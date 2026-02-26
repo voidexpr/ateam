@@ -1156,7 +1156,7 @@ Git commit tracking (`git_commit_start`, `git_commit_end`) records the codebase 
 - `deferred` — valid findings but lower priority than current work; will revisit
 - `blocked` — depends on something else (another agent's work, human input, external dependency)
 
-The `notes` field contains the coordinator's reasoning — why it chose this decision, what it prioritized instead, risk assessment. This makes the coordinator's "thinking" inspectable and debuggable. The `ateam reports` command (§10.6) queries this table to show the coordinator's pipeline.
+The `notes` field contains the coordinator's reasoning — why it chose this decision, what it prioritized instead, risk assessment. This makes the coordinator's "thinking" inspectable and debuggable. The `ateam reports` command (§11.5) queries this table to show the coordinator's pipeline.
 
 **Why SQLite:**
 - Single file, zero setup, no daemon, no lockfiles.
@@ -1896,7 +1896,566 @@ ateam -d ~/my_projects/projectx reports --decision pending
 
 ---
 
-## 11. File Hierarchy
+## 11. CLI Reference
+
+The `ateam` CLI is the single interface for both humans and the coordinator. Every operation — starting agents, pausing, inspecting state, reviewing reports — goes through these commands. The coordinator's MCP tools are thin wrappers around the same CLI, so the database state is always consistent regardless of who initiated the action.
+
+This means **the CLI is usable before the coordinator exists.** During Phase 1 development (and for ongoing manual use), a developer can drive the entire system from the terminal: run audits, review reports, implement findings, update knowledge — all without the autonomous scheduler.
+
+### 11.1 Global Options
+
+```
+ateam [global-options] <command> [command-options]
+
+Global Options:
+  -d, --dir PATH        Project directory (overrides CWD-based detection)
+  --agent NAME          Agent name (overrides directory-based detection)
+  --json                Machine-readable JSON output (for scripting / MCP)
+  --verbose, -v         Show additional detail (SQL queries, docker commands)
+  --dry-run             Show what would happen without executing
+  --help, -h            Show help for any command
+```
+
+**Directory context** (see §10.1): if `--dir` is not specified, the CLI walks up from `$CWD` looking for `config.toml`. If the current directory basename matches an enabled agent name, `--agent` is inferred automatically.
+
+### 11.2 Project Setup
+
+#### `ateam init`
+
+Initialize a new project directory with config, database, and agent scaffolding.
+
+```
+ateam init [--dir PATH]
+
+Creates:
+  config.toml             Project configuration (from template)
+  ateam.db                SQLite database (empty, schema applied)
+  testing/                Agent directories for each enabled agent
+    role.md                 (from shared .agents/ template)
+    knowledge.md            (empty)
+    work/                   (empty)
+  refactor/
+    ...
+
+Options:
+  --template PATH       Use a custom config.toml template
+  --agents LIST         Comma-separated list of agents to enable
+                        (default: testing,refactor,security,performance,deps,docs-internal,docs-external)
+  --repo URL            Git repository URL (written to config.toml)
+  --stack LIST          Tech stack declaration (e.g., typescript,react,postgresql)
+```
+
+Example:
+```bash
+mkdir myapp && cd myapp
+ateam init --repo git@github.com:org/myapp.git --stack typescript,react,postgresql
+# Created config.toml, ateam.db, 7 agent directories
+```
+
+#### `ateam doctor`
+
+Health check: verifies all dependencies and state consistency.
+
+```
+ateam doctor [--fix]
+
+Checks:
+  ✓ Docker daemon running and accessible
+  ✓ Git installed and bare repo accessible
+  ✓ Claude Code CLI installed (claude --version)
+  ✓ SQLite database exists and schema is current
+  ✓ Config.toml valid and parseable
+  ✓ Agent directories match config.toml enabled list
+  ✓ No stale containers (SQLite says running, Docker disagrees)
+  ✓ No orphan containers (Docker running, SQLite doesn't know)
+  ✓ No orphan worktrees (git worktree with no matching agent)
+  ✓ Egress firewall rules present in base image
+
+Options:
+  --fix                 Auto-repair: prune orphans, reset stuck agents,
+                        reconcile DB with Docker state, VACUUM SQLite
+```
+
+### 11.3 Agent Lifecycle
+
+#### `ateam run`
+
+Start an agent run. This is the core command — both manual use and the coordinator's MCP wrapper call this.
+
+```
+ateam run [--agent NAME] [--mode MODE]
+
+Modes:
+  audit       (default) Analyze codebase, produce findings report
+  implement   Execute approved report findings, make code changes
+  maintain    Summarize recent work, update knowledge.md
+  configure   Set up linter/formatter tools, integrate into build
+
+Options:
+  --agent NAME          Agent to run (inferred from CWD if in agent dir)
+  --mode MODE           Execution mode (default: audit)
+  --reason TEXT         Reason tag: 'coordinator' or 'manual' (default: manual)
+  --timeout MINUTES     Override default timeout (default: from config.toml)
+  --report PATH         For implement mode: path to the report to implement
+
+Preconditions (checked before launch):
+  - Agent status must NOT be 'running' or 'interactive' (in ateam.db)
+  - No Docker container named ateam-{project}-{agent} may be running
+  - If both checks pass: creates worktree, starts container, updates DB
+
+Database writes:
+  agents     → status='running', docker_instance, time_started, git_commit_start, reason
+  operations → operation='start', docker_instance, notes with mode/reason/commit
+  reports    → on completion: new row with decision='pending'
+```
+
+Examples:
+```bash
+# Run a testing audit (most common operation)
+cd myapp/testing
+ateam run
+
+# Run security audit from project root
+cd myapp
+ateam run --agent security
+
+# Implement findings from an approved report
+cd myapp/refactor
+ateam run --mode implement --report refactor/work/2026-02-26_2300_report.md
+
+# From anywhere
+ateam -d ~/projects/myapp run --agent testing --mode audit
+```
+
+#### `ateam shell`
+
+Start an interactive Claude Code session inside the agent's Docker environment.
+
+```
+ateam shell [--agent NAME] [--with-mcp]
+
+Launches the same Docker container as `ateam run` but with interactive
+Claude Code instead of `claude -p`. Same prompt, same worktree, same volumes.
+
+Options:
+  --agent NAME          Agent to run as (inferred from CWD)
+  --with-mcp            Also attach the ATeam MCP server to the Claude Code
+                        session, enabling coordinator-level tools:
+                        format_report, subagent_commit_and_merge,
+                        update_knowledge, get_budget_status, etc.
+
+Lifecycle:
+  1. Check preconditions (same as ateam run)
+  2. UPDATE agents SET status='interactive'
+  3. Start container, drop into interactive Claude Code
+  4. On exit (Ctrl-D or /exit):
+     UPDATE agents SET status='stopped', time_ended, git_commit_end
+  5. Container stops, worktree preserved
+```
+
+Examples:
+```bash
+# Debug why the testing agent keeps failing
+cd myapp/testing
+ateam shell
+# You're now inside Claude Code in the testing agent's environment
+# Same prompt, same worktree, same tools — but interactive
+
+# Do manual security work with coordinator tools
+cd myapp/security
+ateam shell --with-mcp
+# "Audit this codebase for SQL injection"
+# "Format the findings into a report"      ← uses MCP format_report
+# "Update the knowledge file"              ← uses MCP update_knowledge
+```
+
+#### `ateam kill`
+
+Force-kill a running or interactive agent.
+
+```
+ateam kill [--agent NAME]
+
+Actions:
+  1. docker kill + docker rm the container
+  2. UPDATE agents SET status='canceled', docker_instance=NULL, time_ended
+  3. INSERT INTO operations (operation='kill', docker_instance)
+  4. Worktree is preserved (use ateam cleanup to remove)
+
+Fails if agent is not in 'running' or 'interactive' status.
+```
+
+#### `ateam retry`
+
+Kill, clean up, and re-run from scratch.
+
+```
+ateam retry [--agent NAME] [--mode MODE]
+
+Equivalent to:
+  ateam kill --agent NAME
+  git worktree remove {path} --force
+  git worktree add {path} main        (fresh checkout)
+  ateam run --agent NAME --mode MODE
+```
+
+### 11.4 Pause / Resume
+
+#### `ateam pause`
+
+Suspend an agent or all agents. Paused agents are skipped by the scheduler.
+
+```
+ateam pause [--agent NAME [--agent NAME ...]] [--coordinator-only]
+
+Behavior depends on context:
+
+  From agent dir (e.g., cd myapp/testing):
+    Pauses only that agent.
+    If currently running: prompts "Kill it? [y/N]"
+
+  From project dir (e.g., cd myapp):
+    Pauses ALL agents + coordinator scheduling.
+    For each running agent: prompts "Kill it? [y/N]"
+
+  --agent NAME (repeatable):
+    Pauses only the named agent(s).
+
+  --coordinator-only:
+    Pauses the scheduler but leaves agent statuses unchanged.
+    Running agents continue to completion.
+
+Database writes:
+  agents     → status='suspended' for affected agents
+  operations → operation='suspend', notes with scope
+```
+
+#### `ateam resume`
+
+Resume suspended agents. Inverse of `ateam pause`.
+
+```
+ateam resume [--agent NAME [--agent NAME ...]]
+
+Behavior depends on context:
+  From agent dir:   resumes that agent
+  From project dir: resumes ALL suspended agents + coordinator
+  --agent NAME:     resumes named agent(s)
+
+Database writes:
+  agents     → status='idle' WHERE status='suspended'
+  operations → operation='resume'
+```
+
+### 11.5 Status & Inspection
+
+#### `ateam status`
+
+The main dashboard command. Output varies by context.
+
+```
+ateam status [--agent NAME] [--json]
+
+From project dir — shows all agents:
+┌──────────────────────────────────────────────────────────────────────┐
+│ ATeam: myapp                              main @ a3f8c21 (2m ago)   │
+│ Coordinator: running                      Last cycle: 3m ago        │
+│                                                                      │
+│ AGENT        STATUS       ELAPSED  REASON       LAST SEEN    BEHIND │
+│ testing      running      12m 34s  coordinator  a3f8c21      0      │
+│ refactor     idle         —        —            b1e7d09      3      │
+│ security     suspended    —        —            8ca2f31      12     │
+│ performance  stopped      —        —            a3f8c21      0      │
+│ deps         idle         —        —            f42a1bc      7      │
+│ docs         error        —        —            91d3e0a      5      │
+│                                                                      │
+│ Recent Operations:                                                   │
+│   14:23  testing    start    coordinator night cycle                  │
+│   14:12  refactor   complete exit=0                                  │
+│   14:01  docs       error    timeout after 30m                       │
+│                                                                      │
+│ Pending Reports:                                                     │
+│   refactor  02-26 14:12  proceed   (approved, impl queued)          │
+│   security  02-25 23:45  ask       (2 high-severity findings)       │
+└──────────────────────────────────────────────────────────────────────┘
+
+From agent dir — shows single agent with live activity:
+┌──────────────────────────────────────────────────────────────────────┐
+│ Agent: testing @ myapp              STATUS: running (12m 34s)        │
+│ Reason: coordinator                 Container: d8a3f... (alive)      │
+│ Commit: a3f8c21 (0 behind main)    Started: 14:23:01                │
+│                                                                      │
+│ Live Activity (stream-json tail):                                    │
+│   [14:34:12] Running test suite: npm test                            │
+│   [14:34:45] 142/186 passing, 3 failing, analyzing failures...      │
+│   [14:35:02] Reading src/api/handler.test.ts                         │
+│                                                                      │
+│ Recent Operations:                                                   │
+│   14:23  start     coordinator  container=d8a3f...                   │
+│   12:01  complete  exit=0       report=testing/work/...              │
+│   11:30  start     coordinator  container=c7b2e...                   │
+│                                                                      │
+│ Reports:                                                             │
+│   02-26 12:01  ignore       (all tests passing, no gaps)            │
+│   02-25 23:58  implemented  @ e4f2a1b (added 12 test cases)         │
+└──────────────────────────────────────────────────────────────────────┘
+
+Data sources:
+  sqlite   agents table (status, docker_instance, time_started, commits)
+  sqlite   operations table (recent activity, with docker_instance)
+  sqlite   reports table (pending/recent decisions)
+  docker   docker inspect for each active container (alive/dead, uptime)
+  git      rev-parse main (current HEAD for "behind" calculation)
+  git      rev-list --count {agent_commit}..main (commit distance)
+  file     tail stream.jsonl (live activity, agent-level view only)
+```
+
+#### `ateam logs`
+
+Tail the stream.jsonl output from an agent run.
+
+```
+ateam logs [--agent NAME] [--last] [--stderr] [--follow]
+
+Default:       show current run's stream.jsonl (or last run if not active)
+  --last       show the most recent completed run (not current)
+  --stderr     show container stderr instead of stream.jsonl
+  --follow     continuous tail (like tail -f), auto-detects:
+               - if agent running: tail stream.jsonl
+               - if agent running: docker logs -f {container}
+
+Data sources:
+  sqlite   agents.docker_instance (to know which container)
+  sqlite   operations (to find stream_log_path for --last)
+  docker   docker logs {container} (for --stderr or --follow)
+  file     tail {agent}/work/{latest}_stream.jsonl
+```
+
+#### `ateam diff`
+
+Show what changes an agent has made in its worktree.
+
+```
+ateam diff [--agent NAME]
+
+Shows: git diff {git_commit_start}..HEAD in the agent's worktree.
+       If worktree is gone, uses git_commit_start..git_commit_end
+       from the agents table (historical diff).
+
+Data sources:
+  sqlite   agents.git_commit_start, agents.git_commit_end
+  git      git -C {worktree} diff {base}..HEAD
+  git      git -C {bare_repo} diff {start}..{end} (fallback)
+```
+
+#### `ateam report`
+
+Show the latest formatted report from an agent.
+
+```
+ateam report [--agent NAME]
+
+Reads the most recent report file and displays it in the terminal.
+Uses the reports table to find the path.
+
+Data sources:
+  sqlite   SELECT report_path FROM reports WHERE agent_name={agent}
+             ORDER BY timestamp DESC LIMIT 1
+  file     cat {report_path}
+```
+
+#### `ateam reports`
+
+Show the coordinator's report pipeline with decisions. (See §11.5 for full output examples.)
+
+```
+ateam reports [--agent NAME] [--decision DECISION] [--all] [--verbose]
+
+Options:
+  --agent NAME         Filter to one agent
+  --decision DECISION  Filter by decision: pending, ignore, proceed,
+                       ask, implemented, deferred, blocked
+  --all                Include 'ignore' decisions (hidden by default)
+  --verbose            Show full coordinator reasoning (notes column)
+  --limit N            Max rows (default: 20)
+
+Data sources:
+  sqlite   reports table (all columns)
+  file     report_path existence check (with --verbose)
+```
+
+#### `ateam history`
+
+Show the operations audit log.
+
+```
+ateam history [--agent NAME] [--operation OP] [--limit N]
+
+Options:
+  --agent NAME         Filter to one agent
+  --operation OP       Filter by operation type: start, stop, suspend,
+                       resume, kill, shell, error, complete
+  --limit N            Max rows (default: 50)
+
+Data sources:
+  sqlite   operations table
+```
+
+#### `ateam changelog`
+
+Show coordinator decisions from the changelog.md narrative.
+
+```
+ateam changelog [--limit N]
+
+Parses changelog.md for terminal display. Falls back to reports table
+if changelog.md is missing or unparseable.
+
+Data sources:
+  file     changelog.md (primary)
+  sqlite   reports table (fallback)
+```
+
+#### `ateam budget`
+
+Show cost tracking and budget status.
+
+```
+ateam budget [--days N]
+
+Options:
+  --days N             Look back N days (default: 7)
+
+Output:
+  Daily breakdown: runs, estimated cost, budget remaining
+  Per-agent breakdown: total runs, total cost
+  Projected: daily average × days remaining in month
+
+Data sources:
+  sqlite   operations WHERE operation='complete' → parse cost from notes
+  config   config.toml budget limits
+```
+
+### 11.6 Maintenance
+
+#### `ateam cleanup`
+
+Remove stale artifacts: exited containers, orphan worktrees, old logs.
+
+```
+ateam cleanup [--days N]
+
+Actions:
+  docker   rm all exited ateam-{project}-* containers
+  git      remove worktrees where agent is not running/interactive
+  file     delete stream.jsonl files older than N days (default: 30)
+  sqlite   DELETE FROM operations WHERE timestamp < N days ago
+  sqlite   VACUUM
+```
+
+#### `ateam worktrees`
+
+List all git worktrees and their status.
+
+```
+ateam worktrees
+
+Output:
+  AGENT       WORKTREE PATH                    STATUS     BRANCH
+  testing     repos/myapp/worktrees/testing     active     main @ a3f8c21
+  refactor    repos/myapp/worktrees/refactor    stale      main @ b1e7d09
+  security    (none)                            —          —
+
+Data sources:
+  git      git worktree list
+  sqlite   agents table (to annotate with status)
+```
+
+#### `ateam db`
+
+Direct SQLite access for advanced debugging.
+
+```
+ateam db [QUERY]
+
+No arguments:  opens interactive sqlite3 shell on ateam.db
+With QUERY:    executes the query and prints results
+
+Examples:
+  ateam db
+  ateam db "SELECT agent_name, status FROM agents"
+  ateam db ".schema"
+  ateam db "SELECT * FROM reports WHERE decision='ask'"
+```
+
+### 11.7 Manual Workflow Example (No Coordinator)
+
+This shows how a developer would use the CLI to drive the full audit→review→implement cycle manually — the same workflow the coordinator automates.
+
+```bash
+# ── Setup ────────────────────────────────────────────────────────
+
+mkdir myapp && cd myapp
+ateam init --repo git@github.com:org/myapp.git --stack typescript,react
+ateam doctor                          # verify everything is ready
+
+# ── Run a testing audit ──────────────────────────────────────────
+
+cd testing
+ateam run                             # starts audit in Docker container
+ateam status                          # watch progress + live stream-json
+# ... wait for completion ...
+ateam report                          # read the findings
+
+# ── Review and decide ────────────────────────────────────────────
+
+ateam reports                         # see: decision='pending'
+# You are the coordinator — decide what to do:
+ateam db "UPDATE reports SET decision='proceed',
+          notes='good findings, implement all'
+          WHERE id=1"
+
+# ── Implement the findings ───────────────────────────────────────
+
+ateam run --mode implement --report testing/work/2026-02-26_report.md
+# ... wait for completion ...
+ateam diff                            # review the code changes
+ateam logs --last                     # see what the agent did
+
+# ── Or do it interactively ───────────────────────────────────────
+
+ateam shell --with-mcp
+# "Implement the findings from the latest testing report"
+# "Run the test suite to make sure nothing broke"
+# "Commit and merge the changes"         ← MCP: subagent_commit_and_merge
+# "Update the knowledge file"            ← MCP: update_knowledge
+# /exit
+
+# ── Run security next ────────────────────────────────────────────
+
+cd ../security
+ateam run
+ateam status                          # monitor
+ateam report                          # review findings
+# Defer for now:
+ateam db "UPDATE reports SET decision='deferred',
+          notes='valid but low priority, revisit after launch'
+          WHERE id=2"
+
+# ── Check overall project state ──────────────────────────────────
+
+cd ..
+ateam status                          # all agents, commit freshness
+ateam reports                         # full decision pipeline
+ateam budget                          # cost tracking
+ateam history                         # full operations log
+```
+
+This manual workflow maps 1:1 to what the coordinator does autonomously. When you're ready to hand off to the coordinator, just start the scheduler — it calls the same `ateam run`, reads the same `ateam.db`, writes the same `reports` table. The only difference is that `reason` changes from `'manual'` to `'coordinator'` and the decisions are made by Claude Code instead of a human updating the reports table.
+
+---
+
+## 12. File Hierarchy
 
 ### 10.1 ATeam Framework Source
 
@@ -1926,7 +2485,7 @@ ateam/                                 # framework source (Python package)
 
 ### 10.2 User Workspace (Git-Versioned)
 
-The entire workspace below is a git repository (see §19). The `.gitignore` excludes bulky/ephemeral data like bare repos, worktrees, and transient prompt files.
+The entire workspace below is a git repository (see §20). The `.gitignore` excludes bulky/ephemeral data like bare repos, worktrees, and transient prompt files.
 
 ```
 my_projects/                           # root workspace — itself a git repo
@@ -2045,7 +2604,7 @@ The key distinction: `CLAUDE.md` files are maintained by human developers for th
 
 ---
 
-## 12. Configuration Format
+## 13. Configuration Format
 
 `config.toml` for each project:
 
@@ -2103,7 +2662,7 @@ implement_minutes = 60
 
 ---
 
-## 13. Sub-Agent System Prompt Structure
+## 14. Sub-Agent System Prompt Structure
 
 Each sub-agent invocation is constructed from layered prompt files:
 
@@ -2182,7 +2741,7 @@ Write your report to `/output/report.md` using this structure:
 
 ---
 
-## 14. Parallel Execution
+## 15. Parallel Execution
 
 Use Python's `asyncio` with semaphore-based concurrency:
 
@@ -2223,7 +2782,7 @@ class AgentOrchestrator:
 
 ---
 
-## 15. Changelog and Audit Trail
+## 16. Changelog and Audit Trail
 
 The coordinator maintains `changelog.md`:
 
@@ -2256,7 +2815,7 @@ The coordinator maintains `changelog.md`:
 
 ---
 
-## 16. Implementation Plan
+## 17. Implementation Plan
 
 ### Phase 1: Foundation (Week 1–2)
 
@@ -2307,7 +2866,7 @@ The coordinator maintains `changelog.md`:
 
 ---
 
-## 17. Key Design Decisions
+## 18. Key Design Decisions
 
 ### Why Claude Code for sub-agents, not a custom API agent?
 
@@ -2335,7 +2894,7 @@ TOML is human-readable, supports nested sections naturally, and has excellent Py
 
 ---
 
-## 18. Risk Mitigation
+## 19. Risk Mitigation
 
 | Risk | Mitigation |
 |---|---|
@@ -2352,7 +2911,7 @@ TOML is human-readable, supports nested sections naturally, and has excellent Py
 
 ---
 
-## 19. Git-Versioned ATeam Configuration
+## 20. Git-Versioned ATeam Configuration
 
 ### 18.1 The ATeam Project Directory Is a Git Repo
 
@@ -2408,7 +2967,7 @@ The top-level `my_projects/agents/` directory (containing default role.md and cu
 
 ---
 
-## 20. Competitive Landscape and Alternatives
+## 21. Competitive Landscape and Alternatives
 
 ### 19.1 Summary
 
@@ -2629,9 +3188,9 @@ This is essentially what agent-orchestrator already does, so we could potentiall
 
 ---
 
-## 21. Future Enhancements
+## 22. Future Enhancements
 
-- **Feature agents** as described in §20.4 — a feature queue for small tasks, one-off agents per feature, leveraging the coordinator for progress tracking and the testing agent for validation.
+- **Feature agents** as described in §21.4 — a feature queue for small tasks, one-off agents per feature, leveraging the coordinator for progress tracking and the testing agent for validation.
 - **Web dashboard** for monitoring agent activity, reviewing reports, approving changes.
 - **Slack/Discord integration** for notifications and commands.
 - **Cross-project knowledge sharing** via `culture.md` files.
