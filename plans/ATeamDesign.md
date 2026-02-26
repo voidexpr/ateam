@@ -43,6 +43,77 @@ ATeam is an agent coordination framework that automates essential but tedious en
 
 **Claude Code** is the sub-agent runtime — it runs inside Docker and does the actual coding work. We don't write a custom coding agent.
 
+### 3.1 Go vs Python: Tradeoff Analysis
+
+Gas Town is written in Go; ATeam is designed for Python. Both are viable choices. Here's the full comparison.
+
+#### Python Dependencies and Go Equivalents
+
+| Capability | Python Module | Go Equivalent | Notes |
+|---|---|---|---|
+| **CLI framework** | `click` or `typer` | `cobra` + `viper` | Cobra is the de facto Go CLI standard (used by kubectl, docker, hugo). Viper handles config. |
+| **Scheduling** | `APScheduler` | `robfig/cron` | Go cron is simpler but covers ATeam's needs. For more: `go-co-op/gocron`. |
+| **Docker management** | `docker` (Docker SDK for Python) | `docker/docker` client library | Both wrap the Docker Engine API. Go's client is the official one from Docker Inc. |
+| **Git operations** | `gitpython` or `subprocess` → `git` | `go-git/go-git` or `os/exec` → `git` | go-git is a pure Go git implementation. For worktree management, shelling out to git is simpler in both languages. |
+| **TOML parsing** | `tomllib` (stdlib since 3.11) | `BurntSushi/toml` or `pelletier/go-toml` | Both mature. Go's options are well-maintained. |
+| **Async / concurrency** | `asyncio` + `aiofiles` | goroutines + channels (stdlib) | Go's concurrency model is native and more natural for daemon processes. |
+| **Process execution** | `subprocess` (stdlib) | `os/exec` (stdlib) | Nearly identical ergonomics. |
+| **File watching** | `watchdog` | `fsnotify/fsnotify` | Both inotify-based on Linux. |
+| **HTTP server** (for dashboard) | `fastapi` or `flask` | `net/http` (stdlib) | Go's stdlib HTTP server is production-grade. No framework needed. |
+| **YAML parsing** (if needed) | `pyyaml` | `go-yaml/yaml` | Both standard. |
+| **Logging** | `logging` (stdlib) | `log/slog` (stdlib since 1.21) | Go's structured logging is now built in. |
+| **Testing** | `pytest` | `testing` (stdlib) + `stretchr/testify` | Both strong. Go's test tooling is built into `go test`. |
+| **Markdown processing** | `markdown-it-py` or just string ops | `goldmark` or just string ops | ATeam mostly reads/writes markdown as text — no parsing needed. |
+| **System monitoring** | `psutil` | `shirou/gopsutil` | Direct port of psutil to Go. |
+
+#### Arguments for Go
+
+**Single binary distribution.** `go build` produces one static binary with zero runtime dependencies. No Python interpreter, no virtualenv, no pip, no module path issues. Just copy the binary to the target machine and run it. This is Go's killer feature for CLI tools and daemons, and it's why Gas Town, Docker, Kubernetes, and most modern DevOps tools are written in Go. For a tool that runs as a background daemon on developer machines, this matters enormously.
+
+**Concurrency model.** Go's goroutines and channels are purpose-built for the kind of work ATeam does: launching multiple Docker containers in parallel, watching for file changes, running timers, and managing a work queue — all concurrently. Python's asyncio works but is more awkward (async/await coloring, event loop management, not all libraries support it).
+
+**Performance.** Not a primary concern for ATeam (the bottleneck is LLM API latency, not coordinator speed), but Go's lower memory footprint and faster startup are nice for a long-running daemon.
+
+**Ecosystem alignment.** Docker SDK, git libraries, and system monitoring tools all have first-class Go implementations. The Go ecosystem is the native home of infrastructure tooling.
+
+**Gas Town precedent.** Gas Town proves this kind of tool works well in Go. Their codebase handles all the same concerns (git worktrees, process management, tmux sessions, CLI) and Go served them well across 3,600 commits.
+
+#### Arguments for Python
+
+**Development speed.** Python is faster to prototype and iterate on, especially with an LLM coding assistant. The coordinator logic is straightforward enough that Python's performance is irrelevant.
+
+**LLM ecosystem.** If ATeam ever needs to call LLM APIs directly (e.g., the Haiku-based coordinator escalation, the API fallback provider), Python has the best SDK support and the most examples/documentation.
+
+**APScheduler.** Python's APScheduler is more feature-rich than Go's cron libraries for complex scheduling scenarios (job stores, event listeners, timezone handling, misfire grace time).
+
+**Familiarity.** If the primary developer is more productive in Python, that trumps all other considerations for a v1.
+
+#### Python Single-Binary Options
+
+Python can produce single binaries, but it's never as clean as Go:
+
+| Tool | How It Works | Binary Size | Startup | Quality |
+|---|---|---|---|---|
+| **PyInstaller** | Bundles Python interpreter + bytecode + deps into self-extracting archive | ~94 MB (CLI app) | Slow (extracts to temp dir) | Most popular, cross-platform, works with most packages |
+| **Nuitka** | Compiles Python → C → native binary | ~58 MB (CLI app) | Fast (native) | Best performance but 6+ minute compile times, potential CPython compat issues |
+| **cx_Freeze** | Similar to PyInstaller, more CI-friendly | ~79 MB | Moderate | Good for enterprise pipelines |
+| **PyOxidizer** | Embeds Python interpreter in Rust binary, loads modules from memory | Varies | Fast (no disk extraction) | Ambitious but complex setup, Rust dependency for build |
+| **Shiv / PEX** | Zip-file packages (.pyz) | Small | Fast | Require Python already installed on target — defeats the purpose |
+
+**Practical assessment:** PyInstaller is the path of least resistance. It works, it's well-documented, and most Python packages are compatible. But the resulting binary is large (~100MB), startup is noticeably slow (extracts a temp directory), and you need to build per-platform. Compare with Go: `go build` → one ~15MB static binary, instant startup, cross-compile with `GOOS=linux GOARCH=amd64` in the same command.
+
+#### Recommendation
+
+For ATeam specifically:
+
+**If optimizing for v1 development speed:** Python. Get the coordinator working, validate the concept, then consider rewriting in Go if distribution becomes important.
+
+**If optimizing for distribution and long-term use:** Go. The single-binary story, native concurrency, and daemon ergonomics make it the better fit for a tool that runs in the background on developer machines.
+
+**Hybrid approach:** Write the coordinator in Go, keep prompts and agent definitions as markdown files (language-agnostic), and use shell scripts for the Docker launch layer. This is essentially what Gas Town does, and it's proven to work.
+
+The key insight is that ATeam's coordinator has very little complex logic — it's mostly process management, file I/O, scheduling, and shelling out to `docker` and `git`. This is exactly the kind of code that is equally easy to write in Go or Python, but is much easier to *distribute* in Go.
+
 ---
 
 ## 4. Architecture Overview
@@ -143,27 +214,27 @@ The coordinator concatenates the layered prompt into a single markdown file:
 ```python
 def build_prompt(agent_id: str, mode: str, project: str, task_context: str) -> str:
     parts = []
-    
+
     # Role definition (general + project-specific override)
     parts.append(read_file(f"agents/{agent_id}/role.md"))
     if exists(f"agents/{agent_id}/culture.md"):
         parts.append(read_file(f"agents/{agent_id}/culture.md"))
     if exists(f"{project}/{agent_id}/role.md"):
         parts.append(read_file(f"{project}/{agent_id}/role.md"))
-    
+
     # Project knowledge
     if exists(f"{project}/{agent_id}/knowledge.md"):
         parts.append(read_file(f"{project}/{agent_id}/knowledge.md"))
-    
+
     # Mode-specific instructions
     parts.append(MODE_TEMPLATES[mode])
-    
+
     # Task context (what to do this run)
     parts.append(task_context)
-    
+
     # Output contract
     parts.append(OUTPUT_CONTRACT[mode])
-    
+
     return "\n\n---\n\n".join(parts)
 ```
 
@@ -197,7 +268,7 @@ docker run \
   "${PROJECT_IMAGE}" \
   /bin/bash -c '
     cd /workspace
-    
+
     # Claude Code reads the prompt and does its work.
     # --verbose gives us a session summary on stdout.
     # The prompt instructs Claude to write outputs to /output/
@@ -205,7 +276,7 @@ docker run \
       --output-format json \
       --verbose \
       > /output/claude_session.json 2>&1
-    
+
     echo $? > /output/exit_code
   '
 ```
@@ -234,16 +305,16 @@ The prompt's output contract (see §5.4) tells it exactly what files to produce 
 ```python
 async def collect_results(output_path: str) -> AgentResult:
     exit_code = int(read_file(f"{output_path}/exit_code"))
-    
+
     report = read_file_if_exists(f"{output_path}/report.md")
     completion = read_file_if_exists(f"{output_path}/completion.md")
     knowledge_update = read_file_if_exists(f"{output_path}/knowledge_update.md")
-    
+
     # Parse the JSON session output for metadata
     session = json.loads(read_file(f"{output_path}/claude_session.json"))
     # session.result contains Claude's final text response
     # session.cost_usd if available gives cost info
-    
+
     return AgentResult(
         exit_code=exit_code,
         report=report,
@@ -269,7 +340,7 @@ You MUST write the following files to /output/ before finishing:
   [1-2 sentence overview]
   ## Findings (by priority)
   ### Critical
-  ### High  
+  ### High
   ### Medium
   ### Low
   ## Recommended Actions
@@ -646,7 +717,7 @@ import psutil
 def can_spawn_agent() -> bool:
     cpu = psutil.cpu_percent(interval=1)
     mem = psutil.virtual_memory().percent
-    
+
     if cpu > 80 or mem > 85:
         return False
     return True
@@ -661,17 +732,17 @@ async def watchdog(container_name: str, timeout_minutes: int):
     client = docker.from_env()
     container = client.containers.get(container_name)
     deadline = time.time() + (timeout_minutes * 60)
-    
+
     while time.time() < deadline:
         await asyncio.sleep(30)
         container.reload()
         if container.status != "running":
             return  # container exited normally
-        
+
         # Check if output files are being updated (sign of progress)
         stats = container.stats(stream=False)
         # ... monitor CPU/memory
-    
+
     # Timeout — kill it
     container.kill()
     logger.warning(f"Killed {container_name}: exceeded {timeout_minutes}m timeout")
@@ -973,17 +1044,17 @@ Use Python's `asyncio` with semaphore-based concurrency:
 class AgentOrchestrator:
     def __init__(self, max_parallel: int):
         self.semaphore = asyncio.Semaphore(max_parallel)
-    
+
     async def run_agent(self, task: AgentTask) -> AgentResult:
         async with self.semaphore:
             # Create worktree
             worktree = await self.git.create_worktree(task)
             output_dir = create_output_dir(task)
-            
+
             # Build and write prompt
             prompt = build_prompt(task)
             write_file(f"{task.agent_data_path}/current_prompt.md", prompt)
-            
+
             try:
                 # Launch Docker container (blocks until exit or timeout)
                 exit_code = await self.docker.run_agent_container(
@@ -992,12 +1063,12 @@ class AgentOrchestrator:
                     output_path=output_dir,
                     timeout_minutes=task.timeout,
                 )
-                
+
                 # Read results from filesystem
                 return await collect_results(output_dir)
             finally:
                 await self.git.cleanup_worktree(worktree)
-    
+
     async def run_batch(self, tasks: list[AgentTask]) -> list[AgentResult]:
         return await asyncio.gather(
             *[self.run_agent(t) for t in tasks]
@@ -1288,21 +1359,64 @@ The agent orchestration space has exploded in 2025–2026. There are dozens of t
 
 **What it is:** A multi-agent workspace manager by Steve Yegge (8.8K GitHub stars, written in Go). Introduces a rich metaphor: a "Mayor" AI coordinator manages "Rigs" (projects), "Polecats" (worker agents), and "Hooks" (git worktree-based persistent storage). Work is tracked via "Beads" (a git-backed issue tracking system) and "Convoys" (bundles of work items). Supports Claude Code and Codex as agent runtimes. Includes a web dashboard, tmux integration, and formula-based repeatable workflows.
 
-**Overlap with ATeam:** Very high conceptual alignment. Gas Town's Mayor ≈ ATeam's coordinator. Polecats ≈ sub-agents. Hooks ≈ git worktrees. The emphasis on persistent work state surviving agent restarts, git-backed tracking, and multi-agent coordination on real codebases is exactly ATeam's territory.
+**How agents communicate:** Gas Town uses three communication mechanisms:
 
-**What it lacks for our use case:**
-- No scheduled/cron-based autonomous operation. The Mayor is interactive — you tell it what to do. There's no "night shift" mode where it proactively scans and improves code.
-- No specialized agent roles with persistent domain knowledge (testing specialist, security specialist, etc.). Polecats are generic workers.
-- No audit → approve → implement workflow. Work goes directly from assignment to execution.
-- No resource budgeting, token tracking, or throttling.
-- No tech-stack culture or cross-project knowledge sharing.
+1. **Mailboxes (`gt mail`):** Each agent (Mayor, Polecats, Witness, etc.) has a mailbox backed by the Beads git store. Agents send messages via `gt mail send <addr> -s "Subject" -m "Message"`. The Mayor checks its inbox with `gt mail inbox` and reads specific messages with `gt mail read <id>`. This is asynchronous, persistent, and survives session restarts. For Claude Code agents, mail can be injected into the session context at startup via `gt mail check --inject`.
 
-**Ideas to integrate:**
-- **Beads system** for work tracking is more sophisticated than ATeam's simple markdown reports. Consider adopting a structured issue/bead format for tracking individual findings and recommendations.
-- **Convoy concept** (bundling related work items) maps well to ATeam's batch of audit findings that get prioritized and assigned together.
-- **Hook lifecycle** (Created → Active → Suspended → Active → Completed → Archived) is a clean state machine for agent work sessions. ATeam could adopt a similar explicit lifecycle for sub-agent tasks.
-- **Formula-based workflows** (TOML-defined repeatable processes) could be useful for ATeam's "configure" mode — defining standard procedures for setting up linters, running security scans, etc.
-- **MEOW pattern** (Mayor-Enhanced Orchestration Workflow) is essentially a well-documented version of ATeam's coordinator decision loop. Worth studying for prompt structure.
+2. **Nudges (`gt nudge`):** Real-time messages sent directly into a running agent's tmux session. `gt nudge <target> "message"` injects text into the agent's terminal. This is the imperative "do this now" channel, used for coordination messages like "Process the merge queue" or "Check your hook." The Mayor is explicitly instructed to always use `gt nudge` rather than raw `tmux send-keys` to avoid dropped keystrokes.
+
+3. **Hooks (filesystem state):** The primary work-assignment mechanism. When work is "slung" to an agent (`gt sling <bead-id> <rig>`), a hook file is attached to the agent's worktree. When the agent starts or resumes (via `gt prime`), it reads the hook and executes the attached work. This is the GUPP principle (Gas Town Universal Propulsion Principle): "If there is work on your hook, you MUST run it." No negotiation, no waiting for commands. The hook IS the assignment.
+
+**How agents execute (Claude Code / Codex):** Gas Town runs agents as **long-lived tmux sessions**, not one-shot Docker containers:
+
+1. **Spawning:** `gt sling <bead-id> <rig>` creates a fresh git worktree under `polecats/<AgentName>/`, creates a tmux session named `gt-<rig>-polecat-<Name>`, and launches the configured runtime (Claude Code by default, Codex as an option via `--agent codex`).
+
+2. **Runtime injection:** For Claude Code, Gas Town uses `.claude/settings.json` hooks — Claude Code's native startup mechanism — to inject the role prompt, mail, and hook context when the session starts. For runtimes without native hooks (Codex), Gas Town sends a startup fallback sequence: `gt prime` (loads context), `gt mail check --inject` (injects pending messages), and `gt nudge deacon session-started`.
+
+3. **Execution:** The agent (Claude Code) runs inside tmux, reads its hook via `bd show <bead-id>`, and executes the work described in the bead. There is no Docker isolation — agents run directly on the host in their git worktree. The Witness agent monitors their health via `gt peek <agent>`.
+
+4. **Completion:** When done, the agent runs `gt done`, which pushes its branch to the remote and submits a merge request to the Refinery (the merge queue processor). The Refinery lands changes on main.
+
+**Key difference from ATeam's model:** Gas Town runs agents in tmux sessions on the bare host. ATeam runs agents in Docker containers. Gas Town's Mayor is itself a Claude Code instance (an LLM-powered coordinator). ATeam's coordinator is a deterministic Python daemon. Gas Town uses Claude Code's interactive mode (long-lived sessions with `--resume`). ATeam uses one-shot `claude -p` invocations.
+
+**What is Beads?** Beads is a separate project by Yegge (`github.com/steveyegge/beads`) — a git-backed issue tracking system stored as structured data files in the repository's `.beads/` directory. It functions as:
+
+- **Issue tracker:** Each bead has a prefix + ID (e.g., `gt-abc12`), title, description, status, priority, assignee, and timestamps. Status flows through: `open` → `hooked` → `in_progress` → `done`.
+- **Work assignment medium:** When you "sling" a bead, it gets attached to an agent's hook. The bead IS the task specification.
+- **Formula engine:** Beads supports "formulas" (TOML-defined multi-step workflows) and "molecules" (instances of formulas). A formula defines steps with dependencies; a molecule tracks progress through those steps. If an agent crashes after step 3, a new agent picks up at step 4.
+
+It's **more than a feature queue** — it's a full work-tracking system with crash recovery semantics. But in practice for Gas Town, beads are primarily used to describe units of work (features, bugs, tasks) that get assigned to agents. The formula system adds structured workflows on top. Compared to ATeam's approach of markdown reports, beads are more structured and machine-readable, which enables the crash-recovery and convoy-bundling features.
+
+**Complexity comparison with ATeam:**
+
+**(1) Implementation complexity:**
+
+| Dimension | Gas Town | ATeam |
+|---|---|---|
+| Language | Go (~3600 commits, 93% Go, substantial codebase) | Python (estimated 2-3K lines for v1) |
+| Coordinator | LLM-powered (Mayor = Claude Code instance) | Deterministic Python daemon |
+| Agent runtime | tmux sessions on bare host | Docker containers with one-shot `claude -p` |
+| Communication | 3 channels (mail, nudge, hooks) | 1 channel (filesystem I/O) |
+| Work tracking | Full issue tracker (Beads, separate project) | Markdown files in git |
+| Agent lifecycle | Complex (spawn, hook, prime, resume, done, handoff, witness monitoring) | Simple (start container, wait, read output) |
+| Session management | Long-lived with resume, crash recovery, session rotation | Stateless one-shot invocations |
+| Dependencies | Beads CLI, tmux, sqlite3, Git 2.25+ | Docker, Git, Python stdlib |
+
+Gas Town is **significantly more complex to implement** — it's a full orchestration platform with its own issue tracker, inter-agent messaging, session management, and crash recovery. The Mayor being an LLM means the coordinator itself is non-deterministic and expensive. ATeam is deliberately simpler: a deterministic coordinator that launches isolated one-shot agents and reads their file outputs.
+
+**(2) Usage complexity:**
+
+| Dimension | Gas Town | ATeam |
+|---|---|---|
+| Setup | `gt install`, `gt rig add`, `gt crew add`, learn 20+ `gt` commands, understand Mayor/Polecat/Hook/Convoy/Bead/Witness/Refinery/Deacon roles | `ateam init`, `ateam run`, `ateam status`, `ateam approve/reject` |
+| Daily use | Interactive — attach to Mayor, tell it what to do, monitor convoys | Autonomous — configure schedule, agents run overnight, review reports in morning |
+| Mental model | 8+ agent roles, 3 communication channels, formula/molecule/bead/convoy abstractions | 7 specialist agents, 4 modes, markdown reports |
+| Scaling | Designed for 20-30 parallel agents (but Yegge reports $100+/hour burn, maxing out Pro Max plans) | Conservative — 1-4 parallel agents, budget-capped |
+| Failure recovery | Crash-resilient via hooks and beads (agent crashes, new one resumes) | Simple — container died? Coordinator logs it and retries next cycle |
+
+Gas Town is **significantly more complex to use** for ATeam's goals. It's designed for Stage 7-8 developers running massive parallelization across large codebases. ATeam targets a simpler workflow: set it up, let it run overnight, review results. The interactive Mayor model requires ongoing human attention; ATeam's daemon model requires attention only at review time.
+
+**Bottom line:** Gas Town is a more ambitious and general-purpose system. ATeam is a more focused and opinionated tool for a specific use case. If you want an interactive multi-agent factory, Gas Town is compelling. If you want a quiet night-shift crew that improves your code while you sleep, ATeam's simpler architecture is a better fit. The ideas worth borrowing from Gas Town are the structured work tracking (beads/convoys) and the crash-recovery semantics (hooks with resumable state), not the interactive tmux-based execution model.
 
 #### LangGraph ⭐⭐
 
