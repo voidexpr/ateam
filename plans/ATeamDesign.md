@@ -43,76 +43,183 @@ ATeam is an agent coordination framework that automates essential but tedious en
 
 **Claude Code** is the sub-agent runtime — it runs inside Docker and does the actual coding work. We don't write a custom coding agent.
 
-### 3.1 Go vs Python: Tradeoff Analysis
+### 3.1 Coordinator Runtime Options
 
-Gas Town is written in Go; ATeam is designed for Python. Both are viable choices. Here's the full comparison.
+The coordinator needs to be an intelligent agent — not just a cron job. It reads reports, decides priorities, resolves conflicts, and communicates decisions. There are several ways to build this:
 
-#### Python Dependencies and Go Equivalents
+#### Option A: Claude Code with Custom MCP Tools (ad-hoc)
 
-| Capability | Python Module | Go Equivalent | Notes |
-|---|---|---|---|
-| **CLI framework** | `click` or `typer` | `cobra` + `viper` | Cobra is the de facto Go CLI standard (used by kubectl, docker, hugo). Viper handles config. |
-| **Scheduling** | `APScheduler` | `robfig/cron` | Go cron is simpler but covers ATeam's needs. For more: `go-co-op/gocron`. |
-| **Docker management** | `docker` (Docker SDK for Python) | `docker/docker` client library | Both wrap the Docker Engine API. Go's client is the official one from Docker Inc. |
-| **Git operations** | `gitpython` or `subprocess` → `git` | `go-git/go-git` or `os/exec` → `git` | go-git is a pure Go git implementation. For worktree management, shelling out to git is simpler in both languages. |
-| **TOML parsing** | `tomllib` (stdlib since 3.11) | `BurntSushi/toml` or `pelletier/go-toml` | Both mature. Go's options are well-maintained. |
-| **Async / concurrency** | `asyncio` + `aiofiles` | goroutines + channels (stdlib) | Go's concurrency model is native and more natural for daemon processes. |
-| **Process execution** | `subprocess` (stdlib) | `os/exec` (stdlib) | Nearly identical ergonomics. |
-| **File watching** | `watchdog` | `fsnotify/fsnotify` | Both inotify-based on Linux. |
-| **HTTP server** (for dashboard) | `fastapi` or `flask` | `net/http` (stdlib) | Go's stdlib HTTP server is production-grade. No framework needed. |
-| **YAML parsing** (if needed) | `pyyaml` | `go-yaml/yaml` | Both standard. |
-| **Logging** | `logging` (stdlib) | `log/slog` (stdlib since 1.21) | Go's structured logging is now built in. |
-| **Testing** | `pytest` | `testing` (stdlib) + `stretchr/testify` | Both strong. Go's test tooling is built into `go test`. |
-| **Markdown processing** | `markdown-it-py` or just string ops | `goldmark` or just string ops | ATeam mostly reads/writes markdown as text — no parsing needed. |
-| **System monitoring** | `psutil` | `shirou/gopsutil` | Direct port of psutil to Go. |
+The coordinator runs as a Claude Code instance with custom MCP servers for ATeam operations. The human interactively tells the coordinator what to do (like Gas Town's Mayor).
 
-#### Arguments for Go
+**Pros:** Zero framework code. Claude Code provides the agent loop, file editing, shell execution. Just add MCP tools.
 
-**Single binary distribution.** `go build` produces one static binary with zero runtime dependencies. No Python interpreter, no virtualenv, no pip, no module path issues. Just copy the binary to the target machine and run it. This is Go's killer feature for CLI tools and daemons, and it's why Gas Town, Docker, Kubernetes, and most modern DevOps tools are written in Go. For a tool that runs as a background daemon on developer machines, this matters enormously.
+**Cons:** Interactive — requires human at the keyboard. No scheduling, no autonomous operation. This is Gas Town's model.
 
-**Concurrency model.** Go's goroutines and channels are purpose-built for the kind of work ATeam does: launching multiple Docker containers in parallel, watching for file changes, running timers, and managing a work queue — all concurrently. Python's asyncio works but is more awkward (async/await coloring, event loop management, not all libraries support it).
+#### Option B: Deterministic Python Daemon + LLM Escalation
 
-**Performance.** Not a primary concern for ATeam (the bottleneck is LLM API latency, not coordinator speed), but Go's lower memory footprint and faster startup are nice for a long-running daemon.
+A Python daemon handles scheduling, git, Docker, and budget via rule-based logic. For complex decisions, it optionally escalates to a cheap LLM call (Haiku via API).
 
-**Ecosystem alignment.** Docker SDK, git libraries, and system monitoring tools all have first-class Go implementations. The Go ecosystem is the native home of infrastructure tooling.
+**Pros:** Predictable, testable, cheap. Easy to audit.
 
-**Gas Town precedent.** Gas Town proves this kind of tool works well in Go. Their codebase handles all the same concerns (git worktrees, process management, tmux sessions, CLI) and Go served them well across 3,600 commits.
+**Cons:** Less capable for nuanced decisions. All decision heuristics must be hand-coded. Lots of framework code to build and maintain.
 
-#### Arguments for Python
+#### Option C: Claude Agent SDK as Coordinator
 
-**Development speed.** Python is faster to prototype and iterate on, especially with an LLM coding assistant. The coordinator logic is straightforward enough that Python's performance is irrelevant.
+Use the Claude Agent SDK (Python) to build the coordinator as a programmatic agent. The SDK wraps Claude Code and provides: custom in-process MCP tools, hooks, permission callbacks, and streaming with token usage reporting.
 
-**LLM ecosystem.** If ATeam ever needs to call LLM APIs directly (e.g., the Haiku-based coordinator escalation, the API fallback provider), Python has the best SDK support and the most examples/documentation.
+**Pros:** Best programmatic control. In-process tools, hooks, permissions. Token tracking. Can run headless.
 
-**APScheduler.** Python's APScheduler is more feature-rich than Go's cron libraries for complex scheduling scenarios (job stores, event listeners, timezone handling, misfire grace time).
+**Cons:** Python-only (no Go SDK). Agent SDK is relatively new (v0.1.x). Requires building the scheduling/lifecycle layer in Python around the SDK. Still substantial framework code.
 
-**Familiarity.** If the primary developer is more productive in Python, that trumps all other considerations for a v1.
+#### Option D: Claude Code as Coordinator + MCP Infrastructure Server (Recommended)
 
-#### Python Single-Binary Options
+**The framework IS an MCP server.** Claude Code runs as the coordinator — either interactively or via `claude -p` invoked by cron/systemd/launchd. The entire ATeam "framework" is just an MCP server (written in any language) that exposes infrastructure tools:
 
-Python can produce single binaries, but it's never as clean as Go:
+```
+MCP Tools exposed by ATeam server:
 
-| Tool | How It Works | Binary Size | Startup | Quality |
+# Sub-agent lifecycle
+subagent_run_audit(agent, project)     → spawns Docker, runs audit, returns report path
+subagent_run_implement(agent, project, report) → spawns Docker, implements approved findings
+subagent_commit_and_merge(agent, project) → commits changes, runs tests, merges if green
+
+# Report management
+format_report(report_path, model?)     → reformats/summarizes report (can delegate to Haiku)
+get_pending_reports(project)           → lists reports awaiting review
+get_report(agent, project, date)       → reads a specific report
+
+# Knowledge & config
+update_knowledge(agent, project, summary) → appends to knowledge.md
+get_config(project)                    → reads config.toml
+get_budget_status(project)             → returns runs today, cost estimate, remaining budget
+
+# Git operations
+create_worktree(project, agent)        → creates git worktree for agent
+cleanup_worktree(project, agent)       → removes worktree after completion
+get_recent_commits(project, since)     → lists recent commits
+
+# Scheduling (for autonomous mode)
+get_schedule_profile()                 → returns "night" or "day" and allowed agents
+get_queued_tasks(project)              → returns prioritized task queue
+```
+
+The coordinator's Claude Code instance reads the ATeam system prompt (from `CLAUDE.md` or injected via `-p`), connects to the ATeam MCP server, and orchestrates everything using natural language reasoning + tool calls.
+
+**For autonomous operation:** A thin wrapper (cron job, systemd timer, launchd, or a simple Go/Python daemon) periodically invokes `claude -p "Run the ATeam night cycle for project X" --mcp-server ateam` or uses the Agent SDK's `query()`. The Claude Code agent then autonomously calls `get_schedule_profile`, `subagent_run_audit`, reviews reports, calls `subagent_run_implement` for approved findings, and so on.
+
+**Pros:**
+
+- **Language-agnostic.** The MCP server can be written in Go, Python, TypeScript, Rust — whatever produces the best binary. The MCP protocol is just JSON-RPC over stdio. This eliminates the Python-vs-Go question for the framework itself.
+- **Minimal framework code.** The MCP server is pure infrastructure: spawn Docker containers, manage git worktrees, read/write files, track budget. No agent loop, no prompt engineering, no decision heuristics. Claude Code handles all the reasoning.
+- **Claude Code does what it's good at.** Report analysis, prioritization, conflict resolution, deciding what to implement — these are reasoning tasks. Claude Code is excellent at them. We don't need to hand-code heuristics.
+- **Full Claude Code capabilities.** The coordinator can read files, grep codebases, inspect test results, write summaries — all natively, without us implementing those tools.
+- **Natural human interaction.** In interactive mode, the human talks to Claude Code directly: "Focus on security this week" or "Skip the refactor agent, the codebase is frozen." No CLI commands to learn.
+- **Works with subscriptions.** Claude Code uses your existing Claude subscription (Pro/Max). No API key needed for the coordinator. Sub-agents inside Docker use the same subscription via `~/.claude` mount.
+- **Testable infrastructure.** The MCP server's tools are pure functions: given inputs, produce outputs. Easy to unit test. The reasoning layer (Claude Code) is tested by Anthropic.
+
+**Cons:**
+
+- Coordinator reasoning costs tokens (but using a cheap model like Haiku for routine decisions mitigates this).
+- Non-deterministic coordinator decisions (but the decision log in changelog.md provides auditability, and the human can always override).
+- MCP server is a separate process that must be running when the coordinator runs.
+
+**Why this is the cleanest architecture:**
+
+```
+┌─────────────────────────────────────────────────┐
+│ Claude Code (coordinator)                        │
+│   - reads ATeam system prompt                    │
+│   - reasons about what to do                     │
+│   - calls MCP tools for infrastructure           │
+│   - reads/writes files natively                  │
+│   - reports decisions to human                   │
+├─────────────────────────────────────────────────┤
+│ ATeam MCP Server (Go/Python/TS binary)           │
+│   - subagent lifecycle (Docker)                  │
+│   - git worktree management                      │
+│   - budget tracking                              │
+│   - report storage                               │
+│   - schedule configuration                       │
+├─────────────────────────────────────────────────┤
+│ Sub-agents (Claude Code in Docker)               │
+│   - testing, refactor, security, etc.            │
+│   - one-shot: read prompt → do work → write output│
+└─────────────────────────────────────────────────┘
+```
+
+Compare with options B/C where the framework must implement: agent loop, prompt management, decision heuristics, context window management, error recovery, conversation state, tool dispatch, streaming handling, etc. In Option D, all of that is Claude Code. The framework is just plumbing.
+
+#### Decision
+
+**Option D (Claude Code + MCP infrastructure server)** is the recommended approach. It produces the simplest framework with the most capable coordinator. The MCP server can be written in Go for single-binary distribution (since it's just infrastructure — no LLM SDK needed), while the coordinator gets full Claude Code reasoning capabilities.
+
+**For the MCP server language:** Go is now the natural choice. The MCP server needs Docker management, git operations, process spawning, file I/O, and a simple HTTP/stdio transport — all things Go excels at. No LLM SDK is needed because the MCP server doesn't call LLMs; Claude Code does. This gives us Go's single-binary distribution for the infrastructure layer while keeping Claude Code's full reasoning for the coordinator.
+
+**Scheduling wrapper options:**
+- **Simplest:** cron/systemd timer that runs `claude -p "Run ATeam cycle" --mcp-server ateam` periodically.
+- **More control:** A small Go daemon that checks for commits, manages the schedule profile (night/day), and invokes Claude Code when work is needed. Still minimal — just a scheduler + subprocess launcher.
+- **Agent SDK (Python):** If you want programmatic hooks and permission callbacks, use the Agent SDK's `query()` to invoke the coordinator. The MCP server is still the same Go binary.
+
+### 3.2 Go vs Python: Language Comparison
+
+With Option D, the language question shifts. The **MCP server** (the actual framework code) doesn't need an LLM SDK at all — it's pure infrastructure. The **coordinator** is Claude Code (language-agnostic). The comparison becomes:
+
+#### For the MCP Server (the framework)
+
+| Consideration | Go | Python |
+|---|---|---|
+| **Single binary** | ✅ `go build` → 15MB static binary | ❌ Requires Python runtime or ~100MB PyInstaller bundle |
+| **Docker SDK** | ✅ Official client from Docker Inc. | ✅ Official SDK |
+| **Git operations** | ✅ `go-git` or `os/exec` → `git` | ✅ `gitpython` or `subprocess` |
+| **MCP server** | ✅ `mcp-go` (official) | ✅ `mcp` (official) |
+| **Concurrency** | ✅ Goroutines — natural for managing multiple Docker containers | ⚠️ asyncio works but more awkward |
+| **Distribution** | ✅ Copy binary and run | ❌ pip install, virtualenv, PATH issues |
+| **LLM SDK needed?** | **No** — the MCP server doesn't call LLMs | **No** |
+
+**Go wins for the MCP server.** It doesn't need the Claude Agent SDK (that was the Python dealbreaker before), and Go's strengths (single binary, concurrency, Docker/git ecosystem) are exactly what the MCP server needs.
+
+#### For the Scheduling Wrapper (optional)
+
+If you want more than a cron job (commit detection, day/night profiles, budget enforcement before invoking Claude Code):
+
+| Consideration | Go | Python |
+|---|---|---|
+| **Simple scheduler** | ✅ `robfig/cron` | ✅ `APScheduler` (more features) |
+| **Claude Code invocation** | ✅ `os/exec` → `claude -p` | ✅ Agent SDK `query()` for richer control |
+| **Can be same binary as MCP server** | ✅ Single binary does both | ❌ Separate process |
+
+**Go wins if** the scheduler is simple (commit check + cron + budget gate → invoke Claude Code). **Python wins if** you want Agent SDK hooks and programmatic control over the coordinator's behavior.
+
+#### Recommendation: Go MCP Server + Thin Scheduler
+
+The MCP server and scheduling wrapper can be a single Go binary: `ateam serve` runs the MCP server, `ateam daemon` runs the scheduler that periodically invokes Claude Code with the MCP server attached. This gives us Gas Town's distribution model (single `go install` binary) with ATeam's autonomous scheduling.
+
+The Claude Agent SDK remains available as an alternative coordinator driver for users who want programmatic Python control. The MCP server doesn't care who calls it — Claude Code interactively, `claude -p` from cron, or the Agent SDK from Python.
+
+#### Full Dependency Comparison (MCP Server in Go)
+
+| Capability | Go Module | Notes |
+|---|---|---|
+| **MCP server** | `mcp-go` (official) | JSON-RPC over stdio, handles tool registration and dispatch |
+| **Docker management** | `docker/docker` client | Official Docker SDK |
+| **Git operations** | `go-git/go-git` or `os/exec` → `git` | Pure Go git or shell out for worktree management |
+| **CLI framework** | `cobra` + `viper` | De facto Go CLI standard |
+| **TOML parsing** | `BurntSushi/toml` | Mature, well-maintained |
+| **Scheduling** | `robfig/cron` or `go-co-op/gocron` | Cron expressions, timezone support |
+| **Process execution** | `os/exec` (stdlib) | For invoking `claude -p` |
+| **System monitoring** | `shirou/gopsutil` | CPU/memory checks |
+| **HTTP server** | `net/http` (stdlib) | For optional dashboard |
+| **Logging** | `log/slog` (stdlib) | Structured logging |
+| **LLM SDK** | **Not needed** | Claude Code handles all LLM interaction |
+
+#### Python Single-Binary Options (if choosing Python)
+
+| Tool | How It Works | Binary Size | Startup | Notes |
 |---|---|---|---|---|
-| **PyInstaller** | Bundles Python interpreter + bytecode + deps into self-extracting archive | ~94 MB (CLI app) | Slow (extracts to temp dir) | Most popular, cross-platform, works with most packages |
-| **Nuitka** | Compiles Python → C → native binary | ~58 MB (CLI app) | Fast (native) | Best performance but 6+ minute compile times, potential CPython compat issues |
-| **cx_Freeze** | Similar to PyInstaller, more CI-friendly | ~79 MB | Moderate | Good for enterprise pipelines |
-| **PyOxidizer** | Embeds Python interpreter in Rust binary, loads modules from memory | Varies | Fast (no disk extraction) | Ambitious but complex setup, Rust dependency for build |
-| **Shiv / PEX** | Zip-file packages (.pyz) | Small | Fast | Require Python already installed on target — defeats the purpose |
-
-**Practical assessment:** PyInstaller is the path of least resistance. It works, it's well-documented, and most Python packages are compatible. But the resulting binary is large (~100MB), startup is noticeably slow (extracts a temp directory), and you need to build per-platform. Compare with Go: `go build` → one ~15MB static binary, instant startup, cross-compile with `GOOS=linux GOARCH=amd64` in the same command.
-
-#### Recommendation
-
-For ATeam specifically:
-
-**If optimizing for v1 development speed:** Python. Get the coordinator working, validate the concept, then consider rewriting in Go if distribution becomes important.
-
-**If optimizing for distribution and long-term use:** Go. The single-binary story, native concurrency, and daemon ergonomics make it the better fit for a tool that runs in the background on developer machines.
-
-**Hybrid approach:** Write the coordinator in Go, keep prompts and agent definitions as markdown files (language-agnostic), and use shell scripts for the Docker launch layer. This is essentially what Gas Town does, and it's proven to work.
-
-The key insight is that ATeam's coordinator has very little complex logic — it's mostly process management, file I/O, scheduling, and shelling out to `docker` and `git`. This is exactly the kind of code that is equally easy to write in Go or Python, but is much easier to *distribute* in Go.
+| **PyInstaller** | Bundles interpreter + bytecode in self-extracting archive | ~94 MB | Slow (extracts to temp) | Most popular, cross-platform |
+| **Nuitka** | Compiles Python → C → native binary | ~58 MB | Fast (native) | 6+ min compile, potential compat issues |
+| **PyOxidizer** | Embeds Python in Rust binary, loads from memory | Varies | Fast | Complex setup, Rust build dependency |
+| **Shiv / PEX** | Zip-file packages (.pyz) | Small | Fast | Requires Python on target — defeats purpose |
 
 ---
 
@@ -326,42 +433,34 @@ async def collect_results(output_path: str) -> AgentResult:
 
 ### 5.4 Output Contract (in the prompt)
 
-Every mode's prompt ends with a strict output contract:
+Every mode's prompt ends with a clear output contract. With `--output-format stream-json` (see §7.3), the full execution trace is captured automatically. The sub-agent focuses on the work, not on report formatting.
 
 ```markdown
 ## Output Contract
 
-You MUST write the following files to /output/ before finishing:
-
 ### For Audit Mode:
-- `/output/report.md` — Your findings and recommendations in this format:
-  # [Agent Name] Audit Report
-  ## Summary
-  [1-2 sentence overview]
-  ## Findings (by priority)
-  ### Critical
-  ### High
-  ### Medium
-  ### Low
-  ## Recommended Actions
-  [numbered list, most important first]
-  ## Estimated Effort
-  [rough sizing per recommendation]
+- Focus on analyzing the codebase. Your reasoning and findings will be captured
+  via the execution stream and formatted into a report automatically.
+- If you find critical issues, write a brief `/output/critical.md` flagging them
+  for immediate human attention.
 
 ### For Implement Mode:
-- All code changes directly in /workspace/ (the git worktree)
-- `/output/completion.md` — Summary of what you changed and why
-- `/output/test_results.txt` — Output of running the test suite after your changes
+- All code changes directly in /workspace/ (the git worktree).
+- Run the test suite after your changes. The test output is captured automatically.
+- If tests fail after your changes, debug and fix them before finishing.
 
 ### For Maintain Mode:
-- `/output/knowledge_update.md` — Updated knowledge file (replaces current knowledge.md)
+- Write `/output/knowledge_update.md` — a concise summary of what was learned
+  from the last implementation cycle (replaces current knowledge.md).
 
 ### For Configure Mode:
-- Config files written directly to /workspace/
-- `/output/completion.md` — What you configured and how to integrate it
+- Config files written directly to /workspace/.
+- Run any relevant checks (linting, formatting) to verify the configuration works.
 
 If you encounter blocking issues, write `/output/blocked.md` explaining the problem.
 ```
+
+**Note on report generation:** In earlier versions of this design, the sub-agent was responsible for writing structured markdown reports. With stream-json output, the coordinator or a cheap model (Haiku) generates reports from the execution trace (see §7.4). This is more reliable, produces consistent formatting, and keeps the sub-agent's prompt focused on the actual task.
 
 ### 5.5 The `claude -p` Question: Is It Enough?
 
@@ -475,57 +574,212 @@ When a rebase produces conflicts:
 
 ## 7. Docker Execution Model
 
-### 7.1 Container Setup
+### 7.1 Building on Anthropic's Devcontainer Sandbox
 
-The Dockerfile for sub-agent containers must include:
+Anthropic ships a reference devcontainer specifically designed for running `claude --dangerously-skip-permissions` unattended. This is exactly ATeam's sub-agent use case. The reference container provides:
+
+- **Base image:** `node:20-bookworm-slim` with Claude Code pre-installed (`npm install -g @anthropic-ai/claude-code`).
+- **Non-root user:** Runs as `node` user (uid 1000) with limited sudo access (only for the firewall script).
+- **Default-deny egress firewall:** Uses `iptables` + `ipset` to allowlist only essential domains and block everything else. The allowlist includes:
+  - `api.anthropic.com` (LLM API)
+  - `github.com`, `raw.githubusercontent.com` (git operations)
+  - `registry.npmjs.org` (npm packages)
+  - DNS and SSH (outbound)
+  - Localhost/loopback
+- **Linux capabilities:** Requires `NET_ADMIN` and `NET_RAW` to configure iptables inside the container.
+- **Firewall verification:** The startup script tests that blocked domains are unreachable and allowed domains work, failing the container if the firewall is broken.
+
+ATeam uses this as the **base layer** for sub-agent containers. Per-project Dockerfiles extend it with project-specific toolchains and dependencies.
+
+### 7.2 Layered Container Architecture
+
+```
+┌────────────────────────────────────────────────┐
+│ Layer 3: Project Runtime                        │
+│   npm install / pip install / cargo build       │
+│   Project-specific tools (postgres client, etc.)│
+│   COPY package.json / requirements.txt          │
+├────────────────────────────────────────────────┤
+│ Layer 2: ATeam Agent Layer                      │
+│   Additional tools: ripgrep, fd, jq, tree       │
+│   ATeam init-firewall.sh (extends allowlist)    │
+│   /agent-data/ and /output/ mount points        │
+├────────────────────────────────────────────────┤
+│ Layer 1: Anthropic Devcontainer Base            │
+│   node:20 + Claude Code + non-root user         │
+│   Default-deny egress firewall                  │
+│   NET_ADMIN / NET_RAW capabilities              │
+└────────────────────────────────────────────────┘
+```
+
+**Base Dockerfile (ATeam agent layer, extends Anthropic's devcontainer):**
 
 ```dockerfile
-FROM ubuntu:24.04
+FROM node:20-bookworm-slim
 
-# Project build toolchain (language-specific)
+# System tools for Claude Code agent work
 RUN apt-get update && apt-get install -y \
-    git curl nodejs npm python3 \
-    # ... project-specific deps
+    git curl sudo ca-certificates \
+    ripgrep fd-find jq tree bat htop unzip \
+    iptables ipset iproute2 dnsutils \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code
 RUN npm install -g @anthropic-ai/claude-code
 
-# Optional: Install Codex CLI for multi-provider support
-# RUN npm install -g @openai/codex
+# Non-root user (matching Anthropic reference)
+ARG USERNAME=node
+RUN groupmod --gid 1000 $USERNAME \
+    && usermod --uid 1000 --gid 1000 $USERNAME \
+    && chown -R 1000:1000 /home/$USERNAME
 
-# Project-specific dependencies
-COPY package.json /workspace/
-RUN cd /workspace && npm install
-# (or pip install, cargo build, etc.)
+# Firewall script (adapted from Anthropic's init-firewall.sh)
+COPY init-firewall.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/init-firewall.sh
 
-# Agent user (non-root)
-RUN useradd -m agent
-USER agent
+# Sudo only for firewall initialization
+RUN echo "$USERNAME ALL=(ALL) NOPASSWD: /usr/local/bin/init-firewall.sh" >> /etc/sudoers
+
+# Agent working directories
+RUN mkdir -p /agent-data /output && chown $USERNAME:$USERNAME /agent-data /output
+
+USER $USERNAME
 WORKDIR /workspace
 ```
 
-### 7.2 Network Policy
+**Per-project Dockerfile (extends base with project deps):**
 
-Sub-agents **need network access** to reach the LLM API. Options:
+```dockerfile
+FROM ateam-base:latest
 
-- **Default bridge** (simplest): container can reach the internet. Claude Code connects to Anthropic's API.
-- **Restricted egress** (more secure): use iptables or Docker network policy to allow only `api.anthropic.com` and `api.openai.com`. Block everything else.
+# Project-specific toolchain
+USER root
+RUN apt-get update && apt-get install -y python3 python3-pip postgresql-client
+# (or: RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh)
+USER node
 
-```bash
-# Option: restrict egress to only LLM APIs
-docker network create --driver bridge ateam-net
-# Then configure iptables rules on the host to restrict ateam-net
+# Project dependencies (pre-installed so container can run network-restricted)
+COPY --chown=node:node package.json package-lock.json /workspace/
+RUN cd /workspace && npm ci
+
+# Extend firewall allowlist if project needs additional domains
+# e.g., private registries, test APIs
+COPY --chown=node:node project-firewall-additions.sh /usr/local/bin/
 ```
 
-For projects that need `npm install` or `pip install` at runtime, the Dockerfile should pre-install all dependencies so the container can run with restricted network.
+Projects declare their container requirements in `config.toml`:
 
-### 7.3 Resource Limits
+```toml
+[docker]
+base_image = "ateam-base:latest"        # or a pre-built project image
+dockerfile = "./Dockerfile"              # per-project Dockerfile
+extra_firewall_domains = ["pypi.org", "files.pythonhosted.org"]  # for pip
+cpus = 2
+memory = "4g"
+```
+
+### 7.3 Sub-Agent Execution: `--dangerously-skip-permissions` + `--output-format stream-json`
+
+Sub-agents run inside Docker with two critical flags:
+
+**`--dangerously-skip-permissions`:** Bypasses all Claude Code permission prompts, enabling fully unattended operation. This is safe because:
+- The container is isolated via Docker (filesystem, process, network).
+- The egress firewall restricts network access to only the LLM API and essential services.
+- The worktree is a disposable git branch — damage is limited and reversible.
+- The coordinator validates all outputs before merging.
+
+**`--output-format stream-json`:** Streams structured JSON events in real-time as the agent works. This enables:
+- **Live observation:** The coordinator (or a monitoring tool) can watch what the sub-agent is doing in real-time — which files it's reading, what commands it's running, what it's thinking.
+- **Token tracking:** The stream includes usage metadata (input/output tokens per turn).
+- **Progress estimation:** The coordinator can detect if the agent is stuck (no events for N minutes) and kill the container.
+- **Structured output:** Instead of the sub-agent writing its own markdown report, the coordinator (or a cheap model like Haiku) can post-process the stream-json into a clean report. This is more reliable than asking the sub-agent to format its own output, and it captures the full reasoning trace.
+
+**Execution flow:**
+
+```bash
+#!/bin/bash
+# run-subagent.sh — invoked by ATeam MCP server's subagent_run_audit tool
+
+PROJECT="$1"
+AGENT="$2"
+WORKTREE="/var/ateam/repos/$PROJECT/worktrees/$AGENT-$(date +%Y%m%d%H%M)"
+PROMPT_FILE="/var/ateam/workspace/$PROJECT/$AGENT/current_prompt.md"
+OUTPUT_DIR="/var/ateam/workspace/$PROJECT/$AGENT/work/$(date +%Y-%m-%d_%H%M)"
+STREAM_LOG="$OUTPUT_DIR/stream.jsonl"
+
+mkdir -p "$OUTPUT_DIR"
+
+# Create ephemeral git worktree
+git -C "/var/ateam/repos/$PROJECT/bare" worktree add "$WORKTREE" origin/main
+
+# Run sub-agent in Docker
+docker run --rm \
+  --name "ateam-$PROJECT-$AGENT" \
+  --cap-add NET_ADMIN --cap-add NET_RAW \
+  --cpus=2 --memory=4g --pids-limit=256 \
+  -v "$WORKTREE:/workspace:rw" \
+  -v "$PROMPT_FILE:/agent-data/current_prompt.md:ro" \
+  -v "$HOME/.claude:/home/node/.claude:ro" \
+  -v "$OUTPUT_DIR:/output:rw" \
+  "$PROJECT_DOCKER_IMAGE" \
+  bash -c '
+    # Initialize firewall (allowlist only)
+    sudo /usr/local/bin/init-firewall.sh
+
+    # Run Claude Code: one-shot, no permissions, streaming JSON
+    claude -p "$(cat /agent-data/current_prompt.md)" \
+      --dangerously-skip-permissions \
+      --output-format stream-json \
+      2>/output/stderr.log \
+      | tee /output/stream.jsonl
+  '
+
+EXIT_CODE=$?
+
+# Post-process: coordinator or Haiku generates the markdown report
+# from the stream.jsonl trace (see §7.4)
+echo "$EXIT_CODE" > "$OUTPUT_DIR/exit_code"
+```
+
+### 7.4 Report Generation from Stream JSON
+
+Instead of relying on the sub-agent to write its own markdown report (which wastes context window and can be inconsistent), the stream-json output captures the agent's full execution trace. The coordinator then generates the report:
+
+**Option A (cheapest):** The MCP server's `format_report` tool extracts key events from `stream.jsonl` (tool calls, file edits, test results, final assistant messages) and templates them into a structured markdown report. Pure code, no LLM needed.
+
+**Option B (better quality):** The `format_report` tool sends the extracted events to a cheap model (Haiku) with a formatting prompt: "Summarize this agent execution into an audit report following this template: [...]". This produces cleaner, more insightful reports at minimal cost (~$0.01 per report).
+
+**Option C (hybrid):** Use Option A for the raw structured data (findings, test results, code changes) and Option B for the narrative summary. This gives you machine-readable data plus human-readable prose.
+
+The sub-agent's prompt is simplified: instead of "write a report to /output/report.md following this template," it just says "analyze the codebase for testing gaps" or "implement these approved changes." The agent focuses on the work, not on report formatting.
+
+### 7.5 Network Policy
+
+The base firewall (from init-firewall.sh) implements default-deny egress with allowlist:
+
+```bash
+# Core allowlist (in init-firewall.sh)
+ALLOWED_DOMAINS=(
+  "api.anthropic.com"           # Claude API
+  "github.com"                  # git operations
+  "raw.githubusercontent.com"   # git operations
+  "registry.npmjs.org"          # npm (for Claude Code updates)
+)
+
+# Per-project additions (from config.toml extra_firewall_domains)
+# e.g., pypi.org, crates.io, rubygems.org, private registries
+```
+
+For projects that need `npm install` or `pip install` at runtime, the Dockerfile should pre-install all dependencies so the container can run with a minimal allowlist. If runtime package installation is unavoidable, add the relevant registries to `extra_firewall_domains` in `config.toml`.
+
+### 7.6 Resource Limits
 
 Containers are constrained via Docker resource flags:
 - `--cpus`: default 2, configurable per project.
 - `--memory`: default 4GB, configurable.
 - `--pids-limit`: prevent fork bombs (default 256).
-- Coordinator watchdog kills containers exceeding time limits.
+- `--cap-add NET_ADMIN --cap-add NET_RAW`: required for iptables firewall setup.
+- Coordinator watchdog monitors `stream.jsonl` output — kills containers if no events for configurable timeout (default 5 minutes).
 
 ---
 
@@ -533,19 +787,39 @@ Containers are constrained via Docker resource flags:
 
 ### 8.1 Implementation
 
-The coordinator is a **long-running Python process** (daemon or systemd service). It does NOT use an LLM for its own logic — it's deterministic Python code that:
+The coordinator is **Claude Code itself**, connected to the ATeam MCP server (see §3.1, Option D). The MCP server provides infrastructure tools (sub-agent lifecycle, git management, budget tracking), while Claude Code provides the reasoning (report analysis, prioritization, conflict resolution, decision-making).
 
-- Watches for git commits on a schedule.
-- Decides which agents to run based on rules and config.
-- Assembles prompts from templates and knowledge files.
-- Launches Docker containers and waits for results.
-- Reads output files and makes simple triage decisions.
-- Logs everything to changelog.md.
-- Accepts human commands via CLI.
+**Interactive mode:** The human runs `claude --mcp-server ateam` and talks to the coordinator directly: "Run the testing agent on myapp" → Claude Code calls `subagent_run_audit("testing", "myapp")` → reads the report → decides whether to approve → calls `subagent_run_implement` if appropriate.
 
-**Why not LLM-powered coordinator?** The coordinator's decisions are simple enough to be rule-based (scheduling, priority ordering, file I/O). Using an LLM here would add latency, cost, and unpredictability for no benefit. The intelligence is in the sub-agents.
+**Autonomous mode:** A thin scheduler (cron, systemd timer, or Go daemon) periodically invokes:
+```bash
+claude -p "Run the ATeam night cycle for project myapp. \
+  Check the schedule profile, run due agents, review reports, \
+  implement approved findings, update knowledge files." \
+  --mcp-server ateam \
+  --allowedTools 'mcp:ateam:*' Bash Read Write Edit Glob Grep \
+  --output-format json
+```
 
-**Optional LLM escalation:** For complex decisions (conflicting agent recommendations, ambiguous priorities), the coordinator can optionally invoke a lightweight LLM call (e.g., Claude Haiku via API) to summarize conflicts and generate a human-readable decision prompt. This is a targeted, cost-effective use of AI at the coordination layer.
+The coordinator's system prompt (injected via `CLAUDE.md` or the `-p` flag) defines its decision-making behavior: always run testing first, auto-approve low-risk changes, queue high-risk for human review, respect budget limits, update changelog.
+
+**Key MCP tools available to the coordinator:**
+
+```
+subagent_run_audit(agent, project)         → Docker: run audit, return report path
+subagent_run_implement(agent, project, report) → Docker: implement findings, return completion path
+subagent_commit_and_merge(agent, project)  → git: commit changes, run tests, merge if green
+format_report(report_path, model?)         → summarize/reformat report (delegate to Haiku)
+get_pending_reports(project)               → list reports awaiting review
+update_knowledge(agent, project, summary)  → append to knowledge.md
+get_budget_status(project)                 → runs today, cost estimate, remaining budget
+get_schedule_profile()                     → "night"/"day", allowed agents, max parallel
+create_worktree(project, agent)            → create git worktree
+cleanup_worktree(project, agent)           → remove worktree
+get_recent_commits(project, since)         → list recent commits
+```
+
+Claude Code also uses its built-in tools natively: reading reports (Read), inspecting code (Grep, Glob), writing changelog entries (Write), running test commands (Bash). The MCP server only handles the infrastructure operations that need Docker, git worktrees, or budget state.
 
 ### 8.2 Scheduler
 
@@ -750,7 +1024,259 @@ async def watchdog(container_name: str, timeout_minutes: int):
 
 ---
 
-## 10. File Hierarchy
+## 10. Debugging and Operations
+
+### 10.1 Container Naming Convention
+
+Every sub-agent container uses a deterministic name: `ateam-{project}-{agent}`. This enforces a single-instance constraint per agent role and makes containers easy to identify, attach to, and manage.
+
+```
+ateam-myapp-testing
+ateam-myapp-refactor
+ateam-myapp-security
+ateam-myapp-performance
+ateam-myapp-deps
+ateam-myapp-docs-internal
+ateam-myapp-docs-external
+```
+
+The MCP server enforces this: `subagent_run_audit("testing", "myapp")` first checks if `ateam-myapp-testing` already exists. If it's running, the tool returns an error describing the existing container's state (interactive session, autonomous run, or stale). The coordinator can then decide whether to wait, skip, or ask the human.
+
+In the future, this constraint can be relaxed to allow parallel instances (e.g., `ateam-myapp-testing-1`, `ateam-myapp-testing-2`), but for v1 the single-instance model is simpler and avoids worktree conflicts.
+
+### 10.2 Suspend / Resume Coordinator
+
+The autonomous coordinator (the scheduler daemon that periodically invokes Claude Code) supports pause/resume:
+
+```bash
+# Suspend: stop scheduling new agent runs, let running agents finish
+ateam pause
+# → writes a lockfile: ~/.ateam/paused
+# → the scheduler loop checks for this file and skips cycles
+# → currently running containers continue to completion
+
+# Resume: re-enable the scheduler
+ateam resume
+# → removes the lockfile
+# → next scheduler tick proceeds normally
+
+# Check status
+ateam status
+# → shows: coordinator paused/running, active containers, pending queue, budget
+```
+
+The MCP server also exposes this as a tool:
+```
+pause_coordinator()   → creates lockfile, returns current state
+resume_coordinator()  → removes lockfile, returns current state
+get_coordinator_status() → paused/running, active containers, last cycle time
+```
+
+The coordinator Claude Code instance (in interactive mode) can also pause/resume itself: "Pause the night cycle, I'm doing manual work on the testing agent."
+
+### 10.3 Interactive Agent Sessions
+
+Any sub-agent can be launched in interactive mode instead of autonomous `-p` mode. This drops the human into the same Docker environment the agent would use, with the same prompt, worktree, and context — but with an interactive Claude Code session instead of a one-shot invocation.
+
+```bash
+# Launch interactive session as the testing agent on myapp
+ateam shell myapp testing
+
+# This:
+# 1. Creates the worktree (if not already present)
+# 2. Builds the prompt (same as autonomous mode)
+# 3. Starts the Docker container with the deterministic name (ateam-myapp-testing)
+# 4. Drops you into an interactive Claude Code session:
+#    claude --dangerously-skip-permissions \
+#           --system-prompt "$(cat /agent-data/current_prompt.md)"
+# 5. Mounts the same volumes: worktree at /workspace, prompt at /agent-data,
+#    output at /output, .claude at /home/node/.claude
+```
+
+Inside the interactive session, the human can:
+- Investigate issues the autonomous agent got stuck on.
+- Manually run parts of the audit/implement workflow.
+- Test changes before letting the autonomous agent take over.
+- Use all of Claude Code's interactive features (follow-up questions, exploration, undo).
+
+**Exiting:** When the human exits the interactive session (`/exit` or Ctrl-D), the container stops. The worktree and any `/output/` files are preserved. The human can then let the autonomous cycle resume, or continue with another `ateam shell` session.
+
+### 10.4 Distinguishing Interactive vs Stale Containers
+
+When the coordinator (or MCP server) encounters an already-running container `ateam-myapp-testing`, it needs to determine: is this a human interactive session, a normally-running autonomous agent, or a stale/hung process?
+
+**Mechanism: state file + heartbeat.**
+
+When a container starts, the entrypoint writes a state file to the shared output volume:
+
+```json
+// /output/.ateam-state.json
+{
+  "mode": "interactive",      // or "autonomous"
+  "started_at": "2026-02-26T23:00:00Z",
+  "pid": 42,
+  "heartbeat": "2026-02-26T23:15:00Z"
+}
+```
+
+- **`mode: "interactive"`** — launched via `ateam shell`. The coordinator knows a human is working and does not interfere. It logs "testing agent in interactive session, skipping" and moves on.
+- **`mode: "autonomous"`** — launched via the normal MCP `subagent_run_audit` tool. The coordinator monitors `stream.jsonl` for activity.
+- **`heartbeat`** — updated periodically (every 60 seconds) by a background process in the container. For autonomous mode, the stream-json output itself serves as the heartbeat. For interactive mode, a simple `while true; do date > /output/.ateam-heartbeat; sleep 60; done &` background process.
+
+**Decision logic in the MCP server:**
+
+```
+container exists?
+  ├─ no → start new container
+  └─ yes → read .ateam-state.json
+       ├─ mode: interactive → return "agent in interactive session, skipping"
+       ├─ mode: autonomous + heartbeat recent (<5 min) → return "agent running normally"
+       ├─ mode: autonomous + heartbeat stale (>5 min) → return "agent appears hung"
+       │    → coordinator decides: kill and retry, or notify human
+       └─ state file missing/unreadable → check docker inspect
+            ├─ container running → assume stale, warn human
+            └─ container exited → cleanup and start new
+```
+
+### 10.5 Manual MCP Commands in Interactive Sessions
+
+When inside an interactive `ateam shell` session, the human should be able to run the same operations the coordinator would. The ATeam MCP server can also be attached to the interactive Claude Code session:
+
+```bash
+# Launch interactive session WITH MCP server attached
+ateam shell myapp testing --with-mcp
+
+# Now inside Claude Code, you can use coordinator-level tools:
+# "Format the findings I just wrote into a proper audit report"
+#   → Claude calls format_report(...)
+# "Commit my changes and run the test suite"
+#   → Claude calls subagent_commit_and_merge(...)
+# "Update the testing knowledge file with what I learned"
+#   → Claude calls update_knowledge(...)
+# "What's the budget status?"
+#   → Claude calls get_budget_status(...)
+```
+
+This means the human in an interactive session can do everything the autonomous coordinator does, but manually and with full control. The files (reports, knowledge updates, changelog) are written to the same paths the autonomous system uses, so there's no divergence.
+
+**Without `--with-mcp`:** The human is in a plain Claude Code session in the agent's environment. They can still manually write files to `/output/`, edit the worktree, run tests, etc. They just don't have access to the coordinator's infrastructure tools (commit-and-merge, format-report, etc.).
+
+### 10.6 Troubleshooting Commands
+
+```bash
+# ── Status & Monitoring ──────────────────────────────────────────
+
+ateam status                      # Overview: coordinator state, active containers,
+                                  # pending queue, budget, last cycle time
+
+ateam status myapp                # Per-project: enabled agents, last run per agent,
+                                  # pending reports, worktree status
+
+ateam containers                  # List all ateam-* Docker containers with state,
+                                  # mode (interactive/autonomous), uptime, resource usage
+
+# ── Agent Inspection ─────────────────────────────────────────────
+
+ateam logs myapp testing          # Tail the stream.jsonl for the current/last run
+                                  # (shows what the agent is doing in real-time)
+
+ateam logs myapp testing --stderr # Show stderr output (errors, warnings)
+
+ateam logs myapp testing --last   # Show the stream.jsonl from the most recent
+                                  # completed run (not the current one)
+
+ateam report myapp testing        # Show the latest formatted report for this agent
+
+ateam diff myapp testing          # Show git diff of the agent's worktree vs main
+                                  # (what changes has the agent made?)
+
+# ── Agent Control ────────────────────────────────────────────────
+
+ateam shell myapp testing         # Interactive session (see §10.3)
+
+ateam kill myapp testing          # Kill a running/hung container immediately
+
+ateam retry myapp testing         # Kill if running, clean up worktree, re-run
+                                  # the last task from scratch
+
+ateam skip myapp testing          # Mark this agent as "skip" for the current cycle
+                                  # (coordinator won't run it tonight)
+
+# ── Coordinator Control ──────────────────────────────────────────
+
+ateam pause                       # Suspend autonomous scheduling
+ateam resume                      # Resume autonomous scheduling
+ateam run myapp                   # Manually trigger a full cycle for a project
+                                  # (even if paused — one-shot override)
+ateam run myapp testing           # Manually trigger a specific agent
+
+# ── Maintenance & Cleanup ────────────────────────────────────────
+
+ateam cleanup myapp               # Remove stale worktrees, exited containers,
+                                  # old stream.jsonl files (>30 days)
+
+ateam worktrees myapp             # List all worktrees for a project with status
+
+ateam doctor                      # Health check: verify Docker, git, Claude Code
+                                  # installation, MCP server connectivity, firewall
+
+ateam doctor --fix                # Auto-repair: remove stale lockfiles, prune
+                                  # orphaned containers, fix worktree state
+
+# ── History & Audit ──────────────────────────────────────────────
+
+ateam history myapp               # Show recent changelog entries (coordinator decisions)
+
+ateam history myapp testing       # Show run history for a specific agent:
+                                  # timestamps, modes, exit codes, report summaries
+
+ateam budget                      # Show budget status across all projects:
+                                  # runs today, estimated cost, remaining budget
+```
+
+### 10.7 Common Debugging Scenarios
+
+**"The testing agent keeps failing on my project"**
+```bash
+ateam logs myapp testing --last     # What happened in the last run?
+ateam shell myapp testing           # Enter interactive mode, reproduce the issue
+# ... investigate in Claude Code ...
+# Found it: the test suite needs a running database.
+# Fix: add postgres to the project Dockerfile, update config.toml
+```
+
+**"I want to manually run a security audit right now"**
+```bash
+ateam pause                         # Stop autonomous cycles
+ateam shell myapp security          # Enter as the security agent
+# ... interactive Claude Code session ...
+# "Audit this codebase for SQL injection vulnerabilities"
+# ... review findings, iterate ...
+ateam resume                        # Let the autonomous cycle continue
+```
+
+**"The refactor agent made changes I don't like"**
+```bash
+ateam diff myapp refactor           # See what it changed
+ateam history myapp refactor        # See the coordinator's decision to approve it
+# If not yet merged:
+ateam kill myapp refactor           # Stop the agent
+cd /var/ateam/repos/myapp/worktrees/refactor-*
+git checkout -- .                   # Discard changes
+# If already merged:
+git revert HEAD                     # Revert the merge commit
+```
+
+**"Something is running but I don't know what"**
+```bash
+ateam containers                    # Show all running ateam-* containers
+ateam logs myapp testing            # Watch real-time activity
+ateam status                        # Full system overview
+```
+
+---
+
+## 11. File Hierarchy
 
 ### 10.1 ATeam Framework Source
 
@@ -780,7 +1306,7 @@ ateam/                                 # framework source (Python package)
 
 ### 10.2 User Workspace (Git-Versioned)
 
-The entire workspace below is a git repository (see §18). The `.gitignore` excludes bulky/ephemeral data like bare repos, worktrees, and transient prompt files.
+The entire workspace below is a git repository (see §19). The `.gitignore` excludes bulky/ephemeral data like bare repos, worktrees, and transient prompt files.
 
 ```
 my_projects/                           # root workspace — itself a git repo
@@ -899,7 +1425,7 @@ The key distinction: `CLAUDE.md` files are maintained by human developers for th
 
 ---
 
-## 11. Configuration Format
+## 12. Configuration Format
 
 `config.toml` for each project:
 
@@ -957,7 +1483,7 @@ implement_minutes = 60
 
 ---
 
-## 12. Sub-Agent System Prompt Structure
+## 13. Sub-Agent System Prompt Structure
 
 Each sub-agent invocation is constructed from layered prompt files:
 
@@ -1036,7 +1562,7 @@ Write your report to `/output/report.md` using this structure:
 
 ---
 
-## 13. Parallel Execution
+## 14. Parallel Execution
 
 Use Python's `asyncio` with semaphore-based concurrency:
 
@@ -1077,7 +1603,7 @@ class AgentOrchestrator:
 
 ---
 
-## 14. Changelog and Audit Trail
+## 15. Changelog and Audit Trail
 
 The coordinator maintains `changelog.md`:
 
@@ -1110,7 +1636,7 @@ The coordinator maintains `changelog.md`:
 
 ---
 
-## 15. Implementation Plan
+## 16. Implementation Plan
 
 ### Phase 1: Foundation (Week 1–2)
 
@@ -1161,7 +1687,7 @@ The coordinator maintains `changelog.md`:
 
 ---
 
-## 16. Key Design Decisions
+## 17. Key Design Decisions
 
 ### Why Claude Code for sub-agents, not a custom API agent?
 
@@ -1189,7 +1715,7 @@ TOML is human-readable, supports nested sections naturally, and has excellent Py
 
 ---
 
-## 17. Risk Mitigation
+## 18. Risk Mitigation
 
 | Risk | Mitigation |
 |---|---|
@@ -1206,7 +1732,7 @@ TOML is human-readable, supports nested sections naturally, and has excellent Py
 
 ---
 
-## 18. Git-Versioned ATeam Configuration
+## 19. Git-Versioned ATeam Configuration
 
 ### 18.1 The ATeam Project Directory Is a Git Repo
 
@@ -1262,7 +1788,7 @@ The top-level `my_projects/agents/` directory (containing default role.md and cu
 
 ---
 
-## 19. Competitive Landscape and Alternatives
+## 20. Competitive Landscape and Alternatives
 
 ### 19.1 Summary
 
@@ -1483,9 +2009,9 @@ This is essentially what agent-orchestrator already does, so we could potentiall
 
 ---
 
-## 20. Future Enhancements
+## 21. Future Enhancements
 
-- **Feature agents** as described in §19.4 — a feature queue for small tasks, one-off agents per feature, leveraging the coordinator for progress tracking and the testing agent for validation.
+- **Feature agents** as described in §20.4 — a feature queue for small tasks, one-off agents per feature, leveraging the coordinator for progress tracking and the testing agent for validation.
 - **Web dashboard** for monitoring agent activity, reviewing reports, approving changes.
 - **Slack/Discord integration** for notifications and commands.
 - **Cross-project knowledge sharing** via `culture.md` files.
