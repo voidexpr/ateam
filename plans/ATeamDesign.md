@@ -805,21 +805,26 @@ The coordinator's system prompt (injected via `CLAUDE.md` or the `-p` flag) defi
 
 **Key MCP tools available to the coordinator:**
 
+Each MCP tool is a thin wrapper around the `ateam` CLI, which reads/writes the project's `ateam.db`. This ensures the coordinator and developers always share the same state (see §10.2).
+
 ```
-subagent_run_audit(agent, project)         → Docker: run audit, return report path
-subagent_run_implement(agent, project, report) → Docker: implement findings, return completion path
+subagent_run_audit(agent, project)         → ateam run --agent X --mode audit
+subagent_run_implement(agent, project, report) → ateam run --agent X --mode implement
 subagent_commit_and_merge(agent, project)  → git: commit changes, run tests, merge if green
 format_report(report_path, model?)         → summarize/reformat report (delegate to Haiku)
 get_pending_reports(project)               → list reports awaiting review
 update_knowledge(agent, project, summary)  → append to knowledge.md
-get_budget_status(project)                 → runs today, cost estimate, remaining budget
+get_budget_status(project)                 → query ateam.db operations for cost data
 get_schedule_profile()                     → "night"/"day", allowed agents, max parallel
 create_worktree(project, agent)            → create git worktree
 cleanup_worktree(project, agent)           → remove worktree
 get_recent_commits(project, since)         → list recent commits
+get_agent_status(project, agent?)          → query ateam.db agents table
+pause_agent(project, agent?)               → ateam pause --agent X
+resume_agent(project, agent?)              → ateam resume --agent X
 ```
 
-Claude Code also uses its built-in tools natively: reading reports (Read), inspecting code (Grep, Glob), writing changelog entries (Write), running test commands (Bash). The MCP server only handles the infrastructure operations that need Docker, git worktrees, or budget state.
+Claude Code also uses its built-in tools natively: reading reports (Read), inspecting code (Grep, Glob), writing changelog entries (Write), running test commands (Bash). The MCP server only handles the infrastructure operations that need Docker, git worktrees, or state management.
 
 ### 8.2 Scheduler
 
@@ -1026,252 +1031,867 @@ async def watchdog(container_name: str, timeout_minutes: int):
 
 ## 10. Debugging and Operations
 
-### 10.1 Container Naming Convention
+### 10.1 CLI Context: Directory-Aware Commands
 
-Every sub-agent container uses a deterministic name: `ateam-{project}-{agent}`. This enforces a single-instance constraint per agent role and makes containers easy to identify, attach to, and manage.
+The `ateam` CLI infers project and agent context from the current working directory:
 
 ```
-ateam-myapp-testing
-ateam-myapp-refactor
-ateam-myapp-security
-ateam-myapp-performance
-ateam-myapp-deps
-ateam-myapp-docs-internal
-ateam-myapp-docs-external
+my_projects/                         # PROJ_ROOT
+  projectx/                          # project dir (has config.toml)
+    config.toml
+    ateam.db                         # SQLite state database
+    testing/                         # agent dir
+      role.md
+      knowledge.md
+      work/
+    refactor/
+      ...
+  projecty/
+    config.toml
+    ateam.db
+    ...
 ```
 
-The MCP server enforces this: `subagent_run_audit("testing", "myapp")` first checks if `ateam-myapp-testing` already exists. If it's running, the tool returns an error describing the existing container's state (interactive session, autonomous run, or stale). The coordinator can then decide whether to wait, skip, or ask the human.
+**Resolution rules:**
 
-In the future, this constraint can be relaxed to allow parallel instances (e.g., `ateam-myapp-testing-1`, `ateam-myapp-testing-2`), but for v1 the single-instance model is simpler and avoids worktree conflicts.
-
-### 10.2 Suspend / Resume Coordinator
-
-The autonomous coordinator (the scheduler daemon that periodically invokes Claude Code) supports pause/resume:
+1. **Inside `projectx/testing/`** → project=projectx, agent=testing. Commands apply to the testing agent only.
+2. **Inside `projectx/`** → project=projectx, no agent. Commands apply to all agents / the coordinator.
+3. **Anywhere else** → requires `-d` flag: `ateam -d ~/my_projects/projectx pause --agent testing`.
 
 ```bash
-# Suspend: stop scheduling new agent runs, let running agents finish
+# These are all equivalent:
+cd ~/my_projects/projectx/testing && ateam pause
+cd ~/my_projects/projectx && ateam pause --agent testing
+ateam -d ~/my_projects/projectx pause --agent testing
+
+# These are all equivalent (project-wide):
+cd ~/my_projects/projectx && ateam pause
+ateam -d ~/my_projects/projectx pause
+```
+
+The CLI walks up from `$CWD` looking for `config.toml` (identifies project root). If the current directory basename matches a known agent name (from `config.toml`'s `[agents] enabled`), that agent is used as context.
+
+**The coordinator uses the same CLI.** MCP tools like `subagent_run_audit` are thin wrappers that invoke the `ateam` CLI commands. The CLI reads and writes `ateam.db`. This means developers and the coordinator always have the same view of the system — there's no separate coordinator state, no lockfiles, no divergent data paths.
+
+### 10.2 State Database: SQLite
+
+Each project has a single `ateam.db` in its root directory. This is the sole source of truth for all runtime state. Both the autonomous coordinator (via MCP → CLI) and the developer (directly via CLI) read and write the same database.
+
+```sql
+CREATE TABLE agents (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_dir     TEXT NOT NULL,         -- absolute path to project root
+    agent_name      TEXT NOT NULL,         -- 'testing', 'refactor', 'security', etc.
+    docker_instance TEXT,                  -- container ID, NULL if not running
+    time_started    TEXT,                  -- ISO timestamp, NULL if not running
+    time_ended      TEXT,                  -- ISO timestamp of last completion
+    git_commit_start TEXT,                 -- HEAD at agent start
+    git_commit_end  TEXT,                  -- HEAD at agent end (after merge, if any)
+    reason          TEXT NOT NULL DEFAULT 'coordinator',
+                                          -- 'coordinator' : autonomous scheduler
+                                          -- 'manual'      : human via ateam run/shell
+    status          TEXT NOT NULL DEFAULT 'idle',
+                                          -- 'idle'        : available for scheduling
+                                          -- 'running'     : autonomous execution
+                                          -- 'interactive' : human shell session
+                                          -- 'suspended'   : manually paused
+                                          -- 'canceled'    : run was aborted
+                                          -- 'stopped'     : completed normally
+                                          -- 'error'       : last run failed
+    UNIQUE(project_dir, agent_name)
+);
+
+CREATE TABLE operations (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_dir     TEXT NOT NULL,         -- absolute path to project root
+    agent_name      TEXT,                  -- NULL for project-wide operations
+    docker_instance TEXT,                  -- container ID if applicable, NULL otherwise
+    timestamp       TEXT NOT NULL DEFAULT (datetime('now')),
+    operation       TEXT NOT NULL,         -- 'start', 'stop', 'suspend', 'resume',
+                                          -- 'kill', 'shell', 'error', 'complete'
+    notes           TEXT                   -- free-form: error messages, kill reasons,
+                                          -- report paths, cost estimates, etc.
+);
+
+CREATE TABLE reports (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_dir     TEXT NOT NULL,
+    agent_name      TEXT NOT NULL,         -- which agent produced this report
+    timestamp       TEXT NOT NULL DEFAULT (datetime('now')),
+    report_path     TEXT NOT NULL,         -- relative path: testing/work/2026-02-26_report.md
+    git_commit_audited TEXT,               -- commit hash the agent analyzed
+    decision        TEXT NOT NULL DEFAULT 'pending',
+                                          -- 'pending'     : awaiting coordinator review
+                                          -- 'ignore'      : no action needed
+                                          -- 'proceed'     : approved for implementation
+                                          -- 'ask'         : needs human review
+                                          -- 'implemented' : changes applied + merged
+                                          -- 'deferred'    : deprioritized for now
+                                          -- 'blocked'     : waiting on dependency
+    git_commit_impl TEXT,                  -- commit hash after implementation, NULL if not impl
+    notes           TEXT                   -- coordinator's reasoning: why this decision,
+                                          -- what was prioritized instead, risk assessment
+);
+```
+
+**Design notes:**
+
+The `agents` table holds current state — one row per enabled agent, upserted on first use. The `operations` table is an append-only audit log of every state transition. The `reports` table tracks the coordinator's analysis and decisions on agent-produced reports. Together they answer "what's happening now?" (agents), "what happened?" (operations), and "what did the coordinator decide?" (reports).
+
+`project_dir` is stored as an absolute path. Since each project has its own `ateam.db`, `project_dir` is technically redundant in most queries — but it makes the schema self-describing and enables future multi-project dashboards that aggregate across databases.
+
+The `reason` field distinguishes coordinator-initiated runs from manual ones. When the scheduler starts a testing audit, `reason='coordinator'`. When a developer runs `ateam shell`, `reason='manual'`. This lets you filter history: "show me only coordinator decisions" vs "show me my interactive sessions."
+
+Git commit tracking (`git_commit_start`, `git_commit_end`) records the codebase state the agent worked against. This enables questions like "which commit did the security agent last audit?" and "did the refactor agent's changes include recent commits?"
+
+`operations.docker_instance` captures the container ID for each state transition. This is critical for post-mortem debugging: if an agent failed, you can correlate the operation with `docker logs {container_id}` (if the container still exists) or at minimum know which container execution you're investigating. It's nullable because some operations (suspend, resume) don't involve a container.
+
+**The `reports` table** is the coordinator's decision log in structured form. Every time an agent produces a report (audit findings, implementation results), the coordinator inserts a row with its decision and reasoning. The `decision` field captures the outcome:
+
+- `pending` — report received, not yet reviewed by coordinator
+- `ignore` — coordinator reviewed, no action needed (e.g., clean audit)
+- `proceed` — approved for implementation, implementation agent will be scheduled
+- `ask` — coordinator is uncertain, flagged for human review
+- `implemented` — implementation completed, `git_commit_impl` records the merge commit
+- `deferred` — valid findings but lower priority than current work; will revisit
+- `blocked` — depends on something else (another agent's work, human input, external dependency)
+
+The `notes` field contains the coordinator's reasoning — why it chose this decision, what it prioritized instead, risk assessment. This makes the coordinator's "thinking" inspectable and debuggable. The `ateam reports` command (§10.6) queries this table to show the coordinator's pipeline.
+
+**Why SQLite:**
+- Single file, zero setup, no daemon, no lockfiles.
+- WAL mode enables concurrent readers + single writer — perfect for ATeam's access pattern (one writer at a time: either CLI or coordinator, with advisory locking via SQLite's built-in mechanism).
+- Trivially inspectable: `sqlite3 ateam.db "SELECT agent_name, status FROM agents"`.
+- The `ateam db` command opens a sqlite3 shell for ad-hoc queries.
+- Schema is recreatable from code, so `ateam.db` can be `.gitignore`d (transient state, not config).
+
+**MCP tools are CLI wrappers.** The coordinator's MCP server implements tools by calling the `ateam` CLI:
+
+```
+subagent_run_audit("testing", "myapp")
+  → internally: ateam -d /path/to/myapp run --agent testing --mode audit
+  → CLI updates ateam.db: INSERT INTO operations, UPDATE agents SET status='running'
+  → CLI spawns Docker container
+  → on completion: UPDATE agents SET status='stopped', time_ended=now
+  → INSERT INTO operations (operation='complete', notes='exit_code=0, report=...')
+```
+
+This means there's zero divergence between what a developer does manually and what the coordinator does autonomously — same CLI, same database, same state transitions.
+
+### 10.3 Container Naming Convention
+
+Deterministic container names: `ateam-{project}-{agent}`.
+
+```
+ateam-projectx-testing
+ateam-projectx-refactor
+ateam-projectx-security
+...
+```
+
+The CLI checks `agents.status` and `agents.docker_instance` before launching. If the agent is `running` or `interactive`, the launch fails with a message describing the current state. Single-instance per agent for v1; parallelism (e.g., suffixed names) can be added later.
+
+### 10.4 Pause / Resume with Granularity
+
+Pausing is a status update in SQLite plus an operations log entry:
+
+```bash
+# ── Agent-level (from agent directory) ───────────────────────────
+
+cd projectx/testing
 ateam pause
-# → writes a lockfile: ~/.ateam/paused
-# → the scheduler loop checks for this file and skips cycles
-# → currently running containers continue to completion
+# → If status='running':
+#   "Testing agent is currently running. Kill it? [y/N]"
+#     y → docker kill, UPDATE agents SET status='suspended'
+#     n → UPDATE agents SET status='suspended' (takes effect after current run)
+# → If status='idle':
+#   UPDATE agents SET status='suspended'
+# → INSERT INTO operations (agent_name='testing', operation='suspend')
 
-# Resume: re-enable the scheduler
 ateam resume
-# → removes the lockfile
-# → next scheduler tick proceeds normally
+# → UPDATE agents SET status='idle' WHERE agent_name='testing'
+# → INSERT INTO operations (agent_name='testing', operation='resume')
 
-# Check status
-ateam status
-# → shows: coordinator paused/running, active containers, pending queue, budget
+# ── Project-level (from project directory) ───────────────────────
+
+cd projectx
+ateam pause
+# → Suspends ALL agents + the coordinator
+# → UPDATE agents SET status='suspended' WHERE status IN ('idle','error')
+# → For each running agent: offers kill prompt
+# → INSERT INTO operations (agent_name=NULL, operation='suspend',
+#     notes='project-wide pause')
+
+ateam resume
+# → UPDATE agents SET status='idle' WHERE status='suspended'
+# → INSERT INTO operations (agent_name=NULL, operation='resume')
+
+# ── From anywhere ────────────────────────────────────────────────
+
+ateam -d ~/my_projects/projectx pause --agent testing --agent security
 ```
 
-The MCP server also exposes this as a tool:
+**The scheduler's decision loop** reads from SQLite each cycle:
+
 ```
-pause_coordinator()   → creates lockfile, returns current state
-resume_coordinator()  → removes lockfile, returns current state
-get_coordinator_status() → paused/running, active containers, last cycle time
+1. Is there a project-wide suspend? (operations log or coordinator key)
+   → skip entire cycle
+2. For each due agent:
+   a. status = 'suspended'? → skip
+   b. status = 'interactive'? → skip (human working)
+   c. status = 'running'?
+      - check Docker container health + time_started
+      - if container dead but status='running' → stale, mark 'error'
+      - if running > timeout → kill, mark 'error'
+      - otherwise → still going, skip
+   d. status IN ('idle', 'error', 'stopped')? → eligible to run
+3. Check budget limits
+4. Launch eligible agents up to max_parallel
+5. UPDATE agents SET status='running', time_started=now, docker_instance=...,
+     git_commit_start=HEAD, reason='coordinator'
+6. INSERT INTO operations (operation='start', notes='coordinator night cycle')
 ```
 
-The coordinator Claude Code instance (in interactive mode) can also pause/resume itself: "Pause the night cycle, I'm doing manual work on the testing agent."
-
-### 10.3 Interactive Agent Sessions
-
-Any sub-agent can be launched in interactive mode instead of autonomous `-p` mode. This drops the human into the same Docker environment the agent would use, with the same prompt, worktree, and context — but with an interactive Claude Code session instead of a one-shot invocation.
+### 10.5 Interactive Agent Sessions
 
 ```bash
-# Launch interactive session as the testing agent on myapp
-ateam shell myapp testing
+# Launch interactive session as the testing agent
+cd projectx/testing
+ateam shell
+
+# Or explicitly:
+ateam -d ~/my_projects/projectx shell --agent testing
 
 # This:
-# 1. Creates the worktree (if not already present)
-# 2. Builds the prompt (same as autonomous mode)
-# 3. Starts the Docker container with the deterministic name (ateam-myapp-testing)
-# 4. Drops you into an interactive Claude Code session:
-#    claude --dangerously-skip-permissions \
-#           --system-prompt "$(cat /agent-data/current_prompt.md)"
-# 5. Mounts the same volumes: worktree at /workspace, prompt at /agent-data,
-#    output at /output, .claude at /home/node/.claude
+# 1. Checks ateam.db: is testing idle/suspended/stopped/error?
+#    If running → error "agent already running"
+# 2. UPDATE agents SET status='interactive', time_started=now,
+#      reason='manual', git_commit_start=HEAD
+# 3. INSERT INTO operations (operation='shell', notes='interactive session')
+# 4. Creates worktree (if not present)
+# 5. Assembles the prompt (same layers as autonomous mode)
+# 6. Starts Docker container (ateam-projectx-testing)
+# 7. Drops into interactive Claude Code:
+#      claude --dangerously-skip-permissions
+# 8. On exit:
+#      UPDATE agents SET status='stopped', time_ended=now, git_commit_end=HEAD
+#      INSERT INTO operations (operation='stop', notes='interactive session ended')
+# 9. Container stops, worktree preserved
+
+# With coordinator MCP tools available:
+ateam shell --with-mcp
+# → Also attaches the ATeam MCP server to the Claude Code session
+# → Human can use coordinator-level commands:
+#   "Format my findings into a report"  → format_report(...)
+#   "Commit and merge my changes"       → subagent_commit_and_merge(...)
+#   "Update the knowledge file"         → update_knowledge(...)
+#   "Check budget"                      → get_budget_status(...)
 ```
 
-Inside the interactive session, the human can:
-- Investigate issues the autonomous agent got stuck on.
-- Manually run parts of the audit/implement workflow.
-- Test changes before letting the autonomous agent take over.
-- Use all of Claude Code's interactive features (follow-up questions, exploration, undo).
+The scheduler sees `status='interactive'` and skips this agent — no ambiguity, no heartbeat heuristics needed. The status is set atomically in SQLite before the container starts.
 
-**Exiting:** When the human exits the interactive session (`/exit` or Ctrl-D), the container stops. The worktree and any `/output/` files are preserved. The human can then let the autonomous cycle resume, or continue with another `ateam shell` session.
+**Distinguishing stale from active:** For `status='running'` (autonomous mode), the scheduler checks:
+1. Is the Docker container still alive? (`docker inspect`)
+2. Has `time_started` exceeded the configured timeout?
+3. Is stream.jsonl still being written to?
 
-### 10.4 Distinguishing Interactive vs Stale Containers
+If the container is dead but status='running', it's stale — the CLI crashed or the container was killed externally. The scheduler marks it `error` and logs an operations entry.
 
-When the coordinator (or MCP server) encounters an already-running container `ateam-myapp-testing`, it needs to determine: is this a human interactive session, a normally-running autonomous agent, or a stale/hung process?
+### 10.6 CLI Command Implementation Details
 
-**Mechanism: state file + heartbeat.**
+Every CLI command is a composition of three data sources: **SQLite** (ateam.db), **git** (worktrees, refs, HEAD), and **Docker** (containers, inspect). This section documents exactly what each command reads and writes.
 
-When a container starts, the entrypoint writes a state file to the shared output volume:
+#### `ateam status`
 
-```json
-// /output/.ateam-state.json
-{
-  "mode": "interactive",      // or "autonomous"
-  "started_at": "2026-02-26T23:00:00Z",
-  "pid": 42,
-  "heartbeat": "2026-02-26T23:15:00Z"
-}
-```
+Shows the combined state of all agents (or a single agent if run from an agent directory), with commit freshness, elapsed time, and live activity preview.
 
-- **`mode: "interactive"`** — launched via `ateam shell`. The coordinator knows a human is working and does not interfere. It logs "testing agent in interactive session, skipping" and moves on.
-- **`mode: "autonomous"`** — launched via the normal MCP `subagent_run_audit` tool. The coordinator monitors `stream.jsonl` for activity.
-- **`heartbeat`** — updated periodically (every 60 seconds) by a background process in the container. For autonomous mode, the stream-json output itself serves as the heartbeat. For interactive mode, a simple `while true; do date > /output/.ateam-heartbeat; sleep 60; done &` background process.
-
-**Decision logic in the MCP server:**
+**Project-level output** (`cd projectx && ateam status`):
 
 ```
-container exists?
-  ├─ no → start new container
-  └─ yes → read .ateam-state.json
-       ├─ mode: interactive → return "agent in interactive session, skipping"
-       ├─ mode: autonomous + heartbeat recent (<5 min) → return "agent running normally"
-       ├─ mode: autonomous + heartbeat stale (>5 min) → return "agent appears hung"
-       │    → coordinator decides: kill and retry, or notify human
-       └─ state file missing/unreadable → check docker inspect
-            ├─ container running → assume stale, warn human
-            └─ container exited → cleanup and start new
+ATeam: projectx                          main @ a3f8c21 (2 min ago)
+Coordinator: running                     Last cycle: 3 min ago
+
+AGENT        STATUS       ELAPSED   REASON        LAST SEEN     BEHIND
+testing      running      12m 34s   coordinator   a3f8c21       0 commits
+refactor     idle         —         —             b1e7d09       3 commits
+security     suspended    —         —             8ca2f31       12 commits
+performance  stopped      —         —             a3f8c21       0 commits
+deps         idle         —         —             f42a1bc       7 commits
+docs         error        —         —             91d3e0a       5 commits
+
+Recent Operations:
+  14:23  testing    start    coordinator night cycle
+  14:12  refactor   complete exit=0 report=refactor/work/...
+  14:01  docs       error    timeout after 30m
+
+Pending Reports:
+  refactor  2026-02-26 14:12  → decision: proceed (approved, impl queued)
+  security  2026-02-25 23:45  → decision: ask (2 high-severity findings)
 ```
 
-### 10.5 Manual MCP Commands in Interactive Sessions
+**Agent-level output** (`cd projectx/testing && ateam status`):
 
-When inside an interactive `ateam shell` session, the human should be able to run the same operations the coordinator would. The ATeam MCP server can also be attached to the interactive Claude Code session:
+```
+Agent: testing @ projectx                STATUS: running (12m 34s)
+Reason: coordinator                      Container: ateam-projectx-testing (d8a3f...)
+Commit: a3f8c21 (0 behind main)         Started: 2026-02-26 14:23:01
 
-```bash
-# Launch interactive session WITH MCP server attached
-ateam shell myapp testing --with-mcp
+Live Activity (stream-json tail):
+  [14:34:12] Running test suite: npm test
+  [14:34:45] 142/186 tests passing, 3 failing, analyzing failures...
+  [14:35:02] Reading src/api/handler.test.ts for context
 
-# Now inside Claude Code, you can use coordinator-level tools:
-# "Format the findings I just wrote into a proper audit report"
-#   → Claude calls format_report(...)
-# "Commit my changes and run the test suite"
-#   → Claude calls subagent_commit_and_merge(...)
-# "Update the testing knowledge file with what I learned"
-#   → Claude calls update_knowledge(...)
-# "What's the budget status?"
-#   → Claude calls get_budget_status(...)
+Recent Operations:
+  14:23  start     coordinator night cycle  container=d8a3f...
+  12:01  complete  exit=0 report=testing/work/2026-02-26_1200_report.md
+  11:30  start     coordinator day check    container=c7b2e...
+
+Reports:
+  2026-02-26 12:01  → ignore (all tests passing, no gaps found)
+  2026-02-25 23:58  → implemented @ commit e4f2a1b (added 12 test cases)
 ```
 
-This means the human in an interactive session can do everything the autonomous coordinator does, but manually and with full control. The files (reports, knowledge updates, changelog) are written to the same paths the autonomous system uses, so there's no divergence.
+**Implementation:**
 
-**Without `--with-mcp`:** The human is in a plain Claude Code session in the agent's environment. They can still manually write files to `/output/`, edit the worktree, run tests, etc. They just don't have access to the coordinator's infrastructure tools (commit-and-merge, format-report, etc.).
+```
+READ  sqlite  SELECT agent_name, status, docker_instance, time_started,
+                     time_ended, reason, git_commit_start, git_commit_end
+              FROM agents
+              → if scoped to single agent: WHERE agent_name={agent}
 
-### 10.6 Troubleshooting Commands
+READ  git     git -C {bare_repo} rev-parse main → current_head
+              For each agent:
+                git -C {bare_repo} rev-list --count {git_commit_end}..{current_head}
+                → "N commits behind"
+                (uses git_commit_end if stopped, git_commit_start if running)
+              git -C {bare_repo} log -1 --format='%cr' → "2 min ago" for header
 
-```bash
-# ── Status & Monitoring ──────────────────────────────────────────
+READ  docker  For each agent where docker_instance IS NOT NULL:
+                docker inspect {docker_instance}
+                → alive/dead, actual uptime, exit code
+                → staleness check: if dead but status='running', show WARNING
 
-ateam status                      # Overview: coordinator state, active containers,
-                                  # pending queue, budget, last cycle time
+READ  file    If agent is running and scoped to single agent (agent-level view):
+                tail -n 20 {agent}/work/{latest}_stream.jsonl
+                → parse stream-json events, extract last few assistant messages
+                → display as "Live Activity" with timestamps
 
-ateam status myapp                # Per-project: enabled agents, last run per agent,
-                                  # pending reports, worktree status
+READ  sqlite  SELECT timestamp, operation, agent_name, docker_instance, notes
+                FROM operations
+                WHERE (agent_name={agent} OR {agent} IS NULL)
+                ORDER BY timestamp DESC LIMIT 10
+              → "Recent Operations" section
 
-ateam containers                  # List all ateam-* Docker containers with state,
-                                  # mode (interactive/autonomous), uptime, resource usage
+READ  sqlite  SELECT agent_name, timestamp, decision, notes, report_path
+                FROM reports
+                WHERE (agent_name={agent} OR {agent} IS NULL)
+                  AND decision != 'ignore'
+                ORDER BY timestamp DESC LIMIT 5
+              → "Pending/Recent Reports" section (skip 'ignore' to reduce noise,
+                show with --all flag)
 
-# ── Agent Inspection ─────────────────────────────────────────────
+WRITE         (none — status is read-only)
+```
 
-ateam logs myapp testing          # Tail the stream.jsonl for the current/last run
-                                  # (shows what the agent is doing in real-time)
+#### `ateam reports [--agent NAME] [--decision DECISION] [--all]`
 
-ateam logs myapp testing --stderr # Show stderr output (errors, warnings)
+Shows the coordinator's report pipeline: what it received, what it decided, and why.
 
-ateam logs myapp testing --last   # Show the stream.jsonl from the most recent
-                                  # completed run (not the current one)
+```
+# From project dir — shows all agent reports
+cd projectx && ateam reports
 
-ateam report myapp testing        # Show the latest formatted report for this agent
+Reports:
+  ID  AGENT       DATE        DECISION      COMMIT      NOTES
+  14  testing     02-26 12:01 ignore        —           all tests passing
+  13  refactor    02-26 11:45 proceed       —           3 dead code removals, low risk
+  12  security    02-25 23:45 ask           —           2 high-severity: SQL injection in /api/users
+  11  testing     02-25 23:30 implemented   e4f2a1b     added 12 test cases for auth module
+  10  performance 02-25 23:00 deferred      —           DB index suggestions, waiting for schema migration
+   9  refactor    02-25 22:15 implemented   c8d3f2a     extracted shared validation logic
 
-ateam diff myapp testing          # Show git diff of the agent's worktree vs main
-                                  # (what changes has the agent made?)
+# Filter by decision
+ateam reports --decision ask
+ateam reports --decision deferred
+ateam reports --decision pending
 
-# ── Agent Control ────────────────────────────────────────────────
+# From agent dir — shows only that agent's reports
+cd projectx/security && ateam reports
 
-ateam shell myapp testing         # Interactive session (see §10.3)
+# Show full notes (coordinator reasoning)
+ateam reports --verbose
+  ID 12  security  2026-02-25 23:45  decision: ask
+  Report: security/work/2026-02-25_2345_report.md
+  Audited: commit 8ca2f31
+  Notes: "Found 2 high-severity SQL injection vectors in /api/users and
+    /api/admin. These require human review because they involve the
+    authentication layer. Also found 4 low-severity issues (missing
+    rate limits) which I would normally auto-approve, but bundling
+    with the high-severity findings for a single review pass."
+```
 
-ateam kill myapp testing          # Kill a running/hung container immediately
+**Implementation:**
 
-ateam retry myapp testing         # Kill if running, clean up worktree, re-run
-                                  # the last task from scratch
+```
+READ  sqlite  SELECT id, agent_name, timestamp, report_path,
+                     git_commit_audited, decision, git_commit_impl, notes
+              FROM reports
+              WHERE (agent_name={agent} OR {agent} IS NULL)
+                AND (decision={filter} OR {filter} IS NULL)
+              ORDER BY timestamp DESC
+              LIMIT 20
 
-ateam skip myapp testing          # Mark this agent as "skip" for the current cycle
-                                  # (coordinator won't run it tonight)
+READ  file    If --verbose: check that report_path exists on disk
+              (warn if report file has been cleaned up)
+```
 
-# ── Coordinator Control ──────────────────────────────────────────
+#### `ateam changelog [--limit N]`
 
-ateam pause                       # Suspend autonomous scheduling
-ateam resume                      # Resume autonomous scheduling
-ateam run myapp                   # Manually trigger a full cycle for a project
-                                  # (even if paused — one-shot override)
-ateam run myapp testing           # Manually trigger a specific agent
+Parses the project's `changelog.md` and shows recent coordinator decisions in a structured view. The changelog is a markdown file maintained by the coordinator (written by Claude Code via its Write tool). This command parses it for quick terminal viewing.
 
-# ── Maintenance & Cleanup ────────────────────────────────────────
+```
+cd projectx && ateam changelog
 
-ateam cleanup myapp               # Remove stale worktrees, exited containers,
-                                  # old stream.jsonl files (>30 days)
+Changelog (last 10 entries):
 
-ateam worktrees myapp             # List all worktrees for a project with status
+2026-02-26 14:12  IMPLEMENTED  refactor
+  Removed 3 dead utility functions (utils/legacy.ts, utils/compat.ts).
+  No test failures. Merged as commit b1e7d09.
 
-ateam doctor                      # Health check: verify Docker, git, Claude Code
-                                  # installation, MCP server connectivity, firewall
+2026-02-26 12:01  REVIEWED     testing
+  All tests passing. No coverage gaps found. No action needed.
 
-ateam doctor --fix                # Auto-repair: remove stale lockfiles, prune
-                                  # orphaned containers, fix worktree state
+2026-02-25 23:58  IMPLEMENTED  testing
+  Added 12 test cases for auth module based on security audit findings.
+  Coverage increased from 72% to 81%. Merged as commit e4f2a1b.
 
-# ── History & Audit ──────────────────────────────────────────────
+2026-02-25 23:45  FLAGGED      security
+  2 high-severity SQL injection findings. Queued for human review.
+  See: security/work/2026-02-25_2345_report.md
 
-ateam history myapp               # Show recent changelog entries (coordinator decisions)
+2026-02-25 23:00  DEFERRED     performance
+  DB index suggestions valid but depend on upcoming schema migration.
+  Will re-run after migration lands.
+```
 
-ateam history myapp testing       # Show run history for a specific agent:
-                                  # timestamps, modes, exit codes, report summaries
+**Implementation:**
 
-ateam budget                      # Show budget status across all projects:
-                                  # runs today, estimated cost, remaining budget
+```
+READ  file    cat {project_dir}/changelog.md
+              → parse markdown: extract date, action, agent, description
+              → the changelog format is structured enough for simple parsing:
+                entries are separated by "## YYYY-MM-DD" headers with
+                subsections per action
+
+              Alternatively, if changelog.md is too free-form to parse reliably:
+READ  sqlite  SELECT r.timestamp, r.agent_name, r.decision, r.notes,
+                     r.git_commit_impl
+              FROM reports r
+              ORDER BY r.timestamp DESC LIMIT {limit}
+              → this gives the same information from the structured reports table,
+                and can serve as a fallback or primary source
+
+WRITE         (none — read-only)
+```
+
+The `reports` table and `changelog.md` contain overlapping information by design. The reports table is the structured, queryable source. The changelog is the human-readable narrative maintained by the coordinator for git history. `ateam changelog` tries the file first; `ateam reports` always uses the database.
+
+#### `ateam run [--agent NAME] [--mode MODE]`
+
+Starts an agent run (audit by default). Used by both humans and the coordinator (via MCP).
+
+```
+READ  sqlite  SELECT status, docker_instance FROM agents
+                WHERE agent_name={agent}
+              → reject if status IN ('running', 'interactive'):
+                "Agent already active (status={status}, container={docker_instance})"
+READ  docker  docker ps --filter name=ateam-{project}-{agent} --format '{{.ID}}'
+              → safety check: reject if container exists even if sqlite says idle
+                (stale state recovery — update sqlite to match reality)
+READ  git     git -C {bare_repo} rev-parse main
+              → capture HEAD as git_commit_start
+WRITE git     git worktree add {worktree_path} main  (if not already present)
+WRITE docker  docker run --name ateam-{project}-{agent} \
+                --cpus=2 --memory=4g --pids-limit=256 \
+                -v {worktree_path}:/workspace \
+                -v {prompt_path}:/agent-data \
+                -v {output_path}:/output \
+                {image} claude -p {prompt} --dangerously-skip-permissions \
+                  --output-format stream-json
+              → captures container ID from docker run output
+WRITE sqlite  UPDATE agents SET
+                status='running',
+                docker_instance={container_id},
+                time_started=datetime('now'),
+                time_ended=NULL,
+                git_commit_start={head},
+                reason={reason}   -- 'coordinator' or 'manual'
+              WHERE agent_name={agent}
+WRITE sqlite  INSERT INTO operations
+                (agent_name, docker_instance, operation, notes)
+              VALUES ({agent}, {container_id}, 'start',
+                'mode={mode} reason={reason} commit={head}')
+
+# ── On completion (monitored by CLI or MCP wrapper) ──────────────
+
+READ  docker  docker inspect {container_id} --format '{{.State.ExitCode}}'
+READ  git     git -C {worktree_path} rev-parse HEAD → git_commit_end
+READ  file    Parse stream.jsonl for report path, token counts, cost estimate
+WRITE sqlite  UPDATE agents SET
+                status='stopped',
+                time_ended=datetime('now'),
+                git_commit_end={head}
+              WHERE agent_name={agent}
+WRITE sqlite  INSERT INTO operations
+                (agent_name, docker_instance, operation, notes)
+              VALUES ({agent}, {container_id}, 'complete',
+                'exit={code} report={path} tokens_in={n} tokens_out={n}')
+WRITE sqlite  INSERT INTO reports
+                (agent_name, report_path, git_commit_audited, decision)
+              VALUES ({agent}, {report_path}, {git_commit_start}, 'pending')
+              → coordinator will UPDATE decision + notes later during triage
+```
+
+#### `ateam shell [--with-mcp]`
+
+Starts an interactive session. Same Docker environment as autonomous, but interactive Claude Code.
+
+```
+READ  sqlite  SELECT status, docker_instance FROM agents WHERE agent_name={agent}
+              → reject if status IN ('running', 'interactive')
+READ  docker  docker ps --filter name=ateam-{project}-{agent}
+              → safety check (same as ateam run)
+READ  git     git -C {bare_repo} rev-parse main → git_commit_start
+WRITE git     git worktree add {worktree_path} main  (if needed)
+WRITE sqlite  UPDATE agents SET
+                status='interactive',
+                docker_instance={container_id},
+                time_started=datetime('now'),
+                git_commit_start={head},
+                reason='manual'
+              WHERE agent_name={agent}
+WRITE sqlite  INSERT INTO operations (agent_name, docker_instance, operation, notes)
+              VALUES ({agent}, {container_id}, 'shell', 'interactive session started')
+WRITE docker  docker run -it --name ateam-{project}-{agent} \
+                ... (same volumes as ateam run) ...
+                {image} claude --dangerously-skip-permissions
+              → blocks until user exits Claude Code
+
+# ── On exit (after Claude Code /exit or Ctrl-D) ──────────────────
+
+READ  git     git -C {worktree_path} rev-parse HEAD → git_commit_end
+READ  docker  docker inspect {container_id} --format '{{.State.ExitCode}}'
+WRITE sqlite  UPDATE agents SET
+                status='stopped',
+                time_ended=datetime('now'),
+                git_commit_end={head}
+              WHERE agent_name={agent}
+WRITE sqlite  INSERT INTO operations (agent_name, docker_instance, operation, notes)
+              VALUES ({agent}, {container_id}, 'stop',
+                'interactive session ended exit_code={code}')
+```
+
+#### `ateam pause`
+
+Suspends an agent (from agent dir) or all agents (from project dir).
+
+```
+# ── From agent directory ─────────────────────────────────────────
+
+READ  sqlite  SELECT status, docker_instance FROM agents WHERE agent_name={agent}
+              → if status='running':
+READ  docker    docker inspect {docker_instance} --format '{{.State.Status}}'
+                → prompt: "Agent is running in container {id}. Kill it? [y/N]"
+                → if yes:
+WRITE docker      docker kill {docker_instance}
+WRITE sqlite      UPDATE agents SET status='suspended', docker_instance=NULL,
+                    time_ended=datetime('now')
+                → if no:
+WRITE sqlite      UPDATE agents SET status='suspended'
+                  (takes effect after current run completes)
+              → if status='interactive':
+                → prompt: "Agent is in interactive session. Kill it? [y/N]"
+                (same kill flow as above)
+              → if status IN ('idle', 'stopped', 'error'):
+WRITE sqlite    UPDATE agents SET status='suspended' WHERE agent_name={agent}
+WRITE sqlite  INSERT INTO operations (agent_name, docker_instance, operation, notes)
+              VALUES ({agent}, {docker_instance}, 'suspend', 'manual pause')
+
+# ── From project directory ───────────────────────────────────────
+
+READ  sqlite  SELECT agent_name, status, docker_instance FROM agents
+              → for each agent with status IN ('running', 'interactive'):
+                prompt to kill (same as above)
+WRITE sqlite  UPDATE agents SET status='suspended'
+                WHERE status IN ('idle', 'stopped', 'error')
+WRITE sqlite  INSERT INTO operations (agent_name=NULL, operation='suspend',
+                notes='project-wide pause')
+```
+
+#### `ateam resume`
+
+```
+# ── From agent directory ─────────────────────────────────────────
+
+READ  sqlite  SELECT status FROM agents WHERE agent_name={agent}
+              → only resumes if status='suspended'
+WRITE sqlite  UPDATE agents SET status='idle' WHERE agent_name={agent}
+                AND status='suspended'
+WRITE sqlite  INSERT INTO operations (agent_name, operation) VALUES ({agent}, 'resume')
+
+# ── From project directory ───────────────────────────────────────
+
+WRITE sqlite  UPDATE agents SET status='idle' WHERE status='suspended'
+WRITE sqlite  INSERT INTO operations (agent_name=NULL, operation='resume',
+                notes='project-wide resume')
+```
+
+#### `ateam kill [--agent NAME]`
+
+Force-kills a running or interactive agent.
+
+```
+READ  sqlite  SELECT status, docker_instance FROM agents WHERE agent_name={agent}
+              → reject if status NOT IN ('running', 'interactive'):
+                "Agent is not active (status={status})"
+READ  docker  docker inspect {docker_instance} --format '{{.State.Status}}'
+              → if container already dead, skip docker kill
+WRITE docker  docker kill {docker_instance}
+WRITE docker  docker rm {docker_instance}  (cleanup)
+READ  git     git -C {worktree_path} rev-parse HEAD → git_commit_end
+WRITE sqlite  UPDATE agents SET
+                status='canceled',
+                docker_instance=NULL,
+                time_ended=datetime('now'),
+                git_commit_end={head}
+              WHERE agent_name={agent}
+WRITE sqlite  INSERT INTO operations (agent_name, docker_instance, operation, notes)
+              VALUES ({agent}, {docker_instance}, 'kill',
+                'manual kill of container {docker_instance}')
+```
+
+#### `ateam retry [--agent NAME]`
+
+Kill + cleanup worktree + fresh run.
+
+```
+(same as ateam kill, then:)
+WRITE git     git worktree remove {worktree_path} --force
+WRITE git     git worktree add {worktree_path} main  (fresh checkout)
+(then same as ateam run)
+```
+
+#### `ateam logs [--agent NAME]`
+
+```
+READ  sqlite  SELECT docker_instance, status FROM agents WHERE agent_name={agent}
+              → determines: show live or historical logs
+              → if status IN ('running', 'interactive'):
+READ  docker    docker logs --follow {docker_instance}
+              → also/alternatively:
+READ  file    tail -f {agent}/work/{latest}_stream.jsonl
+              → with --last flag:
+READ  sqlite    SELECT notes FROM operations WHERE agent_name={agent}
+                  AND operation='complete' ORDER BY timestamp DESC LIMIT 1
+                → extracts stream_log_path from notes
+READ  file      cat {stream_log_path}
+              → with --stderr:
+READ  docker    docker logs --follow {docker_instance} 2>&1 1>/dev/null
+```
+
+#### `ateam diff [--agent NAME]`
+
+```
+READ  sqlite  SELECT git_commit_start FROM agents WHERE agent_name={agent}
+              → the base commit this agent started from
+READ  git     git -C {worktree_path} diff {git_commit_start}..HEAD
+              → shows all changes the agent has made
+              → if worktree doesn't exist:
+READ  git       git -C {bare_repo} diff {git_commit_start}..{git_commit_end}
+                → uses stored commits from agents table for historical diff
+```
+
+#### `ateam history [--agent NAME]`
+
+```
+READ  sqlite  SELECT timestamp, operation, agent_name, notes FROM operations
+                WHERE (agent_name={agent} OR {agent} IS NULL)
+                ORDER BY timestamp DESC
+                LIMIT 50
+              → displays formatted operation log
+              → enriches with duration: computes time between 'start' and
+                'stop'/'complete'/'kill' operations for the same agent
+```
+
+#### `ateam doctor [--fix]`
+
+Cross-references all three data sources to find inconsistencies.
+
+```
+# ── Check: SQLite says running, but Docker disagrees ─────────────
+
+READ  sqlite  SELECT agent_name, docker_instance FROM agents
+                WHERE status IN ('running', 'interactive')
+READ  docker  For each: docker inspect {docker_instance}
+              → if container doesn't exist or is stopped:
+                WARN "Agent {agent} shows status={status} but container is dead"
+              → with --fix:
+WRITE sqlite    UPDATE agents SET status='error',
+                  docker_instance=NULL, time_ended=datetime('now')
+WRITE sqlite    INSERT INTO operations (agent_name, docker_instance, operation, notes)
+                VALUES ({agent}, {docker_instance}, 'error',
+                  'doctor --fix: stale container state')
+
+# ── Check: Docker containers exist that SQLite doesn't know about ─
+
+READ  docker  docker ps --filter name=ateam-{project} --format '{{.Names}}'
+READ  sqlite  SELECT agent_name, docker_instance FROM agents
+              → for each container not in sqlite:
+                WARN "Orphan container: {container_name}"
+              → with --fix:
+WRITE docker    docker kill {container}; docker rm {container}
+
+# ── Check: Worktrees exist without matching agent state ──────────
+
+READ  git     git worktree list
+READ  sqlite  SELECT agent_name, status FROM agents
+              → for each worktree not matching an active/recent agent:
+                WARN "Stale worktree: {path}"
+              → with --fix:
+WRITE git       git worktree remove {path}
+
+# ── Check: SQLite integrity ──────────────────────────────────────
+
+READ  sqlite  PRAGMA integrity_check
+              → with --fix:
+WRITE sqlite    VACUUM
+
+# ── Check: Dependencies ─────────────────────────────────────────
+
+READ  shell   docker --version, git --version, claude --version
+              → WARN if any missing or below minimum version
+```
+
+#### `ateam cleanup`
+
+```
+READ  sqlite  SELECT agent_name, status FROM agents
+READ  docker  docker ps -a --filter name=ateam-{project} --filter status=exited
+WRITE docker  docker rm {each exited container}
+READ  git     git worktree list
+              → for each worktree where agent status NOT IN ('running','interactive'):
+WRITE git       git worktree remove {path}
+READ  file    find {agent}/work/ -name "*_stream.jsonl" -mtime +30
+WRITE file    rm {each old log file}
+WRITE sqlite  DELETE FROM operations WHERE timestamp < datetime('now', '-90 days')
+WRITE sqlite  VACUUM
+```
+
+#### Summary: Data Source Responsibilities
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ SQLite (ateam.db)                                               │
+│   agents table     → current state: who's running, since when,  │
+│                      why, at what commit                        │
+│   operations table → audit log: every state transition, with    │
+│                      docker container IDs for post-mortem       │
+│   reports table    → coordinator decisions: what was found,     │
+│                      what was decided, why, implementation      │
+│                      commit if applicable                       │
+│                                                                 │
+│ Git                                                             │
+│   bare repo        → canonical source, branch refs             │
+│   worktrees        → agent working copies                      │
+│   rev-parse HEAD   → commit hashes for agents table            │
+│   rev-list --count → "N commits behind" for status display     │
+│   diff             → what an agent has changed                 │
+│                                                                 │
+│ Docker                                                          │
+│   docker run       → start agent containers                    │
+│   docker inspect   → ground truth: is container actually alive? │
+│   docker kill/rm   → stop agents                               │
+│   docker logs      → stderr, stdout from container             │
+│   docker ps        → discover orphan containers                │
+│                                                                 │
+│ Files                                                           │
+│   stream.jsonl     → live activity feed, parsed for status     │
+│   changelog.md     → coordinator narrative log (human-readable) │
+│   reports (on disk)→ full audit/impl reports from agents        │
+│                                                                 │
+│ Principle: SQLite is the intended state. Docker is the actual   │
+│ state. Git is the content state. Commands reconcile all three.  │
+│ When they disagree, Docker wins (it's reality), and SQLite is   │
+│ updated to match.                                               │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### 10.7 Common Debugging Scenarios
 
-**"The testing agent keeps failing on my project"**
+**"Known regression — suspend testing until we fix it"**
 ```bash
-ateam logs myapp testing --last     # What happened in the last run?
-ateam shell myapp testing           # Enter interactive mode, reproduce the issue
-# ... investigate in Claude Code ...
-# Found it: the test suite needs a running database.
-# Fix: add postgres to the project Dockerfile, update config.toml
+cd projectx/testing
+ateam pause
+# Testing agent is idle. Suspended.
+# ... days later, after fixing the regression ...
+ateam resume
 ```
 
-**"I want to manually run a security audit right now"**
+**"The testing agent keeps failing — I want to investigate"**
 ```bash
-ateam pause                         # Stop autonomous cycles
-ateam shell myapp security          # Enter as the security agent
-# ... interactive Claude Code session ...
-# "Audit this codebase for SQL injection vulnerabilities"
-# ... review findings, iterate ...
-ateam resume                        # Let the autonomous cycle continue
+cd projectx/testing
+ateam status                        # See commit, elapsed, live stream-json tail
+ateam logs --last                   # Full stream.jsonl from last run
+ateam history                       # All operations for this agent
+ateam shell                         # Enter as the testing agent, investigate
+# ... fix the issue interactively ...
+# exit
+ateam resume                        # If it was suspended
 ```
 
-**"The refactor agent made changes I don't like"**
+**"What has the coordinator been doing?"**
 ```bash
-ateam diff myapp refactor           # See what it changed
-ateam history myapp refactor        # See the coordinator's decision to approve it
-# If not yet merged:
-ateam kill myapp refactor           # Stop the agent
-cd /var/ateam/repos/myapp/worktrees/refactor-*
-git checkout -- .                   # Discard changes
-# If already merged:
-git revert HEAD                     # Revert the merge commit
+cd projectx
+ateam changelog                     # Narrative log of recent decisions
+ateam reports                       # Structured report pipeline with decisions
+ateam reports --decision ask        # What needs human review?
+ateam reports --decision deferred   # What was deprioritized and why?
+ateam reports --verbose             # Show full coordinator reasoning
 ```
 
-**"Something is running but I don't know what"**
+**"The security agent found something — what happened?"**
 ```bash
-ateam containers                    # Show all running ateam-* containers
-ateam logs myapp testing            # Watch real-time activity
-ateam status                        # Full system overview
+cd projectx/security
+ateam reports                       # Show security reports + decisions
+# ID 12: decision=ask, notes="2 high-severity SQL injection..."
+ateam report                        # Read the full report file
+# Decide to implement:
+ateam run --mode implement          # Kick off implementation
+```
+
+**"Something is stuck"**
+```bash
+cd projectx
+ateam status                        # All agents with commit distance + elapsed
+ateam kill --agent refactor         # Kill the hung container
+ateam doctor --fix                  # Reconcile db with Docker reality
+```
+
+**"Post-mortem: what container ran that failed audit?"**
+```bash
+ateam history --agent testing
+# 14:23  start  container=d8a3f...  coordinator night cycle
+# 14:53  error  container=d8a3f...  timeout after 30m
+docker logs d8a3f                   # If container still exists
+ateam db "SELECT docker_instance, notes FROM operations
+          WHERE agent_name='testing' AND operation='error'
+          ORDER BY timestamp DESC LIMIT 5"
+```
+
+**"Quick state check from anywhere"**
+```bash
+ateam -d ~/my_projects/projectx status
+ateam -d ~/my_projects/projectx reports --decision pending
 ```
 
 ---
