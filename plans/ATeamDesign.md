@@ -539,36 +539,72 @@ esac
 
 ### 6.1 Repository Layout
 
+Each project has a bare clone of the source repository and persistent per-agent worktrees under the `workspace/` directory:
+
 ```
-/var/ateam/repos/
-  PROJECT_NAME/
-    bare/                    # bare clone: git clone --bare <remote>
-    coordinator/             # worktree for coordinator read-only browsing
-    worktrees/
-      testing-20260226/      # ephemeral worktree for a specific task
-      refactor-20260226/     # ...
+ORG_ROOT/
+  projectx/
+    repos/
+      bare/                         # bare clone: git clone --bare <remote>
+    workspace/                      # gitignored by project repo
+      testing/
+        code/                       # persistent git worktree
+      refactor/
+        code/                       # persistent git worktree
+      security/
+        code/
+      feature/                      # manual development worktree
+        code/
 ```
 
-### 6.2 Workflow
+Worktrees are **persistent, not ephemeral.** Each agent has one worktree that is created once (on first run or `ateam init`) and reused across all subsequent runs. This means installed dependencies (`node_modules/`, Python venvs), build caches (`.next/`, `dist/`), and local configuration survive between runs.
 
-1. **Human pushes** to the remote repository.
-2. **Coordinator fetches** into the bare repo: `git -C bare/ fetch origin`.
-3. **Coordinator updates** its own worktree and detects new commits.
-4. **Sub-agent worktrees** are created per task from a specific branch/commit:
-   ```bash
-   git -C bare/ worktree add ../worktrees/testing-20260226 origin/main
-   ```
-5. **Sub-agent makes changes** in its worktree (bind-mounted into Docker, where Claude Code runs).
-6. **Coordinator reviews** the changes (diff), decides to merge or discard.
-7. **Approved changes** are committed to a branch, optionally rebased onto main, and pushed (with human approval for significant changes).
-8. **Worktrees are cleaned up** after task completion.
+### 6.2 Worktree Lifecycle
 
-### 6.3 Conflict Resolution
+```
+ateam init myapp --git ...
+  → git clone --bare <remote> → repos/bare/
+  → for each enabled agent:
+      git -C repos/bare worktree add ../../workspace/{agent}/code origin/main
 
-When a rebase produces conflicts:
-1. Coordinator identifies conflicting files.
-2. The relevant sub-agent is re-invoked in **Implement** mode with conflict markers as context.
-3. The agent resolves conflicts, the coordinator verifies the build passes, then continues the rebase.
+ateam run -a testing
+  → cd workspace/testing/code/
+  → git fetch origin
+  → git reset --hard origin/main      (refresh to latest, preserve untracked files)
+  → record HEAD as git_commit_start
+  → launch container with workspace/testing/code/ mounted
+  → on completion: record HEAD as git_commit_end
+
+ateam shell -a testing
+  → same refresh, but interactive session
+  → developer may create branches, commit, etc.
+
+ateam cleanup
+  → removes old logs, exited containers
+  → does NOT remove worktrees or workspace/ data by default
+  → ateam cleanup --full: removes workspace/ entirely (destructive)
+```
+
+The `git reset --hard origin/main` at the start of each run ensures the agent sees the latest code while preserving untracked files (node_modules, data directories, build caches). If an agent left uncommitted changes from a previous run, they are discarded — the agent's changes should have been committed and merged (or discarded) by the coordinator before the next run.
+
+### 6.3 Branching
+
+Agents do not commit directly to main. The workflow is:
+
+1. Agent works in its worktree (which tracks `origin/main`).
+2. If the agent makes code changes (implement mode), the coordinator creates a branch: `git checkout -b ateam/{agent}/{date}`.
+3. Agent commits to the branch.
+4. Coordinator reviews the diff, runs the testing agent to verify.
+5. Coordinator merges the branch to main (fast-forward or rebase).
+6. Next run: `git fetch && git reset --hard origin/main` picks up the merged changes.
+
+### 6.4 Conflict Resolution
+
+When multiple agents have pending branches:
+
+1. Coordinator merges them sequentially, not in parallel.
+2. If a rebase produces conflicts, the relevant agent is re-invoked in implement mode with conflict markers as context.
+3. The agent resolves conflicts, the coordinator verifies tests pass, then continues.
 
 ---
 
@@ -678,14 +714,230 @@ cpus = 2
 memory = "4g"
 ```
 
-### 7.3 Sub-Agent Execution: `--dangerously-skip-permissions` + `--output-format stream-json`
+### 7.3 Persistent Workspace and Volume Mounts
+
+Each agent has a persistent workspace directory under `{project}/workspace/{agent}/` with a well-defined structure:
+
+```
+workspace/{agent}/
+  code/              # git worktree (persistent, bind-mounted rw)
+    node_modules/    #   survives between runs
+    .next/           #   build cache survives
+    ...
+  data/              # persistent state (databases, uploads, caches)
+    pg_data/         #   PostgreSQL data directory (if project uses PG)
+    redis_data/      #   Redis persistence
+    ...
+  artifacts/         # build outputs, coverage reports, test results
+```
+
+**Bind mounts into the container:**
+
+```
+Host                                    Container               Mode
+workspace/{agent}/code/                 /workspace              rw
+workspace/{agent}/data/                 /data                   rw
+workspace/{agent}/artifacts/            /artifacts              rw
+{project}/.env                          /workspace/.env         ro
+{project}/{agent}/current_prompt.md     /agent-data/prompt.md   ro
+~/.claude/                              /home/node/.claude      ro
+```
+
+The `/workspace` mount is the git worktree — the agent reads and writes source code here. The `/data` mount is where databases, caches, and other persistent state live — this survives across runs so the agent doesn't have to rebuild the database from scratch every time. The `/artifacts` mount is where test results, coverage reports, and build outputs go.
+
+**Why persistent data matters.** For a project like TripManager (Node + PostgreSQL + API integrations):
+
+- First run: the agent runs `npm install` (populates `node_modules/`), starts PostgreSQL (creates `pg_data/`), runs migrations (creates schema), seeds test data. This might take 5-10 minutes.
+- Second run: `node_modules/` is already populated (only changed deps are installed), PostgreSQL data directory exists (just start the server), schema is already migrated. The agent is productive in seconds.
+- Interactive session (`ateam shell`): everything is already warm. You start debugging immediately.
+
+**The fat-container pattern.** Most projects should use a single Dockerfile that installs everything needed to run the full stack — database server, language runtime, build tools, project dependencies. This keeps things simple: one container, one process supervisor (or just background processes), everything accessible from the Claude Code session for debugging:
+
+```dockerfile
+FROM ateam-base:latest
+
+# Install everything in one container
+USER root
+RUN apt-get update && apt-get install -y \
+    postgresql-16 postgresql-client-16 \
+    python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configure PostgreSQL to use /data/pg_data
+RUN mkdir -p /etc/postgresql && \
+    echo "data_directory = '/data/pg_data'" > /etc/postgresql/postgresql.conf
+
+USER node
+
+# Project dependencies (pre-installed in image for speed)
+COPY --chown=node:node package.json package-lock.json /workspace/
+RUN cd /workspace && npm ci
+
+# Entrypoint: start services, then hand off to Claude Code
+COPY --chown=node:node entrypoint.sh /usr/local/bin/
+```
+
+The `entrypoint.sh` script starts PostgreSQL (pointing at `/data/pg_data`), runs migrations if needed, and then executes Claude Code. Because `/data/pg_data` is a persistent bind mount, the database state survives across runs.
+
+### 7.4 Environment Abstraction: Container Adapters
+
+The ATeam CLI doesn't call `docker run` directly. Instead, it calls a **container adapter** — an abstraction that manages the agent's execution environment. This allows swapping Docker for other runtimes, or having project-specific launch logic.
+
+```
+┌──────────────────────────────────────────┐
+│ ATeam CLI / MCP Server                   │
+│   ateam run -a testing                   │
+└───────────────┬──────────────────────────┘
+                │ calls adapter
+                ▼
+┌──────────────────────────────────────────┐
+│ Container Adapter Interface              │
+│   start(agent, project, mode) → id      │
+│   stop(id)                              │
+│   kill(id)                              │
+│   status(id) → running/stopped/...      │
+│   logs(id) → stream                     │
+│   exec(id, command) → output            │
+└───────────────┬──────────────────────────┘
+                │
+        ┌───────┴────────┐
+        ▼                ▼
+┌──────────────┐  ┌──────────────┐
+│ Docker       │  │ Compose      │
+│ Adapter      │  │ Adapter      │
+│ (default)    │  │              │
+│ Single fat   │  │ Multi-service│
+│ container    │  │ agent + db + │
+│              │  │ redis + ...  │
+└──────────────┘  └──────────────┘
+        ▲                ▲
+        │                │
+   Future adapters:      │
+   Podman, nerdctl,      │
+   custom scripts        │
+```
+
+**The adapter interface:**
+
+```go
+type ContainerAdapter interface {
+    // Start launches the agent environment and returns a handle
+    Start(ctx context.Context, opts AgentRunOpts) (ContainerHandle, error)
+
+    // Stop gracefully stops the environment
+    Stop(ctx context.Context, handle ContainerHandle) error
+
+    // Kill force-stops the environment
+    Kill(ctx context.Context, handle ContainerHandle) error
+
+    // Status returns the current state
+    Status(ctx context.Context, handle ContainerHandle) (ContainerStatus, error)
+
+    // Logs returns a stream of container output
+    Logs(ctx context.Context, handle ContainerHandle) (io.ReadCloser, error)
+
+    // Exec runs a command inside the running environment
+    Exec(ctx context.Context, handle ContainerHandle, cmd []string) (ExecResult, error)
+}
+
+type AgentRunOpts struct {
+    Project       string
+    Agent         string
+    Mode          string            // "audit", "implement", "shell"
+    WorkspacePath string            // path to workspace/{agent}/
+    EnvFile       string            // path to .env
+    PromptFile    string            // path to current_prompt.md
+    Interactive   bool              // true for ateam shell
+    Resources     ResourceLimits    // cpus, memory, pids
+}
+```
+
+**Docker adapter** (default): builds/pulls the image, runs a single container with the bind mounts described above. Handles `docker run`, `docker kill`, `docker logs`, etc.
+
+**Compose adapter**: for projects that need multiple services (e.g., agent container + external PostgreSQL + Redis + Nginx). Uses a `docker-compose.yml` in the project directory. The adapter calls `docker-compose up -d` for infrastructure services and `docker-compose run agent` for the agent itself. This enables multiple agents to share the same database service.
+
+**Custom adapter** (`docker_run.sh`): the project's `docker_run.sh` script is actually an escape hatch — if it exists, the CLI invokes it instead of the built-in adapter. This lets projects with unusual requirements (GPU access, host networking, custom runtimes) define their own launch logic while still integrating with the rest of the system (the script receives the same arguments and must produce the same container naming convention).
+
+The adapter is selected per-project in `config.toml`:
+
+```toml
+[docker]
+adapter = "docker"            # "docker" (default), "compose", "script"
+dockerfile = "./Dockerfile"
+# compose_file = "./docker-compose.yml"   # for adapter = "compose"
+# run_script = "./docker_run.sh"          # for adapter = "script"
+```
+
+### 7.5 Shared vs Isolated Agent Environments
+
+By default, each agent gets its own `workspace/{agent}/data/` directory — fully isolated databases, caches, and state. This is the safe default: the testing agent can't corrupt the refactor agent's database.
+
+For projects where agents should share infrastructure (e.g., all agents use the same PostgreSQL instance with the same schema and test data), two patterns work:
+
+**Pattern A: Symlinked data directories.** Simple, no compose needed:
+```bash
+# All agents share testing's database
+ln -s workspace/testing/data workspace/refactor/data
+ln -s workspace/testing/data workspace/security/data
+```
+The agents run in separate containers but their `/data` mounts point to the same host directory. Caution: don't run agents concurrently if they write to the same database.
+
+**Pattern B: Compose with shared services.** The compose adapter runs PostgreSQL as a shared service:
+```yaml
+services:
+  db:
+    image: postgres:16
+    volumes:
+      - ./workspace/shared/data/pg_data:/var/lib/postgresql/data
+  testing:
+    build: .
+    volumes:
+      - ./workspace/testing/code:/workspace:rw
+    depends_on: [db]
+  refactor:
+    build: .
+    volumes:
+      - ./workspace/refactor/code:/workspace:rw
+    depends_on: [db]
+```
+Each agent has its own code worktree but connects to the same database. The scheduler still enforces single-instance-per-agent, preventing concurrent writes.
+
+### 7.6 The `.env` Pattern
+
+API keys, database credentials, and port assignments live in `{project}/.env`:
+
+```bash
+# projectx/.env — gitignored, manually created
+DATABASE_URL=postgresql://ateam:ateam@localhost:5432/tripmanager
+ANTHROPIC_API_KEY=sk-ant-...
+GOOGLE_MAPS_API_KEY=AIza...
+NODE_ENV=development
+PORT=3000
+```
+
+This file is:
+- **Gitignored** by both the project repo and `.ateam/`.
+- **Mounted read-only** into every agent container at `/workspace/.env`.
+- **Shared** across all agents in the same project (same credentials, same database URL).
+- **Not sent** to the LLM — it's environment variables, not prompt content.
+
+Agent-specific overrides (e.g., different ports to avoid conflicts) can be placed in `{project}/.env.{agent}`:
+```bash
+# projectx/.env.testing — overrides for the testing agent
+PORT=3001
+DATABASE_URL=postgresql://ateam:ateam@localhost:5432/tripmanager_test
+```
+
+The container adapter merges `.env` and `.env.{agent}` (agent-specific wins).
+
+### 7.7 Sub-Agent Execution: `--dangerously-skip-permissions` + `--output-format stream-json`
 
 Sub-agents run inside Docker with two critical flags:
 
 **`--dangerously-skip-permissions`:** Bypasses all Claude Code permission prompts, enabling fully unattended operation. This is safe because:
 - The container is isolated via Docker (filesystem, process, network).
 - The egress firewall restricts network access to only the LLM API and essential services.
-- The worktree is a disposable git branch — damage is limited and reversible.
+- The worktree is a git branch — damage is limited and reversible via `git reset`.
 - The coordinator validates all outputs before merging.
 
 **`--output-format stream-json`:** Streams structured JSON events in real-time as the agent works. This enables:
@@ -694,37 +946,48 @@ Sub-agents run inside Docker with two critical flags:
 - **Progress estimation:** The coordinator can detect if the agent is stuck (no events for N minutes) and kill the container.
 - **Structured output:** Instead of the sub-agent writing its own markdown report, the coordinator (or a cheap model like Haiku) can post-process the stream-json into a clean report. This is more reliable than asking the sub-agent to format its own output, and it captures the full reasoning trace.
 
-**Execution flow:**
+**Execution flow (default Docker adapter):**
 
 ```bash
 #!/bin/bash
-# run-subagent.sh — invoked by ATeam MCP server's subagent_run_audit tool
+# Simplified view of what the Docker adapter does internally.
+# In practice this is Go code in the adapter, not a shell script.
 
 PROJECT="$1"
 AGENT="$2"
-WORKTREE="/var/ateam/repos/$PROJECT/worktrees/$AGENT-$(date +%Y%m%d%H%M)"
-PROMPT_FILE="/var/ateam/workspace/$PROJECT/$AGENT/current_prompt.md"
-OUTPUT_DIR="/var/ateam/workspace/$PROJECT/$AGENT/work/$(date +%Y-%m-%d_%H%M)"
-STREAM_LOG="$OUTPUT_DIR/stream.jsonl"
+ORG_ROOT="$3"
+WORKSPACE="$ORG_ROOT/$PROJECT/workspace/$AGENT"
+CODE_DIR="$WORKSPACE/code"
+DATA_DIR="$WORKSPACE/data"
+ARTIFACTS_DIR="$WORKSPACE/artifacts"
+PROMPT_FILE="$ORG_ROOT/$PROJECT/$AGENT/current_prompt.md"
+OUTPUT_DIR="$ORG_ROOT/$PROJECT/$AGENT/work/$(date +%Y-%m-%d_%H%M)"
 
-mkdir -p "$OUTPUT_DIR"
+mkdir -p "$DATA_DIR" "$ARTIFACTS_DIR" "$OUTPUT_DIR"
 
-# Create ephemeral git worktree
-git -C "/var/ateam/repos/$PROJECT/bare" worktree add "$WORKTREE" origin/main
+# Refresh persistent worktree to latest main (preserves untracked: node_modules, etc.)
+cd "$CODE_DIR" && git fetch origin && git reset --hard origin/main
 
-# Run sub-agent in Docker
+# Run sub-agent in Docker with persistent bind mounts
 docker run --rm \
   --name "ateam-$PROJECT-$AGENT" \
   --cap-add NET_ADMIN --cap-add NET_RAW \
   --cpus=2 --memory=4g --pids-limit=256 \
-  -v "$WORKTREE:/workspace:rw" \
+  -v "$CODE_DIR:/workspace:rw" \
+  -v "$DATA_DIR:/data:rw" \
+  -v "$ARTIFACTS_DIR:/artifacts:rw" \
+  -v "$ORG_ROOT/$PROJECT/.env:/workspace/.env:ro" \
   -v "$PROMPT_FILE:/agent-data/current_prompt.md:ro" \
   -v "$HOME/.claude:/home/node/.claude:ro" \
   -v "$OUTPUT_DIR:/output:rw" \
+  --env-file "$ORG_ROOT/$PROJECT/.env" \
   "$PROJECT_DOCKER_IMAGE" \
   bash -c '
     # Initialize firewall (allowlist only)
     sudo /usr/local/bin/init-firewall.sh
+
+    # Start services (if entrypoint handles it, e.g., PostgreSQL from /data/pg_data)
+    /usr/local/bin/start-services.sh 2>/output/services.log || true
 
     # Run Claude Code: one-shot, no permissions, streaming JSON
     claude -p "$(cat /agent-data/current_prompt.md)" \
@@ -736,12 +999,11 @@ docker run --rm \
 
 EXIT_CODE=$?
 
-# Post-process: coordinator or Haiku generates the markdown report
-# from the stream.jsonl trace (see §7.4)
+# Post-process: coordinator or Haiku generates the report (see §7.8)
 echo "$EXIT_CODE" > "$OUTPUT_DIR/exit_code"
 ```
 
-### 7.4 Report Generation from Stream JSON
+### 7.8 Report Generation from Stream JSON
 
 Instead of relying on the sub-agent to write its own markdown report (which wastes context window and can be inconsistent), the stream-json output captures the agent's full execution trace. The coordinator then generates the report:
 
@@ -753,7 +1015,7 @@ Instead of relying on the sub-agent to write its own markdown report (which wast
 
 The sub-agent's prompt is simplified: instead of "write a report to /output/report.md following this template," it just says "analyze the codebase for testing gaps" or "implement these approved changes." The agent focuses on the work, not on report formatting.
 
-### 7.5 Network Policy
+### 7.9 Network Policy
 
 The base firewall (from init-firewall.sh) implements default-deny egress with allowlist:
 
@@ -772,7 +1034,7 @@ ALLOWED_DOMAINS=(
 
 For projects that need `npm install` or `pip install` at runtime, the Dockerfile should pre-install all dependencies so the container can run with a minimal allowlist. If runtime package installation is unavoidable, add the relevant registries to `extra_firewall_domains` in `config.toml`.
 
-### 7.6 Resource Limits
+### 7.10 Resource Limits
 
 Containers are constrained via Docker resource flags:
 - `--cpus`: default 2, configurable per project.
@@ -2624,33 +2886,37 @@ ORG_ROOT_DIR/                          # organization root
 
   PROJECT_NAME/                        # per-project — managed by `ateam init`
     .git/                              # project-level git repo
+    .gitignore                         # ignores workspace/, .env, current_prompt.md
     config.toml                        # project config (agents, schedule, budget, stack)
     Dockerfile                         # build environment for sub-agent containers
-    docker_run.sh                      # container launch helper
+    docker_run.sh                      # custom container launch (optional, adapter="script")
+    docker-compose.yml                 # multi-service setup (optional, adapter="compose")
+    .env                               # API keys, ports, credentials (gitignored, manual)
+    .env.testing                       # agent-specific overrides (optional, gitignored)
     project_goals.md                   # project-specific instructions and priorities
     changelog.md                       # coordinator decision log (narrative)
 
-    testing/                           # agent directory
-      knowledge.md                     #   accumulated project knowledge (git-versioned)
-      current_prompt.md                #   latest assembled prompt (transient, .gitignored)
+    repos/
+      bare/                            # bare clone of project source repo
+
+    testing/                           # agent config directory (git-versioned)
+      knowledge.md                     #   accumulated project knowledge
+      current_prompt.md                #   latest assembled prompt (gitignored)
       work/
-        2026-02-26_2300_AUTH_COVERAGE.report.md    # descriptive name for the report
-        2026-02-26_2300_AUTH_COVERAGE.actions.md   # what was done about it (if implemented)
+        2026-02-26_2300_AUTH_COVERAGE.report.md    # descriptive report name
+        2026-02-26_2300_AUTH_COVERAGE.actions.md   # what was done about it
 
     refactor/                          # inherits role from .ateam/agents/refactor/role.md
-      knowledge.md                     # no local role.md needed — uses org default
+      knowledge.md
       work/
 
     security/
       role_add.md                      # ADDS to org-level security/role.md
-                                       #   (e.g., "pay special attention to our API keys
-                                       #    in environment variables, we use AWS Secrets Manager")
       knowledge.md
       work/
 
     performance/
       role.md                          # REPLACES org-level performance/role.md entirely
-                                       #   (this project has very specific perf requirements)
       knowledge.md
       work/
 
@@ -2665,6 +2931,27 @@ ORG_ROOT_DIR/                          # organization root
     docs-external/
       knowledge.md
       work/
+
+    workspace/                         # gitignored — persistent agent working environments
+      testing/
+        code/                          #   git worktree (persistent, bind-mounted rw)
+          node_modules/                #     survives between runs
+          .next/                       #     build cache survives
+        data/                          #   persistent state (databases, caches)
+          pg_data/                     #     PostgreSQL data directory
+        artifacts/                     #   build outputs, coverage reports
+      refactor/
+        code/                          #   separate worktree (can diverge)
+        data/                          #   own database state (isolated)
+        artifacts/
+      security/
+        code/
+        data/
+        artifacts/
+      feature/                         #   manual development agent
+        code/
+        data/
+        artifacts/
 ```
 
 ### 12.3 Role Inheritance
