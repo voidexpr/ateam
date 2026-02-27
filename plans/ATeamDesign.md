@@ -2955,6 +2955,10 @@ TODO:
 * coordinator should special case for code quality and testing as they are the most essential agents with more complex scheduling needs:
   * testing before/after other changes and must be clean before doing anything else
   * code quality does small refactoring on a change-by-change basis and bigger refactoring or even re-arhcitecting once the project as evolved enough
+    * maybe: split into 2 different agents: one for small refactor and one for bigger ones
+    * maybe: also split testing:
+      * basic project integrity, fast, targetted tests
+      * integration testing: more comprehensive tests, harder setup, harder debugging
 
 **File:** `.ateam/agents/coordinator/role.md`
 
