@@ -6,21 +6,24 @@
 
 ---
 
-ATeam is a tool to run non-interactive claude code sessions when requested or on a schedule to improve project quality: refactor, test, security audit, performance audit, documentation updates. Automate the non-essential tasks without human interaction so humans can focus on feature work with other agents. Use Docker to run isolated. The system is mostly a bunch of markdown files to specify what to do, generate reports and accumulate domain specific knowledge about projects. There is a sqlite file to track the state of these agents. A central coordinator agent does the orchestration.
-
-The vision is to run a few CLI commands that given a git repo configures and run non-interactive agents improve the quality of the work of other agents so humans can focus on features and not have to look at code without letting it evolve into a mess. These non-interactive agents run in docker container for safety and to not require constant approvals. We use agents to check other agents work. The system uses a bunch markdown files to set policies and build domain specific knowledge about the project over time. There is a notion of organization above projects to factor out this knowledge and preferences (the culture) for other projects.
-
-The system tries to avoid falling into spawning and managing a swarm of agents that can overwhelm humans. Instead the basic idea is to have on each commit or at night a few extra refactoring and testing occur unattended, then once in a while security is improved by upgrading dependencies and running regressions, doc is kept up to date. Recent commits are refactored and once in a while the architecture is revisited and might result in bigger refactoring.
-
-Smart prompting tries to not be over eager, not always act, act differently given the size, complexity and velocity of the projects.
-
-Agents use the code, their own markdown files, git commit information to decide what to do. They produce their own summaries for future execution. All their work is done as one-shot. A coordinator agent reads all the reports and work done and is the only own allowed to escalate decisions to a human if it's unclear what to do. Git is used to version all actions taken by agents so 'git log' is a summary of what is being done. Simple tools and simple workflows: markdown files, a single CLI shared with agents, some customizable prompts. That's it. The cost: dockerize the development and testing environment (have an agent do it for you).
-
 ## 1. Executive Summary
 
-ATeam is an agent coordination framework that automates essential but tedious engineering tasks — code quality, architecture integrity, testing, performance, security, and documentation — so human developers can focus on feature work. A lightweight Python coordinator orchestrates specialized sub-agents that run **Claude Code inside Docker containers**, operating on Git worktrees from a shared repository. Work happens primarily during off-hours with minimal human intervention.
+Agent-generated code requires constant review or it becomes spaghetti — new features break existing code, test coverage erodes and breaks, dependencies rot, documentation drifts. ATeam manages non-interactive agents that work in the background to prevent this: refactor code as it is being added, improve and debug tests, review security, manage dependencies, update internal and external documentation. Humans focus on features with interactive agents; ATeam quietly handles everything else.
 
-**Key architectural insight:** Claude Code is already an excellent coding agent with built-in file editing, shell execution, iterative debugging, and error recovery. Rather than reimplement all of that poorly with a custom API tool-use loop, we use Claude Code as-is inside Docker containers and communicate through the filesystem — prompts go in as files, reports come out as files.
+**The problem with agents is attention.** They demand constant review and approval. ATeam manages agents that work completely unattended inside Docker containers. A coordinator agent reviews the output of role-specific agents, it prioritizes sub-agent work, and only asks a human as a last resort. Typically ATeam runs at night but it can also run on demand or for each commit
+
+**Nobody wants a complex tool in their workflow**, so ATeam is built on simple, familiar pieces:
+
+- **Docker** to run agents unattended with full control inside the container — no permission prompts, no risk to the host.
+- **Git-managed markdown files** for agent roles, reports, and accumulated knowledge. After each run, agents summarize what they learned to build project-specific context over time. `git log` is a narrative of everything agents have done.
+- **A single CLI** to start, stop, and check on agents. It manages Docker containers, git worktrees, and tracks state in a SQLite database — which commits each agent has seen, what they found, what they did. The same CLI is used by humans and by the coordinator agent.
+- **No daemons, no complex IPC.** Simple single-prompt agents doing one thing at a time on their own.
+
+**ATeam's prompts promote pragmatic approaches.** Small projects don't need exhaustive test suites or complex tooling. Role-specific agents are prompted to configure automated tools (smoke tests, linters, formatters) to tighten the development environment progressively. Code refactoring is frequently done a the scale of git commits and occasionally can look at bigger refactors. The coordinator requests reports of what could be done from role specific agents and decides which ones to prioritize and which ones to wait for later. It tries to be mindful of token usage and the cost of this asynchronous work. But it continuously work in the background to maintain good project hygiene. The coordinator asks role specific agents to perform the tasks it selects. Then it asks these agents to update their specific knowledge of the project so next prompt has the relevant context and knowledge id built (and refactored) over time.
+
+**An organization layer above projects** factors out common knowledge for specific roles and tech stacks — conventions, patterns, and preferences shared across your codebase.
+
+**The cost:** dockerize the development environment of a project (an agent can do the heavy lifting), then a few CLI commands set up ATeam on any git repo while you continue your work.
 
 ---
 
@@ -1014,7 +1017,7 @@ The CLI auto-detects: if `ANTHROPIC_API_KEY` is set (in environment or `.env`), 
 
 ---
 
-## 10. Operations and Debugging
+## 10. Debugging and Operations
 
 ### 10.1 CLI Context: Directory-Aware Commands
 
@@ -4062,7 +4065,7 @@ The agent orchestration space has exploded in 2025–2026. There are dozens of t
 
 4. **Completion:** When done, the agent runs `gt done`, which pushes its branch to the remote and submits a merge request to the Refinery (the merge queue processor). The Refinery lands changes on main.
 
-**Key difference from ATeam's model:** Gas Town runs agents in tmux sessions on the bare host. ATeam runs agents in Docker containers. Gas Town's Mayor is itself a Claude Code instance (an LLM-powered coordinator). ATeam's coordinator is a deterministic Python daemon. Gas Town uses Claude Code's interactive mode (long-lived sessions with `--resume`). ATeam uses one-shot `claude -p` invocations.
+**Key difference from ATeam's model:** Gas Town runs agents in tmux sessions on the bare host. ATeam runs agents in Docker containers. Gas Town's Mayor is itself a Claude Code instance (an LLM-powered coordinator). ATeam's coordinator is Claude Code calling a Go CLI. Gas Town uses Claude Code's interactive mode (long-lived sessions with `--resume`). ATeam uses one-shot `claude -p` invocations.
 
 **What is Beads?** Beads is a separate project by Yegge (`github.com/steveyegge/beads`) — a git-backed issue tracking system stored as structured data files in the repository's `.beads/` directory. It functions as:
 
@@ -4079,7 +4082,7 @@ It's **more than a feature queue** — it's a full work-tracking system with cra
 | Dimension | Gas Town | ATeam |
 |---|---|---|
 | Language | Go (~3600 commits, 93% Go, substantial codebase) | Python (estimated 2-3K lines for v1) |
-| Coordinator | LLM-powered (Mayor = Claude Code instance) | Deterministic Python daemon |
+| Coordinator | LLM-powered (Mayor = Claude Code instance) | Claude Code + Go CLI |
 | Agent runtime | tmux sessions on bare host | Docker containers with one-shot `claude -p` |
 | Communication | 3 channels (mail, nudge, hooks) | 1 channel (filesystem I/O) |
 | Work tracking | Full issue tracker (Beads, separate project) | Markdown files in git |
