@@ -3979,22 +3979,76 @@ The agent orchestration space has exploded in 2025–2026. There are dozens of t
 
 #### ComposioHQ/agent-orchestrator ⭐⭐⭐⭐ (Closest Match)
 
-**What it is:** An open-source TypeScript platform that manages fleets of parallel coding agents. Each agent gets its own git worktree, branch, and PR. Supports Claude Code, Codex, and Aider as agent backends. Has a plugin architecture for swapping agent runtimes (tmux, Docker), trackers (GitHub, Linear), and notification channels.
+**What it is:** An open-source TypeScript platform (40K LOC, 3.3K tests, MIT licensed) that manages fleets of parallel coding agents. Each agent gets its own git worktree, branch, and PR. Agent-agnostic (Claude Code, Codex, Aider, OpenCode), runtime-agnostic (tmux, Docker), tracker-agnostic (GitHub, Linear). Built in 8 days by 30 concurrent AI agents orchestrating their own construction. 2.7K GitHub stars as of Feb 2026.
 
-**Overlap with ATeam:** Very high. Git worktree isolation, agent-agnostic design, parallel execution, CI failure auto-remediation, web dashboard, and reactive automation (CI fails → agent fixes it).
+**How agents are controlled:**
+
+The system uses an 8-slot plugin architecture where every abstraction is swappable. The session lifecycle is:
+
+1. **Tracker** pulls an issue from GitHub or Linear
+2. **Workspace** creates an isolated git worktree (or clone) with a feature branch
+3. **Runtime** starts a tmux session (default) or Docker container
+4. **Agent** plugin launches the coding agent (e.g., Claude Code) with issue context injected into the prompt
+5. The agent works autonomously — explores code, writes changes, creates a PR
+6. **SCM** plugin enriches the PR with context
+7. **Reactions** system watches for GitHub events and auto-responds (see below)
+8. **Notifier** pings the human only when judgment is needed
+
+Agents are spawned via `ao spawn <project> <issue>`. Each gets a dedicated tmux session (or process). The orchestrator doesn't communicate with agents mid-task via IPC. Instead, when external events occur (CI failure, review comment), the reactions system **injects context into the agent's terminal session** — it sends keystrokes or text into the tmux pane, which the agent reads and acts on. This is a clever hack: the agent doesn't need a special API for receiving feedback, it just sees new information appear in its session as if a human typed it.
+
+The orchestrator also supports `ao send <session> "Fix the tests"` for manual injection of instructions into a running agent session.
+
+**How interaction needs are detected (activity detection):**
+
+This is one of the more interesting problems they solved. The orchestrator needs to know what each agent is doing without asking it (because asking would interrupt the agent's work).
+
+Their solution: **Claude Code writes structured JSONL event files during every session.** The orchestrator reads these files directly (not stdout, not the agent's self-report) to determine:
+
+- Is the agent actively generating tokens? (working)
+- Is it waiting for tool execution? (tool call in progress)
+- Is it idle? (may be stuck or finished)
+- Has it finished? (session complete)
+
+This avoids the unreliability of asking agents to self-report their status. The JSONL events are a side-channel that the orchestrator monitors passively. This is essentially the same approach as ATeam's stream-json monitoring (§7.3), which validates our design choice.
+
+The **reactions system** is the primary mechanism for detecting when an agent needs external input. It watches GitHub webhooks for three event types:
+
+- **CI failed** → `auto: true, action: send-to-agent, retries: 2` — the orchestrator fetches CI logs and injects them into the agent's session. The agent reads the failure, fixes the code, pushes again. In their case study, one PR went through 12 CI failure→fix cycles with zero human intervention.
+- **Changes requested** (review comments) → `auto: true, action: send-to-agent, escalateAfter: 30m` — review comments are routed to the agent with context. If the agent hasn't addressed them within 30 minutes, escalate to human.
+- **Approved and green** → `auto: false, action: notify` — human gets a notification to merge (can be set to auto-merge).
+
+The `escalateAfter` timeout is the key interaction-detection mechanism: if an agent can't resolve an issue within a configured window, the system assumes human judgment is needed and escalates via the notifier plugin (desktop notification, Slack, webhook).
+
+**The web dashboard** (Next.js 15 with Server-Sent Events) groups sessions into "attention zones" — failing CI, awaiting review, running fine — so the human sees at a glance which sessions need attention. Live terminal view via xterm.js shows what agents are actually doing in real time.
+
+**Numbers from their self-build:**
+
+- 30 concurrent agents, 747 commits across all branches, 65 of 102 PRs merged
+- 84% of PRs created by AI sessions, 100% of code AI-authored
+- 700 automated code review comments (Cursor Bugbot), agents fixed 68% immediately
+- 41 CI failures across 9 branches, all self-corrected — 84.6% overall CI success rate
+- Human involvement: 1% of code review comments (13 of ~1000)
+
+**Overlap with ATeam:** Very high. Git worktree isolation, agent-agnostic design, parallel execution, CI failure auto-remediation, stream-json/JSONL monitoring for activity detection, web dashboard.
 
 **What it lacks for our use case:**
-- No scheduled/cron-based autonomous operation. It's reactive (responds to issues, CI failures, review comments) rather than proactive (scans for code quality improvements on a schedule).
-- No specialized agent roles with persistent knowledge. Agents are generic — there's no concept of a "testing specialist" that accumulates project knowledge over time.
-- No audit → approve → implement workflow. Agents go straight from issue to PR.
-- No resource budgeting or token-aware throttling.
-- No night/day schedule profiles.
+
+- **No scheduled/autonomous operation.** It's reactive (responds to issues, CI failures, review comments) not proactive (scans for code quality improvements on a schedule). No cron, no night/day profiles. You must `ao spawn` each task.
+- **No specialized agent roles with persistent knowledge.** Agents are generic workers — no concept of a "testing specialist" that accumulates project knowledge and gets smarter over time.
+- **No audit → approve → implement workflow.** Agents go straight from issue to PR. No deliberate phase separation where findings are reviewed before code changes.
+- **No budget enforcement.** No per-run, daily, or monthly cost caps. They reported their creator burning through Pro Max plan limits with 30 concurrent agents.
+- **No org-level knowledge sharing.** No mechanism to learn patterns across projects and promote them to shared defaults.
+- **No coordinator reasoning.** The orchestrator agent is described as intelligent, but the current open-source implementation is primarily event-driven reactions, not LLM-powered decision-making about what to work on next.
 
 **Ideas to integrate:**
-- Adopt their **plugin architecture** pattern for swappable agent backends and notification channels. Their 8-slot plugin system (agent, runtime, workspace, tracker, scm, notifier, reviewer, merger) is well-designed.
-- Borrow their **reactions system** — automated responses to GitHub events (CI failure → spawn agent, review comment → address it). This would be a great addition to ATeam's coordinator for handling events beyond our scheduled cycles.
-- Their **web dashboard** is a nice-to-have for ATeam's Phase 4 or future enhancements.
-- Consider using agent-orchestrator as a **runtime layer** under ATeam's coordinator. ATeam adds the scheduling, specialization, knowledge management, and budgeting on top.
+
+- **Reactions system** for ATeam's coordinator. The pattern of watching GitHub webhooks and injecting CI failures / review comments back into agent sessions is exactly what ATeam's reactive triggers (§20.7) should do. The `escalateAfter` timeout for auto-escalation is a clean pattern.
+- **JSONL activity detection.** Their approach of reading Claude Code's structured event files to determine agent status validates ATeam's stream-json design. We should ensure our stream-json monitoring covers the same states: working, waiting for tool, idle, finished.
+- **tmux injection pattern.** For interactive sessions (`ateam shell`), the ability to send instructions to a running agent via `ao send` is useful. In ATeam's architecture, this maps to the container adapter's `Exec()` method or writing to a message file in the bind-mounted workspace.
+- **Plugin architecture.** Their 8-slot system (runtime, agent, workspace, tracker, SCM, notifier, terminal, lifecycle) is well-factored. ATeam's container adapter abstraction (§7.4) covers runtime+workspace. We should consider similar plugin boundaries for notification and tracker integration in future phases.
+- **Attention zones** in the dashboard. Grouping sessions by urgency (failing, needs review, running fine) is better UX than a flat list of agents. Worth adopting if/when ATeam adds a dashboard.
+
+**Key architectural difference from ATeam:** Agent-orchestrator is an interactive tool for feature work — you assign issues, agents build features, you review PRs. ATeam is an autonomous background system for code quality — it decides what to work on, agents audit and improve, the coordinator triages. They solve complementary problems. An organization could plausibly run both: agent-orchestrator for feature work during the day, ATeam for quality maintenance at night.
 
 #### OpenHands (formerly OpenDevin) ⭐⭐⭐⭐
 
