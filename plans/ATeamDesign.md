@@ -10,20 +10,19 @@
 
 Agent-generated code requires constant review or it becomes spaghetti — new features break existing code, test coverage erodes and breaks, dependencies rot, documentation drifts. ATeam manages non-interactive agents that work in the background to prevent this: refactor code as it is being added, improve and debug tests, review security, manage dependencies, update internal and external documentation. Humans focus on features with interactive agents; ATeam quietly handles everything else.
 
-**The problem with agents is attention.** They demand constant review and approval. ATeam manages agents that work completely unattended inside Docker containers. A coordinator agent reviews the output of role-specific agents, it prioritizes sub-agent work, and only asks a human as a last resort. Typically ATeam runs at night but it can also run on demand or for each commit
+**The problem with agents is attention**. They demand constant review and approval. ATeam manages agents that work completely unattended inside Docker containers. A coordinator agent reviews the output of role-specific agents, prioritizes their work, and only asks a human as a last resort. Typically ATeam runs at night, but it can also run on demand or on each commit.
 
-**Nobody wants a complex tool in their workflow**, so ATeam is built on simple, familiar pieces:
+**Nobody wants a complex tool** in their workflow, so ATeam is built on simple, familiar pieces:
+* **Docker** to run agents unattended with full control inside the container — no permission prompts, no risk to the host.
+* **Git-managed** markdown files for agent roles, reports, and accumulated knowledge. After each run, agents summarize what they learned to build project-specific context over time. `git log` is a narrative of everything agents have done.
+* **A single CLI** to start, stop, and check on agents. It manages Docker containers, git worktrees, and tracks state in a SQLite database — which commits each agent has seen, what they found, what they did. The same CLI is used by humans and by the coordinator agent.
+* **No daemons, no complex IPC, no agents chatting**. Simple single-prompt agents doing one thing at a time on their own. A sqlite database is managed by the CLI to track the status of each agent
 
-- **Docker** to run agents unattended with full control inside the container — no permission prompts, no risk to the host.
-- **Git-managed markdown files** for agent roles, reports, and accumulated knowledge. After each run, agents summarize what they learned to build project-specific context over time. `git log` is a narrative of everything agents have done.
-- **A single CLI** to start, stop, and check on agents. It manages Docker containers, git worktrees, and tracks state in a SQLite database — which commits each agent has seen, what they found, what they did. The same CLI is used by humans and by the coordinator agent.
-- **No daemons, no complex IPC.** Simple single-prompt agents doing one thing at a time on their own, sqlite is used to track per-project and per-agent status.
+ATeam's prompts promote **pragmatic approaches**. Small projects don't need exhaustive test suites or complex tooling. Role-specific agents are prompted to configure automated tools — smoke tests, linters, formatters — to tighten the development environment progressively. Code refactoring happens frequently at the scale of recent commits, and occasionally looks at bigger architectural improvements. The coordinator requests reports from role-specific agents on what could be done, then decides which tasks to act on now and which to defer. It tries to be mindful of token usage and the cost of this background work, but it continuously maintains good project hygiene. After each implementation, the coordinator asks role-specific agents to update their project knowledge so the next run has relevant context — knowledge is built and refined over time.
 
-**ATeam's prompts promote pragmatic approaches.** Small projects don't need exhaustive test suites or complex tooling. Role-specific agents are prompted to configure automated tools (smoke tests, linters, formatters) to tighten the development environment progressively. Code refactoring is frequently done a the scale of git commits and occasionally can look at bigger refactors. The coordinator requests reports of what could be done from role specific agents and decides which ones to prioritize and which ones to wait for later. It tries to be mindful of token usage and the cost of this asynchronous work. But it continuously work in the background to maintain good project hygiene. The coordinator asks role specific agents to perform the tasks it selects. Then it asks these agents to update their specific knowledge of the project so next prompt has the relevant context and knowledge id built (and refactored) over time.
+An organization layer above projects **factors out common knowledge** for specific roles and tech stacks — conventions, patterns, and preferences shared across your codebase.
 
-**An organization layer above projects** factors out common knowledge for specific roles and tech stacks — conventions, patterns, and preferences shared across your codebase.
-
-**The cost:** dockerize the development environment of a project (an agent can do the heavy lifting), then a few CLI commands set up ATeam on any git repo while you continue your work.
+**The cost**: dockerize the development environment of a project (an agent can do the heavy lifting), then a few CLI commands set up ATeam on any git repo while you continue your work.
 
 ---
 
@@ -53,27 +52,6 @@ Agent-generated code requires constant review or it becomes spaghetti — new fe
 **Go** for the entire framework: CLI, container adapters, git management, SQLite operations, prompt builder, scheduler. A single `go build` produces one static binary (~15-20MB) that embeds all default files (role prompts, knowledge templates, database schema).
 
 **Claude Code** is the sub-agent runtime — it runs inside Docker and does the actual coding work. The coordinator also runs as Claude Code, using the `ateam` CLI via bash commands.
-
-### 3.1 Why Go, No MCP
-
-The framework is a CLI, not an MCP server. The coordinator is Claude Code with a system prompt that describes how to use the `ateam` CLI. When the coordinator needs to run an agent, it calls `ateam run -a testing -p myapp` via its native Bash tool. When it needs status, it calls `ateam status --json`. No MCP layer, no JSON-RPC, no tool registration — just a binary that Claude Code shells out to.
-
-**Why this works better than MCP:**
-
-- Claude Code can already run shell commands. Adding an MCP server between "Claude Code wants to run an agent" and "the CLI runs the agent" is pure indirection.
-- The CLI composes naturally: the coordinator can pipe, grep, chain commands with `&&`, use `--json` for structured output — things that are awkward with discrete MCP tool calls.
-- Developers and the coordinator use the exact same interface. No divergence between "what the MCP tool does" and "what the CLI does."
-- One less process to manage. No `ateam serve` that must be running when the coordinator runs.
-
-**Why Go:**
-
-- **Single binary.** `go build` → one file. No Python runtime, no virtualenv, no `pip install`. Copy and run.
-- **Embedded assets.** Default role prompts, knowledge templates, and the SQLite schema are embedded in the binary via `embed.FS`. `ateam install` extracts them to disk.
-- **Fast compilation and type checking.** The framework is infrastructure code (Docker, git, SQLite, file I/O) — exactly what Go is built for.
-- **Native concurrency.** Goroutines for monitoring multiple agent containers, streaming logs, watching for timeouts.
-- **Docker and git ecosystem.** Official Docker client SDK, `go-git` for pure-Go git operations, `os/exec` for worktree management.
-
-**MCP escape hatch:** If MCP is needed later (e.g., to use ATeam from Claude.ai chat or other MCP clients), add an `ateam serve-mcp` command that wraps CLI functions as MCP tools. This is a backwards-compatible addition.
 
 ### 3.2 Dependencies
 
@@ -3868,7 +3846,28 @@ These appendices contain exploration notes, alternative analyses, and competitiv
 
 ## Appendix A. Design Exploration
 
-### A.1 Claude Code vs Custom API Agent (Comparison)
+### A.1 Why Go, No MCP
+
+The framework is a CLI, not an MCP server. The coordinator is Claude Code with a system prompt that describes how to use the `ateam` CLI. When the coordinator needs to run an agent, it calls `ateam run -a testing -p myapp` via its native Bash tool. When it needs status, it calls `ateam status --json`. No MCP layer, no JSON-RPC, no tool registration — just a binary that Claude Code shells out to.
+
+**Why this works better than MCP:**
+
+- Claude Code can already run shell commands. Adding an MCP server between "Claude Code wants to run an agent" and "the CLI runs the agent" is pure indirection.
+- The CLI composes naturally: the coordinator can pipe, grep, chain commands with `&&`, use `--json` for structured output — things that are awkward with discrete MCP tool calls.
+- Developers and the coordinator use the exact same interface. No divergence between "what the MCP tool does" and "what the CLI does."
+- One less process to manage. No `ateam serve` that must be running when the coordinator runs.
+
+**Why Go:**
+
+- **Single binary.** `go build` → one file. No Python runtime, no virtualenv, no `pip install`. Copy and run.
+- **Embedded assets.** Default role prompts, knowledge templates, and the SQLite schema are embedded in the binary via `embed.FS`. `ateam install` extracts them to disk.
+- **Fast compilation and type checking.** The framework is infrastructure code (Docker, git, SQLite, file I/O) — exactly what Go is built for.
+- **Native concurrency.** Goroutines for monitoring multiple agent containers, streaming logs, watching for timeouts.
+- **Docker and git ecosystem.** Official Docker client SDK, `go-git` for pure-Go git operations, `os/exec` for worktree management.
+
+**MCP escape hatch:** If MCP is needed later (e.g., to use ATeam from Claude.ai chat or other MCP clients), add an `ateam serve-mcp` command that wraps CLI functions as MCP tools. This is a backwards-compatible addition.
+
+### A.2 Claude Code vs Custom API Agent (Comparison)
 
 | Concern | Custom API loop | Claude Code in Docker |
 |---|---|---|
@@ -3881,7 +3880,7 @@ These appendices contain exploration notes, alternative analyses, and competitiv
 
 **Tradeoffs accepted:** No per-invocation token counts (use `--max-budget-usd` instead), harder to swap LLM providers (addressed via container adapter), less programmatic control (but stream-json gives visibility).
 
-### A.2 Is `claude -p` Sufficient? (Analysis)
+### A.3 Is `claude -p` Sufficient? (Analysis)
 
 `claude -p` (print/pipe mode) runs Claude Code in non-interactive single-prompt mode. It executes the full agent loop — tool use, file editing, shell commands, iterative debugging — until the task completes or a limit is hit.
 
@@ -3889,7 +3888,7 @@ These appendices contain exploration notes, alternative analyses, and competitiv
 
 **Assessment: Sufficient for sub-agents.** Tasks are well-scoped (audit → approve → implement). The prompt includes all context. If a task is too complex, the agent writes `blocked.md` and the coordinator re-scopes. For rare cases needing multi-turn interaction, `--resume` flag or PTY automation are available as optimizations.
 
-### A.3 Multi-Provider Support (Reference)
+### A.4 Multi-Provider Support (Reference)
 
 | Provider | Approach |
 |---|---|
@@ -3905,7 +3904,7 @@ default = "claude-code"
 # testing = "codex"
 ```
 
-### A.4 Coordinator Architecture Options (Historical)
+### A.5 Coordinator Architecture Options (Historical)
 
 Four options were evaluated for the coordinator:
 
@@ -3916,7 +3915,7 @@ Four options were evaluated for the coordinator:
 
 **Final decision: Go CLI + Claude Code (no MCP).** Simpler than all options above. The CLI is the tool; Claude Code calls it via Bash. No MCP indirection, no separate server process, no Python dependency.
 
-### A.5 Git-Versioned Configuration
+### A.6 Git-Versioned Configuration
 
 Project and org directories are git repos. This provides:
 
