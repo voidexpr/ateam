@@ -2748,6 +2748,79 @@ Examples:
   ateam db "SELECT * FROM reports WHERE decision='ask'"
 ```
 
+#### `ateam update-org-knowledge`
+
+Aggregate project-level knowledge into org-level knowledge files. This is the mechanism that keeps `.ateam/knowledge/` and `.ateam/agents/` current based on what agents have learned across all projects.
+
+```
+ateam update-org-knowledge [options]
+
+Options:
+  --git-commit            Commit changes to .ateam/.git after updating
+  --roles ROLE1,ROLE2     Only update for specific roles (default: all)
+  --dry-run               Show what would change without writing
+  --projects P1,P2        Only harvest from specific projects (default: all)
+
+Process (for each role):
+  1. Discovers all projects that have this role enabled
+  2. Collects knowledge sources for this role across projects:
+     - {project}/{role}/knowledge.md     (accumulated agent knowledge)
+     - {project}/{role}/work/*.report.md (recent reports, for patterns)
+     - {project}/{role}/role_add.md      (project-specific additions that
+                                          might indicate missing org defaults)
+  3. Spawns a "culture maintainer" agent (Claude Code in Docker) with:
+     - All collected knowledge files as input
+     - The current org-level files as baseline:
+       - .ateam/agents/{role}/role.md
+       - .ateam/knowledge/{relevant stack files}
+     - A prompt instructing it to:
+       a. Identify patterns that appear across multiple projects
+       b. Extract broadly useful knowledge into org-level files
+       c. Deduplicate: remove from org files anything project-specific
+       d. Update stack knowledge files (e.g., typescript.md) with
+          patterns learned from TypeScript projects
+       e. Propose role.md improvements if agents consistently need
+          the same role_add.md overrides
+  4. Reviews the proposed changes (diff against current org files)
+  5. If --git-commit: commits to .ateam/.git with a summary message
+
+Output:
+  Shows a diff of proposed changes to .ateam/ files.
+  With --git-commit: commits and shows the commit hash.
+  Without: writes changes but leaves them uncommitted for review.
+
+Database writes:
+  INSERT INTO operations (project=NULL, agent_name='culture-maintainer',
+    operation='complete', notes='updated {N} org files for roles: {roles}')
+```
+
+Example:
+```bash
+# Update all org knowledge, review before committing
+ateam update-org-knowledge
+# Review changes: git -C .ateam diff
+# Happy with it:
+git -C .ateam add -A && git -C .ateam commit -m "knowledge update"
+
+# Or let it commit directly
+ateam update-org-knowledge --git-commit
+
+# Only update testing and security knowledge
+ateam update-org-knowledge --roles testing,security --git-commit
+
+# Schedule it (cron, every few days)
+# 0 6 */3 * * cd /home/user/my_org && ateam update-org-knowledge --git-commit
+```
+
+**What the culture maintainer agent produces:**
+
+The agent doesn't blindly merge files. It synthesizes. For example:
+
+- Three TypeScript projects all have `knowledge.md` entries about "prefer Zod for runtime validation" → the agent adds this to `.ateam/knowledge/typescript.md` (if not already there).
+- Two projects have `security/role_add.md` saying "check for hardcoded AWS credentials" → the agent proposes adding this to `.ateam/agents/security/role.md` as a standard check, so future projects get it by default.
+- One project's testing knowledge.md has a Jest-specific pattern for mocking timers → goes into `.ateam/knowledge/testing_jest.md`.
+- Project-specific knowledge (like "our API rate limit is 100 req/s") stays in the project's knowledge.md and is NOT promoted to org level.
+
 ### 11.7 Manual Workflow Example (No Coordinator)
 
 This shows how a developer would use the CLI to drive the full audit→review→implement cycle manually — the same workflow the coordinator automates.
@@ -3011,11 +3084,24 @@ stack = ["typescript", "react", "postgresql", "docker", "testing_jest", "linting
 
 The prompt builder then includes the matching knowledge files in the agent's prompt, keeping the context window lean. A Go project's security agent sees `golang.md` and `security_owasp.md`, not `react.md` or `testing_jest.md`.
 
+**Knowledge flows in two directions:**
+
+- **Down (org → project):** Org-level knowledge files are included in agent prompts via the prompt builder. This is how patterns learned from Project A benefit Project B.
+
+- **Up (project → org):** Project-level `knowledge.md` files accumulate agent learnings during runs. The `ateam update-org-knowledge` command (§11.6) periodically harvests these files, identifies cross-project patterns, and promotes broadly useful knowledge to the org level.
+
 **How knowledge files are populated:**
-- Initially seeded by `ateam install` with a starter set.
-- Sub-agents in **maintain** mode can propose additions when they learn something broadly useful.
-- The coordinator reviews and commits updates to the `.ateam/` git repo.
-- Developers can manually add or edit files at any time.
+
+1. **Initial seeding:** `ateam install` creates a starter set with basic conventions for common stacks.
+2. **Agent learning:** During maintain mode, agents update their project's `{agent}/knowledge.md` with patterns and decisions from recent runs.
+3. **Org-level aggregation:** `ateam update-org-knowledge` (run on-demand or on a schedule) spawns a culture maintainer agent per role. This agent reads all project knowledge files for that role, identifies patterns appearing across multiple projects, and promotes them to org-level files. It also proposes role.md improvements when multiple projects use the same `role_add.md` overrides.
+4. **Manual editing:** Developers can edit any knowledge file directly. Org-level files are in `.ateam/.git`, project-level in `{project}/.git`.
+
+**What gets promoted vs what stays local:**
+
+- "Prefer Zod for runtime validation in TypeScript" → promoted to `.ateam/knowledge/typescript.md` (broadly useful)
+- "Our API rate limit is 100 req/s" → stays in project knowledge.md (project-specific)
+- Two projects both add "check for hardcoded AWS credentials" to `security/role_add.md` → promoted into `.ateam/agents/security/role.md` as a default check
 
 ### 12.6 Git Structure: Two Repos
 
