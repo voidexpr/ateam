@@ -805,7 +805,7 @@ The coordinator's system prompt (injected via `CLAUDE.md` or the `-p` flag) defi
 
 **Key MCP tools available to the coordinator:**
 
-Each MCP tool is a thin wrapper around the `ateam` CLI, which reads/writes the project's `ateam.db`. This ensures the coordinator and developers always share the same state (see §10.2).
+Each MCP tool is a thin wrapper around the `ateam` CLI, which reads/writes the project's `ateam.sqlite`. This ensures the coordinator and developers always share the same state (see §10.2).
 
 ```
 subagent_run_audit(agent, project)         → ateam run --agent X --mode audit
@@ -814,12 +814,12 @@ subagent_commit_and_merge(agent, project)  → git: commit changes, run tests, m
 format_report(report_path, model?)         → summarize/reformat report (delegate to Haiku)
 get_pending_reports(project)               → list reports awaiting review
 update_knowledge(agent, project, summary)  → append to knowledge.md
-get_budget_status(project)                 → query ateam.db operations for cost data
+get_budget_status(project)                 → query ateam.sqlite operations for cost data
 get_schedule_profile()                     → "night"/"day", allowed agents, max parallel
 create_worktree(project, agent)            → create git worktree
 cleanup_worktree(project, agent)           → remove worktree
 get_recent_commits(project, since)         → list recent commits
-get_agent_status(project, agent?)          → query ateam.db agents table
+get_agent_status(project, agent?)          → query ateam.sqlite agents table
 pause_agent(project, agent?)               → ateam pause --agent X
 resume_agent(project, agent?)              → ateam resume --agent X
 ```
@@ -1033,54 +1033,76 @@ async def watchdog(container_name: str, timeout_minutes: int):
 
 ### 10.1 CLI Context: Directory-Aware Commands
 
-The `ateam` CLI infers project and agent context from the current working directory:
+The `ateam` CLI infers organization, project, and agent context from the current working directory:
 
 ```
-my_projects/                         # PROJ_ROOT
+ORG_ROOT_DIR/                        # organization root (has .ateam/)
+  .ateam/
+    ateam.sqlite                     # org-wide state database
+    coordinator_role.md
+    agents/
+    knowledge/
   projectx/                          # project dir (has config.toml)
     config.toml
-    ateam.db                         # SQLite state database
     testing/                         # agent dir
-      role.md
       knowledge.md
       work/
     refactor/
       ...
   projecty/
     config.toml
-    ateam.db
     ...
 ```
 
 **Resolution rules:**
 
-1. **Inside `projectx/testing/`** → project=projectx, agent=testing. Commands apply to the testing agent only.
-2. **Inside `projectx/`** → project=projectx, no agent. Commands apply to all agents / the coordinator.
-3. **Anywhere else** → requires `-d` flag: `ateam -d ~/my_projects/projectx pause --agent testing`.
+1. **Inside `projectx/testing/`** → org=ORG_ROOT_DIR, project=projectx, agent=testing. Commands apply to the testing agent only.
+2. **Inside `projectx/`** → org=ORG_ROOT_DIR, project=projectx, no agent. Commands apply to all agents / the coordinator for this project.
+3. **Inside `ORG_ROOT_DIR/`** (but not in a project) → org=ORG_ROOT_DIR, no project, no agent. Commands apply org-wide (e.g., `ateam status` shows all projects).
+4. **Anywhere else** → requires explicit flags.
+
+The CLI walks up from `$CWD` looking for `.ateam/` (identifies org root), then checks if the current path is inside a subdirectory containing `config.toml` (identifies project), then checks if the current directory basename matches an enabled agent name (identifies agent).
+
+**CLI flag conventions:**
+
+```
+ateam [global-options] <command> [command-options]
+
+Context overrides:
+  --org PATH                  Organization root directory
+  -p NAME, --proj NAME,
+    --project NAME            Project name (subdirectory of org root)
+  -a NAME, --agent NAME       Agent name
+  --coordinator, -coord       Target the coordinator (not an agent)
+```
 
 ```bash
 # These are all equivalent:
-cd ~/my_projects/projectx/testing && ateam pause
-cd ~/my_projects/projectx && ateam pause --agent testing
-ateam -d ~/my_projects/projectx pause --agent testing
+cd ~/org/projectx/testing && ateam pause
+cd ~/org/projectx && ateam pause -a testing
+cd ~/org && ateam pause -p projectx -a testing
+ateam --org ~/org pause -p projectx -a testing
 
 # These are all equivalent (project-wide):
-cd ~/my_projects/projectx && ateam pause
-ateam -d ~/my_projects/projectx pause
+cd ~/org/projectx && ateam pause
+cd ~/org && ateam pause -p projectx
+ateam --org ~/org pause -p projectx
+
+# Org-wide status:
+cd ~/org && ateam status
+# Shows all projects, all agents, from the single ateam.sqlite
 ```
 
-The CLI walks up from `$CWD` looking for `config.toml` (identifies project root). If the current directory basename matches a known agent name (from `config.toml`'s `[agents] enabled`), that agent is used as context.
-
-**The coordinator uses the same CLI.** MCP tools like `subagent_run_audit` are thin wrappers that invoke the `ateam` CLI commands. The CLI reads and writes `ateam.db`. This means developers and the coordinator always have the same view of the system — there's no separate coordinator state, no lockfiles, no divergent data paths.
+**The coordinator uses the same CLI.** MCP tools like `subagent_run_audit` are thin wrappers that invoke the `ateam` CLI commands. The CLI reads and writes `.ateam/ateam.sqlite`. This means developers and the coordinator always have the same view of the system — there's no separate coordinator state, no lockfiles, no divergent data paths.
 
 ### 10.2 State Database: SQLite
 
-Each project has a single `ateam.db` in its root directory. This is the sole source of truth for all runtime state. Both the autonomous coordinator (via MCP → CLI) and the developer (directly via CLI) read and write the same database.
+A single `ateam.sqlite` lives in `.ateam/` at the organization root. This is the sole source of truth for all runtime state across all projects. Both autonomous coordinators (one per project, via MCP → CLI) and developers (directly via CLI) read and write the same database.
 
 ```sql
 CREATE TABLE agents (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_dir     TEXT NOT NULL,         -- absolute path to project root
+    project         TEXT NOT NULL,         -- project name (directory basename, e.g., 'myapp')
     agent_name      TEXT NOT NULL,         -- 'testing', 'refactor', 'security', etc.
     docker_instance TEXT,                  -- container ID, NULL if not running
     time_started    TEXT,                  -- ISO timestamp, NULL if not running
@@ -1098,12 +1120,12 @@ CREATE TABLE agents (
                                           -- 'canceled'    : run was aborted
                                           -- 'stopped'     : completed normally
                                           -- 'error'       : last run failed
-    UNIQUE(project_dir, agent_name)
+    UNIQUE(project, agent_name)
 );
 
 CREATE TABLE operations (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_dir     TEXT NOT NULL,         -- absolute path to project root
+    project         TEXT NOT NULL,         -- project name
     agent_name      TEXT,                  -- NULL for project-wide operations
     docker_instance TEXT,                  -- container ID if applicable, NULL otherwise
     timestamp       TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1115,10 +1137,11 @@ CREATE TABLE operations (
 
 CREATE TABLE reports (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_dir     TEXT NOT NULL,
+    project         TEXT NOT NULL,
     agent_name      TEXT NOT NULL,         -- which agent produced this report
     timestamp       TEXT NOT NULL DEFAULT (datetime('now')),
-    report_path     TEXT NOT NULL,         -- relative path: testing/work/2026-02-26_report.md
+    report_path     TEXT NOT NULL,         -- relative path from project root:
+                                          --   testing/work/2026-02-26_2300_auth_coverage.report.md
     git_commit_audited TEXT,               -- commit hash the agent analyzed
     decision        TEXT NOT NULL DEFAULT 'pending',
                                           -- 'pending'     : awaiting coordinator review
@@ -1132,45 +1155,56 @@ CREATE TABLE reports (
     notes           TEXT                   -- coordinator's reasoning: why this decision,
                                           -- what was prioritized instead, risk assessment
 );
+
+CREATE INDEX idx_agents_project ON agents(project);
+CREATE INDEX idx_operations_project ON operations(project);
+CREATE INDEX idx_reports_project ON reports(project);
+CREATE INDEX idx_reports_decision ON reports(project, decision);
 ```
 
 **Design notes:**
 
-The `agents` table holds current state — one row per enabled agent, upserted on first use. The `operations` table is an append-only audit log of every state transition. The `reports` table tracks the coordinator's analysis and decisions on agent-produced reports. Together they answer "what's happening now?" (agents), "what happened?" (operations), and "what did the coordinator decide?" (reports).
+The `agents` table holds current state — one row per enabled agent per project, upserted on first use. The `operations` table is an append-only audit log of every state transition. The `reports` table tracks the coordinator's analysis and decisions on agent-produced reports. Together they answer "what's happening now?" (agents), "what happened?" (operations), and "what did the coordinator decide?" (reports).
 
-`project_dir` is stored as an absolute path. Since each project has its own `ateam.db`, `project_dir` is technically redundant in most queries — but it makes the schema self-describing and enables future multi-project dashboards that aggregate across databases.
+**Why one database for the entire org?** Multiple coordinators (one per project) and human CLI commands can all access the same database concurrently. SQLite in WAL mode supports this naturally: unlimited concurrent readers, and write transactions are very short (a single UPDATE or INSERT), so writers just wait briefly for the lock. No coordinator blocks another for any meaningful duration.
 
-The `reason` field distinguishes coordinator-initiated runs from manual ones. When the scheduler starts a testing audit, `reason='coordinator'`. When a developer runs `ateam shell`, `reason='manual'`. This lets you filter history: "show me only coordinator decisions" vs "show me my interactive sessions."
+This makes cross-project queries trivial:
+```sql
+-- What's running across all projects right now?
+SELECT project, agent_name, status, time_started FROM agents WHERE status='running';
+
+-- Budget across all projects this week
+SELECT project, COUNT(*) as runs, SUM(CAST(json_extract(notes, '$.cost') AS REAL)) as cost
+  FROM operations WHERE operation='complete' AND timestamp > date('now', '-7 days')
+  GROUP BY project;
+
+-- Which projects have pending reports needing human review?
+SELECT project, agent_name, timestamp, notes FROM reports WHERE decision='ask';
+```
+
+The `project` column stores the project directory name (e.g., `'myapp'`), not an absolute path. The CLI resolves the actual filesystem path from the org root + project name. This keeps the database portable — moving the org directory doesn't break it.
+
+The `reason` field distinguishes coordinator-initiated runs from manual ones. When the scheduler starts a testing audit, `reason='coordinator'`. When a developer runs `ateam shell`, `reason='manual'`.
 
 Git commit tracking (`git_commit_start`, `git_commit_end`) records the codebase state the agent worked against. This enables questions like "which commit did the security agent last audit?" and "did the refactor agent's changes include recent commits?"
 
-`operations.docker_instance` captures the container ID for each state transition. This is critical for post-mortem debugging: if an agent failed, you can correlate the operation with `docker logs {container_id}` (if the container still exists) or at minimum know which container execution you're investigating. It's nullable because some operations (suspend, resume) don't involve a container.
+`operations.docker_instance` captures the container ID for each state transition. This is critical for post-mortem debugging: correlate the operation with `docker logs {container_id}` (if the container still exists) or at minimum know which container execution you're investigating.
 
-**The `reports` table** is the coordinator's decision log in structured form. Every time an agent produces a report (audit findings, implementation results), the coordinator inserts a row with its decision and reasoning. The `decision` field captures the outcome:
-
-- `pending` — report received, not yet reviewed by coordinator
-- `ignore` — coordinator reviewed, no action needed (e.g., clean audit)
-- `proceed` — approved for implementation, implementation agent will be scheduled
-- `ask` — coordinator is uncertain, flagged for human review
-- `implemented` — implementation completed, `git_commit_impl` records the merge commit
-- `deferred` — valid findings but lower priority than current work; will revisit
-- `blocked` — depends on something else (another agent's work, human input, external dependency)
-
-The `notes` field contains the coordinator's reasoning — why it chose this decision, what it prioritized instead, risk assessment. This makes the coordinator's "thinking" inspectable and debuggable. The `ateam reports` command (§11.5) queries this table to show the coordinator's pipeline.
+**The `reports` table** is the coordinator's decision log in structured form. Report paths follow the naming convention `{agent}/work/{date}_{time}_{DESCRIPTIVE_NAME}.report.md` with a matching `.actions.md` if the coordinator acted on it (see §12). The decision field captures outcomes: `pending`, `ignore`, `proceed`, `ask`, `implemented`, `deferred`, `blocked`.
 
 **Why SQLite:**
 - Single file, zero setup, no daemon, no lockfiles.
-- WAL mode enables concurrent readers + single writer — perfect for ATeam's access pattern (one writer at a time: either CLI or coordinator, with advisory locking via SQLite's built-in mechanism).
-- Trivially inspectable: `sqlite3 ateam.db "SELECT agent_name, status FROM agents"`.
+- WAL mode: unlimited concurrent readers + brief exclusive writes. Multiple coordinators and CLI sessions coexist safely.
+- Trivially inspectable: `sqlite3 .ateam/ateam.sqlite "SELECT project, agent_name, status FROM agents"`.
 - The `ateam db` command opens a sqlite3 shell for ad-hoc queries.
-- Schema is recreatable from code, so `ateam.db` can be `.gitignore`d (transient state, not config).
+- `.gitignore`d because the data is transient runtime state, not configuration.
 
 **MCP tools are CLI wrappers.** The coordinator's MCP server implements tools by calling the `ateam` CLI:
 
 ```
 subagent_run_audit("testing", "myapp")
-  → internally: ateam -d /path/to/myapp run --agent testing --mode audit
-  → CLI updates ateam.db: INSERT INTO operations, UPDATE agents SET status='running'
+  → internally: ateam -p myapp run -a testing --mode audit
+  → CLI updates ateam.sqlite: INSERT INTO operations, UPDATE agents SET status='running'
   → CLI spawns Docker container
   → on completion: UPDATE agents SET status='stopped', time_ended=now
   → INSERT INTO operations (operation='complete', notes='exit_code=0, report=...')
@@ -1228,7 +1262,7 @@ ateam resume
 
 # ── From anywhere ────────────────────────────────────────────────
 
-ateam -d ~/my_projects/projectx pause --agent testing --agent security
+ateam -p projectx pause -a testing -a security
 ```
 
 **The scheduler's decision loop** reads from SQLite each cycle:
@@ -1260,10 +1294,10 @@ cd projectx/testing
 ateam shell
 
 # Or explicitly:
-ateam -d ~/my_projects/projectx shell --agent testing
+ateam -p projectx shell -a testing
 
 # This:
-# 1. Checks ateam.db: is testing idle/suspended/stopped/error?
+# 1. Checks ateam.sqlite: is testing idle/suspended/stopped/error?
 #    If running → error "agent already running"
 # 2. UPDATE agents SET status='interactive', time_started=now,
 #      reason='manual', git_commit_start=HEAD
@@ -1299,7 +1333,7 @@ If the container is dead but status='running', it's stale — the CLI crashed or
 
 ### 10.6 CLI Command Implementation Details
 
-Every CLI command is a composition of three data sources: **SQLite** (ateam.db), **git** (worktrees, refs, HEAD), and **Docker** (containers, inspect). This section documents exactly what each command reads and writes.
+Every CLI command is a composition of three data sources: **SQLite** (ateam.sqlite), **git** (worktrees, refs, HEAD), and **Docker** (containers, inspect). This section documents exactly what each command reads and writes.
 
 #### `ateam status`
 
@@ -1477,7 +1511,7 @@ Changelog (last 10 entries):
 **Implementation:**
 
 ```
-READ  file    cat {project_dir}/changelog.md
+READ  file    cat {project}/changelog.md
               → parse markdown: extract date, action, agent, description
               → the changelog format is structured enough for simple parsing:
                 entries are separated by "## YYYY-MM-DD" headers with
@@ -1791,7 +1825,7 @@ WRITE sqlite  VACUUM
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ SQLite (ateam.db)                                               │
+│ SQLite (ateam.sqlite)                                               │
 │   agents table     → current state: who's running, since when,  │
 │                      why, at what commit                        │
 │   operations table → audit log: every state transition, with    │
@@ -1890,8 +1924,8 @@ ateam db "SELECT docker_instance, notes FROM operations
 
 **"Quick state check from anywhere"**
 ```bash
-ateam -d ~/my_projects/projectx status
-ateam -d ~/my_projects/projectx reports --decision pending
+ateam -p projectx status
+ateam -p projectx reports --decision pending
 ```
 
 ---
@@ -1908,48 +1942,111 @@ This means **the CLI is usable before the coordinator exists.** During Phase 1 d
 ateam [global-options] <command> [command-options]
 
 Global Options:
-  -d, --dir PATH        Project directory (overrides CWD-based detection)
-  --agent NAME          Agent name (overrides directory-based detection)
-  --json                Machine-readable JSON output (for scripting / MCP)
-  --verbose, -v         Show additional detail (SQL queries, docker commands)
-  --dry-run             Show what would happen without executing
-  --help, -h            Show help for any command
+  --org PATH                Organization root (overrides CWD-based detection)
+  -p NAME, --proj NAME,
+    --project NAME          Project name (overrides CWD-based detection)
+  -a NAME, --agent NAME     Agent name (overrides CWD-based detection)
+  -coord, --coordinator     Target the coordinator (not an agent)
+  --json                    Machine-readable JSON output (for scripting / MCP)
+  --verbose, -v             Show additional detail (SQL queries, docker commands)
+  --dry-run                 Show what would happen without executing
+  --help, -h                Show help for any command
 ```
 
-**Directory context** (see §10.1): if `--dir` is not specified, the CLI walks up from `$CWD` looking for `config.toml`. If the current directory basename matches an enabled agent name, `--agent` is inferred automatically.
+**Directory context** (see §10.1): the CLI walks up from `$CWD` looking for `.ateam/` (org root), then checks if CWD is inside a subdirectory with `config.toml` (project), then checks if the directory basename matches an enabled agent name. All levels can be overridden with explicit flags.
 
-### 11.2 Project Setup
+### 11.2 Organization & Project Setup
 
-#### `ateam init`
+#### `ateam install`
 
-Initialize a new project directory with config, database, and agent scaffolding.
+Initialize a new organization root — creates the `.ateam/` directory with the org-wide database, default agent prompts, and the knowledge base.
 
 ```
-ateam init [--dir PATH]
+ateam install [PATH]
+
+PATH defaults to current directory.
 
 Creates:
-  config.toml             Project configuration (from template)
-  ateam.db                SQLite database (empty, schema applied)
-  testing/                Agent directories for each enabled agent
-    role.md                 (from shared .agents/ template)
-    knowledge.md            (empty)
-    work/                   (empty)
-  refactor/
-    ...
+  PATH/.ateam/
+    .git/                         Git repo for org-level config files
+    .gitignore                    Ignores ateam.sqlite
+    ateam.sqlite                  Org-wide SQLite database (WAL mode)
+    coordinator_role.md           Default coordinator prompt
+    agents/                       Default agent role prompts
+      testing/role.md
+      refactor/role.md
+      security/role.md
+      performance/role.md
+      deps/role.md
+      docs-internal/role.md
+      docs-external/role.md
+    knowledge/                    Tech-stack culture files (starter set)
+      golang.md
+      typescript.md
+      python.md
+      postgresql.md
+      docker.md
+      react.md
+      testing_jest.md
+      testing_pytest.md
+      security_owasp.md
+      linting_eslint.md
+      linting_ruff.md
 
-Options:
-  --template PATH       Use a custom config.toml template
-  --agents LIST         Comma-separated list of agents to enable
-                        (default: testing,refactor,security,performance,deps,docs-internal,docs-external)
-  --repo URL            Git repository URL (written to config.toml)
-  --stack LIST          Tech stack declaration (e.g., typescript,react,postgresql)
+Commits the initial state to .ateam/.git
 ```
 
 Example:
 ```bash
-mkdir myapp && cd myapp
-ateam init --repo git@github.com:org/myapp.git --stack typescript,react,postgresql
-# Created config.toml, ateam.db, 7 agent directories
+mkdir ~/my_org && cd ~/my_org
+ateam install
+# Created .ateam/ with database, 7 agent roles, 11 knowledge files
+```
+
+#### `ateam init`
+
+Initialize a new project within an existing organization. Must run inside a directory containing `.ateam/`.
+
+```
+ateam init PROJECT_NAME [options]
+
+Creates:
+  PROJECT_NAME/
+    .git/                         Project-level git repo (for config, reports, changelogs)
+    config.toml                   Project configuration (from template)
+    Dockerfile                    Build environment for sub-agent containers
+    docker_run.sh                 Container launch helper
+    project_goals.md              Project-specific instructions (empty template)
+    changelog.md                  Coordinator decision log (empty)
+    testing/                      Agent directories (knowledge + work only)
+      knowledge.md
+      work/
+    refactor/
+      knowledge.md
+      work/
+    ... (one per enabled agent)
+
+  Agent directories do NOT get role.md — they inherit from
+  .ateam/agents/{agent}/role.md. Create a local role.md
+  (full override) or role_add.md (additive) only when needed.
+
+Options:
+  --git URL               Project source repo URL (bare clone set up)
+  --stack LIST            Tech stack (e.g., typescript,react,postgresql)
+  --agents LIST           Agents to enable (default: all 7)
+  --template PATH         Custom config.toml template
+
+Database writes:
+  INSERT INTO agents (project, agent_name, status='idle')
+    for each enabled agent
+```
+
+Example:
+```bash
+cd ~/my_org
+ateam init myapp --git git@github.com:org/myapp.git --stack typescript,react,postgresql
+# Created myapp/ with config, 7 agent directories
+# Registered 7 agents in .ateam/ateam.sqlite
 ```
 
 #### `ateam doctor`
@@ -1960,15 +2057,16 @@ Health check: verifies all dependencies and state consistency.
 ateam doctor [--fix]
 
 Checks:
+  ✓ .ateam/ exists with valid ateam.sqlite
   ✓ Docker daemon running and accessible
-  ✓ Git installed and bare repo accessible
+  ✓ Git installed and accessible
   ✓ Claude Code CLI installed (claude --version)
-  ✓ SQLite database exists and schema is current
-  ✓ Config.toml valid and parseable
-  ✓ Agent directories match config.toml enabled list
+  ✓ SQLite schema is current
+  ✓ All registered projects have config.toml
+  ✓ Agent directories match config.toml enabled lists
   ✓ No stale containers (SQLite says running, Docker disagrees)
   ✓ No orphan containers (Docker running, SQLite doesn't know)
-  ✓ No orphan worktrees (git worktree with no matching agent)
+  ✓ No orphan worktrees
   ✓ Egress firewall rules present in base image
 
 Options:
@@ -1999,7 +2097,7 @@ Options:
   --report PATH         For implement mode: path to the report to implement
 
 Preconditions (checked before launch):
-  - Agent status must NOT be 'running' or 'interactive' (in ateam.db)
+  - Agent status must NOT be 'running' or 'interactive' (in ateam.sqlite)
   - No Docker container named ateam-{project}-{agent} may be running
   - If both checks pass: creates worktree, starts container, updates DB
 
@@ -2024,7 +2122,7 @@ cd myapp/refactor
 ateam run --mode implement --report refactor/work/2026-02-26_2300_report.md
 
 # From anywhere
-ateam -d ~/projects/myapp run --agent testing --mode audit
+ateam -p myapp run -a testing --mode audit
 ```
 
 #### `ateam shell`
@@ -2378,7 +2476,7 @@ Direct SQLite access for advanced debugging.
 ```
 ateam db [QUERY]
 
-No arguments:  opens interactive sqlite3 shell on ateam.db
+No arguments:  opens interactive sqlite3 shell on ateam.sqlite
 With QUERY:    executes the query and prints results
 
 Examples:
@@ -2395,15 +2493,16 @@ This shows how a developer would use the CLI to drive the full audit→review→
 ```bash
 # ── Setup ────────────────────────────────────────────────────────
 
-mkdir myapp && cd myapp
-ateam init --repo git@github.com:org/myapp.git --stack typescript,react
-ateam doctor                          # verify everything is ready
+mkdir ~/my_org && cd ~/my_org
+ateam install                             # creates .ateam/ with db, roles, knowledge
+ateam init myapp --git git@github.com:org/myapp.git --stack typescript,react
+ateam doctor                              # verify everything is ready
 
 # ── Run a testing audit ──────────────────────────────────────────
 
-cd testing
-ateam run                             # starts audit in Docker container
-ateam status                          # watch progress + live stream-json
+cd myapp/testing
+ateam run                                 # starts audit in Docker container
+ateam status                              # watch progress + live stream-json
 # ... wait for completion ...
 ateam report                          # read the findings
 
@@ -2451,156 +2550,210 @@ ateam budget                          # cost tracking
 ateam history                         # full operations log
 ```
 
-This manual workflow maps 1:1 to what the coordinator does autonomously. When you're ready to hand off to the coordinator, just start the scheduler — it calls the same `ateam run`, reads the same `ateam.db`, writes the same `reports` table. The only difference is that `reason` changes from `'manual'` to `'coordinator'` and the decisions are made by Claude Code instead of a human updating the reports table.
+This manual workflow maps 1:1 to what the coordinator does autonomously. When you're ready to hand off to the coordinator, just start the scheduler — it calls the same `ateam run`, reads the same `ateam.sqlite`, writes the same `reports` table. The only difference is that `reason` changes from `'manual'` to `'coordinator'` and the decisions are made by Claude Code instead of a human updating the reports table.
 
 ---
 
 ## 12. File Hierarchy
 
-### 10.1 ATeam Framework Source
+### 12.1 ATeam Framework Source
 
 ```
-ateam/                                 # framework source (Python package)
-  src/
+ateam/                                 # framework source (Go module / Python package)
+  cmd/
     ateam/
-      __init__.py
-      cli.py                           # CLI entry point
-      coordinator.py                   # main coordinator logic
-      scheduler.py                     # schedule management
-      git_manager.py                   # bare repo, worktree management
-      docker_runner.py                 # container lifecycle + output collection
-      resource_monitor.py              # CPU/memory/container monitoring
-      budget.py                        # cost tracking and throttling
-      config.py                        # config parsing
-      prompt_builder.py                # assembles layered prompts
-      providers/
-        __init__.py
-        base.py                        # provider interface
-        claude_code.py                 # claude -p invocation
-        codex.py                       # codex CLI invocation
-        api_fallback.py                # custom API tool-use loop (fallback)
-  tests/
-  pyproject.toml
+      main.go                          # CLI entry point
+  internal/
+    cli/                               # command implementations
+    mcp/                               # MCP server (tools that wrap CLI)
+    docker/                            # container lifecycle
+    git/                               # bare repo, worktree management
+    prompt/                            # prompt builder (layered assembly)
+    db/                                # SQLite operations
+    config/                            # config.toml parsing
+  go.mod
 ```
 
-### 10.2 User Workspace (Git-Versioned)
+### 12.2 Organization Workspace
 
-The entire workspace below is a git repository (see §20). The `.gitignore` excludes bulky/ephemeral data like bare repos, worktrees, and transient prompt files.
+The org root contains `.ateam/` (org-level config, database, agent defaults, knowledge) and one or more project directories. The `.ateam/` directory has its own git repo for version-controlling the org-level files. Each project directory has its own git repo for version-controlling project-specific config, reports, and changelogs.
 
 ```
-my_projects/                           # root workspace — itself a git repo
-  .agents/                             # default agent definitions (shared across projects)
-    coordinator_role.md
-    testing/
-      role.md
-    refactor/
-      role.md
-    security/
-      role.md
-    performance/
-      role.md
-    deps/
-      role.md
-    docs-internal/
-      role.md
-    docs-external/
-      role.md
+ORG_ROOT_DIR/                          # organization root
+  .ateam/                              # org-level — managed by `ateam install`
+    .git/                              # git repo for org-level files
+    .gitignore                         # ignores ateam.sqlite
+    ateam.sqlite                       # state of ALL agents, ALL projects
+                                       #   (not version-controlled — transient state)
 
-  .common/                             # tech-stack culture (cross-project knowledge)
-    golang.md                          # Go conventions, preferred patterns, common pitfalls
-    typescript.md                      # TS/JS conventions, preferred libraries
-    python.md                          # Python conventions, tooling preferences
-    postgresql.md                      # PostgreSQL patterns, query optimization notes
-    docker.md                          # Dockerfile best practices, common configurations
-    react.md                           # React patterns, state management preferences
-    cli_fd.md                          # notes on using fd (find replacement)
-    cli_ripgrep.md                     # notes on using ripgrep
-    cli_jq.md                          # notes on using jq
-    testing_jest.md                    # Jest patterns and conventions
-    testing_pytest.md                  # Pytest patterns and conventions
-    security_owasp.md                  # OWASP top 10 patterns to check
-    linting_eslint.md                  # ESLint preferred configs
-    linting_ruff.md                    # Ruff preferred configs
-    # ... files are named after what they describe
-    # agents pick up only the files relevant to their project's stack
+    coordinator_role.md                # base coordinator prompt
 
-  PROJECT_NAME/                        # per-project configuration
-    config.toml                        # project config (enabled agents, schedule, budget)
+    agents/                            # default agent role prompts
+      testing/                         #   (shared by all projects unless overridden)
+        role.md
+      refactor/
+        role.md
+      security/
+        role.md
+      performance/
+        role.md
+      deps/
+        role.md
+      docs-internal/
+        role.md
+      docs-external/
+        role.md
+
+    knowledge/                         # tech-stack culture (cross-project)
+      golang.md                        #   Go conventions, patterns, pitfalls
+      typescript.md                    #   TS/JS conventions, libraries
+      python.md                        #   Python conventions, tooling
+      postgresql.md                    #   PostgreSQL patterns, optimization
+      docker.md                        #   Dockerfile best practices
+      react.md                         #   React patterns, state management
+      cli_fd.md                        #   notes on using fd
+      cli_ripgrep.md                   #   notes on using ripgrep
+      cli_jq.md                        #   notes on using jq
+      testing_jest.md                  #   Jest patterns and conventions
+      testing_pytest.md                #   Pytest patterns and conventions
+      security_owasp.md               #   OWASP top 10 patterns
+      linting_eslint.md               #   ESLint preferred configs
+      linting_ruff.md                  #   Ruff preferred configs
+      # ... files named after what they describe
+      # prompt builder picks only files matching project's stack
+
+  PROJECT_NAME/                        # per-project — managed by `ateam init`
+    .git/                              # project-level git repo
+    config.toml                        # project config (agents, schedule, budget, stack)
     Dockerfile                         # build environment for sub-agent containers
     docker_run.sh                      # container launch helper
     project_goals.md                   # project-specific instructions and priorities
-    changelog.md                       # coordinator decision log
-    testing/
-      role.md                          # project-specific role overrides
-      knowledge.md                     # accumulated project knowledge
-      current_prompt.md                # latest assembled prompt (transient, .gitignored)
+    changelog.md                       # coordinator decision log (narrative)
+
+    testing/                           # agent directory
+      knowledge.md                     #   accumulated project knowledge (git-versioned)
+      current_prompt.md                #   latest assembled prompt (transient, .gitignored)
       work/
-        2026-02-26_2300_report.md
-        2026-02-26_2300_report_completion.md
-    refactor/
-      role.md
+        2026-02-26_2300_AUTH_COVERAGE.report.md    # descriptive name for the report
+        2026-02-26_2300_AUTH_COVERAGE.actions.md   # what was done about it (if implemented)
+
+    refactor/                          # inherits role from .ateam/agents/refactor/role.md
+      knowledge.md                     # no local role.md needed — uses org default
+      work/
+
+    security/
+      role_add.md                      # ADDS to org-level security/role.md
+                                       #   (e.g., "pay special attention to our API keys
+                                       #    in environment variables, we use AWS Secrets Manager")
       knowledge.md
       work/
-    security/
-      ...
-    # (same structure for each enabled agent)
+
+    performance/
+      role.md                          # REPLACES org-level performance/role.md entirely
+                                       #   (this project has very specific perf requirements)
+      knowledge.md
+      work/
+
+    deps/
+      knowledge.md
+      work/
+
+    docs-internal/
+      knowledge.md
+      work/
+
+    docs-external/
+      knowledge.md
+      work/
 ```
 
-### 10.3 Tech-Stack Culture Files (`.common/`)
+### 12.3 Role Inheritance
 
-The `.common/` directory contains **on-demand knowledge files** organized by technology, tool, or pattern. These are not loaded into every agent's context — the prompt builder selects only the files relevant to the current project's stack (as declared in `config.toml`):
+The prompt builder assembles agent prompts using a layered inheritance model:
+
+```
+Assembled prompt =
+  1. .ateam/agents/{agent}/role.md          (org-level base role)
+  2. {project}/{agent}/role_add.md          (if exists: appended to base)
+     OR
+  2. {project}/{agent}/role.md              (if exists: REPLACES base entirely)
+  3. .ateam/knowledge/{matching files}      (tech-stack culture, based on project stack)
+  4. {project}/{agent}/knowledge.md         (accumulated project-specific knowledge)
+  5. {project}/project_goals.md             (project priorities)
+  6. Mode-specific instructions + task context
+```
+
+**Three patterns:**
+
+- **Default inheritance** (most common): No `role.md` or `role_add.md` in the project's agent directory. The org-level role is used as-is. This is the case for most agents in most projects.
+
+- **Additive override** (`role_add.md`): The project has extra instructions that supplement the base role. Example: the security agent's base role covers general vulnerability patterns, but this project has specific concerns about its API key management. The `role_add.md` adds those instructions without replacing the base.
+
+- **Full override** (`role.md`): The project's agent needs fundamentally different behavior. The local `role.md` completely replaces the org-level one. Example: a performance-critical project where the performance agent needs a completely different audit methodology.
+
+If both `role.md` and `role_add.md` exist in the same agent directory, `role.md` wins (full override), and `role_add.md` is ignored. The prompt builder logs a warning.
+
+### 12.4 Report Naming Convention
+
+Reports in the `work/` directory use descriptive names:
+
+```
+{date}_{time}_{DESCRIPTIVE_NAME}.report.md
+{date}_{time}_{DESCRIPTIVE_NAME}.actions.md
+```
+
+Examples:
+```
+2026-02-26_2300_AUTH_COVERAGE.report.md        # testing agent: auth module coverage gaps
+2026-02-26_2300_AUTH_COVERAGE.actions.md        # what was implemented from that report
+2026-02-27_0100_SQL_INJECTION_API.report.md     # security agent: SQL injection findings
+2026-02-27_0200_DEAD_CODE_REMOVAL.report.md     # refactor agent: dead code analysis
+2026-02-27_0200_DEAD_CODE_REMOVAL.actions.md    # the actual removals performed
+```
+
+The `.report.md` is produced by the agent during audit mode. The `.actions.md` is produced during implement mode (if the coordinator decided to act on the report). Both are git-versioned in the project repo. The `reports` table in `ateam.sqlite` tracks the mapping between report files and coordinator decisions.
+
+### 12.5 Knowledge Files
+
+The `.ateam/knowledge/` directory contains **on-demand knowledge files** organized by technology, tool, or pattern. These are not loaded into every agent's context — the prompt builder selects only the files relevant to the current project's stack (as declared in `config.toml`):
 
 ```toml
 [project]
 stack = ["typescript", "react", "postgresql", "docker", "testing_jest", "linting_eslint"]
 ```
 
-The prompt builder then includes the matching `.common/` files in the agent's system prompt, keeping the context window lean. A Go project's security agent sees `golang.md` and `security_owasp.md`, not `react.md` or `testing_jest.md`.
+The prompt builder then includes the matching knowledge files in the agent's prompt, keeping the context window lean. A Go project's security agent sees `golang.md` and `security_owasp.md`, not `react.md` or `testing_jest.md`.
 
-**How culture files are populated:**
-- Initially seeded manually or by running a dedicated "culture harvest" pass on an existing project.
-- Sub-agents in **maintain** mode can propose additions to `.common/` files when they learn something project-specific that would be broadly useful.
-- The coordinator reviews and commits these updates to the workspace git repo.
+**How knowledge files are populated:**
+- Initially seeded by `ateam install` with a starter set.
+- Sub-agents in **maintain** mode can propose additions when they learn something broadly useful.
+- The coordinator reviews and commits updates to the `.ateam/` git repo.
+- Developers can manually add or edit files at any time.
 
-**Example `.common/golang.md`:**
-```markdown
-# Go Tech-Stack Culture
+### 12.6 Git Structure: Two Repos
 
-## Error Handling
-- Always wrap errors with context: `fmt.Errorf("operation failed: %w", err)`
-- Use sentinel errors for expected conditions, wrapped errors for unexpected
-- Never ignore errors; at minimum log them
+Each level has its own git repo to avoid write contention when multiple coordinators run concurrently:
 
-## Testing
-- Table-driven tests preferred for functions with multiple cases
-- Use testify/assert for readable assertions
-- Prefer testing behavior over implementation details
+- **`.ateam/.git`** — org-level files: agent roles, knowledge base, coordinator prompt. Changed infrequently. Only humans (or a dedicated maintain cycle) commit here.
 
-## Dependencies
-- Prefer stdlib over third-party where reasonable
-- Use golangci-lint with the project's .golangci.yml
-- Run `go vet` and `staticcheck` in CI
-```
+- **`{project}/.git`** — project-level files: config.toml, reports, actions, changelogs, knowledge.md. Changed frequently by coordinators and agents. Each project's coordinator commits independently, so projects don't block each other.
 
-### 10.4 Relationship to CLAUDE.md Files
+The `ateam.sqlite` database is `.gitignore`d in `.ateam/` because it's transient runtime state, not configuration. The schema is recreatable from code.
+
+### 12.7 Relationship to CLAUDE.md Files
 
 ATeam's knowledge system complements — but does not replace — Claude Code's native `CLAUDE.md` mechanism:
-
-- **`~/.claude/CLAUDE.md`** (global): Personal preferences and conventions that apply to all Claude Code sessions, including ATeam sub-agents. This is a good place for universal preferences like "prefer explicit error handling over try/catch" or "always use conventional commits".
-- **Per-repo `CLAUDE.md`**: Project-specific instructions that Claude Code reads automatically. Developers should continue maintaining this for their own interactive Claude Code sessions. ATeam sub-agents also benefit from it since they run Claude Code in the project's worktree.
-
-**How these layers interact:**
 
 ```
 Claude Code context (inside Docker) =
   ~/.claude/CLAUDE.md          (global preferences, mounted via ~/.claude)
   + /workspace/CLAUDE.md       (project CLAUDE.md, in the git worktree)
-  + ATeam prompt               (role + culture + knowledge + task)
+  + ATeam prompt               (role + knowledge + task)
 ```
 
-The key distinction: `CLAUDE.md` files are maintained by human developers for their own Claude Code usage. ATeam's `.agents/` roles and `.common/` culture files are maintained by the ATeam system for its specialized agents. They coexist naturally because Claude Code reads `CLAUDE.md` automatically, and ATeam injects its own context via the `-p` prompt.
+`CLAUDE.md` files are maintained by human developers for their own Claude Code sessions. ATeam's `.ateam/agents/` roles and `.ateam/knowledge/` files are maintained for specialized agents. They coexist naturally because Claude Code reads `CLAUDE.md` automatically, and ATeam injects its context via the prompt.
 
-**Cross-pollination:** The `.common/` tech-stack culture files can harvest knowledge from one project's `CLAUDE.md` and make it available to other projects using the same technology. For example, if Project A's `CLAUDE.md` has detailed PostgreSQL optimization notes, those can be extracted into `.common/postgresql.md` and benefit Project B without Project B's developers having to rediscover them.
+**Cross-pollination:** Knowledge files can harvest useful patterns from one project's `CLAUDE.md` and make them available org-wide. For example, PostgreSQL optimization notes from Project A can be extracted into `.ateam/knowledge/postgresql.md` for all projects.
 
 ---
 
@@ -2670,19 +2823,22 @@ Each sub-agent invocation is constructed from layered prompt files:
 PROMPT (assembled by CLI, written to current_prompt.md) =
 
   # Your Role
-  {.agents/{agent_id}/role.md}
+  {.ateam/agents/{agent_id}/role.md}           (org-level base role)
+  {project/{agent_id}/role_add.md}             (if exists: appended to base)
+  OR
+  {project/{agent_id}/role.md}                 (if exists: REPLACES base)
 
-  # Tech-Stack Culture (on-demand, based on project stack config)
-  {.common/typescript.md}              (if project stack includes typescript)
-  {.common/postgresql.md}              (if project stack includes postgresql)
-  {.common/testing_jest.md}            (if project stack includes testing_jest)
+  # Tech-Stack Knowledge (on-demand, based on project stack config)
+  {.ateam/knowledge/typescript.md}             (if project stack includes typescript)
+  {.ateam/knowledge/postgresql.md}             (if project stack includes postgresql)
+  {.ateam/knowledge/testing_jest.md}           (if project stack includes testing_jest)
   # ... only matching files are included
 
-  # Project-Specific Role
-  {project/{agent_id}/role.md}         (if exists)
-
   # Project Knowledge
-  {project/{agent_id}/knowledge.md}    (accumulated from past runs)
+  {project/{agent_id}/knowledge.md}            (accumulated from past runs)
+
+  # Project Goals
+  {project/project_goals.md}                   (project-level priorities)
 
   # Your Mission This Run
   {mode-specific instructions}
@@ -2692,13 +2848,13 @@ PROMPT (assembled by CLI, written to current_prompt.md) =
   {what files to write to /output/}
 ```
 
-The role prompts below are the `.agents/{agent_id}/role.md` files — the stable identity of each agent. Project-specific overrides go in `{project}/{agent_id}/role.md`. Knowledge accumulated across runs lives in `{project}/{agent_id}/knowledge.md`.
+The role prompts below are the `.ateam/agents/{agent_id}/role.md` files — the stable identity of each agent. Projects can add to them with `role_add.md` or fully override with a local `role.md` (see §12.3 for inheritance rules). Knowledge accumulated across runs lives in `{project}/{agent_id}/knowledge.md`.
 
 ---
 
 ### 14.1 Coordinator
 
-**File:** `.agents/coordinator/role.md`
+**File:** `.ateam/agents/coordinator/role.md`
 
 This prompt is used as the system prompt for the coordinator Claude Code instance (injected via `CLAUDE.md` or `-p` flag). It runs on the host (not in Docker) and orchestrates sub-agents via MCP tools that wrap the `ateam` CLI.
 
@@ -2713,7 +2869,7 @@ good enough to merge.
 ## Your Tools
 
 You have MCP tools that wrap the `ateam` CLI. Every tool reads/writes the
-project's ateam.db SQLite database. Key tools:
+project's ateam.sqlite SQLite database. Key tools:
 
 - `ateam run --agent NAME --mode MODE` — start an agent
 - `ateam status` — see all agent states, commit freshness, pending reports
@@ -2727,10 +2883,6 @@ Use these to read reports, inspect code, write changelog entries, and
 run quick checks.
 
 ## Decision Principles
-
-### 0. Be pragmatic
-
-If a project is small then not a lot is needed besides code quality and basic regression and an occasional security review. As projects move to medium to large size rely more on sub-agents to maintain overall project quality. Be pragmatic, adapter your decision to the complexity and size of the code base and tool surface.
 
 ### 1. Tests Come First — Always
 
@@ -2825,7 +2977,7 @@ When invoked for a scheduled cycle:
 
 ### 14.2 Tester
 
-**File:** `.agents/testing/role.md`
+**File:** `.ateam/agents/testing/role.md`
 
 ```markdown
 # Testing Agent
@@ -2919,7 +3071,7 @@ Execute the approved findings from your report:
 
 ### 14.3 Quality
 
-**File:** `.agents/quality/role.md`
+**File:** `.ateam/agents/quality/role.md`
 
 ```markdown
 # Quality Agent
@@ -3031,7 +3183,7 @@ Execute approved refactoring from your report:
 
 ### 14.4 Security
 
-**File:** `.agents/security/role.md`
+**File:** `.ateam/agents/security/role.md`
 
 ```markdown
 # Security Agent
@@ -3136,7 +3288,7 @@ Execute approved security fixes:
 
 ### 14.5 Internal Documentation
 
-**File:** `.agents/internal_doc/role.md`
+**File:** `.ateam/agents/internal_doc/role.md`
 
 ```markdown
 # Internal Documentation Agent
@@ -3221,7 +3373,7 @@ For small projects: this is unnecessary. The code overview is sufficient.
 
 ### 14.6 External Documentation
 
-**File:** `.agents/external_doc/role.md`
+**File:** `.ateam/agents/external_doc/role.md`
 
 ```markdown
 # External Documentation Agent
