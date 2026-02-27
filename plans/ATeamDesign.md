@@ -2958,7 +2958,7 @@ TODO:
     * maybe: split into 2 different agents: one for small refactor and one for bigger ones
     * maybe: also split testing:
       * basic project integrity, fast, targetted tests
-      * integration testing: more comprehensive tests, harder setup, harder debugging
+      * integration testing: more comprehensive tests, more difficult setup, more difficult debugging
 
 **File:** `.ateam/agents/coordinator/role.md`
 
