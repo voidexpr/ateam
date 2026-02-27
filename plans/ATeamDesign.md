@@ -6,6 +6,16 @@
 
 ---
 
+ATeam is a tool to run non-interactive claude code sessions when requested or on a schedule to improve project quality: refactor, test, security audit, performance audit, documentation updates. Automate the non-essential tasks without human interaction so humans can focus on feature work with other agents. Use Docker to run isolated. The system is mostly a bunch of markdown files to specify what to do, generate reports and accumulate domain specific knowledge about projects. There is a sqlite file to track the state of these agents. A central coordinator agent does the orchestration.
+
+The vision is to run a few CLI commands that given a git repo configures and run non-interactive agents improve the quality of the work of other agents so humans can focus on features and not have to look at code without letting it evolve into a mess. These non-interactive agents run in docker container for safety and to not require constant approvals. We use agents to check other agents work. The system uses a bunch markdown files to set policies and build domain specific knowledge about the project over time. There is a notion of organization above projects to factor out this knowledge and preferences (the culture) for other projects.
+
+The system tries to avoid falling into spawning and managing a swarm of agents that can overwhelm humans. Instead the basic idea is to have on each commit or at night a few extra refactoring and testing occur unattended, then once in a while security is improved by upgrading dependencies and running regressions, doc is kept up to date. Recent commits are refactored and once in a while the architecture is revisited and might result in bigger refactoring.
+
+Smart prompting tries to not be over eager, not always act, act differently given the size, complexity and velocity of the projects.
+
+Agents use the code, their own markdown files, git commit information to decide what to do. They produce their own summaries for future execution. All their work is done as one-shot. A coordinator agent reads all the reports and work done and is the only own allowed to escalate decisions to a human if it's unclear what to do. Git is used to version all actions taken by agents so 'git log' is a summary of what is being done. Simple tools and simple workflows: markdown files, a single CLI shared with agents, some customizable prompts. That's it. The cost: dockerize the development and testing environment (have an agent do it for you).
+
 ## 1. Executive Summary
 
 ATeam is an agent coordination framework that automates essential but tedious engineering tasks — code quality, architecture integrity, testing, performance, security, and documentation — so human developers can focus on feature work. A lightweight Python coordinator orchestrates specialized sub-agents that run **Claude Code inside Docker containers**, operating on Git worktrees from a shared repository. Work happens primarily during off-hours with minimal human intervention.
@@ -1004,7 +1014,7 @@ The CLI auto-detects: if `ANTHROPIC_API_KEY` is set (in environment or `.env`), 
 
 ---
 
-## 10. Debugging and Operations
+## 10. Operations and Debugging
 
 ### 10.1 CLI Context: Directory-Aware Commands
 
