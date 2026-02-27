@@ -1,5 +1,39 @@
 # Ateam
 
+## Story time
+
+This is my story leading to ATeam: I find that working with agents require a lot of attention in burst and interaction is absolutely require to help shape a specific feature. But the constant approval of minor commands is a drag. Over time code tends to decay so I often ask the coding agent to refactor recent changes before I might even review them. Then less frequently I ask the agent to find and perform bigger refactoring, add tests, review security audit, do some performance optimizations, update documents (internal and external(, etc ... It's time consuming to ask for these tasks, then manage them to completion. And they could be happened asynchronously on every commit or at time or when development is not occurring. Lastly expertise and overview of the code from a particular perspective (architecture, security, etc ...) gets lost as features need to their own context. Not the speak about cross project knwoledge that is not passed along.
+
+So the idea is to have one or more agents working on the side and doing all these well defined tasks on their own with full command approval so no interaction is needed. Then these changes are pulled in to the main repos (after these agents go into the trouble of merging and solving potential conflict from feature work). For this to work we must use containers and add a level of orchestration. Also deciding what to do next from these well defined tasks can be delegated to an agent itself. Thus ATeam:
+* coordinator agent
+* sub-agent with specific roles (refactoring, testing, security audit, documentation, ...)
+* docker for isolation
+* claude code or codex as the coding agent
+* A CLI to tie all these pieces together, the coordinator uses this CLI by itself
+* the CLI maintains a sqlite database to track what each agent is up and where they have caught up with the current code (by tracking git commit seen)
+* then there is a layer of markdown files to provide agent role background and also have the agents maintain their own knowledge about the project. Then as they do work they merge their new findings with the old and summarize it
+* git is used to track agent work, it can provide a simple timeline of decisions
+* sub-agents work in one-shot sessions (claude -p) in 2 modes:
+  * produce a report of what that agent could be doing
+  * implement a report
+* the coordinator agent schedules reports, looks at a few and prioritize which one to do
+
+This is called ATeam, for a given project just have an ATeam instance on its own checkout of your project and have it automatically push its changes or review the local commits and push yourself. If you need to debug anything use the same CLI as the coordinator to start/stop/chat with any agent or the coordinator itself.
+
+Where many frameworks want you to design workflows and manage a lot of agents, the goal of ATeam is to require as little attention as possible. Just have the code be refactored in the background, test coverage improved, etc ...
+
+## Mental model
+
+ATeam does a checkout of your project to work on using role specific agents (refactoring, testing, ...) managed by a coordinator agent. It wraps the checkout it its own directory with the state required to coordinate these agents (role, project specific memories, state of agents). This internal directory uses its own local git repo to provide a full history of changes.
+
+To your project ATeam appears like a single extra coloborator so the management overhead is minimal. Internally ATean uses per agent role git work trees to isolate and potentially parallelize the work but the coordinator aggregates all the work done and can leave it up to you to push the changes manually, automatically or just discard them.
+
+So the mental model is to have an extra collaborator on your repo focus on the engineering itself. Because it is a well defined task the attention required should be minimal. This way you can focus on feature work where attention is required.
+
+The basic idea is to use agents to fix the code of other agents so the quality remains good and adding new features don't start breaking the project left and right.
+
+## First prompt
+
 We want to design an agent coordination framework to use in software projects to perform the boring but necessary engineering tasks in the background: code quality, architecture integrity, testing, performance, security, internal and external documentation. To allow human developers to focus on feature work using their own agents. Then either at night or during low work periods this framework would relentlessly improve the software quality with minimal cognitive overhead to humans.
 
 We want to build project specific knowledge (and potentially cross project cultural knowledge too), have agents configure tools to reduce the amount of future audits they need to perform. Most of the work should require no human intervention but some approval can be needed for bigger tasks or to resolve priority conflicts.
