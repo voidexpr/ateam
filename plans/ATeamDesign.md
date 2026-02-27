@@ -28,7 +28,7 @@ ATeam's prompts promote **pragmatic approaches**:
 
 An organization layer above projects **factors out common knowledge** for specific roles and tech stacks — conventions, patterns, and preferences shared across your codebase.
 
-Other frameworks wants you to spend time defining your work within them, ideally ATeam's work is only seen as additional git commit in your main repo: code improves, additional tools get run as part of the existing build process, documentation is updated.
+ATeam aims at giving its benefits with close to no config (ideally just the git repo and can assist with the initial docker config). Then just observe the git commits performed on your repo (or push them with `ateam push`): code refactoring, tool use, tests, docs, ... If you want to know what ATeam is up to in more details look at its own git repo for markdown file changes, or run `ateam chat` to have a conversation with the coordinator about recent activity.
 
 **The cost**: dockerize the development environment of a project (an agent can do the heavy lifting), then a few CLI commands set up ATeam on any git repo while you continue your work.
 
@@ -48,6 +48,7 @@ Other frameworks wants you to spend time defining your work within them, ideally
 
 ### Operational Goals
 
+- Get benefit on a project with minimal config or understanding of ATeam
 - Avoid overwhelming humans with agent activity.
 - Avoid wasteful token consumption on low-value busywork.
 - Build and maintain project-specific and cross-project knowledge.
@@ -119,9 +120,10 @@ The CLI checks budget before every launch:
 │                        │ │                                │
 │  install / init        │ │ Invoked by scheduler:          │
 │  run / shell / kill    │ │   claude -p "Run ATeam cycle"  │
-│  status / reports      │ │     --max-budget-usd 5.00      │
-│  pause / resume        │ │                                │
-│  cleanup / doctor      │ │ Uses Bash tool to call:        │
+│  chat / push           │ │     --max-budget-usd 5.00      │
+│  status / reports      │ │                                │
+│  pause / resume        │ │ Uses Bash tool to call:        │
+│  cleanup / doctor      │ │                                │
 │                        │ │   ateam status --json          │
 │  Container adapters    │ │   ateam run -a testing         │
 │  Git worktree mgmt     │ │   ateam reports --decision ... │
@@ -892,6 +894,8 @@ on schedule_trigger (night cycle):
     7. Flag high-risk for human review (decision='ask')
     8. After implementations: re-run testing to verify
     9. Update changelog.md
+    10. Commit ATeam files + push to remote (if configured)
+    11. If auto_push_project_repo: ateam push
 
 on human_override (via ateam pause/resume/run):
     Scheduler respects agent status in ateam.sqlite.
@@ -1795,6 +1799,46 @@ WRITE sqlite  DELETE FROM operations WHERE timestamp < datetime('now', '-90 days
 WRITE sqlite  VACUUM
 ```
 
+#### `ateam chat`
+
+```
+READ  sqlite  SELECT * FROM operations ORDER BY timestamp DESC LIMIT 20
+READ  sqlite  SELECT * FROM reports WHERE decision IN ('pending','ask')
+READ  sqlite  SELECT agent_name, status, time_started, reason FROM agents
+READ  file    tail -50 {project}/changelog.md
+              → assembles activity summary from all sources
+
+WRITE sqlite  INSERT INTO operations (operation='chat',
+                notes='interactive coordinator session started')
+
+EXEC  shell   claude --dangerously-skip-permissions
+              → coordinator prompt + activity summary as initial context
+              → blocks until user exits
+
+WRITE sqlite  INSERT INTO operations (operation='chat_end',
+                notes='interactive coordinator session ended')
+```
+
+#### `ateam push`
+
+```
+# ── For each agent (or --agent NAME) with unpushed changes ────
+
+READ  sqlite  SELECT agent_name, git_commit_start, git_commit_end FROM agents
+READ  git     git -C {worktree_path} status --porcelain
+              → if uncommitted changes:
+WRITE git       git -C {worktree_path} add -A
+WRITE git       git -C {worktree_path} commit -m "ateam: {agent} changes"
+
+READ  git     git -C {bare_repo} rev-list origin/{branch}..{branch}
+              → count unpushed commits
+              → with --dry-run: print summary and stop
+
+WRITE git     git -C {bare_repo} push origin {branch}
+WRITE sqlite  INSERT INTO operations (agent_name, operation='push',
+                notes='pushed {N} commits on {branch} to {remote}')
+```
+
 #### Summary: Data Source Responsibilities
 
 ```
@@ -2023,6 +2067,11 @@ ateam init myapp --git git@github.com:org/myapp.git --stack typescript,react,pos
 # Registered 7 agents in .ateam/ateam.sqlite
 ```
 
+TODO:
+* need special prompts and maybe CLI options to instruct the coordinator what to do for a new project:
+  * aggressively get to work or focus on the new stuff
+* propose / cli args: scaffold docker integration if missing, based on reading the basic readme and docs of the project select appropriate agents (just refactor and small-scale-maintainer for small projects ? etc ...)
+
 #### `ateam doctor`
 
 Health check: verifies all dependencies and state consistency.
@@ -2170,6 +2219,91 @@ Equivalent to:
   git worktree add {path} main        (fresh checkout)
   ateam run --agent NAME --mode MODE
 ```
+
+#### `ateam chat`
+
+Open an interactive Claude Code session with the coordinator. This is a conversational interface to discuss what ATeam has been doing, ask questions, and give high-level instructions. Unlike `ateam shell` (which drops you into a specific agent's Docker environment), `ateam chat` runs on the host as the coordinator, with full access to the CLI, reports, and project state.
+
+```
+ateam chat
+
+Lifecycle:
+  1. Gathers recent activity summary:
+     - Last N operations from operations table
+     - Pending reports (decision='pending' or 'ask')
+     - Agent statuses (running, idle, errors)
+     - Recent changelog entries
+  2. Assembles coordinator prompt + activity summary as context
+  3. Starts interactive Claude Code session on the host:
+       claude --dangerously-skip-permissions
+     with the ateam CLI available in PATH
+  4. The coordinator prints the activity summary, then waits for input
+
+The coordinator can:
+  - Answer questions about recent agent activity
+  - Explain report findings and decisions
+  - Run agents on demand (ateam run)
+  - Triage pending reports
+  - Update priorities and knowledge
+  - Push changes (ateam push)
+
+Database writes:
+  INSERT INTO operations (operation='chat', notes='interactive coordinator session')
+```
+
+Examples:
+```bash
+cd myapp
+ateam chat
+# "What did the testing agent find last night?"
+# "Push the refactor changes"
+# "Pause security until after the release"
+# "What's our budget usage this week?"
+```
+
+TODO:
+* support chat with a sub-agent: launch it in interactive mode, update the db when the session ends
+
+#### `ateam push`
+
+Push agent changes from a project's bare repo back to the remote. By default, agent work stays local — `ateam push` is the explicit action to contribute changes back.
+
+```
+ateam push [--agent NAME] [--branch BRANCH] [--dry-run]
+
+Options:
+  --agent NAME     Only push changes from this agent's worktree
+  --branch BRANCH  Push to this remote branch (default: agent-specific branch)
+  --dry-run        Show what would be pushed without pushing
+
+Process:
+  1. For each agent with uncommitted worktree changes:
+     - Commits changes in the worktree (or skips if already committed)
+  2. Pushes from the bare repo to the remote:
+     git -C {bare_repo} push origin {branch}
+  3. Records the push in the operations table
+
+Without --agent: pushes all agents that have unpushed commits.
+
+Database writes:
+  INSERT INTO operations (agent_name, operation='push',
+    notes='pushed {branch} to {remote}')
+```
+
+Examples:
+```bash
+# Push all agent changes
+cd myapp
+ateam push
+
+# Push only testing agent changes
+ateam push --agent testing
+
+# Preview what would be pushed
+ateam push --dry-run
+```
+
+The coordinator can be configured to push automatically — see `[git]` config below.
 
 ### 11.4 Pause / Resume
 
@@ -2595,6 +2729,19 @@ ateam status                          # all agents, commit freshness
 ateam reports                         # full decision pipeline
 ateam budget                          # cost tracking
 ateam history                         # full operations log
+
+# ── Push changes to the remote ──────────────────────────────────
+
+ateam push --dry-run                  # preview what would be pushed
+ateam push                            # push all agent changes to remote
+
+# ── Or talk to the coordinator ──────────────────────────────────
+
+ateam chat
+# "What happened last night?"
+# "Push the testing changes"
+# "What should we focus on next?"
+# /exit
 ```
 
 This manual workflow maps 1:1 to what the coordinator does autonomously. When you're ready to hand off to the coordinator, just start the scheduler — it calls the same `ateam run`, reads the same `ateam.sqlite`, writes the same `reports` table. The only difference is that `reason` changes from `'manual'` to `'coordinator'` and the decisions are made by Claude Code instead of a human updating the reports table.
@@ -2837,6 +2984,21 @@ Each level has its own git repo to avoid write contention when multiple coordina
 
 The `ateam.sqlite` database is `.gitignore`d in `.ateam/` because it's transient runtime state, not configuration. The schema is recreatable from code.
 
+**Auto-commit and push for ATeam's own files:** The coordinator automatically commits changes to `{project}/.git` (reports, changelogs, knowledge updates) and `.ateam/.git` (org-level knowledge, role updates) after each cycle. If a remote is configured for these repos, the coordinator also pushes automatically. This keeps the git history of ATeam's own work always up to date without human intervention.
+
+This is distinct from `ateam push`, which pushes agent changes to the *project source repo* (the bare clone). Pushing to the source repo is explicit by default because it affects the project's real codebase. ATeam's own markdown files (reports, knowledge, changelogs) are safe to push automatically since they only affect ATeam's state.
+
+The `[git]` config section controls this behavior:
+
+```toml
+[git]
+auto_commit = true          # commit ATeam file changes after each cycle (default: true)
+auto_push = true            # push ATeam repos if remote exists (default: true)
+auto_push_project_repo = false  # also auto-push agent changes to project source repo (default: false)
+```
+
+Set `auto_commit = false` or `auto_push = false` for testing or when you want full manual control over ATeam's own git history. Set `auto_push_project_repo = true` to have the coordinator push agent code changes automatically (equivalent to running `ateam push` after each implementation cycle).
+
 ### 12.7 Relationship to CLAUDE.md Files
 
 ATeam's knowledge system complements — but does not replace — Claude Code's native `CLAUDE.md` mechanism:
@@ -2904,6 +3066,11 @@ memory = "4g"
 pids_limit = 256
 network = "bridge"                    # needs network for LLM API access
 # network_restrict_egress = true     # optional: whitelist only LLM API endpoints
+
+[git]
+auto_commit = true                   # commit ATeam file changes after each cycle
+auto_push = true                     # push ATeam repos (.ateam/.git, project/.git) if remote exists
+auto_push_project_repo = false       # push agent changes to project source repo (bare clone → remote)
 
 [timeouts]
 audit_minutes = 30
@@ -2986,6 +3153,8 @@ Key commands:
   ateam kill -a AGENT -p PROJECT       # stop a running agent
   ateam pause / resume                 # control scheduling
   ateam diff -a AGENT -p PROJECT       # see what an agent changed
+  ateam push -p PROJECT                # push agent changes to remote
+  ateam push -p PROJECT --agent NAME   # push specific agent's changes
   ateam budget -p PROJECT --json       # cost tracking
   ateam db "SQL QUERY"                 # direct database access
 
@@ -3077,6 +3246,7 @@ When invoked for a scheduled cycle:
 9. For each completed agent: triage report, implement if approved
 10. After implementations: re-run testing to verify
 11. Update changelog.md with decisions and outcomes
+12. If `auto_push_project_repo` is enabled: `ateam push` to send changes to remote
 
 ## What You Do NOT Do
 
@@ -3320,6 +3490,7 @@ For recent commits (since your last run):
   traces, database schemas, file paths)?
 - Review input validation: is user input validated and sanitized before
   use? Are there trust boundaries that aren't enforced?
+- Pay special attention to supply chain attacks by being warry of scripts accessing the network, paying attention to version of tools used with known security issues (we don't need to bleeding edge most of the time)
 
 ### Dependency Audit
 Periodically (or when commits include dependency changes):
@@ -3398,6 +3569,11 @@ Execute approved security fixes:
 5. Update knowledge.md and security_goals.md
 6. Note: for critical vulnerabilities, implementation should be fast-tracked
 ```
+
+TODO:
+* ask to keep map of dependencies to watch for the ones not needed or lightly needed to get rid of them
+* be wary of node packages as there are too many of them and promote replacement if simple enough
+  * maybe prefer bun/dino instead of node on project inception ?
 
 ---
 
@@ -3638,6 +3814,8 @@ The coordinator maintains `changelog.md`:
 - [ ] `ateam reports`, `ateam diff`, `ateam logs`, `ateam history`
 - [ ] `ateam pause / resume / kill / retry`
 - [ ] `ateam shell` — interactive Claude Code session in container
+- [ ] `ateam chat` — interactive coordinator session with activity summary
+- [ ] `ateam push` — push agent changes to project source remote
 - [ ] `ateam budget` — cost tracking from operations table
 - [ ] `ateam doctor` — health checks with --fix
 - [ ] `ateam db` — direct SQLite access
@@ -3842,8 +4020,10 @@ The key constraint: the Go CLI manages the lifecycle (start, stop, status, budge
 
 ## 21. Future Enhancements
 
+- **Support interactive sessions** - Use VibeTunnel (https://vibetunnel.sh/) or something similar to access agent specific coding agent and manage centrally which sessions require attentions or not
 - **Approve and reject changes** - ATeam proactively makes changes but it should be easy to reject or cherry pick the work it did to include in the main project
 - **Compact role specific and knowledge prompts** - Look into Vector Databases like Chroma, DuckDb+VSS, sqlite-vec, Qdrant to store knowledge about role, projects, organization culture
+- **Mentions to sub-agents**: when explicitly working on an agent's area (rearchitecture, testing, ...) @ mention specific agents to they take note of the direction given and give it a high weight for their future work
 - **Reactive triggers** — commit hooks, GitHub webhooks, chat-based triggering. Minimal architecture change since the CLI is the universal interface. See §20.7.
 - **Feature agents** — one-off agents for small feature work, leveraging the same Docker infrastructure and persistent workspaces.
 - **MCP server** — `ateam serve-mcp` command to expose CLI as MCP tools for use from Claude.ai or other MCP clients.
