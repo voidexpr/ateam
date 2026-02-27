@@ -18,9 +18,17 @@ Agent-generated code requires constant review or it becomes spaghetti — new fe
 * **A single CLI** to start, stop, and check on agents. It manages Docker containers, git worktrees, and tracks state in a SQLite database — which commits each agent has seen, what they found, what they did. The same CLI is used by humans and by the coordinator agent.
 * **No daemons, no complex IPC, no agents chatting**. Simple single-prompt agents doing one thing at a time on their own. A sqlite database is managed by the CLI to track the status of each agent
 
-ATeam's prompts promote **pragmatic approaches**. Small projects don't need exhaustive test suites or complex tooling. Role-specific agents are prompted to configure automated tools — smoke tests, linters, formatters — to tighten the development environment progressively. Code refactoring happens frequently at the scale of recent commits, and occasionally looks at bigger architectural improvements. The coordinator requests reports from role-specific agents on what could be done, then decides which tasks to act on now and which to defer. It tries to be mindful of token usage and the cost of this background work, but it continuously maintains good project hygiene. After each implementation, the coordinator asks role-specific agents to update their project knowledge so the next run has relevant context — knowledge is built and refined over time.
+ATeam's prompts promote **pragmatic approaches**:
+* Small projects don't need exhaustive test suites or complex tooling.
+* Role-specific agents are prompted to configure automated tools — smoke tests, linters, formatters — to tighten the development environment progressively.
+* Code refactoring happens frequently at the scale of recent commits, and occasionally looks at bigger architectural improvements.
+* The coordinator requests reports from role-specific agents on what could be done, then decides which tasks to act on now and which to defer.
+  * It tries to be mindful of token usage and the cost of this background work, but it continuously maintains good project hygiene.
+  * After each implementation, the coordinator asks role-specific agents to update their project knowledge so the next run has relevant context — knowledge is built and refined over time.
 
 An organization layer above projects **factors out common knowledge** for specific roles and tech stacks — conventions, patterns, and preferences shared across your codebase.
+
+Other frameworks wants you to spend time defining your work within them, ideally ATeam's work is only seen as additional git commit in your main repo: code improves, additional tools get run as part of the existing build process, documentation is updated.
 
 **The cost**: dockerize the development environment of a project (an agent can do the heavy lifting), then a few CLI commands set up ATeam on any git repo while you continue your work.
 
@@ -2943,6 +2951,11 @@ The role prompts below are the `.ateam/agents/{agent_id}/role.md` files — the 
 
 ### 14.1 Coordinator
 
+TODO:
+* coordinator should special case for code quality and testing as they are the most essential agents with more complex scheduling needs:
+  * testing before/after other changes and must be clean before doing anything else
+  * code quality does small refactoring on a change-by-change basis and bigger refactoring or even re-arhcitecting once the project as evolved enough
+
 **File:** `.ateam/agents/coordinator/role.md`
 
 This prompt is used as the system prompt for the coordinator Claude Code instance (injected via `-p` flag). It runs on the host (not in Docker) and orchestrates sub-agents by calling `ateam` CLI commands via its Bash tool.
@@ -3752,6 +3765,7 @@ Budget tracking relies on two mechanisms:
 
 **Mitigations:**
 
+- Use cheaper models in as many places as possible (maybe multi-report summarization, agent work completion, testing agent internal troubleshooting, ...)
 - Use `--max-budget-usd` as the primary control (hard cap). This is reliable regardless of tracking accuracy.
 - Use stream-json cost parsing as best-effort tracking for reporting and trend analysis.
 - The `ateam budget` command should clearly label cost estimates as approximate.
@@ -3824,6 +3838,8 @@ The key constraint: the Go CLI manages the lifecycle (start, stop, status, budge
 
 ## 21. Future Enhancements
 
+- **Approve and reject changes** - ATeam proactively makes changes but it should be easy to reject or cherry pick the work it did to include in the main project
+- **Compact role specific and knowledge prompts** - Look into Vector Databases like Chroma, DuckDb+VSS, sqlite-vec, Qdrant to store knowledge about role, projects, organization culture
 - **Reactive triggers** — commit hooks, GitHub webhooks, chat-based triggering. Minimal architecture change since the CLI is the universal interface. See §20.7.
 - **Feature agents** — one-off agents for small feature work, leveraging the same Docker infrastructure and persistent workspaces.
 - **MCP server** — `ateam serve-mcp` command to expose CLI as MCP tools for use from Claude.ai or other MCP clients.
