@@ -78,7 +78,8 @@ The good way to understand Ateam's mental model is to look at its folder hierarc
 ```
 my_org/
 
-  .ateam/
+  .ateam/            # Base config created by the ateam CLI for the entire org
+
     ateam.sqlite     # maintain state of all agents of all projects in one spot (tables: agent_status, agent_history, reports_history)
     config.toml      # default config projects can inherit
     agents/          # define reusable role specific sub-agents
@@ -86,7 +87,7 @@ my_org/
         prompt.md    # what the agents is supposed to do
     expertise/       # where cross-project knowledge goes
 
-  my_project_1
+  my_project_1       # Created by `ateam init my_project_1 --git URL`
     .git/            # to version ateam's own artifacts (agent config, reports, etc ...)
     config.toml      # project specific config
     Dockerfile       # environment to run sub-agents in
@@ -102,8 +103,8 @@ my_org/
 
     agents/
       agent_x/
-        extr_prompt.md   # read-only: can just add instructions to the org-level default per-agent prompt
-        mission.md       # read-write: often update automatically between tasks
+        extra_prompt.md  # read-only: can just add instructions to the org-level default per-agent prompt
+        knowledge.md     # read-write: often update automatically between tasks
         code/            # checkout from the bare repo
           .git           # worktree
         reports/         # keep all reports as markdown and track if they are implementation or not
@@ -115,7 +116,11 @@ my_org/
 
 ### Commands
 
+Just like git command ateam commands figure out their org, project and agent based on which directory they are in (or use --org ..., --project ..., --agent ...)
+
 ```bash
+mkdir my_org && cd my_org
+
 # Create an org to host projects, create claude oauth token to use in unattended claude sessions
 ateam init-org --agent cmd
 
@@ -125,17 +130,19 @@ ateam init my_project_1 --git URL --agent refactor,test,user-docs --auto-dockeri
 
 cd my_project_1
 
-# run the coordinattor
+# run the coordinator
 ateam run [--once | --at-commit | --every DUR | --schedule START_TIME:END_TIME]
 
-# make sure everything is properly configured
+# make sure everything is properly configured, create coding agent credentials if needed
 ateam audit
 
-# chat with the coordinator by spawning a container and running claude with proper prompt and context
+# chat with the coordinator agent (just an instance of claude code with some extra context like the ateam CLI to control other agents and some associated skills)
 ateam chat
 
 # chat with a specific agent
 cd agents/agent_x && ateam chat
+# or:
+ateam chat --agent agent_x
 
 # see what agents are running and how up to date they are
 ateam status
@@ -146,13 +153,20 @@ cd .. && ateam status
 # review recent work
 git log
 
-# a report centric status: which reports were acted on or not and when + git commit
+# a report centric status: which reports were acted on or not, why and the eventual git commit
 ateam reports
 
-# push changes to the project repo
-ateam push
+# review ateam changes for the main repo
+ateam git log
+# same as
+cd bare.git && git log
 
-# Web dashboard
+# push all ateam changes to the project repo
+ateam push
+# same as
+cd bare.git & git fetch --all && git rebase && git push
+
+# Web dashboard (future release)
 ateam ui
 
 # run an ad-hoc agent and review the work before committing and pushing
