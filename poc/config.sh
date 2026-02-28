@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Shared variables and helpers for the ATeam PoC scripts.
 #
-# Auth: set CLAUDE_CODE_OAUTH_TOKEN in your environment.
-# Generate one with: claude setup-token
+# Auth: create .claude_token in your work dir, or set CLAUDE_CODE_OAUTH_TOKEN.
+# Generate a token with: claude setup-token
 
 set -euo pipefail
 
@@ -15,11 +15,17 @@ BRANCH="main"
 DOCKER_CPUS=2
 DOCKER_MEMORY=4g
 
-if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
-  echo "ERROR: CLAUDE_CODE_OAUTH_TOKEN is not set" >&2
+# Auth: read token from file, fall back to env var
+TOKEN_FILE="$WORK_DIR/.claude_token"
+if [[ -f "$TOKEN_FILE" ]]; then
+  CLAUDE_CODE_OAUTH_TOKEN="$(cat "$TOKEN_FILE")"
+elif [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+  echo "ERROR: No auth token found" >&2
+  echo "Either create $TOKEN_FILE or set CLAUDE_CODE_OAUTH_TOKEN" >&2
   echo "Generate one with: claude setup-token" >&2
   exit 1
 fi
+export CLAUDE_CODE_OAUTH_TOKEN
 
 # --- helpers ---
 
