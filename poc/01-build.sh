@@ -6,7 +6,7 @@ source "$SCRIPT_DIR/config.sh"
 
 header "Building Docker image: $DOCKER_IMAGE"
 
-docker build -t "$DOCKER_IMAGE" "$SCRIPT_DIR"
+docker build --build-arg USER_UID="$(id -u)" -t "$DOCKER_IMAGE" "$SCRIPT_DIR"
 
 header "Verifying claude is available"
 docker run --rm "$DOCKER_IMAGE" claude --version

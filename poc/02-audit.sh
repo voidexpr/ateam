@@ -51,9 +51,9 @@ PROMPT
 
 clean_stream_output
 
-header "Running audit agent (budget: \$$BUDGET_AUDIT)"
+header "Running audit agent"
 
-run_agent "ateam-audit" "$WORK_DIR/prompt-audit.md" "$BUDGET_AUDIT"
+run_agent "ateam-audit" "$WORK_DIR/prompt-audit.md"
 
 header "Results"
 

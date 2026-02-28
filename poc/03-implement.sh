@@ -36,9 +36,9 @@ PROMPT
 
 clean_stream_output
 
-header "Running implement agent (budget: \$$BUDGET_IMPLEMENT)"
+header "Running implement agent"
 
-run_agent "ateam-implement" "$WORK_DIR/prompt-implement.md" "$BUDGET_IMPLEMENT"
+run_agent "ateam-implement" "$WORK_DIR/prompt-implement.md"
 
 header "Results"
 

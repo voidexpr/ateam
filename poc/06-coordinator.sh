@@ -49,7 +49,7 @@ PROMPT
 
 rm -f "$WORK_DIR/output/coordinator-stream.jsonl"
 
-header "Running coordinator agent (budget: \$$BUDGET_COORDINATOR)"
+header "Running coordinator agent"
 
 # Coordinator only needs /output mounted — no workspace access
 docker run --rm \
@@ -57,13 +57,17 @@ docker run --rm \
   --cpus="$DOCKER_CPUS" --memory="$DOCKER_MEMORY" \
   -v "$WORK_DIR/output:/output:rw" \
   -v "$WORK_DIR/prompt-coordinator.md:/agent-data/prompt.md:ro" \
-  -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
+  -v "$HOME:$HOME:ro" \
+  -v "$HOME/.claude:$HOME/.claude:rw" \
+  -v "$HOME/.claude.json:$HOME/.claude.json:rw" \
+  -e "HOME=$HOME" \
+  -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
   "$DOCKER_IMAGE" \
   bash -c '
     claude -p "$(cat /agent-data/prompt.md)" \
       --dangerously-skip-permissions \
       --output-format stream-json \
-      --max-budget-usd '"$BUDGET_COORDINATOR"' \
+      --verbose \
       | tee /output/coordinator-stream.jsonl
   '
 

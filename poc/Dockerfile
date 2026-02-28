@@ -7,9 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g @anthropic-ai/claude-code
 
-ARG USERNAME=node
-RUN mkdir -p /data /artifacts /output /agent-data \
-    && chown -R $USERNAME:$USERNAME /data /artifacts /output /agent-data
+ARG USER_UID=1000
+RUN useradd -m -u $USER_UID agent
 
-USER $USERNAME
+RUN mkdir -p /data /artifacts /output /agent-data \
+    && chown -R agent:agent /data /artifacts /output /agent-data
+
+USER agent
 WORKDIR /workspace

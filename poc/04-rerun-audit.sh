@@ -16,9 +16,9 @@ fi
 
 clean_stream_output
 
-header "Rerunning audit agent (timed, budget: \$$BUDGET_AUDIT)"
+header "Rerunning audit agent (timed)"
 
-time run_agent "ateam-audit-2" "$WORK_DIR/prompt-audit.md" "$BUDGET_AUDIT"
+time run_agent "ateam-audit-2" "$WORK_DIR/prompt-audit.md"
 
 header "Results"
 

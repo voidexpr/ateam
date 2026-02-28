@@ -1,52 +1,56 @@
 #!/usr/bin/env bash
 # Shared variables and helpers for the ATeam PoC scripts.
+#
+# Auth: set CLAUDE_CODE_OAUTH_TOKEN in your environment.
+# Generate one with: claude setup-token
 
 set -euo pipefail
 
-WORK_DIR="$HOME/ateam-poc"
+WORK_DIR="$PWD"
 PROJECT_REPO="git@github.com-nicad:nicad/minimon.git"
 DOCKER_IMAGE="ateam-poc"
 BRANCH="main"
-
-# Budget caps (USD)
-BUDGET_AUDIT=2.00
-BUDGET_IMPLEMENT=3.00
-BUDGET_COORDINATOR=0.50
 
 # Docker resource limits
 DOCKER_CPUS=2
 DOCKER_MEMORY=4g
 
-# Require ANTHROPIC_API_KEY
-if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-  echo "ERROR: ANTHROPIC_API_KEY is not set" >&2
+if [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]]; then
+  echo "ERROR: CLAUDE_CODE_OAUTH_TOKEN is not set" >&2
+  echo "Generate one with: claude setup-token" >&2
   exit 1
 fi
 
 # --- helpers ---
 
 # Run claude inside the ateam-poc container.
-# Usage: run_agent <container-name> <prompt-file> <budget> [extra docker flags...]
+# Usage: run_agent <container-name> <prompt-file> [extra docker flags...]
 run_agent() {
-  local name="$1" prompt_file="$2" budget="$3"
-  shift 3
+  local name="$1" prompt_file="$2"
+  shift 2
+
+  mkdir -p "$WORK_DIR/output"
 
   docker run --rm \
     --name "$name" \
     --cpus="$DOCKER_CPUS" --memory="$DOCKER_MEMORY" \
+    -v "$HOME:$HOME:ro" \
+    -v "$HOME/.claude:$HOME/.claude:rw" \
+    -v "$HOME/.claude.json:$HOME/.claude.json:rw" \
     -v "$WORK_DIR/code:/workspace:rw" \
     -v "$WORK_DIR/data:/data:rw" \
     -v "$WORK_DIR/artifacts:/artifacts:rw" \
     -v "$WORK_DIR/output:/output:rw" \
     -v "$prompt_file:/agent-data/prompt.md:ro" \
-    -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
+    -e "HOME=$HOME" \
+    -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
     "$@" \
     "$DOCKER_IMAGE" \
     bash -c '
       claude -p "$(cat /agent-data/prompt.md)" \
         --dangerously-skip-permissions \
         --output-format stream-json \
-        --max-budget-usd '"$budget"' \
+        --verbose \
         2>/output/stderr.log \
         | tee /output/stream.jsonl
       echo $? > /output/exit_code
