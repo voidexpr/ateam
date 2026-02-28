@@ -77,25 +77,63 @@ ATeam aims at giving its benefits with close to no config (ideally just the git 
 | **Structured logging** | `log/slog` (stdlib) | Built-in since Go 1.21 |
 | **LLM SDK** | **Not needed** | Claude Code handles all LLM interaction |
 
-### 3.3 API Key Support
+### 3.3 Authentication for Docker Containers
 
-Sub-agents and the coordinator can run in two modes:
+Sub-agents run as Claude Code inside Docker containers. Authenticating them requires understanding how Claude Code stores credentials:
 
-- **Subscription mode** (default): Claude Code uses the user's existing Claude subscription (Pro/Max). The `~/.claude/` directory is mounted into containers. No API key needed.
-- **API key mode**: Set `ANTHROPIC_API_KEY` in the environment or `.env` file. Claude Code uses the API directly. This enables `--max-budget-usd` for per-run cost control, which is critical for unattended operation.
+**The problem with mounting `~/.claude`:** On macOS, Claude Code stores OAuth tokens in the encrypted Keychain, not on disk. Mounting `~/.claude/` and `~/.claude.json` into a container gives access to config and plugins, but the actual auth token is inaccessible. On Linux, credentials are stored in `~/.claude/.credentials.json` which can be mounted, but this is fragile and creates contention if the host Claude Code refreshes the token while a container is using it.
 
-API key mode is preferred for autonomous/scheduled operation because it provides hard budget caps. Subscription mode works for interactive sessions (`ateam shell`) and development.
+**The solution: `CLAUDE_CODE_OAUTH_TOKEN`**. Claude Code supports a `CLAUDE_CODE_OAUTH_TOKEN` environment variable that takes precedence over all other credential sources. The token is generated via `claude setup-token` (a one-time interactive step) and can be passed to any container via `-e CLAUDE_CODE_OAUTH_TOKEN=...`.
+
+**Two authentication modes:**
+
+- **Subscription mode** (default): Uses a Claude Pro/Max subscription via `CLAUDE_CODE_OAUTH_TOKEN`. The token is generated once with `claude setup-token` and stored by `ateam install` or `ateam init`. No per-token billing — costs are covered by the subscription.
+- **API key mode**: Set `ANTHROPIC_API_KEY` for direct API billing. Enables `--max-budget-usd` for per-run cost control. Best for metered/unattended operation where cost visibility matters.
+
+**Token management strategy:**
+
+```
+Organization level (.ateam/):
+  Default token used by all projects unless overridden.
+  Stored in .ateam/ateam.sqlite (encrypted or via OS credential store).
+  One subscription covers all agents across all projects.
+
+Project level (project/):
+  Optional override in project config.toml or .env.
+  Use case: a project funded by a different team/subscription,
+  or splitting across multiple Max subscriptions for higher rate limits.
+```
+
+**How `ateam install` handles auth:**
+
+1. Check if `CLAUDE_CODE_OAUTH_TOKEN` is already set in the environment → use it
+2. Check if `ANTHROPIC_API_KEY` is already set → use API key mode
+3. Otherwise, prompt: "No Claude auth token found. Run `claude setup-token` to generate one."
+4. Optionally run `claude setup-token` on the user's behalf, capture the token
+5. Store the token in `ateam.sqlite` (not in a plain-text file — it's a credential)
+6. On every agent launch, the CLI reads the token from the database and passes it as `-e CLAUDE_CODE_OAUTH_TOKEN=...` to the container
+
+**How `ateam init` handles per-project overrides:**
+
+If a project needs a different subscription, the user sets `oauth_token_env` in `config.toml` pointing to an env var name, or puts the token in the project's `.env` file (gitignored).
 
 ```toml
 # config.toml
+[auth]
+# Default: uses org-level token from ateam.sqlite
+# To override per-project:
+oauth_token_env = "MYPROJECT_OAUTH_TOKEN"   # env var name
+# Or: api_key_env = "ANTHROPIC_API_KEY"     # for API key mode
+
 [budget]
-api_key_env = "ANTHROPIC_API_KEY"   # env var name (or set in .env)
 max_budget_per_run = 2.00           # USD, passed as --max-budget-usd to claude
 max_budget_daily = 20.00            # USD, enforced by CLI before launching
 max_budget_monthly = 200.00         # USD, enforced by CLI before launching
 model = "sonnet"                    # default model for sub-agents
 coordinator_model = "sonnet"        # model for coordinator (can use cheaper model)
 ```
+
+**Volume mounts are still useful** — mounting `$HOME:$HOME:ro` plus `$HOME/.claude:$HOME/.claude:rw` gives the container access to `CLAUDE.md`, plugins, settings, and shell config. Auth just can't rely on it.
 
 The CLI checks budget before every launch:
 1. Sum costs from `operations` table for the current day/month
@@ -997,13 +1035,13 @@ memory_per_agent = "4g"               # Docker --memory
 
 ### 9.5 API Key vs Subscription Mode
 
-Sub-agents and the coordinator can run in two modes:
+See §3.3 for full authentication details. Summary:
 
-- **API key mode** (recommended for autonomous operation): Set `ANTHROPIC_API_KEY` in `.env`. Enables `--max-budget-usd` for hard cost caps. Costs are per-token, visible in stream-json output. Best for scheduled/unattended runs.
+- **Subscription mode** (default): Uses `CLAUDE_CODE_OAUTH_TOKEN` (generated via `claude setup-token`). Token stored in `ateam.sqlite` at org level, overridable per project. The CLI passes it to containers via `-e CLAUDE_CODE_OAUTH_TOKEN=...`. Mounting `~/.claude` alone does NOT work — macOS stores the actual OAuth token in the Keychain, not on disk.
 
-- **Subscription mode**: Claude Code uses `~/.claude` mount for authentication against a Pro/Max subscription. No API key needed. `--max-budget-usd` may not apply (subscription-based billing). Best for interactive sessions (`ateam shell`).
+- **API key mode**: Set `ANTHROPIC_API_KEY` in `.env` or config. Enables `--max-budget-usd` for hard cost caps. Costs are per-token, visible in stream-json output. Best for metered/unattended operation.
 
-The CLI auto-detects: if `ANTHROPIC_API_KEY` is set (in environment or `.env`), it passes it to the container and enables budget enforcement. Otherwise, it mounts `~/.claude` and logs a warning that budget caps may not be enforced.
+The CLI auto-detects: checks for a stored OAuth token in `ateam.sqlite` first, then `CLAUDE_CODE_OAUTH_TOKEN` env var, then `ANTHROPIC_API_KEY` in environment or `.env`. If none found, `ateam run` refuses to start and directs the user to `ateam install` or `claude setup-token`.
 
 ---
 
@@ -3798,8 +3836,8 @@ The coordinator maintains `changelog.md`:
 - [ ] Go module scaffold (`go.mod`, cobra CLI, embedded assets)
 - [ ] SQLite database: schema, open with WAL + busy_timeout, migrations
 - [ ] Config parser (`config.toml` via BurntSushi/toml)
-- [ ] `ateam install` — create .ateam/ with embedded defaults, init git
-- [ ] `ateam init PROJECT` — scaffold project, register agents in DB
+- [ ] `ateam install` — create .ateam/ with embedded defaults, init git, acquire OAuth token (see §3.3)
+- [ ] `ateam init PROJECT` — scaffold project, register agents in DB, optional per-project token override
 - [ ] Git manager: bare clone, persistent worktree create, refresh (fetch + reset)
 - [ ] Docker adapter (default): build image, run container with bind mounts, wait, collect stream-json
 - [ ] Prompt builder: layered assembly (org role + role_add + knowledge + goals + mode + task)
