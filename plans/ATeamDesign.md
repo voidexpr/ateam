@@ -3847,7 +3847,7 @@ The coordinator maintains `changelog.md`:
 
 **Milestone:** Can manually `ateam run -a testing -p myapp`, Claude Code runs in Docker with persistent workspace, stream-json captured, report generated, result recorded in ateam.sqlite.
 
-### Phase 2: Full CLI + Coordinator (Week 3–4)
+### Phase 2: Full CLI
 
 - [ ] `ateam reports`, `ateam diff`, `ateam logs`, `ateam history`
 - [ ] `ateam pause / resume / kill / retry`
@@ -3857,13 +3857,9 @@ The coordinator maintains `changelog.md`:
 - [ ] `ateam budget` — cost tracking from operations table
 - [ ] `ateam doctor` — health checks with --fix
 - [ ] `ateam db` — direct SQLite access
-- [ ] Budget enforcement: check limits before launch, pass --max-budget-usd
 - [ ] Container watchdog: stream-json monitoring, timeout kills
-- [ ] Coordinator system prompt (§14.1) — write role.md for CLI-based coordination
-- [ ] `ateam daemon` — scheduler with commit detection and day/night profiles
-- [ ] Changelog writer (coordinator updates changelog.md via Write tool)
 
-**Milestone:** `ateam daemon -p myapp` detects commits, runs testing, coordinator reviews reports and makes decisions, budget enforced, all via the same CLI.
+**Milestone:** run agents by acting as the coordinator
 
 ### Phase 3: Full Agent Suite (Week 5–6)
 
@@ -3877,8 +3873,16 @@ The coordinator maintains `changelog.md`:
 
 **Milestone:** Full night cycle: daemon runs all agents, produces reports, coordinator triages and implements, knowledge updated, changelog maintained.
 
-### Phase 4: Polish & Hardening (Week 7–8)
+### Phase 4: Coordinator (Week 3–4)
 
+- [ ] Coordinator system prompt (§14.1) — write role.md for CLI-based coordination
+- [ ] `ateam daemon` — scheduler with commit detection and day/night profiles
+
+**Milestone:** `ateam daemon -p myapp` detects commits, runs testing, coordinator reviews reports and makes decisions, budget enforced, all via the same CLI.
+
+### Phase 5: Polish & Hardening (Week 7–8)
+
+- [ ] Budget enforcement: check limits before launch, pass --max-budget-usd
 - [ ] Devcontainer sandbox integration (Anthropic base image + egress firewall)
 - [ ] .env security (entrypoint loads env vars, deletes file)
 - [ ] Prompt size monitoring (warn >12K, fail >20K tokens)
