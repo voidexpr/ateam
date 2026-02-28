@@ -4,7 +4,7 @@
 
 ATeam is tackling the core issue of agentic coding: how to iterate fast on features while maintaining good software quality. We want to avoid that quick feature turnaround results into a code base that crumbles under its own complexity and any new feature breaks existing logic.
 
-Agents are actually very good at finding issues in code or produce tests so why would humans have to spend attentions to a code base they may never contribute to ? Developers should direct all their attention to the big picture aspects of a project and how features should work, not how the engineering is performed.
+Agents are actually very good at finding issues in code or produce tests so why would humans have to spend attentions on a code base they may never contribute to ? Developers should direct all their attention to the big picture aspects of a project and how features should work, not how the engineering is performed.
 
 ## Story Team
 
@@ -33,7 +33,7 @@ So the idea is to try to delegate well-defined tasks: software engineering maint
   * when work is completed the sub-agent is instructed to maintain a summary of the project and what it's done about it so it maintains context
   * agents run inside docker for isolation, the docker image needs to run only while the agent is active
 * ateam is almost exclusively a CLI to orchestrate, setup, troubleshoot these agents (and in the future starts a web interface)
-  * markdown files are used for reports, sub-agent prompts, persistent knowledge between tasks. These files are managed in their own ateam specific per-proiect git repo. So that repo's `git log` is basically a teamline of the decision and work taken by ATeam.
+  * markdown files are used for reports, sub-agent prompts, persistent knowledge between tasks. These files are managed in their own ateam specific per-proiect git repo. So that repo's `git log` is basically a timeline of the decision and work taken by ATeam.
   * a sqlite database is used to track the state of each sub-agent, which git commits they have seen so far
   * minimal configuration (docker file and some preferences about which coding agent to use, CLI args, etc ... with reasonable defaults)
 * there is a notion of organization to reuse configuration between projects (defaults that each project can override)
@@ -41,7 +41,7 @@ So the idea is to try to delegate well-defined tasks: software engineering maint
 
 ## Approach
 
-In short: claude code + a cli + some markdown files + git
+In short: claude code + a cli + isolated docker container + some markdown files + git
 
 * existing coding agents (Claude code, codex, ...) are great, we don't want to reinvent our own, we want to reuse them as much as possible
 * minimal architecture:
@@ -53,6 +53,7 @@ In short: claude code + a cli + some markdown files + git
   * trivial agent communication and orchestration: one-shot execution, generate files. No IPC, no agent-to-agent dialog
 * at any point the ateam CLI can be used to create interactive sessions with any agent to troubleshoot or do interactive work
 * flexible: can run ateam on any machine, can easily add new agents and instruct the coordinator to do things differently
+* docker is used to run coding agents with `--dangerously-skip-permissions`
 
 ## Strategy
 
@@ -86,12 +87,14 @@ my_org/
 
   .ateam/            # Base config created by the ateam CLI for the entire org
 
-    ateam.sqlite     # maintain state of all agents of all projects in one spot (tables: agent_status, agent_history, reports_history)
+    ateam.sqlite     # maintain state of all agents of all projects in one spot
+                     # (tables: agent_status, agent_history, reports_history)
     config.toml      # default config projects can inherit
     agents/          # define reusable role specific sub-agents
       agent_x/
         prompt.md    # what the agents is supposed to do
-    knowledge/       # where cross-project knowledge goes, automatically aggregated by ateam CLI actions
+    knowledge/       # where cross-project knowledge goes, automatically
+                     # aggregated by ateam CLI actions
 
   my_project_1       # Created by `ateam init my_project_1 --git URL`
     .git/            # to version ateam's own artifacts (agent config, reports, etc ...)
@@ -103,16 +106,21 @@ my_org/
 
     coordinator/
       prompt.md      # read-only: instructions for the coordinator
-      project_overview.md  # read-write: context the coordinator maintains about the project: how it's structured
-      project_goals.md     # read-write: context the coordinator maintains about the project: maintain goals based on the project size, maturity, ...
+      project_overview.md  # read-write: context the coordinator maintains
+                           # about the project: how it's structured
+      project_goals.md     # read-write: context the coordinator maintains
+                           # about the project: maintain goals based on the
+                           # project size, maturity, ...
       decisions/
-        YYYY-MM.md   # where the coordinator documents its rational when deciding on priorities based on sub-agents reports
+        YYYY-MM.md   # where the coordinator documents its rational when
+                     # deciding on priorities based on sub-agents reports
       sessions/      # keep session logs for the coordinator
         YYYY-MM-DD_HHMMSS.jsonl
 
     agents/
       agent_x/
-        extra_prompt.md  # read-only: can just add instructions to the org-level default per-agent prompt
+        extra_prompt.md  # read-only: can just add instructions to the org-level
+                         # default per-agent prompt
         knowledge.md     # read-write: often update automatically between tasks
         code/            # checkout from the bare repo
           .git           # worktree
@@ -131,13 +139,18 @@ Most of the team it's really just:
 
 ```bash
 # Setup a new project
-cd ~/ateam_projects
-ateam init project_foobar --git URL
-cd project_foobar
+  # go to the ateam organization folder
+  cd ~/ateam_projects
+
+  # create a working folder for the new project
+  ateam init project_foobar --git URL
+  cd project_foobar
 
 # Day-to-day commands
-ateam run    # maybe runs for a few hours at night by default, this just schedules it
-ateam review # see what ateam sub-agents have been up to (mix of coordinator decisions and git commit against the project git repo)
+ateam run    # maybe runs for a few hours at night by default,
+             # this just schedules it or this could trigger a one-time run on-demand
+ateam review # see what ateam sub-agents have been up to (mix of coordinator
+             # decisions and git commit against the project git repo)
 ateam push   # contribute their work to the main git repo
 ```
 
@@ -150,7 +163,9 @@ mkdir my_org && cd my_org
 ateam init-org --agent cmd
 
 # Create a project
-#   --auto-dockerize runs an agent prompt to look at the project and try to come up with the proper isolated docker container to run sub-agents to perform dev tasks
+#   --auto-dockerize runs an agent prompt to look at the project and try to
+#                    come up with the proper isolated docker container to run
+#                    sub-agents to perform dev tasks
 ateam init my_project_1 --git URL --agent refactor,test,user-docs --auto-dockerize
 
 cd my_project_1
@@ -164,7 +179,8 @@ ateam audit
 # see what agents have been contributing to the prokect
 ateam review
 
-# chat with the coordinator agent (just an instance of claude code with some extra context like the ateam CLI to control other agents and some associated skills)
+# chat with the coordinator agent (just an instance of claude code with some
+# extra context like the ateam CLI to control other agents and some associated skills)
 ateam chat
 
 # chat with a specific agent
@@ -199,7 +215,8 @@ ateam ui
 
 # run an ad-hoc agent and review the work before committing and pushing
 ateam run --prompt "Please check if we could improve setup scripts" \
-  --new-agent --agent master_automator --agent-prompt "You can't stand running manual commands" \
+  --new-agent --agent master_automator \
+  --agent-prompt "You can't stand running manual commands" \
   --implement --no-commit --allow WebSearch
 # enter a docker image to experiment with the new scripts
 ateam shell --agent master_automator
@@ -209,7 +226,10 @@ cd agents/testing/code && git commit -m "improved setup scripts"
 ateam push
 
 # same but ask the supervisor to oversee
-ateam run --prompt "Spawn an ad-hoc agent called master_automator who hates running manual commands, it should improve setup scripts if it makes sense. It can perform web searches and implement its recommendation directly.Verify its work in its workspace and if it looks good commit and push"
+ateam run --prompt "Spawn an ad-hoc agent called master_automator who hates
+  running manual commands, it should improve setup scripts if it makes sense.
+  It can perform web searches and implement its recommendation directly.
+  Verify its work in its workspace and if it looks good commit and push"
 ```
 
 ATeam can run on separate build servers or on the same machines.
