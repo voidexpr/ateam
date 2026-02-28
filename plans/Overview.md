@@ -2,7 +2,7 @@
 
 ## Motivation
 
-ATeam is an attempt at tackling the core issue of agentic coding: how to iterate fast on features while maintaining good software quality. We want to avoid that quick feature turnaround results into a code base that crumbles under its own complexity and any new feature breaks existing logic.
+ATeam is tackling the core issue of agentic coding: how to iterate fast on features while maintaining good software quality. We want to avoid that quick feature turnaround results into a code base that crumbles under its own complexity and any new feature breaks existing logic.
 
 Agents are actually very good at finding issues in code or produce tests so why would humans have to spend attentions to a code base they may never contribute to ? Developers should direct all their attention to the big picture aspects of a project and how features should work, not how the engineering is performed.
 
