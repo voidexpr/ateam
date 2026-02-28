@@ -14,6 +14,7 @@ So the idea is to try to delegate well-defined tasks: software engineering maint
 So basically just run a cli and have a separate workspace focused on software engineer tasks without much supervision needed.
 
 ## How does it work ?
+* doesn't require any configuration or to store its artifact in your project git repo, it is self contained and is essentially a separate contributor to your project
 * for each project ateam works on:
   * role specific sub-agents focus on an aspect of engineering work: refactoring, testing, security, documentation, ... Each project can enable/disable, add/remove any pre-configured agent or add its own with just a prompt file to specify the mission
   * a coordinator agent to prioritize work between sub-agent
@@ -52,7 +53,7 @@ Where many frameworks want you to design workflows and manage a lot of agents, t
 For feature development what I found works best is to focus on one feature at a time or have multiple checkout of a repository and multitask between them. In these scenarios it's not clear that additional automated orchestration would be beneficial, best to keep it simple.
 
 ## Architecture
-The best way to understand Ateam and have the proper mental model is to look at its folder hierarchy and basic commands
+The good way to understand Ateam is to look at its folder hierarchy and basic commands
 
 ### File Structure
 ```
@@ -134,7 +135,23 @@ ateam push
 
 # Web dashboard
 ateam ui
+
+# run an ad-hoc agent and review the work before committing and pushing
+ateam run --prompt "Please check if we could improve setup scripts" \
+  --new-agent --agent master_automator --agent-prompt "You can't stand running manual commands" \
+  --implement --no-commit --allow WebSearch
+# enter a docker image to experiment with the new scripts
+ateam shell --agent master_automator
+# commit the work and contribute to the main repo
+cd agents/testing/code && git commit -m "improved setup scripts"
+# contribute back to the bare git repo and main repo, update agent status
+ateam push
+
+# same but ask the supervisor to oversee
+ateam run --prompt "Spawn an ad-hoc agent called master_automator who hates running manual commands, it should improve setup scripts if it makes sense. It can perform web searches and implement its recommendation directly.Verify its work in its workspace and if it looks good commit and push"
 ```
+
+ATeam can run on separate build servers or on the same machines
 
 ## Future
 
@@ -142,12 +159,8 @@ The initial focus is on well defined engineering tasks that coding agents seem t
 
 But in the future some feature work could get in scope to help free more attention:
 * tackle small issues from a bug tracker
-* manage notifications from interactive sessions and organize them for remote access (be integrating with VibeTunnel or claude remote capabilities), this would include interacting from a smartphone (and if agents containernized they can easily be spawned on demande remotely)
-
-The initial focus is on automating well defined tasks but over time it could evolve to perform some feature work that requires little interaction (for example taking a stab at open tickets). We could also optimize context usage between report and implementation by allowing agents to interact.
-
-Given the container focus adding support for interactive sessions could be beneficial by integrating with claude code remote or VibeTunnel to avoid a single place to manage session notifications and interactions (including from smartphones)
+* manage notifications from interactive sessions and organize them for remote access (be integrating with VibeTunnel or Claude remote capabilities), this would include interacting from a smartphone (and if agents containerized they can easily be spawned on-demand remotely)
 
 ## Conclusion
 
-Maintaining code quality is essential in agentic coding, ATeam focuses on agents helping agents to take feature work further and avoid development velocity slow down.
+Maintaining code quality is essential in agentic coding, ATeam uses agents to help agents by performing quality engineering in the background. This way feature work can go further with less slow downs.
