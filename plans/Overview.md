@@ -127,6 +127,22 @@ my_org/
 
 Just like git command figures out repo context based on its working directory, ateam commands figure out their org, project and agent based on which directory they are in (or explicitly specify --org ..., --project ..., --agent ...)
 
+Most of the team it's really just:
+
+```bash
+# Setup a new project
+cd ~/ateam_projects
+ateam init project_foobar --git URL
+cd project_foobar
+
+# Day-to-day commands
+ateam run    # maybe runs for a few hours at night by default, this just schedules it
+ateam review # see what ateam sub-agents have been up to (mix of coordinator decisions and git commit against the project git repo)
+ateam push   # contribute their work to the main git repo
+```
+
+Here are more commands:
+
 ```bash
 mkdir my_org && cd my_org
 
@@ -144,6 +160,9 @@ ateam run [--once | --at-commit | --every DUR | --schedule START_TIME:END_TIME]
 
 # make sure everything is properly configured, create coding agent credentials if needed
 ateam audit
+
+# see what agents have been contributing to the prokect
+ateam review
 
 # chat with the coordinator agent (just an instance of claude code with some extra context like the ateam CLI to control other agents and some associated skills)
 ateam chat
@@ -193,7 +212,7 @@ ateam push
 ateam run --prompt "Spawn an ad-hoc agent called master_automator who hates running manual commands, it should improve setup scripts if it makes sense. It can perform web searches and implement its recommendation directly.Verify its work in its workspace and if it looks good commit and push"
 ```
 
-ATeam can run on separate build servers or on the same machines
+ATeam can run on separate build servers or on the same machines.
 
 ## Future
 
