@@ -115,6 +115,8 @@ repos/
 
 The agent orchestration space has exploded in 2025–2026. There are dozens of tools, but most fall into categories that don't quite match ATeam's specific niche: **scheduled, background, autonomous software quality improvement on an existing codebase with minimal human oversight.** Most tools are either general-purpose agent frameworks, interactive coding assistants, or PR-triggered review bots. ATeam's specific value proposition — a "night shift" of specialized agents that relentlessly improve code quality while humans sleep — is underserved.
 
+See also: [Agent Orchestrator research](https://github.com/ComposioHQ/agent-orchestrator/blob/main/artifacts/competitive-research.md).
+
 ### B.2 Most Promising Alternatives
 
 #### ComposioHQ/agent-orchestrator ⭐⭐⭐⭐ (Closest Match)
@@ -335,6 +337,28 @@ Gas Town is **significantly more complex to use** for ATeam's goals. It's design
 - **Durable execution** is a genuinely useful concept. If ATeam's coordinator crashes mid-cycle, it should be able to resume from where it left off. LangGraph's approach of persisting state checkpoints could inform ATeam's coordinator state management.
 - **Human-in-the-loop checkpoints** with "time travel" (roll back and take a different action) is a nice model for ATeam's approve/reject workflow.
 - If ATeam's coordinator ever grows complex enough to need a graph-based workflow engine (unlikely for v1), LangGraph would be the right foundation.
+
+#### Supacode ⭐⭐
+
+**What it is:** A native macOS terminal application ([supacode.sh](https://supacode.sh/)) that serves as a "command center" for running multiple coding agents in parallel. Built in Swift with The Composable Architecture (TCA) and libghostty as the terminal engine. Open source, 72 releases, requires macOS 26. Installable via `brew install supacode`.
+
+**How it works:** Supacode is a terminal multiplexer purpose-built for coding agents. Each task gets an isolated git worktree (via `⌘N`). The user adds repositories through the sidebar, configures a setup script per repo (e.g., `claude --dangerously-skip-permissions`), and Supacode launches the agent in the worktree automatically. It supports Claude Code, Codex, and OpenCode as agent runtimes — BYOA (Bring Your Own Agents) with no translation layer. Claims to handle 50+ parallel agent sessions.
+
+**Overlap with ATeam:** Git worktree isolation per task, multi-agent parallelism, support for Claude Code as runtime, native GitHub integration (PRs, CI checks, conflict resolution).
+
+**What it lacks for our use case:**
+- **Interactive-only.** No scheduled/autonomous operation. A human must create each worktree and launch each agent. No daemon, no night cycle, no coordinator.
+- **No agent specialization or knowledge.** Agents are generic terminal sessions. No concept of persistent roles, project knowledge, or accumulated context across runs.
+- **No audit → implement workflow.** No report generation, no triage, no approval gates.
+- **No budget tracking.** No cost visibility or caps.
+- **macOS only.** Native Swift app, no Linux or headless server support.
+- **Terminal multiplexer, not orchestrator.** Supacode manages terminal sessions, not agent lifecycles. It doesn't monitor agent output, detect failures, or retry. It's tmux-with-worktrees, not a coordination system.
+
+**Ideas to integrate:**
+- The **one-worktree-per-task with auto-agent-launch** UX is clean. ATeam's `ateam run` already does this programmatically, but Supacode's visual approach could inform a future TUI or dashboard.
+- The **libghostty terminal embedding** is interesting if ATeam ever builds a native monitoring app.
+
+**Key difference from ATeam:** Supacode is a developer productivity tool — a better terminal for manually running agents side by side. ATeam is an autonomous system that decides what to work on, runs agents unattended, and triages results. Supacode is the cockpit; ATeam is the autopilot.
 
 #### Other Notable Tools
 
