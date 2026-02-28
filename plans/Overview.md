@@ -74,6 +74,12 @@ For feature development what seems to work best is to focus on one feature at a 
 
 The good way to understand Ateam's mental model is to look at its folder hierarchy and basic commands.
 
+The core terminology:
+* **organization**: collection of projects, accumulated knowledge between projects, global state of all agents for all projects (shared by coordinators)
+* **project**: coordinator and sub-agent state for a given project ateam works on
+* **coordinator**: each project as a coordinator who doesn't change anything but manages domain specific sub-agents (instance of claude code)
+* **sub-agent**: role/domain specific agent (instance of claude code that runs in container one-shot), each project can be have 1 or more
+
 ### File Structure
 ```
 my_org/
@@ -85,7 +91,7 @@ my_org/
     agents/          # define reusable role specific sub-agents
       agent_x/
         prompt.md    # what the agents is supposed to do
-    expertise/       # where cross-project knowledge goes
+    knowledge/       # where cross-project knowledge goes, automatically aggregated by ateam CLI actions
 
   my_project_1       # Created by `ateam init my_project_1 --git URL`
     .git/            # to version ateam's own artifacts (agent config, reports, etc ...)
@@ -97,7 +103,10 @@ my_org/
 
     coordinator/
       prompt.md      # read-only: instructions for the coordinator
-      project.md     # read-write: context the coordinator maintains about the project
+      project_overview.md  # read-write: context the coordinator maintains about the project: how it's structured
+      project_goals.md     # read-write: context the coordinator maintains about the project: maintain goals based on the project size, maturity, ...
+      decisions/
+        YYYY-MM.md   # where the coordinator documents its rational when deciding on priorities based on sub-agents reports
       sessions/      # keep session logs for the coordinator
         YYYY-MM-DD_HHMMSS.jsonl
 
@@ -116,7 +125,7 @@ my_org/
 
 ### Commands
 
-Just like git command ateam commands figure out their org, project and agent based on which directory they are in (or use --org ..., --project ..., --agent ...)
+Just like git command figures out repo context based on its working directory, ateam commands figure out their org, project and agent based on which directory they are in (or explicitly specify --org ..., --project ..., --agent ...)
 
 ```bash
 mkdir my_org && cd my_org
