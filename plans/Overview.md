@@ -1,59 +1,78 @@
-# Story Time
+# Overview
 
-Based on my experience working on multiple projects with agents where I don't really touch the code:
-* feature work with agents requires focused interactive sessions, it is hard to imagine orchestrating this work. If multiple features are developed in parallel it's just a matter of having multiple git checkouts of the project, each with its own agent and multi-task between them
-* in order to maintain a healthy code base I frequently ask the coding agent to refactor recent code and then less frequently to refactor bigger parts of the code. It is essential to avoid hitting a wall where new features keep breaking the project. Tests are also important, internal docs, etc ...
-* constant command approval is a drag (claude code mostly) and configuration tweaks aren't helping, giving permissions to run anything isn't feasible outside of containers
-* code agents are usually very insightful auditing existing code bases for security, refactoring, testing, etc ... and they are of course great at coding
-* if I'm not going to look at the code I want to outsource code reviews and maintenance of it as much as possible. I can always take control if I decide to
-* features are best developed iteratively, modify how things should work as it shapes up
-* coding agents are getting better at using sub-agents transparently for their work, no need to reinvent it. More generally coding agents are improving rapidly so we want to use them as much as possible
+## Motivation
+
+ATeam is an attempt at tackling the core issue of agentic coding: how to iterate fast on features while maintaining good software quality. We want to avoid that quick feature turnaround results into a code base that crumbles under its own complexity and any new feature breaks existing logic.
+
+Agents are actually very good at finding issues in code or produce tests so why would humans have to spend attentions to a code base they may never contribute to ? Developers should direct all their attention to the big picture aspects of a project and how features should work, not how the engineering is performed.
+
+## Story Team
+
+Based on my experience working on multiple projects with agents:
+* I touch code less and less, I used to do a lot of code reviews but why review the code if I'm not going to modify it myself ? I still need to do it to try to catch software architecture issues.
+* feature work with agents requires focused interactive sessions, it is hard to imagine orchestrating this work (even though it seems to be the focus of agent orchestration projects in this area). If needed, it is relatively straightforward to develop multiple features in parallel by using distinct work areas with interactive agents and multi-task between them.
+* in order to maintain a healthy code base I frequently ask the coding agent to refactor recent code and then less frequently to refactor bigger parts of the code. I also ask to update docs, tests, etc .. It is essential to avoid hitting a wall where new features keep breaking the project.
+* constant command approval is a drag (Claude code especially) and configuration tweaks aren't helping, giving permissions to run anything isn't feasible outside of containers
+* code agents are usually very insightful when auditing existing code bases for security, refactoring, testing, etc ... and they are of course great at coding too
+* if I'm not going to look at the code I want to outsource code reviews and maintenance of it as much as possible. I can always take control if I decide to focus on an architectural aspect I think is important.
+* features are best developed iteratively, modify how things should work as it shapes up. Software quality is less interactive
+* coding agents are getting better at using sub-agents transparently for their tasks, no need to reinvent it. More generally coding agents are improving rapidly so we want to use them as much as possible
 
 So the idea is to try to delegate well-defined tasks: software engineering maintenance. Just have a set of agents work after commits or over night to improve the quality of the project and leave feature work to interactive sessions. We use agents to check and improve the work of agents. We use containers so these agents can run with permissions to run any command and they mostly operate in non-interaction sessions.
 
-So basically just run a cli and have a separate workspace focused on software engineer tasks without much supervision needed.
-
 ## How does it work ?
-* doesn't require any configuration or to store its artifact in your project git repo, it is self contained and is essentially a separate contributor to your project
+* we want a system that works outside of our main repo so it can easily be used in seconds on any code base. It should manage its own work area, build expertise over time while managing its context
 * for each project ateam works on:
-  * role specific sub-agents focus on an aspect of engineering work: refactoring, testing, security, documentation, ... Each project can enable/disable, add/remove any pre-configured agent or add its own with just a prompt file to specify the mission
-  * a coordinator agent to prioritize work between sub-agent
-  * sub-agents only run one-shot tasks (claude -p) in a container on their own git work-tree and do one of:
+  * run role specific sub-agents each focus on a specific aspect of engineering work: refactoring, testing, security, documentation, ...
+    * each project can enable/disable, add/remove any pre-configured agent or add its own with just a prompt file to specify the mission
+  * a coordinator agent prioritizes the work between sub-agent so we don't flood our project with agent busy work
+  * sub-agents only run one-shot tasks (claude -p) in a container (with --dangerously-skip-permissions) on their own git work-tree and do one of:
     * generate a report of what they could be doing
     * implement a report (which could have been amended by the coordinator or a human)
   * the coordinator requests multiple reports and prioritize which ones to implement
   * when work is completed the sub-agent is instructed to maintain a summary of the project and what it's done about it so it maintains context
-  * agents run within docker for isolation, the docker image needs to run only while the agent is active
-* ateam is almost exclusively a CLI to orchestrate, setup, troubleshoot this system (and in the future starts a web interface)
-  * markdown files are used for reports, sub-agent prompts. These files are managed in their own ateam specific per-proiect git repo. So git log is basically a teamline of the decision and work taken by ATeam.
+  * agents run inside docker for isolation, the docker image needs to run only while the agent is active
+* ateam is almost exclusively a CLI to orchestrate, setup, troubleshoot these agents (and in the future starts a web interface)
+  * markdown files are used for reports, sub-agent prompts, persistent knowledge between tasks. These files are managed in their own ateam specific per-proiect git repo. So that repo's `git log` is basically a teamline of the decision and work taken by ATeam.
   * a sqlite database is used to track the state of each sub-agent, which git commits they have seen so far
-  * configuration (docker file)
+  * minimal configuration (docker file and some preferences about which coding agent to use, CLI args, etc ... with reasonable defaults)
 * there is a notion of organization to reuse configuration between projects (defaults that each project can override)
   * sub-agents can create domain specific expertise between projects by create knowledge files (markdown) at the organization level
 
-## Strategy
-* simple architecture:
-  * a cli
+## Approach
+
+In short: claude code + a cli + some markdown files + git
+
+* existing coding agents (Claude code, codex, ...) are great, we don't want to reinvent our own, we want to reuse them as much as possible
+* minimal architecture:
+  * a cli `ateam`
   * the same coding agent used for feature work is used for coordinator and sub-agent (claude, codex, ...)
-  * the coordinator uses the main cli
-  * maintain context as markdown that can be read and edited by both agents and humans.
-  * use git to maintain this context to get versioning, history and timeline views
-  * trivial agent communication and orchestration: one-shot execution, generate files. No IPC, no agent-to-agnt dialog
-* agents are instructed to be conservative in the work they do and take into account the maturity and size of the code base they work on. A small code base doesn't need to overdo the software engineering but can certainly benefit from constant small and medium refactoring performed in the background
-* try to be conservative in token usage and cost
-* sub-agents are encouraged to add automation to the project for their respective areas: linter, automated smoke or integration tests, etc ... So less agent work is required over time.
-* sub-agents are responsible for dealing with potential merge conflicts
-* the coordinator agent can escalate decisions to humans to help with prioritizing, sub-agents either generate a report or perform it as a one-shot prompt
-* at any point the ateam CLI can be used to create interactive sessions with
+  * the coordinator uses the main ateam cli than humans
+  * sub-agents get domain specific prompts (read-only) to give them their mission, they also maintain knowledge files about the project (read/write). All are markdown files.
+    * use git to track these markdown files to get versioning, an audit trail and a timeline views
+  * trivial agent communication and orchestration: one-shot execution, generate files. No IPC, no agent-to-agent dialog
+* at any point the ateam CLI can be used to create interactive sessions with any agent to troubleshoot or do interactive work
 * flexible: can run ateam on any machine, can easily add new agents and instruct the coordinator to do things differently
+
+## Strategy
+
+* agents are instructed to be conservative in the work they do and take into account the maturity and size of the code base they work on. A small code base doesn't need to overdo the software engineering but can certainly benefit from constant small and medium refactoring performed in the background
+  * it's ok to be lazy, value can be created by constant incremental improvements
+* try to be conservative in token usage and cost (actively report on it)
+* sub-agents are encouraged to add automation to the project for their respective areas: linter, automated smoke or integration tests, etc ...
+  * so less agent work is required over time.
+* sub-agents are responsible for dealing with potential merge conflicts
+* the coordinator agent acts as a second level of review to prioritize with the project as a whole's best interest vs. sub-agent looking at a specific domain each (to maximize specific context)
+* only the coordinator agent can escalate decisions to humans to help with prioritizing, sub-agents either generate a report or implement a report as a one-shot prompt (they can't notify a human)
 * reduce cognitive load: using ateam is a single extra check-in of the code requiring little attention. Assuming proper dockerization of a project the only command required is either to push commits to the main repo or review changes auto-pushed by the coordinator depending on preference
 
-Where many frameworks want you to design workflows and manage a lot of agents, the goal of ATeam is to require as little attention as possible. Just have the code be refactored in the background, test coverage improved, etc ... allowing developers to focus on the more interesting parts: feature work or directed software engineering tasks (refactoring, testing, docs, ...).
+Where many frameworks want developers to design workflows to manage a lot of agents, the goal of ATeam is to require as little attention as possible. Just have the code be refactored in the background, test coverage improved, etc ... allowing developers to focus on the more interesting parts: feature work or directed software engineering tasks (refactoring, testing, docs, ...).
 
-For feature development what I found works best is to focus on one feature at a time or have multiple checkout of a repository and multitask between them. In these scenarios it's not clear that additional automated orchestration would be beneficial, best to keep it simple.
+For feature development what seems to work best is to focus on one feature at a time, ateam is designed to do everything else in the background as-if the main coding agent would not only implement the feature requests but be an entire software engineering team that can get as busy as required or do small scale changes for small projects.
 
 ## Architecture
-The good way to understand Ateam is to look at its folder hierarchy and basic commands
+
+The good way to understand Ateam's mental model is to look at its folder hierarchy and basic commands.
 
 ### File Structure
 ```
@@ -155,11 +174,11 @@ ATeam can run on separate build servers or on the same machines
 
 ## Future
 
-The initial focus is on well defined engineering tasks that coding agents seem to understand well so needs less prompting and is therefore well suited for automation: bring the ateam to this project to take care of the quality.
+The initial focus is on well defined engineering tasks that coding agents seem to understand well. They need less prompting than for features, it is therefore well suited for automation: bring the ateam to this project to take care of the quality.
 
 But in the future some feature work could get in scope to help free more attention:
-* tackle small issues from a bug tracker
-* manage notifications from interactive sessions and organize them for remote access (be integrating with VibeTunnel or Claude remote capabilities), this would include interacting from a smartphone (and if agents containerized they can easily be spawned on-demand remotely)
+* tackle small issues from a bug tracker (pick the top few bug reports or small features and try to one-shot them, have the supervisor to a first pass to assess their quality and relevance)
+* manage notifications from interactive sessions and organize them for remote access (be integrating with VibeTunnel or Claude remote capabilities), this would include interacting from a smartphone (and if agents containerized they can easily be spawned on-demand remotely). It is a different tool focus but could fit well remote sessions because it also requires container isolation.
 
 ## Conclusion
 
