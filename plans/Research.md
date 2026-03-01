@@ -949,3 +949,178 @@ This is substantially less than what Gas Town requires (no Witness, no Deacon, n
 **tmux-in-Docker**: best for tasks that benefit from mid-task interaction. Implementation tasks where the coordinator may need to course-correct. Long-running tasks where crashes are likely. Workflows where the coordinator reviews intermediate output before the agent continues. Reactive scenarios where external events (CI, reviews) should feed back into a running agent.
 
 A pragmatic approach: start with `claude -p` for all agent types. Add tmux-in-Docker as an alternative runtime for implement-mode agents and for any task that exceeds a cost/duration threshold where crash recovery justifies the complexity.
+
+### C.9 Non-tmux Agent Control
+
+Not every framework uses tmux. This section covers the four main alternatives: subprocess pipes, Docker one-shot, API-based agent loops, and REST servers inside containers. Each avoids tmux's session management complexity but introduces different tradeoffs.
+
+#### Subprocess Pipes (Claude Agent SDK)
+
+**Claude Agent SDK** ([anthropics/claude-agent-sdk-python](https://github.com/anthropics/claude-agent-sdk-python), [claude-agent-sdk-typescript](https://github.com/anthropics/claude-agent-sdk-typescript)) is Anthropic's official way to run Claude Code programmatically. It spawns the Claude Code CLI as a child process and communicates via JSON-lines over stdin/stdout.
+
+The SDK provides two interfaces:
+- **`query()`** — one-shot: new subprocess per call, returns when done. Maps to ATeam's `claude -p` pattern.
+- **`ClaudeSDKClient`** — persistent: reuses the same subprocess for multiple turns, supports interrupts. Maps to the tmux-in-Docker interactive pattern but without tmux.
+
+**Communication protocol**: structured JSON-lines with two categories — regular messages (agent responses, tool outputs, cost) and control messages (permission requests with multiplexed `request_id`). Permission callbacks allow the orchestrator to intercept and approve/deny individual tool calls programmatically:
+```json
+{"type": "control_request", "request_id": "req_1", "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": "rm -rf /"}}}
+{"type": "control_response", "request_id": "req_1", "response": {"behavior": "deny"}}
+```
+
+This is strictly more capable than `--dangerously-skip-permissions` (which is all-or-nothing) — the orchestrator can allow `Read` but deny `Bash`, or inspect the actual command before approving.
+
+**Permission modes**: `default` (standard prompting), `acceptEdits` (auto-accept file edits, still prompt for Bash), `bypassPermissions` (equivalent to `--dangerously-skip-permissions`), `plan` (read-only).
+
+**Subagent support**: first-class. Agents can spawn subagents via the `Task` tool, with `parent_tool_use_id` for tracking. Subagents run within the same session, not as separate processes. The orchestrator can define allowed tools per subagent.
+
+**Session resume**: `query(prompt="continue", options=ClaudeAgentOptions(resume=session_id))` allows multi-turn orchestration without a persistent subprocess — each call spawns a new process but resumes the previous session's context.
+
+**Completion detection**: waits for three conditions — `result` event, stdout EOF, and process exit. All three must occur. If any is missing, the SDK hangs indefinitely.
+
+**Known production issues**:
+
+| Issue | Severity | Impact on ATeam |
+|---|---|---|
+| Missing final `result` event ([#1920](https://github.com/anthropics/claude-code/issues/1920)) | High | After some tool executions, Claude Code fails to emit the final `result` event. SDK hangs indefinitely. Requires external watchdog timeout. |
+| Silent mid-task hang ([#28482](https://github.com/anthropics/claude-code/issues/28482)) | High | Claude Code stops producing output mid-task. No error, no exit, no recovery path. Only workaround is Esc key (interactive only). Marked as blocking for production automation. |
+| Process group signal self-kill in Docker ([#16135](https://github.com/anthropics/claude-code/issues/16135)) | Medium | When Claude Code kills a background process group, it sends the signal to its own group, terminating itself (exit 137). Not triggered by `claude -p` since the background process manager is not invoked. |
+| JSON buffer overflow | Low | Default 1MB buffer. Large tool outputs (big `git diff`) can cause parse failures. |
+
+**Crash recovery**: none built-in. When the subprocess dies, `ProcessTransport` enters a broken state — subsequent requests fail. The caller must start a fresh subprocess and reconstruct context.
+
+**Key advantage over tmux**: structured JSON protocol gives typed events, programmatic permission callbacks, cost tracking, and subagent tracking — all things that tmux `capture-pane` parsing can never provide reliably.
+
+**Key limitation**: no mid-task steering with `query()`. The `ClaudeSDKClient` persistent mode supports it but is less battle-tested and inherits the hang bugs.
+
+#### Subprocess One-Shot (Aider, Codex CLI)
+
+Simpler than the Agent SDK — just spawn the process with a prompt and read exit code.
+
+**Aider** ([Aider-AI/aider](https://github.com/Aider-AI/aider)):
+```bash
+aider --message "add docstrings to all functions" file.py --yes --no-auto-commits
+```
+`--yes` auto-confirms all prompts. `--message` runs one instruction then exits. Exit code 0 = success. No streaming JSON, no cost tracking in output, no permission granularity. Git integration is the crash recovery mechanism — every change creates a commit. Also has an unofficial Python API (`Coder.create()`) for in-process use.
+
+**Codex CLI** ([openai/codex](https://github.com/openai/codex)):
+```bash
+codex exec --full-auto "implement feature X"
+```
+Similar one-shot pattern. `--full-auto` bypasses prompts. Exit code for completion.
+
+These are the simplest possible agent control — subprocess with timeout, check exit code, read output files. The limitation is obvious: no observability during the run, no mid-task steering, no structured events.
+
+#### Docker One-Shot (ATeam's Current Model)
+
+This is ATeam's `agent_in_container.sh` approach. The container runs once, the agent completes, the container exits. The orchestrator reads exit code and output files from bind-mounted volumes.
+
+**How the "no mid-task steering" limitation is handled** across frameworks using this pattern:
+
+1. **Scope tasks narrowly** — so steering is never needed. ATeam's audit/implement separation does this.
+2. **Monitor stream-json for blocks** — detect when the agent writes `blocked.md` or stops making progress, then kill and re-invoke with an amended prompt.
+3. **Agent self-reports** — the agent writes status files (`blocked.md`, `progress.md`) that the coordinator reads after completion.
+4. **`--resume` as escape hatch** — if the container dies, start a new one with `claude --resume <session-id>`. Session JSONL files persisted via bind mount.
+
+**SWE-agent + SWE-ReX** ([SWE-agent/SWE-ReX](https://github.com/SWE-agent/SWE-ReX)) extends the Docker one-shot model with a REST API *inside* the container. The container runs a FastAPI server (`swerex-remote`); the orchestrator sends commands via HTTP. Each command is synchronous (execute → return output + exit code). Multiple concurrent sessions supported. This turns the container from a batch job into a controlled sandbox, while keeping Docker's isolation. **Mini-SWE-agent** achieves >74% on SWE-bench with ~100 lines using plain `subprocess.run` / `docker exec` — stateless, no event streaming.
+
+**sandbox-agent** ([rivet-dev/sandbox-agent](https://github.com/rivet-dev/sandbox-agent)) takes a different approach: a Rust HTTP server inside the container exposes session management via REST and real-time events via SSE. Supports Claude Code, Codex, OpenCode, Amp. Sessions are persistent within the container lifetime (not one-shot per prompt) — you can `createSession()`, `postMessage()`, and `streamEvents()` over HTTP. This bridges Docker isolation with interactive session control, no tmux needed.
+
+#### API-Based Agent Loops (No CLI Agent)
+
+No subprocess at all. The orchestrator calls the LLM API directly, implements its own tool execution loop, and maintains conversation history.
+
+```python
+while True:
+    response = client.messages.create(model="claude-opus-4-6", messages=messages, tools=tools)
+    if response.stop_reason == "end_turn":
+        break
+    for block in response.content:
+        if block.type == "tool_use":
+            result = execute_tool(block.name, block.input)
+            messages.append(tool_result_message(block.id, result))
+```
+
+**What you gain**: full control over tool definitions and permissions per call, provider agnosticism (swap Claude for GPT-4 or Gemini), no subprocess hang bugs, granular per-API-call cost tracking, programmatic mid-task injection (the loop is yours), custom tool implementations in any language.
+
+**What you lose vs Claude Code** (extends §A.2):
+
+| Concern | Custom API Loop | Claude Code CLI |
+|---|---|---|
+| Coding quality | Must implement file editing, shell, error recovery, iterative debugging | Built-in, battle-tested, continuously improved |
+| Tool maintenance | You maintain tools as API changes | `claude update` stays current |
+| Context management | Must handle window limits, truncation, summarization | Handled internally |
+| Multi-file editing | Must implement search-replace, diff application | Built-in Edit/Write/Read |
+| Sub-agent spawning | Must implement orchestration protocol | Built-in Task tool with parent tracking |
+| Complexity | Hundreds of lines of agent loop code | Zero agent code |
+| Cost | Raw API tokens | Subscription plan often more economical |
+
+**Specific failure modes**:
+- **Infinite tool call loops**: model keeps calling tools without progress. Detect by tracking turn count and/or repeated identical tool calls.
+- **Context overflow**: long tasks accumulate history until the window overflows. Must implement rolling summarization.
+- **Tool execution crashes**: unhandled exception in a tool causes the model to either halt or hallucinate. Must return errors as `tool_result` content.
+- **Prompt injection via tool output**: malicious content in files can inject instructions. Must sanitize.
+- **Rate limits**: concurrent agents hitting limits simultaneously. Backoff with jitter.
+
+**Frameworks using this approach**:
+
+**CrewAI** ([crewAIInc/crewAI](https://github.com/crewAIInc/crewAI)): role-based multi-agent. In-process Python, no Docker by default. Agents communicate via natural language messages. Tools are Python functions.
+
+**LangGraph** ([langchain-ai/langgraph](https://github.com/langchain-ai/langgraph)): graph-based execution runtime. The most interesting mid-task steering mechanism: `interrupt()` suspends the graph and serializes state to a checkpointer (disk/database). Resume later with `graph.invoke(Command(resume="approved"), thread_config)`. This is deterministic human-in-the-loop without any tmux keystroke injection. Reached v1.0 in late 2025.
+
+**Open SWE** ([langchain-ai/open-swe](https://github.com/langchain-ai/open-swe)): three-agent LangGraph workflow (Manager → Planner → Programmer+Reviewer). Runs in Daytona sandboxes. Triggered by GitHub issue labels. Human can interrupt to review/edit the plan before execution begins.
+
+#### REST/WebSocket Server Inside Container
+
+A pattern emerging from OpenHands, SWE-ReX, and sandbox-agent: run a server inside the container, communicate over HTTP. Combines Docker isolation with interactive control.
+
+**OpenHands** ([OpenHands/OpenHands](https://github.com/OpenHands/OpenHands)): the most architecturally complete implementation. Each session is an **event-sourced append-only log** of actions and observations. This enables deterministic replay for debugging, fault recovery by replaying events, and auditability. When resuming after a crash, the system loads base state and replays the event log — no state is lost. The V1 SDK includes a production server with REST+WebSocket APIs, plus workspace access via VSCode Web and VNC desktop — enabling human intervention during a running session by opening a URL.
+
+Permission handling: a two-layer model — `SecurityAnalyzer` rates each tool call as LOW/MEDIUM/HIGH risk; `ConfirmationPolicy` determines if approval is required. On `WAITING_FOR_CONFIRMATION`, the agent pauses completely until approved. On rejection, the agent backtracks.
+
+**Daytona** ([daytonaio/daytona](https://github.com/daytonaio/daytona)): cloud-managed version of the same pattern. Provides sandboxes as a service with Python/TypeScript SDKs. Used by Open SWE as the execution environment. You get a stable API endpoint per sandbox — no Docker infrastructure to manage yourself.
+
+#### Platform-Managed Execution (GitHub Actions)
+
+A distinct approach: the agent runs inside a CI/CD runner, communicates entirely via the platform's APIs (issues, PRs, comments), and has no direct process relationship with the orchestrator.
+
+**GitHub Copilot Coding Agent**: creates an ephemeral GitHub Actions runner, runs the agent inside it, communicates via GitHub Actions APIs and WebSocket streams. The human interacts via issue comments and PR reviews — entirely HTTP/webhook-based. The agent pushes commits to a draft PR continuously as it works. CI runs on the agent's commits and failures feed back via automated PR comments.
+
+**Amazon Q Developer**: similar pattern. Triggered by assigning a GitHub issue to Q. Runs on GitHub Actions Ubuntu runners. Communicates via GitHub API. Fully asynchronous.
+
+This approach eliminates all subprocess/container management but is tightly coupled to the platform and provides no real-time agent visibility beyond PR diffs.
+
+#### PTY Control
+
+A PTY (pseudo-terminal) creates a virtual terminal pair. The orchestrator holds the master side and writes input/reads output; the agent thinks it has a real terminal.
+
+**Who uses it**: VS Code's integrated terminal uses `node-pty` ([microsoft/node-pty](https://github.com/microsoft/node-pty)) — this is how Claude Code runs inside VS Code extensions. Cline ([cline/cline](https://github.com/cline/cline)) uses this in VS Code and gRPC in JetBrains. Classic `expect`/`pexpect` can automate Claude Code interactively.
+
+**Why it exists**: some programs behave differently with a TTY (colors, buffering, TUI rendering). PTY makes the program think it's interactive. For Claude Code specifically, this is unnecessary — `claude -p` provides structured output without needing a fake terminal.
+
+**Failure modes**: pattern matching brittleness (any output format change breaks automation), race conditions (async PTY reads with interleaved output), no structured output (must strip ANSI codes), buffer deadlocks. PTY adds complexity without benefit when `claude -p` or the Agent SDK is available.
+
+#### Comparison: Failure Modes by Approach
+
+| Failure | Subprocess Pipe | Docker One-Shot | API Loop | REST-in-Container |
+|---|---|---|---|---|
+| Hang without exit | Yes (missing result event, silent hang) | Yes (same Claude Code bugs) | No (loop is yours) | Depends on agent |
+| Mid-task steering | No (`query()`), Yes (`ClaudeSDKClient`) | No | Yes (loop injection) | Yes (HTTP message) |
+| Crash recovery | None built-in | Restart container, volumes persist | Rebuild history from storage | Event replay (OpenHands) |
+| Process isolation | Process-level only | Full container isolation | In-process, none | Full container isolation |
+| Permission control | Programmatic callbacks (best) | `--dangerously-skip-permissions` | Custom per-tool (best) | Risk-rated (OpenHands) |
+| Cost tracking | `result` event | `result` event | Per-API-call headers | Session complete event |
+| Observability during run | JSON stream | JSON stream via bind mount | Full request/response logs | HTTP/SSE events |
+| Complexity | Medium (SDK integration) | Low (shell script) | High (full agent loop) | Medium (HTTP client) |
+
+#### Key Takeaways for ATeam
+
+**The missing `result` event bug is a real production concern.** ATeam's `agent_in_container.sh` should implement a watchdog: if no stream-json output for N minutes (configurable, e.g., 10min), kill the container and mark the run as hung. Currently the script waits indefinitely.
+
+**The Agent SDK's permission callbacks are strictly better than `--dangerously-skip-permissions`** for scenarios where fine-grained control matters. For ATeam's Docker model where the container IS the sandbox, `--dangerously-skip-permissions` is fine — but if ATeam ever moves to a non-containerized model, the SDK's permission callbacks become essential.
+
+**The REST-server-inside-container pattern (SWE-ReX, sandbox-agent, OpenHands) is the most architecturally sound non-tmux approach for interactive sessions.** It gives Docker isolation + HTTP-based mid-task steering + structured events, without any tmux timing fragility. If ATeam needs interactive sessions beyond `claude -p`, this pattern is preferable to tmux-in-Docker (§C.8).
+
+**Event sourcing (OpenHands) is the gold standard for crash recovery** — deterministic replay from an append-only log. ATeam's stream-json output already IS an append-only event log. The missing piece is a `--resume`-like mechanism that can reconstruct agent state from the log. Claude Code's `--resume` flag provides this at the session level.
+
+**API-based loops trade simplicity for control.** ATeam's choice to use Claude Code (not raw API) is validated by the tool maintenance burden — keeping a custom agent loop working across API changes is ongoing cost. The API approach only makes sense if ATeam needs provider flexibility (GPT-4, Gemini) or per-tool-call permission logic that the SDK doesn't support.
