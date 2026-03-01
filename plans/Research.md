@@ -405,3 +405,547 @@ Several of these tools (OpenHands, agent-orchestrator, GitHub Copilot agent) alr
 - **Knowledge doesn't persist** for feature agents (they're disposable), but they benefit from the project's existing knowledge files and the testing agent validates their output.
 
 This is essentially what agent-orchestrator already does, so we could potentially integrate it as a subcomponent or adopt its patterns when the time comes.
+
+---
+
+## C. Agent Control
+
+How do existing frameworks actually control coding agents at the process level? This section compares the mechanisms used by four frameworks for: session lifecycle, stuck/idle detection, permission handling, done detection, message injection, and crash recovery.
+
+### C.1 Control Patterns Overview
+
+All four frameworks face the same fundamental problem: coding agents (Claude Code, Codex, etc.) are interactive CLI programs designed for human use. Running them unattended requires solving several sub-problems:
+
+1. **Launching** — start the agent with the right context, permissions, and workspace
+2. **Monitoring** — know what the agent is doing without interrupting it
+3. **Prompting** — handle permission dialogs, trust prompts, and interactive questions
+4. **Injecting** — send new instructions or context to a running agent mid-task
+5. **Detecting completion** — know when the agent is done
+6. **Recovering** — handle crashes, stuck agents, and resource exhaustion
+
+Two runtime models dominate: **tmux sessions** (Gas Town, CAO, agent-orchestrator's default) and **Docker containers** (ATeam's approach). The tmux model treats agents as long-lived interactive processes; the Docker model treats them as one-shot batch jobs.
+
+### C.2 Gas Town (steveyegge/gastown)
+
+Gas Town runs agents as **long-lived tmux sessions** on the bare host. Each agent ("Polecat") gets a dedicated tmux session, a git worktree, and a persistent identity. The system includes a Mayor (LLM coordinator), Witness (health monitor), Deacon (work dispatcher), and Refinery (merge queue).
+
+#### Stuck Agent Detection
+
+Detection is layered across three subsystems:
+
+**Witness patrol** (`internal/witness/handlers.go`): Runs periodic scans. `DetectStalledPolecats` flags a session as "stalled at startup" when session age exceeds 90 seconds AND last tmux pane activity is older than 60 seconds. `DetectZombiePolecats` checks two dimensions: session-dead (tmux session absent while bead shows `working`/`running`) and agent-dead (tmux session alive but Claude/Node process gone).
+
+**`CheckSessionHealth`** combines three checks: `HasSession()` (tmux present?), `IsAgentAlive()` (Claude process present?), and `GetSessionActivity()` (output within threshold?). Returns one of: `SessionHealthy`, `SessionDead`, `AgentDead`, `AgentHung`. The hung threshold is **30 minutes** of tmux inactivity.
+
+**`IsAgentAlive`** reads `GT_PROCESS_NAMES` from the tmux session environment to know which process names to look for. Uses `ps -p <pid> -o comm=` for the pane's main PID, plus recursive traversal of up to 10 levels of child processes via `pgrep -P`.
+
+**Heartbeat files** (`internal/polecat/heartbeat.go`): Each agent writes a JSON timestamp to `.runtime/heartbeats/<session>.json` whenever a `gt` command runs. Staleness threshold: **3 minutes**.
+
+**Daemon loop** (`internal/daemon/daemon.go`): Runs every **3 minutes**. Checks: Deacon/Witness/Refinery liveness, Polecat session validation, GUPP violations (agent has work but not progressing — threshold: **30 minutes**), orphaned work, orphaned Claude sub-processes. Also includes **mass death detection**: 3+ session deaths within 30 seconds triggers an alert.
+
+#### Permission and Dialog Handling
+
+Gas Town does NOT rely solely on `--dangerously-skip-permissions`. It uses a multi-layer approach:
+
+**`settings-autonomous.json`** is passed via `--settings` to Claude Code. Contains `"skipDangerousModePermissionPrompt": true` to bypass the in-terminal confirmation dialog.
+
+**`AcceptBypassPermissionsWarning`** handles the "Bypass Permissions mode" startup dialog by reading the tmux pane via `CapturePane`, checking for the dialog text, then sending `Down` + `Enter` keystrokes to select "Yes, I accept".
+
+**`AcceptWorkspaceTrustDialog`** handles the workspace trust dialog (introduced in Claude Code v2.1.55) by checking for "trust this folder" or "Quick safety check" in the pane, then sending `Enter`.
+
+Both are called together via `AcceptStartupDialogs()`, invoked both during `StartSession()` and proactively by `DetectStalledPolecats()` for sessions stuck at startup — a common failure mode.
+
+#### Message Injection (gt nudge)
+
+Three delivery modes:
+- **`immediate`** (default): direct tmux keystroke injection, may interrupt in-flight work
+- **`queue`**: write to file queue, picked up at next `UserPromptSubmit` hook
+- **`wait-idle`**: poll for idle state (15s timeout), then deliver; fallback to queue
+
+The immediate injection sequence in `NudgeSession`:
+1. Acquire per-session mutex lock
+2. Resolve agent pane in multi-pane sessions
+3. Exit copy/scroll mode (would intercept keystrokes) — sends `-X cancel`
+4. Sanitize: strip ESC, CR, BS; replace TAB with space
+5. Send via `send-keys -l` (literal mode). Messages >512 bytes are chunked with 10ms inter-chunk delay
+6. Wait 500ms for delivery
+7. Send `Escape` (exit vim INSERT mode; harmless in normal mode)
+8. Wait **600ms** (must exceed bash readline `keyseq-timeout` of 500ms to prevent ESC+Enter being merged)
+9. Send `Enter` with up to 3 retries (200ms between attempts)
+10. Send `SIGWINCH` to wake detached sessions
+
+Queue-based nudges are stored as JSON files in `.runtime/nudge_queue/<session>/`. TTLs: normal = 30 minutes, urgent = 2 hours. Max 50 queued per session. Drain is atomic (rename to `.claimed`) to prevent concurrent delivery. Injected as `<system-reminder>` blocks.
+
+#### Done Detection
+
+Primary: agents call **`gt done`** which writes completion metadata to the bead (`exit_type`: COMPLETED/ESCALATED/DEFERRED), transitions state to `idle`, and sends a tmux nudge to Witness.
+
+Backup: the Witness's **"Discover Don't Track" pattern** scans agent beads for `exit_type` and `completion_time` fields on each patrol cycle, not relying exclusively on the mail notification.
+
+Dead sessions with a `done-intent` label less than 30 seconds old are assumed to have exited normally.
+
+#### Crash Recovery
+
+**Restart-first policy**: `gt session restart` kills the tmux session and spawns a fresh one. The polecat's existing hook bead and git worktree are preserved — the agent picks up where it left off via `gt prime`.
+
+**Auto-respawn tmux hook**: installed via `run-shell -b` on pane-died events. Waits 3 seconds, checks if pane is still dead, then runs `tmux respawn-pane`.
+
+**`NukePolecat` safety gates**: refused if the polecat has a pending MR in the refinery. For zombies with uncommitted work, escalates rather than nuking.
+
+**Crash loop protection** (`RestartTracker`): initial backoff 30s, max 10min, 2x multiplier. 5 restarts within 15 minutes → blocked until manual `gt daemon clear-backoff`. Stability period: 30 minutes of uptime resets the counter.
+
+**Stale hook recovery**: beads with `hooked` status and no live agent session are reset to `open` after **1 hour**.
+
+**Redispatch**: up to 3 attempts per bead, 5-minute cooldown between attempts, then escalate to Mayor. A **spawn storm** detector flags beads respawned more than twice.
+
+#### Context Injection at Startup (gt prime)
+
+`gt prime` is the context injection entrypoint, called at session start via the `SessionStart` hook. It outputs: session metadata, full role context (300-500 lines from embedded docs), handoff content, and pending mail. If hooked work exists, outputs "AUTONOMOUS WORK MODE" with immediate-execution instructions and the bead description. After context compaction, a lighter version is injected to avoid disrupting workflow continuity.
+
+### C.3 Tmux Orchestrator Pattern
+
+"Tmux Orchestrator" is not a single project but a **pattern with multiple independent implementations**, all built around the same core idea: use tmux as the process manager for AI CLI agents with a supervisor layer that sends keystrokes in, reads terminal output back, and reacts.
+
+Key implementations: [Jedward23/Tmux-Orchestrator](https://github.com/Jedward23/Tmux-Orchestrator) (shell scripts), [Dicklesworthstone/claude_code_agent_farm](https://github.com/Dicklesworthstone/claude_code_agent_farm) (Python, 20+ parallel agents), [mixpeek/amux](https://github.com/mixpeek/amux) (Python + REST API), [adamwulf/ittybitty](https://github.com/adamwulf/ittybitty) (bash, worktree-isolated), [claude-yolo/claude-yolo](https://github.com/claude-yolo/claude-yolo) (permission auto-approval daemon).
+
+#### Session Control
+
+The fundamental mechanism is universal:
+```bash
+tmux new-session -s project -d
+tmux send-keys -t project:agent-1 "claude --dangerously-skip-permissions" Enter
+tmux send-keys -t project:agent-1 "Implement feature X" Enter
+```
+
+For large payloads with special characters, `claude_code_agent_farm` uses the tmux buffer API (binary-safe):
+```python
+tmux("load-buffer", "-b", buf_name, tmp_path)
+tmux("paste-buffer", "-d", "-b", buf_name, "-t", target)
+```
+
+The Jedward23 architecture uses a 3-tier hierarchy: Orchestrator (window 0) → Project Managers (one window per project) → Engineers (workers).
+
+#### Stuck Agent Detection
+
+Four approaches exist across implementations:
+
+**Heartbeat files** (`claude_code_agent_farm`): Agents touch a file on each command. Monitor checks file mtime — if age > 120 seconds, agent is considered hung and restarted.
+
+**`capture-pane` output scanning** (multiple projects): `tmux capture-pane -p -t SESSION:WINDOW` reads the visible terminal buffer. The orchestrator pattern-matches for signs of activity:
+```python
+def is_claude_working(content):
+    return any(ind in content for ind in ["✻ Pontificating", "● Bash(", "esc to interrupt"])
+def is_claude_ready(content):
+    return any(["Welcome to Claude Code!" in content, "│ >" in content])
+```
+
+**Claude Code hooks** (`ittybitty`, `claude-code-manager`, `tmux-agent-indicator`): Claude Code's native `Stop`, `PermissionRequest`, `UserPromptSubmit` hooks fire shell commands on lifecycle events:
+```json
+{ "hooks": { "Stop": [{ "command": "agent-state.sh --state done" }] } }
+```
+
+**Self-scheduling check-ins** (Jedward23): Agents call `nohup bash -c "sleep N && tmux send-keys ..."` at the end of each work session. If an agent dies, it never reschedules, which becomes visible at the next check-in.
+
+#### Permission Handling
+
+**`--dangerously-skip-permissions`**: the simplest approach, used by most for fully unattended operation. Known bugs where it doesn't bypass every prompt (workspace trust, certain mode dialogs).
+
+**Auto-approval daemon** (`claude-yolo`): Polls `capture-pane` every 0.3 seconds. Uses a two-tier detection (primary + secondary signals) to avoid false positives:
+- Primary: "Allow" and "Deny" both visible, OR numbered options like "1. Yes / 2. No"
+- Secondary: tool keywords (Bash, Read, Write), context phrases ("want to proceed", "permission")
+- Safety vetoes: if a slash-command autocomplete menu is visible, do NOT approve (prevents false trigger from the word "permissions" in autocomplete)
+
+Only `Enter` works as the approval keystroke (not `y`) — Claude Code's prompt has a pre-selected default. A 2-second per-pane cooldown prevents duplicate approvals.
+
+**Hook-based allowlist** (`ittybitty`): `PreToolUse` hook auto-denies tool calls accessing paths outside the agent's assigned worktree.
+
+#### Done Detection
+
+**Filesystem sentinels**: Workers write a `.done` file when finished. Orchestrator polls for it.
+
+**`Stop` hook**: Claude Code's native hook fires when a turn completes. Projects wire this to state files, notifications, or nudges.
+
+**Completion phrases**: Agents are prompted to output specific strings ("WAITING", "I HAVE COMPLETED THE GOAL"). The `Stop` hook scans for these.
+
+**Prompt box reappearance**: `capture-pane` detects the `│ >` prompt box returning — transition from "working" to "ready".
+
+#### Robustness
+
+**Exponential backoff restart** (`claude_code_agent_farm`): `min(10 * 2^restart_count, 300)` seconds.
+
+**File locking**: prevents concurrent Claude Code launches from corrupting shared `~/.claude` config files.
+
+**Self-healing context compaction** (`amux`): when context drops below 20%, automatically sends `/compact` with a 5-minute cooldown.
+
+**Known fragility — tmux send-keys race**: documented [bug](https://github.com/anthropics/claude-code/issues/23513) where `tmux send-keys` fires before the shell in a newly created pane finishes initializing, causing lost commands. Standard workaround: `sleep 1-2` after pane creation.
+
+### C.4 CAO (CLI Agent Orchestrator, awslabs)
+
+Repository: [awslabs/cli-agent-orchestrator](https://github.com/awslabs/cli-agent-orchestrator). A Python orchestration system that manages multiple agent sessions in tmux terminals with a supervisor-worker hierarchy, MCP-based inter-agent communication, and cron-scheduled flows.
+
+#### Session Lifecycle
+
+Every agent gets its own **tmux session** (not just a window), named with prefix `cao-` plus an 8-character hex suffix. A `CAO_TERMINAL_ID` environment variable is injected into the session for process identification.
+
+Full creation flow:
+```
+generate_session_name() + generate_terminal_id()
+  → tmux create_session()
+  → SQLite database.create_terminal()
+  → provider.initialize()         # starts agent, waits for IDLE
+  → tmux pipe_pane(log_path)      # pipes all output to .log file
+  → inbox_service.register()      # starts watchdog on log file
+```
+
+All terminal output is piped to `~/.aws/cli-agent-orchestrator/logs/terminal/{id}.log`. The SQLite database tracks terminal state.
+
+#### IDLE / Done Detection
+
+Done detection is **provider-specific regex pattern matching** on `capture-pane` output (last 200 lines).
+
+**Claude Code**: COMPLETED when the response marker `⏺` is found AND the idle prompt `[>❯]` is also present.
+
+**Q CLI / Kiro CLI**: COMPLETED when green arrow `>` plus idle prompt pattern are found.
+
+State priority order: `PROCESSING → WAITING_USER_ANSWER → COMPLETED → IDLE → ERROR`. Processing is checked first because spinner patterns can appear alongside prompt patterns during transitions.
+
+**Shell readiness check** during startup: polls with 0.5s intervals up to 10 seconds, checking that two consecutive `capture-pane` reads return the same non-empty output (stability check).
+
+#### Permission Handling
+
+**Claude Code**: launched with `--dangerously-skip-permissions`. The `WAITING_USER_ANSWER` state fires when Claude presents a numbered menu (but trust prompts are excluded via `TRUST_PROMPT_PATTERN`).
+
+**Q CLI / Kiro CLI**: permission prompts detected via `Allow this action?.*[y/n/t]:` pattern. The system checks how many idle lines appear after the last permission match — 0-1 means an active prompt needing response, 2+ means stale (already answered).
+
+When status is `WAITING_USER_ANSWER`, the system surfaces it through the API. The supervisor agent is expected to notice and handle it via `send_message` or `send_input`. No automatic resolution for non-Claude providers.
+
+**Trust prompts** are handled in `_handle_trust_prompt()` during `initialize()`: polls for "Yes, I trust this folder" text and sends `Enter` to accept.
+
+#### Supervisor-to-Worker Communication
+
+Three MCP tools:
+
+**`handoff(agent_profile, message, timeout=600)`** — synchronous, blocking: creates terminal, waits for IDLE, sends message, polls for COMPLETED (up to `timeout` seconds, default 600), retrieves output, sends exit command. Returns the output.
+
+**`assign(agent_profile, message)`** — async, non-blocking: creates terminal, sends message, returns `terminal_id` immediately. The worker calls `send_message` back when done.
+
+**`send_message(receiver_id, message)`** — inbox delivery: queued in SQLite, delivered asynchronously when receiver reaches IDLE. A Python `watchdog` `PollingObserver` monitors log files; when modified, checks for idle patterns before querying terminal status (two-phase approach for performance).
+
+Input injection uses tmux **bracketed paste mode**: `tmux load-buffer` + `paste-buffer`. `paste_enter_count` defaults to 2 (first Enter adds newline in Claude Code's multi-line mode, second submits).
+
+#### Recovery and Robustness
+
+Minimal explicit recovery in the current codebase:
+- **Timeout-based**: `wait_until_terminal_status()` returns `False` after timeout
+- **Handoff timeout**: 600s default, configurable up to 3600s
+- **Inbox retry**: PENDING messages retried on every log file modification event (no max retry count)
+- **Cleanup daemon**: removes data older than 14 days
+- No automatic agent restart on crash, no heartbeat beyond status polling
+
+#### Flows / Cron Scheduling
+
+Flows are defined as markdown files with YAML frontmatter containing a cron expression. Uses APScheduler's `CronTrigger`. A background daemon polls every 60 seconds for flows whose `next_run <= NOW AND enabled = TRUE`.
+
+An optional **script gate** runs before flow execution: an external script can check conditions and return `{"execute": false}` to abort. This is the primary mechanism for conditional/health-gated execution. Once a flow fires, it is fire-and-forget — no waiting for completion.
+
+### C.5 Agent Orchestrator (ComposioHQ)
+
+Repository: [ComposioHQ/agent-orchestrator](https://github.com/ComposioHQ/agent-orchestrator). TypeScript platform managing fleets of parallel coding agents. Agent-agnostic, runtime-agnostic (tmux default, process alternative), tracker-agnostic (GitHub, Linear).
+
+#### Session Lifecycle
+
+Tmux sessions use a two-tier naming scheme:
+- User-facing: `{prefix}-{num}` (e.g., `int-1`)
+- tmux name: `{hash}-{prefix}-{num}` where hash = `sha256(dirname(configPath)).slice(0, 12)` — prevents collision between different checkouts
+
+Agent launch for commands >200 chars uses `tmux load-buffer` + `paste-buffer` to avoid truncation, falling back to `send-keys` for shorter commands.
+
+Session status state machine:
+```
+spawning → working → pr_open → ci_failed / review_pending / changes_requested
+                              → approved → mergeable → merged
+Error paths: needs_input, stuck, errored, killed
+```
+
+#### Activity Detection (Dual-Channel)
+
+**Terminal output classifier** (fast, synchronous): scans `capture-pane` output.
+```
+Last line matches /^[❯>$#]\s*$/ → idle
+Last 5 lines contain "Do you want to proceed?" or "(Y)es...(N)o" → waiting_input
+Otherwise → active
+```
+
+**JSONL-based detection** (authoritative): reads Claude Code's session JSONL files directly at `~/.claude/projects/{encoded-path}/`. Uses a backwards-reading algorithm (4KB chunks) to find only the last entry. Maps entry types:
+- `user`, `tool_use`, `progress` → `active` (if recent) or `idle` (if stale)
+- `assistant`, `result`, `summary` → `ready` (if recent) or `idle`
+- `permission_request` → `waiting_input`
+- `error` → `blocked`
+
+The `DEFAULT_READY_THRESHOLD_MS` separates "recently finished" from "stale/idle" based on file mtime.
+
+Per-session enrichment has a **2-second timeout cap** to prevent subprocess calls from blocking the polling loop.
+
+#### Permission Handling
+
+**Not `--dangerously-skip-permissions` by default** — it's opt-in per project:
+```yaml
+agentConfig:
+  permissions: skip    # adds --dangerously-skip-permissions
+```
+
+The **orchestrator agent** always gets `permissions: "skip"` since it must run `ao` CLI commands autonomously.
+
+When permissions are not skipped and Claude shows a prompt, both the terminal classifier and JSONL classifier detect `waiting_input`, which maps to `needs_input` session status and triggers the `agent-needs-input` reaction.
+
+#### Reactions System
+
+Event-to-reaction mapping:
+```
+ci.failing               → ci-failed
+review.changes_requested → changes-requested
+automated_review.found   → bugbot-comments
+merge.conflicts          → merge-conflicts
+merge.ready              → approved-and-green
+session.stuck            → agent-stuck
+session.needs_input      → agent-needs-input
+session.killed           → agent-exited
+summary.all_complete     → all-complete
+```
+
+Action types: `send-to-agent` (inject message into tmux session), `notify` (alert human), `auto-merge`.
+
+Message injection via `sendMessage()`:
+1. `C-u` to clear partial input
+2. For long/multiline messages: named buffer via `tmux load-buffer` + `paste-buffer` (named `ao-{uuid}` to avoid race conditions on concurrent sends)
+3. For short messages: `tmux send-keys -l` (literal mode)
+4. 300ms delay, then `Enter`
+
+#### escalateAfter Mechanism
+
+Per-reaction trackers record `attempts` count and `firstTriggered` timestamp, keyed by `"sessionId:reactionKey"`.
+
+`escalateAfter` accepts either a **duration string** (`"30m"`, `"1h"`) or a **count** (numeric). When the threshold is exceeded, the reaction fires a `reaction.escalated` event and notifies the human.
+
+Trackers reset when the session changes status (e.g., CI fails again after a fix — retry counter starts fresh).
+
+Example config:
+```yaml
+reactions:
+  ci-failed:
+    auto: true
+    action: send-to-agent
+    retries: 2
+    escalateAfter: 2        # escalate after 2 attempts
+  changes-requested:
+    auto: true
+    action: send-to-agent
+    escalateAfter: 30m      # escalate after 30 minutes
+```
+
+#### ao send
+
+CLI command for injecting instructions into running sessions. Sequence:
+1. Wait for agent to become idle (polls every 5s, configurable timeout)
+2. `C-u` to clear partial input
+3. Send message (via `send-keys -l` or `load-buffer`/`paste-buffer` for long messages)
+4. 300ms delay + `Enter`
+5. **Delivery confirmation** (up to 3 retries): wait 2s, check if agent became active or message is queued. Re-send `Enter` if needed.
+
+#### Done / Exited Detection
+
+- **Process exit**: `ps -eo pid,tty,args` to find `claude` process on the tmux pane's TTY
+- **tmux session liveness**: `tmux has-session -t id`
+- **JSONL `exited` state**: if process not running, `getActivityState()` returns `{ state: "exited" }`
+- **PR merge/close**: from SCM plugin
+- **`summary.all_complete`**: fires when all sessions reach `merged` or `killed`
+
+#### Session Recovery
+
+`restore()` implements full crash recovery:
+1. Look in active metadata, fall back to archived metadata
+2. Validate workspace still exists (attempt `workspace.restore()` if missing)
+3. Destroy old runtime (in case tmux session survived the agent crash)
+4. Prefer `claude --resume {sessionUuid}` over fresh launch (reads session UUID from JSONL filename)
+5. Metadata is archived (not deleted) on `kill()`, enabling future restoration
+
+#### Monitoring
+
+30-second polling loop in `lifecycle-manager.ts`. Re-entrancy guard skips overlapping cycles. Probe failure preserves existing `stuck`/`needs_input` status rather than overwriting with `working`. No separate watchdog process.
+
+### C.6 Comparison Table
+
+| Concern | Gas Town | Tmux Orchestrator | CAO | ComposioHQ |
+|---|---|---|---|---|
+| **Runtime** | tmux on bare host | tmux on bare host | tmux on bare host | tmux (default) or child_process |
+| **Session model** | Long-lived, resumable | Long-lived or one-shot | One tmux session per agent | Long-lived, restorable |
+| **Stuck detection** | Witness patrol + heartbeat + daemon loop (3min cycle). Hung threshold: 30min inactivity | Heartbeat files (120s), capture-pane scanning, Claude Code hooks | Timeout-based polling only (no watchdog) | Dual-channel: terminal capture + JSONL file mtime. 30s poll cycle |
+| **Permission handling** | settings.json `skipDangerousModePermissionPrompt` + tmux keystroke injection for startup dialogs | `--dangerously-skip-permissions` or auto-approval daemon (capture-pane poll, 0.3s interval) | `--dangerously-skip-permissions` for Claude; regex detection for Q/Kiro CLI | Opt-in `permissions: skip` per project. Activity classifier detects `waiting_input` |
+| **Trust prompt** | `AcceptWorkspaceTrustDialog` sends Enter | Manual or `--dangerously-skip-permissions` | `_handle_trust_prompt()` sends Enter during init | Not explicitly handled |
+| **Message injection** | `gt nudge`: 3 modes (immediate/queue/wait-idle). Literal send-keys, chunked >512B, mutex-locked. 600ms ESC/Enter timing | `tmux send-keys` or `load-buffer`/`paste-buffer` for binary safety | Bracketed paste (`load-buffer` + `paste-buffer`), double-Enter for Claude | `C-u` clear + `send-keys -l` or named buffer. 3-retry delivery confirmation |
+| **Done detection** | `gt done` self-report + Witness bead scanning (Discover Don't Track) | `.done` files, Stop hook, completion phrases, prompt box reappearance | Provider-specific regex on capture-pane (response marker + idle prompt) | Process exit + tmux liveness + JSONL state + PR merge |
+| **Crash recovery** | Restart-first (preserve worktree+bead). Auto-respawn tmux hook. Crash loop protection (5 restarts/15min → blocked). Stale hook recovery (1hr). Redispatch (3 attempts, 5min cooldown) | Exponential backoff restart. File locking for ~/.claude. Context compaction at 20% | Timeout-based only. No auto-restart | Full restore with `--resume`. Metadata archival. Workspace validation. 2s enrichment timeout |
+| **Escalation** | GUPP violation (30min) → Deacon/Mayor. `gt help` → Witness triage. Spawn storm detection | Manual (no built-in escalation) | Supervisor notices via API, handles manually | `escalateAfter` per reaction (duration or count). Tracker resets on state change |
+| **Inter-agent comms** | 3 channels: mail (persistent), nudge (real-time), hooks (filesystem) | tmux send-keys between windows | MCP tools: handoff (sync), assign (async), send_message (inbox) | Reactions system: event → action mapping |
+| **Scheduling** | Manual dispatch by Mayor | Manual or self-scheduled check-ins | APScheduler cron with script gate | Manual `ao spawn` (no built-in scheduling) |
+
+### C.7 Lessons for ATeam
+
+**Gas Town's robustness is the gold standard** — layered detection (Witness patrol + heartbeat + daemon), crash loop protection with exponential backoff, TOCTOU guards before destructive actions, spawn storm detection, stale hook recovery. ATeam should adopt the crash loop protection pattern and the "Discover Don't Track" philosophy (read state from artifacts, don't rely on notifications).
+
+**The tmux `send-keys` timing problem is real.** Gas Town's 600ms ESC/Enter delay, mutex-locked delivery, chunked messages >512B, and 3-retry Enter are all solutions to actual race conditions. ATeam's Docker+`claude -p` model avoids this entirely — one-shot invocations don't need keystroke injection. This is a significant simplicity advantage.
+
+**Permission handling is a pain point for everyone.** The `--dangerously-skip-permissions` flag doesn't bypass every dialog (workspace trust, certain mode prompts). Gas Town's approach of both using settings.json AND having tmux keystroke handlers for startup dialogs is pragmatic. ATeam's Docker containers can pre-configure the settings file in the image, avoiding runtime dialog handling.
+
+**JSONL/stream-json monitoring is converging as the standard.** Both ComposioHQ and Gas Town read Claude Code's session files directly as a side-channel for activity detection. ATeam's stream-json approach is the same pattern. The dual-channel approach (terminal output for fast checks + JSONL for authoritative state) from ComposioHQ is worth adopting.
+
+**`escalateAfter` is the right abstraction.** ComposioHQ's per-reaction escalation with both duration and count thresholds, plus automatic reset on state change, is clean. ATeam's coordinator should use the same pattern for deciding when to give up on an agent and escalate to human review.
+
+**One-shot vs long-lived is a fundamental tradeoff.** Long-lived sessions (Gas Town, tmux orchestrator) enable mid-task steering, context accumulation, and `--resume` after crashes. One-shot sessions (ATeam's `claude -p`) are simpler, stateless, and avoid the entire class of stuck-session bugs. ATeam's choice is validated by the complexity required to manage long-lived sessions — Gas Town has thousands of lines of session management code that ATeam doesn't need.
+
+### C.8 Hybrid: tmux Inside Docker
+
+ATeam currently uses one-shot `claude -p` in Docker containers — simple, stateless, no session management. The tmux-based frameworks (Gas Town, CAO, tmux orchestrator) use long-lived interactive sessions — more capable, but complex and fragile. A hybrid approach runs tmux *inside* the Docker container, combining Docker's isolation with tmux's interactive control.
+
+#### Why Consider This
+
+`claude -p` is fire-and-forget: the prompt is fixed at launch, there's no way to steer mid-task, and if the agent gets stuck on the wrong approach there's no recourse but to wait for it to finish (or kill it). The tmux-inside-Docker model would allow:
+
+- **Mid-task steering** — inject corrections, additional context, or "stop and try a different approach" without killing the container
+- **Reactive context injection** — feed CI failures, review comments, or coordinator decisions to a running agent (the ComposioHQ reactions pattern)
+- **Interactive mode with `--resume`** — Claude Code in interactive mode accumulates context across turns; `--resume` can recover from crashes without losing conversation history
+- **Multi-turn workflows** — an audit agent could first explore, then the coordinator reviews its findings and sends a follow-up prompt to refine, all within one session
+- **Graceful shutdown** — send "wrap up and commit your work" instead of `docker kill`
+
+#### Architecture
+
+Two viable approaches:
+
+**Option A: tmux inside the container, controlled via `docker exec`**
+
+```
+Host                          Docker container
+─────────────────────────     ──────────────────────────────
+coordinator                   tmux server
+  │                             └─ session "agent"
+  ├─ docker exec ... \              └─ claude (interactive)
+  │    tmux send-keys ...
+  ├─ docker exec ... \
+  │    tmux capture-pane ...
+  └─ docker exec ... \
+       cat /output/stream.jsonl
+```
+
+The container entrypoint starts tmux and launches Claude Code inside it. The host controls the session via `docker exec <container> tmux send-keys ...`. All the tmux patterns from C.2–C.5 apply, just prefixed with `docker exec`.
+
+Dockerfile additions:
+```dockerfile
+RUN apt-get install -y tmux
+```
+
+Container entrypoint:
+```bash
+#!/bin/bash
+tmux new-session -d -s agent -x 200 -y 50
+tmux send-keys -t agent "claude --dangerously-skip-permissions" Enter
+# Keep container alive while tmux runs
+tmux wait-for agent-done  # or: while tmux has-session -t agent 2>/dev/null; do sleep 5; done
+```
+
+Host sends a task:
+```bash
+docker exec $CONTAINER tmux send-keys -t agent "Audit the test coverage of /workspace" Enter
+```
+
+Host reads state:
+```bash
+docker exec $CONTAINER tmux capture-pane -t agent -p    # terminal output
+docker exec $CONTAINER cat /output/stream.jsonl          # JSONL side-channel (if configured)
+```
+
+Host injects mid-task context:
+```bash
+docker exec $CONTAINER tmux send-keys -t agent \
+  "Actually, focus on the auth module first — CI is failing there" Enter
+```
+
+**Option B: tmux on the host, Docker as a "fat shell"**
+
+The tmux session lives on the host. Each pane runs `docker exec -it <container> bash` rather than a local shell. This is simpler conceptually (tmux is just tmux, Docker is just the sandbox) but messier in practice — the tmux session survives the container, creating orphan state.
+
+Option A is cleaner. The container is the unit of isolation, and tmux is an implementation detail inside it.
+
+#### Sending Messages: `docker exec` vs Bind-Mount Mailbox
+
+The `docker exec ... tmux send-keys` approach inherits all the tmux timing fragility documented in C.2–C.5 (ESC/Enter races, chunking, mutex locking). An alternative is a **file-based mailbox**:
+
+```
+Host writes:    $OUTPUT_DIR/inbox/001-task.md
+Container reads: /output/inbox/001-task.md  (via bind mount)
+```
+
+Claude Code's `UserPromptSubmit` hook or a simple inotifywait loop inside the container picks up new files and injects them into the session. This avoids tmux keystroke timing entirely — the message is a file, not a sequence of keystrokes. Gas Town's nudge queue uses the same pattern (§C.2), and it's more reliable than direct tmux injection.
+
+The mailbox approach can be combined with tmux: the container runs tmux internally for session persistence and `--resume` support, but the host communicates via files rather than `docker exec tmux send-keys`.
+
+#### Monitoring: Three Channels
+
+With tmux inside Docker, monitoring can use all three channels simultaneously:
+
+1. **stream-json / JSONL** (existing) — `claude -p --output-format stream-json > /output/stream.jsonl` or Claude Code's session JSONL at `~/.claude/projects/`. File is bind-mounted to host. The host's live monitor (§G in `agent_in_container.sh`) already does this.
+
+2. **tmux capture-pane** (new) — `docker exec $CONTAINER tmux capture-pane -t agent -p -S -50` returns the last 50 lines of terminal output. Enables the terminal-output classifiers from ComposioHQ (§C.5): detect idle prompt, permission dialogs, spinner activity.
+
+3. **Claude Code hooks** (new) — configure `Stop`, `PermissionRequest`, etc. in the container's `.claude/settings.json` to write state files:
+   ```json
+   { "hooks": { "Stop": [{ "command": "echo done > /output/agent-state" }] } }
+   ```
+   The host reads `/output/agent-state` via the bind mount. No `docker exec` needed.
+
+The dual-channel approach from ComposioHQ (§C.5) — fast terminal scan + authoritative JSONL — maps directly to channels 2 and 1.
+
+#### Stuck Detection and Recovery
+
+With tmux in the container, stuck detection can go beyond "wait for exit code":
+
+| Signal | Detection method | Action |
+|---|---|---|
+| Agent idle >5min | JSONL file mtime or `capture-pane` shows prompt | Send follow-up via mailbox |
+| Permission prompt | Claude Code hook or `capture-pane` regex | Auto-approve or escalate |
+| Agent hung >30min | No JSONL writes, no tmux activity | Send Ctrl-C, then new prompt; or kill and `--resume` in new container |
+| Container OOM | Docker event or exit code 137 | Restart container with higher memory, `--resume` previous session |
+| Context exhaustion | JSONL `result` event with high token count | Send `/compact` or start new session with summary |
+
+Recovery via `--resume` is the key advantage over `claude -p`. If the container dies (OOM, timeout, crash), a new container can be started with `claude --resume <session-id>`, picking up where the previous session left off. The session JSONL files must be persisted on the host (already the case via bind mount of `~/.claude`).
+
+#### What This Unlocks vs `claude -p`
+
+| Capability | `claude -p` (current) | tmux-in-Docker |
+|---|---|---|
+| Mid-task steering | No | Yes — mailbox or tmux send-keys |
+| Reactive context (CI fail, review) | No — must wait for next run | Yes — inject during current run |
+| Crash recovery | Restart from scratch | `--resume` continues session |
+| Multi-turn workflow | Separate invocations, no shared context | Same session, accumulated context |
+| Graceful shutdown | `docker kill` (loses in-progress work) | "Commit your work and exit" message |
+| Done detection | Exit code only | Exit code + hooks + capture-pane + JSONL |
+| Session visibility | stream.jsonl tail | stream.jsonl + `tmux attach` for live view |
+| Complexity | Minimal | Moderate (tmux in image, entrypoint, mailbox or send-keys) |
+
+#### Complexity Cost
+
+The hybrid model adds:
+- tmux in the Docker image (~2MB)
+- An entrypoint script that starts tmux and launches Claude Code
+- Either `docker exec tmux send-keys` wiring (with the timing issues) or a mailbox mechanism
+- A keep-alive loop so the container doesn't exit when Claude Code finishes a turn
+- Session ID tracking for `--resume` across container restarts
+
+This is substantially less than what Gas Town requires (no Witness, no Deacon, no Beads, no nudge queue atomics, no crash loop tracker) because Docker provides the isolation and lifecycle that Gas Town builds manually with tmux sessions on bare metal.
+
+#### When to Use Which
+
+**`claude -p`** (current ATeam model): best for well-scoped, autonomous tasks where the prompt contains everything the agent needs. Audit runs, test generation, documentation — anything that can be specified upfront and evaluated after completion.
+
+**tmux-in-Docker**: best for tasks that benefit from mid-task interaction. Implementation tasks where the coordinator may need to course-correct. Long-running tasks where crashes are likely. Workflows where the coordinator reviews intermediate output before the agent continues. Reactive scenarios where external events (CI, reviews) should feed back into a running agent.
+
+A pragmatic approach: start with `claude -p` for all agent types. Add tmux-in-Docker as an alternative runtime for implement-mode agents and for any task that exceeds a cost/duration threshold where crash recovery justifies the complexity.
