@@ -1,5 +1,50 @@
 # Ateam
 
+### POC CLI
+
+Let's move to building a CLI to start proving this idea:
+* focus on specialized sub-agents
+* implement the core workflow of: produce report, implement report
+* initially I'll act as the supervisor to decide what report to implement and I'll manually run each agent
+* little emphasis on directory structure
+
+#### Phase 1: Focus on container execution and report generation
+
+```bash
+# Run a specific agent
+ateam agent [report|implement] --agent AGENT_NAME --role PROMPT \
+  [--report FILENAME (default: AGENT_NAME.YYYY-MM-DD_HHMM.report.md)]
+  [--extra-prompt PROMPT] \
+  [--commit yes (default for implement)|no (default for report)]
+  [--docker-file FILE (default: Dockerfile)]
+  [--docker-run FILE (default)]
+
+# Run the coordinator agent and have it analyze a set of reports
+ateam decide AGENT_NAME1:REPORT_FILE_1 AGENT_NAME2:REPORT_FILE_2 ...\
+  [--decision FILEPATH (default: )]
+
+
+# troubleshoot / interact
+ateam chat --agent AGENT_NAME \
+  [--docker-file FILE (default: Dockerfile)]
+  [--docker-run FILE (default)]
+```
+
+#### Phase 2: Add automatic supervision
+
+Implement the core coordinator
+
+```bash
+# Spawn sub-agents, wait for their completion and then run the coordinator to  and run the coordinator to wait
+ateam run AGENT_NAME1,AGENT_NAME2,... [--mode report|implement (default: report)]
+```
+
+
+#### Phase 3: Implement directory structure and orchestration
+
+many sub phases
+
+
 ### v0
 
 This is my story leading to ATeam: I find that working with agents require a lot of attention in burst and interaction is absolutely require to help shape a specific feature. But the constant approval of minor commands is a drag. Over time code tends to decay so I often ask the coding agent to refactor recent changes before I might even review them. Then less frequently I ask the agent to find and perform bigger refactoring, add tests, review security audit, do some performance optimizations, update documents (internal and external(, etc ... It's time consuming to ask for these tasks, then manage them to completion. And they could be happened asynchronously on every commit or at time or when development is not occurring. Lastly expertise and overview of the code from a particular perspective (architecture, security, etc ...) gets lost as features need to their own context. Not the speak about cross project knwoledge that is not passed along.
