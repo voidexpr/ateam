@@ -6,6 +6,8 @@
 
 ---
 
+TODO: commit approval/dismissal + history of decisions so contributions can be controlled before/during `ateam push`
+
 ## 1. Executive Summary
 
 Agent-generated code requires constant review or it becomes spaghetti — new features break existing code, test coverage erodes and breaks, dependencies rot, documentation drifts. ATeam manages non-interactive agents that work in the background to prevent this: refactor code as it is being added, improve and debug tests, review security, manage dependencies, update internal and external documentation. Humans focus on features with interactive agents; ATeam quietly handles everything else.
