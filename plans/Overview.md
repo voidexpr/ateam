@@ -6,7 +6,7 @@ ATeam tackles the core issue of agentic coding: how to iterate fast on features 
 
 Agents are very good at finding issues in code and producing tests, so why should humans spend attention on a codebase they may never contribute to? Developers should focus on the big picture: what the project does and how features should work, not how the engineering is performed.
 
-## Story Team
+## Story Time
 
 Based on my experience working on multiple projects with agents:
 * I touch code less and less. I used to do a lot of code reviews but why review code I'm not going to modify myself? But I still need to do it to catch architecture issues.
