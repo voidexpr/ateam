@@ -1,6 +1,120 @@
 # Ateam
 
-### POC CLI
+### POC CLI - v1
+
+Let's implement a proof of concept for ateam, we want to focus on reports and summary of reports and leave a few features to later:
+* isolation of execution
+* manage persistent memory of agents
+* perform changes in isolated environment
+* overall directory structure
+
+Concepts:
+* an existing checkout of a project
+* sub-agents to report to produce reports for a specific role: small refactoring, big refactoring/rearchitecting, database integrity, internal docs, external docs, testing, etc ...
+* supervisor reviews and makes decisions on one or more reports and later requests the report by itself
+* report: an assessment of what to do for a particular role
+* decisions: the report produced by the supervisor
+
+Here is the basic features we want:
+* designate a ateam working directory to store reports and designate which directory the project is already checked out in. ateam commands will be run within this working directory
+* request one or more reports from sub-agents
+* have the supervisor process these reports and produce a decisions report
+
+Here is the CLI:
+
+```bash
+# create $(pwd)/NAME/ + a sub dir for each agent
+# if the directories already exist then no-op except if new agents are specified then add them
+# create config.toml with PROJECT_DIR
+ateam init NAME --source PROJECT_DIR [--agents AGENT_LIST] [--work-dir DIR (default: current dir)]
+
+# AGENT_LIST is one or or more of: all, refactor_small, refactor_architecture, docs_internal, docs_external, basic_project_structure, automation, dependencies, testing_basic, testing_full, security
+# all means all these roles
+
+# must be ran within a directory with config.toml
+# runs all the agents in parallel (max of 3 at a time) as claude -p DEFAULT_AGENT_PROMPT + DEFAULT_REPORT_PROMPT + CUSTOM_PROMPT > AGENT_NAME.report.md
+# also archive the report within the agent hown directory as: YYYY-MM-DD_HHMM.AGENT_NAME.report.md
+ateam report --agents AGENT_LIST [--extra-prompt TEXT_OR_FILE]
+
+# Look at all *.report.md files and produce review.md
+# this executes claude -p SUPERVISOR_PROMPT + REVIEW_PROMPT + CUSTOM_PROMPT or just uses PROMPT with --prompt is passed in
+ateam review [--extra-prompt TEXT_OR_FILE] [--prompt PROMPT]
+```
+
+We want to implement this in Go. Parallel agent execution is done via a worker pool with max number of parallelism (ok to use a dependency for that if it's very small, ideally use a built-in worker pool if it exists). This program mostly spawns "claude -p" processes. It will hardcoded a mapping between AGENT_NAME and their DEFAULT_AGENT_PROMPT. Also hardcode a generic DEFAULT_REPORT_PROMPT, SUPERVISOR_PROMPT, REVIEW_PROMPT.
+When doing init these prompts are written to appropriately named markdown files in the directory structure created and each execution will read from them. This way it's possible to customize these prompts easily.
+
+Next features will be:
+* create a basic project overview for each sub-agent that can be used when producing a report
+* maintain a context between reports so there is some memory
+* have the supervisor create a summary of the project and based on its assessment (project size, complexity, velocity, ... ) will decide itself which agent reports to commission.
+* more isolated environment (docker, anthropic experimental sandbox)
+* stateful agents: last commit seen, decision/feedback on each report to incorporate in future reports
+
+But don't implement any of these features yet. Just given context.
+
+Please propose a plan and ask clarifying questions. Write this plan in plans/POC_Reporting.md
+
+### POC CLI - v0.5
+
+* run within an existing directory
+* pre-create simple prompts aimed to be called with "claude -p" just to produce reports. Give this CLI to a supervisor with its own prompt.
+* sub-agent prompt includes to write AGENT.report.md into a directory (by default /tmp/ateam/PROJECT_PATH)
+* the supervisor then reads these reports and make a summary
+* play with different conservative/ambitious prompts
+
+```bash
+ateam report --agent AGENT [--output-dir DIR]
+ateam review [--output-dir DIR]
+ateam all
+```
+
+TODO: cd to ateam project dir and specify the project to work on
+
+Alt:
+* cd to ateam state dir
+* run: ateam init --project-dir DIR
+  * save where the project is in project.config
+* commands:
+
+```bash
+ateam report --agent AGENT [--project-dir DIR (default from local project.config or error)]
+ateam review [--agents AGENT1,AGENT2,...]   (default review all reports) [--project-dir DIR (default from local project.config or error)]
+ateam all (have the supervisor request reports and summarize them) [--project-dir DIR (default from local project.config or error)]
+  # this commands produces a review.md that could then be given to an agent to implement (for now any claude but eventually )
+```
+
+Initial agents:
+* small refactor
+* big architecture review
+* small testing
+* full testing
+* documentation-internal
+* documentation-external
+* dependency analysis:
+  * deprecation
+  * security
+  * behind major versions + how it could impact the project
+* review scripts/tooling ?
+
+
+Concepts:
+* report
+  * stateful ?
+* environment:
+  * sandbox, docker, nothing, custom CLI args
+* memory mode:
+  * none
+  * agg reports incrementally
+  * build overview of project and reuse only that for each new report
+  * look at X commits
+  * look at specific changes
+  * look at "recent"
+  * since commit of last report
+    * need to track commits
+
+
+### POC CLI - v0
 
 Let's move to building a CLI to start proving this idea:
 * focus on specialized sub-agents
