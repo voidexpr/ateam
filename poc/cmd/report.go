@@ -39,7 +39,7 @@ Example:
 func init() {
 	reportCmd.Flags().StringSliceVar(&reportAgents, "agents", nil, agents.FlagUsage()+" (required)")
 	reportCmd.Flags().StringVar(&reportExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
-	reportCmd.Flags().IntVar(&reportTimeout, "agent-report-timeout", 0, "timeout in minutes per agent (overrides config)")
+	reportCmd.Flags().IntVar(&reportTimeout, "timeout", 0, "timeout in minutes per agent (overrides config)")
 	reportCmd.Flags().BoolVar(&reportDelta, "delta", false, "produce delta report (not yet implemented)")
 	_ = reportCmd.MarkFlagRequired("agents")
 }

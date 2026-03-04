@@ -55,7 +55,10 @@ func RunClaude(ctx context.Context, prompt, outputFile, workDir string, timeoutM
 	}
 
 	// Read back output for the result
-	data, _ := os.ReadFile(outputFile)
+	data, err := os.ReadFile(outputFile)
+	if err != nil {
+		return RunResult{Err: fmt.Errorf("cannot read output file: %w", err), Duration: duration}
+	}
 	return RunResult{Output: string(data), Duration: duration}
 }
 
@@ -72,8 +75,8 @@ func FormatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dm%ds", minutes, seconds)
 }
 
-// ArchiveFile copies a report file to the archive directory with a timestamped name.
-func ArchiveFile(srcPath, archiveDir, prefix string) error {
+// ArchiveFile copies a file to archiveDir with a timestamped name: "2006-01-02_1504.{name}".
+func ArchiveFile(srcPath, archiveDir, name string) error {
 	if err := os.MkdirAll(archiveDir, 0755); err != nil {
 		return err
 	}
@@ -84,13 +87,7 @@ func ArchiveFile(srcPath, archiveDir, prefix string) error {
 	}
 
 	timestamp := time.Now().Format("2006-01-02_1504")
-	archiveName := fmt.Sprintf("%s.%s", timestamp, filepath.Base(srcPath))
-	if prefix != "" {
-		archiveName = fmt.Sprintf("%s.%s", timestamp, prefix)
-	}
-
-	// Remove characters that are problematic in filenames
-	archiveName = strings.ReplaceAll(archiveName, " ", "_")
+	archiveName := strings.ReplaceAll(fmt.Sprintf("%s.%s", timestamp, name), " ", "_")
 
 	return os.WriteFile(filepath.Join(archiveDir, archiveName), data, 0644)
 }
