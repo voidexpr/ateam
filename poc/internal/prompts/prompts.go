@@ -5,6 +5,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/ateam-poc/internal/agents"
+)
+
+const (
+	ReportPromptFile      = "report_prompt.md"
+	ExtraReportPromptFile = "extra_report_prompt.md"
+	ReviewPromptFile      = "review_prompt.md"
+	FullReportFile        = "full_report.md"
 )
 
 // ResolveValue handles the @filename convention:
@@ -22,67 +31,78 @@ func ResolveValue(value string) (string, error) {
 	return value, nil
 }
 
-// WriteDefaults writes all default prompt files to the project directory.
-// It does not overwrite existing files.
-func WriteDefaults(projectDir string, agentIDs []string) error {
-	agentsDir := filepath.Join(projectDir, "agents")
-	supervisorDir := filepath.Join(projectDir, "supervisor")
-	if err := os.MkdirAll(supervisorDir, 0755); err != nil {
-		return fmt.Errorf("cannot create supervisor directory: %w", err)
+// ResolveOptional resolves a prompt value, returning "" for empty input.
+func ResolveOptional(value string) (string, error) {
+	if value == "" {
+		return "", nil
 	}
+	return ResolveValue(value)
+}
 
-	// Write shared report instructions
-	if err := writeIfNotExists(filepath.Join(agentsDir, "report_prompt.md"), DefaultReportInstructions); err != nil {
-		return err
+// CombinedAgentPrompt returns the default agent role prompt combined with
+// report instructions for the given agent ID.
+func CombinedAgentPrompt(agentID string) string {
+	role, ok := DefaultAgentPrompts[agentID]
+	if !ok {
+		return ""
 	}
+	return role + "\n\n---\n\n" + DefaultReportInstructions
+}
 
-	// Write supervisor prompts
-	if err := writeIfNotExists(filepath.Join(supervisorDir, "prompt.md"), DefaultSupervisorRole); err != nil {
-		return err
-	}
-	if err := writeIfNotExists(filepath.Join(supervisorDir, "review_prompt.md"), DefaultReviewInstructions); err != nil {
-		return err
-	}
+// CombinedSupervisorPrompt returns the default supervisor role combined with
+// review instructions.
+func CombinedSupervisorPrompt() string {
+	return DefaultSupervisorRole + "\n\n---\n\n" + DefaultReviewInstructions
+}
 
-	// Write per-agent prompts
-	for _, id := range agentIDs {
-		prompt, ok := DefaultAgentPrompts[id]
-		if !ok {
-			continue
+// WriteRootDefaults writes default prompt files to the .ateam root directory.
+// If overwrite is true, existing files are replaced; otherwise they are skipped.
+func WriteRootDefaults(ateamRoot string, overwrite bool) error {
+	write := WriteIfNotExists
+	if overwrite {
+		write = func(path, content string) error {
+			return os.WriteFile(path, []byte(content), 0644)
 		}
-		agentDir := filepath.Join(agentsDir, id)
+	}
+
+	for _, id := range agents.AllAgentIDs {
+		agentDir := filepath.Join(ateamRoot, "agents", id)
 		if err := os.MkdirAll(agentDir, 0755); err != nil {
 			return fmt.Errorf("cannot create agent directory %s: %w", id, err)
 		}
-		if err := writeIfNotExists(filepath.Join(agentDir, "prompt.md"), prompt); err != nil {
+		if err := write(filepath.Join(agentDir, ReportPromptFile), CombinedAgentPrompt(id)); err != nil {
 			return err
 		}
 	}
 
-	return nil
+	supervisorDir := filepath.Join(ateamRoot, "supervisor")
+	if err := os.MkdirAll(supervisorDir, 0755); err != nil {
+		return fmt.Errorf("cannot create supervisor directory: %w", err)
+	}
+	return write(filepath.Join(supervisorDir, ReviewPromptFile), CombinedSupervisorPrompt())
 }
 
-// AssembleAgentPrompt reads the prompt files for an agent and combines them
-// with the source directory and optional extra prompt.
-func AssembleAgentPrompt(projectDir, agentID, sourceDir, extraPrompt string) (string, error) {
-	agentPath := filepath.Join(projectDir, "agents", agentID, "prompt.md")
-	agentPrompt, err := os.ReadFile(agentPath)
+// AssembleAgentPrompt builds the full prompt for an agent run.
+// Checks project-level override first, falls back to root default.
+func AssembleAgentPrompt(ateamRoot, projectDir, agentID, sourceDir, extraPrompt string) (string, error) {
+	promptContent, err := readWithFallback(
+		filepath.Join(projectDir, "agents", agentID, ReportPromptFile),
+		filepath.Join(ateamRoot, "agents", agentID, ReportPromptFile),
+		"agent "+agentID,
+	)
 	if err != nil {
-		return "", fmt.Errorf("cannot read agent prompt for %s: %w", agentID, err)
+		return "", err
 	}
 
-	instrPath := filepath.Join(projectDir, "agents", "report_prompt.md")
-	instrPrompt, err := os.ReadFile(instrPath)
-	if err != nil {
-		return "", fmt.Errorf("cannot read report instructions: %w", err)
+	promptContent = strings.ReplaceAll(promptContent, "{{SOURCE_DIR}}", sourceDir)
+
+	parts := []string{promptContent}
+
+	extraFilePath := filepath.Join(projectDir, "agents", agentID, ExtraReportPromptFile)
+	if data, err := os.ReadFile(extraFilePath); err == nil {
+		parts = append(parts, "# Project-Specific Instructions\n\n"+string(data))
 	}
 
-	// Replace source dir placeholder
-	instructions := strings.ReplaceAll(string(instrPrompt), "{{SOURCE_DIR}}", sourceDir)
-
-	var parts []string
-	parts = append(parts, string(agentPrompt))
-	parts = append(parts, instructions)
 	if extraPrompt != "" {
 		parts = append(parts, "# Additional Instructions\n\n"+extraPrompt)
 	}
@@ -90,8 +110,8 @@ func AssembleAgentPrompt(projectDir, agentID, sourceDir, extraPrompt string) (st
 	return strings.Join(parts, "\n\n---\n\n"), nil
 }
 
-// AssembleReviewPrompt reads the supervisor prompt files and appends all report contents.
-func AssembleReviewPrompt(projectDir, extraPrompt, customPrompt string) (string, error) {
+// AssembleReviewPrompt builds the full prompt for a supervisor review.
+func AssembleReviewPrompt(ateamRoot, projectDir, extraPrompt, customPrompt string) (string, error) {
 	agentsDir := filepath.Join(projectDir, "agents")
 	entries, err := os.ReadDir(agentsDir)
 	if err != nil {
@@ -103,7 +123,7 @@ func AssembleReviewPrompt(projectDir, extraPrompt, customPrompt string) (string,
 		if !entry.IsDir() {
 			continue
 		}
-		reportPath := filepath.Join(agentsDir, entry.Name(), entry.Name()+".report.md")
+		reportPath := filepath.Join(agentsDir, entry.Name(), FullReportFile)
 		data, err := os.ReadFile(reportPath)
 		if err != nil {
 			continue
@@ -122,22 +142,16 @@ func AssembleReviewPrompt(projectDir, extraPrompt, customPrompt string) (string,
 		return customPrompt + "\n\n---\n\n# Agent Reports\n\n" + allReports, nil
 	}
 
-	supervisorPath := filepath.Join(projectDir, "supervisor", "prompt.md")
-	supervisorPrompt, err := os.ReadFile(supervisorPath)
+	supervisorPrompt, err := readWithFallback(
+		filepath.Join(projectDir, "supervisor", ReviewPromptFile),
+		filepath.Join(ateamRoot, "supervisor", ReviewPromptFile),
+		"supervisor",
+	)
 	if err != nil {
-		return "", fmt.Errorf("cannot read supervisor prompt: %w", err)
+		return "", err
 	}
 
-	reviewPath := filepath.Join(projectDir, "supervisor", "review_prompt.md")
-	reviewPrompt, err := os.ReadFile(reviewPath)
-	if err != nil {
-		return "", fmt.Errorf("cannot read review instructions: %w", err)
-	}
-
-	var parts []string
-	parts = append(parts, string(supervisorPrompt))
-	parts = append(parts, string(reviewPrompt))
-	parts = append(parts, "# Agent Reports\n\n"+allReports)
+	parts := []string{supervisorPrompt, "# Agent Reports\n\n" + allReports}
 	if extraPrompt != "" {
 		parts = append(parts, "# Additional Instructions\n\n"+extraPrompt)
 	}
@@ -145,9 +159,21 @@ func AssembleReviewPrompt(projectDir, extraPrompt, customPrompt string) (string,
 	return strings.Join(parts, "\n\n---\n\n"), nil
 }
 
-func writeIfNotExists(path, content string) error {
+// readWithFallback tries projectPath first, then rootPath.
+func readWithFallback(projectPath, rootPath, label string) (string, error) {
+	if data, err := os.ReadFile(projectPath); err == nil {
+		return string(data), nil
+	}
+	if data, err := os.ReadFile(rootPath); err == nil {
+		return string(data), nil
+	}
+	return "", fmt.Errorf("no prompt found for %s (checked %s and %s)", label, projectPath, rootPath)
+}
+
+// WriteIfNotExists writes content to path only if the file does not already exist.
+func WriteIfNotExists(path, content string) error {
 	if _, err := os.Stat(path); err == nil {
-		return nil // file exists, skip
+		return nil
 	}
 	return os.WriteFile(path, []byte(content), 0644)
 }
