@@ -18,6 +18,7 @@ var (
 	reportExtraPrompt string
 	reportTimeout     int
 	reportDelta       bool
+	reportPrint       bool
 )
 
 var reportCmd = &cobra.Command{
@@ -41,6 +42,7 @@ func init() {
 	reportCmd.Flags().StringVar(&reportExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
 	reportCmd.Flags().IntVar(&reportTimeout, "timeout", 0, "timeout in minutes per agent (overrides config)")
 	reportCmd.Flags().BoolVar(&reportDelta, "delta", false, "produce delta report (not yet implemented)")
+	reportCmd.Flags().BoolVar(&reportPrint, "print", false, "print reports to stdout after completion")
 	_ = reportCmd.MarkFlagRequired("agents")
 }
 
@@ -128,6 +130,15 @@ func runReport(cmd *cobra.Command, args []string) error {
 	fmt.Printf("\n%d succeeded, %d failed\n", succeeded, failed)
 	if succeeded > 0 {
 		fmt.Printf("\nRun 'ateam review' to have the supervisor synthesize findings.\n")
+	}
+
+	if reportPrint && succeeded > 0 {
+		for _, r := range results {
+			if r.Result.Err != nil {
+				continue
+			}
+			fmt.Printf("\n══════ %s ══════\n\n%s\n", r.AgentID, r.Result.Output)
+		}
 	}
 
 	return nil
