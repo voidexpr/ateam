@@ -33,7 +33,7 @@ func runEnv(cmd *cobra.Command, args []string) error {
 	fmt.Printf("ateam root:  %s  (from cwd: %s)\n", info.AteamRoot, relFromCwd)
 
 	if info.SourceGit != "" {
-		rel, _ := filepath.Rel(info.AteamRoot, info.SourceGit)
+		rel, _ := filepath.Rel(filepath.Dir(info.AteamRoot), info.SourceGit)
 		fmt.Printf("source git:  %s\n", rel)
 	}
 
