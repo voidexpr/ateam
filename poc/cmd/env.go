@@ -32,8 +32,15 @@ func runEnv(cmd *cobra.Command, args []string) error {
 	relFromCwd, _ := filepath.Rel(cwd, info.AteamRoot)
 	fmt.Printf("ateam root:  %s  (from cwd: %s)\n", info.AteamRoot, relFromCwd)
 
+	if info.InsideAteam {
+		fmt.Printf("execute:     in .ateam project\n")
+	} else {
+		fmt.Printf("execute:     in source project\n")
+	}
+
+	ateamParent := filepath.Dir(info.AteamRoot)
 	if info.SourceGit != "" {
-		rel, _ := filepath.Rel(filepath.Dir(info.AteamRoot), info.SourceGit)
+		rel, _ := filepath.Rel(ateamParent, info.SourceGit)
 		fmt.Printf("source git:  %s\n", rel)
 	}
 

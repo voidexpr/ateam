@@ -225,25 +225,27 @@ func resolveInside(cwd, ateamRoot string) (*ResolvedProject, error) {
 // EnvInfo holds read-only environment information (no auto-creation).
 type EnvInfo struct {
 	AteamRoot      string
-	SourceGit        string
+	SourceGit      string
 	ProjectRelPath string
 	ProjectDir     string
 	Agents         []string
+	InsideAteam    bool
 }
 
 // Lookup discovers the .ateam root and project without creating anything.
 func Lookup() (*EnvInfo, error) {
 	cwd := realPath(mustGetwd())
 
-	ateamRoot := ""
-	if root, ok := isInsideAteam(cwd); ok {
-		ateamRoot = root
-	} else {
-		found, err := findAteamRoot(cwd)
-		if err != nil {
-			return nil, err
-		}
-		ateamRoot = found
+	if ateamRoot, ok := isInsideAteam(cwd); ok {
+		return lookupInside(cwd, ateamRoot)
+	}
+	return lookupOutside(cwd)
+}
+
+func lookupOutside(cwd string) (*EnvInfo, error) {
+	ateamRoot, err := findAteamRoot(cwd)
+	if err != nil {
+		return nil, err
 	}
 	if ateamRoot == "" {
 		return nil, fmt.Errorf("no .ateam/ found (run 'ateam install' first)")
@@ -256,7 +258,7 @@ func Lookup() (*EnvInfo, error) {
 
 	info := &EnvInfo{
 		AteamRoot: ateamRoot,
-		SourceGit:   gitRoot,
+		SourceGit: gitRoot,
 	}
 
 	ateamParent := filepath.Dir(ateamRoot)
@@ -266,8 +268,7 @@ func Lookup() (*EnvInfo, error) {
 	}
 
 	projectDir := filepath.Join(ateamRoot, "projects", relPath)
-	configPath := filepath.Join(projectDir, "config.toml")
-	if _, err := os.Stat(configPath); err != nil {
+	if _, err := os.Stat(filepath.Join(projectDir, "config.toml")); err != nil {
 		return info, nil
 	}
 
@@ -278,6 +279,52 @@ func Lookup() (*EnvInfo, error) {
 	if err != nil {
 		return info, nil
 	}
+	info.Agents = cfg.Agents.Enabled
+
+	return info, nil
+}
+
+func lookupInside(cwd, ateamRoot string) (*EnvInfo, error) {
+	info := &EnvInfo{
+		AteamRoot:   ateamRoot,
+		InsideAteam: true,
+	}
+
+	projectsDir := filepath.Join(ateamRoot, "projects")
+	rel, err := filepath.Rel(projectsDir, cwd)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return info, nil
+	}
+
+	// Walk up to find config.toml
+	dir := cwd
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "config.toml")); err == nil {
+			break
+		}
+		if dir == projectsDir || dir == ateamRoot {
+			return info, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return info, nil
+		}
+		dir = parent
+	}
+
+	relPath, err := filepath.Rel(projectsDir, dir)
+	if err != nil {
+		return info, nil
+	}
+
+	cfg, err := config.Load(dir)
+	if err != nil {
+		return info, nil
+	}
+
+	info.SourceGit = resolveSourceDir(ateamRoot, cfg.Project.SourceDir)
+	info.ProjectRelPath = relPath
+	info.ProjectDir = dir
 	info.Agents = cfg.Agents.Enabled
 
 	return info, nil
