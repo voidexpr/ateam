@@ -13,7 +13,7 @@ import (
 // ResolvedProject holds all resolved paths for a project.
 type ResolvedProject struct {
 	ProjectRelPath string         // e.g. "code/myapp"
-	SourceDir      string         // absolute path to git root
+	SourceDir      string         // absolute path to source git directory
 	AteamRoot      string         // path to .ateam/
 	ProjectDir     string         // .ateam/projects/<RelPath>/
 	Config         *config.Config
@@ -64,7 +64,7 @@ func Resolve(agentHint []string) (*ResolvedProject, error) {
 	if ateamRoot == "" {
 		home := realPath(mustHomeDir())
 
-		gitRoot, gitErr := findGitRoot(cwd)
+		gitRoot, gitErr := findSourceGit(cwd)
 		if gitErr != nil {
 			return nil, gitErr
 		}
@@ -80,7 +80,7 @@ func Resolve(agentHint []string) (*ResolvedProject, error) {
 		fmt.Printf("Created %s with default prompts\n", ateamRoot)
 
 		// Pass gitRoot to avoid a second git subprocess
-		return resolveOutsideWithGitRoot(ateamRoot, gitRoot, agentHint)
+		return resolveOutsideWithSourceGit(ateamRoot, gitRoot, agentHint)
 	}
 
 	return resolveOutside(cwd, ateamRoot, agentHint)
@@ -126,8 +126,8 @@ func findAteamRoot(dir string) (string, error) {
 	return "", nil
 }
 
-// findGitRoot runs git rev-parse --show-toplevel to find the git root.
-func findGitRoot(dir string) (string, error) {
+// findSourceGit runs git rev-parse --show-toplevel to find the git root.
+func findSourceGit(dir string) (string, error) {
 	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
 	cmd.Dir = dir
 	out, err := cmd.Output()
@@ -139,15 +139,15 @@ func findGitRoot(dir string) (string, error) {
 
 // resolveOutside handles the case where we're in a git project outside .ateam.
 func resolveOutside(cwd, ateamRoot string, agentHint []string) (*ResolvedProject, error) {
-	gitRoot, err := findGitRoot(cwd)
+	gitRoot, err := findSourceGit(cwd)
 	if err != nil {
 		return nil, err
 	}
-	return resolveOutsideWithGitRoot(ateamRoot, gitRoot, agentHint)
+	return resolveOutsideWithSourceGit(ateamRoot, gitRoot, agentHint)
 }
 
-// resolveOutsideWithGitRoot is the core resolution when we already know the git root.
-func resolveOutsideWithGitRoot(ateamRoot, gitRoot string, agentHint []string) (*ResolvedProject, error) {
+// resolveOutsideWithSourceGit is the core resolution when we already know the git root.
+func resolveOutsideWithSourceGit(ateamRoot, gitRoot string, agentHint []string) (*ResolvedProject, error) {
 	ateamParent := filepath.Dir(ateamRoot)
 	relPath, err := filepath.Rel(ateamParent, gitRoot)
 	if err != nil || strings.HasPrefix(relPath, "..") {
@@ -215,7 +215,7 @@ func resolveInside(cwd, ateamRoot string) (*ResolvedProject, error) {
 
 	return &ResolvedProject{
 		ProjectRelPath: relPath,
-		SourceDir:      cfg.Project.SourceDir,
+		SourceDir:      resolveSourceDir(ateamRoot, cfg.Project.SourceDir),
 		AteamRoot:      ateamRoot,
 		ProjectDir:     dir,
 		Config:         cfg,
@@ -225,7 +225,7 @@ func resolveInside(cwd, ateamRoot string) (*ResolvedProject, error) {
 // EnvInfo holds read-only environment information (no auto-creation).
 type EnvInfo struct {
 	AteamRoot      string
-	GitRoot        string
+	SourceGit        string
 	ProjectRelPath string
 	ProjectDir     string
 	Agents         []string
@@ -249,14 +249,14 @@ func Lookup() (*EnvInfo, error) {
 		return nil, fmt.Errorf("no .ateam/ found (run 'ateam install' first)")
 	}
 
-	gitRoot, _ := findGitRoot(cwd)
+	gitRoot, _ := findSourceGit(cwd)
 	if gitRoot == "" {
 		return &EnvInfo{AteamRoot: ateamRoot}, nil
 	}
 
 	info := &EnvInfo{
 		AteamRoot: ateamRoot,
-		GitRoot:   gitRoot,
+		SourceGit:   gitRoot,
 	}
 
 	ateamParent := filepath.Dir(ateamRoot)
@@ -281,6 +281,15 @@ func Lookup() (*EnvInfo, error) {
 	info.Agents = cfg.Agents.Enabled
 
 	return info, nil
+}
+
+// resolveSourceDir makes a source_dir from config absolute.
+// If it's already absolute, return as-is. Otherwise resolve relative to .ateam's parent.
+func resolveSourceDir(ateamRoot, sourceDir string) string {
+	if filepath.IsAbs(sourceDir) {
+		return sourceDir
+	}
+	return filepath.Join(filepath.Dir(ateamRoot), sourceDir)
 }
 
 func mustGetwd() string {

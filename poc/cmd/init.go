@@ -14,7 +14,7 @@ var initAgents []string
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize the current git project for ATeam",
-	Long: `Discovers the git root and .ateam/ directory, then creates or updates
+	Long: `Discovers the source git directory and .ateam/ directory, then creates or updates
 the project entry with the specified agents.
 
 If the project already exists, new agents are merged into the config.
@@ -54,7 +54,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Project: %s\n", proj.ProjectRelPath)
-	fmt.Printf("  Source: %s\n", proj.SourceDir)
+	fmt.Printf("  Source git: %s\n", proj.SourceDir)
 	fmt.Printf("  ATeam root: %s\n", proj.AteamRoot)
 	fmt.Printf("  Agents: %v\n", merged)
 	fmt.Printf("\nNext steps:\n")

@@ -47,7 +47,12 @@ func AutoInitProject(ateamRoot, sourceDir, relPath string, agentIDs []string) (s
 	}
 
 	name := filepath.Base(relPath)
-	cfg := config.DefaultConfig(name, sourceDir, agentIDs)
+	ateamParent := filepath.Dir(ateamRoot)
+	relSourceDir, err := filepath.Rel(ateamParent, sourceDir)
+	if err != nil {
+		relSourceDir = sourceDir
+	}
+	cfg := config.DefaultConfig(name, relSourceDir, agentIDs)
 	if err := config.Save(projectDir, cfg); err != nil {
 		return "", err
 	}

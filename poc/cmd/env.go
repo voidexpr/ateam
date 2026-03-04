@@ -28,8 +28,14 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Printf("ateam root:  %s\n", info.AteamRoot)
-	fmt.Printf("git root:    %s\n", info.GitRoot)
+	cwd, _ := os.Getwd()
+	relFromCwd, _ := filepath.Rel(cwd, info.AteamRoot)
+	fmt.Printf("ateam root:  %s  (from cwd: %s)\n", info.AteamRoot, relFromCwd)
+
+	if info.SourceGit != "" {
+		rel, _ := filepath.Rel(info.AteamRoot, info.SourceGit)
+		fmt.Printf("source git:  %s\n", rel)
+	}
 
 	if info.ProjectDir == "" {
 		fmt.Printf("project:     (not initialized)\n")
@@ -37,7 +43,8 @@ func runEnv(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("project:     %s\n", info.ProjectRelPath)
-	fmt.Printf("project dir: %s\n", info.ProjectDir)
+	relProjDir, _ := filepath.Rel(info.AteamRoot, info.ProjectDir)
+	fmt.Printf("project dir: %s\n", relProjDir)
 	fmt.Printf("agents:      %s\n", strings.Join(info.Agents, ", "))
 
 	if len(info.Agents) > 0 {
