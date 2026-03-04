@@ -18,50 +18,54 @@ go build -o ateam .
 ## Usage
 
 ```bash
-# Initialize a project (creates working directory with prompts and config)
-./ateam init myproject --source /path/to/your/code --agents all
+# One-time: create ~/.ateam/ with default prompts
+ateam install
 
-# Run agents to produce reports (from the project directory)
-cd myproject
-../ateam report --agents all
-../ateam report --agents testing_basic,security --extra-prompt "Focus on the API layer"
-
-# Have the supervisor review all reports
-../ateam review
-../ateam review --extra-prompt "This is a production financial app"
+# From any git project directory — auto-discovers git root and .ateam/
+ateam init --agents all
+ateam report --agents all
+ateam report --agents testing_basic,security --extra-prompt "Focus on the API layer"
+ateam review
+ateam review --extra-prompt "This is a production financial app"
 ```
+
+`ateam report` and `ateam init` auto-create the `.ateam/` structure if it doesn't exist yet, so `ateam install` is optional.
 
 ## Prerequisites
 
 - Go 1.23+
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated (`claude` command available in PATH)
 
-## Project Structure
+## Directory Layout
 
-After `ateam init`, the working directory looks like:
+ATeam stores all artifacts in a `.ateam/` directory (by default `~/.ateam/`):
 
 ```
-myproject/
-  config.toml                       # project config (source dir, agents, timeouts)
+~/.ateam/
   agents/
-    report_prompt.md                # shared report format instructions
     refactor_small/
-      prompt.md                     # agent role prompt (customizable)
-      refactor_small.report.md      # latest report (overwritten each run)
-      reports/                      # timestamped report history
+      report_prompt.md          # default agent prompt (customizable)
     security/
-      prompt.md
-      security.report.md
-      reports/
+      report_prompt.md
     ...
   supervisor/
-    prompt.md                       # supervisor system prompt
-    review_prompt.md                # review output format
-    reviews/                        # timestamped review history
-  review.md                         # latest supervisor decisions
+    review_prompt.md            # default supervisor prompt
+  expertise/                    # (reserved for future use)
+  projects/
+    code/myapp/                 # mirrors git root relative path from $HOME
+      config.toml               # project config (source dir, agents, timeouts)
+      agents/
+        refactor_small/
+          full_report.md        # latest report
+          extra_report_prompt.md  # project-specific extra instructions (optional)
+          history/              # timestamped report archive
+        ...
+      supervisor/
+        review.md               # latest supervisor decisions
+        history/                # timestamped review archive
 ```
 
-All prompts are written to disk during `init` — edit them before running reports to customize behavior.
+Prompt lookup order: project-level override → root-level default.
 
 ## Agents
 

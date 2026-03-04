@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
-	"github.com/ateam-poc/internal/config"
 	"github.com/ateam-poc/internal/prompts"
+	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
 	"github.com/spf13/cobra"
 )
@@ -24,67 +23,50 @@ var reviewCmd = &cobra.Command{
 	Long: `Read all agent reports and have the supervisor produce a prioritized
 decisions document.
 
-Must be run from an ATeam project directory after running 'ateam report'.
+Works from any git project directory or from within the .ateam/ tree.
 
 Example:
   ateam review
   ateam review --extra-prompt "Focus on security findings"
-  ateam review --prompt @custom_review.md
-  ateam review --extra-prompt "This is a production financial app, prioritize accordingly"`,
+  ateam review --prompt @custom_review.md`,
 	RunE: runReview,
 }
 
 func init() {
 	reviewCmd.Flags().StringVar(&reviewExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
 	reviewCmd.Flags().StringVar(&reviewCustomPrompt, "prompt", "", "custom prompt replacing default supervisor role (text or @filepath)")
-	reviewCmd.Flags().IntVar(&reviewTimeout, "agent-report-timeout", 0, "timeout in minutes (overrides config)")
+	reviewCmd.Flags().IntVar(&reviewTimeout, "timeout", 0, "timeout in minutes (overrides config)")
 }
 
 func runReview(cmd *cobra.Command, args []string) error {
-	projectDir, err := os.Getwd()
+	proj, err := root.Resolve(nil)
 	if err != nil {
 		return err
 	}
 
-	cfg, err := config.Load(projectDir)
+	extraPrompt, err := prompts.ResolveOptional(reviewExtraPrompt)
 	if err != nil {
 		return err
 	}
 
-	// Resolve extra prompt
-	extraPrompt := ""
-	if reviewExtraPrompt != "" {
-		resolved, err := prompts.ResolveValue(reviewExtraPrompt)
-		if err != nil {
-			return err
-		}
-		extraPrompt = resolved
-	}
-
-	// Resolve custom prompt
-	customPrompt := ""
-	if reviewCustomPrompt != "" {
-		resolved, err := prompts.ResolveValue(reviewCustomPrompt)
-		if err != nil {
-			return err
-		}
-		customPrompt = resolved
-	}
-
-	// Assemble the full review prompt (includes reading all report files)
-	prompt, err := prompts.AssembleReviewPrompt(projectDir, extraPrompt, customPrompt)
+	customPrompt, err := prompts.ResolveOptional(reviewCustomPrompt)
 	if err != nil {
 		return err
 	}
 
-	// Determine timeout
-	timeout := cfg.Execution.AgentReportTimeoutMinutes
-	if reviewTimeout > 0 {
-		timeout = reviewTimeout
+	prompt, err := prompts.AssembleReviewPrompt(proj.AteamRoot, proj.ProjectDir, extraPrompt, customPrompt)
+	if err != nil {
+		return err
 	}
 
-	reviewFile := filepath.Join(projectDir, "review.md")
-	reviewsDir := filepath.Join(projectDir, "supervisor", "reviews")
+	timeout := proj.Config.Execution.EffectiveTimeout(reviewTimeout)
+
+	reviewFile := proj.ReviewPath()
+	historyDir := proj.ReviewHistoryDir()
+
+	if err := os.MkdirAll(historyDir, 0755); err != nil {
+		return fmt.Errorf("cannot create review history directory: %w", err)
+	}
 
 	fmt.Printf("Supervisor reviewing reports (%dm timeout)...\n", timeout)
 
@@ -95,11 +77,12 @@ func runReview(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("review failed: %w", result.Err)
 	}
 
-	_ = runner.ArchiveFile(reviewFile, reviewsDir, "review.md")
+	if err := runner.ArchiveFile(reviewFile, historyDir, "review.md"); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not archive review: %v\n", err)
+	}
 
 	fmt.Printf("Done (%s)\n\n", runner.FormatDuration(result.Duration))
-	fmt.Printf("Review written to: %s\n", reviewFile)
-	fmt.Printf("Archived to: %s/\n", reviewsDir)
+	fmt.Printf("Review: %s\n", reviewFile)
 
 	return nil
 }

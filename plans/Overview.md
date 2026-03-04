@@ -6,6 +6,8 @@ ATeam tackles the core issue of agentic coding: how to iterate fast on features 
 
 Agents are very good at finding issues in code and producing tests, so why should humans spend attention on a codebase they may never contribute to? Developers should focus on the big picture: what the project does and how features should work, not how the engineering is performed.
 
+Coding agents make the right fundamental tradeoff: implement a working feature when asked. They do not invest too much time on in-depth software engineering. But when the dust settle after feature work we'd like coding agents to work in the background improving the over software quality: testing, refactoring, security, documentation, dependency management, etc ...
+
 ## The Idea
 
 Use agents with pre-built prompts to focus on software engineering tasks: refactoring, testing, documentation (internal, external), security, performance. While taking as little attention from feature work as possible. For this they run mostly unattended in containers with no permission approval required. Just decide if you want to keep their commits or not. They are just another contributor to your project focused only on code quality.

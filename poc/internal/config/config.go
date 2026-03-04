@@ -8,6 +8,11 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+const (
+	DefaultMaxParallel              = 3
+	DefaultAgentReportTimeoutMinutes = 10
+)
+
 // Config represents the project's config.toml.
 type Config struct {
 	Project   ProjectConfig   `toml:"project"`
@@ -40,8 +45,8 @@ func DefaultConfig(name, sourceDir string, agents []string) Config {
 			Enabled: agents,
 		},
 		Execution: ExecutionConfig{
-			MaxParallel:              3,
-			AgentReportTimeoutMinutes: 10,
+			MaxParallel:              DefaultMaxParallel,
+			AgentReportTimeoutMinutes: DefaultAgentReportTimeoutMinutes,
 		},
 	}
 }
@@ -59,12 +64,20 @@ func Load(dir string) (*Config, error) {
 	}
 	// Apply defaults for missing values
 	if cfg.Execution.MaxParallel == 0 {
-		cfg.Execution.MaxParallel = 3
+		cfg.Execution.MaxParallel = DefaultMaxParallel
 	}
 	if cfg.Execution.AgentReportTimeoutMinutes == 0 {
-		cfg.Execution.AgentReportTimeoutMinutes = 10
+		cfg.Execution.AgentReportTimeoutMinutes = DefaultAgentReportTimeoutMinutes
 	}
 	return &cfg, nil
+}
+
+// EffectiveTimeout returns the override if positive, otherwise the configured timeout.
+func (e ExecutionConfig) EffectiveTimeout(override int) int {
+	if override > 0 {
+		return override
+	}
+	return e.AgentReportTimeoutMinutes
 }
 
 // Save writes config.toml to the given directory.
