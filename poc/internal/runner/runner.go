@@ -19,8 +19,8 @@ type RunResult struct {
 }
 
 // RunClaude executes "claude -p PROMPT > outputFile" with a timeout.
-// The prompt is passed via stdin to avoid shell escaping issues with large prompts.
-func RunClaude(ctx context.Context, prompt, outputFile string, timeoutMinutes int) RunResult {
+// If workDir is non-empty, the subprocess runs in that directory.
+func RunClaude(ctx context.Context, prompt, outputFile, workDir string, timeoutMinutes int) RunResult {
 	start := time.Now()
 
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMinutes)*time.Minute)
@@ -38,6 +38,9 @@ func RunClaude(ctx context.Context, prompt, outputFile string, timeoutMinutes in
 	defer outFile.Close()
 
 	cmd := exec.CommandContext(ctx, "claude", "-p", prompt)
+	if workDir != "" {
+		cmd.Dir = workDir
+	}
 	cmd.Stdout = outFile
 	cmd.Stderr = os.Stderr
 

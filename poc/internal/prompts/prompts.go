@@ -25,23 +25,23 @@ func ResolveValue(value string) (string, error) {
 // WriteDefaults writes all default prompt files to the project directory.
 // It does not overwrite existing files.
 func WriteDefaults(projectDir string, agentIDs []string) error {
-	promptsDir := filepath.Join(projectDir, "prompts")
-	agentsDir := filepath.Join(promptsDir, "agents")
-	if err := os.MkdirAll(agentsDir, 0755); err != nil {
-		return fmt.Errorf("cannot create prompts directory: %w", err)
+	agentsDir := filepath.Join(projectDir, "agents")
+	supervisorDir := filepath.Join(projectDir, "supervisor")
+	if err := os.MkdirAll(supervisorDir, 0755); err != nil {
+		return fmt.Errorf("cannot create supervisor directory: %w", err)
 	}
 
-	// Write shared prompts
-	sharedFiles := map[string]string{
-		"report_instructions.md": DefaultReportInstructions,
-		"supervisor_role.md":     DefaultSupervisorRole,
-		"review_instructions.md": DefaultReviewInstructions,
+	// Write shared report instructions
+	if err := writeIfNotExists(filepath.Join(agentsDir, "report_prompt.md"), DefaultReportInstructions); err != nil {
+		return err
 	}
-	for name, content := range sharedFiles {
-		path := filepath.Join(promptsDir, name)
-		if err := writeIfNotExists(path, content); err != nil {
-			return err
-		}
+
+	// Write supervisor prompts
+	if err := writeIfNotExists(filepath.Join(supervisorDir, "prompt.md"), DefaultSupervisorRole); err != nil {
+		return err
+	}
+	if err := writeIfNotExists(filepath.Join(supervisorDir, "review_prompt.md"), DefaultReviewInstructions); err != nil {
+		return err
 	}
 
 	// Write per-agent prompts
@@ -50,8 +50,11 @@ func WriteDefaults(projectDir string, agentIDs []string) error {
 		if !ok {
 			continue
 		}
-		path := filepath.Join(agentsDir, id+".md")
-		if err := writeIfNotExists(path, prompt); err != nil {
+		agentDir := filepath.Join(agentsDir, id)
+		if err := os.MkdirAll(agentDir, 0755); err != nil {
+			return fmt.Errorf("cannot create agent directory %s: %w", id, err)
+		}
+		if err := writeIfNotExists(filepath.Join(agentDir, "prompt.md"), prompt); err != nil {
 			return err
 		}
 	}
@@ -62,15 +65,13 @@ func WriteDefaults(projectDir string, agentIDs []string) error {
 // AssembleAgentPrompt reads the prompt files for an agent and combines them
 // with the source directory and optional extra prompt.
 func AssembleAgentPrompt(projectDir, agentID, sourceDir, extraPrompt string) (string, error) {
-	// Read agent role prompt
-	agentPath := filepath.Join(projectDir, "prompts", "agents", agentID+".md")
+	agentPath := filepath.Join(projectDir, "agents", agentID, "prompt.md")
 	agentPrompt, err := os.ReadFile(agentPath)
 	if err != nil {
 		return "", fmt.Errorf("cannot read agent prompt for %s: %w", agentID, err)
 	}
 
-	// Read report instructions
-	instrPath := filepath.Join(projectDir, "prompts", "report_instructions.md")
+	instrPath := filepath.Join(projectDir, "agents", "report_prompt.md")
 	instrPrompt, err := os.ReadFile(instrPath)
 	if err != nil {
 		return "", fmt.Errorf("cannot read report instructions: %w", err)
@@ -91,46 +92,43 @@ func AssembleAgentPrompt(projectDir, agentID, sourceDir, extraPrompt string) (st
 
 // AssembleReviewPrompt reads the supervisor prompt files and appends all report contents.
 func AssembleReviewPrompt(projectDir, extraPrompt, customPrompt string) (string, error) {
-	// Gather all report files
-	reportsDir := filepath.Join(projectDir, "reports")
-	entries, err := os.ReadDir(reportsDir)
+	agentsDir := filepath.Join(projectDir, "agents")
+	entries, err := os.ReadDir(agentsDir)
 	if err != nil {
-		return "", fmt.Errorf("cannot read reports directory: %w (run 'ateam report' first)", err)
+		return "", fmt.Errorf("cannot read agents directory: %w (run 'ateam report' first)", err)
 	}
 
 	var reportContents []string
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".report.md") {
+		if !entry.IsDir() {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(reportsDir, entry.Name()))
+		reportPath := filepath.Join(agentsDir, entry.Name(), entry.Name()+".report.md")
+		data, err := os.ReadFile(reportPath)
 		if err != nil {
 			continue
 		}
-		agentName := strings.TrimSuffix(entry.Name(), ".report.md")
 		reportContents = append(reportContents,
-			fmt.Sprintf("# Agent Report: %s\n\n%s", agentName, string(data)))
+			fmt.Sprintf("# Agent Report: %s\n\n%s", entry.Name(), string(data)))
 	}
 
 	if len(reportContents) == 0 {
-		return "", fmt.Errorf("no report files found in %s — run 'ateam report' first", reportsDir)
+		return "", fmt.Errorf("no report files found in %s — run 'ateam report' first", agentsDir)
 	}
 
 	allReports := strings.Join(reportContents, "\n\n---\n\n")
 
-	// If custom prompt provided, use it directly with reports appended
 	if customPrompt != "" {
 		return customPrompt + "\n\n---\n\n# Agent Reports\n\n" + allReports, nil
 	}
 
-	// Otherwise assemble from prompt files
-	supervisorPath := filepath.Join(projectDir, "prompts", "supervisor_role.md")
+	supervisorPath := filepath.Join(projectDir, "supervisor", "prompt.md")
 	supervisorPrompt, err := os.ReadFile(supervisorPath)
 	if err != nil {
 		return "", fmt.Errorf("cannot read supervisor prompt: %w", err)
 	}
 
-	reviewPath := filepath.Join(projectDir, "prompts", "review_instructions.md")
+	reviewPath := filepath.Join(projectDir, "supervisor", "review_prompt.md")
 	reviewPrompt, err := os.ReadFile(reviewPath)
 	if err != nil {
 		return "", fmt.Errorf("cannot read review instructions: %w", err)

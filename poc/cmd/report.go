@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ateam-poc/internal/agents"
 	"github.com/ateam-poc/internal/config"
@@ -36,7 +37,7 @@ Example:
 }
 
 func init() {
-	reportCmd.Flags().StringSliceVar(&reportAgents, "agents", nil, "comma-separated agent list, or 'all' (required)")
+	reportCmd.Flags().StringSliceVar(&reportAgents, "agents", nil, agents.FlagUsage()+" (required)")
 	reportCmd.Flags().StringVar(&reportExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
 	reportCmd.Flags().IntVar(&reportTimeout, "agent-report-timeout", 0, "timeout in minutes per agent (overrides config)")
 	_ = reportCmd.MarkFlagRequired("agents")
@@ -77,11 +78,6 @@ func runReport(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build tasks
-	reportsDir := filepath.Join(projectDir, "reports")
-	if err := os.MkdirAll(reportsDir, 0755); err != nil {
-		return err
-	}
-
 	var tasks []runner.AgentTask
 	for _, agentID := range agentIDs {
 		prompt, err := prompts.AssembleAgentPrompt(projectDir, agentID, cfg.Project.SourceDir, extraPrompt)
@@ -89,10 +85,15 @@ func runReport(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", agentID, err)
 			continue
 		}
+		agentDir := filepath.Join(projectDir, "agents", agentID)
+		if err := os.MkdirAll(agentDir, 0755); err != nil {
+			return err
+		}
 		tasks = append(tasks, runner.AgentTask{
 			AgentID:    agentID,
 			Prompt:     prompt,
-			OutputFile: filepath.Join(reportsDir, agentID+".report.md"),
+			OutputFile: filepath.Join(agentDir, agentID+".report.md"),
+			WorkDir:    cfg.Project.SourceDir,
 		})
 	}
 
@@ -113,21 +114,23 @@ func runReport(cmd *cobra.Command, args []string) error {
 	results := runner.RunPool(ctx, tasks, cfg.Execution.MaxParallel, timeout)
 
 	// Report results and archive
-	archiveDir := filepath.Join(projectDir, "archive")
 	var succeeded, failed int
 	for _, r := range results {
+		agentDir := filepath.Join(projectDir, "agents", r.AgentID)
+		reportPath := filepath.Join(agentDir, r.AgentID+".report.md")
 		if r.Result.Err != nil {
 			fmt.Printf("  %-25s FAILED  (%s) — %v\n", r.AgentID, runner.FormatDuration(r.Result.Duration), r.Result.Err)
-			// Write error to report file so it's visible
 			errorReport := fmt.Sprintf("# Report Failed: %s\n\nError: %v\n\nDuration: %s\n",
 				r.AgentID, r.Result.Err, runner.FormatDuration(r.Result.Duration))
-			reportPath := filepath.Join(reportsDir, r.AgentID+".report.md")
-			os.WriteFile(reportPath, []byte(errorReport), 0644)
+			if err := os.WriteFile(reportPath, []byte(errorReport), 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not write error report for %s: %v\n", r.AgentID, err)
+			}
 			failed++
 		} else {
-			fmt.Printf("  %-25s done    (%s)\n", r.AgentID, runner.FormatDuration(r.Result.Duration))
-			// Archive
-			reportPath := filepath.Join(reportsDir, r.AgentID+".report.md")
+			producedAt := time.Now().Format("2006-01-02 15:04")
+			relPath, _ := filepath.Rel(projectDir, reportPath)
+			fmt.Printf("%s: %s (produced at %s, took %s)\n", r.AgentID, relPath, producedAt, runner.FormatDuration(r.Result.Duration))
+			archiveDir := filepath.Join(agentDir, "reports")
 			_ = runner.ArchiveFile(reportPath, archiveDir, r.AgentID+".report.md")
 			succeeded++
 		}
@@ -135,7 +138,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\n%d succeeded, %d failed\n", succeeded, failed)
 	if succeeded > 0 {
-		fmt.Printf("\nReports are in %s/\n", reportsDir)
+		fmt.Printf("\nReports are in agents/*/\n")
 		fmt.Printf("Run 'ateam review' to have the supervisor synthesize findings.\n")
 	}
 

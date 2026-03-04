@@ -84,23 +84,22 @@ func runReview(cmd *cobra.Command, args []string) error {
 	}
 
 	reviewFile := filepath.Join(projectDir, "review.md")
-	archiveDir := filepath.Join(projectDir, "archive")
+	reviewsDir := filepath.Join(projectDir, "supervisor", "reviews")
 
 	fmt.Printf("Supervisor reviewing reports (%dm timeout)...\n", timeout)
 
 	ctx := context.Background()
-	result := runner.RunClaude(ctx, prompt, reviewFile, timeout)
+	result := runner.RunClaude(ctx, prompt, reviewFile, "", timeout)
 
 	if result.Err != nil {
 		return fmt.Errorf("review failed: %w", result.Err)
 	}
 
-	// Archive
-	_ = runner.ArchiveFile(reviewFile, archiveDir, "review.md")
+	_ = runner.ArchiveFile(reviewFile, reviewsDir, "review.md")
 
 	fmt.Printf("Done (%s)\n\n", runner.FormatDuration(result.Duration))
 	fmt.Printf("Review written to: %s\n", reviewFile)
-	fmt.Printf("Archived to: %s/\n", archiveDir)
+	fmt.Printf("Archived to: %s/\n", reviewsDir)
 
 	return nil
 }
