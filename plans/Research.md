@@ -1301,3 +1301,296 @@ Given unattended background agents with budget controls and audit needs, the mos
 **`permission-prompt-tool`** MCP server for fine-grained audit logging and budget enforcement at the tool call level, combined with either **Anthropic's sandbox runtime** or docker-based isolation (**viwo-cli/TSK**) for actual containment. The permission-prompt-tool's `updatedInput` capability is particularly interesting for implementing tool input sanitization before execution.
 
 The **hooks system** is worth layering on top for project-specific blocking rules that you want committed to the repo itself.
+
+---
+
+## E. Agent Sandboxing
+
+Running agents without approval prompts requires sandboxing — if you can't trust the agent to stay in its box, you need to watch every move. The goal is to make the box tight enough that `--dangerously-skip-permissions` (or the sandbox auto-allow mode) becomes genuinely safe, not just "YOLO." This section reviews the available approaches through three dimensions that matter for ATeam: filesystem isolation, network control, and remote session access.
+
+### E.1 The Three Dimensions
+
+**Filesystem access** needs nuance. A code analysis agent needs read access to the project it's working on, read/write to its own working directory, and access to toolchain paths (`~/.npm`, `~/.cache`, `/usr/local`, etc.) and `~/.claude` for Claude Code to function. It should NOT have access to `~/.ssh`, `~/.aws`, `~/.gnupg`, other project directories, or anything outside its scope. The hard part is that "normal tool usage" (node, npm, go, pip, cargo) requires scattered filesystem access — you can't just mount one directory.
+
+**Network access** has three useful tiers, not two:
+
+| Tier | What's allowed | When to use |
+|---|---|---|
+| **Full network** | Everything | Agent needs to research, browse docs, or use external APIs. Filesystem isolation is the safety boundary. |
+| **Developer network** | LLM API + package managers (npm, pypi, crates.io, proxy.golang.org, ...) + API docs + local ports | Agent needs to install packages, run tests against local services, read documentation. No arbitrary outbound. |
+| **Minimal network** | LLM API only | Maximum containment. Agent can think but can't reach anything. |
+
+A fourth dimension — **local port access** — cuts across these tiers. An agent testing a web app needs `localhost:3000` regardless of whether it can reach the internet. Local port access should be configurable per-project (read from `.env` or `config.toml`).
+
+**Remote session access** is always important. Running agents unattended means checking on them from a phone, giving instructions, reviewing progress. This requires exposing the agent's session without exposing the host machine. Every sandboxing approach should be evaluated for how well it supports this — and critically, remote access means the sandbox is the only thing standing between the outside world and the development environment.
+
+### E.2 Anthropic Sandbox Runtime (sandbox-runtime)
+
+**GitHub:** [anthropic-experimental/sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime)
+**npm:** `@anthropic-ai/sandbox-runtime`
+**Language:** TypeScript/C (bubblewrap on Linux, Seatbelt on macOS)
+
+The official Anthropic tool. Uses OS-level primitives — not containers — to enforce filesystem and network restrictions on arbitrary processes. Integrated into Claude Code as the "sandboxed bash tool" since late 2025.
+
+**How it works:**
+
+- On **macOS**: generates a dynamic Seatbelt profile (`.sb` file) and executes via `sandbox-exec`. The profile is regenerated per invocation based on the configured policy.
+- On **Linux**: uses [bubblewrap](https://github.com/containers/bubblewrap) to create a restricted namespace. Requires `bubblewrap` and `socat` packages.
+- **Network proxy**: all network traffic is forced through a unix domain socket to a proxy running outside the sandbox. The proxy enforces domain allowlists. This is how network isolation works without iptables or network namespaces on macOS.
+
+**Filesystem policy (Claude Code defaults):**
+
+- **Write allowed**: current working directory and subdirectories, `/tmp`
+- **Write denied**: everything else (home directory, system paths, other projects)
+- **Read allowed**: entire filesystem by default (agent needs to read toolchains, system libraries)
+- **Read denied**: configurable — can block `~/.ssh`, `~/.aws`, `~/.gnupg`, etc.
+- **Configurable** via `settings.json`:
+  ```json
+  {
+    "sandbox": {
+      "enabled": true,
+      "filesystem": {
+        "allowWrite": ["~/.npm", "~/.cache", "//tmp"],
+        "denyRead": ["~/.ssh", "~/.aws", "~/.gnupg"]
+      },
+      "allowedDomains": ["api.anthropic.com", "registry.npmjs.org", "github.com"]
+    }
+  }
+  ```
+- Path prefixes: `//` = absolute from root, `~/` = relative to home, `/` = relative to settings file, `./` = relative to cwd.
+- Settings from multiple scopes (managed, user, project) **merge** — you can't accidentally override a broader policy with a narrower one.
+
+**Network policy:**
+
+- Domain-based allowlist via `allowedDomains` in settings.
+- New domains trigger a permission prompt (in interactive mode) — user can allow once or permanently.
+- Custom proxy support for organizations: `sandbox.network.httpProxyPort` and `socksProxyPort` allow routing through corporate inspection infrastructure.
+- **Limitation**: domain filtering only — no deep packet inspection. Domain fronting can bypass it. Allowing broad domains like `github.com` creates exfiltration risk.
+
+**Escape hatch**: when a command fails due to sandbox restrictions, Claude is prompted to retry with `dangerouslyDisableSandbox`, which falls back to the normal permissions flow (user approval required). Can be disabled entirely with `"allowUnsandboxedCommands": false`.
+
+**Key stat**: reduces permission prompts by 84% internally at Anthropic.
+
+**Compatibility notes:**
+
+- `docker` doesn't work inside the sandbox (sandbox can't sandbox Docker's privileged operations). Must be listed in `excludedCommands`.
+- `watchman` (used by Jest) is incompatible — use `jest --no-watchman`.
+- Some CLI tools need network access to specific hosts on first use — prompts build up the allowlist over time.
+- WSL1 not supported (bubblewrap needs kernel namespaces). WSL2 works.
+- Linux: `enableWeakerNestedSandbox` mode exists for running inside Docker (e.g., CI) but "considerably weakens security."
+
+**Assessment for ATeam:**
+
+| Dimension | Rating | Notes |
+|---|---|---|
+| Filesystem isolation | Good | Fine-grained read/write policies. Covers subprocesses. |
+| Network control | Good | Domain allowlist via proxy. All three tiers achievable. |
+| Tool compatibility | Good | Most tools work. Docker and watchman are exceptions. |
+| `~/.claude` access | Built-in | Claude Code handles this automatically. |
+| Remote access | N/A | Not a feature. Would need a separate mechanism. |
+| Overhead | Minimal | OS primitives, no VM or container startup. |
+| Unattended use | Excellent | Combined with auto-allow mode, eliminates prompts within policy. |
+
+**Best fit**: the coordinator agent (runs on host, needs minimal isolation) and lightweight agent tasks that don't need Docker services.
+
+### E.3 neko-kai/claude-code-sandbox
+
+**GitHub:** [neko-kai/claude-code-sandbox](https://github.com/neko-kai/claude-code-sandbox)
+**Language:** Bash (wrapper script)
+**Platform:** macOS only (sandbox-exec / Seatbelt)
+
+A community-built wrapper that predates Anthropic's official sandbox integration. Generates a Seatbelt profile that restricts Claude Code's filesystem READ access — the official sandbox focuses on write restrictions, but this project also limits what Claude can see.
+
+**How it works:**
+
+- `claude-sandbox` wrapper script generates a `.sb` Seatbelt profile dynamically based on the target directory.
+- Runs `sandbox-exec -f profile.sb claude` (or any command).
+- Based on the [Para sandboxing profile](https://github.com/nickthecook/para) and Anthropic's own dynamic profile, with Claude Code-specific additions.
+
+**Filesystem policy:**
+
+- **Read denied**: `~` (home directory) is blocked by default. Claude cannot read your dotfiles, SSH keys, AWS credentials, or other projects.
+- **Read allowed**: the target project directory, system paths needed for toolchains, and paths needed for Claude Code to function.
+- **Directory listing**: directories leading up to the target can be listed (`ls`) but files/metadata cannot be read. This is necessary because Claude glitches and sets `PATH` to `""` if it can't list parent directories.
+- **Write allowed**: target directory and temp locations only.
+
+**Key difference from Anthropic's sandbox**: this denies READ access to the home directory by default. The official sandbox allows reads everywhere and only restricts writes. For ATeam's remote access use case — where the sandbox is the only barrier between a remote session and the development machine — read denial is the stronger posture.
+
+**Network**: no network restrictions. This is purely filesystem sandboxing.
+
+**Installation**: Nix (`nix run github:neko-kai/claude-code-sandbox -- claude`) or manual copy to `~/.local/bin/`.
+
+**Assessment for ATeam:**
+
+| Dimension | Rating | Notes |
+|---|---|---|
+| Filesystem isolation | Excellent | Denies reads to ~ by default — strongest posture of any non-container approach. |
+| Network control | None | No network restrictions at all. |
+| Tool compatibility | Good | macOS sandbox-exec is mature. Some tools may need path additions. |
+| `~/.claude` access | Handled | Explicitly allowed in the profile. |
+| Remote access | N/A | No built-in support. |
+| Overhead | Zero | sandbox-exec is a kernel-level mechanism, no process overhead. |
+| Platform | macOS only | Cannot be used on Linux. |
+
+**Best fit**: macOS development where filesystem read-denial is the priority and network isn't a concern (Tier 1: full network + tight filesystem).
+
+### E.4 cco (Claude Condom)
+
+**GitHub:** [nikvdp/cco](https://github.com/nikvdp/cco)
+**Language:** Bash
+**Platform:** macOS (Seatbelt), Linux (bubblewrap), Docker (fallback)
+
+A thin wrapper that auto-selects the best available sandbox backend. The value proposition is "one command, best available isolation."
+
+**How it works:**
+
+- Detects platform and available tools.
+- macOS: uses `sandbox-exec` (Seatbelt) — near-zero overhead.
+- Linux: uses bubblewrap.
+- Fallback: Docker container.
+- `--safe` mode: hides the entire `$HOME` directory from Claude, significantly reducing exposure of personal files, dotfiles, secrets, and caches.
+
+**Assessment**: useful as a reference for how to detect and compose sandbox backends. For ATeam, the auto-detection pattern is worth adopting — the same agent code should work whether the host is macOS (Seatbelt) or Linux (bubblewrap) or CI (Docker).
+
+### E.5 ClaudeCage
+
+**GitHub:** [PACHAKUTlQ/ClaudeCage](https://github.com/PACHAKUTlQ/ClaudeCage)
+**Language:** Bash (build script)
+**Platform:** Linux only
+
+A single portable executable (no dependencies) that packages Claude Code inside a bubblewrap sandbox. Uses the [RunImage](https://github.com/VHSgunzo/runimage) project to create lightweight, unprivileged containers.
+
+**How it works:**
+
+- Downloads and packages Claude Code CLI into a self-contained executable.
+- The `claude` binary acts as a drop-in replacement — anything that calls `claude` (including Claude Code's own sub-agent spawning) automatically runs sandboxed.
+- Linux namespaces enforce isolation: the process cannot access home directory, network info, or other processes.
+
+**Key insight**: the drop-in replacement approach is elegant for ATeam. If the `claude` binary on `$PATH` inside the container IS the sandboxed version, then `claude -p` invocations (including any sub-agents spawned by the Task tool) are automatically sandboxed. No wrapper scripts, no special flags.
+
+**Assessment**: Linux-only, but the drop-in pattern is worth considering for Docker-based agents.
+
+### E.6 scode (Seatbelt for AI Coding)
+
+**GitHub:** scode by Laurent Bindschaedler (MPI-SWS)
+**Language:** Bash (single script)
+**Platform:** macOS (Seatbelt), Linux (bubblewrap)
+
+An opinionated wrapper that blocks 35+ credential and personal file paths out of the box, scrubs 28+ environment variable token patterns, and handles the Chromium double-sandbox problem automatically.
+
+**How it works:**
+
+- Single bash script: `scode claude`
+- Blocks access to known credential paths (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, etc.)
+- Scrubs environment variables matching token patterns (AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN, etc.)
+- Handles Chromium's nested sandbox incompatibility (relevant for Electron-based tools).
+
+**Key insight for ATeam**: the curated blocklist of 35+ credential paths and 28+ env var patterns is valuable. Rather than building our own list from scratch, adopt scode's lists as the default deny policy.
+
+**Assessment**: described as "a seatbelt, not an armored vehicle" — catches the common case of an agent wandering into personal files, not a determined attacker. Good for interactive use; for unattended agents with remote access, needs to be combined with stronger isolation.
+
+### E.7 Docker-Based Approaches
+
+Docker remains the strongest isolation option. The existing research in §D.1–D.3 covers textcortex/claude-code-sandbox, viwo-cli, and TSK. Key additions:
+
+**Apple Container (macOS Tahoe / macOS 26+):**
+
+Apple's open-source container runtime, released at WWDC 2025 (v0.9.0 as of February 2026). Each container gets its own micro-VM — better isolation than Docker's shared-kernel model, sub-second startup, no daemon. Written in Swift, optimized for Apple Silicon.
+
+For ATeam on macOS, this is the Docker replacement: lighter, more secure (VM-level isolation per container), no Docker Desktop licensing. Still pre-1.0, but the runtime is solid.
+
+**Cloudflare Sandbox SDK:**
+
+[cloudflare/sandbox-sdk](https://github.com/cloudflare/sandbox-sdk) — runs sandboxed Linux containers on Cloudflare's edge network. Each sandbox is a full Linux environment with its own filesystem, network, and process isolation. Claude Code can be run inside via their template.
+
+Relevant for ATeam's remote access story: if agents run on Cloudflare's edge, remote access is built-in (HTTPS endpoint per sandbox), and there's zero exposure of the development machine. The tradeoff is that the project source must be synced to the remote sandbox.
+
+### E.8 Comparison Across Dimensions
+
+| Approach | Filesystem R | Filesystem W | Network | Tools Work | `~/.claude` | Remote Access | Overhead | Platform |
+|---|---|---|---|---|---|---|---|---|
+| **Anthropic SRT** | Allow all, deny list | CWD only, allow list | Domain proxy | Most | Auto | None | Minimal | macOS, Linux |
+| **neko-kai** | Deny ~, allow project | Project + tmp | None | Most | Explicit | None | Zero | macOS only |
+| **cco** | Configurable | Configurable | Depends on backend | Most | Handled | None | Near-zero | macOS, Linux |
+| **ClaudeCage** | Deny ~, allow project | Project | Linux ns | Most | Packaged | None | Minimal | Linux only |
+| **scode** | Block 35+ cred paths | CWD | None | Most | Handled | None | Zero | macOS, Linux |
+| **Docker** | Mount only | Mount only | iptables/ns | All (in container) | Mount | Via port/tunnel | Medium | Any |
+| **Apple Container** | VM isolation | VM isolation | VM networking | All (in VM) | Mount | Via port/tunnel | Low | macOS 26+ |
+| **Cloudflare Sandbox** | Full isolation | Full isolation | Configurable | All (in container) | API key | Built-in HTTPS | High (remote) | Cloud |
+
+### E.9 Network Tier Implementation
+
+How to implement each network tier with available tools:
+
+**Tier 1: Full network + tight filesystem** (research agents, documentation agents)
+
+- Use Anthropic SRT or neko-kai for filesystem isolation.
+- Don't restrict network — `allowedDomains: ["*"]` or equivalent.
+- The filesystem sandbox IS the security boundary.
+- Ideal for agents that need to browse docs, check APIs, research libraries.
+
+**Tier 2: Developer network** (build/test agents)
+
+- Use Anthropic SRT with `allowedDomains` covering:
+  - `api.anthropic.com` (LLM)
+  - `registry.npmjs.org`, `pypi.org`, `files.pythonhosted.org`, `proxy.golang.org`, `crates.io`, `rubygems.org` (package managers)
+  - `github.com`, `*.github.com` (git operations)
+  - `localhost`, `127.0.0.1` (local services)
+- Or Docker with iptables allowlist (Anthropic devcontainer pattern from §7.1).
+- Per-project port access: read `PORT`, `DATABASE_URL`, etc. from `.env` and add those ports to the localhost allowlist.
+
+**Tier 3: Minimal network** (sensitive codebases)
+
+- `allowedDomains: ["api.anthropic.com"]` only.
+- All dependencies must be pre-installed (no runtime package fetching).
+- Docker: default-deny iptables with only the API endpoint whitelisted.
+- This is the only tier appropriate for codebases with trade secrets.
+
+**Local port access** (cross-cutting):
+
+- Read `.env` or `config.toml` for port mappings.
+- In Docker: `--network host` (simple) or explicit port mapping.
+- In Anthropic SRT: localhost is accessible by default (no domain restriction on loopback).
+- Specific port restriction isn't natively supported by any tool — would need a custom proxy rule.
+
+### E.10 Remote Access Patterns
+
+Running agents unattended requires a way to check in, give instructions, and review progress without exposing the development machine.
+
+**Pattern A: Tunnel to agent session** (simplest)
+
+- Agent runs locally in a sandbox.
+- Expose the session via a tunnel service (VibeTunnel, ngrok, Cloudflare Tunnel, bore).
+- The tunnel only exposes the agent's terminal/API, not the host filesystem.
+- Risk: if the sandbox is compromised, the tunnel gives the attacker a foothold. The sandbox must be the trust boundary.
+
+**Pattern B: Agent runs remotely** (strongest isolation)
+
+- Agent runs on a remote machine or cloud service (Cloudflare Sandbox, Daytona, GitHub Codespaces).
+- Project source is synced to the remote environment.
+- Remote access is built-in (HTTPS, SSH, web terminal).
+- Development secrets are in the remote environment only — not on the local machine.
+- Tradeoff: latency, sync complexity, cost.
+
+**Pattern C: Docker + web terminal** (middle ground)
+
+- Agent runs in Docker on the local machine.
+- A web terminal (ttyd, wetty) or REST API inside the container provides remote access.
+- Docker's network and filesystem isolation ensures the agent can't reach the host.
+- sandbox-agent's SSE/REST pattern (§C.9) or OpenHands' web UI are examples of this.
+
+For ATeam, Pattern C is the likely sweet spot: Docker provides strong isolation, a web terminal provides remote access, and the agent's filesystem is limited to bind-mounted volumes.
+
+### E.11 Recommendation for ATeam
+
+**Layer the approaches based on trust level:**
+
+1. **Coordinator** (runs on host, trusted): Anthropic Sandbox Runtime with filesystem deny-list (adopt scode's 35+ credential path list) + developer-tier network. No Docker — the coordinator needs to call the `ateam` CLI and read/write the org directory.
+
+2. **Sub-agents in Docker** (untrusted, default): Docker container with bind-mounted project worktree. iptables firewall for network tier. `--dangerously-skip-permissions` inside the container (Docker IS the sandbox). Web terminal or REST API for remote access.
+
+3. **Sub-agents without Docker** (lightweight option): Anthropic Sandbox Runtime with filesystem restricted to the project directory + `~/.claude` + toolchain paths. Network tier via the proxy. For simple projects that don't need databases or services.
+
+4. **Remote access** for all modes: web terminal (ttyd) exposed via an authenticated tunnel. The agent sees only its sandbox; the remote user sees only the agent's terminal.
+
+**The auto-detection pattern from cco is worth adopting**: the same `ateam run` command should automatically select the best available sandbox — Anthropic SRT on host, Docker when configured, Apple Container on macOS 26+. The container adapter abstraction (§7.4) already supports this.
