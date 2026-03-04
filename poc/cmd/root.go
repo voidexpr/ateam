@@ -15,6 +15,7 @@ func Execute() error {
 }
 
 func init() {
+	rootCmd.AddCommand(envCmd)
 	rootCmd.AddCommand(installCmd)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(reportCmd)

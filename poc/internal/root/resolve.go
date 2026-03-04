@@ -222,6 +222,67 @@ func resolveInside(cwd, ateamRoot string) (*ResolvedProject, error) {
 	}, nil
 }
 
+// EnvInfo holds read-only environment information (no auto-creation).
+type EnvInfo struct {
+	AteamRoot      string
+	GitRoot        string
+	ProjectRelPath string
+	ProjectDir     string
+	Agents         []string
+}
+
+// Lookup discovers the .ateam root and project without creating anything.
+func Lookup() (*EnvInfo, error) {
+	cwd := realPath(mustGetwd())
+
+	ateamRoot := ""
+	if root, ok := isInsideAteam(cwd); ok {
+		ateamRoot = root
+	} else {
+		found, err := findAteamRoot(cwd)
+		if err != nil {
+			return nil, err
+		}
+		ateamRoot = found
+	}
+	if ateamRoot == "" {
+		return nil, fmt.Errorf("no .ateam/ found (run 'ateam install' first)")
+	}
+
+	gitRoot, _ := findGitRoot(cwd)
+	if gitRoot == "" {
+		return &EnvInfo{AteamRoot: ateamRoot}, nil
+	}
+
+	info := &EnvInfo{
+		AteamRoot: ateamRoot,
+		GitRoot:   gitRoot,
+	}
+
+	ateamParent := filepath.Dir(ateamRoot)
+	relPath, err := filepath.Rel(ateamParent, gitRoot)
+	if err != nil || strings.HasPrefix(relPath, "..") {
+		return info, nil
+	}
+
+	projectDir := filepath.Join(ateamRoot, "projects", relPath)
+	configPath := filepath.Join(projectDir, "config.toml")
+	if _, err := os.Stat(configPath); err != nil {
+		return info, nil
+	}
+
+	info.ProjectRelPath = relPath
+	info.ProjectDir = projectDir
+
+	cfg, err := config.Load(projectDir)
+	if err != nil {
+		return info, nil
+	}
+	info.Agents = cfg.Agents.Enabled
+
+	return info, nil
+}
+
 func mustGetwd() string {
 	cwd, err := os.Getwd()
 	if err != nil {
