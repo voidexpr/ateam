@@ -42,18 +42,23 @@ After `ateam init`, the working directory looks like:
 
 ```
 myproject/
-  config.toml           # project config (source dir, agents, timeouts)
-  prompts/
-    report_instructions.md    # shared report format instructions
-    supervisor_role.md        # supervisor system prompt
-    review_instructions.md    # review output format
-    agents/
-      refactor_small.md       # per-agent role prompts (customizable)
-      security.md
-      ...
-  reports/              # latest reports (overwritten each run)
-  archive/              # timestamped copies of all reports
-  review.md             # latest supervisor decisions
+  config.toml                       # project config (source dir, agents, timeouts)
+  agents/
+    report_prompt.md                # shared report format instructions
+    refactor_small/
+      prompt.md                     # agent role prompt (customizable)
+      refactor_small.report.md      # latest report (overwritten each run)
+      reports/                      # timestamped report history
+    security/
+      prompt.md
+      security.report.md
+      reports/
+    ...
+  supervisor/
+    prompt.md                       # supervisor system prompt
+    review_prompt.md                # review output format
+    reviews/                        # timestamped review history
+  review.md                         # latest supervisor decisions
 ```
 
 All prompts are written to disk during `init` — edit them before running reports to customize behavior.

@@ -10,6 +10,7 @@ type AgentTask struct {
 	AgentID    string
 	Prompt     string
 	OutputFile string
+	WorkDir    string
 }
 
 // PoolResult pairs an agent ID with its run result.
@@ -34,7 +35,7 @@ func RunPool(ctx context.Context, tasks []AgentTask, maxParallel, timeoutMinutes
 			defer wg.Done()
 			defer func() { <-sem }() // release slot
 
-			result := RunClaude(ctx, t.Prompt, t.OutputFile, timeoutMinutes)
+			result := RunClaude(ctx, t.Prompt, t.OutputFile, t.WorkDir, timeoutMinutes)
 			result.AgentID = t.AgentID
 
 			mu.Lock()

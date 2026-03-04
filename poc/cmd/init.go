@@ -33,7 +33,7 @@ Example:
 
 func init() {
 	initCmd.Flags().StringVar(&initSource, "source", "", "path to project source code (required)")
-	initCmd.Flags().StringSliceVar(&initAgents, "agents", []string{"all"}, "comma-separated agent list, or 'all'")
+	initCmd.Flags().StringSliceVar(&initAgents, "agents", []string{"all"}, agents.FlagUsage())
 	initCmd.Flags().StringVar(&initWorkDir, "work-dir", "", "parent directory for the project (default: current directory)")
 	_ = initCmd.MarkFlagRequired("source")
 }
@@ -70,9 +70,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Create directory structure
 	dirs := []string{
 		projectDir,
-		filepath.Join(projectDir, "prompts", "agents"),
-		filepath.Join(projectDir, "reports"),
-		filepath.Join(projectDir, "archive"),
+		filepath.Join(projectDir, "supervisor", "reviews"),
+	}
+	for _, agentID := range agentIDs {
+		dirs = append(dirs, filepath.Join(projectDir, "agents", agentID, "reports"))
 	}
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -110,7 +111,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Initialized ATeam project: %s\n", projectDir)
 	fmt.Printf("  Source: %s\n", sourceDir)
 	fmt.Printf("  Agents: %v\n", agentIDs)
-	fmt.Printf("\nPrompt files are in %s/prompts/ — customize them before running reports.\n", projectDir)
+	fmt.Printf("\nPrompt files are in agents/ and supervisor/ — customize them before running reports.\n")
 	fmt.Printf("\nNext steps:\n")
 	fmt.Printf("  cd %s\n", projectDir)
 	fmt.Printf("  ateam report --agents all\n")

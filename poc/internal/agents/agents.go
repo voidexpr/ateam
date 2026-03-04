@@ -1,5 +1,7 @@
 package agents
 
+import "strings"
+
 // Agent represents a role-specific analysis agent.
 type Agent struct {
 	ID          string
@@ -94,11 +96,16 @@ type UnknownAgentError struct {
 }
 
 func (e *UnknownAgentError) Error() string {
-	return "unknown agent: " + e.ID
+	return "unknown agent: " + e.ID + "\nValid agents: " + strings.Join(AllAgentIDs, ", ")
 }
 
 type NoAgentsError struct{}
 
 func (e *NoAgentsError) Error() string {
 	return "no agents specified"
+}
+
+// FlagUsage returns a help string listing all valid agent IDs for use in flag descriptions.
+func FlagUsage() string {
+	return "comma-separated agent list, or 'all'. Valid: " + strings.Join(AllAgentIDs, ", ")
 }
