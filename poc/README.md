@@ -25,8 +25,10 @@ ateam install
 ateam init --agents all
 ateam report --agents all
 ateam report --agents testing_basic,security --extra-prompt "Focus on the API layer"
+ateam report --agents all --print    # also display reports to stdout
 ateam review
 ateam review --extra-prompt "This is a production financial app"
+ateam review --print                 # also display review to stdout
 ```
 
 `ateam report` and `ateam init` auto-create the `.ateam/` structure if it doesn't exist yet, so `ateam install` is optional.

@@ -15,6 +15,7 @@ var (
 	reviewExtraPrompt  string
 	reviewCustomPrompt string
 	reviewTimeout      int
+	reviewPrint        bool
 )
 
 var reviewCmd = &cobra.Command{
@@ -36,6 +37,7 @@ func init() {
 	reviewCmd.Flags().StringVar(&reviewExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
 	reviewCmd.Flags().StringVar(&reviewCustomPrompt, "prompt", "", "custom prompt replacing default supervisor role (text or @filepath)")
 	reviewCmd.Flags().IntVar(&reviewTimeout, "timeout", 0, "timeout in minutes (overrides config)")
+	reviewCmd.Flags().BoolVar(&reviewPrint, "print", false, "print review to stdout after completion")
 }
 
 func runReview(cmd *cobra.Command, args []string) error {
@@ -83,6 +85,10 @@ func runReview(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Done (%s)\n\n", runner.FormatDuration(result.Duration))
 	fmt.Printf("Review: %s\n", reviewFile)
+
+	if reviewPrint {
+		fmt.Printf("\n%s\n", result.Output)
+	}
 
 	return nil
 }

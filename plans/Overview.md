@@ -8,9 +8,15 @@ Agents are very good at finding issues in code and producing tests, so why shoul
 
 Coding agents make the right fundamental tradeoff: implement a working feature when asked. They do not invest too much time on in-depth software engineering. But when the dust settle after feature work we'd like coding agents to work in the background improving the over software quality: testing, refactoring, security, documentation, dependency management, etc ...
 
+Core principles:
+* Agents are optimized for one thing: implementing the feature in front of them. They can't simultaneously move fast on feature work and attend to everything else a healthy project demands: testing, security, documentation, refactoring at every scale, dependency hygiene, and more.
+* Agents are good at finding issues in project structure and code
+* human attention needs to be optimized for, currently agents require too many approvals
+* feature work requires human involvement but software engineering quality can be prompted once and adapt to the size and velocity of the project and therefore could be operating in the background as feature work settles
+
 ## The Idea
 
-Use agents with pre-built prompts to focus on software engineering tasks: refactoring, testing, documentation (internal, external), security, performance. While taking as little attention from feature work as possible. For this they run mostly unattended in containers with no permission approval required. Just decide if you want to keep their commits or not. They are just another contributor to your project focused only on code quality.
+Use agents with pre-built prompts to focus on software engineering tasks: refactoring, testing, documentation (internal, external), security, performance, dependency management, ... Have them assess a project based on their specific role and make recommendations. Then a supervisor agent reviews all these reports and decide what the correct priorities should be. This process should require as little attention as possible: only the supervisor should escalate questions to humans when needed but mostly all the audit and implementation work should be performed unattended. Then humans can see the git commits and push them to the main repo or discard them. This system would behave as another contributor to a project focused on software quality and nothing else.
 
 ## Story Time
 
