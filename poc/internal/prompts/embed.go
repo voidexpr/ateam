@@ -39,20 +39,25 @@ func DefaultSupervisorPrompt() string {
 	return readEmbedded("defaults/supervisor/review_prompt.md")
 }
 
+type embeddedFile struct {
+	rel     string
+	content string
+}
+
 // embeddedFiles returns all default files as relPath -> content pairs.
-func embeddedFiles() []struct{ rel, content string } {
-	var files []struct{ rel, content string }
+func embeddedFiles() []embeddedFile {
+	var files []embeddedFile
 	for _, id := range agents.AllAgentIDs {
-		files = append(files, struct{ rel, content string }{
+		files = append(files, embeddedFile{
 			filepath.Join("defaults", "agents", id, ReportPromptFile),
 			DefaultAgentPrompt(id),
 		})
 	}
-	files = append(files, struct{ rel, content string }{
-		filepath.Join("defaults", "report_instructions.md"),
+	files = append(files, embeddedFile{
+		filepath.Join("defaults", ReportInstructionsFile),
 		DefaultReportInstructions(),
 	})
-	files = append(files, struct{ rel, content string }{
+	files = append(files, embeddedFile{
 		filepath.Join("defaults", "supervisor", ReviewPromptFile),
 		DefaultSupervisorPrompt(),
 	})
