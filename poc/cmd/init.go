@@ -49,7 +49,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Ensure agent dirs and prompts exist
-	if err := root.EnsureAgents(proj.AteamRoot, proj.ProjectDir, agentIDs); err != nil {
+	if err := root.EnsureAgents(proj.ProjectDir, agentIDs); err != nil {
 		return err
 	}
 

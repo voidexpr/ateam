@@ -20,4 +20,5 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(reportCmd)
 	rootCmd.AddCommand(reviewCmd)
+	rootCmd.AddCommand(updatePromptsCmd)
 }

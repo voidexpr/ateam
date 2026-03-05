@@ -60,22 +60,9 @@ func AutoInitProject(ateamRoot, sourceDir, relPath string, agentIDs []string) (s
 	return projectDir, nil
 }
 
-// EnsureAgents creates missing agent dirs and prompt files for the given agents.
-func EnsureAgents(ateamRoot, projectDir string, agentIDs []string) error {
+// EnsureAgents creates missing agent dirs under the project for the given agents.
+func EnsureAgents(projectDir string, agentIDs []string) error {
 	for _, agentID := range agentIDs {
-		// Root-level default prompt
-		rootAgentDir := filepath.Join(ateamRoot, "agents", agentID)
-		if err := os.MkdirAll(rootAgentDir, 0755); err != nil {
-			return fmt.Errorf("cannot create agent directory %s: %w", rootAgentDir, err)
-		}
-		content := prompts.CombinedAgentPrompt(agentID)
-		if content != "" {
-			if err := prompts.WriteIfNotExists(filepath.Join(rootAgentDir, prompts.ReportPromptFile), content); err != nil {
-				return fmt.Errorf("cannot write default prompt for %s: %w", agentID, err)
-			}
-		}
-
-		// Project-level agent dir with history
 		if err := os.MkdirAll(filepath.Join(projectDir, "agents", agentID, "history"), 0755); err != nil {
 			return fmt.Errorf("cannot create project agent directory: %w", err)
 		}
