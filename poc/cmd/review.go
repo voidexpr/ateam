@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"time"
 
+	"github.com/ateam-poc/internal/gitutil"
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
@@ -61,7 +61,9 @@ func runReview(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	prompt, err := prompts.AssembleReviewPrompt(proj.AteamRoot, proj.ProjectDir, proj.SourceDir, extraPrompt, customPrompt)
+	meta, _ := gitutil.GetProjectMeta(proj.SourceDir)
+
+	prompt, err := prompts.AssembleReviewPrompt(proj.AteamRoot, proj.ProjectDir, meta, extraPrompt, customPrompt)
 	if err != nil {
 		return err
 	}
@@ -103,32 +105,10 @@ func runReview(cmd *cobra.Command, args []string) error {
 }
 
 func printReviewDryRun(proj *root.ResolvedProject, prompt string) error {
-	agentsDir := filepath.Join(proj.ProjectDir, "agents")
-	entries, _ := os.ReadDir(agentsDir)
+	reports, _ := prompts.DiscoverReports(proj.ProjectDir)
 
-	type reportEntry struct {
-		agent   string
-		modTime time.Time
-		relPath string
-	}
-	var reports []reportEntry
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		reportPath := filepath.Join(agentsDir, entry.Name(), prompts.FullReportFile)
-		info, err := os.Stat(reportPath)
-		if err != nil {
-			continue
-		}
-		relPath, _ := filepath.Rel(filepath.Dir(proj.AteamRoot), reportPath)
-		if relPath == "" {
-			relPath = reportPath
-		}
-		reports = append(reports, reportEntry{entry.Name(), info.ModTime(), relPath})
-	}
 	sort.Slice(reports, func(i, j int) bool {
-		return reports[i].modTime.After(reports[j].modTime)
+		return reports[i].ModTime.After(reports[j].ModTime)
 	})
 
 	fmt.Println("Reports found:")
@@ -136,7 +116,11 @@ func printReviewDryRun(proj *root.ResolvedProject, prompt string) error {
 		fmt.Println("  (none)")
 	}
 	for _, r := range reports {
-		fmt.Printf("  %s  %-30s %s\n", r.modTime.Format("2006-01-02 15:04"), r.agent, r.relPath)
+		relPath, _ := filepath.Rel(filepath.Dir(proj.AteamRoot), r.Path)
+		if relPath == "" {
+			relPath = r.Path
+		}
+		fmt.Printf("  %s  %-30s %s\n", r.ModTime.Format("2006-01-02 15:04"), r.AgentID, relPath)
 	}
 
 	fmt.Printf("\n╔══ supervisor ══╗\n\n")

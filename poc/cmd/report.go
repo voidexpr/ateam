@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ateam-poc/internal/agents"
+	"github.com/ateam-poc/internal/gitutil"
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
@@ -73,13 +74,15 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	meta, _ := gitutil.GetProjectMeta(proj.SourceDir)
+
 	timeout := proj.Config.Execution.EffectiveTimeout(reportTimeout)
 	reportType := "full"
 
 	// Build tasks
 	var tasks []runner.AgentTask
 	for _, agentID := range agentIDs {
-		prompt, err := prompts.AssembleAgentPrompt(proj.AteamRoot, proj.ProjectDir, agentID, proj.SourceDir, extraPrompt)
+		prompt, err := prompts.AssembleAgentPrompt(proj.AteamRoot, proj.ProjectDir, agentID, proj.SourceDir, extraPrompt, meta)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", agentID, err)
 			continue

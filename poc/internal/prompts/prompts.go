@@ -44,7 +44,8 @@ func ResolveOptional(value string) (string, error) {
 // AssembleAgentPrompt builds the full prompt for an agent run.
 // Resolution order for role prompt: project override → defaults.
 // Report instructions always come from defaults.
-func AssembleAgentPrompt(ateamRoot, projectDir, agentID, sourceDir, extraPrompt string) (string, error) {
+// meta is optional — if nil, git metadata is omitted from the prompt.
+func AssembleAgentPrompt(ateamRoot, projectDir, agentID, sourceDir, extraPrompt string, meta *gitutil.ProjectMeta) (string, error) {
 	rolePrompt, err := readWithFallback(
 		filepath.Join(projectDir, "agents", agentID, ReportPromptFile),
 		filepath.Join(ateamRoot, "defaults", "agents", agentID, ReportPromptFile),
@@ -68,7 +69,7 @@ func AssembleAgentPrompt(ateamRoot, projectDir, agentID, sourceDir, extraPrompt 
 
 	parts := []string{promptContent}
 
-	if meta, err := gitutil.GetProjectMeta(sourceDir); err == nil && meta != nil {
+	if meta != nil {
 		parts = append(parts, gitutil.FormatMetadataSection(meta, time.Now()))
 	}
 
@@ -84,37 +85,61 @@ func AssembleAgentPrompt(ateamRoot, projectDir, agentID, sourceDir, extraPrompt 
 	return strings.Join(parts, "\n\n---\n\n"), nil
 }
 
-// AssembleReviewPrompt builds the full prompt for a supervisor review.
-func AssembleReviewPrompt(ateamRoot, projectDir, sourceDir, extraPrompt, customPrompt string) (string, error) {
+// AgentReport holds metadata about a discovered agent report file.
+type AgentReport struct {
+	AgentID string
+	Path    string
+	ModTime time.Time
+	Content string
+}
+
+// DiscoverReports scans the project's agents directory for full_report.md files.
+func DiscoverReports(projectDir string) ([]AgentReport, error) {
 	agentsDir := filepath.Join(projectDir, "agents")
 	entries, err := os.ReadDir(agentsDir)
 	if err != nil {
-		return "", fmt.Errorf("cannot read agents directory: %w (run 'ateam report' first)", err)
+		return nil, fmt.Errorf("cannot read agents directory: %w (run 'ateam report' first)", err)
 	}
 
-	var reportContents []string
-	var manifestLines []string
+	var reports []AgentReport
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		reportPath := filepath.Join(agentsDir, entry.Name(), FullReportFile)
-		info, err := os.Stat(reportPath)
-		if err != nil {
-			continue
-		}
 		data, err := os.ReadFile(reportPath)
 		if err != nil {
 			continue
 		}
-		reportContents = append(reportContents,
-			fmt.Sprintf("# Agent Report: %s\n\n%s", entry.Name(), string(data)))
-		manifestLines = append(manifestLines,
-			fmt.Sprintf("| %s | %s |", entry.Name(), info.ModTime().Format("2006-01-02 15:04:05")))
+		info, _ := os.Stat(reportPath)
+		reports = append(reports, AgentReport{
+			AgentID: entry.Name(),
+			Path:    reportPath,
+			ModTime: info.ModTime(),
+			Content: string(data),
+		})
+	}
+	return reports, nil
+}
+
+// AssembleReviewPrompt builds the full prompt for a supervisor review.
+// meta is optional — if nil, git metadata is omitted from the prompt.
+func AssembleReviewPrompt(ateamRoot, projectDir string, meta *gitutil.ProjectMeta, extraPrompt, customPrompt string) (string, error) {
+	reports, err := DiscoverReports(projectDir)
+	if err != nil {
+		return "", err
+	}
+	if len(reports) == 0 {
+		return "", fmt.Errorf("no report files found in %s/agents — run 'ateam report' first", projectDir)
 	}
 
-	if len(reportContents) == 0 {
-		return "", fmt.Errorf("no report files found in %s — run 'ateam report' first", agentsDir)
+	var reportContents []string
+	var manifestLines []string
+	for _, r := range reports {
+		reportContents = append(reportContents,
+			fmt.Sprintf("# Agent Report: %s\n\n%s", r.AgentID, r.Content))
+		manifestLines = append(manifestLines,
+			fmt.Sprintf("| %s | %s |", r.AgentID, r.ModTime.Format("2006-01-02 15:04:05")))
 	}
 
 	allReports := strings.Join(reportContents, "\n\n---\n\n")
@@ -127,7 +152,7 @@ func AssembleReviewPrompt(ateamRoot, projectDir, sourceDir, extraPrompt, customP
 		contextParts = append(contextParts, manifest)
 	}
 
-	if meta, err := gitutil.GetProjectMeta(sourceDir); err == nil && meta != nil {
+	if meta != nil {
 		contextParts = append(contextParts, gitutil.FormatMetadataSection(meta, time.Now()))
 	}
 
@@ -185,8 +210,14 @@ func readFileOr(path, fallback string) string {
 
 // WriteIfNotExists writes content to path only if the file does not already exist.
 func WriteIfNotExists(path, content string) error {
-	if _, err := os.Stat(path); err == nil {
-		return nil
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+	if err != nil {
+		if os.IsExist(err) {
+			return nil
+		}
+		return err
 	}
-	return os.WriteFile(path, []byte(content), 0644)
+	defer f.Close()
+	_, err = f.WriteString(content)
+	return err
 }
