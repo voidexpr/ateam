@@ -6,7 +6,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/ateam-poc/internal/agents"
 	"github.com/ateam-poc/internal/gitutil"
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
@@ -40,7 +39,7 @@ Example:
 }
 
 func init() {
-	reportCmd.Flags().StringSliceVar(&reportAgents, "agents", nil, agents.FlagUsage()+" (required)")
+	reportCmd.Flags().StringSliceVar(&reportAgents, "agents", nil, prompts.AgentFlagUsage()+" (required)")
 	reportCmd.Flags().StringVar(&reportExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
 	reportCmd.Flags().IntVar(&reportTimeout, "timeout", 0, "timeout in minutes per agent (overrides config)")
 	reportCmd.Flags().BoolVar(&reportDelta, "delta", false, "produce delta report (not yet implemented)")
@@ -54,7 +53,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--delta is not yet implemented")
 	}
 
-	agentIDs, err := agents.ResolveAgentList(reportAgents)
+	agentIDs, err := prompts.ResolveAgentList(reportAgents)
 	if err != nil {
 		return err
 	}

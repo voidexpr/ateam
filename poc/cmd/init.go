@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/ateam-poc/internal/agents"
 	"github.com/ateam-poc/internal/config"
+	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
 	"github.com/spf13/cobra"
 )
@@ -27,11 +27,11 @@ Example:
 }
 
 func init() {
-	initCmd.Flags().StringSliceVar(&initAgents, "agents", []string{"all"}, agents.FlagUsage())
+	initCmd.Flags().StringSliceVar(&initAgents, "agents", []string{"all"}, prompts.AgentFlagUsage())
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
-	agentIDs, err := agents.ResolveAgentList(initAgents)
+	agentIDs, err := prompts.ResolveAgentList(initAgents)
 	if err != nil {
 		return err
 	}
