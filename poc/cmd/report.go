@@ -19,6 +19,7 @@ var (
 	reportTimeout     int
 	reportDelta       bool
 	reportPrint       bool
+	reportDryRun      bool
 )
 
 var reportCmd = &cobra.Command{
@@ -43,6 +44,7 @@ func init() {
 	reportCmd.Flags().IntVar(&reportTimeout, "timeout", 0, "timeout in minutes per agent (overrides config)")
 	reportCmd.Flags().BoolVar(&reportDelta, "delta", false, "produce delta report (not yet implemented)")
 	reportCmd.Flags().BoolVar(&reportPrint, "print", false, "print reports to stdout after completion")
+	reportCmd.Flags().BoolVar(&reportDryRun, "dry-run", false, "print the computed prompt for each agent without running")
 	_ = reportCmd.MarkFlagRequired("agents")
 }
 
@@ -62,7 +64,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 	}
 
 	// Ensure agent dirs and default prompts exist
-	if err := root.EnsureAgents(proj.AteamRoot, proj.ProjectDir, agentIDs); err != nil {
+	if err := root.EnsureAgents(proj.ProjectDir, agentIDs); err != nil {
 		return err
 	}
 
@@ -92,6 +94,18 @@ func runReport(cmd *cobra.Command, args []string) error {
 
 	if len(tasks) == 0 {
 		return fmt.Errorf("no valid agents to run")
+	}
+
+	if reportDryRun {
+		for i, t := range tasks {
+			if i > 0 {
+				fmt.Println()
+			}
+			fmt.Printf("╔══ %s ══╗\n\n", t.AgentID)
+			fmt.Println(t.Prompt)
+			fmt.Printf("\n╚══ %s ══╝\n", t.AgentID)
+		}
+		return nil
 	}
 
 	fmt.Printf("Running %d agent(s) (max %d parallel, %dm timeout)...\n\n",

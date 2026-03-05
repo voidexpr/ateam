@@ -26,7 +26,7 @@ You have been given reports from multiple specialized agents that analyzed the s
 ### Priority Actions
 The top 5-10 things that should be done, in order. For each:
 - **Action**: What to do (specific and actionable)
-- **Source**: Which agent report(s) identified this
+- **Source**: Which agent report(s) identified this — use the exact agent name(s) from the reports
 - **Priority**: P0 (do now) / P1 (do soon) / P2 (do eventually)
 - **Effort**: SMALL / MEDIUM / LARGE
 - **Rationale**: Why this is prioritized here
@@ -46,3 +46,4 @@ Any observations about the project that don't fit into specific actions — patt
 - Don't just concatenate findings — synthesize and prioritize
 - Be decisive — "maybe" is not a priority level
 - If all reports say the code is clean, say so. Don't manufacture work.
+- In each Priority Action heading, specify which report(s) the recommendation primarily comes from

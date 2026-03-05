@@ -26,9 +26,16 @@ ateam init --agents all
 ateam report --agents all
 ateam report --agents testing_basic,security --extra-prompt "Focus on the API layer"
 ateam report --agents all --print    # also display reports to stdout
+ateam report --agents all --dry-run  # show computed prompts without running
 ateam review
 ateam review --extra-prompt "This is a production financial app"
 ateam review --print                 # also display review to stdout
+ateam review --dry-run               # show reports found and computed prompt
+
+# Update default prompts to match current binary
+ateam update-prompts
+# Or symlink defaults to your own prompt directory
+ateam update-prompts --symlink ~/my-prompts
 ```
 
 `ateam report` and `ateam init` auto-create the `.ateam/` structure if it doesn't exist yet, so `ateam install` is optional.
@@ -44,30 +51,34 @@ ATeam stores all artifacts in a `.ateam/` directory (by default `~/.ateam/`):
 
 ```
 ~/.ateam/
-  agents/
-    refactor_small/
-      report_prompt.md          # default agent prompt (customizable)
-    security/
-      report_prompt.md
-    ...
-  supervisor/
-    review_prompt.md            # default supervisor prompt
-  expertise/                    # (reserved for future use)
+  defaults/                       # mirrors internal/prompts/defaults/ — can be symlinked
+    agents/
+      refactor_small/
+        report_prompt.md          # agent role prompt
+      security/
+        report_prompt.md
+      ...
+    supervisor/
+      review_prompt.md            # supervisor prompt
+    report_instructions.md        # shared report format instructions
+  expertise/                      # (reserved for future use)
   projects/
-    code/myapp/                 # mirrors git root relative path from $HOME
-      config.toml               # project config (source dir, agents, timeouts)
+    code/myapp/                   # mirrors git root relative path from $HOME
+      config.toml                 # project config (source dir, agents, timeouts)
       agents/
         refactor_small/
-          full_report.md        # latest report
+          report_prompt.md        # project-level role override (optional)
+          full_report.md          # latest report
           extra_report_prompt.md  # project-specific extra instructions (optional)
-          history/              # timestamped report archive
+          history/                # timestamped report archive
         ...
       supervisor/
-        review.md               # latest supervisor decisions
-        history/                # timestamped review archive
+        review_prompt.md          # project-level override (optional)
+        review.md                 # latest supervisor decisions
+        history/                  # timestamped review archive
 ```
 
-Prompt lookup order: project-level override → root-level default.
+Prompt lookup: project-level override → `defaults/`. Agent prompts are assembled by combining the role prompt with `report_instructions.md` at run time, so project overrides only need the role-specific part.
 
 ## Agents
 
