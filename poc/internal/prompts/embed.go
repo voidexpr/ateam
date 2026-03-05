@@ -3,11 +3,11 @@ package prompts
 import (
 	"embed"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
-
-	"github.com/ateam-poc/internal/agents"
 )
 
 // PromptDiff describes a prompt file that differs from the embedded default.
@@ -18,6 +18,57 @@ type PromptDiff struct {
 
 //go:embed defaults/agents/*/report_prompt.md defaults/report_instructions.md defaults/supervisor/review_prompt.md
 var defaultsFS embed.FS
+
+// AllAgentIDs is the sorted list of agent IDs discovered from embedded prompt files.
+var AllAgentIDs = discoverAgentIDs()
+
+func discoverAgentIDs() []string {
+	entries, err := fs.ReadDir(defaultsFS, "defaults/agents")
+	if err != nil {
+		return nil
+	}
+	var ids []string
+	for _, e := range entries {
+		if e.IsDir() {
+			ids = append(ids, e.Name())
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// IsValidAgent returns true if the agent ID has an embedded prompt.
+func IsValidAgent(id string) bool {
+	for _, known := range AllAgentIDs {
+		if known == id {
+			return true
+		}
+	}
+	return false
+}
+
+// ResolveAgentList expands "all" and validates agent IDs.
+func ResolveAgentList(ids []string) ([]string, error) {
+	var result []string
+	for _, id := range ids {
+		if id == "all" {
+			return AllAgentIDs, nil
+		}
+		if !IsValidAgent(id) {
+			return nil, fmt.Errorf("unknown agent: %s\nValid agents: %s", id, strings.Join(AllAgentIDs, ", "))
+		}
+		result = append(result, id)
+	}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("no agents specified")
+	}
+	return result, nil
+}
+
+// AgentFlagUsage returns a help string listing all valid agent IDs for use in flag descriptions.
+func AgentFlagUsage() string {
+	return "comma-separated agent list, or 'all'. Valid: " + strings.Join(AllAgentIDs, ", ")
+}
 
 func readEmbedded(name string) string {
 	data, err := defaultsFS.ReadFile(name)
@@ -47,7 +98,7 @@ type embeddedFile struct {
 // embeddedFiles returns all default files as relPath -> content pairs.
 func embeddedFiles() []embeddedFile {
 	var files []embeddedFile
-	for _, id := range agents.AllAgentIDs {
+	for _, id := range AllAgentIDs {
 		files = append(files, embeddedFile{
 			filepath.Join("defaults", "agents", id, ReportPromptFile),
 			DefaultAgentPrompt(id),

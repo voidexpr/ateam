@@ -82,17 +82,6 @@ Prompt lookup: project-level override → `defaults/`. Agent prompts are assembl
 
 ## Agents
 
-| Agent | Focus |
-|---|---|
-| `refactor_small` | Small refactoring: naming, duplication, error handling |
-| `refactor_architecture` | Architecture: coupling, layering, abstractions |
-| `docs_internal` | Internal docs: architecture, code overview, dev guides |
-| `docs_external` | External docs: README, installation, usage |
-| `basic_project_structure` | Project structure: file layout, build system, conventions |
-| `automation` | CI/CD, linting, formatting, pre-commit hooks |
-| `dependencies` | Dependency health: outdated, unused, vulnerable |
-| `testing_basic` | Test coverage gaps, missing edge cases |
-| `testing_full` | Test suite architecture, flaky tests, integration gaps |
-| `security` | Vulnerabilities, injection risks, secrets, auth patterns |
+Agents are auto-discovered from `internal/prompts/defaults/agents/`. Each subdirectory containing a `report_prompt.md` becomes a valid agent. To add a new agent, create the directory with its prompt and rebuild.
 
-Use `all` as shorthand for every agent.
+Use `all` as shorthand for every agent. Run `ateam report --agents invalid` to see the current list.
