@@ -14,7 +14,7 @@ A workspace is the unit of isolated work in ATeam. It combines a git worktree (f
 
 ### What a Workspace Is
 
-- A git worktree branched from a known base commit (typically `main` or an integration branch)
+- A git worktree branched from a known base commit (typically the integration branch `ateam_integration`, or `main` for ad-hoc workspaces)
 - A Docker container (or future sandbox) bind-mounting that worktree
 - A single-purpose environment: one task, one workspace
 
@@ -86,7 +86,7 @@ Workspace names must be valid across three systems simultaneously: filesystem pa
 | Workspace directory | `.ateam/projects/{project}/workspaces/{workspace-name}/` |
 | Git branch | `ateam/{workspace-name}` |
 | Docker container | `ateam-{workspace-name}` |
-| Worktree directory | `{Workspace directory}/worktree/{workspace-name}/` |
+| Worktree directory | `{Workspace directory}/worktree/` |
 | Result file | `{Workspace directory}/result.md` |
 
 The `ateam/` prefix on git branches and `ateam-` prefix on containers are added by the tooling, not part of the workspace name itself.
@@ -95,6 +95,17 @@ The `ateam/` prefix on git branches and `ateam-` prefix on containers are added 
 
 ## CLI Commands
 
+### Command Aliases
+
+For convenience, commonly used workspace commands have top-level aliases:
+
+| Alias | Expands To |
+|---|---|
+| `ateam shell -w NAME` | `ateam ws shell -w NAME` |
+| `ateam status -w NAME` | `ateam ws status -w NAME` |
+
+These are purely shortcuts — they behave identically to the full `ateam ws` form.
+
 ### `ateam ws create`
 
 Create a new workspace: git worktree + Docker container ready for use.
@@ -102,6 +113,9 @@ Create a new workspace: git worktree + Docker container ready for use.
 ```bash
 # Create a workspace for a coding task, --purpose NAME is optional, it is derived from the name specified
 ateam ws create -w 'code-fix-auth-timeout' --purpose code
+
+# Create a workspace branching from a specific branch (e.g. the integration branch)
+ateam ws create -w 'code-fix-auth-timeout' --from-branch ateam_integration
 
 # Create an ad-hoc workspace for debugging or experimentation
 ateam ws create -w 'adhoc-test-env' --purpose adhoc
@@ -113,13 +127,13 @@ ateam ws create --purpose code --description "Fix authentication timeout in logi
 **What it does:**
 
 1. Validate the workspace name (or generate one from `--description` by slugifying)
-2. Determine the base commit — current `main` HEAD (or integration branch, depending on mode)
+2. Determine the base branch: uses `--from-branch` if specified, otherwise defaults to the project's integration branch (`ateam_integration`), or `main` if no integration branch exists
 3. Create the git worktree:
    ```bash
-   git worktree add workspaces/{name}/worktree -b ateam/{name}
+   git worktree add workspaces/{name}/worktree -b ateam/{name} {from-branch}
    ```
 4. Record the workspace in `state.sqlite` with status `Idle` and `git_commit_at_creation`
-5. Optionally start the Docker container (or defer to `ateam code`)
+5. The sandbox is not started — it is created on-demand by `ateam code`, `ateam ws start`, or `ateam ws shell`
 
 ### `ateam code`
 
@@ -139,10 +153,10 @@ ateam code @tasks/fix-auth.md --extra-prompt "Focus on the OAuth provider" -w co
 **What it does:**
 
 1. Set workspace status to `InUse` in `state.sqlite` (error if not Idle)
-2. Rebase the workspace branch onto the current base (main or integration) to incorporate recent changes
-3. Start the Docker container with the worktree bind-mounted as `/workspace`:
+2. Rebase the workspace branch onto the current base (integration branch) to incorporate recent changes
+3. Start the sandbox with the worktree bind-mounted as `/workspace`:
    ```bash
-   docker run --rm \
+   docker run \
      --name ateam-{name} \
      --network host \
      -v WORKTREE_PATH:/workspace \
@@ -153,7 +167,7 @@ ateam code @tasks/fix-auth.md --extra-prompt "Focus on the OAuth provider" -w co
 4. Wait for completion (with timeout from config)
 5. Check for `result.md` in the workspace
 6. Update `state.sqlite`: set `last_git_commit`, set status to `Done` or `Error`
-7. If the coding agent made commits, update `last_git_commit` in the database
+7. **The container is NOT removed.** It persists so the supervisor (or a human) can inspect it on failure via `ateam ws shell`. The container is torn down by `ateam ws stop` or `ateam ws cleanup`.
 
 **The coding agent's contract:**
 
@@ -177,10 +191,19 @@ ateam ws shell -w code-fix-auth-timeout
 ateam ws shell -w adhoc-test-env
 ```
 
-Useful for debugging failed workspaces, inspecting partial work, or manual experimentation. The container is started without `--rm` so it persists for inspection. Mounts `~/.bashrc` read-only so the user gets their familiar shell environment.
+Useful for debugging failed workspaces, inspecting partial work, or manual experimentation.
+
+If the container is already running (left over from `ateam code` or `ateam ws start`), this attaches to it:
 
 ```bash
-# Under the hood (docker sandbox):
+# Under the hood — attach to existing container:
+docker exec -it ateam-{name} bash -l
+```
+
+If the container is not running, it creates one:
+
+```bash
+# Under the hood — create new container:
 docker run -it \
   --name ateam-{name} \
   -v WORKTREE_PATH:/workspace \
@@ -448,20 +471,21 @@ Start N workspaces in parallel off `main`. If conflicts are detected during inte
 
 **Not implemented in this POC.**
 
-### POC Default: Sequential with Rebase
+### POC Default: Sequential Off Integration
 
-For the POC, we use a sequential approach with a twist:
+For the POC, we use Mode 2 (sequential off integration):
 
-1. Supervisor creates an integration branch from `main`
+1. Supervisor creates an integration branch `ateam_integration` from `main`
 2. For each coding task (in sequence):
-   a. `ateam ws create` creates a workspace branching from `main`
-   b. `ateam code` runs the task; the coding agent rebases onto latest `main` before committing
-   c. Supervisor merges the workspace branch into integration (should be a fast-forward or clean merge since the agent just rebased)
-3. When all tasks are done, `ateam push` rebases integration onto latest `main` and pushes
+   a. `ateam ws create -w {name} --from-branch ateam_integration` creates a workspace branching from the current integration tip
+   b. `ateam code` runs the task inside the workspace
+   c. Supervisor merges the workspace branch back into `ateam_integration` (should be a fast-forward since the workspace branched from integration tip and no other work happened in between)
+   d. Supervisor stops the workspace container via `ateam ws stop`
+3. When all tasks are done, `ateam push` rebases `ateam_integration` onto latest `main` and pushes
 
-This gives us the simplicity of sequential execution while keeping each workspace's branch based on `main` (so the coding agent works against a known-good state). The supervisor's integration branch accumulates the results.
+Each workspace sees all previously completed work because it branches from the updated integration tip. This eliminates merge conflicts between workspaces by construction. The tradeoff is that tasks run one at a time.
 
-If the supervisor determines the work split was bad (too many conflicts, interdependent changes that should have been one task), it can give up and report the issue rather than producing a broken merge.
+If the supervisor determines the work split was bad (a task fails and blocks subsequent tasks that depend on it), it can give up and report the issue rather than continuing with a broken base.
 
 ---
 
@@ -561,23 +585,34 @@ A typical supervisor-driven coding cycle:
 # 1. Supervisor decides on tasks from reports/reviews
 #    (this is the existing report + review flow)
 
-# 2. Supervisor creates workspaces and dispatches tasks sequentially
-ateam ws create -w code-fix-auth-timeout --purpose code
+# 2. Supervisor creates integration branch
+git checkout -b ateam_integration main
+
+# 3. For each task, sequentially:
+
+# 3a. Create workspace from integration tip, run the task
+ateam ws create -w code-fix-auth-timeout --from-branch ateam_integration
 ateam code "Fix the authentication timeout bug per review finding R-12" \
   -w code-fix-auth-timeout
 
-ateam ws create -w code-add-rate-limiter --purpose code
-ateam code @tasks/rate-limiter.md -w code-add-rate-limiter
+# 3b. If success, merge into integration and stop the container
+git checkout ateam_integration
+git merge --ff-only ateam/code-fix-auth-timeout
+ateam ws stop -w code-fix-auth-timeout
 
-# 3. Supervisor checks results
+# 3c. Next task branches from updated integration tip
+ateam ws create -w code-add-rate-limiter --from-branch ateam_integration
+ateam code @tasks/rate-limiter.md -w code-add-rate-limiter
+git checkout ateam_integration
+git merge --ff-only ateam/code-add-rate-limiter
+ateam ws stop -w code-add-rate-limiter
+
+# 4. Supervisor checks results
 ateam ws list
 
-# 4. If a workspace failed, inspect it
+# 5. If a workspace failed, inspect it
 ateam ws shell -w code-fix-auth-timeout
 # ... or have the supervisor read result.md and decide to retry
-
-# 5. Supervisor merges workspace branches into integration
-#    (this happens internally as part of the supervisor's workflow)
 
 # 6. Push to main
 ateam push
@@ -586,7 +621,7 @@ ateam push
 ateam ws cleanup --done
 ```
 
-The supervisor agent orchestrates steps 2-6 programmatically. The human's involvement is limited to reviewing the final commits on `main` (or stepping in when the supervisor reports a failure it can't resolve).
+The supervisor agent orchestrates steps 2-7 programmatically. The human's involvement is limited to reviewing the final commits on `main` (or stepping in when the supervisor reports a failure it can't resolve).
 
 ---
 
