@@ -26,10 +26,12 @@ You have been given reports from multiple specialized agents that analyzed the s
 ### Priority Actions
 The top 5-10 things that should be done, in order. For each:
 - **Action**: What to do (specific and actionable)
-- **Source**: Which agent report(s) identified this — use the exact agent name(s) from the reports
+- **Source Agent**: use the exact agent name(s) from the reports and timestamp when the report was generated
+- **Source Report**: Which agent report(s) identified this and timestamp when the report was generated
 - **Priority**: P0 (do now) / P1 (do soon) / P2 (do eventually)
 - **Effort**: SMALL / MEDIUM / LARGE
 - **Rationale**: Why this is prioritized here
+- **Branch**: Short git branch name to use for this work, make sure it doesn't already exist. Don't create the branch yet, it will be used to organize work and related it back to reports.
 
 ### Deferred
 Findings from agent reports that are valid but should wait. Brief explanation of why.
