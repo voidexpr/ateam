@@ -10,7 +10,7 @@ This document defines workspaces (git worktree + sandboxed runtime), the command
 
 ## Workspace Concept
 
-A workspace is the unit of isolated work in ATeam. It combines a git worktree (for code isolation) with a sandboxed runtime environment (currently Docker, designed to be pluggable). Each workspace is independent: it has its own branch, its own container, and its own lifecycle.
+A workspace is the unit of isolated work in ATeam. It combines a git worktree (for code isolation) with a sandboxed runtime environment (currently Docker, designed to be pluggable). Each workspace is independent: it has its own branch, its own container, and its own lifecycle. Workspaces belong to a specific ateam project.
 
 ### What a Workspace Is
 
@@ -23,7 +23,7 @@ A workspace is the unit of isolated work in ATeam. It combines a git worktree (f
 - Read and modify code in `/workspace`
 - Install packages, run tests, start dev servers
 - Create commits on the workspace's branch
-- Write `code_result.md` to report outcome
+- Write `result.md` to report outcome
 
 ### What a Coding Agent Cannot Do
 
@@ -37,13 +37,13 @@ The supervisor owns everything outside the workspace boundary: creating workspac
 ### Workspace Lifecycle
 
 ```
-prepare  →  code  →  [inspect if failed]  →  cleanup
+create  →  idle  →  code  →  [inspect if failed]  →  cleanup
 ```
 
-1. **Created** by the supervisor (or manually via CLI) with `ateam prepare`
+1. **Created** by the supervisor (or manually via CLI) with `ateam ws create`
 2. **Used** for exactly one task via `ateam code`
 3. **Inspected** if the task fails — the workspace is preserved for debugging, and the task can be resumed or finished manually instead of restarting from scratch
-4. **Cleaned up** when no longer needed via `ateam cleanup`
+4. **Cleaned up** when no longer needed via `ateam ws cleanup`
 
 A new task always gets a new workspace. Workspaces are not reused across tasks.
 
@@ -63,7 +63,7 @@ Workspace names must be valid across three systems simultaneously: filesystem pa
 
 **Naming scheme:** `{purpose}-{descriptor}-{seq}`
 
-- **purpose**: `code`, `review`, `report`, `adhoc`, `debug`
+- **purpose**: `code`, `review`, `report`, `adhoc`
 - **descriptor**: derived from the task — a slug of the task name, ticket ID, or short description
 - **seq**: numeric suffix to handle duplicates
 
@@ -73,7 +73,7 @@ Workspace names must be valid across three systems simultaneously: filesystem pa
 - `code-add-rate-limiter-1`
 - `review-sprint-42-1`
 - `adhoc-test-docker-config-1`
-- `debug-fix-auth-timeout-1` (troubleshooting a failed coding workspace)
+- `adhoc-fix-auth-timeout-1` (troubleshooting a failed coding workspace)
 
 **Why not agent names?** One agent may have multiple workspaces. A workspace can outlive the agent's involvement (handed to a different agent for debugging, or inspected manually). The workspace identity describes *what it's for*, not *who's working on it*. Agent assignment is tracked as metadata in the database.
 
@@ -83,39 +83,40 @@ Workspace names must be valid across three systems simultaneously: filesystem pa
 
 | System | Identifier |
 |---|---|
-| Git branch | `ws/{workspace-name}` |
-| Docker container | `ateam-ws-{workspace-name}` |
-| Worktree directory | `workspaces/{workspace-name}/` |
-| Result file | `workspaces/{workspace-name}/code_result.md` |
+| Workspace directory | `.ateam/projects/{project}/workspaces/{workspace-name}/` |
+| Git branch | `ateam/{workspace-name}` |
+| Docker container | `ateam-{workspace-name}` |
+| Worktree directory | `{Workspace directory}/worktree/{workspace-name}/` |
+| Result file | `{Workspace directory}/result.md` |
 
-The `ws/` prefix on git branches and `ateam-ws-` prefix on containers are added by the tooling, not part of the workspace name itself.
+The `ateam/` prefix on git branches and `ateam-` prefix on containers are added by the tooling, not part of the workspace name itself.
 
 ---
 
 ## CLI Commands
 
-### `ateam prepare`
+### `ateam ws create`
 
 Create a new workspace: git worktree + Docker container ready for use.
 
 ```bash
-# Create a workspace for a coding task
-ateam prepare --name code-fix-auth-timeout --purpose code
+# Create a workspace for a coding task, --purpose NAME is optional, it is derived from the name specified
+ateam ws create -w 'code-fix-auth-timeout' --purpose code
 
 # Create an ad-hoc workspace for debugging or experimentation
-ateam prepare --name adhoc-test-env --purpose adhoc
+ateam ws create -w 'adhoc-test-env' --purpose adhoc
 
 # Auto-generate a name from a task description
-ateam prepare --purpose code --task "Fix authentication timeout in login flow"
+ateam ws create --purpose code --description "Fix authentication timeout in login flow"
 ```
 
 **What it does:**
 
-1. Validate the workspace name (or generate one from `--task` by slugifying)
+1. Validate the workspace name (or generate one from `--description` by slugifying)
 2. Determine the base commit — current `main` HEAD (or integration branch, depending on mode)
 3. Create the git worktree:
    ```bash
-   git worktree add workspaces/{name} -b ws/{name}
+   git worktree add workspaces/{name}/worktree -b ateam/{name}
    ```
 4. Record the workspace in `state.sqlite` with status `Idle` and `git_commit_at_creation`
 5. Optionally start the Docker container (or defer to `ateam code`)
@@ -137,7 +138,7 @@ ateam code @tasks/fix-auth.md --extra-prompt "Focus on the OAuth provider" -w co
 
 **What it does:**
 
-1. Set workspace status to `InUse` in `state.sqlite`
+1. Set workspace status to `InUse` in `state.sqlite` (error if not Idle)
 2. Rebase the workspace branch onto the current base (main or integration) to incorporate recent changes
 3. Start the Docker container with the worktree bind-mounted as `/workspace`:
    ```bash
@@ -150,7 +151,7 @@ ateam code @tasks/fix-auth.md --extra-prompt "Focus on the OAuth provider" -w co
      claude -p "PROMPT" --dangerously-skip-permissions
    ```
 4. Wait for completion (with timeout from config)
-5. Check for `code_result.md` in the workspace
+5. Check for `result.md` in the workspace
 6. Update `state.sqlite`: set `last_git_commit`, set status to `Done` or `Error`
 7. If the coding agent made commits, update `last_git_commit` in the database
 
@@ -158,7 +159,7 @@ ateam code @tasks/fix-auth.md --extra-prompt "Focus on the OAuth provider" -w co
 
 - Make code changes, run tests, commit
 - Each logical change gets its own commit with prefix: `[ateam/{purpose}] description`
-- Write `/workspace/code_result.md` with:
+- Write `/workspace/result.md` with:
   - Status: `PASS` or `FAIL`
   - Summary of what was done (one line per commit)
   - If anything was skipped or deferred, why
@@ -178,12 +179,12 @@ ateam shell -w adhoc-test-env
 
 Useful for debugging failed workspaces, inspecting partial work, or manual experimentation. The container is started without `--rm` so it persists for inspection.
 
-### `ateam workspace list`
+### `ateam ws list`
 
 Show all workspaces and their status.
 
 ```bash
-ateam workspace list
+ateam ws list
 ```
 
 ```
@@ -193,19 +194,19 @@ code-add-rate-limiter-1       code      Done     ws/code-add-rate-limiter-1     
 adhoc-test-docker-config-1    adhoc     Idle     ws/adhoc-test-docker-config-1  —             2026-03-05 15:01
 ```
 
-### `ateam cleanup`
+### `ateam ws cleanup`
 
 Safely remove a workspace.
 
 ```bash
 # Clean up a specific workspace
-ateam cleanup -w code-fix-auth-timeout-1
+ateam ws cleanup -w code-fix-auth-timeout-1
 
 # Clean up all workspaces with status Done
-ateam cleanup --done
+ateam ws cleanup --done
 
 # Force cleanup (skip safety checks)
-ateam cleanup -w code-fix-auth-timeout-1 --force
+ateam ws cleanup -w code-fix-auth-timeout-1 --force
 ```
 
 **Safety checks before cleanup:**
@@ -294,7 +295,7 @@ For the POC, we use a sequential approach with a twist:
 
 1. Supervisor creates an integration branch from `main`
 2. For each coding task (in sequence):
-   a. `ateam prepare` creates a workspace branching from `main`
+   a. `ateam ws create` creates a workspace branching from `main`
    b. `ateam code` runs the task; the coding agent rebases onto latest `main` before committing
    c. Supervisor merges the workspace branch into integration (should be a fast-forward or clean merge since the agent just rebased)
 3. When all tasks are done, `ateam push` rebases integration onto latest `main` and pushes
@@ -307,7 +308,9 @@ If the supervisor determines the work split was bad (too many conflicts, interde
 
 ## SQLite State Management
 
-State is stored in `.ateam/state.sqlite` at the organization root. The database is created on install (`ateam init-org`). It tracks projects, agents, and workspaces — enough for the CLI to operate without scanning the filesystem.
+State is stored in `.ateam/state.sqlite` at the organization root. The database is created on install (`ateam install`). It tracks projects, agents, and workspaces — enough for the CLI to operate without scanning the filesystem.
+
+TODO: use strict typing for sqlite
 
 ### Schema
 
@@ -318,6 +321,7 @@ CREATE TABLE projects (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT NOT NULL UNIQUE,
     path        TEXT NOT NULL UNIQUE,
+    git_remote  TEXT,
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -349,7 +353,7 @@ CREATE TABLE workspaces (
     container_id         TEXT,                           -- Docker container ID (if running)
     git_commit_at_creation TEXT NOT NULL,                -- SHA of base commit when worktree was created
     last_git_commit      TEXT,                           -- SHA of latest commit in the workspace
-    result_status        TEXT CHECK(result_status IN ('PASS', 'FAIL')),  -- from code_result.md
+    result_status        TEXT CHECK(result_status IN ('PASS', 'FAIL')),  -- from result.md
     created_at           TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at           TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -397,19 +401,19 @@ A typical supervisor-driven coding cycle:
 #    (this is the existing report + review flow)
 
 # 2. Supervisor creates workspaces and dispatches tasks sequentially
-ateam prepare --name code-fix-auth-timeout --purpose code
+ateam ws create -w code-fix-auth-timeout --purpose code
 ateam code "Fix the authentication timeout bug per review finding R-12" \
   -w code-fix-auth-timeout
 
-ateam prepare --name code-add-rate-limiter --purpose code
+ateam ws create -w code-add-rate-limiter --purpose code
 ateam code @tasks/rate-limiter.md -w code-add-rate-limiter
 
 # 3. Supervisor checks results
-ateam workspace list
+ateam ws list
 
 # 4. If a workspace failed, inspect it
 ateam shell -w code-fix-auth-timeout
-# ... or have the supervisor read code_result.md and decide to retry
+# ... or have the supervisor read result.md and decide to retry
 
 # 5. Supervisor merges workspace branches into integration
 #    (this happens internally as part of the supervisor's workflow)
@@ -418,7 +422,7 @@ ateam shell -w code-fix-auth-timeout
 ateam push
 
 # 7. Clean up
-ateam cleanup --done
+ateam ws cleanup --done
 ```
 
 The supervisor agent orchestrates steps 2-6 programmatically. The human's involvement is limited to reviewing the final commits on `main` (or stepping in when the supervisor reports a failure it can't resolve).
