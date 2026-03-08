@@ -1,12 +1,12 @@
 # ATeam — AI Agent Team for Code Analysis
 
-A Go CLI that manages role-specific AI agents to analyze codebases and produce actionable reports. Agents run in parallel via `claude -p`, and a supervisor synthesizes their findings into prioritized decisions.
+A Go CLI that manages role-specific AI agents to analyze codebases and produce actionable reports unattended. Agents run in parallel via `claude -p`, and a supervisor synthesizes their findings into prioritized decisions. Then manages the coding. The goal is to improve project quality along multiple dimensions (code, testing, documentation, security, ...) in the background to free more attention for feature work.
 
 ## Features
 
 - **Organization/project split** — shared defaults in `.ateamorg/`, per-project config and results in `.ateam/`
 - **Multi-project support** — multiple ateam projects per git repo (monorepo-friendly)
-- **15 built-in agents** — security, testing, refactoring, dependencies, documentation, and more
+- **16 built-in agents** — security, testing, refactoring, dependencies, documentation, project profiling, and more
 - **3-level prompt fallback** — project overrides → org overrides → embedded defaults
 - **Parallel execution** — configurable concurrency with per-agent timeouts
 - **Stream-json output** — real-time JSONL stream capture with cost/token tracking
@@ -275,7 +275,7 @@ All agent prompts follow the same pattern: `defaults/agents/<NAME>/report_prompt
 
 Agents are auto-discovered from [`internal/prompts/defaults/agents/`](internal/prompts/defaults/agents/). Each subdirectory containing a `report_prompt.md` becomes a valid agent. Use `all` as shorthand for every agent.
 
-Available agents: `automation`, `basic_project_structure`, `critic_engineering`, `critic_project`, `database_config`, `database_schema`, `dependencies`, `docs_external`, `docs_internal`, `refactor_architecture`, `refactor_small`, `security`, `shortcut_taker`, `testing_basic`, `testing_full`.
+Available agents: `automation`, `basic_project_structure`, `critic_engineering`, `critic_project`, `database_config`, `database_schema`, `dependencies`, `docs_external`, `docs_internal`, `project_characteristics`, `refactor_architecture`, `refactor_small`, `security`, `shortcut_taker`, `testing_basic`, `testing_full`.
 
 ## Troubleshooting
 
