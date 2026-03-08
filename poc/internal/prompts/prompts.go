@@ -17,6 +17,7 @@ const (
 	ReviewPromptFile                = "review_prompt.md"
 	ReportCommissioningPromptFile   = "report_commissioning_prompt.md"
 	FullReportFile                  = "full_report.md"
+	FullReportErrorFile             = "full_report_error.md"
 )
 
 // ResolveValue handles the @filename convention:

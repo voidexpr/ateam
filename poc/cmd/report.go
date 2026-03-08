@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ateam-poc/internal/gitutil"
@@ -124,11 +126,41 @@ func runReport(cmd *cobra.Command, args []string) error {
 		reportPath := env.AgentReportPath(r.AgentID, reportType)
 		if r.Result.Err != nil {
 			fmt.Printf("  %-25s FAILED  (%s) — %v\n", r.AgentID, runner.FormatDuration(r.Result.Duration), r.Result.Err)
+
+			// Read any partial stdout before overwriting with error marker
+			var partialOutput string
+			if partial, err := os.ReadFile(reportPath); err == nil {
+				content := strings.TrimSpace(string(partial))
+				if content != "" {
+					partialOutput = content
+				}
+			}
+
+			// Write brief marker to the report file
 			errorReport := fmt.Sprintf("# Report Failed: %s\n\nError: %v\n\nDuration: %s\n",
 				r.AgentID, r.Result.Err, runner.FormatDuration(r.Result.Duration))
 			if err := os.WriteFile(reportPath, []byte(errorReport), 0644); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not write error report for %s: %v\n", r.AgentID, err)
 			}
+
+			// Write detailed error log with stderr output
+			errorLogPath := filepath.Join(filepath.Dir(reportPath), prompts.FullReportErrorFile)
+			var detail strings.Builder
+			fmt.Fprintf(&detail, "# Report Error: %s\n\n", r.AgentID)
+			fmt.Fprintf(&detail, "**Time:** %s\n\n", time.Now().Format("2006-01-02 15:04:05"))
+			fmt.Fprintf(&detail, "**Duration:** %s\n\n", runner.FormatDuration(r.Result.Duration))
+			fmt.Fprintf(&detail, "**Error:** %v\n\n", r.Result.Err)
+			fmt.Fprintf(&detail, "**Work Dir:** %s\n\n", env.SourceDir)
+			if r.Result.Stderr != "" {
+				fmt.Fprintf(&detail, "## Stderr\n\n```\n%s\n```\n", r.Result.Stderr)
+			}
+			if partialOutput != "" {
+				fmt.Fprintf(&detail, "\n## Partial Output\n\n```\n%s\n```\n", partialOutput)
+			}
+			if err := os.WriteFile(errorLogPath, []byte(detail.String()), 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: could not write error log for %s: %v\n", r.AgentID, err)
+			}
+
 			failed++
 		} else {
 			producedAt := time.Now().Format("2006-01-02 15:04")

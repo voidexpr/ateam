@@ -522,23 +522,62 @@ CREATE TABLE agents (
     UNIQUE(project_id, name)
 );
 
+-- NOTE: use a config file for now, it doesn't really change
+-- CREATE TABLE sandboxes (
+--     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+--     name        TEXT NOT NULL UNIQUE,
+--     type        TEXT NOT NULL,
+--     enabled     INTEGER NOT NULL DEFAULT 1,  -- 1 = active, 0 = disabled (keeps config)
+--     cli_args    TEXT DEFAULT '',
+--     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+--     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+-- );
+
+-- NOTE: use a config file for now, it doesn't really change
+-- CREATE TABLE coding_agents (
+--     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+--     name        TEXT NOT NULL UNIQUE,
+--     type        TEXT NOT NULL,
+--     enabled     INTEGER NOT NULL DEFAULT 1,  -- 1 = active, 0 = disabled (keeps config)
+--     cli_args    TEXT DEFAULT '',
+--     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+--     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+-- );
+
 -- Workspaces: track lifecycle of each isolated work unit
 CREATE TABLE workspaces (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id           INTEGER NOT NULL REFERENCES projects(id),
-    agent_id             INTEGER REFERENCES agents(id),  -- NULL for adhoc workspaces
     name                 TEXT NOT NULL UNIQUE,            -- human-readable, DNS-label-safe
+
+    collection           TEXT, -- a way to group multiple workspaces together, for example all workspaces working on a review. Should only be used for related work
+
     purpose              TEXT NOT NULL CHECK(purpose IN ('report', 'review', 'code', 'feature', 'adhoc')),
-    sandbox_type         TEXT NOT NULL DEFAULT 'docker'  -- 'docker', 'none' (from config or override)
-                         CHECK(sandbox_type IN ('docker', 'none')),
     status               TEXT NOT NULL DEFAULT 'Idle'
                          CHECK(status IN ('Idle', 'InUse', 'Error', 'Done')),
-    branch               TEXT NOT NULL,                  -- e.g. 'ateam/code-fix-auth-timeout-1'
-    worktree_path        TEXT NOT NULL,                  -- relative path to worktree directory
-    container_id         TEXT,                           -- Docker container ID (if running)
-    git_commit_at_creation TEXT NOT NULL,                -- SHA of base commit when worktree was created
-    last_git_commit      TEXT,                           -- SHA of latest commit in the workspace
-    result_status        TEXT CHECK(result_status IN ('PASS', 'FAIL')),  -- from result.md
+
+    agent_id             INTEGER REFERENCES agents(id),  -- NULL for adhoc workspaces
+
+    code_path        TEXT NOT NULL,                  -- relative path or absolute path to a directory with the code to work on
+
+    code_path_owned  BOOLEAN,  -- whether this workspace can delete the code_path as part of its cleanup or not
+
+    git_base_branch TEXT,  -- ex: main, ateam/integration
+    git_base_commit TEXT,
+    git_work_branch TEXT,    -- e.g. 'ateam/code-fix-auth-timeout-1'
+    git_last_commit TEXT,
+
+    sandbox_type         TEXT NOT NULL DEFAULT 'docker'  -- 'docker', 'none' (from config or override)
+                         CHECK(sandbox_type IN ('docker', 'none')),
+    sandbox_args         TEXT, -- TODO: specific arguments related to how to run the sandbox
+
+    sandbox_internal_id           TEXT,                           -- Docker container ID (if running)
+
+    prompt               TEXT,  -- if the workspace is used for running a coding agent remember the prompt given
+
+    result_status        TEXT CHECK(result_status IN ('OK', 'ERROR', 'FAIL')),  -- from result.md
+    result_output        TEXT, -- current / last output displayed
+
     created_at           TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at           TEXT NOT NULL DEFAULT (datetime('now'))
 );
