@@ -3,94 +3,93 @@ package root
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/ateam-poc/internal/config"
 )
 
-// ResolvedProject holds all resolved paths for a project.
-type ResolvedProject struct {
-	ProjectRelPath string         // e.g. "code/myapp"
-	SourceDir      string         // absolute path to source git directory
-	AteamRoot      string         // path to .ateam/
-	ProjectDir     string         // .ateam/projects/<RelPath>/
-	Config         *config.Config
+const (
+	OrgDirName     = ".ateamorg"
+	ProjectDirName = ".ateam"
+)
+
+// ResolvedEnv holds all resolved paths for the org + project environment.
+type ResolvedEnv struct {
+	OrgDir      string         // absolute path to .ateamorg/
+	ProjectDir  string         // absolute path to .ateam/
+	ProjectName string         // from config.toml
+	SourceDir   string         // resolved from config project.source
+	GitRepoDir  string         // resolved from config git.repo
+	Config      *config.Config
 }
 
-// AgentReportPath returns the path to an agent's report file.
-func (p *ResolvedProject) AgentReportPath(agentID, reportType string) string {
-	return filepath.Join(p.ProjectDir, "agents", agentID, reportType+"_report.md")
+func (e *ResolvedEnv) AgentReportPath(agentID, reportType string) string {
+	return filepath.Join(e.ProjectDir, "agents", agentID, reportType+"_report.md")
 }
 
-// AgentHistoryDir returns the history directory for an agent.
-func (p *ResolvedProject) AgentHistoryDir(agentID string) string {
-	return filepath.Join(p.ProjectDir, "agents", agentID, "history")
+func (e *ResolvedEnv) AgentHistoryDir(agentID string) string {
+	return filepath.Join(e.ProjectDir, "agents", agentID, "history")
 }
 
-// ReviewPath returns the path to the supervisor review file.
-func (p *ResolvedProject) ReviewPath() string {
-	return filepath.Join(p.ProjectDir, "supervisor", "review.md")
+func (e *ResolvedEnv) ReviewPath() string {
+	return filepath.Join(e.ProjectDir, "supervisor", "review.md")
 }
 
-// ReviewHistoryDir returns the history directory for supervisor reviews.
-func (p *ResolvedProject) ReviewHistoryDir() string {
-	return filepath.Join(p.ProjectDir, "supervisor", "history")
+func (e *ResolvedEnv) ReviewHistoryDir() string {
+	return filepath.Join(e.ProjectDir, "supervisor", "history")
 }
 
-// realPath resolves symlinks and returns an absolute path.
-func realPath(p string) string {
-	r, err := filepath.EvalSymlinks(p)
-	if err != nil {
-		return filepath.Clean(p)
-	}
-	return r
-}
-
-// Resolve discovers the .ateam root and project, auto-creating as needed.
-// agentHint is used when auto-initializing a project to pre-create agent dirs.
-func Resolve(agentHint []string) (*ResolvedProject, error) {
-	cwd := realPath(mustGetwd())
-
-	if ateamRoot, ok := isInsideAteam(cwd); ok {
-		return resolveInside(cwd, ateamRoot)
+// FindOrg walks up from cwd looking for a .ateamorg directory.
+func FindOrg(cwd string) (string, error) {
+	if dir, ok := findInPath(cwd, OrgDirName); ok {
+		return dir, nil
 	}
 
-	ateamRoot, err := findAteamRoot(cwd)
-	if err != nil {
-		return nil, err
-	}
-	if ateamRoot == "" {
-		home := realPath(mustHomeDir())
-
-		gitRoot, gitErr := findSourceGit(cwd)
-		if gitErr != nil {
-			return nil, gitErr
+	dir := filepath.Clean(cwd)
+	for {
+		candidate := filepath.Join(dir, OrgDirName)
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return realPath(candidate), nil
 		}
-		rel, relErr := filepath.Rel(home, gitRoot)
-		if relErr != nil || strings.HasPrefix(rel, "..") {
-			return nil, fmt.Errorf("no .ateam/ found and git root %s is not under $HOME\nRun 'ateam install <parent-dir>' where <parent-dir> is a common ancestor of your projects", gitRoot)
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
 		}
-
-		ateamRoot, err = Install(home)
-		if err != nil {
-			return nil, fmt.Errorf("cannot create .ateam: %w", err)
-		}
-		fmt.Printf("Created %s with default prompts\n", ateamRoot)
-
-		// Pass gitRoot to avoid a second git subprocess
-		return resolveOutsideWithSourceGit(ateamRoot, gitRoot, agentHint)
+		dir = parent
 	}
 
-	return resolveOutside(cwd, ateamRoot, agentHint)
+	return "", fmt.Errorf("no %s/ found (run 'ateam install' first)", OrgDirName)
 }
 
-// isInsideAteam checks if cwd is inside a .ateam directory.
-func isInsideAteam(cwd string) (string, bool) {
+// FindProject walks up from cwd looking for a .ateam directory.
+func FindProject(cwd string) (string, error) {
+	if dir, ok := findInPath(cwd, ProjectDirName); ok {
+		return dir, nil
+	}
+
+	dir := filepath.Clean(cwd)
+	for {
+		candidate := filepath.Join(dir, ProjectDirName)
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return realPath(candidate), nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+
+	return "", fmt.Errorf("no %s/ found (not inside an ateam project)", ProjectDirName)
+}
+
+// findInPath checks if cwd is inside a directory named target.
+// Returns the absolute path up to and including the target component.
+func findInPath(cwd, target string) (string, bool) {
 	parts := strings.Split(filepath.Clean(cwd), string(filepath.Separator))
 	for i, part := range parts {
-		if part == ".ateam" {
+		if part == target {
 			root := string(filepath.Separator) + filepath.Join(parts[:i+1]...)
 			return root, true
 		}
@@ -98,245 +97,151 @@ func isInsideAteam(cwd string) (string, bool) {
 	return "", false
 }
 
-// findAteamRoot walks up from dir looking for a .ateam/ child directory.
-// Stops at $HOME (inclusive). Returns "" if not found.
-// dir must already be resolved via realPath.
-func findAteamRoot(dir string) (string, error) {
-	home := realPath(mustHomeDir())
-
-	for {
-		candidate := filepath.Join(dir, ".ateam")
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return realPath(candidate), nil
-		}
-
-		if dir == "/" || dir == "." {
-			break
-		}
-		if dir == home {
-			break
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-
-	return "", nil
-}
-
-// findSourceGit runs git rev-parse --show-toplevel to find the git root.
-func findSourceGit(dir string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("not a git repository (run from a git project or use 'ateam install')")
-	}
-	return realPath(strings.TrimSpace(string(out))), nil
-}
-
-// resolveOutside handles the case where we're in a git project outside .ateam.
-func resolveOutside(cwd, ateamRoot string, agentHint []string) (*ResolvedProject, error) {
-	gitRoot, err := findSourceGit(cwd)
-	if err != nil {
-		return nil, err
-	}
-	return resolveOutsideWithSourceGit(ateamRoot, gitRoot, agentHint)
-}
-
-// resolveOutsideWithSourceGit is the core resolution when we already know the git root.
-func resolveOutsideWithSourceGit(ateamRoot, gitRoot string, agentHint []string) (*ResolvedProject, error) {
-	ateamParent := filepath.Dir(ateamRoot)
-	relPath, err := filepath.Rel(ateamParent, gitRoot)
-	if err != nil || strings.HasPrefix(relPath, "..") {
-		return nil, fmt.Errorf("git root %s is not under .ateam parent %s", gitRoot, ateamParent)
-	}
-
-	projectDir := filepath.Join(ateamRoot, "projects", relPath)
-	configPath := filepath.Join(projectDir, "config.toml")
-
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		projectDir, err = AutoInitProject(ateamRoot, gitRoot, relPath, agentHint)
-		if err != nil {
-			return nil, fmt.Errorf("cannot auto-init project: %w", err)
-		}
-		fmt.Printf("Auto-initialized project: %s\n", relPath)
-	}
-
-	cfg, err := config.Load(projectDir)
-	if err != nil {
-		return nil, err
-	}
-
-	return &ResolvedProject{
-		ProjectRelPath: relPath,
-		SourceDir:      gitRoot,
-		AteamRoot:      ateamRoot,
-		ProjectDir:     projectDir,
-		Config:         cfg,
-	}, nil
-}
-
-// resolveInside handles the case where we're inside the .ateam directory tree.
-func resolveInside(cwd, ateamRoot string) (*ResolvedProject, error) {
-	projectsDir := filepath.Join(ateamRoot, "projects")
-
-	rel, err := filepath.Rel(projectsDir, cwd)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return nil, fmt.Errorf("inside .ateam but not under projects/ — cd into a project or run from a git checkout")
-	}
-
-	dir := cwd
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "config.toml")); err == nil {
-			break
-		}
-		if dir == projectsDir || dir == ateamRoot {
-			return nil, fmt.Errorf("no config.toml found under .ateam/projects/ — run 'ateam init' from a git project first")
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return nil, fmt.Errorf("no config.toml found under .ateam/projects/")
-		}
-		dir = parent
-	}
-
-	relPath, err := filepath.Rel(projectsDir, dir)
-	if err != nil {
-		return nil, err
-	}
-
-	cfg, err := config.Load(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	return &ResolvedProject{
-		ProjectRelPath: relPath,
-		SourceDir:      resolveSourceDir(ateamRoot, cfg.Project.SourceDir),
-		AteamRoot:      ateamRoot,
-		ProjectDir:     dir,
-		Config:         cfg,
-	}, nil
-}
-
-// EnvInfo holds read-only environment information (no auto-creation).
-type EnvInfo struct {
-	AteamRoot      string
-	SourceGit      string
-	ProjectRelPath string
-	ProjectDir     string
-	Agents         []string
-	InsideAteam    bool
-}
-
-// Lookup discovers the .ateam root and project without creating anything.
-func Lookup() (*EnvInfo, error) {
+// Resolve discovers org and project directories and loads config.
+func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
 	cwd := realPath(mustGetwd())
 
-	if ateamRoot, ok := isInsideAteam(cwd); ok {
-		return lookupInside(cwd, ateamRoot)
+	var orgDir string
+	var err error
+	if orgOverride != "" {
+		orgDir, err = resolveOrgByName(orgOverride)
+	} else {
+		orgDir, err = FindOrg(cwd)
 	}
-	return lookupOutside(cwd)
-}
-
-func lookupOutside(cwd string) (*EnvInfo, error) {
-	ateamRoot, err := findAteamRoot(cwd)
 	if err != nil {
 		return nil, err
 	}
-	if ateamRoot == "" {
-		return nil, fmt.Errorf("no .ateam/ found (run 'ateam install' first)")
-	}
 
-	gitRoot, _ := findSourceGit(cwd)
-	if gitRoot == "" {
-		return &EnvInfo{AteamRoot: ateamRoot}, nil
+	var projectDir string
+	if projectOverride != "" {
+		projectDir, err = resolveProjectByName(orgDir, projectOverride)
+	} else {
+		projectDir, err = FindProject(cwd)
 	}
-
-	info := &EnvInfo{
-		AteamRoot: ateamRoot,
-		SourceGit: gitRoot,
+	if err != nil {
+		return nil, err
 	}
-
-	ateamParent := filepath.Dir(ateamRoot)
-	relPath, err := filepath.Rel(ateamParent, gitRoot)
-	if err != nil || strings.HasPrefix(relPath, "..") {
-		return info, nil
-	}
-
-	projectDir := filepath.Join(ateamRoot, "projects", relPath)
-	if _, err := os.Stat(filepath.Join(projectDir, "config.toml")); err != nil {
-		return info, nil
-	}
-
-	info.ProjectRelPath = relPath
-	info.ProjectDir = projectDir
 
 	cfg, err := config.Load(projectDir)
 	if err != nil {
-		return info, nil
+		return nil, err
 	}
-	info.Agents = cfg.Agents.Enabled
 
-	return info, nil
+	env := &ResolvedEnv{
+		OrgDir:      orgDir,
+		ProjectDir:  projectDir,
+		ProjectName: cfg.Project.Name,
+		Config:      cfg,
+	}
+
+	if cfg.Project.Source != "" {
+		env.SourceDir = resolveRelPath(projectDir, cfg.Project.Source)
+	}
+
+	if cfg.Git.Repo != "" && env.SourceDir != "" {
+		env.GitRepoDir = resolveRelPath(env.SourceDir, cfg.Git.Repo)
+	}
+
+	return env, nil
 }
 
-func lookupInside(cwd, ateamRoot string) (*EnvInfo, error) {
-	info := &EnvInfo{
-		AteamRoot:   ateamRoot,
-		InsideAteam: true,
-	}
+// Lookup discovers org and project without creating anything.
+// Returns partial ResolvedEnv if project is not found.
+func Lookup() (*ResolvedEnv, error) {
+	cwd := realPath(mustGetwd())
 
-	projectsDir := filepath.Join(ateamRoot, "projects")
-	rel, err := filepath.Rel(projectsDir, cwd)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return info, nil
-	}
-
-	// Walk up to find config.toml
-	dir := cwd
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "config.toml")); err == nil {
-			break
-		}
-		if dir == projectsDir || dir == ateamRoot {
-			return info, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return info, nil
-		}
-		dir = parent
-	}
-
-	relPath, err := filepath.Rel(projectsDir, dir)
+	orgDir, err := FindOrg(cwd)
 	if err != nil {
-		return info, nil
+		return nil, err
 	}
 
-	cfg, err := config.Load(dir)
+	env := &ResolvedEnv{
+		OrgDir: orgDir,
+	}
+
+	projectDir, err := FindProject(cwd)
 	if err != nil {
-		return info, nil
+		return env, nil
 	}
 
-	info.SourceGit = resolveSourceDir(ateamRoot, cfg.Project.SourceDir)
-	info.ProjectRelPath = relPath
-	info.ProjectDir = dir
-	info.Agents = cfg.Agents.Enabled
+	env.ProjectDir = projectDir
 
-	return info, nil
+	cfg, err := config.Load(projectDir)
+	if err != nil {
+		return env, nil
+	}
+
+	env.Config = cfg
+	env.ProjectName = cfg.Project.Name
+
+	if cfg.Project.Source != "" {
+		env.SourceDir = resolveRelPath(projectDir, cfg.Project.Source)
+	}
+
+	if cfg.Git.Repo != "" && env.SourceDir != "" {
+		env.GitRepoDir = resolveRelPath(env.SourceDir, cfg.Git.Repo)
+	}
+
+	return env, nil
 }
 
-// resolveSourceDir makes a source_dir from config absolute.
-// If it's already absolute, return as-is. Otherwise resolve relative to .ateam's parent.
-func resolveSourceDir(ateamRoot, sourceDir string) string {
-	if filepath.IsAbs(sourceDir) {
-		return sourceDir
+// resolveOrgByName treats override as a path and looks for .ateamorg child there.
+func resolveOrgByName(override string) (string, error) {
+	candidate := filepath.Join(override, OrgDirName)
+	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		return realPath(candidate), nil
 	}
-	return filepath.Join(filepath.Dir(ateamRoot), sourceDir)
+	return "", fmt.Errorf("no %s/ found under %s", OrgDirName, override)
+}
+
+// resolveProjectByName walks from orgDir's parent looking for a .ateam/config.toml
+// where project.name matches the given name.
+func resolveProjectByName(orgDir, name string) (string, error) {
+	start := filepath.Dir(orgDir)
+
+	var found string
+	err := filepath.WalkDir(start, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() && d.Name() == OrgDirName {
+			return filepath.SkipDir
+		}
+		if d.IsDir() && d.Name() == ProjectDirName {
+			configPath := filepath.Join(path, "config.toml")
+			cfg, loadErr := config.Load(filepath.Dir(configPath))
+			if loadErr == nil && cfg.Project.Name == name {
+				found = path
+				return filepath.SkipAll
+			}
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if err != nil {
+		return "", fmt.Errorf("error searching for project %q: %w", name, err)
+	}
+	if found == "" {
+		return "", fmt.Errorf("project %q not found under %s", name, start)
+	}
+	return realPath(found), nil
+}
+
+// resolveRelPath resolves rel relative to base's parent directory.
+// If rel is absolute, it is returned as-is.
+func resolveRelPath(base, rel string) string {
+	if filepath.IsAbs(rel) {
+		return rel
+	}
+	return filepath.Join(filepath.Dir(base), rel)
+}
+
+func realPath(p string) string {
+	r, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return filepath.Clean(p)
+	}
+	return r
 }
 
 func mustGetwd() string {

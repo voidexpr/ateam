@@ -52,7 +52,11 @@ func AutoInitProject(ateamRoot, sourceDir, relPath string, agentIDs []string) (s
 	if err != nil {
 		relSourceDir = sourceDir
 	}
-	cfg := config.DefaultConfig(name, relSourceDir, agentIDs)
+	agentMap := make(map[string]string, len(agentIDs))
+	for _, id := range agentIDs {
+		agentMap[id] = "enabled"
+	}
+	cfg := config.DefaultConfig(name, relSourceDir, agentMap)
 	if err := config.Save(projectDir, cfg); err != nil {
 		return "", err
 	}
