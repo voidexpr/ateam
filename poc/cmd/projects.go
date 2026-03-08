@@ -41,12 +41,12 @@ func runProjects(cmd *cobra.Command, args []string) error {
 	}
 
 	type projectRow struct {
-		name, path, gitRepo, gitRemote string
+		name, path, uuid, gitRepo, gitRemote string
 	}
 
 	var rows []projectRow
 
-	for _, relPath := range orgCfg.Projects {
+	for uuid, relPath := range orgCfg.Projects {
 		projectDir := filepath.Join(orgRoot, relPath, root.ProjectDirName)
 		cfg, loadErr := config.Load(projectDir)
 		if loadErr != nil {
@@ -55,6 +55,7 @@ func runProjects(cmd *cobra.Command, args []string) error {
 		rows = append(rows, projectRow{
 			name:      cfg.Project.Name,
 			path:      relPath,
+			uuid:      uuid,
 			gitRepo:   cfg.Git.Repo,
 			gitRemote: cfg.Git.RemoteOriginURL,
 		})
@@ -66,9 +67,9 @@ func runProjects(cmd *cobra.Command, args []string) error {
 	}
 
 	w := newTable()
-	fmt.Fprintln(w, "NAME\tPATH\tGIT REPO\tGIT REMOTE")
+	fmt.Fprintln(w, "NAME\tPATH\tUUID\tGIT REPO\tGIT REMOTE")
 	for _, r := range rows {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.name, r.path, r.gitRepo, r.gitRemote)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.name, r.path, r.uuid, r.gitRepo, r.gitRemote)
 	}
 	w.Flush()
 
