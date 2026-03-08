@@ -1,0 +1,51 @@
+package cmd
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"text/tabwriter"
+	"time"
+)
+
+func newTable() *tabwriter.Writer {
+	return tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+}
+
+func relPath(cwd, path string) string {
+	rel, err := filepath.Rel(cwd, path)
+	if err != nil {
+		return path
+	}
+	return rel
+}
+
+func fmtCost(cost float64) string {
+	if cost <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("$%.2f", cost)
+}
+
+func fmtInt(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+func fmtDateAge(t time.Time) string {
+	date := t.Format("01/02")
+	age := time.Since(t)
+	switch {
+	case age < time.Minute:
+		return date + " (just now)"
+	case age < time.Hour:
+		return fmt.Sprintf("%s (%dm ago)", date, int(age.Minutes()))
+	case age < 24*time.Hour:
+		return fmt.Sprintf("%s (%dh ago)", date, int(age.Hours()))
+	default:
+		days := int(age.Hours()) / 24
+		return fmt.Sprintf("%s (%dd ago)", date, days)
+	}
+}

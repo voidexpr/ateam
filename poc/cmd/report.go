@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/ateam-poc/internal/gitutil"
 	"github.com/ateam-poc/internal/prompts"
@@ -79,18 +77,25 @@ func runReport(cmd *cobra.Command, args []string) error {
 	timeout := env.Config.Report.EffectiveTimeout(reportTimeout)
 	reportType := "full"
 
-	var tasks []runner.AgentTask
+	cr := &runner.ClaudeRunner{}
+	var tasks []runner.PoolTask
 	for _, agentID := range agentIDs {
 		prompt, err := prompts.AssembleAgentPrompt(env.OrgDir, env.ProjectDir, agentID, env.SourceDir, extraPrompt, meta)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", agentID, err)
 			continue
 		}
-		tasks = append(tasks, runner.AgentTask{
-			AgentID:    agentID,
-			Prompt:     prompt,
-			OutputFile: env.AgentReportPath(agentID, reportType),
-			WorkDir:    env.SourceDir,
+		agentDir := filepath.Join(env.ProjectDir, "agents", agentID)
+		tasks = append(tasks, runner.PoolTask{
+			Prompt: prompt,
+			RunOpts: runner.RunOpts{
+				AgentID:              agentID,
+				OutputDir:            agentDir,
+				LastMessageFilePath:  env.AgentReportPath(agentID, reportType),
+				ErrorMessageFilePath: filepath.Join(agentDir, prompts.FullReportErrorFile),
+				WorkDir:              env.SourceDir,
+				TimeoutMin:           timeout,
+			},
 		})
 	}
 
@@ -119,59 +124,39 @@ func runReport(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	ctx := context.Background()
-	results := runner.RunPool(ctx, tasks, env.Config.Report.MaxParallel, timeout)
+	results := runner.RunPool(ctx, cr, tasks, env.Config.Report.MaxParallel, nil)
+
+	cwd, _ := os.Getwd()
 
 	var succeeded, failed int
+	w := newTable()
+	fmt.Fprintln(w, "AGENT\tENDED_AT\tELAPSED\tCOST\tTURNS\tSTATUS\tPATH")
 	for _, r := range results {
-		reportPath := env.AgentReportPath(r.AgentID, reportType)
-		agentDir := filepath.Dir(reportPath)
-		if r.Result.Err != nil {
-			fmt.Printf("  %-25s FAILED  (%s) — %v\n", r.AgentID, runner.FormatDuration(r.Result.Duration), r.Result.Err)
+		endedAt := r.EndedAt.Format("15:04:05")
+		elapsed := runner.FormatDuration(r.Duration)
+		cost := fmtCost(r.Cost)
+		turns := fmtInt(r.Turns)
 
-			// Write brief marker to the report file
-			errorReport := fmt.Sprintf("# Report Failed: %s\n\nError: %v\n\nDuration: %s\n",
-				r.AgentID, r.Result.Err, runner.FormatDuration(r.Result.Duration))
-			_ = os.WriteFile(reportPath, []byte(errorReport), 0644)
-
-			// Write detailed error log
-			errorLogPath := filepath.Join(agentDir, prompts.FullReportErrorFile)
-			var detail strings.Builder
-			fmt.Fprintf(&detail, "# Report Error: %s\n\n", r.AgentID)
-			fmt.Fprintf(&detail, "**Time:** %s\n\n", time.Now().Format("2006-01-02 15:04:05"))
-			fmt.Fprintf(&detail, "**Duration:** %s\n\n", runner.FormatDuration(r.Result.Duration))
-			fmt.Fprintf(&detail, "**Error:** %v\n\n", r.Result.Err)
-			fmt.Fprintf(&detail, "**Work Dir:** %s\n\n", env.SourceDir)
-			if r.Result.Stderr != "" {
-				fmt.Fprintf(&detail, "## Stderr\n\n```\n%s\n```\n", r.Result.Stderr)
+		if r.Err != nil {
+			errorPath := filepath.Join(filepath.Dir(r.StreamFilePath), prompts.FullReportErrorFile)
+			if _, err := os.Stat(errorPath); err != nil {
+				errorPath = r.StderrFilePath
 			}
-			if r.Result.Output != "" {
-				fmt.Fprintf(&detail, "\n## Stdout\n\n```\n%s\n```\n", r.Result.Output)
-			}
-			_ = os.WriteFile(errorLogPath, []byte(detail.String()), 0644)
-
-			// Show last lines of stderr/stdout for quick diagnosis
-			if r.Result.Stderr != "" {
-				fmt.Printf("    stderr (last lines):\n")
-				printLastLines(r.Result.Stderr, 5)
-			}
-			if r.Result.Output != "" {
-				fmt.Printf("    stdout (last lines):\n")
-				printLastLines(r.Result.Output, 5)
-			}
-			fmt.Printf("    details: %s\n", errorLogPath)
-			fmt.Printf("    logs:    %s/last_run_{stdout,stderr}.log\n", agentDir)
-
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\tERROR\t%s\n",
+				r.AgentID, endedAt, elapsed, cost, turns, relPath(cwd, errorPath))
 			failed++
 		} else {
-			producedAt := time.Now().Format("2006-01-02 15:04")
-			fmt.Printf("  %-25s OK      (%s, produced at %s)\n", r.AgentID, runner.FormatDuration(r.Result.Duration), producedAt)
+			reportPath := env.AgentReportPath(r.AgentID, reportType)
 			historyDir := env.AgentHistoryDir(r.AgentID)
 			if err := runner.ArchiveFile(reportPath, historyDir, reportType+"_report.md"); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not archive report for %s: %v\n", r.AgentID, err)
 			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\tOK\t%s\n",
+				r.AgentID, endedAt, elapsed, cost, turns, relPath(cwd, reportPath))
 			succeeded++
 		}
 	}
+	w.Flush()
 
 	fmt.Printf("\n%d succeeded, %d failed\n", succeeded, failed)
 	if failed == 0 && succeeded > 0 {
@@ -180,23 +165,13 @@ func runReport(cmd *cobra.Command, args []string) error {
 
 	if reportPrint && succeeded > 0 {
 		for _, r := range results {
-			if r.Result.Err != nil {
+			if r.Err != nil {
 				continue
 			}
-			fmt.Printf("\n══════ %s ══════\n\n%s\n", r.AgentID, r.Result.Output)
+			fmt.Printf("\n══════ %s ══════\n\n%s\n", r.AgentID, r.Output)
 		}
 	}
 
 	return nil
 }
 
-func printLastLines(s string, n int) {
-	lines := strings.Split(strings.TrimSpace(s), "\n")
-	start := 0
-	if len(lines) > n {
-		start = len(lines) - n
-	}
-	for _, line := range lines[start:] {
-		fmt.Printf("      %s\n", line)
-	}
-}

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"text/tabwriter"
 
 	"github.com/ateam-poc/internal/root"
 	"github.com/spf13/cobra"
@@ -60,7 +59,7 @@ func runProjects(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	w := newTable()
 	fmt.Fprintln(w, "NAME\tPATH\tGIT REPO\tGIT REMOTE")
 	for _, r := range rows {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.name, r.path, r.gitRepo, r.gitRemote)

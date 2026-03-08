@@ -5,41 +5,32 @@ import (
 	"sync"
 )
 
-// AgentTask represents a unit of work for the worker pool.
-type AgentTask struct {
-	AgentID    string
-	Prompt     string
-	OutputFile string
-	WorkDir    string
-}
-
-// PoolResult pairs an agent ID with its run result.
-type PoolResult struct {
-	AgentID string
-	Result  RunResult
+// PoolTask pairs a prompt with its run options for the worker pool.
+type PoolTask struct {
+	Prompt string
+	RunOpts
 }
 
 // RunPool executes tasks in parallel with a maximum concurrency limit.
 // It returns results in completion order.
-func RunPool(ctx context.Context, tasks []AgentTask, maxParallel, timeoutMinutes int) []PoolResult {
+func RunPool(ctx context.Context, cr *ClaudeRunner, tasks []PoolTask, maxParallel int, progress chan<- RunProgress) []RunSummary {
 	sem := make(chan struct{}, maxParallel)
 	var mu sync.Mutex
-	var results []PoolResult
+	var results []RunSummary
 	var wg sync.WaitGroup
 
 	for _, task := range tasks {
 		wg.Add(1)
 		sem <- struct{}{} // acquire slot
 
-		go func(t AgentTask) {
+		go func(t PoolTask) {
 			defer wg.Done()
 			defer func() { <-sem }() // release slot
 
-			result := RunClaude(ctx, t.Prompt, t.OutputFile, t.WorkDir, timeoutMinutes)
-			result.AgentID = t.AgentID
+			summary := cr.Run(ctx, t.Prompt, t.RunOpts, progress)
 
 			mu.Lock()
-			results = append(results, PoolResult{AgentID: t.AgentID, Result: result})
+			results = append(results, summary)
 			mu.Unlock()
 		}(task)
 	}
