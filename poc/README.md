@@ -12,6 +12,36 @@ A Go CLI that manages role-specific AI agents to analyze codebases and produce a
 - **Stream-json output** — real-time JSONL stream capture with cost/token tracking
 - **Report archiving** — timestamped history of all prompts, reports, and reviews
 
+## Workflow
+
+You run 'ateam init' within a directory or at the base of a git repo (either your main work area or a separate checkout), it will create a .ateam/ project directory where configuration and reports will be stored as well as logs. You can either add it to your .gitignore or version prompts and reports but ignore runtime files:
+
+  Ignore all:
+
+    **/.ateam/
+
+  Ignore runtime files:
+
+    **/.ateam/**/*.log
+    **/.ateam/**/*.jsonl
+
+Then the current workflow is to manually commission reports:
+
+  ateam report --agents CHOOSE_SOME_AGENTS
+
+Summarize then in a review:
+
+  ateam review --print
+
+(Soon) code the changes:
+
+  ateam code
+
+(Soon) do it all at once:
+
+  ateam craft --agents CHOOSE_SOME_AGENTS
+
+
 ## Prerequisites
 
 - Go 1.23+
