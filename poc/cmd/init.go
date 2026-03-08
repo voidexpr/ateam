@@ -50,11 +50,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 	absPath = evalSymlinks(absPath)
 
-	cwd, err := os.Getwd()
+	cwd, err := resolvedCwd()
 	if err != nil {
-		return fmt.Errorf("cannot get working directory: %w", err)
+		return err
 	}
-	cwd = evalSymlinks(cwd)
 
 	orgDir, err := root.FindOrg(cwd)
 	if err != nil {
@@ -123,7 +122,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		displayGit, _ = filepath.Rel(orgRoot, gitTopLevel)
 	}
 
-	fmt.Printf("     Org: %s\n", relOrg)
+	fmt.Printf("     Org: %s (%s)\n", relOrg, tildeHome(orgRoot))
 	fmt.Printf("    Name: %s\n", name)
 	if displayGit != "" {
 		fmt.Printf("     Git: %s\n", displayGit)
@@ -147,6 +146,14 @@ func execGitCmd(dir string, gitArgs ...string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func resolvedCwd() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("cannot get working directory: %w", err)
+	}
+	return evalSymlinks(cwd), nil
 }
 
 func evalSymlinks(p string) string {

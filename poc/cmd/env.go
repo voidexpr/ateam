@@ -12,22 +12,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var envAbsolute bool
-
 var envCmd = &cobra.Command{
 	Use:   "env",
 	Short: "Show the current ATeam environment",
 	Long: `Print organization, project status, and latest report/review timestamps.
 
-This command is read-only — it never creates or modifies anything.
-
-Use --absolute to show fully resolved paths instead of relative ones.`,
+This command is read-only — it never creates or modifies anything.`,
 	Args: cobra.NoArgs,
 	RunE: runEnv,
-}
-
-func init() {
-	envCmd.Flags().BoolVar(&envAbsolute, "absolute", false, "show absolute paths instead of relative")
 }
 
 func runEnv(cmd *cobra.Command, args []string) error {
@@ -37,33 +29,22 @@ func runEnv(cmd *cobra.Command, args []string) error {
 	}
 
 	orgRoot := env.OrgRoot()
-
-	if envAbsolute {
-		fmt.Printf("     Org: %s\n", orgRoot)
-	} else {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("cannot get working directory: %w", err)
-		}
-		cwd = evalSymlinks(cwd)
-		relOrg, _ := filepath.Rel(cwd, orgRoot)
-		fmt.Printf("     Org: %s\n", relOrg)
+	cwd, err := resolvedCwd()
+	if err != nil {
+		return err
 	}
+
+	relOrg, _ := filepath.Rel(cwd, orgRoot)
+	fmt.Printf("     Org: %s (%s)\n", relOrg, tildeHome(orgRoot))
 
 	if env.ProjectDir == "" {
-		fmt.Printf("    Name: (not initialized)\n")
 		return nil
-	}
-
-	displayPath := env.RelPath
-	if envAbsolute {
-		displayPath = func(p string) string { return p }
 	}
 
 	fmt.Printf("    Name: %s\n", env.ProjectName)
 
 	if env.GitRepoDir != "" {
-		fmt.Printf("     Git: %s\n", displayPath(env.GitRepoDir))
+		fmt.Printf("     Git: %s (%s)\n", env.RelPath(env.GitRepoDir), tildeHome(env.GitRepoDir))
 	}
 	if env.Config != nil && env.Config.Git.RemoteOriginURL != "" {
 		fmt.Printf("  Remote: %s\n", env.Config.Git.RemoteOriginURL)
@@ -75,44 +56,59 @@ func runEnv(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  Agents: %s\n", strings.Join(agents, ", "))
 
 			fmt.Println()
-			fmt.Println("Reports:")
+			fmt.Printf("  %-25s %-20s %s\n", "AGENT", "LAST", "PATH")
 			for _, agentID := range agents {
 				reportPath := filepath.Join(env.ProjectDir, "agents", agentID, prompts.FullReportFile)
-				printFileAge(reportPath, agentID, env.ProjectDir)
+				printReportRow(reportPath, agentID, cwd)
 			}
 		}
 	}
 
 	reviewPath := filepath.Join(env.ProjectDir, "supervisor", "review.md")
 	if fi, err := os.Stat(reviewPath); err == nil {
-		fmt.Println()
-		rel, _ := filepath.Rel(env.ProjectDir, reviewPath)
-		fmt.Printf("  Review: %s  (%s)\n", rel, formatAge(fi.ModTime()))
+		relPath, _ := filepath.Rel(cwd, reviewPath)
+		fmt.Printf("  %-25s %-20s %s\n", "review", formatDateAge(fi.ModTime()), relPath)
 	}
 
 	return nil
 }
 
-func printFileAge(path, label, relativeTo string) {
-	fi, err := os.Stat(path)
-	if err != nil {
-		fmt.Printf("  %-25s (no report)\n", label)
-		return
+func tildeHome(p string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return p
 	}
-	rel, _ := filepath.Rel(relativeTo, path)
-	fmt.Printf("  %-25s %s  %s\n", label, formatAge(fi.ModTime()), rel)
+	if p == home {
+		return "~"
+	}
+	if strings.HasPrefix(p, home+string(filepath.Separator)) {
+		return "~" + p[len(home):]
+	}
+	return p
 }
 
-func formatAge(t time.Time) string {
+func printReportRow(path, label, cwd string) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		fmt.Printf("  %-25s -\n", label)
+		return
+	}
+	relPath, _ := filepath.Rel(cwd, path)
+	fmt.Printf("  %-25s %-20s %s\n", label, formatDateAge(fi.ModTime()), relPath)
+}
+
+func formatDateAge(t time.Time) string {
+	date := t.Format("01/02")
 	age := time.Since(t)
 	switch {
 	case age < time.Minute:
-		return "just now"
+		return date + " (just now)"
 	case age < time.Hour:
-		return fmt.Sprintf("%dm ago", int(age.Minutes()))
+		return fmt.Sprintf("%s (%dm ago)", date, int(age.Minutes()))
 	case age < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(age.Hours()))
+		return fmt.Sprintf("%s (%dh ago)", date, int(age.Hours()))
 	default:
-		return t.Format("2006-01-02 15:04")
+		days := int(age.Hours()) / 24
+		return fmt.Sprintf("%s (%dd ago)", date, days)
 	}
 }

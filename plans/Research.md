@@ -1308,6 +1308,75 @@ The **hooks system** is worth layering on top for project-specific blocking rule
 
 Running agents without approval prompts requires sandboxing — if you can't trust the agent to stay in its box, you need to watch every move. The goal is to make the box tight enough that `--dangerously-skip-permissions` (or the sandbox auto-allow mode) becomes genuinely safe, not just "YOLO." This section reviews the available approaches through three dimensions that matter for ATeam: filesystem isolation, network control, and remote session access.
 
+### E.0 Claude Code sandbox
+
+Limitations:
+* still need to approve network requests
+* reduces bash approval but not complete
+* sandbox might block file access from tools and make them fail
+    * docker might be a better way
+* clear security risks:
+    * data exfiltration
+
+Known sandbox quirks worth noting for ATeam:
+* The sandbox blocks .git access broadly — not just the repository directory, but .git marker files anywhere. This can affect tools whose caches contain .git marker files. Antisimplistic Blog
+* Bash heredoc syntax (<< EOF) fails in the sandbox — the shell needs to create a temp file for the here document and the sandbox blocks it, even with TMPDIR pointed at an allowed path. Antisimplistic Blog
+* The allowUnixSockets configuration can inadvertently grant access to powerful system services. For example, allowing access to /var/run/docker.sock would effectively grant access to the host system through the Docker socket. Claude
+
+Can be used with /sandbox or pass a custom settings.json file (I think this involves merging with the local one to preserve local config).
+
+```bash
+cat sandbox_enabled.json
+{
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true
+  }
+}
+claude -p --settings sandbox_enabled.json "delete file foobar"
+The file `foobar` exists (empty file). Shall I go ahead and delete it?
+```
+
+You can pass a settings file to Claude Code using the --settings flag.
+
+Basic usage
+
+claude -p --settings settings.local.json
+
+With a path
+
+claude -p --settings ./config/settings.local.json
+
+Example unattended run
+
+claude -p \
+  --settings settings.local.json \
+  --dangerously-skip-permissions \
+  "review the repo and propose improvements"
+
+Notes
+    •   --settings replaces the default ~/.claude/settings.json for that run.
+    •   The file can include things like:
+    •   sandbox
+    •   permissions
+    •   hooks
+    •   env
+    •   This is commonly used in automation so CI/agents don’t depend on a user’s home directory config.
+
+Useful pattern for agent runners
+
+Many setups do something like:
+
+WORKDIR=/workspace/task-123
+
+claude -p \
+  --settings "$WORKDIR/settings.local.json" \
+  --dangerously-skip-permissions \
+  --cwd "$WORKDIR" \
+  "$PROMPT"
+
+so each workspace/worktree has its own sandbox policy.
+
 ### E.1 The Three Dimensions
 
 **Filesystem access** needs nuance. A code analysis agent needs read access to the project it's working on, read/write to its own working directory, and access to toolchain paths (`~/.npm`, `~/.cache`, `/usr/local`, etc.) and `~/.claude` for Claude Code to function. It should NOT have access to `~/.ssh`, `~/.aws`, `~/.gnupg`, other project directories, or anything outside its scope. The hard part is that "normal tool usage" (node, npm, go, pip, cargo) requires scattered filesystem access — you can't just mount one directory.

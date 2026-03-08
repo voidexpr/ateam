@@ -1,5 +1,31 @@
 # Overview
 
+## PENDING TODO
+
+
+Core principles:
+* Coding agents make the right fundamental tradeoff: implement a working feature when asked. They do not invest too much time on in-depth software engineering.
+* Agents are good at finding issues in project structure and code
+* human attention needs to be optimized for, currently agents require too many approvals
+* feature work requires human involvement but software engineering quality can be prompted once and adapt to the size and velocity of the project and therefore could be operating in the background as feature work settles
+
+But when the dust settle after feature work we'd like coding agents to work in the background improving the over software quality: testing, refactoring, security, documentation, dependency management, etc ...
+
+
+Solution
+* background sub agents not requiring permissions perform audits
+* a supervisor reviews all audits and decides on the work to do
+* sandboxed agents not requiring approval code the changes
+* the supervisor merge all changes, makes sure tests pass and push the changes to the main repo
+* require no human attention
+  * if anything fails humans can decide to troubleshoot or just ignore
+
+Strategy
+* prompting of sub agents is done to be pragmatic and not over do work
+* the supervisor can decide to notify of issues but is instructed to be conservative
+
+
+* Agents are optimized to implement the feature requested. They can't simultaneously move fast on feature work and attend to everything else a healthy project demands: testing, security, documentation, refactoring at every scale, dependency hygiene, and more.
 ## Motivation
 
 ATeam tackles the core issue of agentic coding: how to iterate fast on features while maintaining good software quality. We want to avoid quick feature turnaround resulting in a codebase that crumbles under its own complexity where any new feature breaks existing logic.
@@ -7,12 +33,6 @@ ATeam tackles the core issue of agentic coding: how to iterate fast on features 
 Agents are very good at finding issues in code and producing tests, so why should humans spend attention on a codebase they may never contribute to? Developers should focus on the big picture: what the project does and how features should work, not how the engineering is performed.
 
 Coding agents make the right fundamental tradeoff: implement a working feature when asked. They do not invest too much time on in-depth software engineering. But when the dust settle after feature work we'd like coding agents to work in the background improving the over software quality: testing, refactoring, security, documentation, dependency management, etc ...
-
-Core principles:
-* Agents are optimized for one thing: implementing the feature in front of them. They can't simultaneously move fast on feature work and attend to everything else a healthy project demands: testing, security, documentation, refactoring at every scale, dependency hygiene, and more.
-* Agents are good at finding issues in project structure and code
-* human attention needs to be optimized for, currently agents require too many approvals
-* feature work requires human involvement but software engineering quality can be prompted once and adapt to the size and velocity of the project and therefore could be operating in the background as feature work settles
 
 ## The Idea
 

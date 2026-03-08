@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -14,6 +15,7 @@ import (
 type RunResult struct {
 	AgentID  string
 	Output   string
+	Stderr   string
 	Duration time.Duration
 	Err      error
 }
@@ -42,16 +44,18 @@ func RunClaude(ctx context.Context, prompt, outputFile, workDir string, timeoutM
 		cmd.Dir = workDir
 	}
 	cmd.Stdout = outFile
-	cmd.Stderr = os.Stderr
+	var stderrBuf bytes.Buffer
+	cmd.Stderr = &stderrBuf
 
 	err = cmd.Run()
 	duration := time.Since(start)
+	stderr := strings.TrimSpace(stderrBuf.String())
 
 	if ctx.Err() == context.DeadlineExceeded {
-		return RunResult{Err: fmt.Errorf("timed out after %d minutes", timeoutMinutes), Duration: duration}
+		return RunResult{Err: fmt.Errorf("timed out after %d minutes", timeoutMinutes), Stderr: stderr, Duration: duration}
 	}
 	if err != nil {
-		return RunResult{Err: fmt.Errorf("claude exited with error: %w", err), Duration: duration}
+		return RunResult{Err: fmt.Errorf("claude exited with error: %w", err), Stderr: stderr, Duration: duration}
 	}
 
 	// Read back output for the result
