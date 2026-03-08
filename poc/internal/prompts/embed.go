@@ -16,7 +16,7 @@ type PromptDiff struct {
 	Status  string // "changed", "missing"
 }
 
-//go:embed defaults/agents/*/report_prompt.md defaults/report_instructions.md defaults/supervisor/review_prompt.md
+//go:embed defaults/agents/*/report_prompt.md defaults/report_prompt.md defaults/supervisor/review_prompt.md defaults/supervisor/report_commissioning_prompt.md defaults/code_prompt.md
 var defaultsFS embed.FS
 
 // AllAgentIDs is the sorted list of agent IDs discovered from embedded prompt files.
@@ -82,12 +82,20 @@ func DefaultAgentPrompt(agentID string) string {
 	return readEmbedded(fmt.Sprintf("defaults/agents/%s/report_prompt.md", agentID))
 }
 
-func DefaultReportInstructions() string {
-	return readEmbedded("defaults/report_instructions.md")
+func DefaultReportPrompt() string {
+	return readEmbedded("defaults/report_prompt.md")
 }
 
-func DefaultSupervisorPrompt() string {
+func DefaultCodePrompt() string {
+	return readEmbedded("defaults/code_prompt.md")
+}
+
+func DefaultSupervisorReviewPrompt() string {
 	return readEmbedded("defaults/supervisor/review_prompt.md")
+}
+
+func DefaultSupervisorCommissioningPrompt() string {
+	return readEmbedded("defaults/supervisor/report_commissioning_prompt.md")
 }
 
 type embeddedFile struct {
@@ -103,14 +111,30 @@ func embeddedFiles() []embeddedFile {
 			filepath.Join("defaults", "agents", id, ReportPromptFile),
 			DefaultAgentPrompt(id),
 		})
+		// Include per-agent code_prompt.md if present in the embedded FS.
+		codePath := fmt.Sprintf("defaults/agents/%s/%s", id, CodePromptFile)
+		if data, err := defaultsFS.ReadFile(codePath); err == nil {
+			files = append(files, embeddedFile{
+				filepath.Join("defaults", "agents", id, CodePromptFile),
+				string(data),
+			})
+		}
 	}
 	files = append(files, embeddedFile{
-		filepath.Join("defaults", ReportInstructionsFile),
-		DefaultReportInstructions(),
+		filepath.Join("defaults", ReportPromptFile),
+		DefaultReportPrompt(),
+	})
+	files = append(files, embeddedFile{
+		filepath.Join("defaults", CodePromptFile),
+		DefaultCodePrompt(),
 	})
 	files = append(files, embeddedFile{
 		filepath.Join("defaults", "supervisor", ReviewPromptFile),
-		DefaultSupervisorPrompt(),
+		DefaultSupervisorReviewPrompt(),
+	})
+	files = append(files, embeddedFile{
+		filepath.Join("defaults", "supervisor", ReportCommissioningPromptFile),
+		DefaultSupervisorCommissioningPrompt(),
 	})
 	return files
 }

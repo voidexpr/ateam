@@ -11,11 +11,12 @@ import (
 )
 
 const (
-	ReportPromptFile      = "report_prompt.md"
-	ReportInstructionsFile = "report_instructions.md"
-	ExtraReportPromptFile = "extra_report_prompt.md"
-	ReviewPromptFile      = "review_prompt.md"
-	FullReportFile        = "full_report.md"
+	ReportPromptFile                = "report_prompt.md"
+	CodePromptFile                  = "code_prompt.md"
+	ExtraReportPromptFile           = "extra_report_prompt.md"
+	ReviewPromptFile                = "review_prompt.md"
+	ReportCommissioningPromptFile   = "report_commissioning_prompt.md"
+	FullReportFile                  = "full_report.md"
 )
 
 // ResolveValue handles the @filename convention:
@@ -56,7 +57,7 @@ func AssembleAgentPrompt(ateamRoot, projectDir, agentID, sourceDir, extraPrompt 
 	}
 
 	instructions := readFileOr(
-		filepath.Join(ateamRoot, "defaults", ReportInstructionsFile),
+		filepath.Join(ateamRoot, "defaults", ReportPromptFile),
 		"",
 	)
 
