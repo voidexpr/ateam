@@ -44,8 +44,7 @@ func ResolveOptional(value string) (string, error) {
 }
 
 // AssembleAgentPrompt builds the full prompt for an agent run.
-// Resolution order for role prompt: project → org agents → org defaults.
-// Report instructions always come from org defaults.
+// Resolution order for both role prompt and global instructions: project → org → org defaults.
 // meta is optional — if nil, git metadata is omitted from the prompt.
 func AssembleAgentPrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, meta *gitutil.ProjectMeta) (string, error) {
 	rolePrompt, err := readWith3LevelFallback(
@@ -58,9 +57,10 @@ func AssembleAgentPrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt str
 		return "", err
 	}
 
-	instructions := readFileOr(
+	instructions := readFileOr3Level(
+		filepath.Join(projectDir, ReportPromptFile),
+		filepath.Join(orgDir, ReportPromptFile),
 		filepath.Join(orgDir, "defaults", ReportPromptFile),
-		"",
 	)
 
 	promptContent := rolePrompt
@@ -175,7 +175,7 @@ func AssembleReviewPrompt(orgDir, projectDir string, meta *gitutil.ProjectMeta, 
 
 	supervisorPrompt, err := readWith3LevelFallback(
 		filepath.Join(projectDir, "supervisor", ReviewPromptFile),
-		filepath.Join(orgDir, "agents", "supervisor", ReviewPromptFile),
+		filepath.Join(orgDir, "supervisor", ReviewPromptFile),
 		filepath.Join(orgDir, "defaults", "supervisor", ReviewPromptFile),
 		"supervisor",
 	)
@@ -209,13 +209,14 @@ func readWith3LevelFallback(projectPath, orgPath, defaultPath, label string) (st
 	return "", fmt.Errorf("no prompt found for %s (checked %s, %s, and %s)", label, projectPath, orgPath, defaultPath)
 }
 
-// readFileOr reads a file or returns fallback if it can't be read.
-func readFileOr(path, fallback string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return fallback
+// readFileOr3Level tries three paths and returns the first one that exists, or "" if none do.
+func readFileOr3Level(projectPath, orgPath, defaultPath string) string {
+	for _, p := range []string{projectPath, orgPath, defaultPath} {
+		if data, err := os.ReadFile(p); err == nil {
+			return string(data)
+		}
 	}
-	return string(data)
+	return ""
 }
 
 // WriteIfNotExists writes content to path only if the file does not already exist.
