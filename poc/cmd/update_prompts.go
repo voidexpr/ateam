@@ -49,7 +49,7 @@ func runUpdatePrompts(cmd *cobra.Command, args []string) error {
 }
 
 func updatePrompts(ateamRoot string) error {
-	diffs := prompts.DiffRootDefaults(ateamRoot)
+	diffs := prompts.DiffOrgDefaults(ateamRoot)
 	if len(diffs) == 0 {
 		fmt.Println("All prompts are up to date.")
 		return nil
@@ -61,7 +61,7 @@ func updatePrompts(ateamRoot string) error {
 	}
 	fmt.Println()
 
-	if err := prompts.WriteRootDefaults(ateamRoot, true); err != nil {
+	if err := prompts.WriteOrgDefaults(ateamRoot, true); err != nil {
 		return err
 	}
 

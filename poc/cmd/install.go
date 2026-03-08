@@ -52,7 +52,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		if _, err := os.Stat(ateamRoot); os.IsNotExist(err) {
 			return fmt.Errorf(".ateam/ does not exist at %s — run 'ateam install' first", parentDir)
 		}
-		if err := prompts.WriteRootDefaults(ateamRoot, true); err != nil {
+		if err := prompts.WriteOrgDefaults(ateamRoot, true); err != nil {
 			return err
 		}
 		fmt.Printf("Updated default prompts in %s\n", ateamRoot)
