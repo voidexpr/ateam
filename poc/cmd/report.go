@@ -63,7 +63,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := root.EnsureAgents(env.ProjectDir, agentIDs); err != nil {
+	if err := root.EnsureAgents(env.ProjectDir, env.StateDir, agentIDs); err != nil {
 		return err
 	}
 
@@ -90,7 +90,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 			Prompt: prompt,
 			RunOpts: runner.RunOpts{
 				AgentID:              agentID,
-				OutputDir:            agentDir,
+				OutputDir:            env.AgentLogsDir(agentID, "report"),
 				LastMessageFilePath:  env.AgentReportPath(agentID, reportType),
 				ErrorMessageFilePath: filepath.Join(agentDir, prompts.FullReportErrorFile),
 				WorkDir:              env.SourceDir,

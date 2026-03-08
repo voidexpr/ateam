@@ -19,8 +19,10 @@ type ResolvedEnv struct {
 	OrgDir      string         // absolute path to .ateamorg/
 	ProjectDir  string         // absolute path to .ateam/
 	ProjectName string         // from config.toml
+	ProjectUUID string         // from config.toml
 	SourceDir   string         // absolute path to project root (parent of .ateam/)
 	GitRepoDir  string         // resolved from config git.repo
+	StateDir    string         // .ateamorg/projects/<UUID>/ (empty if no UUID)
 	Config      *config.Config
 }
 
@@ -41,7 +43,22 @@ func (e *ResolvedEnv) ReviewHistoryDir() string {
 }
 
 func (e *ResolvedEnv) RunnerLogPath() string {
+	if e.StateDir != "" {
+		return filepath.Join(e.StateDir, "runner.log")
+	}
 	return filepath.Join(e.ProjectDir, "logs", "runner.log")
+}
+
+func (e *ResolvedEnv) AgentLogsDir(agentID, action string) string {
+	return filepath.Join(e.StateDir, "agents", agentID, "logs", action)
+}
+
+func (e *ResolvedEnv) SupervisorLogsDir(action string) string {
+	return filepath.Join(e.StateDir, "supervisor", "logs", action)
+}
+
+func (e *ResolvedEnv) AgentWorkspacesDir(agentID string) string {
+	return filepath.Join(e.StateDir, "agents", agentID, "workspaces")
 }
 
 // OrgRoot returns the parent directory of .ateamorg.
@@ -65,9 +82,13 @@ func (e *ResolvedEnv) RelPath(absPath string) string {
 func (e *ResolvedEnv) populateFromConfig(projectDir string, cfg *config.Config) {
 	e.Config = cfg
 	e.ProjectName = cfg.Project.Name
+	e.ProjectUUID = cfg.Project.UUID
 	e.SourceDir = filepath.Dir(projectDir) // project root = parent of .ateam/
 	if cfg.Git.Repo != "" {
 		e.GitRepoDir = resolvePath(e.SourceDir, cfg.Git.Repo)
+	}
+	if cfg.Project.UUID != "" {
+		e.StateDir = filepath.Join(e.OrgDir, "projects", cfg.Project.UUID)
 	}
 }
 
@@ -152,6 +173,10 @@ func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
 		ProjectDir: projectDir,
 	}
 	env.populateFromConfig(projectDir, cfg)
+
+	if env.ProjectUUID == "" {
+		return nil, fmt.Errorf("project missing project_uuid — re-run 'ateam init' or add project_uuid to config.toml")
+	}
 
 	return env, nil
 }

@@ -14,16 +14,15 @@ A Go CLI that manages role-specific AI agents to analyze codebases and produce a
 
 ## Workflow
 
-You run 'ateam init' within a directory or at the base of a git repo (either your main work area or a separate checkout), it will create a .ateam/ project directory where configuration and reports will be stored as well as logs. You can either add it to your .gitignore or version prompts and reports but ignore runtime files:
+You run 'ateam init' within a directory or at the base of a git repo (either your main work area or a separate checkout), it will create a .ateam/ project directory where configuration, prompts and reports are stored. Runtime state (stream logs, stderr captures, runner log) lives in `.ateamorg/projects/<UUID>/`, keeping `.ateam/` safe to version-control.
 
   Ignore all:
 
     **/.ateam/
 
-  Ignore runtime files:
+  Version prompts and reports (runtime state is already outside the repo):
 
-    **/.ateam/**/*.log
-    **/.ateam/**/*.jsonl
+    # nothing to ignore — .ateam/ is clean
 
 Then the current workflow is to manually commission reports:
 
@@ -179,6 +178,8 @@ Created by `ateam install`. Holds shared defaults and org-level overrides.
 
 ```
 .ateamorg/
+  orgconfig.toml                             # project registry (UUID → path)
+  projects/<UUID>/                           # runtime state per project (see below)
   defaults/                                  # embedded prompts written to disk
     report_prompt.md                         # shared report format instructions
     code_prompt.md                           # shared code format instructions
@@ -195,19 +196,17 @@ Created by `ateam install`. Holds shared defaults and org-level overrides.
 
 ### Project: `.ateam/`
 
-Created by `ateam init`. Holds project config, results, and history.
+Created by `ateam init`. Holds project config, prompts, reports, and history (version-controllable).
 
 ```
 .ateam/
-  config.toml                                # project configuration
+  config.toml                                # project configuration (includes project_uuid)
   report_prompt.md                           # project-level report format override (optional)
   agents/<NAME>/
     report_prompt.md                         # project-level agent prompt override (optional)
     extra_report_prompt.md                   # extra instructions for this agent (optional)
     full_report.md                           # latest successful report
     full_report_error.md                     # error details (on failure only)
-    last_run_stream.jsonl                    # raw JSONL stream from last run
-    last_run_stderr.log                      # stderr capture from last run
     history/                                 # timestamped archive
       2026-03-08_1504.full_prompt.md         # archived prompt
       2026-03-08_1504.full_report.md         # archived report
@@ -215,13 +214,24 @@ Created by `ateam init`. Holds project config, results, and history.
     review_prompt.md                         # project-level supervisor override (optional)
     review.md                                # latest successful review
     review_error.md                          # error details (on failure only)
-    last_run_stream.jsonl
-    last_run_stderr.log
     history/
       2026-03-08_1504.review_prompt.md
       2026-03-08_1504.review.md
-  logs/
-    runner.log                               # append-only execution log
+```
+
+### Runtime state: `.ateamorg/projects/<UUID>/`
+
+Runtime files are stored outside the project, keyed by the project's UUID from `config.toml`.
+
+```
+.ateamorg/projects/<UUID>/
+  runner.log                                 # append-only execution log
+  agents/<NAME>/logs/report/
+    last_run_stream.jsonl                    # raw JSONL stream from last run
+    last_run_stderr.log                      # stderr capture from last run
+  supervisor/logs/review/
+    last_run_stream.jsonl
+    last_run_stderr.log
 ```
 
 ### `config.toml`
@@ -229,6 +239,7 @@ Created by `ateam init`. Holds project config, results, and history.
 ```toml
 [project]
 name = "myproject"
+project_uuid = "550e8400-e29b-41d4-a716-446655440000"
 
 [git]
 repo = "."
@@ -317,7 +328,7 @@ Available agents: `automation`, `basic_project_structure`, `critic_engineering`,
 
 ### Runner log
 
-Every `ateam report` and `ateam review` invocation is logged to `.ateam/logs/runner.log`. Each line is tab-separated with quoted fields:
+Every `ateam report` and `ateam review` invocation is logged to `.ateamorg/projects/<UUID>/runner.log`. Each line is tab-separated with quoted fields:
 
 ```
 TIMESTAMP  "AGENT"  "STATUS"  "CWD"  "CLI"  [EXTRA...]
@@ -344,15 +355,15 @@ ateam report --agents security --dry-run    # print the prompt that would be sen
 ateam review --dry-run                      # print prompt and list discovered reports
 ```
 
-When a run fails, inspect these files in the agent's directory:
+When a run fails, inspect these files:
 
-| File | Content |
-|------|---------|
-| `full_report_error.md` | Error summary, exit code, duration, stderr, partial output, token usage |
-| `last_run_stderr.log` | Raw stderr from the `claude` subprocess |
-| `last_run_stream.jsonl` | Raw JSONL event stream (useful for debugging parsing issues) |
+| File | Location | Content |
+|------|----------|---------|
+| `full_report_error.md` | `.ateam/agents/<NAME>/` | Error summary, exit code, duration, stderr, partial output, token usage |
+| `last_run_stderr.log` | `.ateamorg/projects/<UUID>/agents/<NAME>/logs/report/` | Raw stderr from the `claude` subprocess |
+| `last_run_stream.jsonl` | `.ateamorg/projects/<UUID>/agents/<NAME>/logs/report/` | Raw JSONL event stream (useful for debugging parsing issues) |
 
-For the supervisor, the equivalent error file is `supervisor/review_error.md`.
+For the supervisor, the error file is `.ateam/supervisor/review_error.md` and runtime logs are in `.ateamorg/projects/<UUID>/supervisor/logs/review/`.
 
 ### History
 
