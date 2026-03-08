@@ -4,50 +4,77 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/BurntSushi/toml"
 )
 
 const (
-	DefaultMaxParallel              = 3
+	DefaultMaxParallel               = 3
 	DefaultAgentReportTimeoutMinutes = 10
 )
 
 // Config represents the project's config.toml.
 type Config struct {
-	Project   ProjectConfig   `toml:"project"`
-	Agents    AgentsConfig    `toml:"agents"`
-	Execution ExecutionConfig `toml:"execution"`
+	Project ProjectConfig     `toml:"project"`
+	Git     GitConfig         `toml:"git"`
+	Report  ReportConfig      `toml:"report"`
+	Review  ReviewConfig      `toml:"review"`
+	Code    CodeConfig        `toml:"code"`
+	Agents  map[string]string `toml:"agents"`
 }
 
 type ProjectConfig struct {
-	Name      string `toml:"name"`
-	SourceDir string `toml:"source_dir"`
+	Name   string `toml:"name"`
+	Source string `toml:"source"`
 }
 
-type AgentsConfig struct {
-	Enabled []string `toml:"enabled"`
+type GitConfig struct {
+	Repo            string `toml:"repo"`
+	RemoteOriginURL string `toml:"remote_origin_url"`
 }
 
-type ExecutionConfig struct {
-	MaxParallel              int `toml:"max_parallel"`
+type ReportConfig struct {
+	MaxParallel               int `toml:"max_parallel"`
 	AgentReportTimeoutMinutes int `toml:"agent_report_timeout_minutes"`
 }
 
+type ReviewConfig struct{}
+
+type CodeConfig struct{}
+
+// EffectiveTimeout returns the override if positive, otherwise the configured timeout.
+func (r ReportConfig) EffectiveTimeout(override int) int {
+	if override > 0 {
+		return override
+	}
+	return r.AgentReportTimeoutMinutes
+}
+
+// EnabledAgents returns a sorted slice of agent names that have "enabled" status.
+func (c Config) EnabledAgents() []string {
+	var enabled []string
+	for name, status := range c.Agents {
+		if status == "enabled" {
+			enabled = append(enabled, name)
+		}
+	}
+	sort.Strings(enabled)
+	return enabled
+}
+
 // DefaultConfig returns a config with sensible defaults.
-func DefaultConfig(name, sourceDir string, agents []string) Config {
+func DefaultConfig(name, source string, agents map[string]string) Config {
 	return Config{
 		Project: ProjectConfig{
-			Name:      name,
-			SourceDir: sourceDir,
+			Name:   name,
+			Source: source,
 		},
-		Agents: AgentsConfig{
-			Enabled: agents,
-		},
-		Execution: ExecutionConfig{
-			MaxParallel:              DefaultMaxParallel,
+		Report: ReportConfig{
+			MaxParallel:               DefaultMaxParallel,
 			AgentReportTimeoutMinutes: DefaultAgentReportTimeoutMinutes,
 		},
+		Agents: agents,
 	}
 }
 
@@ -62,22 +89,16 @@ func Load(dir string) (*Config, error) {
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("cannot parse config.toml: %w", err)
 	}
-	// Apply defaults for missing values
-	if cfg.Execution.MaxParallel == 0 {
-		cfg.Execution.MaxParallel = DefaultMaxParallel
+	if cfg.Report.MaxParallel == 0 {
+		cfg.Report.MaxParallel = DefaultMaxParallel
 	}
-	if cfg.Execution.AgentReportTimeoutMinutes == 0 {
-		cfg.Execution.AgentReportTimeoutMinutes = DefaultAgentReportTimeoutMinutes
+	if cfg.Report.AgentReportTimeoutMinutes == 0 {
+		cfg.Report.AgentReportTimeoutMinutes = DefaultAgentReportTimeoutMinutes
+	}
+	if cfg.Agents == nil {
+		cfg.Agents = make(map[string]string)
 	}
 	return &cfg, nil
-}
-
-// EffectiveTimeout returns the override if positive, otherwise the configured timeout.
-func (e ExecutionConfig) EffectiveTimeout(override int) int {
-	if override > 0 {
-		return override
-	}
-	return e.AgentReportTimeoutMinutes
 }
 
 // Save writes config.toml to the given directory.
