@@ -87,7 +87,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 	cr := &runner.ClaudeRunner{LogFile: env.RunnerLogPath(), ProjectDir: env.ProjectDir}
 	opts := runner.RunOpts{
 		AgentID:              "supervisor",
-		OutputDir:            reviewDir,
+		OutputDir:            env.SupervisorLogsDir("review"),
 		LastMessageFilePath:  reviewFile,
 		ErrorMessageFilePath: filepath.Join(reviewDir, "review_error.md"),
 		WorkDir:              env.SourceDir,

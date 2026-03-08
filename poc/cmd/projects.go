@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ateam-poc/internal/config"
 	"github.com/ateam-poc/internal/root"
 	"github.com/spf13/cobra"
 )
@@ -32,7 +33,12 @@ func runProjects(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	orgParent := filepath.Dir(orgDir)
+	orgRoot := filepath.Dir(orgDir)
+
+	orgCfg, err := config.LoadOrgConfig(orgDir)
+	if err != nil {
+		return err
+	}
 
 	type projectRow struct {
 		name, path, gitRepo, gitRemote string
@@ -40,19 +46,19 @@ func runProjects(cmd *cobra.Command, args []string) error {
 
 	var rows []projectRow
 
-	_ = root.WalkProjects(orgDir, func(p root.ProjectInfo) error {
-		relPath, _ := filepath.Rel(orgParent, filepath.Dir(p.Dir))
-		if relPath == "" {
-			relPath = "."
+	for _, relPath := range orgCfg.Projects {
+		projectDir := filepath.Join(orgRoot, relPath, root.ProjectDirName)
+		cfg, loadErr := config.Load(projectDir)
+		if loadErr != nil {
+			continue
 		}
 		rows = append(rows, projectRow{
-			name:      p.Config.Project.Name,
+			name:      cfg.Project.Name,
 			path:      relPath,
-			gitRepo:   p.Config.Git.Repo,
-			gitRemote: p.Config.Git.RemoteOriginURL,
+			gitRepo:   cfg.Git.Repo,
+			gitRemote: cfg.Git.RemoteOriginURL,
 		})
-		return nil
-	})
+	}
 
 	if len(rows) == 0 {
 		fmt.Println("No projects found.")

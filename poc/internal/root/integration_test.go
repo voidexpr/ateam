@@ -64,6 +64,10 @@ func TestIntegration_BasicProject(t *testing.T) {
 		t.Errorf("git.remote = %q, want %q", cfg.Git.RemoteOriginURL, "https://foobar/myproj.git")
 	}
 
+	if cfg.Project.UUID == "" {
+		t.Fatal("project_uuid should be set after InitProject")
+	}
+
 	// Verify resolution: source = project path, git = project path.
 	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
 	env.populateFromConfig(projDir, cfg)
@@ -72,6 +76,33 @@ func TestIntegration_BasicProject(t *testing.T) {
 	}
 	if env.GitRepoDir != projPath {
 		t.Errorf("GitRepoDir = %q, want %q", env.GitRepoDir, projPath)
+	}
+
+	// Verify StateDir is set.
+	wantStateDir := filepath.Join(orgDir, "projects", cfg.Project.UUID)
+	if env.StateDir != wantStateDir {
+		t.Errorf("StateDir = %q, want %q", env.StateDir, wantStateDir)
+	}
+
+	// Verify state directories were created.
+	for _, agentID := range prompts.AllAgentIDs {
+		logsDir := filepath.Join(env.StateDir, "agents", agentID, "logs", "report")
+		if _, err := os.Stat(logsDir); err != nil {
+			t.Errorf("state logs dir missing for agent %s: %v", agentID, err)
+		}
+	}
+	supervisorLogsDir := filepath.Join(env.StateDir, "supervisor", "logs", "review")
+	if _, err := os.Stat(supervisorLogsDir); err != nil {
+		t.Errorf("supervisor state logs dir missing: %v", err)
+	}
+
+	// Verify orgconfig registration.
+	orgCfg, err := config.LoadOrgConfig(orgDir)
+	if err != nil {
+		t.Fatalf("LoadOrgConfig: %v", err)
+	}
+	if orgCfg.Projects[cfg.Project.UUID] != "level1/myproj" {
+		t.Errorf("orgconfig entry = %q, want %q", orgCfg.Projects[cfg.Project.UUID], "level1/myproj")
 	}
 
 	// FindOrg from project path should find the org.
@@ -379,5 +410,101 @@ func TestIntegration_RelPathHelper(t *testing.T) {
 	}
 	if got := env.RelPath(""); got != "" {
 		t.Errorf("RelPath(\"\") = %q, want %q", got, "")
+	}
+}
+
+// TestIntegration_StatePathMethods verifies AgentLogsDir, SupervisorLogsDir, etc.
+func TestIntegration_StatePathMethods(t *testing.T) {
+	base := resolvedTempDir(t)
+
+	orgDir, err := InstallOrg(base)
+	if err != nil {
+		t.Fatalf("InstallOrg: %v", err)
+	}
+
+	projPath := filepath.Join(base, "myproj")
+	if err := os.MkdirAll(projPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := InitProjectOpts{
+		Name:          "myproj",
+		EnabledAgents: prompts.AllAgentIDs,
+	}
+	projDir, err := InitProject(projPath, orgDir, opts)
+	if err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+
+	cfg, _ := config.Load(projDir)
+	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
+	env.populateFromConfig(projDir, cfg)
+
+	stateBase := filepath.Join(orgDir, "projects", cfg.Project.UUID)
+
+	if got := env.AgentLogsDir("security", "report"); got != filepath.Join(stateBase, "agents", "security", "logs", "report") {
+		t.Errorf("AgentLogsDir = %q, want path under state dir", got)
+	}
+	if got := env.SupervisorLogsDir("review"); got != filepath.Join(stateBase, "supervisor", "logs", "review") {
+		t.Errorf("SupervisorLogsDir = %q, want path under state dir", got)
+	}
+	if got := env.AgentWorkspacesDir("security"); got != filepath.Join(stateBase, "agents", "security", "workspaces") {
+		t.Errorf("AgentWorkspacesDir = %q, want path under state dir", got)
+	}
+	if got := env.RunnerLogPath(); got != filepath.Join(stateBase, "runner.log") {
+		t.Errorf("RunnerLogPath = %q, want path under state dir", got)
+	}
+}
+
+// TestIntegration_OrgConfigMultipleProjects verifies orgconfig tracks all registered projects.
+func TestIntegration_OrgConfigMultipleProjects(t *testing.T) {
+	base := resolvedTempDir(t)
+
+	orgDir, err := InstallOrg(base)
+	if err != nil {
+		t.Fatalf("InstallOrg: %v", err)
+	}
+
+	names := []string{"frontend", "backend", "shared"}
+	uuids := make(map[string]string) // name → uuid
+
+	for _, name := range names {
+		p := filepath.Join(base, name)
+		if err := os.MkdirAll(p, 0755); err != nil {
+			t.Fatal(err)
+		}
+		opts := InitProjectOpts{
+			Name:          name,
+			EnabledAgents: prompts.AllAgentIDs,
+		}
+		projDir, err := InitProject(p, orgDir, opts)
+		if err != nil {
+			t.Fatalf("InitProject(%s): %v", name, err)
+		}
+		cfg, _ := config.Load(projDir)
+		uuids[name] = cfg.Project.UUID
+	}
+
+	// All UUIDs should be unique.
+	seen := make(map[string]bool)
+	for name, uuid := range uuids {
+		if seen[uuid] {
+			t.Errorf("duplicate UUID for project %s: %s", name, uuid)
+		}
+		seen[uuid] = true
+	}
+
+	// Orgconfig should have all entries.
+	orgCfg, err := config.LoadOrgConfig(orgDir)
+	if err != nil {
+		t.Fatalf("LoadOrgConfig: %v", err)
+	}
+	if len(orgCfg.Projects) != 3 {
+		t.Errorf("orgconfig has %d projects, want 3", len(orgCfg.Projects))
+	}
+	for name, uuid := range uuids {
+		if orgCfg.Projects[uuid] != name {
+			t.Errorf("orgconfig[%s] = %q, want %q", uuid, orgCfg.Projects[uuid], name)
+		}
 	}
 }

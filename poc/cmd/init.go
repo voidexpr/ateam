@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ateam-poc/internal/config"
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
 	"github.com/spf13/cobra"
@@ -120,7 +121,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 		AllAgents:       allAgentIDs,
 	}
 
-	_, err = root.InitProject(absPath, orgDir, opts)
+	projDir, err := root.InitProject(absPath, orgDir, opts)
+	if err != nil {
+		return err
+	}
+
+	cfg, err := config.Load(projDir)
 	if err != nil {
 		return err
 	}
@@ -134,6 +140,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("     Org: %s (%s)\n", relOrg, tildeHome(orgRoot))
 	fmt.Printf(" Project: %s\n", name)
+	fmt.Printf("    UUID: %s\n", cfg.Project.UUID)
 	if displayGit != "" {
 		fmt.Printf("     Git: %s\n", displayGit)
 	}
