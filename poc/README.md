@@ -49,11 +49,15 @@ ateam install ~/projects   # creates .ateamorg/ at the given path
 
 ### `ateam init [PATH]`
 
-Initialize a project by creating a `.ateam/` directory. Requires a `.ateamorg/` discoverable from the current directory.
+Initialize a project by creating a `.ateam/` directory at PATH (defaults to `.`).
+
+If no `.ateamorg/` is found, you are prompted to create one. Use `--org-home` or `--org-create` to skip the interactive prompt.
 
 ```bash
 ateam init
 ateam init --name myproject --agent testing_basic,security
+ateam init --org-home                      # auto-create .ateamorg/ in $HOME
+ateam init --org-create ~/projects         # auto-create .ateamorg/ at path
 ```
 
 | Flag | Description |
@@ -61,6 +65,8 @@ ateam init --name myproject --agent testing_basic,security
 | `--name NAME` | Project name (defaults to relative path from org root) |
 | `--agent LIST` | Agents to enable (comma-separated; if omitted, all are enabled) |
 | `--git-remote URL` | Git remote origin URL (auto-detected if omitted) |
+| `--org-create PATH` | Create `.ateamorg/` at PATH if none exists |
+| `--org-home` | Create `.ateamorg/` in `$HOME` if none exists |
 
 ### `ateam report`
 
@@ -281,23 +287,22 @@ Available agents: `automation`, `basic_project_structure`, `critic_engineering`,
 
 ### Runner log
 
-Every `ateam report` and `ateam review` invocation is logged to `.ateam/logs/runner.log`. Each line is tab-separated:
+Every `ateam report` and `ateam review` invocation is logged to `.ateam/logs/runner.log`. Each line is tab-separated with quoted fields:
 
 ```
-TIMESTAMP    AGENT_ID    STATUS    CLI_COMMAND    [EXTRA]
+TIMESTAMP  "AGENT"  "STATUS"  "CWD"  "CLI"  [EXTRA...]
 ```
 
-- **start** lines include the CLI invocation and the path to the archived prompt file
+- **start** lines include the prompt path and output path (relative to `.ateam/`)
 - **ok** lines confirm successful completion
 - **error** lines include the error message
 
 Example:
 
 ```
-2026-03-08T15:04:00Z	security	start	claude -p --output-format stream-json --verbose	.ateam/agents/security/history/2026-03-08_1504.full_prompt.md
-2026-03-08T15:06:23Z	security	ok	claude -p --output-format stream-json --verbose
-2026-03-08T15:04:00Z	testing_basic	start	claude -p --output-format stream-json --verbose	.ateam/agents/testing_basic/history/2026-03-08_1504.full_prompt.md
-2026-03-08T15:07:01Z	testing_basic	error	claude -p --output-format stream-json --verbose	timed out after 10 minutes
+2026-03-08T15:04:00Z	"security"	"start"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"	"agents/security/history/2026-03-08_1504.full_prompt.md"	"agents/security/full_report.md"
+2026-03-08T15:06:23Z	"security"	"ok"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"
+2026-03-08T15:07:01Z	"testing_basic"	"error"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"	"timed out after 10 minutes"
 ```
 
 ### Detailed output

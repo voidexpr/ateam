@@ -13,6 +13,10 @@ func newTable() *tabwriter.Writer {
 }
 
 func relPath(cwd, path string) string {
+	// Resolve symlinks so both sides match (env paths are already resolved).
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = resolved
+	}
 	rel, err := filepath.Rel(cwd, path)
 	if err != nil {
 		return path

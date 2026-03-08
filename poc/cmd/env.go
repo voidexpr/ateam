@@ -40,7 +40,7 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	fmt.Printf("    Name: %s\n", env.ProjectName)
+	fmt.Printf(" Project: %s\n", env.ProjectName)
 
 	if env.GitRepoDir != "" {
 		fmt.Printf("     Git: %s (%s)\n", env.RelPath(env.GitRepoDir), tildeHome(env.GitRepoDir))
