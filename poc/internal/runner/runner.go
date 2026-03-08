@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +21,8 @@ type RunResult struct {
 	Err      error
 }
 
-// RunClaude executes "claude -p PROMPT > outputFile" with a timeout.
+// RunClaude executes "claude -p" with the prompt piped via stdin.
+// Stdout is captured to outputFile and a buffer. Stderr is captured separately.
 // If workDir is non-empty, the subprocess runs in that directory.
 func RunClaude(ctx context.Context, prompt, outputFile, workDir string, timeoutMinutes int) RunResult {
 	start := time.Now()
@@ -28,8 +30,8 @@ func RunClaude(ctx context.Context, prompt, outputFile, workDir string, timeoutM
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMinutes)*time.Minute)
 	defer cancel()
 
-	// Ensure output directory exists
-	if err := os.MkdirAll(filepath.Dir(outputFile), 0755); err != nil {
+	outDir := filepath.Dir(outputFile)
+	if err := os.MkdirAll(outDir, 0755); err != nil {
 		return RunResult{Err: fmt.Errorf("cannot create output directory: %w", err), Duration: time.Since(start)}
 	}
 
@@ -39,31 +41,41 @@ func RunClaude(ctx context.Context, prompt, outputFile, workDir string, timeoutM
 	}
 	defer outFile.Close()
 
-	cmd := exec.CommandContext(ctx, "claude", "-p", prompt)
+	cmd := exec.CommandContext(ctx, "claude", "-p")
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
-	cmd.Stdout = outFile
+	cmd.Stdin = strings.NewReader(prompt)
+
+	var stdoutBuf bytes.Buffer
+	cmd.Stdout = io.MultiWriter(outFile, &stdoutBuf)
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf
 
 	err = cmd.Run()
 	duration := time.Since(start)
-	stderr := strings.TrimSpace(stderrBuf.String())
+	stdout := stdoutBuf.String()
+	stderr := stderrBuf.String()
+
+	// Save raw logs for every run
+	writeLog(filepath.Join(outDir, "last_run_stdout.log"), stdout)
+	writeLog(filepath.Join(outDir, "last_run_stderr.log"), stderr)
+
+	stdout = strings.TrimSpace(stdout)
+	stderr = strings.TrimSpace(stderr)
 
 	if ctx.Err() == context.DeadlineExceeded {
-		return RunResult{Err: fmt.Errorf("timed out after %d minutes", timeoutMinutes), Stderr: stderr, Duration: duration}
+		return RunResult{Output: stdout, Stderr: stderr, Err: fmt.Errorf("timed out after %d minutes", timeoutMinutes), Duration: duration}
 	}
 	if err != nil {
-		return RunResult{Err: fmt.Errorf("claude exited with error: %w", err), Stderr: stderr, Duration: duration}
+		return RunResult{Output: stdout, Stderr: stderr, Err: fmt.Errorf("claude exited with error: %w", err), Duration: duration}
 	}
 
-	// Read back output for the result
-	data, err := os.ReadFile(outputFile)
-	if err != nil {
-		return RunResult{Err: fmt.Errorf("cannot read output file: %w", err), Duration: duration}
-	}
-	return RunResult{Output: string(data), Duration: duration}
+	return RunResult{Output: stdout, Duration: duration}
+}
+
+func writeLog(path, content string) {
+	_ = os.WriteFile(path, []byte(content), 0644)
 }
 
 // FormatDuration returns a human-readable duration string.

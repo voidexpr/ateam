@@ -124,27 +124,17 @@ func runReport(cmd *cobra.Command, args []string) error {
 	var succeeded, failed int
 	for _, r := range results {
 		reportPath := env.AgentReportPath(r.AgentID, reportType)
+		agentDir := filepath.Dir(reportPath)
 		if r.Result.Err != nil {
 			fmt.Printf("  %-25s FAILED  (%s) — %v\n", r.AgentID, runner.FormatDuration(r.Result.Duration), r.Result.Err)
-
-			// Read any partial stdout before overwriting with error marker
-			var partialOutput string
-			if partial, err := os.ReadFile(reportPath); err == nil {
-				content := strings.TrimSpace(string(partial))
-				if content != "" {
-					partialOutput = content
-				}
-			}
 
 			// Write brief marker to the report file
 			errorReport := fmt.Sprintf("# Report Failed: %s\n\nError: %v\n\nDuration: %s\n",
 				r.AgentID, r.Result.Err, runner.FormatDuration(r.Result.Duration))
-			if err := os.WriteFile(reportPath, []byte(errorReport), 0644); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not write error report for %s: %v\n", r.AgentID, err)
-			}
+			_ = os.WriteFile(reportPath, []byte(errorReport), 0644)
 
-			// Write detailed error log with stderr output
-			errorLogPath := filepath.Join(filepath.Dir(reportPath), prompts.FullReportErrorFile)
+			// Write detailed error log
+			errorLogPath := filepath.Join(agentDir, prompts.FullReportErrorFile)
 			var detail strings.Builder
 			fmt.Fprintf(&detail, "# Report Error: %s\n\n", r.AgentID)
 			fmt.Fprintf(&detail, "**Time:** %s\n\n", time.Now().Format("2006-01-02 15:04:05"))
@@ -154,17 +144,27 @@ func runReport(cmd *cobra.Command, args []string) error {
 			if r.Result.Stderr != "" {
 				fmt.Fprintf(&detail, "## Stderr\n\n```\n%s\n```\n", r.Result.Stderr)
 			}
-			if partialOutput != "" {
-				fmt.Fprintf(&detail, "\n## Partial Output\n\n```\n%s\n```\n", partialOutput)
+			if r.Result.Output != "" {
+				fmt.Fprintf(&detail, "\n## Stdout\n\n```\n%s\n```\n", r.Result.Output)
 			}
-			if err := os.WriteFile(errorLogPath, []byte(detail.String()), 0644); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not write error log for %s: %v\n", r.AgentID, err)
+			_ = os.WriteFile(errorLogPath, []byte(detail.String()), 0644)
+
+			// Show last lines of stderr/stdout for quick diagnosis
+			if r.Result.Stderr != "" {
+				fmt.Printf("    stderr (last lines):\n")
+				printLastLines(r.Result.Stderr, 5)
 			}
+			if r.Result.Output != "" {
+				fmt.Printf("    stdout (last lines):\n")
+				printLastLines(r.Result.Output, 5)
+			}
+			fmt.Printf("    details: %s\n", errorLogPath)
+			fmt.Printf("    logs:    %s/last_run_{stdout,stderr}.log\n", agentDir)
 
 			failed++
 		} else {
 			producedAt := time.Now().Format("2006-01-02 15:04")
-			fmt.Printf("%s: %s (produced at %s, took %s)\n", r.AgentID, reportPath, producedAt, runner.FormatDuration(r.Result.Duration))
+			fmt.Printf("  %-25s OK      (%s, produced at %s)\n", r.AgentID, runner.FormatDuration(r.Result.Duration), producedAt)
 			historyDir := env.AgentHistoryDir(r.AgentID)
 			if err := runner.ArchiveFile(reportPath, historyDir, reportType+"_report.md"); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not archive report for %s: %v\n", r.AgentID, err)
@@ -174,7 +174,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\n%d succeeded, %d failed\n", succeeded, failed)
-	if succeeded > 0 {
+	if failed == 0 && succeeded > 0 {
 		fmt.Printf("\nRun 'ateam review' to have the supervisor synthesize findings.\n")
 	}
 
@@ -188,4 +188,15 @@ func runReport(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func printLastLines(s string, n int) {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	start := 0
+	if len(lines) > n {
+		start = len(lines) - n
+	}
+	for _, line := range lines[start:] {
+		fmt.Printf("      %s\n", line)
+	}
 }
