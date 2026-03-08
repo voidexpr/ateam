@@ -53,6 +53,7 @@ ateam review --dry-run                  # show prompt without running
 
 # Show current environment
 ateam env
+ateam env --absolute              # show fully resolved paths
 
 # List all projects under the organization
 ateam projects

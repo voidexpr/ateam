@@ -12,7 +12,6 @@ import (
 // InitProjectOpts holds options for creating a new project.
 type InitProjectOpts struct {
 	Name            string
-	Source          string
 	GitRepo         string
 	GitRemoteOrigin string
 	EnabledAgents   []string
@@ -93,8 +92,7 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 
 	cfg := config.Config{
 		Project: config.ProjectConfig{
-			Name:   opts.Name,
-			Source: opts.Source,
+			Name: opts.Name,
 		},
 		Git: config.GitConfig{
 			Repo:            opts.GitRepo,

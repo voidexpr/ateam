@@ -41,7 +41,6 @@ func TestIntegration_BasicProject(t *testing.T) {
 
 	opts := InitProjectOpts{
 		Name:            "level1/myproj",
-		Source:          ".",
 		GitRepo:         ".",
 		GitRemoteOrigin: "https://foobar/myproj.git",
 		EnabledAgents:   prompts.AllAgentIDs,
@@ -58,9 +57,6 @@ func TestIntegration_BasicProject(t *testing.T) {
 	if cfg.Project.Name != "level1/myproj" {
 		t.Errorf("name = %q, want %q", cfg.Project.Name, "level1/myproj")
 	}
-	if cfg.Project.Source != "." {
-		t.Errorf("source = %q, want %q", cfg.Project.Source, ".")
-	}
 	if cfg.Git.Repo != "." {
 		t.Errorf("git.repo = %q, want %q", cfg.Git.Repo, ".")
 	}
@@ -68,7 +64,7 @@ func TestIntegration_BasicProject(t *testing.T) {
 		t.Errorf("git.remote = %q, want %q", cfg.Git.RemoteOriginURL, "https://foobar/myproj.git")
 	}
 
-	// Verify resolution: source and git should resolve to the project path.
+	// Verify resolution: source = project path, git = project path.
 	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
 	env.populateFromConfig(projDir, cfg)
 	if env.SourceDir != projPath {
@@ -115,7 +111,6 @@ func TestIntegration_MonorepoSubdir(t *testing.T) {
 
 	opts := InitProjectOpts{
 		Name:          "level1/myproj/subdir_abc",
-		Source:        ".",
 		GitRepo:       "..",
 		EnabledAgents: []string{"security"},
 	}
@@ -130,9 +125,6 @@ func TestIntegration_MonorepoSubdir(t *testing.T) {
 	}
 	if cfg.Project.Name != "level1/myproj/subdir_abc" {
 		t.Errorf("name = %q, want %q", cfg.Project.Name, "level1/myproj/subdir_abc")
-	}
-	if cfg.Project.Source != "." {
-		t.Errorf("source = %q, want %q", cfg.Project.Source, ".")
 	}
 	if cfg.Git.Repo != ".." {
 		t.Errorf("git.repo = %q, want %q", cfg.Git.Repo, "..")
@@ -173,59 +165,6 @@ func TestIntegration_MonorepoSubdir(t *testing.T) {
 	}
 }
 
-// TestIntegration_ExternalProject simulates:
-//
-//	cd ~/projects/ateam_projects && ateam init --name myproj --source ~/projects/level1/myproj
-func TestIntegration_ExternalProject(t *testing.T) {
-	base := resolvedTempDir(t)
-
-	orgDir, err := InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
-
-	externalSource := filepath.Join(base, "level1", "myproj")
-	if err := os.MkdirAll(externalSource, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	ateamProjectsPath := filepath.Join(base, "ateam_projects")
-	if err := os.MkdirAll(ateamProjectsPath, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Source relative from ateam_projects to level1/myproj
-	relSource := "../level1/myproj"
-
-	opts := InitProjectOpts{
-		Name:          "myproj",
-		Source:        relSource,
-		EnabledAgents: prompts.AllAgentIDs,
-	}
-	projDir, err := InitProject(ateamProjectsPath, orgDir, opts)
-	if err != nil {
-		t.Fatalf("InitProject: %v", err)
-	}
-
-	cfg, err := config.Load(projDir)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if cfg.Project.Name != "myproj" {
-		t.Errorf("name = %q, want %q", cfg.Project.Name, "myproj")
-	}
-	if cfg.Project.Source != relSource {
-		t.Errorf("source = %q, want %q", cfg.Project.Source, relSource)
-	}
-
-	// Verify resolution: source should resolve to the external path.
-	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
-	env.populateFromConfig(projDir, cfg)
-	if env.SourceDir != externalSource {
-		t.Errorf("SourceDir = %q, want %q", env.SourceDir, externalSource)
-	}
-}
-
 // TestIntegration_DuplicateProjectName verifies that creating two projects
 // with the same name under the same org fails.
 func TestIntegration_DuplicateProjectName(t *testing.T) {
@@ -242,7 +181,6 @@ func TestIntegration_DuplicateProjectName(t *testing.T) {
 	}
 	opts1 := InitProjectOpts{
 		Name:          "duplicate-name",
-		Source:        ".",
 		EnabledAgents: prompts.AllAgentIDs,
 	}
 	if _, err := InitProject(proj1Path, orgDir, opts1); err != nil {
@@ -255,7 +193,6 @@ func TestIntegration_DuplicateProjectName(t *testing.T) {
 	}
 	opts2 := InitProjectOpts{
 		Name:          "duplicate-name",
-		Source:        ".",
 		EnabledAgents: prompts.AllAgentIDs,
 	}
 	_, err = InitProject(proj2Path, orgDir, opts2)
@@ -287,7 +224,6 @@ func TestIntegration_MultipleProjects(t *testing.T) {
 		}
 		opts := InitProjectOpts{
 			Name:          name,
-			Source:        ".",
 			EnabledAgents: prompts.AllAgentIDs,
 		}
 		projDir, err := InitProject(p, orgDir, opts)
@@ -338,7 +274,6 @@ func TestIntegration_3LevelPromptFallback(t *testing.T) {
 
 	opts := InitProjectOpts{
 		Name:          "myproj",
-		Source:        ".",
 		EnabledAgents: prompts.AllAgentIDs,
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
@@ -397,10 +332,52 @@ func TestIntegration_3LevelPromptFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssembleAgentPrompt (project override): %v", err)
 	}
+	if strings.Contains(result, "org override") {
+		t.Error("project override should take precedence over org override")
+	}
 	if !strings.Contains(result, "project override") {
 		t.Errorf("expected 'project override' in result, got:\n%s", result)
 	}
-	if strings.Contains(result, "org override") {
-		t.Error("project override should take precedence over org override")
+}
+
+// TestIntegration_RelPathHelper verifies the RelPath helper on ResolvedEnv.
+func TestIntegration_RelPathHelper(t *testing.T) {
+	base := resolvedTempDir(t)
+
+	orgDir, err := InstallOrg(base)
+	if err != nil {
+		t.Fatalf("InstallOrg: %v", err)
+	}
+
+	projPath := filepath.Join(base, "services", "api")
+	if err := os.MkdirAll(projPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := InitProjectOpts{
+		Name:          "services/api",
+		GitRepo:       ".",
+		EnabledAgents: prompts.AllAgentIDs,
+	}
+	projDir, err := InitProject(projPath, orgDir, opts)
+	if err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+
+	cfg, _ := config.Load(projDir)
+	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
+	env.populateFromConfig(projDir, cfg)
+
+	if env.OrgRoot() != base {
+		t.Errorf("OrgRoot() = %q, want %q", env.OrgRoot(), base)
+	}
+	if got := env.RelPath(projPath); got != "services/api" {
+		t.Errorf("RelPath(projPath) = %q, want %q", got, "services/api")
+	}
+	if got := env.RelPath(env.SourceDir); got != "services/api" {
+		t.Errorf("RelPath(SourceDir) = %q, want %q", got, "services/api")
+	}
+	if got := env.RelPath(""); got != "" {
+		t.Errorf("RelPath(\"\") = %q, want %q", got, "")
 	}
 }
