@@ -184,7 +184,7 @@ func TestInitProjectDuplicateName(t *testing.T) {
 	}
 	opts := InitProjectOpts{
 		Name:          "shared-name",
-		Source:        "../proj1",
+		Source:        ".",
 		EnabledAgents: prompts.AllAgentIDs,
 	}
 	if _, err := InitProject(proj1, orgDir, opts); err != nil {
@@ -198,7 +198,7 @@ func TestInitProjectDuplicateName(t *testing.T) {
 	}
 	opts2 := InitProjectOpts{
 		Name:          "shared-name",
-		Source:        "../proj2",
+		Source:        ".",
 		EnabledAgents: prompts.AllAgentIDs,
 	}
 	_, err = InitProject(proj2, orgDir, opts2)

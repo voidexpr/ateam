@@ -40,14 +40,33 @@ func (e *ResolvedEnv) ReviewHistoryDir() string {
 	return filepath.Join(e.ProjectDir, "supervisor", "history")
 }
 
+// OrgRoot returns the parent directory of .ateamorg.
+func (e *ResolvedEnv) OrgRoot() string {
+	return filepath.Dir(e.OrgDir)
+}
+
+// RelPath returns absPath relative to the org root.
+// Returns absPath as-is if the computation fails or absPath is empty.
+func (e *ResolvedEnv) RelPath(absPath string) string {
+	if absPath == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(e.OrgRoot(), absPath)
+	if err != nil {
+		return absPath
+	}
+	return rel
+}
+
 func (e *ResolvedEnv) populateFromConfig(projectDir string, cfg *config.Config) {
 	e.Config = cfg
 	e.ProjectName = cfg.Project.Name
+	projectRoot := filepath.Dir(projectDir) // parent of .ateam/
 	if cfg.Project.Source != "" {
-		e.SourceDir = resolveRelPath(projectDir, cfg.Project.Source)
+		e.SourceDir = resolvePath(projectRoot, cfg.Project.Source)
 	}
 	if cfg.Git.Repo != "" && e.SourceDir != "" {
-		e.GitRepoDir = resolveRelPath(e.SourceDir, cfg.Git.Repo)
+		e.GitRepoDir = resolvePath(e.SourceDir, cfg.Git.Repo)
 	}
 }
 
@@ -226,13 +245,13 @@ func resolveProjectByName(orgDir, name string) (string, error) {
 	return realPath(found), nil
 }
 
-// resolveRelPath resolves rel relative to base's parent directory.
+// resolvePath resolves rel relative to base.
 // If rel is absolute, it is returned as-is.
-func resolveRelPath(base, rel string) string {
+func resolvePath(base, rel string) string {
 	if filepath.IsAbs(rel) {
 		return rel
 	}
-	return filepath.Join(filepath.Dir(base), rel)
+	return filepath.Clean(filepath.Join(base, rel))
 }
 
 func realPath(p string) string {

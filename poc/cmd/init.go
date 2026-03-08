@@ -61,36 +61,40 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	orgRoot := filepath.Dir(orgDir)
 
-	// Name defaults to relative path from org parent to cwd
+	// Name: relative path from org root to project dir
 	name := initName
 	if name == "" {
-		orgParent := filepath.Dir(orgDir)
-		rel, relErr := filepath.Rel(orgParent, absPath)
+		rel, relErr := filepath.Rel(orgRoot, absPath)
 		if relErr != nil {
 			rel = filepath.Base(absPath)
 		}
 		name = rel
 	}
 
-	// Source defaults to PATH
-	source := initSource
-	if source == "" {
-		source = absPath
-	} else {
-		source, err = filepath.Abs(source)
+	// Source: relative from project dir to source dir
+	// Default: "." (source IS the project dir)
+	source := "."
+	absSource := absPath
+	if initSource != "" {
+		absSource, err = filepath.Abs(initSource)
 		if err != nil {
 			return fmt.Errorf("cannot resolve source path: %w", err)
 		}
+		source, err = filepath.Rel(absPath, absSource)
+		if err != nil {
+			source = absSource // fallback to absolute
+		}
 	}
 
-	// Git: auto-discover from source dir
+	// Git: auto-discover from absolute source dir
 	gitRepo := ""
 	gitRemote := initGitRemote
 
-	gitTopLevel := execGitCmd(source, "rev-parse", "--show-toplevel")
+	gitTopLevel := execGitCmd(absSource, "rev-parse", "--show-toplevel")
 	if gitTopLevel != "" {
-		rel, relErr := filepath.Rel(source, gitTopLevel)
+		rel, relErr := filepath.Rel(absSource, gitTopLevel)
 		if relErr == nil {
 			gitRepo = rel
 		} else {
@@ -99,7 +103,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	if gitRemote == "" {
-		gitRemote = execGitCmd(source, "config", "remote.origin.url")
+		gitRemote = execGitCmd(absSource, "config", "remote.origin.url")
 	}
 
 	// Agents: if --agent provided, those are enabled, rest disabled; if not, all enabled
@@ -124,16 +128,24 @@ func runInit(cmd *cobra.Command, args []string) error {
 		AllAgents:       allAgentIDs,
 	}
 
-	projDir, err := root.InitProject(absPath, orgDir, opts)
+	_, err = root.InitProject(absPath, orgDir, opts)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("Project:  %s\n", name)
-	fmt.Printf("  Dir:    %s\n", projDir)
-	fmt.Printf("  Source: %s\n", source)
-	if gitRepo != "" {
-		fmt.Printf("  Git:    %s\n", gitRepo)
+	// Display paths relative to org root for readability
+	relOrg, _ := filepath.Rel(cwd, orgRoot)
+	displaySource, _ := filepath.Rel(orgRoot, absSource)
+	displayGit := ""
+	if gitTopLevel != "" {
+		displayGit, _ = filepath.Rel(orgRoot, gitTopLevel)
+	}
+
+	fmt.Printf("     Org: %s\n", relOrg)
+	fmt.Printf(" Project: %s\n", name)
+	fmt.Printf("  Source: %s\n", displaySource)
+	if displayGit != "" {
+		fmt.Printf("     Git: %s\n", displayGit)
 	}
 	if gitRemote != "" {
 		fmt.Printf("  Remote: %s\n", gitRemote)

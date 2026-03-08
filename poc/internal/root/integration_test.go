@@ -41,7 +41,7 @@ func TestIntegration_BasicProject(t *testing.T) {
 
 	opts := InitProjectOpts{
 		Name:            "level1/myproj",
-		Source:          "level1/myproj",
+		Source:          ".",
 		GitRepo:         ".",
 		GitRemoteOrigin: "https://foobar/myproj.git",
 		EnabledAgents:   prompts.AllAgentIDs,
@@ -58,14 +58,24 @@ func TestIntegration_BasicProject(t *testing.T) {
 	if cfg.Project.Name != "level1/myproj" {
 		t.Errorf("name = %q, want %q", cfg.Project.Name, "level1/myproj")
 	}
-	if cfg.Project.Source != "level1/myproj" {
-		t.Errorf("source = %q, want %q", cfg.Project.Source, "level1/myproj")
+	if cfg.Project.Source != "." {
+		t.Errorf("source = %q, want %q", cfg.Project.Source, ".")
 	}
 	if cfg.Git.Repo != "." {
 		t.Errorf("git.repo = %q, want %q", cfg.Git.Repo, ".")
 	}
 	if cfg.Git.RemoteOriginURL != "https://foobar/myproj.git" {
 		t.Errorf("git.remote = %q, want %q", cfg.Git.RemoteOriginURL, "https://foobar/myproj.git")
+	}
+
+	// Verify resolution: source and git should resolve to the project path.
+	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
+	env.populateFromConfig(projDir, cfg)
+	if env.SourceDir != projPath {
+		t.Errorf("SourceDir = %q, want %q", env.SourceDir, projPath)
+	}
+	if env.GitRepoDir != projPath {
+		t.Errorf("GitRepoDir = %q, want %q", env.GitRepoDir, projPath)
 	}
 
 	// FindOrg from project path should find the org.
@@ -105,8 +115,8 @@ func TestIntegration_MonorepoSubdir(t *testing.T) {
 
 	opts := InitProjectOpts{
 		Name:          "level1/myproj/subdir_abc",
-		Source:        "level1/myproj/subdir_abc",
-		GitRepo:       "level1/myproj",
+		Source:        ".",
+		GitRepo:       "..",
 		EnabledAgents: []string{"security"},
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
@@ -121,8 +131,22 @@ func TestIntegration_MonorepoSubdir(t *testing.T) {
 	if cfg.Project.Name != "level1/myproj/subdir_abc" {
 		t.Errorf("name = %q, want %q", cfg.Project.Name, "level1/myproj/subdir_abc")
 	}
-	if cfg.Git.Repo != "level1/myproj" {
-		t.Errorf("git.repo = %q, want %q", cfg.Git.Repo, "level1/myproj")
+	if cfg.Project.Source != "." {
+		t.Errorf("source = %q, want %q", cfg.Project.Source, ".")
+	}
+	if cfg.Git.Repo != ".." {
+		t.Errorf("git.repo = %q, want %q", cfg.Git.Repo, "..")
+	}
+
+	// Verify resolution: source = subdir, git repo = parent dir.
+	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
+	env.populateFromConfig(projDir, cfg)
+	if env.SourceDir != projPath {
+		t.Errorf("SourceDir = %q, want %q", env.SourceDir, projPath)
+	}
+	wantGit := filepath.Join(base, "level1", "myproj")
+	if env.GitRepoDir != wantGit {
+		t.Errorf("GitRepoDir = %q, want %q", env.GitRepoDir, wantGit)
 	}
 
 	// Only "security" should be enabled.
@@ -170,9 +194,12 @@ func TestIntegration_ExternalProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Source relative from ateam_projects to level1/myproj
+	relSource := "../level1/myproj"
+
 	opts := InitProjectOpts{
 		Name:          "myproj",
-		Source:        externalSource, // absolute path
+		Source:        relSource,
 		EnabledAgents: prompts.AllAgentIDs,
 	}
 	projDir, err := InitProject(ateamProjectsPath, orgDir, opts)
@@ -187,8 +214,15 @@ func TestIntegration_ExternalProject(t *testing.T) {
 	if cfg.Project.Name != "myproj" {
 		t.Errorf("name = %q, want %q", cfg.Project.Name, "myproj")
 	}
-	if cfg.Project.Source != externalSource {
-		t.Errorf("source = %q, want %q", cfg.Project.Source, externalSource)
+	if cfg.Project.Source != relSource {
+		t.Errorf("source = %q, want %q", cfg.Project.Source, relSource)
+	}
+
+	// Verify resolution: source should resolve to the external path.
+	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
+	env.populateFromConfig(projDir, cfg)
+	if env.SourceDir != externalSource {
+		t.Errorf("SourceDir = %q, want %q", env.SourceDir, externalSource)
 	}
 }
 
@@ -208,7 +242,7 @@ func TestIntegration_DuplicateProjectName(t *testing.T) {
 	}
 	opts1 := InitProjectOpts{
 		Name:          "duplicate-name",
-		Source:        "proj1",
+		Source:        ".",
 		EnabledAgents: prompts.AllAgentIDs,
 	}
 	if _, err := InitProject(proj1Path, orgDir, opts1); err != nil {
@@ -221,7 +255,7 @@ func TestIntegration_DuplicateProjectName(t *testing.T) {
 	}
 	opts2 := InitProjectOpts{
 		Name:          "duplicate-name",
-		Source:        "proj2",
+		Source:        ".",
 		EnabledAgents: prompts.AllAgentIDs,
 	}
 	_, err = InitProject(proj2Path, orgDir, opts2)
@@ -253,7 +287,7 @@ func TestIntegration_MultipleProjects(t *testing.T) {
 		}
 		opts := InitProjectOpts{
 			Name:          name,
-			Source:        name,
+			Source:        ".",
 			EnabledAgents: prompts.AllAgentIDs,
 		}
 		projDir, err := InitProject(p, orgDir, opts)
@@ -304,7 +338,7 @@ func TestIntegration_3LevelPromptFallback(t *testing.T) {
 
 	opts := InitProjectOpts{
 		Name:          "myproj",
-		Source:        "myproj",
+		Source:        ".",
 		EnabledAgents: prompts.AllAgentIDs,
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
@@ -313,7 +347,7 @@ func TestIntegration_3LevelPromptFallback(t *testing.T) {
 	}
 
 	agentID := "security"
-	sourceDir := filepath.Join(base, "myproj")
+	sourceDir := projPath
 
 	// Level 1: default content is written by InstallOrg.
 	// The defaults file exists at orgDir/defaults/agents/security/report_prompt.md.

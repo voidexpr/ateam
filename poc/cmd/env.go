@@ -12,14 +12,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var envAbsolute bool
+
 var envCmd = &cobra.Command{
 	Use:   "env",
 	Short: "Show the current ATeam environment",
 	Long: `Print organization, project status, and latest report/review timestamps.
 
-This command is read-only — it never creates or modifies anything.`,
+This command is read-only — it never creates or modifies anything.
+
+Use --absolute to show fully resolved paths instead of relative ones.`,
 	Args: cobra.NoArgs,
 	RunE: runEnv,
+}
+
+func init() {
+	envCmd.Flags().BoolVar(&envAbsolute, "absolute", false, "show absolute paths instead of relative")
 }
 
 func runEnv(cmd *cobra.Command, args []string) error {
@@ -28,30 +36,34 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Printf("org:         %s\n", env.OrgDir)
+	displayPath := env.RelPath
+	if envAbsolute {
+		displayPath = func(p string) string { return p }
+	}
+
+	fmt.Printf("     Org: %s\n", displayPath(env.OrgRoot()))
 
 	if env.ProjectDir == "" {
-		fmt.Printf("project:     (not initialized)\n")
+		fmt.Printf(" Project: (not initialized)\n")
 		return nil
 	}
 
-	fmt.Printf("project:     %s\n", env.ProjectName)
-	fmt.Printf("project dir: %s\n", env.ProjectDir)
+	fmt.Printf(" Project: %s\n", env.ProjectName)
 
 	if env.SourceDir != "" {
-		fmt.Printf("source:      %s\n", env.SourceDir)
+		fmt.Printf("  Source: %s\n", displayPath(env.SourceDir))
 	}
 	if env.GitRepoDir != "" {
-		fmt.Printf("git repo:    %s\n", env.GitRepoDir)
+		fmt.Printf("     Git: %s\n", displayPath(env.GitRepoDir))
 	}
 	if env.Config != nil && env.Config.Git.RemoteOriginURL != "" {
-		fmt.Printf("git remote:  %s\n", env.Config.Git.RemoteOriginURL)
+		fmt.Printf("  Remote: %s\n", env.Config.Git.RemoteOriginURL)
 	}
 
 	if env.Config != nil {
 		agents := env.Config.EnabledAgents()
 		if len(agents) > 0 {
-			fmt.Printf("agents:      %s\n", strings.Join(agents, ", "))
+			fmt.Printf("  Agents: %s\n", strings.Join(agents, ", "))
 
 			fmt.Println()
 			fmt.Println("Reports:")
