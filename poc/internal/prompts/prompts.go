@@ -43,13 +43,14 @@ func ResolveOptional(value string) (string, error) {
 }
 
 // AssembleAgentPrompt builds the full prompt for an agent run.
-// Resolution order for role prompt: project override → defaults.
-// Report instructions always come from defaults.
+// Resolution order for role prompt: project → org agents → org defaults.
+// Report instructions always come from org defaults.
 // meta is optional — if nil, git metadata is omitted from the prompt.
-func AssembleAgentPrompt(ateamRoot, projectDir, agentID, sourceDir, extraPrompt string, meta *gitutil.ProjectMeta) (string, error) {
-	rolePrompt, err := readWithFallback(
+func AssembleAgentPrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, meta *gitutil.ProjectMeta) (string, error) {
+	rolePrompt, err := readWith3LevelFallback(
 		filepath.Join(projectDir, "agents", agentID, ReportPromptFile),
-		filepath.Join(ateamRoot, "defaults", "agents", agentID, ReportPromptFile),
+		filepath.Join(orgDir, "agents", agentID, ReportPromptFile),
+		filepath.Join(orgDir, "defaults", "agents", agentID, ReportPromptFile),
 		"agent "+agentID,
 	)
 	if err != nil {
@@ -57,7 +58,7 @@ func AssembleAgentPrompt(ateamRoot, projectDir, agentID, sourceDir, extraPrompt 
 	}
 
 	instructions := readFileOr(
-		filepath.Join(ateamRoot, "defaults", ReportPromptFile),
+		filepath.Join(orgDir, "defaults", ReportPromptFile),
 		"",
 	)
 
@@ -125,7 +126,7 @@ func DiscoverReports(projectDir string) ([]AgentReport, error) {
 
 // AssembleReviewPrompt builds the full prompt for a supervisor review.
 // meta is optional — if nil, git metadata is omitted from the prompt.
-func AssembleReviewPrompt(ateamRoot, projectDir string, meta *gitutil.ProjectMeta, extraPrompt, customPrompt string) (string, error) {
+func AssembleReviewPrompt(orgDir, projectDir string, meta *gitutil.ProjectMeta, extraPrompt, customPrompt string) (string, error) {
 	reports, err := DiscoverReports(projectDir)
 	if err != nil {
 		return "", err
@@ -168,9 +169,10 @@ func AssembleReviewPrompt(ateamRoot, projectDir string, meta *gitutil.ProjectMet
 		return strings.Join(parts, "\n\n---\n\n"), nil
 	}
 
-	supervisorPrompt, err := readWithFallback(
+	supervisorPrompt, err := readWith3LevelFallback(
 		filepath.Join(projectDir, "supervisor", ReviewPromptFile),
-		filepath.Join(ateamRoot, "defaults", "supervisor", ReviewPromptFile),
+		filepath.Join(orgDir, "agents", "supervisor", ReviewPromptFile),
+		filepath.Join(orgDir, "defaults", "supervisor", ReviewPromptFile),
 		"supervisor",
 	)
 	if err != nil {
@@ -189,15 +191,18 @@ func AssembleReviewPrompt(ateamRoot, projectDir string, meta *gitutil.ProjectMet
 	return strings.Join(parts, "\n\n---\n\n"), nil
 }
 
-// readWithFallback tries projectPath first, then rootPath.
-func readWithFallback(projectPath, rootPath, label string) (string, error) {
+// readWith3LevelFallback tries projectPath, then orgPath, then defaultPath.
+func readWith3LevelFallback(projectPath, orgPath, defaultPath, label string) (string, error) {
 	if data, err := os.ReadFile(projectPath); err == nil {
 		return string(data), nil
 	}
-	if data, err := os.ReadFile(rootPath); err == nil {
+	if data, err := os.ReadFile(orgPath); err == nil {
 		return string(data), nil
 	}
-	return "", fmt.Errorf("no prompt found for %s (checked %s and %s)", label, projectPath, rootPath)
+	if data, err := os.ReadFile(defaultPath); err == nil {
+		return string(data), nil
+	}
+	return "", fmt.Errorf("no prompt found for %s (checked %s, %s, and %s)", label, projectPath, orgPath, defaultPath)
 }
 
 // readFileOr reads a file or returns fallback if it can't be read.

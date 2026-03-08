@@ -41,7 +41,7 @@ func InstallOrg(parentDir string) (string, error) {
 		return "", fmt.Errorf("cannot create supervisor directory: %w", err)
 	}
 
-	if err := prompts.WriteRootDefaults(orgDir, false); err != nil {
+	if err := prompts.WriteOrgDefaults(orgDir, false); err != nil {
 		return "", err
 	}
 

@@ -139,9 +139,9 @@ func embeddedFiles() []embeddedFile {
 	return files
 }
 
-// DiffRootDefaults compares on-disk prompt files against embedded defaults
+// DiffOrgDefaults compares on-disk prompt files against embedded defaults
 // and returns a list of files that differ.
-func DiffRootDefaults(ateamRoot string) []PromptDiff {
+func DiffOrgDefaults(ateamRoot string) []PromptDiff {
 	var diffs []PromptDiff
 	for _, f := range embeddedFiles() {
 		diskPath := filepath.Join(ateamRoot, f.rel)
@@ -157,9 +157,9 @@ func DiffRootDefaults(ateamRoot string) []PromptDiff {
 	return diffs
 }
 
-// WriteRootDefaults writes default prompt files to .ateam/defaults/.
+// WriteOrgDefaults writes default prompt files to the org directory's defaults/.
 // If overwrite is true, existing files are replaced; otherwise they are skipped.
-func WriteRootDefaults(ateamRoot string, overwrite bool) error {
+func WriteOrgDefaults(ateamRoot string, overwrite bool) error {
 	write := WriteIfNotExists
 	if overwrite {
 		write = func(path, content string) error {
