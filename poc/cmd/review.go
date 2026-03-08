@@ -75,6 +75,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 	timeout := env.Config.Report.EffectiveTimeout(reviewTimeout)
 
 	reviewFile := env.ReviewPath()
+	reviewDir := filepath.Dir(reviewFile)
 	historyDir := env.ReviewHistoryDir()
 
 	if err := os.MkdirAll(historyDir, 0755); err != nil {
@@ -83,8 +84,18 @@ func runReview(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Supervisor reviewing reports (%dm timeout)...\n", timeout)
 
+	cr := &runner.ClaudeRunner{}
+	opts := runner.RunOpts{
+		AgentID:              "supervisor",
+		OutputDir:            reviewDir,
+		LastMessageFilePath:  reviewFile,
+		ErrorMessageFilePath: filepath.Join(reviewDir, "review_error.md"),
+		WorkDir:              env.SourceDir,
+		TimeoutMin:           timeout,
+	}
+
 	ctx := context.Background()
-	result := runner.RunClaude(ctx, prompt, reviewFile, "", timeout)
+	result := cr.Run(ctx, prompt, opts, nil)
 
 	if result.Err != nil {
 		return fmt.Errorf("review failed: %w", result.Err)
@@ -94,7 +105,11 @@ func runReview(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: could not archive review: %v\n", err)
 	}
 
-	fmt.Printf("Done (%s)\n\n", runner.FormatDuration(result.Duration))
+	costSuffix := ""
+	if c := fmtCost(result.Cost); c != "" {
+		costSuffix = ", " + c
+	}
+	fmt.Printf("Done (%s%s)\n\n", runner.FormatDuration(result.Duration), costSuffix)
 	fmt.Printf("Review: %s\n", reviewFile)
 
 	if reviewPrint {

@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
@@ -56,18 +55,23 @@ func runEnv(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  Agents: %s\n", strings.Join(agents, ", "))
 
 			fmt.Println()
-			fmt.Printf("  %-25s %-20s %s\n", "AGENT", "LAST", "PATH")
+			w := newTable()
+			fmt.Fprintln(w, "AGENT\tLAST\tPATH")
 			for _, agentID := range agents {
 				reportPath := filepath.Join(env.ProjectDir, "agents", agentID, prompts.FullReportFile)
-				printReportRow(reportPath, agentID, cwd)
+				if fi, err := os.Stat(reportPath); err == nil {
+					fmt.Fprintf(w, "%s\t%s\t%s\n", agentID, fmtDateAge(fi.ModTime()), relPath(cwd, reportPath))
+				} else {
+					fmt.Fprintf(w, "%s\t-\t\n", agentID)
+				}
 			}
-		}
-	}
 
-	reviewPath := filepath.Join(env.ProjectDir, "supervisor", "review.md")
-	if fi, err := os.Stat(reviewPath); err == nil {
-		relPath, _ := filepath.Rel(cwd, reviewPath)
-		fmt.Printf("  %-25s %-20s %s\n", "review", formatDateAge(fi.ModTime()), relPath)
+			reviewPath := filepath.Join(env.ProjectDir, "supervisor", "review.md")
+			if fi, err := os.Stat(reviewPath); err == nil {
+				fmt.Fprintf(w, "%s\t%s\t%s\n", "review", fmtDateAge(fi.ModTime()), relPath(cwd, reviewPath))
+			}
+			w.Flush()
+		}
 	}
 
 	return nil
@@ -87,28 +91,3 @@ func tildeHome(p string) string {
 	return p
 }
 
-func printReportRow(path, label, cwd string) {
-	fi, err := os.Stat(path)
-	if err != nil {
-		fmt.Printf("  %-25s -\n", label)
-		return
-	}
-	relPath, _ := filepath.Rel(cwd, path)
-	fmt.Printf("  %-25s %-20s %s\n", label, formatDateAge(fi.ModTime()), relPath)
-}
-
-func formatDateAge(t time.Time) string {
-	date := t.Format("01/02")
-	age := time.Since(t)
-	switch {
-	case age < time.Minute:
-		return date + " (just now)"
-	case age < time.Hour:
-		return fmt.Sprintf("%s (%dm ago)", date, int(age.Minutes()))
-	case age < 24*time.Hour:
-		return fmt.Sprintf("%s (%dh ago)", date, int(age.Hours()))
-	default:
-		days := int(age.Hours()) / 24
-		return fmt.Sprintf("%s (%dd ago)", date, days)
-	}
-}
