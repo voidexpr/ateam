@@ -7,7 +7,7 @@ import (
 )
 
 func TestFindOrg(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	orgDir := filepath.Join(tmp, ".ateamorg")
 	if err := os.MkdirAll(filepath.Join(orgDir, "defaults"), 0755); err != nil {
 		t.Fatal(err)
@@ -60,7 +60,7 @@ func TestFindOrg(t *testing.T) {
 }
 
 func TestFindProject(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	projectDir := filepath.Join(tmp, ".ateam")
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		t.Fatal(err)
@@ -107,7 +107,7 @@ func TestFindProject(t *testing.T) {
 }
 
 func TestFindOrgNotFound(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	_, err := FindOrg(tmp)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -115,7 +115,7 @@ func TestFindOrgNotFound(t *testing.T) {
 }
 
 func TestFindProjectNotFound(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	_, err := FindProject(tmp)
 	if err == nil {
 		t.Fatal("expected error, got nil")
