@@ -77,7 +77,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 	timeout := env.Config.Report.EffectiveTimeout(reportTimeout)
 	reportType := "full"
 
-	cr := &runner.ClaudeRunner{LogFile: env.RunnerLogPath()}
+	cr := &runner.ClaudeRunner{LogFile: env.RunnerLogPath(), ProjectDir: env.ProjectDir}
 	var tasks []runner.PoolTask
 	for _, agentID := range agentIDs {
 		prompt, err := prompts.AssembleAgentPrompt(env.OrgDir, env.ProjectDir, agentID, env.SourceDir, extraPrompt, meta)

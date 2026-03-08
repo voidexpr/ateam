@@ -84,7 +84,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Supervisor reviewing reports (%dm timeout)...\n", timeout)
 
-	cr := &runner.ClaudeRunner{LogFile: env.RunnerLogPath()}
+	cr := &runner.ClaudeRunner{LogFile: env.RunnerLogPath(), ProjectDir: env.ProjectDir}
 	opts := runner.RunOpts{
 		AgentID:              "supervisor",
 		OutputDir:            reviewDir,
