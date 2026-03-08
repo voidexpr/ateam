@@ -16,6 +16,7 @@ import (
 // ClaudeRunner holds shared execution config for invoking claude.
 type ClaudeRunner struct {
 	ExtraArgs []string
+	LogFile   string // append-only runner log (e.g. .ateam/logs/runner.log)
 }
 
 // RunOpts holds per-invocation settings.
@@ -26,6 +27,8 @@ type RunOpts struct {
 	ErrorMessageFilePath string // where to write error info (on failure only)
 	WorkDir              string // cwd for the subprocess
 	TimeoutMin           int
+	HistoryDir           string // where to archive the prompt (e.g. agents/<name>/history)
+	PromptName           string // archive name (e.g. "report_prompt.md", "review_prompt.md")
 }
 
 // RunProgress is a lightweight status sent on a channel during execution.
@@ -111,6 +114,10 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 
 	args := []string{"-p", "--output-format", "stream-json", "--verbose"}
 	args = append(args, r.ExtraArgs...)
+	cliStr := "claude " + strings.Join(args, " ")
+
+	// Archive the prompt to history before running.
+	promptFile := archivePrompt(opts.HistoryDir, opts.PromptName, prompt)
 
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	if opts.WorkDir != "" {
@@ -126,7 +133,10 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = io.MultiWriter(ef, &stderrBuf)
 
+	appendLog(r.LogFile, opts.AgentID, "start", cliStr, promptFile)
+
 	if err := cmd.Start(); err != nil {
+		appendLog(r.LogFile, opts.AgentID, "error", cliStr, err.Error())
 		return failEarly(fmt.Errorf("cannot start claude: %w", err))
 	}
 
@@ -244,6 +254,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 			_ = os.MkdirAll(dir, 0755)
 			_ = os.WriteFile(opts.LastMessageFilePath, []byte(output), 0644)
 		}
+		appendLog(r.LogFile, opts.AgentID, "ok", cliStr, "")
 		emitProgress(PhaseDone, "", totalTools, eventCount)
 	} else {
 		switch {
@@ -257,6 +268,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 			summary.Err = fmt.Errorf("claude produced no result event")
 		}
 		writeErrorFile(opts.ErrorMessageFilePath, summary, stderr)
+		appendLog(r.LogFile, opts.AgentID, "error", cliStr, summary.Err.Error())
 		emitProgress(PhaseError, "", totalTools, eventCount)
 	}
 
@@ -302,6 +314,40 @@ func writeErrorFile(path string, s RunSummary, stderr string) {
 	}
 
 	_ = os.WriteFile(path, []byte(b.String()), 0644)
+}
+
+func appendLog(logFile, agentID, status, cli string, extra ...string) {
+	if logFile == "" {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(logFile), 0755)
+	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	ts := time.Now().Format(time.RFC3339)
+	fmt.Fprintf(f, "%s\t%s\t%s\t%s", ts, agentID, status, cli)
+	for _, e := range extra {
+		if e != "" {
+			fmt.Fprintf(f, "\t%s", e)
+		}
+	}
+	f.Write([]byte("\n"))
+}
+
+// archivePrompt writes the prompt to historyDir and returns the file path (empty if skipped).
+func archivePrompt(historyDir, promptName, prompt string) string {
+	if historyDir == "" || promptName == "" {
+		return ""
+	}
+	_ = os.MkdirAll(historyDir, 0755)
+	ts := time.Now().Format("2006-01-02_1504")
+	name := strings.ReplaceAll(fmt.Sprintf("%s.%s", ts, promptName), " ", "_")
+	path := filepath.Join(historyDir, name)
+	_ = os.WriteFile(path, []byte(prompt), 0644)
+	return path
 }
 
 // FormatDuration returns a human-readable duration string.

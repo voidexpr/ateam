@@ -40,6 +40,10 @@ func (e *ResolvedEnv) ReviewHistoryDir() string {
 	return filepath.Join(e.ProjectDir, "supervisor", "history")
 }
 
+func (e *ResolvedEnv) RunnerLogPath() string {
+	return filepath.Join(e.ProjectDir, "logs", "runner.log")
+}
+
 // OrgRoot returns the parent directory of .ateamorg.
 func (e *ResolvedEnv) OrgRoot() string {
 	return filepath.Dir(e.OrgDir)
