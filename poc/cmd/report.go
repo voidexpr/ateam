@@ -28,7 +28,7 @@ var reportCmd = &cobra.Command{
 	Long: `Run one or more agents in parallel to analyze the project source code
 and produce markdown reports.
 
-Works from any git project directory — discovers or creates the .ateam/ structure automatically.
+Works from any project directory — discovers the .ateamorg/ and .ateam/ structure.
 
 Example:
   ateam report --agents all
@@ -58,13 +58,12 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	proj, err := root.Resolve(agentIDs)
+	env, err := root.Resolve(orgFlag, projectFlag)
 	if err != nil {
 		return err
 	}
 
-	// Ensure agent dirs and default prompts exist
-	if err := root.EnsureAgents(proj.ProjectDir, agentIDs); err != nil {
+	if err := root.EnsureAgents(env.ProjectDir, agentIDs); err != nil {
 		return err
 	}
 
@@ -73,15 +72,14 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	meta, _ := gitutil.GetProjectMeta(proj.SourceDir)
+	meta, _ := gitutil.GetProjectMeta(env.SourceDir)
 
-	timeout := proj.Config.Execution.EffectiveTimeout(reportTimeout)
+	timeout := env.Config.Report.EffectiveTimeout(reportTimeout)
 	reportType := "full"
 
-	// Build tasks
 	var tasks []runner.AgentTask
 	for _, agentID := range agentIDs {
-		prompt, err := prompts.AssembleAgentPrompt(proj.AteamRoot, proj.ProjectDir, agentID, proj.SourceDir, extraPrompt, meta)
+		prompt, err := prompts.AssembleAgentPrompt(env.OrgDir, env.ProjectDir, agentID, env.SourceDir, extraPrompt, meta)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", agentID, err)
 			continue
@@ -89,8 +87,8 @@ func runReport(cmd *cobra.Command, args []string) error {
 		tasks = append(tasks, runner.AgentTask{
 			AgentID:    agentID,
 			Prompt:     prompt,
-			OutputFile: proj.AgentReportPath(agentID, reportType),
-			WorkDir:    proj.SourceDir,
+			OutputFile: env.AgentReportPath(agentID, reportType),
+			WorkDir:    env.SourceDir,
 		})
 	}
 
@@ -111,7 +109,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Running %d agent(s) (max %d parallel, %dm timeout)...\n\n",
-		len(tasks), proj.Config.Execution.MaxParallel, timeout)
+		len(tasks), env.Config.Report.MaxParallel, timeout)
 
 	for _, t := range tasks {
 		fmt.Printf("  %-25s queued\n", t.AgentID)
@@ -119,11 +117,11 @@ func runReport(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	ctx := context.Background()
-	results := runner.RunPool(ctx, tasks, proj.Config.Execution.MaxParallel, timeout)
+	results := runner.RunPool(ctx, tasks, env.Config.Report.MaxParallel, timeout)
 
 	var succeeded, failed int
 	for _, r := range results {
-		reportPath := proj.AgentReportPath(r.AgentID, reportType)
+		reportPath := env.AgentReportPath(r.AgentID, reportType)
 		if r.Result.Err != nil {
 			fmt.Printf("  %-25s FAILED  (%s) — %v\n", r.AgentID, runner.FormatDuration(r.Result.Duration), r.Result.Err)
 			errorReport := fmt.Sprintf("# Report Failed: %s\n\nError: %v\n\nDuration: %s\n",
@@ -135,7 +133,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 		} else {
 			producedAt := time.Now().Format("2006-01-02 15:04")
 			fmt.Printf("%s: %s (produced at %s, took %s)\n", r.AgentID, reportPath, producedAt, runner.FormatDuration(r.Result.Duration))
-			historyDir := proj.AgentHistoryDir(r.AgentID)
+			historyDir := env.AgentHistoryDir(r.AgentID)
 			if err := runner.ArchiveFile(reportPath, historyDir, reportType+"_report.md"); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not archive report for %s: %v\n", r.AgentID, err)
 			}

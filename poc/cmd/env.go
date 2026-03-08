@@ -15,7 +15,7 @@ import (
 var envCmd = &cobra.Command{
 	Use:   "env",
 	Short: "Show the current ATeam environment",
-	Long: `Print .ateam location, project status, and latest report/review timestamps.
+	Long: `Print organization, project status, and latest report/review timestamps.
 
 This command is read-only — it never creates or modifies anything.`,
 	Args: cobra.NoArgs,
@@ -23,50 +23,49 @@ This command is read-only — it never creates or modifies anything.`,
 }
 
 func runEnv(cmd *cobra.Command, args []string) error {
-	info, err := root.Lookup()
+	env, err := root.Lookup()
 	if err != nil {
 		return err
 	}
 
-	cwd, _ := os.Getwd()
-	relFromCwd, _ := filepath.Rel(cwd, info.AteamRoot)
-	fmt.Printf("ateam root:  %s  (from cwd: %s)\n", info.AteamRoot, relFromCwd)
+	fmt.Printf("org:         %s\n", env.OrgDir)
 
-	if info.InsideAteam {
-		fmt.Printf("execute:     in .ateam project\n")
-	} else {
-		fmt.Printf("execute:     in source project\n")
-	}
-
-	ateamParent := filepath.Dir(info.AteamRoot)
-	if info.SourceGit != "" {
-		rel, _ := filepath.Rel(ateamParent, info.SourceGit)
-		fmt.Printf("source git:  %s\n", rel)
-	}
-
-	if info.ProjectDir == "" {
+	if env.ProjectDir == "" {
 		fmt.Printf("project:     (not initialized)\n")
 		return nil
 	}
 
-	fmt.Printf("project:     %s\n", info.ProjectRelPath)
-	relProjDir, _ := filepath.Rel(info.AteamRoot, info.ProjectDir)
-	fmt.Printf("project dir: %s\n", relProjDir)
-	fmt.Printf("agents:      %s\n", strings.Join(info.Agents, ", "))
+	fmt.Printf("project:     %s\n", env.ProjectName)
+	fmt.Printf("project dir: %s\n", env.ProjectDir)
 
-	if len(info.Agents) > 0 {
-		fmt.Println()
-		fmt.Println("Reports:")
-		for _, agentID := range info.Agents {
-			reportPath := filepath.Join(info.ProjectDir, "agents", agentID, prompts.FullReportFile)
-			printFileAge(reportPath, agentID, info.AteamRoot)
+	if env.SourceDir != "" {
+		fmt.Printf("source:      %s\n", env.SourceDir)
+	}
+	if env.GitRepoDir != "" {
+		fmt.Printf("git repo:    %s\n", env.GitRepoDir)
+	}
+	if env.Config != nil && env.Config.Git.RemoteOriginURL != "" {
+		fmt.Printf("git remote:  %s\n", env.Config.Git.RemoteOriginURL)
+	}
+
+	if env.Config != nil {
+		agents := env.Config.EnabledAgents()
+		if len(agents) > 0 {
+			fmt.Printf("agents:      %s\n", strings.Join(agents, ", "))
+
+			fmt.Println()
+			fmt.Println("Reports:")
+			for _, agentID := range agents {
+				reportPath := filepath.Join(env.ProjectDir, "agents", agentID, prompts.FullReportFile)
+				printFileAge(reportPath, agentID, env.ProjectDir)
+			}
 		}
 	}
 
-	reviewPath := filepath.Join(info.ProjectDir, "supervisor", "review.md")
+	reviewPath := filepath.Join(env.ProjectDir, "supervisor", "review.md")
 	if fi, err := os.Stat(reviewPath); err == nil {
 		fmt.Println()
-		rel, _ := filepath.Rel(info.AteamRoot, reviewPath)
+		rel, _ := filepath.Rel(env.ProjectDir, reviewPath)
 		fmt.Printf("Review:  %s  (%s)\n", rel, formatAge(fi.ModTime()))
 	}
 

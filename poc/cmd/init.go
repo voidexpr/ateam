@@ -2,61 +2,143 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 
-	"github.com/ateam-poc/internal/config"
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
 	"github.com/spf13/cobra"
 )
 
-var initAgents []string
+var (
+	initSource    string
+	initGitRemote string
+	initName      string
+	initAgents    []string
+)
 
 var initCmd = &cobra.Command{
-	Use:   "init",
-	Short: "Initialize the current git project for ATeam",
-	Long: `Discovers the source git directory and .ateam/ directory, then creates or updates
-the project entry with the specified agents.
+	Use:   "init [PATH]",
+	Short: "Initialize a project for ATeam",
+	Long: `Create a .ateam/ project directory at PATH (defaults to ".").
 
-If the project already exists, new agents are merged into the config.
+Requires a .ateamorg/ discoverable from the current directory.
 
 Example:
-  ateam init --agents all
-  ateam init --agents testing_basic,security`,
-	Args: cobra.NoArgs,
+  ateam init
+  ateam init --name myproject --agent testing_basic,security
+  ateam init /path/to/project --source /path/to/source`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runInit,
 }
 
 func init() {
-	initCmd.Flags().StringSliceVar(&initAgents, "agents", []string{"all"}, prompts.AgentFlagUsage())
+	initCmd.Flags().StringVar(&initSource, "source", "", "source directory (defaults to PATH)")
+	initCmd.Flags().StringVar(&initGitRemote, "git-remote", "", "git remote origin URL")
+	initCmd.Flags().StringVar(&initName, "name", "", "project name (defaults to relative path from org parent to cwd)")
+	initCmd.Flags().StringSliceVar(&initAgents, "agent", nil, "agents to enable (if omitted, all are enabled)")
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
-	agentIDs, err := prompts.ResolveAgentList(initAgents)
+	path := "."
+	if len(args) > 0 {
+		path = args[0]
+	}
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("cannot resolve path: %w", err)
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("cannot get working directory: %w", err)
+	}
+
+	orgDir, err := root.FindOrg(cwd)
 	if err != nil {
 		return err
 	}
 
-	proj, err := root.Resolve(agentIDs)
+	// Name defaults to relative path from org parent to cwd
+	name := initName
+	if name == "" {
+		orgParent := filepath.Dir(orgDir)
+		rel, relErr := filepath.Rel(orgParent, absPath)
+		if relErr != nil {
+			rel = filepath.Base(absPath)
+		}
+		name = rel
+	}
+
+	// Source defaults to PATH
+	source := initSource
+	if source == "" {
+		source = absPath
+	} else {
+		source, err = filepath.Abs(source)
+		if err != nil {
+			return fmt.Errorf("cannot resolve source path: %w", err)
+		}
+	}
+
+	// Git: auto-discover from source dir
+	gitRepo := ""
+	gitRemote := initGitRemote
+
+	gitTopLevel := execGitCmd(source, "rev-parse", "--show-toplevel")
+	if gitTopLevel != "" {
+		rel, relErr := filepath.Rel(source, gitTopLevel)
+		if relErr == nil {
+			gitRepo = rel
+		} else {
+			gitRepo = gitTopLevel
+		}
+	}
+
+	if gitRemote == "" {
+		gitRemote = execGitCmd(source, "config", "remote.origin.url")
+	}
+
+	// Agents: if --agent provided, those are enabled, rest disabled; if not, all enabled
+	allAgentIDs := prompts.AllAgentIDs
+	var enabledAgents []string
+	if len(initAgents) > 0 {
+		resolved, resolveErr := prompts.ResolveAgentList(initAgents)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		enabledAgents = resolved
+	} else {
+		enabledAgents = allAgentIDs
+	}
+
+	opts := root.InitProjectOpts{
+		Name:            name,
+		Source:          source,
+		GitRepo:         gitRepo,
+		GitRemoteOrigin: gitRemote,
+		EnabledAgents:   enabledAgents,
+		AllAgents:       allAgentIDs,
+	}
+
+	projDir, err := root.InitProject(absPath, orgDir, opts)
 	if err != nil {
 		return err
 	}
 
-	// Merge new agents into existing config
-	merged := mergeAgents(proj.Config.Agents.Enabled, agentIDs)
-	proj.Config.Agents.Enabled = merged
-	if err := config.Save(proj.ProjectDir, *proj.Config); err != nil {
-		return err
+	fmt.Printf("Project:  %s\n", name)
+	fmt.Printf("  Dir:    %s\n", projDir)
+	fmt.Printf("  Source: %s\n", source)
+	if gitRepo != "" {
+		fmt.Printf("  Git:    %s\n", gitRepo)
 	}
-
-	// Ensure agent dirs and prompts exist
-	if err := root.EnsureAgents(proj.ProjectDir, agentIDs); err != nil {
-		return err
+	if gitRemote != "" {
+		fmt.Printf("  Remote: %s\n", gitRemote)
 	}
-
-	fmt.Printf("Project: %s\n", proj.ProjectRelPath)
-	fmt.Printf("  Source git: %s\n", proj.SourceDir)
-	fmt.Printf("  ATeam root: %s\n", proj.AteamRoot)
-	fmt.Printf("  Agents: %v\n", merged)
+	fmt.Printf("  Agents: %s\n", strings.Join(enabledAgents, ", "))
 	fmt.Printf("\nNext steps:\n")
 	fmt.Printf("  ateam report --agents all\n")
 	fmt.Printf("  ateam review\n")
@@ -64,17 +146,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func mergeAgents(existing, new []string) []string {
-	seen := make(map[string]bool)
-	for _, id := range existing {
-		seen[id] = true
+func execGitCmd(dir string, gitArgs ...string) string {
+	cmd := exec.Command("git", gitArgs...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
 	}
-	result := append([]string{}, existing...)
-	for _, id := range new {
-		if !seen[id] {
-			result = append(result, id)
-			seen[id] = true
-		}
-	}
-	return result
+	return strings.TrimSpace(string(out))
 }
