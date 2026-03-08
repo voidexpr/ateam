@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"text/tabwriter"
 
-	"github.com/ateam-poc/internal/config"
 	"github.com/ateam-poc/internal/root"
 	"github.com/spf13/cobra"
 )
@@ -34,56 +33,38 @@ func runProjects(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	start := filepath.Dir(orgDir)
+	orgParent := filepath.Dir(orgDir)
 
-	type projectInfo struct {
-		name      string
-		path      string
-		sourceDir string
-		gitRepo   string
-		gitRemote string
+	type projectRow struct {
+		name, path, source, gitRepo, gitRemote string
 	}
 
-	var projects []projectInfo
+	var rows []projectRow
 
-	_ = filepath.WalkDir(start, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
+	_ = root.WalkProjects(orgDir, func(p root.ProjectInfo) error {
+		relPath, _ := filepath.Rel(orgParent, filepath.Dir(p.Dir))
+		if relPath == "" {
+			relPath = "."
 		}
-		if d.IsDir() && d.Name() == root.OrgDirName {
-			return filepath.SkipDir
-		}
-		if d.IsDir() && d.Name() == root.ProjectDirName {
-			cfg, loadErr := config.Load(path)
-			if loadErr != nil {
-				return filepath.SkipDir
-			}
-			projPath := filepath.Dir(path)
-			relPath, _ := filepath.Rel(start, projPath)
-			if relPath == "" {
-				relPath = "."
-			}
-			projects = append(projects, projectInfo{
-				name:      cfg.Project.Name,
-				path:      relPath,
-				sourceDir: cfg.Project.Source,
-				gitRepo:   cfg.Git.Repo,
-				gitRemote: cfg.Git.RemoteOriginURL,
-			})
-			return filepath.SkipDir
-		}
+		rows = append(rows, projectRow{
+			name:      p.Config.Project.Name,
+			path:      relPath,
+			source:    p.Config.Project.Source,
+			gitRepo:   p.Config.Git.Repo,
+			gitRemote: p.Config.Git.RemoteOriginURL,
+		})
 		return nil
 	})
 
-	if len(projects) == 0 {
+	if len(rows) == 0 {
 		fmt.Println("No projects found.")
 		return nil
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "PROJECT\tPATH\tSOURCE DIR\tGIT REPO DIR\tGIT REMOTE")
-	for _, p := range projects {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", p.name, p.path, p.sourceDir, p.gitRepo, p.gitRemote)
+	for _, r := range rows {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.name, r.path, r.source, r.gitRepo, r.gitRemote)
 	}
 	w.Flush()
 

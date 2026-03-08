@@ -40,37 +40,37 @@ func (e *ResolvedEnv) ReviewHistoryDir() string {
 	return filepath.Join(e.ProjectDir, "supervisor", "history")
 }
 
+func (e *ResolvedEnv) populateFromConfig(projectDir string, cfg *config.Config) {
+	e.Config = cfg
+	e.ProjectName = cfg.Project.Name
+	if cfg.Project.Source != "" {
+		e.SourceDir = resolveRelPath(projectDir, cfg.Project.Source)
+	}
+	if cfg.Git.Repo != "" && e.SourceDir != "" {
+		e.GitRepoDir = resolveRelPath(e.SourceDir, cfg.Git.Repo)
+	}
+}
+
 // FindOrg walks up from cwd looking for a .ateamorg directory.
 func FindOrg(cwd string) (string, error) {
-	if dir, ok := findInPath(cwd, OrgDirName); ok {
-		return dir, nil
-	}
-
-	dir := filepath.Clean(cwd)
-	for {
-		candidate := filepath.Join(dir, OrgDirName)
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return realPath(candidate), nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-
-	return "", fmt.Errorf("no %s/ found (run 'ateam install' first)", OrgDirName)
+	return findDirUp(cwd, OrgDirName, "run 'ateam install' first")
 }
 
 // FindProject walks up from cwd looking for a .ateam directory.
 func FindProject(cwd string) (string, error) {
-	if dir, ok := findInPath(cwd, ProjectDirName); ok {
+	return findDirUp(cwd, ProjectDirName, "not inside an ateam project")
+}
+
+// findDirUp walks up from cwd looking for a directory named target.
+// If cwd is already inside the target directory, returns it directly.
+func findDirUp(cwd, target, errHint string) (string, error) {
+	if dir, ok := findInPath(cwd, target); ok {
 		return dir, nil
 	}
 
 	dir := filepath.Clean(cwd)
 	for {
-		candidate := filepath.Join(dir, ProjectDirName)
+		candidate := filepath.Join(dir, target)
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
 			return realPath(candidate), nil
 		}
@@ -81,7 +81,7 @@ func FindProject(cwd string) (string, error) {
 		dir = parent
 	}
 
-	return "", fmt.Errorf("no %s/ found (not inside an ateam project)", ProjectDirName)
+	return "", fmt.Errorf("no %s/ found (%s)", target, errHint)
 }
 
 // findInPath checks if cwd is inside a directory named target.
@@ -128,19 +128,10 @@ func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
 	}
 
 	env := &ResolvedEnv{
-		OrgDir:      orgDir,
-		ProjectDir:  projectDir,
-		ProjectName: cfg.Project.Name,
-		Config:      cfg,
+		OrgDir:     orgDir,
+		ProjectDir: projectDir,
 	}
-
-	if cfg.Project.Source != "" {
-		env.SourceDir = resolveRelPath(projectDir, cfg.Project.Source)
-	}
-
-	if cfg.Git.Repo != "" && env.SourceDir != "" {
-		env.GitRepoDir = resolveRelPath(env.SourceDir, cfg.Git.Repo)
-	}
+	env.populateFromConfig(projectDir, cfg)
 
 	return env, nil
 }
@@ -171,18 +162,40 @@ func Lookup() (*ResolvedEnv, error) {
 		return env, nil
 	}
 
-	env.Config = cfg
-	env.ProjectName = cfg.Project.Name
-
-	if cfg.Project.Source != "" {
-		env.SourceDir = resolveRelPath(projectDir, cfg.Project.Source)
-	}
-
-	if cfg.Git.Repo != "" && env.SourceDir != "" {
-		env.GitRepoDir = resolveRelPath(env.SourceDir, cfg.Git.Repo)
-	}
+	env.populateFromConfig(projectDir, cfg)
 
 	return env, nil
+}
+
+// ProjectInfo holds metadata about a discovered project.
+type ProjectInfo struct {
+	Dir    string
+	Config *config.Config
+}
+
+// WalkProjects walks from orgDir's parent looking for .ateam/config.toml files.
+// The callback receives each discovered project. Return filepath.SkipAll to stop early.
+func WalkProjects(orgDir string, fn func(ProjectInfo) error) error {
+	start := filepath.Dir(orgDir)
+	return filepath.WalkDir(start, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() && d.Name() == OrgDirName {
+			return filepath.SkipDir
+		}
+		if d.IsDir() && d.Name() == ProjectDirName {
+			cfg, loadErr := config.Load(path)
+			if loadErr != nil {
+				return filepath.SkipDir
+			}
+			if err := fn(ProjectInfo{Dir: path, Config: cfg}); err != nil {
+				return err
+			}
+			return filepath.SkipDir
+		}
+		return nil
+	})
 }
 
 // resolveOrgByName treats override as a path and looks for .ateamorg child there.
@@ -194,35 +207,21 @@ func resolveOrgByName(override string) (string, error) {
 	return "", fmt.Errorf("no %s/ found under %s", OrgDirName, override)
 }
 
-// resolveProjectByName walks from orgDir's parent looking for a .ateam/config.toml
-// where project.name matches the given name.
+// resolveProjectByName walks from orgDir's parent looking for a project with matching name.
 func resolveProjectByName(orgDir, name string) (string, error) {
-	start := filepath.Dir(orgDir)
-
 	var found string
-	err := filepath.WalkDir(start, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() && d.Name() == OrgDirName {
-			return filepath.SkipDir
-		}
-		if d.IsDir() && d.Name() == ProjectDirName {
-			configPath := filepath.Join(path, "config.toml")
-			cfg, loadErr := config.Load(filepath.Dir(configPath))
-			if loadErr == nil && cfg.Project.Name == name {
-				found = path
-				return filepath.SkipAll
-			}
-			return filepath.SkipDir
+	err := WalkProjects(orgDir, func(p ProjectInfo) error {
+		if p.Config.Project.Name == name {
+			found = p.Dir
+			return filepath.SkipAll
 		}
 		return nil
 	})
-	if err != nil {
+	if err != nil && err != filepath.SkipAll {
 		return "", fmt.Errorf("error searching for project %q: %w", name, err)
 	}
 	if found == "" {
-		return "", fmt.Errorf("project %q not found under %s", name, start)
+		return "", fmt.Errorf("project %q not found under %s", name, filepath.Dir(orgDir))
 	}
 	return realPath(found), nil
 }
@@ -251,4 +250,3 @@ func mustGetwd() string {
 	}
 	return cwd
 }
-

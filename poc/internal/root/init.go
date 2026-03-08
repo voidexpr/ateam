@@ -85,9 +85,9 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 	}
 	for _, id := range agentIDs {
 		if enabledSet[id] {
-			agents[id] = "enabled"
+			agents[id] = config.AgentEnabled
 		} else {
-			agents[id] = "disabled"
+			agents[id] = config.AgentDisabled
 		}
 	}
 
@@ -127,21 +127,9 @@ func EnsureAgents(projectDir string, agentIDs []string) error {
 // checkDuplicateProjectName walks from orgDir's parent looking for any
 // .ateam/config.toml with a matching project.name.
 func checkDuplicateProjectName(orgDir, name string) error {
-	start := filepath.Dir(orgDir)
-
-	return filepath.WalkDir(start, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() && d.Name() == OrgDirName {
-			return filepath.SkipDir
-		}
-		if d.IsDir() && d.Name() == ProjectDirName {
-			cfg, loadErr := config.Load(path)
-			if loadErr == nil && cfg.Project.Name == name {
-				return fmt.Errorf("project %q already exists at %s", name, filepath.Dir(path))
-			}
-			return filepath.SkipDir
+	return WalkProjects(orgDir, func(p ProjectInfo) error {
+		if p.Config.Project.Name == name {
+			return fmt.Errorf("project %q already exists at %s", name, filepath.Dir(p.Dir))
 		}
 		return nil
 	})

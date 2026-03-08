@@ -113,7 +113,10 @@ func DiscoverReports(projectDir string) ([]AgentReport, error) {
 		if err != nil {
 			continue
 		}
-		info, _ := os.Stat(reportPath)
+		info, err := os.Stat(reportPath)
+		if err != nil {
+			continue
+		}
 		reports = append(reports, AgentReport{
 			AgentID: entry.Name(),
 			Path:    reportPath,

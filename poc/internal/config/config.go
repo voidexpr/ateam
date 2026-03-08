@@ -12,6 +12,9 @@ import (
 const (
 	DefaultMaxParallel               = 3
 	DefaultAgentReportTimeoutMinutes = 10
+
+	AgentEnabled  = "enabled"
+	AgentDisabled = "disabled"
 )
 
 // Config represents the project's config.toml.
@@ -55,7 +58,7 @@ func (r ReportConfig) EffectiveTimeout(override int) int {
 func (c Config) EnabledAgents() []string {
 	var enabled []string
 	for name, status := range c.Agents {
-		if status == "enabled" {
+		if status == AgentEnabled {
 			enabled = append(enabled, name)
 		}
 	}
