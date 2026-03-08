@@ -28,7 +28,7 @@ var reviewCmd = &cobra.Command{
 	Long: `Read all agent reports and have the supervisor produce a prioritized
 decisions document.
 
-Works from any git project directory or from within the .ateam/ tree.
+Works from any project directory — discovers the .ateamorg/ and .ateam/ structure.
 
 Example:
   ateam review
@@ -46,7 +46,7 @@ func init() {
 }
 
 func runReview(cmd *cobra.Command, args []string) error {
-	proj, err := root.Resolve(nil)
+	env, err := root.Resolve(orgFlag, projectFlag)
 	if err != nil {
 		return err
 	}
@@ -61,21 +61,21 @@ func runReview(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	meta, _ := gitutil.GetProjectMeta(proj.SourceDir)
+	meta, _ := gitutil.GetProjectMeta(env.SourceDir)
 
-	prompt, err := prompts.AssembleReviewPrompt(proj.AteamRoot, proj.ProjectDir, meta, extraPrompt, customPrompt)
+	prompt, err := prompts.AssembleReviewPrompt(env.OrgDir, env.ProjectDir, meta, extraPrompt, customPrompt)
 	if err != nil {
 		return err
 	}
 
 	if reviewDryRun {
-		return printReviewDryRun(proj, prompt)
+		return printReviewDryRun(env, prompt)
 	}
 
-	timeout := proj.Config.Execution.EffectiveTimeout(reviewTimeout)
+	timeout := env.Config.Report.EffectiveTimeout(reviewTimeout)
 
-	reviewFile := proj.ReviewPath()
-	historyDir := proj.ReviewHistoryDir()
+	reviewFile := env.ReviewPath()
+	historyDir := env.ReviewHistoryDir()
 
 	if err := os.MkdirAll(historyDir, 0755); err != nil {
 		return fmt.Errorf("cannot create review history directory: %w", err)
@@ -104,8 +104,8 @@ func runReview(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func printReviewDryRun(proj *root.ResolvedProject, prompt string) error {
-	reports, _ := prompts.DiscoverReports(proj.ProjectDir)
+func printReviewDryRun(env *root.ResolvedEnv, prompt string) error {
+	reports, _ := prompts.DiscoverReports(env.ProjectDir)
 
 	sort.Slice(reports, func(i, j int) bool {
 		return reports[i].ModTime.After(reports[j].ModTime)
@@ -116,7 +116,7 @@ func printReviewDryRun(proj *root.ResolvedProject, prompt string) error {
 		fmt.Println("  (none)")
 	}
 	for _, r := range reports {
-		relPath, _ := filepath.Rel(filepath.Dir(proj.AteamRoot), r.Path)
+		relPath, _ := filepath.Rel(filepath.Dir(env.OrgDir), r.Path)
 		if relPath == "" {
 			relPath = r.Path
 		}

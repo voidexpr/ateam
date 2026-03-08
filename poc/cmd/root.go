@@ -4,6 +4,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	orgFlag     string
+	projectFlag string
+)
+
 var rootCmd = &cobra.Command{
 	Use:   "ateam",
 	Short: "ATeam — background agents for code quality",
@@ -15,10 +20,14 @@ func Execute() error {
 }
 
 func init() {
+	rootCmd.PersistentFlags().StringVarP(&orgFlag, "org", "o", "", "organization path override")
+	rootCmd.PersistentFlags().StringVarP(&projectFlag, "project", "p", "", "project name override")
+
 	rootCmd.AddCommand(envCmd)
 	rootCmd.AddCommand(installCmd)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(reportCmd)
 	rootCmd.AddCommand(reviewCmd)
-	rootCmd.AddCommand(updatePromptsCmd)
+	rootCmd.AddCommand(updateCmd)
+	rootCmd.AddCommand(projectsCmd)
 }
