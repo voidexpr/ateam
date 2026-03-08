@@ -141,10 +141,10 @@ func embeddedFiles() []embeddedFile {
 
 // DiffOrgDefaults compares on-disk prompt files against embedded defaults
 // and returns a list of files that differ.
-func DiffOrgDefaults(ateamRoot string) []PromptDiff {
+func DiffOrgDefaults(orgDir string) []PromptDiff {
 	var diffs []PromptDiff
 	for _, f := range embeddedFiles() {
-		diskPath := filepath.Join(ateamRoot, f.rel)
+		diskPath := filepath.Join(orgDir, f.rel)
 		data, err := os.ReadFile(diskPath)
 		if err != nil {
 			diffs = append(diffs, PromptDiff{RelPath: f.rel, Status: "missing"})
@@ -159,7 +159,7 @@ func DiffOrgDefaults(ateamRoot string) []PromptDiff {
 
 // WriteOrgDefaults writes default prompt files to the org directory's defaults/.
 // If overwrite is true, existing files are replaced; otherwise they are skipped.
-func WriteOrgDefaults(ateamRoot string, overwrite bool) error {
+func WriteOrgDefaults(orgDir string, overwrite bool) error {
 	write := WriteIfNotExists
 	if overwrite {
 		write = func(path, content string) error {
@@ -168,7 +168,7 @@ func WriteOrgDefaults(ateamRoot string, overwrite bool) error {
 	}
 
 	for _, f := range embeddedFiles() {
-		diskPath := filepath.Join(ateamRoot, f.rel)
+		diskPath := filepath.Join(orgDir, f.rel)
 		if err := os.MkdirAll(filepath.Dir(diskPath), 0755); err != nil {
 			return fmt.Errorf("cannot create directory for %s: %w", f.rel, err)
 		}

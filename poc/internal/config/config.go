@@ -63,21 +63,6 @@ func (c Config) EnabledAgents() []string {
 	return enabled
 }
 
-// DefaultConfig returns a config with sensible defaults.
-func DefaultConfig(name, source string, agents map[string]string) Config {
-	return Config{
-		Project: ProjectConfig{
-			Name:   name,
-			Source: source,
-		},
-		Report: ReportConfig{
-			MaxParallel:               DefaultMaxParallel,
-			AgentReportTimeoutMinutes: DefaultAgentReportTimeoutMinutes,
-		},
-		Agents: agents,
-	}
-}
-
 // Load reads config.toml from the given directory.
 func Load(dir string) (*Config, error) {
 	path := filepath.Join(dir, "config.toml")

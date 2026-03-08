@@ -252,10 +252,3 @@ func mustGetwd() string {
 	return cwd
 }
 
-func mustHomeDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		panic(fmt.Sprintf("cannot determine home directory: %v", err))
-	}
-	return home
-}
