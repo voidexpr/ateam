@@ -28,8 +28,7 @@ type Config struct {
 }
 
 type ProjectConfig struct {
-	Name   string `toml:"name"`
-	Source string `toml:"source"`
+	Name string `toml:"name"`
 }
 
 type GitConfig struct {

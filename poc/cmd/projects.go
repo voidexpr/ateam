@@ -36,7 +36,7 @@ func runProjects(cmd *cobra.Command, args []string) error {
 	orgParent := filepath.Dir(orgDir)
 
 	type projectRow struct {
-		name, path, source, gitRepo, gitRemote string
+		name, path, gitRepo, gitRemote string
 	}
 
 	var rows []projectRow
@@ -49,7 +49,6 @@ func runProjects(cmd *cobra.Command, args []string) error {
 		rows = append(rows, projectRow{
 			name:      p.Config.Project.Name,
 			path:      relPath,
-			source:    p.Config.Project.Source,
 			gitRepo:   p.Config.Git.Repo,
 			gitRemote: p.Config.Git.RemoteOriginURL,
 		})
@@ -62,9 +61,9 @@ func runProjects(cmd *cobra.Command, args []string) error {
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "PROJECT\tPATH\tSOURCE DIR\tGIT REPO DIR\tGIT REMOTE")
+	fmt.Fprintln(w, "NAME\tPATH\tGIT REPO\tGIT REMOTE")
 	for _, r := range rows {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.name, r.path, r.source, r.gitRepo, r.gitRemote)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.name, r.path, r.gitRepo, r.gitRemote)
 	}
 	w.Flush()
 

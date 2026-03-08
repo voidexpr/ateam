@@ -13,7 +13,6 @@ import (
 )
 
 var (
-	initSource    string
 	initGitRemote string
 	initName      string
 	initAgents    []string
@@ -28,16 +27,14 @@ Requires a .ateamorg/ discoverable from the current directory.
 
 Example:
   ateam init
-  ateam init --name myproject --agent testing_basic,security
-  ateam init /path/to/project --source /path/to/source`,
+  ateam init --name myproject --agent testing_basic,security`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInit,
 }
 
 func init() {
-	initCmd.Flags().StringVar(&initSource, "source", "", "source directory (defaults to PATH)")
 	initCmd.Flags().StringVar(&initGitRemote, "git-remote", "", "git remote origin URL")
-	initCmd.Flags().StringVar(&initName, "name", "", "project name (defaults to relative path from org parent to cwd)")
+	initCmd.Flags().StringVar(&initName, "name", "", "project name (defaults to relative path from org root)")
 	initCmd.Flags().StringSliceVar(&initAgents, "agent", nil, "agents to enable (if omitted, all are enabled)")
 }
 
@@ -51,11 +48,13 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("cannot resolve path: %w", err)
 	}
+	absPath = evalSymlinks(absPath)
 
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("cannot get working directory: %w", err)
 	}
+	cwd = evalSymlinks(cwd)
 
 	orgDir, err := root.FindOrg(cwd)
 	if err != nil {
@@ -73,28 +72,13 @@ func runInit(cmd *cobra.Command, args []string) error {
 		name = rel
 	}
 
-	// Source: relative from project dir to source dir
-	// Default: "." (source IS the project dir)
-	source := "."
-	absSource := absPath
-	if initSource != "" {
-		absSource, err = filepath.Abs(initSource)
-		if err != nil {
-			return fmt.Errorf("cannot resolve source path: %w", err)
-		}
-		source, err = filepath.Rel(absPath, absSource)
-		if err != nil {
-			source = absSource // fallback to absolute
-		}
-	}
-
-	// Git: auto-discover from absolute source dir
+	// Git: auto-discover from project dir
 	gitRepo := ""
 	gitRemote := initGitRemote
 
-	gitTopLevel := execGitCmd(absSource, "rev-parse", "--show-toplevel")
+	gitTopLevel := execGitCmd(absPath, "rev-parse", "--show-toplevel")
 	if gitTopLevel != "" {
-		rel, relErr := filepath.Rel(absSource, gitTopLevel)
+		rel, relErr := filepath.Rel(absPath, gitTopLevel)
 		if relErr == nil {
 			gitRepo = rel
 		} else {
@@ -103,7 +87,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	if gitRemote == "" {
-		gitRemote = execGitCmd(absSource, "config", "remote.origin.url")
+		gitRemote = execGitCmd(absPath, "config", "remote.origin.url")
 	}
 
 	// Agents: if --agent provided, those are enabled, rest disabled; if not, all enabled
@@ -121,7 +105,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	opts := root.InitProjectOpts{
 		Name:            name,
-		Source:          source,
 		GitRepo:         gitRepo,
 		GitRemoteOrigin: gitRemote,
 		EnabledAgents:   enabledAgents,
@@ -133,17 +116,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Display paths relative to org root for readability
+	// Display
 	relOrg, _ := filepath.Rel(cwd, orgRoot)
-	displaySource, _ := filepath.Rel(orgRoot, absSource)
 	displayGit := ""
 	if gitTopLevel != "" {
 		displayGit, _ = filepath.Rel(orgRoot, gitTopLevel)
 	}
 
 	fmt.Printf("     Org: %s\n", relOrg)
-	fmt.Printf(" Project: %s\n", name)
-	fmt.Printf("  Source: %s\n", displaySource)
+	fmt.Printf("    Name: %s\n", name)
 	if displayGit != "" {
 		fmt.Printf("     Git: %s\n", displayGit)
 	}
@@ -166,4 +147,12 @@ func execGitCmd(dir string, gitArgs ...string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func evalSymlinks(p string) string {
+	resolved, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return p
+	}
+	return resolved
 }

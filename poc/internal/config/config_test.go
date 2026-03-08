@@ -10,7 +10,7 @@ func TestRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 
 	original := Config{
-		Project: ProjectConfig{Name: "myproject", Source: "/src"},
+		Project: ProjectConfig{Name: "myproject"},
 		Git:     GitConfig{Repo: "myrepo", RemoteOriginURL: "https://github.com/example/repo.git"},
 		Report: ReportConfig{
 			MaxParallel:               5,
@@ -34,9 +34,6 @@ func TestRoundTrip(t *testing.T) {
 
 	if loaded.Project.Name != original.Project.Name {
 		t.Errorf("Project.Name = %q, want %q", loaded.Project.Name, original.Project.Name)
-	}
-	if loaded.Project.Source != original.Project.Source {
-		t.Errorf("Project.Source = %q, want %q", loaded.Project.Source, original.Project.Source)
 	}
 	if loaded.Git.Repo != original.Git.Repo {
 		t.Errorf("Git.Repo = %q, want %q", loaded.Git.Repo, original.Git.Repo)
@@ -66,7 +63,6 @@ func TestLoadDefaults(t *testing.T) {
 	// Write a minimal config with no [report] section
 	content := `[project]
 name = "minimal"
-source = "/tmp/src"
 
 [agents]
 lint = "enabled"
@@ -94,7 +90,6 @@ func TestLoadDefaultsNilAgents(t *testing.T) {
 	// Write a config with no [agents] section
 	content := `[project]
 name = "noagents"
-source = "/tmp/src"
 `
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)

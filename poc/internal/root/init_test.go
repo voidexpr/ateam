@@ -84,7 +84,6 @@ func TestInitProject(t *testing.T) {
 
 	opts := InitProjectOpts{
 		Name:            "test-project",
-		Source:          "../myproject",
 		GitRepo:         ".",
 		GitRemoteOrigin: "git@github.com:example/repo.git",
 		EnabledAgents:   enabled,
@@ -122,9 +121,6 @@ func TestInitProject(t *testing.T) {
 
 	if cfg.Project.Name != "test-project" {
 		t.Errorf("project name = %q, want %q", cfg.Project.Name, "test-project")
-	}
-	if cfg.Project.Source != "../myproject" {
-		t.Errorf("project source = %q, want %q", cfg.Project.Source, "../myproject")
 	}
 	if cfg.Git.Repo != "." {
 		t.Errorf("git repo = %q, want %q", cfg.Git.Repo, ".")
@@ -184,7 +180,6 @@ func TestInitProjectDuplicateName(t *testing.T) {
 	}
 	opts := InitProjectOpts{
 		Name:          "shared-name",
-		Source:        ".",
 		EnabledAgents: prompts.AllAgentIDs,
 	}
 	if _, err := InitProject(proj1, orgDir, opts); err != nil {
@@ -198,7 +193,6 @@ func TestInitProjectDuplicateName(t *testing.T) {
 	}
 	opts2 := InitProjectOpts{
 		Name:          "shared-name",
-		Source:        ".",
 		EnabledAgents: prompts.AllAgentIDs,
 	}
 	_, err = InitProject(proj2, orgDir, opts2)

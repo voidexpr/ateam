@@ -19,7 +19,7 @@ type ResolvedEnv struct {
 	OrgDir      string         // absolute path to .ateamorg/
 	ProjectDir  string         // absolute path to .ateam/
 	ProjectName string         // from config.toml
-	SourceDir   string         // resolved from config project.source
+	SourceDir   string         // absolute path to project root (parent of .ateam/)
 	GitRepoDir  string         // resolved from config git.repo
 	Config      *config.Config
 }
@@ -61,11 +61,8 @@ func (e *ResolvedEnv) RelPath(absPath string) string {
 func (e *ResolvedEnv) populateFromConfig(projectDir string, cfg *config.Config) {
 	e.Config = cfg
 	e.ProjectName = cfg.Project.Name
-	projectRoot := filepath.Dir(projectDir) // parent of .ateam/
-	if cfg.Project.Source != "" {
-		e.SourceDir = resolvePath(projectRoot, cfg.Project.Source)
-	}
-	if cfg.Git.Repo != "" && e.SourceDir != "" {
+	e.SourceDir = filepath.Dir(projectDir) // project root = parent of .ateam/
+	if cfg.Git.Repo != "" {
 		e.GitRepoDir = resolvePath(e.SourceDir, cfg.Git.Repo)
 	}
 }
@@ -251,7 +248,7 @@ func resolvePath(base, rel string) string {
 	if filepath.IsAbs(rel) {
 		return rel
 	}
-	return filepath.Clean(filepath.Join(base, rel))
+	return filepath.Join(base, rel)
 }
 
 func realPath(p string) string {

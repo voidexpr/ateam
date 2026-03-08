@@ -36,23 +36,32 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	orgRoot := env.OrgRoot()
+
+	if envAbsolute {
+		fmt.Printf("     Org: %s\n", orgRoot)
+	} else {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("cannot get working directory: %w", err)
+		}
+		cwd = evalSymlinks(cwd)
+		relOrg, _ := filepath.Rel(cwd, orgRoot)
+		fmt.Printf("     Org: %s\n", relOrg)
+	}
+
+	if env.ProjectDir == "" {
+		fmt.Printf("    Name: (not initialized)\n")
+		return nil
+	}
+
 	displayPath := env.RelPath
 	if envAbsolute {
 		displayPath = func(p string) string { return p }
 	}
 
-	fmt.Printf("     Org: %s\n", displayPath(env.OrgRoot()))
+	fmt.Printf("    Name: %s\n", env.ProjectName)
 
-	if env.ProjectDir == "" {
-		fmt.Printf(" Project: (not initialized)\n")
-		return nil
-	}
-
-	fmt.Printf(" Project: %s\n", env.ProjectName)
-
-	if env.SourceDir != "" {
-		fmt.Printf("  Source: %s\n", displayPath(env.SourceDir))
-	}
 	if env.GitRepoDir != "" {
 		fmt.Printf("     Git: %s\n", displayPath(env.GitRepoDir))
 	}
@@ -78,7 +87,7 @@ func runEnv(cmd *cobra.Command, args []string) error {
 	if fi, err := os.Stat(reviewPath); err == nil {
 		fmt.Println()
 		rel, _ := filepath.Rel(env.ProjectDir, reviewPath)
-		fmt.Printf("Review:  %s  (%s)\n", rel, formatAge(fi.ModTime()))
+		fmt.Printf("  Review: %s  (%s)\n", rel, formatAge(fi.ModTime()))
 	}
 
 	return nil
