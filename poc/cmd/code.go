@@ -77,19 +77,20 @@ func runCode(cmd *cobra.Command, args []string) error {
 
 	meta, _ := gitutil.GetProjectMeta(env.SourceDir)
 
-	prompt, err := prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.SourceDir, meta, reviewContent, customManagement)
-	if err != nil {
-		return err
-	}
-
-	prompt += "\n\n---\n\n" + prompts.FormatProjectInfo(prompts.ProjectInfoParams{
+	pinfo := prompts.ProjectInfoParams{
 		OrgDir:      env.OrgDir,
+		ProjectDir:  env.ProjectDir,
 		ProjectName: env.ProjectName,
 		ProjectUUID: env.ProjectUUID,
 		SourceDir:   env.SourceDir,
 		GitRepoDir:  env.GitRepoDir,
 		Role:        "the supervisor",
-	})
+		Meta:        meta,
+	}
+	prompt, err := prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.SourceDir, pinfo, reviewContent, customManagement)
+	if err != nil {
+		return err
+	}
 
 	if codeDryRun {
 		fmt.Printf("╔══ code management ══╗\n\n")

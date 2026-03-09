@@ -80,19 +80,21 @@ func runReport(cmd *cobra.Command, args []string) error {
 	cr := &runner.ClaudeRunner{LogFile: env.RunnerLogPath(), ProjectDir: env.ProjectDir}
 	var tasks []runner.PoolTask
 	for _, agentID := range agentIDs {
-		prompt, err := prompts.AssembleAgentPrompt(env.OrgDir, env.ProjectDir, agentID, env.SourceDir, extraPrompt, meta)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", agentID, err)
-			continue
-		}
-		prompt += "\n\n---\n\n" + prompts.FormatProjectInfo(prompts.ProjectInfoParams{
+		pinfo := prompts.ProjectInfoParams{
 			OrgDir:      env.OrgDir,
+			ProjectDir:  env.ProjectDir,
 			ProjectName: env.ProjectName,
 			ProjectUUID: env.ProjectUUID,
 			SourceDir:   env.SourceDir,
 			GitRepoDir:  env.GitRepoDir,
 			Role:        "agent " + agentID,
-		})
+			Meta:        meta,
+		}
+		prompt, err := prompts.AssembleAgentPrompt(env.OrgDir, env.ProjectDir, agentID, env.SourceDir, extraPrompt, pinfo)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", agentID, err)
+			continue
+		}
 		agentDir := filepath.Join(env.ProjectDir, "agents", agentID)
 		tasks = append(tasks, runner.PoolTask{
 			Prompt: prompt,
