@@ -456,6 +456,76 @@ func TestIntegration_StatePathMethods(t *testing.T) {
 	}
 }
 
+// TestIntegration_RunnerOutputDirFlow simulates what cmd/report.go and cmd/review.go do:
+// construct OutputDir from env methods, then create files like the runner would.
+func TestIntegration_RunnerOutputDirFlow(t *testing.T) {
+	base := resolvedTempDir(t)
+
+	orgDir, err := InstallOrg(base)
+	if err != nil {
+		t.Fatalf("InstallOrg: %v", err)
+	}
+
+	projPath := filepath.Join(base, "myproj")
+	if err := os.MkdirAll(projPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := InitProjectOpts{
+		Name:          "myproj",
+		EnabledAgents: prompts.AllAgentIDs,
+	}
+	projDir, err := InitProject(projPath, orgDir, opts)
+	if err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+
+	cfg, _ := config.Load(projDir)
+	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
+	env.populateFromConfig(projDir, cfg)
+
+	// Simulate report: OutputDir = env.AgentLogsDir(agentID, "report")
+	agentOutputDir := env.AgentLogsDir("security", "report")
+	t.Logf("AgentLogsDir: %s", agentOutputDir)
+
+	// Runner does: os.MkdirAll(opts.OutputDir, 0755), then os.Create(stream), os.Create(stderr)
+	if err := os.MkdirAll(agentOutputDir, 0755); err != nil {
+		t.Fatalf("MkdirAll agent output dir: %v", err)
+	}
+	streamFile := filepath.Join(agentOutputDir, "last_run_stream.jsonl")
+	if err := os.WriteFile(streamFile, []byte("test"), 0644); err != nil {
+		t.Fatalf("WriteFile stream: %v", err)
+	}
+	if _, err := os.Stat(streamFile); err != nil {
+		t.Fatalf("stream file not found after write: %v", err)
+	}
+
+	// Simulate review: OutputDir = env.SupervisorLogsDir("review")
+	supOutputDir := env.SupervisorLogsDir("review")
+	t.Logf("SupervisorLogsDir: %s", supOutputDir)
+
+	if err := os.MkdirAll(supOutputDir, 0755); err != nil {
+		t.Fatalf("MkdirAll supervisor output dir: %v", err)
+	}
+	supStream := filepath.Join(supOutputDir, "last_run_stream.jsonl")
+	if err := os.WriteFile(supStream, []byte("test"), 0644); err != nil {
+		t.Fatalf("WriteFile supervisor stream: %v", err)
+	}
+	if _, err := os.Stat(supStream); err != nil {
+		t.Fatalf("supervisor stream file not found after write: %v", err)
+	}
+
+	// Verify runner log path
+	runnerLog := env.RunnerLogPath()
+	t.Logf("RunnerLogPath: %s", runnerLog)
+	if err := os.MkdirAll(filepath.Dir(runnerLog), 0755); err != nil {
+		t.Fatalf("MkdirAll runner log dir: %v", err)
+	}
+	if err := os.WriteFile(runnerLog, []byte("log entry"), 0644); err != nil {
+		t.Fatalf("WriteFile runner log: %v", err)
+	}
+}
+
 // TestIntegration_OrgConfigMultipleProjects verifies orgconfig tracks all registered projects.
 func TestIntegration_OrgConfigMultipleProjects(t *testing.T) {
 	base := resolvedTempDir(t)
