@@ -157,9 +157,9 @@ func printProgress(ch <-chan runner.RunProgress) {
 				fmt.Fprintf(os.Stderr, "[%s] result: %s (%s)\n", p.AgentID, singleLine(p.Content), ts)
 			}
 		case runner.PhaseDone:
-			fmt.Fprintf(os.Stderr, "[%s] done (%s)\n", p.AgentID, runner.FormatDuration(p.Elapsed))
+			fmt.Fprintf(os.Stderr, "[%s] done (%s)\n", p.AgentID, ts)
 		case runner.PhaseError:
-			fmt.Fprintf(os.Stderr, "[%s] error (%s)\n", p.AgentID, runner.FormatDuration(p.Elapsed))
+			fmt.Fprintf(os.Stderr, "[%s] error (%s)\n", p.AgentID, ts)
 		}
 	}
 }

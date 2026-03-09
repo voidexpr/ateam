@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/ateam-poc/internal/config"
+	"github.com/ateam-poc/internal/gitutil"
+	"github.com/ateam-poc/internal/prompts"
 )
 
 const (
@@ -59,6 +61,21 @@ func (e *ResolvedEnv) SupervisorLogsDir(action string) string {
 
 func (e *ResolvedEnv) AgentWorkspacesDir(agentID string) string {
 	return filepath.Join(e.StateDir, "agents", agentID, "workspaces")
+}
+
+// NewProjectInfoParams builds a ProjectInfoParams from the resolved environment.
+func (e *ResolvedEnv) NewProjectInfoParams(role string) prompts.ProjectInfoParams {
+	meta, _ := gitutil.GetProjectMeta(e.SourceDir)
+	return prompts.ProjectInfoParams{
+		OrgDir:      e.OrgDir,
+		ProjectDir:  e.ProjectDir,
+		ProjectName: e.ProjectName,
+		ProjectUUID: e.ProjectUUID,
+		SourceDir:   e.SourceDir,
+		GitRepoDir:  e.GitRepoDir,
+		Role:        role,
+		Meta:        meta,
+	}
 }
 
 // OrgRoot returns the parent directory of .ateamorg.

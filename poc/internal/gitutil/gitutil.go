@@ -54,21 +54,3 @@ func GetProjectMeta(dir string) (*ProjectMeta, error) {
 
 	return meta, nil
 }
-
-func FormatMetadataSection(meta *ProjectMeta, timestamp time.Time) string {
-	var b strings.Builder
-	b.WriteString("# Project Context\n\n")
-	b.WriteString(fmt.Sprintf("- **Timestamp**: %s\n", timestamp.Format("2006-01-02 15:04:05 MST")))
-	b.WriteString(fmt.Sprintf("- **Last Commit**: %s - %s - \"%s\"\n", meta.CommitHash[:min(12, len(meta.CommitHash))], meta.CommitDate, meta.CommitMessage))
-
-	if len(meta.Uncommitted) > 0 {
-		b.WriteString(fmt.Sprintf("- **Uncommitted changes**: %d file(s)\n", len(meta.Uncommitted)))
-		for _, f := range meta.Uncommitted {
-			b.WriteString(fmt.Sprintf("  - `%s`\n", f))
-		}
-	} else {
-		b.WriteString("- **Working tree**: clean\n")
-	}
-
-	return b.String()
-}

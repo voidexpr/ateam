@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ateam-poc/internal/gitutil"
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
@@ -72,24 +71,15 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	meta, _ := gitutil.GetProjectMeta(env.SourceDir)
-
 	timeout := env.Config.Report.EffectiveTimeout(reportTimeout)
 	reportType := "full"
 
 	cr := &runner.ClaudeRunner{LogFile: env.RunnerLogPath(), ProjectDir: env.ProjectDir}
+	basePinfo := env.NewProjectInfoParams("")
 	var tasks []runner.PoolTask
 	for _, agentID := range agentIDs {
-		pinfo := prompts.ProjectInfoParams{
-			OrgDir:      env.OrgDir,
-			ProjectDir:  env.ProjectDir,
-			ProjectName: env.ProjectName,
-			ProjectUUID: env.ProjectUUID,
-			SourceDir:   env.SourceDir,
-			GitRepoDir:  env.GitRepoDir,
-			Role:        "agent " + agentID,
-			Meta:        meta,
-		}
+		pinfo := basePinfo
+		pinfo.Role = "agent " + agentID
 		prompt, err := prompts.AssembleAgentPrompt(env.OrgDir, env.ProjectDir, agentID, env.SourceDir, extraPrompt, pinfo)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", agentID, err)

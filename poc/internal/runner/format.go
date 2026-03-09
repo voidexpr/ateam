@@ -45,10 +45,7 @@ func FormatStream(path string, w io.Writer) error {
 						fmt.Fprintf(w, "%s\n", block.Text)
 					}
 				case "tool_use":
-					input := strings.TrimSpace(string(block.Input))
-					if len(input) > 500 {
-						input = input[:500] + "…"
-					}
+					input := truncate(strings.TrimSpace(string(block.Input)), 500)
 					fmt.Fprintf(w, "\n▶ %s\n", block.Name)
 					if input != "" && input != "{}" && input != "null" {
 						fmt.Fprintf(w, "  %s\n", input)
@@ -58,11 +55,8 @@ func FormatStream(path string, w io.Writer) error {
 
 		case "tool_result":
 			tr := ev.(*toolResultEvent)
-			content := strings.TrimSpace(tr.Content)
+			content := truncate(strings.TrimSpace(tr.Content), 1000)
 			if content != "" {
-				if len(content) > 1000 {
-					content = content[:1000] + "…"
-				}
 				fmt.Fprintf(w, "◀ %s\n", content)
 			}
 

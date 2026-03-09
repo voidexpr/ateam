@@ -329,14 +329,8 @@ func FormatProjectInfo(p ProjectInfoParams) string {
 
 // readWith3LevelFallback tries projectPath, then orgPath, then defaultPath.
 func readWith3LevelFallback(projectPath, orgPath, defaultPath, label string) (string, error) {
-	if data, err := os.ReadFile(projectPath); err == nil {
-		return string(data), nil
-	}
-	if data, err := os.ReadFile(orgPath); err == nil {
-		return string(data), nil
-	}
-	if data, err := os.ReadFile(defaultPath); err == nil {
-		return string(data), nil
+	if s := readFileOr3Level(projectPath, orgPath, defaultPath); s != "" {
+		return s, nil
 	}
 	return "", fmt.Errorf("no prompt found for %s (checked %s, %s, and %s)", label, projectPath, orgPath, defaultPath)
 }

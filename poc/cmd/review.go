@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/ateam-poc/internal/gitutil"
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
@@ -61,18 +60,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	meta, _ := gitutil.GetProjectMeta(env.SourceDir)
-
-	pinfo := prompts.ProjectInfoParams{
-		OrgDir:      env.OrgDir,
-		ProjectDir:  env.ProjectDir,
-		ProjectName: env.ProjectName,
-		ProjectUUID: env.ProjectUUID,
-		SourceDir:   env.SourceDir,
-		GitRepoDir:  env.GitRepoDir,
-		Role:        "the supervisor",
-		Meta:        meta,
-	}
+	pinfo := env.NewProjectInfoParams("the supervisor")
 	prompt, err := prompts.AssembleReviewPrompt(env.OrgDir, env.ProjectDir, pinfo, extraPrompt, customPrompt)
 	if err != nil {
 		return err
@@ -117,11 +105,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: could not archive review: %v\n", err)
 	}
 
-	costSuffix := ""
-	if c := fmtCost(result.Cost); c != "" {
-		costSuffix = ", " + c
-	}
-	fmt.Printf("Done (%s%s)\n\n", runner.FormatDuration(result.Duration), costSuffix)
+	printDone(result)
 	fmt.Printf("Review: %s\n", reviewFile)
 
 	if reviewPrint {

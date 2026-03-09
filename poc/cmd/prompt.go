@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/ateam-poc/internal/gitutil"
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
 	"github.com/spf13/cobra"
@@ -59,20 +58,9 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	meta, _ := gitutil.GetProjectMeta(env.SourceDir)
-
 	var pinfo prompts.ProjectInfoParams
 	if !promptNoProjectInfo {
-		pinfo = prompts.ProjectInfoParams{
-			OrgDir:      env.OrgDir,
-			ProjectDir:  env.ProjectDir,
-			ProjectName: env.ProjectName,
-			ProjectUUID: env.ProjectUUID,
-			SourceDir:   env.SourceDir,
-			GitRepoDir:  env.GitRepoDir,
-			Role:        "agent " + promptAgent,
-			Meta:        meta,
-		}
+		pinfo = env.NewProjectInfoParams("agent " + promptAgent)
 	}
 
 	var assembled string

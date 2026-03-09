@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/ateam-poc/internal/gitutil"
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
@@ -75,18 +74,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	meta, _ := gitutil.GetProjectMeta(env.SourceDir)
-
-	pinfo := prompts.ProjectInfoParams{
-		OrgDir:      env.OrgDir,
-		ProjectDir:  env.ProjectDir,
-		ProjectName: env.ProjectName,
-		ProjectUUID: env.ProjectUUID,
-		SourceDir:   env.SourceDir,
-		GitRepoDir:  env.GitRepoDir,
-		Role:        "the supervisor",
-		Meta:        meta,
-	}
+	pinfo := env.NewProjectInfoParams("the supervisor")
 	prompt, err := prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.SourceDir, pinfo, reviewContent, customManagement)
 	if err != nil {
 		return err
@@ -142,11 +130,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("code execution failed: %w", result.Err)
 	}
 
-	costSuffix := ""
-	if c := fmtCost(result.Cost); c != "" {
-		costSuffix = ", " + c
-	}
-	fmt.Printf("Done (%s%s)\n\n", runner.FormatDuration(result.Duration), costSuffix)
+	printDone(result)
 	fmt.Printf("Output: %s\n", filepath.Join(supervisorDir, "code_output.md"))
 
 	if codePrint {

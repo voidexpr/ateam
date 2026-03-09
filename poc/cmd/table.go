@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"text/tabwriter"
 	"time"
+
+	"github.com/ateam-poc/internal/runner"
 )
 
 func newTable() *tabwriter.Writer {
@@ -29,6 +31,14 @@ func fmtCost(cost float64) string {
 		return ""
 	}
 	return fmt.Sprintf("$%.2f", cost)
+}
+
+func printDone(r runner.RunSummary) {
+	costSuffix := ""
+	if c := fmtCost(r.Cost); c != "" {
+		costSuffix = ", " + c
+	}
+	fmt.Printf("Done (%s%s)\n\n", runner.FormatDuration(r.Duration), costSuffix)
 }
 
 func fmtInt(n int) string {
