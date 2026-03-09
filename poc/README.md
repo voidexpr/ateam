@@ -24,21 +24,11 @@ You run 'ateam init' within a directory or at the base of a git repo (either you
 
     # nothing to ignore — .ateam/ is clean
 
-Then the current workflow is to manually commission reports:
+Then the workflow is:
 
-  ateam report --agents CHOOSE_SOME_AGENTS
-
-Summarize then in a review:
-
-  ateam review --print
-
-(Soon) code the changes:
-
-  ateam code
-
-(Soon) do it all at once:
-
-  ateam craft --agents CHOOSE_SOME_AGENTS
+  ateam report --agents CHOOSE_SOME_AGENTS    # commission agent reports
+  ateam review --print                        # supervisor synthesizes a prioritized review
+  ateam code                                  # supervisor delegates tasks as code changes
 
 
 ## Prerequisites
@@ -139,6 +129,61 @@ ateam review --dry-run
 | `--print` | Print review to stdout after completion |
 | `--dry-run` | Print computed prompt and list reports without running |
 
+### `ateam code`
+
+Read the review document and execute prioritized tasks as code changes, delegating each task to the appropriate agent via `ateam run`.
+
+```bash
+ateam code
+ateam code --review @custom_review.md
+ateam code --management @custom_management.md
+ateam code --dry-run
+```
+
+| Flag | Description |
+|------|-------------|
+| `--review TEXT` | Review content (text or `@filepath`; defaults to `.ateam/supervisor/review.md`) |
+| `--management TEXT` | Management prompt override (text or `@filepath`) |
+| `--timeout MINUTES` | Timeout in minutes (overrides `config.toml`; default 60) |
+| `--print` | Print output to stdout after completion |
+| `--dry-run` | Print the computed prompt without running |
+
+### `ateam prompt`
+
+Resolve and print the full prompt for an agent without running it. Useful for debugging prompt assembly.
+
+```bash
+ateam prompt --agent security --action report
+ateam prompt --agent refactor_small --action code
+ateam prompt --agent security --action report --extra-prompt "Focus on auth"
+ateam prompt --agent security --action report --extra-prompt @notes.md
+ateam prompt --agent security --action report --no-project-info
+```
+
+| Flag | Description |
+|------|-------------|
+| `--agent AGENT` | Agent name **(required)** |
+| `--action ACTION` | Action type: `report` or `code` **(required)** |
+| `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
+| `--no-project-info` | Omit the ATeam Project Context section from the prompt |
+
+### `ateam log`
+
+Pretty-format the last stream JSONL log for an agent or the supervisor.
+
+```bash
+ateam log --supervisor
+ateam log --supervisor --action review
+ateam log --agent security
+ateam log --agent security --action report
+```
+
+| Flag | Description |
+|------|-------------|
+| `--supervisor` | Show supervisor log (defaults to `code` action) |
+| `--agent AGENT` | Show agent log (defaults to `run` action) |
+| `--action ACTION` | Override the action (e.g. `report`, `code`, `review`, `run`) |
+
 ### `ateam env`
 
 Show the current ATeam environment: organization, project, agents, and latest report/review timestamps. Read-only — never creates or modifies anything.
@@ -213,20 +258,30 @@ Created by `ateam install`. Holds shared defaults and org-level overrides.
 
 ```
 .ateamorg/
-  orgconfig.toml                             # project registry (UUID → path)
-  projects/<UUID>/                           # runtime state per project (see below)
-  defaults/                                  # embedded prompts written to disk
-    report_prompt.md                         # shared report format instructions
-    code_prompt.md                           # shared code format instructions
-    agents/<NAME>/report_prompt.md           # per-agent role prompt
-    agents/<NAME>/code_prompt.md             # per-agent code prompt (where available)
-    supervisor/review_prompt.md              # supervisor review role prompt
-    supervisor/report_commissioning_prompt.md
-  agents/                                    # org-level overrides (empty by default)
-    <NAME>/report_prompt.md                  # override a specific agent
-  supervisor/                                # org-level supervisor override
+  orgconfig.toml                               # project registry (UUID → path)
+  projects/<UUID>/                             # runtime state per project (see below)
+  defaults/                                    # embedded prompts written to disk
+    report_base_prompt.md                      # shared report base instructions
+    code_base_prompt.md                        # shared code base instructions
+    agents/<NAME>/report_prompt.md             # per-agent report role prompt
+    agents/<NAME>/code_prompt.md               # per-agent code role prompt (where available)
+    supervisor/review_prompt.md                # supervisor review prompt
+    supervisor/code_management_prompt.md       # supervisor code management prompt
+    supervisor/report_commissioning_prompt.md  # report commissioning prompt
+  report_base_prompt.md                        # org-level report base override (optional)
+  code_base_prompt.md                          # org-level code base override (optional)
+  report_extra_prompt.md                       # org-wide extra instructions for reports (optional)
+  code_extra_prompt.md                         # org-wide extra instructions for code (optional)
+  agents/                                      # org-level agent overrides
+    <NAME>/report_prompt.md                    # override a specific agent's report prompt
+    <NAME>/report_extra_prompt.md              # extra instructions for this agent's reports
+    <NAME>/code_prompt.md                      # override a specific agent's code prompt
+    <NAME>/code_extra_prompt.md                # extra instructions for this agent's code
+  supervisor/                                  # org-level supervisor overrides
     review_prompt.md
-  report_prompt.md                           # org-level report format override
+    review_extra_prompt.md                     # extra instructions for reviews
+    code_management_prompt.md
+    code_management_extra_prompt.md            # extra instructions for code management
 ```
 
 ### Project: `.ateam/`
@@ -236,10 +291,15 @@ Created by `ateam init`. Holds project config, prompts, reports, and history (ve
 ```
 .ateam/
   config.toml                                # project configuration (includes project_uuid)
-  report_prompt.md                           # project-level report format override (optional)
+  report_base_prompt.md                      # project-level report base override (optional)
+  code_base_prompt.md                        # project-level code base override (optional)
+  report_extra_prompt.md                     # project-wide extra instructions for reports (optional)
+  code_extra_prompt.md                       # project-wide extra instructions for code (optional)
   agents/<NAME>/
-    report_prompt.md                         # project-level agent prompt override (optional)
-    extra_report_prompt.md                   # extra instructions for this agent (optional)
+    report_prompt.md                         # project-level agent report prompt override (optional)
+    report_extra_prompt.md                   # extra instructions for this agent's reports (optional)
+    code_prompt.md                           # project-level agent code prompt override (optional)
+    code_extra_prompt.md                     # extra instructions for this agent's code (optional)
     full_report.md                           # latest successful report
     full_report_error.md                     # error details (on failure only)
     history/                                 # timestamped archive
@@ -247,8 +307,13 @@ Created by `ateam init`. Holds project config, prompts, reports, and history (ve
       2026-03-08_1504.full_report.md         # archived report
   supervisor/
     review_prompt.md                         # project-level supervisor override (optional)
+    review_extra_prompt.md                   # extra instructions for reviews (optional)
+    code_management_prompt.md                # project-level code management override (optional)
+    code_management_extra_prompt.md          # extra instructions for code management (optional)
     review.md                                # latest successful review
     review_error.md                          # error details (on failure only)
+    code_output.md                           # latest code management output
+    code_error.md                            # error details (on failure only)
     history/
       2026-03-08_1504.review_prompt.md
       2026-03-08_1504.review.md
@@ -264,7 +329,13 @@ Runtime files are stored outside the project, keyed by the project's UUID from `
   agents/<NAME>/logs/report/
     last_run_stream.jsonl                    # raw JSONL stream from last run
     last_run_stderr.log                      # stderr capture from last run
+  agents/<NAME>/logs/run/
+    last_run_stream.jsonl                    # stream from ateam run
+    last_run_stderr.log
   supervisor/logs/review/
+    last_run_stream.jsonl
+    last_run_stderr.log
+  supervisor/logs/code/
     last_run_stream.jsonl
     last_run_stderr.log
 ```
@@ -294,64 +365,108 @@ refactor_small = "disabled"
 
 Prompts are resolved with a 3-level fallback: **project** → **org** → **org defaults**. The first file found wins. This lets you customize prompts at any level without modifying the embedded defaults.
 
-### `ateam report` — agent prompt assembly
+The placeholder `{{SOURCE_DIR}}` in prompts is replaced with the absolute path to the project source directory.
 
-Each agent's prompt is assembled from multiple parts, concatenated with `---` separators:
+### ATeam Project Context
+
+All prompts (agent and supervisor) start with an **ATeam Project Context** section containing:
+
+- Runtime files path, project name, project UUID
+- Role (e.g. "agent security", "the supervisor")
+- Source code directory and reports directory
+- Git metadata: last commit hash/date/message, uncommitted changes
+
+Use `--no-project-info` on `ateam prompt` to omit this section.
+
+### Agent prompt assembly (`report` and `code`)
+
+Parts are concatenated with `---` separators in this order:
+
+```
+ATeam Project Context → Base prompt → Role-specific prompt → Extra prompts → CLI --extra-prompt
+```
 
 | Part | Source | Required |
 |------|--------|----------|
-| **Agent role prompt** | 3-level fallback (see below) | Yes |
-| **Global report instructions** | 3-level fallback (see below) | No |
-| **Git metadata** | Auto-detected from project | No |
-| **Project-specific instructions** | `.ateam/agents/<NAME>/extra_report_prompt.md` | No |
-| **Extra prompt** | `--extra-prompt` flag | No |
+| **ATeam Project Context** | Auto-generated | No |
+| **Base prompt** | 3-level fallback: `report_base_prompt.md` or `code_base_prompt.md` | At least one of base or role required |
+| **Role-specific prompt** | 3-level fallback: `agents/<NAME>/report_prompt.md` or `code_prompt.md` | At least one of base or role required |
+| **Extra prompts** | Additive from all levels (see below) | No |
+| **CLI extra** | `--extra-prompt` flag | No |
 
-Agent role prompt fallback:
+Base prompt 3-level fallback (e.g. for report):
+
+1. `.ateam/report_base_prompt.md`
+2. `.ateamorg/report_base_prompt.md`
+3. `.ateamorg/defaults/report_base_prompt.md`
+
+Role-specific prompt 3-level fallback (e.g. for report):
 
 1. `.ateam/agents/<NAME>/report_prompt.md`
 2. `.ateamorg/agents/<NAME>/report_prompt.md`
 3. `.ateamorg/defaults/agents/<NAME>/report_prompt.md`
 
-Global report instructions fallback:
+If an agent has no role-specific prompt for an action (e.g. no `code_prompt.md`), the base prompt alone is used — this is not an error. Both base and role missing is an error.
 
-1. `.ateam/report_prompt.md`
-2. `.ateamorg/report_prompt.md`
-3. `.ateamorg/defaults/report_prompt.md`
+### Supervisor prompt assembly (`review` and `code`)
 
-The placeholder `{{SOURCE_DIR}}` in prompts is replaced with the absolute path to the project source directory.
+Parts are concatenated with `---` separators in this order:
 
-### `ateam review` — supervisor prompt assembly
-
-When `--prompt` is provided, it replaces the supervisor role prompt entirely. Otherwise:
+```
+ATeam Project Context → Action prompt → Extra prompts → Review → CLI --extra-prompt
+```
 
 | Part | Source | Required |
 |------|--------|----------|
-| **Supervisor review prompt** | 3-level fallback (see below) or `--prompt` | Yes |
-| **Report manifest** | Auto-discovered from agent reports | Yes |
-| **Git metadata** | Auto-detected from project | No |
-| **Agent reports** | All `full_report.md` files under `.ateam/agents/` | Yes |
-| **Extra prompt** | `--extra-prompt` flag | No |
+| **ATeam Project Context** | Auto-generated | No |
+| **Action prompt** | 3-level fallback or `--prompt`/`--management` override | Yes |
+| **Extra prompts** | Additive from org and project levels (see below) | No |
+| **Review** | Agent reports (for `review`) or review document (for `code`) | Yes |
+| **CLI extra** | `--extra-prompt` flag | No |
 
-Supervisor review prompt fallback:
+Action prompt 3-level fallback (e.g. for review):
 
 1. `.ateam/supervisor/review_prompt.md`
 2. `.ateamorg/supervisor/review_prompt.md`
 3. `.ateamorg/defaults/supervisor/review_prompt.md`
 
-### Default prompt examples
+For `ateam code`, the fallback uses `code_management_prompt.md` at each level.
+
+### Extra prompts
+
+Extra prompts are **additive** — all matching files are included (not fallback). They are appended after the main prompt, before any CLI `--extra-prompt`.
+
+For agents, extras are collected from four locations in order:
+
+1. `.ateamorg/report_extra_prompt.md` — org-wide
+2. `.ateamorg/agents/<NAME>/report_extra_prompt.md` — org agent-specific
+3. `.ateam/report_extra_prompt.md` — project-wide
+4. `.ateam/agents/<NAME>/report_extra_prompt.md` — project agent-specific
+
+(Same pattern with `code_extra_prompt.md` for the code action.)
+
+For supervisors, extras are collected from two locations:
+
+1. `.ateamorg/supervisor/review_extra_prompt.md` — org-level
+2. `.ateam/supervisor/review_extra_prompt.md` — project-level
+
+(Same pattern with `code_management_extra_prompt.md` for the code action.)
+
+### Default prompt files
 
 The embedded default prompts are in the source tree under [`internal/prompts/defaults/`](internal/prompts/defaults/):
 
 | Prompt | Source file |
 |--------|------------|
-| Global report instructions | [`defaults/report_prompt.md`](internal/prompts/defaults/report_prompt.md) |
-| Global code instructions | [`defaults/code_prompt.md`](internal/prompts/defaults/code_prompt.md) |
+| Report base instructions | [`defaults/report_base_prompt.md`](internal/prompts/defaults/report_base_prompt.md) |
+| Code base instructions | [`defaults/code_base_prompt.md`](internal/prompts/defaults/code_base_prompt.md) |
 | Supervisor review | [`defaults/supervisor/review_prompt.md`](internal/prompts/defaults/supervisor/review_prompt.md) |
+| Supervisor code management | [`defaults/supervisor/code_management_prompt.md`](internal/prompts/defaults/supervisor/code_management_prompt.md) |
 | Agent: security | [`defaults/agents/security/report_prompt.md`](internal/prompts/defaults/agents/security/report_prompt.md) |
 | Agent: testing_basic | [`defaults/agents/testing_basic/report_prompt.md`](internal/prompts/defaults/agents/testing_basic/report_prompt.md) |
 | Agent: refactor_small | [`defaults/agents/refactor_small/report_prompt.md`](internal/prompts/defaults/agents/refactor_small/report_prompt.md) |
 
-All agent prompts follow the same pattern: `defaults/agents/<NAME>/report_prompt.md`.
+All agent prompts follow the same pattern: `defaults/agents/<NAME>/report_prompt.md` (and optionally `code_prompt.md`).
 
 ## Agents
 
@@ -383,11 +498,21 @@ Example:
 
 ### Detailed output
 
-Use `--dry-run` on `report` and `review` to inspect the fully assembled prompt without running anything:
+Use `--dry-run` on `report`, `review`, and `code` to inspect the fully assembled prompt without running anything:
 
 ```bash
 ateam report --agents security --dry-run    # print the prompt that would be sent
 ateam review --dry-run                      # print prompt and list discovered reports
+ateam code --dry-run                        # print the code management prompt
+ateam prompt --agent security --action report  # resolve and print an agent prompt
+```
+
+Use `ateam log` to pretty-format the last stream JSONL:
+
+```bash
+ateam log --supervisor               # last code management stream
+ateam log --supervisor --action review  # last review stream
+ateam log --agent security           # last run stream for an agent
 ```
 
 When a run fails, inspect these files:
@@ -398,7 +523,7 @@ When a run fails, inspect these files:
 | `last_run_stderr.log` | `.ateamorg/projects/<UUID>/agents/<NAME>/logs/report/` | Raw stderr from the `claude` subprocess |
 | `last_run_stream.jsonl` | `.ateamorg/projects/<UUID>/agents/<NAME>/logs/report/` | Raw JSONL event stream (useful for debugging parsing issues) |
 
-For the supervisor, the error file is `.ateam/supervisor/review_error.md` and runtime logs are in `.ateamorg/projects/<UUID>/supervisor/logs/review/`.
+For the supervisor, error files are `.ateam/supervisor/review_error.md` (review) and `.ateam/supervisor/code_error.md` (code). Runtime logs are in `.ateamorg/projects/<UUID>/supervisor/logs/review/` and `.../logs/code/`.
 
 ### History
 
