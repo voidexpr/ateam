@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/ateam-poc/internal/prompts"
@@ -135,19 +136,38 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 func printProgress(ch <-chan runner.RunProgress) {
 	for p := range ch {
+		ts := runner.FormatDuration(p.Elapsed)
 		switch p.Phase {
 		case runner.PhaseInit:
 			fmt.Fprintf(os.Stderr, "[%s] initializing...\n", p.AgentID)
 		case runner.PhaseThinking:
-			fmt.Fprintf(os.Stderr, "[%s] thinking... (%s)\n", p.AgentID, runner.FormatDuration(p.Elapsed))
+			if p.Content != "" {
+				fmt.Fprintf(os.Stderr, "[%s] %s (%s)\n", p.AgentID, singleLine(p.Content), ts)
+			} else {
+				fmt.Fprintf(os.Stderr, "[%s] thinking... (%s)\n", p.AgentID, ts)
+			}
 		case runner.PhaseTool:
-			fmt.Fprintf(os.Stderr, "[%s] tool: %s (%d total, %s)\n", p.AgentID, p.ToolName, p.ToolCount, runner.FormatDuration(p.Elapsed))
+			if p.ToolInput != "" {
+				fmt.Fprintf(os.Stderr, "[%s] tool: %s %s (%d total, %s)\n", p.AgentID, p.ToolName, singleLine(p.ToolInput), p.ToolCount, ts)
+			} else {
+				fmt.Fprintf(os.Stderr, "[%s] tool: %s (%d total, %s)\n", p.AgentID, p.ToolName, p.ToolCount, ts)
+			}
+		case runner.PhaseToolResult:
+			if p.Content != "" {
+				fmt.Fprintf(os.Stderr, "[%s] result: %s (%s)\n", p.AgentID, singleLine(p.Content), ts)
+			}
 		case runner.PhaseDone:
 			fmt.Fprintf(os.Stderr, "[%s] done (%s)\n", p.AgentID, runner.FormatDuration(p.Elapsed))
 		case runner.PhaseError:
 			fmt.Fprintf(os.Stderr, "[%s] error (%s)\n", p.AgentID, runner.FormatDuration(p.Elapsed))
 		}
 	}
+}
+
+func singleLine(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", "")
+	return strings.TrimSpace(s)
 }
 
 func printRunSummary(r runner.RunSummary) {

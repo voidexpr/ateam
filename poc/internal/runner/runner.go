@@ -35,8 +35,10 @@ type RunOpts struct {
 // RunProgress is a lightweight status sent on a channel during execution.
 type RunProgress struct {
 	AgentID        string
-	Phase          string // PhaseInit, PhaseThinking, PhaseTool, PhaseDone, PhaseError
+	Phase          string // PhaseInit, PhaseThinking, PhaseTool, PhaseToolResult, PhaseDone, PhaseError
 	ToolName       string // set when Phase == PhaseTool
+	ToolInput      string // tool input snippet (for PhaseTool)
+	Content        string // text content (for PhaseThinking) or tool result (for PhaseToolResult)
 	ToolCount      int
 	EventCount     int
 	Elapsed        time.Duration
@@ -149,12 +151,13 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 		return failEarly(fmt.Errorf("cannot start claude: %w", err))
 	}
 
-	// Progress helper — captures common fields, only varies phase/tool/elapsed.
-	emitProgress := func(phase, toolName string, toolCount, eventCount int) {
+	emitProgress := func(phase, toolName, toolInput, content string, toolCount, eventCount int) {
 		sendProgress(progress, RunProgress{
 			AgentID:        opts.AgentID,
 			Phase:          phase,
 			ToolName:       toolName,
+			ToolInput:      toolInput,
+			Content:        content,
 			ToolCount:      toolCount,
 			EventCount:     eventCount,
 			StartedAt:      startedAt,
@@ -193,7 +196,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 
 		switch typ {
 		case "system":
-			emitProgress(PhaseInit, "", 0, eventCount)
+			emitProgress(PhaseInit, "", "", "", 0, eventCount)
 
 		case "assistant":
 			ast := ev.(*assistantEvent)
@@ -205,12 +208,17 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 					toolCounts[block.Name]++
 					totalTools++
 					hasToolUse = true
-					emitProgress(PhaseTool, block.Name, totalTools, eventCount)
+					emitProgress(PhaseTool, block.Name, truncate(string(block.Input), 200), "", totalTools, eventCount)
 				}
 			}
 			if !hasToolUse {
-				emitProgress(PhaseThinking, "", totalTools, eventCount)
+				text := extractReportText(ast)
+				emitProgress(PhaseThinking, "", "", truncate(text, 200), totalTools, eventCount)
 			}
+
+		case "tool_result":
+			tr := ev.(*toolResultEvent)
+			emitProgress(PhaseToolResult, "", "", truncate(tr.Content, 200), totalTools, eventCount)
 
 		case "result":
 			result = ev.(*resultEvent)
@@ -264,7 +272,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 			_ = os.WriteFile(opts.LastMessageFilePath, []byte(output), 0644)
 		}
 		appendLog(r.LogFile, opts.AgentID, "ok", cwd, cliStr)
-		emitProgress(PhaseDone, "", totalTools, eventCount)
+		emitProgress(PhaseDone, "", "", "", totalTools, eventCount)
 	} else {
 		switch {
 		case ctx.Err() == context.DeadlineExceeded:
@@ -278,10 +286,17 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 		}
 		writeErrorFile(opts.ErrorMessageFilePath, summary, stderr)
 		appendLog(r.LogFile, opts.AgentID, "error", cwd, cliStr, summary.Err.Error())
-		emitProgress(PhaseError, "", totalTools, eventCount)
+		emitProgress(PhaseError, "", "", "", totalTools, eventCount)
 	}
 
 	return summary
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
 }
 
 func sendProgress(ch chan<- RunProgress, p RunProgress) {

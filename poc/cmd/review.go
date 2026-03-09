@@ -68,6 +68,15 @@ func runReview(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	prompt += "\n\n---\n\n" + prompts.FormatProjectInfo(prompts.ProjectInfoParams{
+		OrgDir:      env.OrgDir,
+		ProjectName: env.ProjectName,
+		ProjectUUID: env.ProjectUUID,
+		SourceDir:   env.SourceDir,
+		GitRepoDir:  env.GitRepoDir,
+		Role:        "the supervisor",
+	})
+
 	if reviewDryRun {
 		return printReviewDryRun(env, prompt)
 	}
