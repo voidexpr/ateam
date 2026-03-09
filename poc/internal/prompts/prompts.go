@@ -282,7 +282,6 @@ type ProjectInfoParams struct {
 	OrgDir      string // absolute path to .ateamorg/
 	ProjectDir  string // absolute path to .ateam/
 	ProjectName string
-	ProjectUUID string
 	SourceDir   string // absolute path to project root
 	GitRepoDir  string // absolute path to git repo root (may differ from SourceDir)
 	Role        string // e.g. "agent security" or "the supervisor"
@@ -300,7 +299,6 @@ func FormatProjectInfo(p ProjectInfoParams) string {
 	b.WriteString("You are part of the ateam software:\n")
 	fmt.Fprintf(&b, "* runtime files: %s\n", p.OrgDir)
 	fmt.Fprintf(&b, "* project name: %s\n", p.ProjectName)
-	fmt.Fprintf(&b, "* project UUID: %s\n", p.ProjectUUID)
 	fmt.Fprintf(&b, "* role: %s\n", p.Role)
 	fmt.Fprintf(&b, "* source code: %s\n", p.SourceDir)
 	if p.GitRepoDir != "" && p.GitRepoDir != p.SourceDir {

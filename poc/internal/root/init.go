@@ -90,12 +90,9 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 		}
 	}
 
-	uuid := config.GenerateUUID()
-
 	cfg := config.Config{
 		Project: config.ProjectConfig{
 			Name: opts.Name,
-			UUID: uuid,
 		},
 		Git: config.GitConfig{
 			Repo:            opts.GitRepo,
@@ -112,16 +109,14 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 		return "", err
 	}
 
-	if err := createStateDirs(orgDir, uuid, agentIDs); err != nil {
-		return "", err
-	}
-
 	orgRoot := filepath.Dir(orgDir)
 	relPath, err := filepath.Rel(orgRoot, path)
 	if err != nil {
 		relPath = path
 	}
-	if err := RegisterProject(orgDir, uuid, relPath); err != nil {
+	stateKey := config.PathToStateKey(relPath)
+
+	if err := createStateDirs(orgDir, stateKey, agentIDs); err != nil {
 		return "", err
 	}
 
@@ -143,8 +138,8 @@ func EnsureAgents(projectDir, stateDir string, agentIDs []string) error {
 	return nil
 }
 
-func createStateDirs(orgDir, uuid string, agentIDs []string) error {
-	stateBase := filepath.Join(orgDir, "projects", uuid)
+func createStateDirs(orgDir, stateKey string, agentIDs []string) error {
+	stateBase := filepath.Join(orgDir, "projects", stateKey)
 	for _, id := range agentIDs {
 		if err := os.MkdirAll(filepath.Join(stateBase, "agents", id, "logs", "report"), 0755); err != nil {
 			return fmt.Errorf("cannot create agent state directory: %w", err)
@@ -154,16 +149,6 @@ func createStateDirs(orgDir, uuid string, agentIDs []string) error {
 		return fmt.Errorf("cannot create supervisor state directory: %w", err)
 	}
 	return nil
-}
-
-// RegisterProject loads orgconfig, registers the UUID → relPath mapping, and saves.
-func RegisterProject(orgDir, uuid, projectRelPath string) error {
-	orgCfg, err := config.LoadOrgConfig(orgDir)
-	if err != nil {
-		return err
-	}
-	orgCfg.Register(uuid, projectRelPath)
-	return config.SaveOrgConfig(orgDir, orgCfg)
 }
 
 // checkDuplicateProjectName walks from orgDir's parent looking for any

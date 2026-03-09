@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ateam-poc/internal/config"
 	"github.com/ateam-poc/internal/root"
 	"github.com/spf13/cobra"
 )
@@ -35,30 +34,28 @@ func runProjects(cmd *cobra.Command, args []string) error {
 
 	orgRoot := filepath.Dir(orgDir)
 
-	orgCfg, err := config.LoadOrgConfig(orgDir)
-	if err != nil {
-		return err
-	}
-
 	type projectRow struct {
-		name, path, uuid, gitRepo, gitRemote string
+		name, path, gitRepo, gitRemote string
 	}
 
 	var rows []projectRow
 
-	for uuid, relPath := range orgCfg.Projects {
-		projectDir := filepath.Join(orgRoot, relPath, root.ProjectDirName)
-		cfg, loadErr := config.Load(projectDir)
-		if loadErr != nil {
-			continue
+	err = root.WalkProjects(orgDir, func(p root.ProjectInfo) error {
+		projPath := filepath.Dir(p.Dir)
+		relPath, relErr := filepath.Rel(orgRoot, projPath)
+		if relErr != nil {
+			relPath = projPath
 		}
 		rows = append(rows, projectRow{
-			name:      cfg.Project.Name,
+			name:      p.Config.Project.Name,
 			path:      relPath,
-			uuid:      uuid,
-			gitRepo:   cfg.Git.Repo,
-			gitRemote: cfg.Git.RemoteOriginURL,
+			gitRepo:   p.Config.Git.Repo,
+			gitRemote: p.Config.Git.RemoteOriginURL,
 		})
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	if len(rows) == 0 {
@@ -67,9 +64,9 @@ func runProjects(cmd *cobra.Command, args []string) error {
 	}
 
 	w := newTable()
-	fmt.Fprintln(w, "NAME\tPATH\tUUID\tGIT REPO\tGIT REMOTE")
+	fmt.Fprintln(w, "NAME\tPATH\tGIT REPO\tGIT REMOTE")
 	for _, r := range rows {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", r.name, r.path, r.uuid, r.gitRepo, r.gitRemote)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", r.name, r.path, r.gitRepo, r.gitRemote)
 	}
 	w.Flush()
 

@@ -64,10 +64,6 @@ func TestIntegration_BasicProject(t *testing.T) {
 		t.Errorf("git.remote = %q, want %q", cfg.Git.RemoteOriginURL, "https://foobar/myproj.git")
 	}
 
-	if cfg.Project.UUID == "" {
-		t.Fatal("project_uuid should be set after InitProject")
-	}
-
 	// Verify resolution: source = project path, git = project path.
 	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
 	env.populateFromConfig(projDir, cfg)
@@ -78,8 +74,9 @@ func TestIntegration_BasicProject(t *testing.T) {
 		t.Errorf("GitRepoDir = %q, want %q", env.GitRepoDir, projPath)
 	}
 
-	// Verify StateDir is set.
-	wantStateDir := filepath.Join(orgDir, "projects", cfg.Project.UUID)
+	// Verify StateDir is path-based.
+	wantStateKey := config.PathToStateKey("level1/myproj")
+	wantStateDir := filepath.Join(orgDir, "projects", wantStateKey)
 	if env.StateDir != wantStateDir {
 		t.Errorf("StateDir = %q, want %q", env.StateDir, wantStateDir)
 	}
@@ -94,15 +91,6 @@ func TestIntegration_BasicProject(t *testing.T) {
 	supervisorLogsDir := filepath.Join(env.StateDir, "supervisor", "logs", "review")
 	if _, err := os.Stat(supervisorLogsDir); err != nil {
 		t.Errorf("supervisor state logs dir missing: %v", err)
-	}
-
-	// Verify orgconfig registration.
-	orgCfg, err := config.LoadOrgConfig(orgDir)
-	if err != nil {
-		t.Fatalf("LoadOrgConfig: %v", err)
-	}
-	if orgCfg.Projects[cfg.Project.UUID] != "level1/myproj" {
-		t.Errorf("orgconfig entry = %q, want %q", orgCfg.Projects[cfg.Project.UUID], "level1/myproj")
 	}
 
 	// FindOrg from project path should find the org.
@@ -440,7 +428,8 @@ func TestIntegration_StatePathMethods(t *testing.T) {
 	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
 	env.populateFromConfig(projDir, cfg)
 
-	stateBase := filepath.Join(orgDir, "projects", cfg.Project.UUID)
+	stateKey := config.PathToStateKey("myproj")
+	stateBase := filepath.Join(orgDir, "projects", stateKey)
 
 	if got := env.AgentLogsDir("security", "report"); got != filepath.Join(stateBase, "agents", "security", "logs", "report") {
 		t.Errorf("AgentLogsDir = %q, want path under state dir", got)
@@ -526,8 +515,47 @@ func TestIntegration_RunnerOutputDirFlow(t *testing.T) {
 	}
 }
 
-// TestIntegration_OrgConfigMultipleProjects verifies orgconfig tracks all registered projects.
-func TestIntegration_OrgConfigMultipleProjects(t *testing.T) {
+// TestIntegration_NestedProjectStateDir verifies that a nested project path
+// produces the correct path-based state directory name.
+func TestIntegration_NestedProjectStateDir(t *testing.T) {
+	base := resolvedTempDir(t)
+
+	orgDir, err := InstallOrg(base)
+	if err != nil {
+		t.Fatalf("InstallOrg: %v", err)
+	}
+
+	projPath := filepath.Join(base, "services", "api", "v2")
+	if err := os.MkdirAll(projPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	opts := InitProjectOpts{
+		Name:          "services/api/v2",
+		EnabledAgents: []string{"security"},
+	}
+	projDir, err := InitProject(projPath, orgDir, opts)
+	if err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+
+	cfg, _ := config.Load(projDir)
+	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
+	env.populateFromConfig(projDir, cfg)
+
+	wantStateKey := config.PathToStateKey("services/api/v2")
+	wantStateDir := filepath.Join(orgDir, "projects", wantStateKey)
+	if env.StateDir != wantStateDir {
+		t.Errorf("StateDir = %q, want %q", env.StateDir, wantStateDir)
+	}
+	if wantStateKey != "services_Sapi_Sv2" {
+		t.Errorf("state key = %q, want %q", wantStateKey, "services_Sapi_Sv2")
+	}
+}
+
+// TestIntegration_WalkProjectsDiscovery verifies that WalkProjects discovers
+// all projects without orgconfig.toml.
+func TestIntegration_WalkProjectsDiscovery(t *testing.T) {
 	base := resolvedTempDir(t)
 
 	orgDir, err := InstallOrg(base)
@@ -536,8 +564,6 @@ func TestIntegration_OrgConfigMultipleProjects(t *testing.T) {
 	}
 
 	names := []string{"frontend", "backend", "shared"}
-	uuids := make(map[string]string) // name → uuid
-
 	for _, name := range names {
 		p := filepath.Join(base, name)
 		if err := os.MkdirAll(p, 0755); err != nil {
@@ -547,34 +573,26 @@ func TestIntegration_OrgConfigMultipleProjects(t *testing.T) {
 			Name:          name,
 			EnabledAgents: prompts.AllAgentIDs,
 		}
-		projDir, err := InitProject(p, orgDir, opts)
-		if err != nil {
+		if _, err := InitProject(p, orgDir, opts); err != nil {
 			t.Fatalf("InitProject(%s): %v", name, err)
 		}
-		cfg, _ := config.Load(projDir)
-		uuids[name] = cfg.Project.UUID
 	}
 
-	// All UUIDs should be unique.
-	seen := make(map[string]bool)
-	for name, uuid := range uuids {
-		if seen[uuid] {
-			t.Errorf("duplicate UUID for project %s: %s", name, uuid)
-		}
-		seen[uuid] = true
-	}
-
-	// Orgconfig should have all entries.
-	orgCfg, err := config.LoadOrgConfig(orgDir)
+	found := make(map[string]bool)
+	err = WalkProjects(orgDir, func(p ProjectInfo) error {
+		found[p.Config.Project.Name] = true
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("LoadOrgConfig: %v", err)
+		t.Fatalf("WalkProjects: %v", err)
 	}
-	if len(orgCfg.Projects) != 3 {
-		t.Errorf("orgconfig has %d projects, want 3", len(orgCfg.Projects))
-	}
-	for name, uuid := range uuids {
-		if orgCfg.Projects[uuid] != name {
-			t.Errorf("orgconfig[%s] = %q, want %q", uuid, orgCfg.Projects[uuid], name)
+
+	for _, name := range names {
+		if !found[name] {
+			t.Errorf("WalkProjects did not discover project %q", name)
 		}
+	}
+	if len(found) != len(names) {
+		t.Errorf("WalkProjects found %d projects, want %d", len(found), len(names))
 	}
 }
