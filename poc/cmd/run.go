@@ -1,0 +1,166 @@
+package cmd
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/ateam-poc/internal/prompts"
+	"github.com/ateam-poc/internal/root"
+	"github.com/ateam-poc/internal/runner"
+	"github.com/spf13/cobra"
+)
+
+var (
+	runAgent   string
+	runStream  bool
+	runQuiet   bool
+	runWorkDir string
+	runSummary bool
+)
+
+var runCmd = &cobra.Command{
+	Use:   "run PROMPT_OR_@FILE",
+	Short: "Run a single agent with a given prompt",
+	Long: `Run a single agent instance with the provided prompt text or file.
+
+By default runs quietly, printing only the final message to stdout.
+Use --stream to see progress updates during execution.
+
+Example:
+  ateam run "Analyze the auth module for security issues" --agent security
+  ateam run @prompt.md --agent testing_basic
+  ateam run @prompt.md --agent security --stream
+  ateam run @prompt.md --agent security --summary`,
+	Args: cobra.ExactArgs(1),
+	RunE: runRun,
+}
+
+func init() {
+	runCmd.Flags().StringVar(&runAgent, "agent", "", "agent to run (required)")
+	runCmd.Flags().BoolVar(&runStream, "stream", false, "show progress updates during execution")
+	runCmd.Flags().BoolVar(&runQuiet, "quiet", false, "print only the final message (default)")
+	runCmd.Flags().StringVar(&runWorkDir, "work-dir", "", "working directory for the agent (defaults to project source dir)")
+	runCmd.Flags().BoolVar(&runSummary, "summary", false, "print run summary after completion")
+	_ = runCmd.MarkFlagRequired("agent")
+	runCmd.MarkFlagsMutuallyExclusive("stream", "quiet")
+}
+
+func runRun(cmd *cobra.Command, args []string) error {
+	if !prompts.IsValidAgent(runAgent) {
+		return fmt.Errorf("unknown agent: %s\nValid agents: %s", runAgent, prompts.AgentFlagUsage())
+	}
+
+	promptText, err := prompts.ResolveValue(args[0])
+	if err != nil {
+		return fmt.Errorf("cannot resolve prompt: %w", err)
+	}
+
+	env, err := root.Resolve(orgFlag, projectFlag)
+	if err != nil {
+		return err
+	}
+
+	if err := root.EnsureAgents(env.ProjectDir, env.StateDir, []string{runAgent}); err != nil {
+		return err
+	}
+
+	workDir := env.SourceDir
+	if runWorkDir != "" {
+		abs, err := filepath.Abs(runWorkDir)
+		if err != nil {
+			return fmt.Errorf("cannot resolve work-dir: %w", err)
+		}
+		workDir = abs
+	}
+
+	outputDir := env.AgentLogsDir(runAgent, "run")
+	agentDir := filepath.Join(env.ProjectDir, "agents", runAgent)
+
+	cr := &runner.ClaudeRunner{LogFile: env.RunnerLogPath(), ProjectDir: env.ProjectDir}
+	opts := runner.RunOpts{
+		AgentID:              runAgent,
+		OutputDir:            outputDir,
+		LastMessageFilePath:  filepath.Join(agentDir, "last_run_output.md"),
+		ErrorMessageFilePath: filepath.Join(agentDir, "last_run_error.md"),
+		WorkDir:              workDir,
+		PromptName:           "run_prompt.md",
+		HistoryDir:           env.AgentHistoryDir(runAgent),
+	}
+
+	var progress chan runner.RunProgress
+	if runStream {
+		progress = make(chan runner.RunProgress, 64)
+		go printProgress(progress)
+	}
+
+	ctx := context.Background()
+	result := cr.Run(ctx, promptText, opts, progress)
+
+	// Print stderr from the agent to our stderr.
+	if stderrContent, err := os.ReadFile(result.StderrFilePath); err == nil && len(stderrContent) > 0 {
+		fmt.Fprint(os.Stderr, string(stderrContent))
+	}
+
+	// Print the last message to stdout.
+	if result.Output != "" {
+		fmt.Print(result.Output)
+		if result.Output[len(result.Output)-1] != '\n' {
+			fmt.Println()
+		}
+	}
+
+	if runSummary {
+		printRunSummary(result)
+	}
+
+	if result.Err != nil {
+		// Exit with the agent's exit code.
+		os.Exit(result.ExitCode)
+	}
+
+	return nil
+}
+
+func printProgress(ch <-chan runner.RunProgress) {
+	for p := range ch {
+		switch p.Phase {
+		case runner.PhaseInit:
+			fmt.Fprintf(os.Stderr, "[%s] initializing...\n", p.AgentID)
+		case runner.PhaseThinking:
+			fmt.Fprintf(os.Stderr, "[%s] thinking... (%s)\n", p.AgentID, runner.FormatDuration(p.Elapsed))
+		case runner.PhaseTool:
+			fmt.Fprintf(os.Stderr, "[%s] tool: %s (%d total, %s)\n", p.AgentID, p.ToolName, p.ToolCount, runner.FormatDuration(p.Elapsed))
+		case runner.PhaseDone:
+			fmt.Fprintf(os.Stderr, "[%s] done (%s)\n", p.AgentID, runner.FormatDuration(p.Elapsed))
+		case runner.PhaseError:
+			fmt.Fprintf(os.Stderr, "[%s] error (%s)\n", p.AgentID, runner.FormatDuration(p.Elapsed))
+		}
+	}
+}
+
+func printRunSummary(r runner.RunSummary) {
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintf(os.Stderr, "--- Summary ---\n")
+	fmt.Fprintf(os.Stderr, "  Agent:    %s\n", r.AgentID)
+	fmt.Fprintf(os.Stderr, "  Duration: %s\n", runner.FormatDuration(r.Duration))
+	if r.Cost > 0 {
+		fmt.Fprintf(os.Stderr, "  Cost:     $%.2f\n", r.Cost)
+	}
+	if r.Turns > 0 {
+		fmt.Fprintf(os.Stderr, "  Turns:    %d\n", r.Turns)
+	}
+	if r.InputTokens > 0 {
+		fmt.Fprintf(os.Stderr, "  Input:    %d tokens\n", r.InputTokens)
+	}
+	if r.OutputTokens > 0 {
+		fmt.Fprintf(os.Stderr, "  Output:   %d tokens\n", r.OutputTokens)
+	}
+	if r.ExitCode != 0 {
+		fmt.Fprintf(os.Stderr, "  Exit:     %d\n", r.ExitCode)
+	}
+	if r.Err != nil {
+		fmt.Fprintf(os.Stderr, "  Error:    %v\n", r.Err)
+	}
+}
