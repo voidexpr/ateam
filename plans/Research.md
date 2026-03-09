@@ -1127,6 +1127,36 @@ A PTY (pseudo-terminal) creates a virtual terminal pair. The orchestrator holds 
 
 ---
 
+### C.10 Claude Code Remote Control Protocol
+
+* Official docs from Anthropic: https://code.claude.com/docs/en/remote-control
+* Reverse Engineering notes: https://gist.github.com/sorrycc/9b9ac045d5329ac03084a465345b59c3
+
+#### Summary from ChatGPT as of 2026/03/07
+
+There are really two layers people mean by “Claude Code Remote Control protocol.”
+
+The full official Remote Control stack is the claude remote-control / /remote-control feature that connects claude.ai/code or the Claude mobile app to a local Claude Code session. Anthropic’s docs describe that feature at a high level. A public reverse-engineering write-up by sorrycc reconstructs the full bridge as environment registration at /v1/environments/bridge, long-polling at /v1/environments/{id}/work/poll, and event posting at /v1/sessions/{id}/events, with separate environment_secret auth for polling. Anthropic bug logs also show Remote Control spawning a child Claude process with --sdk-url wss://api.anthropic.com/v1/session_ingress/ws/..., which is the inner session-ingress layer.  ￼
+
+If you mean the full bridge, I can only verify one clear public reverse-engineering artifact right now:
+    •   sorrycc / remote-control-implementation.md — a reverse-engineered implementation reference for “Remote Control (Tengu Bridge).” It documents the bridge endpoints, feature flags, OAuth flow, environment registration, work polling, session event posting, and the hybrid WebSocket/HTTP transport. It is more of a spec/reference than a polished end-user product.  ￼
+
+If you also count the lower-level session-ingress / --sdk-url WebSocket protocol that Remote Control uses internally, then the list gets longer:
+    •   The-Vibe-Company / Companion — this is the clearest one. The repo includes WEBSOCKET_PROTOCOL_REVERSED.md, which explicitly says the undocumented --sdk-url WebSocket protocol was reverse-engineered from Claude Code CLI, and the README says its bridge uses the CLI --sdk-url WebSocket path plus NDJSON events. An Anthropic docs issue even cites The Vibe Companion as a third-party project that had to reverse-engineer the internal WebSocket NDJSON protocol because the official docs were insufficient.  ￼
+    •   kxbnb / claude-code-companion — a TUI that spawns Claude Code in SDK mode and talks to it over a local WebSocket using NDJSON. I’d count this as an implementation of the lower layer, though the repo does not itself present a reverse-engineering write-up.  ￼
+    •   pandazki / pneuma-skills — explicitly says it spawns a Claude Code CLI session over WebSocket, and that /ws/cli/:sessionId carries NDJSON messages for Claude Code’s --sdk-url protocol. Again: implementation yes, explicit RE write-up no.  ￼
+    •   lebovic / agent-quickstart — says its API is “unofficially interoperable with Claude Code,” and shows Claude launched against its own session_ingress endpoints via --sdk-url and --resume. That is effectively a clean-room reimplementation of the session-ingress layer.  ￼
+    •   ZhangHanDong / claude-code-api-rs — exposes WebSocket sessions that spawn Claude with --sdk-url, plus WS endpoints for the CLI side and external client side. This clearly implements the same lower layer, though it is not explicitly framed as a reverse-engineering project.  ￼
+
+What I would not count as “already reversed engineered the official Remote Control protocol” are projects that give you remote control by other means:
+    •   sled uses ACP (Agent Control Protocol), not Anthropic Remote Control.  ￼
+    •   CCBot explicitly says it works via tmux, “not the Claude Code SDK.”  ￼
+    •   DarkCode Server is its own phone-to-server WebSocket bridge and talks to Claude via stdin/stdout.  ￼
+    •   Claude-Code-Remote is a messaging-platform wrapper (email/Telegram/LINE), not the Anthropic Remote Control stack.  ￼
+
+So the concise answer is: full official RC stack: basically just sorrycc’s reference so far; inner session_ingress / --sdk-url layer: Companion is the clearest reverse-engineered project, with claude-code-companion, pneuma-skills, agent-quickstart, and claude-code-api-rs also implementing that lower layer.
+
+
 ## D. Permission Management
 
 The landscape of open source tools for managing Claude Code permissions splits into roughly three categories: container isolation, smart hooks/filters, and programmatic permission servers.
