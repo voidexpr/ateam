@@ -46,17 +46,16 @@ func ResolveOptional(value string) (string, error) {
 
 // AssembleAgentPrompt builds the full prompt for an agent report run.
 // Resolution order for both role prompt and global instructions: project → org → org defaults.
-// meta is optional — if nil, git metadata is omitted from the prompt.
-func AssembleAgentPrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, meta *gitutil.ProjectMeta) (string, error) {
-	return assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt, meta, ReportPromptFile)
+func AssembleAgentPrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams) (string, error) {
+	return assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt, pinfo, ReportPromptFile)
 }
 
 // AssembleAgentCodePrompt builds the full prompt for an agent code run.
-func AssembleAgentCodePrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, meta *gitutil.ProjectMeta) (string, error) {
-	return assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt, meta, CodePromptFile)
+func AssembleAgentCodePrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams) (string, error) {
+	return assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt, pinfo, CodePromptFile)
 }
 
-func assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt string, meta *gitutil.ProjectMeta, promptFile string) (string, error) {
+func assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, promptFile string) (string, error) {
 	rolePrompt, err := readWith3LevelFallback(
 		filepath.Join(projectDir, "agents", agentID, promptFile),
 		filepath.Join(orgDir, "agents", agentID, promptFile),
@@ -81,11 +80,11 @@ func assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt str
 
 	promptContent = strings.ReplaceAll(promptContent, "{{SOURCE_DIR}}", sourceDir)
 
-	parts := []string{promptContent}
-
-	if meta != nil {
-		parts = append(parts, gitutil.FormatMetadataSection(meta, time.Now()))
+	var parts []string
+	if info := FormatProjectInfo(pinfo); info != "" {
+		parts = append(parts, info)
 	}
+	parts = append(parts, promptContent)
 
 	extraFilePath := filepath.Join(projectDir, "agents", agentID, ExtraReportPromptFile)
 	if data, err := os.ReadFile(extraFilePath); err == nil {
@@ -140,8 +139,7 @@ func DiscoverReports(projectDir string) ([]AgentReport, error) {
 }
 
 // AssembleReviewPrompt builds the full prompt for a supervisor review.
-// meta is optional — if nil, git metadata is omitted from the prompt.
-func AssembleReviewPrompt(orgDir, projectDir string, meta *gitutil.ProjectMeta, extraPrompt, customPrompt string) (string, error) {
+func AssembleReviewPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, extraPrompt, customPrompt string) (string, error) {
 	reports, err := DiscoverReports(projectDir)
 	if err != nil {
 		return "", err
@@ -161,24 +159,22 @@ func AssembleReviewPrompt(orgDir, projectDir string, meta *gitutil.ProjectMeta, 
 
 	allReports := strings.Join(reportContents, "\n\n---\n\n")
 
-	var contextParts []string
-
+	var manifest string
 	if len(manifestLines) > 0 {
-		manifest := "# Reports Under Review\n\n| Agent | Generated |\n|-------|----------|\n" +
+		manifest = "# Reports Under Review\n\n| Agent | Generated |\n|-------|----------|\n" +
 			strings.Join(manifestLines, "\n")
-		contextParts = append(contextParts, manifest)
 	}
 
-	if meta != nil {
-		contextParts = append(contextParts, gitutil.FormatMetadataSection(meta, time.Now()))
-	}
-
-	contextSection := strings.Join(contextParts, "\n\n")
+	projectInfo := FormatProjectInfo(pinfo)
 
 	if customPrompt != "" {
-		parts := []string{customPrompt}
-		if contextSection != "" {
-			parts = append(parts, contextSection)
+		var parts []string
+		if projectInfo != "" {
+			parts = append(parts, projectInfo)
+		}
+		parts = append(parts, customPrompt)
+		if manifest != "" {
+			parts = append(parts, manifest)
 		}
 		parts = append(parts, "# Agent Reports\n\n"+allReports)
 		return strings.Join(parts, "\n\n---\n\n"), nil
@@ -194,9 +190,13 @@ func AssembleReviewPrompt(orgDir, projectDir string, meta *gitutil.ProjectMeta, 
 		return "", err
 	}
 
-	parts := []string{supervisorPrompt}
-	if contextSection != "" {
-		parts = append(parts, contextSection)
+	var parts []string
+	if projectInfo != "" {
+		parts = append(parts, projectInfo)
+	}
+	parts = append(parts, supervisorPrompt)
+	if manifest != "" {
+		parts = append(parts, manifest)
 	}
 	parts = append(parts, "# Agent Reports\n\n"+allReports)
 	if extraPrompt != "" {
@@ -208,7 +208,7 @@ func AssembleReviewPrompt(orgDir, projectDir string, meta *gitutil.ProjectMeta, 
 
 // AssembleCodeManagementPrompt builds the full prompt for a supervisor code run.
 // reviewContent is the review document to include. customPrompt overrides 3-level fallback if non-empty.
-func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, meta *gitutil.ProjectMeta, reviewContent, customPrompt string) (string, error) {
+func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, pinfo ProjectInfoParams, reviewContent, customPrompt string) (string, error) {
 	var mgmtPrompt string
 	var err error
 
@@ -228,11 +228,11 @@ func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, meta *gi
 
 	mgmtPrompt = strings.ReplaceAll(mgmtPrompt, "{{SOURCE_DIR}}", sourceDir)
 
-	parts := []string{mgmtPrompt}
-
-	if meta != nil {
-		parts = append(parts, gitutil.FormatMetadataSection(meta, time.Now()))
+	var parts []string
+	if info := FormatProjectInfo(pinfo); info != "" {
+		parts = append(parts, info)
 	}
+	parts = append(parts, mgmtPrompt)
 
 	parts = append(parts, "# Review\n\n"+reviewContent)
 
@@ -242,25 +242,49 @@ func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, meta *gi
 // ProjectInfoParams holds the values needed to build the project info section.
 type ProjectInfoParams struct {
 	OrgDir      string // absolute path to .ateamorg/
+	ProjectDir  string // absolute path to .ateam/
 	ProjectName string
 	ProjectUUID string
 	SourceDir   string // absolute path to project root
 	GitRepoDir  string // absolute path to git repo root (may differ from SourceDir)
 	Role        string // e.g. "agent security" or "the supervisor"
+	Meta        *gitutil.ProjectMeta
 }
 
 // FormatProjectInfo builds the ateam project context section.
+// Returns "" if p has no Role set (zero value).
 func FormatProjectInfo(p ProjectInfoParams) string {
+	if p.Role == "" {
+		return ""
+	}
 	var b strings.Builder
 	b.WriteString("# ATeam Project Context\n\n")
 	b.WriteString("You are part of the ateam software:\n")
-	fmt.Fprintf(&b, "* your runtime files go in %s\n", p.OrgDir)
-	fmt.Fprintf(&b, "* your project name is %s\n", p.ProjectName)
-	fmt.Fprintf(&b, "* your project UUID is %s\n", p.ProjectUUID)
-	fmt.Fprintf(&b, "* you are %s\n", p.Role)
-	fmt.Fprintf(&b, "* you work exclusively on source code in %s\n", p.SourceDir)
+	fmt.Fprintf(&b, "* runtime files: %s\n", p.OrgDir)
+	fmt.Fprintf(&b, "* project name: %s\n", p.ProjectName)
+	fmt.Fprintf(&b, "* project UUID: %s\n", p.ProjectUUID)
+	fmt.Fprintf(&b, "* role: %s\n", p.Role)
+	fmt.Fprintf(&b, "* source code: %s\n", p.SourceDir)
 	if p.GitRepoDir != "" && p.GitRepoDir != p.SourceDir {
-		fmt.Fprintf(&b, "  * you are allowed to read but not modify up to %s\n", p.GitRepoDir)
+		fmt.Fprintf(&b, "  * allowed to read but not modify up to: %s\n", p.GitRepoDir)
+	}
+	fmt.Fprintf(&b, "* reports and reviews: %s\n", p.ProjectDir)
+	if p.Meta != nil {
+		ts := time.Now().Format("2006-01-02 15:04:05 MST")
+		fmt.Fprintf(&b, "* timestamp: %s\n", ts)
+		hash := p.Meta.CommitHash
+		if len(hash) > 12 {
+			hash = hash[:12]
+		}
+		fmt.Fprintf(&b, "* last commit: %s - %s - \"%s\"\n", hash, p.Meta.CommitDate, p.Meta.CommitMessage)
+		if len(p.Meta.Uncommitted) > 0 {
+			fmt.Fprintf(&b, "* uncommitted changes: %d file(s)\n", len(p.Meta.Uncommitted))
+			for _, f := range p.Meta.Uncommitted {
+				fmt.Fprintf(&b, "  * `%s`\n", f)
+			}
+		} else {
+			b.WriteString("* working tree: clean\n")
+		}
 	}
 	return b.String()
 }

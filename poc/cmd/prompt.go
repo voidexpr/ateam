@@ -61,27 +61,29 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 
 	meta, _ := gitutil.GetProjectMeta(env.SourceDir)
 
-	var assembled string
-	switch promptAction {
-	case "report":
-		assembled, err = prompts.AssembleAgentPrompt(env.OrgDir, env.ProjectDir, promptAgent, env.SourceDir, extraPrompt, meta)
-	case "code":
-		assembled, err = prompts.AssembleAgentCodePrompt(env.OrgDir, env.ProjectDir, promptAgent, env.SourceDir, extraPrompt, meta)
-	}
-	if err != nil {
-		return err
-	}
-
+	var pinfo prompts.ProjectInfoParams
 	if !promptNoProjectInfo {
-		info := prompts.FormatProjectInfo(prompts.ProjectInfoParams{
+		pinfo = prompts.ProjectInfoParams{
 			OrgDir:      env.OrgDir,
+			ProjectDir:  env.ProjectDir,
 			ProjectName: env.ProjectName,
 			ProjectUUID: env.ProjectUUID,
 			SourceDir:   env.SourceDir,
 			GitRepoDir:  env.GitRepoDir,
 			Role:        "agent " + promptAgent,
-		})
-		assembled = assembled + "\n\n---\n\n" + info
+			Meta:        meta,
+		}
+	}
+
+	var assembled string
+	switch promptAction {
+	case "report":
+		assembled, err = prompts.AssembleAgentPrompt(env.OrgDir, env.ProjectDir, promptAgent, env.SourceDir, extraPrompt, pinfo)
+	case "code":
+		assembled, err = prompts.AssembleAgentCodePrompt(env.OrgDir, env.ProjectDir, promptAgent, env.SourceDir, extraPrompt, pinfo)
+	}
+	if err != nil {
+		return err
 	}
 
 	fmt.Print(assembled)

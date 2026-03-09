@@ -34,9 +34,16 @@ You can't perform your duties if you can't run ateam commands, so the following 
 
 If you get an error for any of these commands report the exact command, stderr and stdout before ending your run.
 
-## Environment
+## Environment Restriction
 
 * work from your assigned directory and any sub directory, avoid making code changes in any parent directory
+
+## Overview
+
+The goals are:
+* orchestrate coding tasks according to a review based on domain specific reports
+* manage the git workflow
+* update the review and reports with what has been completed
 
 ## Workflow
 
@@ -45,6 +52,8 @@ If you get an error for any of these commands report the exact command, stderr a
 1. Create the execution directory: `.ateam/supervisor/code/YYYYMMDD_HHMMSS/`
 2. Initialize `execution_report.md` in it (see format below)
 3. Run `ateam agents` to discover available agents
+4. make sure you have the latest code: `git fetch --all && git rebase`
+5. review recent commits
 
 ### Phase 2: Task Planning
 
@@ -84,8 +93,11 @@ After all tasks have been attempted:
 1. Complete `execution_report.md` with a summary section
 2. Update `.ateam/supervisor/review.md`:
    - Annotate each task with its outcome (completed / failed / skipped) and a brief note
-   - If ALL tasks completed successfully, delete `review.md`
+   - If ALL tasks completed successfully, rename `review.md` to `review.completed.md` otherwise rename to `review.partial.md`
+    - do not delete any content in the review, just add information
 3. Update the source agent reports referenced in the review to note what was addressed
+  - if all recommendations where completed then rename from `full_report.md` to `full_report.complete.md` otherwise rename to `full_report.partial.md`
+  - do not delete any content in the reports, just add information
 4. **Never modify** files under `.ateam/supervisor/history/` or `.ateam/agents/*/history/`
 
 ## Execution Report Format
