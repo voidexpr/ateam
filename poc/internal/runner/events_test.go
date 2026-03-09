@@ -151,6 +151,39 @@ func TestExtractReportTextNil(t *testing.T) {
 	}
 }
 
+func TestParseToolResult(t *testing.T) {
+	line := []byte(`{"type":"tool_result","content":"file contents here"}`)
+	typ, ev, err := parseStreamLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if typ != "tool_result" {
+		t.Fatalf("expected type 'tool_result', got %q", typ)
+	}
+	tr, ok := ev.(*toolResultEvent)
+	if !ok {
+		t.Fatalf("expected *toolResultEvent, got %T", ev)
+	}
+	if tr.Content != "file contents here" {
+		t.Errorf("expected 'file contents here', got %q", tr.Content)
+	}
+}
+
+func TestParseAssistantToolInput(t *testing.T) {
+	line := []byte(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"ls -la"}}]}}`)
+	_, ev, err := parseStreamLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ast := ev.(*assistantEvent)
+	if len(ast.Message.Content) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(ast.Message.Content))
+	}
+	if string(ast.Message.Content[0].Input) != `{"command":"ls -la"}` {
+		t.Errorf("unexpected input: %s", ast.Message.Content[0].Input)
+	}
+}
+
 func TestParseResultWithIsError(t *testing.T) {
 	line := []byte(`{"type":"result","total_cost_usd":0.05,"is_error":true,"num_turns":1,"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":0}}`)
 	_, ev, err := parseStreamLine(line)

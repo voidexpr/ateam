@@ -6,11 +6,12 @@ import (
 )
 
 const (
-	PhaseInit     = "init"
-	PhaseThinking = "thinking"
-	PhaseTool     = "tool"
-	PhaseDone     = "done"
-	PhaseError    = "error"
+	PhaseInit       = "init"
+	PhaseThinking   = "thinking"
+	PhaseTool       = "tool"
+	PhaseToolResult = "tool_result"
+	PhaseDone       = "done"
+	PhaseError      = "error"
 )
 
 type typedEvent struct {
@@ -29,9 +30,14 @@ type assistantEvent struct {
 }
 
 type contentBlock struct {
-	Type string `json:"type"` // "text" or "tool_use"
-	Text string `json:"text,omitempty"`
-	Name string `json:"name,omitempty"`
+	Type  string          `json:"type"` // "text" or "tool_use"
+	Text  string          `json:"text,omitempty"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
+}
+
+type toolResultEvent struct {
+	Content string `json:"content"`
 }
 
 type resultEvent struct {
@@ -71,6 +77,13 @@ func parseStreamLine(line []byte) (string, any, error) {
 
 	case "assistant":
 		var ev assistantEvent
+		if err := json.Unmarshal(line, &ev); err != nil {
+			return typed.Type, nil, err
+		}
+		return typed.Type, &ev, nil
+
+	case "tool_result":
+		var ev toolResultEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
 			return typed.Type, nil, err
 		}

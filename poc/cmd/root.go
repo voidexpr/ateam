@@ -32,4 +32,7 @@ func init() {
 	rootCmd.AddCommand(projectsCmd)
 	rootCmd.AddCommand(agentsCmd)
 	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(promptCmd)
+	rootCmd.AddCommand(codeCmd)
+	rootCmd.AddCommand(logCmd)
 }

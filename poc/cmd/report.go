@@ -85,6 +85,14 @@ func runReport(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", agentID, err)
 			continue
 		}
+		prompt += "\n\n---\n\n" + prompts.FormatProjectInfo(prompts.ProjectInfoParams{
+			OrgDir:      env.OrgDir,
+			ProjectName: env.ProjectName,
+			ProjectUUID: env.ProjectUUID,
+			SourceDir:   env.SourceDir,
+			GitRepoDir:  env.GitRepoDir,
+			Role:        "agent " + agentID,
+		})
 		agentDir := filepath.Join(env.ProjectDir, "agents", agentID)
 		tasks = append(tasks, runner.PoolTask{
 			Prompt: prompt,

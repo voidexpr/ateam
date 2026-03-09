@@ -16,6 +16,7 @@ const (
 	ExtraReportPromptFile           = "extra_report_prompt.md"
 	ReviewPromptFile                = "review_prompt.md"
 	ReportCommissioningPromptFile   = "report_commissioning_prompt.md"
+	CodeManagementPromptFile        = "code_management.md"
 	FullReportFile                  = "full_report.md"
 	FullReportErrorFile             = "full_report_error.md"
 )
@@ -43,24 +44,34 @@ func ResolveOptional(value string) (string, error) {
 	return ResolveValue(value)
 }
 
-// AssembleAgentPrompt builds the full prompt for an agent run.
+// AssembleAgentPrompt builds the full prompt for an agent report run.
 // Resolution order for both role prompt and global instructions: project → org → org defaults.
 // meta is optional — if nil, git metadata is omitted from the prompt.
 func AssembleAgentPrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, meta *gitutil.ProjectMeta) (string, error) {
+	return assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt, meta, ReportPromptFile)
+}
+
+// AssembleAgentCodePrompt builds the full prompt for an agent code run.
+func AssembleAgentCodePrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, meta *gitutil.ProjectMeta) (string, error) {
+	return assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt, meta, CodePromptFile)
+}
+
+func assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt string, meta *gitutil.ProjectMeta, promptFile string) (string, error) {
 	rolePrompt, err := readWith3LevelFallback(
-		filepath.Join(projectDir, "agents", agentID, ReportPromptFile),
-		filepath.Join(orgDir, "agents", agentID, ReportPromptFile),
-		filepath.Join(orgDir, "defaults", "agents", agentID, ReportPromptFile),
+		filepath.Join(projectDir, "agents", agentID, promptFile),
+		filepath.Join(orgDir, "agents", agentID, promptFile),
+		filepath.Join(orgDir, "defaults", "agents", agentID, promptFile),
 		"agent "+agentID,
 	)
 	if err != nil {
 		return "", err
 	}
 
+	// Global instructions use the same file name (e.g. report_prompt.md, code_prompt.md).
 	instructions := readFileOr3Level(
-		filepath.Join(projectDir, ReportPromptFile),
-		filepath.Join(orgDir, ReportPromptFile),
-		filepath.Join(orgDir, "defaults", ReportPromptFile),
+		filepath.Join(projectDir, promptFile),
+		filepath.Join(orgDir, promptFile),
+		filepath.Join(orgDir, "defaults", promptFile),
 	)
 
 	promptContent := rolePrompt
@@ -193,6 +204,65 @@ func AssembleReviewPrompt(orgDir, projectDir string, meta *gitutil.ProjectMeta, 
 	}
 
 	return strings.Join(parts, "\n\n---\n\n"), nil
+}
+
+// AssembleCodeManagementPrompt builds the full prompt for a supervisor code run.
+// reviewContent is the review document to include. customPrompt overrides 3-level fallback if non-empty.
+func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, meta *gitutil.ProjectMeta, reviewContent, customPrompt string) (string, error) {
+	var mgmtPrompt string
+	var err error
+
+	if customPrompt != "" {
+		mgmtPrompt = customPrompt
+	} else {
+		mgmtPrompt, err = readWith3LevelFallback(
+			filepath.Join(projectDir, "supervisor", CodeManagementPromptFile),
+			filepath.Join(orgDir, "supervisor", CodeManagementPromptFile),
+			filepath.Join(orgDir, "defaults", "supervisor", CodeManagementPromptFile),
+			"code management",
+		)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	mgmtPrompt = strings.ReplaceAll(mgmtPrompt, "{{SOURCE_DIR}}", sourceDir)
+
+	parts := []string{mgmtPrompt}
+
+	if meta != nil {
+		parts = append(parts, gitutil.FormatMetadataSection(meta, time.Now()))
+	}
+
+	parts = append(parts, "# Review\n\n"+reviewContent)
+
+	return strings.Join(parts, "\n\n---\n\n"), nil
+}
+
+// ProjectInfoParams holds the values needed to build the project info section.
+type ProjectInfoParams struct {
+	OrgDir      string // absolute path to .ateamorg/
+	ProjectName string
+	ProjectUUID string
+	SourceDir   string // absolute path to project root
+	GitRepoDir  string // absolute path to git repo root (may differ from SourceDir)
+	Role        string // e.g. "agent security" or "the supervisor"
+}
+
+// FormatProjectInfo builds the ateam project context section.
+func FormatProjectInfo(p ProjectInfoParams) string {
+	var b strings.Builder
+	b.WriteString("# ATeam Project Context\n\n")
+	b.WriteString("You are part of the ateam software:\n")
+	fmt.Fprintf(&b, "* your runtime files go in %s\n", p.OrgDir)
+	fmt.Fprintf(&b, "* your project name is %s\n", p.ProjectName)
+	fmt.Fprintf(&b, "* your project UUID is %s\n", p.ProjectUUID)
+	fmt.Fprintf(&b, "* you are %s\n", p.Role)
+	fmt.Fprintf(&b, "* you work exclusively on source code in %s\n", p.SourceDir)
+	if p.GitRepoDir != "" && p.GitRepoDir != p.SourceDir {
+		fmt.Fprintf(&b, "  * you are allowed to read but not modify up to %s\n", p.GitRepoDir)
+	}
+	return b.String()
 }
 
 // readWith3LevelFallback tries projectPath, then orgPath, then defaultPath.
