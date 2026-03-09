@@ -554,7 +554,7 @@ func TestIntegration_NestedProjectStateDir(t *testing.T) {
 }
 
 // TestIntegration_WalkProjectsDiscovery verifies that WalkProjects discovers
-// all projects without orgconfig.toml.
+// all projects by walking the filesystem.
 func TestIntegration_WalkProjectsDiscovery(t *testing.T) {
 	base := resolvedTempDir(t)
 

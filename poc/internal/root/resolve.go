@@ -101,10 +101,7 @@ func (e *ResolvedEnv) populateFromConfig(projectDir string, cfg *config.Config) 
 	if cfg.Git.Repo != "" {
 		e.GitRepoDir = resolvePath(e.SourceDir, cfg.Git.Repo)
 	}
-	relPath, err := filepath.Rel(filepath.Dir(e.OrgDir), e.SourceDir)
-	if err != nil {
-		relPath = e.SourceDir
-	}
+	relPath := e.RelPath(e.SourceDir)
 	e.StateDir = filepath.Join(e.OrgDir, "projects", config.PathToStateKey(relPath))
 }
 

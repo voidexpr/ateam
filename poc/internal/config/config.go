@@ -29,7 +29,6 @@ type Config struct {
 
 type ProjectConfig struct {
 	Name string `toml:"name"`
-	UUID string `toml:"project_uuid,omitempty"`
 }
 
 type GitConfig struct {
