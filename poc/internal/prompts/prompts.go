@@ -12,11 +12,16 @@ import (
 
 const (
 	ReportPromptFile                = "report_prompt.md"
+	ReportBasePromptFile            = "report_base_prompt.md"
+	ReportExtraPromptFile           = "report_extra_prompt.md"
 	CodePromptFile                  = "code_prompt.md"
-	ExtraReportPromptFile           = "extra_report_prompt.md"
+	CodeBasePromptFile              = "code_base_prompt.md"
+	CodeExtraPromptFile             = "code_extra_prompt.md"
 	ReviewPromptFile                = "review_prompt.md"
+	ReviewExtraPromptFile           = "review_extra_prompt.md"
 	ReportCommissioningPromptFile   = "report_commissioning_prompt.md"
-	CodeManagementPromptFile        = "code_management.md"
+	CodeManagementPromptFile        = "code_management_prompt.md"
+	CodeManagementExtraPromptFile   = "code_management_extra_prompt.md"
 	FullReportFile                  = "full_report.md"
 	FullReportErrorFile             = "full_report_error.md"
 )
@@ -45,32 +50,33 @@ func ResolveOptional(value string) (string, error) {
 }
 
 // AssembleAgentPrompt builds the full prompt for an agent report run.
-// Resolution order for both role prompt and global instructions: project → org → org defaults.
 func AssembleAgentPrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams) (string, error) {
-	return assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt, pinfo, ReportPromptFile)
+	return assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt, pinfo,
+		ReportBasePromptFile, ReportPromptFile, ReportExtraPromptFile)
 }
 
 // AssembleAgentCodePrompt builds the full prompt for an agent code run.
 func AssembleAgentCodePrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams) (string, error) {
-	return assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt, pinfo, CodePromptFile)
+	return assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt, pinfo,
+		CodeBasePromptFile, CodePromptFile, CodeExtraPromptFile)
 }
 
-// Prompt sequence: ATeam Project Context → Base action prompt → Role-specific prompt → extra CLI prompt
-func assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, promptFile string) (string, error) {
+// Prompt sequence: ATeam Project Context → Base prompt → Role-specific prompt → Extra prompts → CLI extra
+func assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, baseFile, roleFile, extraFile string) (string, error) {
 	rolePrompt := readFileOr3Level(
-		filepath.Join(projectDir, "agents", agentID, promptFile),
-		filepath.Join(orgDir, "agents", agentID, promptFile),
-		filepath.Join(orgDir, "defaults", "agents", agentID, promptFile),
+		filepath.Join(projectDir, "agents", agentID, roleFile),
+		filepath.Join(orgDir, "agents", agentID, roleFile),
+		filepath.Join(orgDir, "defaults", "agents", agentID, roleFile),
 	)
 
 	basePrompt := readFileOr3Level(
-		filepath.Join(projectDir, promptFile),
-		filepath.Join(orgDir, promptFile),
-		filepath.Join(orgDir, "defaults", promptFile),
+		filepath.Join(projectDir, baseFile),
+		filepath.Join(orgDir, baseFile),
+		filepath.Join(orgDir, "defaults", baseFile),
 	)
 
 	if rolePrompt == "" && basePrompt == "" {
-		return "", fmt.Errorf("no prompt found for agent %s action %s", agentID, strings.TrimSuffix(promptFile, ".md"))
+		return "", fmt.Errorf("no prompt found for agent %s action %s", agentID, strings.TrimSuffix(roleFile, ".md"))
 	}
 
 	var parts []string
@@ -84,16 +90,48 @@ func assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt str
 		parts = append(parts, strings.ReplaceAll(rolePrompt, "{{SOURCE_DIR}}", sourceDir))
 	}
 
-	extraFilePath := filepath.Join(projectDir, "agents", agentID, ExtraReportPromptFile)
-	if data, err := os.ReadFile(extraFilePath); err == nil {
-		parts = append(parts, "# Project-Specific Instructions\n\n"+string(data))
-	}
+	extras := collectAgentExtras(orgDir, projectDir, agentID, extraFile)
+	parts = append(parts, extras...)
 
 	if extraPrompt != "" {
 		parts = append(parts, "# Additional Instructions\n\n"+extraPrompt)
 	}
 
 	return strings.Join(parts, "\n\n---\n\n"), nil
+}
+
+// collectAgentExtras gathers extra prompt files from all levels (no defaults).
+// Order: org broad → org agent-specific → project broad → project agent-specific.
+func collectAgentExtras(orgDir, projectDir, agentID, extraFile string) []string {
+	paths := []string{
+		filepath.Join(orgDir, extraFile),
+		filepath.Join(orgDir, "agents", agentID, extraFile),
+		filepath.Join(projectDir, extraFile),
+		filepath.Join(projectDir, "agents", agentID, extraFile),
+	}
+	return readAllExisting(paths)
+}
+
+// collectSupervisorExtras gathers extra prompt files from org and project levels.
+func collectSupervisorExtras(orgDir, projectDir, extraFile string) []string {
+	paths := []string{
+		filepath.Join(orgDir, "supervisor", extraFile),
+		filepath.Join(projectDir, "supervisor", extraFile),
+	}
+	return readAllExisting(paths)
+}
+
+func readAllExisting(paths []string) []string {
+	var results []string
+	for _, p := range paths {
+		if data, err := os.ReadFile(p); err == nil {
+			content := strings.TrimSpace(string(data))
+			if content != "" {
+				results = append(results, content)
+			}
+		}
+	}
+	return results
 }
 
 // AgentReport holds metadata about a discovered agent report file.
@@ -193,6 +231,7 @@ func AssembleReviewPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, ex
 		parts = append(parts, projectInfo)
 	}
 	parts = append(parts, supervisorPrompt)
+	parts = append(parts, collectSupervisorExtras(orgDir, projectDir, ReviewExtraPromptFile)...)
 	if manifest != "" {
 		parts = append(parts, manifest)
 	}
@@ -231,6 +270,7 @@ func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, pinfo Pr
 		parts = append(parts, info)
 	}
 	parts = append(parts, mgmtPrompt)
+	parts = append(parts, collectSupervisorExtras(orgDir, projectDir, CodeManagementExtraPromptFile)...)
 
 	parts = append(parts, "# Review\n\n"+reviewContent)
 

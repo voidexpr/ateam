@@ -16,7 +16,7 @@ type PromptDiff struct {
 	Status  string // "changed", "missing"
 }
 
-//go:embed defaults/agents/*/report_prompt.md defaults/agents/*/code_prompt.md defaults/report_prompt.md defaults/supervisor/review_prompt.md defaults/supervisor/report_commissioning_prompt.md defaults/supervisor/code_management.md defaults/code_prompt.md
+//go:embed defaults/agents/*/report_prompt.md defaults/agents/*/code_prompt.md defaults/report_base_prompt.md defaults/code_base_prompt.md defaults/supervisor/review_prompt.md defaults/supervisor/report_commissioning_prompt.md defaults/supervisor/code_management_prompt.md
 var defaultsFS embed.FS
 
 // AllAgentIDs is the sorted list of agent IDs discovered from embedded prompt files.
@@ -82,12 +82,12 @@ func DefaultAgentPrompt(agentID string) string {
 	return readEmbedded(fmt.Sprintf("defaults/agents/%s/report_prompt.md", agentID))
 }
 
-func DefaultReportPrompt() string {
-	return readEmbedded("defaults/report_prompt.md")
+func DefaultReportBasePrompt() string {
+	return readEmbedded("defaults/report_base_prompt.md")
 }
 
-func DefaultCodePrompt() string {
-	return readEmbedded("defaults/code_prompt.md")
+func DefaultCodeBasePrompt() string {
+	return readEmbedded("defaults/code_base_prompt.md")
 }
 
 func DefaultSupervisorReviewPrompt() string {
@@ -99,7 +99,7 @@ func DefaultSupervisorCommissioningPrompt() string {
 }
 
 func DefaultSupervisorCodeManagementPrompt() string {
-	return readEmbedded("defaults/supervisor/code_management.md")
+	return readEmbedded("defaults/supervisor/code_management_prompt.md")
 }
 
 type embeddedFile struct {
@@ -125,12 +125,12 @@ func embeddedFiles() []embeddedFile {
 		}
 	}
 	files = append(files, embeddedFile{
-		filepath.Join("defaults", ReportPromptFile),
-		DefaultReportPrompt(),
+		filepath.Join("defaults", ReportBasePromptFile),
+		DefaultReportBasePrompt(),
 	})
 	files = append(files, embeddedFile{
-		filepath.Join("defaults", CodePromptFile),
-		DefaultCodePrompt(),
+		filepath.Join("defaults", CodeBasePromptFile),
+		DefaultCodeBasePrompt(),
 	})
 	files = append(files, embeddedFile{
 		filepath.Join("defaults", "supervisor", ReviewPromptFile),
