@@ -3,8 +3,10 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
@@ -15,7 +17,6 @@ import (
 var (
 	runAgent   string
 	runStream  bool
-	runQuiet   bool
 	runWorkDir string
 	runSummary bool
 )
@@ -40,11 +41,9 @@ Example:
 func init() {
 	runCmd.Flags().StringVar(&runAgent, "agent", "", "agent to run (required)")
 	runCmd.Flags().BoolVar(&runStream, "stream", false, "show progress updates during execution")
-	runCmd.Flags().BoolVar(&runQuiet, "quiet", false, "print only the final message (default)")
 	runCmd.Flags().StringVar(&runWorkDir, "work-dir", "", "working directory for the agent (defaults to project source dir)")
 	runCmd.Flags().BoolVar(&runSummary, "summary", false, "print run summary after completion")
 	_ = runCmd.MarkFlagRequired("agent")
-	runCmd.MarkFlagsMutuallyExclusive("stream", "quiet")
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
@@ -90,17 +89,28 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	var progress chan runner.RunProgress
+	var progressWg sync.WaitGroup
 	if runStream {
 		progress = make(chan runner.RunProgress, 64)
-		go printProgress(progress)
+		progressWg.Add(1)
+		go func() {
+			defer progressWg.Done()
+			printProgress(progress)
+		}()
 	}
 
 	ctx := context.Background()
 	result := cr.Run(ctx, promptText, opts, progress)
 
-	// Print stderr from the agent to our stderr.
-	if stderrContent, err := os.ReadFile(result.StderrFilePath); err == nil && len(stderrContent) > 0 {
-		fmt.Fprint(os.Stderr, string(stderrContent))
+	if progress != nil {
+		close(progress)
+		progressWg.Wait()
+	}
+
+	// Stream stderr from the agent to our stderr.
+	if f, err := os.Open(result.StderrFilePath); err == nil {
+		io.Copy(os.Stderr, f)
+		f.Close()
 	}
 
 	// Print the last message to stdout.

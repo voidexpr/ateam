@@ -155,6 +155,41 @@ List all projects discovered under the current organization.
 ateam projects
 ```
 
+### `ateam run`
+
+Run a single agent with a given prompt. By default prints only the final message to stdout.
+
+```bash
+ateam run "Analyze the auth module" --agent security
+ateam run @prompt.md --agent testing_basic
+ateam run @prompt.md --agent security --stream
+ateam run @prompt.md --agent security --summary
+```
+
+| Flag | Description |
+|------|-------------|
+| `--agent AGENT` | Agent to run **(required)** — any valid agent, does not need to be enabled |
+| `--stream` | Show progress updates on stderr during execution |
+| `--work-dir PATH` | Working directory for the agent (defaults to project source dir) |
+| `--summary` | Print cost/duration/tokens summary to stderr after completion |
+
+Returns the agent's exit code. Agent stderr is forwarded to stderr.
+
+### `ateam agents`
+
+List agents configured for the current project.
+
+```bash
+ateam agents                 # all agents with status (default)
+ateam agents --enabled       # enabled agents only
+ateam agents --available     # same as default
+```
+
+| Flag | Description |
+|------|-------------|
+| `--enabled` | List enabled agents only |
+| `--available` | List all agents with status (default) |
+
 ### `ateam update`
 
 Update on-disk default prompts to match the version embedded in the current binary.
