@@ -30,4 +30,5 @@ func init() {
 	rootCmd.AddCommand(reviewCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(projectsCmd)
+	rootCmd.AddCommand(agentsCmd)
 }
