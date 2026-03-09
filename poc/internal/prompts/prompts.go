@@ -55,6 +55,7 @@ func AssembleAgentCodePrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt
 	return assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt, pinfo, CodePromptFile)
 }
 
+// Prompt sequence: ATeam Project Context → Base action prompt → Role-specific prompt → extra CLI prompt
 func assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, promptFile string) (string, error) {
 	rolePrompt, err := readWith3LevelFallback(
 		filepath.Join(projectDir, "agents", agentID, promptFile),
@@ -66,25 +67,21 @@ func assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt str
 		return "", err
 	}
 
-	// Global instructions use the same file name (e.g. report_prompt.md, code_prompt.md).
-	instructions := readFileOr3Level(
+	basePrompt := readFileOr3Level(
 		filepath.Join(projectDir, promptFile),
 		filepath.Join(orgDir, promptFile),
 		filepath.Join(orgDir, "defaults", promptFile),
 	)
 
-	promptContent := rolePrompt
-	if instructions != "" {
-		promptContent += "\n\n---\n\n" + instructions
-	}
-
-	promptContent = strings.ReplaceAll(promptContent, "{{SOURCE_DIR}}", sourceDir)
-
 	var parts []string
 	if info := FormatProjectInfo(pinfo); info != "" {
 		parts = append(parts, info)
 	}
-	parts = append(parts, promptContent)
+	if basePrompt != "" {
+		parts = append(parts, strings.ReplaceAll(basePrompt, "{{SOURCE_DIR}}", sourceDir))
+	}
+
+	parts = append(parts, strings.ReplaceAll(rolePrompt, "{{SOURCE_DIR}}", sourceDir))
 
 	extraFilePath := filepath.Join(projectDir, "agents", agentID, ExtraReportPromptFile)
 	if data, err := os.ReadFile(extraFilePath); err == nil {
