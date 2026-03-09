@@ -485,7 +485,7 @@ All agent prompts follow the same pattern: `defaults/agents/<NAME>/report_prompt
 
 Agents are auto-discovered from [`internal/prompts/defaults/agents/`](internal/prompts/defaults/agents/). Each subdirectory containing a `report_prompt.md` becomes a valid agent. Use `all` as shorthand for every agent.
 
-Available agents: `automation`, `basic_project_structure`, `critic_engineering`, `critic_project`, `database_config`, `database_schema`, `dependencies`, `docs_external`, `docs_internal`, `project_characteristics`, `refactor_architecture`, `refactor_small`, `security`, `shortcut_taker`, `testing_basic`, `testing_full`.
+Available agents: `automation`, `basic_project_structure`, `critic_engineering`, `critic_project`, `database_config`, `database_schema`, `dependencies`, `docs_external`, `docs_internal`, `production_ready`, `project_characteristics`, `refactor_architecture`, `refactor_small`, `security`, `shortcut_taker`, `testing_basic`, `testing_full`.
 
 ## Troubleshooting
 
