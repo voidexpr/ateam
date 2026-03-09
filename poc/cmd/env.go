@@ -42,9 +42,6 @@ func runEnv(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf(" Project: %s\n", env.ProjectName)
 
-	if env.ProjectUUID != "" {
-		fmt.Printf("    UUID: %s\n", env.ProjectUUID)
-	}
 	if env.StateDir != "" {
 		fmt.Printf("   State: %s\n", env.RelPath(env.StateDir))
 	}

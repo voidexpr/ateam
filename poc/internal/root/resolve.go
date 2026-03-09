@@ -21,10 +21,9 @@ type ResolvedEnv struct {
 	OrgDir      string         // absolute path to .ateamorg/
 	ProjectDir  string         // absolute path to .ateam/
 	ProjectName string         // from config.toml
-	ProjectUUID string         // from config.toml
 	SourceDir   string         // absolute path to project root (parent of .ateam/)
 	GitRepoDir  string         // resolved from config git.repo
-	StateDir    string         // .ateamorg/projects/<UUID>/ (empty if no UUID)
+	StateDir    string         // .ateamorg/projects/<state-key>/
 	Config      *config.Config
 }
 
@@ -70,7 +69,6 @@ func (e *ResolvedEnv) NewProjectInfoParams(role string) prompts.ProjectInfoParam
 		OrgDir:      e.OrgDir,
 		ProjectDir:  e.ProjectDir,
 		ProjectName: e.ProjectName,
-		ProjectUUID: e.ProjectUUID,
 		SourceDir:   e.SourceDir,
 		GitRepoDir:  e.GitRepoDir,
 		Role:        role,
@@ -99,14 +97,15 @@ func (e *ResolvedEnv) RelPath(absPath string) string {
 func (e *ResolvedEnv) populateFromConfig(projectDir string, cfg *config.Config) {
 	e.Config = cfg
 	e.ProjectName = cfg.Project.Name
-	e.ProjectUUID = cfg.Project.UUID
 	e.SourceDir = filepath.Dir(projectDir) // project root = parent of .ateam/
 	if cfg.Git.Repo != "" {
 		e.GitRepoDir = resolvePath(e.SourceDir, cfg.Git.Repo)
 	}
-	if cfg.Project.UUID != "" {
-		e.StateDir = filepath.Join(e.OrgDir, "projects", cfg.Project.UUID)
+	relPath, err := filepath.Rel(filepath.Dir(e.OrgDir), e.SourceDir)
+	if err != nil {
+		relPath = e.SourceDir
 	}
+	e.StateDir = filepath.Join(e.OrgDir, "projects", config.PathToStateKey(relPath))
 }
 
 // FindOrg walks up from cwd looking for a .ateamorg directory.
@@ -190,10 +189,6 @@ func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
 		ProjectDir: projectDir,
 	}
 	env.populateFromConfig(projectDir, cfg)
-
-	if env.ProjectUUID == "" {
-		return nil, fmt.Errorf("project missing project_uuid — re-run 'ateam init' or add project_uuid to config.toml")
-	}
 
 	return env, nil
 }

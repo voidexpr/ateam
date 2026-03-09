@@ -8,6 +8,10 @@ The project source code is located at: {{SOURCE_DIR}}
 
 Explore the codebase thoroughly before writing your report. Read key files, understand the structure, and base every finding on actual code you've seen.
 
+## Agent performing the audit
+
+Specify which agent you are use, what model you are using and other attributes related to the model (thinking enable, level of thinking, ...)
+
 ## Report Format
 
 Structure your report as follows:
