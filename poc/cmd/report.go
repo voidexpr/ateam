@@ -13,12 +13,14 @@ import (
 )
 
 var (
-	reportAgents      []string
-	reportExtraPrompt string
-	reportTimeout     int
-	reportDelta       bool
-	reportPrint       bool
-	reportDryRun      bool
+	reportAgents               []string
+	reportExtraPrompt          string
+	reportTimeout              int
+	reportDelta                bool
+	reportPrint                bool
+	reportDryRun               bool
+	reportIgnorePreviousReport bool
+	reportCheaperModel         bool
 )
 
 var reportCmd = &cobra.Command{
@@ -44,6 +46,8 @@ func init() {
 	reportCmd.Flags().BoolVar(&reportDelta, "delta", false, "produce delta report (not yet implemented)")
 	reportCmd.Flags().BoolVar(&reportPrint, "print", false, "print reports to stdout after completion")
 	reportCmd.Flags().BoolVar(&reportDryRun, "dry-run", false, "print the computed prompt for each agent without running")
+	reportCmd.Flags().BoolVar(&reportIgnorePreviousReport, "ignore-previous-report", false, "do not include the agent's previous report in the prompt")
+	addCheaperModelFlag(reportCmd, &reportCheaperModel)
 	_ = reportCmd.MarkFlagRequired("agents")
 }
 
@@ -75,12 +79,13 @@ func runReport(cmd *cobra.Command, args []string) error {
 	reportType := "full"
 
 	cr := &runner.ClaudeRunner{LogFile: env.RunnerLogPath(), ProjectDir: env.ProjectDir}
+	applyCheaperModel(cr, reportCheaperModel)
 	basePinfo := env.NewProjectInfoParams("")
 	var tasks []runner.PoolTask
 	for _, agentID := range agentIDs {
 		pinfo := basePinfo
 		pinfo.Role = "agent " + agentID
-		prompt, err := prompts.AssembleAgentPrompt(env.OrgDir, env.ProjectDir, agentID, env.SourceDir, extraPrompt, pinfo)
+		prompt, err := prompts.AssembleAgentPrompt(env.OrgDir, env.ProjectDir, agentID, env.SourceDir, extraPrompt, pinfo, reportIgnorePreviousReport)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", agentID, err)
 			continue

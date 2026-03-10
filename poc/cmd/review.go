@@ -19,6 +19,7 @@ var (
 	reviewTimeout      int
 	reviewPrint        bool
 	reviewDryRun       bool
+	reviewCheaperModel bool
 )
 
 var reviewCmd = &cobra.Command{
@@ -42,6 +43,7 @@ func init() {
 	reviewCmd.Flags().IntVar(&reviewTimeout, "timeout", 0, "timeout in minutes (overrides config)")
 	reviewCmd.Flags().BoolVar(&reviewPrint, "print", false, "print review to stdout after completion")
 	reviewCmd.Flags().BoolVar(&reviewDryRun, "dry-run", false, "print the computed prompt and list reports without running")
+	addCheaperModelFlag(reviewCmd, &reviewCheaperModel)
 }
 
 func runReview(cmd *cobra.Command, args []string) error {
@@ -83,6 +85,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Supervisor reviewing reports (%dm timeout)...\n", timeout)
 
 	cr := &runner.ClaudeRunner{LogFile: env.RunnerLogPath(), ProjectDir: env.ProjectDir}
+	applyCheaperModel(cr, reviewCheaperModel)
 	opts := runner.RunOpts{
 		AgentID:              "supervisor",
 		OutputDir:            env.SupervisorLogsDir("review"),

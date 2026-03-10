@@ -14,11 +14,12 @@ import (
 )
 
 var (
-	codeReview     string
-	codeManagement string
-	codeTimeout    int
-	codePrint      bool
-	codeDryRun     bool
+	codeReview       string
+	codeManagement   string
+	codeTimeout      int
+	codePrint        bool
+	codeDryRun       bool
+	codeCheaperModel bool
 )
 
 var codeCmd = &cobra.Command{
@@ -46,6 +47,7 @@ func init() {
 		"print output to stdout after completion")
 	codeCmd.Flags().BoolVar(&codeDryRun, "dry-run", false,
 		"print the computed prompt without running")
+	addCheaperModelFlag(codeCmd, &codeCheaperModel)
 }
 
 func runCode(cmd *cobra.Command, args []string) error {
@@ -101,6 +103,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 
 	supervisorDir := filepath.Join(env.ProjectDir, "supervisor")
 	cr := &runner.ClaudeRunner{LogFile: env.RunnerLogPath(), ProjectDir: env.ProjectDir}
+	applyCheaperModel(cr, codeCheaperModel)
 	opts := runner.RunOpts{
 		AgentID:              "supervisor",
 		OutputDir:            env.SupervisorLogsDir("code"),

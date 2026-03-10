@@ -2,6 +2,7 @@ package prompts
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,19 +51,23 @@ func ResolveOptional(value string) (string, error) {
 }
 
 // AssembleAgentPrompt builds the full prompt for an agent report run.
-func AssembleAgentPrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams) (string, error) {
+// When skipPreviousReport is false, the agent's existing full_report.md is
+// included as a "Previous Report" section so the agent can build on prior findings.
+func AssembleAgentPrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, skipPreviousReport bool) (string, error) {
 	return assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt, pinfo,
-		ReportBasePromptFile, ReportPromptFile, ReportExtraPromptFile)
+		ReportBasePromptFile, ReportPromptFile, ReportExtraPromptFile, skipPreviousReport)
 }
 
 // AssembleAgentCodePrompt builds the full prompt for an agent code run.
-func AssembleAgentCodePrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams) (string, error) {
+// When skipPreviousReport is false, the agent's existing full_report.md is
+// included so the agent has context about prior findings.
+func AssembleAgentCodePrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, skipPreviousReport bool) (string, error) {
 	return assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt, pinfo,
-		CodeBasePromptFile, CodePromptFile, CodeExtraPromptFile)
+		CodeBasePromptFile, CodePromptFile, CodeExtraPromptFile, skipPreviousReport)
 }
 
-// Prompt sequence: ATeam Project Context → Base prompt → Role-specific prompt → Extra prompts → CLI extra
-func assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, baseFile, roleFile, extraFile string) (string, error) {
+// Prompt sequence: ATeam Project Context → Base prompt → Role-specific prompt → Extra prompts → Previous report → CLI extra
+func assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, baseFile, roleFile, extraFile string, skipPreviousReport bool) (string, error) {
 	rolePrompt := readFileOr3Level(
 		filepath.Join(projectDir, "agents", agentID, roleFile),
 		filepath.Join(orgDir, "agents", agentID, roleFile),
@@ -92,6 +97,15 @@ func assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt str
 
 	extras := collectAgentExtras(orgDir, projectDir, agentID, extraFile)
 	parts = append(parts, extras...)
+
+	if !skipPreviousReport {
+		if content, modTime, err := readFileWithModTime(filepath.Join(projectDir, "agents", agentID, FullReportFile)); err == nil && content != "" {
+			age := time.Since(modTime)
+			header := fmt.Sprintf("# Previous Report\n\nWhat follows is the previous report that was generated (and possibly updated with the tasks completed) on %s (%s ago). It might be outdated but it will give you some context of what has been done.\n\n",
+				modTime.Format("2006-01-02 15:04:05 MST"), formatAge(age))
+			parts = append(parts, header+content)
+		}
+	}
 
 	if extraPrompt != "" {
 		parts = append(parts, "# Additional Instructions\n\n"+extraPrompt)
@@ -341,6 +355,48 @@ func readFileOr3Level(projectPath, orgPath, defaultPath string) string {
 		}
 	}
 	return ""
+}
+
+func readFileWithModTime(path string) (string, time.Time, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	return strings.TrimSpace(string(data)), info.ModTime(), nil
+}
+
+func formatAge(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		m := int(d.Minutes())
+		if m == 1 {
+			return "1 minute"
+		}
+		return fmt.Sprintf("%d minutes", m)
+	case d < 24*time.Hour:
+		h := int(d.Hours())
+		if h == 1 {
+			return "1 hour"
+		}
+		return fmt.Sprintf("%d hours", h)
+	default:
+		days := int(d.Hours() / 24)
+		if days == 1 {
+			return "1 day"
+		}
+		return fmt.Sprintf("%d days", days)
+	}
 }
 
 // WriteIfNotExists writes content to path only if the file does not already exist.

@@ -310,7 +310,7 @@ func TestIntegration_3LevelPromptFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := prompts.AssembleAgentPrompt(orgDir, projDir, agentID, sourceDir, "", prompts.ProjectInfoParams{})
+	result, err := prompts.AssembleAgentPrompt(orgDir, projDir, agentID, sourceDir, "", prompts.ProjectInfoParams{}, false)
 	if err != nil {
 		t.Fatalf("AssembleAgentPrompt (defaults): %v", err)
 	}
@@ -327,7 +327,7 @@ func TestIntegration_3LevelPromptFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err = prompts.AssembleAgentPrompt(orgDir, projDir, agentID, sourceDir, "", prompts.ProjectInfoParams{})
+	result, err = prompts.AssembleAgentPrompt(orgDir, projDir, agentID, sourceDir, "", prompts.ProjectInfoParams{}, false)
 	if err != nil {
 		t.Fatalf("AssembleAgentPrompt (org override): %v", err)
 	}
@@ -347,7 +347,7 @@ func TestIntegration_3LevelPromptFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err = prompts.AssembleAgentPrompt(orgDir, projDir, agentID, sourceDir, "", prompts.ProjectInfoParams{})
+	result, err = prompts.AssembleAgentPrompt(orgDir, projDir, agentID, sourceDir, "", prompts.ProjectInfoParams{}, false)
 	if err != nil {
 		t.Fatalf("AssembleAgentPrompt (project override): %v", err)
 	}

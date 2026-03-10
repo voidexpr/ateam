@@ -9,10 +9,11 @@ import (
 )
 
 var (
-	promptAgent         string
-	promptAction        string
-	promptExtraPrompt   string
-	promptNoProjectInfo bool
+	promptAgent                string
+	promptAction               string
+	promptExtraPrompt          string
+	promptNoProjectInfo        bool
+	promptIgnorePreviousReport bool
 )
 
 var promptCmd = &cobra.Command{
@@ -35,6 +36,7 @@ func init() {
 	promptCmd.Flags().StringVar(&promptAction, "action", "", "action type: report or code (required)")
 	promptCmd.Flags().StringVar(&promptExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
 	promptCmd.Flags().BoolVar(&promptNoProjectInfo, "no-project-info", false, "omit ateam project context from the prompt")
+	promptCmd.Flags().BoolVar(&promptIgnorePreviousReport, "ignore-previous-report", false, "do not include the agent's previous report in the prompt")
 	_ = promptCmd.MarkFlagRequired("agent")
 	_ = promptCmd.MarkFlagRequired("action")
 }
@@ -66,9 +68,9 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	var assembled string
 	switch promptAction {
 	case "report":
-		assembled, err = prompts.AssembleAgentPrompt(env.OrgDir, env.ProjectDir, promptAgent, env.SourceDir, extraPrompt, pinfo)
+		assembled, err = prompts.AssembleAgentPrompt(env.OrgDir, env.ProjectDir, promptAgent, env.SourceDir, extraPrompt, pinfo, promptIgnorePreviousReport)
 	case "code":
-		assembled, err = prompts.AssembleAgentCodePrompt(env.OrgDir, env.ProjectDir, promptAgent, env.SourceDir, extraPrompt, pinfo)
+		assembled, err = prompts.AssembleAgentCodePrompt(env.OrgDir, env.ProjectDir, promptAgent, env.SourceDir, extraPrompt, pinfo, promptIgnorePreviousReport)
 	}
 	if err != nil {
 		return err

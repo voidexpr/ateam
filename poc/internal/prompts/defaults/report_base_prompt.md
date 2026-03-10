@@ -39,5 +39,6 @@ List the top 3-5 findings that are high-value and low-effort (SMALL effort, MEDI
 - Be actionable — every finding should have a clear next step
 - Be honest — if the code is fine in your area, say so. An empty report is better than invented issues.
 - Do NOT include code blocks with proposed fixes (that comes later in the implementation phase)
+- Recommend a tool to automate your objects if it is appropriate to the language and tech stack analyzed
 - Start your report directly with the `# Summary` heading — no preamble text like "Here's my report:"
 - Use `#` for top-level headings, not `##`

@@ -21,7 +21,7 @@ Solution
   * if anything fails humans can decide to troubleshoot or just ignore
 
 Strategy
-* prompting of sub agents is done to be pragmatic and not over do work
+* prompting of sub agents is made to be pragmatic and not to just perform busy work for the sake of it
 * the supervisor can decide to notify of issues but is instructed to be conservative
 
 

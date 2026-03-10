@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ateam-poc/internal/runner"
+	"github.com/spf13/cobra"
 )
 
 func newTable() *tabwriter.Writer {
@@ -46,6 +47,18 @@ func fmtInt(n int) string {
 		return ""
 	}
 	return fmt.Sprintf("%d", n)
+}
+
+const cheaperModelName = "sonnet"
+
+func addCheaperModelFlag(cmd *cobra.Command, dst *bool) {
+	cmd.Flags().BoolVar(dst, "cheaper-model", false, "use a cheaper model ("+cheaperModelName+")")
+}
+
+func applyCheaperModel(cr *runner.ClaudeRunner, cheaper bool) {
+	if cheaper {
+		cr.ExtraArgs = append(cr.ExtraArgs, "--model", cheaperModelName)
+	}
 }
 
 func fmtDateAge(t time.Time) string {
