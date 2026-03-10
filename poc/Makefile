@@ -1,6 +1,6 @@
 BINARY = ateam
 
-.PHONY: build clean tidy
+.PHONY: build clean tidy test
 
 BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
@@ -9,6 +9,9 @@ build: tidy
 
 tidy:
 	go mod tidy
+
+test:
+	go test ./...
 
 clean:
 	rm -f $(BINARY)
