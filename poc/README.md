@@ -14,7 +14,7 @@ A Go CLI that manages role-specific AI agents to analyze codebases and produce a
 
 ## Workflow
 
-You run 'ateam init' within a directory or at the base of a git repo (either your main work area or a separate checkout), it will create a .ateam/ project directory where configuration, prompts and reports are stored. Runtime state (stream logs, stderr captures, runner log) lives in `.ateamorg/projects/<state-key>/` (derived from the project's relative path), keeping `.ateam/` safe to version-control.
+You run 'ateam init' within a directory or at the base of a git repo (either your main work area or a separate checkout), it will create a .ateam/ project directory where configuration, prompts and reports are stored. Runtime state (stream logs, stderr captures, runner log) lives in `.ateamorg/projects/<project-id>/` (derived from the project's relative path), keeping `.ateam/` safe to version-control.
 
   Ignore all:
 
@@ -258,7 +258,7 @@ Created by `ateam install`. Holds shared defaults and org-level overrides.
 
 ```
 .ateamorg/
-  projects/<state-key>/                        # runtime state per project (see below)
+  projects/<project-id>/                        # runtime state per project (see below)
   defaults/                                    # embedded prompts written to disk
     report_base_prompt.md                      # shared report base instructions
     code_base_prompt.md                        # shared code base instructions
@@ -318,12 +318,12 @@ Created by `ateam init`. Holds project config, prompts, reports, and history (ve
       2026-03-08_1504.review.md
 ```
 
-### Runtime state: `.ateamorg/projects/<state-key>/`
+### Runtime state: `.ateamorg/projects/<project-id>/`
 
-Runtime files are stored outside the project, keyed by the project's relative path from the org root (escaped: `_` → `__`, `/` → `_S`, `.` → `_D`). For example, project at `services/api` gets state key `services_Sapi`.
+Runtime files are stored outside the project, keyed by the project's relative path from the org root (escaped: `_` → `__`, `/` → `_`). For example, project at `services/api` gets project ID `services_api`.
 
 ```
-.ateamorg/projects/<state-key>/
+.ateamorg/projects/<project-id>/
   runner.log                                 # append-only execution log
   agents/<NAME>/logs/report/
     last_run_stream.jsonl                    # raw JSONL stream from last run
@@ -339,10 +339,11 @@ Runtime files are stored outside the project, keyed by the project's relative pa
     last_run_stderr.log
 ```
 
-### Migrating from UUID-based state directories
+### Migrating from UUID-based or old-encoding state directories
 
-Older versions used a random UUID per project (stored in `config.toml` as `project_uuid`) to key
-state directories. Current versions derive the state key from the project's relative path instead.
+Older versions used a random UUID per project (stored in `config.toml` as `project_uuid`) or a
+different encoding (`_S` for `/`, `_D` for `.`) to key state directories. Current versions derive
+the project ID from the project's relative path using `_` for `/` and `__` for `_`.
 
 To migrate:
 
@@ -491,7 +492,7 @@ Available agents: `automation`, `basic_project_structure`, `critic_engineering`,
 
 ### Runner log
 
-Every `ateam report` and `ateam review` invocation is logged to `.ateamorg/projects/<state-key>/runner.log`. Each line is tab-separated with quoted fields:
+Every `ateam report` and `ateam review` invocation is logged to `.ateamorg/projects/<project-id>/runner.log`. Each line is tab-separated with quoted fields:
 
 ```
 TIMESTAMP  "AGENT"  "STATUS"  "CWD"  "CLI"  [EXTRA...]
@@ -533,10 +534,10 @@ When a run fails, inspect these files:
 | File | Location | Content |
 |------|----------|---------|
 | `full_report_error.md` | `.ateam/agents/<NAME>/` | Error summary, exit code, duration, stderr, partial output, token usage |
-| `last_run_stderr.log` | `.ateamorg/projects/<state-key>/agents/<NAME>/logs/report/` | Raw stderr from the `claude` subprocess |
-| `last_run_stream.jsonl` | `.ateamorg/projects/<state-key>/agents/<NAME>/logs/report/` | Raw JSONL event stream (useful for debugging parsing issues) |
+| `last_run_stderr.log` | `.ateamorg/projects/<project-id>/agents/<NAME>/logs/report/` | Raw stderr from the `claude` subprocess |
+| `last_run_stream.jsonl` | `.ateamorg/projects/<project-id>/agents/<NAME>/logs/report/` | Raw JSONL event stream (useful for debugging parsing issues) |
 
-For the supervisor, error files are `.ateam/supervisor/review_error.md` (review) and `.ateam/supervisor/code_error.md` (code). Runtime logs are in `.ateamorg/projects/<state-key>/supervisor/logs/review/` and `.../logs/code/`.
+For the supervisor, error files are `.ateam/supervisor/review_error.md` (review) and `.ateam/supervisor/code_error.md` (code). Runtime logs are in `.ateamorg/projects/<project-id>/supervisor/logs/review/` and `.../logs/code/`.
 
 ### History
 
