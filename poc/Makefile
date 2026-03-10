@@ -10,7 +10,7 @@ build: tidy
 tidy:
 	go mod tidy
 
-test:
+test: build
 	go test ./...
 
 clean:
