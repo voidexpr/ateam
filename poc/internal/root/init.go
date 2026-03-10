@@ -60,6 +60,15 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 		return "", err
 	}
 
+	orgRoot := filepath.Dir(orgDir)
+	relPath, err := filepath.Rel(orgRoot, path)
+	if err != nil {
+		relPath = path
+	}
+	if err := config.ValidateProjectPath(relPath); err != nil {
+		return "", err
+	}
+
 	agentIDs := opts.AllAgents
 	if len(agentIDs) == 0 {
 		agentIDs = prompts.AllAgentIDs
@@ -109,14 +118,9 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 		return "", err
 	}
 
-	orgRoot := filepath.Dir(orgDir)
-	relPath, err := filepath.Rel(orgRoot, path)
-	if err != nil {
-		relPath = path
-	}
-	stateKey := config.PathToStateKey(relPath)
+	projectID := config.PathToProjectID(relPath)
 
-	if err := createStateDirs(orgDir, stateKey, agentIDs); err != nil {
+	if err := createStateDirs(orgDir, projectID, agentIDs); err != nil {
 		return "", err
 	}
 
@@ -138,8 +142,8 @@ func EnsureAgents(projectDir, stateDir string, agentIDs []string) error {
 	return nil
 }
 
-func createStateDirs(orgDir, stateKey string, agentIDs []string) error {
-	stateBase := filepath.Join(orgDir, "projects", stateKey)
+func createStateDirs(orgDir, projectID string, agentIDs []string) error {
+	stateBase := filepath.Join(orgDir, "projects", projectID)
 	for _, id := range agentIDs {
 		if err := os.MkdirAll(filepath.Join(stateBase, "agents", id, "logs", "report"), 0755); err != nil {
 			return fmt.Errorf("cannot create agent state directory: %w", err)

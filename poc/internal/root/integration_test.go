@@ -75,8 +75,8 @@ func TestIntegration_BasicProject(t *testing.T) {
 	}
 
 	// Verify StateDir is path-based.
-	wantStateKey := config.PathToStateKey("level1/myproj")
-	wantStateDir := filepath.Join(orgDir, "projects", wantStateKey)
+	wantProjectID := config.PathToProjectID("level1/myproj")
+	wantStateDir := filepath.Join(orgDir, "projects", wantProjectID)
 	if env.StateDir != wantStateDir {
 		t.Errorf("StateDir = %q, want %q", env.StateDir, wantStateDir)
 	}
@@ -428,8 +428,8 @@ func TestIntegration_StatePathMethods(t *testing.T) {
 	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
 	env.populateFromConfig(projDir, cfg)
 
-	stateKey := config.PathToStateKey("myproj")
-	stateBase := filepath.Join(orgDir, "projects", stateKey)
+	projectID := config.PathToProjectID("myproj")
+	stateBase := filepath.Join(orgDir, "projects", projectID)
 
 	if got := env.AgentLogsDir("security", "report"); got != filepath.Join(stateBase, "agents", "security", "logs", "report") {
 		t.Errorf("AgentLogsDir = %q, want path under state dir", got)
@@ -543,13 +543,13 @@ func TestIntegration_NestedProjectStateDir(t *testing.T) {
 	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
 	env.populateFromConfig(projDir, cfg)
 
-	wantStateKey := config.PathToStateKey("services/api/v2")
-	wantStateDir := filepath.Join(orgDir, "projects", wantStateKey)
+	wantProjectID := config.PathToProjectID("services/api/v2")
+	wantStateDir := filepath.Join(orgDir, "projects", wantProjectID)
 	if env.StateDir != wantStateDir {
 		t.Errorf("StateDir = %q, want %q", env.StateDir, wantStateDir)
 	}
-	if wantStateKey != "services_Sapi_Sv2" {
-		t.Errorf("state key = %q, want %q", wantStateKey, "services_Sapi_Sv2")
+	if wantProjectID != "services_api_v2" {
+		t.Errorf("project ID = %q, want %q", wantProjectID, "services_api_v2")
 	}
 }
 

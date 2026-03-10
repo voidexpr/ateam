@@ -23,7 +23,7 @@ type ResolvedEnv struct {
 	ProjectName string         // from config.toml
 	SourceDir   string         // absolute path to project root (parent of .ateam/)
 	GitRepoDir  string         // resolved from config git.repo
-	StateDir    string         // .ateamorg/projects/<state-key>/
+	StateDir    string         // .ateamorg/projects/<project-id>/
 	Config      *config.Config
 }
 
@@ -102,7 +102,7 @@ func (e *ResolvedEnv) populateFromConfig(projectDir string, cfg *config.Config) 
 		e.GitRepoDir = resolvePath(e.SourceDir, cfg.Git.Repo)
 	}
 	relPath := e.RelPath(e.SourceDir)
-	e.StateDir = filepath.Join(e.OrgDir, "projects", config.PathToStateKey(relPath))
+	e.StateDir = filepath.Join(e.OrgDir, "projects", config.PathToProjectID(relPath))
 }
 
 // FindOrg walks up from cwd looking for a .ateamorg directory.
