@@ -8,7 +8,7 @@ without requesting input from humans unless absolutely necessary.
 
 - **review**: The prioritized list of tasks provided as input (see end of this prompt)
 - **task**: A single priority action from the review, with priority, description, and source agent
-- **execution directory**: A timestamped folder `.ateam/supervisor/code/YYYY-MM-DD_HH_MM_SS/`
+- **execution directory**: A timestamped folder `.ateam/supervisor/code/YYYY-MM-DDTHH:MM:SS/`
   storing all artifacts for this run
 - **code prompt**: The full prompt file given to an agent, generated via `ateam prompt`
 - **execution report**: `execution_report.md` in the execution directory, tracking outcomes
@@ -49,7 +49,7 @@ The goals are:
 
 ### Phase 1: Setup
 
-1. Create the execution directory (EXECUTION_DIR): `.ateam/supervisor/code/YYYY-MM-DD_HH_MM_SS/`
+1. Create the execution directory (EXECUTION_DIR): `.ateam/supervisor/code/YYYY-MM-DDTHH:MM:SS/`
 2. Initialize `execution_report.md` in it (see format below)
 3. Run `ateam agents` to discover available agents
 4. make sure you have the latest code: `git fetch --all && git rebase`
@@ -102,8 +102,8 @@ After all tasks have been attempted:
 
     # Execution Report
 
-    **Started**: YYYY-MM-DD HH:MM:SS
-    **Execution Directory**: .ateam/supervisor/code/YYYY-MM-DD_HH_MM_SS/
+    **Started**: YYYY-MM-DDTHH:MM:SS
+    **Execution Directory**: .ateam/supervisor/code/YYYY-MM-DDTHH:MM:SS/
 
     ## Tasks
 
@@ -167,15 +167,15 @@ follow along. Print status lines as you go:
   ```
 - **File operations**: print every file you create or update
   ```
-  Created: .ateam/supervisor/code/2026-03-08_14_05_30/execution_report.md
-  Generated: .ateam/supervisor/code/2026-03-08_14_05_30/01_fix_sql_injection_code_prompt.md
-  Updated: .ateam/supervisor/code/2026-03-08_14_05_30/execution_report.md
+  Created: .ateam/supervisor/code/2026-03-08T14:05:30/execution_report.md
+  Generated: .ateam/supervisor/code/2026-03-08T14:05:30/01_fix_sql_injection_code_prompt.md
+  Updated: .ateam/supervisor/code/2026-03-08T14:05:30/execution_report.md
   ```
 - **Commands**: print every ateam CLI command before running it
   ```
   Running: ateam agents
-  Running: ateam prompt --agent security --action code --extra-prompt @.ateam/supervisor/code/2026-03-08_14_05_30/current_task.md
-  Running: ateam run @.ateam/supervisor/code/2026-03-08_14_05_30/01_fix_sql_injection_code_prompt.md --agent security
+  Running: ateam prompt --agent security --action code --extra-prompt @.ateam/supervisor/code/2026-03-08T14:05:30/current_task.md
+  Running: ateam run @.ateam/supervisor/code/2026-03-08T14:05:30/01_fix_sql_injection_code_prompt.md --agent security
   ```
 - **Task outcomes**: print the result of each task immediately and include the git hash and branch used
   ```

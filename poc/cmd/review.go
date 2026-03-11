@@ -88,7 +88,8 @@ func runReview(cmd *cobra.Command, args []string) error {
 	applyCheaperModel(cr, reviewCheaperModel)
 	opts := runner.RunOpts{
 		AgentID:              "supervisor",
-		OutputDir:            env.SupervisorLogsDir("review"),
+		Action:               "review",
+		LogsDir:              env.SupervisorLogsDir(),
 		LastMessageFilePath:  reviewFile,
 		ErrorMessageFilePath: filepath.Join(reviewDir, "review_error.md"),
 		WorkDir:              env.SourceDir,
@@ -134,7 +135,7 @@ func printReviewDryRun(env *root.ResolvedEnv, prompt string) error {
 		if relPath == "" {
 			relPath = r.Path
 		}
-		fmt.Printf("  %s  %-30s %s\n", r.ModTime.Format("2006-01-02 15:04"), r.AgentID, relPath)
+		fmt.Printf("  %s  %-30s %s\n", r.ModTime.Format(runner.TimestampFormat), r.AgentID, relPath)
 	}
 
 	fmt.Printf("\n╔══ supervisor ══╗\n\n")

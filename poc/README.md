@@ -326,8 +326,8 @@ Created by `ateam init`. Holds project config, prompts, reports, and history (ve
     full_report.md                           # latest successful report
     full_report_error.md                     # error details (on failure only)
     history/                                 # timestamped archive
-      2026-03-08_1504.full_prompt.md         # archived prompt
-      2026-03-08_1504.full_report.md         # archived report
+      2026-03-08T15:04:00.full_prompt.md         # archived prompt
+      2026-03-08T15:04:00.full_report.md         # archived report
   supervisor/
     review_prompt.md                         # project-level supervisor override (optional)
     review_extra_prompt.md                   # extra instructions for reviews (optional)
@@ -338,8 +338,8 @@ Created by `ateam init`. Holds project config, prompts, reports, and history (ve
     code_output.md                           # latest code management output
     code_error.md                            # error details (on failure only)
     history/
-      2026-03-08_1504.review_prompt.md
-      2026-03-08_1504.review.md
+      2026-03-08T15:04:00.review_prompt.md
+      2026-03-08T15:04:00.review.md
 ```
 
 ### Runtime state: `.ateamorg/projects/<project-id>/`
@@ -349,18 +349,16 @@ Runtime files are stored outside the project, keyed by the project's relative pa
 ```
 .ateamorg/projects/<project-id>/
   runner.log                                 # append-only execution log
-  agents/<NAME>/logs/report/
-    last_run_stream.jsonl                    # raw JSONL stream from last run
-    last_run_stderr.log                      # stderr capture from last run
-  agents/<NAME>/logs/run/
-    last_run_stream.jsonl                    # stream from ateam run
-    last_run_stderr.log
-  supervisor/logs/review/
-    last_run_stream.jsonl
-    last_run_stderr.log
-  supervisor/logs/code/
-    last_run_stream.jsonl
-    last_run_stderr.log
+  agents/<NAME>/logs/
+    2026-03-10T22:17:58_report_exec.md       # full execution context (env, settings, prompt)
+    2026-03-10T22:17:58_report_stream.jsonl  # raw JSONL stream
+    2026-03-10T22:17:58_report_stderr.log    # stderr capture
+    2026-03-10T22:17:58_report_settings.json # sandbox settings used
+  supervisor/logs/
+    2026-03-10T22:18:00_review_exec.md
+    2026-03-10T22:18:00_review_stream.jsonl
+    2026-03-10T22:18:00_review_stderr.log
+    2026-03-10T22:18:00_review_settings.json
 ```
 
 ### Migrating from UUID-based or old-encoding state directories
@@ -535,9 +533,9 @@ TIMESTAMP  "AGENT"  "STATUS"  "CWD"  "CLI"  [EXTRA...]
 Example:
 
 ```
-2026-03-08T15:04:00Z	"security"	"start"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"	"agents/security/history/2026-03-08_1504.full_prompt.md"	"agents/security/full_report.md"
-2026-03-08T15:06:23Z	"security"	"ok"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"
-2026-03-08T15:07:01Z	"testing_basic"	"error"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"	"timed out after 10 minutes"
+2026-03-08T15:04:00	"security"	"start"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"	"agents/security/history/2026-03-08T15:04:00.full_prompt.md"	"agents/security/full_report.md"
+2026-03-08T15:06:23	"security"	"ok"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"
+2026-03-08T15:07:01	"testing_basic"	"error"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"	"timed out after 10 minutes"
 ```
 
 ### Detailed output
@@ -564,25 +562,26 @@ When a run fails, inspect these files:
 | File | Location | Content |
 |------|----------|---------|
 | `full_report_error.md` | `.ateam/agents/<NAME>/` | Error summary, exit code, duration, stderr, partial output, token usage |
-| `last_run_stderr.log` | `.ateamorg/projects/<project-id>/agents/<NAME>/logs/report/` | Raw stderr from the `claude` subprocess |
-| `last_run_stream.jsonl` | `.ateamorg/projects/<project-id>/agents/<NAME>/logs/report/` | Raw JSONL event stream (useful for debugging parsing issues) |
+| `*_stderr.log` | `.ateamorg/projects/<project-id>/agents/<NAME>/logs/` | Raw stderr from the `claude` subprocess |
+| `*_stream.jsonl` | `.ateamorg/projects/<project-id>/agents/<NAME>/logs/` | Raw JSONL event stream (useful for debugging parsing issues) |
+| `*_exec.md` | `.ateamorg/projects/<project-id>/agents/<NAME>/logs/` | Full execution context: env, settings, prompt |
 
-For the supervisor, error files are `.ateam/supervisor/review_error.md` (review) and `.ateam/supervisor/code_error.md` (code). Runtime logs are in `.ateamorg/projects/<project-id>/supervisor/logs/review/` and `.../logs/code/`.
+For the supervisor, error files are `.ateam/supervisor/review_error.md` (review) and `.ateam/supervisor/code_error.md` (code). Runtime logs are in `.ateamorg/projects/<project-id>/supervisor/logs/`.
 
 ### History
 
-Every run archives its prompt and output to the `history/` directory with a timestamp prefix (`YYYY-MM-DD_HHMM`):
+Every run archives its prompt and output to the `history/` directory with an ISO-8601 timestamp prefix:
 
 ```bash
 ls .ateam/agents/security/history/
-# 2026-03-07_1430.full_prompt.md
-# 2026-03-07_1430.full_report.md
-# 2026-03-08_0900.full_prompt.md
-# 2026-03-08_0900.full_report.md
+# 2026-03-07T14:30:00.full_prompt.md
+# 2026-03-07T14:30:00.full_report.md
+# 2026-03-08T09:00:00.full_prompt.md
+# 2026-03-08T09:00:00.full_report.md
 
 ls .ateam/supervisor/history/
-# 2026-03-07_1435.review_prompt.md
-# 2026-03-07_1435.review.md
+# 2026-03-07T14:35:00.review_prompt.md
+# 2026-03-07T14:35:00.review.md
 ```
 
 This lets you compare reports across runs and trace what prompt produced what output.

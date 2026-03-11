@@ -2,7 +2,7 @@
 
 ## Context
 
-When agents run (via `ateam report`, `ateam code`, etc.), their output is written to `last_run_stream.jsonl` files. Currently there's no way to watch a running agent's progress from a separate terminal. The `ateam log` command reads completed stream files, but doesn't tail live ones. The `claude-sandbox.sh` script has a `live_monitor()` function that does exactly this — we want a Go equivalent as `ateam tail`.
+When agents run (via `ateam report`, `ateam code`, etc.), their output is written to timestamped `*_stream.jsonl` files. Currently there's no way to watch a running agent's progress from a separate terminal. The `ateam log` command reads completed stream files, but doesn't tail live ones. The `claude-sandbox.sh` script has a `live_monitor()` function that does exactly this — we want a Go equivalent as `ateam tail`.
 
 ## Effort estimate
 
@@ -24,7 +24,7 @@ New cobra command `ateam tail` with same flags as `ateam log`:
 - `--action ACTION` — action type (default: "report" for agents, "code" for supervisor)
 
 **Implementation:**
-- Resolve stream file path using same logic as `cmd/log.go` (`AgentLogsDir`/`SupervisorLogsDir` + `last_run_stream.jsonl`)
+- Resolve stream file path using same logic as `cmd/log.go` (`findLatestStreamFile` in the flat logs dir)
 - Open file, seek to beginning (or end with a `--follow-from-end` flag, default: beginning)
 - Read loop: read lines, parse only complete lines (ending with `\n`), format and print
 - When no more data, `time.Sleep(300ms)` and retry (like `tail -f`)

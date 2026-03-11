@@ -83,12 +83,12 @@ func TestIntegration_BasicProject(t *testing.T) {
 
 	// Verify state directories were created.
 	for _, agentID := range prompts.AllAgentIDs {
-		logsDir := filepath.Join(env.StateDir, "agents", agentID, "logs", "report")
+		logsDir := filepath.Join(env.StateDir, "agents", agentID, "logs")
 		if _, err := os.Stat(logsDir); err != nil {
 			t.Errorf("state logs dir missing for agent %s: %v", agentID, err)
 		}
 	}
-	supervisorLogsDir := filepath.Join(env.StateDir, "supervisor", "logs", "review")
+	supervisorLogsDir := filepath.Join(env.StateDir, "supervisor", "logs")
 	if _, err := os.Stat(supervisorLogsDir); err != nil {
 		t.Errorf("supervisor state logs dir missing: %v", err)
 	}
@@ -431,10 +431,10 @@ func TestIntegration_StatePathMethods(t *testing.T) {
 	projectID := config.PathToProjectID("myproj")
 	stateBase := filepath.Join(orgDir, "projects", projectID)
 
-	if got := env.AgentLogsDir("security", "report"); got != filepath.Join(stateBase, "agents", "security", "logs", "report") {
+	if got := env.AgentLogsDir("security"); got != filepath.Join(stateBase, "agents", "security", "logs") {
 		t.Errorf("AgentLogsDir = %q, want path under state dir", got)
 	}
-	if got := env.SupervisorLogsDir("review"); got != filepath.Join(stateBase, "supervisor", "logs", "review") {
+	if got := env.SupervisorLogsDir(); got != filepath.Join(stateBase, "supervisor", "logs") {
 		t.Errorf("SupervisorLogsDir = %q, want path under state dir", got)
 	}
 	if got := env.AgentWorkspacesDir("security"); got != filepath.Join(stateBase, "agents", "security", "workspaces") {
@@ -445,9 +445,9 @@ func TestIntegration_StatePathMethods(t *testing.T) {
 	}
 }
 
-// TestIntegration_RunnerOutputDirFlow simulates what cmd/report.go and cmd/review.go do:
-// construct OutputDir from env methods, then create files like the runner would.
-func TestIntegration_RunnerOutputDirFlow(t *testing.T) {
+// TestIntegration_RunnerLogsDirFlow simulates what cmd/report.go and cmd/review.go do:
+// construct LogsDir from env methods, then create timestamped files like the runner would.
+func TestIntegration_RunnerLogsDirFlow(t *testing.T) {
 	base := resolvedTempDir(t)
 
 	orgDir, err := InstallOrg(base)
@@ -473,15 +473,14 @@ func TestIntegration_RunnerOutputDirFlow(t *testing.T) {
 	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
 	env.populateFromConfig(projDir, cfg)
 
-	// Simulate report: OutputDir = env.AgentLogsDir(agentID, "report")
-	agentOutputDir := env.AgentLogsDir("security", "report")
-	t.Logf("AgentLogsDir: %s", agentOutputDir)
+	// Simulate report: LogsDir = env.AgentLogsDir(agentID), flat timestamped files
+	agentLogsDir := env.AgentLogsDir("security")
+	t.Logf("AgentLogsDir: %s", agentLogsDir)
 
-	// Runner does: os.MkdirAll(opts.OutputDir, 0755), then os.Create(stream), os.Create(stderr)
-	if err := os.MkdirAll(agentOutputDir, 0755); err != nil {
-		t.Fatalf("MkdirAll agent output dir: %v", err)
+	if err := os.MkdirAll(agentLogsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll agent logs dir: %v", err)
 	}
-	streamFile := filepath.Join(agentOutputDir, "last_run_stream.jsonl")
+	streamFile := filepath.Join(agentLogsDir, "2026-03-10T22:17:58_report_stream.jsonl")
 	if err := os.WriteFile(streamFile, []byte("test"), 0644); err != nil {
 		t.Fatalf("WriteFile stream: %v", err)
 	}
@@ -489,14 +488,14 @@ func TestIntegration_RunnerOutputDirFlow(t *testing.T) {
 		t.Fatalf("stream file not found after write: %v", err)
 	}
 
-	// Simulate review: OutputDir = env.SupervisorLogsDir("review")
-	supOutputDir := env.SupervisorLogsDir("review")
-	t.Logf("SupervisorLogsDir: %s", supOutputDir)
+	// Simulate review: LogsDir = env.SupervisorLogsDir(), flat timestamped files
+	supLogsDir := env.SupervisorLogsDir()
+	t.Logf("SupervisorLogsDir: %s", supLogsDir)
 
-	if err := os.MkdirAll(supOutputDir, 0755); err != nil {
-		t.Fatalf("MkdirAll supervisor output dir: %v", err)
+	if err := os.MkdirAll(supLogsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll supervisor logs dir: %v", err)
 	}
-	supStream := filepath.Join(supOutputDir, "last_run_stream.jsonl")
+	supStream := filepath.Join(supLogsDir, "2026-03-10T22:18:00_review_stream.jsonl")
 	if err := os.WriteFile(supStream, []byte("test"), 0644); err != nil {
 		t.Fatalf("WriteFile supervisor stream: %v", err)
 	}
