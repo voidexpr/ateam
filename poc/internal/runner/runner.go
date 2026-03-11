@@ -10,9 +10,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
+
+// TimestampFormat is the canonical timestamp format used across all log files.
+const TimestampFormat = "2006-01-02T15:04:05"
 
 // ClaudeRunner holds shared execution config for invoking claude.
 type ClaudeRunner struct {
@@ -26,7 +30,8 @@ type ClaudeRunner struct {
 // RunOpts holds per-invocation settings.
 type RunOpts struct {
 	AgentID              string
-	OutputDir            string // where to write stream.jsonl, stderr.log
+	Action               string // "report", "run", "code", "review"
+	LogsDir              string // flat dir for all timestamped log files
 	LastMessageFilePath  string // where to write extracted report text (on success only)
 	ErrorMessageFilePath string // where to write error info (on failure only)
 	WorkDir              string // cwd for the subprocess
@@ -83,11 +88,9 @@ func (r *ClaudeRunner) LogQueued(opts RunOpts) {
 
 // writeSettings resolves the sandbox settings via 3-level fallback
 // (.ateam/ → .ateamorg/ → .ateamorg/defaults/), merges in runtime paths
-// (workdir, projectDir, extraWriteDirs), and writes last_settings.json
-// to the run's OutputDir (safe for concurrent pool execution).
-func (r *ClaudeRunner) writeSettings(opts RunOpts) (string, error) {
+// (workdir, projectDir, extraWriteDirs), and writes the settings to settingsPath.
+func (r *ClaudeRunner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error) {
 	const sandboxFile = "ateam_claude_sandbox_extra_settings.json"
-	const lastFile = "last_settings.json"
 
 	// 3-level resolution: project → org → org/defaults
 	base := readFileOr3Level(
@@ -96,12 +99,12 @@ func (r *ClaudeRunner) writeSettings(opts RunOpts) (string, error) {
 		filepath.Join(r.OrgDir, "defaults", sandboxFile),
 	)
 	if base == "" {
-		return "", fmt.Errorf("no %s found in project, org, or defaults", sandboxFile)
+		return nil, fmt.Errorf("no %s found in project, org, or defaults", sandboxFile)
 	}
 
 	var settings map[string]any
 	if err := json.Unmarshal([]byte(base), &settings); err != nil {
-		return "", fmt.Errorf("cannot parse %s: %w", sandboxFile, err)
+		return nil, fmt.Errorf("cannot parse %s: %w", sandboxFile, err)
 	}
 
 	workDir := effectiveWorkDir(opts)
@@ -113,7 +116,7 @@ func (r *ClaudeRunner) writeSettings(opts RunOpts) (string, error) {
 
 	mergeStringList(settings, []string{"sandbox", "filesystem", "allowWrite"}, runtimeWriteDirs)
 	mergeStringList(settings, []string{"sandbox", "filesystem", "denyWrite"}, []string{
-		filepath.Join(opts.OutputDir, lastFile),
+		settingsPath,
 		filepath.Join(r.ProjectDir, sandboxFile),
 		filepath.Join(r.OrgDir, sandboxFile),
 		filepath.Join(r.OrgDir, "defaults", sandboxFile),
@@ -122,14 +125,13 @@ func (r *ClaudeRunner) writeSettings(opts RunOpts) (string, error) {
 
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	settingsPath := filepath.Join(opts.OutputDir, lastFile)
 	if err := os.WriteFile(settingsPath, data, 0644); err != nil {
-		return "", err
+		return nil, err
 	}
-	return settingsPath, nil
+	return data, nil
 }
 
 // readFileOr3Level tries three paths and returns the first that exists, or "".
@@ -170,8 +172,11 @@ func mergeStringList(obj map[string]any, keyPath []string, values []string) {
 func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, progress chan<- RunProgress) RunSummary {
 	startedAt := time.Now()
 
-	streamFile := filepath.Join(opts.OutputDir, "last_run_stream.jsonl")
-	stderrFile := filepath.Join(opts.OutputDir, "last_run_stderr.log")
+	prefix := filepath.Join(opts.LogsDir, startedAt.Format(TimestampFormat)+"_"+opts.Action)
+	streamFile := prefix + "_stream.jsonl"
+	stderrFile := prefix + "_stderr.log"
+	settingsTarget := prefix + "_settings.json"
+	execTarget := prefix + "_exec.md"
 
 	failEarly := func(err error) RunSummary {
 		s := RunSummary{
@@ -188,8 +193,8 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 		return s
 	}
 
-	if err := os.MkdirAll(opts.OutputDir, 0755); err != nil {
-		return failEarly(fmt.Errorf("cannot create output directory: %w", err))
+	if err := os.MkdirAll(opts.LogsDir, 0755); err != nil {
+		return failEarly(fmt.Errorf("cannot create logs directory: %w", err))
 	}
 
 	sf, err := os.Create(streamFile)
@@ -210,12 +215,12 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 		defer cancel()
 	}
 
-	settingsFile, err := r.writeSettings(opts)
+	settingsJSON, err := r.writeSettings(settingsTarget, opts)
 	if err != nil {
 		return failEarly(fmt.Errorf("cannot create settings file: %w", err))
 	}
 
-	args := []string{"-p", "--output-format", "stream-json", "--verbose", "--settings", settingsFile}
+	args := []string{"-p", "--output-format", "stream-json", "--verbose", "--settings", settingsTarget}
 	args = append(args, r.ExtraArgs...)
 	cliStr := "claude " + strings.Join(args, " ")
 
@@ -224,11 +229,15 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 	// Archive the prompt to history before running.
 	promptFile := archivePrompt(opts.HistoryDir, opts.PromptName, prompt)
 
+	// Write exec file with full context for debugging.
+	writeExecFile(execTarget, startedAt, opts, prompt, settingsJSON, cliStr, cwd)
+
 	cmd := exec.CommandContext(ctx, "claude", args...)
 	if opts.WorkDir != "" {
 		cmd.Dir = opts.WorkDir
 	}
 	cmd.Stdin = strings.NewReader(prompt)
+	cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -447,7 +456,7 @@ func appendLog(logFile, agentID, status, cwd, cli string, extra ...string) {
 	}
 	defer f.Close()
 
-	ts := time.Now().Format(time.RFC3339)
+	ts := time.Now().Format(TimestampFormat)
 	fields := []string{ts, agentID, status, cwd, cli}
 	fields = append(fields, extra...)
 	fmt.Fprintln(f, strings.Join(fields, " | "))
@@ -478,7 +487,7 @@ func archivePrompt(historyDir, promptName, prompt string) string {
 		return ""
 	}
 	_ = os.MkdirAll(historyDir, 0755)
-	ts := time.Now().Format("2006-01-02_1504")
+	ts := time.Now().Format(TimestampFormat)
 	name := strings.ReplaceAll(fmt.Sprintf("%s.%s", ts, promptName), " ", "_")
 	path := filepath.Join(historyDir, name)
 	_ = os.WriteFile(path, []byte(prompt), 0644)
@@ -498,7 +507,7 @@ func FormatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dm%ds", minutes, seconds)
 }
 
-// ArchiveFile copies a file to archiveDir with a timestamped name: "2006-01-02_1504.{name}".
+// ArchiveFile copies a file to archiveDir with a timestamped name.
 func ArchiveFile(srcPath, archiveDir, name string) error {
 	if err := os.MkdirAll(archiveDir, 0755); err != nil {
 		return err
@@ -509,8 +518,52 @@ func ArchiveFile(srcPath, archiveDir, name string) error {
 		return err
 	}
 
-	timestamp := time.Now().Format("2006-01-02_1504")
+	timestamp := time.Now().Format(TimestampFormat)
 	archiveName := strings.ReplaceAll(fmt.Sprintf("%s.%s", timestamp, name), " ", "_")
 
 	return os.WriteFile(filepath.Join(archiveDir, archiveName), data, 0644)
+}
+
+// writeExecFile writes a diagnostic _exec.md capturing the full execution context.
+func writeExecFile(path string, startedAt time.Time, opts RunOpts, prompt string, settingsJSON []byte, claudeArgs, cwd string) {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "# Command\n")
+	fmt.Fprintf(&b, "* started: %s\n", startedAt.Format(TimestampFormat))
+	fmt.Fprintf(&b, "* action: %s\n", opts.Action)
+	fmt.Fprintf(&b, "* agent: %s\n", opts.AgentID)
+	fmt.Fprintf(&b, "* cwd: %s\n", cwd)
+	fmt.Fprintf(&b, "* coding agent cli:\n  ```bash\n  %s\n  ```\n", claudeArgs)
+
+	fmt.Fprintf(&b, "\n# Env\n")
+	fmt.Fprintf(&b, "## Inherited\n")
+	env := os.Environ()
+	sort.Strings(env)
+	for _, e := range env {
+		fmt.Fprintf(&b, "%s\n", e)
+	}
+	fmt.Fprintf(&b, "\n## Specified\n")
+	fmt.Fprintf(&b, "unsets CLAUDECODE\n")
+
+	fmt.Fprintf(&b, "\n# Settings\n```json\n%s\n```\n", string(settingsJSON))
+
+	fmt.Fprintf(&b, "\n# Prompt\n%s\n", prompt)
+
+	_ = os.WriteFile(path, []byte(b.String()), 0644)
+}
+
+// filterEnv returns a copy of env with the specified variable names removed.
+func filterEnv(env []string, exclude ...string) []string {
+	excludeSet := make(map[string]bool, len(exclude))
+	for _, e := range exclude {
+		excludeSet[e] = true
+	}
+	var result []string
+	for _, e := range env {
+		if k, _, ok := strings.Cut(e, "="); ok && excludeSet[k] {
+			continue
+		}
+		result = append(result, e)
+	}
+	return result
 }

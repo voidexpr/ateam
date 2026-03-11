@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
@@ -19,7 +20,7 @@ var (
 var logCmd = &cobra.Command{
 	Use:   "log",
 	Short: "Pretty-print the last run stream log",
-	Long: `Read and format the last_run_stream.jsonl of the supervisor or a specific agent.
+	Long: `Read and format the latest stream log of the supervisor or a specific agent.
 
 Example:
   ateam log --supervisor
@@ -49,23 +50,37 @@ func runLog(cmd *cobra.Command, args []string) error {
 
 	var logsDir string
 	if logSupervisor {
-		action := logAction
-		if action == "" {
-			action = "code"
-		}
-		logsDir = env.SupervisorLogsDir(action)
+		logsDir = env.SupervisorLogsDir()
 	} else {
-		action := logAction
-		if action == "" {
-			action = "run"
-		}
-		logsDir = env.AgentLogsDir(logAgent, action)
+		logsDir = env.AgentLogsDir(logAgent)
 	}
 
-	streamPath := filepath.Join(logsDir, "last_run_stream.jsonl")
-	if _, err := os.Stat(streamPath); err != nil {
-		return fmt.Errorf("no stream log found at %s", streamPath)
+	streamPath, err := findLatestStreamFile(logsDir, logAction)
+	if err != nil {
+		return err
 	}
 
 	return runner.FormatStream(streamPath, os.Stdout)
+}
+
+// findLatestStreamFile globs for *_stream.jsonl files in logsDir,
+// optionally filtered by action, and returns the most recent by name.
+func findLatestStreamFile(logsDir, action string) (string, error) {
+	var pattern string
+	if action != "" {
+		pattern = filepath.Join(logsDir, "*_"+action+"_stream.jsonl")
+	} else {
+		pattern = filepath.Join(logsDir, "*_stream.jsonl")
+	}
+
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return "", fmt.Errorf("cannot search for stream files: %w", err)
+	}
+	if len(matches) == 0 {
+		return "", fmt.Errorf("no stream log found in %s", logsDir)
+	}
+
+	sort.Strings(matches)
+	return matches[len(matches)-1], nil
 }

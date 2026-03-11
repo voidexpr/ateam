@@ -95,7 +95,8 @@ func runReport(cmd *cobra.Command, args []string) error {
 			Prompt: prompt,
 			RunOpts: runner.RunOpts{
 				AgentID:              agentID,
-				OutputDir:            env.AgentLogsDir(agentID, "report"),
+				Action:               "report",
+				LogsDir:              env.AgentLogsDir(agentID),
 				LastMessageFilePath:  env.AgentReportPath(agentID, reportType),
 				ErrorMessageFilePath: filepath.Join(agentDir, prompts.FullReportErrorFile),
 				WorkDir:              env.SourceDir,
@@ -139,7 +140,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 	w := newTable()
 	fmt.Fprintln(w, "AGENT\tENDED_AT\tELAPSED\tCOST\tTURNS\tSTATUS\tPATH")
 	for _, r := range results {
-		endedAt := r.EndedAt.Format("15:04:05")
+		endedAt := r.EndedAt.Format(runner.TimestampFormat)
 		elapsed := runner.FormatDuration(r.Duration)
 		cost := fmtCost(r.Cost)
 		turns := fmtInt(r.Turns)

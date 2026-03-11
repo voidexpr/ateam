@@ -134,7 +134,7 @@ func EnsureAgents(projectDir, stateDir string, agentIDs []string) error {
 			return fmt.Errorf("cannot create project agent directory: %w", err)
 		}
 		if stateDir != "" {
-			if err := os.MkdirAll(filepath.Join(stateDir, "agents", agentID, "logs", "report"), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Join(stateDir, "agents", agentID, "logs"), 0755); err != nil {
 				return fmt.Errorf("cannot create agent state directory: %w", err)
 			}
 		}
@@ -145,11 +145,11 @@ func EnsureAgents(projectDir, stateDir string, agentIDs []string) error {
 func createStateDirs(orgDir, projectID string, agentIDs []string) error {
 	stateBase := filepath.Join(orgDir, "projects", projectID)
 	for _, id := range agentIDs {
-		if err := os.MkdirAll(filepath.Join(stateBase, "agents", id, "logs", "report"), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(stateBase, "agents", id, "logs"), 0755); err != nil {
 			return fmt.Errorf("cannot create agent state directory: %w", err)
 		}
 	}
-	if err := os.MkdirAll(filepath.Join(stateBase, "supervisor", "logs", "review"), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Join(stateBase, "supervisor", "logs"), 0755); err != nil {
 		return fmt.Errorf("cannot create supervisor state directory: %w", err)
 	}
 	return nil

@@ -50,12 +50,12 @@ func (e *ResolvedEnv) RunnerLogPath() string {
 	return filepath.Join(e.ProjectDir, "logs", "runner.log")
 }
 
-func (e *ResolvedEnv) AgentLogsDir(agentID, action string) string {
-	return filepath.Join(e.StateDir, "agents", agentID, "logs", action)
+func (e *ResolvedEnv) AgentLogsDir(agentID string) string {
+	return filepath.Join(e.StateDir, "agents", agentID, "logs")
 }
 
-func (e *ResolvedEnv) SupervisorLogsDir(action string) string {
-	return filepath.Join(e.StateDir, "supervisor", "logs", action)
+func (e *ResolvedEnv) SupervisorLogsDir() string {
+	return filepath.Join(e.StateDir, "supervisor", "logs")
 }
 
 func (e *ResolvedEnv) AgentWorkspacesDir(agentID string) string {
