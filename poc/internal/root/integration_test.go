@@ -480,7 +480,7 @@ func TestIntegration_RunnerLogsDirFlow(t *testing.T) {
 	if err := os.MkdirAll(agentLogsDir, 0755); err != nil {
 		t.Fatalf("MkdirAll agent logs dir: %v", err)
 	}
-	streamFile := filepath.Join(agentLogsDir, "2026-03-10T22:17:58_report_stream.jsonl")
+	streamFile := filepath.Join(agentLogsDir, "2026-03-10_22-17-58_report_stream.jsonl")
 	if err := os.WriteFile(streamFile, []byte("test"), 0644); err != nil {
 		t.Fatalf("WriteFile stream: %v", err)
 	}
@@ -495,7 +495,7 @@ func TestIntegration_RunnerLogsDirFlow(t *testing.T) {
 	if err := os.MkdirAll(supLogsDir, 0755); err != nil {
 		t.Fatalf("MkdirAll supervisor logs dir: %v", err)
 	}
-	supStream := filepath.Join(supLogsDir, "2026-03-10T22:18:00_review_stream.jsonl")
+	supStream := filepath.Join(supLogsDir, "2026-03-10_22-18-00_review_stream.jsonl")
 	if err := os.WriteFile(supStream, []byte("test"), 0644); err != nil {
 		t.Fatalf("WriteFile supervisor stream: %v", err)
 	}
