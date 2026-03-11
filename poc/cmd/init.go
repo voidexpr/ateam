@@ -40,7 +40,7 @@ Example:
 func init() {
 	initCmd.Flags().StringVar(&initGitRemote, "git-remote", "", "git remote origin URL")
 	initCmd.Flags().StringVar(&initName, "name", "", "project name (defaults to relative path from org root)")
-	initCmd.Flags().StringSliceVar(&initAgents, "agent", nil, "agents to enable (if omitted, all are enabled)")
+	initCmd.Flags().StringSliceVar(&initAgents, "agent", nil, "agents to enable (if omitted, uses defaults)")
 	initCmd.Flags().StringVar(&initOrgCreate, "org-create", "", "create .ateamorg/ at PATH if none exists")
 	initCmd.Flags().BoolVar(&initOrgHome, "org-home", false, "create .ateamorg/ in $HOME if none exists")
 }
@@ -99,8 +99,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		gitRemote = execGitCmd(absPath, "config", "remote.origin.url")
 	}
 
-	// Agents: if --agent provided, those are enabled, rest disabled; if not, all enabled
-	allAgentIDs := prompts.AllAgentIDs
+	// Agents: if --agent provided, those are enabled, rest disabled; otherwise use defaults
 	var enabledAgents []string
 	if len(initAgents) > 0 {
 		resolved, resolveErr := prompts.ResolveAgentList(initAgents, nil)
@@ -109,7 +108,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 		enabledAgents = resolved
 	} else {
-		enabledAgents = allAgentIDs
+		enabledAgents = prompts.DefaultEnabledAgents()
 	}
 
 	opts := root.InitProjectOpts{
@@ -117,7 +116,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		GitRepo:         gitRepo,
 		GitRemoteOrigin: gitRemote,
 		EnabledAgents:   enabledAgents,
-		AllAgents:       allAgentIDs,
+		AllAgents:       prompts.AllAgentIDs,
 	}
 
 	_, err = root.InitProject(absPath, orgDir, opts)

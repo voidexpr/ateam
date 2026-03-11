@@ -22,6 +22,29 @@ var defaultsFS embed.FS
 // AllAgentIDs is the sorted list of agent IDs discovered from embedded prompt files.
 var AllAgentIDs = discoverAgentIDs()
 
+// DefaultDisabledAgents are agents disabled by default for new projects.
+var DefaultDisabledAgents = map[string]bool{
+	"automation":              true,
+	"basic_project_structure": true,
+	"critic_engineering":      true,
+	"critic_project":          true,
+	"database_config":         true,
+	"refactor_architecture":   true,
+	"shortcut_taker":          true,
+	"testing_full":            true,
+}
+
+// DefaultEnabledAgents returns the subset of AllAgentIDs not in DefaultDisabledAgents.
+func DefaultEnabledAgents() []string {
+	var enabled []string
+	for _, id := range AllAgentIDs {
+		if !DefaultDisabledAgents[id] {
+			enabled = append(enabled, id)
+		}
+	}
+	return enabled
+}
+
 func discoverAgentIDs() []string {
 	entries, err := fs.ReadDir(defaultsFS, "defaults/agents")
 	if err != nil {
