@@ -52,12 +52,13 @@ func IsValidAgent(id string, configAgents map[string]string) bool {
 
 // ResolveAgentList expands "all" and validates agent IDs.
 // configAgents provides additional valid agent IDs from the project config.
+// When "all" is used and configAgents is non-nil, only enabled agents are returned.
 func ResolveAgentList(ids []string, configAgents map[string]string) ([]string, error) {
 	allKnown := AllKnownAgentIDs(configAgents)
 	var result []string
 	for _, id := range ids {
 		if id == "all" {
-			return allKnown, nil
+			return enabledAgentIDs(configAgents, allKnown), nil
 		}
 		if !IsValidAgent(id, configAgents) {
 			return nil, fmt.Errorf("unknown agent: %s\nValid agents: %s", id, strings.Join(allKnown, ", "))
@@ -68,6 +69,21 @@ func ResolveAgentList(ids []string, configAgents map[string]string) ([]string, e
 		return nil, fmt.Errorf("no agents specified")
 	}
 	return result, nil
+}
+
+// enabledAgentIDs filters allKnown to only agents that are enabled (or not
+// explicitly disabled) in configAgents. When configAgents is nil, all are returned.
+func enabledAgentIDs(configAgents map[string]string, allKnown []string) []string {
+	if configAgents == nil {
+		return allKnown
+	}
+	var enabled []string
+	for _, id := range allKnown {
+		if configAgents[id] != "disabled" {
+			enabled = append(enabled, id)
+		}
+	}
+	return enabled
 }
 
 // AllKnownAgentIDs returns the sorted union of embedded and config-defined agent IDs.

@@ -13,6 +13,7 @@ var rootCmd = &cobra.Command{
 	Use:   "ateam",
 	Short: "ATeam — background agents for code quality",
 	Long:  "ATeam manages role-specific agents that analyze your codebase and produce actionable reports.",
+	SilenceErrors: true,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		cmd.SilenceUsage = true
 	},

@@ -16,7 +16,6 @@ var (
 	reportAgents               []string
 	reportExtraPrompt          string
 	reportTimeout              int
-	reportDelta                bool
 	reportPrint                bool
 	reportDryRun               bool
 	reportIgnorePreviousReport bool
@@ -43,7 +42,6 @@ func init() {
 	reportCmd.Flags().StringSliceVar(&reportAgents, "agents", nil, prompts.AgentFlagUsage()+" (required)")
 	reportCmd.Flags().StringVar(&reportExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
 	reportCmd.Flags().IntVar(&reportTimeout, "timeout", 0, "timeout in minutes per agent (overrides config)")
-	reportCmd.Flags().BoolVar(&reportDelta, "delta", false, "produce delta report (not yet implemented)")
 	reportCmd.Flags().BoolVar(&reportPrint, "print", false, "print reports to stdout after completion")
 	reportCmd.Flags().BoolVar(&reportDryRun, "dry-run", false, "print the computed prompt for each agent without running")
 	reportCmd.Flags().BoolVar(&reportIgnorePreviousReport, "ignore-previous-report", false, "do not include the agent's previous report in the prompt")
@@ -52,10 +50,6 @@ func init() {
 }
 
 func runReport(cmd *cobra.Command, args []string) error {
-	if reportDelta {
-		return fmt.Errorf("--delta is not yet implemented")
-	}
-
 	env, err := root.Resolve(orgFlag, projectFlag)
 	if err != nil {
 		return err

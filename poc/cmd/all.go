@@ -47,7 +47,6 @@ func runAll(cmd *cobra.Command, args []string) error {
 	reportTimeout = allTimeout
 	reportCheaperModel = allCheaperModel
 	reportDryRun = false
-	reportDelta = false
 	reportIgnorePreviousReport = false
 	if err := runReport(nil, nil); err != nil {
 		return fmt.Errorf("report phase failed: %w", err)
