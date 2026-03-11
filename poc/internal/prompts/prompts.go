@@ -25,6 +25,7 @@ const (
 	CodeManagementExtraPromptFile   = "code_management_extra_prompt.md"
 	FullReportFile                  = "full_report.md"
 	FullReportErrorFile             = "full_report_error.md"
+	SandboxSettingsFile = "ateam_claude_sandbox_extra_settings.json"
 )
 
 // ResolveValue handles the @filename convention:
@@ -59,11 +60,10 @@ func AssembleAgentPrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt str
 }
 
 // AssembleAgentCodePrompt builds the full prompt for an agent code run.
-// When skipPreviousReport is false, the agent's existing full_report.md is
-// included so the agent has context about prior findings.
-func AssembleAgentCodePrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, skipPreviousReport bool) (string, error) {
+// Code prompts never include the previous report.
+func AssembleAgentCodePrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams) (string, error) {
 	return assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt, pinfo,
-		CodeBasePromptFile, CodePromptFile, CodeExtraPromptFile, skipPreviousReport)
+		CodeBasePromptFile, CodePromptFile, CodeExtraPromptFile, true)
 }
 
 // Prompt sequence: ATeam Project Context → Base prompt → Role-specific prompt → Extra prompts → Previous report → CLI extra

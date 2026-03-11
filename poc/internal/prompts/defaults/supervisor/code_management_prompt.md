@@ -8,7 +8,7 @@ without requesting input from humans unless absolutely necessary.
 
 - **review**: The prioritized list of tasks provided as input (see end of this prompt)
 - **task**: A single priority action from the review, with priority, description, and source agent
-- **execution directory**: A timestamped folder `.ateam/supervisor/code/YYYYMMDD_HHMMSS/`
+- **execution directory**: A timestamped folder `.ateam/supervisor/code/YYYY-MM-DD_HH_MM_SS/`
   storing all artifacts for this run
 - **code prompt**: The full prompt file given to an agent, generated via `ateam prompt`
 - **execution report**: `execution_report.md` in the execution directory, tracking outcomes
@@ -49,7 +49,7 @@ The goals are:
 
 ### Phase 1: Setup
 
-1. Create the execution directory: `.ateam/supervisor/code/YYYYMMDD_HHMMSS/`
+1. Create the execution directory (EXECUTION_DIR): `.ateam/supervisor/code/YYYY-MM-DD_HH_MM_SS/`
 2. Initialize `execution_report.md` in it (see format below)
 3. Run `ateam agents` to discover available agents
 4. make sure you have the latest code: `git fetch --all && git rebase`
@@ -92,12 +92,10 @@ After all tasks have been attempted:
 
 1. Complete `execution_report.md` with a summary section
 2. Update `.ateam/supervisor/review.md`:
-   - Annotate each task with its outcome (completed / failed / skipped) and a brief note
-   - If ALL tasks completed successfully, rename `review.md` to `review.completed.md` otherwise rename to `review.partial.md`
-    - do not delete any content in the review, just add information
-3. Update the source agent reports referenced in the review to note what was addressed
-  - if all recommendations where completed then rename from `full_report.md` to `full_report.complete.md` otherwise rename to `full_report.partial.md`
-  - do not delete any content in the reports, just add information
+  - Annotate each task with its outcome (completed / failed / skipped) and a brief note
+  - do not delete any content in the review, just add information
+3. Update the source agent full_report.md referenced in the review to note what was addressed
+  - do not delete any content in the report file, just add information
 4. **Never modify** files under `.ateam/supervisor/history/` or `.ateam/agents/*/history/`
 
 ## Execution Report Format
@@ -105,7 +103,7 @@ After all tasks have been attempted:
     # Execution Report
 
     **Started**: YYYY-MM-DD HH:MM:SS
-    **Execution Directory**: .ateam/supervisor/code/YYYYMMDD_HHMMSS/
+    **Execution Directory**: .ateam/supervisor/code/YYYY-MM-DD_HH_MM_SS/
 
     ## Tasks
 
@@ -138,7 +136,7 @@ If an agent fails because it required user approval for a tool call (e.g., permi
 denied for a bash command or file operation), do not retry. Instead, in the execution
 report, note the specific approval that was needed and suggest how to configure
 permissions to prevent it (e.g., allowlist rules, settings changes) so the task can
-succeed on a future retry.
+succeed on a future retry. But do not modify approval lists directly.
 
 ### Clarifying question failures
 
@@ -169,15 +167,15 @@ follow along. Print status lines as you go:
   ```
 - **File operations**: print every file you create or update
   ```
-  Created: .ateam/supervisor/code/20260308_140530/execution_report.md
-  Generated: .ateam/supervisor/code/20260308_140530/01_fix_sql_injection_code_prompt.md
-  Updated: .ateam/supervisor/code/20260308_140530/execution_report.md
+  Created: .ateam/supervisor/code/2026-03-08_14_05_30/execution_report.md
+  Generated: .ateam/supervisor/code/2026-03-08_14_05_30/01_fix_sql_injection_code_prompt.md
+  Updated: .ateam/supervisor/code/2026-03-08_14_05_30/execution_report.md
   ```
 - **Commands**: print every ateam CLI command before running it
   ```
   Running: ateam agents
-  Running: ateam prompt --agent security --action code --extra-prompt @.ateam/supervisor/code/20260308_140530/current_task.md
-  Running: ateam run @.ateam/supervisor/code/20260308_140530/01_fix_sql_injection_code_prompt.md --agent security
+  Running: ateam prompt --agent security --action code --extra-prompt @.ateam/supervisor/code/2026-03-08_14_05_30/current_task.md
+  Running: ateam run @.ateam/supervisor/code/2026-03-08_14_05_30/01_fix_sql_injection_code_prompt.md --agent security
   ```
 - **Task outcomes**: print the result of each task immediately and include the git hash and branch used
   ```

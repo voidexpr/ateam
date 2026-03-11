@@ -16,7 +16,7 @@ type PromptDiff struct {
 	Status  string // "changed", "missing"
 }
 
-//go:embed defaults/agents/*/report_prompt.md defaults/agents/*/code_prompt.md defaults/report_base_prompt.md defaults/code_base_prompt.md defaults/supervisor/review_prompt.md defaults/supervisor/report_commissioning_prompt.md defaults/supervisor/code_management_prompt.md
+//go:embed defaults/agents/*/report_prompt.md defaults/agents/*/code_prompt.md defaults/report_base_prompt.md defaults/code_base_prompt.md defaults/supervisor/review_prompt.md defaults/supervisor/report_commissioning_prompt.md defaults/supervisor/code_management_prompt.md defaults/ateam_claude_sandbox_extra_settings.json
 var defaultsFS embed.FS
 
 // AllAgentIDs is the sorted list of agent IDs discovered from embedded prompt files.
@@ -102,6 +102,10 @@ func DefaultSupervisorCodeManagementPrompt() string {
 	return readEmbedded("defaults/supervisor/code_management_prompt.md")
 }
 
+func DefaultSandboxSettings() string {
+	return readEmbedded("defaults/" + SandboxSettingsFile)
+}
+
 type embeddedFile struct {
 	rel     string
 	content string
@@ -143,6 +147,10 @@ func embeddedFiles() []embeddedFile {
 	files = append(files, embeddedFile{
 		filepath.Join("defaults", "supervisor", CodeManagementPromptFile),
 		DefaultSupervisorCodeManagementPrompt(),
+	})
+	files = append(files, embeddedFile{
+		filepath.Join("defaults", SandboxSettingsFile),
+		DefaultSandboxSettings(),
 	})
 	return files
 }

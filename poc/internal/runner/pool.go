@@ -20,6 +20,10 @@ func RunPool(ctx context.Context, cr *ClaudeRunner, tasks []PoolTask, maxParalle
 	var wg sync.WaitGroup
 
 	for _, task := range tasks {
+		cr.LogQueued(task.RunOpts)
+	}
+
+	for _, task := range tasks {
 		wg.Add(1)
 		sem <- struct{}{} // acquire slot
 

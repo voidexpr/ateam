@@ -70,7 +70,7 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	case "report":
 		assembled, err = prompts.AssembleAgentPrompt(env.OrgDir, env.ProjectDir, promptAgent, env.SourceDir, extraPrompt, pinfo, promptIgnorePreviousReport)
 	case "code":
-		assembled, err = prompts.AssembleAgentCodePrompt(env.OrgDir, env.ProjectDir, promptAgent, env.SourceDir, extraPrompt, pinfo, promptIgnorePreviousReport)
+		assembled, err = prompts.AssembleAgentCodePrompt(env.OrgDir, env.ProjectDir, promptAgent, env.SourceDir, extraPrompt, pinfo)
 	}
 	if err != nil {
 		return err
