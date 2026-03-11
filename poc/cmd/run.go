@@ -78,7 +78,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	outputDir := env.AgentLogsDir(runAgent, "run")
 	agentDir := filepath.Join(env.ProjectDir, "agents", runAgent)
 
-	cr := &runner.ClaudeRunner{LogFile: env.RunnerLogPath(), ProjectDir: env.ProjectDir, OrgDir: env.OrgDir, ExtraWriteDirs: []string{env.OrgDir}}
+	cr := newClaudeRunner(env)
 	opts := runner.RunOpts{
 		AgentID:              runAgent,
 		OutputDir:            outputDir,

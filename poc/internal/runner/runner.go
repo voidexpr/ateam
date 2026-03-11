@@ -77,11 +77,7 @@ type RunSummary struct {
 // to be dispatched. Call this before spawning parallel goroutines so all queued
 // entries appear together.
 func (r *ClaudeRunner) LogQueued(opts RunOpts) {
-	cwd := opts.WorkDir
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-	appendLog(r.LogFile, opts.AgentID, "queued", cwd,
+	appendLog(r.LogFile, opts.AgentID, "queued", effectiveWorkDir(opts),
 		relToDir(r.ProjectDir, opts.LastMessageFilePath))
 }
 
@@ -108,10 +104,7 @@ func (r *ClaudeRunner) writeSettings(opts RunOpts) (string, error) {
 		return "", fmt.Errorf("cannot parse %s: %w", sandboxFile, err)
 	}
 
-	workDir := opts.WorkDir
-	if workDir == "" {
-		workDir, _ = os.Getwd()
-	}
+	workDir := effectiveWorkDir(opts)
 
 	// Merge runtime paths into the parsed settings.
 	runtimeWriteDirs := []string{workDir, r.ProjectDir}
@@ -226,11 +219,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 	args = append(args, r.ExtraArgs...)
 	cliStr := "claude " + strings.Join(args, " ")
 
-	// Resolve cwd for logging.
-	cwd := opts.WorkDir
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
+	cwd := effectiveWorkDir(opts)
 
 	// Archive the prompt to history before running.
 	promptFile := archivePrompt(opts.HistoryDir, opts.PromptName, prompt)
@@ -462,6 +451,14 @@ func appendLog(logFile, agentID, status, cwd, cli string, extra ...string) {
 	fields := []string{ts, agentID, status, cwd, cli}
 	fields = append(fields, extra...)
 	fmt.Fprintln(f, strings.Join(fields, " | "))
+}
+
+func effectiveWorkDir(opts RunOpts) string {
+	if opts.WorkDir != "" {
+		return opts.WorkDir
+	}
+	cwd, _ := os.Getwd()
+	return cwd
 }
 
 func relToDir(base, path string) string {

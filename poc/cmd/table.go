@@ -7,6 +7,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
 	"github.com/spf13/cobra"
 )
@@ -47,6 +48,15 @@ func fmtInt(n int) string {
 		return ""
 	}
 	return fmt.Sprintf("%d", n)
+}
+
+func newClaudeRunner(env *root.ResolvedEnv) *runner.ClaudeRunner {
+	return &runner.ClaudeRunner{
+		LogFile:        env.RunnerLogPath(),
+		ProjectDir:     env.ProjectDir,
+		OrgDir:         env.OrgDir,
+		ExtraWriteDirs: []string{env.OrgDir},
+	}
 }
 
 const cheaperModelName = "sonnet"

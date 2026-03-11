@@ -78,7 +78,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 	timeout := env.Config.Report.EffectiveTimeout(reportTimeout)
 	reportType := "full"
 
-	cr := &runner.ClaudeRunner{LogFile: env.RunnerLogPath(), ProjectDir: env.ProjectDir, OrgDir: env.OrgDir, ExtraWriteDirs: []string{env.OrgDir}}
+	cr := newClaudeRunner(env)
 	applyCheaperModel(cr, reportCheaperModel)
 	basePinfo := env.NewProjectInfoParams("")
 	var tasks []runner.PoolTask
