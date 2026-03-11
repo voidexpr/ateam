@@ -326,8 +326,8 @@ Created by `ateam init`. Holds project config, prompts, reports, and history (ve
     full_report.md                           # latest successful report
     full_report_error.md                     # error details (on failure only)
     history/                                 # timestamped archive
-      2026-03-08T15:04:00.full_prompt.md         # archived prompt
-      2026-03-08T15:04:00.full_report.md         # archived report
+      2026-03-08_15-04-00.full_prompt.md         # archived prompt
+      2026-03-08_15-04-00.full_report.md         # archived report
   supervisor/
     review_prompt.md                         # project-level supervisor override (optional)
     review_extra_prompt.md                   # extra instructions for reviews (optional)
@@ -338,8 +338,8 @@ Created by `ateam init`. Holds project config, prompts, reports, and history (ve
     code_output.md                           # latest code management output
     code_error.md                            # error details (on failure only)
     history/
-      2026-03-08T15:04:00.review_prompt.md
-      2026-03-08T15:04:00.review.md
+      2026-03-08_15-04-00.review_prompt.md
+      2026-03-08_15-04-00.review.md
 ```
 
 ### Runtime state: `.ateamorg/projects/<project-id>/`
@@ -350,15 +350,15 @@ Runtime files are stored outside the project, keyed by the project's relative pa
 .ateamorg/projects/<project-id>/
   runner.log                                 # append-only execution log
   agents/<NAME>/logs/
-    2026-03-10T22:17:58_report_exec.md       # full execution context (env, settings, prompt)
-    2026-03-10T22:17:58_report_stream.jsonl  # raw JSONL stream
-    2026-03-10T22:17:58_report_stderr.log    # stderr capture
-    2026-03-10T22:17:58_report_settings.json # sandbox settings used
+    2026-03-10_22-17-58_report_exec.md       # full execution context (env, settings, prompt)
+    2026-03-10_22-17-58_report_stream.jsonl  # raw JSONL stream
+    2026-03-10_22-17-58_report_stderr.log    # stderr capture
+    2026-03-10_22-17-58_report_settings.json # sandbox settings used
   supervisor/logs/
-    2026-03-10T22:18:00_review_exec.md
-    2026-03-10T22:18:00_review_stream.jsonl
-    2026-03-10T22:18:00_review_stderr.log
-    2026-03-10T22:18:00_review_settings.json
+    2026-03-10_22-18-00_review_exec.md
+    2026-03-10_22-18-00_review_stream.jsonl
+    2026-03-10_22-18-00_review_stderr.log
+    2026-03-10_22-18-00_review_settings.json
 ```
 
 ### Migrating from UUID-based or old-encoding state directories
@@ -533,9 +533,9 @@ TIMESTAMP  "AGENT"  "STATUS"  "CWD"  "CLI"  [EXTRA...]
 Example:
 
 ```
-2026-03-08T15:04:00	"security"	"start"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"	"agents/security/history/2026-03-08T15:04:00.full_prompt.md"	"agents/security/full_report.md"
-2026-03-08T15:06:23	"security"	"ok"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"
-2026-03-08T15:07:01	"testing_basic"	"error"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"	"timed out after 10 minutes"
+2026-03-08_15-04-00	"security"	"start"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"	"agents/security/history/2026-03-08_15-04-00.full_prompt.md"	"agents/security/full_report.md"
+2026-03-08_15-06-23	"security"	"ok"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"
+2026-03-08_15-07-01	"testing_basic"	"error"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"	"timed out after 10 minutes"
 ```
 
 ### Detailed output
@@ -570,18 +570,18 @@ For the supervisor, error files are `.ateam/supervisor/review_error.md` (review)
 
 ### History
 
-Every run archives its prompt and output to the `history/` directory with an ISO-8601 timestamp prefix:
+Every run archives its prompt and output to the `history/` directory with a timestamp prefix:
 
 ```bash
 ls .ateam/agents/security/history/
-# 2026-03-07T14:30:00.full_prompt.md
-# 2026-03-07T14:30:00.full_report.md
-# 2026-03-08T09:00:00.full_prompt.md
-# 2026-03-08T09:00:00.full_report.md
+# 2026-03-07_14-30-00.full_prompt.md
+# 2026-03-07_14-30-00.full_report.md
+# 2026-03-08_09-00-00.full_prompt.md
+# 2026-03-08_09-00-00.full_report.md
 
 ls .ateam/supervisor/history/
-# 2026-03-07T14:35:00.review_prompt.md
-# 2026-03-07T14:35:00.review.md
+# 2026-03-07_14-35-00.review_prompt.md
+# 2026-03-07_14-35-00.review.md
 ```
 
 This lets you compare reports across runs and trace what prompt produced what output.

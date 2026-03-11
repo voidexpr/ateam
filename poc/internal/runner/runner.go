@@ -17,7 +17,7 @@ import (
 
 const (
 	// TimestampFormat is the canonical timestamp format used across all log files.
-	TimestampFormat = "2006-01-02T15:04:05"
+	TimestampFormat = "2006-01-02_15-04-05"
 
 	ActionReport = "report"
 	ActionRun    = "run"
