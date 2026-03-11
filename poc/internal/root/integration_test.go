@@ -553,6 +553,69 @@ func TestIntegration_NestedProjectStateDir(t *testing.T) {
 	}
 }
 
+// TestIntegration_ResolveFromStateDir verifies that resolveProjectFromStateDir
+// can find the project when cwd is inside .ateamorg/projects/<id>/.
+func TestIntegration_ResolveFromStateDir(t *testing.T) {
+	base := resolvedTempDir(t)
+
+	orgDir, err := InstallOrg(base)
+	if err != nil {
+		t.Fatalf("InstallOrg: %v", err)
+	}
+
+	cases := []struct {
+		name    string
+		relPath string // project relative path from orgRoot
+	}{
+		{"simple", "myproj"},
+		{"nested", "services/api/v2"},
+		{"underscores", "my_project"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			projPath := filepath.Join(base, filepath.FromSlash(tc.relPath))
+			if err := os.MkdirAll(projPath, 0755); err != nil {
+				t.Fatal(err)
+			}
+
+			opts := InitProjectOpts{
+				Name:          tc.relPath,
+				EnabledAgents: []string{"security"},
+			}
+			projDir, err := InitProject(projPath, orgDir, opts)
+			if err != nil {
+				t.Fatalf("InitProject: %v", err)
+			}
+
+			// Compute state dir and verify resolution from it.
+			projectID := config.PathToProjectID(tc.relPath)
+			stateDir := filepath.Join(orgDir, "projects", projectID)
+
+			got, err := resolveProjectFromStateDir(orgDir, stateDir)
+			if err != nil {
+				t.Fatalf("resolveProjectFromStateDir(%q): %v", stateDir, err)
+			}
+			if got != projDir {
+				t.Errorf("got %q, want %q", got, projDir)
+			}
+
+			// Also resolve from a subdirectory of the state dir.
+			subDir := filepath.Join(stateDir, "agents", "security", "logs")
+			if err := os.MkdirAll(subDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			got, err = resolveProjectFromStateDir(orgDir, subDir)
+			if err != nil {
+				t.Fatalf("resolveProjectFromStateDir(%q): %v", subDir, err)
+			}
+			if got != projDir {
+				t.Errorf("from subdir: got %q, want %q", got, projDir)
+			}
+		})
+	}
+}
+
 // TestIntegration_WalkProjectsDiscovery verifies that WalkProjects discovers
 // all projects by walking the filesystem.
 func TestIntegration_WalkProjectsDiscovery(t *testing.T) {

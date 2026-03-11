@@ -170,7 +170,10 @@ func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
 	if projectOverride != "" {
 		projectDir, err = resolveProjectByName(orgDir, projectOverride)
 	} else {
-		projectDir, err = FindProject(cwd)
+		projectDir, err = resolveProjectFromStateDir(orgDir, cwd)
+		if err != nil {
+			projectDir, err = FindProject(cwd)
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -204,7 +207,10 @@ func Lookup() (*ResolvedEnv, error) {
 		OrgDir: orgDir,
 	}
 
-	projectDir, err := FindProject(cwd)
+	projectDir, err := resolveProjectFromStateDir(orgDir, cwd)
+	if err != nil {
+		projectDir, err = FindProject(cwd)
+	}
 	if err != nil {
 		return env, nil
 	}
@@ -250,6 +256,33 @@ func WalkProjects(orgDir string, fn func(ProjectInfo) error) error {
 		}
 		return nil
 	})
+}
+
+// resolveProjectFromStateDir checks if cwd is inside .ateamorg/projects/<id>/
+// and resolves the project directory by reversing the project ID to a path.
+func resolveProjectFromStateDir(orgDir, cwd string) (string, error) {
+	projectsDir := filepath.Join(orgDir, "projects")
+	prefix := projectsDir + string(filepath.Separator)
+	if !strings.HasPrefix(cwd+string(filepath.Separator), prefix) {
+		return "", fmt.Errorf("not inside a state directory")
+	}
+
+	// Extract the project ID: first path component after "projects/"
+	rest := cwd[len(projectsDir):]
+	rest = strings.TrimPrefix(rest, string(filepath.Separator))
+	if rest == "" {
+		return "", fmt.Errorf("not inside a specific project state directory")
+	}
+	projectID := strings.SplitN(rest, string(filepath.Separator), 2)[0]
+
+	relPath := config.ProjectIDToPath(projectID)
+	orgRoot := filepath.Dir(orgDir)
+	candidate := filepath.Join(orgRoot, relPath, ProjectDirName)
+
+	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		return realPath(candidate), nil
+	}
+	return "", fmt.Errorf("project directory not found for state %q", projectID)
 }
 
 // resolveOrgByName treats override as a path and looks for .ateamorg child there.
