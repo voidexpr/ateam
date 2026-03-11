@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -15,9 +16,11 @@ import (
 
 // ClaudeRunner holds shared execution config for invoking claude.
 type ClaudeRunner struct {
-	ExtraArgs  []string
-	LogFile    string // append-only runner log (e.g. .ateam/logs/runner.log)
-	ProjectDir string // .ateam/ dir, used for computing relative paths in logs
+	ExtraArgs      []string
+	LogFile        string   // append-only runner log (e.g. .ateam/logs/runner.log)
+	ProjectDir     string   // .ateam/ dir, used for computing relative paths in logs and settings resolution
+	OrgDir         string   // .ateamorg/ dir, used for settings resolution
+	ExtraWriteDirs []string // additional dirs granted sandbox write access (e.g. .ateamorg/)
 }
 
 // RunOpts holds per-invocation settings.
@@ -70,6 +73,105 @@ type RunSummary struct {
 	StderrFilePath string
 }
 
+// LogQueued writes a "queued" entry to the runner log for a task that is about
+// to be dispatched. Call this before spawning parallel goroutines so all queued
+// entries appear together.
+func (r *ClaudeRunner) LogQueued(opts RunOpts) {
+	cwd := opts.WorkDir
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	appendLog(r.LogFile, opts.AgentID, "queued", cwd,
+		relToDir(r.ProjectDir, opts.LastMessageFilePath))
+}
+
+// writeSettings resolves the sandbox settings via 3-level fallback
+// (.ateam/ → .ateamorg/ → .ateamorg/defaults/), merges in runtime paths
+// (workdir, projectDir, extraWriteDirs), and writes last_settings.json
+// to the run's OutputDir (safe for concurrent pool execution).
+func (r *ClaudeRunner) writeSettings(opts RunOpts) (string, error) {
+	const sandboxFile = "ateam_claude_sandbox_extra_settings.json"
+	const lastFile = "last_settings.json"
+
+	// 3-level resolution: project → org → org/defaults
+	base := readFileOr3Level(
+		filepath.Join(r.ProjectDir, sandboxFile),
+		filepath.Join(r.OrgDir, sandboxFile),
+		filepath.Join(r.OrgDir, "defaults", sandboxFile),
+	)
+	if base == "" {
+		return "", fmt.Errorf("no %s found in project, org, or defaults", sandboxFile)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal([]byte(base), &settings); err != nil {
+		return "", fmt.Errorf("cannot parse %s: %w", sandboxFile, err)
+	}
+
+	workDir := opts.WorkDir
+	if workDir == "" {
+		workDir, _ = os.Getwd()
+	}
+
+	// Merge runtime paths into the parsed settings.
+	runtimeWriteDirs := []string{workDir, r.ProjectDir}
+	runtimeWriteDirs = append(runtimeWriteDirs, r.ExtraWriteDirs...)
+	runtimeAdditionalDirs := append([]string{r.ProjectDir}, r.ExtraWriteDirs...)
+
+	mergeStringList(settings, []string{"sandbox", "filesystem", "allowWrite"}, runtimeWriteDirs)
+	mergeStringList(settings, []string{"sandbox", "filesystem", "denyWrite"}, []string{
+		filepath.Join(opts.OutputDir, lastFile),
+		filepath.Join(r.ProjectDir, sandboxFile),
+		filepath.Join(r.OrgDir, sandboxFile),
+		filepath.Join(r.OrgDir, "defaults", sandboxFile),
+	})
+	mergeStringList(settings, []string{"permissions", "additionalDirectories"}, runtimeAdditionalDirs)
+
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return "", err
+	}
+
+	settingsPath := filepath.Join(opts.OutputDir, lastFile)
+	if err := os.WriteFile(settingsPath, data, 0644); err != nil {
+		return "", err
+	}
+	return settingsPath, nil
+}
+
+// readFileOr3Level tries three paths and returns the first that exists, or "".
+func readFileOr3Level(paths ...string) string {
+	for _, p := range paths {
+		if data, err := os.ReadFile(p); err == nil {
+			return string(data)
+		}
+	}
+	return ""
+}
+
+// mergeStringList appends values to a nested JSON array at the given key path,
+// creating intermediate maps as needed.
+func mergeStringList(obj map[string]any, keyPath []string, values []string) {
+	m := obj
+	for _, key := range keyPath[:len(keyPath)-1] {
+		child, ok := m[key].(map[string]any)
+		if !ok {
+			child = make(map[string]any)
+			m[key] = child
+		}
+		m = child
+	}
+	lastKey := keyPath[len(keyPath)-1]
+	var existing []any
+	if arr, ok := m[lastKey].([]any); ok {
+		existing = arr
+	}
+	for _, v := range values {
+		existing = append(existing, v)
+	}
+	m[lastKey] = existing
+}
+
 // Run executes claude with stream-json output, parsing events in real time.
 // If progress is non-nil, lightweight status updates are sent on it.
 func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, progress chan<- RunProgress) RunSummary {
@@ -115,7 +217,12 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 		defer cancel()
 	}
 
-	args := []string{"-p", "--output-format", "stream-json", "--verbose"}
+	settingsFile, err := r.writeSettings(opts)
+	if err != nil {
+		return failEarly(fmt.Errorf("cannot create settings file: %w", err))
+	}
+
+	args := []string{"-p", "--output-format", "stream-json", "--verbose", "--settings", settingsFile}
 	args = append(args, r.ExtraArgs...)
 	cliStr := "claude " + strings.Join(args, " ")
 
@@ -352,11 +459,9 @@ func appendLog(logFile, agentID, status, cwd, cli string, extra ...string) {
 	defer f.Close()
 
 	ts := time.Now().Format(time.RFC3339)
-	fmt.Fprintf(f, "%s\t%q\t%q\t%q\t%q", ts, agentID, status, cwd, cli)
-	for _, e := range extra {
-		fmt.Fprintf(f, "\t%q", e)
-	}
-	f.Write([]byte("\n"))
+	fields := []string{ts, agentID, status, cwd, cli}
+	fields = append(fields, extra...)
+	fmt.Fprintln(f, strings.Join(fields, " | "))
 }
 
 func relToDir(base, path string) string {

@@ -89,10 +89,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	timeout := env.Config.Report.EffectiveTimeout(codeTimeout)
-	if timeout == 0 {
-		timeout = 60
-	}
+	timeout := env.Config.Code.EffectiveTimeout(codeTimeout)
 	historyDir := env.ReviewHistoryDir()
 
 	if err := os.MkdirAll(historyDir, 0755); err != nil {
@@ -102,7 +99,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Code management supervisor running (%dm timeout)...\n", timeout)
 
 	supervisorDir := filepath.Join(env.ProjectDir, "supervisor")
-	cr := &runner.ClaudeRunner{LogFile: env.RunnerLogPath(), ProjectDir: env.ProjectDir}
+	cr := &runner.ClaudeRunner{LogFile: env.RunnerLogPath(), ProjectDir: env.ProjectDir, OrgDir: env.OrgDir, ExtraWriteDirs: []string{env.OrgDir}}
 	applyCheaperModel(cr, codeCheaperModel)
 	opts := runner.RunOpts{
 		AgentID:              "supervisor",

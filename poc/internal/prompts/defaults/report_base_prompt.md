@@ -14,6 +14,8 @@ Specify which agent you are use, what model you are using and other attributes r
 
 ## Report Format
 
+**IMPORTANT: if a prior report is provided re-include the findings that haven't been addressed with a potentially updated priority**
+
 Structure your report as follows:
 
 ### Summary
