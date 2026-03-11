@@ -31,6 +31,27 @@ Then the workflow is:
   ateam code                                  # supervisor delegates tasks as code changes
 
 
+Can also be more methological:
+* edit .ateam/config.toml to enable/disalbe relevent agents (you should probably never run all of them)
+* gather information
+
+  ateam report && ateam review --print
+
+* Edit reports and reviews to make sure you specify the work you want to occur.
+* code:
+
+  ateam code
+
+### Git
+* use your work area, use ateam directly on main, get commits and rebase done automatically
+* use a separate checkout of your repo, work from main or a branch
+* create an 'ateam_work' branch and git worktree, do your work there
+
+### Provide feedback
+* use report_extra_prompt.md or review_extra_prompt.md to specify rejected approaches so they are taken into account in the future
+  * can also document rejected comments for the same reason
+
+
 ## Prerequisites
 
 - Go 1.23+
@@ -587,3 +608,23 @@ go test ./internal/runner/ -v        # stream event parsing tests
 1. Create `internal/prompts/defaults/agents/AGENT_NAME/report_prompt.md`
 2. Optionally add `code_prompt.md` in the same directory
 3. Rebuild with `make build` — the agent is auto-discovered from the embedded filesystem
+
+## Future
+* execution flexibility
+  * support codex
+  * support model choice
+  * support sandboxing options: docker, MacOS container, etc ...
+  * easily default at install time
+  * use different models/clis for different tasks: review with codex, code with claude, report with codex
+* move orchestration logic out of the supervisor prompts into the ateam CLI:
+  * git workflow
+  * control of report and review break down in tasks and check completed tasks
+* explicit workspace management using container
+  * remove all permission checks and all sandboxing
+  * can enter a docker container to debug issues and run in the same environment as the agent
+* better context and memory
+  * reduce prompt size
+    * by moving more of the instructions to the tooling around
+* maintain a current view of a project: overview.md and update it based on commit
+  * time generated
+  * last commit
