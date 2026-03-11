@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
@@ -42,10 +43,6 @@ func init() {
 }
 
 func runPrompt(cmd *cobra.Command, args []string) error {
-	if !prompts.IsValidAgent(promptAgent) {
-		return fmt.Errorf("unknown agent: %s\nValid agents: %s", promptAgent, prompts.AgentFlagUsage())
-	}
-
 	if promptAction != "report" && promptAction != "code" {
 		return fmt.Errorf("invalid action %q: must be 'report' or 'code'", promptAction)
 	}
@@ -53,6 +50,10 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	env, err := root.Resolve(orgFlag, projectFlag)
 	if err != nil {
 		return err
+	}
+
+	if !prompts.IsValidAgent(promptAgent, env.Config.Agents) {
+		return fmt.Errorf("unknown agent: %s\nValid agents: %s", promptAgent, strings.Join(prompts.AllKnownAgentIDs(env.Config.Agents), ", "))
 	}
 
 	extraPrompt, err := prompts.ResolveOptional(promptExtraPrompt)

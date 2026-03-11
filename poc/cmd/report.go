@@ -56,12 +56,12 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--delta is not yet implemented")
 	}
 
-	agentIDs, err := prompts.ResolveAgentList(reportAgents)
+	env, err := root.Resolve(orgFlag, projectFlag)
 	if err != nil {
 		return err
 	}
 
-	env, err := root.Resolve(orgFlag, projectFlag)
+	agentIDs, err := prompts.ResolveAgentList(reportAgents, env.Config.Agents)
 	if err != nil {
 		return err
 	}

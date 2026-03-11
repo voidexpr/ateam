@@ -48,10 +48,6 @@ func init() {
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
-	if !prompts.IsValidAgent(runAgent) {
-		return fmt.Errorf("unknown agent: %s\nValid agents: %s", runAgent, prompts.AgentFlagUsage())
-	}
-
 	promptText, err := prompts.ResolveValue(args[0])
 	if err != nil {
 		return fmt.Errorf("cannot resolve prompt: %w", err)
@@ -60,6 +56,10 @@ func runRun(cmd *cobra.Command, args []string) error {
 	env, err := root.Resolve(orgFlag, projectFlag)
 	if err != nil {
 		return err
+	}
+
+	if !prompts.IsValidAgent(runAgent, env.Config.Agents) {
+		return fmt.Errorf("unknown agent: %s\nValid agents: %s", runAgent, strings.Join(prompts.AllKnownAgentIDs(env.Config.Agents), ", "))
 	}
 
 	if err := root.EnsureAgents(env.ProjectDir, env.StateDir, []string{runAgent}); err != nil {

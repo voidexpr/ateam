@@ -37,25 +37,30 @@ func discoverAgentIDs() []string {
 	return ids
 }
 
-// IsValidAgent returns true if the agent ID has an embedded prompt.
-func IsValidAgent(id string) bool {
+// IsValidAgent returns true if id is a built-in agent or exists in configAgents.
+func IsValidAgent(id string, configAgents map[string]string) bool {
 	for _, known := range AllAgentIDs {
 		if known == id {
 			return true
 		}
 	}
+	if _, ok := configAgents[id]; ok {
+		return true
+	}
 	return false
 }
 
 // ResolveAgentList expands "all" and validates agent IDs.
-func ResolveAgentList(ids []string) ([]string, error) {
+// configAgents provides additional valid agent IDs from the project config.
+func ResolveAgentList(ids []string, configAgents map[string]string) ([]string, error) {
+	allKnown := AllKnownAgentIDs(configAgents)
 	var result []string
 	for _, id := range ids {
 		if id == "all" {
-			return AllAgentIDs, nil
+			return allKnown, nil
 		}
-		if !IsValidAgent(id) {
-			return nil, fmt.Errorf("unknown agent: %s\nValid agents: %s", id, strings.Join(AllAgentIDs, ", "))
+		if !IsValidAgent(id, configAgents) {
+			return nil, fmt.Errorf("unknown agent: %s\nValid agents: %s", id, strings.Join(allKnown, ", "))
 		}
 		result = append(result, id)
 	}
@@ -65,9 +70,26 @@ func ResolveAgentList(ids []string) ([]string, error) {
 	return result, nil
 }
 
-// AgentFlagUsage returns a help string listing all valid agent IDs for use in flag descriptions.
+// AllKnownAgentIDs returns the sorted union of embedded and config-defined agent IDs.
+func AllKnownAgentIDs(configAgents map[string]string) []string {
+	seen := make(map[string]bool, len(AllAgentIDs)+len(configAgents))
+	for _, id := range AllAgentIDs {
+		seen[id] = true
+	}
+	for id := range configAgents {
+		seen[id] = true
+	}
+	all := make([]string, 0, len(seen))
+	for id := range seen {
+		all = append(all, id)
+	}
+	sort.Strings(all)
+	return all
+}
+
+// AgentFlagUsage returns a help string listing built-in agent IDs for use in flag descriptions.
 func AgentFlagUsage() string {
-	return "comma-separated agent list, or 'all'. Valid: " + strings.Join(AllAgentIDs, ", ")
+	return "comma-separated agent list, or 'all'. Built-in: " + strings.Join(AllAgentIDs, ", ")
 }
 
 func readEmbedded(name string) string {
