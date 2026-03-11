@@ -165,28 +165,31 @@ ateam code --dry-run
 |------|-------------|
 | `--review TEXT` | Review content (text or `@filepath`; defaults to `.ateam/supervisor/review.md`) |
 | `--management TEXT` | Management prompt override (text or `@filepath`) |
-| `--timeout MINUTES` | Timeout in minutes (overrides `config.toml`; default 60) |
+| `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
+| `--timeout MINUTES` | Timeout in minutes (overrides `config.toml`; default 120) |
 | `--print` | Print output to stdout after completion |
 | `--dry-run` | Print the computed prompt without running |
 
 ### `ateam prompt`
 
-Resolve and print the full prompt for an agent without running it. Useful for debugging prompt assembly.
+Resolve and print the full prompt for an agent or supervisor without running it. Useful for debugging prompt assembly.
 
 ```bash
 ateam prompt --agent security --action report
 ateam prompt --agent refactor_small --action code
 ateam prompt --agent security --action report --extra-prompt "Focus on auth"
-ateam prompt --agent security --action report --extra-prompt @notes.md
-ateam prompt --agent security --action report --no-project-info
+ateam prompt --supervisor --action review
+ateam prompt --supervisor --action code
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--agent AGENT` | Agent name **(required)** |
-| `--action ACTION` | Action type: `report` or `code` **(required)** |
+| `--agent AGENT` | Agent name (mutually exclusive with `--supervisor`) |
+| `--supervisor` | Generate supervisor prompt instead of agent prompt |
+| `--action ACTION` | Action type: `report` or `code` for agents; `review` or `code` for supervisor **(required)** |
 | `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
 | `--no-project-info` | Omit the ATeam Project Context section from the prompt |
+| `--ignore-previous-report` | Do not include the agent's previous report in the prompt |
 
 ### `ateam log`
 
@@ -388,7 +391,13 @@ remote_origin_url = "git@github.com:org/repo.git"
 
 [report]
 max_parallel = 3
-agent_report_timeout_minutes = 10
+agent_report_timeout_minutes = 20
+
+[review]
+timeout_minutes = 20
+
+[code]
+timeout_minutes = 120
 
 [agents]
 security = "enabled"

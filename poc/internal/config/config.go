@@ -11,8 +11,9 @@ import (
 
 const (
 	DefaultMaxParallel               = 3
-	DefaultAgentReportTimeoutMinutes = 10
-	DefaultCodeTimeoutMinutes        = 60
+	DefaultAgentReportTimeoutMinutes = 20
+	DefaultReviewTimeoutMinutes      = 20
+	DefaultCodeTimeoutMinutes        = 120
 
 	AgentEnabled  = "enabled"
 	AgentDisabled = "disabled"
@@ -42,7 +43,16 @@ type ReportConfig struct {
 	AgentReportTimeoutMinutes int `toml:"agent_report_timeout_minutes"`
 }
 
-type ReviewConfig struct{}
+type ReviewConfig struct {
+	TimeoutMinutes int `toml:"timeout_minutes"`
+}
+
+func (r ReviewConfig) EffectiveTimeout(override int) int {
+	if override > 0 {
+		return override
+	}
+	return r.TimeoutMinutes
+}
 
 type CodeConfig struct {
 	TimeoutMinutes int `toml:"timeout_minutes"`
@@ -91,6 +101,9 @@ func Load(dir string) (*Config, error) {
 	}
 	if cfg.Report.AgentReportTimeoutMinutes == 0 {
 		cfg.Report.AgentReportTimeoutMinutes = DefaultAgentReportTimeoutMinutes
+	}
+	if cfg.Review.TimeoutMinutes == 0 {
+		cfg.Review.TimeoutMinutes = DefaultReviewTimeoutMinutes
 	}
 	if cfg.Code.TimeoutMinutes == 0 {
 		cfg.Code.TimeoutMinutes = DefaultCodeTimeoutMinutes

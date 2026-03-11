@@ -72,7 +72,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 		return printReviewDryRun(env, prompt)
 	}
 
-	timeout := env.Config.Report.EffectiveTimeout(reviewTimeout)
+	timeout := env.Config.Review.EffectiveTimeout(reviewTimeout)
 
 	reviewFile := env.ReviewPath()
 	reviewDir := filepath.Dir(reviewFile)

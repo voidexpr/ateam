@@ -16,6 +16,7 @@ import (
 var (
 	codeReview       string
 	codeManagement   string
+	codeExtraPrompt  string
 	codeTimeout      int
 	codePrint        bool
 	codeDryRun       bool
@@ -41,6 +42,8 @@ func init() {
 		"review content (text or @filepath; defaults to .ateam/supervisor/review.md)")
 	codeCmd.Flags().StringVar(&codeManagement, "management", "",
 		"management prompt override (text or @filepath)")
+	codeCmd.Flags().StringVar(&codeExtraPrompt, "extra-prompt", "",
+		"additional instructions (text or @filepath)")
 	codeCmd.Flags().IntVar(&codeTimeout, "timeout", 0,
 		"timeout in minutes (overrides config)")
 	codeCmd.Flags().BoolVar(&codePrint, "print", false,
@@ -76,8 +79,13 @@ func runCode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	extraPrompt, err := prompts.ResolveOptional(codeExtraPrompt)
+	if err != nil {
+		return err
+	}
+
 	pinfo := env.NewProjectInfoParams("the supervisor")
-	prompt, err := prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.SourceDir, pinfo, reviewContent, customManagement)
+	prompt, err := prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.SourceDir, pinfo, reviewContent, customManagement, extraPrompt)
 	if err != nil {
 		return err
 	}

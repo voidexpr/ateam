@@ -259,7 +259,7 @@ func AssembleReviewPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, ex
 
 // AssembleCodeManagementPrompt builds the full prompt for a supervisor code run.
 // reviewContent is the review document to include. customPrompt overrides 3-level fallback if non-empty.
-func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, pinfo ProjectInfoParams, reviewContent, customPrompt string) (string, error) {
+func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, pinfo ProjectInfoParams, reviewContent, customPrompt, extraPrompt string) (string, error) {
 	var mgmtPrompt string
 	var err error
 
@@ -287,6 +287,9 @@ func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, pinfo Pr
 	parts = append(parts, collectSupervisorExtras(orgDir, projectDir, CodeManagementExtraPromptFile)...)
 
 	parts = append(parts, "# Review\n\n"+reviewContent)
+	if extraPrompt != "" {
+		parts = append(parts, "# Additional Instructions\n\n"+extraPrompt)
+	}
 
 	return strings.Join(parts, "\n\n---\n\n"), nil
 }
