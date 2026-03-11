@@ -49,3 +49,4 @@ Any observations about the project that don't fit into specific actions — patt
 - Be decisive — "maybe" is not a priority level
 - If all reports say the code is clean, say so. Don't manufacture work.
 - In each Priority Action heading, specify which report(s) the recommendation primarily comes from
+- When processing an existing review.md you must omit completed work unless it mentions an impact on future tasks
