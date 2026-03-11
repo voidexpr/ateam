@@ -111,7 +111,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 	applyCheaperModel(cr, codeCheaperModel)
 	opts := runner.RunOpts{
 		AgentID:              "supervisor",
-		Action:               "code",
+		Action:               runner.ActionCode,
 		LogsDir:              env.SupervisorLogsDir(),
 		LastMessageFilePath:  filepath.Join(supervisorDir, "code_output.md"),
 		ErrorMessageFilePath: filepath.Join(supervisorDir, "code_error.md"),

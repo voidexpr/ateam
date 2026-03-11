@@ -95,7 +95,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 			Prompt: prompt,
 			RunOpts: runner.RunOpts{
 				AgentID:              agentID,
-				Action:               "report",
+				Action:               runner.ActionReport,
 				LogsDir:              env.AgentLogsDir(agentID),
 				LastMessageFilePath:  env.AgentReportPath(agentID, reportType),
 				ErrorMessageFilePath: filepath.Join(agentDir, prompts.FullReportErrorFile),

@@ -80,7 +80,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	cr := newClaudeRunner(env)
 	opts := runner.RunOpts{
 		AgentID:              runAgent,
-		Action:               "run",
+		Action:               runner.ActionRun,
 		LogsDir:              env.AgentLogsDir(runAgent),
 		LastMessageFilePath:  filepath.Join(agentDir, "last_run_output.md"),
 		ErrorMessageFilePath: filepath.Join(agentDir, "last_run_error.md"),

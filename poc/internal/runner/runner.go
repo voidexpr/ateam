@@ -15,8 +15,15 @@ import (
 	"time"
 )
 
-// TimestampFormat is the canonical timestamp format used across all log files.
-const TimestampFormat = "2006-01-02T15:04:05"
+const (
+	// TimestampFormat is the canonical timestamp format used across all log files.
+	TimestampFormat = "2006-01-02T15:04:05"
+
+	ActionReport = "report"
+	ActionRun    = "run"
+	ActionCode   = "code"
+	ActionReview = "review"
+)
 
 // ClaudeRunner holds shared execution config for invoking claude.
 type ClaudeRunner struct {

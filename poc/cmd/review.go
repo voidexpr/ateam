@@ -88,7 +88,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 	applyCheaperModel(cr, reviewCheaperModel)
 	opts := runner.RunOpts{
 		AgentID:              "supervisor",
-		Action:               "review",
+		Action:               runner.ActionReview,
 		LogsDir:              env.SupervisorLogsDir(),
 		LastMessageFilePath:  reviewFile,
 		ErrorMessageFilePath: filepath.Join(reviewDir, "review_error.md"),
