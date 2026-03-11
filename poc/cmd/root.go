@@ -38,4 +38,5 @@ func init() {
 	rootCmd.AddCommand(promptCmd)
 	rootCmd.AddCommand(codeCmd)
 	rootCmd.AddCommand(logCmd)
+	rootCmd.AddCommand(allCmd)
 }
