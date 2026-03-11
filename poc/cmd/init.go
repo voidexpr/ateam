@@ -103,7 +103,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	allAgentIDs := prompts.AllAgentIDs
 	var enabledAgents []string
 	if len(initAgents) > 0 {
-		resolved, resolveErr := prompts.ResolveAgentList(initAgents)
+		resolved, resolveErr := prompts.ResolveAgentList(initAgents, nil)
 		if resolveErr != nil {
 			return resolveErr
 		}
