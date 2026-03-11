@@ -8,6 +8,10 @@ The project source code is located at: {{SOURCE_DIR}}
 
 Explore the codebase thoroughly before writing your report. Read key files, understand the structure, and base every finding on actual code you've seen.
 
+## Merging old report
+
+When processing an existing report you must omit completed work unless it mentions an impact on future tasks.
+
 ## Agent performing the audit
 
 Specify which agent you are use, what model you are using and other attributes related to the model (thinking enable, level of thinking, ...)
@@ -44,3 +48,4 @@ List the top 3-5 findings that are high-value and low-effort (SMALL effort, MEDI
 - Recommend a tool to automate your objects if it is appropriate to the language and tech stack analyzed
 - Start your report directly with the `# Summary` heading — no preamble text like "Here's my report:"
 - Use `#` for top-level headings, not `##`
+
