@@ -45,6 +45,38 @@ func TestPathToProjectID_LongPath(t *testing.T) {
 	}
 }
 
+func TestProjectIDToPath(t *testing.T) {
+	cases := []struct {
+		id   string
+		want string
+	}{
+		{"myproject", "myproject"},
+		{"foo_bar", "foo/bar"},
+		{"foo__bar", "foo_bar"},
+		{"a_b_c", "a/b/c"},
+		{"", ""},
+		{"services_api", "services/api"},
+		{"my__project_sub__dir", "my_project/sub_dir"},
+	}
+	for _, tc := range cases {
+		got := ProjectIDToPath(tc.id)
+		if got != tc.want {
+			t.Errorf("ProjectIDToPath(%q) = %q, want %q", tc.id, got, tc.want)
+		}
+	}
+}
+
+func TestProjectIDRoundTrip(t *testing.T) {
+	paths := []string{"myproject", "foo/bar", "foo_bar", "a/b/c", "services/api", "my_project/sub_dir"}
+	for _, p := range paths {
+		id := PathToProjectID(p)
+		got := ProjectIDToPath(id)
+		if got != p {
+			t.Errorf("round-trip failed: %q -> %q -> %q", p, id, got)
+		}
+	}
+}
+
 func TestValidateProjectPath(t *testing.T) {
 	cases := []struct {
 		path    string
