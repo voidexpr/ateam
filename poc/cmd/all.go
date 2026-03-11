@@ -19,7 +19,7 @@ var allCmd = &cobra.Command{
 	Long: `Run the full ateam pipeline sequentially: report → review → code.
 
 Equivalent to:
-  ateam report --agents all --print && ateam review --print && ateam code --print
+  ateam report --roles all --print && ateam review --print && ateam code --print
 
 Example:
   ateam all
@@ -41,7 +41,7 @@ func runAll(cmd *cobra.Command, args []string) error {
 
 	// Phase 1: Report
 	fmt.Println("=== Phase 1: Report ===")
-	reportAgents = []string{"all"}
+	reportRoles = []string{"all"}
 	reportPrint = printOutput
 	reportExtraPrompt = allExtraPrompt
 	reportTimeout = allTimeout

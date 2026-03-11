@@ -54,19 +54,19 @@ func runEnv(cmd *cobra.Command, args []string) error {
 	}
 
 	if env.Config != nil {
-		agents := env.Config.EnabledAgents()
-		if len(agents) > 0 {
-			fmt.Printf("  Agents: %s\n", strings.Join(agents, ", "))
+		roles := env.Config.EnabledRoles()
+		if len(roles) > 0 {
+			fmt.Printf("   Roles: %s\n", strings.Join(roles, ", "))
 
 			fmt.Println()
 			w := newTable()
-			fmt.Fprintln(w, "AGENT\tLAST\tPATH")
-			for _, agentID := range agents {
-				reportPath := filepath.Join(env.ProjectDir, "agents", agentID, prompts.FullReportFile)
+			fmt.Fprintln(w, "ROLE\tLAST\tPATH")
+			for _, roleID := range roles {
+				reportPath := filepath.Join(env.ProjectDir, "roles", roleID, prompts.FullReportFile)
 				if fi, err := os.Stat(reportPath); err == nil {
-					fmt.Fprintf(w, "%s\t%s\t%s\n", agentID, fmtDateAge(fi.ModTime()), relPath(cwd, reportPath))
+					fmt.Fprintf(w, "%s\t%s\t%s\n", roleID, fmtDateAge(fi.ModTime()), relPath(cwd, reportPath))
 				} else {
-					fmt.Fprintf(w, "%s\t-\t\n", agentID)
+					fmt.Fprintf(w, "%s\t-\t\n", roleID)
 				}
 			}
 

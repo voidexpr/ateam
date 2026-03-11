@@ -13,10 +13,10 @@ func TestRoundTrip(t *testing.T) {
 		Project: ProjectConfig{Name: "myproject"},
 		Git:     GitConfig{Repo: "myrepo", RemoteOriginURL: "https://github.com/example/repo.git"},
 		Report: ReportConfig{
-			MaxParallel:               5,
-			AgentReportTimeoutMinutes: 20,
+			MaxParallel:          5,
+			ReportTimeoutMinutes: 20,
 		},
-		Agents: map[string]string{
+		Roles: map[string]string{
 			"lint":   "enabled",
 			"test":   "disabled",
 			"review": "enabled",
@@ -44,15 +44,15 @@ func TestRoundTrip(t *testing.T) {
 	if loaded.Report.MaxParallel != original.Report.MaxParallel {
 		t.Errorf("Report.MaxParallel = %d, want %d", loaded.Report.MaxParallel, original.Report.MaxParallel)
 	}
-	if loaded.Report.AgentReportTimeoutMinutes != original.Report.AgentReportTimeoutMinutes {
-		t.Errorf("Report.AgentReportTimeoutMinutes = %d, want %d", loaded.Report.AgentReportTimeoutMinutes, original.Report.AgentReportTimeoutMinutes)
+	if loaded.Report.ReportTimeoutMinutes != original.Report.ReportTimeoutMinutes {
+		t.Errorf("Report.ReportTimeoutMinutes = %d, want %d", loaded.Report.ReportTimeoutMinutes, original.Report.ReportTimeoutMinutes)
 	}
-	if len(loaded.Agents) != len(original.Agents) {
-		t.Fatalf("Agents length = %d, want %d", len(loaded.Agents), len(original.Agents))
+	if len(loaded.Roles) != len(original.Roles) {
+		t.Fatalf("Roles length = %d, want %d", len(loaded.Roles), len(original.Roles))
 	}
-	for k, v := range original.Agents {
-		if loaded.Agents[k] != v {
-			t.Errorf("Agents[%q] = %q, want %q", k, loaded.Agents[k], v)
+	for k, v := range original.Roles {
+		if loaded.Roles[k] != v {
+			t.Errorf("Roles[%q] = %q, want %q", k, loaded.Roles[k], v)
 		}
 	}
 }
@@ -60,11 +60,10 @@ func TestRoundTrip(t *testing.T) {
 func TestLoadDefaults(t *testing.T) {
 	dir := t.TempDir()
 
-	// Write a minimal config with no [report] section
 	content := `[project]
 name = "minimal"
 
-[agents]
+[roles]
 lint = "enabled"
 `
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644); err != nil {
@@ -79,17 +78,16 @@ lint = "enabled"
 	if cfg.Report.MaxParallel != DefaultMaxParallel {
 		t.Errorf("Report.MaxParallel = %d, want default %d", cfg.Report.MaxParallel, DefaultMaxParallel)
 	}
-	if cfg.Report.AgentReportTimeoutMinutes != DefaultAgentReportTimeoutMinutes {
-		t.Errorf("Report.AgentReportTimeoutMinutes = %d, want default %d", cfg.Report.AgentReportTimeoutMinutes, DefaultAgentReportTimeoutMinutes)
+	if cfg.Report.ReportTimeoutMinutes != DefaultReportTimeoutMinutes {
+		t.Errorf("Report.ReportTimeoutMinutes = %d, want default %d", cfg.Report.ReportTimeoutMinutes, DefaultReportTimeoutMinutes)
 	}
 }
 
-func TestLoadDefaultsNilAgents(t *testing.T) {
+func TestLoadDefaultsNilRoles(t *testing.T) {
 	dir := t.TempDir()
 
-	// Write a config with no [agents] section
 	content := `[project]
-name = "noagents"
+name = "noroles"
 `
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -100,17 +98,17 @@ name = "noagents"
 		t.Fatalf("Load: %v", err)
 	}
 
-	if cfg.Agents == nil {
-		t.Error("Agents map should be initialized, got nil")
+	if cfg.Roles == nil {
+		t.Error("Roles map should be initialized, got nil")
 	}
-	if len(cfg.Agents) != 0 {
-		t.Errorf("Agents length = %d, want 0", len(cfg.Agents))
+	if len(cfg.Roles) != 0 {
+		t.Errorf("Roles length = %d, want 0", len(cfg.Roles))
 	}
 }
 
-func TestEnabledAgents(t *testing.T) {
+func TestEnabledRoles(t *testing.T) {
 	cfg := Config{
-		Agents: map[string]string{
+		Roles: map[string]string{
 			"zebra":  "enabled",
 			"alpha":  "enabled",
 			"beta":   "disabled",
@@ -119,35 +117,35 @@ func TestEnabledAgents(t *testing.T) {
 		},
 	}
 
-	got := cfg.EnabledAgents()
+	got := cfg.EnabledRoles()
 	want := []string{"alpha", "gamma", "zebra"}
 
 	if len(got) != len(want) {
-		t.Fatalf("EnabledAgents() returned %d items, want %d: %v", len(got), len(want), got)
+		t.Fatalf("EnabledRoles() returned %d items, want %d: %v", len(got), len(want), got)
 	}
 	for i, name := range want {
 		if got[i] != name {
-			t.Errorf("EnabledAgents()[%d] = %q, want %q", i, got[i], name)
+			t.Errorf("EnabledRoles()[%d] = %q, want %q", i, got[i], name)
 		}
 	}
 }
 
-func TestEnabledAgentsEmpty(t *testing.T) {
+func TestEnabledRolesEmpty(t *testing.T) {
 	cfg := Config{
-		Agents: map[string]string{
+		Roles: map[string]string{
 			"a": "disabled",
 			"b": "disabled",
 		},
 	}
 
-	got := cfg.EnabledAgents()
+	got := cfg.EnabledRoles()
 	if len(got) != 0 {
-		t.Errorf("EnabledAgents() returned %v, want empty slice", got)
+		t.Errorf("EnabledRoles() returned %v, want empty slice", got)
 	}
 }
 
 func TestEffectiveTimeout(t *testing.T) {
-	r := ReportConfig{AgentReportTimeoutMinutes: 10}
+	r := ReportConfig{ReportTimeoutMinutes: 10}
 
 	if got := r.EffectiveTimeout(0); got != 10 {
 		t.Errorf("EffectiveTimeout(0) = %d, want 10", got)

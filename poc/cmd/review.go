@@ -24,8 +24,8 @@ var (
 
 var reviewCmd = &cobra.Command{
 	Use:   "review",
-	Short: "Supervisor reviews agent reports and produces decisions",
-	Long: `Read all agent reports and have the supervisor produce a prioritized
+	Short: "Supervisor reviews role reports and produces decisions",
+	Long: `Read all role reports and have the supervisor produce a prioritized
 decisions document.
 
 Works from any project directory — discovers the .ateamorg/ and .ateam/ structure.
@@ -87,7 +87,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 	cr := newClaudeRunner(env)
 	applyCheaperModel(cr, reviewCheaperModel)
 	opts := runner.RunOpts{
-		AgentID:              "supervisor",
+		RoleID:               "supervisor",
 		Action:               runner.ActionReview,
 		LogsDir:              env.SupervisorLogsDir(),
 		LastMessageFilePath:  reviewFile,
@@ -135,7 +135,7 @@ func printReviewDryRun(env *root.ResolvedEnv, prompt string) error {
 		if relPath == "" {
 			relPath = r.Path
 		}
-		fmt.Printf("  %s  %-30s %s\n", r.ModTime.Format(runner.TimestampFormat), r.AgentID, relPath)
+		fmt.Printf("  %s  %-30s %s\n", r.ModTime.Format(runner.TimestampFormat), r.RoleID, relPath)
 	}
 
 	fmt.Printf("\n╔══ supervisor ══╗\n\n")

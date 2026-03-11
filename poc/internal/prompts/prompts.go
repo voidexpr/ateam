@@ -52,27 +52,27 @@ func ResolveOptional(value string) (string, error) {
 	return ResolveValue(value)
 }
 
-// AssembleAgentPrompt builds the full prompt for an agent report run.
-// When skipPreviousReport is false, the agent's existing full_report.md is
-// included as a "Previous Report" section so the agent can build on prior findings.
-func AssembleAgentPrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, skipPreviousReport bool) (string, error) {
-	return assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt, pinfo,
+// AssembleRolePrompt builds the full prompt for a role report run.
+// When skipPreviousReport is false, the role's existing full_report.md is
+// included as a "Previous Report" section so the role can build on prior findings.
+func AssembleRolePrompt(orgDir, projectDir, roleID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, skipPreviousReport bool) (string, error) {
+	return assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt, pinfo,
 		ReportBasePromptFile, ReportPromptFile, ReportExtraPromptFile, skipPreviousReport)
 }
 
-// AssembleAgentCodePrompt builds the full prompt for an agent code run.
+// AssembleRoleCodePrompt builds the full prompt for a role code run.
 // Code prompts never include the previous report.
-func AssembleAgentCodePrompt(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams) (string, error) {
-	return assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt, pinfo,
+func AssembleRoleCodePrompt(orgDir, projectDir, roleID, sourceDir, extraPrompt string, pinfo ProjectInfoParams) (string, error) {
+	return assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt, pinfo,
 		CodeBasePromptFile, CodePromptFile, CodeExtraPromptFile, true)
 }
 
 // Prompt sequence: ATeam Project Context → Base prompt → Role-specific prompt → Extra prompts → Previous report → CLI extra
-func assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, baseFile, roleFile, extraFile string, skipPreviousReport bool) (string, error) {
+func assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, baseFile, roleFile, extraFile string, skipPreviousReport bool) (string, error) {
 	rolePrompt := readFileOr3Level(
-		filepath.Join(projectDir, "agents", agentID, roleFile),
-		filepath.Join(orgDir, "agents", agentID, roleFile),
-		filepath.Join(orgDir, "defaults", "agents", agentID, roleFile),
+		filepath.Join(projectDir, "roles", roleID, roleFile),
+		filepath.Join(orgDir, "roles", roleID, roleFile),
+		filepath.Join(orgDir, "defaults", "roles", roleID, roleFile),
 	)
 
 	basePrompt := readFileOr3Level(
@@ -82,7 +82,7 @@ func assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt str
 	)
 
 	if rolePrompt == "" && basePrompt == "" {
-		return "", fmt.Errorf("no prompt found for agent %s action %s", agentID, strings.TrimSuffix(roleFile, ".md"))
+		return "", fmt.Errorf("no prompt found for role %s action %s", roleID, strings.TrimSuffix(roleFile, ".md"))
 	}
 
 	var parts []string
@@ -96,11 +96,11 @@ func assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt str
 		parts = append(parts, strings.ReplaceAll(rolePrompt, "{{SOURCE_DIR}}", sourceDir))
 	}
 
-	extras := collectAgentExtras(orgDir, projectDir, agentID, extraFile)
+	extras := collectRoleExtras(orgDir, projectDir, roleID, extraFile)
 	parts = append(parts, extras...)
 
 	if !skipPreviousReport {
-		if content, modTime, err := readFileWithModTime(filepath.Join(projectDir, "agents", agentID, FullReportFile)); err == nil && content != "" {
+		if content, modTime, err := readFileWithModTime(filepath.Join(projectDir, "roles", roleID, FullReportFile)); err == nil && content != "" {
 			age := time.Since(modTime)
 			header := fmt.Sprintf("# Previous Report\n\nWhat follows is the previous report that was generated (and possibly updated with the tasks completed) on %s (%s ago). It might be outdated but it will give you some context of what has been done.\n\n",
 				modTime.Format(runner.TimestampFormat), formatAge(age))
@@ -115,14 +115,14 @@ func assembleAgentAction(orgDir, projectDir, agentID, sourceDir, extraPrompt str
 	return strings.Join(parts, "\n\n---\n\n"), nil
 }
 
-// collectAgentExtras gathers extra prompt files from all levels (no defaults).
-// Order: org broad → org agent-specific → project broad → project agent-specific.
-func collectAgentExtras(orgDir, projectDir, agentID, extraFile string) []string {
+// collectRoleExtras gathers extra prompt files from all levels (no defaults).
+// Order: org broad → org role-specific → project broad → project role-specific.
+func collectRoleExtras(orgDir, projectDir, roleID, extraFile string) []string {
 	paths := []string{
 		filepath.Join(orgDir, extraFile),
-		filepath.Join(orgDir, "agents", agentID, extraFile),
+		filepath.Join(orgDir, "roles", roleID, extraFile),
 		filepath.Join(projectDir, extraFile),
-		filepath.Join(projectDir, "agents", agentID, extraFile),
+		filepath.Join(projectDir, "roles", roleID, extraFile),
 	}
 	return readAllExisting(paths)
 }
@@ -149,28 +149,28 @@ func readAllExisting(paths []string) []string {
 	return results
 }
 
-// AgentReport holds metadata about a discovered agent report file.
-type AgentReport struct {
-	AgentID string
+// RoleReport holds metadata about a discovered role report file.
+type RoleReport struct {
+	RoleID  string
 	Path    string
 	ModTime time.Time
 	Content string
 }
 
-// DiscoverReports scans the project's agents directory for full_report.md files.
-func DiscoverReports(projectDir string) ([]AgentReport, error) {
-	agentsDir := filepath.Join(projectDir, "agents")
-	entries, err := os.ReadDir(agentsDir)
+// DiscoverReports scans the project's roles directory for full_report.md files.
+func DiscoverReports(projectDir string) ([]RoleReport, error) {
+	rolesDir := filepath.Join(projectDir, "roles")
+	entries, err := os.ReadDir(rolesDir)
 	if err != nil {
-		return nil, fmt.Errorf("cannot read agents directory: %w (run 'ateam report' first)", err)
+		return nil, fmt.Errorf("cannot read roles directory: %w (run 'ateam report' first)", err)
 	}
 
-	var reports []AgentReport
+	var reports []RoleReport
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		reportPath := filepath.Join(agentsDir, entry.Name(), FullReportFile)
+		reportPath := filepath.Join(rolesDir, entry.Name(), FullReportFile)
 		data, err := os.ReadFile(reportPath)
 		if err != nil {
 			continue
@@ -179,8 +179,8 @@ func DiscoverReports(projectDir string) ([]AgentReport, error) {
 		if err != nil {
 			continue
 		}
-		reports = append(reports, AgentReport{
-			AgentID: entry.Name(),
+		reports = append(reports, RoleReport{
+			RoleID:  entry.Name(),
 			Path:    reportPath,
 			ModTime: info.ModTime(),
 			Content: string(data),
@@ -196,23 +196,23 @@ func AssembleReviewPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, ex
 		return "", err
 	}
 	if len(reports) == 0 {
-		return "", fmt.Errorf("no report files found in %s/agents — run 'ateam report' first", projectDir)
+		return "", fmt.Errorf("no report files found in %s/roles — run 'ateam report' first", projectDir)
 	}
 
 	var reportContents []string
 	var manifestLines []string
 	for _, r := range reports {
 		reportContents = append(reportContents,
-			fmt.Sprintf("# Agent Report: %s\n\n%s", r.AgentID, r.Content))
+			fmt.Sprintf("# Role Report: %s\n\n%s", r.RoleID, r.Content))
 		manifestLines = append(manifestLines,
-			fmt.Sprintf("| %s | %s |", r.AgentID, r.ModTime.Format(runner.TimestampFormat)))
+			fmt.Sprintf("| %s | %s |", r.RoleID, r.ModTime.Format(runner.TimestampFormat)))
 	}
 
 	allReports := strings.Join(reportContents, "\n\n---\n\n")
 
 	var manifest string
 	if len(manifestLines) > 0 {
-		manifest = "# Reports Under Review\n\n| Agent | Generated |\n|-------|----------|\n" +
+		manifest = "# Reports Under Review\n\n| Role | Generated |\n|------|----------|\n" +
 			strings.Join(manifestLines, "\n")
 	}
 
@@ -227,7 +227,7 @@ func AssembleReviewPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, ex
 		if manifest != "" {
 			parts = append(parts, manifest)
 		}
-		parts = append(parts, "# Agent Reports\n\n"+allReports)
+		parts = append(parts, "# Role Reports\n\n"+allReports)
 		return strings.Join(parts, "\n\n---\n\n"), nil
 	}
 
@@ -250,7 +250,7 @@ func AssembleReviewPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, ex
 	if manifest != "" {
 		parts = append(parts, manifest)
 	}
-	parts = append(parts, "# Agent Reports\n\n"+allReports)
+	parts = append(parts, "# Role Reports\n\n"+allReports)
 	if extraPrompt != "" {
 		parts = append(parts, "# Additional Instructions\n\n"+extraPrompt)
 	}
@@ -302,7 +302,7 @@ type ProjectInfoParams struct {
 	ProjectName string
 	SourceDir   string // absolute path to project root
 	GitRepoDir  string // absolute path to git repo root (may differ from SourceDir)
-	Role        string // e.g. "agent security" or "the supervisor"
+	Role        string // e.g. "role security" or "the supervisor"
 	Meta        *gitutil.ProjectMeta
 }
 

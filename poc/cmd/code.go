@@ -27,7 +27,7 @@ var codeCmd = &cobra.Command{
 	Use:   "code",
 	Short: "Execute review tasks as code changes",
 	Long: `Read the review document and execute prioritized tasks as code changes,
-delegating each task to the appropriate agent via ateam run.
+delegating each task to the appropriate role via ateam run.
 
 Example:
   ateam code
@@ -110,7 +110,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 	cr := newClaudeRunner(env)
 	applyCheaperModel(cr, codeCheaperModel)
 	opts := runner.RunOpts{
-		AgentID:              "supervisor",
+		RoleID:               "supervisor",
 		Action:               runner.ActionCode,
 		LogsDir:              env.SupervisorLogsDir(),
 		LastMessageFilePath:  filepath.Join(supervisorDir, "code_output.md"),

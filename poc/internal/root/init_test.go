@@ -21,23 +21,23 @@ func TestInstallOrg(t *testing.T) {
 		t.Errorf("orgDir = %q, want %q", orgDir, wantOrg)
 	}
 
-	// Verify agent dirs exist for all known agents.
-	for _, id := range prompts.AllAgentIDs {
-		dir := filepath.Join(orgDir, "agents", id)
+	// Verify role dirs exist for all known roles.
+	for _, id := range prompts.AllRoleIDs {
+		dir := filepath.Join(orgDir, "roles", id)
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-			t.Errorf("expected agent dir %s to exist", dir)
+			t.Errorf("expected role dir %s to exist", dir)
 		}
 	}
 
 	// Verify supervisor dir exists.
-	supervisorDir := filepath.Join(orgDir, "agents", "supervisor")
+	supervisorDir := filepath.Join(orgDir, "roles", "supervisor")
 	if info, err := os.Stat(supervisorDir); err != nil || !info.IsDir() {
 		t.Errorf("expected supervisor dir %s to exist", supervisorDir)
 	}
 
 	// Verify at least one default prompt file exists.
-	if len(prompts.AllAgentIDs) > 0 {
-		promptFile := filepath.Join(orgDir, "defaults", "agents", prompts.AllAgentIDs[0], "report_prompt.md")
+	if len(prompts.AllRoleIDs) > 0 {
+		promptFile := filepath.Join(orgDir, "defaults", "roles", prompts.AllRoleIDs[0], "report_prompt.md")
 		if _, err := os.Stat(promptFile); err != nil {
 			t.Errorf("expected prompt file %s to exist: %v", promptFile, err)
 		}
@@ -76,17 +76,17 @@ func TestInitProject(t *testing.T) {
 	}
 
 	enabled := []string{}
-	if len(prompts.AllAgentIDs) >= 2 {
-		enabled = prompts.AllAgentIDs[:2]
-	} else if len(prompts.AllAgentIDs) >= 1 {
-		enabled = prompts.AllAgentIDs[:1]
+	if len(prompts.AllRoleIDs) >= 2 {
+		enabled = prompts.AllRoleIDs[:2]
+	} else if len(prompts.AllRoleIDs) >= 1 {
+		enabled = prompts.AllRoleIDs[:1]
 	}
 
 	opts := InitProjectOpts{
 		Name:            "test-project",
 		GitRepo:         ".",
 		GitRemoteOrigin: "git@github.com:example/repo.git",
-		EnabledAgents:   enabled,
+		EnabledRoles:   enabled,
 	}
 
 	projDir, err := InitProject(projectPath, orgDir, opts)
@@ -99,11 +99,11 @@ func TestInitProject(t *testing.T) {
 		t.Errorf("projDir = %q, want %q", projDir, wantProj)
 	}
 
-	// Verify agent history dirs.
-	for _, id := range prompts.AllAgentIDs {
-		histDir := filepath.Join(projDir, "agents", id, "history")
+	// Verify role history dirs.
+	for _, id := range prompts.AllRoleIDs {
+		histDir := filepath.Join(projDir, "roles", id, "history")
 		if info, err := os.Stat(histDir); err != nil || !info.IsDir() {
-			t.Errorf("expected agent history dir %s to exist", histDir)
+			t.Errorf("expected role history dir %s to exist", histDir)
 		}
 	}
 
@@ -131,23 +131,23 @@ func TestInitProject(t *testing.T) {
 	if cfg.Report.MaxParallel != config.DefaultMaxParallel {
 		t.Errorf("max_parallel = %d, want %d", cfg.Report.MaxParallel, config.DefaultMaxParallel)
 	}
-	if cfg.Report.AgentReportTimeoutMinutes != config.DefaultAgentReportTimeoutMinutes {
-		t.Errorf("timeout = %d, want %d", cfg.Report.AgentReportTimeoutMinutes, config.DefaultAgentReportTimeoutMinutes)
+	if cfg.Report.ReportTimeoutMinutes != config.DefaultReportTimeoutMinutes {
+		t.Errorf("timeout = %d, want %d", cfg.Report.ReportTimeoutMinutes, config.DefaultReportTimeoutMinutes)
 	}
 
-	// Verify enabled/disabled agent states.
+	// Verify enabled/disabled role states.
 	for _, id := range enabled {
-		if cfg.Agents[id] != "enabled" {
-			t.Errorf("agent %s = %q, want %q", id, cfg.Agents[id], "enabled")
+		if cfg.Roles[id] != "enabled" {
+			t.Errorf("role %s = %q, want %q", id, cfg.Roles[id], "enabled")
 		}
 	}
 	enabledSet := make(map[string]bool, len(enabled))
 	for _, id := range enabled {
 		enabledSet[id] = true
 	}
-	for _, id := range prompts.AllAgentIDs {
-		if !enabledSet[id] && cfg.Agents[id] != "disabled" {
-			t.Errorf("agent %s = %q, want %q", id, cfg.Agents[id], "disabled")
+	for _, id := range prompts.AllRoleIDs {
+		if !enabledSet[id] && cfg.Roles[id] != "disabled" {
+			t.Errorf("role %s = %q, want %q", id, cfg.Roles[id], "disabled")
 		}
 	}
 }
@@ -180,7 +180,7 @@ func TestInitProjectDuplicateName(t *testing.T) {
 	}
 	opts := InitProjectOpts{
 		Name:          "shared-name",
-		EnabledAgents: prompts.AllAgentIDs,
+		EnabledRoles: prompts.AllRoleIDs,
 	}
 	if _, err := InitProject(proj1, orgDir, opts); err != nil {
 		t.Fatalf("first InitProject failed: %v", err)
@@ -193,7 +193,7 @@ func TestInitProjectDuplicateName(t *testing.T) {
 	}
 	opts2 := InitProjectOpts{
 		Name:          "shared-name",
-		EnabledAgents: prompts.AllAgentIDs,
+		EnabledRoles: prompts.AllRoleIDs,
 	}
 	_, err = InitProject(proj2, orgDir, opts2)
 	if err == nil {

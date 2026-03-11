@@ -14,12 +14,12 @@ type InitProjectOpts struct {
 	Name            string
 	GitRepo         string
 	GitRemoteOrigin string
-	EnabledAgents   []string
-	AllAgents       []string
+	EnabledRoles    []string
+	AllRoles        []string
 }
 
 // InstallOrg creates a new .ateamorg/ directory at parentDir with default prompts
-// and empty agent directories.
+// and empty role directories.
 func InstallOrg(parentDir string) (string, error) {
 	orgDir := filepath.Join(parentDir, OrgDirName)
 
@@ -27,15 +27,15 @@ func InstallOrg(parentDir string) (string, error) {
 		return "", fmt.Errorf("%s/ already exists at %s", OrgDirName, parentDir)
 	}
 
-	allAgents := prompts.AllAgentIDs
-	for _, id := range allAgents {
-		dir := filepath.Join(orgDir, "agents", id)
+	allRoles := prompts.AllRoleIDs
+	for _, id := range allRoles {
+		dir := filepath.Join(orgDir, "roles", id)
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return "", fmt.Errorf("cannot create agent directory %s: %w", dir, err)
+			return "", fmt.Errorf("cannot create role directory %s: %w", dir, err)
 		}
 	}
 
-	supervisorDir := filepath.Join(orgDir, "agents", "supervisor")
+	supervisorDir := filepath.Join(orgDir, "roles", "supervisor")
 	if err := os.MkdirAll(supervisorDir, 0755); err != nil {
 		return "", fmt.Errorf("cannot create supervisor directory: %w", err)
 	}
@@ -69,15 +69,15 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 		return "", err
 	}
 
-	agentIDs := opts.AllAgents
-	if len(agentIDs) == 0 {
-		agentIDs = prompts.AllAgentIDs
+	roleIDs := opts.AllRoles
+	if len(roleIDs) == 0 {
+		roleIDs = prompts.AllRoleIDs
 	}
 
-	for _, id := range agentIDs {
-		dir := filepath.Join(projDir, "agents", id, "history")
+	for _, id := range roleIDs {
+		dir := filepath.Join(projDir, "roles", id, "history")
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return "", fmt.Errorf("cannot create agent directory %s: %w", dir, err)
+			return "", fmt.Errorf("cannot create role directory %s: %w", dir, err)
 		}
 	}
 
@@ -86,16 +86,16 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 		return "", fmt.Errorf("cannot create supervisor directory: %w", err)
 	}
 
-	agents := make(map[string]string, len(agentIDs))
-	enabledSet := make(map[string]bool, len(opts.EnabledAgents))
-	for _, id := range opts.EnabledAgents {
+	roles := make(map[string]string, len(roleIDs))
+	enabledSet := make(map[string]bool, len(opts.EnabledRoles))
+	for _, id := range opts.EnabledRoles {
 		enabledSet[id] = true
 	}
-	for _, id := range agentIDs {
+	for _, id := range roleIDs {
 		if enabledSet[id] {
-			agents[id] = config.AgentEnabled
+			roles[id] = config.RoleEnabled
 		} else {
-			agents[id] = config.AgentDisabled
+			roles[id] = config.RoleDisabled
 		}
 	}
 
@@ -108,10 +108,10 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 			RemoteOriginURL: opts.GitRemoteOrigin,
 		},
 		Report: config.ReportConfig{
-			MaxParallel:               config.DefaultMaxParallel,
-			AgentReportTimeoutMinutes: config.DefaultAgentReportTimeoutMinutes,
+			MaxParallel:          config.DefaultMaxParallel,
+			ReportTimeoutMinutes: config.DefaultReportTimeoutMinutes,
 		},
-		Agents: agents,
+		Roles: roles,
 	}
 
 	if err := config.Save(projDir, cfg); err != nil {
@@ -120,33 +120,33 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 
 	projectID := config.PathToProjectID(relPath)
 
-	if err := createStateDirs(orgDir, projectID, agentIDs); err != nil {
+	if err := createStateDirs(orgDir, projectID, roleIDs); err != nil {
 		return "", err
 	}
 
 	return projDir, nil
 }
 
-// EnsureAgents creates missing agent dirs under the project and state dir for the given agents.
-func EnsureAgents(projectDir, stateDir string, agentIDs []string) error {
-	for _, agentID := range agentIDs {
-		if err := os.MkdirAll(filepath.Join(projectDir, "agents", agentID, "history"), 0755); err != nil {
-			return fmt.Errorf("cannot create project agent directory: %w", err)
+// EnsureRoles creates missing role dirs under the project and state dir for the given roles.
+func EnsureRoles(projectDir, stateDir string, roleIDs []string) error {
+	for _, roleID := range roleIDs {
+		if err := os.MkdirAll(filepath.Join(projectDir, "roles", roleID, "history"), 0755); err != nil {
+			return fmt.Errorf("cannot create project role directory: %w", err)
 		}
 		if stateDir != "" {
-			if err := os.MkdirAll(filepath.Join(stateDir, "agents", agentID, "logs"), 0755); err != nil {
-				return fmt.Errorf("cannot create agent state directory: %w", err)
+			if err := os.MkdirAll(filepath.Join(stateDir, "roles", roleID, "logs"), 0755); err != nil {
+				return fmt.Errorf("cannot create role state directory: %w", err)
 			}
 		}
 	}
 	return nil
 }
 
-func createStateDirs(orgDir, projectID string, agentIDs []string) error {
+func createStateDirs(orgDir, projectID string, roleIDs []string) error {
 	stateBase := filepath.Join(orgDir, "projects", projectID)
-	for _, id := range agentIDs {
-		if err := os.MkdirAll(filepath.Join(stateBase, "agents", id, "logs"), 0755); err != nil {
-			return fmt.Errorf("cannot create agent state directory: %w", err)
+	for _, id := range roleIDs {
+		if err := os.MkdirAll(filepath.Join(stateBase, "roles", id, "logs"), 0755); err != nil {
+			return fmt.Errorf("cannot create role state directory: %w", err)
 		}
 	}
 	if err := os.MkdirAll(filepath.Join(stateBase, "supervisor", "logs"), 0755); err != nil {

@@ -43,30 +43,30 @@ func TestReadWith3LevelFallback(t *testing.T) {
 	}
 }
 
-// setupMinimalAgent creates the minimum structure for AssembleAgentPrompt to work:
+// setupMinimalRole creates the minimum structure for AssembleRolePrompt to work:
 // a role prompt file at defaults level.
-func setupMinimalAgent(t *testing.T, orgDir, projectDir, agentID string) {
+func setupMinimalRole(t *testing.T, orgDir, projectDir, roleID string) {
 	t.Helper()
-	roleDir := filepath.Join(orgDir, "defaults", "agents", agentID)
+	roleDir := filepath.Join(orgDir, "defaults", "roles", roleID)
 	os.MkdirAll(roleDir, 0755)
 	os.WriteFile(filepath.Join(roleDir, ReportPromptFile), []byte("role prompt"), 0644)
 
-	agentDir := filepath.Join(projectDir, "agents", agentID)
-	os.MkdirAll(agentDir, 0755)
+	roleProjectDir := filepath.Join(projectDir, "roles", roleID)
+	os.MkdirAll(roleProjectDir, 0755)
 }
 
-func TestAssembleAgentPromptIncludesPreviousReport(t *testing.T) {
+func TestAssembleRolePromptIncludesPreviousReport(t *testing.T) {
 	base := t.TempDir()
 	orgDir := filepath.Join(base, "org")
 	projectDir := filepath.Join(base, "project")
-	agentID := "security"
+	roleID := "security"
 
-	setupMinimalAgent(t, orgDir, projectDir, agentID)
+	setupMinimalRole(t, orgDir, projectDir, roleID)
 
-	reportPath := filepath.Join(projectDir, "agents", agentID, FullReportFile)
+	reportPath := filepath.Join(projectDir, "roles", roleID, FullReportFile)
 	os.WriteFile(reportPath, []byte("previous findings here"), 0644)
 
-	result, err := AssembleAgentPrompt(orgDir, projectDir, agentID, base, "", ProjectInfoParams{}, false)
+	result, err := AssembleRolePrompt(orgDir, projectDir, roleID, base, "", ProjectInfoParams{}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -81,18 +81,18 @@ func TestAssembleAgentPromptIncludesPreviousReport(t *testing.T) {
 	}
 }
 
-func TestAssembleAgentPromptSkipPreviousReport(t *testing.T) {
+func TestAssembleRolePromptSkipPreviousReport(t *testing.T) {
 	base := t.TempDir()
 	orgDir := filepath.Join(base, "org")
 	projectDir := filepath.Join(base, "project")
-	agentID := "security"
+	roleID := "security"
 
-	setupMinimalAgent(t, orgDir, projectDir, agentID)
+	setupMinimalRole(t, orgDir, projectDir, roleID)
 
-	reportPath := filepath.Join(projectDir, "agents", agentID, FullReportFile)
+	reportPath := filepath.Join(projectDir, "roles", roleID, FullReportFile)
 	os.WriteFile(reportPath, []byte("previous findings here"), 0644)
 
-	result, err := AssembleAgentPrompt(orgDir, projectDir, agentID, base, "", ProjectInfoParams{}, true)
+	result, err := AssembleRolePrompt(orgDir, projectDir, roleID, base, "", ProjectInfoParams{}, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -104,16 +104,16 @@ func TestAssembleAgentPromptSkipPreviousReport(t *testing.T) {
 	}
 }
 
-func TestAssembleAgentPromptNoPreviousReportFile(t *testing.T) {
+func TestAssembleRolePromptNoPreviousReportFile(t *testing.T) {
 	base := t.TempDir()
 	orgDir := filepath.Join(base, "org")
 	projectDir := filepath.Join(base, "project")
-	agentID := "security"
+	roleID := "security"
 
-	setupMinimalAgent(t, orgDir, projectDir, agentID)
+	setupMinimalRole(t, orgDir, projectDir, roleID)
 
 	// No full_report.md exists — should succeed without "Previous Report"
-	result, err := AssembleAgentPrompt(orgDir, projectDir, agentID, base, "", ProjectInfoParams{}, false)
+	result, err := AssembleRolePrompt(orgDir, projectDir, roleID, base, "", ProjectInfoParams{}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

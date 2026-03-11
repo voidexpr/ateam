@@ -1,14 +1,14 @@
-# ATeam — AI Agent Team for Code Analysis
+# ATeam — AI Role Team for Code Analysis
 
-A Go CLI that manages role-specific AI agents to analyze codebases and produce actionable reports unattended. Agents run in parallel via `claude -p`, and a supervisor synthesizes their findings into prioritized decisions. Then manages the coding. The goal is to improve project quality along multiple dimensions (code, testing, documentation, security, ...) in the background to free more attention for feature work.
+A Go CLI that manages role-specific AI roles to analyze codebases and produce actionable reports unattended. Roles run in parallel via `claude -p`, and a supervisor synthesizes their findings into prioritized decisions. Then manages the coding. The goal is to improve project quality along multiple dimensions (code, testing, documentation, security, ...) in the background to free more attention for feature work.
 
 ## Features
 
 - **Organization/project split** — shared defaults in `.ateamorg/`, per-project config and results in `.ateam/`
 - **Multi-project support** — multiple ateam projects per git repo (monorepo-friendly)
-- **16 built-in agents** — security, testing, refactoring, dependencies, documentation, project profiling, and more
+- **16 built-in roles** — security, testing, refactoring, dependencies, documentation, project profiling, and more
 - **3-level prompt fallback** — project overrides → org overrides → embedded defaults
-- **Parallel execution** — configurable concurrency with per-agent timeouts
+- **Parallel execution** — configurable concurrency with per-role timeouts
 - **Stream-json output** — real-time JSONL stream capture with cost/token tracking
 - **Report archiving** — timestamped history of all prompts, reports, and reviews
 
@@ -26,13 +26,13 @@ You run 'ateam init' within a directory or at the base of a git repo (either you
 
 Then the workflow is:
 
-  ateam report --agents CHOOSE_SOME_AGENTS    # commission agent reports
-  ateam review --print                        # supervisor synthesizes a prioritized review
-  ateam code                                  # supervisor delegates tasks as code changes
+  ateam report --roles CHOOSE_SOME_ROLES       # commission role reports
+  ateam review --print                         # supervisor synthesizes a prioritized review
+  ateam code                                   # supervisor delegates tasks as code changes
 
 
 Can also be more methological:
-* edit .ateam/config.toml to enable/disalbe relevent agents (you should probably never run all of them)
+* edit .ateam/config.toml to enable/disable relevant roles (you should probably never run all of them)
 * gather information
 
   ateam report && ateam review --print
@@ -80,7 +80,7 @@ All commands accept these flags:
 
 ### `ateam install [PATH]`
 
-Create a `.ateamorg/` directory with default prompts for all agents and the supervisor.
+Create a `.ateamorg/` directory with default prompts for all roles and the supervisor.
 
 ```bash
 ateam install              # creates .ateamorg/ in current directory
@@ -95,7 +95,7 @@ If no `.ateamorg/` is found, you are prompted to create one. Use `--org-home` or
 
 ```bash
 ateam init
-ateam init --name myproject --agent testing_basic,security
+ateam init --name myproject --role testing_basic,security
 ateam init --org-home                      # auto-create .ateamorg/ in $HOME
 ateam init --org-create ~/projects         # auto-create .ateamorg/ at path
 ```
@@ -103,37 +103,37 @@ ateam init --org-create ~/projects         # auto-create .ateamorg/ at path
 | Flag | Description |
 |------|-------------|
 | `--name NAME` | Project name (defaults to relative path from org root) |
-| `--agent LIST` | Agents to enable (comma-separated; if omitted, all are enabled) |
+| `--role LIST` | Roles to enable (comma-separated; if omitted, defaults are used) |
 | `--git-remote URL` | Git remote origin URL (auto-detected if omitted) |
 | `--org-create PATH` | Create `.ateamorg/` at PATH if none exists |
 | `--org-home` | Create `.ateamorg/` in `$HOME` if none exists |
 
 ### `ateam report`
 
-Run one or more agents in parallel to analyze the project and produce markdown reports.
+Run one or more roles in parallel to analyze the project and produce markdown reports.
 
 ```bash
-ateam report --agents all
-ateam report --agents security,testing_basic
-ateam report --agents all --extra-prompt "Focus on the API layer"
-ateam report --agents all --extra-prompt @notes.md
-ateam report --agents all --dry-run
-ateam report --agents all --print
+ateam report --roles all
+ateam report --roles security,testing_basic
+ateam report --roles all --extra-prompt "Focus on the API layer"
+ateam report --roles all --extra-prompt @notes.md
+ateam report --roles all --dry-run
+ateam report --roles all --print
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--agents LIST` | Comma-separated agent list, or `all` **(required)** |
-| `--extra-prompt TEXT` | Additional instructions appended to every agent's prompt (text or `@filepath`) |
-| `--timeout MINUTES` | Timeout per agent (overrides `config.toml`) |
+| `--roles LIST` | Comma-separated role list, or `all` **(required)** |
+| `--extra-prompt TEXT` | Additional instructions appended to every role's prompt (text or `@filepath`) |
+| `--timeout MINUTES` | Timeout per role (overrides `config.toml`) |
 | `--print` | Print reports to stdout after completion |
-| `--dry-run` | Print computed prompts without running agents |
+| `--dry-run` | Print computed prompts without running roles |
 
-Output table columns: `AGENT`, `ENDED_AT`, `ELAPSED`, `COST`, `TURNS`, `STATUS`, `PATH`.
+Output table columns: `ROLE`, `ENDED_AT`, `ELAPSED`, `COST`, `TURNS`, `STATUS`, `PATH`.
 
 ### `ateam review`
 
-Have the supervisor read all agent reports and produce a prioritized decisions document.
+Have the supervisor read all role reports and produce a prioritized decisions document.
 
 ```bash
 ateam review
@@ -152,7 +152,7 @@ ateam review --dry-run
 
 ### `ateam code`
 
-Read the review document and execute prioritized tasks as code changes, delegating each task to the appropriate agent via `ateam run`.
+Read the review document and execute prioritized tasks as code changes, delegating each task to the appropriate role via `ateam run`.
 
 ```bash
 ateam code
@@ -172,45 +172,45 @@ ateam code --dry-run
 
 ### `ateam prompt`
 
-Resolve and print the full prompt for an agent or supervisor without running it. Useful for debugging prompt assembly.
+Resolve and print the full prompt for a role or supervisor without running it. Useful for debugging prompt assembly.
 
 ```bash
-ateam prompt --agent security --action report
-ateam prompt --agent refactor_small --action code
-ateam prompt --agent security --action report --extra-prompt "Focus on auth"
+ateam prompt --role security --action report
+ateam prompt --role refactor_small --action code
+ateam prompt --role security --action report --extra-prompt "Focus on auth"
 ateam prompt --supervisor --action review
 ateam prompt --supervisor --action code
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--agent AGENT` | Agent name (mutually exclusive with `--supervisor`) |
-| `--supervisor` | Generate supervisor prompt instead of agent prompt |
-| `--action ACTION` | Action type: `report` or `code` for agents; `review` or `code` for supervisor **(required)** |
+| `--role ROLE` | Role name (mutually exclusive with `--supervisor`) |
+| `--supervisor` | Generate supervisor prompt instead of role prompt |
+| `--action ACTION` | Action type: `report` or `code` for roles; `review` or `code` for supervisor **(required)** |
 | `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
 | `--no-project-info` | Omit the ATeam Project Context section from the prompt |
-| `--ignore-previous-report` | Do not include the agent's previous report in the prompt |
+| `--ignore-previous-report` | Do not include the role's previous report in the prompt |
 
 ### `ateam log`
 
-Pretty-format the last stream JSONL log for an agent or the supervisor.
+Pretty-format the last stream JSONL log for a role or the supervisor.
 
 ```bash
 ateam log --supervisor
 ateam log --supervisor --action review
-ateam log --agent security
-ateam log --agent security --action report
+ateam log --role security
+ateam log --role security --action report
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--supervisor` | Show supervisor log (defaults to `code` action) |
-| `--agent AGENT` | Show agent log (defaults to `run` action) |
+| `--role ROLE` | Show role log (defaults to `run` action) |
 | `--action ACTION` | Override the action (e.g. `report`, `code`, `review`, `run`) |
 
 ### `ateam env`
 
-Show the current ATeam environment: organization, project, agents, and latest report/review timestamps. Read-only — never creates or modifies anything.
+Show the current ATeam environment: organization, project, roles, and latest report/review timestamps. Read-only — never creates or modifies anything.
 
 ```bash
 ateam env
@@ -226,38 +226,38 @@ ateam projects
 
 ### `ateam run`
 
-Run a single agent with a given prompt. By default prints only the final message to stdout.
+Run a single role with a given prompt. By default prints only the final message to stdout.
 
 ```bash
-ateam run "Analyze the auth module" --agent security
-ateam run @prompt.md --agent testing_basic
-ateam run @prompt.md --agent security --stream
-ateam run @prompt.md --agent security --summary
+ateam run "Analyze the auth module" --role security
+ateam run @prompt.md --role testing_basic
+ateam run @prompt.md --role security --stream
+ateam run @prompt.md --role security --summary
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--agent AGENT` | Agent to run **(required)** — any valid agent, does not need to be enabled |
+| `--role ROLE` | Role to run **(required)** — any valid role, does not need to be enabled |
 | `--stream` | Show progress updates on stderr during execution |
-| `--work-dir PATH` | Working directory for the agent (defaults to project source dir) |
+| `--work-dir PATH` | Working directory for the role (defaults to project source dir) |
 | `--summary` | Print cost/duration/tokens summary to stderr after completion |
 
-Returns the agent's exit code. Agent stderr is forwarded to stderr.
+Returns the role's exit code. Role stderr is forwarded to stderr.
 
-### `ateam agents`
+### `ateam roles`
 
-List agents configured for the current project.
+List roles configured for the current project.
 
 ```bash
-ateam agents                 # all agents with status (default)
-ateam agents --enabled       # enabled agents only
-ateam agents --available     # same as default
+ateam roles                  # all roles with status (default)
+ateam roles --enabled        # enabled roles only
+ateam roles --available      # same as default
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--enabled` | List enabled agents only |
-| `--available` | List all agents with status (default) |
+| `--enabled` | List enabled roles only |
+| `--available` | List all roles with status (default) |
 
 ### `ateam update`
 
@@ -286,8 +286,8 @@ Created by `ateam install`. Holds shared defaults and org-level overrides.
   defaults/                                    # embedded prompts written to disk
     report_base_prompt.md                      # shared report base instructions
     code_base_prompt.md                        # shared code base instructions
-    agents/<NAME>/report_prompt.md             # per-agent report role prompt
-    agents/<NAME>/code_prompt.md               # per-agent code role prompt (where available)
+    roles/<NAME>/report_prompt.md              # per-role report prompt
+    roles/<NAME>/code_prompt.md                # per-role code prompt (where available)
     supervisor/review_prompt.md                # supervisor review prompt
     supervisor/code_management_prompt.md       # supervisor code management prompt
     supervisor/report_commissioning_prompt.md  # report commissioning prompt
@@ -295,11 +295,11 @@ Created by `ateam install`. Holds shared defaults and org-level overrides.
   code_base_prompt.md                          # org-level code base override (optional)
   report_extra_prompt.md                       # org-wide extra instructions for reports (optional)
   code_extra_prompt.md                         # org-wide extra instructions for code (optional)
-  agents/                                      # org-level agent overrides
-    <NAME>/report_prompt.md                    # override a specific agent's report prompt
-    <NAME>/report_extra_prompt.md              # extra instructions for this agent's reports
-    <NAME>/code_prompt.md                      # override a specific agent's code prompt
-    <NAME>/code_extra_prompt.md                # extra instructions for this agent's code
+  roles/                                       # org-level role overrides
+    <NAME>/report_prompt.md                    # override a specific role's report prompt
+    <NAME>/report_extra_prompt.md              # extra instructions for this role's reports
+    <NAME>/code_prompt.md                      # override a specific role's code prompt
+    <NAME>/code_extra_prompt.md                # extra instructions for this role's code
   supervisor/                                  # org-level supervisor overrides
     review_prompt.md
     review_extra_prompt.md                     # extra instructions for reviews
@@ -318,11 +318,11 @@ Created by `ateam init`. Holds project config, prompts, reports, and history (ve
   code_base_prompt.md                        # project-level code base override (optional)
   report_extra_prompt.md                     # project-wide extra instructions for reports (optional)
   code_extra_prompt.md                       # project-wide extra instructions for code (optional)
-  agents/<NAME>/
-    report_prompt.md                         # project-level agent report prompt override (optional)
-    report_extra_prompt.md                   # extra instructions for this agent's reports (optional)
-    code_prompt.md                           # project-level agent code prompt override (optional)
-    code_extra_prompt.md                     # extra instructions for this agent's code (optional)
+  roles/<NAME>/
+    report_prompt.md                         # project-level role report prompt override (optional)
+    report_extra_prompt.md                   # extra instructions for this role's reports (optional)
+    code_prompt.md                           # project-level role code prompt override (optional)
+    code_extra_prompt.md                     # extra instructions for this role's code (optional)
     full_report.md                           # latest successful report
     full_report_error.md                     # error details (on failure only)
     history/                                 # timestamped archive
@@ -349,7 +349,7 @@ Runtime files are stored outside the project, keyed by the project's relative pa
 ```
 .ateamorg/projects/<project-id>/
   runner.log                                 # append-only execution log
-  agents/<NAME>/logs/
+  roles/<NAME>/logs/
     2026-03-10_22-17-58_report_exec.md       # full execution context (env, settings, prompt)
     2026-03-10_22-17-58_report_stream.jsonl  # raw JSONL stream
     2026-03-10_22-17-58_report_stderr.log    # stderr capture
@@ -389,7 +389,7 @@ remote_origin_url = "git@github.com:org/repo.git"
 
 [report]
 max_parallel = 3
-agent_report_timeout_minutes = 20
+report_timeout_minutes = 20
 
 [review]
 timeout_minutes = 20
@@ -397,7 +397,7 @@ timeout_minutes = 20
 [code]
 timeout_minutes = 120
 
-[agents]
+[roles]
 security = "enabled"
 testing_basic = "enabled"
 refactor_small = "disabled"
@@ -411,16 +411,16 @@ The placeholder `{{SOURCE_DIR}}` in prompts is replaced with the absolute path t
 
 ### ATeam Project Context
 
-All prompts (agent and supervisor) start with an **ATeam Project Context** section containing:
+All prompts (role and supervisor) start with an **ATeam Project Context** section containing:
 
 - Runtime files path, project name
-- Role (e.g. "agent security", "the supervisor")
+- Role (e.g. "role security", "the supervisor")
 - Source code directory and reports directory
 - Git metadata: last commit hash/date/message, uncommitted changes
 
 Use `--no-project-info` on `ateam prompt` to omit this section.
 
-### Agent prompt assembly (`report` and `code`)
+### Role prompt assembly (`report` and `code`)
 
 Parts are concatenated with `---` separators in this order:
 
@@ -432,7 +432,7 @@ ATeam Project Context → Base prompt → Role-specific prompt → Extra prompts
 |------|--------|----------|
 | **ATeam Project Context** | Auto-generated | No |
 | **Base prompt** | 3-level fallback: `report_base_prompt.md` or `code_base_prompt.md` | At least one of base or role required |
-| **Role-specific prompt** | 3-level fallback: `agents/<NAME>/report_prompt.md` or `code_prompt.md` | At least one of base or role required |
+| **Role-specific prompt** | 3-level fallback: `roles/<NAME>/report_prompt.md` or `code_prompt.md` | At least one of base or role required |
 | **Extra prompts** | Additive from all levels (see below) | No |
 | **CLI extra** | `--extra-prompt` flag | No |
 
@@ -444,11 +444,11 @@ Base prompt 3-level fallback (e.g. for report):
 
 Role-specific prompt 3-level fallback (e.g. for report):
 
-1. `.ateam/agents/<NAME>/report_prompt.md`
-2. `.ateamorg/agents/<NAME>/report_prompt.md`
-3. `.ateamorg/defaults/agents/<NAME>/report_prompt.md`
+1. `.ateam/roles/<NAME>/report_prompt.md`
+2. `.ateamorg/roles/<NAME>/report_prompt.md`
+3. `.ateamorg/defaults/roles/<NAME>/report_prompt.md`
 
-If an agent has no role-specific prompt for an action (e.g. no `code_prompt.md`), the base prompt alone is used — this is not an error. Both base and role missing is an error.
+If a role has no role-specific prompt for an action (e.g. no `code_prompt.md`), the base prompt alone is used — this is not an error. Both base and role missing is an error.
 
 ### Supervisor prompt assembly (`review` and `code`)
 
@@ -463,7 +463,7 @@ ATeam Project Context → Action prompt → Extra prompts → Review → CLI --e
 | **ATeam Project Context** | Auto-generated | No |
 | **Action prompt** | 3-level fallback or `--prompt`/`--management` override | Yes |
 | **Extra prompts** | Additive from org and project levels (see below) | No |
-| **Review** | Agent reports (for `review`) or review document (for `code`) | Yes |
+| **Review** | Role reports (for `review`) or review document (for `code`) | Yes |
 | **CLI extra** | `--extra-prompt` flag | No |
 
 Action prompt 3-level fallback (e.g. for review):
@@ -478,12 +478,12 @@ For `ateam code`, the fallback uses `code_management_prompt.md` at each level.
 
 Extra prompts are **additive** — all matching files are included (not fallback). They are appended after the main prompt, before any CLI `--extra-prompt`.
 
-For agents, extras are collected from four locations in order:
+For roles, extras are collected from four locations in order:
 
 1. `.ateamorg/report_extra_prompt.md` — org-wide
-2. `.ateamorg/agents/<NAME>/report_extra_prompt.md` — org agent-specific
+2. `.ateamorg/roles/<NAME>/report_extra_prompt.md` — org role-specific
 3. `.ateam/report_extra_prompt.md` — project-wide
-4. `.ateam/agents/<NAME>/report_extra_prompt.md` — project agent-specific
+4. `.ateam/roles/<NAME>/report_extra_prompt.md` — project role-specific
 
 (Same pattern with `code_extra_prompt.md` for the code action.)
 
@@ -504,17 +504,17 @@ The embedded default prompts are in the source tree under [`internal/prompts/def
 | Code base instructions | [`defaults/code_base_prompt.md`](internal/prompts/defaults/code_base_prompt.md) |
 | Supervisor review | [`defaults/supervisor/review_prompt.md`](internal/prompts/defaults/supervisor/review_prompt.md) |
 | Supervisor code management | [`defaults/supervisor/code_management_prompt.md`](internal/prompts/defaults/supervisor/code_management_prompt.md) |
-| Agent: security | [`defaults/agents/security/report_prompt.md`](internal/prompts/defaults/agents/security/report_prompt.md) |
-| Agent: testing_basic | [`defaults/agents/testing_basic/report_prompt.md`](internal/prompts/defaults/agents/testing_basic/report_prompt.md) |
-| Agent: refactor_small | [`defaults/agents/refactor_small/report_prompt.md`](internal/prompts/defaults/agents/refactor_small/report_prompt.md) |
+| Role: security | [`defaults/roles/security/report_prompt.md`](internal/prompts/defaults/roles/security/report_prompt.md) |
+| Role: testing_basic | [`defaults/roles/testing_basic/report_prompt.md`](internal/prompts/defaults/roles/testing_basic/report_prompt.md) |
+| Role: refactor_small | [`defaults/roles/refactor_small/report_prompt.md`](internal/prompts/defaults/roles/refactor_small/report_prompt.md) |
 
-All agent prompts follow the same pattern: `defaults/agents/<NAME>/report_prompt.md` (and optionally `code_prompt.md`).
+All role prompts follow the same pattern: `defaults/roles/<NAME>/report_prompt.md` (and optionally `code_prompt.md`).
 
-## Agents
+## Roles
 
-Agents are auto-discovered from [`internal/prompts/defaults/agents/`](internal/prompts/defaults/agents/). Each subdirectory containing a `report_prompt.md` becomes a valid agent. Use `all` as shorthand for every agent.
+Roles are auto-discovered from [`internal/prompts/defaults/roles/`](internal/prompts/defaults/roles/). Each subdirectory containing a `report_prompt.md` becomes a valid role. Use `all` as shorthand for every enabled role.
 
-Available agents: `automation`, `basic_project_structure`, `critic_engineering`, `critic_project`, `database_config`, `database_schema`, `dependencies`, `docs_external`, `docs_internal`, `production_ready`, `project_characteristics`, `refactor_architecture`, `refactor_small`, `security`, `shortcut_taker`, `testing_basic`, `testing_full`.
+Available roles: `automation`, `basic_project_structure`, `critic_engineering`, `critic_project`, `database_config`, `database_schema`, `dependencies`, `docs_external`, `docs_internal`, `production_ready`, `project_characteristics`, `refactor_architecture`, `refactor_small`, `security`, `shortcut_taker`, `testing_basic`, `testing_full`.
 
 ## Troubleshooting
 
@@ -523,7 +523,7 @@ Available agents: `automation`, `basic_project_structure`, `critic_engineering`,
 Every `ateam report` and `ateam review` invocation is logged to `.ateamorg/projects/<project-id>/runner.log`. Each line is tab-separated with quoted fields:
 
 ```
-TIMESTAMP  "AGENT"  "STATUS"  "CWD"  "CLI"  [EXTRA...]
+TIMESTAMP  "ROLE"  "STATUS"  "CWD"  "CLI"  [EXTRA...]
 ```
 
 - **start** lines include the prompt path and output path (relative to `.ateam/`)
@@ -533,7 +533,7 @@ TIMESTAMP  "AGENT"  "STATUS"  "CWD"  "CLI"  [EXTRA...]
 Example:
 
 ```
-2026-03-08_15-04-00	"security"	"start"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"	"agents/security/history/2026-03-08_15-04-00.full_prompt.md"	"agents/security/full_report.md"
+2026-03-08_15-04-00	"security"	"start"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"	"roles/security/history/2026-03-08_15-04-00.full_prompt.md"	"roles/security/full_report.md"
 2026-03-08_15-06-23	"security"	"ok"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"
 2026-03-08_15-07-01	"testing_basic"	"error"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"	"timed out after 10 minutes"
 ```
@@ -543,10 +543,10 @@ Example:
 Use `--dry-run` on `report`, `review`, and `code` to inspect the fully assembled prompt without running anything:
 
 ```bash
-ateam report --agents security --dry-run    # print the prompt that would be sent
-ateam review --dry-run                      # print prompt and list discovered reports
-ateam code --dry-run                        # print the code management prompt
-ateam prompt --agent security --action report  # resolve and print an agent prompt
+ateam report --roles security --dry-run      # print the prompt that would be sent
+ateam review --dry-run                       # print prompt and list discovered reports
+ateam code --dry-run                         # print the code management prompt
+ateam prompt --role security --action report  # resolve and print a role prompt
 ```
 
 Use `ateam log` to pretty-format the last stream JSONL:
@@ -554,17 +554,17 @@ Use `ateam log` to pretty-format the last stream JSONL:
 ```bash
 ateam log --supervisor               # last code management stream
 ateam log --supervisor --action review  # last review stream
-ateam log --agent security           # last run stream for an agent
+ateam log --role security            # last run stream for a role
 ```
 
 When a run fails, inspect these files:
 
 | File | Location | Content |
 |------|----------|---------|
-| `full_report_error.md` | `.ateam/agents/<NAME>/` | Error summary, exit code, duration, stderr, partial output, token usage |
-| `*_stderr.log` | `.ateamorg/projects/<project-id>/agents/<NAME>/logs/` | Raw stderr from the `claude` subprocess |
-| `*_stream.jsonl` | `.ateamorg/projects/<project-id>/agents/<NAME>/logs/` | Raw JSONL event stream (useful for debugging parsing issues) |
-| `*_exec.md` | `.ateamorg/projects/<project-id>/agents/<NAME>/logs/` | Full execution context: env, settings, prompt |
+| `full_report_error.md` | `.ateam/roles/<NAME>/` | Error summary, exit code, duration, stderr, partial output, token usage |
+| `*_stderr.log` | `.ateamorg/projects/<project-id>/roles/<NAME>/logs/` | Raw stderr from the `claude` subprocess |
+| `*_stream.jsonl` | `.ateamorg/projects/<project-id>/roles/<NAME>/logs/` | Raw JSONL event stream (useful for debugging parsing issues) |
+| `*_exec.md` | `.ateamorg/projects/<project-id>/roles/<NAME>/logs/` | Full execution context: env, settings, prompt |
 
 For the supervisor, error files are `.ateam/supervisor/review_error.md` (review) and `.ateam/supervisor/code_error.md` (code). Runtime logs are in `.ateamorg/projects/<project-id>/supervisor/logs/`.
 
@@ -573,7 +573,7 @@ For the supervisor, error files are `.ateam/supervisor/review_error.md` (review)
 Every run archives its prompt and output to the `history/` directory with a timestamp prefix:
 
 ```bash
-ls .ateam/agents/security/history/
+ls .ateam/roles/security/history/
 # 2026-03-07_14-30-00.full_prompt.md
 # 2026-03-07_14-30-00.full_report.md
 # 2026-03-08_09-00-00.full_prompt.md
@@ -611,11 +611,11 @@ go test ./internal/root/ -v          # resolution + integration tests
 go test ./internal/runner/ -v        # stream event parsing tests
 ```
 
-### Adding a new agent
+### Adding a new role
 
-1. Create `internal/prompts/defaults/agents/AGENT_NAME/report_prompt.md`
+1. Create `internal/prompts/defaults/roles/ROLE_NAME/report_prompt.md`
 2. Optionally add `code_prompt.md` in the same directory
-3. Rebuild with `make build` — the agent is auto-discovered from the embedded filesystem
+3. Rebuild with `make build` — the role is auto-discovered from the embedded filesystem
 
 ## Future
 * execution flexibility
@@ -629,7 +629,7 @@ go test ./internal/runner/ -v        # stream event parsing tests
   * control of report and review break down in tasks and check completed tasks
 * explicit workspace management using container
   * remove all permission checks and all sandboxing
-  * can enter a docker container to debug issues and run in the same environment as the agent
+  * can enter a docker container to debug issues and run in the same environment as the role
 * better context and memory
   * reduce prompt size
     * by moving more of the instructions to the tooling around

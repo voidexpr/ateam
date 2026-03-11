@@ -10,13 +10,13 @@ import (
 )
 
 const (
-	DefaultMaxParallel               = 3
-	DefaultAgentReportTimeoutMinutes = 20
-	DefaultReviewTimeoutMinutes      = 20
-	DefaultCodeTimeoutMinutes        = 120
+	DefaultMaxParallel          = 3
+	DefaultReportTimeoutMinutes = 20
+	DefaultReviewTimeoutMinutes = 20
+	DefaultCodeTimeoutMinutes   = 120
 
-	AgentEnabled  = "enabled"
-	AgentDisabled = "disabled"
+	RoleEnabled  = "enabled"
+	RoleDisabled = "disabled"
 )
 
 // Config represents the project's config.toml.
@@ -26,7 +26,7 @@ type Config struct {
 	Report  ReportConfig      `toml:"report"`
 	Review  ReviewConfig      `toml:"review"`
 	Code    CodeConfig        `toml:"code"`
-	Agents  map[string]string `toml:"agents"`
+	Roles   map[string]string `toml:"roles"`
 }
 
 type ProjectConfig struct {
@@ -39,8 +39,8 @@ type GitConfig struct {
 }
 
 type ReportConfig struct {
-	MaxParallel               int `toml:"max_parallel"`
-	AgentReportTimeoutMinutes int `toml:"agent_report_timeout_minutes"`
+	MaxParallel          int `toml:"max_parallel"`
+	ReportTimeoutMinutes int `toml:"report_timeout_minutes"`
 }
 
 type ReviewConfig struct {
@@ -70,14 +70,14 @@ func (r ReportConfig) EffectiveTimeout(override int) int {
 	if override > 0 {
 		return override
 	}
-	return r.AgentReportTimeoutMinutes
+	return r.ReportTimeoutMinutes
 }
 
-// EnabledAgents returns a sorted slice of agent names that have "enabled" status.
-func (c Config) EnabledAgents() []string {
+// EnabledRoles returns a sorted slice of role names that have "enabled" status.
+func (c Config) EnabledRoles() []string {
 	var enabled []string
-	for name, status := range c.Agents {
-		if status == AgentEnabled {
+	for name, status := range c.Roles {
+		if status == RoleEnabled {
 			enabled = append(enabled, name)
 		}
 	}
@@ -99,8 +99,8 @@ func Load(dir string) (*Config, error) {
 	if cfg.Report.MaxParallel == 0 {
 		cfg.Report.MaxParallel = DefaultMaxParallel
 	}
-	if cfg.Report.AgentReportTimeoutMinutes == 0 {
-		cfg.Report.AgentReportTimeoutMinutes = DefaultAgentReportTimeoutMinutes
+	if cfg.Report.ReportTimeoutMinutes == 0 {
+		cfg.Report.ReportTimeoutMinutes = DefaultReportTimeoutMinutes
 	}
 	if cfg.Review.TimeoutMinutes == 0 {
 		cfg.Review.TimeoutMinutes = DefaultReviewTimeoutMinutes
@@ -108,8 +108,8 @@ func Load(dir string) (*Config, error) {
 	if cfg.Code.TimeoutMinutes == 0 {
 		cfg.Code.TimeoutMinutes = DefaultCodeTimeoutMinutes
 	}
-	if cfg.Agents == nil {
-		cfg.Agents = make(map[string]string)
+	if cfg.Roles == nil {
+		cfg.Roles = make(map[string]string)
 	}
 	return &cfg, nil
 }

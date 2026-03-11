@@ -16,7 +16,7 @@ import (
 var (
 	initGitRemote string
 	initName      string
-	initAgents    []string
+	initRoles     []string
 	initOrgCreate string
 	initOrgHome   bool
 )
@@ -31,7 +31,7 @@ Use --org-home or --org-create to skip the prompt.
 
 Example:
   ateam init
-  ateam init --name myproject --agent testing_basic,security
+  ateam init --name myproject --role testing_basic,security
   ateam init --org-home`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInit,
@@ -40,7 +40,7 @@ Example:
 func init() {
 	initCmd.Flags().StringVar(&initGitRemote, "git-remote", "", "git remote origin URL")
 	initCmd.Flags().StringVar(&initName, "name", "", "project name (defaults to relative path from org root)")
-	initCmd.Flags().StringSliceVar(&initAgents, "agent", nil, "agents to enable (if omitted, uses defaults)")
+	initCmd.Flags().StringSliceVar(&initRoles, "role", nil, "roles to enable (if omitted, uses defaults)")
 	initCmd.Flags().StringVar(&initOrgCreate, "org-create", "", "create .ateamorg/ at PATH if none exists")
 	initCmd.Flags().BoolVar(&initOrgHome, "org-home", false, "create .ateamorg/ in $HOME if none exists")
 }
@@ -99,24 +99,24 @@ func runInit(cmd *cobra.Command, args []string) error {
 		gitRemote = execGitCmd(absPath, "config", "remote.origin.url")
 	}
 
-	// Agents: if --agent provided, those are enabled, rest disabled; otherwise use defaults
-	var enabledAgents []string
-	if len(initAgents) > 0 {
-		resolved, resolveErr := prompts.ResolveAgentList(initAgents, nil)
+	// Roles: if --role provided, those are enabled, rest disabled; otherwise use defaults
+	var enabledRoles []string
+	if len(initRoles) > 0 {
+		resolved, resolveErr := prompts.ResolveRoleList(initRoles, nil)
 		if resolveErr != nil {
 			return resolveErr
 		}
-		enabledAgents = resolved
+		enabledRoles = resolved
 	} else {
-		enabledAgents = prompts.DefaultEnabledAgents()
+		enabledRoles = prompts.DefaultEnabledRoles()
 	}
 
 	opts := root.InitProjectOpts{
 		Name:            name,
 		GitRepo:         gitRepo,
 		GitRemoteOrigin: gitRemote,
-		EnabledAgents:   enabledAgents,
-		AllAgents:       prompts.AllAgentIDs,
+		EnabledRoles:    enabledRoles,
+		AllRoles:        prompts.AllRoleIDs,
 	}
 
 	_, err = root.InitProject(absPath, orgDir, opts)
@@ -139,9 +139,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if gitRemote != "" {
 		fmt.Printf("  Remote: %s\n", gitRemote)
 	}
-	fmt.Printf("  Agents: %s\n", strings.Join(enabledAgents, ", "))
+	fmt.Printf("   Roles: %s\n", strings.Join(enabledRoles, ", "))
 	fmt.Printf("\nNext steps:\n")
-	fmt.Printf("  ateam report --agents all\n")
+	fmt.Printf("  ateam report --roles all\n")
 	fmt.Printf("  ateam review\n")
 
 	return nil

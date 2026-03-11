@@ -43,7 +43,7 @@ func TestIntegration_BasicProject(t *testing.T) {
 		Name:            "level1/myproj",
 		GitRepo:         ".",
 		GitRemoteOrigin: "https://foobar/myproj.git",
-		EnabledAgents:   prompts.AllAgentIDs,
+		EnabledRoles:   prompts.AllRoleIDs,
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
 	if err != nil {
@@ -82,10 +82,10 @@ func TestIntegration_BasicProject(t *testing.T) {
 	}
 
 	// Verify state directories were created.
-	for _, agentID := range prompts.AllAgentIDs {
-		logsDir := filepath.Join(env.StateDir, "agents", agentID, "logs")
+	for _, roleID := range prompts.AllRoleIDs {
+		logsDir := filepath.Join(env.StateDir, "roles", roleID, "logs")
 		if _, err := os.Stat(logsDir); err != nil {
-			t.Errorf("state logs dir missing for agent %s: %v", agentID, err)
+			t.Errorf("state logs dir missing for role %s: %v", roleID, err)
 		}
 	}
 	supervisorLogsDir := filepath.Join(env.StateDir, "supervisor", "logs")
@@ -131,7 +131,7 @@ func TestIntegration_MonorepoSubdir(t *testing.T) {
 	opts := InitProjectOpts{
 		Name:          "level1/myproj/subdir_abc",
 		GitRepo:       "..",
-		EnabledAgents: []string{"security"},
+		EnabledRoles: []string{"security"},
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
 	if err != nil {
@@ -161,12 +161,12 @@ func TestIntegration_MonorepoSubdir(t *testing.T) {
 	}
 
 	// Only "security" should be enabled.
-	if cfg.Agents["security"] != "enabled" {
-		t.Errorf("security agent = %q, want %q", cfg.Agents["security"], "enabled")
+	if cfg.Roles["security"] != "enabled" {
+		t.Errorf("security role = %q, want %q", cfg.Roles["security"], "enabled")
 	}
-	for id, status := range cfg.Agents {
+	for id, status := range cfg.Roles {
 		if id != "security" && status != "disabled" {
-			t.Errorf("agent %s = %q, want %q", id, status, "disabled")
+			t.Errorf("role %s = %q, want %q", id, status, "disabled")
 		}
 	}
 
@@ -200,7 +200,7 @@ func TestIntegration_DuplicateProjectName(t *testing.T) {
 	}
 	opts1 := InitProjectOpts{
 		Name:          "duplicate-name",
-		EnabledAgents: prompts.AllAgentIDs,
+		EnabledRoles: prompts.AllRoleIDs,
 	}
 	if _, err := InitProject(proj1Path, orgDir, opts1); err != nil {
 		t.Fatalf("first InitProject: %v", err)
@@ -212,7 +212,7 @@ func TestIntegration_DuplicateProjectName(t *testing.T) {
 	}
 	opts2 := InitProjectOpts{
 		Name:          "duplicate-name",
-		EnabledAgents: prompts.AllAgentIDs,
+		EnabledRoles: prompts.AllRoleIDs,
 	}
 	_, err = InitProject(proj2Path, orgDir, opts2)
 	if err == nil {
@@ -243,7 +243,7 @@ func TestIntegration_MultipleProjects(t *testing.T) {
 		}
 		opts := InitProjectOpts{
 			Name:          name,
-			EnabledAgents: prompts.AllAgentIDs,
+			EnabledRoles: prompts.AllRoleIDs,
 		}
 		projDir, err := InitProject(p, orgDir, opts)
 		if err != nil {
@@ -275,8 +275,8 @@ func TestIntegration_MultipleProjects(t *testing.T) {
 // TestIntegration_3LevelPromptFallback tests the prompt cascade:
 // org defaults -> org override -> project override.
 func TestIntegration_3LevelPromptFallback(t *testing.T) {
-	if len(prompts.AllAgentIDs) == 0 {
-		t.Skip("no embedded agents found")
+	if len(prompts.AllRoleIDs) == 0 {
+		t.Skip("no embedded roles found")
 	}
 
 	base := resolvedTempDir(t)
@@ -293,33 +293,33 @@ func TestIntegration_3LevelPromptFallback(t *testing.T) {
 
 	opts := InitProjectOpts{
 		Name:          "myproj",
-		EnabledAgents: prompts.AllAgentIDs,
+		EnabledRoles: prompts.AllRoleIDs,
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
 	if err != nil {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	agentID := "security"
+	roleID := "security"
 	sourceDir := projPath
 
 	// Level 1: default content is written by InstallOrg.
-	// The defaults file exists at orgDir/defaults/agents/security/report_prompt.md.
-	defaultFile := filepath.Join(orgDir, "defaults", "agents", agentID, "report_prompt.md")
+	// The defaults file exists at orgDir/defaults/roles/security/report_prompt.md.
+	defaultFile := filepath.Join(orgDir, "defaults", "roles", roleID, "report_prompt.md")
 	if err := os.WriteFile(defaultFile, []byte("default content"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	result, err := prompts.AssembleAgentPrompt(orgDir, projDir, agentID, sourceDir, "", prompts.ProjectInfoParams{}, false)
+	result, err := prompts.AssembleRolePrompt(orgDir, projDir, roleID, sourceDir, "", prompts.ProjectInfoParams{}, false)
 	if err != nil {
-		t.Fatalf("AssembleAgentPrompt (defaults): %v", err)
+		t.Fatalf("AssembleRolePrompt (defaults): %v", err)
 	}
 	if !strings.Contains(result, "default content") {
 		t.Errorf("expected 'default content' in result, got:\n%s", result)
 	}
 
-	// Level 2: org override at orgDir/agents/security/report_prompt.md.
-	orgOverrideFile := filepath.Join(orgDir, "agents", agentID, "report_prompt.md")
+	// Level 2: org override at orgDir/roles/security/report_prompt.md.
+	orgOverrideFile := filepath.Join(orgDir, "roles", roleID, "report_prompt.md")
 	if err := os.MkdirAll(filepath.Dir(orgOverrideFile), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -327,9 +327,9 @@ func TestIntegration_3LevelPromptFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err = prompts.AssembleAgentPrompt(orgDir, projDir, agentID, sourceDir, "", prompts.ProjectInfoParams{}, false)
+	result, err = prompts.AssembleRolePrompt(orgDir, projDir, roleID, sourceDir, "", prompts.ProjectInfoParams{}, false)
 	if err != nil {
-		t.Fatalf("AssembleAgentPrompt (org override): %v", err)
+		t.Fatalf("AssembleRolePrompt (org override): %v", err)
 	}
 	if !strings.Contains(result, "org override") {
 		t.Errorf("expected 'org override' in result, got:\n%s", result)
@@ -338,8 +338,8 @@ func TestIntegration_3LevelPromptFallback(t *testing.T) {
 		t.Error("org override should take precedence over default content")
 	}
 
-	// Level 3: project override at projDir/agents/security/report_prompt.md.
-	projectOverrideFile := filepath.Join(projDir, "agents", agentID, "report_prompt.md")
+	// Level 3: project override at projDir/roles/security/report_prompt.md.
+	projectOverrideFile := filepath.Join(projDir, "roles", roleID, "report_prompt.md")
 	if err := os.MkdirAll(filepath.Dir(projectOverrideFile), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -347,9 +347,9 @@ func TestIntegration_3LevelPromptFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err = prompts.AssembleAgentPrompt(orgDir, projDir, agentID, sourceDir, "", prompts.ProjectInfoParams{}, false)
+	result, err = prompts.AssembleRolePrompt(orgDir, projDir, roleID, sourceDir, "", prompts.ProjectInfoParams{}, false)
 	if err != nil {
-		t.Fatalf("AssembleAgentPrompt (project override): %v", err)
+		t.Fatalf("AssembleRolePrompt (project override): %v", err)
 	}
 	if strings.Contains(result, "org override") {
 		t.Error("project override should take precedence over org override")
@@ -376,7 +376,7 @@ func TestIntegration_RelPathHelper(t *testing.T) {
 	opts := InitProjectOpts{
 		Name:          "services/api",
 		GitRepo:       ".",
-		EnabledAgents: prompts.AllAgentIDs,
+		EnabledRoles: prompts.AllRoleIDs,
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
 	if err != nil {
@@ -401,7 +401,7 @@ func TestIntegration_RelPathHelper(t *testing.T) {
 	}
 }
 
-// TestIntegration_StatePathMethods verifies AgentLogsDir, SupervisorLogsDir, etc.
+// TestIntegration_StatePathMethods verifies RoleLogsDir, SupervisorLogsDir, etc.
 func TestIntegration_StatePathMethods(t *testing.T) {
 	base := resolvedTempDir(t)
 
@@ -417,7 +417,7 @@ func TestIntegration_StatePathMethods(t *testing.T) {
 
 	opts := InitProjectOpts{
 		Name:          "myproj",
-		EnabledAgents: prompts.AllAgentIDs,
+		EnabledRoles: prompts.AllRoleIDs,
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
 	if err != nil {
@@ -431,14 +431,14 @@ func TestIntegration_StatePathMethods(t *testing.T) {
 	projectID := config.PathToProjectID("myproj")
 	stateBase := filepath.Join(orgDir, "projects", projectID)
 
-	if got := env.AgentLogsDir("security"); got != filepath.Join(stateBase, "agents", "security", "logs") {
-		t.Errorf("AgentLogsDir = %q, want path under state dir", got)
+	if got := env.RoleLogsDir("security"); got != filepath.Join(stateBase, "roles", "security", "logs") {
+		t.Errorf("RoleLogsDir = %q, want path under state dir", got)
 	}
 	if got := env.SupervisorLogsDir(); got != filepath.Join(stateBase, "supervisor", "logs") {
 		t.Errorf("SupervisorLogsDir = %q, want path under state dir", got)
 	}
-	if got := env.AgentWorkspacesDir("security"); got != filepath.Join(stateBase, "agents", "security", "workspaces") {
-		t.Errorf("AgentWorkspacesDir = %q, want path under state dir", got)
+	if got := env.RoleWorkspacesDir("security"); got != filepath.Join(stateBase, "roles", "security", "workspaces") {
+		t.Errorf("RoleWorkspacesDir = %q, want path under state dir", got)
 	}
 	if got := env.RunnerLogPath(); got != filepath.Join(stateBase, "runner.log") {
 		t.Errorf("RunnerLogPath = %q, want path under state dir", got)
@@ -462,7 +462,7 @@ func TestIntegration_RunnerLogsDirFlow(t *testing.T) {
 
 	opts := InitProjectOpts{
 		Name:          "myproj",
-		EnabledAgents: prompts.AllAgentIDs,
+		EnabledRoles: prompts.AllRoleIDs,
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
 	if err != nil {
@@ -473,14 +473,14 @@ func TestIntegration_RunnerLogsDirFlow(t *testing.T) {
 	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
 	env.populateFromConfig(projDir, cfg)
 
-	// Simulate report: LogsDir = env.AgentLogsDir(agentID), flat timestamped files
-	agentLogsDir := env.AgentLogsDir("security")
-	t.Logf("AgentLogsDir: %s", agentLogsDir)
+	// Simulate report: LogsDir = env.RoleLogsDir(roleID), flat timestamped files
+	roleLogsDir := env.RoleLogsDir("security")
+	t.Logf("RoleLogsDir: %s", roleLogsDir)
 
-	if err := os.MkdirAll(agentLogsDir, 0755); err != nil {
-		t.Fatalf("MkdirAll agent logs dir: %v", err)
+	if err := os.MkdirAll(roleLogsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll role logs dir: %v", err)
 	}
-	streamFile := filepath.Join(agentLogsDir, "2026-03-10_22-17-58_report_stream.jsonl")
+	streamFile := filepath.Join(roleLogsDir, "2026-03-10_22-17-58_report_stream.jsonl")
 	if err := os.WriteFile(streamFile, []byte("test"), 0644); err != nil {
 		t.Fatalf("WriteFile stream: %v", err)
 	}
@@ -531,7 +531,7 @@ func TestIntegration_NestedProjectStateDir(t *testing.T) {
 
 	opts := InitProjectOpts{
 		Name:          "services/api/v2",
-		EnabledAgents: []string{"security"},
+		EnabledRoles: []string{"security"},
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
 	if err != nil {
@@ -580,7 +580,7 @@ func TestIntegration_ResolveFromStateDir(t *testing.T) {
 
 			opts := InitProjectOpts{
 				Name:          tc.relPath,
-				EnabledAgents: []string{"security"},
+				EnabledRoles: []string{"security"},
 			}
 			projDir, err := InitProject(projPath, orgDir, opts)
 			if err != nil {
@@ -600,7 +600,7 @@ func TestIntegration_ResolveFromStateDir(t *testing.T) {
 			}
 
 			// Also resolve from a subdirectory of the state dir.
-			subDir := filepath.Join(stateDir, "agents", "security", "logs")
+			subDir := filepath.Join(stateDir, "roles", "security", "logs")
 			if err := os.MkdirAll(subDir, 0755); err != nil {
 				t.Fatal(err)
 			}
@@ -633,7 +633,7 @@ func TestIntegration_WalkProjectsDiscovery(t *testing.T) {
 		}
 		opts := InitProjectOpts{
 			Name:          name,
-			EnabledAgents: prompts.AllAgentIDs,
+			EnabledRoles: prompts.AllRoleIDs,
 		}
 		if _, err := InitProject(p, orgDir, opts); err != nil {
 			t.Fatalf("InitProject(%s): %v", name, err)

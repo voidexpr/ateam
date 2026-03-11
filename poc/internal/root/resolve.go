@@ -27,12 +27,12 @@ type ResolvedEnv struct {
 	Config      *config.Config
 }
 
-func (e *ResolvedEnv) AgentReportPath(agentID, reportType string) string {
-	return filepath.Join(e.ProjectDir, "agents", agentID, reportType+"_report.md")
+func (e *ResolvedEnv) RoleReportPath(roleID, reportType string) string {
+	return filepath.Join(e.ProjectDir, "roles", roleID, reportType+"_report.md")
 }
 
-func (e *ResolvedEnv) AgentHistoryDir(agentID string) string {
-	return filepath.Join(e.ProjectDir, "agents", agentID, "history")
+func (e *ResolvedEnv) RoleHistoryDir(roleID string) string {
+	return filepath.Join(e.ProjectDir, "roles", roleID, "history")
 }
 
 func (e *ResolvedEnv) ReviewPath() string {
@@ -50,16 +50,16 @@ func (e *ResolvedEnv) RunnerLogPath() string {
 	return filepath.Join(e.ProjectDir, "logs", "runner.log")
 }
 
-func (e *ResolvedEnv) AgentLogsDir(agentID string) string {
-	return filepath.Join(e.StateDir, "agents", agentID, "logs")
+func (e *ResolvedEnv) RoleLogsDir(roleID string) string {
+	return filepath.Join(e.StateDir, "roles", roleID, "logs")
 }
 
 func (e *ResolvedEnv) SupervisorLogsDir() string {
 	return filepath.Join(e.StateDir, "supervisor", "logs")
 }
 
-func (e *ResolvedEnv) AgentWorkspacesDir(agentID string) string {
-	return filepath.Join(e.StateDir, "agents", agentID, "workspaces")
+func (e *ResolvedEnv) RoleWorkspacesDir(roleID string) string {
+	return filepath.Join(e.StateDir, "roles", roleID, "workspaces")
 }
 
 // NewProjectInfoParams builds a ProjectInfoParams from the resolved environment.

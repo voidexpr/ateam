@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	reportAgents               []string
+	reportRoles                []string
 	reportExtraPrompt          string
 	reportTimeout              int
 	reportPrint                bool
@@ -24,29 +24,29 @@ var (
 
 var reportCmd = &cobra.Command{
 	Use:   "report",
-	Short: "Run agents to produce analysis reports",
-	Long: `Run one or more agents in parallel to analyze the project source code
+	Short: "Run roles to produce analysis reports",
+	Long: `Run one or more roles in parallel to analyze the project source code
 and produce markdown reports.
 
 Works from any project directory — discovers the .ateamorg/ and .ateam/ structure.
 
 Example:
-  ateam report --agents all
-  ateam report --agents testing_basic,security
-  ateam report --agents refactor_small --extra-prompt "Focus on the auth module"
-  ateam report --agents all --extra-prompt @notes.md`,
+  ateam report --roles all
+  ateam report --roles testing_basic,security
+  ateam report --roles refactor_small --extra-prompt "Focus on the auth module"
+  ateam report --roles all --extra-prompt @notes.md`,
 	RunE: runReport,
 }
 
 func init() {
-	reportCmd.Flags().StringSliceVar(&reportAgents, "agents", nil, prompts.AgentFlagUsage()+" (required)")
+	reportCmd.Flags().StringSliceVar(&reportRoles, "roles", nil, prompts.RoleFlagUsage()+" (required)")
 	reportCmd.Flags().StringVar(&reportExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
-	reportCmd.Flags().IntVar(&reportTimeout, "timeout", 0, "timeout in minutes per agent (overrides config)")
+	reportCmd.Flags().IntVar(&reportTimeout, "timeout", 0, "timeout in minutes per role (overrides config)")
 	reportCmd.Flags().BoolVar(&reportPrint, "print", false, "print reports to stdout after completion")
-	reportCmd.Flags().BoolVar(&reportDryRun, "dry-run", false, "print the computed prompt for each agent without running")
-	reportCmd.Flags().BoolVar(&reportIgnorePreviousReport, "ignore-previous-report", false, "do not include the agent's previous report in the prompt")
+	reportCmd.Flags().BoolVar(&reportDryRun, "dry-run", false, "print the computed prompt for each role without running")
+	reportCmd.Flags().BoolVar(&reportIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
 	addCheaperModelFlag(reportCmd, &reportCheaperModel)
-	_ = reportCmd.MarkFlagRequired("agents")
+	_ = reportCmd.MarkFlagRequired("roles")
 }
 
 func runReport(cmd *cobra.Command, args []string) error {
@@ -55,12 +55,12 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	agentIDs, err := prompts.ResolveAgentList(reportAgents, env.Config.Agents)
+	roleIDs, err := prompts.ResolveRoleList(reportRoles, env.Config.Roles)
 	if err != nil {
 		return err
 	}
 
-	if err := root.EnsureAgents(env.ProjectDir, env.StateDir, agentIDs); err != nil {
+	if err := root.EnsureRoles(env.ProjectDir, env.StateDir, roleIDs); err != nil {
 		return err
 	}
 
@@ -76,33 +76,33 @@ func runReport(cmd *cobra.Command, args []string) error {
 	applyCheaperModel(cr, reportCheaperModel)
 	basePinfo := env.NewProjectInfoParams("")
 	var tasks []runner.PoolTask
-	for _, agentID := range agentIDs {
+	for _, roleID := range roleIDs {
 		pinfo := basePinfo
-		pinfo.Role = "agent " + agentID
-		prompt, err := prompts.AssembleAgentPrompt(env.OrgDir, env.ProjectDir, agentID, env.SourceDir, extraPrompt, pinfo, reportIgnorePreviousReport)
+		pinfo.Role = "role " + roleID
+		prompt, err := prompts.AssembleRolePrompt(env.OrgDir, env.ProjectDir, roleID, env.SourceDir, extraPrompt, pinfo, reportIgnorePreviousReport)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", agentID, err)
+			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", roleID, err)
 			continue
 		}
-		agentDir := filepath.Join(env.ProjectDir, "agents", agentID)
+		roleDir := filepath.Join(env.ProjectDir, "roles", roleID)
 		tasks = append(tasks, runner.PoolTask{
 			Prompt: prompt,
 			RunOpts: runner.RunOpts{
-				AgentID:              agentID,
+				RoleID:               roleID,
 				Action:               runner.ActionReport,
-				LogsDir:              env.AgentLogsDir(agentID),
-				LastMessageFilePath:  env.AgentReportPath(agentID, reportType),
-				ErrorMessageFilePath: filepath.Join(agentDir, prompts.FullReportErrorFile),
+				LogsDir:              env.RoleLogsDir(roleID),
+				LastMessageFilePath:  env.RoleReportPath(roleID, reportType),
+				ErrorMessageFilePath: filepath.Join(roleDir, prompts.FullReportErrorFile),
 				WorkDir:              env.SourceDir,
 				TimeoutMin:           timeout,
-				HistoryDir:           env.AgentHistoryDir(agentID),
+				HistoryDir:           env.RoleHistoryDir(roleID),
 				PromptName:           reportType + "_prompt.md",
 			},
 		})
 	}
 
 	if len(tasks) == 0 {
-		return fmt.Errorf("no valid agents to run")
+		return fmt.Errorf("no valid roles to run")
 	}
 
 	if reportDryRun {
@@ -110,18 +110,18 @@ func runReport(cmd *cobra.Command, args []string) error {
 			if i > 0 {
 				fmt.Println()
 			}
-			fmt.Printf("╔══ %s ══╗\n\n", t.AgentID)
+			fmt.Printf("╔══ %s ══╗\n\n", t.RoleID)
 			fmt.Println(t.Prompt)
-			fmt.Printf("\n╚══ %s ══╝\n", t.AgentID)
+			fmt.Printf("\n╚══ %s ══╝\n", t.RoleID)
 		}
 		return nil
 	}
 
-	fmt.Printf("Running %d agent(s) (max %d parallel, %dm timeout)...\n\n",
+	fmt.Printf("Running %d role(s) (max %d parallel, %dm timeout)...\n\n",
 		len(tasks), env.Config.Report.MaxParallel, timeout)
 
 	for _, t := range tasks {
-		fmt.Printf("  %-25s queued\n", t.AgentID)
+		fmt.Printf("  %-25s queued\n", t.RoleID)
 	}
 	fmt.Println()
 
@@ -132,7 +132,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 
 	var succeeded, failed int
 	w := newTable()
-	fmt.Fprintln(w, "AGENT\tENDED_AT\tELAPSED\tCOST\tTURNS\tSTATUS\tPATH")
+	fmt.Fprintln(w, "ROLE\tENDED_AT\tELAPSED\tCOST\tTURNS\tSTATUS\tPATH")
 	for _, r := range results {
 		endedAt := r.EndedAt.Format(runner.TimestampFormat)
 		elapsed := runner.FormatDuration(r.Duration)
@@ -145,16 +145,16 @@ func runReport(cmd *cobra.Command, args []string) error {
 				errorPath = r.StderrFilePath
 			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\tERROR\t%s\n",
-				r.AgentID, endedAt, elapsed, cost, turns, relPath(cwd, errorPath))
+				r.RoleID, endedAt, elapsed, cost, turns, relPath(cwd, errorPath))
 			failed++
 		} else {
-			reportPath := env.AgentReportPath(r.AgentID, reportType)
-			historyDir := env.AgentHistoryDir(r.AgentID)
+			reportPath := env.RoleReportPath(r.RoleID, reportType)
+			historyDir := env.RoleHistoryDir(r.RoleID)
 			if err := runner.ArchiveFile(reportPath, historyDir, reportType+"_report.md"); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not archive report for %s: %v\n", r.AgentID, err)
+				fmt.Fprintf(os.Stderr, "Warning: could not archive report for %s: %v\n", r.RoleID, err)
 			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\tOK\t%s\n",
-				r.AgentID, endedAt, elapsed, cost, turns, relPath(cwd, reportPath))
+				r.RoleID, endedAt, elapsed, cost, turns, relPath(cwd, reportPath))
 			succeeded++
 		}
 	}
@@ -170,10 +170,9 @@ func runReport(cmd *cobra.Command, args []string) error {
 			if r.Err != nil {
 				continue
 			}
-			fmt.Printf("\n══════ %s ══════\n\n%s\n", r.AgentID, r.Output)
+			fmt.Printf("\n══════ %s ══════\n\n%s\n", r.RoleID, r.Output)
 		}
 	}
 
 	return nil
 }
-

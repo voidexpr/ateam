@@ -2,14 +2,14 @@
 
 ## Context
 
-When agents run (via `ateam report`, `ateam code`, etc.), their output is written to timestamped `*_stream.jsonl` files. Currently there's no way to watch a running agent's progress from a separate terminal. The `ateam log` command reads completed stream files, but doesn't tail live ones. The `claude-sandbox.sh` script has a `live_monitor()` function that does exactly this — we want a Go equivalent as `ateam tail`.
+When roles run (via `ateam report`, `ateam code`, etc.), their output is written to timestamped `*_stream.jsonl` files. Currently there's no way to watch a running role's progress from a separate terminal. The `ateam log` command reads completed stream files, but doesn't tail live ones. The `claude-sandbox.sh` script has a `live_monitor()` function that does exactly this — we want a Go equivalent as `ateam tail`.
 
 ## Effort estimate
 
 **Small-medium.** Most infrastructure exists:
 - `internal/runner/events.go` — `parseStreamLine()` and all event structs already exist
 - `internal/runner/format.go` — `FormatStream()` reads JSONL and formats output (used by `ateam log`)
-- `cmd/log.go` — resolves stream file paths via `--agent`/`--supervisor`/`--action` flags
+- `cmd/log.go` — resolves stream file paths via `--role`/`--supervisor`/`--action` flags
 - `cmd/run.go:printProgress()` — formats progress events to stderr
 
 The new command is essentially `tail -f` on a JSONL file, parsing complete lines via `parseStreamLine()`, and formatting output similar to `claude-sandbox.sh`'s `live_monitor()`.
@@ -19,9 +19,9 @@ The new command is essentially `tail -f` on a JSONL file, parsing complete lines
 ### 1. `cmd/tail.go` (new)
 
 New cobra command `ateam tail` with same flags as `ateam log`:
-- `--agent NAME` — tail a specific agent's stream
+- `--role NAME` — tail a specific role's stream
 - `--supervisor` — tail supervisor stream
-- `--action ACTION` — action type (default: "report" for agents, "code" for supervisor)
+- `--action ACTION` — action type (default: "report" for roles, "code" for supervisor)
 
 **Implementation:**
 - Resolve stream file path using same logic as `cmd/log.go` (`findLatestStreamFile` in the flat logs dir)
@@ -77,8 +77,8 @@ Track elapsed time from the first event's timestamp (or from command start).
 ## Verification
 
 1. `go build ./...` and `go test ./...`
-2. In one terminal: `ateam report --agents security`
-3. In another terminal: `ateam tail --agent security` — verify live formatted output appears
+2. In one terminal: `ateam report --roles security`
+3. In another terminal: `ateam tail --role security` — verify live formatted output appears
 4. Verify tail exits after `result` event
-5. Run `ateam tail --agent security` on a completed stream file — verify it replays and exits
+5. Run `ateam tail --role security` on a completed stream file — verify it replays and exits
 6. Verify `ateam tail --supervisor --action review` works for supervisor streams

@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	promptAgent                string
+	promptRole                 string
 	promptAction               string
 	promptExtraPrompt          string
 	promptNoProjectInfo        bool
@@ -21,14 +21,14 @@ var (
 
 var promptCmd = &cobra.Command{
 	Use:   "prompt",
-	Short: "Resolve and print the full prompt for an agent or supervisor",
+	Short: "Resolve and print the full prompt for a role or supervisor",
 	Long: `Perform 3-level prompt resolution (project → org → defaults) for a given
-agent or supervisor action, then print the assembled prompt to stdout.
+role or supervisor action, then print the assembled prompt to stdout.
 
 Example:
-  ateam prompt --agent security --action report
-  ateam prompt --agent refactor_small --action code
-  ateam prompt --agent security --action report --extra-prompt "Focus on auth"
+  ateam prompt --role security --action report
+  ateam prompt --role refactor_small --action code
+  ateam prompt --role security --action report --extra-prompt "Focus on auth"
   ateam prompt --supervisor --action review
   ateam prompt --supervisor --action code`,
 	Args: cobra.NoArgs,
@@ -36,13 +36,13 @@ Example:
 }
 
 func init() {
-	promptCmd.Flags().StringVar(&promptAgent, "agent", "", "agent name")
-	promptCmd.Flags().BoolVar(&promptSupervisor, "supervisor", false, "generate supervisor prompt instead of agent prompt")
+	promptCmd.Flags().StringVar(&promptRole, "role", "", "role name")
+	promptCmd.Flags().BoolVar(&promptSupervisor, "supervisor", false, "generate supervisor prompt instead of role prompt")
 	promptCmd.Flags().StringVar(&promptAction, "action", "", "action type: report, code, or review (required)")
 	promptCmd.Flags().StringVar(&promptExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
 	promptCmd.Flags().BoolVar(&promptNoProjectInfo, "no-project-info", false, "omit ateam project context from the prompt")
-	promptCmd.Flags().BoolVar(&promptIgnorePreviousReport, "ignore-previous-report", false, "do not include the agent's previous report in the prompt")
-	promptCmd.MarkFlagsMutuallyExclusive("agent", "supervisor")
+	promptCmd.Flags().BoolVar(&promptIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
+	promptCmd.MarkFlagsMutuallyExclusive("role", "supervisor")
 	_ = promptCmd.MarkFlagRequired("action")
 }
 
@@ -50,15 +50,15 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	if promptSupervisor {
 		return runPromptSupervisor()
 	}
-	if promptAgent == "" {
-		return fmt.Errorf("either --agent or --supervisor is required")
+	if promptRole == "" {
+		return fmt.Errorf("either --role or --supervisor is required")
 	}
-	return runPromptAgent()
+	return runPromptRole()
 }
 
-func runPromptAgent() error {
+func runPromptRole() error {
 	if promptAction != "report" && promptAction != "code" {
-		return fmt.Errorf("invalid action %q for agent: must be 'report' or 'code'", promptAction)
+		return fmt.Errorf("invalid action %q for role: must be 'report' or 'code'", promptAction)
 	}
 
 	env, err := root.Resolve(orgFlag, projectFlag)
@@ -66,8 +66,8 @@ func runPromptAgent() error {
 		return err
 	}
 
-	if !prompts.IsValidAgent(promptAgent, env.Config.Agents) {
-		return fmt.Errorf("unknown agent: %s\nValid agents: %s", promptAgent, strings.Join(prompts.AllKnownAgentIDs(env.Config.Agents), ", "))
+	if !prompts.IsValidRole(promptRole, env.Config.Roles) {
+		return fmt.Errorf("unknown role: %s\nValid roles: %s", promptRole, strings.Join(prompts.AllKnownRoleIDs(env.Config.Roles), ", "))
 	}
 
 	extraPrompt, err := prompts.ResolveOptional(promptExtraPrompt)
@@ -77,15 +77,15 @@ func runPromptAgent() error {
 
 	var pinfo prompts.ProjectInfoParams
 	if !promptNoProjectInfo {
-		pinfo = env.NewProjectInfoParams("agent " + promptAgent)
+		pinfo = env.NewProjectInfoParams("role " + promptRole)
 	}
 
 	var assembled string
 	switch promptAction {
 	case "report":
-		assembled, err = prompts.AssembleAgentPrompt(env.OrgDir, env.ProjectDir, promptAgent, env.SourceDir, extraPrompt, pinfo, promptIgnorePreviousReport)
+		assembled, err = prompts.AssembleRolePrompt(env.OrgDir, env.ProjectDir, promptRole, env.SourceDir, extraPrompt, pinfo, promptIgnorePreviousReport)
 	case "code":
-		assembled, err = prompts.AssembleAgentCodePrompt(env.OrgDir, env.ProjectDir, promptAgent, env.SourceDir, extraPrompt, pinfo)
+		assembled, err = prompts.AssembleRoleCodePrompt(env.OrgDir, env.ProjectDir, promptRole, env.SourceDir, extraPrompt, pinfo)
 	}
 	if err != nil {
 		return err

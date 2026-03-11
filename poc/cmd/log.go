@@ -13,34 +13,34 @@ import (
 
 var (
 	logSupervisor bool
-	logAgent      string
+	logRole       string
 	logAction     string
 )
 
 var logCmd = &cobra.Command{
 	Use:   "log",
 	Short: "Pretty-print the last run stream log",
-	Long: `Read and format the latest stream log of the supervisor or a specific agent.
+	Long: `Read and format the latest stream log of the supervisor or a specific role.
 
 Example:
   ateam log --supervisor
-  ateam log --agent security
-  ateam log --agent security --action run`,
+  ateam log --role security
+  ateam log --role security --action run`,
 	RunE: runLog,
 }
 
 func init() {
 	logCmd.Flags().BoolVar(&logSupervisor, "supervisor", false, "show supervisor log (defaults to code action)")
-	logCmd.Flags().StringVar(&logAgent, "agent", "", "agent name to show log for")
+	logCmd.Flags().StringVar(&logRole, "role", "", "role name to show log for")
 	logCmd.Flags().StringVar(&logAction, "action", "", "action type (e.g. report, run, code, review; auto-detected if omitted)")
 }
 
 func runLog(cmd *cobra.Command, args []string) error {
-	if !logSupervisor && logAgent == "" {
-		return fmt.Errorf("specify --supervisor or --agent AGENT")
+	if !logSupervisor && logRole == "" {
+		return fmt.Errorf("specify --supervisor or --role ROLE")
 	}
-	if logSupervisor && logAgent != "" {
-		return fmt.Errorf("use either --supervisor or --agent, not both")
+	if logSupervisor && logRole != "" {
+		return fmt.Errorf("use either --supervisor or --role, not both")
 	}
 
 	env, err := root.Resolve(orgFlag, projectFlag)
@@ -52,7 +52,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 	if logSupervisor {
 		logsDir = env.SupervisorLogsDir()
 	} else {
-		logsDir = env.AgentLogsDir(logAgent)
+		logsDir = env.RoleLogsDir(logRole)
 	}
 
 	streamPath, err := findLatestStreamFile(logsDir, logAction)

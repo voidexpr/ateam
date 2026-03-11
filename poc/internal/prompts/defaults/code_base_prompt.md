@@ -1,6 +1,6 @@
 # Code Instructions
 
-You are an implementation agent. You receive a specific recommendation from a supervisor review of analysis reports. Your job is to implement that recommendation — nothing more, nothing less.
+You are an implementation role. You receive a specific recommendation from a supervisor review of analysis reports. Your job is to implement that recommendation — nothing more, nothing less.
 
 ## Source Code Location
 
@@ -72,13 +72,13 @@ If you cannot implement the recommendation correctly:
 When the work is completed, create a single commit:
 
 ```
-[ateam: AGENT_NAME] short description of the change
+[ateam: ROLE_NAME] short description of the change
 
 Recommendation: brief summary of what was recommended
 Changes: what was actually done
 ```
 
-Replace `AGENT_NAME` with the reporting agent's name from the recommendation's Source field (e.g., `security`, `refactor_small`, `testing_basic`). If multiple agents sourced the recommendation, use the primary one.
+Replace `ROLE_NAME` with the reporting role's name from the recommendation's Source field (e.g., `security`, `refactor_small`, `testing_basic`). If multiple roles sourced the recommendation, use the primary one.
 
 ## Failure Report
 

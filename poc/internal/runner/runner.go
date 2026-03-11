@@ -36,20 +36,20 @@ type ClaudeRunner struct {
 
 // RunOpts holds per-invocation settings.
 type RunOpts struct {
-	AgentID              string
+	RoleID               string
 	Action               string // "report", "run", "code", "review"
 	LogsDir              string // flat dir for all timestamped log files
 	LastMessageFilePath  string // where to write extracted report text (on success only)
 	ErrorMessageFilePath string // where to write error info (on failure only)
 	WorkDir              string // cwd for the subprocess
 	TimeoutMin           int
-	HistoryDir           string // where to archive the prompt (e.g. agents/<name>/history)
+	HistoryDir           string // where to archive the prompt (e.g. roles/<name>/history)
 	PromptName           string // archive name (e.g. "report_prompt.md", "review_prompt.md")
 }
 
 // RunProgress is a lightweight status sent on a channel during execution.
 type RunProgress struct {
-	AgentID        string
+	RoleID        string
 	Phase          string // PhaseInit, PhaseThinking, PhaseTool, PhaseToolResult, PhaseDone, PhaseError
 	ToolName       string // set when Phase == PhaseTool
 	ToolInput      string // tool input snippet (for PhaseTool)
@@ -64,7 +64,7 @@ type RunProgress struct {
 
 // RunSummary is the final result returned by Run.
 type RunSummary struct {
-	AgentID         string
+	RoleID         string
 	StartedAt       time.Time
 	EndedAt         time.Time
 	Duration        time.Duration
@@ -89,7 +89,7 @@ type RunSummary struct {
 // to be dispatched. Call this before spawning parallel goroutines so all queued
 // entries appear together.
 func (r *ClaudeRunner) LogQueued(opts RunOpts) {
-	appendLog(r.LogFile, opts.AgentID, "queued", effectiveWorkDir(opts),
+	appendLog(r.LogFile, opts.RoleID, "queued", effectiveWorkDir(opts),
 		relToDir(r.ProjectDir, opts.LastMessageFilePath))
 }
 
@@ -187,7 +187,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 
 	failEarly := func(err error) RunSummary {
 		s := RunSummary{
-			AgentID:        opts.AgentID,
+			RoleID:        opts.RoleID,
 			StartedAt:      startedAt,
 			EndedAt:        time.Now(),
 			Duration:       time.Since(startedAt),
@@ -254,18 +254,18 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = io.MultiWriter(ef, &stderrBuf)
 
-	appendLog(r.LogFile, opts.AgentID, "start", cwd, cliStr,
+	appendLog(r.LogFile, opts.RoleID, "start", cwd, cliStr,
 		relToDir(r.ProjectDir, promptFile),
 		relToDir(r.ProjectDir, opts.LastMessageFilePath))
 
 	if err := cmd.Start(); err != nil {
-		appendLog(r.LogFile, opts.AgentID, "error", cwd, cliStr, err.Error())
+		appendLog(r.LogFile, opts.RoleID, "error", cwd, cliStr, err.Error())
 		return failEarly(fmt.Errorf("cannot start claude: %w", err))
 	}
 
 	emitProgress := func(phase, toolName, toolInput, content string, toolCount, eventCount int) {
 		sendProgress(progress, RunProgress{
-			AgentID:        opts.AgentID,
+			RoleID:        opts.RoleID,
 			Phase:          phase,
 			ToolName:       toolName,
 			ToolInput:      toolInput,
@@ -354,7 +354,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 	output := extractReportText(lastAssistant)
 
 	summary := RunSummary{
-		AgentID:        opts.AgentID,
+		RoleID:        opts.RoleID,
 		StartedAt:      startedAt,
 		EndedAt:        endedAt,
 		Duration:       duration,
@@ -383,7 +383,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 			_ = os.MkdirAll(dir, 0755)
 			_ = os.WriteFile(opts.LastMessageFilePath, []byte(output), 0644)
 		}
-		appendLog(r.LogFile, opts.AgentID, "ok", cwd, cliStr)
+		appendLog(r.LogFile, opts.RoleID, "ok", cwd, cliStr)
 		emitProgress(PhaseDone, "", "", "", totalTools, eventCount)
 	} else {
 		switch {
@@ -397,7 +397,7 @@ func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, pro
 			summary.Err = fmt.Errorf("claude produced no result event")
 		}
 		writeErrorFile(opts.ErrorMessageFilePath, summary, stderr)
-		appendLog(r.LogFile, opts.AgentID, "error", cwd, cliStr, summary.Err.Error())
+		appendLog(r.LogFile, opts.RoleID, "error", cwd, cliStr, summary.Err.Error())
 		emitProgress(PhaseError, "", "", "", totalTools, eventCount)
 	}
 
@@ -429,7 +429,7 @@ func writeErrorFile(path string, s RunSummary, stderr string) {
 	_ = os.MkdirAll(dir, 0755)
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Error: %s\n\n", s.AgentID)
+	fmt.Fprintf(&b, "# Error: %s\n\n", s.RoleID)
 	fmt.Fprintf(&b, "**Error:** %v\n\n", s.Err)
 	fmt.Fprintf(&b, "**Exit Code:** %d\n\n", s.ExitCode)
 	fmt.Fprintf(&b, "**Duration:** %s\n\n", FormatDuration(s.Duration))
@@ -452,7 +452,7 @@ func writeErrorFile(path string, s RunSummary, stderr string) {
 	_ = os.WriteFile(path, []byte(b.String()), 0644)
 }
 
-func appendLog(logFile, agentID, status, cwd, cli string, extra ...string) {
+func appendLog(logFile, roleID, status, cwd, cli string, extra ...string) {
 	if logFile == "" {
 		return
 	}
@@ -464,7 +464,7 @@ func appendLog(logFile, agentID, status, cwd, cli string, extra ...string) {
 	defer f.Close()
 
 	ts := time.Now().Format(TimestampFormat)
-	fields := []string{ts, agentID, status, cwd, cli}
+	fields := []string{ts, roleID, status, cwd, cli}
 	fields = append(fields, extra...)
 	fmt.Fprintln(f, strings.Join(fields, " | "))
 }
@@ -538,7 +538,7 @@ func writeExecFile(path string, startedAt time.Time, opts RunOpts, prompt string
 	fmt.Fprintf(&b, "# Command\n")
 	fmt.Fprintf(&b, "* started: %s\n", startedAt.Format(TimestampFormat))
 	fmt.Fprintf(&b, "* action: %s\n", opts.Action)
-	fmt.Fprintf(&b, "* agent: %s\n", opts.AgentID)
+	fmt.Fprintf(&b, "* role: %s\n", opts.RoleID)
 	fmt.Fprintf(&b, "* cwd: %s\n", cwd)
 	fmt.Fprintf(&b, "* coding agent cli:\n  ```bash\n  %s\n  ```\n", claudeArgs)
 

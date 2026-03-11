@@ -12,9 +12,9 @@ Explore the codebase thoroughly before writing your report. Read key files, unde
 
 When processing an existing report you must omit completed work unless it mentions an impact on future tasks.
 
-## Agent performing the audit
+## Role performing the audit
 
-Specify which agent you are use, what model you are using and other attributes related to the model (thinking enable, level of thinking, ...)
+Specify which role you are use, what model you are using and other attributes related to the model (thinking enable, level of thinking, ...)
 
 ## Report Format
 

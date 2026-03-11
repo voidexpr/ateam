@@ -12,7 +12,7 @@ var installCmd = &cobra.Command{
 	Use:   "install [PATH]",
 	Short: "Create a .ateamorg/ directory with default prompts",
 	Long: `Create a .ateamorg/ directory at PATH (defaults to ".") with default
-prompt files for all agents and the supervisor.
+prompt files for all roles and the supervisor.
 
 Example:
   ateam install              # creates .ateamorg/ in current directory
@@ -38,6 +38,6 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Created %s\n", orgDir)
-	fmt.Printf("Default prompts for all agents and supervisor are ready.\n")
+	fmt.Printf("Default prompts for all roles and supervisor are ready.\n")
 	return nil
 }
