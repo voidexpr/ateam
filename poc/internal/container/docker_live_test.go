@@ -89,6 +89,18 @@ WORKDIR /workspace
 	t.Logf("container claude version: %s", strings.TrimSpace(vOut.String()))
 }
 
+// mkdirWritable creates a directory that's writable by the container user.
+// In DinD the test runs as root but the container user is UID 1000,
+// so bind-mounted dirs need open permissions.
+func mkdirWritable(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0777); err != nil {
+		t.Fatal(err)
+	}
+	// MkdirAll respects umask, so force permissions explicitly
+	os.Chmod(path, 0777)
+}
+
 func requireAuth(t *testing.T) {
 	t.Helper()
 	if os.Getenv("ANTHROPIC_API_KEY") == "" && os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") == "" {
@@ -146,7 +158,7 @@ func TestLiveClaudeReadFile(t *testing.T) {
 
 	dir := t.TempDir()
 	sourceDir := filepath.Join(dir, "project")
-	os.MkdirAll(sourceDir, 0755)
+	mkdirWritable(t, sourceDir)
 
 	os.WriteFile(filepath.Join(sourceDir, "test-data.txt"), []byte("The answer is 42."), 0644)
 
@@ -173,7 +185,7 @@ func TestLiveClaudeWriteFile(t *testing.T) {
 
 	dir := t.TempDir()
 	sourceDir := filepath.Join(dir, "project")
-	os.MkdirAll(sourceDir, 0755)
+	mkdirWritable(t, sourceDir)
 
 	dc := &DockerContainer{
 		Image:      liveImage,
@@ -203,8 +215,8 @@ func TestLiveClaudeOrgReadOnly(t *testing.T) {
 	dir := t.TempDir()
 	sourceDir := filepath.Join(dir, "project")
 	orgDir := filepath.Join(dir, "org")
-	os.MkdirAll(sourceDir, 0755)
-	os.MkdirAll(orgDir, 0755)
+	mkdirWritable(t, sourceDir)
+	mkdirWritable(t, orgDir)
 
 	os.WriteFile(filepath.Join(orgDir, "config.txt"), []byte("org-config-value"), 0644)
 
@@ -232,11 +244,11 @@ func TestLiveClaudeNoAccessOutsideMounts(t *testing.T) {
 
 	dir := t.TempDir()
 	sourceDir := filepath.Join(dir, "project")
-	os.MkdirAll(sourceDir, 0755)
+	mkdirWritable(t, sourceDir)
 
 	// Secret file on host — NOT mounted into container
 	secretDir := filepath.Join(dir, "secret")
-	os.MkdirAll(secretDir, 0755)
+	mkdirWritable(t, secretDir)
 	os.WriteFile(filepath.Join(secretDir, "password.txt"), []byte("super-secret"), 0644)
 
 	dc := &DockerContainer{
