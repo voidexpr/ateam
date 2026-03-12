@@ -2,6 +2,21 @@
 
 ## PENDING TODO
 
+The trend in agentic coding went from copy-paste code snippets to agent codes directly and human reviews. The next trend might be that agent codes, agent reviews the code and human focus on feature work. Ateam is meant to automate project wide quality improvement by using pre-configured (and customizable) prompts that audit, review and code changes that don't modify features but only code quality. This way feature work doesn't hit a code spaghetti wall and the code base stays healthy over time.
+
+Feature work requires a lot of attention but code improvements can be automated with coding agents: they are actually very good at finding flaws in code, tests, automation, documentations, etc ... So let's have a team of agents audit on a schedule or continuously the code with minimal configuration. Customization is just done via additional prompts. The goal is to be "run and play".
+
+  cd your_project_or_worktree
+  ateam init && ateam all
+
+For the first time see what ateam does:
+
+  cd your_project_or_worktree
+  ateam init && ateam report && ateam review --print
+
+See what changes will be made. Then:
+
+  ateam code
 
 Core principles:
 * Coding agents make the right fundamental tradeoff: implement a working feature when asked. They do not invest too much time on in-depth software engineering.
