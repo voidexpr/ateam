@@ -18,11 +18,13 @@ test-docker:
 	docker build -t ateam-test-dind -f test/Dockerfile.dind .
 	docker run --rm --privileged ateam-test-dind
 
-# Run live agent tests inside DinD (requires ANTHROPIC_API_KEY, costs ~$0.03).
+# Run live agent tests inside DinD with real Claude haiku (~$0.03).
+# Auth: set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (either works).
 test-docker-live:
 	docker build -t ateam-test-dind -f test/Dockerfile.dind .
 	docker run --rm --privileged \
 		-e ANTHROPIC_API_KEY \
+		-e CLAUDE_CODE_OAUTH_TOKEN \
 		-e TEST_TAGS="docker_integration,docker_live" \
 		ateam-test-dind
 

@@ -17,7 +17,7 @@ import (
 // These tests run real Claude (haiku) inside Docker containers.
 // Requirements:
 //   - Running Docker daemon
-//   - ANTHROPIC_API_KEY env var set
+//   - Either ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN env var set
 //   - Internet access (Anthropic API)
 //
 // Run via: make test-docker-live
@@ -55,15 +55,27 @@ func ensureLiveImage(t *testing.T) {
 	})
 }
 
-func requireAPIKey(t *testing.T) {
+func requireAuth(t *testing.T) {
 	t.Helper()
-	if os.Getenv("ANTHROPIC_API_KEY") == "" {
-		t.Skip("ANTHROPIC_API_KEY not set")
+	if os.Getenv("ANTHROPIC_API_KEY") == "" && os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") == "" {
+		t.Skip("neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN set")
 	}
 }
 
+// authEnvVars returns the env var names that should be forwarded to the container.
+func authEnvVars() []string {
+	var vars []string
+	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+		vars = append(vars, "ANTHROPIC_API_KEY")
+	}
+	if os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") != "" {
+		vars = append(vars, "CLAUDE_CODE_OAUTH_TOKEN")
+	}
+	return vars
+}
+
 func TestLiveClaudeReadFile(t *testing.T) {
-	requireAPIKey(t)
+	requireAuth(t)
 	ensureLiveImage(t)
 	ctx, cancel := context.WithTimeout(context.Background(), liveTestTimeout)
 	defer cancel()
@@ -77,7 +89,7 @@ func TestLiveClaudeReadFile(t *testing.T) {
 	dc := &DockerContainer{
 		Image:      liveImage,
 		SourceDir:  sourceDir,
-		ForwardEnv: []string{"ANTHROPIC_API_KEY"},
+		ForwardEnv: authEnvVars(),
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -103,7 +115,7 @@ func TestLiveClaudeReadFile(t *testing.T) {
 }
 
 func TestLiveClaudeWriteFile(t *testing.T) {
-	requireAPIKey(t)
+	requireAuth(t)
 	ensureLiveImage(t)
 	ctx, cancel := context.WithTimeout(context.Background(), liveTestTimeout)
 	defer cancel()
@@ -115,7 +127,7 @@ func TestLiveClaudeWriteFile(t *testing.T) {
 	dc := &DockerContainer{
 		Image:      liveImage,
 		SourceDir:  sourceDir,
-		ForwardEnv: []string{"ANTHROPIC_API_KEY"},
+		ForwardEnv: authEnvVars(),
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -145,7 +157,7 @@ func TestLiveClaudeWriteFile(t *testing.T) {
 }
 
 func TestLiveClaudeOrgReadOnly(t *testing.T) {
-	requireAPIKey(t)
+	requireAuth(t)
 	ensureLiveImage(t)
 	ctx, cancel := context.WithTimeout(context.Background(), liveTestTimeout)
 	defer cancel()
@@ -162,7 +174,7 @@ func TestLiveClaudeOrgReadOnly(t *testing.T) {
 		Image:      liveImage,
 		SourceDir:  sourceDir,
 		OrgDir:     orgDir,
-		ForwardEnv: []string{"ANTHROPIC_API_KEY"},
+		ForwardEnv: authEnvVars(),
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -188,7 +200,7 @@ func TestLiveClaudeOrgReadOnly(t *testing.T) {
 }
 
 func TestLiveClaudeNoAccessOutsideMounts(t *testing.T) {
-	requireAPIKey(t)
+	requireAuth(t)
 	ensureLiveImage(t)
 	ctx, cancel := context.WithTimeout(context.Background(), liveTestTimeout)
 	defer cancel()
@@ -205,7 +217,7 @@ func TestLiveClaudeNoAccessOutsideMounts(t *testing.T) {
 	dc := &DockerContainer{
 		Image:      liveImage,
 		SourceDir:  sourceDir,
-		ForwardEnv: []string{"ANTHROPIC_API_KEY"},
+		ForwardEnv: authEnvVars(),
 	}
 
 	// The host path won't exist inside the container at all.
