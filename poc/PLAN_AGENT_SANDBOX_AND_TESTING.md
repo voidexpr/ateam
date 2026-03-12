@@ -1406,13 +1406,13 @@ profile "test" {
 
 ### Implementation order (revised)
 
-1. **Agent interface + MockAgent** — extract from `ClaudeRunner`, add `ClaudeAgent`
-2. **Container interface + NoneContainer** — passthrough, no behavior change
-3. **Profile + HCL config** — load `runtime.hcl`, resolve profiles
-4. **Runner refactor** — uses Profile instead of ClaudeRunner directly
-5. **Unified `ateam run`** — merge exec into run, make --role/--project optional, adapt logging
-6. **Layer 1+2 tests** — mock agent plumbing + rule verification
-7. **DockerContainer** — docker lifecycle, mount translation
+1. ~~**Agent interface + MockAgent** — extract from `ClaudeRunner`, add `ClaudeAgent`~~ ✅
+2. ~~**Container interface + NoneContainer** — passthrough, no behavior change~~ ✅
+3. ~~**Profile + HCL config** — load `runtime.hcl`, resolve profiles~~ ✅
+4. ~~**Runner refactor** — uses Profile instead of ClaudeRunner directly~~ ✅
+5. ~~**Unified `ateam run`** — merge exec into run, make --role/--project optional, adapt logging~~ ✅
+6. ~~**Layer 1+2 tests** — mock agent plumbing + rule verification~~ ✅ (partial — runner_test.go + config_test.go)
+7. **DockerContainer** — docker lifecycle, mount translation ← **NEXT**
 8. **Layer 3 smoke test** — real agent in profile
 9. **`ateam shell`** — interactive container shell
 10. **AgentCallDB** — SQLite tracking, insert on each run
@@ -1420,3 +1420,393 @@ profile "test" {
 12. **SRTContainer** — Anthropic SRT support
 13. **Layer 4+5** — enforcement + docker E2E tests
 14. **`ateam stats`** — query the call DB
+
+---
+
+## Implementation Status (as of 2026-03-11)
+
+### What exists today
+
+```
+internal/
+  agent/
+    agent.go        # Agent interface, StreamEvent, Request, SandboxRules, buildProcessEnv
+    claude.go       # ClaudeAgent — streaming JSONL parser, settings injection
+    codex.go        # CodexAgent — codex exec --json, JSONL parser
+    codex_test.go   # 14 parser tests
+    mock.go         # MockAgent — canned events for testing
+    mock_test.go
+  container/
+    container.go    # Container interface, NoneContainer (passthrough)
+  runtime/
+    config.go       # HCL parsing, 4-level resolution, agent inheritance (base)
+    config_test.go  # Tests: defaults, inheritance, circular refs, sandbox, org/project override
+    defaults/
+      runtime.hcl   # Embedded defaults (agents, containers, profiles)
+  runner/
+    runner.go       # Runner orchestrator using Agent interface
+    pool.go         # Parallel runner pool
+    events.go       # Claude stream parser (legacy, used by FormatStream)
+    format.go       # Stream formatting for ateam log/tail
+    runner_test.go  # MockAgent integration tests
+  config/
+    config.go       # config.toml with ResolveProfile(), SupervisorConfig, ProfilesConfig
+```
+
+**Key design choices already locked in:**
+
+- **Agent.Run() returns `<-chan StreamEvent`** — channel-based streaming, not blocking
+- **Agents spawn their own process** — ClaudeAgent/CodexAgent each build their own `exec.Command`, manage env, parse output
+- **sandbox attribute is inline JSON** in runtime.hcl (heredoc), not a filename reference. Runner parses it directly, merges runtime paths, writes to a temp file for `--settings`
+- **Agent inheritance via `base`** — child agents inherit command, args, env, sandbox, model, type from parent. Zero-value = inherit. Circular detection.
+- **4-level runtime.hcl resolution** — embedded → .ateamorg/defaults/ → .ateamorg/ → .ateam/
+- **Profile resolution from config.toml** — role-specific → action-specific supervisor → supervisor default → project default → "default"
+- **`--profile` and `--agent` flags** on run/report/review/code, mutually exclusive
+
+**What the Runner does today (runner.go):**
+
+1. Creates log files (stream.jsonl, stderr.log, exec.md, settings.json)
+2. If `SandboxSettings != ""`: parses inline JSON, merges runtime write dirs, writes temp settings file, appends `--settings <path>` to extra args
+3. Archives prompt to history dir
+4. Builds `agent.Request` and calls `r.Agent.Run(ctx, req)`
+5. Consumes `StreamEvent` channel, emits `RunProgress`, accumulates metrics
+6. Writes output file (LastMessageFilePath) or error file
+7. Appends to runner.log
+
+**What the Runner does NOT do yet:**
+
+- No container awareness — agents always run on host
+- No `ParseStreamFile()` for log replay
+- SandboxRules struct exists but is unused (settings JSON handles sandbox for claude, codex uses its own `--sandbox` flag)
+
+---
+
+## Phase 2: Docker Container Support
+
+### Goal
+
+Run agents inside Docker containers for filesystem isolation. The container wraps the agent process — same agent binary, different execution environment.
+
+### Architecture
+
+The container is **not** part of the agent. It's a wrapper around the agent's execution:
+
+```
+Without container (today):
+  Runner → Agent.Run() → exec.Command("claude", args...) on host
+
+With container:
+  Runner → Container.Exec("claude", args...) → docker exec → claude inside container
+```
+
+The agent doesn't know or care whether it's in a container. The Runner decides based on the profile's container config.
+
+### Container interface (expanded from current)
+
+```go
+package container
+
+type Container interface {
+    Type() string // "none", "docker", "srt"
+
+    // Ensure the container is running (build image if needed, start if not running).
+    // Idempotent — safe to call multiple times.
+    EnsureRunning(ctx context.Context) error
+
+    // Exec runs a command inside the container. Blocks until command completes.
+    Exec(ctx context.Context, opts ExecOpts) error
+
+    // Stop shuts down the container. No-op if not running.
+    Stop(ctx context.Context) error
+
+    // IsRunning checks if the container is currently running.
+    IsRunning(ctx context.Context) bool
+
+    // Shell opens an interactive shell in the container.
+    Shell(ctx context.Context) error
+
+    // DebugCommand returns the raw docker/srt command for debug output.
+    DebugCommand(opts ExecOpts) string
+}
+
+type ExecOpts struct {
+    Command   string
+    Args      []string
+    Stdin     io.Reader
+    Stdout    io.Writer
+    Stderr    io.Writer
+    WorkDir   string
+    Env       []string      // KEY=VALUE pairs
+    ExtraArgs []string      // from --container-args
+}
+```
+
+NoneContainer stays as-is (passthrough). The current `RunOpts` maps to the new `ExecOpts`.
+
+### DockerContainer implementation
+
+```go
+type DockerContainer struct {
+    // Config (from runtime.hcl container block)
+    Name         string            // container name: "ateam-<project-id>"
+    Image        string            // image name: "ateam-<project-id>:latest"
+    Dockerfile   string            // path to Dockerfile (relative to source dir)
+    IdleTimeout  time.Duration     // auto-stop after idle (0 = manual stop only)
+
+    // Runtime context (set by Runner before use)
+    SourceDir    string            // project source root — mounted as /workspace
+    ProjectDir   string            // .ateam/ dir — mounted as /workspace/.ateam
+    OrgDir       string            // .ateamorg/ dir — mounted read-only
+    ExtraMounts  []Mount           // additional mounts from SandboxRules
+
+    // Auth (forwarded from host)
+    ForwardEnv   []string          // env var names to forward (e.g. ANTHROPIC_API_KEY)
+}
+
+type Mount struct {
+    HostPath      string
+    ContainerPath string
+    ReadOnly      bool
+}
+```
+
+### Docker lifecycle
+
+**One-shot model** (for `ateam run`, `ateam report`):
+
+```bash
+docker run --rm -i \
+  --name ateam-<project-id>-<timestamp> \
+  -v <source>:/workspace:rw \
+  -v <.ateam>:/workspace/.ateam:rw \
+  -v <.ateamorg>:/home/ateam/.ateamorg:ro \
+  -w /workspace \
+  -e ANTHROPIC_API_KEY \
+  -e CLAUDE_CODE_OAUTH_TOKEN \
+  ateam-<project-id>:latest \
+  claude -p --output-format stream-json --verbose --settings /workspace/.ateam/settings.json
+```
+
+Prompt piped to stdin. Container removed after completion (`--rm`).
+
+**Start+exec model** (for `ateam code`, where supervisor calls `ateam run` multiple times):
+
+```bash
+# Start once
+docker run -d \
+  --name ateam-<project-id> \
+  -v <source>:/workspace:rw \
+  -v <.ateam>:/workspace/.ateam:rw \
+  -v <.ateamorg>:/home/ateam/.ateamorg:ro \
+  -w /workspace \
+  -e ANTHROPIC_API_KEY \
+  -e CLAUDE_CODE_OAUTH_TOKEN \
+  ateam-<project-id>:latest \
+  sleep infinity
+
+# Each agent call
+docker exec -i ateam-<project-id> \
+  claude -p --output-format stream-json --verbose --settings /workspace/.ateam/settings.json
+
+# Teardown
+docker stop ateam-<project-id> && docker rm ateam-<project-id>
+```
+
+**Decision: start with one-shot only.** The start+exec model is needed for the code phase but adds complexity (container lifecycle tracking, lock files, idle timeout). One-shot covers `ateam run`, `ateam report`, `ateam review`. The code phase can be added later.
+
+### How the Runner uses containers
+
+Today the Runner calls `r.Agent.Run(ctx, req)` which internally does `exec.CommandContext(...)`. With containers, the Runner needs to:
+
+1. Check if the profile has a container != "none"
+2. If yes: call `container.EnsureRunning()`, then `container.Exec()` instead of `agent.Run()`
+
+But wait — the agent still needs to parse the JSONL output. The container just changes *where* the process runs, not *what* it does.
+
+**Two approaches:**
+
+**A) Container wraps the agent (decorator pattern)**:
+```go
+type ContainerAgent struct {
+    Inner     Agent       // the real agent (claude, codex)
+    Container Container   // docker, srt
+}
+// ContainerAgent.Run() calls Container.Exec() with the agent's command,
+// then uses Inner's parser on the output.
+```
+
+**B) Agent receives a command executor**:
+```go
+type CommandExecutor func(ctx context.Context, cmd string, args []string, ...) (*exec.Cmd, error)
+// Host executor: exec.CommandContext(ctx, cmd, args...)
+// Docker executor: exec.CommandContext(ctx, "docker", "exec", containerID, cmd, args...)
+```
+
+**Recommendation: approach B (command executor).** It's simpler — the agent still owns its full lifecycle (build args, parse output, manage stream file), it just runs the command differently. The executor is a function, not a new type hierarchy.
+
+```go
+// In agent package:
+type Request struct {
+    Prompt     string
+    WorkDir    string
+    StreamFile string
+    StderrFile string
+    ExtraArgs  []string
+    Env        map[string]string
+    // NEW: if set, the agent uses this to create its subprocess
+    // instead of exec.CommandContext directly.
+    CmdFactory CmdFactory
+}
+
+// CmdFactory creates an *exec.Cmd. The agent calls this instead of
+// exec.CommandContext when present. For docker, this returns a command
+// like: docker exec -i <container> <original-cmd> <original-args>
+type CmdFactory func(ctx context.Context, name string, args ...string) *exec.Cmd
+```
+
+When `CmdFactory` is nil, agents use `exec.CommandContext` as today (no behavior change). When set, the factory wraps the command in `docker exec`.
+
+The Runner sets `req.CmdFactory` based on the profile's container:
+
+```go
+func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, ...) RunSummary {
+    // ... existing setup ...
+
+    req := agent.Request{
+        Prompt:     prompt,
+        WorkDir:    cwd,
+        StreamFile: streamFile,
+        StderrFile: stderrFile,
+        ExtraArgs:  extraArgs,
+    }
+
+    if r.Container != nil && r.Container.Type() != "none" {
+        if err := r.Container.EnsureRunning(ctx); err != nil {
+            return failEarly(err)
+        }
+        req.CmdFactory = r.Container.CmdFactory()
+    }
+
+    events := r.Agent.Run(ctx, req)
+    // ... rest unchanged ...
+}
+```
+
+### File paths inside the container
+
+The container has different filesystem paths than the host. The agent runs inside the container, so file paths in `Request` need to be container-relative:
+
+| Host path | Container path |
+|-----------|---------------|
+| `/Users/nic/projects/myapp` (source) | `/workspace` |
+| `/Users/nic/projects/myapp/.ateam` | `/workspace/.ateam` |
+| `/Users/nic/.ateamorg` | `/home/ateam/.ateamorg` |
+| Stream/stderr/settings files (in .ateam/logs/) | `/workspace/.ateam/logs/...` |
+
+The Runner needs to translate paths when building the Request. The container provides a `TranslatePath(hostPath) string` method.
+
+### runtime.hcl additions
+
+```hcl
+container "docker" {
+  type       = "docker"
+  dockerfile = "Dockerfile"           # relative to .ateam/ dir
+  idle_timeout = "30m"                # for start+exec model (future)
+  forward_env = [                     # env vars forwarded from host
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "OPENAI_API_KEY",
+  ]
+}
+
+# Agent config additions for container support:
+agent "claude-isolated" {
+  base    = "claude"
+  sandbox = ""                        # no settings needed — container handles isolation
+  env = {
+    CLAUDECODE = ""
+    HOME = "/home/ateam"              # clean HOME inside container
+  }
+}
+
+# New profiles:
+profile "claude-docker" {
+  agent     = "claude-isolated"
+  container = "docker"
+}
+
+profile "codex-docker" {
+  agent     = "codex"
+  container = "docker"
+}
+```
+
+### ContainerConfig additions
+
+```go
+type ContainerConfig struct {
+    Name        string
+    Type        string   // "none", "docker", "srt"
+    Dockerfile  string   // relative to .ateam/ dir
+    IdleTimeout string   // duration string, e.g. "30m"
+    ForwardEnv  []string // env var names to forward from host
+}
+```
+
+### Default Dockerfile
+
+Generated by `ateam init` or `ateam docker-init`:
+
+```dockerfile
+FROM node:22-slim
+RUN npm install -g @anthropic-ai/claude-code
+RUN useradd -m ateam
+USER ateam
+WORKDIR /workspace
+```
+
+Enough to run claude. The `docker-init` command (future) generates a project-specific Dockerfile using an agent.
+
+### Implementation steps for Docker support
+
+**Step 1: Expand ContainerConfig in runtime.hcl**
+- Add `dockerfile`, `idle_timeout`, `forward_env` to hclContainer + ContainerConfig
+- Add `container "docker"` to embedded defaults (with dockerfile and forward_env)
+- No behavior change yet
+
+**Step 2: Add CmdFactory to agent.Request**
+- Add `CmdFactory func(ctx, name, args) *exec.Cmd` to Request
+- Update ClaudeAgent.run() and CodexAgent.run() to use `req.CmdFactory` when set
+- No behavior change when nil (all existing paths)
+
+**Step 3: DockerContainer implementation**
+- `internal/container/docker.go`
+- `EnsureRunning()`: check if image exists → build if not → `docker run --rm -d`
+- `CmdFactory()`: returns a function that wraps commands in `docker exec -i <id>`
+- `Exec()`: wraps command in `docker exec`, connects stdin/stdout/stderr
+- `Stop()`: `docker stop && docker rm`
+- `IsRunning()`: `docker inspect`
+- `Shell()`: `docker exec -it <id> bash`
+- `DebugCommand()`: returns the full docker command string
+- Path translation: `TranslatePath()` maps host paths to container paths
+
+**Step 4: Wire Runner to Container**
+- Add `Container container.Container` to Runner struct
+- In `Runner.Run()`: if container != none, call `EnsureRunning()`, set `req.CmdFactory`
+- Translate file paths (stream, stderr, settings) to container-relative paths
+- `cmd/table.go`: `buildContainer()` from ContainerConfig, set on Runner
+
+**Step 5: Add docker profiles to defaults**
+- Add `claude-docker` and `codex-docker` profiles
+- Add `claude-isolated` agent config
+- Pre-flight check: verify required env vars exist before starting container
+
+**Step 6: `ateam shell` command**
+- `cmd/shell.go`: resolve profile, call `container.Shell()`
+- Errors if profile uses container "none"
+
+**Step 7: Tests**
+- Unit: DockerContainer.DebugCommand() returns correct docker commands
+- Unit: CmdFactory wrapping produces correct exec.Cmd
+- Unit: path translation
+- Integration (gated): `ATEAM_DOCKER_TEST=1` — build image, run mock agent inside, verify output
