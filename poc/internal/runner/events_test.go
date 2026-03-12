@@ -184,6 +184,29 @@ func TestParseAssistantToolInput(t *testing.T) {
 	}
 }
 
+func TestLooksLikeSecret(t *testing.T) {
+	secrets := []string{
+		"API_KEY", "aws_secret_access_key", "GITHUB_TOKEN",
+		"DB_PASSWORD", "PRIVATE_KEY", "AUTH_HEADER",
+		"MY_CREDENTIALS", "passwd",
+	}
+	for _, name := range secrets {
+		if !looksLikeSecret(name) {
+			t.Errorf("expected %q to be detected as secret", name)
+		}
+	}
+
+	safe := []string{
+		"HOME", "PATH", "GOPATH", "SHELL", "USER", "LANG",
+		"TERM", "EDITOR", "PWD",
+	}
+	for _, name := range safe {
+		if looksLikeSecret(name) {
+			t.Errorf("expected %q to NOT be detected as secret", name)
+		}
+	}
+}
+
 func TestParseResultWithIsError(t *testing.T) {
 	line := []byte(`{"type":"result","total_cost_usd":0.05,"is_error":true,"num_turns":1,"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":0}}`)
 	_, ev, err := parseStreamLine(line)

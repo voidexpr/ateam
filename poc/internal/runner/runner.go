@@ -547,7 +547,12 @@ func writeExecFile(path string, startedAt time.Time, opts RunOpts, prompt string
 	env := os.Environ()
 	sort.Strings(env)
 	for _, e := range env {
-		fmt.Fprintf(&b, "%s\n", e)
+		k, v, _ := strings.Cut(e, "=")
+		if looksLikeSecret(k) {
+			fmt.Fprintf(&b, "%s=<redacted:%d>\n", k, len(v))
+		} else {
+			fmt.Fprintf(&b, "%s\n", e)
+		}
 	}
 	fmt.Fprintf(&b, "\n## Specified\n")
 	fmt.Fprintf(&b, "unsets CLAUDECODE\n")
@@ -557,6 +562,20 @@ func writeExecFile(path string, startedAt time.Time, opts RunOpts, prompt string
 	fmt.Fprintf(&b, "\n# Prompt\n%s\n", prompt)
 
 	_ = os.WriteFile(path, []byte(b.String()), 0644)
+}
+
+// looksLikeSecret returns true if the variable name suggests it holds a secret.
+func looksLikeSecret(name string) bool {
+	up := strings.ToUpper(name)
+	for _, substr := range []string{
+		"KEY", "SECRET", "TOKEN", "PASSWORD", "PASSWD",
+		"CREDENTIAL", "AUTH", "PRIVATE",
+	} {
+		if strings.Contains(up, substr) {
+			return true
+		}
+	}
+	return false
 }
 
 // filterEnv returns a copy of env with the specified variable names removed.
