@@ -81,6 +81,19 @@ func authEnvVars() []string {
 	return vars
 }
 
+// claudeArgs builds the standard claude CLI args for live tests.
+// --dangerously-skip-permissions is required for tool use in non-interactive containers.
+func claudeArgs(maxTurns string, prompt string) []string {
+	return []string{
+		"-p",
+		"--dangerously-skip-permissions",
+		"--output-format", "text",
+		"--model", "haiku",
+		"--max-turns", maxTurns,
+		prompt,
+	}
+}
+
 // runClaude is a helper that runs claude in a DockerContainer and returns
 // stdout/stderr, failing the test with full diagnostic output on error.
 func runClaude(t *testing.T, ctx context.Context, dc *DockerContainer, args []string) (stdout, stderr string) {
@@ -116,13 +129,9 @@ func TestLiveClaudeReadFile(t *testing.T) {
 		ForwardEnv: authEnvVars(),
 	}
 
-	stdout, _ := runClaude(t, ctx, dc, []string{
-		"-p",
-		"--output-format", "text",
-		"--model", "haiku",
-		"--max-turns", "2",
+	stdout, _ := runClaude(t, ctx, dc, claudeArgs("2",
 		"Read /workspace/test-data.txt and reply with ONLY its exact contents.",
-	})
+	))
 
 	if !strings.Contains(stdout, "42") {
 		t.Errorf("expected output to contain '42', got: %s", stdout)
@@ -145,13 +154,9 @@ func TestLiveClaudeWriteFile(t *testing.T) {
 		ForwardEnv: authEnvVars(),
 	}
 
-	runClaude(t, ctx, dc, []string{
-		"-p",
-		"--output-format", "text",
-		"--model", "haiku",
-		"--max-turns", "3",
+	runClaude(t, ctx, dc, claudeArgs("3",
 		"Create a file at /workspace/agent-output.txt containing exactly 'written-by-agent'. Reply 'done' when finished.",
-	})
+	))
 
 	data, err := os.ReadFile(filepath.Join(sourceDir, "agent-output.txt"))
 	if err != nil {
@@ -183,13 +188,9 @@ func TestLiveClaudeOrgReadOnly(t *testing.T) {
 		ForwardEnv: authEnvVars(),
 	}
 
-	stdout, _ := runClaude(t, ctx, dc, []string{
-		"-p",
-		"--output-format", "text",
-		"--model", "haiku",
-		"--max-turns", "2",
+	stdout, _ := runClaude(t, ctx, dc, claudeArgs("2",
 		"Read /.ateamorg/config.txt and reply with ONLY its exact contents.",
-	})
+	))
 
 	if !strings.Contains(stdout, "org-config-value") {
 		t.Errorf("expected 'org-config-value' in output, got: %s", stdout)
@@ -218,22 +219,18 @@ func TestLiveClaudeNoAccessOutsideMounts(t *testing.T) {
 	}
 
 	// The host path won't exist inside the container at all.
-	var stdout, stderr bytes.Buffer
+	var outBuf, errBuf bytes.Buffer
 	err := dc.Run(ctx, RunOpts{
 		Command: "claude",
-		Args: []string{
-			"-p",
-			"--output-format", "text",
-			"--model", "haiku",
-			"--max-turns", "2",
-			"Try to read " + filepath.Join(secretDir, "password.txt") + ". If you cannot, reply 'ACCESS_DENIED'.",
-		},
-		Stdout: &stdout,
-		Stderr: &stderr,
+		Args: claudeArgs("2",
+			"Try to read "+filepath.Join(secretDir, "password.txt")+". If you cannot, reply 'ACCESS_DENIED'.",
+		),
+		Stdout: &outBuf,
+		Stderr: &errBuf,
 	})
 	_ = err // agent may error or report denial — both are fine
 
-	if strings.Contains(stdout.String(), "super-secret") {
+	if strings.Contains(outBuf.String(), "super-secret") {
 		t.Error("agent read unmounted host path — isolation breach")
 	}
 }
