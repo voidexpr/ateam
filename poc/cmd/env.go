@@ -38,6 +38,9 @@ func runEnv(cmd *cobra.Command, args []string) error {
 	relOrg, _ := filepath.Rel(cwd, orgRoot)
 	fmt.Printf("     Org: %s (%s)\n", relOrg, tildeHome(orgRoot))
 
+	// Show auth status
+	printAuthStatus()
+
 	// Show runtime.hcl resolution
 	printRuntimePaths(env, cwd)
 
@@ -84,6 +87,39 @@ func runEnv(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func printAuthStatus() {
+	oauth := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+
+	if oauth == "" && apiKey == "" {
+		fmt.Println("    Auth: (none)")
+		return
+	}
+
+	// CLAUDE_CODE_OAUTH_TOKEN takes precedence
+	if oauth != "" {
+		label := "active"
+		if apiKey != "" {
+			label = "active, takes precedence"
+		}
+		fmt.Printf("    Auth: CLAUDE_CODE_OAUTH_TOKEN=%s (%s)\n", maskEnvVar(oauth), label)
+	}
+	if apiKey != "" {
+		label := "active"
+		if oauth != "" {
+			label = "set but unused (CLAUDE_CODE_OAUTH_TOKEN takes precedence)"
+		}
+		fmt.Printf("          ANTHROPIC_API_KEY=%s (%s)\n", maskEnvVar(apiKey), label)
+	}
+}
+
+func maskEnvVar(val string) string {
+	if len(val) <= 8 {
+		return "***"
+	}
+	return val[:4] + "..." + val[len(val)-4:]
 }
 
 func printRuntimePaths(env *root.ResolvedEnv, cwd string) {

@@ -97,8 +97,8 @@ container "docker" {
   type        = "docker"
   dockerfile  = "Dockerfile"
   forward_env = [
-    "ANTHROPIC_API_KEY",
     "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
   ]
 }
 
