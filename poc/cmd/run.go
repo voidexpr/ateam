@@ -18,12 +18,13 @@ import (
 )
 
 var (
-	runRole    string
-	runProfile string
-	runModel   string
-	runStream  bool
-	runWorkDir string
-	runSummary bool
+	runRole      string
+	runProfile   string
+	runModel     string
+	runNoStream  bool
+	runWorkDir   string
+	runNoSummary bool
+	runQuiet     bool
 )
 
 var runCmd = &cobra.Command{
@@ -35,12 +36,15 @@ Can run standalone (just needs .ateamorg/) or within a project context.
 With --role: validates the role exists and stores output in role directory.
 Without --role: runs as ad-hoc, stores output in project or org logs.
 
+Streaming and summary are on by default. Use --quiet to suppress both,
+or --no-stream / --no-summary individually.
+
 Example:
   ateam run "say hello"
   ateam run "Analyze the auth module" --role security
-  ateam run @prompt.md --role testing_basic --stream
-  ateam run "test" --profile test
-  ateam run "say hi" --model sonnet`,
+  ateam run "test" --profile cheap
+  ateam run "say hi" --model sonnet
+  ateam run "quick check" --quiet`,
 	Args: cobra.ExactArgs(1),
 	RunE: runRun,
 }
@@ -49,9 +53,10 @@ func init() {
 	runCmd.Flags().StringVar(&runRole, "role", "", "role to run (optional)")
 	runCmd.Flags().StringVar(&runProfile, "profile", "", "runtime profile to use (overrides config resolution)")
 	runCmd.Flags().StringVar(&runModel, "model", "", "model override")
-	runCmd.Flags().BoolVar(&runStream, "stream", false, "show progress updates during execution")
+	runCmd.Flags().BoolVar(&runNoStream, "no-stream", false, "disable progress updates during execution")
+	runCmd.Flags().BoolVar(&runNoSummary, "no-summary", false, "disable run summary after completion")
+	runCmd.Flags().BoolVar(&runQuiet, "quiet", false, "disable both streaming and summary (same as --no-stream --no-summary)")
 	runCmd.Flags().StringVar(&runWorkDir, "work-dir", "", "working directory (defaults to project source dir or cwd)")
-	runCmd.Flags().BoolVar(&runSummary, "summary", false, "print run summary after completion")
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
@@ -161,9 +166,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 		opts.HistoryDir = env.RoleHistoryDir(runRole)
 	}
 
+	showStream := !runNoStream && !runQuiet
+	showSummary := !runNoSummary && !runQuiet
+
 	var progress chan runner.RunProgress
 	var progressWg sync.WaitGroup
-	if runStream {
+	if showStream {
 		progress = make(chan runner.RunProgress, 64)
 		progressWg.Add(1)
 		go func() {
@@ -194,7 +202,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if runSummary {
+	if showSummary {
 		printRunSummary(result)
 	}
 

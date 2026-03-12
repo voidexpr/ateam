@@ -93,6 +93,7 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 		Command: cmd,
 		Args:    ac.Args,
 		Model:   ac.Model,
+		Env:     ac.Env,
 	}
 	return ca
 }

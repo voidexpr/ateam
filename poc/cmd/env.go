@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
+	"github.com/ateam-poc/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -35,6 +37,9 @@ func runEnv(cmd *cobra.Command, args []string) error {
 
 	relOrg, _ := filepath.Rel(cwd, orgRoot)
 	fmt.Printf("     Org: %s (%s)\n", relOrg, tildeHome(orgRoot))
+
+	// Show runtime.hcl resolution
+	printRuntimePaths(env, cwd)
 
 	if env.ProjectDir == "" {
 		return nil
@@ -79,6 +84,53 @@ func runEnv(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func printRuntimePaths(env *root.ResolvedEnv, cwd string) {
+	// Build the resolution chain: embedded -> org/defaults -> org -> project
+	var paths []string
+	if env.OrgDir != "" {
+		paths = append(paths,
+			filepath.Join(env.OrgDir, "defaults", "runtime.hcl"),
+			filepath.Join(env.OrgDir, "runtime.hcl"),
+		)
+	}
+	if env.ProjectDir != "" {
+		paths = append(paths, filepath.Join(env.ProjectDir, "runtime.hcl"))
+	}
+
+	fmt.Print(" Runtime: (embedded defaults)")
+	for _, p := range paths {
+		if fileOrSymlinkExists(p) {
+			fmt.Printf(" → %s", relPath(cwd, p))
+		}
+	}
+	fmt.Println()
+
+	// Show loaded profiles
+	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
+	if err == nil {
+		var names []string
+		for name := range rtCfg.Profiles {
+			names = append(names, name)
+		}
+		if len(names) > 0 {
+			sort.Strings(names)
+			fmt.Printf("Profiles: %s\n", strings.Join(names, ", "))
+		}
+	}
+}
+
+// fileOrSymlinkExists returns true if path exists as a file or symlink.
+// Uses Lstat first so broken symlinks are still detected, then Stat to confirm.
+func fileOrSymlinkExists(path string) bool {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true
+	}
+	// Check for broken symlink
+	_, err = os.Lstat(path)
+	return err == nil
 }
 
 func tildeHome(p string) string {

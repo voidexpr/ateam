@@ -269,9 +269,9 @@ Run an agent with a prompt. Can run standalone (just needs `.ateamorg/`) or with
 ```bash
 ateam run "say hello"
 ateam run "Analyze the auth module" --role security
-ateam run @prompt.md --role testing_basic --stream
-ateam run "test" --profile test
+ateam run "test" --profile cheap
 ateam run "say hi" --model sonnet
+ateam run "quick check" --quiet
 ```
 
 | Flag | Description |
@@ -279,9 +279,10 @@ ateam run "say hi" --model sonnet
 | `--role ROLE` | Role to run (optional — requires project context) |
 | `--profile NAME` | Runtime profile to use (overrides config resolution) |
 | `--model MODEL` | Model override |
-| `--stream` | Show progress updates on stderr during execution |
+| `--no-stream` | Disable progress updates on stderr (on by default) |
+| `--no-summary` | Disable cost/duration/tokens summary (on by default) |
+| `--quiet` | Disable both streaming and summary |
 | `--work-dir PATH` | Working directory (defaults to project source dir or cwd) |
-| `--summary` | Print cost/duration/tokens summary to stderr after completion |
 
 Returns the agent's exit code. Agent stderr is forwarded to stderr.
 

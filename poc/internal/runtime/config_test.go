@@ -12,20 +12,18 @@ func TestLoadDefaults(t *testing.T) {
 		t.Fatalf("unexpected error loading defaults: %v", err)
 	}
 
-	if _, ok := cfg.Agents["claude"]; !ok {
-		t.Error("expected 'claude' agent in defaults")
-	}
-	if _, ok := cfg.Agents["mock"]; !ok {
-		t.Error("expected 'mock' agent in defaults")
+	for _, name := range []string{"claude", "claude-sonnet", "claude-haiku", "mock"} {
+		if _, ok := cfg.Agents[name]; !ok {
+			t.Errorf("expected %q agent in defaults", name)
+		}
 	}
 	if _, ok := cfg.Containers["none"]; !ok {
 		t.Error("expected 'none' container in defaults")
 	}
-	if _, ok := cfg.Profiles["default"]; !ok {
-		t.Error("expected 'default' profile in defaults")
-	}
-	if _, ok := cfg.Profiles["test"]; !ok {
-		t.Error("expected 'test' profile in defaults")
+	for _, name := range []string{"default", "cheap", "cheapest", "test"} {
+		if _, ok := cfg.Profiles[name]; !ok {
+			t.Errorf("expected %q profile in defaults", name)
+		}
 	}
 }
 
@@ -120,6 +118,115 @@ agent "claude" {
 	}
 }
 
+func TestOrgDefaultsOverride(t *testing.T) {
+	orgDir := t.TempDir()
+	defaultsDir := filepath.Join(orgDir, "defaults")
+	if err := os.MkdirAll(defaultsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// org/defaults/runtime.hcl overrides embedded defaults
+	defaultsHCL := `
+agent "claude" {
+  command = "claude"
+  args    = ["-p", "--output-format", "stream-json"]
+  model   = "sonnet"
+}
+`
+	if err := os.WriteFile(filepath.Join(defaultsDir, "runtime.hcl"), []byte(defaultsHCL), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load("", orgDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ac := cfg.Agents["claude"]
+	if ac.Model != "sonnet" {
+		t.Errorf("expected model 'sonnet' from org defaults, got %q", ac.Model)
+	}
+}
+
+func TestOrgDefaultsThenOrgOverride(t *testing.T) {
+	orgDir := t.TempDir()
+	defaultsDir := filepath.Join(orgDir, "defaults")
+	if err := os.MkdirAll(defaultsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// org/defaults sets model to sonnet
+	defaultsHCL := `
+agent "claude" {
+  command = "claude"
+  args    = ["-p"]
+  model   = "sonnet"
+}
+`
+	// org root overrides model to opus
+	orgHCL := `
+agent "claude" {
+  command = "claude"
+  args    = ["-p"]
+  model   = "opus"
+}
+`
+	if err := os.WriteFile(filepath.Join(defaultsDir, "runtime.hcl"), []byte(defaultsHCL), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(orgDir, "runtime.hcl"), []byte(orgHCL), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load("", orgDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ac := cfg.Agents["claude"]
+	if ac.Model != "opus" {
+		t.Errorf("expected org override model 'opus', got %q", ac.Model)
+	}
+}
+
+func TestOrgDefaultsSymlink(t *testing.T) {
+	orgDir := t.TempDir()
+	defaultsDir := filepath.Join(orgDir, "defaults")
+	if err := os.MkdirAll(defaultsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create the actual file elsewhere
+	srcDir := t.TempDir()
+	srcHCL := `
+agent "claude" {
+  command = "claude"
+  args    = ["-p"]
+  model   = "haiku"
+}
+`
+	srcPath := filepath.Join(srcDir, "runtime.hcl")
+	if err := os.WriteFile(srcPath, []byte(srcHCL), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Symlink from org/defaults/runtime.hcl -> srcPath
+	linkPath := filepath.Join(defaultsDir, "runtime.hcl")
+	if err := os.Symlink(srcPath, linkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load("", orgDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ac := cfg.Agents["claude"]
+	if ac.Model != "haiku" {
+		t.Errorf("expected model 'haiku' from symlinked defaults, got %q", ac.Model)
+	}
+}
+
 func TestProjectOverride(t *testing.T) {
 	orgDir := t.TempDir()
 	projDir := t.TempDir()
@@ -179,5 +286,84 @@ func TestMockAgentConfig(t *testing.T) {
 	ac := cfg.Agents["mock"]
 	if ac.Type != "builtin" {
 		t.Errorf("expected mock agent type 'builtin', got %q", ac.Type)
+	}
+}
+
+func TestClaudeAgentEnv(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ac := cfg.Agents["claude"]
+	if ac.Env == nil {
+		t.Fatal("expected env map on claude agent, got nil")
+	}
+	v, ok := ac.Env["CLAUDECODE"]
+	if !ok {
+		t.Error("expected CLAUDECODE key in claude agent env")
+	}
+	if v != "" {
+		t.Errorf("expected CLAUDECODE to be empty string (unset), got %q", v)
+	}
+}
+
+func TestCheapProfiles(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	tests := []struct {
+		profile string
+		agent   string
+	}{
+		{"cheap", "claude-sonnet"},
+		{"cheapest", "claude-haiku"},
+	}
+
+	for _, tt := range tests {
+		prof, ac, _, err := cfg.ResolveProfile(tt.profile)
+		if err != nil {
+			t.Errorf("ResolveProfile(%q): %v", tt.profile, err)
+			continue
+		}
+		if prof.Agent != tt.agent {
+			t.Errorf("profile %q: expected agent %q, got %q", tt.profile, tt.agent, prof.Agent)
+		}
+		if ac.Command != "claude" {
+			t.Errorf("profile %q agent: expected command 'claude', got %q", tt.profile, ac.Command)
+		}
+	}
+}
+
+func TestOrgOverrideEnv(t *testing.T) {
+	dir := t.TempDir()
+
+	hcl := `
+agent "claude" {
+  command = "claude"
+  args    = ["-p", "--verbose"]
+  env = {
+    CLAUDECODE = ""
+    CUSTOM_VAR = "hello"
+  }
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load("", dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ac := cfg.Agents["claude"]
+	if ac.Env["CUSTOM_VAR"] != "hello" {
+		t.Errorf("expected CUSTOM_VAR=hello, got %q", ac.Env["CUSTOM_VAR"])
+	}
+	if ac.Env["CLAUDECODE"] != "" {
+		t.Errorf("expected CLAUDECODE='', got %q", ac.Env["CLAUDECODE"])
 	}
 }
