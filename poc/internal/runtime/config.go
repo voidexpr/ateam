@@ -13,6 +13,7 @@ import (
 )
 
 //go:embed defaults/runtime.hcl
+//go:embed defaults/Dockerfile
 var defaultsFS embed.FS
 
 // Config is the top-level runtime configuration parsed from runtime.hcl files.
@@ -338,6 +339,56 @@ func parseLocals(data []byte, filename string) (*hcl.EvalContext, error) {
 			"local": cty.ObjectVal(locals),
 		},
 	}, nil
+}
+
+// ResolveDockerfile finds the Dockerfile using a fallback chain:
+//  1. .ateam/roles/<role>/Dockerfile (if roleID is set)
+//  2. .ateam/Dockerfile
+//  3. .ateamorg/Dockerfile
+//  4. .ateamorg/defaults/Dockerfile
+//  5. embedded default Dockerfile (written to a temp file)
+//
+// The filename searched for comes from the container config (cc.Dockerfile,
+// typically just "Dockerfile"). Returns the absolute path to the first match.
+func ResolveDockerfile(cc *ContainerConfig, projectDir, orgDir, roleID string) (string, error) {
+	name := cc.Dockerfile
+	if name == "" {
+		name = "Dockerfile"
+	}
+
+	// Build the search path
+	var candidates []string
+	if projectDir != "" {
+		if roleID != "" {
+			candidates = append(candidates, filepath.Join(projectDir, "roles", roleID, name))
+		}
+		candidates = append(candidates, filepath.Join(projectDir, name))
+	}
+	if orgDir != "" {
+		candidates = append(candidates, filepath.Join(orgDir, name))
+		candidates = append(candidates, filepath.Join(orgDir, "defaults", name))
+	}
+
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+
+	// Final fallback: embedded default
+	data, err := defaultsFS.ReadFile("defaults/Dockerfile")
+	if err != nil {
+		return "", fmt.Errorf("no Dockerfile found and embedded default missing: %w", err)
+	}
+	tmpDir, err := os.MkdirTemp("", "ateam-dockerfile-*")
+	if err != nil {
+		return "", fmt.Errorf("cannot create temp dir for Dockerfile: %w", err)
+	}
+	tmpFile := filepath.Join(tmpDir, "Dockerfile")
+	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+		return "", fmt.Errorf("cannot write embedded Dockerfile: %w", err)
+	}
+	return tmpFile, nil
 }
 
 // ResolveProfile looks up a profile by name and validates agent/container refs.

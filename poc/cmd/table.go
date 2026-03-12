@@ -53,7 +53,8 @@ func fmtInt(n int) string {
 }
 
 // newRunner creates a Runner using the resolved profile from runtime.hcl.
-func newRunner(env *root.ResolvedEnv, profileName string) (*runner.Runner, error) {
+// roleID is optional — used for role-specific Dockerfile resolution.
+func newRunner(env *root.ResolvedEnv, profileName, roleID string) (*runner.Runner, error) {
 	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
 	if err != nil {
 		return nil, fmt.Errorf("cannot load runtime.hcl: %w", err)
@@ -66,7 +67,11 @@ func newRunner(env *root.ResolvedEnv, profileName string) (*runner.Runner, error
 
 	r := runnerFromAgentConfig(env, ac)
 	r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
-	r.Container = buildContainer(cc, prof, env.SourceDir, env.ProjectDir, env.OrgDir)
+	ct, err := buildContainer(cc, prof, env.SourceDir, env.ProjectDir, env.OrgDir, roleID)
+	if err != nil {
+		return nil, err
+	}
+	r.Container = ct
 	return r, nil
 }
 
@@ -115,7 +120,7 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 // newRunnerDefault creates a Runner using the default profile.
 func newRunnerDefault(env *root.ResolvedEnv) (*runner.Runner, error) {
 	profileName := env.Config.ResolveProfile("", "")
-	return newRunner(env, profileName)
+	return newRunner(env, profileName, "")
 }
 
 // resolveRunnerMinimal builds a Runner without project context (just org dir).
@@ -157,10 +162,10 @@ func resolveRunner(env *root.ResolvedEnv, profileFlag, agentFlag, action, roleID
 	case agentFlag != "":
 		return newRunnerFromAgent(env, agentFlag)
 	case profileFlag != "":
-		return newRunner(env, profileFlag)
+		return newRunner(env, profileFlag, roleID)
 	default:
 		profileName := env.Config.ResolveProfile(action, roleID)
-		return newRunner(env, profileName)
+		return newRunner(env, profileName, roleID)
 	}
 }
 
@@ -196,15 +201,16 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 
 // buildContainer creates a Container implementation from config.
 // Returns nil for "none" type (runner treats nil as host execution).
-func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, sourceDir, projectDir, orgDir string) container.Container {
+// roleID is used for Dockerfile resolution (role-specific Dockerfiles).
+func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, sourceDir, projectDir, orgDir, roleID string) (container.Container, error) {
 	if cc == nil || cc.Type == "none" {
-		return nil
+		return nil, nil
 	}
 	switch cc.Type {
 	case "docker":
-		dockerfile := cc.Dockerfile
-		if dockerfile != "" && !filepath.IsAbs(dockerfile) {
-			dockerfile = filepath.Join(projectDir, dockerfile)
+		dockerfile, err := runtime.ResolveDockerfile(cc, projectDir, orgDir, roleID)
+		if err != nil {
+			return nil, err
 		}
 		// Resolve relative paths in extra_volumes from project dir
 		volumes := make([]string, len(cc.ExtraVolumes))
@@ -226,9 +232,9 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 			SourceDir:    sourceDir,
 			ProjectDir:   projectDir,
 			OrgDir:       orgDir,
-		}
+		}, nil
 	default:
-		return nil
+		return nil, nil
 	}
 }
 

@@ -94,6 +94,20 @@ Defined in `internal/container/`. Each container implements the `Container` inte
 | `none` | Direct host execution (default) |
 | `docker` | One-shot `docker run --rm -i` per invocation |
 
+#### Dockerfile resolution
+
+The Dockerfile used to build the container image is resolved with a fallback chain (first match wins):
+
+1. `.ateam/roles/<role>/Dockerfile` — role-specific (when a role is specified)
+2. `.ateam/Dockerfile` — project-level
+3. `.ateamorg/Dockerfile` — org-level
+4. `.ateamorg/defaults/Dockerfile` — org defaults
+5. Embedded default — built into the `ateam` binary
+
+This follows the same pattern as prompt resolution. A security-focused role can use a locked-down container while other roles use the project default.
+
+The filename searched for comes from the container config's `dockerfile` field (defaults to `"Dockerfile"`).
+
 #### Docker path mapping
 
 The Docker container maps host paths to fixed container paths:
