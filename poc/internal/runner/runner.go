@@ -136,9 +136,11 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	extraArgs := make([]string, len(r.ExtraArgs))
 	copy(extraArgs, r.ExtraArgs)
 
-	// Write sandbox settings if configured
+	// Write sandbox settings if configured.
+	// Skip when running inside Docker — the container itself is the sandbox.
 	var settingsJSON []byte
-	if r.SandboxSettings != "" {
+	_, isDocker := r.Container.(*container.DockerContainer)
+	if r.SandboxSettings != "" && !isDocker {
 		settingsTarget := prefix + "_settings.json"
 		var err error
 		settingsJSON, err = r.writeSettings(settingsTarget, opts)
@@ -187,12 +189,6 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		req.CmdFactory = dc.CmdFactory()
 		req.StreamFile = dc.TranslatePath(streamFile)
 		req.StderrFile = dc.TranslatePath(stderrFile)
-		// Settings file path in extraArgs also needs translation
-		for i, a := range req.ExtraArgs {
-			if a == "--settings" && i+1 < len(req.ExtraArgs) {
-				req.ExtraArgs[i+1] = dc.TranslatePath(req.ExtraArgs[i+1])
-			}
-		}
 		req.WorkDir = dc.TranslatePath(cwd)
 	}
 

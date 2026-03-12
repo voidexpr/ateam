@@ -119,9 +119,12 @@ profile "codex" {
   container = "none"
 }
 
+// Docker container is the sandbox — skip claude's own sandbox settings
+// and use --dangerously-skip-permissions for unattended tool use.
 profile "docker" {
-  agent     = "claude"
-  container = "docker"
+  agent            = "claude"
+  container        = "docker"
+  agent_extra_args = ["--dangerously-skip-permissions"]
 }
 
 profile "test" {
