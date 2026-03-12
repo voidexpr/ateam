@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 
@@ -48,8 +49,15 @@ func (d *DockerContainer) EnsureImage(ctx context.Context) error {
 		return fmt.Errorf("Dockerfile not found: %s", d.Dockerfile)
 	}
 
+	// Pass host UID so the container user owns bind-mounted files.
+	uid := "1000"
+	if u, err := user.Current(); err == nil {
+		uid = u.Uid
+	}
+
 	buildCtx := filepath.Dir(d.Dockerfile)
 	cmd := exec.CommandContext(ctx, "docker", "build",
+		"--build-arg", "USER_UID="+uid,
 		"-t", d.Image,
 		"-f", d.Dockerfile,
 		buildCtx,

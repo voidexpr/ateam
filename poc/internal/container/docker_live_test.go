@@ -7,12 +7,20 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func liveTestUID() string {
+	if u, err := user.Current(); err == nil {
+		return u.Uid
+	}
+	return "1000"
+}
 
 // These tests run real Claude (haiku) inside Docker containers.
 // Requirements:
@@ -41,8 +49,8 @@ func ensureLiveImage(t *testing.T) {
 			return
 		}
 		df := filepath.Join(dir, "Dockerfile")
-		os.WriteFile(df, []byte("FROM node:22-slim\nRUN npm install -g @anthropic-ai/claude-code\nWORKDIR /workspace\n"), 0644)
-		cmd := exec.Command("docker", "build", "-t", liveImage, "-f", df, dir)
+		os.WriteFile(df, []byte("FROM node:22-slim\nRUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/* && npm install -g @anthropic-ai/claude-code\nARG USER_UID=1000\nRUN useradd -m -u $USER_UID ateam\nUSER ateam\nWORKDIR /workspace\n"), 0644)
+		cmd := exec.Command("docker", "build", "--build-arg", "USER_UID="+liveTestUID(), "-t", liveImage, "-f", df, dir)
 		cmd.Stdout = os.Stderr
 		cmd.Stderr = os.Stderr
 		buildErr = cmd.Run()
