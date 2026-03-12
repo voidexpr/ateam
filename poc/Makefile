@@ -26,10 +26,14 @@ test-docker-live:
 		echo "ERROR: No API authentication configured."; \
 		echo ""; \
 		echo "Set one of these environment variables:"; \
-		echo "  export ANTHROPIC_API_KEY=sk-ant-..."; \
-		echo "  export CLAUDE_CODE_OAUTH_TOKEN=..."; \
 		echo ""; \
-		echo "Then re-run: make test-docker-live"; \
+		echo "  Option A - API key (from https://console.anthropic.com/settings/keys):"; \
+		echo "    export ANTHROPIC_API_KEY=sk-ant-..."; \
+		echo ""; \
+		echo "  Option B - OAuth token (reuses your Claude Code login):"; \
+		echo "    export CLAUDE_CODE_OAUTH_TOKEN=\"\$$(cat ~/.claude/.credentials.json | grep -o '\"accessToken\":\"[^\"]*\"' | cut -d'\"' -f4)\""; \
+		echo ""; \
+		echo "See DEV.md for details. Then re-run: make test-docker-live"; \
 		exit 1; \
 	fi
 	docker build -t ateam-test-dind -f test/Dockerfile.dind .

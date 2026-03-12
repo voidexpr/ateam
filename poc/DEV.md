@@ -38,12 +38,22 @@ Runs real Claude (haiku) inside Docker containers to verify end-to-end agent beh
 - Agent reads org config from read-only mount
 - Agent cannot access unmounted host paths
 
-Build tag: `docker_live`. Requires one of:
+Build tag: `docker_live`. Requires one of these auth methods:
+
+**Option A — API key** (recommended for CI):
+
+Create a key at https://console.anthropic.com/settings/keys, then:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-# or
-export CLAUDE_CODE_OAUTH_TOKEN=...
+```
+
+**Option B — OAuth token** (reuses your Claude Code login):
+
+Authenticate Claude Code if you haven't already (`claude` will prompt on first run), then:
+
+```bash
+export CLAUDE_CODE_OAUTH_TOKEN="$(cat ~/.claude/.credentials.json | grep -o '"accessToken":"[^"]*"' | cut -d'"' -f4)"
 ```
 
 The Makefile checks for auth before starting and fails with setup instructions if neither is set. The tests themselves also fail (not skip) when auth is missing — this catches configuration issues in CI.
