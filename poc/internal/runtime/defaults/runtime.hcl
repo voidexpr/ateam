@@ -1,25 +1,26 @@
 agent "claude" {
   command = "claude"
   args    = ["-p", "--output-format", "stream-json", "--verbose"]
+  sandbox = "ateam_claude_sandbox_extra_settings.json"
   env = {
     CLAUDECODE = ""
   }
 }
 
 agent "claude-sonnet" {
-  command = "claude"
+  base    = "claude"
   args    = ["-p", "--output-format", "stream-json", "--verbose", "--model", "sonnet", "--max-budget-usd", "0.50"]
-  env = {
-    CLAUDECODE = ""
-  }
 }
 
 agent "claude-haiku" {
-  command = "claude"
+  base    = "claude"
   args    = ["-p", "--output-format", "stream-json", "--verbose", "--model", "haiku", "--max-budget-usd", "0.10"]
-  env = {
-    CLAUDECODE = ""
-  }
+}
+
+agent "codex" {
+  type    = "codex"
+  command = "codex"
+  args    = ["--sandbox", "workspace-write", "--ask-for-approval", "never"]
 }
 
 agent "mock" {
@@ -42,6 +43,11 @@ profile "cheap" {
 
 profile "cheapest" {
   agent     = "claude-haiku"
+  container = "none"
+}
+
+profile "codex" {
+  agent     = "codex"
   container = "none"
 }
 

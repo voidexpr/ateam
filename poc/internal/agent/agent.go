@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 )
 
 // Agent executes a prompt and produces normalized stream events.
@@ -62,6 +64,47 @@ type StreamEvent struct {
 	IsError         bool
 	ExitCode        int
 	Err             error
+}
+
+// buildProcessEnv constructs the process environment for an agent.
+// Keys with empty values in agentEnv are excluded from the parent process env.
+// Non-empty agentEnv values are added. reqEnv overrides everything.
+func buildProcessEnv(agentEnv, reqEnv map[string]string) []string {
+	var excludeKeys []string
+	for k, v := range agentEnv {
+		if v == "" {
+			excludeKeys = append(excludeKeys, k)
+		}
+	}
+
+	env := filterEnv(os.Environ(), excludeKeys...)
+
+	for k, v := range agentEnv {
+		if v != "" {
+			env = append(env, k+"="+v)
+		}
+	}
+
+	for k, v := range reqEnv {
+		env = append(env, k+"="+v)
+	}
+
+	return env
+}
+
+func filterEnv(env []string, exclude ...string) []string {
+	excludeSet := make(map[string]bool, len(exclude))
+	for _, e := range exclude {
+		excludeSet[e] = true
+	}
+	var result []string
+	for _, e := range env {
+		if k, _, ok := strings.Cut(e, "="); ok && excludeSet[k] {
+			continue
+		}
+		result = append(result, e)
+	}
+	return result
 }
 
 // Result drains a stream of events and returns the final result.

@@ -20,6 +20,8 @@ var (
 	reviewPrint        bool
 	reviewDryRun       bool
 	reviewCheaperModel bool
+	reviewProfile      string
+	reviewAgent        string
 )
 
 var reviewCmd = &cobra.Command{
@@ -44,6 +46,7 @@ func init() {
 	reviewCmd.Flags().BoolVar(&reviewPrint, "print", false, "print review to stdout after completion")
 	reviewCmd.Flags().BoolVar(&reviewDryRun, "dry-run", false, "print the computed prompt and list reports without running")
 	addCheaperModelFlag(reviewCmd, &reviewCheaperModel)
+	addProfileFlags(reviewCmd, &reviewProfile, &reviewAgent)
 }
 
 func runReview(cmd *cobra.Command, args []string) error {
@@ -84,8 +87,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Supervisor reviewing reports (%dm timeout)...\n", timeout)
 
-	profileName := env.Config.ResolveProfile(runner.ActionReview, "")
-	cr, err := newRunner(env, profileName)
+	cr, err := resolveRunner(env, reviewProfile, reviewAgent, runner.ActionReview, "")
 	if err != nil {
 		return err
 	}

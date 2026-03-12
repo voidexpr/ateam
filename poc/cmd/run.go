@@ -13,13 +13,13 @@ import (
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
-	"github.com/ateam-poc/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
 var (
 	runRole      string
 	runProfile   string
+	runAgent     string
 	runModel     string
 	runNoStream  bool
 	runWorkDir   string
@@ -51,8 +51,8 @@ Example:
 
 func init() {
 	runCmd.Flags().StringVar(&runRole, "role", "", "role to run (optional)")
-	runCmd.Flags().StringVar(&runProfile, "profile", "", "runtime profile to use (overrides config resolution)")
 	runCmd.Flags().StringVar(&runModel, "model", "", "model override")
+	addProfileFlags(runCmd, &runProfile, &runAgent)
 	runCmd.Flags().BoolVar(&runNoStream, "no-stream", false, "disable progress updates during execution")
 	runCmd.Flags().BoolVar(&runNoSummary, "no-summary", false, "disable run summary after completion")
 	runCmd.Flags().BoolVar(&runQuiet, "quiet", false, "disable both streaming and summary (same as --no-stream --no-summary)")
@@ -100,31 +100,25 @@ func runRun(cmd *cobra.Command, args []string) error {
 		workDir = env.SourceDir
 	}
 
-	// Load runtime config and resolve profile
-	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
-	if err != nil {
-		return fmt.Errorf("cannot load runtime.hcl: %w", err)
-	}
-
-	profileName := runProfile
-	if profileName == "" {
-		if hasProject {
-			profileName = env.Config.ResolveProfile(runner.ActionRun, runRole)
-		} else {
-			profileName = "default"
+	// Resolve runner from flags or config
+	var r *runner.Runner
+	if hasProject {
+		r, err = resolveRunner(env, runProfile, runAgent, runner.ActionRun, runRole)
+	} else {
+		// No project context — use flags or "default" profile
+		profile := runProfile
+		if profile == "" && runAgent == "" {
+			profile = "default"
 		}
+		r, err = resolveRunnerMinimal(env.OrgDir, profile, runAgent)
 	}
-
-	_, ac, _, err := rtCfg.ResolveProfile(profileName)
 	if err != nil {
 		return err
 	}
 
-	ag := buildAgent(ac)
-
 	// Apply model override
 	if runModel != "" {
-		if ca, ok := ag.(*agent.ClaudeAgent); ok {
+		if ca, ok := r.Agent.(*agent.ClaudeAgent); ok {
 			ca.Model = runModel
 		}
 	}
@@ -137,17 +131,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 		logsDir = env.SupervisorLogsDir()
 	} else {
 		logsDir = filepath.Join(env.OrgDir, "logs", "adhoc")
-	}
-
-	// Build runner
-	r := &runner.Runner{
-		Agent:  ag,
-		OrgDir: env.OrgDir,
-	}
-	if hasProject {
-		r.LogFile = env.RunnerLogPath()
-		r.ProjectDir = env.ProjectDir
-		r.ExtraWriteDirs = []string{env.OrgDir}
 	}
 
 	// Build opts

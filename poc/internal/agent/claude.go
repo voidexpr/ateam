@@ -51,7 +51,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 		cmd.Dir = req.WorkDir
 	}
 	cmd.Stdin = strings.NewReader(req.Prompt)
-	cmd.Env = c.buildEnv(req.Env)
+	cmd.Env = buildProcessEnv(c.Env, req.Env)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -169,35 +169,6 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 	}
 }
 
-// buildEnv constructs the process environment.
-// Agent-level Env from config is applied first (empty value = exclude from parent),
-// then request-level Env overrides on top.
-func (c *ClaudeAgent) buildEnv(reqEnv map[string]string) []string {
-	// Collect keys to exclude (agent env with empty value)
-	var excludeKeys []string
-	for k, v := range c.Env {
-		if v == "" {
-			excludeKeys = append(excludeKeys, k)
-		}
-	}
-
-	env := filterEnv(os.Environ(), excludeKeys...)
-
-	// Apply agent env (non-empty values)
-	for k, v := range c.Env {
-		if v != "" {
-			env = append(env, k+"="+v)
-		}
-	}
-
-	// Apply request env (overrides everything)
-	for k, v := range reqEnv {
-		env = append(env, k+"="+v)
-	}
-
-	return env
-}
-
 // claude-native JSONL event types
 
 type claudeTypedEvent struct {
@@ -288,17 +259,3 @@ func trimBOM(b []byte) []byte {
 	return b
 }
 
-func filterEnv(env []string, exclude ...string) []string {
-	excludeSet := make(map[string]bool, len(exclude))
-	for _, e := range exclude {
-		excludeSet[e] = true
-	}
-	var result []string
-	for _, e := range env {
-		if k, _, ok := strings.Cut(e, "="); ok && excludeSet[k] {
-			continue
-		}
-		result = append(result, e)
-	}
-	return result
-}

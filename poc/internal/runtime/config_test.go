@@ -12,7 +12,7 @@ func TestLoadDefaults(t *testing.T) {
 		t.Fatalf("unexpected error loading defaults: %v", err)
 	}
 
-	for _, name := range []string{"claude", "claude-sonnet", "claude-haiku", "mock"} {
+	for _, name := range []string{"claude", "claude-sonnet", "claude-haiku", "codex", "mock"} {
 		if _, ok := cfg.Agents[name]; !ok {
 			t.Errorf("expected %q agent in defaults", name)
 		}
@@ -20,7 +20,7 @@ func TestLoadDefaults(t *testing.T) {
 	if _, ok := cfg.Containers["none"]; !ok {
 		t.Error("expected 'none' container in defaults")
 	}
-	for _, name := range []string{"default", "cheap", "cheapest", "test"} {
+	for _, name := range []string{"default", "cheap", "cheapest", "codex", "test"} {
 		if _, ok := cfg.Profiles[name]; !ok {
 			t.Errorf("expected %q profile in defaults", name)
 		}
@@ -289,6 +289,21 @@ func TestMockAgentConfig(t *testing.T) {
 	}
 }
 
+func TestCodexAgentConfig(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ac := cfg.Agents["codex"]
+	if ac.Type != "codex" {
+		t.Errorf("expected codex agent type 'codex', got %q", ac.Type)
+	}
+	if ac.Command != "codex" {
+		t.Errorf("expected command 'codex', got %q", ac.Command)
+	}
+}
+
 func TestClaudeAgentEnv(t *testing.T) {
 	cfg, err := Load("", "")
 	if err != nil {
@@ -365,5 +380,118 @@ agent "claude" {
 	}
 	if ac.Env["CLAUDECODE"] != "" {
 		t.Errorf("expected CLAUDECODE='', got %q", ac.Env["CLAUDECODE"])
+	}
+}
+
+func TestBaseInheritance(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// claude-sonnet inherits from claude via base
+	ac := cfg.Agents["claude-sonnet"]
+	if ac.Command != "claude" {
+		t.Errorf("expected inherited command 'claude', got %q", ac.Command)
+	}
+	if ac.Env == nil || ac.Env["CLAUDECODE"] != "" {
+		t.Errorf("expected inherited env with CLAUDECODE='', got %v", ac.Env)
+	}
+	if ac.Sandbox != "ateam_claude_sandbox_extra_settings.json" {
+		t.Errorf("expected inherited sandbox, got %q", ac.Sandbox)
+	}
+
+	// claude-haiku also inherits
+	ac2 := cfg.Agents["claude-haiku"]
+	if ac2.Sandbox != "ateam_claude_sandbox_extra_settings.json" {
+		t.Errorf("expected inherited sandbox for haiku, got %q", ac2.Sandbox)
+	}
+}
+
+func TestBaseInheritanceOverride(t *testing.T) {
+	dir := t.TempDir()
+
+	hcl := `
+agent "base-agent" {
+  command = "base-cmd"
+  model   = "base-model"
+  sandbox = "base.json"
+  env = {
+    FOO = "bar"
+  }
+}
+
+agent "child-agent" {
+  base  = "base-agent"
+  model = "child-model"
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load("", dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	child := cfg.Agents["child-agent"]
+	if child.Command != "base-cmd" {
+		t.Errorf("expected inherited command 'base-cmd', got %q", child.Command)
+	}
+	if child.Model != "child-model" {
+		t.Errorf("expected overridden model 'child-model', got %q", child.Model)
+	}
+	if child.Sandbox != "base.json" {
+		t.Errorf("expected inherited sandbox 'base.json', got %q", child.Sandbox)
+	}
+	if child.Env == nil || child.Env["FOO"] != "bar" {
+		t.Errorf("expected inherited env FOO=bar, got %v", child.Env)
+	}
+}
+
+func TestBaseInheritanceCircular(t *testing.T) {
+	dir := t.TempDir()
+
+	hcl := `
+agent "a" {
+  base = "b"
+}
+agent "b" {
+  base = "a"
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load("", dir)
+	if err == nil {
+		t.Error("expected error for circular base reference")
+	}
+}
+
+func TestSandboxAttribute(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// claude has sandbox set
+	ac := cfg.Agents["claude"]
+	if ac.Sandbox != "ateam_claude_sandbox_extra_settings.json" {
+		t.Errorf("expected sandbox 'ateam_claude_sandbox_extra_settings.json', got %q", ac.Sandbox)
+	}
+
+	// codex has no sandbox
+	codex := cfg.Agents["codex"]
+	if codex.Sandbox != "" {
+		t.Errorf("expected empty sandbox for codex, got %q", codex.Sandbox)
+	}
+
+	// mock has no sandbox
+	mock := cfg.Agents["mock"]
+	if mock.Sandbox != "" {
+		t.Errorf("expected empty sandbox for mock, got %q", mock.Sandbox)
 	}
 }
