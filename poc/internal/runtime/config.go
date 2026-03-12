@@ -22,14 +22,17 @@ type Config struct {
 }
 
 type AgentConfig struct {
-	Name    string
-	Base    string            // inherit unset fields from this agent
-	Command string
-	Args    []string
-	Model   string
-	Type    string            // "builtin" for mock, "codex", or "" for claude
-	Env     map[string]string // env vars to set (empty string = unset from parent)
-	Sandbox string            // settings template filename (e.g. "ateam_claude_sandbox_extra_settings.json")
+	Name        string
+	Base        string            // inherit unset fields from this agent
+	Command     string
+	Args        []string
+	Model       string
+	Type        string            // "builtin" for mock, "codex", or "" for claude
+	Env         map[string]string // env vars to set (empty string = unset from parent)
+	Sandbox     string            // inline JSON settings template
+	RWPaths     []string          // additional read-write paths merged into sandbox allowWrite
+	ROPaths     []string          // additional read-only paths merged into sandbox additionalDirectories
+	DeniedPaths []string          // paths merged into sandbox denyWrite
 }
 
 type ContainerConfig struct {
@@ -52,14 +55,17 @@ type hclFile struct {
 }
 
 type hclAgent struct {
-	Name    string            `hcl:"name,label"`
-	Base    string            `hcl:"base,optional"`
-	Command string            `hcl:"command,optional"`
-	Args    []string          `hcl:"args,optional"`
-	Model   string            `hcl:"model,optional"`
-	Type    string            `hcl:"type,optional"`
-	Env     map[string]string `hcl:"env,optional"`
-	Sandbox string            `hcl:"sandbox,optional"`
+	Name        string            `hcl:"name,label"`
+	Base        string            `hcl:"base,optional"`
+	Command     string            `hcl:"command,optional"`
+	Args        []string          `hcl:"args,optional"`
+	Model       string            `hcl:"model,optional"`
+	Type        string            `hcl:"type,optional"`
+	Env         map[string]string `hcl:"env,optional"`
+	Sandbox     string            `hcl:"sandbox,optional"`
+	RWPaths     []string          `hcl:"rw_paths,optional"`
+	ROPaths     []string          `hcl:"ro_paths,optional"`
+	DeniedPaths []string          `hcl:"denied_paths,optional"`
 }
 
 type hclContainer struct {
@@ -171,6 +177,15 @@ func (c *Config) resolveInheritance() error {
 		if ac.Sandbox == "" {
 			ac.Sandbox = base.Sandbox
 		}
+		if ac.RWPaths == nil {
+			ac.RWPaths = base.RWPaths
+		}
+		if ac.ROPaths == nil {
+			ac.ROPaths = base.ROPaths
+		}
+		if ac.DeniedPaths == nil {
+			ac.DeniedPaths = base.DeniedPaths
+		}
 
 		c.Agents[name] = ac
 		resolved[name] = true
@@ -216,14 +231,17 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 
 	for _, a := range hf.Agents {
 		cfg.Agents[a.Name] = AgentConfig{
-			Name:    a.Name,
-			Base:    a.Base,
-			Command: a.Command,
-			Args:    a.Args,
-			Model:   a.Model,
-			Type:    a.Type,
-			Env:     a.Env,
-			Sandbox: a.Sandbox,
+			Name:        a.Name,
+			Base:        a.Base,
+			Command:     a.Command,
+			Args:        a.Args,
+			Model:       a.Model,
+			Type:        a.Type,
+			Env:         a.Env,
+			Sandbox:     a.Sandbox,
+			RWPaths:     a.RWPaths,
+			ROPaths:     a.ROPaths,
+			DeniedPaths: a.DeniedPaths,
 		}
 	}
 	for _, c := range hf.Containers {

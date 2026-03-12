@@ -31,6 +31,9 @@ type Runner struct {
 	ExtraWriteDirs  []string // additional dirs granted sandbox write access
 	ExtraArgs       []string // extra args passed to the agent
 	SandboxSettings string   // inline JSON settings template (from runtime.hcl sandbox attribute)
+	SandboxRWPaths  []string // from agent config rw_paths
+	SandboxROPaths  []string // from agent config ro_paths
+	SandboxDenied   []string // from agent config denied_paths
 }
 
 // RunOpts holds per-invocation settings.
@@ -293,10 +296,14 @@ func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error
 
 	runtimeWriteDirs := []string{workDir, r.ProjectDir}
 	runtimeWriteDirs = append(runtimeWriteDirs, r.ExtraWriteDirs...)
+	runtimeWriteDirs = append(runtimeWriteDirs, r.SandboxRWPaths...)
 	runtimeAdditionalDirs := append([]string{r.ProjectDir}, r.ExtraWriteDirs...)
+	runtimeAdditionalDirs = append(runtimeAdditionalDirs, r.SandboxROPaths...)
 
 	mergeStringList(settings, []string{"sandbox", "filesystem", "allowWrite"}, runtimeWriteDirs)
-	mergeStringList(settings, []string{"sandbox", "filesystem", "denyWrite"}, []string{settingsPath})
+	denyPaths := []string{settingsPath}
+	denyPaths = append(denyPaths, r.SandboxDenied...)
+	mergeStringList(settings, []string{"sandbox", "filesystem", "denyWrite"}, denyPaths)
 	mergeStringList(settings, []string{"permissions", "additionalDirectories"}, runtimeAdditionalDirs)
 
 	data, err := json.MarshalIndent(settings, "", "  ")

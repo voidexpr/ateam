@@ -285,6 +285,7 @@ ateam run "quick check" --quiet
 | `--no-summary` | Disable cost/duration/tokens summary (on by default) |
 | `--quiet` | Disable both streaming and summary |
 | `--work-dir PATH` | Working directory (defaults to project source dir or cwd) |
+| `--agent-args "ARGS"` | Extra args passed to the agent CLI (appended after configured args) |
 
 Returns the agent's exit code. Agent stderr is forwarded to stderr.
 
