@@ -214,6 +214,125 @@ func TestDockerCmdFactory(t *testing.T) {
 	}
 }
 
+// TestDockerFilePermissions exercises the full permission matrix:
+// rw mount: read ok, write ok
+// ro mount: read ok, write fails
+// no mount: access fails
+// Tests run a shell script through CmdFactory, same path real agents take.
+func TestDockerFilePermissions(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	dir := t.TempDir()
+
+	sourceDir := filepath.Join(dir, "project")
+	projectDir := filepath.Join(sourceDir, ".ateam")
+	orgDir := filepath.Join(dir, "org")
+	secretDir := filepath.Join(dir, "secret")
+	for _, d := range []string{sourceDir, projectDir, orgDir, secretDir} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Seed files
+	os.WriteFile(filepath.Join(sourceDir, "src.txt"), []byte("source"), 0644)
+	os.WriteFile(filepath.Join(orgDir, "org.txt"), []byte("org"), 0644)
+	os.WriteFile(filepath.Join(secretDir, "secret.txt"), []byte("secret"), 0644)
+
+	dockerfile := filepath.Join(projectDir, "Dockerfile")
+	os.WriteFile(dockerfile, []byte("FROM alpine:3.20\nWORKDIR /workspace\n"), 0644)
+
+	dc := &DockerContainer{
+		Image:      "ateam-dind-test-perms:latest",
+		Dockerfile: dockerfile,
+		SourceDir:  sourceDir,
+		ProjectDir: projectDir,
+		OrgDir:     orgDir,
+		// secretDir is NOT mounted — should be inaccessible
+	}
+	t.Cleanup(func() { cleanupImage(dc.Image) })
+
+	if err := dc.EnsureImage(ctx); err != nil {
+		t.Fatalf("EnsureImage: %v", err)
+	}
+
+	// Helper: run a command via CmdFactory (same path agents use)
+	runViaFactory := func(command string, args ...string) (stdout, stderr string, err error) {
+		factory := dc.CmdFactory()
+		cmd := factory(ctx, command, args...)
+		cmd.Stdin = strings.NewReader("")
+		var outBuf, errBuf bytes.Buffer
+		cmd.Stdout = &outBuf
+		cmd.Stderr = &errBuf
+		err = cmd.Run()
+		return outBuf.String(), errBuf.String(), err
+	}
+
+	// --- RW mount (source → /workspace) ---
+	t.Run("rw/read", func(t *testing.T) {
+		out, _, err := runViaFactory("cat", "/workspace/src.txt")
+		if err != nil {
+			t.Fatalf("expected read to succeed: %v", err)
+		}
+		if out != "source" {
+			t.Errorf("expected 'source', got %q", out)
+		}
+	})
+	t.Run("rw/write", func(t *testing.T) {
+		_, _, err := runViaFactory("sh", "-c", "echo rw-ok > /workspace/rw-test.txt")
+		if err != nil {
+			t.Fatalf("expected write to succeed: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(sourceDir, "rw-test.txt"))
+		if err != nil {
+			t.Fatalf("host ReadFile: %v", err)
+		}
+		if got := strings.TrimSpace(string(data)); got != "rw-ok" {
+			t.Errorf("expected 'rw-ok', got %q", got)
+		}
+	})
+
+	// --- RO mount (org → /.ateamorg) ---
+	t.Run("ro/read", func(t *testing.T) {
+		out, _, err := runViaFactory("cat", "/.ateamorg/org.txt")
+		if err != nil {
+			t.Fatalf("expected read to succeed: %v", err)
+		}
+		if out != "org" {
+			t.Errorf("expected 'org', got %q", out)
+		}
+	})
+	t.Run("ro/write fails", func(t *testing.T) {
+		_, _, err := runViaFactory("sh", "-c", "echo nope > /.ateamorg/nope.txt")
+		if err == nil {
+			t.Error("expected write to ro mount to fail")
+		}
+	})
+
+	// --- No mount (secretDir is not mounted at all) ---
+	// The host path doesn't exist inside the container. The container
+	// uses its own root filesystem, so the exact host path won't resolve.
+	// We test that a path outside any mount simply doesn't exist.
+	t.Run("no-mount/read fails", func(t *testing.T) {
+		_, _, err := runViaFactory("cat", "/secret/secret.txt")
+		if err == nil {
+			t.Error("expected read of unmounted path to fail")
+		}
+	})
+	t.Run("no-mount/write fails", func(t *testing.T) {
+		_, _, err := runViaFactory("sh", "-c", "mkdir -p /secret && echo nope > /secret/hack.txt")
+		if err != nil {
+			// Write to container filesystem might succeed (not a host path),
+			// but the file must NOT appear on the host
+			t.Logf("write returned error (expected): %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(secretDir, "hack.txt")); err == nil {
+			t.Error("file appeared on host from unmounted path — isolation breach")
+		}
+	})
+}
+
 func TestDockerEnvForwarding(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

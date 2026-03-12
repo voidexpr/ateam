@@ -1,0 +1,230 @@
+//go:build docker_live
+
+package container
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+// These tests run real Claude (haiku) inside Docker containers.
+// Requirements:
+//   - Running Docker daemon
+//   - ANTHROPIC_API_KEY env var set
+//   - Internet access (Anthropic API)
+//
+// Run via: make test-docker-live
+// Cost: ~$0.01-0.03 per test run (haiku model)
+
+const (
+	liveImage       = "ateam-live-test:latest"
+	liveTestTimeout = 5 * time.Minute
+)
+
+// buildOnce ensures the claude-code image is built exactly once across all tests.
+var buildOnce sync.Once
+var buildErr error
+
+func ensureLiveImage(t *testing.T) {
+	t.Helper()
+	buildOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "ateam-live-dockerfile-*")
+		if err != nil {
+			buildErr = err
+			return
+		}
+		df := filepath.Join(dir, "Dockerfile")
+		os.WriteFile(df, []byte("FROM node:22-slim\nRUN npm install -g @anthropic-ai/claude-code\nWORKDIR /workspace\n"), 0644)
+		cmd := exec.Command("docker", "build", "-t", liveImage, "-f", df, dir)
+		cmd.Stdout = os.Stderr
+		cmd.Stderr = os.Stderr
+		buildErr = cmd.Run()
+	})
+	if buildErr != nil {
+		t.Fatalf("failed to build live test image: %v", buildErr)
+	}
+	t.Cleanup(func() {
+		// Don't remove — shared across tests, cleaned up by DinD teardown
+	})
+}
+
+func requireAPIKey(t *testing.T) {
+	t.Helper()
+	if os.Getenv("ANTHROPIC_API_KEY") == "" {
+		t.Skip("ANTHROPIC_API_KEY not set")
+	}
+}
+
+func TestLiveClaudeReadFile(t *testing.T) {
+	requireAPIKey(t)
+	ensureLiveImage(t)
+	ctx, cancel := context.WithTimeout(context.Background(), liveTestTimeout)
+	defer cancel()
+
+	dir := t.TempDir()
+	sourceDir := filepath.Join(dir, "project")
+	os.MkdirAll(sourceDir, 0755)
+
+	os.WriteFile(filepath.Join(sourceDir, "test-data.txt"), []byte("The answer is 42."), 0644)
+
+	dc := &DockerContainer{
+		Image:      liveImage,
+		SourceDir:  sourceDir,
+		ForwardEnv: []string{"ANTHROPIC_API_KEY"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := dc.Run(ctx, RunOpts{
+		Command: "claude",
+		Args: []string{
+			"-p",
+			"--output-format", "text",
+			"--model", "haiku",
+			"--max-turns", "1",
+			"Read /workspace/test-data.txt and reply with ONLY its exact contents.",
+		},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatalf("claude run failed: %v\nstderr: %s", err, stderr.String())
+	}
+
+	if !strings.Contains(stdout.String(), "42") {
+		t.Errorf("expected output to contain '42', got: %s", stdout.String())
+	}
+}
+
+func TestLiveClaudeWriteFile(t *testing.T) {
+	requireAPIKey(t)
+	ensureLiveImage(t)
+	ctx, cancel := context.WithTimeout(context.Background(), liveTestTimeout)
+	defer cancel()
+
+	dir := t.TempDir()
+	sourceDir := filepath.Join(dir, "project")
+	os.MkdirAll(sourceDir, 0755)
+
+	dc := &DockerContainer{
+		Image:      liveImage,
+		SourceDir:  sourceDir,
+		ForwardEnv: []string{"ANTHROPIC_API_KEY"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := dc.Run(ctx, RunOpts{
+		Command: "claude",
+		Args: []string{
+			"-p",
+			"--output-format", "text",
+			"--model", "haiku",
+			"--max-turns", "3",
+			"Create a file at /workspace/agent-output.txt containing exactly 'written-by-agent'. Reply 'done' when finished.",
+		},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatalf("claude run failed: %v\nstderr: %s", err, stderr.String())
+	}
+
+	data, err := os.ReadFile(filepath.Join(sourceDir, "agent-output.txt"))
+	if err != nil {
+		t.Fatalf("agent did not create file on host: %v", err)
+	}
+	if got := strings.TrimSpace(string(data)); got != "written-by-agent" {
+		t.Errorf("expected 'written-by-agent', got %q", got)
+	}
+}
+
+func TestLiveClaudeOrgReadOnly(t *testing.T) {
+	requireAPIKey(t)
+	ensureLiveImage(t)
+	ctx, cancel := context.WithTimeout(context.Background(), liveTestTimeout)
+	defer cancel()
+
+	dir := t.TempDir()
+	sourceDir := filepath.Join(dir, "project")
+	orgDir := filepath.Join(dir, "org")
+	os.MkdirAll(sourceDir, 0755)
+	os.MkdirAll(orgDir, 0755)
+
+	os.WriteFile(filepath.Join(orgDir, "config.txt"), []byte("org-config-value"), 0644)
+
+	dc := &DockerContainer{
+		Image:      liveImage,
+		SourceDir:  sourceDir,
+		OrgDir:     orgDir,
+		ForwardEnv: []string{"ANTHROPIC_API_KEY"},
+	}
+
+	var stdout, stderr bytes.Buffer
+	err := dc.Run(ctx, RunOpts{
+		Command: "claude",
+		Args: []string{
+			"-p",
+			"--output-format", "text",
+			"--model", "haiku",
+			"--max-turns", "1",
+			"Read /.ateamorg/config.txt and reply with ONLY its exact contents.",
+		},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		t.Fatalf("claude run failed: %v\nstderr: %s", err, stderr.String())
+	}
+
+	if !strings.Contains(stdout.String(), "org-config-value") {
+		t.Errorf("expected 'org-config-value' in output, got: %s", stdout.String())
+	}
+}
+
+func TestLiveClaudeNoAccessOutsideMounts(t *testing.T) {
+	requireAPIKey(t)
+	ensureLiveImage(t)
+	ctx, cancel := context.WithTimeout(context.Background(), liveTestTimeout)
+	defer cancel()
+
+	dir := t.TempDir()
+	sourceDir := filepath.Join(dir, "project")
+	os.MkdirAll(sourceDir, 0755)
+
+	// Secret file on host — NOT mounted into container
+	secretDir := filepath.Join(dir, "secret")
+	os.MkdirAll(secretDir, 0755)
+	os.WriteFile(filepath.Join(secretDir, "password.txt"), []byte("super-secret"), 0644)
+
+	dc := &DockerContainer{
+		Image:      liveImage,
+		SourceDir:  sourceDir,
+		ForwardEnv: []string{"ANTHROPIC_API_KEY"},
+	}
+
+	// The host path won't exist inside the container at all.
+	var stdout, stderr bytes.Buffer
+	err := dc.Run(ctx, RunOpts{
+		Command: "claude",
+		Args: []string{
+			"-p",
+			"--output-format", "text",
+			"--model", "haiku",
+			"--max-turns", "2",
+			"Try to read " + filepath.Join(secretDir, "password.txt") + ". If you cannot, reply 'ACCESS_DENIED'.",
+		},
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	_ = err // agent may error or report denial — both are fine
+
+	if strings.Contains(stdout.String(), "super-secret") {
+		t.Error("agent read unmounted host path — isolation breach")
+	}
+}

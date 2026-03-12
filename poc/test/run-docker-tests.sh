@@ -19,9 +19,12 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-echo "==> Running docker integration tests..."
+# Determine which test tags to use
+TAGS="${TEST_TAGS:-docker_integration}"
+
+echo "==> Running tests with tags: $TAGS"
 cd /src
-go test -tags docker_integration -v -count=1 -timeout 5m ./internal/container/
+go test -tags "$TAGS" -v -count=1 -timeout 10m ./internal/container/
 TEST_EXIT=$?
 
 echo "==> Stopping dockerd..."
