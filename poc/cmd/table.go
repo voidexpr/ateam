@@ -63,14 +63,7 @@ func newRunner(env *root.ResolvedEnv, profileName string) (*runner.Runner, error
 		return nil, err
 	}
 
-	return &runner.Runner{
-		Agent:           buildAgent(ac),
-		LogFile:         env.RunnerLogPath(),
-		ProjectDir:      env.ProjectDir,
-		OrgDir:          env.OrgDir,
-		ExtraWriteDirs:  []string{env.OrgDir},
-		SandboxSettings: ac.Sandbox,
-	}, nil
+	return runnerFromAgentConfig(env, ac), nil
 }
 
 // newRunnerFromAgent creates a Runner using a named agent directly (no profile).
@@ -85,14 +78,32 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.Runner
 		return nil, fmt.Errorf("unknown agent %q", agentName)
 	}
 
+	return runnerFromAgentConfig(env, &ac), nil
+}
+
+func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runner.Runner {
 	return &runner.Runner{
-		Agent:           buildAgent(&ac),
+		Agent:           buildAgent(ac),
+		OrgDir:          orgDir,
+		SandboxSettings: ac.Sandbox,
+		SandboxRWPaths:  ac.RWPaths,
+		SandboxROPaths:  ac.ROPaths,
+		SandboxDenied:   ac.DeniedPaths,
+	}
+}
+
+func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runner.Runner {
+	return &runner.Runner{
+		Agent:           buildAgent(ac),
 		LogFile:         env.RunnerLogPath(),
 		ProjectDir:      env.ProjectDir,
 		OrgDir:          env.OrgDir,
 		ExtraWriteDirs:  []string{env.OrgDir},
 		SandboxSettings: ac.Sandbox,
-	}, nil
+		SandboxRWPaths:  ac.RWPaths,
+		SandboxROPaths:  ac.ROPaths,
+		SandboxDenied:   ac.DeniedPaths,
+	}
 }
 
 // newRunnerDefault creates a Runner using the default profile.
@@ -116,11 +127,7 @@ func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.Runner
 		if !ok {
 			return nil, fmt.Errorf("unknown agent %q", agentFlag)
 		}
-		return &runner.Runner{
-			Agent:           buildAgent(&ac),
-			OrgDir:          orgDir,
-			SandboxSettings: ac.Sandbox,
-		}, nil
+		return minimalRunnerFromAgentConfig(orgDir, &ac), nil
 	default:
 		if profileFlag == "" {
 			profileFlag = "default"
@@ -129,11 +136,7 @@ func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.Runner
 		if err != nil {
 			return nil, err
 		}
-		return &runner.Runner{
-			Agent:           buildAgent(ac),
-			OrgDir:          orgDir,
-			SandboxSettings: ac.Sandbox,
-		}, nil
+		return minimalRunnerFromAgentConfig(orgDir, ac), nil
 	}
 }
 

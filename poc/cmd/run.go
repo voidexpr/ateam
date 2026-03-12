@@ -25,6 +25,7 @@ var (
 	runWorkDir   string
 	runNoSummary bool
 	runQuiet     bool
+	runAgentArgs string
 )
 
 var runCmd = &cobra.Command{
@@ -57,6 +58,7 @@ func init() {
 	runCmd.Flags().BoolVar(&runNoSummary, "no-summary", false, "disable run summary after completion")
 	runCmd.Flags().BoolVar(&runQuiet, "quiet", false, "disable both streaming and summary (same as --no-stream --no-summary)")
 	runCmd.Flags().StringVar(&runWorkDir, "work-dir", "", "working directory (defaults to project source dir or cwd)")
+	runCmd.Flags().StringVar(&runAgentArgs, "agent-args", "", "extra args passed to the agent CLI (appended after configured args)")
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
@@ -114,6 +116,11 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 	if err != nil {
 		return err
+	}
+
+	// Apply --agent-args
+	if runAgentArgs != "" {
+		r.ExtraArgs = append(r.ExtraArgs, strings.Fields(runAgentArgs)...)
 	}
 
 	// Apply model override

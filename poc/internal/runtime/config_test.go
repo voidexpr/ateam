@@ -499,3 +499,86 @@ func TestSandboxAttribute(t *testing.T) {
 		t.Errorf("expected empty sandbox for mock, got %q", mock.Sandbox)
 	}
 }
+
+func TestSandboxPaths(t *testing.T) {
+	dir := t.TempDir()
+
+	hcl := `
+agent "test-agent" {
+  command      = "test"
+  rw_paths     = ["/data/output", "/tmp/scratch"]
+  ro_paths     = ["/data/input"]
+  denied_paths = ["/etc/secrets"]
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load("", dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ac := cfg.Agents["test-agent"]
+	if len(ac.RWPaths) != 2 || ac.RWPaths[0] != "/data/output" {
+		t.Errorf("expected rw_paths [/data/output /tmp/scratch], got %v", ac.RWPaths)
+	}
+	if len(ac.ROPaths) != 1 || ac.ROPaths[0] != "/data/input" {
+		t.Errorf("expected ro_paths [/data/input], got %v", ac.ROPaths)
+	}
+	if len(ac.DeniedPaths) != 1 || ac.DeniedPaths[0] != "/etc/secrets" {
+		t.Errorf("expected denied_paths [/etc/secrets], got %v", ac.DeniedPaths)
+	}
+}
+
+func TestSandboxPathsInheritance(t *testing.T) {
+	dir := t.TempDir()
+
+	hcl := `
+agent "parent" {
+  command      = "test"
+  rw_paths     = ["/data/rw"]
+  ro_paths     = ["/data/ro"]
+  denied_paths = ["/data/denied"]
+}
+
+agent "child" {
+  base = "parent"
+}
+
+agent "child-override" {
+  base     = "parent"
+  rw_paths = ["/override/rw"]
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load("", dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// child inherits all paths
+	child := cfg.Agents["child"]
+	if len(child.RWPaths) != 1 || child.RWPaths[0] != "/data/rw" {
+		t.Errorf("expected inherited rw_paths, got %v", child.RWPaths)
+	}
+	if len(child.ROPaths) != 1 || child.ROPaths[0] != "/data/ro" {
+		t.Errorf("expected inherited ro_paths, got %v", child.ROPaths)
+	}
+	if len(child.DeniedPaths) != 1 || child.DeniedPaths[0] != "/data/denied" {
+		t.Errorf("expected inherited denied_paths, got %v", child.DeniedPaths)
+	}
+
+	// child-override replaces rw_paths but inherits ro_paths and denied_paths
+	co := cfg.Agents["child-override"]
+	if len(co.RWPaths) != 1 || co.RWPaths[0] != "/override/rw" {
+		t.Errorf("expected overridden rw_paths, got %v", co.RWPaths)
+	}
+	if len(co.ROPaths) != 1 || co.ROPaths[0] != "/data/ro" {
+		t.Errorf("expected inherited ro_paths, got %v", co.ROPaths)
+	}
+}
