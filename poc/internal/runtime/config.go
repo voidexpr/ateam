@@ -34,6 +34,7 @@ type AgentConfig struct {
 	RWPaths     []string          // additional read-write paths merged into sandbox allowWrite
 	ROPaths     []string          // additional read-only paths merged into sandbox additionalDirectories
 	DeniedPaths []string          // paths merged into sandbox denyWrite
+	ConfigDir   string            // sets CLAUDE_CONFIG_DIR; relative paths resolve from .ateam/, absolute used as-is
 }
 
 type ContainerConfig struct {
@@ -69,6 +70,7 @@ type hclAgent struct {
 	RWPaths     []string          `hcl:"rw_paths,optional"`
 	ROPaths     []string          `hcl:"ro_paths,optional"`
 	DeniedPaths []string          `hcl:"denied_paths,optional"`
+	ConfigDir   string            `hcl:"config_dir,optional"`
 }
 
 type hclContainer struct {
@@ -191,6 +193,9 @@ func (c *Config) resolveInheritance() error {
 		if ac.DeniedPaths == nil {
 			ac.DeniedPaths = base.DeniedPaths
 		}
+		if ac.ConfigDir == "" {
+			ac.ConfigDir = base.ConfigDir
+		}
 
 		c.Agents[name] = ac
 		resolved[name] = true
@@ -254,6 +259,7 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 			RWPaths:     a.RWPaths,
 			ROPaths:     a.ROPaths,
 			DeniedPaths: a.DeniedPaths,
+			ConfigDir:   a.ConfigDir,
 		}
 	}
 	for _, c := range hf.Containers {

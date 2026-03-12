@@ -61,6 +61,14 @@ agent "claude-haiku" {
   args = ["-p", "--output-format", "stream-json", "--verbose", "--model", "haiku", "--max-budget-usd", "0.10"]
 }
 
+// claude-isolated uses a project-local config dir (.ateam/.claude) instead of ~/.claude,
+// providing full isolation for ateam-specific agent settings and auth tokens.
+// config_dir: relative paths resolve from .ateam/, absolute paths are used as-is.
+agent "claude-isolated" {
+  base       = "claude"
+  config_dir = ".claude"
+}
+
 agent "codex" {
   type    = "codex"
   command = "codex"
@@ -90,6 +98,11 @@ profile "cheapest" {
   agent            = "claude"
   container        = "none"
   agent_extra_args = ["--model", "haiku", "--max-budget-usd", "0.10"]
+}
+
+profile "isolated" {
+  agent     = "claude-isolated"
+  container = "none"
 }
 
 profile "codex" {

@@ -91,6 +91,7 @@ func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runne
 		SandboxRWPaths:  ac.RWPaths,
 		SandboxROPaths:  ac.ROPaths,
 		SandboxDenied:   ac.DeniedPaths,
+		ConfigDir:       ac.ConfigDir,
 	}
 }
 
@@ -105,6 +106,7 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 		SandboxRWPaths:  ac.RWPaths,
 		SandboxROPaths:  ac.ROPaths,
 		SandboxDenied:   ac.DeniedPaths,
+		ConfigDir:       ac.ConfigDir,
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -30,6 +31,18 @@ func (c *ClaudeAgent) Run(ctx context.Context, req Request) <-chan StreamEvent {
 
 func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent) {
 	defer close(ch)
+
+	// If CLAUDE_CONFIG_DIR is set (isolated mode), create the dir and require sandbox settings.
+	if configDir := resolveConfigDir(c.Env, req.Env); configDir != "" {
+		if err := os.MkdirAll(configDir, 0755); err != nil {
+			ch <- StreamEvent{Type: "error", Err: fmt.Errorf("cannot create config dir %s: %w", configDir, err), ExitCode: -1}
+			return
+		}
+		if !hasSettingsArg(req.ExtraArgs) {
+			ch <- StreamEvent{Type: "error", Err: fmt.Errorf("CLAUDE_CONFIG_DIR is set (%s) but no --settings specified; isolated claude requires sandbox settings", configDir), ExitCode: -1}
+			return
+		}
+	}
 
 	args := make([]string, len(c.Args))
 	copy(args, c.Args)
@@ -257,5 +270,25 @@ func trimBOM(b []byte) []byte {
 		return b[3:]
 	}
 	return b
+}
+
+// resolveConfigDir returns the CLAUDE_CONFIG_DIR value from request env (priority) or agent env.
+func resolveConfigDir(agentEnv, reqEnv map[string]string) string {
+	if v, ok := reqEnv["CLAUDE_CONFIG_DIR"]; ok && v != "" {
+		return v
+	}
+	if v, ok := agentEnv["CLAUDE_CONFIG_DIR"]; ok && v != "" {
+		return v
+	}
+	return ""
+}
+
+func hasSettingsArg(args []string) bool {
+	for _, a := range args {
+		if a == "--settings" {
+			return true
+		}
+	}
+	return false
 }
 

@@ -34,6 +34,7 @@ type Runner struct {
 	SandboxRWPaths  []string // from agent config rw_paths
 	SandboxROPaths  []string // from agent config ro_paths
 	SandboxDenied   []string // from agent config denied_paths
+	ConfigDir       string   // sets CLAUDE_CONFIG_DIR; relative paths resolve from ProjectDir, absolute used as-is
 }
 
 // RunOpts holds per-invocation settings.
@@ -148,6 +149,24 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	// Archive the prompt to history before running.
 	promptFile := archivePrompt(opts.HistoryDir, opts.PromptName, prompt)
 
+	// Resolve CLAUDE_CONFIG_DIR for isolated agents.
+	// Relative config_dir is resolved from ProjectDir (.ateam/); absolute is used as-is.
+	var reqEnv map[string]string
+	if r.ConfigDir != "" {
+		var configPath string
+		if filepath.IsAbs(r.ConfigDir) {
+			configPath = r.ConfigDir
+		} else {
+			if r.ProjectDir == "" {
+				return failEarly(fmt.Errorf("relative config_dir requires project context (no .ateam/ found)"))
+			}
+			configPath = filepath.Join(r.ProjectDir, r.ConfigDir)
+		}
+		reqEnv = map[string]string{
+			"CLAUDE_CONFIG_DIR": configPath,
+		}
+	}
+
 	// Build the agent request
 	req := agent.Request{
 		Prompt:     prompt,
@@ -155,6 +174,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		StreamFile: streamFile,
 		StderrFile: stderrFile,
 		ExtraArgs:  extraArgs,
+		Env:        reqEnv,
 	}
 
 	agentName := r.Agent.Name()

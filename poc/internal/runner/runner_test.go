@@ -149,6 +149,94 @@ func TestRunnerProgress(t *testing.T) {
 	}
 }
 
+func TestRunnerConfigDirSetsEnv(t *testing.T) {
+	dir := t.TempDir()
+	logsDir := filepath.Join(dir, "logs")
+	projectDir := filepath.Join(dir, ".ateam")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &agent.MockAgent{Response: "ok"}
+
+	r := &Runner{
+		Agent:      mock,
+		ProjectDir: projectDir,
+		ConfigDir:  ".claude",
+	}
+
+	opts := RunOpts{
+		RoleID:  "iso-role",
+		Action:  ActionRun,
+		LogsDir: logsDir,
+	}
+
+	_ = r.Run(context.Background(), "test", opts, nil)
+
+	if len(mock.Requests) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(mock.Requests))
+	}
+	req := mock.Requests[0]
+	want := filepath.Join(projectDir, ".claude")
+	if req.Env == nil || req.Env["CLAUDE_CONFIG_DIR"] != want {
+		t.Errorf("expected CLAUDE_CONFIG_DIR=%q in request env, got %v", want, req.Env)
+	}
+}
+
+func TestRunnerConfigDirAbsolute(t *testing.T) {
+	dir := t.TempDir()
+	logsDir := filepath.Join(dir, "logs")
+	absConfigDir := filepath.Join(dir, "abs-claude-config")
+
+	mock := &agent.MockAgent{Response: "ok"}
+
+	r := &Runner{
+		Agent:     mock,
+		ConfigDir: absConfigDir,
+		// no ProjectDir needed for absolute paths
+	}
+
+	opts := RunOpts{
+		RoleID:  "abs-role",
+		Action:  ActionRun,
+		LogsDir: logsDir,
+	}
+
+	_ = r.Run(context.Background(), "test", opts, nil)
+
+	if len(mock.Requests) != 1 {
+		t.Fatalf("expected 1 request, got %d", len(mock.Requests))
+	}
+	req := mock.Requests[0]
+	if req.Env == nil || req.Env["CLAUDE_CONFIG_DIR"] != absConfigDir {
+		t.Errorf("expected CLAUDE_CONFIG_DIR=%q, got %v", absConfigDir, req.Env)
+	}
+}
+
+func TestRunnerConfigDirRelativeRequiresProject(t *testing.T) {
+	dir := t.TempDir()
+	logsDir := filepath.Join(dir, "logs")
+
+	mock := &agent.MockAgent{Response: "ok"}
+
+	r := &Runner{
+		Agent:     mock,
+		ConfigDir: ".claude",
+		// no ProjectDir
+	}
+
+	opts := RunOpts{
+		RoleID:  "no-proj",
+		Action:  ActionRun,
+		LogsDir: logsDir,
+	}
+
+	summary := r.Run(context.Background(), "test", opts, nil)
+	if summary.Err == nil {
+		t.Fatal("expected error when relative config_dir is set without project context")
+	}
+}
+
 func TestRunnerArchivesPrompt(t *testing.T) {
 	dir := t.TempDir()
 	logsDir := filepath.Join(dir, "logs")

@@ -724,3 +724,75 @@ profile "docker-profile" {
 		t.Errorf("expected container_extra_args [--cpus 2], got %v", prof.ContainerExtraArgs)
 	}
 }
+
+func TestConfigDir(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ac := cfg.Agents["claude-isolated"]
+	if ac.ConfigDir != ".claude" {
+		t.Errorf("expected config_dir '.claude', got %q", ac.ConfigDir)
+	}
+	// Should inherit sandbox from claude base
+	if ac.Sandbox == "" {
+		t.Error("expected inherited sandbox for claude-isolated")
+	}
+	if ac.Command != "claude" {
+		t.Errorf("expected inherited command 'claude', got %q", ac.Command)
+	}
+}
+
+func TestConfigDirInheritance(t *testing.T) {
+	dir := t.TempDir()
+
+	hcl := `
+agent "parent" {
+  command    = "test"
+  config_dir = ".isolated"
+}
+
+agent "child" {
+  base = "parent"
+}
+
+agent "child-override" {
+  base       = "parent"
+  config_dir = ".other"
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load("", dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	child := cfg.Agents["child"]
+	if child.ConfigDir != ".isolated" {
+		t.Errorf("expected inherited config_dir '.isolated', got %q", child.ConfigDir)
+	}
+
+	co := cfg.Agents["child-override"]
+	if co.ConfigDir != ".other" {
+		t.Errorf("expected overridden config_dir '.other', got %q", co.ConfigDir)
+	}
+}
+
+func TestIsolatedProfile(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	prof, ok := cfg.Profiles["isolated"]
+	if !ok {
+		t.Fatal("expected 'isolated' profile in defaults")
+	}
+	if prof.Agent != "claude-isolated" {
+		t.Errorf("expected agent 'claude-isolated', got %q", prof.Agent)
+	}
+}
