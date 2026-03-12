@@ -59,12 +59,19 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 		command = "claude"
 	}
 
-	cmd := exec.CommandContext(ctx, command, args...)
-	if req.WorkDir != "" {
+	var cmd *exec.Cmd
+	if req.CmdFactory != nil {
+		cmd = req.CmdFactory(ctx, command, args...)
+	} else {
+		cmd = exec.CommandContext(ctx, command, args...)
+	}
+	if req.WorkDir != "" && cmd.Dir == "" {
 		cmd.Dir = req.WorkDir
 	}
 	cmd.Stdin = strings.NewReader(req.Prompt)
-	cmd.Env = buildProcessEnv(c.Env, req.Env)
+	if cmd.Env == nil {
+		cmd.Env = buildProcessEnv(c.Env, req.Env)
+	}
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ateam-poc/internal/agent"
+	"github.com/ateam-poc/internal/container"
 )
 
 const (
@@ -25,16 +26,17 @@ const (
 // Runner orchestrates agent execution with logging, file I/O, and progress reporting.
 type Runner struct {
 	Agent           agent.Agent
-	LogFile         string   // append-only runner log
-	ProjectDir      string   // .ateam/ dir
-	OrgDir          string   // .ateamorg/ dir
-	ExtraWriteDirs  []string // additional dirs granted sandbox write access
-	ExtraArgs       []string // extra args passed to the agent
-	SandboxSettings string   // inline JSON settings template (from runtime.hcl sandbox attribute)
-	SandboxRWPaths  []string // from agent config rw_paths
-	SandboxROPaths  []string // from agent config ro_paths
-	SandboxDenied   []string // from agent config denied_paths
-	ConfigDir       string   // sets CLAUDE_CONFIG_DIR; relative paths resolve from ProjectDir, absolute used as-is
+	Container       container.Container // nil or NoneContainer means run on host
+	LogFile         string              // append-only runner log
+	ProjectDir      string              // .ateam/ dir
+	OrgDir          string              // .ateamorg/ dir
+	ExtraWriteDirs  []string            // additional dirs granted sandbox write access
+	ExtraArgs       []string            // extra args passed to the agent
+	SandboxSettings string              // inline JSON settings template (from runtime.hcl sandbox attribute)
+	SandboxRWPaths  []string            // from agent config rw_paths
+	SandboxROPaths  []string            // from agent config ro_paths
+	SandboxDenied   []string            // from agent config denied_paths
+	ConfigDir       string              // sets CLAUDE_CONFIG_DIR; relative paths resolve from ProjectDir, absolute used as-is
 }
 
 // RunOpts holds per-invocation settings.
@@ -175,6 +177,23 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		StderrFile: stderrFile,
 		ExtraArgs:  extraArgs,
 		Env:        reqEnv,
+	}
+
+	// If running inside a Docker container, set up CmdFactory and translate paths.
+	if dc, ok := r.Container.(*container.DockerContainer); ok {
+		if err := dc.EnsureImage(ctx); err != nil {
+			return failEarly(fmt.Errorf("docker image build failed: %w", err))
+		}
+		req.CmdFactory = dc.CmdFactory()
+		req.StreamFile = dc.TranslatePath(streamFile)
+		req.StderrFile = dc.TranslatePath(stderrFile)
+		// Settings file path in extraArgs also needs translation
+		for i, a := range req.ExtraArgs {
+			if a == "--settings" && i+1 < len(req.ExtraArgs) {
+				req.ExtraArgs[i+1] = dc.TranslatePath(req.ExtraArgs[i+1])
+			}
+		}
+		req.WorkDir = dc.TranslatePath(cwd)
 	}
 
 	agentName := r.Agent.Name()
