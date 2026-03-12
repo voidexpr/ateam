@@ -58,7 +58,7 @@ func ensureLiveImage(t *testing.T) {
 func requireAuth(t *testing.T) {
 	t.Helper()
 	if os.Getenv("ANTHROPIC_API_KEY") == "" && os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") == "" {
-		t.Skip("neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN set")
+		t.Fatalf("neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN set — see 'make test-docker-live' for setup")
 	}
 }
 

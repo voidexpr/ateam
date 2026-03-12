@@ -406,22 +406,6 @@ Runtime files are stored outside the project, keyed by the project's relative pa
     2026-03-10_22-18-00_review_settings.json
 ```
 
-### Migrating from UUID-based or old-encoding state directories
-
-Older versions used a random UUID per project (stored in `config.toml` as `project_uuid`) or a
-different encoding (`_S` for `/`, `_D` for `.`) to key state directories. Current versions derive
-the project ID from the project's relative path using `_` for `/` and `__` for `_`.
-
-To migrate:
-
-1. Delete the old state directories and registry:
-   ```bash
-   rm -rf .ateamorg/projects/ .ateamorg/orgconfig.toml
-   ```
-2. Optionally remove `project_uuid` lines from `.ateam/config.toml` (harmless if left — parsed but ignored)
-
-New state directories are created automatically on the next `ateam report`, `ateam review`, or `ateam run`.
-
 ### `config.toml`
 
 ```toml
@@ -630,37 +614,6 @@ ls .ateam/supervisor/history/
 ```
 
 This lets you compare reports across runs and trace what prompt produced what output.
-
-## Development
-
-### Build
-
-```bash
-make build        # tidy + build with embedded build timestamp
-make clean        # remove binary
-```
-
-Or manually:
-
-```bash
-go build -o ateam .
-```
-
-### Test
-
-```bash
-go test ./...                        # all tests
-go test ./internal/config/ -v        # config tests
-go test ./internal/prompts/ -v       # prompt fallback tests
-go test ./internal/root/ -v          # resolution + integration tests
-go test ./internal/runner/ -v        # stream event parsing tests
-```
-
-### Adding a new role
-
-1. Create `internal/prompts/defaults/roles/ROLE_NAME/report_prompt.md`
-2. Optionally add `code_prompt.md` in the same directory
-3. Rebuild with `make build` — the role is auto-discovered from the embedded filesystem
 
 ## Future
 * execution flexibility
