@@ -105,6 +105,8 @@ make build
 
 Copy or symlink the `ateam` binary to somewhere in your PATH.
 
+See [DEV.md](DEV.md) for development setup, testing, and architecture details.
+
 ## Commands
 
 ### Global flags
