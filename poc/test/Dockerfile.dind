@@ -1,0 +1,21 @@
+# Docker-in-Docker test environment for ateam docker container tests.
+# Runs the Go integration tests inside an isolated Docker daemon
+# so nothing touches the host system.
+#
+# Usage: make test-docker
+
+FROM docker:27-dind
+
+# Install Go
+RUN apk add --no-cache go git musl-dev
+
+# Copy project source
+WORKDIR /src
+COPY . .
+
+# Pre-download Go modules while building the image
+RUN go mod download
+
+RUN chmod +x /src/test/run-docker-tests.sh
+
+ENTRYPOINT ["/src/test/run-docker-tests.sh"]
