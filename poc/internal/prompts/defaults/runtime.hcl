@@ -1,1 +1,0 @@
-/Users/nicolas/projects/ateam/poc/internal/runtime/defaults/runtime.hcl
