@@ -51,11 +51,18 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 		command = "codex"
 	}
 
-	cmd := exec.CommandContext(ctx, command, args...)
-	if req.WorkDir != "" {
+	var cmd *exec.Cmd
+	if req.CmdFactory != nil {
+		cmd = req.CmdFactory(ctx, command, args...)
+	} else {
+		cmd = exec.CommandContext(ctx, command, args...)
+	}
+	if req.WorkDir != "" && cmd.Dir == "" {
 		cmd.Dir = req.WorkDir
 	}
-	cmd.Env = buildProcessEnv(c.Env, req.Env)
+	if cmd.Env == nil {
+		cmd.Env = buildProcessEnv(c.Env, req.Env)
+	}
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {

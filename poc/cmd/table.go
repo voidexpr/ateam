@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ateam-poc/internal/agent"
+	"github.com/ateam-poc/internal/container"
 	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
 	"github.com/ateam-poc/internal/runtime"
@@ -58,13 +59,14 @@ func newRunner(env *root.ResolvedEnv, profileName string) (*runner.Runner, error
 		return nil, fmt.Errorf("cannot load runtime.hcl: %w", err)
 	}
 
-	prof, ac, _, err := rtCfg.ResolveProfile(profileName)
+	prof, ac, cc, err := rtCfg.ResolveProfile(profileName)
 	if err != nil {
 		return nil, err
 	}
 
 	r := runnerFromAgentConfig(env, ac)
 	r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
+	r.Container = buildContainer(cc, env.SourceDir, env.ProjectDir, env.OrgDir)
 	return r, nil
 }
 
@@ -117,6 +119,7 @@ func newRunnerDefault(env *root.ResolvedEnv) (*runner.Runner, error) {
 }
 
 // resolveRunnerMinimal builds a Runner without project context (just org dir).
+// Docker containers are not supported without project context.
 func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.Runner, error) {
 	rtCfg, err := runtime.Load("", orgDir)
 	if err != nil {
@@ -188,6 +191,33 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 			Model:   ac.Model,
 			Env:     ac.Env,
 		}
+	}
+}
+
+// buildContainer creates a Container implementation from config.
+// Returns nil for "none" type (runner treats nil as host execution).
+func buildContainer(cc *runtime.ContainerConfig, sourceDir, projectDir, orgDir string) container.Container {
+	if cc == nil || cc.Type == "none" {
+		return nil
+	}
+	switch cc.Type {
+	case "docker":
+		dockerfile := cc.Dockerfile
+		if dockerfile != "" && !filepath.IsAbs(dockerfile) {
+			dockerfile = filepath.Join(projectDir, dockerfile)
+		}
+		// Image name derived from project dir name
+		image := "ateam-" + filepath.Base(filepath.Dir(projectDir)) + ":latest"
+		return &container.DockerContainer{
+			Image:      image,
+			Dockerfile: dockerfile,
+			ForwardEnv: cc.ForwardEnv,
+			SourceDir:  sourceDir,
+			ProjectDir: projectDir,
+			OrgDir:     orgDir,
+		}
+	default:
+		return nil
 	}
 }
 

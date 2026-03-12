@@ -83,6 +83,15 @@ container "none" {
   type = "none"
 }
 
+container "docker" {
+  type        = "docker"
+  dockerfile  = "Dockerfile"
+  forward_env = [
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+  ]
+}
+
 profile "default" {
   agent     = "claude"
   container = "none"
@@ -108,6 +117,11 @@ profile "isolated" {
 profile "codex" {
   agent     = "codex"
   container = "none"
+}
+
+profile "docker" {
+  agent     = "claude"
+  container = "docker"
 }
 
 profile "test" {

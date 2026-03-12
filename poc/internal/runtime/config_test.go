@@ -18,10 +18,12 @@ func TestLoadDefaults(t *testing.T) {
 			t.Errorf("expected %q agent in defaults", name)
 		}
 	}
-	if _, ok := cfg.Containers["none"]; !ok {
-		t.Error("expected 'none' container in defaults")
+	for _, name := range []string{"none", "docker"} {
+		if _, ok := cfg.Containers[name]; !ok {
+			t.Errorf("expected %q container in defaults", name)
+		}
 	}
-	for _, name := range []string{"default", "cheap", "cheapest", "codex", "test"} {
+	for _, name := range []string{"default", "cheap", "cheapest", "docker", "codex", "test"} {
 		if _, ok := cfg.Profiles[name]; !ok {
 			t.Errorf("expected %q profile in defaults", name)
 		}
@@ -779,6 +781,62 @@ agent "child-override" {
 	co := cfg.Agents["child-override"]
 	if co.ConfigDir != ".other" {
 		t.Errorf("expected overridden config_dir '.other', got %q", co.ConfigDir)
+	}
+}
+
+func TestDockerContainerConfig(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cc, ok := cfg.Containers["docker"]
+	if !ok {
+		t.Fatal("expected 'docker' container in defaults")
+	}
+	if cc.Type != "docker" {
+		t.Errorf("expected type 'docker', got %q", cc.Type)
+	}
+	if cc.Dockerfile != "Dockerfile" {
+		t.Errorf("expected dockerfile 'Dockerfile', got %q", cc.Dockerfile)
+	}
+	if len(cc.ForwardEnv) < 2 {
+		t.Errorf("expected at least 2 forward_env entries, got %v", cc.ForwardEnv)
+	}
+	hasKey := false
+	for _, e := range cc.ForwardEnv {
+		if e == "ANTHROPIC_API_KEY" {
+			hasKey = true
+		}
+	}
+	if !hasKey {
+		t.Errorf("expected ANTHROPIC_API_KEY in forward_env, got %v", cc.ForwardEnv)
+	}
+}
+
+func TestDockerProfile(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	prof, ok := cfg.Profiles["docker"]
+	if !ok {
+		t.Fatal("expected 'docker' profile in defaults")
+	}
+	if prof.Agent != "claude" {
+		t.Errorf("expected agent 'claude', got %q", prof.Agent)
+	}
+	if prof.Container != "docker" {
+		t.Errorf("expected container 'docker', got %q", prof.Container)
+	}
+
+	_, _, cc, err := cfg.ResolveProfile("docker")
+	if err != nil {
+		t.Fatalf("ResolveProfile(docker): %v", err)
+	}
+	if cc.Type != "docker" {
+		t.Errorf("expected resolved container type 'docker', got %q", cc.Type)
 	}
 }
 
