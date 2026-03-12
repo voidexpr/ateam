@@ -9,14 +9,18 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ateam-poc/internal/agent"
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
+	"github.com/ateam-poc/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
 var (
 	runRole    string
+	runProfile string
+	runModel   string
 	runStream  bool
 	runWorkDir string
 	runSummary bool
@@ -24,27 +28,30 @@ var (
 
 var runCmd = &cobra.Command{
 	Use:   "run PROMPT_OR_@FILE",
-	Short: "Run a single role with a given prompt",
-	Long: `Run a single role instance with the provided prompt text or file.
+	Short: "Run an agent with a prompt",
+	Long: `Run an agent with the provided prompt text or file.
+Can run standalone (just needs .ateamorg/) or within a project context.
 
-By default runs quietly, printing only the final message to stdout.
-Use --stream to see progress updates during execution.
+With --role: validates the role exists and stores output in role directory.
+Without --role: runs as ad-hoc, stores output in project or org logs.
 
 Example:
-  ateam run "Analyze the auth module for security issues" --role security
-  ateam run @prompt.md --role testing_basic
-  ateam run @prompt.md --role security --stream
-  ateam run @prompt.md --role security --summary`,
+  ateam run "say hello"
+  ateam run "Analyze the auth module" --role security
+  ateam run @prompt.md --role testing_basic --stream
+  ateam run "test" --profile test
+  ateam run "say hi" --model sonnet`,
 	Args: cobra.ExactArgs(1),
 	RunE: runRun,
 }
 
 func init() {
-	runCmd.Flags().StringVar(&runRole, "role", "", "role to run (required)")
+	runCmd.Flags().StringVar(&runRole, "role", "", "role to run (optional)")
+	runCmd.Flags().StringVar(&runProfile, "profile", "", "runtime profile to use (overrides config resolution)")
+	runCmd.Flags().StringVar(&runModel, "model", "", "model override")
 	runCmd.Flags().BoolVar(&runStream, "stream", false, "show progress updates during execution")
-	runCmd.Flags().StringVar(&runWorkDir, "work-dir", "", "working directory for the role (defaults to project source dir)")
+	runCmd.Flags().StringVar(&runWorkDir, "work-dir", "", "working directory (defaults to project source dir or cwd)")
 	runCmd.Flags().BoolVar(&runSummary, "summary", false, "print run summary after completion")
-	_ = runCmd.MarkFlagRequired("role")
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
@@ -53,40 +60,105 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot resolve prompt: %w", err)
 	}
 
-	env, err := root.Resolve(orgFlag, projectFlag)
+	// Try to resolve project context (optional for ateam run)
+	env, err := root.Lookup()
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot find .ateamorg/: %w", err)
 	}
 
-	if !prompts.IsValidRole(runRole, env.Config.Roles) {
-		return fmt.Errorf("unknown role: %s\nValid roles: %s", runRole, strings.Join(prompts.AllKnownRoleIDs(env.Config.Roles), ", "))
+	hasProject := env.ProjectDir != "" && env.Config != nil
+
+	// If role specified, require project context
+	if runRole != "" && !hasProject {
+		return fmt.Errorf("--role requires a project context (.ateam/ directory)")
 	}
 
-	if err := root.EnsureRoles(env.ProjectDir, env.StateDir, []string{runRole}); err != nil {
-		return err
+	// Validate role if specified
+	if runRole != "" {
+		if !prompts.IsValidRole(runRole, env.Config.Roles) {
+			return fmt.Errorf("unknown role: %s\nValid roles: %s", runRole, strings.Join(prompts.AllKnownRoleIDs(env.Config.Roles), ", "))
+		}
+		if err := root.EnsureRoles(env.ProjectDir, env.StateDir, []string{runRole}); err != nil {
+			return err
+		}
 	}
 
-	workDir := env.SourceDir
+	// Resolve working directory
+	workDir := ""
 	if runWorkDir != "" {
 		abs, err := filepath.Abs(runWorkDir)
 		if err != nil {
 			return fmt.Errorf("cannot resolve work-dir: %w", err)
 		}
 		workDir = abs
+	} else if hasProject {
+		workDir = env.SourceDir
 	}
 
-	roleDir := filepath.Join(env.ProjectDir, "roles", runRole)
+	// Load runtime config and resolve profile
+	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
+	if err != nil {
+		return fmt.Errorf("cannot load runtime.hcl: %w", err)
+	}
 
-	cr := newClaudeRunner(env)
+	profileName := runProfile
+	if profileName == "" {
+		if hasProject {
+			profileName = env.Config.ResolveProfile(runner.ActionRun, runRole)
+		} else {
+			profileName = "default"
+		}
+	}
+
+	_, ac, _, err := rtCfg.ResolveProfile(profileName)
+	if err != nil {
+		return err
+	}
+
+	ag := buildAgent(ac)
+
+	// Apply model override
+	if runModel != "" {
+		if ca, ok := ag.(*agent.ClaudeAgent); ok {
+			ca.Model = runModel
+		}
+	}
+
+	// Determine logs dir
+	var logsDir string
+	if runRole != "" {
+		logsDir = env.RoleLogsDir(runRole)
+	} else if hasProject {
+		logsDir = env.SupervisorLogsDir()
+	} else {
+		logsDir = filepath.Join(env.OrgDir, "logs", "adhoc")
+	}
+
+	// Build runner
+	r := &runner.Runner{
+		Agent:  ag,
+		OrgDir: env.OrgDir,
+	}
+	if hasProject {
+		r.LogFile = env.RunnerLogPath()
+		r.ProjectDir = env.ProjectDir
+		r.ExtraWriteDirs = []string{env.OrgDir}
+	}
+
+	// Build opts
 	opts := runner.RunOpts{
-		RoleID:               runRole,
-		Action:               runner.ActionRun,
-		LogsDir:              env.RoleLogsDir(runRole),
-		LastMessageFilePath:  filepath.Join(roleDir, "last_run_output.md"),
-		ErrorMessageFilePath: filepath.Join(roleDir, "last_run_error.md"),
-		WorkDir:              workDir,
-		PromptName:           "run_prompt.md",
-		HistoryDir:           env.RoleHistoryDir(runRole),
+		RoleID: runRole,
+		Action: runner.ActionRun,
+		LogsDir: logsDir,
+		WorkDir: workDir,
+	}
+
+	if runRole != "" {
+		roleDir := filepath.Join(env.ProjectDir, "roles", runRole)
+		opts.LastMessageFilePath = filepath.Join(roleDir, "last_run_output.md")
+		opts.ErrorMessageFilePath = filepath.Join(roleDir, "last_run_error.md")
+		opts.PromptName = "run_prompt.md"
+		opts.HistoryDir = env.RoleHistoryDir(runRole)
 	}
 
 	var progress chan runner.RunProgress
@@ -101,7 +173,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := context.Background()
-	result := cr.Run(ctx, promptText, opts, progress)
+	result := r.Run(ctx, promptText, opts, progress)
 
 	if progress != nil {
 		close(progress)

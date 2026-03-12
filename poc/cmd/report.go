@@ -71,8 +71,13 @@ func runReport(cmd *cobra.Command, args []string) error {
 
 	timeout := env.Config.Report.EffectiveTimeout(reportTimeout)
 
-	cr := newClaudeRunner(env)
+	profileName := env.Config.ResolveProfile(runner.ActionReport, "")
+	cr, err := newRunner(env, profileName)
+	if err != nil {
+		return err
+	}
 	applyCheaperModel(cr, reportCheaperModel)
+
 	basePinfo := env.NewProjectInfoParams("")
 	var tasks []runner.PoolTask
 	for _, roleID := range roleIDs {

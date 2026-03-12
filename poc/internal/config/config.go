@@ -21,16 +21,29 @@ const (
 
 // Config represents the project's config.toml.
 type Config struct {
-	Project ProjectConfig     `toml:"project"`
-	Git     GitConfig         `toml:"git"`
-	Report  ReportConfig      `toml:"report"`
-	Review  ReviewConfig      `toml:"review"`
-	Code    CodeConfig        `toml:"code"`
-	Roles   map[string]string `toml:"roles"`
+	Project    ProjectConfig     `toml:"project"`
+	Git        GitConfig         `toml:"git"`
+	Report     ReportConfig      `toml:"report"`
+	Review     ReviewConfig      `toml:"review"`
+	Code       CodeConfig        `toml:"code"`
+	Roles      map[string]string `toml:"roles"`
+	Supervisor SupervisorConfig  `toml:"supervisor"`
+	Profiles   ProfilesConfig    `toml:"profiles"`
 }
 
 type ProjectConfig struct {
-	Name string `toml:"name"`
+	Name           string `toml:"name"`
+	DefaultProfile string `toml:"default_profile"`
+}
+
+type SupervisorConfig struct {
+	DefaultProfile string `toml:"default_profile"`
+	ReviewProfile  string `toml:"review_profile"`
+	CodeProfile    string `toml:"code_profile"`
+}
+
+type ProfilesConfig struct {
+	Roles map[string]string `toml:"roles"` // role -> profile name
 }
 
 type GitConfig struct {
@@ -83,6 +96,33 @@ func (c Config) EnabledRoles() []string {
 	}
 	sort.Strings(enabled)
 	return enabled
+}
+
+// ResolveProfile determines the profile name for a given action and role.
+// Priority: role-specific profile > action-specific supervisor profile > project default > "default".
+func (c Config) ResolveProfile(action, roleID string) string {
+	if roleID != "" && c.Profiles.Roles != nil {
+		if p, ok := c.Profiles.Roles[roleID]; ok && p != "" {
+			return p
+		}
+	}
+	switch action {
+	case "review":
+		if c.Supervisor.ReviewProfile != "" {
+			return c.Supervisor.ReviewProfile
+		}
+	case "code":
+		if c.Supervisor.CodeProfile != "" {
+			return c.Supervisor.CodeProfile
+		}
+	}
+	if c.Supervisor.DefaultProfile != "" {
+		return c.Supervisor.DefaultProfile
+	}
+	if c.Project.DefaultProfile != "" {
+		return c.Project.DefaultProfile
+	}
+	return "default"
 }
 
 // Load reads config.toml from the given directory.

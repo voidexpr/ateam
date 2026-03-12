@@ -13,14 +13,14 @@ type PoolTask struct {
 
 // RunPool executes tasks in parallel with a maximum concurrency limit.
 // It returns results in completion order.
-func RunPool(ctx context.Context, cr *ClaudeRunner, tasks []PoolTask, maxParallel int, progress chan<- RunProgress) []RunSummary {
+func RunPool(ctx context.Context, r *Runner, tasks []PoolTask, maxParallel int, progress chan<- RunProgress) []RunSummary {
 	sem := make(chan struct{}, maxParallel)
 	var mu sync.Mutex
 	var results []RunSummary
 	var wg sync.WaitGroup
 
 	for _, task := range tasks {
-		cr.LogQueued(task.RunOpts)
+		r.LogQueued(task.RunOpts)
 	}
 
 	for _, task := range tasks {
@@ -31,7 +31,7 @@ func RunPool(ctx context.Context, cr *ClaudeRunner, tasks []PoolTask, maxParalle
 			defer wg.Done()
 			defer func() { <-sem }() // release slot
 
-			summary := cr.Run(ctx, t.Prompt, t.RunOpts, progress)
+			summary := r.Run(ctx, t.Prompt, t.RunOpts, progress)
 
 			mu.Lock()
 			results = append(results, summary)

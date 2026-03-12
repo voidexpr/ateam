@@ -264,23 +264,26 @@ ateam projects
 
 ### `ateam run`
 
-Run a single role with a given prompt. By default prints only the final message to stdout.
+Run an agent with a prompt. Can run standalone (just needs `.ateamorg/`) or within a project context. By default prints only the final message to stdout.
 
 ```bash
+ateam run "say hello"
 ateam run "Analyze the auth module" --role security
-ateam run @prompt.md --role testing_basic
-ateam run @prompt.md --role security --stream
-ateam run @prompt.md --role security --summary
+ateam run @prompt.md --role testing_basic --stream
+ateam run "test" --profile test
+ateam run "say hi" --model sonnet
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--role ROLE` | Role to run **(required)** — any valid role, does not need to be enabled |
+| `--role ROLE` | Role to run (optional — requires project context) |
+| `--profile NAME` | Runtime profile to use (overrides config resolution) |
+| `--model MODEL` | Model override |
 | `--stream` | Show progress updates on stderr during execution |
-| `--work-dir PATH` | Working directory for the role (defaults to project source dir) |
+| `--work-dir PATH` | Working directory (defaults to project source dir or cwd) |
 | `--summary` | Print cost/duration/tokens summary to stderr after completion |
 
-Returns the role's exit code. Role stderr is forwarded to stderr.
+Returns the agent's exit code. Agent stderr is forwarded to stderr.
 
 ### `ateam roles`
 

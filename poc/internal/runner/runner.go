@@ -1,22 +1,19 @@
 package runner
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/ateam-poc/internal/agent"
 )
 
 const (
-	// TimestampFormat is the canonical timestamp format used across all log files.
 	TimestampFormat = "2006-01-02_15-04-05"
 
 	ActionReport = "report"
@@ -25,13 +22,14 @@ const (
 	ActionReview = "review"
 )
 
-// ClaudeRunner holds shared execution config for invoking claude.
-type ClaudeRunner struct {
-	ExtraArgs      []string
-	LogFile        string   // append-only runner log (e.g. .ateam/logs/runner.log)
-	ProjectDir     string   // .ateam/ dir, used for computing relative paths in logs and settings resolution
-	OrgDir         string   // .ateamorg/ dir, used for settings resolution
-	ExtraWriteDirs []string // additional dirs granted sandbox write access (e.g. .ateamorg/)
+// Runner orchestrates agent execution with logging, file I/O, and progress reporting.
+type Runner struct {
+	Agent          agent.Agent
+	LogFile        string   // append-only runner log
+	ProjectDir     string   // .ateam/ dir
+	OrgDir         string   // .ateamorg/ dir
+	ExtraWriteDirs []string // additional dirs granted sandbox write access
+	ExtraArgs      []string // extra args passed to the agent
 }
 
 // RunOpts holds per-invocation settings.
@@ -43,17 +41,17 @@ type RunOpts struct {
 	ErrorMessageFilePath string // where to write error info (on failure only)
 	WorkDir              string // cwd for the subprocess
 	TimeoutMin           int
-	HistoryDir           string // where to archive the prompt (e.g. roles/<name>/history)
-	PromptName           string // archive name (e.g. "report_prompt.md", "review_prompt.md")
+	HistoryDir           string // where to archive the prompt
+	PromptName           string // archive name
 }
 
 // RunProgress is a lightweight status sent on a channel during execution.
 type RunProgress struct {
-	RoleID        string
-	Phase          string // PhaseInit, PhaseThinking, PhaseTool, PhaseToolResult, PhaseDone, PhaseError
-	ToolName       string // set when Phase == PhaseTool
-	ToolInput      string // tool input snippet (for PhaseTool)
-	Content        string // text content (for PhaseThinking) or tool result (for PhaseToolResult)
+	RoleID         string
+	Phase          string
+	ToolName       string
+	ToolInput      string
+	Content        string
 	ToolCount      int
 	EventCount     int
 	Elapsed        time.Duration
@@ -64,16 +62,16 @@ type RunProgress struct {
 
 // RunSummary is the final result returned by Run.
 type RunSummary struct {
-	RoleID         string
+	RoleID          string
 	StartedAt       time.Time
 	EndedAt         time.Time
 	Duration        time.Duration
 	ExitCode        int
 	Err             error
 
-	Output          string // extracted report text
+	Output          string
 	Cost            float64
-	DurationMS      int64 // claude's own measurement
+	DurationMS      int64
 	Turns           int
 	IsError         bool
 	InputTokens     int
@@ -85,21 +83,214 @@ type RunSummary struct {
 	StderrFilePath string
 }
 
-// LogQueued writes a "queued" entry to the runner log for a task that is about
-// to be dispatched. Call this before spawning parallel goroutines so all queued
-// entries appear together.
-func (r *ClaudeRunner) LogQueued(opts RunOpts) {
+// LogQueued writes a "queued" entry to the runner log.
+func (r *Runner) LogQueued(opts RunOpts) {
 	appendLog(r.LogFile, opts.RoleID, "queued", effectiveWorkDir(opts),
 		relToDir(r.ProjectDir, opts.LastMessageFilePath))
 }
 
+// Run executes the agent with the given prompt and options.
+func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress chan<- RunProgress) RunSummary {
+	startedAt := time.Now()
+
+	prefix := filepath.Join(opts.LogsDir, startedAt.Format(TimestampFormat)+"_"+opts.Action)
+	streamFile := prefix + "_stream.jsonl"
+	stderrFile := prefix + "_stderr.log"
+	execTarget := prefix + "_exec.md"
+
+	failEarly := func(err error) RunSummary {
+		s := RunSummary{
+			RoleID:         opts.RoleID,
+			StartedAt:      startedAt,
+			EndedAt:        time.Now(),
+			Duration:       time.Since(startedAt),
+			ExitCode:       -1,
+			Err:            err,
+			StreamFilePath: streamFile,
+			StderrFilePath: stderrFile,
+		}
+		writeErrorFile(opts.ErrorMessageFilePath, s, "")
+		return s
+	}
+
+	if err := os.MkdirAll(opts.LogsDir, 0755); err != nil {
+		return failEarly(fmt.Errorf("cannot create logs directory: %w", err))
+	}
+
+	if opts.TimeoutMin > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(opts.TimeoutMin)*time.Minute)
+		defer cancel()
+	}
+
+	cwd := effectiveWorkDir(opts)
+
+	// Build extra args (settings for claude agents, model overrides, etc.)
+	extraArgs := make([]string, len(r.ExtraArgs))
+	copy(extraArgs, r.ExtraArgs)
+
+	// Write sandbox settings for claude-type agents
+	var settingsJSON []byte
+	if r.agentNeedsSettings() {
+		settingsTarget := prefix + "_settings.json"
+		var err error
+		settingsJSON, err = r.writeSettings(settingsTarget, opts)
+		if err != nil {
+			return failEarly(fmt.Errorf("cannot create settings file: %w", err))
+		}
+		extraArgs = append(extraArgs, "--settings", settingsTarget)
+	}
+
+	// Archive the prompt to history before running.
+	promptFile := archivePrompt(opts.HistoryDir, opts.PromptName, prompt)
+
+	// Build the agent request
+	req := agent.Request{
+		Prompt:     prompt,
+		WorkDir:    cwd,
+		StreamFile: streamFile,
+		StderrFile: stderrFile,
+		ExtraArgs:  extraArgs,
+	}
+
+	agentName := r.Agent.Name()
+	cliStr := agentName + " " + strings.Join(extraArgs, " ")
+
+	// Write exec file with full context for debugging.
+	writeExecFile(execTarget, startedAt, opts, prompt, settingsJSON, cliStr, cwd, agentName)
+
+	appendLog(r.LogFile, opts.RoleID, "start", cwd, cliStr,
+		relToDir(r.ProjectDir, promptFile),
+		relToDir(r.ProjectDir, opts.LastMessageFilePath))
+
+	// Run the agent and consume events
+	events := r.Agent.Run(ctx, req)
+
+	var (
+		toolCounts = make(map[string]int)
+		eventCount int
+		totalTools int
+		lastOutput string
+		resultEv   *agent.StreamEvent
+	)
+
+	emitProgress := func(phase, toolName, toolInput, content string, toolCount, evCount int) {
+		sendProgress(progress, RunProgress{
+			RoleID:         opts.RoleID,
+			Phase:          phase,
+			ToolName:       toolName,
+			ToolInput:      toolInput,
+			Content:        content,
+			ToolCount:      toolCount,
+			EventCount:     evCount,
+			StartedAt:      startedAt,
+			Elapsed:        time.Since(startedAt),
+			StreamFilePath: streamFile,
+			StderrFilePath: stderrFile,
+		})
+	}
+
+	for ev := range events {
+		eventCount++
+
+		switch ev.Type {
+		case "system":
+			emitProgress(PhaseInit, "", "", "", 0, eventCount)
+
+		case "assistant":
+			if ev.Text != "" {
+				lastOutput = ev.Text
+				emitProgress(PhaseThinking, "", "", truncate(ev.Text, 200), totalTools, eventCount)
+			}
+
+		case "tool_use":
+			toolCounts[ev.ToolName]++
+			totalTools++
+			emitProgress(PhaseTool, ev.ToolName, truncate(ev.ToolInput, 200), "", totalTools, eventCount)
+
+		case "tool_result":
+			emitProgress(PhaseToolResult, "", "", truncate(ev.ToolResult, 200), totalTools, eventCount)
+
+		case "result":
+			evCopy := ev
+			resultEv = &evCopy
+
+		case "error":
+			evCopy := ev
+			resultEv = &evCopy
+		}
+	}
+
+	endedAt := time.Now()
+	duration := endedAt.Sub(startedAt)
+
+	output := lastOutput
+	if resultEv != nil && resultEv.Output != "" {
+		output = resultEv.Output
+	}
+
+	summary := RunSummary{
+		RoleID:         opts.RoleID,
+		StartedAt:      startedAt,
+		EndedAt:        endedAt,
+		Duration:       duration,
+		Output:         output,
+		ToolCounts:     toolCounts,
+		StreamFilePath: streamFile,
+		StderrFilePath: stderrFile,
+	}
+
+	if resultEv != nil {
+		summary.ExitCode = resultEv.ExitCode
+		summary.Cost = resultEv.Cost
+		summary.DurationMS = resultEv.DurationMS
+		summary.Turns = resultEv.Turns
+		summary.IsError = resultEv.IsError
+		summary.InputTokens = resultEv.InputTokens
+		summary.OutputTokens = resultEv.OutputTokens
+		summary.CacheReadTokens = resultEv.CacheReadTokens
+	}
+
+	success := resultEv != nil && resultEv.Type == "result" && resultEv.ExitCode == 0 && !resultEv.IsError
+
+	if success {
+		if opts.LastMessageFilePath != "" && output != "" {
+			dir := filepath.Dir(opts.LastMessageFilePath)
+			_ = os.MkdirAll(dir, 0755)
+			_ = os.WriteFile(opts.LastMessageFilePath, []byte(output), 0644)
+		}
+		appendLog(r.LogFile, opts.RoleID, "ok", cwd, cliStr)
+		emitProgress(PhaseDone, "", "", "", totalTools, eventCount)
+	} else {
+		switch {
+		case ctx.Err() == context.DeadlineExceeded:
+			summary.Err = fmt.Errorf("timed out after %d minutes", opts.TimeoutMin)
+		case resultEv != nil && resultEv.Err != nil:
+			summary.Err = fmt.Errorf("agent exited with error: %w", resultEv.Err)
+		case resultEv != nil && resultEv.IsError:
+			summary.Err = fmt.Errorf("agent reported error (is_error=true)")
+		default:
+			summary.Err = fmt.Errorf("agent produced no result event")
+		}
+		writeErrorFile(opts.ErrorMessageFilePath, summary, "")
+		appendLog(r.LogFile, opts.RoleID, "error", cwd, cliStr, summary.Err.Error())
+		emitProgress(PhaseError, "", "", "", totalTools, eventCount)
+	}
+
+	return summary
+}
+
+// agentNeedsSettings returns true if the agent is claude-based and needs settings.
+func (r *Runner) agentNeedsSettings() bool {
+	return r.Agent.Name() == "claude"
+}
+
 // writeSettings resolves the sandbox settings via 3-level fallback
-// (.ateam/ → .ateamorg/ → .ateamorg/defaults/), merges in runtime paths
-// (workdir, projectDir, extraWriteDirs), and writes the settings to settingsPath.
-func (r *ClaudeRunner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error) {
+// (.ateam/ -> .ateamorg/ -> .ateamorg/defaults/), merges in runtime paths,
+// and writes the settings to settingsPath.
+func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error) {
 	const sandboxFile = "ateam_claude_sandbox_extra_settings.json"
 
-	// 3-level resolution: project → org → org/defaults
 	base := readFileOr3Level(
 		filepath.Join(r.ProjectDir, sandboxFile),
 		filepath.Join(r.OrgDir, sandboxFile),
@@ -116,7 +307,6 @@ func (r *ClaudeRunner) writeSettings(settingsPath string, opts RunOpts) ([]byte,
 
 	workDir := effectiveWorkDir(opts)
 
-	// Merge runtime paths into the parsed settings.
 	runtimeWriteDirs := []string{workDir, r.ProjectDir}
 	runtimeWriteDirs = append(runtimeWriteDirs, r.ExtraWriteDirs...)
 	runtimeAdditionalDirs := append([]string{r.ProjectDir}, r.ExtraWriteDirs...)
@@ -141,7 +331,6 @@ func (r *ClaudeRunner) writeSettings(settingsPath string, opts RunOpts) ([]byte,
 	return data, nil
 }
 
-// readFileOr3Level tries three paths and returns the first that exists, or "".
 func readFileOr3Level(paths ...string) string {
 	for _, p := range paths {
 		if data, err := os.ReadFile(p); err == nil {
@@ -151,8 +340,6 @@ func readFileOr3Level(paths ...string) string {
 	return ""
 }
 
-// mergeStringList appends values to a nested JSON array at the given key path,
-// creating intermediate maps as needed.
 func mergeStringList(obj map[string]any, keyPath []string, values []string) {
 	m := obj
 	for _, key := range keyPath[:len(keyPath)-1] {
@@ -172,236 +359,6 @@ func mergeStringList(obj map[string]any, keyPath []string, values []string) {
 		existing = append(existing, v)
 	}
 	m[lastKey] = existing
-}
-
-// Run executes claude with stream-json output, parsing events in real time.
-// If progress is non-nil, lightweight status updates are sent on it.
-func (r *ClaudeRunner) Run(ctx context.Context, prompt string, opts RunOpts, progress chan<- RunProgress) RunSummary {
-	startedAt := time.Now()
-
-	prefix := filepath.Join(opts.LogsDir, startedAt.Format(TimestampFormat)+"_"+opts.Action)
-	streamFile := prefix + "_stream.jsonl"
-	stderrFile := prefix + "_stderr.log"
-	settingsTarget := prefix + "_settings.json"
-	execTarget := prefix + "_exec.md"
-
-	failEarly := func(err error) RunSummary {
-		s := RunSummary{
-			RoleID:        opts.RoleID,
-			StartedAt:      startedAt,
-			EndedAt:        time.Now(),
-			Duration:       time.Since(startedAt),
-			ExitCode:       -1,
-			Err:            err,
-			StreamFilePath: streamFile,
-			StderrFilePath: stderrFile,
-		}
-		writeErrorFile(opts.ErrorMessageFilePath, s, "")
-		return s
-	}
-
-	if err := os.MkdirAll(opts.LogsDir, 0755); err != nil {
-		return failEarly(fmt.Errorf("cannot create logs directory: %w", err))
-	}
-
-	sf, err := os.Create(streamFile)
-	if err != nil {
-		return failEarly(fmt.Errorf("cannot create stream file: %w", err))
-	}
-	defer sf.Close()
-
-	ef, err := os.Create(stderrFile)
-	if err != nil {
-		return failEarly(fmt.Errorf("cannot create stderr file: %w", err))
-	}
-	defer ef.Close()
-
-	if opts.TimeoutMin > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(opts.TimeoutMin)*time.Minute)
-		defer cancel()
-	}
-
-	settingsJSON, err := r.writeSettings(settingsTarget, opts)
-	if err != nil {
-		return failEarly(fmt.Errorf("cannot create settings file: %w", err))
-	}
-
-	args := []string{"-p", "--output-format", "stream-json", "--verbose", "--settings", settingsTarget}
-	args = append(args, r.ExtraArgs...)
-	cliStr := "claude " + strings.Join(args, " ")
-
-	cwd := effectiveWorkDir(opts)
-
-	// Archive the prompt to history before running.
-	promptFile := archivePrompt(opts.HistoryDir, opts.PromptName, prompt)
-
-	// Write exec file with full context for debugging.
-	writeExecFile(execTarget, startedAt, opts, prompt, settingsJSON, cliStr, cwd)
-
-	cmd := exec.CommandContext(ctx, "claude", args...)
-	if opts.WorkDir != "" {
-		cmd.Dir = opts.WorkDir
-	}
-	cmd.Stdin = strings.NewReader(prompt)
-	cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
-
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return failEarly(fmt.Errorf("cannot create stdout pipe: %w", err))
-	}
-
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = io.MultiWriter(ef, &stderrBuf)
-
-	appendLog(r.LogFile, opts.RoleID, "start", cwd, cliStr,
-		relToDir(r.ProjectDir, promptFile),
-		relToDir(r.ProjectDir, opts.LastMessageFilePath))
-
-	if err := cmd.Start(); err != nil {
-		appendLog(r.LogFile, opts.RoleID, "error", cwd, cliStr, err.Error())
-		return failEarly(fmt.Errorf("cannot start claude: %w", err))
-	}
-
-	emitProgress := func(phase, toolName, toolInput, content string, toolCount, eventCount int) {
-		sendProgress(progress, RunProgress{
-			RoleID:        opts.RoleID,
-			Phase:          phase,
-			ToolName:       toolName,
-			ToolInput:      toolInput,
-			Content:        content,
-			ToolCount:      toolCount,
-			EventCount:     eventCount,
-			StartedAt:      startedAt,
-			Elapsed:        time.Since(startedAt),
-			StreamFilePath: streamFile,
-			StderrFilePath: stderrFile,
-		})
-	}
-
-	// Parse stdout stream
-	var (
-		lastAssistant *assistantEvent
-		result        *resultEvent
-		toolCounts    = make(map[string]int)
-		eventCount    int
-		totalTools    int
-	)
-
-	streamWriter := bufio.NewWriter(sf)
-	defer streamWriter.Flush()
-
-	scanner := bufio.NewScanner(stdoutPipe)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Bytes()
-
-		streamWriter.Write(line)
-		streamWriter.WriteByte('\n')
-
-		typ, ev, parseErr := parseStreamLine(line)
-		if parseErr != nil || ev == nil {
-			continue
-		}
-		eventCount++
-
-		switch typ {
-		case "system":
-			emitProgress(PhaseInit, "", "", "", 0, eventCount)
-
-		case "assistant":
-			ast := ev.(*assistantEvent)
-			lastAssistant = ast
-
-			hasToolUse := false
-			for _, block := range ast.Message.Content {
-				if block.Type == "tool_use" {
-					toolCounts[block.Name]++
-					totalTools++
-					hasToolUse = true
-					emitProgress(PhaseTool, block.Name, truncate(string(block.Input), 200), "", totalTools, eventCount)
-				}
-			}
-			if !hasToolUse {
-				text := extractReportText(ast)
-				emitProgress(PhaseThinking, "", "", truncate(text, 200), totalTools, eventCount)
-			}
-
-		case "tool_result":
-			tr := ev.(*toolResultEvent)
-			emitProgress(PhaseToolResult, "", "", truncate(tr.Content, 200), totalTools, eventCount)
-
-		case "result":
-			result = ev.(*resultEvent)
-		}
-	}
-
-	cmdErr := cmd.Wait()
-	endedAt := time.Now()
-	duration := endedAt.Sub(startedAt)
-	stderr := strings.TrimSpace(stderrBuf.String())
-
-	exitCode := 0
-	if cmdErr != nil {
-		if exitErr, ok := cmdErr.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		} else {
-			exitCode = -1
-		}
-	}
-
-	output := extractReportText(lastAssistant)
-
-	summary := RunSummary{
-		RoleID:        opts.RoleID,
-		StartedAt:      startedAt,
-		EndedAt:        endedAt,
-		Duration:       duration,
-		ExitCode:       exitCode,
-		Output:         output,
-		ToolCounts:     toolCounts,
-		StreamFilePath: streamFile,
-		StderrFilePath: stderrFile,
-	}
-
-	if result != nil {
-		summary.Cost = result.TotalCostUSD
-		summary.DurationMS = result.DurationMS
-		summary.Turns = result.NumTurns
-		summary.IsError = result.IsError
-		summary.InputTokens = result.Usage.InputTokens
-		summary.OutputTokens = result.Usage.OutputTokens
-		summary.CacheReadTokens = result.Usage.CacheReadInputTokens
-	}
-
-	success := result != nil && exitCode == 0 && !result.IsError
-
-	if success {
-		if opts.LastMessageFilePath != "" && output != "" {
-			dir := filepath.Dir(opts.LastMessageFilePath)
-			_ = os.MkdirAll(dir, 0755)
-			_ = os.WriteFile(opts.LastMessageFilePath, []byte(output), 0644)
-		}
-		appendLog(r.LogFile, opts.RoleID, "ok", cwd, cliStr)
-		emitProgress(PhaseDone, "", "", "", totalTools, eventCount)
-	} else {
-		switch {
-		case ctx.Err() == context.DeadlineExceeded:
-			summary.Err = fmt.Errorf("timed out after %d minutes", opts.TimeoutMin)
-		case cmdErr != nil:
-			summary.Err = fmt.Errorf("claude exited with error: %w", cmdErr)
-		case result != nil && result.IsError:
-			summary.Err = fmt.Errorf("claude reported error (is_error=true)")
-		default:
-			summary.Err = fmt.Errorf("claude produced no result event")
-		}
-		writeErrorFile(opts.ErrorMessageFilePath, summary, stderr)
-		appendLog(r.LogFile, opts.RoleID, "error", cwd, cliStr, summary.Err.Error())
-		emitProgress(PhaseError, "", "", "", totalTools, eventCount)
-	}
-
-	return summary
 }
 
 func truncate(s string, max int) string {
@@ -488,7 +445,6 @@ func relToDir(base, path string) string {
 	return rel
 }
 
-// archivePrompt writes the prompt to historyDir and returns the file path (empty if skipped).
 func archivePrompt(historyDir, promptName, prompt string) string {
 	if historyDir == "" || promptName == "" {
 		return ""
@@ -519,28 +475,25 @@ func ArchiveFile(srcPath, archiveDir, name string) error {
 	if err := os.MkdirAll(archiveDir, 0755); err != nil {
 		return err
 	}
-
 	data, err := os.ReadFile(srcPath)
 	if err != nil {
 		return err
 	}
-
 	timestamp := time.Now().Format(TimestampFormat)
 	archiveName := strings.ReplaceAll(fmt.Sprintf("%s.%s", timestamp, name), " ", "_")
-
 	return os.WriteFile(filepath.Join(archiveDir, archiveName), data, 0644)
 }
 
-// writeExecFile writes a diagnostic _exec.md capturing the full execution context.
-func writeExecFile(path string, startedAt time.Time, opts RunOpts, prompt string, settingsJSON []byte, claudeArgs, cwd string) {
+func writeExecFile(path string, startedAt time.Time, opts RunOpts, prompt string, settingsJSON []byte, cliStr, cwd, agentName string) {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "# Command\n")
 	fmt.Fprintf(&b, "* started: %s\n", startedAt.Format(TimestampFormat))
+	fmt.Fprintf(&b, "* agent: %s\n", agentName)
 	fmt.Fprintf(&b, "* action: %s\n", opts.Action)
 	fmt.Fprintf(&b, "* role: %s\n", opts.RoleID)
 	fmt.Fprintf(&b, "* cwd: %s\n", cwd)
-	fmt.Fprintf(&b, "* coding agent cli:\n  ```bash\n  %s\n  ```\n", claudeArgs)
+	fmt.Fprintf(&b, "* coding agent cli:\n  ```bash\n  %s\n  ```\n", cliStr)
 
 	fmt.Fprintf(&b, "\n# Env\n")
 	fmt.Fprintf(&b, "## Inherited\n")
@@ -557,14 +510,15 @@ func writeExecFile(path string, startedAt time.Time, opts RunOpts, prompt string
 	fmt.Fprintf(&b, "\n## Specified\n")
 	fmt.Fprintf(&b, "unsets CLAUDECODE\n")
 
-	fmt.Fprintf(&b, "\n# Settings\n```json\n%s\n```\n", string(settingsJSON))
+	if len(settingsJSON) > 0 {
+		fmt.Fprintf(&b, "\n# Settings\n```json\n%s\n```\n", string(settingsJSON))
+	}
 
 	fmt.Fprintf(&b, "\n# Prompt\n%s\n", prompt)
 
 	_ = os.WriteFile(path, []byte(b.String()), 0644)
 }
 
-// looksLikeSecret returns true if the variable name suggests it holds a secret.
 func looksLikeSecret(name string) bool {
 	up := strings.ToUpper(name)
 	for _, substr := range []string{
@@ -576,20 +530,4 @@ func looksLikeSecret(name string) bool {
 		}
 	}
 	return false
-}
-
-// filterEnv returns a copy of env with the specified variable names removed.
-func filterEnv(env []string, exclude ...string) []string {
-	excludeSet := make(map[string]bool, len(exclude))
-	for _, e := range exclude {
-		excludeSet[e] = true
-	}
-	var result []string
-	for _, e := range env {
-		if k, _, ok := strings.Cut(e, "="); ok && excludeSet[k] {
-			continue
-		}
-		result = append(result, e)
-	}
-	return result
 }

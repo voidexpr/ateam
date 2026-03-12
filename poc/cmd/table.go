@@ -7,8 +7,10 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/ateam-poc/internal/agent"
 	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
+	"github.com/ateam-poc/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -17,7 +19,6 @@ func newTable() *tabwriter.Writer {
 }
 
 func relPath(cwd, path string) string {
-	// Resolve symlinks so both sides match (env paths are already resolved).
 	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
 		cwd = resolved
 	}
@@ -50,13 +51,50 @@ func fmtInt(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
-func newClaudeRunner(env *root.ResolvedEnv) *runner.ClaudeRunner {
-	return &runner.ClaudeRunner{
+// newRunner creates a Runner using the resolved profile from runtime.hcl.
+func newRunner(env *root.ResolvedEnv, profileName string) (*runner.Runner, error) {
+	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
+	if err != nil {
+		return nil, fmt.Errorf("cannot load runtime.hcl: %w", err)
+	}
+
+	_, ac, _, err := rtCfg.ResolveProfile(profileName)
+	if err != nil {
+		return nil, err
+	}
+
+	ag := buildAgent(ac)
+
+	return &runner.Runner{
+		Agent:          ag,
 		LogFile:        env.RunnerLogPath(),
 		ProjectDir:     env.ProjectDir,
 		OrgDir:         env.OrgDir,
 		ExtraWriteDirs: []string{env.OrgDir},
+	}, nil
+}
+
+// newRunnerDefault creates a Runner using the default profile.
+func newRunnerDefault(env *root.ResolvedEnv) (*runner.Runner, error) {
+	profileName := env.Config.ResolveProfile("", "")
+	return newRunner(env, profileName)
+}
+
+// buildAgent constructs an agent.Agent from config.
+func buildAgent(ac *runtime.AgentConfig) agent.Agent {
+	if ac.Type == "builtin" {
+		return &agent.MockAgent{}
 	}
+	cmd := ac.Command
+	if cmd == "" {
+		cmd = ac.Name
+	}
+	ca := &agent.ClaudeAgent{
+		Command: cmd,
+		Args:    ac.Args,
+		Model:   ac.Model,
+	}
+	return ca
 }
 
 const cheaperModelName = "sonnet"
@@ -65,9 +103,9 @@ func addCheaperModelFlag(cmd *cobra.Command, dst *bool) {
 	cmd.Flags().BoolVar(dst, "cheaper-model", false, "use a cheaper model ("+cheaperModelName+")")
 }
 
-func applyCheaperModel(cr *runner.ClaudeRunner, cheaper bool) {
+func applyCheaperModel(r *runner.Runner, cheaper bool) {
 	if cheaper {
-		cr.ExtraArgs = append(cr.ExtraArgs, "--model", cheaperModelName)
+		r.ExtraArgs = append(r.ExtraArgs, "--model", cheaperModelName)
 	}
 }
 

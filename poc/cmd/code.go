@@ -107,8 +107,14 @@ func runCode(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Code management supervisor running (%dm timeout)...\n", timeout)
 
 	supervisorDir := filepath.Join(env.ProjectDir, "supervisor")
-	cr := newClaudeRunner(env)
+
+	profileName := env.Config.ResolveProfile(runner.ActionCode, "")
+	cr, err := newRunner(env, profileName)
+	if err != nil {
+		return err
+	}
 	applyCheaperModel(cr, codeCheaperModel)
+
 	opts := runner.RunOpts{
 		RoleID:               "supervisor",
 		Action:               runner.ActionCode,

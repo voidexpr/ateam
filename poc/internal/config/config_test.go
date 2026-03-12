@@ -154,3 +154,78 @@ func TestEffectiveTimeout(t *testing.T) {
 		t.Errorf("EffectiveTimeout(30) = %d, want 30", got)
 	}
 }
+
+func TestResolveProfileDefault(t *testing.T) {
+	cfg := Config{}
+	if got := cfg.ResolveProfile("", ""); got != "default" {
+		t.Errorf("ResolveProfile empty = %q, want 'default'", got)
+	}
+}
+
+func TestResolveProfileProjectDefault(t *testing.T) {
+	cfg := Config{
+		Project: ProjectConfig{DefaultProfile: "custom"},
+	}
+	if got := cfg.ResolveProfile("", ""); got != "custom" {
+		t.Errorf("ResolveProfile = %q, want 'custom'", got)
+	}
+}
+
+func TestResolveProfileSupervisor(t *testing.T) {
+	cfg := Config{
+		Supervisor: SupervisorConfig{
+			ReviewProfile: "review-prof",
+			CodeProfile:   "code-prof",
+		},
+	}
+	if got := cfg.ResolveProfile("review", ""); got != "review-prof" {
+		t.Errorf("ResolveProfile(review) = %q, want 'review-prof'", got)
+	}
+	if got := cfg.ResolveProfile("code", ""); got != "code-prof" {
+		t.Errorf("ResolveProfile(code) = %q, want 'code-prof'", got)
+	}
+}
+
+func TestResolveProfileRoleSpecific(t *testing.T) {
+	cfg := Config{
+		Project: ProjectConfig{DefaultProfile: "proj-default"},
+		Profiles: ProfilesConfig{
+			Roles: map[string]string{
+				"security": "security-prof",
+			},
+		},
+	}
+	if got := cfg.ResolveProfile("report", "security"); got != "security-prof" {
+		t.Errorf("ResolveProfile(report, security) = %q, want 'security-prof'", got)
+	}
+	if got := cfg.ResolveProfile("report", "other"); got != "proj-default" {
+		t.Errorf("ResolveProfile(report, other) = %q, want 'proj-default'", got)
+	}
+}
+
+func TestResolveProfilePriority(t *testing.T) {
+	cfg := Config{
+		Project: ProjectConfig{DefaultProfile: "proj"},
+		Supervisor: SupervisorConfig{
+			DefaultProfile: "sup",
+			ReviewProfile:  "review-sup",
+		},
+		Profiles: ProfilesConfig{
+			Roles: map[string]string{
+				"security": "sec-prof",
+			},
+		},
+	}
+	// Role-specific wins over everything
+	if got := cfg.ResolveProfile("review", "security"); got != "sec-prof" {
+		t.Errorf("role-specific should win, got %q", got)
+	}
+	// Action-specific supervisor wins over defaults
+	if got := cfg.ResolveProfile("review", "other"); got != "review-sup" {
+		t.Errorf("review supervisor should win, got %q", got)
+	}
+	// Supervisor default wins over project default
+	if got := cfg.ResolveProfile("run", ""); got != "sup" {
+		t.Errorf("supervisor default should win, got %q", got)
+	}
+}

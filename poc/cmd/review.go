@@ -84,8 +84,13 @@ func runReview(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Supervisor reviewing reports (%dm timeout)...\n", timeout)
 
-	cr := newClaudeRunner(env)
+	profileName := env.Config.ResolveProfile(runner.ActionReview, "")
+	cr, err := newRunner(env, profileName)
+	if err != nil {
+		return err
+	}
 	applyCheaperModel(cr, reviewCheaperModel)
+
 	opts := runner.RunOpts{
 		RoleID:               "supervisor",
 		Action:               runner.ActionReview,
