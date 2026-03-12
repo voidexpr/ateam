@@ -21,6 +21,17 @@ test-docker:
 # Run live agent tests inside DinD with real Claude haiku (~$0.03).
 # Auth: set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (either works).
 test-docker-live:
+	@if [ -z "$$ANTHROPIC_API_KEY" ] && [ -z "$$CLAUDE_CODE_OAUTH_TOKEN" ]; then \
+		echo ""; \
+		echo "ERROR: No API authentication configured."; \
+		echo ""; \
+		echo "Set one of these environment variables:"; \
+		echo "  export ANTHROPIC_API_KEY=sk-ant-..."; \
+		echo "  export CLAUDE_CODE_OAUTH_TOKEN=..."; \
+		echo ""; \
+		echo "Then re-run: make test-docker-live"; \
+		exit 1; \
+	fi
 	docker build -t ateam-test-dind -f test/Dockerfile.dind .
 	docker run --rm --privileged \
 		-e ANTHROPIC_API_KEY \
