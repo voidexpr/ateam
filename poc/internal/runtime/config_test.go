@@ -3,6 +3,7 @@ package runtime
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -397,14 +398,14 @@ func TestBaseInheritance(t *testing.T) {
 	if ac.Env == nil || ac.Env["CLAUDECODE"] != "" {
 		t.Errorf("expected inherited env with CLAUDECODE='', got %v", ac.Env)
 	}
-	if ac.Sandbox != "ateam_claude_sandbox_extra_settings.json" {
-		t.Errorf("expected inherited sandbox, got %q", ac.Sandbox)
+	if ac.Sandbox == "" || !strings.Contains(ac.Sandbox, `"permissions"`) {
+		t.Errorf("expected inherited sandbox JSON content, got empty or wrong content")
 	}
 
-	// claude-haiku also inherits
+	// claude-haiku also inherits sandbox
 	ac2 := cfg.Agents["claude-haiku"]
-	if ac2.Sandbox != "ateam_claude_sandbox_extra_settings.json" {
-		t.Errorf("expected inherited sandbox for haiku, got %q", ac2.Sandbox)
+	if ac2.Sandbox == "" {
+		t.Error("expected inherited sandbox for haiku, got empty")
 	}
 }
 
@@ -415,7 +416,7 @@ func TestBaseInheritanceOverride(t *testing.T) {
 agent "base-agent" {
   command = "base-cmd"
   model   = "base-model"
-  sandbox = "base.json"
+  sandbox = "base-settings"
   env = {
     FOO = "bar"
   }
@@ -442,8 +443,8 @@ agent "child-agent" {
 	if child.Model != "child-model" {
 		t.Errorf("expected overridden model 'child-model', got %q", child.Model)
 	}
-	if child.Sandbox != "base.json" {
-		t.Errorf("expected inherited sandbox 'base.json', got %q", child.Sandbox)
+	if child.Sandbox != "base-settings" {
+		t.Errorf("expected inherited sandbox 'base-settings', got %q", child.Sandbox)
 	}
 	if child.Env == nil || child.Env["FOO"] != "bar" {
 		t.Errorf("expected inherited env FOO=bar, got %v", child.Env)
@@ -477,10 +478,13 @@ func TestSandboxAttribute(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// claude has sandbox set
+	// claude has inline sandbox JSON
 	ac := cfg.Agents["claude"]
-	if ac.Sandbox != "ateam_claude_sandbox_extra_settings.json" {
-		t.Errorf("expected sandbox 'ateam_claude_sandbox_extra_settings.json', got %q", ac.Sandbox)
+	if ac.Sandbox == "" {
+		t.Fatal("expected non-empty sandbox on claude agent")
+	}
+	if !strings.Contains(ac.Sandbox, `"permissions"`) {
+		t.Errorf("expected sandbox to contain permissions JSON, got %q", ac.Sandbox[:min(len(ac.Sandbox), 80)])
 	}
 
 	// codex has no sandbox

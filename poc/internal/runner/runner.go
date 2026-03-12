@@ -30,7 +30,7 @@ type Runner struct {
 	OrgDir          string   // .ateamorg/ dir
 	ExtraWriteDirs  []string // additional dirs granted sandbox write access
 	ExtraArgs       []string // extra args passed to the agent
-	SandboxSettings string   // settings template filename (resolved via 3-level fallback)
+	SandboxSettings string   // inline JSON settings template (from runtime.hcl sandbox attribute)
 }
 
 // RunOpts holds per-invocation settings.
@@ -281,24 +281,12 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	return summary
 }
 
-// writeSettings resolves the sandbox settings template via 3-level fallback
-// (.ateam/ -> .ateamorg/ -> .ateamorg/defaults/), merges in runtime paths,
-// and writes the merged settings to settingsPath.
+// writeSettings parses the inline sandbox settings JSON from the agent config,
+// merges in runtime paths, and writes the result to settingsPath.
 func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error) {
-	sandboxFile := r.SandboxSettings
-
-	base := readFileOr3Level(
-		filepath.Join(r.ProjectDir, sandboxFile),
-		filepath.Join(r.OrgDir, sandboxFile),
-		filepath.Join(r.OrgDir, "defaults", sandboxFile),
-	)
-	if base == "" {
-		return nil, fmt.Errorf("no %s found in project, org, or defaults", sandboxFile)
-	}
-
 	var settings map[string]any
-	if err := json.Unmarshal([]byte(base), &settings); err != nil {
-		return nil, fmt.Errorf("cannot parse %s: %w", sandboxFile, err)
+	if err := json.Unmarshal([]byte(r.SandboxSettings), &settings); err != nil {
+		return nil, fmt.Errorf("cannot parse sandbox settings: %w", err)
 	}
 
 	workDir := effectiveWorkDir(opts)
@@ -308,12 +296,7 @@ func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error
 	runtimeAdditionalDirs := append([]string{r.ProjectDir}, r.ExtraWriteDirs...)
 
 	mergeStringList(settings, []string{"sandbox", "filesystem", "allowWrite"}, runtimeWriteDirs)
-	mergeStringList(settings, []string{"sandbox", "filesystem", "denyWrite"}, []string{
-		settingsPath,
-		filepath.Join(r.ProjectDir, sandboxFile),
-		filepath.Join(r.OrgDir, sandboxFile),
-		filepath.Join(r.OrgDir, "defaults", sandboxFile),
-	})
+	mergeStringList(settings, []string{"sandbox", "filesystem", "denyWrite"}, []string{settingsPath})
 	mergeStringList(settings, []string{"permissions", "additionalDirectories"}, runtimeAdditionalDirs)
 
 	data, err := json.MarshalIndent(settings, "", "  ")
@@ -325,15 +308,6 @@ func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error
 		return nil, err
 	}
 	return data, nil
-}
-
-func readFileOr3Level(paths ...string) string {
-	for _, p := range paths {
-		if data, err := os.ReadFile(p); err == nil {
-			return string(data)
-		}
-	}
-	return ""
 }
 
 func mergeStringList(obj map[string]any, keyPath []string, values []string) {
