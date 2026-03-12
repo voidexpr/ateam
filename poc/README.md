@@ -361,11 +361,11 @@ Created by `ateam init`. Holds project config, prompts, reports, and history (ve
     report_extra_prompt.md                   # extra instructions for this role's reports (optional)
     code_prompt.md                           # project-level role code prompt override (optional)
     code_extra_prompt.md                     # extra instructions for this role's code (optional)
-    full_report.md                           # latest successful report
-    full_report_error.md                     # error details (on failure only)
+    report.md                                # latest successful report
+    report_error.md                          # error details (on failure only)
     history/                                 # timestamped archive
-      2026-03-08_15-04-00.full_prompt.md         # archived prompt
-      2026-03-08_15-04-00.full_report.md         # archived report
+      2026-03-08_15-04-00.report_prompt.md       # archived prompt
+      2026-03-08_15-04-00.report.md              # archived report
   supervisor/
     review_prompt.md                         # project-level supervisor override (optional)
     review_extra_prompt.md                   # extra instructions for reviews (optional)
@@ -571,7 +571,7 @@ TIMESTAMP  "ROLE"  "STATUS"  "CWD"  "CLI"  [EXTRA...]
 Example:
 
 ```
-2026-03-08_15-04-00	"security"	"start"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"	"roles/security/history/2026-03-08_15-04-00.full_prompt.md"	"roles/security/full_report.md"
+2026-03-08_15-04-00	"security"	"start"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"	"roles/security/history/2026-03-08_15-04-00.report_prompt.md"	"roles/security/report.md"
 2026-03-08_15-06-23	"security"	"ok"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"
 2026-03-08_15-07-01	"testing_basic"	"error"	"/home/user/myapp"	"claude -p --output-format stream-json --verbose"	"timed out after 10 minutes"
 ```
@@ -599,7 +599,7 @@ When a run fails, inspect these files:
 
 | File | Location | Content |
 |------|----------|---------|
-| `full_report_error.md` | `.ateam/roles/<NAME>/` | Error summary, exit code, duration, stderr, partial output, token usage |
+| `report_error.md` | `.ateam/roles/<NAME>/` | Error summary, exit code, duration, stderr, partial output, token usage |
 | `*_stderr.log` | `.ateamorg/projects/<project-id>/roles/<NAME>/logs/` | Raw stderr from the `claude` subprocess |
 | `*_stream.jsonl` | `.ateamorg/projects/<project-id>/roles/<NAME>/logs/` | Raw JSONL event stream (useful for debugging parsing issues) |
 | `*_exec.md` | `.ateamorg/projects/<project-id>/roles/<NAME>/logs/` | Full execution context: env, settings, prompt |
@@ -612,10 +612,10 @@ Every run archives its prompt and output to the `history/` directory with a time
 
 ```bash
 ls .ateam/roles/security/history/
-# 2026-03-07_14-30-00.full_prompt.md
-# 2026-03-07_14-30-00.full_report.md
-# 2026-03-08_09-00-00.full_prompt.md
-# 2026-03-08_09-00-00.full_report.md
+# 2026-03-07_14-30-00.report_prompt.md
+# 2026-03-07_14-30-00.report.md
+# 2026-03-08_09-00-00.report_prompt.md
+# 2026-03-08_09-00-00.report.md
 
 ls .ateam/supervisor/history/
 # 2026-03-07_14-35-00.review_prompt.md

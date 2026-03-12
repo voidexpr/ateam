@@ -27,8 +27,8 @@ type ResolvedEnv struct {
 	Config      *config.Config
 }
 
-func (e *ResolvedEnv) RoleReportPath(roleID, reportType string) string {
-	return filepath.Join(e.ProjectDir, "roles", roleID, reportType+"_report.md")
+func (e *ResolvedEnv) RoleReportPath(roleID string) string {
+	return filepath.Join(e.ProjectDir, "roles", roleID, prompts.ReportFile)
 }
 
 func (e *ResolvedEnv) RoleHistoryDir(roleID string) string {

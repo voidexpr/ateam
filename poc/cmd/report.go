@@ -70,7 +70,6 @@ func runReport(cmd *cobra.Command, args []string) error {
 	}
 
 	timeout := env.Config.Report.EffectiveTimeout(reportTimeout)
-	reportType := "full"
 
 	cr := newClaudeRunner(env)
 	applyCheaperModel(cr, reportCheaperModel)
@@ -91,12 +90,12 @@ func runReport(cmd *cobra.Command, args []string) error {
 				RoleID:               roleID,
 				Action:               runner.ActionReport,
 				LogsDir:              env.RoleLogsDir(roleID),
-				LastMessageFilePath:  env.RoleReportPath(roleID, reportType),
-				ErrorMessageFilePath: filepath.Join(roleDir, prompts.FullReportErrorFile),
+				LastMessageFilePath:  env.RoleReportPath(roleID),
+				ErrorMessageFilePath: filepath.Join(roleDir, prompts.ReportErrorFile),
 				WorkDir:              env.SourceDir,
 				TimeoutMin:           timeout,
 				HistoryDir:           env.RoleHistoryDir(roleID),
-				PromptName:           reportType + "_prompt.md",
+				PromptName:           "report_prompt.md",
 			},
 		})
 	}
@@ -140,7 +139,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 		turns := fmtInt(r.Turns)
 
 		if r.Err != nil {
-			errorPath := filepath.Join(filepath.Dir(r.StreamFilePath), prompts.FullReportErrorFile)
+			errorPath := filepath.Join(filepath.Dir(r.StreamFilePath), prompts.ReportErrorFile)
 			if _, err := os.Stat(errorPath); err != nil {
 				errorPath = r.StderrFilePath
 			}
@@ -148,9 +147,9 @@ func runReport(cmd *cobra.Command, args []string) error {
 				r.RoleID, endedAt, elapsed, cost, turns, relPath(cwd, errorPath))
 			failed++
 		} else {
-			reportPath := env.RoleReportPath(r.RoleID, reportType)
+			reportPath := env.RoleReportPath(r.RoleID)
 			historyDir := env.RoleHistoryDir(r.RoleID)
-			if err := runner.ArchiveFile(reportPath, historyDir, reportType+"_report.md"); err != nil {
+			if err := runner.ArchiveFile(reportPath, historyDir, prompts.ReportFile); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not archive report for %s: %v\n", r.RoleID, err)
 			}
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\tOK\t%s\n",

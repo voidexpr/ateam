@@ -63,7 +63,7 @@ func TestAssembleRolePromptIncludesPreviousReport(t *testing.T) {
 
 	setupMinimalRole(t, orgDir, projectDir, roleID)
 
-	reportPath := filepath.Join(projectDir, "roles", roleID, FullReportFile)
+	reportPath := filepath.Join(projectDir, "roles", roleID, ReportFile)
 	os.WriteFile(reportPath, []byte("previous findings here"), 0644)
 
 	result, err := AssembleRolePrompt(orgDir, projectDir, roleID, base, "", ProjectInfoParams{}, false)
@@ -89,7 +89,7 @@ func TestAssembleRolePromptSkipPreviousReport(t *testing.T) {
 
 	setupMinimalRole(t, orgDir, projectDir, roleID)
 
-	reportPath := filepath.Join(projectDir, "roles", roleID, FullReportFile)
+	reportPath := filepath.Join(projectDir, "roles", roleID, ReportFile)
 	os.WriteFile(reportPath, []byte("previous findings here"), 0644)
 
 	result, err := AssembleRolePrompt(orgDir, projectDir, roleID, base, "", ProjectInfoParams{}, true)
@@ -112,7 +112,7 @@ func TestAssembleRolePromptNoPreviousReportFile(t *testing.T) {
 
 	setupMinimalRole(t, orgDir, projectDir, roleID)
 
-	// No full_report.md exists — should succeed without "Previous Report"
+	// No report.md exists — should succeed without "Previous Report"
 	result, err := AssembleRolePrompt(orgDir, projectDir, roleID, base, "", ProjectInfoParams{}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

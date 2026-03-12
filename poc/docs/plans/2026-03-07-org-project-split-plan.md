@@ -297,7 +297,7 @@ const (
 	ExtraReportPromptFile = "extra_report_prompt.md"
 	ReviewPromptFile      = "review_prompt.md"
 	ReportCommissioningPromptFile = "report_commissioning_prompt.md"
-	FullReportFile        = "full_report.md"
+	ReportFile            = "report.md"
 )
 ```
 
