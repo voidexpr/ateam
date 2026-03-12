@@ -26,7 +26,8 @@ type AgentConfig struct {
 	Command string
 	Args    []string
 	Model   string
-	Type    string // "builtin" for mock, "" for external command
+	Type    string            // "builtin" for mock, "" for external command
+	Env     map[string]string // env vars to set (empty string = unset from parent)
 }
 
 type ContainerConfig struct {
@@ -49,11 +50,12 @@ type hclFile struct {
 }
 
 type hclAgent struct {
-	Name    string   `hcl:"name,label"`
-	Command string   `hcl:"command,optional"`
-	Args    []string `hcl:"args,optional"`
-	Model   string   `hcl:"model,optional"`
-	Type    string   `hcl:"type,optional"`
+	Name    string            `hcl:"name,label"`
+	Command string            `hcl:"command,optional"`
+	Args    []string          `hcl:"args,optional"`
+	Model   string            `hcl:"model,optional"`
+	Type    string            `hcl:"type,optional"`
+	Env     map[string]string `hcl:"env,optional"`
 }
 
 type hclContainer struct {
@@ -67,8 +69,8 @@ type hclProfile struct {
 	Container string `hcl:"container"`
 }
 
-// Load reads runtime.hcl with 3-level resolution:
-// defaults (embedded) -> orgDir/runtime.hcl -> projectDir/runtime.hcl
+// Load reads runtime.hcl with 4-level resolution:
+// embedded defaults -> orgDir/defaults/runtime.hcl -> orgDir/runtime.hcl -> projectDir/runtime.hcl
 // Each level's blocks override (by name) those from the previous level.
 func Load(projectDir, orgDir string) (*Config, error) {
 	cfg := &Config{
@@ -86,27 +88,42 @@ func Load(projectDir, orgDir string) (*Config, error) {
 		return nil, fmt.Errorf("cannot parse embedded defaults: %w", err)
 	}
 
-	// Level 2: org runtime.hcl
 	if orgDir != "" {
-		orgPath := filepath.Join(orgDir, "runtime.hcl")
-		if data, err := os.ReadFile(orgPath); err == nil {
-			if err := mergeHCL(cfg, data, orgPath); err != nil {
-				return nil, fmt.Errorf("cannot parse %s: %w", orgPath, err)
-			}
+		// Level 2: org defaults (e.g. .ateamorg/defaults/runtime.hcl)
+		if err := mergeHCLFile(cfg, filepath.Join(orgDir, "defaults", "runtime.hcl")); err != nil {
+			return nil, err
+		}
+
+		// Level 3: org override (e.g. .ateamorg/runtime.hcl)
+		if err := mergeHCLFile(cfg, filepath.Join(orgDir, "runtime.hcl")); err != nil {
+			return nil, err
 		}
 	}
 
-	// Level 3: project runtime.hcl
+	// Level 4: project override (e.g. .ateam/runtime.hcl)
 	if projectDir != "" {
-		projPath := filepath.Join(projectDir, "runtime.hcl")
-		if data, err := os.ReadFile(projPath); err == nil {
-			if err := mergeHCL(cfg, data, projPath); err != nil {
-				return nil, fmt.Errorf("cannot parse %s: %w", projPath, err)
-			}
+		if err := mergeHCLFile(cfg, filepath.Join(projectDir, "runtime.hcl")); err != nil {
+			return nil, err
 		}
 	}
 
 	return cfg, nil
+}
+
+// mergeHCLFile reads a file (following symlinks) and merges it into cfg.
+// Returns nil if the file doesn't exist.
+func mergeHCLFile(cfg *Config, path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("cannot read %s: %w", path, err)
+	}
+	if err := mergeHCL(cfg, data, path); err != nil {
+		return fmt.Errorf("cannot parse %s: %w", path, err)
+	}
+	return nil
 }
 
 func mergeHCL(cfg *Config, data []byte, filename string) error {
@@ -129,6 +146,7 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 			Args:    a.Args,
 			Model:   a.Model,
 			Type:    a.Type,
+			Env:     a.Env,
 		}
 	}
 	for _, c := range hf.Containers {

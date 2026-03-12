@@ -14,9 +14,10 @@ import (
 
 // ClaudeAgent executes prompts using the Claude CLI.
 type ClaudeAgent struct {
-	Command string   // e.g. "claude"
-	Args    []string // base args from config, e.g. ["-p", "--output-format", "stream-json", "--verbose"]
-	Model   string   // optional model override
+	Command string            // e.g. "claude"
+	Args    []string          // base args from config, e.g. ["-p", "--output-format", "stream-json", "--verbose"]
+	Model   string            // optional model override
+	Env     map[string]string // env vars to set (empty string = exclude from parent env)
 }
 
 func (c *ClaudeAgent) Name() string { return "claude" }
@@ -50,12 +51,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 		cmd.Dir = req.WorkDir
 	}
 	cmd.Stdin = strings.NewReader(req.Prompt)
-	cmd.Env = filterEnv(os.Environ(), "CLAUDECODE")
-	if len(req.Env) > 0 {
-		for k, v := range req.Env {
-			cmd.Env = append(cmd.Env, k+"="+v)
-		}
-	}
+	cmd.Env = c.buildEnv(req.Env)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -171,6 +167,35 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 			DurationMS: time.Since(startedAt).Milliseconds(),
 		}
 	}
+}
+
+// buildEnv constructs the process environment.
+// Agent-level Env from config is applied first (empty value = exclude from parent),
+// then request-level Env overrides on top.
+func (c *ClaudeAgent) buildEnv(reqEnv map[string]string) []string {
+	// Collect keys to exclude (agent env with empty value)
+	var excludeKeys []string
+	for k, v := range c.Env {
+		if v == "" {
+			excludeKeys = append(excludeKeys, k)
+		}
+	}
+
+	env := filterEnv(os.Environ(), excludeKeys...)
+
+	// Apply agent env (non-empty values)
+	for k, v := range c.Env {
+		if v != "" {
+			env = append(env, k+"="+v)
+		}
+	}
+
+	// Apply request env (overrides everything)
+	for k, v := range reqEnv {
+		env = append(env, k+"="+v)
+	}
+
+	return env
 }
 
 // claude-native JSONL event types
