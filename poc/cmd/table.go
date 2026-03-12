@@ -66,7 +66,7 @@ func newRunner(env *root.ResolvedEnv, profileName string) (*runner.Runner, error
 
 	r := runnerFromAgentConfig(env, ac)
 	r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
-	r.Container = buildContainer(cc, env.SourceDir, env.ProjectDir, env.OrgDir)
+	r.Container = buildContainer(cc, prof, env.SourceDir, env.ProjectDir, env.OrgDir)
 	return r, nil
 }
 
@@ -196,7 +196,7 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 
 // buildContainer creates a Container implementation from config.
 // Returns nil for "none" type (runner treats nil as host execution).
-func buildContainer(cc *runtime.ContainerConfig, sourceDir, projectDir, orgDir string) container.Container {
+func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, sourceDir, projectDir, orgDir string) container.Container {
 	if cc == nil || cc.Type == "none" {
 		return nil
 	}
@@ -206,15 +206,26 @@ func buildContainer(cc *runtime.ContainerConfig, sourceDir, projectDir, orgDir s
 		if dockerfile != "" && !filepath.IsAbs(dockerfile) {
 			dockerfile = filepath.Join(projectDir, dockerfile)
 		}
+		// Resolve relative paths in extra_volumes from project dir
+		volumes := make([]string, len(cc.ExtraVolumes))
+		for i, vol := range cc.ExtraVolumes {
+			volumes[i] = resolveVolumePath(vol, sourceDir)
+		}
 		// Image name derived from project dir name
 		image := "ateam-" + filepath.Base(filepath.Dir(projectDir)) + ":latest"
+		var extraArgs []string
+		if prof != nil {
+			extraArgs = prof.ContainerExtraArgs
+		}
 		return &container.DockerContainer{
-			Image:      image,
-			Dockerfile: dockerfile,
-			ForwardEnv: cc.ForwardEnv,
-			SourceDir:  sourceDir,
-			ProjectDir: projectDir,
-			OrgDir:     orgDir,
+			Image:        image,
+			Dockerfile:   dockerfile,
+			ForwardEnv:   cc.ForwardEnv,
+			ExtraVolumes: volumes,
+			ExtraArgs:    extraArgs,
+			SourceDir:    sourceDir,
+			ProjectDir:   projectDir,
+			OrgDir:       orgDir,
 		}
 	default:
 		return nil
@@ -225,6 +236,51 @@ func addProfileFlags(cmd *cobra.Command, profileDst, agentDst *string) {
 	cmd.Flags().StringVar(profileDst, "profile", "", "runtime profile (overrides config resolution)")
 	cmd.Flags().StringVar(agentDst, "agent", "", "agent name from runtime.hcl (shortcut, uses 'none' container)")
 	cmd.MarkFlagsMutuallyExclusive("profile", "agent")
+}
+
+// resolveVolumePath resolves relative host paths in a volume spec.
+// Volume format: "hostPath:containerPath[:mode]"
+// Relative hostPath is resolved from baseDir (project source dir).
+func resolveVolumePath(vol, baseDir string) string {
+	parts := splitVolumeSpec(vol)
+	if len(parts) < 2 {
+		return vol
+	}
+	hostPath := parts[0]
+	if !filepath.IsAbs(hostPath) {
+		hostPath = filepath.Join(baseDir, hostPath)
+	}
+	parts[0] = hostPath
+	result := parts[0] + ":" + parts[1]
+	if len(parts) > 2 {
+		result += ":" + parts[2]
+	}
+	return result
+}
+
+// splitVolumeSpec splits "host:container[:mode]" respecting that
+// host path on Windows might contain a drive letter (C:\...).
+func splitVolumeSpec(vol string) []string {
+	parts := []string{}
+	for i, remaining := 0, vol; remaining != ""; i++ {
+		idx := findVolumeSep(remaining)
+		if idx < 0 {
+			parts = append(parts, remaining)
+			break
+		}
+		parts = append(parts, remaining[:idx])
+		remaining = remaining[idx+1:]
+	}
+	return parts
+}
+
+func findVolumeSep(s string) int {
+	for i, c := range s {
+		if c == ':' {
+			return i
+		}
+	}
+	return -1
 }
 
 const cheaperModelName = "sonnet"

@@ -16,9 +16,11 @@ import (
 // Uses the one-shot model: each invocation is a `docker run --rm`.
 type DockerContainer struct {
 	// From ContainerConfig
-	Image      string   // docker image name, e.g. "ateam-myproject:latest"
-	Dockerfile string   // absolute path to Dockerfile
-	ForwardEnv []string // env var names to forward from host
+	Image        string   // docker image name, e.g. "ateam-myproject:latest"
+	Dockerfile   string   // absolute path to Dockerfile
+	ForwardEnv   []string // env var names to forward from host
+	ExtraVolumes []string // additional -v mounts, e.g. "/host/data:/data:ro"
+	ExtraArgs    []string // additional docker run args from profile container_extra_args
 
 	// Runtime context
 	SourceDir  string // project source root → mounted as /workspace
@@ -88,8 +90,16 @@ func (d *DockerContainer) CmdFactory() agent.CmdFactory {
 			dockerArgs = append(dockerArgs, "-v", d.OrgDir+":"+containerOrgDir+":ro")
 		}
 
+		// Extra volumes from container config (e.g. "../data:/data:ro")
+		for _, vol := range d.ExtraVolumes {
+			dockerArgs = append(dockerArgs, "-v", vol)
+		}
+
 		// Working directory
 		dockerArgs = append(dockerArgs, "-w", containerWorkspace)
+
+		// Extra docker run args from profile
+		dockerArgs = append(dockerArgs, d.ExtraArgs...)
 
 		// Forward env vars from host
 		for _, key := range d.ForwardEnv {
@@ -174,7 +184,11 @@ func (d *DockerContainer) DebugCommand(opts RunOpts) string {
 	if d.OrgDir != "" {
 		parts = append(parts, "-v", d.OrgDir+":"+containerOrgDir+":ro")
 	}
+	for _, vol := range d.ExtraVolumes {
+		parts = append(parts, "-v", vol)
+	}
 	parts = append(parts, "-w", containerWorkspace)
+	parts = append(parts, d.ExtraArgs...)
 	for _, key := range d.ForwardEnv {
 		parts = append(parts, "-e", key)
 	}
