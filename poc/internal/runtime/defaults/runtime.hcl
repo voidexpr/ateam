@@ -1,7 +1,5 @@
-agent "claude" {
-  command = "claude"
-  args    = ["-p", "--output-format", "stream-json", "--verbose"]
-  sandbox = <<-EOF
+locals {
+  claude_sandbox = <<-EOF
   {
     "permissions": {
       "defaultMode": "acceptEdits",
@@ -42,19 +40,25 @@ agent "claude" {
     }
   }
   EOF
+}
+
+agent "claude" {
+  command = "claude"
+  args    = ["-p", "--output-format", "stream-json", "--verbose"]
+  sandbox = local.claude_sandbox
   env = {
     CLAUDECODE = ""
   }
 }
 
 agent "claude-sonnet" {
-  base    = "claude"
-  args    = ["-p", "--output-format", "stream-json", "--verbose", "--model", "sonnet", "--max-budget-usd", "0.50"]
+  base = "claude"
+  args = ["-p", "--output-format", "stream-json", "--verbose", "--model", "sonnet", "--max-budget-usd", "0.50"]
 }
 
 agent "claude-haiku" {
-  base    = "claude"
-  args    = ["-p", "--output-format", "stream-json", "--verbose", "--model", "haiku", "--max-budget-usd", "0.10"]
+  base = "claude"
+  args = ["-p", "--output-format", "stream-json", "--verbose", "--model", "haiku", "--max-budget-usd", "0.10"]
 }
 
 agent "codex" {
@@ -77,13 +81,15 @@ profile "default" {
 }
 
 profile "cheap" {
-  agent     = "claude-sonnet"
-  container = "none"
+  agent            = "claude"
+  container        = "none"
+  agent_extra_args = ["--model", "sonnet", "--max-budget-usd", "0.50"]
 }
 
 profile "cheapest" {
-  agent     = "claude-haiku"
-  container = "none"
+  agent            = "claude"
+  container        = "none"
+  agent_extra_args = ["--model", "haiku", "--max-budget-usd", "0.10"]
 }
 
 profile "codex" {

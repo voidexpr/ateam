@@ -9,6 +9,7 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclparse"
+	"github.com/zclconf/go-cty/cty"
 )
 
 //go:embed defaults/runtime.hcl
@@ -41,9 +42,11 @@ type ContainerConfig struct {
 }
 
 type ProfileConfig struct {
-	Name      string
-	Agent     string // references AgentConfig name
-	Container string // references ContainerConfig name
+	Name               string
+	Agent              string   // references AgentConfig name
+	Container          string   // references ContainerConfig name
+	AgentExtraArgs     []string // appended to Runner.ExtraArgs
+	ContainerExtraArgs []string // reserved for container launch args
 }
 
 // hclFile is the HCL schema for runtime.hcl.
@@ -74,9 +77,11 @@ type hclContainer struct {
 }
 
 type hclProfile struct {
-	Name      string `hcl:"name,label"`
-	Agent     string `hcl:"agent"`
-	Container string `hcl:"container"`
+	Name               string   `hcl:"name,label"`
+	Agent              string   `hcl:"agent"`
+	Container          string   `hcl:"container"`
+	AgentExtraArgs     []string `hcl:"agent_extra_args,optional"`
+	ContainerExtraArgs []string `hcl:"container_extra_args,optional"`
 }
 
 // Load reads runtime.hcl with 4-level resolution:
@@ -217,6 +222,13 @@ func mergeHCLFile(cfg *Config, path string) error {
 }
 
 func mergeHCL(cfg *Config, data []byte, filename string) error {
+	// Pass 1: extract locals for expression evaluation
+	evalCtx, err := parseLocals(data, filename)
+	if err != nil {
+		return err
+	}
+
+	// Pass 2: decode config with locals context
 	parser := hclparse.NewParser()
 	file, diags := parser.ParseHCL(data, filename)
 	if diags.HasErrors() {
@@ -224,7 +236,7 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 	}
 
 	var hf hclFile
-	diags = gohcl.DecodeBody(file.Body, nil, &hf)
+	diags = gohcl.DecodeBody(file.Body, evalCtx, &hf)
 	if diags.HasErrors() {
 		return diags
 	}
@@ -252,12 +264,62 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 	}
 	for _, p := range hf.Profiles {
 		cfg.Profiles[p.Name] = ProfileConfig{
-			Name:      p.Name,
-			Agent:     p.Agent,
-			Container: p.Container,
+			Name:               p.Name,
+			Agent:              p.Agent,
+			Container:          p.Container,
+			AgentExtraArgs:     p.AgentExtraArgs,
+			ContainerExtraArgs: p.ContainerExtraArgs,
 		}
 	}
 	return nil
+}
+
+// parseLocals extracts locals blocks from HCL data and builds an eval context.
+// Locals are scoped to the file they're defined in.
+func parseLocals(data []byte, filename string) (*hcl.EvalContext, error) {
+	parser := hclparse.NewParser()
+	file, diags := parser.ParseHCL(data, filename)
+	if diags.HasErrors() {
+		return nil, diags
+	}
+
+	type localsFile struct {
+		Locals []struct {
+			Remain hcl.Body `hcl:",remain"`
+		} `hcl:"locals,block"`
+		Remain hcl.Body `hcl:",remain"`
+	}
+
+	var lf localsFile
+	diags = gohcl.DecodeBody(file.Body, nil, &lf)
+	if diags.HasErrors() {
+		return nil, diags
+	}
+
+	if len(lf.Locals) == 0 {
+		return nil, nil
+	}
+
+	locals := make(map[string]cty.Value)
+	for _, lb := range lf.Locals {
+		attrs, diags := lb.Remain.JustAttributes()
+		if diags.HasErrors() {
+			return nil, diags
+		}
+		for name, attr := range attrs {
+			val, diags := attr.Expr.Value(nil)
+			if diags.HasErrors() {
+				return nil, fmt.Errorf("cannot evaluate local %q in %s: %s", name, filename, diags.Error())
+			}
+			locals[name] = val
+		}
+	}
+
+	return &hcl.EvalContext{
+		Variables: map[string]cty.Value{
+			"local": cty.ObjectVal(locals),
+		},
+	}, nil
 }
 
 // ResolveProfile looks up a profile by name and validates agent/container refs.
