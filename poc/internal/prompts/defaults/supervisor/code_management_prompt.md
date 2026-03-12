@@ -94,7 +94,7 @@ After all tasks have been attempted:
 2. Update `.ateam/supervisor/review.md`:
   - Annotate each task with its outcome (completed / failed / skipped) and a brief note
   - do not delete any content in the review, just add information
-3. Update the source role full_report.md referenced in the review to note what was addressed
+3. Update the source role report.md referenced in the review to note what was addressed
   - do not delete any content in the report file, just add information
 4. **Never modify** files under `.ateam/supervisor/history/` or `.ateam/roles/*/history/`
 

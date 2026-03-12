@@ -62,7 +62,7 @@ func runEnv(cmd *cobra.Command, args []string) error {
 			w := newTable()
 			fmt.Fprintln(w, "ROLE\tLAST\tPATH")
 			for _, roleID := range roles {
-				reportPath := filepath.Join(env.ProjectDir, "roles", roleID, prompts.FullReportFile)
+				reportPath := filepath.Join(env.ProjectDir, "roles", roleID, prompts.ReportFile)
 				if fi, err := os.Stat(reportPath); err == nil {
 					fmt.Fprintf(w, "%s\t%s\t%s\n", roleID, fmtDateAge(fi.ModTime()), relPath(cwd, reportPath))
 				} else {

@@ -39,7 +39,7 @@ Created by `ateam init [PATH]`.
 .ateam/
   config.toml
   agents/NAME/
-    full_report.md
+    report.md
     history/
     extra_report_prompt.md     # optional project-specific extra prompt
   supervisor/

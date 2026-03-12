@@ -24,8 +24,8 @@ const (
 	ReportCommissioningPromptFile   = "report_commissioning_prompt.md"
 	CodeManagementPromptFile        = "code_management_prompt.md"
 	CodeManagementExtraPromptFile   = "code_management_extra_prompt.md"
-	FullReportFile                  = "full_report.md"
-	FullReportErrorFile             = "full_report_error.md"
+	ReportFile                      = "report.md"
+	ReportErrorFile                 = "report_error.md"
 	SandboxSettingsFile = "ateam_claude_sandbox_extra_settings.json"
 )
 
@@ -53,7 +53,7 @@ func ResolveOptional(value string) (string, error) {
 }
 
 // AssembleRolePrompt builds the full prompt for a role report run.
-// When skipPreviousReport is false, the role's existing full_report.md is
+// When skipPreviousReport is false, the role's existing report.md is
 // included as a "Previous Report" section so the role can build on prior findings.
 func AssembleRolePrompt(orgDir, projectDir, roleID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, skipPreviousReport bool) (string, error) {
 	return assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt, pinfo,
@@ -100,7 +100,7 @@ func assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt strin
 	parts = append(parts, extras...)
 
 	if !skipPreviousReport {
-		if content, modTime, err := readFileWithModTime(filepath.Join(projectDir, "roles", roleID, FullReportFile)); err == nil && content != "" {
+		if content, modTime, err := readFileWithModTime(filepath.Join(projectDir, "roles", roleID, ReportFile)); err == nil && content != "" {
 			age := time.Since(modTime)
 			header := fmt.Sprintf("# Previous Report\n\nWhat follows is the previous report that was generated (and possibly updated with the tasks completed) on %s (%s ago). It might be outdated but it will give you some context of what has been done.\n\n",
 				modTime.Format(runner.TimestampFormat), formatAge(age))
@@ -157,7 +157,7 @@ type RoleReport struct {
 	Content string
 }
 
-// DiscoverReports scans the project's roles directory for full_report.md files.
+// DiscoverReports scans the project's roles directory for report.md files.
 func DiscoverReports(projectDir string) ([]RoleReport, error) {
 	rolesDir := filepath.Join(projectDir, "roles")
 	entries, err := os.ReadDir(rolesDir)
@@ -170,7 +170,7 @@ func DiscoverReports(projectDir string) ([]RoleReport, error) {
 		if !entry.IsDir() {
 			continue
 		}
-		reportPath := filepath.Join(rolesDir, entry.Name(), FullReportFile)
+		reportPath := filepath.Join(rolesDir, entry.Name(), ReportFile)
 		data, err := os.ReadFile(reportPath)
 		if err != nil {
 			continue
