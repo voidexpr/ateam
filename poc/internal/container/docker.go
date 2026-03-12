@@ -50,8 +50,9 @@ func (d *DockerContainer) EnsureImage(ctx context.Context) error {
 	}
 
 	// Pass host UID so the container user owns bind-mounted files.
+	// Fall back to 1000 when running as root (e.g. inside DinD).
 	uid := "1000"
-	if u, err := user.Current(); err == nil {
+	if u, err := user.Current(); err == nil && u.Uid != "0" {
 		uid = u.Uid
 	}
 

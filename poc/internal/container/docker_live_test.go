@@ -16,7 +16,7 @@ import (
 )
 
 func liveTestUID() string {
-	if u, err := user.Current(); err == nil {
+	if u, err := user.Current(); err == nil && u.Uid != "0" {
 		return u.Uid
 	}
 	return "1000"
