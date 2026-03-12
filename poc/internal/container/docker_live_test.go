@@ -50,9 +50,16 @@ func ensureLiveImage(t *testing.T) {
 	if buildErr != nil {
 		t.Fatalf("failed to build live test image: %v", buildErr)
 	}
-	t.Cleanup(func() {
-		// Don't remove — shared across tests, cleaned up by DinD teardown
-	})
+
+	// Smoke test: verify claude is callable inside the container
+	var vOut, vErr bytes.Buffer
+	vCmd := exec.Command("docker", "run", "--rm", liveImage, "claude", "--version")
+	vCmd.Stdout = &vOut
+	vCmd.Stderr = &vErr
+	if err := vCmd.Run(); err != nil {
+		t.Fatalf("claude --version failed inside container: %v\nstdout: %s\nstderr: %s", err, vOut.String(), vErr.String())
+	}
+	t.Logf("container claude version: %s", strings.TrimSpace(vOut.String()))
 }
 
 func requireAuth(t *testing.T) {
@@ -74,6 +81,23 @@ func authEnvVars() []string {
 	return vars
 }
 
+// runClaude is a helper that runs claude in a DockerContainer and returns
+// stdout/stderr, failing the test with full diagnostic output on error.
+func runClaude(t *testing.T, ctx context.Context, dc *DockerContainer, args []string) (stdout, stderr string) {
+	t.Helper()
+	var outBuf, errBuf bytes.Buffer
+	err := dc.Run(ctx, RunOpts{
+		Command: "claude",
+		Args:    args,
+		Stdout:  &outBuf,
+		Stderr:  &errBuf,
+	})
+	if err != nil {
+		t.Fatalf("claude run failed: %v\nstdout: %s\nstderr: %s", err, outBuf.String(), errBuf.String())
+	}
+	return outBuf.String(), errBuf.String()
+}
+
 func TestLiveClaudeReadFile(t *testing.T) {
 	requireAuth(t)
 	ensureLiveImage(t)
@@ -92,25 +116,16 @@ func TestLiveClaudeReadFile(t *testing.T) {
 		ForwardEnv: authEnvVars(),
 	}
 
-	var stdout, stderr bytes.Buffer
-	err := dc.Run(ctx, RunOpts{
-		Command: "claude",
-		Args: []string{
-			"-p",
-			"--output-format", "text",
-			"--model", "haiku",
-			"--max-turns", "2",
-			"Read /workspace/test-data.txt and reply with ONLY its exact contents.",
-		},
-		Stdout: &stdout,
-		Stderr: &stderr,
+	stdout, _ := runClaude(t, ctx, dc, []string{
+		"-p",
+		"--output-format", "text",
+		"--model", "haiku",
+		"--max-turns", "2",
+		"Read /workspace/test-data.txt and reply with ONLY its exact contents.",
 	})
-	if err != nil {
-		t.Fatalf("claude run failed: %v\nstderr: %s", err, stderr.String())
-	}
 
-	if !strings.Contains(stdout.String(), "42") {
-		t.Errorf("expected output to contain '42', got: %s", stdout.String())
+	if !strings.Contains(stdout, "42") {
+		t.Errorf("expected output to contain '42', got: %s", stdout)
 	}
 }
 
@@ -130,22 +145,13 @@ func TestLiveClaudeWriteFile(t *testing.T) {
 		ForwardEnv: authEnvVars(),
 	}
 
-	var stdout, stderr bytes.Buffer
-	err := dc.Run(ctx, RunOpts{
-		Command: "claude",
-		Args: []string{
-			"-p",
-			"--output-format", "text",
-			"--model", "haiku",
-			"--max-turns", "3",
-			"Create a file at /workspace/agent-output.txt containing exactly 'written-by-agent'. Reply 'done' when finished.",
-		},
-		Stdout: &stdout,
-		Stderr: &stderr,
+	runClaude(t, ctx, dc, []string{
+		"-p",
+		"--output-format", "text",
+		"--model", "haiku",
+		"--max-turns", "3",
+		"Create a file at /workspace/agent-output.txt containing exactly 'written-by-agent'. Reply 'done' when finished.",
 	})
-	if err != nil {
-		t.Fatalf("claude run failed: %v\nstderr: %s", err, stderr.String())
-	}
 
 	data, err := os.ReadFile(filepath.Join(sourceDir, "agent-output.txt"))
 	if err != nil {
@@ -177,25 +183,16 @@ func TestLiveClaudeOrgReadOnly(t *testing.T) {
 		ForwardEnv: authEnvVars(),
 	}
 
-	var stdout, stderr bytes.Buffer
-	err := dc.Run(ctx, RunOpts{
-		Command: "claude",
-		Args: []string{
-			"-p",
-			"--output-format", "text",
-			"--model", "haiku",
-			"--max-turns", "2",
-			"Read /.ateamorg/config.txt and reply with ONLY its exact contents.",
-		},
-		Stdout: &stdout,
-		Stderr: &stderr,
+	stdout, _ := runClaude(t, ctx, dc, []string{
+		"-p",
+		"--output-format", "text",
+		"--model", "haiku",
+		"--max-turns", "2",
+		"Read /.ateamorg/config.txt and reply with ONLY its exact contents.",
 	})
-	if err != nil {
-		t.Fatalf("claude run failed: %v\nstderr: %s", err, stderr.String())
-	}
 
-	if !strings.Contains(stdout.String(), "org-config-value") {
-		t.Errorf("expected 'org-config-value' in output, got: %s", stdout.String())
+	if !strings.Contains(stdout, "org-config-value") {
+		t.Errorf("expected 'org-config-value' in output, got: %s", stdout)
 	}
 }
 
