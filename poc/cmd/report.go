@@ -20,6 +20,8 @@ var (
 	reportDryRun               bool
 	reportIgnorePreviousReport bool
 	reportCheaperModel         bool
+	reportProfile              string
+	reportAgent                string
 )
 
 var reportCmd = &cobra.Command{
@@ -46,6 +48,7 @@ func init() {
 	reportCmd.Flags().BoolVar(&reportDryRun, "dry-run", false, "print the computed prompt for each role without running")
 	reportCmd.Flags().BoolVar(&reportIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
 	addCheaperModelFlag(reportCmd, &reportCheaperModel)
+	addProfileFlags(reportCmd, &reportProfile, &reportAgent)
 	_ = reportCmd.MarkFlagRequired("roles")
 }
 
@@ -71,8 +74,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 
 	timeout := env.Config.Report.EffectiveTimeout(reportTimeout)
 
-	profileName := env.Config.ResolveProfile(runner.ActionReport, "")
-	cr, err := newRunner(env, profileName)
+	cr, err := resolveRunner(env, reportProfile, reportAgent, runner.ActionReport, "")
 	if err != nil {
 		return err
 	}

@@ -23,11 +23,13 @@ type Config struct {
 
 type AgentConfig struct {
 	Name    string
+	Base    string            // inherit unset fields from this agent
 	Command string
 	Args    []string
 	Model   string
-	Type    string            // "builtin" for mock, "" for external command
+	Type    string            // "builtin" for mock, "codex", or "" for claude
 	Env     map[string]string // env vars to set (empty string = unset from parent)
+	Sandbox string            // settings template filename (e.g. "ateam_claude_sandbox_extra_settings.json")
 }
 
 type ContainerConfig struct {
@@ -51,11 +53,13 @@ type hclFile struct {
 
 type hclAgent struct {
 	Name    string            `hcl:"name,label"`
+	Base    string            `hcl:"base,optional"`
 	Command string            `hcl:"command,optional"`
 	Args    []string          `hcl:"args,optional"`
 	Model   string            `hcl:"model,optional"`
 	Type    string            `hcl:"type,optional"`
 	Env     map[string]string `hcl:"env,optional"`
+	Sandbox string            `hcl:"sandbox,optional"`
 }
 
 type hclContainer struct {
@@ -107,7 +111,78 @@ func Load(projectDir, orgDir string) (*Config, error) {
 		}
 	}
 
+	// Resolve agent inheritance (base references)
+	if err := cfg.resolveInheritance(); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// resolveInheritance resolves base references in agent configs.
+// Fields that are zero-valued in the child are inherited from the base.
+func (c *Config) resolveInheritance() error {
+	resolved := make(map[string]bool)
+	var resolve func(name string, visited map[string]bool) error
+
+	resolve = func(name string, visited map[string]bool) error {
+		if resolved[name] {
+			return nil
+		}
+		if visited[name] {
+			return fmt.Errorf("circular agent base reference: %s", name)
+		}
+		visited[name] = true
+
+		ac, ok := c.Agents[name]
+		if !ok {
+			return fmt.Errorf("unknown agent %q", name)
+		}
+		if ac.Base == "" {
+			resolved[name] = true
+			return nil
+		}
+
+		// Resolve the base first
+		if err := resolve(ac.Base, visited); err != nil {
+			return err
+		}
+		base, ok := c.Agents[ac.Base]
+		if !ok {
+			return fmt.Errorf("agent %q references unknown base %q", name, ac.Base)
+		}
+
+		// Inherit zero-valued fields from base
+		if ac.Command == "" {
+			ac.Command = base.Command
+		}
+		if ac.Args == nil {
+			ac.Args = base.Args
+		}
+		if ac.Model == "" {
+			ac.Model = base.Model
+		}
+		if ac.Type == "" {
+			ac.Type = base.Type
+		}
+		if ac.Env == nil {
+			ac.Env = base.Env
+		}
+		if ac.Sandbox == "" {
+			ac.Sandbox = base.Sandbox
+		}
+
+		c.Agents[name] = ac
+		resolved[name] = true
+		return nil
+	}
+
+	for name := range c.Agents {
+		if err := resolve(name, make(map[string]bool)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // mergeHCLFile reads a file (following symlinks) and merges it into cfg.
@@ -142,11 +217,13 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 	for _, a := range hf.Agents {
 		cfg.Agents[a.Name] = AgentConfig{
 			Name:    a.Name,
+			Base:    a.Base,
 			Command: a.Command,
 			Args:    a.Args,
 			Model:   a.Model,
 			Type:    a.Type,
 			Env:     a.Env,
+			Sandbox: a.Sandbox,
 		}
 	}
 	for _, c := range hf.Containers {

@@ -21,6 +21,8 @@ var (
 	codePrint        bool
 	codeDryRun       bool
 	codeCheaperModel bool
+	codeProfile      string
+	codeAgent        string
 )
 
 var codeCmd = &cobra.Command{
@@ -51,6 +53,7 @@ func init() {
 	codeCmd.Flags().BoolVar(&codeDryRun, "dry-run", false,
 		"print the computed prompt without running")
 	addCheaperModelFlag(codeCmd, &codeCheaperModel)
+	addProfileFlags(codeCmd, &codeProfile, &codeAgent)
 }
 
 func runCode(cmd *cobra.Command, args []string) error {
@@ -108,8 +111,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 
 	supervisorDir := filepath.Join(env.ProjectDir, "supervisor")
 
-	profileName := env.Config.ResolveProfile(runner.ActionCode, "")
-	cr, err := newRunner(env, profileName)
+	cr, err := resolveRunner(env, codeProfile, codeAgent, runner.ActionCode, "")
 	if err != nil {
 		return err
 	}

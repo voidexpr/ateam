@@ -63,14 +63,35 @@ func newRunner(env *root.ResolvedEnv, profileName string) (*runner.Runner, error
 		return nil, err
 	}
 
-	ag := buildAgent(ac)
+	return &runner.Runner{
+		Agent:           buildAgent(ac),
+		LogFile:         env.RunnerLogPath(),
+		ProjectDir:      env.ProjectDir,
+		OrgDir:          env.OrgDir,
+		ExtraWriteDirs:  []string{env.OrgDir},
+		SandboxSettings: ac.Sandbox,
+	}, nil
+}
+
+// newRunnerFromAgent creates a Runner using a named agent directly (no profile).
+func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.Runner, error) {
+	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
+	if err != nil {
+		return nil, fmt.Errorf("cannot load runtime.hcl: %w", err)
+	}
+
+	ac, ok := rtCfg.Agents[agentName]
+	if !ok {
+		return nil, fmt.Errorf("unknown agent %q", agentName)
+	}
 
 	return &runner.Runner{
-		Agent:          ag,
-		LogFile:        env.RunnerLogPath(),
-		ProjectDir:     env.ProjectDir,
-		OrgDir:         env.OrgDir,
-		ExtraWriteDirs: []string{env.OrgDir},
+		Agent:           buildAgent(&ac),
+		LogFile:         env.RunnerLogPath(),
+		ProjectDir:      env.ProjectDir,
+		OrgDir:          env.OrgDir,
+		ExtraWriteDirs:  []string{env.OrgDir},
+		SandboxSettings: ac.Sandbox,
 	}, nil
 }
 
@@ -80,22 +101,91 @@ func newRunnerDefault(env *root.ResolvedEnv) (*runner.Runner, error) {
 	return newRunner(env, profileName)
 }
 
+// resolveRunnerMinimal builds a Runner without project context (just org dir).
+func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.Runner, error) {
+	rtCfg, err := runtime.Load("", orgDir)
+	if err != nil {
+		return nil, fmt.Errorf("cannot load runtime.hcl: %w", err)
+	}
+
+	switch {
+	case profileFlag != "" && agentFlag != "":
+		return nil, fmt.Errorf("--profile and --agent are mutually exclusive")
+	case agentFlag != "":
+		ac, ok := rtCfg.Agents[agentFlag]
+		if !ok {
+			return nil, fmt.Errorf("unknown agent %q", agentFlag)
+		}
+		return &runner.Runner{
+			Agent:           buildAgent(&ac),
+			OrgDir:          orgDir,
+			SandboxSettings: ac.Sandbox,
+		}, nil
+	default:
+		if profileFlag == "" {
+			profileFlag = "default"
+		}
+		_, ac, _, err := rtCfg.ResolveProfile(profileFlag)
+		if err != nil {
+			return nil, err
+		}
+		return &runner.Runner{
+			Agent:           buildAgent(ac),
+			OrgDir:          orgDir,
+			SandboxSettings: ac.Sandbox,
+		}, nil
+	}
+}
+
+// resolveRunner builds a Runner from --profile/--agent flags, falling back to config resolution.
+func resolveRunner(env *root.ResolvedEnv, profileFlag, agentFlag, action, roleID string) (*runner.Runner, error) {
+	switch {
+	case profileFlag != "" && agentFlag != "":
+		return nil, fmt.Errorf("--profile and --agent are mutually exclusive")
+	case agentFlag != "":
+		return newRunnerFromAgent(env, agentFlag)
+	case profileFlag != "":
+		return newRunner(env, profileFlag)
+	default:
+		profileName := env.Config.ResolveProfile(action, roleID)
+		return newRunner(env, profileName)
+	}
+}
+
 // buildAgent constructs an agent.Agent from config.
 func buildAgent(ac *runtime.AgentConfig) agent.Agent {
-	if ac.Type == "builtin" {
+	switch ac.Type {
+	case "builtin":
 		return &agent.MockAgent{}
+	case "codex":
+		cmd := ac.Command
+		if cmd == "" {
+			cmd = "codex"
+		}
+		return &agent.CodexAgent{
+			Command: cmd,
+			Args:    ac.Args,
+			Model:   ac.Model,
+			Env:     ac.Env,
+		}
+	default:
+		cmd := ac.Command
+		if cmd == "" {
+			cmd = ac.Name
+		}
+		return &agent.ClaudeAgent{
+			Command: cmd,
+			Args:    ac.Args,
+			Model:   ac.Model,
+			Env:     ac.Env,
+		}
 	}
-	cmd := ac.Command
-	if cmd == "" {
-		cmd = ac.Name
-	}
-	ca := &agent.ClaudeAgent{
-		Command: cmd,
-		Args:    ac.Args,
-		Model:   ac.Model,
-		Env:     ac.Env,
-	}
-	return ca
+}
+
+func addProfileFlags(cmd *cobra.Command, profileDst, agentDst *string) {
+	cmd.Flags().StringVar(profileDst, "profile", "", "runtime profile (overrides config resolution)")
+	cmd.Flags().StringVar(agentDst, "agent", "", "agent name from runtime.hcl (shortcut, uses 'none' container)")
+	cmd.MarkFlagsMutuallyExclusive("profile", "agent")
 }
 
 const cheaperModelName = "sonnet"

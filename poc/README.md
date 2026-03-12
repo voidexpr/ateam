@@ -270,6 +270,7 @@ Run an agent with a prompt. Can run standalone (just needs `.ateamorg/`) or with
 ateam run "say hello"
 ateam run "Analyze the auth module" --role security
 ateam run "test" --profile cheap
+ateam run "say hi" --agent codex
 ateam run "say hi" --model sonnet
 ateam run "quick check" --quiet
 ```
@@ -278,6 +279,7 @@ ateam run "quick check" --quiet
 |------|-------------|
 | `--role ROLE` | Role to run (optional — requires project context) |
 | `--profile NAME` | Runtime profile to use (overrides config resolution) |
+| `--agent NAME` | Agent name from runtime.hcl (mutually exclusive with --profile) |
 | `--model MODEL` | Model override |
 | `--no-stream` | Disable progress updates on stderr (on by default) |
 | `--no-summary` | Disable cost/duration/tokens summary (on by default) |

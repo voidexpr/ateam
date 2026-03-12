@@ -24,12 +24,13 @@ const (
 
 // Runner orchestrates agent execution with logging, file I/O, and progress reporting.
 type Runner struct {
-	Agent          agent.Agent
-	LogFile        string   // append-only runner log
-	ProjectDir     string   // .ateam/ dir
-	OrgDir         string   // .ateamorg/ dir
-	ExtraWriteDirs []string // additional dirs granted sandbox write access
-	ExtraArgs      []string // extra args passed to the agent
+	Agent           agent.Agent
+	LogFile         string   // append-only runner log
+	ProjectDir      string   // .ateam/ dir
+	OrgDir          string   // .ateamorg/ dir
+	ExtraWriteDirs  []string // additional dirs granted sandbox write access
+	ExtraArgs       []string // extra args passed to the agent
+	SandboxSettings string   // settings template filename (resolved via 3-level fallback)
 }
 
 // RunOpts holds per-invocation settings.
@@ -129,9 +130,9 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	extraArgs := make([]string, len(r.ExtraArgs))
 	copy(extraArgs, r.ExtraArgs)
 
-	// Write sandbox settings for claude-type agents
+	// Write sandbox settings if configured
 	var settingsJSON []byte
-	if r.agentNeedsSettings() {
+	if r.SandboxSettings != "" {
 		settingsTarget := prefix + "_settings.json"
 		var err error
 		settingsJSON, err = r.writeSettings(settingsTarget, opts)
@@ -280,16 +281,11 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	return summary
 }
 
-// agentNeedsSettings returns true if the agent is claude-based and needs settings.
-func (r *Runner) agentNeedsSettings() bool {
-	return r.Agent.Name() == "claude"
-}
-
-// writeSettings resolves the sandbox settings via 3-level fallback
+// writeSettings resolves the sandbox settings template via 3-level fallback
 // (.ateam/ -> .ateamorg/ -> .ateamorg/defaults/), merges in runtime paths,
-// and writes the settings to settingsPath.
+// and writes the merged settings to settingsPath.
 func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error) {
-	const sandboxFile = "ateam_claude_sandbox_extra_settings.json"
+	sandboxFile := r.SandboxSettings
 
 	base := readFileOr3Level(
 		filepath.Join(r.ProjectDir, sandboxFile),
