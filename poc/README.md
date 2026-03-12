@@ -1,16 +1,44 @@
 # ATeam — AI Role Team for Code Analysis
 
-A Go CLI that manages role-specific AI roles to analyze codebases and produce actionable reports unattended. Roles run in parallel via `claude -p`, and a supervisor synthesizes their findings into prioritized decisions. Then manages the coding. The goal is to improve project quality along multiple dimensions (code, testing, documentation, security, ...) in the background to free more attention for feature work.
+A Go CLI to improve a project quality using coding agents as unattended as desired. Have project quality improved while you sleep. Focus on feature work and have a team of expert agent improve your project code, tests, scripts, documentation.
+
+It automates role specific coding agents to improve project quality along multiple dimensions: code refactoring, testing, documentation, security, ... It audits, prioritize and perform the code changes unattended via pre-built but customizable prompts. All steps produce easy to audit (and edit) markdown files:
+* role specific reports
+* supervisor synthesizes and prioritizes in a review document
+* a supervisor coordinate the implementation of prioritized fixes
+* reports and reviews get updated with progress and are ready for another round when you are
+
+You can run it on demand (say after a coding day, before the week-end) or on a schedule (every day at night) for all or part the roles it knows how to do. Ateam is intended to run unattended with various sandboxing options to manage risks, isolation and convenience (i.e. don't constantly ask for approval).
+
+## Why
+
+Coding agents tend to produce sub-par code when implementing features. They also require a lot of attention between approvals and spec steering. As code is mostly written, read and modified by agents there is little incentive left for humans to perform code reviews except to gauge the current quality. At the same time coding agents are actually very good at finding refactoring opportunities, testing gaps, analyze dependencies and all the standard software quality tasks. So why keep reading code or why having to prompt agents to improve with these standard tasks ?
+
+Let's just reuse or write project quality improvement prompts once and have background agents run in a sandbox without requiring approvals perform the work. We add supervisor layer to balance priorities between the various dimensions of the work.
+
+The end result is to be able to focus our attention to the value generating feature work and let agents do the rest.
+
+Ateam provides additional default/overload/tracking structure compared to just 'claude -p "/simplify"' or other simple one-liners: multi-role audit + supervisor prioritization taking more decision fatigue away, built-in agent switching and sandboxing, audit and cost tracking. Also an out of the box immediate working state for any code base.
+
+Note that Ateam is not made to provide generic agent workflow management for feature work, it provides one simple and effective workflow for orthogonal project quality features that don't need much customization. Agent workflow management require a lot of attention to learn and configure, ateam is designed for the opposite: run it and forget it, see a stream of commits you can choose to integrate or not.
+
+Ateam makes use of existing coding agents instead of having its own agent talking to the LLM models directly. It is done to leverage the fast pace work going on coding agents and for familiary of behavior. A built-in agent could easily be added in the future if using existing coding agents is problematic
 
 ## Features
 
-- **Organization/project split** — shared defaults in `.ateamorg/`, per-project config and results in `.ateam/`
-- **Multi-project support** — multiple ateam projects per git repo (monorepo-friendly)
 - **16 built-in roles** — security, testing, refactoring, dependencies, documentation, project profiling, and more
-- **3-level prompt fallback** — project overrides → org overrides → embedded defaults
+- **3-level prompt fallback** — project overrides → org overrides → embedded defaults. You can also just add extra prompts and benefit from default prompts to customize
+- **Add new roles** - just create a directory and role specific prompt file to add particular type of audit
+- **Multi-project support** — multiple ateam projects can share a set of personal/organizational defaults
+- **Multi-project per repo support** — multiple ateam projects per git repo (monorepo-friendly)
+- **Auditability**: see current and historical reports, execution, logs
 - **Parallel execution** — configurable concurrency with per-role timeouts
 - **Stream-json output** — real-time JSONL stream capture with cost/token tracking
-- **Report archiving** — timestamped history of all prompts, reports, and reviews
+
+TODO:
+- cost tracking and limiting
+- flexible sandboxing and agent clients
+  - for example: audit with codex or gemini and code with claude
 
 ## Workflow
 
@@ -41,6 +69,16 @@ Can also be more methological:
 * code:
 
   ateam code
+
+
+* Example of scheduled runs with a subset of all the work:
+Run at night:
+
+  ateam all --roles refactor_small,docs_external,testing_basic
+
+Run on Fridays:
+
+  ateam all --roles security,dependencies,testing_full
 
 ### Git
 * use your work area, use ateam directly on main, get commits and rebase done automatically
