@@ -331,11 +331,11 @@ func TestCheapProfiles(t *testing.T) {
 	}
 
 	tests := []struct {
-		profile string
-		agent   string
+		profile       string
+		wantExtraArgs []string
 	}{
-		{"cheap", "claude-sonnet"},
-		{"cheapest", "claude-haiku"},
+		{"cheap", []string{"--model", "sonnet", "--max-budget-usd", "0.50"}},
+		{"cheapest", []string{"--model", "haiku", "--max-budget-usd", "0.10"}},
 	}
 
 	for _, tt := range tests {
@@ -344,11 +344,19 @@ func TestCheapProfiles(t *testing.T) {
 			t.Errorf("ResolveProfile(%q): %v", tt.profile, err)
 			continue
 		}
-		if prof.Agent != tt.agent {
-			t.Errorf("profile %q: expected agent %q, got %q", tt.profile, tt.agent, prof.Agent)
+		if prof.Agent != "claude" {
+			t.Errorf("profile %q: expected agent 'claude', got %q", tt.profile, prof.Agent)
 		}
 		if ac.Command != "claude" {
 			t.Errorf("profile %q agent: expected command 'claude', got %q", tt.profile, ac.Command)
+		}
+		if len(prof.AgentExtraArgs) != len(tt.wantExtraArgs) {
+			t.Errorf("profile %q: expected %d agent_extra_args, got %d: %v", tt.profile, len(tt.wantExtraArgs), len(prof.AgentExtraArgs), prof.AgentExtraArgs)
+		}
+		for i, arg := range prof.AgentExtraArgs {
+			if i < len(tt.wantExtraArgs) && arg != tt.wantExtraArgs[i] {
+				t.Errorf("profile %q: extra arg %d: expected %q, got %q", tt.profile, i, tt.wantExtraArgs[i], arg)
+			}
 		}
 	}
 }
@@ -580,5 +588,139 @@ agent "child-override" {
 	}
 	if len(co.ROPaths) != 1 || co.ROPaths[0] != "/data/ro" {
 		t.Errorf("expected inherited ro_paths, got %v", co.ROPaths)
+	}
+}
+
+func TestLocals(t *testing.T) {
+	dir := t.TempDir()
+
+	hcl := `
+locals {
+  my_sandbox = <<-EOF
+  {"permissions": {"allow": ["Read"]}}
+  EOF
+}
+
+agent "test-agent" {
+  command = "test"
+  sandbox = local.my_sandbox
+}
+
+container "none" {
+  type = "none"
+}
+
+profile "test" {
+  agent     = "test-agent"
+  container = "none"
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load("", dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ac := cfg.Agents["test-agent"]
+	if !strings.Contains(ac.Sandbox, `"permissions"`) {
+		t.Errorf("expected sandbox from local, got %q", ac.Sandbox)
+	}
+}
+
+func TestLocalsDefaultsSandbox(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ac := cfg.Agents["claude"]
+	if ac.Sandbox == "" {
+		t.Fatal("expected non-empty sandbox on claude agent (from locals)")
+	}
+	if !strings.Contains(ac.Sandbox, `"permissions"`) {
+		t.Errorf("expected sandbox JSON with permissions, got %q", ac.Sandbox[:min(len(ac.Sandbox), 80)])
+	}
+}
+
+func TestProfileAgentExtraArgs(t *testing.T) {
+	dir := t.TempDir()
+
+	hcl := `
+agent "base" {
+  command = "test-cmd"
+  args    = ["--verbose"]
+}
+
+container "none" {
+  type = "none"
+}
+
+profile "with-extras" {
+  agent            = "base"
+  container        = "none"
+  agent_extra_args = ["--model", "fast", "--budget", "1.00"]
+}
+
+profile "no-extras" {
+  agent     = "base"
+  container = "none"
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load("", dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	prof := cfg.Profiles["with-extras"]
+	if len(prof.AgentExtraArgs) != 4 {
+		t.Fatalf("expected 4 agent_extra_args, got %d: %v", len(prof.AgentExtraArgs), prof.AgentExtraArgs)
+	}
+	if prof.AgentExtraArgs[0] != "--model" || prof.AgentExtraArgs[1] != "fast" {
+		t.Errorf("unexpected agent_extra_args: %v", prof.AgentExtraArgs)
+	}
+
+	noExtras := cfg.Profiles["no-extras"]
+	if len(noExtras.AgentExtraArgs) != 0 {
+		t.Errorf("expected no agent_extra_args, got %v", noExtras.AgentExtraArgs)
+	}
+}
+
+func TestProfileContainerExtraArgs(t *testing.T) {
+	dir := t.TempDir()
+
+	hcl := `
+agent "mock" {
+  type = "builtin"
+}
+
+container "docker" {
+  type = "docker"
+}
+
+profile "docker-profile" {
+  agent              = "mock"
+  container          = "docker"
+  container_extra_args = ["--cpus", "2"]
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load("", dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	prof := cfg.Profiles["docker-profile"]
+	if len(prof.ContainerExtraArgs) != 2 || prof.ContainerExtraArgs[0] != "--cpus" {
+		t.Errorf("expected container_extra_args [--cpus 2], got %v", prof.ContainerExtraArgs)
 	}
 }

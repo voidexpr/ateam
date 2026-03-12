@@ -58,12 +58,14 @@ func newRunner(env *root.ResolvedEnv, profileName string) (*runner.Runner, error
 		return nil, fmt.Errorf("cannot load runtime.hcl: %w", err)
 	}
 
-	_, ac, _, err := rtCfg.ResolveProfile(profileName)
+	prof, ac, _, err := rtCfg.ResolveProfile(profileName)
 	if err != nil {
 		return nil, err
 	}
 
-	return runnerFromAgentConfig(env, ac), nil
+	r := runnerFromAgentConfig(env, ac)
+	r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
+	return r, nil
 }
 
 // newRunnerFromAgent creates a Runner using a named agent directly (no profile).
@@ -132,11 +134,13 @@ func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.Runner
 		if profileFlag == "" {
 			profileFlag = "default"
 		}
-		_, ac, _, err := rtCfg.ResolveProfile(profileFlag)
+		prof, ac, _, err := rtCfg.ResolveProfile(profileFlag)
 		if err != nil {
 			return nil, err
 		}
-		return minimalRunnerFromAgentConfig(orgDir, ac), nil
+		r := minimalRunnerFromAgentConfig(orgDir, ac)
+		r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
+		return r, nil
 	}
 }
 
