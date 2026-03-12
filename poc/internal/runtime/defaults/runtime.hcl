@@ -61,6 +61,16 @@ agent "claude-haiku" {
   args = ["-p", "--output-format", "stream-json", "--verbose", "--model", "haiku", "--max-budget-usd", "0.10"]
 }
 
+// claude-docker has no sandbox settings — the container itself provides isolation.
+// Uses --dangerously-skip-permissions for unattended tool use inside Docker.
+agent "claude-docker" {
+  command = "claude"
+  args    = ["-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"]
+  env = {
+    CLAUDECODE = ""
+  }
+}
+
 // claude-isolated uses a project-local config dir (.ateam/.claude) instead of ~/.claude,
 // providing full isolation for ateam-specific agent settings and auth tokens.
 // config_dir: relative paths resolve from .ateam/, absolute paths are used as-is.
@@ -119,12 +129,9 @@ profile "codex" {
   container = "none"
 }
 
-// Docker container is the sandbox — skip claude's own sandbox settings
-// and use --dangerously-skip-permissions for unattended tool use.
 profile "docker" {
-  agent            = "claude"
-  container        = "docker"
-  agent_extra_args = ["--dangerously-skip-permissions"]
+  agent     = "claude-docker"
+  container = "docker"
 }
 
 profile "test" {

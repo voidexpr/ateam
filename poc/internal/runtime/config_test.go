@@ -824,8 +824,8 @@ func TestDockerProfile(t *testing.T) {
 	if !ok {
 		t.Fatal("expected 'docker' profile in defaults")
 	}
-	if prof.Agent != "claude" {
-		t.Errorf("expected agent 'claude', got %q", prof.Agent)
+	if prof.Agent != "claude-docker" {
+		t.Errorf("expected agent 'claude-docker', got %q", prof.Agent)
 	}
 	if prof.Container != "docker" {
 		t.Errorf("expected container 'docker', got %q", prof.Container)
