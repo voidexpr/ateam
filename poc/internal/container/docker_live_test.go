@@ -103,19 +103,19 @@ func mkdirWritable(t *testing.T, path string) {
 
 func requireAuth(t *testing.T) {
 	t.Helper()
-	if os.Getenv("ANTHROPIC_API_KEY") == "" && os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") == "" {
-		t.Fatalf("neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN set — see 'make test-docker-live' for setup")
+	if os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") == "" && os.Getenv("ANTHROPIC_API_KEY") == "" {
+		t.Fatalf("neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY set — see 'make test-docker-live' for setup")
 	}
 }
 
 // authEnvVars returns the env var names that should be forwarded to the container.
 func authEnvVars() []string {
 	var vars []string
-	if os.Getenv("ANTHROPIC_API_KEY") != "" {
-		vars = append(vars, "ANTHROPIC_API_KEY")
-	}
 	if os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") != "" {
 		vars = append(vars, "CLAUDE_CODE_OAUTH_TOKEN")
+	}
+	if os.Getenv("ANTHROPIC_API_KEY") != "" {
+		vars = append(vars, "ANTHROPIC_API_KEY")
 	}
 	return vars
 }
