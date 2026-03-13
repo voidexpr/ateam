@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ateam-poc/internal/agent"
+	"github.com/ateam-poc/internal/config"
 	"github.com/ateam-poc/internal/container"
 	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
@@ -227,20 +228,45 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 		if gitRepoDir != "" {
 			mountDir = gitRepoDir
 		}
+
+		persistent := cc.Mode == "persistent"
+		var containerName string
+		if persistent {
+			containerName = buildContainerName(sourceDir, orgDir, roleID)
+		}
+
 		return &container.DockerContainer{
-			Image:        image,
-			Dockerfile:   dockerfile,
-			ForwardEnv:   cc.ForwardEnv,
-			ExtraVolumes: volumes,
-			ExtraArgs:    extraArgs,
-			MountDir:     mountDir,
-			SourceDir:    sourceDir,
-			ProjectDir:   projectDir,
-			OrgDir:       orgDir,
+			Image:         image,
+			Dockerfile:    dockerfile,
+			ForwardEnv:    cc.ForwardEnv,
+			ExtraVolumes:  volumes,
+			ExtraArgs:     extraArgs,
+			Persistent:    persistent,
+			ContainerName: containerName,
+			MountDir:      mountDir,
+			SourceDir:     sourceDir,
+			ProjectDir:    projectDir,
+			OrgDir:        orgDir,
 		}, nil
 	default:
 		return nil, nil
 	}
+}
+
+func buildContainerName(sourceDir, orgDir, roleID string) string {
+	if roleID == "" {
+		roleID = "adhoc"
+	}
+	if orgDir == "" {
+		return "ateam-adhoc"
+	}
+	orgRoot := filepath.Dir(orgDir)
+	relPath, err := filepath.Rel(orgRoot, sourceDir)
+	if err != nil || relPath == "" {
+		return "ateam-adhoc"
+	}
+	projectID := config.PathToProjectID(relPath)
+	return "ateam-" + projectID + "-" + roleID
 }
 
 func addProfileFlags(cmd *cobra.Command, profileDst, agentDst *string) {

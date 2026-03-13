@@ -185,6 +185,9 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		if err := dc.EnsureImage(ctx); err != nil {
 			return failEarly(fmt.Errorf("docker image build failed: %w", err))
 		}
+		if err := dc.EnsureRunning(ctx); err != nil {
+			return failEarly(fmt.Errorf("docker container start failed: %w", err))
+		}
 		req.CmdFactory = dc.CmdFactory()
 		req.StreamFile = dc.TranslatePath(streamFile)
 		req.StderrFile = dc.TranslatePath(stderrFile)

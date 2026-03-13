@@ -41,6 +41,7 @@ type AgentConfig struct {
 type ContainerConfig struct {
 	Name         string
 	Type         string   // "none", "docker", "srt"
+	Mode         string   // "oneshot" (default) or "persistent"
 	Dockerfile   string   // relative to .ateam/ dir
 	IdleTimeout  string   // duration string, e.g. "30m" (future use)
 	ForwardEnv   []string // env var names to forward from host into container
@@ -81,6 +82,7 @@ type hclAgent struct {
 type hclContainer struct {
 	Name         string   `hcl:"name,label"`
 	Type         string   `hcl:"type,optional"`
+	Mode         string   `hcl:"mode,optional"`
 	Dockerfile   string   `hcl:"dockerfile,optional"`
 	IdleTimeout  string   `hcl:"idle_timeout,optional"`
 	ForwardEnv   []string `hcl:"forward_env,optional"`
@@ -275,6 +277,7 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 		cfg.Containers[c.Name] = ContainerConfig{
 			Name:         c.Name,
 			Type:         c.Type,
+			Mode:         c.Mode,
 			Dockerfile:   c.Dockerfile,
 			IdleTimeout:  c.IdleTimeout,
 			ForwardEnv:   c.ForwardEnv,
