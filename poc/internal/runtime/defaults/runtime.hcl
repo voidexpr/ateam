@@ -138,3 +138,18 @@ profile "test" {
   agent     = "mock"
   container = "none"
 }
+
+container "docker-persistent" {
+  type        = "docker"
+  mode        = "persistent"
+  dockerfile  = "Dockerfile"
+  forward_env = [
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+  ]
+}
+
+profile "docker-persistent" {
+  agent     = "claude-docker"
+  container = "docker-persistent"
+}
