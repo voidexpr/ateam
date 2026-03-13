@@ -24,9 +24,13 @@ This command is read-only — it never creates or modifies anything.`,
 }
 
 func runEnv(cmd *cobra.Command, args []string) error {
+	// Show auth status first — works even without .ateamorg
+	printAuthStatus()
+
 	env, err := root.Lookup()
 	if err != nil {
-		return err
+		fmt.Printf("     Org: (not found — run 'ateam install' to set up)\n")
+		return nil
 	}
 
 	orgRoot := env.OrgRoot()
@@ -37,9 +41,6 @@ func runEnv(cmd *cobra.Command, args []string) error {
 
 	relOrg, _ := filepath.Rel(cwd, orgRoot)
 	fmt.Printf("     Org: %s (%s)\n", relOrg, tildeHome(orgRoot))
-
-	// Show auth status
-	printAuthStatus()
 
 	// Show runtime.hcl resolution
 	printRuntimePaths(env, cwd)

@@ -134,7 +134,7 @@ Example `.ateam/runtime.hcl`:
 container "docker-with-data" {
   type        = "docker"
   dockerfile  = "Dockerfile"
-  forward_env = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"]
+  forward_env = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
   extra_volumes = [
     "../shared-data:/data:ro",       // relative to project source dir
     "/opt/tools:/tools:ro",          // absolute paths work too
