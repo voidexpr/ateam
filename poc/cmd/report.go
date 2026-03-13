@@ -22,6 +22,7 @@ var (
 	reportCheaperModel         bool
 	reportProfile              string
 	reportAgent                string
+	reportVerbose              bool
 )
 
 var reportCmd = &cobra.Command{
@@ -49,6 +50,7 @@ func init() {
 	reportCmd.Flags().BoolVar(&reportIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
 	addCheaperModelFlag(reportCmd, &reportCheaperModel)
 	addProfileFlags(reportCmd, &reportProfile, &reportAgent)
+	addVerboseFlag(reportCmd, &reportVerbose)
 	_ = reportCmd.MarkFlagRequired("roles")
 }
 
@@ -103,6 +105,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 				TimeoutMin:           timeout,
 				HistoryDir:           env.RoleHistoryDir(roleID),
 				PromptName:           "report_prompt.md",
+				Verbose:              reportVerbose,
 			},
 		})
 	}

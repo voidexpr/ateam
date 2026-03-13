@@ -1064,15 +1064,29 @@ We must use wal and trict mode.
 ```sql
 CREATE TABLE agent_calls (
   id            INTEGER PRIMARY KEY,
-  started_at    TEXT NOT NULL,     -- ISO-8601
-  ended_at      TEXT,
+
+  -- Core Dimensions
+  project_id    TEXT NOT NULL
   profile       TEXT NOT NULL,     -- profile name used
   agent         TEXT NOT NULL,     -- agent config name
   container     TEXT NOT NULL,     -- "none", "docker", "srt"
   action        TEXT NOT NULL,     -- "report", "review", "code", "run", "exec"
   role          TEXT,              -- null for exec/review
+  task_group    TEXT,              -- when executing related tasks set a common label to report on their aggregate or just find them
+
+  -- Arguments
   model         TEXT,
-  prompt_hash   TEXT,              -- SHA-256 of prompt (not the full prompt)
+  prompt_hash   TEXT,              -- SHA-256 of prompt (not the full prompt). TODO: need a way to find that prompt. Or maybe store the prefix (so exact file name if a file or first part of a real longer prompt)
+  -- TODO: exact CLI option ?
+
+  -- Runtime at start
+  started_at    TEXT NOT NULL,     -- ISO-8601
+  stream_file   TEXT,              -- path to JSONL stream
+  -- TODO: container id ?
+
+  -- Runtime at end
+  ended_at      TEXT,
+  duration_ms   INTEGER,
   exit_code     INTEGER,
   is_error      BOOLEAN DEFAULT 0,
   error_message TEXT,
@@ -1081,9 +1095,8 @@ CREATE TABLE agent_calls (
   output_tokens INTEGER,
   cache_read_tokens INTEGER,
   turns         INTEGER,
-  duration_ms   INTEGER,
-  stream_file   TEXT,              -- path to JSONL stream
-  project_id    TEXT NOT NULL
+
+  -- TODO: need a way to get a path to the formatted last message output
 );
 
 CREATE INDEX idx_calls_project ON agent_calls(project_id, started_at);

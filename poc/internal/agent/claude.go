@@ -23,6 +23,20 @@ type ClaudeAgent struct {
 
 func (c *ClaudeAgent) Name() string { return "claude" }
 
+func (c *ClaudeAgent) DebugCommandArgs(extraArgs []string) (string, []string) {
+	command := c.Command
+	if command == "" {
+		command = "claude"
+	}
+	args := make([]string, len(c.Args))
+	copy(args, c.Args)
+	if c.Model != "" {
+		args = append(args, "--model", c.Model)
+	}
+	args = append(args, extraArgs...)
+	return command, args
+}
+
 func (c *ClaudeAgent) Run(ctx context.Context, req Request) <-chan StreamEvent {
 	ch := make(chan StreamEvent, 64)
 	go c.run(ctx, req, ch)
@@ -65,7 +79,10 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 	} else {
 		cmd = exec.CommandContext(ctx, command, args...)
 	}
-	if req.WorkDir != "" && cmd.Dir == "" {
+	// Set working directory for host execution. When CmdFactory is used (e.g. Docker),
+	// the factory already handles workdir via container flags (docker -w), so we
+	// must not set cmd.Dir to a container path that doesn't exist on the host.
+	if req.WorkDir != "" && cmd.Dir == "" && req.CmdFactory == nil {
 		cmd.Dir = req.WorkDir
 	}
 	cmd.Stdin = strings.NewReader(req.Prompt)

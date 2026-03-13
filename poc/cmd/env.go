@@ -144,7 +144,7 @@ func printRuntimePaths(env *root.ResolvedEnv, cwd string) {
 	}
 	fmt.Println()
 
-	// Show loaded profiles
+	// Show loaded profiles and Dockerfile resolution
 	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
 	if err == nil {
 		var names []string
@@ -155,6 +155,8 @@ func printRuntimePaths(env *root.ResolvedEnv, cwd string) {
 			sort.Strings(names)
 			fmt.Printf("Profiles: %s\n", strings.Join(names, ", "))
 		}
+
+		printDockerfilePath(env, cwd)
 	}
 }
 
@@ -168,6 +170,26 @@ func fileOrSymlinkExists(path string) bool {
 	// Check for broken symlink
 	_, err = os.Lstat(path)
 	return err == nil
+}
+
+func printDockerfilePath(env *root.ResolvedEnv, cwd string) {
+	// Show the Dockerfile resolution chain (same order as runtime.ResolveDockerfile)
+	var candidates []string
+	if env.ProjectDir != "" {
+		candidates = append(candidates, filepath.Join(env.ProjectDir, "Dockerfile"))
+	}
+	if env.OrgDir != "" {
+		candidates = append(candidates, filepath.Join(env.OrgDir, "Dockerfile"))
+		candidates = append(candidates, filepath.Join(env.OrgDir, "defaults", "Dockerfile"))
+	}
+
+	for _, path := range candidates {
+		if fileOrSymlinkExists(path) {
+			fmt.Printf("  Docker: %s\n", relPath(cwd, path))
+			return
+		}
+	}
+	fmt.Println("  Docker: (embedded default)")
 }
 
 func tildeHome(p string) string {

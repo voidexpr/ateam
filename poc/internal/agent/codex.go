@@ -24,6 +24,21 @@ type CodexAgent struct {
 
 func (c *CodexAgent) Name() string { return "codex" }
 
+func (c *CodexAgent) DebugCommandArgs(extraArgs []string) (string, []string) {
+	command := c.Command
+	if command == "" {
+		command = "codex"
+	}
+	args := make([]string, len(c.Args))
+	copy(args, c.Args)
+	if c.Model != "" {
+		args = append(args, "--model", c.Model)
+	}
+	args = append(args, extraArgs...)
+	args = append(args, "exec", "--json")
+	return command, args
+}
+
 func (c *CodexAgent) Run(ctx context.Context, req Request) <-chan StreamEvent {
 	ch := make(chan StreamEvent, 64)
 	go c.run(ctx, req, ch)
@@ -57,7 +72,7 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 	} else {
 		cmd = exec.CommandContext(ctx, command, args...)
 	}
-	if req.WorkDir != "" && cmd.Dir == "" {
+	if req.WorkDir != "" && cmd.Dir == "" && req.CmdFactory == nil {
 		cmd.Dir = req.WorkDir
 	}
 	if cmd.Env == nil {

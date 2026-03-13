@@ -26,6 +26,7 @@ var (
 	runNoSummary bool
 	runQuiet     bool
 	runAgentArgs string
+	runVerbose   bool
 )
 
 var runCmd = &cobra.Command{
@@ -59,6 +60,7 @@ func init() {
 	runCmd.Flags().BoolVar(&runQuiet, "quiet", false, "disable both streaming and summary (same as --no-stream --no-summary)")
 	runCmd.Flags().StringVar(&runWorkDir, "work-dir", "", "working directory (defaults to project source dir or cwd)")
 	runCmd.Flags().StringVar(&runAgentArgs, "agent-args", "", "extra args passed to the agent CLI (appended after configured args)")
+	addVerboseFlag(runCmd, &runVerbose)
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
@@ -142,10 +144,11 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	// Build opts
 	opts := runner.RunOpts{
-		RoleID: runRole,
-		Action: runner.ActionRun,
+		RoleID:  runRole,
+		Action:  runner.ActionRun,
 		LogsDir: logsDir,
 		WorkDir: workDir,
+		Verbose: runVerbose,
 	}
 
 	if runRole != "" {

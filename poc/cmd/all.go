@@ -11,6 +11,7 @@ var (
 	allQuiet        bool
 	allTimeout      int
 	allCheaperModel bool
+	allVerbose      bool
 )
 
 var allCmd = &cobra.Command{
@@ -34,6 +35,7 @@ func init() {
 	allCmd.Flags().BoolVarP(&allQuiet, "quiet", "q", false, "suppress output printing")
 	allCmd.Flags().IntVar(&allTimeout, "timeout", 0, "per-phase timeout in minutes (overrides config)")
 	addCheaperModelFlag(allCmd, &allCheaperModel)
+	addVerboseFlag(allCmd, &allVerbose)
 }
 
 func runAll(cmd *cobra.Command, args []string) error {
@@ -46,6 +48,7 @@ func runAll(cmd *cobra.Command, args []string) error {
 	reportExtraPrompt = allExtraPrompt
 	reportTimeout = allTimeout
 	reportCheaperModel = allCheaperModel
+	reportVerbose = allVerbose
 	reportDryRun = false
 	reportIgnorePreviousReport = false
 	if err := runReport(nil, nil); err != nil {
@@ -58,6 +61,7 @@ func runAll(cmd *cobra.Command, args []string) error {
 	reviewExtraPrompt = allExtraPrompt
 	reviewTimeout = allTimeout
 	reviewCheaperModel = allCheaperModel
+	reviewVerbose = allVerbose
 	reviewDryRun = false
 	reviewCustomPrompt = ""
 	if err := runReview(nil, nil); err != nil {
@@ -70,6 +74,7 @@ func runAll(cmd *cobra.Command, args []string) error {
 	codeExtraPrompt = allExtraPrompt
 	codeTimeout = allTimeout
 	codeCheaperModel = allCheaperModel
+	codeVerbose = allVerbose
 	codeDryRun = false
 	codeReview = ""
 	codeManagement = ""

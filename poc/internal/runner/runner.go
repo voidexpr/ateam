@@ -50,6 +50,7 @@ type RunOpts struct {
 	TimeoutMin           int
 	HistoryDir           string // where to archive the prompt
 	PromptName           string // archive name
+	Verbose              bool   // print agent and docker commands to stderr
 }
 
 // RunProgress is a lightweight status sent on a channel during execution.
@@ -197,7 +198,16 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	}
 
 	agentName := r.Agent.Name()
-	cliStr := agentName + " " + strings.Join(extraArgs, " ")
+	command, agentArgs := r.Agent.DebugCommandArgs(extraArgs)
+	cliStr := command + " " + strings.Join(agentArgs, " ")
+
+	if opts.Verbose {
+		fmt.Fprintf(os.Stderr, "[verbose] agent: %s\n", cliStr)
+		if dc, ok := r.Container.(*container.DockerContainer); ok {
+			fmt.Fprintf(os.Stderr, "[verbose] docker: %s\n",
+				dc.DebugCommand(container.RunOpts{Command: command, Args: agentArgs}))
+		}
+	}
 
 	// Write exec file with full context for debugging.
 	writeExecFile(execTarget, startedAt, opts, prompt, settingsJSON, cliStr, cwd, agentName)

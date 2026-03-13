@@ -28,7 +28,8 @@ test-docker-live:
 		echo "Set one of these environment variables:"; \
 		echo ""; \
 		echo "  Option A - OAuth token (reuses your Claude Code login):"; \
-		echo "    export CLAUDE_CODE_OAUTH_TOKEN=\"\$$(cat ~/.claude/.credentials.json | grep -o '\"accessToken\":\"[^\"]*\"' | cut -d'\"' -f4)\""; \
+		echo "    run: claude setup-token"; \
+		echo "    export CLAUDE_CODE_OAUTH_TOKEN=\"PASTE TOKEN FROM ABOVE COMMAND HERE\""; \
 		echo ""; \
 		echo "  Option B - API key (from https://console.anthropic.com/settings/keys):"; \
 		echo "    export ANTHROPIC_API_KEY=sk-ant-..."; \

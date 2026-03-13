@@ -23,6 +23,7 @@ var (
 	codeCheaperModel bool
 	codeProfile      string
 	codeAgent        string
+	codeVerbose      bool
 )
 
 var codeCmd = &cobra.Command{
@@ -54,6 +55,7 @@ func init() {
 		"print the computed prompt without running")
 	addCheaperModelFlag(codeCmd, &codeCheaperModel)
 	addProfileFlags(codeCmd, &codeProfile, &codeAgent)
+	addVerboseFlag(codeCmd, &codeVerbose)
 }
 
 func runCode(cmd *cobra.Command, args []string) error {
@@ -127,6 +129,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 		TimeoutMin:           timeout,
 		HistoryDir:           historyDir,
 		PromptName:           "code_management_prompt.md",
+		Verbose:              codeVerbose,
 	}
 
 	progress := make(chan runner.RunProgress, 64)

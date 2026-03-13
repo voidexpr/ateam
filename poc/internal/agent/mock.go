@@ -22,6 +22,10 @@ type MockAgent struct {
 
 func (m *MockAgent) Name() string { return "mock" }
 
+func (m *MockAgent) DebugCommandArgs(extraArgs []string) (string, []string) {
+	return "mock", nil
+}
+
 func (m *MockAgent) Run(ctx context.Context, req Request) <-chan StreamEvent {
 	m.mu.Lock()
 	m.Requests = append(m.Requests, req)

@@ -23,15 +23,13 @@ type DockerContainer struct {
 	ExtraArgs    []string // additional docker run args from profile container_extra_args
 
 	// Runtime context
-	SourceDir  string // project source root → mounted as /workspace
-	ProjectDir string // .ateam/ dir → inside /workspace/.ateam
-	OrgDir     string // .ateamorg/ dir → mounted as /.ateamorg
+	MountDir   string // volume mount source: git root, or SourceDir as fallback
+	SourceDir  string // project root (parent of .ateam/) — determines -w
+	ProjectDir string // .ateam/ dir
+	OrgDir     string // .ateamorg/ dir
 }
 
-const (
-	containerWorkspace = "/workspace"
-	containerOrgDir    = "/.ateamorg"
-)
+const containerRoot = "/ateam"
 
 func (d *DockerContainer) Type() string { return "docker" }
 
@@ -47,7 +45,11 @@ func (d *DockerContainer) EnsureImage(ctx context.Context) error {
 	if d.Dockerfile == "" {
 		return fmt.Errorf("no Dockerfile configured for docker container")
 	}
-	if _, err := os.Stat(d.Dockerfile); err != nil {
+	// Resolve symlinks so Docker can read the actual file.
+	// Symlinked Dockerfiles (e.g. .ateamorg/Dockerfile → .../defaults/Dockerfile)
+	// point outside the build context, which BuildKit can't follow.
+	dockerfilePath, err := filepath.EvalSymlinks(d.Dockerfile)
+	if err != nil {
 		return fmt.Errorf("Dockerfile not found: %s", d.Dockerfile)
 	}
 
@@ -58,11 +60,11 @@ func (d *DockerContainer) EnsureImage(ctx context.Context) error {
 		uid = u.Uid
 	}
 
-	buildCtx := filepath.Dir(d.Dockerfile)
+	buildCtx := filepath.Dir(dockerfilePath)
 	cmd := exec.CommandContext(ctx, "docker", "build",
 		"--build-arg", "USER_UID="+uid,
 		"-t", d.Image,
-		"-f", d.Dockerfile,
+		"-f", dockerfilePath,
 		buildCtx,
 	)
 	cmd.Stdout = os.Stderr // build output goes to stderr
@@ -77,17 +79,21 @@ func (d *DockerContainer) EnsureImage(ctx context.Context) error {
 // The returned factory sets up all mounts, env forwarding, and workdir.
 // The agent uses this instead of exec.CommandContext.
 func (d *DockerContainer) CmdFactory() agent.CmdFactory {
+	containerCodePath, containerWorkDir, containerOrgPath := d.containerPaths()
+
+	mount := d.mountDir()
+
 	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		dockerArgs := []string{"run", "--rm", "-i"}
 
-		// Mount source dir as /workspace
-		if d.SourceDir != "" {
-			dockerArgs = append(dockerArgs, "-v", d.SourceDir+":"+containerWorkspace+":rw")
+		// Mount code dir (git root or source dir)
+		if mount != "" {
+			dockerArgs = append(dockerArgs, "-v", mount+":"+containerCodePath+":rw")
 		}
 
-		// Mount org dir as /.ateamorg (read-only)
+		// Mount org dir
 		if d.OrgDir != "" {
-			dockerArgs = append(dockerArgs, "-v", d.OrgDir+":"+containerOrgDir+":ro")
+			dockerArgs = append(dockerArgs, "-v", d.OrgDir+":"+containerOrgPath+":rw")
 		}
 
 		// Extra volumes from container config (e.g. "../data:/data:ro")
@@ -96,7 +102,7 @@ func (d *DockerContainer) CmdFactory() agent.CmdFactory {
 		}
 
 		// Working directory
-		dockerArgs = append(dockerArgs, "-w", containerWorkspace)
+		dockerArgs = append(dockerArgs, "-w", containerWorkDir)
 
 		// Extra docker run args from profile
 		dockerArgs = append(dockerArgs, d.ExtraArgs...)
@@ -131,22 +137,22 @@ func (d *DockerContainer) TranslatePath(hostPath string) string {
 		return ""
 	}
 
-	// .ateam/ is inside source dir, so check ProjectDir first (more specific)
-	if d.ProjectDir != "" {
-		if rel, ok := relativeUnder(hostPath, d.ProjectDir); ok {
-			return filepath.Join(containerWorkspace, ".ateam", rel)
-		}
-	}
+	_, _, containerOrgPath := d.containerPaths()
+	orgRoot := filepath.Dir(d.OrgDir)
 
-	if d.SourceDir != "" {
-		if rel, ok := relativeUnder(hostPath, d.SourceDir); ok {
-			return filepath.Join(containerWorkspace, rel)
-		}
-	}
-
+	// Check OrgDir first (most specific non-code path)
 	if d.OrgDir != "" {
 		if rel, ok := relativeUnder(hostPath, d.OrgDir); ok {
-			return filepath.Join(containerOrgDir, rel)
+			return filepath.Join(containerOrgPath, rel)
+		}
+	}
+
+	// Check MountDir (git root or sourceDir)
+	mount := d.mountDir()
+	if mount != "" {
+		if rel, ok := relativeUnder(hostPath, mount); ok {
+			relMount, _ := filepath.Rel(orgRoot, mount)
+			return filepath.Join(containerRoot, relMount, rel)
 		}
 	}
 
@@ -177,17 +183,21 @@ func (d *DockerContainer) Run(ctx context.Context, opts RunOpts) error {
 
 // DebugCommand returns the full docker command string for logging.
 func (d *DockerContainer) DebugCommand(opts RunOpts) string {
+	containerCodePath, containerWorkDir, containerOrgPath := d.containerPaths()
+
+	mount := d.mountDir()
+
 	parts := []string{"docker", "run", "--rm", "-i"}
-	if d.SourceDir != "" {
-		parts = append(parts, "-v", d.SourceDir+":"+containerWorkspace+":rw")
+	if mount != "" {
+		parts = append(parts, "-v", mount+":"+containerCodePath+":rw")
 	}
 	if d.OrgDir != "" {
-		parts = append(parts, "-v", d.OrgDir+":"+containerOrgDir+":ro")
+		parts = append(parts, "-v", d.OrgDir+":"+containerOrgPath+":rw")
 	}
 	for _, vol := range d.ExtraVolumes {
 		parts = append(parts, "-v", vol)
 	}
-	parts = append(parts, "-w", containerWorkspace)
+	parts = append(parts, "-w", containerWorkDir)
 	parts = append(parts, d.ExtraArgs...)
 	for _, key := range d.ForwardEnv {
 		parts = append(parts, "-e", key)
@@ -195,4 +205,38 @@ func (d *DockerContainer) DebugCommand(opts RunOpts) string {
 	parts = append(parts, d.Image, opts.Command)
 	parts = append(parts, opts.Args...)
 	return strings.Join(parts, " ")
+}
+
+// mountDir returns the effective mount source: MountDir if set, otherwise SourceDir.
+func (d *DockerContainer) mountDir() string {
+	if d.MountDir != "" {
+		return d.MountDir
+	}
+	return d.SourceDir
+}
+
+// containerPaths computes the container paths for code, workdir, and orgdir,
+// preserving the relative hierarchy between orgRoot and the mounted dirs.
+func (d *DockerContainer) containerPaths() (codePath, workDir, orgPath string) {
+	orgRoot := filepath.Dir(d.OrgDir)
+
+	// Container org path: /ateam/.ateamorg
+	orgPath = filepath.Join(containerRoot, filepath.Base(d.OrgDir))
+
+	// Container code path: /ateam/<relMountDir>
+	mount := d.mountDir()
+	relMount, err := filepath.Rel(orgRoot, mount)
+	if err != nil {
+		relMount = filepath.Base(mount)
+	}
+	codePath = filepath.Join(containerRoot, relMount)
+
+	// Container workdir: /ateam/<relSourceDir>
+	relSource, err := filepath.Rel(orgRoot, d.SourceDir)
+	if err != nil {
+		relSource = relMount
+	}
+	workDir = filepath.Join(containerRoot, relSource)
+
+	return codePath, workDir, orgPath
 }

@@ -22,6 +22,7 @@ var (
 	reviewCheaperModel bool
 	reviewProfile      string
 	reviewAgent        string
+	reviewVerbose      bool
 )
 
 var reviewCmd = &cobra.Command{
@@ -47,6 +48,7 @@ func init() {
 	reviewCmd.Flags().BoolVar(&reviewDryRun, "dry-run", false, "print the computed prompt and list reports without running")
 	addCheaperModelFlag(reviewCmd, &reviewCheaperModel)
 	addProfileFlags(reviewCmd, &reviewProfile, &reviewAgent)
+	addVerboseFlag(reviewCmd, &reviewVerbose)
 }
 
 func runReview(cmd *cobra.Command, args []string) error {
@@ -103,6 +105,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 		TimeoutMin:           timeout,
 		HistoryDir:           historyDir,
 		PromptName:           "review_prompt.md",
+		Verbose:              reviewVerbose,
 	}
 
 	ctx := context.Background()

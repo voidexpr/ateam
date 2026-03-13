@@ -18,13 +18,44 @@ func TestTranslatePath(t *testing.T) {
 		want     string
 	}{
 		{"empty", "", ""},
-		{"source root", "/Users/nic/projects/myapp", "/workspace"},
-		{"file in source", "/Users/nic/projects/myapp/src/main.go", "/workspace/src/main.go"},
-		{"project dir", "/Users/nic/projects/myapp/.ateam", "/workspace/.ateam"},
-		{"file in project", "/Users/nic/projects/myapp/.ateam/logs/stream.jsonl", "/workspace/.ateam/logs/stream.jsonl"},
-		{"org dir", "/Users/nic/.ateamorg", "/.ateamorg"},
-		{"file in org", "/Users/nic/.ateamorg/runtime.hcl", "/.ateamorg/runtime.hcl"},
+		{"source root", "/Users/nic/projects/myapp", "/ateam/projects/myapp"},
+		{"file in source", "/Users/nic/projects/myapp/src/main.go", "/ateam/projects/myapp/src/main.go"},
+		{"project dir", "/Users/nic/projects/myapp/.ateam", "/ateam/projects/myapp/.ateam"},
+		{"file in project", "/Users/nic/projects/myapp/.ateam/logs/stream.jsonl", "/ateam/projects/myapp/.ateam/logs/stream.jsonl"},
+		{"org dir", "/Users/nic/.ateamorg", "/ateam/.ateamorg"},
+		{"file in org", "/Users/nic/.ateamorg/runtime.hcl", "/ateam/.ateamorg/runtime.hcl"},
 		{"unrelated path", "/tmp/something", "/tmp/something"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := dc.TranslatePath(tt.hostPath)
+			if got != tt.want {
+				t.Errorf("TranslatePath(%q) = %q, want %q", tt.hostPath, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTranslatePathWithGitRoot(t *testing.T) {
+	dc := &DockerContainer{
+		MountDir:   "/Users/nic/projects/repo",
+		SourceDir:  "/Users/nic/projects/repo/myapp",
+		ProjectDir: "/Users/nic/projects/repo/myapp/.ateam",
+		OrgDir:     "/Users/nic/.ateamorg",
+	}
+
+	tests := []struct {
+		name     string
+		hostPath string
+		want     string
+	}{
+		{"git root", "/Users/nic/projects/repo", "/ateam/projects/repo"},
+		{"source dir (subdir of git root)", "/Users/nic/projects/repo/myapp", "/ateam/projects/repo/myapp"},
+		{"file in source", "/Users/nic/projects/repo/myapp/main.go", "/ateam/projects/repo/myapp/main.go"},
+		{"file in git root outside source", "/Users/nic/projects/repo/README.md", "/ateam/projects/repo/README.md"},
+		{"org dir", "/Users/nic/.ateamorg", "/ateam/.ateamorg"},
+		{"state dir in org", "/Users/nic/.ateamorg/projects/id/stream.jsonl", "/ateam/.ateamorg/projects/id/stream.jsonl"},
 	}
 
 	for _, tt := range tests {
@@ -49,13 +80,11 @@ func TestCmdFactoryProducesDockerArgs(t *testing.T) {
 	factory := dc.CmdFactory()
 	cmd := factory(context.Background(), "claude", "-p", "--verbose")
 
-	// Verify it's a docker command
 	if cmd.Path == "" {
 		t.Fatal("expected non-empty command path")
 	}
 
 	args := cmd.Args
-	// args[0] is "docker"
 	if len(args) < 2 || args[1] != "run" {
 		t.Fatalf("expected docker run, got %v", args)
 	}
@@ -74,7 +103,6 @@ func TestCmdFactoryProducesDockerArgs(t *testing.T) {
 		t.Errorf("expected 'claude -p --verbose' in args, got %v", args)
 	}
 
-	// Check mounts are present
 	hasMount := func(mount string) bool {
 		for _, a := range args {
 			if a == mount {
@@ -83,11 +111,43 @@ func TestCmdFactoryProducesDockerArgs(t *testing.T) {
 		}
 		return false
 	}
-	if !hasMount("/Users/nic/projects/myapp:/workspace:rw") {
-		t.Error("missing source mount")
+	if !hasMount("/Users/nic/projects/myapp:/ateam/projects/myapp:rw") {
+		t.Errorf("missing source mount, args: %v", args)
 	}
-	if !hasMount("/Users/nic/.ateamorg:/.ateamorg:ro") {
-		t.Error("missing org mount")
+	if !hasMount("/Users/nic/.ateamorg:/ateam/.ateamorg:rw") {
+		t.Errorf("missing org mount, args: %v", args)
+	}
+}
+
+func TestCmdFactoryWithGitRoot(t *testing.T) {
+	dc := &DockerContainer{
+		Image:      "ateam-test:latest",
+		MountDir:   "/Users/nic/projects/repo",
+		SourceDir:  "/Users/nic/projects/repo/myapp",
+		ProjectDir: "/Users/nic/projects/repo/myapp/.ateam",
+		OrgDir:     "/Users/nic/.ateamorg",
+	}
+
+	factory := dc.CmdFactory()
+	cmd := factory(context.Background(), "claude", "-p")
+	args := cmd.Args
+
+	hasArg := func(flag, value string) bool {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) && args[i+1] == value {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Code mount should be git root → /ateam/projects/repo
+	if !hasArg("-v", "/Users/nic/projects/repo:/ateam/projects/repo:rw") {
+		t.Errorf("missing git root mount, args: %v", args)
+	}
+	// Working dir should be source dir → /ateam/projects/repo/myapp
+	if !hasArg("-w", "/ateam/projects/repo/myapp") {
+		t.Errorf("missing workdir, args: %v", args)
 	}
 }
 
@@ -104,8 +164,28 @@ func TestDebugCommand(t *testing.T) {
 		Args:    []string{"-p", "--verbose"},
 	})
 
-	want := "docker run --rm -i -v /src:/workspace:rw -v /org:/.ateamorg:ro -w /workspace -e ANTHROPIC_API_KEY ateam-test:latest claude -p --verbose"
+	want := "docker run --rm -i -v /src:/ateam/src:rw -v /org:/ateam/org:rw -w /ateam/src -e ANTHROPIC_API_KEY ateam-test:latest claude -p --verbose"
 	if got != want {
 		t.Errorf("DebugCommand:\n  got:  %s\n  want: %s", got, want)
+	}
+}
+
+func TestContainerPathsProjectIDMatches(t *testing.T) {
+	// Verify the core invariant: the relative path from orgRoot to sourceDir
+	// is the same on host and in container.
+	dc := &DockerContainer{
+		MountDir:   "/home/user/repo",
+		SourceDir:  "/home/user/repo/myapp",
+		ProjectDir: "/home/user/repo/myapp/.ateam",
+		OrgDir:     "/home/user/.ateamorg",
+	}
+
+	_, workDir, _ := dc.containerPaths()
+
+	// Host: filepath.Rel("/home/user", "/home/user/repo/myapp") = "repo/myapp"
+	// Container: filepath.Rel("/ateam", workDir) should also be "repo/myapp"
+	wantWorkDir := "/ateam/repo/myapp"
+	if workDir != wantWorkDir {
+		t.Errorf("workDir = %q, want %q", workDir, wantWorkDir)
 	}
 }

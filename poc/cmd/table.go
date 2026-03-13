@@ -67,7 +67,7 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string) (*runner.Runne
 
 	r := runnerFromAgentConfig(env, ac)
 	r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
-	ct, err := buildContainer(cc, prof, env.SourceDir, env.ProjectDir, env.OrgDir, roleID)
+	ct, err := buildContainer(cc, prof, env.SourceDir, env.ProjectDir, env.OrgDir, env.GitRepoDir, roleID)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +202,7 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 // buildContainer creates a Container implementation from config.
 // Returns nil for "none" type (runner treats nil as host execution).
 // roleID is used for Dockerfile resolution (role-specific Dockerfiles).
-func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, sourceDir, projectDir, orgDir, roleID string) (container.Container, error) {
+func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, sourceDir, projectDir, orgDir, gitRepoDir, roleID string) (container.Container, error) {
 	if cc == nil || cc.Type == "none" {
 		return nil, nil
 	}
@@ -223,12 +223,17 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 		if prof != nil {
 			extraArgs = prof.ContainerExtraArgs
 		}
+		mountDir := sourceDir
+		if gitRepoDir != "" {
+			mountDir = gitRepoDir
+		}
 		return &container.DockerContainer{
 			Image:        image,
 			Dockerfile:   dockerfile,
 			ForwardEnv:   cc.ForwardEnv,
 			ExtraVolumes: volumes,
 			ExtraArgs:    extraArgs,
+			MountDir:     mountDir,
 			SourceDir:    sourceDir,
 			ProjectDir:   projectDir,
 			OrgDir:       orgDir,
@@ -290,6 +295,10 @@ func findVolumeSep(s string) int {
 }
 
 const cheaperModelName = "sonnet"
+
+func addVerboseFlag(cmd *cobra.Command, dst *bool) {
+	cmd.Flags().BoolVar(dst, "verbose", false, "print agent and docker commands to stderr")
+}
 
 func addCheaperModelFlag(cmd *cobra.Command, dst *bool) {
 	cmd.Flags().BoolVar(dst, "cheaper-model", false, "use a cheaper model ("+cheaperModelName+")")

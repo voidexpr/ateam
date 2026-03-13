@@ -14,6 +14,9 @@ type Agent interface {
 	// Run starts the agent and returns a channel of normalized events.
 	// The agent writes raw output to req.StreamFile for archival.
 	Run(ctx context.Context, req Request) <-chan StreamEvent
+	// DebugCommandArgs returns the full command and args the agent would execute,
+	// including extraArgs. Used for verbose/diagnostic output.
+	DebugCommandArgs(extraArgs []string) (command string, args []string)
 }
 
 // CmdFactory creates an *exec.Cmd. When set on a Request, agents use this
