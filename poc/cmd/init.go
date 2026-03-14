@@ -192,7 +192,7 @@ func promptOrgCreate(initTarget string) (string, error) {
 	sameDir := filepath.Clean(homeDir) == filepath.Clean(parentDir)
 
 	fmt.Fprintf(os.Stderr, "No .ateamorg/ found.\nCreate one?\n")
-	fmt.Fprintf(os.Stderr, "  1) %s (home directory)\n", homeDir)
+	fmt.Fprintf(os.Stderr, "  1) %s (home directory) [default]\n", homeDir)
 	if !sameDir {
 		fmt.Fprintf(os.Stderr, "  2) %s\n", parentDir)
 	}
@@ -206,14 +206,14 @@ func promptOrgCreate(initTarget string) (string, error) {
 	choice := strings.TrimSpace(scanner.Text())
 
 	switch choice {
-	case "1":
+	case "1", "":
 		return homeDir, nil
 	case "2":
 		if sameDir {
 			return "", fmt.Errorf("invalid choice %q", choice)
 		}
 		return parentDir, nil
-	case "n", "N", "":
+	case "n", "N":
 		return "", fmt.Errorf("cancelled")
 	default:
 		return "", fmt.Errorf("invalid choice %q — run 'ateam install' to create .ateamorg/ manually", choice)
