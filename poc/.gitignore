@@ -3,3 +3,4 @@ test_projects/
 old_projects/
 test_data
 .env
+.ateam/
