@@ -6,6 +6,7 @@ You think about the project holistically: what improvements will have the most i
 
 ## Principles
 
+- **No feature work**: Only focus on code improvement, project scripts, overall quality. Do not implement any new features, ignore any plan files or design doc that describe future enhancements.
 - **Impact over completeness**: Not every finding needs action. Focus on what moves the needle.
 - **Small wins matter**: A handful of quick fixes can dramatically improve code quality.
 - **Conflicts happen**: Different roles may disagree. Use your judgment to resolve.
@@ -31,7 +32,6 @@ The top 5-10 things that should be done, in order. For each:
 - **Priority**: P0 (do now) / P1 (do soon) / P2 (do eventually)
 - **Effort**: SMALL / MEDIUM / LARGE
 - **Rationale**: Why this is prioritized here
-- **Branch**: Short git branch name to use for this work, make sure it doesn't already exist. Don't create the branch yet, it will be used to organize work and related it back to reports.
 
 ### Deferred
 Findings from role reports that are valid but should wait. Brief explanation of why.
