@@ -22,29 +22,6 @@ var defaultsFS embed.FS
 // AllRoleIDs is the sorted list of role IDs discovered from embedded prompt files.
 var AllRoleIDs = discoverRoleIDs()
 
-// DefaultDisabledRoles are roles disabled by default for new projects.
-var DefaultDisabledRoles = map[string]bool{
-	"automation":              true,
-	"basic_project_structure": true,
-	"critic_engineering":      true,
-	"critic_project":          true,
-	"database_config":         true,
-	"refactor_architecture":   true,
-	"shortcut_taker":          true,
-	"testing_full":            true,
-}
-
-// DefaultEnabledRoles returns the subset of AllRoleIDs not in DefaultDisabledRoles.
-func DefaultEnabledRoles() []string {
-	var enabled []string
-	for _, id := range AllRoleIDs {
-		if !DefaultDisabledRoles[id] {
-			enabled = append(enabled, id)
-		}
-	}
-	return enabled
-}
-
 func discoverRoleIDs() []string {
 	entries, err := fs.ReadDir(defaultsFS, "defaults/roles")
 	if err != nil {

@@ -1,0 +1,39 @@
+[project]
+name = ""
+
+[git]
+repo = ""
+remote_origin_url = ""
+
+[report]
+max_parallel = 3
+report_timeout_minutes = 20
+
+[review]
+timeout_minutes = 20
+
+[code]
+timeout_minutes = 120
+
+[roles]
+automation              = "off"
+basic_project_structure = "off"
+critic_engineering      = "off"
+critic_project          = "off"
+database_config         = "off"
+database_schema         = "on"
+dependencies            = "on"
+docs_external           = "on"
+docs_internal           = "on"
+production_ready        = "off"
+project_characteristics = "on"
+refactor_architecture   = "off"
+refactor_small          = "on"
+security                = "on"
+shortcut_taker          = "off"
+testing_basic           = "on"
+testing_full            = "off"
+
+[supervisor]
+
+[profiles]

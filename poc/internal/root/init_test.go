@@ -128,11 +128,12 @@ func TestInitProject(t *testing.T) {
 	if cfg.Git.RemoteOriginURL != "git@github.com:example/repo.git" {
 		t.Errorf("git remote = %q, want %q", cfg.Git.RemoteOriginURL, "git@github.com:example/repo.git")
 	}
-	if cfg.Report.MaxParallel != config.DefaultMaxParallel {
-		t.Errorf("max_parallel = %d, want %d", cfg.Report.MaxParallel, config.DefaultMaxParallel)
+	defaults := config.DefaultConfig()
+	if cfg.Report.MaxParallel != defaults.Report.MaxParallel {
+		t.Errorf("max_parallel = %d, want %d", cfg.Report.MaxParallel, defaults.Report.MaxParallel)
 	}
-	if cfg.Report.ReportTimeoutMinutes != config.DefaultReportTimeoutMinutes {
-		t.Errorf("timeout = %d, want %d", cfg.Report.ReportTimeoutMinutes, config.DefaultReportTimeoutMinutes)
+	if cfg.Report.ReportTimeoutMinutes != defaults.Report.ReportTimeoutMinutes {
+		t.Errorf("timeout = %d, want %d", cfg.Report.ReportTimeoutMinutes, defaults.Report.ReportTimeoutMinutes)
 	}
 
 	// Verify enabled/disabled role states.

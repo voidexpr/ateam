@@ -1,6 +1,7 @@
 package config
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,15 +10,22 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-const (
-	DefaultMaxParallel          = 3
-	DefaultReportTimeoutMinutes = 20
-	DefaultReviewTimeoutMinutes = 20
-	DefaultCodeTimeoutMinutes   = 120
+//go:embed default_config.toml
+var defaultConfigTOML []byte
 
+const (
 	RoleEnabled  = "on"
 	RoleDisabled = "off"
 )
+
+// DefaultConfig returns a Config populated from the embedded default_config.toml.
+func DefaultConfig() Config {
+	var cfg Config
+	if err := toml.Unmarshal(defaultConfigTOML, &cfg); err != nil {
+		panic(fmt.Sprintf("cannot parse embedded default_config.toml: %v", err))
+	}
+	return cfg
+}
 
 // Config represents the project's config.toml.
 type Config struct {
@@ -150,27 +158,16 @@ func (c Config) ResolveSupervisorProfile(action string) string {
 }
 
 // Load reads config.toml from the given directory.
+// Missing fields are filled from the embedded default_config.toml.
 func Load(dir string) (*Config, error) {
 	path := filepath.Join(dir, "config.toml")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read config.toml: %w (are you in an ateam project directory?)", err)
 	}
-	var cfg Config
+	cfg := DefaultConfig()
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("cannot parse config.toml: %w", err)
-	}
-	if cfg.Report.MaxParallel == 0 {
-		cfg.Report.MaxParallel = DefaultMaxParallel
-	}
-	if cfg.Report.ReportTimeoutMinutes == 0 {
-		cfg.Report.ReportTimeoutMinutes = DefaultReportTimeoutMinutes
-	}
-	if cfg.Review.TimeoutMinutes == 0 {
-		cfg.Review.TimeoutMinutes = DefaultReviewTimeoutMinutes
-	}
-	if cfg.Code.TimeoutMinutes == 0 {
-		cfg.Code.TimeoutMinutes = DefaultCodeTimeoutMinutes
 	}
 	if cfg.Roles == nil {
 		cfg.Roles = make(map[string]string)

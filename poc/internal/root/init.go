@@ -91,32 +91,25 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 		return "", fmt.Errorf("cannot create supervisor directory: %w", err)
 	}
 
-	roles := make(map[string]string, len(roleIDs))
-	enabledSet := make(map[string]bool, len(opts.EnabledRoles))
-	for _, id := range opts.EnabledRoles {
-		enabledSet[id] = true
-	}
-	for _, id := range roleIDs {
-		if enabledSet[id] {
-			roles[id] = config.RoleEnabled
-		} else {
-			roles[id] = config.RoleDisabled
-		}
-	}
+	cfg := config.DefaultConfig()
+	cfg.Project.Name = opts.Name
+	cfg.Git.Repo = opts.GitRepo
+	cfg.Git.RemoteOriginURL = opts.GitRemoteOrigin
 
-	cfg := config.Config{
-		Project: config.ProjectConfig{
-			Name: opts.Name,
-		},
-		Git: config.GitConfig{
-			Repo:            opts.GitRepo,
-			RemoteOriginURL: opts.GitRemoteOrigin,
-		},
-		Report: config.ReportConfig{
-			MaxParallel:          config.DefaultMaxParallel,
-			ReportTimeoutMinutes: config.DefaultReportTimeoutMinutes,
-		},
-		Roles: roles,
+	if len(opts.EnabledRoles) > 0 {
+		roles := make(map[string]string, len(roleIDs))
+		enabledSet := make(map[string]bool, len(opts.EnabledRoles))
+		for _, id := range opts.EnabledRoles {
+			enabledSet[id] = true
+		}
+		for _, id := range roleIDs {
+			if enabledSet[id] {
+				roles[id] = config.RoleEnabled
+			} else {
+				roles[id] = config.RoleDisabled
+			}
+		}
+		cfg.Roles = roles
 	}
 
 	if err := config.Save(projDir, cfg); err != nil {

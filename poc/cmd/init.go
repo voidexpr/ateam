@@ -99,7 +99,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		gitRemote = execGitCmd(absPath, "config", "remote.origin.url")
 	}
 
-	// Roles: if --role provided, those are enabled, rest disabled; otherwise use defaults
+	// Roles: if --role provided, those are enabled, rest disabled; otherwise use template defaults
 	var enabledRoles []string
 	if len(initRoles) > 0 {
 		resolved, resolveErr := prompts.ResolveRoleList(initRoles, nil)
@@ -107,8 +107,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 			return resolveErr
 		}
 		enabledRoles = resolved
-	} else {
-		enabledRoles = prompts.DefaultEnabledRoles()
 	}
 
 	opts := root.InitProjectOpts{

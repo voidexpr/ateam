@@ -47,9 +47,7 @@ func TestRoundTrip(t *testing.T) {
 	if loaded.Report.ReportTimeoutMinutes != original.Report.ReportTimeoutMinutes {
 		t.Errorf("Report.ReportTimeoutMinutes = %d, want %d", loaded.Report.ReportTimeoutMinutes, original.Report.ReportTimeoutMinutes)
 	}
-	if len(loaded.Roles) != len(original.Roles) {
-		t.Fatalf("Roles length = %d, want %d", len(loaded.Roles), len(original.Roles))
-	}
+	// On-disk roles override defaults; check saved values are preserved.
 	for k, v := range original.Roles {
 		if loaded.Roles[k] != v {
 			t.Errorf("Roles[%q] = %q, want %q", k, loaded.Roles[k], v)
@@ -75,11 +73,12 @@ lint = "on"
 		t.Fatalf("Load: %v", err)
 	}
 
-	if cfg.Report.MaxParallel != DefaultMaxParallel {
-		t.Errorf("Report.MaxParallel = %d, want default %d", cfg.Report.MaxParallel, DefaultMaxParallel)
+	defaults := DefaultConfig()
+	if cfg.Report.MaxParallel != defaults.Report.MaxParallel {
+		t.Errorf("Report.MaxParallel = %d, want default %d", cfg.Report.MaxParallel, defaults.Report.MaxParallel)
 	}
-	if cfg.Report.ReportTimeoutMinutes != DefaultReportTimeoutMinutes {
-		t.Errorf("Report.ReportTimeoutMinutes = %d, want default %d", cfg.Report.ReportTimeoutMinutes, DefaultReportTimeoutMinutes)
+	if cfg.Report.ReportTimeoutMinutes != defaults.Report.ReportTimeoutMinutes {
+		t.Errorf("Report.ReportTimeoutMinutes = %d, want default %d", cfg.Report.ReportTimeoutMinutes, defaults.Report.ReportTimeoutMinutes)
 	}
 }
 
@@ -101,8 +100,35 @@ name = "noroles"
 	if cfg.Roles == nil {
 		t.Error("Roles map should be initialized, got nil")
 	}
-	if len(cfg.Roles) != 0 {
-		t.Errorf("Roles length = %d, want 0", len(cfg.Roles))
+	// When no [roles] section is on disk, defaults from embedded template are used.
+	defaults := DefaultConfig()
+	if len(cfg.Roles) != len(defaults.Roles) {
+		t.Errorf("Roles length = %d, want %d (defaults)", len(cfg.Roles), len(defaults.Roles))
+	}
+}
+
+func TestDefaultConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Report.MaxParallel != 3 {
+		t.Errorf("Report.MaxParallel = %d, want 3", cfg.Report.MaxParallel)
+	}
+	if cfg.Report.ReportTimeoutMinutes != 20 {
+		t.Errorf("Report.ReportTimeoutMinutes = %d, want 20", cfg.Report.ReportTimeoutMinutes)
+	}
+	if cfg.Review.TimeoutMinutes != 20 {
+		t.Errorf("Review.TimeoutMinutes = %d, want 20", cfg.Review.TimeoutMinutes)
+	}
+	if cfg.Code.TimeoutMinutes != 120 {
+		t.Errorf("Code.TimeoutMinutes = %d, want 120", cfg.Code.TimeoutMinutes)
+	}
+	if len(cfg.Roles) == 0 {
+		t.Fatal("Roles should not be empty")
+	}
+	if cfg.Roles["security"] != "on" {
+		t.Errorf("Roles[security] = %q, want %q", cfg.Roles["security"], "on")
+	}
+	if cfg.Roles["automation"] != "off" {
+		t.Errorf("Roles[automation] = %q, want %q", cfg.Roles["automation"], "off")
 	}
 }
 
