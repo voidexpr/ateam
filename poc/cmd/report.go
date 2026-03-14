@@ -139,32 +139,34 @@ func runReport(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Running %d role(s) (max %d parallel, %dm timeout)...\n\n",
 		len(tasks), env.Config.Report.MaxParallel, timeout)
 
-	for _, t := range tasks {
-		fmt.Printf("  %-25s queued\n", t.RoleID)
-	}
-	fmt.Println()
-
-	ctx := context.Background()
-	results := runner.RunPool(ctx, cr, tasks, env.Config.Report.MaxParallel, nil)
-
 	cwd, _ := os.Getwd()
 
-	var succeeded, failed int
-	w := newTable()
-	fmt.Fprintln(w, "ROLE\tENDED_AT\tELAPSED\tCOST\tTURNS\tSTATUS\tPATH")
-	for _, r := range results {
-		endedAt := r.EndedAt.Format(runner.TimestampFormat)
-		elapsed := runner.FormatDuration(r.Duration)
-		cost := fmtCost(r.Cost)
-		turns := fmtInt(r.Turns)
+	// Build role order index for status display
+	roleIndex := make(map[string]int, len(tasks))
+	statuses := make([]string, len(tasks))
+	for i, t := range tasks {
+		roleIndex[t.RoleID] = i
+		statuses[i] = fmt.Sprintf("  %-25s queued", t.RoleID)
+	}
+	printStatuses(statuses)
 
+	// Process completions as they arrive
+	completed := make(chan runner.RunSummary, len(tasks))
+	var succeeded, failed int
+	var results []runner.RunSummary
+
+	ctx := context.Background()
+	go func() {
+		runner.RunPool(ctx, cr, tasks, env.Config.Report.MaxParallel, nil, completed)
+	}()
+
+	for r := range completed {
+		elapsed := runner.FormatDuration(r.Duration)
+		endedAt := r.EndedAt.Format("15:04:05")
+
+		idx := roleIndex[r.RoleID]
 		if r.Err != nil {
-			errorPath := filepath.Join(filepath.Dir(r.StreamFilePath), prompts.ReportErrorFile)
-			if _, err := os.Stat(errorPath); err != nil {
-				errorPath = r.StderrFilePath
-			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\tERROR\t%s\n",
-				r.RoleID, endedAt, elapsed, cost, turns, relPath(cwd, errorPath))
+			statuses[idx] = fmt.Sprintf("  %-25s ERROR    %s  %s", r.RoleID, endedAt, elapsed)
 			failed++
 		} else {
 			reportPath := env.RoleReportPath(r.RoleID)
@@ -172,12 +174,12 @@ func runReport(cmd *cobra.Command, args []string) error {
 			if err := runner.ArchiveFile(reportPath, historyDir, prompts.ReportFile); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not archive report for %s: %v\n", r.RoleID, err)
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\tOK\t%s\n",
-				r.RoleID, endedAt, elapsed, cost, turns, relPath(cwd, reportPath))
+			statuses[idx] = fmt.Sprintf("  %-25s done     %s  %s  %s", r.RoleID, endedAt, elapsed, relPath(cwd, reportPath))
 			succeeded++
 		}
+		reprintStatuses(statuses)
+		results = append(results, r)
 	}
-	w.Flush()
 
 	fmt.Printf("\n%d succeeded, %d failed\n", succeeded, failed)
 	if failed == 0 && succeeded > 0 {
@@ -194,4 +196,20 @@ func runReport(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// printStatuses prints all status lines.
+func printStatuses(statuses []string) {
+	for _, s := range statuses {
+		fmt.Println(s)
+	}
+}
+
+// reprintStatuses moves the cursor up, reprints all lines, clearing previous content.
+func reprintStatuses(statuses []string) {
+	// Move cursor up len(statuses) lines and overwrite
+	fmt.Printf("\033[%dA", len(statuses))
+	for _, s := range statuses {
+		fmt.Printf("\033[2K%s\n", s)
+	}
 }
