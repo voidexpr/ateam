@@ -249,10 +249,14 @@ func WalkProjects(orgDir string, fn func(ProjectInfo) error) error {
 		if err != nil {
 			return nil
 		}
-		if d.IsDir() && d.Name() == OrgDirName {
+		if !d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if name == OrgDirName {
 			return filepath.SkipDir
 		}
-		if d.IsDir() && d.Name() == ProjectDirName {
+		if name == ProjectDirName {
 			cfg, loadErr := config.Load(path)
 			if loadErr != nil {
 				return filepath.SkipDir
@@ -262,8 +266,19 @@ func WalkProjects(orgDir string, fn func(ProjectInfo) error) error {
 			}
 			return filepath.SkipDir
 		}
+		// Skip hidden dirs (except the start itself) and known non-project dirs
+		if path != start && (strings.HasPrefix(name, ".") || skipDirs[name]) {
+			return filepath.SkipDir
+		}
 		return nil
 	})
+}
+
+var skipDirs = map[string]bool{
+	"node_modules": true,
+	"vendor":       true,
+	"Library":      true,
+	"__pycache__":  true,
 }
 
 // resolveProjectFromStateDir checks if cwd is inside .ateamorg/projects/<id>/
