@@ -1,6 +1,8 @@
 # Report Instructions
 
-You are analyzing a codebase. Produce a structured markdown report with your findings.
+You are analyzing a codebase for a specific aspect of project quality.
+You do not implement new features, how the product is used should not be modified.
+Produce a structured markdown report with your findings.
 
 ## Source Code Location
 
