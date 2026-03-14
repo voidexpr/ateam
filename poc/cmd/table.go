@@ -3,7 +3,9 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"text/tabwriter"
 	"time"
 
@@ -270,6 +272,7 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 			SourceDir:     sourceDir,
 			ProjectDir:    projectDir,
 			OrgDir:        orgDir,
+			HostCLIPath:   crossBuildCLI(orgDir),
 		}, nil
 	default:
 		return nil, nil
@@ -290,6 +293,58 @@ func buildContainerName(sourceDir, orgDir, roleID string) string {
 	}
 	projectID := config.PathToProjectID(relPath)
 	return "ateam-" + projectID + "-" + roleID
+}
+
+// crossBuildCLI cross-compiles the ateam binary for linux/amd64 when the host
+// is not Linux. The result is cached in orgDir/cache/ and reused if the host
+// binary hasn't changed. Returns the path to the Linux binary, or "" on failure.
+func crossBuildCLI(orgDir string) string {
+	if goruntime.GOOS == "linux" && goruntime.GOARCH == "amd64" {
+		// Already on the target platform; use the running binary directly.
+		if exe, err := os.Executable(); err == nil {
+			return exe
+		}
+		return ""
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: cannot find ateam binary for cross-build: %v\n", err)
+		return ""
+	}
+	exe, _ = filepath.EvalSymlinks(exe)
+
+	// The go module dir is the directory containing the binary (make build outputs there).
+	modDir := filepath.Dir(exe)
+	goMod := filepath.Join(modDir, "go.mod")
+	if _, err := os.Stat(goMod); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: go.mod not found next to %s, cannot cross-build\n", exe)
+		return ""
+	}
+
+	cacheDir := filepath.Join(orgDir, "cache")
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return ""
+	}
+	target := filepath.Join(cacheDir, "ateam-linux-amd64")
+
+	// Rebuild only if the target is missing or older than the host binary.
+	hostInfo, _ := os.Stat(exe)
+	targetInfo, targetErr := os.Stat(target)
+	if targetErr == nil && hostInfo != nil && !targetInfo.ModTime().Before(hostInfo.ModTime()) {
+		return target
+	}
+
+	fmt.Fprintf(os.Stderr, "Cross-compiling ateam for linux/amd64...\n")
+	cmd := exec.Command("go", "build", "-o", target, ".")
+	cmd.Dir = modDir
+	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: cross-build failed: %v\n", err)
+		return ""
+	}
+	return target
 }
 
 func addProfileFlags(cmd *cobra.Command, profileDst, agentDst *string) {

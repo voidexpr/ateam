@@ -101,11 +101,13 @@ func TestDockerMountsAndWorkdir(t *testing.T) {
 		t.Fatalf("EnsureImage: %v", err)
 	}
 
+	codePath, _, orgPath := dc.containerPaths()
+
 	t.Run("source mount readable", func(t *testing.T) {
 		var stdout bytes.Buffer
 		err := dc.Run(ctx, RunOpts{
 			Command: "cat",
-			Args:    []string{"/workspace/hello.txt"},
+			Args:    []string{codePath + "/hello.txt"},
 			Stdout:  &stdout,
 		})
 		if err != nil {
@@ -120,7 +122,7 @@ func TestDockerMountsAndWorkdir(t *testing.T) {
 		var stdout bytes.Buffer
 		err := dc.Run(ctx, RunOpts{
 			Command: "cat",
-			Args:    []string{"/.ateamorg/org.txt"},
+			Args:    []string{orgPath + "/org.txt"},
 			Stdout:  &stdout,
 		})
 		if err != nil {
@@ -131,7 +133,7 @@ func TestDockerMountsAndWorkdir(t *testing.T) {
 		}
 	})
 
-	t.Run("workdir is /workspace", func(t *testing.T) {
+	t.Run("workdir is correct", func(t *testing.T) {
 		var stdout bytes.Buffer
 		err := dc.Run(ctx, RunOpts{
 			Command: "pwd",
@@ -140,15 +142,15 @@ func TestDockerMountsAndWorkdir(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-		if got := strings.TrimSpace(stdout.String()); got != "/workspace" {
-			t.Errorf("expected '/workspace', got %q", got)
+		if got := strings.TrimSpace(stdout.String()); got != codePath {
+			t.Errorf("expected %q, got %q", codePath, got)
 		}
 	})
 
 	t.Run("source writable from container", func(t *testing.T) {
 		err := dc.Run(ctx, RunOpts{
 			Command: "sh",
-			Args:    []string{"-c", "echo written-inside > /workspace/from-container.txt"},
+			Args:    []string{"-c", "echo written-inside > " + codePath + "/from-container.txt"},
 		})
 		if err != nil {
 			t.Fatalf("Run: %v", err)
@@ -162,13 +164,20 @@ func TestDockerMountsAndWorkdir(t *testing.T) {
 		}
 	})
 
-	t.Run("org mount read-only", func(t *testing.T) {
+	t.Run("org mount writable", func(t *testing.T) {
 		err := dc.Run(ctx, RunOpts{
 			Command: "sh",
-			Args:    []string{"-c", "echo nope > /.ateamorg/nope.txt"},
+			Args:    []string{"-c", "echo org-write > " + orgPath + "/written.txt"},
 		})
-		if err == nil {
-			t.Error("expected error writing to read-only org mount")
+		if err != nil {
+			t.Fatalf("expected write to org mount to succeed: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(orgDir, "written.txt"))
+		if err != nil {
+			t.Fatalf("host ReadFile: %v", err)
+		}
+		if got := strings.TrimSpace(string(data)); got != "org-write" {
+			t.Errorf("expected 'org-write', got %q", got)
 		}
 	})
 }
@@ -269,9 +278,11 @@ func TestDockerFilePermissions(t *testing.T) {
 		return outBuf.String(), errBuf.String(), err
 	}
 
-	// --- RW mount (source → /workspace) ---
+	codePath, _, orgPath := dc.containerPaths()
+
+	// --- RW mount (source → codePath) ---
 	t.Run("rw/read", func(t *testing.T) {
-		out, _, err := runViaFactory("cat", "/workspace/src.txt")
+		out, _, err := runViaFactory("cat", codePath+"/src.txt")
 		if err != nil {
 			t.Fatalf("expected read to succeed: %v", err)
 		}
@@ -280,7 +291,7 @@ func TestDockerFilePermissions(t *testing.T) {
 		}
 	})
 	t.Run("rw/write", func(t *testing.T) {
-		_, _, err := runViaFactory("sh", "-c", "echo rw-ok > /workspace/rw-test.txt")
+		_, _, err := runViaFactory("sh", "-c", "echo rw-ok > "+codePath+"/rw-test.txt")
 		if err != nil {
 			t.Fatalf("expected write to succeed: %v", err)
 		}
@@ -293,9 +304,9 @@ func TestDockerFilePermissions(t *testing.T) {
 		}
 	})
 
-	// --- RO mount (org → /.ateamorg) ---
-	t.Run("ro/read", func(t *testing.T) {
-		out, _, err := runViaFactory("cat", "/.ateamorg/org.txt")
+	// --- RW mount (org → orgPath) ---
+	t.Run("rw-org/read", func(t *testing.T) {
+		out, _, err := runViaFactory("cat", orgPath+"/org.txt")
 		if err != nil {
 			t.Fatalf("expected read to succeed: %v", err)
 		}
@@ -303,10 +314,17 @@ func TestDockerFilePermissions(t *testing.T) {
 			t.Errorf("expected 'org', got %q", out)
 		}
 	})
-	t.Run("ro/write fails", func(t *testing.T) {
-		_, _, err := runViaFactory("sh", "-c", "echo nope > /.ateamorg/nope.txt")
-		if err == nil {
-			t.Error("expected write to ro mount to fail")
+	t.Run("rw-org/write", func(t *testing.T) {
+		_, _, err := runViaFactory("sh", "-c", "echo org-ok > "+orgPath+"/org-write.txt")
+		if err != nil {
+			t.Fatalf("expected write to org mount to succeed: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(orgDir, "org-write.txt"))
+		if err != nil {
+			t.Fatalf("host ReadFile: %v", err)
+		}
+		if got := strings.TrimSpace(string(data)); got != "org-ok" {
+			t.Errorf("expected 'org-ok', got %q", got)
 		}
 	})
 

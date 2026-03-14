@@ -34,6 +34,10 @@ type DockerContainer struct {
 	SourceDir  string // project root (parent of .ateam/) — determines -w
 	ProjectDir string // .ateam/ dir
 	OrgDir     string // .ateamorg/ dir
+
+	// HostCLIPath is the path to a Linux-compatible ateam binary on the host.
+	// When set, it is bind-mounted to /usr/local/bin/ateam inside the container.
+	HostCLIPath string
 }
 
 const containerRoot = "/ateam"
@@ -105,6 +109,9 @@ func (d *DockerContainer) EnsureRunning(ctx context.Context) error {
 		}
 		if d.OrgDir != "" {
 			args = append(args, "-v", d.OrgDir+":"+containerOrgPath+":rw")
+		}
+		if d.HostCLIPath != "" {
+			args = append(args, "-v", d.HostCLIPath+":/usr/local/bin/ateam:ro")
 		}
 		for _, vol := range d.ExtraVolumes {
 			args = append(args, "-v", vol)
@@ -178,6 +185,11 @@ func (d *DockerContainer) oneshotCmdFactory() agent.CmdFactory {
 		// Mount org dir
 		if d.OrgDir != "" {
 			dockerArgs = append(dockerArgs, "-v", d.OrgDir+":"+containerOrgPath+":rw")
+		}
+
+		// Mount ateam CLI binary
+		if d.HostCLIPath != "" {
+			dockerArgs = append(dockerArgs, "-v", d.HostCLIPath+":/usr/local/bin/ateam:ro")
 		}
 
 		// Extra volumes from container config (e.g. "../data:/data:ro")
@@ -304,6 +316,9 @@ func (d *DockerContainer) debugCommandOneshot(opts RunOpts) string {
 	}
 	if d.OrgDir != "" {
 		parts = append(parts, "-v", d.OrgDir+":"+containerOrgPath+":rw")
+	}
+	if d.HostCLIPath != "" {
+		parts = append(parts, "-v", d.HostCLIPath+":/usr/local/bin/ateam:ro")
 	}
 	for _, vol := range d.ExtraVolumes {
 		parts = append(parts, "-v", vol)
