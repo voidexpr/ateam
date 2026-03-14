@@ -179,7 +179,7 @@ func printProjectSection(env *root.ResolvedEnv, cwd string) {
 	w := newTable()
 	fmt.Fprintln(w, " \tROLE\tLAST\tPATH")
 	for _, roleID := range allRoles {
-		enabled := env.Config.Roles[roleID] == config.RoleEnabled
+		enabled := config.IsRoleEnabled(env.Config.Roles[roleID])
 		reportPath := filepath.Join(env.ProjectDir, "roles", roleID, prompts.ReportFile)
 		fi, err := os.Stat(reportPath)
 		hasReport := err == nil

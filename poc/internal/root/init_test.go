@@ -137,8 +137,8 @@ func TestInitProject(t *testing.T) {
 
 	// Verify enabled/disabled role states.
 	for _, id := range enabled {
-		if cfg.Roles[id] != "enabled" {
-			t.Errorf("role %s = %q, want %q", id, cfg.Roles[id], "enabled")
+		if cfg.Roles[id] != config.RoleEnabled {
+			t.Errorf("role %s = %q, want %q", id, cfg.Roles[id], config.RoleEnabled)
 		}
 	}
 	enabledSet := make(map[string]bool, len(enabled))
@@ -146,8 +146,8 @@ func TestInitProject(t *testing.T) {
 		enabledSet[id] = true
 	}
 	for _, id := range prompts.AllRoleIDs {
-		if !enabledSet[id] && cfg.Roles[id] != "disabled" {
-			t.Errorf("role %s = %q, want %q", id, cfg.Roles[id], "disabled")
+		if !enabledSet[id] && cfg.Roles[id] != config.RoleDisabled {
+			t.Errorf("role %s = %q, want %q", id, cfg.Roles[id], config.RoleDisabled)
 		}
 	}
 }

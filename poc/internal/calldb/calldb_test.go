@@ -142,11 +142,11 @@ func seedCalls(t *testing.T, db *CallDB) {
 		result CallResult
 	}{
 		{
-			Call{ProjectID: "proj-a", Action: "report", Role: "security", StartedAt: now.Add(-3 * time.Hour)},
+			Call{ProjectID: "proj-a", Action: "report", Role: "security", TaskGroup: "report-2026-03-13_09-00-00", StartedAt: now.Add(-3 * time.Hour)},
 			CallResult{EndedAt: now.Add(-3*time.Hour + 2*time.Minute), DurationMS: 120000, CostUSD: 0.10, InputTokens: 5000, OutputTokens: 1000, CacheReadTokens: 500},
 		},
 		{
-			Call{ProjectID: "proj-a", Action: "report", Role: "testing", StartedAt: now.Add(-3*time.Hour + time.Minute)},
+			Call{ProjectID: "proj-a", Action: "report", Role: "testing", TaskGroup: "report-2026-03-13_09-00-00", StartedAt: now.Add(-3*time.Hour + time.Minute)},
 			CallResult{EndedAt: now.Add(-3*time.Hour + 3*time.Minute), DurationMS: 120000, CostUSD: 0.08, InputTokens: 4000, OutputTokens: 800, CacheReadTokens: 300},
 		},
 		{
@@ -272,42 +272,49 @@ func TestCostByAction(t *testing.T) {
 	}
 }
 
-func TestCostByCodeSession(t *testing.T) {
+func TestCostByTaskGroup(t *testing.T) {
 	db := testDB(t)
 	seedCalls(t, db)
 
-	rows, err := db.CostByCodeSession("")
+	rows, err := db.CostByTaskGroup("")
 	if err != nil {
-		t.Fatalf("CostByCodeSession: %v", err)
+		t.Fatalf("CostByTaskGroup: %v", err)
 	}
 
-	// We have one task_group "code-2026-03-13_10-00-00" with 2 actions: code and run
-	if len(rows) != 2 {
-		t.Fatalf("expected 2 rows, got %d", len(rows))
-	}
-
-	actionMap := make(map[string]CodeSessionRow)
+	// Group rows by task_group
+	groups := make(map[string]map[string]TaskGroupRow)
 	for _, r := range rows {
-		actionMap[r.Action] = r
+		if groups[r.TaskGroup] == nil {
+			groups[r.TaskGroup] = make(map[string]TaskGroupRow)
+		}
+		groups[r.TaskGroup][r.Action] = r
 	}
 
-	if code, ok := actionMap["code"]; !ok {
-		t.Fatal("expected code action")
-	} else {
-		if code.Count != 1 {
-			t.Errorf("expected 1 code call, got %d", code.Count)
-		}
-		if code.CostUSD != 0.50 {
-			t.Errorf("expected $0.50 code cost, got %f", code.CostUSD)
-		}
+	// code-2026-03-13_10-00-00: code + run
+	codeGroup := groups["code-2026-03-13_10-00-00"]
+	if codeGroup == nil {
+		t.Fatal("expected code task group")
+	}
+	if code, ok := codeGroup["code"]; !ok {
+		t.Fatal("expected code action in code group")
+	} else if code.Count != 1 {
+		t.Errorf("expected 1 code call, got %d", code.Count)
+	}
+	if run, ok := codeGroup["run"]; !ok {
+		t.Fatal("expected run action in code group")
+	} else if run.Count != 2 {
+		t.Errorf("expected 2 run calls, got %d", run.Count)
 	}
 
-	if run, ok := actionMap["run"]; !ok {
-		t.Fatal("expected run action")
-	} else {
-		if run.Count != 2 {
-			t.Errorf("expected 2 run calls, got %d", run.Count)
-		}
+	// report-2026-03-13_09-00-00: report
+	reportGroup := groups["report-2026-03-13_09-00-00"]
+	if reportGroup == nil {
+		t.Fatal("expected report task group")
+	}
+	if rep, ok := reportGroup["report"]; !ok {
+		t.Fatal("expected report action in report group")
+	} else if rep.Count != 2 {
+		t.Errorf("expected 2 report calls, got %d", rep.Count)
 	}
 }
 

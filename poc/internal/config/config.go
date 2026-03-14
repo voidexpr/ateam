@@ -15,8 +15,8 @@ const (
 	DefaultReviewTimeoutMinutes = 20
 	DefaultCodeTimeoutMinutes   = 120
 
-	RoleEnabled  = "enabled"
-	RoleDisabled = "disabled"
+	RoleEnabled  = "on"
+	RoleDisabled = "off"
 )
 
 // Config represents the project's config.toml.
@@ -87,11 +87,16 @@ func (r ReportConfig) EffectiveTimeout(override int) int {
 	return r.ReportTimeoutMinutes
 }
 
-// EnabledRoles returns a sorted slice of role names that have "enabled" status.
+// IsRoleEnabled returns true if status is "on" or "enabled" (backward compat).
+func IsRoleEnabled(status string) bool {
+	return status == "on" || status == "enabled"
+}
+
+// EnabledRoles returns a sorted slice of role names that are enabled.
 func (c Config) EnabledRoles() []string {
 	var enabled []string
 	for name, status := range c.Roles {
-		if status == RoleEnabled {
+		if IsRoleEnabled(status) {
 			enabled = append(enabled, name)
 		}
 	}

@@ -129,7 +129,7 @@ func (c *CallDB) CostByAction(projectID string) ([]ActionAgg, error) {
 	return results, rows.Err()
 }
 
-type CodeSessionRow struct {
+type TaskGroupRow struct {
 	TaskGroup       string
 	Action          string
 	Count           int
@@ -142,7 +142,9 @@ type CodeSessionRow struct {
 	LastEnded       sql.NullString
 }
 
-func (c *CallDB) CostByCodeSession(projectID string) ([]CodeSessionRow, error) {
+// CostByTaskGroup returns cost data grouped by task_group and action for all
+// runs that have a non-empty task_group (code sessions, report batches, etc.).
+func (c *CallDB) CostByTaskGroup(projectID string) ([]TaskGroupRow, error) {
 	q := `
 		SELECT
 			task_group,
@@ -156,7 +158,7 @@ func (c *CallDB) CostByCodeSession(projectID string) ([]CodeSessionRow, error) {
 			MIN(started_at),
 			MAX(ended_at)
 		FROM agent_calls
-		WHERE task_group LIKE 'code-%'`
+		WHERE task_group != ''`
 	var args []any
 	if projectID != "" {
 		q += " AND project_id = ?"
@@ -170,9 +172,9 @@ func (c *CallDB) CostByCodeSession(projectID string) ([]CodeSessionRow, error) {
 	}
 	defer rows.Close()
 
-	var results []CodeSessionRow
+	var results []TaskGroupRow
 	for rows.Next() {
-		var r CodeSessionRow
+		var r TaskGroupRow
 		if err := rows.Scan(&r.TaskGroup, &r.Action, &r.Count, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.TotalTokens, &r.FirstStarted, &r.LastEnded); err != nil {
 			return results, err
 		}
