@@ -124,25 +124,20 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Display
-	relOrg, _ := filepath.Rel(cwd, orgRoot)
-	displayGit := ""
-	if gitTopLevel != "" {
-		displayGit, _ = filepath.Rel(orgRoot, gitTopLevel)
+	// Re-resolve to show the full env display
+	env, err := root.Lookup()
+	if err != nil {
+		return err
+	}
+	if err := printEnv(env); err != nil {
+		return err
 	}
 
-	fmt.Printf("     Org: %s (%s)\n", relOrg, tildeHome(orgRoot))
-	fmt.Printf(" Project: %s\n", name)
-	if displayGit != "" {
-		fmt.Printf("     Git: %s\n", displayGit)
-	}
-	if gitRemote != "" {
-		fmt.Printf("  Remote: %s\n", gitRemote)
-	}
-	fmt.Printf("   Roles: %s\n", strings.Join(enabledRoles, ", "))
 	fmt.Printf("\nNext steps:\n")
-	fmt.Printf("  ateam report --roles all\n")
-	fmt.Printf("  ateam review\n")
+	fmt.Printf("  ateam report --roles all           # run all enabled roles\n")
+	fmt.Printf("  ateam review                       # supervisor reviews and prioritizes\n")
+	fmt.Printf("  ateam code                         # execute prioritized tasks\n")
+	fmt.Printf("  ateam all                          # or run the full pipeline at once\n")
 
 	return nil
 }

@@ -31,6 +31,10 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	return printEnv(env)
+}
+
+func printEnv(env *root.ResolvedEnv) error {
 	cwd, err := resolvedCwd()
 	if err != nil {
 		return err
