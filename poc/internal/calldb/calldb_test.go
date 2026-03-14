@@ -198,9 +198,9 @@ func TestRecentRuns(t *testing.T) {
 	if len(rows) != 8 {
 		t.Fatalf("expected 8 rows, got %d", len(rows))
 	}
-	// Should be ordered by started_at DESC — first row is most recent
-	if rows[0].ProjectID != "proj-b" {
-		t.Errorf("expected proj-b first, got %s", rows[0].ProjectID)
+	// Should be ordered by started_at ASC — first row is oldest
+	if rows[0].ProjectID != "proj-a" {
+		t.Errorf("expected proj-a first, got %s", rows[0].ProjectID)
 	}
 
 	// Filter by project

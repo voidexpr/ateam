@@ -52,7 +52,7 @@ func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
-	q += " ORDER BY started_at DESC"
+	q += " ORDER BY started_at ASC"
 
 	limit := f.Limit
 	if limit <= 0 {
