@@ -241,53 +241,38 @@ type ProjectInfo struct {
 	Config *config.Config
 }
 
-// WalkProjects walks from orgDir's parent looking for .ateam/config.toml files.
+// WalkProjects enumerates registered projects from .ateamorg/projects/.
+// Each subdirectory is a project ID that maps back to a project path.
 // The callback receives each discovered project. Return filepath.SkipAll to stop early.
 func WalkProjects(orgDir string, fn func(ProjectInfo) error) error {
-	start := filepath.Dir(orgDir)
-	sep := string(filepath.Separator)
-	startDepth := strings.Count(start, sep)
-	const maxDepth = 8
-
-	return filepath.WalkDir(start, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
+	projectsDir := filepath.Join(orgDir, "projects")
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
 			return nil
 		}
-		if !d.IsDir() {
-			return nil
-		}
+		return fmt.Errorf("cannot read projects directory: %w", err)
+	}
 
-		depth := strings.Count(path, sep) - startDepth
-		if depth > maxDepth {
-			return filepath.SkipDir
+	orgRoot := filepath.Dir(orgDir)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
 		}
-
-		name := d.Name()
-		if name == OrgDirName {
-			return filepath.SkipDir
+		relPath := config.ProjectIDToPath(e.Name())
+		projDir := filepath.Join(orgRoot, relPath, ProjectDirName)
+		cfg, loadErr := config.Load(projDir)
+		if loadErr != nil {
+			continue
 		}
-		if name == ProjectDirName {
-			cfg, loadErr := config.Load(path)
-			if loadErr != nil {
-				return filepath.SkipDir
+		if err := fn(ProjectInfo{Dir: projDir, Config: cfg}); err != nil {
+			if err == filepath.SkipAll {
+				return nil
 			}
-			if err := fn(ProjectInfo{Dir: path, Config: cfg}); err != nil {
-				return err
-			}
-			return filepath.SkipDir
+			return err
 		}
-		if path != start && (strings.HasPrefix(name, ".") || skipDirs[name]) {
-			return filepath.SkipDir
-		}
-		return nil
-	})
-}
-
-var skipDirs = map[string]bool{
-	"node_modules": true,
-	"vendor":       true,
-	"Library":      true,
-	"__pycache__":  true,
+	}
+	return nil
 }
 
 // resolveProjectFromStateDir checks if cwd is inside .ateamorg/projects/<id>/
@@ -326,7 +311,7 @@ func resolveOrgByName(override string) (string, error) {
 	return "", fmt.Errorf("no %s/ found under %s", OrgDirName, override)
 }
 
-// resolveProjectByName walks from orgDir's parent looking for a project with matching name.
+// resolveProjectByName searches registered projects for one with the given name.
 func resolveProjectByName(orgDir, name string) (string, error) {
 	var found string
 	err := WalkProjects(orgDir, func(p ProjectInfo) error {

@@ -12,8 +12,8 @@ import (
 var projectsCmd = &cobra.Command{
 	Use:   "projects",
 	Short: "List all projects under the current organization",
-	Long: `Walk from the organization parent directory looking for .ateam/config.toml
-files and print a summary table.
+	Long: `List all registered projects under the current organization and print
+a summary table.
 
 Example:
   ateam projects`,

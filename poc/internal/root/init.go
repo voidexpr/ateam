@@ -160,8 +160,7 @@ func createStateDirs(orgDir, projectID string, roleIDs []string) error {
 	return nil
 }
 
-// checkDuplicateProjectName walks from orgDir's parent looking for any
-// .ateam/config.toml with a matching project.name.
+// checkDuplicateProjectName checks registered projects for a name collision.
 func checkDuplicateProjectName(orgDir, name string) error {
 	return WalkProjects(orgDir, func(p ProjectInfo) error {
 		if p.Config.Project.Name == name {

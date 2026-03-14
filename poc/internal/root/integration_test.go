@@ -616,7 +616,7 @@ func TestIntegration_ResolveFromStateDir(t *testing.T) {
 }
 
 // TestIntegration_WalkProjectsDiscovery verifies that WalkProjects discovers
-// all projects by walking the filesystem.
+// all registered projects via .ateamorg/projects/.
 func TestIntegration_WalkProjectsDiscovery(t *testing.T) {
 	base := resolvedTempDir(t)
 
