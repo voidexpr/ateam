@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ateam-poc/internal/config"
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runtime"
@@ -24,95 +25,99 @@ This command is read-only — it never creates or modifies anything.`,
 }
 
 func runEnv(cmd *cobra.Command, args []string) error {
-	// Show auth status first — works even without .ateamorg
-	printAuthStatus()
-
 	env, err := root.Lookup()
 	if err != nil {
-		fmt.Printf("     Org: (not found — run 'ateam install' to set up)\n")
+		fmt.Printf("Org: (not found — run 'ateam install' to set up)\n")
 		return nil
 	}
 
-	orgRoot := env.OrgRoot()
 	cwd, err := resolvedCwd()
 	if err != nil {
 		return err
 	}
 
+	orgRoot := env.OrgRoot()
 	relOrg, _ := filepath.Rel(cwd, orgRoot)
-	fmt.Printf("     Org: %s (%s)\n", relOrg, tildeHome(orgRoot))
+	fmt.Printf("Org: %s (%s)\n", relOrg, tildeHome(orgRoot))
 
-	// Show runtime.hcl resolution
-	printRuntimePaths(env, cwd)
+	printRuntimeSection(env, cwd)
 
 	if env.ProjectDir == "" {
 		return nil
 	}
 
-	fmt.Printf(" Project: %s\n", env.ProjectName)
-
-	if env.StateDir != "" {
-		fmt.Printf("   State: %s\n", env.RelPath(env.StateDir))
-	}
-
-	if env.GitRepoDir != "" {
-		fmt.Printf("     Git: %s (%s)\n", env.RelPath(env.GitRepoDir), tildeHome(env.GitRepoDir))
-	}
-	if env.Config != nil && env.Config.Git.RemoteOriginURL != "" {
-		fmt.Printf("  Remote: %s\n", env.Config.Git.RemoteOriginURL)
-	}
-
-	if env.Config != nil {
-		roles := env.Config.EnabledRoles()
-		if len(roles) > 0 {
-			fmt.Printf("   Roles: %s\n", strings.Join(roles, ", "))
-
-			fmt.Println()
-			w := newTable()
-			fmt.Fprintln(w, "ROLE\tLAST\tPATH")
-			for _, roleID := range roles {
-				reportPath := filepath.Join(env.ProjectDir, "roles", roleID, prompts.ReportFile)
-				if fi, err := os.Stat(reportPath); err == nil {
-					fmt.Fprintf(w, "%s\t%s\t%s\n", roleID, fmtDateAge(fi.ModTime()), relPath(cwd, reportPath))
-				} else {
-					fmt.Fprintf(w, "%s\t-\t\n", roleID)
-				}
-			}
-
-			reviewPath := filepath.Join(env.ProjectDir, "supervisor", "review.md")
-			if fi, err := os.Stat(reviewPath); err == nil {
-				fmt.Fprintf(w, "%s\t%s\t%s\n", "review", fmtDateAge(fi.ModTime()), relPath(cwd, reviewPath))
-			}
-			w.Flush()
-		}
-	}
+	printProjectSection(env, cwd)
 
 	return nil
 }
 
-func printAuthStatus() {
+func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
+	fmt.Println("\nRuntime")
+
+	printAuthLines()
+
+	// Config resolution chain
+	chain := []string{"built-in"}
+	var candidates []string
+	if env.OrgDir != "" {
+		candidates = append(candidates,
+			filepath.Join(env.OrgDir, "defaults", "runtime.hcl"),
+			filepath.Join(env.OrgDir, "runtime.hcl"),
+		)
+	}
+	if env.ProjectDir != "" {
+		candidates = append(candidates, filepath.Join(env.ProjectDir, "runtime.hcl"))
+	}
+	for _, p := range candidates {
+		if fileOrSymlinkExists(p) {
+			chain = append(chain, relPath(cwd, p))
+		}
+	}
+	fmt.Printf("  Config: %s\n", strings.Join(chain, " → "))
+
+	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
+	if err != nil {
+		return
+	}
+
+	if prof, _, _, err := rtCfg.ResolveProfile("default"); err == nil {
+		fmt.Printf("  Default profile: agent=%s, container=%s\n", prof.Agent, prof.Container)
+	}
+
+	var names []string
+	for name := range rtCfg.Profiles {
+		names = append(names, name)
+	}
+	if len(names) > 0 {
+		sort.Strings(names)
+		fmt.Printf("  Profiles: %s\n", strings.Join(names, ", "))
+	}
+
+	printDockerfileLine(env, cwd)
+}
+
+func printAuthLines() {
 	oauth := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 
 	if oauth == "" && apiKey == "" {
-		fmt.Println("    Auth: (none)")
+		fmt.Println("  Auth: (none)")
 		return
 	}
 
-	// CLAUDE_CODE_OAUTH_TOKEN takes precedence
 	if oauth != "" {
 		label := "active"
 		if apiKey != "" {
 			label = "active, takes precedence"
 		}
-		fmt.Printf("    Auth: CLAUDE_CODE_OAUTH_TOKEN=%s (%s)\n", maskEnvVar(oauth), label)
+		fmt.Printf("  Auth: CLAUDE_CODE_OAUTH_TOKEN=%s (%s)\n", maskEnvVar(oauth), label)
 	}
 	if apiKey != "" {
 		label := "active"
 		if oauth != "" {
 			label = "set but unused (CLAUDE_CODE_OAUTH_TOKEN takes precedence)"
 		}
-		fmt.Printf("          ANTHROPIC_API_KEY=%s (%s)\n", maskEnvVar(apiKey), label)
+		fmt.Printf("        ANTHROPIC_API_KEY=%s (%s)\n", maskEnvVar(apiKey), label)
 	}
 }
 
@@ -123,57 +128,7 @@ func maskEnvVar(val string) string {
 	return val[:4] + "..." + val[len(val)-4:]
 }
 
-func printRuntimePaths(env *root.ResolvedEnv, cwd string) {
-	// Build the resolution chain: embedded -> org/defaults -> org -> project
-	var paths []string
-	if env.OrgDir != "" {
-		paths = append(paths,
-			filepath.Join(env.OrgDir, "defaults", "runtime.hcl"),
-			filepath.Join(env.OrgDir, "runtime.hcl"),
-		)
-	}
-	if env.ProjectDir != "" {
-		paths = append(paths, filepath.Join(env.ProjectDir, "runtime.hcl"))
-	}
-
-	fmt.Print(" Runtime: (embedded defaults)")
-	for _, p := range paths {
-		if fileOrSymlinkExists(p) {
-			fmt.Printf(" → %s", relPath(cwd, p))
-		}
-	}
-	fmt.Println()
-
-	// Show loaded profiles and Dockerfile resolution
-	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
-	if err == nil {
-		var names []string
-		for name := range rtCfg.Profiles {
-			names = append(names, name)
-		}
-		if len(names) > 0 {
-			sort.Strings(names)
-			fmt.Printf("Profiles: %s\n", strings.Join(names, ", "))
-		}
-
-		printDockerfilePath(env, cwd)
-	}
-}
-
-// fileOrSymlinkExists returns true if path exists as a file or symlink.
-// Uses Lstat first so broken symlinks are still detected, then Stat to confirm.
-func fileOrSymlinkExists(path string) bool {
-	_, err := os.Stat(path)
-	if err == nil {
-		return true
-	}
-	// Check for broken symlink
-	_, err = os.Lstat(path)
-	return err == nil
-}
-
-func printDockerfilePath(env *root.ResolvedEnv, cwd string) {
-	// Show the Dockerfile resolution chain (same order as runtime.ResolveDockerfile)
+func printDockerfileLine(env *root.ResolvedEnv, cwd string) {
 	var candidates []string
 	if env.ProjectDir != "" {
 		candidates = append(candidates, filepath.Join(env.ProjectDir, "Dockerfile"))
@@ -185,11 +140,76 @@ func printDockerfilePath(env *root.ResolvedEnv, cwd string) {
 
 	for _, path := range candidates {
 		if fileOrSymlinkExists(path) {
-			fmt.Printf("  Docker: %s\n", relPath(cwd, path))
+			fmt.Printf("  Dockerfile: %s\n", relPath(cwd, path))
 			return
 		}
 	}
-	fmt.Println("  Docker: (embedded default)")
+	fmt.Println("  Dockerfile: (built-in)")
+}
+
+func printProjectSection(env *root.ResolvedEnv, cwd string) {
+	fmt.Printf("\nProject: %s\n", env.ProjectName)
+
+	if env.StateDir != "" {
+		fmt.Printf("  State: %s\n", env.RelPath(env.StateDir))
+	}
+	if env.GitRepoDir != "" {
+		fmt.Printf("  Git: %s (%s)\n", env.RelPath(env.GitRepoDir), tildeHome(env.GitRepoDir))
+	}
+	if env.Config != nil && env.Config.Git.RemoteOriginURL != "" {
+		fmt.Printf("  Remote: %s\n", env.Config.Git.RemoteOriginURL)
+	}
+
+	if env.Config == nil || len(env.Config.Roles) == 0 {
+		return
+	}
+
+	// Collect all role names, sorted
+	var allRoles []string
+	for name := range env.Config.Roles {
+		allRoles = append(allRoles, name)
+	}
+	sort.Strings(allRoles)
+
+	fmt.Println()
+	w := newTable()
+	fmt.Fprintln(w, " \tROLE\tLAST\tPATH")
+	for _, roleID := range allRoles {
+		enabled := env.Config.Roles[roleID] == config.RoleEnabled
+		reportPath := filepath.Join(env.ProjectDir, "roles", roleID, prompts.ReportFile)
+		fi, err := os.Stat(reportPath)
+		hasReport := err == nil
+
+		if !enabled && !hasReport {
+			continue
+		}
+
+		status := "✓"
+		if !enabled {
+			status = "-"
+		}
+		if hasReport {
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", status, roleID, fmtDateAge(fi.ModTime()), relPath(cwd, reportPath))
+		} else {
+			fmt.Fprintf(w, "%s\t%s\t-\t\n", status, roleID)
+		}
+	}
+
+	reviewPath := filepath.Join(env.ProjectDir, "supervisor", "review.md")
+	if fi, err := os.Stat(reviewPath); err == nil {
+		fmt.Fprintf(w, " \t%s\t%s\t%s\n", "review", fmtDateAge(fi.ModTime()), relPath(cwd, reviewPath))
+	}
+	w.Flush()
+}
+
+// fileOrSymlinkExists returns true if path exists as a file or symlink.
+func fileOrSymlinkExists(path string) bool {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true
+	}
+	_, err = os.Lstat(path)
+	return err == nil
 }
 
 func tildeHome(p string) string {
@@ -205,4 +225,3 @@ func tildeHome(p string) string {
 	}
 	return p
 }
-
