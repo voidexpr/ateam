@@ -42,20 +42,6 @@ Ateam's core principles are:
 * **audit**: display cost related to ateam's work, make it easy to see any artifact used by ateam to make decision, review how the coding sessions were supervised
 * **fit into your development workflow**: choose the git approach that works for you (direct to main for small project, integration branch, separate worktree or checkout, etc ...), work for an entire git repo or have multiple ateam instances for the same code base focusing on different components, etc ...
 
-
-
-Coding agents tend to produce sub-par code when implementing features. They also require a lot of attention between approvals and spec steering. As code is mostly written, read and modified by agents there is little incentive left for humans to perform code reviews except to gauge the current quality. At the same time coding agents are actually very good at finding refactoring opportunities, testing gaps, analyze dependencies and all the standard software quality tasks. So why keep reading code or why having to prompt agents to improve with these standard tasks ?
-
-Let's just reuse or write project quality improvement prompts once and have background agents run in a sandbox without requiring approvals perform the work. We add supervisor layer to balance priorities between the various dimensions of the work.
-
-The end result is to be able to focus our attention to the value generating feature work and let agents do the rest.
-
-Ateam provides additional default/overload/tracking structure compared to just 'claude -p "/simplify"' or other simple one-liners: multi-role audit + supervisor prioritization taking more decision fatigue away, built-in agent switching and sandboxing, audit and cost tracking. Also an out of the box immediate working state for any code base.
-
-Note that Ateam is not made to provide generic agent workflow management for feature work, it provides one simple and effective workflow for orthogonal project quality features that don't need much customization. Agent workflow management require a lot of attention to learn and configure, ateam is designed for the opposite: run it and forget it, see a stream of commits you can choose to integrate or not.
-
-Ateam makes use of existing coding agents instead of having its own agent talking to the LLM models directly. It is done to leverage the fast pace work going on coding agents and for familiary of behavior. A built-in agent could easily be added in the future if using existing coding agents is problematic
-
 ## Features
 
 - **17 built-in roles** — security, testing, refactoring, dependencies, documentation, project profiling, and more
@@ -127,7 +113,8 @@ Run on Fridays:
 
 - Go 1.24+
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated (`claude` command available in PATH)
-  - For OAuth token setup (recommended for unattended use): `claude setup-token`
+  - For OAuth token setup (recommended for unattended use using containers): `claude setup-token`
+- [Open AI Codex CLI](https://developers.openai.com/codex/cli/?utm_source=chatgpt.com) (partial, ongoing work)
 
 ## Install
 
@@ -137,7 +124,7 @@ cd poc
 make build
 ```
 
-Copy or symlink the `ateam` binary to somewhere in your PATH.
+Have `ateam` in your PATH or symlink to it.
 
 See [DEV.md](DEV.md) for development setup, testing, and architecture details.
 
@@ -152,7 +139,7 @@ All commands accept these flags:
 | `--org PATH` | `-o` | Organization path override (skips auto-discovery) |
 | `--project NAME` | `-p` | Project name override (skips auto-discovery) |
 
-### `ateam install [PATH]`
+### `ateam install [PATH]` (Optional)
 
 Create a `.ateamorg/` directory with default prompts, runtime config, and Dockerfile.
 
