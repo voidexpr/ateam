@@ -17,9 +17,9 @@ func TestRoundTrip(t *testing.T) {
 			ReportTimeoutMinutes: 20,
 		},
 		Roles: map[string]string{
-			"lint":   "enabled",
-			"test":   "disabled",
-			"review": "enabled",
+			"lint":   "on",
+			"test":   "off",
+			"review": "on",
 		},
 	}
 
@@ -64,7 +64,7 @@ func TestLoadDefaults(t *testing.T) {
 name = "minimal"
 
 [roles]
-lint = "enabled"
+lint = "on"
 `
 	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -109,11 +109,11 @@ name = "noroles"
 func TestEnabledRoles(t *testing.T) {
 	cfg := Config{
 		Roles: map[string]string{
-			"zebra":  "enabled",
-			"alpha":  "enabled",
-			"beta":   "disabled",
-			"gamma":  "enabled",
-			"delta":  "disabled",
+			"zebra":  "on",
+			"alpha":  "enabled", // backward compat
+			"beta":   "off",
+			"gamma":  "on",
+			"delta":  "disabled", // backward compat
 		},
 	}
 
@@ -133,7 +133,7 @@ func TestEnabledRoles(t *testing.T) {
 func TestEnabledRolesEmpty(t *testing.T) {
 	cfg := Config{
 		Roles: map[string]string{
-			"a": "disabled",
+			"a": "off",
 			"b": "disabled",
 		},
 	}

@@ -161,12 +161,12 @@ func TestIntegration_MonorepoSubdir(t *testing.T) {
 	}
 
 	// Only "security" should be enabled.
-	if cfg.Roles["security"] != "enabled" {
-		t.Errorf("security role = %q, want %q", cfg.Roles["security"], "enabled")
+	if cfg.Roles["security"] != config.RoleEnabled {
+		t.Errorf("security role = %q, want %q", cfg.Roles["security"], config.RoleEnabled)
 	}
 	for id, status := range cfg.Roles {
-		if id != "security" && status != "disabled" {
-			t.Errorf("role %s = %q, want %q", id, status, "disabled")
+		if id != "security" && status != config.RoleDisabled {
+			t.Errorf("role %s = %q, want %q", id, status, config.RoleDisabled)
 		}
 	}
 

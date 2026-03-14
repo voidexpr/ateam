@@ -30,20 +30,20 @@ var reportCmd = &cobra.Command{
 	Use:   "report",
 	Short: "Run roles to produce analysis reports",
 	Long: `Run one or more roles in parallel to analyze the project source code
-and produce markdown reports.
+and produce markdown reports. Defaults to all enabled roles.
 
 Works from any project directory — discovers the .ateamorg/ and .ateam/ structure.
 
 Example:
-  ateam report --roles all
+  ateam report
   ateam report --roles testing_basic,security
   ateam report --roles refactor_small --extra-prompt "Focus on the auth module"
-  ateam report --roles all --extra-prompt @notes.md`,
+  ateam report --extra-prompt @notes.md`,
 	RunE: runReport,
 }
 
 func init() {
-	reportCmd.Flags().StringSliceVar(&reportRoles, "roles", nil, prompts.RoleFlagUsage()+" (required)")
+	reportCmd.Flags().StringSliceVar(&reportRoles, "roles", nil, prompts.RoleFlagUsage()+" (default: all)")
 	reportCmd.Flags().StringVar(&reportExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
 	reportCmd.Flags().IntVar(&reportTimeout, "timeout", 0, "timeout in minutes per role (overrides config)")
 	reportCmd.Flags().BoolVar(&reportPrint, "print", false, "print reports to stdout after completion")
@@ -52,7 +52,6 @@ func init() {
 	addCheaperModelFlag(reportCmd, &reportCheaperModel)
 	addProfileFlags(reportCmd, &reportProfile, &reportAgent)
 	addVerboseFlag(reportCmd, &reportVerbose)
-	_ = reportCmd.MarkFlagRequired("roles")
 }
 
 func runReport(cmd *cobra.Command, args []string) error {
@@ -61,7 +60,11 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	roleIDs, err := prompts.ResolveRoleList(reportRoles, env.Config.Roles)
+	roles := reportRoles
+	if len(roles) == 0 {
+		roles = []string{"all"}
+	}
+	roleIDs, err := prompts.ResolveRoleList(roles, env.Config.Roles)
 	if err != nil {
 		return err
 	}

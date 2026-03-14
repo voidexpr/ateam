@@ -102,7 +102,8 @@ func enabledRoleIDs(configRoles map[string]string, allKnown []string) []string {
 	}
 	var enabled []string
 	for _, id := range allKnown {
-		if configRoles[id] != "disabled" {
+		status := configRoles[id]
+		if status != "off" && status != "disabled" {
 			enabled = append(enabled, id)
 		}
 	}

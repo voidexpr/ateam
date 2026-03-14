@@ -13,7 +13,7 @@ var costCmd = &cobra.Command{
 	Use:   "cost",
 	Short: "Show aggregated cost reports from the call database",
 	Long: `Display aggregated cost and token usage, grouped by action type
-and by code session.
+and by task group (code sessions, report batches, etc.).
 
 When run inside a project, results are filtered to that project by default.
 Use --project to filter explicitly.
@@ -75,10 +75,10 @@ func runCost(cmd *cobra.Command, args []string) error {
 		w.Flush()
 	}
 
-	// --- Code session breakdown ---
-	sessionRows, err := db.CostByCodeSession(projectID)
+	// --- Task group breakdown ---
+	sessionRows, err := db.CostByTaskGroup(projectID)
 	if err != nil {
-		return fmt.Errorf("code session query failed: %w", err)
+		return fmt.Errorf("task group query failed: %w", err)
 	}
 
 	if len(sessionRows) == 0 {
@@ -86,7 +86,7 @@ func runCost(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-	fmt.Println("=== Cost by Code Session ===")
+	fmt.Println("=== Cost by Task Group ===")
 
 	type sessionSummary struct {
 		taskGroup    string
@@ -130,39 +130,64 @@ func runCost(cmd *cobra.Command, args []string) error {
 	w := newTable()
 	fmt.Fprintln(w, "TASK_GROUP\tACTION\tCOUNT\tCOST\tINPUT\tOUTPUT\tCACHE_READ\tTOTAL_TOKENS\tSTARTED\tENDED\tDURATION")
 
+	prevTG := ""
 	for _, tg := range order {
 		s := sessions[tg]
 		started := fmtTimestamp(s.firstStarted)
 		ended := fmtTimestamp(s.lastEnded)
 		dur := computeDuration(s.firstStarted, s.lastEnded)
 
-		for _, action := range []string{"code", "run"} {
+		displayTG := tg
+		if tg == prevTG {
+			displayTG = ""
+		}
+
+		first := true
+		for _, action := range []string{"code", "report", "review", "run"} {
 			al, ok := s.actions[action]
 			if !ok {
 				continue
 			}
+			label := displayTG
+			if !first {
+				label = ""
+			}
 			fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				tg, action, al.count, fmtCost(al.cost),
+				label, action, al.count, fmtCost(al.cost),
 				fmtTokens64(al.inputTok), fmtTokens64(al.outputTok),
 				fmtTokens64(al.cacheReadTok), fmtTokens64(al.totalTok),
 				started, ended, dur)
+			first = false
 		}
-		// Print any other actions not covered above.
+		// Print any other actions not in the ordered list above.
 		for action, al := range s.actions {
-			if action == "code" || action == "run" {
+			switch action {
+			case "code", "report", "review", "run":
 				continue
 			}
+			label := displayTG
+			if !first {
+				label = ""
+			}
 			fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				tg, action, al.count, fmtCost(al.cost),
+				label, action, al.count, fmtCost(al.cost),
 				fmtTokens64(al.inputTok), fmtTokens64(al.outputTok),
 				fmtTokens64(al.cacheReadTok), fmtTokens64(al.totalTok),
+				started, ended, dur)
+			first = false
+		}
+
+		if len(s.actions) > 1 {
+			label := displayTG
+			if !first {
+				label = ""
+			}
+			fmt.Fprintf(w, "%s\tTOTAL\t\t%s\t\t\t\t%s\t%s\t%s\t%s\n",
+				label, fmtCost(s.totalCost), fmtTokens64(s.totalTokens),
 				started, ended, dur)
 		}
 
-		// Session total row.
-		fmt.Fprintf(w, "%s\tTOTAL\t\t%s\t\t\t\t%s\t%s\t%s\t%s\n",
-			tg, fmtCost(s.totalCost), fmtTokens64(s.totalTokens),
-			started, ended, dur)
+		prevTG = tg
 	}
 	w.Flush()
 
