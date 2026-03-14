@@ -245,6 +245,9 @@ type ProjectInfo struct {
 // The callback receives each discovered project. Return filepath.SkipAll to stop early.
 func WalkProjects(orgDir string, fn func(ProjectInfo) error) error {
 	start := filepath.Dir(orgDir)
+	startDepth := strings.Count(start, string(filepath.Separator))
+	const maxDepth = 8
+
 	return filepath.WalkDir(start, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -252,6 +255,12 @@ func WalkProjects(orgDir string, fn func(ProjectInfo) error) error {
 		if !d.IsDir() {
 			return nil
 		}
+
+		depth := strings.Count(path, string(filepath.Separator)) - startDepth
+		if depth > maxDepth {
+			return filepath.SkipDir
+		}
+
 		name := d.Name()
 		if name == OrgDirName {
 			return filepath.SkipDir
@@ -266,7 +275,6 @@ func WalkProjects(orgDir string, fn func(ProjectInfo) error) error {
 			}
 			return filepath.SkipDir
 		}
-		// Skip hidden dirs (except the start itself) and known non-project dirs
 		if path != start && (strings.HasPrefix(name, ".") || skipDirs[name]) {
 			return filepath.SkipDir
 		}
