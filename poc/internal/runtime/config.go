@@ -395,8 +395,8 @@ func ResolveDockerfile(cc *ContainerConfig, projectDir, orgDir, roleID string) (
 }
 
 // WriteOrgDefaults writes the embedded runtime.hcl and Dockerfile to orgDir/defaults/.
-// Existing files are not overwritten.
-func WriteOrgDefaults(orgDir string) error {
+// When overwrite is false, existing files are not overwritten.
+func WriteOrgDefaults(orgDir string, overwrite bool) error {
 	entries, err := defaultsFS.ReadDir("defaults")
 	if err != nil {
 		return fmt.Errorf("cannot read embedded defaults: %w", err)
@@ -410,8 +410,10 @@ func WriteOrgDefaults(orgDir string) error {
 			continue
 		}
 		dst := filepath.Join(defaultsDir, e.Name())
-		if _, err := os.Stat(dst); err == nil {
-			continue // don't overwrite
+		if !overwrite {
+			if _, err := os.Stat(dst); err == nil {
+				continue
+			}
 		}
 		data, err := defaultsFS.ReadFile("defaults/" + e.Name())
 		if err != nil {
