@@ -7,6 +7,7 @@ import (
 
 	"github.com/ateam-poc/internal/config"
 	"github.com/ateam-poc/internal/prompts"
+	"github.com/ateam-poc/internal/runtime"
 )
 
 // InitProjectOpts holds options for creating a new project.
@@ -41,6 +42,10 @@ func InstallOrg(parentDir string) (string, error) {
 	}
 
 	if err := prompts.WriteOrgDefaults(orgDir, false); err != nil {
+		return "", err
+	}
+
+	if err := runtime.WriteOrgDefaults(orgDir); err != nil {
 		return "", err
 	}
 
