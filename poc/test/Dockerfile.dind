@@ -6,8 +6,10 @@
 
 FROM docker:27-dind
 
-# Install Go
-RUN apk add --no-cache go git musl-dev
+# Install Go 1.24+ (Alpine's packaged Go may be too old for go.mod)
+RUN apk add --no-cache git musl-dev curl && \
+    curl -fsSL https://go.dev/dl/go1.24.1.linux-amd64.tar.gz | tar -C /usr/local -xz
+ENV PATH="/usr/local/go/bin:${PATH}"
 
 # Copy project source
 WORKDIR /src

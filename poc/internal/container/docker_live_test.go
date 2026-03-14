@@ -168,8 +168,9 @@ func TestLiveClaudeReadFile(t *testing.T) {
 		ForwardEnv: authEnvVars(),
 	}
 
+	codePath, _, _ := dc.containerPaths()
 	stdout, _ := runClaude(t, ctx, dc, claudeArgs("2",
-		"Read /workspace/test-data.txt and reply with ONLY its exact contents.",
+		"Read "+codePath+"/test-data.txt and reply with ONLY its exact contents.",
 	))
 
 	if !strings.Contains(stdout, "42") {
@@ -193,8 +194,9 @@ func TestLiveClaudeWriteFile(t *testing.T) {
 		ForwardEnv: authEnvVars(),
 	}
 
+	codePath, _, _ := dc.containerPaths()
 	runClaude(t, ctx, dc, claudeArgs("3",
-		"Create a file at /workspace/agent-output.txt containing exactly 'written-by-agent'. Reply 'done' when finished.",
+		"Create a file at "+codePath+"/agent-output.txt containing exactly 'written-by-agent'. Reply 'done' when finished.",
 	))
 
 	data, err := os.ReadFile(filepath.Join(sourceDir, "agent-output.txt"))
@@ -227,8 +229,9 @@ func TestLiveClaudeOrgReadOnly(t *testing.T) {
 		ForwardEnv: authEnvVars(),
 	}
 
+	_, _, orgPath := dc.containerPaths()
 	stdout, _ := runClaude(t, ctx, dc, claudeArgs("2",
-		"Read /.ateamorg/config.txt and reply with ONLY its exact contents.",
+		"Read "+orgPath+"/config.txt and reply with ONLY its exact contents.",
 	))
 
 	if !strings.Contains(stdout, "org-config-value") {
