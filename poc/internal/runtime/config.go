@@ -394,6 +394,36 @@ func ResolveDockerfile(cc *ContainerConfig, projectDir, orgDir, roleID string) (
 	return tmpFile, nil
 }
 
+// WriteOrgDefaults writes the embedded runtime.hcl and Dockerfile to orgDir/defaults/.
+// Existing files are not overwritten.
+func WriteOrgDefaults(orgDir string) error {
+	entries, err := defaultsFS.ReadDir("defaults")
+	if err != nil {
+		return fmt.Errorf("cannot read embedded defaults: %w", err)
+	}
+	defaultsDir := filepath.Join(orgDir, "defaults")
+	if err := os.MkdirAll(defaultsDir, 0755); err != nil {
+		return fmt.Errorf("cannot create defaults directory: %w", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		dst := filepath.Join(defaultsDir, e.Name())
+		if _, err := os.Stat(dst); err == nil {
+			continue // don't overwrite
+		}
+		data, err := defaultsFS.ReadFile("defaults/" + e.Name())
+		if err != nil {
+			return fmt.Errorf("cannot read embedded %s: %w", e.Name(), err)
+		}
+		if err := os.WriteFile(dst, data, 0644); err != nil {
+			return fmt.Errorf("cannot write %s: %w", dst, err)
+		}
+	}
+	return nil
+}
+
 // ResolveProfile looks up a profile by name and validates agent/container refs.
 func (c *Config) ResolveProfile(name string) (*ProfileConfig, *AgentConfig, *ContainerConfig, error) {
 	prof, ok := c.Profiles[name]
