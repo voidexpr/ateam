@@ -1,7 +1,9 @@
 package runner
 
 import (
+	"bufio"
 	"encoding/json"
+	"os"
 	"strings"
 )
 
@@ -114,6 +116,32 @@ func extractReportText(ev *assistantEvent) string {
 		}
 	}
 	return strings.Join(parts, "")
+}
+
+// scanStreamFileForResult reads a stream JSONL file and returns the last
+// result event found, or nil if none exists. Used as a fallback to extract
+// cost/usage data when the event channel was closed before the result arrived.
+func scanStreamFileForResult(path string) *resultEvent {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var last *resultEvent
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		typ, ev, err := parseStreamLine(scanner.Bytes())
+		if err != nil || ev == nil {
+			continue
+		}
+		if typ == "result" {
+			res := ev.(*resultEvent)
+			last = res
+		}
+	}
+	return last
 }
 
 func trimBOM(b []byte) []byte {

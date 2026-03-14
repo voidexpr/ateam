@@ -50,4 +50,5 @@ List the top 3-5 findings that are high-value and low-effort (SMALL effort, MEDI
 - Recommend a tool to automate your objects if it is appropriate to the language and tech stack analyzed
 - Start your report directly with the `# Summary` heading — no preamble text like "Here's my report:"
 - Use `#` for top-level headings, not `##`
+- When you are done generated the report make sure it contains all the information you meant for it to contain and is not truncated
 

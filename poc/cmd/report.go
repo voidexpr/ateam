@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ateam-poc/internal/prompts"
@@ -163,13 +164,16 @@ func runReport(cmd *cobra.Command, args []string) error {
 		runner.RunPool(ctx, cr, tasks, env.Config.Report.MaxParallel, nil, completed)
 	}()
 
+	agentName := cr.Agent.Name()
+
 	for r := range completed {
 		elapsed := runner.FormatDuration(r.Duration)
 		endedAt := r.EndedAt.Format("15:04:05")
 
 		idx := roleIndex[r.RoleID]
 		if r.Err != nil {
-			statuses[idx] = fmt.Sprintf("  %-25s ERROR    %s  %s", r.RoleID, endedAt, elapsed)
+			logsRef := streamFilePrefix(r.StreamFilePath, cwd)
+			statuses[idx] = fmt.Sprintf("  %-25s ERROR    %s  %s  %s", r.RoleID, endedAt, elapsed, logsRef)
 			failed++
 		} else {
 			reportPath := env.RoleReportPath(r.RoleID)
@@ -185,6 +189,23 @@ func runReport(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("\n%d succeeded, %d failed\n", succeeded, failed)
+
+	if failed > 0 {
+		for _, r := range results {
+			if r.Err == nil {
+				continue
+			}
+			tail := runner.StreamTailError(r.StreamFilePath, agentName, 5)
+			if tail == "" {
+				continue
+			}
+			fmt.Printf("\n  %s:\n", r.RoleID)
+			for _, line := range strings.Split(tail, "\n") {
+				fmt.Printf("        %s\n", line)
+			}
+		}
+	}
+
 	if failed == 0 && succeeded > 0 {
 		fmt.Printf("\nRun 'ateam review' to have the supervisor synthesize findings.\n")
 	}
@@ -198,7 +219,20 @@ func runReport(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if failed > 0 {
+		return fmt.Errorf("%d role(s) failed", failed)
+	}
+
 	return nil
+}
+
+// streamFilePrefix returns the log file prefix (without _stream.jsonl suffix)
+// relative to cwd, with a trailing "*" glob hint.
+func streamFilePrefix(streamPath, cwd string) string {
+	// Stream files are named <prefix>_stream.jsonl — strip the suffix.
+	prefix := strings.TrimSuffix(streamPath, "_stream.jsonl")
+	rel := relPath(cwd, prefix)
+	return rel + "*"
 }
 
 // printStatuses prints all status lines.
