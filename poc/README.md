@@ -95,6 +95,7 @@ Run on Fridays:
 
 - Go 1.24+
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated (`claude` command available in PATH)
+  - For OAuth token setup (recommended for unattended use): `claude setup-token`
 
 ## Install
 
