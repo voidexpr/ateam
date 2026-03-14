@@ -45,7 +45,7 @@ func InstallOrg(parentDir string) (string, error) {
 		return "", err
 	}
 
-	if err := runtime.WriteOrgDefaults(orgDir); err != nil {
+	if err := runtime.WriteOrgDefaults(orgDir, false); err != nil {
 		return "", err
 	}
 

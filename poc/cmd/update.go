@@ -6,6 +6,7 @@ import (
 
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
+	"github.com/ateam-poc/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -63,6 +64,9 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := prompts.WriteOrgDefaults(orgDir, true); err != nil {
+		return err
+	}
+	if err := runtime.WriteOrgDefaults(orgDir, true); err != nil {
 		return err
 	}
 
