@@ -37,9 +37,10 @@ type ProjectConfig struct {
 }
 
 type SupervisorConfig struct {
-	DefaultProfile string `toml:"default_profile"`
-	ReviewProfile  string `toml:"review_profile"`
-	CodeProfile    string `toml:"code_profile"`
+	DefaultProfile       string `toml:"default_profile"`
+	ReviewProfile        string `toml:"review_profile"`
+	CodeProfile          string `toml:"code_profile"`
+	CodeSupervisorProfile string `toml:"code_supervisor_profile"`
 }
 
 type ProfilesConfig struct {
@@ -114,6 +115,24 @@ func (c Config) ResolveProfile(action, roleID string) string {
 	case "code":
 		if c.Supervisor.CodeProfile != "" {
 			return c.Supervisor.CodeProfile
+		}
+	}
+	if c.Supervisor.DefaultProfile != "" {
+		return c.Supervisor.DefaultProfile
+	}
+	if c.Project.DefaultProfile != "" {
+		return c.Project.DefaultProfile
+	}
+	return "default"
+}
+
+// ResolveSupervisorProfile determines the profile for the supervisor itself.
+// Priority: action-specific supervisor profile > supervisor default > project default > "default".
+func (c Config) ResolveSupervisorProfile(action string) string {
+	switch action {
+	case "code":
+		if c.Supervisor.CodeSupervisorProfile != "" {
+			return c.Supervisor.CodeSupervisorProfile
 		}
 	}
 	if c.Supervisor.DefaultProfile != "" {

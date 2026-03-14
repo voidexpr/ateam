@@ -74,7 +74,7 @@ func runRecentRuns(cmd *cobra.Command, args []string) error {
 	}
 
 	w := newTable()
-	fmt.Fprintln(w, "ID\tSTARTED\tACTION\tROLE\tMODEL\tDURATION\tCOST\tTOKENS\tSTATUS\tTASK_GROUP")
+	fmt.Fprintln(w, "ID\tSTARTED\tPROFILE\tACTION\tROLE\tMODEL\tDURATION\tCOST\tTOKENS\tSTATUS\tTASK_GROUP")
 	for _, r := range rows {
 		status := "ok"
 		if r.IsError {
@@ -99,8 +99,8 @@ func runRecentRuns(cmd *cobra.Command, args []string) error {
 			tokens = fmtTokens(total)
 		}
 
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			r.ID, started, r.Action, r.Role, r.Model,
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			r.ID, started, r.Profile, r.Action, r.Role, r.Model,
 			dur, fmtCost(r.CostUSD), tokens, status, r.TaskGroup)
 	}
 	w.Flush()
