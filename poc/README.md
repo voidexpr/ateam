@@ -1,16 +1,48 @@
 # ATeam — AI Role Team for Code Analysis
 
-A Go CLI to improve a project quality using coding agents as unattended as desired. Have project quality improved while you sleep. Focus on feature work and have a team of expert agent improve your project code, tests, scripts, documentation.
 
-It automates role specific coding agents to improve project quality along multiple dimensions: code refactoring, testing, documentation, security, ... It audits, prioritize and perform the code changes unattended via pre-built but customizable prompts. All steps produce easy to audit (and edit) markdown files:
-* role specific reports
-* supervisor synthesizes and prioritizes in a review document
-* a supervisor coordinate the implementation of prioritized fixes
-* reports and reviews get updated with progress and are ready for another round when you are
+ATeam is a CLI, point it at your codebase and a crew of role-specific coding agents gets to work across multiple dimensions: code refactoring, testing, documentation, security, and more. Each agent audits the code, another one prioritizes findings, and then manages other agents to implement the fixes.
 
-You can run it on demand (say after a coding day, before the week-end) or on a schedule (every day at night) for all or part the roles it knows how to do. Ateam is intended to run unattended with various sandboxing options to manage risks, isolation and convenience (i.e. don't constantly ask for approval).
+It is designed to work out of the box unattended but it can also be customized by adding or changing prompts. This way you can focus on feature work and have your project quality improve in the background (like while you sleep) with agents instructed to make pragmatic choices and balance priorities for you.
+
+ATeam is also transparent and auditable. Agents produce markdown artifacts at every step:
+
+* Role reports — per-agent findings and recommendations
+* Supervisor review — synthesized priorities across all roles
+* Supervisor manages coding of the top priority tasks and record what is completed
+
+Then ateam is ready for the next round: reports get updated so each run builds on the last.
+
+Run it on demand — after a coding session, before the weekend — or schedule it nightly. Choose which roles to run. Configure sandboxing to match your risk tolerance: full isolation, selective approval, or fully unattended. ATeam is designed to stay out of your way.
+
+ATeam feels like the missing part of agentic coding: the infra/platform team big companies have but scaled to match your project small or big and grow with it.
+
+At the core ateam is very simple: your existing coding agent (claude code, codex, more later), some prompt markdown files and markdown files for the various reports it produces if you wish to audit or modify.
 
 ## Why
+
+Ateam comes from the realization that with agentic software engineering:
+* coding agents need to prioritize feature completion over software quality (this is a good tradeoff for the short term)
+* feature work requires a lot of attention: back and forth prompting, iteration on how the feature works, approvals, ...
+* over time software quality becomes an issue: feature work breaks existing functionality, code changes take longer, security issues are created, dependencies/docs/tests are out of date, ...
+* agents are actually very good at reviewing code or entire projects and finding general software quality issues
+* if agents are the only one touching the code why even review what they produce besides big high level aspects relevant to current and future feature work ? Code is more and more writing by agents for agents.
+
+So Ateam was born: let's just have role specific agents that can be prompted once on general quality principles that can be applied to any project. Then to reduce prompting fatigue let's have a supervisor agent do the prioritization and act as a 2nd filter on what is worth doing. This should work as a simple CLI invocation or run on a schedule but most importantly can be unattended and require as little attention as possible. You can just see ateam's work as a stream of small focused commits if you even care. It should look as if the coding agents wrote the feature with good software quality engineering but without even taking longer, have ateam run while you sleep.
+
+Ateam's core principles are:
+* **no feature work**: focus on quality improvement, not feature (don't change existing behavior)
+* **unattended**: work on your own, don't ask for approval
+* **be pragmatic**: smaller code bases don't have the same needs as bigger ones, number of collaborator matters, young projects need to focus on code quality over the rest, etc ...
+* **look for opportunities for automation**: save future ateam work by automating linters, test scripts, audits, ...
+* **simple**: reuse existing coding agents, close to no orchestration, no arbitrary agent framework
+* **safe execution** via sandboxing or containers
+* **generally applicable**: software quality is a great target because it relies mostly on principles that agents can follow to adapt to each project tech stack
+* **works out of the box, yet customizable**: general prompts can work for a wide variety of project, ateam makes it easy to add new agent roles, add to existing prompts or overload existing prompts for a given project or many projects in one place
+* **audit**: display cost related to ateam's work, make it easy to see any artifact used by ateam to make decision, review how the coding sessions were supervised
+* **fit into your development workflow**: choose the git approach that works for you (direct to main for small project, integration branch, separate worktree or checkout, etc ...), work for an entire git repo or have multiple ateam instances for the same code base focusing on different components, etc ...
+
+
 
 Coding agents tend to produce sub-par code when implementing features. They also require a lot of attention between approvals and spec steering. As code is mostly written, read and modified by agents there is little incentive left for humans to perform code reviews except to gauge the current quality. At the same time coding agents are actually very good at finding refactoring opportunities, testing gaps, analyze dependencies and all the standard software quality tasks. So why keep reading code or why having to prompt agents to improve with these standard tasks ?
 
