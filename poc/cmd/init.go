@@ -196,7 +196,7 @@ func promptOrgCreate(initTarget string) (string, error) {
 	if !sameDir {
 		fmt.Fprintf(os.Stderr, "  2) %s\n", parentDir)
 	}
-	fmt.Fprintf(os.Stderr, "  n) skip\n")
+	fmt.Fprintf(os.Stderr, "  n) cancel\n")
 	fmt.Fprintf(os.Stderr, "> ")
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -214,7 +214,7 @@ func promptOrgCreate(initTarget string) (string, error) {
 		}
 		return parentDir, nil
 	case "n", "N", "":
-		return "", fmt.Errorf("skipped — run 'ateam install' to create .ateamorg/ manually")
+		return "", fmt.Errorf("cancelled")
 	default:
 		return "", fmt.Errorf("invalid choice %q — run 'ateam install' to create .ateamorg/ manually", choice)
 	}
