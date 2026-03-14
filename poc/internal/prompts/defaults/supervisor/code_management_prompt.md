@@ -22,9 +22,9 @@ Use the `ateam` CLI for all role operations:
                                           # generate a full code prompt to stdout
     ateam run @PROMPT_FILE --role ROLE    # execute a role with a prompt file
 
-If a **Task Group** section is provided at the end of this prompt, you MUST pass
-the `--task-group` flag to every `ateam run` command. This enables cost tracking
-across all sub-tasks in this code session.
+If a **Sub-Run Flags** section is provided at the end of this prompt, you MUST pass
+ALL listed flags to every `ateam run` command. These flags control cost tracking
+(`--task-group`) and runtime profile (`--profile`) for sub-tasks.
 
 Run `ateam --help` and `ateam COMMAND --help` for full details.
 

@@ -11,20 +11,21 @@ import (
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
+	"github.com/ateam-poc/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
 var (
-	codeReview       string
-	codeManagement   string
-	codeExtraPrompt  string
-	codeTimeout      int
-	codePrint        bool
-	codeDryRun       bool
-	codeCheaperModel bool
-	codeProfile      string
-	codeAgent        string
-	codeVerbose      bool
+	codeReview            string
+	codeManagement        string
+	codeExtraPrompt       string
+	codeTimeout           int
+	codePrint             bool
+	codeDryRun            bool
+	codeCheaperModel      bool
+	codeProfile           string
+	codeSupervisorProfile string
+	codeVerbose           bool
 )
 
 var codeCmd = &cobra.Command{
@@ -55,7 +56,8 @@ func init() {
 	codeCmd.Flags().BoolVar(&codeDryRun, "dry-run", false,
 		"print the computed prompt without running")
 	addCheaperModelFlag(codeCmd, &codeCheaperModel)
-	addProfileFlags(codeCmd, &codeProfile, &codeAgent)
+	codeCmd.Flags().StringVar(&codeProfile, "profile", "", "profile for sub-runs (passed to ateam run --profile)")
+	codeCmd.Flags().StringVar(&codeSupervisorProfile, "supervisor-profile", "", "profile for the supervisor itself")
 	addVerboseFlag(codeCmd, &codeVerbose)
 }
 
@@ -98,8 +100,18 @@ func runCode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Inject task_group instruction for the supervisor so it passes it to sub-runs.
-	prompt += "\n\n# Task Group\n\nYou MUST pass `--task-group " + taskGroup + "` to every `ateam run` command you execute. This groups all sub-tasks for cost tracking.\n"
+	// Inject flags for the supervisor to pass to sub-runs.
+	prompt += "\n\n# Sub-Run Flags\n\nYou MUST pass the following flags to every `ateam run` command you execute:\n"
+	prompt += "- `--task-group " + taskGroup + "` (groups all sub-tasks for cost tracking)\n"
+
+	// Resolve the profile that sub-runs will use.
+	subRunProfile := codeProfile
+	if subRunProfile == "" {
+		subRunProfile = env.Config.ResolveProfile("code", "")
+	}
+	if subRunProfile != "" && subRunProfile != "default" {
+		prompt += "- `--profile " + subRunProfile + "`\n"
+	}
 
 	if codeDryRun {
 		fmt.Printf("╔══ code management ══╗\n\n")
@@ -119,7 +131,16 @@ func runCode(cmd *cobra.Command, args []string) error {
 
 	supervisorDir := filepath.Join(env.ProjectDir, "supervisor")
 
-	cr, err := resolveRunner(env, codeProfile, codeAgent, runner.ActionCode, "")
+	supervisorProfileName := codeSupervisorProfile
+	if supervisorProfileName == "" {
+		supervisorProfileName = env.Config.ResolveSupervisorProfile("code")
+	}
+
+	if err := checkDockerInDocker(env, supervisorProfileName, subRunProfile); err != nil {
+		return err
+	}
+
+	cr, err := resolveRunner(env, supervisorProfileName, "", runner.ActionCode, "")
 	if err != nil {
 		return err
 	}
@@ -170,5 +191,31 @@ func runCode(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\n%s\n", result.Output)
 	}
 
+	return nil
+}
+
+// checkDockerInDocker returns an error if both the supervisor and sub-run profiles
+// resolve to docker containers, since we don't support docker-in-docker yet.
+func checkDockerInDocker(env *root.ResolvedEnv, supervisorProfile, subRunProfile string) error {
+	if supervisorProfile == "" && subRunProfile == "" {
+		return nil
+	}
+	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
+	if err != nil {
+		return nil // let the runner resolution surface this error later
+	}
+	isDocker := func(profileName string) bool {
+		if profileName == "" {
+			return false
+		}
+		_, _, cc, err := rtCfg.ResolveProfile(profileName)
+		if err != nil {
+			return false
+		}
+		return cc != nil && cc.Type == "docker"
+	}
+	if isDocker(supervisorProfile) && isDocker(subRunProfile) {
+		return fmt.Errorf("docker-in-docker is not supported: both --supervisor-profile %q and --profile %q use docker containers", supervisorProfile, subRunProfile)
+	}
 	return nil
 }
