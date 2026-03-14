@@ -1,38 +1,36 @@
 # ATeam — AI Role Team for Code Analysis
 
+ATeam is a CLI, point it at your codebase and a crew of role-specific coding agents gets to work across multiple dimensions: code refactoring, testing, documentation, security, and more. Each agent audits the code, another one prioritizes findings,and then runs coding agents to implement the selected fixes.
 
-ATeam is a CLI, point it at your codebase and a crew of role-specific coding agents gets to work across multiple dimensions: code refactoring, testing, documentation, security, and more. Each agent audits the code, another one prioritizes findings, and then manages other agents to implement the fixes.
-
-It is designed to work out of the box unattended but it can also be customized by adding or changing prompts. This way you can focus on feature work and have your project quality improve in the background (like while you sleep) with agents instructed to make pragmatic choices and balance priorities for you.
+It is designed to work out of the box unattended for most software project size and for any tech stack. It can also be ran on-demand and customized by adding or changing prompts. This way you can focus on feature work and have your project quality improve while you sleep with agents instructed to make pragmatic choices and balance priorities for you.
 
 ATeam is also transparent and auditable. Agents produce markdown artifacts at every step:
-
-* Role reports — per-agent findings and recommendations
-* Supervisor review — synthesized priorities across all roles
+* Role reports: per-agent findings and recommendations
+* Supervisor review: synthesized priorities across all roles
 * Supervisor manages coding of the top priority tasks and record what is completed
 
 Then ateam is ready for the next round: reports get updated so each run builds on the last.
 
 Run it on demand — after a coding session, before the weekend — or schedule it nightly. Choose which roles to run. Configure sandboxing to match your risk tolerance: full isolation, selective approval, or fully unattended. ATeam is designed to stay out of your way.
 
-ATeam feels like the missing part of agentic coding: the infra/platform team big companies have but scaled to match your project small or big and grow with it.
+At the core ateam is very simple: your existing coding agent (claude code, codex, more later), some prompt markdown files and other markdown files for the various reports it produces if you wish to audit or modify. It does use a small sqlite database to track cost across coding agent runs and provide aggregated reports.
 
-At the core ateam is very simple: your existing coding agent (claude code, codex, more later), some prompt markdown files and markdown files for the various reports it produces if you wish to audit or modify.
+ATeam should feel like the missing part of agentic coding: add expert colleagues to a solo project or be the infra/platform team big software companies have but scaled to match your project small or big and grow with it.
 
 ## Why
 
-Ateam comes from the realization that with agentic software engineering:
+ATeam comes from the realization that with agentic software engineering:
 * coding agents need to prioritize feature completion over software quality (this is a good tradeoff for the short term)
 * feature work requires a lot of attention: back and forth prompting, iteration on how the feature works, approvals, ...
 * over time software quality becomes an issue: feature work breaks existing functionality, code changes take longer, security issues are created, dependencies/docs/tests are out of date, ...
 * agents are actually very good at reviewing code or entire projects and finding general software quality issues
 * if agents are the only one touching the code why even review what they produce besides big high level aspects relevant to current and future feature work ? Code is more and more writing by agents for agents.
 
-So Ateam was born: let's just have role specific agents that can be prompted once on general quality principles that can be applied to any project. Then to reduce prompting fatigue let's have a supervisor agent do the prioritization and act as a 2nd filter on what is worth doing. This should work as a simple CLI invocation or run on a schedule but most importantly can be unattended and require as little attention as possible. You can just see ateam's work as a stream of small focused commits if you even care. It should look as if the coding agents wrote the feature with good software quality engineering but without even taking longer, have ateam run while you sleep.
+So ATeam was born: let's just have role specific agents that can be prompted once on general quality principles that can be applied to any project. Then to reduce prompting fatigue let's have a supervisor agent do the prioritization and act as a 2nd filter on what is worth doing. This should work as a simple CLI invocation or run on a schedule but most importantly can be unattended and require as little attention as possible. You can just see ateam's work as a stream of small focused commits if you even care. It should look as if the coding agents wrote the feature with good software quality engineering but without even taking longer, have ateam run while you sleep.
 
-Ateam's core principles are:
-* **no feature work**: focus on quality improvement, not feature (don't change existing behavior)
-* **unattended**: work on your own, don't ask for approval
+ATeam's core principles are:
+* **no feature work**: focus on quality improvement, not feature (don't change existing behavior), this way its work requires no interactive prompting
+* **unattended**: work on its own, doesn't ask for approval
 * **be pragmatic**: smaller code bases don't have the same needs as bigger ones, number of collaborator matters, young projects need to focus on code quality over the rest, etc ...
 * **look for opportunities for automation**: save future ateam work by automating linters, test scripts, audits, ...
 * **simple**: reuse existing coding agents, close to no orchestration, no arbitrary agent framework
@@ -405,6 +403,42 @@ ateam update --quiet
 |------|-------------|
 | `--diff` | Show diffs between on-disk and embedded prompts |
 | `--quiet`, `-q` | Suppress diff output |
+
+## Customization Points
+
+### Prompts
+
+All prompt files can be modified at the project level (.ateam folder), organization for multiple projects (.ateamorg folder) or rely on the built-in defaults.
+
+You can either redefine a prompt file or add to it by adding a prompt called ACTION_extra_prompt.md
+
+To audit what prompt will be used use the following command:
+
+  ateam prompt --role ROLE --action report
+  ateam prompt --supervisor --action review
+  ateam prompt --supervisor --action code
+
+#### Report
+* base_report_prompt.md: included for all roles
+* base_report_extra_prompt.md: included for all roles (doesn't exist by default), useful to change how reports are generated
+* roles/ROLE/
+  * report_prompt.md: role specific unique instructions
+  * report_extra_prompt.md: only add additional instruction (doesn't exist by default)
+
+#### Review
+* supervisor/
+  * review_prompt.md
+  * review_extra_prompt.md: only add additional instruction (doesn't exist by default). Very useful to permanently record some tasks you might not want to do or project specific guidelines that will be applied over all roles
+
+#### Coding
+* roles/ROLE/
+  * code_prompt.md
+* supervisor/
+  * code_management_prompt.md
+
+### How to run agents
+
+### Modify Reports or Reviews
 
 ## Runtime Configuration
 
