@@ -77,6 +77,71 @@ func FormatStream(path string, w io.Writer) error {
 	return scanner.Err()
 }
 
+// knownErrors maps substrings in the last assistant message to short error descriptions.
+var knownErrors = []string{
+	"Credit balance is too low",
+}
+
+// StreamTailError reads the stream JSONL and checks the last assistant message
+// for known error patterns. If found, returns "{agentName}: {error}" directly.
+// Otherwise returns the last maxMessages assistant text blocks formatted.
+// Returns "" if nothing useful is found.
+func StreamTailError(path, agentName string, maxMessages int) string {
+	messages := streamTailMessages(path, maxMessages)
+	if len(messages) == 0 {
+		return ""
+	}
+
+	last := messages[len(messages)-1]
+	for _, pattern := range knownErrors {
+		if strings.Contains(last, pattern) {
+			return agentName + ": " + pattern
+		}
+	}
+
+	var b strings.Builder
+	for i, msg := range messages {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		for _, line := range strings.Split(strings.TrimRight(msg, "\n"), "\n") {
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// streamTailMessages reads the stream JSONL and returns the last n assistant
+// text blocks.
+func streamTailMessages(path string, n int) []string {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var messages []string
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		typ, ev, err := parseStreamLine(scanner.Bytes())
+		if err != nil || ev == nil || typ != "assistant" {
+			continue
+		}
+		text := extractReportText(ev.(*assistantEvent))
+		if text == "" {
+			continue
+		}
+		messages = append(messages, truncate(text, 500))
+	}
+
+	if len(messages) > n {
+		messages = messages[len(messages)-n:]
+	}
+	return messages
+}
+
 func msToDuration(ms int64) time.Duration {
 	return time.Duration(ms) * time.Millisecond
 }

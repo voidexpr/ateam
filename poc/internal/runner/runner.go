@@ -334,6 +334,18 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		summary.InputTokens = resultEv.InputTokens
 		summary.OutputTokens = resultEv.OutputTokens
 		summary.CacheReadTokens = resultEv.CacheReadTokens
+	} else if streamFile != "" {
+		// No result event received (timeout, crash). Try to extract
+		// cost/usage from the stream file which may have been written
+		// before the process was killed.
+		if res := scanStreamFileForResult(streamFile); res != nil {
+			summary.Cost = res.TotalCostUSD
+			summary.DurationMS = res.DurationMS
+			summary.Turns = res.NumTurns
+			summary.InputTokens = res.Usage.InputTokens
+			summary.OutputTokens = res.Usage.OutputTokens
+			summary.CacheReadTokens = res.Usage.CacheReadInputTokens
+		}
 	}
 
 	success := resultEv != nil && resultEv.Type == "result" && resultEv.ExitCode == 0 && !resultEv.IsError
@@ -347,6 +359,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		appendLog(r.LogFile, opts.RoleID, "ok", cwd, cliStr)
 		emitProgress(PhaseDone, "", "", "", totalTools, eventCount)
 	} else {
+		summary.IsError = true
 		switch {
 		case ctx.Err() == context.DeadlineExceeded:
 			summary.Err = fmt.Errorf("timed out after %d minutes", opts.TimeoutMin)
