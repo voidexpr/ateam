@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ateam-poc/internal/agent"
+	"github.com/ateam-poc/internal/calldb"
 	"github.com/ateam-poc/internal/config"
 	"github.com/ateam-poc/internal/container"
 	"github.com/ateam-poc/internal/root"
@@ -53,6 +54,18 @@ func fmtInt(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
+func openCallDB(orgDir string) *calldb.CallDB {
+	if orgDir == "" {
+		return nil
+	}
+	db, err := calldb.Open(filepath.Join(orgDir, "state.sqlite"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: cannot open call database: %v\n", err)
+		return nil
+	}
+	return db
+}
+
 // newRunner creates a Runner using the resolved profile from runtime.hcl.
 // roleID is optional — used for role-specific Dockerfile resolution.
 func newRunner(env *root.ResolvedEnv, profileName, roleID string) (*runner.Runner, error) {
@@ -67,12 +80,19 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string) (*runner.Runne
 	}
 
 	r := runnerFromAgentConfig(env, ac)
+	r.Profile = profileName
+	r.ProjectID = env.ProjectID()
 	r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
 	ct, err := buildContainer(cc, prof, env.SourceDir, env.ProjectDir, env.OrgDir, env.GitRepoDir, roleID)
 	if err != nil {
 		return nil, err
 	}
 	r.Container = ct
+	if cc != nil && cc.Type != "none" {
+		r.ContainerType = cc.Type
+	} else {
+		r.ContainerType = "none"
+	}
 	return r, nil
 }
 
@@ -88,7 +108,10 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.Runner
 		return nil, fmt.Errorf("unknown agent %q", agentName)
 	}
 
-	return runnerFromAgentConfig(env, &ac), nil
+	r := runnerFromAgentConfig(env, &ac)
+	r.ProjectID = env.ProjectID()
+	r.ContainerType = "none"
+	return r, nil
 }
 
 func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runner.Runner {

@@ -40,4 +40,6 @@ func init() {
 	rootCmd.AddCommand(codeCmd)
 	rootCmd.AddCommand(logCmd)
 	rootCmd.AddCommand(allCmd)
+	rootCmd.AddCommand(recentRunsCmd)
+	rootCmd.AddCommand(costCmd)
 }

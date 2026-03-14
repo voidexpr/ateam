@@ -76,6 +76,14 @@ func (e *ResolvedEnv) NewProjectInfoParams(role string) prompts.ProjectInfoParam
 	}
 }
 
+// ProjectID returns the project identifier derived from the source directory path.
+func (e *ResolvedEnv) ProjectID() string {
+	if e.SourceDir == "" || e.OrgDir == "" {
+		return ""
+	}
+	return config.PathToProjectID(e.RelPath(e.SourceDir))
+}
+
 // OrgRoot returns the parent directory of .ateamorg.
 func (e *ResolvedEnv) OrgRoot() string {
 	return filepath.Dir(e.OrgDir)

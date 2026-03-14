@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
@@ -82,6 +83,14 @@ func runReport(cmd *cobra.Command, args []string) error {
 	}
 	applyCheaperModel(cr, reportCheaperModel)
 
+	db := openCallDB(env.OrgDir)
+	if db != nil {
+		defer db.Close()
+		cr.CallDB = db
+	}
+
+	taskGroup := "report-" + time.Now().Format(runner.TimestampFormat)
+
 	basePinfo := env.NewProjectInfoParams("")
 	var tasks []runner.PoolTask
 	for _, roleID := range roleIDs {
@@ -106,6 +115,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 				HistoryDir:           env.RoleHistoryDir(roleID),
 				PromptName:           "report_prompt.md",
 				Verbose:              reportVerbose,
+				TaskGroup:            taskGroup,
 			},
 		})
 	}

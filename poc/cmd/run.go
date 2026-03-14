@@ -27,6 +27,7 @@ var (
 	runQuiet     bool
 	runAgentArgs string
 	runVerbose   bool
+	runTaskGroup string
 )
 
 var runCmd = &cobra.Command{
@@ -60,6 +61,7 @@ func init() {
 	runCmd.Flags().BoolVar(&runQuiet, "quiet", false, "disable both streaming and summary (same as --no-stream --no-summary)")
 	runCmd.Flags().StringVar(&runWorkDir, "work-dir", "", "working directory (defaults to project source dir or cwd)")
 	runCmd.Flags().StringVar(&runAgentArgs, "agent-args", "", "extra args passed to the agent CLI (appended after configured args)")
+	runCmd.Flags().StringVar(&runTaskGroup, "task-group", "", "group related calls (e.g. all tasks in one ateam code run)")
 	addVerboseFlag(runCmd, &runVerbose)
 }
 
@@ -120,6 +122,13 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Open call tracking DB.
+	db := openCallDB(env.OrgDir)
+	if db != nil {
+		defer db.Close()
+		r.CallDB = db
+	}
+
 	// Apply --agent-args
 	if runAgentArgs != "" {
 		r.ExtraArgs = append(r.ExtraArgs, strings.Fields(runAgentArgs)...)
@@ -144,11 +153,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	// Build opts
 	opts := runner.RunOpts{
-		RoleID:  runRole,
-		Action:  runner.ActionRun,
-		LogsDir: logsDir,
-		WorkDir: workDir,
-		Verbose: runVerbose,
+		RoleID:    runRole,
+		Action:    runner.ActionRun,
+		LogsDir:   logsDir,
+		WorkDir:   workDir,
+		Verbose:   runVerbose,
+		TaskGroup: runTaskGroup,
 	}
 
 	if runRole != "" {

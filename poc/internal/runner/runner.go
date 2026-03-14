@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ateam-poc/internal/agent"
+	"github.com/ateam-poc/internal/calldb"
 	"github.com/ateam-poc/internal/container"
 )
 
@@ -37,6 +39,10 @@ type Runner struct {
 	SandboxROPaths  []string            // from agent config ro_paths
 	SandboxDenied   []string            // from agent config denied_paths
 	ConfigDir       string              // sets CLAUDE_CONFIG_DIR; relative paths resolve from ProjectDir, absolute used as-is
+	CallDB          *calldb.CallDB      // nil = no DB tracking
+	Profile         string              // profile name for DB
+	ContainerType   string              // "none" or "docker" for DB
+	ProjectID       string              // project ID for DB
 }
 
 // RunOpts holds per-invocation settings.
@@ -51,6 +57,7 @@ type RunOpts struct {
 	HistoryDir           string // where to archive the prompt
 	PromptName           string // archive name
 	Verbose              bool   // print agent and docker commands to stderr
+	TaskGroup            string // groups related calls (e.g. all tasks in one ateam code run)
 }
 
 // RunProgress is a lightweight status sent on a channel during execution.
@@ -219,6 +226,28 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		relToDir(r.ProjectDir, promptFile),
 		relToDir(r.ProjectDir, opts.LastMessageFilePath))
 
+	// Insert call tracking record.
+	var callID int64
+	if r.CallDB != nil {
+		if id, err := r.CallDB.InsertCall(&calldb.Call{
+			ProjectID:  r.ProjectID,
+			Profile:    r.Profile,
+			Agent:      agentName,
+			Container:  r.ContainerType,
+			Action:     opts.Action,
+			Role:       opts.RoleID,
+			TaskGroup:  opts.TaskGroup,
+			Model:      extractModel(r.Agent),
+			PromptHash: hashPrompt(prompt),
+			StartedAt:  startedAt,
+			StreamFile: streamFile,
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: call tracking insert failed: %v\n", err)
+		} else {
+			callID = id
+		}
+	}
+
 	// Run the agent and consume events
 	events := r.Agent.Run(ctx, req)
 
@@ -331,6 +360,28 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		writeErrorFile(opts.ErrorMessageFilePath, summary, "")
 		appendLog(r.LogFile, opts.RoleID, "error", cwd, cliStr, summary.Err.Error())
 		emitProgress(PhaseError, "", "", "", totalTools, eventCount)
+	}
+
+	// Update call tracking record with results.
+	if r.CallDB != nil && callID > 0 {
+		errMsg := ""
+		if summary.Err != nil {
+			errMsg = summary.Err.Error()
+		}
+		if err := r.CallDB.UpdateCall(callID, &calldb.CallResult{
+			EndedAt:         summary.EndedAt,
+			DurationMS:      summary.DurationMS,
+			ExitCode:        summary.ExitCode,
+			IsError:         summary.IsError,
+			ErrorMessage:    errMsg,
+			CostUSD:         summary.Cost,
+			InputTokens:     summary.InputTokens,
+			OutputTokens:    summary.OutputTokens,
+			CacheReadTokens: summary.CacheReadTokens,
+			Turns:           summary.Turns,
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: call tracking update failed: %v\n", err)
+		}
 	}
 
 	return summary
@@ -546,6 +597,22 @@ func writeExecFile(path string, startedAt time.Time, opts RunOpts, prompt string
 	fmt.Fprintf(&b, "\n# Prompt\n%s\n", prompt)
 
 	_ = os.WriteFile(path, []byte(b.String()), 0644)
+}
+
+func extractModel(a agent.Agent) string {
+	switch v := a.(type) {
+	case *agent.ClaudeAgent:
+		return v.Model
+	case *agent.CodexAgent:
+		return v.Model
+	default:
+		return ""
+	}
+}
+
+func hashPrompt(prompt string) string {
+	h := sha256.Sum256([]byte(prompt))
+	return fmt.Sprintf("%x", h[:8])
 }
 
 func looksLikeSecret(name string) bool {

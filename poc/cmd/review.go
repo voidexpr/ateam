@@ -95,6 +95,12 @@ func runReview(cmd *cobra.Command, args []string) error {
 	}
 	applyCheaperModel(cr, reviewCheaperModel)
 
+	db := openCallDB(env.OrgDir)
+	if db != nil {
+		defer db.Close()
+		cr.CallDB = db
+	}
+
 	opts := runner.RunOpts{
 		RoleID:               "supervisor",
 		Action:               runner.ActionReview,

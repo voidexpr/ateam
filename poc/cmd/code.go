@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/ateam-poc/internal/prompts"
 	"github.com/ateam-poc/internal/root"
@@ -89,11 +90,16 @@ func runCode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	taskGroup := "code-" + time.Now().Format(runner.TimestampFormat)
+
 	pinfo := env.NewProjectInfoParams("the supervisor")
 	prompt, err := prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.SourceDir, pinfo, reviewContent, customManagement, extraPrompt)
 	if err != nil {
 		return err
 	}
+
+	// Inject task_group instruction for the supervisor so it passes it to sub-runs.
+	prompt += "\n\n# Task Group\n\nYou MUST pass `--task-group " + taskGroup + "` to every `ateam run` command you execute. This groups all sub-tasks for cost tracking.\n"
 
 	if codeDryRun {
 		fmt.Printf("╔══ code management ══╗\n\n")
@@ -119,6 +125,12 @@ func runCode(cmd *cobra.Command, args []string) error {
 	}
 	applyCheaperModel(cr, codeCheaperModel)
 
+	db := openCallDB(env.OrgDir)
+	if db != nil {
+		defer db.Close()
+		cr.CallDB = db
+	}
+
 	opts := runner.RunOpts{
 		RoleID:               "supervisor",
 		Action:               runner.ActionCode,
@@ -130,6 +142,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 		HistoryDir:           historyDir,
 		PromptName:           "code_management_prompt.md",
 		Verbose:              codeVerbose,
+		TaskGroup:            taskGroup,
 	}
 
 	progress := make(chan runner.RunProgress, 64)
