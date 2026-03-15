@@ -128,7 +128,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		return s
 	}
 
-	if err := os.MkdirAll(opts.LogsDir, 0755); err != nil {
+	if err := os.MkdirAll(opts.LogsDir, 0700); err != nil {
 		return failEarly(fmt.Errorf("cannot create logs directory: %w", err))
 	}
 
@@ -353,8 +353,8 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	if success {
 		if opts.LastMessageFilePath != "" && output != "" {
 			dir := filepath.Dir(opts.LastMessageFilePath)
-			_ = os.MkdirAll(dir, 0755)
-			_ = os.WriteFile(opts.LastMessageFilePath, []byte(output), 0644)
+			_ = os.MkdirAll(dir, 0700)
+			_ = os.WriteFile(opts.LastMessageFilePath, []byte(output), 0600)
 		}
 		appendLog(r.LogFile, opts.RoleID, "ok", cwd, cliStr)
 		emitProgress(PhaseDone, "", "", "", totalTools, eventCount)
@@ -427,7 +427,7 @@ func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error
 		return nil, err
 	}
 
-	if err := os.WriteFile(settingsPath, data, 0644); err != nil {
+	if err := os.WriteFile(settingsPath, data, 0600); err != nil {
 		return nil, err
 	}
 	return data, nil
@@ -476,7 +476,7 @@ func writeErrorFile(path string, s RunSummary, stderr string) {
 		return
 	}
 	dir := filepath.Dir(path)
-	_ = os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0700)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Error: %s\n\n", s.RoleID)
@@ -499,15 +499,15 @@ func writeErrorFile(path string, s RunSummary, stderr string) {
 		fmt.Fprintf(&b, "## Partial Output\n\n%s\n", s.Output)
 	}
 
-	_ = os.WriteFile(path, []byte(b.String()), 0644)
+	_ = os.WriteFile(path, []byte(b.String()), 0600)
 }
 
 func appendLog(logFile, roleID, status, cwd, cli string, extra ...string) {
 	if logFile == "" {
 		return
 	}
-	_ = os.MkdirAll(filepath.Dir(logFile), 0755)
-	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	_ = os.MkdirAll(filepath.Dir(logFile), 0700)
+	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return
 	}
@@ -542,11 +542,11 @@ func archivePrompt(historyDir, promptName, prompt string) string {
 	if historyDir == "" || promptName == "" {
 		return ""
 	}
-	_ = os.MkdirAll(historyDir, 0755)
+	_ = os.MkdirAll(historyDir, 0700)
 	ts := time.Now().Format(TimestampFormat)
 	name := strings.ReplaceAll(fmt.Sprintf("%s.%s", ts, promptName), " ", "_")
 	path := filepath.Join(historyDir, name)
-	_ = os.WriteFile(path, []byte(prompt), 0644)
+	_ = os.WriteFile(path, []byte(prompt), 0600)
 	return path
 }
 
@@ -565,7 +565,7 @@ func FormatDuration(d time.Duration) string {
 
 // ArchiveFile copies a file to archiveDir with a timestamped name.
 func ArchiveFile(srcPath, archiveDir, name string) error {
-	if err := os.MkdirAll(archiveDir, 0755); err != nil {
+	if err := os.MkdirAll(archiveDir, 0700); err != nil {
 		return err
 	}
 	data, err := os.ReadFile(srcPath)
@@ -574,7 +574,7 @@ func ArchiveFile(srcPath, archiveDir, name string) error {
 	}
 	timestamp := time.Now().Format(TimestampFormat)
 	archiveName := strings.ReplaceAll(fmt.Sprintf("%s.%s", timestamp, name), " ", "_")
-	return os.WriteFile(filepath.Join(archiveDir, archiveName), data, 0644)
+	return os.WriteFile(filepath.Join(archiveDir, archiveName), data, 0600)
 }
 
 func writeExecFile(path string, startedAt time.Time, opts RunOpts, prompt string, settingsJSON []byte, cliStr, cwd, agentName string) {
@@ -609,7 +609,7 @@ func writeExecFile(path string, startedAt time.Time, opts RunOpts, prompt string
 
 	fmt.Fprintf(&b, "\n# Prompt\n%s\n", prompt)
 
-	_ = os.WriteFile(path, []byte(b.String()), 0644)
+	_ = os.WriteFile(path, []byte(b.String()), 0600)
 }
 
 func extractModel(a agent.Agent) string {

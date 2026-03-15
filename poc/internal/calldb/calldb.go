@@ -3,6 +3,7 @@ package calldb
 import (
 	"database/sql"
 	"fmt"
+	"os"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -73,6 +74,14 @@ type CallDB struct {
 }
 
 func Open(dbPath string) (*CallDB, error) {
+	// Pre-create the file with owner-only permissions so the SQLite driver
+	// inherits 0600 rather than the default 0666.
+	f, err := os.OpenFile(dbPath, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("create %s: %w", dbPath, err)
+	}
+	f.Close()
+
 	dsn := dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
