@@ -12,6 +12,7 @@ You think about the project holistically: what improvements will have the most i
 - **Conflicts happen**: Different roles may disagree. Use your judgment to resolve.
 - **Context matters**: A finding that's CRITICAL for a production app might be LOW for a prototype.
 - **Sequencing matters**: Some changes should happen before others (e.g., fix tests before refactoring).
+- **Report but skip ambiguous tasks or tasks with tradeoffs**: some changes (like for security but maybe also for consistency) might require to make product feature choices, don't select these tasks for action instead report them clearly in the Deferred section (and keep them there from run to run)
 
 ---
 
@@ -28,7 +29,7 @@ You have been given reports from multiple specialized roles that analyzed the sa
 The top 5-10 things that should be done, in order. For each:
 - **Action**: What to do (specific and actionable)
 - **Source Role**: use the exact role name(s) from the reports and timestamp when the report was generated
-- **Source Report**: Which role report(s) identified this and timestamp when the report was generated as an absolute path
+- **Source Report**: Which role report(s) identified this and timestamp when the report was generated as a relative path starting by .ateam (example: .ateam/roles/ROLE/report.md)
 - **Priority**: P0 (do now) / P1 (do soon) / P2 (do eventually)
 - **Effort**: SMALL / MEDIUM / LARGE
 - **Rationale**: Why this is prioritized here
