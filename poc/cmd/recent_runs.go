@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"syscall"
 	"time"
 
 	"github.com/ateam-poc/internal/calldb"
@@ -76,12 +78,7 @@ func runRecentRuns(cmd *cobra.Command, args []string) error {
 	w := newTable()
 	fmt.Fprintln(w, "ID\tSTARTED\tPROFILE\tACTION\tROLE\tMODEL\tDURATION\tCOST\tTOKENS\tSTATUS\tTASK_GROUP")
 	for _, r := range rows {
-		status := "ok"
-		if r.IsError {
-			status = "error"
-		} else if r.EndedAt == "" {
-			status = "running"
-		}
+		status := runStatus(r)
 
 		started := r.StartedAt
 		if t, err := time.Parse(time.RFC3339, r.StartedAt); err == nil {
@@ -91,6 +88,10 @@ func runRecentRuns(cmd *cobra.Command, args []string) error {
 		dur := ""
 		if r.DurationMS > 0 {
 			dur = runner.FormatDuration(time.Duration(r.DurationMS) * time.Millisecond)
+		} else if r.EndedAt == "" {
+			if t, err := time.Parse(time.RFC3339, r.StartedAt); err == nil {
+				dur = runner.FormatDuration(time.Since(t))
+			}
 		}
 
 		tokens := ""
@@ -106,6 +107,30 @@ func runRecentRuns(cmd *cobra.Command, args []string) error {
 	w.Flush()
 
 	return nil
+}
+
+func runStatus(r calldb.RecentRow) string {
+	if r.IsError {
+		return "error"
+	}
+	if r.EndedAt != "" {
+		return "ok"
+	}
+	if r.PID > 0 && isProcessAlive(r.PID) {
+		if r.ContainerID != "" {
+			return "running (docker)"
+		}
+		return fmt.Sprintf("running (%d)", r.PID)
+	}
+	return "canceled"
+}
+
+func isProcessAlive(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 func fmtTokens(n int) string {

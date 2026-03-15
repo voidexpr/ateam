@@ -99,6 +99,7 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 		ch <- StreamEvent{Type: "error", Err: err, ExitCode: -1}
 		return
 	}
+	ch <- StreamEvent{Type: "system", PID: cmd.Process.Pid}
 
 	var streamWriter *bufio.Writer
 	if req.StreamFile != "" {

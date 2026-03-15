@@ -110,6 +110,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 		ch <- StreamEvent{Type: "error", Err: err, ExitCode: -1}
 		return
 	}
+	ch <- StreamEvent{Type: "system", PID: cmd.Process.Pid}
 
 	// Open stream file for writing raw JSONL
 	var streamWriter *bufio.Writer

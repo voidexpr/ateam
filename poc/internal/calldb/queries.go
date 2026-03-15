@@ -23,6 +23,8 @@ type RecentRow struct {
 	OutputTokens    int
 	CacheReadTokens int
 	Turns           int
+	PID             int
+	ContainerID     string
 }
 
 type RecentFilter struct {
@@ -49,7 +51,7 @@ func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
 		args = append(args, f.Action)
 	}
 
-	q := "SELECT id, project_id, profile, action, role, task_group, model, started_at, COALESCE(ended_at,''), COALESCE(duration_ms,0), COALESCE(exit_code,0), is_error, COALESCE(cost_usd,0), COALESCE(input_tokens,0), COALESCE(output_tokens,0), COALESCE(cache_read_tokens,0), COALESCE(turns,0) FROM agent_calls"
+	q := "SELECT id, project_id, profile, action, role, task_group, model, started_at, COALESCE(ended_at,''), COALESCE(duration_ms,0), COALESCE(exit_code,0), is_error, COALESCE(cost_usd,0), COALESCE(input_tokens,0), COALESCE(output_tokens,0), COALESCE(cache_read_tokens,0), COALESCE(turns,0), COALESCE(pid,0), COALESCE(container_id,'') FROM agent_calls"
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -72,7 +74,7 @@ func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
 	for rows.Next() {
 		var r RecentRow
 		var isErr int
-		if err := rows.Scan(&r.ID, &r.ProjectID, &r.Profile, &r.Action, &r.Role, &r.TaskGroup, &r.Model, &r.StartedAt, &r.EndedAt, &r.DurationMS, &r.ExitCode, &isErr, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.Turns); err != nil {
+		if err := rows.Scan(&r.ID, &r.ProjectID, &r.Profile, &r.Action, &r.Role, &r.TaskGroup, &r.Model, &r.StartedAt, &r.EndedAt, &r.DurationMS, &r.ExitCode, &isErr, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.Turns, &r.PID, &r.ContainerID); err != nil {
 			return results, err
 		}
 		r.IsError = isErr != 0

@@ -92,6 +92,9 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string) (*runner.Runne
 	r.Container = ct
 	if cc != nil && cc.Type != "none" {
 		r.ContainerType = cc.Type
+		if dc, ok := ct.(*container.DockerContainer); ok {
+			r.ContainerName = dc.ContainerName
+		}
 	} else {
 		r.ContainerType = "none"
 	}

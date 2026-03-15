@@ -42,6 +42,7 @@ type Runner struct {
 	CallDB          *calldb.CallDB      // nil = no DB tracking
 	Profile         string              // profile name for DB
 	ContainerType   string              // "none" or "docker" for DB
+	ContainerName   string              // docker container name for liveness checks
 	ProjectID       string              // project ID for DB
 }
 
@@ -280,6 +281,9 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 
 		switch ev.Type {
 		case "system":
+			if ev.PID > 0 && r.CallDB != nil && callID > 0 {
+				_ = r.CallDB.SetPID(callID, ev.PID, r.ContainerName)
+			}
 			emitProgress(PhaseInit, "", "", "", 0, eventCount)
 
 		case "assistant":

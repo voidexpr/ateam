@@ -318,6 +318,48 @@ func TestCostByTaskGroup(t *testing.T) {
 	}
 }
 
+func TestMigrateIdempotent(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.sqlite")
+
+	// First open creates table + migrates
+	db1, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	db1.Close()
+
+	// Second open re-runs migrate — should be a no-op
+	db2, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("second Open: %v", err)
+	}
+	defer db2.Close()
+
+	// Verify columns exist
+	var pid int
+	var containerID string
+	id, err := db2.InsertCall(&Call{
+		ProjectID: "proj", Agent: "claude", Container: "none",
+		Action: "run", StartedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("InsertCall: %v", err)
+	}
+	if err := db2.SetPID(id, 12345, "ateam-proj-security"); err != nil {
+		t.Fatalf("SetPID: %v", err)
+	}
+	err = db2.db.QueryRow("SELECT pid, container_id FROM agent_calls WHERE id = ?", id).Scan(&pid, &containerID)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if pid != 12345 {
+		t.Errorf("expected pid 12345, got %d", pid)
+	}
+	if containerID != "ateam-proj-security" {
+		t.Errorf("expected container_id ateam-proj-security, got %s", containerID)
+	}
+}
+
 func TestDBErrorsDoNotPanic(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.sqlite")
 	db, err := Open(dbPath)
