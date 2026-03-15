@@ -404,116 +404,6 @@ ateam update --quiet
 | `--diff` | Show diffs between on-disk and embedded prompts |
 | `--quiet`, `-q` | Suppress diff output |
 
-## Customization Points
-
-### Prompts
-
-All prompt files can be modified at the project level (.ateam folder), organization for multiple projects (.ateamorg folder) or rely on the built-in defaults.
-
-You can either redefine a prompt file or add to it by adding a prompt called ACTION_extra_prompt.md
-
-To audit what prompt will be used use the following command:
-
-  ateam prompt --role ROLE --action report
-  ateam prompt --supervisor --action review
-  ateam prompt --supervisor --action code
-
-#### Report
-* base_report_prompt.md: included for all roles
-* base_report_extra_prompt.md: included for all roles (doesn't exist by default), useful to change how reports are generated
-* roles/ROLE/
-  * report_prompt.md: role specific unique instructions
-  * report_extra_prompt.md: only add additional instruction (doesn't exist by default)
-
-#### Review
-* supervisor/
-  * review_prompt.md
-  * review_extra_prompt.md: only add additional instruction (doesn't exist by default). Very useful to permanently record some tasks you might not want to do or project specific guidelines that will be applied over all roles
-
-#### Coding
-* roles/ROLE/
-  * code_prompt.md
-* supervisor/
-  * code_management_prompt.md
-
-### How to run agents
-
-### Modify Reports or Reviews
-
-## Runtime Configuration
-
-Runtime behavior is configured via `runtime.hcl` files using HCL syntax. The configuration defines agents, containers, and profiles.
-
-### Resolution order
-
-1. **Built-in defaults** — compiled into the binary
-2. **Org defaults** — `.ateamorg/defaults/runtime.hcl`
-3. **Org override** — `.ateamorg/runtime.hcl`
-4. **Project override** — `.ateam/runtime.hcl`
-
-Each level's blocks override (by name) those from the previous level. Use `ateam env` to see the active resolution chain.
-
-### Agents
-
-```hcl
-agent "claude" {
-  command = "claude"
-  args    = ["-p", "--output-format", "stream-json", "--verbose"]
-  sandbox = local.claude_sandbox
-}
-
-agent "claude-sonnet" {
-  base = "claude"
-  args = ["-p", "--output-format", "stream-json", "--verbose", "--model", "sonnet"]
-}
-
-agent "codex" {
-  type    = "codex"
-  command = "codex"
-  args    = ["--sandbox", "workspace-write", "--ask-for-approval", "never"]
-}
-```
-
-Agents support inheritance via `base`, sandbox settings (JSON), environment variables, and isolated config dirs.
-
-### Containers
-
-```hcl
-container "none" {
-  type = "none"
-}
-
-container "docker" {
-  type        = "docker"
-  mode        = "oneshot"        # or "persistent"
-  dockerfile  = "Dockerfile"
-  forward_env = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
-}
-```
-
-### Profiles
-
-Profiles combine an agent and a container:
-
-```hcl
-profile "default" {
-  agent     = "claude"
-  container = "none"
-}
-
-profile "docker" {
-  agent     = "claude-docker"
-  container = "docker"
-}
-
-profile "cheap" {
-  agent            = "claude"
-  container        = "none"
-  agent_extra_args = ["--model", "sonnet", "--max-budget-usd", "0.50"]
-}
-```
-
-Use `--profile docker` on any command to run inside a container, or `--profile cheap` for cheaper runs.
 
 ## Directory Layout
 
@@ -633,6 +523,114 @@ security = "enabled"
 testing_basic = "enabled"
 refactor_small = "disabled"
 ```
+
+
+## Prompt Configuration
+
+All prompt files can be modified at the project level (.ateam folder), organization for multiple projects (.ateamorg folder) or rely on the built-in defaults.
+
+You can either redefine a prompt file or add to it by adding a prompt called ACTION_extra_prompt.md
+
+To audit what prompt will be used use the following command:
+
+  ateam prompt --role ROLE --action report
+  ateam prompt --supervisor --action review
+  ateam prompt --supervisor --action code
+
+### Report
+* base_report_prompt.md: included for all roles
+* base_report_extra_prompt.md: included for all roles (doesn't exist by default), useful to change how reports are generated
+* roles/ROLE/
+  * report_prompt.md: role specific unique instructions
+  * report_extra_prompt.md: only add additional instruction (doesn't exist by default)
+
+### Review
+* supervisor/
+  * review_prompt.md
+  * review_extra_prompt.md: only add additional instruction (doesn't exist by default). Very useful to permanently record some tasks you might not want to do or project specific guidelines that will be applied over all roles
+
+Note that you can always edit a report.md or review.md file directly, they are just used by agents to be prompted.
+
+### Coding
+* roles/ROLE/
+  * code_prompt.md
+* supervisor/
+  * code_management_prompt.md
+
+## Runtime Configuration
+
+Runtime behavior is configured via `runtime.hcl` files using HCL syntax. The configuration defines agents, containers, and profiles.
+
+### Resolution order
+
+1. **Built-in defaults** — compiled into the binary
+2. **Org defaults** — `.ateamorg/defaults/runtime.hcl`
+3. **Org override** — `.ateamorg/runtime.hcl`
+4. **Project override** — `.ateam/runtime.hcl`
+
+Each level's blocks override (by name) those from the previous level. Use `ateam env` to see the active resolution chain.
+
+### Agents
+
+```hcl
+agent "claude" {
+  command = "claude"
+  args    = ["-p", "--output-format", "stream-json", "--verbose"]
+  sandbox = local.claude_sandbox
+}
+
+agent "claude-sonnet" {
+  base = "claude"
+  args = ["-p", "--output-format", "stream-json", "--verbose", "--model", "sonnet"]
+}
+
+agent "codex" {
+  type    = "codex"
+  command = "codex"
+  args    = ["--sandbox", "workspace-write", "--ask-for-approval", "never"]
+}
+```
+
+Agents support inheritance via `base`, sandbox settings (JSON), environment variables, and isolated config dirs.
+
+### Containers
+
+```hcl
+container "none" {
+  type = "none"
+}
+
+container "docker" {
+  type        = "docker"
+  mode        = "oneshot"        # or "persistent"
+  dockerfile  = "Dockerfile"
+  forward_env = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
+}
+```
+
+### Profiles
+
+Profiles combine an agent and a container:
+
+```hcl
+profile "default" {
+  agent     = "claude"
+  container = "none"
+}
+
+profile "docker" {
+  agent     = "claude-docker"
+  container = "docker"
+}
+
+profile "cheap" {
+  agent            = "claude"
+  container        = "none"
+  agent_extra_args = ["--model", "sonnet", "--max-budget-usd", "0.50"]
+}
+```
+
+Use `--profile docker` on any command to run inside a container, or `--profile cheap` for cheaper runs.
 
 ## Prompt Resolution
 
@@ -820,7 +818,7 @@ This lets you compare reports across runs and trace what prompt produced what ou
 ## Future
 * better context and memory
   * reduce prompt size
-    * by moving more of the instructions to the tooling around
+    * by moving more of the instructions to ateam itself (like for coding management)
 * maintain a current view of a project: overview.md and update it based on commit
   * time generated
   * last commit
