@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-
-	"github.com/ateam-poc/internal/agent"
 )
 
 // DockerContainer runs agent commands inside a Docker container.
@@ -162,14 +160,14 @@ func (d *DockerContainer) Stop(ctx context.Context) error {
 
 // CmdFactory returns a function that wraps commands for Docker execution.
 // In persistent mode, returns `docker exec`; in oneshot mode, returns `docker run --rm`.
-func (d *DockerContainer) CmdFactory() agent.CmdFactory {
+func (d *DockerContainer) CmdFactory() CmdFactory {
 	if d.Persistent {
 		return d.persistentCmdFactory()
 	}
 	return d.oneshotCmdFactory()
 }
 
-func (d *DockerContainer) oneshotCmdFactory() agent.CmdFactory {
+func (d *DockerContainer) oneshotCmdFactory() CmdFactory {
 	containerCodePath, containerWorkDir, containerOrgPath := d.containerPaths()
 
 	mount := d.mountDir()
@@ -223,7 +221,7 @@ func (d *DockerContainer) oneshotCmdFactory() agent.CmdFactory {
 	}
 }
 
-func (d *DockerContainer) persistentCmdFactory() agent.CmdFactory {
+func (d *DockerContainer) persistentCmdFactory() CmdFactory {
 	_, containerWorkDir, _ := d.containerPaths()
 
 	return func(ctx context.Context, name string, args ...string) *exec.Cmd {

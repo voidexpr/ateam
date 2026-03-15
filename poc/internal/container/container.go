@@ -7,6 +7,10 @@ import (
 	"os/exec"
 )
 
+// CmdFactory creates an *exec.Cmd. When set on an agent Request, agents use this
+// instead of exec.CommandContext. For docker, this wraps commands in docker run/exec.
+type CmdFactory func(ctx context.Context, name string, args ...string) *exec.Cmd
+
 // Container abstracts where agent commands execute.
 type Container interface {
 	Type() string // "none", "docker", "srt"

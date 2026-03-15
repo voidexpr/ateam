@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
+
+	"github.com/ateam-poc/internal/container"
 )
 
 // Agent executes a prompt and produces normalized stream events.
@@ -19,10 +20,6 @@ type Agent interface {
 	DebugCommandArgs(extraArgs []string) (command string, args []string)
 }
 
-// CmdFactory creates an *exec.Cmd. When set on a Request, agents use this
-// instead of exec.CommandContext. For docker, this wraps commands in docker run/exec.
-type CmdFactory func(ctx context.Context, name string, args ...string) *exec.Cmd
-
 // Request holds everything an agent needs to execute.
 type Request struct {
 	Prompt     string
@@ -32,7 +29,7 @@ type Request struct {
 	Sandbox    SandboxRules
 	ExtraArgs  []string          // from --agent-args
 	Env        map[string]string // env vars to set/override
-	CmdFactory CmdFactory        // if set, agent uses this to create subprocesses instead of exec.CommandContext
+	CmdFactory container.CmdFactory // if set, agent uses this to create subprocesses instead of exec.CommandContext
 }
 
 // SandboxRules describe filesystem access constraints.
