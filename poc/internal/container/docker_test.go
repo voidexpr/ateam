@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -164,9 +165,19 @@ func TestDebugCommand(t *testing.T) {
 		Args:    []string{"-p", "--verbose"},
 	})
 
-	want := "docker run --rm -i -v /src:/ateam/src:ro -v /org:/ateam/org:rw -w /ateam/src -e ANTHROPIC_API_KEY ateam-test:latest claude -p --verbose"
-	if got != want {
-		t.Errorf("DebugCommand:\n  got:  %s\n  want: %s", got, want)
+	// Timezone mount is platform-dependent (/etc/localtime may or may not exist),
+	// so check required parts instead of exact match.
+	for _, substr := range []string{
+		"docker run --rm -i",
+		"-v /src:/ateam/src:ro",
+		"-v /org:/ateam/org:rw",
+		"-w /ateam/src",
+		"-e ANTHROPIC_API_KEY",
+		"ateam-test:latest claude -p --verbose",
+	} {
+		if !strings.Contains(got, substr) {
+			t.Errorf("DebugCommand missing %q:\n  got: %s", substr, got)
+		}
 	}
 }
 

@@ -114,6 +114,7 @@ func (d *DockerContainer) EnsureRunning(ctx context.Context) error {
 		for _, vol := range d.ExtraVolumes {
 			args = append(args, "-v", vol)
 		}
+		args = append(args, timezoneArgs()...)
 		args = append(args, "-w", containerWorkDir)
 		args = append(args, d.ExtraArgs...)
 		for _, key := range d.ForwardEnv {
@@ -194,6 +195,9 @@ func (d *DockerContainer) oneshotCmdFactory() CmdFactory {
 		for _, vol := range d.ExtraVolumes {
 			dockerArgs = append(dockerArgs, "-v", vol)
 		}
+
+		// Host timezone
+		dockerArgs = append(dockerArgs, timezoneArgs()...)
 
 		// Working directory
 		dockerArgs = append(dockerArgs, "-w", containerWorkDir)
@@ -321,6 +325,7 @@ func (d *DockerContainer) debugCommandOneshot(opts RunOpts) string {
 	for _, vol := range d.ExtraVolumes {
 		parts = append(parts, "-v", vol)
 	}
+	parts = append(parts, timezoneArgs()...)
 	parts = append(parts, "-w", containerWorkDir)
 	parts = append(parts, d.ExtraArgs...)
 	for _, key := range d.ForwardEnv {
@@ -375,4 +380,12 @@ func (d *DockerContainer) containerPaths() (codePath, workDir, orgPath string) {
 	workDir = filepath.Join(containerRoot, relSource)
 
 	return codePath, workDir, orgPath
+}
+
+// timezoneArgs returns docker args to forward the host timezone into the container.
+func timezoneArgs() []string {
+	if _, err := os.Stat("/etc/localtime"); err == nil {
+		return []string{"-v", "/etc/localtime:/etc/localtime:ro"}
+	}
+	return nil
 }
