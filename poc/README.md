@@ -91,11 +91,11 @@ Can also be more methological:
 * Example of scheduled runs with a subset of all the work:
 Run at night:
 
-  ateam all --roles refactor_small,docs_external,testing_basic
+  ateam report --roles refactor_small,docs_external,testing_basic && ateam review && ateam code
 
 Run on Fridays:
 
-  ateam all --roles security,dependencies,testing_full
+  ateam report --roles security,dependencies,testing_full && ateam review && ateam code
 
 ### Git
 * use your work area, use ateam directly on main, get commits and rebase done automatically
@@ -182,7 +182,7 @@ ateam report --roles all --print
 
 | Flag | Description |
 |------|-------------|
-| `--roles LIST` | Comma-separated role list, or `all` **(required)** |
+| `--roles LIST` | Comma-separated role list, or `all` (default: all enabled roles) |
 | `--extra-prompt TEXT` | Additional instructions appended to every role's prompt (text or `@filepath`) |
 | `--profile NAME` | Runtime profile (overrides config resolution) |
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
@@ -193,7 +193,7 @@ ateam report --roles all --print
 | `--ignore-previous-report` | Do not include the role's previous report in the prompt |
 | `--verbose` | Print agent and docker commands to stderr |
 
-Output table columns: `ROLE`, `ENDED_AT`, `ELAPSED`, `COST`, `TURNS`, `STATUS`, `PATH`.
+Output table columns: `ROLE`, `STATUS`, `ENDED_AT`, `ELAPSED`, `PATH`.
 
 ### `ateam review`
 
