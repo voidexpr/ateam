@@ -105,7 +105,7 @@ func (d *DockerContainer) EnsureRunning(ctx context.Context) error {
 
 		args := []string{"run", "-d", "--name", d.ContainerName, "-i"}
 		if mount != "" {
-			args = append(args, "-v", mount+":"+containerCodePath+":rw")
+			args = append(args, "-v", mount+":"+containerCodePath+":ro")
 		}
 		if d.OrgDir != "" {
 			args = append(args, "-v", d.OrgDir+":"+containerOrgPath+":rw")
@@ -179,7 +179,7 @@ func (d *DockerContainer) oneshotCmdFactory() agent.CmdFactory {
 
 		// Mount code dir (git root or source dir)
 		if mount != "" {
-			dockerArgs = append(dockerArgs, "-v", mount+":"+containerCodePath+":rw")
+			dockerArgs = append(dockerArgs, "-v", mount+":"+containerCodePath+":ro")
 		}
 
 		// Mount org dir
@@ -312,7 +312,7 @@ func (d *DockerContainer) debugCommandOneshot(opts RunOpts) string {
 
 	parts := []string{"docker", "run", "--rm", "-i"}
 	if mount != "" {
-		parts = append(parts, "-v", mount+":"+containerCodePath+":rw")
+		parts = append(parts, "-v", mount+":"+containerCodePath+":ro")
 	}
 	if d.OrgDir != "" {
 		parts = append(parts, "-v", d.OrgDir+":"+containerOrgPath+":rw")

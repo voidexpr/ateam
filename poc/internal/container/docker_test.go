@@ -111,7 +111,7 @@ func TestCmdFactoryProducesDockerArgs(t *testing.T) {
 		}
 		return false
 	}
-	if !hasMount("/Users/nic/projects/myapp:/ateam/projects/myapp:rw") {
+	if !hasMount("/Users/nic/projects/myapp:/ateam/projects/myapp:ro") {
 		t.Errorf("missing source mount, args: %v", args)
 	}
 	if !hasMount("/Users/nic/.ateamorg:/ateam/.ateamorg:rw") {
@@ -142,7 +142,7 @@ func TestCmdFactoryWithGitRoot(t *testing.T) {
 	}
 
 	// Code mount should be git root → /ateam/projects/repo
-	if !hasArg("-v", "/Users/nic/projects/repo:/ateam/projects/repo:rw") {
+	if !hasArg("-v", "/Users/nic/projects/repo:/ateam/projects/repo:ro") {
 		t.Errorf("missing git root mount, args: %v", args)
 	}
 	// Working dir should be source dir → /ateam/projects/repo/myapp
@@ -164,7 +164,7 @@ func TestDebugCommand(t *testing.T) {
 		Args:    []string{"-p", "--verbose"},
 	})
 
-	want := "docker run --rm -i -v /src:/ateam/src:rw -v /org:/ateam/org:rw -w /ateam/src -e ANTHROPIC_API_KEY ateam-test:latest claude -p --verbose"
+	want := "docker run --rm -i -v /src:/ateam/src:ro -v /org:/ateam/org:rw -w /ateam/src -e ANTHROPIC_API_KEY ateam-test:latest claude -p --verbose"
 	if got != want {
 		t.Errorf("DebugCommand:\n  got:  %s\n  want: %s", got, want)
 	}

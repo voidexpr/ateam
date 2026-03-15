@@ -147,20 +147,16 @@ func TestDockerMountsAndWorkdir(t *testing.T) {
 		}
 	})
 
-	t.Run("source writable from container", func(t *testing.T) {
+	t.Run("source read-only from container", func(t *testing.T) {
 		err := dc.Run(ctx, RunOpts{
 			Command: "sh",
 			Args:    []string{"-c", "echo written-inside > " + codePath + "/from-container.txt"},
 		})
-		if err != nil {
-			t.Fatalf("Run: %v", err)
+		if err == nil {
+			t.Error("expected write to read-only source mount to fail, but it succeeded")
 		}
-		data, err := os.ReadFile(filepath.Join(sourceDir, "from-container.txt"))
-		if err != nil {
-			t.Fatalf("ReadFile: %v", err)
-		}
-		if got := strings.TrimSpace(string(data)); got != "written-inside" {
-			t.Errorf("expected 'written-inside', got %q", got)
+		if _, statErr := os.Stat(filepath.Join(sourceDir, "from-container.txt")); statErr == nil {
+			t.Error("file appeared on host from read-only mount — isolation breach")
 		}
 	})
 
@@ -280,8 +276,8 @@ func TestDockerFilePermissions(t *testing.T) {
 
 	codePath, _, orgPath := dc.containerPaths()
 
-	// --- RW mount (source → codePath) ---
-	t.Run("rw/read", func(t *testing.T) {
+	// --- RO mount (source → codePath) ---
+	t.Run("ro-source/read", func(t *testing.T) {
 		out, _, err := runViaFactory("cat", codePath+"/src.txt")
 		if err != nil {
 			t.Fatalf("expected read to succeed: %v", err)
@@ -290,17 +286,13 @@ func TestDockerFilePermissions(t *testing.T) {
 			t.Errorf("expected 'source', got %q", out)
 		}
 	})
-	t.Run("rw/write", func(t *testing.T) {
+	t.Run("ro-source/write-fails", func(t *testing.T) {
 		_, _, err := runViaFactory("sh", "-c", "echo rw-ok > "+codePath+"/rw-test.txt")
-		if err != nil {
-			t.Fatalf("expected write to succeed: %v", err)
+		if err == nil {
+			t.Fatal("expected write to read-only source mount to fail, but it succeeded")
 		}
-		data, err := os.ReadFile(filepath.Join(sourceDir, "rw-test.txt"))
-		if err != nil {
-			t.Fatalf("host ReadFile: %v", err)
-		}
-		if got := strings.TrimSpace(string(data)); got != "rw-ok" {
-			t.Errorf("expected 'rw-ok', got %q", got)
+		if _, statErr := os.Stat(filepath.Join(sourceDir, "rw-test.txt")); statErr == nil {
+			t.Error("file appeared on host from read-only mount — isolation breach")
 		}
 	})
 
