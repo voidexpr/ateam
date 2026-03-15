@@ -16,8 +16,8 @@ var (
 	recentLimit  int
 )
 
-var recentRunsCmd = &cobra.Command{
-	Use:   "recent-runs",
+var runsCmd = &cobra.Command{
+	Use:   "runs",
 	Short: "Show recent agent runs from the call database",
 	Long: `Display summary data about recent runs, with optional filtering
 by project, role, or action.
@@ -25,21 +25,21 @@ by project, role, or action.
 When run inside a project, results are filtered to that project by default.
 
 Example:
-  ateam recent-runs
-  ateam recent-runs --role security
-  ateam recent-runs --action report
-  ateam recent-runs --project myproject --role testing_basic`,
+  ateam runs
+  ateam runs --role security
+  ateam runs --action report
+  ateam runs --project myproject --role testing_basic`,
 	Args: cobra.NoArgs,
-	RunE: runRecentRuns,
+	RunE: runRuns,
 }
 
 func init() {
-	recentRunsCmd.Flags().StringVar(&recentRole, "role", "", "filter by role")
-	recentRunsCmd.Flags().StringVar(&recentAction, "action", "", "filter by action (report, review, code, run)")
-	recentRunsCmd.Flags().IntVar(&recentLimit, "limit", 30, "max rows to show")
+	runsCmd.Flags().StringVar(&recentRole, "role", "", "filter by role")
+	runsCmd.Flags().StringVar(&recentAction, "action", "", "filter by action (report, review, code, run)")
+	runsCmd.Flags().IntVar(&recentLimit, "limit", 30, "max rows to show")
 }
 
-func runRecentRuns(cmd *cobra.Command, args []string) error {
+func runRuns(cmd *cobra.Command, args []string) error {
 	env, err := root.Lookup()
 	if err != nil {
 		return fmt.Errorf("cannot find .ateamorg/: %w", err)

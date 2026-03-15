@@ -41,6 +41,6 @@ func init() {
 	rootCmd.AddCommand(catCmd)
 	rootCmd.AddCommand(tailCmd)
 	rootCmd.AddCommand(allCmd)
-	rootCmd.AddCommand(recentRunsCmd)
+	rootCmd.AddCommand(runsCmd)
 	rootCmd.AddCommand(costCmd)
 }
