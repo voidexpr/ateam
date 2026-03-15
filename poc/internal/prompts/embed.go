@@ -71,16 +71,19 @@ func ResolveRoleList(ids []string, configRoles map[string]string) ([]string, err
 	return result, nil
 }
 
-// enabledRoleIDs filters allKnown to only roles that are enabled (or not
-// explicitly disabled) in configRoles. When configRoles is nil, all are returned.
+// enabledRoleIDs filters allKnown to only roles that are enabled in configRoles.
+// Uses allowlist logic (same as config.IsRoleEnabled): only "on" or "enabled" statuses
+// are considered enabled. Roles not present in configRoles default to enabled so that
+// custom roles and embedded roles without an explicit config entry are included.
+// When configRoles is nil, all are returned.
 func enabledRoleIDs(configRoles map[string]string, allKnown []string) []string {
 	if configRoles == nil {
 		return allKnown
 	}
 	var enabled []string
 	for _, id := range allKnown {
-		status := configRoles[id]
-		if status != "off" && status != "disabled" {
+		status, inConfig := configRoles[id]
+		if !inConfig || status == "on" || status == "enabled" {
 			enabled = append(enabled, id)
 		}
 	}

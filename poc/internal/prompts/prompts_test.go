@@ -122,6 +122,67 @@ func TestAssembleRolePromptNoPreviousReportFile(t *testing.T) {
 	}
 }
 
+func TestEnabledRoleIDsAllowlist(t *testing.T) {
+	configRoles := map[string]string{
+		"alpha":   "on",
+		"beta":    "off",
+		"gamma":   "enabled",
+		"delta":   "disabled",
+		"epsilon": "weird_value",
+	}
+	allKnown := []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta"}
+
+	got := enabledRoleIDs(configRoles, allKnown)
+
+	// alpha: "on" → included; beta: "off" → excluded; gamma: "enabled" → included;
+	// delta: "disabled" → excluded; epsilon: "weird_value" → excluded (allowlist);
+	// zeta: not in configRoles → included (enabled by default).
+	want := map[string]bool{"alpha": true, "gamma": true, "zeta": true}
+	if len(got) != len(want) {
+		t.Fatalf("enabledRoleIDs returned %v, want keys %v", got, want)
+	}
+	for _, id := range got {
+		if !want[id] {
+			t.Errorf("enabledRoleIDs included unexpected role %q", id)
+		}
+	}
+}
+
+func TestEnabledRoleIDsNilConfig(t *testing.T) {
+	allKnown := []string{"a", "b", "c"}
+	got := enabledRoleIDs(nil, allKnown)
+	if len(got) != len(allKnown) {
+		t.Errorf("enabledRoleIDs(nil) = %v, want all %v", got, allKnown)
+	}
+}
+
+func TestResolveRoleListAllExpansionUsesAllowlist(t *testing.T) {
+	configRoles := map[string]string{
+		"security":   "on",
+		"automation": "off",
+	}
+	// "all" should expand only to roles with status "on" or "enabled", plus
+	// embedded roles not listed in configRoles (which default to enabled).
+	roles, err := ResolveRoleList([]string{"all"}, configRoles)
+	if err != nil {
+		t.Fatalf("ResolveRoleList: %v", err)
+	}
+	for _, r := range roles {
+		if r == "automation" {
+			t.Errorf("'automation' (status 'off') should not appear in 'all' expansion")
+		}
+	}
+	found := false
+	for _, r := range roles {
+		if r == "security" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("'security' (status 'on') should appear in 'all' expansion")
+	}
+}
+
 func TestReadWith3LevelFallbackNoneExist(t *testing.T) {
 	base := t.TempDir()
 	_, err := readWith3LevelFallback(
