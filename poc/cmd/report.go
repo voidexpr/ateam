@@ -25,6 +25,7 @@ var (
 	reportProfile              string
 	reportAgent                string
 	reportVerbose              bool
+	reportForce                bool
 )
 
 var reportCmd = &cobra.Command{
@@ -53,6 +54,7 @@ func init() {
 	addCheaperModelFlag(reportCmd, &reportCheaperModel)
 	addProfileFlags(reportCmd, &reportProfile, &reportAgent)
 	addVerboseFlag(reportCmd, &reportVerbose)
+	addForceFlag(reportCmd, &reportForce)
 }
 
 func runReport(cmd *cobra.Command, args []string) error {
@@ -91,6 +93,12 @@ func runReport(cmd *cobra.Command, args []string) error {
 	if db != nil {
 		defer db.Close()
 		cr.CallDB = db
+	}
+
+	if !reportForce {
+		if err := checkConcurrentRuns(db, env.ProjectID(), runner.ActionReport, roleIDs); err != nil {
+			return err
+		}
 	}
 
 	taskGroup := "report-" + time.Now().Format(runner.TimestampFormat)

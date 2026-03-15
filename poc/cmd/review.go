@@ -23,6 +23,7 @@ var (
 	reviewProfile      string
 	reviewAgent        string
 	reviewVerbose      bool
+	reviewForce        bool
 )
 
 var reviewCmd = &cobra.Command{
@@ -49,6 +50,7 @@ func init() {
 	addCheaperModelFlag(reviewCmd, &reviewCheaperModel)
 	addProfileFlags(reviewCmd, &reviewProfile, &reviewAgent)
 	addVerboseFlag(reviewCmd, &reviewVerbose)
+	addForceFlag(reviewCmd, &reviewForce)
 }
 
 func runReview(cmd *cobra.Command, args []string) error {
@@ -99,6 +101,12 @@ func runReview(cmd *cobra.Command, args []string) error {
 	if db != nil {
 		defer db.Close()
 		cr.CallDB = db
+	}
+
+	if !reviewForce {
+		if err := checkConcurrentRuns(db, env.ProjectID(), runner.ActionReview, nil); err != nil {
+			return err
+		}
 	}
 
 	opts := runner.RunOpts{
