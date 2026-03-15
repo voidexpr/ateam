@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/ateam-poc/internal/gitutil"
-	"github.com/ateam-poc/internal/runner"
 )
 
 const (
+	TimestampFormat                 = "2006-01-02_15-04-05"
 	ReportPromptFile                = "report_prompt.md"
 	ReportBasePromptFile            = "report_base_prompt.md"
 	ReportExtraPromptFile           = "report_extra_prompt.md"
@@ -103,7 +103,7 @@ func assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt strin
 		if content, modTime, err := readFileWithModTime(filepath.Join(projectDir, "roles", roleID, ReportFile)); err == nil && content != "" {
 			age := time.Since(modTime)
 			header := fmt.Sprintf("# Previous Report\n\nWhat follows is the previous report that was generated (and possibly updated with the tasks completed) on %s (%s ago). It might be outdated but it will give you some context of what has been done.\n\n",
-				modTime.Format(runner.TimestampFormat), formatAge(age))
+				modTime.Format(TimestampFormat), formatAge(age))
 			parts = append(parts, header+content)
 		}
 	}
@@ -205,7 +205,7 @@ func AssembleReviewPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, ex
 		reportContents = append(reportContents,
 			fmt.Sprintf("# Role Report: %s\n\n%s", r.RoleID, r.Content))
 		manifestLines = append(manifestLines,
-			fmt.Sprintf("| %s | %s |", r.RoleID, r.ModTime.Format(runner.TimestampFormat)))
+			fmt.Sprintf("| %s | %s |", r.RoleID, r.ModTime.Format(TimestampFormat)))
 	}
 
 	allReports := strings.Join(reportContents, "\n\n---\n\n")
@@ -324,7 +324,7 @@ func FormatProjectInfo(p ProjectInfoParams) string {
 	}
 	fmt.Fprintf(&b, "* reports and reviews: %s\n", p.ProjectDir)
 	if p.Meta != nil {
-		ts := time.Now().Format(runner.TimestampFormat)
+		ts := time.Now().Format(TimestampFormat)
 		fmt.Fprintf(&b, "* timestamp: %s\n", ts)
 		hash := p.Meta.CommitHash
 		if len(hash) > 12 {
