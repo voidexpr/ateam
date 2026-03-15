@@ -48,6 +48,7 @@ type StreamEvent struct {
 	// system
 	SessionID string
 	Model     string
+	PID       int
 
 	// assistant text
 	Text string

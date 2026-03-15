@@ -97,7 +97,48 @@ func Open(dbPath string) (*CallDB, error) {
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
 
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
+	}
+
 	return &CallDB{db: db}, nil
+}
+
+func migrate(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(agent_calls)")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	hasPID := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "pid" {
+			hasPID = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	if !hasPID {
+		if _, err := db.Exec("ALTER TABLE agent_calls ADD COLUMN pid INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+		if _, err := db.Exec("ALTER TABLE agent_calls ADD COLUMN container_id TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *CallDB) InsertCall(call *Call) (int64, error) {
@@ -133,6 +174,11 @@ func (c *CallDB) UpdateCall(id int64, result *CallResult) error {
 		result.InputTokens, result.OutputTokens, result.CacheReadTokens,
 		result.Turns, id,
 	)
+	return err
+}
+
+func (c *CallDB) SetPID(id int64, pid int, containerID string) error {
+	_, err := c.db.Exec("UPDATE agent_calls SET pid = ?, container_id = ? WHERE id = ?", pid, containerID, id)
 	return err
 }
 
