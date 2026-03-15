@@ -21,8 +21,11 @@ type typedEvent struct {
 }
 
 type systemEvent struct {
-	Subtype   string `json:"subtype"`
-	SessionID string `json:"session_id"`
+	Subtype          string `json:"subtype"`
+	SessionID        string `json:"session_id"`
+	Model            string `json:"model"`
+	Cwd              string `json:"cwd"`
+	ClaudeCodeVersion string `json:"claude_code_version"`
 }
 
 type assistantEvent struct {
@@ -37,6 +40,8 @@ type contentBlock struct {
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
 }
+
+type userEvent struct{}
 
 type toolResultEvent struct {
 	Content string `json:"content"`
@@ -76,6 +81,9 @@ func parseStreamLine(line []byte) (string, any, error) {
 			return typed.Type, nil, err
 		}
 		return typed.Type, &ev, nil
+
+	case "user":
+		return typed.Type, &userEvent{}, nil
 
 	case "assistant":
 		var ev assistantEvent

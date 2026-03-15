@@ -142,11 +142,11 @@ func seedCalls(t *testing.T, db *CallDB) {
 		result CallResult
 	}{
 		{
-			Call{ProjectID: "proj-a", Action: "report", Role: "security", TaskGroup: "report-2026-03-13_09-00-00", StartedAt: now.Add(-3 * time.Hour)},
+			Call{ProjectID: "proj-a", Action: "report", Role: "security", TaskGroup: "report-2026-03-13_09-00-00", StartedAt: now.Add(-3 * time.Hour), StreamFile: "/logs/report_security.jsonl"},
 			CallResult{EndedAt: now.Add(-3*time.Hour + 2*time.Minute), DurationMS: 120000, CostUSD: 0.10, InputTokens: 5000, OutputTokens: 1000, CacheReadTokens: 500},
 		},
 		{
-			Call{ProjectID: "proj-a", Action: "report", Role: "testing", TaskGroup: "report-2026-03-13_09-00-00", StartedAt: now.Add(-3*time.Hour + time.Minute)},
+			Call{ProjectID: "proj-a", Action: "report", Role: "testing", TaskGroup: "report-2026-03-13_09-00-00", StartedAt: now.Add(-3*time.Hour + time.Minute), StreamFile: "/logs/report_testing.jsonl"},
 			CallResult{EndedAt: now.Add(-3*time.Hour + 3*time.Minute), DurationMS: 120000, CostUSD: 0.08, InputTokens: 4000, OutputTokens: 800, CacheReadTokens: 300},
 		},
 		{
@@ -154,15 +154,15 @@ func seedCalls(t *testing.T, db *CallDB) {
 			CallResult{EndedAt: now.Add(-2*time.Hour + 5*time.Minute), DurationMS: 300000, CostUSD: 0.20, InputTokens: 10000, OutputTokens: 2000, CacheReadTokens: 1000},
 		},
 		{
-			Call{ProjectID: "proj-a", Action: "code", Role: "supervisor", TaskGroup: "code-2026-03-13_10-00-00", StartedAt: now.Add(-1 * time.Hour)},
+			Call{ProjectID: "proj-a", Action: "code", Role: "supervisor", TaskGroup: "code-2026-03-13_10-00-00", StartedAt: now.Add(-1 * time.Hour), StreamFile: "/logs/code_supervisor.jsonl"},
 			CallResult{EndedAt: now.Add(-1*time.Hour + 10*time.Minute), DurationMS: 600000, CostUSD: 0.50, InputTokens: 20000, OutputTokens: 5000, CacheReadTokens: 2000},
 		},
 		{
-			Call{ProjectID: "proj-a", Action: "run", Role: "security", TaskGroup: "code-2026-03-13_10-00-00", StartedAt: now.Add(-50 * time.Minute)},
+			Call{ProjectID: "proj-a", Action: "run", Role: "security", TaskGroup: "code-2026-03-13_10-00-00", StartedAt: now.Add(-50 * time.Minute), StreamFile: "/logs/run_security.jsonl"},
 			CallResult{EndedAt: now.Add(-45 * time.Minute), DurationMS: 300000, CostUSD: 0.15, InputTokens: 8000, OutputTokens: 1500, CacheReadTokens: 600},
 		},
 		{
-			Call{ProjectID: "proj-a", Action: "run", Role: "testing", TaskGroup: "code-2026-03-13_10-00-00", StartedAt: now.Add(-44 * time.Minute)},
+			Call{ProjectID: "proj-a", Action: "run", Role: "testing", TaskGroup: "code-2026-03-13_10-00-00", StartedAt: now.Add(-44 * time.Minute), StreamFile: "/logs/run_testing.jsonl"},
 			CallResult{EndedAt: now.Add(-40 * time.Minute), DurationMS: 240000, CostUSD: 0.12, InputTokens: 6000, OutputTokens: 1200, CacheReadTokens: 400},
 		},
 		{
@@ -383,5 +383,95 @@ func TestDBErrorsDoNotPanic(t *testing.T) {
 	_, err = Open("/nonexistent/path/db.sqlite")
 	if err == nil {
 		t.Fatal("expected error opening invalid path")
+	}
+}
+
+func TestCallsByIDs(t *testing.T) {
+	db := testDB(t)
+	seedCalls(t, db)
+
+	rows, err := db.CallsByIDs([]int64{1, 4, 5})
+	if err != nil {
+		t.Fatalf("CallsByIDs: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(rows))
+	}
+	if rows[0].ID != 1 {
+		t.Errorf("expected first ID=1, got %d", rows[0].ID)
+	}
+	if rows[0].StreamFile != "/logs/report_security.jsonl" {
+		t.Errorf("expected stream file, got %q", rows[0].StreamFile)
+	}
+
+	// Empty IDs returns nil
+	rows, err = db.CallsByIDs(nil)
+	if err != nil {
+		t.Fatalf("CallsByIDs nil: %v", err)
+	}
+	if rows != nil {
+		t.Fatalf("expected nil for empty IDs, got %d rows", len(rows))
+	}
+}
+
+func TestCallsByTaskGroup(t *testing.T) {
+	db := testDB(t)
+	seedCalls(t, db)
+
+	rows, err := db.CallsByTaskGroup("code-2026-03-13_10-00-00")
+	if err != nil {
+		t.Fatalf("CallsByTaskGroup: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 rows in code task group, got %d", len(rows))
+	}
+	// Should include the supervisor (code) and two sub-runs
+	actions := map[string]int{}
+	for _, r := range rows {
+		actions[r.Action]++
+	}
+	if actions["code"] != 1 {
+		t.Errorf("expected 1 code action, got %d", actions["code"])
+	}
+	if actions["run"] != 2 {
+		t.Errorf("expected 2 run actions, got %d", actions["run"])
+	}
+}
+
+func TestLatestTaskGroup(t *testing.T) {
+	db := testDB(t)
+	seedCalls(t, db)
+
+	tg, err := db.LatestTaskGroup("proj-a", "code-")
+	if err != nil {
+		t.Fatalf("LatestTaskGroup: %v", err)
+	}
+	if tg != "code-2026-03-13_10-00-00" {
+		t.Errorf("expected code-2026-03-13_10-00-00, got %q", tg)
+	}
+
+	// No match
+	tg, err = db.LatestTaskGroup("proj-a", "nonexistent-")
+	if err != nil {
+		t.Fatalf("LatestTaskGroup no match: %v", err)
+	}
+	if tg != "" {
+		t.Errorf("expected empty string, got %q", tg)
+	}
+}
+
+func TestRecentRunsStreamFile(t *testing.T) {
+	db := testDB(t)
+	seedCalls(t, db)
+
+	rows, err := db.RecentRuns(RecentFilter{TaskGroup: "code-2026-03-13_10-00-00"})
+	if err != nil {
+		t.Fatalf("RecentRuns: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(rows))
+	}
+	if rows[0].StreamFile != "/logs/code_supervisor.jsonl" {
+		t.Errorf("expected stream file on supervisor, got %q", rows[0].StreamFile)
 	}
 }

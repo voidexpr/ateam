@@ -27,6 +27,7 @@ var (
 	codeSupervisorProfile string
 	codeVerbose           bool
 	codeForce             bool
+	codeTail              bool
 )
 
 var codeCmd = &cobra.Command{
@@ -61,6 +62,7 @@ func init() {
 	codeCmd.Flags().StringVar(&codeSupervisorProfile, "supervisor-profile", "", "profile for the supervisor itself")
 	addVerboseFlag(codeCmd, &codeVerbose)
 	addForceFlag(codeCmd, &codeForce)
+	codeCmd.Flags().BoolVar(&codeTail, "tail", false, "stream live output from supervisor and sub-runs")
 }
 
 func runCode(cmd *cobra.Command, args []string) error {
@@ -175,29 +177,68 @@ func runCode(cmd *cobra.Command, args []string) error {
 		TaskGroup:            taskGroup,
 	}
 
-	progress := make(chan runner.RunProgress, 64)
-	var progressWg sync.WaitGroup
-	progressWg.Add(1)
-	go func() {
-		defer progressWg.Done()
-		printProgress(progress)
-	}()
-
 	ctx := context.Background()
-	result := cr.Run(ctx, prompt, opts, progress)
 
-	close(progress)
-	progressWg.Wait()
+	if codeTail {
+		runDone := make(chan struct{})
+		var result runner.RunSummary
+		go func() {
+			result = cr.Run(ctx, prompt, opts, nil)
+			close(runDone)
+		}()
 
-	if result.Err != nil {
-		return fmt.Errorf("code execution failed: %w", result.Err)
-	}
+		time.Sleep(300 * time.Millisecond)
 
-	printDone(result)
-	fmt.Printf("Output: %s\n", filepath.Join(supervisorDir, "code_output.md"))
+		tailer := runner.NewTailer(os.Stderr, db, isTerminal(), codeVerbose)
+		tailer.TaskGroup = taskGroup
 
-	if codePrint {
-		fmt.Printf("\n%s\n", result.Output)
+		if rows, err := db.CallsByTaskGroup(taskGroup); err == nil {
+			for _, r := range rows {
+				if r.StreamFile != "" {
+					tailer.AddSource(r.ID, r.Role, r.Action, r.StreamFile)
+				}
+			}
+		}
+
+		tailCtx, tailCancel := context.WithCancel(ctx)
+		go func() {
+			<-runDone
+			time.Sleep(time.Second)
+			tailCancel()
+		}()
+		tailer.Run(tailCtx)
+		<-runDone
+
+		if result.Err != nil {
+			return fmt.Errorf("code execution failed: %w", result.Err)
+		}
+		printDone(result)
+		fmt.Printf("Output: %s\n", filepath.Join(supervisorDir, "code_output.md"))
+		if codePrint {
+			fmt.Printf("\n%s\n", result.Output)
+		}
+	} else {
+		progress := make(chan runner.RunProgress, 64)
+		var progressWg sync.WaitGroup
+		progressWg.Add(1)
+		go func() {
+			defer progressWg.Done()
+			printProgress(progress)
+		}()
+
+		result := cr.Run(ctx, prompt, opts, progress)
+
+		close(progress)
+		progressWg.Wait()
+
+		if result.Err != nil {
+			return fmt.Errorf("code execution failed: %w", result.Err)
+		}
+		printDone(result)
+		fmt.Printf("Output: %s\n", filepath.Join(supervisorDir, "code_output.md"))
+		if codePrint {
+			fmt.Printf("\n%s\n", result.Output)
+		}
 	}
 
 	return nil

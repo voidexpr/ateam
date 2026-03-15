@@ -241,6 +241,8 @@ ateam code --dry-run
 | `--print` | Print output to stdout after completion |
 | `--dry-run` | Print the computed prompt without running |
 | `--verbose` | Print agent and docker commands to stderr |
+| `--tail` | Stream live output from supervisor and sub-runs |
+| `--force` | Run even if the same action is already running |
 
 ### `ateam all`
 
@@ -282,22 +284,37 @@ ateam prompt --supervisor --action code
 | `--no-project-info` | Omit the ATeam Project Context section from the prompt |
 | `--ignore-previous-report` | Do not include the role's previous report in the prompt |
 
-### `ateam log`
+### `ateam cat`
 
-Pretty-format the last stream JSONL log for a role or the supervisor.
+Pretty-print stream logs by call ID (replaces `ateam log`).
 
 ```bash
-ateam log --supervisor
-ateam log --supervisor --action review
-ateam log --role security
-ateam log --role security --action report
+ateam cat 42
+ateam cat 42 43 44 --verbose
+ateam cat 42 --no-color
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--supervisor` | Show supervisor log (defaults to `code` action) |
-| `--role ROLE` | Show role log (defaults to `run` action) |
-| `--action ACTION` | Override the action (e.g. `report`, `code`, `review`, `run`) |
+| `--verbose` | Show full tool inputs and text content |
+| `--no-color` | Disable color output |
+
+### `ateam tail`
+
+Live-stream agent output from running processes.
+
+```bash
+ateam tail 42 43            # tail specific calls by ID
+ateam tail --reports        # tail all current report runs
+ateam tail --coding         # tail current coding session (supervisor + sub-runs)
+```
+
+| Flag | Description |
+|------|-------------|
+| `--reports` | Tail all current report runs for the project |
+| `--coding` | Tail the latest coding session (supervisor + sub-runs) |
+| `--verbose` | Show full tool inputs and text content |
+| `--no-color` | Disable color output |
 
 ### `ateam env`
 
@@ -778,12 +795,12 @@ ateam code --dry-run                         # print the code management prompt
 ateam prompt --role security --action report  # resolve and print a role prompt
 ```
 
-Use `ateam log` to pretty-format the last stream JSONL:
+Use `ateam cat` to pretty-print stream logs by call ID, or `ateam tail` to live-stream:
 
 ```bash
-ateam log --supervisor               # last code management stream
-ateam log --supervisor --action review  # last review stream
-ateam log --role security            # last run stream for a role
+ateam cat 42                    # pretty-print a completed run
+ateam tail --coding             # live-stream current coding session
+ateam tail --reports            # live-stream current report runs
 ```
 
 When a run fails, inspect these files:
