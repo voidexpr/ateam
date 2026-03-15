@@ -83,6 +83,35 @@ func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
 	return results, rows.Err()
 }
 
+type RunningRow struct {
+	ID          int64
+	Role        string
+	PID         int
+	ContainerID string
+	StartedAt   string
+}
+
+func (c *CallDB) FindRunning(projectID, action string) ([]RunningRow, error) {
+	q := `SELECT id, role, COALESCE(pid,0), COALESCE(container_id,''), started_at
+		FROM agent_calls
+		WHERE ended_at IS NULL AND project_id = ? AND action = ?`
+	rows, err := c.db.Query(q, projectID, action)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []RunningRow
+	for rows.Next() {
+		var r RunningRow
+		if err := rows.Scan(&r.ID, &r.Role, &r.PID, &r.ContainerID, &r.StartedAt); err != nil {
+			return results, err
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
 type ActionAgg struct {
 	Category        string
 	Count           int

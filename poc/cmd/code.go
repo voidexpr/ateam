@@ -26,6 +26,7 @@ var (
 	codeProfile           string
 	codeSupervisorProfile string
 	codeVerbose           bool
+	codeForce             bool
 )
 
 var codeCmd = &cobra.Command{
@@ -59,6 +60,7 @@ func init() {
 	codeCmd.Flags().StringVar(&codeProfile, "profile", "", "profile for sub-runs (passed to ateam run --profile)")
 	codeCmd.Flags().StringVar(&codeSupervisorProfile, "supervisor-profile", "", "profile for the supervisor itself")
 	addVerboseFlag(codeCmd, &codeVerbose)
+	addForceFlag(codeCmd, &codeForce)
 }
 
 func runCode(cmd *cobra.Command, args []string) error {
@@ -150,6 +152,12 @@ func runCode(cmd *cobra.Command, args []string) error {
 	if db != nil {
 		defer db.Close()
 		cr.CallDB = db
+	}
+
+	if !codeForce {
+		if err := checkConcurrentRuns(db, env.ProjectID(), runner.ActionCode, nil); err != nil {
+			return err
+		}
 	}
 
 	opts := runner.RunOpts{

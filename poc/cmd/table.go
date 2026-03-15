@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -415,6 +417,49 @@ func applyCheaperModel(r *runner.Runner, cheaper bool) {
 	if cheaper {
 		r.ExtraArgs = append(r.ExtraArgs, "--model", cheaperModelName)
 	}
+}
+
+func isProcessAlive(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+func addForceFlag(cmd *cobra.Command, dst *bool) {
+	cmd.Flags().BoolVar(dst, "force", false, "run even if the same action+role is already running")
+}
+
+// checkConcurrentRuns returns an error if any of the given roles already have a
+// live process for the same project+action. Pass roles=nil to check all roles.
+func checkConcurrentRuns(db *calldb.CallDB, projectID, action string, roles []string) error {
+	if db == nil {
+		return nil
+	}
+	running, err := db.FindRunning(projectID, action)
+	if err != nil || len(running) == 0 {
+		return nil
+	}
+
+	roleSet := make(map[string]bool, len(roles))
+	for _, r := range roles {
+		roleSet[r] = true
+	}
+
+	var alive []string
+	for _, r := range running {
+		if len(roles) > 0 && !roleSet[r.Role] {
+			continue
+		}
+		if r.PID > 0 && isProcessAlive(r.PID) {
+			alive = append(alive, fmt.Sprintf("  %s (PID %d, started %s)", r.Role, r.PID, r.StartedAt))
+		}
+	}
+	if len(alive) == 0 {
+		return nil
+	}
+	return fmt.Errorf("concurrent %s already running:\n%s\nuse --force to run anyway", action, strings.Join(alive, "\n"))
 }
 
 func fmtDateAge(t time.Time) string {

@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"syscall"
 	"time"
 
 	"github.com/ateam-poc/internal/calldb"
@@ -123,14 +121,6 @@ func runStatus(r calldb.RecentRow) string {
 		return fmt.Sprintf("running (%d)", r.PID)
 	}
 	return "canceled"
-}
-
-func isProcessAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 func fmtTokens(n int) string {
