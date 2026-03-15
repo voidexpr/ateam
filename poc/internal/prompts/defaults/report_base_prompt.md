@@ -20,7 +20,7 @@ Specify which role you are use, what model you are using and other attributes re
 
 ## Report Format
 
-**IMPORTANT: if a prior report is provided re-include the findings that haven't been addressed with a potentially updated priority**
+**IMPORTANT: if a prior report is provided re-include the findings that haven't been addressed with a potentially updated priority. Always produce a full standalone report, don't just refer to a previous version.**
 
 Structure your report as follows:
 

@@ -249,9 +249,7 @@ func printProgress(ch <-chan runner.RunProgress) {
 }
 
 func singleLine(s string) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", "")
-	return strings.TrimSpace(s)
+	return runner.SingleLineText(s)
 }
 
 func printRunSummary(r runner.RunSummary) {

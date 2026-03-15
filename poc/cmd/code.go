@@ -179,9 +179,9 @@ func runCode(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 
+	var result runner.RunSummary
 	if codeTail {
 		runDone := make(chan struct{})
-		var result runner.RunSummary
 		go func() {
 			result = cr.Run(ctx, prompt, opts, nil)
 			close(runDone)
@@ -208,15 +208,6 @@ func runCode(cmd *cobra.Command, args []string) error {
 		}()
 		tailer.Run(tailCtx)
 		<-runDone
-
-		if result.Err != nil {
-			return fmt.Errorf("code execution failed: %w", result.Err)
-		}
-		printDone(result)
-		fmt.Printf("Output: %s\n", filepath.Join(supervisorDir, "code_output.md"))
-		if codePrint {
-			fmt.Printf("\n%s\n", result.Output)
-		}
 	} else {
 		progress := make(chan runner.RunProgress, 64)
 		var progressWg sync.WaitGroup
@@ -226,19 +217,19 @@ func runCode(cmd *cobra.Command, args []string) error {
 			printProgress(progress)
 		}()
 
-		result := cr.Run(ctx, prompt, opts, progress)
+		result = cr.Run(ctx, prompt, opts, progress)
 
 		close(progress)
 		progressWg.Wait()
+	}
 
-		if result.Err != nil {
-			return fmt.Errorf("code execution failed: %w", result.Err)
-		}
-		printDone(result)
-		fmt.Printf("Output: %s\n", filepath.Join(supervisorDir, "code_output.md"))
-		if codePrint {
-			fmt.Printf("\n%s\n", result.Output)
-		}
+	if result.Err != nil {
+		return fmt.Errorf("code execution failed: %w", result.Err)
+	}
+	printDone(result)
+	fmt.Printf("Output: %s\n", filepath.Join(supervisorDir, "code_output.md"))
+	if codePrint {
+		fmt.Printf("\n%s\n", result.Output)
 	}
 
 	return nil

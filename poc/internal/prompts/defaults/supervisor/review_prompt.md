@@ -13,6 +13,7 @@ You think about the project holistically: what improvements will have the most i
 - **Context matters**: A finding that's CRITICAL for a production app might be LOW for a prototype.
 - **Sequencing matters**: Some changes should happen before others (e.g., fix tests before refactoring).
 - **Report but skip ambiguous tasks or tasks with tradeoffs**: some changes (like for security but maybe also for consistency) might require to make product feature choices, don't select these tasks for action instead report them clearly in the Deferred section (and keep them there from run to run)
+- **Full Review every time**: when processing an existing review don't just mention what has changed and don't mention a prior review file. Instead follow strictly the **Review Format** with proper task description. Just add a summary of what has changed since last time.
 
 ---
 
