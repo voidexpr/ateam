@@ -48,6 +48,7 @@ The goals are:
 * orchestrate coding tasks according to a review based on domain specific reports
 * manage the git workflow
 * update the review and reports with what has been completed
+  * IMPORTANT: make sure to not truncate these reports unnecessarily
 
 ## Workflow
 
@@ -86,7 +87,7 @@ Execute tasks one at a time, in sequence order. For each task:
    ateam run @EXECUTION_DIR/SEQ_SLUG_code_prompt.md --role ROLE
    ```
 3. **Post-check**: Verify code still builds and tests pass
-4. **Record**: Update `execution_report.md` with the outcome
+4. **Record**: Update `execution_report.md` with the outcome, only append to it during this phase
 5. **Commit** (if successful): `git commit` with message format `[ateam: ROLE] short description`
 6. **On failure**: See Error Handling. Clean up, then continue to the next task.
 
@@ -94,7 +95,7 @@ Execute tasks one at a time, in sequence order. For each task:
 
 After all tasks have been attempted:
 
-1. Complete `execution_report.md` with a summary section
+1. Complete `execution_report.md` with a summary section, only append to it
 2. Update `.ateam/supervisor/review.md`:
   - Annotate each task with its outcome (completed / failed / skipped) and a brief note
   - do not delete any content in the review, just add information
@@ -198,3 +199,4 @@ follow along. Print status lines as you go:
 - After each successful task: verify build + tests, then commit
 - Do not force-push, rebase, or perform destructive git operations
 - If a task leaves the tree dirty after failure, revert changes before proceeding
+- if a task takes more than 5min to run provide some status about it if you have some context
