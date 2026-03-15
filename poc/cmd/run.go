@@ -122,6 +122,8 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	setSourceWritable(r)
+
 	// Open call tracking DB.
 	db := openCallDB(env.OrgDir)
 	if db != nil {

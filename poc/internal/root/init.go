@@ -126,10 +126,12 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 }
 
 // EnsureRoles creates missing role dirs under the project and state dir for the given roles.
+// The projectDir part is best-effort (may fail on read-only mounts inside containers);
+// the stateDir part is required for logging.
 func EnsureRoles(projectDir, stateDir string, roleIDs []string) error {
 	for _, roleID := range roleIDs {
 		if err := os.MkdirAll(filepath.Join(projectDir, "roles", roleID, "history"), 0755); err != nil {
-			return fmt.Errorf("cannot create project role directory: %w", err)
+			fmt.Fprintf(os.Stderr, "Warning: cannot create project role directory for %s: %v\n", roleID, err)
 		}
 		if stateDir != "" {
 			if err := os.MkdirAll(filepath.Join(stateDir, "roles", roleID, "logs"), 0755); err != nil {

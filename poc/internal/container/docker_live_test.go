@@ -189,9 +189,10 @@ func TestLiveClaudeWriteFile(t *testing.T) {
 	mkdirWritable(t, sourceDir)
 
 	dc := &DockerContainer{
-		Image:      liveImage,
-		SourceDir:  sourceDir,
-		ForwardEnv: authEnvVars(),
+		Image:          liveImage,
+		SourceDir:      sourceDir,
+		SourceWritable: true,
+		ForwardEnv:     authEnvVars(),
 	}
 
 	codePath, _, _ := dc.containerPaths()

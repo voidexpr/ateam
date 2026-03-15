@@ -146,6 +146,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	setSourceWritable(cr)
 	applyCheaperModel(cr, codeCheaperModel)
 
 	db := openCallDB(env.OrgDir)

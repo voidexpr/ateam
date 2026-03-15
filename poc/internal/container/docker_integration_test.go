@@ -160,6 +160,31 @@ func TestDockerMountsAndWorkdir(t *testing.T) {
 		}
 	})
 
+	t.Run("source writable when SourceWritable set", func(t *testing.T) {
+		dcRW := &DockerContainer{
+			Image:          dc.Image,
+			Dockerfile:     dockerfile,
+			SourceDir:      sourceDir,
+			ProjectDir:     projectDir,
+			OrgDir:         orgDir,
+			SourceWritable: true,
+		}
+		err := dcRW.Run(ctx, RunOpts{
+			Command: "sh",
+			Args:    []string{"-c", "echo rw-ok > " + codePath + "/rw-test.txt"},
+		})
+		if err != nil {
+			t.Fatalf("expected write to writable source mount to succeed: %v", err)
+		}
+		data, readErr := os.ReadFile(filepath.Join(sourceDir, "rw-test.txt"))
+		if readErr != nil {
+			t.Fatalf("host ReadFile: %v", readErr)
+		}
+		if got := strings.TrimSpace(string(data)); got != "rw-ok" {
+			t.Errorf("expected 'rw-ok', got %q", got)
+		}
+	})
+
 	t.Run("org mount writable", func(t *testing.T) {
 		err := dc.Run(ctx, RunOpts{
 			Command: "sh",
