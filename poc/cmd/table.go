@@ -18,6 +18,7 @@ import (
 	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
 	"github.com/ateam-poc/internal/runtime"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
@@ -468,6 +469,10 @@ func checkConcurrentRuns(db *calldb.CallDB, projectID, action string, roles []st
 		return nil
 	}
 	return fmt.Errorf("concurrent %s already running:\n%s\nuse --force to run anyway", action, strings.Join(alive, "\n"))
+}
+
+func isTerminal() bool {
+	return isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
 }
 
 func fmtDateAge(t time.Time) string {
