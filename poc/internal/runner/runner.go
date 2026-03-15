@@ -282,7 +282,9 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		switch ev.Type {
 		case "system":
 			if ev.PID > 0 && r.CallDB != nil && callID > 0 {
-				_ = r.CallDB.SetPID(callID, ev.PID, r.ContainerName)
+				if err := r.CallDB.SetPID(callID, ev.PID, r.ContainerName); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: call tracking SetPID failed: %v\n", err)
+				}
 			}
 			emitProgress(PhaseInit, "", "", "", 0, eventCount)
 
