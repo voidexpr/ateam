@@ -50,7 +50,7 @@ ATeam's core principles are:
 - **Runtime profiles** — HCL-based configuration (`runtime.hcl`) with agent, container, and profile definitions; 3-level resolution (embedded → org defaults → org → project)
 - **Multiple agents** — Claude Code, Codex, and custom agents configurable via `runtime.hcl`; switch per-command with `--profile` or `--agent`
 - **Docker containers** — run agents inside Docker for full isolation (oneshot and persistent modes); auto-builds from configurable Dockerfile
-- **Cost tracking** — per-run token/cost tracking via SQLite call database; `ateam cost` for aggregated reports, `ateam recent-runs` for run history
+- **Cost tracking** — per-run token/cost tracking via SQLite call database; `ateam cost` for aggregated reports, `ateam runs` for run history
 - **Auditability** — see current and historical reports, execution logs, and cost data
 - **Parallel execution** — configurable concurrency with per-role timeouts
 - **Stream-json output** — real-time JSONL stream capture with cost/token tracking
@@ -364,15 +364,15 @@ ateam cost --project myproject
 
 When run inside a project, results are filtered to that project by default.
 
-### `ateam recent-runs`
+### `ateam runs`
 
 Display summary data about recent agent runs, with optional filtering.
 
 ```bash
-ateam recent-runs
-ateam recent-runs --role security
-ateam recent-runs --action report
-ateam recent-runs --limit 10
+ateam runs
+ateam runs --role security
+ateam runs --action report
+ateam runs --limit 10
 ```
 
 | Flag | Description |
