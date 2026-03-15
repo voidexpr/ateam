@@ -36,6 +36,10 @@ type DockerContainer struct {
 	// HostCLIPath is the path to a Linux-compatible ateam binary on the host.
 	// When set, it is bind-mounted to /usr/local/bin/ateam inside the container.
 	HostCLIPath string
+
+	// SourceWritable mounts the source code directory as :rw instead of :ro.
+	// Required for actions that modify source code (code, run).
+	SourceWritable bool
 }
 
 const containerRoot = "/ateam"
@@ -103,11 +107,12 @@ func (d *DockerContainer) EnsureRunning(ctx context.Context) error {
 
 		args := []string{"run", "-d", "--name", d.ContainerName, "-i"}
 		if mount != "" {
-			args = append(args, "-v", mount+":"+containerCodePath+":ro")
+			args = append(args, "-v", mount+":"+containerCodePath+":"+d.sourceMountMode())
 		}
 		if d.OrgDir != "" {
 			args = append(args, "-v", d.OrgDir+":"+containerOrgPath+":rw")
 		}
+		args = append(args, d.projectDirArgs()...)
 		if d.HostCLIPath != "" {
 			args = append(args, "-v", d.HostCLIPath+":/usr/local/bin/ateam:ro")
 		}
@@ -178,13 +183,16 @@ func (d *DockerContainer) oneshotCmdFactory() CmdFactory {
 
 		// Mount code dir (git root or source dir)
 		if mount != "" {
-			dockerArgs = append(dockerArgs, "-v", mount+":"+containerCodePath+":ro")
+			dockerArgs = append(dockerArgs, "-v", mount+":"+containerCodePath+":"+d.sourceMountMode())
 		}
 
 		// Mount org dir
 		if d.OrgDir != "" {
 			dockerArgs = append(dockerArgs, "-v", d.OrgDir+":"+containerOrgPath+":rw")
 		}
+
+		// Mount .ateam/ read-write (overlays the read-only source mount)
+		dockerArgs = append(dockerArgs, d.projectDirArgs()...)
 
 		// Mount ateam CLI binary
 		if d.HostCLIPath != "" {
@@ -314,11 +322,12 @@ func (d *DockerContainer) debugCommandOneshot(opts RunOpts) string {
 
 	parts := []string{"docker", "run", "--rm", "-i"}
 	if mount != "" {
-		parts = append(parts, "-v", mount+":"+containerCodePath+":ro")
+		parts = append(parts, "-v", mount+":"+containerCodePath+":"+d.sourceMountMode())
 	}
 	if d.OrgDir != "" {
 		parts = append(parts, "-v", d.OrgDir+":"+containerOrgPath+":rw")
 	}
+	parts = append(parts, d.projectDirArgs()...)
 	if d.HostCLIPath != "" {
 		parts = append(parts, "-v", d.HostCLIPath+":/usr/local/bin/ateam:ro")
 	}
@@ -346,6 +355,14 @@ func (d *DockerContainer) debugCommandPersistent(opts RunOpts) string {
 	parts = append(parts, d.ContainerName, opts.Command)
 	parts = append(parts, opts.Args...)
 	return strings.Join(parts, " ")
+}
+
+// sourceMountMode returns "rw" or "ro" for the source code volume mount.
+func (d *DockerContainer) sourceMountMode() string {
+	if d.SourceWritable {
+		return "rw"
+	}
+	return "ro"
 }
 
 // mountDir returns the effective mount source: MountDir if set, otherwise SourceDir.
@@ -380,6 +397,19 @@ func (d *DockerContainer) containerPaths() (codePath, workDir, orgPath string) {
 	workDir = filepath.Join(containerRoot, relSource)
 
 	return codePath, workDir, orgPath
+}
+
+// projectDirArgs returns docker -v args to mount .ateam/ read-write,
+// overlaying the read-only source code mount so agents can write state files.
+func (d *DockerContainer) projectDirArgs() []string {
+	if d.ProjectDir == "" {
+		return nil
+	}
+	containerPath := d.TranslatePath(d.ProjectDir)
+	if containerPath == d.ProjectDir {
+		return nil
+	}
+	return []string{"-v", d.ProjectDir + ":" + containerPath + ":rw"}
 }
 
 // timezoneArgs returns docker args to forward the host timezone into the container.

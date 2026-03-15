@@ -427,6 +427,14 @@ func isProcessAlive(pid int) bool {
 	return proc.Signal(syscall.Signal(0)) == nil
 }
 
+// setSourceWritable marks the runner's docker container as source-writable.
+// No-op if the runner doesn't use a docker container.
+func setSourceWritable(r *runner.Runner) {
+	if dc, ok := r.Container.(*container.DockerContainer); ok {
+		dc.SourceWritable = true
+	}
+}
+
 func addForceFlag(cmd *cobra.Command, dst *bool) {
 	cmd.Flags().BoolVar(dst, "force", false, "run even if the same action+role is already running")
 }
