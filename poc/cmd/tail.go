@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 
 	"github.com/ateam-poc/internal/root"
@@ -66,13 +65,9 @@ func runTail(cmd *cobra.Command, args []string) error {
 
 	switch {
 	case len(args) > 0:
-		ids := make([]int64, len(args))
-		for i, arg := range args {
-			id, err := strconv.ParseInt(arg, 10, 64)
-			if err != nil {
-				return fmt.Errorf("invalid ID %q: %w", arg, err)
-			}
-			ids[i] = id
+		ids, err := parseIDArgs(args)
+		if err != nil {
+			return err
 		}
 		rows, err := db.CallsByIDs(ids)
 		if err != nil {

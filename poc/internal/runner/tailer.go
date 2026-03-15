@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -12,13 +13,12 @@ import (
 
 // TailSource tracks a single stream file being tailed.
 type TailSource struct {
-	ID        int64
-	Label     string // "security/run" or "supervisor/code"
+	ID         int64
 	StreamFile string
-	Formatter *StreamFormatter
-	offset    int64
-	partial   []byte // incomplete last line
-	done      bool
+	Formatter  *StreamFormatter
+	offset     int64
+	partial    []byte // incomplete last line
+	done       bool
 }
 
 // Tailer multiplexes live streaming from one or more JSONL stream files.
@@ -56,7 +56,7 @@ func (t *Tailer) AddSource(id int64, role, action, streamFile string) {
 	}
 	t.knownIDs[id] = true
 	label := role + "/" + action
-	prefix := ""
+	var prefix string
 	if t.Color {
 		prefix = fmt.Sprintf("\033[36m[%d:%s]\033[0m ", id, label)
 	} else {
@@ -64,7 +64,6 @@ func (t *Tailer) AddSource(id int64, role, action, streamFile string) {
 	}
 	t.sources = append(t.sources, &TailSource{
 		ID:         id,
-		Label:      label,
 		StreamFile: streamFile,
 		Formatter: &StreamFormatter{
 			Verbose: t.Verbose,
@@ -213,16 +212,16 @@ func (t *Tailer) pollFiles() {
 }
 
 func (t *Tailer) pollSource(src *TailSource) {
-	info, err := os.Stat(src.StreamFile)
-	if err != nil || info.Size() <= src.offset {
-		return
-	}
-
 	f, err := os.Open(src.StreamFile)
 	if err != nil {
 		return
 	}
 	defer f.Close()
+
+	info, err := f.Stat()
+	if err != nil || info.Size() <= src.offset {
+		return
+	}
 
 	if src.offset > 0 {
 		if _, err := f.Seek(src.offset, io.SeekStart); err != nil {
@@ -265,13 +264,7 @@ func (t *Tailer) pollSource(src *TailSource) {
 // trailing partial data (bytes after the last newline).
 func splitLines(buf []byte) (lines [][]byte, remainder []byte) {
 	for len(buf) > 0 {
-		idx := -1
-		for i, b := range buf {
-			if b == '\n' {
-				idx = i
-				break
-			}
-		}
+		idx := bytes.IndexByte(buf, '\n')
 		if idx < 0 {
 			remainder = buf
 			break

@@ -105,26 +105,19 @@ func (f *StreamFormatter) fmtAssistant(ev *assistantEvent) string {
 		case "tool_use":
 			hasTools = true
 			f.ToolCount++
-			detail := toolDetail(block.Name, block.Input)
+			header := f.cyan(fmt.Sprintf("  tool #%d: ", f.ToolCount)) + f.boldCyan(block.Name)
 			if f.Verbose {
-				b.WriteString(fmt.Sprintf("%s%s\n", f.Prefix,
-					f.cyan(fmt.Sprintf("  tool #%d: ", f.ToolCount))+f.boldCyan(block.Name)))
+				b.WriteString(fmt.Sprintf("%s%s\n", f.Prefix, header))
 				input := strings.TrimSpace(string(block.Input))
 				if input != "" && input != "{}" && input != "null" {
 					for _, line := range strings.Split(input, "\n") {
 						b.WriteString(fmt.Sprintf("%s           %s\n", f.Prefix, line))
 					}
 				}
+			} else if detail := truncate(toolDetail(block.Name, block.Input), 100); detail != "" {
+				b.WriteString(fmt.Sprintf("%s%s %s\n", f.Prefix, header, f.dim(detail)))
 			} else {
-				if detail != "" {
-					detail = truncate(detail, 100)
-					b.WriteString(fmt.Sprintf("%s%s %s\n", f.Prefix,
-						f.cyan(fmt.Sprintf("  tool #%d: ", f.ToolCount))+f.boldCyan(block.Name),
-						f.dim(detail)))
-				} else {
-					b.WriteString(fmt.Sprintf("%s%s\n", f.Prefix,
-						f.cyan(fmt.Sprintf("  tool #%d: ", f.ToolCount))+f.boldCyan(block.Name)))
-				}
+				b.WriteString(fmt.Sprintf("%s%s\n", f.Prefix, header))
 			}
 
 		case "text":
@@ -140,7 +133,7 @@ func (f *StreamFormatter) fmtAssistant(ev *assistantEvent) string {
 					b.WriteString(fmt.Sprintf("%s    %s\n", f.Prefix, line))
 				}
 			} else {
-				preview := singleLineText(block.Text)
+				preview := SingleLineText(block.Text)
 				preview = truncate(preview, 120)
 				b.WriteString(fmt.Sprintf("%s%s %s\n", f.Prefix,
 					f.yellow(fmt.Sprintf("  text #%d:", f.TextCount)),
@@ -287,7 +280,8 @@ func (f *StreamFormatter) boldGreen(s string) string {
 	return "\033[1m\033[32m" + s + "\033[0m"
 }
 
-func singleLineText(s string) string {
+// SingleLineText collapses a multi-line string into a single trimmed line.
+func SingleLineText(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", "")
 	return strings.TrimSpace(s)

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	goruntime "runtime"
 	"strings"
 	"syscall"
@@ -469,6 +470,18 @@ func checkConcurrentRuns(db *calldb.CallDB, projectID, action string, roles []st
 		return nil
 	}
 	return fmt.Errorf("concurrent %s already running:\n%s\nuse --force to run anyway", action, strings.Join(alive, "\n"))
+}
+
+func parseIDArgs(args []string) ([]int64, error) {
+	ids := make([]int64, len(args))
+	for i, arg := range args {
+		id, err := strconv.ParseInt(arg, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid ID %q: %w", arg, err)
+		}
+		ids[i] = id
+	}
+	return ids, nil
 }
 
 func isTerminal() bool {
