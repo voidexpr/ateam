@@ -111,11 +111,9 @@ func runCode(cmd *cobra.Command, args []string) error {
 	// Resolve the profile that sub-runs will use.
 	subRunProfile := codeProfile
 	if subRunProfile == "" {
-		subRunProfile = env.Config.ResolveProfile("code", "")
+		subRunProfile = env.Config.ResolveProfile("run", "")
 	}
-	if subRunProfile != "" && subRunProfile != "default" {
-		prompt += "- `--profile " + subRunProfile + "`\n"
-	}
+	prompt += "- `--profile " + subRunProfile + "`\n"
 
 	if codeDryRun {
 		fmt.Printf("╔══ code management ══╗\n\n")
