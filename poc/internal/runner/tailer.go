@@ -76,7 +76,7 @@ func (t *Tailer) AddSource(id int64, role, action, streamFile string) {
 // Run polls stream files and DB, writing formatted output to Writer.
 // It blocks until all sources are done or ctx is cancelled.
 func (t *Tailer) Run(ctx context.Context) error {
-	discoveryMode := t.TaskGroup != "" || t.Action != ""
+	discoveryMode := t.TaskGroup != "" || t.ProjectID != ""
 	pollTick := time.NewTicker(t.PollInterval)
 	defer pollTick.Stop()
 
@@ -169,19 +169,21 @@ func (t *Tailer) discoverSources() {
 		}
 	}
 
-	if t.Action != "" && t.ProjectID != "" {
+	if t.ProjectID != "" {
 		rows, err := t.DB.FindRunning(t.ProjectID, t.Action)
 		if err != nil {
 			return
 		}
 		var newIDs []int64
 		roleByID := map[int64]string{}
+		actionByID := map[int64]string{}
 		for _, r := range rows {
 			if t.knownIDs[r.ID] {
 				continue
 			}
 			newIDs = append(newIDs, r.ID)
 			roleByID[r.ID] = r.Role
+			actionByID[r.ID] = r.Action
 		}
 		if len(newIDs) == 0 {
 			return
@@ -196,7 +198,11 @@ func (t *Tailer) discoverSources() {
 				if role == "" {
 					role = c.Role
 				}
-				t.AddSource(c.ID, role, t.Action, c.StreamFile)
+				action := actionByID[c.ID]
+				if action == "" {
+					action = c.Action
+				}
+				t.AddSource(c.ID, role, action, c.StreamFile)
 			}
 		}
 	}

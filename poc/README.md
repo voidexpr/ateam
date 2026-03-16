@@ -304,6 +304,7 @@ ateam cat 42 --no-color
 Live-stream agent output from running processes.
 
 ```bash
+ateam tail                  # tail all running processes (default)
 ateam tail 42 43            # tail specific calls by ID
 ateam tail --reports        # tail all current report runs
 ateam tail --coding         # tail current coding session (supervisor + sub-runs)
@@ -799,6 +800,7 @@ Use `ateam cat` to pretty-print stream logs by call ID, or `ateam tail` to live-
 
 ```bash
 ateam cat 42                    # pretty-print a completed run
+ateam tail                      # live-stream all running processes
 ateam tail --coding             # live-stream current coding session
 ateam tail --reports            # live-stream current report runs
 ```
