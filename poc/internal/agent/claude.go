@@ -21,7 +21,8 @@ type ClaudeAgent struct {
 	Env     map[string]string // env vars to set (empty string = exclude from parent env)
 }
 
-func (c *ClaudeAgent) Name() string { return "claude" }
+func (c *ClaudeAgent) Name() string      { return "claude" }
+func (c *ClaudeAgent) ModelName() string  { return c.Model }
 
 func (c *ClaudeAgent) DebugCommandArgs(extraArgs []string) (string, []string) {
 	command := c.Command

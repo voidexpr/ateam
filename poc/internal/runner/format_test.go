@@ -33,7 +33,7 @@ func TestFormatStreamOutput(t *testing.T) {
 		desc    string
 		contain string
 	}{
-		{"system header", "── system (init) ──"},
+		{"system header", "── system ──"},
 		{"turn 1 header", "── turn 1 ──"},
 		{"assistant text first", "I will analyze the code."},
 		{"tool use header", "▶ Bash"},
@@ -87,26 +87,23 @@ func TestScanStreamFileForResultFound(t *testing.T) {
 	if res == nil {
 		t.Fatal("expected non-nil result event")
 	}
-	if res.TotalCostUSD != 0.0150 {
-		t.Errorf("expected TotalCostUSD 0.0150, got %f", res.TotalCostUSD)
+	if res.Cost != 0.0150 {
+		t.Errorf("expected CostUSD 0.0150, got %f", res.Cost)
 	}
 	if res.DurationMS != 8500 {
 		t.Errorf("expected DurationMS 8500, got %d", res.DurationMS)
 	}
-	if res.NumTurns != 2 {
-		t.Errorf("expected NumTurns 2, got %d", res.NumTurns)
+	if res.Turns != 2 {
+		t.Errorf("expected NumTurns 2, got %d", res.Turns)
 	}
-	if res.Usage.InputTokens != 500 {
-		t.Errorf("expected InputTokens 500, got %d", res.Usage.InputTokens)
+	if res.InputTokens != 500 {
+		t.Errorf("expected InputTokens 500, got %d", res.InputTokens)
 	}
-	if res.Usage.OutputTokens != 150 {
-		t.Errorf("expected OutputTokens 150, got %d", res.Usage.OutputTokens)
+	if res.OutputTokens != 150 {
+		t.Errorf("expected OutputTokens 150, got %d", res.OutputTokens)
 	}
-	if res.Usage.CacheReadInputTokens != 100 {
-		t.Errorf("expected CacheReadInputTokens 100, got %d", res.Usage.CacheReadInputTokens)
-	}
-	if res.IsError {
-		t.Error("expected IsError false")
+	if res.CacheReadTokens != 100 {
+		t.Errorf("expected CacheReadTokens 100, got %d", res.CacheReadTokens)
 	}
 }
 
@@ -143,11 +140,11 @@ func TestScanStreamFileForResultLastWins(t *testing.T) {
 	if res == nil {
 		t.Fatal("expected non-nil result event")
 	}
-	if res.TotalCostUSD != 0.05 {
-		t.Errorf("expected last result TotalCostUSD 0.05, got %f", res.TotalCostUSD)
+	if res.Cost != 0.05 {
+		t.Errorf("expected last result CostUSD 0.05, got %f", res.Cost)
 	}
-	if res.NumTurns != 3 {
-		t.Errorf("expected last result NumTurns 3, got %d", res.NumTurns)
+	if res.Turns != 3 {
+		t.Errorf("expected last result NumTurns 3, got %d", res.Turns)
 	}
 }
 

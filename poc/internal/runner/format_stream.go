@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/ateam-poc/internal/agent"
 )
 
 // StreamFormatter formats JSONL stream lines for human consumption.
@@ -14,12 +16,14 @@ import (
 type StreamFormatter struct {
 	Verbose    bool
 	Color      bool
+	Model      string // for cost estimation when not reported natively
 	Prefix     string // for multiplexed tail: "[42:security/run] "
 	TurnNum    int
 	ToolCount  int
 	TextCount  int
 	EventCount int
 	hasResult  bool
+	format     streamFormat
 }
 
 func (f *StreamFormatter) HasResult() bool { return f.hasResult }
@@ -27,29 +31,19 @@ func (f *StreamFormatter) HasResult() bool { return f.hasResult }
 // FormatLine processes a single JSONL line and returns formatted output.
 // Returns empty string for unknown/skipped events.
 func (f *StreamFormatter) FormatLine(line []byte) string {
-	typ, ev, err := parseStreamLine(line)
-	if err != nil || ev == nil {
+	events, detected, err := parseDisplayLine(line, f.format)
+	if err != nil || len(events) == 0 {
 		return ""
 	}
-	f.EventCount++
+	if f.format == formatUnknown {
+		f.format = detected
+	}
 
-	switch typ {
-	case "system":
-		return f.fmtSystem(ev.(*systemEvent))
-	case "user":
-		return f.fmtUser()
-	case "assistant":
-		return f.fmtAssistant(ev.(*assistantEvent))
-	case "tool_result":
-		if f.Verbose {
-			return f.fmtToolResult(ev.(*toolResultEvent))
-		}
-		return ""
-	case "result":
-		return f.fmtResult(ev.(*resultEvent))
-	default:
-		return ""
+	var b strings.Builder
+	for _, ev := range events {
+		b.WriteString(f.formatEvent(ev))
 	}
+	return b.String()
 }
 
 // FormatFile reads a JSONL file and writes formatted output to w.
@@ -70,20 +64,50 @@ func (f *StreamFormatter) FormatFile(path string, w io.Writer) error {
 	return scanner.Err()
 }
 
-func (f *StreamFormatter) fmtSystem(ev *systemEvent) string {
-	if ev.Subtype != "init" {
+func (f *StreamFormatter) formatEvent(ev DisplayEvent) string {
+	f.EventCount++
+	switch e := ev.(type) {
+	case *SystemLine:
+		return f.fmtSystem(e)
+	case *UserLine:
+		return f.fmtUser()
+	case *ToolCallLine:
+		return f.fmtToolCall(e)
+	case *TextLine:
+		return f.fmtText(e)
+	case *ThinkingLine:
+		return f.fmtThinking(e)
+	case *ToolResultLine:
+		if f.Verbose {
+			return f.fmtToolResult(e)
+		}
+		return ""
+	case *ResultLine:
+		return f.fmtResult(e)
+	case *ErrorLine:
+		return f.fmtError(e)
+	}
+	return ""
+}
+
+func (f *StreamFormatter) fmtSystem(e *SystemLine) string {
+	// Auto-populate Model from stream if not set externally
+	if f.Model == "" && e.Model != "" {
+		f.Model = e.Model
+	}
+	if e.SessionID == "" && e.Model == "" {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString(f.Prefix)
-	b.WriteString(f.dim(fmt.Sprintf("--- session %s  model=%s", short(ev.SessionID, 12), ev.Model)))
-	if ev.ClaudeCodeVersion != "" {
-		b.WriteString(f.dim(fmt.Sprintf("  v%s", ev.ClaudeCodeVersion)))
+	b.WriteString(f.dim(fmt.Sprintf("--- session %s  model=%s", short(e.SessionID, 12), e.Model)))
+	if e.Version != "" {
+		b.WriteString(f.dim(fmt.Sprintf("  v%s", e.Version)))
 	}
 	b.WriteString("\n")
-	if f.Verbose && ev.Cwd != "" {
+	if f.Verbose && e.Cwd != "" {
 		b.WriteString(f.Prefix)
-		b.WriteString(f.dim(fmt.Sprintf("    cwd: %s", ev.Cwd)))
+		b.WriteString(f.dim(fmt.Sprintf("    cwd: %s", e.Cwd)))
 		b.WriteString("\n")
 	}
 	return b.String()
@@ -94,71 +118,59 @@ func (f *StreamFormatter) fmtUser() string {
 	return fmt.Sprintf("\n%s%s\n", f.Prefix, f.boldMagenta(fmt.Sprintf("=== Turn %d ===", f.TurnNum)))
 }
 
-func (f *StreamFormatter) fmtAssistant(ev *assistantEvent) string {
-	var b strings.Builder
-
-	hasTools := false
-	hasText := false
-
-	for _, block := range ev.Message.Content {
-		switch block.Type {
-		case "tool_use":
-			hasTools = true
-			f.ToolCount++
-			header := f.cyan(fmt.Sprintf("  tool #%d: ", f.ToolCount)) + f.boldCyan(block.Name)
-			if f.Verbose {
-				b.WriteString(fmt.Sprintf("%s%s\n", f.Prefix, header))
-				input := strings.TrimSpace(string(block.Input))
-				if input != "" && input != "{}" && input != "null" {
-					for _, line := range strings.Split(input, "\n") {
-						b.WriteString(fmt.Sprintf("%s           %s\n", f.Prefix, line))
-					}
-				}
-			} else if detail := truncate(toolDetail(block.Name, block.Input), 100); detail != "" {
-				b.WriteString(fmt.Sprintf("%s%s %s\n", f.Prefix, header, f.dim(detail)))
-			} else {
-				b.WriteString(fmt.Sprintf("%s%s\n", f.Prefix, header))
-			}
-
-		case "text":
-			if block.Text == "" {
-				continue
-			}
-			hasText = true
-			f.TextCount++
-			if f.Verbose {
-				b.WriteString(fmt.Sprintf("%s%s\n", f.Prefix,
-					f.yellow(fmt.Sprintf("  text #%d:", f.TextCount))))
-				for _, line := range strings.Split(block.Text, "\n") {
-					b.WriteString(fmt.Sprintf("%s    %s\n", f.Prefix, line))
-				}
-			} else {
-				preview := SingleLineText(block.Text)
-				preview = truncate(preview, 120)
-				b.WriteString(fmt.Sprintf("%s%s %s\n", f.Prefix,
-					f.yellow(fmt.Sprintf("  text #%d:", f.TextCount)),
-					f.dim(preview)))
-			}
-
-		case "thinking":
-			if f.Verbose && block.Text != "" {
-				b.WriteString(f.Prefix + f.dim("  thinking:") + "\n")
-				for _, line := range strings.Split(block.Text, "\n") {
-					b.WriteString(fmt.Sprintf("%s    %s\n", f.Prefix, f.dim(line)))
-				}
+func (f *StreamFormatter) fmtToolCall(e *ToolCallLine) string {
+	f.ToolCount++
+	header := f.cyan(fmt.Sprintf("  tool #%d: ", f.ToolCount)) + f.boldCyan(e.Name)
+	if f.Verbose && e.Claude != nil {
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("%s%s\n", f.Prefix, header))
+		input := strings.TrimSpace(string(e.Claude.Input))
+		if input != "" && input != "{}" && input != "null" {
+			for _, line := range strings.Split(input, "\n") {
+				b.WriteString(fmt.Sprintf("%s           %s\n", f.Prefix, line))
 			}
 		}
+		return b.String()
 	}
-
-	if !hasTools && !hasText {
-		b.WriteString(f.Prefix + f.dim("  ... thinking") + "\n")
+	detail := truncate(e.Detail, 100)
+	if detail != "" {
+		return fmt.Sprintf("%s%s %s\n", f.Prefix, header, f.dim(detail))
 	}
+	return fmt.Sprintf("%s%s\n", f.Prefix, header)
+}
 
+func (f *StreamFormatter) fmtText(e *TextLine) string {
+	f.TextCount++
+	if f.Verbose {
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf("%s%s\n", f.Prefix,
+			f.yellow(fmt.Sprintf("  text #%d:", f.TextCount))))
+		for _, line := range strings.Split(e.Text, "\n") {
+			b.WriteString(fmt.Sprintf("%s    %s\n", f.Prefix, line))
+		}
+		return b.String()
+	}
+	preview := SingleLineText(e.Text)
+	preview = truncate(preview, 120)
+	return fmt.Sprintf("%s%s %s\n", f.Prefix,
+		f.yellow(fmt.Sprintf("  text #%d:", f.TextCount)),
+		f.dim(preview))
+}
+
+func (f *StreamFormatter) fmtThinking(e *ThinkingLine) string {
+	if !f.Verbose {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(f.Prefix + f.dim("  thinking:") + "\n")
+	for _, line := range strings.Split(e.Text, "\n") {
+		b.WriteString(fmt.Sprintf("%s    %s\n", f.Prefix, f.dim(line)))
+	}
 	return b.String()
 }
 
-func (f *StreamFormatter) fmtToolResult(ev *toolResultEvent) string {
-	content := strings.TrimSpace(ev.Content)
+func (f *StreamFormatter) fmtToolResult(e *ToolResultLine) string {
+	content := strings.TrimSpace(e.Content)
 	if content == "" {
 		return ""
 	}
@@ -166,18 +178,19 @@ func (f *StreamFormatter) fmtToolResult(ev *toolResultEvent) string {
 	return fmt.Sprintf("%s%s\n", f.Prefix, f.dim("  result: "+content))
 }
 
-func (f *StreamFormatter) fmtResult(ev *resultEvent) string {
+func (f *StreamFormatter) fmtResult(e *ResultLine) string {
 	f.hasResult = true
-	cost := ev.TotalCostUSD
-	if cost == 0 {
-		cost = ev.CostUSD
+
+	cost := e.Cost
+	if cost == 0 && f.Model != "" {
+		cost = agent.EstimateCost(f.Model, e.InputTokens, e.OutputTokens)
 	}
 
-	durSec := ev.DurationMS / 1000
+	durSec := e.DurationMS / 1000
 	durStr := fmt.Sprintf("%dm %ds", durSec/60, durSec%60)
 
 	status := "ok"
-	if ev.IsError {
+	if e.IsError {
 		status = "error"
 	}
 
@@ -186,12 +199,19 @@ func (f *StreamFormatter) fmtResult(ev *resultEvent) string {
 	b.WriteString(fmt.Sprintf("%s  Status:    %s\n", f.Prefix, status))
 	b.WriteString(fmt.Sprintf("%s  Duration:  %s\n", f.Prefix, durStr))
 	b.WriteString(fmt.Sprintf("%s  Cost:      $%.2f\n", f.Prefix, cost))
-	b.WriteString(fmt.Sprintf("%s  Turns:     %d\n", f.Prefix, ev.NumTurns))
+	if cost > 0 && e.Cost == 0 {
+		b.WriteString(fmt.Sprintf("%s              %s\n", f.Prefix, f.dim("(estimated)")))
+	}
+	b.WriteString(fmt.Sprintf("%s  Turns:     %d\n", f.Prefix, e.Turns))
 	b.WriteString(fmt.Sprintf("%s  Tokens:    in=%d out=%d cache_read=%d\n", f.Prefix,
-		ev.Usage.InputTokens, ev.Usage.OutputTokens, ev.Usage.CacheReadInputTokens))
+		e.InputTokens, e.OutputTokens, e.CacheReadTokens))
 	b.WriteString(fmt.Sprintf("%s  Events:    %d (tools=%d, text=%d)\n", f.Prefix,
 		f.EventCount, f.ToolCount, f.TextCount))
 	return b.String()
+}
+
+func (f *StreamFormatter) fmtError(e *ErrorLine) string {
+	return fmt.Sprintf("%s%s\n", f.Prefix, f.red("  error: "+e.Message))
 }
 
 // toolDetail extracts a short description from the tool input.
@@ -278,6 +298,13 @@ func (f *StreamFormatter) boldGreen(s string) string {
 		return s
 	}
 	return "\033[1m\033[32m" + s + "\033[0m"
+}
+
+func (f *StreamFormatter) red(s string) string {
+	if !f.Color {
+		return s
+	}
+	return "\033[31m" + s + "\033[0m"
 }
 
 // SingleLineText collapses a multi-line string into a single trimmed line.

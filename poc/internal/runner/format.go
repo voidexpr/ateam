@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/ateam-poc/internal/agent"
 )
 
 // FormatStream reads a stream JSONL file and writes a human-readable
@@ -22,54 +24,70 @@ func FormatStream(path string, w io.Writer) error {
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	turnNum := 0
+	model := ""
+	hint := formatUnknown
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		typ, ev, err := parseStreamLine(line)
-		if err != nil || ev == nil {
+		events, detected, err := parseDisplayLine(line, hint)
+		if err != nil || len(events) == 0 {
 			continue
 		}
+		if hint == formatUnknown {
+			hint = detected
+		}
 
-		switch typ {
-		case "system":
-			sys := ev.(*systemEvent)
-			fmt.Fprintf(w, "── system (%s) ──\n", sys.Subtype)
-
-		case "assistant":
-			turnNum++
-			ast := ev.(*assistantEvent)
-			fmt.Fprintf(w, "\n── turn %d ──\n", turnNum)
-			for _, block := range ast.Message.Content {
-				switch block.Type {
-				case "text":
-					if block.Text != "" {
-						fmt.Fprintf(w, "%s\n", block.Text)
-					}
-				case "tool_use":
-					input := truncate(strings.TrimSpace(string(block.Input)), 500)
-					fmt.Fprintf(w, "\n▶ %s\n", block.Name)
-					if input != "" && input != "{}" && input != "null" {
-						fmt.Fprintf(w, "  %s\n", input)
-					}
+		for _, ev := range events {
+			switch e := ev.(type) {
+			case *SystemLine:
+				if model == "" && e.Model != "" {
+					model = e.Model
 				}
-			}
+				fmt.Fprintf(w, "── system ──\n")
 
-		case "tool_result":
-			tr := ev.(*toolResultEvent)
-			content := truncate(strings.TrimSpace(tr.Content), 1000)
-			if content != "" {
-				fmt.Fprintf(w, "◀ %s\n", content)
-			}
+			case *UserLine:
+				turnNum++
+				fmt.Fprintf(w, "\n── turn %d ──\n", turnNum)
 
-		case "result":
-			res := ev.(*resultEvent)
-			fmt.Fprintf(w, "\n── result ──\n")
-			fmt.Fprintf(w, "  Turns:    %d\n", res.NumTurns)
-			fmt.Fprintf(w, "  Cost:     $%.4f\n", res.TotalCostUSD)
-			fmt.Fprintf(w, "  Duration: %s\n", FormatDuration(msToDuration(res.DurationMS)))
-			fmt.Fprintf(w, "  Input:    %d tokens\n", res.Usage.InputTokens)
-			fmt.Fprintf(w, "  Output:   %d tokens\n", res.Usage.OutputTokens)
-			if res.IsError {
-				fmt.Fprintf(w, "  ERROR:    true\n")
+			case *ToolCallLine:
+				fmt.Fprintf(w, "\n▶ %s\n", e.Name)
+				detail := e.Detail
+				if e.Claude != nil {
+					detail = truncate(strings.TrimSpace(string(e.Claude.Input)), 500)
+				}
+				if detail != "" && detail != "{}" && detail != "null" {
+					fmt.Fprintf(w, "  %s\n", detail)
+				}
+
+			case *TextLine:
+				turnNum++
+				fmt.Fprintf(w, "\n── turn %d ──\n", turnNum)
+				if e.Text != "" {
+					fmt.Fprintf(w, "%s\n", e.Text)
+				}
+
+			case *ToolResultLine:
+				content := truncate(strings.TrimSpace(e.Content), 1000)
+				if content != "" {
+					fmt.Fprintf(w, "◀ %s\n", content)
+				}
+
+			case *ResultLine:
+				cost := e.Cost
+				if cost == 0 && model != "" {
+					cost = agent.EstimateCost(model, e.InputTokens, e.OutputTokens)
+				}
+				fmt.Fprintf(w, "\n── result ──\n")
+				fmt.Fprintf(w, "  Turns:    %d\n", e.Turns)
+				fmt.Fprintf(w, "  Cost:     $%.4f\n", cost)
+				fmt.Fprintf(w, "  Duration: %s\n", FormatDuration(msToDuration(e.DurationMS)))
+				fmt.Fprintf(w, "  Input:    %d tokens\n", e.InputTokens)
+				fmt.Fprintf(w, "  Output:   %d tokens\n", e.OutputTokens)
+				if e.IsError {
+					fmt.Fprintf(w, "  ERROR:    true\n")
+				}
+
+			case *ErrorLine:
+				fmt.Fprintf(w, "  ERROR:    %s\n", e.Message)
 			}
 		}
 	}
@@ -121,23 +139,27 @@ func streamTailMessages(path string, n int) []string {
 	}
 	defer f.Close()
 
-	var messages []string
+	messages := make([]string, 0, n)
+	hint := formatUnknown
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
-		typ, ev, err := parseStreamLine(scanner.Bytes())
-		if err != nil || ev == nil || typ != "assistant" {
+		events, detected, err := parseDisplayLine(scanner.Bytes(), hint)
+		if err != nil || len(events) == 0 {
 			continue
 		}
-		text := extractReportText(ev.(*assistantEvent))
-		if text == "" {
-			continue
+		if hint == formatUnknown {
+			hint = detected
 		}
-		messages = append(messages, truncate(text, 500))
-	}
-
-	if len(messages) > n {
-		messages = messages[len(messages)-n:]
+		for _, ev := range events {
+			if tl, ok := ev.(*TextLine); ok && tl.Text != "" {
+				if len(messages) >= n {
+					copy(messages, messages[1:])
+					messages = messages[:n-1]
+				}
+				messages = append(messages, truncate(tl.Text, 500))
+			}
+		}
 	}
 	return messages
 }

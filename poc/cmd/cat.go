@@ -75,6 +75,7 @@ func runCat(cmd *cobra.Command, args []string) error {
 		f := &runner.StreamFormatter{
 			Verbose: catVerbose,
 			Color:   color,
+			Model:   row.Model,
 		}
 		if err := f.FormatFile(row.StreamFile, os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "  error reading %s: %v\n", row.StreamFile, err)

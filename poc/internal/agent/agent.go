@@ -20,6 +20,11 @@ type Agent interface {
 	DebugCommandArgs(extraArgs []string) (command string, args []string)
 }
 
+// ModelProvider is optionally implemented by agents that expose their model name.
+type ModelProvider interface {
+	ModelName() string
+}
+
 // Request holds everything an agent needs to execute.
 type Request struct {
 	Prompt     string

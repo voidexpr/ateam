@@ -235,6 +235,8 @@ func (c *CallDB) CostByTaskGroup(projectID string) ([]TaskGroupRow, error) {
 
 type CallRow struct {
 	ID         int64
+	Agent      string
+	Model      string
 	Role       string
 	Action     string
 	TaskGroup  string
@@ -243,11 +245,11 @@ type CallRow struct {
 	StreamFile string
 }
 
-const callRowCols = `id, role, action, task_group, started_at, COALESCE(ended_at,''), COALESCE(stream_file,'')`
+const callRowCols = `id, COALESCE(agent,''), COALESCE(model,''), role, action, task_group, started_at, COALESCE(ended_at,''), COALESCE(stream_file,'')`
 
 func scanCallRow(rows *sql.Rows) (CallRow, error) {
 	var r CallRow
-	err := rows.Scan(&r.ID, &r.Role, &r.Action, &r.TaskGroup, &r.StartedAt, &r.EndedAt, &r.StreamFile)
+	err := rows.Scan(&r.ID, &r.Agent, &r.Model, &r.Role, &r.Action, &r.TaskGroup, &r.StartedAt, &r.EndedAt, &r.StreamFile)
 	return r, err
 }
 

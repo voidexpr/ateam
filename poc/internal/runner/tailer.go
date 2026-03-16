@@ -50,7 +50,7 @@ func NewTailer(w io.Writer, db *calldb.CallDB, color, verbose bool) *Tailer {
 }
 
 // AddSource registers a stream file to tail.
-func (t *Tailer) AddSource(id int64, role, action, streamFile string) {
+func (t *Tailer) AddSource(id int64, role, action, streamFile, model string) {
 	if t.knownIDs[id] {
 		return
 	}
@@ -68,6 +68,7 @@ func (t *Tailer) AddSource(id int64, role, action, streamFile string) {
 		Formatter: &StreamFormatter{
 			Verbose: t.Verbose,
 			Color:   t.Color,
+			Model:   model,
 			Prefix:  prefix,
 		},
 	})
@@ -164,7 +165,7 @@ func (t *Tailer) discoverSources() {
 		}
 		for _, r := range rows {
 			if r.StreamFile != "" {
-				t.AddSource(r.ID, r.Role, r.Action, r.StreamFile)
+				t.AddSource(r.ID, r.Role, r.Action, r.StreamFile, r.Model)
 			}
 		}
 	}
@@ -202,7 +203,7 @@ func (t *Tailer) discoverSources() {
 				if action == "" {
 					action = c.Action
 				}
-				t.AddSource(c.ID, role, action, c.StreamFile)
+				t.AddSource(c.ID, role, action, c.StreamFile, c.Model)
 			}
 		}
 	}

@@ -17,7 +17,7 @@ var (
 )
 
 var runsCmd = &cobra.Command{
-	Use:   "runs",
+	Use:   "ps",
 	Short: "Show recent agent runs from the call database",
 	Long: `Display summary data about recent runs, with optional filtering
 by project, role, or action.
@@ -25,10 +25,10 @@ by project, role, or action.
 When run inside a project, results are filtered to that project by default.
 
 Example:
-  ateam runs
-  ateam runs --role security
-  ateam runs --action report
-  ateam runs --project myproject --role testing_basic`,
+  ateam ps
+  ateam ps --role security
+  ateam ps --action report
+  ateam ps --project myproject --role testing_basic`,
 	Args: cobra.NoArgs,
 	RunE: runRuns,
 }
@@ -93,7 +93,7 @@ func runRuns(cmd *cobra.Command, args []string) error {
 		}
 
 		tokens := ""
-		total := r.InputTokens + r.OutputTokens + r.CacheReadTokens
+		total := int64(r.InputTokens + r.OutputTokens + r.CacheReadTokens)
 		if total > 0 {
 			tokens = fmtTokens(total)
 		}
@@ -123,7 +123,7 @@ func runStatus(r calldb.RecentRow) string {
 	return "canceled"
 }
 
-func fmtTokens(n int) string {
+func fmtTokens(n int64) string {
 	if n <= 0 {
 		return ""
 	}

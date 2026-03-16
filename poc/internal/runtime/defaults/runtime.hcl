@@ -175,6 +175,14 @@ agent "claude" {
   }
 }
 
+agent "claude-no-sandbox" {
+  command = "claude"
+  args    = ["-p", "--output-format", "stream-json", "--verbose"]
+  env = {
+    CLAUDECODE = ""
+  }
+}
+
 agent "claude-sonnet" {
   base = "claude"
   args = ["-p", "--output-format", "stream-json", "--verbose", "--model", "sonnet", "--max-budget-usd", "0.50"]

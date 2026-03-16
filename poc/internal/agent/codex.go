@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const codexDefaultModel = "codex-mini"
+
 // CodexAgent executes prompts using the OpenAI Codex CLI.
 // Invocation: codex [args...] exec --json "prompt"
 // The prompt is passed as a positional argument, not stdin.
@@ -23,6 +25,13 @@ type CodexAgent struct {
 }
 
 func (c *CodexAgent) Name() string { return "codex" }
+
+func (c *CodexAgent) effectiveModel() string {
+	if c.Model != "" {
+		return c.Model
+	}
+	return codexDefaultModel
+}
 
 func (c *CodexAgent) DebugCommandArgs(extraArgs []string) (string, []string) {
 	command := c.Command
@@ -126,7 +135,7 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 			streamWriter.WriteByte('\n')
 		}
 
-		typ, ev, parseErr := parseCodexLine(line)
+		typ, ev, parseErr := ParseCodexLine(line)
 		if parseErr != nil || ev == nil {
 			continue
 		}
@@ -136,7 +145,7 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 			ch <- StreamEvent{Type: "system"}
 
 		case "tool_use":
-			te := ev.(*codexToolUseEvent)
+			te := ev.(*CodexToolUseEvent)
 			ch <- StreamEvent{
 				Type:      "tool_use",
 				ToolName:  te.ToolName,
@@ -144,28 +153,34 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 			}
 
 		case "assistant":
-			te := ev.(*codexTextEvent)
+			te := ev.(*CodexTextEvent)
 			if te.Text != "" {
 				lastText.WriteString(te.Text)
 				ch <- StreamEvent{Type: "assistant", Text: te.Text}
 			}
 
 		case "item_completed":
-			te := ev.(*codexTextEvent)
+			te := ev.(*CodexTextEvent)
 			if te.Text != "" {
 				itemText = te.Text
 				ch <- StreamEvent{Type: "assistant", Text: te.Text}
 			}
 
 		case "result":
-			re := ev.(*codexResultEvent)
+			re := ev.(*CodexResultEvent)
 			output := itemText
 			if output == "" {
 				output = lastText.String()
 			}
+			model := c.effectiveModel()
+			if re.Model != "" {
+				model = re.Model
+			}
 			ch <- StreamEvent{
 				Type:         "result",
 				Output:       output,
+				Model:        model,
+				Cost:         EstimateCost(model, re.InputTokens, re.OutputTokens),
 				InputTokens:  re.InputTokens,
 				OutputTokens: re.OutputTokens,
 				DurationMS:   re.DurationMS,
@@ -174,7 +189,7 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 			}
 
 		case "error":
-			ee := ev.(*codexErrorEvent)
+			ee := ev.(*CodexErrorEvent)
 			ch <- StreamEvent{
 				Type: "assistant",
 				Text: "error: " + ee.Message,
@@ -199,30 +214,35 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 	}
 }
 
-// codex event types for JSONL parsing
+func (c *CodexAgent) ModelName() string { return c.effectiveModel() }
 
-type codexToolUseEvent struct {
+// CodexToolUseEvent represents a tool invocation in Codex JSONL output.
+type CodexToolUseEvent struct {
 	ToolName  string
 	ToolInput string
 }
 
-type codexTextEvent struct {
+// CodexTextEvent represents an assistant text chunk in Codex JSONL output.
+type CodexTextEvent struct {
 	Text string
 }
 
-type codexResultEvent struct {
+// CodexResultEvent represents the final result in Codex JSONL output.
+type CodexResultEvent struct {
+	Model        string
 	InputTokens  int
 	OutputTokens int
 	DurationMS   int64
 	IsError      bool
 }
 
-type codexErrorEvent struct {
+// CodexErrorEvent represents an error in Codex JSONL output.
+type CodexErrorEvent struct {
 	Message string
 }
 
-// parseCodexLine parses a single JSONL line from codex exec --json output.
-func parseCodexLine(line []byte) (string, any, error) {
+// ParseCodexLine parses a single JSONL line from codex exec --json output.
+func ParseCodexLine(line []byte) (string, any, error) {
 	line = trimBOM(line)
 	if len(line) == 0 {
 		return "", nil, nil
@@ -250,7 +270,7 @@ func parseCodexLine(line []byte) (string, any, error) {
 
 		toolName := strings.TrimSuffix(eventType, "_begin")
 		toolInput := codexToolDetail(raw)
-		return "tool_use", &codexToolUseEvent{
+		return "tool_use", &CodexToolUseEvent{
 			ToolName:  toolName,
 			ToolInput: toolInput,
 		}, nil
@@ -260,16 +280,16 @@ func parseCodexLine(line []byte) (string, any, error) {
 		if d, ok := raw["delta"]; ok {
 			json.Unmarshal(d, &delta)
 		}
-		return "assistant", &codexTextEvent{Text: delta}, nil
+		return "assistant", &CodexTextEvent{Text: delta}, nil
 
 	case "agent_message", "assistant_message":
 		text := codexMessageText(raw)
-		return "assistant", &codexTextEvent{Text: text}, nil
+		return "assistant", &CodexTextEvent{Text: text}, nil
 
 	case "item.completed":
 		text := codexItemCompletedText(raw)
 		if text != "" {
-			return "item_completed", &codexTextEvent{Text: text}, nil
+			return "item_completed", &CodexTextEvent{Text: text}, nil
 		}
 		return "", nil, nil
 
@@ -287,7 +307,7 @@ func parseCodexLine(line []byte) (string, any, error) {
 		if msg == "" {
 			msg = "unknown error"
 		}
-		return "error", &codexErrorEvent{Message: msg}, nil
+		return "error", &CodexErrorEvent{Message: msg}, nil
 
 	default:
 		return "", nil, nil
@@ -369,8 +389,12 @@ func codexItemCompletedText(raw map[string]json.RawMessage) string {
 }
 
 // parseCodexResult extracts tokens and duration from turn.completed / turn.failed.
-func parseCodexResult(raw map[string]json.RawMessage, isError bool) *codexResultEvent {
-	re := &codexResultEvent{IsError: isError}
+func parseCodexResult(raw map[string]json.RawMessage, isError bool) *CodexResultEvent {
+	re := &CodexResultEvent{IsError: isError}
+
+	if v, ok := raw["model"]; ok {
+		json.Unmarshal(v, &re.Model)
+	}
 
 	// duration_ms or durationMs
 	if v, ok := raw["duration_ms"]; ok {
