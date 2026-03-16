@@ -118,6 +118,7 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.Runner
 	}
 
 	r := runnerFromAgentConfig(env, &ac)
+	r.Profile = "a:" + agentName
 	r.ProjectID = env.ProjectID()
 	r.ContainerType = "none"
 	return r, nil
@@ -172,7 +173,9 @@ func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.Runner
 		if !ok {
 			return nil, fmt.Errorf("unknown agent %q", agentFlag)
 		}
-		return minimalRunnerFromAgentConfig(orgDir, &ac), nil
+		r := minimalRunnerFromAgentConfig(orgDir, &ac)
+		r.Profile = "a:" + agentFlag
+		return r, nil
 	default:
 		if profileFlag == "" {
 			profileFlag = "default"

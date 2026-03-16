@@ -127,26 +127,32 @@ func extractReportText(ev *assistantEvent) string {
 }
 
 // scanStreamFileForResult reads a stream JSONL file and returns the last
-// result event found, or nil if none exists. Used as a fallback to extract
-// cost/usage data when the event channel was closed before the result arrived.
-func scanStreamFileForResult(path string) *resultEvent {
+// ResultLine found, or nil if none exists. Handles both Claude and Codex formats.
+// Used as a fallback to extract cost/usage data when the event channel was
+// closed before the result arrived.
+func scanStreamFileForResult(path string) *ResultLine {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
 	defer f.Close()
 
-	var last *resultEvent
+	var last *ResultLine
+	hint := formatUnknown
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
-		typ, ev, err := parseStreamLine(scanner.Bytes())
-		if err != nil || ev == nil {
+		events, detected, err := parseDisplayLine(scanner.Bytes(), hint)
+		if err != nil || len(events) == 0 {
 			continue
 		}
-		if typ == "result" {
-			res := ev.(*resultEvent)
-			last = res
+		if hint == formatUnknown {
+			hint = detected
+		}
+		for _, ev := range events {
+			if rl, ok := ev.(*ResultLine); ok {
+				last = rl
+			}
 		}
 	}
 	return last

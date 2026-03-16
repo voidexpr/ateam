@@ -65,13 +65,13 @@ func runCost(cmd *cobra.Command, args []string) error {
 		for _, a := range actionAggs {
 			fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%s\t%s\n",
 				a.Category, a.Count, fmtCost(a.CostUSD),
-				fmtTokens64(a.InputTokens), fmtTokens64(a.OutputTokens),
-				fmtTokens64(a.CacheReadTokens), fmtTokens64(a.TotalTokens))
+				fmtTokens(a.InputTokens), fmtTokens(a.OutputTokens),
+				fmtTokens(a.CacheReadTokens), fmtTokens(a.TotalTokens))
 			totalCost += a.CostUSD
 			totalTokens += a.TotalTokens
 		}
 		fmt.Fprintf(w, "TOTAL\t\t%s\t\t\t\t%s\n",
-			fmtCost(totalCost), fmtTokens64(totalTokens))
+			fmtCost(totalCost), fmtTokens(totalTokens))
 		w.Flush()
 	}
 
@@ -110,12 +110,12 @@ func runCost(cmd *cobra.Command, args []string) error {
 			order = append(order, r.TaskGroup)
 		}
 		s.actions[r.Action] = actionLine{
-			count:       r.Count,
-			cost:        r.CostUSD,
-			inputTok:    r.InputTokens,
-			outputTok:   r.OutputTokens,
+			count:        r.Count,
+			cost:         r.CostUSD,
+			inputTok:     r.InputTokens,
+			outputTok:    r.OutputTokens,
 			cacheReadTok: r.CacheReadTokens,
-			totalTok:    r.TotalTokens,
+			totalTok:     r.TotalTokens,
 		}
 		s.totalCost += r.CostUSD
 		s.totalTokens += r.TotalTokens
@@ -143,7 +143,7 @@ func runCost(cmd *cobra.Command, args []string) error {
 		}
 
 		first := true
-		for _, action := range []string{"code", "report", "review", "run"} {
+		for _, action := range []string{runner.ActionCode, runner.ActionReport, runner.ActionReview, runner.ActionRun} {
 			al, ok := s.actions[action]
 			if !ok {
 				continue
@@ -154,15 +154,15 @@ func runCost(cmd *cobra.Command, args []string) error {
 			}
 			fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				label, action, al.count, fmtCost(al.cost),
-				fmtTokens64(al.inputTok), fmtTokens64(al.outputTok),
-				fmtTokens64(al.cacheReadTok), fmtTokens64(al.totalTok),
+				fmtTokens(al.inputTok), fmtTokens(al.outputTok),
+				fmtTokens(al.cacheReadTok), fmtTokens(al.totalTok),
 				started, ended, dur)
 			first = false
 		}
 		// Print any other actions not in the ordered list above.
 		for action, al := range s.actions {
 			switch action {
-			case "code", "report", "review", "run":
+			case runner.ActionCode, runner.ActionReport, runner.ActionReview, runner.ActionRun:
 				continue
 			}
 			label := displayTG
@@ -171,8 +171,8 @@ func runCost(cmd *cobra.Command, args []string) error {
 			}
 			fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				label, action, al.count, fmtCost(al.cost),
-				fmtTokens64(al.inputTok), fmtTokens64(al.outputTok),
-				fmtTokens64(al.cacheReadTok), fmtTokens64(al.totalTok),
+				fmtTokens(al.inputTok), fmtTokens(al.outputTok),
+				fmtTokens(al.cacheReadTok), fmtTokens(al.totalTok),
 				started, ended, dur)
 			first = false
 		}
@@ -183,7 +183,7 @@ func runCost(cmd *cobra.Command, args []string) error {
 				label = ""
 			}
 			fmt.Fprintf(w, "%s\tTOTAL\t\t%s\t\t\t\t%s\t%s\t%s\t%s\n",
-				label, fmtCost(s.totalCost), fmtTokens64(s.totalTokens),
+				label, fmtCost(s.totalCost), fmtTokens(s.totalTokens),
 				started, ended, dur)
 		}
 
@@ -203,9 +203,6 @@ type actionLine struct {
 	totalTok     int64
 }
 
-func fmtTokens64(n int64) string {
-	return fmtTokens(int(n))
-}
 
 func fmtTimestamp(s string) string {
 	if s == "" {

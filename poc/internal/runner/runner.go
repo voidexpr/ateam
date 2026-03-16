@@ -238,7 +238,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			Action:     opts.Action,
 			Role:       opts.RoleID,
 			TaskGroup:  opts.TaskGroup,
-			Model:      extractModel(r.Agent),
+			Model:      agent.NormalizeModel(extractModel(r.Agent)),
 			PromptHash: hashPrompt(prompt),
 			StartedAt:  startedAt,
 			StreamFile: streamFile,
@@ -335,6 +335,9 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		summary.ExitCode = resultEv.ExitCode
 		summary.Cost = resultEv.Cost
 		summary.DurationMS = resultEv.DurationMS
+		if summary.DurationMS == 0 {
+			summary.DurationMS = duration.Milliseconds()
+		}
 		summary.Turns = resultEv.Turns
 		summary.IsError = resultEv.IsError
 		summary.InputTokens = resultEv.InputTokens
@@ -345,12 +348,12 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		// cost/usage from the stream file which may have been written
 		// before the process was killed.
 		if res := scanStreamFileForResult(streamFile); res != nil {
-			summary.Cost = res.TotalCostUSD
+			summary.Cost = res.Cost
 			summary.DurationMS = res.DurationMS
-			summary.Turns = res.NumTurns
-			summary.InputTokens = res.Usage.InputTokens
-			summary.OutputTokens = res.Usage.OutputTokens
-			summary.CacheReadTokens = res.Usage.CacheReadInputTokens
+			summary.Turns = res.Turns
+			summary.InputTokens = res.InputTokens
+			summary.OutputTokens = res.OutputTokens
+			summary.CacheReadTokens = res.CacheReadTokens
 		}
 	}
 
@@ -387,6 +390,12 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		if summary.Err != nil {
 			errMsg = summary.Err.Error()
 		}
+		// If the result event reported a model (e.g. Codex discovering the
+		// model at runtime), propagate it so the DB row is accurate.
+		resultModel := ""
+		if resultEv != nil && resultEv.Model != "" {
+			resultModel = agent.NormalizeModel(resultEv.Model)
+		}
 		if err := r.CallDB.UpdateCall(callID, &calldb.CallResult{
 			EndedAt:         summary.EndedAt,
 			DurationMS:      summary.DurationMS,
@@ -398,6 +407,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			OutputTokens:    summary.OutputTokens,
 			CacheReadTokens: summary.CacheReadTokens,
 			Turns:           summary.Turns,
+			Model:           resultModel,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: call tracking update failed: %v\n", err)
 		}
@@ -619,14 +629,10 @@ func writeExecFile(path string, startedAt time.Time, opts RunOpts, prompt string
 }
 
 func extractModel(a agent.Agent) string {
-	switch v := a.(type) {
-	case *agent.ClaudeAgent:
-		return v.Model
-	case *agent.CodexAgent:
-		return v.Model
-	default:
-		return ""
+	if mp, ok := a.(agent.ModelProvider); ok {
+		return mp.ModelName()
 	}
+	return ""
 }
 
 func hashPrompt(prompt string) string {

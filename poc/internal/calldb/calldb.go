@@ -67,6 +67,7 @@ type CallResult struct {
 	OutputTokens    int
 	CacheReadTokens int
 	Turns           int
+	Model           string // if non-empty, updates the model column
 }
 
 type CallDB struct {
@@ -162,18 +163,24 @@ func (c *CallDB) UpdateCall(id int64, result *CallResult) error {
 	if result.IsError {
 		isError = 1
 	}
-	_, err := c.db.Exec(`
-		UPDATE agent_calls SET
+	q := `UPDATE agent_calls SET
 			ended_at = ?, duration_ms = ?, exit_code = ?,
 			is_error = ?, error_message = ?, cost_usd = ?,
 			input_tokens = ?, output_tokens = ?, cache_read_tokens = ?,
-			turns = ?
-		WHERE id = ?`,
+			turns = ?`
+	args := []any{
 		result.EndedAt.Format(time.RFC3339), result.DurationMS, result.ExitCode,
 		isError, result.ErrorMessage, result.CostUSD,
 		result.InputTokens, result.OutputTokens, result.CacheReadTokens,
-		result.Turns, id,
-	)
+		result.Turns,
+	}
+	if result.Model != "" {
+		q += `, model = ?`
+		args = append(args, result.Model)
+	}
+	q += ` WHERE id = ?`
+	args = append(args, id)
+	_, err := c.db.Exec(q, args...)
 	return err
 }
 

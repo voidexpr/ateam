@@ -24,7 +24,7 @@ func TestTailerStaticFile(t *testing.T) {
 
 	var buf bytes.Buffer
 	tailer := NewTailer(&buf, nil, false, false)
-	tailer.AddSource(1, "security", "run", path)
+	tailer.AddSource(1, "security", "run", path, "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -68,7 +68,7 @@ func TestTailerGrowingFile(t *testing.T) {
 	var buf bytes.Buffer
 	tailer := NewTailer(&buf, nil, false, false)
 	tailer.PollInterval = 50 * time.Millisecond
-	tailer.AddSource(1, "test", "run", path)
+	tailer.AddSource(1, "test", "run", path, "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

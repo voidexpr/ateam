@@ -75,7 +75,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 		}
 		for _, r := range rows {
 			if r.StreamFile != "" {
-				tailer.AddSource(r.ID, r.Role, r.Action, r.StreamFile)
+				tailer.AddSource(r.ID, r.Role, r.Action, r.StreamFile, r.Model)
 			}
 		}
 
