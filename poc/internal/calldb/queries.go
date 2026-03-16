@@ -58,18 +58,22 @@ func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
 		args = append(args, f.TaskGroup)
 	}
 
-	q := "SELECT id, project_id, profile, action, role, task_group, model, started_at, COALESCE(ended_at,''), COALESCE(duration_ms,0), COALESCE(exit_code,0), is_error, COALESCE(cost_usd,0), COALESCE(input_tokens,0), COALESCE(output_tokens,0), COALESCE(cache_read_tokens,0), COALESCE(turns,0), COALESCE(pid,0), COALESCE(container_id,''), COALESCE(stream_file,'') FROM agent_calls"
-	if len(where) > 0 {
-		q += " WHERE " + strings.Join(where, " AND ")
-	}
-	q += " ORDER BY started_at ASC"
+	cols := "id, project_id, profile, action, role, task_group, model, started_at, COALESCE(ended_at,''), COALESCE(duration_ms,0), COALESCE(exit_code,0), is_error, COALESCE(cost_usd,0), COALESCE(input_tokens,0), COALESCE(output_tokens,0), COALESCE(cache_read_tokens,0), COALESCE(turns,0), COALESCE(pid,0), COALESCE(container_id,''), COALESCE(stream_file,'')"
 
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 30
 	}
-	q += " LIMIT ?"
+
+	// Subquery selects the N most recent rows, outer query re-sorts ascending.
+	inner := "SELECT " + cols + " FROM agent_calls"
+	if len(where) > 0 {
+		inner += " WHERE " + strings.Join(where, " AND ")
+	}
+	inner += " ORDER BY started_at DESC LIMIT ?"
 	args = append(args, limit)
+
+	q := "SELECT * FROM (" + inner + ") ORDER BY started_at ASC"
 
 	rows, err := c.db.Query(q, args...)
 	if err != nil {
@@ -93,16 +97,24 @@ func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
 type RunningRow struct {
 	ID          int64
 	Role        string
+	Action      string
 	PID         int
 	ContainerID string
 	StartedAt   string
 }
 
+// FindRunning returns calls with no ended_at for the given project.
+// If action is empty, all actions are returned.
 func (c *CallDB) FindRunning(projectID, action string) ([]RunningRow, error) {
-	q := `SELECT id, role, COALESCE(pid,0), COALESCE(container_id,''), started_at
+	q := `SELECT id, role, action, COALESCE(pid,0), COALESCE(container_id,''), started_at
 		FROM agent_calls
-		WHERE ended_at IS NULL AND project_id = ? AND action = ?`
-	rows, err := c.db.Query(q, projectID, action)
+		WHERE ended_at IS NULL AND project_id = ?`
+	args := []any{projectID}
+	if action != "" {
+		q += ` AND action = ?`
+		args = append(args, action)
+	}
+	rows, err := c.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +123,7 @@ func (c *CallDB) FindRunning(projectID, action string) ([]RunningRow, error) {
 	var results []RunningRow
 	for rows.Next() {
 		var r RunningRow
-		if err := rows.Scan(&r.ID, &r.Role, &r.PID, &r.ContainerID, &r.StartedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Role, &r.Action, &r.PID, &r.ContainerID, &r.StartedAt); err != nil {
 			return results, err
 		}
 		results = append(results, r)

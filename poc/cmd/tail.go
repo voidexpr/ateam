@@ -25,7 +25,8 @@ var tailCmd = &cobra.Command{
 	Long: `Stream live output from running agents.
 
 Modes:
-  ateam tail ID [ID...]     Tail specific calls by ID
+  ateam tail                 Tail all running processes (default)
+  ateam tail ID [ID...]      Tail specific calls by ID
   ateam tail --reports       Tail all current report runs
   ateam tail --coding        Tail current coding session (supervisor + sub-runs)
 
@@ -43,10 +44,6 @@ func init() {
 }
 
 func runTail(cmd *cobra.Command, args []string) error {
-	if len(args) == 0 && !tailReports && !tailCoding {
-		return fmt.Errorf("specify call IDs, --reports, or --coding")
-	}
-
 	env, err := root.Lookup()
 	if err != nil {
 		return fmt.Errorf("cannot find .ateamorg/: %w", err)
@@ -82,13 +79,6 @@ func runTail(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-	case tailReports:
-		if projectID == "" {
-			return fmt.Errorf("--reports requires a project context (run from within a project)")
-		}
-		tailer.Action = runner.ActionReport
-		tailer.ProjectID = projectID
-
 	case tailCoding:
 		if projectID == "" {
 			return fmt.Errorf("--coding requires a project context (run from within a project)")
@@ -101,6 +91,20 @@ func runTail(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("no coding session found for this project")
 		}
 		tailer.TaskGroup = tg
+
+	case tailReports:
+		if projectID == "" {
+			return fmt.Errorf("--reports requires a project context (run from within a project)")
+		}
+		tailer.Action = runner.ActionReport
+		tailer.ProjectID = projectID
+
+	default:
+		// No args, no flags: tail everything running for this project
+		if projectID == "" {
+			return fmt.Errorf("no project context found (run from within a project)")
+		}
+		tailer.ProjectID = projectID
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
