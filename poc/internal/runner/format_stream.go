@@ -14,16 +14,18 @@ import (
 // StreamFormatter formats JSONL stream lines for human consumption.
 // It is stateful — tracks turn number, tool count, etc.
 type StreamFormatter struct {
-	Verbose    bool
-	Color      bool
-	Model      string // for cost estimation when not reported natively
-	Prefix     string // for multiplexed tail: "[42:security/run] "
-	TurnNum    int
-	ToolCount  int
-	TextCount  int
-	EventCount int
-	hasResult  bool
-	format     streamFormat
+	Verbose      bool
+	Color        bool
+	Model        string            // for cost estimation when not reported natively
+	DefaultModel string            // fallback model for pricing lookup
+	Pricing      agent.PricingTable // cost estimation table (nil = use native cost only)
+	Prefix       string            // for multiplexed tail: "[42:security/run] "
+	TurnNum      int
+	ToolCount    int
+	TextCount    int
+	EventCount   int
+	hasResult    bool
+	format       streamFormat
 }
 
 func (f *StreamFormatter) HasResult() bool { return f.hasResult }
@@ -183,7 +185,7 @@ func (f *StreamFormatter) fmtResult(e *ResultLine) string {
 
 	cost := e.Cost
 	if cost == 0 && f.Model != "" {
-		cost = agent.EstimateCost(f.Model, e.InputTokens, e.OutputTokens)
+		cost = agent.EstimateCost(f.Pricing, f.Model, f.DefaultModel, e.InputTokens, e.OutputTokens)
 	}
 
 	durSec := e.DurationMS / 1000

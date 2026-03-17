@@ -11,14 +11,27 @@ import (
 	"github.com/ateam-poc/internal/agent"
 )
 
+// FormatStreamOpts holds options for FormatStream.
+type FormatStreamOpts struct {
+	Pricing      agent.PricingTable
+	DefaultModel string
+}
+
 // FormatStream reads a stream JSONL file and writes a human-readable
 // representation to w. Returns any I/O error.
-func FormatStream(path string, w io.Writer) error {
+func FormatStream(path string, w io.Writer, opts *FormatStreamOpts) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+
+	var pricing agent.PricingTable
+	var defaultModel string
+	if opts != nil {
+		pricing = opts.Pricing
+		defaultModel = opts.DefaultModel
+	}
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -74,7 +87,7 @@ func FormatStream(path string, w io.Writer) error {
 			case *ResultLine:
 				cost := e.Cost
 				if cost == 0 && model != "" {
-					cost = agent.EstimateCost(model, e.InputTokens, e.OutputTokens)
+					cost = agent.EstimateCost(pricing, model, defaultModel, e.InputTokens, e.OutputTokens)
 				}
 				fmt.Fprintf(w, "\n── result ──\n")
 				fmt.Fprintf(w, "  Turns:    %d\n", e.Turns)

@@ -814,6 +814,138 @@ func TestDockerContainerConfig(t *testing.T) {
 	}
 }
 
+func TestPricingBlockParsed(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Codex should have pricing from embedded defaults
+	codex := cfg.Agents["codex"]
+	if codex.Pricing == nil {
+		t.Fatal("expected non-nil pricing on codex agent")
+	}
+	if codex.Pricing.DefaultModel != "gpt-5.3-codex" {
+		t.Errorf("expected default_model 'gpt-5.3-codex', got %q", codex.Pricing.DefaultModel)
+	}
+	if len(codex.Pricing.Models) == 0 {
+		t.Fatal("expected non-empty pricing models on codex")
+	}
+	cm, ok := codex.Pricing.Models["gpt-5.3-codex"]
+	if !ok {
+		t.Fatal("expected 'gpt-5.3-codex' in codex pricing models")
+	}
+	if cm.InputPerMTok != 1.75 {
+		t.Errorf("expected gpt-5.3-codex input_per_mtok 1.75, got %v", cm.InputPerMTok)
+	}
+	if cm.OutputPerMTok != 14.00 {
+		t.Errorf("expected gpt-5.3-codex output_per_mtok 14.00, got %v", cm.OutputPerMTok)
+	}
+
+	// Claude has no pricing block — it reports native cost via total_cost_usd
+	claude := cfg.Agents["claude"]
+	if claude.Pricing != nil {
+		t.Errorf("expected nil pricing on claude agent (uses native cost), got %+v", claude.Pricing)
+	}
+}
+
+func TestPricingInheritance(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// claude-sonnet inherits nil pricing from claude (Claude has no pricing block)
+	cs := cfg.Agents["claude-sonnet"]
+	if cs.Pricing != nil {
+		t.Errorf("expected nil pricing inherited from claude, got %+v", cs.Pricing)
+	}
+
+	// claude-docker has no base and no pricing block
+	cd := cfg.Agents["claude-docker"]
+	if cd.Pricing != nil {
+		t.Errorf("expected nil pricing on claude-docker, got %+v", cd.Pricing)
+	}
+}
+
+func TestPricingInheritanceOverride(t *testing.T) {
+	dir := t.TempDir()
+
+	hcl := `
+agent "parent" {
+  command = "test"
+
+  pricing {
+    default_model = "parent-model"
+
+    model "parent-model" {
+      input_per_mtok  = 10.00
+      output_per_mtok = 20.00
+    }
+  }
+}
+
+agent "child" {
+  base = "parent"
+}
+
+agent "child-override" {
+  base = "parent"
+
+  pricing {
+    default_model = "child-model"
+
+    model "child-model" {
+      input_per_mtok  = 1.00
+      output_per_mtok = 2.00
+    }
+  }
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load("", dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// child inherits parent pricing
+	child := cfg.Agents["child"]
+	if child.Pricing == nil {
+		t.Fatal("expected child to inherit pricing from parent")
+	}
+	if child.Pricing.DefaultModel != "parent-model" {
+		t.Errorf("expected inherited default_model 'parent-model', got %q", child.Pricing.DefaultModel)
+	}
+
+	// child-override replaces parent pricing
+	co := cfg.Agents["child-override"]
+	if co.Pricing == nil {
+		t.Fatal("expected child-override to have pricing")
+	}
+	if co.Pricing.DefaultModel != "child-model" {
+		t.Errorf("expected overridden default_model 'child-model', got %q", co.Pricing.DefaultModel)
+	}
+	if len(co.Pricing.Models) != 1 {
+		t.Errorf("expected 1 model in child-override pricing, got %d", len(co.Pricing.Models))
+	}
+}
+
+func TestNoPricingBlock(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Mock agent has no pricing
+	mock := cfg.Agents["mock"]
+	if mock.Pricing != nil {
+		t.Errorf("expected nil pricing for mock agent, got %+v", mock.Pricing)
+	}
+}
+
 func TestDockerProfile(t *testing.T) {
 	cfg, err := Load("", "")
 	if err != nil {

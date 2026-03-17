@@ -24,7 +24,7 @@ func writeTempStream(t *testing.T, content string) string {
 // human-readable sections from the sample fixture.
 func TestFormatStreamOutput(t *testing.T) {
 	var buf strings.Builder
-	if err := FormatStream("testdata/sample_stream.jsonl", &buf); err != nil {
+	if err := FormatStream("testdata/sample_stream.jsonl", &buf, nil); err != nil {
 		t.Fatalf("FormatStream returned error: %v", err)
 	}
 
@@ -57,7 +57,7 @@ func TestFormatStreamOutput(t *testing.T) {
 // when the path does not exist.
 func TestFormatStreamMissingFile(t *testing.T) {
 	var buf strings.Builder
-	err := FormatStream("/nonexistent/path/stream.jsonl", &buf)
+	err := FormatStream("/nonexistent/path/stream.jsonl", &buf, nil)
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")
 	}
@@ -72,7 +72,7 @@ func TestFormatStreamSkipsUnknownTypes(t *testing.T) {
 	path := writeTempStream(t, content)
 
 	var buf strings.Builder
-	if err := FormatStream(path, &buf); err != nil {
+	if err := FormatStream(path, &buf, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(buf.String(), "visible") {

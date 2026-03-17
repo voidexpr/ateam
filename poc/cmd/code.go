@@ -189,6 +189,9 @@ func runCode(cmd *cobra.Command, args []string) error {
 
 		tailer := runner.NewTailer(os.Stderr, db, isTerminal(), codeVerbose)
 		tailer.TaskGroup = taskGroup
+		if rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir); err == nil {
+			tailer.Pricing, tailer.DefaultModel = mergedPricingFromConfig(rtCfg)
+		}
 
 		if rows, err := db.CallsByTaskGroup(taskGroup); err == nil {
 			for _, r := range rows {

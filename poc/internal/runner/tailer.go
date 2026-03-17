@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/ateam-poc/internal/agent"
 	"github.com/ateam-poc/internal/calldb"
 )
 
@@ -31,7 +32,9 @@ type Tailer struct {
 	Action       string // "report" or "" — for --reports mode
 	Color        bool
 	Verbose      bool
-	WaitTimeout  time.Duration // how long to wait for first source (default 30s)
+	Pricing      agent.PricingTable // cost estimation table forwarded to formatters
+	DefaultModel string             // fallback model for pricing lookup
+	WaitTimeout  time.Duration      // how long to wait for first source (default 30s)
 	sources      []*TailSource
 	knownIDs     map[int64]bool
 }
@@ -66,10 +69,12 @@ func (t *Tailer) AddSource(id int64, role, action, streamFile, model string) {
 		ID:         id,
 		StreamFile: streamFile,
 		Formatter: &StreamFormatter{
-			Verbose: t.Verbose,
-			Color:   t.Color,
-			Model:   model,
-			Prefix:  prefix,
+			Verbose:      t.Verbose,
+			Color:        t.Color,
+			Model:        model,
+			DefaultModel: t.DefaultModel,
+			Pricing:      t.Pricing,
+			Prefix:       prefix,
 		},
 	})
 }
