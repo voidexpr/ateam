@@ -36,6 +36,17 @@ type AgentConfig struct {
 	ROPaths     []string          // additional read-only paths merged into sandbox additionalDirectories
 	DeniedPaths []string          // paths merged into sandbox denyWrite
 	ConfigDir   string            // sets CLAUDE_CONFIG_DIR; relative paths resolve from .ateam/, absolute used as-is
+	Pricing     *AgentPricing     // cost estimation config (nil = no pricing)
+}
+
+type AgentPricing struct {
+	DefaultModel string
+	Models       map[string]ModelPricing
+}
+
+type ModelPricing struct {
+	InputPerMTok  float64
+	OutputPerMTok float64
 }
 
 type ContainerConfig struct {
@@ -77,6 +88,18 @@ type hclAgent struct {
 	ROPaths     []string          `hcl:"ro_paths,optional"`
 	DeniedPaths []string          `hcl:"denied_paths,optional"`
 	ConfigDir   string            `hcl:"config_dir,optional"`
+	Pricing     []hclPricing      `hcl:"pricing,block"`
+}
+
+type hclPricing struct {
+	DefaultModel string     `hcl:"default_model"`
+	Models       []hclModel `hcl:"model,block"`
+}
+
+type hclModel struct {
+	Name          string  `hcl:"name,label"`
+	InputPerMTok  float64 `hcl:"input_per_mtok"`
+	OutputPerMTok float64 `hcl:"output_per_mtok"`
 }
 
 type hclContainer struct {
@@ -207,6 +230,9 @@ func (c *Config) resolveInheritance() error {
 		if ac.ConfigDir == "" {
 			ac.ConfigDir = base.ConfigDir
 		}
+		if ac.Pricing == nil {
+			ac.Pricing = base.Pricing
+		}
 
 		c.Agents[name] = ac
 		resolved[name] = true
@@ -258,6 +284,21 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 	}
 
 	for _, a := range hf.Agents {
+		var pricing *AgentPricing
+		if len(a.Pricing) > 0 {
+			hp := a.Pricing[0]
+			models := make(map[string]ModelPricing, len(hp.Models))
+			for _, m := range hp.Models {
+				models[m.Name] = ModelPricing{
+					InputPerMTok:  m.InputPerMTok,
+					OutputPerMTok: m.OutputPerMTok,
+				}
+			}
+			pricing = &AgentPricing{
+				DefaultModel: hp.DefaultModel,
+				Models:       models,
+			}
+		}
 		cfg.Agents[a.Name] = AgentConfig{
 			Name:        a.Name,
 			Base:        a.Base,
@@ -271,6 +312,7 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 			ROPaths:     a.ROPaths,
 			DeniedPaths: a.DeniedPaths,
 			ConfigDir:   a.ConfigDir,
+			Pricing:     pricing,
 		}
 	}
 	for _, c := range hf.Containers {

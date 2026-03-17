@@ -167,15 +167,28 @@ locals {
 }
 
 agent "claude" {
+  type    = "claude"
   command = "claude"
   args    = ["-p", "--output-format", "stream-json", "--verbose"]
   sandbox = local.claude_sandbox
   env = {
     CLAUDECODE = ""
   }
+
+  # Claude reports actual cost directly via total_cost_usd in its stream output,
+  # so no pricing block is needed here. The example below shows how you could
+  # add one if Claude ever stops reporting cost or if you want to override it.
+
+  # pricing {
+  #   default_model = "claude-opus-4"
+  #   model "claude-opus-4"   { input_per_mtok = 15.00; output_per_mtok = 75.00 }
+  #   model "claude-sonnet-4" { input_per_mtok = 3.00;  output_per_mtok = 15.00 }
+  #   model "claude-haiku-4"  { input_per_mtok = 0.80;  output_per_mtok = 4.00  }
+  # }
 }
 
 agent "claude-no-sandbox" {
+  type    = "claude"
   command = "claude"
   args    = ["-p", "--output-format", "stream-json", "--verbose"]
   env = {
@@ -196,6 +209,7 @@ agent "claude-haiku" {
 // claude-docker has no sandbox settings — the container itself provides isolation.
 // Uses --dangerously-skip-permissions for unattended tool use inside Docker.
 agent "claude-docker" {
+  type    = "claude"
   command = "claude"
   args    = ["-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"]
   env = {
@@ -215,6 +229,35 @@ agent "codex" {
   type    = "codex"
   command = "codex"
   args    = ["--sandbox", "workspace-write", "--ask-for-approval", "never"]
+
+  pricing {
+    default_model = "gpt-5.3-codex"
+
+    model "gpt-5.3-codex" {
+      input_per_mtok  = 1.75
+      output_per_mtok = 14.00
+    }
+
+    model "gpt-5.2-codex" {
+      input_per_mtok  = 1.75
+      output_per_mtok = 14.00
+    }
+
+    model "gpt-5.1-codex" {
+      input_per_mtok  = 1.25
+      output_per_mtok = 10.00
+    }
+
+    model "gpt-5-mini" {
+      input_per_mtok  = 0.25
+      output_per_mtok = 2.00
+    }
+
+    model "gpt-5-nano" {
+      input_per_mtok  = 0.05
+      output_per_mtok = 0.40
+    }
+  }
 }
 
 agent "mock" {

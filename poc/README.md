@@ -50,7 +50,7 @@ ATeam's core principles are:
 - **Runtime profiles** — HCL-based configuration (`runtime.hcl`) with agent, container, and profile definitions; 3-level resolution (embedded → org defaults → org → project)
 - **Multiple agents** — Claude Code, Codex, and custom agents configurable via `runtime.hcl`; switch per-command with `--profile` or `--agent`
 - **Docker containers** — run agents inside Docker for full isolation (oneshot and persistent modes); auto-builds from configurable Dockerfile
-- **Cost tracking** — per-run token/cost tracking via SQLite call database; `ateam cost` for aggregated reports, `ateam ps` for run history
+- **Cost tracking** — per-run token/cost tracking via SQLite call database; `ateam cost` for aggregated reports, `ateam ps` for run history. Claude reports actual cost directly; Codex cost is estimated from configurable pricing tables (see [Cost Estimation & Pricing](#cost-estimation--pricing))
 - **Auditability** — see current and historical reports, execution logs, and cost data
 - **Parallel execution** — configurable concurrency with per-role timeouts
 - **Stream-json output** — real-time JSONL stream capture with cost/token tracking
@@ -610,6 +610,61 @@ agent "codex" {
 ```
 
 Agents support inheritance via `base`, sandbox settings (JSON), environment variables, and isolated config dirs.
+
+### Cost Estimation & Pricing
+
+Cost reporting works differently depending on the agent:
+
+- **Claude** reports actual cost directly in its stream output (`total_cost_usd`). No configuration needed — ateam uses the value Claude provides.
+- **Codex** (and other agents that don't report native cost) rely on a `pricing` block in `runtime.hcl` to estimate cost from token counts. This is an estimate based on published model prices at the time of release.
+
+Codex pricing is defined as a lookup table inside the agent definition:
+
+```hcl
+agent "codex" {
+  type    = "codex"
+  command = "codex"
+  args    = ["--sandbox", "workspace-write", "--ask-for-approval", "never"]
+
+  pricing {
+    default_model = "gpt-5.3-codex"
+
+    model "gpt-5.3-codex" {
+      input_per_mtok  = 1.75
+      output_per_mtok = 14.00
+    }
+  }
+}
+```
+
+- `default_model` — the model to assume for pricing when the agent stream doesn't report which model it used. This does **not** control which model the agent runs.
+- `model` blocks — per-million-token prices (input and output). Model names are matched after stripping date suffixes (e.g. `gpt-5.3-codex-2026-01-15` → `gpt-5.3-codex`).
+
+**Pricing can go stale** as model prices change. To update it, edit the `pricing` block in any `runtime.hcl` at the appropriate level:
+
+| Level | File | Scope |
+|-------|------|-------|
+| Built-in defaults | `internal/runtime/defaults/runtime.hcl` (embedded in binary) | Updates with ateam releases |
+| Org defaults | `.ateamorg/defaults/runtime.hcl` | All projects in this org |
+| Org override | `.ateamorg/runtime.hcl` | All projects in this org |
+| Project override | `.ateam/runtime.hcl` | Single project |
+
+For example, to update codex pricing for your org, add to `.ateamorg/runtime.hcl`:
+
+```hcl
+agent "codex" {
+  type    = "codex"
+  command = "codex"
+  args    = ["--sandbox", "workspace-write", "--ask-for-approval", "never"]
+
+  pricing {
+    default_model = "gpt-5.3-codex"
+    model "gpt-5.3-codex" { input_per_mtok = 1.50; output_per_mtok = 12.00 }
+  }
+}
+```
+
+Child agents inherit pricing from their `base` agent. If a child defines its own `pricing` block, it replaces the parent's entirely.
 
 ### Containers
 

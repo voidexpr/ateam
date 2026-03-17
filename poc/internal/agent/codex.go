@@ -12,25 +12,25 @@ import (
 	"time"
 )
 
-const codexDefaultModel = "codex-mini"
-
 // CodexAgent executes prompts using the OpenAI Codex CLI.
 // Invocation: codex [args...] exec --json "prompt"
 // The prompt is passed as a positional argument, not stdin.
 type CodexAgent struct {
-	Command string            // e.g. "codex"
-	Args    []string          // base args, e.g. ["--sandbox", "workspace-write", "--ask-for-approval", "never"]
-	Model   string            // optional model override
-	Env     map[string]string // env vars to set (empty string = exclude from parent env)
+	Command      string            // e.g. "codex"
+	Args         []string          // base args, e.g. ["--sandbox", "workspace-write", "--ask-for-approval", "never"]
+	Model        string            // optional model override (passed as --model flag)
+	DefaultModel string            // assumed model for pricing when stream doesn't report one
+	Pricing      PricingTable      // cost estimation lookup table
+	Env          map[string]string // env vars to set (empty string = exclude from parent env)
 }
 
 func (c *CodexAgent) Name() string { return "codex" }
 
-func (c *CodexAgent) effectiveModel() string {
+func (c *CodexAgent) ModelName() string {
 	if c.Model != "" {
 		return c.Model
 	}
-	return codexDefaultModel
+	return c.DefaultModel
 }
 
 func (c *CodexAgent) DebugCommandArgs(extraArgs []string) (string, []string) {
@@ -172,7 +172,7 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 			if output == "" {
 				output = lastText.String()
 			}
-			model := c.effectiveModel()
+			model := c.ModelName()
 			if re.Model != "" {
 				model = re.Model
 			}
@@ -180,7 +180,7 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 				Type:         "result",
 				Output:       output,
 				Model:        model,
-				Cost:         EstimateCost(model, re.InputTokens, re.OutputTokens),
+				Cost:         EstimateCost(c.Pricing, model, c.DefaultModel, re.InputTokens, re.OutputTokens),
 				InputTokens:  re.InputTokens,
 				OutputTokens: re.OutputTokens,
 				DurationMS:   re.DurationMS,
@@ -213,8 +213,6 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 		}
 	}
 }
-
-func (c *CodexAgent) ModelName() string { return c.effectiveModel() }
 
 // CodexToolUseEvent represents a tool invocation in Codex JSONL output.
 type CodexToolUseEvent struct {

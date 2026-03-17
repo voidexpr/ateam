@@ -205,8 +205,47 @@ func resolveRunner(env *root.ResolvedEnv, profileFlag, agentFlag, action, roleID
 	}
 }
 
+// mergedPricingFromConfig builds a PricingTable that merges all agents' pricing.
+// This is useful when tailing mixed agent types (codex + claude).
+func mergedPricingFromConfig(cfg *runtime.Config) (agent.PricingTable, string) {
+	merged := make(agent.PricingTable)
+	var defaultModel string
+	for _, ac := range cfg.Agents {
+		t, dm := buildPricingFromConfig(ac.Pricing)
+		if t == nil {
+			continue
+		}
+		if defaultModel == "" {
+			defaultModel = dm
+		}
+		for name, price := range t {
+			merged[name] = price
+		}
+	}
+	if len(merged) == 0 {
+		return nil, ""
+	}
+	return merged, defaultModel
+}
+
+// buildPricingFromConfig converts config pricing to an agent PricingTable.
+func buildPricingFromConfig(ap *runtime.AgentPricing) (agent.PricingTable, string) {
+	if ap == nil {
+		return nil, ""
+	}
+	table := make(agent.PricingTable, len(ap.Models))
+	for name, mp := range ap.Models {
+		table[name] = agent.ModelPrice{
+			InputPerToken:  mp.InputPerMTok / 1e6,
+			OutputPerToken: mp.OutputPerMTok / 1e6,
+		}
+	}
+	return table, ap.DefaultModel
+}
+
 // buildAgent constructs an agent.Agent from config.
 func buildAgent(ac *runtime.AgentConfig) agent.Agent {
+	pricing, defaultModel := buildPricingFromConfig(ac.Pricing)
 	switch ac.Type {
 	case "builtin":
 		return &agent.MockAgent{}
@@ -216,21 +255,24 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 			cmd = "codex"
 		}
 		return &agent.CodexAgent{
-			Command: cmd,
-			Args:    ac.Args,
-			Model:   ac.Model,
-			Env:     ac.Env,
+			Command:      cmd,
+			Args:         ac.Args,
+			Model:        ac.Model,
+			DefaultModel: defaultModel,
+			Pricing:      pricing,
+			Env:          ac.Env,
 		}
-	default:
+	default: // "claude", "", or any unknown type
 		cmd := ac.Command
 		if cmd == "" {
 			cmd = ac.Name
 		}
 		return &agent.ClaudeAgent{
-			Command: cmd,
-			Args:    ac.Args,
-			Model:   ac.Model,
-			Env:     ac.Env,
+			Command:      cmd,
+			Args:         ac.Args,
+			Model:        ac.Model,
+			DefaultModel: defaultModel,
+			Env:          ac.Env,
 		}
 	}
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
+	"github.com/ateam-poc/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -57,6 +58,11 @@ func runTail(cmd *cobra.Command, args []string) error {
 
 	color := !tailNoColor && isTerminal()
 	tailer := runner.NewTailer(os.Stderr, db, color, tailVerbose)
+
+	// Load runtime config to provide pricing for cost estimation.
+	if rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir); err == nil {
+		tailer.Pricing, tailer.DefaultModel = mergedPricingFromConfig(rtCfg)
+	}
 
 	projectID := env.ProjectID()
 

@@ -15,14 +15,21 @@ import (
 
 // ClaudeAgent executes prompts using the Claude CLI.
 type ClaudeAgent struct {
-	Command string            // e.g. "claude"
-	Args    []string          // base args from config, e.g. ["-p", "--output-format", "stream-json", "--verbose"]
-	Model   string            // optional model override
-	Env     map[string]string // env vars to set (empty string = exclude from parent env)
+	Command      string            // e.g. "claude"
+	Args         []string          // base args from config, e.g. ["-p", "--output-format", "stream-json", "--verbose"]
+	Model        string            // optional model override (passed as --model flag)
+	DefaultModel string            // assumed model for pricing when stream doesn't report one
+	Env          map[string]string // env vars to set (empty string = exclude from parent env)
 }
 
-func (c *ClaudeAgent) Name() string      { return "claude" }
-func (c *ClaudeAgent) ModelName() string  { return c.Model }
+func (c *ClaudeAgent) Name() string { return "claude" }
+
+func (c *ClaudeAgent) ModelName() string {
+	if c.Model != "" {
+		return c.Model
+	}
+	return c.DefaultModel
+}
 
 func (c *ClaudeAgent) DebugCommandArgs(extraArgs []string) (string, []string) {
 	command := c.Command

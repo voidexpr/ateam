@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ateam-poc/internal/agent"
 	"github.com/ateam-poc/internal/root"
 	"github.com/ateam-poc/internal/runner"
+	"github.com/ateam-poc/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -57,6 +59,19 @@ func runCat(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no calls found for given IDs")
 	}
 
+	// Load runtime config for agent pricing lookup.
+	rtCfg, _ := runtime.Load(env.ProjectDir, env.OrgDir)
+	agentPricing := func(agentName string) (agent.PricingTable, string) {
+		if rtCfg == nil {
+			return nil, ""
+		}
+		ac, ok := rtCfg.Agents[agentName]
+		if !ok {
+			return nil, ""
+		}
+		return buildPricingFromConfig(ac.Pricing)
+	}
+
 	color := !catNoColor && isTerminal()
 
 	for i, row := range rows {
@@ -72,10 +87,13 @@ func runCat(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
+		pricing, defaultModel := agentPricing(row.Agent)
 		f := &runner.StreamFormatter{
-			Verbose: catVerbose,
-			Color:   color,
-			Model:   row.Model,
+			Verbose:      catVerbose,
+			Color:        color,
+			Model:        row.Model,
+			DefaultModel: defaultModel,
+			Pricing:      pricing,
 		}
 		if err := f.FormatFile(row.StreamFile, os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "  error reading %s: %v\n", row.StreamFile, err)
