@@ -11,10 +11,12 @@ import (
 
 // MockAgent is a test agent that returns canned responses.
 type MockAgent struct {
-	Response string
-	Cost     float64
-	Err      error
-	Delay    time.Duration
+	Response     string
+	Cost         float64
+	Err          error
+	Delay        time.Duration
+	DefaultModel string
+	Pricing      PricingTable
 
 	mu       sync.Mutex
 	Requests []Request

@@ -174,17 +174,6 @@ agent "claude" {
   env = {
     CLAUDECODE = ""
   }
-
-  # Claude reports actual cost directly via total_cost_usd in its stream output,
-  # so no pricing block is needed here. The example below shows how you could
-  # add one if Claude ever stops reporting cost or if you want to override it.
-
-  # pricing {
-  #   default_model = "claude-opus-4"
-  #   model "claude-opus-4"   { input_per_mtok = 15.00; output_per_mtok = 75.00 }
-  #   model "claude-sonnet-4" { input_per_mtok = 3.00;  output_per_mtok = 15.00 }
-  #   model "claude-haiku-4"  { input_per_mtok = 0.80;  output_per_mtok = 4.00  }
-  # }
 }
 
 agent "claude-no-sandbox" {
@@ -262,6 +251,15 @@ agent "codex" {
 
 agent "mock" {
   type = "builtin"
+
+  pricing {
+    default_model = "mock-default"
+
+    model "mock-default" {
+      input_per_mtok  = 1.00
+      output_per_mtok = 2.00
+    }
+  }
 }
 
 container "none" {
