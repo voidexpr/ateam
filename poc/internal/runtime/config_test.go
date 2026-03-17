@@ -933,16 +933,28 @@ agent "child-override" {
 	}
 }
 
-func TestNoPricingBlock(t *testing.T) {
+func TestMockPricingBlock(t *testing.T) {
 	cfg, err := Load("", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Mock agent has no pricing
 	mock := cfg.Agents["mock"]
-	if mock.Pricing != nil {
-		t.Errorf("expected nil pricing for mock agent, got %+v", mock.Pricing)
+	if mock.Pricing == nil {
+		t.Fatal("expected non-nil pricing on mock agent")
+	}
+	if mock.Pricing.DefaultModel != "mock-default" {
+		t.Errorf("expected default_model 'mock-default', got %q", mock.Pricing.DefaultModel)
+	}
+	mp, ok := mock.Pricing.Models["mock-default"]
+	if !ok {
+		t.Fatal("expected 'mock-default' in mock pricing models")
+	}
+	if mp.InputPerMTok != 1.00 {
+		t.Errorf("expected input_per_mtok 1.00, got %v", mp.InputPerMTok)
+	}
+	if mp.OutputPerMTok != 2.00 {
+		t.Errorf("expected output_per_mtok 2.00, got %v", mp.OutputPerMTok)
 	}
 }
 

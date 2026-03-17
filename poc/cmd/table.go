@@ -248,7 +248,10 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 	pricing, defaultModel := buildPricingFromConfig(ac.Pricing)
 	switch ac.Type {
 	case "builtin":
-		return &agent.MockAgent{}
+		return &agent.MockAgent{
+			DefaultModel: defaultModel,
+			Pricing:      pricing,
+		}
 	case "codex":
 		cmd := ac.Command
 		if cmd == "" {

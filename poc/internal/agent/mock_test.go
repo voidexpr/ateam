@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -105,6 +106,29 @@ func TestMockAgentError(t *testing.T) {
 	}
 	if lastErr == nil || lastErr.Error() != "simulated failure" {
 		t.Errorf("expected 'simulated failure' error, got %v", lastErr)
+	}
+}
+
+func TestMockAgentPricingEstimation(t *testing.T) {
+	m := &MockAgent{
+		DefaultModel: "mock-default",
+		Pricing: PricingTable{
+			"mock-default": {InputPerToken: 1.00 / 1e6, OutputPerToken: 2.00 / 1e6},
+		},
+	}
+
+	// When the mock emits a result with no native cost, the pricing table
+	// should produce a valid estimate via EstimateCost.
+	cost := EstimateCost(m.Pricing, "", m.DefaultModel, 100, 50)
+	want := 100*1.00/1e6 + 50*2.00/1e6
+	if math.Abs(cost-want) > 1e-12 {
+		t.Errorf("EstimateCost with mock pricing = %v, want %v", cost, want)
+	}
+
+	// A model not in the table falls back to DefaultModel.
+	cost = EstimateCost(m.Pricing, "unknown-model", m.DefaultModel, 100, 50)
+	if math.Abs(cost-want) > 1e-12 {
+		t.Errorf("EstimateCost fallback to default = %v, want %v", cost, want)
 	}
 }
 
