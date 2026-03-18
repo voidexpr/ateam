@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/ateam/internal/agent"
@@ -27,6 +28,7 @@ type Tailer struct {
 	Writer       io.Writer
 	PollInterval time.Duration // default 500ms
 	DB           *calldb.CallDB
+	OrgDir       string // .ateamorg/ dir, used to resolve relative stream_file paths
 	TaskGroup    string // discover new calls joining this group
 	ProjectID    string // for finding running calls
 	Action       string // "report" or "" — for --reports mode
@@ -170,7 +172,7 @@ func (t *Tailer) discoverSources() {
 		}
 		for _, r := range rows {
 			if r.StreamFile != "" {
-				t.AddSource(r.ID, r.Role, r.Action, r.StreamFile, r.Model)
+				t.AddSource(r.ID, r.Role, r.Action, t.resolveStreamFile(r.StreamFile), r.Model)
 			}
 		}
 	}
@@ -208,10 +210,17 @@ func (t *Tailer) discoverSources() {
 				if action == "" {
 					action = c.Action
 				}
-				t.AddSource(c.ID, role, action, c.StreamFile, c.Model)
+				t.AddSource(c.ID, role, action, t.resolveStreamFile(c.StreamFile), c.Model)
 			}
 		}
 	}
+}
+
+func (t *Tailer) resolveStreamFile(sf string) string {
+	if t.OrgDir != "" && !filepath.IsAbs(sf) {
+		return filepath.Join(t.OrgDir, sf)
+	}
+	return sf
 }
 
 func (t *Tailer) pollFiles() {

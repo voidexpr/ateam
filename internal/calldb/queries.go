@@ -66,7 +66,7 @@ func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
 	}
 
 	// Subquery selects the N most recent rows, outer query re-sorts ascending.
-	inner := "SELECT " + cols + " FROM agent_calls"
+	inner := "SELECT " + cols + " FROM agent_execs"
 	if len(where) > 0 {
 		inner += " WHERE " + strings.Join(where, " AND ")
 	}
@@ -107,7 +107,7 @@ type RunningRow struct {
 // If action is empty, all actions are returned.
 func (c *CallDB) FindRunning(projectID, action string) ([]RunningRow, error) {
 	q := `SELECT id, role, action, COALESCE(pid,0), COALESCE(container_id,''), started_at
-		FROM agent_calls
+		FROM agent_execs
 		WHERE ended_at IS NULL AND project_id = ?`
 	args := []any{projectID}
 	if action != "" {
@@ -154,7 +154,7 @@ func (c *CallDB) CostByAction(projectID string) ([]ActionAgg, error) {
 			COALESCE(SUM(output_tokens), 0),
 			COALESCE(SUM(cache_read_tokens), 0),
 			COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(output_tokens), 0) + COALESCE(SUM(cache_read_tokens), 0)
-		FROM agent_calls`
+		FROM agent_execs`
 	var args []any
 	if projectID != "" {
 		q += " WHERE project_id = ?"
@@ -207,7 +207,7 @@ func (c *CallDB) CostByTaskGroup(projectID string) ([]TaskGroupRow, error) {
 			COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(output_tokens), 0) + COALESCE(SUM(cache_read_tokens), 0),
 			MIN(started_at),
 			MAX(ended_at)
-		FROM agent_calls
+		FROM agent_execs
 		WHERE task_group != ''`
 	var args []any
 	if projectID != "" {
@@ -263,7 +263,7 @@ func (c *CallDB) CallsByIDs(ids []int64) ([]CallRow, error) {
 		placeholders[i] = "?"
 		args[i] = id
 	}
-	q := fmt.Sprintf("SELECT %s FROM agent_calls WHERE id IN (%s) ORDER BY started_at",
+	q := fmt.Sprintf("SELECT %s FROM agent_execs WHERE id IN (%s) ORDER BY started_at",
 		callRowCols, strings.Join(placeholders, ","))
 
 	rows, err := c.db.Query(q, args...)
@@ -284,7 +284,7 @@ func (c *CallDB) CallsByIDs(ids []int64) ([]CallRow, error) {
 }
 
 func (c *CallDB) CallsByTaskGroup(taskGroup string) ([]CallRow, error) {
-	q := fmt.Sprintf("SELECT %s FROM agent_calls WHERE task_group = ? ORDER BY started_at", callRowCols)
+	q := fmt.Sprintf("SELECT %s FROM agent_execs WHERE task_group = ? ORDER BY started_at", callRowCols)
 	rows, err := c.db.Query(q, taskGroup)
 	if err != nil {
 		return nil, err
@@ -303,7 +303,7 @@ func (c *CallDB) CallsByTaskGroup(taskGroup string) ([]CallRow, error) {
 }
 
 func (c *CallDB) LatestTaskGroup(projectID, prefix string) (string, error) {
-	q := `SELECT task_group FROM agent_calls
+	q := `SELECT task_group FROM agent_execs
 		WHERE project_id = ? AND task_group LIKE ?
 		ORDER BY started_at DESC LIMIT 1`
 	var tg string

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/root"
@@ -87,6 +88,11 @@ func runCat(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
+		streamPath := row.StreamFile
+		if !filepath.IsAbs(streamPath) {
+			streamPath = filepath.Join(env.OrgDir, streamPath)
+		}
+
 		pricing, defaultModel := agentPricing(row.Agent)
 		f := &runner.StreamFormatter{
 			Verbose:      catVerbose,
@@ -95,7 +101,7 @@ func runCat(cmd *cobra.Command, args []string) error {
 			DefaultModel: defaultModel,
 			Pricing:      pricing,
 		}
-		if err := f.FormatFile(row.StreamFile, os.Stdout); err != nil {
+		if err := f.FormatFile(streamPath, os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "  error reading %s: %v\n", row.StreamFile, err)
 		}
 	}
