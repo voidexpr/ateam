@@ -95,9 +95,14 @@ func Open(dbPath string) (*CallDB, error) {
 	// Reads can still proceed concurrently via WAL.
 	db.SetMaxOpenConns(1)
 
-	if _, err := db.Exec(schema); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("create schema: %w", err)
+	// Skip schema creation when old table exists — migrate() will rename it.
+	var hasOldTable bool
+	db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_calls'").Scan(&hasOldTable)
+	if !hasOldTable {
+		if _, err := db.Exec(schema); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("create schema: %w", err)
+		}
 	}
 
 	if err := migrate(db, dbPath); err != nil {
@@ -154,10 +159,7 @@ func migrate(db *sql.DB, dbPath string) error {
 			}
 		}
 
-		// Drop the empty agent_execs table (and its indexes) created by schema, then rename.
-		if _, err := db.Exec("DROP TABLE IF EXISTS agent_execs"); err != nil {
-			return err
-		}
+		// Rename old table to new name.
 		if _, err := db.Exec("ALTER TABLE agent_calls RENAME TO agent_execs"); err != nil {
 			return err
 		}
