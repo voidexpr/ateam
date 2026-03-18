@@ -302,6 +302,33 @@ func (c *CallDB) CallsByTaskGroup(taskGroup string) ([]CallRow, error) {
 	return results, rows.Err()
 }
 
+// RenameProject updates all rows with oldID to newID, rewriting both the
+// project_id column and the stream_file prefix. Returns rows affected.
+func (c *CallDB) RenameProject(oldID, newID string) (int64, error) {
+	tx, err := c.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec("UPDATE agent_execs SET project_id = ? WHERE project_id = ?", newID, oldID)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+
+	oldPrefix := "projects/" + oldID + "/"
+	newPrefix := "projects/" + newID + "/"
+	if _, err := tx.Exec(
+		"UPDATE agent_execs SET stream_file = REPLACE(stream_file, ?, ?) WHERE stream_file LIKE ?",
+		oldPrefix, newPrefix, oldPrefix+"%",
+	); err != nil {
+		return 0, err
+	}
+
+	return n, tx.Commit()
+}
+
 func (c *CallDB) LatestTaskGroup(projectID, prefix string) (string, error) {
 	q := `SELECT task_group FROM agent_execs
 		WHERE project_id = ? AND task_group LIKE ?

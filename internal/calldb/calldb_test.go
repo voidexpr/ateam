@@ -561,3 +561,63 @@ func TestRecentRunsStreamFile(t *testing.T) {
 		t.Errorf("expected stream file on supervisor, got %q", rows[0].StreamFile)
 	}
 }
+
+func TestRenameProject(t *testing.T) {
+	db := testDB(t)
+
+	now := time.Now()
+	for _, c := range []Call{
+		{ProjectID: "services_api", Action: "report", Role: "security", StartedAt: now, StreamFile: "projects/services_api/roles/security/logs/stream.jsonl"},
+		{ProjectID: "services_api", Action: "run", Role: "testing", StartedAt: now, StreamFile: "projects/services_api/roles/testing/logs/stream.jsonl"},
+		{ProjectID: "other_proj", Action: "run", Role: "security", StartedAt: now, StreamFile: "projects/other_proj/roles/security/logs/stream.jsonl"},
+	} {
+		if _, err := db.InsertCall(&c); err != nil {
+			t.Fatalf("InsertCall: %v", err)
+		}
+	}
+
+	n, err := db.RenameProject("services_api", "backends_api")
+	if err != nil {
+		t.Fatalf("RenameProject: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 rows affected, got %d", n)
+	}
+
+	// Verify project_id updated
+	rows, err := db.RecentRuns(RecentFilter{ProjectID: "backends_api"})
+	if err != nil {
+		t.Fatalf("RecentRuns: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows with new project_id, got %d", len(rows))
+	}
+
+	// Verify old project_id gone
+	rows, err = db.RecentRuns(RecentFilter{ProjectID: "services_api"})
+	if err != nil {
+		t.Fatalf("RecentRuns: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected 0 rows with old project_id, got %d", len(rows))
+	}
+
+	// Verify stream_file paths updated
+	var sf string
+	err = db.db.QueryRow("SELECT stream_file FROM agent_execs WHERE id = 1").Scan(&sf)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if sf != "projects/backends_api/roles/security/logs/stream.jsonl" {
+		t.Errorf("expected updated stream_file, got %q", sf)
+	}
+
+	// Verify other project untouched
+	err = db.db.QueryRow("SELECT stream_file FROM agent_execs WHERE id = 3").Scan(&sf)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if sf != "projects/other_proj/roles/security/logs/stream.jsonl" {
+		t.Errorf("expected other project stream_file unchanged, got %q", sf)
+	}
+}

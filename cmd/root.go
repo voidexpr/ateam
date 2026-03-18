@@ -43,4 +43,5 @@ func init() {
 	rootCmd.AddCommand(allCmd)
 	rootCmd.AddCommand(runsCmd)
 	rootCmd.AddCommand(costCmd)
+	rootCmd.AddCommand(projectRenameCmd)
 }
