@@ -230,6 +230,12 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	// Insert call tracking record.
 	var callID int64
 	if r.CallDB != nil {
+		relStream := streamFile
+		if r.OrgDir != "" {
+			if rel, err := filepath.Rel(r.OrgDir, streamFile); err == nil {
+				relStream = rel
+			}
+		}
 		if id, err := r.CallDB.InsertCall(&calldb.Call{
 			ProjectID:  r.ProjectID,
 			Profile:    r.Profile,
@@ -241,7 +247,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			Model:      agent.NormalizeModel(extractModel(r.Agent)),
 			PromptHash: hashPrompt(prompt),
 			StartedAt:  startedAt,
-			StreamFile: streamFile,
+			StreamFile: relStream,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: call tracking insert failed: %v\n", err)
 		} else {

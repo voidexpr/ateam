@@ -4,13 +4,15 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
 
 const schema = `
-CREATE TABLE IF NOT EXISTS agent_calls (
+CREATE TABLE IF NOT EXISTS agent_execs (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id        TEXT NOT NULL DEFAULT '',
   profile           TEXT NOT NULL DEFAULT '',
@@ -35,11 +37,11 @@ CREATE TABLE IF NOT EXISTS agent_calls (
   turns             INTEGER
 );
 
-CREATE INDEX IF NOT EXISTS idx_calls_started ON agent_calls(started_at);
-CREATE INDEX IF NOT EXISTS idx_calls_project ON agent_calls(project_id, started_at);
-CREATE INDEX IF NOT EXISTS idx_calls_action ON agent_calls(action, started_at);
-CREATE INDEX IF NOT EXISTS idx_calls_task_group ON agent_calls(task_group);
-CREATE INDEX IF NOT EXISTS idx_calls_role ON agent_calls(role, started_at);
+CREATE INDEX IF NOT EXISTS idx_execs_started ON agent_execs(started_at);
+CREATE INDEX IF NOT EXISTS idx_execs_project ON agent_execs(project_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_execs_action ON agent_execs(action, started_at);
+CREATE INDEX IF NOT EXISTS idx_execs_task_group ON agent_execs(task_group);
+CREATE INDEX IF NOT EXISTS idx_execs_role ON agent_execs(role, started_at);
 `
 
 type Call struct {
@@ -98,7 +100,7 @@ func Open(dbPath string) (*CallDB, error) {
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
 
-	if err := migrate(db); err != nil {
+	if err := migrate(db, dbPath); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
@@ -106,36 +108,108 @@ func Open(dbPath string) (*CallDB, error) {
 	return &CallDB{db: db}, nil
 }
 
-func migrate(db *sql.DB) error {
-	rows, err := db.Query("PRAGMA table_info(agent_calls)")
+func migrate(db *sql.DB, dbPath string) error {
+	orgDir := filepath.Dir(dbPath)
+
+	// Check if old table name exists and needs migration.
+	var oldTableExists bool
+	err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_calls'").Scan(&oldTableExists)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+
+	if oldTableExists {
+		// Convert absolute stream_file paths to relative (relative to orgDir).
+		rows, err := db.Query("SELECT id, stream_file FROM agent_calls WHERE stream_file != '' AND stream_file LIKE '/%'")
+		if err != nil {
+			return err
+		}
+		var updates []struct {
+			id  int64
+			rel string
+		}
+		for rows.Next() {
+			var id int64
+			var sf string
+			if err := rows.Scan(&id, &sf); err != nil {
+				rows.Close()
+				return err
+			}
+			rel, relErr := filepath.Rel(orgDir, sf)
+			if relErr != nil || strings.HasPrefix(rel, ".."+string(filepath.Separator)+"..") {
+				continue
+			}
+			updates = append(updates, struct {
+				id  int64
+				rel string
+			}{id, rel})
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, u := range updates {
+			if _, err := db.Exec("UPDATE agent_calls SET stream_file = ? WHERE id = ?", u.rel, u.id); err != nil {
+				return err
+			}
+		}
+
+		// Drop the empty agent_execs table (and its indexes) created by schema, then rename.
+		if _, err := db.Exec("DROP TABLE IF EXISTS agent_execs"); err != nil {
+			return err
+		}
+		if _, err := db.Exec("ALTER TABLE agent_calls RENAME TO agent_execs"); err != nil {
+			return err
+		}
+		// Drop old indexes (they still reference agent_calls internally but
+		// SQLite keeps them working after rename; re-create with new names).
+		for _, idx := range []string{
+			"idx_calls_started", "idx_calls_project", "idx_calls_action",
+			"idx_calls_task_group", "idx_calls_role",
+		} {
+			db.Exec("DROP INDEX IF EXISTS " + idx)
+		}
+		if _, err := db.Exec(`
+			CREATE INDEX IF NOT EXISTS idx_execs_started ON agent_execs(started_at);
+			CREATE INDEX IF NOT EXISTS idx_execs_project ON agent_execs(project_id, started_at);
+			CREATE INDEX IF NOT EXISTS idx_execs_action ON agent_execs(action, started_at);
+			CREATE INDEX IF NOT EXISTS idx_execs_task_group ON agent_execs(task_group);
+			CREATE INDEX IF NOT EXISTS idx_execs_role ON agent_execs(role, started_at);
+		`); err != nil {
+			return err
+		}
+	}
+
+	// Add pid/container_id columns if missing (works on both old-migrated and new tables).
+	tRows, err := db.Query("PRAGMA table_info(agent_execs)")
+	if err != nil {
+		return err
+	}
+	defer tRows.Close()
 
 	hasPID := false
-	for rows.Next() {
+	for tRows.Next() {
 		var cid int
 		var name, typ string
 		var notNull int
 		var dflt sql.NullString
 		var pk int
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+		if err := tRows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
 			return err
 		}
 		if name == "pid" {
 			hasPID = true
 		}
 	}
-	if err := rows.Err(); err != nil {
+	if err := tRows.Err(); err != nil {
 		return err
 	}
 
 	if !hasPID {
-		if _, err := db.Exec("ALTER TABLE agent_calls ADD COLUMN pid INTEGER NOT NULL DEFAULT 0"); err != nil {
+		if _, err := db.Exec("ALTER TABLE agent_execs ADD COLUMN pid INTEGER NOT NULL DEFAULT 0"); err != nil {
 			return err
 		}
-		if _, err := db.Exec("ALTER TABLE agent_calls ADD COLUMN container_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		if _, err := db.Exec("ALTER TABLE agent_execs ADD COLUMN container_id TEXT NOT NULL DEFAULT ''"); err != nil {
 			return err
 		}
 	}
@@ -144,7 +218,7 @@ func migrate(db *sql.DB) error {
 
 func (c *CallDB) InsertCall(call *Call) (int64, error) {
 	res, err := c.db.Exec(`
-		INSERT INTO agent_calls (
+		INSERT INTO agent_execs (
 			project_id, profile, agent, container, action, role,
 			task_group, model, prompt_hash, started_at, stream_file
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -163,7 +237,7 @@ func (c *CallDB) UpdateCall(id int64, result *CallResult) error {
 	if result.IsError {
 		isError = 1
 	}
-	q := `UPDATE agent_calls SET
+	q := `UPDATE agent_execs SET
 			ended_at = ?, duration_ms = ?, exit_code = ?,
 			is_error = ?, error_message = ?, cost_usd = ?,
 			input_tokens = ?, output_tokens = ?, cache_read_tokens = ?,
@@ -185,7 +259,7 @@ func (c *CallDB) UpdateCall(id int64, result *CallResult) error {
 }
 
 func (c *CallDB) SetPID(id int64, pid int, containerID string) error {
-	_, err := c.db.Exec("UPDATE agent_calls SET pid = ?, container_id = ? WHERE id = ?", pid, containerID, id)
+	_, err := c.db.Exec("UPDATE agent_execs SET pid = ?, container_id = ? WHERE id = ?", pid, containerID, id)
 	return err
 }
 

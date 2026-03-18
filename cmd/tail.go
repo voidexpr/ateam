@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/ateam/internal/root"
@@ -58,6 +59,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 
 	color := !tailNoColor && isTerminal()
 	tailer := runner.NewTailer(os.Stderr, db, color, tailVerbose)
+	tailer.OrgDir = env.OrgDir
 
 	// Load runtime config to provide pricing for cost estimation.
 	if rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir); err == nil {
@@ -81,7 +83,11 @@ func runTail(cmd *cobra.Command, args []string) error {
 		}
 		for _, r := range rows {
 			if r.StreamFile != "" {
-				tailer.AddSource(r.ID, r.Role, r.Action, r.StreamFile, r.Model)
+				sf := r.StreamFile
+				if !filepath.IsAbs(sf) {
+					sf = filepath.Join(env.OrgDir, sf)
+				}
+				tailer.AddSource(r.ID, r.Role, r.Action, sf, r.Model)
 			}
 		}
 

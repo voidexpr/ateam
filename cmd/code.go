@@ -188,6 +188,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 		time.Sleep(300 * time.Millisecond)
 
 		tailer := runner.NewTailer(os.Stderr, db, isTerminal(), codeVerbose)
+		tailer.OrgDir = env.OrgDir
 		tailer.TaskGroup = taskGroup
 		if rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir); err == nil {
 			tailer.Pricing, tailer.DefaultModel = mergedPricingFromConfig(rtCfg)

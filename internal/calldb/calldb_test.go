@@ -1,10 +1,13 @@
 package calldb
 
 import (
+	"database/sql"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestOpenCreatesTables(t *testing.T) {
@@ -16,12 +19,12 @@ func TestOpenCreatesTables(t *testing.T) {
 	defer db.Close()
 
 	var name string
-	err = db.db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_calls'").Scan(&name)
+	err = db.db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_execs'").Scan(&name)
 	if err != nil {
 		t.Fatalf("table not created: %v", err)
 	}
-	if name != "agent_calls" {
-		t.Fatalf("expected agent_calls, got %s", name)
+	if name != "agent_execs" {
+		t.Fatalf("expected agent_execs, got %s", name)
 	}
 }
 
@@ -71,7 +74,7 @@ func TestInsertAndUpdate(t *testing.T) {
 
 	var costUSD float64
 	var inputTokens int
-	err = db.db.QueryRow("SELECT cost_usd, input_tokens FROM agent_calls WHERE id = ?", id).Scan(&costUSD, &inputTokens)
+	err = db.db.QueryRow("SELECT cost_usd, input_tokens FROM agent_execs WHERE id = ?", id).Scan(&costUSD, &inputTokens)
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -117,7 +120,7 @@ func TestConcurrentInserts(t *testing.T) {
 	}
 
 	var count int
-	db.db.QueryRow("SELECT COUNT(*) FROM agent_calls").Scan(&count)
+	db.db.QueryRow("SELECT COUNT(*) FROM agent_execs").Scan(&count)
 	if count != n {
 		t.Fatalf("expected %d rows, got %d", n, count)
 	}
@@ -348,7 +351,7 @@ func TestMigrateIdempotent(t *testing.T) {
 	if err := db2.SetPID(id, 12345, "ateam-proj-security"); err != nil {
 		t.Fatalf("SetPID: %v", err)
 	}
-	err = db2.db.QueryRow("SELECT pid, container_id FROM agent_calls WHERE id = ?", id).Scan(&pid, &containerID)
+	err = db2.db.QueryRow("SELECT pid, container_id FROM agent_execs WHERE id = ?", id).Scan(&pid, &containerID)
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -357,6 +360,89 @@ func TestMigrateIdempotent(t *testing.T) {
 	}
 	if containerID != "ateam-proj-security" {
 		t.Errorf("expected container_id ateam-proj-security, got %s", containerID)
+	}
+}
+
+func TestMigrateFromOldTableName(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "state.sqlite")
+
+	// Manually create old-style agent_calls table with absolute stream_file paths.
+	dsn := dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	rawDB, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	_, err = rawDB.Exec(`
+		CREATE TABLE agent_calls (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id TEXT NOT NULL DEFAULT '',
+			profile TEXT NOT NULL DEFAULT '',
+			agent TEXT NOT NULL DEFAULT '',
+			container TEXT NOT NULL DEFAULT 'none',
+			action TEXT NOT NULL DEFAULT '',
+			role TEXT NOT NULL DEFAULT '',
+			task_group TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			prompt_hash TEXT NOT NULL DEFAULT '',
+			started_at TEXT NOT NULL,
+			stream_file TEXT NOT NULL DEFAULT '',
+			ended_at TEXT,
+			duration_ms INTEGER,
+			exit_code INTEGER,
+			is_error INTEGER NOT NULL DEFAULT 0,
+			error_message TEXT NOT NULL DEFAULT '',
+			cost_usd REAL,
+			input_tokens INTEGER,
+			output_tokens INTEGER,
+			cache_read_tokens INTEGER,
+			turns INTEGER,
+			pid INTEGER NOT NULL DEFAULT 0,
+			container_id TEXT NOT NULL DEFAULT ''
+		);
+		CREATE INDEX idx_calls_started ON agent_calls(started_at);
+	`)
+	if err != nil {
+		t.Fatalf("create old table: %v", err)
+	}
+	// Insert a row with an absolute stream_file path.
+	absStream := filepath.Join(dir, "logs", "2026-01-01_stream.jsonl")
+	_, err = rawDB.Exec(`INSERT INTO agent_calls (project_id, started_at, stream_file) VALUES ('proj', '2026-01-01T00:00:00Z', ?)`, absStream)
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	rawDB.Close()
+
+	// Open via calldb — should auto-migrate.
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	// Verify table was renamed.
+	var tableName string
+	err = db.db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_execs'").Scan(&tableName)
+	if err != nil {
+		t.Fatalf("agent_execs table not found: %v", err)
+	}
+
+	// Verify old table is gone.
+	var oldCount int
+	db.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_calls'").Scan(&oldCount)
+	if oldCount != 0 {
+		t.Fatal("old agent_calls table still exists")
+	}
+
+	// Verify stream_file was converted to relative.
+	var sf string
+	err = db.db.QueryRow("SELECT stream_file FROM agent_execs WHERE id = 1").Scan(&sf)
+	if err != nil {
+		t.Fatalf("query stream_file: %v", err)
+	}
+	expected := filepath.Join("logs", "2026-01-01_stream.jsonl")
+	if sf != expected {
+		t.Errorf("expected relative path %q, got %q", expected, sf)
 	}
 }
 
