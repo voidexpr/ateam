@@ -31,18 +31,9 @@ type Request struct {
 	WorkDir    string
 	StreamFile string            // agent writes raw stream here (agent-native JSONL)
 	StderrFile string
-	Sandbox    SandboxRules
 	ExtraArgs  []string          // from --agent-args
 	Env        map[string]string // env vars to set/override
 	CmdFactory container.CmdFactory // if set, agent uses this to create subprocesses instead of exec.CommandContext
-}
-
-// SandboxRules describe filesystem access constraints.
-// Agent implementations translate these to their native format.
-type SandboxRules struct {
-	AllowWriteDirs []string
-	DenyWriteDirs  []string
-	AllowReadDirs  []string
 }
 
 // StreamEvent is the normalized in-memory event type all agents produce.
