@@ -154,9 +154,7 @@ func printDockerfileLine(env *root.ResolvedEnv, cwd string) {
 func printProjectSection(env *root.ResolvedEnv, cwd string) {
 	fmt.Printf("\nProject: %s\n", env.ProjectName)
 
-	if env.StateDir != "" {
-		fmt.Printf("  State: %s\n", env.RelPath(env.StateDir))
-	}
+	fmt.Printf("  DB: %s\n", env.ProjectDBPath())
 	if env.GitRepoDir != "" {
 		fmt.Printf("  Git: %s (%s)\n", env.RelPath(env.GitRepoDir), tildeHome(env.GitRepoDir))
 	}

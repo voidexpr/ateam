@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 
 	"github.com/ateam/internal/root"
@@ -48,10 +47,10 @@ func init() {
 func runTail(cmd *cobra.Command, args []string) error {
 	env, err := root.Lookup()
 	if err != nil {
-		return fmt.Errorf("cannot find .ateamorg/: %w", err)
+		return fmt.Errorf("cannot find project: %w", err)
 	}
 
-	db := openCallDB(env.OrgDir)
+	db := openProjectDB(env)
 	if db == nil {
 		return fmt.Errorf("cannot open call database")
 	}
@@ -59,6 +58,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 
 	color := !tailNoColor && isTerminal()
 	tailer := runner.NewTailer(os.Stderr, db, color, tailVerbose)
+	tailer.ProjectDir = env.ProjectDir
 	tailer.OrgDir = env.OrgDir
 
 	// Load runtime config to provide pricing for cost estimation.
@@ -66,7 +66,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 		tailer.Pricing, tailer.DefaultModel = mergedPricingFromConfig(rtCfg)
 	}
 
-	projectID := env.ProjectID()
+	hasProject := env.ProjectDir != ""
 
 	switch {
 	case len(args) > 0:
@@ -83,19 +83,15 @@ func runTail(cmd *cobra.Command, args []string) error {
 		}
 		for _, r := range rows {
 			if r.StreamFile != "" {
-				sf := r.StreamFile
-				if !filepath.IsAbs(sf) {
-					sf = filepath.Join(env.OrgDir, sf)
-				}
-				tailer.AddSource(r.ID, r.Role, r.Action, sf, r.Model)
+				tailer.AddSource(r.ID, r.Role, r.Action, resolveStreamPath(env, r.StreamFile), r.Model)
 			}
 		}
 
 	case tailCoding:
-		if projectID == "" {
+		if !hasProject {
 			return fmt.Errorf("--coding requires a project context (run from within a project)")
 		}
-		tg, err := db.LatestTaskGroup(projectID, "code-")
+		tg, err := db.LatestTaskGroup("", "code-")
 		if err != nil {
 			return fmt.Errorf("cannot find coding session: %w", err)
 		}
@@ -105,18 +101,18 @@ func runTail(cmd *cobra.Command, args []string) error {
 		tailer.TaskGroup = tg
 
 	case tailReports:
-		if projectID == "" {
+		if !hasProject {
 			return fmt.Errorf("--reports requires a project context (run from within a project)")
 		}
 		tailer.Action = runner.ActionReport
-		tailer.ProjectID = projectID
+		tailer.ProjectID = ""
+		tailer.DiscoverAll = true
 
 	default:
-		// No args, no flags: tail everything running for this project
-		if projectID == "" {
+		if !hasProject {
 			return fmt.Errorf("no project context found (run from within a project)")
 		}
-		tailer.ProjectID = projectID
+		tailer.DiscoverAll = true
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

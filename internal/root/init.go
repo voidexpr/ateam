@@ -54,6 +54,7 @@ func InstallOrg(parentDir string) (string, error) {
 
 // InitProject creates a new .ateam/ project directory at path.
 // orgDir is the resolved .ateamorg/ directory used for duplicate-name checking.
+// orgDir may be empty for org-less mode.
 func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 	projDir := filepath.Join(path, ProjectDirName)
 
@@ -61,17 +62,21 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 		return "", fmt.Errorf("%s/ already exists at %s", ProjectDirName, path)
 	}
 
-	if err := checkDuplicateProjectName(orgDir, opts.Name); err != nil {
-		return "", err
+	if orgDir != "" {
+		if err := checkDuplicateProjectName(orgDir, opts.Name); err != nil {
+			return "", err
+		}
 	}
 
-	orgRoot := filepath.Dir(orgDir)
-	relPath, err := filepath.Rel(orgRoot, path)
-	if err != nil {
-		relPath = path
-	}
-	if err := config.ValidateProjectPath(relPath); err != nil {
-		return "", err
+	if orgDir != "" {
+		orgRoot := filepath.Dir(orgDir)
+		relPath, err := filepath.Rel(orgRoot, path)
+		if err != nil {
+			relPath = path
+		}
+		if err := config.ValidateProjectPath(relPath); err != nil {
+			return "", err
+		}
 	}
 
 	roleIDs := opts.AllRoles
@@ -89,6 +94,16 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 	supervisorHistory := filepath.Join(projDir, "supervisor", "history")
 	if err := os.MkdirAll(supervisorHistory, 0755); err != nil {
 		return "", fmt.Errorf("cannot create supervisor directory: %w", err)
+	}
+
+	// Create logs directories under .ateam/
+	if err := createLogsDirs(projDir, roleIDs); err != nil {
+		return "", err
+	}
+
+	// Write .gitignore for runtime artifacts
+	if err := WriteProjectGitignore(projDir); err != nil {
+		return "", err
 	}
 
 	cfg := config.DefaultConfig()
@@ -116,27 +131,29 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 		return "", err
 	}
 
-	projectID := config.PathToProjectID(relPath)
-
-	if err := createStateDirs(orgDir, projectID, roleIDs); err != nil {
-		return "", err
+	// Legacy: create state dirs under .ateamorg/projects/ if org exists
+	if orgDir != "" {
+		orgRoot := filepath.Dir(orgDir)
+		relPath, _ := filepath.Rel(orgRoot, path)
+		projectID := config.PathToProjectID(relPath)
+		if err := createStateDirs(orgDir, projectID, roleIDs); err != nil {
+			return "", err
+		}
 	}
 
 	return projDir, nil
 }
 
-// EnsureRoles creates missing role dirs under the project and state dir for the given roles.
-// The projectDir part is best-effort (may fail on read-only mounts inside containers);
-// the stateDir part is required for logging.
-func EnsureRoles(projectDir, stateDir string, roleIDs []string) error {
+// EnsureRoles creates missing role dirs under the project for the given roles.
+// The project role dirs (history) are best-effort (may fail on read-only mounts);
+// the logs dirs under .ateam/logs/ are required for logging.
+func EnsureRoles(projectDir string, roleIDs []string) error {
 	for _, roleID := range roleIDs {
 		if err := os.MkdirAll(filepath.Join(projectDir, "roles", roleID, "history"), 0755); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: cannot create project role directory for %s: %v\n", roleID, err)
 		}
-		if stateDir != "" {
-			if err := os.MkdirAll(filepath.Join(stateDir, "roles", roleID, "logs"), 0755); err != nil {
-				return fmt.Errorf("cannot create role state directory: %w", err)
-			}
+		if err := os.MkdirAll(filepath.Join(projectDir, "logs", "roles", roleID), 0755); err != nil {
+			return fmt.Errorf("cannot create role logs directory: %w", err)
 		}
 	}
 	return nil
@@ -153,6 +170,26 @@ func createStateDirs(orgDir, projectID string, roleIDs []string) error {
 		return fmt.Errorf("cannot create supervisor state directory: %w", err)
 	}
 	return nil
+}
+
+// createLogsDirs creates the logs directory structure under .ateam/.
+func createLogsDirs(projDir string, roleIDs []string) error {
+	for _, id := range roleIDs {
+		if err := os.MkdirAll(filepath.Join(projDir, "logs", "roles", id), 0755); err != nil {
+			return fmt.Errorf("cannot create role logs directory: %w", err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(projDir, "logs", "supervisor"), 0755); err != nil {
+		return fmt.Errorf("cannot create supervisor logs directory: %w", err)
+	}
+	return nil
+}
+
+// WriteProjectGitignore writes the .gitignore file inside .ateam/ to exclude
+// runtime artifacts (state.sqlite and logs/).
+func WriteProjectGitignore(projDir string) error {
+	content := "state.sqlite\nstate.sqlite-wal\nstate.sqlite-shm\nlogs/\n"
+	return os.WriteFile(filepath.Join(projDir, ".gitignore"), []byte(content), 0644)
 }
 
 // checkDuplicateProjectName checks registered projects for a name collision.

@@ -58,15 +58,18 @@ ATeam's core principles are:
 
 ## Workflow
 
-You run 'ateam init' within a directory or at the base of a git repo (either your main work area or a separate checkout), it will create a .ateam/ project directory where configuration, prompts and reports are stored. Runtime state (stream logs, stderr captures, runner log) lives in `.ateamorg/projects/<project-id>/` (derived from the project's relative path), keeping `.ateam/` safe to version-control.
+You run 'ateam init' within a directory or at the base of a git repo (either your main work area or a separate checkout), it will create a `.ateam/` project directory where configuration, prompts, reports, and runtime state all live. The `.ateam/` directory is self-contained — moving a project directory just works.
 
-  Ignore all:
+Versioned files (config, prompts, reports) live at the top level of `.ateam/`. Runtime artifacts (logs, SQLite database) live under `.ateam/logs/` and `.ateam/state.sqlite`, which are automatically gitignored via `.ateam/.gitignore`.
+
+  Ignore `.ateam/` entirely (simplest):
 
     **/.ateam/
 
-  Version prompts and reports (runtime state is already outside the repo):
+  Or version prompts and reports (recommended):
 
-    # nothing to ignore — .ateam/ is clean
+    # .ateam/.gitignore already excludes state.sqlite and logs/
+    # nothing extra to configure
 
 Then the workflow is:
 
@@ -431,7 +434,6 @@ Created by `ateam install`. Holds shared defaults and org-level overrides.
 
 ```
 .ateamorg/
-  projects/<project-id>/                        # runtime state per project (see below)
   defaults/                                    # embedded defaults written to disk
     runtime.hcl                                # runtime config (agents, containers, profiles)
     Dockerfile                                 # default Dockerfile for container builds
@@ -462,11 +464,15 @@ Created by `ateam install`. Holds shared defaults and org-level overrides.
 
 ### Project: `.ateam/`
 
-Created by `ateam init`. Holds project config, prompts, reports, and history (version-controllable).
+Created by `ateam init`. Self-contained: config, prompts, reports, and runtime state all live here.
+
+Versioned files (config, prompts, reports, history) are at the top level. Runtime artifacts are under `logs/` and `state.sqlite`, excluded by `.ateam/.gitignore`.
 
 ```
 .ateam/
+  .gitignore                                 # excludes state.sqlite* and logs/
   config.toml                                # project configuration
+  state.sqlite                               # call database (cost/token tracking) [gitignored]
   runtime.hcl                                # project-level runtime config override (optional)
   report_base_prompt.md                      # project-level report base override (optional)
   code_base_prompt.md                        # project-level code base override (optional)
@@ -494,26 +500,18 @@ Created by `ateam init`. Holds project config, prompts, reports, and history (ve
     history/
       2026-03-08_15-04-00.review_prompt.md
       2026-03-08_15-04-00.review.md
-```
-
-### Runtime state: `.ateamorg/projects/<project-id>/`
-
-Runtime files are stored outside the project, keyed by the project's relative path from the org root (escaped: `_` → `__`, `/` → `_`). For example, project at `services/api` gets project ID `services_api`.
-
-```
-.ateamorg/projects/<project-id>/
-  runner.log                                 # append-only execution log
-  state.sqlite                               # call database (cost/token tracking)
-  roles/<NAME>/logs/
-    2026-03-10_22-17-58_report_exec.md       # full execution context (env, settings, prompt)
-    2026-03-10_22-17-58_report_stream.jsonl  # raw JSONL stream
-    2026-03-10_22-17-58_report_stderr.log    # stderr capture
-    2026-03-10_22-17-58_report_settings.json # sandbox settings used
-  supervisor/logs/
-    2026-03-10_22-18-00_review_exec.md
-    2026-03-10_22-18-00_review_stream.jsonl
-    2026-03-10_22-18-00_review_stderr.log
-    2026-03-10_22-18-00_review_settings.json
+  logs/                                      # runtime logs [gitignored]
+    runner.log                               # append-only execution log
+    roles/<NAME>/
+      2026-03-10_22-17-58_report_exec.md       # full execution context (env, settings, prompt)
+      2026-03-10_22-17-58_report_stream.jsonl  # raw JSONL stream
+      2026-03-10_22-17-58_report_stderr.log    # stderr capture
+      2026-03-10_22-17-58_report_settings.json # sandbox settings used
+    supervisor/
+      2026-03-10_22-18-00_review_exec.md
+      2026-03-10_22-18-00_review_stream.jsonl
+      2026-03-10_22-18-00_review_stderr.log
+      2026-03-10_22-18-00_review_settings.json
 ```
 
 ### `config.toml`
@@ -822,7 +820,7 @@ Available roles: `automation`, `basic_project_structure`, `critic_engineering`, 
 
 ### Runner log
 
-Every `ateam report` and `ateam review` invocation is logged to `.ateamorg/projects/<project-id>/runner.log`. Each line is tab-separated with quoted fields:
+Every `ateam report` and `ateam review` invocation is logged to `.ateam/logs/runner.log`. Each line is tab-separated with quoted fields:
 
 ```
 TIMESTAMP  "ROLE"  "STATUS"  "CWD"  "CLI"  [EXTRA...]
@@ -865,11 +863,11 @@ When a run fails, inspect these files:
 | File | Location | Content |
 |------|----------|---------|
 | `report_error.md` | `.ateam/roles/<NAME>/` | Error summary, exit code, duration, stderr, partial output, token usage |
-| `*_stderr.log` | `.ateamorg/projects/<project-id>/roles/<NAME>/logs/` | Raw stderr from the `claude` subprocess |
-| `*_stream.jsonl` | `.ateamorg/projects/<project-id>/roles/<NAME>/logs/` | Raw JSONL event stream (useful for debugging parsing issues) |
-| `*_exec.md` | `.ateamorg/projects/<project-id>/roles/<NAME>/logs/` | Full execution context: env, settings, prompt |
+| `*_stderr.log` | `.ateam/logs/roles/<NAME>/` | Raw stderr from the `claude` subprocess |
+| `*_stream.jsonl` | `.ateam/logs/roles/<NAME>/` | Raw JSONL event stream (useful for debugging parsing issues) |
+| `*_exec.md` | `.ateam/logs/roles/<NAME>/` | Full execution context: env, settings, prompt |
 
-For the supervisor, error files are `.ateam/supervisor/review_error.md` (review) and `.ateam/supervisor/code_error.md` (code). Runtime logs are in `.ateamorg/projects/<project-id>/supervisor/logs/`.
+For the supervisor, error files are `.ateam/supervisor/review_error.md` (review) and `.ateam/supervisor/code_error.md` (code). Runtime logs are in `.ateam/logs/supervisor/`.
 
 ### History
 

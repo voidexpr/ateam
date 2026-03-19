@@ -18,12 +18,11 @@ const (
 
 // ResolvedEnv holds all resolved paths for the org + project environment.
 type ResolvedEnv struct {
-	OrgDir      string         // absolute path to .ateamorg/
+	OrgDir      string         // absolute path to .ateamorg/ (empty in org-less mode)
 	ProjectDir  string         // absolute path to .ateam/
 	ProjectName string         // from config.toml
 	SourceDir   string         // absolute path to project root (parent of .ateam/)
 	GitRepoDir  string         // resolved from config git.repo
-	StateDir    string         // .ateamorg/projects/<project-id>/
 	Config      *config.Config
 }
 
@@ -44,22 +43,24 @@ func (e *ResolvedEnv) ReviewHistoryDir() string {
 }
 
 func (e *ResolvedEnv) RunnerLogPath() string {
-	if e.StateDir != "" {
-		return filepath.Join(e.StateDir, "runner.log")
-	}
 	return filepath.Join(e.ProjectDir, "logs", "runner.log")
 }
 
 func (e *ResolvedEnv) RoleLogsDir(roleID string) string {
-	return filepath.Join(e.StateDir, "roles", roleID, "logs")
+	return filepath.Join(e.ProjectDir, "logs", "roles", roleID)
 }
 
 func (e *ResolvedEnv) SupervisorLogsDir() string {
-	return filepath.Join(e.StateDir, "supervisor", "logs")
+	return filepath.Join(e.ProjectDir, "logs", "supervisor")
 }
 
 func (e *ResolvedEnv) RoleWorkspacesDir(roleID string) string {
-	return filepath.Join(e.StateDir, "roles", roleID, "workspaces")
+	return filepath.Join(e.ProjectDir, "logs", "roles", roleID, "workspaces")
+}
+
+// ProjectDBPath returns the path to the per-project state database.
+func (e *ResolvedEnv) ProjectDBPath() string {
+	return filepath.Join(e.ProjectDir, "state.sqlite")
 }
 
 // NewProjectInfoParams builds a ProjectInfoParams from the resolved environment.
@@ -85,15 +86,19 @@ func (e *ResolvedEnv) ProjectID() string {
 }
 
 // OrgRoot returns the parent directory of .ateamorg.
+// Returns "" in org-less mode.
 func (e *ResolvedEnv) OrgRoot() string {
+	if e.OrgDir == "" {
+		return ""
+	}
 	return filepath.Dir(e.OrgDir)
 }
 
 // RelPath returns absPath relative to the org root.
-// Returns absPath as-is if the computation fails or absPath is empty.
+// Returns absPath as-is if the computation fails, absPath is empty, or org-less mode.
 func (e *ResolvedEnv) RelPath(absPath string) string {
-	if absPath == "" {
-		return ""
+	if absPath == "" || e.OrgDir == "" {
+		return absPath
 	}
 	rel, err := filepath.Rel(e.OrgRoot(), absPath)
 	if err != nil {
@@ -109,8 +114,6 @@ func (e *ResolvedEnv) populateFromConfig(projectDir string, cfg *config.Config) 
 	if cfg.Git.Repo != "" {
 		e.GitRepoDir = resolvePath(e.SourceDir, cfg.Git.Repo)
 	}
-	relPath := e.RelPath(e.SourceDir)
-	e.StateDir = filepath.Join(e.OrgDir, "projects", config.PathToProjectID(relPath))
 }
 
 // FindOrg walks up from cwd looking for a .ateamorg directory.
@@ -160,6 +163,7 @@ func findInPath(cwd, target string) (string, bool) {
 }
 
 // Resolve discovers org and project directories and loads config.
+// If no .ateamorg/ is found but .ateam/ exists, operates in org-less mode.
 func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
 	cwd := realPath(mustGetwd())
 
@@ -167,19 +171,26 @@ func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
 	var err error
 	if orgOverride != "" {
 		orgDir, err = resolveOrgByName(orgOverride)
+		if err != nil {
+			return nil, err
+		}
 	} else {
-		orgDir, err = FindOrg(cwd)
-	}
-	if err != nil {
-		return nil, err
+		orgDir, _ = FindOrg(cwd)
 	}
 
 	var projectDir string
 	if projectOverride != "" {
+		if orgDir == "" {
+			return nil, fmt.Errorf("--project requires an org context (.ateamorg/)")
+		}
 		projectDir, err = resolveProjectByName(orgDir, projectOverride)
 	} else {
-		projectDir, err = resolveProjectFromStateDir(orgDir, cwd)
-		if err != nil {
+		if orgDir != "" {
+			projectDir, err = resolveProjectFromStateDir(orgDir, cwd)
+			if err != nil {
+				projectDir, err = FindProject(cwd)
+			}
+		} else {
 			projectDir, err = FindProject(cwd)
 		}
 	}
@@ -203,24 +214,31 @@ func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
 
 // Lookup discovers org and project without creating anything.
 // Returns partial ResolvedEnv if project is not found.
+// Works in org-less mode: if no .ateamorg/ but .ateam/ exists, OrgDir is "".
 func Lookup() (*ResolvedEnv, error) {
 	cwd := realPath(mustGetwd())
 
-	orgDir, err := FindOrg(cwd)
-	if err != nil {
-		return nil, err
-	}
+	orgDir, _ := FindOrg(cwd)
 
 	env := &ResolvedEnv{
 		OrgDir: orgDir,
 	}
 
-	projectDir, err := resolveProjectFromStateDir(orgDir, cwd)
-	if err != nil {
+	var projectDir string
+	var err error
+	if orgDir != "" {
+		projectDir, err = resolveProjectFromStateDir(orgDir, cwd)
+		if err != nil {
+			projectDir, err = FindProject(cwd)
+		}
+	} else {
 		projectDir, err = FindProject(cwd)
 	}
 	if err != nil {
-		return env, nil
+		if orgDir != "" {
+			return env, nil
+		}
+		return nil, fmt.Errorf("no .ateamorg/ or .ateam/ found")
 	}
 
 	env.ProjectDir = projectDir

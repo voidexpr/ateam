@@ -149,14 +149,14 @@ func runCode(cmd *cobra.Command, args []string) error {
 	setSourceWritable(cr)
 	applyCheaperModel(cr, codeCheaperModel)
 
-	db := openCallDB(env.OrgDir)
+	db := openProjectDB(env)
 	if db != nil {
 		defer db.Close()
 		cr.CallDB = db
 	}
 
 	if !codeForce {
-		if err := checkConcurrentRuns(db, env.ProjectID(), runner.ActionCode, nil); err != nil {
+		if err := checkConcurrentRuns(db, "", runner.ActionCode, nil); err != nil {
 			return err
 		}
 	}
@@ -188,6 +188,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 		time.Sleep(300 * time.Millisecond)
 
 		tailer := runner.NewTailer(os.Stderr, db, isTerminal(), codeVerbose)
+		tailer.ProjectDir = env.ProjectDir
 		tailer.OrgDir = env.OrgDir
 		tailer.TaskGroup = taskGroup
 		if rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir); err == nil {

@@ -74,23 +74,36 @@ func TestIntegration_BasicProject(t *testing.T) {
 		t.Errorf("GitRepoDir = %q, want %q", env.GitRepoDir, projPath)
 	}
 
-	// Verify StateDir is path-based.
-	wantProjectID := config.PathToProjectID("level1/myproj")
-	wantStateDir := filepath.Join(orgDir, "projects", wantProjectID)
-	if env.StateDir != wantStateDir {
-		t.Errorf("StateDir = %q, want %q", env.StateDir, wantStateDir)
-	}
-
-	// Verify state directories were created.
+	// Verify logs directories were created under .ateam/.
 	for _, roleID := range prompts.AllRoleIDs {
-		logsDir := filepath.Join(env.StateDir, "roles", roleID, "logs")
+		logsDir := filepath.Join(projDir, "logs", "roles", roleID)
 		if _, err := os.Stat(logsDir); err != nil {
-			t.Errorf("state logs dir missing for role %s: %v", roleID, err)
+			t.Errorf("logs dir missing for role %s: %v", roleID, err)
 		}
 	}
-	supervisorLogsDir := filepath.Join(env.StateDir, "supervisor", "logs")
+	supervisorLogsDir := filepath.Join(projDir, "logs", "supervisor")
 	if _, err := os.Stat(supervisorLogsDir); err != nil {
-		t.Errorf("supervisor state logs dir missing: %v", err)
+		t.Errorf("supervisor logs dir missing: %v", err)
+	}
+
+	// Verify .gitignore was created.
+	gitignorePath := filepath.Join(projDir, ".gitignore")
+	if data, err := os.ReadFile(gitignorePath); err != nil {
+		t.Errorf(".gitignore missing: %v", err)
+	} else {
+		content := string(data)
+		if !strings.Contains(content, "state.sqlite") {
+			t.Error(".gitignore should contain state.sqlite")
+		}
+		if !strings.Contains(content, "logs/") {
+			t.Error(".gitignore should contain logs/")
+		}
+	}
+
+	// Verify ProjectDBPath.
+	wantDBPath := filepath.Join(projDir, "state.sqlite")
+	if env.ProjectDBPath() != wantDBPath {
+		t.Errorf("ProjectDBPath() = %q, want %q", env.ProjectDBPath(), wantDBPath)
 	}
 
 	// FindOrg from project path should find the org.
@@ -428,20 +441,20 @@ func TestIntegration_StatePathMethods(t *testing.T) {
 	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
 	env.populateFromConfig(projDir, cfg)
 
-	projectID := config.PathToProjectID("myproj")
-	stateBase := filepath.Join(orgDir, "projects", projectID)
-
-	if got := env.RoleLogsDir("security"); got != filepath.Join(stateBase, "roles", "security", "logs") {
-		t.Errorf("RoleLogsDir = %q, want path under state dir", got)
+	if got := env.RoleLogsDir("security"); got != filepath.Join(projDir, "logs", "roles", "security") {
+		t.Errorf("RoleLogsDir = %q, want %q", got, filepath.Join(projDir, "logs", "roles", "security"))
 	}
-	if got := env.SupervisorLogsDir(); got != filepath.Join(stateBase, "supervisor", "logs") {
-		t.Errorf("SupervisorLogsDir = %q, want path under state dir", got)
+	if got := env.SupervisorLogsDir(); got != filepath.Join(projDir, "logs", "supervisor") {
+		t.Errorf("SupervisorLogsDir = %q, want %q", got, filepath.Join(projDir, "logs", "supervisor"))
 	}
-	if got := env.RoleWorkspacesDir("security"); got != filepath.Join(stateBase, "roles", "security", "workspaces") {
-		t.Errorf("RoleWorkspacesDir = %q, want path under state dir", got)
+	if got := env.RoleWorkspacesDir("security"); got != filepath.Join(projDir, "logs", "roles", "security", "workspaces") {
+		t.Errorf("RoleWorkspacesDir = %q, want %q", got, filepath.Join(projDir, "logs", "roles", "security", "workspaces"))
 	}
-	if got := env.RunnerLogPath(); got != filepath.Join(stateBase, "runner.log") {
-		t.Errorf("RunnerLogPath = %q, want path under state dir", got)
+	if got := env.RunnerLogPath(); got != filepath.Join(projDir, "logs", "runner.log") {
+		t.Errorf("RunnerLogPath = %q, want %q", got, filepath.Join(projDir, "logs", "runner.log"))
+	}
+	if got := env.ProjectDBPath(); got != filepath.Join(projDir, "state.sqlite") {
+		t.Errorf("ProjectDBPath = %q, want %q", got, filepath.Join(projDir, "state.sqlite"))
 	}
 }
 
@@ -473,13 +486,19 @@ func TestIntegration_RunnerLogsDirFlow(t *testing.T) {
 	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
 	env.populateFromConfig(projDir, cfg)
 
-	// Simulate report: LogsDir = env.RoleLogsDir(roleID), flat timestamped files
+	// Verify logs dirs are under .ateam/logs/
 	roleLogsDir := env.RoleLogsDir("security")
 	t.Logf("RoleLogsDir: %s", roleLogsDir)
-
-	if err := os.MkdirAll(roleLogsDir, 0755); err != nil {
-		t.Fatalf("MkdirAll role logs dir: %v", err)
+	wantRoleLogsDir := filepath.Join(projDir, "logs", "roles", "security")
+	if roleLogsDir != wantRoleLogsDir {
+		t.Fatalf("RoleLogsDir = %q, want %q", roleLogsDir, wantRoleLogsDir)
 	}
+
+	// Dirs should already exist from InitProject
+	if _, err := os.Stat(roleLogsDir); err != nil {
+		t.Fatalf("role logs dir should exist after init: %v", err)
+	}
+
 	streamFile := filepath.Join(roleLogsDir, "2026-03-10_22-17-58_report_stream.jsonl")
 	if err := os.WriteFile(streamFile, []byte("test"), 0644); err != nil {
 		t.Fatalf("WriteFile stream: %v", err)
@@ -488,35 +507,43 @@ func TestIntegration_RunnerLogsDirFlow(t *testing.T) {
 		t.Fatalf("stream file not found after write: %v", err)
 	}
 
-	// Simulate review: LogsDir = env.SupervisorLogsDir(), flat timestamped files
+	// Verify stream file relative path
+	relStream, err := filepath.Rel(projDir, streamFile)
+	if err != nil {
+		t.Fatalf("filepath.Rel: %v", err)
+	}
+	if relStream != "logs/roles/security/2026-03-10_22-17-58_report_stream.jsonl" {
+		t.Errorf("relative stream = %q, want %q", relStream, "logs/roles/security/2026-03-10_22-17-58_report_stream.jsonl")
+	}
+
 	supLogsDir := env.SupervisorLogsDir()
 	t.Logf("SupervisorLogsDir: %s", supLogsDir)
-
-	if err := os.MkdirAll(supLogsDir, 0755); err != nil {
-		t.Fatalf("MkdirAll supervisor logs dir: %v", err)
+	wantSupLogsDir := filepath.Join(projDir, "logs", "supervisor")
+	if supLogsDir != wantSupLogsDir {
+		t.Fatalf("SupervisorLogsDir = %q, want %q", supLogsDir, wantSupLogsDir)
 	}
+
 	supStream := filepath.Join(supLogsDir, "2026-03-10_22-18-00_review_stream.jsonl")
 	if err := os.WriteFile(supStream, []byte("test"), 0644); err != nil {
 		t.Fatalf("WriteFile supervisor stream: %v", err)
 	}
-	if _, err := os.Stat(supStream); err != nil {
-		t.Fatalf("supervisor stream file not found after write: %v", err)
-	}
 
-	// Verify runner log path
+	// Verify runner log path under .ateam/logs/
 	runnerLog := env.RunnerLogPath()
 	t.Logf("RunnerLogPath: %s", runnerLog)
-	if err := os.MkdirAll(filepath.Dir(runnerLog), 0755); err != nil {
-		t.Fatalf("MkdirAll runner log dir: %v", err)
+	wantRunnerLog := filepath.Join(projDir, "logs", "runner.log")
+	if runnerLog != wantRunnerLog {
+		t.Fatalf("RunnerLogPath = %q, want %q", runnerLog, wantRunnerLog)
 	}
+	// The logs/ dir already exists from InitProject
 	if err := os.WriteFile(runnerLog, []byte("log entry"), 0644); err != nil {
 		t.Fatalf("WriteFile runner log: %v", err)
 	}
 }
 
-// TestIntegration_NestedProjectStateDir verifies that a nested project path
-// produces the correct path-based state directory name.
-func TestIntegration_NestedProjectStateDir(t *testing.T) {
+// TestIntegration_NestedProjectPaths verifies that a nested project path
+// produces correct log paths under .ateam/.
+func TestIntegration_NestedProjectPaths(t *testing.T) {
 	base := resolvedTempDir(t)
 
 	orgDir, err := InstallOrg(base)
@@ -542,11 +569,14 @@ func TestIntegration_NestedProjectStateDir(t *testing.T) {
 	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
 	env.populateFromConfig(projDir, cfg)
 
-	wantProjectID := config.PathToProjectID("services/api/v2")
-	wantStateDir := filepath.Join(orgDir, "projects", wantProjectID)
-	if env.StateDir != wantStateDir {
-		t.Errorf("StateDir = %q, want %q", env.StateDir, wantStateDir)
+	// Verify logs are under .ateam/logs/
+	wantLogsDir := filepath.Join(projDir, "logs", "roles", "security")
+	if got := env.RoleLogsDir("security"); got != wantLogsDir {
+		t.Errorf("RoleLogsDir = %q, want %q", got, wantLogsDir)
 	}
+
+	// Verify ProjectID still works for org context
+	wantProjectID := config.PathToProjectID("services/api/v2")
 	if wantProjectID != "services_api_v2" {
 		t.Errorf("project ID = %q, want %q", wantProjectID, "services_api_v2")
 	}

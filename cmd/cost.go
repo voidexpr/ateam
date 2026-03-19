@@ -28,28 +28,21 @@ Example:
 func runCost(cmd *cobra.Command, args []string) error {
 	env, err := root.Lookup()
 	if err != nil {
-		return fmt.Errorf("cannot find .ateamorg/: %w", err)
+		return fmt.Errorf("cannot find project: %w", err)
 	}
 
-	db := openCallDB(env.OrgDir)
+	db := openProjectDB(env)
 	if db == nil {
 		return fmt.Errorf("cannot open call database")
 	}
 	defer db.Close()
 
-	projectID := ""
-	if projectFlag != "" {
-		projectID = projectFlag
-	} else if env.ProjectDir != "" {
-		projectID = env.ProjectID()
-	}
-
-	if projectID != "" {
-		fmt.Printf("Project: %s\n\n", projectID)
+	if env.ProjectName != "" {
+		fmt.Printf("Project: %s\n\n", env.ProjectName)
 	}
 
 	// --- All-time aggregation by action category ---
-	actionAggs, err := db.CostByAction(projectID)
+	actionAggs, err := db.CostByAction("")
 	if err != nil {
 		return fmt.Errorf("action aggregation query failed: %w", err)
 	}
@@ -76,7 +69,7 @@ func runCost(cmd *cobra.Command, args []string) error {
 	}
 
 	// --- Task group breakdown ---
-	sessionRows, err := db.CostByTaskGroup(projectID)
+	sessionRows, err := db.CostByTaskGroup("")
 	if err != nil {
 		return fmt.Errorf("task group query failed: %w", err)
 	}

@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/root"
@@ -43,10 +42,10 @@ func runCat(cmd *cobra.Command, args []string) error {
 
 	env, err := root.Lookup()
 	if err != nil {
-		return fmt.Errorf("cannot find .ateamorg/: %w", err)
+		return fmt.Errorf("cannot find project: %w", err)
 	}
 
-	db := openCallDB(env.OrgDir)
+	db := openProjectDB(env)
 	if db == nil {
 		return fmt.Errorf("cannot open call database")
 	}
@@ -88,10 +87,7 @@ func runCat(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		streamPath := row.StreamFile
-		if !filepath.IsAbs(streamPath) {
-			streamPath = filepath.Join(env.OrgDir, streamPath)
-		}
+		streamPath := resolveStreamPath(env, row.StreamFile)
 
 		pricing, defaultModel := agentPricing(row.Agent)
 		f := &runner.StreamFormatter{

@@ -97,14 +97,14 @@ func runReview(cmd *cobra.Command, args []string) error {
 	}
 	applyCheaperModel(cr, reviewCheaperModel)
 
-	db := openCallDB(env.OrgDir)
+	db := openProjectDB(env)
 	if db != nil {
 		defer db.Close()
 		cr.CallDB = db
 	}
 
 	if !reviewForce {
-		if err := checkConcurrentRuns(db, env.ProjectID(), runner.ActionReview, nil); err != nil {
+		if err := checkConcurrentRuns(db, "", runner.ActionReview, nil); err != nil {
 			return err
 		}
 	}

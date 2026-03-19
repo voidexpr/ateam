@@ -89,7 +89,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if !prompts.IsValidRole(runRole, env.Config.Roles) {
 			return fmt.Errorf("unknown role: %s\nValid roles: %s", runRole, strings.Join(prompts.AllKnownRoleIDs(env.Config.Roles), ", "))
 		}
-		if err := root.EnsureRoles(env.ProjectDir, env.StateDir, []string{runRole}); err != nil {
+		if err := root.EnsureRoles(env.ProjectDir, []string{runRole}); err != nil {
 			return err
 		}
 	}
@@ -125,7 +125,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	setSourceWritable(r)
 
 	// Open call tracking DB.
-	db := openCallDB(env.OrgDir)
+	db := openProjectDB(env)
 	if db != nil {
 		defer db.Close()
 		r.CallDB = db

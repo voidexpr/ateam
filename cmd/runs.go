@@ -42,24 +42,17 @@ func init() {
 func runRuns(cmd *cobra.Command, args []string) error {
 	env, err := root.Lookup()
 	if err != nil {
-		return fmt.Errorf("cannot find .ateamorg/: %w", err)
+		return fmt.Errorf("cannot find project: %w", err)
 	}
 
-	db := openCallDB(env.OrgDir)
+	db := openProjectDB(env)
 	if db == nil {
 		return fmt.Errorf("cannot open call database")
 	}
 	defer db.Close()
 
-	projectID := ""
-	if projectFlag != "" {
-		projectID = projectFlag
-	} else if env.ProjectDir != "" {
-		projectID = env.ProjectID()
-	}
-
 	rows, err := db.RecentRuns(calldb.RecentFilter{
-		ProjectID: projectID,
+		ProjectID: "",
 		Role:      recentRole,
 		Action:    recentAction,
 		Limit:     recentLimit,
