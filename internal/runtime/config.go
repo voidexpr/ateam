@@ -391,7 +391,7 @@ func parseLocals(data []byte, filename string) (*hcl.EvalContext, error) {
 //
 // The filename searched for comes from the container config (cc.Dockerfile,
 // typically just "Dockerfile"). Returns the absolute path to the first match.
-func ResolveDockerfile(cc *ContainerConfig, projectDir, orgDir, roleID string) (string, error) {
+func ResolveDockerfile(cc *ContainerConfig, projectDir, orgDir, roleID string) (dockerfilePath string, tmpDir string, err error) {
 	name := cc.Dockerfile
 	if name == "" {
 		name = "Dockerfile"
@@ -412,24 +412,25 @@ func ResolveDockerfile(cc *ContainerConfig, projectDir, orgDir, roleID string) (
 
 	for _, path := range candidates {
 		if _, err := os.Stat(path); err == nil {
-			return path, nil
+			return path, "", nil
 		}
 	}
 
 	// Final fallback: embedded default
 	data, err := defaults.FS.ReadFile("Dockerfile")
 	if err != nil {
-		return "", fmt.Errorf("no Dockerfile found and embedded default missing: %w", err)
+		return "", "", fmt.Errorf("no Dockerfile found and embedded default missing: %w", err)
 	}
-	tmpDir, err := os.MkdirTemp("", "ateam-dockerfile-*")
+	tmpDir, err = os.MkdirTemp("", "ateam-dockerfile-*")
 	if err != nil {
-		return "", fmt.Errorf("cannot create temp dir for Dockerfile: %w", err)
+		return "", "", fmt.Errorf("cannot create temp dir for Dockerfile: %w", err)
 	}
 	tmpFile := filepath.Join(tmpDir, "Dockerfile")
 	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
-		return "", fmt.Errorf("cannot write embedded Dockerfile: %w", err)
+		os.RemoveAll(tmpDir)
+		return "", "", fmt.Errorf("cannot write embedded Dockerfile: %w", err)
 	}
-	return tmpFile, nil
+	return tmpFile, tmpDir, nil
 }
 
 // WriteOrgDefaults writes the embedded runtime.hcl and Dockerfile to orgDir/defaults/.

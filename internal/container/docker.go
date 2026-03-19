@@ -37,6 +37,10 @@ type DockerContainer struct {
 	// When set, it is bind-mounted to /usr/local/bin/ateam inside the container.
 	HostCLIPath string
 
+	// DockerfileTmpDir is a temporary directory created for the embedded Dockerfile.
+	// EnsureImage removes it after the build completes.
+	DockerfileTmpDir string
+
 	// SourceWritable mounts the source code directory as :rw instead of :ro.
 	// Required for actions that modify source code (code, run).
 	SourceWritable bool
@@ -48,6 +52,8 @@ func (d *DockerContainer) Type() string { return "docker" }
 
 // EnsureImage builds the docker image if it doesn't exist.
 func (d *DockerContainer) EnsureImage(ctx context.Context) error {
+	defer d.cleanupDockerfileTmpDir()
+
 	// Check if image already exists
 	check := exec.CommandContext(ctx, "docker", "image", "inspect", d.Image)
 	if check.Run() == nil {
@@ -86,6 +92,13 @@ func (d *DockerContainer) EnsureImage(ctx context.Context) error {
 		return fmt.Errorf("docker build failed: %w", err)
 	}
 	return nil
+}
+
+func (d *DockerContainer) cleanupDockerfileTmpDir() {
+	if d.DockerfileTmpDir != "" {
+		os.RemoveAll(d.DockerfileTmpDir)
+		d.DockerfileTmpDir = ""
+	}
 }
 
 // EnsureRunning starts the persistent container if not already running.
