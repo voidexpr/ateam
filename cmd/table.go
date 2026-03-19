@@ -360,7 +360,7 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 			SourceDir:     sourceDir,
 			ProjectDir:    projectDir,
 			OrgDir:        orgDir,
-			HostCLIPath:   crossBuildCLI(orgDir),
+			HostCLIPath:   findLinuxBinary(orgDir),
 		}, nil
 	default:
 		return nil, nil
@@ -383,12 +383,11 @@ func buildContainerName(sourceDir, orgDir, roleID string) string {
 	return "ateam-" + projectID + "-" + roleID
 }
 
-// crossBuildCLI cross-compiles the ateam binary for linux/amd64 when the host
-// is not Linux. The result is cached in orgDir/cache/ and reused if the host
-// binary hasn't changed. Returns the path to the Linux binary, or "" on failure.
-func crossBuildCLI(orgDir string) string {
+// findLinuxBinary locates or builds a Linux/AMD64 ateam binary for Docker.
+// Search order: self (if linux), companion binary, org cache, cross-compile.
+func findLinuxBinary(orgDir string) string {
+	// 1. Already on target platform — use the running binary.
 	if goruntime.GOOS == "linux" && goruntime.GOARCH == "amd64" {
-		// Already on the target platform; use the running binary directly.
 		if exe, err := os.Executable(); err == nil {
 			return exe
 		}
@@ -397,16 +396,45 @@ func crossBuildCLI(orgDir string) string {
 
 	exe, err := os.Executable()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: cannot find ateam binary for cross-build: %v\n", err)
 		return ""
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
 
-	// The go module dir is the directory containing the binary (make build outputs there).
-	modDir := filepath.Dir(exe)
-	goMod := filepath.Join(modDir, "go.mod")
-	if _, err := os.Stat(goMod); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: go.mod not found next to %s, cannot cross-build\n", exe)
+	// 2. Companion binary next to host binary (e.g. from a release archive).
+	companion := filepath.Join(filepath.Dir(exe), "ateam-linux-amd64")
+	if info, err := os.Stat(companion); err == nil && !info.IsDir() {
+		return companion
+	}
+
+	// 3. Cached in orgDir from a prior cross-compilation.
+	if orgDir != "" {
+		cached := filepath.Join(orgDir, "cache", "ateam-linux-amd64")
+		if info, err := os.Stat(cached); err == nil && !info.IsDir() {
+			return cached
+		}
+	}
+
+	// 4. Cross-compile if Go toolchain is available.
+	if orgDir != "" {
+		if built := crossBuildIfPossible(exe, orgDir); built != "" {
+			return built
+		}
+	}
+
+	fmt.Fprintf(os.Stderr, "Warning: no Linux ateam binary found for Docker; "+
+		"place ateam-linux-amd64 next to %s or install Go to cross-compile\n", exe)
+	return ""
+}
+
+// crossBuildIfPossible cross-compiles ateam for linux/amd64 if go.mod exists
+// next to hostExe and `go` is in PATH. The result is cached in orgDir/cache/
+// and reused if the host binary hasn't changed.
+func crossBuildIfPossible(hostExe, orgDir string) string {
+	modDir := filepath.Dir(hostExe)
+	if _, err := os.Stat(filepath.Join(modDir, "go.mod")); err != nil {
+		return ""
+	}
+	if _, err := exec.LookPath("go"); err != nil {
 		return ""
 	}
 
@@ -417,7 +445,7 @@ func crossBuildCLI(orgDir string) string {
 	target := filepath.Join(cacheDir, "ateam-linux-amd64")
 
 	// Rebuild only if the target is missing or older than the host binary.
-	hostInfo, _ := os.Stat(exe)
+	hostInfo, _ := os.Stat(hostExe)
 	targetInfo, targetErr := os.Stat(target)
 	if targetErr == nil && hostInfo != nil && !targetInfo.ModTime().Before(hostInfo.ModTime()) {
 		return target

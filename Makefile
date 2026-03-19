@@ -1,11 +1,16 @@
 BINARY = ateam
 
-.PHONY: build clean tidy test test-docker test-docker-live
+.PHONY: build companion clean tidy test test-docker test-docker-live
 
 BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 build: tidy
 	go build -ldflags "-X github.com/ateam/cmd.BuildTime=$(BUILD_TIME)" -o $(BINARY) .
+
+companion:
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
+		-ldflags "-X github.com/ateam/cmd.BuildTime=$(BUILD_TIME)" \
+		-o ateam-linux-amd64 .
 
 tidy:
 	go mod tidy
