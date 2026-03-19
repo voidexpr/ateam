@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -167,7 +166,8 @@ func runReport(cmd *cobra.Command, args []string) error {
 	var succeeded, failed int
 	var results []runner.RunSummary
 
-	ctx := context.Background()
+	ctx, stop := cmdContext()
+	defer stop()
 	go func() {
 		runner.RunPool(ctx, cr, tasks, env.Config.Report.MaxParallel, nil, completed)
 	}()

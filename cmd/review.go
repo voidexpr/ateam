@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -122,7 +121,8 @@ func runReview(cmd *cobra.Command, args []string) error {
 		Verbose:              reviewVerbose,
 	}
 
-	ctx := context.Background()
+	ctx, stop := cmdContext()
+	defer stop()
 	result := cr.Run(ctx, prompt, opts, nil)
 
 	if result.Err != nil {
