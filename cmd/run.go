@@ -212,7 +212,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	if result.Err != nil {
-		os.Exit(result.ExitCode)
+		return &ExitError{Code: result.ExitCode}
 	}
 
 	return nil
