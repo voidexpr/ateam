@@ -4,6 +4,7 @@
 * ateam testing requires to create and delete files, use ./test_data/
 
 ## Development guidelines
+* you are the agent for the ateam software, not a member of ateam so don't follow the [ateam: ROLE] convention in commits
 * run make build after all code changes
 * run tests:
     * `make test`: always
