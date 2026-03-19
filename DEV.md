@@ -78,7 +78,7 @@ Release archives should include both `ateam` (host) and `ateam-linux-amd64` so D
 
 ## Adding a new role
 
-1. Create `internal/prompts/defaults/roles/<name>/report_prompt.md`
+1. Create `defaults/roles/<name>/report_prompt.md`
 2. Optionally add `code_prompt.md` for code-action support
 3. Run `make build` — the role is auto-discovered from the embedded filesystem
 4. Enable it in a project: `ateam init --role <name>` or edit `.ateam/config.toml`

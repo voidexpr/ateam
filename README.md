@@ -121,7 +121,7 @@ Run on Fridays:
 
 ```bash
 git clone <repo-url>
-cd poc
+cd ateam
 make build
 ```
 
@@ -554,8 +554,8 @@ To audit what prompt will be used use the following command:
   ateam prompt --supervisor --action code
 
 ### Report
-* base_report_prompt.md: included for all roles
-* base_report_extra_prompt.md: included for all roles (doesn't exist by default), useful to change how reports are generated
+* report_base_prompt.md: included for all roles
+* report_base_extra_prompt.md: included for all roles (doesn't exist by default), useful to change how reports are generated
 * roles/ROLE/
   * report_prompt.md: role specific unique instructions
   * report_extra_prompt.md: only add additional instruction (doesn't exist by default)
@@ -796,23 +796,23 @@ For supervisors, extras are collected from two locations:
 
 ### Default prompt files
 
-The embedded default prompts are in the source tree under [`internal/prompts/defaults/`](internal/prompts/defaults/):
+The embedded default prompts are in the source tree under [`defaults/`](defaults/):
 
 | Prompt | Source file |
 |--------|------------|
-| Report base instructions | [`defaults/report_base_prompt.md`](internal/prompts/defaults/report_base_prompt.md) |
-| Code base instructions | [`defaults/code_base_prompt.md`](internal/prompts/defaults/code_base_prompt.md) |
-| Supervisor review | [`defaults/supervisor/review_prompt.md`](internal/prompts/defaults/supervisor/review_prompt.md) |
-| Supervisor code management | [`defaults/supervisor/code_management_prompt.md`](internal/prompts/defaults/supervisor/code_management_prompt.md) |
-| Role: security | [`defaults/roles/security/report_prompt.md`](internal/prompts/defaults/roles/security/report_prompt.md) |
-| Role: testing_basic | [`defaults/roles/testing_basic/report_prompt.md`](internal/prompts/defaults/roles/testing_basic/report_prompt.md) |
-| Role: refactor_small | [`defaults/roles/refactor_small/report_prompt.md`](internal/prompts/defaults/roles/refactor_small/report_prompt.md) |
+| Report base instructions | [`defaults/report_base_prompt.md`](defaults/report_base_prompt.md) |
+| Code base instructions | [`defaults/code_base_prompt.md`](defaults/code_base_prompt.md) |
+| Supervisor review | [`defaults/supervisor/review_prompt.md`](defaults/supervisor/review_prompt.md) |
+| Supervisor code management | [`defaults/supervisor/code_management_prompt.md`](defaults/supervisor/code_management_prompt.md) |
+| Role: security | [`defaults/roles/security/report_prompt.md`](defaults/roles/security/report_prompt.md) |
+| Role: testing_basic | [`defaults/roles/testing_basic/report_prompt.md`](defaults/roles/testing_basic/report_prompt.md) |
+| Role: refactor_small | [`defaults/roles/refactor_small/report_prompt.md`](defaults/roles/refactor_small/report_prompt.md) |
 
 All role prompts follow the same pattern: `defaults/roles/<NAME>/report_prompt.md` (and optionally `code_prompt.md`).
 
 ## Roles
 
-Roles are auto-discovered from [`internal/prompts/defaults/roles/`](internal/prompts/defaults/roles/). Each subdirectory containing a `report_prompt.md` becomes a valid role. Use `all` as shorthand for every enabled role.
+Roles are auto-discovered from [`defaults/roles/`](defaults/roles/). Each subdirectory containing a `report_prompt.md` becomes a valid role. Use `all` as shorthand for every enabled role.
 
 Available roles: `automation`, `basic_project_structure`, `critic_engineering`, `critic_project`, `database_config`, `database_schema`, `dependencies`, `docs_external`, `docs_internal`, `production_ready`, `project_characteristics`, `refactor_architecture`, `refactor_small`, `security`, `shortcut_taker`, `testing_basic`, `testing_full`.
 
