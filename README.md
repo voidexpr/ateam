@@ -49,7 +49,7 @@ ATeam's core principles are:
 - **Multi-project per repo support** — multiple ateam projects per git repo (monorepo-friendly)
 - **Runtime profiles** — HCL-based configuration (`runtime.hcl`) with agent, container, and profile definitions; 3-level resolution (embedded → org defaults → org → project)
 - **Multiple agents** — Claude Code, Codex, and custom agents configurable via `runtime.hcl`; switch per-command with `--profile` or `--agent`
-- **Docker containers** — run agents inside Docker for full isolation (oneshot and persistent modes); auto-builds from configurable Dockerfile
+- **Docker containers** — run agents inside Docker for full isolation (oneshot and persistent modes); auto-builds from configurable Dockerfile. Requires either `ateam-linux-amd64` next to the `ateam` binary or a Go compiler for automatic cross-compilation (see [DEV.md](DEV.md#docker-binary-resolution))
 - **Cost tracking** — per-run token/cost tracking via SQLite call database; `ateam cost` for aggregated reports, `ateam ps` for run history. Claude reports actual cost directly; Codex cost is estimated from configurable pricing tables (see [Cost Estimation & Pricing](#cost-estimation--pricing))
 - **Auditability** — see current and historical reports, execution logs, and cost data
 - **Parallel execution** — configurable concurrency with per-role timeouts
