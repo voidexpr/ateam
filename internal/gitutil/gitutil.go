@@ -5,9 +5,9 @@ import (
 	"os/exec"
 	"strings"
 	"time"
-
-	"github.com/ateam/internal/runner"
 )
+
+const timestampFormat = "2006-01-02_15-04-05"
 
 type ProjectMeta struct {
 	CommitHash    string
@@ -31,7 +31,7 @@ func GetProjectMeta(dir string) (*ProjectMeta, error) {
 
 	commitDate := lines[1]
 	if t, err := time.Parse(time.RFC3339, lines[1]); err == nil {
-		commitDate = t.Format(runner.TimestampFormat)
+		commitDate = t.Format(timestampFormat)
 	}
 
 	meta := &ProjectMeta{
