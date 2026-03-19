@@ -23,6 +23,15 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// ExitError is returned by commands that need to exit with a specific non-zero code.
+type ExitError struct {
+	Code int
+}
+
+func (e *ExitError) Error() string {
+	return fmt.Sprintf("exit status %d", e.Code)
+}
+
 func newTable() *tabwriter.Writer {
 	return tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 }
