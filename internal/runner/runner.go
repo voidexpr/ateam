@@ -231,8 +231,8 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	var callID int64
 	if r.CallDB != nil {
 		relStream := streamFile
-		if r.OrgDir != "" {
-			if rel, err := filepath.Rel(r.OrgDir, streamFile); err == nil {
+		if r.ProjectDir != "" {
+			if rel, err := filepath.Rel(r.ProjectDir, streamFile); err == nil {
 				relStream = rel
 			}
 		}

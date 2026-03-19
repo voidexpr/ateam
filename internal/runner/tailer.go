@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ateam/internal/agent"
@@ -28,9 +29,11 @@ type Tailer struct {
 	Writer       io.Writer
 	PollInterval time.Duration // default 500ms
 	DB           *calldb.CallDB
-	OrgDir       string // .ateamorg/ dir, used to resolve relative stream_file paths
+	ProjectDir   string // .ateam/ dir, used to resolve relative stream_file paths (new layout)
+	OrgDir       string // .ateamorg/ dir, used to resolve legacy relative stream_file paths
 	TaskGroup    string // discover new calls joining this group
-	ProjectID    string // for finding running calls
+	ProjectID    string // for finding running calls (legacy, empty for per-project DB)
+	DiscoverAll  bool   // discover all running calls in the DB (per-project mode)
 	Action       string // "report" or "" — for --reports mode
 	Color        bool
 	Verbose      bool
@@ -84,7 +87,7 @@ func (t *Tailer) AddSource(id int64, role, action, streamFile, model string) {
 // Run polls stream files and DB, writing formatted output to Writer.
 // It blocks until all sources are done or ctx is cancelled.
 func (t *Tailer) Run(ctx context.Context) error {
-	discoveryMode := t.TaskGroup != "" || t.ProjectID != ""
+	discoveryMode := t.TaskGroup != "" || t.ProjectID != "" || t.DiscoverAll
 	pollTick := time.NewTicker(t.PollInterval)
 	defer pollTick.Stop()
 
@@ -177,7 +180,7 @@ func (t *Tailer) discoverSources() {
 		}
 	}
 
-	if t.ProjectID != "" {
+	if t.ProjectID != "" || t.DiscoverAll {
 		rows, err := t.DB.FindRunning(t.ProjectID, t.Action)
 		if err != nil {
 			return
@@ -216,8 +219,19 @@ func (t *Tailer) discoverSources() {
 	}
 }
 
+// resolveStreamFile resolves a relative stream_file path to an absolute path.
+// New layout: relative to ProjectDir. Legacy: relative to OrgDir (paths starting with "projects/").
 func (t *Tailer) resolveStreamFile(sf string) string {
-	if t.OrgDir != "" && !filepath.IsAbs(sf) {
+	if filepath.IsAbs(sf) {
+		return sf
+	}
+	if strings.HasPrefix(sf, "projects/") && t.OrgDir != "" {
+		return filepath.Join(t.OrgDir, sf)
+	}
+	if t.ProjectDir != "" {
+		return filepath.Join(t.ProjectDir, sf)
+	}
+	if t.OrgDir != "" {
 		return filepath.Join(t.OrgDir, sf)
 	}
 	return sf

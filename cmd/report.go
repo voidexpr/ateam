@@ -72,7 +72,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := root.EnsureRoles(env.ProjectDir, env.StateDir, roleIDs); err != nil {
+	if err := root.EnsureRoles(env.ProjectDir, roleIDs); err != nil {
 		return err
 	}
 
@@ -89,14 +89,14 @@ func runReport(cmd *cobra.Command, args []string) error {
 	}
 	applyCheaperModel(cr, reportCheaperModel)
 
-	db := openCallDB(env.OrgDir)
+	db := openProjectDB(env)
 	if db != nil {
 		defer db.Close()
 		cr.CallDB = db
 	}
 
 	if !reportForce {
-		if err := checkConcurrentRuns(db, env.ProjectID(), runner.ActionReport, roleIDs); err != nil {
+		if err := checkConcurrentRuns(db, "", runner.ActionReport, roleIDs); err != nil {
 			return err
 		}
 	}

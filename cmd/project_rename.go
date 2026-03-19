@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/root"
@@ -16,8 +15,9 @@ var projectRenameCmd = &cobra.Command{
 	Short: "Update state after moving a project directory",
 	Long: `Update ateam state after a project directory has been moved within the org.
 
-Rewrites the project_id in the call database, updates stream_file paths,
-and renames the state directory under .ateamorg/projects/.
+Since state.sqlite is per-project (inside .ateam/), no DB updates are needed.
+This command only renames the legacy state directory under .ateamorg/projects/
+if one exists.
 
 Paths are relative to the org root (parent of .ateamorg/).
 
@@ -48,11 +48,11 @@ func runProjectRename(cmd *cobra.Command, args []string) error {
 	var orgDir string
 	if orgFlag != "" {
 		orgDir, err = root.FindOrg(orgFlag)
+		if err != nil {
+			return err
+		}
 	} else {
-		orgDir, err = root.FindOrg(cwd)
-	}
-	if err != nil {
-		return err
+		orgDir, _ = root.FindOrg(cwd)
 	}
 
 	oldID := config.PathToProjectID(renameOldPath)
@@ -62,60 +62,31 @@ func runProjectRename(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	db := openCallDB(orgDir)
-	if db == nil {
-		return fmt.Errorf("cannot open call database")
-	}
-	defer db.Close()
-
-	// Check for running agents
-	running, err := db.FindRunning(oldID, "")
-	if err != nil {
-		return fmt.Errorf("checking running agents: %w", err)
-	}
-	var alive []string
-	for _, r := range running {
-		if r.PID > 0 && isProcessAlive(r.PID) {
-			alive = append(alive, fmt.Sprintf("  %s/%s (PID %d)", r.Action, r.Role, r.PID))
-		}
-	}
-	if len(alive) > 0 {
-		return fmt.Errorf("agents are currently running for this project; stop them first:\n%s",
-			strings.Join(alive, "\n"))
-	}
-
 	// Warn if new path doesn't have .ateam/
-	orgRoot := filepath.Dir(orgDir)
-	newAteamDir := filepath.Join(orgRoot, renameNewPath, root.ProjectDirName)
-	if info, err := os.Stat(newAteamDir); err != nil || !info.IsDir() {
-		fmt.Fprintf(os.Stderr, "Warning: %s does not exist; metadata will be updated anyway\n", newAteamDir)
-	}
-
-	// Rename state dir
-	oldStateDir := filepath.Join(orgDir, "projects", oldID)
-	newStateDir := filepath.Join(orgDir, "projects", newID)
-	stateDirMsg := ""
-
-	if _, err := os.Stat(oldStateDir); err == nil {
-		if _, err := os.Stat(newStateDir); err == nil {
-			stateDirMsg = fmt.Sprintf("State dir: skipped rename (%s already exists)", newStateDir)
-		} else {
-			if err := os.Rename(oldStateDir, newStateDir); err != nil {
-				return fmt.Errorf("renaming state dir: %w", err)
-			}
-			stateDirMsg = fmt.Sprintf("State dir: renamed %s → %s", oldID, newID)
+	if orgDir != "" {
+		orgRoot := filepath.Dir(orgDir)
+		newAteamDir := filepath.Join(orgRoot, renameNewPath, root.ProjectDirName)
+		if info, err := os.Stat(newAteamDir); err != nil || !info.IsDir() {
+			fmt.Fprintf(os.Stderr, "Warning: %s does not exist; metadata will be updated anyway\n", newAteamDir)
 		}
-	} else {
-		stateDirMsg = "State dir: nothing to rename (old dir not found)"
 	}
 
-	// Update DB
-	n, err := db.RenameProject(oldID, newID)
-	if err != nil {
-		return fmt.Errorf("updating database: %w", err)
+	// Clean up legacy state dir if present
+	if orgDir != "" {
+		oldStateDir := filepath.Join(orgDir, "projects", oldID)
+		if _, err := os.Stat(oldStateDir); err == nil {
+			newStateDir := filepath.Join(orgDir, "projects", newID)
+			if _, err := os.Stat(newStateDir); err == nil {
+				fmt.Printf("Legacy state dir: skipped rename (%s already exists)\n", newStateDir)
+			} else {
+				if err := os.Rename(oldStateDir, newStateDir); err != nil {
+					return fmt.Errorf("renaming legacy state dir: %w", err)
+				}
+				fmt.Printf("Legacy state dir: renamed %s -> %s\n", oldID, newID)
+			}
+		}
 	}
 
-	fmt.Println(stateDirMsg)
-	fmt.Printf("Database: %d row(s) updated (%s → %s)\n", n, oldID, newID)
+	fmt.Println("Per-project state.sqlite requires no path updates.")
 	return nil
 }

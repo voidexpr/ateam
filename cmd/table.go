@@ -60,6 +60,21 @@ func fmtInt(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
+// openProjectDB opens the per-project state.sqlite in .ateam/.
+// Falls back to the legacy org-level state.sqlite if the project DB doesn't exist.
+func openProjectDB(env *root.ResolvedEnv) *calldb.CallDB {
+	if env.ProjectDir != "" {
+		dbPath := env.ProjectDBPath()
+		db, err := calldb.Open(dbPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: cannot open project database: %v\n", err)
+			return nil
+		}
+		return db
+	}
+	return openCallDB(env.OrgDir)
+}
+
 func openCallDB(orgDir string) *calldb.CallDB {
 	if orgDir == "" {
 		return nil
@@ -70,6 +85,20 @@ func openCallDB(orgDir string) *calldb.CallDB {
 		return nil
 	}
 	return db
+}
+
+// resolveStreamPath resolves a stream_file path from the DB.
+// New layout: relative to .ateam/ (e.g. "logs/roles/security/...").
+// Legacy layout: relative to .ateamorg/ (e.g. "projects/<id>/roles/...").
+// Detection: paths starting with "projects/" are legacy; otherwise new.
+func resolveStreamPath(env *root.ResolvedEnv, sf string) string {
+	if sf == "" || filepath.IsAbs(sf) {
+		return sf
+	}
+	if strings.HasPrefix(sf, "projects/") && env.OrgDir != "" {
+		return filepath.Join(env.OrgDir, sf)
+	}
+	return filepath.Join(env.ProjectDir, sf)
 }
 
 // newRunner creates a Runner using the resolved profile from runtime.hcl.
@@ -87,7 +116,7 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string) (*runner.Runne
 
 	r := runnerFromAgentConfig(env, ac)
 	r.Profile = profileName
-	r.ProjectID = env.ProjectID()
+	r.ProjectID = ""
 	r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
 	ct, err := buildContainer(cc, prof, env.SourceDir, env.ProjectDir, env.OrgDir, env.GitRepoDir, roleID)
 	if err != nil {
@@ -119,7 +148,7 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.Runner
 
 	r := runnerFromAgentConfig(env, &ac)
 	r.Profile = "a:" + agentName
-	r.ProjectID = env.ProjectID()
+	r.ProjectID = ""
 	r.ContainerType = "none"
 	return r, nil
 }
@@ -137,12 +166,16 @@ func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runne
 }
 
 func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runner.Runner {
+	var extraWriteDirs []string
+	if env.OrgDir != "" {
+		extraWriteDirs = []string{env.OrgDir}
+	}
 	return &runner.Runner{
 		Agent:           buildAgent(ac),
 		LogFile:         env.RunnerLogPath(),
 		ProjectDir:      env.ProjectDir,
 		OrgDir:          env.OrgDir,
-		ExtraWriteDirs:  []string{env.OrgDir},
+		ExtraWriteDirs:  extraWriteDirs,
 		SandboxSettings: ac.Sandbox,
 		SandboxRWPaths:  ac.RWPaths,
 		SandboxROPaths:  ac.ROPaths,

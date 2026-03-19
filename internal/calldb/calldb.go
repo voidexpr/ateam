@@ -265,6 +265,10 @@ func (c *CallDB) SetPID(id int64, pid int, containerID string) error {
 	return err
 }
 
+func (c *CallDB) RawDB() *sql.DB {
+	return c.db
+}
+
 func (c *CallDB) Close() error {
 	return c.db.Close()
 }

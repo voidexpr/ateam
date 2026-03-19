@@ -173,6 +173,44 @@ profile "docker" {
 
 Select via `--profile` flag or `config.toml` per action/role.
 
+## Maintenance Commands
+
+### `ateam project-rename`
+
+Update state after moving a project directory within the org. Since `state.sqlite` is per-project (inside `.ateam/`), no DB updates are needed. This command only renames the legacy state directory under `.ateamorg/projects/` if one exists.
+
+```bash
+ateam project-rename --old services/api --new backends/api
+```
+
+| Flag | Description |
+|------|-------------|
+| `--old PATH` | Old project path (relative to org root) **(required)** |
+| `--new PATH` | New project path (relative to org root) **(required)** |
+
+### `ateam migrate-logs`
+
+Migrate existing projects from the legacy org-level layout (logs and exec history in `.ateamorg/projects/<id>/`, shared `state.sqlite`) to the new per-project layout (everything inside `.ateam/`).
+
+For each project discovered under `.ateamorg/projects/`:
+
+1. Copies log files from `.ateamorg/projects/<id>/roles/<role>/logs/` to `.ateam/logs/roles/<role>/`
+2. Copies supervisor logs from `.ateamorg/projects/<id>/supervisor/logs/` to `.ateam/logs/supervisor/`
+3. Appends `runner.log` from `.ateamorg/projects/<id>/runner.log` to `.ateam/logs/runner.log`
+4. Copies `agent_execs` rows from `.ateamorg/state.sqlite` to `.ateam/state.sqlite`, rewriting `project_id` to `""` and `stream_file` paths to the new layout
+5. Creates `.ateam/.gitignore` if missing
+
+The migration is idempotent: files that already exist are skipped, DB rows are only copied if the project DB is empty.
+
+```bash
+ateam migrate-logs              # run from anywhere under the org root
+ateam migrate-logs --dry-run    # preview changes without applying
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Preview changes without applying them |
+
 ## Devcontainer
 
 Claude Code provides a [devcontainer](https://code.claude.com/docs/en/devcontainer) for sandboxed agent execution. To use it:
