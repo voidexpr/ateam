@@ -426,7 +426,7 @@ func ResolveDockerfile(cc *ContainerConfig, projectDir, orgDir, roleID string) (
 		return "", "", fmt.Errorf("cannot create temp dir for Dockerfile: %w", err)
 	}
 	tmpFile := filepath.Join(tmpDir, "Dockerfile")
-	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
+	if err := os.WriteFile(tmpFile, data, 0600); err != nil {
 		os.RemoveAll(tmpDir)
 		return "", "", fmt.Errorf("cannot write embedded Dockerfile: %w", err)
 	}
