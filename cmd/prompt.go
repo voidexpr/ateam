@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
@@ -17,6 +19,7 @@ var (
 	promptNoProjectInfo        bool
 	promptIgnorePreviousReport bool
 	promptSupervisor           bool
+	promptFilesOnly            bool
 )
 
 var promptCmd = &cobra.Command{
@@ -30,7 +33,8 @@ Example:
   ateam prompt --role refactor_small --action code
   ateam prompt --role security --action report --extra-prompt "Focus on auth"
   ateam prompt --supervisor --action review
-  ateam prompt --supervisor --action code`,
+  ateam prompt --supervisor --action code
+  ateam prompt --role security --action report --files-only`,
 	Args: cobra.NoArgs,
 	RunE: runPrompt,
 }
@@ -42,6 +46,7 @@ func init() {
 	promptCmd.Flags().StringVar(&promptExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
 	promptCmd.Flags().BoolVar(&promptNoProjectInfo, "no-project-info", false, "omit ateam project context from the prompt")
 	promptCmd.Flags().BoolVar(&promptIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
+	promptCmd.Flags().BoolVar(&promptFilesOnly, "files-only", false, "list prompt sources with token estimates instead of printing the prompt")
 	promptCmd.MarkFlagsMutuallyExclusive("role", "supervisor")
 	_ = promptCmd.MarkFlagRequired("action")
 }
@@ -80,6 +85,19 @@ func runPromptRole() error {
 		pinfo = env.NewProjectInfoParams("role " + promptRole)
 	}
 
+	var sources []prompts.PromptSource
+	switch promptAction {
+	case "report":
+		sources = prompts.TraceRolePromptSources(env.OrgDir, env.ProjectDir, promptRole, env.SourceDir, extraPrompt, pinfo, promptIgnorePreviousReport)
+	case "code":
+		sources = prompts.TraceRoleCodePromptSources(env.OrgDir, env.ProjectDir, promptRole, env.SourceDir, extraPrompt, pinfo)
+	}
+
+	if promptFilesOnly {
+		printPromptSources(os.Stdout, sources)
+		return nil
+	}
+
 	var assembled string
 	switch promptAction {
 	case "report":
@@ -90,8 +108,8 @@ func runPromptRole() error {
 	if err != nil {
 		return err
 	}
-
 	fmt.Print(assembled)
+	printPromptSources(os.Stderr, sources)
 	return nil
 }
 
@@ -115,6 +133,19 @@ func runPromptSupervisor() error {
 		pinfo = env.NewProjectInfoParams("the supervisor")
 	}
 
+	var sources []prompts.PromptSource
+	switch promptAction {
+	case "review":
+		sources = prompts.TraceReviewPromptSources(env.OrgDir, env.ProjectDir, pinfo, extraPrompt)
+	case "code":
+		sources = prompts.TraceCodeManagementPromptSources(env.OrgDir, env.ProjectDir, pinfo, env.ReviewPath(), extraPrompt)
+	}
+
+	if promptFilesOnly {
+		printPromptSources(os.Stdout, sources)
+		return nil
+	}
+
 	var assembled string
 	switch promptAction {
 	case "review":
@@ -129,7 +160,24 @@ func runPromptSupervisor() error {
 	if err != nil {
 		return err
 	}
-
 	fmt.Print(assembled)
+	printPromptSources(os.Stderr, sources)
 	return nil
+}
+
+func printPromptSources(out io.Writer, sources []prompts.PromptSource) {
+	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(w, "PATH\tLAST MODIFIED\tEST. TOKENS")
+	var totalTokens int
+	for _, s := range sources {
+		tokens := prompts.EstimateTokens(s.Content)
+		totalTokens += tokens
+		modified := ""
+		if !s.ModTime.IsZero() {
+			modified = fmtDateAge(s.ModTime)
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\n", s.DisplayPath(), modified, fmtTokens(int64(tokens)))
+	}
+	fmt.Fprintf(w, "TOTAL\t\t%s\n", fmtTokens(int64(totalTokens)))
+	w.Flush()
 }
