@@ -189,6 +189,8 @@ func TestLooksLikeSecret(t *testing.T) {
 		"API_KEY", "aws_secret_access_key", "GITHUB_TOKEN",
 		"DB_PASSWORD", "PRIVATE_KEY", "AUTH_HEADER",
 		"MY_CREDENTIALS", "passwd",
+		"DATABASE_URL", "REDIS_URL", "MONGO_URL",
+		"PGURI", "DSN", "CONN_STRING",
 	}
 	for _, name := range secrets {
 		if !looksLikeSecret(name) {
