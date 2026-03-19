@@ -651,6 +651,7 @@ func looksLikeSecret(name string) bool {
 	for _, substr := range []string{
 		"KEY", "SECRET", "TOKEN", "PASSWORD", "PASSWD",
 		"CREDENTIAL", "AUTH", "PRIVATE",
+		"URL", "URI", "DSN", "CONN",
 	} {
 		if strings.Contains(up, substr) {
 			return true
