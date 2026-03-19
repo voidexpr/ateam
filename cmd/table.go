@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	goruntime "runtime"
@@ -22,6 +24,10 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
+
+func cmdContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+}
 
 // ExitError is returned by commands that need to exit with a specific non-zero code.
 type ExitError struct {

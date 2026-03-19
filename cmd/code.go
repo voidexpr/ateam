@@ -175,7 +175,8 @@ func runCode(cmd *cobra.Command, args []string) error {
 		TaskGroup:            taskGroup,
 	}
 
-	ctx := context.Background()
+	ctx, stop := cmdContext()
+	defer stop()
 
 	var result runner.RunSummary
 	if codeTail {

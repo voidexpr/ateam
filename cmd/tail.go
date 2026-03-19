@@ -1,11 +1,8 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -115,7 +112,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 		tailer.DiscoverAll = true
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := cmdContext()
 	defer stop()
 
 	return tailer.Run(ctx)

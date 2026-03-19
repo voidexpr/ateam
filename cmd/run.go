@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"os"
@@ -185,7 +184,8 @@ func runRun(cmd *cobra.Command, args []string) error {
 		}()
 	}
 
-	ctx := context.Background()
+	ctx, stop := cmdContext()
+	defer stop()
 	result := r.Run(ctx, promptText, opts, progress)
 
 	if progress != nil {
