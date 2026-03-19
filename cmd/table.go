@@ -331,7 +331,7 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 	}
 	switch cc.Type {
 	case "docker":
-		dockerfile, err := runtime.ResolveDockerfile(cc, projectDir, orgDir, roleID)
+		dockerfile, dockerfileTmpDir, err := runtime.ResolveDockerfile(cc, projectDir, orgDir, roleID)
 		if err != nil {
 			return nil, err
 		}
@@ -358,18 +358,19 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 		}
 
 		return &container.DockerContainer{
-			Image:         image,
-			Dockerfile:    dockerfile,
-			ForwardEnv:    cc.ForwardEnv,
-			ExtraVolumes:  volumes,
-			ExtraArgs:     extraArgs,
-			Persistent:    persistent,
-			ContainerName: containerName,
-			MountDir:      mountDir,
-			SourceDir:     sourceDir,
-			ProjectDir:    projectDir,
-			OrgDir:        orgDir,
-			HostCLIPath:   findLinuxBinary(orgDir),
+			Image:            image,
+			Dockerfile:       dockerfile,
+			DockerfileTmpDir: dockerfileTmpDir,
+			ForwardEnv:       cc.ForwardEnv,
+			ExtraVolumes:     volumes,
+			ExtraArgs:        extraArgs,
+			Persistent:       persistent,
+			ContainerName:    containerName,
+			MountDir:         mountDir,
+			SourceDir:        sourceDir,
+			ProjectDir:       projectDir,
+			OrgDir:           orgDir,
+			HostCLIPath:      findLinuxBinary(orgDir),
 		}, nil
 	default:
 		return nil, nil
