@@ -110,11 +110,11 @@ func filterHistoryByKind(entries []HistoryEntry, kind string) []HistoryEntry {
 	return result
 }
 
-// CodeSession represents a code session from calldb task_group data.
+// CodeSession represents a task group session from calldb.
 type CodeSession struct {
 	TaskGroup string
 	Timestamp time.Time
-	Label     string
+	Kind      string // "code" or "report"
 	RunCount  int
 	TotalCost float64
 	Tokens    int64

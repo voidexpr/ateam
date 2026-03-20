@@ -329,11 +329,13 @@ func (s *Server) handleCost(w http.ResponseWriter, r *http.Request) {
 // --- History handlers ---
 
 type historyDetailData struct {
-	Kind      string // "report", "review", "code_management_prompt", etc.
-	RoleID    string // empty for supervisor
-	Filename  string
-	Timestamp time.Time
-	HTML      template.HTML
+	Kind            string // "report", "review", "code_management_prompt", etc.
+	RoleID          string // empty for supervisor
+	Filename        string
+	Timestamp       time.Time
+	HTML            template.HTML
+	History         []HistoryEntry // all history entries for the timeline
+	CurrentFilename string         // which entry is being viewed
 }
 
 func (s *Server) handleReportHistory(w http.ResponseWriter, r *http.Request) {
@@ -373,6 +375,12 @@ func (s *Server) serveHistoryFile(w http.ResponseWriter, r *http.Request, projec
 	}
 
 	entry := parseHistoryFilename(filename, path)
+	kind := entry.Kind
+	if kind == "" {
+		kind = "report"
+	}
+	history := filterHistoryByKind(discoverHistory(histDir), kind)
+
 	title := nav + " history"
 	if roleID != "" {
 		title = roleID + " history"
@@ -382,11 +390,13 @@ func (s *Server) serveHistoryFile(w http.ResponseWriter, r *http.Request, projec
 		Nav:         nav,
 		ProjectName: projectName,
 		Data: historyDetailData{
-			Kind:      entry.Kind,
-			RoleID:    roleID,
-			Filename:  filename,
-			Timestamp: entry.Timestamp,
-			HTML:      template.HTML(s.renderMarkdown(string(content))),
+			Kind:            kind,
+			RoleID:          roleID,
+			Filename:        filename,
+			Timestamp:       entry.Timestamp,
+			HTML:            template.HTML(s.renderMarkdown(string(content))),
+			History:         history,
+			CurrentFilename: filename,
 		},
 	})
 }
@@ -408,10 +418,14 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 			cs, ok := seen[row.TaskGroup]
 			if !ok {
 				ts := parseTaskGroupTimestamp(row.TaskGroup)
+				kind := "report"
+				if strings.HasPrefix(row.TaskGroup, "code-") {
+					kind = "code"
+				}
 				cs = &CodeSession{
 					TaskGroup: row.TaskGroup,
 					Timestamp: ts,
-					Label:     row.TaskGroup,
+					Kind:      kind,
 				}
 				seen[row.TaskGroup] = cs
 				order = append(order, row.TaskGroup)
@@ -425,24 +439,16 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Also collect supervisor history (code_management_prompt entries)
-	supHistDir := filepath.Join(pe.ProjectDir, "supervisor", "history")
-	codePrompts := filterHistoryByKind(discoverHistory(supHistDir), "code_management_prompt")
-
 	s.render(w, r, "sessions.html", pageData{
 		Title:       "Sessions",
 		Nav:         "sessions",
 		ProjectName: pe.Name,
-		Data: sessionsPageData{
-			Sessions:    sessions,
-			CodePrompts: codePrompts,
-		},
+		Data: sessionsPageData{Sessions: sessions},
 	})
 }
 
 type sessionsPageData struct {
-	Sessions    []CodeSession
-	CodePrompts []HistoryEntry
+	Sessions []CodeSession
 }
 
 func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
@@ -453,39 +459,98 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	taskGroup := r.PathValue("taskgroup")
-	db := s.getDB(pe)
-	if db == nil {
-		http.NotFound(w, r)
-		return
+	data := sessionDetailData{TaskGroup: taskGroup}
+
+	// Get runs from DB
+	if db := s.getDB(pe); db != nil {
+		data.Runs, _ = db.RecentRuns(calldb.RecentFilter{TaskGroup: taskGroup, Limit: 200})
+		for _, run := range data.Runs {
+			data.TotalCost += run.CostUSD
+			data.TotalTokens += int64(run.InputTokens + run.OutputTokens + run.CacheReadTokens)
+		}
 	}
 
-	runs, _ := db.RecentRuns(calldb.RecentFilter{TaskGroup: taskGroup, Limit: 200})
+	// Collect supervisor history files matching this session's timestamp
+	ts := parseTaskGroupTimestamp(taskGroup)
+	tsPrefix := ts.Format(runner.TimestampFormat)
 
-	var totalCost float64
-	var totalTokens int64
-	for _, run := range runs {
-		totalCost += run.CostUSD
-		totalTokens += int64(run.InputTokens + run.OutputTokens + run.CacheReadTokens)
+	supHistDir := filepath.Join(pe.ProjectDir, "supervisor", "history")
+	for _, entry := range discoverHistory(supHistDir) {
+		if entry.Timestamp.Format(runner.TimestampFormat) == tsPrefix {
+			data.SupervisorFiles = append(data.SupervisorFiles, sessionFile{
+				HistoryEntry: entry,
+				Label:        "supervisor/" + entry.Kind,
+				URL:          fmt.Sprintf("/p/%s/review/history/%s", pe.Name, entry.Filename),
+			})
+		}
+	}
+
+	// Code output file
+	if strings.HasPrefix(taskGroup, "code-") {
+		codeOutputPath := filepath.Join(pe.ProjectDir, "supervisor", "code_output.md")
+		if info, err := os.Stat(codeOutputPath); err == nil {
+			content, _ := os.ReadFile(codeOutputPath)
+			data.CodeOutputHTML = template.HTML(s.renderMarkdown(string(content)))
+			data.CodeOutputModTime = info.ModTime()
+		}
+	}
+
+	// Role history files: match via sub-run timestamps from calldb
+	// Build a set of (roleID, timestamp) pairs from the runs in this task group
+	runTimestamps := map[string][]string{} // roleID -> list of timestamp prefixes
+	for _, run := range data.Runs {
+		if run.Role == "" || run.Role == "supervisor" {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339, run.StartedAt); err == nil {
+			runTimestamps[run.Role] = append(runTimestamps[run.Role], t.Format(runner.TimestampFormat))
+		}
+	}
+
+	rolesDir := filepath.Join(pe.ProjectDir, "roles")
+	for roleID, timestamps := range runTimestamps {
+		roleHistDir := filepath.Join(rolesDir, roleID, "history")
+		allEntries := discoverHistory(roleHistDir)
+		tsSet := make(map[string]bool, len(timestamps))
+		for _, ts := range timestamps {
+			tsSet[ts] = true
+		}
+		for _, entry := range allEntries {
+			if tsSet[entry.Timestamp.Format(runner.TimestampFormat)] {
+				data.RoleFiles = append(data.RoleFiles, sessionFile{
+					HistoryEntry: entry,
+					Label:        roleID + "/" + entry.Kind,
+					RoleID:       roleID,
+					URL:          fmt.Sprintf("/p/%s/reports/%s/history/%s", pe.Name, roleID, entry.Filename),
+				})
+			}
+		}
 	}
 
 	s.render(w, r, "session_detail.html", pageData{
 		Title:       taskGroup,
 		Nav:         "sessions",
 		ProjectName: pe.Name,
-		Data: sessionDetailData{
-			TaskGroup:   taskGroup,
-			Runs:        runs,
-			TotalCost:   totalCost,
-			TotalTokens: totalTokens,
-		},
+		Data:        data,
 	})
 }
 
+type sessionFile struct {
+	HistoryEntry
+	Label  string
+	RoleID string
+	URL    string
+}
+
 type sessionDetailData struct {
-	TaskGroup   string
-	Runs        []calldb.RecentRow
-	TotalCost   float64
-	TotalTokens int64
+	TaskGroup         string
+	Runs              []calldb.RecentRow
+	TotalCost         float64
+	TotalTokens       int64
+	SupervisorFiles   []sessionFile
+	RoleFiles         []sessionFile
+	CodeOutputHTML    template.HTML
+	CodeOutputModTime time.Time
 }
 
 // parseTaskGroupTimestamp extracts timestamp from "code-2026-03-19_00-35-57" or "report-2026-03-19_00-35-57".
