@@ -1,0 +1,47 @@
+{{define "run.html"}}
+{{$d := .Data}}
+{{$r := $d.Run}}
+<a href="/p/{{.ProjectName}}/runs" class="back-link">&larr; All runs</a>
+<div class="page-header">
+  <h1>Run #{{$r.ID}}</h1>
+  <p class="subtitle">
+    <span class="badge badge-{{$r.Action}}">{{$r.Action}}</span>
+    {{if $r.Role}} &middot; {{$r.Role}}{{end}}
+    {{if $r.IsError}} &middot; <span class="badge badge-error">error</span>{{end}}
+  </p>
+</div>
+
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="stat-label">Duration</div>
+    <div class="stat-value">{{fmtDuration $r.DurationMS}}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Cost</div>
+    <div class="stat-value">{{if gt $r.CostUSD 0.0}}{{fmtCost $r.CostUSD}}{{else}}&mdash;{{end}}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Turns</div>
+    <div class="stat-value">{{if gt $r.Turns 0}}{{$r.Turns}}{{else}}&mdash;{{end}}</div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Details</div>
+  <table class="data-table">
+    <tbody>
+      <tr><td style="width:160px;color:var(--text-muted)">Profile</td><td>{{$r.Profile}}</td></tr>
+      <tr><td style="color:var(--text-muted)">Model</td><td>{{$r.Model}}</td></tr>
+      <tr><td style="color:var(--text-muted)">Task Group</td><td>{{$r.TaskGroup}}</td></tr>
+      <tr><td style="color:var(--text-muted)">Started</td><td>{{fmtTimestamp $r.StartedAt}}</td></tr>
+      <tr><td style="color:var(--text-muted)">Ended</td><td>{{fmtTimestamp $r.EndedAt}}</td></tr>
+      <tr><td style="color:var(--text-muted)">Exit Code</td><td>{{$r.ExitCode}}</td></tr>
+      <tr><td style="color:var(--text-muted)">Input Tokens</td><td>{{fmtTokensInt $r.InputTokens}}</td></tr>
+      <tr><td style="color:var(--text-muted)">Output Tokens</td><td>{{fmtTokensInt $r.OutputTokens}}</td></tr>
+      <tr><td style="color:var(--text-muted)">Cache Read</td><td>{{fmtTokensInt $r.CacheReadTokens}}</td></tr>
+      {{if $r.ContainerID}}<tr><td style="color:var(--text-muted)">Container</td><td style="font-family:var(--font-mono);font-size:13px">{{$r.ContainerID}}</td></tr>{{end}}
+      {{if $r.StreamFile}}<tr><td style="color:var(--text-muted)">Stream File</td><td style="font-family:var(--font-mono);font-size:13px">{{$r.StreamFile}}</td></tr>{{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}

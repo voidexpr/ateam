@@ -1,0 +1,66 @@
+{{define "prompts.html"}}
+{{$d := .Data}}
+<div class="page-header">
+  <h1>Prompt Sources</h1>
+  <p class="subtitle">Files contributing to each role prompt</p>
+</div>
+
+{{range $d.Roles}}
+<div class="section">
+  <div class="section-title">{{.RoleID}}</div>
+  <table class="data-table">
+    <thead>
+      <tr><th>Action</th><th>Sources</th><th>Est. Tokens</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="badge badge-report">report</span></td>
+        <td>{{len .ReportSources}} file{{if ne (len .ReportSources) 1}}s{{end}}</td>
+        <td><span class="token-pill">{{fmtTokensInt .ReportTokens}}</span></td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-code">code</span></td>
+        <td>{{len .CodeSources}} file{{if ne (len .CodeSources) 1}}s{{end}}</td>
+        <td><span class="token-pill">{{fmtTokensInt .CodeTokens}}</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  {{if .ReportSources}}
+  <details style="margin-top:12px">
+    <summary style="cursor:pointer;color:var(--text-muted);font-size:13px">Report prompt sources</summary>
+    <table class="data-table" style="margin-top:8px">
+      <thead><tr><th>Path</th><th>Last Modified</th><th>Est. Tokens</th></tr></thead>
+      <tbody>
+        {{range .ReportSources}}
+        <tr>
+          <td style="font-family:var(--font-mono);font-size:13px">{{.DisplayPath}}</td>
+          <td>{{fmtDateAge .ModTime}}</td>
+          <td><span class="token-pill">{{fmtTokensInt (estTokens .Content)}}</span></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </details>
+  {{end}}
+
+  {{if .CodeSources}}
+  <details style="margin-top:8px">
+    <summary style="cursor:pointer;color:var(--text-muted);font-size:13px">Code prompt sources</summary>
+    <table class="data-table" style="margin-top:8px">
+      <thead><tr><th>Path</th><th>Last Modified</th><th>Est. Tokens</th></tr></thead>
+      <tbody>
+        {{range .CodeSources}}
+        <tr>
+          <td style="font-family:var(--font-mono);font-size:13px">{{.DisplayPath}}</td>
+          <td>{{fmtDateAge .ModTime}}</td>
+          <td><span class="token-pill">{{fmtTokensInt (estTokens .Content)}}</span></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </details>
+  {{end}}
+</div>
+{{end}}
+{{end}}

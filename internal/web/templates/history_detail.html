@@ -1,0 +1,17 @@
+{{define "history_detail.html"}}
+{{$d := .Data}}
+{{if $d.RoleID}}
+<a href="/p/{{.ProjectName}}/reports/{{$d.RoleID}}" class="back-link">&larr; {{$d.RoleID}} report</a>
+{{else}}
+<a href="/p/{{.ProjectName}}/review" class="back-link">&larr; Review</a>
+{{end}}
+<div class="page-header">
+  <h1>{{if $d.RoleID}}{{$d.RoleID}} &mdash; {{end}}{{$d.Kind}}</h1>
+  <p class="subtitle">{{$d.Timestamp.Format "2006-01-02 15:04:05"}}</p>
+</div>
+<div class="section">
+  <div class="markdown-body">
+    {{$d.HTML}}
+  </div>
+</div>
+{{end}}
