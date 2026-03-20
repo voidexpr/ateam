@@ -110,22 +110,57 @@ Run on Fridays:
   * can also document rejected comments for the same reason
 
 
-## Prerequisites
-
-- Go 1.24+
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated (`claude` command available in PATH)
-  - For OAuth token setup (recommended for unattended use using containers): `claude setup-token`
-- [Open AI Codex CLI](https://developers.openai.com/codex/cli/?utm_source=chatgpt.com) (partial, ongoing work)
-
-## Install
+## Quick Start
 
 ```bash
 git clone <repo-url>
 cd ateam
-make build
+./install.sh
 ```
 
-Have `ateam` in your PATH or symlink to it.
+The install script checks for Go (installs it if missing), builds the binary, and symlinks it into `~/.local/bin/`. Then:
+
+```bash
+cd /path/to/your/project
+ateam init                    # create .ateam/ project
+ateam report --roles all      # run all role analyses
+ateam review                  # supervisor prioritizes findings
+ateam code                    # execute top-priority fixes
+```
+
+Or run the full pipeline in one command: `ateam all`
+
+Browse results in a web UI: `ateam serve`
+
+### Prerequisites
+
+- **Go 1.24+** — installed automatically by `install.sh` (via Homebrew on macOS, official tarball on Linux)
+- **[Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)** — install and authenticate before running agents:
+  ```bash
+  # install claude code, then:
+  claude login
+  # for unattended/container use:
+  claude setup-token
+  ```
+- **[OpenAI Codex CLI](https://developers.openai.com/codex/cli/)** (optional, partial support)
+
+### Manual Install
+
+If you prefer not to use the install script:
+
+```bash
+# ensure Go 1.24+ is installed
+go version
+
+git clone <repo-url>
+cd ateam
+make build
+
+# add to PATH (pick one):
+sudo ln -s "$(pwd)/ateam" /usr/local/bin/ateam
+# or:
+export PATH="$(pwd):$PATH"
+```
 
 See [DEV.md](DEV.md) for development setup, testing, and architecture details.
 
@@ -319,6 +354,21 @@ ateam tail --coding         # tail current coding session (supervisor + sub-runs
 | `--coding` | Tail the latest coding session (supervisor + sub-runs) |
 | `--verbose` | Show full tool inputs and text content |
 | `--no-color` | Disable color output |
+
+### `ateam serve`
+
+Start a localhost web UI to browse reports, reviews, prompts, sessions, runs, and cost data. Opens in the default browser.
+
+```bash
+ateam serve
+ateam serve --port 8080
+ateam serve --no-open
+```
+
+| Flag | Description |
+|------|-------------|
+| `--port N` | Listen on a fixed port (default: random) |
+| `--no-open` | Do not open the browser automatically |
 
 ### `ateam env`
 
