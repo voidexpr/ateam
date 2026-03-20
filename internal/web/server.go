@@ -217,8 +217,8 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, tmplName string,
 	}
 }
 
-// ListenAndServe starts the HTTP server on a random localhost port.
-func (s *Server) ListenAndServe() error {
+// ListenAndServe starts the HTTP server. Port 0 means a random available port.
+func (s *Server) ListenAndServe(port int) error {
 	mux := http.NewServeMux()
 
 	staticSub, err := fs.Sub(staticFS, "static")
@@ -242,13 +242,13 @@ func (s *Server) ListenAndServe() error {
 	mux.HandleFunc("GET /p/{project}/sessions", s.handleSessions)
 	mux.HandleFunc("GET /p/{project}/sessions/{taskgroup}", s.handleSessionDetail)
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		return err
 	}
 
-	port := ln.Addr().(*net.TCPAddr).Port
-	url := fmt.Sprintf("http://localhost:%d", port)
+	actualPort := ln.Addr().(*net.TCPAddr).Port
+	url := fmt.Sprintf("http://localhost:%d", actualPort)
 
 	if s.singleMode {
 		url += "/p/" + s.projects[0].Name + "/"
