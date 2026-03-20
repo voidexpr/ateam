@@ -9,13 +9,17 @@ require (
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/mattn/go-isatty v0.0.20
 	github.com/spf13/cobra v1.8.1
+	github.com/yuin/goldmark v1.7.17
+	github.com/yuin/goldmark-highlighting/v2 v2.0.0-20230729083705-37449abec8cc
 	github.com/zclconf/go-cty v1.16.3
 	modernc.org/sqlite v1.46.1
 )
 
 require (
 	github.com/agext/levenshtein v1.2.1 // indirect
+	github.com/alecthomas/chroma/v2 v2.2.0 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
+	github.com/dlclark/regexp2 v1.7.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect

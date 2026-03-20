@@ -1,0 +1,40 @@
+{{define "review.html"}}
+{{$d := .Data}}
+<div class="page-header">
+  <h1>Supervisor Review</h1>
+  {{if $d.Exists}}<p class="subtitle">Current review &middot; {{fmtDateAge $d.ModTime}}</p>{{end}}
+</div>
+
+{{if $d.Exists}}
+<div class="section">
+  <div class="markdown-body">
+    {{$d.HTML}}
+  </div>
+</div>
+{{else}}
+<div class="empty-state">
+  <h2>No review</h2>
+  <p>Run <code>ateam review</code> to generate a supervisor review.</p>
+</div>
+{{end}}
+
+{{if $d.History}}
+<div class="section">
+  <div class="section-title">Review History</div>
+  <table class="data-table">
+    <thead>
+      <tr><th>Date</th><th>Age</th><th></th></tr>
+    </thead>
+    <tbody>
+      {{range $d.History}}
+      <tr>
+        <td>{{.Timestamp.Format "2006-01-02 15:04"}}</td>
+        <td>{{fmtDateAge .Timestamp}}</td>
+        <td><a href="/p/{{$.ProjectName}}/review/history/{{.Filename}}">View</a></td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
+{{end}}

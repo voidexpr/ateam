@@ -1,0 +1,21 @@
+{{define "home.html"}}
+<div class="page-header">
+  <h1>Projects</h1>
+  <p class="subtitle">Select a project to browse</p>
+</div>
+{{if .Projects}}
+<div class="project-grid">
+  {{range .Projects}}
+  <a href="/p/{{.Name}}/" class="card">
+    <h3>{{.Name}}</h3>
+    <div class="meta">{{.SourceDir}}</div>
+  </a>
+  {{end}}
+</div>
+{{else}}
+<div class="empty-state">
+  <h2>No projects found</h2>
+  <p>Run <code>ateam init</code> to set up a project.</p>
+</div>
+{{end}}
+{{end}}

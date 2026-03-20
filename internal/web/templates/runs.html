@@ -1,0 +1,49 @@
+{{define "runs.html"}}
+{{$runs := .Data}}
+<div class="page-header">
+  <h1>Agent Runs</h1>
+  <p class="subtitle">{{len $runs}} run{{if ne (len $runs) 1}}s{{end}}</p>
+</div>
+
+{{if $runs}}
+<div class="section">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Action</th>
+        <th>Role</th>
+        <th>Model</th>
+        <th>Started</th>
+        <th>Duration</th>
+        <th>Input</th>
+        <th>Output</th>
+        <th>Cost</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range $runs}}
+      <tr>
+        <td><a href="/p/{{$.ProjectName}}/runs/{{.ID}}">#{{.ID}}</a></td>
+        <td><span class="badge badge-{{.Action}}">{{.Action}}</span></td>
+        <td>{{.Role}}</td>
+        <td style="font-size:12px;color:var(--text-muted)">{{.Model}}</td>
+        <td>{{fmtTimestamp .StartedAt}}</td>
+        <td>{{fmtDuration .DurationMS}}</td>
+        <td>{{fmtTokensInt .InputTokens}}</td>
+        <td>{{fmtTokensInt .OutputTokens}}</td>
+        <td>{{fmtCost .CostUSD}}</td>
+        <td>{{if .IsError}}<span class="badge badge-error">error</span>{{else if .EndedAt}}<span class="badge badge-ok">ok</span>{{else}}<span class="badge badge-run">running</span>{{end}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{else}}
+<div class="empty-state">
+  <h2>No runs</h2>
+  <p>Run <code>ateam report</code> or <code>ateam code</code> to create agent runs.</p>
+</div>
+{{end}}
+{{end}}

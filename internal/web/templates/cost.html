@@ -1,0 +1,81 @@
+{{define "cost.html"}}
+{{$d := .Data}}
+<div class="page-header">
+  <h1>Cost</h1>
+</div>
+
+<div class="stats-row">
+  <div class="stat-card">
+    <div class="stat-label">Total Cost</div>
+    <div class="stat-value">{{if gt $d.TotalCost 0.0}}{{fmtCost $d.TotalCost}}{{else}}&mdash;{{end}}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Total Tokens</div>
+    <div class="stat-value">{{if gt $d.TotalTokens 0}}{{fmtTokens $d.TotalTokens}}{{else}}&mdash;{{end}}</div>
+  </div>
+</div>
+
+{{if $d.Actions}}
+<div class="section">
+  <div class="section-title">Cost by Action</div>
+  <table class="data-table">
+    <thead>
+      <tr><th>Action</th><th>Count</th><th>Cost</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Total Tokens</th></tr>
+    </thead>
+    <tbody>
+      {{range $d.Actions}}
+      <tr>
+        <td><span class="badge badge-{{lower .Category}}">{{.Category}}</span></td>
+        <td>{{.Count}}</td>
+        <td>{{fmtCost .CostUSD}}</td>
+        <td>{{fmtTokens .InputTokens}}</td>
+        <td>{{fmtTokens .OutputTokens}}</td>
+        <td>{{fmtTokens .CacheReadTokens}}</td>
+        <td>{{fmtTokens .TotalTokens}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
+
+{{if $d.TaskGroups}}
+<div class="section">
+  <div class="section-title">Cost by Task Group</div>
+  {{range $d.TaskGroups}}
+  <details style="margin-bottom:8px">
+    <summary style="cursor:pointer;padding:8px 0">
+      <strong>{{.Name}}</strong>
+      <span style="color:var(--text-muted);margin-left:8px">{{fmtCost .TotalCost}}</span>
+      <span class="token-pill" style="margin-left:4px">{{fmtTokens .TotalTokens}}</span>
+    </summary>
+    <table class="data-table" style="margin-top:8px">
+      <thead>
+        <tr><th>Action</th><th>Count</th><th>Cost</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Total</th></tr>
+      </thead>
+      <tbody>
+        {{range .Rows}}
+        <tr>
+          <td><span class="badge badge-{{lower .Action}}">{{.Action}}</span></td>
+          <td>{{.Count}}</td>
+          <td>{{fmtCost .CostUSD}}</td>
+          <td>{{fmtTokens .InputTokens}}</td>
+          <td>{{fmtTokens .OutputTokens}}</td>
+          <td>{{fmtTokens .CacheReadTokens}}</td>
+          <td>{{fmtTokens .TotalTokens}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </details>
+  {{end}}
+</div>
+{{end}}
+
+{{if not $d.Actions}}
+<div class="empty-state">
+  <h2>No cost data</h2>
+  <p>Cost data appears after agent runs complete.</p>
+</div>
+{{end}}
+{{end}}
