@@ -21,7 +21,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.singleMode {
-		http.Redirect(w, r, "/p/"+s.projects[0].Name+"/", http.StatusFound)
+		http.Redirect(w, r, "/p/"+s.projects[0].Slug+"/", http.StatusFound)
 		return
 	}
 	s.render(w, r, "home.html", pageData{
@@ -67,6 +67,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		Title:       pe.Name,
 		Nav:         "overview",
 		ProjectName: pe.Name,
+		ProjectSlug: pe.Slug,
 		Data:        data,
 	})
 }
@@ -84,6 +85,7 @@ func (s *Server) handleReports(w http.ResponseWriter, r *http.Request) {
 		Title:       "Reports",
 		Nav:         "reports",
 		ProjectName: pe.Name,
+		ProjectSlug: pe.Slug,
 		Data:        reports,
 	})
 }
@@ -112,6 +114,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 				Title:       roleID + " report",
 				Nav:         "reports",
 				ProjectName: pe.Name,
+		ProjectSlug: pe.Slug,
 				Data: reportData{
 					RoleID:  roleID,
 					ModTime: rpt.ModTime,
@@ -155,6 +158,7 @@ func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {
 		Title:       "Review",
 		Nav:         "review",
 		ProjectName: pe.Name,
+		ProjectSlug: pe.Slug,
 		Data:        data,
 	})
 }
@@ -199,6 +203,7 @@ func (s *Server) handlePrompts(w http.ResponseWriter, r *http.Request) {
 		Title:       "Prompts",
 		Nav:         "prompts",
 		ProjectName: pe.Name,
+		ProjectSlug: pe.Slug,
 		Data:        data,
 	})
 }
@@ -219,6 +224,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		Title:       "Runs",
 		Nav:         "runs",
 		ProjectName: pe.Name,
+		ProjectSlug: pe.Slug,
 		Data:        runs,
 	})
 }
@@ -257,6 +263,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		Title:       fmt.Sprintf("Run #%d", id),
 		Nav:         "runs",
 		ProjectName: pe.Name,
+		ProjectSlug: pe.Slug,
 		Data:        runDetailData{Run: *run},
 	})
 }
@@ -322,6 +329,7 @@ func (s *Server) handleCost(w http.ResponseWriter, r *http.Request) {
 		Title:       "Cost",
 		Nav:         "cost",
 		ProjectName: pe.Name,
+		ProjectSlug: pe.Slug,
 		Data:        data,
 	})
 }
@@ -347,7 +355,7 @@ func (s *Server) handleReportHistory(w http.ResponseWriter, r *http.Request) {
 
 	roleID := r.PathValue("role")
 	histDir := filepath.Join(pe.ProjectDir, "roles", roleID, "history")
-	s.serveHistoryFile(w, r, pe.Name, histDir, r.PathValue("file"), roleID, "reports")
+	s.serveHistoryFile(w, r, pe, histDir, r.PathValue("file"), roleID, "reports")
 }
 
 func (s *Server) handleReviewHistory(w http.ResponseWriter, r *http.Request) {
@@ -358,10 +366,10 @@ func (s *Server) handleReviewHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	histDir := filepath.Join(pe.ProjectDir, "supervisor", "history")
-	s.serveHistoryFile(w, r, pe.Name, histDir, r.PathValue("file"), "", "review")
+	s.serveHistoryFile(w, r, pe, histDir, r.PathValue("file"), "", "review")
 }
 
-func (s *Server) serveHistoryFile(w http.ResponseWriter, r *http.Request, projectName, histDir, filename, roleID, nav string) {
+func (s *Server) serveHistoryFile(w http.ResponseWriter, r *http.Request, pe *ProjectEntry, histDir, filename, roleID, nav string) {
 	path := filepath.Clean(filepath.Join(histDir, filename))
 	if !strings.HasPrefix(path, filepath.Clean(histDir)+string(filepath.Separator)) {
 		http.NotFound(w, r)
@@ -388,7 +396,8 @@ func (s *Server) serveHistoryFile(w http.ResponseWriter, r *http.Request, projec
 	s.render(w, r, "history_detail.html", pageData{
 		Title:       title,
 		Nav:         nav,
-		ProjectName: projectName,
+		ProjectName: pe.Name,
+		ProjectSlug: pe.Slug,
 		Data: historyDetailData{
 			Kind:            kind,
 			RoleID:          roleID,
@@ -443,6 +452,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		Title:       "Sessions",
 		Nav:         "sessions",
 		ProjectName: pe.Name,
+		ProjectSlug: pe.Slug,
 		Data: sessionsPageData{Sessions: sessions},
 	})
 }
@@ -480,7 +490,7 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 			data.SupervisorFiles = append(data.SupervisorFiles, sessionFile{
 				HistoryEntry: entry,
 				Label:        "supervisor/" + entry.Kind,
-				URL:          fmt.Sprintf("/p/%s/review/history/%s", pe.Name, entry.Filename),
+				URL:          fmt.Sprintf("/p/%s/review/history/%s", pe.Slug, entry.Filename),
 			})
 		}
 	}
@@ -521,7 +531,7 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 					HistoryEntry: entry,
 					Label:        roleID + "/" + entry.Kind,
 					RoleID:       roleID,
-					URL:          fmt.Sprintf("/p/%s/reports/%s/history/%s", pe.Name, roleID, entry.Filename),
+					URL:          fmt.Sprintf("/p/%s/reports/%s/history/%s", pe.Slug, roleID, entry.Filename),
 				})
 			}
 		}
@@ -531,6 +541,7 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		Title:       taskGroup,
 		Nav:         "sessions",
 		ProjectName: pe.Name,
+		ProjectSlug: pe.Slug,
 		Data:        data,
 	})
 }

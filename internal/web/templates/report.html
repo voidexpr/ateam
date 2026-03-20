@@ -1,6 +1,6 @@
 {{define "report.html"}}
 {{$d := .Data}}
-<a href="/p/{{.ProjectName}}/reports" class="back-link">&larr; All reports</a>
+<a href="/p/{{.ProjectSlug}}/reports" class="back-link">&larr; All reports</a>
 <div class="page-header">
   <h1>{{$d.RoleID}}</h1>
   <p class="subtitle">Current report &middot; {{fmtDateAge $d.ModTime}}</p>
@@ -23,7 +23,7 @@
         <td>current</td>
       </tr>
       {{range $d.History}}
-      <tr data-href="/p/{{$.ProjectName}}/reports/{{$d.RoleID}}/history/{{.Filename}}">
+      <tr data-href="/p/{{$.ProjectSlug}}/reports/{{$d.RoleID}}/history/{{.Filename}}">
         <td>{{.Timestamp.Format "2006-01-02 15:04"}}</td>
         <td>{{fmtDateAge .Timestamp}}</td>
       </tr>

@@ -1,6 +1,6 @@
 {{define "session_detail.html"}}
 {{$d := .Data}}
-<a href="/p/{{.ProjectName}}/sessions" class="back-link">&larr; All sessions</a>
+<a href="/p/{{.ProjectSlug}}/sessions" class="back-link">&larr; All sessions</a>
 <div class="page-header">
   <h1>{{$d.TaskGroup}}</h1>
 </div>
@@ -80,7 +80,7 @@
     </thead>
     <tbody>
       {{range $d.Runs}}
-      <tr data-href="/p/{{$.ProjectName}}/runs/{{.ID}}">
+      <tr data-href="/p/{{$.ProjectSlug}}/runs/{{.ID}}">
         <td>#{{.ID}}</td>
         <td><span class="badge badge-{{.Action}}">{{.Action}}</span></td>
         <td>{{.Role}}</td>

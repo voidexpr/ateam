@@ -24,7 +24,7 @@
   <div class="section-title">Role Reports</div>
   <div class="card-grid">
     {{range $d.Reports}}
-    <a href="/p/{{$.ProjectName}}/reports/{{.RoleID}}" class="card">
+    <a href="/p/{{$.ProjectSlug}}/reports/{{.RoleID}}" class="card">
       <h3>{{.RoleID}}</h3>
       <div class="meta">{{fmtDateAge .ModTime}}</div>
     </a>
@@ -42,7 +42,7 @@
     </thead>
     <tbody>
       {{range $d.RecentRuns}}
-      <tr data-href="/p/{{$.ProjectName}}/runs/{{.ID}}">
+      <tr data-href="/p/{{$.ProjectSlug}}/runs/{{.ID}}">
         <td>#{{.ID}}</td>
         <td><span class="badge badge-{{.Action}}">{{.Action}}</span></td>
         <td>{{.Role}}</td>
