@@ -6,7 +6,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var servePort int
+var (
+	servePort   int
+	serveNoOpen bool
+)
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
@@ -18,13 +21,15 @@ When run outside, lists all registered projects.
 
 Example:
   ateam serve
-  ateam serve --port 8080`,
+  ateam serve --port 8080
+  ateam serve --no-open`,
 	Args: cobra.NoArgs,
 	RunE: runServe,
 }
 
 func init() {
 	serveCmd.Flags().IntVar(&servePort, "port", 0, "port to listen on (0 = random)")
+	serveCmd.Flags().BoolVar(&serveNoOpen, "no-open", false, "do not open the browser automatically")
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -39,5 +44,5 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer srv.Close()
 
-	return srv.ListenAndServe(servePort)
+	return srv.ListenAndServe(servePort, !serveNoOpen)
 }
