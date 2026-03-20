@@ -1,7 +1,7 @@
 {{define "run.html"}}
 {{$d := .Data}}
 {{$r := $d.Run}}
-<a href="/p/{{.ProjectName}}/runs" class="back-link">&larr; All runs</a>
+<a href="/p/{{.ProjectSlug}}/runs" class="back-link">&larr; All runs</a>
 <div class="page-header">
   <h1>Run #{{$r.ID}}</h1>
   <p class="subtitle">

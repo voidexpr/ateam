@@ -8,7 +8,7 @@
 {{if $reports}}
 <div class="card-grid">
   {{range $reports}}
-  <a href="/p/{{$.ProjectName}}/reports/{{.RoleID}}" class="card">
+  <a href="/p/{{$.ProjectSlug}}/reports/{{.RoleID}}" class="card">
     <h3>{{.RoleID}}</h3>
     <div class="meta">{{fmtDateAge .ModTime}}</div>
     <span class="card-stat">{{len .Content}} chars</span>

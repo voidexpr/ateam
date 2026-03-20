@@ -13,7 +13,7 @@
     </thead>
     <tbody>
       {{range $d.Sessions}}
-      <tr data-href="/p/{{$.ProjectName}}/sessions/{{.TaskGroup}}">
+      <tr data-href="/p/{{$.ProjectSlug}}/sessions/{{.TaskGroup}}">
         <td>
           {{.TaskGroup}}
           {{if not .Timestamp.IsZero}}<div style="font-size:12px;color:var(--text-muted)">{{fmtDateAge .Timestamp}}</div>{{end}}

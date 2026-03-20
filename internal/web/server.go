@@ -27,7 +27,8 @@ var staticFS embed.FS
 
 // ProjectEntry holds info about a discovered project for listing.
 type ProjectEntry struct {
-	Name       string
+	Name       string // display name from config
+	Slug       string // URL-safe identifier
 	ProjectDir string
 	OrgDir     string
 	SourceDir  string
@@ -56,7 +57,8 @@ func (s *Server) Close() {
 type pageData struct {
 	Title       string
 	Nav         string // active nav tab
-	ProjectName string
+	ProjectName string // display name
+	ProjectSlug string // URL-safe identifier
 	Projects    []ProjectEntry
 	SingleMode  bool
 	Content     template.HTML
@@ -149,6 +151,7 @@ func New(env *root.ResolvedEnv) (*Server, error) {
 		s.singleMode = true
 		s.projects = []ProjectEntry{{
 			Name:       env.ProjectName,
+			Slug:       slugify(env.ProjectName),
 			ProjectDir: env.ProjectDir,
 			OrgDir:     env.OrgDir,
 			SourceDir:  env.SourceDir,
@@ -157,6 +160,7 @@ func New(env *root.ResolvedEnv) (*Server, error) {
 		if err := root.WalkProjects(env.OrgDir, func(pi root.ProjectInfo) error {
 			s.projects = append(s.projects, ProjectEntry{
 				Name:       pi.Config.Project.Name,
+				Slug:       slugify(pi.Config.Project.Name),
 				ProjectDir: pi.Dir,
 				OrgDir:     env.OrgDir,
 				SourceDir:  filepath.Dir(pi.Dir),
@@ -170,9 +174,9 @@ func New(env *root.ResolvedEnv) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) findProject(name string) *ProjectEntry {
+func (s *Server) findProject(slug string) *ProjectEntry {
 	for i := range s.projects {
-		if s.projects[i].Name == name {
+		if s.projects[i].Slug == slug {
 			return &s.projects[i]
 		}
 	}
@@ -251,11 +255,28 @@ func (s *Server) ListenAndServe(port int) error {
 	url := fmt.Sprintf("http://localhost:%d", actualPort)
 
 	if s.singleMode {
-		url += "/p/" + s.projects[0].Name + "/"
+		url += "/p/" + s.projects[0].Slug + "/"
 	}
 	fmt.Fprintf(os.Stderr, "Serving at %s\n", url)
 
 	return http.Serve(ln, mux)
+}
+
+// slugify returns a URL-safe identifier from a project name.
+func slugify(name string) string {
+	s := strings.ToLower(name)
+	s = strings.ReplaceAll(s, " ", "-")
+	// Remove anything not alphanumeric, dash, or underscore
+	var b strings.Builder
+	for _, c := range s {
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' {
+			b.WriteRune(c)
+		}
+	}
+	if b.Len() == 0 {
+		return "project"
+	}
+	return b.String()
 }
 
 // discoverRoles returns all known role IDs for a project.

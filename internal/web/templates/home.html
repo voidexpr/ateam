@@ -6,7 +6,7 @@
 {{if .Projects}}
 <div class="project-grid">
   {{range .Projects}}
-  <a href="/p/{{.Name}}/" class="card">
+  <a href="/p/{{.Slug}}/" class="card">
     <h3>{{.Name}}</h3>
     <div class="meta">{{.SourceDir}}</div>
   </a>
