@@ -24,8 +24,8 @@
     </thead>
     <tbody>
       {{range $runs}}
-      <tr>
-        <td><a href="/p/{{$.ProjectName}}/runs/{{.ID}}">#{{.ID}}</a></td>
+      <tr data-href="/p/{{$.ProjectName}}/runs/{{.ID}}">
+        <td>#{{.ID}}</td>
         <td><span class="badge badge-{{.Action}}">{{.Action}}</span></td>
         <td>{{.Role}}</td>
         <td style="font-size:12px;color:var(--text-muted)">{{.Model}}</td>

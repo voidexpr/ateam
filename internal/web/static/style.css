@@ -359,6 +359,17 @@ main {
   font-family: var(--font-mono);
 }
 
+/* Clickable rows */
+.data-table tr[data-href] { cursor: pointer; }
+.data-table tr[data-href]:hover td { background: var(--accent-dim); }
+
+/* Active history row */
+.data-table tr.active-row td {
+  background: var(--accent-dim);
+  color: var(--text-bright);
+  font-weight: 500;
+}
+
 /* Back link */
 .back-link {
   display: inline-flex;

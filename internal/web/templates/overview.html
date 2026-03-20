@@ -42,8 +42,8 @@
     </thead>
     <tbody>
       {{range $d.RecentRuns}}
-      <tr>
-        <td><a href="/p/{{$.ProjectName}}/runs/{{.ID}}">#{{.ID}}</a></td>
+      <tr data-href="/p/{{$.ProjectName}}/runs/{{.ID}}">
+        <td>#{{.ID}}</td>
         <td><span class="badge badge-{{.Action}}">{{.Action}}</span></td>
         <td>{{.Role}}</td>
         <td>{{fmtTimestamp .StartedAt}}</td>
