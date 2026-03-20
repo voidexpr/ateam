@@ -40,6 +40,9 @@ For each finding:
 ### Quick Wins
 List the top 3-5 findings that are high-value and low-effort (SMALL effort, MEDIUM+ severity).
 
+### Project Context
+List the key specifics about the project being analyzed from your specific role angle. Record the key files, directories and technologies so the next report needs to spend less time exploring.
+
 ## Guidelines
 
 - Be specific — reference actual files, functions, and line numbers

@@ -8,7 +8,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -37,6 +39,7 @@ type ProjectEntry struct {
 
 // Server is the ateam web server.
 type Server struct {
+	URL        string // set after ListenAndServe binds
 	orgDir     string
 	projects   []ProjectEntry
 	singleMode bool
@@ -222,7 +225,8 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, tmplName string,
 }
 
 // ListenAndServe starts the HTTP server. Port 0 means a random available port.
-func (s *Server) ListenAndServe(port int) error {
+// If openBrowser is true, opens the URL in the default browser before serving.
+func (s *Server) ListenAndServe(port int, openBrowser bool) error {
 	mux := http.NewServeMux()
 
 	staticSub, err := fs.Sub(staticFS, "static")
@@ -252,14 +256,31 @@ func (s *Server) ListenAndServe(port int) error {
 	}
 
 	actualPort := ln.Addr().(*net.TCPAddr).Port
-	url := fmt.Sprintf("http://localhost:%d", actualPort)
+	s.URL = fmt.Sprintf("http://localhost:%d", actualPort)
 
 	if s.singleMode {
-		url += "/p/" + s.projects[0].Slug + "/"
+		s.URL += "/p/" + s.projects[0].Slug + "/"
 	}
-	fmt.Fprintf(os.Stderr, "Serving at %s\n", url)
+	fmt.Fprintf(os.Stderr, "Serving at %s\n", s.URL)
+
+	if openBrowser {
+		openURL(s.URL)
+	}
 
 	return http.Serve(ln, mux)
+}
+
+func openURL(url string) {
+	var cmd string
+	switch goruntime.GOOS {
+	case "darwin":
+		cmd = "open"
+	case "windows":
+		cmd = "start"
+	default:
+		cmd = "xdg-open"
+	}
+	exec.Command(cmd, url).Start()
 }
 
 // slugify returns a URL-safe identifier from a project name.
