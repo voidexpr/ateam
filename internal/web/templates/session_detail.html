@@ -20,6 +20,46 @@
   </div>
 </div>
 
+{{if $d.CodeOutputHTML}}
+<div class="section">
+  <div class="section-title">Code Output <span style="font-weight:normal;color:var(--text-muted);font-size:13px">&middot; {{fmtDateAge $d.CodeOutputModTime}}</span></div>
+  <div class="markdown-body">
+    {{$d.CodeOutputHTML}}
+  </div>
+</div>
+{{end}}
+
+{{if or $d.SupervisorFiles $d.RoleFiles}}
+<div class="section">
+  <div class="section-title">Session Files</div>
+  <table class="data-table">
+    <thead>
+      <tr><th>File</th><th>Date</th></tr>
+    </thead>
+    <tbody>
+      {{range $d.SupervisorFiles}}
+      <tr data-href="{{.URL}}">
+        <td>
+          <span class="badge badge-review">supervisor</span>
+          <span style="margin-left:4px">{{.Kind}}</span>
+        </td>
+        <td>{{.Timestamp.Format "2006-01-02 15:04"}}</td>
+      </tr>
+      {{end}}
+      {{range $d.RoleFiles}}
+      <tr data-href="{{.URL}}">
+        <td>
+          <span class="badge badge-run">{{.RoleID}}</span>
+          <span style="margin-left:4px">{{.Kind}}</span>
+        </td>
+        <td>{{.Timestamp.Format "2006-01-02 15:04"}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
+
 {{if $d.Runs}}
 <div class="section">
   <div class="section-title">Runs</div>
@@ -40,8 +80,8 @@
     </thead>
     <tbody>
       {{range $d.Runs}}
-      <tr>
-        <td><a href="/p/{{$.ProjectName}}/runs/{{.ID}}">#{{.ID}}</a></td>
+      <tr data-href="/p/{{$.ProjectName}}/runs/{{.ID}}">
+        <td>#{{.ID}}</td>
         <td><span class="badge badge-{{.Action}}">{{.Action}}</span></td>
         <td>{{.Role}}</td>
         <td style="font-size:12px;color:var(--text-muted)">{{.Model}}</td>
