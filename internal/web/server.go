@@ -244,6 +244,7 @@ func (s *Server) ListenAndServe(port int, openBrowser bool) error {
 	mux.HandleFunc("GET /p/{project}/prompts", s.handlePrompts)
 	mux.HandleFunc("GET /p/{project}/runs", s.handleRuns)
 	mux.HandleFunc("GET /p/{project}/runs/{id}", s.handleRun)
+	mux.HandleFunc("GET /p/{project}/runs/{id}/{file}", s.handleRunFile)
 	mux.HandleFunc("GET /p/{project}/cost", s.handleCost)
 	mux.HandleFunc("GET /p/{project}/reports/{role}/history/{file}", s.handleReportHistory)
 	mux.HandleFunc("GET /p/{project}/review/history/{file}", s.handleReviewHistory)

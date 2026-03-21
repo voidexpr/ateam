@@ -1,0 +1,12 @@
+{{define "run_file.html"}}
+{{$d := .Data}}
+<a href="/p/{{.ProjectSlug}}/runs/{{$d.RunID}}" class="back-link">&larr; Run #{{$d.RunID}}</a>
+<div class="page-header">
+  <h1>Run #{{$d.RunID}} &mdash; {{$d.FileType}}</h1>
+</div>
+<div class="section">
+  <div class="markdown-body">
+    {{$d.HTML}}
+  </div>
+</div>
+{{end}}
