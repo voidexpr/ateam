@@ -192,7 +192,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 		} else {
 			reportPath := env.RoleReportPath(r.RoleID)
 			historyDir := env.RoleHistoryDir(r.RoleID)
-			if err := runner.ArchiveFile(reportPath, historyDir, prompts.ReportFile); err != nil {
+			if err := runner.ArchiveFile(reportPath, historyDir, prompts.ReportFile, r.StartedAt); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not archive report for %s: %v\n", r.RoleID, err)
 			}
 			statuses[idx] = fmt.Sprintf("  %-25s done     %s  %s  %s", r.RoleID, endedAt, elapsed, relPath(cwd, reportPath))

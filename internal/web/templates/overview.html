@@ -33,23 +33,46 @@
 </div>
 {{end}}
 
-{{if $d.RecentRuns}}
+{{if $d.Runs}}
 <div class="section">
-  <div class="section-title">Recent Runs</div>
+  <div class="section-title" style="display:flex;align-items:center;gap:12px">
+    Runs ({{$d.TotalRuns}})
+    {{if $d.ShowAll}}
+      <a href="/p/{{$.ProjectSlug}}/" class="btn btn-sm">Recent 30</a>
+    {{else}}
+      {{if gt $d.TotalRuns 29}}
+      <a href="/p/{{$.ProjectSlug}}/?all=1" class="btn btn-sm">Show all</a>
+      {{end}}
+    {{end}}
+  </div>
   <table class="data-table">
     <thead>
-      <tr><th>ID</th><th>Action</th><th>Role</th><th>Started</th><th>Duration</th><th>Cost</th><th>Status</th></tr>
+      <tr>
+        <th>ID</th>
+        <th>Action</th>
+        <th>Role</th>
+        <th>Started</th>
+        <th>Duration</th>
+        <th>Cost</th>
+        <th>Status</th>
+        <th>Files</th>
+      </tr>
     </thead>
     <tbody>
-      {{range $d.RecentRuns}}
-      <tr data-href="/p/{{$.ProjectSlug}}/runs/{{.ID}}">
-        <td>#{{.ID}}</td>
+      {{range $d.Runs}}
+      <tr>
+        <td><a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}">#{{.ID}}</a></td>
         <td><span class="badge badge-{{.Action}}">{{.Action}}</span></td>
         <td>{{.Role}}</td>
         <td>{{fmtTimestamp .StartedAt}}</td>
         <td>{{fmtDuration .DurationMS}}</td>
         <td>{{fmtCost .CostUSD}}</td>
         <td>{{if .IsError}}<span class="badge badge-error">error</span>{{else if .EndedAt}}<span class="badge badge-ok">ok</span>{{else}}<span class="badge badge-run">running</span>{{end}}</td>
+        <td class="file-links">
+          {{- if .ExecFile}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/exec" title="Exec">exec</a>{{end -}}
+          {{- if .PromptFile}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/prompt" title="Prompt">prompt</a>{{end -}}
+          {{- if .OutputFile}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/output" title="Output">output</a>{{end -}}
+        </td>
       </tr>
       {{end}}
     </tbody>

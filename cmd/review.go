@@ -129,7 +129,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("review failed: %w", result.Err)
 	}
 
-	if err := runner.ArchiveFile(reviewFile, historyDir, "review.md"); err != nil {
+	if err := runner.ArchiveFile(reviewFile, historyDir, "review.md", result.StartedAt); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not archive review: %v\n", err)
 	}
 
