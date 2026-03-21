@@ -230,7 +230,10 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 type runDetailData struct {
-	Run calldb.RecentRow
+	Run        calldb.RecentRow
+	ExecFile   string // filename for link (empty if not found)
+	PromptFile string // filename for link (empty if not found)
+	LogsDir    string // relative path to logs directory
 }
 
 func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
@@ -259,13 +262,159 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	data := runDetailData{Run: *run}
+	if run.StreamFile != "" {
+		prefix := strings.TrimSuffix(run.StreamFile, "_stream.jsonl")
+		execPath := filepath.Join(pe.ProjectDir, prefix+"_exec.md")
+		if _, err := os.Stat(execPath); err == nil {
+			data.ExecFile = filepath.Base(execPath)
+		}
+		data.LogsDir = filepath.Dir(run.StreamFile)
+		data.PromptFile = resolvePromptFile(pe.ProjectDir, run.Action, run.Role, run.StreamFile)
+	}
+
 	s.render(w, r, "run.html", pageData{
 		Title:       fmt.Sprintf("Run #%d", id),
 		Nav:         "runs",
 		ProjectName: pe.Name,
 		ProjectSlug: pe.Slug,
-		Data:        runDetailData{Run: *run},
+		Data:        data,
 	})
+}
+
+// handleRunFile serves exec or prompt markdown files associated with a run.
+func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
+	pe := s.findProject(r.PathValue("project"))
+	if pe == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	db := s.getDB(pe)
+	if db == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	run, err := db.GetRunByID(id)
+	if err != nil || run == nil || run.StreamFile == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	fileType := r.PathValue("file")
+	var absPath, title string
+
+	switch fileType {
+	case "exec":
+		prefix := strings.TrimSuffix(run.StreamFile, "_stream.jsonl")
+		absPath = filepath.Join(pe.ProjectDir, prefix+"_exec.md")
+		title = fmt.Sprintf("Run #%d — Exec", id)
+	case "prompt":
+		promptFile := resolvePromptFile(pe.ProjectDir, run.Action, run.Role, run.StreamFile)
+		if promptFile == "" {
+			http.NotFound(w, r)
+			return
+		}
+		absPath = filepath.Join(pe.ProjectDir, promptDir(run.Action, run.Role), promptFile)
+		title = fmt.Sprintf("Run #%d — Prompt", id)
+	default:
+		http.NotFound(w, r)
+		return
+	}
+
+	// Validate path stays within project dir.
+	absPath = filepath.Clean(absPath)
+	if !strings.HasPrefix(absPath, filepath.Clean(pe.ProjectDir)+string(filepath.Separator)) {
+		http.NotFound(w, r)
+		return
+	}
+
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	s.render(w, r, "run_file.html", pageData{
+		Title:       title,
+		Nav:         "runs",
+		ProjectName: pe.Name,
+		ProjectSlug: pe.Slug,
+		Data: runFileData{
+			RunID:    id,
+			FileType: fileType,
+			HTML:     template.HTML(s.renderMarkdown(string(content))),
+		},
+	})
+}
+
+type runFileData struct {
+	RunID    int64
+	FileType string
+	HTML     template.HTML
+}
+
+// promptDir returns the history directory path (relative to project dir) for an action/role.
+func promptDir(action, role string) string {
+	switch action {
+	case runner.ActionReport, runner.ActionRun:
+		return filepath.Join("roles", role, "history")
+	default:
+		return filepath.Join("supervisor", "history")
+	}
+}
+
+// resolvePromptFile finds the archived prompt file for a run by matching timestamps.
+// Returns the filename (not full path), or empty if not found.
+func resolvePromptFile(projectDir, action, role, streamFile string) string {
+	var promptName string
+	switch action {
+	case runner.ActionReport:
+		promptName = "report_prompt.md"
+	case runner.ActionReview:
+		promptName = "review_prompt.md"
+	case runner.ActionCode:
+		promptName = "code_management_prompt.md"
+	case runner.ActionRun:
+		promptName = "run_prompt.md"
+	default:
+		return ""
+	}
+
+	histDir := filepath.Join(projectDir, promptDir(action, role))
+
+	// Extract timestamp from stream file name (first 19 chars: "2006-01-02_15-04-05").
+	base := filepath.Base(streamFile)
+	if len(base) < 19 {
+		return ""
+	}
+	ts := base[:19]
+
+	// Try exact match, then +/- a few seconds.
+	exact := ts + "." + promptName
+	if _, err := os.Stat(filepath.Join(histDir, exact)); err == nil {
+		return exact
+	}
+
+	t, err := time.Parse(runner.TimestampFormat, ts)
+	if err != nil {
+		return ""
+	}
+	for _, offset := range []time.Duration{time.Second, -time.Second, 2 * time.Second} {
+		candidate := t.Add(offset).Format(runner.TimestampFormat) + "." + promptName
+		if _, err := os.Stat(filepath.Join(histDir, candidate)); err == nil {
+			return candidate
+		}
+	}
+
+	return ""
 }
 
 type costPageData struct {
