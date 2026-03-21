@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 type RecentRow struct {
@@ -350,6 +351,42 @@ func (c *CallDB) RenameProject(oldID, newID string) (int64, error) {
 	}
 
 	return n, tx.Commit()
+}
+
+// RunCost holds cost and token data for a single run.
+type RunCost struct {
+	CostUSD     float64
+	TotalTokens int64
+}
+
+// RunCostByActionRole returns cost/token data for all runs matching the given
+// action and role, keyed by started_at formatted as runner.TimestampFormat.
+func (c *CallDB) RunCostByActionRole(action, role string) (map[string]RunCost, error) {
+	q := `SELECT started_at,
+			COALESCE(cost_usd, 0),
+			COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) + COALESCE(cache_read_tokens, 0)
+		FROM agent_execs WHERE action = ? AND role = ?`
+	rows, err := c.db.Query(q, action, role)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := map[string]RunCost{}
+	for rows.Next() {
+		var startedAt string
+		var rc RunCost
+		if err := rows.Scan(&startedAt, &rc.CostUSD, &rc.TotalTokens); err != nil {
+			return result, err
+		}
+		t, err := time.Parse(time.RFC3339, startedAt)
+		if err != nil {
+			continue
+		}
+		key := t.Format("2006-01-02_15-04-05")
+		result[key] = rc
+	}
+	return result, rows.Err()
 }
 
 func (c *CallDB) LatestTaskGroup(projectID, prefix string) (string, error) {
