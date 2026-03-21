@@ -88,6 +88,14 @@ func (c CodeConfig) EffectiveTimeout(override int) int {
 	return c.TimeoutMinutes
 }
 
+// EffectiveMaxParallel returns the override if positive, otherwise the configured max_parallel.
+func (r ReportConfig) EffectiveMaxParallel(override int) int {
+	if override > 0 {
+		return override
+	}
+	return r.MaxParallel
+}
+
 // EffectiveTimeout returns the override if positive, otherwise the configured timeout.
 func (r ReportConfig) EffectiveTimeout(override int) int {
 	if override > 0 {

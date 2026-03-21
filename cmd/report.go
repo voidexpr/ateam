@@ -17,6 +17,7 @@ var (
 	reportRoles                []string
 	reportExtraPrompt          string
 	reportTimeout              int
+	reportParallel             int
 	reportPrint                bool
 	reportDryRun               bool
 	reportIgnorePreviousReport bool
@@ -25,6 +26,7 @@ var (
 	reportAgent                string
 	reportVerbose              bool
 	reportForce                bool
+	reportReview               bool
 )
 
 var reportCmd = &cobra.Command{
@@ -47,7 +49,9 @@ func init() {
 	reportCmd.Flags().StringSliceVar(&reportRoles, "roles", nil, prompts.RoleFlagUsage()+" (default: all)")
 	reportCmd.Flags().StringVar(&reportExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
 	reportCmd.Flags().IntVar(&reportTimeout, "timeout", 0, "timeout in minutes per role (overrides config)")
+	reportCmd.Flags().IntVar(&reportParallel, "parallel", 0, "max parallel roles (overrides config max_parallel)")
 	reportCmd.Flags().BoolVar(&reportPrint, "print", false, "print reports to stdout after completion")
+	reportCmd.Flags().BoolVar(&reportReview, "review", false, "run review automatically after reports complete")
 	reportCmd.Flags().BoolVar(&reportDryRun, "dry-run", false, "print the computed prompt for each role without running")
 	reportCmd.Flags().BoolVar(&reportIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
 	addCheaperModelFlag(reportCmd, &reportCheaperModel)
@@ -147,8 +151,10 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	maxParallel := env.Config.Report.EffectiveMaxParallel(reportParallel)
+
 	fmt.Printf("Running %d role(s) (max %d parallel, %dm timeout)...\n\n",
-		len(tasks), env.Config.Report.MaxParallel, timeout)
+		len(tasks), maxParallel, timeout)
 
 	cwd, _ := os.Getwd()
 
@@ -169,7 +175,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 	ctx, stop := cmdContext()
 	defer stop()
 	go func() {
-		runner.RunPool(ctx, cr, tasks, env.Config.Report.MaxParallel, nil, completed)
+		runner.RunPool(ctx, cr, tasks, maxParallel, nil, completed)
 	}()
 
 	agentName := cr.Agent.Name()
@@ -214,10 +220,6 @@ func runReport(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if failed == 0 && succeeded > 0 {
-		fmt.Printf("\nRun 'ateam review' to have the supervisor synthesize findings.\n")
-	}
-
 	if reportPrint && succeeded > 0 {
 		for _, r := range results {
 			if r.Err != nil {
@@ -229,6 +231,15 @@ func runReport(cmd *cobra.Command, args []string) error {
 
 	if failed > 0 {
 		return fmt.Errorf("%d role(s) failed", failed)
+	}
+
+	if reportReview && succeeded > 0 {
+		fmt.Println()
+		return runReview(nil, nil)
+	}
+
+	if succeeded > 0 {
+		fmt.Printf("\nRun 'ateam review' to have the supervisor synthesize findings.\n")
 	}
 
 	return nil
