@@ -10,6 +10,7 @@ var (
 	allExtraPrompt  string
 	allQuiet        bool
 	allTimeout      int
+	allParallel     int
 	allCheaperModel bool
 	allVerbose      bool
 )
@@ -34,6 +35,7 @@ func init() {
 	allCmd.Flags().StringVar(&allExtraPrompt, "extra-prompt", "", "additional instructions passed to all phases (text or @filepath)")
 	allCmd.Flags().BoolVarP(&allQuiet, "quiet", "q", false, "suppress output printing")
 	allCmd.Flags().IntVar(&allTimeout, "timeout", 0, "per-phase timeout in minutes (overrides config)")
+	allCmd.Flags().IntVar(&allParallel, "parallel", 0, "max parallel report roles (overrides config max_parallel)")
 	addCheaperModelFlag(allCmd, &allCheaperModel)
 	addVerboseFlag(allCmd, &allVerbose)
 }
@@ -51,6 +53,8 @@ func runAll(cmd *cobra.Command, args []string) error {
 	reportVerbose = allVerbose
 	reportDryRun = false
 	reportIgnorePreviousReport = false
+	reportParallel = allParallel
+	reportReview = false
 	if err := runReport(nil, nil); err != nil {
 		return fmt.Errorf("report phase failed: %w", err)
 	}
