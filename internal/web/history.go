@@ -7,15 +7,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/runner"
 )
 
 // HistoryEntry represents a single archived file.
 type HistoryEntry struct {
-	Filename  string
-	Timestamp time.Time
-	Kind      string // "report", "review", "report_prompt", "review_prompt", "code_management_prompt", "run_prompt"
-	Path      string // absolute path
+	Filename    string
+	Timestamp   time.Time
+	Kind        string // "report", "review", "report_prompt", "review_prompt", "code_management_prompt", "run_prompt"
+	Path        string // absolute path
+	CostUSD     float64
+	TotalTokens int64
 }
 
 // HistoryGroup groups history entries by timestamp (same session).
@@ -108,6 +111,43 @@ func filterHistoryByKind(entries []HistoryEntry, kind string) []HistoryEntry {
 		}
 	}
 	return result
+}
+
+// fetchRunCosts returns cost/token data for all runs matching action+role.
+func fetchRunCosts(db *calldb.CallDB, action, role string) map[string]calldb.RunCost {
+	if db == nil {
+		return nil
+	}
+	costs, err := db.RunCostByActionRole(action, role)
+	if err != nil {
+		return nil
+	}
+	return costs
+}
+
+// enrichHistoryCost fills in CostUSD and TotalTokens on history entries
+// using a pre-fetched cost map.
+func enrichHistoryCost(entries []HistoryEntry, costs map[string]calldb.RunCost) {
+	for i := range entries {
+		key := entries[i].Timestamp.Format(runner.TimestampFormat)
+		if rc, ok := costs[key]; ok {
+			entries[i].CostUSD = rc.CostUSD
+			entries[i].TotalTokens = rc.TotalTokens
+		}
+	}
+}
+
+// latestRunCost returns cost/tokens for the most recent entry in the cost map.
+func latestRunCost(costs map[string]calldb.RunCost) (float64, int64) {
+	var best string
+	var rc calldb.RunCost
+	for k, v := range costs {
+		if k > best {
+			best = k
+			rc = v
+		}
+	}
+	return rc.CostUSD, rc.TotalTokens
 }
 
 // CodeSession represents a task group session from calldb.

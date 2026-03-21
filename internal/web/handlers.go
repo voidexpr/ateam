@@ -154,10 +154,12 @@ func (s *Server) handleReports(w http.ResponseWriter, r *http.Request) {
 }
 
 type reportData struct {
-	RoleID  string
-	ModTime time.Time
-	HTML    template.HTML
-	History []HistoryEntry // past report.md versions
+	RoleID             string
+	ModTime            time.Time
+	HTML               template.HTML
+	History            []HistoryEntry // past report.md versions
+	CurrentCostUSD     float64
+	CurrentTotalTokens int64
 }
 
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
@@ -173,16 +175,21 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		if rpt.RoleID == roleID {
 			histDir := filepath.Join(pe.ProjectDir, "roles", roleID, "history")
 			history := filterHistoryByKind(discoverHistory(histDir), "report")
+			costs := fetchRunCosts(s.getDB(pe), runner.ActionReport, roleID)
+			enrichHistoryCost(history, costs)
+			curCost, curTokens := latestRunCost(costs)
 			s.render(w, r, "report.html", pageData{
 				Title:       roleID + " report",
 				Nav:         "reports",
 				ProjectName: pe.Name,
-		ProjectSlug: pe.Slug,
+				ProjectSlug: pe.Slug,
 				Data: reportData{
-					RoleID:  roleID,
-					ModTime: rpt.ModTime,
-					HTML:    template.HTML(s.renderMarkdown(rpt.Content)),
-					History: history,
+					RoleID:             roleID,
+					ModTime:            rpt.ModTime,
+					HTML:               template.HTML(s.renderMarkdown(rpt.Content)),
+					History:            history,
+					CurrentCostUSD:     curCost,
+					CurrentTotalTokens: curTokens,
 				},
 			})
 			return
@@ -192,10 +199,12 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 }
 
 type reviewData struct {
-	HTML    template.HTML
-	ModTime time.Time
-	Exists  bool
-	History []HistoryEntry // past review.md versions
+	HTML               template.HTML
+	ModTime            time.Time
+	Exists             bool
+	History            []HistoryEntry // past review.md versions
+	CurrentCostUSD     float64
+	CurrentTotalTokens int64
 }
 
 func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {
@@ -216,6 +225,9 @@ func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {
 	}
 	histDir := filepath.Join(pe.ProjectDir, "supervisor", "history")
 	data.History = filterHistoryByKind(discoverHistory(histDir), "review")
+	costs := fetchRunCosts(s.getDB(pe), runner.ActionReview, "supervisor")
+	enrichHistoryCost(data.History, costs)
+	data.CurrentCostUSD, data.CurrentTotalTokens = latestRunCost(costs)
 
 	s.render(w, r, "review.html", pageData{
 		Title:       "Review",
@@ -636,6 +648,14 @@ func (s *Server) serveHistoryFile(w http.ResponseWriter, r *http.Request, pe *Pr
 		kind = "report"
 	}
 	history := filterHistoryByKind(discoverHistory(histDir), kind)
+
+	action := runner.ActionReview
+	role := "supervisor"
+	if roleID != "" {
+		action = runner.ActionReport
+		role = roleID
+	}
+	enrichHistoryCost(history, fetchRunCosts(s.getDB(pe), action, role))
 
 	title := nav + " history"
 	if roleID != "" {
