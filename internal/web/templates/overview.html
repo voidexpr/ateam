@@ -72,6 +72,8 @@
           {{- if .ExecFile}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/exec" title="Exec">exec</a>{{end -}}
           {{- if .PromptFile}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/prompt" title="Prompt">prompt</a>{{end -}}
           {{- if .OutputFile}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/output" title="Output">output</a>{{end -}}
+          {{- if .HasStream}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/logs" title="Stream log">logs</a>{{end -}}
+          {{- if .HasStderr}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/stderr" title="Stderr">stderr</a>{{end -}}
         </td>
       </tr>
       {{end}}

@@ -146,10 +146,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 	var logsDir string
 	if runRole != "" {
 		logsDir = env.RoleLogsDir(runRole)
-	} else if hasProject {
-		logsDir = env.SupervisorLogsDir()
 	} else {
-		logsDir = filepath.Join(env.OrgDir, "logs", "adhoc")
+		baseDir := env.OrgDir
+		if hasProject {
+			baseDir = env.ProjectDir
+		}
+		logsDir = filepath.Join(baseDir, "logs", "run")
 	}
 
 	// Build opts
@@ -162,12 +164,14 @@ func runRun(cmd *cobra.Command, args []string) error {
 		TaskGroup: runTaskGroup,
 	}
 
+	opts.PromptName = "run_prompt.md"
 	if runRole != "" {
 		roleDir := filepath.Join(env.ProjectDir, "roles", runRole)
 		opts.LastMessageFilePath = filepath.Join(roleDir, "last_run_output.md")
 		opts.ErrorMessageFilePath = filepath.Join(roleDir, "last_run_error.md")
-		opts.PromptName = "run_prompt.md"
 		opts.HistoryDir = env.RoleHistoryDir(runRole)
+	} else {
+		opts.HistoryDir = logsDir
 	}
 
 	showStream := !runNoStream && !runQuiet

@@ -153,6 +153,8 @@ func runReport(cmd *cobra.Command, args []string) error {
 
 	maxParallel := env.Config.Report.EffectiveMaxParallel(reportParallel)
 
+	reportStart := time.Now()
+
 	fmt.Printf("Running %d role(s) (max %d parallel, %dm timeout)...\n\n",
 		len(tasks), maxParallel, timeout)
 
@@ -202,7 +204,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 		results = append(results, r)
 	}
 
-	fmt.Printf("\n%d succeeded, %d failed\n", succeeded, failed)
+	fmt.Printf("\n%d succeeded, %d failed (%s)\n", succeeded, failed, runner.FormatDuration(time.Since(reportStart)))
 
 	if failed > 0 {
 		for _, r := range results {

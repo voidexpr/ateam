@@ -32,10 +32,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 
 type overviewRun struct {
 	calldb.RecentRow
-	ExecFile   string
-	PromptFile string
-	OutputFile string
-	LogsDir    string
+	runFiles
 }
 
 type overviewData struct {
@@ -91,20 +88,37 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type runFiles struct {
+	ExecFile   string
+	PromptFile string
+	OutputFile string
+	LogsDir    string
+	HasStream  bool
+	HasStderr  bool
+}
+
 // resolveRunFiles resolves associated files for a single run row.
-func resolveRunFiles(projectDir string, row calldb.RecentRow) (execFile, promptFile, outputFile, logsDir string) {
+func resolveRunFiles(projectDir string, row calldb.RecentRow) runFiles {
 	if row.StreamFile == "" {
-		return
+		return runFiles{}
 	}
+	var rf runFiles
 	prefix := strings.TrimSuffix(row.StreamFile, "_stream.jsonl")
 	execPath := filepath.Join(projectDir, prefix+"_exec.md")
 	if _, err := os.Stat(execPath); err == nil {
-		execFile = filepath.Base(execPath)
+		rf.ExecFile = filepath.Base(execPath)
 	}
-	logsDir = filepath.Dir(row.StreamFile)
-	promptFile = resolvePromptFile(projectDir, row.Action, row.Role, row.StreamFile)
-	outputFile = resolveOutputFile(projectDir, row.Action, row.Role, row.StreamFile)
-	return
+	if _, err := os.Stat(filepath.Join(projectDir, row.StreamFile)); err == nil {
+		rf.HasStream = true
+	}
+	stderrPath := prefix + "_stderr.log"
+	if info, err := os.Stat(filepath.Join(projectDir, stderrPath)); err == nil && info.Size() > 0 {
+		rf.HasStderr = true
+	}
+	rf.LogsDir = filepath.Dir(row.StreamFile)
+	rf.PromptFile = resolvePromptFile(projectDir, row.Action, row.Role, row.StreamFile)
+	rf.OutputFile = resolveOutputFile(projectDir, row.Action, row.Role, row.StreamFile)
+	return rf
 }
 
 // enrichRuns resolves associated files for each run.
@@ -112,10 +126,11 @@ func resolveRunFiles(projectDir string, row calldb.RecentRow) (execFile, promptF
 func enrichRuns(rows []calldb.RecentRow, projectDir string) []overviewRun {
 	result := make([]overviewRun, len(rows))
 	for i, row := range rows {
-		or := overviewRun{RecentRow: row}
-		or.ExecFile, or.PromptFile, or.OutputFile, or.LogsDir = resolveRunFiles(projectDir, row)
 		// rows come back ASC from calldb; reverse to DESC.
-		result[len(rows)-1-i] = or
+		result[len(rows)-1-i] = overviewRun{
+			RecentRow: row,
+			runFiles:  resolveRunFiles(projectDir, row),
+		}
 	}
 	return result
 }
@@ -278,11 +293,8 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 type runDetailData struct {
-	Run        calldb.RecentRow
-	ExecFile   string
-	PromptFile string
-	OutputFile string
-	LogsDir    string
+	Run calldb.RecentRow
+	runFiles
 }
 
 func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
@@ -311,8 +323,10 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data := runDetailData{Run: *run}
-	data.ExecFile, data.PromptFile, data.OutputFile, data.LogsDir = resolveRunFiles(pe.ProjectDir, *run)
+	data := runDetailData{
+		Run:      *run,
+		runFiles: resolveRunFiles(pe.ProjectDir, *run),
+	}
 
 	s.render(w, r, "run.html", pageData{
 		Title:       fmt.Sprintf("Run #%d", id),
@@ -373,6 +387,13 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 		}
 		absPath = filepath.Join(pe.ProjectDir, promptDir(run.Action, run.Role), outputFile)
 		title = fmt.Sprintf("Run #%d — Output", id)
+	case "logs":
+		absPath = filepath.Join(pe.ProjectDir, run.StreamFile)
+		title = fmt.Sprintf("Run #%d — Stream Log", id)
+	case "stderr":
+		prefix := strings.TrimSuffix(run.StreamFile, "_stream.jsonl")
+		absPath = filepath.Join(pe.ProjectDir, prefix+"_stderr.log")
+		title = fmt.Sprintf("Run #%d — Stderr", id)
 	default:
 		http.NotFound(w, r)
 		return
@@ -391,6 +412,14 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var rendered string
+	switch fileType {
+	case "logs", "stderr":
+		rendered = s.renderMarkdown("```\n" + string(content) + "\n```")
+	default:
+		rendered = s.renderMarkdown(string(content))
+	}
+
 	s.render(w, r, "run_file.html", pageData{
 		Title:       title,
 		Nav:         "runs",
@@ -399,7 +428,7 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 		Data: runFileData{
 			RunID:    id,
 			FileType: fileType,
-			HTML:     template.HTML(s.renderMarkdown(string(content))),
+			HTML:     template.HTML(rendered),
 		},
 	})
 }
