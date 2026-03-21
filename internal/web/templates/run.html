@@ -45,13 +45,14 @@
   </table>
 </div>
 
-{{if or $d.ExecFile $d.PromptFile $d.LogsDir}}
+{{if or $d.ExecFile $d.PromptFile $d.OutputFile $d.LogsDir}}
 <div class="section">
   <div class="section-title">Files</div>
   <table class="data-table">
     <tbody>
       {{if $d.ExecFile}}<tr><td style="width:160px;color:var(--text-muted)">Exec</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/exec">{{$d.ExecFile}}</a></td></tr>{{end}}
       {{if $d.PromptFile}}<tr><td style="color:var(--text-muted)">Prompt</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/prompt">{{$d.PromptFile}}</a></td></tr>{{end}}
+      {{if $d.OutputFile}}<tr><td style="color:var(--text-muted)">Output</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/output">{{$d.OutputFile}}</a></td></tr>{{end}}
       {{if $d.LogsDir}}<tr><td style="color:var(--text-muted)">Logs</td><td style="font-family:var(--font-mono);font-size:13px">{{$d.LogsDir}}/</td></tr>{{end}}
     </tbody>
   </table>

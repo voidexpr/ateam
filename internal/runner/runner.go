@@ -158,7 +158,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	}
 
 	// Archive the prompt to history before running.
-	promptFile := archivePrompt(opts.HistoryDir, opts.PromptName, prompt)
+	promptFile := archivePrompt(opts.HistoryDir, opts.PromptName, prompt, startedAt)
 
 	// Resolve CLAUDE_CONFIG_DIR for isolated agents.
 	// Relative config_dir is resolved from ProjectDir (.ateam/); absolute is used as-is.
@@ -560,12 +560,12 @@ func relToDir(base, path string) string {
 	return rel
 }
 
-func archivePrompt(historyDir, promptName, prompt string) string {
+func archivePrompt(historyDir, promptName, prompt string, startedAt time.Time) string {
 	if historyDir == "" || promptName == "" {
 		return ""
 	}
 	_ = os.MkdirAll(historyDir, 0700)
-	ts := time.Now().Format(TimestampFormat)
+	ts := startedAt.Format(TimestampFormat)
 	name := strings.ReplaceAll(fmt.Sprintf("%s.%s", ts, promptName), " ", "_")
 	path := filepath.Join(historyDir, name)
 	_ = os.WriteFile(path, []byte(prompt), 0600)
@@ -586,7 +586,9 @@ func FormatDuration(d time.Duration) string {
 }
 
 // ArchiveFile copies a file to archiveDir with a timestamped name.
-func ArchiveFile(srcPath, archiveDir, name string) error {
+// The ts parameter sets the timestamp prefix; pass the run's startedAt so all
+// files for a run share the same timestamp, making association deterministic.
+func ArchiveFile(srcPath, archiveDir, name string, ts time.Time) error {
 	if err := os.MkdirAll(archiveDir, 0700); err != nil {
 		return err
 	}
@@ -594,8 +596,7 @@ func ArchiveFile(srcPath, archiveDir, name string) error {
 	if err != nil {
 		return err
 	}
-	timestamp := time.Now().Format(TimestampFormat)
-	archiveName := strings.ReplaceAll(fmt.Sprintf("%s.%s", timestamp, name), " ", "_")
+	archiveName := strings.ReplaceAll(fmt.Sprintf("%s.%s", ts.Format(TimestampFormat), name), " ", "_")
 	return os.WriteFile(filepath.Join(archiveDir, archiveName), data, 0600)
 }
 

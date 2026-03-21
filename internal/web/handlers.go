@@ -30,12 +30,22 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type overviewRun struct {
+	calldb.RecentRow
+	ExecFile   string
+	PromptFile string
+	OutputFile string
+	LogsDir    string
+}
+
 type overviewData struct {
 	Reports       []prompts.RoleReport
-	RecentRuns    []calldb.RecentRow
+	Runs          []overviewRun
 	HasReview     bool
 	ReviewModTime time.Time
 	CostTotal     float64
+	ShowAll       bool
+	TotalRuns     int
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
@@ -54,8 +64,17 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		data.ReviewModTime = info.ModTime()
 	}
 
+	showAll := r.URL.Query().Get("all") == "1"
+	data.ShowAll = showAll
+
 	if db := s.getDB(pe); db != nil {
-		data.RecentRuns, _ = db.RecentRuns(calldb.RecentFilter{Limit: 10})
+		limit := 30
+		if showAll {
+			limit = 100000
+		}
+		rows, _ := db.RecentRuns(calldb.RecentFilter{Limit: limit})
+		data.Runs = enrichRuns(rows, pe.ProjectDir)
+		data.TotalRuns = len(rows)
 		if aggs, err := db.CostByAction(""); err == nil {
 			for _, a := range aggs {
 				data.CostTotal += a.CostUSD
@@ -70,6 +89,35 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		ProjectSlug: pe.Slug,
 		Data:        data,
 	})
+}
+
+// resolveRunFiles resolves associated files for a single run row.
+func resolveRunFiles(projectDir string, row calldb.RecentRow) (execFile, promptFile, outputFile, logsDir string) {
+	if row.StreamFile == "" {
+		return
+	}
+	prefix := strings.TrimSuffix(row.StreamFile, "_stream.jsonl")
+	execPath := filepath.Join(projectDir, prefix+"_exec.md")
+	if _, err := os.Stat(execPath); err == nil {
+		execFile = filepath.Base(execPath)
+	}
+	logsDir = filepath.Dir(row.StreamFile)
+	promptFile = resolvePromptFile(projectDir, row.Action, row.Role, row.StreamFile)
+	outputFile = resolveOutputFile(projectDir, row.Action, row.Role, row.StreamFile)
+	return
+}
+
+// enrichRuns resolves associated files for each run.
+// Runs are returned in descending start order (newest first).
+func enrichRuns(rows []calldb.RecentRow, projectDir string) []overviewRun {
+	result := make([]overviewRun, len(rows))
+	for i, row := range rows {
+		or := overviewRun{RecentRow: row}
+		or.ExecFile, or.PromptFile, or.OutputFile, or.LogsDir = resolveRunFiles(projectDir, row)
+		// rows come back ASC from calldb; reverse to DESC.
+		result[len(rows)-1-i] = or
+	}
+	return result
 }
 
 func (s *Server) handleReports(w http.ResponseWriter, r *http.Request) {
@@ -231,9 +279,10 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 
 type runDetailData struct {
 	Run        calldb.RecentRow
-	ExecFile   string // filename for link (empty if not found)
-	PromptFile string // filename for link (empty if not found)
-	LogsDir    string // relative path to logs directory
+	ExecFile   string
+	PromptFile string
+	OutputFile string
+	LogsDir    string
 }
 
 func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
@@ -263,15 +312,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := runDetailData{Run: *run}
-	if run.StreamFile != "" {
-		prefix := strings.TrimSuffix(run.StreamFile, "_stream.jsonl")
-		execPath := filepath.Join(pe.ProjectDir, prefix+"_exec.md")
-		if _, err := os.Stat(execPath); err == nil {
-			data.ExecFile = filepath.Base(execPath)
-		}
-		data.LogsDir = filepath.Dir(run.StreamFile)
-		data.PromptFile = resolvePromptFile(pe.ProjectDir, run.Action, run.Role, run.StreamFile)
-	}
+	data.ExecFile, data.PromptFile, data.OutputFile, data.LogsDir = resolveRunFiles(pe.ProjectDir, *run)
 
 	s.render(w, r, "run.html", pageData{
 		Title:       fmt.Sprintf("Run #%d", id),
@@ -324,6 +365,14 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 		}
 		absPath = filepath.Join(pe.ProjectDir, promptDir(run.Action, run.Role), promptFile)
 		title = fmt.Sprintf("Run #%d — Prompt", id)
+	case "output":
+		outputFile := resolveOutputFile(pe.ProjectDir, run.Action, run.Role, run.StreamFile)
+		if outputFile == "" {
+			http.NotFound(w, r)
+			return
+		}
+		absPath = filepath.Join(pe.ProjectDir, promptDir(run.Action, run.Role), outputFile)
+		title = fmt.Sprintf("Run #%d — Output", id)
 	default:
 		http.NotFound(w, r)
 		return
@@ -372,7 +421,6 @@ func promptDir(action, role string) string {
 }
 
 // resolvePromptFile finds the archived prompt file for a run by matching timestamps.
-// Returns the filename (not full path), or empty if not found.
 func resolvePromptFile(projectDir, action, role, streamFile string) string {
 	var promptName string
 	switch action {
@@ -387,18 +435,36 @@ func resolvePromptFile(projectDir, action, role, streamFile string) string {
 	default:
 		return ""
 	}
+	return resolveHistoryFile(projectDir, action, role, streamFile, promptName)
+}
 
+// resolveOutputFile finds the archived output file (report.md or review.md) for a run.
+func resolveOutputFile(projectDir, action, role, streamFile string) string {
+	var outputName string
+	switch action {
+	case runner.ActionReport:
+		outputName = "report.md"
+	case runner.ActionReview:
+		outputName = "review.md"
+	default:
+		return ""
+	}
+	return resolveHistoryFile(projectDir, action, role, streamFile, outputName)
+}
+
+// resolveHistoryFile finds an archived file by matching the stream file's timestamp.
+// Exact match is expected for new runs; fuzzy ±5s fallback handles older data.
+// Returns the filename (not full path), or empty if not found.
+func resolveHistoryFile(projectDir, action, role, streamFile, targetName string) string {
 	histDir := filepath.Join(projectDir, promptDir(action, role))
 
-	// Extract timestamp from stream file name (first 19 chars: "2006-01-02_15-04-05").
 	base := filepath.Base(streamFile)
 	if len(base) < 19 {
 		return ""
 	}
 	ts := base[:19]
 
-	// Try exact match, then +/- a few seconds.
-	exact := ts + "." + promptName
+	exact := ts + "." + targetName
 	if _, err := os.Stat(filepath.Join(histDir, exact)); err == nil {
 		return exact
 	}
@@ -407,8 +473,12 @@ func resolvePromptFile(projectDir, action, role, streamFile string) string {
 	if err != nil {
 		return ""
 	}
-	for _, offset := range []time.Duration{time.Second, -time.Second, 2 * time.Second} {
-		candidate := t.Add(offset).Format(runner.TimestampFormat) + "." + promptName
+	for _, offset := range []time.Duration{
+		time.Second, -time.Second,
+		2 * time.Second, -2 * time.Second,
+		5 * time.Second, -5 * time.Second,
+	} {
+		candidate := t.Add(offset).Format(runner.TimestampFormat) + "." + targetName
 		if _, err := os.Stat(filepath.Join(histDir, candidate)); err == nil {
 			return candidate
 		}
