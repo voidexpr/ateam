@@ -131,20 +131,21 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Printf("\n1. Edit .ateam/config.toml to enable/disable specific roles as needed\n")
-	fmt.Printf("\n2. Optional: set up a token for Docker container execution (not required):\n")
-	fmt.Printf("     claude setup-token\n")
-	fmt.Printf("     export CLAUDE_CODE_OAUTH_TOKEN=\"<token from above>\"\n")
-	fmt.Printf("\n3. Main commands:\n")
-	fmt.Printf("  ateam env       show current environment and configuration\n")
-	fmt.Printf("  ateam report    run role agents to analyze the project\n")
-	fmt.Printf("  ateam review    supervisor reviews and prioritizes findings\n")
-	fmt.Printf("  ateam code      execute prioritized tasks as code changes\n")
-	fmt.Printf("  ateam all       run the full pipeline: report + review + code\n")
-	fmt.Printf("  ateam ps        show recent agent runs\n")
-	fmt.Printf("  ateam tail      live-stream agent output\n")
-	fmt.Printf("  ateam prompt    inspect assembled prompts\n")
-	fmt.Printf("  ateam serve     browse reports and sessions in a web UI\n")
+	fmt.Printf("\nNext steps:\n")
+	fmt.Printf("\n  1. Edit .ateam/config.toml to enable/disable specific roles as needed\n")
+	fmt.Printf("\n  2. Optional: set up a token for Docker container execution (not required):\n")
+	fmt.Printf("       claude setup-token\n")
+	fmt.Printf("       export CLAUDE_CODE_OAUTH_TOKEN=\"<token from above>\"\n")
+	fmt.Printf("\n  3. Main commands:\n")
+	fmt.Printf("    ateam env       show current environment and configuration\n")
+	fmt.Printf("    ateam report    run role agents to analyze the project\n")
+	fmt.Printf("    ateam review    supervisor reviews and prioritizes findings\n")
+	fmt.Printf("    ateam code      execute prioritized tasks as code changes\n")
+	fmt.Printf("    ateam all       run the full pipeline: report + review + code\n")
+	fmt.Printf("    ateam ps        show recent agent runs\n")
+	fmt.Printf("    ateam tail      live-stream agent output\n")
+	fmt.Printf("    ateam prompt    inspect assembled prompts\n")
+	fmt.Printf("    ateam serve     browse reports and sessions in a web UI\n")
 
 	return nil
 }
