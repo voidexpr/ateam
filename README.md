@@ -252,6 +252,7 @@ ateam review --dry-run
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
 | `--cheaper-model` | Use a cheaper model (sonnet) |
 | `--timeout MINUTES` | Timeout (overrides `config.toml`) |
+| `--roles ROLE,...` | Limit coding tasks to these roles (reviews all reports but only assigns code tasks to listed roles) |
 | `--print` | Print review to stdout after completion |
 | `--dry-run` | Print computed prompt and list reports without running |
 | `--verbose` | Print agent and docker commands to stderr |
@@ -298,6 +299,8 @@ ateam all --quiet
 | `--extra-prompt TEXT` | Additional instructions passed to all phases (text or `@filepath`) |
 | `--cheaper-model` | Use a cheaper model (sonnet) |
 | `--timeout MINUTES` | Per-phase timeout (overrides config) |
+| `--roles ROLE,...` | Limit coding tasks to these roles in the review phase |
+| `--profile NAME` | Profile for code sub-runs (passed to `ateam code --profile`) |
 | `--quiet` | Suppress output printing |
 | `--verbose` | Print agent and docker commands to stderr |
 

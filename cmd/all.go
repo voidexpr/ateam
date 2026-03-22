@@ -13,6 +13,8 @@ var (
 	allParallel     int
 	allCheaperModel bool
 	allVerbose      bool
+	allRoles        []string
+	allProfile      string
 )
 
 var allCmd = &cobra.Command{
@@ -36,6 +38,8 @@ func init() {
 	allCmd.Flags().BoolVarP(&allQuiet, "quiet", "q", false, "suppress output printing")
 	allCmd.Flags().IntVar(&allTimeout, "timeout", 0, "per-phase timeout in minutes (overrides config)")
 	allCmd.Flags().IntVar(&allParallel, "parallel", 0, "max parallel report roles (overrides config max_parallel)")
+	allCmd.Flags().StringSliceVar(&allRoles, "roles", nil, "limit coding tasks to these roles in the review phase")
+	allCmd.Flags().StringVar(&allProfile, "profile", "", "profile for code sub-runs (passed to ateam code --profile)")
 	addCheaperModelFlag(allCmd, &allCheaperModel)
 	addVerboseFlag(allCmd, &allVerbose)
 }
@@ -68,6 +72,7 @@ func runAll(cmd *cobra.Command, args []string) error {
 	reviewVerbose = allVerbose
 	reviewDryRun = false
 	reviewCustomPrompt = ""
+	reviewRoles = allRoles
 	if err := runReview(nil, nil); err != nil {
 		return fmt.Errorf("review phase failed: %w", err)
 	}
@@ -82,6 +87,7 @@ func runAll(cmd *cobra.Command, args []string) error {
 	codeDryRun = false
 	codeReview = ""
 	codeManagement = ""
+	codeProfile = allProfile
 	if err := runCode(nil, nil); err != nil {
 		return fmt.Errorf("code phase failed: %w", err)
 	}
