@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
@@ -23,6 +24,7 @@ var (
 	reviewAgent        string
 	reviewVerbose      bool
 	reviewForce        bool
+	reviewRoles        []string
 )
 
 var reviewCmd = &cobra.Command{
@@ -46,6 +48,7 @@ func init() {
 	reviewCmd.Flags().IntVar(&reviewTimeout, "timeout", 0, "timeout in minutes (overrides config)")
 	reviewCmd.Flags().BoolVar(&reviewPrint, "print", false, "print review to stdout after completion")
 	reviewCmd.Flags().BoolVar(&reviewDryRun, "dry-run", false, "print the computed prompt and list reports without running")
+	reviewCmd.Flags().StringSliceVar(&reviewRoles, "roles", nil, "limit coding tasks to these roles (reviews all reports but only assigns code tasks to listed roles)")
 	addCheaperModelFlag(reviewCmd, &reviewCheaperModel)
 	addProfileFlags(reviewCmd, &reviewProfile, &reviewAgent)
 	addVerboseFlag(reviewCmd, &reviewVerbose)
@@ -68,10 +71,23 @@ func runReview(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if len(reviewRoles) > 0 {
+		if _, err := prompts.ResolveRoleList(reviewRoles, env.Config.Roles); err != nil {
+			return err
+		}
+	}
+
 	pinfo := env.NewProjectInfoParams("the supervisor")
 	prompt, err := prompts.AssembleReviewPrompt(env.OrgDir, env.ProjectDir, pinfo, extraPrompt, customPrompt)
 	if err != nil {
 		return err
+	}
+
+	if len(reviewRoles) > 0 {
+		prompt += "\n\n---\n\n# Role Constraint\n\n" +
+			"Assign coding tasks only to the following roles: " + strings.Join(reviewRoles, ", ") + ". " +
+			"Review and assess all reports, but mark coding tasks for unlisted roles as deferred. " +
+			"For the listed roles, include tasks you consider worthwhile even if not strictly urgent."
 	}
 
 	if reviewDryRun {
