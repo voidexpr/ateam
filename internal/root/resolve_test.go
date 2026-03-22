@@ -106,6 +106,75 @@ func TestFindProject(t *testing.T) {
 	})
 }
 
+func TestResolveStreamPath(t *testing.T) {
+	tests := []struct {
+		name       string
+		projectDir string
+		orgDir     string
+		sf         string
+		want       string
+	}{
+		{
+			name:       "empty string",
+			projectDir: "/home/user/myproject/.ateam",
+			orgDir:     "/home/user/.ateamorg",
+			sf:         "",
+			want:       "",
+		},
+		{
+			name:       "absolute path returned as-is",
+			projectDir: "/home/user/myproject/.ateam",
+			orgDir:     "/home/user/.ateamorg",
+			sf:         "/var/log/stream.jsonl",
+			want:       "/var/log/stream.jsonl",
+		},
+		{
+			name:       "legacy projects/ prefix resolves to orgDir",
+			projectDir: "/home/user/myproject/.ateam",
+			orgDir:     "/home/user/.ateamorg",
+			sf:         "projects/myproject/roles/security/logs/stream.jsonl",
+			want:       filepath.Join("/home/user/.ateamorg", "projects/myproject/roles/security/logs/stream.jsonl"),
+		},
+		{
+			name:       "new relative path resolves to projectDir",
+			projectDir: "/home/user/myproject/.ateam",
+			orgDir:     "/home/user/.ateamorg",
+			sf:         "logs/roles/security/2026-03-18_stream.jsonl",
+			want:       filepath.Join("/home/user/myproject/.ateam", "logs/roles/security/2026-03-18_stream.jsonl"),
+		},
+		{
+			name:       "legacy prefix but empty orgDir falls back to projectDir",
+			projectDir: "/home/user/myproject/.ateam",
+			orgDir:     "",
+			sf:         "projects/myproject/roles/security/logs/stream.jsonl",
+			want:       filepath.Join("/home/user/myproject/.ateam", "projects/myproject/roles/security/logs/stream.jsonl"),
+		},
+		{
+			name:       "empty projectDir falls back to orgDir",
+			projectDir: "",
+			orgDir:     "/home/user/.ateamorg",
+			sf:         "logs/stream.jsonl",
+			want:       filepath.Join("/home/user/.ateamorg", "logs/stream.jsonl"),
+		},
+		{
+			name:       "both empty returns sf as-is",
+			projectDir: "",
+			orgDir:     "",
+			sf:         "logs/stream.jsonl",
+			want:       "logs/stream.jsonl",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ResolveStreamPath(tt.projectDir, tt.orgDir, tt.sf)
+			if got != tt.want {
+				t.Errorf("ResolveStreamPath(%q, %q, %q) = %q, want %q", tt.projectDir, tt.orgDir, tt.sf, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFindOrgNotFound(t *testing.T) {
 	tmp := resolvedTempDir(t)
 	_, err := FindOrg(tmp)

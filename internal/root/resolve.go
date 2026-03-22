@@ -348,6 +348,24 @@ func resolveProjectByName(orgDir, name string) (string, error) {
 	return realPath(found), nil
 }
 
+// ResolveStreamPath resolves a relative stream_file path to absolute.
+// New layout: relative to projectDir. Legacy: relative to orgDir (paths starting with "projects/").
+func ResolveStreamPath(projectDir, orgDir, sf string) string {
+	if sf == "" || filepath.IsAbs(sf) {
+		return sf
+	}
+	if strings.HasPrefix(sf, "projects/") && orgDir != "" {
+		return filepath.Join(orgDir, sf)
+	}
+	if projectDir != "" {
+		return filepath.Join(projectDir, sf)
+	}
+	if orgDir != "" {
+		return filepath.Join(orgDir, sf)
+	}
+	return sf
+}
+
 // resolvePath resolves rel relative to base.
 // If rel is absolute, it is returned as-is.
 func resolvePath(base, rel string) string {

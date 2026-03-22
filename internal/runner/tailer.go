@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/calldb"
+	"github.com/ateam/internal/root"
 )
 
 // TailSource tracks a single stream file being tailed.
@@ -175,7 +174,7 @@ func (t *Tailer) discoverSources() {
 		}
 		for _, r := range rows {
 			if r.StreamFile != "" {
-				t.AddSource(r.ID, r.Role, r.Action, t.resolveStreamFile(r.StreamFile), r.Model)
+				t.AddSource(r.ID, r.Role, r.Action, root.ResolveStreamPath(t.ProjectDir, t.OrgDir, r.StreamFile), r.Model)
 			}
 		}
 	}
@@ -213,29 +212,12 @@ func (t *Tailer) discoverSources() {
 				if action == "" {
 					action = c.Action
 				}
-				t.AddSource(c.ID, role, action, t.resolveStreamFile(c.StreamFile), c.Model)
+				t.AddSource(c.ID, role, action, root.ResolveStreamPath(t.ProjectDir, t.OrgDir, c.StreamFile), c.Model)
 			}
 		}
 	}
 }
 
-// resolveStreamFile resolves a relative stream_file path to an absolute path.
-// New layout: relative to ProjectDir. Legacy: relative to OrgDir (paths starting with "projects/").
-func (t *Tailer) resolveStreamFile(sf string) string {
-	if filepath.IsAbs(sf) {
-		return sf
-	}
-	if strings.HasPrefix(sf, "projects/") && t.OrgDir != "" {
-		return filepath.Join(t.OrgDir, sf)
-	}
-	if t.ProjectDir != "" {
-		return filepath.Join(t.ProjectDir, sf)
-	}
-	if t.OrgDir != "" {
-		return filepath.Join(t.OrgDir, sf)
-	}
-	return sf
-}
 
 func (t *Tailer) pollFiles() {
 	for _, src := range t.sources {
