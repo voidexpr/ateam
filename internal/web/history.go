@@ -21,13 +21,6 @@ type HistoryEntry struct {
 	TotalTokens int64
 }
 
-// HistoryGroup groups history entries by timestamp (same session).
-type HistoryGroup struct {
-	Timestamp time.Time
-	Label     string // formatted timestamp
-	Entries   []HistoryEntry
-}
-
 // discoverHistory reads a history directory and returns entries sorted newest-first.
 func discoverHistory(dir string) []HistoryEntry {
 	entries, err := os.ReadDir(dir)
@@ -74,32 +67,6 @@ func parseHistoryFilename(name, path string) HistoryEntry {
 		Kind:      kind,
 		Path:      path,
 	}
-}
-
-// groupHistory groups entries by timestamp into sessions.
-func groupHistory(entries []HistoryEntry) []HistoryGroup {
-	byTS := map[string]*HistoryGroup{}
-	var order []string
-
-	for _, e := range entries {
-		key := e.Timestamp.Format(runner.TimestampFormat)
-		g, ok := byTS[key]
-		if !ok {
-			g = &HistoryGroup{
-				Timestamp: e.Timestamp,
-				Label:     e.Timestamp.Format("2006-01-02 15:04:05"),
-			}
-			byTS[key] = g
-			order = append(order, key)
-		}
-		g.Entries = append(g.Entries, e)
-	}
-
-	var groups []HistoryGroup
-	for _, key := range order {
-		groups = append(groups, *byTS[key])
-	}
-	return groups
 }
 
 // filterHistoryByKind returns only entries matching the given kind.
