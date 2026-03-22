@@ -102,19 +102,6 @@ func openCallDB(orgDir string) *calldb.CallDB {
 	return db
 }
 
-// resolveStreamPath resolves a stream_file path from the DB.
-// New layout: relative to .ateam/ (e.g. "logs/roles/security/...").
-// Legacy layout: relative to .ateamorg/ (e.g. "projects/<id>/roles/...").
-// Detection: paths starting with "projects/" are legacy; otherwise new.
-func resolveStreamPath(env *root.ResolvedEnv, sf string) string {
-	if sf == "" || filepath.IsAbs(sf) {
-		return sf
-	}
-	if strings.HasPrefix(sf, "projects/") && env.OrgDir != "" {
-		return filepath.Join(env.OrgDir, sf)
-	}
-	return filepath.Join(env.ProjectDir, sf)
-}
 
 // newRunner creates a Runner using the resolved profile from runtime.hcl.
 // roleID is optional — used for role-specific Dockerfile resolution.

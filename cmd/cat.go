@@ -87,7 +87,7 @@ func runCat(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		streamPath := resolveStreamPath(env, row.StreamFile)
+		streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, row.StreamFile)
 
 		pricing, defaultModel := agentPricing(row.Agent)
 		f := &runner.StreamFormatter{
