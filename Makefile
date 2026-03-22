@@ -1,6 +1,6 @@
 BINARY = ateam
 
-.PHONY: build companion clean tidy test test-docker test-docker-live
+.PHONY: build companion clean tidy test test-docker test-docker-live vuln
 
 BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
@@ -48,6 +48,10 @@ test-docker-live:
 		-e ANTHROPIC_API_KEY \
 		-e TEST_TAGS="docker_integration,docker_live" \
 		ateam-test-dind
+
+vuln:
+	@which govulncheck > /dev/null 2>&1 || go install golang.org/x/vuln/cmd/govulncheck@latest
+	govulncheck ./...
 
 clean:
 	rm -f $(BINARY)
