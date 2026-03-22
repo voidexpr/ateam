@@ -38,7 +38,7 @@ func init() {
 	allCmd.Flags().BoolVarP(&allQuiet, "quiet", "q", false, "suppress output printing")
 	allCmd.Flags().IntVar(&allTimeout, "timeout", 0, "per-phase timeout in minutes (overrides config)")
 	allCmd.Flags().IntVar(&allParallel, "parallel", 0, "max parallel report roles (overrides config max_parallel)")
-	allCmd.Flags().StringSliceVar(&allRoles, "roles", nil, "limit coding tasks to these roles in the review phase")
+	allCmd.Flags().StringSliceVar(&allRoles, "roles", nil, "run only these roles in the report phase and limit coding tasks to them in review")
 	allCmd.Flags().StringVar(&allProfile, "profile", "", "profile for code sub-runs (passed to ateam code --profile)")
 	addCheaperModelFlag(allCmd, &allCheaperModel)
 	addVerboseFlag(allCmd, &allVerbose)
@@ -49,7 +49,11 @@ func runAll(cmd *cobra.Command, args []string) error {
 
 	// Phase 1: Report
 	fmt.Println("=== Phase 1: Report ===")
-	reportRoles = []string{"all"}
+	if len(allRoles) > 0 {
+		reportRoles = allRoles
+	} else {
+		reportRoles = []string{"all"}
+	}
 	reportPrint = printOutput
 	reportExtraPrompt = allExtraPrompt
 	reportTimeout = allTimeout

@@ -299,7 +299,7 @@ ateam all --quiet
 | `--extra-prompt TEXT` | Additional instructions passed to all phases (text or `@filepath`) |
 | `--cheaper-model` | Use a cheaper model (sonnet) |
 | `--timeout MINUTES` | Per-phase timeout (overrides config) |
-| `--roles ROLE,...` | Limit coding tasks to these roles in the review phase |
+| `--roles ROLE,...` | Run only these roles in the report phase and limit coding tasks to them in review |
 | `--profile NAME` | Profile for code sub-runs (passed to `ateam code --profile`) |
 | `--quiet` | Suppress output printing |
 | `--verbose` | Print agent and docker commands to stderr |
