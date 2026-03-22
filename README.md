@@ -1,13 +1,13 @@
 # ATeam — AI Role Team for Code Analysis
 
-ATeam is a CLI, point it at your codebase and a crew of role-specific coding agents gets to work across multiple dimensions: code refactoring, testing, documentation, security, and more. Each agent audits the code, another one prioritizes findings,and then runs coding agents to implement the selected fixes.
+ATeam is a CLI, point it at your codebase and a crew of role-specific coding agents gets to work across multiple dimensions: code refactoring, testing, documentation, security, and more. Each agent audits the code, another one prioritizes findings, and then runs coding agents to implement the selected fixes.
 
-It is designed to work out of the box unattended for most software project size and for any tech stack. It can also be ran on-demand and customized by adding or changing prompts. This way you can focus on feature work and have your project quality improve while you sleep with agents instructed to make pragmatic choices and balance priorities for you.
+It is designed to work out of the box unattended for most software project size and for any tech stack. It can also be run on-demand and customized by adding or changing prompts. This way you can focus on feature work and have your project quality improve while you sleep with agents instructed to make pragmatic choices and balance priorities for you.
 
 ATeam is also transparent and auditable. Agents produce markdown artifacts at every step:
 * Role reports: per-agent findings and recommendations
 * Supervisor review: synthesized priorities across all roles
-* Supervisor manages coding of the top priority tasks and record what is completed
+* Supervisor manages coding of the top priority tasks and records what is completed
 
 Then ateam is ready for the next round: reports get updated so each run builds on the last.
 
@@ -62,43 +62,56 @@ You run 'ateam init' within a directory or at the base of a git repo (either you
 
 Versioned files (config, prompts, reports) live at the top level of `.ateam/`. Runtime artifacts (logs, SQLite database) live under `.ateam/logs/` and `.ateam/state.sqlite`, which are automatically gitignored via `.ateam/.gitignore`.
 
-  Ignore `.ateam/` entirely (simplest):
+Ignore `.ateam/` entirely (simplest):
 
-    **/.ateam/
+```gitignore
+**/.ateam/
+```
 
-  Or version prompts and reports (recommended):
+Or version prompts and reports (recommended):
 
-    # .ateam/.gitignore already excludes state.sqlite and logs/
-    # nothing extra to configure
+```gitignore
+# .ateam/.gitignore already excludes state.sqlite and logs/
+# nothing extra to configure
+```
 
 Then the workflow is:
 
-  ateam report --roles all           # run all enabled roles
-  ateam review                       # supervisor reviews and prioritizes
-  ateam code                         # execute prioritized tasks
-  ateam all                          # or run the full pipeline at once
+```bash
+ateam report --roles all           # run all enabled roles
+ateam review                       # supervisor reviews and prioritizes
+ateam code                         # execute prioritized tasks
+ateam all                          # or run the full pipeline at once
+```
 
-
-Can also be more methological:
+Can also be more methodical:
 * edit .ateam/config.toml to enable/disable relevant roles (you should probably never run all of them)
 * gather information
 
+  ```bash
   ateam report && ateam review --print
+  ```
 
 * Edit reports and reviews to make sure you specify the work you want to occur.
 * code:
 
+  ```bash
   ateam code
-
+  ```
 
 * Example of scheduled runs with a subset of all the work:
+
 Run at night:
 
-  ateam report --roles refactor_small,docs_external,testing_basic && ateam review && ateam code
+```bash
+ateam report --roles refactor_small,docs_external,testing_basic && ateam review && ateam code
+```
 
 Run on Fridays:
 
-  ateam report --roles security,dependencies,testing_full && ateam review && ateam code
+```bash
+ateam report --roles security,dependencies,testing_full && ateam review && ateam code
+```
 
 ### Git
 * use your work area, use ateam directly on main, get commits and rebase done automatically
@@ -602,9 +615,11 @@ You can either redefine a prompt file or add to it by adding a prompt called ACT
 
 To audit what prompt will be used use the following command:
 
-  ateam prompt --role ROLE --action report
-  ateam prompt --supervisor --action review
-  ateam prompt --supervisor --action code
+```bash
+ateam prompt --role ROLE --action report
+ateam prompt --supervisor --action review
+ateam prompt --supervisor --action code
+```
 
 ### Report
 * report_base_prompt.md: included for all roles
