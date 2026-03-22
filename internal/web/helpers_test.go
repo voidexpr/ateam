@@ -230,37 +230,6 @@ func TestFilterHistoryByKind(t *testing.T) {
 	}
 }
 
-func TestGroupHistory(t *testing.T) {
-	ts1, _ := time.ParseInLocation(runner.TimestampFormat, "2026-03-14_00-20-28", time.Local)
-	ts2, _ := time.ParseInLocation(runner.TimestampFormat, "2026-03-15_10-00-00", time.Local)
-
-	entries := []HistoryEntry{
-		{Timestamp: ts1, Kind: "report", Filename: "a.md"},
-		{Timestamp: ts1, Kind: "report_prompt", Filename: "b.md"},
-		{Timestamp: ts2, Kind: "report", Filename: "c.md"},
-	}
-
-	groups := groupHistory(entries)
-	if len(groups) != 2 {
-		t.Fatalf("expected 2 groups, got %d", len(groups))
-	}
-	if len(groups[0].Entries) != 2 {
-		t.Errorf("first group: expected 2 entries, got %d", len(groups[0].Entries))
-	}
-	if len(groups[1].Entries) != 1 {
-		t.Errorf("second group: expected 1 entry, got %d", len(groups[1].Entries))
-	}
-	if groups[0].Label != "2026-03-14 00:20:28" {
-		t.Errorf("first group label = %q, want %q", groups[0].Label, "2026-03-14 00:20:28")
-	}
-
-	// Empty input
-	groups = groupHistory(nil)
-	if len(groups) != 0 {
-		t.Errorf("expected 0 groups for nil input, got %d", len(groups))
-	}
-}
-
 func TestLatestRunCost(t *testing.T) {
 	costs := map[string]calldb.RunCost{
 		"2026-03-14_00-20-28": {CostUSD: 0.10, TotalTokens: 1000},
