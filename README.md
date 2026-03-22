@@ -13,7 +13,11 @@ Then ateam is ready for the next round: reports get updated so each run builds o
 
 Run it on demand — after a coding session, before the weekend — or schedule it nightly. Choose which roles to run. Configure sandboxing to match your risk tolerance: full isolation, selective approval, or fully unattended. ATeam is designed to stay out of your way.
 
-At the core ateam is very simple: your existing coding agent (claude code, codex, more later), some prompt markdown files and other markdown files for the various reports it produces if you wish to audit or modify. It does use a small sqlite database to track cost across coding agent runs and provide aggregated reports.
+At the core ateam is very simple:
+* your existing coding agent (claude code, codex, more later)
+* some sandbox and optional container (docker for now) configuration for one-shot execution (extensible)
+* some prompt markdown files and other markdown files for the various reports it produces if you wish to audit or modify
+* a small sqlite database to track cost across coding agent runs and provide aggregated reports
 
 ATeam should feel like the missing part of agentic coding: add expert colleagues to a solo project or be the infra/platform team big software companies have but scaled to match your project small or big and grow with it.
 
@@ -126,7 +130,7 @@ ateam report --roles security,dependencies,testing_full && ateam review && ateam
 ## Quick Start
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/nicad/ateam.git
 cd ateam
 ./install.sh
 ```
@@ -165,7 +169,7 @@ If you prefer not to use the install script:
 # ensure Go 1.24+ is installed
 go version
 
-git clone <repo-url>
+git clone https://github.com/nicad/ateam.git
 cd ateam
 make build
 
