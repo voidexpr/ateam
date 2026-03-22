@@ -562,6 +562,152 @@ func TestRecentRunsStreamFile(t *testing.T) {
 	}
 }
 
+func TestGetRunByID(t *testing.T) {
+	db := testDB(t)
+	seedCalls(t, db)
+
+	// Existing row
+	row, err := db.GetRunByID(1)
+	if err != nil {
+		t.Fatalf("GetRunByID: %v", err)
+	}
+	if row == nil {
+		t.Fatal("expected non-nil row for ID 1")
+	}
+	if row.ID != 1 {
+		t.Errorf("expected ID 1, got %d", row.ID)
+	}
+	if row.ProjectID != "proj-a" {
+		t.Errorf("expected proj-a, got %s", row.ProjectID)
+	}
+	if row.Action != "report" {
+		t.Errorf("expected action report, got %s", row.Action)
+	}
+	if row.Role != "security" {
+		t.Errorf("expected role security, got %s", row.Role)
+	}
+	if row.CostUSD != 0.10 {
+		t.Errorf("expected cost 0.10, got %f", row.CostUSD)
+	}
+
+	// Non-existent row
+	row, err = db.GetRunByID(9999)
+	if err != nil {
+		t.Fatalf("GetRunByID non-existent: %v", err)
+	}
+	if row != nil {
+		t.Fatalf("expected nil for non-existent ID, got %+v", row)
+	}
+}
+
+func TestRunCostByActionRole(t *testing.T) {
+	db := testDB(t)
+	seedCalls(t, db)
+
+	// security + run: seed has two entries (IDs 5 and 7)
+	costs, err := db.RunCostByActionRole("run", "security")
+	if err != nil {
+		t.Fatalf("RunCostByActionRole: %v", err)
+	}
+	if len(costs) != 2 {
+		t.Fatalf("expected 2 entries, got %d", len(costs))
+	}
+	var totalCost float64
+	for _, rc := range costs {
+		totalCost += rc.CostUSD
+		if rc.TotalTokens <= 0 {
+			t.Errorf("expected positive TotalTokens, got %d", rc.TotalTokens)
+		}
+	}
+	if totalCost != 0.25 {
+		t.Errorf("expected total cost 0.25, got %f", totalCost)
+	}
+
+	// No matches
+	costs, err = db.RunCostByActionRole("nonexistent", "nobody")
+	if err != nil {
+		t.Fatalf("RunCostByActionRole no match: %v", err)
+	}
+	if len(costs) != 0 {
+		t.Fatalf("expected 0 entries, got %d", len(costs))
+	}
+}
+
+func TestFindRunning(t *testing.T) {
+	db := testDB(t)
+	seedCalls(t, db)
+
+	// All seeded calls are completed — FindRunning should return none
+	rows, err := db.FindRunning("proj-a", "")
+	if err != nil {
+		t.Fatalf("FindRunning: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected 0 running rows, got %d", len(rows))
+	}
+
+	// Insert a call without UpdateCall so ended_at stays NULL
+	now := time.Now()
+	id1, err := db.InsertCall(&Call{
+		ProjectID: "proj-a", Action: "run", Role: "security",
+		StartedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("InsertCall: %v", err)
+	}
+	id2, err := db.InsertCall(&Call{
+		ProjectID: "proj-a", Action: "report", Role: "testing",
+		StartedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("InsertCall: %v", err)
+	}
+	// Different project — should not appear
+	if _, err := db.InsertCall(&Call{
+		ProjectID: "proj-b", Action: "run", Role: "security",
+		StartedAt: now,
+	}); err != nil {
+		t.Fatalf("InsertCall: %v", err)
+	}
+
+	// All running for proj-a
+	rows, err = db.FindRunning("proj-a", "")
+	if err != nil {
+		t.Fatalf("FindRunning: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 running rows, got %d", len(rows))
+	}
+	ids := map[int64]bool{}
+	for _, r := range rows {
+		ids[r.ID] = true
+	}
+	if !ids[id1] || !ids[id2] {
+		t.Errorf("expected IDs %d and %d, got %v", id1, id2, rows)
+	}
+
+	// Filter by action
+	rows, err = db.FindRunning("proj-a", "run")
+	if err != nil {
+		t.Fatalf("FindRunning with action: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 running row, got %d", len(rows))
+	}
+	if rows[0].Role != "security" {
+		t.Errorf("expected role security, got %s", rows[0].Role)
+	}
+
+	// proj-b should have 1 running
+	rows, err = db.FindRunning("proj-b", "")
+	if err != nil {
+		t.Fatalf("FindRunning proj-b: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 running row for proj-b, got %d", len(rows))
+	}
+}
+
 func TestRenameProject(t *testing.T) {
 	db := testDB(t)
 
