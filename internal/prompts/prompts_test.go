@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ateam/internal/gitutil"
 )
 
 func TestReadWith3LevelFallback(t *testing.T) {
@@ -181,6 +183,137 @@ func TestResolveRoleListAllExpansionUsesAllowlist(t *testing.T) {
 	if !found {
 		t.Errorf("'security' (status 'on') should appear in 'all' expansion")
 	}
+}
+
+func TestFormatProjectInfo(t *testing.T) {
+	t.Run("empty role returns empty", func(t *testing.T) {
+		got := FormatProjectInfo(ProjectInfoParams{})
+		if got != "" {
+			t.Errorf("expected empty string for zero-value params, got %q", got)
+		}
+	})
+
+	t.Run("basic fields", func(t *testing.T) {
+		p := ProjectInfoParams{
+			OrgDir:      "/home/user/.ateamorg",
+			ProjectDir:  "/projects/myapp/.ateam",
+			ProjectName: "myapp",
+			SourceDir:   "/projects/myapp",
+			Role:        "role security",
+		}
+		got := FormatProjectInfo(p)
+
+		for _, want := range []string{
+			"# ATeam Project Context",
+			"* runtime files: /home/user/.ateamorg",
+			"* project name: myapp",
+			"* role: role security",
+			"* source code: /projects/myapp",
+			"* reports and reviews: /projects/myapp/.ateam",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("missing %q in output:\n%s", want, got)
+			}
+		}
+		// GitRepoDir not set → no "allowed to read" line
+		if strings.Contains(got, "allowed to read") {
+			t.Error("should not contain 'allowed to read' when GitRepoDir is empty")
+		}
+	})
+
+	t.Run("git repo dir differs from source dir", func(t *testing.T) {
+		p := ProjectInfoParams{
+			OrgDir:      "/home/user/.ateamorg",
+			ProjectDir:  "/projects/mono/apps/myapp/.ateam",
+			ProjectName: "myapp",
+			SourceDir:   "/projects/mono/apps/myapp",
+			GitRepoDir:  "/projects/mono",
+			Role:        "the supervisor",
+		}
+		got := FormatProjectInfo(p)
+		if !strings.Contains(got, "allowed to read but not modify up to: /projects/mono") {
+			t.Errorf("missing GitRepoDir line in output:\n%s", got)
+		}
+	})
+
+	t.Run("git repo dir same as source dir", func(t *testing.T) {
+		p := ProjectInfoParams{
+			OrgDir:      "/home/user/.ateamorg",
+			ProjectDir:  "/projects/myapp/.ateam",
+			ProjectName: "myapp",
+			SourceDir:   "/projects/myapp",
+			GitRepoDir:  "/projects/myapp",
+			Role:        "role testing",
+		}
+		got := FormatProjectInfo(p)
+		if strings.Contains(got, "allowed to read") {
+			t.Error("should not contain 'allowed to read' when GitRepoDir == SourceDir")
+		}
+	})
+
+	t.Run("with meta clean tree", func(t *testing.T) {
+		p := ProjectInfoParams{
+			OrgDir:      "/home/user/.ateamorg",
+			ProjectDir:  "/projects/myapp/.ateam",
+			ProjectName: "myapp",
+			SourceDir:   "/projects/myapp",
+			Role:        "role security",
+			Meta: &gitutil.ProjectMeta{
+				CommitHash:    "abcdef1234567890abcdef",
+				CommitDate:    "2026-03-20_10-00-00",
+				CommitMessage: "fix the widget",
+			},
+		}
+		got := FormatProjectInfo(p)
+
+		for _, want := range []string{
+			"* timestamp:",
+			"* last commit: abcdef123456 - 2026-03-20_10-00-00 - \"fix the widget\"",
+			"* working tree: clean",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("missing %q in output:\n%s", want, got)
+			}
+		}
+		// Hash should be truncated to 12 chars
+		if strings.Contains(got, "abcdef1234567890") {
+			t.Error("commit hash should be truncated to 12 characters")
+		}
+	})
+
+	t.Run("with meta uncommitted changes", func(t *testing.T) {
+		p := ProjectInfoParams{
+			OrgDir:      "/home/user/.ateamorg",
+			ProjectDir:  "/projects/myapp/.ateam",
+			ProjectName: "myapp",
+			SourceDir:   "/projects/myapp",
+			Role:        "role security",
+			Meta: &gitutil.ProjectMeta{
+				CommitHash:    "abc123",
+				CommitDate:    "2026-03-20_10-00-00",
+				CommitMessage: "initial",
+				Uncommitted:   []string{"README.md", "main.go"},
+			},
+		}
+		got := FormatProjectInfo(p)
+
+		for _, want := range []string{
+			"* uncommitted changes: 2 file(s)",
+			"* `README.md`",
+			"* `main.go`",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("missing %q in output:\n%s", want, got)
+			}
+		}
+		if strings.Contains(got, "working tree: clean") {
+			t.Error("should not say 'clean' when there are uncommitted changes")
+		}
+		// Short hash should not be truncated
+		if !strings.Contains(got, "abc123") {
+			t.Error("short hash should be kept as-is")
+		}
+	})
 }
 
 func TestReadWith3LevelFallbackNoneExist(t *testing.T) {
