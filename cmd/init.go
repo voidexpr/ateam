@@ -133,9 +133,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\nNext steps:\n")
 	fmt.Printf("\n  1. Edit .ateam/config.toml to enable/disable specific roles as needed\n")
-	fmt.Printf("\n  2. Optional: set up a token for Docker container execution (not required):\n")
-	fmt.Printf("       claude setup-token\n")
-	fmt.Printf("       export CLAUDE_CODE_OAUTH_TOKEN=\"<token from above>\"\n")
+	fmt.Printf("\n  2. Set up authentication:\n")
+	fmt.Printf("       ateam secret ANTHROPIC_API_KEY\n")
 	fmt.Printf("\n  3. Main commands:\n")
 	fmt.Printf("    ateam env       show current environment and configuration\n")
 	fmt.Printf("    ateam report    run role agents to analyze the project\n")

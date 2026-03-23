@@ -1,6 +1,7 @@
 package root
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -108,6 +109,7 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 
 	cfg := config.DefaultConfig()
 	cfg.Project.Name = opts.Name
+	cfg.Project.KeychainKey = generateKeychainKey(opts.Name, projDir)
 	cfg.Git.Repo = opts.GitRepo
 	cfg.Git.RemoteOriginURL = opts.GitRemoteOrigin
 
@@ -188,8 +190,15 @@ func createLogsDirs(projDir string, roleIDs []string) error {
 // WriteProjectGitignore writes the .gitignore file inside .ateam/ to exclude
 // runtime artifacts (state.sqlite and logs/).
 func WriteProjectGitignore(projDir string) error {
-	content := "state.sqlite\nstate.sqlite-wal\nstate.sqlite-shm\nlogs/\n"
+	content := "state.sqlite\nstate.sqlite-wal\nstate.sqlite-shm\nlogs/\nsecrets.env\n"
 	return os.WriteFile(filepath.Join(projDir, ".gitignore"), []byte(content), 0644)
+}
+
+// generateKeychainKey creates a stable identifier for keychain lookups.
+// Format: <name>-<first 6 hex of SHA-256(absPath)>.
+func generateKeychainKey(name, absPath string) string {
+	h := sha256.Sum256([]byte(absPath))
+	return fmt.Sprintf("%s-%x", name, h[:3])
 }
 
 // checkDuplicateProjectName checks registered projects for a name collision.
