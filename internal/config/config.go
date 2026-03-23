@@ -43,6 +43,7 @@ type Config struct {
 type ProjectConfig struct {
 	Name           string `toml:"name"`
 	DefaultProfile string `toml:"default_profile"`
+	KeychainKey    string `toml:"keychain_key,omitempty"`
 }
 
 type SupervisorConfig struct {

@@ -166,6 +166,7 @@ locals {
   EOF
 }
 
+// share default local claude config and adds a sandbox
 agent "claude" {
   type    = "claude"
   command = "claude"
@@ -174,8 +175,10 @@ agent "claude" {
   env = {
     CLAUDECODE = ""
   }
+  required_env = ["ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"]
 }
 
+// danger: no sandbox, could be useful for debugging
 agent "claude-no-sandbox" {
   type    = "claude"
   command = "claude"
@@ -183,6 +186,7 @@ agent "claude-no-sandbox" {
   env = {
     CLAUDECODE = ""
   }
+  required_env = ["ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"]
 }
 
 agent "claude-sonnet" {
@@ -195,15 +199,11 @@ agent "claude-haiku" {
   args = ["-p", "--output-format", "stream-json", "--verbose", "--model", "haiku", "--max-budget-usd", "0.10"]
 }
 
-// claude-docker has no sandbox settings — the container itself provides isolation.
-// Uses --dangerously-skip-permissions for unattended tool use inside Docker.
+// claude-docker inherits from claude but uses --dangerously-skip-permissions for
+// unattended tool use inside Docker. The inherited sandbox is ignored by Claude.
 agent "claude-docker" {
-  type    = "claude"
-  command = "claude"
+  base    = "claude"
   args    = ["-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"]
-  env = {
-    CLAUDECODE = ""
-  }
 }
 
 // claude-isolated uses a project-local config dir (.ateam/.claude) instead of ~/.claude,
@@ -218,6 +218,7 @@ agent "codex" {
   type    = "codex"
   command = "codex"
   args    = ["--sandbox", "workspace-write", "--ask-for-approval", "never"]
+  required_env = ["OPENAI_API_KEY"]
 
   pricing {
     default_model = "gpt-5.3-codex"
@@ -251,6 +252,7 @@ agent "codex" {
 
 agent "mock" {
   type = "builtin"
+  required_env = []
 
   pricing {
     default_model = "mock-default"

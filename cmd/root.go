@@ -46,4 +46,5 @@ func init() {
 	rootCmd.AddCommand(projectRenameCmd)
 	rootCmd.AddCommand(migrateLogsCmd)
 	rootCmd.AddCommand(serveCmd)
+	rootCmd.AddCommand(secretCmd)
 }

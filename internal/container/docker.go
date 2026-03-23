@@ -226,10 +226,11 @@ func (d *DockerContainer) oneshotCmdFactory() CmdFactory {
 		// Extra docker run args from profile
 		dockerArgs = append(dockerArgs, d.ExtraArgs...)
 
-		// Forward env vars from host
+		// Forward env vars from host (use KEY=VALUE to ensure vars
+		// injected via os.Setenv by the secret store are forwarded).
 		for _, key := range d.ForwardEnv {
-			if _, ok := os.LookupEnv(key); ok {
-				dockerArgs = append(dockerArgs, "-e", key)
+			if val, ok := os.LookupEnv(key); ok {
+				dockerArgs = append(dockerArgs, "-e", key+"="+val)
 			}
 		}
 

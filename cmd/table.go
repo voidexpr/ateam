@@ -21,6 +21,7 @@ import (
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/ateam/internal/runtime"
+	"github.com/ateam/internal/secret"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
@@ -116,6 +117,11 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string) (*runner.Runne
 		return nil, err
 	}
 
+	resolver := secretResolver(env, secret.DefaultBackend())
+	if err := secret.ValidateSecrets(ac, resolver); err != nil {
+		return nil, err
+	}
+
 	r := runnerFromAgentConfig(env, ac)
 	r.Profile = profileName
 	r.ProjectID = ""
@@ -146,6 +152,11 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.Runner
 	ac, ok := rtCfg.Agents[agentName]
 	if !ok {
 		return nil, fmt.Errorf("unknown agent %q", agentName)
+	}
+
+	resolver := secretResolver(env, secret.DefaultBackend())
+	if err := secret.ValidateSecrets(&ac, resolver); err != nil {
+		return nil, err
 	}
 
 	r := runnerFromAgentConfig(env, &ac)
@@ -598,6 +609,17 @@ func parseIDArgs(args []string) ([]int64, error) {
 
 func isTerminal() bool {
 	return isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
+}
+
+func secretResolver(env *root.ResolvedEnv, backend secret.Backend) *secret.Resolver {
+	if env == nil {
+		return secret.NewResolver("", "", backend, nil)
+	}
+	var opts *secret.ResolverOpts
+	if env.Config != nil && env.Config.Project.KeychainKey != "" {
+		opts = &secret.ResolverOpts{ProjectKeychainKey: env.Config.Project.KeychainKey}
+	}
+	return secret.NewResolver(env.ProjectDir, env.OrgDir, backend, opts)
 }
 
 func fmtDateAge(t time.Time) string {

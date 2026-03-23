@@ -33,6 +33,7 @@ type AgentConfig struct {
 	DeniedPaths []string          // paths merged into sandbox denyWrite
 	ConfigDir   string            // sets CLAUDE_CONFIG_DIR; relative paths resolve from .ateam/, absolute used as-is
 	Pricing     *AgentPricing     // cost estimation config (nil = no pricing)
+	RequiredEnv []string          // env var names that must be set; "A|B" means at least one of A or B
 }
 
 type AgentPricing struct {
@@ -84,6 +85,7 @@ type hclAgent struct {
 	ROPaths     []string          `hcl:"ro_paths,optional"`
 	DeniedPaths []string          `hcl:"denied_paths,optional"`
 	ConfigDir   string            `hcl:"config_dir,optional"`
+	RequiredEnv []string          `hcl:"required_env,optional"`
 	Pricing     []hclPricing      `hcl:"pricing,block"`
 }
 
@@ -229,6 +231,9 @@ func (c *Config) resolveInheritance() error {
 		if ac.Pricing == nil {
 			ac.Pricing = base.Pricing
 		}
+		if ac.RequiredEnv == nil {
+			ac.RequiredEnv = base.RequiredEnv
+		}
 
 		c.Agents[name] = ac
 		resolved[name] = true
@@ -309,6 +314,7 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 			DeniedPaths: a.DeniedPaths,
 			ConfigDir:   a.ConfigDir,
 			Pricing:     pricing,
+			RequiredEnv: a.RequiredEnv,
 		}
 	}
 	for _, c := range hf.Containers {

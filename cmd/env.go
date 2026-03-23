@@ -11,6 +11,7 @@ import (
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runtime"
+	"github.com/ateam/internal/secret"
 	"github.com/spf13/cobra"
 )
 
@@ -58,7 +59,7 @@ func printEnv(env *root.ResolvedEnv) error {
 func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
 	fmt.Println("\nRuntime")
 
-	printAuthLines()
+	printAuthLines(env)
 
 	// Config resolution chain
 	chain := []string{"built-in"}
@@ -100,28 +101,25 @@ func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
 	printDockerfileLine(env, cwd)
 }
 
-func printAuthLines() {
-	oauth := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN")
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+func printAuthLines(env *root.ResolvedEnv) {
+	resolver := secretResolver(env, secret.DefaultBackend())
 
-	if oauth == "" && apiKey == "" {
-		fmt.Println("  Auth: (none)")
-		return
-	}
-
-	if oauth != "" {
-		label := "active"
-		if apiKey != "" {
-			label = "active, takes precedence"
+	authVars := []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}
+	anyFound := false
+	for i, name := range authVars {
+		result := resolver.Resolve(name)
+		if !result.Found {
+			continue
 		}
-		fmt.Printf("  Auth: CLAUDE_CODE_OAUTH_TOKEN=%s (%s)\n", maskEnvVar(oauth), label)
-	}
-	if apiKey != "" {
-		label := "active"
-		if oauth != "" {
-			label = "set but unused (CLAUDE_CODE_OAUTH_TOKEN takes precedence)"
+		prefix := "  Auth: "
+		if i > 0 && anyFound {
+			prefix = "        "
 		}
-		fmt.Printf("        ANTHROPIC_API_KEY=%s (%s)\n", maskEnvVar(apiKey), label)
+		fmt.Printf("%s%s=%s (%s, %s)\n", prefix, name, maskEnvVar(result.Value), result.Source, result.Backend)
+		anyFound = true
+	}
+	if !anyFound {
+		fmt.Println("  Auth: (none) — run 'ateam secret ANTHROPIC_API_KEY' to configure")
 	}
 }
 

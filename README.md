@@ -139,10 +139,11 @@ The install script checks for Go (installs it if missing), builds the binary, an
 
 ```bash
 cd /path/to/your/project
-ateam init                    # create .ateam/ project
-ateam report --roles all      # run all role analyses
-ateam review                  # supervisor prioritizes findings
-ateam code                    # execute top-priority fixes
+ateam init                           # create .ateam/ project
+ateam secret ANTHROPIC_API_KEY       # set up authentication
+ateam report --roles all             # run all role analyses
+ateam review                         # supervisor prioritizes findings
+ateam code                           # execute top-priority fixes
 ```
 
 Or run the full pipeline in one command: `ateam all`
@@ -397,6 +398,28 @@ Show the current ATeam environment: organization, runtime config, project, and r
 ```bash
 ateam env
 ```
+
+### `ateam secret`
+
+Manage secrets (API keys) used by ateam agents. Secrets are stored outside version control — in macOS Keychain (default on macOS) or plain `.env` files.
+
+```bash
+ateam secret                                  # list all required secrets and status
+ateam secret ANTHROPIC_API_KEY                # check/set a specific secret
+ateam secret ANTHROPIC_API_KEY --set          # set (reads from stdin or --value)
+ateam secret ANTHROPIC_API_KEY --delete
+ateam secret ANTHROPIC_API_KEY --storage file # force .env file backend
+```
+
+| Flag | Description |
+|------|-------------|
+| `--scope SCOPE` | Secret scope: `global` (default), `org`, or `project` |
+| `--storage BACKEND` | Storage backend: `keychain` (macOS default) or `file` |
+| `--set` | Set the secret (reads value from stdin) |
+| `--value VALUE` | Secret value (alternative to stdin) |
+| `--delete` | Delete the secret from the selected backend |
+
+Agents declare required secrets via `required_env` in `runtime.hcl`. Validation runs before any agent spawn — missing secrets produce clear instructions instead of late auth failures.
 
 ### `ateam run`
 
