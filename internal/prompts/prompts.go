@@ -24,6 +24,7 @@ const (
 	ReportCommissioningPromptFile   = "report_commissioning_prompt.md"
 	CodeManagementPromptFile        = "code_management_prompt.md"
 	CodeManagementExtraPromptFile   = "code_management_extra_prompt.md"
+	AutoSetupPromptFile             = "auto_setup_prompt.md"
 	ReportFile                      = "report.md"
 	ReportErrorFile                 = "report_error.md"
 	SandboxSettingsFile = "ateam_claude_sandbox_extra_settings.json"
@@ -89,6 +90,9 @@ func assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt strin
 	if info := FormatProjectInfo(pinfo); info != "" {
 		parts = append(parts, info)
 	}
+	if overview := readOverview(projectDir); overview != "" {
+		parts = append(parts, overview)
+	}
 	if basePrompt != "" {
 		parts = append(parts, strings.ReplaceAll(basePrompt, "{{SOURCE_DIR}}", sourceDir))
 	}
@@ -134,6 +138,22 @@ func collectSupervisorExtras(orgDir, projectDir, extraFile string) []string {
 		filepath.Join(projectDir, "supervisor", extraFile),
 	}
 	return readAllExisting(paths)
+}
+
+// readOverview returns the project overview content if .ateam/overview.md exists.
+func readOverview(projectDir string) string {
+	if projectDir == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(projectDir, "overview.md"))
+	if err != nil {
+		return ""
+	}
+	content := strings.TrimSpace(string(data))
+	if content == "" {
+		return ""
+	}
+	return "# Project Overview\n\n" + content
 }
 
 func readAllExisting(paths []string) []string {
@@ -245,6 +265,9 @@ func AssembleReviewPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, ex
 	if projectInfo != "" {
 		parts = append(parts, projectInfo)
 	}
+	if overview := readOverview(projectDir); overview != "" {
+		parts = append(parts, overview)
+	}
 	parts = append(parts, supervisorPrompt)
 	parts = append(parts, collectSupervisorExtras(orgDir, projectDir, ReviewExtraPromptFile)...)
 	if manifest != "" {
@@ -292,6 +315,26 @@ func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, pinfo Pr
 		parts = append(parts, "# Additional Instructions\n\n"+extraPrompt)
 	}
 
+	return strings.Join(parts, "\n\n---\n\n"), nil
+}
+
+// AssembleAutoSetupPrompt builds the prompt for the auto-setup command.
+func AssembleAutoSetupPrompt(orgDir, projectDir string, pinfo ProjectInfoParams) (string, error) {
+	setupPrompt, err := readWith3LevelFallback(
+		filepath.Join(projectDir, "supervisor", AutoSetupPromptFile),
+		filepath.Join(orgDir, "supervisor", AutoSetupPromptFile),
+		filepath.Join(orgDir, "defaults", "supervisor", AutoSetupPromptFile),
+		"auto-setup",
+	)
+	if err != nil {
+		return "", err
+	}
+
+	var parts []string
+	if info := FormatProjectInfo(pinfo); info != "" {
+		parts = append(parts, info)
+	}
+	parts = append(parts, setupPrompt)
 	return strings.Join(parts, "\n\n---\n\n"), nil
 }
 

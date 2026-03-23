@@ -57,6 +57,7 @@ func traceRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt string, 
 	if info := FormatProjectInfo(pinfo); info != "" {
 		sources = append(sources, PromptSource{Label: "Built-in: project-info", Content: info})
 	}
+	sources = append(sources, traceFile(filepath.Join(projectDir, "overview.md"))...)
 
 	if s := traceFileOr3Level(
 		filepath.Join(projectDir, baseFile),
@@ -99,6 +100,7 @@ func TraceReviewPromptSources(orgDir, projectDir string, pinfo ProjectInfoParams
 	if info := FormatProjectInfo(pinfo); info != "" {
 		sources = append(sources, PromptSource{Label: "Built-in: project-info", Content: info})
 	}
+	sources = append(sources, traceFile(filepath.Join(projectDir, "overview.md"))...)
 
 	if s := traceFileOr3Level(
 		filepath.Join(projectDir, "supervisor", ReviewPromptFile),
@@ -134,6 +136,7 @@ func TraceCodeManagementPromptSources(orgDir, projectDir string, pinfo ProjectIn
 	if info := FormatProjectInfo(pinfo); info != "" {
 		sources = append(sources, PromptSource{Label: "Built-in: project-info", Content: info})
 	}
+	sources = append(sources, traceFile(filepath.Join(projectDir, "overview.md"))...)
 
 	if s := traceFileOr3Level(
 		filepath.Join(projectDir, "supervisor", CodeManagementPromptFile),
