@@ -141,6 +141,7 @@ func collectSupervisorExtras(orgDir, projectDir, extraFile string) []string {
 }
 
 // readOverview returns the project overview content if .ateam/overview.md exists.
+// The file is expected to contain its own heading.
 func readOverview(projectDir string) string {
 	if projectDir == "" {
 		return ""
@@ -149,11 +150,7 @@ func readOverview(projectDir string) string {
 	if err != nil {
 		return ""
 	}
-	content := strings.TrimSpace(string(data))
-	if content == "" {
-		return ""
-	}
-	return "# Project Overview\n\n" + content
+	return strings.TrimSpace(string(data))
 }
 
 func readAllExisting(paths []string) []string {
@@ -306,6 +303,9 @@ func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, pinfo Pr
 	var parts []string
 	if info := FormatProjectInfo(pinfo); info != "" {
 		parts = append(parts, info)
+	}
+	if overview := readOverview(projectDir); overview != "" {
+		parts = append(parts, overview)
 	}
 	parts = append(parts, mgmtPrompt)
 	parts = append(parts, collectSupervisorExtras(orgDir, projectDir, CodeManagementExtraPromptFile)...)
