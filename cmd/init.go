@@ -19,6 +19,7 @@ var (
 	initRoles     []string
 	initOrgCreate string
 	initOrgHome   bool
+	initAutoSetup bool
 )
 
 var initCmd = &cobra.Command{
@@ -43,6 +44,7 @@ func init() {
 	initCmd.Flags().StringSliceVar(&initRoles, "role", nil, "roles to enable (if omitted, uses defaults)")
 	initCmd.Flags().StringVar(&initOrgCreate, "org-create", "", "create .ateamorg/ at PATH if none exists")
 	initCmd.Flags().BoolVar(&initOrgHome, "org-home", false, "create .ateamorg/ in $HOME if none exists")
+	initCmd.Flags().BoolVar(&initAutoSetup, "auto-setup", false, "run auto-setup after initialization")
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
@@ -145,6 +147,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("    ateam tail      live-stream agent output\n")
 	fmt.Printf("    ateam prompt    inspect assembled prompts\n")
 	fmt.Printf("    ateam serve     browse reports and sessions in a web UI\n")
+
+	if initAutoSetup {
+		fmt.Println("\n=== Auto-Setup ===")
+		return runAutoSetup(nil, nil)
+	}
 
 	return nil
 }

@@ -1,6 +1,6 @@
 # ATeam — AI Role Team for Code Analysis
 
-ATeam is a CLI, point it at your codebase and a crew of role-specific coding agents gets to work across multiple dimensions: code refactoring, testing, documentation, security, and more. Each agent audits the code, another one prioritizes findings, and then runs coding agents to implement the selected fixes.
+ATeam is a CLI, point it at your codebase and a crew of role-specific coding agents gets to work across multiple dimensions: code refactoring, testing, documentation, security, and more. Each agent audits the code, another one prioritizes findings, and then runs coding agents to implement the selected fixes. Its goal is software engineering quality without modifying how existing features work.
 
 It is designed to work out of the box unattended for most software project size and for any tech stack. It can also be run on-demand and customized by adding or changing prompts. This way you can focus on feature work and have your project quality improve while you sleep with agents instructed to make pragmatic choices and balance priorities for you.
 
@@ -82,11 +82,14 @@ Or version prompts and reports (recommended):
 Then the workflow is:
 
 ```bash
-ateam report --roles all           # run all enabled roles
-ateam review                       # supervisor reviews and prioritizes
-ateam code                         # execute prioritized tasks
-ateam all                          # or run the full pipeline at once
+ateam report           # run all enabled roles
+ateam review           # supervisor reviews and prioritizes
+ateam code             # execute prioritized tasks
 ```
+
+You can audit the files generated at each step and either modify them before running the next phase or add custom instructions via `roles/NAME/report_extra_prompt.md`.
+
+Or all at once: `ateam all`
 
 Can also be more methodical:
 * edit .ateam/config.toml to enable/disable relevant roles (you should probably never run all of them)
@@ -118,14 +121,15 @@ ateam report --roles security,dependencies,testing_full && ateam review && ateam
 ```
 
 ### Git
-* use your work area, use ateam directly on main, get commits and rebase done automatically
-* use a separate checkout of your repo, work from main or a branch
-* create an 'ateam_work' branch and git worktree, do your work there
 
-### Provide feedback
+There are multiple ways to use ateam:
+* simplest is to use your own work area and run ateam at the end of the day, then review the local commits to exclude the ones you don't want
+* same but use a git worktree or a separate git work directory
+* create a branch named `ateam_work` (or any name you want) and cherry pick changes
+
+### Provide feedback to ateam to steer decisions to fit your needs and preferences
 * use report_extra_prompt.md or review_extra_prompt.md to specify rejected approaches so they are taken into account in the future
   * can also document rejected comments for the same reason
-
 
 ## Quick Start
 
@@ -140,25 +144,30 @@ The install script checks for Go (installs it if missing), builds the binary, an
 ```bash
 cd /path/to/your/project
 ateam init                           # create .ateam/ project
-ateam secret ANTHROPIC_API_KEY       # set up authentication
-ateam report --roles all             # run all role analyses
+ateam secret ANTHROPIC_API_KEY       # OPTIONAL: set up authentication to use Docker
+```
+
+Usage is:
+
+```bash
+ateam report                         # run all role analyses
 ateam review                         # supervisor prioritizes findings
 ateam code                           # execute top-priority fixes
 ```
 
 Or run the full pipeline in one command: `ateam all`
 
-Browse results in a web UI: `ateam serve`
+Browse results in a web UI: `ateam serve` (experimental)
 
 ### Prerequisites
 
 - **Go 1.24+** — installed automatically by `install.sh` (via Homebrew on macOS, official tarball on Linux)
 - **[Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)** — install and authenticate before running agents:
   ```bash
-  # install claude code, then:
-  claude login
   # for unattended/container use:
   claude setup-token
+  # save securely in OS keychain, paste
+  ateam secret ANTHROPIC_API_KEY
   ```
 - **[OpenAI Codex CLI](https://developers.openai.com/codex/cli/)** (optional, partial support)
 
@@ -628,9 +637,9 @@ timeout_minutes = 20
 timeout_minutes = 120
 
 [roles]
-security = "enabled"
-testing_basic = "enabled"
-refactor_small = "disabled"
+security = "on"
+testing_basic = "on"
+refactor_small = "off"
 ```
 
 
@@ -910,6 +919,19 @@ All role prompts follow the same pattern: `defaults/roles/<NAME>/report_prompt.m
 Roles are auto-discovered from [`defaults/roles/`](defaults/roles/). Each subdirectory containing a `report_prompt.md` becomes a valid role. Use `all` as shorthand for every enabled role.
 
 Available roles: `automation`, `basic_project_structure`, `critic_engineering`, `critic_project`, `database_config`, `database_schema`, `dependencies`, `docs_external`, `docs_internal`, `production_ready`, `project_characteristics`, `refactor_architecture`, `refactor_small`, `security`, `shortcut_taker`, `testing_basic`, `testing_full`.
+
+### Create custom roles
+
+Many more roles can be added:
+* personal identifier / gdpr reviewer
+* cloud deployment script safety
+* spec driven tester which only looks at plan/spec files and generate tests without looking at the code
+* observability enhancer: adds tracing, metrics, improves logging, reduce redundant and wasteful statements
+* company specific tool compliance assistant
+* performance analyzer: develop benchmark and measure performance changes each run to detect important regressions
+* framework specific usage enforcer: best practices for ORM, messaging platforms, database specific features, etc ...
+
+All what is needed is to create `roles/NAME/report_prompt.md` (tip: ask your coding agent to fine tune your prompt) and enable it in config.toml in the relevant projects.
 
 ## Troubleshooting
 

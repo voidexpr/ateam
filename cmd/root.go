@@ -47,4 +47,5 @@ func init() {
 	rootCmd.AddCommand(migrateLogsCmd)
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(secretCmd)
+	rootCmd.AddCommand(autoSetupCmd)
 }
