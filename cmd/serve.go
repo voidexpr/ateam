@@ -38,11 +38,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	port := servePort
+	if port == 0 && env != nil && env.Config != nil && env.Config.Serve.Port > 0 {
+		port = env.Config.Serve.Port
+	}
+
 	srv, err := web.New(env)
 	if err != nil {
 		return err
 	}
 	defer srv.Close()
 
-	return srv.ListenAndServe(servePort, !serveNoOpen)
+	return srv.ListenAndServe(port, !serveNoOpen)
 }

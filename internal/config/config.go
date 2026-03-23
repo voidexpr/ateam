@@ -35,9 +35,14 @@ type Config struct {
 	Report     ReportConfig      `toml:"report"`
 	Review     ReviewConfig      `toml:"review"`
 	Code       CodeConfig        `toml:"code"`
+	Serve      ServeConfig       `toml:"serve"`
 	Roles      map[string]string `toml:"roles"`
 	Supervisor SupervisorConfig  `toml:"supervisor"`
 	Profiles   ProfilesConfig    `toml:"profiles"`
+}
+
+type ServeConfig struct {
+	Port int `toml:"port,omitempty"`
 }
 
 type ProjectConfig struct {

@@ -34,6 +34,9 @@ shortcut_taker          = "off"
 testing_basic           = "on"
 testing_full            = "off"
 
+# [serve]
+# port = 8080  # fixed port for 'ateam serve' (default: random)
+
 [supervisor]
 
 [profiles]
