@@ -1,0 +1,569 @@
+# ATeam Reference
+
+Full command reference, configuration, and troubleshooting. See [README.md](README.md) for an overview and quick start.
+
+## Global Flags
+
+All commands accept:
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--org PATH` | `-o` | Organization path override (skips auto-discovery) |
+| `--project NAME` | `-p` | Project name override (skips auto-discovery) |
+
+## Commands
+
+### `ateam install [PATH]`
+
+Create a `.ateamorg/` directory with default prompts, runtime config, and Dockerfile.
+
+```bash
+ateam install              # creates .ateamorg/ in current directory
+ateam install ~/projects   # creates .ateamorg/ at the given path
+```
+
+### `ateam init [PATH]`
+
+Initialize a project by creating a `.ateam/` directory at PATH (defaults to `.`).
+
+If no `.ateamorg/` is found, you are prompted to create one (defaults to home directory). Use `--org-home` or `--org-create` to skip the interactive prompt.
+
+```bash
+ateam init
+ateam init --name myproject --role testing_basic,security
+ateam init --auto-setup                        # initialize and auto-configure
+ateam init --org-home                          # auto-create .ateamorg/ in $HOME
+```
+
+| Flag | Description |
+|------|-------------|
+| `--name NAME` | Project name (defaults to relative path from org root) |
+| `--role LIST` | Roles to enable (comma-separated; if omitted, defaults are used) |
+| `--git-remote URL` | Git remote origin URL (auto-detected if omitted) |
+| `--org-create PATH` | Create `.ateamorg/` at PATH if none exists |
+| `--org-home` | Create `.ateamorg/` in `$HOME` if none exists |
+| `--auto-setup` | Run `ateam auto-setup` after initialization |
+
+### `ateam auto-setup`
+
+Run the supervisor to analyze the project and auto-configure roles in `config.toml`, create `.ateam/overview.md`, and recommend settings.
+
+```bash
+ateam auto-setup
+ateam auto-setup --dry-run
+ateam auto-setup --profile docker
+```
+
+| Flag | Description |
+|------|-------------|
+| `--profile NAME` | Runtime profile |
+| `--agent NAME` | Agent name from runtime.hcl |
+| `--timeout MINUTES` | Timeout in minutes |
+| `--dry-run` | Print the prompt without running |
+| `--verbose` | Print agent and docker commands to stderr |
+
+### `ateam report`
+
+Run one or more roles in parallel to analyze the project and produce markdown reports.
+
+```bash
+ateam report --roles all
+ateam report --roles security,testing_basic
+ateam report --roles all --extra-prompt "Focus on the API layer"
+ateam report --roles all --dry-run
+```
+
+| Flag | Description |
+|------|-------------|
+| `--roles LIST` | Comma-separated role list, or `all` (default: all enabled roles) |
+| `--extra-prompt TEXT` | Additional instructions appended to every role's prompt (text or `@filepath`) |
+| `--profile NAME` | Runtime profile (overrides config resolution) |
+| `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
+| `--cheaper-model` | Use a cheaper model (sonnet) |
+| `--timeout MINUTES` | Timeout per role (overrides `config.toml`) |
+| `--print` | Print reports to stdout after completion |
+| `--dry-run` | Print computed prompts without running roles |
+| `--ignore-previous-report` | Do not include the role's previous report in the prompt |
+| `--verbose` | Print agent and docker commands to stderr |
+
+### `ateam review`
+
+Have the supervisor read all role reports and produce a prioritized decisions document.
+
+```bash
+ateam review
+ateam review --extra-prompt "This is a production financial app"
+ateam review --prompt @custom_review.md
+ateam review --dry-run
+```
+
+| Flag | Description |
+|------|-------------|
+| `--extra-prompt TEXT` | Additional instructions appended to the supervisor prompt (text or `@filepath`) |
+| `--prompt TEXT` | Custom prompt replacing the default supervisor role entirely (text or `@filepath`) |
+| `--profile NAME` | Runtime profile (overrides config resolution) |
+| `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
+| `--cheaper-model` | Use a cheaper model (sonnet) |
+| `--timeout MINUTES` | Timeout (overrides `config.toml`) |
+| `--roles ROLE,...` | Limit coding tasks to these roles (reviews all reports but only assigns code tasks to listed roles) |
+| `--print` | Print review to stdout after completion |
+| `--dry-run` | Print computed prompt and list reports without running |
+| `--verbose` | Print agent and docker commands to stderr |
+
+### `ateam code`
+
+Read the review document and execute prioritized tasks as code changes.
+
+```bash
+ateam code
+ateam code --review @custom_review.md
+ateam code --dry-run
+```
+
+| Flag | Description |
+|------|-------------|
+| `--review TEXT` | Review content (text or `@filepath`; defaults to `.ateam/supervisor/review.md`) |
+| `--management TEXT` | Management prompt override (text or `@filepath`) |
+| `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
+| `--profile NAME` | Profile for sub-runs (passed to `ateam run --profile`) |
+| `--supervisor-profile NAME` | Profile for the supervisor itself |
+| `--cheaper-model` | Use a cheaper model (sonnet) |
+| `--timeout MINUTES` | Timeout in minutes (overrides `config.toml`; default 120) |
+| `--print` | Print output to stdout after completion |
+| `--dry-run` | Print the computed prompt without running |
+| `--verbose` | Print agent and docker commands to stderr |
+| `--tail` | Stream live output from supervisor and sub-runs |
+| `--force` | Run even if the same action is already running |
+
+### `ateam all`
+
+Run the full pipeline sequentially: report → review → code.
+
+```bash
+ateam all
+ateam all --extra-prompt "Focus on security"
+ateam all --roles refactor_small,testing_basic
+```
+
+| Flag | Description |
+|------|-------------|
+| `--extra-prompt TEXT` | Additional instructions passed to all phases (text or `@filepath`) |
+| `--cheaper-model` | Use a cheaper model (sonnet) |
+| `--timeout MINUTES` | Per-phase timeout (overrides config) |
+| `--roles ROLE,...` | Run only these roles in the report phase and limit coding tasks to them in review |
+| `--profile NAME` | Profile for code sub-runs (passed to `ateam code --profile`) |
+| `--quiet` | Suppress output printing |
+| `--verbose` | Print agent and docker commands to stderr |
+
+### `ateam secret`
+
+Manage secrets (API keys). Secrets are stored in the OS keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager) or plain `.env` files.
+
+```bash
+ateam secret                                  # list all required secrets
+ateam secret ANTHROPIC_API_KEY                # check/set a specific secret
+ateam secret ANTHROPIC_API_KEY --set          # set (reads from stdin or --value)
+ateam secret ANTHROPIC_API_KEY --delete
+ateam secret ANTHROPIC_API_KEY --storage file # force .env file backend
+```
+
+| Flag | Description |
+|------|-------------|
+| `--scope SCOPE` | Secret scope: `global` (default), `org`, or `project` |
+| `--storage BACKEND` | Storage backend: `keychain` (default if available) or `file` |
+| `--set` | Set the secret (reads value from stdin) |
+| `--value VALUE` | Secret value (alternative to stdin) |
+| `--delete` | Delete the secret from the selected backend |
+
+Agents declare required secrets via `required_env` in `runtime.hcl`. Validation runs before any agent spawn.
+
+### `ateam run`
+
+Run an agent with a prompt. Can run standalone (just needs `.ateamorg/`) or within a project.
+
+```bash
+ateam run "say hello"
+ateam run "Analyze the auth module" --role security
+ateam run "test" --profile docker
+ateam run @prompt_file.md
+```
+
+| Flag | Description |
+|------|-------------|
+| `--role ROLE` | Role to run (optional — requires project context) |
+| `--profile NAME` | Runtime profile to use |
+| `--agent NAME` | Agent name from runtime.hcl (mutually exclusive with --profile) |
+| `--model MODEL` | Model override |
+| `--work-dir PATH` | Working directory |
+| `--agent-args "ARGS"` | Extra args passed to the agent CLI |
+| `--task-group ID` | Group related calls |
+| `--no-stream` | Disable progress updates on stderr |
+| `--no-summary` | Disable cost/duration/tokens summary |
+| `--quiet` | Disable both streaming and summary |
+| `--verbose` | Print agent and docker commands to stderr |
+
+### `ateam prompt`
+
+Resolve and print the full prompt for a role or supervisor without running it.
+
+```bash
+ateam prompt --role security --action report
+ateam prompt --supervisor --action review
+ateam prompt --role security --action report --extra-prompt "Focus on auth"
+```
+
+| Flag | Description |
+|------|-------------|
+| `--role ROLE` | Role name (mutually exclusive with `--supervisor`) |
+| `--supervisor` | Generate supervisor prompt instead of role prompt |
+| `--action ACTION` | Action type: `report` or `code` for roles; `review` or `code` for supervisor **(required)** |
+| `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
+| `--no-project-info` | Omit the ATeam Project Context section |
+| `--ignore-previous-report` | Do not include the role's previous report |
+
+### `ateam env`
+
+Show the current environment: organization, runtime config, project, and role status.
+
+### `ateam serve`
+
+Start a localhost web UI for browsing reports, reviews, sessions, and cost data.
+
+| Flag | Description |
+|------|-------------|
+| `--port N` | Listen on a fixed port (default: random, configurable in `config.toml`) |
+| `--no-open` | Do not open the browser automatically |
+
+### `ateam cat`
+
+Pretty-print stream logs by call ID.
+
+```bash
+ateam cat 42
+ateam cat 42 43 44 --verbose
+```
+
+| Flag | Description |
+|------|-------------|
+| `--verbose` | Show full tool inputs and text content |
+| `--no-color` | Disable color output |
+
+### `ateam tail`
+
+Live-stream agent output from running processes.
+
+```bash
+ateam tail                  # all running processes
+ateam tail 42 43            # specific calls by ID
+ateam tail --reports        # current report runs
+ateam tail --coding         # current coding session
+```
+
+| Flag | Description |
+|------|-------------|
+| `--reports` | Tail all current report runs |
+| `--coding` | Tail the latest coding session (supervisor + sub-runs) |
+| `--verbose` | Show full tool inputs and text content |
+| `--no-color` | Disable color output |
+
+### `ateam cost`
+
+Display aggregated cost and token usage. When run inside a project, results are filtered to that project.
+
+### `ateam ps`
+
+Display recent agent runs.
+
+| Flag | Description |
+|------|-------------|
+| `--role ROLE` | Filter by role |
+| `--action ACTION` | Filter by action (report, review, code, run) |
+| `--limit N` | Max rows (default 30) |
+
+### `ateam roles`
+
+List roles configured for the current project.
+
+| Flag | Description |
+|------|-------------|
+| `--enabled` | List enabled roles only |
+| `--available` | List all roles with status (default) |
+
+### `ateam projects`
+
+List all projects discovered under the current organization.
+
+### `ateam update`
+
+Update on-disk default prompts and runtime config to match the current binary.
+
+| Flag | Description |
+|------|-------------|
+| `--diff` | Show diffs between on-disk and embedded prompts |
+| `--quiet`, `-q` | Suppress diff output |
+
+## Directory Layout
+
+### Organization: `.ateamorg/`
+
+Created by `ateam install`. Holds shared defaults and org-level overrides.
+
+```
+.ateamorg/
+  defaults/                                    # embedded defaults written to disk
+    runtime.hcl                                # runtime config (agents, containers, profiles)
+    Dockerfile                                 # default Dockerfile for container builds
+    report_base_prompt.md                      # shared report base instructions
+    code_base_prompt.md                        # shared code base instructions
+    roles/<NAME>/report_prompt.md              # per-role report prompt
+    roles/<NAME>/code_prompt.md                # per-role code prompt (where available)
+    supervisor/review_prompt.md                # supervisor review prompt
+    supervisor/code_management_prompt.md       # supervisor code management prompt
+    supervisor/auto_setup_prompt.md            # auto-setup prompt
+  runtime.hcl                                  # org-level runtime config override (optional)
+  Dockerfile                                   # org-level Dockerfile override (optional)
+  report_base_prompt.md                        # org-level report base override (optional)
+  code_base_prompt.md                          # org-level code base override (optional)
+  report_extra_prompt.md                       # org-wide extra instructions for reports (optional)
+  code_extra_prompt.md                         # org-wide extra instructions for code (optional)
+  roles/                                       # org-level role overrides
+    <NAME>/report_prompt.md
+    <NAME>/report_extra_prompt.md
+    <NAME>/code_prompt.md
+    <NAME>/code_extra_prompt.md
+  supervisor/                                  # org-level supervisor overrides
+    review_prompt.md
+    review_extra_prompt.md
+    code_management_prompt.md
+    code_management_extra_prompt.md
+```
+
+### Project: `.ateam/`
+
+Created by `ateam init`. Self-contained: config, prompts, reports, and runtime state.
+
+Versioned files are at the top level. Runtime artifacts (`logs/`, `state.sqlite`, `secrets.env`) are gitignored.
+
+```
+.ateam/
+  .gitignore                                 # excludes state.sqlite*, logs/, secrets.env
+  config.toml                                # project configuration
+  overview.md                                # project overview (created by auto-setup)
+  state.sqlite                               # call database [gitignored]
+  secrets.env                                # project-scoped secrets [gitignored]
+  runtime.hcl                                # project-level runtime override (optional)
+  roles/<NAME>/
+    report_prompt.md                         # role report prompt override (optional)
+    report_extra_prompt.md                   # extra instructions (optional)
+    code_prompt.md                           # role code prompt override (optional)
+    code_extra_prompt.md                     # extra instructions (optional)
+    report.md                                # latest successful report
+    history/                                 # timestamped archive
+  supervisor/
+    review_prompt.md                         # supervisor override (optional)
+    review_extra_prompt.md                   # extra instructions (optional)
+    review.md                                # latest successful review
+    history/
+  logs/                                      # runtime logs [gitignored]
+```
+
+### `config.toml`
+
+```toml
+[project]
+name = "myproject"
+
+[git]
+repo = "."
+remote_origin_url = "git@github.com:org/repo.git"
+
+[report]
+max_parallel = 3
+report_timeout_minutes = 20
+
+[review]
+timeout_minutes = 20
+
+[code]
+timeout_minutes = 120
+
+# [serve]
+# port = 8080  # fixed port for 'ateam serve' (default: random)
+
+[roles]
+security = "on"
+testing_basic = "on"
+refactor_small = "off"
+```
+
+## Prompt Configuration
+
+All prompt files can be customized at the project level (`.ateam/`), organization level (`.ateamorg/`), or rely on built-in defaults.
+
+To add instructions without replacing the default prompt, use `*_extra_prompt.md` files. To inspect what prompt will be used:
+
+```bash
+ateam prompt --role ROLE --action report
+ateam prompt --supervisor --action review
+```
+
+### Prompt Resolution
+
+Prompts are resolved with a 3-level fallback: **project** → **org** → **org defaults**. The first file found wins. Extra prompts are **additive** — all matching files are included.
+
+The placeholder `{{SOURCE_DIR}}` in prompts is replaced with the project source directory path.
+
+### Role Prompt Assembly (report and code)
+
+```
+ATeam Project Context → Project Overview → Base prompt → Role prompt → Extra prompts → CLI --extra-prompt
+```
+
+### Supervisor Prompt Assembly (review and code)
+
+```
+ATeam Project Context → Project Overview → Action prompt → Extra prompts → Reports/Review → CLI --extra-prompt
+```
+
+### Extra Prompt Locations
+
+For roles (e.g. report):
+1. `.ateamorg/report_extra_prompt.md` — org-wide
+2. `.ateamorg/roles/<NAME>/report_extra_prompt.md` — org role-specific
+3. `.ateam/report_extra_prompt.md` — project-wide
+4. `.ateam/roles/<NAME>/report_extra_prompt.md` — project role-specific
+
+For supervisors (e.g. review):
+1. `.ateamorg/supervisor/review_extra_prompt.md` — org-level
+2. `.ateam/supervisor/review_extra_prompt.md` — project-level
+
+## Runtime Configuration
+
+Runtime behavior is configured via `runtime.hcl` files using HCL syntax, with a 4-level resolution:
+
+1. **Built-in defaults** — compiled into the binary
+2. **Org defaults** — `.ateamorg/defaults/runtime.hcl`
+3. **Org override** — `.ateamorg/runtime.hcl`
+4. **Project override** — `.ateam/runtime.hcl`
+
+Use `ateam env` to see the active resolution chain.
+
+### Agents
+
+```hcl
+agent "claude" {
+  command = "claude"
+  args    = ["-p", "--output-format", "stream-json", "--verbose"]
+  sandbox = local.claude_sandbox
+  required_env = ["ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"]
+}
+
+agent "claude-sonnet" {
+  base = "claude"
+  args = ["-p", "--output-format", "stream-json", "--verbose", "--model", "sonnet"]
+}
+```
+
+Agents support inheritance via `base`, sandbox settings, environment variables, isolated config dirs, and `required_env` for secret validation.
+
+### Cost Estimation & Pricing
+
+- **Claude** reports actual cost directly in its stream output. No configuration needed.
+- **Codex** (and other agents) rely on a `pricing` block in `runtime.hcl` to estimate cost from token counts.
+
+```hcl
+agent "codex" {
+  type    = "codex"
+  command = "codex"
+  args    = ["--sandbox", "workspace-write", "--ask-for-approval", "never"]
+  required_env = ["OPENAI_API_KEY"]
+
+  pricing {
+    default_model = "gpt-5.3-codex"
+    model "gpt-5.3-codex" {
+      input_per_mtok  = 1.75
+      output_per_mtok = 14.00
+    }
+  }
+}
+```
+
+Pricing can go stale. Override at any level by redefining the agent's `pricing` block in the appropriate `runtime.hcl`.
+
+### Containers
+
+```hcl
+container "docker" {
+  type        = "docker"
+  mode        = "oneshot"        # or "persistent"
+  dockerfile  = "Dockerfile"
+  forward_env = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
+}
+```
+
+### Profiles
+
+Profiles combine an agent and a container:
+
+```hcl
+profile "default" {
+  agent     = "claude"
+  container = "none"
+}
+
+profile "docker" {
+  agent     = "claude-docker"
+  container = "docker"
+}
+
+profile "cheap" {
+  agent            = "claude"
+  container        = "none"
+  agent_extra_args = ["--model", "sonnet", "--max-budget-usd", "0.50"]
+}
+```
+
+Use `--profile docker` on any command to run inside a container, or `--profile cheap` for cheaper runs.
+
+## Troubleshooting
+
+### Runner Log
+
+Every invocation is logged to `.ateam/logs/runner.log` (tab-separated, quoted fields).
+
+### Debugging Prompts
+
+```bash
+ateam report --roles security --dry-run      # print prompt without running
+ateam review --dry-run                       # print prompt and list reports
+ateam prompt --role security --action report  # resolve and print a role prompt
+```
+
+### Stream Logs
+
+```bash
+ateam cat 42                    # pretty-print a completed run
+ateam tail                      # live-stream all running processes
+ateam tail --coding             # live-stream current coding session
+```
+
+### Error Files
+
+| File | Location | Content |
+|------|----------|---------|
+| `report_error.md` | `.ateam/roles/<NAME>/` | Error summary, exit code, stderr, partial output |
+| `*_stderr.log` | `.ateam/logs/roles/<NAME>/` | Raw stderr |
+| `*_stream.jsonl` | `.ateam/logs/roles/<NAME>/` | Raw JSONL event stream |
+| `*_exec.md` | `.ateam/logs/roles/<NAME>/` | Full execution context |
+
+Supervisor errors: `.ateam/supervisor/review_error.md` and `.ateam/supervisor/code_error.md`.
+
+### History
+
+Every run archives its prompt and output to `history/` with a timestamp prefix:
+
+```bash
+ls .ateam/roles/security/history/
+# 2026-03-08_15-04-00.report_prompt.md
+# 2026-03-08_15-04-00.report.md
+```
