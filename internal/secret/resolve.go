@@ -3,7 +3,6 @@ package secret
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 )
 
 // Scope name constants.
@@ -90,11 +89,8 @@ func (r *Resolver) Resolve(name string) ResolveResult {
 }
 
 // resolveScope checks backends for a scope in priority order.
-// Keychain is only attempted on macOS.
 func (r *Resolver) resolveScope(scope Scope, name string) (string, string, bool) {
-	canKeychain := runtime.GOOS == "darwin"
-
-	if r.Backend == BackendKeychain && canKeychain {
+	if r.Backend == BackendKeychain {
 		if val, err := KeychainGet(KeychainAccount(scope.Name, scope.KeychainKey, name)); err == nil && val != "" {
 			return val, "keychain", true
 		}
@@ -103,7 +99,7 @@ func (r *Resolver) resolveScope(scope Scope, name string) (string, string, bool)
 	if val, ok := store.Get(name); ok {
 		return val, "file", true
 	}
-	if r.Backend == BackendFile && canKeychain {
+	if r.Backend == BackendFile {
 		if val, err := KeychainGet(KeychainAccount(scope.Name, scope.KeychainKey, name)); err == nil && val != "" {
 			return val, "keychain", true
 		}

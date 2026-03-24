@@ -2,12 +2,11 @@ package secret
 
 import (
 	"bufio"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
+
+	"github.com/zalando/go-keyring"
 )
 
 // Backend identifies a secret storage backend.
@@ -21,11 +20,20 @@ const (
 )
 
 // DefaultBackend returns the preferred backend for the current OS.
+// Returns keychain if a keyring backend is available, otherwise file.
 func DefaultBackend() Backend {
-	if runtime.GOOS == "darwin" {
+	if keyringAvailable() {
 		return BackendKeychain
 	}
 	return BackendFile
+}
+
+// keyringAvailable probes whether the OS keyring is functional.
+func keyringAvailable() bool {
+	_, err := keyring.Get(keychainService, "__probe__")
+	// ErrNotFound means the keyring works but the key doesn't exist — that's fine.
+	// Any other error (e.g. no Secret Service on Linux) means keyring is unavailable.
+	return err == nil || err == keyring.ErrNotFound
 }
 
 // GlobalDir returns the global secrets directory (~/.config/ateam/).
@@ -147,40 +155,21 @@ func parseLine(line string) (string, string) {
 	return strings.TrimSpace(k), v
 }
 
-// --- Keychain backend (macOS) ---
+// --- Keychain backend (cross-platform via go-keyring) ---
 
-// KeychainGet reads a secret from macOS Keychain.
+// KeychainGet reads a secret from the OS credential store.
 func KeychainGet(account string) (string, error) {
-	if runtime.GOOS != "darwin" {
-		return "", fmt.Errorf("keychain is only available on macOS")
-	}
-	out, err := exec.Command("security", "find-generic-password",
-		"-s", keychainService, "-a", account, "-w").Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
+	return keyring.Get(keychainService, account)
 }
 
-// KeychainSet writes a secret to macOS Keychain.
+// KeychainSet writes a secret to the OS credential store.
 func KeychainSet(account, value string) error {
-	if runtime.GOOS != "darwin" {
-		return fmt.Errorf("keychain is only available on macOS")
-	}
-	// Delete first to avoid "already exists" error.
-	exec.Command("security", "delete-generic-password",
-		"-s", keychainService, "-a", account).Run()
-	return exec.Command("security", "add-generic-password",
-		"-s", keychainService, "-a", account, "-w", value).Run()
+	return keyring.Set(keychainService, account, value)
 }
 
-// KeychainDelete removes a secret from macOS Keychain.
+// KeychainDelete removes a secret from the OS credential store.
 func KeychainDelete(account string) error {
-	if runtime.GOOS != "darwin" {
-		return fmt.Errorf("keychain is only available on macOS")
-	}
-	return exec.Command("security", "delete-generic-password",
-		"-s", keychainService, "-a", account).Run()
+	return keyring.Delete(keychainService, account)
 }
 
 // KeychainAccount builds the keychain account string for a scope and variable name.
