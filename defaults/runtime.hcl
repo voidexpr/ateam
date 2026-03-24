@@ -128,6 +128,7 @@ locals {
           "/usr/local/lib/node_modules",
           "/usr/share/gradle",
           "/usr/share/maven",
+          "/var/folders/",
           "/var/run/docker.sock",
           "~/.cargo/bin",
           "~/.cargo/config",
