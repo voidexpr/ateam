@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/zalando/go-keyring"
 )
@@ -28,12 +29,19 @@ func DefaultBackend() Backend {
 	return BackendFile
 }
 
+var (
+	keyringOnce      sync.Once
+	keyringAvail     bool
+)
+
 // keyringAvailable probes whether the OS keyring is functional.
+// Result is cached for the process lifetime.
 func keyringAvailable() bool {
-	_, err := keyring.Get(keychainService, "__probe__")
-	// ErrNotFound means the keyring works but the key doesn't exist — that's fine.
-	// Any other error (e.g. no Secret Service on Linux) means keyring is unavailable.
-	return err == nil || err == keyring.ErrNotFound
+	keyringOnce.Do(func() {
+		_, err := keyring.Get(keychainService, "__probe__")
+		keyringAvail = err == nil || err == keyring.ErrNotFound
+	})
+	return keyringAvail
 }
 
 // GlobalDir returns the global secrets directory (~/.config/ateam/).
