@@ -85,7 +85,7 @@ Release archives should include both `ateam` (host) and `ateam-linux-amd64` so D
 
 ## Architecture: Runtime / Agents / Containers / Profiles
 
-Configuration lives in `runtime.hcl` with 3-level resolution: org defaults → org overrides → project overrides.
+Configuration lives in `runtime.hcl` with 4-level resolution: embedded defaults → org defaults → org overrides → project overrides.
 
 ### Agents
 

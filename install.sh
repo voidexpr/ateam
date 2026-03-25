@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ATeam installer — checks dependencies, builds from source, adds to PATH.
 
-REQUIRED_GO_VERSION="1.24"
+REQUIRED_GO_VERSION="1.25"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 info()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -144,7 +144,8 @@ main() {
     info "Done! Quick start:"
     echo "  cd /path/to/your/project"
     echo "  ateam init"
-    echo "  ateam report --roles all"
+    echo "  ateam auto-setup"
+    echo "  ateam report"
     echo "  ateam review"
     echo "  ateam code"
 }
