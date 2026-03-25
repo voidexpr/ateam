@@ -89,8 +89,11 @@ func (r *Resolver) Resolve(name string) ResolveResult {
 }
 
 // resolveScope checks backends for a scope in priority order.
+// Keychain is skipped entirely when keyringAvailable() is false.
 func (r *Resolver) resolveScope(scope Scope, name string) (string, string, bool) {
-	if r.Backend == BackendKeychain {
+	canKeychain := keyringAvailable()
+
+	if r.Backend == BackendKeychain && canKeychain {
 		if val, err := KeychainGet(KeychainAccount(scope.Name, scope.KeychainKey, name)); err == nil && val != "" {
 			return val, "keychain", true
 		}
@@ -99,7 +102,7 @@ func (r *Resolver) resolveScope(scope Scope, name string) (string, string, bool)
 	if val, ok := store.Get(name); ok {
 		return val, "file", true
 	}
-	if r.Backend == BackendFile {
+	if r.Backend == BackendFile && canKeychain {
 		if val, err := KeychainGet(KeychainAccount(scope.Name, scope.KeychainKey, name)); err == nil && val != "" {
 			return val, "keychain", true
 		}
