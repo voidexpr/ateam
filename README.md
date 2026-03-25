@@ -11,13 +11,13 @@ Coding agents prioritize feature completion over software quality — a good sho
 ATeam addresses this by running quality-focused agents unattended, no interactive prompting needed, no feature changes. Just steady, incremental quality improvement that looks like the code was engineered well in the first place.
 
 Core principles:
-- **No feature work** — focus on quality, don't change behavior
-- **Unattended** — works without approval or interaction safely in sandboxes or containers
-- **Pragmatic** — ateam agents are prompted to adapt to the project size and maturity
-- **Simple** — reuses existing coding agents, minimal orchestration
-- **Safe** — sandboxing and container isolation
-- **Auditable** — every artifact is a readable markdown file
-- **Stateful** - old reports or reviews are read before generating a new one so that context is not lost and doesn't bloat over time
+- **No feature work**: focus on quality, don't change behavior
+- **Unattended**: works without approval or interaction safely in sandboxes or containers
+- **Pragmatic**: ateam agents are prompted to adapt to the project size and maturity
+- **Simple**: reuses existing coding agents, minimal orchestration
+- **Safe**: sandboxing and container isolation
+- **Auditable**: every artifact is a readable markdown file
+- **Stateful**: old reports or reviews are read before generating a new one so no context is lost, only one file per role so there is no bloat over time
 
 ## Quick Start
 
@@ -138,7 +138,9 @@ Create `roles/NAME/report_prompt.md` (in `.ateam/` or `.ateamorg/`) and enable i
 - Cloud deployment safety
 - Observability enhancer
 - Framework-specific best practices
+- Language expert
 - Performance regression detector
+- Black-box testing agents that read feature specs and generate (potentially) failing tests, without permission to modify source code
 
 ## Key Concepts
 
@@ -172,6 +174,35 @@ Create `roles/NAME/report_prompt.md` (in `.ateam/` or `.ateamorg/`) and enable i
 | `ateam update` | Update on-disk defaults to match binary |
 
 See [REFERENCE.md](REFERENCE.md) for full flag documentation, directory layout, prompt configuration, runtime configuration, and troubleshooting.
+
+## FAQ
+
+### How are agents executed by default ?
+
+For both Claude and Codex the built-in sandbox mode is used. For Claure it is enforced by OS level primitives and constraint claude to only specific folders and a few network domains.
+
+It can easily be changed in `.ateam/config.toml` to select specific profiles and how to run agents is fully customizable in `.ateamorg/runtime.hcl`.
+
+### How to look at the exact prompts used by ateam
+
+Use the `ateam prompt --role ROLENAME --action report` to show the exact prompt used taking into account overloaded and extra prompts added.
+
+### Why not just /simplify in claude ?
+
+`/simplify` only looks like at code refactoring and is great to use, ateam can look at many other aspects: testing, documentation, etc ...
+
+It actually fits very well as a first step before a full ateam cycle:
+
+```bash
+ateam run "/simplify the recent commits" && ateam all
+```
+
+### What if I want to use ateam in a slightly different workflow than report-review-code ?
+
+The `ateam run` command is a wrapper around coding to run one-shot, unattended prompts. You can use it to build your own automated scripts. It can also be run outside of an ateam project (but requires an ateam organization which is created by default in `$HOME`). You still benefit from ateam observability features:
+* `ateam ps` to see current and past execution
+* `ateam tail` to see logs in real time
+* `ateam cost` to get a token cost report
 
 ## Future
 
