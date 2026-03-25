@@ -36,13 +36,16 @@ type overviewRun struct {
 }
 
 type overviewData struct {
-	Reports       []prompts.RoleReport
-	Runs          []overviewRun
-	HasReview     bool
-	ReviewModTime time.Time
-	CostTotal     float64
-	ShowAll       bool
-	TotalRuns     int
+	Reports              []prompts.RoleReport
+	Runs                 []overviewRun
+	HasReview            bool
+	ReviewModTime        time.Time
+	HasCodeOutput        bool
+	CodeModTime          time.Time
+	LatestCodeTaskGroup  string
+	CostTotal            float64
+	ShowAll              bool
+	TotalRuns            int
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +64,12 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		data.ReviewModTime = info.ModTime()
 	}
 
+	codeOutputPath := filepath.Join(pe.ProjectDir, "supervisor", "code_output.md")
+	if info, err := os.Stat(codeOutputPath); err == nil {
+		data.HasCodeOutput = true
+		data.CodeModTime = info.ModTime()
+	}
+
 	showAll := r.URL.Query().Get("all") == "1"
 	data.ShowAll = showAll
 
@@ -76,6 +85,9 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 			for _, a := range aggs {
 				data.CostTotal += a.CostUSD
 			}
+		}
+		if tg, err := db.LatestTaskGroup(pe.projectID(), "code-"); err == nil && tg != "" {
+			data.LatestCodeTaskGroup = tg
 		}
 	}
 
