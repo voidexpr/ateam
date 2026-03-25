@@ -7,7 +7,7 @@
 set -euo pipefail
 
 WORK_DIR="$PWD"
-PROJECT_REPO="git@github.com-nicad:nicad/minimon.git"
+PROJECT_REPO="git@github.com:someuser/someproject.git"
 DOCKER_IMAGE="ateam-poc"
 BRANCH="main"
 
