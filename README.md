@@ -4,9 +4,20 @@ ATeam is a CLI that points a crew of role-specific coding agents at your codebas
 
 Think of it as a team of expert colleagues for software quality: they audit while you sleep, commit small focused fixes, and the next run builds on the last.
 
-Coding agents (rightfully) prioritize getting features to work at the cost of longer term software engineering tasks. As a result, new features eventually keep breaking existing ones or security issues appear. But it turns out that coding agents are also very good at auditing code and artifacts. Instead of typing “/simplify” after each change or asking agents to perform maintenance tasks repeatedly, with ATeam you simply schedule it to run after a workday. Over time, project quality is maintained so that only feature work requires attention and there is no slowdown because best practices are enforced along the way.
+## Why ATeam
 
-The architecture is very simple: a few prompt files, some automation to run one-shot coding agents like Claude or Codex (by default in a sandbox but it is configurable, including running within a Docker container), and it produces markdown files at each step to make auditing easy. The prompts instructs ateam agents to make pragmatic changes and not over do, adapting to the project size.
+Coding agents prioritize feature completion over software quality — a good short-term tradeoff that degrades over time. Tests fall behind, security issues accumulate, docs go stale, dependencies rot.
+
+ATeam addresses this by running quality-focused agents unattended, no interactive prompting needed, no feature changes. Just steady, incremental quality improvement that looks like the code was engineered well in the first place.
+
+Core principles:
+- **No feature work** — focus on quality, don't change behavior
+- **Unattended** — works without approval or interaction safely in sandboxes or containers
+- **Pragmatic** — ateam agents are prompted to adapt to the project size and maturity
+- **Simple** — reuses existing coding agents, minimal orchestration
+- **Safe** — sandboxing and container isolation
+- **Auditable** — every artifact is a readable markdown file
+- **Stateful** - old reports or reviews are read before generating a new one so that context is not lost and doesn't bloat over time
 
 ## Quick Start
 
@@ -21,7 +32,7 @@ The install script checks for Go (installs it if missing), builds the binary, an
 # 0. Use your own workspace, a git worktree or a separate workspace for ateam
 cd /path/to/your/project
 
-# 1. Initialize
+# 1. Initialize, it will create .ateam/ directory in your folder
 ateam init
 
 # 2. Auto-configure roles for your project (optional)
@@ -36,6 +47,15 @@ ateam code                           # execute top-priority fixes
 Or run the full pipeline: `ateam all`
 
 You can see all artifacts under `.ateam/` or via an experimental web UI `ateam serve`.
+
+Other very useful commands:
+```bash
+# See current and past agent runs
+ateam ps
+
+# See logs of running agents
+ateam tail
+```
 
 ### Prerequisites
 
