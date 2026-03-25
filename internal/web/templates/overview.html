@@ -9,10 +9,28 @@
     <div class="stat-label">Reports</div>
     <div class="stat-value">{{len $d.Reports}}</div>
   </div>
+  {{if $d.HasReview}}
+  <a href="/p/{{$.ProjectSlug}}/review" class="stat-card stat-card-link">
+    <div class="stat-label">Review</div>
+    <div class="stat-value">{{fmtDateAge $d.ReviewModTime}}</div>
+  </a>
+  {{else}}
   <div class="stat-card">
     <div class="stat-label">Review</div>
-    <div class="stat-value">{{if $d.HasReview}}{{fmtDateAge $d.ReviewModTime}}{{else}}&mdash;{{end}}</div>
+    <div class="stat-value">&mdash;</div>
   </div>
+  {{end}}
+  {{if $d.HasCodeOutput}}
+  <a href="{{if $d.LatestCodeTaskGroup}}/p/{{$.ProjectSlug}}/sessions/{{$d.LatestCodeTaskGroup}}{{else}}/p/{{$.ProjectSlug}}/sessions{{end}}" class="stat-card stat-card-link">
+    <div class="stat-label">Last Code</div>
+    <div class="stat-value">{{fmtDateAge $d.CodeModTime}}</div>
+  </a>
+  {{else}}
+  <div class="stat-card">
+    <div class="stat-label">Last Code</div>
+    <div class="stat-value">&mdash;</div>
+  </div>
+  {{end}}
   <div class="stat-card">
     <div class="stat-label">Total Cost</div>
     <div class="stat-value">{{if gt $d.CostTotal 0.0}}{{fmtCost $d.CostTotal}}{{else}}&mdash;{{end}}</div>

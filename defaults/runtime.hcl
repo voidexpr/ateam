@@ -179,6 +179,17 @@ agent "claude" {
   required_env = ["ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"]
 }
 
+agent "claude-auto" {
+  type    = "claude"
+  command = "claude"
+  args    = ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode" , "auto"]
+  sandbox = local.claude_sandbox
+  env = {
+    CLAUDECODE = ""
+  }
+  required_env = ["ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"]
+}
+
 // danger: no sandbox, could be useful for debugging
 agent "claude-no-sandbox" {
   type    = "claude"

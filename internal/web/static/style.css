@@ -194,6 +194,16 @@ main {
   margin-top: 4px;
 }
 
+a.stat-card-link {
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+a.stat-card-link:hover {
+  border-color: var(--accent);
+}
+
 /* Tables */
 .data-table {
   width: 100%;
