@@ -173,27 +173,16 @@ Create `roles/NAME/report_prompt.md` (in `.ateam/` or `.ateamorg/`) and enable i
 
 See [REFERENCE.md](REFERENCE.md) for full flag documentation, directory layout, prompt configuration, runtime configuration, and troubleshooting.
 
-## Why ATeam
-
-Coding agents prioritize feature completion over software quality — a good short-term tradeoff that degrades over time. Tests fall behind, security issues accumulate, docs go stale, dependencies rot.
-
-ATeam addresses this by running quality-focused agents on a schedule. No interactive prompting needed. No feature changes. Just steady, incremental quality improvement that looks like the code was written well in the first place.
-
-Core principles:
-- **No feature work** — focus on quality, don't change behavior
-- **Unattended** — works without approval or interaction
-- **Pragmatic** — adapts to project size and maturity
-- **Simple** — reuses existing coding agents, minimal orchestration
-- **Safe** — sandboxing and container isolation
-- **Auditable** — every artifact is a readable markdown file
-
 ## Future
 
-- Better context and memory
-  - Reduce prompt size by moving more instructions into ateam itself
-  - Keep `overview.md` up to date based on commits
-- More agents and profiles
-- Scheduling integration
+- Reduce token usage
+- Improve default role prompts
+- Move more orchestration away from prompts into ateam itself
+- Keep `overview.md` up to date based on commits
+- More agent types (gemini, cursor, ...) and profiles (MacOS native container)
+- Stricter testing policy and automation (opt-in)
+- Built-in scheduling
+- Adaptative report commissioning based on recent code changes (can reduce token usage)
 
 ## Development
 
