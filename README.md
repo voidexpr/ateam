@@ -59,14 +59,14 @@ ateam tail
 
 ### Prerequisites
 
-- **Go 1.24+** — installed automatically by `install.sh`
+- **Go 1.25+** — installed automatically by `install.sh`
 - **[Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)** — install and authenticate before running agents
 - **Docker** (optional) — enables isolated execution via `--profile docker`
 
 ### Manual Install
 
 ```bash
-go version          # ensure Go 1.24+
+go version          # ensure Go 1.25+
 git clone https://github.com/voidexpr/ateam.git
 cd ateam && make build
 sudo ln -s "$(pwd)/ateam" /usr/local/bin/ateam
@@ -182,7 +182,7 @@ See [REFERENCE.md](REFERENCE.md) for full flag documentation, directory layout, 
 - More agent types (gemini, cursor, ...) and profiles (MacOS native container)
 - Stricter testing policy and automation (opt-in)
 - Built-in scheduling
-- Adaptative report commissioning based on recent code changes (can reduce token usage)
+- Adaptive report commissioning based on recent code changes (can reduce token usage)
 
 ## Development
 
