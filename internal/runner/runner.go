@@ -433,9 +433,15 @@ func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error
 	workDir := effectiveWorkDir(opts)
 
 	runtimeWriteDirs := []string{workDir, r.ProjectDir}
+	if r.OrgDir != "" {
+		runtimeWriteDirs = append(runtimeWriteDirs, r.OrgDir)
+	}
 	runtimeWriteDirs = append(runtimeWriteDirs, r.ExtraWriteDirs...)
 	runtimeWriteDirs = append(runtimeWriteDirs, r.SandboxRWPaths...)
 	runtimeAdditionalDirs := append([]string{r.ProjectDir}, r.ExtraWriteDirs...)
+	if r.OrgDir != "" {
+		runtimeAdditionalDirs = append(runtimeAdditionalDirs, r.OrgDir)
+	}
 	runtimeAdditionalDirs = append(runtimeAdditionalDirs, r.SandboxROPaths...)
 
 	mergeStringList(settings, []string{"sandbox", "filesystem", "allowWrite"}, runtimeWriteDirs)

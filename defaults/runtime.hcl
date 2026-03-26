@@ -1,3 +1,9 @@
+// Sandbox template for Claude agents.
+// At runtime, the runner also grants access to (see writeSettings in runner.go):
+//   - working directory (project source dir)
+//   - .ateam/ project directory
+//   - .ateamorg/ organization directory (if present)
+//   - agent rw_paths / ro_paths / denied_paths from agent config blocks
 locals {
   claude_sandbox = <<-EOF
   {
@@ -42,12 +48,18 @@ locals {
       "enabled": true,
       "autoAllowBashIfSandboxed": true,
       "allowUnsandboxedCommands": false,
+      "allowAllUnixSockets": true,
       "excludedCommands": [
         "ateam:*"
       ],
       "filesystem": {
+        "additionalDirectories": [
+          "/tmp",
+          "~/.docker/run/"
+        ],
         "allowWrite": [
           "/tmp",
+          "~/.docker/run/",
           "~/.bun",
           "~/.cache",
           "~/.cache/bun",
@@ -96,6 +108,8 @@ locals {
           "/Applications/Docker.app",
           "/var/lib/docker",
           "/var/run/docker.sock",
+          "~/.docker/run/",
+          "/tmp",
           "/bin",
           "/lib",
           "/opt",
