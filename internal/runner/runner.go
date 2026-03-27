@@ -208,6 +208,18 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		req.WorkDir = dc.TranslatePath(cwd)
 	}
 
+	// If running inside a devcontainer, start it and validate the agent.
+	if dc, ok := r.Container.(*container.DevcontainerContainer); ok {
+		if err := dc.EnsureRunning(ctx); err != nil {
+			return failEarly(fmt.Errorf("devcontainer start failed: %w", err))
+		}
+		agentCmd, _ := r.Agent.DebugCommandArgs(nil)
+		if err := dc.ValidateAgent(ctx, agentCmd); err != nil {
+			return failEarly(err)
+		}
+		req.CmdFactory = dc.CmdFactory()
+	}
+
 	agentName := r.Agent.Name()
 	command, agentArgs := r.Agent.DebugCommandArgs(extraArgs)
 	cliStr := command + " " + strings.Join(agentArgs, " ")
@@ -216,6 +228,10 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		fmt.Fprintf(os.Stderr, "[verbose] agent: %s\n", cliStr)
 		if dc, ok := r.Container.(*container.DockerContainer); ok {
 			fmt.Fprintf(os.Stderr, "[verbose] docker: %s\n",
+				dc.DebugCommand(container.RunOpts{Command: command, Args: agentArgs}))
+		}
+		if dc, ok := r.Container.(*container.DevcontainerContainer); ok {
+			fmt.Fprintf(os.Stderr, "[verbose] devcontainer: %s\n",
 				dc.DebugCommand(container.RunOpts{Command: command, Args: agentArgs}))
 		}
 	}

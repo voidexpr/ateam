@@ -48,9 +48,10 @@ type ModelPricing struct {
 
 type ContainerConfig struct {
 	Name         string
-	Type         string   // "none", "docker", "srt"
+	Type         string   // "none", "docker", "devcontainer"
 	Mode         string   // "oneshot" (default) or "persistent"
-	Dockerfile   string   // relative to .ateam/ dir
+	Dockerfile   string   // docker: relative to .ateam/ dir
+	ConfigPath   string   // devcontainer: path to devcontainer.json (relative to source dir)
 	IdleTimeout  string   // duration string, e.g. "30m" (future use)
 	ForwardEnv   []string // env var names to forward from host into container
 	ExtraVolumes []string // additional volume mounts, e.g. "../data:/data:ro"
@@ -105,6 +106,7 @@ type hclContainer struct {
 	Type         string   `hcl:"type,optional"`
 	Mode         string   `hcl:"mode,optional"`
 	Dockerfile   string   `hcl:"dockerfile,optional"`
+	ConfigPath   string   `hcl:"config_path,optional"`
 	IdleTimeout  string   `hcl:"idle_timeout,optional"`
 	ForwardEnv   []string `hcl:"forward_env,optional"`
 	ExtraVolumes []string `hcl:"extra_volumes,optional"`
@@ -323,6 +325,7 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 			Type:         c.Type,
 			Mode:         c.Mode,
 			Dockerfile:   c.Dockerfile,
+			ConfigPath:   c.ConfigPath,
 			IdleTimeout:  c.IdleTimeout,
 			ForwardEnv:   c.ForwardEnv,
 			ExtraVolumes: c.ExtraVolumes,
