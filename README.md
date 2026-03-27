@@ -1,23 +1,26 @@
 # ATeam — AI Role Team for Code Analysis
 
+ATeam is designed for developers who want to focus on feature work and key architectural design aspects, while delegating more of the engineering to agents. The goal is to produce a healthy codebase with minimal human effort.
+
 ATeam is a CLI that points a crew of role-specific coding agents at your codebase. Each agent audits code across selected dimensions like code refactoring, testing, security, dependencies, documentation, etc. Then a supervisor prioritizes the findings and runs coding agents to implement fixes. It works unattended, out of the box, for any tech stack. It is solely focused on project quality and doesn't make any feature change.
 
 Think of it as a team of expert colleagues for software quality: they audit while you sleep, commit small focused fixes, and the next run builds on the last.
 
 ## Why ATeam
 
-Coding agents prioritize feature completion over software quality — a good short-term tradeoff that degrades over time. Tests fall behind, security issues accumulate, docs go stale, dependencies rot.
+Coding agents prioritize feature completion over software quality which is a good short-term tradeoff that degrades over time. Tests fall behind, security issues accumulate, code becomes spaghetti, docs go stale, dependencies rot, ...
 
-ATeam addresses this by running quality-focused agents unattended, no interactive prompting needed, no feature changes. Just steady, incremental quality improvement that looks like the code was engineered well in the first place.
+ATeam addresses this by running quality-focused agents unattended, no interactive prompting needed, no functional changes. Just steady, incremental quality improvement that looks like the code was engineered well in the first place.
 
 Core principles:
 - **No feature work**: focus on quality, don't change behavior
-- **Unattended**: works without approval or interaction safely in sandboxes or containers
-- **Pragmatic**: ateam agents are prompted to adapt to the project size and maturity
-- **Simple**: reuses existing coding agents, minimal orchestration
+- **Unattended**: your own coding agent works without approval or interaction
 - **Safe**: sandboxing and container isolation
+- **Pragmatic**: ateam agents are prompted to adapt to the project size and maturity, audits try to automate tools (linter, test automation, security vulnerability tools, ...) rather than constantly relying on agents
+- **Simple**: reuses existing coding agents, minimal orchestration
 - **Auditable**: every artifact is a readable markdown file
 - **Stateful**: old reports or reviews are read before generating a new one so no context is lost, only one file per role so there is no bloat over time
+- **Get out of your way**: ATeam is not a generic workflow system, it is a focused report + review + code automation layer designed to preserve your attention for high-value work
 
 ## Quick Start
 
@@ -42,9 +45,10 @@ ateam auto-setup
 ateam report                         # run all enabled role analyses
 ateam review                         # supervisor prioritizes findings
 ateam code                           # execute top-priority fixes
+
 ```
 
-Or run the full pipeline: `ateam all`
+Once familiar with ateam just run the full pipeline: `ateam all`.
 
 You can see all artifacts under `.ateam/` or via an experimental web UI `ateam serve`.
 
@@ -204,16 +208,21 @@ The `ateam run` command is a wrapper around coding to run one-shot, unattended p
 * `ateam tail` to see logs in real time
 * `ateam cost` to get a token cost report
 
+### What size of project is it for ?
+
+ATeam should be adaptable for projects of many size by running on the entire repo for small to medium projects and have separate ateam projects for various component of bigger projects using a mono repo.
+
 ## Future
 
-- Reduce token usage
-- Improve default role prompts
+- Reduce input token usage
+- Improve default role prompts for accuracy and token usage
 - Move more orchestration away from prompts into ateam itself
 - Keep `overview.md` up to date based on commits
 - More agent types (gemini, cursor, ...) and profiles (MacOS native container)
 - Stricter testing policy and automation (opt-in)
 - Built-in scheduling
 - Adaptive report commissioning based on recent code changes (can reduce token usage)
+- look at adding an evaluation cycle (after report/review and code) to potentially reject some code changes
 
 ## Development
 
