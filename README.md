@@ -144,7 +144,9 @@ Create `roles/NAME/report_prompt.md` (in `.ateam/` or `.ateamorg/`) and enable i
 - Framework-specific best practices
 - Language expert
 - Performance regression detector
-- Black-box testing agents that read feature specs and generate (potentially) failing tests, without permission to modify source code
+- Black-box testing agent that reads feature specs and generates (potentially) failing tests, without permission to modify the source code
+
+There is a very long list of potentially very useful roles to add.
 
 ## Key Concepts
 
@@ -153,6 +155,23 @@ Create `roles/NAME/report_prompt.md` (in `.ateam/` or `.ateamorg/`) and enable i
 - **Runtime profiles**: switch agent/container combos with `--profile docker` or `--profile cheap`
 - **Cost tracking**: `ateam cost` for aggregated reports, `ateam ps` for run history
 - **Secret management**: `ateam secret` stores API keys in OS keychain or `.env` files
+
+An ateam project is a `.ateam` folder in your code base, a parent directory ($HOME by default) contains `.ateamorg`.
+* **Project**:
+    * configuration
+        * `config.toml` configured roles and general persisted settings
+        * optional: overloaded or extended prompts
+        * optional: extended coding agent or container config (`runtime.hcl`, `Dockerfile`)
+    * produced artifacts
+        * reports (and their history)
+        * last review (and their history)
+        * coding tasks and their execution report
+    * runtime logs
+        * state.sqlite: track running tasks and statistics about them for live monitoring and cost reporting
+        * log files from agent execution, exact prompt used
+* **Organization**:
+    * optional: overload runtime.hcl or prompts to reuse between projects
+    * defaults for all roles and all config
 
 ## Commands
 
@@ -211,6 +230,14 @@ The `ateam run` command is a wrapper around coding to run one-shot, unattended p
 ### What size of project is it for ?
 
 ATeam should be adaptable for projects of many size by running on the entire repo for small to medium projects and have separate ateam projects for various component of bigger projects using a mono repo.
+
+### Can it be used outside of the report/review/code ?
+
+Yes, `ateam run` is a great wrapper to run one-shot prompts and benefit from live task tracking (`ateam ps`), live log tailing (`ateam tail`) and reused saved agent and container config (`runtime.hcl`). It can be ran without an ateam project but does require an ateam org (which is created in $HOME by default).
+
+You can then use `ateam run` in your own scripts and build your own workflows reusing agent/container management without the ateam prompt/artifact part.
+
+For example: `ateam run "/simplify my last few commits" && git commit . -m "round of simplify" && ateam run "Identify and code at most 5 code refactoring opportunities focused on performance and security. Make sure to commit each separately as soon as they are completed, do run tests between each and fix any issue introduced" --profile docker` and then go get than nice walk outside or valuable family time while your agent is at work. You shouldn't come back to see that it got stuck asking for a bash command approval at the first step.
 
 ## Future
 
