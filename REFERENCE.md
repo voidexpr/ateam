@@ -501,6 +501,16 @@ container "docker" {
 }
 ```
 
+Devcontainers use the project's `.devcontainer/devcontainer.json` to run agents in a pre-configured environment. The agent CLI (e.g. `claude`) must be installed inside the devcontainer. Requires `@devcontainers/cli` (`npm install -g @devcontainers/cli`).
+
+```hcl
+container "devcontainer" {
+  type        = "devcontainer"
+  # config_path = ".devcontainer/backend/devcontainer.json"  # optional override
+  forward_env = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
+}
+```
+
 ### Profiles
 
 Profiles combine an agent and a container:
@@ -521,9 +531,14 @@ profile "cheap" {
   container        = "none"
   agent_extra_args = ["--model", "sonnet", "--max-budget-usd", "0.50"]
 }
+
+profile "devcontainer" {
+  agent     = "claude-docker"
+  container = "devcontainer"
+}
 ```
 
-Use `--profile docker` on any command to run inside a container, or `--profile cheap` for cheaper runs.
+Use `--profile docker` to run in ateam's Docker, `--profile devcontainer` to run in your project's devcontainer, or `--profile cheap` for cheaper runs.
 
 ## Troubleshooting
 

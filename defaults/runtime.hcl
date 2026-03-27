@@ -354,3 +354,19 @@ profile "docker-persistent" {
   agent     = "claude-docker"
   container = "docker-persistent"
 }
+
+// Devcontainer: runs agents inside the project's .devcontainer/ environment.
+// The devcontainer must include the agent CLI (e.g. claude, codex).
+// Requires: npm install -g @devcontainers/cli
+container "devcontainer" {
+  type        = "devcontainer"
+  forward_env = [
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+  ]
+}
+
+profile "devcontainer" {
+  agent     = "claude-docker"
+  container = "devcontainer"
+}

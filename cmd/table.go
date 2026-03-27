@@ -376,6 +376,19 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 			OrgDir:           orgDir,
 			HostCLIPath:      findLinuxBinary(orgDir),
 		}, nil
+	case "devcontainer":
+		configPath := cc.ConfigPath
+		if configPath == "" {
+			configPath = ".devcontainer/devcontainer.json"
+		}
+		if !filepath.IsAbs(configPath) {
+			configPath = filepath.Join(sourceDir, configPath)
+		}
+		return &container.DevcontainerContainer{
+			ConfigPath:   configPath,
+			WorkspaceDir: sourceDir,
+			ForwardEnv:   cc.ForwardEnv,
+		}, nil
 	default:
 		return nil, nil
 	}
