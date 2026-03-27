@@ -220,6 +220,11 @@ It actually fits very well as a first step before a full ateam cycle:
 ateam run "/simplify the recent commits" && ateam all
 ```
 
+### What if I only want to do some of the code changes or only run some of the reports ?
+
+* you can easily select which reports to run with `ateam report --roles ROLE1,ROLE2`
+* you can instruct the supervisor: `ateam review --extra-prompt "I only want tasks from refactoring_small and testing_basic"`
+
 ### What if I want to use ateam in a slightly different workflow than report-review-code ?
 
 The `ateam run` command is a wrapper around coding to run one-shot, unattended prompts. You can use it to build your own automated scripts. It can also be run outside of an ateam project (but requires an ateam organization which is created by default in `$HOME`). You still benefit from ateam observability features:
@@ -227,17 +232,13 @@ The `ateam run` command is a wrapper around coding to run one-shot, unattended p
 * `ateam tail` to see logs in real time
 * `ateam cost` to get a token cost report
 
+You can then use `ateam run` in your own scripts and build your own workflows reusing agent/container management without the ateam prompt/artifact part. It can be ran without an ateam project but does require an ateam org (which is created in $HOME by default).
+
+For example: `ateam run "/simplify my last few commits" && git commit . -m "round of simplify" && ateam run "Identify and code at most 5 code refactoring opportunities focused on performance and security. Make sure to commit each separately as soon as they are completed, do run tests between each and fix any issue introduced" --profile docker` and then go get than nice walk outside or valuable family time while your agent is at work. You shouldn't come back to see that it got stuck asking for a bash command approval at the first step.
+
 ### What size of project is it for ?
 
 ATeam should be adaptable for projects of many size by running on the entire repo for small to medium projects and have separate ateam projects for various component of bigger projects using a mono repo.
-
-### Can it be used outside of the report/review/code ?
-
-Yes, `ateam run` is a great wrapper to run one-shot prompts and benefit from live task tracking (`ateam ps`), live log tailing (`ateam tail`) and reused saved agent and container config (`runtime.hcl`). It can be ran without an ateam project but does require an ateam org (which is created in $HOME by default).
-
-You can then use `ateam run` in your own scripts and build your own workflows reusing agent/container management without the ateam prompt/artifact part.
-
-For example: `ateam run "/simplify my last few commits" && git commit . -m "round of simplify" && ateam run "Identify and code at most 5 code refactoring opportunities focused on performance and security. Make sure to commit each separately as soon as they are completed, do run tests between each and fix any issue introduced" --profile docker` and then go get than nice walk outside or valuable family time while your agent is at work. You shouldn't come back to see that it got stuck asking for a bash command approval at the first step.
 
 ## Future
 
@@ -245,11 +246,12 @@ For example: `ateam run "/simplify my last few commits" && git commit . -m "roun
 - Improve default role prompts for accuracy and token usage
 - Move more orchestration away from prompts into ateam itself
 - Keep `overview.md` up to date based on commits
-- More agent types (gemini, cursor, ...) and profiles (MacOS native container)
+- More agent types (gemini, cursor, ...) and containers (MacOS native container), improve sandbox configuration
 - Stricter testing policy and automation (opt-in)
 - Built-in scheduling
 - Adaptive report commissioning based on recent code changes (can reduce token usage)
 - look at adding an evaluation cycle (after report/review and code) to potentially reject some code changes
+- maybe: explicit task system instead of relying on supervisor to orchestrate coding sessions (could save a lot of tokens but coding agents already know how to manage multiple tasks)
 
 ## Development
 
