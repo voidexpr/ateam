@@ -208,16 +208,16 @@ func TestFormatProjectInfo(t *testing.T) {
 			"* runtime files: /home/user/.ateamorg",
 			"* project name: myapp",
 			"* role: role security",
-			"* source code: /projects/myapp",
+			"* project directory: /projects/myapp",
 			"* reports and reviews: /projects/myapp/.ateam",
 		} {
 			if !strings.Contains(got, want) {
 				t.Errorf("missing %q in output:\n%s", want, got)
 			}
 		}
-		// GitRepoDir not set → no "allowed to read" line
-		if strings.Contains(got, "allowed to read") {
-			t.Error("should not contain 'allowed to read' when GitRepoDir is empty")
+		// GitRepoDir not set → no scope warning
+		if strings.Contains(got, "IMPORTANT") {
+			t.Error("should not contain IMPORTANT when GitRepoDir is empty")
 		}
 	})
 
@@ -231,8 +231,14 @@ func TestFormatProjectInfo(t *testing.T) {
 			Role:        "the supervisor",
 		}
 		got := FormatProjectInfo(p)
-		if !strings.Contains(got, "allowed to read but not modify up to: /projects/mono") {
-			t.Errorf("missing GitRepoDir line in output:\n%s", got)
+		if !strings.Contains(got, "**IMPORTANT**") {
+			t.Errorf("missing IMPORTANT scope warning in output:\n%s", got)
+		}
+		if !strings.Contains(got, "Limit your findings to the project directory") {
+			t.Errorf("missing scope instruction in output:\n%s", got)
+		}
+		if !strings.Contains(got, "/projects/mono/apps/myapp") {
+			t.Errorf("missing project dir path in scope warning:\n%s", got)
 		}
 	})
 
@@ -246,8 +252,8 @@ func TestFormatProjectInfo(t *testing.T) {
 			Role:        "role testing",
 		}
 		got := FormatProjectInfo(p)
-		if strings.Contains(got, "allowed to read") {
-			t.Error("should not contain 'allowed to read' when GitRepoDir == SourceDir")
+		if strings.Contains(got, "IMPORTANT") {
+			t.Error("should not contain IMPORTANT when GitRepoDir == SourceDir")
 		}
 	})
 
