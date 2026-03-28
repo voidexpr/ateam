@@ -361,11 +361,11 @@ func FormatProjectInfo(p ProjectInfoParams) string {
 	fmt.Fprintf(&b, "* runtime files: %s\n", p.OrgDir)
 	fmt.Fprintf(&b, "* project name: %s\n", p.ProjectName)
 	fmt.Fprintf(&b, "* role: %s\n", p.Role)
-	fmt.Fprintf(&b, "* source code: %s\n", p.SourceDir)
-	if p.GitRepoDir != "" && p.GitRepoDir != p.SourceDir {
-		fmt.Fprintf(&b, "  * allowed to read but not modify up to: %s\n", p.GitRepoDir)
-	}
+	fmt.Fprintf(&b, "* project directory: %s\n", p.SourceDir)
 	fmt.Fprintf(&b, "* reports and reviews: %s\n", p.ProjectDir)
+	if p.GitRepoDir != "" && p.GitRepoDir != p.SourceDir {
+		fmt.Fprintf(&b, "\n**IMPORTANT**: Your working directory is the project directory (%s), not the git repo root (%s). Limit your findings to the project directory. Do not look at or report on code outside it.\n", p.SourceDir, p.GitRepoDir)
+	}
 	if p.Meta != nil {
 		ts := time.Now().Format(TimestampFormat)
 		fmt.Fprintf(&b, "* timestamp: %s\n", ts)
