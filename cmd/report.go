@@ -188,7 +188,10 @@ func runReport(cmd *cobra.Command, args []string) error {
 
 	// Consume progress events to update in-flight status lines.
 	// Rate-limit terminal redraws to avoid excessive output with many parallel roles.
+	var progressDone sync.WaitGroup
+	progressDone.Add(1)
 	go func() {
+		defer progressDone.Done()
 		var lastRedraw time.Time
 		for p := range progress {
 			idx, ok := roleIndex[p.RoleID]
@@ -211,10 +214,6 @@ func runReport(cmd *cobra.Command, args []string) error {
 			}
 			statusMu.Unlock()
 		}
-		// Final redraw to ensure latest state is shown
-		statusMu.Lock()
-		reprintStatuses(statuses)
-		statusMu.Unlock()
 	}()
 
 	for r := range completed {
@@ -241,6 +240,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 		statusMu.Unlock()
 		results = append(results, r)
 	}
+	progressDone.Wait()
 
 	fmt.Printf("\n%d succeeded, %d failed (%s)\n", succeeded, failed, runner.FormatDuration(time.Since(reportStart)))
 
