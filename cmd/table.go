@@ -117,9 +117,12 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string) (*runner.Runne
 		return nil, err
 	}
 
-	resolver := secretResolver(env, secret.DefaultBackend())
-	if err := secret.ValidateSecrets(ac, resolver); err != nil {
-		return nil, err
+	// Only validate secrets for container runs — agents handle their own auth on host.
+	if cc != nil && cc.Type != "none" {
+		resolver := secretResolver(env, secret.DefaultBackend())
+		if err := secret.ValidateSecrets(ac, resolver); err != nil {
+			return nil, err
+		}
 	}
 
 	r := runnerFromAgentConfig(env, ac)
@@ -152,11 +155,6 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.Runner
 	ac, ok := rtCfg.Agents[agentName]
 	if !ok {
 		return nil, fmt.Errorf("unknown agent %q", agentName)
-	}
-
-	resolver := secretResolver(env, secret.DefaultBackend())
-	if err := secret.ValidateSecrets(&ac, resolver); err != nil {
-		return nil, err
 	}
 
 	r := runnerFromAgentConfig(env, &ac)
