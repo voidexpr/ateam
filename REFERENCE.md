@@ -26,7 +26,7 @@ ateam install ~/projects   # creates .ateamorg/ at the given path
 
 Initialize a project by creating a `.ateam/` directory at PATH (defaults to `.`).
 
-If no `.ateamorg/` is found, you are prompted to create one (defaults to home directory). Use `--org-home` or `--org-create` to skip the interactive prompt.
+If no `.ateamorg/` is found, one is created in `$HOME` by default. Use `--org-create-prompt` for an interactive choice, or `--org-create PATH`.
 
 ```bash
 ateam init
@@ -42,6 +42,7 @@ ateam init --org-home                          # auto-create .ateamorg/ in $HOME
 | `--git-remote URL` | Git remote origin URL (auto-detected if omitted) |
 | `--org-create PATH` | Create `.ateamorg/` at PATH if none exists |
 | `--org-home` | Create `.ateamorg/` in `$HOME` if none exists |
+| `--org-create-prompt` | Interactively choose where to create `.ateamorg/` |
 | `--auto-setup` | Run `ateam auto-setup` after initialization |
 
 ### `ateam auto-setup`
