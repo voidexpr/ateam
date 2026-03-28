@@ -14,12 +14,13 @@ import (
 )
 
 var (
-	initGitRemote string
-	initName      string
-	initRoles     []string
-	initOrgCreate string
-	initOrgHome   bool
-	initAutoSetup bool
+	initGitRemote       string
+	initName            string
+	initRoles           []string
+	initOrgCreate       string
+	initOrgHome         bool
+	initAutoSetup       bool
+	initOrgCreatePrompt bool
 )
 
 var initCmd = &cobra.Command{
@@ -27,8 +28,8 @@ var initCmd = &cobra.Command{
 	Short: "Initialize a project for ATeam",
 	Long: `Create a .ateam/ project directory at PATH (defaults to ".").
 
-If no .ateamorg/ is found, you are prompted to create one.
-Use --org-home or --org-create to skip the prompt.
+If no .ateamorg/ is found, one is created in $HOME by default.
+Use --org-create-prompt for an interactive choice, or --org-create PATH.
 
 Example:
   ateam init
@@ -45,6 +46,7 @@ func init() {
 	initCmd.Flags().StringVar(&initOrgCreate, "org-create", "", "create .ateamorg/ at PATH if none exists")
 	initCmd.Flags().BoolVar(&initOrgHome, "org-home", false, "create .ateamorg/ in $HOME if none exists")
 	initCmd.Flags().BoolVar(&initAutoSetup, "auto-setup", false, "run auto-setup after initialization")
+	initCmd.Flags().BoolVar(&initOrgCreatePrompt, "org-create-prompt", false, "interactively choose where to create .ateamorg/")
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
@@ -169,12 +171,18 @@ func autoCreateOrg(initTarget string) (string, error) {
 			return "", fmt.Errorf("cannot determine home directory: %w", err)
 		}
 		createAt = home
-	default:
+	case initOrgCreatePrompt:
 		selected, err := promptOrgCreate(initTarget)
 		if err != nil {
 			return "", err
 		}
 		createAt = selected
+	default:
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("cannot determine home directory: %w", err)
+		}
+		createAt = home
 	}
 
 	absCreate, err := filepath.Abs(createAt)
