@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ateam/internal/prompts"
@@ -169,27 +170,63 @@ func runReport(cmd *cobra.Command, args []string) error {
 	}
 	printStatuses(statuses)
 
-	// Process completions as they arrive
+	// Process completions and progress as they arrive
 	completed := make(chan runner.RunSummary, len(tasks))
+	progress := make(chan runner.RunProgress, 64)
 	var succeeded, failed int
 	var results []runner.RunSummary
+	var statusMu sync.Mutex
 
 	ctx, stop := cmdContext()
 	defer stop()
 	go func() {
-		runner.RunPool(ctx, cr, tasks, maxParallel, nil, completed)
+		runner.RunPool(ctx, cr, tasks, maxParallel, progress, completed)
+		close(progress)
 	}()
 
 	agentName := cr.Agent.Name()
 
+	// Consume progress events to update in-flight status lines.
+	// Rate-limit terminal redraws to avoid excessive output with many parallel roles.
+	go func() {
+		var lastRedraw time.Time
+		for p := range progress {
+			idx, ok := roleIndex[p.RoleID]
+			if !ok {
+				continue
+			}
+			elapsed := runner.FormatDuration(p.Elapsed)
+			statusMu.Lock()
+			switch p.Phase {
+			case runner.PhaseInit:
+				statuses[idx] = fmt.Sprintf("  %-25s running  %s", p.RoleID, elapsed)
+			case runner.PhaseTool:
+				statuses[idx] = fmt.Sprintf("  %-25s running  %d calls  %s  %s", p.RoleID, p.ToolCount, elapsed, p.ToolName)
+			default:
+				statuses[idx] = fmt.Sprintf("  %-25s running  %d calls  %s", p.RoleID, p.ToolCount, elapsed)
+			}
+			if time.Since(lastRedraw) >= 500*time.Millisecond {
+				reprintStatuses(statuses)
+				lastRedraw = time.Now()
+			}
+			statusMu.Unlock()
+		}
+		// Final redraw to ensure latest state is shown
+		statusMu.Lock()
+		reprintStatuses(statuses)
+		statusMu.Unlock()
+	}()
+
 	for r := range completed {
 		elapsed := runner.FormatDuration(r.Duration)
 		endedAt := r.EndedAt.Format("15:04:05")
+		tokens := fmtTokens(int64(r.InputTokens + r.OutputTokens + r.CacheReadTokens))
 
+		statusMu.Lock()
 		idx := roleIndex[r.RoleID]
 		if r.Err != nil {
 			logsRef := streamFilePrefix(r.StreamFilePath, cwd)
-			statuses[idx] = fmt.Sprintf("  %-25s ERROR    %s  %s  %s", r.RoleID, endedAt, elapsed, logsRef)
+			statuses[idx] = fmt.Sprintf("  %-25s ERROR    %s  %s  %s  %s", r.RoleID, endedAt, elapsed, tokens, logsRef)
 			failed++
 		} else {
 			reportPath := env.RoleReportPath(r.RoleID)
@@ -197,10 +234,11 @@ func runReport(cmd *cobra.Command, args []string) error {
 			if err := runner.ArchiveFile(reportPath, historyDir, prompts.ReportFile, r.StartedAt); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not archive report for %s: %v\n", r.RoleID, err)
 			}
-			statuses[idx] = fmt.Sprintf("  %-25s done     %s  %s  %s", r.RoleID, endedAt, elapsed, relPath(cwd, reportPath))
+			statuses[idx] = fmt.Sprintf("  %-25s done     %s  %s  %s  %s", r.RoleID, endedAt, elapsed, tokens, relPath(cwd, reportPath))
 			succeeded++
 		}
 		reprintStatuses(statuses)
+		statusMu.Unlock()
 		results = append(results, r)
 	}
 
