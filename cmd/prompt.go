@@ -71,8 +71,8 @@ func runPromptRole() error {
 		return err
 	}
 
-	if !prompts.IsValidRole(promptRole, env.Config.Roles) {
-		return fmt.Errorf("unknown role: %s\nValid roles: %s", promptRole, strings.Join(prompts.AllKnownRoleIDs(env.Config.Roles), ", "))
+	if !prompts.IsValidRole(promptRole, env.Config.Roles, env.ProjectDir, env.OrgDir) {
+		return fmt.Errorf("unknown role: %s\nValid roles: %s", promptRole, strings.Join(prompts.AllKnownRoleIDs(env.Config.Roles, env.ProjectDir, env.OrgDir), ", "))
 	}
 
 	extraPrompt, err := prompts.ResolveOptional(promptExtraPrompt)

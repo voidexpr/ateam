@@ -397,6 +397,26 @@ testing_basic = "on"
 refactor_small = "off"
 ```
 
+### Custom Roles
+
+Create a custom role by adding a directory with a `report_prompt.md` — no config.toml registration needed:
+
+```bash
+mkdir -p .ateam/roles/my_custom_role
+# write your prompt
+vim .ateam/roles/my_custom_role/report_prompt.md
+# run it
+ateam report --roles my_custom_role
+```
+
+Roles are discovered from the union of:
+- Built-in defaults (embedded in the binary)
+- `config.toml` `[roles]` entries
+- `.ateamorg/roles/<NAME>/report_prompt.md` (org-level, shared across projects)
+- `.ateam/roles/<NAME>/report_prompt.md` (project-level)
+
+To include a custom role in `--roles all`, add it to `config.toml` with status `on`. Roles not listed in `config.toml` default to enabled when explicitly named but are excluded from `all`.
+
 ## Prompt Configuration
 
 All prompt files can be customized at the project level (`.ateam/`), organization level (`.ateamorg/`), or rely on built-in defaults.

@@ -106,7 +106,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Roles: if --role provided, those are enabled, rest disabled; otherwise use template defaults
 	var enabledRoles []string
 	if len(initRoles) > 0 {
-		resolved, resolveErr := prompts.ResolveRoleList(initRoles, nil)
+		resolved, resolveErr := prompts.ResolveRoleList(initRoles, nil, "", "")
 		if resolveErr != nil {
 			return resolveErr
 		}

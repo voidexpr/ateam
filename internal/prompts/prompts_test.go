@@ -165,7 +165,7 @@ func TestResolveRoleListAllExpansionUsesAllowlist(t *testing.T) {
 	}
 	// "all" should expand only to roles with status "on" or "enabled", plus
 	// embedded roles not listed in configRoles (which default to enabled).
-	roles, err := ResolveRoleList([]string{"all"}, configRoles)
+	roles, err := ResolveRoleList([]string{"all"}, configRoles, "", "")
 	if err != nil {
 		t.Fatalf("ResolveRoleList: %v", err)
 	}
