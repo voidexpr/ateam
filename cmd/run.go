@@ -85,8 +85,8 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	// Validate role if specified
 	if runRole != "" {
-		if !prompts.IsValidRole(runRole, env.Config.Roles) {
-			return fmt.Errorf("unknown role: %s\nValid roles: %s", runRole, strings.Join(prompts.AllKnownRoleIDs(env.Config.Roles), ", "))
+		if !prompts.IsValidRole(runRole, env.Config.Roles, env.ProjectDir, env.OrgDir) {
+			return fmt.Errorf("unknown role: %s\nValid roles: %s", runRole, strings.Join(prompts.AllKnownRoleIDs(env.Config.Roles, env.ProjectDir, env.OrgDir), ", "))
 		}
 		if err := root.EnsureRoles(env.ProjectDir, []string{runRole}); err != nil {
 			return err

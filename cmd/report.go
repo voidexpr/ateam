@@ -71,7 +71,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 	if len(roles) == 0 {
 		roles = []string{"all"}
 	}
-	roleIDs, err := prompts.ResolveRoleList(roles, env.Config.Roles)
+	roleIDs, err := prompts.ResolveRoleList(roles, env.Config.Roles, env.ProjectDir, env.OrgDir)
 	if err != nil {
 		return err
 	}

@@ -35,8 +35,9 @@ func discoverRoleIDs() []string {
 	return ids
 }
 
-// IsValidRole returns true if id is a built-in role or exists in configRoles.
-func IsValidRole(id string, configRoles map[string]string) bool {
+// IsValidRole returns true if id is a built-in role, exists in configRoles,
+// or has a role directory with a report_prompt.md under projectDir or orgDir.
+func IsValidRole(id string, configRoles map[string]string, projectDir, orgDir string) bool {
 	for _, known := range AllRoleIDs {
 		if known == id {
 			return true
@@ -45,20 +46,27 @@ func IsValidRole(id string, configRoles map[string]string) bool {
 	if _, ok := configRoles[id]; ok {
 		return true
 	}
+	for _, dir := range []string{projectDir, orgDir} {
+		if dir != "" {
+			if _, err := os.Stat(filepath.Join(dir, "roles", id, ReportPromptFile)); err == nil {
+				return true
+			}
+		}
+	}
 	return false
 }
 
 // ResolveRoleList expands "all" and validates role IDs.
 // configRoles provides additional valid role IDs from the project config.
 // When "all" is used and configRoles is non-nil, only enabled roles are returned.
-func ResolveRoleList(ids []string, configRoles map[string]string) ([]string, error) {
-	allKnown := AllKnownRoleIDs(configRoles)
+func ResolveRoleList(ids []string, configRoles map[string]string, projectDir, orgDir string) ([]string, error) {
+	allKnown := AllKnownRoleIDs(configRoles, projectDir, orgDir)
 	var result []string
 	for _, id := range ids {
 		if id == "all" {
 			return enabledRoleIDs(configRoles, allKnown), nil
 		}
-		if !IsValidRole(id, configRoles) {
+		if !IsValidRole(id, configRoles, projectDir, orgDir) {
 			return nil, fmt.Errorf("unknown role: %s\nValid roles: %s", id, strings.Join(allKnown, ", "))
 		}
 		result = append(result, id)
@@ -88,8 +96,10 @@ func enabledRoleIDs(configRoles map[string]string, allKnown []string) []string {
 	return enabled
 }
 
-// AllKnownRoleIDs returns the sorted union of embedded and config-defined role IDs.
-func AllKnownRoleIDs(configRoles map[string]string) []string {
+// AllKnownRoleIDs returns the sorted union of embedded defaults, config-defined,
+// .ateamorg/ org-level, and .ateam/ project-level role IDs.
+// A directory counts as a role if it contains a report_prompt.md.
+func AllKnownRoleIDs(configRoles map[string]string, projectDir, orgDir string) []string {
 	seen := make(map[string]bool, len(AllRoleIDs)+len(configRoles))
 	for _, id := range AllRoleIDs {
 		seen[id] = true
@@ -97,12 +107,28 @@ func AllKnownRoleIDs(configRoles map[string]string) []string {
 	for id := range configRoles {
 		seen[id] = true
 	}
+	scanRolesDir(seen, filepath.Join(projectDir, "roles"))
+	scanRolesDir(seen, filepath.Join(orgDir, "roles"))
 	all := make([]string, 0, len(seen))
 	for id := range seen {
 		all = append(all, id)
 	}
 	sort.Strings(all)
 	return all
+}
+
+func scanRolesDir(seen map[string]bool, rolesDir string) {
+	entries, err := os.ReadDir(rolesDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			if _, err := os.Stat(filepath.Join(rolesDir, e.Name(), ReportPromptFile)); err == nil {
+				seen[e.Name()] = true
+			}
+		}
+	}
 }
 
 // RoleFlagUsage returns a help string listing built-in role IDs for use in flag descriptions.

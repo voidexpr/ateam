@@ -319,5 +319,5 @@ func discoverRoles(pe *ProjectEntry) []string {
 	if err != nil {
 		return prompts.AllRoleIDs
 	}
-	return prompts.AllKnownRoleIDs(cfg.Roles)
+	return prompts.AllKnownRoleIDs(cfg.Roles, pe.ProjectDir, pe.OrgDir)
 }

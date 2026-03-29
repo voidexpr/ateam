@@ -72,7 +72,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(reviewRoles) > 0 {
-		if _, err := prompts.ResolveRoleList(reviewRoles, env.Config.Roles); err != nil {
+		if _, err := prompts.ResolveRoleList(reviewRoles, env.Config.Roles, env.ProjectDir, env.OrgDir); err != nil {
 			return err
 		}
 	}
