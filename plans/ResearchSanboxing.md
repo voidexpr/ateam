@@ -50,22 +50,36 @@ Runs Claude Code in a Docker container with git worktrees as volume mounts to en
 ### D.3 TSK — AI Agent Task Manager and Sandbox (dtormoen)
 
 **Language:** Rust
-**GitHub:** via `awesome-claude-code`
+**GitHub:** [dtormoen/tsk-tsk](https://github.com/dtormoen/tsk-tsk)
 
 A Rust CLI tool that lets you delegate development tasks to AI agents running in sandboxed Docker environments. Multiple agents work in parallel, returning git branches for human review. Positions itself explicitly as a task delegation tool where human review happens at the branch/PR level rather than at individual tool calls.
+
+What makes it relevant for ATeam is that the sandboxing story is more explicit than the original short description implied:
+
+- **Repo copy, not bind mount.** `tsk` copies the repository into a per-task workspace and excludes gitignored files by default. This is a meaningful safety property: secrets and local detritus that are already ignored by git do not get handed to the agent accidentally.
+- **Container image composition is layered.** Each sandbox image is assembled from a base Dockerfile plus stack-specific snippets (Go, Node, Python, etc.), an agent snippet (`claude`, `codex`), and an optional project layer. That makes the environment reproducible while still allowing repo-specific customization.
+- **Network egress is proxied, not open.** Each task container routes traffic through a Squid forward-proxy sidecar. The proxy enforces a domain allowlist, and `tsk` fingerprints proxy config so tasks with different policies get different proxy containers.
+- **Task artifacts are structured.** Each task directory contains `/repo`, `/instructions.md`, and `/output/agent.log`. The log is structured JSON-lines covering both infrastructure phases and processed agent output, which is useful for debugging and postmortems.
+- **Docker and Podman are both supported.** That matters for environments where Docker Desktop is undesirable or unavailable.
+
+This is still a container-first model: once the agent is inside its container, the control plane is coarse-grained. The security boundary is "the copied repo + the container + the proxy policy", not per-tool approval.
 
 **Pros:**
 
 - Rust gives it low overhead and reliability
 - Designed from the ground up for unattended multi-agent work
 - Human review at the output (branch) level is sane for async workflows
+- Better-than-average network story for a Docker wrapper because the proxy is a first-class feature
+- Repo-copy semantics reduce accidental secret exposure compared to naive bind-mount approaches
 
 **Cons:**
 
 - Rust means fewer people can contribute/customize
-- Still Docker-dependent
+- Still Docker/Podman-dependent
+- Domain allowlisting is proxy-based, not kernel-level network isolation
+- Copying the repo is safer, but less convenient than bind mounts for very large repos or workflows that expect live host changes
 
-**Best for:** Unattended batch agent work; fits naturally with ATeam-style orchestration.
+**Best for:** Unattended batch agent work where "safe enough by container + allowlisted network + review the branch later" is the desired operating model.
 
 ### D.4 Dippy (Lily Dayton)
 
@@ -140,6 +154,8 @@ Built on top of OS-level primitives such as Linux bubblewrap and macOS Seatbelt 
 
 Uses Claude Code's `hooks` system (`PreToolUse`, `PostToolUse` lifecycle events) to intercept tool calls with shell scripts. You write a script that receives the tool name and arguments via stdin, and exits 0 (allow), 1 (deny), or 2 (ask) based on your logic.
 
+A useful concrete example from the `awesome-claude-code` list is [`pchalasani/claude-code-tools`](https://github.com/pchalasani/claude-code-tools). Its `safety-hooks` plugin packages a set of opinionated guardrails rather than making every team write hooks from scratch: blocking clearly destructive `rm` patterns, protecting `.env` files, and putting policy around risky git operations such as direct `git add` / `git commit`. That is not sandboxing, but it is a practical "policy layer" on top of a sandbox or container.
+
 **Pros:**
 
 - No external dependencies — pure shell
@@ -152,6 +168,7 @@ Uses Claude Code's `hooks` system (`PreToolUse`, `PostToolUse` lifecycle events)
 - Shell scripting injection risks if you're not careful with quoting
 - Limited expressiveness compared to a full MCP permission server
 - No built-in remote/async approval capability
+- Still policy-only. If the agent escapes the hook path or gains broader execution elsewhere, there is no containment
 
 **Best for:** Project-specific rules in interactive sessions; simple allowlist/denylist enforcement.
 
@@ -161,7 +178,7 @@ Uses Claude Code's `hooks` system (`PreToolUse`, `PostToolUse` lifecycle events)
 |---|---|---|---|---|---|---|
 | claude-code-sandbox | TypeScript | ✓ | ✓✓ | Docker | None | Medium |
 | viwo-cli | Shell | — | ✓✓ | Docker+worktree | None | Low |
-| TSK | Rust | — | ✓✓ | Docker | None | Medium |
+| TSK | Rust | — | ✓✓ | Docker | Partial | Medium |
 | Dippy | Python | ✓✓ | ✗ | None | None | Low |
 | permission-prompt-tool | TypeScript/MCP | ✓ | ✓✓ | None | ✓✓ | High |
 | Anthropic Sandbox runtime | C/Rust | ✓ | ✓✓ | OS-level | None | High |
@@ -173,7 +190,7 @@ Given unattended background agents with budget controls and audit needs, the mos
 
 **`permission-prompt-tool`** MCP server for fine-grained audit logging and budget enforcement at the tool call level, combined with either **Anthropic's sandbox runtime** or docker-based isolation (**viwo-cli/TSK**) for actual containment. The permission-prompt-tool's `updatedInput` capability is particularly interesting for implementing tool input sanitization before execution.
 
-The **hooks system** is worth layering on top for project-specific blocking rules that you want committed to the repo itself.
+The **hooks system** is worth layering on top for project-specific blocking rules that you want committed to the repo itself. `claude-code-tools` is a good reference point for what a reusable hook pack can look like in practice.
 
 ---
 
@@ -376,7 +393,53 @@ A community-built wrapper that predates Anthropic's official sandbox integration
 
 **Best fit**: macOS development where filesystem read-denial is the priority and network isn't a concern (Tier 1: full network + tight filesystem).
 
-### E.4 cco (Claude Condom)
+### E.4 kohkimakimoto/claude-sandbox
+
+**GitHub:** [kohkimakimoto/claude-sandbox](https://github.com/kohkimakimoto/claude-sandbox)
+**Language:** Go
+**Platform:** macOS only (sandbox-exec / Seatbelt)
+
+A newer macOS wrapper around `claude` that takes a narrower, more operationally pragmatic stance than Anthropic's built-in sandbox: constrain writes predictably, keep reads mostly open, and provide an explicit escape hatch for tools that cannot run in a nested macOS sandbox.
+
+**How it works:**
+
+- `claude-sandbox` is a drop-in replacement for `claude`. You can run `claude-sandbox --dangerously-skip-permissions` and get Seatbelt-enforced write confinement around that session.
+- Configuration is TOML-based with **three scopes**: user (`~/.claude/sandbox.toml`), project (`.claude/sandbox.toml`), and local overrides (`.claude/sandbox.local.toml`).
+- The default profile is intentionally simple: **deny file writes globally**, then allow writes to the working directory, `~/.claude`, and `/tmp`.
+- The tool exposes useful introspection commands: `claude-sandbox profile` shows the generated Seatbelt profile and `claude-sandbox config` shows the merged effective config.
+
+**Sandbox-external execution (`unboxexec`):**
+
+This is the most distinctive feature. Some tools, especially browser automation stacks like Playwright, do not work cleanly inside nested macOS sandboxes. `claude-sandbox` solves that by starting an internal daemon outside the sandbox and exposing `claude-sandbox unboxexec` inside the sandbox:
+
+- Claude invokes `claude-sandbox unboxexec -- <command> ...`
+- The request goes over a Unix domain socket to the daemon
+- The daemon runs the command **outside** the sandbox only if it matches an allowlisted regex in `[unboxexec].allowed_commands`
+
+This is a deliberate escape hatch, not a bug. It makes the wrapper more usable for real development tasks, but it also means the safety posture depends heavily on how tight the `allowed_commands` patterns are.
+
+**Security profile:**
+
+- **Write isolation:** good and predictable on macOS
+- **Read isolation:** weak by default compared to `neko-kai`; this tool is about write restriction, not hiding the home directory
+- **Network isolation:** none
+- **Escape hatch:** explicit and configurable via `unboxexec`, which is both the main feature and the main caveat
+
+**Assessment for ATeam:**
+
+| Dimension | Rating | Notes |
+|---|---|---|
+| Filesystem isolation | Good | Strong write restriction; read access remains comparatively broad. |
+| Network control | None | No network restrictions. |
+| Tool compatibility | Very good | `unboxexec` exists specifically to make hard-to-sandbox tools workable. |
+| `~/.claude` access | Built-in | Default profile explicitly allows it. |
+| Remote access | N/A | No built-in remote story. |
+| Overhead | Low | Seatbelt wrapper, no VM or container startup. |
+| Platform | macOS only | Not useful for Linux-based agent fleets. |
+
+**Best fit**: macOS users who want a predictable write-constrained wrapper with per-project config and occasional explicitly-approved escapes for incompatible tools.
+
+### E.5 cco (Claude Condom)
 
 **GitHub:** [nikvdp/cco](https://github.com/nikvdp/cco)
 **Language:** Bash
@@ -394,7 +457,7 @@ A thin wrapper that auto-selects the best available sandbox backend. The value p
 
 **Assessment**: useful as a reference for how to detect and compose sandbox backends. For ATeam, the auto-detection pattern is worth adopting — the same agent code should work whether the host is macOS (Seatbelt) or Linux (bubblewrap) or CI (Docker).
 
-### E.5 ClaudeCage
+### E.6 ClaudeCage
 
 **GitHub:** [PACHAKUTlQ/ClaudeCage](https://github.com/PACHAKUTlQ/ClaudeCage)
 **Language:** Bash (build script)
@@ -412,7 +475,7 @@ A single portable executable (no dependencies) that packages Claude Code inside 
 
 **Assessment**: Linux-only, but the drop-in pattern is worth considering for Docker-based agents.
 
-### E.6 scode (Seatbelt for AI Coding)
+### E.7 scode (Seatbelt for AI Coding)
 
 **GitHub:** scode by Laurent Bindschaedler (MPI-SWS)
 **Language:** Bash (single script)
@@ -431,9 +494,32 @@ An opinionated wrapper that blocks 35+ credential and personal file paths out of
 
 **Assessment**: described as "a seatbelt, not an armored vehicle" — catches the common case of an agent wandering into personal files, not a determined attacker. Good for interactive use; for unattended agents with remote access, needs to be combined with stronger isolation.
 
-### E.7 Docker-Based Approaches
+### E.8 Docker-Based Approaches
 
 Docker remains the strongest isolation option. The existing research in §D.1–D.3 covers textcortex/claude-code-sandbox, viwo-cli, and TSK. Key additions:
+
+**run-claude-docker (icanhasjonas):**
+
+[icanhasjonas/run-claude-docker](https://github.com/icanhasjonas/run-claude-docker) is a single-file Docker runner that bundles the Dockerfile, runtime wrapper, and MCP server setup into one script. From a safety perspective, the useful details are:
+
+- It mounts the workspace plus `~/.claude`, and mounts `~/.ssh` / `~/.gitconfig` read-only.
+- It supports a persistent container that is reused across runs, which is convenient but means state accumulates unless you deliberately recreate or remove it.
+- It offers a `--safe` mode, but its default operating mode is intentionally YOLO: `--dangerously-skip-permissions`, auth forwarding, and a privileged container.
+
+This makes it a good example of a **developer-convenience sandbox** rather than a high-assurance one. It is safer than running directly on the host, but weaker than a minimal-purpose container design because it forwards more of the developer environment into the sandbox and keeps state warm by default.
+
+**Container Use (dagger):**
+
+[dagger/container-use](https://github.com/dagger/container-use) is not primarily a permission system, but it is highly relevant as a **container management pattern** for safe execution. It gives each agent a fresh container and git branch, exposes complete command logs, and lets a human drop directly into the agent terminal when needed.
+
+For the current ATeam question, the important part is not the MCP orchestration layer but the execution model:
+
+- fresh container per agent
+- branch-per-agent review flow
+- direct observability into what commands actually ran
+- interactive takeover when an agent gets stuck
+
+That makes it a strong reference for **inspectable containerized sessions**, especially if ATeam later wants a human to be able to attach to a running sandbox rather than only waiting for the final result.
 
 **Apple Container (macOS Tahoe / macOS 26+):**
 
@@ -478,12 +564,13 @@ The community is already converging on devcontainers as the standard way to sand
 
 **Recommendation:** Adopt devcontainers as ATeam's primary Docker strategy. For projects that ship a devcontainer.json, use it as-is. For projects without one, ATeam generates a minimal devcontainer.json with the detected language features. Raw Docker remains available as a fallback for advanced use cases (custom networking, multi-container services). The abstraction should be: `devcontainer exec` is the default, `docker run` is the escape hatch.
 
-### E.8 Comparison Across Dimensions
+### E.9 Comparison Across Dimensions
 
 | Approach | Filesystem R | Filesystem W | Network | Tools Work | `~/.claude` | Remote Access | Overhead | Platform |
 |---|---|---|---|---|---|---|---|---|
 | **Anthropic SRT** | Allow all, deny list | CWD only, allow list | Domain proxy | Most | Auto | None | Minimal | macOS, Linux |
 | **neko-kai** | Deny ~, allow project | Project + tmp | None | Most | Explicit | None | Zero | macOS only |
+| **claude-sandbox (kohkimakimoto)** | Broad reads | Workdir + `~/.claude` + `/tmp` | None | Very good | Built-in | None | Low | macOS only |
 | **cco** | Configurable | Configurable | Depends on backend | Most | Handled | None | Near-zero | macOS, Linux |
 | **ClaudeCage** | Deny ~, allow project | Project | Linux ns | Most | Packaged | None | Minimal | Linux only |
 | **scode** | Block 35+ cred paths | CWD | None | Most | Handled | None | Zero | macOS, Linux |
@@ -492,7 +579,7 @@ The community is already converging on devcontainers as the standard way to sand
 | **Cloudflare Sandbox** | Full isolation | Full isolation | Configurable | All (in container) | API key | Built-in HTTPS | High (remote) | Cloud |
 | **Dev Container** | Mount only | Mount only | Container ns | All (in container) | Mount | Via port/tunnel | Medium | Any |
 
-### E.9 Network Tier Implementation
+### E.10 Network Tier Implementation
 
 How to implement each network tier with available tools:
 
@@ -527,7 +614,7 @@ How to implement each network tier with available tools:
 - In Anthropic SRT: localhost is accessible by default (no domain restriction on loopback).
 - Specific port restriction isn't natively supported by any tool — would need a custom proxy rule.
 
-### E.10 Remote Access Patterns
+### E.11 Remote Access Patterns
 
 Running agents unattended requires a way to check in, give instructions, and review progress without exposing the development machine.
 
@@ -555,7 +642,7 @@ Running agents unattended requires a way to check in, give instructions, and rev
 
 For ATeam, Pattern C is the likely sweet spot: Docker provides strong isolation, a web terminal provides remote access, and the agent's filesystem is limited to bind-mounted volumes.
 
-### E.11 Recommendation for ATeam
+### E.12 Recommendation for ATeam
 
 **Layer the approaches based on trust level:**
 
@@ -563,7 +650,7 @@ For ATeam, Pattern C is the likely sweet spot: Docker provides strong isolation,
 
 2. **Sub-agents in Docker** (untrusted, default): Docker container with bind-mounted project worktree. iptables firewall for network tier. `--dangerously-skip-permissions` inside the container (Docker IS the sandbox). Web terminal or REST API for remote access.
 
-3. **Sub-agents without Docker** (lightweight option): Anthropic Sandbox Runtime with filesystem restricted to the project directory + `~/.claude` + toolchain paths. Network tier via the proxy. For simple projects that don't need databases or services.
+3. **Sub-agents without Docker** (lightweight option): Anthropic Sandbox Runtime with filesystem restricted to the project directory + `~/.claude` + toolchain paths. Network tier via the proxy. For simple projects that don't need databases or services. On macOS, `kohkimakimoto/claude-sandbox` is also a credible lightweight option when the goal is "predictable write restriction with a pragmatic escape hatch," not full network control.
 
 4. **Remote access** for all modes: web terminal (ttyd) exposed via an authenticated tunnel. The agent sees only its sandbox; the remote user sees only the agent's terminal.
 
