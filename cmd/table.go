@@ -177,13 +177,7 @@ func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runne
 }
 
 func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runner.Runner {
-	var extraWriteDirs []string
-	if env.OrgDir != "" {
-		extraWriteDirs = append(extraWriteDirs, env.OrgDir)
-	}
-	if env.GitRepoDir != "" && env.GitRepoDir != env.SourceDir && strings.HasPrefix(env.SourceDir, env.GitRepoDir+string(filepath.Separator)) {
-		extraWriteDirs = append(extraWriteDirs, env.GitRepoDir)
-	}
+	extraWriteDirs := gitWriteDirs(env.SourceDir)
 	return &runner.Runner{
 		Agent:           buildAgent(ac),
 		LogFile:         env.RunnerLogPath(),
@@ -489,6 +483,30 @@ func crossBuildIfPossible(hostExe, orgDir string) string {
 		return ""
 	}
 	return target
+}
+
+// gitWriteDirs returns the .git directories that need sandbox write access
+// for git operations. In a worktree, this includes both the worktree's
+// .git dir and the main repo's common git dir.
+func gitWriteDirs(sourceDir string) []string {
+	gitDir := execGitCmd(sourceDir, "rev-parse", "--git-dir")
+	if gitDir == "" {
+		return nil
+	}
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(sourceDir, gitDir)
+	}
+	dirs := []string{gitDir}
+	commonDir := execGitCmd(sourceDir, "rev-parse", "--git-common-dir")
+	if commonDir != "" {
+		if !filepath.IsAbs(commonDir) {
+			commonDir = filepath.Join(sourceDir, commonDir)
+		}
+		if commonDir != gitDir {
+			dirs = append(dirs, commonDir)
+		}
+	}
+	return dirs
 }
 
 func addProfileFlags(cmd *cobra.Command, profileDst, agentDst *string) {

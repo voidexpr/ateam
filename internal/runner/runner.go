@@ -23,6 +23,7 @@ const (
 	ActionRun    = "run"
 	ActionCode   = "code"
 	ActionReview = "review"
+	ActionDebug  = "debug"
 )
 
 // Runner orchestrates agent execution with logging, file I/O, and progress reporting.
@@ -438,6 +439,21 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	return summary
 }
 
+// RenderSettings generates the merged sandbox settings JSON without writing to disk.
+// workDir is the effective working directory (e.g. SourceDir).
+func (r *Runner) RenderSettings(workDir string) ([]byte, error) {
+	if r.SandboxSettings == "" {
+		return nil, nil
+	}
+	var settings map[string]any
+	if err := json.Unmarshal([]byte(r.SandboxSettings), &settings); err != nil {
+		return nil, fmt.Errorf("cannot parse sandbox settings: %w", err)
+	}
+
+	r.mergeSandboxPaths(settings, workDir, nil)
+	return json.MarshalIndent(settings, "", "  ")
+}
+
 // writeSettings parses the inline sandbox settings JSON from the agent config,
 // merges in runtime paths, and writes the result to settingsPath.
 func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error) {
@@ -446,25 +462,7 @@ func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error
 		return nil, fmt.Errorf("cannot parse sandbox settings: %w", err)
 	}
 
-	workDir := effectiveWorkDir(opts)
-
-	runtimeWriteDirs := []string{workDir, r.ProjectDir}
-	if r.OrgDir != "" {
-		runtimeWriteDirs = append(runtimeWriteDirs, r.OrgDir)
-	}
-	runtimeWriteDirs = append(runtimeWriteDirs, r.ExtraWriteDirs...)
-	runtimeWriteDirs = append(runtimeWriteDirs, r.SandboxRWPaths...)
-	runtimeAdditionalDirs := append([]string{r.ProjectDir}, r.ExtraWriteDirs...)
-	if r.OrgDir != "" {
-		runtimeAdditionalDirs = append(runtimeAdditionalDirs, r.OrgDir)
-	}
-	runtimeAdditionalDirs = append(runtimeAdditionalDirs, r.SandboxROPaths...)
-
-	mergeStringList(settings, []string{"sandbox", "filesystem", "allowWrite"}, runtimeWriteDirs)
-	denyPaths := []string{settingsPath}
-	denyPaths = append(denyPaths, r.SandboxDenied...)
-	mergeStringList(settings, []string{"sandbox", "filesystem", "denyWrite"}, denyPaths)
-	mergeStringList(settings, []string{"permissions", "additionalDirectories"}, runtimeAdditionalDirs)
+	r.mergeSandboxPaths(settings, effectiveWorkDir(opts), []string{settingsPath})
 
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
@@ -475,6 +473,37 @@ func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error
 		return nil, err
 	}
 	return data, nil
+}
+
+// mergeSandboxPaths merges runtime-discovered paths into the parsed settings JSON.
+// extraDenyWrite contains paths to deny (e.g. the settings file itself).
+func (r *Runner) mergeSandboxPaths(settings map[string]any, workDir string, extraDenyWrite []string) {
+	// Write access: workDir (project root), .git dirs, agent rw_paths
+	runtimeWriteDirs := []string{workDir}
+	runtimeWriteDirs = append(runtimeWriteDirs, r.ExtraWriteDirs...)
+	runtimeWriteDirs = append(runtimeWriteDirs, r.SandboxRWPaths...)
+
+	// Read access: .ateamorg/
+	var runtimeReadDirs []string
+	if r.OrgDir != "" {
+		runtimeReadDirs = append(runtimeReadDirs, r.OrgDir)
+	}
+
+	// Tool access (additionalDirectories): project root, .ateamorg/, agent ro_paths
+	runtimeAdditionalDirs := []string{workDir}
+	if r.OrgDir != "" {
+		runtimeAdditionalDirs = append(runtimeAdditionalDirs, r.OrgDir)
+	}
+	runtimeAdditionalDirs = append(runtimeAdditionalDirs, r.SandboxROPaths...)
+
+	mergeStringList(settings, []string{"sandbox", "filesystem", "allowWrite"}, runtimeWriteDirs)
+	mergeStringList(settings, []string{"sandbox", "filesystem", "allowRead"}, runtimeReadDirs)
+	denyPaths := append([]string{}, extraDenyWrite...)
+	denyPaths = append(denyPaths, r.SandboxDenied...)
+	if len(denyPaths) > 0 {
+		mergeStringList(settings, []string{"sandbox", "filesystem", "denyWrite"}, denyPaths)
+	}
+	mergeStringList(settings, []string{"permissions", "additionalDirectories"}, runtimeAdditionalDirs)
 }
 
 func mergeStringList(obj map[string]any, keyPath []string, values []string) {
