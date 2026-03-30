@@ -37,8 +37,9 @@ type Config struct {
 	Code       CodeConfig        `toml:"code"`
 	Serve      ServeConfig       `toml:"serve"`
 	Roles      map[string]string `toml:"roles"`
-	Supervisor SupervisorConfig  `toml:"supervisor"`
-	Profiles   ProfilesConfig    `toml:"profiles"`
+	Supervisor   SupervisorConfig  `toml:"supervisor"`
+	Profiles     ProfilesConfig    `toml:"profiles"`
+	SandboxExtra SandboxExtraConfig `toml:"sandbox-extra"`
 }
 
 type ServeConfig struct {
@@ -60,6 +61,12 @@ type SupervisorConfig struct {
 
 type ProfilesConfig struct {
 	Roles map[string]string `toml:"roles"` // role -> profile name
+}
+
+type SandboxExtraConfig struct {
+	AllowWrite   []string `toml:"allow_write"`
+	AllowRead    []string `toml:"allow_read"`
+	AllowDomains []string `toml:"allow_domains"`
 }
 
 type GitConfig struct {
