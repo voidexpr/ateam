@@ -39,9 +39,10 @@ type Runner struct {
 	SandboxRWPaths      []string            // from agent config rw_paths
 	SandboxROPaths      []string            // from agent config ro_paths
 	SandboxDenied       []string            // from agent config denied_paths
-	SandboxExtraWrite   []string            // from config.toml [sandbox-extra]
-	SandboxExtraRead    []string            // from config.toml [sandbox-extra]
-	SandboxExtraDomains []string            // from config.toml [sandbox-extra]
+	SandboxExtraWrite       []string        // from config.toml [sandbox-extra]
+	SandboxExtraRead        []string        // from config.toml [sandbox-extra]
+	SandboxExtraDomains     []string        // from config.toml [sandbox-extra]
+	SandboxExtraExcludedCmd []string        // from config.toml [sandbox-extra]
 	ConfigDir           string              // CLAUDE_CONFIG_DIR; relative resolves from ProjectDir
 	CallDB          *calldb.CallDB      // nil = no DB tracking
 	Profile         string              // profile name for DB
@@ -509,6 +510,9 @@ func (r *Runner) mergeSandboxPaths(settings map[string]any, workDir string, extr
 	mergeStringList(settings, []string{"permissions", "additionalDirectories"}, runtimeAdditionalDirs)
 	if len(r.SandboxExtraDomains) > 0 {
 		mergeStringList(settings, []string{"sandbox", "network", "allowedDomains"}, r.SandboxExtraDomains)
+	}
+	if len(r.SandboxExtraExcludedCmd) > 0 {
+		mergeStringList(settings, []string{"sandbox", "excludedCommands"}, r.SandboxExtraExcludedCmd)
 	}
 }
 
