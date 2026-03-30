@@ -35,11 +35,14 @@ type Runner struct {
 	OrgDir          string              // .ateamorg/ dir
 	ExtraWriteDirs  []string            // additional dirs granted sandbox write access
 	ExtraArgs       []string            // extra args passed to the agent
-	SandboxSettings string              // inline JSON settings template (from runtime.hcl sandbox attribute)
-	SandboxRWPaths  []string            // from agent config rw_paths
-	SandboxROPaths  []string            // from agent config ro_paths
-	SandboxDenied   []string            // from agent config denied_paths
-	ConfigDir       string              // sets CLAUDE_CONFIG_DIR; relative paths resolve from ProjectDir, absolute used as-is
+	SandboxSettings     string              // inline JSON settings template (from runtime.hcl)
+	SandboxRWPaths      []string            // from agent config rw_paths
+	SandboxROPaths      []string            // from agent config ro_paths
+	SandboxDenied       []string            // from agent config denied_paths
+	SandboxExtraWrite   []string            // from config.toml [sandbox-extra]
+	SandboxExtraRead    []string            // from config.toml [sandbox-extra]
+	SandboxExtraDomains []string            // from config.toml [sandbox-extra]
+	ConfigDir           string              // CLAUDE_CONFIG_DIR; relative resolves from ProjectDir
 	CallDB          *calldb.CallDB      // nil = no DB tracking
 	Profile         string              // profile name for DB
 	ContainerType   string              // "none" or "docker" for DB
@@ -478,18 +481,18 @@ func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error
 // mergeSandboxPaths merges runtime-discovered paths into the parsed settings JSON.
 // extraDenyWrite contains paths to deny (e.g. the settings file itself).
 func (r *Runner) mergeSandboxPaths(settings map[string]any, workDir string, extraDenyWrite []string) {
-	// Write access: workDir (project root), .git dirs, agent rw_paths
 	runtimeWriteDirs := []string{workDir}
 	runtimeWriteDirs = append(runtimeWriteDirs, r.ExtraWriteDirs...)
 	runtimeWriteDirs = append(runtimeWriteDirs, r.SandboxRWPaths...)
+	runtimeWriteDirs = append(runtimeWriteDirs, r.SandboxExtraWrite...)
 
-	// Read access: .ateamorg/
 	var runtimeReadDirs []string
 	if r.OrgDir != "" {
 		runtimeReadDirs = append(runtimeReadDirs, r.OrgDir)
 	}
+	runtimeReadDirs = append(runtimeReadDirs, r.SandboxExtraRead...)
 
-	// Tool access (additionalDirectories): project root, .ateamorg/, agent ro_paths
+	// additionalDirectories: project root, .ateamorg/, agent ro_paths
 	runtimeAdditionalDirs := []string{workDir}
 	if r.OrgDir != "" {
 		runtimeAdditionalDirs = append(runtimeAdditionalDirs, r.OrgDir)
@@ -504,6 +507,9 @@ func (r *Runner) mergeSandboxPaths(settings map[string]any, workDir string, extr
 		mergeStringList(settings, []string{"sandbox", "filesystem", "denyWrite"}, denyPaths)
 	}
 	mergeStringList(settings, []string{"permissions", "additionalDirectories"}, runtimeAdditionalDirs)
+	if len(r.SandboxExtraDomains) > 0 {
+		mergeStringList(settings, []string{"sandbox", "network", "allowedDomains"}, r.SandboxExtraDomains)
+	}
 }
 
 func mergeStringList(obj map[string]any, keyPath []string, values []string) {

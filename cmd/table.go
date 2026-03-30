@@ -178,7 +178,7 @@ func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runne
 
 func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runner.Runner {
 	extraWriteDirs := gitWriteDirs(env.SourceDir)
-	return &runner.Runner{
+	r := &runner.Runner{
 		Agent:           buildAgent(ac),
 		LogFile:         env.RunnerLogPath(),
 		ProjectDir:      env.ProjectDir,
@@ -190,6 +190,12 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 		SandboxDenied:   ac.DeniedPaths,
 		ConfigDir:       ac.ConfigDir,
 	}
+	if env.Config != nil {
+		r.SandboxExtraWrite = env.Config.SandboxExtra.AllowWrite
+		r.SandboxExtraRead = env.Config.SandboxExtra.AllowRead
+		r.SandboxExtraDomains = env.Config.SandboxExtra.AllowDomains
+	}
+	return r
 }
 
 // newRunnerDefault creates a Runner using the default profile.
