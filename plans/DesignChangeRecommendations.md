@@ -1,6 +1,6 @@
 # ATeam Design — Change Recommendations
 
-Based on Research.md sections C (Agent Control) and D (Permission Management), and the question of where Anthropic's Sandbox runtime fits.
+Based on [ResearchAgentControl.md](./ResearchAgentControl.md) and [ResearchSanboxing.md](./ResearchSanboxing.md), and the question of where Anthropic's Sandbox runtime fits.
 
 ---
 
