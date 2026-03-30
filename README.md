@@ -137,7 +137,9 @@ Enable/disable roles in `.ateam/config.toml` or let `ateam auto-setup` configure
 
 ### Creating Custom Roles
 
-Create `roles/NAME/report_prompt.md` (in `.ateam/` or `.ateamorg/`) and enable it in `config.toml`. Ideas:
+Create `roles/YOUR_NEW_ROLE_NAME/report_prompt.md` (in `.ateam/` or `.ateamorg/`), you can then run a report with `ateam report --roles YOUR_NEW_ROLE_NAME`. If you want to have it run by default enable it in `config.toml`.
+
+Ideas:
 - GDPR/PII reviewer
 - Cloud deployment safety
 - Observability enhancer
@@ -145,6 +147,7 @@ Create `roles/NAME/report_prompt.md` (in `.ateam/` or `.ateamorg/`) and enable i
 - Language expert
 - Performance regression detector
 - Black-box testing agent that reads feature specs and generates (potentially) failing tests, without permission to modify the source code
+- Pure maintainer: only track CVE, OS and major stack component compatibility without changing anything in the code except to support dependency upgrades
 
 There is a very long list of potentially very useful roles to add.
 
