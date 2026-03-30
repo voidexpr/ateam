@@ -3,13 +3,16 @@ BINARY = ateam
 .PHONY: build companion clean tidy test test-docker test-docker-live vuln
 
 BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
+GIT_COMMIT := $(shell git describe --always --dirty 2>/dev/null || echo unknown)
+LDFLAGS := -X github.com/ateam/cmd.BuildTime=$(BUILD_TIME) -X github.com/ateam/cmd.Version=$(VERSION) -X github.com/ateam/cmd.GitCommit=$(GIT_COMMIT)
 
 build: tidy
-	go build -ldflags "-X github.com/ateam/cmd.BuildTime=$(BUILD_TIME)" -o $(BINARY) .
+	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
 
 companion:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
-		-ldflags "-X github.com/ateam/cmd.BuildTime=$(BUILD_TIME)" \
+		-ldflags "$(LDFLAGS)" \
 		-o ateam-linux-amd64 .
 
 tidy:
