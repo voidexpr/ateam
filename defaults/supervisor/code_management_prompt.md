@@ -58,7 +58,8 @@ The goals are:
 2. Initialize `execution_report.md` in it (see format below)
 3. Run `ateam roles` to discover available roles
 4. make sure you have the latest code: `git fetch --all && git rebase`
-5. review recent commits
+5. make sure there are no git dirty files (untracked files are fine), if there are any abort with a clear error message
+6. review recent commits
 
 ### Phase 2: Task Planning
 
@@ -88,7 +89,7 @@ Execute tasks one at a time, in sequence order. For each task:
    ```
 3. **Post-check**: Verify code still builds and tests pass
 4. **Record**: Update `execution_report.md` with the outcome, only append to it during this phase
-5. **Commit** (if successful): `git commit` with message format `[ateam: ROLE] short description`
+5. **Verify git commit**: the coding agent is supposed to commit its own changes so if the git working tree has tracked files that are modified and not committed it means git commit is likely broken so abort with a clear error message
 6. **On failure**: See Error Handling. Clean up, then continue to the next task.
 
 ### Phase 4: Finalize
