@@ -15,6 +15,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var envClaudeSandbox bool
+
 var envCmd = &cobra.Command{
 	Use:   "env",
 	Short: "Show the current ATeam environment",
@@ -25,6 +27,10 @@ This command is read-only — it never creates or modifies anything.`,
 	RunE: runEnv,
 }
 
+func init() {
+	envCmd.Flags().BoolVar(&envClaudeSandbox, "claude-sandbox", false, "print the generated Claude sandbox settings JSON")
+}
+
 func runEnv(cmd *cobra.Command, args []string) error {
 	env, err := root.Lookup()
 	if err != nil {
@@ -32,7 +38,28 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	if envClaudeSandbox {
+		return printClaudeSandbox(env)
+	}
+
 	return printEnv(env)
+}
+
+func printClaudeSandbox(env *root.ResolvedEnv) error {
+	r, err := newRunnerDefault(env)
+	if err != nil {
+		return err
+	}
+	data, err := r.RenderSettings(env.SourceDir)
+	if err != nil {
+		return err
+	}
+	if data == nil {
+		fmt.Println("No sandbox settings configured for the default profile.")
+		return nil
+	}
+	fmt.Println(string(data))
+	return nil
 }
 
 func printEnv(env *root.ResolvedEnv) error {
