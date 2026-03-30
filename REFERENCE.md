@@ -442,6 +442,7 @@ refactor_small = "off"
 # allow_write = ["/path/to/extra/writable/dir"]
 # allow_read = ["/path/to/extra/readable/dir"]
 # allow_domains = ["api.example.com"]
+# unsandboxed_commands = ["make:*"]
 ```
 
 ### `[sandbox-extra]`
@@ -453,6 +454,7 @@ Grant additional sandbox permissions to agents running in this project. These pa
 | `allow_write` | Additional filesystem paths the agent can write to. Added to `sandbox.filesystem.allowWrite`. |
 | `allow_read` | Additional filesystem paths the agent can read. Added to `sandbox.filesystem.allowRead`. |
 | `allow_domains` | Additional network domains the agent can reach. Added to `sandbox.network.allowedDomains`. |
+| `unsandboxed_commands` | Commands that bypass the sandbox entirely. Added to `sandbox.excludedCommands`. Use `name:*` for all subcommands (e.g. `make:*`, `docker:*`). |
 
 All paths are absolute. Use `ateam env --claude-sandbox` to inspect the final merged sandbox settings.
 
@@ -461,6 +463,7 @@ All paths are absolute. Use `ateam env --claude-sandbox` to inspect the final me
 allow_write = ["/data/output", "/tmp/scratch"]
 allow_read = ["/opt/shared-tools"]
 allow_domains = ["api.internal.example.com", "registry.npmjs.org"]
+unsandboxed_commands = ["make:*", "docker:build"]
 ```
 
 ### Custom Roles

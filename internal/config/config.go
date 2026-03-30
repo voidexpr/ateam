@@ -64,9 +64,10 @@ type ProfilesConfig struct {
 }
 
 type SandboxExtraConfig struct {
-	AllowWrite   []string `toml:"allow_write"`
-	AllowRead    []string `toml:"allow_read"`
-	AllowDomains []string `toml:"allow_domains"`
+	AllowWrite          []string `toml:"allow_write"`
+	AllowRead           []string `toml:"allow_read"`
+	AllowDomains        []string `toml:"allow_domains"`
+	UnsandboxedCommands []string `toml:"unsandboxed_commands"`
 }
 
 type GitConfig struct {

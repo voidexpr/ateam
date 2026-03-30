@@ -194,6 +194,7 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 		r.SandboxExtraWrite = env.Config.SandboxExtra.AllowWrite
 		r.SandboxExtraRead = env.Config.SandboxExtra.AllowRead
 		r.SandboxExtraDomains = env.Config.SandboxExtra.AllowDomains
+		r.SandboxExtraExcludedCmd = env.Config.SandboxExtra.UnsandboxedCommands
 	}
 	return r
 }
