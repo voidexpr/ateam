@@ -18,11 +18,11 @@ const (
 
 // ResolvedEnv holds all resolved paths for the org + project environment.
 type ResolvedEnv struct {
-	OrgDir      string         // absolute path to .ateamorg/ (empty in org-less mode)
-	ProjectDir  string         // absolute path to .ateam/
-	ProjectName string         // from config.toml
-	SourceDir   string         // absolute path to project root (parent of .ateam/)
-	GitRepoDir  string         // resolved from config git.repo
+	OrgDir      string // absolute path to .ateamorg/ (empty in org-less mode)
+	ProjectDir  string // absolute path to .ateam/
+	ProjectName string // from config.toml
+	SourceDir   string // absolute path to project root (parent of .ateam/)
+	GitRepoDir  string // resolved from config git.repo
 	Config      *config.Config
 }
 
@@ -212,11 +212,11 @@ func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
 	return env, nil
 }
 
-// Lookup discovers org and project without creating anything.
+// LookupFrom discovers org and project from the given starting path without creating anything.
 // Returns partial ResolvedEnv if project is not found.
 // Works in org-less mode: if no .ateamorg/ but .ateam/ exists, OrgDir is "".
-func Lookup() (*ResolvedEnv, error) {
-	cwd := realPath(mustGetwd())
+func LookupFrom(start string) (*ResolvedEnv, error) {
+	cwd := realPath(start)
 
 	orgDir, _ := FindOrg(cwd)
 
@@ -251,6 +251,11 @@ func Lookup() (*ResolvedEnv, error) {
 	env.populateFromConfig(projectDir, cfg)
 
 	return env, nil
+}
+
+// Lookup discovers org and project from the current working directory without creating anything.
+func Lookup() (*ResolvedEnv, error) {
+	return LookupFrom(mustGetwd())
 }
 
 // ProjectInfo holds metadata about a discovered project.
