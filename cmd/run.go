@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/prompts"
@@ -165,12 +166,15 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	opts.PromptName = "run_prompt.md"
+	ts := time.Now().Format(runner.TimestampFormat)
 	if runRole != "" {
 		roleDir := filepath.Join(env.ProjectDir, "roles", runRole)
-		opts.LastMessageFilePath = filepath.Join(roleDir, "last_run_output.md")
-		opts.ErrorMessageFilePath = filepath.Join(roleDir, "last_run_error.md")
+		opts.LastMessageFilePath = filepath.Join(roleDir, "history", ts+".run_output.md")
+		opts.ErrorMessageFilePath = filepath.Join(roleDir, "history", ts+".run_error.md")
 		opts.HistoryDir = env.RoleHistoryDir(runRole)
 	} else {
+		opts.LastMessageFilePath = filepath.Join(logsDir, ts+"_run_output.md")
+		opts.ErrorMessageFilePath = filepath.Join(logsDir, ts+"_run_error.md")
 		opts.HistoryDir = logsDir
 	}
 
