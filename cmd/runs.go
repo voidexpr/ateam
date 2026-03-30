@@ -66,15 +66,17 @@ func runRuns(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	printRunsTable(rows)
+	return nil
+}
+
+func printRunsTable(rows []calldb.RecentRow) {
 	w := newTable()
 	fmt.Fprintln(w, "ID\tSTARTED\tPROFILE\tACTION\tROLE\tMODEL\tDURATION\tCOST\tTOKENS\tSTATUS\tTASK_GROUP")
 	for _, r := range rows {
 		status := runStatus(r)
 
-		started := r.StartedAt
-		if t, err := time.Parse(time.RFC3339, r.StartedAt); err == nil {
-			started = t.Format(runner.TimestampFormat)
-		}
+		started := fmtStartedAt(r.StartedAt)
 
 		dur := ""
 		if r.DurationMS > 0 {
@@ -96,8 +98,6 @@ func runRuns(cmd *cobra.Command, args []string) error {
 			dur, fmtCost(r.CostUSD), tokens, status, r.TaskGroup)
 	}
 	w.Flush()
-
-	return nil
 }
 
 func runStatus(r calldb.RecentRow) string {
@@ -114,6 +114,13 @@ func runStatus(r calldb.RecentRow) string {
 		return fmt.Sprintf("running (%d)", r.PID)
 	}
 	return "canceled"
+}
+
+func fmtStartedAt(s string) string {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t.Format(runner.TimestampFormat)
+	}
+	return s
 }
 
 func fmtTokens(n int64) string {

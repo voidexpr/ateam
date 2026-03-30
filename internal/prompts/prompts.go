@@ -25,6 +25,7 @@ const (
 	CodeManagementPromptFile        = "code_management_prompt.md"
 	CodeManagementExtraPromptFile   = "code_management_extra_prompt.md"
 	AutoSetupPromptFile             = "auto_setup_prompt.md"
+	TaskDebugPromptFile             = "task_debug_prompt.md"
 	ReportFile                      = "report.md"
 	ReportErrorFile                 = "report_error.md"
 	SandboxSettingsFile = "ateam_claude_sandbox_extra_settings.json"
@@ -335,6 +336,29 @@ func AssembleAutoSetupPrompt(orgDir, projectDir string, pinfo ProjectInfoParams)
 		parts = append(parts, info)
 	}
 	parts = append(parts, setupPrompt)
+	return strings.Join(parts, "\n\n---\n\n"), nil
+}
+
+// AssembleTaskDebugPrompt builds the prompt for the ps-files --auto-debug command.
+// debugContext contains the run metadata and file paths to investigate.
+func AssembleTaskDebugPrompt(orgDir, projectDir, debugContext string, pinfo ProjectInfoParams) (string, error) {
+	debugPrompt, err := readWith3LevelFallback(
+		filepath.Join(projectDir, "supervisor", TaskDebugPromptFile),
+		filepath.Join(orgDir, "supervisor", TaskDebugPromptFile),
+		filepath.Join(orgDir, "defaults", "supervisor", TaskDebugPromptFile),
+		"task-debug",
+	)
+	if err != nil {
+		return "", err
+	}
+
+	debugPrompt = strings.ReplaceAll(debugPrompt, "{{TASK_DEBUG_CONTEXT}}", debugContext)
+
+	var parts []string
+	if info := FormatProjectInfo(pinfo); info != "" {
+		parts = append(parts, info)
+	}
+	parts = append(parts, debugPrompt)
 	return strings.Join(parts, "\n\n---\n\n"), nil
 }
 
