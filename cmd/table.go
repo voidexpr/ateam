@@ -179,7 +179,10 @@ func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runne
 func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runner.Runner {
 	var extraWriteDirs []string
 	if env.OrgDir != "" {
-		extraWriteDirs = []string{env.OrgDir}
+		extraWriteDirs = append(extraWriteDirs, env.OrgDir)
+	}
+	if env.GitRepoDir != "" && env.GitRepoDir != env.SourceDir && strings.HasPrefix(env.SourceDir, env.GitRepoDir+string(filepath.Separator)) {
+		extraWriteDirs = append(extraWriteDirs, env.GitRepoDir)
 	}
 	return &runner.Runner{
 		Agent:           buildAgent(ac),
