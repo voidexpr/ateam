@@ -48,4 +48,6 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(secretCmd)
 	rootCmd.AddCommand(autoSetupCmd)
+	rootCmd.AddCommand(psFilesCmd)
+	rootCmd.AddCommand(versionCmd)
 }

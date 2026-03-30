@@ -172,6 +172,10 @@ func DefaultAutoSetupPrompt() string {
 	return readEmbedded("supervisor/auto_setup_prompt.md")
 }
 
+func DefaultTaskDebugPrompt() string {
+	return readEmbedded("supervisor/task_debug_prompt.md")
+}
+
 func DefaultSandboxSettings() string {
 	return readEmbedded(SandboxSettingsFile)
 }
@@ -221,6 +225,10 @@ func embeddedFiles() []embeddedFile {
 	files = append(files, embeddedFile{
 		filepath.Join("defaults", "supervisor", AutoSetupPromptFile),
 		DefaultAutoSetupPrompt(),
+	})
+	files = append(files, embeddedFile{
+		filepath.Join("defaults", "supervisor", TaskDebugPromptFile),
+		DefaultTaskDebugPrompt(),
 	})
 	files = append(files, embeddedFile{
 		filepath.Join("defaults", SandboxSettingsFile),
