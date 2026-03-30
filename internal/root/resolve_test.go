@@ -57,6 +57,22 @@ func TestFindOrg(t *testing.T) {
 			t.Errorf("got %q, want %q", got, orgDir)
 		}
 	})
+
+	t.Run("prefers nearest org from project path", func(t *testing.T) {
+		projectRoot := filepath.Join(tmp, "myproj")
+		localOrgDir := filepath.Join(projectRoot, ".ateamorg")
+		if err := os.MkdirAll(filepath.Join(localOrgDir, "defaults"), 0755); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := FindOrg(projectRoot)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != localOrgDir {
+			t.Errorf("got %q, want %q", got, localOrgDir)
+		}
+	})
 }
 
 func TestFindProject(t *testing.T) {
