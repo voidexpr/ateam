@@ -17,42 +17,42 @@ import (
 )
 
 var (
-	psFilesTaskGroup  string
-	psFilesLastRun    bool
-	psFilesLastReport bool
-	psFilesLastReview bool
-	psFilesLastCode   bool
-	psFilesAutoDebug       bool
-	psFilesAutoDebugPrompt bool
-	psFilesProfile         string
-	psFilesAgent           string
+	inspectTaskGroup  string
+	inspectLastRun    bool
+	inspectLastReport bool
+	inspectLastReview bool
+	inspectLastCode   bool
+	inspectAutoDebug       bool
+	inspectAutoDebugPrompt bool
+	inspectProfile         string
+	inspectAgent           string
 )
 
-var psFilesCmd = &cobra.Command{
-	Use:   "ps-files [ID...]",
+var inspectCmd = &cobra.Command{
+	Use:   "inspect [ID...]",
 	Short: "Show log files for agent runs",
 	Long: `Display the ps summary and log files for one or more runs.
 
 Select runs by ID, task group, or shorthand flags.
 
 Example:
-  ateam ps-files 42
-  ateam ps-files 42 43
-  ateam ps-files --last-run
-  ateam ps-files --last-report
-  ateam ps-files --last-report --auto-debug`,
+  ateam inspect 42
+  ateam inspect 42 43
+  ateam inspect --last-run
+  ateam inspect --last-report
+  ateam inspect --last-report --auto-debug`,
 	RunE: runPsFiles,
 }
 
 func init() {
-	psFilesCmd.Flags().StringVar(&psFilesTaskGroup, "task-group", "", "select all runs in a task group")
-	psFilesCmd.Flags().BoolVar(&psFilesLastRun, "last-run", false, "select the most recent run")
-	psFilesCmd.Flags().BoolVar(&psFilesLastReport, "last-report", false, "select all tasks from the last report batch")
-	psFilesCmd.Flags().BoolVar(&psFilesLastReview, "last-review", false, "select the last review run")
-	psFilesCmd.Flags().BoolVar(&psFilesLastCode, "last-code", false, "select all tasks from the last code session")
-	psFilesCmd.Flags().BoolVar(&psFilesAutoDebug, "auto-debug", false, "launch an agent to investigate the selected runs")
-	psFilesCmd.Flags().BoolVar(&psFilesAutoDebugPrompt, "auto-debug-prompt", false, "print the auto-debug prompt without executing")
-	addProfileFlags(psFilesCmd, &psFilesProfile, &psFilesAgent)
+	inspectCmd.Flags().StringVar(&inspectTaskGroup, "task-group", "", "select all runs in a task group")
+	inspectCmd.Flags().BoolVar(&inspectLastRun, "last-run", false, "select the most recent run")
+	inspectCmd.Flags().BoolVar(&inspectLastReport, "last-report", false, "select all tasks from the last report batch")
+	inspectCmd.Flags().BoolVar(&inspectLastReview, "last-review", false, "select the last review run")
+	inspectCmd.Flags().BoolVar(&inspectLastCode, "last-code", false, "select all tasks from the last code session")
+	inspectCmd.Flags().BoolVar(&inspectAutoDebug, "auto-debug", false, "launch an agent to investigate the selected runs")
+	inspectCmd.Flags().BoolVar(&inspectAutoDebugPrompt, "auto-debug-prompt", false, "print the auto-debug prompt without executing")
+	addProfileFlags(inspectCmd, &inspectProfile, &inspectAgent)
 }
 
 func runPsFiles(cmd *cobra.Command, args []string) error {
@@ -101,14 +101,14 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if psFilesAutoDebug || psFilesAutoDebugPrompt {
+	if inspectAutoDebug || inspectAutoDebugPrompt {
 		debugContext := buildDebugContext(rows, allFiles)
 		pinfo := env.NewProjectInfoParams("task debugger")
 		prompt, err := prompts.AssembleTaskDebugPrompt(env.OrgDir, env.ProjectDir, debugContext, pinfo)
 		if err != nil {
 			return err
 		}
-		if psFilesAutoDebugPrompt {
+		if inspectAutoDebugPrompt {
 			fmt.Println(prompt)
 			return nil
 		}
@@ -128,11 +128,11 @@ func resolveRunSelection(db *calldb.CallDB, env *root.ResolvedEnv, args []string
 		return recentRowsByIDs(db, ids)
 	}
 
-	if psFilesTaskGroup != "" {
-		return db.RecentRuns(calldb.RecentFilter{TaskGroup: psFilesTaskGroup})
+	if inspectTaskGroup != "" {
+		return db.RecentRuns(calldb.RecentFilter{TaskGroup: inspectTaskGroup})
 	}
 
-	if psFilesLastReport {
+	if inspectLastReport {
 		tg, err := db.LatestTaskGroup("", "report-")
 		if err != nil {
 			return nil, err
@@ -143,7 +143,7 @@ func resolveRunSelection(db *calldb.CallDB, env *root.ResolvedEnv, args []string
 		return db.RecentRuns(calldb.RecentFilter{TaskGroup: tg})
 	}
 
-	if psFilesLastCode {
+	if inspectLastCode {
 		tg, err := db.LatestTaskGroup("", "code-")
 		if err != nil {
 			return nil, err
@@ -154,7 +154,7 @@ func resolveRunSelection(db *calldb.CallDB, env *root.ResolvedEnv, args []string
 		return db.RecentRuns(calldb.RecentFilter{TaskGroup: tg})
 	}
 
-	if psFilesLastReview {
+	if inspectLastReview {
 		rows, err := db.RecentRuns(calldb.RecentFilter{Action: "review", Limit: 1})
 		if err != nil {
 			return nil, err
@@ -162,7 +162,7 @@ func resolveRunSelection(db *calldb.CallDB, env *root.ResolvedEnv, args []string
 		return rows, nil
 	}
 
-	if psFilesLastRun {
+	if inspectLastRun {
 		rows, err := db.RecentRuns(calldb.RecentFilter{Limit: 1})
 		if err != nil {
 			return nil, err
@@ -231,7 +231,7 @@ func buildDebugContext(rows []calldb.RecentRow, filePaths []string) string {
 }
 
 func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
-	r, err := resolveRunner(env, psFilesProfile, psFilesAgent, runner.ActionDebug, "")
+	r, err := resolveRunner(env, inspectProfile, inspectAgent, runner.ActionDebug, "")
 	if err != nil {
 		return err
 	}
