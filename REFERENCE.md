@@ -226,6 +226,48 @@ ateam prompt --role security --action report --extra-prompt "Focus on auth"
 
 Show the current environment: organization, runtime config, project, and role status.
 
+| Flag | Description |
+|------|-------------|
+| `--claude-sandbox` | Print the generated Claude sandbox settings JSON for the default profile |
+
+### `ateam inspect [ID...]`
+
+Show the ps summary and log files for one or more agent runs. Select runs by ID, task group, or shorthand flags.
+
+```bash
+ateam inspect 42
+ateam inspect 42 43
+ateam inspect --last-run
+ateam inspect --last-report
+ateam inspect --last-report --auto-debug
+ateam inspect --last-run --auto-debug-prompt
+```
+
+| Flag | Description |
+|------|-------------|
+| `--last-run` | Select the most recent run |
+| `--last-report` | Select all tasks from the last report batch |
+| `--last-review` | Select the last review run |
+| `--last-code` | Select all tasks from the last code session |
+| `--task-group NAME` | Select all runs in a task group |
+| `--auto-debug` | Launch an agent in streaming mode to investigate the selected runs |
+| `--auto-debug-prompt` | Print the auto-debug prompt without executing |
+| `--profile NAME` | Profile for the auto-debug agent |
+| `--agent NAME` | Agent for the auto-debug run |
+
+The debug prompt uses the standard 3-level fallback (`supervisor/task_debug_prompt.md`). Debug reports are saved to `.ateam/logs/supervisor/`.
+
+### `ateam version`
+
+Print version, build, and system information.
+
+```
+ateam:  0.1.0
+commit: e8348b8-dirty
+built:  2026-03-30T22:58:33Z
+system: Darwin ...
+```
+
 ### `ateam serve`
 
 Start a localhost web UI for browsing reports, reviews, sessions, and cost data.
