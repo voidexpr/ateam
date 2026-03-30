@@ -181,6 +181,72 @@ func TestEffectiveTimeout(t *testing.T) {
 	}
 }
 
+func TestSandboxExtra(t *testing.T) {
+	dir := t.TempDir()
+
+	content := `[project]
+name = "sandbox-test"
+
+[sandbox-extra]
+allow_write = ["/tmp/test-write", "/data/output"]
+allow_read = ["/opt/test-read"]
+allow_domains = ["example.com", "*.internal.dev"]
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if len(cfg.SandboxExtra.AllowWrite) != 2 {
+		t.Fatalf("AllowWrite length = %d, want 2", len(cfg.SandboxExtra.AllowWrite))
+	}
+	if cfg.SandboxExtra.AllowWrite[0] != "/tmp/test-write" {
+		t.Errorf("AllowWrite[0] = %q, want %q", cfg.SandboxExtra.AllowWrite[0], "/tmp/test-write")
+	}
+	if len(cfg.SandboxExtra.AllowRead) != 1 {
+		t.Fatalf("AllowRead length = %d, want 1", len(cfg.SandboxExtra.AllowRead))
+	}
+	if cfg.SandboxExtra.AllowRead[0] != "/opt/test-read" {
+		t.Errorf("AllowRead[0] = %q, want %q", cfg.SandboxExtra.AllowRead[0], "/opt/test-read")
+	}
+	if len(cfg.SandboxExtra.AllowDomains) != 2 {
+		t.Fatalf("AllowDomains length = %d, want 2", len(cfg.SandboxExtra.AllowDomains))
+	}
+	if cfg.SandboxExtra.AllowDomains[0] != "example.com" {
+		t.Errorf("AllowDomains[0] = %q, want %q", cfg.SandboxExtra.AllowDomains[0], "example.com")
+	}
+}
+
+func TestSandboxExtraEmpty(t *testing.T) {
+	dir := t.TempDir()
+
+	content := `[project]
+name = "no-sandbox"
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if len(cfg.SandboxExtra.AllowWrite) != 0 {
+		t.Errorf("AllowWrite should be empty, got %v", cfg.SandboxExtra.AllowWrite)
+	}
+	if len(cfg.SandboxExtra.AllowRead) != 0 {
+		t.Errorf("AllowRead should be empty, got %v", cfg.SandboxExtra.AllowRead)
+	}
+	if len(cfg.SandboxExtra.AllowDomains) != 0 {
+		t.Errorf("AllowDomains should be empty, got %v", cfg.SandboxExtra.AllowDomains)
+	}
+}
+
 func TestResolveProfileDefault(t *testing.T) {
 	cfg := Config{}
 	if got := cfg.ResolveProfile("", ""); got != "default" {

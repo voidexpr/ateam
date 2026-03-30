@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -234,6 +235,97 @@ func TestRunnerConfigDirRelativeRequiresProject(t *testing.T) {
 	summary := r.Run(context.Background(), "test", opts, nil)
 	if summary.Err == nil {
 		t.Fatal("expected error when relative config_dir is set without project context")
+	}
+}
+
+func TestRenderSettingsSandboxExtra(t *testing.T) {
+	sandbox := `{
+		"sandbox": {
+			"filesystem": {
+				"allowWrite": ["/base/write"],
+				"allowRead": ["/base/read"]
+			},
+			"network": {
+				"allowedDomains": ["base.example.com"]
+			}
+		},
+		"permissions": {}
+	}`
+
+	r := &Runner{
+		SandboxSettings:     sandbox,
+		SandboxExtraWrite:   []string{"/extra/write"},
+		SandboxExtraRead:    []string{"/extra/read"},
+		SandboxExtraDomains: []string{"extra.example.com"},
+	}
+
+	data, err := r.RenderSettings("/work")
+	if err != nil {
+		t.Fatalf("RenderSettings: %v", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("cannot parse output: %v", err)
+	}
+
+	fs := result["sandbox"].(map[string]any)["filesystem"].(map[string]any)
+	net := result["sandbox"].(map[string]any)["network"].(map[string]any)
+
+	assertContains := func(list []any, want string) {
+		t.Helper()
+		for _, v := range list {
+			if v.(string) == want {
+				return
+			}
+		}
+		t.Errorf("expected %q in list %v", want, list)
+	}
+
+	allowWrite := fs["allowWrite"].([]any)
+	assertContains(allowWrite, "/base/write")
+	assertContains(allowWrite, "/extra/write")
+
+	allowRead := fs["allowRead"].([]any)
+	assertContains(allowRead, "/base/read")
+	assertContains(allowRead, "/extra/read")
+
+	domains := net["allowedDomains"].([]any)
+	assertContains(domains, "base.example.com")
+	assertContains(domains, "extra.example.com")
+}
+
+func TestRenderSettingsNoSandboxExtra(t *testing.T) {
+	sandbox := `{
+		"sandbox": {
+			"filesystem": {
+				"allowWrite": ["/base/write"]
+			},
+			"network": {
+				"allowedDomains": ["base.example.com"]
+			}
+		},
+		"permissions": {}
+	}`
+
+	r := &Runner{
+		SandboxSettings: sandbox,
+	}
+
+	data, err := r.RenderSettings("/work")
+	if err != nil {
+		t.Fatalf("RenderSettings: %v", err)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("cannot parse output: %v", err)
+	}
+
+	net := result["sandbox"].(map[string]any)["network"].(map[string]any)
+	domains := net["allowedDomains"].([]any)
+	if len(domains) != 1 {
+		t.Errorf("expected 1 domain, got %d: %v", len(domains), domains)
 	}
 }
 

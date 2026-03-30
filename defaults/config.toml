@@ -37,6 +37,11 @@ testing_full            = "off"
 # [serve]
 # port = 8080  # fixed port for 'ateam serve' (default: random)
 
+# [sandbox-extra]
+# allow_write = []   # extra filesystem paths granted write access in sandbox
+# allow_read = []    # extra filesystem paths granted read access in sandbox
+# allow_domains = [] # extra network domains allowed in sandbox
+
 [supervisor]
 
 [profiles]
