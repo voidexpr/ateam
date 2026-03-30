@@ -437,6 +437,30 @@ timeout_minutes = 120
 security = "on"
 testing_basic = "on"
 refactor_small = "off"
+
+# [sandbox-extra]
+# allow_write = ["/path/to/extra/writable/dir"]
+# allow_read = ["/path/to/extra/readable/dir"]
+# allow_domains = ["api.example.com"]
+```
+
+### `[sandbox-extra]`
+
+Grant additional sandbox permissions to agents running in this project. These paths and domains are merged into the Claude sandbox settings alongside the defaults from `runtime.hcl`.
+
+| Key | Description |
+|-----|-------------|
+| `allow_write` | Additional filesystem paths the agent can write to. Added to `sandbox.filesystem.allowWrite`. |
+| `allow_read` | Additional filesystem paths the agent can read. Added to `sandbox.filesystem.allowRead`. |
+| `allow_domains` | Additional network domains the agent can reach. Added to `sandbox.network.allowedDomains`. |
+
+All paths are absolute. Use `ateam env --claude-sandbox` to inspect the final merged sandbox settings.
+
+```toml
+[sandbox-extra]
+allow_write = ["/data/output", "/tmp/scratch"]
+allow_read = ["/opt/shared-tools"]
+allow_domains = ["api.internal.example.com", "registry.npmjs.org"]
 ```
 
 ### Custom Roles
