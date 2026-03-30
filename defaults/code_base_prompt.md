@@ -6,7 +6,7 @@ You are an autonomous agent running a one-shot prompt: DO NOT ask for confirmati
 
 ## Source Code Location
 
-The project source code is located at: {{SOURCE_DIR}}
+The project source code is in the current working directory.
 
 ## Core Principles
 

@@ -94,10 +94,10 @@ func assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt strin
 		parts = append(parts, overview)
 	}
 	if basePrompt != "" {
-		parts = append(parts, strings.ReplaceAll(basePrompt, "{{SOURCE_DIR}}", sourceDir))
+		parts = append(parts, strings.ReplaceAll(basePrompt, "{{SOURCE_DIR}}", "."))
 	}
 	if rolePrompt != "" {
-		parts = append(parts, strings.ReplaceAll(rolePrompt, "{{SOURCE_DIR}}", sourceDir))
+		parts = append(parts, strings.ReplaceAll(rolePrompt, "{{SOURCE_DIR}}", "."))
 	}
 
 	extras := collectRoleExtras(orgDir, projectDir, roleID, extraFile)
@@ -298,7 +298,7 @@ func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, pinfo Pr
 		}
 	}
 
-	mgmtPrompt = strings.ReplaceAll(mgmtPrompt, "{{SOURCE_DIR}}", sourceDir)
+	mgmtPrompt = strings.ReplaceAll(mgmtPrompt, "{{SOURCE_DIR}}", ".")
 
 	var parts []string
 	if info := FormatProjectInfo(pinfo); info != "" {
@@ -358,13 +358,14 @@ func FormatProjectInfo(p ProjectInfoParams) string {
 	var b strings.Builder
 	b.WriteString("# ATeam Project Context\n\n")
 	b.WriteString("You are part of the ateam software:\n")
-	fmt.Fprintf(&b, "* runtime files: %s\n", p.OrgDir)
+	fmt.Fprintf(&b, "* runtime files: %s\n", shortRelPath(p.SourceDir, p.OrgDir))
 	fmt.Fprintf(&b, "* project name: %s\n", p.ProjectName)
 	fmt.Fprintf(&b, "* role: %s\n", p.Role)
-	fmt.Fprintf(&b, "* project directory: %s\n", p.SourceDir)
-	fmt.Fprintf(&b, "* reports and reviews: %s\n", p.ProjectDir)
+	b.WriteString("* project directory: . (working directory)\n")
+	b.WriteString("* reports and reviews: .ateam\n")
 	if p.GitRepoDir != "" && p.GitRepoDir != p.SourceDir {
-		fmt.Fprintf(&b, "\n**IMPORTANT**: Your working directory is the project directory (%s), not the git repo root (%s). Limit your findings to the project directory. Do not look at or report on code outside it.\n", p.SourceDir, p.GitRepoDir)
+		rel := shortRelPath(p.SourceDir, p.GitRepoDir)
+		fmt.Fprintf(&b, "\n**IMPORTANT**: Your working directory is the project directory (.), not the git repo root (%s). Limit your findings to the project directory. Do not look at or report on code outside it.\n", rel)
 	}
 	if p.Meta != nil {
 		ts := time.Now().Format(TimestampFormat)
@@ -384,6 +385,20 @@ func FormatProjectInfo(p ProjectInfoParams) string {
 		}
 	}
 	return b.String()
+}
+
+// shortRelPath returns target relative to base. Falls back to ~/... shorthand
+// for paths under $HOME, or the absolute path if neither works.
+func shortRelPath(base, target string) string {
+	if rel, err := filepath.Rel(base, target); err == nil && !filepath.IsAbs(rel) {
+		return rel
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		if rel, err := filepath.Rel(home, target); err == nil && !strings.HasPrefix(rel, "..") {
+			return filepath.Join("~", rel)
+		}
+	}
+	return target
 }
 
 // readWith3LevelFallback tries projectPath, then orgPath, then defaultPath.

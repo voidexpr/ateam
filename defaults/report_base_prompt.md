@@ -7,7 +7,7 @@ You are performing a read-only analysis, it is allowed to execute commands to di
 
 ## Source Code Location
 
-The project source code is located at: {{SOURCE_DIR}}
+The project source code is in the current working directory.
 
 Explore the codebase thoroughly before writing your report. Read key files, understand the structure, and base every finding on actual code you've seen.
 

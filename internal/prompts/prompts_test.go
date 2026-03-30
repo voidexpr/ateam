@@ -193,7 +193,7 @@ func TestFormatProjectInfo(t *testing.T) {
 		}
 	})
 
-	t.Run("basic fields", func(t *testing.T) {
+	t.Run("basic fields use relative paths", func(t *testing.T) {
 		p := ProjectInfoParams{
 			OrgDir:      "/home/user/.ateamorg",
 			ProjectDir:  "/projects/myapp/.ateam",
@@ -205,15 +205,18 @@ func TestFormatProjectInfo(t *testing.T) {
 
 		for _, want := range []string{
 			"# ATeam Project Context",
-			"* runtime files: /home/user/.ateamorg",
 			"* project name: myapp",
 			"* role: role security",
-			"* project directory: /projects/myapp",
-			"* reports and reviews: /projects/myapp/.ateam",
+			"* project directory: . (working directory)",
+			"* reports and reviews: .ateam",
 		} {
 			if !strings.Contains(got, want) {
 				t.Errorf("missing %q in output:\n%s", want, got)
 			}
+		}
+		// No absolute paths for SourceDir or ProjectDir
+		if strings.Contains(got, "/projects/myapp") {
+			t.Errorf("should not contain absolute project path in output:\n%s", got)
 		}
 		// GitRepoDir not set → no scope warning
 		if strings.Contains(got, "IMPORTANT") {
@@ -221,7 +224,7 @@ func TestFormatProjectInfo(t *testing.T) {
 		}
 	})
 
-	t.Run("git repo dir differs from source dir", func(t *testing.T) {
+	t.Run("git repo dir differs uses relative path", func(t *testing.T) {
 		p := ProjectInfoParams{
 			OrgDir:      "/home/user/.ateamorg",
 			ProjectDir:  "/projects/mono/apps/myapp/.ateam",
@@ -237,8 +240,12 @@ func TestFormatProjectInfo(t *testing.T) {
 		if !strings.Contains(got, "Limit your findings to the project directory") {
 			t.Errorf("missing scope instruction in output:\n%s", got)
 		}
-		if !strings.Contains(got, "/projects/mono/apps/myapp") {
-			t.Errorf("missing project dir path in scope warning:\n%s", got)
+		// Should use relative path for git repo root, not absolute
+		if !strings.Contains(got, "../..") {
+			t.Errorf("expected relative git repo path (../..) in output:\n%s", got)
+		}
+		if strings.Contains(got, "/projects/mono/apps/myapp") {
+			t.Errorf("should not contain absolute path in scope warning:\n%s", got)
 		}
 	})
 
