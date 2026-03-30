@@ -10,7 +10,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var BuildTime = "unknown"
+var (
+	BuildTime = "unknown"
+	Version   = "dev"
+	GitCommit = "unknown"
+)
 
 var (
 	updateQuiet bool
