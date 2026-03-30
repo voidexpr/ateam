@@ -61,12 +61,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 	absPath = evalSymlinks(absPath)
 
-	cwd, err := resolvedCwd()
-	if err != nil {
-		return err
-	}
-
-	orgDir, err := root.FindOrg(cwd)
+	orgDir, err := root.FindOrg(absPath)
 	if err != nil {
 		orgDir, err = autoCreateOrg(absPath)
 		if err != nil {
@@ -80,6 +75,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if name == "" {
 		rel, relErr := filepath.Rel(orgRoot, absPath)
 		if relErr != nil {
+			rel = filepath.Base(absPath)
+		}
+		if rel == "." {
 			rel = filepath.Base(absPath)
 		}
 		name = rel
@@ -127,7 +125,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Re-resolve to show the full env display
-	env, err := root.Lookup()
+	env, err := root.LookupFrom(absPath)
 	if err != nil {
 		return err
 	}

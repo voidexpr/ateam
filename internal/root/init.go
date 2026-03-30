@@ -69,14 +69,19 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 		}
 	}
 
+	var relPath string
 	if orgDir != "" {
 		orgRoot := filepath.Dir(orgDir)
-		relPath, err := filepath.Rel(orgRoot, path)
+		rel, err := filepath.Rel(orgRoot, path)
 		if err != nil {
 			relPath = path
+		} else {
+			relPath = rel
 		}
-		if err := config.ValidateProjectPath(relPath); err != nil {
-			return "", err
+		if relPath != "." {
+			if err := config.ValidateProjectPath(relPath); err != nil {
+				return "", err
+			}
 		}
 	}
 
@@ -134,9 +139,7 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 	}
 
 	// Legacy: create state dirs under .ateamorg/projects/ if org exists
-	if orgDir != "" {
-		orgRoot := filepath.Dir(orgDir)
-		relPath, _ := filepath.Rel(orgRoot, path)
+	if orgDir != "" && relPath != "." {
 		projectID := config.PathToProjectID(relPath)
 		if err := createStateDirs(orgDir, projectID, roleIDs); err != nil {
 			return "", err
