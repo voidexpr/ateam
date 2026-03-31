@@ -118,7 +118,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", roleID, err)
 			continue
 		}
-		roleDir := filepath.Join(env.ProjectDir, "roles", roleID)
+		roleDir := env.RoleDir(roleID)
 		tasks = append(tasks, runner.PoolTask{
 			Prompt: prompt,
 			RunOpts: runner.RunOpts{

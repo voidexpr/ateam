@@ -78,7 +78,7 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 		cr.CallDB = db
 	}
 
-	supervisorDir := filepath.Join(env.ProjectDir, "supervisor")
+	supervisorDir := env.SupervisorDir()
 	historyDir := env.ReviewHistoryDir()
 	if err := os.MkdirAll(historyDir, 0755); err != nil {
 		return fmt.Errorf("cannot create history directory: %w", err)

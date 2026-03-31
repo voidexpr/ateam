@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/ateam/internal/config"
-	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runtime"
 	"github.com/ateam/internal/secret"
@@ -203,7 +202,7 @@ func printProjectSection(env *root.ResolvedEnv, cwd string) {
 	fmt.Fprintln(w, " \tROLE\tLAST\tPATH")
 	for _, roleID := range allRoles {
 		enabled := config.IsRoleEnabled(env.Config.Roles[roleID])
-		reportPath := filepath.Join(env.ProjectDir, "roles", roleID, prompts.ReportFile)
+		reportPath := env.RoleReportPath(roleID)
 		fi, err := os.Stat(reportPath)
 		hasReport := err == nil
 
@@ -222,7 +221,7 @@ func printProjectSection(env *root.ResolvedEnv, cwd string) {
 		}
 	}
 
-	reviewPath := filepath.Join(env.ProjectDir, "supervisor", "review.md")
+	reviewPath := env.ReviewPath()
 	if fi, err := os.Stat(reviewPath); err == nil {
 		fmt.Fprintf(w, " \t%s\t%s\t%s\n", "review", fmtDateAge(fi.ModTime()), relPath(cwd, reviewPath))
 	}

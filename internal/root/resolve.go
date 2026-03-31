@@ -26,20 +26,28 @@ type ResolvedEnv struct {
 	Config      *config.Config
 }
 
+func (e *ResolvedEnv) RoleDir(roleID string) string {
+	return filepath.Join(e.ProjectDir, "roles", roleID)
+}
+
+func (e *ResolvedEnv) SupervisorDir() string {
+	return filepath.Join(e.ProjectDir, "supervisor")
+}
+
 func (e *ResolvedEnv) RoleReportPath(roleID string) string {
-	return filepath.Join(e.ProjectDir, "roles", roleID, prompts.ReportFile)
+	return filepath.Join(e.RoleDir(roleID), prompts.ReportFile)
 }
 
 func (e *ResolvedEnv) RoleHistoryDir(roleID string) string {
-	return filepath.Join(e.ProjectDir, "roles", roleID, "history")
+	return filepath.Join(e.RoleDir(roleID), "history")
 }
 
 func (e *ResolvedEnv) ReviewPath() string {
-	return filepath.Join(e.ProjectDir, "supervisor", "review.md")
+	return filepath.Join(e.SupervisorDir(), "review.md")
 }
 
 func (e *ResolvedEnv) ReviewHistoryDir() string {
-	return filepath.Join(e.ProjectDir, "supervisor", "history")
+	return filepath.Join(e.SupervisorDir(), "history")
 }
 
 func (e *ResolvedEnv) RunnerLogPath() string {
