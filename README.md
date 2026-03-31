@@ -74,6 +74,21 @@ go version          # ensure Go 1.25+
 git clone https://github.com/voidexpr/ateam.git
 cd ateam && make build
 sudo ln -s "$(pwd)/ateam" /usr/local/bin/ateam
+
+# OPTIONAL: only if you plan on using docker on MacOS
+make companinon
+export ATEAM_ORG_CACHE_DIR="$HOME/.ateamorg/cache"  # OR where your .ateamorg directory, this is the default location
+mkdir -p "$ATEAM_ORG_CACHE_DIR"
+ln -sf "$(pwd)/ateam-linux-amd64? "$ATEAM_ORG_CACHE_DIR/"
+unset ATEAM_ORG_CACHE_DIR
+```
+
+### Upgrade
+
+Assuming `ateam` binary is symlinked somewhere in your PATH:
+
+```bash
+git fetch --all && git rebase && make
 ```
 
 ## How It Works
@@ -214,7 +229,87 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 
 See [REFERENCE.md](REFERENCE.md) for full flag documentation, directory layout, prompt configuration, runtime configuration, and troubleshooting.
 
+## Isolation: sandbox and containers
+
+### Why is it important ?
+
+ATeam runs unattended agents so it's essential that they operate safely without constant permission approval.
+
+Here are the risks:
+* filesystem:
+  * write to the wrong file by accident
+  * nefarious file writes: ransomware, file deletion or corruption
+  * read sensitive/private files
+* network:
+  * exfiltration of sensitive files
+  * contact a command and control server (ransomware or botnet)
+* commands
+  * try to bypass file permissions or network permissions (like access the web browser to reach the internet)
+
+The tradeoff is that the more restrictions the more likely existing tools break, for example access a unix domain socket (docker), pipe (tsx), /tmp directory shared by multiple tools can corrupt each others, ...
+
+### Key Differences and tradeoffs
+There are 3 approaches:
+* sandboxing: OS level restrictions for file system and network access
+  * claude does sandboxing for the tools it calls (each command is sanboxed separately)
+  * other sandboxing solutions could run around claude and restrict all of what it could do
+  * sandboxes uses built-in OS level system calls to prevent processes and their child processes to escape the sanbox: Seatbel on MacOS and bubblewrap on Linux are popular approaches
+* containers: run a different base OS provided a strong isolation of environment, can control file system and network access
+  * they make it impossible to test MacOS specific code with docker for example
+* VM: like containers but with more isolation and could emulate MacOS
+
+Sandbox is fastest with least amount of configuration but can make tools to fail in weird ways. They are also less mature so Claude Code still has multiple bugs.
+
+Containers require to start/stop them and are overall more complicated operationally but could be simpler once setup and ran regularly for a project.
+
+VMs are much slower and heavyweight and have the drawbacks of containers.
+
+There is no perfect answer. By default ATeam favors sandboxing because it's simpler and shares the base OS. But it also supports docker and more containers can be added in the future (VM will just be treated as containers, there isn't a need for a separate concept).
+
+### Current issues
+* Any sandbox:
+  * negative: agent built-in sandbox are still immature but eventually should become more well understood, more robust
+  * negative: allowing docker means any code and any network access is possible, bypassing all protection
+  * positive: can use any installed tool, can debug current system easily
+  * negative: less reproducible
+  * negative: can't nest sandboxes, for example playwright-cli can be ran from within a sandbox
+  * Claude Code:
+    * negative: doesn't support unix domain socket or named pipe: https://github.com/anthropics/claude-code/issues/41254
+      * breaks docker and tsx, they have to run unsandbox
+    * negative: all files can be read by default, must explicitly exclude paths,
+* Docker / MacOS native containers (Linux only)
+  * negative: no MacOS
+  * negative: adds complexity and changes workflows
+  * positive: docker in docker (especially with docker sandbox)
+
+
+### ATeam current approach
+
+As the situation evolve an the findings above change ateam will evolve it's approach. But currently:
+* by default use the agent own sandbox options
+* for coding phase what is recommended is to use '--profile docker' that will be used by coding agents (but not the supervisor that will stay in the default sandbox profile), for complex multi-tier projects use 'ateam auto-setup --docker' and then verify that your tests can be ran with: `ateam run "run: YOUR_BUILD_COMMAND && YOUR_TEST_COMMAND  and report if there are issues, don't resolve them directly but provide information on how to resolve them" --profile docker`
+  * but do not use docker if you need to test code that is MacOS specific or won't work on Linux, keep working from the sandbox
+
+### Customize sandboxing rules
+
+ATeam produces a default sandbox config file, this file is preseved for each execution as TODO_settings.json so it can be audited and used for troublehsooting. Then config.toml makes it easy to do common sandbox config change: add read only, read write and unsandbox commands. For more complex configuration runtime.hcl can be used to fully customize how agents or containers are ran without modifying any code.
+
+TODO: common config changes
+
+
 ## FAQ
+
+### How to troubleshoot ?
+
+Use `--help` for more details about each command
+
+* `ateam env`: basic path, roles, reports available
+* `ateam ps`: see ateam agents run
+* `ateam tail`: see ateam logs in real time
+* `ateam inspect`: access full command arguments and logs more easily than exploring `.ateam/logs` directly. Also `--auto-debug` makes ateam debug itself and recommend config changes or what bug to file against ateam
+* `ateam cat`: pretty print agent output (.jsonl format)
+
+See [REFERENCE.md](REFERENCE.md) for more commands and config details.
 
 ### How are agents executed by default ?
 
