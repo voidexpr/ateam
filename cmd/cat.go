@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/root"
@@ -17,14 +18,17 @@ var (
 )
 
 var catCmd = &cobra.Command{
-	Use:   "cat ID [ID...]",
-	Short: "Pretty-print stream logs by call ID",
+	Use:   "cat ID|FILE [...]",
+	Short: "Pretty-print stream logs by call ID or file path",
 	Long: `Read and format stream logs for one or more completed runs.
+
+Arguments can be numeric call IDs or file paths to JSONL stream files.
 
 Example:
   ateam cat 42
   ateam cat 42 43 44 --verbose
-  ateam cat 42 --no-color`,
+  ateam cat 42 --no-color
+  ateam cat .ateam/logs/roles/security/stream.jsonl`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runCat,
 }
@@ -35,6 +39,43 @@ func init() {
 }
 
 func runCat(cmd *cobra.Command, args []string) error {
+	if looksLikeFiles(args) {
+		return runCatFiles(args)
+	}
+	return runCatIDs(args)
+}
+
+func looksLikeFiles(args []string) bool {
+	for _, a := range args {
+		if strings.ContainsAny(a, "/.") {
+			return true
+		}
+	}
+	return false
+}
+
+func runCatFiles(paths []string) error {
+	color := !catNoColor && isTerminal()
+
+	for i, path := range paths {
+		if i > 0 {
+			fmt.Println()
+		}
+		if len(paths) > 1 {
+			fmt.Printf("═══ %s ═══\n", path)
+		}
+		f := &runner.StreamFormatter{
+			Verbose: catVerbose,
+			Color:   color,
+		}
+		if err := f.FormatFile(path, os.Stdout); err != nil {
+			return fmt.Errorf("error reading %s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func runCatIDs(args []string) error {
 	ids, err := parseIDArgs(args)
 	if err != nil {
 		return err
