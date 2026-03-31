@@ -59,6 +59,7 @@ What makes it relevant for ATeam is that the sandboxing story is more explicit t
 - **Repo copy, not bind mount.** `tsk` copies the repository into a per-task workspace and excludes gitignored files by default. This is a meaningful safety property: secrets and local detritus that are already ignored by git do not get handed to the agent accidentally.
 - **Container image composition is layered.** Each sandbox image is assembled from a base Dockerfile plus stack-specific snippets (Go, Node, Python, etc.), an agent snippet (`claude`, `codex`), and an optional project layer. That makes the environment reproducible while still allowing repo-specific customization.
 - **Network egress is proxied, not open.** Each task container routes traffic through a Squid forward-proxy sidecar. The proxy enforces a domain allowlist, and `tsk` fingerprints proxy config so tasks with different policies get different proxy containers.
+- **Host-local service access.** `host_ports` configuration and `TSK_PROXY_HOST` allow agents inside the container to reach services running on the host (databases, dev servers), making tsk-tsk the most practical containerized option for integration tests that need localhost connectivity. Optional DinD support is also available.
 - **Task artifacts are structured.** Each task directory contains `/repo`, `/instructions.md`, and `/output/agent.log`. The log is structured JSON-lines covering both infrastructure phases and processed agent output, which is useful for debugging and postmortems.
 - **Docker and Podman are both supported.** That matters for environments where Docker Desktop is undesirable or unavailable.
 
@@ -578,6 +579,11 @@ The community is already converging on devcontainers as the standard way to sand
 | **Apple Container** | VM isolation | VM isolation | VM networking | All (in VM) | Mount | Via port/tunnel | Low | macOS 26+ |
 | **Cloudflare Sandbox** | Full isolation | Full isolation | Configurable | All (in container) | API key | Built-in HTTPS | High (remote) | Cloud |
 | **Dev Container** | Mount only | Mount only | Container ns | All (in container) | Mount | Via port/tunnel | Medium | Any |
+| **Greywall** | Default-deny, allowlist | Default-deny, allowlist | Transparent proxy + DNS (Linux); proxy-only (macOS) | Most | Configurable | None | Low | Linux, macOS |
+| **Fence** | Practical allow/deny; /usr /lib /bin /etc readable | Allow/deny with always-protected targets | Default-deny outbound; domain rules; localhost controls | Most | Configurable | None | Low | Linux, macOS |
+| **clampdown** | Workdir + system dirs RX, rest blocked | Workdir only; masked .env/.npmrc | Agent allowlist; RFC1918/loopback/link-local blocked | All (in container) | Masked | None | Medium | Linux only |
+| **jailoc** | Explicit mounts only | Explicit mounts only | Private networks blocked by default | All (in container) | Mount | None | Medium | Linux, macOS (Docker) |
+| **Docker Sandboxes (MicroVM)** | VM isolation + file sync | VM isolation + file sync | HTTP/HTTPS policy; raw TCP/UDP blocked | All (in VM) | API key | None | Medium | macOS, Windows |
 
 ### E.10 Network Tier Implementation
 
@@ -655,3 +661,96 @@ For ATeam, Pattern C is the likely sweet spot: Docker provides strong isolation,
 4. **Remote access** for all modes: web terminal (ttyd) exposed via an authenticated tunnel. The agent sees only its sandbox; the remote user sees only the agent's terminal.
 
 **The auto-detection pattern from cco is worth adopting**: the same `ateam run` command should automatically select the best available sandbox — Anthropic SRT on host, Docker when configured, Apple Container on macOS 26+. The container adapter abstraction (§7.4) already supports this.
+
+### E.13 Additional Native Sandbox Tools
+
+#### E.13.1 Greywall
+
+**Platform:** Native Linux + macOS (Linux has transparent proxy + DNS capture; macOS loses these)
+
+The closest native tool to default-deny path allowlisting. Only the working directory is accessible unless you explicitly allow more, with `defaultDenyRead`, `allowRead`, and `allowWrite` config. On Linux, it integrates a transparent proxy (Greyproxy) with DNS capture for network control; on macOS it runs natively but without those network features.
+
+Key features:
+- **Default-deny filesystem** for both reads and writes — strongest native posture
+- **Built-in agent/toolchain profiles** for common stacks
+- **Learning mode** that auto-generates least-privilege profiles by tracing actual access patterns — useful for bootstrapping per-project policies
+- **Localhost outbound and bind toggles** for Postgres/Redis/dev servers
+
+Limitation: in Docker/CI environments, missing `CAP_NET_ADMIN` removes network-namespace isolation.
+
+**Assessment:** Best all-around native generalist. If ATeam wants a single native sandbox foundation on the host, Greywall is the strongest current option, especially on Linux where the network story is complete.
+
+#### E.13.2 Fence
+
+**Platform:** Native Linux + macOS
+
+Developer-friendly policy layer rather than hard containment. Practical path allow/deny rules, but not pure deny-everything: `/usr`, `/lib`, `/bin`, `/etc` stay readable, and always-protected targets reduce common persistence vectors.
+
+Key features:
+- **Best turnkey dev policy**: code template includes package registries and command restrictions out of the box
+- **Monitor mode** for auditing what `npm install` or `pip install` actually tries to access before committing to a policy
+- **Command rules** that can block `git push`, `npm publish`, and dangerous Docker invocations
+- **Default-deny outbound network** with domain rules and localhost outbound/bind controls
+- **Unix-socket controls** for Docker socket and similar
+
+Positioned as defense-in-depth, not a hostile-code boundary. The package-manager safety and guardrails around npm/pip/git are the strongest of any tool reviewed.
+
+**Assessment:** Best for layering dev-specific command/package policies on top of a filesystem sandbox. ATeam should borrow Fence's package-manager and command-policy patterns regardless of which filesystem sandbox is used.
+
+#### E.13.3 clampdown
+
+**Platform:** Linux only (macOS only via Linux VM: Colima/Podman machine; Docker Desktop explicitly unsupported)
+
+The hardest container-based isolation option reviewed. Designed for environments where blast-radius reduction matters more than developer convenience.
+
+Key features:
+- **Workdir RWX, system dirs RX, everything else blocked**
+- **Protected and masked sensitive paths** (`.env`, `.npmrc`, etc.) propagate to nested containers
+- **Network**: agent allowlist; RFC1918/loopback/link-local/ULA blocked for both agent and tool containers
+- **Optional image-digest enforcement** for supply-chain protection
+- **Project-only access** — no access to host home or other projects
+
+The RFC1918/loopback/link-local blocking makes it explicitly unsuitable for host-local integration tests (Postgres, Redis, dev servers). Use it when maximal containment matters more than localhost connectivity.
+
+**Assessment:** Strongest Linux hardening choice. Reserve for high-security agent work where the agent should have zero access to host services or private networks.
+
+#### E.13.4 jailoc
+
+**Platform:** Linux, macOS (via Docker)
+
+Container-based sandboxing focused on explicit workspace isolation:
+- Only exposes explicitly mounted directories — nothing else from the host
+- Blocks private networks by default
+- Per-workspace DinD sidecar instead of sharing the host Docker socket
+- Ships a pinned default image with Node.js, Python 3, npm, and common language servers
+
+Relevant if OpenCode is the baseline agent. Good isolation model for ATeam if the explicit-mount-only pattern is desired.
+
+#### E.13.5 Docker Sandboxes (Anthropic Official MicroVM)
+
+Anthropic's own Docker-based sandbox offering. Uses MicroVM sandboxes on macOS/Windows (Linux uses a legacy container path). Each sandbox gets a private Docker daemon and bidirectional file sync with the workspace.
+
+Network policy:
+- HTTP/HTTPS policy only; raw TCP/UDP blocked
+- Localhost and private ranges blocked unless explicitly proxied
+
+Best documented Docker-inside-the-sandbox story, but poor fit for host-local Postgres or other non-HTTP localhost services. Good if the workflow already revolves around `docker build` / Compose.
+
+### E.14 Network Companion Tools
+
+**OpenSnitch** (Linux) and **Little Snitch** (macOS) provide per-app/domain outbound firewalling as a standalone layer. They don't provide filesystem sandboxing but can be paired with any of the above tools:
+
+- **OpenSnitch**: interactive per-app/domain filtering with rule persistence
+- **Little Snitch**: app/domain/server/port/protocol rules with a GUI
+
+Useful as a defense-in-depth network layer when the primary sandbox doesn't have strong network controls (e.g., neko-kai, kohkimakimoto/claude-sandbox, scode).
+
+### E.15 Updated Recommendation Summary
+
+The March 2026 landscape adds Greywall, Fence, and clampdown as meaningful options beyond the original E.12 recommendation. The updated guidance:
+
+- **Best native generalist (host sandbox):** Greywall — replaces or supplements Anthropic SRT as the primary host sandbox, especially on Linux where the network story is strongest. On macOS, Anthropic SRT or Greywall are comparable.
+- **Package-manager and command safety:** Borrow Fence's policy patterns (command restrictions, monitor mode, registry allowlists) regardless of which sandbox is used.
+- **Localhost integration tests in containers:** tsk-tsk is the most practical choice — `host_ports` + `TSK_PROXY_HOST` provide clean host-service access that clampdown and Docker Sandboxes explicitly block.
+- **Maximum Linux hardening:** clampdown when the agent needs zero access to host services or private networks.
+- **Network-only companion:** Pair Linux hosts with OpenSnitch, macOS with Little Snitch, for domain-level outbound filtering alongside any filesystem sandbox.
