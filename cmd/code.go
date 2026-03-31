@@ -131,7 +131,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Code management supervisor running (%dm timeout)...\n", timeout)
 
-	supervisorDir := filepath.Join(env.ProjectDir, "supervisor")
+	supervisorDir := env.SupervisorDir()
 
 	supervisorProfileName := codeSupervisorProfile
 	if supervisorProfileName == "" {

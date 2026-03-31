@@ -168,7 +168,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	opts.PromptName = "run_prompt.md"
 	ts := time.Now().Format(runner.TimestampFormat)
 	if runRole != "" {
-		roleDir := filepath.Join(env.ProjectDir, "roles", runRole)
+		roleDir := env.RoleDir(runRole)
 		opts.LastMessageFilePath = filepath.Join(roleDir, "history", ts+".run_output.md")
 		opts.ErrorMessageFilePath = filepath.Join(roleDir, "history", ts+".run_error.md")
 		opts.HistoryDir = env.RoleHistoryDir(runRole)
