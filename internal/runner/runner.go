@@ -225,6 +225,18 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		req.CmdFactory = dc.CmdFactory()
 	}
 
+	// If running inside a Docker sandbox, create it and validate the agent.
+	if ds, ok := r.Container.(*container.DockerSandboxContainer); ok {
+		if err := ds.EnsureRunning(ctx); err != nil {
+			return failEarly(fmt.Errorf("docker sandbox start failed: %w", err))
+		}
+		agentCmd, _ := r.Agent.DebugCommandArgs(nil)
+		if err := ds.ValidateAgent(ctx, agentCmd); err != nil {
+			return failEarly(err)
+		}
+		req.CmdFactory = ds.CmdFactory()
+	}
+
 	agentName := r.Agent.Name()
 	command, agentArgs := r.Agent.DebugCommandArgs(extraArgs)
 	cliStr := command + " " + strings.Join(agentArgs, " ")
@@ -238,6 +250,10 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		if dc, ok := r.Container.(*container.DevcontainerContainer); ok {
 			fmt.Fprintf(os.Stderr, "[verbose] devcontainer: %s\n",
 				dc.DebugCommand(container.RunOpts{Command: command, Args: agentArgs}))
+		}
+		if ds, ok := r.Container.(*container.DockerSandboxContainer); ok {
+			fmt.Fprintf(os.Stderr, "[verbose] docker-sandbox: %s\n",
+				ds.DebugCommand(container.RunOpts{Command: command, Args: agentArgs}))
 		}
 	}
 

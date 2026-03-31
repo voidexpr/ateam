@@ -23,7 +23,8 @@ companion:
 tidy:
 	go mod tidy
 
-test: build
+test: tidy
+	go build ./...
 	go test ./...
 
 # Run docker integration tests inside Docker-in-Docker (no host impact).

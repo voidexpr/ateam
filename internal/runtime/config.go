@@ -47,14 +47,16 @@ type ModelPricing struct {
 }
 
 type ContainerConfig struct {
-	Name         string
-	Type         string   // "none", "docker", "devcontainer"
-	Mode         string   // "oneshot" (default) or "persistent"
-	Dockerfile   string   // docker: relative to .ateam/ dir
-	ConfigPath   string   // devcontainer: path to devcontainer.json (relative to source dir)
-	IdleTimeout  string   // duration string, e.g. "30m" (future use)
-	ForwardEnv   []string // env var names to forward from host into container
-	ExtraVolumes []string // additional volume mounts, e.g. "../data:/data:ro"
+	Name             string
+	Type             string   // "none", "docker", "devcontainer", "docker-sandbox"
+	Mode             string   // "oneshot" (default) or "persistent"
+	Dockerfile       string   // docker: relative to .ateam/ dir
+	ConfigPath       string   // devcontainer: path to devcontainer.json (relative to source dir)
+	IdleTimeout      string   // duration string, e.g. "30m" (future use)
+	ForwardEnv       []string // env var names to forward from host into container
+	ExtraVolumes     []string // additional volume mounts, e.g. "../data:/data:ro"
+	CopyClaudeConfig bool     // docker-sandbox: copy ~/.claude/ config (skills, plugins) into sandbox
+	NetworkPolicy    string   // docker-sandbox: "deny" (default) or "allow"
 }
 
 type ProfileConfig struct {
@@ -102,14 +104,16 @@ type hclModel struct {
 }
 
 type hclContainer struct {
-	Name         string   `hcl:"name,label"`
-	Type         string   `hcl:"type,optional"`
-	Mode         string   `hcl:"mode,optional"`
-	Dockerfile   string   `hcl:"dockerfile,optional"`
-	ConfigPath   string   `hcl:"config_path,optional"`
-	IdleTimeout  string   `hcl:"idle_timeout,optional"`
-	ForwardEnv   []string `hcl:"forward_env,optional"`
-	ExtraVolumes []string `hcl:"extra_volumes,optional"`
+	Name             string   `hcl:"name,label"`
+	Type             string   `hcl:"type,optional"`
+	Mode             string   `hcl:"mode,optional"`
+	Dockerfile       string   `hcl:"dockerfile,optional"`
+	ConfigPath       string   `hcl:"config_path,optional"`
+	IdleTimeout      string   `hcl:"idle_timeout,optional"`
+	ForwardEnv       []string `hcl:"forward_env,optional"`
+	ExtraVolumes     []string `hcl:"extra_volumes,optional"`
+	CopyClaudeConfig bool     `hcl:"copy_claude_config,optional"`
+	NetworkPolicy    string   `hcl:"network_policy,optional"`
 }
 
 type hclProfile struct {
@@ -321,14 +325,16 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 	}
 	for _, c := range hf.Containers {
 		cfg.Containers[c.Name] = ContainerConfig{
-			Name:         c.Name,
-			Type:         c.Type,
-			Mode:         c.Mode,
-			Dockerfile:   c.Dockerfile,
-			ConfigPath:   c.ConfigPath,
-			IdleTimeout:  c.IdleTimeout,
-			ForwardEnv:   c.ForwardEnv,
-			ExtraVolumes: c.ExtraVolumes,
+			Name:             c.Name,
+			Type:             c.Type,
+			Mode:             c.Mode,
+			Dockerfile:       c.Dockerfile,
+			ConfigPath:       c.ConfigPath,
+			IdleTimeout:      c.IdleTimeout,
+			ForwardEnv:       c.ForwardEnv,
+			ExtraVolumes:     c.ExtraVolumes,
+			CopyClaudeConfig: c.CopyClaudeConfig,
+			NetworkPolicy:    c.NetworkPolicy,
 		}
 	}
 	for _, p := range hf.Profiles {
