@@ -47,52 +47,48 @@ func init() {
 func runAll(cmd *cobra.Command, args []string) error {
 	printOutput := !allQuiet
 
+	roles := allRoles
+	if len(roles) == 0 {
+		roles = []string{"all"}
+	}
+
 	// Phase 1: Report
 	fmt.Println("=== Phase 1: Report ===")
-	if len(allRoles) > 0 {
-		reportRoles = allRoles
-	} else {
-		reportRoles = []string{"all"}
-	}
-	reportPrint = printOutput
-	reportExtraPrompt = allExtraPrompt
-	reportTimeout = allTimeout
-	reportCheaperModel = allCheaperModel
-	reportVerbose = allVerbose
-	reportDryRun = false
-	reportIgnorePreviousReport = false
-	reportParallel = allParallel
-	reportReview = false
-	if err := runReport(nil, nil); err != nil {
+	if err := runReport(ReportOptions{
+		Roles:        roles,
+		ExtraPrompt:  allExtraPrompt,
+		Timeout:      allTimeout,
+		Parallel:     allParallel,
+		Print:        printOutput,
+		CheaperModel: allCheaperModel,
+		Verbose:      allVerbose,
+	}); err != nil {
 		return fmt.Errorf("report phase failed: %w", err)
 	}
 
 	// Phase 2: Review
 	fmt.Println("\n=== Phase 2: Review ===")
-	reviewPrint = printOutput
-	reviewExtraPrompt = allExtraPrompt
-	reviewTimeout = allTimeout
-	reviewCheaperModel = allCheaperModel
-	reviewVerbose = allVerbose
-	reviewDryRun = false
-	reviewCustomPrompt = ""
-	reviewRoles = allRoles
-	if err := runReview(nil, nil); err != nil {
+	if err := runReview(ReviewOptions{
+		ExtraPrompt:  allExtraPrompt,
+		Timeout:      allTimeout,
+		Print:        printOutput,
+		CheaperModel: allCheaperModel,
+		Verbose:      allVerbose,
+		Roles:        allRoles,
+	}); err != nil {
 		return fmt.Errorf("review phase failed: %w", err)
 	}
 
 	// Phase 3: Code
 	fmt.Println("\n=== Phase 3: Code ===")
-	codePrint = printOutput
-	codeExtraPrompt = allExtraPrompt
-	codeTimeout = allTimeout
-	codeCheaperModel = allCheaperModel
-	codeVerbose = allVerbose
-	codeDryRun = false
-	codeReview = ""
-	codeManagement = ""
-	codeProfile = allProfile
-	if err := runCode(nil, nil); err != nil {
+	if err := runCode(CodeOptions{
+		ExtraPrompt:  allExtraPrompt,
+		Timeout:      allTimeout,
+		Print:        printOutput,
+		CheaperModel: allCheaperModel,
+		Verbose:      allVerbose,
+		Profile:      allProfile,
+	}); err != nil {
 		return fmt.Errorf("code phase failed: %w", err)
 	}
 

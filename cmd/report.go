@@ -31,6 +31,23 @@ var (
 	reportReview               bool
 )
 
+// ReportOptions holds configuration for a report run.
+type ReportOptions struct {
+	Roles                []string
+	ExtraPrompt          string
+	Timeout              int
+	Parallel             int
+	Print                bool
+	DryRun               bool
+	IgnorePreviousReport bool
+	CheaperModel         bool
+	Profile              string
+	Agent                string
+	Verbose              bool
+	Force                bool
+	Review               bool
+}
+
 var reportCmd = &cobra.Command{
 	Use:   "report",
 	Short: "Run roles to produce analysis reports",
@@ -44,7 +61,23 @@ Example:
   ateam report --roles testing_basic,security
   ateam report --roles refactor_small --extra-prompt "Focus on the auth module"
   ateam report --extra-prompt @notes.md`,
-	RunE: runReport,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runReport(ReportOptions{
+			Roles:                reportRoles,
+			ExtraPrompt:          reportExtraPrompt,
+			Timeout:              reportTimeout,
+			Parallel:             reportParallel,
+			Print:                reportPrint,
+			DryRun:               reportDryRun,
+			IgnorePreviousReport: reportIgnorePreviousReport,
+			CheaperModel:         reportCheaperModel,
+			Profile:              reportProfile,
+			Agent:                reportAgent,
+			Verbose:              reportVerbose,
+			Force:                reportForce,
+			Review:               reportReview,
+		})
+	},
 }
 
 func init() {
@@ -62,13 +95,13 @@ func init() {
 	addForceFlag(reportCmd, &reportForce)
 }
 
-func runReport(cmd *cobra.Command, args []string) error {
+func runReport(opts ReportOptions) error {
 	env, err := root.Resolve(orgFlag, projectFlag)
 	if err != nil {
 		return err
 	}
 
-	roles := reportRoles
+	roles := opts.Roles
 	if len(roles) == 0 {
 		roles = []string{"all"}
 	}
@@ -81,18 +114,18 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	extraPrompt, err := prompts.ResolveOptional(reportExtraPrompt)
+	extraPrompt, err := prompts.ResolveOptional(opts.ExtraPrompt)
 	if err != nil {
 		return err
 	}
 
-	timeout := env.Config.Report.EffectiveTimeout(reportTimeout)
+	timeout := env.Config.Report.EffectiveTimeout(opts.Timeout)
 
-	cr, err := resolveRunner(env, reportProfile, reportAgent, runner.ActionReport, "")
+	cr, err := resolveRunner(env, opts.Profile, opts.Agent, runner.ActionReport, "")
 	if err != nil {
 		return err
 	}
-	applyCheaperModel(cr, reportCheaperModel)
+	applyCheaperModel(cr, opts.CheaperModel)
 
 	db := openProjectDB(env)
 	if db != nil {
@@ -100,7 +133,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 		cr.CallDB = db
 	}
 
-	if !reportForce {
+	if !opts.Force {
 		if err := checkConcurrentRuns(db, "", runner.ActionReport, roleIDs); err != nil {
 			return err
 		}
@@ -113,7 +146,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 	for _, roleID := range roleIDs {
 		pinfo := basePinfo
 		pinfo.Role = "role " + roleID
-		prompt, err := prompts.AssembleRolePrompt(env.OrgDir, env.ProjectDir, roleID, env.SourceDir, extraPrompt, pinfo, reportIgnorePreviousReport)
+		prompt, err := prompts.AssembleRolePrompt(env.OrgDir, env.ProjectDir, roleID, env.SourceDir, extraPrompt, pinfo, opts.IgnorePreviousReport)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", roleID, err)
 			continue
@@ -131,7 +164,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 				TimeoutMin:           timeout,
 				HistoryDir:           env.RoleHistoryDir(roleID),
 				PromptName:           "report_prompt.md",
-				Verbose:              reportVerbose,
+				Verbose:              opts.Verbose,
 				TaskGroup:            taskGroup,
 			},
 		})
@@ -141,7 +174,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no valid roles to run")
 	}
 
-	if reportDryRun {
+	if opts.DryRun {
 		for i, t := range tasks {
 			if i > 0 {
 				fmt.Println()
@@ -153,7 +186,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	maxParallel := env.Config.Report.EffectiveMaxParallel(reportParallel)
+	maxParallel := env.Config.Report.EffectiveMaxParallel(opts.Parallel)
 
 	reportStart := time.Now()
 
@@ -261,7 +294,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if reportPrint && succeeded > 0 {
+	if opts.Print && succeeded > 0 {
 		for _, r := range results {
 			if r.Err != nil {
 				continue
@@ -274,9 +307,9 @@ func runReport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%d role(s) failed", failed)
 	}
 
-	if reportReview && succeeded > 0 {
+	if opts.Review && succeeded > 0 {
 		fmt.Println()
-		return runReview(nil, nil)
+		return runReview(ReviewOptions{})
 	}
 
 	if succeeded > 0 {
