@@ -383,7 +383,6 @@ func FormatProjectInfo(p ProjectInfoParams) string {
 	var b strings.Builder
 	b.WriteString("# ATeam Project Context\n\n")
 	b.WriteString("You are part of the ateam software:\n")
-	fmt.Fprintf(&b, "* runtime files: %s\n", shortRelPath(p.SourceDir, p.OrgDir))
 	fmt.Fprintf(&b, "* project name: %s\n", p.ProjectName)
 	fmt.Fprintf(&b, "* role: %s\n", p.Role)
 	b.WriteString("* project directory: . (working directory)\n")
