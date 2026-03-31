@@ -1,14 +1,19 @@
 BINARY = ateam
 
-.PHONY: build companion clean tidy test test-docker test-docker-live vuln
+.PHONY: build build-binary companion clean tidy test test-docker test-docker-live vuln docs
 
 BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
 GIT_COMMIT := $(shell git describe --always --dirty 2>/dev/null || echo unknown)
 LDFLAGS := -X github.com/ateam/cmd.BuildTime=$(BUILD_TIME) -X github.com/ateam/cmd.Version=$(VERSION) -X github.com/ateam/cmd.GitCommit=$(GIT_COMMIT)
 
-build: tidy
+build: build-binary docs
+
+build-binary: tidy
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
+
+docs: build-binary
+	./$(BINARY) roles --docs > ROLES.md
 
 companion:
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
