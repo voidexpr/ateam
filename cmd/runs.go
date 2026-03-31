@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ateam/internal/calldb"
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
@@ -90,12 +91,12 @@ func printRunsTable(rows []calldb.RecentRow) {
 		tokens := ""
 		total := int64(r.InputTokens + r.OutputTokens + r.CacheReadTokens)
 		if total > 0 {
-			tokens = fmtTokens(total)
+			tokens = display.FmtTokens(total)
 		}
 
 		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			r.ID, started, r.Profile, r.Action, r.Role, r.Model,
-			dur, fmtCost(r.CostUSD), tokens, status, r.TaskGroup)
+			dur, display.FmtCost(r.CostUSD), tokens, status, r.TaskGroup)
 	}
 	w.Flush()
 }
@@ -123,15 +124,3 @@ func fmtStartedAt(s string) string {
 	return s
 }
 
-func fmtTokens(n int64) string {
-	if n <= 0 {
-		return ""
-	}
-	if n >= 1_000_000 {
-		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
-	}
-	if n >= 1_000 {
-		return fmt.Sprintf("%.1fK", float64(n)/1_000)
-	}
-	return fmt.Sprintf("%d", n)
-}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
@@ -57,14 +58,14 @@ func runCost(cmd *cobra.Command, args []string) error {
 		var totalTokens int64
 		for _, a := range actionAggs {
 			fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%s\t%s\n",
-				a.Category, a.Count, fmtCost(a.CostUSD),
-				fmtTokens(a.InputTokens), fmtTokens(a.OutputTokens),
-				fmtTokens(a.CacheReadTokens), fmtTokens(a.TotalTokens))
+				a.Category, a.Count, display.FmtCost(a.CostUSD),
+				display.FmtTokens(a.InputTokens), display.FmtTokens(a.OutputTokens),
+				display.FmtTokens(a.CacheReadTokens), display.FmtTokens(a.TotalTokens))
 			totalCost += a.CostUSD
 			totalTokens += a.TotalTokens
 		}
 		fmt.Fprintf(w, "TOTAL\t\t%s\t\t\t\t%s\n",
-			fmtCost(totalCost), fmtTokens(totalTokens))
+			display.FmtCost(totalCost), display.FmtTokens(totalTokens))
 		w.Flush()
 	}
 
@@ -146,9 +147,9 @@ func runCost(cmd *cobra.Command, args []string) error {
 				label = ""
 			}
 			fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				label, action, al.count, fmtCost(al.cost),
-				fmtTokens(al.inputTok), fmtTokens(al.outputTok),
-				fmtTokens(al.cacheReadTok), fmtTokens(al.totalTok),
+				label, action, al.count, display.FmtCost(al.cost),
+				display.FmtTokens(al.inputTok), display.FmtTokens(al.outputTok),
+				display.FmtTokens(al.cacheReadTok), display.FmtTokens(al.totalTok),
 				started, ended, dur)
 			first = false
 		}
@@ -163,9 +164,9 @@ func runCost(cmd *cobra.Command, args []string) error {
 				label = ""
 			}
 			fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				label, action, al.count, fmtCost(al.cost),
-				fmtTokens(al.inputTok), fmtTokens(al.outputTok),
-				fmtTokens(al.cacheReadTok), fmtTokens(al.totalTok),
+				label, action, al.count, display.FmtCost(al.cost),
+				display.FmtTokens(al.inputTok), display.FmtTokens(al.outputTok),
+				display.FmtTokens(al.cacheReadTok), display.FmtTokens(al.totalTok),
 				started, ended, dur)
 			first = false
 		}
@@ -176,7 +177,7 @@ func runCost(cmd *cobra.Command, args []string) error {
 				label = ""
 			}
 			fmt.Fprintf(w, "%s\tTOTAL\t\t%s\t\t\t\t%s\t%s\t%s\t%s\n",
-				label, fmtCost(s.totalCost), fmtTokens(s.totalTokens),
+				label, display.FmtCost(s.totalCost), display.FmtTokens(s.totalTokens),
 				started, ended, dur)
 		}
 

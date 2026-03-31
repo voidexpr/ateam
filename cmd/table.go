@@ -18,6 +18,7 @@ import (
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/container"
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/ateam/internal/runtime"
@@ -54,16 +55,10 @@ func relPath(cwd, path string) string {
 	return rel
 }
 
-func fmtCost(cost float64) string {
-	if cost <= 0 {
-		return ""
-	}
-	return fmt.Sprintf("$%.2f", cost)
-}
 
 func printDone(r runner.RunSummary) {
 	costSuffix := ""
-	if c := fmtCost(r.Cost); c != "" {
+	if c := display.FmtCost(r.Cost); c != "" {
 		costSuffix = ", " + c
 	}
 	fmt.Printf("Done (%s%s)\n\n", runner.FormatDuration(r.Duration), costSuffix)
