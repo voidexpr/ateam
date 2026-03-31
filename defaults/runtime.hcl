@@ -229,8 +229,13 @@ agent "claude-haiku" {
 // claude-docker inherits from claude but uses --dangerously-skip-permissions for
 // unattended tool use inside Docker. The inherited sandbox is ignored by Claude.
 agent "claude-docker" {
-  base    = "claude"
+  type    = "claude"
+  command = "claude"
   args    = ["-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"]
+  env = {
+    CLAUDECODE = ""
+  }
+  required_env = ["ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"]
 }
 
 // claude-isolated uses a project-local config dir (.ateam/.claude) instead of ~/.claude,
@@ -354,6 +359,49 @@ container "docker-persistent" {
 profile "docker-persistent" {
   agent     = "claude-docker"
   container = "docker-persistent"
+}
+
+// Docker Sandbox: runs agents inside a Docker AI sandbox (microVM).
+// Provides hypervisor-level isolation with a private Docker daemon
+// and bidirectional workspace sync (git root synced at same absolute path).
+// Additional dirs (.ateamorg) are tar-copied as read-only snapshots.
+// Requires: Docker Desktop 4.58+
+//
+// Directory strategy (vs regular Docker):
+//   - Paths are 1:1 (same absolute path in sandbox as on host) — no remapping.
+//   - Only ONE workspace dir is synced bidirectionally (git root).
+//   - Extra dirs (.ateamorg, ~/.claude/) are tar-copied (one-way snapshots).
+//   - No TranslatePath, SourceWritable, or HostCLIPath — not needed or supported.
+//
+// Networking:
+//   - network_policy controls the sandbox VM's outbound access (default: "allow").
+//   - The sandbox has its own Docker daemon. Containers inside that daemon have
+//     restricted networking regardless of network_policy — they can pull images
+//     but cannot make outbound HTTPS connections to arbitrary hosts.
+//   - This means Docker-in-Docker builds (e.g. make test-docker) that need to
+//     fetch packages during RUN steps will fail. Use the regular "docker" profile
+//     for DinD workloads.
+//
+// Auto-recreation:
+//   - A config hash is stored in .ateam/cache/. When the config or ateam binary
+//     changes, the sandbox is automatically removed and recreated.
+//
+// copy_claude_config: when true, copies ~/.claude/ config (skills, plugins,
+// settings.json, CLAUDE.md) into the sandbox so the inner agent has access
+// to user-defined skills and MCP configuration. Default: false.
+container "docker-sandbox" {
+  type               = "docker-sandbox"
+  copy_claude_config = false
+  network_policy     = "allow"
+  forward_env = [
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+  ]
+}
+
+profile "docker-sandbox" {
+  agent     = "claude-docker"
+  container = "docker-sandbox"
 }
 
 // Devcontainer: runs agents inside the project's .devcontainer/ environment.

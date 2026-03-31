@@ -390,6 +390,29 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 			WorkspaceDir: sourceDir,
 			ForwardEnv:   cc.ForwardEnv,
 		}, nil
+	case "docker-sandbox":
+		sandboxName := buildContainerName(sourceDir, orgDir, roleID)
+		mountDir := sourceDir
+		if gitRepoDir != "" {
+			mountDir = gitRepoDir
+		}
+		var claudeDir string
+		if cc.CopyClaudeConfig {
+			if home, err := os.UserHomeDir(); err == nil {
+				claudeDir = filepath.Join(home, ".claude")
+			}
+		}
+		return &container.DockerSandboxContainer{
+			WorkspaceDir:  sourceDir,
+			MountDir:      mountDir,
+			OrgDir:        orgDir,
+			ClaudeDir:     claudeDir,
+			CacheDir:      filepath.Join(projectDir, "cache"),
+			ForwardEnv:    cc.ForwardEnv,
+			SandboxName:   sandboxName,
+			NetworkPolicy: cc.NetworkPolicy,
+			BuildVersion:  GitCommit,
+		}, nil
 	default:
 		return nil, nil
 	}
