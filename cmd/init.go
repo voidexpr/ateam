@@ -105,7 +105,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	dbg("git rev-parse --show-toplevel...")
 	gitTopLevel := execGitCmd(absPath, "rev-parse", "--show-toplevel")
 	dbg("git toplevel: " + gitTopLevel)
-	if gitTopLevel != "" {
+	if gitTopLevel != "" && gitTopLevel != absPath {
 		rel, relErr := filepath.Rel(absPath, gitTopLevel)
 		if relErr == nil {
 			gitRepo = rel
