@@ -98,7 +98,8 @@ func assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt strin
 		parts = append(parts, strings.ReplaceAll(basePrompt, "{{SOURCE_DIR}}", "."))
 	}
 	if rolePrompt != "" {
-		parts = append(parts, strings.ReplaceAll(rolePrompt, "{{SOURCE_DIR}}", "."))
+		_, roleBody := ParsePromptFrontmatter(rolePrompt)
+		parts = append(parts, strings.ReplaceAll(roleBody, "{{SOURCE_DIR}}", "."))
 	}
 
 	extras := collectRoleExtras(orgDir, projectDir, roleID, extraFile)
