@@ -21,6 +21,7 @@ var (
 	initOrgHome         bool
 	initAutoSetup       bool
 	initOrgCreatePrompt bool
+	initDebug           bool
 )
 
 var initCmd = &cobra.Command{
@@ -47,28 +48,41 @@ func init() {
 	initCmd.Flags().BoolVar(&initOrgHome, "org-home", false, "create .ateamorg/ in $HOME if none exists")
 	initCmd.Flags().BoolVar(&initAutoSetup, "auto-setup", false, "run auto-setup after initialization")
 	initCmd.Flags().BoolVar(&initOrgCreatePrompt, "org-create-prompt", false, "interactively choose where to create .ateamorg/")
+	initCmd.Flags().BoolVar(&initDebug, "debug", false, "print step-by-step progress to stderr")
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
+	dbg := func(msg string) {
+		if initDebug {
+			fmt.Fprintf(os.Stderr, "[init] %s\n", msg)
+		}
+	}
+	dbg("starting")
+
 	path := "."
 	if len(args) > 0 {
 		path = args[0]
 	}
 
+	dbg("resolving path: " + path)
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("cannot resolve path: %w", err)
 	}
 	absPath = evalSymlinks(absPath)
+	dbg("resolved to: " + absPath)
 
+	dbg("finding org...")
 	orgDir, err := root.FindOrg(absPath)
 	if err != nil {
+		dbg("org not found, creating...")
 		orgDir, err = autoCreateOrg(absPath)
 		if err != nil {
 			return err
 		}
 	}
 	orgRoot := filepath.Dir(orgDir)
+	dbg("org: " + orgDir)
 
 	// Name: relative path from org root to project dir
 	name := initName
@@ -82,12 +96,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 		name = rel
 	}
+	dbg("project name: " + name)
 
 	// Git: auto-discover from project dir
 	gitRepo := ""
 	gitRemote := initGitRemote
 
+	dbg("git rev-parse --show-toplevel...")
 	gitTopLevel := execGitCmd(absPath, "rev-parse", "--show-toplevel")
+	dbg("git toplevel: " + gitTopLevel)
 	if gitTopLevel != "" {
 		rel, relErr := filepath.Rel(absPath, gitTopLevel)
 		if relErr == nil {
@@ -98,12 +115,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	if gitRemote == "" {
+		dbg("git config remote.origin.url...")
 		gitRemote = execGitCmd(absPath, "config", "remote.origin.url")
+		dbg("git remote: " + gitRemote)
 	}
 
 	// Roles: if --role provided, those are enabled, rest disabled; otherwise use template defaults
 	var enabledRoles []string
 	if len(initRoles) > 0 {
+		dbg("resolving roles...")
 		resolved, resolveErr := prompts.ResolveRoleList(initRoles, nil, "", "")
 		if resolveErr != nil {
 			return resolveErr
@@ -119,19 +139,24 @@ func runInit(cmd *cobra.Command, args []string) error {
 		AllRoles:        prompts.AllRoleIDs,
 	}
 
+	dbg("InitProject...")
 	_, err = root.InitProject(absPath, orgDir, opts)
 	if err != nil {
 		return err
 	}
+	dbg("InitProject done")
 
 	// Re-resolve to show the full env display
+	dbg("LookupFrom...")
 	env, err := root.LookupFrom(absPath)
 	if err != nil {
 		return err
 	}
+	dbg("printEnv...")
 	if err := printEnv(env); err != nil {
 		return err
 	}
+	dbg("printEnv done")
 
 	fmt.Printf("\nNext steps:\n")
 	fmt.Printf("\n  1. Edit .ateam/config.toml to enable/disable specific roles as needed\n")
