@@ -19,6 +19,7 @@ var (
 	secretStorage string
 	secretSet     bool
 	secretDelete  bool
+	secretGet     bool
 	secretValue   string
 )
 
@@ -34,6 +35,7 @@ Examples:
   ateam secret                                    # list all secrets
   ateam secret ANTHROPIC_API_KEY                  # check/set a specific secret
   ateam secret ANTHROPIC_API_KEY --set            # set (reads value from stdin)
+  ateam secret ANTHROPIC_API_KEY --get            # print raw value (for scripting)
   ateam secret ANTHROPIC_API_KEY --delete
   ateam secret ANTHROPIC_API_KEY --scope global
   ateam secret ANTHROPIC_API_KEY --storage file`,
@@ -45,6 +47,7 @@ func init() {
 	secretCmd.Flags().StringVar(&secretScope, "scope", secret.ScopeGlobal, "secret scope: global, org, or project")
 	secretCmd.Flags().StringVar(&secretStorage, "storage", "", "storage backend: keychain or file (default: keychain on macOS, file otherwise)")
 	secretCmd.Flags().BoolVar(&secretSet, "set", false, "set the secret (reads value from stdin)")
+	secretCmd.Flags().BoolVar(&secretGet, "get", false, "print raw value to stdout (for scripting)")
 	secretCmd.Flags().StringVar(&secretValue, "value", "", "secret value (alternative to stdin)")
 	secretCmd.Flags().BoolVar(&secretDelete, "delete", false, "delete the secret")
 }
@@ -69,6 +72,10 @@ func runSecret(cmd *cobra.Command, args []string) error {
 
 	if secretDelete {
 		return deleteSecret(resolver, backend, name)
+	}
+
+	if secretGet {
+		return getSecret(resolver, name)
 	}
 
 	if secretSet {
@@ -110,6 +117,15 @@ func listSecrets(resolver *secret.Resolver, backend secret.Backend, projectDir, 
 			fmt.Printf("  %-30s not set\n", name)
 		}
 	}
+	return nil
+}
+
+func getSecret(resolver *secret.Resolver, name string) error {
+	result := resolver.Resolve(name)
+	if !result.Found {
+		return fmt.Errorf("%s: not set", name)
+	}
+	fmt.Print(result.Value)
 	return nil
 }
 
