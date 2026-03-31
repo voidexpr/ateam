@@ -626,7 +626,8 @@ The community is already converging on devcontainers as the standard way to sand
 | **Fence** | Practical allow/deny; /usr /lib /bin /etc readable | Allow/deny with always-protected targets | Default-deny outbound; domain rules; localhost controls | Most | Configurable | None | Low | Linux, macOS |
 | **clampdown** | Workdir + system dirs RX, rest blocked | Workdir only; masked .env/.npmrc | Agent allowlist; RFC1918/loopback/link-local blocked | All (in container) | Masked | None | Medium | Linux only |
 | **jailoc** | Explicit mounts only | Explicit mounts only | Private networks blocked by default | All (in container) | Mount | None | Medium | Linux, macOS (Docker) |
-| **Docker Sandboxes (MicroVM)** | VM isolation + file sync | VM isolation + file sync | HTTP/HTTPS policy; raw TCP/UDP blocked | All (in VM) | API key | None | Medium | macOS, Windows |
+| **Anthropic Devcontainer** | Bind mount workspace | Bind mount workspace | iptables ipset (IP-based, resolved at start) | All (in container) | Passed in | None | Low-Medium | Any Docker host |
+| **Docker Sandboxes (Docker Inc.)** | VM + bidirectional sync | VM + bidirectional sync | Proxy with domain allow/deny; private nets blocked | All (in VM + private Docker) | Injected by proxy (on host) | None | Medium | macOS, Windows (exp.) |
 
 ### E.10 Network Tier Implementation
 
@@ -769,15 +770,88 @@ Container-based sandboxing focused on explicit workspace isolation:
 
 Relevant if OpenCode is the baseline agent. Good isolation model for ATeam if the explicit-mount-only pattern is desired.
 
-#### E.13.5 Docker Sandboxes (Anthropic Official MicroVM)
+#### E.13.5 Anthropic Reference Devcontainer
 
-Anthropic's own Docker-based sandbox offering. Uses MicroVM sandboxes on macOS/Windows (Linux uses a legacy container path). Each sandbox gets a private Docker daemon and bidirectional file sync with the workspace.
+**Source:** [anthropics/claude-code/.devcontainer](https://github.com/anthropics/claude-code/tree/main/.devcontainer)
+**Docs:** [code.claude.com/docs/en/devcontainer](https://code.claude.com/docs/en/devcontainer)
+**Platform:** Any Docker host
 
-Network policy:
-- HTTP/HTTPS policy only; raw TCP/UDP blocked
-- Localhost and private ranges blocked unless explicitly proxied
+Anthropic's official reference Docker setup for running Claude Code in a container. A standard `node:20` container (not a microVM) with an iptables-based network firewall. Three components: `devcontainer.json`, `Dockerfile`, and `init-firewall.sh`.
 
-Best documented Docker-inside-the-sandbox story, but poor fit for host-local Postgres or other non-HTTP localhost services. Good if the workflow already revolves around `docker build` / Compose.
+**Filesystem model:**
+- Workspace bind-mounted from host (`source=${localWorkspaceFolder},target=/workspace`)
+- Named volumes for bash history and Claude config persistence
+- Host `~/.ssh`, `~/.aws`, etc. are NOT mounted — invisible to the agent
+
+**Network isolation (`init-firewall.sh`):**
+
+The firewall script implements a default-deny iptables policy:
+- Allows DNS (UDP 53), SSH (TCP 22), localhost loopback, host network (auto-detected)
+- Creates an `ipset` of allowed domains by DNS-resolving them at startup: GitHub (via `api.github.com/meta` IP ranges), `registry.npmjs.org`, `api.anthropic.com`, `sentry.io`, VS Code marketplace domains
+- Sets `iptables -P OUTPUT DROP` — everything not in the allowlist is rejected
+- Requires `--cap-add=NET_ADMIN` and `--cap-add=NET_RAW` for firewall setup
+
+**Key limitation:** IP-based firewall (DNS resolved at startup). If IPs change after container start, access breaks until restart. No Docker-in-Docker support (no Docker socket mounted). Credentials passed into the container are exposed if a malicious project exfiltrates them.
+
+**Intended usage:** Run `claude --dangerously-skip-permissions` inside. The container boundary + iptables firewall IS the safety layer.
+
+**Assessment for ATeam:** Good reference implementation for Docker-based agent isolation. The iptables/ipset pattern is a practical alternative to proxy-based domain filtering for containers. The IP-at-startup resolution is a weakness for long-running agents, but fine for task-scoped runs.
+
+#### E.13.6 Docker Desktop Sandboxes (Docker Inc.)
+
+**Docs:** [docs.docker.com/ai/sandboxes](https://docs.docker.com/ai/sandboxes/)
+**Platform:** macOS (Apple Virtualization.framework), Windows experimental (Hyper-V); Linux gets legacy container-based sandboxes (Docker Desktop 4.57+)
+**Requires:** Docker Desktop 4.58+
+
+This is **Docker Inc.'s product**, not Anthropic's. Each sandbox is a lightweight **microVM** (not a container), running its own Linux kernel and its own private Docker daemon.
+
+**CLI:**
+```
+docker sandbox run claude ~/my-project           # run Claude Code in a sandbox
+docker sandbox run claude ~/project ~/docs:ro    # multiple workspaces, read-only option
+docker sandbox ls                                 # list sandboxes
+docker sandbox exec -it <name> bash               # shell into a running sandbox
+docker sandbox rm <name>                           # remove a sandbox
+```
+
+**Filesystem model — bidirectional file sync (not bind mounts):**
+- Files sync between host and VM at identical absolute paths
+- Changes propagate in both directions automatically
+- Path consistency ensures error messages match between environments
+- When a sandbox is removed, the VM is deleted but workspace changes have already synced back
+
+**Docker-in-Docker:**
+
+Each sandbox has its own private Docker daemon. Agents can `docker build`, `docker run`, `docker compose` — all inside the sandbox VM. No access to the host Docker daemon, host containers, or host images. This is the only sandboxing solution reviewed that provides safe Docker-in-Docker.
+
+**Network policy:**
+
+An HTTP/HTTPS filtering proxy runs on the host at `host.docker.internal:3128`. All agent traffic passes through it.
+
+Default policy (allow mode):
+- All internet traffic allowed except private networks and metadata services
+- Blocked by default: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.0/8`, `169.254.0.0/16`, IPv6 link-local/ULA
+- `*.anthropic.com` and `platform.claude.com:443` pre-allowed
+
+Deny mode (strict):
+```
+docker sandbox network proxy <name> --policy deny --allow-host api.anthropic.com --allow-host "*.npmjs.org"
+```
+
+Additional features:
+- **Credential injection:** the proxy injects API keys (Anthropic, OpenAI, GitHub) so credentials stay on the host, never inside the VM
+- **HTTPS bypass:** `--bypass-host` for certificate-pinned services (loses MITM inspection)
+- **Monitoring:** `docker sandbox network log [--json]` shows access patterns
+- **Config persistence:** per-sandbox at `~/.docker/sandboxes/vm/<name>/proxy-config.json`; defaults at `~/.sandboxd/proxy-config.json`
+
+**Key limitations:**
+- microVM only on macOS/Windows; Linux falls back to legacy containers
+- Requires Docker Desktop 4.58+ (commercial license for large orgs)
+- Domain fronting can bypass HTTPS filters
+- No inter-sandbox networking
+- Sandboxes are persistent until explicitly removed
+
+**Assessment for ATeam:** Strongest isolation of any Docker-based approach (hypervisor-level). The only solution with safe DinD and credential injection. The right choice when agents need to build/test Docker images. The Docker Desktop license requirement and macOS/Windows-only microVM are the main constraints. On Linux, the legacy container fallback is significantly weaker.
 
 ### E.14 Network Companion Tools
 
@@ -795,5 +869,7 @@ The March 2026 landscape adds Greywall, Fence, and clampdown as meaningful optio
 - **Best native generalist (host sandbox):** Greywall — replaces or supplements Anthropic SRT as the primary host sandbox, especially on Linux where the network story is strongest. On macOS, Anthropic SRT or Greywall are comparable.
 - **Package-manager and command safety:** Borrow Fence's policy patterns (command restrictions, monitor mode, registry allowlists) regardless of which sandbox is used.
 - **Localhost integration tests in containers:** tsk-tsk is the most practical choice — `host_ports` + `TSK_PROXY_HOST` provide clean host-service access that clampdown and Docker Sandboxes explicitly block.
+- **Docker-in-Docker isolation:** Docker Desktop Sandboxes (Docker Inc.) — the only solution with safe DinD via private daemon per sandbox, plus credential injection that keeps API keys off the VM. Requires Docker Desktop license; microVM only on macOS/Windows.
+- **Reference Docker setup:** Anthropic's devcontainer is a good starting point for iptables-based container isolation without Docker Desktop. IP-based firewall is less flexible than proxy-based domain filtering but simpler to audit.
 - **Maximum Linux hardening:** clampdown when the agent needs zero access to host services or private networks.
 - **Network-only companion:** Pair Linux hosts with OpenSnitch, macOS with Little Snitch, for domain-level outbound filtering alongside any filesystem sandbox.
