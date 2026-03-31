@@ -54,5 +54,11 @@ List the key specifics about the project being analyzed from your specific role 
 - Recommend a tool to automate your objects if it is appropriate to the language and tech stack analyzed
 - Start your report directly with the `# Summary` heading — no preamble text like "Here's my report:"
 - Use `#` for top-level headings, not `##`
-- When you are done generated the report make sure it contains all the information you meant for it to contain and is not truncated
+- When you are done generating the report make sure it contains all the information you meant for it to contain and is not truncated
+
+## Critical Output Rule
+
+Your FINAL assistant message must be the complete report starting with `# Summary`.
+Do not send any preamble, summary, or commentary after the report.
+The report itself IS your final output — it will be saved directly as report.md.
 
