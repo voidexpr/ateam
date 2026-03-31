@@ -11,3 +11,4 @@
     * `make test-docker`: any time you change agent, container, runner related code or dependencies
 * when not executing a skill don't commit without asking first
 * avoid complex commands that require approvals. Consider using reusable scripts for common testing
+* do NOT git commit without asking me first
