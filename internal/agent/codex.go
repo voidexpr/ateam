@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -102,6 +103,8 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 		if ef, err := os.Create(req.StderrFile); err == nil {
 			defer ef.Close()
 			stderrWriters = append(stderrWriters, ef)
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: cannot create stderr file %s: %v\n", req.StderrFile, err)
 		}
 	}
 	cmd.Stderr = io.MultiWriter(stderrWriters...)
@@ -118,6 +121,8 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 			defer sf.Close()
 			streamWriter = bufio.NewWriter(sf)
 			defer streamWriter.Flush()
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: cannot create stream file %s: %v\n", req.StreamFile, err)
 		}
 	}
 
