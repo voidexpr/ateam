@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/ateam/internal/streamutil"
 )
 
 // ClaudeAgent executes prompts using the Claude CLI.
@@ -258,7 +260,7 @@ type claudeResultEvent struct {
 
 // parseClaudeLine parses a single JSONL line from claude's stream-json output.
 func parseClaudeLine(line []byte) (string, any, error) {
-	line = trimBOM(line)
+	line = streamutil.TrimBOM(line)
 	if len(line) == 0 {
 		return "", nil, nil
 	}
@@ -296,13 +298,6 @@ func parseClaudeLine(line []byte) (string, any, error) {
 	default:
 		return "", nil, nil
 	}
-}
-
-func trimBOM(b []byte) []byte {
-	if len(b) >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF {
-		return b[3:]
-	}
-	return b
 }
 
 // resolveConfigDir returns the CLAUDE_CONFIG_DIR value from request env (priority) or agent env.
