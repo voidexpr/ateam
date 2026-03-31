@@ -294,9 +294,20 @@ The official Anthropic tool. Uses OS-level primitives — not containers — to 
 
 **How it works:**
 
+This is a **per-command sandbox** — Claude Code itself runs unsandboxed on the host and wraps each individual bash command with `sandbox-exec` before executing it:
+
+```
+Claude Code (unsandboxed, on host)
+  └─ sandbox-exec -p <dynamic-profile> bash -c "npm install"   ← sandboxed
+  └─ sandbox-exec -p <dynamic-profile> bash -c "git status"    ← sandboxed
+  └─ playwright install                                         ← NOT sandboxed (if excluded)
+```
+
+Each command gets its own dynamically generated Seatbelt profile. This means no nesting issues — each invocation is independent. The tradeoff is that Claude Code's own Node.js process has full host access; only the bash commands it spawns are constrained.
+
 - On **macOS**: generates a dynamic Seatbelt profile (`.sb` file) and executes via `sandbox-exec`. The profile is regenerated per invocation based on the configured policy.
 - On **Linux**: uses [bubblewrap](https://github.com/containers/bubblewrap) to create a restricted namespace. Requires `bubblewrap` and `socat` packages.
-- **Network proxy**: all network traffic is forced through a unix domain socket to a proxy running outside the sandbox. The proxy enforces domain allowlists. This is how network isolation works without iptables or network namespaces on macOS.
+- **Network proxy**: all network traffic is forced through a unix domain socket to a proxy running outside the sandbox. The Seatbelt profile only allows connections to the proxy's localhost ports; the proxy enforces domain allowlists. This is how network isolation works without iptables or network namespaces on macOS.
 
 **Filesystem policy (Claude Code defaults):**
 
@@ -404,6 +415,16 @@ A newer macOS wrapper around `claude` that takes a narrower, more operationally 
 
 **How it works:**
 
+This is a **whole-process sandbox** — the entire Claude Code process runs inside `sandbox-exec`, not just individual commands:
+
+```
+claude-sandbox (unsandboxed parent)
+  ├─ unboxexec daemon goroutine (unsandboxed, listening on Unix socket)
+  └─ sandbox-exec → claude (entire Claude Code process is sandboxed)
+       └─ bash commands (inherit sandbox, also sandboxed)
+       └─ claude-sandbox unboxexec → talks to daemon → runs outside sandbox
+```
+
 - `claude-sandbox` is a drop-in replacement for `claude`. You can run `claude-sandbox --dangerously-skip-permissions` and get Seatbelt-enforced write confinement around that session.
 - Configuration is TOML-based with **three scopes**: user (`~/.claude/sandbox.toml`), project (`.claude/sandbox.toml`), and local overrides (`.claude/sandbox.local.toml`).
 - The default profile is intentionally simple: **deny file writes globally**, then allow writes to the working directory, `~/.claude`, and `/tmp`.
@@ -411,13 +432,15 @@ A newer macOS wrapper around `claude` that takes a narrower, more operationally 
 
 **Sandbox-external execution (`unboxexec`):**
 
-This is the most distinctive feature. Some tools, especially browser automation stacks like Playwright, do not work cleanly inside nested macOS sandboxes. `claude-sandbox` solves that by starting an internal daemon outside the sandbox and exposing `claude-sandbox unboxexec` inside the sandbox:
+The daemon exists because of a fundamental macOS Seatbelt constraint: once a sandbox profile is applied to a process, it **cannot be removed or nested**. Every child process inherits the sandbox — you can't opt out per-command, and you can't call `sandbox-exec` again from within a sandboxed process. The only way to escape is to talk to a process that was never sandboxed — hence the daemon listening on a Unix socket outside the sandbox wall.
+
+Anthropic's sandbox-runtime doesn't need this mechanism because Claude Code itself is never sandboxed — it's the caller, not the callee, of `sandbox-exec`.
 
 - Claude invokes `claude-sandbox unboxexec -- <command> ...`
 - The request goes over a Unix domain socket to the daemon
 - The daemon runs the command **outside** the sandbox only if it matches an allowlisted regex in `[unboxexec].allowed_commands`
 
-This is a deliberate escape hatch, not a bug. It makes the wrapper more usable for real development tasks, but it also means the safety posture depends heavily on how tight the `allowed_commands` patterns are.
+This is a deliberate escape hatch, not a bug. It makes the wrapper more usable for real development tasks (especially Playwright and other browser automation), but the safety posture depends heavily on how tight the `allowed_commands` patterns are.
 
 **Security profile:**
 
@@ -438,7 +461,27 @@ This is a deliberate escape hatch, not a bug. It makes the wrapper more usable f
 | Overhead | Low | Seatbelt wrapper, no VM or container startup. |
 | Platform | macOS only | Not useful for Linux-based agent fleets. |
 
-**Best fit**: macOS users who want a predictable write-constrained wrapper with per-project config and occasional explicitly-approved escapes for incompatible tools.
+**Best fit**: macOS users who want a predictable write-constrained wrapper with per-project config and occasionally explicitly-approved escapes for incompatible tools.
+
+### E.4a Per-Command vs Whole-Process Sandboxing
+
+The fundamental architectural difference between Anthropic's sandbox-runtime (E.2) and kohkimakimoto's claude-sandbox (E.4) is **what gets sandboxed**:
+
+| Dimension | kohkimakimoto (whole-process) | Anthropic SRT (per-command) |
+|---|---|---|
+| **Scope** | Claude Code itself is constrained — can't write files or access network except as allowed | Only bash tool commands are sandboxed; Claude Code's own process has full access |
+| **Defense depth** | Stronger — even if Claude Code has a bug, it can't write outside allowed paths | Weaker — relies on Claude Code correctly wrapping every command |
+| **Bypass risk** | Needs an explicit escape hatch (the daemon), which is an attack surface | No escape hatch needed, but a bug in wrapping logic means no sandbox at all |
+| **Nesting** | Can't nest sandbox-exec, so Playwright/etc. need the daemon | No nesting issue — each command is independently sandboxed |
+| **Network** | Default profile doesn't restrict network at all | Full network filtering via proxy with domain allowlists |
+| **Integration** | External wrapper, works with any Claude Code version | Library integrated into Claude Code, needs Anthropic to ship it |
+| **Complexity** | Simple — one static profile + daemon | Complex — dynamic profiles, proxy servers, per-command wrapping, violation monitoring |
+
+**The core tradeoff:** kohkimakimoto doesn't trust Claude Code itself — even its Node.js process can't escape the sandbox. Anthropic trusts Claude Code but doesn't trust the commands it runs. The daemon is the cost of not trusting the orchestrator: you need an out-of-band channel to run things that can't work inside the sandbox.
+
+If Anthropic ships sandbox-runtime as a standard part of Claude Code (which is the trajectory), the per-command model covers most use cases. But the whole-process model still has value if you want to restrict what Claude Code itself can do — for example, preventing it from writing to `~/.ssh` through its own Node.js process, not just through bash commands.
+
+**For ATeam:** the per-command model (Anthropic SRT) is the right default since it's officially supported and has network filtering. The whole-process model is worth considering for high-security scenarios where Claude Code's own process shouldn't have host access, but the daemon escape hatch partially undermines that benefit.
 
 ### E.5 cco (Claude Condom)
 
