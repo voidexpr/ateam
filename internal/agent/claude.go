@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +13,9 @@ import (
 
 	"github.com/ateam/internal/streamutil"
 )
+
+// parseClaudeLine delegates to the shared streamutil parser.
+var parseClaudeLine = streamutil.ParseClaudeLine
 
 // ClaudeAgent executes prompts using the Claude CLI.
 type ClaudeAgent struct {
@@ -158,12 +160,11 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 
 		switch typ {
 		case "system":
-			sys := ev.(*claudeSystemEvent)
+			sys := ev.(*streamutil.SystemEvent)
 			ch <- StreamEvent{Type: "system", SessionID: sys.SessionID}
 
 		case "assistant":
-			ast := ev.(*claudeAssistantEvent)
-			// Emit text blocks
+			ast := ev.(*streamutil.AssistantEvent)
 			var textParts []string
 			for _, block := range ast.Message.Content {
 				switch block.Type {
@@ -184,11 +185,11 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 			}
 
 		case "tool_result":
-			tr := ev.(*claudeToolResultEvent)
+			tr := ev.(*streamutil.ToolResultEvent)
 			ch <- StreamEvent{Type: "tool_result", ToolResult: tr.Content}
 
 		case "result":
-			res := ev.(*claudeResultEvent)
+			res := ev.(*streamutil.ResultEvent)
 			ch <- StreamEvent{
 				Type:            "result",
 				Output:          lastAssistantText,
@@ -218,89 +219,6 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 			ExitCode:   exitCode,
 			DurationMS: time.Since(startedAt).Milliseconds(),
 		}
-	}
-}
-
-// claude-native JSONL event types
-
-type claudeTypedEvent struct {
-	Type string `json:"type"`
-}
-
-type claudeSystemEvent struct {
-	Subtype   string `json:"subtype"`
-	SessionID string `json:"session_id"`
-}
-
-type claudeAssistantEvent struct {
-	Message struct {
-		Content []claudeContentBlock `json:"content"`
-	} `json:"message"`
-}
-
-type claudeContentBlock struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text,omitempty"`
-	Name  string          `json:"name,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
-}
-
-type claudeToolResultEvent struct {
-	Content string `json:"content"`
-}
-
-type claudeResultEvent struct {
-	TotalCostUSD float64 `json:"total_cost_usd"`
-	CostUSD      float64 `json:"cost_usd"`
-	DurationMS   int64   `json:"duration_ms"`
-	NumTurns     int     `json:"num_turns"`
-	IsError      bool    `json:"is_error"`
-	Usage        struct {
-		InputTokens          int `json:"input_tokens"`
-		OutputTokens         int `json:"output_tokens"`
-		CacheReadInputTokens int `json:"cache_read_input_tokens"`
-	} `json:"usage"`
-}
-
-// parseClaudeLine parses a single JSONL line from claude's stream-json output.
-func parseClaudeLine(line []byte) (string, any, error) {
-	line = streamutil.TrimBOM(line)
-	if len(line) == 0 {
-		return "", nil, nil
-	}
-
-	var typed claudeTypedEvent
-	if err := json.Unmarshal(line, &typed); err != nil {
-		return "", nil, err
-	}
-
-	switch typed.Type {
-	case "system":
-		var ev claudeSystemEvent
-		if err := json.Unmarshal(line, &ev); err != nil {
-			return typed.Type, nil, err
-		}
-		return typed.Type, &ev, nil
-	case "assistant":
-		var ev claudeAssistantEvent
-		if err := json.Unmarshal(line, &ev); err != nil {
-			return typed.Type, nil, err
-		}
-		return typed.Type, &ev, nil
-	case "tool_result":
-		var ev claudeToolResultEvent
-		if err := json.Unmarshal(line, &ev); err != nil {
-			return typed.Type, nil, err
-		}
-		return typed.Type, &ev, nil
-	case "result":
-		var ev claudeResultEvent
-		if err := json.Unmarshal(line, &ev); err != nil {
-			return typed.Type, nil, err
-		}
-		return typed.Type, &ev, nil
-	default:
-		return "", nil, nil
 	}
 }
 
