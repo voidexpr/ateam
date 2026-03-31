@@ -16,6 +16,7 @@ import (
 
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/config"
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/yuin/goldmark"
@@ -80,30 +81,12 @@ type pageData struct {
 	Data        any
 }
 
-func fmtTokensI64(n int64) string {
-	if n <= 0 {
-		return ""
-	}
-	if n >= 1_000_000 {
-		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
-	}
-	if n >= 1_000 {
-		return fmt.Sprintf("%.1fK", float64(n)/1_000)
-	}
-	return fmt.Sprintf("%d", n)
-}
-
 func funcMap() template.FuncMap {
 	return template.FuncMap{
-		"fmtCost": func(c float64) string {
-			if c <= 0 {
-				return ""
-			}
-			return fmt.Sprintf("$%.2f", c)
-		},
-		"fmtTokens": fmtTokensI64,
+		"fmtCost":  display.FmtCost,
+		"fmtTokens": display.FmtTokens,
 		"fmtTokensInt": func(n int) string {
-			return fmtTokensI64(int64(n))
+			return display.FmtTokens(int64(n))
 		},
 		"fmtDateAge": func(t time.Time) string {
 			if t.IsZero() {

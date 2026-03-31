@@ -7,6 +7,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/spf13/cobra"
@@ -176,8 +177,8 @@ func printPromptSources(out io.Writer, sources []prompts.PromptSource) {
 		if !s.ModTime.IsZero() {
 			modified = fmtDateAge(s.ModTime)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\n", s.DisplayPath(), modified, fmtTokens(int64(tokens)))
+		fmt.Fprintf(w, "%s\t%s\t%s\n", s.DisplayPath(), modified, display.FmtTokens(int64(tokens)))
 	}
-	fmt.Fprintf(w, "TOTAL\t\t%s\n", fmtTokens(int64(totalTokens)))
+	fmt.Fprintf(w, "TOTAL\t\t%s\n", display.FmtTokens(int64(totalTokens)))
 	w.Flush()
 }

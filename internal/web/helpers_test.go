@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/ateam/internal/calldb"
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/runner"
 )
 
@@ -36,7 +37,7 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
-func TestFmtTokensI64(t *testing.T) {
+func TestFmtTokens(t *testing.T) {
 	tests := []struct {
 		input int64
 		want  string
@@ -55,9 +56,9 @@ func TestFmtTokensI64(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
-			got := fmtTokensI64(tt.input)
+			got := display.FmtTokens(tt.input)
 			if got != tt.want {
-				t.Errorf("fmtTokensI64(%d) = %q, want %q", tt.input, got, tt.want)
+				t.Errorf("FmtTokens(%d) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}

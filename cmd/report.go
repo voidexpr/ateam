@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -219,7 +220,7 @@ func runReport(cmd *cobra.Command, args []string) error {
 	for r := range completed {
 		elapsed := runner.FormatDuration(r.Duration)
 		endedAt := r.EndedAt.Format("15:04:05")
-		tokens := fmtTokens(int64(r.InputTokens + r.OutputTokens + r.CacheReadTokens))
+		tokens := display.FmtTokens(int64(r.InputTokens + r.OutputTokens + r.CacheReadTokens))
 
 		statusMu.Lock()
 		idx := roleIndex[r.RoleID]
