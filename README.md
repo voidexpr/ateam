@@ -131,7 +131,20 @@ Add `report_extra_prompt.md` or `review_extra_prompt.md` to document:
 
 ## Roles
 
-**17 built-in roles**: `automation`, `basic_project_structure`, `critic_engineering`, `critic_project`, `database_config`, `database_schema`, `dependencies`, `docs_external`, `docs_internal`, `production_ready`, `project_characteristics`, `refactor_architecture`, `refactor_small`, `security`, `shortcut_taker`, `testing_basic`, `testing_full`.
+Many built-in roles covering security, testing, documentation, dependencies, refactoring, and more. See [ROLES.md](ROLES.md) for full descriptions.
+
+**Enabled by default** (8 roles):
+
+| Role | Description |
+|------|-------------|
+| `database_schema` | Analyzes schema definitions, migrations, indexes, constraints, and naming conventions. |
+| `dependencies` | Assesses dependency health: outdated packages, unused deps, duplicates, and CVE vulnerabilities. |
+| `docs_external` | Reviews user-facing documentation: README quality, install instructions, API docs, and accuracy. |
+| `docs_internal` | Assesses developer-facing docs: architecture guides, onboarding, inline comments, and config docs. |
+| `project_characteristics` | Produces a structured project profile: size, complexity, tech stack, test coverage, and activity. |
+| `refactor_small` | Concrete code improvements: naming, duplication, error handling, dead code, and conventions. |
+| `security` | Security vulnerability analysis: injection, auth flaws, hardcoded secrets, input validation, and CVEs. |
+| `testing_basic` | Ensures a minimal set of high-value regression tests covering critical paths. |
 
 Enable/disable roles in `.ateam/config.toml` or let `ateam auto-setup` configure them based on your project.
 
