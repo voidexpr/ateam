@@ -69,7 +69,7 @@ func AssembleRoleCodePrompt(orgDir, projectDir, roleID, sourceDir, extraPrompt s
 		CodeBasePromptFile, CodePromptFile, CodeExtraPromptFile, true)
 }
 
-// Prompt sequence: ATeam Project Context → Base prompt → Role-specific prompt → Extra prompts → Previous report → CLI extra
+// Prompt sequence: ATeam Project Context → Role-specific prompt → Base prompt (format/output) → Extra prompts → Previous report → CLI extra
 func assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, baseFile, roleFile, extraFile string, skipPreviousReport bool) (string, error) {
 	rolePrompt := readFileOr3Level(
 		filepath.Join(projectDir, "roles", roleID, roleFile),
@@ -94,12 +94,12 @@ func assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt strin
 	if overview := readOverview(projectDir); overview != "" {
 		parts = append(parts, overview)
 	}
-	if basePrompt != "" {
-		parts = append(parts, strings.ReplaceAll(basePrompt, "{{SOURCE_DIR}}", "."))
-	}
 	if rolePrompt != "" {
 		_, roleBody := ParsePromptFrontmatter(rolePrompt)
 		parts = append(parts, strings.ReplaceAll(roleBody, "{{SOURCE_DIR}}", "."))
+	}
+	if basePrompt != "" {
+		parts = append(parts, strings.ReplaceAll(basePrompt, "{{SOURCE_DIR}}", "."))
 	}
 
 	extras := collectRoleExtras(orgDir, projectDir, roleID, extraFile)
