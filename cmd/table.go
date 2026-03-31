@@ -196,6 +196,10 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 		r.SandboxExtraDomains = env.Config.SandboxExtra.AllowDomains
 		r.SandboxExtraExcludedCmd = env.Config.SandboxExtra.UnsandboxedCommands
 	}
+	// Grant read access to the entire git repo when project is nested within it
+	if env.GitRepoDir != "" && env.GitRepoDir != env.SourceDir {
+		r.SandboxExtraRead = append(r.SandboxExtraRead, env.GitRepoDir)
+	}
 	return r
 }
 
