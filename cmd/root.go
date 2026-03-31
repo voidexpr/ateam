@@ -50,4 +50,5 @@ func init() {
 	rootCmd.AddCommand(autoSetupCmd)
 	rootCmd.AddCommand(inspectCmd)
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(migrateCmd)
 }
