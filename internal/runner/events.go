@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+
+	"github.com/ateam/internal/streamutil"
 )
 
 const (
@@ -64,7 +66,7 @@ type resultEvent struct {
 // Returns the event type, the parsed struct, and any error.
 // Unknown types return ("", nil, nil).
 func parseStreamLine(line []byte) (string, any, error) {
-	line = trimBOM(line)
+	line = streamutil.TrimBOM(line)
 	if len(line) == 0 {
 		return "", nil, nil
 	}
@@ -158,9 +160,3 @@ func scanStreamFileForResult(path string) *ResultLine {
 	return last
 }
 
-func trimBOM(b []byte) []byte {
-	if len(b) >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF {
-		return b[3:]
-	}
-	return b
-}

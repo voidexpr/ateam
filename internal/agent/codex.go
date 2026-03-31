@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/ateam/internal/streamutil"
 )
 
 // CodexAgent executes prompts using the OpenAI Codex CLI.
@@ -241,7 +243,7 @@ type CodexErrorEvent struct {
 
 // ParseCodexLine parses a single JSONL line from codex exec --json output.
 func ParseCodexLine(line []byte) (string, any, error) {
-	line = trimBOM(line)
+	line = streamutil.TrimBOM(line)
 	if len(line) == 0 {
 		return "", nil, nil
 	}

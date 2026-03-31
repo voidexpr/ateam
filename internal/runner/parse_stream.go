@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/ateam/internal/agent"
+	"github.com/ateam/internal/streamutil"
 )
 
 // DisplayEvent is the normalized display type all stream parsers produce.
@@ -76,7 +77,7 @@ const (
 // parseDisplayLine parses any JSONL line into normalized DisplayEvents.
 // hint is sticky — once detected, pass it for subsequent lines.
 func parseDisplayLine(line []byte, hint streamFormat) ([]DisplayEvent, streamFormat, error) {
-	line = trimBOM(line)
+	line = streamutil.TrimBOM(line)
 	if len(line) == 0 {
 		return nil, hint, nil
 	}
