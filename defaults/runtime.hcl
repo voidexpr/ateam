@@ -55,10 +55,11 @@ locals {
       "filesystem": {
         "additionalDirectories": [
           "/tmp",
+          "/var/folders",
+          "/private/tmp",
           "~/.docker/run/"
         ],
         "allowWrite": [
-          "/tmp",
           "~/.docker/run/",
           "~/.bun",
           "~/.cache",
