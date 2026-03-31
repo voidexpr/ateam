@@ -630,11 +630,23 @@ profile "devcontainer" {
 
 Use `--profile docker` to run in ateam's Docker, `--profile devcontainer` to run in your project's devcontainer, or `--profile cheap` for cheaper runs.
 
+#### If run supervisor in docker
+
+Typically only coding agents need to run inside docker so they can build and run tests in an isolated environment. Basic docker config from [README.md](README.md) is enough. But if you want the supervisor itself to run in docker and launch ateam coding agents then a Linux build of ateam must be available inside of docker. This is supported, cross-compile the Linux companion binary:
+
+```bash
+make companion
+mkdir -p "$HOME/.ateamorg/cache"
+ln -sf "$(pwd)/ateam-linux-amd64" "$HOME/.ateamorg/cache/"
+```
+
 ## Troubleshooting
 
-### Runner Log
+### DEPRECATED: Runner Log
 
-Every invocation is logged to `.ateam/logs/runner.log` (tab-separated, quoted fields).
+Use `ateam ps` instead of inspecting this log. You can also use `ateam inspect TASKID` to get more details.
+
+Legacy: Every invocation is logged to `.ateam/logs/runner.log` (tab-separated, quoted fields).
 
 ### Debugging Prompts
 
