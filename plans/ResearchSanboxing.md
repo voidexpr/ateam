@@ -805,6 +805,19 @@ The firewall script implements a default-deny iptables policy:
 
 This is **Docker Inc.'s product**, not Anthropic's. Each sandbox is a lightweight **microVM** (not a container), running its own Linux kernel and its own private Docker daemon.
 
+**Container vs Sandbox — the security model difference:**
+
+| Dimension | Regular Docker container | Docker Sandbox (microVM) |
+|---|---|---|
+| **Kernel** | Shares host kernel — kernel exploits can escalate to host | Own kernel inside VM — kernel exploit stays in sandbox |
+| **Docker daemon** | Shared daemon (or `--privileged` DinD shares host kernel) — agent can see host containers/images | Private daemon per sandbox — agent sees only its own containers |
+| **Visibility** | Shows in `docker ps` | Does not appear in `docker ps`; use `docker sandbox ls` |
+| **Image/layer sharing** | Shared between containers on same daemon | No sharing — each sandbox has its own storage |
+| **Isolation boundary** | Linux namespaces + cgroups (process-level) | Hardware hypervisor (Apple Virtualization.framework / Hyper-V) |
+| **Escape surface** | Container escapes are a known, well-studied attack class | Requires VM escape — significantly harder |
+
+The fundamental difference: containers isolate processes, sandboxes isolate kernels. A compromised container can potentially reach the host through kernel exploits or misconfigured capabilities. A compromised sandbox is still trapped in its own VM.
+
 **CLI:**
 ```
 docker sandbox run claude ~/my-project           # run Claude Code in a sandbox
@@ -845,13 +858,24 @@ Additional features:
 - **Config persistence:** per-sandbox at `~/.docker/sandboxes/vm/<name>/proxy-config.json`; defaults at `~/.sandboxd/proxy-config.json`
 
 **Key limitations:**
-- microVM only on macOS/Windows; Linux falls back to legacy containers
-- Requires Docker Desktop 4.58+ (commercial license for large orgs)
 - Domain fronting can bypass HTTPS filters
 - No inter-sandbox networking
-- Sandboxes are persistent until explicitly removed
+- Sandboxes are persistent until explicitly removed; multiple sandboxes do not share images or layers
 
-**Assessment for ATeam:** Strongest isolation of any Docker-based approach (hypervisor-level). The only solution with safe DinD and credential injection. The right choice when agents need to build/test Docker images. The Docker Desktop license requirement and macOS/Windows-only microVM are the main constraints. On Linux, the legacy container fallback is significantly weaker.
+**Assessment for ATeam:** Strongest isolation of any Docker-based approach (hypervisor-level). The only solution with safe DinD and credential injection. The right choice when agents need to build/test Docker images.
+
+ATeam's current approach uses `--privileged` DinD containers, which gives each agent its own Docker daemon but still shares the host kernel. Docker Sandboxes would give stronger isolation boundaries per agent at the cost of higher resource overhead (a full microVM + daemon per sandbox). This overhead is significant if running many agents in parallel. The Linux limitation (no microVM, only legacy containers) is also relevant since ATeam targets Linux CI environments.
+
+**Constraints:** Docker Desktop license requirement for large orgs. microVM only on macOS/Windows; Linux falls back to legacy containers which lose the kernel isolation advantage.
+
+**References:**
+- [Docker Sandboxes product page](https://www.docker.com/products/docker-sandboxes/)
+- [Architecture docs](https://docs.docker.com/ai/sandboxes/architecture/)
+- [Getting started](https://docs.docker.com/ai/sandboxes/get-started/)
+- [Docker blog announcement (Jan 2026)](https://www.docker.com/blog/docker-sandboxes-run-claude-code-and-other-coding-agents-unsupervised-but-safely/)
+- [Containers vs MicroVMs comparison (Ajeet Raina, Feb 2026)](https://www.ajeetraina.com/docker-sandboxes-containers-vs-microvms-when-to-use-what/)
+- [Sandboxed container technologies overview (Palo Alto Unit 42)](https://unit42.paloaltonetworks.com/making-containers-more-isolated-an-overview-of-sandboxed-container-technologies/)
+- [AI agent sandboxing strategies (Northflank, Feb 2026)](https://northflank.com/blog/how-to-sandbox-ai-agents)
 
 ### E.14 Network Companion Tools
 
