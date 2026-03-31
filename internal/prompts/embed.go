@@ -20,6 +20,38 @@ type PromptDiff struct {
 // AllRoleIDs is the sorted list of role IDs discovered from embedded prompt files.
 var AllRoleIDs = discoverRoleIDs()
 
+// ParsePromptFrontmatter extracts YAML frontmatter from a markdown prompt.
+// Returns the description (if present) and the body without frontmatter.
+func ParsePromptFrontmatter(content string) (description, body string) {
+	if !strings.HasPrefix(content, "---\n") {
+		return "", content
+	}
+	end := strings.Index(content[4:], "\n---\n")
+	if end < 0 {
+		return "", content
+	}
+	frontmatter := content[4 : 4+end]
+	body = strings.TrimLeft(content[4+end+5:], "\n")
+	for _, line := range strings.Split(frontmatter, "\n") {
+		if strings.HasPrefix(line, "description:") {
+			description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+		}
+	}
+	return description, body
+}
+
+// RoleDescription returns the description from a role's report_prompt.md frontmatter.
+// Falls back to "" if the role has no frontmatter, no description field, or is not embedded.
+func RoleDescription(roleID string) string {
+	path := fmt.Sprintf("roles/%s/report_prompt.md", roleID)
+	data, err := defaults.FS.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	desc, _ := ParsePromptFrontmatter(string(data))
+	return desc
+}
+
 func discoverRoleIDs() []string {
 	entries, err := fs.ReadDir(defaults.FS, "roles")
 	if err != nil {

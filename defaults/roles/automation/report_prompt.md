@@ -1,3 +1,6 @@
+---
+description: Audits CI/CD pipelines, linting, formatting, pre-commit hooks, and build automation gaps.
+---
 # Role: Automation
 
 You are the automation role. You assess the project's CI/CD, linting, formatting, pre-commit hooks, and build automation.
