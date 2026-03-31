@@ -27,6 +27,21 @@ var (
 	reviewRoles        []string
 )
 
+// ReviewOptions holds configuration for a review run.
+type ReviewOptions struct {
+	ExtraPrompt  string
+	CustomPrompt string
+	Timeout      int
+	Print        bool
+	DryRun       bool
+	CheaperModel bool
+	Profile      string
+	Agent        string
+	Verbose      bool
+	Force        bool
+	Roles        []string
+}
+
 var reviewCmd = &cobra.Command{
 	Use:   "review",
 	Short: "Supervisor reviews role reports and produces decisions",
@@ -39,7 +54,21 @@ Example:
   ateam review
   ateam review --extra-prompt "Focus on security findings"
   ateam review --prompt @custom_review.md`,
-	RunE: runReview,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runReview(ReviewOptions{
+			ExtraPrompt:  reviewExtraPrompt,
+			CustomPrompt: reviewCustomPrompt,
+			Timeout:      reviewTimeout,
+			Print:        reviewPrint,
+			DryRun:       reviewDryRun,
+			CheaperModel: reviewCheaperModel,
+			Profile:      reviewProfile,
+			Agent:        reviewAgent,
+			Verbose:      reviewVerbose,
+			Force:        reviewForce,
+			Roles:        reviewRoles,
+		})
+	},
 }
 
 func init() {
@@ -55,24 +84,24 @@ func init() {
 	addForceFlag(reviewCmd, &reviewForce)
 }
 
-func runReview(cmd *cobra.Command, args []string) error {
+func runReview(opts ReviewOptions) error {
 	env, err := root.Resolve(orgFlag, projectFlag)
 	if err != nil {
 		return err
 	}
 
-	extraPrompt, err := prompts.ResolveOptional(reviewExtraPrompt)
+	extraPrompt, err := prompts.ResolveOptional(opts.ExtraPrompt)
 	if err != nil {
 		return err
 	}
 
-	customPrompt, err := prompts.ResolveOptional(reviewCustomPrompt)
+	customPrompt, err := prompts.ResolveOptional(opts.CustomPrompt)
 	if err != nil {
 		return err
 	}
 
-	if len(reviewRoles) > 0 {
-		if _, err := prompts.ResolveRoleList(reviewRoles, env.Config.Roles, env.ProjectDir, env.OrgDir); err != nil {
+	if len(opts.Roles) > 0 {
+		if _, err := prompts.ResolveRoleList(opts.Roles, env.Config.Roles, env.ProjectDir, env.OrgDir); err != nil {
 			return err
 		}
 	}
@@ -83,18 +112,18 @@ func runReview(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if len(reviewRoles) > 0 {
+	if len(opts.Roles) > 0 {
 		prompt += "\n\n---\n\n# Role Constraint\n\n" +
-			"Assign coding tasks only to the following roles: " + strings.Join(reviewRoles, ", ") + ". " +
+			"Assign coding tasks only to the following roles: " + strings.Join(opts.Roles, ", ") + ". " +
 			"Review and assess all reports, but mark coding tasks for unlisted roles as deferred. " +
 			"For the listed roles, include tasks you consider worthwhile even if not strictly urgent."
 	}
 
-	if reviewDryRun {
+	if opts.DryRun {
 		return printReviewDryRun(env, prompt)
 	}
 
-	timeout := env.Config.Review.EffectiveTimeout(reviewTimeout)
+	timeout := env.Config.Review.EffectiveTimeout(opts.Timeout)
 
 	reviewFile := env.ReviewPath()
 	reviewDir := filepath.Dir(reviewFile)
@@ -106,11 +135,11 @@ func runReview(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Supervisor reviewing reports (%dm timeout)...\n", timeout)
 
-	cr, err := resolveRunner(env, reviewProfile, reviewAgent, runner.ActionReview, "")
+	cr, err := resolveRunner(env, opts.Profile, opts.Agent, runner.ActionReview, "")
 	if err != nil {
 		return err
 	}
-	applyCheaperModel(cr, reviewCheaperModel)
+	applyCheaperModel(cr, opts.CheaperModel)
 
 	db := openProjectDB(env)
 	if db != nil {
@@ -118,13 +147,13 @@ func runReview(cmd *cobra.Command, args []string) error {
 		cr.CallDB = db
 	}
 
-	if !reviewForce {
+	if !opts.Force {
 		if err := checkConcurrentRuns(db, "", runner.ActionReview, nil); err != nil {
 			return err
 		}
 	}
 
-	opts := runner.RunOpts{
+	runOpts := runner.RunOpts{
 		RoleID:               "supervisor",
 		Action:               runner.ActionReview,
 		LogsDir:              env.SupervisorLogsDir(),
@@ -134,12 +163,12 @@ func runReview(cmd *cobra.Command, args []string) error {
 		TimeoutMin:           timeout,
 		HistoryDir:           historyDir,
 		PromptName:           "review_prompt.md",
-		Verbose:              reviewVerbose,
+		Verbose:              opts.Verbose,
 	}
 
 	ctx, stop := cmdContext()
 	defer stop()
-	result := cr.Run(ctx, prompt, opts, nil)
+	result := cr.Run(ctx, prompt, runOpts, nil)
 
 	if result.Err != nil {
 		return fmt.Errorf("review failed: %w", result.Err)
@@ -152,7 +181,7 @@ func runReview(cmd *cobra.Command, args []string) error {
 	printDone(result)
 	fmt.Printf("Review: %s\n", reviewFile)
 
-	if reviewPrint {
+	if opts.Print {
 		fmt.Printf("\n%s\n", result.Output)
 	}
 

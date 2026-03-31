@@ -30,6 +30,22 @@ var (
 	codeTail              bool
 )
 
+// CodeOptions holds configuration for a code run.
+type CodeOptions struct {
+	Review            string
+	Management        string
+	ExtraPrompt       string
+	Timeout           int
+	Print             bool
+	DryRun            bool
+	CheaperModel      bool
+	Profile           string
+	SupervisorProfile string
+	Verbose           bool
+	Force             bool
+	Tail              bool
+}
+
 var codeCmd = &cobra.Command{
 	Use:   "code",
 	Short: "Execute review tasks as code changes",
@@ -41,7 +57,22 @@ Example:
   ateam code --review @custom_review.md
   ateam code --management @custom_management.md
   ateam code --dry-run`,
-	RunE: runCode,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runCode(CodeOptions{
+			Review:            codeReview,
+			Management:        codeManagement,
+			ExtraPrompt:       codeExtraPrompt,
+			Timeout:           codeTimeout,
+			Print:             codePrint,
+			DryRun:            codeDryRun,
+			CheaperModel:      codeCheaperModel,
+			Profile:           codeProfile,
+			SupervisorProfile: codeSupervisorProfile,
+			Verbose:           codeVerbose,
+			Force:             codeForce,
+			Tail:              codeTail,
+		})
+	},
 }
 
 func init() {
@@ -65,14 +96,14 @@ func init() {
 	codeCmd.Flags().BoolVar(&codeTail, "tail", false, "stream live output from supervisor and sub-runs")
 }
 
-func runCode(cmd *cobra.Command, args []string) error {
+func runCode(opts CodeOptions) error {
 	env, err := root.Resolve(orgFlag, projectFlag)
 	if err != nil {
 		return err
 	}
 
 	var reviewContent string
-	if codeReview == "" {
+	if opts.Review == "" {
 		reviewPath := env.ReviewPath()
 		data, err := os.ReadFile(reviewPath)
 		if err != nil {
@@ -80,18 +111,18 @@ func runCode(cmd *cobra.Command, args []string) error {
 		}
 		reviewContent = string(data)
 	} else {
-		reviewContent, err = prompts.ResolveValue(codeReview)
+		reviewContent, err = prompts.ResolveValue(opts.Review)
 		if err != nil {
 			return err
 		}
 	}
 
-	customManagement, err := prompts.ResolveOptional(codeManagement)
+	customManagement, err := prompts.ResolveOptional(opts.Management)
 	if err != nil {
 		return err
 	}
 
-	extraPrompt, err := prompts.ResolveOptional(codeExtraPrompt)
+	extraPrompt, err := prompts.ResolveOptional(opts.ExtraPrompt)
 	if err != nil {
 		return err
 	}
@@ -109,20 +140,20 @@ func runCode(cmd *cobra.Command, args []string) error {
 	prompt += "- `--task-group " + taskGroup + "` (groups all sub-tasks for cost tracking)\n"
 
 	// Resolve the profile that sub-runs will use.
-	subRunProfile := codeProfile
+	subRunProfile := opts.Profile
 	if subRunProfile == "" {
 		subRunProfile = env.Config.ResolveProfile("run", "")
 	}
 	prompt += "- `--profile " + subRunProfile + "`\n"
 
-	if codeDryRun {
+	if opts.DryRun {
 		fmt.Printf("╔══ code management ══╗\n\n")
 		fmt.Println(prompt)
 		fmt.Printf("\n╚══ code management ══╝\n")
 		return nil
 	}
 
-	timeout := env.Config.Code.EffectiveTimeout(codeTimeout)
+	timeout := env.Config.Code.EffectiveTimeout(opts.Timeout)
 	historyDir := env.ReviewHistoryDir()
 
 	if err := os.MkdirAll(historyDir, 0755); err != nil {
@@ -133,7 +164,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 
 	supervisorDir := env.SupervisorDir()
 
-	supervisorProfileName := codeSupervisorProfile
+	supervisorProfileName := opts.SupervisorProfile
 	if supervisorProfileName == "" {
 		supervisorProfileName = env.Config.ResolveSupervisorProfile("code")
 	}
@@ -147,7 +178,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	setSourceWritable(cr)
-	applyCheaperModel(cr, codeCheaperModel)
+	applyCheaperModel(cr, opts.CheaperModel)
 
 	db := openProjectDB(env)
 	if db != nil {
@@ -155,13 +186,13 @@ func runCode(cmd *cobra.Command, args []string) error {
 		cr.CallDB = db
 	}
 
-	if !codeForce {
+	if !opts.Force {
 		if err := checkConcurrentRuns(db, "", runner.ActionCode, nil); err != nil {
 			return err
 		}
 	}
 
-	opts := runner.RunOpts{
+	runOpts := runner.RunOpts{
 		RoleID:               "supervisor",
 		Action:               runner.ActionCode,
 		LogsDir:              env.SupervisorLogsDir(),
@@ -171,7 +202,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 		TimeoutMin:           timeout,
 		HistoryDir:           historyDir,
 		PromptName:           "code_management_prompt.md",
-		Verbose:              codeVerbose,
+		Verbose:              opts.Verbose,
 		TaskGroup:            taskGroup,
 	}
 
@@ -179,16 +210,16 @@ func runCode(cmd *cobra.Command, args []string) error {
 	defer stop()
 
 	var result runner.RunSummary
-	if codeTail {
+	if opts.Tail {
 		runDone := make(chan struct{})
 		go func() {
-			result = cr.Run(ctx, prompt, opts, nil)
+			result = cr.Run(ctx, prompt, runOpts, nil)
 			close(runDone)
 		}()
 
 		time.Sleep(300 * time.Millisecond)
 
-		tailer := runner.NewTailer(os.Stderr, db, isTerminal(), codeVerbose)
+		tailer := runner.NewTailer(os.Stderr, db, isTerminal(), opts.Verbose)
 		tailer.ProjectDir = env.ProjectDir
 		tailer.OrgDir = env.OrgDir
 		tailer.TaskGroup = taskGroup
@@ -221,7 +252,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 			printProgress(progress)
 		}()
 
-		result = cr.Run(ctx, prompt, opts, progress)
+		result = cr.Run(ctx, prompt, runOpts, progress)
 
 		close(progress)
 		progressWg.Wait()
@@ -232,7 +263,7 @@ func runCode(cmd *cobra.Command, args []string) error {
 	}
 	printDone(result)
 	fmt.Printf("Output: %s\n", filepath.Join(supervisorDir, "code_output.md"))
-	if codePrint {
+	if opts.Print {
 		fmt.Printf("\n%s\n", result.Output)
 	}
 
