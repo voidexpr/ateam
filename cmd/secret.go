@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	goruntime "runtime"
 	"sort"
 	"strings"
 
@@ -214,7 +215,21 @@ func readLine() (string, error) {
 func backendLabel(b secret.Backend) string {
 	switch b {
 	case secret.BackendKeychain:
-		return "macOS Keychain (default for darwin)"
+		var name string
+		switch goruntime.GOOS {
+		case "darwin":
+			name = "macOS Keychain"
+		case "linux":
+			name = "Secret Service (D-Bus)"
+		case "windows":
+			name = "Windows Credential Manager"
+		default:
+			name = "OS keychain"
+		}
+		if secret.DefaultBackend() == secret.BackendKeychain {
+			return fmt.Sprintf("%s (default for %s)", name, goruntime.GOOS)
+		}
+		return name
 	case secret.BackendFile:
 		return "file (.env)"
 	default:
