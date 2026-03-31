@@ -550,8 +550,8 @@ func resolveVolumePath(vol, baseDir string) string {
 // host path on Windows might contain a drive letter (C:\...).
 func splitVolumeSpec(vol string) []string {
 	parts := []string{}
-	for i, remaining := 0, vol; remaining != ""; i++ {
-		idx := findVolumeSep(remaining)
+	for remaining := vol; remaining != ""; {
+		idx := strings.IndexByte(remaining, ':')
 		if idx < 0 {
 			parts = append(parts, remaining)
 			break
@@ -560,15 +560,6 @@ func splitVolumeSpec(vol string) []string {
 		remaining = remaining[idx+1:]
 	}
 	return parts
-}
-
-func findVolumeSep(s string) int {
-	for i, c := range s {
-		if c == ':' {
-			return i
-		}
-	}
-	return -1
 }
 
 const cheaperModelName = "sonnet"
