@@ -50,7 +50,10 @@ type DockerContainer struct {
 	PrecheckScript string
 }
 
-const containerRoot = "/ateam"
+const (
+	containerCodeRoot = "/workspace"
+	containerOrgRoot  = "/.ateamorg"
+)
 
 func (d *DockerContainer) Type() string { return "docker" }
 
@@ -298,13 +301,10 @@ func (d *DockerContainer) TranslatePath(hostPath string) string {
 		return ""
 	}
 
-	_, _, containerOrgPath := d.containerPaths()
-	orgRoot := filepath.Dir(d.OrgDir)
-
 	// Check OrgDir first (most specific non-code path)
 	if d.OrgDir != "" {
 		if rel, ok := relativeUnder(hostPath, d.OrgDir); ok {
-			return filepath.Join(containerOrgPath, rel)
+			return filepath.Join(containerOrgRoot, rel)
 		}
 	}
 
@@ -312,8 +312,7 @@ func (d *DockerContainer) TranslatePath(hostPath string) string {
 	mount := d.mountDir()
 	if mount != "" {
 		if rel, ok := relativeUnder(hostPath, mount); ok {
-			relMount, _ := filepath.Rel(orgRoot, mount)
-			return filepath.Join(containerRoot, relMount, rel)
+			return filepath.Join(containerCodeRoot, rel)
 		}
 	}
 
@@ -408,30 +407,22 @@ func (d *DockerContainer) mountDir() string {
 	return d.SourceDir
 }
 
-// containerPaths computes the container paths for code, workdir, and orgdir,
-// preserving the relative hierarchy between orgRoot and the mounted dirs.
+// containerPaths computes the container paths for code, workdir, and orgdir.
+// Code is mounted at /workspace, org at /.ateamorg.
 func (d *DockerContainer) containerPaths() (codePath, workDir, orgPath string) {
-	orgRoot := filepath.Dir(d.OrgDir)
+	codePath = containerCodeRoot
+	orgPath = containerOrgRoot
 
-	// Container org path: /ateam/.ateamorg
-	orgPath = filepath.Join(containerRoot, filepath.Base(d.OrgDir))
-
-	// Container code path: /ateam/<relMountDir>
+	// If sourceDir is a subdirectory of mountDir (git root), workdir is /workspace/<rel>
 	mount := d.mountDir()
-	relMount, err := filepath.Rel(orgRoot, mount)
-	if err != nil {
-		relMount = filepath.Base(mount)
+	if mount != "" && d.SourceDir != mount {
+		if rel, err := filepath.Rel(mount, d.SourceDir); err == nil && !strings.HasPrefix(rel, "..") {
+			workDir = filepath.Join(containerCodeRoot, rel)
+			return
+		}
 	}
-	codePath = filepath.Join(containerRoot, relMount)
-
-	// Container workdir: /ateam/<relSourceDir>
-	relSource, err := filepath.Rel(orgRoot, d.SourceDir)
-	if err != nil {
-		relSource = relMount
-	}
-	workDir = filepath.Join(containerRoot, relSource)
-
-	return codePath, workDir, orgPath
+	workDir = containerCodeRoot
+	return
 }
 
 // projectDirArgs returns docker -v args to mount .ateam/ read-write,
