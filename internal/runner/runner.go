@@ -202,8 +202,9 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			return failEarly(fmt.Errorf("docker container start failed: %w", err))
 		}
 		req.CmdFactory = dc.CmdFactory()
-		req.StreamFile = dc.TranslatePath(streamFile)
-		req.StderrFile = dc.TranslatePath(stderrFile)
+		// Note: StreamFile and StderrFile are NOT translated — they are
+		// opened by the host process (os.Create) to capture piped output,
+		// not accessed inside the container.
 		// Translate any host paths in extraArgs (e.g. --settings path)
 		for i, a := range req.ExtraArgs {
 			if a == "--settings" && i+1 < len(req.ExtraArgs) {

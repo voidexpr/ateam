@@ -231,7 +231,7 @@ func buildDebugContext(rows []calldb.RecentRow, filePaths []string) string {
 }
 
 func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
-	r, err := resolveRunner(env, inspectProfile, inspectAgent, runner.ActionDebug, "")
+	r, err := resolveRunner(env, inspectProfile, inspectAgent, runner.ActionDebug, "", false)
 	if err != nil {
 		return err
 	}

@@ -17,17 +17,18 @@ import (
 )
 
 var (
-	runRole      string
-	runProfile   string
-	runAgent     string
-	runModel     string
-	runNoStream  bool
-	runWorkDir   string
-	runNoSummary bool
-	runQuiet     bool
-	runAgentArgs string
-	runVerbose   bool
-	runTaskGroup string
+	runRole             string
+	runProfile          string
+	runAgent            string
+	runModel            string
+	runNoStream         bool
+	runWorkDir          string
+	runNoSummary        bool
+	runQuiet            bool
+	runAgentArgs        string
+	runVerbose          bool
+	runTaskGroup        string
+	runDockerAutoSetup  bool
 )
 
 var runCmd = &cobra.Command{
@@ -63,6 +64,7 @@ func init() {
 	runCmd.Flags().StringVar(&runAgentArgs, "agent-args", "", "extra args passed to the agent CLI (appended after configured args)")
 	runCmd.Flags().StringVar(&runTaskGroup, "task-group", "", "group related calls (e.g. all tasks in one ateam code run)")
 	addVerboseFlag(runCmd, &runVerbose)
+	addDockerAutoSetupFlag(runCmd, &runDockerAutoSetup)
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
@@ -109,7 +111,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// Resolve runner from flags or config
 	var r *runner.Runner
 	if hasProject {
-		r, err = resolveRunner(env, runProfile, runAgent, runner.ActionRun, runRole)
+		r, err = resolveRunner(env, runProfile, runAgent, runner.ActionRun, runRole, runDockerAutoSetup)
 	} else {
 		// No project context — use flags or "default" profile
 		profile := runProfile

@@ -29,6 +29,7 @@ var (
 	reportVerbose              bool
 	reportForce                bool
 	reportReview               bool
+	reportDockerAutoSetup      bool
 )
 
 // ReportOptions holds configuration for a report run.
@@ -46,6 +47,7 @@ type ReportOptions struct {
 	Verbose              bool
 	Force                bool
 	Review               bool
+	DockerAutoSetup      bool
 }
 
 var reportCmd = &cobra.Command{
@@ -76,6 +78,7 @@ Example:
 			Verbose:              reportVerbose,
 			Force:                reportForce,
 			Review:               reportReview,
+			DockerAutoSetup:      reportDockerAutoSetup,
 		})
 	},
 }
@@ -93,6 +96,7 @@ func init() {
 	addProfileFlags(reportCmd, &reportProfile, &reportAgent)
 	addVerboseFlag(reportCmd, &reportVerbose)
 	addForceFlag(reportCmd, &reportForce)
+	addDockerAutoSetupFlag(reportCmd, &reportDockerAutoSetup)
 }
 
 func runReport(opts ReportOptions) error {
@@ -121,7 +125,7 @@ func runReport(opts ReportOptions) error {
 
 	timeout := env.Config.Report.EffectiveTimeout(opts.Timeout)
 
-	cr, err := resolveRunner(env, opts.Profile, opts.Agent, runner.ActionReport, "")
+	cr, err := resolveRunner(env, opts.Profile, opts.Agent, runner.ActionReport, "", opts.DockerAutoSetup)
 	if err != nil {
 		return err
 	}

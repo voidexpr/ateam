@@ -1,0 +1,55 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "Bash(*)",
+      "Agent",
+      "NotebookEdit",
+      "AskUserQuestion",
+      "Skill",
+      "EnterPlanMode",
+      "ExitPlanMode",
+      "EnterWorktree",
+      "LSP",
+      "WebFetch",
+      "WebSearch",
+      "SendMessage",
+      "TaskCreate",
+      "TaskGet",
+      "TaskList",
+      "TaskOutput",
+      "TaskStop",
+      "TaskUpdate",
+      "TeamCreate",
+      "TeamDelete",
+      "WebFetch(domain:proxy.golang.org)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "additionalDirectories": [
+        "/Users/nicolas/Library/Caches"
+      ]
+    },
+    "excludedCommands": [
+      "git:*",
+      "go:*",
+      "cargo:*",
+      "npm:*", "npx:*",
+      "bun:*", "bunx:*",
+      "pnpm:*",
+      "yarn:*",
+      "pip:*", "pip3:*", "uv:*", "poetry:*",
+      "gradle:*", "mvn:*",
+      "docker:*"
+    ]
+  },
+  "autoAcceptEdits": true
+}

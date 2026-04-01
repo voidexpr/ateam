@@ -2,7 +2,7 @@ FROM node:20-bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl sudo ca-certificates \
-    ripgrep fd-find jq tree \
+    ripgrep fd-find jq tree make \
     python3 python3-pip \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g @anthropic-ai/claude-code

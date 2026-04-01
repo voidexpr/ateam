@@ -101,7 +101,7 @@ func openCallDB(orgDir string) *calldb.CallDB {
 
 // newRunner creates a Runner using the resolved profile from runtime.hcl.
 // roleID is optional — used for role-specific Dockerfile resolution.
-func newRunner(env *root.ResolvedEnv, profileName, roleID string) (*runner.Runner, error) {
+func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetup bool) (*runner.Runner, error) {
 	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
 	if err != nil {
 		return nil, fmt.Errorf("cannot load runtime.hcl: %w", err)
@@ -124,7 +124,7 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string) (*runner.Runne
 	r.Profile = profileName
 	r.ProjectID = ""
 	r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
-	ct, err := buildContainer(cc, prof, env.SourceDir, env.ProjectDir, env.OrgDir, env.GitRepoDir, roleID)
+	ct, err := buildContainer(cc, prof, env.SourceDir, env.ProjectDir, env.OrgDir, env.GitRepoDir, roleID, dockerAutoSetup)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +201,7 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 // newRunnerDefault creates a Runner using the default profile.
 func newRunnerDefault(env *root.ResolvedEnv) (*runner.Runner, error) {
 	profileName := env.Config.ResolveProfile("", "")
-	return newRunner(env, profileName, "")
+	return newRunner(env, profileName, "", false)
 }
 
 // resolveRunnerMinimal builds a Runner without project context (just org dir).
@@ -238,17 +238,17 @@ func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.Runner
 }
 
 // resolveRunner builds a Runner from --profile/--agent flags, falling back to config resolution.
-func resolveRunner(env *root.ResolvedEnv, profileFlag, agentFlag, action, roleID string) (*runner.Runner, error) {
+func resolveRunner(env *root.ResolvedEnv, profileFlag, agentFlag, action, roleID string, dockerAutoSetup bool) (*runner.Runner, error) {
 	switch {
 	case profileFlag != "" && agentFlag != "":
 		return nil, fmt.Errorf("--profile and --agent are mutually exclusive")
 	case agentFlag != "":
 		return newRunnerFromAgent(env, agentFlag)
 	case profileFlag != "":
-		return newRunner(env, profileFlag, roleID)
+		return newRunner(env, profileFlag, roleID, dockerAutoSetup)
 	default:
 		profileName := env.Config.ResolveProfile(action, roleID)
-		return newRunner(env, profileName, roleID)
+		return newRunner(env, profileName, roleID, dockerAutoSetup)
 	}
 }
 
@@ -330,12 +330,21 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 // buildContainer creates a Container implementation from config.
 // Returns nil for "none" type (runner treats nil as host execution).
 // roleID is used for Dockerfile resolution (role-specific Dockerfiles).
-func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, sourceDir, projectDir, orgDir, gitRepoDir, roleID string) (container.Container, error) {
+func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, sourceDir, projectDir, orgDir, gitRepoDir, roleID string, dockerAutoSetup bool) (container.Container, error) {
 	if cc == nil || cc.Type == "none" {
 		return nil, nil
 	}
 	switch cc.Type {
 	case "docker":
+		// Image name derived from project dir name
+		image := "ateam-" + filepath.Base(filepath.Dir(projectDir)) + ":latest"
+		if dockerAutoSetup {
+			if generated, names, err := runtime.AutoSetupDockerfile(sourceDir, projectDir, orgDir); err != nil {
+				fmt.Fprintf(os.Stderr, "[docker] auto-setup warning: %v\n", err)
+			} else if generated {
+				fmt.Fprintf(os.Stderr, "[docker] auto-generated .ateam/Dockerfile (%s)\n", strings.Join(names, ", "))
+			}
+		}
 		dockerfile, dockerfileTmpDir, err := runtime.ResolveDockerfile(cc, projectDir, orgDir, roleID)
 		if err != nil {
 			return nil, err
@@ -345,8 +354,6 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 		for i, vol := range cc.ExtraVolumes {
 			volumes[i] = resolveVolumePath(vol, sourceDir)
 		}
-		// Image name derived from project dir name
-		image := "ateam-" + filepath.Base(filepath.Dir(projectDir)) + ":latest"
 		var extraArgs []string
 		if prof != nil {
 			extraArgs = prof.ContainerExtraArgs
@@ -610,6 +617,10 @@ func setSourceWritable(r *runner.Runner) {
 	if dc, ok := r.Container.(*container.DockerContainer); ok {
 		dc.SourceWritable = true
 	}
+}
+
+func addDockerAutoSetupFlag(cmd *cobra.Command, dst *bool) {
+	cmd.Flags().BoolVar(dst, "docker-auto-setup", true, "auto-generate .ateam/Dockerfile when using docker profile")
 }
 
 func addForceFlag(cmd *cobra.Command, dst *bool) {

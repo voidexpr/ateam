@@ -14,32 +14,34 @@ import (
 )
 
 var (
-	reviewExtraPrompt  string
-	reviewCustomPrompt string
-	reviewTimeout      int
-	reviewPrint        bool
-	reviewDryRun       bool
-	reviewCheaperModel bool
-	reviewProfile      string
-	reviewAgent        string
-	reviewVerbose      bool
-	reviewForce        bool
-	reviewRoles        []string
+	reviewExtraPrompt     string
+	reviewCustomPrompt    string
+	reviewTimeout         int
+	reviewPrint           bool
+	reviewDryRun          bool
+	reviewCheaperModel    bool
+	reviewProfile         string
+	reviewAgent           string
+	reviewVerbose         bool
+	reviewForce           bool
+	reviewRoles           []string
+	reviewDockerAutoSetup bool
 )
 
 // ReviewOptions holds configuration for a review run.
 type ReviewOptions struct {
-	ExtraPrompt  string
-	CustomPrompt string
-	Timeout      int
-	Print        bool
-	DryRun       bool
-	CheaperModel bool
-	Profile      string
-	Agent        string
-	Verbose      bool
-	Force        bool
-	Roles        []string
+	ExtraPrompt     string
+	CustomPrompt    string
+	Timeout         int
+	Print           bool
+	DryRun          bool
+	CheaperModel    bool
+	Profile         string
+	Agent           string
+	Verbose         bool
+	Force           bool
+	Roles           []string
+	DockerAutoSetup bool
 }
 
 var reviewCmd = &cobra.Command{
@@ -56,17 +58,18 @@ Example:
   ateam review --prompt @custom_review.md`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runReview(ReviewOptions{
-			ExtraPrompt:  reviewExtraPrompt,
-			CustomPrompt: reviewCustomPrompt,
-			Timeout:      reviewTimeout,
-			Print:        reviewPrint,
-			DryRun:       reviewDryRun,
-			CheaperModel: reviewCheaperModel,
-			Profile:      reviewProfile,
-			Agent:        reviewAgent,
-			Verbose:      reviewVerbose,
-			Force:        reviewForce,
-			Roles:        reviewRoles,
+			ExtraPrompt:     reviewExtraPrompt,
+			CustomPrompt:    reviewCustomPrompt,
+			Timeout:         reviewTimeout,
+			Print:           reviewPrint,
+			DryRun:          reviewDryRun,
+			CheaperModel:    reviewCheaperModel,
+			Profile:         reviewProfile,
+			Agent:           reviewAgent,
+			Verbose:         reviewVerbose,
+			Force:           reviewForce,
+			Roles:           reviewRoles,
+			DockerAutoSetup: reviewDockerAutoSetup,
 		})
 	},
 }
@@ -82,6 +85,7 @@ func init() {
 	addProfileFlags(reviewCmd, &reviewProfile, &reviewAgent)
 	addVerboseFlag(reviewCmd, &reviewVerbose)
 	addForceFlag(reviewCmd, &reviewForce)
+	addDockerAutoSetupFlag(reviewCmd, &reviewDockerAutoSetup)
 }
 
 func runReview(opts ReviewOptions) error {
@@ -135,7 +139,7 @@ func runReview(opts ReviewOptions) error {
 
 	fmt.Printf("Supervisor reviewing reports (%dm timeout)...\n", timeout)
 
-	cr, err := resolveRunner(env, opts.Profile, opts.Agent, runner.ActionReview, "")
+	cr, err := resolveRunner(env, opts.Profile, opts.Agent, runner.ActionReview, "", opts.DockerAutoSetup)
 	if err != nil {
 		return err
 	}

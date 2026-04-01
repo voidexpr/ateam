@@ -28,6 +28,7 @@ var (
 	codeVerbose           bool
 	codeForce             bool
 	codeTail              bool
+	codeDockerAutoSetup   bool
 )
 
 // CodeOptions holds configuration for a code run.
@@ -44,6 +45,7 @@ type CodeOptions struct {
 	Verbose           bool
 	Force             bool
 	Tail              bool
+	DockerAutoSetup   bool
 }
 
 var codeCmd = &cobra.Command{
@@ -71,6 +73,7 @@ Example:
 			Verbose:           codeVerbose,
 			Force:             codeForce,
 			Tail:              codeTail,
+			DockerAutoSetup:   codeDockerAutoSetup,
 		})
 	},
 }
@@ -94,6 +97,7 @@ func init() {
 	addVerboseFlag(codeCmd, &codeVerbose)
 	addForceFlag(codeCmd, &codeForce)
 	codeCmd.Flags().BoolVar(&codeTail, "tail", false, "stream live output from supervisor and sub-runs")
+	addDockerAutoSetupFlag(codeCmd, &codeDockerAutoSetup)
 }
 
 func runCode(opts CodeOptions) error {
@@ -173,7 +177,7 @@ func runCode(opts CodeOptions) error {
 		return err
 	}
 
-	cr, err := resolveRunner(env, supervisorProfileName, "", runner.ActionCode, "")
+	cr, err := resolveRunner(env, supervisorProfileName, "", runner.ActionCode, "", opts.DockerAutoSetup)
 	if err != nil {
 		return err
 	}
