@@ -234,15 +234,17 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 
 See [REFERENCE.md](REFERENCE.md) for full flag documentation, directory layout, prompt configuration, runtime configuration, and troubleshooting.
 
-## Isolation: Sandboxes and Containers
+## Isolation: Sandboxes, Containers, Agent configuration
 
 ATeam runs unattended agents, so they must operate safely without constant permission approval.
+
+At this point there is no clear winning strategy for isolation of unattended coding agents, it's an evolving field trying to balance convenience (work without approvals), safety (don't modify files it shouldn't, don't expose sensitive data, don't let malicious code affect more than the minimal attack surface) and reproducibility. ATeam supports multiple approaches: sandbox (default), containers (docker as one-off or persistent), devcontainers, nothing or can be ran inside an existing container. As the field matures ATeam will adapt to what works best in practice.
 
 **Risks without isolation:**
 * file system: accidental or malicious file writes outside of what is strictly required by the project, reading sensitive files, running unauthorized commands that could potentially escape a sandbox or container (like docker from a Claude/Codex sandbox)
 * network: data exfiltration (when combined with the ability of reading sensitive files)
 
-**Tradeoff:** stricter restrictions increase safety but can break tools that rely on directories outside of the project, use Unix sockets (Docker), pipes (tsx), or shared `/tmp` directories.
+**Tradeoff:** stricter restrictions increase safety but can break tools that rely on directories outside of the project, use Unix sockets (Docker), pipes (tsx), use their own sandbox (like Playwright, on MacOS sandboxes can't be nested) or shared `/tmp` directories.
 
 ### Approaches
 
@@ -264,20 +266,64 @@ Some of these limitations will change as agents evolve rapidly.
 * **Docker:** No macOS guest — can't test macOS-specific code. Docker-in-Docker networking is restricted inside Docker sandboxes (inner containers can pull images but not make outbound HTTPS).
 * **Nesting:** Sandboxes can't be nested (e.g., Playwright CLI inside a sandbox).
 
+### Agent configuration
+
+When ran in a sandbox agents don't need separate authentication but they do if they run in a container. See: TODO
+
+By default agents run with your default configuration (i.e. `~/.claude` for claude code) which means it will use default permissions (useful for excluded folders for example), hooks, etc ... But it's easy to specify a custom config directory (for example .ateam/.claude) to not use the default config.
+
+### Customizing runtime options
+
+Agents and container can be configured in:
+* `runtime.hcl` — full control over agent and container configuration.
+
+Some simple sandbox config changes can be made in:
+* `config.toml` — add read-only paths, read-write paths, or unsandboxed commands.
+
+
 ### Recommended Setup
 
 * **Default:** agent's built-in sandbox (no config needed) for all commands (`report`, `review`, `code`), it provides defaults for many commands, restricts to fewer directories than default agent sandbox and limits internet access.
-* for complex project consider doing only the coding from within docker, use `--profile docker`. Verify first with:
-  ```bash
-  ateam run "run: 'YOUR_BUILD_COMMAND && YOUR_TEST_COMMAND', report issues and how to solve them but don't try to do so yourself" --profile docker
-  ```
+* for projects using playwright, multiple tiers (database, web server) or docker there are a few options:
+    * sandbox: these tools can be configured to escape the sandbox (only way for them to run)
+    * hybrid: report and review run in the default sandbox and `code` uses docker so tests can be ran
+    * run ateam itself inside docker and then run agents without any restrictions because they are in a container already
+    * run ateam outside of docker and run all its commands within docker
+
+
+#### Sandbox best practices
+TODO: edit config.toml as needed
+
+#### Docker best practices
+
+* run ateam from outside docker and run agents inside docker
+    * pro: can mix report/audit outside of docker an use docker only for code where tests are ran
+    * cons: need to setup docker so that ateam can use it, parallel runs (like report) would require many containers
+* add ateam in a docker image an run it from within it
+    * pro: simple to use, agents can be set to never ask for any permission
+    * pro: no sanboxing at all
+    * pro: reproducible setup
+    * cons: need to have a docker setup for your project that also includes ateam
+
+TODO: authentication for agents
+
+Use coding agents to do docker setup.
+
+TODO: ateam docker-setup wrapper
+
+Verify first with:
+```bash
+ateam run "run: 'YOUR_BUILD_COMMAND && YOUR_TEST_COMMAND', report issues and how to solve them but don't try to do so yourself" --profile docker
+```
+
+TODO: ateam docker-start + ateam docker-shell + ateam docker-run ARGS
+
+
+        for `code` use `--profile docker` (can persist it in config.toml) for lightweight docker images or `--profile docker-persistent` for docker containers that should be reused (because a full setup is too slow)
+
+
+    consider doing only the coding from within docker, use `--profile docker`.
 * Don't use Docker profiles for macOS-specific code.
-
-### Customizing Rules
-
-ATeam generates a sandbox config for each execution. Customize via:
-* `config.toml` — add read-only paths, read-write paths, or unsandboxed commands.
-* `runtime.hcl` — full control over agent and container configuration.
 
 
 ## FAQ
@@ -291,6 +337,8 @@ ATeam generates a sandbox config for each execution. Customize via:
 * `ateam cat` — pretty-print agent output (.jsonl)
 
 Use `--help` on any command for details. See [REFERENCE.md](REFERENCE.md) for more.
+
+You can also resume sessions from role agents, for example you can use 'claude --resume' and select a specific session to dive more into the findings or why a command the agent ran failed (but start with `ateam ps`, `ateam inspect`, `ateam cat` first).
 
 ### How are agents executed by default ?
 
