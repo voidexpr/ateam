@@ -306,3 +306,127 @@ func TestContainerPathsWithGitRoot(t *testing.T) {
 		t.Errorf("orgPath = %q, want /.ateamorg", orgPath)
 	}
 }
+
+func TestEnvArgsInOneshotCmdFactory(t *testing.T) {
+	dc := &DockerContainer{
+		Image:     "ateam-test:latest",
+		SourceDir: "/src",
+		OrgDir:    "/org",
+		Env: map[string]string{
+			"DB_HOST": "localhost",
+			"DB_PORT": "5432",
+		},
+	}
+
+	factory := dc.CmdFactory()
+	cmd := factory(context.Background(), "claude", "-p")
+	args := cmd.Args
+
+	hasArg := func(flag, value string) bool {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) && args[i+1] == value {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !hasArg("-e", "DB_HOST=localhost") {
+		t.Errorf("missing -e DB_HOST=localhost, args: %v", args)
+	}
+	if !hasArg("-e", "DB_PORT=5432") {
+		t.Errorf("missing -e DB_PORT=5432, args: %v", args)
+	}
+}
+
+func TestEnvArgsInPersistentCmdFactory(t *testing.T) {
+	t.Setenv("MY_TOKEN", "secret")
+
+	dc := &DockerContainer{
+		Image:         "ateam-test:latest",
+		Persistent:    true,
+		ContainerName: "ateam-test-env",
+		SourceDir:     "/src",
+		OrgDir:        "/org",
+		ForwardEnv:    []string{"MY_TOKEN"},
+		Env: map[string]string{
+			"DB_HOST": "localhost",
+		},
+	}
+
+	factory := dc.CmdFactory()
+	cmd := factory(context.Background(), "claude", "-p")
+	args := cmd.Args
+
+	// Should be docker exec
+	if len(args) < 2 || args[1] != "exec" {
+		t.Fatalf("expected docker exec, got %v", args)
+	}
+
+	hasArg := func(flag, value string) bool {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) && args[i+1] == value {
+				return true
+			}
+		}
+		return false
+	}
+
+	// ForwardEnv
+	if !hasArg("-e", "MY_TOKEN=secret") {
+		t.Errorf("missing forwarded env, args: %v", args)
+	}
+	// Literal Env
+	if !hasArg("-e", "DB_HOST=localhost") {
+		t.Errorf("missing literal env, args: %v", args)
+	}
+}
+
+func TestEnvArgsInDebugCommand(t *testing.T) {
+	dc := &DockerContainer{
+		Image:     "ateam-test:latest",
+		SourceDir: "/src",
+		OrgDir:    "/org",
+		Env: map[string]string{
+			"B_VAR": "two",
+			"A_VAR": "one",
+		},
+	}
+
+	got := dc.DebugCommand(RunOpts{Command: "claude", Args: []string{"-p"}})
+
+	// Env vars should appear sorted by key
+	if !strings.Contains(got, "-e A_VAR=one") {
+		t.Errorf("missing -e A_VAR=one in: %s", got)
+	}
+	if !strings.Contains(got, "-e B_VAR=two") {
+		t.Errorf("missing -e B_VAR=two in: %s", got)
+	}
+	// A_VAR should come before B_VAR
+	aIdx := strings.Index(got, "A_VAR")
+	bIdx := strings.Index(got, "B_VAR")
+	if aIdx > bIdx {
+		t.Errorf("env args not sorted: A_VAR at %d, B_VAR at %d in: %s", aIdx, bIdx, got)
+	}
+}
+
+func TestDebugCommandPersistentWithEnv(t *testing.T) {
+	dc := &DockerContainer{
+		Image:         "ateam-test:latest",
+		Persistent:    true,
+		ContainerName: "ateam-test-env",
+		SourceDir:     "/src",
+		OrgDir:        "/org",
+		ForwardEnv:    []string{"API_KEY"},
+		Env: map[string]string{
+			"DB_HOST": "localhost",
+		},
+	}
+
+	got := dc.DebugCommand(RunOpts{Command: "claude", Args: []string{"-p"}})
+
+	want := "docker exec -i -w /workspace -e API_KEY=... -e DB_HOST=localhost ateam-test-env claude -p"
+	if got != want {
+		t.Errorf("DebugCommand persistent with env:\n  got:  %s\n  want: %s", got, want)
+	}
+}

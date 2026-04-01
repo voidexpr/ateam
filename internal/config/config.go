@@ -39,7 +39,8 @@ type Config struct {
 	Roles      map[string]string `toml:"roles"`
 	Supervisor   SupervisorConfig  `toml:"supervisor"`
 	Profiles     ProfilesConfig    `toml:"profiles"`
-	SandboxExtra SandboxExtraConfig `toml:"sandbox-extra"`
+	SandboxExtra   SandboxExtraConfig   `toml:"sandbox-extra"`
+	ContainerExtra ContainerExtraConfig `toml:"container-extra"`
 }
 
 type ServeConfig struct {
@@ -68,6 +69,12 @@ type SandboxExtraConfig struct {
 	AllowRead           []string `toml:"allow_read"`
 	AllowDomains        []string `toml:"allow_domains"`
 	UnsandboxedCommands []string `toml:"unsandboxed_commands"`
+}
+
+type ContainerExtraConfig struct {
+	ExtraArgs  []string          `toml:"extra_args"`
+	ForwardEnv []string          `toml:"forward_env"`
+	Env        map[string]string `toml:"env"`
 }
 
 type GitConfig struct {
