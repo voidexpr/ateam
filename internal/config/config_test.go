@@ -221,6 +221,72 @@ allow_domains = ["example.com", "*.internal.dev"]
 	}
 }
 
+func TestContainerExtra(t *testing.T) {
+	dir := t.TempDir()
+
+	content := `[project]
+name = "with-container-extra"
+
+[container-extra]
+extra_args = ["-p", "3000:3000", "-v", "pgdata:/pgdata"]
+forward_env = ["DB_PORT"]
+
+[container-extra.env]
+DB_HOST = "localhost"
+BIND_HOST = "0.0.0.0"
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if len(cfg.ContainerExtra.ExtraArgs) != 4 {
+		t.Fatalf("ExtraArgs length = %d, want 4", len(cfg.ContainerExtra.ExtraArgs))
+	}
+	if cfg.ContainerExtra.ExtraArgs[0] != "-p" || cfg.ContainerExtra.ExtraArgs[1] != "3000:3000" {
+		t.Errorf("ExtraArgs = %v, want [-p 3000:3000 -v pgdata:/pgdata]", cfg.ContainerExtra.ExtraArgs)
+	}
+	if len(cfg.ContainerExtra.ForwardEnv) != 1 || cfg.ContainerExtra.ForwardEnv[0] != "DB_PORT" {
+		t.Errorf("ForwardEnv = %v, want [DB_PORT]", cfg.ContainerExtra.ForwardEnv)
+	}
+	if cfg.ContainerExtra.Env["DB_HOST"] != "localhost" {
+		t.Errorf("Env[DB_HOST] = %q, want %q", cfg.ContainerExtra.Env["DB_HOST"], "localhost")
+	}
+	if cfg.ContainerExtra.Env["BIND_HOST"] != "0.0.0.0" {
+		t.Errorf("Env[BIND_HOST] = %q, want %q", cfg.ContainerExtra.Env["BIND_HOST"], "0.0.0.0")
+	}
+}
+
+func TestContainerExtraEmpty(t *testing.T) {
+	dir := t.TempDir()
+
+	content := `[project]
+name = "no-extras"
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if len(cfg.ContainerExtra.ExtraArgs) != 0 {
+		t.Errorf("ExtraArgs should be empty, got %v", cfg.ContainerExtra.ExtraArgs)
+	}
+	if len(cfg.ContainerExtra.ForwardEnv) != 0 {
+		t.Errorf("ForwardEnv should be empty, got %v", cfg.ContainerExtra.ForwardEnv)
+	}
+	if len(cfg.ContainerExtra.Env) != 0 {
+		t.Errorf("Env should be empty, got %v", cfg.ContainerExtra.Env)
+	}
+}
+
 func TestSandboxExtraEmpty(t *testing.T) {
 	dir := t.TempDir()
 

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -48,6 +49,11 @@ type DockerContainer struct {
 	// PrecheckScript is the absolute host path to a precheck script.
 	// When set on a persistent container, RunPrecheck executes it before the agent.
 	PrecheckScript string
+
+	// Env holds explicit environment variables (KEY=VALUE) to set inside the container.
+	// Unlike ForwardEnv (which forwards host values), these are literal values.
+	// Applied to both docker run and docker exec.
+	Env map[string]string
 }
 
 const (
@@ -142,6 +148,7 @@ func (d *DockerContainer) EnsureRunning(ctx context.Context) error {
 				args = append(args, "-e", key)
 			}
 		}
+		args = append(args, d.envArgs()...)
 		args = append(args, d.Image, "sleep", "infinity")
 
 		cmd := exec.CommandContext(ctx, "docker", args...)
@@ -258,6 +265,9 @@ func (d *DockerContainer) oneshotCmdFactory() CmdFactory {
 			}
 		}
 
+		// Literal env vars (e.g. DB_HOST=localhost)
+		dockerArgs = append(dockerArgs, d.envArgs()...)
+
 		// Image
 		dockerArgs = append(dockerArgs, d.Image)
 
@@ -283,6 +293,7 @@ func (d *DockerContainer) persistentCmdFactory() CmdFactory {
 				dockerArgs = append(dockerArgs, "-e", key+"="+val)
 			}
 		}
+		dockerArgs = append(dockerArgs, d.envArgs()...)
 
 		dockerArgs = append(dockerArgs, d.ContainerName)
 		dockerArgs = append(dockerArgs, name)
@@ -374,6 +385,7 @@ func (d *DockerContainer) debugCommandOneshot(opts RunOpts) string {
 	for _, key := range d.ForwardEnv {
 		parts = append(parts, "-e", key)
 	}
+	parts = append(parts, d.envArgs()...)
 	parts = append(parts, d.Image, opts.Command)
 	parts = append(parts, opts.Args...)
 	return strings.Join(parts, " ")
@@ -386,6 +398,7 @@ func (d *DockerContainer) debugCommandPersistent(opts RunOpts) string {
 	for _, key := range d.ForwardEnv {
 		parts = append(parts, "-e", key+"=...")
 	}
+	parts = append(parts, d.envArgs()...)
 	parts = append(parts, d.ContainerName, opts.Command)
 	parts = append(parts, opts.Args...)
 	return strings.Join(parts, " ")
@@ -444,4 +457,21 @@ func timezoneArgs() []string {
 		return []string{"-v", "/etc/localtime:/etc/localtime:ro"}
 	}
 	return nil
+}
+
+// envArgs returns sorted -e KEY=VALUE args for the Env map.
+func (d *DockerContainer) envArgs() []string {
+	if len(d.Env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(d.Env))
+	for k := range d.Env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var args []string
+	for _, k := range keys {
+		args = append(args, "-e", k+"="+d.Env[k])
+	}
+	return args
 }
