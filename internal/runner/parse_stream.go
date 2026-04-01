@@ -120,7 +120,9 @@ func detectFormat(line []byte) streamFormat {
 		"exec_command_begin", "web_search_begin", "mcp_tool_call_begin",
 		"custom_tool_call_begin", "patch_apply_begin", "apply_patch_begin",
 		"agent_message_delta", "agent_message", "assistant_message",
-		"item.completed", "turn.completed", "turn.failed":
+		"item.started", "item.completed", "item.updated",
+		"command_execution", "todo_list",
+		"turn.completed", "turn.failed":
 		return formatCodex
 	default:
 		return formatUnknown
