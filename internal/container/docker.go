@@ -50,15 +50,10 @@ const containerRoot = "/ateam"
 
 func (d *DockerContainer) Type() string { return "docker" }
 
-// EnsureImage builds the docker image if it doesn't exist.
+// EnsureImage builds the docker image, relying on Docker's layer cache for speed.
+// Always runs docker build so Dockerfile changes are picked up automatically.
 func (d *DockerContainer) EnsureImage(ctx context.Context) error {
 	defer d.cleanupDockerfileTmpDir()
-
-	// Check if image already exists
-	check := exec.CommandContext(ctx, "docker", "image", "inspect", d.Image)
-	if check.Run() == nil {
-		return nil
-	}
 
 	// Build from Dockerfile
 	if d.Dockerfile == "" {

@@ -13,8 +13,9 @@ var (
 	allParallel     int
 	allCheaperModel bool
 	allVerbose      bool
-	allRoles        []string
-	allProfile      string
+	allRoles           []string
+	allProfile         string
+	allDockerAutoSetup bool
 )
 
 var allCmd = &cobra.Command{
@@ -42,6 +43,7 @@ func init() {
 	allCmd.Flags().StringVar(&allProfile, "profile", "", "profile for code sub-runs (passed to ateam code --profile)")
 	addCheaperModelFlag(allCmd, &allCheaperModel)
 	addVerboseFlag(allCmd, &allVerbose)
+	addDockerAutoSetupFlag(allCmd, &allDockerAutoSetup)
 }
 
 func runAll(cmd *cobra.Command, args []string) error {
@@ -55,13 +57,14 @@ func runAll(cmd *cobra.Command, args []string) error {
 	// Phase 1: Report
 	fmt.Println("=== Phase 1: Report ===")
 	if err := runReport(ReportOptions{
-		Roles:        roles,
-		ExtraPrompt:  allExtraPrompt,
-		Timeout:      allTimeout,
-		Parallel:     allParallel,
-		Print:        printOutput,
-		CheaperModel: allCheaperModel,
-		Verbose:      allVerbose,
+		Roles:           roles,
+		ExtraPrompt:     allExtraPrompt,
+		Timeout:         allTimeout,
+		Parallel:        allParallel,
+		Print:           printOutput,
+		CheaperModel:    allCheaperModel,
+		Verbose:         allVerbose,
+		DockerAutoSetup: allDockerAutoSetup,
 	}); err != nil {
 		return fmt.Errorf("report phase failed: %w", err)
 	}
@@ -69,12 +72,13 @@ func runAll(cmd *cobra.Command, args []string) error {
 	// Phase 2: Review
 	fmt.Println("\n=== Phase 2: Review ===")
 	if err := runReview(ReviewOptions{
-		ExtraPrompt:  allExtraPrompt,
-		Timeout:      allTimeout,
-		Print:        printOutput,
-		CheaperModel: allCheaperModel,
-		Verbose:      allVerbose,
-		Roles:        allRoles,
+		ExtraPrompt:     allExtraPrompt,
+		Timeout:         allTimeout,
+		Print:           printOutput,
+		CheaperModel:    allCheaperModel,
+		Verbose:         allVerbose,
+		Roles:           allRoles,
+		DockerAutoSetup: allDockerAutoSetup,
 	}); err != nil {
 		return fmt.Errorf("review phase failed: %w", err)
 	}
@@ -82,12 +86,13 @@ func runAll(cmd *cobra.Command, args []string) error {
 	// Phase 3: Code
 	fmt.Println("\n=== Phase 3: Code ===")
 	if err := runCode(CodeOptions{
-		ExtraPrompt:  allExtraPrompt,
-		Timeout:      allTimeout,
-		Print:        printOutput,
-		CheaperModel: allCheaperModel,
-		Verbose:      allVerbose,
-		Profile:      allProfile,
+		ExtraPrompt:     allExtraPrompt,
+		Timeout:         allTimeout,
+		Print:           printOutput,
+		CheaperModel:    allCheaperModel,
+		Verbose:         allVerbose,
+		Profile:         allProfile,
+		DockerAutoSetup: allDockerAutoSetup,
 	}); err != nil {
 		return fmt.Errorf("code phase failed: %w", err)
 	}

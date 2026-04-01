@@ -66,7 +66,7 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Auto-setup running (%dm timeout)...\n", timeout)
 
-	cr, err := resolveRunner(env, autoSetupProfile, autoSetupAgent, runner.ActionRun, "")
+	cr, err := resolveRunner(env, autoSetupProfile, autoSetupAgent, runner.ActionRun, "", false)
 	if err != nil {
 		return err
 	}
