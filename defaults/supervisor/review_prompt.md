@@ -52,3 +52,9 @@ Any observations about the project that don't fit into specific actions — patt
 - If all reports say the code is clean, say so. Don't manufacture work.
 - In each Priority Action heading, specify which report(s) the recommendation primarily comes from
 - When processing an existing review.md you must omit completed work unless it mentions an impact on future tasks
+
+## Critical Output Rule
+
+Your FINAL assistant message must be the complete review following the Review Format above.
+Do not send any preamble, summary, or commentary after the review.
+The review itself IS your final output — it will be saved directly as review.md.
