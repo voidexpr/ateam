@@ -49,7 +49,7 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	pinfo := env.NewProjectInfoParams("the supervisor")
+	pinfo := env.NewProjectInfoParams("the supervisor", "auto-setup")
 	prompt, err := prompts.AssembleAutoSetupPrompt(env.OrgDir, env.ProjectDir, pinfo)
 	if err != nil {
 		return err

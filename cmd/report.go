@@ -145,7 +145,7 @@ func runReport(opts ReportOptions) error {
 
 	taskGroup := "report-" + time.Now().Format(runner.TimestampFormat)
 
-	basePinfo := env.NewProjectInfoParams("")
+	basePinfo := env.NewProjectInfoParams("", "report")
 	var tasks []runner.PoolTask
 	for _, roleID := range roleIDs {
 		pinfo := basePinfo

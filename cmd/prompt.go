@@ -83,7 +83,7 @@ func runPromptRole() error {
 
 	var pinfo prompts.ProjectInfoParams
 	if !promptNoProjectInfo {
-		pinfo = env.NewProjectInfoParams("role " + promptRole)
+		pinfo = env.NewProjectInfoParams("role "+promptRole, promptAction)
 	}
 
 	var sources []prompts.PromptSource
@@ -131,7 +131,7 @@ func runPromptSupervisor() error {
 
 	var pinfo prompts.ProjectInfoParams
 	if !promptNoProjectInfo {
-		pinfo = env.NewProjectInfoParams("the supervisor")
+		pinfo = env.NewProjectInfoParams("the supervisor", promptAction)
 	}
 
 	var sources []prompts.PromptSource
