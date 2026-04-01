@@ -192,6 +192,8 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 		LogFile:         env.RunnerLogPath(),
 		ProjectDir:      env.ProjectDir,
 		OrgDir:          env.OrgDir,
+		SourceDir:       env.SourceDir,
+		ProjectName:     env.ProjectName,
 		ExtraWriteDirs:  extraWriteDirs,
 		SandboxSettings: ac.Sandbox,
 		SandboxRWPaths:  ac.RWPaths,

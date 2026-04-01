@@ -33,6 +33,8 @@ type Runner struct {
 	LogFile         string              // append-only runner log
 	ProjectDir      string              // .ateam/ dir
 	OrgDir          string              // .ateamorg/ dir
+	SourceDir       string              // project root (parent of .ateam/)
+	ProjectName     string              // from config.toml
 	ExtraWriteDirs  []string            // additional dirs granted sandbox write access
 	ExtraArgs       []string            // extra args passed to the agent
 	SandboxSettings     string              // inline JSON settings template (from runtime.hcl)
@@ -162,6 +164,41 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		extraArgs = append(extraArgs, "--settings", settingsTarget)
 	}
 
+	// Insert call tracking record early so EXEC_ID is available for templates.
+	agentName := r.Agent.Name()
+	model := agent.NormalizeModel(extractModel(r.Agent))
+	var callID int64
+	if r.CallDB != nil {
+		relStream := streamFile
+		if r.ProjectDir != "" {
+			if rel, err := filepath.Rel(r.ProjectDir, streamFile); err == nil {
+				relStream = rel
+			}
+		}
+		if id, err := r.CallDB.InsertCall(&calldb.Call{
+			ProjectID:  r.ProjectID,
+			Profile:    r.Profile,
+			Agent:      agentName,
+			Container:  r.ContainerType,
+			Action:     opts.Action,
+			Role:       opts.RoleID,
+			TaskGroup:  opts.TaskGroup,
+			Model:      model,
+			PromptHash: hashPrompt(prompt),
+			StartedAt:  startedAt,
+			StreamFile: relStream,
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: call tracking insert failed: %v\n", err)
+		} else {
+			callID = id
+		}
+	}
+
+	// Resolve {{VAR}} templates in agent args and extra args.
+	tmplVars := BuildTemplateVars(r, opts, startedAt, callID, agentName, model)
+	extraArgs = ResolveTemplateArgs(extraArgs, tmplVars)
+	resolveAgentTemplateArgs(r.Agent, tmplVars)
+
 	// Archive the prompt to history before running.
 	promptFile := archivePrompt(opts.HistoryDir, opts.PromptName, prompt, startedAt)
 
@@ -247,7 +284,6 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		req.CmdFactory = ds.CmdFactory()
 	}
 
-	agentName := r.Agent.Name()
 	command, agentArgs := r.Agent.DebugCommandArgs(extraArgs)
 	cliStr := command + " " + strings.Join(agentArgs, " ")
 
@@ -273,34 +309,6 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	appendLog(r.LogFile, opts.RoleID, "start", cwd, cliStr,
 		relToDir(r.ProjectDir, promptFile),
 		relToDir(r.ProjectDir, opts.LastMessageFilePath))
-
-	// Insert call tracking record.
-	var callID int64
-	if r.CallDB != nil {
-		relStream := streamFile
-		if r.ProjectDir != "" {
-			if rel, err := filepath.Rel(r.ProjectDir, streamFile); err == nil {
-				relStream = rel
-			}
-		}
-		if id, err := r.CallDB.InsertCall(&calldb.Call{
-			ProjectID:  r.ProjectID,
-			Profile:    r.Profile,
-			Agent:      agentName,
-			Container:  r.ContainerType,
-			Action:     opts.Action,
-			Role:       opts.RoleID,
-			TaskGroup:  opts.TaskGroup,
-			Model:      agent.NormalizeModel(extractModel(r.Agent)),
-			PromptHash: hashPrompt(prompt),
-			StartedAt:  startedAt,
-			StreamFile: relStream,
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: call tracking insert failed: %v\n", err)
-		} else {
-			callID = id
-		}
-	}
 
 	// Run the agent and consume events
 	events := r.Agent.Run(ctx, req)
