@@ -57,6 +57,7 @@ type ContainerConfig struct {
 	ExtraVolumes     []string // additional volume mounts, e.g. "../data:/data:ro"
 	CopyClaudeConfig bool     // docker-sandbox: copy ~/.claude/ config (skills, plugins) into sandbox
 	NetworkPolicy    string   // docker-sandbox: "deny" (default) or "allow"
+	Precheck         string   // docker: precheck script path, relative to .ateam/ (or "" for convention default)
 }
 
 type ProfileConfig struct {
@@ -114,6 +115,7 @@ type hclContainer struct {
 	ExtraVolumes     []string `hcl:"extra_volumes,optional"`
 	CopyClaudeConfig bool     `hcl:"copy_claude_config,optional"`
 	NetworkPolicy    string   `hcl:"network_policy,optional"`
+	Precheck         string   `hcl:"precheck,optional"`
 }
 
 type hclProfile struct {
@@ -335,6 +337,7 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 			ExtraVolumes:     c.ExtraVolumes,
 			CopyClaudeConfig: c.CopyClaudeConfig,
 			NetworkPolicy:    c.NetworkPolicy,
+			Precheck:         c.Precheck,
 		}
 	}
 	for _, p := range hf.Profiles {
@@ -446,6 +449,49 @@ func ResolveDockerfile(cc *ContainerConfig, projectDir, orgDir, roleID string) (
 		return "", "", fmt.Errorf("cannot write embedded Dockerfile: %w", err)
 	}
 	return tmpFile, tmpDir, nil
+}
+
+// ResolvePrecheckScript finds the precheck script using a fallback chain:
+//  1. Explicit cc.Precheck (relative to projectDir)
+//  2. .ateam/roles/<role>/docker-agent-precheck.sh (if roleID is set)
+//  3. .ateam/docker-agent-precheck.sh
+//  4. .ateamorg/docker-agent-precheck.sh
+//  5. .ateamorg/defaults/docker-agent-precheck.sh
+//
+// Returns the absolute path to the first match, or "" if none found.
+// Unlike ResolveDockerfile, there is no embedded fallback — if no script exists,
+// the precheck is simply skipped.
+func ResolvePrecheckScript(cc *ContainerConfig, projectDir, orgDir, roleID string) string {
+	if cc.Precheck != "" {
+		path := cc.Precheck
+		if !filepath.IsAbs(path) && projectDir != "" {
+			path = filepath.Join(projectDir, path)
+		}
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+		return ""
+	}
+
+	const name = "docker-agent-precheck.sh"
+	var candidates []string
+	if projectDir != "" {
+		if roleID != "" {
+			candidates = append(candidates, filepath.Join(projectDir, "roles", roleID, name))
+		}
+		candidates = append(candidates, filepath.Join(projectDir, name))
+	}
+	if orgDir != "" {
+		candidates = append(candidates, filepath.Join(orgDir, name))
+		candidates = append(candidates, filepath.Join(orgDir, "defaults", name))
+	}
+
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+	return ""
 }
 
 // WriteOrgDefaults writes the embedded runtime.hcl and Dockerfile to orgDir/defaults/.
