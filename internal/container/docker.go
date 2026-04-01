@@ -44,6 +44,10 @@ type DockerContainer struct {
 	// SourceWritable mounts the source code directory as :rw instead of :ro.
 	// Required for actions that modify source code (code, run).
 	SourceWritable bool
+
+	// PrecheckScript is the absolute host path to a precheck script.
+	// When set on a persistent container, RunPrecheck executes it before the agent.
+	PrecheckScript string
 }
 
 const containerRoot = "/ateam"
@@ -143,6 +147,28 @@ func (d *DockerContainer) EnsureRunning(ctx context.Context) error {
 		d.startErr = cmd.Run()
 	})
 	return d.startErr
+}
+
+// RunPrecheck executes the precheck script inside the persistent container.
+// No-op if PrecheckScript is empty. Returns an error if the script exits non-zero.
+func (d *DockerContainer) RunPrecheck(ctx context.Context) error {
+	if d.PrecheckScript == "" {
+		return nil
+	}
+
+	containerPath := d.TranslatePath(d.PrecheckScript)
+	fmt.Fprintf(os.Stderr, "[docker] running precheck: %s\n", containerPath)
+
+	script := fmt.Sprintf("chmod +x %s && %s", containerPath, containerPath)
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", d.ContainerName, "sh", "-c", script)
+
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%w\n%s", err, buf.String())
+	}
+	return nil
 }
 
 // IsRunning checks whether the persistent container is currently running.

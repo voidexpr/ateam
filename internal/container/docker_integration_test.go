@@ -368,6 +368,121 @@ func TestDockerFilePermissions(t *testing.T) {
 	})
 }
 
+func TestDockerPrecheckPersistent(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	dir := t.TempDir()
+
+	sourceDir := filepath.Join(dir, "project")
+	projectDir := filepath.Join(sourceDir, ".ateam")
+	orgDir := filepath.Join(dir, "org")
+	for _, d := range []string{sourceDir, projectDir, orgDir} {
+		os.MkdirAll(d, 0755)
+	}
+
+	dockerfile := filepath.Join(projectDir, "Dockerfile")
+	os.WriteFile(dockerfile, []byte("FROM alpine:3.20\nWORKDIR /workspace\n"), 0644)
+
+	// Precheck script creates a marker file
+	precheckScript := filepath.Join(projectDir, "docker-agent-precheck.sh")
+	os.WriteFile(precheckScript, []byte("#!/bin/sh\ntouch /tmp/precheck-ran\n"), 0755)
+
+	dc := &DockerContainer{
+		Image:          "ateam-dind-test-precheck:latest",
+		Dockerfile:     dockerfile,
+		Persistent:     true,
+		ContainerName:  "ateam-test-precheck",
+		SourceDir:      sourceDir,
+		ProjectDir:     projectDir,
+		OrgDir:         orgDir,
+		MountDir:       sourceDir,
+		PrecheckScript: precheckScript,
+	}
+	t.Cleanup(func() {
+		dc.Stop(ctx)
+		cleanupImage(dc.Image)
+	})
+
+	if err := dc.EnsureImage(ctx); err != nil {
+		t.Fatalf("EnsureImage: %v", err)
+	}
+	if err := dc.EnsureRunning(ctx); err != nil {
+		t.Fatalf("EnsureRunning: %v", err)
+	}
+
+	if err := dc.RunPrecheck(ctx); err != nil {
+		t.Fatalf("RunPrecheck: %v", err)
+	}
+
+	// Verify the marker file was created
+	var stdout bytes.Buffer
+	cmd := exec.CommandContext(ctx, "docker", "exec", dc.ContainerName, "cat", "/tmp/precheck-ran")
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("marker file not found — precheck did not run: %v", err)
+	}
+}
+
+func TestDockerPrecheckFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	dir := t.TempDir()
+
+	sourceDir := filepath.Join(dir, "project")
+	projectDir := filepath.Join(sourceDir, ".ateam")
+	orgDir := filepath.Join(dir, "org")
+	for _, d := range []string{sourceDir, projectDir, orgDir} {
+		os.MkdirAll(d, 0755)
+	}
+
+	dockerfile := filepath.Join(projectDir, "Dockerfile")
+	os.WriteFile(dockerfile, []byte("FROM alpine:3.20\nWORKDIR /workspace\n"), 0644)
+
+	// Precheck script that fails
+	precheckScript := filepath.Join(projectDir, "docker-agent-precheck.sh")
+	os.WriteFile(precheckScript, []byte("#!/bin/sh\necho 'precheck failed: db not ready'\nexit 1\n"), 0755)
+
+	dc := &DockerContainer{
+		Image:          "ateam-dind-test-precheck-fail:latest",
+		Dockerfile:     dockerfile,
+		Persistent:     true,
+		ContainerName:  "ateam-test-precheck-fail",
+		SourceDir:      sourceDir,
+		ProjectDir:     projectDir,
+		OrgDir:         orgDir,
+		MountDir:       sourceDir,
+		PrecheckScript: precheckScript,
+	}
+	t.Cleanup(func() {
+		dc.Stop(ctx)
+		cleanupImage(dc.Image)
+	})
+
+	if err := dc.EnsureImage(ctx); err != nil {
+		t.Fatalf("EnsureImage: %v", err)
+	}
+	if err := dc.EnsureRunning(ctx); err != nil {
+		t.Fatalf("EnsureRunning: %v", err)
+	}
+
+	err := dc.RunPrecheck(ctx)
+	if err == nil {
+		t.Fatal("expected RunPrecheck to return error for failing script")
+	}
+	if !strings.Contains(err.Error(), "precheck failed: db not ready") {
+		t.Errorf("expected error to contain script output, got: %v", err)
+	}
+}
+
+func TestDockerPrecheckNoScript(t *testing.T) {
+	dc := &DockerContainer{PrecheckScript: ""}
+	if err := dc.RunPrecheck(context.Background()); err != nil {
+		t.Fatalf("expected no-op for empty PrecheckScript, got: %v", err)
+	}
+}
+
 func TestDockerEnvForwarding(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

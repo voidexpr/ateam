@@ -201,6 +201,15 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		if err := dc.EnsureRunning(ctx); err != nil {
 			return failEarly(fmt.Errorf("docker container start failed: %w", err))
 		}
+		if dc.PrecheckScript != "" {
+			if dc.Persistent {
+				if err := dc.RunPrecheck(ctx); err != nil {
+					return failEarly(fmt.Errorf("precheck failed: %w", err))
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "[docker] warning: precheck ignored in oneshot mode — use Dockerfile ENTRYPOINT instead\n")
+			}
+		}
 		req.CmdFactory = dc.CmdFactory()
 		// Note: StreamFile and StderrFile are NOT translated — they are
 		// opened by the host process (os.Create) to capture piped output,

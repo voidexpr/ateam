@@ -369,6 +369,8 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 			containerName = buildContainerName(sourceDir, orgDir, roleID)
 		}
 
+		precheckScript := runtime.ResolvePrecheckScript(cc, projectDir, orgDir, roleID)
+
 		return &container.DockerContainer{
 			Image:            image,
 			Dockerfile:       dockerfile,
@@ -383,6 +385,7 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 			ProjectDir:       projectDir,
 			OrgDir:           orgDir,
 			HostCLIPath:      findLinuxBinary(orgDir),
+			PrecheckScript:   precheckScript,
 		}, nil
 	case "devcontainer":
 		configPath := cc.ConfigPath

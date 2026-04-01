@@ -984,6 +984,173 @@ func TestDockerProfile(t *testing.T) {
 	}
 }
 
+func TestContainerPrecheckField(t *testing.T) {
+	dir := t.TempDir()
+
+	os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(`
+agent "mock" {
+  type    = "builtin"
+  command = "mock"
+}
+container "docker" {
+  type       = "docker"
+  mode       = "persistent"
+  dockerfile = "Dockerfile"
+  precheck   = "my-precheck.sh"
+}
+profile "docker" {
+  agent     = "mock"
+  container = "docker"
+}
+`), 0644)
+
+	cfg, err := Load(dir, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cc := cfg.Containers["docker"]
+	if cc.Precheck != "my-precheck.sh" {
+		t.Errorf("expected precheck 'my-precheck.sh', got %q", cc.Precheck)
+	}
+}
+
+func TestContainerPrecheckOverride(t *testing.T) {
+	dir := t.TempDir()
+	orgDir := filepath.Join(dir, "org")
+	projectDir := filepath.Join(dir, "project")
+	os.MkdirAll(orgDir, 0755)
+	os.MkdirAll(projectDir, 0755)
+
+	// Org defines precheck
+	os.WriteFile(filepath.Join(orgDir, "runtime.hcl"), []byte(`
+container "docker" {
+  type     = "docker"
+  precheck = "org-precheck.sh"
+}
+`), 0644)
+
+	// Project overrides it
+	os.WriteFile(filepath.Join(projectDir, "runtime.hcl"), []byte(`
+container "docker" {
+  type     = "docker"
+  precheck = "project-precheck.sh"
+}
+`), 0644)
+
+	cfg, err := Load(projectDir, orgDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cc := cfg.Containers["docker"]
+	if cc.Precheck != "project-precheck.sh" {
+		t.Errorf("expected precheck 'project-precheck.sh', got %q", cc.Precheck)
+	}
+}
+
+func TestResolvePrecheckScriptExplicit(t *testing.T) {
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "project")
+	os.MkdirAll(projectDir, 0755)
+
+	scriptPath := filepath.Join(projectDir, "custom-precheck.sh")
+	os.WriteFile(scriptPath, []byte("#!/bin/sh\nexit 0\n"), 0755)
+
+	cc := &ContainerConfig{Precheck: "custom-precheck.sh"}
+	got := ResolvePrecheckScript(cc, projectDir, "", "")
+	if got != scriptPath {
+		t.Errorf("expected %q, got %q", scriptPath, got)
+	}
+}
+
+func TestResolvePrecheckScriptExplicitMissing(t *testing.T) {
+	dir := t.TempDir()
+	cc := &ContainerConfig{Precheck: "nonexistent.sh"}
+	got := ResolvePrecheckScript(cc, dir, "", "")
+	if got != "" {
+		t.Errorf("expected empty string for missing explicit script, got %q", got)
+	}
+}
+
+func TestResolvePrecheckScriptConvention(t *testing.T) {
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "project")
+	os.MkdirAll(projectDir, 0755)
+
+	scriptPath := filepath.Join(projectDir, "docker-agent-precheck.sh")
+	os.WriteFile(scriptPath, []byte("#!/bin/sh\nexit 0\n"), 0755)
+
+	cc := &ContainerConfig{}
+	got := ResolvePrecheckScript(cc, projectDir, "", "")
+	if got != scriptPath {
+		t.Errorf("expected %q, got %q", scriptPath, got)
+	}
+}
+
+func TestResolvePrecheckScriptRoleOverride(t *testing.T) {
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "project")
+	roleDir := filepath.Join(projectDir, "roles", "security")
+	os.MkdirAll(roleDir, 0755)
+
+	// Both role-level and project-level exist
+	roleScript := filepath.Join(roleDir, "docker-agent-precheck.sh")
+	projectScript := filepath.Join(projectDir, "docker-agent-precheck.sh")
+	os.WriteFile(roleScript, []byte("#!/bin/sh\nexit 0\n"), 0755)
+	os.WriteFile(projectScript, []byte("#!/bin/sh\nexit 0\n"), 0755)
+
+	cc := &ContainerConfig{}
+	got := ResolvePrecheckScript(cc, projectDir, "", "security")
+	if got != roleScript {
+		t.Errorf("expected role-level %q, got %q", roleScript, got)
+	}
+}
+
+func TestResolvePrecheckScriptOrgFallback(t *testing.T) {
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "project")
+	orgDir := filepath.Join(dir, "org")
+	os.MkdirAll(projectDir, 0755)
+	os.MkdirAll(orgDir, 0755)
+
+	orgScript := filepath.Join(orgDir, "docker-agent-precheck.sh")
+	os.WriteFile(orgScript, []byte("#!/bin/sh\nexit 0\n"), 0755)
+
+	cc := &ContainerConfig{}
+	got := ResolvePrecheckScript(cc, projectDir, orgDir, "")
+	if got != orgScript {
+		t.Errorf("expected org-level %q, got %q", orgScript, got)
+	}
+}
+
+func TestResolvePrecheckScriptOrgDefaultsFallback(t *testing.T) {
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "project")
+	orgDir := filepath.Join(dir, "org")
+	orgDefaultsDir := filepath.Join(orgDir, "defaults")
+	os.MkdirAll(projectDir, 0755)
+	os.MkdirAll(orgDefaultsDir, 0755)
+
+	script := filepath.Join(orgDefaultsDir, "docker-agent-precheck.sh")
+	os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0755)
+
+	cc := &ContainerConfig{}
+	got := ResolvePrecheckScript(cc, projectDir, orgDir, "")
+	if got != script {
+		t.Errorf("expected org defaults %q, got %q", script, got)
+	}
+}
+
+func TestResolvePrecheckScriptNone(t *testing.T) {
+	dir := t.TempDir()
+	cc := &ContainerConfig{}
+	got := ResolvePrecheckScript(cc, dir, "", "")
+	if got != "" {
+		t.Errorf("expected empty string when no script exists, got %q", got)
+	}
+}
+
 func TestIsolatedProfile(t *testing.T) {
 	cfg, err := Load("", "")
 	if err != nil {
