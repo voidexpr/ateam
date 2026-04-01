@@ -221,6 +221,63 @@ func TestParseCodexLineCamelCaseTokens(t *testing.T) {
 	}
 }
 
+func TestParseCodexLineItemStartedCommandExecution(t *testing.T) {
+	line := []byte(`{"type":"item.started","item":{"id":"item_2","type":"command_execution","command":"/opt/homebrew/bin/bash -lc 'git status --short'","aggregated_output":"","exit_code":null,"status":"in_progress"}}`)
+	typ, ev, err := ParseCodexLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typ != "tool_use" {
+		t.Errorf("expected type 'tool_use', got %q", typ)
+	}
+	te := ev.(*CodexToolUseEvent)
+	if te.ToolName != "command_execution" {
+		t.Errorf("expected tool name 'command_execution', got %q", te.ToolName)
+	}
+	if te.ToolInput != "/opt/homebrew/bin/bash -lc 'git status --short'" {
+		t.Errorf("unexpected tool input: %q", te.ToolInput)
+	}
+}
+
+func TestParseCodexLineItemStartedNonTool(t *testing.T) {
+	line := []byte(`{"type":"item.started","item":{"type":"todo_list"}}`)
+	typ, _, err := ParseCodexLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typ != "" {
+		t.Errorf("expected empty type for non-tool item.started, got %q", typ)
+	}
+}
+
+func TestParseCodexLineCommandExecutionStandalone(t *testing.T) {
+	// Standalone command_execution events are output updates, not new tool calls.
+	line := []byte(`{"type":"command_execution","exit_code":0,"aggregated_output":"ok"}`)
+	typ, _, err := ParseCodexLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typ != "" {
+		t.Errorf("expected empty type for standalone command_execution, got %q", typ)
+	}
+}
+
+func TestParseCodexLineUnknownBeginSuffix(t *testing.T) {
+	// Any unknown _begin event should be treated as a tool call.
+	line := []byte(`{"type":"file_search_begin","query":"test pattern"}`)
+	typ, ev, err := ParseCodexLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typ != "tool_use" {
+		t.Errorf("expected type 'tool_use', got %q", typ)
+	}
+	te := ev.(*CodexToolUseEvent)
+	if te.ToolName != "file_search" {
+		t.Errorf("expected 'file_search', got %q", te.ToolName)
+	}
+}
+
 func TestParseCodexLinePatchApply(t *testing.T) {
 	line := []byte(`{"type":"patch_apply_begin","name":"fix.patch"}`)
 	typ, ev, err := ParseCodexLine(line)

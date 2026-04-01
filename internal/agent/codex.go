@@ -270,6 +270,17 @@ func ParseCodexLine(line []byte) (string, any, error) {
 	case "turn.started", "thread.started":
 		return "system", &struct{}{}, nil
 
+	case "item.started":
+		return parseCodexItemStarted(raw)
+
+	case "item.completed":
+		return parseCodexItemCompleted(raw)
+
+	case "command_execution":
+		// Standalone command_execution events (output/completion updates).
+		// Not a new tool call — skip.
+		return "", nil, nil
+
 	case "exec_command_begin", "web_search_begin", "mcp_tool_call_begin",
 		"custom_tool_call_begin", "patch_apply_begin", "apply_patch_begin":
 
@@ -291,13 +302,6 @@ func ParseCodexLine(line []byte) (string, any, error) {
 		text := codexMessageText(raw)
 		return "assistant", &CodexTextEvent{Text: text}, nil
 
-	case "item.completed":
-		text := codexItemCompletedText(raw)
-		if text != "" {
-			return "item_completed", &CodexTextEvent{Text: text}, nil
-		}
-		return "", nil, nil
-
 	case "turn.completed":
 		return "result", parseCodexResult(raw, false), nil
 
@@ -315,8 +319,67 @@ func ParseCodexLine(line []byte) (string, any, error) {
 		return "error", &CodexErrorEvent{Message: msg}, nil
 
 	default:
+		// Match any *_begin event as a tool call (forward-compatible).
+		if strings.HasSuffix(eventType, "_begin") {
+			toolName := strings.TrimSuffix(eventType, "_begin")
+			toolInput := codexToolDetail(raw)
+			return "tool_use", &CodexToolUseEvent{
+				ToolName:  toolName,
+				ToolInput: toolInput,
+			}, nil
+		}
 		return "", nil, nil
 	}
+}
+
+// parseCodexItemStarted handles item.started events. The item.type determines
+// whether this is a tool call (command_execution) or something else.
+func parseCodexItemStarted(raw map[string]json.RawMessage) (string, any, error) {
+	itemRaw, ok := raw["item"]
+	if !ok {
+		return "", nil, nil
+	}
+	var item struct {
+		Type    string `json:"type"`
+		Command string `json:"command"`
+		Name    string `json:"name"`
+		Query   string `json:"query"`
+	}
+	if err := json.Unmarshal(itemRaw, &item); err != nil {
+		return "", nil, nil
+	}
+	switch item.Type {
+	case "command_execution":
+		return "tool_use", &CodexToolUseEvent{
+			ToolName:  "command_execution",
+			ToolInput: item.Command,
+		}, nil
+	case "web_search":
+		return "tool_use", &CodexToolUseEvent{
+			ToolName:  "web_search",
+			ToolInput: item.Query,
+		}, nil
+	case "mcp_tool_call", "custom_tool_call", "patch_apply", "apply_patch":
+		detail := item.Name
+		if detail == "" {
+			detail = item.Command
+		}
+		return "tool_use", &CodexToolUseEvent{
+			ToolName:  item.Type,
+			ToolInput: detail,
+		}, nil
+	}
+	return "", nil, nil
+}
+
+// parseCodexItemCompleted handles item.completed events. These carry the final
+// text of agent messages and tool completion data.
+func parseCodexItemCompleted(raw map[string]json.RawMessage) (string, any, error) {
+	text := codexItemCompletedText(raw)
+	if text != "" {
+		return "item_completed", &CodexTextEvent{Text: text}, nil
+	}
+	return "", nil, nil
 }
 
 // codexToolDetail extracts .command // .query // .tool_name // .name from a tool event.
