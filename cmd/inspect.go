@@ -103,7 +103,7 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 
 	if inspectAutoDebug || inspectAutoDebugPrompt {
 		debugContext := buildDebugContext(rows, allFiles)
-		pinfo := env.NewProjectInfoParams("task debugger")
+		pinfo := env.NewProjectInfoParams("task debugger", "debug")
 		prompt, err := prompts.AssembleTaskDebugPrompt(env.OrgDir, env.ProjectDir, debugContext, pinfo)
 		if err != nil {
 			return err

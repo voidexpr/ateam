@@ -72,7 +72,7 @@ func (e *ResolvedEnv) ProjectDBPath() string {
 }
 
 // NewProjectInfoParams builds a ProjectInfoParams from the resolved environment.
-func (e *ResolvedEnv) NewProjectInfoParams(role string) prompts.ProjectInfoParams {
+func (e *ResolvedEnv) NewProjectInfoParams(role, action string) prompts.ProjectInfoParams {
 	meta, _ := gitutil.GetProjectMeta(e.SourceDir)
 	return prompts.ProjectInfoParams{
 		OrgDir:      e.OrgDir,
@@ -81,6 +81,7 @@ func (e *ResolvedEnv) NewProjectInfoParams(role string) prompts.ProjectInfoParam
 		SourceDir:   e.SourceDir,
 		GitRepoDir:  e.GitRepoDir,
 		Role:        role,
+		Action:      action,
 		Meta:        meta,
 	}
 }

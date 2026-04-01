@@ -110,7 +110,7 @@ func runReview(opts ReviewOptions) error {
 		}
 	}
 
-	pinfo := env.NewProjectInfoParams("the supervisor")
+	pinfo := env.NewProjectInfoParams("the supervisor", "review")
 	prompt, err := prompts.AssembleReviewPrompt(env.OrgDir, env.ProjectDir, pinfo, extraPrompt, customPrompt)
 	if err != nil {
 		return err

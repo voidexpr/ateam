@@ -371,6 +371,7 @@ type ProjectInfoParams struct {
 	SourceDir   string // absolute path to project root
 	GitRepoDir  string // absolute path to git repo root (may differ from SourceDir)
 	Role        string // e.g. "role security" or "the supervisor"
+	Action      string // e.g. "report", "review", "code"
 	Meta        *gitutil.ProjectMeta
 }
 
@@ -381,6 +382,17 @@ func FormatProjectInfo(p ProjectInfoParams) string {
 		return ""
 	}
 	var b strings.Builder
+	// Header line: "project_name role action" — helps identify sessions in --resume lists.
+	if p.ProjectName != "" {
+		b.WriteString(p.ProjectName)
+		b.WriteString(" ")
+		b.WriteString(p.Role)
+		if p.Action != "" {
+			b.WriteString(" ")
+			b.WriteString(p.Action)
+		}
+		b.WriteString("\n\n")
+	}
 	b.WriteString("# ATeam Project Context\n\n")
 	b.WriteString("You are part of the ateam software:\n")
 	fmt.Fprintf(&b, "* project name: %s\n", p.ProjectName)

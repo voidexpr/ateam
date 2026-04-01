@@ -133,7 +133,7 @@ func runCode(opts CodeOptions) error {
 
 	taskGroup := "code-" + time.Now().Format(runner.TimestampFormat)
 
-	pinfo := env.NewProjectInfoParams("the supervisor")
+	pinfo := env.NewProjectInfoParams("the supervisor", "code")
 	prompt, err := prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.SourceDir, pinfo, reviewContent, customManagement, extraPrompt)
 	if err != nil {
 		return err
