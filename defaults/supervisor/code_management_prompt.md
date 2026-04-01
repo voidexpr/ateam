@@ -201,3 +201,9 @@ follow along. Print status lines as you go:
 - Do not force-push, rebase, or perform destructive git operations
 - If a task leaves the tree dirty after failure, revert changes before proceeding
 - if a task takes more than 5min to run provide some status about it if you have some context
+
+## Critical Output Rule
+
+Your FINAL assistant message must be the complete execution report.
+Do not send any summary or commentary after the execution report.
+The execution report IS your final output — it will be saved directly as code_output.md.
