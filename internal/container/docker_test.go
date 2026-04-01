@@ -19,12 +19,12 @@ func TestTranslatePath(t *testing.T) {
 		want     string
 	}{
 		{"empty", "", ""},
-		{"source root", "/Users/nic/projects/myapp", "/ateam/projects/myapp"},
-		{"file in source", "/Users/nic/projects/myapp/src/main.go", "/ateam/projects/myapp/src/main.go"},
-		{"project dir", "/Users/nic/projects/myapp/.ateam", "/ateam/projects/myapp/.ateam"},
-		{"file in project", "/Users/nic/projects/myapp/.ateam/logs/stream.jsonl", "/ateam/projects/myapp/.ateam/logs/stream.jsonl"},
-		{"org dir", "/Users/nic/.ateamorg", "/ateam/.ateamorg"},
-		{"file in org", "/Users/nic/.ateamorg/runtime.hcl", "/ateam/.ateamorg/runtime.hcl"},
+		{"source root", "/Users/nic/projects/myapp", "/workspace"},
+		{"file in source", "/Users/nic/projects/myapp/src/main.go", "/workspace/src/main.go"},
+		{"project dir", "/Users/nic/projects/myapp/.ateam", "/workspace/.ateam"},
+		{"file in project", "/Users/nic/projects/myapp/.ateam/logs/stream.jsonl", "/workspace/.ateam/logs/stream.jsonl"},
+		{"org dir", "/Users/nic/.ateamorg", "/.ateamorg"},
+		{"file in org", "/Users/nic/.ateamorg/runtime.hcl", "/.ateamorg/runtime.hcl"},
 		{"unrelated path", "/tmp/something", "/tmp/something"},
 	}
 
@@ -51,12 +51,12 @@ func TestTranslatePathWithGitRoot(t *testing.T) {
 		hostPath string
 		want     string
 	}{
-		{"git root", "/Users/nic/projects/repo", "/ateam/projects/repo"},
-		{"source dir (subdir of git root)", "/Users/nic/projects/repo/myapp", "/ateam/projects/repo/myapp"},
-		{"file in source", "/Users/nic/projects/repo/myapp/main.go", "/ateam/projects/repo/myapp/main.go"},
-		{"file in git root outside source", "/Users/nic/projects/repo/README.md", "/ateam/projects/repo/README.md"},
-		{"org dir", "/Users/nic/.ateamorg", "/ateam/.ateamorg"},
-		{"state dir in org", "/Users/nic/.ateamorg/projects/id/stream.jsonl", "/ateam/.ateamorg/projects/id/stream.jsonl"},
+		{"git root", "/Users/nic/projects/repo", "/workspace"},
+		{"source dir (subdir of git root)", "/Users/nic/projects/repo/myapp", "/workspace/myapp"},
+		{"file in source", "/Users/nic/projects/repo/myapp/main.go", "/workspace/myapp/main.go"},
+		{"file in git root outside source", "/Users/nic/projects/repo/README.md", "/workspace/README.md"},
+		{"org dir", "/Users/nic/.ateamorg", "/.ateamorg"},
+		{"file in org", "/Users/nic/.ateamorg/defaults/runtime.hcl", "/.ateamorg/defaults/runtime.hcl"},
 	}
 
 	for _, tt := range tests {
@@ -112,10 +112,10 @@ func TestCmdFactoryProducesDockerArgs(t *testing.T) {
 		}
 		return false
 	}
-	if !hasMount("/Users/nic/projects/myapp:/ateam/projects/myapp:ro") {
+	if !hasMount("/Users/nic/projects/myapp:/workspace:ro") {
 		t.Errorf("missing source mount, args: %v", args)
 	}
-	if !hasMount("/Users/nic/.ateamorg:/ateam/.ateamorg:rw") {
+	if !hasMount("/Users/nic/.ateamorg:/.ateamorg:rw") {
 		t.Errorf("missing org mount, args: %v", args)
 	}
 }
@@ -142,12 +142,12 @@ func TestCmdFactoryWithGitRoot(t *testing.T) {
 		return false
 	}
 
-	// Code mount should be git root → /ateam/projects/repo
-	if !hasArg("-v", "/Users/nic/projects/repo:/ateam/projects/repo:ro") {
+	// Code mount should be git root → /workspace
+	if !hasArg("-v", "/Users/nic/projects/repo:/workspace:ro") {
 		t.Errorf("missing git root mount, args: %v", args)
 	}
-	// Working dir should be source dir → /ateam/projects/repo/myapp
-	if !hasArg("-w", "/ateam/projects/repo/myapp") {
+	// Working dir should be source dir → /workspace/myapp
+	if !hasArg("-w", "/workspace/myapp") {
 		t.Errorf("missing workdir, args: %v", args)
 	}
 }
@@ -169,9 +169,9 @@ func TestDebugCommand(t *testing.T) {
 	// so check required parts instead of exact match.
 	for _, substr := range []string{
 		"docker run --rm -i",
-		"-v /src:/ateam/src:ro",
-		"-v /org:/ateam/org:rw",
-		"-w /ateam/src",
+		"-v /src:/workspace:ro",
+		"-v /org:/.ateamorg:rw",
+		"-w /workspace",
 		"-e ANTHROPIC_API_KEY",
 		"ateam-test:latest claude -p --verbose",
 	} {
@@ -213,7 +213,7 @@ func TestPersistentCmdFactoryArgs(t *testing.T) {
 	}
 
 	// Working dir
-	if !hasArg("-w", "/ateam/projects/myapp") {
+	if !hasArg("-w", "/workspace") {
 		t.Errorf("missing -w flag, args: %v", args)
 	}
 
@@ -260,15 +260,33 @@ func TestDebugCommandPersistent(t *testing.T) {
 		Args:    []string{"-p"},
 	})
 
-	want := "docker exec -i -w /ateam/src -e ANTHROPIC_API_KEY=... ateam-projects_myapp-security claude -p"
+	want := "docker exec -i -w /workspace -e ANTHROPIC_API_KEY=... ateam-projects_myapp-security claude -p"
 	if got != want {
 		t.Errorf("DebugCommand persistent:\n  got:  %s\n  want: %s", got, want)
 	}
 }
 
-func TestContainerPathsProjectIDMatches(t *testing.T) {
-	// Verify the core invariant: the relative path from orgRoot to sourceDir
-	// is the same on host and in container.
+func TestContainerPathsSimple(t *testing.T) {
+	dc := &DockerContainer{
+		SourceDir:  "/Users/nic/projects/myapp",
+		ProjectDir: "/Users/nic/projects/myapp/.ateam",
+		OrgDir:     "/Users/nic/.ateamorg",
+	}
+
+	codePath, workDir, orgPath := dc.containerPaths()
+
+	if codePath != "/workspace" {
+		t.Errorf("codePath = %q, want /workspace", codePath)
+	}
+	if workDir != "/workspace" {
+		t.Errorf("workDir = %q, want /workspace", workDir)
+	}
+	if orgPath != "/.ateamorg" {
+		t.Errorf("orgPath = %q, want /.ateamorg", orgPath)
+	}
+}
+
+func TestContainerPathsWithGitRoot(t *testing.T) {
 	dc := &DockerContainer{
 		MountDir:   "/home/user/repo",
 		SourceDir:  "/home/user/repo/myapp",
@@ -276,12 +294,15 @@ func TestContainerPathsProjectIDMatches(t *testing.T) {
 		OrgDir:     "/home/user/.ateamorg",
 	}
 
-	_, workDir, _ := dc.containerPaths()
+	codePath, workDir, orgPath := dc.containerPaths()
 
-	// Host: filepath.Rel("/home/user", "/home/user/repo/myapp") = "repo/myapp"
-	// Container: filepath.Rel("/ateam", workDir) should also be "repo/myapp"
-	wantWorkDir := "/ateam/repo/myapp"
-	if workDir != wantWorkDir {
-		t.Errorf("workDir = %q, want %q", workDir, wantWorkDir)
+	if codePath != "/workspace" {
+		t.Errorf("codePath = %q, want /workspace", codePath)
+	}
+	if workDir != "/workspace/myapp" {
+		t.Errorf("workDir = %q, want /workspace/myapp", workDir)
+	}
+	if orgPath != "/.ateamorg" {
+		t.Errorf("orgPath = %q, want /.ateamorg", orgPath)
 	}
 }
