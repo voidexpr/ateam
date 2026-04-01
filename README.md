@@ -234,96 +234,70 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 
 See [REFERENCE.md](REFERENCE.md) for full flag documentation, directory layout, prompt configuration, runtime configuration, and troubleshooting.
 
-## Isolation: Sandboxes, Containers, Agent configuration
+## Isolation
 
-ATeam runs unattended agents, so they must operate safely without constant permission approval.
+ATeam runs unattended agents that must operate safely without constant permission approval. The field is evolving — ATeam supports multiple approaches and will adapt as best practices emerge.
 
-At this point there is no clear winning strategy for isolation of unattended coding agents, it's an evolving field trying to balance convenience (work without approvals), safety (don't modify files it shouldn't, don't expose sensitive data, don't let malicious code affect more than the minimal attack surface) and reproducibility. ATeam supports multiple approaches: sandbox (default), containers (docker as one-off or persistent), devcontainers, nothing or can be ran inside an existing container. As the field matures ATeam will adapt to what works best in practice.
+**Why isolation matters:**
+- **Filesystem**: prevent accidental or malicious writes outside the project, reading sensitive files, running unauthorized commands
+- **Network**: prevent data exfiltration (especially combined with filesystem access)
 
-**Risks without isolation:**
-* file system: accidental or malicious file writes outside of what is strictly required by the project, reading sensitive files, running unauthorized commands that could potentially escape a sandbox or container (like docker from a Claude/Codex sandbox)
-* network: data exfiltration (when combined with the ability of reading sensitive files)
-
-**Tradeoff:** stricter restrictions increase safety but can break tools that rely on directories outside of the project, use Unix sockets (Docker), pipes (tsx), use their own sandbox (like Playwright, on MacOS sandboxes can't be nested) or shared `/tmp` directories.
+**The tradeoff**: stricter restrictions increase safety but can break tools that rely on directories outside the project, Unix sockets (Docker), pipes (tsx), nested sandboxes (Playwright on macOS), or shared `/tmp` directories.
 
 ### Approaches
 
-| Approach | Mechanism | Pros | Cons |
-|----------|-----------|------|------|
-| **Sandbox** | OS-level syscall restrictions (Seatbelt on macOS, bubblewrap on Linux) per command | Fast, minimal config, shares host OS and tools | Can break tools in subtle ways; still maturing |
-| **Container** | Isolated Linux environment (Docker) with controlled filesystem and network | Reproducible, supports Docker-in-Docker | Linux only, more operational overhead |
-| **Docker Sandbox** | MicroVM via Docker Desktop 4.58+ with bidirectional workspace sync | Hypervisor isolation, private Docker daemon | Requires Docker Desktop, limited to one synced workspace, can't build docker images with in, heavierweight than regular docker |
+| Approach | How it works | Best for |
+|----------|-------------|----------|
+| **Sandbox** (default) | OS-level syscall restrictions (Seatbelt/bubblewrap) per command | Most projects — fast, no setup |
+| **Docker** | Isolated Linux container with controlled mounts and network | Projects needing build/test isolation, multi-tier stacks |
+| **Devcontainer** | Uses project's `.devcontainer/` environment | Projects already using devcontainers |
+| **None** | No isolation (agent runs directly on host) | Debugging, or when already inside a container |
 
-By default ATeam uses the agent's built-in sandbox. Docker profiles (`--profile docker`, `--profile docker-sandbox` is experimental but not recommended given the restrictions mentioned above) are available for stronger isolation. See `defaults/runtime.hcl` for details.
+By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for container isolation. See `defaults/runtime.hcl` for all profiles.
 
-### Known Limitations
+### Sandbox
 
-Some of these limitations will change as agents evolve rapidly.
+No config needed — works out of the box. ATeam's default sandbox restricts filesystem access to fewer directories than the agent's default and limits network to package registries and API endpoints.
 
-* **Sandbox:** Claude Code doesn't yet support Unix domain sockets or named pipes ([#41254](https://github.com/anthropics/claude-code/issues/41254)) — Docker, playwright-cli and tsx must run unsandboxed. All files are readable by default; sensitive paths must be explicitly excluded.
-    * while udx/named pipe should get eventually fixed, more complex commands like playwright-cli must run outside of a sandbox and therefore could allow network escapes, Docker can allow to install and run arbitrary code (but not escape file system sandboxing)
-    * different agents make different choices in sandboxing and making it easy to switch between them might not always be possible
-* **Docker:** No macOS guest — can't test macOS-specific code. Docker-in-Docker networking is restricted inside Docker sandboxes (inner containers can pull images but not make outbound HTTPS).
-* **Nesting:** Sandboxes can't be nested (e.g., Playwright CLI inside a sandbox).
+To customize, edit `.ateam/config.toml`:
 
-### Agent configuration
-
-When ran in a sandbox agents don't need separate authentication but they do if they run in a container. See: TODO
-
-By default agents run with your default configuration (i.e. `~/.claude` for claude code) which means it will use default permissions (useful for excluded folders for example), hooks, etc ... But it's easy to specify a custom config directory (for example .ateam/.claude) to not use the default config.
-
-### Customizing runtime options
-
-Agents and container can be configured in:
-* `runtime.hcl` — full control over agent and container configuration.
-
-Some simple sandbox config changes can be made in:
-* `config.toml` — add read-only paths, read-write paths, or unsandboxed commands.
-
-
-### Recommended Setup
-
-* **Default:** agent's built-in sandbox (no config needed) for all commands (`report`, `review`, `code`), it provides defaults for many commands, restricts to fewer directories than default agent sandbox and limits internet access.
-* for projects using playwright, multiple tiers (database, web server) or docker there are a few options:
-    * sandbox: these tools can be configured to escape the sandbox (only way for them to run)
-    * hybrid: report and review run in the default sandbox and `code` uses docker so tests can be ran
-    * run ateam itself inside docker and then run agents without any restrictions because they are in a container already
-    * run ateam outside of docker and run all its commands within docker
-
-
-#### Sandbox best practices
-TODO: edit config.toml as needed
-
-#### Docker best practices
-
-* run ateam from outside docker and run agents inside docker
-    * pro: can mix report/audit outside of docker an use docker only for code where tests are ran
-    * cons: need to setup docker so that ateam can use it, parallel runs (like report) would require many containers
-* add ateam in a docker image an run it from within it
-    * pro: simple to use, agents can be set to never ask for any permission
-    * pro: no sanboxing at all
-    * pro: reproducible setup
-    * cons: need to have a docker setup for your project that also includes ateam
-
-TODO: authentication for agents
-
-Use coding agents to do docker setup.
-
-TODO: ateam docker-setup wrapper
-
-Verify first with:
-```bash
-ateam run "run: 'YOUR_BUILD_COMMAND && YOUR_TEST_COMMAND', report issues and how to solve them but don't try to do so yourself" --profile docker
+```toml
+[sandbox-extra]
+allow_write = ["/tmp/my-tool-output"]
+allow_read = ["/opt/my-sdk"]
+allow_domains = ["my-internal-registry.dev"]
+unsandboxed_commands = ["playwright"]    # commands that can't run inside a sandbox
 ```
 
-TODO: ateam docker-start + ateam docker-shell + ateam docker-run ARGS
+**Known limitations** (will change as agents evolve):
+- Claude Code doesn't yet support Unix domain sockets or named pipes — Docker, playwright-cli and tsx must run unsandboxed
+- Sandboxes can't be nested (e.g., Playwright CLI inside a sandbox)
+- All files are readable by default; sensitive paths must be explicitly excluded
 
+### Docker
 
-        for `code` use `--profile docker` (can persist it in config.toml) for lightweight docker images or `--profile docker-persistent` for docker containers that should be reused (because a full setup is too slow)
+Two ways to use Docker with ATeam:
 
+1. **ATeam orchestrates Docker** (`--profile docker`): ATeam runs on the host and launches agents inside Docker containers. Best when you want isolated build/test environments with per-project customization.
 
-    consider doing only the coding from within docker, use `--profile docker`.
-* Don't use Docker profiles for macOS-specific code.
+2. **ATeam inside Docker**: Add ATeam to your own Docker image. Agents run without any sandbox since the container is the isolation boundary. Simplest setup — no special config needed.
+
+Docker containers need API keys forwarded as environment variables. Store them with `ateam secret` (see [Quick Start](#optional-docker-on-macos)).
+
+For detailed Docker setup instructions, container customization, and technical details, see [SANDBOX_DOCKER.md](SANDBOX_DOCKER.md).
+
+### Agent Configuration
+
+In sandbox mode, agents use your default config (e.g. `~/.claude` for Claude Code) — permissions, hooks, and settings all apply. In Docker mode, agents run with `--dangerously-skip-permissions` since the container provides isolation.
+
+To use a project-specific config directory instead of your default, use the `claude-isolated` agent or set `config_dir` in a custom agent definition in `runtime.hcl`.
+
+### Customizing Runtime
+
+- **`config.toml`**: simple customization — sandbox paths, container extras, unsandboxed commands, profiles
+- **`runtime.hcl`**: full control — agent definitions, container types, profiles, pricing
+
+See [REFERENCE.md](REFERENCE.md) for complete configuration documentation.
 
 
 ## FAQ
