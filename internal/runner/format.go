@@ -118,6 +118,9 @@ var knownErrors = []string{
 // Otherwise returns the last maxMessages assistant text blocks formatted.
 // Returns "" if nothing useful is found.
 func StreamTailError(path, agentName string, maxMessages int) string {
+	if maxMessages <= 0 {
+		return ""
+	}
 	messages := streamTailMessages(path, maxMessages)
 	if len(messages) == 0 {
 		return ""
@@ -146,6 +149,9 @@ func StreamTailError(path, agentName string, maxMessages int) string {
 // streamTailMessages reads the stream JSONL and returns the last n assistant
 // text blocks.
 func streamTailMessages(path string, n int) []string {
+	if n <= 0 {
+		return nil
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil
