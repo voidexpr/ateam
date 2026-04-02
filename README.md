@@ -280,7 +280,7 @@ Two ways to use Docker with ATeam:
 
 1. **ATeam orchestrates Docker** (`--profile docker`): ATeam runs on the host and launches agents inside Docker containers. Best when you want isolated build/test environments with per-project customization.
 
-2. **ATeam inside Docker**: Add ATeam to your own Docker image. Agents run without any sandbox since the container is the isolation boundary. Simplest setup — no special config needed.
+2. **ATeam inside Docker**: Add ATeam and agents to your own Docker image. Agents run without any sandbox since the container is the isolation boundary. Simplest setup — no special ATeam config needed. Best for complex docker setup like multi-tier systems.
 
 Docker containers need API keys forwarded as environment variables. Store them with `ateam secret` (see [Quick Start](#optional-docker-on-macos)).
 
