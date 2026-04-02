@@ -686,11 +686,12 @@ func archivePrompt(historyDir, promptName, prompt string, startedAt time.Time) s
 
 // FormatDuration returns a human-readable duration string.
 func FormatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%.0fs", d.Seconds())
+	rounded := d.Round(time.Second)
+	if rounded < time.Minute {
+		return fmt.Sprintf("%ds", int(rounded/time.Second))
 	}
-	minutes := int(d.Minutes())
-	seconds := int(d.Seconds()) % 60
+	minutes := int(rounded / time.Minute)
+	seconds := int((rounded % time.Minute) / time.Second)
 	if seconds == 0 {
 		return fmt.Sprintf("%dm", minutes)
 	}
