@@ -57,16 +57,17 @@ type StreamEvent struct {
 	ToolResult string
 
 	// result (final)
-	Output          string
-	Cost            float64
-	InputTokens     int
-	OutputTokens    int
-	CacheReadTokens int
-	Turns           int
-	DurationMS      int64
-	IsError         bool
-	ExitCode        int
-	Err             error
+	Output           string
+	Cost             float64
+	InputTokens      int
+	OutputTokens     int
+	CacheReadTokens  int
+	CacheWriteTokens int
+	Turns            int
+	DurationMS       int64
+	IsError          bool
+	ExitCode         int
+	Err              error
 }
 
 // buildProcessEnv constructs the process environment for an agent.

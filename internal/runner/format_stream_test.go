@@ -66,13 +66,16 @@ func TestStreamFormatterText(t *testing.T) {
 
 func TestStreamFormatterResult(t *testing.T) {
 	f := &StreamFormatter{Color: false}
-	line := []byte(`{"type":"result","total_cost_usd":0.15,"duration_ms":60000,"num_turns":3,"is_error":false,"usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":200}}`)
+	line := []byte(`{"type":"result","total_cost_usd":0.15,"duration_ms":60000,"num_turns":3,"is_error":false,"usage":{"input_tokens":1000,"output_tokens":500,"cache_read_input_tokens":200,"cache_write_input_tokens":75}}`)
 	out := f.FormatLine(line)
 	if !strings.Contains(out, "=== Result ===") {
 		t.Errorf("expected result header, got: %s", out)
 	}
 	if !strings.Contains(out, "$0.15") {
 		t.Errorf("expected cost, got: %s", out)
+	}
+	if !strings.Contains(out, "cache_write=75") {
+		t.Errorf("expected cache write tokens, got: %s", out)
 	}
 	if !f.HasResult() {
 		t.Error("expected HasResult=true")

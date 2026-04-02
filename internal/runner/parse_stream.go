@@ -43,13 +43,14 @@ type ToolResultLine struct {
 }
 
 type ResultLine struct {
-	Cost            float64
-	DurationMS      int64
-	Turns           int
-	InputTokens     int
-	OutputTokens    int
-	CacheReadTokens int
-	IsError         bool
+	Cost             float64
+	DurationMS       int64
+	Turns            int
+	InputTokens      int
+	OutputTokens     int
+	CacheReadTokens  int
+	CacheWriteTokens int
+	IsError          bool
 }
 
 type ErrorLine struct {
@@ -185,13 +186,14 @@ func parseClaudeDisplay(line []byte) ([]DisplayEvent, error) {
 			cost = res.CostUSD
 		}
 		return []DisplayEvent{&ResultLine{
-			Cost:            cost,
-			DurationMS:      res.DurationMS,
-			Turns:           res.NumTurns,
-			InputTokens:     res.Usage.InputTokens,
-			OutputTokens:    res.Usage.OutputTokens,
-			CacheReadTokens: res.Usage.CacheReadInputTokens,
-			IsError:         res.IsError,
+			Cost:             cost,
+			DurationMS:       res.DurationMS,
+			Turns:            res.NumTurns,
+			InputTokens:      res.Usage.InputTokens,
+			OutputTokens:     res.Usage.OutputTokens,
+			CacheReadTokens:  res.Usage.CacheReadInputTokens,
+			CacheWriteTokens: res.Usage.CacheWriteInputTokens,
+			IsError:          res.IsError,
 		}}, nil
 	}
 

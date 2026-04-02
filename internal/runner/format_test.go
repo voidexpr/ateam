@@ -148,6 +148,20 @@ func TestScanStreamFileForResultLastWins(t *testing.T) {
 	}
 }
 
+func TestScanStreamFileForResultCacheWriteTokens(t *testing.T) {
+	content := `{"type":"result","total_cost_usd":0.05,"duration_ms":5000,"num_turns":3,"is_error":false,"usage":{"input_tokens":200,"output_tokens":80,"cache_read_input_tokens":40,"cache_write_input_tokens":20}}
+`
+	path := writeTempStream(t, content)
+
+	res := scanStreamFileForResult(path)
+	if res == nil {
+		t.Fatal("expected non-nil result event")
+	}
+	if res.CacheWriteTokens != 20 {
+		t.Errorf("expected CacheWriteTokens 20, got %d", res.CacheWriteTokens)
+	}
+}
+
 // TestStreamTailErrorKnownPattern verifies that a known credit error in the
 // last assistant message is returned as "{agentName}: {pattern}".
 func TestStreamTailErrorKnownPattern(t *testing.T) {
