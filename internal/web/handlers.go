@@ -760,7 +760,7 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		data.Runs, _ = db.RecentRuns(calldb.RecentFilter{TaskGroup: taskGroup, Limit: 200})
 		for _, run := range data.Runs {
 			data.TotalCost += run.CostUSD
-			data.TotalTokens += int64(run.InputTokens + run.OutputTokens + run.CacheReadTokens)
+			data.TotalTokens += int64(run.InputTokens + run.OutputTokens + run.CacheReadTokens + run.CacheWriteTokens)
 		}
 	}
 

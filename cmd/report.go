@@ -257,7 +257,7 @@ func runReport(opts ReportOptions) error {
 	for r := range completed {
 		elapsed := runner.FormatDuration(r.Duration)
 		endedAt := r.EndedAt.Format("15:04:05")
-		tokens := display.FmtTokens(int64(r.InputTokens + r.OutputTokens + r.CacheReadTokens))
+		tokens := display.FmtTokens(int64(r.InputTokens + r.OutputTokens + r.CacheReadTokens + r.CacheWriteTokens))
 
 		statusMu.Lock()
 		idx := roleIndex[r.RoleID]

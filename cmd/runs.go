@@ -89,7 +89,7 @@ func printRunsTable(rows []calldb.RecentRow) {
 		}
 
 		tokens := ""
-		total := int64(r.InputTokens + r.OutputTokens + r.CacheReadTokens)
+		total := int64(r.InputTokens + r.OutputTokens + r.CacheReadTokens + r.CacheWriteTokens)
 		if total > 0 {
 			tokens = display.FmtTokens(total)
 		}

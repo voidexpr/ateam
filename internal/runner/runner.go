@@ -97,10 +97,11 @@ type RunSummary struct {
 	DurationMS      int64
 	Turns           int
 	IsError         bool
-	InputTokens     int
-	OutputTokens    int
-	CacheReadTokens int
-	ToolCounts      map[string]int
+	InputTokens      int
+	OutputTokens     int
+	CacheReadTokens  int
+	CacheWriteTokens int
+	ToolCounts       map[string]int
 
 	StreamFilePath string
 	StderrFilePath string
@@ -466,8 +467,9 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			CostUSD:         summary.Cost,
 			InputTokens:     summary.InputTokens,
 			OutputTokens:    summary.OutputTokens,
-			CacheReadTokens: summary.CacheReadTokens,
-			Turns:           summary.Turns,
+			CacheReadTokens:  summary.CacheReadTokens,
+			CacheWriteTokens: summary.CacheWriteTokens,
+			Turns:            summary.Turns,
 			Model:           resultModel,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: call tracking update failed: %v\n", err)
