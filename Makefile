@@ -1,6 +1,6 @@
 BINARY = ateam
 
-.PHONY: build build-binary companion clean tidy test test-docker test-docker-live vuln docs lint fmt fmt-check
+.PHONY: build build-binary companion clean tidy check-tidy test test-docker test-docker-live vuln docs lint fmt fmt-check
 
 BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
@@ -9,7 +9,7 @@ LDFLAGS := -X github.com/ateam/cmd.BuildTime=$(BUILD_TIME) -X github.com/ateam/c
 
 build: build-binary docs
 
-build-binary: tidy
+build-binary:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
 
 docs: build-binary
@@ -23,7 +23,10 @@ companion:
 tidy:
 	go mod tidy
 
-test: tidy
+check-tidy:
+	go mod tidy -diff
+
+test:
 	go build ./...
 	go test ./...
 
