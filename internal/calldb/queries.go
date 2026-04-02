@@ -23,9 +23,10 @@ type RecentRow struct {
 	CostUSD         float64
 	InputTokens     int
 	OutputTokens    int
-	CacheReadTokens int
-	Turns           int
-	PID             int
+	CacheReadTokens  int
+	CacheWriteTokens int
+	Turns            int
+	PID              int
 	ContainerID     string
 	StreamFile      string
 }
@@ -90,12 +91,12 @@ func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
 	return results, rows.Err()
 }
 
-const recentCols = "id, project_id, profile, action, role, task_group, model, started_at, COALESCE(ended_at,''), COALESCE(duration_ms,0), COALESCE(exit_code,0), is_error, COALESCE(cost_usd,0), COALESCE(input_tokens,0), COALESCE(output_tokens,0), COALESCE(cache_read_tokens,0), COALESCE(turns,0), COALESCE(pid,0), COALESCE(container_id,''), COALESCE(stream_file,'')"
+const recentCols = "id, project_id, profile, action, role, task_group, model, started_at, COALESCE(ended_at,''), COALESCE(duration_ms,0), COALESCE(exit_code,0), is_error, COALESCE(cost_usd,0), COALESCE(input_tokens,0), COALESCE(output_tokens,0), COALESCE(cache_read_tokens,0), COALESCE(cache_write_tokens,0), COALESCE(turns,0), COALESCE(pid,0), COALESCE(container_id,''), COALESCE(stream_file,'')"
 
 func scanRecentRow(rows *sql.Rows) (RecentRow, error) {
 	var r RecentRow
 	var isErr int
-	err := rows.Scan(&r.ID, &r.ProjectID, &r.Profile, &r.Action, &r.Role, &r.TaskGroup, &r.Model, &r.StartedAt, &r.EndedAt, &r.DurationMS, &r.ExitCode, &isErr, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.Turns, &r.PID, &r.ContainerID, &r.StreamFile)
+	err := rows.Scan(&r.ID, &r.ProjectID, &r.Profile, &r.Action, &r.Role, &r.TaskGroup, &r.Model, &r.StartedAt, &r.EndedAt, &r.DurationMS, &r.ExitCode, &isErr, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens, &r.Turns, &r.PID, &r.ContainerID, &r.StreamFile)
 	r.IsError = isErr != 0
 	return r, err
 }
@@ -156,13 +157,14 @@ func (c *CallDB) FindRunning(projectID, action string) ([]RunningRow, error) {
 }
 
 type ActionAgg struct {
-	Category        string
-	Count           int
-	CostUSD         float64
-	InputTokens     int64
-	OutputTokens    int64
-	CacheReadTokens int64
-	TotalTokens     int64
+	Category         string
+	Count            int
+	CostUSD          float64
+	InputTokens      int64
+	OutputTokens     int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+	TotalTokens      int64
 }
 
 func (c *CallDB) CostByAction(projectID string) ([]ActionAgg, error) {
@@ -177,7 +179,8 @@ func (c *CallDB) CostByAction(projectID string) ([]ActionAgg, error) {
 			COALESCE(SUM(input_tokens), 0),
 			COALESCE(SUM(output_tokens), 0),
 			COALESCE(SUM(cache_read_tokens), 0),
-			COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(output_tokens), 0) + COALESCE(SUM(cache_read_tokens), 0)
+			COALESCE(SUM(cache_write_tokens), 0),
+			COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(output_tokens), 0) + COALESCE(SUM(cache_read_tokens), 0) + COALESCE(SUM(cache_write_tokens), 0)
 		FROM agent_execs`
 	var args []any
 	if projectID != "" {
@@ -195,7 +198,7 @@ func (c *CallDB) CostByAction(projectID string) ([]ActionAgg, error) {
 	var results []ActionAgg
 	for rows.Next() {
 		var r ActionAgg
-		if err := rows.Scan(&r.Category, &r.Count, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.TotalTokens); err != nil {
+		if err := rows.Scan(&r.Category, &r.Count, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens, &r.TotalTokens); err != nil {
 			return results, err
 		}
 		results = append(results, r)
@@ -204,16 +207,17 @@ func (c *CallDB) CostByAction(projectID string) ([]ActionAgg, error) {
 }
 
 type TaskGroupRow struct {
-	TaskGroup       string
-	Action          string
-	Count           int
-	CostUSD         float64
-	InputTokens     int64
-	OutputTokens    int64
-	CacheReadTokens int64
-	TotalTokens     int64
-	FirstStarted    string
-	LastEnded       sql.NullString
+	TaskGroup        string
+	Action           string
+	Count            int
+	CostUSD          float64
+	InputTokens      int64
+	OutputTokens     int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+	TotalTokens      int64
+	FirstStarted     string
+	LastEnded        sql.NullString
 }
 
 // CostByTaskGroup returns cost data grouped by task_group and action for all
@@ -228,7 +232,8 @@ func (c *CallDB) CostByTaskGroup(projectID string) ([]TaskGroupRow, error) {
 			COALESCE(SUM(input_tokens), 0),
 			COALESCE(SUM(output_tokens), 0),
 			COALESCE(SUM(cache_read_tokens), 0),
-			COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(output_tokens), 0) + COALESCE(SUM(cache_read_tokens), 0),
+			COALESCE(SUM(cache_write_tokens), 0),
+			COALESCE(SUM(input_tokens), 0) + COALESCE(SUM(output_tokens), 0) + COALESCE(SUM(cache_read_tokens), 0) + COALESCE(SUM(cache_write_tokens), 0),
 			MIN(started_at),
 			MAX(ended_at)
 		FROM agent_execs
@@ -249,7 +254,7 @@ func (c *CallDB) CostByTaskGroup(projectID string) ([]TaskGroupRow, error) {
 	var results []TaskGroupRow
 	for rows.Next() {
 		var r TaskGroupRow
-		if err := rows.Scan(&r.TaskGroup, &r.Action, &r.Count, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.TotalTokens, &r.FirstStarted, &r.LastEnded); err != nil {
+		if err := rows.Scan(&r.TaskGroup, &r.Action, &r.Count, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens, &r.TotalTokens, &r.FirstStarted, &r.LastEnded); err != nil {
 			return results, err
 		}
 		results = append(results, r)
@@ -364,7 +369,7 @@ type RunCost struct {
 func (c *CallDB) RunCostByActionRole(action, role string) (map[string]RunCost, error) {
 	q := `SELECT started_at,
 			COALESCE(cost_usd, 0),
-			COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) + COALESCE(cache_read_tokens, 0)
+			COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_write_tokens, 0)
 		FROM agent_execs WHERE action = ? AND role = ?`
 	rows, err := c.db.Query(q, action, role)
 	if err != nil {

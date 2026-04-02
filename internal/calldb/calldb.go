@@ -33,8 +33,9 @@ CREATE TABLE IF NOT EXISTS agent_execs (
   cost_usd          REAL,
   input_tokens      INTEGER,
   output_tokens     INTEGER,
-  cache_read_tokens INTEGER,
-  turns             INTEGER
+  cache_read_tokens  INTEGER,
+  cache_write_tokens INTEGER,
+  turns              INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_execs_started ON agent_execs(started_at);
@@ -67,9 +68,10 @@ type CallResult struct {
 	CostUSD         float64
 	InputTokens     int
 	OutputTokens    int
-	CacheReadTokens int
-	Turns           int
-	Model           string // if non-empty, updates the model column
+	CacheReadTokens  int
+	CacheWriteTokens int
+	Turns            int
+	Model            string // if non-empty, updates the model column
 }
 
 type CallDB struct {
@@ -132,9 +134,15 @@ func migrate(db *sql.DB, dbPath string) error {
 		return err
 	}
 
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	if oldTableExists {
 		// Convert absolute stream_file paths to relative (relative to orgDir).
-		rows, err := db.Query("SELECT id, stream_file FROM agent_calls WHERE stream_file != '' AND stream_file LIKE '/%'")
+		rows, err := tx.Query("SELECT id, stream_file FROM agent_calls WHERE stream_file != '' AND stream_file LIKE '/%'")
 		if err != nil {
 			return err
 		}
@@ -163,13 +171,13 @@ func migrate(db *sql.DB, dbPath string) error {
 			return err
 		}
 		for _, u := range updates {
-			if _, err := db.Exec("UPDATE agent_calls SET stream_file = ? WHERE id = ?", u.rel, u.id); err != nil {
+			if _, err := tx.Exec("UPDATE agent_calls SET stream_file = ? WHERE id = ?", u.rel, u.id); err != nil {
 				return err
 			}
 		}
 
 		// Rename old table to new name.
-		if _, err := db.Exec("ALTER TABLE agent_calls RENAME TO agent_execs"); err != nil {
+		if _, err := tx.Exec("ALTER TABLE agent_calls RENAME TO agent_execs"); err != nil {
 			return err
 		}
 		// Drop old indexes (they still reference agent_calls internally but
@@ -178,9 +186,9 @@ func migrate(db *sql.DB, dbPath string) error {
 			"idx_calls_started", "idx_calls_project", "idx_calls_action",
 			"idx_calls_task_group", "idx_calls_role",
 		} {
-			_, _ = db.Exec("DROP INDEX IF EXISTS " + idx)
+			_, _ = tx.Exec("DROP INDEX IF EXISTS " + idx)
 		}
-		if _, err := db.Exec(`
+		if _, err := tx.Exec(`
 			CREATE INDEX IF NOT EXISTS idx_execs_started ON agent_execs(started_at);
 			CREATE INDEX IF NOT EXISTS idx_execs_project ON agent_execs(project_id, started_at);
 			CREATE INDEX IF NOT EXISTS idx_execs_action ON agent_execs(action, started_at);
@@ -191,14 +199,15 @@ func migrate(db *sql.DB, dbPath string) error {
 		}
 	}
 
-	// Add pid/container_id columns if missing (works on both old-migrated and new tables).
-	tRows, err := db.Query("PRAGMA table_info(agent_execs)")
+	// Add missing columns (works on both old-migrated and new tables).
+	tRows, err := tx.Query("PRAGMA table_info(agent_execs)")
 	if err != nil {
 		return err
 	}
-	defer tRows.Close()
 
 	hasPID := false
+	hasContainerID := false
+	hasCacheWriteTokens := false
 	for tRows.Next() {
 		var cid int
 		var name, typ string
@@ -206,25 +215,40 @@ func migrate(db *sql.DB, dbPath string) error {
 		var dflt sql.NullString
 		var pk int
 		if err := tRows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			tRows.Close()
 			return err
 		}
-		if name == "pid" {
+		switch name {
+		case "pid":
 			hasPID = true
+		case "container_id":
+			hasContainerID = true
+		case "cache_write_tokens":
+			hasCacheWriteTokens = true
 		}
 	}
+	tRows.Close()
 	if err := tRows.Err(); err != nil {
 		return err
 	}
 
 	if !hasPID {
-		if _, err := db.Exec("ALTER TABLE agent_execs ADD COLUMN pid INTEGER NOT NULL DEFAULT 0"); err != nil {
-			return err
-		}
-		if _, err := db.Exec("ALTER TABLE agent_execs ADD COLUMN container_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		if _, err := tx.Exec("ALTER TABLE agent_execs ADD COLUMN pid INTEGER NOT NULL DEFAULT 0"); err != nil {
 			return err
 		}
 	}
-	return nil
+	if !hasContainerID {
+		if _, err := tx.Exec("ALTER TABLE agent_execs ADD COLUMN container_id TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if !hasCacheWriteTokens {
+		if _, err := tx.Exec("ALTER TABLE agent_execs ADD COLUMN cache_write_tokens INTEGER"); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 func (c *CallDB) InsertCall(call *Call) (int64, error) {
@@ -252,12 +276,12 @@ func (c *CallDB) UpdateCall(id int64, result *CallResult) error {
 			ended_at = ?, duration_ms = ?, exit_code = ?,
 			is_error = ?, error_message = ?, cost_usd = ?,
 			input_tokens = ?, output_tokens = ?, cache_read_tokens = ?,
-			turns = ?`
+			cache_write_tokens = ?, turns = ?`
 	args := []any{
 		result.EndedAt.Format(time.RFC3339), result.DurationMS, result.ExitCode,
 		isError, result.ErrorMessage, result.CostUSD,
 		result.InputTokens, result.OutputTokens, result.CacheReadTokens,
-		result.Turns,
+		result.CacheWriteTokens, result.Turns,
 	}
 	if result.Model != "" {
 		q += `, model = ?`
