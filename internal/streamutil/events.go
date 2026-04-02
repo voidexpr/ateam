@@ -43,9 +43,10 @@ type ResultEvent struct {
 	NumTurns     int     `json:"num_turns"`
 	IsError      bool    `json:"is_error"`
 	Usage        struct {
-		InputTokens          int `json:"input_tokens"`
-		OutputTokens         int `json:"output_tokens"`
-		CacheReadInputTokens int `json:"cache_read_input_tokens"`
+		InputTokens           int `json:"input_tokens"`
+		OutputTokens          int `json:"output_tokens"`
+		CacheReadInputTokens  int `json:"cache_read_input_tokens"`
+		CacheWriteInputTokens int `json:"cache_write_input_tokens"`
 	} `json:"usage"`
 }
 

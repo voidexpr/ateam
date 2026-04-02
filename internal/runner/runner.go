@@ -406,6 +406,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		summary.InputTokens = resultEv.InputTokens
 		summary.OutputTokens = resultEv.OutputTokens
 		summary.CacheReadTokens = resultEv.CacheReadTokens
+		summary.CacheWriteTokens = resultEv.CacheWriteTokens
 	} else if streamFile != "" {
 		// No result event received (timeout, crash). Try to extract
 		// cost/usage from the stream file which may have been written
@@ -417,6 +418,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			summary.InputTokens = res.InputTokens
 			summary.OutputTokens = res.OutputTokens
 			summary.CacheReadTokens = res.CacheReadTokens
+			summary.CacheWriteTokens = res.CacheWriteTokens
 		}
 	}
 
@@ -627,7 +629,8 @@ func writeErrorFile(path string, s RunSummary, stderr string) {
 		fmt.Fprintf(&b, "- Turns: %d\n", s.Turns)
 		fmt.Fprintf(&b, "- Input tokens: %d\n", s.InputTokens)
 		fmt.Fprintf(&b, "- Output tokens: %d\n", s.OutputTokens)
-		fmt.Fprintf(&b, "- Cache read tokens: %d\n\n", s.CacheReadTokens)
+		fmt.Fprintf(&b, "- Cache read tokens: %d\n", s.CacheReadTokens)
+		fmt.Fprintf(&b, "- Cache write tokens: %d\n\n", s.CacheWriteTokens)
 	}
 	if s.Output != "" {
 		fmt.Fprintf(&b, "## Partial Output\n\n%s\n", s.Output)

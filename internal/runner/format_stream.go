@@ -205,8 +205,8 @@ func (f *StreamFormatter) fmtResult(e *ResultLine) string {
 		fmt.Fprintf(&b, "%s              %s\n", f.Prefix, f.dim("(estimated)"))
 	}
 	fmt.Fprintf(&b, "%s  Turns:     %d\n", f.Prefix, e.Turns)
-	fmt.Fprintf(&b, "%s  Tokens:    in=%d out=%d cache_read=%d\n", f.Prefix,
-		e.InputTokens, e.OutputTokens, e.CacheReadTokens)
+	fmt.Fprintf(&b, "%s  Tokens:    in=%d out=%d cache_read=%d cache_write=%d\n", f.Prefix,
+		e.InputTokens, e.OutputTokens, e.CacheReadTokens, e.CacheWriteTokens)
 	fmt.Fprintf(&b, "%s  Events:    %d (tools=%d, text=%d)\n", f.Prefix,
 		f.EventCount, f.ToolCount, f.TextCount)
 	return b.String()

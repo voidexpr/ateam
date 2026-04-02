@@ -100,6 +100,12 @@ func FormatStream(path string, w io.Writer, opts *FormatStreamOpts) error {
 				fmt.Fprintf(w, "  Duration: %s\n", FormatDuration(msToDuration(e.DurationMS)))
 				fmt.Fprintf(w, "  Input:    %d tokens\n", e.InputTokens)
 				fmt.Fprintf(w, "  Output:   %d tokens\n", e.OutputTokens)
+				if e.CacheReadTokens > 0 {
+					fmt.Fprintf(w, "  Cache Read:  %d tokens\n", e.CacheReadTokens)
+				}
+				if e.CacheWriteTokens > 0 {
+					fmt.Fprintf(w, "  Cache Write: %d tokens\n", e.CacheWriteTokens)
+				}
 				if e.IsError {
 					fmt.Fprintf(w, "  ERROR:    true\n")
 				}

@@ -69,7 +69,7 @@ func TestParseAssistantToolUse(t *testing.T) {
 }
 
 func TestParseResult(t *testing.T) {
-	line := []byte(`{"type":"result","total_cost_usd":0.12,"cost_usd":0.10,"duration_ms":5000,"num_turns":3,"is_error":false,"usage":{"input_tokens":100,"output_tokens":200,"cache_read_input_tokens":50}}`)
+	line := []byte(`{"type":"result","total_cost_usd":0.12,"cost_usd":0.10,"duration_ms":5000,"num_turns":3,"is_error":false,"usage":{"input_tokens":100,"output_tokens":200,"cache_read_input_tokens":50,"cache_write_input_tokens":25}}`)
 	typ, ev, err := parseStreamLine(line)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -104,6 +104,9 @@ func TestParseResult(t *testing.T) {
 	}
 	if res.Usage.CacheReadInputTokens != 50 {
 		t.Errorf("expected cache_read_input_tokens 50, got %d", res.Usage.CacheReadInputTokens)
+	}
+	if res.Usage.CacheWriteInputTokens != 25 {
+		t.Errorf("expected cache_write_input_tokens 25, got %d", res.Usage.CacheWriteInputTokens)
 	}
 }
 

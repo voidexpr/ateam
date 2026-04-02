@@ -191,15 +191,16 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 		case "result":
 			res := ev.(*streamutil.ResultEvent)
 			ch <- StreamEvent{
-				Type:            "result",
-				Output:          lastAssistantText,
-				Cost:            res.TotalCostUSD,
-				InputTokens:     res.Usage.InputTokens,
-				OutputTokens:    res.Usage.OutputTokens,
-				CacheReadTokens: res.Usage.CacheReadInputTokens,
-				Turns:           res.NumTurns,
-				DurationMS:      res.DurationMS,
-				IsError:         res.IsError,
+				Type:             "result",
+				Output:           lastAssistantText,
+				Cost:             res.TotalCostUSD,
+				InputTokens:      res.Usage.InputTokens,
+				OutputTokens:     res.Usage.OutputTokens,
+				CacheReadTokens:  res.Usage.CacheReadInputTokens,
+				CacheWriteTokens: res.Usage.CacheWriteInputTokens,
+				Turns:            res.NumTurns,
+				DurationMS:       res.DurationMS,
+				IsError:          res.IsError,
 			}
 		}
 	}
