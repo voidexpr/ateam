@@ -1,6 +1,8 @@
 package web
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -297,6 +299,25 @@ func TestPromptDir(t *testing.T) {
 				t.Errorf("promptDir(%q, %q) = %q, want %q", tt.action, tt.role, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGetDBDoesNotCreateFile(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "state.sqlite")
+
+	s := &Server{}
+	pe := &ProjectEntry{ProjectDir: dir}
+
+	db := s.getDB(pe)
+	if db != nil {
+		db.Close()
+		t.Fatal("expected nil db when file doesn't exist")
+	}
+
+	// Verify the file was NOT created on disk.
+	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+		t.Fatalf("expected state.sqlite to not exist, got err=%v", err)
 	}
 }
 

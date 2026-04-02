@@ -76,6 +76,15 @@ type CallDB struct {
 	db *sql.DB
 }
 
+// OpenIfExists opens an existing database file. Returns (nil, nil) if the file
+// does not exist, avoiding creation of empty DB files on read-only code paths.
+func OpenIfExists(dbPath string) (*CallDB, error) {
+	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
+		return nil, nil
+	}
+	return Open(dbPath)
+}
+
 func Open(dbPath string) (*CallDB, error) {
 	// Pre-create the file with owner-only permissions so the SQLite driver
 	// inherits 0600 rather than the default 0666.
