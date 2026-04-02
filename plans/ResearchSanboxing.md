@@ -565,11 +565,9 @@ For the current ATeam question, the important part is not the MCP orchestration 
 
 That makes it a strong reference for **inspectable containerized sessions**, especially if ATeam later wants a human to be able to attach to a running sandbox rather than only waiting for the final result.
 
-**Apple Container (macOS Tahoe / macOS 26+):**
+**Apple Container (macOS 26+):**
 
-Apple's open-source container runtime, released at WWDC 2025 (v0.9.0 as of February 2026). Each container gets its own micro-VM — better isolation than Docker's shared-kernel model, sub-second startup, no daemon. Written in Swift, optimized for Apple Silicon.
-
-For ATeam on macOS, this is the Docker replacement: lighter, more secure (VM-level isolation per container), no Docker Desktop licensing. Still pre-1.0, but the runtime is solid.
+Apple's open-source container runtime, released at WWDC 2025 (v0.11.0 as of March 2026). Each container gets its own micro-VM via the Virtualization Framework — VM-level isolation rather than shared-kernel containers. Written in Swift, optimized for Apple Silicon. Docker-compatible CLI surface (`run`, `build`, `exec`, `push`, `pull`), OCI-compatible images. No daemon — uses launchd and XPC. See §E.13.8 for full technical details and ATeam assessment.
 
 **Cloudflare Sandbox SDK:**
 
@@ -628,6 +626,7 @@ The community is already converging on devcontainers as the standard way to sand
 | **jailoc** | Explicit mounts only | Explicit mounts only | Private networks blocked by default | All (in container) | Mount | None | Medium | Linux, macOS (Docker) |
 | **Anthropic Devcontainer** | Bind mount workspace | Bind mount workspace | iptables ipset (IP-based, resolved at start) | All (in container) | Passed in | None | Low-Medium | Any Docker host |
 | **Docker Sandboxes (Docker Inc.)** | VM + bidirectional sync | VM + bidirectional sync | Proxy with domain allow/deny; private nets blocked | All (in VM + private Docker) | Injected by proxy (on host) | None | Medium | macOS, Windows (exp.) |
+| **VibeBox** | VM isolation (explicit mounts) | VM isolation (explicit mounts) | Full (no filtering) | All (in VM) | Not mounted | None | Low–Medium | macOS (Apple Silicon) |
 
 ### E.10 Network Tier Implementation
 
@@ -876,6 +875,205 @@ ATeam's current approach uses `--privileged` DinD containers, which gives each a
 - [Containers vs MicroVMs comparison (Ajeet Raina, Feb 2026)](https://www.ajeetraina.com/docker-sandboxes-containers-vs-microvms-when-to-use-what/)
 - [Sandboxed container technologies overview (Palo Alto Unit 42)](https://unit42.paloaltonetworks.com/making-containers-more-isolated-an-overview-of-sandboxed-container-technologies/)
 - [AI agent sandboxing strategies (Northflank, Feb 2026)](https://northflank.com/blog/how-to-sandbox-ai-agents)
+
+#### E.13.7 VibeBox
+
+**GitHub:** [robcholz/vibebox](https://github.com/robcholz/vibebox)
+**Language:** Rust
+**Platform:** macOS (Apple Silicon only — uses Apple Virtualization Framework)
+
+A per-project micro-VM sandbox for running coding agents. Each project gets its own lightweight Linux VM with explicit mount allowlists, `.git` masking, and session reuse. Written in Rust, focused on fast iteration: warm re-entry is ~5 seconds on M3.
+
+**How it works:**
+
+- Running `vibebox` from any project directory starts or reattaches to a Debian-based micro-VM for that project.
+- Uses Apple's Virtualization Framework — each VM has its own kernel, not a shared-kernel container.
+- The project directory is mounted read-write at `~/<project-name>` inside the guest. All other host paths are invisible unless explicitly declared in `vibebox.toml`.
+- `.git` directories are masked with tmpfs to prevent accidental modifications from the guest.
+- Multi-terminal sessions: multiple shells can attach to the same running VM.
+
+**Configuration (`vibebox.toml`):**
+
+```toml
+cpu_count = 2
+ram_mb = 2048
+disk_gb = 5
+auto_shutdown_ms = 20000
+
+[[mounts]]
+host = "~/shared-libs"
+guest = "~/shared-libs"
+mode = "read-only"
+```
+
+Mounts use `host:guest[:mode]` format. Host paths support tilde expansion. Only explicitly listed paths are mounted — default-deny for anything outside the project.
+
+**Guest environment:**
+
+- Debian base image (downloaded and cached on first run at `~/.cache/vibebox`)
+- SSH user: `vibecoder`
+- Pre-installed: build tools, git, curl, ripgrep, openssh-server
+- First login provisions `mise` with `uv`, `node`, `codex`, and `claude-code`
+
+**State:**
+
+- Per-project: `.vibebox/` (disk image, SSH keys, logs, manager socket)
+- Global cache: `~/.cache/vibebox` (base image)
+- Session index: `~/.vibebox/sessions`
+
+**CLI:**
+
+```
+vibebox              # start/attach to project VM
+vibebox list         # show known sessions
+vibebox reset        # delete .vibebox/ and recreate on next run
+vibebox purge-cache  # remove global cache
+vibebox explain      # show resolved mounts and network config
+```
+
+**Security model:**
+
+- VM-level isolation (own kernel) — stronger than container-based approaches
+- Explicit mount allowlists — nothing from the host is visible unless declared
+- `.git` masking via tmpfs — prevents accidental repo mutation from the guest
+- No network filtering — the VM has full outbound access
+
+**Comparison with similar tools:**
+
+- vs **Apple Container** (E.8): both use Apple Virtualization Framework for micro-VMs. VibeBox is higher-level — project-aware sessions, mount management, agent provisioning. Apple Container is a lower-level runtime.
+- vs **Docker Sandboxes** (E.13.6): Docker Sandboxes add network filtering, credential injection, and DinD. VibeBox is simpler — no Docker dependency, no network policy, but also no DinD.
+- vs **neko-kai** / **kohkimakimoto** (E.3–E.4): those are Seatbelt wrappers (process-level sandboxing). VibeBox provides full VM isolation at the cost of higher overhead and macOS-only / Apple Silicon-only support.
+
+**Assessment for ATeam:**
+
+| Dimension | Rating | Notes |
+|---|---|---|
+| Filesystem isolation | Excellent | VM boundary + explicit mount allowlists. Default-deny. |
+| Network control | None | Full outbound access, no filtering. |
+| Tool compatibility | Excellent | Full Linux VM — everything works. |
+| `~/.claude` access | Not mounted | Would need explicit mount in `vibebox.toml`. |
+| Remote access | None | No built-in remote story. |
+| Overhead | Low–Medium | Micro-VM startup ~5s warm. Lighter than full Docker but heavier than Seatbelt. |
+| Platform | macOS Apple Silicon only | Not usable on Linux CI or Intel Macs. |
+
+**Best fit:** macOS Apple Silicon development where VM-level filesystem isolation is wanted without Docker overhead, and network filtering is not a concern. The per-project session model with `.git` masking is well-suited to agent workflows where you want the agent to work in an isolated copy without risking host repo state.
+
+#### E.13.8 Apple Container
+
+**GitHub:** [apple/container](https://github.com/apple/container)
+**Language:** Swift (CLI + services), built on the [Containerization](https://github.com/apple/containerization) Swift package
+**Platform:** macOS 26+ (Apple Silicon only)
+**License:** Apache-2.0
+**Status:** Active development, v0.11.0 (March 2026). Breaking changes possible until 1.0.
+
+Apple's open-source container runtime where each container runs inside its own lightweight VM via the macOS Virtualization Framework. Not a Docker wrapper — a ground-up implementation with a Docker-compatible CLI surface and OCI image compatibility.
+
+**Architecture:**
+
+```
+container CLI
+  └─ container-apiserver (launchd agent, manages container/network resources)
+       ├─ container-core-images (XPC helper: image management, local content store)
+       ├─ container-network-vmnet (XPC helper: virtual networking via vmnet framework)
+       └─ container-runtime-linux (per-container runtime management)
+            └─ Lightweight VM (Virtualization Framework) ← one per container
+```
+
+Each container gets a dedicated VM with its own Linux kernel, not a shared kernel with namespace isolation. This gives "the isolation properties of a full VM, using a minimal set of core utilities and dynamic libraries."
+
+**CLI (Docker-compatible surface):**
+
+Core operations map directly to Docker equivalents:
+
+```bash
+container run [-d] [-it] [-p 8080:80] [-v host:guest] [-e KEY=VAL] [-m 4g] [-c 4] image [cmd]
+container build [-f Dockerfile] [-t tag] [--platform linux/arm64,linux/amd64] .
+container exec [-it] <name> <cmd>
+container stop/kill/rm <name>
+container ls [-a]
+container logs [--follow] <name>
+container stats <name>
+container inspect <name>
+```
+
+Image management: `container image pull/push/ls/rm/save/load/tag/inspect/prune`
+Volume management: `container volume create [-s size]/ls/rm/inspect/prune`
+Network management: `container network create [--subnet]/ls/rm/inspect/prune`
+System management: `container system start/stop/status/version/logs/df`
+
+**Filesystem model:**
+
+- **Bind mounts**: `--volume host-path:container-path` or `--mount source=path,target=path` — same syntax as Docker.
+- **Named volumes**: `container volume create` with optional size. Persist across container runs.
+- **SSH agent forwarding**: `--ssh` mounts the host SSH socket automatically (equivalent to `--volume "${SSH_AUTH_SOCK}:/run/host-services/ssh-auth.sock"`).
+
+**Networking:**
+
+- Uses macOS vmnet framework for virtual networking.
+- **Port forwarding**: `-p [host-ip:]host-port:container-port[/protocol]` — standard Docker syntax.
+- **Host access from containers**: custom DNS domains via `sudo container system dns create host.container.internal --localhost <ip>`.
+- **Isolated networks**: `container network create` with custom subnets. Networks are isolated from one another.
+- **Container-to-container**: supported on macOS 26+ via user-defined networks. Not available on macOS 15.
+- **Default subnet**: 192.168.64.1/24, configurable via `container system property set network.subnet`.
+
+**Resource management:**
+
+- Default: 1 GB RAM, 4 CPUs per container.
+- Override: `--memory 32g --cpus 8`.
+- Builder (BuildKit) has separate limits: `container builder start --cpus 8 --memory 32g`.
+- Memory ballooning incomplete — freed guest pages are not relinquished to the host. Restart containers for memory-intensive workloads.
+
+**Build system:**
+
+- Full Dockerfile/Containerfile support via BuildKit running in its own isolated VM.
+- Multi-platform builds: `--arch arm64 --arch amd64` (multiple `--arch` flags).
+- `--target` for multi-stage builds, `--build-arg`, `--no-cache`, `--pull`.
+
+**Advanced features:**
+
+- **Nested virtualization**: M3+ only, `--virtualization` flag with custom kernel.
+- **Custom init images**: `--init-image` for custom boot-time logic, additional daemons.
+- **`--init` flag**: lightweight PID 1 for signal forwarding and orphan reaping.
+
+**Security model:**
+
+- VM-level isolation per container — kernel exploits in the guest don't reach the host.
+- Only explicitly mounted paths are visible inside the VM.
+- Registry credentials stored in macOS Keychain.
+- No `--privileged` mode — the VM boundary makes it unnecessary.
+- OCI image compatibility means standard base images work without modification.
+
+**Comparison with Docker:**
+
+| Dimension | Apple Container | Docker (on macOS) |
+|---|---|---|
+| **Isolation** | VM per container (Virtualization Framework) | Shared Linux VM (all containers share one kernel) |
+| **Daemon** | Launchd agents + XPC (native macOS services) | Docker Desktop daemon in a Linux VM |
+| **Image format** | OCI-compatible | OCI-compatible |
+| **CLI** | Near-identical to Docker CLI | Docker CLI |
+| **Networking** | vmnet framework (native macOS) | Docker Desktop's virtualized networking |
+| **Build** | BuildKit in isolated VM | BuildKit in shared VM |
+| **Licensing** | Apache-2.0, no commercial restrictions | Docker Desktop: commercial license for large orgs |
+| **DinD** | Nested virtualization (M3+) | `--privileged` DinD or Docker-in-Docker images |
+| **Platform** | macOS 26+ / Apple Silicon only | macOS, Linux, Windows |
+
+**Assessment for ATeam:**
+
+| Dimension | Rating | Notes |
+|---|---|---|
+| Filesystem isolation | Excellent | VM boundary. Only explicit mounts visible. |
+| Network control | Good | Port forwarding, isolated networks, DNS. No domain-level filtering (would need a proxy layer). |
+| Tool compatibility | Excellent | Full Linux VM with OCI images — everything works. |
+| `~/.claude` access | Via mount | `--volume ~/.claude:/root/.claude` or equivalent. |
+| Remote access | Via port/tunnel | No built-in remote UI. Expose via port forwarding + tunnel. |
+| Overhead | Low | Lighter than Docker Desktop (no daemon VM). Heavier than Seatbelt wrappers. |
+| Platform | macOS 26+ / Apple Silicon | Not usable on Linux CI or Intel Macs. |
+| DinD | M3+ only | Nested virtualization requires M3 or later. |
+| Maturity | Pre-1.0 | Active development, breaking changes expected. |
+
+**Best fit:** macOS Apple Silicon development and local agent runs where Docker Desktop licensing is undesirable. The Docker-compatible CLI means existing Dockerfiles and workflows port over with minimal changes. Stronger per-container isolation than Docker (VM vs shared kernel). The main gaps are: no built-in domain-level network filtering (needs an external proxy), macOS 26+ requirement, and pre-1.0 stability.
+
+**For ATeam:** Apple Container is the likely successor to Docker Desktop for macOS-based agent sandboxing. The VM-per-container model gives isolation parity with Docker Sandboxes (E.13.6) without the Docker Desktop license. The CLI compatibility means ATeam's container adapter can support it as a drop-in backend. The pre-1.0 status and macOS 26+ requirement mean it's not ready as the primary backend today, but worth tracking for the next macOS cycle.
 
 ### E.14 Network Companion Tools
 
