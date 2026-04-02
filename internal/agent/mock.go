@@ -106,6 +106,10 @@ func (m *MockAgent) writeStreamFile(path string, response string) {
 	})
 
 	writeLine(map[string]any{
+		"type": "user",
+	})
+
+	writeLine(map[string]any{
 		"type": "assistant",
 		"message": map[string]any{
 			"content": []map[string]any{
