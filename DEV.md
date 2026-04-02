@@ -7,7 +7,7 @@ make build    # builds the ateam binary
 make clean    # removes the binary
 ```
 
-Requires Go 1.24+.
+Requires Go 1.25+.
 
 ## Tests
 
