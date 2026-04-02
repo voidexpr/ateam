@@ -72,12 +72,12 @@ func (m *MockAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent)
 	}
 
 	ch <- StreamEvent{
-		Type:        "result",
-		Output:      response,
-		Cost:        m.Cost,
-		Turns:       1,
-		DurationMS:  time.Since(startedAt).Milliseconds(),
-		InputTokens: 100,
+		Type:         "result",
+		Output:       response,
+		Cost:         m.Cost,
+		Turns:        1,
+		DurationMS:   time.Since(startedAt).Milliseconds(),
+		InputTokens:  100,
 		OutputTokens: 50,
 	}
 }

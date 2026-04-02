@@ -35,8 +35,8 @@ var (
 func init() {
 	projectRenameCmd.Flags().StringVar(&renameOldPath, "old", "", "old project path (relative to org root)")
 	projectRenameCmd.Flags().StringVar(&renameNewPath, "new", "", "new project path (relative to org root)")
-	projectRenameCmd.MarkFlagRequired("old")
-	projectRenameCmd.MarkFlagRequired("new")
+	_ = projectRenameCmd.MarkFlagRequired("old")
+	_ = projectRenameCmd.MarkFlagRequired("new")
 }
 
 func runProjectRename(cmd *cobra.Command, args []string) error {

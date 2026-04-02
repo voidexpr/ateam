@@ -29,10 +29,10 @@ type ModelProvider interface {
 type Request struct {
 	Prompt     string
 	WorkDir    string
-	StreamFile string            // agent writes raw stream here (agent-native JSONL)
+	StreamFile string // agent writes raw stream here (agent-native JSONL)
 	StderrFile string
-	ExtraArgs  []string          // from --agent-args
-	Env        map[string]string // env vars to set/override
+	ExtraArgs  []string             // from --agent-args
+	Env        map[string]string    // env vars to set/override
 	CmdFactory container.CmdFactory // if set, agent uses this to create subprocesses instead of exec.CommandContext
 }
 

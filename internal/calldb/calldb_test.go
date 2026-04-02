@@ -121,7 +121,7 @@ func TestConcurrentInserts(t *testing.T) {
 	}
 
 	var count int
-	db.db.QueryRow("SELECT COUNT(*) FROM agent_execs").Scan(&count)
+	_ = db.db.QueryRow("SELECT COUNT(*) FROM agent_execs").Scan(&count)
 	if count != n {
 		t.Fatalf("expected %d rows, got %d", n, count)
 	}
@@ -430,7 +430,7 @@ func TestMigrateFromOldTableName(t *testing.T) {
 
 	// Verify old table is gone.
 	var oldCount int
-	db.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_calls'").Scan(&oldCount)
+	_ = db.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_calls'").Scan(&oldCount)
 	if oldCount != 0 {
 		t.Fatal("old agent_calls table still exists")
 	}

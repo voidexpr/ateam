@@ -20,7 +20,7 @@ func TestTailerStaticFile(t *testing.T) {
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}`,
 		`{"type":"result","total_cost_usd":0.01,"duration_ms":5000,"num_turns":1,"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":0}}`,
 	}, "\n") + "\n"
-	os.WriteFile(path, []byte(content), 0644)
+	_ = os.WriteFile(path, []byte(content), 0644)
 
 	var buf bytes.Buffer
 	tailer := NewTailer(&buf, nil, false, false)
@@ -28,7 +28,7 @@ func TestTailerStaticFile(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	tailer.Run(ctx)
+	_ = tailer.Run(ctx)
 
 	out := buf.String()
 	if !strings.Contains(out, "Turn 1") {
@@ -48,7 +48,7 @@ func TestTailerWaitTimeout(t *testing.T) {
 	tailer.WaitTimeout = 100 * time.Millisecond // fast timeout for test
 
 	ctx := context.Background()
-	tailer.Run(ctx)
+	_ = tailer.Run(ctx)
 
 	if !strings.Contains(buf.String(), "No running processes found") {
 		t.Errorf("expected timeout message, got: %s", buf.String())
@@ -61,8 +61,8 @@ func TestTailerGrowingFile(t *testing.T) {
 
 	// Start with partial content
 	f, _ := os.Create(path)
-	f.WriteString(`{"type":"system","subtype":"init","session_id":"s1","model":"opus"}` + "\n")
-	f.WriteString(`{"type":"user"}` + "\n")
+	_, _ = f.WriteString(`{"type":"system","subtype":"init","session_id":"s1","model":"opus"}` + "\n")
+	_, _ = f.WriteString(`{"type":"user"}` + "\n")
 	f.Close()
 
 	var buf bytes.Buffer
@@ -77,11 +77,11 @@ func TestTailerGrowingFile(t *testing.T) {
 	go func() {
 		time.Sleep(200 * time.Millisecond)
 		f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
-		f.WriteString(`{"type":"result","total_cost_usd":0.01,"duration_ms":5000,"num_turns":1,"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":0}}` + "\n")
+		_, _ = f.WriteString(`{"type":"result","total_cost_usd":0.01,"duration_ms":5000,"num_turns":1,"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":0}}` + "\n")
 		f.Close()
 	}()
 
-	tailer.Run(ctx)
+	_ = tailer.Run(ctx)
 
 	out := buf.String()
 	if !strings.Contains(out, "Result") {

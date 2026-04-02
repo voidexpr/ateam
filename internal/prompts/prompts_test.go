@@ -16,12 +16,12 @@ func TestReadWith3LevelFallback(t *testing.T) {
 	orgPath := filepath.Join(base, "org", "report_prompt.md")
 	defaultPath := filepath.Join(base, "defaults", "report_prompt.md")
 
-	os.MkdirAll(filepath.Dir(projectPath), 0755)
-	os.MkdirAll(filepath.Dir(orgPath), 0755)
-	os.MkdirAll(filepath.Dir(defaultPath), 0755)
+	_ = os.MkdirAll(filepath.Dir(projectPath), 0755)
+	_ = os.MkdirAll(filepath.Dir(orgPath), 0755)
+	_ = os.MkdirAll(filepath.Dir(defaultPath), 0755)
 
 	// Only default exists
-	os.WriteFile(defaultPath, []byte("default"), 0644)
+	_ = os.WriteFile(defaultPath, []byte("default"), 0644)
 	got, err := readWith3LevelFallback(projectPath, orgPath, defaultPath, "test")
 	if err != nil {
 		t.Fatalf("default only: %v", err)
@@ -31,14 +31,14 @@ func TestReadWith3LevelFallback(t *testing.T) {
 	}
 
 	// Org override exists
-	os.WriteFile(orgPath, []byte("org"), 0644)
+	_ = os.WriteFile(orgPath, []byte("org"), 0644)
 	got, _ = readWith3LevelFallback(projectPath, orgPath, defaultPath, "test")
 	if got != "org" {
 		t.Errorf("org override: got %q, want %q", got, "org")
 	}
 
 	// Project override exists
-	os.WriteFile(projectPath, []byte("project"), 0644)
+	_ = os.WriteFile(projectPath, []byte("project"), 0644)
 	got, _ = readWith3LevelFallback(projectPath, orgPath, defaultPath, "test")
 	if got != "project" {
 		t.Errorf("project override: got %q, want %q", got, "project")
@@ -50,11 +50,11 @@ func TestReadWith3LevelFallback(t *testing.T) {
 func setupMinimalRole(t *testing.T, orgDir, projectDir, roleID string) {
 	t.Helper()
 	roleDir := filepath.Join(orgDir, "defaults", "roles", roleID)
-	os.MkdirAll(roleDir, 0755)
-	os.WriteFile(filepath.Join(roleDir, ReportPromptFile), []byte("role prompt"), 0644)
+	_ = os.MkdirAll(roleDir, 0755)
+	_ = os.WriteFile(filepath.Join(roleDir, ReportPromptFile), []byte("role prompt"), 0644)
 
 	roleProjectDir := filepath.Join(projectDir, "roles", roleID)
-	os.MkdirAll(roleProjectDir, 0755)
+	_ = os.MkdirAll(roleProjectDir, 0755)
 }
 
 func TestAssembleRolePromptIncludesPreviousReport(t *testing.T) {
@@ -66,7 +66,7 @@ func TestAssembleRolePromptIncludesPreviousReport(t *testing.T) {
 	setupMinimalRole(t, orgDir, projectDir, roleID)
 
 	reportPath := filepath.Join(projectDir, "roles", roleID, ReportFile)
-	os.WriteFile(reportPath, []byte("previous findings here"), 0644)
+	_ = os.WriteFile(reportPath, []byte("previous findings here"), 0644)
 
 	result, err := AssembleRolePrompt(orgDir, projectDir, roleID, base, "", ProjectInfoParams{}, false)
 	if err != nil {
@@ -92,7 +92,7 @@ func TestAssembleRolePromptSkipPreviousReport(t *testing.T) {
 	setupMinimalRole(t, orgDir, projectDir, roleID)
 
 	reportPath := filepath.Join(projectDir, "roles", roleID, ReportFile)
-	os.WriteFile(reportPath, []byte("previous findings here"), 0644)
+	_ = os.WriteFile(reportPath, []byte("previous findings here"), 0644)
 
 	result, err := AssembleRolePrompt(orgDir, projectDir, roleID, base, "", ProjectInfoParams{}, true)
 	if err != nil {

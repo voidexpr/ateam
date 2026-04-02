@@ -245,7 +245,7 @@ func runCode(opts CodeOptions) error {
 			time.Sleep(time.Second)
 			tailCancel()
 		}()
-		tailer.Run(tailCtx)
+		_ = tailer.Run(tailCtx)
 		<-runDone
 	} else {
 		progress := make(chan runner.RunProgress, 64)

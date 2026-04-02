@@ -83,7 +83,7 @@ type pageData struct {
 
 func funcMap() template.FuncMap {
 	return template.FuncMap{
-		"fmtCost":  display.FmtCost,
+		"fmtCost":   display.FmtCost,
 		"fmtTokens": display.FmtTokens,
 		"fmtTokensInt": func(n int) string {
 			return display.FmtTokens(int64(n))
@@ -197,14 +197,6 @@ func (s *Server) getDB(pe *ProjectEntry) *calldb.CallDB {
 	return db
 }
 
-func (s *Server) loadConfig(pe *ProjectEntry) *config.Config {
-	cfg, err := config.Load(pe.ProjectDir)
-	if err != nil {
-		return nil
-	}
-	return cfg
-}
-
 func (s *Server) render(w http.ResponseWriter, r *http.Request, tmplName string, pd pageData) {
 	pd.Projects = s.projects
 	pd.SingleMode = s.singleMode
@@ -279,7 +271,7 @@ func openURL(url string) {
 	default:
 		cmd = "xdg-open"
 	}
-	exec.Command(cmd, url).Start()
+	_ = exec.Command(cmd, url).Start()
 }
 
 // slugify returns a URL-safe identifier from a project name.

@@ -197,7 +197,6 @@ type actionLine struct {
 	totalTok     int64
 }
 
-
 func fmtTimestamp(s string) string {
 	if s == "" {
 		return ""

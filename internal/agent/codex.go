@@ -260,7 +260,7 @@ func ParseCodexLine(line []byte) (string, any, error) {
 
 	var eventType string
 	if t, ok := raw["type"]; ok {
-		json.Unmarshal(t, &eventType)
+		_ = json.Unmarshal(t, &eventType)
 	}
 	if eventType == "" {
 		return "", nil, nil
@@ -294,7 +294,7 @@ func ParseCodexLine(line []byte) (string, any, error) {
 	case "agent_message_delta":
 		var delta string
 		if d, ok := raw["delta"]; ok {
-			json.Unmarshal(d, &delta)
+			_ = json.Unmarshal(d, &delta)
 		}
 		return "assistant", &CodexTextEvent{Text: delta}, nil
 
@@ -311,7 +311,7 @@ func ParseCodexLine(line []byte) (string, any, error) {
 	case "error":
 		var msg string
 		if m, ok := raw["message"]; ok {
-			json.Unmarshal(m, &msg)
+			_ = json.Unmarshal(m, &msg)
 		}
 		if msg == "" {
 			msg = "unknown error"
@@ -461,14 +461,14 @@ func parseCodexResult(raw map[string]json.RawMessage, isError bool) *CodexResult
 	re := &CodexResultEvent{IsError: isError}
 
 	if v, ok := raw["model"]; ok {
-		json.Unmarshal(v, &re.Model)
+		_ = json.Unmarshal(v, &re.Model)
 	}
 
 	// duration_ms or durationMs
 	if v, ok := raw["duration_ms"]; ok {
-		json.Unmarshal(v, &re.DurationMS)
+		_ = json.Unmarshal(v, &re.DurationMS)
 	} else if v, ok := raw["durationMs"]; ok {
-		json.Unmarshal(v, &re.DurationMS)
+		_ = json.Unmarshal(v, &re.DurationMS)
 	}
 
 	// usage.input_tokens, usage.output_tokens (with camelCase fallbacks)

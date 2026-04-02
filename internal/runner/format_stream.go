@@ -16,10 +16,10 @@ import (
 type StreamFormatter struct {
 	Verbose      bool
 	Color        bool
-	Model        string            // for cost estimation when not reported natively
-	DefaultModel string            // fallback model for pricing lookup
+	Model        string             // for cost estimation when not reported natively
+	DefaultModel string             // fallback model for pricing lookup
 	Pricing      agent.PricingTable // cost estimation table (nil = use native cost only)
-	Prefix       string            // for multiplexed tail: "[42:security/run] "
+	Prefix       string             // for multiplexed tail: "[42:security/run] "
 	TurnNum      int
 	ToolCount    int
 	TextCount    int
@@ -125,11 +125,11 @@ func (f *StreamFormatter) fmtToolCall(e *ToolCallLine) string {
 	header := f.cyan(fmt.Sprintf("  tool #%d: ", f.ToolCount)) + f.boldCyan(e.Name)
 	if f.Verbose && e.Claude != nil {
 		var b strings.Builder
-		b.WriteString(fmt.Sprintf("%s%s\n", f.Prefix, header))
+		fmt.Fprintf(&b, "%s%s\n", f.Prefix, header)
 		input := strings.TrimSpace(string(e.Claude.Input))
 		if input != "" && input != "{}" && input != "null" {
 			for _, line := range strings.Split(input, "\n") {
-				b.WriteString(fmt.Sprintf("%s           %s\n", f.Prefix, line))
+				fmt.Fprintf(&b, "%s           %s\n", f.Prefix, line)
 			}
 		}
 		return b.String()
@@ -145,10 +145,10 @@ func (f *StreamFormatter) fmtText(e *TextLine) string {
 	f.TextCount++
 	if f.Verbose {
 		var b strings.Builder
-		b.WriteString(fmt.Sprintf("%s%s\n", f.Prefix,
-			f.yellow(fmt.Sprintf("  text #%d:", f.TextCount))))
+		fmt.Fprintf(&b, "%s%s\n", f.Prefix,
+			f.yellow(fmt.Sprintf("  text #%d:", f.TextCount)))
 		for _, line := range strings.Split(e.Text, "\n") {
-			b.WriteString(fmt.Sprintf("%s    %s\n", f.Prefix, line))
+			fmt.Fprintf(&b, "%s    %s\n", f.Prefix, line)
 		}
 		return b.String()
 	}
@@ -166,7 +166,7 @@ func (f *StreamFormatter) fmtThinking(e *ThinkingLine) string {
 	var b strings.Builder
 	b.WriteString(f.Prefix + f.dim("  thinking:") + "\n")
 	for _, line := range strings.Split(e.Text, "\n") {
-		b.WriteString(fmt.Sprintf("%s    %s\n", f.Prefix, f.dim(line)))
+		fmt.Fprintf(&b, "%s    %s\n", f.Prefix, f.dim(line))
 	}
 	return b.String()
 }
@@ -197,18 +197,18 @@ func (f *StreamFormatter) fmtResult(e *ResultLine) string {
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("\n%s%s\n", f.Prefix, f.boldGreen("=== Result ===")))
-	b.WriteString(fmt.Sprintf("%s  Status:    %s\n", f.Prefix, status))
-	b.WriteString(fmt.Sprintf("%s  Duration:  %s\n", f.Prefix, durStr))
-	b.WriteString(fmt.Sprintf("%s  Cost:      $%.2f\n", f.Prefix, cost))
+	fmt.Fprintf(&b, "\n%s%s\n", f.Prefix, f.boldGreen("=== Result ==="))
+	fmt.Fprintf(&b, "%s  Status:    %s\n", f.Prefix, status)
+	fmt.Fprintf(&b, "%s  Duration:  %s\n", f.Prefix, durStr)
+	fmt.Fprintf(&b, "%s  Cost:      $%.2f\n", f.Prefix, cost)
 	if cost > 0 && e.Cost == 0 {
-		b.WriteString(fmt.Sprintf("%s              %s\n", f.Prefix, f.dim("(estimated)")))
+		fmt.Fprintf(&b, "%s              %s\n", f.Prefix, f.dim("(estimated)"))
 	}
-	b.WriteString(fmt.Sprintf("%s  Turns:     %d\n", f.Prefix, e.Turns))
-	b.WriteString(fmt.Sprintf("%s  Tokens:    in=%d out=%d cache_read=%d\n", f.Prefix,
-		e.InputTokens, e.OutputTokens, e.CacheReadTokens))
-	b.WriteString(fmt.Sprintf("%s  Events:    %d (tools=%d, text=%d)\n", f.Prefix,
-		f.EventCount, f.ToolCount, f.TextCount))
+	fmt.Fprintf(&b, "%s  Turns:     %d\n", f.Prefix, e.Turns)
+	fmt.Fprintf(&b, "%s  Tokens:    in=%d out=%d cache_read=%d\n", f.Prefix,
+		e.InputTokens, e.OutputTokens, e.CacheReadTokens)
+	fmt.Fprintf(&b, "%s  Events:    %d (tools=%d, text=%d)\n", f.Prefix,
+		f.EventCount, f.ToolCount, f.TextCount)
 	return b.String()
 }
 

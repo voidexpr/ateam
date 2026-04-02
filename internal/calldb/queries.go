@@ -333,7 +333,7 @@ func (c *CallDB) RenameProject(oldID, newID string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	res, err := tx.Exec("UPDATE agent_execs SET project_id = ? WHERE project_id = ?", newID, oldID)
 	if err != nil {

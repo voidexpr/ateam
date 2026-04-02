@@ -43,7 +43,7 @@ func TestIntegration_BasicProject(t *testing.T) {
 		Name:            "level1/myproj",
 		GitRepo:         ".",
 		GitRemoteOrigin: "https://foobar/myproj.git",
-		EnabledRoles:   prompts.AllRoleIDs,
+		EnabledRoles:    prompts.AllRoleIDs,
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
 	if err != nil {
@@ -142,8 +142,8 @@ func TestIntegration_MonorepoSubdir(t *testing.T) {
 	}
 
 	opts := InitProjectOpts{
-		Name:          "level1/myproj/subdir_abc",
-		GitRepo:       "..",
+		Name:         "level1/myproj/subdir_abc",
+		GitRepo:      "..",
 		EnabledRoles: []string{"security"},
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
@@ -212,7 +212,7 @@ func TestIntegration_DuplicateProjectName(t *testing.T) {
 		t.Fatal(err)
 	}
 	opts1 := InitProjectOpts{
-		Name:          "duplicate-name",
+		Name:         "duplicate-name",
 		EnabledRoles: prompts.AllRoleIDs,
 	}
 	if _, err := InitProject(proj1Path, orgDir, opts1); err != nil {
@@ -224,7 +224,7 @@ func TestIntegration_DuplicateProjectName(t *testing.T) {
 		t.Fatal(err)
 	}
 	opts2 := InitProjectOpts{
-		Name:          "duplicate-name",
+		Name:         "duplicate-name",
 		EnabledRoles: prompts.AllRoleIDs,
 	}
 	_, err = InitProject(proj2Path, orgDir, opts2)
@@ -255,7 +255,7 @@ func TestIntegration_MultipleProjects(t *testing.T) {
 			t.Fatal(err)
 		}
 		opts := InitProjectOpts{
-			Name:          name,
+			Name:         name,
 			EnabledRoles: prompts.AllRoleIDs,
 		}
 		projDir, err := InitProject(p, orgDir, opts)
@@ -305,7 +305,7 @@ func TestIntegration_3LevelPromptFallback(t *testing.T) {
 	}
 
 	opts := InitProjectOpts{
-		Name:          "myproj",
+		Name:         "myproj",
 		EnabledRoles: prompts.AllRoleIDs,
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
@@ -387,8 +387,8 @@ func TestIntegration_RelPathHelper(t *testing.T) {
 	}
 
 	opts := InitProjectOpts{
-		Name:          "services/api",
-		GitRepo:       ".",
+		Name:         "services/api",
+		GitRepo:      ".",
 		EnabledRoles: prompts.AllRoleIDs,
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
@@ -429,7 +429,7 @@ func TestIntegration_StatePathMethods(t *testing.T) {
 	}
 
 	opts := InitProjectOpts{
-		Name:          "myproj",
+		Name:         "myproj",
 		EnabledRoles: prompts.AllRoleIDs,
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
@@ -474,7 +474,7 @@ func TestIntegration_RunnerLogsDirFlow(t *testing.T) {
 	}
 
 	opts := InitProjectOpts{
-		Name:          "myproj",
+		Name:         "myproj",
 		EnabledRoles: prompts.AllRoleIDs,
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
@@ -557,7 +557,7 @@ func TestIntegration_NestedProjectPaths(t *testing.T) {
 	}
 
 	opts := InitProjectOpts{
-		Name:          "services/api/v2",
+		Name:         "services/api/v2",
 		EnabledRoles: []string{"security"},
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
@@ -609,7 +609,7 @@ func TestIntegration_ResolveFromStateDir(t *testing.T) {
 			}
 
 			opts := InitProjectOpts{
-				Name:          tc.relPath,
+				Name:         tc.relPath,
 				EnabledRoles: []string{"security"},
 			}
 			projDir, err := InitProject(projPath, orgDir, opts)
@@ -662,7 +662,7 @@ func TestIntegration_WalkProjectsDiscovery(t *testing.T) {
 			t.Fatal(err)
 		}
 		opts := InitProjectOpts{
-			Name:          name,
+			Name:         name,
 			EnabledRoles: prompts.AllRoleIDs,
 		}
 		if _, err := InitProject(p, orgDir, opts); err != nil {

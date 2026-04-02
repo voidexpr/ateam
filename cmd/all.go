@@ -7,12 +7,12 @@ import (
 )
 
 var (
-	allExtraPrompt  string
-	allQuiet        bool
-	allTimeout      int
-	allParallel     int
-	allCheaperModel bool
-	allVerbose      bool
+	allExtraPrompt     string
+	allQuiet           bool
+	allTimeout         int
+	allParallel        int
+	allCheaperModel    bool
+	allVerbose         bool
 	allRoles           []string
 	allProfile         string
 	allDockerAutoSetup bool

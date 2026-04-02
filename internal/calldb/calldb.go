@@ -106,7 +106,7 @@ func Open(dbPath string) (*CallDB, error) {
 
 	// Skip schema creation when old table exists — migrate() will rename it.
 	var hasOldTable bool
-	db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_calls'").Scan(&hasOldTable)
+	_ = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_calls'").Scan(&hasOldTable)
 	if !hasOldTable {
 		if _, err := db.Exec(schema); err != nil {
 			db.Close()
@@ -178,7 +178,7 @@ func migrate(db *sql.DB, dbPath string) error {
 			"idx_calls_started", "idx_calls_project", "idx_calls_action",
 			"idx_calls_task_group", "idx_calls_role",
 		} {
-			db.Exec("DROP INDEX IF EXISTS " + idx)
+			_, _ = db.Exec("DROP INDEX IF EXISTS " + idx)
 		}
 		if _, err := db.Exec(`
 			CREATE INDEX IF NOT EXISTS idx_execs_started ON agent_execs(started_at);

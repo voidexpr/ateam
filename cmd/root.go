@@ -10,9 +10,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "ateam",
-	Short: "ATeam — background roles for code quality",
-	Long:  "ATeam manages specialized roles that analyze your codebase and produce actionable reports.",
+	Use:           "ateam",
+	Short:         "ATeam — background roles for code quality",
+	Long:          "ATeam manages specialized roles that analyze your codebase and produce actionable reports.",
 	SilenceErrors: true,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		cmd.SilenceUsage = true

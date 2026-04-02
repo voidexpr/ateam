@@ -33,16 +33,16 @@ func ValidateSecrets(ac *runtime.AgentConfig, resolver *Resolver) error {
 
 	var b strings.Builder
 	if len(missing) == 1 {
-		b.WriteString(fmt.Sprintf("Missing required secret: %s", formatRequirement(missing[0])))
+		fmt.Fprintf(&b, "Missing required secret: %s", formatRequirement(missing[0]))
 	} else {
 		b.WriteString("Missing required secrets:")
 		for _, m := range missing {
-			b.WriteString(fmt.Sprintf("\n  - %s", formatRequirement(m)))
+			fmt.Fprintf(&b, "\n  - %s", formatRequirement(m))
 		}
 	}
 	// Suggest the first concrete var name for the set command.
 	first := strings.SplitN(missing[0], "|", 2)[0]
-	b.WriteString(fmt.Sprintf("\n\nSet it with: ateam secret %s", first))
+	fmt.Fprintf(&b, "\n\nSet it with: ateam secret %s", first)
 	return fmt.Errorf("%s", b.String())
 }
 
@@ -59,7 +59,7 @@ func resolveRequirement(req string, resolver *Resolver) bool {
 		if result.Found {
 			// Inject into process env if not already there.
 			if result.Source != "env" {
-				os.Setenv(alt, result.Value)
+				_ = os.Setenv(alt, result.Value)
 			}
 			return true
 		}

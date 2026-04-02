@@ -86,7 +86,7 @@ func TestInitProject(t *testing.T) {
 		Name:            "test-project",
 		GitRepo:         ".",
 		GitRemoteOrigin: "git@github.com:example/repo.git",
-		EnabledRoles:   enabled,
+		EnabledRoles:    enabled,
 	}
 
 	projDir, err := InitProject(projectPath, orgDir, opts)
@@ -180,7 +180,7 @@ func TestInitProjectDuplicateName(t *testing.T) {
 		t.Fatal(err)
 	}
 	opts := InitProjectOpts{
-		Name:          "shared-name",
+		Name:         "shared-name",
 		EnabledRoles: prompts.AllRoleIDs,
 	}
 	if _, err := InitProject(proj1, orgDir, opts); err != nil {
@@ -193,7 +193,7 @@ func TestInitProjectDuplicateName(t *testing.T) {
 		t.Fatal(err)
 	}
 	opts2 := InitProjectOpts{
-		Name:          "shared-name",
+		Name:         "shared-name",
 		EnabledRoles: prompts.AllRoleIDs,
 	}
 	_, err = InitProject(proj2, orgDir, opts2)

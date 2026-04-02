@@ -91,7 +91,7 @@ func TestMigrateProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orgDB.Exec(`CREATE TABLE agent_execs (
+	_, _ = orgDB.Exec(`CREATE TABLE agent_execs (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		project_id TEXT NOT NULL DEFAULT '',
 		profile TEXT NOT NULL DEFAULT '',
@@ -120,17 +120,17 @@ func TestMigrateProject(t *testing.T) {
 
 	// Insert rows for our project
 	streamFile := "projects/" + projectID + "/roles/security/logs/2026-03-18_report_stream.jsonl"
-	orgDB.Exec(`INSERT INTO agent_execs (project_id, profile, agent, action, role, started_at, stream_file, ended_at, cost_usd, is_error)
+	_, _ = orgDB.Exec(`INSERT INTO agent_execs (project_id, profile, agent, action, role, started_at, stream_file, ended_at, cost_usd, is_error)
 		VALUES (?, 'default', 'claude', 'report', 'security', '2026-03-18T10:00:00Z', ?, '2026-03-18T10:05:00Z', 0.50, 0)`,
 		projectID, streamFile)
 
 	supStreamFile := "projects/" + projectID + "/supervisor/logs/2026-03-18_review_stream.jsonl"
-	orgDB.Exec(`INSERT INTO agent_execs (project_id, profile, agent, action, role, started_at, stream_file, ended_at, cost_usd, is_error)
+	_, _ = orgDB.Exec(`INSERT INTO agent_execs (project_id, profile, agent, action, role, started_at, stream_file, ended_at, cost_usd, is_error)
 		VALUES (?, 'default', 'claude', 'review', 'supervisor', '2026-03-18T10:10:00Z', ?, '2026-03-18T10:15:00Z', 0.30, 0)`,
 		projectID, supStreamFile)
 
 	// Insert a row for a different project (should not be migrated)
-	orgDB.Exec(`INSERT INTO agent_execs (project_id, profile, agent, action, role, started_at, stream_file, is_error)
+	_, _ = orgDB.Exec(`INSERT INTO agent_execs (project_id, profile, agent, action, role, started_at, stream_file, is_error)
 		VALUES ('other_project', 'default', 'claude', 'report', 'security', '2026-03-18T11:00:00Z', 'projects/other_project/roles/security/logs/stream.jsonl', 0)`)
 
 	orgDB.Close()
@@ -181,28 +181,28 @@ func TestMigrateProject(t *testing.T) {
 	defer projDB.Close()
 
 	var count int
-	projDB.QueryRow("SELECT COUNT(*) FROM agent_execs").Scan(&count)
+	_ = projDB.QueryRow("SELECT COUNT(*) FROM agent_execs").Scan(&count)
 	if count != 2 {
 		t.Errorf("project DB has %d rows, want 2", count)
 	}
 
 	// Verify project_id was rewritten to ""
 	var pid string
-	projDB.QueryRow("SELECT project_id FROM agent_execs LIMIT 1").Scan(&pid)
+	_ = projDB.QueryRow("SELECT project_id FROM agent_execs LIMIT 1").Scan(&pid)
 	if pid != "" {
 		t.Errorf("project_id = %q, want empty string", pid)
 	}
 
 	// Verify stream_file was rewritten
 	var sf string
-	projDB.QueryRow("SELECT stream_file FROM agent_execs WHERE action='report'").Scan(&sf)
+	_ = projDB.QueryRow("SELECT stream_file FROM agent_execs WHERE action='report'").Scan(&sf)
 	wantSF := "logs/roles/security/2026-03-18_report_stream.jsonl"
 	if sf != wantSF {
 		t.Errorf("stream_file = %q, want %q", sf, wantSF)
 	}
 
 	var sfSup string
-	projDB.QueryRow("SELECT stream_file FROM agent_execs WHERE action='review'").Scan(&sfSup)
+	_ = projDB.QueryRow("SELECT stream_file FROM agent_execs WHERE action='review'").Scan(&sfSup)
 	wantSFSup := "logs/supervisor/2026-03-18_review_stream.jsonl"
 	if sfSup != wantSFSup {
 		t.Errorf("stream_file = %q, want %q", sfSup, wantSFSup)

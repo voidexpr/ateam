@@ -17,8 +17,8 @@ func TestDetectToolchains(t *testing.T) {
 	}
 
 	// Add go.mod and requirements.txt
-	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.25.0\n"), 0644)
-	os.WriteFile(filepath.Join(dir, "requirements.txt"), []byte("flask"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.25.0\n"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "requirements.txt"), []byte("flask"), 0644)
 
 	tc = DetectToolchains(dir)
 	if len(tc) != 2 {

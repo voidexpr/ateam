@@ -1,6 +1,6 @@
 BINARY = ateam
 
-.PHONY: build build-binary companion clean tidy test test-docker test-docker-live vuln docs
+.PHONY: build build-binary companion clean tidy test test-docker test-docker-live vuln docs lint fmt fmt-check
 
 BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
@@ -60,6 +60,15 @@ test-docker-live: build-binary
 vuln:
 	@which govulncheck > /dev/null 2>&1 || go install golang.org/x/vuln/cmd/govulncheck@latest
 	govulncheck ./...
+
+lint:
+	golangci-lint run ./...
+
+fmt:
+	gofmt -w .
+
+fmt-check:
+	test -z "$$(gofmt -l .)"
 
 clean:
 	rm -f $(BINARY)
