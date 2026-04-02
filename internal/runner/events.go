@@ -75,4 +75,3 @@ func scanStreamFileForResult(path string) *ResultLine {
 	}
 	return last
 }
-

@@ -135,11 +135,11 @@ func TestDefaultConfig(t *testing.T) {
 func TestEnabledRoles(t *testing.T) {
 	cfg := Config{
 		Roles: map[string]string{
-			"zebra":  "on",
-			"alpha":  "enabled", // backward compat
-			"beta":   "off",
-			"gamma":  "on",
-			"delta":  "disabled", // backward compat
+			"zebra": "on",
+			"alpha": "enabled", // backward compat
+			"beta":  "off",
+			"gamma": "on",
+			"delta": "disabled", // backward compat
 		},
 	}
 

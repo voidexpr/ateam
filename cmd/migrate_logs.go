@@ -320,8 +320,8 @@ func migrateDBRows(orgDBPath string, p migrationProject, dryRun bool, prefix str
 				return 0, fmt.Errorf("open project DB: %w", err)
 			}
 			var existingCount int
-			cdb.RawDB().QueryRow("SELECT COUNT(*) FROM agent_execs").Scan(&existingCount)
-			cdb.Close()
+			_ = cdb.RawDB().QueryRow("SELECT COUNT(*) FROM agent_execs").Scan(&existingCount)
+			_ = cdb.Close()
 			if existingCount > 0 {
 				fmt.Printf("  project DB already has %d row(s), skipping DB migration\n", existingCount)
 				return 0, nil
@@ -337,7 +337,7 @@ func migrateDBRows(orgDBPath string, p migrationProject, dryRun bool, prefix str
 
 	// Check if agent_execs table exists in org DB
 	var tableExists bool
-	orgDB.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_execs'").Scan(&tableExists)
+	_ = orgDB.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_execs'").Scan(&tableExists)
 	if !tableExists {
 		return 0, nil
 	}
@@ -365,7 +365,7 @@ func migrateDBRows(orgDBPath string, p migrationProject, dryRun bool, prefix str
 		isError                                             int
 		errorMessage                                        string
 		costUSD                                             sql.NullFloat64
-		inputTokens, outputTokens, cacheReadTokens, turns  sql.NullInt64
+		inputTokens, outputTokens, cacheReadTokens, turns   sql.NullInt64
 		pid                                                 int
 		containerID                                         string
 	}
@@ -419,7 +419,7 @@ func migrateDBRows(orgDBPath string, p migrationProject, dryRun bool, prefix str
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO agent_execs (
@@ -478,4 +478,3 @@ func rewriteStreamPath(oldSuffix string) string {
 
 	return "logs/" + oldSuffix
 }
-

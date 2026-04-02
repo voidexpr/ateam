@@ -77,7 +77,7 @@ func (d *DockerContainer) EnsureImage(ctx context.Context) error {
 	// point outside the build context, which BuildKit can't follow.
 	dockerfilePath, err := filepath.EvalSymlinks(d.Dockerfile)
 	if err != nil {
-		return fmt.Errorf("Dockerfile not found: %s", d.Dockerfile)
+		return fmt.Errorf("dockerfile not found: %s", d.Dockerfile)
 	}
 
 	// Pass host UID so the container user owns bind-mounted files.
@@ -121,7 +121,7 @@ func (d *DockerContainer) EnsureRunning(ctx context.Context) error {
 		}
 		// Remove any stopped container with the same name
 		rm := exec.CommandContext(ctx, "docker", "rm", "-f", d.ContainerName)
-		rm.Run() // ignore error — container may not exist
+		_ = rm.Run() // container may not exist
 
 		containerCodePath, containerWorkDir, containerOrgPath := d.containerPaths()
 		mount := d.mountDir()
@@ -202,9 +202,9 @@ func (d *DockerContainer) Stop(ctx context.Context) error {
 		return nil
 	}
 	stop := exec.CommandContext(ctx, "docker", "stop", d.ContainerName)
-	stop.Run() // ignore error — may already be stopped
+	_ = stop.Run() // may already be stopped
 	rm := exec.CommandContext(ctx, "docker", "rm", "-f", d.ContainerName)
-	rm.Run()
+	_ = rm.Run()
 	return nil
 }
 

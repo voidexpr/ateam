@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/ateam/defaults"
 	"github.com/BurntSushi/toml"
+	"github.com/ateam/defaults"
 )
 
 const (
@@ -30,15 +30,15 @@ func DefaultConfig() Config {
 
 // Config represents the project's config.toml.
 type Config struct {
-	Project    ProjectConfig     `toml:"project"`
-	Git        GitConfig         `toml:"git"`
-	Report     ReportConfig      `toml:"report"`
-	Review     ReviewConfig      `toml:"review"`
-	Code       CodeConfig        `toml:"code"`
-	Serve      ServeConfig       `toml:"serve"`
-	Roles      map[string]string `toml:"roles"`
-	Supervisor   SupervisorConfig  `toml:"supervisor"`
-	Profiles     ProfilesConfig    `toml:"profiles"`
+	Project        ProjectConfig        `toml:"project"`
+	Git            GitConfig            `toml:"git"`
+	Report         ReportConfig         `toml:"report"`
+	Review         ReviewConfig         `toml:"review"`
+	Code           CodeConfig           `toml:"code"`
+	Serve          ServeConfig          `toml:"serve"`
+	Roles          map[string]string    `toml:"roles"`
+	Supervisor     SupervisorConfig     `toml:"supervisor"`
+	Profiles       ProfilesConfig       `toml:"profiles"`
 	SandboxExtra   SandboxExtraConfig   `toml:"sandbox-extra"`
 	ContainerExtra ContainerExtraConfig `toml:"container-extra"`
 }
@@ -54,9 +54,9 @@ type ProjectConfig struct {
 }
 
 type SupervisorConfig struct {
-	DefaultProfile       string `toml:"default_profile"`
-	ReviewProfile        string `toml:"review_profile"`
-	CodeProfile          string `toml:"code_profile"`
+	DefaultProfile        string `toml:"default_profile"`
+	ReviewProfile         string `toml:"review_profile"`
+	CodeProfile           string `toml:"code_profile"`
 	CodeSupervisorProfile string `toml:"code_supervisor_profile"`
 }
 

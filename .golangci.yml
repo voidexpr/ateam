@@ -1,0 +1,28 @@
+version: "2"
+
+linters:
+  # Standard default includes govet, staticcheck (with gosimple), errcheck,
+  # unused, and ineffassign.
+  default: standard
+
+  settings:
+    errcheck:
+      exclude-functions:
+        - (*os.File).Close
+        - (*bufio.Writer).Write
+        - (*bufio.Writer).WriteByte
+        - (*bufio.Writer).Flush
+        - (*database/sql.Rows).Close
+        - (io.Closer).Close
+        - os.RemoveAll
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
+
+  exclusions:
+    presets:
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck

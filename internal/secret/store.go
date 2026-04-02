@@ -30,8 +30,8 @@ func DefaultBackend() Backend {
 }
 
 var (
-	keyringOnce      sync.Once
-	keyringAvail     bool
+	keyringOnce  sync.Once
+	keyringAvail bool
 )
 
 // keyringAvailable probes whether the OS keyring is functional.

@@ -123,4 +123,3 @@ func fmtStartedAt(s string) string {
 	}
 	return s
 }
-

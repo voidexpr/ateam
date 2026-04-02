@@ -17,11 +17,11 @@ import (
 )
 
 var (
-	inspectTaskGroup  string
-	inspectLastRun    bool
-	inspectLastReport bool
-	inspectLastReview bool
-	inspectLastCode   bool
+	inspectTaskGroup       string
+	inspectLastRun         bool
+	inspectLastReport      bool
+	inspectLastReview      bool
+	inspectLastCode        bool
 	inspectAutoDebug       bool
 	inspectAutoDebugPrompt bool
 	inspectProfile         string
@@ -272,7 +272,7 @@ func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
 	progressWg.Wait()
 
 	if f, err := os.Open(summary.StderrFilePath); err == nil {
-		io.Copy(os.Stderr, f)
+		_, _ = io.Copy(os.Stderr, f)
 		f.Close()
 	}
 

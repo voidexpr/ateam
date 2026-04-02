@@ -56,7 +56,7 @@ func (d *DockerSandboxContainer) EnsureRunning(ctx context.Context) error {
 				return
 			}
 			fmt.Fprintf(os.Stderr, "[docker-sandbox] config changed, recreating sandbox %s\n", d.SandboxName)
-			d.Stop()
+			_ = d.Stop()
 		}
 		d.startErr = d.create(ctx)
 		if d.startErr == nil {

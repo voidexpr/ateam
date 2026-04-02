@@ -85,14 +85,14 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 	}
 
 	opts := runner.RunOpts{
-		RoleID:     "supervisor",
-		Action:     runner.ActionRun,
-		LogsDir:    env.SupervisorLogsDir(),
-		WorkDir:    env.SourceDir,
-		TimeoutMin: timeout,
-		HistoryDir: historyDir,
-		PromptName: "auto_setup_prompt.md",
-		Verbose:    autoSetupVerbose,
+		RoleID:               "supervisor",
+		Action:               runner.ActionRun,
+		LogsDir:              env.SupervisorLogsDir(),
+		WorkDir:              env.SourceDir,
+		TimeoutMin:           timeout,
+		HistoryDir:           historyDir,
+		PromptName:           "auto_setup_prompt.md",
+		Verbose:              autoSetupVerbose,
 		LastMessageFilePath:  filepath.Join(supervisorDir, "auto_setup_output.md"),
 		ErrorMessageFilePath: filepath.Join(supervisorDir, "auto_setup_error.md"),
 	}

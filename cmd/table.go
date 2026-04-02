@@ -7,8 +7,8 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -55,20 +55,12 @@ func relPath(cwd, path string) string {
 	return rel
 }
 
-
 func printDone(r runner.RunSummary) {
 	costSuffix := ""
 	if c := display.FmtCost(r.Cost); c != "" {
 		costSuffix = ", " + c
 	}
 	fmt.Printf("Done (%s%s)\n\n", runner.FormatDuration(r.Duration), costSuffix)
-}
-
-func fmtInt(n int) string {
-	if n <= 0 {
-		return ""
-	}
-	return fmt.Sprintf("%d", n)
 }
 
 // openProjectDB opens the per-project state.sqlite in .ateam/.
@@ -100,7 +92,6 @@ func openCallDB(orgDir string) *calldb.CallDB {
 	}
 	return db
 }
-
 
 // newRunner creates a Runner using the resolved profile from runtime.hcl.
 // roleID is optional — used for role-specific Dockerfile resolution.

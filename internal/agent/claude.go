@@ -241,4 +241,3 @@ func hasSettingsArg(args []string) bool {
 	}
 	return false
 }
-

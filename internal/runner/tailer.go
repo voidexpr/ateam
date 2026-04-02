@@ -218,7 +218,6 @@ func (t *Tailer) discoverSources() {
 	}
 }
 
-
 func (t *Tailer) pollFiles() {
 	for _, src := range t.sources {
 		if src.done {
@@ -247,7 +246,7 @@ func (t *Tailer) pollSource(src *TailSource) {
 	}
 
 	buf := make([]byte, info.Size()-src.offset)
-	n, err := f.Read(buf)
+	n, _ := f.Read(buf)
 	if n == 0 {
 		return
 	}

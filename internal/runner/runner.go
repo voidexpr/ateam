@@ -28,29 +28,29 @@ const (
 
 // Runner orchestrates agent execution with logging, file I/O, and progress reporting.
 type Runner struct {
-	Agent           agent.Agent
-	Container       container.Container // nil or NoneContainer means run on host
-	LogFile         string              // append-only runner log
-	ProjectDir      string              // .ateam/ dir
-	OrgDir          string              // .ateamorg/ dir
-	SourceDir       string              // project root (parent of .ateam/)
-	ProjectName     string              // from config.toml
-	ExtraWriteDirs  []string            // additional dirs granted sandbox write access
-	ExtraArgs       []string            // extra args passed to the agent
-	SandboxSettings     string              // inline JSON settings template (from runtime.hcl)
-	SandboxRWPaths      []string            // from agent config rw_paths
-	SandboxROPaths      []string            // from agent config ro_paths
-	SandboxDenied       []string            // from agent config denied_paths
-	SandboxExtraWrite       []string        // from config.toml [sandbox-extra]
-	SandboxExtraRead        []string        // from config.toml [sandbox-extra]
-	SandboxExtraDomains     []string        // from config.toml [sandbox-extra]
-	SandboxExtraExcludedCmd []string        // from config.toml [sandbox-extra]
-	ConfigDir           string              // CLAUDE_CONFIG_DIR; relative resolves from ProjectDir
-	CallDB          *calldb.CallDB      // nil = no DB tracking
-	Profile         string              // profile name for DB
-	ContainerType   string              // "none" or "docker" for DB
-	ContainerName   string              // docker container name for liveness checks
-	ProjectID       string              // project ID for DB
+	Agent                   agent.Agent
+	Container               container.Container // nil or NoneContainer means run on host
+	LogFile                 string              // append-only runner log
+	ProjectDir              string              // .ateam/ dir
+	OrgDir                  string              // .ateamorg/ dir
+	SourceDir               string              // project root (parent of .ateam/)
+	ProjectName             string              // from config.toml
+	ExtraWriteDirs          []string            // additional dirs granted sandbox write access
+	ExtraArgs               []string            // extra args passed to the agent
+	SandboxSettings         string              // inline JSON settings template (from runtime.hcl)
+	SandboxRWPaths          []string            // from agent config rw_paths
+	SandboxROPaths          []string            // from agent config ro_paths
+	SandboxDenied           []string            // from agent config denied_paths
+	SandboxExtraWrite       []string            // from config.toml [sandbox-extra]
+	SandboxExtraRead        []string            // from config.toml [sandbox-extra]
+	SandboxExtraDomains     []string            // from config.toml [sandbox-extra]
+	SandboxExtraExcludedCmd []string            // from config.toml [sandbox-extra]
+	ConfigDir               string              // CLAUDE_CONFIG_DIR; relative resolves from ProjectDir
+	CallDB                  *calldb.CallDB      // nil = no DB tracking
+	Profile                 string              // profile name for DB
+	ContainerType           string              // "none" or "docker" for DB
+	ContainerName           string              // docker container name for liveness checks
+	ProjectID               string              // project ID for DB
 }
 
 // RunOpts holds per-invocation settings.
@@ -85,12 +85,12 @@ type RunProgress struct {
 
 // RunSummary is the final result returned by Run.
 type RunSummary struct {
-	RoleID          string
-	StartedAt       time.Time
-	EndedAt         time.Time
-	Duration        time.Duration
-	ExitCode        int
-	Err             error
+	RoleID    string
+	StartedAt time.Time
+	EndedAt   time.Time
+	Duration  time.Duration
+	ExitCode  int
+	Err       error
 
 	Output          string
 	Cost            float64

@@ -21,7 +21,7 @@ type Config struct {
 
 type AgentConfig struct {
 	Name        string
-	Base        string            // inherit unset fields from this agent
+	Base        string // inherit unset fields from this agent
 	Command     string
 	Args        []string
 	Model       string
@@ -326,28 +326,10 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 		}
 	}
 	for _, c := range hf.Containers {
-		cfg.Containers[c.Name] = ContainerConfig{
-			Name:             c.Name,
-			Type:             c.Type,
-			Mode:             c.Mode,
-			Dockerfile:       c.Dockerfile,
-			ConfigPath:       c.ConfigPath,
-			IdleTimeout:      c.IdleTimeout,
-			ForwardEnv:       c.ForwardEnv,
-			ExtraVolumes:     c.ExtraVolumes,
-			CopyClaudeConfig: c.CopyClaudeConfig,
-			NetworkPolicy:    c.NetworkPolicy,
-			Precheck:         c.Precheck,
-		}
+		cfg.Containers[c.Name] = ContainerConfig(c)
 	}
 	for _, p := range hf.Profiles {
-		cfg.Profiles[p.Name] = ProfileConfig{
-			Name:               p.Name,
-			Agent:              p.Agent,
-			Container:          p.Container,
-			AgentExtraArgs:     p.AgentExtraArgs,
-			ContainerExtraArgs: p.ContainerExtraArgs,
-		}
+		cfg.Profiles[p.Name] = ProfileConfig(p)
 	}
 	return nil
 }

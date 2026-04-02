@@ -49,8 +49,8 @@ func TestFileStoreSetOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	store := &FileStore{Path: filepath.Join(dir, "secrets.env")}
 
-	store.Set("KEY", "v1")
-	store.Set("KEY", "v2")
+	_ = store.Set("KEY", "v1")
+	_ = store.Set("KEY", "v2")
 
 	val, ok := store.Get("KEY")
 	if !ok || val != "v2" {
@@ -74,8 +74,8 @@ func TestFileStoreDelete(t *testing.T) {
 	dir := t.TempDir()
 	store := &FileStore{Path: filepath.Join(dir, "secrets.env")}
 
-	store.Set("A", "1")
-	store.Set("B", "2")
+	_ = store.Set("A", "1")
+	_ = store.Set("B", "2")
 
 	found, err := store.Delete("A")
 	if err != nil {
@@ -100,7 +100,7 @@ func TestFileStoreDeleteMissing(t *testing.T) {
 	dir := t.TempDir()
 	store := &FileStore{Path: filepath.Join(dir, "secrets.env")}
 
-	store.Set("A", "1")
+	_ = store.Set("A", "1")
 
 	found, err := store.Delete("NONEXISTENT")
 	if err != nil {
@@ -126,8 +126,8 @@ func TestFileStoreList(t *testing.T) {
 	dir := t.TempDir()
 	store := &FileStore{Path: filepath.Join(dir, "secrets.env")}
 
-	store.Set("X", "1")
-	store.Set("Y", "2")
+	_ = store.Set("X", "1")
+	_ = store.Set("Y", "2")
 
 	names := store.List()
 	if len(names) != 2 {
@@ -178,9 +178,9 @@ func TestResolverScopePrecedence(t *testing.T) {
 	projectStore := &FileStore{Path: filepath.Join(projectDir, "secrets.env")}
 	orgStore := &FileStore{Path: filepath.Join(orgDir, "secrets.env")}
 
-	projectStore.Set("SHARED_KEY", "project-value")
-	orgStore.Set("SHARED_KEY", "org-value")
-	orgStore.Set("ORG_ONLY", "org-only-value")
+	_ = projectStore.Set("SHARED_KEY", "project-value")
+	_ = orgStore.Set("SHARED_KEY", "org-value")
+	_ = orgStore.Set("ORG_ONLY", "org-only-value")
 
 	r := &Resolver{
 		Scopes: []Scope{
@@ -216,7 +216,7 @@ func TestResolverScopePrecedence(t *testing.T) {
 func TestResolverEnvOverridesScopes(t *testing.T) {
 	projectDir := t.TempDir()
 	projectStore := &FileStore{Path: filepath.Join(projectDir, "secrets.env")}
-	projectStore.Set("TEST_SECRET_ENV_VAR", "file-value")
+	_ = projectStore.Set("TEST_SECRET_ENV_VAR", "file-value")
 
 	t.Setenv("TEST_SECRET_ENV_VAR", "env-value")
 
@@ -306,7 +306,7 @@ func TestScopeForNameEmpty(t *testing.T) {
 func TestValidateSecretsAllPresent(t *testing.T) {
 	dir := t.TempDir()
 	store := &FileStore{Path: filepath.Join(dir, "secrets.env")}
-	store.Set("MY_API_KEY", "key123")
+	_ = store.Set("MY_API_KEY", "key123")
 
 	r := &Resolver{
 		Scopes: []Scope{
@@ -343,7 +343,7 @@ func TestValidateSecretsMissing(t *testing.T) {
 func TestValidateSecretsAlternatives(t *testing.T) {
 	dir := t.TempDir()
 	store := &FileStore{Path: filepath.Join(dir, "secrets.env")}
-	store.Set("ALT_B", "val")
+	_ = store.Set("ALT_B", "val")
 
 	r := &Resolver{
 		Scopes: []Scope{

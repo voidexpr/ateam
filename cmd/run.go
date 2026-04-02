@@ -17,18 +17,18 @@ import (
 )
 
 var (
-	runRole             string
-	runProfile          string
-	runAgent            string
-	runModel            string
-	runNoStream         bool
-	runWorkDir          string
-	runNoSummary        bool
-	runQuiet            bool
-	runAgentArgs        string
-	runVerbose          bool
-	runTaskGroup        string
-	runDockerAutoSetup  bool
+	runRole            string
+	runProfile         string
+	runAgent           string
+	runModel           string
+	runNoStream        bool
+	runWorkDir         string
+	runNoSummary       bool
+	runQuiet           bool
+	runAgentArgs       string
+	runVerbose         bool
+	runTaskGroup       string
+	runDockerAutoSetup bool
 )
 
 var runCmd = &cobra.Command{
@@ -205,7 +205,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	// Stream stderr to our stderr.
 	if f, err := os.Open(result.StderrFilePath); err == nil {
-		io.Copy(os.Stderr, f)
+		_, _ = io.Copy(os.Stderr, f)
 		f.Close()
 	}
 

@@ -37,16 +37,16 @@ type overviewRun struct {
 }
 
 type overviewData struct {
-	Reports              []prompts.RoleReport
-	Runs                 []overviewRun
-	HasReview            bool
-	ReviewModTime        time.Time
-	HasCodeOutput        bool
-	CodeModTime          time.Time
-	LatestCodeTaskGroup  string
-	CostTotal            float64
-	ShowAll              bool
-	TotalRuns            int
+	Reports             []prompts.RoleReport
+	Runs                []overviewRun
+	HasReview           bool
+	ReviewModTime       time.Time
+	HasCodeOutput       bool
+	CodeModTime         time.Time
+	LatestCodeTaskGroup string
+	CostTotal           float64
+	ShowAll             bool
+	TotalRuns           int
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
@@ -737,7 +737,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		Nav:         "sessions",
 		ProjectName: pe.Name,
 		ProjectSlug: pe.Slug,
-		Data: sessionsPageData{Sessions: sessions},
+		Data:        sessionsPageData{Sessions: sessions},
 	})
 }
 
