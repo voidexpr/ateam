@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/calldb"
@@ -92,11 +93,11 @@ type RunSummary struct {
 	ExitCode  int
 	Err       error
 
-	Output          string
-	Cost            float64
-	DurationMS      int64
-	Turns           int
-	IsError         bool
+	Output           string
+	Cost             float64
+	DurationMS       int64
+	Turns            int
+	IsError          bool
 	InputTokens      int
 	OutputTokens     int
 	CacheReadTokens  int
@@ -459,18 +460,18 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			resultModel = agent.NormalizeModel(resultEv.Model)
 		}
 		if err := r.CallDB.UpdateCall(callID, &calldb.CallResult{
-			EndedAt:         summary.EndedAt,
-			DurationMS:      summary.DurationMS,
-			ExitCode:        summary.ExitCode,
-			IsError:         summary.IsError,
-			ErrorMessage:    errMsg,
-			CostUSD:         summary.Cost,
-			InputTokens:     summary.InputTokens,
-			OutputTokens:    summary.OutputTokens,
+			EndedAt:          summary.EndedAt,
+			DurationMS:       summary.DurationMS,
+			ExitCode:         summary.ExitCode,
+			IsError:          summary.IsError,
+			ErrorMessage:     errMsg,
+			CostUSD:          summary.Cost,
+			InputTokens:      summary.InputTokens,
+			OutputTokens:     summary.OutputTokens,
 			CacheReadTokens:  summary.CacheReadTokens,
 			CacheWriteTokens: summary.CacheWriteTokens,
 			Turns:            summary.Turns,
-			Model:           resultModel,
+			Model:            resultModel,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: call tracking update failed: %v\n", err)
 		}
@@ -574,10 +575,24 @@ func mergeStringList(obj map[string]any, keyPath []string, values []string) {
 }
 
 func truncate(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
 	if len(s) <= max {
 		return s
 	}
-	return s[:max] + "…"
+	cut := 0
+	for i, r := range s {
+		end := i + utf8.RuneLen(r)
+		if end > max {
+			break
+		}
+		cut = end
+	}
+	if cut == 0 {
+		return "…"
+	}
+	return s[:cut] + "…"
 }
 
 func sendProgress(ch chan<- RunProgress, p RunProgress) {
