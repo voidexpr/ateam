@@ -186,8 +186,11 @@ func (s *Server) getDB(pe *ProjectEntry) *calldb.CallDB {
 		return pe.db
 	}
 	dbPath := filepath.Join(pe.ProjectDir, "state.sqlite")
-	db, err := calldb.Open(dbPath)
+	db, err := calldb.OpenIfExists(dbPath)
 	if err != nil {
+		return nil
+	}
+	if db == nil {
 		return nil
 	}
 	pe.db = db

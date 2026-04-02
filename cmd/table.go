@@ -76,12 +76,15 @@ func fmtInt(n int) string {
 func openProjectDB(env *root.ResolvedEnv) *calldb.CallDB {
 	if env.ProjectDir != "" {
 		dbPath := env.ProjectDBPath()
-		db, err := calldb.Open(dbPath)
+		db, err := calldb.OpenIfExists(dbPath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: cannot open project database: %v\n", err)
 			return nil
 		}
-		return db
+		if db != nil {
+			return db
+		}
+		// Project DB doesn't exist yet; fall back to org-level DB.
 	}
 	return openCallDB(env.OrgDir)
 }

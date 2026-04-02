@@ -2,6 +2,7 @@ package calldb
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -444,6 +445,47 @@ func TestMigrateFromOldTableName(t *testing.T) {
 	if sf != expected {
 		t.Errorf("expected relative path %q, got %q", expected, sf)
 	}
+}
+
+func TestOpenIfExistsReturnsNilForMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "nonexistent.sqlite")
+
+	db, err := OpenIfExists(dbPath)
+	if err != nil {
+		t.Fatalf("OpenIfExists: %v", err)
+	}
+	if db != nil {
+		db.Close()
+		t.Fatal("expected nil db for missing file")
+	}
+
+	// Verify the file was NOT created.
+	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
+		t.Fatalf("expected file to not exist, but got err=%v", err)
+	}
+}
+
+func TestOpenIfExistsOpensExistingFile(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "existing.sqlite")
+
+	// Create the DB first via Open.
+	db1, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	db1.Close()
+
+	// OpenIfExists should open the existing file.
+	db2, err := OpenIfExists(dbPath)
+	if err != nil {
+		t.Fatalf("OpenIfExists: %v", err)
+	}
+	if db2 == nil {
+		t.Fatal("expected non-nil db for existing file")
+	}
+	db2.Close()
 }
 
 func TestDBErrorsDoNotPanic(t *testing.T) {
