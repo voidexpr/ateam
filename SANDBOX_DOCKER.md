@@ -20,16 +20,32 @@ COPY --from=ateam-builder /ateam /usr/local/bin/ateam
 WORKDIR /workspace
 ```
 
-Run with no sandbox and no permission prompts:
+Since the container is the isolation boundary, define a no-sandbox profile in your project's `.ateam/runtime.hcl`:
+
+```hcl
+# .ateam/runtime.hcl — no sandbox, no Docker management (container IS the sandbox)
+agent "claude-unsandboxed" {
+  type    = "claude"
+  command = "claude"
+  args    = ["-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"]
+  env     = { CLAUDECODE = "" }
+  required_env = ["ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"]
+}
+
+profile "no-sandbox" {
+  agent     = "claude-unsandboxed"
+  container = "none"
+}
+```
+
+Then run with no sandbox and no permission prompts:
 
 ```bash
 docker run -it -v $(pwd):/workspace \
   -e ANTHROPIC_API_KEY \
   my-project:latest \
-  bash -c "cd /workspace && ateam init && ateam all --profile docker-no-sandbox"
+  bash -c "cd /workspace && ateam init && ateam all --profile no-sandbox"
 ```
-
-Or define a custom profile in `runtime.hcl` with `container = "none"` and an agent using `--dangerously-skip-permissions`.
 
 **Pros**: simple setup, no sandboxing needed, fully reproducible.
 **Cons**: need to maintain a Docker image that includes both your project tooling and ATeam.
