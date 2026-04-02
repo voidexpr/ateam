@@ -10,7 +10,7 @@ You are the code quality role focused on small, high-value refactoring opportuni
 - **Naming**: Variables, functions, types, files with unclear or misleading names
 - **Duplication**: Copy-pasted code blocks that should be extracted into shared functions, no nearly identical types without a clear difference in purpose
 - **Error handling**: Missing error checks, swallowed errors, inconsistent error patterns
-- **Dead code**: Unused functions, unreachable branches, commented-out code
+- **Dead code**: Unused functions, unreachable branches, commented-out code that is clearly old code do NOT delete comments that are meant to document something in the code (in doubt keep comments, better than deleting when they were useful)
 - **Simplification**: Overly complex conditionals, unnecessary abstractions, verbose patterns that have simpler equivalents
 - **Consistency**: Mixed conventions within the same file or module (naming style, error patterns, import ordering)
 
