@@ -86,9 +86,16 @@ func TestResolveAgentTemplateArgs(t *testing.T) {
 	}
 	vars := TemplateVars{ProjectDir: "myapp", Role: "security"}
 
-	resolveAgentTemplateArgs(a, vars)
+	resolved := resolveAgentTemplateArgs(a, vars)
+	got, ok := resolved.(*agent.ClaudeAgent)
+	if !ok {
+		t.Fatalf("expected *agent.ClaudeAgent, got %T", resolved)
+	}
 
-	if a.Args[2] != "myapp-security" {
-		t.Errorf("expected 'myapp-security', got %q", a.Args[2])
+	if got.Args[2] != "myapp-security" {
+		t.Errorf("expected 'myapp-security', got %q", got.Args[2])
+	}
+	if a.Args[2] != "{{PROJECT_DIR}}-{{ROLE}}" {
+		t.Errorf("expected original args to remain templated, got %q", a.Args[2])
 	}
 }
