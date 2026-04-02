@@ -6,7 +6,6 @@ import (
 	"github.com/yuin/goldmark"
 	highlighting "github.com/yuin/goldmark-highlighting/v2"
 	"github.com/yuin/goldmark/extension"
-	"github.com/yuin/goldmark/renderer/html"
 )
 
 func newMarkdown() goldmark.Markdown {
@@ -16,9 +15,6 @@ func newMarkdown() goldmark.Markdown {
 			highlighting.NewHighlighting(
 				highlighting.WithStyle("dracula"),
 			),
-		),
-		goldmark.WithRendererOptions(
-			html.WithUnsafe(),
 		),
 	)
 }
