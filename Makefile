@@ -74,4 +74,4 @@ fmt-check:
 	test -z "$$(gofmt -l .)"
 
 clean:
-	rm -f $(BINARY)
+	rm -f $(BINARY) ateam-linux-*
