@@ -235,6 +235,16 @@ HCL config merges at the block level — if a project redefines a `container` bl
 
 `config.toml`'s `[container-extra]` section is purely additive: it appends to whatever the HCL config defines. This follows the same pattern as `[sandbox-extra]`.
 
+For per-profile Docker args without leaving HCL, use `container_extra_args` on a profile block:
+
+```hcl
+profile "docker-custom" {
+  agent     = "claude"
+  container = "docker"
+  container_extra_args = ["-p", "3000:3000", "--cpus", "2"]
+}
+```
+
 ## Precheck Scripts (Persistent Mode)
 
 For persistent containers that need setup before each agent run (e.g., starting a database, running migrations), you can define a precheck script. ATeam executes it inside the container before each command.
@@ -316,3 +326,5 @@ The container will be recreated on the next run.
 - **No macOS guest**: Docker containers run Linux — can't test macOS-specific code
 - **Docker Sandbox** (`--profile docker-sandbox`): experimental, uses Docker Desktop 4.58+ microVMs. Limited to one synced workspace, can't build Docker images inside it, and inner containers have restricted networking
 - **Parallel report roles**: in oneshot mode, each role gets its own container (works well). In persistent mode, all roles share one container
+- **Entrypoint env vars not available in persistent mode**: Environment variables set by a custom `ENTRYPOINT` script (e.g., `export DB_URL=...`) are only visible to the container's PID 1 process. In persistent mode, `docker exec` starts a new process that does NOT inherit these. Use `[container-extra.env]` in config.toml instead — it passes `-e` flags to both `docker run` and `docker exec`
+- **Named volumes persist across runs**: Volumes created via `extra_args` (e.g., `-v pgdata:/pgdata`) survive container removal — ateam uses `docker rm -f` without the `-v` flag. Clean up manually with `docker volume rm <name>` if needed
