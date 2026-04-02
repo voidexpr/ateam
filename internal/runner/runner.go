@@ -199,7 +199,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	// Resolve {{VAR}} templates in agent args and extra args.
 	tmplVars := BuildTemplateVars(r, opts, startedAt, callID, agentName, model)
 	extraArgs = ResolveTemplateArgs(extraArgs, tmplVars)
-	resolveAgentTemplateArgs(r.Agent, tmplVars)
+	runAgent := resolveAgentTemplateArgs(r.Agent, tmplVars)
 
 	// Archive the prompt to history before running.
 	promptFile := archivePrompt(opts.HistoryDir, opts.PromptName, prompt, startedAt)
@@ -267,7 +267,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		if err := dc.EnsureRunning(ctx); err != nil {
 			return failEarly(fmt.Errorf("devcontainer start failed: %w", err))
 		}
-		agentCmd, _ := r.Agent.DebugCommandArgs(nil)
+		agentCmd, _ := runAgent.DebugCommandArgs(nil)
 		if err := dc.ValidateAgent(ctx, agentCmd); err != nil {
 			return failEarly(err)
 		}
@@ -279,14 +279,14 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		if err := ds.EnsureRunning(ctx); err != nil {
 			return failEarly(fmt.Errorf("docker sandbox start failed: %w", err))
 		}
-		agentCmd, _ := r.Agent.DebugCommandArgs(nil)
+		agentCmd, _ := runAgent.DebugCommandArgs(nil)
 		if err := ds.ValidateAgent(ctx, agentCmd); err != nil {
 			return failEarly(err)
 		}
 		req.CmdFactory = ds.CmdFactory()
 	}
 
-	command, agentArgs := r.Agent.DebugCommandArgs(extraArgs)
+	command, agentArgs := runAgent.DebugCommandArgs(extraArgs)
 	cliStr := command + " " + strings.Join(agentArgs, " ")
 
 	if opts.Verbose {
@@ -313,7 +313,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		relToDir(r.ProjectDir, opts.LastMessageFilePath))
 
 	// Run the agent and consume events
-	events := r.Agent.Run(ctx, req)
+	events := runAgent.Run(ctx, req)
 
 	var (
 		toolCounts = make(map[string]int)

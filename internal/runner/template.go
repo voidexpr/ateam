@@ -56,15 +56,33 @@ func ResolveTemplateArgs(args []string, vars TemplateVars) []string {
 	return resolved
 }
 
-// resolveAgentTemplateArgs resolves templates in the agent's base Args.
-// Makes a defensive copy so the original agent config is not mutated.
-func resolveAgentTemplateArgs(a agent.Agent, vars TemplateVars) {
+// resolveAgentTemplateArgs resolves templates in the agent's base Args on a
+// per-run clone, so the original shared agent config is never mutated.
+func resolveAgentTemplateArgs(a agent.Agent, vars TemplateVars) agent.Agent {
 	switch t := a.(type) {
 	case *agent.ClaudeAgent:
-		t.Args = ResolveTemplateArgs(t.Args, vars)
+		clone := *t
+		clone.Args = ResolveTemplateArgs(t.Args, vars)
+		clone.Env = cloneStringMap(t.Env)
+		return &clone
 	case *agent.CodexAgent:
-		t.Args = ResolveTemplateArgs(t.Args, vars)
+		clone := *t
+		clone.Args = ResolveTemplateArgs(t.Args, vars)
+		clone.Env = cloneStringMap(t.Env)
+		return &clone
 	}
+	return a
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
 }
 
 // BuildTemplateVars constructs a fully populated TemplateVars.
