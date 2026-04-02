@@ -37,6 +37,7 @@ func FormatStream(path string, w io.Writer, opts *FormatStreamOpts) error {
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	turnNum := 0
+	turnStarted := false
 	model := ""
 	hint := formatUnknown
 	for scanner.Scan() {
@@ -59,6 +60,7 @@ func FormatStream(path string, w io.Writer, opts *FormatStreamOpts) error {
 
 			case *UserLine:
 				turnNum++
+				turnStarted = true
 				fmt.Fprintf(w, "\n── turn %d ──\n", turnNum)
 
 			case *ToolCallLine:
@@ -72,8 +74,11 @@ func FormatStream(path string, w io.Writer, opts *FormatStreamOpts) error {
 				}
 
 			case *TextLine:
-				turnNum++
-				fmt.Fprintf(w, "\n── turn %d ──\n", turnNum)
+				if !turnStarted {
+					turnNum++
+					turnStarted = true
+					fmt.Fprintf(w, "\n── turn %d ──\n", turnNum)
+				}
 				if e.Text != "" {
 					fmt.Fprintf(w, "%s\n", e.Text)
 				}
