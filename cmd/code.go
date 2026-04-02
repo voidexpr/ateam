@@ -234,7 +234,7 @@ func runCode(opts CodeOptions) error {
 		if rows, err := db.CallsByTaskGroup(taskGroup); err == nil {
 			for _, r := range rows {
 				if r.StreamFile != "" {
-					tailer.AddSource(r.ID, r.Role, r.Action, r.StreamFile, r.Model)
+					tailer.AddSource(r.ID, r.Role, r.Action, root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.StreamFile), r.Model)
 				}
 			}
 		}

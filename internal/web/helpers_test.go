@@ -302,6 +302,55 @@ func TestPromptDir(t *testing.T) {
 	}
 }
 
+func TestResolveRunFilesRelativeStreamFile(t *testing.T) {
+	projectDir := t.TempDir()
+	orgDir := t.TempDir()
+
+	// Create a stream file under projectDir at a relative path.
+	logsDir := filepath.Join(projectDir, "logs", "roles", "security")
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	streamRel := filepath.Join("logs", "roles", "security", "2026-03-18_00-00-00_stream.jsonl")
+	absStream := filepath.Join(projectDir, streamRel)
+	if err := os.WriteFile(absStream, []byte(`{}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Create exec file next to it.
+	execPath := filepath.Join(logsDir, "2026-03-18_00-00-00_exec.md")
+	if err := os.WriteFile(execPath, []byte("# exec"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Create stderr file.
+	stderrPath := filepath.Join(logsDir, "2026-03-18_00-00-00_stderr.log")
+	if err := os.WriteFile(stderrPath, []byte("some error"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	row := calldb.RecentRow{
+		StreamFile: streamRel,
+		Action:     runner.ActionReport,
+		Role:       "security",
+	}
+
+	rf := resolveRunFiles(projectDir, orgDir, row)
+	if !rf.HasStream {
+		t.Error("expected HasStream=true for relative stream_file")
+	}
+	if rf.ExecFile == "" {
+		t.Error("expected ExecFile to be found for relative stream_file")
+	}
+	if !rf.HasStderr {
+		t.Error("expected HasStderr=true for relative stream_file")
+	}
+
+	// Empty stream file should return zero value.
+	rf2 := resolveRunFiles(projectDir, orgDir, calldb.RecentRow{})
+	if rf2.HasStream || rf2.ExecFile != "" || rf2.HasStderr {
+		t.Error("expected empty runFiles for empty StreamFile")
+	}
+}
+
 func TestGetDBDoesNotCreateFile(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "state.sqlite")

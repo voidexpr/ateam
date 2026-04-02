@@ -12,6 +12,7 @@ import (
 
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 )
 
@@ -79,7 +80,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 			limit = 100000
 		}
 		rows, _ := db.RecentRuns(calldb.RecentFilter{Limit: limit})
-		data.Runs = enrichRuns(rows, pe.ProjectDir)
+		data.Runs = enrichRuns(rows, pe.ProjectDir, pe.OrgDir)
 		data.TotalRuns = len(rows)
 		if aggs, err := db.CostByAction(""); err == nil {
 			for _, a := range aggs {
@@ -110,21 +111,20 @@ type runFiles struct {
 }
 
 // resolveRunFiles resolves associated files for a single run row.
-func resolveRunFiles(projectDir string, row calldb.RecentRow) runFiles {
+func resolveRunFiles(projectDir, orgDir string, row calldb.RecentRow) runFiles {
 	if row.StreamFile == "" {
 		return runFiles{}
 	}
+	absStream := root.ResolveStreamPath(projectDir, orgDir, row.StreamFile)
 	var rf runFiles
-	prefix := strings.TrimSuffix(row.StreamFile, "_stream.jsonl")
-	execPath := filepath.Join(projectDir, prefix+"_exec.md")
-	if _, err := os.Stat(execPath); err == nil {
-		rf.ExecFile = filepath.Base(execPath)
+	prefix := strings.TrimSuffix(absStream, "_stream.jsonl")
+	if _, err := os.Stat(prefix + "_exec.md"); err == nil {
+		rf.ExecFile = filepath.Base(prefix + "_exec.md")
 	}
-	if _, err := os.Stat(filepath.Join(projectDir, row.StreamFile)); err == nil {
+	if _, err := os.Stat(absStream); err == nil {
 		rf.HasStream = true
 	}
-	stderrPath := prefix + "_stderr.log"
-	if info, err := os.Stat(filepath.Join(projectDir, stderrPath)); err == nil && info.Size() > 0 {
+	if info, err := os.Stat(prefix + "_stderr.log"); err == nil && info.Size() > 0 {
 		rf.HasStderr = true
 	}
 	rf.LogsDir = filepath.Dir(row.StreamFile)
@@ -135,13 +135,13 @@ func resolveRunFiles(projectDir string, row calldb.RecentRow) runFiles {
 
 // enrichRuns resolves associated files for each run.
 // Runs are returned in descending start order (newest first).
-func enrichRuns(rows []calldb.RecentRow, projectDir string) []overviewRun {
+func enrichRuns(rows []calldb.RecentRow, projectDir, orgDir string) []overviewRun {
 	result := make([]overviewRun, len(rows))
 	for i, row := range rows {
 		// rows come back ASC from calldb; reverse to DESC.
 		result[len(rows)-1-i] = overviewRun{
 			RecentRow: row,
-			runFiles:  resolveRunFiles(projectDir, row),
+			runFiles:  resolveRunFiles(projectDir, orgDir, row),
 		}
 	}
 	return result
@@ -349,7 +349,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 
 	data := runDetailData{
 		Run:      *run,
-		runFiles: resolveRunFiles(pe.ProjectDir, *run),
+		runFiles: resolveRunFiles(pe.ProjectDir, pe.OrgDir, *run),
 	}
 
 	s.render(w, r, "run.html", pageData{
@@ -388,12 +388,13 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fileType := r.PathValue("file")
+	absStream := root.ResolveStreamPath(pe.ProjectDir, pe.OrgDir, run.StreamFile)
 	var absPath, title string
 
 	switch fileType {
 	case "exec":
-		prefix := strings.TrimSuffix(run.StreamFile, "_stream.jsonl")
-		absPath = filepath.Join(pe.ProjectDir, prefix+"_exec.md")
+		prefix := strings.TrimSuffix(absStream, "_stream.jsonl")
+		absPath = prefix + "_exec.md"
 		title = fmt.Sprintf("Run #%d — Exec", id)
 	case "prompt":
 		promptFile := resolvePromptFile(pe.ProjectDir, run.Action, run.Role, run.StreamFile)
@@ -412,20 +413,23 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 		absPath = filepath.Join(pe.ProjectDir, promptDir(run.Action, run.Role), outputFile)
 		title = fmt.Sprintf("Run #%d — Output", id)
 	case "logs":
-		absPath = filepath.Join(pe.ProjectDir, run.StreamFile)
+		absPath = absStream
 		title = fmt.Sprintf("Run #%d — Stream Log", id)
 	case "stderr":
-		prefix := strings.TrimSuffix(run.StreamFile, "_stream.jsonl")
-		absPath = filepath.Join(pe.ProjectDir, prefix+"_stderr.log")
+		prefix := strings.TrimSuffix(absStream, "_stream.jsonl")
+		absPath = prefix + "_stderr.log"
 		title = fmt.Sprintf("Run #%d — Stderr", id)
 	default:
 		http.NotFound(w, r)
 		return
 	}
 
-	// Validate path stays within project dir.
+	// Validate path stays within project dir or org dir.
 	absPath = filepath.Clean(absPath)
-	if !strings.HasPrefix(absPath, filepath.Clean(pe.ProjectDir)+string(filepath.Separator)) {
+	projPrefix := filepath.Clean(pe.ProjectDir) + string(filepath.Separator)
+	inProject := strings.HasPrefix(absPath, projPrefix)
+	inOrg := pe.OrgDir != "" && strings.HasPrefix(absPath, filepath.Clean(pe.OrgDir)+string(filepath.Separator))
+	if !inProject && !inOrg {
 		http.NotFound(w, r)
 		return
 	}
