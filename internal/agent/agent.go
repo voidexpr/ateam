@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/ateam/internal/container"
@@ -82,17 +83,32 @@ func buildProcessEnv(agentEnv, reqEnv map[string]string) []string {
 	}
 
 	env := filterEnv(os.Environ(), excludeKeys...)
+	env = upsertEnv(env, agentEnv, true)
+	env = upsertEnv(env, reqEnv, false)
+	return env
+}
 
-	for k, v := range agentEnv {
-		if v != "" {
-			env = append(env, k+"="+v)
+func upsertEnv(env []string, updates map[string]string, skipEmpty bool) []string {
+	if len(updates) == 0 {
+		return env
+	}
+
+	var keys []string
+	for k, v := range updates {
+		if skipEmpty && v == "" {
+			continue
 		}
+		keys = append(keys, k)
+	}
+	if len(keys) == 0 {
+		return env
 	}
 
-	for k, v := range reqEnv {
-		env = append(env, k+"="+v)
+	env = filterEnv(env, keys...)
+	sort.Strings(keys)
+	for _, k := range keys {
+		env = append(env, k+"="+updates[k])
 	}
-
 	return env
 }
 
