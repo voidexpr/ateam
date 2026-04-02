@@ -258,7 +258,16 @@ func (s *Server) ListenAndServe(port int, openBrowser bool) error {
 		openURL(s.URL)
 	}
 
-	return http.Serve(ln, mux)
+	return http.Serve(ln, securityHeaders(mux))
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func openURL(url string) {
