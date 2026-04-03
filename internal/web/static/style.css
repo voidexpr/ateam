@@ -95,9 +95,7 @@ a:hover { text-decoration: underline; }
 
 /* Main content */
 main {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 32px 24px;
+  padding: 32px 40px;
 }
 
 .page-header {
@@ -209,6 +207,7 @@ a.stat-card-link:hover {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
+  white-space: nowrap;
 }
 
 .data-table th {
@@ -336,6 +335,7 @@ a.stat-card-link:hover {
   border-radius: var(--radius);
   padding: 24px;
   margin-bottom: 24px;
+  overflow-x: auto;
 }
 
 .section-title {
