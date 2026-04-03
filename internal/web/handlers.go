@@ -551,18 +551,9 @@ func resolveHistoryFile(projectDir, action, role, streamFile, targetName string)
 
 type costPageData struct {
 	Actions     []calldb.ActionAgg
-	TaskGroups  []taskGroupSummary
+	Sessions    []CodeSession
 	TotalCost   float64
 	TotalTokens int64
-}
-
-type taskGroupSummary struct {
-	Name         string
-	Rows         []calldb.TaskGroupRow
-	TotalCost    float64
-	TotalTokens  int64
-	FirstStarted string
-	LastEnded    string
 }
 
 func (s *Server) handleCost(w http.ResponseWriter, r *http.Request) {
@@ -580,30 +571,7 @@ func (s *Server) handleCost(w http.ResponseWriter, r *http.Request) {
 			data.TotalCost += a.CostUSD
 			data.TotalTokens += a.TotalTokens
 		}
-
-		tgRows, _ := db.CostByTaskGroup("")
-		groups := map[string]*taskGroupSummary{}
-		var order []string
-		for _, row := range tgRows {
-			g, ok := groups[row.TaskGroup]
-			if !ok {
-				g = &taskGroupSummary{Name: row.TaskGroup}
-				groups[row.TaskGroup] = g
-				order = append(order, row.TaskGroup)
-			}
-			g.Rows = append(g.Rows, row)
-			g.TotalCost += row.CostUSD
-			g.TotalTokens += row.TotalTokens
-			if g.FirstStarted == "" || row.FirstStarted < g.FirstStarted {
-				g.FirstStarted = row.FirstStarted
-			}
-			if row.LastEnded.Valid && row.LastEnded.String > g.LastEnded {
-				g.LastEnded = row.LastEnded.String
-			}
-		}
-		for _, name := range order {
-			data.TaskGroups = append(data.TaskGroups, *groups[name])
-		}
+		data.Sessions = buildSessions(db)
 	}
 
 	s.render(w, r, "cost.html", pageData{
@@ -699,6 +667,38 @@ func (s *Server) serveHistoryFile(w http.ResponseWriter, r *http.Request, pe *Pr
 	})
 }
 
+// buildSessions aggregates CostByTaskGroup rows into CodeSession entries.
+func buildSessions(db *calldb.CallDB) []CodeSession {
+	tgRows, _ := db.CostByTaskGroup("")
+	seen := map[string]*CodeSession{}
+	var order []string
+	for _, row := range tgRows {
+		cs, ok := seen[row.TaskGroup]
+		if !ok {
+			ts := parseTaskGroupTimestamp(row.TaskGroup)
+			kind := "report"
+			if strings.HasPrefix(row.TaskGroup, "code-") {
+				kind = "code"
+			}
+			cs = &CodeSession{
+				TaskGroup: row.TaskGroup,
+				Timestamp: ts,
+				Kind:      kind,
+			}
+			seen[row.TaskGroup] = cs
+			order = append(order, row.TaskGroup)
+		}
+		cs.RunCount += row.Count
+		cs.TotalCost += row.CostUSD
+		cs.Tokens += row.TotalTokens
+	}
+	var sessions []CodeSession
+	for _, name := range order {
+		sessions = append(sessions, *seen[name])
+	}
+	return sessions
+}
+
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	pe := s.findProject(r.PathValue("project"))
 	if pe == nil {
@@ -707,34 +707,8 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var sessions []CodeSession
-	db := s.getDB(pe)
-	if db != nil {
-		tgRows, _ := db.CostByTaskGroup("")
-		seen := map[string]*CodeSession{}
-		var order []string
-		for _, row := range tgRows {
-			cs, ok := seen[row.TaskGroup]
-			if !ok {
-				ts := parseTaskGroupTimestamp(row.TaskGroup)
-				kind := "report"
-				if strings.HasPrefix(row.TaskGroup, "code-") {
-					kind = "code"
-				}
-				cs = &CodeSession{
-					TaskGroup: row.TaskGroup,
-					Timestamp: ts,
-					Kind:      kind,
-				}
-				seen[row.TaskGroup] = cs
-				order = append(order, row.TaskGroup)
-			}
-			cs.RunCount += row.Count
-			cs.TotalCost += row.CostUSD
-			cs.Tokens += row.TotalTokens
-		}
-		for _, name := range order {
-			sessions = append(sessions, *seen[name])
-		}
+	if db := s.getDB(pe); db != nil {
+		sessions = buildSessions(db)
 	}
 
 	s.render(w, r, "sessions.html", pageData{
