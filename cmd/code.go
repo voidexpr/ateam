@@ -280,13 +280,52 @@ func runCode(opts CodeOptions) error {
 	if result.Err != nil {
 		return fmt.Errorf("code execution failed: %w", result.Err)
 	}
+	printCodeSessionSummary(supervisorDir, opts.Print, result.Output)
 	printDone(result)
-	fmt.Printf("Output: %s\n", filepath.Join(supervisorDir, "code_output.md"))
-	if opts.Print {
-		fmt.Printf("\n%s\n", result.Output)
-	}
 
 	return nil
+}
+
+func printCodeSessionSummary(supervisorDir string, printOutput bool, output string) {
+	cwd, _ := os.Getwd()
+	lastMsg := relPath(cwd, filepath.Join(supervisorDir, "code_output.md"))
+
+	entries, _ := os.ReadDir(filepath.Join(supervisorDir, "code"))
+	var sessionDir string
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].IsDir() {
+			sessionDir = filepath.Join(supervisorDir, "code", entries[i].Name())
+			break
+		}
+	}
+
+	if sessionDir == "" {
+		fmt.Printf("Last message: %s\n", lastMsg)
+		if printOutput {
+			fmt.Printf("\n%s\n", output)
+		}
+		return
+	}
+
+	reportFile := filepath.Join(sessionDir, "execution_report.md")
+	if data, err := os.ReadFile(reportFile); err == nil {
+		fmt.Printf("%s\n", data)
+	}
+
+	fmt.Printf("Last message: %s\n", lastMsg)
+
+	fmt.Printf("Session: %s\n", relPath(cwd, sessionDir))
+	taskEntries, _ := os.ReadDir(sessionDir)
+	for _, e := range taskEntries {
+		if e.IsDir() || e.Name() == "current_task.md" {
+			continue
+		}
+		fmt.Printf("  %s\n", e.Name())
+	}
+
+	if printOutput {
+		fmt.Printf("\n%s\n", output)
+	}
 }
 
 // checkDockerInDocker returns an error if both the supervisor and sub-run profiles
