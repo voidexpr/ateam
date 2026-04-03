@@ -307,7 +307,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 
 	data := runsPageData{}
 	if db := s.getDB(pe); db != nil {
-		rows, _ := db.RecentRuns(calldb.RecentFilter{Limit: 100000})
+		rows, _ := db.RecentRuns(calldb.RecentFilter{Limit: -1})
 		data.Runs = enrichRuns(rows, pe.ProjectDir, pe.OrgDir)
 		data.TotalRuns = len(rows)
 	}
@@ -429,12 +429,8 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate path stays within project dir or org dir.
 	absPath = filepath.Clean(absPath)
-	projPrefix := filepath.Clean(pe.ProjectDir) + string(filepath.Separator)
-	inProject := strings.HasPrefix(absPath, projPrefix)
-	inOrg := pe.OrgDir != "" && strings.HasPrefix(absPath, filepath.Clean(pe.OrgDir)+string(filepath.Separator))
-	if !inProject && !inOrg {
+	if !isPathWithin(absPath, pe.ProjectDir) && !isPathWithin(absPath, pe.OrgDir) {
 		http.NotFound(w, r)
 		return
 	}
@@ -470,6 +466,14 @@ type runFileData struct {
 	RunID    int64
 	FileType string
 	HTML     template.HTML
+}
+
+// isPathWithin checks that absPath is under baseDir after cleaning.
+func isPathWithin(absPath, baseDir string) bool {
+	if baseDir == "" {
+		return false
+	}
+	return strings.HasPrefix(filepath.Clean(absPath), filepath.Clean(baseDir)+string(filepath.Separator))
 }
 
 // promptDir returns the history directory path (relative to project dir) for an action/role.
@@ -620,7 +624,7 @@ func (s *Server) handleReviewHistory(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) serveHistoryFile(w http.ResponseWriter, r *http.Request, pe *ProjectEntry, histDir, filename, roleID, nav string) {
 	path := filepath.Clean(filepath.Join(histDir, filename))
-	if !strings.HasPrefix(path, filepath.Clean(histDir)+string(filepath.Separator)) {
+	if !isPathWithin(path, histDir) {
 		http.NotFound(w, r)
 		return
 	}
@@ -734,7 +738,6 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	taskGroup := r.PathValue("taskgroup")
 	data := sessionDetailData{TaskGroup: taskGroup}
 
-	// Get runs from DB
 	if db := s.getDB(pe); db != nil {
 		data.Runs, _ = db.RecentRuns(calldb.RecentFilter{TaskGroup: taskGroup, Limit: 200})
 		for _, run := range data.Runs {
@@ -743,7 +746,6 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Collect supervisor history files matching this session's timestamp
 	ts := parseTaskGroupTimestamp(taskGroup)
 	tsPrefix := ts.Format(runner.TimestampFormat)
 
@@ -758,7 +760,6 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Code output file
 	if strings.HasPrefix(taskGroup, "code-") {
 		codeOutputPath := filepath.Join(pe.ProjectDir, "supervisor", "code_output.md")
 		if info, err := os.Stat(codeOutputPath); err == nil {
@@ -768,9 +769,7 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Role history files: match via sub-run timestamps from calldb
-	// Build a set of (roleID, timestamp) pairs from the runs in this task group
-	runTimestamps := map[string][]string{} // roleID -> list of timestamp prefixes
+	runTimestamps := map[string][]string{}
 	for _, run := range data.Runs {
 		if run.Role == "" || run.Role == "supervisor" {
 			continue
@@ -861,16 +860,22 @@ func (s *Server) handleCodeSessions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	codeDir := filepath.Join(pe.ProjectDir, "supervisor", "code")
+	sessions := scanCodeSessions(codeDir)
+
+	s.render(w, r, "code_sessions.html", pageData{
+		Title:       "Code",
+		Nav:         "code",
+		ProjectName: pe.Name,
+		ProjectSlug: pe.Slug,
+		Data:        codeSessionsData{Sessions: sessions},
+	})
+}
+
+// scanCodeSessions reads the code directory and returns sessions sorted newest-first.
+func scanCodeSessions(codeDir string) []codeSessionEntry {
 	entries, err := os.ReadDir(codeDir)
 	if err != nil {
-		s.render(w, r, "code_sessions.html", pageData{
-			Title:       "Code",
-			Nav:         "code",
-			ProjectName: pe.Name,
-			ProjectSlug: pe.Slug,
-			Data:        codeSessionsData{},
-		})
-		return
+		return nil
 	}
 
 	var sessions []codeSessionEntry
@@ -883,64 +888,41 @@ func (s *Server) handleCodeSessions(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		sessionDir := filepath.Join(codeDir, e.Name())
-		taskCount := countTaskPrompts(sessionDir)
-		_, reportErr := os.Stat(filepath.Join(sessionDir, "execution_report.md"))
+		subEntries, _ := os.ReadDir(sessionDir)
+		var taskCount int
+		var hasReport bool
+		for _, se := range subEntries {
+			if se.IsDir() {
+				continue
+			}
+			if strings.HasSuffix(se.Name(), "_code_prompt.md") {
+				taskCount++
+			}
+			if se.Name() == "execution_report.md" {
+				hasReport = true
+			}
+		}
 		sessions = append(sessions, codeSessionEntry{
 			DirName:   e.Name(),
 			Timestamp: ts,
 			TaskCount: taskCount,
-			HasReport: reportErr == nil,
+			HasReport: hasReport,
 		})
 	}
 
-	// newest first
 	sort.Slice(sessions, func(i, j int) bool {
 		return sessions[i].Timestamp.After(sessions[j].Timestamp)
 	})
-
-	s.render(w, r, "code_sessions.html", pageData{
-		Title:       "Code",
-		Nav:         "code",
-		ProjectName: pe.Name,
-		ProjectSlug: pe.Slug,
-		Data:        codeSessionsData{Sessions: sessions},
-	})
+	return sessions
 }
 
 // latestCodeSession returns the directory name of the newest code session, or "".
 func latestCodeSession(codeDir string) string {
-	entries, err := os.ReadDir(codeDir)
-	if err != nil {
+	sessions := scanCodeSessions(codeDir)
+	if len(sessions) == 0 {
 		return ""
 	}
-	var best string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if _, err := time.ParseInLocation(runner.TimestampFormat, e.Name(), time.Local); err != nil {
-			continue
-		}
-		if e.Name() > best {
-			best = e.Name()
-		}
-	}
-	return best
-}
-
-// countTaskPrompts counts files matching NN_*_code_prompt.md in a directory.
-func countTaskPrompts(dir string) int {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 0
-	}
-	n := 0
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), "_code_prompt.md") {
-			n++
-		}
-	}
-	return n
+	return sessions[0].DirName
 }
 
 type codeSessionFile struct {
@@ -964,8 +946,8 @@ func (s *Server) handleCodeSessionDetail(w http.ResponseWriter, r *http.Request)
 	}
 
 	dirName := r.PathValue("session")
-	// Validate timestamp format to prevent path traversal
-	if _, err := time.ParseInLocation(runner.TimestampFormat, dirName, time.Local); err != nil {
+	ts, err := time.ParseInLocation(runner.TimestampFormat, dirName, time.Local)
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -977,7 +959,6 @@ func (s *Server) handleCodeSessionDetail(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	ts, _ := time.ParseInLocation(runner.TimestampFormat, dirName, time.Local)
 	data := codeSessionDetailData{
 		DirName:   dirName,
 		Timestamp: ts,
@@ -1035,12 +1016,8 @@ func (s *Server) handleCodeSessionFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	absPath := filepath.Join(pe.ProjectDir, "supervisor", "code", dirName, fileName)
-	absPath = filepath.Clean(absPath)
-
-	// Validate path stays within project dir
-	projPrefix := filepath.Clean(pe.ProjectDir) + string(filepath.Separator)
-	if !strings.HasPrefix(absPath, projPrefix) {
+	absPath := filepath.Clean(filepath.Join(pe.ProjectDir, "supervisor", "code", dirName, fileName))
+	if !isPathWithin(absPath, pe.ProjectDir) {
 		http.NotFound(w, r)
 		return
 	}
@@ -1056,10 +1033,16 @@ func (s *Server) handleCodeSessionFile(w http.ResponseWriter, r *http.Request) {
 		Nav:         "code",
 		ProjectName: pe.Name,
 		ProjectSlug: pe.Slug,
-		Data: map[string]any{
-			"DirName":  dirName,
-			"FileName": fileName,
-			"HTML":     template.HTML(s.renderMarkdown(string(content))),
+		Data: codeSessionFileData{
+			DirName:  dirName,
+			FileName: fileName,
+			HTML:     template.HTML(s.renderMarkdown(string(content))),
 		},
 	})
+}
+
+type codeSessionFileData struct {
+	DirName  string
+	FileName string
+	HTML     template.HTML
 }

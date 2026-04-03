@@ -1,13 +1,13 @@
 {{define "code_session_file.html"}}
 {{$d := .Data}}
-<a href="/p/{{.ProjectSlug}}/code/{{index $d "DirName"}}" class="back-link">&larr; {{index $d "DirName"}}</a>
+<a href="/p/{{.ProjectSlug}}/code/{{$d.DirName}}" class="back-link">&larr; {{$d.DirName}}</a>
 <div class="page-header">
-  <h1>{{index $d "FileName"}}</h1>
+  <h1>{{$d.FileName}}</h1>
 </div>
 
 <div class="section">
   <div class="markdown-body">
-    {{index $d "HTML"}}
+    {{$d.HTML}}
   </div>
 </div>
 {{end}}
