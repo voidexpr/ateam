@@ -24,7 +24,9 @@ var (
 	codeDryRun            bool
 	codeCheaperModel      bool
 	codeProfile           string
+	codeAgent             string
 	codeSupervisorProfile string
+	codeSupervisorAgent   string
 	codeVerbose           bool
 	codeForce             bool
 	codeTail              bool
@@ -40,8 +42,10 @@ type CodeOptions struct {
 	Print             bool
 	DryRun            bool
 	CheaperModel      bool
-	Profile           string
+	Profile           string // sub-run profile (--profile on ateam run)
+	Agent             string // sub-run agent (--agent on ateam run, mutually exclusive with Profile)
 	SupervisorProfile string
+	SupervisorAgent   string
 	Verbose           bool
 	Force             bool
 	Tail              bool
@@ -69,7 +73,9 @@ Example:
 			DryRun:            codeDryRun,
 			CheaperModel:      codeCheaperModel,
 			Profile:           codeProfile,
+			Agent:             codeAgent,
 			SupervisorProfile: codeSupervisorProfile,
+			SupervisorAgent:   codeSupervisorAgent,
 			Verbose:           codeVerbose,
 			Force:             codeForce,
 			Tail:              codeTail,
@@ -93,7 +99,11 @@ func init() {
 		"print the computed prompt without running")
 	addCheaperModelFlag(codeCmd, &codeCheaperModel)
 	codeCmd.Flags().StringVar(&codeProfile, "profile", "", "profile for sub-runs (passed to ateam run --profile)")
+	codeCmd.Flags().StringVar(&codeAgent, "agent", "", "agent for sub-runs (passed to ateam run --agent)")
 	codeCmd.Flags().StringVar(&codeSupervisorProfile, "supervisor-profile", "", "profile for the supervisor itself")
+	codeCmd.Flags().StringVar(&codeSupervisorAgent, "supervisor-agent", "", "agent for the supervisor itself")
+	codeCmd.MarkFlagsMutuallyExclusive("profile", "agent")
+	codeCmd.MarkFlagsMutuallyExclusive("supervisor-profile", "supervisor-agent")
 	addVerboseFlag(codeCmd, &codeVerbose)
 	addForceFlag(codeCmd, &codeForce)
 	codeCmd.Flags().BoolVar(&codeTail, "tail", false, "stream live output from supervisor and sub-runs")
@@ -139,16 +149,21 @@ func runCode(opts CodeOptions) error {
 		return err
 	}
 
+	// Resolve sub-run profile/agent once — used for both prompt injection and DinD check.
+	// --agent and --profile are mutually exclusive on ateam run.
+	subRunProfile := opts.Profile
+	if subRunProfile == "" && opts.Agent == "" {
+		subRunProfile = env.Config.ResolveProfile("run", "")
+	}
+
 	// Inject flags for the supervisor to pass to sub-runs.
 	prompt += "\n\n# Sub-Run Flags\n\nYou MUST pass the following flags to every `ateam run` command you execute:\n"
 	prompt += "- `--task-group " + taskGroup + "` (groups all sub-tasks for cost tracking)\n"
-
-	// Resolve the profile that sub-runs will use.
-	subRunProfile := opts.Profile
-	if subRunProfile == "" {
-		subRunProfile = env.Config.ResolveProfile("run", "")
+	if opts.Agent != "" {
+		prompt += "- `--agent " + opts.Agent + "`\n"
+	} else {
+		prompt += "- `--profile " + subRunProfile + "`\n"
 	}
-	prompt += "- `--profile " + subRunProfile + "`\n"
 
 	if opts.DryRun {
 		fmt.Printf("╔══ code management ══╗\n\n")
@@ -169,7 +184,7 @@ func runCode(opts CodeOptions) error {
 	supervisorDir := env.SupervisorDir()
 
 	supervisorProfileName := opts.SupervisorProfile
-	if supervisorProfileName == "" {
+	if supervisorProfileName == "" && opts.SupervisorAgent == "" {
 		supervisorProfileName = env.Config.ResolveSupervisorProfile("code")
 	}
 
@@ -177,7 +192,7 @@ func runCode(opts CodeOptions) error {
 		return err
 	}
 
-	cr, err := resolveRunner(env, supervisorProfileName, "", runner.ActionCode, "", opts.DockerAutoSetup)
+	cr, err := resolveRunner(env, supervisorProfileName, opts.SupervisorAgent, runner.ActionCode, "", opts.DockerAutoSetup)
 	if err != nil {
 		return err
 	}

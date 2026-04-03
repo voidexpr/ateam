@@ -16,6 +16,14 @@ var (
 	allRoles           []string
 	allProfile         string
 	allDockerAutoSetup bool
+
+	// Per-stage overrides
+	allReportProfile     string
+	allReportAgent       string
+	allSupervisorProfile string
+	allSupervisorAgent   string
+	allCodeProfile       string
+	allCodeAgent         string
 )
 
 var allCmd = &cobra.Command{
@@ -26,10 +34,13 @@ var allCmd = &cobra.Command{
 Equivalent to:
   ateam report --roles all --print && ateam review --print && ateam code --print
 
+Per-stage profile/agent overrides let you mix agents across the pipeline.
+--supervisor-profile/--supervisor-agent apply to both review and code management.
+
 Example:
   ateam all
   ateam all --extra-prompt "Focus on security"
-  ateam all --quiet
+  ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile docker
   ateam all --timeout 30`,
 	RunE: runAll,
 }
@@ -41,6 +52,15 @@ func init() {
 	allCmd.Flags().IntVar(&allParallel, "parallel", 0, "max parallel report roles (overrides config max_parallel)")
 	allCmd.Flags().StringSliceVar(&allRoles, "roles", nil, "run only these roles in the report phase and limit coding tasks to them in review")
 	allCmd.Flags().StringVar(&allProfile, "profile", "", "profile for code sub-runs (passed to ateam code --profile)")
+	allCmd.Flags().StringVar(&allReportProfile, "report-profile", "", "profile for report phase agents")
+	allCmd.Flags().StringVar(&allReportAgent, "report-agent", "", "agent for report phase (uses 'none' container)")
+	allCmd.Flags().StringVar(&allSupervisorProfile, "supervisor-profile", "", "profile for supervisor (review + code management)")
+	allCmd.Flags().StringVar(&allSupervisorAgent, "supervisor-agent", "", "agent for supervisor (review + code management)")
+	allCmd.Flags().StringVar(&allCodeProfile, "code-profile", "", "profile for code sub-runs (overrides --profile)")
+	allCmd.Flags().StringVar(&allCodeAgent, "code-agent", "", "agent for code sub-runs (uses 'none' container)")
+	allCmd.MarkFlagsMutuallyExclusive("report-profile", "report-agent")
+	allCmd.MarkFlagsMutuallyExclusive("supervisor-profile", "supervisor-agent")
+	allCmd.MarkFlagsMutuallyExclusive("code-profile", "code-agent")
 	addCheaperModelFlag(allCmd, &allCheaperModel)
 	addVerboseFlag(allCmd, &allVerbose)
 	addDockerAutoSetupFlag(allCmd, &allDockerAutoSetup)
@@ -54,6 +74,12 @@ func runAll(cmd *cobra.Command, args []string) error {
 		roles = []string{"all"}
 	}
 
+	// Resolve per-stage profile/agent.
+	// --supervisor-* applies to review + code management.
+	// --code-profile/--code-agent override --profile for sub-runs.
+	codeSubRunProfile := coalesce(allCodeProfile, allProfile)
+	codeSubRunAgent := allCodeAgent
+
 	// Phase 1: Report
 	fmt.Println("=== Phase 1: Report ===")
 	if err := runReport(ReportOptions{
@@ -63,6 +89,8 @@ func runAll(cmd *cobra.Command, args []string) error {
 		Parallel:        allParallel,
 		Print:           printOutput,
 		CheaperModel:    allCheaperModel,
+		Profile:         allReportProfile,
+		Agent:           allReportAgent,
 		Verbose:         allVerbose,
 		DockerAutoSetup: allDockerAutoSetup,
 	}); err != nil {
@@ -76,6 +104,8 @@ func runAll(cmd *cobra.Command, args []string) error {
 		Timeout:         allTimeout,
 		Print:           printOutput,
 		CheaperModel:    allCheaperModel,
+		Profile:         allSupervisorProfile,
+		Agent:           allSupervisorAgent,
 		Verbose:         allVerbose,
 		Roles:           allRoles,
 		DockerAutoSetup: allDockerAutoSetup,
@@ -86,16 +116,29 @@ func runAll(cmd *cobra.Command, args []string) error {
 	// Phase 3: Code
 	fmt.Println("\n=== Phase 3: Code ===")
 	if err := runCode(CodeOptions{
-		ExtraPrompt:     allExtraPrompt,
-		Timeout:         allTimeout,
-		Print:           printOutput,
-		CheaperModel:    allCheaperModel,
-		Verbose:         allVerbose,
-		Profile:         allProfile,
-		DockerAutoSetup: allDockerAutoSetup,
+		ExtraPrompt:       allExtraPrompt,
+		Timeout:           allTimeout,
+		Print:             printOutput,
+		CheaperModel:      allCheaperModel,
+		Profile:           codeSubRunProfile,
+		Agent:             codeSubRunAgent,
+		SupervisorProfile: allSupervisorProfile,
+		SupervisorAgent:   allSupervisorAgent,
+		Verbose:           allVerbose,
+		DockerAutoSetup:   allDockerAutoSetup,
 	}); err != nil {
 		return fmt.Errorf("code phase failed: %w", err)
 	}
 
 	return nil
+}
+
+// coalesce returns the first non-empty string.
+func coalesce(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
