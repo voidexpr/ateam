@@ -128,6 +128,9 @@ func funcMap() template.FuncMap {
 		},
 		"lower":     strings.ToLower,
 		"estTokens": prompts.EstimateTokens,
+		"runsTableCtx": func(slug string, runs []overviewRun) map[string]any {
+			return map[string]any{"ProjectSlug": slug, "Runs": runs}
+		},
 	}
 }
 

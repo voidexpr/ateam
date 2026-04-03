@@ -202,9 +202,9 @@ func TestRecentRuns(t *testing.T) {
 	if len(rows) != 8 {
 		t.Fatalf("expected 8 rows, got %d", len(rows))
 	}
-	// Should be ordered by started_at ASC — first row is oldest
-	if rows[0].ProjectID != "proj-a" {
-		t.Errorf("expected proj-a first, got %s", rows[0].ProjectID)
+	// Should be ordered by started_at DESC — first row is newest
+	if rows[0].ProjectID != "proj-b" {
+		t.Errorf("expected proj-b first (newest), got %s", rows[0].ProjectID)
 	}
 
 	// Filter by project
@@ -599,8 +599,9 @@ func TestRecentRunsStreamFile(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("expected 3 rows, got %d", len(rows))
 	}
-	if rows[0].StreamFile != "/logs/code_supervisor.jsonl" {
-		t.Errorf("expected stream file on supervisor, got %q", rows[0].StreamFile)
+	// DESC order: newest first — testing is most recent in this task group
+	if rows[0].StreamFile != "/logs/run_testing.jsonl" {
+		t.Errorf("expected stream file on testing (newest), got %q", rows[0].StreamFile)
 	}
 }
 

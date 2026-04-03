@@ -133,12 +133,11 @@ func resolveRunFiles(projectDir, orgDir string, row calldb.RecentRow) runFiles {
 }
 
 // enrichRuns resolves associated files for each run.
-// Runs are returned in descending start order (newest first).
+// Rows are expected in descending start order (newest first) from calldb.
 func enrichRuns(rows []calldb.RecentRow, projectDir, orgDir string) []overviewRun {
 	result := make([]overviewRun, len(rows))
 	for i, row := range rows {
-		// rows come back ASC from calldb; reverse to DESC.
-		result[len(rows)-1-i] = overviewRun{
+		result[i] = overviewRun{
 			RecentRow: row,
 			runFiles:  resolveRunFiles(projectDir, orgDir, row),
 		}
@@ -294,6 +293,11 @@ func (s *Server) handlePrompts(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type runsPageData struct {
+	Runs      []overviewRun
+	TotalRuns int
+}
+
 func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	pe := s.findProject(r.PathValue("project"))
 	if pe == nil {
@@ -301,9 +305,11 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var runs []calldb.RecentRow
+	data := runsPageData{}
 	if db := s.getDB(pe); db != nil {
-		runs, _ = db.RecentRuns(calldb.RecentFilter{Limit: 100})
+		rows, _ := db.RecentRuns(calldb.RecentFilter{Limit: 100000})
+		data.Runs = enrichRuns(rows, pe.ProjectDir, pe.OrgDir)
+		data.TotalRuns = len(rows)
 	}
 
 	s.render(w, r, "runs.html", pageData{
@@ -311,7 +317,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		Nav:         "runs",
 		ProjectName: pe.Name,
 		ProjectSlug: pe.Slug,
-		Data:        runs,
+		Data:        data,
 	})
 }
 

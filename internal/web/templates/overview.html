@@ -63,40 +63,7 @@
       {{end}}
     {{end}}
   </div>
-  <table class="data-table">
-    <thead>
-      <tr>
-        <th>ID</th>
-        <th>Action</th>
-        <th>Role</th>
-        <th>Started</th>
-        <th>Duration</th>
-        <th>Cost</th>
-        <th>Status</th>
-        <th>Files</th>
-      </tr>
-    </thead>
-    <tbody>
-      {{range $d.Runs}}
-      <tr>
-        <td><a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}">#{{.ID}}</a></td>
-        <td><span class="badge badge-{{.Action}}">{{.Action}}</span></td>
-        <td>{{.Role}}</td>
-        <td>{{fmtTimestamp .StartedAt}}</td>
-        <td>{{fmtDuration .DurationMS}}</td>
-        <td>{{fmtCost .CostUSD}}</td>
-        <td>{{if .IsError}}<span class="badge badge-error">error</span>{{else if .EndedAt}}<span class="badge badge-ok">ok</span>{{else}}<span class="badge badge-run">running</span>{{end}}</td>
-        <td class="file-links">
-          {{- if .ExecFile}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/exec" title="Exec">exec</a>{{end -}}
-          {{- if .PromptFile}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/prompt" title="Prompt">prompt</a>{{end -}}
-          {{- if .OutputFile}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/output" title="Output">output</a>{{end -}}
-          {{- if .HasStream}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/logs" title="Stream log">logs</a>{{end -}}
-          {{- if .HasStderr}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/stderr" title="Stderr">stderr</a>{{end -}}
-        </td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
+  {{template "runs_table" (runsTableCtx $.ProjectSlug $d.Runs)}}
 </div>
 {{end}}
 {{end}}
