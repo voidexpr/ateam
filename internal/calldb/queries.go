@@ -29,6 +29,7 @@ type RecentRow struct {
 	PID              int
 	ContainerID     string
 	StreamFile      string
+	OutputFile      string
 }
 
 type RecentFilter struct {
@@ -91,12 +92,12 @@ func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
 	return results, rows.Err()
 }
 
-const recentCols = "id, project_id, profile, action, role, task_group, model, started_at, COALESCE(ended_at,''), COALESCE(duration_ms,0), COALESCE(exit_code,0), is_error, COALESCE(cost_usd,0), COALESCE(input_tokens,0), COALESCE(output_tokens,0), COALESCE(cache_read_tokens,0), COALESCE(cache_write_tokens,0), COALESCE(turns,0), COALESCE(pid,0), COALESCE(container_id,''), COALESCE(stream_file,'')"
+const recentCols = "id, project_id, profile, action, role, task_group, model, started_at, COALESCE(ended_at,''), COALESCE(duration_ms,0), COALESCE(exit_code,0), is_error, COALESCE(cost_usd,0), COALESCE(input_tokens,0), COALESCE(output_tokens,0), COALESCE(cache_read_tokens,0), COALESCE(cache_write_tokens,0), COALESCE(turns,0), COALESCE(pid,0), COALESCE(container_id,''), COALESCE(stream_file,''), COALESCE(output_file,'')"
 
 func scanRecentRow(rows *sql.Rows) (RecentRow, error) {
 	var r RecentRow
 	var isErr int
-	err := rows.Scan(&r.ID, &r.ProjectID, &r.Profile, &r.Action, &r.Role, &r.TaskGroup, &r.Model, &r.StartedAt, &r.EndedAt, &r.DurationMS, &r.ExitCode, &isErr, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens, &r.Turns, &r.PID, &r.ContainerID, &r.StreamFile)
+	err := rows.Scan(&r.ID, &r.ProjectID, &r.Profile, &r.Action, &r.Role, &r.TaskGroup, &r.Model, &r.StartedAt, &r.EndedAt, &r.DurationMS, &r.ExitCode, &isErr, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens, &r.Turns, &r.PID, &r.ContainerID, &r.StreamFile, &r.OutputFile)
 	r.IsError = isErr != 0
 	return r, err
 }
@@ -272,13 +273,14 @@ type CallRow struct {
 	StartedAt  string
 	EndedAt    string
 	StreamFile string
+	OutputFile string
 }
 
-const callRowCols = `id, COALESCE(agent,''), COALESCE(model,''), role, action, task_group, started_at, COALESCE(ended_at,''), COALESCE(stream_file,'')`
+const callRowCols = `id, COALESCE(agent,''), COALESCE(model,''), role, action, task_group, started_at, COALESCE(ended_at,''), COALESCE(stream_file,''), COALESCE(output_file,'')`
 
 func scanCallRow(rows *sql.Rows) (CallRow, error) {
 	var r CallRow
-	err := rows.Scan(&r.ID, &r.Agent, &r.Model, &r.Role, &r.Action, &r.TaskGroup, &r.StartedAt, &r.EndedAt, &r.StreamFile)
+	err := rows.Scan(&r.ID, &r.Agent, &r.Model, &r.Role, &r.Action, &r.TaskGroup, &r.StartedAt, &r.EndedAt, &r.StreamFile, &r.OutputFile)
 	return r, err
 }
 

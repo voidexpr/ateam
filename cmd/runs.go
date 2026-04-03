@@ -12,9 +12,10 @@ import (
 )
 
 var (
-	recentRole   string
-	recentAction string
-	recentLimit  int
+	recentRole      string
+	recentAction    string
+	recentTaskGroup string
+	recentLimit     int
 )
 
 var runsCmd = &cobra.Command{
@@ -37,6 +38,7 @@ Example:
 func init() {
 	runsCmd.Flags().StringVar(&recentRole, "role", "", "filter by role")
 	runsCmd.Flags().StringVar(&recentAction, "action", "", "filter by action (report, review, code, run)")
+	runsCmd.Flags().StringVar(&recentTaskGroup, "task-group", "", "filter by task group")
 	runsCmd.Flags().IntVar(&recentLimit, "limit", 30, "max rows to show")
 }
 
@@ -53,9 +55,9 @@ func runRuns(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 
 	rows, err := db.RecentRuns(calldb.RecentFilter{
-		ProjectID: "",
 		Role:      recentRole,
 		Action:    recentAction,
+		TaskGroup: recentTaskGroup,
 		Limit:     recentLimit,
 	})
 	if err != nil {

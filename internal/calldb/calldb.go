@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS agent_execs (
   prompt_hash       TEXT NOT NULL DEFAULT '',
   started_at        TEXT NOT NULL,
   stream_file       TEXT NOT NULL DEFAULT '',
+  output_file       TEXT NOT NULL DEFAULT '',
   ended_at          TEXT,
   duration_ms       INTEGER,
   exit_code         INTEGER,
@@ -57,6 +58,7 @@ type Call struct {
 	PromptHash string
 	StartedAt  time.Time
 	StreamFile string
+	OutputFile string
 }
 
 type CallResult struct {
@@ -208,6 +210,7 @@ func migrate(db *sql.DB, dbPath string) error {
 	hasPID := false
 	hasContainerID := false
 	hasCacheWriteTokens := false
+	hasOutputFile := false
 	for tRows.Next() {
 		var cid int
 		var name, typ string
@@ -225,6 +228,8 @@ func migrate(db *sql.DB, dbPath string) error {
 			hasContainerID = true
 		case "cache_write_tokens":
 			hasCacheWriteTokens = true
+		case "output_file":
+			hasOutputFile = true
 		}
 	}
 	tRows.Close()
@@ -247,6 +252,11 @@ func migrate(db *sql.DB, dbPath string) error {
 			return err
 		}
 	}
+	if !hasOutputFile {
+		if _, err := tx.Exec("ALTER TABLE agent_execs ADD COLUMN output_file TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
 
 	return tx.Commit()
 }
@@ -255,11 +265,12 @@ func (c *CallDB) InsertCall(call *Call) (int64, error) {
 	res, err := c.db.Exec(`
 		INSERT INTO agent_execs (
 			project_id, profile, agent, container, action, role,
-			task_group, model, prompt_hash, started_at, stream_file
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			task_group, model, prompt_hash, started_at, stream_file, output_file
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		call.ProjectID, call.Profile, call.Agent, call.Container,
 		call.Action, call.Role, call.TaskGroup, call.Model,
 		call.PromptHash, call.StartedAt.Format(time.RFC3339), call.StreamFile,
+		call.OutputFile,
 	)
 	if err != nil {
 		return 0, err
