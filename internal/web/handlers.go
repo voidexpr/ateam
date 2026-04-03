@@ -104,7 +104,6 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 type runFiles struct {
 	ExecFile   string
 	PromptFile string
-	OutputFile string
 	LogsDir    string
 	HasStream  bool
 	HasStderr  bool
@@ -129,7 +128,6 @@ func resolveRunFiles(projectDir, orgDir string, row calldb.RecentRow) runFiles {
 	}
 	rf.LogsDir = filepath.Dir(row.StreamFile)
 	rf.PromptFile = resolvePromptFile(projectDir, row.Action, row.Role, row.StreamFile)
-	rf.OutputFile = resolveOutputFile(projectDir, row.Action, row.Role, row.StreamFile)
 	return rf
 }
 
