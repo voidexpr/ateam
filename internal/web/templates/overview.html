@@ -21,7 +21,7 @@
   </div>
   {{end}}
   {{if $d.HasCodeOutput}}
-  <a href="{{if $d.LatestCodeTaskGroup}}/p/{{$.ProjectSlug}}/sessions/{{$d.LatestCodeTaskGroup}}{{else}}/p/{{$.ProjectSlug}}/sessions{{end}}" class="stat-card stat-card-link">
+  <a href="/p/{{$.ProjectSlug}}/code/{{$d.LatestCodeSession}}/execution_report.md" class="stat-card stat-card-link">
     <div class="stat-label">Last Code</div>
     <div class="stat-value">{{fmtDateAge $d.CodeModTime}}</div>
   </a>
