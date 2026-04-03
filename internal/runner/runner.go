@@ -71,6 +71,7 @@ type RunOpts struct {
 
 // RunProgress is a lightweight status sent on a channel during execution.
 type RunProgress struct {
+	ExecID         int64
 	RoleID         string
 	Phase          string
 	ToolName       string
@@ -86,6 +87,7 @@ type RunProgress struct {
 
 // RunSummary is the final result returned by Run.
 type RunSummary struct {
+	ExecID    int64
 	RoleID    string
 	StartedAt time.Time
 	EndedAt   time.Time
@@ -117,6 +119,7 @@ func (r *Runner) LogQueued(opts RunOpts) {
 // Run executes the agent with the given prompt and options.
 func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress chan<- RunProgress) RunSummary {
 	startedAt := time.Now()
+	var callID int64
 
 	prefix := filepath.Join(opts.LogsDir, startedAt.Format(TimestampFormat)+"_"+opts.Action)
 	streamFile := prefix + "_stream.jsonl"
@@ -125,6 +128,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 
 	failEarly := func(err error) RunSummary {
 		s := RunSummary{
+			ExecID:         callID,
 			RoleID:         opts.RoleID,
 			StartedAt:      startedAt,
 			EndedAt:        time.Now(),
@@ -169,7 +173,6 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	// Insert call tracking record early so EXEC_ID is available for templates.
 	agentName := r.Agent.Name()
 	model := agent.NormalizeModel(extractModel(r.Agent))
-	var callID int64
 	if r.CallDB != nil {
 		relStream := streamFile
 		if r.ProjectDir != "" {
@@ -325,6 +328,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 
 	emitProgress := func(phase, toolName, toolInput, content string, toolCount, evCount int) {
 		sendProgress(progress, RunProgress{
+			ExecID:         callID,
 			RoleID:         opts.RoleID,
 			Phase:          phase,
 			ToolName:       toolName,
@@ -384,6 +388,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	}
 
 	summary := RunSummary{
+		ExecID:         callID,
 		RoleID:         opts.RoleID,
 		StartedAt:      startedAt,
 		EndedAt:        endedAt,

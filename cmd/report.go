@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +15,14 @@ import (
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
+)
+
+const (
+	reportStateQueued  = "queued"
+	reportStateRunning = "running"
+	reportStateDone    = "done"
+	reportStateError   = "ERROR"
+	reportStatusHeader = "  ID      ROLE                      STATUS   CALLS  DETAILS"
 )
 
 var (
@@ -200,13 +210,8 @@ func runReport(opts ReportOptions) error {
 	cwd, _ := os.Getwd()
 
 	// Build role order index for status display
-	roleIndex := make(map[string]int, len(tasks))
-	statuses := make([]string, len(tasks))
-	for i, t := range tasks {
-		roleIndex[t.RoleID] = i
-		statuses[i] = fmt.Sprintf("  %-25s queued", t.RoleID)
-	}
-	printStatuses(statuses)
+	statusRows, roleIndex := newReportStatusRows(tasks)
+	renderedRows := printReportStatuses(statusRows)
 
 	// Process completions and progress as they arrive
 	completed := make(chan runner.RunSummary, len(tasks))
@@ -220,6 +225,24 @@ func runReport(opts ReportOptions) error {
 	go func() {
 		runner.RunPool(ctx, cr, tasks, maxParallel, progress, completed)
 		close(progress)
+	}()
+
+	resizeCh, stopResize := subscribeWindowResize()
+	var resizeDone sync.WaitGroup
+	if resizeCh != nil {
+		resizeDone.Add(1)
+		go func() {
+			defer resizeDone.Done()
+			for range resizeCh {
+				statusMu.Lock()
+				renderedRows = reprintReportStatuses(statusRows, renderedRows)
+				statusMu.Unlock()
+			}
+		}()
+	}
+	defer func() {
+		stopResize()
+		resizeDone.Wait()
 	}()
 
 	agentName := cr.Agent.Name()
@@ -236,18 +259,10 @@ func runReport(opts ReportOptions) error {
 			if !ok {
 				continue
 			}
-			elapsed := runner.FormatDuration(p.Elapsed)
 			statusMu.Lock()
-			switch p.Phase {
-			case runner.PhaseInit:
-				statuses[idx] = fmt.Sprintf("  %-25s running  %s", p.RoleID, elapsed)
-			case runner.PhaseTool:
-				statuses[idx] = fmt.Sprintf("  %-25s running  %d calls  %s  %s", p.RoleID, p.ToolCount, elapsed, p.ToolName)
-			default:
-				statuses[idx] = fmt.Sprintf("  %-25s running  %d calls  %s", p.RoleID, p.ToolCount, elapsed)
-			}
+			statusRows[idx] = nextReportStatusRow(statusRows[idx], p)
 			if time.Since(lastRedraw) >= 500*time.Millisecond {
-				reprintStatuses(statuses)
+				renderedRows = reprintReportStatuses(statusRows, renderedRows)
 				lastRedraw = time.Now()
 			}
 			statusMu.Unlock()
@@ -255,15 +270,10 @@ func runReport(opts ReportOptions) error {
 	}()
 
 	for r := range completed {
-		elapsed := runner.FormatDuration(r.Duration)
-		endedAt := r.EndedAt.Format("15:04:05")
-		tokens := display.FmtTokens(int64(r.InputTokens + r.OutputTokens + r.CacheReadTokens + r.CacheWriteTokens))
-
 		statusMu.Lock()
 		idx := roleIndex[r.RoleID]
 		if r.Err != nil {
-			logsRef := streamFilePrefix(r.StreamFilePath, cwd)
-			statuses[idx] = fmt.Sprintf("  %-25s ERROR    %s  %s  %s  %s", r.RoleID, endedAt, elapsed, tokens, logsRef)
+			statusRows[idx] = errorReportStatusRow(statusRows[idx], r, cwd)
 			failed++
 		} else {
 			reportPath := env.RoleReportPath(r.RoleID)
@@ -271,14 +281,25 @@ func runReport(opts ReportOptions) error {
 			if err := runner.ArchiveFile(reportPath, historyDir, prompts.ReportFile, r.StartedAt); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not archive report for %s: %v\n", r.RoleID, err)
 			}
-			statuses[idx] = fmt.Sprintf("  %-25s done     %s  %s  %s  %s", r.RoleID, endedAt, elapsed, tokens, relPath(cwd, reportPath))
+			statusRows[idx] = doneReportStatusRow(statusRows[idx], r, relPath(cwd, reportPath))
 			succeeded++
 		}
-		reprintStatuses(statuses)
+		renderedRows = reprintReportStatuses(statusRows, renderedRows)
 		statusMu.Unlock()
 		results = append(results, r)
 	}
 	progressDone.Wait()
+	statusMu.Lock()
+	finalRows := cloneReportStatusRows(statusRows)
+	if ctx.Err() == nil {
+		renderedRows = reprintReportStatuses(finalRows, renderedRows)
+	}
+	statusMu.Unlock()
+
+	if ctx.Err() != nil {
+		fmt.Println()
+		printPlainReportStatuses(finalRows)
+	}
 
 	fmt.Printf("\n%d succeeded, %d failed (%s)\n", succeeded, failed, runner.FormatDuration(time.Since(reportStart)))
 
@@ -323,6 +344,32 @@ func runReport(opts ReportOptions) error {
 	return nil
 }
 
+type reportStatusRow struct {
+	ExecID int64
+	RoleID string
+	State  string
+	Calls  int
+	Detail string
+	Path   string
+}
+
+func newReportStatusRows(tasks []runner.PoolTask) ([]reportStatusRow, map[string]int) {
+	rows := make([]reportStatusRow, len(tasks))
+	index := make(map[string]int, len(tasks))
+	for i, t := range tasks {
+		index[t.RoleID] = i
+		rows[i] = reportStatusRow{
+			RoleID: t.RoleID,
+			State:  reportStateQueued,
+		}
+	}
+	return rows, index
+}
+
+func cloneReportStatusRows(rows []reportStatusRow) []reportStatusRow {
+	return append([]reportStatusRow(nil), rows...)
+}
+
 // streamFilePrefix returns the log file prefix (without _stream.jsonl suffix)
 // relative to cwd, with a trailing "*" glob hint.
 func streamFilePrefix(streamPath, cwd string) string {
@@ -332,18 +379,200 @@ func streamFilePrefix(streamPath, cwd string) string {
 	return rel + "*"
 }
 
-// printStatuses prints all status lines.
-func printStatuses(statuses []string) {
-	for _, s := range statuses {
-		fmt.Println(s)
+func reportStatusLinesForWidth(rows []reportStatusRow, width int) []string {
+	lines := make([]string, 0, len(rows)+1)
+	lines = append(lines, fitReportLine(reportStatusHeader, width))
+	for _, row := range rows {
+		lines = append(lines, reportStatusRowLines(row, width)...)
+	}
+	return lines
+}
+
+func reportStatusRowLines(row reportStatusRow, width int) []string {
+	execID := "-"
+	if row.ExecID > 0 {
+		execID = strconv.FormatInt(row.ExecID, 10)
+	}
+	calls := "-"
+	if row.State != reportStateQueued || row.Calls > 0 {
+		calls = strconv.Itoa(row.Calls)
+	}
+	line := strings.TrimRight(fmt.Sprintf("  %-7s %-25s %-8s %-6s %s", execID, row.RoleID, row.State, calls, row.Detail), " ")
+	if row.State != reportStateDone || row.Path == "" {
+		return []string{fitReportLine(line, width)}
+	}
+	return []string{
+		fitReportLine(line, width),
+		row.Path,
 	}
 }
 
-// reprintStatuses moves the cursor up, reprints all lines, clearing previous content.
-func reprintStatuses(statuses []string) {
-	// Move cursor up len(statuses) lines and overwrite
-	fmt.Printf("\033[%dA", len(statuses))
-	for _, s := range statuses {
-		fmt.Printf("\033[2K%s\n", s)
+func fitReportLine(line string, width int) string {
+	line = strings.TrimRight(line, " ")
+	if width <= 1 {
+		return line
 	}
+	limit := width - 1
+	runes := []rune(line)
+	if len(runes) <= limit {
+		return line
+	}
+	if limit == 1 {
+		return "…"
+	}
+	return string(runes[:limit-1]) + "…"
+}
+
+func formatRunningToolDetail(elapsed, toolName string, toolCount int) string {
+	label := "tool calls"
+	if toolCount == 1 {
+		label = "tool call"
+	}
+	return strings.TrimSpace(fmt.Sprintf("%s  %s (%d %s)", elapsed, toolName, toolCount, label))
+}
+
+func reportStatusTerminal(state string) bool {
+	return state == reportStateDone || state == reportStateError
+}
+
+func nextReportStatusRow(row reportStatusRow, p runner.RunProgress) reportStatusRow {
+	if reportStatusTerminal(row.State) {
+		return row
+	}
+	elapsed := runner.FormatDuration(p.Elapsed)
+	next := row
+	next.ExecID = p.ExecID
+	next.Calls = p.ToolCount
+	switch p.Phase {
+	case runner.PhaseInit:
+		next.State = reportStateRunning
+		next.Detail = elapsed
+	case runner.PhaseTool:
+		next.State = reportStateRunning
+		next.Detail = formatRunningToolDetail(elapsed, p.ToolName, p.ToolCount)
+	case runner.PhaseDone:
+		next.State = reportStateDone
+		next.Detail = elapsed
+	case runner.PhaseError:
+		next.State = reportStateError
+		next.Detail = elapsed
+	default:
+		next.State = reportStateRunning
+		next.Detail = elapsed
+	}
+	return next
+}
+
+func finalizedReportStatusRow(row reportStatusRow, summary runner.RunSummary, state, detail, path string) reportStatusRow {
+	next := row
+	next.ExecID = summary.ExecID
+	next.State = state
+	next.Detail = detail
+	next.Path = path
+	return next
+}
+
+func errorReportStatusRow(row reportStatusRow, summary runner.RunSummary, cwd string) reportStatusRow {
+	return finalizedReportStatusRow(row, summary, reportStateError, strings.TrimSpace(fmt.Sprintf("%s  %s  %s  %s",
+		summary.EndedAt.Format("15:04:05"),
+		runner.FormatDuration(summary.Duration),
+		reportStatusTokens(summary),
+		streamFilePrefix(summary.StreamFilePath, cwd),
+	)), "")
+}
+
+func doneReportStatusRow(row reportStatusRow, summary runner.RunSummary, reportPath string) reportStatusRow {
+	return finalizedReportStatusRow(row, summary, reportStateDone, strings.TrimSpace(fmt.Sprintf("%s  %s  %s  %s",
+		summary.EndedAt.Format("15:04:05"),
+		runner.FormatDuration(summary.Duration),
+		reportStatusCost(summary),
+		reportStatusTokens(summary),
+	)), reportPath)
+}
+
+func reportStatusCost(summary runner.RunSummary) string {
+	cost := display.FmtCost(summary.Cost)
+	if cost == "" {
+		return "$0.00"
+	}
+	return cost
+}
+
+func reportStatusTokens(summary runner.RunSummary) string {
+	return display.FmtTokens(int64(summary.InputTokens + summary.OutputTokens + summary.CacheReadTokens + summary.CacheWriteTokens))
+}
+
+func writeReportStatusLines(w io.Writer, lines []string, clear bool) {
+	for _, line := range lines {
+		if clear {
+			fmt.Fprintf(w, "\r\033[2K%s\n", line)
+			continue
+		}
+		fmt.Fprintln(w, line)
+	}
+}
+
+func saveReportStatusAnchor(w io.Writer) {
+	fmt.Fprint(w, "\r\033[2K\0337")
+}
+
+func redrawReportStatusLines(w io.Writer, lines []string, previousRows int, width int) int {
+	currentRows := totalVisualRows(lines, width)
+	fmt.Fprint(w, "\0338")
+	if previousRows > 0 {
+		fmt.Fprintf(w, "\033[%dA", previousRows)
+	}
+	fmt.Fprint(w, "\033[J")
+	writeReportStatusLines(w, lines, true)
+	saveReportStatusAnchor(w)
+	return currentRows
+}
+
+func visualRowsForLine(line string, width int) int {
+	if width <= 0 {
+		return 1
+	}
+	runes := len([]rune(line))
+	if runes == 0 {
+		return 1
+	}
+	rows := runes / width
+	if runes%width != 0 {
+		rows++
+	}
+	if rows < 1 {
+		return 1
+	}
+	return rows
+}
+
+func totalVisualRows(lines []string, width int) int {
+	total := 0
+	for _, line := range lines {
+		total += visualRowsForLine(line, width)
+	}
+	return total
+}
+
+func currentReportStatusLines(rows []reportStatusRow) ([]string, int) {
+	width := stdoutWidth()
+	return reportStatusLinesForWidth(rows, width), width
+}
+
+// printReportStatuses prints the report status table.
+func printReportStatuses(rows []reportStatusRow) int {
+	lines, width := currentReportStatusLines(rows)
+	writeReportStatusLines(os.Stdout, lines, false)
+	saveReportStatusAnchor(os.Stdout)
+	return totalVisualRows(lines, width)
+}
+
+func printPlainReportStatuses(rows []reportStatusRow) {
+	writeReportStatusLines(os.Stdout, reportStatusLinesForWidth(rows, 0), false)
+}
+
+// reprintReportStatuses redraws the report status table in place.
+func reprintReportStatuses(rows []reportStatusRow, previousRows int) int {
+	lines, width := currentReportStatusLines(rows)
+	return redrawReportStatusLines(os.Stdout, lines, previousRows, width)
 }

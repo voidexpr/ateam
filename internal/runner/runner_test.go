@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/ateam/internal/agent"
+	"github.com/ateam/internal/calldb"
 )
 
 func TestRunnerWithMockAgent(t *testing.T) {
@@ -147,6 +148,43 @@ func TestRunnerProgress(t *testing.T) {
 	last := phases[len(phases)-1]
 	if last != PhaseDone {
 		t.Errorf("expected last phase 'done', got %q", last)
+	}
+}
+
+func TestRunnerProgressIncludesExecID(t *testing.T) {
+	dir := t.TempDir()
+	logsDir := filepath.Join(dir, "logs")
+	db, err := calldb.Open(filepath.Join(dir, "state.sqlite"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	mock := &agent.MockAgent{Response: "progress test"}
+
+	r := &Runner{
+		Agent:  mock,
+		CallDB: db,
+	}
+
+	opts := RunOpts{
+		RoleID:  "progress-role",
+		Action:  ActionRun,
+		LogsDir: logsDir,
+	}
+
+	progress := make(chan RunProgress, 64)
+	summary := r.Run(context.Background(), "test", opts, progress)
+	close(progress)
+
+	if summary.ExecID <= 0 {
+		t.Fatalf("expected non-zero exec id, got %d", summary.ExecID)
+	}
+
+	for p := range progress {
+		if p.ExecID != summary.ExecID {
+			t.Fatalf("expected progress exec id %d, got %d", summary.ExecID, p.ExecID)
+		}
 	}
 }
 
