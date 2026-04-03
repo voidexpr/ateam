@@ -62,17 +62,19 @@ func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
 		args = append(args, f.TaskGroup)
 	}
 
-	limit := f.Limit
-	if limit <= 0 {
-		limit = 30
-	}
-
 	q := "SELECT " + recentCols + " FROM agent_execs"
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
-	q += " ORDER BY started_at DESC LIMIT ?"
-	args = append(args, limit)
+	q += " ORDER BY started_at DESC"
+	if f.Limit >= 0 {
+		limit := f.Limit
+		if limit == 0 {
+			limit = 30
+		}
+		q += " LIMIT ?"
+		args = append(args, limit)
+	}
 
 	rows, err := c.db.Query(q, args...)
 	if err != nil {
