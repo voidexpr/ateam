@@ -32,7 +32,7 @@
   <main>
     {{.Content}}
   </main>
-  <script>document.addEventListener('click',function(e){var r=e.target.closest('tr[data-href]');if(r)window.location=r.dataset.href})</script>
+  <script>document.addEventListener('click',function(e){var r=e.target.closest('tr[data-href]');if(r){e.preventDefault();window.location.href=r.dataset.href}})</script>
 </body>
 </html>
 {{end}}
