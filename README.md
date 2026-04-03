@@ -239,8 +239,8 @@ See [REFERENCE.md](REFERENCE.md) for full flag documentation, directory layout, 
 ATeam runs unattended agents that must operate safely without constant permission approval. The field is evolving — ATeam supports multiple approaches and will adapt as best practices emerge.
 
 **Why isolation matters:**
-- **Filesystem**: prevent accidental or malicious writes outside the project, reading sensitive files, running unauthorized commands
-- **Network**: prevent data exfiltration (especially combined with filesystem access)
+- **Filesystem**: prevent accidental or malicious writes outside the project, protect access to sensitive files, avoid time wasting configuration breakages
+- **Network**: prevent data exfiltration (especially combined with filesystem access), prevent remote control
 
 **The tradeoff**: stricter restrictions increase safety but can break tools that rely on directories outside the project, Unix sockets (Docker), pipes (tsx), nested sandboxes (Playwright on macOS), or shared `/tmp` directories.
 
