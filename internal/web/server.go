@@ -240,6 +240,9 @@ func (s *Server) ListenAndServe(port int, openBrowser bool) error {
 	mux.HandleFunc("GET /p/{project}/review/history/{file}", s.handleReviewHistory)
 	mux.HandleFunc("GET /p/{project}/sessions", s.handleSessions)
 	mux.HandleFunc("GET /p/{project}/sessions/{taskgroup}", s.handleSessionDetail)
+	mux.HandleFunc("GET /p/{project}/code", s.handleCodeSessions)
+	mux.HandleFunc("GET /p/{project}/code/{session}", s.handleCodeSessionDetail)
+	mux.HandleFunc("GET /p/{project}/code/{session}/{file}", s.handleCodeSessionFile)
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {

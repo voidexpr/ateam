@@ -1,0 +1,40 @@
+{{define "code_sessions.html"}}
+{{$d := .Data}}
+<div class="page-header">
+  <h1>Code Sessions</h1>
+  <p class="subtitle">Coding sessions from supervisor/code/</p>
+</div>
+
+{{if $d.Sessions}}
+<div class="section">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Session</th>
+        <th>Tasks</th>
+        <th>Execution Report</th>
+        <th>Files</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range $d.Sessions}}
+      <tr>
+        <td>
+          {{.DirName}}
+          <div style="font-size:12px;color:var(--text-muted)">{{fmtDateAge .Timestamp}}</div>
+        </td>
+        <td>{{.TaskCount}}</td>
+        <td>{{if .HasReport}}<a href="/p/{{$.ProjectSlug}}/code/{{.DirName}}/execution_report.md">Execution Report</a>{{else}}&mdash;{{end}}</td>
+        <td><a href="/p/{{$.ProjectSlug}}/code/{{.DirName}}">View files</a></td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{else}}
+<div class="empty-state">
+  <h2>No code sessions</h2>
+  <p>Run <code>ateam code</code> to create coding sessions.</p>
+</div>
+{{end}}
+{{end}}
