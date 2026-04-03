@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
@@ -413,13 +414,15 @@ func fitReportLine(line string, width int) string {
 		return line
 	}
 	limit := width - 1
-	runes := []rune(line)
-	if len(runes) <= limit {
+	n := utf8.RuneCountInString(line)
+	if n <= limit {
 		return line
 	}
 	if limit == 1 {
 		return "…"
 	}
+	// Only allocate []rune when truncation is actually needed.
+	runes := []rune(line)
 	return string(runes[:limit-1]) + "…"
 }
 
@@ -532,12 +535,12 @@ func visualRowsForLine(line string, width int) int {
 	if width <= 0 {
 		return 1
 	}
-	runes := len([]rune(line))
-	if runes == 0 {
+	n := utf8.RuneCountInString(line)
+	if n == 0 {
 		return 1
 	}
-	rows := runes / width
-	if runes%width != 0 {
+	rows := n / width
+	if n%width != 0 {
 		rows++
 	}
 	if rows < 1 {
