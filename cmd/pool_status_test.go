@@ -9,10 +9,10 @@ import (
 	"github.com/ateam/internal/runner"
 )
 
-func TestReportStatusLinesIncludeIDColumn(t *testing.T) {
-	lines := reportStatusLinesForWidth([]reportStatusRow{
-		{RoleID: "security", State: "queued"},
-		{ExecID: 42, RoleID: "testing_basic", State: "running", Calls: 3, Detail: "12s  bash"},
+func TestPoolStatusLinesIncludeIDColumn(t *testing.T) {
+	lines := poolStatusLinesForWidth([]poolStatusRow{
+		{Label: "security", State: "queued"},
+		{ExecID: 42, Label: "testing_basic", State: "running", Calls: 3, Detail: "12s  bash"},
 	}, 120)
 
 	if len(lines) != 3 {
@@ -35,8 +35,8 @@ func TestReportStatusLinesIncludeIDColumn(t *testing.T) {
 	}
 }
 
-func TestFitReportLineAvoidsTerminalWrap(t *testing.T) {
-	line := fitReportLine("  1234567 security running a very long detail string", 20)
+func TestFitPoolStatusLineAvoidsTerminalWrap(t *testing.T) {
+	line := fitPoolStatusLine("  1234567 security running a very long detail string", 20)
 	if got := utf8.RuneCountInString(line); got > 19 {
 		t.Fatalf("expected at most 19 runes, got %d in %q", got, line)
 	}
@@ -47,8 +47,8 @@ func TestFitReportLineAvoidsTerminalWrap(t *testing.T) {
 
 func TestDoneStatusPathIsNeverTruncated(t *testing.T) {
 	path := "very/long/path/to/report.md"
-	lines := reportStatusLinesForWidth([]reportStatusRow{
-		{ExecID: 42, RoleID: "testing_basic", State: "done", Calls: 3, Detail: "12:34:56  12s  $0.25  1.2K", Path: path},
+	lines := poolStatusLinesForWidth([]poolStatusRow{
+		{ExecID: 42, Label: "testing_basic", State: "done", Calls: 3, Detail: "12:34:56  12s  $0.25  1.2K", Path: path},
 	}, 12)
 
 	if len(lines) != 3 {
@@ -67,24 +67,24 @@ func TestFormatRunningToolDetail(t *testing.T) {
 	}
 }
 
-func TestNextReportStatusRowDoesNotOverwriteDoneRow(t *testing.T) {
-	row := reportStatusRow{
+func TestNextPoolStatusRowDoesNotOverwriteDoneRow(t *testing.T) {
+	row := poolStatusRow{
 		ExecID: 42,
-		RoleID: "testing_basic",
+		Label:  "testing_basic",
 		State:  "done",
 		Calls:  3,
 		Detail: "12:34:56  12s  $0.25  1.2K",
 		Path:   "reports/testing_basic/report.md",
 	}
 
-	next := nextReportStatusRow(row, runner.RunProgress{
+	next := nextPoolStatusRow(row, runner.RunProgress{
 		ExecID:    42,
 		Phase:     runner.PhaseTool,
 		ToolName:  "Bash",
 		ToolCount: 99,
 	})
 
-	if next.State != reportStateDone {
+	if next.State != poolStateDone {
 		t.Fatalf("expected done state to remain final, got %q", next.State)
 	}
 	if next.Path != "reports/testing_basic/report.md" {
@@ -95,9 +95,9 @@ func TestNextReportStatusRowDoesNotOverwriteDoneRow(t *testing.T) {
 	}
 }
 
-func TestWriteReportStatusBlockRedrawClearsFromColumnZero(t *testing.T) {
+func TestWritePoolStatusBlockRedrawClearsFromColumnZero(t *testing.T) {
 	var buf bytes.Buffer
-	redrawReportStatusLines(&buf, []string{"header", "row"}, 4, 10)
+	redrawPoolStatusLines(&buf, []string{"header", "row"}, 4, 10)
 	got := buf.String()
 
 	if !strings.HasPrefix(got, "\0338\033[4A\033[J") {
