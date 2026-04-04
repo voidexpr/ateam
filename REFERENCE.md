@@ -203,6 +203,46 @@ ateam run @prompt_file.md
 | `--quiet` | Disable both streaming and summary |
 | `--verbose` | Print agent and docker commands to stderr |
 
+### `ateam parallel`
+
+Run multiple agents in parallel, each with its own prompt. All tasks share a single runner instance and task group for unified cost tracking.
+
+```bash
+ateam parallel "analyze auth module" "analyze payment module"
+ateam parallel @task1.md @task2.md @task3.md --labels auth,payment,users
+ateam parallel "task A" "task B" --max-parallel 1 --common-prompt-first @context.md
+ateam parallel "task A" "task B" --dry-run
+```
+
+Each positional argument is a prompt (text or `@filepath`). Tasks run concurrently up to `--max-parallel`, with a live ANSI progress table showing status, tool calls, and elapsed time per task.
+
+| Flag | Description |
+|------|-------------|
+| `--labels LIST` | Comma-separated names for each task (must match prompt count; default: `task-1`, `task-2`, ...) |
+| `--max-parallel N` | Maximum concurrent tasks (default: 3) |
+| `--common-prompt-first TEXT` | Text or `@filepath` prepended to every prompt |
+| `--common-prompt-last TEXT` | Text or `@filepath` appended to every prompt |
+| `--task-group ID` | Custom task group name (default: `parallel-TIMESTAMP`) |
+| `--profile NAME` | Runtime profile |
+| `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
+| `--model MODEL` | Model override |
+| `--work-dir PATH` | Working directory (defaults to project source dir or cwd) |
+| `--timeout MINUTES` | Timeout per task |
+| `--no-progress` | Suppress ANSI progress table (use plain line output) |
+| `--print` | Print task outputs to stdout after completion |
+| `--dry-run` | Print assembled prompts without running |
+| `--verbose` | Print agent and docker commands to stderr |
+| `--force` | Run even if the same action is already running |
+| `--docker-auto-setup` | Auto-setup Docker container if needed |
+
+**Task group**: All tasks are grouped under a single task group (visible in `ateam cost`, `ateam ps`, and `ateam serve`). Use `--task-group` to set a custom name or let it auto-generate as `parallel-TIMESTAMP`.
+
+**Common prompts**: Use `--common-prompt-first` and `--common-prompt-last` to inject shared context. The final prompt for each task is: `common-first + "\n\n" + task-prompt + "\n\n" + common-last`.
+
+**Output**: Progress and status go to stderr. With `--print`, task outputs are printed to stdout in submission order, each preceded by a label header (omitted for single-task runs). This makes it composable with downstream tools.
+
+**Logs**: Each task's logs are stored under `logs/parallel/{label}/` in the project or org directory.
+
 ### `ateam prompt`
 
 Resolve and print the full prompt for a role or supervisor without running it.
