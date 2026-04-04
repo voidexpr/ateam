@@ -16,26 +16,26 @@ import (
 )
 
 var (
-	runManyLabels           []string
-	runManyTaskGroup        string
-	runManyMaxParallel      int
-	runManyNoProgress       bool
-	runManyCommonPromptFirst string
-	runManyCommonPromptLast  string
-	runManyProfile          string
-	runManyAgent            string
-	runManyModel            string
-	runManyWorkDir          string
-	runManyTimeout          int
-	runManyVerbose          bool
-	runManyForce            bool
-	runManyDryRun           bool
-	runManyPrint            bool
-	runManyDockerAutoSetup  bool
+	parallelLabels           []string
+	parallelTaskGroup        string
+	parallelMaxParallel      int
+	parallelNoProgress       bool
+	parallelCommonPromptFirst string
+	parallelCommonPromptLast  string
+	parallelProfile          string
+	parallelAgent            string
+	parallelModel            string
+	parallelWorkDir          string
+	parallelTimeout          int
+	parallelVerbose          bool
+	parallelForce            bool
+	parallelDryRun           bool
+	parallelPrint            bool
+	parallelDockerAutoSetup  bool
 )
 
-var runManyCmd = &cobra.Command{
-	Use:   "run-many PROMPT_OR_@FILE...",
+var parallelCmd = &cobra.Command{
+	Use:   "parallel PROMPT_OR_@FILE...",
 	Short: "Run multiple agents in parallel",
 	Long: `Run multiple agents in parallel, each with its own prompt.
 
@@ -43,32 +43,32 @@ Each positional argument is a prompt (text or @filepath). All tasks share a
 single runner instance and task group for unified cost tracking.
 
 Example:
-  ateam run-many "analyze auth module" "analyze payment module"
-  ateam run-many @task1.md @task2.md @task3.md --labels auth,payment,users
-  ateam run-many "task A" "task B" --max-parallel 1 --common-prompt-first @context.md`,
+  ateam parallel "analyze auth module" "analyze payment module"
+  ateam parallel @task1.md @task2.md @task3.md --labels auth,payment,users
+  ateam parallel "task A" "task B" --max-parallel 1 --common-prompt-first @context.md`,
 	Args: cobra.MinimumNArgs(1),
-	RunE: runRunMany,
+	RunE: runParallel,
 }
 
 func init() {
-	runManyCmd.Flags().StringSliceVar(&runManyLabels, "labels", nil, "names for each task (comma-separated, must match prompt count)")
-	runManyCmd.Flags().StringVar(&runManyTaskGroup, "task-group", "", "group related calls (default: run-many-TIMESTAMP)")
-	runManyCmd.Flags().IntVar(&runManyMaxParallel, "max-parallel", 3, "max parallel tasks")
-	runManyCmd.Flags().BoolVar(&runManyNoProgress, "no-progress", false, "suppress ANSI progress table")
-	runManyCmd.Flags().StringVar(&runManyCommonPromptFirst, "common-prompt-first", "", "text or @filepath to prepend to each prompt")
-	runManyCmd.Flags().StringVar(&runManyCommonPromptLast, "common-prompt-last", "", "text or @filepath to append to each prompt")
-	addProfileFlags(runManyCmd, &runManyProfile, &runManyAgent)
-	runManyCmd.Flags().StringVar(&runManyModel, "model", "", "model override")
-	runManyCmd.Flags().StringVar(&runManyWorkDir, "work-dir", "", "working directory (defaults to project source dir or cwd)")
-	runManyCmd.Flags().IntVar(&runManyTimeout, "timeout", 0, "timeout in minutes per task")
-	addVerboseFlag(runManyCmd, &runManyVerbose)
-	addForceFlag(runManyCmd, &runManyForce)
-	runManyCmd.Flags().BoolVar(&runManyDryRun, "dry-run", false, "print computed prompts without running")
-	runManyCmd.Flags().BoolVar(&runManyPrint, "print", false, "print task outputs to stdout after completion")
-	addDockerAutoSetupFlag(runManyCmd, &runManyDockerAutoSetup)
+	parallelCmd.Flags().StringSliceVar(&parallelLabels, "labels", nil, "names for each task (comma-separated, must match prompt count)")
+	parallelCmd.Flags().StringVar(&parallelTaskGroup, "task-group", "", "group related calls (default: parallel-TIMESTAMP)")
+	parallelCmd.Flags().IntVar(&parallelMaxParallel, "max-parallel", 3, "max parallel tasks")
+	parallelCmd.Flags().BoolVar(&parallelNoProgress, "no-progress", false, "suppress ANSI progress table")
+	parallelCmd.Flags().StringVar(&parallelCommonPromptFirst, "common-prompt-first", "", "text or @filepath to prepend to each prompt")
+	parallelCmd.Flags().StringVar(&parallelCommonPromptLast, "common-prompt-last", "", "text or @filepath to append to each prompt")
+	addProfileFlags(parallelCmd, &parallelProfile, &parallelAgent)
+	parallelCmd.Flags().StringVar(&parallelModel, "model", "", "model override")
+	parallelCmd.Flags().StringVar(&parallelWorkDir, "work-dir", "", "working directory (defaults to project source dir or cwd)")
+	parallelCmd.Flags().IntVar(&parallelTimeout, "timeout", 0, "timeout in minutes per task")
+	addVerboseFlag(parallelCmd, &parallelVerbose)
+	addForceFlag(parallelCmd, &parallelForce)
+	parallelCmd.Flags().BoolVar(&parallelDryRun, "dry-run", false, "print computed prompts without running")
+	parallelCmd.Flags().BoolVar(&parallelPrint, "print", false, "print task outputs to stdout after completion")
+	addDockerAutoSetupFlag(parallelCmd, &parallelDockerAutoSetup)
 }
 
-func runRunMany(cmd *cobra.Command, args []string) error {
+func runParallel(cmd *cobra.Command, args []string) error {
 	resolvedPrompts := make([]string, len(args))
 	for i, arg := range args {
 		p, err := prompts.ResolveValue(arg)
@@ -78,11 +78,11 @@ func runRunMany(cmd *cobra.Command, args []string) error {
 		resolvedPrompts[i] = p
 	}
 
-	commonFirst, err := prompts.ResolveOptional(runManyCommonPromptFirst)
+	commonFirst, err := prompts.ResolveOptional(parallelCommonPromptFirst)
 	if err != nil {
 		return fmt.Errorf("cannot resolve common-prompt-first: %w", err)
 	}
-	commonLast, err := prompts.ResolveOptional(runManyCommonPromptLast)
+	commonLast, err := prompts.ResolveOptional(parallelCommonPromptLast)
 	if err != nil {
 		return fmt.Errorf("cannot resolve common-prompt-last: %w", err)
 	}
@@ -97,7 +97,7 @@ func runRunMany(cmd *cobra.Command, args []string) error {
 		resolvedPrompts[i] = p
 	}
 
-	labels := runManyLabels
+	labels := parallelLabels
 	if len(labels) > 0 {
 		if len(labels) != len(resolvedPrompts) {
 			return fmt.Errorf("--labels count (%d) must match prompt count (%d)", len(labels), len(resolvedPrompts))
@@ -109,7 +109,7 @@ func runRunMany(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if runManyDryRun {
+	if parallelDryRun {
 		for i, p := range resolvedPrompts {
 			if i > 0 {
 				fmt.Println()
@@ -128,8 +128,8 @@ func runRunMany(cmd *cobra.Command, args []string) error {
 	hasProject := env.ProjectDir != "" && env.Config != nil
 
 	workDir := ""
-	if runManyWorkDir != "" {
-		abs, err := filepath.Abs(runManyWorkDir)
+	if parallelWorkDir != "" {
+		abs, err := filepath.Abs(parallelWorkDir)
 		if err != nil {
 			return fmt.Errorf("cannot resolve work-dir: %w", err)
 		}
@@ -140,22 +140,22 @@ func runRunMany(cmd *cobra.Command, args []string) error {
 
 	var r *runner.Runner
 	if hasProject {
-		r, err = resolveRunner(env, runManyProfile, runManyAgent, runner.ActionRunMany, "", runManyDockerAutoSetup)
+		r, err = resolveRunner(env, parallelProfile, parallelAgent, runner.ActionParallel, "", parallelDockerAutoSetup)
 	} else {
-		profile := runManyProfile
-		if profile == "" && runManyAgent == "" {
+		profile := parallelProfile
+		if profile == "" && parallelAgent == "" {
 			profile = "default"
 		}
-		r, err = resolveRunnerMinimal(env.OrgDir, profile, runManyAgent)
+		r, err = resolveRunnerMinimal(env.OrgDir, profile, parallelAgent)
 	}
 	if err != nil {
 		return err
 	}
 	setSourceWritable(r)
 
-	if runManyModel != "" {
+	if parallelModel != "" {
 		if ca, ok := r.Agent.(*agent.ClaudeAgent); ok {
-			ca.Model = runManyModel
+			ca.Model = parallelModel
 		}
 	}
 
@@ -165,13 +165,13 @@ func runRunMany(cmd *cobra.Command, args []string) error {
 		r.CallDB = db
 	}
 
-	taskGroup := runManyTaskGroup
+	taskGroup := parallelTaskGroup
 	if taskGroup == "" {
-		taskGroup = "run-many-" + time.Now().Format(runner.TimestampFormat)
+		taskGroup = "parallel-" + time.Now().Format(runner.TimestampFormat)
 	}
 
-	if !runManyForce {
-		if err := checkConcurrentRuns(db, "", runner.ActionRunMany, nil); err != nil {
+	if !parallelForce {
+		if err := checkConcurrentRuns(db, "", runner.ActionParallel, nil); err != nil {
 			return err
 		}
 	}
@@ -186,30 +186,30 @@ func runRunMany(cmd *cobra.Command, args []string) error {
 		tasks[i] = runner.PoolTask{
 			Prompt: prompt,
 			RunOpts: runner.RunOpts{
-				RoleID:    labels[i],
-				Action:    runner.ActionRunMany,
-				LogsDir:   filepath.Join(baseLogsDir, "logs", "run-many", labels[i]),
-				WorkDir:   workDir,
-				TimeoutMin: runManyTimeout,
-				Verbose:   runManyVerbose,
-				TaskGroup: taskGroup,
-				PromptName: "run_many_prompt.md",
+				RoleID:     labels[i],
+				Action:     runner.ActionParallel,
+				LogsDir:    filepath.Join(baseLogsDir, "logs", "parallel", labels[i]),
+				WorkDir:    workDir,
+				TimeoutMin: parallelTimeout,
+				Verbose:    parallelVerbose,
+				TaskGroup:  taskGroup,
+				PromptName: "parallel_prompt.md",
 			},
 		}
 	}
 
-	maxParallel := runManyMaxParallel
+	maxParallel := parallelMaxParallel
 	if maxParallel <= 0 {
 		maxParallel = 3
 	}
 
 	start := time.Now()
-	fmt.Fprintf(os.Stderr, "Running %d task(s) (max %d parallel)...\n\n", len(tasks), maxParallel)
+	fmt.Fprintf(os.Stderr, "Running %d agent(s) task group %s (max %d parallel)...\n\n", len(tasks), taskGroup, maxParallel)
 
 	cwd, _ := os.Getwd()
 	agentName := r.Agent.Name()
 
-	useTable := isTerminal() && !runManyNoProgress
+	useTable := isTerminal() && !parallelNoProgress
 	var statusRows []poolStatusRow
 	var labelIndex map[string]int
 	var renderedRows int
@@ -297,7 +297,7 @@ func runRunMany(cmd *cobra.Command, args []string) error {
 				succeeded++
 			}
 		}
-		if !runManyPrint {
+		if !parallelPrint {
 			result.Output = ""
 		}
 		results = append(results, result)
@@ -337,8 +337,7 @@ func runRunMany(cmd *cobra.Command, args []string) error {
 	}
 
 	// Print outputs in submission order
-	if runManyPrint && succeeded > 0 {
-		// Build output map keyed by label
+	if parallelPrint && succeeded > 0 {
 		outputByLabel := make(map[string]string, len(results))
 		for _, result := range results {
 			if result.Err == nil {

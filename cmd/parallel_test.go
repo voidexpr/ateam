@@ -14,9 +14,9 @@ import (
 	"github.com/ateam/internal/runner"
 )
 
-func TestRunManyPoolWithMockAgent(t *testing.T) {
+func TestParallelPoolWithMockAgent(t *testing.T) {
 	dir := t.TempDir()
-	mock := &agent.MockAgent{Response: "hello from run-many", Cost: 0.02}
+	mock := &agent.MockAgent{Response: "hello from parallel", Cost: 0.02}
 	r := &runner.Runner{Agent: mock}
 
 	labels := []string{"alpha", "beta", "gamma"}
@@ -26,9 +26,9 @@ func TestRunManyPoolWithMockAgent(t *testing.T) {
 			Prompt: fmt.Sprintf("prompt for %s", label),
 			RunOpts: runner.RunOpts{
 				RoleID:    label,
-				Action:    runner.ActionRunMany,
+				Action:    runner.ActionParallel,
 				LogsDir:   filepath.Join(dir, "logs", label),
-				TaskGroup: "test-run-many-group",
+				TaskGroup: "test-parallel-group",
 			},
 		}
 	}
@@ -52,8 +52,8 @@ func TestRunManyPoolWithMockAgent(t *testing.T) {
 		if s.Err != nil {
 			t.Errorf("unexpected error for %s: %v", s.RoleID, s.Err)
 		}
-		if s.Output != "hello from run-many" {
-			t.Errorf("expected output 'hello from run-many', got %q for %s", s.Output, s.RoleID)
+		if s.Output != "hello from parallel" {
+			t.Errorf("expected output 'hello from parallel', got %q for %s", s.Output, s.RoleID)
 		}
 		if s.Cost != 0.02 {
 			t.Errorf("expected cost 0.02, got %f for %s", s.Cost, s.RoleID)
@@ -76,19 +76,15 @@ func TestRunManyPoolWithMockAgent(t *testing.T) {
 	}
 }
 
-func TestRunManyPoolPartialFailure(t *testing.T) {
+func TestParallelPoolPartialFailure(t *testing.T) {
 	dir := t.TempDir()
 
-	// Use separate mock agents — one succeeds, one fails.
-	// Since RunPool uses a single Runner, we need a custom approach.
-	// Instead, test with a mock that always succeeds but verify error handling
-	// logic by running post-completion classification.
 	successMock := &agent.MockAgent{Response: "ok", Cost: 0.01}
 	r := &runner.Runner{Agent: successMock}
 
 	tasks := []runner.PoolTask{
-		{Prompt: "good", RunOpts: runner.RunOpts{RoleID: "good-task", Action: runner.ActionRunMany, LogsDir: filepath.Join(dir, "logs", "good")}},
-		{Prompt: "also good", RunOpts: runner.RunOpts{RoleID: "good-task-2", Action: runner.ActionRunMany, LogsDir: filepath.Join(dir, "logs", "good2")}},
+		{Prompt: "good", RunOpts: runner.RunOpts{RoleID: "good-task", Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", "good")}},
+		{Prompt: "also good", RunOpts: runner.RunOpts{RoleID: "good-task-2", Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", "good2")}},
 	}
 
 	completedCh := make(chan runner.RunSummary, len(tasks))
@@ -111,15 +107,15 @@ func TestRunManyPoolPartialFailure(t *testing.T) {
 	}
 }
 
-func TestRunManyPoolWithErrors(t *testing.T) {
+func TestParallelPoolWithErrors(t *testing.T) {
 	dir := t.TempDir()
 
 	failMock := &agent.MockAgent{Err: fmt.Errorf("simulated failure")}
 	r := &runner.Runner{Agent: failMock}
 
 	tasks := []runner.PoolTask{
-		{Prompt: "fail1", RunOpts: runner.RunOpts{RoleID: "fail-a", Action: runner.ActionRunMany, LogsDir: filepath.Join(dir, "logs", "fail-a")}},
-		{Prompt: "fail2", RunOpts: runner.RunOpts{RoleID: "fail-b", Action: runner.ActionRunMany, LogsDir: filepath.Join(dir, "logs", "fail-b")}},
+		{Prompt: "fail1", RunOpts: runner.RunOpts{RoleID: "fail-a", Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", "fail-a")}},
+		{Prompt: "fail2", RunOpts: runner.RunOpts{RoleID: "fail-b", Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", "fail-b")}},
 	}
 
 	completedCh := make(chan runner.RunSummary, len(tasks))
@@ -135,14 +131,14 @@ func TestRunManyPoolWithErrors(t *testing.T) {
 	}
 }
 
-func TestRunManyPoolProgressEvents(t *testing.T) {
+func TestParallelPoolProgressEvents(t *testing.T) {
 	dir := t.TempDir()
 	mock := &agent.MockAgent{Response: "progress test"}
 	r := &runner.Runner{Agent: mock}
 
 	tasks := []runner.PoolTask{
-		{Prompt: "p1", RunOpts: runner.RunOpts{RoleID: "prog-1", Action: runner.ActionRunMany, LogsDir: filepath.Join(dir, "logs", "prog-1")}},
-		{Prompt: "p2", RunOpts: runner.RunOpts{RoleID: "prog-2", Action: runner.ActionRunMany, LogsDir: filepath.Join(dir, "logs", "prog-2")}},
+		{Prompt: "p1", RunOpts: runner.RunOpts{RoleID: "prog-1", Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", "prog-1")}},
+		{Prompt: "p2", RunOpts: runner.RunOpts{RoleID: "prog-2", Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", "prog-2")}},
 	}
 
 	progressCh := make(chan runner.RunProgress, 64)
@@ -180,8 +176,7 @@ func TestRunManyPoolProgressEvents(t *testing.T) {
 	}
 }
 
-func TestRunManyPoolStatusIntegration(t *testing.T) {
-	// Test that pool status rows work correctly with run-many labels
+func TestParallelPoolStatusIntegration(t *testing.T) {
 	labels := []string{"auth-check", "payment-check", "user-check"}
 	rows, index := newPoolStatusRows(labels)
 
@@ -203,10 +198,10 @@ func TestRunManyPoolStatusIntegration(t *testing.T) {
 
 	// Simulate progress update
 	rows[0] = nextPoolStatusRow(rows[0], runner.RunProgress{
-		ExecID:    1,
-		RoleID:    "auth-check",
-		Phase:     runner.PhaseInit,
-		Elapsed:   2 * time.Second,
+		ExecID:  1,
+		RoleID:  "auth-check",
+		Phase:   runner.PhaseInit,
+		Elapsed: 2 * time.Second,
 	})
 	if rows[0].State != poolStateRunning {
 		t.Errorf("expected running state after init, got %q", rows[0].State)
@@ -245,7 +240,7 @@ func TestRunManyPoolStatusIntegration(t *testing.T) {
 		t.Errorf("expected done state, got %q", rows[0].State)
 	}
 
-	// Verify done row is terminal — further progress events are ignored
+	// Verify done row is terminal
 	rows[0] = nextPoolStatusRow(rows[0], runner.RunProgress{
 		ExecID: 1,
 		Phase:  runner.PhaseTool,
@@ -255,10 +250,9 @@ func TestRunManyPoolStatusIntegration(t *testing.T) {
 	}
 }
 
-func TestRunManyPoolWithCallDB(t *testing.T) {
+func TestParallelPoolWithCallDB(t *testing.T) {
 	dir := t.TempDir()
 
-	// Set up a real CallDB
 	dbPath := filepath.Join(dir, "state.sqlite")
 	db, err := calldb.Open(dbPath)
 	if err != nil {
@@ -272,7 +266,7 @@ func TestRunManyPoolWithCallDB(t *testing.T) {
 		CallDB: db,
 	}
 
-	taskGroup := "test-run-many-" + time.Now().Format(runner.TimestampFormat)
+	taskGroup := "test-parallel-" + time.Now().Format(runner.TimestampFormat)
 	labels := []string{"task-a", "task-b"}
 	tasks := make([]runner.PoolTask, len(labels))
 	for i, label := range labels {
@@ -280,7 +274,7 @@ func TestRunManyPoolWithCallDB(t *testing.T) {
 			Prompt: fmt.Sprintf("prompt for %s", label),
 			RunOpts: runner.RunOpts{
 				RoleID:    label,
-				Action:    runner.ActionRunMany,
+				Action:    runner.ActionParallel,
 				LogsDir:   filepath.Join(dir, "logs", label),
 				TaskGroup: taskGroup,
 			},
@@ -289,8 +283,7 @@ func TestRunManyPoolWithCallDB(t *testing.T) {
 
 	runner.RunPool(context.Background(), r, tasks, 2, nil, nil)
 
-	// Verify runs are tracked in CallDB
-	rows, err := db.RecentRuns(calldb.RecentFilter{Action: "run-many", Limit: 10})
+	rows, err := db.RecentRuns(calldb.RecentFilter{Action: "parallel", Limit: 10})
 	if err != nil {
 		t.Fatalf("RecentRuns: %v", err)
 	}
@@ -298,27 +291,25 @@ func TestRunManyPoolWithCallDB(t *testing.T) {
 		t.Fatalf("expected 2 DB rows, got %d", len(rows))
 	}
 
-	// Verify task group
 	for _, row := range rows {
 		if row.TaskGroup != taskGroup {
 			t.Errorf("expected task group %q, got %q", taskGroup, row.TaskGroup)
 		}
-		if row.Action != "run-many" {
-			t.Errorf("expected action 'run-many', got %q", row.Action)
+		if row.Action != "parallel" {
+			t.Errorf("expected action 'parallel', got %q", row.Action)
 		}
 	}
 
-	// Verify cost tracking
 	aggs, err := db.CostByAction("")
 	if err != nil {
 		t.Fatalf("CostByAction: %v", err)
 	}
 	var found bool
 	for _, agg := range aggs {
-		if agg.Category == "run-many" {
+		if agg.Category == "parallel" {
 			found = true
 			if agg.Count != 2 {
-				t.Errorf("expected count 2 for run-many, got %d", agg.Count)
+				t.Errorf("expected count 2 for parallel, got %d", agg.Count)
 			}
 			if agg.CostUSD < 0.05 {
 				t.Errorf("expected total cost >= 0.05, got %f", agg.CostUSD)
@@ -326,14 +317,13 @@ func TestRunManyPoolWithCallDB(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("expected run-many category in cost aggregation")
+		t.Error("expected parallel category in cost aggregation")
 	}
 }
 
-func TestRunManyPoolSequentialExecution(t *testing.T) {
+func TestParallelPoolSequentialExecution(t *testing.T) {
 	dir := t.TempDir()
 
-	// Use a small delay to verify sequential execution with maxParallel=1
 	mock := &agent.MockAgent{Response: "sequential", Delay: 10 * time.Millisecond}
 	r := &runner.Runner{Agent: mock}
 
@@ -341,7 +331,7 @@ func TestRunManyPoolSequentialExecution(t *testing.T) {
 	for i := range tasks {
 		tasks[i] = runner.PoolTask{
 			Prompt:  fmt.Sprintf("seq-%d", i),
-			RunOpts: runner.RunOpts{RoleID: fmt.Sprintf("seq-%d", i), Action: runner.ActionRunMany, LogsDir: filepath.Join(dir, "logs", fmt.Sprintf("seq-%d", i))},
+			RunOpts: runner.RunOpts{RoleID: fmt.Sprintf("seq-%d", i), Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", fmt.Sprintf("seq-%d", i))},
 		}
 	}
 
@@ -365,7 +355,7 @@ func TestRunManyPoolSequentialExecution(t *testing.T) {
 	}
 }
 
-func TestRunManyPoolOutputCollection(t *testing.T) {
+func TestParallelPoolOutputCollection(t *testing.T) {
 	dir := t.TempDir()
 	mock := &agent.MockAgent{Response: "collected output"}
 	r := &runner.Runner{Agent: mock}
@@ -375,14 +365,13 @@ func TestRunManyPoolOutputCollection(t *testing.T) {
 	for i, label := range labels {
 		tasks[i] = runner.PoolTask{
 			Prompt:  fmt.Sprintf("prompt %s", label),
-			RunOpts: runner.RunOpts{RoleID: label, Action: runner.ActionRunMany, LogsDir: filepath.Join(dir, "logs", label)},
+			RunOpts: runner.RunOpts{RoleID: label, Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", label)},
 		}
 	}
 
 	completedCh := make(chan runner.RunSummary, len(tasks))
 	runner.RunPool(context.Background(), r, tasks, 3, nil, completedCh)
 
-	// Collect results keyed by label, like runRunMany does
 	outputByLabel := make(map[string]string)
 	for s := range completedCh {
 		if s.Err == nil {
@@ -390,7 +379,6 @@ func TestRunManyPoolOutputCollection(t *testing.T) {
 		}
 	}
 
-	// Verify all outputs collected
 	for _, label := range labels {
 		output, ok := outputByLabel[label]
 		if !ok {
@@ -403,10 +391,9 @@ func TestRunManyPoolOutputCollection(t *testing.T) {
 	}
 }
 
-func TestRunManyPoolContextCancellation(t *testing.T) {
+func TestParallelPoolContextCancellation(t *testing.T) {
 	dir := t.TempDir()
 
-	// Use a long delay so we can cancel
 	mock := &agent.MockAgent{Response: "slow", Delay: 5 * time.Second}
 	r := &runner.Runner{Agent: mock}
 
@@ -414,7 +401,7 @@ func TestRunManyPoolContextCancellation(t *testing.T) {
 	for i := range tasks {
 		tasks[i] = runner.PoolTask{
 			Prompt:  "slow task",
-			RunOpts: runner.RunOpts{RoleID: fmt.Sprintf("cancel-%d", i), Action: runner.ActionRunMany, LogsDir: filepath.Join(dir, "logs", fmt.Sprintf("cancel-%d", i))},
+			RunOpts: runner.RunOpts{RoleID: fmt.Sprintf("cancel-%d", i), Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", fmt.Sprintf("cancel-%d", i))},
 		}
 	}
 
@@ -425,12 +412,10 @@ func TestRunManyPoolContextCancellation(t *testing.T) {
 	results := runner.RunPool(ctx, r, tasks, 3, nil, nil)
 	elapsed := time.Since(start)
 
-	// Should complete quickly due to cancellation, not wait 5s
 	if elapsed > 2*time.Second {
 		t.Errorf("cancellation took too long: %v", elapsed)
 	}
 
-	// All results should have errors
 	for _, s := range results {
 		if s.Err == nil {
 			t.Errorf("expected error from cancelled task %s", s.RoleID)
@@ -438,7 +423,7 @@ func TestRunManyPoolContextCancellation(t *testing.T) {
 	}
 }
 
-func TestRunManyTaskGroupInDB(t *testing.T) {
+func TestParallelTaskGroupInDB(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "state.sqlite")
 	db, err := calldb.Open(dbPath)
@@ -450,15 +435,14 @@ func TestRunManyTaskGroupInDB(t *testing.T) {
 	mock := &agent.MockAgent{Response: "grouped"}
 	r := &runner.Runner{Agent: mock, CallDB: db}
 
-	taskGroup := "run-many-2026-04-03_12-00-00"
+	taskGroup := "parallel-2026-04-03_12-00-00"
 	tasks := []runner.PoolTask{
-		{Prompt: "g1", RunOpts: runner.RunOpts{RoleID: "grp-1", Action: runner.ActionRunMany, LogsDir: filepath.Join(dir, "logs", "grp-1"), TaskGroup: taskGroup}},
-		{Prompt: "g2", RunOpts: runner.RunOpts{RoleID: "grp-2", Action: runner.ActionRunMany, LogsDir: filepath.Join(dir, "logs", "grp-2"), TaskGroup: taskGroup}},
+		{Prompt: "g1", RunOpts: runner.RunOpts{RoleID: "grp-1", Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", "grp-1"), TaskGroup: taskGroup}},
+		{Prompt: "g2", RunOpts: runner.RunOpts{RoleID: "grp-2", Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", "grp-2"), TaskGroup: taskGroup}},
 	}
 
 	runner.RunPool(context.Background(), r, tasks, 2, nil, nil)
 
-	// Query by task group
 	tgRows, err := db.CostByTaskGroup("")
 	if err != nil {
 		t.Fatalf("CostByTaskGroup: %v", err)
@@ -471,8 +455,8 @@ func TestRunManyTaskGroupInDB(t *testing.T) {
 			if row.Count != 2 {
 				t.Errorf("expected count 2 for task group, got %d", row.Count)
 			}
-			if row.Action != "run-many" {
-				t.Errorf("expected action 'run-many', got %q", row.Action)
+			if row.Action != "parallel" {
+				t.Errorf("expected action 'parallel', got %q", row.Action)
 			}
 		}
 	}
@@ -480,8 +464,7 @@ func TestRunManyTaskGroupInDB(t *testing.T) {
 		t.Errorf("task group %q not found in CostByTaskGroup results", taskGroup)
 	}
 
-	// Verify LatestTaskGroup works
-	latest, err := db.LatestTaskGroup("", "run-many-")
+	latest, err := db.LatestTaskGroup("", "parallel-")
 	if err != nil {
 		t.Fatalf("LatestTaskGroup: %v", err)
 	}
@@ -490,17 +473,15 @@ func TestRunManyTaskGroupInDB(t *testing.T) {
 	}
 }
 
-func TestRunManyPoolStatusRendering(t *testing.T) {
+func TestParallelPoolStatusRendering(t *testing.T) {
 	labels := []string{"task-1", "task-2"}
 	rows, _ := newPoolStatusRows(labels)
 
-	// Verify header includes LABEL column
 	lines := poolStatusLinesForWidth(rows, 120)
 	if !strings.Contains(lines[0], "LABEL") {
 		t.Errorf("expected LABEL in header, got %q", lines[0])
 	}
 
-	// Verify labels appear in output
 	if !strings.Contains(lines[1], "task-1") {
 		t.Errorf("expected task-1 in row 1, got %q", lines[1])
 	}

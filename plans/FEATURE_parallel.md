@@ -1,8 +1,8 @@
-# Plan: `ateam run-many` command
+# Plan: `ateam parallel` command
 
 ## Context
 
-`ateam run` executes a single agent with one prompt. There's no way to run multiple independent agents in parallel from the CLI. The `report` command does run agents in parallel, but it's tightly coupled to role-based report generation. We need a generic parallel runner — `ateam run-many` — that accepts N prompts and runs them concurrently, reusing the existing `RunPool` engine and progress display infrastructure.
+`ateam run` executes a single agent with one prompt. There's no way to run multiple independent agents in parallel from the CLI. The `report` command does run agents in parallel, but it's tightly coupled to role-based report generation. We need a generic parallel runner — `ateam parallel` — that accepts N prompts and runs them concurrently, reusing the existing `RunPool` engine and progress display infrastructure.
 
 The user wants this to be a unix-style building block: simple, composable, pipe-friendly. No orchestration agent, no auto-retry, no JSON spec — those can be added later if needed.
 
@@ -14,7 +14,7 @@ The user wants this to be a unix-style building block: simple, composable, pipe-
 | `--common-prompt-first/last FILE` | **Include** | Prepend/append shared context to each prompt. Simple `os.ReadFile` + concat. |
 | `--max-parallel N` | **Include** | Already in `RunPool`. Default: 3. |
 | `--no-progress` | **Include** | Suppress ANSI table for CI/non-TTY. |
-| `--task-group` | **Include** | Already in `RunOpts`. Auto: `run-many-TIMESTAMP`. |
+| `--task-group` | **Include** | Already in `RunOpts`. Auto: `parallel-TIMESTAMP`. |
 | Shared flags (`--profile`, `--agent`, `--model`, `--work-dir`, `--timeout`, `--verbose`, `--force`, `--docker-auto-setup`) | **Include** | Reuse existing flag helpers from `table.go` and `run.go`. |
 | Manager agent | **Skip** | Adds costly LLM layer for pure task dispatch. Pipeline chaining is simpler. |
 | Auto-diagnose / `--retry` | **Skip** | Hard to distinguish transient vs permanent failures. Additive later. |
@@ -55,7 +55,7 @@ The ANSI progress table in `report.go` (~230 lines) is reusable. Extract into `c
 
 Also move to `cmd/pool_status.go`: the terminal files (`report_terminal_unix.go`, `report_terminal_windows.go`) keep their names but rename to `pool_terminal_unix.go` / `pool_terminal_windows.go` since they contain `stdoutWidth` and `subscribeWindowResize` which are generic.
 
-**`report.go` changes**: Remove all extracted code. `runReport` calls the pool status functions with new names. The `doneReportStatusRow` wrapper passes `relPath(cwd, reportPath)` as the `Path` field — this stays inline in `report.go` as a 1-line call to `donePoolStatusRow`.
+**`report.go` changes**: Remove all extracted code. `runReport` calls the pool status functions with new names. The `donePoolStatusRow` wrapper passes `relPath(cwd, reportPath)` as the `Path` field — this stays inline in `report.go` as a 1-line call to `donePoolStatusRow`.
 
 **Move tests**: `report_test.go` tests that test pool status functions move to `cmd/pool_status_test.go` with renamed types.
 
@@ -66,17 +66,17 @@ Also move to `cmd/pool_status.go`: the terminal files (`report_terminal_unix.go`
 - Rename: `cmd/report_terminal_windows.go` → `cmd/pool_terminal_windows.go`
 - Modify: `cmd/report.go` — remove extracted code, use new names
 
-### Step 2: Create `cmd/run_many.go`
+### Step 2: Create `cmd/parallel.go`
 
 New cobra command:
 
 ```
-Use:   "run-many PROMPT_OR_@FILE..."
+Use:   "parallel PROMPT_OR_@FILE..."
 Short: "Run multiple agents in parallel"
 Args:  cobra.MinimumNArgs(1)
 ```
 
-**`runRunMany` flow**:
+**`runParallel` flow**:
 
 1. Resolve each positional arg via `prompts.ResolveValue(arg)` (handles `@file`)
 2. Read `--common-prompt-first` / `--common-prompt-last` files, prepend/append to each prompt
@@ -85,11 +85,11 @@ Args:  cobra.MinimumNArgs(1)
 5. Build runner: `resolveRunner` (with project) or `resolveRunnerMinimal` (without), same as `run.go`
 6. Apply `--model` override (same pattern as `run.go`)
 7. Open CallDB via `openProjectDB(env)`
-8. Generate task group: `run-many-TIMESTAMP` unless `--task-group` provided
-9. Logs dir: `{projectDir|orgDir}/logs/run-many/{label}/` per task
+8. Generate task group: `parallel-TIMESTAMP` unless `--task-group` provided
+9. Logs dir: `{projectDir|orgDir}/logs/parallel/{label}/` per task
 10. Build `[]runner.PoolTask` — use label as `RoleID` for progress tracking (RoleID is just a string identifier, `run.go` already allows empty/arbitrary values)
 11. If `--dry-run`: print each prompt labeled, return
-12. If `--force` not set: `checkConcurrentRuns` for action `run-many`
+12. If `--force` not set: `checkConcurrentRuns` for action `parallel`
 13. Call `runner.RunPool` in goroutine with progress/completed channels
 14. Progress display: ANSI table via `poolStatusRow` (TTY + no `--no-progress`), else `printProgress` from `run.go` (already handles multi-task via `[label]` prefix)
 15. On completion: update status rows, collect results
@@ -121,11 +121,11 @@ Args:  cobra.MinimumNArgs(1)
 
 ### Step 3: Register in `cmd/root.go`
 
-Add `rootCmd.AddCommand(runManyCmd)` to `init()`.
+Add `rootCmd.AddCommand(parallelCmd)` to `init()`.
 
-### Step 4: Add `runner.ActionRunMany` constant
+### Step 4: Add `runner.ActionParallel` constant
 
-In `internal/runner/runner.go`, add `ActionRunMany = "run-many"` alongside existing `ActionReport`, `ActionRun`, etc.
+In `internal/runner/runner.go`, add `ActionParallel = "parallel"` alongside existing `ActionReport`, `ActionRun`, etc.
 
 ## Key files
 
@@ -137,9 +137,9 @@ In `internal/runner/runner.go`, add `ActionRunMany = "run-many"` alongside exist
 | `cmd/pool_terminal_windows.go` | Rename from `report_terminal_windows.go` |
 | `cmd/report.go` | Modify — remove extracted code, use pool_status |
 | `cmd/report_test.go` | Modify — remove moved tests |
-| `cmd/run_many.go` | Create (~250 lines) |
-| `cmd/root.go` | Modify — add `runManyCmd` |
-| `internal/runner/runner.go` | Modify — add `ActionRunMany` constant |
+| `cmd/parallel.go` | Create (~250 lines) |
+| `cmd/root.go` | Modify — add `parallelCmd` |
+| `internal/runner/runner.go` | Modify — add `ActionParallel` constant |
 
 ## Reused functions (no changes needed)
 
@@ -154,22 +154,22 @@ In `internal/runner/runner.go`, add `ActionRunMany = "run-many"` alongside exist
 - `runner.StreamTailError` — error tail extraction
 - `runner.FormatDuration` — duration formatting
 
-## Discussion: `run-many` vs GNU parallel
+## Discussion: `ateam parallel` vs GNU parallel
 
-### Why not just `parallel`?
+### Why not just GNU `parallel`?
 
 You can already do this today:
 ```sh
 parallel -j3 ateam run ::: "prompt1" "prompt2" "prompt3"
 ```
 
-This works and gives you GNU parallel's full feature set (job slots, retries, `--halt`, `--joblog`, `--results`, etc.). So is `run-many` worth building?
+This works and gives you GNU parallel's full feature set (job slots, retries, `--halt`, `--joblog`, `--results`, etc.). So is `ateam parallel` worth building?
 
-**What `run-many` adds over `parallel ateam run`:**
+**What `ateam parallel` adds over `parallel ateam run`:**
 
-| Capability | `parallel` | `run-many` |
+| Capability | GNU `parallel` | `ateam parallel` |
 |-----------|-----------|------------|
-| Shared task group for cost tracking | Manual (`--task-group` per invocation, must coordinate) | Automatic — all tasks share one `run-many-TIMESTAMP` group |
+| Shared task group for cost tracking | Manual (`--task-group` per invocation, must coordinate) | Automatic — all tasks share one `parallel-TIMESTAMP` group |
 | Live ANSI progress table | No — each process writes to its own stderr | Yes — unified table showing all tasks, tool calls, elapsed time |
 | Shared runner/container setup | N separate processes, N container builds | One runner, one container build, N tasks |
 | CallDB integration | N separate DB connections | One connection, proper grouping |
@@ -177,19 +177,19 @@ This works and gives you GNU parallel's full feature set (job slots, retries, `-
 | Common prompt injection | Requires shell scripting | `--common-prompt-first/last` |
 | Output collection | `--results` dir or manual | Ordered stdout with labels |
 
-The strongest arguments for `run-many`:
-1. **Task group integration** — the ateam cost/serve/inspect tools understand task groups. With `parallel`, you'd need to manually coordinate `--task-group` across N invocations and they'd still be separate DB rows with no batch identity.
+The strongest arguments for `ateam parallel`:
+1. **Task group integration** — the ateam cost/serve/inspect tools understand task groups. With GNU `parallel`, you'd need to manually coordinate `--task-group` across N invocations and they'd still be separate DB rows with no batch identity.
 2. **Single runner instance** — avoids N×container setup, N×DB connections, N×config resolution. Meaningful for Docker profiles.
 3. **Progress display** — the ANSI table showing all tasks simultaneously is a much better UX than N interleaved stderr streams.
 
 The argument against:
-- It's ~250 lines of new code for something `parallel` mostly handles. If you don't care about task grouping or the progress table, `parallel` is fine.
+- It's ~250 lines of new code for something GNU `parallel` mostly handles. If you don't care about task grouping or the progress table, GNU `parallel` is fine.
 
 ### GNU parallel features worth considering (later)
 
 | `parallel` feature | Worth copying? | Notes |
 |-------------------|---------------|-------|
-| `--halt now,fail=1` / `--halt soon,fail=30%` | **Maybe later** | Useful for fail-fast. Currently `run-many` waits for all tasks. Could add `--halt-on-failure` flag. |
+| `--halt now,fail=1` / `--halt soon,fail=30%` | **Maybe later** | Useful for fail-fast. Currently `ateam parallel` waits for all tasks. Could add `--halt-on-failure` flag. |
 | `--joblog FILE` | **No** | CallDB already tracks this better (cost, tokens, duration, streams). |
 | `--retry N` | **Maybe later** | Already discussed as a deferred feature. |
 | `--results DIR` | **No** | `RunOpts.LastMessageFilePath` already saves outputs per task. |
@@ -201,13 +201,13 @@ The argument against:
 
 ### Verdict
 
-`run-many` is worth building. The integration with ateam's task group system, progress display, and shared runner setup is the value — not the parallelism itself. GNU parallel solves the process-level parallelism but can't provide the ateam-aware coordination. The implementation cost is low (~250 new lines, ~280 moved lines) because the infrastructure already exists.
+`ateam parallel` is worth building. The integration with ateam's task group system, progress display, and shared runner setup is the value — not the parallelism itself. GNU parallel solves the process-level parallelism but can't provide the ateam-aware coordination. The implementation cost is low (~250 new lines, ~280 moved lines) because the infrastructure already exists.
 
 ## Verification
 
 1. `make build` — compiles
 2. `make test` — all tests pass (pool_status_test.go, report tests still work)
-3. Manual: `ateam run-many "say hello" "say goodbye" --labels greet,farewell --dry-run`
-4. Manual: `ateam run-many "say hello" "say goodbye" --max-parallel 1` — verify sequential execution, progress display, summary
-5. Manual: `ateam run-many "say hello" --no-progress` — verify plain output
+3. Manual: `ateam parallel "say hello" "say goodbye" --labels greet,farewell --dry-run`
+4. Manual: `ateam parallel "say hello" "say goodbye" --max-parallel 1` — verify sequential execution, progress display, summary
+5. Manual: `ateam parallel "say hello" --no-progress` — verify plain output
 6. `ateam report` — verify still works identically after refactor
