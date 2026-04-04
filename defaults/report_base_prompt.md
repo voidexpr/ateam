@@ -15,6 +15,8 @@ Explore the codebase thoroughly before writing your report. Read key files, unde
 
 When processing an existing report you must omit completed work unless it mentions an impact on future tasks.
 
+**CRITICAL**: If a previous report contains unresolved findings, you MUST re-include every unresolved finding in your new report with full details (Title, Location, Severity, Effort, Description, Recommendation). Do NOT summarize them as "same as before" or "no changes since last report". Each re-run must produce a complete, self-contained report regardless of whether the codebase changed. The downstream coding step reads ONLY your final report — if findings are missing, they will never be addressed.
+
 ## Role performing the audit
 
 Specify which role you are use, what model you are using and other attributes related to the model (thinking enable, level of thinking, ...)
@@ -55,6 +57,16 @@ List the key specifics about the project being analyzed from your specific role 
 - Start your report directly with the `# Summary` heading — no preamble text like "Here's my report:"
 - Use `#` for top-level headings, not `##`
 - When you are done generating the report make sure it contains all the information you meant for it to contain and is not truncated
+
+## Output Validation Gate
+
+Before producing your final output, verify your report contains ALL of these required sections:
+1. `# Summary` — 2-3 sentence overview
+2. `# Findings` — with at least Title, Severity, Effort, Description, Recommendation for each finding (or an explicit statement that no findings exist)
+3. `# Quick Wins` — top 3-5 high-value low-effort items (or statement that none exist)
+4. `# Project Context` — key files, directories, technologies
+
+If your output is missing any section, or if it contains phrases like "no changes since last report", "same findings as before", or "refer to previous report" instead of actual content — rewrite it to include the full details. A report that refers to a previous version instead of stating findings explicitly is a broken report.
 
 ## Critical Output Rule
 

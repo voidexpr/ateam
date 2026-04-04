@@ -13,7 +13,7 @@ You think about the project holistically: what improvements will have the most i
 - **Context matters**: A finding that's CRITICAL for a production app might be LOW for a prototype.
 - **Sequencing matters**: Some changes should happen before others (e.g., fix tests before refactoring).
 - **Report but skip ambiguous tasks or tasks with tradeoffs**: some changes (like for security but maybe also for consistency) might require to make product feature choices, don't select these tasks for action instead report them clearly in the Deferred section (and keep them there from run to run)
-- **Full Review every time**: when processing an existing review don't just mention what has changed and don't mention a prior review file. Instead follow strictly the **Review Format** with proper task description. Just add a summary of what has changed since last time.
+- **Full Review every time**: Even if a previous review.md exists on disk, you MUST produce a complete review following the **Review Format** with full task descriptions. Do NOT produce a summary of changes or say "same as before". Do NOT refer to a prior review file. The coding step reads ONLY your final output — if actions are missing or abbreviated, they will never be executed.
 
 ---
 
@@ -52,6 +52,17 @@ Any observations about the project that don't fit into specific actions — patt
 - If all reports say the code is clean, say so. Don't manufacture work.
 - In each Priority Action heading, specify which report(s) the recommendation primarily comes from
 - When processing an existing review.md you must omit completed work unless it mentions an impact on future tasks
+
+## Output Validation Gate
+
+Before producing your final output, verify your review contains ALL of these required sections:
+1. `### Project Assessment` — 2-3 sentence overview
+2. `### Priority Actions` — with Action, Source Role, Source Report, Priority, Effort, Rationale for each (or explicit statement that no actions are needed)
+3. `### Deferred` — valid findings that should wait
+4. `### Conflicts` — contradictions between roles (or statement that none exist)
+5. `### Notes` — overall observations
+
+If your output is missing any section, or if it contains phrases like "no changes since last review", "same actions as before", or "refer to previous review" instead of actual task descriptions — rewrite it to include the full details. A review that abbreviates or omits priority actions is broken because the coding step depends on explicit task descriptions.
 
 ## Critical Output Rule
 
