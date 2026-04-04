@@ -20,11 +20,12 @@ import (
 const (
 	TimestampFormat = "2006-01-02_15-04-05"
 
-	ActionReport = "report"
-	ActionRun    = "run"
-	ActionCode   = "code"
-	ActionReview = "review"
-	ActionDebug  = "debug"
+	ActionReport  = "report"
+	ActionRun     = "run"
+	ActionRunMany = "run-many"
+	ActionCode    = "code"
+	ActionReview  = "review"
+	ActionDebug   = "debug"
 )
 
 // Runner orchestrates agent execution with logging, file I/O, and progress reporting.
