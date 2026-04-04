@@ -218,7 +218,7 @@ Each positional argument is a prompt (text or `@filepath`). Tasks run concurrent
 
 | Flag | Description |
 |------|-------------|
-| `--labels LIST` | Comma-separated names for each task (must match prompt count; default: `task-1`, `task-2`, ...) |
+| `--labels LIST` | Comma-separated names for each task (must match prompt count; default: `agent-1`, `agent-2`, ...) |
 | `--max-parallel N` | Maximum concurrent tasks (default: 3) |
 | `--common-prompt-first TEXT` | Text or `@filepath` prepended to every prompt |
 | `--common-prompt-last TEXT` | Text or `@filepath` appended to every prompt |

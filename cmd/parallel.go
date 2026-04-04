@@ -105,7 +105,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	} else {
 		labels = make([]string, len(resolvedPrompts))
 		for i := range labels {
-			labels[i] = fmt.Sprintf("task-%d", i+1)
+			labels[i] = fmt.Sprintf("agent-%d", i+1)
 		}
 	}
 
@@ -204,7 +204,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	}
 
 	start := time.Now()
-	fmt.Fprintf(os.Stderr, "Running %d agent(s) task group %s (max %d parallel)...\n\n", len(tasks), taskGroup, maxParallel)
+	fmt.Fprintf(os.Stderr, "Running %d agent(s) task group: %s (max %d parallel)...\n\n", len(tasks), taskGroup, maxParallel)
 
 	cwd, _ := os.Getwd()
 	agentName := r.Agent.Name()
