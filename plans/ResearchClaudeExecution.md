@@ -44,6 +44,61 @@ claude setup-token
 
 This command runs the OAuth flow with `inferenceOnly: true` and `expiresIn: 31536000` (1 year). The resulting token is designed for CI/automation with `-p` mode. It cannot be used for interactive sessions or Remote Control.
 
+### Bootstrapping Interactive Sessions via Refresh Token
+
+Claude Code supports bootstrapping full-scope interactive credentials from a refresh token, without a browser. This is the recommended way to set up interactive sessions in containers.
+
+**Env vars:**
+```bash
+CLAUDE_CODE_OAUTH_REFRESH_TOKEN="<refreshToken>"
+CLAUDE_CODE_OAUTH_SCOPES="user:profile user:inference"
+```
+
+When Claude Code starts with these set, it exchanges the refresh token for a fresh access token, stores full-scope credentials in `~/.claude/.credentials.json`, prints "Login successful.", and the session is immediately interactive — no browser needed. Remote Control also works.
+
+**Credentials file format** (what gets written to `.credentials.json`):
+```json
+{
+  "claudeAiOauth": {
+    "accessToken": "...",
+    "refreshToken": "...",
+    "expiresAt": 1234567890,
+    "scopes": "user:profile user:inference",
+    "subscriptionType": "pro",
+    "rateLimitTier": null
+  }
+}
+```
+
+**Practical flow:**
+
+1. Do a browser-based interactive login once (in any container with a persistent volume):
+   ```bash
+   ./test/docker-auth/start.sh --name login-once --interactive
+   # inside: claude → complete browser login → exit
+   ```
+
+2. Extract the refresh token:
+   ```bash
+   ./test/docker-auth/extract-refresh-token.sh --volume claude-login-once
+   # or from a running container:
+   ./test/docker-auth/extract-refresh-token.sh --container login-once
+   ```
+
+3. Store it in ateam secrets:
+   ```bash
+   ./test/docker-auth/extract-refresh-token.sh --volume claude-login-once \
+     | ateam secret CLAUDE_CODE_OAUTH_REFRESH_TOKEN --set
+   ```
+
+4. Any fresh container can now bootstrap interactive sessions:
+   ```bash
+   ./test/docker-auth/start.sh --name fresh-session --login --interactive
+   # Claude auto-authenticates using the refresh token, no browser needed
+   ```
+
+This is better than volume mounting because the refresh token is a single string, portable across any container, and stored securely in ateam's secret system.
+
 ## `-p` (Print/Pipe) Mode vs Interactive Mode
 
 ### `-p` mode (headless)
@@ -157,8 +212,8 @@ Key fields relevant to auth and execution:
 | `ANTHROPIC_API_KEY` | API key for direct API billing (highest auth priority) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Long-lived inference-only OAuth token (from `claude setup-token`) |
 | `CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR` | Read OAuth token from a file descriptor |
-| `CLAUDE_CODE_OAUTH_REFRESH_TOKEN` | OAuth refresh token (requires `CLAUDE_CODE_OAUTH_SCOPES`) |
-| `CLAUDE_CODE_OAUTH_SCOPES` | Required with `CLAUDE_CODE_OAUTH_REFRESH_TOKEN` |
+| `CLAUDE_CODE_OAUTH_REFRESH_TOKEN` | OAuth refresh token — bootstraps full-scope interactive credentials on startup without browser login. Requires `CLAUDE_CODE_OAUTH_SCOPES`. |
+| `CLAUDE_CODE_OAUTH_SCOPES` | Space-separated scopes for refresh token bootstrap (e.g., `"user:profile user:inference"`) |
 | `CLAUDE_CODE_OAUTH_CLIENT_ID` | Custom OAuth client ID |
 | `CLAUDE_CODE_CUSTOM_OAUTH_URL` | Custom OAuth server URL |
 | `ANTHROPIC_AUTH_TOKEN` | Alternative auth token (lower priority than API key) |
@@ -254,7 +309,32 @@ In Linux Docker containers (no OS keychain), credentials go to files:
 | `.claude.json` | Install state (userID, migrations) | **Yes** — without it, Claude runs onboarding |
 | `settings.json` | Permissions config | Recommended |
 
-### Option A: Named Docker Volume (recommended)
+### Option A: Refresh Token Bootstrap (recommended)
+
+Store the refresh token from a one-time browser login in ateam secrets. Any new container can bootstrap full-scope credentials instantly:
+
+```bash
+# One-time: extract from an authenticated container and store
+./test/docker-auth/extract-refresh-token.sh --volume claude-login | ateam secret CLAUDE_CODE_OAUTH_REFRESH_TOKEN --set
+
+# Any new container: auto-authenticates on startup
+docker run --rm -it \
+    -e "CLAUDE_CODE_OAUTH_REFRESH_TOKEN=$(ateam secret CLAUDE_CODE_OAUTH_REFRESH_TOKEN --get)" \
+    -e "CLAUDE_CODE_OAUTH_SCOPES=user:profile user:inference" \
+    ateam-auth-test claude
+```
+
+With ateam `runtime.hcl`:
+```hcl
+container "docker" {
+  forward_env = ["CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "CLAUDE_CODE_OAUTH_SCOPES", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
+}
+```
+
+**Pros:** No volume needed, portable, stored securely in ateam secrets, works for interactive AND `-p` mode.
+**Cons:** Refresh token eventually expires (rare). Need to re-login and re-extract when it does.
+
+### Option B: Named Docker Volume
 
 ```bash
 docker volume create claude-config
@@ -290,7 +370,7 @@ Authenticating in container A and reusing credentials in container B **does work
 
 The tokens auto-refresh via `refreshToken`. This works until the refresh token expires (rare). See `test/docker-auth/` for scripts that automate this flow.
 
-### Option B: Bind Mount from Host
+### Option C: Bind Mount from Host
 
 ```bash
 mkdir -p ~/.ateamorg/claude-docker-config
@@ -307,7 +387,7 @@ container "docker" {
 **Pros:** Visible on host, easy to back up.
 **Cons:** UID alignment needed (ateam passes `--build-arg USER_UID=$(id -u)`).
 
-### Option C: Persistent Container Mode
+### Option D: Persistent Container Mode
 
 Ateam supports persistent containers (`mode = "persistent"`):
 

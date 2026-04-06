@@ -45,6 +45,7 @@ func init() {
 	rootCmd.AddCommand(costCmd)
 	rootCmd.AddCommand(projectRenameCmd)
 	rootCmd.AddCommand(migrateLogsCmd)
+	rootCmd.AddCommand(agentAuthCmd)
 	rootCmd.AddCommand(parallelCmd)
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(secretCmd)
