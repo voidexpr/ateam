@@ -13,6 +13,7 @@ This plan introduces `docker_container` — a way to point ateam at a user-manag
 
 This replaces: persistent mode, container-extra, precheck scripts, and the planned Compose feature for the "complex project" use case.
 
+
 ---
 
 ## What the user experience looks like
