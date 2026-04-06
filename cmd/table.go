@@ -477,7 +477,13 @@ func findLinuxBinary(orgDir string) string {
 		return companion
 	}
 
-	// 3. Cached in orgDir from a prior cross-compilation.
+	// 3. build/ directory (from `make companion` in dev).
+	buildDir := filepath.Join(filepath.Dir(exe), "build", "ateam-linux-amd64")
+	if info, err := os.Stat(buildDir); err == nil && !info.IsDir() {
+		return buildDir
+	}
+
+	// 4. Cached in orgDir from a prior auto cross-compilation.
 	if orgDir != "" {
 		cached := filepath.Join(orgDir, "cache", "ateam-linux-amd64")
 		if info, err := os.Stat(cached); err == nil && !info.IsDir() {
@@ -485,7 +491,7 @@ func findLinuxBinary(orgDir string) string {
 		}
 	}
 
-	// 4. Cross-compile if Go toolchain is available.
+	// 5. Cross-compile if Go toolchain is available.
 	if orgDir != "" {
 		if built := crossBuildIfPossible(exe, orgDir); built != "" {
 			return built

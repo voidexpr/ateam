@@ -16,9 +16,10 @@ docs: build-binary
 	./$(BINARY) roles --docs > ROLES.md
 
 companion:
+	mkdir -p build
 	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
 		-ldflags "$(LDFLAGS)" \
-		-o ateam-linux-amd64 .
+		-o build/ateam-linux-amd64 .
 
 tidy:
 	go mod tidy
@@ -75,3 +76,4 @@ fmt-check:
 
 clean:
 	rm -f $(BINARY) ateam-linux-*
+	rm -rf build/

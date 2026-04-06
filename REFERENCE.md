@@ -160,6 +160,11 @@ ateam all --roles refactor_small,testing_basic
 
 Manage secrets (API keys). Secrets are stored in the OS keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager) or plain `.env` files.
 
+You can obtain a long lived token for claude code with:
+```bash
+claude setup-token
+```
+
 ```bash
 ateam secret                                  # list all required secrets
 ateam secret ANTHROPIC_API_KEY                # check/set a specific secret
@@ -641,6 +646,8 @@ container "devcontainer" {
 }
 ```
 
+TODO: authentication pre-config with `claude setup-token`
+
 ### Profiles
 
 Profiles combine an agent and a container:
@@ -675,10 +682,10 @@ Use `--profile docker` to run in ateam's Docker, `--profile devcontainer` to run
 Typically only coding agents need to run inside docker so they can build and run tests in an isolated environment. Basic docker config from [README.md](README.md) is enough. But if you want the supervisor itself to run in docker and launch ateam coding agents then a Linux build of ateam must be available inside of docker. This is supported, cross-compile the Linux companion binary:
 
 ```bash
-make companion
-mkdir -p "$HOME/.ateamorg/cache"
-ln -sf "$(pwd)/ateam-linux-amd64" "$HOME/.ateamorg/cache/"
+make companion    # produces build/ateam-linux-amd64
 ```
+
+The binary is automatically found by ateam from `build/`. For installations without a git checkout, place `ateam-linux-amd64` next to the host `ateam` binary.
 
 ## Troubleshooting
 

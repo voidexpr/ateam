@@ -64,14 +64,15 @@ Docker containers need a Linux/AMD64 ateam binary mounted at `/usr/local/bin/ate
 
 1. **Host is linux/amd64** — uses the running binary directly
 2. **Companion binary** — `ateam-linux-amd64` next to the host `ateam` binary (e.g. from a release archive)
-3. **Org cache** — `.ateamorg/cache/ateam-linux-amd64` from a prior cross-compilation
-4. **Cross-compile** — builds automatically if `go` and `go.mod` are available
-5. **Warning** — prints a message and returns empty (Docker mount is skipped)
+3. **Build directory** — `build/ateam-linux-amd64` from `make companion`
+4. **Org cache** — `.ateamorg/cache/ateam-linux-amd64` from a prior auto cross-compilation
+5. **Cross-compile** — builds automatically if `go` and `go.mod` are available
+6. **Warning** — prints a message and returns empty (Docker mount is skipped)
 
-For developers building from source, cross-compilation happens automatically (step 4). To pre-build the companion binary:
+For developers building from source, cross-compilation happens automatically (step 5). To pre-build the companion binary:
 
 ```bash
-make companion    # produces ateam-linux-amd64 next to the ateam binary
+make companion    # produces build/ateam-linux-amd64
 ```
 
 Release archives should include both `ateam` (host) and `ateam-linux-amd64` so Docker mode works without a Go compiler.
