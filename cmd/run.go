@@ -159,7 +159,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	// Dry-run: print everything and exit
 	if runDryRun {
-		return printRunDryRun(r, env, promptText)
+		return printRunDryRun(r, env, promptText, runRole, runTaskGroup)
 	}
 
 	// Determine logs dir
@@ -279,26 +279,40 @@ func singleLine(s string) string {
 	return runner.SingleLineText(s)
 }
 
-func printRunDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt string) error {
+func printRunDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, taskGroup string) error {
 	fmt.Println("╔══ dry-run ══╗")
 	fmt.Println()
 
+	// Resolve template variables for display
+	agentName := r.Agent.Name()
+	var model string
+	if mp, ok := r.Agent.(agent.ModelProvider); ok {
+		model = agent.NormalizeModel(mp.ModelName())
+	}
+	tmplVars := runner.BuildTemplateVars(r, runner.RunOpts{
+		RoleID:    roleID,
+		Action:    runner.ActionRun,
+		TaskGroup: taskGroup,
+	}, time.Now(), 0, agentName, model)
+	resolvedAgent := runner.ResolveAgentForDryRun(r.Agent, tmplVars)
+	resolvedExtraArgs := runner.ResolveTemplateArgs(r.ExtraArgs, tmplVars)
+
 	// Agent and profile
-	fmt.Printf("Agent:     %s\n", r.Agent.Name())
+	fmt.Printf("Agent:     %s\n", agentName)
 	if r.Profile != "" {
 		fmt.Printf("Profile:   %s\n", r.Profile)
 	}
 	if r.ContainerType != "" && r.ContainerType != "none" {
 		name := r.ContainerType
 		if r.ContainerName != "" {
-			name += " (" + r.ContainerName + ")"
+			name += " (" + runner.ResolveTemplateString(r.ContainerName, tmplVars) + ")"
 		}
 		fmt.Printf("Container: %s\n", name)
 	}
 	fmt.Println()
 
-	// Agent command
-	cmd, args := r.Agent.DebugCommandArgs(r.ExtraArgs)
+	// Agent command (with resolved templates)
+	cmd, args := resolvedAgent.DebugCommandArgs(resolvedExtraArgs)
 	fmt.Printf("Command:\n  %s %s\n", cmd, strings.Join(args, " "))
 	fmt.Println()
 
