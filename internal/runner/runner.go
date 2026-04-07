@@ -271,6 +271,10 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			fmt.Fprintf(os.Stderr, "[verbose] container: %s\n",
 				r.Container.DebugCommand(container.RunOpts{Command: command, Args: agentArgs}))
 		}
+		if de, ok := r.Container.(*container.DockerExecContainer); ok {
+			fmt.Fprintf(os.Stderr, "[verbose] docker-exec: %s\n",
+				de.DebugCommand(container.RunOpts{Command: command, Args: agentArgs}))
+		}
 	}
 
 	// Write exec file with full context for debugging.

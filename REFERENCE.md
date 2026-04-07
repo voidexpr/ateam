@@ -689,6 +689,8 @@ Unknown variables are left as-is (e.g. `{{UNKNOWN}}` passes through unchanged). 
 | Docker `Env` values | `config.toml` `[container-extra]` | Yes |
 | `agent.args_inside_container` | `runtime.hcl` | Yes |
 | `agent.args_outside_container` | `runtime.hcl` | Yes |
+| docker-exec `docker_container` | `runtime.hcl` | Yes |
+| docker-exec `WorkDir` | Computed from project paths | Yes |
 
 Templates are **not** resolved in:
 - Prompt files (use `{{SOURCE_DIR}}` which has its own separate substitution)
@@ -697,6 +699,7 @@ Templates are **not** resolved in:
 - Precheck script paths (use the role-based resolution chain instead)
 - `forward_env` key names (these are env var names, not values)
 - Map keys in `env` blocks (only values are resolved)
+- docker-exec `exec` template — uses its own `{{CONTAINER}}` and `{{CMD}}` placeholders (see [docker-exec](#docker-exec) below). Note: `{{CONTAINER}}` in exec templates refers to the docker container name, not the `{{CONTAINER}}` general template var (container type)
 
 #### Examples
 
