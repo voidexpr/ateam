@@ -18,6 +18,10 @@ type DockerExecContainer struct {
 	ForwardEnv    []string // env var names to forward via -e
 	WorkDir       string   // working directory inside the container
 
+	// HostCLIPath is the path to a Linux-compatible ateam binary on the host.
+	// When set (via copy_ateam = true), it is copied into the container before exec.
+	HostCLIPath string
+
 	// PrecheckScript runs on the HOST before each exec.
 	// Can be used to start the container, verify health, install deps, etc.
 	PrecheckScript string
@@ -80,6 +84,16 @@ func (d *DockerExecContainer) Run(ctx context.Context, opts RunOpts) error {
 	cmd.Stdin = opts.Stdin
 	cmd.Stdout = opts.Stdout
 	cmd.Stderr = opts.Stderr
+	return cmd.Run()
+}
+
+// EnsureBinary copies the ateam binary into the container via docker cp.
+func (d *DockerExecContainer) EnsureBinary(ctx context.Context) error {
+	if d.HostCLIPath == "" {
+		return nil
+	}
+	cmd := exec.CommandContext(ctx, "docker", "cp", d.HostCLIPath, d.ContainerName+":/usr/local/bin/ateam")
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 

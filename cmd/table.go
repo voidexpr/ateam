@@ -423,11 +423,16 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 				workDir = filepath.Join("/workspace", rel)
 			}
 		}
+		var hostCLIPath string
+		if cc.CopyAteam {
+			hostCLIPath = findLinuxBinary(orgDir)
+		}
 		return &container.DockerExecContainer{
 			ContainerName:  cc.DockerContainer,
 			ExecTemplate:   cc.ExecTemplate,
 			ForwardEnv:     cc.ForwardEnv,
 			WorkDir:        workDir,
+			HostCLIPath:    hostCLIPath,
 			PrecheckScript: precheckScript,
 		}, nil
 	case "devcontainer":

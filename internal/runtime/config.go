@@ -64,6 +64,7 @@ type ContainerConfig struct {
 	CopyClaudeConfig bool     // docker-sandbox: copy ~/.claude/ config (skills, plugins) into sandbox
 	NetworkPolicy    string   // docker-sandbox: "deny" (default) or "allow"
 	Precheck         string   // docker/docker-exec: precheck script path, relative to .ateam/ (or "" for convention default)
+	CopyAteam        bool     // docker-exec: copy ateam binary into container via docker cp
 }
 
 type ProfileConfig struct {
@@ -127,6 +128,7 @@ type hclContainer struct {
 	CopyClaudeConfig bool     `hcl:"copy_claude_config,optional"`
 	NetworkPolicy    string   `hcl:"network_policy,optional"`
 	Precheck         string   `hcl:"precheck,optional"`
+	CopyAteam        bool     `hcl:"copy_ateam,optional"`
 }
 
 type hclProfile struct {
