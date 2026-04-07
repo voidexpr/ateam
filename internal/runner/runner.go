@@ -324,8 +324,11 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		req.CmdFactory = ds.CmdFactory()
 	}
 
-	// If running inside a docker-exec container (user-managed), run precheck and set up CmdFactory.
+	// If running inside a docker-exec container (user-managed), copy binary, run precheck, set up CmdFactory.
 	if de, ok := r.Container.(*container.DockerExecContainer); ok {
+		if err := de.EnsureBinary(ctx); err != nil {
+			return failEarly(fmt.Errorf("copy ateam binary failed: %w", err))
+		}
 		if err := de.RunPrecheck(ctx); err != nil {
 			return failEarly(fmt.Errorf("precheck failed: %w", err))
 		}
