@@ -193,7 +193,7 @@ func createLogsDirs(projDir string, roleIDs []string) error {
 // WriteProjectGitignore writes the .gitignore file inside .ateam/ to exclude
 // runtime artifacts (state.sqlite and logs/).
 func WriteProjectGitignore(projDir string) error {
-	content := "state.sqlite\nstate.sqlite-wal\nstate.sqlite-shm\nlogs/\nsecrets.env\n"
+	content := "state.sqlite\nstate.sqlite-wal\nstate.sqlite-shm\nlogs/\ncache/\nsecrets.env\n"
 	return os.WriteFile(filepath.Join(projDir, ".gitignore"), []byte(content), 0644)
 }
 

@@ -40,7 +40,7 @@ The ateam binary is NOT baked into the image — it's mounted from `build/` at r
 Inside the container:
 ```bash
 claude                                  # complete browser login → /exit
-ateam agent-auth --save-refresh-token   # extracts token, prints to stdout
+ateam agent-config --save-refresh-token   # extracts token, prints to stdout
 exit
 ```
 
@@ -59,7 +59,7 @@ exit
 
 Inside the container:
 ```bash
-ateam agent-auth --method regular --exec
+ateam agent-config --setup-interactive
 # Prints "Login successful." → starts interactive claude session
 ```
 
@@ -89,7 +89,7 @@ The refresh token bootstrap flow:
 2. Stopped that container
 3. Started a fresh container (no volume sharing)
 4. Set the refresh token: `export CLAUDE_CODE_OAUTH_REFRESH_TOKEN=<token>`
-5. Ran `ateam agent-auth --method regular --exec`
+5. Ran `ateam agent-config --setup-interactive`
 6. Got "Login successful." → interactive Claude session worked
 
 Key finding: the token shown in the browser during OAuth is NOT the refresh token. The refresh token must be extracted from `~/.claude/.credentials.json` after a successful login.
