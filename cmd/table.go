@@ -139,8 +139,11 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 	r.Container = ct
 	if cc != nil && cc.Type != "none" {
 		r.ContainerType = cc.Type
-		if dc, ok := ct.(*container.DockerContainer); ok {
-			r.ContainerName = dc.ContainerName
+		switch c := ct.(type) {
+		case *container.DockerContainer:
+			r.ContainerName = c.ContainerName
+		case *container.DockerExecContainer:
+			r.ContainerName = c.ContainerName
 		}
 	} else {
 		r.ContainerType = "none"
@@ -402,6 +405,30 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 			OrgDir:           orgDir,
 			HostCLIPath:      findLinuxBinary(orgDir),
 			PrecheckScript:   precheckScript,
+		}, nil
+	case "docker-exec":
+		if cc.DockerContainer == "" {
+			return nil, fmt.Errorf("docker-exec container %q requires docker_container field", cc.Name)
+		}
+		var precheckScript string
+		if cc.Precheck != "" {
+			precheckScript = filepath.Join(projectDir, cc.Precheck)
+			if !filepath.IsAbs(cc.Precheck) && projectDir == "" {
+				precheckScript = cc.Precheck
+			}
+		}
+		workDir := "/workspace"
+		if sourceDir != "" && gitRepoDir != "" && gitRepoDir != sourceDir {
+			if rel, err := filepath.Rel(gitRepoDir, sourceDir); err == nil {
+				workDir = filepath.Join("/workspace", rel)
+			}
+		}
+		return &container.DockerExecContainer{
+			ContainerName:  cc.DockerContainer,
+			ExecTemplate:   cc.ExecTemplate,
+			ForwardEnv:     cc.ForwardEnv,
+			WorkDir:        workDir,
+			PrecheckScript: precheckScript,
 		}, nil
 	case "devcontainer":
 		configPath := cc.ConfigPath
