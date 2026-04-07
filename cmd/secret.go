@@ -62,7 +62,7 @@ func init() {
 func runSecret(cmd *cobra.Command, args []string) error {
 	backend := resolveBackend()
 
-	env, _ := root.Lookup()
+	env, _ := root.Lookup("", "")
 	resolver := secretResolver(env, backend)
 
 	var projectDir, orgDir string
