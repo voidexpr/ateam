@@ -169,7 +169,8 @@ func (d *DockerContainer) RunPrecheck(ctx context.Context) error {
 	containerPath := d.TranslatePath(d.PrecheckScript)
 	fmt.Fprintf(os.Stderr, "[docker] running precheck: %s\n", containerPath)
 
-	script := fmt.Sprintf("chmod +x %s && %s", containerPath, containerPath)
+	quoted := "'" + strings.ReplaceAll(containerPath, "'", "'\\''") + "'"
+	script := fmt.Sprintf("chmod +x %s && %s", quoted, quoted)
 	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", d.ContainerName, "sh", "-c", script)
 
 	var buf bytes.Buffer

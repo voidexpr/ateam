@@ -52,7 +52,7 @@ func (d *DevcontainerContainer) ValidateAgent(ctx context.Context, command strin
 		}
 		return nil
 	}
-	args := d.execArgs("sh", "-c", "command -v "+command)
+	args := d.execArgs("which", command)
 	cmd := exec.CommandContext(ctx, "devcontainer", args...)
 	if err := cmd.Run(); err != nil {
 		err = fmt.Errorf("agent %q not found in devcontainer; add it as a Feature or install it in your Dockerfile", command)
