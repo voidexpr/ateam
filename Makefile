@@ -7,7 +7,7 @@ VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
 GIT_COMMIT := $(shell git describe --always --dirty 2>/dev/null || echo unknown)
 LDFLAGS := -X github.com/ateam/cmd.BuildTime=$(BUILD_TIME) -X github.com/ateam/cmd.Version=$(VERSION) -X github.com/ateam/cmd.GitCommit=$(GIT_COMMIT)
 
-build: build-binary docs
+build: build-binary
 
 build-binary:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
