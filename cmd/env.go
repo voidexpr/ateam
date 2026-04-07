@@ -143,6 +143,15 @@ func printAuthLines(env *root.ResolvedEnv) {
 		}
 		fmt.Printf("%s%s=%s (%s, %s)\n", prefix, name, maskEnvVar(result.Value), result.Source, result.Backend)
 		anyFound = true
+
+		// Check for project/global override
+		if result.Source == "project" || result.Source == "env" {
+			globalResolver := secret.NewResolver("", "", secret.DefaultBackend(), nil)
+			globalResult := globalResolver.Resolve(name)
+			if globalResult.Found && globalResult.Source != "env" && globalResult.Value != result.Value {
+				fmt.Printf("        ⚠ project value overrides global value\n")
+			}
+		}
 	}
 	if !anyFound {
 		fmt.Println("  Auth: (none) — run 'ateam secret ANTHROPIC_API_KEY' to configure")

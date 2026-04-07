@@ -10,9 +10,12 @@ import (
 	"time"
 
 	"github.com/ateam/internal/agent"
+	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
+	"github.com/ateam/internal/runtime"
+	"github.com/ateam/internal/secret"
 	"github.com/spf13/cobra"
 )
 
@@ -29,6 +32,7 @@ var (
 	runVerbose         bool
 	runTaskGroup       string
 	runDockerAutoSetup bool
+	runDryRun          bool
 )
 
 var runCmd = &cobra.Command{
@@ -65,6 +69,7 @@ func init() {
 	runCmd.Flags().StringVar(&runTaskGroup, "task-group", "", "group related calls (e.g. all tasks in one ateam code run)")
 	addVerboseFlag(runCmd, &runVerbose)
 	addDockerAutoSetupFlag(runCmd, &runDockerAutoSetup)
+	runCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "print resolved command, secrets, and prompt without running")
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
@@ -121,7 +126,14 @@ func runRun(cmd *cobra.Command, args []string) error {
 		r, err = resolveRunnerMinimal(env.OrgDir, profile, runAgent)
 	}
 	if err != nil {
-		return err
+		if !runDryRun {
+			return err
+		}
+		// In dry-run mode, show the error but continue with what we can resolve
+		fmt.Fprintf(os.Stderr, "Warning: %v\n\n", err)
+		if r == nil {
+			return nil
+		}
 	}
 
 	setSourceWritable(r)
@@ -143,6 +155,11 @@ func runRun(cmd *cobra.Command, args []string) error {
 		if ca, ok := r.Agent.(*agent.ClaudeAgent); ok {
 			ca.Model = runModel
 		}
+	}
+
+	// Dry-run: print everything and exit
+	if runDryRun {
+		return printRunDryRun(r, env, promptText)
 	}
 
 	// Determine logs dir
@@ -260,6 +277,93 @@ func printProgress(ch <-chan runner.RunProgress) {
 
 func singleLine(s string) string {
 	return runner.SingleLineText(s)
+}
+
+func printRunDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt string) error {
+	fmt.Println("╔══ dry-run ══╗")
+	fmt.Println()
+
+	// Agent and profile
+	fmt.Printf("Agent:     %s\n", r.Agent.Name())
+	if r.Profile != "" {
+		fmt.Printf("Profile:   %s\n", r.Profile)
+	}
+	if r.ContainerType != "" && r.ContainerType != "none" {
+		name := r.ContainerType
+		if r.ContainerName != "" {
+			name += " (" + r.ContainerName + ")"
+		}
+		fmt.Printf("Container: %s\n", name)
+	}
+	fmt.Println()
+
+	// Agent command
+	cmd, args := r.Agent.DebugCommandArgs(r.ExtraArgs)
+	fmt.Printf("Command:\n  %s %s\n", cmd, strings.Join(args, " "))
+	fmt.Println()
+
+	// Docker command (if container)
+	if r.Container != nil {
+		opts := container.RunOpts{WorkDir: r.SourceDir}
+		dockerCmd := r.Container.DebugCommand(opts)
+		if dockerCmd != "" {
+			fmt.Printf("Docker:\n  %s\n", dockerCmd)
+			fmt.Println()
+		}
+	}
+
+	// Secret resolution
+	rtCfg, _ := runtime.Load(env.ProjectDir, env.OrgDir)
+	if rtCfg != nil {
+		// Find the agent config for secret resolution
+		var ac *runtime.AgentConfig
+		var forwardEnv []string
+		profileName := r.Profile
+		if strings.HasPrefix(profileName, "a:") {
+			agentName := profileName[2:]
+			if a, ok := rtCfg.Agents[agentName]; ok {
+				ac = &a
+			}
+		} else if profileName != "" {
+			if _, a, cc, err := rtCfg.ResolveProfile(profileName); err == nil {
+				ac = a
+				if cc != nil {
+					forwardEnv = cc.ForwardEnv
+				}
+			}
+		}
+		if ac != nil {
+			resolver := secretResolver(env, secret.DefaultBackend())
+			details := secret.ResolveAllRequired(ac, forwardEnv, resolver)
+			if len(details) > 0 {
+				fmt.Println("Secrets:")
+				for _, d := range details {
+					if d.Found {
+						fmt.Printf("  %-30s ✓ %s (%s, %s)\n", d.Name, d.Masked, d.Source, d.Backend)
+					} else {
+						fmt.Printf("  %-30s ✗ not found\n", d.Name)
+					}
+				}
+				fmt.Println()
+			}
+		}
+	}
+
+	// Sandbox settings
+	if r.SandboxSettings != "" {
+		fmt.Println("Sandbox: configured (use --verbose for full JSON)")
+	}
+
+	// Prompt
+	fmt.Println("Prompt:")
+	if len(prompt) > 500 {
+		fmt.Printf("  %s...\n  (%d chars total)\n", prompt[:500], len(prompt))
+	} else {
+		fmt.Printf("  %s\n", prompt)
+	}
+	fmt.Println()
+	fmt.Println("╚══ dry-run ══╝")
+	return nil
 }
 
 func printRunSummary(r runner.RunSummary) {
