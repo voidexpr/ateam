@@ -38,16 +38,16 @@ type overviewRun struct {
 }
 
 type overviewData struct {
-	Reports             []prompts.RoleReport
-	Runs                []overviewRun
-	HasReview           bool
-	ReviewModTime       time.Time
-	HasCodeOutput       bool
-	CodeModTime         time.Time
-	LatestCodeSession   string
-	CostTotal           float64
-	ShowAll             bool
-	TotalRuns           int
+	Reports           []prompts.RoleReport
+	Runs              []overviewRun
+	HasReview         bool
+	ReviewModTime     time.Time
+	HasCodeOutput     bool
+	CodeModTime       time.Time
+	LatestCodeSession string
+	CostTotal         float64
+	ShowAll           bool
+	TotalRuns         int
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {

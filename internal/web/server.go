@@ -126,8 +126,8 @@ func funcMap() template.FuncMap {
 			}
 			return t.Format("01/02 15:04")
 		},
-		"addInt": func(a, b int) int { return a + b },
-		"lower":  strings.ToLower,
+		"addInt":    func(a, b int) int { return a + b },
+		"lower":     strings.ToLower,
 		"estTokens": prompts.EstimateTokens,
 		"runsTableCtx": func(slug string, runs []overviewRun) map[string]any {
 			return map[string]any{"ProjectSlug": slug, "Runs": runs}

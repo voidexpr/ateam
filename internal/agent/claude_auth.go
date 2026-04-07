@@ -5,9 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"time"
 	goruntime "runtime"
 	"strings"
+	"time"
 
 	"github.com/ateam/internal/secret"
 )

@@ -8,29 +8,29 @@ import (
 )
 
 type RecentRow struct {
-	ID              int64
-	ProjectID       string
-	Profile         string
-	Agent           string
-	Action          string
-	Role            string
-	TaskGroup       string
-	Model           string
-	StartedAt       string
-	EndedAt         string
-	DurationMS      int64
-	ExitCode        int
-	IsError         bool
-	CostUSD         float64
-	InputTokens     int
-	OutputTokens    int
+	ID               int64
+	ProjectID        string
+	Profile          string
+	Agent            string
+	Action           string
+	Role             string
+	TaskGroup        string
+	Model            string
+	StartedAt        string
+	EndedAt          string
+	DurationMS       int64
+	ExitCode         int
+	IsError          bool
+	CostUSD          float64
+	InputTokens      int
+	OutputTokens     int
 	CacheReadTokens  int
 	CacheWriteTokens int
 	Turns            int
 	PID              int
-	ContainerID     string
-	StreamFile      string
-	OutputFile      string
+	ContainerID      string
+	StreamFile       string
+	OutputFile       string
 }
 
 type RecentFilter struct {

@@ -11,6 +11,7 @@ require (
 	github.com/yuin/goldmark-highlighting/v2 v2.0.0-20230729083705-37449abec8cc
 	github.com/zalando/go-keyring v0.2.8
 	github.com/zclconf/go-cty v1.16.3
+	golang.org/x/sys v0.42.0
 	modernc.org/sqlite v1.47.0
 )
 
@@ -31,7 +32,6 @@ require (
 	github.com/spf13/pflag v1.0.9 // indirect
 	golang.org/x/mod v0.33.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.25.0 // indirect
 	golang.org/x/tools v0.42.0 // indirect
 	modernc.org/libc v1.70.0 // indirect
