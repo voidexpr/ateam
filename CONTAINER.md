@@ -1,6 +1,6 @@
 # Running ATeam with Docker
 
-This guide covers how to run ateam agents inside Docker containers — from simple one-shot sandboxing to integrating with existing Docker infrastructure and running interactive Claude sessions.
+This guide covers how to run ateam agents inside Docker containers — from simple one-shot sandboxing to integrating with existing Docker infrastructure and running interactive Claude sessions. See [README.md](README.md) for general setup and [REFERENCE.md](REFERENCE.md) for command details.
 
 ## Quick Start
 
