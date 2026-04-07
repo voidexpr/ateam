@@ -147,7 +147,7 @@ func runAgentConfigAudit(projectDir, orgDir string) error {
 	if refreshToken != "" {
 		fmt.Println("Interactive session detected. To use in another environment:")
 		fmt.Println()
-		fmt.Printf("  export CLAUDE_CODE_OAUTH_REFRESH_TOKEN=%s\n", refreshToken)
+		fmt.Printf("  export CLAUDE_CODE_OAUTH_REFRESH_TOKEN=%s\n", maskToken(refreshToken))
 		fmt.Println("  export CLAUDE_CODE_OAUTH_SCOPES=\"user:profile user:inference\"")
 		fmt.Println()
 		fmt.Println("  Or save to ateam secrets:")
@@ -158,14 +158,14 @@ func runAgentConfigAudit(projectDir, orgDir string) error {
 	if val := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); val != "" {
 		fmt.Println("Headless token detected. To use in another environment:")
 		fmt.Println()
-		fmt.Printf("  export CLAUDE_CODE_OAUTH_TOKEN=%s\n", val)
+		fmt.Printf("  export CLAUDE_CODE_OAUTH_TOKEN=%s\n", maskToken(val))
 		fmt.Println()
 	} else if status.HasSecretOAuth {
 		resolver := secret.NewResolver(projectDir, orgDir, secret.DefaultBackend(), nil)
 		if r := resolver.Resolve("CLAUDE_CODE_OAUTH_TOKEN"); r.Found {
 			fmt.Println("Headless token detected. To use in another environment:")
 			fmt.Println()
-			fmt.Printf("  export CLAUDE_CODE_OAUTH_TOKEN=%s\n", r.Value)
+			fmt.Printf("  export CLAUDE_CODE_OAUTH_TOKEN=%s\n", maskToken(r.Value))
 			fmt.Println()
 		}
 	}
@@ -343,7 +343,6 @@ func saveRefreshToken(status agent.AuthStatus, projectDir, orgDir string) error 
 	fmt.Fprintln(os.Stderr, "On any new container, run:")
 	fmt.Fprintln(os.Stderr, "  ateam agent-config --setup-interactive")
 	fmt.Fprintln(os.Stderr, "")
-	fmt.Print(token)
 	return nil
 }
 
@@ -363,6 +362,13 @@ func storeRefreshToken(token, projectDir, orgDir string) error {
 		return fmt.Errorf("failed to save refresh token: %w", err)
 	}
 	return nil
+}
+
+func maskToken(val string) string {
+	if len(val) <= 12 {
+		return "***"
+	}
+	return val[:8] + "***" + val[len(val)-4:]
 }
 
 func lookupEnvOptional() (*root.ResolvedEnv, error) {
