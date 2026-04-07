@@ -192,6 +192,11 @@ agent "claude" {
     CLAUDECODE = ""
   }
   required_env = ["ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"]
+
+  // Inside containers: skip permissions (container provides isolation).
+  // Outside containers: sandbox settings are applied automatically.
+  args_inside_container    = ["--dangerously-skip-permissions"]
+  sandbox_inside_container = false
 }
 
 agent "claude-auto" {
@@ -226,16 +231,11 @@ agent "claude-haiku" {
   args = ["-p", "--output-format", "stream-json", "--verbose", "--model", "haiku", "--max-budget-usd", "0.10"]
 }
 
-// claude-docker inherits from claude but uses --dangerously-skip-permissions for
-// unattended tool use inside Docker. The inherited sandbox is ignored by Claude.
+// claude-docker: backward compatibility alias. The base claude agent now
+// auto-detects containers and skips permissions/sandbox. Prefer using "claude" directly.
 agent "claude-docker" {
-  type    = "claude"
-  command = "claude"
-  args    = ["-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"]
-  env = {
-    CLAUDECODE = ""
-  }
-  required_env = ["ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"]
+  base = "claude"
+  args = ["-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"]
 }
 
 // claude-isolated uses a project-local config dir (.ateam/.claude) instead of ~/.claude,
@@ -249,8 +249,10 @@ agent "claude-isolated" {
 agent "codex" {
   type    = "codex"
   command = "codex"
-  args    = ["--sandbox", "workspace-write", "--ask-for-approval", "never"]
+  args    = ["--ask-for-approval", "never"]
   required_env = ["OPENAI_API_KEY"]
+
+  args_outside_container = ["--sandbox", "workspace-write"]
 
   pricing {
     default_model = "gpt-5.3-codex"
@@ -337,7 +339,7 @@ profile "codex" {
 }
 
 profile "docker" {
-  agent     = "claude-docker"
+  agent     = "claude"
   container = "docker"
 }
 
@@ -357,7 +359,7 @@ container "docker-persistent" {
 }
 
 profile "docker-persistent" {
-  agent     = "claude-docker"
+  agent     = "claude"
   container = "docker-persistent"
 }
 
@@ -400,7 +402,7 @@ container "docker-sandbox" {
 }
 
 profile "docker-sandbox" {
-  agent     = "claude-docker"
+  agent     = "claude"
   container = "docker-sandbox"
 }
 
@@ -416,6 +418,6 @@ container "devcontainer" {
 }
 
 profile "devcontainer" {
-  agent     = "claude-docker"
+  agent     = "claude"
   container = "devcontainer"
 }

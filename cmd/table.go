@@ -169,31 +169,37 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.Runner
 
 func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runner.Runner {
 	return &runner.Runner{
-		Agent:           buildAgent(ac),
-		OrgDir:          orgDir,
-		SandboxSettings: ac.Sandbox,
-		SandboxRWPaths:  ac.RWPaths,
-		SandboxROPaths:  ac.ROPaths,
-		SandboxDenied:   ac.DeniedPaths,
-		ConfigDir:       ac.ConfigDir,
+		Agent:                  buildAgent(ac),
+		OrgDir:                 orgDir,
+		SandboxSettings:        ac.Sandbox,
+		SandboxRWPaths:         ac.RWPaths,
+		SandboxROPaths:         ac.ROPaths,
+		SandboxDenied:          ac.DeniedPaths,
+		ConfigDir:              ac.ConfigDir,
+		ArgsInsideContainer:    ac.ArgsInsideContainer,
+		ArgsOutsideContainer:   ac.ArgsOutsideContainer,
+		SandboxInsideContainer: ac.SandboxInsideContainer,
 	}
 }
 
 func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runner.Runner {
 	extraWriteDirs := gitWriteDirs(env.SourceDir)
 	r := &runner.Runner{
-		Agent:           buildAgent(ac),
-		LogFile:         env.RunnerLogPath(),
-		ProjectDir:      env.ProjectDir,
-		OrgDir:          env.OrgDir,
-		SourceDir:       env.SourceDir,
-		ProjectName:     env.ProjectName,
-		ExtraWriteDirs:  extraWriteDirs,
-		SandboxSettings: ac.Sandbox,
-		SandboxRWPaths:  ac.RWPaths,
-		SandboxROPaths:  ac.ROPaths,
-		SandboxDenied:   ac.DeniedPaths,
-		ConfigDir:       ac.ConfigDir,
+		Agent:                  buildAgent(ac),
+		LogFile:                env.RunnerLogPath(),
+		ProjectDir:             env.ProjectDir,
+		OrgDir:                 env.OrgDir,
+		SourceDir:              env.SourceDir,
+		ProjectName:            env.ProjectName,
+		ExtraWriteDirs:         extraWriteDirs,
+		SandboxSettings:        ac.Sandbox,
+		SandboxRWPaths:         ac.RWPaths,
+		SandboxROPaths:         ac.ROPaths,
+		SandboxDenied:          ac.DeniedPaths,
+		ConfigDir:              ac.ConfigDir,
+		ArgsInsideContainer:    ac.ArgsInsideContainer,
+		ArgsOutsideContainer:   ac.ArgsOutsideContainer,
+		SandboxInsideContainer: ac.SandboxInsideContainer,
 	}
 	if env.Config != nil {
 		r.SandboxExtraWrite = env.Config.SandboxExtra.AllowWrite

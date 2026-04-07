@@ -28,6 +28,12 @@ const (
 	ActionDebug    = "debug"
 )
 
+// IsInContainer detects whether the current process is running inside a Docker container.
+func IsInContainer() bool {
+	_, err := os.Stat("/.dockerenv")
+	return err == nil
+}
+
 // Runner orchestrates agent execution with logging, file I/O, and progress reporting.
 type Runner struct {
 	Agent                   agent.Agent
@@ -48,6 +54,9 @@ type Runner struct {
 	SandboxExtraDomains     []string            // from config.toml [sandbox-extra]
 	SandboxExtraExcludedCmd []string            // from config.toml [sandbox-extra]
 	ConfigDir               string              // CLAUDE_CONFIG_DIR; relative resolves from ProjectDir
+	ArgsInsideContainer     []string            // extra args when inside a container
+	ArgsOutsideContainer    []string            // extra args when on the host
+	SandboxInsideContainer  bool                // if false, skip sandbox inside containers
 	CallDB                  *calldb.CallDB      // nil = no DB tracking
 	Profile                 string              // profile name for DB
 	ContainerType           string              // "none" or "docker" for DB
@@ -159,9 +168,17 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	extraArgs := make([]string, len(r.ExtraArgs))
 	copy(extraArgs, r.ExtraArgs)
 
-	// Write sandbox settings if configured
+	// Append environment-aware args
+	if IsInContainer() {
+		extraArgs = append(extraArgs, r.ArgsInsideContainer...)
+	} else {
+		extraArgs = append(extraArgs, r.ArgsOutsideContainer...)
+	}
+
+	// Write sandbox settings if configured (skip inside containers unless explicitly requested)
+	skipSandbox := IsInContainer() && !r.SandboxInsideContainer
 	var settingsJSON []byte
-	if r.SandboxSettings != "" {
+	if r.SandboxSettings != "" && !skipSandbox {
 		settingsTarget := prefix + "_settings.json"
 		var err error
 		settingsJSON, err = r.writeSettings(settingsTarget, opts)
