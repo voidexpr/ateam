@@ -62,14 +62,14 @@ type Call struct {
 }
 
 type CallResult struct {
-	EndedAt         time.Time
-	DurationMS      int64
-	ExitCode        int
-	IsError         bool
-	ErrorMessage    string
-	CostUSD         float64
-	InputTokens     int
-	OutputTokens    int
+	EndedAt          time.Time
+	DurationMS       int64
+	ExitCode         int
+	IsError          bool
+	ErrorMessage     string
+	CostUSD          float64
+	InputTokens      int
+	OutputTokens     int
 	CacheReadTokens  int
 	CacheWriteTokens int
 	Turns            int

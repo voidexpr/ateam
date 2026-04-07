@@ -16,22 +16,22 @@ import (
 )
 
 var (
-	parallelLabels           []string
-	parallelTaskGroup        string
-	parallelMaxParallel      int
-	parallelNoProgress       bool
+	parallelLabels            []string
+	parallelTaskGroup         string
+	parallelMaxParallel       int
+	parallelNoProgress        bool
 	parallelCommonPromptFirst string
 	parallelCommonPromptLast  string
-	parallelProfile          string
-	parallelAgent            string
-	parallelModel            string
-	parallelWorkDir          string
-	parallelTimeout          int
-	parallelVerbose          bool
-	parallelForce            bool
-	parallelDryRun           bool
-	parallelPrint            bool
-	parallelDockerAutoSetup  bool
+	parallelProfile           string
+	parallelAgent             string
+	parallelModel             string
+	parallelWorkDir           string
+	parallelTimeout           int
+	parallelVerbose           bool
+	parallelForce             bool
+	parallelDryRun            bool
+	parallelPrint             bool
+	parallelDockerAutoSetup   bool
 )
 
 var parallelCmd = &cobra.Command{

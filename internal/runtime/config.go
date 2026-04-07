@@ -84,17 +84,17 @@ type hclFile struct {
 }
 
 type hclAgent struct {
-	Name        string            `hcl:"name,label"`
-	Base        string            `hcl:"base,optional"`
-	Command     string            `hcl:"command,optional"`
-	Args        []string          `hcl:"args,optional"`
-	Model       string            `hcl:"model,optional"`
-	Type        string            `hcl:"type,optional"`
-	Env         map[string]string `hcl:"env,optional"`
-	Sandbox     string            `hcl:"sandbox,optional"`
-	RWPaths     []string          `hcl:"rw_paths,optional"`
-	ROPaths     []string          `hcl:"ro_paths,optional"`
-	DeniedPaths []string          `hcl:"denied_paths,optional"`
+	Name                   string            `hcl:"name,label"`
+	Base                   string            `hcl:"base,optional"`
+	Command                string            `hcl:"command,optional"`
+	Args                   []string          `hcl:"args,optional"`
+	Model                  string            `hcl:"model,optional"`
+	Type                   string            `hcl:"type,optional"`
+	Env                    map[string]string `hcl:"env,optional"`
+	Sandbox                string            `hcl:"sandbox,optional"`
+	RWPaths                []string          `hcl:"rw_paths,optional"`
+	ROPaths                []string          `hcl:"ro_paths,optional"`
+	DeniedPaths            []string          `hcl:"denied_paths,optional"`
 	ConfigDir              string            `hcl:"config_dir,optional"`
 	RequiredEnv            []string          `hcl:"required_env,optional"`
 	ArgsInsideContainer    []string          `hcl:"args_inside_container,optional"`
