@@ -222,6 +222,7 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 | `ateam run` | Run an agent with a custom prompt |
 | `ateam parallel` | Run multiple agents in parallel, each with its own prompt |
 | `ateam secret` | Manage API keys (keychain or file) |
+| `ateam agent-config` | [experimental] Audit and configure agent authentication |
 | `ateam env` | Show environment and configuration status |
 | `ateam serve` | Web UI for browsing reports and sessions |
 | `ateam ps` | Recent run history |

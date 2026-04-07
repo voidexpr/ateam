@@ -169,8 +169,11 @@ claude setup-token
 ateam secret                                  # list all required secrets
 ateam secret ANTHROPIC_API_KEY                # check/set a specific secret
 ateam secret ANTHROPIC_API_KEY --set          # set (reads from stdin or --value)
+ateam secret ANTHROPIC_API_KEY --get          # print raw value (for scripting)
 ateam secret ANTHROPIC_API_KEY --delete
 ateam secret ANTHROPIC_API_KEY --storage file # force .env file backend
+ateam secret --print                          # print all as KEY=VALUE (raw, for piping)
+ateam secret --save-project-scope             # write all to .ateam/secrets.env
 ```
 
 | Flag | Description |
@@ -178,10 +181,40 @@ ateam secret ANTHROPIC_API_KEY --storage file # force .env file backend
 | `--scope SCOPE` | Secret scope: `global` (default), `org`, or `project` |
 | `--storage BACKEND` | Storage backend: `keychain` (default if available) or `file` |
 | `--set` | Set the secret (reads value from stdin) |
+| `--get` | Print raw value to stdout (for scripting) |
 | `--value VALUE` | Secret value (alternative to stdin) |
 | `--delete` | Delete the secret from the selected backend |
+| `--print` | Print all (or named) secrets as raw `KEY=VALUE` to stdout |
+| `--save-project-scope` | Resolve from any source and write to `.ateam/secrets.env` |
 
 Agents declare required secrets via `required_env` in `runtime.hcl`. Validation runs before any agent spawn.
+
+**Docker usage**: secrets in OS keychains don't cross into containers. Use `--save-project-scope` to write resolved secrets to `.ateam/secrets.env`, which is mounted into containers. Inside the container, `ateam run` resolves them from the project scope automatically.
+
+### `ateam agent-config`
+
+[experimental] Audit and configure Claude Code agent authentication, primarily for Docker containers.
+
+```bash
+ateam agent-config --audit                    # show auth state and export instructions
+ateam agent-config --setup-interactive        # bootstrap interactive session from refresh token
+ateam agent-config --wipe-i-am-sure           # remove all auth state
+ateam agent-config --save-refresh-token       # extract refresh token from .credentials.json
+```
+
+| Flag | Description |
+|------|-------------|
+| `--audit` | Show auth state, detected tokens, and export instructions (works everywhere) |
+| `--setup-interactive` | Bootstrap an interactive Claude session from a saved refresh token |
+| `--wipe-i-am-sure` | Remove all auth state (keeps settings.json, plugins, skills). Linux only |
+| `--save-refresh-token` | Extract refresh token from `.credentials.json` and save to ateam secrets |
+| `--container-only` | Only allow destructive operations inside Docker containers (default: true) |
+
+**`--audit`** detects all auth sources (env vars, ateam secrets, credential files, keychain) and prints export instructions for replicating auth in another environment.
+
+**`--setup-interactive`** is the recommended way to start interactive Claude sessions in containers:
+1. First time: do a browser login (`claude` → login → `/exit`), then `--save-refresh-token`
+2. Any new container: `--setup-interactive` exchanges the refresh token for full credentials
 
 ### `ateam run`
 
@@ -206,6 +239,7 @@ ateam run @prompt_file.md
 | `--no-stream` | Disable progress updates on stderr |
 | `--no-summary` | Disable cost/duration/tokens summary |
 | `--quiet` | Disable both streaming and summary |
+| `--dry-run` | Print resolved command, secrets, container config, and prompt without running |
 | `--verbose` | Print agent and docker commands to stderr |
 
 ### `ateam parallel`
