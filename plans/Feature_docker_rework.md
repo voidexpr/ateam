@@ -709,3 +709,47 @@ Ordered for incremental delivery. Each step is independently useful, builds on t
 7. **`copy_ateam` default** (E) — ateam binary auto-included in `docker` containers
 8. **Document refresh token flow** (D) — already works, needs user-facing docs
 9. **Isolated agent configs** (F) — enables interactive+headless coexistence, future work
+
+## Future Work
+
+Features considered but intentionally deferred:
+
+### Isolated agent config as default for ateam
+
+Currently ateam outside containers uses `~/.claude` (the shared global Claude config — settings.json, hooks, permissions). Inside containers, `~/.claude` is empty or container-specific. This means ateam runs can behave differently inside vs outside containers because the settings differ.
+
+A potential improvement: ateam could default to using an isolated config dir (e.g., `.ateam/.claude/`) for all agent runs, making behavior consistent regardless of environment. The existing `claude-isolated` agent and `config_dir` mechanism support this — it just needs to become the default.
+
+Tradeoffs:
+- Pro: predictable behavior, no interference from user's personal Claude settings
+- Pro: eliminates "works on my machine" differences between host and container
+- Con: loses access to user's custom skills, plugins, and hooks during ateam runs
+- Con: requires initializing the isolated config on first use
+
+### Template variable expansion for settings files
+
+Allow `{{SANDBOX_FILE}}` in agent args to make sandbox settings explicit: `["--settings", "{{SANDBOX_FILE}}"]` instead of the current magic runner behavior. Part of a broader template system (`{{CONTAINER_NAME}}`, `{{PROJECT_DIR}}`, etc.).
+
+### Generic "field to file" mechanism
+
+Allow any HCL agent field to be dumped to a file and referenced in args. Useful for agents that need config files generated from HCL.
+
+### Network isolation for containers
+
+Docker doesn't isolate network by default. Options: iptables default-deny, proxy-based domain filtering, `--network none` + explicit forwarding. Not implemented — the current container isolation focuses on filesystem, not network.
+
+### `container_name_script` or template variable for dynamic container names
+
+For multi-work-area setups where container names can't be hardcoded. Deferred in favor of the advice: run ateam inside each container rather than exec'ing from the host. The future template system (`docker_container = "myapp-{{WORK_AREA}}"`) covers the rare host→container case.
+
+### Secrets injection to `/run/ateam/` (tmpfs)
+
+Write secrets to a tmpfs path inside the container (wiped on restart) instead of `.ateam/secrets.env` (persists on disk). More secure but more complex. Deferred in favor of the simpler `--save-project-scope` approach.
+
+### `ateam agent-create` command
+
+Create isolated agent directories with controlled auth and config import. Deferred — the existing `config_dir` field and `CLAUDE_CONFIG_DIR` mechanism handle the underlying need.
+
+### Rename `sandbox` field to `sandbox_file_content`
+
+Clarify that the `sandbox` field in agent definitions is JSON content that gets written to a file, not a sandbox configuration in the traditional sense.

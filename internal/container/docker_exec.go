@@ -98,11 +98,12 @@ func (d *DockerExecContainer) EnsureBinary(ctx context.Context) error {
 }
 
 // RunPrecheck runs the precheck script on the host before agent execution.
+// The container name is passed as the first argument.
 func (d *DockerExecContainer) RunPrecheck(ctx context.Context) error {
 	if d.PrecheckScript == "" {
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, "sh", "-c", d.PrecheckScript)
+	cmd := exec.CommandContext(ctx, "sh", d.PrecheckScript, d.ContainerName)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
