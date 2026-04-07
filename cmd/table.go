@@ -116,7 +116,7 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 
 	r := runnerFromAgentConfig(env, ac)
 	r.Profile = profileName
-	r.ProjectID = ""
+	r.ProjectID = env.ProjectID()
 	r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
 	ct, err := buildContainer(cc, prof, env.SourceDir, env.ProjectDir, env.OrgDir, env.GitRepoDir, roleID, dockerAutoSetup)
 	if err != nil {
@@ -165,7 +165,7 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.Runner
 
 	r := runnerFromAgentConfig(env, &ac)
 	r.Profile = "a:" + agentName
-	r.ProjectID = ""
+	r.ProjectID = env.ProjectID()
 	r.ContainerType = "none"
 	return r, nil
 }
