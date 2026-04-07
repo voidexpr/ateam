@@ -365,7 +365,7 @@ func TestResolveContainerTemplatesNilContainer(t *testing.T) {
 	resolveContainerTemplates(nil, TemplateVars{})
 }
 
-func TestResolveContainerTemplatesDockerExec(t *testing.T) {
+func TestResolveContainerTemplatesDockerExecBasic(t *testing.T) {
 	dc := &container.DockerExecContainer{
 		ContainerName: "ateam-{{PROJECT_DIR}}-{{ROLE}}",
 		ExecTemplate:  "docker exec {{CONTAINER}} {{CMD}}",
@@ -380,6 +380,43 @@ func TestResolveContainerTemplatesDockerExec(t *testing.T) {
 	}
 	if dc.WorkDir != "/workspace/myapp" {
 		t.Errorf("WorkDir: got %q, want %q", dc.WorkDir, "/workspace/myapp")
+	}
+}
+
+func TestResolveContainerTemplatesDockerExecCollision(t *testing.T) {
+	de := &container.DockerExecContainer{
+		ContainerName: "myapp-{{ROLE}}",
+		ExecTemplate:  "docker exec {{CONTAINER}} {{CMD}}",
+		WorkDir:       "/workspace/{{PROJECT_DIR}}",
+	}
+	vars := TemplateVars{
+		Role:       "security",
+		ProjectDir: "myapp",
+		Container:  "docker-exec",
+	}
+
+	resolveContainerTemplates(de, vars)
+
+	if de.ContainerName != "myapp-security" {
+		t.Errorf("ContainerName: got %q, want %q", de.ContainerName, "myapp-security")
+	}
+	// ExecTemplate must NOT be resolved — {{CONTAINER}} and {{CMD}} are exec-specific
+	if de.ExecTemplate != "docker exec {{CONTAINER}} {{CMD}}" {
+		t.Errorf("ExecTemplate should be preserved: got %q", de.ExecTemplate)
+	}
+	if de.WorkDir != "/workspace/myapp" {
+		t.Errorf("WorkDir: got %q, want %q", de.WorkDir, "/workspace/myapp")
+	}
+}
+
+func TestResolveContainerTemplatesDockerExecNoTemplates(t *testing.T) {
+	de := &container.DockerExecContainer{
+		ContainerName: "static-name",
+		WorkDir:       "/workspace",
+	}
+	resolveContainerTemplates(de, TemplateVars{Role: "security"})
+	if de.ContainerName != "static-name" {
+		t.Errorf("ContainerName should be unchanged: got %q", de.ContainerName)
 	}
 }
 
