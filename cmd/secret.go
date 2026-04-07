@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	goruntime "runtime"
 	"sort"
 	"strings"
@@ -15,12 +16,14 @@ import (
 )
 
 var (
-	secretScope   string
-	secretStorage string
-	secretSet     bool
-	secretDelete  bool
-	secretGet     bool
-	secretValue   string
+	secretScope            string
+	secretStorage          string
+	secretSet              bool
+	secretDelete           bool
+	secretGet              bool
+	secretValue            string
+	secretPrint            bool
+	secretSaveProjectScope bool
 )
 
 var secretCmd = &cobra.Command{
@@ -38,8 +41,10 @@ Examples:
   ateam secret ANTHROPIC_API_KEY --get            # print raw value (for scripting)
   ateam secret ANTHROPIC_API_KEY --delete
   ateam secret ANTHROPIC_API_KEY --scope global
-  ateam secret ANTHROPIC_API_KEY --storage file`,
-	Args: cobra.MaximumNArgs(1),
+  ateam secret ANTHROPIC_API_KEY --storage file
+  ateam secret --print                            # print all as KEY=VALUE (raw, for piping)
+  ateam secret --save-project-scope               # write all to .ateam/secrets.env`,
+	Args: cobra.ArbitraryArgs,
 	RunE: runSecret,
 }
 
@@ -50,6 +55,8 @@ func init() {
 	secretCmd.Flags().BoolVar(&secretGet, "get", false, "print raw value to stdout (for scripting)")
 	secretCmd.Flags().StringVar(&secretValue, "value", "", "secret value (alternative to stdin)")
 	secretCmd.Flags().BoolVar(&secretDelete, "delete", false, "delete the secret")
+	secretCmd.Flags().BoolVar(&secretPrint, "print", false, "print raw KEY=VALUE to stdout (for piping/sourcing)")
+	secretCmd.Flags().BoolVar(&secretSaveProjectScope, "save-project-scope", false, "resolve from any source and write to .ateam/secrets.env")
 }
 
 func runSecret(cmd *cobra.Command, args []string) error {
@@ -64,8 +71,20 @@ func runSecret(cmd *cobra.Command, args []string) error {
 		orgDir = env.OrgDir
 	}
 
+	if secretPrint {
+		return printSecrets(resolver, projectDir, orgDir, args)
+	}
+
+	if secretSaveProjectScope {
+		return saveProjectScope(resolver, projectDir, orgDir, args)
+	}
+
 	if len(args) == 0 {
 		return listSecrets(resolver, backend, projectDir, orgDir)
+	}
+
+	if len(args) > 1 {
+		return fmt.Errorf("multiple names only supported with --print or --save-project-scope")
 	}
 
 	name := args[0]
@@ -226,6 +245,86 @@ func readLine() (string, error) {
 		return "", err
 	}
 	return "", nil
+}
+
+func collectSecretNames(resolver *secret.Resolver, projectDir, orgDir string, args []string) []string {
+	if len(args) > 0 {
+		return args
+	}
+	rtCfg, err := runtime.Load(projectDir, orgDir)
+	if err != nil {
+		return nil
+	}
+	names := secret.CollectRequiredEnvNames(rtCfg)
+	sort.Strings(names)
+	return names
+}
+
+func printSecrets(resolver *secret.Resolver, projectDir, orgDir string, args []string) error {
+	names := collectSecretNames(resolver, projectDir, orgDir, args)
+	for _, name := range names {
+		result := resolver.Resolve(name)
+		if result.Found {
+			fmt.Printf("%s=%s\n", name, result.Value)
+		}
+	}
+	return nil
+}
+
+func saveProjectScope(resolver *secret.Resolver, projectDir, orgDir string, args []string) error {
+	if projectDir == "" {
+		return fmt.Errorf("--save-project-scope requires a project context (.ateam/ directory)")
+	}
+
+	names := collectSecretNames(resolver, projectDir, orgDir, args)
+	if len(names) == 0 {
+		fmt.Println("No secrets to save.")
+		return nil
+	}
+
+	envFile := filepath.Join(projectDir, "secrets.env")
+	store := &secret.FileStore{Path: envFile}
+
+	var added, changed, same, written int
+	for _, name := range names {
+		result := resolver.Resolve(name)
+		if !result.Found {
+			continue
+		}
+
+		existing, hasExisting := store.Get(name)
+		if hasExisting && existing == result.Value {
+			fmt.Printf("  [same]    %s\n", name)
+			same++
+			continue
+		}
+
+		if err := store.Set(name, result.Value); err != nil {
+			fmt.Fprintf(os.Stderr, "  [error]   %s: %v\n", name, err)
+			continue
+		}
+
+		if hasExisting {
+			fmt.Printf("  [changed] %s\n", name)
+			changed++
+		} else {
+			fmt.Printf("  [added]   %s\n", name)
+			added++
+		}
+		written++
+	}
+
+	total := written + same
+	if total > 0 {
+		fmt.Printf("Wrote %d secret(s) to %s", total, envFile)
+		if changed > 0 || added > 0 {
+			fmt.Printf(" (%d added, %d changed, %d unchanged)", added, changed, same)
+		}
+		fmt.Println()
+	} else {
+		fmt.Println("No secrets found to save.")
+	}
+	return nil
 }
 
 func backendLabel(b secret.Backend) string {

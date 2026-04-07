@@ -79,6 +79,68 @@ func formatRequirement(req string) string {
 	return strings.Join(parts, " or ")
 }
 
+// ResolveDetail describes the resolution result for a single secret.
+type ResolveDetail struct {
+	Name    string
+	Found   bool
+	Source  string // "env", "project", "org", "global"
+	Backend string // "env", "file", "keychain"
+	Masked  string // "sk-a...zQAA"
+}
+
+// ResolveAllRequired resolves all required_env and forward_env entries
+// without injecting into the process environment. For display/diagnostic use.
+func ResolveAllRequired(ac *runtime.AgentConfig, forwardEnv []string, resolver *Resolver) []ResolveDetail {
+	seen := map[string]bool{}
+	var details []ResolveDetail
+
+	// Resolve required_env entries.
+	for _, req := range ac.RequiredEnv {
+		for _, alt := range strings.Split(req, "|") {
+			alt = strings.TrimSpace(alt)
+			if alt == "" || seen[alt] {
+				continue
+			}
+			seen[alt] = true
+			details = append(details, resolveOneDetail(alt, resolver))
+		}
+	}
+
+	// Resolve forward_env entries not already covered.
+	for _, key := range forwardEnv {
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		details = append(details, resolveOneDetail(key, resolver))
+	}
+
+	return details
+}
+
+func resolveOneDetail(name string, resolver *Resolver) ResolveDetail {
+	if resolver == nil {
+		return ResolveDetail{Name: name}
+	}
+	r := resolver.Resolve(name)
+	if !r.Found {
+		return ResolveDetail{Name: name}
+	}
+	masked := r.Value
+	if len(masked) > 8 {
+		masked = masked[:4] + "..." + masked[len(masked)-4:]
+	} else if len(masked) > 0 {
+		masked = "***"
+	}
+	return ResolveDetail{
+		Name:    name,
+		Found:   true,
+		Source:  r.Source,
+		Backend: r.Backend,
+		Masked:  masked,
+	}
+}
+
 // CollectRequiredEnvNames returns all unique env var names from required_env
 // across all agents in the config. Useful for listing all known secrets.
 func CollectRequiredEnvNames(cfg *runtime.Config) []string {
