@@ -412,9 +412,13 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 		}
 		var precheckScript string
 		if cc.Precheck != "" {
-			precheckScript = filepath.Join(projectDir, cc.Precheck)
-			if !filepath.IsAbs(cc.Precheck) && projectDir == "" {
-				precheckScript = cc.Precheck
+			expanded := runner.ExpandHome(cc.Precheck)
+			if filepath.IsAbs(expanded) {
+				precheckScript = expanded
+			} else if projectDir != "" {
+				precheckScript = filepath.Join(projectDir, expanded)
+			} else {
+				precheckScript = expanded
 			}
 		}
 		workDir := "/workspace"
@@ -616,7 +620,7 @@ func resolveVolumePath(vol, baseDir string) string {
 	if len(parts) < 2 {
 		return vol
 	}
-	hostPath := parts[0]
+	hostPath := runner.ExpandHome(parts[0])
 	if !filepath.IsAbs(hostPath) {
 		hostPath = filepath.Join(baseDir, hostPath)
 	}
