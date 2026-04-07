@@ -1,0 +1,71 @@
+%%{init: {'flowchart': {'htmlLabels': true}} }%%
+flowchart LR
+
+  classDef host fill:#eef4ff,stroke:#5b7bb2,stroke-width:2px,color:#1f2d3d;
+  classDef ateam fill:#e8f7f0,stroke:#4e9b7a,stroke-width:2px,color:#1f2d3d;
+  classDef sandbox fill:#fff4db,stroke:#d4a63a,stroke-width:2px,color:#1f2d3d;
+  classDef container fill:#ffe7e7,stroke:#c96b6b,stroke-width:2px,color:#1f2d3d;
+  classDef agent fill:#ffffff,stroke:#6b7280,stroke-width:1.5px,color:#111827;
+  classDef panel fill:#f8fafc,stroke:#94a3b8,stroke-width:1.5px,color:#111827;
+
+  subgraph P1["<div align='left'><b>ATeam spawns a sandbox</b></div>"]
+    direction TB
+    subgraph H1["Host"]
+      direction TB
+      subgraph T1["ATeam"]
+        direction TB
+        subgraph S1["Sandbox"]
+          A1["Agent"]
+        end
+      end
+    end
+  end
+
+  subgraph P2["<div align='left'><b>ATeam spawns a container</b></div>"]
+    direction TB
+    subgraph H2["Host"]
+      direction TB
+      subgraph T2["ATeam"]
+        direction TB
+        subgraph C2["Container"]
+          A2["Agent"]
+        end
+      end
+    end
+  end
+
+  subgraph P3["<div align='left'><b>ATeam uses a running container</b></div>"]
+    direction TB
+    subgraph H3["Host"]
+      direction TB
+      subgraph T3["ATeam"]
+        direction TB
+        subgraph C3["Running container"]
+          A3["Agent"]
+        end
+      end
+    end
+  end
+
+  subgraph P4["<div align='left'><b>ATeam runs inside container</b></div>"]
+    direction TB
+    subgraph H4["Host"]
+      direction TB
+      subgraph C4["Container"]
+        direction TB
+        subgraph T4["ATeam"]
+          A4["Agent"]
+        end
+      end
+    end
+  end
+
+  %% force left-to-right ordering
+  P1 --- P2 --- P3 --- P4
+
+  class P1,P2,P3,P4 panel;
+  class H1,H2,H3,H4 host;
+  class T1,T2,T3,T4 ateam;
+  class S1 sandbox;
+  class C2,C3,C4 container;
+  class A1,A2,A3,A4 agent;

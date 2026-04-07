@@ -69,6 +69,12 @@ func runRuns(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// CLI prints oldest-first (ASC) for natural reading order.
+	// DB returns DESC; reverse for display.
+	for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
+		rows[i], rows[j] = rows[j], rows[i]
+	}
+
 	printRunsTable(rows)
 	return nil
 }
