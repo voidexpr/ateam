@@ -85,7 +85,7 @@ func openCallDB(orgDir string) *calldb.CallDB {
 	if orgDir == "" {
 		return nil
 	}
-	db, err := calldb.Open(filepath.Join(orgDir, "state.sqlite"))
+	db, err := calldb.OpenIfExists(filepath.Join(orgDir, "state.sqlite"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: cannot open call database: %v\n", err)
 		return nil
