@@ -11,6 +11,7 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:           "ateam",
+	Version:       Version,
 	Short:         "ATeam — background roles for code quality",
 	Long:          "ATeam manages specialized roles that analyze your codebase and produce actionable reports.",
 	SilenceErrors: true,
