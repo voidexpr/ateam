@@ -374,11 +374,12 @@ Start a localhost web UI for browsing reports, reviews, sessions, and cost data.
 
 ### `ateam cat`
 
-Pretty-print stream logs by call ID.
+Pretty-print stream logs by call ID or file path.
 
 ```bash
 ateam cat 42
 ateam cat 42 43 44 --verbose
+ateam cat .ateam/logs/roles/security/2026-03-31_stream.jsonl
 ```
 
 | Flag | Description |
@@ -650,6 +651,93 @@ agent "claude-sonnet" {
 ```
 
 Agents support inheritance via `base`, sandbox settings, environment variables, isolated config dirs, and `required_env` for secret validation.
+
+### Template Variables
+
+Agent args, profile extra args, container config fields, and agent env values support `{{VAR}}` placeholder substitution. Variables are resolved at execution time by the runner.
+
+#### Available Variables
+
+| Variable | Description | Example value |
+|---|---|---|
+| `{{PROJECT_NAME}}` | Project name from `config.toml` | `myproject` |
+| `{{PROJECT_FULL_PATH}}` | Absolute path to project root | `/home/user/projects/myproject` |
+| `{{PROJECT_DIR}}` | Last component of the project path | `myproject` |
+| `{{ROLE}}` | Role ID | `security`, `supervisor` |
+| `{{ACTION}}` | Action type | `report`, `run`, `code`, `review` |
+| `{{TASK_GROUP}}` | Task group ID | `code-2026-03-31_06-09-39` |
+| `{{TIMESTAMP}}` | Run start time | `2026-03-31_06-09-39` |
+| `{{PROFILE}}` | Active profile name | `docker`, `default` |
+| `{{EXEC_ID}}` | Call tracking ID (visible in `ateam ps`) | `42` |
+| `{{AGENT}}` | Agent config name | `claude`, `claude-docker` |
+| `{{MODEL}}` | Resolved model name | `sonnet`, `haiku` |
+| `{{CONTAINER}}` | Container type | `none`, `docker` |
+
+Unknown variables are left as-is (e.g. `{{UNKNOWN}}` passes through unchanged). When `EXEC_ID` is 0 (no DB tracking), it resolves to an empty string.
+
+#### Where Templates Are Resolved
+
+| Config field | Location | Templates supported |
+|---|---|---|
+| `agent.args` | `runtime.hcl` | Yes |
+| `agent.env` values | `runtime.hcl` | Yes |
+| `agent.config_dir` | `runtime.hcl` | Yes |
+| `profile.agent_extra_args` | `runtime.hcl` | Yes |
+| `profile.container_extra_args` | `runtime.hcl` | Yes (via Docker ExtraArgs) |
+| Docker `ContainerName` | Computed at build time | Yes |
+| Docker `ExtraVolumes` | `runtime.hcl` container config | Yes |
+| Docker `Env` values | `config.toml` `[container-extra]` | Yes |
+| `agent.args_inside_container` | `runtime.hcl` | Yes |
+| `agent.args_outside_container` | `runtime.hcl` | Yes |
+
+Templates are **not** resolved in:
+- Prompt files (use `{{SOURCE_DIR}}` which has its own separate substitution)
+- Sandbox settings JSON (has its own merge mechanism)
+- Dockerfile paths (use the role-based resolution chain instead)
+- Precheck script paths (use the role-based resolution chain instead)
+- `forward_env` key names (these are env var names, not values)
+- Map keys in `env` blocks (only values are resolved)
+
+#### Examples
+
+Session naming for agent runs:
+
+```hcl
+agent "claude" {
+  args = ["-p", "--output-format", "stream-json", "--verbose",
+          "--name", "{{PROJECT_DIR}}-{{ROLE}}-{{ACTION}}"]
+}
+```
+
+Per-role Claude config directory:
+
+```hcl
+agent "claude-isolated" {
+  base       = "claude"
+  config_dir = ".claude-{{ROLE}}"
+}
+```
+
+Custom Docker hostname per role:
+
+```hcl
+profile "docker" {
+  agent              = "claude-docker"
+  container          = "docker"
+  container_extra_args = ["--hostname", "ateam-{{PROJECT_DIR}}-{{ROLE}}"]
+}
+```
+
+Passing role context as environment variables:
+
+```hcl
+agent "claude" {
+  env = {
+    ATEAM_ROLE   = "{{ROLE}}"
+    ATEAM_ACTION = "{{ACTION}}"
+  }
+}
+```
 
 ### Cost Estimation & Pricing
 
