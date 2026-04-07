@@ -37,22 +37,35 @@ func (d *DockerExecContainer) CmdFactory() CmdFactory {
 			tmpl = "docker exec {{CONTAINER}} {{CMD}}"
 		}
 
-		// Build the full agent command
-		cmdParts := append([]string{name}, args...)
-		cmdStr := strings.Join(cmdParts, " ")
-
-		// Expand template
+		// Expand container name in template
 		expanded := strings.ReplaceAll(tmpl, "{{CONTAINER}}", d.ContainerName)
-		expanded = strings.ReplaceAll(expanded, "{{CMD}}", cmdStr)
 
-		// Parse into command + args
-		fields := strings.Fields(expanded)
-		if len(fields) == 0 {
+		// Split template around {{CMD}} to preserve argument boundaries.
+		// Joining args into a string and re-splitting with Fields would
+		// destroy boundaries for args containing whitespace.
+		cmdArgs := append([]string{name}, args...)
+		var allArgs []string
+		if idx := strings.Index(expanded, "{{CMD}}"); idx >= 0 {
+			prefix := strings.TrimSpace(expanded[:idx])
+			suffix := strings.TrimSpace(expanded[idx+len("{{CMD}}"):])
+			if prefix != "" {
+				allArgs = append(allArgs, strings.Fields(prefix)...)
+			}
+			allArgs = append(allArgs, cmdArgs...)
+			if suffix != "" {
+				allArgs = append(allArgs, strings.Fields(suffix)...)
+			}
+		} else {
+			allArgs = append(allArgs, strings.Fields(expanded)...)
+			allArgs = append(allArgs, cmdArgs...)
+		}
+
+		if len(allArgs) == 0 {
 			return exec.CommandContext(ctx, "echo", "empty exec template")
 		}
 
 		// Insert -i and env forwarding after "exec" for docker exec commands
-		if fields[0] == "docker" && len(fields) > 1 && fields[1] == "exec" {
+		if allArgs[0] == "docker" && len(allArgs) > 1 && allArgs[1] == "exec" {
 			// Rebuild as: docker exec -i [-w WORKDIR] [-e KEY=VALUE...] CONTAINER CMD...
 			dockerArgs := []string{"exec", "-i"}
 			if d.WorkDir != "" {
@@ -63,15 +76,15 @@ func (d *DockerExecContainer) CmdFactory() CmdFactory {
 					dockerArgs = append(dockerArgs, "-e", key+"="+val)
 				}
 			}
-			// Append everything after "docker exec" from the expanded template
-			dockerArgs = append(dockerArgs, fields[2:]...)
+			// Append everything after "docker exec" (container name + command args)
+			dockerArgs = append(dockerArgs, allArgs[2:]...)
 			cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 			cmd.Env = os.Environ()
 			return cmd
 		}
 
 		// Non-docker exec template: use as-is
-		cmd := exec.CommandContext(ctx, fields[0], fields[1:]...)
+		cmd := exec.CommandContext(ctx, allArgs[0], allArgs[1:]...)
 		cmd.Env = os.Environ()
 		return cmd
 	}

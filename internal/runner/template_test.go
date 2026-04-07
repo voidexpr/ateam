@@ -378,14 +378,65 @@ func TestResolveContainerTemplatesNilContainer(t *testing.T) {
 	resolveContainerTemplates(nil, TemplateVars{})
 }
 
-func TestResolveContainerTemplatesNonDocker(t *testing.T) {
-	// DevcontainerContainer should be ignored (no-op).
-	dc := &container.DevcontainerContainer{
-		ConfigPath: "{{ROLE}}",
+func TestResolveContainerTemplatesDockerExec(t *testing.T) {
+	dc := &container.DockerExecContainer{
+		ContainerName: "ateam-{{PROJECT_DIR}}-{{ROLE}}",
+		ExecTemplate:  "docker exec {{CONTAINER}} {{CMD}}",
+		WorkDir:       "/workspace/{{PROJECT_DIR}}",
 	}
-	resolveContainerTemplates(dc, TemplateVars{Role: "security"})
-	if dc.ConfigPath != "{{ROLE}}" {
-		t.Errorf("DevcontainerContainer fields should not be resolved: got %q", dc.ConfigPath)
+	resolveContainerTemplates(dc, TemplateVars{
+		ProjectDir: "myapp",
+		Role:       "security",
+	})
+	if dc.ContainerName != "ateam-myapp-security" {
+		t.Errorf("ContainerName: got %q, want %q", dc.ContainerName, "ateam-myapp-security")
+	}
+	if dc.WorkDir != "/workspace/myapp" {
+		t.Errorf("WorkDir: got %q, want %q", dc.WorkDir, "/workspace/myapp")
+	}
+}
+
+func TestResolveContainerTemplatesDevcontainer(t *testing.T) {
+	dc := &container.DevcontainerContainer{
+		ConfigPath:   "/home/user/{{PROJECT_DIR}}/.devcontainer/devcontainer.json",
+		WorkspaceDir: "{{PROJECT_FULL_PATH}}",
+	}
+	resolveContainerTemplates(dc, TemplateVars{
+		ProjectDir:      "myapp",
+		ProjectFullPath: "/home/user/myapp",
+	})
+	if dc.ConfigPath != "/home/user/myapp/.devcontainer/devcontainer.json" {
+		t.Errorf("ConfigPath: got %q", dc.ConfigPath)
+	}
+	if dc.WorkspaceDir != "/home/user/myapp" {
+		t.Errorf("WorkspaceDir: got %q", dc.WorkspaceDir)
+	}
+}
+
+func TestResolveContainerTemplatesDockerSandbox(t *testing.T) {
+	dc := &container.DockerSandboxContainer{
+		SandboxName:  "ateam-{{PROJECT_DIR}}-{{ROLE}}",
+		WorkspaceDir: "{{PROJECT_FULL_PATH}}",
+		MountDir:     "{{PROJECT_FULL_PATH}}",
+		OrgDir:       "/home/user/.ateamorg",
+	}
+	resolveContainerTemplates(dc, TemplateVars{
+		ProjectDir:      "myapp",
+		ProjectFullPath: "/home/user/myapp",
+		Role:            "security",
+	})
+	if dc.SandboxName != "ateam-myapp-security" {
+		t.Errorf("SandboxName: got %q, want %q", dc.SandboxName, "ateam-myapp-security")
+	}
+	if dc.WorkspaceDir != "/home/user/myapp" {
+		t.Errorf("WorkspaceDir: got %q", dc.WorkspaceDir)
+	}
+	if dc.MountDir != "/home/user/myapp" {
+		t.Errorf("MountDir: got %q", dc.MountDir)
+	}
+	// OrgDir has no templates, should be unchanged
+	if dc.OrgDir != "/home/user/.ateamorg" {
+		t.Errorf("OrgDir should be unchanged: got %q", dc.OrgDir)
 	}
 }
 
