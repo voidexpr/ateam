@@ -175,6 +175,16 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		extraArgs = append(extraArgs, r.ArgsOutsideContainer...)
 	}
 
+	// Safety warning: --dangerously-skip-permissions outside a container
+	if !IsInContainer() {
+		for _, a := range extraArgs {
+			if a == "--dangerously-skip-permissions" {
+				fmt.Fprintf(os.Stderr, "Warning: --dangerously-skip-permissions used outside a Docker container. This skips all safety checks.\n")
+				break
+			}
+		}
+	}
+
 	// Write sandbox settings if configured (skip inside containers unless explicitly requested)
 	skipSandbox := IsInContainer() && !r.SandboxInsideContainer
 	var settingsJSON []byte
