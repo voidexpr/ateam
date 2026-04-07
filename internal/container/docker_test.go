@@ -430,3 +430,102 @@ func TestDebugCommandPersistentWithEnv(t *testing.T) {
 		t.Errorf("DebugCommand persistent with env:\n  got:  %s\n  want: %s", got, want)
 	}
 }
+
+func TestDockerExecCmdFactoryPreservesArgBoundaries(t *testing.T) {
+	dc := &DockerExecContainer{
+		ContainerName: "mycontainer",
+	}
+
+	factory := dc.CmdFactory()
+	cmd := factory(context.Background(), "claude", "--prompt", "hello world")
+	args := cmd.Args
+
+	// The "hello world" argument must be preserved as a single arg
+	foundPrompt := false
+	for i, a := range args {
+		if a == "--prompt" && i+1 < len(args) {
+			if args[i+1] != "hello world" {
+				t.Errorf("arg after --prompt = %q, want %q", args[i+1], "hello world")
+			}
+			foundPrompt = true
+			break
+		}
+	}
+	if !foundPrompt {
+		t.Errorf("--prompt not found in args: %v", args)
+	}
+}
+
+func TestDockerExecCmdFactoryDefaultTemplate(t *testing.T) {
+	dc := &DockerExecContainer{
+		ContainerName: "mycontainer",
+		WorkDir:       "/workspace",
+	}
+
+	factory := dc.CmdFactory()
+	cmd := factory(context.Background(), "claude", "-p")
+	args := cmd.Args
+
+	// Should be: docker exec -i -w /workspace mycontainer claude -p
+	if len(args) < 2 || args[0] != "docker" || args[1] != "exec" {
+		t.Fatalf("expected docker exec, got %v", args)
+	}
+
+	hasArg := func(flag, value string) bool {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) && args[i+1] == value {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !hasArg("-w", "/workspace") {
+		t.Errorf("missing -w flag, args: %v", args)
+	}
+
+	// Container name should appear before the command
+	foundName := false
+	for i, a := range args {
+		if a == "mycontainer" {
+			if i+1 < len(args) && args[i+1] == "claude" {
+				foundName = true
+			}
+			break
+		}
+	}
+	if !foundName {
+		t.Errorf("expected container name before command, args: %v", args)
+	}
+}
+
+func TestDockerExecCmdFactoryCustomTemplate(t *testing.T) {
+	dc := &DockerExecContainer{
+		ContainerName: "mycontainer",
+		ExecTemplate:  "podman exec {{CONTAINER}} {{CMD}}",
+	}
+
+	factory := dc.CmdFactory()
+	cmd := factory(context.Background(), "claude", "--prompt", "two words")
+	args := cmd.Args
+
+	// Custom template (not "docker exec"), should pass through as-is
+	if args[0] != "podman" {
+		t.Fatalf("expected podman, got %v", args)
+	}
+
+	// Arg boundaries must still be preserved
+	foundPrompt := false
+	for i, a := range args {
+		if a == "--prompt" && i+1 < len(args) {
+			if args[i+1] != "two words" {
+				t.Errorf("arg after --prompt = %q, want %q", args[i+1], "two words")
+			}
+			foundPrompt = true
+			break
+		}
+	}
+	if !foundPrompt {
+		t.Errorf("--prompt not found in args: %v", args)
+	}
+}
