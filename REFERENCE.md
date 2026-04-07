@@ -1,6 +1,6 @@
 # ATeam Reference
 
-Full command reference, configuration, and troubleshooting. See [README.md](README.md) for an overview and quick start.
+Full command reference, configuration, and troubleshooting. See [README.md](README.md) for an overview and quick start. See [CONTAINER.md](CONTAINER.md) for Docker setup and container guide.
 
 ## Global Flags
 
@@ -696,7 +696,7 @@ container "devcontainer" {
 }
 ```
 
-TODO: authentication pre-config with `claude setup-token`
+For authentication setup inside containers, see [CONTAINER.md](CONTAINER.md#running-interactive-claude-in-containers).
 
 ### Profiles
 
@@ -737,13 +737,9 @@ make companion    # produces build/ateam-linux-amd64
 
 The binary is automatically found by ateam from `build/`. For installations without a git checkout, place `ateam-linux-amd64` next to the host `ateam` binary.
 
+For complete Docker setup including secrets, precheck scripts, and interactive sessions, see [CONTAINER.md](CONTAINER.md).
+
 ## Troubleshooting
-
-### DEPRECATED: Runner Log
-
-Use `ateam ps` instead of inspecting this log. You can also use `ateam inspect TASKID` to get more details.
-
-Legacy: Every invocation is logged to `.ateam/logs/runner.log` (tab-separated, quoted fields).
 
 ### Debugging Prompts
 

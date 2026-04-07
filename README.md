@@ -76,19 +76,16 @@ cd ateam && make build
 sudo ln -s "$(pwd)/ateam" /usr/local/bin/ateam
 ```
 
-### Optional: Docker on MacOS
+### Optional: Docker
 
-Agents running in Docker need an API key forwarded as an environment variable.
-Set the key for whichever agent you use:
+Docker agents need API credentials. Store them once with `ateam secret`:
 
 ```bash
-# Claude (one of these)
 ateam secret CLAUDE_CODE_OAUTH_TOKEN    # recommended (uses your subscription)
-ateam secret ANTHROPIC_API_KEY          # use API directly (pay as you go)
-
-# Codex
-ateam secret OPENAI_API_KEY
+ateam secret ANTHROPIC_API_KEY          # or use API directly (pay as you go)
 ```
+
+See [CONTAINER.md](CONTAINER.md) for Docker setup details.
 
 ### Upgrade
 
@@ -278,21 +275,9 @@ unsandboxed_commands = ["playwright"]    # commands that can't run inside a sand
 
 ### Docker
 
-Three ways to use Docker with ATeam:
+Use `--profile docker` for one-shot container isolation, or run ateam inside your own Docker setup. Agents auto-detect containers and skip sandbox/permissions — no profile switching needed.
 
-1. **Docker one-shot** (`--profile docker`): ATeam builds and runs a fresh container per command. Simple sandbox alternative.
-2. **Docker exec** (`docker-exec` type): ATeam execs into your existing container (docker-compose, devcontainer). No lifecycle management.
-3. **ATeam inside Docker**: Install ateam in your Docker image. Agents auto-detect the container and skip sandbox/permissions. Best for Docker-native projects.
-
-Agents auto-adapt: sandbox and permissions are applied on the host, skipped inside containers. No profile switching needed.
-
-See [CONTAINER.md](CONTAINER.md) for the full guide: secrets, precheck scripts, interactive sessions, and troubleshooting.
-
-### Agent Configuration
-
-Agents auto-adapt to their environment via `args_inside_container` and `sandbox_inside_container` fields in `runtime.hcl`. On the host: sandbox and permissions are active. Inside Docker: both are skipped. Override with custom agent definitions. See [CONTAINER.md](CONTAINER.md#agent-behavior-inside-vs-outside-containers) for details.
-
-To use a project-specific config directory, use the `claude-isolated` agent or set `config_dir` in a custom agent definition in `runtime.hcl`.
+See [CONTAINER.md](CONTAINER.md) for the full guide: container modes, secrets, precheck scripts, interactive Claude sessions, and agent auto-adaptation.
 
 ### Customizing Runtime
 
