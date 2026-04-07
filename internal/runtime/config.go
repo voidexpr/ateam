@@ -34,6 +34,10 @@ type AgentConfig struct {
 	ConfigDir   string            // sets CLAUDE_CONFIG_DIR; relative paths resolve from .ateam/, absolute used as-is
 	Pricing     *AgentPricing     // cost estimation config (nil = no pricing)
 	RequiredEnv []string          // env var names that must be set; "A|B" means at least one of A or B
+
+	ArgsInsideContainer    []string // extra args when running inside a container (detected via /.dockerenv)
+	ArgsOutsideContainer   []string // extra args when running on the host
+	SandboxInsideContainer bool     // if false (default), skip sandbox settings inside containers
 }
 
 type AgentPricing struct {
@@ -88,9 +92,12 @@ type hclAgent struct {
 	RWPaths     []string          `hcl:"rw_paths,optional"`
 	ROPaths     []string          `hcl:"ro_paths,optional"`
 	DeniedPaths []string          `hcl:"denied_paths,optional"`
-	ConfigDir   string            `hcl:"config_dir,optional"`
-	RequiredEnv []string          `hcl:"required_env,optional"`
-	Pricing     []hclPricing      `hcl:"pricing,block"`
+	ConfigDir              string            `hcl:"config_dir,optional"`
+	RequiredEnv            []string          `hcl:"required_env,optional"`
+	ArgsInsideContainer    []string          `hcl:"args_inside_container,optional"`
+	ArgsOutsideContainer   []string          `hcl:"args_outside_container,optional"`
+	SandboxInsideContainer bool              `hcl:"sandbox_inside_container,optional"`
+	Pricing                []hclPricing      `hcl:"pricing,block"`
 }
 
 type hclPricing struct {
@@ -242,6 +249,17 @@ func (c *Config) resolveInheritance() error {
 		if ac.RequiredEnv == nil {
 			ac.RequiredEnv = base.RequiredEnv
 		}
+		if ac.ArgsInsideContainer == nil {
+			ac.ArgsInsideContainer = base.ArgsInsideContainer
+		}
+		if ac.ArgsOutsideContainer == nil {
+			ac.ArgsOutsideContainer = base.ArgsOutsideContainer
+		}
+		// SandboxInsideContainer: bool defaults to false, only inherit if base is true and child hasn't explicitly set it.
+		// Since we can't distinguish "not set" from "set to false" for bools, we inherit if base is true.
+		if !ac.SandboxInsideContainer && base.SandboxInsideContainer {
+			ac.SandboxInsideContainer = base.SandboxInsideContainer
+		}
 
 		c.Agents[name] = ac
 		resolved[name] = true
@@ -309,20 +327,23 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 			}
 		}
 		cfg.Agents[a.Name] = AgentConfig{
-			Name:        a.Name,
-			Base:        a.Base,
-			Command:     a.Command,
-			Args:        a.Args,
-			Model:       a.Model,
-			Type:        a.Type,
-			Env:         a.Env,
-			Sandbox:     a.Sandbox,
-			RWPaths:     a.RWPaths,
-			ROPaths:     a.ROPaths,
-			DeniedPaths: a.DeniedPaths,
-			ConfigDir:   a.ConfigDir,
-			Pricing:     pricing,
-			RequiredEnv: a.RequiredEnv,
+			Name:                   a.Name,
+			Base:                   a.Base,
+			Command:                a.Command,
+			Args:                   a.Args,
+			Model:                  a.Model,
+			Type:                   a.Type,
+			Env:                    a.Env,
+			Sandbox:                a.Sandbox,
+			RWPaths:                a.RWPaths,
+			ROPaths:                a.ROPaths,
+			DeniedPaths:            a.DeniedPaths,
+			ConfigDir:              a.ConfigDir,
+			Pricing:                pricing,
+			RequiredEnv:            a.RequiredEnv,
+			ArgsInsideContainer:    a.ArgsInsideContainer,
+			ArgsOutsideContainer:   a.ArgsOutsideContainer,
+			SandboxInsideContainer: a.SandboxInsideContainer,
 		}
 	}
 	for _, c := range hf.Containers {
