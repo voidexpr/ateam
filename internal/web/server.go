@@ -38,18 +38,6 @@ type ProjectEntry struct {
 	db         *calldb.CallDB // cached; may be nil
 }
 
-func (pe *ProjectEntry) projectID() string {
-	if pe.SourceDir == "" || pe.OrgDir == "" {
-		return ""
-	}
-	orgRoot := filepath.Dir(pe.OrgDir)
-	rel, err := filepath.Rel(orgRoot, pe.SourceDir)
-	if err != nil {
-		return ""
-	}
-	return config.PathToProjectID(rel)
-}
-
 // Server is the ateam web server.
 type Server struct {
 	URL        string // set after ListenAndServe binds
