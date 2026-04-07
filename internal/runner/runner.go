@@ -234,26 +234,28 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		}
 	}
 
-	// Resolve {{VAR}} templates in agent args and extra args.
+	// Resolve {{VAR}} templates in agent args, extra args, and container fields.
 	tmplVars := BuildTemplateVars(r, opts, startedAt, callID, agentName, model)
-	extraArgs = ResolveTemplateArgs(extraArgs, tmplVars)
+	extraArgs = resolveArgs(extraArgs, tmplVars.Replacer())
 	runAgent := resolveAgentTemplateArgs(r.Agent, tmplVars)
+	resolveContainerTemplates(r.Container, tmplVars)
 
 	// Archive the prompt to history before running.
 	promptFile := archivePrompt(opts.HistoryDir, opts.PromptName, prompt, startedAt)
 
 	// Resolve CLAUDE_CONFIG_DIR for isolated agents.
 	// Relative config_dir is resolved from ProjectDir (.ateam/); absolute is used as-is.
+	configDir := ResolveTemplateString(r.ConfigDir, tmplVars)
 	var reqEnv map[string]string
-	if r.ConfigDir != "" {
+	if configDir != "" {
 		var configPath string
-		if filepath.IsAbs(r.ConfigDir) {
-			configPath = r.ConfigDir
+		if filepath.IsAbs(configDir) {
+			configPath = configDir
 		} else {
 			if r.ProjectDir == "" {
 				return failEarly(fmt.Errorf("relative config_dir requires project context (no .ateam/ found)"))
 			}
-			configPath = filepath.Join(r.ProjectDir, r.ConfigDir)
+			configPath = filepath.Join(r.ProjectDir, configDir)
 		}
 		reqEnv = map[string]string{
 			"CLAUDE_CONFIG_DIR": configPath,
