@@ -324,6 +324,14 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		req.CmdFactory = ds.CmdFactory()
 	}
 
+	// If running inside a docker-exec container (user-managed), run precheck and set up CmdFactory.
+	if de, ok := r.Container.(*container.DockerExecContainer); ok {
+		if err := de.RunPrecheck(ctx); err != nil {
+			return failEarly(fmt.Errorf("precheck failed: %w", err))
+		}
+		req.CmdFactory = de.CmdFactory()
+	}
+
 	command, agentArgs := runAgent.DebugCommandArgs(extraArgs)
 	cliStr := command + " " + strings.Join(agentArgs, " ")
 

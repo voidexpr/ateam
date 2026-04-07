@@ -52,16 +52,18 @@ type ModelPricing struct {
 
 type ContainerConfig struct {
 	Name             string
-	Type             string   // "none", "docker", "devcontainer", "docker-sandbox"
+	Type             string   // "none", "docker", "docker-exec", "devcontainer", "docker-sandbox"
 	Mode             string   // "oneshot" (default) or "persistent"
 	Dockerfile       string   // docker: relative to .ateam/ dir
+	DockerContainer  string   // docker-exec: name of user-managed container
+	ExecTemplate     string   // docker-exec: custom exec command (default: "docker exec {{CONTAINER}} {{CMD}}")
 	ConfigPath       string   // devcontainer: path to devcontainer.json (relative to source dir)
 	IdleTimeout      string   // duration string, e.g. "30m" (future use)
 	ForwardEnv       []string // env var names to forward from host into container
 	ExtraVolumes     []string // additional volume mounts, e.g. "../data:/data:ro"
 	CopyClaudeConfig bool     // docker-sandbox: copy ~/.claude/ config (skills, plugins) into sandbox
 	NetworkPolicy    string   // docker-sandbox: "deny" (default) or "allow"
-	Precheck         string   // docker: precheck script path, relative to .ateam/ (or "" for convention default)
+	Precheck         string   // docker/docker-exec: precheck script path, relative to .ateam/ (or "" for convention default)
 }
 
 type ProfileConfig struct {
@@ -116,6 +118,8 @@ type hclContainer struct {
 	Type             string   `hcl:"type,optional"`
 	Mode             string   `hcl:"mode,optional"`
 	Dockerfile       string   `hcl:"dockerfile,optional"`
+	DockerContainer  string   `hcl:"docker_container,optional"`
+	ExecTemplate     string   `hcl:"exec,optional"`
 	ConfigPath       string   `hcl:"config_path,optional"`
 	IdleTimeout      string   `hcl:"idle_timeout,optional"`
 	ForwardEnv       []string `hcl:"forward_env,optional"`
