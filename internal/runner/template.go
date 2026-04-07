@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ateam/internal/agent"
+	"github.com/ateam/internal/container"
 )
 
 // TemplateVars holds the variables available for {{VAR}} substitution
@@ -26,63 +27,109 @@ type TemplateVars struct {
 	Container       string // container type ("none", "docker", etc.)
 }
 
+// Replacer builds a strings.Replacer for the current template vars.
+// Call once per Run() and reuse across all resolution calls.
+func (v TemplateVars) Replacer() *strings.Replacer {
+	execID := ""
+	if v.ExecID > 0 {
+		execID = fmt.Sprintf("%d", v.ExecID)
+	}
+	return strings.NewReplacer(
+		"{{PROJECT_NAME}}", v.ProjectName,
+		"{{PROJECT_FULL_PATH}}", v.ProjectFullPath,
+		"{{PROJECT_DIR}}", v.ProjectDir,
+		"{{ROLE}}", v.Role,
+		"{{ACTION}}", v.Action,
+		"{{TASK_GROUP}}", v.TaskGroup,
+		"{{TIMESTAMP}}", v.Timestamp,
+		"{{PROFILE}}", v.Profile,
+		"{{EXEC_ID}}", execID,
+		"{{AGENT}}", v.Agent,
+		"{{MODEL}}", v.Model,
+		"{{CONTAINER}}", v.Container,
+	)
+}
+
 // ResolveTemplateArgs replaces {{VAR}} placeholders in each arg string.
 // Unknown variables are left as-is.
 func ResolveTemplateArgs(args []string, vars TemplateVars) []string {
-	execID := ""
-	if vars.ExecID > 0 {
-		execID = fmt.Sprintf("%d", vars.ExecID)
-	}
-	replacements := []string{
-		"{{PROJECT_NAME}}", vars.ProjectName,
-		"{{PROJECT_FULL_PATH}}", vars.ProjectFullPath,
-		"{{PROJECT_DIR}}", vars.ProjectDir,
-		"{{ROLE}}", vars.Role,
-		"{{ACTION}}", vars.Action,
-		"{{TASK_GROUP}}", vars.TaskGroup,
-		"{{TIMESTAMP}}", vars.Timestamp,
-		"{{PROFILE}}", vars.Profile,
-		"{{EXEC_ID}}", execID,
-		"{{AGENT}}", vars.Agent,
-		"{{MODEL}}", vars.Model,
-		"{{CONTAINER}}", vars.Container,
-	}
-	replacer := strings.NewReplacer(replacements...)
+	return resolveArgs(args, vars.Replacer())
+}
 
+func resolveArgs(args []string, r *strings.Replacer) []string {
 	resolved := make([]string, len(args))
 	for i, arg := range args {
-		resolved[i] = replacer.Replace(arg)
+		resolved[i] = r.Replace(arg)
 	}
 	return resolved
 }
 
-// resolveAgentTemplateArgs resolves templates in the agent's base Args on a
-// per-run clone, so the original shared agent config is never mutated.
+// ResolveAgentForDryRun is the exported version of resolveAgentTemplateArgs
+// for use in dry-run display from command handlers.
+func ResolveAgentForDryRun(a agent.Agent, vars TemplateVars) agent.Agent {
+	return resolveAgentTemplateArgs(a, vars)
+}
+
+// resolveAgentTemplateArgs resolves templates in the agent's Args, Env values,
+// and other string fields. Clones the agent so the original config is never mutated.
 func resolveAgentTemplateArgs(a agent.Agent, vars TemplateVars) agent.Agent {
+	r := vars.Replacer()
 	switch t := a.(type) {
 	case *agent.ClaudeAgent:
 		clone := *t
-		clone.Args = ResolveTemplateArgs(t.Args, vars)
-		clone.Env = cloneStringMap(t.Env)
+		clone.Args = resolveArgs(t.Args, r)
+		clone.Env = resolveMap(t.Env, r)
 		return &clone
 	case *agent.CodexAgent:
 		clone := *t
-		clone.Args = ResolveTemplateArgs(t.Args, vars)
-		clone.Env = cloneStringMap(t.Env)
+		clone.Args = resolveArgs(t.Args, r)
+		clone.Env = resolveMap(t.Env, r)
 		return &clone
 	}
 	return a
 }
 
-func cloneStringMap(src map[string]string) map[string]string {
-	if src == nil {
+// ResolveTemplateString replaces {{VAR}} placeholders in a single string.
+func ResolveTemplateString(s string, vars TemplateVars) string {
+	if !strings.Contains(s, "{{") {
+		return s
+	}
+	return vars.Replacer().Replace(s)
+}
+
+// ResolveTemplateMap replaces {{VAR}} placeholders in map values.
+// Keys are not resolved. Returns a new map.
+func ResolveTemplateMap(m map[string]string, vars TemplateVars) map[string]string {
+	return resolveMap(m, vars.Replacer())
+}
+
+func resolveMap(m map[string]string, r *strings.Replacer) map[string]string {
+	if m == nil {
 		return nil
 	}
-	dst := make(map[string]string, len(src))
-	for k, v := range src {
-		dst[k] = v
+	resolved := make(map[string]string, len(m))
+	for k, v := range m {
+		resolved[k] = r.Replace(v)
 	}
-	return dst
+	return resolved
+}
+
+// resolveContainerTemplates resolves {{VAR}} placeholders in container config fields.
+// Mutates the container in place (ExtraArgs, ContainerName, Env, ExtraVolumes).
+func resolveContainerTemplates(c container.Container, vars TemplateVars) {
+	if c == nil {
+		return
+	}
+	switch dc := c.(type) {
+	case *container.DockerContainer:
+		r := vars.Replacer()
+		dc.ExtraArgs = resolveArgs(dc.ExtraArgs, r)
+		dc.ExtraVolumes = resolveArgs(dc.ExtraVolumes, r)
+		if strings.Contains(dc.ContainerName, "{{") {
+			dc.ContainerName = r.Replace(dc.ContainerName)
+		}
+		dc.Env = resolveMap(dc.Env, r)
+	}
 }
 
 // BuildTemplateVars constructs a fully populated TemplateVars.

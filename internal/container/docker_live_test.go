@@ -69,7 +69,7 @@ RUN mkdir -p /data /artifacts /output /agent-data \
 USER agent
 WORKDIR /workspace
 `), 0644)
-		cmd := exec.Command("docker", "build", "--build-arg", "USER_UID="+liveTestUID(), "-t", liveImage, "-f", df, dir)
+		cmd := exec.Command("docker", "build", "--pull", "--build-arg", "USER_UID="+liveTestUID(), "-t", liveImage, "-f", df, dir)
 		cmd.Stdout = os.Stderr
 		cmd.Stderr = os.Stderr
 		buildErr = cmd.Run()
