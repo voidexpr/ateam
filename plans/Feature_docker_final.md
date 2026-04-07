@@ -588,6 +588,108 @@ Existing `--method`, `--exec`, `--dry-run`, `--container-only` flags stay but be
 - **`exec` templating**: implement alongside `docker-exec`. Default: `"docker exec {{CONTAINER}} {{CMD}}"`.
 - **`--container-only` on `agent-config`**: `--audit` works everywhere (read-only). `--wipe-i-am-sure` and `--setup-interactive` respect `--container-only` (default true — refuse on host without override).
 
+---
+
+## Implementation Steps
+
+Ordered for incremental delivery. Each step is independently useful, builds on the previous, and can be stopped/resumed. Run `make build && make test` after each step.
+
+### Step 1: `ateam run --dry-run` [I]
+
+**Goal:** diagnostic tool to see exactly what would execute.
+
+**Files:**
+- `internal/secret/validate.go` — add `ResolveAllRequired(ac, resolver) []ResolveDetail` type+function (~30 lines). Returns resolution details per secret without injecting into env.
+- `cmd/run.go` — add `--dry-run` flag. After runner resolution but before execution, print: agent/profile/container info, agent command (`DebugCommandArgs`), docker command (if container), secret resolution (`ResolveAllRequired`), sandbox settings, prompt. Skip `ValidateSecrets` in dry-run path (add `skipSecretValidation` param to `newRunner`).
+
+**Test:** `ateam run --dry-run "hello" --profile docker` shows full output without running.
+
+### Step 2: `ateam secret --print` and `--save-project-scope` [B]
+
+**Goal:** secrets cross Docker boundaries via `.ateam/secrets.env`.
+
+**Files:**
+- `cmd/secret.go` — add `--print` flag: resolve named secrets (or all), print raw `KEY=VALUE` to stdout, no masking. Add `--save-project-scope` flag: resolve secrets, write to `.ateam/secrets.env` via `FileStore.Set`, report added/changed/same for each key.
+- `cmd/env.go` — in the auth display section, compare project-scope and global-scope values for each secret. Print `⚠ project value overrides global value` when they differ.
+
+**Test:** `ateam secret --print` outputs raw values. `ateam secret --save-project-scope` writes to `.ateam/secrets.env` with diff report. `ateam env` shows override warning.
+
+### Step 3: Environment-aware agent args [A]
+
+**Goal:** one `claude` agent definition works inside and outside Docker.
+
+**Files:**
+- `internal/runtime/config.go` — add `ArgsInsideContainer`, `ArgsOutsideContainer` (both `[]string`), `SandboxInsideContainer` (`bool`, default `false`) to `AgentConfig`. Parse from HCL: `args_inside_container`, `args_outside_container`, `sandbox_inside_container`. Update `resolveInheritance` to merge these fields.
+- `internal/runtime/config_test.go` — test parsing and inheritance of new fields.
+- `defaults/runtime.hcl` — update `claude` agent: move `--dangerously-skip-permissions` to `args_inside_container`. Remove `claude-docker` agent. Update profiles that reference `claude-docker` to use `claude`. Update `codex` agent: move `--sandbox workspace-write` to `args_outside_container`.
+- `internal/runner/runner.go` — in `Run()`, after building agent args: if `isInContainer()`, append `args_inside_container` and skip sandbox file if `!sandbox_inside_container`. Else append `args_outside_container`.
+- `cmd/table.go` — add `isInContainer()` utility (or reuse from `cmd/agent_auth.go`). May need to move to a shared location.
+
+**Test:** `make test`. `ateam run --dry-run "hello"` inside Docker shows `--dangerously-skip-permissions` in args, no sandbox. Outside Docker shows sandbox settings, no `--dangerously-skip-permissions`.
+
+### Step 4: Docker error messages [G] and safety guard [H]
+
+**Goal:** clear errors inside Docker, prevent `--dangerously-skip-permissions` on host.
+
+**Files:**
+- `internal/secret/validate.go` — in `ValidateSecrets`, if error and `isInContainer()`, append Docker-specific setup instructions to the error message.
+- `internal/runner/runner.go` — before agent execution, if args contain `--dangerously-skip-permissions` (or codex equivalent) and NOT `isInContainer()`, print warning. If `--force` not set, refuse to run.
+
+**Test:** missing secret inside Docker gives container-specific error. `--dangerously-skip-permissions` outside Docker warns/refuses.
+
+### Step 5: Rename `agent-auth` to `agent-config` [J]
+
+**Goal:** broader command with `--audit`, `--setup-interactive`, `--wipe-i-am-sure`.
+
+**Files:**
+- `cmd/agent_config.go` — rename from `cmd/agent_auth.go`. Change command name to `agent-config`. Add `--audit` (replaces default behavior — show auth state, print raw tokens when interactive login detected, show export instructions). Add `--setup-interactive` (replaces `--method regular --exec`). Add `--wipe-i-am-sure` (replaces cleanup + `--wipe-config-clean`). Mark all as `[experimental]` in output. `--audit` ignores `--container-only`. `--setup-interactive` and `--wipe-i-am-sure` respect it.
+- `cmd/root.go` — replace `agentAuthCmd` with `agentConfigCmd`.
+- `internal/agent/claude_auth.go` — no changes (logic stays the same).
+
+**Test:** `ateam agent-config --audit` works everywhere. `ateam agent-config --wipe-i-am-sure` refuses on host without `--container-only=false`.
+
+### Step 6: `docker-exec` container type with exec templating [C]
+
+**Goal:** exec into user-managed containers.
+
+**Files:**
+- `internal/runtime/config.go` — add `DockerContainer` and `Exec` fields to `ContainerConfig`. Parse `docker_container` and `exec` from HCL.
+- `internal/container/docker_exec.go` — new file. `DockerExecContainer` struct implementing `Container` interface. `CmdFactory` parses `exec` template (default `"docker exec {{CONTAINER}} {{CMD}}"`), replaces `{{CONTAINER}}` with container name, `{{CMD}}` with the agent command. `Precheck` runs the precheck script via `docker exec` or host shell. No `EnsureImage` or `EnsureRunning`.
+- `cmd/table.go` — in `buildContainer`, handle `type = "docker-exec"`: create `DockerExecContainer`.
+- `defaults/runtime.hcl` — add example `docker-exec` container definition (commented out).
+
+**Test:** `make test`. Manual: configure a `docker-exec` container pointing to a running container, run `ateam run --dry-run --profile my-exec-profile "hello"`.
+
+### Step 7: `copy_ateam` on docker containers [E]
+
+**Goal:** ateam binary auto-included in oneshot containers.
+
+**Files:**
+- `internal/runtime/config.go` — add `CopyAteam` bool to `ContainerConfig` (default `true` for `docker` type).
+- `internal/container/docker.go` — in image build or container start, if `CopyAteam`, use `findLinuxBinary` and `docker cp` (or Dockerfile COPY via build context) to include the binary.
+- `defaults/runtime.hcl` — add `copy_ateam = true` to docker container definition.
+
+**Test:** build a docker container without pre-installed ateam. `ateam run --profile docker "hello"` should find ateam inside.
+
+### Step 8: Documentation [D]
+
+**Goal:** user-facing docs for all the above.
+
+**Files:**
+- `REFERENCE.md` — update secret management section (add `--print`, `--save-project-scope`). Update container section (add `docker-exec` type, precheck examples, devcontainer example). Update agent section (add `args_inside_container` etc). Document `agent-config` command.
+- `README.md` — update Docker quick start section.
+- `DEV.md` — update Docker binary resolution section.
+- `plans/ResearchClaudeExecution.md` — update container session persistence to reference `--save-project-scope` as the recommended approach.
+
+### Step 9: Cleanup
+
+**Goal:** remove dead code and old patterns.
+
+**Files:**
+- `defaults/runtime.hcl` — remove `claude-docker` agent (if not removed in step 3), remove `docker-persistent` container (superseded by `docker-exec`), update profiles.
+- `cmd/agent_auth.go` — delete (replaced by `agent_config.go` in step 5).
+- `test/docker-auth/` — update scripts to use `agent-config` instead of `agent-auth`.
+
 ## Priority Order
 
 1. **`run --dry-run`** (I) — diagnostic tool showing exact commands, secret resolution, container config. Helps users debug Docker issues while bigger changes are in progress.
