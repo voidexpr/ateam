@@ -374,6 +374,75 @@ Outside Docker, `CLAUDE_CODE_OAUTH_TOKEN` is optional (interactive login works).
 
 Add a pre-run check: refuse to run agents with `--dangerously-skip-permissions` unless inside a container (detected via `/.dockerenv`). This prevents accidentally running unsandboxed agents on the host. Can be overridden with `--force`.
 
+### I. `ateam run --dry-run`
+
+The `run` command is the only core execution command without `--dry-run` (`report`, `review`, `code`, `parallel` all have it). For Docker debugging, users need to see the exact commands, container config, and secret resolution before running.
+
+**Output format:**
+
+```
+╔══ dry-run ══╗
+
+Agent:     claude
+Profile:   docker-persistent
+Container: docker (persistent, ateam-projects_myapp-security)
+
+Command:
+  claude -p --output-format stream-json --verbose --dangerously-skip-permissions
+
+Docker:
+  docker exec -i -w /workspace -e CLAUDE_CODE_OAUTH_TOKEN=sk-a...zQAA ateam-projects_myapp-security claude ...
+
+Secrets:
+  CLAUDE_CODE_OAUTH_TOKEN  ✓ found (project, file)
+  ANTHROPIC_API_KEY        ✗ not found
+
+Settings (sandbox):
+  { ... merged JSON ... }
+
+Prompt:
+  <the resolved prompt text>
+
+╚══ dry-run ══╝
+```
+
+**Key behaviors:**
+- Shows secret resolution without injecting into env (display-only, uses masking)
+- Missing secrets show `✗ not found` instead of erroring — the point is diagnosis
+- Skip `ValidateSecrets` in dry-run (pass `skipSecretValidation` flag to `newRunner`)
+- Uses existing `DebugCommandArgs`, `DebugCommand`, `RenderSettings` methods
+
+**Files:** `cmd/run.go` (flag + print block), `internal/secret/validate.go` (add `ResolveAllRequired` function)
+
+## Implementation Status Audit
+
+How the goals in this plan map to what's actually implemented:
+
+| # | Goal | Status | Gap |
+|---|------|--------|-----|
+| A | Environment-aware agent args | **Not started** | `runtime.hcl` still has separate `claude` and `claude-docker`. No `args_inside_container` field. Largest UX gap. |
+| B | Secret management (`--save-project-scope`, `--print`) | **Partial** | Resolver chain works. `ValidateSecrets` injects via `os.Setenv`. Missing: `--save-project-scope` and `--print` flags. Workaround: manually write `secrets.env`. |
+| C | `docker-exec` container type | **Not started** | `docker` oneshot + persistent work. `docker-exec` not built. `devcontainer` and `docker-sandbox` exist as other types. |
+| D | Interactive sessions (refresh token) | **Partial** | `agent-auth` exists with `--save-refresh-token` and `--method regular --exec`. Needs polish. |
+| E | `copy_ateam` for docker containers | **Different impl** | `findLinuxBinary()` + `HostCLIPath` mount achieves the same outcome. Not a declarative `copy_ateam` field. |
+| F | Isolated agent config dirs | **Implemented** | `claude-isolated` in runtime.hcl, `Runner.ConfigDir`, `CLAUDE_CONFIG_DIR`. |
+| G | Docker error messages | **Not started** | No Docker detection in error paths. Generic errors everywhere. Quick win. |
+| H | Safety guard | **Not started** | No check refusing `--dangerously-skip-permissions` outside containers. Quick win. |
+| I | `run --dry-run` | **Not started** | No dry-run on `ateam run`. Other commands have it. |
+
+**Cross-plan status:**
+
+| Plan | Proposal | Status |
+|------|----------|--------|
+| `FEATURE_ateam_in_docker.md` | Transparent re-exec | Correctly deferred (rejected) |
+| `FEATURE_docker_alt_designs.md` | Safety guard, lifecycle commands | Guard not built, lifecycle deferred |
+| `FEATURE_docker_refactoring.md` | ExternalContainer (docker-exec) | Not implemented |
+| `FEATURE_container_docker_compose.md` | ComposeContainer | Superseded by docker-exec design |
+
+**Revised priority considering current state:**
+
+The two biggest gaps are A (env-aware args) and B (secret management). Both are needed for the "just works inside Docker" goal. `run --dry-run` (I) is the diagnostic tool that helps users while A and B are being built.
+
 ## Additional Issues from Prior Research
 
 ### Auth credential persistence
@@ -422,22 +491,111 @@ Docker doesn't isolate network by default. Options for restricting agent network
 
 Integration tests often need to reach host services (database, dev server). Docker containers use `host.docker.internal` but this needs explicit config. Not all Docker setups support it.
 
-## Open Questions
+## Resolved Questions
 
-1. **Should `forward_env` include `ANTHROPIC_API_KEY` by default?** Current: yes. Proposed: no (remove from container definitions, users add explicitly if needed).
-2. **devcontainer**: is it a flavor of `docker-exec` (just set `docker_container` to the devcontainer name) or does it need its own type?
-3. **Auto-rebuild detection**: compute hash from Dockerfile + binary version, rebuild only when changed? (docker-sandbox already does this)
-4. **`exec` property templating**: future-proof `docker-exec` with `exec = "docker exec {{CONTAINER}} {{CMD}}"` to support podman/remote? Or wait for real demand?
-5. **`agent-auth` vs `agent-config`**: rename to broader `agent-config` with `--auth` subcommand? Or fold auth audit into `ateam env`?
-6. **`--export-auth`**: experimental flag to print token + instructions for replicating auth in another environment. Useful but scope creep?
+1. **`forward_env` and `ANTHROPIC_API_KEY`**: keep `ANTHROPIC_API_KEY` in default `forward_env`. Both tokens should be available in containers — the secret management design (section B) handles the coexistence problem by using file-based resolution instead of env vars.
+
+2. **devcontainer**: no separate type. Use `docker-exec` with a precheck script that runs the devcontainer CLI:
+   ```hcl
+   container "devcontainer" {
+     type             = "docker-exec"
+     docker_container = "my-project-devcontainer"
+     precheck         = "devcontainer-precheck.sh"
+     forward_env      = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
+   }
+   ```
+   Example precheck:
+   ```bash
+   #!/bin/bash
+   # devcontainer-precheck.sh
+   if ! docker ps --format '{{.Names}}' | grep -q my-project-devcontainer; then
+       devcontainer up --workspace-folder .
+   fi
+   ```
+   Document as an example in REFERENCE.md.
+
+3. **Auto-rebuild detection**: removed. The `docker` oneshot type already rebuilds on every run (layer cache handles speed). The docker-sandbox hash detection is sandbox-specific. No need for a general mechanism.
+
+4. **`exec` property templating**: evaluated below.
+
+5. **`agent-auth` rename**: rename to `agent-config` with subcommands. See section J below.
+
+### Exec property templating evaluation
+
+The `exec` property on `docker-exec` containers would allow custom exec commands:
+```hcl
+container "podman-app" {
+  type             = "docker-exec"
+  docker_container = "my-app"
+  exec             = "podman exec {{CONTAINER}} {{CMD}}"
+}
+
+container "remote-app" {
+  type             = "docker-exec"
+  docker_container = "my-app"
+  exec             = "ssh devbox docker exec {{CONTAINER}} {{CMD}}"
+}
+```
+
+**Level of effort**: low-medium. The `docker-exec` container's `CmdFactory` already builds the `docker exec` command. Templating means: read the `exec` string, replace `{{CONTAINER}}` and `{{CMD}}`, parse into command + args. ~30 lines in `docker.go`, plus HCL schema change (~5 lines in `config.go`).
+
+**What it abstracts**: the container runtime. `docker exec`, `podman exec`, `ssh ... docker exec`, `kubectl exec` — all become config, not code. The `docker-exec` type becomes a generic "exec into a named thing" type.
+
+**Recommendation**: implement when building `docker-exec`. The marginal cost over hardcoded `docker exec` is small and the abstraction is clean. Default `exec` template: `"docker exec {{CONTAINER}} {{CMD}}"`.
+
+### J. Rename `agent-auth` to `agent-config`
+
+Rename the current `agent-auth` command to `agent-config` with clear subcommands. All marked as **experimental** in help text and output.
+
+```
+ateam agent-config --audit                    # show auth state, tokens, config
+ateam agent-config --setup-interactive        # browser login + refresh token flow
+ateam agent-config --wipe-i-am-sure           # nuke ~/.claude state (current cleanup)
+```
+
+**`--audit`** output:
+```
+[experimental] Claude Code Agent Configuration Audit
+
+Config dir:       /home/agent/.claude
+Active auth:      oauth (CLAUDE_CODE_OAUTH_TOKEN from project/file)
+
+Secrets:
+  ANTHROPIC_API_KEY:            (not set)
+  CLAUDE_CODE_OAUTH_TOKEN:      sk-ant-oat01-... (project, file)
+  CLAUDE_CODE_OAUTH_REFRESH_TOKEN: sk-ant-ort01-... (global, keychain)
+
+Credentials file: present (.credentials.json)
+  Refresh token:   sk-ant-ort01-Eqq29ZR...8Dx0bwAA
+
+To use this auth in another environment:
+  export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
+  # or for interactive sessions:
+  export CLAUDE_CODE_OAUTH_REFRESH_TOKEN=sk-ant-ort01-...
+  export CLAUDE_CODE_OAUTH_SCOPES="user:profile user:inference"
+```
+
+When an interactive login is detected (`.credentials.json` has refresh token), it prints the raw tokens with instructions for how to use them in other environments.
+
+**`--setup-interactive`**: replaces current `--method regular --exec`. Runs `claude auth login` with refresh token if available, otherwise opens browser login.
+
+**`--wipe-i-am-sure`**: replaces current cleanup + `--wipe-config-clean`. Removes all auth state, keeps `settings.json`, `plugins/`, `skills/`.
+
+Existing `--method`, `--exec`, `--dry-run`, `--container-only` flags stay but become secondary (used by `--setup-interactive` internally).
+
+## Resolved
+
+- **`exec` templating**: implement alongside `docker-exec`. Default: `"docker exec {{CONTAINER}} {{CMD}}"`.
+- **`--container-only` on `agent-config`**: `--audit` works everywhere (read-only). `--wipe-i-am-sure` and `--setup-interactive` respect `--container-only` (default true — refuse on host without override).
 
 ## Priority Order
 
-1. **Secret management** (B) — `--save-project-scope` and `--print` on `ateam secret`, project/global override warning in `ateam env`. Unblocks "ateam inside Docker" without env var conflicts.
-2. **Environment-aware agent args** (A) — `args_inside_container` + `sandbox_inside_container` eliminates `claude-docker`, one agent definition works everywhere
-3. **`docker-exec` container type** (C) — supports compose/devcontainer/external containers with precheck lifecycle hooks
-4. **`copy_ateam` default** (E) — ateam binary auto-included in `docker` containers
-5. **Docker error messages** (G) — container-specific guidance when credentials are missing
-6. **Safety guard** (H) — runtime warning if `--dangerously-skip-permissions` used outside Docker
-7. **Document refresh token flow** (D) — already works, needs user-facing docs
-8. **Isolated agent configs** (F) — enables interactive+headless coexistence, future work
+1. **`run --dry-run`** (I) — diagnostic tool showing exact commands, secret resolution, container config. Helps users debug Docker issues while bigger changes are in progress.
+2. **Secret management** (B) — `--save-project-scope` and `--print` on `ateam secret`, project/global override warning in `ateam env`. Unblocks "ateam inside Docker" without env var conflicts.
+3. **Environment-aware agent args** (A) — `args_inside_container` + `sandbox_inside_container` eliminates `claude-docker`, one agent definition works everywhere
+4. **Docker error messages** (G) — container-specific guidance when credentials are missing. Quick win.
+5. **Safety guard** (H) — runtime warning if `--dangerously-skip-permissions` used outside Docker. Quick win.
+6. **`docker-exec` container type** (C) — supports compose/devcontainer/external containers with precheck lifecycle hooks
+7. **`copy_ateam` default** (E) — ateam binary auto-included in `docker` containers
+8. **Document refresh token flow** (D) — already works, needs user-facing docs
+9. **Isolated agent configs** (F) — enables interactive+headless coexistence, future work
