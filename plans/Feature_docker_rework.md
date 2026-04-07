@@ -414,34 +414,42 @@ Prompt:
 
 **Files:** `cmd/run.go` (flag + print block), `internal/secret/validate.go` (add `ResolveAllRequired` function)
 
-## Implementation Status Audit
+## Implementation Status
 
-How the goals in this plan map to what's actually implemented:
+All planned features have been implemented:
 
-| # | Goal | Status | Gap |
-|---|------|--------|-----|
-| A | Environment-aware agent args | **Not started** | `runtime.hcl` still has separate `claude` and `claude-docker`. No `args_inside_container` field. Largest UX gap. |
-| B | Secret management (`--save-project-scope`, `--print`) | **Partial** | Resolver chain works. `ValidateSecrets` injects via `os.Setenv`. Missing: `--save-project-scope` and `--print` flags. Workaround: manually write `secrets.env`. |
-| C | `docker-exec` container type | **Not started** | `docker` oneshot + persistent work. `docker-exec` not built. `devcontainer` and `docker-sandbox` exist as other types. |
-| D | Interactive sessions (refresh token) | **Partial** | `agent-auth` exists with `--save-refresh-token` and `--method regular --exec`. Needs polish. |
-| E | `copy_ateam` for docker containers | **Different impl** | `findLinuxBinary()` + `HostCLIPath` mount achieves the same outcome. Not a declarative `copy_ateam` field. |
-| F | Isolated agent config dirs | **Implemented** | `claude-isolated` in runtime.hcl, `Runner.ConfigDir`, `CLAUDE_CONFIG_DIR`. |
-| G | Docker error messages | **Not started** | No Docker detection in error paths. Generic errors everywhere. Quick win. |
-| H | Safety guard | **Not started** | No check refusing `--dangerously-skip-permissions` outside containers. Quick win. |
-| I | `run --dry-run` | **Not started** | No dry-run on `ateam run`. Other commands have it. |
+| # | Goal | Status | Commit |
+|---|------|--------|--------|
+| A | Environment-aware agent args | **Done** | `args_inside_container`, `args_outside_container`, `sandbox_inside_container` on `AgentConfig`. One `claude` agent works everywhere. `claude-docker` kept as backward-compat alias. |
+| B | Secret management | **Done** | `ateam secret --print` and `--save-project-scope`. `ateam env` warns on project/global override. |
+| C | `docker-exec` container type | **Done** | New container type with `docker_container`, `precheck`, and `exec` template (`{{CONTAINER}}`, `{{CMD}}`). |
+| D | Interactive sessions (refresh token) | **Done** | `ateam agent-config --setup-interactive` and `--save-refresh-token`. |
+| E | `copy_ateam` for docker-exec | **Done** | `copy_ateam = true` on `docker-exec` auto-copies via `docker cp`. `ateam container-cp` command for manual use. |
+| F | Isolated agent config dirs | **Done** (pre-existing) | `claude-isolated` in runtime.hcl, `Runner.ConfigDir`, `CLAUDE_CONFIG_DIR`. |
+| G | Docker error messages | **Done** | `ValidateSecrets` detects Docker and prints container-specific setup instructions. |
+| H | Safety guard | **Done** | Runner warns when `--dangerously-skip-permissions` used outside containers. |
+| I | `run --dry-run` | **Done** | Shows agent, profile, container, docker command, secret resolution, sandbox, prompt. |
+| J | `agent-config` command | **Done** | Renamed from `agent-auth`. Has `--audit`, `--setup-interactive`, `--wipe-i-am-sure`. All marked experimental. |
 
-**Cross-plan status:**
+**Key files changed:**
+- `cmd/run.go` — `--dry-run` flag
+- `cmd/secret.go` — `--print`, `--save-project-scope`
+- `cmd/agent_config.go` — new command (replaced `agent_auth.go`)
+- `cmd/container_cp.go` — new command
+- `cmd/env.go` — project/global override warning
+- `cmd/table.go` — `docker-exec` in `buildContainer`, `findLinuxBinary` searches `build/`
+- `internal/runtime/config.go` — `ArgsInsideContainer`, `ArgsOutsideContainer`, `SandboxInsideContainer`, `DockerContainer`, `ExecTemplate`, `CopyAteam`
+- `internal/runner/runner.go` — env-aware args, sandbox skip, safety guard, `DockerExecContainer` support
+- `internal/container/docker_exec.go` — new container type
+- `internal/secret/validate.go` — Docker error messages, `ResolveAllRequired`
+- `internal/agent/claude_auth.go` — auth detection, cleanup, refresh token
+- `defaults/runtime.hcl` — `claude` with `args_inside_container`, profiles use `claude` instead of `claude-docker`
 
-| Plan | Proposal | Status |
-|------|----------|--------|
-| `FEATURE_ateam_in_docker.md` | Transparent re-exec | Correctly deferred (rejected) |
-| `FEATURE_docker_alt_designs.md` | Safety guard, lifecycle commands | Guard not built, lifecycle deferred |
-| `FEATURE_docker_refactoring.md` | ExternalContainer (docker-exec) | Not implemented |
-| `FEATURE_container_docker_compose.md` | ComposeContainer | Superseded by docker-exec design |
-
-**Revised priority considering current state:**
-
-The two biggest gaps are A (env-aware args) and B (secret management). Both are needed for the "just works inside Docker" goal. `run --dry-run` (I) is the diagnostic tool that helps users while A and B are being built.
+**Superseded plans** (deleted):
+- `FEATURE_ateam_in_docker.md` — transparent re-exec rejected
+- `FEATURE_docker_alt_designs.md` — safety guard done, lifecycle deferred
+- `FEATURE_docker_refactoring.md` — `docker-exec` implemented here
+- `FEATURE_container_docker_compose.md` — superseded by `docker-exec`
 
 ## Additional Issues from Prior Research
 
