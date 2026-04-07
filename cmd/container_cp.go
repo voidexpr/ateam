@@ -36,7 +36,7 @@ func runContainerCp(cmd *cobra.Command, args []string) error {
 	containerName := containerCpContainer
 
 	if containerName == "" && containerCpProfile != "" {
-		env, _ := root.Lookup()
+		env, _ := root.Lookup("", "")
 		var projectDir, orgDir string
 		if env != nil {
 			projectDir = env.ProjectDir
@@ -60,7 +60,7 @@ func runContainerCp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("specify --container-name or --profile")
 	}
 
-	env, _ := root.Lookup()
+	env, _ := root.Lookup("", "")
 	orgDir := ""
 	if env != nil {
 		orgDir = env.OrgDir

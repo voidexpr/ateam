@@ -263,7 +263,11 @@ func LookupFrom(start string) (*ResolvedEnv, error) {
 }
 
 // Lookup discovers org and project from the current working directory without creating anything.
-func Lookup() (*ResolvedEnv, error) {
+// When orgOverride or projectOverride are non-empty, delegates to Resolve for explicit resolution.
+func Lookup(orgOverride, projectOverride string) (*ResolvedEnv, error) {
+	if orgOverride != "" || projectOverride != "" {
+		return Resolve(orgOverride, projectOverride)
+	}
 	return LookupFrom(mustGetwd())
 }
 

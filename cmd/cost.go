@@ -27,7 +27,7 @@ Example:
 }
 
 func runCost(cmd *cobra.Command, args []string) error {
-	env, err := root.Lookup()
+	env, err := root.Resolve(orgFlag, projectFlag)
 	if err != nil {
 		return fmt.Errorf("cannot find project: %w", err)
 	}

@@ -79,7 +79,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	// Try to resolve project context (optional for ateam run)
-	env, err := root.Lookup()
+	env, err := root.Lookup(orgFlag, projectFlag)
 	if err != nil {
 		return fmt.Errorf("cannot find .ateamorg/: %w", err)
 	}

@@ -372,7 +372,7 @@ func maskToken(val string) string {
 }
 
 func lookupEnvOptional() (*root.ResolvedEnv, error) {
-	return root.Lookup()
+	return root.Lookup("", "")
 }
 
 func execClaude(target agent.AuthMethod, status agent.AuthStatus, projectDir, orgDir string, extraArgs []string) error {

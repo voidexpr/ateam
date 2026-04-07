@@ -81,7 +81,7 @@ func runCatIDs(args []string) error {
 		return err
 	}
 
-	env, err := root.Lookup()
+	env, err := root.Resolve(orgFlag, projectFlag)
 	if err != nil {
 		return fmt.Errorf("cannot find project: %w", err)
 	}

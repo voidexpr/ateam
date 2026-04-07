@@ -121,7 +121,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	env, err := root.Lookup()
+	env, err := root.Lookup(orgFlag, projectFlag)
 	if err != nil {
 		return fmt.Errorf("cannot find .ateamorg/: %w", err)
 	}
