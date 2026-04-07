@@ -1,6 +1,6 @@
 BINARY = ateam
 
-.PHONY: build build-binary companion clean tidy check-tidy test test-docker test-docker-live vuln docs lint fmt fmt-check
+.PHONY: build build-binary companion clean tidy check-tidy test test-docker test-docker-live vuln docs lint fmt fmt-check install-hooks
 
 BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
@@ -72,7 +72,19 @@ fmt:
 	gofmt -w .
 
 fmt-check:
-	test -z "$$(gofmt -l .)"
+	@unformatted=$$(gofmt -l .); \
+	if [ -n "$$unformatted" ]; then \
+		echo "The following files have formatting issues:"; \
+		echo "$$unformatted"; \
+		echo ""; \
+		echo "Run 'make fmt' to fix them."; \
+		exit 1; \
+	fi
+
+install-hooks:
+	@printf '#!/bin/sh\nmake fmt-check && make check-tidy\n' > .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "Installed pre-commit hook."
 
 clean:
 	rm -f $(BINARY) ateam-linux-*
