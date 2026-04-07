@@ -34,6 +34,18 @@ func IsInContainer() bool {
 	return err == nil
 }
 
+// ExpandHome replaces a leading ~/ with the user's home directory.
+func ExpandHome(path string) string {
+	if !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	return filepath.Join(home, path[2:])
+}
+
 // Runner orchestrates agent execution with logging, file I/O, and progress reporting.
 type Runner struct {
 	Agent                   agent.Agent
@@ -245,7 +257,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 
 	// Resolve CLAUDE_CONFIG_DIR for isolated agents.
 	// Relative config_dir is resolved from ProjectDir (.ateam/); absolute is used as-is.
-	configDir := ResolveTemplateString(r.ConfigDir, tmplVars)
+	configDir := ExpandHome(ResolveTemplateString(r.ConfigDir, tmplVars))
 	var reqEnv map[string]string
 	if configDir != "" {
 		var configPath string

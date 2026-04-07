@@ -327,7 +327,7 @@ func printRunDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, tas
 	fmt.Println()
 
 	// CLAUDE_CONFIG_DIR
-	configDir := runner.ResolveTemplateString(r.ConfigDir, tmplVars)
+	configDir := runner.ExpandHome(runner.ResolveTemplateString(r.ConfigDir, tmplVars))
 	if configDir != "" {
 		var configPath string
 		if filepath.IsAbs(configDir) {
