@@ -311,10 +311,34 @@ func printRunDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, tas
 	}
 	fmt.Println()
 
-	// Agent command (with resolved templates)
-	cmd, args := resolvedAgent.DebugCommandArgs(resolvedExtraArgs)
+	// Build the full low-level args (including --settings if sandbox is active)
+	fullArgs := make([]string, len(resolvedExtraArgs))
+	copy(fullArgs, resolvedExtraArgs)
+
+	skipSandbox := runner.IsInContainer() && !r.SandboxInsideContainer
+	if r.SandboxSettings != "" && !skipSandbox {
+		settingsPath := "<logs>/<timestamp>_settings.json"
+		fullArgs = append(fullArgs, "--settings", settingsPath)
+	}
+
+	// Agent command (with resolved templates and settings)
+	cmd, args := resolvedAgent.DebugCommandArgs(fullArgs)
 	fmt.Printf("Command:\n  %s %s\n", cmd, strings.Join(args, " "))
 	fmt.Println()
+
+	// CLAUDE_CONFIG_DIR
+	configDir := runner.ResolveTemplateString(r.ConfigDir, tmplVars)
+	if configDir != "" {
+		var configPath string
+		if filepath.IsAbs(configDir) {
+			configPath = configDir
+		} else if r.ProjectDir != "" {
+			configPath = filepath.Join(r.ProjectDir, configDir)
+		} else {
+			configPath = configDir
+		}
+		fmt.Printf("CLAUDE_CONFIG_DIR: %s\n\n", configPath)
+	}
 
 	// Docker command (if container)
 	if r.Container != nil {
@@ -329,13 +353,12 @@ func printRunDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, tas
 	// Secret resolution
 	rtCfg, _ := runtime.Load(env.ProjectDir, env.OrgDir)
 	if rtCfg != nil {
-		// Find the agent config for secret resolution
 		var ac *runtime.AgentConfig
 		var forwardEnv []string
 		profileName := r.Profile
 		if strings.HasPrefix(profileName, "a:") {
-			agentName := profileName[2:]
-			if a, ok := rtCfg.Agents[agentName]; ok {
+			an := profileName[2:]
+			if a, ok := rtCfg.Agents[an]; ok {
 				ac = &a
 			}
 		} else if profileName != "" {
@@ -364,8 +387,10 @@ func printRunDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, tas
 	}
 
 	// Sandbox settings
-	if r.SandboxSettings != "" {
+	if r.SandboxSettings != "" && !skipSandbox {
 		fmt.Println("Sandbox: configured (use --verbose for full JSON)")
+	} else if r.SandboxSettings != "" && skipSandbox {
+		fmt.Println("Sandbox: skipped (inside container)")
 	}
 
 	// Prompt
