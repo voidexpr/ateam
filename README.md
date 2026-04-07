@@ -278,21 +278,21 @@ unsandboxed_commands = ["playwright"]    # commands that can't run inside a sand
 
 ### Docker
 
-Two ways to use Docker with ATeam:
+Three ways to use Docker with ATeam:
 
-1. **ATeam orchestrates Docker** (`--profile docker`): ATeam runs on the host and launches agents inside Docker containers. Best when you want isolated build/test environments with per-project customization.
+1. **Docker one-shot** (`--profile docker`): ATeam builds and runs a fresh container per command. Simple sandbox alternative.
+2. **Docker exec** (`docker-exec` type): ATeam execs into your existing container (docker-compose, devcontainer). No lifecycle management.
+3. **ATeam inside Docker**: Install ateam in your Docker image. Agents auto-detect the container and skip sandbox/permissions. Best for Docker-native projects.
 
-2. **ATeam inside Docker**: Add ATeam and agents to your own Docker image. Agents run without any sandbox since the container is the isolation boundary. Simplest setup — no special ATeam config needed. Best for complex docker setup like multi-tier systems.
+Agents auto-adapt: sandbox and permissions are applied on the host, skipped inside containers. No profile switching needed.
 
-Docker containers need API keys forwarded as environment variables. Store them with `ateam secret` (see [Quick Start](#optional-docker-on-macos)).
-
-For detailed Docker setup instructions, container customization, and technical details, see [SANDBOX_DOCKER.md](SANDBOX_DOCKER.md).
+See [CONTAINER.md](CONTAINER.md) for the full guide: secrets, precheck scripts, interactive sessions, and troubleshooting.
 
 ### Agent Configuration
 
-In sandbox mode, agents use your default config (e.g. `~/.claude` for Claude Code) — permissions, hooks, and settings all apply. In Docker mode, agents run with `--dangerously-skip-permissions` since the container provides isolation.
+Agents auto-adapt to their environment via `args_inside_container` and `sandbox_inside_container` fields in `runtime.hcl`. On the host: sandbox and permissions are active. Inside Docker: both are skipped. Override with custom agent definitions. See [CONTAINER.md](CONTAINER.md#agent-behavior-inside-vs-outside-containers) for details.
 
-To use a project-specific config directory instead of your default, use the `claude-isolated` agent or set `config_dir` in a custom agent definition in `runtime.hcl`.
+To use a project-specific config directory, use the `claude-isolated` agent or set `config_dir` in a custom agent definition in `runtime.hcl`.
 
 ### Customizing Runtime
 

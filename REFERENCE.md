@@ -216,6 +216,22 @@ ateam agent-config --save-refresh-token       # extract refresh token from .cred
 1. First time: do a browser login (`claude` → login → `/exit`), then `--save-refresh-token`
 2. Any new container: `--setup-interactive` exchanges the refresh token for full credentials
 
+### `ateam container-cp`
+
+Copy the ateam linux binary into a running Docker container.
+
+```bash
+ateam container-cp --container-name my-app-dev
+ateam container-cp --profile my-app
+```
+
+| Flag | Description |
+|------|-------------|
+| `--container-name NAME` | Target container name |
+| `--profile NAME` | Read container name from profile's `docker_container` field |
+
+Requires a pre-built linux binary (`make companion` produces `build/ateam-linux-amd64`).
+
 ### `ateam run`
 
 Run an agent with a prompt. Can run standalone (just needs `.ateamorg/`) or within a project.
