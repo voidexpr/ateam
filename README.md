@@ -211,7 +211,7 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 | Command | Description |
 |---------|-------------|
 | `ateam init` | Initialize a project (`.ateam/` directory) |
-| `ateam auto-setup` | Auto-configure roles and create project overview |
+| `ateam auto-setup` | Auto-configure roles for your project |
 | `ateam report` | Run role analyses |
 | `ateam review` | Supervisor reviews and prioritizes findings |
 | `ateam code` | Execute prioritized coding tasks |
@@ -346,7 +346,6 @@ ATeam should be adaptable for projects of many size by running on the entire rep
 - Reduce input token usage
 - Improve default role prompts for accuracy and token usage
 - Move more orchestration away from prompts into ateam itself
-- Keep `overview.md` up to date based on commits
 - More agent types (gemini, cursor, ...) and containers (MacOS native container), improve sandbox configuration
 - Stricter testing policy and automation (opt-in)
 - Built-in scheduling

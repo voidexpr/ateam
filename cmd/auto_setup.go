@@ -23,8 +23,8 @@ var (
 var autoSetupCmd = &cobra.Command{
 	Use:   "auto-setup",
 	Short: "Auto-configure ateam for the current project",
-	Long: `Run the supervisor to analyze the project and configure roles,
-create a project overview, and recommend settings.
+	Long: `Run the supervisor to analyze the project, configure roles,
+and recommend settings.
 
 Requires an initialized project (.ateam/ directory).
 

@@ -91,9 +91,6 @@ func assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt strin
 	if info := FormatProjectInfo(pinfo); info != "" {
 		parts = append(parts, info)
 	}
-	if overview := readOverview(projectDir); overview != "" {
-		parts = append(parts, overview)
-	}
 	if rolePrompt != "" {
 		_, roleBody := ParsePromptFrontmatter(rolePrompt)
 		parts = append(parts, strings.ReplaceAll(roleBody, "{{SOURCE_DIR}}", "."))
@@ -140,19 +137,6 @@ func collectSupervisorExtras(orgDir, projectDir, extraFile string) []string {
 		filepath.Join(projectDir, "supervisor", extraFile),
 	}
 	return readAllExisting(paths)
-}
-
-// readOverview returns the project overview content if .ateam/overview.md exists.
-// The file is expected to contain its own heading.
-func readOverview(projectDir string) string {
-	if projectDir == "" {
-		return ""
-	}
-	data, err := os.ReadFile(filepath.Join(projectDir, "overview.md"))
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(data))
 }
 
 func readAllExisting(paths []string) []string {
@@ -264,9 +248,6 @@ func AssembleReviewPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, ex
 	if projectInfo != "" {
 		parts = append(parts, projectInfo)
 	}
-	if overview := readOverview(projectDir); overview != "" {
-		parts = append(parts, overview)
-	}
 	parts = append(parts, supervisorPrompt)
 	parts = append(parts, collectSupervisorExtras(orgDir, projectDir, ReviewExtraPromptFile)...)
 	if manifest != "" {
@@ -305,9 +286,6 @@ func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, pinfo Pr
 	var parts []string
 	if info := FormatProjectInfo(pinfo); info != "" {
 		parts = append(parts, info)
-	}
-	if overview := readOverview(projectDir); overview != "" {
-		parts = append(parts, overview)
 	}
 	parts = append(parts, mgmtPrompt)
 	parts = append(parts, collectSupervisorExtras(orgDir, projectDir, CodeManagementExtraPromptFile)...)
