@@ -81,6 +81,7 @@ When the work is completed, create a single commit:
 Recommendation: brief summary of what was recommended
 Changes: what was actually done
 Why: include the full details of the report finding and review that led to this change to be implemented
+Tests ran: list the tests execution and if the entire command(s) passed or failed
 ```
 
 Replace `ROLE_NAME` with the reporting role's name from the recommendation's Source field (e.g., `security`, `refactor_small`, `testing_basic`). If multiple roles sourced the recommendation, use the primary one.
