@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/runtime"
@@ -138,6 +139,13 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 		return "", err
 	}
 
+	// Create the project database with the proper schema.
+	db, err := calldb.Open(filepath.Join(projDir, "state.sqlite"))
+	if err != nil {
+		return "", fmt.Errorf("cannot create project database: %w", err)
+	}
+	db.Close()
+
 	// Legacy: create state dirs under .ateamorg/projects/ if org exists
 	if orgDir != "" && relPath != "." {
 		projectID := config.PathToProjectID(relPath)
@@ -184,8 +192,10 @@ func createLogsDirs(projDir string, roleIDs []string) error {
 			return fmt.Errorf("cannot create role logs directory: %w", err)
 		}
 	}
-	if err := os.MkdirAll(filepath.Join(projDir, "logs", "supervisor"), 0755); err != nil {
-		return fmt.Errorf("cannot create supervisor logs directory: %w", err)
+	for _, sub := range []string{"supervisor", "run"} {
+		if err := os.MkdirAll(filepath.Join(projDir, "logs", sub), 0755); err != nil {
+			return fmt.Errorf("cannot create %s logs directory: %w", sub, err)
+		}
 	}
 	return nil
 }

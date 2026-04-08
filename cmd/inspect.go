@@ -61,9 +61,9 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot find project: %w", err)
 	}
 
-	db := openProjectDB(env)
-	if db == nil {
-		return fmt.Errorf("cannot open call database")
+	db, err := requireProjectDB(env)
+	if err != nil {
+		return err
 	}
 	defer db.Close()
 
@@ -238,11 +238,12 @@ func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
 
 	setSourceWritable(r)
 
-	dbForRun := openProjectDB(env)
-	if dbForRun != nil {
-		defer dbForRun.Close()
-		r.CallDB = dbForRun
+	dbForRun, err := openProjectDB(env)
+	if err != nil {
+		return fmt.Errorf("database: %w", err)
 	}
+	defer dbForRun.Close()
+	r.CallDB = dbForRun
 
 	logsDir := env.SupervisorLogsDir()
 	reportPath := filepath.Join(logsDir, time.Now().Format(runner.TimestampFormat)+"_debug_report.md")

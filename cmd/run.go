@@ -141,9 +141,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 	applyContainerNameOverride(r, runContainerName)
 	setSourceWritable(r)
 
-	// Open call tracking DB.
-	db := openProjectDB(env)
-	if db != nil {
+	// Open call tracking DB (requires project context).
+	if hasProject {
+		db, err := openProjectDB(env)
+		if err != nil {
+			return fmt.Errorf("database: %w", err)
+		}
 		defer db.Close()
 		r.CallDB = db
 	}
@@ -165,16 +168,14 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return printRunDryRun(r, env, promptText, runRole, runTaskGroup)
 	}
 
-	// Determine logs dir
+	// Determine logs dir — always under .ateam/ when project exists.
 	var logsDir string
 	if runRole != "" {
 		logsDir = env.RoleLogsDir(runRole)
+	} else if hasProject {
+		logsDir = filepath.Join(env.ProjectDir, "logs", "run")
 	} else {
-		baseDir := env.OrgDir
-		if hasProject {
-			baseDir = env.ProjectDir
-		}
-		logsDir = filepath.Join(baseDir, "logs", "run")
+		logsDir = filepath.Join(env.OrgDir, "logs", "run")
 	}
 
 	// Build opts

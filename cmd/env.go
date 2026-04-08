@@ -187,9 +187,24 @@ func printDockerfileLine(env *root.ResolvedEnv, cwd string) {
 func printProjectSection(env *root.ResolvedEnv, cwd string) {
 	fmt.Printf("\nProject: %s\n", env.ProjectName)
 
-	fmt.Printf("  DB: %s\n", env.ProjectDBPath())
+	dbPath := env.ProjectDBPath()
+	if fileOrSymlinkExists(dbPath) {
+		fmt.Printf("  DB: %s\n", dbPath)
+	} else {
+		fmt.Printf("  DB: %s (NOT FOUND)\n", dbPath)
+	}
+	if env.ProjectDir != "" {
+		logsDir := filepath.Join(env.ProjectDir, "logs")
+		if !fileOrSymlinkExists(logsDir) {
+			fmt.Printf("  Logs: %s (NOT FOUND)\n", logsDir)
+		}
+	}
 	if env.GitRepoDir != "" {
-		fmt.Printf("  Git: %s (%s)\n", env.RelPath(env.GitRepoDir), tildeHome(env.GitRepoDir))
+		if fileOrSymlinkExists(env.GitRepoDir) {
+			fmt.Printf("  Git: %s (%s)\n", env.RelPath(env.GitRepoDir), tildeHome(env.GitRepoDir))
+		} else {
+			fmt.Printf("  Git: %s (%s) (NOT FOUND)\n", env.RelPath(env.GitRepoDir), tildeHome(env.GitRepoDir))
+		}
 	}
 	if env.Config != nil && env.Config.Git.RemoteOriginURL != "" {
 		fmt.Printf("  Remote: %s\n", env.Config.Git.RemoteOriginURL)

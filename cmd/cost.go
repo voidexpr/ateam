@@ -32,9 +32,9 @@ func runCost(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot find project: %w", err)
 	}
 
-	db := openProjectDB(env)
-	if db == nil {
-		return fmt.Errorf("cannot open call database")
+	db, err := requireProjectDB(env)
+	if err != nil {
+		return err
 	}
 	defer db.Close()
 

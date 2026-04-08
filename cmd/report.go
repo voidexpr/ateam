@@ -133,11 +133,12 @@ func runReport(opts ReportOptions) error {
 	applyContainerNameOverride(cr, opts.ContainerName)
 	applyCheaperModel(cr, opts.CheaperModel)
 
-	db := openProjectDB(env)
-	if db != nil {
-		defer db.Close()
-		cr.CallDB = db
+	db, err := openProjectDB(env)
+	if err != nil {
+		return fmt.Errorf("database: %w", err)
 	}
+	defer db.Close()
+	cr.CallDB = db
 
 	if !opts.Force {
 		if err := checkConcurrentRuns(db, "", runner.ActionReport, roleIDs); err != nil {

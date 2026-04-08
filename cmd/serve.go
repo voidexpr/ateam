@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/web"
 	"github.com/spf13/cobra"
@@ -36,6 +39,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	env, err := root.Resolve(orgFlag, projectFlag)
 	if err != nil {
 		return err
+	}
+
+	// Verify the database exists before starting the server.
+	dbPath := env.ProjectDBPath()
+	if _, statErr := os.Stat(dbPath); os.IsNotExist(statErr) {
+		return fmt.Errorf("project database not found at %s — run a command like 'ateam run' or 'ateam report' first", dbPath)
 	}
 
 	port := servePort
