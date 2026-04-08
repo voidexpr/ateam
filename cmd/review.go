@@ -152,7 +152,7 @@ func runReview(opts ReviewOptions) error {
 
 	db, err := openProjectDB(env)
 	if err != nil {
-		return fmt.Errorf("database: %w", err)
+		return err
 	}
 	defer db.Close()
 	cr.CallDB = db

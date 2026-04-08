@@ -163,7 +163,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	if hasProject {
 		db, err := openProjectDB(env)
 		if err != nil {
-			return fmt.Errorf("database: %w", err)
+			return err
 		}
 		defer db.Close()
 		r.CallDB = db

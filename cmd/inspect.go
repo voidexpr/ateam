@@ -240,7 +240,7 @@ func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
 
 	dbForRun, err := openProjectDB(env)
 	if err != nil {
-		return fmt.Errorf("database: %w", err)
+		return err
 	}
 	defer dbForRun.Close()
 	r.CallDB = dbForRun
