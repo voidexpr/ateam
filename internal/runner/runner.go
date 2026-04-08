@@ -164,10 +164,6 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		return s
 	}
 
-	if err := os.MkdirAll(opts.LogsDir, 0700); err != nil {
-		return failEarly(fmt.Errorf("cannot create logs directory: %w", err))
-	}
-
 	if opts.TimeoutMin > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(opts.TimeoutMin)*time.Minute)
@@ -255,56 +251,15 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	runAgent := resolveAgentTemplateArgs(r.Agent, tmplVars)
 	resolveContainerTemplates(r.Container, tmplVars)
 
-	// Archive the prompt to history before running.
-	promptFile := archivePrompt(opts.HistoryDir, opts.PromptName, prompt, startedAt)
-
-	// Resolve CLAUDE_CONFIG_DIR for isolated agents.
-	// Relative config_dir is resolved from ProjectDir (.ateam/); absolute is used as-is.
-	configDir := ExpandHome(ResolveTemplateString(r.ConfigDir, tmplVars))
-	var reqEnv map[string]string
-	if configDir != "" {
-		var configPath string
-		if filepath.IsAbs(configDir) {
-			configPath = configDir
-		} else {
-			if r.ProjectDir == "" {
-				return failEarly(fmt.Errorf("relative config_dir requires project context (no .ateam/ found)"))
-			}
-			configPath = filepath.Join(r.ProjectDir, configDir)
-		}
-		reqEnv = map[string]string{
-			"CLAUDE_CONFIG_DIR": configPath,
-		}
+	// Build agent request (includes log dir creation and prompt archival).
+	req, promptFile, err := r.buildPrompt(prompt, opts, startedAt, tmplVars, cwd, streamFile, stderrFile, extraArgs)
+	if err != nil {
+		return failEarly(err)
 	}
 
-	// Build the agent request
-	req := agent.Request{
-		Prompt:     prompt,
-		WorkDir:    cwd,
-		StreamFile: streamFile,
-		StderrFile: stderrFile,
-		ExtraArgs:  extraArgs,
-		Env:        reqEnv,
-	}
-
-	// Prepare the container (image build, binary copy, precheck) and wire up
-	// the CmdFactory and path translation for container execution.
-	if c := r.Container; c != nil {
-		if err := c.Prepare(ctx); err != nil {
-			return failEarly(err)
-		}
-		if factory := c.CmdFactory(); factory != nil {
-			req.CmdFactory = factory
-		}
-		// Note: StreamFile and StderrFile are NOT translated — they are
-		// opened by the host process (os.Create) to capture piped output,
-		// not accessed inside the container.
-		req.WorkDir = c.TranslatePath(cwd)
-		for i, a := range req.ExtraArgs {
-			if a == "--settings" && i+1 < len(req.ExtraArgs) {
-				req.ExtraArgs[i+1] = c.TranslatePath(req.ExtraArgs[i+1])
-			}
-		}
+	// Prepare container and translate request paths.
+	if err := r.setupContainer(ctx, &req, cwd); err != nil {
+		return failEarly(err)
 	}
 
 	command, agentArgs := runAgent.DebugCommandArgs(extraArgs)
@@ -437,6 +392,83 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		}
 	}
 
+	// Finalize: write output/error files, update DB, log result.
+	if r.finalizeCall(ctx, callID, &summary, resultEv, opts, output, cliStr, cwd) {
+		emitProgress(PhaseDone, "", "", "", totalTools, eventCount)
+	} else {
+		emitProgress(PhaseError, "", "", "", totalTools, eventCount)
+	}
+
+	return summary
+}
+
+// buildPrompt creates the log directory, archives the prompt, resolves
+// CLAUDE_CONFIG_DIR, and assembles the agent.Request. Returns the request,
+// the archived prompt file path, and any error.
+func (r *Runner) buildPrompt(prompt string, opts RunOpts, startedAt time.Time, tmplVars TemplateVars, cwd, streamFile, stderrFile string, extraArgs []string) (agent.Request, string, error) {
+	if err := os.MkdirAll(opts.LogsDir, 0700); err != nil {
+		return agent.Request{}, "", fmt.Errorf("cannot create logs directory: %w", err)
+	}
+
+	promptFile := archivePrompt(opts.HistoryDir, opts.PromptName, prompt, startedAt)
+
+	// Resolve CLAUDE_CONFIG_DIR for isolated agents.
+	// Relative config_dir is resolved from ProjectDir (.ateam/); absolute is used as-is.
+	configDir := ExpandHome(ResolveTemplateString(r.ConfigDir, tmplVars))
+	var reqEnv map[string]string
+	if configDir != "" {
+		var configPath string
+		if filepath.IsAbs(configDir) {
+			configPath = configDir
+		} else {
+			if r.ProjectDir == "" {
+				return agent.Request{}, "", fmt.Errorf("relative config_dir requires project context (no .ateam/ found)")
+			}
+			configPath = filepath.Join(r.ProjectDir, configDir)
+		}
+		reqEnv = map[string]string{"CLAUDE_CONFIG_DIR": configPath}
+	}
+
+	req := agent.Request{
+		Prompt:     prompt,
+		WorkDir:    cwd,
+		StreamFile: streamFile,
+		StderrFile: stderrFile,
+		ExtraArgs:  extraArgs,
+		Env:        reqEnv,
+	}
+	return req, promptFile, nil
+}
+
+// setupContainer prepares the container for execution and translates the
+// request's WorkDir and settings paths to container-relative paths.
+func (r *Runner) setupContainer(ctx context.Context, req *agent.Request, cwd string) error {
+	c := r.Container
+	if c == nil {
+		return nil
+	}
+	if err := c.Prepare(ctx); err != nil {
+		return err
+	}
+	if factory := c.CmdFactory(); factory != nil {
+		req.CmdFactory = factory
+	}
+	// Note: StreamFile and StderrFile are NOT translated — they are
+	// opened by the host process (os.Create) to capture piped output,
+	// not accessed inside the container.
+	req.WorkDir = c.TranslatePath(cwd)
+	for i, a := range req.ExtraArgs {
+		if a == "--settings" && i+1 < len(req.ExtraArgs) {
+			req.ExtraArgs[i+1] = c.TranslatePath(req.ExtraArgs[i+1])
+		}
+	}
+	return nil
+}
+
+// finalizeCall handles post-execution work: writes the output or error file,
+// appends to the runner log, and updates the call tracking record. Returns
+// true on success.
+func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSummary, resultEv *agent.StreamEvent, opts RunOpts, output, cliStr, cwd string) bool {
 	success := resultEv != nil && resultEv.Type == "result" && resultEv.ExitCode == 0 && !resultEv.IsError
 
 	if success {
@@ -446,7 +478,6 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			_ = os.WriteFile(opts.LastMessageFilePath, []byte(output), 0600)
 		}
 		appendLog(r.LogFile, opts.RoleID, "ok", cwd, cliStr)
-		emitProgress(PhaseDone, "", "", "", totalTools, eventCount)
 	} else {
 		summary.IsError = true
 		switch {
@@ -459,12 +490,10 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		default:
 			summary.Err = fmt.Errorf("agent produced no result event")
 		}
-		writeErrorFile(opts.ErrorMessageFilePath, summary, "")
+		writeErrorFile(opts.ErrorMessageFilePath, *summary, "")
 		appendLog(r.LogFile, opts.RoleID, "error", cwd, cliStr, summary.Err.Error())
-		emitProgress(PhaseError, "", "", "", totalTools, eventCount)
 	}
 
-	// Update call tracking record with results.
 	if r.CallDB != nil && callID > 0 {
 		errMsg := ""
 		if summary.Err != nil {
@@ -494,7 +523,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		}
 	}
 
-	return summary
+	return success
 }
 
 // RenderSettings generates the merged sandbox settings JSON without writing to disk.
