@@ -69,6 +69,7 @@ For each task:
 1. Assign a two-digit sequence number starting from 01
 2. Select the most appropriate role (use the Source Role from the review as default)
 3. Write the task description to a temp file: `EXECUTION_DIR/current_task.md`
+  * provide all the details from the review document to help understand why this task is required and why it was prioritized in addition to what needs to be done. Include all the details you have access to that are specific to this task
 4. Generate the code prompt:
    ```
    ateam prompt --role ROLE --action code \
