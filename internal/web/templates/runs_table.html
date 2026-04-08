@@ -1,33 +1,33 @@
 {{define "runs_table"}}
-<table class="data-table">
+<table class="data-table sortable-table" id="runs-table">
   <thead>
     <tr>
-      <th>ID</th>
-      <th>Action</th>
-      <th>Role</th>
-      <th>Started</th>
-      <th>Duration</th>
-      <th>Cost</th>
-      <th>Status</th>
+      <th data-sort="num">ID</th>
+      <th data-sort="str">Action</th>
+      <th data-sort="str">Role</th>
+      <th data-sort="str" data-sort-default="desc" class="sort-desc">Started</th>
+      <th data-sort="num">Duration</th>
+      <th data-sort="num">Cost</th>
+      <th data-sort="str">Status</th>
       <th>Files</th>
-      <th>In+Cache</th>
-      <th>Output</th>
-      <th>Model</th>
-      <th>Agent</th>
-      <th>Profile</th>
-      <th>Task Group</th>
+      <th data-sort="num">In+Cache</th>
+      <th data-sort="num">Output</th>
+      <th data-sort="str">Model</th>
+      <th data-sort="str">Agent</th>
+      <th data-sort="str">Profile</th>
+      <th data-sort="str">Task Group</th>
     </tr>
   </thead>
   <tbody>
     {{range .Runs}}
     <tr data-href="/p/{{$.ProjectSlug}}/runs/{{.ID}}">
-      <td><a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}">#{{.ID}}</a></td>
-      <td><span class="badge badge-{{.Action}}">{{.Action}}</span></td>
-      <td>{{.Role}}</td>
-      <td>{{fmtTimestamp .StartedAt}}</td>
-      <td>{{fmtDuration .DurationMS}}</td>
-      <td>{{fmtCost .CostUSD}}</td>
-      <td>{{if .IsError}}<span class="badge badge-error">error</span>{{else if .EndedAt}}<span class="badge badge-ok">ok</span>{{else}}<span class="badge badge-run">running</span>{{end}}</td>
+      <td data-val="{{.ID}}"><a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}">#{{.ID}}</a></td>
+      <td data-val="{{.Action}}"><span class="badge badge-{{.Action}}">{{.Action}}</span></td>
+      <td data-val="{{.Role}}">{{.Role}}</td>
+      <td data-val="{{.StartedAt}}">{{fmtTimestamp .StartedAt}}</td>
+      <td data-val="{{.DurationMS}}">{{fmtDuration .DurationMS}}</td>
+      <td data-val="{{printf "%.6f" .CostUSD}}">{{fmtCost .CostUSD}}</td>
+      <td data-val="{{if .IsError}}error{{else if .EndedAt}}ok{{else}}running{{end}}">{{if .IsError}}<span class="badge badge-error">error</span>{{else if .EndedAt}}<span class="badge badge-ok">ok</span>{{else}}<span class="badge badge-run">running</span>{{end}}</td>
       <td class="file-links">
         {{- if .ExecFile}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/exec" title="Exec">exec</a>{{end -}}
         {{- if .PromptFile}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/prompt" title="Prompt">prompt</a>{{end -}}
@@ -35,14 +35,48 @@
         {{- if .HasStream}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/logs" title="Stream log">logs</a>{{end -}}
         {{- if .HasStderr}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/stderr" title="Stderr">stderr</a>{{end -}}
       </td>
-      <td><span class="token-pill">{{fmtTokensInt (addInt .InputTokens .CacheWriteTokens)}}</span></td>
-      <td><span class="token-pill">{{fmtTokensInt .OutputTokens}}</span></td>
-      <td style="font-size:12px;color:var(--text-muted)">{{.Model}}</td>
-      <td style="font-size:12px;color:var(--text-muted)">{{.Agent}}</td>
-      <td style="font-size:12px;color:var(--text-muted)">{{.Profile}}</td>
-      <td style="font-size:12px;color:var(--text-muted)">{{.TaskGroup}}</td>
+      <td data-val="{{addInt .InputTokens .CacheWriteTokens}}"><span class="token-pill">{{fmtTokensInt (addInt .InputTokens .CacheWriteTokens)}}</span></td>
+      <td data-val="{{.OutputTokens}}"><span class="token-pill">{{fmtTokensInt .OutputTokens}}</span></td>
+      <td data-val="{{.Model}}" style="font-size:12px;color:var(--text-muted)">{{.Model}}</td>
+      <td data-val="{{.Agent}}" style="font-size:12px;color:var(--text-muted)">{{.Agent}}</td>
+      <td data-val="{{.Profile}}" style="font-size:12px;color:var(--text-muted)">{{.Profile}}</td>
+      <td data-val="{{.TaskGroup}}" style="font-size:12px;color:var(--text-muted)">{{.TaskGroup}}</td>
     </tr>
     {{end}}
   </tbody>
 </table>
+<script>
+(function(){
+  var table = document.getElementById('runs-table');
+  if (!table) return;
+  var headers = table.querySelectorAll('th[data-sort]');
+  headers.forEach(function(th, colIdx) {
+    th.style.cursor = 'pointer';
+    th.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var type = th.dataset.sort;
+      var desc = th.classList.contains('sort-asc');
+      if (!th.classList.contains('sort-asc') && !th.classList.contains('sort-desc')) {
+        desc = true;
+      }
+      headers.forEach(function(h) { h.classList.remove('sort-asc','sort-desc'); });
+      th.classList.add(desc ? 'sort-desc' : 'sort-asc');
+      var tbody = table.querySelector('tbody');
+      var rows = Array.from(tbody.querySelectorAll('tr'));
+      rows.sort(function(a, b) {
+        var av = a.children[colIdx].dataset.val || a.children[colIdx].textContent.trim();
+        var bv = b.children[colIdx].dataset.val || b.children[colIdx].textContent.trim();
+        var cmp;
+        if (type === 'num') {
+          cmp = (parseFloat(av) || 0) - (parseFloat(bv) || 0);
+        } else {
+          cmp = av.localeCompare(bv);
+        }
+        return desc ? -cmp : cmp;
+      });
+      rows.forEach(function(r) { tbody.appendChild(r); });
+    });
+  });
+})();
+</script>
 {{end}}
