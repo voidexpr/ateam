@@ -26,6 +26,7 @@ var (
 	reviewForce           bool
 	reviewRoles           []string
 	reviewDockerAutoSetup bool
+	reviewContainerName   string
 )
 
 // ReviewOptions holds configuration for a review run.
@@ -42,6 +43,7 @@ type ReviewOptions struct {
 	Force           bool
 	Roles           []string
 	DockerAutoSetup bool
+	ContainerName   string
 }
 
 var reviewCmd = &cobra.Command{
@@ -70,6 +72,7 @@ Example:
 			Force:           reviewForce,
 			Roles:           reviewRoles,
 			DockerAutoSetup: reviewDockerAutoSetup,
+			ContainerName:   reviewContainerName,
 		})
 	},
 }
@@ -86,6 +89,7 @@ func init() {
 	addVerboseFlag(reviewCmd, &reviewVerbose)
 	addForceFlag(reviewCmd, &reviewForce)
 	addDockerAutoSetupFlag(reviewCmd, &reviewDockerAutoSetup)
+	addContainerNameFlag(reviewCmd, &reviewContainerName)
 }
 
 func runReview(opts ReviewOptions) error {
@@ -143,6 +147,7 @@ func runReview(opts ReviewOptions) error {
 	if err != nil {
 		return err
 	}
+	applyContainerNameOverride(cr, opts.ContainerName)
 	applyCheaperModel(cr, opts.CheaperModel)
 
 	db := openProjectDB(env)

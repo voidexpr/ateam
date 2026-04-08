@@ -33,6 +33,7 @@ var (
 	runTaskGroup       string
 	runDockerAutoSetup bool
 	runDryRun          bool
+	runContainerName   string
 )
 
 var runCmd = &cobra.Command{
@@ -69,6 +70,7 @@ func init() {
 	runCmd.Flags().StringVar(&runTaskGroup, "task-group", "", "group related calls (e.g. all tasks in one ateam code run)")
 	addVerboseFlag(runCmd, &runVerbose)
 	addDockerAutoSetupFlag(runCmd, &runDockerAutoSetup)
+	addContainerNameFlag(runCmd, &runContainerName)
 	runCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "print resolved command, secrets, and prompt without running")
 }
 
@@ -136,6 +138,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	applyContainerNameOverride(r, runContainerName)
 	setSourceWritable(r)
 
 	// Open call tracking DB.

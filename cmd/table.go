@@ -151,6 +151,22 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 	return r, nil
 }
 
+// applyContainerNameOverride replaces the container name on a runner's container
+// if a --container-name flag was provided. Works for docker-exec and persistent docker.
+func applyContainerNameOverride(r *runner.Runner, name string) {
+	if name == "" || r.Container == nil {
+		return
+	}
+	switch c := r.Container.(type) {
+	case *container.DockerContainer:
+		c.ContainerName = name
+		r.ContainerName = name
+	case *container.DockerExecContainer:
+		c.ContainerName = name
+		r.ContainerName = name
+	}
+}
+
 // newRunnerFromAgent creates a Runner using a named agent directly (no profile).
 func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.Runner, error) {
 	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
@@ -610,6 +626,10 @@ func addProfileFlags(cmd *cobra.Command, profileDst, agentDst *string) {
 	cmd.Flags().StringVar(profileDst, "profile", "", "runtime profile (overrides config resolution)")
 	cmd.Flags().StringVar(agentDst, "agent", "", "agent name from runtime.hcl (shortcut, uses 'none' container)")
 	cmd.MarkFlagsMutuallyExclusive("profile", "agent")
+}
+
+func addContainerNameFlag(cmd *cobra.Command, dst *string) {
+	cmd.Flags().StringVar(dst, "container-name", "", "override container name (for docker-exec or persistent containers)")
 }
 
 // resolveVolumePath resolves relative host paths in a volume spec.
