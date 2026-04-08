@@ -72,11 +72,12 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 	}
 	setSourceWritable(cr)
 
-	db := openProjectDB(env)
-	if db != nil {
-		defer db.Close()
-		cr.CallDB = db
+	db, err := openProjectDB(env)
+	if err != nil {
+		return fmt.Errorf("database: %w", err)
 	}
+	defer db.Close()
+	cr.CallDB = db
 
 	supervisorDir := env.SupervisorDir()
 	historyDir := env.ReviewHistoryDir()

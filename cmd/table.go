@@ -64,34 +64,35 @@ func printDone(r runner.RunSummary) {
 	fmt.Printf("Done (%s%s)\n\n", runner.FormatDuration(r.Duration), costSuffix)
 }
 
-// openProjectDB opens the per-project state.sqlite in .ateam/.
-// Falls back to the legacy org-level state.sqlite if the project DB doesn't exist.
-func openProjectDB(env *root.ResolvedEnv) *calldb.CallDB {
-	if env.ProjectDir != "" {
-		dbPath := env.ProjectDBPath()
-		db, err := calldb.OpenIfExists(dbPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: cannot open project database: %v\n", err)
-			return nil
-		}
-		if db != nil {
-			return db
-		}
-		// Project DB doesn't exist yet; fall back to org-level DB.
+// openProjectDB opens the per-project state.sqlite in .ateam/, creating it
+// if it doesn't exist. Returns an error if the project has no ProjectDir.
+func openProjectDB(env *root.ResolvedEnv) (*calldb.CallDB, error) {
+	if env.ProjectDir == "" {
+		return nil, fmt.Errorf("no project context — run 'ateam init' first")
 	}
-	return openCallDB(env.OrgDir)
+	dbPath := env.ProjectDBPath()
+	db, err := calldb.Open(dbPath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot open project database %s: %w", dbPath, err)
+	}
+	return db, nil
 }
 
-func openCallDB(orgDir string) *calldb.CallDB {
-	if orgDir == "" {
-		return nil
+// requireProjectDB opens an existing per-project state.sqlite.
+// Returns an error if the database does not exist.
+func requireProjectDB(env *root.ResolvedEnv) (*calldb.CallDB, error) {
+	if env.ProjectDir == "" {
+		return nil, fmt.Errorf("no project context — run 'ateam init' first")
 	}
-	db, err := calldb.OpenIfExists(filepath.Join(orgDir, "state.sqlite"))
+	dbPath := env.ProjectDBPath()
+	db, err := calldb.OpenIfExists(dbPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: cannot open call database: %v\n", err)
-		return nil
+		return nil, fmt.Errorf("cannot open project database %s: %w", dbPath, err)
 	}
-	return db
+	if db == nil {
+		return nil, fmt.Errorf("project database not found at %s — run a command like 'ateam run' or 'ateam report' first", dbPath)
+	}
+	return db, nil
 }
 
 // newRunner creates a Runner using the resolved profile from runtime.hcl.

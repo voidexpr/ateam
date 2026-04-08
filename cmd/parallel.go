@@ -160,21 +160,24 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	db := openProjectDB(env)
-	if db != nil {
+	if hasProject {
+		db, err := openProjectDB(env)
+		if err != nil {
+			return fmt.Errorf("database: %w", err)
+		}
 		defer db.Close()
 		r.CallDB = db
+
+		if !parallelForce {
+			if err := checkConcurrentRuns(db, "", runner.ActionParallel, nil); err != nil {
+				return err
+			}
+		}
 	}
 
 	taskGroup := parallelTaskGroup
 	if taskGroup == "" {
 		taskGroup = "parallel-" + time.Now().Format(runner.TimestampFormat)
-	}
-
-	if !parallelForce {
-		if err := checkConcurrentRuns(db, "", runner.ActionParallel, nil); err != nil {
-			return err
-		}
 	}
 
 	baseLogsDir := env.OrgDir

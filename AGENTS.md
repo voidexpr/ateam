@@ -1,4 +1,4 @@
-# CLAUDE for ateam POC
+# Agents
 
 ## Testing
 * ateam testing requires to create and delete files, use ./test_data/

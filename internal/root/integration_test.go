@@ -100,10 +100,13 @@ func TestIntegration_BasicProject(t *testing.T) {
 		}
 	}
 
-	// Verify ProjectDBPath.
+	// Verify ProjectDBPath and that the DB file was created during init.
 	wantDBPath := filepath.Join(projDir, "state.sqlite")
 	if env.ProjectDBPath() != wantDBPath {
 		t.Errorf("ProjectDBPath() = %q, want %q", env.ProjectDBPath(), wantDBPath)
+	}
+	if _, err := os.Stat(wantDBPath); err != nil {
+		t.Errorf("state.sqlite should exist after init: %v", err)
 	}
 
 	// FindOrg from project path should find the org.
