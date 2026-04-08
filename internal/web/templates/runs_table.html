@@ -12,6 +12,7 @@
       <th>Files</th>
       <th data-sort="num">Input</th>
       <th data-sort="num">Output</th>
+      <th data-sort="num">Context</th>
       <th data-sort="str">Model</th>
       <th data-sort="str">Agent</th>
       <th data-sort="str">Profile</th>
@@ -37,6 +38,7 @@
       </td>
       <td data-val="{{addInt (addInt .InputTokens .CacheReadTokens) .CacheWriteTokens}}"><span class="token-pill">{{fmtTokensInt (addInt (addInt .InputTokens .CacheReadTokens) .CacheWriteTokens)}}</span></td>
       <td data-val="{{.OutputTokens}}"><span class="token-pill">{{fmtTokensInt .OutputTokens}}</span></td>
+      <td data-val="{{.PeakContextTokens}}">{{if gt .PeakContextTokens 0}}<span class="token-pill">{{fmtTokensInt .PeakContextTokens}}</span>{{if gt .ContextWindow 0}} <span style="font-size:11px;color:var(--text-muted)">{{fmtPercent .PeakContextTokens .ContextWindow}}</span>{{end}}{{end}}</td>
       <td data-val="{{.Model}}" style="font-size:12px;color:var(--text-muted)">{{.Model}}</td>
       <td data-val="{{.Agent}}" style="font-size:12px;color:var(--text-muted)">{{.Agent}}</td>
       <td data-val="{{.Profile}}" style="font-size:12px;color:var(--text-muted)">{{.Profile}}</td>

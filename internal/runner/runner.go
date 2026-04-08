@@ -105,6 +105,8 @@ type RunProgress struct {
 	StartedAt      time.Time
 	StreamFilePath string
 	StderrFilePath string
+	ContextTokens  int
+	ContextWindow  int
 }
 
 // RunSummary is the final result returned by Run.
@@ -127,6 +129,9 @@ type RunSummary struct {
 	CacheReadTokens  int
 	CacheWriteTokens int
 	ToolCounts       map[string]int
+
+	PeakContextTokens int
+	ContextWindow     int
 
 	StreamFilePath string
 	StderrFilePath string
@@ -290,11 +295,13 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	events := runAgent.Run(ctx, req)
 
 	var (
-		toolCounts = make(map[string]int)
-		eventCount int
-		totalTools int
-		lastOutput string
-		resultEv   *agent.StreamEvent
+		toolCounts        = make(map[string]int)
+		eventCount        int
+		totalTools        int
+		lastOutput        string
+		resultEv          *agent.StreamEvent
+		peakContextTokens int
+		contextWindow     int
 	)
 
 	emitProgress := func(phase, toolName, toolInput, content string, toolCount, evCount int) {
@@ -311,11 +318,17 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			Elapsed:        time.Since(startedAt),
 			StreamFilePath: streamFile,
 			StderrFilePath: stderrFile,
+			ContextTokens:  peakContextTokens,
+			ContextWindow:  contextWindow,
 		})
 	}
 
 	for ev := range events {
 		eventCount++
+
+		if ev.ContextTokens > peakContextTokens {
+			peakContextTokens = ev.ContextTokens
+		}
 
 		switch ev.Type {
 		case "system":
@@ -343,6 +356,9 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		case "result":
 			evCopy := ev
 			resultEv = &evCopy
+			if ev.ContextWindow > 0 {
+				contextWindow = ev.ContextWindow
+			}
 
 		case "error":
 			evCopy := ev
@@ -359,15 +375,17 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	}
 
 	summary := RunSummary{
-		ExecID:         callID,
-		RoleID:         opts.RoleID,
-		StartedAt:      startedAt,
-		EndedAt:        endedAt,
-		Duration:       duration,
-		Output:         output,
-		ToolCounts:     toolCounts,
-		StreamFilePath: streamFile,
-		StderrFilePath: stderrFile,
+		ExecID:            callID,
+		RoleID:            opts.RoleID,
+		StartedAt:         startedAt,
+		EndedAt:           endedAt,
+		Duration:          duration,
+		Output:            output,
+		ToolCounts:        toolCounts,
+		PeakContextTokens: peakContextTokens,
+		ContextWindow:     contextWindow,
+		StreamFilePath:    streamFile,
+		StderrFilePath:    stderrFile,
 	}
 
 	if resultEv != nil {
@@ -395,6 +413,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			summary.OutputTokens = res.OutputTokens
 			summary.CacheReadTokens = res.CacheReadTokens
 			summary.CacheWriteTokens = res.CacheWriteTokens
+			summary.ContextWindow = res.ContextWindow
 		}
 	}
 
@@ -512,18 +531,20 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 			resultModel = agent.NormalizeModel(resultEv.Model)
 		}
 		if err := r.CallDB.UpdateCall(callID, &calldb.CallResult{
-			EndedAt:          summary.EndedAt,
-			DurationMS:       summary.DurationMS,
-			ExitCode:         summary.ExitCode,
-			IsError:          summary.IsError,
-			ErrorMessage:     errMsg,
-			CostUSD:          summary.Cost,
-			InputTokens:      summary.InputTokens,
-			OutputTokens:     summary.OutputTokens,
-			CacheReadTokens:  summary.CacheReadTokens,
-			CacheWriteTokens: summary.CacheWriteTokens,
-			Turns:            summary.Turns,
-			Model:            resultModel,
+			EndedAt:           summary.EndedAt,
+			DurationMS:        summary.DurationMS,
+			ExitCode:          summary.ExitCode,
+			IsError:           summary.IsError,
+			ErrorMessage:      errMsg,
+			CostUSD:           summary.Cost,
+			InputTokens:       summary.InputTokens,
+			OutputTokens:      summary.OutputTokens,
+			CacheReadTokens:   summary.CacheReadTokens,
+			CacheWriteTokens:  summary.CacheWriteTokens,
+			Turns:             summary.Turns,
+			Model:             resultModel,
+			PeakContextTokens: summary.PeakContextTokens,
+			ContextWindow:     summary.ContextWindow,
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: call tracking update failed: %v\n", err)
 		}

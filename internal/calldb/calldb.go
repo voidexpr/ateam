@@ -62,18 +62,20 @@ type Call struct {
 }
 
 type CallResult struct {
-	EndedAt          time.Time
-	DurationMS       int64
-	ExitCode         int
-	IsError          bool
-	ErrorMessage     string
-	CostUSD          float64
-	InputTokens      int
-	OutputTokens     int
-	CacheReadTokens  int
-	CacheWriteTokens int
-	Turns            int
-	Model            string // if non-empty, updates the model column
+	EndedAt           time.Time
+	DurationMS        int64
+	ExitCode          int
+	IsError           bool
+	ErrorMessage      string
+	CostUSD           float64
+	InputTokens       int
+	OutputTokens      int
+	CacheReadTokens   int
+	CacheWriteTokens  int
+	Turns             int
+	Model             string // if non-empty, updates the model column
+	PeakContextTokens int
+	ContextWindow     int
 }
 
 type CallDB struct {
@@ -211,6 +213,8 @@ func migrate(db *sql.DB, dbPath string) error {
 	hasContainerID := false
 	hasCacheWriteTokens := false
 	hasOutputFile := false
+	hasPeakContextTokens := false
+	hasContextWindow := false
 	for tRows.Next() {
 		var cid int
 		var name, typ string
@@ -230,6 +234,10 @@ func migrate(db *sql.DB, dbPath string) error {
 			hasCacheWriteTokens = true
 		case "output_file":
 			hasOutputFile = true
+		case "peak_context_tokens":
+			hasPeakContextTokens = true
+		case "context_window":
+			hasContextWindow = true
 		}
 	}
 	tRows.Close()
@@ -254,6 +262,16 @@ func migrate(db *sql.DB, dbPath string) error {
 	}
 	if !hasOutputFile {
 		if _, err := tx.Exec("ALTER TABLE agent_execs ADD COLUMN output_file TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if !hasPeakContextTokens {
+		if _, err := tx.Exec("ALTER TABLE agent_execs ADD COLUMN peak_context_tokens INTEGER"); err != nil {
+			return err
+		}
+	}
+	if !hasContextWindow {
+		if _, err := tx.Exec("ALTER TABLE agent_execs ADD COLUMN context_window INTEGER"); err != nil {
 			return err
 		}
 	}
@@ -287,12 +305,14 @@ func (c *CallDB) UpdateCall(id int64, result *CallResult) error {
 			ended_at = ?, duration_ms = ?, exit_code = ?,
 			is_error = ?, error_message = ?, cost_usd = ?,
 			input_tokens = ?, output_tokens = ?, cache_read_tokens = ?,
-			cache_write_tokens = ?, turns = ?`
+			cache_write_tokens = ?, turns = ?,
+			peak_context_tokens = ?, context_window = ?`
 	args := []any{
 		result.EndedAt.Format(time.RFC3339), result.DurationMS, result.ExitCode,
 		isError, result.ErrorMessage, result.CostUSD,
 		result.InputTokens, result.OutputTokens, result.CacheReadTokens,
 		result.CacheWriteTokens, result.Turns,
+		result.PeakContextTokens, result.ContextWindow,
 	}
 	if result.Model != "" {
 		q += `, model = ?`

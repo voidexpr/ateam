@@ -39,6 +39,7 @@
       <tr><td style="color:var(--text-muted)">Input Tokens</td><td>{{fmtTokensInt $r.InputTokens}}</td></tr>
       <tr><td style="color:var(--text-muted)">Output Tokens</td><td>{{fmtTokensInt $r.OutputTokens}}</td></tr>
       <tr><td style="color:var(--text-muted)">Cache Read</td><td>{{fmtTokensInt $r.CacheReadTokens}}</td></tr>
+      {{if gt $r.PeakContextTokens 0}}<tr><td style="color:var(--text-muted)">Peak Context</td><td>{{fmtTokensInt $r.PeakContextTokens}}{{if gt $r.ContextWindow 0}} / {{fmtTokensInt $r.ContextWindow}} ({{fmtPercent $r.PeakContextTokens $r.ContextWindow}}){{end}}</td></tr>{{end}}
       {{if $r.ContainerID}}<tr><td style="color:var(--text-muted)">Container</td><td style="font-family:var(--font-mono);font-size:13px">{{$r.ContainerID}}</td></tr>{{end}}
       {{if $r.StreamFile}}<tr><td style="color:var(--text-muted)">Stream File</td><td style="font-family:var(--font-mono);font-size:13px">{{$r.StreamFile}}</td></tr>{{end}}
     </tbody>

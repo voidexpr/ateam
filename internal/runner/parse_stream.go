@@ -51,6 +51,7 @@ type ResultLine struct {
 	CacheReadTokens  int
 	CacheWriteTokens int
 	IsError          bool
+	ContextWindow    int
 }
 
 type ErrorLine struct {
@@ -194,6 +195,7 @@ func parseClaudeDisplay(line []byte) ([]DisplayEvent, error) {
 			CacheReadTokens:  res.Usage.CacheReadInputTokens,
 			CacheWriteTokens: res.Usage.CacheWriteInputTokens,
 			IsError:          res.IsError,
+			ContextWindow:    res.MaxContextWindow(),
 		}}, nil
 	}
 

@@ -152,6 +152,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 
 		case "assistant":
 			ast := ev.(*streamutil.AssistantEvent)
+			ctxTokens := ast.Message.Usage.InputTokens
 			var textParts []string
 			for _, block := range ast.Message.Content {
 				switch block.Type {
@@ -159,16 +160,17 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 					textParts = append(textParts, block.Text)
 				case "tool_use":
 					ch <- StreamEvent{
-						Type:      "tool_use",
-						ToolName:  block.Name,
-						ToolInput: strings.TrimSpace(string(block.Input)),
+						Type:          "tool_use",
+						ToolName:      block.Name,
+						ToolInput:     strings.TrimSpace(string(block.Input)),
+						ContextTokens: ctxTokens,
 					}
 				}
 			}
 			if len(textParts) > 0 {
 				text := strings.Join(textParts, "")
 				lastAssistantText = text
-				ch <- StreamEvent{Type: "assistant", Text: text}
+				ch <- StreamEvent{Type: "assistant", Text: text, ContextTokens: ctxTokens}
 			}
 
 		case "tool_result":
@@ -188,6 +190,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 				Turns:            res.NumTurns,
 				DurationMS:       res.DurationMS,
 				IsError:          res.IsError,
+				ContextWindow:    res.MaxContextWindow(),
 			}
 		}
 	}

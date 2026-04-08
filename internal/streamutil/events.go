@@ -20,6 +20,12 @@ type SystemEvent struct {
 type AssistantEvent struct {
 	Message struct {
 		Content []ContentBlock `json:"content"`
+		Usage   struct {
+			InputTokens              int `json:"input_tokens"`
+			OutputTokens             int `json:"output_tokens"`
+			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+		} `json:"usage"`
 	} `json:"message"`
 }
 
@@ -48,6 +54,21 @@ type ResultEvent struct {
 		CacheReadInputTokens  int `json:"cache_read_input_tokens"`
 		CacheWriteInputTokens int `json:"cache_write_input_tokens"`
 	} `json:"usage"`
+	ModelUsage map[string]struct {
+		ContextWindow   int `json:"contextWindow"`
+		MaxOutputTokens int `json:"maxOutputTokens"`
+	} `json:"modelUsage"`
+}
+
+// MaxContextWindow returns the largest contextWindow across all models in ModelUsage.
+func (r *ResultEvent) MaxContextWindow() int {
+	var max int
+	for _, mu := range r.ModelUsage {
+		if mu.ContextWindow > max {
+			max = mu.ContextWindow
+		}
+	}
+	return max
 }
 
 // ParseClaudeLine parses a single JSONL line from Claude's stream-json output.

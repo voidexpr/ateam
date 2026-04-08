@@ -57,6 +57,10 @@ type StreamEvent struct {
 	// tool_result
 	ToolResult string
 
+	// context size (from per-turn usage)
+	ContextTokens int
+	ContextWindow int
+
 	// result (final)
 	Output           string
 	Cost             float64
