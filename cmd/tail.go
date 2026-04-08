@@ -102,13 +102,14 @@ func runTail(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("--reports requires a project context (run from within a project)")
 		}
 		tailer.Action = runner.ActionReport
-		tailer.ProjectID = ""
+		tailer.ProjectID = env.ProjectID()
 		tailer.DiscoverAll = true
 
 	default:
 		if !hasProject {
 			return fmt.Errorf("no project context found (run from within a project)")
 		}
+		tailer.ProjectID = env.ProjectID()
 		tailer.DiscoverAll = true
 	}
 
