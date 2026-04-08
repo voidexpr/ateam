@@ -134,10 +134,10 @@ The Docker container maps host paths to fixed container paths:
 
 | Host path | Container path | Mode |
 |-----------|----------------|------|
-| Project source dir | `/workspace` | read-write |
-| `.ateamorg/` dir | `/.ateamorg` | read-only |
+| Project source dir | `/workspace` | read-only by default; read-write for `code`, `run`, `parallel`, `inspect`, `auto-setup` |
+| `.ateamorg/` dir | `/.ateamorg` | read-write |
 
-The agent sees only these mount points. Host paths in agent arguments (stream files, stderr files, settings) are automatically translated via `TranslatePath()`. For example, `/Users/me/myproject/output.jsonl` becomes `/workspace/output.jsonl` inside the container.
+The agent sees only these mount points. See `CONTAINER.md` for detailed per-mode setup. Host paths in agent arguments (stream files, stderr files, settings) are automatically translated via `TranslatePath()`. For example, `/Users/me/myproject/output.jsonl` becomes `/workspace/output.jsonl` inside the container.
 
 The container image is built with a non-root user matching the host UID (`--build-arg USER_UID=$(id -u)`), so files written by the agent inside `/workspace` have correct ownership on the host.
 
