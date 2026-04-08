@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/ateam/internal/prompts"
@@ -196,124 +194,29 @@ func runReport(opts ReportOptions) error {
 
 	maxParallel := env.Config.Report.EffectiveMaxParallel(opts.Parallel)
 
-	reportStart := time.Now()
-
 	fmt.Printf("Running %d role(s) (max %d parallel, %dm timeout)...\n\n",
 		len(tasks), maxParallel, timeout)
 
-	cwd, _ := os.Getwd()
-
-	// Build role order index for status display
-	labels := make([]string, len(tasks))
-	for i, t := range tasks {
-		labels[i] = t.RoleID
-	}
-	statusRows, roleIndex := newPoolStatusRows(labels)
-	renderedRows := printPoolStatuses(statusRows)
-
-	// Process completions and progress as they arrive
-	completedCh := make(chan runner.RunSummary, len(tasks))
-	progress := make(chan runner.RunProgress, 64)
-	var succeeded, failed int
-	var results []runner.RunSummary
-	var statusMu sync.Mutex
-
 	ctx, stop := cmdContext()
 	defer stop()
-	go func() {
-		runner.RunPool(ctx, cr, tasks, maxParallel, progress, completedCh)
-		close(progress)
-	}()
 
-	resizeCh, stopResize := subscribeWindowResize()
-	var resizeDone sync.WaitGroup
-	if resizeCh != nil {
-		resizeDone.Add(1)
-		go func() {
-			defer resizeDone.Done()
-			for range resizeCh {
-				statusMu.Lock()
-				renderedRows = reprintPoolStatuses(statusRows, renderedRows)
-				statusMu.Unlock()
-			}
-		}()
-	}
-	defer func() {
-		stopResize()
-		resizeDone.Wait()
-	}()
-
-	agentName := cr.Agent.Name()
-
-	// Consume progress events to update in-flight status lines.
-	// Rate-limit terminal redraws to avoid excessive output with many parallel roles.
-	var progressDone sync.WaitGroup
-	progressDone.Add(1)
-	go func() {
-		defer progressDone.Done()
-		var lastRedraw time.Time
-		for p := range progress {
-			idx, ok := roleIndex[p.RoleID]
-			if !ok {
-				continue
-			}
-			statusMu.Lock()
-			statusRows[idx] = nextPoolStatusRow(statusRows[idx], p)
-			if time.Since(lastRedraw) >= 500*time.Millisecond {
-				renderedRows = reprintPoolStatuses(statusRows, renderedRows)
-				lastRedraw = time.Now()
-			}
-			statusMu.Unlock()
-		}
-	}()
-
-	for r := range completedCh {
-		statusMu.Lock()
-		idx := roleIndex[r.RoleID]
-		if r.Err != nil {
-			statusRows[idx] = errorPoolStatusRow(statusRows[idx], r, cwd)
-			failed++
-		} else {
+	results, runErr := runPool(ctx, cr, tasks, maxParallel, poolDisplayOpts{
+		out:       os.Stdout,
+		agentName: cr.Agent.Name(),
+		itemLabel: "role(s)",
+		onDone: func(r runner.RunSummary, cwd string) string {
 			reportPath := env.RoleReportPath(r.RoleID)
-			historyDir := env.RoleHistoryDir(r.RoleID)
-			if err := runner.ArchiveFile(reportPath, historyDir, prompts.ReportFile, r.StartedAt); err != nil {
+			if err := runner.ArchiveFile(reportPath, env.RoleHistoryDir(r.RoleID), prompts.ReportFile, r.StartedAt); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: could not archive report for %s: %v\n", r.RoleID, err)
 			}
-			statusRows[idx] = donePoolStatusRow(statusRows[idx], r, relPath(cwd, reportPath))
+			return relPath(cwd, reportPath)
+		},
+	})
+
+	var succeeded int
+	for _, r := range results {
+		if r.Err == nil {
 			succeeded++
-		}
-		renderedRows = reprintPoolStatuses(statusRows, renderedRows)
-		statusMu.Unlock()
-		results = append(results, r)
-	}
-	progressDone.Wait()
-	statusMu.Lock()
-	finalRows := clonePoolStatusRows(statusRows)
-	if ctx.Err() == nil {
-		renderedRows = reprintPoolStatuses(finalRows, renderedRows)
-	}
-	statusMu.Unlock()
-
-	if ctx.Err() != nil {
-		fmt.Println()
-		printPlainPoolStatuses(finalRows)
-	}
-
-	fmt.Printf("\n%d succeeded, %d failed (%s)\n", succeeded, failed, runner.FormatDuration(time.Since(reportStart)))
-
-	if failed > 0 {
-		for _, r := range results {
-			if r.Err == nil {
-				continue
-			}
-			tail := runner.StreamTailError(r.StreamFilePath, agentName, 5)
-			if tail == "" {
-				continue
-			}
-			fmt.Printf("\n  %s:\n", r.RoleID)
-			for _, line := range strings.Split(tail, "\n") {
-				fmt.Printf("        %s\n", line)
-			}
 		}
 	}
 
@@ -326,8 +229,8 @@ func runReport(opts ReportOptions) error {
 		}
 	}
 
-	if failed > 0 {
-		return fmt.Errorf("%d role(s) failed", failed)
+	if runErr != nil {
+		return runErr
 	}
 
 	if opts.Review && succeeded > 0 {

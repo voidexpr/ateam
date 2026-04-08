@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/ateam/internal/agent"
@@ -206,140 +204,25 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		maxParallel = 3
 	}
 
-	start := time.Now()
 	fmt.Fprintf(os.Stderr, "Running %d agent(s) task group: %s (max %d parallel)...\n\n", len(tasks), taskGroup, maxParallel)
-
-	cwd, _ := os.Getwd()
-	agentName := r.Agent.Name()
-
-	useTable := isTerminal() && !parallelNoProgress
-	var statusRows []poolStatusRow
-	var labelIndex map[string]int
-	var renderedRows int
-
-	if useTable {
-		statusRows, labelIndex = newPoolStatusRows(labels)
-		renderedRows = printPoolStatuses(statusRows)
-	}
-
-	completedCh := make(chan runner.RunSummary, len(tasks))
-	progressCh := make(chan runner.RunProgress, 64)
-	var succeeded, failed int
-	var results []runner.RunSummary
-	var statusMu sync.Mutex
 
 	ctx, stop := cmdContext()
 	defer stop()
 
-	go func() {
-		runner.RunPool(ctx, r, tasks, maxParallel, progressCh, completedCh)
-		close(progressCh)
-	}()
-
-	var resizeDone sync.WaitGroup
-	if useTable {
-		resizeCh, stopResize := subscribeWindowResize()
-		if resizeCh != nil {
-			resizeDone.Add(1)
-			go func() {
-				defer resizeDone.Done()
-				for range resizeCh {
-					statusMu.Lock()
-					renderedRows = reprintPoolStatuses(statusRows, renderedRows)
-					statusMu.Unlock()
-				}
-			}()
-		}
-		defer func() {
-			stopResize()
-			resizeDone.Wait()
-		}()
-	}
-
-	var progressDone sync.WaitGroup
-	progressDone.Add(1)
-	go func() {
-		defer progressDone.Done()
-		if useTable {
-			var lastRedraw time.Time
-			for p := range progressCh {
-				idx, ok := labelIndex[p.RoleID]
-				if !ok {
-					continue
-				}
-				statusMu.Lock()
-				statusRows[idx] = nextPoolStatusRow(statusRows[idx], p)
-				if time.Since(lastRedraw) >= 500*time.Millisecond {
-					renderedRows = reprintPoolStatuses(statusRows, renderedRows)
-					lastRedraw = time.Now()
-				}
-				statusMu.Unlock()
-			}
-		} else {
-			printProgress(progressCh)
-		}
-	}()
-
-	for result := range completedCh {
-		if useTable {
-			statusMu.Lock()
-			idx := labelIndex[result.RoleID]
-			if result.Err != nil {
-				statusRows[idx] = errorPoolStatusRow(statusRows[idx], result, cwd)
-				failed++
-			} else {
-				statusRows[idx] = donePoolStatusRow(statusRows[idx], result, "")
-				succeeded++
-			}
-			renderedRows = reprintPoolStatuses(statusRows, renderedRows)
-			statusMu.Unlock()
-		} else {
-			if result.Err != nil {
-				failed++
-			} else {
-				succeeded++
-			}
-		}
-		if !parallelPrint {
-			result.Output = ""
-		}
-		results = append(results, result)
-	}
-	progressDone.Wait()
-
-	if useTable {
-		statusMu.Lock()
-		finalRows := clonePoolStatusRows(statusRows)
-		if ctx.Err() == nil {
-			renderedRows = reprintPoolStatuses(finalRows, renderedRows)
-		}
-		statusMu.Unlock()
-
-		if ctx.Err() != nil {
-			fmt.Println()
-			printPlainPoolStatuses(finalRows)
-		}
-	}
-
-	fmt.Fprintf(os.Stderr, "\n%d succeeded, %d failed (%s)\n", succeeded, failed, runner.FormatDuration(time.Since(start)))
-
-	if failed > 0 {
-		for _, result := range results {
-			if result.Err == nil {
-				continue
-			}
-			tail := runner.StreamTailError(result.StreamFilePath, agentName, 5)
-			if tail == "" {
-				continue
-			}
-			fmt.Fprintf(os.Stderr, "\n  %s:\n", result.RoleID)
-			for _, line := range strings.Split(tail, "\n") {
-				fmt.Fprintf(os.Stderr, "        %s\n", line)
-			}
-		}
-	}
+	results, runErr := runPool(ctx, r, tasks, maxParallel, poolDisplayOpts{
+		quiet:     !isTerminal() || parallelNoProgress,
+		out:       os.Stderr,
+		agentName: r.Agent.Name(),
+		itemLabel: "task(s)",
+	})
 
 	// Print outputs in submission order
+	var succeeded int
+	for _, result := range results {
+		if result.Err == nil {
+			succeeded++
+		}
+	}
 	if parallelPrint && succeeded > 0 {
 		outputByLabel := make(map[string]string, len(results))
 		for _, result := range results {
@@ -363,9 +246,5 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if failed > 0 {
-		return fmt.Errorf("%d task(s) failed", failed)
-	}
-
-	return nil
+	return runErr
 }

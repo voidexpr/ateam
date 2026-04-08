@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -10,6 +11,7 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -709,4 +711,161 @@ func fmtDateAge(t time.Time) string {
 		days := int(age.Hours()) / 24
 		return fmt.Sprintf("%s (%dd ago)", date, days)
 	}
+}
+
+// poolDisplayOpts controls how runPool renders progress and formats output.
+type poolDisplayOpts struct {
+	quiet     bool                                   // suppress ANSI table; fall back to plain text progress
+	out       io.Writer                              // output for summary/error tails (nil = os.Stdout)
+	onDone    func(runner.RunSummary, string) string // result, cwd → display path for status row; nil → ""
+	agentName string
+	itemLabel string // used in "N failed" error, e.g. "role(s)" or "task(s)"
+}
+
+// runPool drives a runner.Pool to completion, rendering progress and printing
+// the summary count + error tails. It returns all results and a non-nil error
+// if any tasks failed.
+func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, maxParallel int, opts poolDisplayOpts) ([]runner.RunSummary, error) {
+	start := time.Now()
+	out := opts.out
+	if out == nil {
+		out = os.Stdout
+	}
+
+	labels := make([]string, len(tasks))
+	for i, t := range tasks {
+		labels[i] = t.RoleID
+	}
+	cwd, _ := os.Getwd()
+
+	var statusRows []poolStatusRow
+	var labelIndex map[string]int
+	var renderedRows int
+	if !opts.quiet {
+		statusRows, labelIndex = newPoolStatusRows(labels)
+		renderedRows = printPoolStatuses(statusRows)
+	}
+
+	completedCh := make(chan runner.RunSummary, len(tasks))
+	progressCh := make(chan runner.RunProgress, 64)
+	var statusMu sync.Mutex
+
+	go func() {
+		runner.RunPool(ctx, r, tasks, maxParallel, progressCh, completedCh)
+		close(progressCh)
+	}()
+
+	if !opts.quiet {
+		resizeCh, stopResize := subscribeWindowResize()
+		var resizeDone sync.WaitGroup
+		if resizeCh != nil {
+			resizeDone.Add(1)
+			go func() {
+				defer resizeDone.Done()
+				for range resizeCh {
+					statusMu.Lock()
+					renderedRows = reprintPoolStatuses(statusRows, renderedRows)
+					statusMu.Unlock()
+				}
+			}()
+		}
+		defer func() {
+			stopResize()
+			resizeDone.Wait()
+		}()
+	}
+
+	var progressDone sync.WaitGroup
+	progressDone.Add(1)
+	go func() {
+		defer progressDone.Done()
+		if !opts.quiet {
+			var lastRedraw time.Time
+			for p := range progressCh {
+				idx, ok := labelIndex[p.RoleID]
+				if !ok {
+					continue
+				}
+				statusMu.Lock()
+				statusRows[idx] = nextPoolStatusRow(statusRows[idx], p)
+				if time.Since(lastRedraw) >= 500*time.Millisecond {
+					renderedRows = reprintPoolStatuses(statusRows, renderedRows)
+					lastRedraw = time.Now()
+				}
+				statusMu.Unlock()
+			}
+		} else {
+			printProgress(progressCh)
+		}
+	}()
+
+	var succeeded, failed int
+	var results []runner.RunSummary
+	for result := range completedCh {
+		if !opts.quiet {
+			statusMu.Lock()
+			idx := labelIndex[result.RoleID]
+			if result.Err != nil {
+				statusRows[idx] = errorPoolStatusRow(statusRows[idx], result, cwd)
+				failed++
+			} else {
+				displayPath := ""
+				if opts.onDone != nil {
+					displayPath = opts.onDone(result, cwd)
+				}
+				statusRows[idx] = donePoolStatusRow(statusRows[idx], result, displayPath)
+				succeeded++
+			}
+			renderedRows = reprintPoolStatuses(statusRows, renderedRows)
+			statusMu.Unlock()
+		} else {
+			if result.Err != nil {
+				failed++
+			} else {
+				if opts.onDone != nil {
+					opts.onDone(result, cwd)
+				}
+				succeeded++
+			}
+		}
+		results = append(results, result)
+	}
+	progressDone.Wait()
+
+	if !opts.quiet {
+		statusMu.Lock()
+		finalRows := clonePoolStatusRows(statusRows)
+		if ctx.Err() == nil {
+			renderedRows = reprintPoolStatuses(finalRows, renderedRows)
+		}
+		statusMu.Unlock()
+
+		if ctx.Err() != nil {
+			fmt.Println()
+			printPlainPoolStatuses(finalRows)
+		}
+	}
+
+	fmt.Fprintf(out, "\n%d succeeded, %d failed (%s)\n", succeeded, failed, runner.FormatDuration(time.Since(start)))
+
+	if failed > 0 {
+		for _, result := range results {
+			if result.Err == nil {
+				continue
+			}
+			tail := runner.StreamTailError(result.StreamFilePath, opts.agentName, 5)
+			if tail == "" {
+				continue
+			}
+			fmt.Fprintf(out, "\n  %s:\n", result.RoleID)
+			for _, line := range strings.Split(tail, "\n") {
+				fmt.Fprintf(out, "        %s\n", line)
+			}
+		}
+	}
+
+	if failed > 0 {
+		return results, fmt.Errorf("%d %s failed", failed, opts.itemLabel)
+	}
+	return results, nil
 }
