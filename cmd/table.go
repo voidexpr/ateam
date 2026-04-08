@@ -850,12 +850,13 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 				continue
 			}
 			tail := runner.StreamTailError(result.StreamFilePath, opts.agentName, 5)
-			if tail == "" {
-				continue
-			}
-			fmt.Fprintf(out, "\n  %s:\n", result.RoleID)
-			for _, line := range strings.Split(tail, "\n") {
-				fmt.Fprintf(out, "        %s\n", line)
+			if tail != "" {
+				fmt.Fprintf(out, "\n  %s:\n", result.RoleID)
+				for _, line := range strings.Split(tail, "\n") {
+					fmt.Fprintf(out, "        %s\n", line)
+				}
+			} else {
+				fmt.Fprintf(out, "\n  %s: %v\n", result.RoleID, result.Err)
 			}
 		}
 	}

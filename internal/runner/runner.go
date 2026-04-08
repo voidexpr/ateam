@@ -201,6 +201,11 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		}
 	}
 
+	// Ensure logs directory exists before writing settings or stream files.
+	if err := os.MkdirAll(opts.LogsDir, 0700); err != nil {
+		return failEarly(fmt.Errorf("cannot create logs directory: %w", err))
+	}
+
 	// Write sandbox settings if configured.
 	// Skip when: already inside a container, OR launching into a container (r.Container != nil),
 	// unless sandbox_inside_container is explicitly true.
@@ -427,14 +432,10 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	return summary
 }
 
-// buildPrompt creates the log directory, archives the prompt, resolves
-// CLAUDE_CONFIG_DIR, and assembles the agent.Request. Returns the request,
-// the archived prompt file path, and any error.
+// buildPrompt archives the prompt, resolves CLAUDE_CONFIG_DIR, and assembles
+// the agent.Request. Returns the request, the archived prompt file path, and
+// any error. The caller must ensure opts.LogsDir exists before calling.
 func (r *Runner) buildPrompt(prompt string, opts RunOpts, startedAt time.Time, tmplVars TemplateVars, cwd, streamFile, stderrFile string, extraArgs []string) (agent.Request, string, error) {
-	if err := os.MkdirAll(opts.LogsDir, 0700); err != nil {
-		return agent.Request{}, "", fmt.Errorf("cannot create logs directory: %w", err)
-	}
-
 	promptFile := archivePrompt(opts.HistoryDir, opts.PromptName, prompt, startedAt)
 
 	// Resolve CLAUDE_CONFIG_DIR for isolated agents.
