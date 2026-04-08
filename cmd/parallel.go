@@ -32,6 +32,7 @@ var (
 	parallelDryRun            bool
 	parallelPrint             bool
 	parallelDockerAutoSetup   bool
+	parallelContainerName     string
 )
 
 var parallelCmd = &cobra.Command{
@@ -66,6 +67,7 @@ func init() {
 	parallelCmd.Flags().BoolVar(&parallelDryRun, "dry-run", false, "print computed prompts without running")
 	parallelCmd.Flags().BoolVar(&parallelPrint, "print", false, "print task outputs to stdout after completion")
 	addDockerAutoSetupFlag(parallelCmd, &parallelDockerAutoSetup)
+	addContainerNameFlag(parallelCmd, &parallelContainerName)
 }
 
 func runParallel(cmd *cobra.Command, args []string) error {
@@ -151,6 +153,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	applyContainerNameOverride(r, parallelContainerName)
 	setSourceWritable(r)
 
 	if parallelModel != "" {

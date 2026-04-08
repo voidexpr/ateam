@@ -31,6 +31,7 @@ var (
 	codeForce             bool
 	codeTail              bool
 	codeDockerAutoSetup   bool
+	codeContainerName     string
 )
 
 // CodeOptions holds configuration for a code run.
@@ -50,6 +51,7 @@ type CodeOptions struct {
 	Force             bool
 	Tail              bool
 	DockerAutoSetup   bool
+	ContainerName     string
 }
 
 var codeCmd = &cobra.Command{
@@ -80,6 +82,7 @@ Example:
 			Force:             codeForce,
 			Tail:              codeTail,
 			DockerAutoSetup:   codeDockerAutoSetup,
+			ContainerName:     codeContainerName,
 		})
 	},
 }
@@ -108,6 +111,7 @@ func init() {
 	addForceFlag(codeCmd, &codeForce)
 	codeCmd.Flags().BoolVar(&codeTail, "tail", false, "stream live output from supervisor and sub-runs")
 	addDockerAutoSetupFlag(codeCmd, &codeDockerAutoSetup)
+	addContainerNameFlag(codeCmd, &codeContainerName)
 }
 
 func runCode(opts CodeOptions) error {
@@ -196,6 +200,7 @@ func runCode(opts CodeOptions) error {
 	if err != nil {
 		return err
 	}
+	applyContainerNameOverride(cr, opts.ContainerName)
 	setSourceWritable(cr)
 	applyCheaperModel(cr, opts.CheaperModel)
 

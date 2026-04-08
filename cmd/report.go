@@ -29,6 +29,7 @@ var (
 	reportForce                bool
 	reportReview               bool
 	reportDockerAutoSetup      bool
+	reportContainerName        string
 )
 
 // ReportOptions holds configuration for a report run.
@@ -47,6 +48,7 @@ type ReportOptions struct {
 	Force                bool
 	Review               bool
 	DockerAutoSetup      bool
+	ContainerName        string
 }
 
 var reportCmd = &cobra.Command{
@@ -78,6 +80,7 @@ Example:
 			Force:                reportForce,
 			Review:               reportReview,
 			DockerAutoSetup:      reportDockerAutoSetup,
+			ContainerName:        reportContainerName,
 		})
 	},
 }
@@ -96,6 +99,7 @@ func init() {
 	addVerboseFlag(reportCmd, &reportVerbose)
 	addForceFlag(reportCmd, &reportForce)
 	addDockerAutoSetupFlag(reportCmd, &reportDockerAutoSetup)
+	addContainerNameFlag(reportCmd, &reportContainerName)
 }
 
 func runReport(opts ReportOptions) error {
@@ -128,6 +132,7 @@ func runReport(opts ReportOptions) error {
 	if err != nil {
 		return err
 	}
+	applyContainerNameOverride(cr, opts.ContainerName)
 	applyCheaperModel(cr, opts.CheaperModel)
 
 	db := openProjectDB(env)
