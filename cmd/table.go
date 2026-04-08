@@ -391,18 +391,28 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 		if gitRepoDir != "" {
 			mountDir = gitRepoDir
 		}
+		var claudeCredentialsFile string
+		if cc.MountClaudeConfig {
+			if home, err := os.UserHomeDir(); err == nil {
+				f := filepath.Join(home, ".claude", ".credentials.json")
+				if _, err := os.Stat(f); err == nil {
+					claudeCredentialsFile = f
+				}
+			}
+		}
 		return &container.DockerContainer{
-			Image:            image,
-			Dockerfile:       dockerfile,
-			DockerfileTmpDir: dockerfileTmpDir,
-			ForwardEnv:       cc.ForwardEnv,
-			ExtraVolumes:     volumes,
-			ExtraArgs:        extraArgs,
-			MountDir:         mountDir,
-			SourceDir:        sourceDir,
-			ProjectDir:       projectDir,
-			OrgDir:           orgDir,
-			HostCLIPath:      findLinuxBinary(orgDir),
+			Image:                 image,
+			Dockerfile:            dockerfile,
+			DockerfileTmpDir:      dockerfileTmpDir,
+			ForwardEnv:            cc.ForwardEnv,
+			ExtraVolumes:          volumes,
+			ExtraArgs:             extraArgs,
+			MountDir:              mountDir,
+			SourceDir:             sourceDir,
+			ProjectDir:            projectDir,
+			OrgDir:                orgDir,
+			HostCLIPath:           findLinuxBinary(orgDir),
+			ClaudeCredentialsFile: claudeCredentialsFile,
 		}, nil
 	case "docker-exec":
 		if cc.DockerContainer == "" {

@@ -172,6 +172,7 @@ The Docker container maps host paths to fixed container paths:
 |-----------|----------------|------|
 | Project source dir | `/workspace` | read-only by default; read-write for `code`, `run`, `parallel`, `inspect`, `auto-setup` |
 | `.ateamorg/` dir | `/.ateamorg` | read-write |
+| `~/.claude/.credentials.json` | `/home/agent/.claude/.credentials.json` | read-only (only when `mount_claude_config = true`) |
 
 The agent sees only these mount points. See `CONTAINER.md` for detailed per-mode setup. Host paths in agent arguments (stream files, stderr files, settings) are automatically translated via `TranslatePath()`. For example, `/Users/me/myproject/output.jsonl` becomes `/workspace/output.jsonl` inside the container.
 

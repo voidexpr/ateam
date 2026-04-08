@@ -131,6 +131,7 @@ If the default Dockerfile works, you're done. If your project needs extra Docker
 | Git root (or project source) | `/workspace` | `ro` (report/review) or `rw` (code/run) | Source code |
 | `.ateam/` | `/workspace/.ateam/` | `rw` | Agent state, logs, artifacts |
 | `.ateamorg/` | `/.ateamorg/` | `rw` | Organization config |
+| `~/.claude/.credentials.json` | `/home/agent/.claude/.credentials.json` | `ro` | OAuth token session context (only with `mount_claude_config = true`) |
 | `/etc/localtime` | `/etc/localtime` | `ro` | Host timezone (Linux/macOS) |
 
 Source code is mounted read-only by default. The `code` and `run` commands mount it read-write so agents can modify files.

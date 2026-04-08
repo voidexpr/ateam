@@ -36,6 +36,11 @@ type DockerContainer struct {
 	// EnsureImage removes it after the build completes.
 	DockerfileTmpDir string
 
+	// ClaudeCredentialsFile is the host path to ~/.claude/.credentials.json.
+	// When set, it is mounted read-only into the container. Required for OAuth
+	// tokens which are session-scoped and need the credential store.
+	ClaudeCredentialsFile string
+
 	// SourceWritable mounts the source code directory as :rw instead of :ro.
 	// Required for actions that modify source code (code, run).
 	SourceWritable bool
@@ -131,6 +136,11 @@ func (d *DockerContainer) CmdFactory() CmdFactory {
 		// Mount ateam CLI binary
 		if d.HostCLIPath != "" {
 			dockerArgs = append(dockerArgs, "-v", d.HostCLIPath+":/usr/local/bin/ateam:ro")
+		}
+
+		// Mount .credentials.json read-only for OAuth token session context
+		if d.ClaudeCredentialsFile != "" {
+			dockerArgs = append(dockerArgs, "-v", d.ClaudeCredentialsFile+":/home/agent/.claude/.credentials.json:ro")
 		}
 
 		// Extra volumes from container config (e.g. "../data:/data:ro")
@@ -234,6 +244,9 @@ func (d *DockerContainer) DebugCommand(opts RunOpts) string {
 	parts = append(parts, d.projectDirArgs()...)
 	if d.HostCLIPath != "" {
 		parts = append(parts, "-v", d.HostCLIPath+":/usr/local/bin/ateam:ro")
+	}
+	if d.ClaudeCredentialsFile != "" {
+		parts = append(parts, "-v", d.ClaudeCredentialsFile+":/home/agent/.claude/.credentials.json:ro")
 	}
 	for _, vol := range d.ExtraVolumes {
 		parts = append(parts, "-v", vol)

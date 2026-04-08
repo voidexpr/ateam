@@ -302,9 +302,33 @@ container "none" {
   type = "none"
 }
 
-container "docker" {
+// docker-oauth: mounts host ~/.claude/ read-only so OAuth tokens work.
+// OAuth tokens are session-scoped and need the credential store in ~/.claude/.
+container "docker-oauth" {
+  type                = "docker"
+  dockerfile          = "Dockerfile"
+  mount_claude_config = true
+  forward_env = [
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+  ]
+}
+
+// docker-api: uses ANTHROPIC_API_KEY only (stateless, no ~/.claude/ needed).
+// Pay-per-use but simpler — no session context required.
+container "docker-api" {
   type        = "docker"
   dockerfile  = "Dockerfile"
+  forward_env = [
+    "ANTHROPIC_API_KEY",
+  ]
+}
+
+// docker: default Docker container, same as docker-oauth.
+container "docker" {
+  type                = "docker"
+  dockerfile          = "Dockerfile"
+  mount_claude_config = true
   forward_env = [
     "CLAUDE_CODE_OAUTH_TOKEN",
     "ANTHROPIC_API_KEY",
@@ -341,6 +365,16 @@ profile "codex" {
 profile "docker" {
   agent     = "claude"
   container = "docker"
+}
+
+profile "docker-oauth" {
+  agent     = "claude"
+  container = "docker-oauth"
+}
+
+profile "docker-api" {
+  agent     = "claude"
+  container = "docker-api"
 }
 
 profile "test" {

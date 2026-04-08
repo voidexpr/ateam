@@ -184,8 +184,10 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		extraArgs = append(extraArgs, r.ArgsOutsideContainer...)
 	}
 
-	// Safety warning: --dangerously-skip-permissions outside a container
-	if !IsInContainer() {
+	// Safety warning: --dangerously-skip-permissions outside a container.
+	// Skip warning when launching into a container (r.Container != nil) since the
+	// flag will only be used inside that container.
+	if !IsInContainer() && r.Container == nil {
 		for _, a := range extraArgs {
 			if a == "--dangerously-skip-permissions" {
 				fmt.Fprintf(os.Stderr, "Warning: --dangerously-skip-permissions used outside a Docker container. This skips all safety checks.\n")
