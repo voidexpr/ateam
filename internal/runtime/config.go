@@ -56,7 +56,6 @@ type ContainerConfig struct {
 	Dockerfile      string   // docker: relative to .ateam/ dir
 	DockerContainer string   // docker-exec: name of user-managed container
 	ExecTemplate    string   // docker-exec: custom exec command (default: "docker exec {{CONTAINER}} {{CMD}}")
-	IdleTimeout     string   // duration string, e.g. "30m" (future use)
 	ForwardEnv      []string // env var names to forward from host into container
 	ExtraVolumes    []string // additional volume mounts, e.g. "../data:/data:ro"
 	Precheck        string   // docker/docker-exec: precheck script path, relative to .ateam/ (or "" for convention default)
@@ -116,7 +115,6 @@ type hclContainer struct {
 	Dockerfile      string   `hcl:"dockerfile,optional"`
 	DockerContainer string   `hcl:"docker_container,optional"`
 	ExecTemplate    string   `hcl:"exec,optional"`
-	IdleTimeout     string   `hcl:"idle_timeout,optional"`
 	ForwardEnv      []string `hcl:"forward_env,optional"`
 	ExtraVolumes    []string `hcl:"extra_volumes,optional"`
 	Precheck        string   `hcl:"precheck,optional"`

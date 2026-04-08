@@ -71,6 +71,16 @@ type StreamEvent struct {
 	Err              error
 }
 
+// buildAgentArgs copies base args, appends --model if non-empty, then appends extra.
+func buildAgentArgs(base []string, model string, extra []string) []string {
+	args := make([]string, len(base))
+	copy(args, base)
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	return append(args, extra...)
+}
+
 // buildProcessEnv constructs the process environment for an agent.
 // Keys with empty values in agentEnv are excluded from the parent process env.
 // Non-empty agentEnv values are added. reqEnv overrides everything.

@@ -41,13 +41,7 @@ func (c *CodexAgent) DebugCommandArgs(extraArgs []string) (string, []string) {
 	if command == "" {
 		command = "codex"
 	}
-	args := make([]string, len(c.Args))
-	copy(args, c.Args)
-	if c.Model != "" {
-		args = append(args, "--model", c.Model)
-	}
-	args = append(args, extraArgs...)
-	args = append(args, "exec", "--json")
+	args := append(buildAgentArgs(c.Args, c.Model, extraArgs), "exec", "--json")
 	return command, args
 }
 
@@ -60,18 +54,8 @@ func (c *CodexAgent) Run(ctx context.Context, req Request) <-chan StreamEvent {
 func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent) {
 	defer close(ch)
 
-	args := make([]string, len(c.Args))
-	copy(args, c.Args)
-
-	if c.Model != "" {
-		args = append(args, "--model", c.Model)
-	}
-
-	// ExtraArgs before the exec subcommand
-	args = append(args, req.ExtraArgs...)
-
-	// exec --json <prompt> — the codex one-shot invocation
-	args = append(args, "exec", "--json", req.Prompt)
+	// ExtraArgs before the exec subcommand; exec --json <prompt> — the codex one-shot invocation
+	args := append(buildAgentArgs(c.Args, c.Model, req.ExtraArgs), "exec", "--json", req.Prompt)
 
 	command := c.Command
 	if command == "" {

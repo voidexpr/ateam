@@ -40,13 +40,7 @@ func (c *ClaudeAgent) DebugCommandArgs(extraArgs []string) (string, []string) {
 	if command == "" {
 		command = "claude"
 	}
-	args := make([]string, len(c.Args))
-	copy(args, c.Args)
-	if c.Model != "" {
-		args = append(args, "--model", c.Model)
-	}
-	args = append(args, extraArgs...)
-	return command, args
+	return command, buildAgentArgs(c.Args, c.Model, extraArgs)
 }
 
 func (c *ClaudeAgent) Run(ctx context.Context, req Request) <-chan StreamEvent {
@@ -70,15 +64,8 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 		}
 	}
 
-	args := make([]string, len(c.Args))
-	copy(args, c.Args)
-
-	if c.Model != "" {
-		args = append(args, "--model", c.Model)
-	}
-
 	// ExtraArgs may include --settings for sandbox, model overrides, etc.
-	args = append(args, req.ExtraArgs...)
+	args := buildAgentArgs(c.Args, c.Model, req.ExtraArgs)
 
 	command := c.Command
 	if command == "" {

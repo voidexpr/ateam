@@ -3,7 +3,6 @@ package container
 import (
 	"context"
 	"io"
-	"os"
 	"os/exec"
 )
 
@@ -22,7 +21,7 @@ type Container interface {
 	Prepare(ctx context.Context) error
 
 	// CmdFactory returns a CmdFactory that wraps commands for container execution.
-	// Returns nil for host execution (NoneContainer).
+	// Returns nil for host execution (nil Container).
 	CmdFactory() CmdFactory
 
 	// GetContainerName returns the name of a long-lived container, or "" if not applicable.
@@ -46,39 +45,3 @@ type RunOpts struct {
 	ExtraArgs []string // from --container-args
 }
 
-// NoneContainer executes commands directly on the host.
-type NoneContainer struct{}
-
-func (n *NoneContainer) Type() string { return "none" }
-
-func (n *NoneContainer) Run(ctx context.Context, opts RunOpts) error {
-	cmd := exec.CommandContext(ctx, opts.Command, opts.Args...)
-	if opts.WorkDir != "" {
-		cmd.Dir = opts.WorkDir
-	}
-	cmd.Stdin = opts.Stdin
-	cmd.Stdout = opts.Stdout
-	cmd.Stderr = opts.Stderr
-
-	if len(opts.Env) > 0 {
-		cmd.Env = os.Environ()
-		for k, v := range opts.Env {
-			cmd.Env = append(cmd.Env, k+"="+v)
-		}
-	}
-
-	return cmd.Run()
-}
-
-func (n *NoneContainer) DebugCommand(opts RunOpts) string {
-	s := opts.Command
-	for _, a := range opts.Args {
-		s += " " + a
-	}
-	return s
-}
-
-func (n *NoneContainer) Prepare(_ context.Context) error    { return nil }
-func (n *NoneContainer) CmdFactory() CmdFactory             { return nil }
-func (n *NoneContainer) GetContainerName() string           { return "" }
-func (n *NoneContainer) TranslatePath(path string) string   { return path }

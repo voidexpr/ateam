@@ -88,24 +88,7 @@ func funcMap() template.FuncMap {
 		"fmtTokensInt": func(n int) string {
 			return display.FmtTokens(int64(n))
 		},
-		"fmtDateAge": func(t time.Time) string {
-			if t.IsZero() {
-				return ""
-			}
-			date := t.Format("01/02")
-			age := time.Since(t)
-			switch {
-			case age < time.Minute:
-				return date + " (just now)"
-			case age < time.Hour:
-				return fmt.Sprintf("%s (%dm ago)", date, int(age.Minutes()))
-			case age < 24*time.Hour:
-				return fmt.Sprintf("%s (%dh ago)", date, int(age.Hours()))
-			default:
-				days := int(age.Hours()) / 24
-				return fmt.Sprintf("%s (%dd ago)", date, days)
-			}
-		},
+		"fmtDateAge": display.FmtDateAge,
 		"fmtDuration": func(ms int64) string {
 			if ms <= 0 {
 				return ""
