@@ -87,7 +87,7 @@
         <td style="font-size:12px;color:var(--text-muted)">{{.Model}}</td>
         <td>{{fmtTimestamp .StartedAt}}</td>
         <td>{{fmtDuration .DurationMS}}</td>
-        <td>{{fmtTokensInt .InputTokens}}</td>
+        <td>{{fmtTokensInt (addInt (addInt .InputTokens .CacheReadTokens) .CacheWriteTokens)}}</td>
         <td>{{fmtTokensInt .OutputTokens}}</td>
         <td>{{fmtCost .CostUSD}}</td>
         <td>{{if .IsError}}<span class="badge badge-error">error</span>{{else if .EndedAt}}<span class="badge badge-ok">ok</span>{{else}}<span class="badge badge-run">running</span>{{end}}</td>
