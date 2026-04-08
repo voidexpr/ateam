@@ -32,7 +32,35 @@
   <main>
     {{.Content}}
   </main>
-  <script>document.addEventListener('click',function(e){var r=e.target.closest('tr[data-href]');if(r){e.preventDefault();window.location.href=r.dataset.href}})</script>
+  <script>
+  document.addEventListener('click',function(e){var r=e.target.closest('tr[data-href]');if(r&&!e.target.closest('th')){e.preventDefault();window.location.href=r.dataset.href}});
+  (function(){
+    function initSortable(table){
+      var headers=table.querySelectorAll('th[data-sort]');
+      headers.forEach(function(th){
+        th.addEventListener('click',function(e){
+          e.stopPropagation();
+          var colIdx=Array.from(th.parentNode.children).indexOf(th);
+          var type=th.dataset.sort;
+          var desc=th.classList.contains('sort-asc');
+          if(!th.classList.contains('sort-asc')&&!th.classList.contains('sort-desc'))desc=true;
+          headers.forEach(function(h){h.classList.remove('sort-asc','sort-desc')});
+          th.classList.add(desc?'sort-desc':'sort-asc');
+          var tbody=table.querySelector('tbody');
+          var rows=Array.from(tbody.querySelectorAll('tr'));
+          rows.sort(function(a,b){
+            var av=(a.children[colIdx]||{}).dataset&&a.children[colIdx].dataset.val||a.children[colIdx].textContent.trim();
+            var bv=(b.children[colIdx]||{}).dataset&&b.children[colIdx].dataset.val||b.children[colIdx].textContent.trim();
+            var cmp=type==='num'?(parseFloat(av)||0)-(parseFloat(bv)||0):av.localeCompare(bv);
+            return desc?-cmp:cmp;
+          });
+          rows.forEach(function(r){tbody.appendChild(r)});
+        });
+      });
+    }
+    document.querySelectorAll('.sortable-table').forEach(initSortable);
+  })();
+  </script>
 </body>
 </html>
 {{end}}
