@@ -368,7 +368,6 @@ func TestDockerFilePermissions(t *testing.T) {
 	})
 }
 
-
 func TestDockerEnvForwarding(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

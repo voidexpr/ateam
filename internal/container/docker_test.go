@@ -181,7 +181,6 @@ func TestDebugCommand(t *testing.T) {
 	}
 }
 
-
 func TestContainerPathsSimple(t *testing.T) {
 	dc := &DockerContainer{
 		SourceDir:  "/Users/nic/projects/myapp",
@@ -255,7 +254,6 @@ func TestEnvArgsInOneshotCmdFactory(t *testing.T) {
 	}
 }
 
-
 func TestEnvArgsInDebugCommand(t *testing.T) {
 	dc := &DockerContainer{
 		Image:     "ateam-test:latest",
@@ -283,7 +281,6 @@ func TestEnvArgsInDebugCommand(t *testing.T) {
 		t.Errorf("env args not sorted: A_VAR at %d, B_VAR at %d in: %s", aIdx, bIdx, got)
 	}
 }
-
 
 func TestDockerExecCmdFactoryPreservesArgBoundaries(t *testing.T) {
 	dc := &DockerExecContainer{
