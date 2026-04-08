@@ -125,9 +125,6 @@ func resolveContainerTemplates(c container.Container, vars TemplateVars) {
 	case *container.DockerContainer:
 		dc.ExtraArgs = resolveArgs(dc.ExtraArgs, r)
 		dc.ExtraVolumes = resolveArgs(dc.ExtraVolumes, r)
-		if strings.Contains(dc.ContainerName, "{{") {
-			dc.ContainerName = r.Replace(dc.ContainerName)
-		}
 		dc.Env = resolveMap(dc.Env, r)
 	case *container.DockerExecContainer:
 		if strings.Contains(dc.ContainerName, "{{") {
@@ -138,29 +135,6 @@ func resolveContainerTemplates(c container.Container, vars TemplateVars) {
 		}
 		if strings.Contains(dc.WorkDir, "{{") {
 			dc.WorkDir = r.Replace(dc.WorkDir)
-		}
-	case *container.DevcontainerContainer:
-		if strings.Contains(dc.ConfigPath, "{{") {
-			dc.ConfigPath = r.Replace(dc.ConfigPath)
-		}
-		if strings.Contains(dc.WorkspaceDir, "{{") {
-			dc.WorkspaceDir = r.Replace(dc.WorkspaceDir)
-		}
-	case *container.DockerSandboxContainer:
-		if strings.Contains(dc.SandboxName, "{{") {
-			dc.SandboxName = r.Replace(dc.SandboxName)
-		}
-		if strings.Contains(dc.WorkspaceDir, "{{") {
-			dc.WorkspaceDir = r.Replace(dc.WorkspaceDir)
-		}
-		if strings.Contains(dc.MountDir, "{{") {
-			dc.MountDir = r.Replace(dc.MountDir)
-		}
-		if strings.Contains(dc.OrgDir, "{{") {
-			dc.OrgDir = r.Replace(dc.OrgDir)
-		}
-		if strings.Contains(dc.ClaudeDir, "{{") {
-			dc.ClaudeDir = r.Replace(dc.ClaudeDir)
 		}
 	}
 }

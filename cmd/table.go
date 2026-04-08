@@ -16,7 +16,6 @@ import (
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/calldb"
-	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
@@ -139,12 +138,7 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 	r.Container = ct
 	if cc != nil && cc.Type != "none" {
 		r.ContainerType = cc.Type
-		switch c := ct.(type) {
-		case *container.DockerContainer:
-			r.ContainerName = c.ContainerName
-		case *container.DockerExecContainer:
-			r.ContainerName = c.ContainerName
-		}
+		r.ContainerName = ct.GetContainerName()
 	} else {
 		r.ContainerType = "none"
 	}
@@ -152,19 +146,15 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 }
 
 // applyContainerNameOverride replaces the container name on a runner's container
-// if a --container-name flag was provided. Works for docker-exec and persistent docker.
+// if a --container-name flag was provided. Only effective for docker-exec containers.
 func applyContainerNameOverride(r *runner.Runner, name string) {
 	if name == "" || r.Container == nil {
 		return
 	}
-	switch c := r.Container.(type) {
-	case *container.DockerContainer:
-		c.ContainerName = name
+	if de, ok := r.Container.(*container.DockerExecContainer); ok {
+		de.ContainerName = name
 		r.ContainerName = name
-	case *container.DockerExecContainer:
-		c.ContainerName = name
-		r.ContainerName = name
-	default:
+	} else {
 		fmt.Fprintf(os.Stderr, "Warning: --container-name has no effect for container type %q\n", r.ContainerType)
 	}
 }
@@ -399,15 +389,6 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 		if gitRepoDir != "" {
 			mountDir = gitRepoDir
 		}
-
-		persistent := cc.Mode == "persistent"
-		var containerName string
-		if persistent {
-			containerName = buildContainerName(sourceDir, orgDir, roleID)
-		}
-
-		precheckScript := runtime.ResolvePrecheckScript(cc, projectDir, orgDir, roleID)
-
 		return &container.DockerContainer{
 			Image:            image,
 			Dockerfile:       dockerfile,
@@ -415,14 +396,11 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 			ForwardEnv:       cc.ForwardEnv,
 			ExtraVolumes:     volumes,
 			ExtraArgs:        extraArgs,
-			Persistent:       persistent,
-			ContainerName:    containerName,
 			MountDir:         mountDir,
 			SourceDir:        sourceDir,
 			ProjectDir:       projectDir,
 			OrgDir:           orgDir,
 			HostCLIPath:      findLinuxBinary(orgDir),
-			PrecheckScript:   precheckScript,
 		}, nil
 	case "docker-exec":
 		if cc.DockerContainer == "" {
@@ -457,62 +435,11 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 			HostCLIPath:    hostCLIPath,
 			PrecheckScript: precheckScript,
 		}, nil
-	case "devcontainer":
-		configPath := cc.ConfigPath
-		if configPath == "" {
-			configPath = ".devcontainer/devcontainer.json"
-		}
-		if !filepath.IsAbs(configPath) {
-			configPath = filepath.Join(sourceDir, configPath)
-		}
-		return &container.DevcontainerContainer{
-			ConfigPath:   configPath,
-			WorkspaceDir: sourceDir,
-			ForwardEnv:   cc.ForwardEnv,
-		}, nil
-	case "docker-sandbox":
-		sandboxName := buildContainerName(sourceDir, orgDir, roleID)
-		mountDir := sourceDir
-		if gitRepoDir != "" {
-			mountDir = gitRepoDir
-		}
-		var claudeDir string
-		if cc.CopyClaudeConfig {
-			if home, err := os.UserHomeDir(); err == nil {
-				claudeDir = filepath.Join(home, ".claude")
-			}
-		}
-		return &container.DockerSandboxContainer{
-			WorkspaceDir:  sourceDir,
-			MountDir:      mountDir,
-			OrgDir:        orgDir,
-			ClaudeDir:     claudeDir,
-			CacheDir:      filepath.Join(projectDir, "cache"),
-			ForwardEnv:    cc.ForwardEnv,
-			SandboxName:   sandboxName,
-			NetworkPolicy: cc.NetworkPolicy,
-			BuildVersion:  GitCommit,
-		}, nil
 	default:
 		return nil, nil
 	}
 }
 
-func buildContainerName(sourceDir, orgDir, roleID string) string {
-	if roleID == "" {
-		roleID = "adhoc"
-	}
-	if orgDir == "" {
-		return "ateam-adhoc"
-	}
-	orgRoot := filepath.Dir(orgDir)
-	relPath, err := filepath.Rel(orgRoot, sourceDir)
-	if err != nil || relPath == "" {
-		return "ateam-adhoc"
-	}
-	projectID := config.PathToProjectID(relPath)
-	return "ateam-" + projectID + "-" + roleID
-}
 
 // findLinuxBinary locates or builds a Linux/AMD64 ateam binary for Docker.
 // Search order: self (if linux), companion binary, org cache, cross-compile.

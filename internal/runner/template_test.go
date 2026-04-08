@@ -304,10 +304,9 @@ func TestResolveAgentTemplateArgsMockAgent(t *testing.T) {
 
 func TestResolveContainerTemplatesDocker(t *testing.T) {
 	dc := &container.DockerContainer{
-		ExtraArgs:     []string{"--hostname", "{{PROJECT_DIR}}-{{ROLE}}", "--label", "action={{ACTION}}"},
-		ContainerName: "ateam-{{PROJECT_DIR}}-{{ROLE}}",
-		ExtraVolumes:  []string{"{{PROJECT_FULL_PATH}}/data:/data:ro", "/static:/static:ro"},
-		Env:           map[string]string{"SESSION": "{{EXEC_ID}}", "PLAIN": "value"},
+		ExtraArgs:    []string{"--hostname", "{{PROJECT_DIR}}-{{ROLE}}", "--label", "action={{ACTION}}"},
+		ExtraVolumes: []string{"{{PROJECT_FULL_PATH}}/data:/data:ro", "/static:/static:ro"},
+		Env:          map[string]string{"SESSION": "{{EXEC_ID}}", "PLAIN": "value"},
 	}
 	vars := TemplateVars{
 		ProjectDir:      "myapp",
@@ -325,11 +324,6 @@ func TestResolveContainerTemplatesDocker(t *testing.T) {
 	}
 	if dc.ExtraArgs[3] != "action=report" {
 		t.Errorf("ExtraArgs[3]: got %q, want %q", dc.ExtraArgs[3], "action=report")
-	}
-
-	// ContainerName
-	if dc.ContainerName != "ateam-myapp-security" {
-		t.Errorf("ContainerName: got %q, want %q", dc.ContainerName, "ateam-myapp-security")
 	}
 
 	// ExtraVolumes
@@ -351,17 +345,13 @@ func TestResolveContainerTemplatesDocker(t *testing.T) {
 
 func TestResolveContainerTemplatesNoTemplates(t *testing.T) {
 	dc := &container.DockerContainer{
-		ExtraArgs:     []string{"--privileged"},
-		ContainerName: "ateam-static",
-		ExtraVolumes:  []string{"/data:/data:ro"},
+		ExtraArgs:    []string{"--privileged"},
+		ExtraVolumes: []string{"/data:/data:ro"},
 	}
 	resolveContainerTemplates(dc, TemplateVars{Role: "security"})
 
 	if dc.ExtraArgs[0] != "--privileged" {
 		t.Errorf("ExtraArgs should be unchanged: got %q", dc.ExtraArgs[0])
-	}
-	if dc.ContainerName != "ateam-static" {
-		t.Errorf("ContainerName should be unchanged: got %q", dc.ContainerName)
 	}
 }
 
@@ -369,9 +359,6 @@ func TestResolveContainerTemplatesEmptyFields(t *testing.T) {
 	dc := &container.DockerContainer{}
 	resolveContainerTemplates(dc, TemplateVars{Role: "security"})
 	// Should not panic on empty/nil fields.
-	if dc.ContainerName != "" {
-		t.Errorf("expected empty ContainerName, got %q", dc.ContainerName)
-	}
 }
 
 func TestResolveContainerTemplatesNilContainer(t *testing.T) {
@@ -396,49 +383,6 @@ func TestResolveContainerTemplatesDockerExec(t *testing.T) {
 	}
 }
 
-func TestResolveContainerTemplatesDevcontainer(t *testing.T) {
-	dc := &container.DevcontainerContainer{
-		ConfigPath:   "/home/user/{{PROJECT_DIR}}/.devcontainer/devcontainer.json",
-		WorkspaceDir: "{{PROJECT_FULL_PATH}}",
-	}
-	resolveContainerTemplates(dc, TemplateVars{
-		ProjectDir:      "myapp",
-		ProjectFullPath: "/home/user/myapp",
-	})
-	if dc.ConfigPath != "/home/user/myapp/.devcontainer/devcontainer.json" {
-		t.Errorf("ConfigPath: got %q", dc.ConfigPath)
-	}
-	if dc.WorkspaceDir != "/home/user/myapp" {
-		t.Errorf("WorkspaceDir: got %q", dc.WorkspaceDir)
-	}
-}
-
-func TestResolveContainerTemplatesDockerSandbox(t *testing.T) {
-	dc := &container.DockerSandboxContainer{
-		SandboxName:  "ateam-{{PROJECT_DIR}}-{{ROLE}}",
-		WorkspaceDir: "{{PROJECT_FULL_PATH}}",
-		MountDir:     "{{PROJECT_FULL_PATH}}",
-		OrgDir:       "/home/user/.ateamorg",
-	}
-	resolveContainerTemplates(dc, TemplateVars{
-		ProjectDir:      "myapp",
-		ProjectFullPath: "/home/user/myapp",
-		Role:            "security",
-	})
-	if dc.SandboxName != "ateam-myapp-security" {
-		t.Errorf("SandboxName: got %q, want %q", dc.SandboxName, "ateam-myapp-security")
-	}
-	if dc.WorkspaceDir != "/home/user/myapp" {
-		t.Errorf("WorkspaceDir: got %q", dc.WorkspaceDir)
-	}
-	if dc.MountDir != "/home/user/myapp" {
-		t.Errorf("MountDir: got %q", dc.MountDir)
-	}
-	// OrgDir has no templates, should be unchanged
-	if dc.OrgDir != "/home/user/.ateamorg" {
-		t.Errorf("OrgDir should be unchanged: got %q", dc.OrgDir)
-	}
-}
 
 // --- BuildTemplateVars ---
 
