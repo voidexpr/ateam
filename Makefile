@@ -1,6 +1,6 @@
 BINARY = ateam
 
-.PHONY: build build-binary companion clean tidy check-tidy test test-docker test-docker-live vuln docs lint fmt fmt-check install-hooks
+.PHONY: build build-binary companion clean tidy check-tidy test test-all test-docker test-docker-live vuln docs lint fmt fmt-check install-hooks
 
 BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
@@ -30,6 +30,8 @@ check-tidy:
 test:
 	go build ./...
 	go test ./...
+
+test-all: test test-docker
 
 # Run docker integration tests inside Docker-in-Docker (no host impact).
 test-docker:

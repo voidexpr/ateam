@@ -49,7 +49,7 @@ func ExpandHome(path string) string {
 // Runner orchestrates agent execution with logging, file I/O, and progress reporting.
 type Runner struct {
 	Agent                   agent.Agent
-	Container               container.Container // nil or NoneContainer means run on host
+	Container               container.Container // nil means run on host
 	LogFile                 string              // append-only runner log
 	ProjectDir              string              // .ateam/ dir
 	OrgDir                  string              // .ateamorg/ dir

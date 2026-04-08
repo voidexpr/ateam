@@ -697,21 +697,7 @@ func secretResolver(env *root.ResolvedEnv, backend secret.Backend) *secret.Resol
 	return secret.NewResolver(env.ProjectDir, env.OrgDir, backend, opts)
 }
 
-func fmtDateAge(t time.Time) string {
-	date := t.Format("01/02")
-	age := time.Since(t)
-	switch {
-	case age < time.Minute:
-		return date + " (just now)"
-	case age < time.Hour:
-		return fmt.Sprintf("%s (%dm ago)", date, int(age.Minutes()))
-	case age < 24*time.Hour:
-		return fmt.Sprintf("%s (%dh ago)", date, int(age.Hours()))
-	default:
-		days := int(age.Hours()) / 24
-		return fmt.Sprintf("%s (%dd ago)", date, days)
-	}
-}
+func fmtDateAge(t time.Time) string { return display.FmtDateAge(t) }
 
 // poolDisplayOpts controls how runPool renders progress and formats output.
 type poolDisplayOpts struct {
