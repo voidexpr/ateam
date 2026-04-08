@@ -485,7 +485,7 @@ Bind-mounting host dirs requires matching UIDs. Current approach: `--build-arg U
 For projects whose tests require Docker (building images, running containers), options:
 - `--privileged` DinD: full Docker daemon inside container, kernel-sharing security risk
 - Sidecar pattern: separate Docker daemon container, shared socket
-- Docker-sandbox (microVM): isolated Docker daemon, requires Docker Desktop 4.58+
+- Docker Sandbox (microVM): isolated Docker daemon with own kernel, requires Docker Desktop 4.58+. See "Docker Sandbox (microVM) container type" in Future Work for full details. Note: inner containers have restricted networking, so DinD builds that fetch packages during `RUN` steps will fail.
 
 ### Network isolation
 
@@ -493,7 +493,7 @@ Docker doesn't isolate network by default. Options for restricting agent network
 - iptables default-deny with allowlist (Anthropic's reference devcontainer pattern)
 - Proxy-based domain filtering (Greywall, Claude's built-in SRT)
 - Docker `--network none` + explicit port forwarding
-- Docker-sandbox `network_policy = "deny"` (microVM level)
+- Docker Sandbox `network_policy = "deny"` (microVM level) — strongest option, but inner containers have restricted networking even with "allow" policy. See "Docker Sandbox (microVM) container type" in Future Work.
 
 ### Host-local service access
 
@@ -734,9 +734,124 @@ Allow `{{SANDBOX_FILE}}` in agent args to make sandbox settings explicit: `["--s
 
 Allow any HCL agent field to be dumped to a file and referenced in args. Useful for agents that need config files generated from HCL.
 
+### Docker Sandbox (microVM) container type
+
+**Status:** Removed from code (commit `1425e01`), may be re-added. Prior implementation in `internal/container/docker_sandbox.go`.
+
+#### What Docker Sandbox is
+
+Docker Desktop 4.58+ introduced `docker sandbox`, which runs workloads inside a lightweight microVM (Apple Virtualization Framework on macOS, Hyper-V on Windows) rather than a regular container. Each sandbox gets:
+
+- **Its own kernel** — kernel exploits inside the sandbox can't reach the host
+- **A private Docker daemon** — the agent can build and run containers, but only sees containers it creates (no access to host Docker environment)
+- **Bidirectional workspace sync** — the project directory is synced between host and sandbox at the same absolute path
+
+Sandboxes appear in `docker sandbox ls`, not `docker ps`.
+
+#### How it differs from regular Docker containers
+
+| | `docker run` (regular) | `docker sandbox` (microVM) |
+|---|---|---|
+| Kernel | Shared with host | Private (own VM) |
+| Docker daemon | Shared (host socket) | Private (per-sandbox) |
+| Kernel exploit escape | Possible | Contained by hypervisor |
+| Container visibility | All host containers visible | Only sandbox's own containers |
+| Mounting | Arbitrary `-v host:container:mode` | **One workspace mount only** — no `-v` equivalent |
+| Extra dirs | Bind-mount as needed | Must tar-copy (one-way snapshots) |
+| Resource overhead | Low (shared kernel) | Higher (VM + daemon per sandbox) |
+| Networking | Full host network by default | Restricted — inner containers can pull images but can't make arbitrary outbound HTTPS |
+| Requirement | Docker Engine | Docker Desktop 4.58+ |
+
+#### The single-mount limitation
+
+This is the key constraint. Docker Sandbox exposes exactly **one workspace directory** with bidirectional sync. There is no `-v` equivalent for arbitrary extra mounts. In practice this means:
+
+- `.ateamorg/` (org config) must be tar-copied as a read-only snapshot — changes inside the sandbox are lost
+- `~/.claude/` (agent config) must be selectively tar-copied (skills, plugins, settings.json only)
+- The ateam binary can't be bind-mounted — it must be baked into the sandbox image or copied in
+- Any project dependencies outside the workspace (shared libraries, data dirs) need workarounds
+
+The prior implementation handled this by:
+1. Syncing the git root as the workspace (bidirectional)
+2. Tar-copying `.ateamorg/` after sandbox creation
+3. Selectively tar-copying `~/.claude/` (only `CLAUDE.md`, `plugins/`, `skills/`, `settings.json`, `projects/`)
+4. Skipping session data, credentials, hooks, and debug logs to avoid stale state
+
+#### Networking constraints
+
+Docker Sandbox networking has two layers:
+
+- **Sandbox VM level**: controlled by `network_policy` ("allow" or "deny"). When "allow", the sandbox itself can reach the internet.
+- **Inner container level**: containers started inside the sandbox's private Docker daemon have restricted networking regardless of `network_policy` — they can pull images but can't make arbitrary outbound HTTPS connections.
+
+This means Docker-in-Docker builds that fetch packages during `RUN` steps (e.g., `make test-docker`) will fail inside a sandbox. Regular `docker` profile is needed for DinD workloads.
+
+#### Prior implementation design
+
+The removed `DockerSandboxContainer` implemented:
+
+- **Auto-recreation**: a config hash (workspace, org dir, agent name, network policy, env vars, build version) was stored in `.ateam/cache/`. When the hash changed, the sandbox was automatically removed and recreated.
+- **Lifecycle**: `EnsureRunning` (create if missing, recreate if config changed) → `CmdFactory` (wraps commands in `docker sandbox exec`) → `Stop` (remove sandbox)
+- **Env forwarding**: `docker sandbox exec -e KEY=VAL` for each `forward_env` entry, same as regular Docker
+- **Agent validation**: `docker sandbox exec which <command>` to verify the agent CLI exists
+- **Config in HCL**:
+
+```hcl
+container "docker-sandbox" {
+  type               = "docker-sandbox"
+  copy_claude_config = false          # whether to tar-copy ~/.claude/ into sandbox
+  network_policy     = "allow"        # "allow" or "deny"
+  forward_env        = ["ANTHROPIC_API_KEY"]
+}
+
+profile "docker-sandbox" {
+  agent     = "claude"
+  container = "docker-sandbox"
+}
+```
+
+#### Re-integration path
+
+To bring docker-sandbox back, it needs to implement the current `Container` interface (introduced after removal):
+
+```go
+type Container interface {
+    Type() string
+    Prepare(ctx context.Context) error    // was EnsureRunning
+    CmdFactory() CmdFactory               // unchanged
+    GetContainerName() string             // sandbox name
+    TranslatePath(hostPath string) string // 1:1 paths (no remapping needed)
+    DebugCommand(opts RunOpts) string     // unchanged
+    Run(ctx context.Context, opts RunOpts) error // unchanged
+}
+```
+
+Implementation steps:
+
+1. **Restore `docker_sandbox.go`** from git history (`git show 1425e01 -- internal/container/docker_sandbox.go`)
+2. **Adapt to `Container` interface**: rename `EnsureRunning` → `Prepare`, add `GetContainerName` (returns `SandboxName`), add `TranslatePath` (return path as-is since paths are 1:1)
+3. **Restore HCL fields**: `CopyClaudeConfig` and `NetworkPolicy` in `ContainerConfig` / `hclContainer`
+4. **Restore `buildContainer` case** in `cmd/table.go` for `type = "docker-sandbox"`
+5. **Restore runtime.hcl block** for `docker-sandbox` container and profile
+6. **Add `Stop()` call** — the current interface doesn't have `Stop`. Either add it to the interface or handle cleanup via a separate mechanism (e.g., `ateam sandbox rm` command, or defer-based cleanup in runner)
+
+#### When to bring it back
+
+Docker Sandbox is the strongest isolation option ateam can offer — hypervisor-level isolation with a private Docker daemon. It should come back when:
+
+- Docker Desktop 4.58+ is more widely adopted
+- The single-mount limitation is better understood by users (or Docker relaxes it)
+- There's user demand for stronger-than-container isolation
+
+It is not needed for the common case. Regular `docker` containers provide sufficient isolation for most projects. Docker Sandbox adds value for:
+
+- Security-sensitive codebases where kernel-level isolation matters
+- Multi-tenant CI where agents from different projects must not see each other's containers
+- Environments where the Docker socket must not be exposed to agents
+
 ### Network isolation for containers
 
-Docker doesn't isolate network by default. Options: iptables default-deny, proxy-based domain filtering, `--network none` + explicit forwarding. Not implemented — the current container isolation focuses on filesystem, not network.
+Docker doesn't isolate network by default. Options: iptables default-deny, proxy-based domain filtering, `--network none` + explicit forwarding. Not implemented — the current container isolation focuses on filesystem, not network. Docker Sandbox's `network_policy = "deny"` provides the strongest network isolation option when re-integrated.
 
 ### `container_name_script` or template variable for dynamic container names
 
