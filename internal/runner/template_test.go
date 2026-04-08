@@ -23,7 +23,8 @@ func TestResolveTemplateArgsAllVars(t *testing.T) {
 		ExecID:          42,
 		Agent:           "claude-docker",
 		Model:           "sonnet",
-		Container:       "docker",
+		ContainerType:   "docker",
+		ContainerName:   "ateam-myproject-security",
 	}
 
 	tests := []struct {
@@ -41,7 +42,8 @@ func TestResolveTemplateArgsAllVars(t *testing.T) {
 		{"{{EXEC_ID}}", "42"},
 		{"{{AGENT}}", "claude-docker"},
 		{"{{MODEL}}", "sonnet"},
-		{"{{CONTAINER}}", "docker"},
+		{"{{CONTAINER_TYPE}}", "docker"},
+		{"{{CONTAINER_NAME}}", "ateam-myproject-security"},
 	}
 
 	for _, tt := range tests {
@@ -390,9 +392,9 @@ func TestResolveContainerTemplatesDockerExecCollision(t *testing.T) {
 		WorkDir:       "/workspace/{{PROJECT_DIR}}",
 	}
 	vars := TemplateVars{
-		Role:       "security",
-		ProjectDir: "myapp",
-		Container:  "docker-exec",
+		Role:          "security",
+		ProjectDir:    "myapp",
+		ContainerType: "docker-exec",
 	}
 
 	resolveContainerTemplates(de, vars)
@@ -471,8 +473,8 @@ func TestBuildTemplateVars(t *testing.T) {
 	if vars.Model != "sonnet" {
 		t.Errorf("Model: got %q", vars.Model)
 	}
-	if vars.Container != "docker" {
-		t.Errorf("Container: got %q", vars.Container)
+	if vars.ContainerType != "docker" {
+		t.Errorf("ContainerType: got %q", vars.ContainerType)
 	}
 }
 

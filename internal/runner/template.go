@@ -24,7 +24,8 @@ type TemplateVars struct {
 	ExecID          int64  // call tracking ID (from ateam ps)
 	Agent           string // agent config name (e.g. "claude", "claude-docker")
 	Model           string // resolved model name
-	Container       string // container type ("none", "docker", etc.)
+	ContainerType   string // container type ("none", "docker", "docker-exec", etc.)
+	ContainerName   string // docker container name (e.g. "ateam-myapp-security")
 }
 
 // Replacer builds a strings.Replacer for the current template vars.
@@ -46,7 +47,8 @@ func (v TemplateVars) Replacer() *strings.Replacer {
 		"{{EXEC_ID}}", execID,
 		"{{AGENT}}", v.Agent,
 		"{{MODEL}}", v.Model,
-		"{{CONTAINER}}", v.Container,
+		"{{CONTAINER_TYPE}}", v.ContainerType,
+		"{{CONTAINER_NAME}}", v.ContainerName,
 	)
 }
 
@@ -115,10 +117,9 @@ func resolveMap(m map[string]string, r *strings.Replacer) map[string]string {
 }
 
 // resolveContainerTemplates resolves {{VAR}} placeholders in container config fields.
-// Mutates the container in place. For DockerExecContainer, only the general template
-// vars (PROJECT_DIR, ROLE, etc.) are resolved here — the exec-specific {{CONTAINER}}
-// and {{CMD}} placeholders in ExecTemplate are resolved later by CmdFactory at
-// execution time.
+// Mutates the container in place. For DockerExecContainer, the ExecTemplate is not
+// resolved here — its {{CONTAINER}} and {{CMD}} placeholders are expanded by
+// CmdFactory at execution time (separate namespace from general template vars).
 func resolveContainerTemplates(c container.Container, vars TemplateVars) {
 	if c == nil {
 		return
@@ -133,9 +134,8 @@ func resolveContainerTemplates(c container.Container, vars TemplateVars) {
 		if strings.Contains(dc.ContainerName, "{{") {
 			dc.ContainerName = r.Replace(dc.ContainerName)
 		}
-		// ExecTemplate is NOT resolved here — it uses its own {{CONTAINER}} and
-		// {{CMD}} placeholders that are expanded by CmdFactory at execution time.
-		// Resolving general vars would corrupt {{CONTAINER}} (container type vs name).
+		// ExecTemplate is NOT resolved here — its {{CONTAINER}} and {{CMD}}
+		// placeholders are expanded by CmdFactory at execution time.
 		if strings.Contains(dc.WorkDir, "{{") {
 			dc.WorkDir = r.Replace(dc.WorkDir)
 		}
@@ -145,16 +145,17 @@ func resolveContainerTemplates(c container.Container, vars TemplateVars) {
 // BuildTemplateVars constructs a fully populated TemplateVars.
 func BuildTemplateVars(r *Runner, opts RunOpts, startedAt time.Time, callID int64, agentName, model string) TemplateVars {
 	vars := TemplateVars{
-		ProjectName: r.ProjectName,
-		Role:        opts.RoleID,
-		Action:      opts.Action,
-		TaskGroup:   opts.TaskGroup,
-		Timestamp:   startedAt.Format(TimestampFormat),
-		Profile:     r.Profile,
-		ExecID:      callID,
-		Agent:       agentName,
-		Model:       model,
-		Container:   r.ContainerType,
+		ProjectName:   r.ProjectName,
+		Role:          opts.RoleID,
+		Action:        opts.Action,
+		TaskGroup:     opts.TaskGroup,
+		Timestamp:     startedAt.Format(TimestampFormat),
+		Profile:       r.Profile,
+		ExecID:        callID,
+		Agent:         agentName,
+		Model:         model,
+		ContainerType: r.ContainerType,
+		ContainerName: r.ContainerName,
 	}
 	if r.SourceDir != "" {
 		vars.ProjectFullPath = r.SourceDir
