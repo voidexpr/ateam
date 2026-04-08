@@ -15,9 +15,9 @@ Read README.md and scan the top-level directory structure. Identify:
 - Whether other services or middleware are involed
 - Project maturity (prototype vs production)
 
-### 2. Write .ateam/overview.md
+### 2. Write .ateam/setup_overview.md
 
-Create a concise project overview in `.ateam/overview.md`:
+Create a concise project overview in `.ateam/setup_overview.md`. This file is used as a reference during setup and is not included in agent prompts (agents read the codebase directly, and project context is maintained in CLAUDE.md or similar files).
 
 ```markdown
 # Project Overview
@@ -61,7 +61,7 @@ cat .ateam/config.toml
 
 ### 4. Check Docker availability
 
-Run `docker --version` to check if Docker is installed. If Docker is available, note it in the overview. Docker enables isolated execution via the `docker` profile but is not required.
+Run `docker --version` to check if Docker is installed. If Docker is available, note it in the setup overview. Docker enables isolated execution via the `docker` profile but is not required.
 
 ### 5. Print summary
 

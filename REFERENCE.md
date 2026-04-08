@@ -47,7 +47,7 @@ ateam init --org-home                          # auto-create .ateamorg/ in $HOME
 
 ### `ateam auto-setup`
 
-Run the supervisor to analyze the project and auto-configure roles in `config.toml`, create `.ateam/overview.md`, and recommend settings.
+Run the supervisor to analyze the project and auto-configure roles in `config.toml` and recommend settings. Creates `.ateam/setup_overview.md` as a setup reference (not included in agent prompts).
 
 ```bash
 ateam auto-setup
@@ -487,7 +487,7 @@ Versioned files are at the top level. Runtime artifacts (`logs/`, `state.sqlite`
 .ateam/
   .gitignore                                 # excludes state.sqlite*, logs/, secrets.env
   config.toml                                # project configuration
-  overview.md                                # project overview (created by auto-setup)
+  setup_overview.md                           # project overview from auto-setup (not included in prompts)
   state.sqlite                               # call database [gitignored]
   secrets.env                                # project-scoped secrets [gitignored]
   runtime.hcl                                # project-level runtime override (optional)
@@ -602,13 +602,13 @@ The placeholder `{{SOURCE_DIR}}` in prompts is replaced with the project source 
 ### Role Prompt Assembly (report and code)
 
 ```
-ATeam Project Context → Project Overview → Base prompt → Role prompt → Extra prompts → CLI --extra-prompt
+ATeam Project Context → Base prompt → Role prompt → Extra prompts → CLI --extra-prompt
 ```
 
 ### Supervisor Prompt Assembly (review and code)
 
 ```
-ATeam Project Context → Project Overview → Action prompt → Extra prompts → Reports/Review → CLI --extra-prompt
+ATeam Project Context → Action prompt → Extra prompts → Reports/Review → CLI --extra-prompt
 ```
 
 ### Extra Prompt Locations
