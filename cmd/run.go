@@ -311,11 +311,16 @@ func printRunDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, tas
 	}
 	fmt.Println()
 
-	// Build the full low-level args (including --settings if sandbox is active)
+	// Build the full low-level args with container-aware additions
 	fullArgs := make([]string, len(resolvedExtraArgs))
 	copy(fullArgs, resolvedExtraArgs)
+	if runner.IsInContainer() || r.Container != nil {
+		fullArgs = append(fullArgs, runner.ResolveTemplateArgs(r.ArgsInsideContainer, tmplVars)...)
+	} else {
+		fullArgs = append(fullArgs, runner.ResolveTemplateArgs(r.ArgsOutsideContainer, tmplVars)...)
+	}
 
-	skipSandbox := runner.IsInContainer() && !r.SandboxInsideContainer
+	skipSandbox := (runner.IsInContainer() || r.Container != nil) && !r.SandboxInsideContainer
 	if r.SandboxSettings != "" && !skipSandbox {
 		settingsPath := "<logs>/<timestamp>_settings.json"
 		fullArgs = append(fullArgs, "--settings", settingsPath)

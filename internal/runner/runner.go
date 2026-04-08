@@ -180,8 +180,9 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	extraArgs := make([]string, len(r.ExtraArgs))
 	copy(extraArgs, r.ExtraArgs)
 
-	// Append environment-aware args
-	if IsInContainer() {
+	// Append environment-aware args.
+	// Use container args when: already inside a container, OR launching into one.
+	if IsInContainer() || r.Container != nil {
 		extraArgs = append(extraArgs, r.ArgsInsideContainer...)
 	} else {
 		extraArgs = append(extraArgs, r.ArgsOutsideContainer...)
@@ -197,8 +198,10 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		}
 	}
 
-	// Write sandbox settings if configured (skip inside containers unless explicitly requested)
-	skipSandbox := IsInContainer() && !r.SandboxInsideContainer
+	// Write sandbox settings if configured.
+	// Skip when: already inside a container, OR launching into a container (r.Container != nil),
+	// unless sandbox_inside_container is explicitly true.
+	skipSandbox := (IsInContainer() || r.Container != nil) && !r.SandboxInsideContainer
 	var settingsJSON []byte
 	if r.SandboxSettings != "" && !skipSandbox {
 		settingsTarget := prefix + "_settings.json"
