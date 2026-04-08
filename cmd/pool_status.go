@@ -156,20 +156,22 @@ func finalizedPoolStatusRow(row poolStatusRow, summary runner.RunSummary, state,
 }
 
 func errorPoolStatusRow(row poolStatusRow, summary runner.RunSummary, cwd string) poolStatusRow {
-	return finalizedPoolStatusRow(row, summary, poolStateError, strings.TrimSpace(fmt.Sprintf("%s  %s  %s  %s",
+	return finalizedPoolStatusRow(row, summary, poolStateError, strings.TrimSpace(fmt.Sprintf("%s  %s  %s  %s  %s",
 		summary.EndedAt.Format("15:04:05"),
 		runner.FormatDuration(summary.Duration),
 		poolStatusTokens(summary),
+		poolStatusContext(summary),
 		streamFilePrefix(summary.StreamFilePath, cwd),
 	)), "")
 }
 
 func donePoolStatusRow(row poolStatusRow, summary runner.RunSummary, path string) poolStatusRow {
-	return finalizedPoolStatusRow(row, summary, poolStateDone, strings.TrimSpace(fmt.Sprintf("%s  %s  %s  %s",
+	return finalizedPoolStatusRow(row, summary, poolStateDone, strings.TrimSpace(fmt.Sprintf("%s  %s  %s  %s  %s",
 		summary.EndedAt.Format("15:04:05"),
 		runner.FormatDuration(summary.Duration),
 		poolStatusCost(summary),
 		poolStatusTokens(summary),
+		poolStatusContext(summary),
 	)), path)
 }
 
@@ -182,7 +184,22 @@ func poolStatusCost(summary runner.RunSummary) string {
 }
 
 func poolStatusTokens(summary runner.RunSummary) string {
-	return display.FmtTokens(int64(summary.InputTokens + summary.OutputTokens + summary.CacheReadTokens + summary.CacheWriteTokens))
+	t := display.FmtTokens(int64(summary.InputTokens + summary.OutputTokens + summary.CacheReadTokens + summary.CacheWriteTokens))
+	if t == "" {
+		return ""
+	}
+	return "tokens: " + t
+}
+
+func poolStatusContext(summary runner.RunSummary) string {
+	if summary.PeakContextTokens <= 0 {
+		return ""
+	}
+	s := "ctx: " + display.FmtTokens(int64(summary.PeakContextTokens))
+	if summary.ContextWindow > 0 {
+		s += fmt.Sprintf("/%d%%", summary.PeakContextTokens*100/summary.ContextWindow)
+	}
+	return s
 }
 
 func writePoolStatusLines(w io.Writer, lines []string, clear bool) {
