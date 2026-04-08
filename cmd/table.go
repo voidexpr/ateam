@@ -164,6 +164,8 @@ func applyContainerNameOverride(r *runner.Runner, name string) {
 	case *container.DockerExecContainer:
 		c.ContainerName = name
 		r.ContainerName = name
+	default:
+		fmt.Fprintf(os.Stderr, "Warning: --container-name has no effect for container type %q\n", r.ContainerType)
 	}
 }
 
