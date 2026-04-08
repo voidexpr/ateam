@@ -10,7 +10,7 @@
       <th data-sort="num">Cost</th>
       <th data-sort="str">Status</th>
       <th>Files</th>
-      <th data-sort="num">In+Cache</th>
+      <th data-sort="num">Input</th>
       <th data-sort="num">Output</th>
       <th data-sort="str">Model</th>
       <th data-sort="str">Agent</th>
@@ -35,7 +35,7 @@
         {{- if .HasStream}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/logs" title="Stream log">logs</a>{{end -}}
         {{- if .HasStderr}}<a href="/p/{{$.ProjectSlug}}/runs/{{.ID}}/stderr" title="Stderr">stderr</a>{{end -}}
       </td>
-      <td data-val="{{addInt .InputTokens .CacheWriteTokens}}"><span class="token-pill">{{fmtTokensInt (addInt .InputTokens .CacheWriteTokens)}}</span></td>
+      <td data-val="{{addInt (addInt .InputTokens .CacheReadTokens) .CacheWriteTokens}}"><span class="token-pill">{{fmtTokensInt (addInt (addInt .InputTokens .CacheReadTokens) .CacheWriteTokens)}}</span></td>
       <td data-val="{{.OutputTokens}}"><span class="token-pill">{{fmtTokensInt .OutputTokens}}</span></td>
       <td data-val="{{.Model}}" style="font-size:12px;color:var(--text-muted)">{{.Model}}</td>
       <td data-val="{{.Agent}}" style="font-size:12px;color:var(--text-muted)">{{.Agent}}</td>
