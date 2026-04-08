@@ -12,7 +12,7 @@ ateam report --profile docker
 ateam run "analyze the auth module" --profile docker
 ```
 
-This builds a Docker image from `.ateam/Dockerfile` (or the default), runs the agent inside it, and cleans up. No additional configuration needed beyond having Docker installed and a `CLAUDE_CODE_OAUTH_TOKEN` set.
+This builds a Docker image from `.ateam/Dockerfile` (or the default), runs the agent inside it, and cleans up. No additional configuration needed beyond having Docker installed and credentials set via `ateam secret`.
 
 ## Secrets
 
@@ -32,6 +32,20 @@ ateam secret
 ```
 
 Secrets are stored in the OS keychain (macOS Keychain, Linux Secret Service) or in `.env` files. They are resolved automatically when running agents — you don't need to set environment variables.
+
+### How secret resolution works
+
+Before spawning an agent, ateam resolves each secret declared in the agent's `required_env` using this search order: environment variable → project `.ateam/secrets.env` → org `.ateamorg/secrets.env` → global keychain/file.
+
+If a secret is found from any source other than an existing environment variable, ateam calls `os.Setenv` to inject it into the current process. This means:
+
+1. The agent child process inherits the secret automatically (standard Unix env inheritance)
+2. For Docker containers, `forward_env` picks it up via `os.LookupEnv` and passes it as `docker run -e` / `docker exec -e`
+3. The injection only affects the ateam process and its children — your shell environment is not modified
+
+In practice: if you run `ateam secret CLAUDE_CODE_OAUTH_TOKEN --set` on the host, then `ateam run --profile docker "do something"`, the token flows from keychain → ateam process env → `docker run -e CLAUDE_CODE_OAUTH_TOKEN=...` → agent inside container. No manual `export` needed.
+
+**Note on OAuth tokens:** `CLAUDE_CODE_OAUTH_TOKEN` is session-scoped — Claude Code needs `~/.claude/.credentials.json` to validate it. The default `docker` profile mounts this file read-only into the container. If you use `--profile docker-api` (API key only), no host mount is needed. See [Docker Profiles](#docker-profiles) for details.
 
 ### Secrets and Docker
 
@@ -77,6 +91,36 @@ ateam secret CLAUDE_CODE_OAUTH_TOKEN --print
 ateam secret --print > /path/to/secrets.env
 ```
 
+## Docker Profiles
+
+Three built-in Docker profiles handle the two authentication methods:
+
+| Profile | Auth method | Credentials mounted? | Cost model |
+|---------|-------------|---------------------|------------|
+| `docker` | OAuth token (default) | Yes (`.credentials.json`, read-only) | Subscription |
+| `docker-oauth` | OAuth token | Yes (`.credentials.json`, read-only) | Subscription |
+| `docker-api` | API key only | No | Pay-per-use |
+
+**Why the distinction?** OAuth tokens (`CLAUDE_CODE_OAUTH_TOKEN`) are session-scoped — Claude Code needs the credential store in `~/.claude/.credentials.json` to validate them. Without it, the token is rejected inside the container. `ANTHROPIC_API_KEY` is stateless and works without any host mounts.
+
+`--profile docker` (the default) mounts only `~/.claude/.credentials.json` read-only into the container — no other files from `~/.claude/` are exposed (sessions, backups, settings, etc.). Use `--profile docker-api` if you prefer stateless API key auth or don't want to expose any credentials to containers.
+
+```bash
+ateam report --profile docker       # OAuth token (mounts .credentials.json)
+ateam report --profile docker-api   # API key only (no host mounts)
+```
+
+The mount is controlled by `mount_claude_config` in the container definition:
+
+```hcl
+container "docker" {
+  type                = "docker"
+  dockerfile          = "Dockerfile"
+  mount_claude_config = true    # mount ~/.claude/.credentials.json read-only
+  forward_env = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
+}
+```
+
 ## Container Modes
 
 ### Docker One-Shot (sandbox alternative)
@@ -86,8 +130,9 @@ Ateam builds and runs a fresh container for each command. The container is remov
 ```hcl
 # In runtime.hcl (defaults are already configured)
 container "docker" {
-  type        = "docker"
-  dockerfile  = "Dockerfile"
+  type                = "docker"
+  dockerfile          = "Dockerfile"
+  mount_claude_config = true
   forward_env = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
 }
 
