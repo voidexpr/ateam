@@ -133,19 +133,6 @@ func runReport(opts ReportOptions) error {
 	applyContainerNameOverride(cr, opts.ContainerName)
 	applyCheaperModel(cr, opts.CheaperModel)
 
-	db, err := openProjectDB(env)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-	cr.CallDB = db
-
-	if !opts.Force {
-		if err := checkConcurrentRuns(db, "", runner.ActionReport, roleIDs); err != nil {
-			return err
-		}
-	}
-
 	taskGroup := "report-" + time.Now().Format(runner.TimestampFormat)
 
 	basePinfo := env.NewProjectInfoParams("", "report")
@@ -191,6 +178,19 @@ func runReport(opts ReportOptions) error {
 			fmt.Printf("\n╚══ %s ══╝\n", t.RoleID)
 		}
 		return nil
+	}
+
+	db, err := openProjectDB(env)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	cr.CallDB = db
+
+	if !opts.Force {
+		if err := checkConcurrentRuns(db, "", runner.ActionReport, roleIDs); err != nil {
+			return err
+		}
 	}
 
 	maxParallel := env.Config.Report.EffectiveMaxParallel(opts.Parallel)
