@@ -287,69 +287,24 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		Env:        reqEnv,
 	}
 
-	// If running inside a Docker container, set up CmdFactory and translate paths.
-	if dc, ok := r.Container.(*container.DockerContainer); ok {
-		if err := dc.EnsureImage(ctx); err != nil {
-			return failEarly(fmt.Errorf("docker image build failed: %w", err))
+	// Prepare the container (image build, binary copy, precheck) and wire up
+	// the CmdFactory and path translation for container execution.
+	if c := r.Container; c != nil {
+		if err := c.Prepare(ctx); err != nil {
+			return failEarly(err)
 		}
-		if err := dc.EnsureRunning(ctx); err != nil {
-			return failEarly(fmt.Errorf("docker container start failed: %w", err))
+		if factory := c.CmdFactory(); factory != nil {
+			req.CmdFactory = factory
 		}
-		if dc.PrecheckScript != "" {
-			if dc.Persistent {
-				if err := dc.RunPrecheck(ctx); err != nil {
-					return failEarly(fmt.Errorf("precheck failed: %w", err))
-				}
-			} else {
-				fmt.Fprintf(os.Stderr, "[docker] warning: precheck ignored in oneshot mode — use Dockerfile ENTRYPOINT instead\n")
-			}
-		}
-		req.CmdFactory = dc.CmdFactory()
 		// Note: StreamFile and StderrFile are NOT translated — they are
 		// opened by the host process (os.Create) to capture piped output,
 		// not accessed inside the container.
-		// Translate any host paths in extraArgs (e.g. --settings path)
+		req.WorkDir = c.TranslatePath(cwd)
 		for i, a := range req.ExtraArgs {
 			if a == "--settings" && i+1 < len(req.ExtraArgs) {
-				req.ExtraArgs[i+1] = dc.TranslatePath(req.ExtraArgs[i+1])
+				req.ExtraArgs[i+1] = c.TranslatePath(req.ExtraArgs[i+1])
 			}
 		}
-		req.WorkDir = dc.TranslatePath(cwd)
-	}
-
-	// If running inside a devcontainer, start it and validate the agent.
-	if dc, ok := r.Container.(*container.DevcontainerContainer); ok {
-		if err := dc.EnsureRunning(ctx); err != nil {
-			return failEarly(fmt.Errorf("devcontainer start failed: %w", err))
-		}
-		agentCmd, _ := runAgent.DebugCommandArgs(nil)
-		if err := dc.ValidateAgent(ctx, agentCmd); err != nil {
-			return failEarly(err)
-		}
-		req.CmdFactory = dc.CmdFactory()
-	}
-
-	// If running inside a Docker sandbox, create it and validate the agent.
-	if ds, ok := r.Container.(*container.DockerSandboxContainer); ok {
-		if err := ds.EnsureRunning(ctx); err != nil {
-			return failEarly(fmt.Errorf("docker sandbox start failed: %w", err))
-		}
-		agentCmd, _ := runAgent.DebugCommandArgs(nil)
-		if err := ds.ValidateAgent(ctx, agentCmd); err != nil {
-			return failEarly(err)
-		}
-		req.CmdFactory = ds.CmdFactory()
-	}
-
-	// If running inside a docker-exec container (user-managed), copy binary, run precheck, set up CmdFactory.
-	if de, ok := r.Container.(*container.DockerExecContainer); ok {
-		if err := de.EnsureBinary(ctx); err != nil {
-			return failEarly(fmt.Errorf("copy ateam binary failed: %w", err))
-		}
-		if err := de.RunPrecheck(ctx); err != nil {
-			return failEarly(fmt.Errorf("precheck failed: %w", err))
-		}
-		req.CmdFactory = de.CmdFactory()
 	}
 
 	command, agentArgs := runAgent.DebugCommandArgs(extraArgs)
@@ -357,17 +312,9 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 
 	if opts.Verbose {
 		fmt.Fprintf(os.Stderr, "[verbose] agent: %s\n", cliStr)
-		if dc, ok := r.Container.(*container.DockerContainer); ok {
-			fmt.Fprintf(os.Stderr, "[verbose] docker: %s\n",
-				dc.DebugCommand(container.RunOpts{Command: command, Args: agentArgs}))
-		}
-		if dc, ok := r.Container.(*container.DevcontainerContainer); ok {
-			fmt.Fprintf(os.Stderr, "[verbose] devcontainer: %s\n",
-				dc.DebugCommand(container.RunOpts{Command: command, Args: agentArgs}))
-		}
-		if ds, ok := r.Container.(*container.DockerSandboxContainer); ok {
-			fmt.Fprintf(os.Stderr, "[verbose] docker-sandbox: %s\n",
-				ds.DebugCommand(container.RunOpts{Command: command, Args: agentArgs}))
+		if r.Container != nil && r.Container.Type() != "none" {
+			fmt.Fprintf(os.Stderr, "[verbose] container: %s\n",
+				r.Container.DebugCommand(container.RunOpts{Command: command, Args: agentArgs}))
 		}
 	}
 

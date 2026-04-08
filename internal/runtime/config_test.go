@@ -994,7 +994,6 @@ agent "mock" {
 }
 container "docker" {
   type       = "docker"
-  mode       = "persistent"
   dockerfile = "Dockerfile"
   precheck   = "my-precheck.sh"
 }

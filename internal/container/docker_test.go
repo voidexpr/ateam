@@ -181,90 +181,6 @@ func TestDebugCommand(t *testing.T) {
 	}
 }
 
-func TestPersistentCmdFactoryArgs(t *testing.T) {
-	t.Setenv("MY_TOKEN", "secret123")
-
-	dc := &DockerContainer{
-		Image:         "ateam-test:latest",
-		Persistent:    true,
-		ContainerName: "ateam-projects_myapp-security",
-		SourceDir:     "/Users/nic/projects/myapp",
-		ProjectDir:    "/Users/nic/projects/myapp/.ateam",
-		OrgDir:        "/Users/nic/.ateamorg",
-		ForwardEnv:    []string{"MY_TOKEN"},
-	}
-
-	factory := dc.CmdFactory()
-	cmd := factory(context.Background(), "claude", "-p", "--verbose")
-	args := cmd.Args
-
-	// Should be docker exec, not docker run
-	if len(args) < 2 || args[1] != "exec" {
-		t.Fatalf("expected docker exec, got %v", args)
-	}
-
-	hasArg := func(flag, value string) bool {
-		for i, a := range args {
-			if a == flag && i+1 < len(args) && args[i+1] == value {
-				return true
-			}
-		}
-		return false
-	}
-
-	// Working dir
-	if !hasArg("-w", "/workspace") {
-		t.Errorf("missing -w flag, args: %v", args)
-	}
-
-	// Env vars: docker exec requires KEY=VALUE
-	if !hasArg("-e", "MY_TOKEN=secret123") {
-		t.Errorf("missing -e KEY=VALUE, args: %v", args)
-	}
-
-	// Container name should appear before the command
-	foundName := false
-	for i, a := range args {
-		if a == "ateam-projects_myapp-security" {
-			if i+1 < len(args) && args[i+1] == "claude" {
-				foundName = true
-			}
-			break
-		}
-	}
-	if !foundName {
-		t.Errorf("expected container name before command, args: %v", args)
-	}
-
-	// Should NOT contain -v mounts (those are set at docker run, not exec)
-	for _, a := range args {
-		if a == "-v" {
-			t.Errorf("persistent CmdFactory should not have -v mounts, args: %v", args)
-			break
-		}
-	}
-}
-
-func TestDebugCommandPersistent(t *testing.T) {
-	dc := &DockerContainer{
-		Image:         "ateam-test:latest",
-		Persistent:    true,
-		ContainerName: "ateam-projects_myapp-security",
-		SourceDir:     "/src",
-		OrgDir:        "/org",
-		ForwardEnv:    []string{"ANTHROPIC_API_KEY"},
-	}
-
-	got := dc.DebugCommand(RunOpts{
-		Command: "claude",
-		Args:    []string{"-p"},
-	})
-
-	want := "docker exec -i -w /workspace -e ANTHROPIC_API_KEY=... ateam-projects_myapp-security claude -p"
-	if got != want {
-		t.Errorf("DebugCommand persistent:\n  got:  %s\n  want: %s", got, want)
-	}
-}
 
 func TestContainerPathsSimple(t *testing.T) {
 	dc := &DockerContainer{
@@ -339,48 +255,6 @@ func TestEnvArgsInOneshotCmdFactory(t *testing.T) {
 	}
 }
 
-func TestEnvArgsInPersistentCmdFactory(t *testing.T) {
-	t.Setenv("MY_TOKEN", "secret")
-
-	dc := &DockerContainer{
-		Image:         "ateam-test:latest",
-		Persistent:    true,
-		ContainerName: "ateam-test-env",
-		SourceDir:     "/src",
-		OrgDir:        "/org",
-		ForwardEnv:    []string{"MY_TOKEN"},
-		Env: map[string]string{
-			"DB_HOST": "localhost",
-		},
-	}
-
-	factory := dc.CmdFactory()
-	cmd := factory(context.Background(), "claude", "-p")
-	args := cmd.Args
-
-	// Should be docker exec
-	if len(args) < 2 || args[1] != "exec" {
-		t.Fatalf("expected docker exec, got %v", args)
-	}
-
-	hasArg := func(flag, value string) bool {
-		for i, a := range args {
-			if a == flag && i+1 < len(args) && args[i+1] == value {
-				return true
-			}
-		}
-		return false
-	}
-
-	// ForwardEnv
-	if !hasArg("-e", "MY_TOKEN=secret") {
-		t.Errorf("missing forwarded env, args: %v", args)
-	}
-	// Literal Env
-	if !hasArg("-e", "DB_HOST=localhost") {
-		t.Errorf("missing literal env, args: %v", args)
-	}
-}
 
 func TestEnvArgsInDebugCommand(t *testing.T) {
 	dc := &DockerContainer{
@@ -410,26 +284,6 @@ func TestEnvArgsInDebugCommand(t *testing.T) {
 	}
 }
 
-func TestDebugCommandPersistentWithEnv(t *testing.T) {
-	dc := &DockerContainer{
-		Image:         "ateam-test:latest",
-		Persistent:    true,
-		ContainerName: "ateam-test-env",
-		SourceDir:     "/src",
-		OrgDir:        "/org",
-		ForwardEnv:    []string{"API_KEY"},
-		Env: map[string]string{
-			"DB_HOST": "localhost",
-		},
-	}
-
-	got := dc.DebugCommand(RunOpts{Command: "claude", Args: []string{"-p"}})
-
-	want := "docker exec -i -w /workspace -e API_KEY=... -e DB_HOST=localhost ateam-test-env claude -p"
-	if got != want {
-		t.Errorf("DebugCommand persistent with env:\n  got:  %s\n  want: %s", got, want)
-	}
-}
 
 func TestDockerExecCmdFactoryPreservesArgBoundaries(t *testing.T) {
 	dc := &DockerExecContainer{

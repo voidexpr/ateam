@@ -112,6 +112,7 @@ Defined in `internal/container/`. Each container implements the `Container` inte
 |-----------|-------------|
 | `none` | Direct host execution (default) |
 | `docker` | One-shot `docker run --rm -i` per invocation |
+| `docker-exec` | Exec into a user-managed container |
 
 #### Dockerfile resolution
 
@@ -230,17 +231,3 @@ ateam migrate-logs --dry-run    # preview changes without applying
 |------|-------------|
 | `--dry-run` | Preview changes without applying them |
 
-## Devcontainer
-
-Claude Code provides a [devcontainer](https://code.claude.com/docs/en/devcontainer) for sandboxed agent execution. To use it:
-
-1. Install the VS Code Dev Containers extension
-2. Clone the repo and open in VS Code
-3. Reopen in Container when prompted (or Command Palette → "Dev Containers: Reopen in Container")
-
-The devcontainer provides:
-- Network isolation via iptables firewall (only Anthropic API allowed)
-- `--dangerously-skip-permissions` for unattended operation
-- `NET_ADMIN`/`NET_RAW` capabilities for firewall rules
-
-This is separate from ateam's own Docker container support. The devcontainer runs the entire development environment in a container, while ateam's Docker profiles run individual agent invocations in containers.

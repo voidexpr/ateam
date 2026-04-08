@@ -13,9 +13,25 @@ type CmdFactory func(ctx context.Context, name string, args ...string) *exec.Cmd
 
 // Container abstracts where agent commands execute.
 type Container interface {
-	Type() string // "none", "docker", "srt"
+	Type() string // "none", "docker", "docker-exec"
 	Run(ctx context.Context, opts RunOpts) error
 	DebugCommand(opts RunOpts) string
+
+	// Prepare performs any pre-run setup: image builds, binary copies, precheck scripts.
+	// Called once per Run() before the agent is launched.
+	Prepare(ctx context.Context) error
+
+	// CmdFactory returns a CmdFactory that wraps commands for container execution.
+	// Returns nil for host execution (NoneContainer).
+	CmdFactory() CmdFactory
+
+	// GetContainerName returns the name of a long-lived container, or "" if not applicable.
+	// Used to populate Runner.ContainerName for liveness tracking.
+	GetContainerName() string
+
+	// TranslatePath maps a host path to the corresponding in-container path.
+	// Returns the original path unchanged if no mapping applies.
+	TranslatePath(path string) string
 }
 
 // RunOpts holds options for executing a command in a container.
@@ -61,3 +77,8 @@ func (n *NoneContainer) DebugCommand(opts RunOpts) string {
 	}
 	return s
 }
+
+func (n *NoneContainer) Prepare(_ context.Context) error    { return nil }
+func (n *NoneContainer) CmdFactory() CmdFactory             { return nil }
+func (n *NoneContainer) GetContainerName() string           { return "" }
+func (n *NoneContainer) TranslatePath(path string) string   { return path }

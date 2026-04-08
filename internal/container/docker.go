@@ -1,7 +1,6 @@
 package container
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -10,10 +9,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 )
 
-// DockerContainer runs agent commands inside a Docker container.
+// DockerContainer runs agent commands inside a Docker container (oneshot mode).
+// Each invocation launches a fresh container via `docker run --rm -i` and
+// removes it when the agent exits.
 type DockerContainer struct {
 	// From ContainerConfig
 	Image        string   // docker image name, e.g. "ateam-myproject:latest"
@@ -21,12 +21,6 @@ type DockerContainer struct {
 	ForwardEnv   []string // env var names to forward from host
 	ExtraVolumes []string // additional -v mounts, e.g. "/host/data:/data:ro"
 	ExtraArgs    []string // additional docker run args from profile container_extra_args
-
-	// Persistent mode
-	Persistent    bool   // true = long-lived container with docker exec
-	ContainerName string // e.g. "ateam-projects_myapp-security"
-	startOnce     sync.Once
-	startErr      error
 
 	// Runtime context
 	MountDir   string // volume mount source: git root, or SourceDir as fallback
@@ -46,13 +40,8 @@ type DockerContainer struct {
 	// Required for actions that modify source code (code, run).
 	SourceWritable bool
 
-	// PrecheckScript is the absolute host path to a precheck script.
-	// When set on a persistent container, RunPrecheck executes it before the agent.
-	PrecheckScript string
-
 	// Env holds explicit environment variables (KEY=VALUE) to set inside the container.
 	// Unlike ForwardEnv (which forwards host values), these are literal values.
-	// Applied to both docker run and docker exec.
 	Env map[string]string
 }
 
@@ -62,6 +51,14 @@ const (
 )
 
 func (d *DockerContainer) Type() string { return "docker" }
+
+// Prepare builds the docker image. Implements the Container interface.
+func (d *DockerContainer) Prepare(ctx context.Context) error {
+	return d.EnsureImage(ctx)
+}
+
+// GetContainerName returns "" — oneshot containers have no persistent name.
+func (d *DockerContainer) GetContainerName() string { return "" }
 
 // EnsureImage builds the docker image, relying on Docker's layer cache for speed.
 // Always runs docker build so Dockerfile changes are picked up automatically.
@@ -109,116 +106,8 @@ func (d *DockerContainer) cleanupDockerfileTmpDir() {
 	}
 }
 
-// EnsureRunning starts the persistent container if not already running.
-// No-op for oneshot mode. Safe for concurrent calls via sync.Once.
-func (d *DockerContainer) EnsureRunning(ctx context.Context) error {
-	if !d.Persistent {
-		return nil
-	}
-	d.startOnce.Do(func() {
-		if d.IsRunning(ctx) {
-			return
-		}
-		// Remove any stopped container with the same name
-		rm := exec.CommandContext(ctx, "docker", "rm", "-f", d.ContainerName)
-		_ = rm.Run() // container may not exist
-
-		containerCodePath, containerWorkDir, containerOrgPath := d.containerPaths()
-		mount := d.mountDir()
-
-		args := []string{"run", "-d", "--name", d.ContainerName, "-i"}
-		if mount != "" {
-			args = append(args, "-v", mount+":"+containerCodePath+":"+d.sourceMountMode())
-		}
-		if d.OrgDir != "" {
-			args = append(args, "-v", d.OrgDir+":"+containerOrgPath+":rw")
-		}
-		args = append(args, d.projectDirArgs()...)
-		if d.HostCLIPath != "" {
-			args = append(args, "-v", d.HostCLIPath+":/usr/local/bin/ateam:ro")
-		}
-		for _, vol := range d.ExtraVolumes {
-			args = append(args, "-v", vol)
-		}
-		args = append(args, timezoneArgs()...)
-		args = append(args, "-w", containerWorkDir)
-		args = append(args, d.ExtraArgs...)
-		for _, key := range d.ForwardEnv {
-			if _, ok := os.LookupEnv(key); ok {
-				args = append(args, "-e", key)
-			}
-		}
-		args = append(args, d.envArgs()...)
-		args = append(args, d.Image, "sleep", "infinity")
-
-		cmd := exec.CommandContext(ctx, "docker", args...)
-		cmd.Env = os.Environ()
-		cmd.Stderr = os.Stderr
-		d.startErr = cmd.Run()
-	})
-	return d.startErr
-}
-
-// RunPrecheck executes the precheck script inside the persistent container.
-// No-op if PrecheckScript is empty. Returns an error if the script exits non-zero.
-func (d *DockerContainer) RunPrecheck(ctx context.Context) error {
-	if d.PrecheckScript == "" {
-		return nil
-	}
-
-	containerPath := d.TranslatePath(d.PrecheckScript)
-	fmt.Fprintf(os.Stderr, "[docker] running precheck: %s\n", containerPath)
-
-	quoted := "'" + strings.ReplaceAll(containerPath, "'", "'\\''") + "'"
-	script := fmt.Sprintf("chmod +x %s && %s", quoted, quoted)
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", d.ContainerName, "sh", "-c", script)
-
-	var buf bytes.Buffer
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%w\n%s", err, buf.String())
-	}
-	return nil
-}
-
-// IsRunning checks whether the persistent container is currently running.
-func (d *DockerContainer) IsRunning(ctx context.Context) bool {
-	if d.ContainerName == "" {
-		return false
-	}
-	cmd := exec.CommandContext(ctx, "docker", "container", "inspect",
-		"--format", "{{.State.Running}}", d.ContainerName)
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if cmd.Run() != nil {
-		return false
-	}
-	return strings.TrimSpace(out.String()) == "true"
-}
-
-// Stop stops and removes the persistent container. Idempotent.
-func (d *DockerContainer) Stop(ctx context.Context) error {
-	if d.ContainerName == "" {
-		return nil
-	}
-	stop := exec.CommandContext(ctx, "docker", "stop", d.ContainerName)
-	_ = stop.Run() // may already be stopped
-	rm := exec.CommandContext(ctx, "docker", "rm", "-f", d.ContainerName)
-	_ = rm.Run()
-	return nil
-}
-
-// CmdFactory returns a function that wraps commands for Docker execution.
-// In persistent mode, returns `docker exec`; in oneshot mode, returns `docker run --rm`.
+// CmdFactory returns a function that wraps commands in `docker run --rm -i`.
 func (d *DockerContainer) CmdFactory() CmdFactory {
-	if d.Persistent {
-		return d.persistentCmdFactory()
-	}
-	return d.oneshotCmdFactory()
-}
-
-func (d *DockerContainer) oneshotCmdFactory() CmdFactory {
 	containerCodePath, containerWorkDir, containerOrgPath := d.containerPaths()
 
 	mount := d.mountDir()
@@ -282,30 +171,6 @@ func (d *DockerContainer) oneshotCmdFactory() CmdFactory {
 	}
 }
 
-func (d *DockerContainer) persistentCmdFactory() CmdFactory {
-	_, containerWorkDir, _ := d.containerPaths()
-
-	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		dockerArgs := []string{"exec", "-i", "-w", containerWorkDir}
-
-		// docker exec -e requires KEY=VALUE (not just KEY like docker run)
-		for _, key := range d.ForwardEnv {
-			if val, ok := os.LookupEnv(key); ok {
-				dockerArgs = append(dockerArgs, "-e", key+"="+val)
-			}
-		}
-		dockerArgs = append(dockerArgs, d.envArgs()...)
-
-		dockerArgs = append(dockerArgs, d.ContainerName)
-		dockerArgs = append(dockerArgs, name)
-		dockerArgs = append(dockerArgs, args...)
-
-		cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
-		cmd.Env = os.Environ()
-		return cmd
-	}
-}
-
 // TranslatePath maps a host path to the corresponding container path.
 // Returns the original path if no mapping applies.
 func (d *DockerContainer) TranslatePath(hostPath string) string {
@@ -355,13 +220,6 @@ func (d *DockerContainer) Run(ctx context.Context, opts RunOpts) error {
 
 // DebugCommand returns the full docker command string for logging.
 func (d *DockerContainer) DebugCommand(opts RunOpts) string {
-	if d.Persistent {
-		return d.debugCommandPersistent(opts)
-	}
-	return d.debugCommandOneshot(opts)
-}
-
-func (d *DockerContainer) debugCommandOneshot(opts RunOpts) string {
 	containerCodePath, containerWorkDir, containerOrgPath := d.containerPaths()
 
 	mount := d.mountDir()
@@ -388,19 +246,6 @@ func (d *DockerContainer) debugCommandOneshot(opts RunOpts) string {
 	}
 	parts = append(parts, d.envArgs()...)
 	parts = append(parts, d.Image, opts.Command)
-	parts = append(parts, opts.Args...)
-	return strings.Join(parts, " ")
-}
-
-func (d *DockerContainer) debugCommandPersistent(opts RunOpts) string {
-	_, containerWorkDir, _ := d.containerPaths()
-
-	parts := []string{"docker", "exec", "-i", "-w", containerWorkDir}
-	for _, key := range d.ForwardEnv {
-		parts = append(parts, "-e", key+"=...")
-	}
-	parts = append(parts, d.envArgs()...)
-	parts = append(parts, d.ContainerName, opts.Command)
 	parts = append(parts, opts.Args...)
 	return strings.Join(parts, " ")
 }

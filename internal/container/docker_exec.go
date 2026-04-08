@@ -156,3 +156,15 @@ func (d *DockerExecContainer) DebugCommand(opts RunOpts) string {
 func (d *DockerExecContainer) TranslatePath(hostPath string) string {
 	return hostPath
 }
+
+// Prepare copies the ateam binary (if configured) and runs the precheck script.
+// Implements the Container interface.
+func (d *DockerExecContainer) Prepare(ctx context.Context) error {
+	if err := d.EnsureBinary(ctx); err != nil {
+		return fmt.Errorf("copy ateam binary failed: %w", err)
+	}
+	return d.RunPrecheck(ctx)
+}
+
+// GetContainerName returns the name of the user-managed container.
+func (d *DockerExecContainer) GetContainerName() string { return d.ContainerName }
