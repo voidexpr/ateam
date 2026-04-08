@@ -442,7 +442,6 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 	}
 }
 
-
 // findLinuxBinary locates or builds a Linux/AMD64 ateam binary for Docker.
 // Search order: self (if linux), companion binary, org cache, cross-compile.
 func findLinuxBinary(orgDir string) string {

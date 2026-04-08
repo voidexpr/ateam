@@ -383,7 +383,6 @@ func TestResolveContainerTemplatesDockerExec(t *testing.T) {
 	}
 }
 
-
 // --- BuildTemplateVars ---
 
 func TestBuildTemplateVars(t *testing.T) {

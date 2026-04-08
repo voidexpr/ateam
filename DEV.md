@@ -3,7 +3,7 @@
 ## Build
 
 ```bash
-make build    # builds the ateam binary
+make build companion    # builds the ateam binary + the linux binary for docker
 make clean    # removes the binary
 ```
 
@@ -57,6 +57,42 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 The Makefile checks for auth before starting and fails with setup instructions if neither is set. The tests themselves also fail (not skip) when auth is missing — this catches configuration issues in CI.
+
+## Code Quality
+
+### Before committing
+
+```bash
+make fmt-check     # verify gofmt formatting (no changes, exit 1 if issues)
+make check-tidy    # verify go.mod is tidy (no changes, exit 1 if drift)
+make build         # build the binary (catches compile errors)
+make test          # unit tests
+```
+
+To fix formatting or tidy issues:
+
+```bash
+make fmt           # auto-format all .go files
+make tidy          # run go mod tidy
+```
+
+### Git hooks
+
+A pre-commit hook runs `fmt-check` and `check-tidy` automatically. Install it with:
+
+```bash
+make install-hooks
+```
+
+This creates `.git/hooks/pre-commit` that blocks commits with formatting or module drift issues.
+
+### Additional checks
+
+```bash
+make lint          # golangci-lint (requires golangci-lint installed)
+make vuln          # govulncheck for known vulnerabilities (installs itself if missing)
+make test-docker   # Docker-in-Docker integration tests (see below)
+```
 
 ## Docker binary resolution
 
