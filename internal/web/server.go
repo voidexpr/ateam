@@ -100,6 +100,12 @@ func funcMap() template.FuncMap {
 		"addInt":    func(a, b int) int { return a + b },
 		"lower":     strings.ToLower,
 		"estTokens": prompts.EstimateTokens,
+		"fmtPercent": func(value, total int) string {
+			if total <= 0 || value <= 0 {
+				return ""
+			}
+			return fmt.Sprintf("%d%%", value*100/total)
+		},
 		"runsTableCtx": func(slug string, runs []overviewRun) map[string]any {
 			return map[string]any{"ProjectSlug": slug, "Runs": runs}
 		},

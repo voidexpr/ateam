@@ -11,6 +11,7 @@ import (
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/container"
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -262,10 +263,11 @@ func printProgress(ch <-chan runner.RunProgress) {
 				fmt.Fprintf(os.Stderr, "[%s] thinking... (%s)\n", p.RoleID, ts)
 			}
 		case runner.PhaseTool:
+			ctxInfo := fmtContextProgress(p.ContextTokens, p.ContextWindow)
 			if p.ToolInput != "" {
-				fmt.Fprintf(os.Stderr, "[%s] tool: %s %s (%d total, %s)\n", p.RoleID, p.ToolName, singleLine(p.ToolInput), p.ToolCount, ts)
+				fmt.Fprintf(os.Stderr, "[%s] tool: %s %s (%d total, %s%s)\n", p.RoleID, p.ToolName, singleLine(p.ToolInput), p.ToolCount, ts, ctxInfo)
 			} else {
-				fmt.Fprintf(os.Stderr, "[%s] tool: %s (%d total, %s)\n", p.RoleID, p.ToolName, p.ToolCount, ts)
+				fmt.Fprintf(os.Stderr, "[%s] tool: %s (%d total, %s%s)\n", p.RoleID, p.ToolName, p.ToolCount, ts, ctxInfo)
 			}
 		case runner.PhaseToolResult:
 			if p.Content != "" {
@@ -281,6 +283,18 @@ func printProgress(ch <-chan runner.RunProgress) {
 
 func singleLine(s string) string {
 	return runner.SingleLineText(s)
+}
+
+func fmtContextProgress(contextTokens, contextWindow int) string {
+	if contextTokens <= 0 {
+		return ""
+	}
+	ctxStr := display.FmtTokens(int64(contextTokens))
+	if contextWindow > 0 {
+		pct := contextTokens * 100 / contextWindow
+		return fmt.Sprintf(", ctx: %s/%d%%", ctxStr, pct)
+	}
+	return fmt.Sprintf(", ctx: %s", ctxStr)
 }
 
 func printRunDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, taskGroup string) error {
@@ -430,6 +444,16 @@ func printRunSummary(r runner.RunSummary) {
 	}
 	if r.OutputTokens > 0 {
 		fmt.Fprintf(os.Stderr, "  Output:   %d tokens\n", r.OutputTokens)
+	}
+	if r.PeakContextTokens > 0 {
+		peak := display.FmtTokens(int64(r.PeakContextTokens))
+		if r.ContextWindow > 0 {
+			window := display.FmtTokens(int64(r.ContextWindow))
+			pct := r.PeakContextTokens * 100 / r.ContextWindow
+			fmt.Fprintf(os.Stderr, "  Context:  %s / %s (%d%%)\n", peak, window, pct)
+		} else {
+			fmt.Fprintf(os.Stderr, "  Context:  %s\n", peak)
+		}
 	}
 	if r.ExitCode != 0 {
 		fmt.Fprintf(os.Stderr, "  Exit:     %d\n", r.ExitCode)

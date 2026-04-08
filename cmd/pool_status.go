@@ -125,7 +125,14 @@ func nextPoolStatusRow(row poolStatusRow, p runner.RunProgress) poolStatusRow {
 		next.Detail = elapsed
 	case runner.PhaseTool:
 		next.State = poolStateRunning
-		next.Detail = formatRunningToolDetail(elapsed, p.ToolName, p.ToolCount)
+		detail := formatRunningToolDetail(elapsed, p.ToolName, p.ToolCount)
+		if p.ContextTokens > 0 {
+			detail += " ctx: " + display.FmtTokens(int64(p.ContextTokens))
+			if p.ContextWindow > 0 {
+				detail += fmt.Sprintf("/%d%%", p.ContextTokens*100/p.ContextWindow)
+			}
+		}
+		next.Detail = detail
 	case runner.PhaseDone:
 		next.State = poolStateDone
 		next.Detail = elapsed
