@@ -31,7 +31,7 @@ test:
 	go build ./...
 	go test ./...
 
-test-all: test test-docker
+test-all: test test-docker test-docker-live
 
 # Run docker integration tests inside Docker-in-Docker (no host impact).
 test-docker:
