@@ -671,7 +671,8 @@ Agent args, profile extra args, container config fields, and agent env values su
 | `{{EXEC_ID}}` | Call tracking ID (visible in `ateam ps`) | `42` |
 | `{{AGENT}}` | Agent config name | `claude`, `claude-docker` |
 | `{{MODEL}}` | Resolved model name | `sonnet`, `haiku` |
-| `{{CONTAINER}}` | Container type | `none`, `docker` |
+| `{{CONTAINER_TYPE}}` | Container type | `none`, `docker`, `docker-exec` |
+| `{{CONTAINER_NAME}}` | Docker container name | `ateam-myapp-security` |
 
 Unknown variables are left as-is (e.g. `{{UNKNOWN}}` passes through unchanged). When `EXEC_ID` is 0 (no DB tracking), it resolves to an empty string.
 
@@ -696,10 +697,10 @@ Templates are **not** resolved in:
 - Prompt files (use `{{SOURCE_DIR}}` which has its own separate substitution)
 - Sandbox settings JSON (has its own merge mechanism)
 - Dockerfile paths (use the role-based resolution chain instead)
-- Precheck script paths (use the role-based resolution chain instead)
+- Precheck script paths (use the role-based resolution chain instead; scripts receive `{{CONTAINER_NAME}}` as `$1` at runtime)
 - `forward_env` key names (these are env var names, not values)
 - Map keys in `env` blocks (only values are resolved)
-- docker-exec `exec` template — uses its own `{{CONTAINER}}` and `{{CMD}}` placeholders (see [docker-exec](#docker-exec) below). Note: `{{CONTAINER}}` in exec templates refers to the docker container name, not the `{{CONTAINER}}` general template var (container type)
+- docker-exec `exec` template — uses its own `{{CONTAINER}}` and `{{CMD}}` placeholders which are expanded at execution time by the CmdFactory (separate from general template vars)
 
 #### Examples
 

@@ -130,7 +130,7 @@ Usage:
 ateam run "do something" --profile my-app
 ```
 
-**Precheck scripts** run on the host before each exec. The container name is passed as the first argument:
+**Precheck scripts** run on the host before each exec. The container name (`{{CONTAINER_NAME}}`) is passed as `$1`:
 
 ```bash
 #!/bin/bash
