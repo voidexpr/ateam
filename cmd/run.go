@@ -141,16 +141,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 	applyContainerNameOverride(r, runContainerName)
 	setSourceWritable(r)
 
-	// Open call tracking DB (requires project context).
-	if hasProject {
-		db, err := openProjectDB(env)
-		if err != nil {
-			return err
-		}
-		defer db.Close()
-		r.CallDB = db
-	}
-
 	// Apply --agent-args
 	if runAgentArgs != "" {
 		r.ExtraArgs = append(r.ExtraArgs, strings.Fields(runAgentArgs)...)
@@ -166,6 +156,16 @@ func runRun(cmd *cobra.Command, args []string) error {
 	// Dry-run: print everything and exit
 	if runDryRun {
 		return printRunDryRun(r, env, promptText, runRole, runTaskGroup)
+	}
+
+	// Open call tracking DB (requires project context).
+	if hasProject {
+		db, err := openProjectDB(env)
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		r.CallDB = db
 	}
 
 	// Determine logs dir — always under .ateam/ when project exists.
