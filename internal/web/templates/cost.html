@@ -42,21 +42,26 @@
 {{if $d.Sessions}}
 <div class="section">
   <div class="section-title">Cost by Session</div>
-  <table class="data-table">
+  <table class="data-table sortable-table">
     <thead>
-      <tr><th>Session</th><th>Type</th><th>Runs</th><th>Cost</th><th>Tokens</th></tr>
+      <tr>
+        <th data-sort="str">Session</th>
+        <th data-sort="str">Type</th>
+        <th data-sort="str" data-sort-default="desc" class="sort-desc">Started</th>
+        <th data-sort="num">Runs</th>
+        <th data-sort="num">Cost</th>
+        <th data-sort="num">Tokens</th>
+      </tr>
     </thead>
     <tbody>
       {{range $d.Sessions}}
       <tr data-href="/p/{{$.ProjectSlug}}/sessions/{{.TaskGroup}}">
-        <td>
-          {{.TaskGroup}}
-          {{if not .Timestamp.IsZero}}<div style="font-size:12px;color:var(--text-muted)">{{fmtDateAge .Timestamp}}</div>{{end}}
-        </td>
-        <td><span class="badge badge-{{.Kind}}">{{.Kind}}</span></td>
-        <td>{{.RunCount}}</td>
-        <td>{{fmtCost .TotalCost}}</td>
-        <td><span class="token-pill">{{fmtTokens .Tokens}}</span></td>
+        <td data-val="{{.TaskGroup}}">{{.TaskGroup}}</td>
+        <td data-val="{{.Kind}}"><span class="badge badge-{{.Kind}}">{{.Kind}}</span></td>
+        <td data-val="{{if not .Timestamp.IsZero}}{{.Timestamp.Format "2006-01-02T15:04:05"}}{{end}}">{{if not .Timestamp.IsZero}}{{fmtDateAge .Timestamp}}{{else}}&mdash;{{end}}</td>
+        <td data-val="{{.RunCount}}">{{.RunCount}}</td>
+        <td data-val="{{printf "%.6f" .TotalCost}}">{{fmtCost .TotalCost}}</td>
+        <td data-val="{{.Tokens}}"><span class="token-pill">{{fmtTokens .Tokens}}</span></td>
       </tr>
       {{end}}
     </tbody>
