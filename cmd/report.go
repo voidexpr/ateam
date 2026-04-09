@@ -126,15 +126,19 @@ func runReport(opts ReportOptions) error {
 		}
 		defer db.Close()
 
-		roleIDs, err = failedReportRoles(db, env.ProjectID())
+		var succeeded []string
+		succeeded, roleIDs, err = lastReportRolesByStatus(db, env.ProjectID())
 		if err != nil {
 			return err
+		}
+		if len(succeeded) > 0 {
+			fmt.Printf("Roles with successful reports: %s\n", strings.Join(succeeded, ", "))
 		}
 		if len(roleIDs) == 0 {
 			fmt.Println("No failed roles in the last report round.")
 			return nil
 		}
-		fmt.Printf("Re-running %d failed role(s): %s\n\n", len(roleIDs), strings.Join(roleIDs, ", "))
+		fmt.Printf("Roles that failed to re-run:   %s\n\n", strings.Join(roleIDs, ", "))
 	} else {
 		roles := opts.Roles
 		if len(roles) == 0 {
@@ -285,26 +289,28 @@ func runReport(opts ReportOptions) error {
 	return nil
 }
 
-// failedReportRoles finds roles that failed in the latest report task group.
-func failedReportRoles(db *calldb.CallDB, projectID string) ([]string, error) {
+// lastReportRolesByStatus returns (succeeded, failed) role lists from the
+// latest report task group.
+func lastReportRolesByStatus(db *calldb.CallDB, projectID string) (succeeded, failed []string, err error) {
 	tg, err := db.LatestTaskGroup(projectID, "report-")
 	if err != nil {
-		return nil, fmt.Errorf("cannot query latest report: %w", err)
+		return nil, nil, fmt.Errorf("cannot query latest report: %w", err)
 	}
 	if tg == "" {
-		return nil, fmt.Errorf("no previous report found")
+		return nil, nil, fmt.Errorf("no previous report found")
 	}
 
 	runs, err := db.RecentRuns(calldb.RecentFilter{TaskGroup: tg, Limit: -1})
 	if err != nil {
-		return nil, fmt.Errorf("cannot query runs for %s: %w", tg, err)
+		return nil, nil, fmt.Errorf("cannot query runs for %s: %w", tg, err)
 	}
 
-	var failed []string
 	for _, r := range runs {
 		if r.IsError {
 			failed = append(failed, r.Role)
+		} else {
+			succeeded = append(succeeded, r.Role)
 		}
 	}
-	return failed, nil
+	return succeeded, failed, nil
 }
