@@ -435,18 +435,27 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	content, err := os.ReadFile(absPath)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-
 	var rendered string
-	switch fileType {
-	case "logs", "stderr":
-		rendered = s.renderMarkdown("```\n" + string(content) + "\n```")
-	default:
-		rendered = s.renderMarkdown(string(content))
+	if fileType == "logs" {
+		var buf strings.Builder
+		f := &runner.HTMLStreamFormatter{}
+		if err := f.FormatFile(absPath, &buf); err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		rendered = buf.String()
+	} else {
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		switch fileType {
+		case "stderr":
+			rendered = s.renderMarkdown("```\n" + string(content) + "\n```")
+		default:
+			rendered = s.renderMarkdown(string(content))
+		}
 	}
 
 	s.render(w, r, "run_file.html", pageData{
