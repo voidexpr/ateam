@@ -152,7 +152,8 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 
 		case "assistant":
 			ast := ev.(*streamutil.AssistantEvent)
-			ctxTokens := ast.Message.Usage.InputTokens
+			u := ast.Message.Usage
+			ctxTokens := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
 			var textParts []string
 			for _, block := range ast.Message.Content {
 				switch block.Type {
