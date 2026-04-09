@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -28,6 +30,7 @@ var (
 	reportReview               bool
 	reportDockerAutoSetup      bool
 	reportContainerName        string
+	reportRerunFailed          bool
 )
 
 // ReportOptions holds configuration for a report run.
@@ -47,6 +50,7 @@ type ReportOptions struct {
 	Review               bool
 	DockerAutoSetup      bool
 	ContainerName        string
+	RerunFailed          bool
 }
 
 var reportCmd = &cobra.Command{
@@ -79,6 +83,7 @@ Example:
 			Review:               reportReview,
 			DockerAutoSetup:      reportDockerAutoSetup,
 			ContainerName:        reportContainerName,
+			RerunFailed:          reportRerunFailed,
 		})
 	},
 }
@@ -90,7 +95,8 @@ func init() {
 	reportCmd.Flags().IntVar(&reportParallel, "parallel", 0, "max parallel roles (overrides config max_parallel)")
 	reportCmd.Flags().BoolVar(&reportPrint, "print", false, "print reports to stdout after completion")
 	reportCmd.Flags().BoolVar(&reportReview, "review", false, "run review automatically after reports complete")
-	reportCmd.Flags().BoolVar(&reportDryRun, "dry-run", false, "print the computed prompt for each role without running")
+	reportCmd.Flags().BoolVar(&reportDryRun, "dry-run", false, "print resolved commands for each role without running")
+	reportCmd.Flags().BoolVar(&reportRerunFailed, "rerun-failed", false, "re-run only roles that failed in the last report round")
 	reportCmd.Flags().BoolVar(&reportIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
 	addCheaperModelFlag(reportCmd, &reportCheaperModel)
 	addProfileFlags(reportCmd, &reportProfile, &reportAgent)
@@ -106,13 +112,38 @@ func runReport(opts ReportOptions) error {
 		return err
 	}
 
-	roles := opts.Roles
-	if len(roles) == 0 {
-		roles = []string{"all"}
-	}
-	roleIDs, err := prompts.ResolveRoleList(roles, env.Config.Roles, env.ProjectDir, env.OrgDir)
-	if err != nil {
-		return err
+	// Resolve role list — either from --rerun-failed (DB) or --roles flag.
+	var roleIDs []string
+	var db *calldb.CallDB
+
+	if opts.RerunFailed {
+		if len(opts.Roles) > 0 {
+			return fmt.Errorf("--rerun-failed and --roles are mutually exclusive")
+		}
+		db, err = requireProjectDB(env)
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+
+		roleIDs, err = failedReportRoles(db, env.ProjectID())
+		if err != nil {
+			return err
+		}
+		if len(roleIDs) == 0 {
+			fmt.Println("No failed roles in the last report round.")
+			return nil
+		}
+		fmt.Printf("Re-running %d failed role(s): %s\n\n", len(roleIDs), strings.Join(roleIDs, ", "))
+	} else {
+		roles := opts.Roles
+		if len(roles) == 0 {
+			roles = []string{"all"}
+		}
+		roleIDs, err = prompts.ResolveRoleList(roles, env.Config.Roles, env.ProjectDir, env.OrgDir)
+		if err != nil {
+			return err
+		}
 	}
 
 	if err := root.EnsureRoles(env.ProjectDir, roleIDs); err != nil {
@@ -169,22 +200,30 @@ func runReport(opts ReportOptions) error {
 	}
 
 	if opts.DryRun {
+		fmt.Printf("Roles: %s\n\n", strings.Join(roleIDs, ", "))
 		for i, t := range tasks {
 			if i > 0 {
 				fmt.Println()
 			}
 			fmt.Printf("╔══ %s ══╗\n\n", t.RoleID)
-			fmt.Println(t.Prompt)
+			printDryRunInfo(cr, env, dryRunOpts{
+				RoleID:    t.RoleID,
+				Action:    runner.ActionReport,
+				TaskGroup: taskGroup,
+			})
 			fmt.Printf("\n╚══ %s ══╝\n", t.RoleID)
 		}
 		return nil
 	}
 
-	db, err := openProjectDB(env)
-	if err != nil {
-		return err
+	// Open DB if not already opened by --rerun-failed.
+	if db == nil {
+		db, err = openProjectDB(env)
+		if err != nil {
+			return err
+		}
+		defer db.Close()
 	}
-	defer db.Close()
 	cr.CallDB = db
 
 	if !opts.Force {
@@ -244,4 +283,28 @@ func runReport(opts ReportOptions) error {
 	}
 
 	return nil
+}
+
+// failedReportRoles finds roles that failed in the latest report task group.
+func failedReportRoles(db *calldb.CallDB, projectID string) ([]string, error) {
+	tg, err := db.LatestTaskGroup(projectID, "report-")
+	if err != nil {
+		return nil, fmt.Errorf("cannot query latest report: %w", err)
+	}
+	if tg == "" {
+		return nil, fmt.Errorf("no previous report found")
+	}
+
+	runs, err := db.RecentRuns(calldb.RecentFilter{TaskGroup: tg, Limit: -1})
+	if err != nil {
+		return nil, fmt.Errorf("cannot query runs for %s: %w", tg, err)
+	}
+
+	var failed []string
+	for _, r := range runs {
+		if r.IsError {
+			failed = append(failed, r.Role)
+		}
+	}
+	return failed, nil
 }
