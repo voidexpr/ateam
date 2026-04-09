@@ -450,3 +450,76 @@ a.stat-card-link:hover {
   color: var(--text-muted);
 }
 .file-links a:hover { color: var(--accent); text-decoration: none; }
+
+/* Stream log viewer */
+.stream-log {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sl-session {
+  color: var(--text-muted);
+  white-space: pre;
+  margin-bottom: 4px;
+}
+
+.sl-turn {
+  color: #bc8cff;
+  font-weight: 700;
+  margin-top: 16px;
+  margin-bottom: 4px;
+}
+
+.sl-tool {
+  padding-left: 16px;
+  margin: 2px 0;
+}
+
+.sl-tool-num { color: #56d4dd; }
+.sl-tool-name { color: #56d4dd; font-weight: 700; }
+
+.sl-tool-input,
+.sl-text-body,
+.sl-thinking-body {
+  margin: 4px 0 4px 40px;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.sl-text {
+  padding-left: 16px;
+  margin: 2px 0;
+}
+
+.sl-text-label { color: var(--yellow); }
+
+.sl-thinking {
+  padding-left: 16px;
+  margin: 2px 0;
+}
+
+.sl-thinking-body { color: var(--text-muted); }
+
+.sl-dim { color: var(--text-muted); }
+
+.sl-result {
+  margin-top: 16px;
+  white-space: pre;
+}
+
+.sl-result-header {
+  color: var(--green);
+  font-weight: 700;
+}
+
+.sl-error {
+  color: var(--red);
+  padding-left: 16px;
+}
