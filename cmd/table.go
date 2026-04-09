@@ -709,6 +709,147 @@ func secretResolver(env *root.ResolvedEnv, backend secret.Backend) *secret.Resol
 
 func fmtDateAge(t time.Time) string { return display.FmtDateAge(t) }
 
+// dryRunOpts configures what printDryRunInfo displays.
+type dryRunOpts struct {
+	RoleID    string
+	Action    string
+	TaskGroup string
+	Prompt    string // if non-empty, printed at the end (truncated)
+}
+
+// printDryRunInfo prints resolved execution details for a dry run.
+// This is the shared core used by both `run --dry-run` and `report --dry-run`.
+func printDryRunInfo(r *runner.Runner, env *root.ResolvedEnv, opts dryRunOpts) {
+	agentName := r.Agent.Name()
+	var model string
+	if mp, ok := r.Agent.(agent.ModelProvider); ok {
+		model = agent.NormalizeModel(mp.ModelName())
+	}
+	tmplVars := runner.BuildTemplateVars(r, runner.RunOpts{
+		RoleID:    opts.RoleID,
+		Action:    opts.Action,
+		TaskGroup: opts.TaskGroup,
+	}, time.Now(), 0, agentName, model)
+	resolvedAgent := runner.ResolveAgentForDryRun(r.Agent, tmplVars)
+	resolvedExtraArgs := runner.ResolveTemplateArgs(r.ExtraArgs, tmplVars)
+
+	// Agent and profile
+	fmt.Printf("Agent:     %s\n", agentName)
+	if r.Profile != "" {
+		fmt.Printf("Profile:   %s\n", r.Profile)
+	}
+	if r.ContainerType != "" && r.ContainerType != "none" {
+		name := r.ContainerType
+		if r.ContainerName != "" {
+			name += " (" + runner.ResolveTemplateString(r.ContainerName, tmplVars) + ")"
+		}
+		fmt.Printf("Container: %s\n", name)
+	}
+	fmt.Println()
+
+	// Build the full low-level args with container-aware additions
+	fullArgs := make([]string, len(resolvedExtraArgs))
+	copy(fullArgs, resolvedExtraArgs)
+	if runner.IsInContainer() || r.Container != nil {
+		fullArgs = append(fullArgs, runner.ResolveTemplateArgs(r.ArgsInsideContainer, tmplVars)...)
+	} else {
+		fullArgs = append(fullArgs, runner.ResolveTemplateArgs(r.ArgsOutsideContainer, tmplVars)...)
+	}
+
+	skipSandbox := (runner.IsInContainer() || r.Container != nil) && !r.SandboxInsideContainer
+	if r.SandboxSettings != "" && !skipSandbox {
+		fullArgs = append(fullArgs, "--settings", "<logs>/<timestamp>_settings.json")
+	}
+
+	// Resolved command
+	cmd, args := resolvedAgent.DebugCommandArgs(fullArgs)
+	fmt.Printf("Command:\n  %s %s\n", cmd, strings.Join(args, " "))
+	fmt.Println()
+
+	// CLAUDE_CONFIG_DIR
+	configDir := runner.ExpandHome(runner.ResolveTemplateString(r.ConfigDir, tmplVars))
+	if configDir != "" {
+		var configPath string
+		if filepath.IsAbs(configDir) {
+			configPath = configDir
+		} else if r.ProjectDir != "" {
+			configPath = filepath.Join(r.ProjectDir, configDir)
+		} else {
+			configPath = configDir
+		}
+		fmt.Printf("CLAUDE_CONFIG_DIR: %s\n\n", configPath)
+	}
+
+	// Docker command
+	if r.Container != nil {
+		dockerOpts := container.RunOpts{WorkDir: r.SourceDir}
+		dockerCmd := r.Container.DebugCommand(dockerOpts)
+		if dockerCmd != "" {
+			fmt.Printf("Docker:\n  %s\n\n", dockerCmd)
+		}
+	}
+
+	// Secrets
+	printDryRunSecrets(r, env)
+
+	// Sandbox
+	if r.SandboxSettings != "" && !skipSandbox {
+		fmt.Println("Sandbox: configured (use --verbose for full JSON)")
+	} else if r.SandboxSettings != "" && skipSandbox {
+		fmt.Println("Sandbox: skipped (inside container)")
+	}
+
+	// Prompt (optional)
+	if opts.Prompt != "" {
+		fmt.Println("Prompt:")
+		if len(opts.Prompt) > 500 {
+			fmt.Printf("  %s...\n  (%d chars total)\n", opts.Prompt[:500], len(opts.Prompt))
+		} else {
+			fmt.Printf("  %s\n", opts.Prompt)
+		}
+	}
+}
+
+func printDryRunSecrets(r *runner.Runner, env *root.ResolvedEnv) {
+	rtCfg, _ := runtime.Load(env.ProjectDir, env.OrgDir)
+	if rtCfg == nil {
+		return
+	}
+	var ac *runtime.AgentConfig
+	var forwardEnv []string
+	profileName := r.Profile
+	if strings.HasPrefix(profileName, "a:") {
+		an := profileName[2:]
+		if a, ok := rtCfg.Agents[an]; ok {
+			ac = &a
+		}
+	} else if profileName != "" {
+		if _, a, cc, err := rtCfg.ResolveProfile(profileName); err == nil {
+			ac = a
+			if cc != nil {
+				forwardEnv = cc.ForwardEnv
+			}
+		}
+	}
+	if ac == nil {
+		return
+	}
+	resolver := secretResolver(env, secret.DefaultBackend())
+	details := secret.ResolveAllRequired(ac, forwardEnv, resolver)
+	if len(details) == 0 {
+		return
+	}
+	fmt.Println("Secrets:")
+	for _, d := range details {
+		if d.Found {
+			fmt.Printf("  %-30s ✓ %s (%s, %s)\n", d.Name, d.Masked, d.Source, d.Backend)
+		} else {
+			fmt.Printf("  %-30s ✗ not found\n", d.Name)
+		}
+	}
+	fmt.Println()
+}
+
 // poolDisplayOpts controls how runPool renders progress and formats output.
 type poolDisplayOpts struct {
 	quiet     bool                                   // suppress ANSI table; fall back to plain text progress

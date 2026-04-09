@@ -10,13 +10,10 @@ import (
 	"time"
 
 	"github.com/ateam/internal/agent"
-	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
-	"github.com/ateam/internal/runtime"
-	"github.com/ateam/internal/secret"
 	"github.com/spf13/cobra"
 )
 
@@ -300,129 +297,12 @@ func fmtContextProgress(contextTokens, contextWindow int) string {
 func printRunDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, taskGroup string) error {
 	fmt.Println("╔══ dry-run ══╗")
 	fmt.Println()
-
-	// Resolve template variables for display
-	agentName := r.Agent.Name()
-	var model string
-	if mp, ok := r.Agent.(agent.ModelProvider); ok {
-		model = agent.NormalizeModel(mp.ModelName())
-	}
-	tmplVars := runner.BuildTemplateVars(r, runner.RunOpts{
+	printDryRunInfo(r, env, dryRunOpts{
 		RoleID:    roleID,
 		Action:    runner.ActionRun,
 		TaskGroup: taskGroup,
-	}, time.Now(), 0, agentName, model)
-	resolvedAgent := runner.ResolveAgentForDryRun(r.Agent, tmplVars)
-	resolvedExtraArgs := runner.ResolveTemplateArgs(r.ExtraArgs, tmplVars)
-
-	// Agent and profile
-	fmt.Printf("Agent:     %s\n", agentName)
-	if r.Profile != "" {
-		fmt.Printf("Profile:   %s\n", r.Profile)
-	}
-	if r.ContainerType != "" && r.ContainerType != "none" {
-		name := r.ContainerType
-		if r.ContainerName != "" {
-			name += " (" + runner.ResolveTemplateString(r.ContainerName, tmplVars) + ")"
-		}
-		fmt.Printf("Container: %s\n", name)
-	}
-	fmt.Println()
-
-	// Build the full low-level args with container-aware additions
-	fullArgs := make([]string, len(resolvedExtraArgs))
-	copy(fullArgs, resolvedExtraArgs)
-	if runner.IsInContainer() || r.Container != nil {
-		fullArgs = append(fullArgs, runner.ResolveTemplateArgs(r.ArgsInsideContainer, tmplVars)...)
-	} else {
-		fullArgs = append(fullArgs, runner.ResolveTemplateArgs(r.ArgsOutsideContainer, tmplVars)...)
-	}
-
-	skipSandbox := (runner.IsInContainer() || r.Container != nil) && !r.SandboxInsideContainer
-	if r.SandboxSettings != "" && !skipSandbox {
-		settingsPath := "<logs>/<timestamp>_settings.json"
-		fullArgs = append(fullArgs, "--settings", settingsPath)
-	}
-
-	// Agent command (with resolved templates and settings)
-	cmd, args := resolvedAgent.DebugCommandArgs(fullArgs)
-	fmt.Printf("Command:\n  %s %s\n", cmd, strings.Join(args, " "))
-	fmt.Println()
-
-	// CLAUDE_CONFIG_DIR
-	configDir := runner.ExpandHome(runner.ResolveTemplateString(r.ConfigDir, tmplVars))
-	if configDir != "" {
-		var configPath string
-		if filepath.IsAbs(configDir) {
-			configPath = configDir
-		} else if r.ProjectDir != "" {
-			configPath = filepath.Join(r.ProjectDir, configDir)
-		} else {
-			configPath = configDir
-		}
-		fmt.Printf("CLAUDE_CONFIG_DIR: %s\n\n", configPath)
-	}
-
-	// Docker command (if container)
-	if r.Container != nil {
-		opts := container.RunOpts{WorkDir: r.SourceDir}
-		dockerCmd := r.Container.DebugCommand(opts)
-		if dockerCmd != "" {
-			fmt.Printf("Docker:\n  %s\n", dockerCmd)
-			fmt.Println()
-		}
-	}
-
-	// Secret resolution
-	rtCfg, _ := runtime.Load(env.ProjectDir, env.OrgDir)
-	if rtCfg != nil {
-		var ac *runtime.AgentConfig
-		var forwardEnv []string
-		profileName := r.Profile
-		if strings.HasPrefix(profileName, "a:") {
-			an := profileName[2:]
-			if a, ok := rtCfg.Agents[an]; ok {
-				ac = &a
-			}
-		} else if profileName != "" {
-			if _, a, cc, err := rtCfg.ResolveProfile(profileName); err == nil {
-				ac = a
-				if cc != nil {
-					forwardEnv = cc.ForwardEnv
-				}
-			}
-		}
-		if ac != nil {
-			resolver := secretResolver(env, secret.DefaultBackend())
-			details := secret.ResolveAllRequired(ac, forwardEnv, resolver)
-			if len(details) > 0 {
-				fmt.Println("Secrets:")
-				for _, d := range details {
-					if d.Found {
-						fmt.Printf("  %-30s ✓ %s (%s, %s)\n", d.Name, d.Masked, d.Source, d.Backend)
-					} else {
-						fmt.Printf("  %-30s ✗ not found\n", d.Name)
-					}
-				}
-				fmt.Println()
-			}
-		}
-	}
-
-	// Sandbox settings
-	if r.SandboxSettings != "" && !skipSandbox {
-		fmt.Println("Sandbox: configured (use --verbose for full JSON)")
-	} else if r.SandboxSettings != "" && skipSandbox {
-		fmt.Println("Sandbox: skipped (inside container)")
-	}
-
-	// Prompt
-	fmt.Println("Prompt:")
-	if len(prompt) > 500 {
-		fmt.Printf("  %s...\n  (%d chars total)\n", prompt[:500], len(prompt))
-	} else {
-		fmt.Printf("  %s\n", prompt)
-	}
+		Prompt:    prompt,
+	})
 	fmt.Println()
 	fmt.Println("╚══ dry-run ══╝")
 	return nil
