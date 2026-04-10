@@ -45,7 +45,6 @@ func init() {
 	rootCmd.AddCommand(runsCmd)
 	rootCmd.AddCommand(costCmd)
 	rootCmd.AddCommand(projectRenameCmd)
-	rootCmd.AddCommand(migrateLogsCmd)
 	rootCmd.AddCommand(agentConfigCmd)
 	rootCmd.AddCommand(containerCpCmd)
 	rootCmd.AddCommand(parallelCmd)
@@ -54,5 +53,4 @@ func init() {
 	rootCmd.AddCommand(autoSetupCmd)
 	rootCmd.AddCommand(inspectCmd)
 	rootCmd.AddCommand(versionCmd)
-	rootCmd.AddCommand(migrateCmd)
 }

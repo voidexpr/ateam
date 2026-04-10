@@ -245,26 +245,4 @@ ateam project-rename --old services/api --new backends/api
 | `--old PATH` | Old project path (relative to org root) **(required)** |
 | `--new PATH` | New project path (relative to org root) **(required)** |
 
-### `ateam migrate-logs`
-
-Migrate existing projects from the legacy org-level layout (logs and exec history in `.ateamorg/projects/<id>/`, shared `state.sqlite`) to the new per-project layout (everything inside `.ateam/`).
-
-For each project discovered under `.ateamorg/projects/`:
-
-1. Copies log files from `.ateamorg/projects/<id>/roles/<role>/logs/` to `.ateam/logs/roles/<role>/`
-2. Copies supervisor logs from `.ateamorg/projects/<id>/supervisor/logs/` to `.ateam/logs/supervisor/`
-3. Appends `runner.log` from `.ateamorg/projects/<id>/runner.log` to `.ateam/logs/runner.log`
-4. Copies `agent_execs` rows from `.ateamorg/state.sqlite` to `.ateam/state.sqlite`, rewriting `project_id` to `""` and `stream_file` paths to the new layout
-5. Creates `.ateam/.gitignore` if missing
-
-The migration is idempotent: files that already exist are skipped, DB rows are only copied if the project DB is empty.
-
-```bash
-ateam migrate-logs              # run from anywhere under the org root
-ateam migrate-logs --dry-run    # preview changes without applying
-```
-
-| Flag | Description |
-|------|-------------|
-| `--dry-run` | Preview changes without applying them |
 
