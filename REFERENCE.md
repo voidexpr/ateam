@@ -72,6 +72,8 @@ ateam report --roles all
 ateam report --roles security,testing_basic
 ateam report --roles all --extra-prompt "Focus on the API layer"
 ateam report --roles all --dry-run
+ateam report --rerun-failed              # re-run only roles that failed last time
+ateam report --rerun-failed --dry-run    # preview which roles would be rerun
 ```
 
 | Flag | Description |
@@ -83,8 +85,10 @@ ateam report --roles all --dry-run
 | `--cheaper-model` | Use a cheaper model (sonnet) |
 | `--timeout MINUTES` | Timeout per role (overrides `config.toml`) |
 | `--print` | Print reports to stdout after completion |
+| `--rerun-failed` | Re-run only roles that failed in the last report round (mutually exclusive with `--roles`) |
 | `--dry-run` | Print computed prompts without running roles |
 | `--ignore-previous-report` | Do not include the role's previous report in the prompt |
+| `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
 | `--verbose` | Print agent and docker commands to stderr |
 
 ### `ateam review`
@@ -109,6 +113,7 @@ ateam review --dry-run
 | `--roles ROLE,...` | Limit coding tasks to these roles (reviews all reports but only assigns code tasks to listed roles) |
 | `--print` | Print review to stdout after completion |
 | `--dry-run` | Print computed prompt and list reports without running |
+| `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
 | `--verbose` | Print agent and docker commands to stderr |
 
 ### `ateam code`
@@ -132,6 +137,7 @@ ateam code --dry-run
 | `--timeout MINUTES` | Timeout in minutes (overrides `config.toml`; default 120) |
 | `--print` | Print output to stdout after completion |
 | `--dry-run` | Print the computed prompt without running |
+| `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
 | `--verbose` | Print agent and docker commands to stderr |
 | `--tail` | Stream live output from supervisor and sub-runs |
 | `--force` | Run even if the same action is already running |
@@ -144,6 +150,7 @@ Run the full pipeline sequentially: report → review → code.
 ateam all
 ateam all --extra-prompt "Focus on security"
 ateam all --roles refactor_small,testing_basic
+ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile docker
 ```
 
 | Flag | Description |
@@ -153,6 +160,12 @@ ateam all --roles refactor_small,testing_basic
 | `--timeout MINUTES` | Per-phase timeout (overrides config) |
 | `--roles ROLE,...` | Run only these roles in the report phase and limit coding tasks to them in review |
 | `--profile NAME` | Profile for code sub-runs (passed to `ateam code --profile`) |
+| `--report-profile NAME` | Override profile for the report phase |
+| `--report-agent NAME` | Override agent for the report phase (uses 'none' container) |
+| `--supervisor-profile NAME` | Override profile for the supervisor (review + code management) |
+| `--supervisor-agent NAME` | Override agent for the supervisor (review + code management) |
+| `--code-profile NAME` | Override profile for code sub-runs (overrides `--profile`) |
+| `--code-agent NAME` | Override agent for code sub-runs (uses 'none' container) |
 | `--quiet` | Suppress output printing |
 | `--verbose` | Print agent and docker commands to stderr |
 
