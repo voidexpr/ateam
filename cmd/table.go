@@ -539,6 +539,26 @@ func crossBuildIfPossible(hostExe, orgDir string) string {
 	return target
 }
 
+func dockerExecOutput(container string, args ...string) (string, error) {
+	cmdArgs := append([]string{"exec", container}, args...)
+	cmd := exec.Command("docker", cmdArgs...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("docker exec %s %s: %w", container, strings.Join(args, " "), err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func dockerCp(src, dst string) error {
+	cmd := exec.Command("docker", "cp", src, dst)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker cp %s → %s: %w", src, dst, err)
+	}
+	return nil
+}
+
 // gitWriteDirs returns the .git directories that need sandbox write access
 // for git operations. In a worktree, this includes both the worktree's
 // .git dir and the main repo's common git dir.

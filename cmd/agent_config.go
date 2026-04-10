@@ -310,30 +310,19 @@ func execClaude(target agent.AuthMethod, status agent.AuthStatus, projectDir, or
 // Docker container helpers
 // ---------------------------------------------------------------------------
 
-func dockerExecOutput(container string, args ...string) (string, error) {
-	cmdArgs := append([]string{"exec", container}, args...)
-	cmd := exec.Command("docker", cmdArgs...)
-	out, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("docker exec %s %s: %w", container, strings.Join(args, " "), err)
-	}
-	return strings.TrimSpace(string(out)), nil
-}
-
-func dockerCp(src, dst string) error {
-	cmd := exec.Command("docker", "cp", src, dst)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("docker cp %s → %s: %w", src, dst, err)
-	}
-	return nil
-}
-
 type containerInfo struct {
 	home      string
 	user      string
 	configDir string // CLAUDE_CONFIG_DIR, empty if unset
+}
+
+// claudePaths returns the claude config directory and .claude.json path
+// for the container. When CLAUDE_CONFIG_DIR is set, claudeJSON is empty.
+func (ci containerInfo) claudePaths() (claudeDir, claudeJSON string) {
+	if ci.configDir != "" {
+		return ci.configDir, ""
+	}
+	return ci.home + "/.claude", ci.home + "/.claude.json"
 }
 
 // detectContainer gathers home, user, and CLAUDE_CONFIG_DIR in a single docker exec.
@@ -455,12 +444,7 @@ func runCopyOut(containerName, flagPath, homeOverride, orgDir string) error {
 		return err
 	}
 
-	claudeDir := ci.home + "/.claude"
-	claudeJSON := ci.home + "/.claude.json"
-	if ci.configDir != "" {
-		claudeDir = ci.configDir
-		claudeJSON = ""
-	}
+	claudeDir, claudeJSON := ci.claudePaths()
 
 	if !containerPathExists(containerName, claudeDir) {
 		return fmt.Errorf("%s does not exist in container %s", claudeDir, containerName)
@@ -529,12 +513,7 @@ func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bo
 		return err
 	}
 
-	claudeDir := ci.home + "/.claude"
-	claudeJSON := ci.home + "/.claude.json"
-	if ci.configDir != "" {
-		claudeDir = ci.configDir
-		claudeJSON = ""
-	}
+	claudeDir, claudeJSON := ci.claudePaths()
 
 	fmt.Printf("Copying from %s → container %s (%s, user=%s)\n\n", localPath, containerName, ci.home, ci.user)
 
@@ -548,7 +527,9 @@ func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bo
 		fmt.Println("  cleared existing " + claudeDir)
 	}
 
-	dockerExecOutput(containerName, "mkdir", "-p", claudeDir)
+	if _, err := dockerExecOutput(containerName, "mkdir", "-p", claudeDir); err != nil {
+		return fmt.Errorf("creating %s in container: %w", claudeDir, err)
+	}
 
 	if err := dockerCp(localClaudeDir+"/.", containerName+":"+claudeDir+"/"); err != nil {
 		return err
@@ -572,7 +553,9 @@ func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bo
 	localSecrets := filepath.Join(localPath, "secrets.env")
 	if _, err := os.Stat(localSecrets); err == nil {
 		ateamOrgDir := ci.home + "/.ateamorg"
-		dockerExecOutput(containerName, "mkdir", "-p", ateamOrgDir)
+		if _, err := dockerExecOutput(containerName, "mkdir", "-p", ateamOrgDir); err != nil {
+			return fmt.Errorf("creating %s in container: %w", ateamOrgDir, err)
+		}
 		if err := dockerCp(localSecrets, containerName+":"+ateamOrgDir+"/secrets.env"); err != nil {
 			return err
 		}

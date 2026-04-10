@@ -136,10 +136,13 @@ func New(env *root.ResolvedEnv) (*Server, error) {
 			SourceDir:  env.SourceDir,
 		}}
 	} else if env.OrgDir != "" {
+		usedSlugs := make(map[string]bool)
 		if err := root.WalkProjects(env.OrgDir, func(pi root.ProjectInfo) error {
+			slug := uniqueSlug(slugify(pi.Config.Project.Name), usedSlugs)
+			usedSlugs[slug] = true
 			s.projects = append(s.projects, ProjectEntry{
 				Name:       pi.Config.Project.Name,
-				Slug:       slugify(pi.Config.Project.Name),
+				Slug:       slug,
 				ProjectDir: pi.Dir,
 				OrgDir:     env.OrgDir,
 				SourceDir:  filepath.Dir(pi.Dir),
@@ -265,6 +268,19 @@ func openURL(url string) {
 		cmd = "xdg-open"
 	}
 	_ = exec.Command(cmd, url).Start()
+}
+
+// uniqueSlug returns slug if unused, otherwise appends -2, -3, etc.
+func uniqueSlug(slug string, used map[string]bool) string {
+	if !used[slug] {
+		return slug
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", slug, i)
+		if !used[candidate] {
+			return candidate
+		}
+	}
 }
 
 // slugify returns a URL-safe identifier from a project name.
