@@ -59,23 +59,28 @@ func TestInsertAndUpdate(t *testing.T) {
 	}
 
 	err = db.UpdateCall(id, &CallResult{
-		EndedAt:         now.Add(30 * time.Second),
-		DurationMS:      30000,
-		ExitCode:        0,
-		IsError:         false,
-		CostUSD:         0.05,
-		InputTokens:     1000,
-		OutputTokens:    500,
-		CacheReadTokens: 200,
-		Turns:           3,
+		EndedAt:           now.Add(30 * time.Second),
+		DurationMS:        30000,
+		ExitCode:          0,
+		IsError:           false,
+		CostUSD:           0.05,
+		InputTokens:       1000,
+		OutputTokens:      500,
+		CacheReadTokens:   200,
+		CacheWriteTokens:  75,
+		Turns:             3,
+		PeakContextTokens: 42000,
+		ContextWindow:     200000,
 	})
 	if err != nil {
 		t.Fatalf("UpdateCall: %v", err)
 	}
 
 	var costUSD float64
-	var inputTokens int
-	err = db.db.QueryRow("SELECT cost_usd, input_tokens FROM agent_execs WHERE id = ?", id).Scan(&costUSD, &inputTokens)
+	var inputTokens, cacheWriteTokens, peakCtx, ctxWindow int
+	err = db.db.QueryRow(
+		"SELECT cost_usd, input_tokens, cache_write_tokens, peak_context_tokens, context_window FROM agent_execs WHERE id = ?", id,
+	).Scan(&costUSD, &inputTokens, &cacheWriteTokens, &peakCtx, &ctxWindow)
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -84,6 +89,33 @@ func TestInsertAndUpdate(t *testing.T) {
 	}
 	if inputTokens != 1000 {
 		t.Fatalf("expected 1000 input tokens, got %d", inputTokens)
+	}
+	if cacheWriteTokens != 75 {
+		t.Fatalf("expected 75 cache_write_tokens, got %d", cacheWriteTokens)
+	}
+	if peakCtx != 42000 {
+		t.Fatalf("expected 42000 peak_context_tokens, got %d", peakCtx)
+	}
+	if ctxWindow != 200000 {
+		t.Fatalf("expected 200000 context_window, got %d", ctxWindow)
+	}
+
+	// Verify the fields also roundtrip through RecentRuns.
+	rows, err := db.RecentRuns(RecentFilter{Limit: 1})
+	if err != nil {
+		t.Fatalf("RecentRuns: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].CacheWriteTokens != 75 {
+		t.Fatalf("RecentRuns: expected CacheWriteTokens=75, got %d", rows[0].CacheWriteTokens)
+	}
+	if rows[0].PeakContextTokens != 42000 {
+		t.Fatalf("RecentRuns: expected PeakContextTokens=42000, got %d", rows[0].PeakContextTokens)
+	}
+	if rows[0].ContextWindow != 200000 {
+		t.Fatalf("RecentRuns: expected ContextWindow=200000, got %d", rows[0].ContextWindow)
 	}
 }
 
