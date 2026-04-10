@@ -21,7 +21,7 @@ esac
 mkdir -p "$REPO_ROOT/build"
 BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 VERSION=$(cat "$REPO_ROOT/VERSION" 2>/dev/null || echo dev)
-GIT_COMMIT=$(git -C "$REPO_ROOT" describe --always --dirty 2>/dev/null || echo unknown)
+GIT_COMMIT=$(cd "$REPO_ROOT" && git describe --always --dirty 2>/dev/null || echo unknown)
 LDFLAGS="-X github.com/ateam/cmd.BuildTime=$BUILD_TIME -X github.com/ateam/cmd.Version=$VERSION -X github.com/ateam/cmd.GitCommit=$GIT_COMMIT"
 
 echo "Cross-compiling ateam for linux/$GOARCH..."

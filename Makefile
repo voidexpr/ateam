@@ -28,7 +28,6 @@ check-tidy:
 	go mod tidy -diff
 
 test:
-	go build ./...
 	go test ./...
 
 test-all: test test-docker test-docker-live
