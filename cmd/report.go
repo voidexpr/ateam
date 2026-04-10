@@ -122,6 +122,10 @@ func runReport(opts ReportOptions) error {
 		}
 		db, err = requireProjectDB(env)
 		if err != nil {
+			if opts.DryRun {
+				fmt.Println("No previous report found (no project database).")
+				return nil
+			}
 			return err
 		}
 		defer db.Close()
@@ -305,7 +309,12 @@ func lastReportRolesByStatus(db *calldb.CallDB, projectID string) (succeeded, fa
 		return nil, nil, fmt.Errorf("cannot query runs for %s: %w", tg, err)
 	}
 
+	seen := make(map[string]bool)
 	for _, r := range runs {
+		if seen[r.Role] {
+			continue
+		}
+		seen[r.Role] = true
 		if r.IsError {
 			failed = append(failed, r.Role)
 		} else {
