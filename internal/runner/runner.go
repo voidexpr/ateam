@@ -260,7 +260,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	// Resolve {{VAR}} templates in agent args, extra args, and container fields.
 	tmplVars := BuildTemplateVars(r, opts, startedAt, callID, agentName, model)
 	extraArgs = resolveArgs(extraArgs, tmplVars.Replacer())
-	runAgent := resolveAgentTemplateArgs(r.Agent, tmplVars)
+	runAgent := ResolveAgentTemplateArgs(r.Agent, tmplVars)
 	resolveContainerTemplates(r.Container, tmplVars)
 
 	// Build agent request (includes log dir creation and prompt archival).

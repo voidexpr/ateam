@@ -202,7 +202,7 @@ func TestResolveTemplateMapKeysNotResolved(t *testing.T) {
 	}
 }
 
-// --- resolveAgentTemplateArgs ---
+// --- ResolveAgentTemplateArgs ---
 
 func TestResolveAgentTemplateArgsClaude(t *testing.T) {
 	a := &agent.ClaudeAgent{
@@ -212,7 +212,7 @@ func TestResolveAgentTemplateArgsClaude(t *testing.T) {
 	}
 	vars := TemplateVars{ProjectDir: "myapp", Role: "security", ExecID: 99}
 
-	resolved := resolveAgentTemplateArgs(a, vars)
+	resolved := ResolveAgentTemplateArgs(a, vars)
 	got := resolved.(*agent.ClaudeAgent)
 
 	if got.Args[2] != "myapp-security" {
@@ -234,7 +234,7 @@ func TestResolveAgentTemplateArgsCodex(t *testing.T) {
 	}
 	vars := TemplateVars{Role: "testing_basic", Action: "run"}
 
-	resolved := resolveAgentTemplateArgs(a, vars)
+	resolved := ResolveAgentTemplateArgs(a, vars)
 	got := resolved.(*agent.CodexAgent)
 
 	if got.Args[1] != "testing_basic-run" {
@@ -253,7 +253,7 @@ func TestResolveAgentTemplateArgsDoesNotMutateOriginal(t *testing.T) {
 	}
 	vars := TemplateVars{Role: "security"}
 
-	resolved := resolveAgentTemplateArgs(original, vars)
+	resolved := ResolveAgentTemplateArgs(original, vars)
 
 	// Original unchanged
 	if original.Args[1] != "{{ROLE}}" {
@@ -281,7 +281,7 @@ func TestResolveAgentTemplateArgsNilEnv(t *testing.T) {
 	}
 	vars := TemplateVars{Role: "security"}
 
-	resolved := resolveAgentTemplateArgs(a, vars)
+	resolved := ResolveAgentTemplateArgs(a, vars)
 	got := resolved.(*agent.ClaudeAgent)
 
 	if got.Env != nil {
@@ -296,7 +296,7 @@ func TestResolveAgentTemplateArgsMockAgent(t *testing.T) {
 	// MockAgent doesn't implement Args — should be returned as-is.
 	a := &agent.MockAgent{}
 	vars := TemplateVars{Role: "security"}
-	resolved := resolveAgentTemplateArgs(a, vars)
+	resolved := ResolveAgentTemplateArgs(a, vars)
 	if resolved != a {
 		t.Error("unknown agent type should be returned as-is")
 	}

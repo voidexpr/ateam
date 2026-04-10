@@ -8,12 +8,12 @@ import (
 )
 
 // =============================================================================
-// BUG: resolveAgentTemplateArgs used to mutate shared Agent.Args without synchronization
-// File: template.go, func resolveAgentTemplateArgs
+// BUG: ResolveAgentTemplateArgs used to mutate shared Agent.Args without synchronization
+// File: template.go, func ResolveAgentTemplateArgs
 // Called from: runner.go:201 inside Run()
 //
 // RunPool calls r.Run() in parallel goroutines sharing the same Runner (and
-// thus the same r.Agent). resolveAgentTemplateArgs writes to agent.Args
+// thus the same r.Agent). ResolveAgentTemplateArgs writes to agent.Args
 // (t.Args = ResolveTemplateArgs(t.Args, vars)), creating a data race when
 // multiple goroutines resolve templates concurrently.
 //
@@ -42,7 +42,7 @@ func TestResolveAgentTemplateArgsConcurrentRace(t *testing.T) {
 				ProjectDir: "project",
 				Role:       "security",
 			}
-			resolved := resolveAgentTemplateArgs(a, vars)
+			resolved := ResolveAgentTemplateArgs(a, vars)
 			clone, ok := resolved.(*agent.ClaudeAgent)
 			if !ok {
 				t.Errorf("resolved agent type = %T, want *agent.ClaudeAgent", resolved)
@@ -57,9 +57,9 @@ func TestResolveAgentTemplateArgsConcurrentRace(t *testing.T) {
 	wg.Wait()
 
 	if a.Args[2] != originalArgs[2] {
-		t.Logf("After concurrent resolveAgentTemplateArgs, agent.Args = %v", a.Args)
+		t.Logf("After concurrent ResolveAgentTemplateArgs, agent.Args = %v", a.Args)
 		t.Logf("Original agent.Args = %v", originalArgs)
-		t.Errorf("resolveAgentTemplateArgs mutated the shared agent's Args — templates should remain unresolved on the shared agent")
+		t.Errorf("ResolveAgentTemplateArgs mutated the shared agent's Args — templates should remain unresolved on the shared agent")
 	}
 }
 
@@ -74,14 +74,14 @@ func TestResolveAgentTemplateArgsDoesNotMutateSharedAgent(t *testing.T) {
 	}
 
 	// First resolve: security
-	first := resolveAgentTemplateArgs(a, TemplateVars{Role: "security"})
+	first := ResolveAgentTemplateArgs(a, TemplateVars{Role: "security"})
 	firstAgent := first.(*agent.ClaudeAgent)
 	if firstAgent.Args[1] != "security-agent" {
 		t.Fatalf("first resolve: got %q, want %q", firstAgent.Args[1], "security-agent")
 	}
 
 	// Second resolve with different role: should get "testing-agent"
-	second := resolveAgentTemplateArgs(a, TemplateVars{Role: "testing"})
+	second := ResolveAgentTemplateArgs(a, TemplateVars{Role: "testing"})
 	secondAgent := second.(*agent.ClaudeAgent)
 
 	if secondAgent.Args[1] != "testing-agent" {

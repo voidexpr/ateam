@@ -36,7 +36,9 @@ CREATE TABLE IF NOT EXISTS agent_execs (
   output_tokens     INTEGER,
   cache_read_tokens  INTEGER,
   cache_write_tokens INTEGER,
-  turns              INTEGER
+  turns              INTEGER,
+  pid                INTEGER NOT NULL DEFAULT 0,
+  container_id       TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_execs_started ON agent_execs(started_at);

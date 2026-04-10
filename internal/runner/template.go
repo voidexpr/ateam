@@ -66,15 +66,9 @@ func resolveArgs(args []string, r *strings.Replacer) []string {
 	return resolved
 }
 
-// ResolveAgentForDryRun is the exported version of resolveAgentTemplateArgs
-// for use in dry-run display from command handlers.
-func ResolveAgentForDryRun(a agent.Agent, vars TemplateVars) agent.Agent {
-	return resolveAgentTemplateArgs(a, vars)
-}
-
-// resolveAgentTemplateArgs resolves templates in the agent's Args, Env values,
+// ResolveAgentTemplateArgs resolves templates in the agent's Args, Env values,
 // and other string fields. Clones the agent so the original config is never mutated.
-func resolveAgentTemplateArgs(a agent.Agent, vars TemplateVars) agent.Agent {
+func ResolveAgentTemplateArgs(a agent.Agent, vars TemplateVars) agent.Agent {
 	r := vars.Replacer()
 	switch t := a.(type) {
 	case *agent.ClaudeAgent:
