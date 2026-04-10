@@ -224,3 +224,156 @@ Future: `--container` could support `--setup-interactive` to run the interactive
 The existing `--wipe-i-am-sure` already has guards (container-only by default, Linux-only). These stay. The additional rule: `--config-dir` must not resolve to `~/` or `~/.claude`, and `--container` + `--wipe-i-am-sure` only affects the container's config, never a volume-mounted host `~/.claude`.
 
 **Open question:** should we detect and refuse to wipe when `~/.claude` inside a container is a bind mount from the host? This could be checked via `docker exec NAME stat -f %d ~/.claude` vs the container root, or by inspecting mount points. Worth implementing if feasible, otherwise document the risk.
+
+---
+
+## Key Finding: `.claude.json` Location Depends on `CLAUDE_CONFIG_DIR`
+
+Claude Code stores account state (userID, oauthAccount, migrations) in a file called `.claude.json`. Its location follows two different conventions:
+
+**Default (no `CLAUDE_CONFIG_DIR`):**
+- Config directory: `~/.claude/` (contains `.credentials.json`, `settings.json`, sessions, etc.)
+- Account state: `~/.claude.json` (at the home root, **outside** `~/.claude/`)
+- These are at the same level: `~/.claude/` is a directory, `~/.claude.json` is a sibling file
+
+**With `CLAUDE_CONFIG_DIR=/some/path`:**
+- Config directory: `/some/path/` (contains everything)
+- Account state: `/some/path/.claude.json` (**inside** the custom config dir)
+- Fully self-contained — the entire config dir is portable
+
+### Implications for Docker volumes
+
+When mounting `~/.claude` as a Docker volume (the default case), the volume only covers the directory. `.claude.json` at the home root is on the container filesystem and is **lost when the container is recreated**. Claude Code backs it up inside `~/.claude/backups/.claude.json.backup.*` (which does persist in the volume), and prints a restore command on startup when it detects the file is missing.
+
+**Workarounds for the default case:**
+- Restore from backup on container startup (entrypoint or manual `cp`)
+- Mount `.claude.json` as a separate file (`-v path/.claude.json:/home/agent/.claude.json`)
+
+**Using `CLAUDE_CONFIG_DIR` avoids this entirely** — `.claude.json` is inside the config dir, so a single volume mount covers everything. This is the recommended approach for portable/shared agent configs.
+
+### Implications for copying configs between containers
+
+- **Default case:** must copy both `~/.claude/` and `~/.claude.json` (two separate paths)
+- **`CLAUDE_CONFIG_DIR` case:** copy the single directory — everything is inside it
+- Moving `.claude.json` into `~/.claude/` does NOT work in the default case — Claude Code only looks at `~/.claude.json` (home root)
+
+### Recommendation
+
+Prefer `CLAUDE_CONFIG_DIR` for any managed/automated agent config. It provides full isolation and portability in a single directory. Reserve the default `~/.claude` layout for interactive human use where the split location is handled naturally by the OS.
+
+---
+
+## Recommended Approach: Shared Linux Agent Config Directory
+
+A single host directory holds the complete Linux agent identity: credentials, account state, and OAuth token. It can be volume-mounted into containers or copied in/out.
+
+### Host layout
+
+```
+~/.ateamorg/linux-shared-claude/
+  .claude/          # mounted as $HOME/.claude
+  .claude.json      # mounted as $HOME/.claude.json
+  secrets.env       # mounted as $HOME/.ateamorg/secrets.env (org scope)
+                    # contains CLAUDE_CODE_OAUTH_TOKEN for headless agents
+```
+
+### Volume-mount approach
+
+Three mounts from the shared dir into any container:
+
+```bash
+docker run \
+  -v ~/.ateamorg/linux-shared-claude/.claude:/home/agent/.claude \
+  -v ~/.ateamorg/linux-shared-claude/.claude.json:/home/agent/.claude.json \
+  -v ~/.ateamorg/linux-shared-claude/secrets.env:/home/agent/.ateamorg/secrets.env \
+  ...
+```
+
+`start.sh --volume ~/.ateamorg/linux-shared-claude` handles this automatically.
+
+Inside the container:
+- Interactive `claude` works (`.credentials.json` + `.claude.json` present)
+- `ateam run` resolves `CLAUDE_CODE_OAUTH_TOKEN` from org scope (`.ateamorg/secrets.env`) naturally
+- No `CLAUDE_CONFIG_DIR`, no env vars to manage, no entrypoint hacks
+- Host secret system is untouched (the file is only mounted inside containers)
+
+### Copy in/out approach
+
+For containers where you can't change the mount configuration.
+
+#### CLI
+
+```bash
+# Copy agent config out of a running container
+ateam agent-config --copy-out --container NAME [--path PATH] [--home CUSTOM_HOME]
+
+# Copy agent config into a running container
+ateam agent-config --copy-in --container NAME [--path PATH] [--force] [--copy-ateam] [--home CUSTOM_HOME]
+```
+
+`--path` defaults to `~/.ateamorg/linux-shared-claude/`.
+
+`--home` overrides the container home directory. Auto-detected via `docker exec CONTAINER sh -c 'echo $HOME'` by default.
+
+Container must be running (required for `$HOME` detection, file ownership fix, etc.).
+
+#### --copy-out behavior
+
+Copies from the container to the local path:
+- `$HOME/.claude/` → `PATH/.claude/`
+- `$HOME/.claude.json` → `PATH/.claude.json`
+- Does NOT copy `$HOME/.ateamorg/secrets.env` — that file is manually maintained and contains the OAuth token from `claude setup-token`. Overwriting it would lose a token that can't be automatically regenerated.
+
+Detects container user via `docker exec CONTAINER id -un` for accurate reporting.
+
+#### --copy-in behavior
+
+Copies from the local path into the container:
+- `PATH/.claude/` → `$HOME/.claude/`
+- `PATH/.claude.json` → `$HOME/.claude.json`
+- `PATH/secrets.env` → `$HOME/.ateamorg/secrets.env` (if the file exists in PATH)
+- Fixes file ownership after copy (`chown` to container user)
+- `--force` overwrites existing `$HOME/.claude/` (clears contents, doesn't remove mount point)
+- `--copy-ateam` also copies the ateam linux binary into the container
+
+Writing `secrets.env` on copy-in is safe because the source file is the user's curated version from the shared dir.
+
+#### `CLAUDE_CONFIG_DIR` detection
+
+If `$CLAUDE_CONFIG_DIR` is set inside the container, both copy-out and copy-in adapt:
+- `.claude.json` is inside the config dir (not at `$HOME/.claude.json`)
+- Copy paths adjust automatically
+
+`--home` has no effect when `CLAUDE_CONFIG_DIR` is detected (the config dir location is explicit).
+
+### Setup workflow
+
+One-time setup for a new Linux shared agent config:
+
+```bash
+# 1. Start a container with a fresh volume
+start.sh --name setup --volume ~/.ateamorg/linux-shared-claude
+
+# 2. Inside the container: interactive login
+claude auth login
+# Copy/paste URL, authorize, paste token
+
+# 3. Inside the container: generate OAuth token for headless use
+claude setup-token
+# Copy/paste URL, authorize — prints the token
+
+# 4. Inside the container: save token to org secrets
+ateam secret CLAUDE_CODE_OAUTH_TOKEN --scope org --set
+# Paste the token from step 3
+
+# 5. Exit and stop the setup container
+exit
+```
+
+The shared dir is now ready. Mount it into any container or use `--copy-in`.
+
+### Flaw: secrets.env is manually maintained
+
+The OAuth token in `secrets.env` is generated by `claude setup-token` and manually saved via `ateam secret`. There is no automated way to regenerate it — if the token expires, the user must redo the `setup-token` flow. `--copy-out` intentionally skips `secrets.env` to avoid overwriting a valid token with stale data from a container, but this means the canonical copy lives only in the shared dir on the host.
+
+Mitigation: `ateam agent-config --copy-out` warns if `PATH/secrets.env` is missing or empty, suggesting the user run `claude setup-token` if headless agents are needed.
