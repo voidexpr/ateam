@@ -124,7 +124,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	var enabledRoles []string
 	if len(initRoles) > 0 {
 		dbg("resolving roles...")
-		resolved, resolveErr := prompts.ResolveRoleList(initRoles, nil, "", "")
+		resolved, resolveErr := prompts.ResolveRoleList(initRoles, nil, "", orgDir)
 		if resolveErr != nil {
 			return resolveErr
 		}
