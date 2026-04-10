@@ -139,8 +139,12 @@ func AllKnownRoleIDs(configRoles map[string]string, projectDir, orgDir string) [
 	for id := range configRoles {
 		seen[id] = true
 	}
-	scanRolesDir(seen, filepath.Join(projectDir, "roles"))
-	scanRolesDir(seen, filepath.Join(orgDir, "roles"))
+	if projectDir != "" {
+		scanRolesDir(seen, filepath.Join(projectDir, "roles"))
+	}
+	if orgDir != "" {
+		scanRolesDir(seen, filepath.Join(orgDir, "roles"))
+	}
 	all := make([]string, 0, len(seen))
 	for id := range seen {
 		all = append(all, id)
