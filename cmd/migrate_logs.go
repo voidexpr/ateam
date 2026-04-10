@@ -342,16 +342,42 @@ func migrateDBRows(orgDBPath string, p migrationProject, dryRun bool, prefix str
 		return 0, nil
 	}
 
+	// Detect optional columns that may not exist in older org DBs.
+	orgCols := map[string]bool{}
+	colRows, err := orgDB.Query("PRAGMA table_info(agent_execs)")
+	if err == nil {
+		for colRows.Next() {
+			var cid int
+			var name, ctype string
+			var notnull int
+			var dflt sql.NullString
+			var pk int
+			if colRows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk) == nil {
+				orgCols[name] = true
+			}
+		}
+		colRows.Close()
+	}
+	cacheWriteExpr := "0"
+	if orgCols["cache_write_tokens"] {
+		cacheWriteExpr = "COALESCE(cache_write_tokens, 0)"
+	}
+	outputFileExpr := "''"
+	if orgCols["output_file"] {
+		outputFileExpr = "COALESCE(output_file, '')"
+	}
+
 	// Read all rows for this project
-	rows, err := orgDB.Query(`
+	rows, err := orgDB.Query(fmt.Sprintf(`
 		SELECT project_id, profile, agent, container, action, role,
 			task_group, model, prompt_hash, started_at, stream_file,
 			ended_at, duration_ms, exit_code, is_error, error_message,
 			cost_usd, input_tokens, output_tokens, cache_read_tokens, turns,
-			COALESCE(pid, 0), COALESCE(container_id, '')
+			COALESCE(pid, 0), COALESCE(container_id, ''),
+			%s, %s
 		FROM agent_execs
 		WHERE project_id = ?
-		ORDER BY started_at`, p.projectID)
+		ORDER BY started_at`, cacheWriteExpr, outputFileExpr), p.projectID)
 	if err != nil {
 		return 0, fmt.Errorf("query org DB: %w", err)
 	}
@@ -368,6 +394,8 @@ func migrateDBRows(orgDBPath string, p migrationProject, dryRun bool, prefix str
 		inputTokens, outputTokens, cacheReadTokens, turns   sql.NullInt64
 		pid                                                 int
 		containerID                                         string
+		cacheWriteTokens                                    int
+		outputFile                                          string
 	}
 
 	// The stream_file prefix in the org DB for this project
@@ -382,6 +410,7 @@ func migrateDBRows(orgDBPath string, p migrationProject, dryRun bool, prefix str
 			&r.endedAt, &r.durationMS, &r.exitCode, &r.isError, &r.errorMessage,
 			&r.costUSD, &r.inputTokens, &r.outputTokens, &r.cacheReadTokens, &r.turns,
 			&r.pid, &r.containerID,
+			&r.cacheWriteTokens, &r.outputFile,
 		); err != nil {
 			return 0, fmt.Errorf("scan row: %w", err)
 		}
@@ -427,8 +456,9 @@ func migrateDBRows(orgDBPath string, p migrationProject, dryRun bool, prefix str
 			task_group, model, prompt_hash, started_at, stream_file,
 			ended_at, duration_ms, exit_code, is_error, error_message,
 			cost_usd, input_tokens, output_tokens, cache_read_tokens, turns,
-			pid, container_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+			pid, container_id,
+			cache_write_tokens, output_file
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return 0, err
 	}
@@ -441,6 +471,7 @@ func migrateDBRows(orgDBPath string, p migrationProject, dryRun bool, prefix str
 			r.endedAt, r.durationMS, r.exitCode, r.isError, r.errorMessage,
 			r.costUSD, r.inputTokens, r.outputTokens, r.cacheReadTokens, r.turns,
 			r.pid, r.containerID,
+			r.cacheWriteTokens, r.outputFile,
 		); err != nil {
 			return 0, fmt.Errorf("insert row: %w", err)
 		}

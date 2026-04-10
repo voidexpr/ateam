@@ -115,13 +115,15 @@ func TestMigrateProject(t *testing.T) {
 		cache_read_tokens INTEGER,
 		turns INTEGER,
 		pid INTEGER NOT NULL DEFAULT 0,
-		container_id TEXT NOT NULL DEFAULT ''
+		container_id TEXT NOT NULL DEFAULT '',
+		cache_write_tokens INTEGER,
+		output_file TEXT NOT NULL DEFAULT ''
 	)`)
 
 	// Insert rows for our project
 	streamFile := "projects/" + projectID + "/roles/security/logs/2026-03-18_report_stream.jsonl"
-	_, _ = orgDB.Exec(`INSERT INTO agent_execs (project_id, profile, agent, action, role, started_at, stream_file, ended_at, cost_usd, is_error)
-		VALUES (?, 'default', 'claude', 'report', 'security', '2026-03-18T10:00:00Z', ?, '2026-03-18T10:05:00Z', 0.50, 0)`,
+	_, _ = orgDB.Exec(`INSERT INTO agent_execs (project_id, profile, agent, action, role, started_at, stream_file, ended_at, cost_usd, is_error, cache_write_tokens, output_file)
+		VALUES (?, 'default', 'claude', 'report', 'security', '2026-03-18T10:00:00Z', ?, '2026-03-18T10:05:00Z', 0.50, 0, 42, 'report_out.md')`,
 		projectID, streamFile)
 
 	supStreamFile := "projects/" + projectID + "/supervisor/logs/2026-03-18_review_stream.jsonl"
@@ -206,6 +208,17 @@ func TestMigrateProject(t *testing.T) {
 	wantSFSup := "logs/supervisor/2026-03-18_review_stream.jsonl"
 	if sfSup != wantSFSup {
 		t.Errorf("stream_file = %q, want %q", sfSup, wantSFSup)
+	}
+
+	// Verify cache_write_tokens and output_file were migrated
+	var cwt int
+	var of string
+	_ = projDB.QueryRow("SELECT cache_write_tokens, output_file FROM agent_execs WHERE action='report'").Scan(&cwt, &of)
+	if cwt != 42 {
+		t.Errorf("cache_write_tokens = %d, want 42", cwt)
+	}
+	if of != "report_out.md" {
+		t.Errorf("output_file = %q, want %q", of, "report_out.md")
 	}
 
 	// Verify .gitignore was created
