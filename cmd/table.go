@@ -382,7 +382,11 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 		// Resolve relative paths in extra_volumes from project dir
 		volumes := make([]string, len(cc.ExtraVolumes))
 		for i, vol := range cc.ExtraVolumes {
-			volumes[i] = resolveVolumePath(vol, sourceDir)
+			resolved, err := resolveVolumePath(vol, sourceDir, sourceDir, orgDir)
+			if err != nil {
+				return nil, err
+			}
+			volumes[i] = resolved
 		}
 		var extraArgs []string
 		if prof != nil {
@@ -515,7 +519,7 @@ func crossBuildIfPossible(hostExe, orgDir string) string {
 	}
 
 	cacheDir := filepath.Join(orgDir, "cache")
-	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+	if err := os.MkdirAll(cacheDir, 0700); err != nil {
 		return ""
 	}
 	target := filepath.Join(cacheDir, "ateam-linux-amd64")
@@ -593,24 +597,44 @@ func addContainerNameFlag(cmd *cobra.Command, dst *string) {
 	cmd.Flags().StringVar(dst, "container-name", "", "override container name (for docker-exec or persistent containers)")
 }
 
-// resolveVolumePath resolves relative host paths in a volume spec.
-// Volume format: "hostPath:containerPath[:mode]"
-// Relative hostPath is resolved from baseDir (project source dir).
-func resolveVolumePath(vol, baseDir string) string {
+// resolveVolumePath resolves relative host paths in a volume spec and validates
+// that the resolved path stays within allowedDirs. Volume format:
+// "hostPath:containerPath[:mode]". Relative hostPath is resolved from baseDir.
+func resolveVolumePath(vol, baseDir string, allowedDirs ...string) (string, error) {
 	parts := splitVolumeSpec(vol)
 	if len(parts) < 2 {
-		return vol
+		return vol, nil
 	}
 	hostPath := runner.ExpandHome(parts[0])
 	if !filepath.IsAbs(hostPath) {
 		hostPath = filepath.Join(baseDir, hostPath)
 	}
+	hostPath = filepath.Clean(hostPath)
+
+	allowed := false
+	for _, dir := range allowedDirs {
+		if dir == "" {
+			continue
+		}
+		rel, err := filepath.Rel(dir, hostPath)
+		if err != nil {
+			continue
+		}
+		if !strings.HasPrefix(rel, "..") {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return "", fmt.Errorf("volume path %s escapes project boundary", hostPath)
+	}
+
 	parts[0] = hostPath
 	result := parts[0] + ":" + parts[1]
 	if len(parts) > 2 {
 		result += ":" + parts[2]
 	}
-	return result
+	return result, nil
 }
 
 // splitVolumeSpec splits "host:container[:mode]" respecting that
