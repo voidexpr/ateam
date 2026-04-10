@@ -1,29 +1,33 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
-	goruntime "runtime"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/root"
-	"github.com/ateam/internal/runner"
 	"github.com/ateam/internal/secret"
 	"github.com/spf13/cobra"
 )
 
+const defaultSharedClaudePath = "linux-shared-claude"
+
 var (
 	agentCfgAudit            bool
 	agentCfgSetupInteractive bool
-	agentCfgWipe             bool
-	agentCfgContainerOnly    bool
-	agentCfgMethod           string
-	agentCfgExec             bool
-	agentCfgDryRun           bool
-	agentCfgRefreshToken     string
-	agentCfgSaveRefreshToken bool
+
+	agentCfgCopyOut   bool
+	agentCfgCopyIn    bool
+	agentCfgContainer string
+	agentCfgPath      string
+	agentCfgHome      string
+	agentCfgForce     bool
+	agentCfgCopyAteam bool
 )
 
 var agentConfigCmd = &cobra.Command{
@@ -31,38 +35,39 @@ var agentConfigCmd = &cobra.Command{
 	Short: "[experimental] Configure Claude Code agent authentication",
 	Long: `[experimental] Configure Claude Code agent authentication.
 
-Audit auth state, set up interactive sessions, or wipe agent config.
+Audit auth state (default), set up interactive sessions, and copy config
+between host and containers.
 
-AUDIT (works everywhere, read-only):
+AUDIT (default, works everywhere, read-only):
+  ateam agent-config
   ateam agent-config --audit
+  ateam agent-config --audit --container my-app    # remote audit
+
+COPY CONFIG OUT OF A CONTAINER:
+  ateam agent-config --copy-out --container my-app
+  ateam agent-config --copy-out --container my-app --path /tmp/claude-config
+
+COPY CONFIG INTO A CONTAINER:
+  ateam agent-config --copy-in --container my-app
+  ateam agent-config --copy-in --container my-app --force --copy-ateam
 
 SETUP INTERACTIVE (in a container):
   ateam agent-config --setup-interactive
-  # Bootstraps credentials from refresh token, then starts claude
-
-WIPE (in a container):
-  ateam agent-config --wipe-i-am-sure
-  # Removes all auth state, keeps settings.json, plugins, skills
-
-LEGACY FLAGS (still work):
-  ateam agent-config --method oauth --exec -- -p "hello"
-  ateam agent-config --save-refresh-token`,
+  # Bootstraps credentials from refresh token, then starts claude`,
 	Args: cobra.ArbitraryArgs,
 	RunE: runAgentConfig,
 }
 
 func init() {
-	agentConfigCmd.Flags().BoolVar(&agentCfgAudit, "audit", false, "[experimental] show auth state, tokens, and export instructions")
-	agentConfigCmd.Flags().BoolVar(&agentCfgSetupInteractive, "setup-interactive", false, "[experimental] bootstrap interactive session from refresh token")
-	agentConfigCmd.Flags().BoolVar(&agentCfgWipe, "wipe-i-am-sure", false, "[experimental] remove all auth state (keeps settings.json, plugins, skills)")
-	agentConfigCmd.Flags().BoolVar(&agentCfgContainerOnly, "container-only", true, "only allow destructive operations inside Docker containers")
-
-	// Legacy flags (backward compat with agent-auth)
-	agentConfigCmd.Flags().StringVar(&agentCfgMethod, "method", "", "target auth method: oauth, api, or regular")
-	agentConfigCmd.Flags().BoolVar(&agentCfgExec, "exec", false, "exec claude after configuring auth (replaces process)")
-	agentConfigCmd.Flags().BoolVarP(&agentCfgDryRun, "dry-run", "n", false, "show what would be done without making changes")
-	agentConfigCmd.Flags().BoolVar(&agentCfgSaveRefreshToken, "save-refresh-token", false, "extract refresh token from .credentials.json and save to ateam secrets")
-	agentConfigCmd.Flags().StringVar(&agentCfgRefreshToken, "refresh-token", "", "provide a refresh token from .credentials.json")
+	agentConfigCmd.Flags().BoolVar(&agentCfgAudit, "audit", false, "show auth state, tokens, and export instructions")
+	agentConfigCmd.Flags().BoolVar(&agentCfgSetupInteractive, "setup-interactive", false, "bootstrap interactive session from refresh token")
+	agentConfigCmd.Flags().BoolVar(&agentCfgCopyOut, "copy-out", false, "copy agent config from a container to a local directory")
+	agentConfigCmd.Flags().BoolVar(&agentCfgCopyIn, "copy-in", false, "copy agent config into a container from a local directory")
+	agentConfigCmd.Flags().StringVar(&agentCfgContainer, "container", "", "target container name (for --copy-out, --copy-in, --audit)")
+	agentConfigCmd.Flags().StringVar(&agentCfgPath, "path", "", "local directory for agent config (default: <ateamorg>/"+defaultSharedClaudePath+")")
+	agentConfigCmd.Flags().StringVar(&agentCfgHome, "home", "", "override container home directory (auto-detected by default)")
+	agentConfigCmd.Flags().BoolVar(&agentCfgForce, "force", false, "overwrite existing config in container (for --copy-in)")
+	agentConfigCmd.Flags().BoolVar(&agentCfgCopyAteam, "copy-ateam", false, "also copy ateam linux binary into the container (for --copy-in)")
 }
 
 func runAgentConfig(cmd *cobra.Command, args []string) error {
@@ -72,62 +77,35 @@ func runAgentConfig(cmd *cobra.Command, args []string) error {
 		orgDir = env.OrgDir
 	}
 
-	// --audit works everywhere, no container-only check
+	// --copy-out / --copy-in require --container
+	if agentCfgCopyOut {
+		return runCopyOut(agentCfgContainer, agentCfgPath, agentCfgHome, orgDir)
+	}
+	if agentCfgCopyIn {
+		return runCopyIn(agentCfgContainer, agentCfgPath, agentCfgHome, agentCfgForce, agentCfgCopyAteam, orgDir)
+	}
+
+	// --audit works everywhere, no container-only check.
+	// With --container, run audit remotely inside the container.
 	if agentCfgAudit {
+		if agentCfgContainer != "" {
+			return runRemoteAudit(agentCfgContainer, agentCfgHome)
+		}
 		return runAgentConfigAudit(projectDir, orgDir)
 	}
 
-	// --setup-interactive and --wipe-i-am-sure respect container-only
-	if (agentCfgSetupInteractive || agentCfgWipe) && agentCfgContainerOnly && !runner.IsInContainer() {
-		return fmt.Errorf("this operation is designed for Docker containers (use --container-only=false to override)")
-	}
-
 	if agentCfgSetupInteractive {
+		if agentCfgContainer != "" {
+			return fmt.Errorf("--setup-interactive runs locally, not in a container (--container is not supported)")
+		}
 		return runSetupInteractive(projectDir, orgDir, args)
 	}
 
-	if agentCfgWipe {
-		return runWipe(projectDir, orgDir)
+	// No action flags → default to audit.
+	if agentCfgContainer != "" {
+		return runRemoteAudit(agentCfgContainer, agentCfgHome)
 	}
-
-	// Legacy flow (--method, --save-refresh-token, etc.)
-	if agentCfgContainerOnly && !runner.IsInContainer() {
-		// Only enforce for destructive legacy flags
-		if agentCfgMethod != "" || agentCfgSaveRefreshToken {
-			return fmt.Errorf("agent-config is designed for Docker containers (use --container-only=false to override)")
-		}
-	}
-
-	if agentCfgWipe && goruntime.GOOS != "linux" {
-		return fmt.Errorf("--wipe-i-am-sure is only allowed on Linux (current OS: %s)", goruntime.GOOS)
-	}
-
-	if agentCfgExec && agentCfgDryRun {
-		return fmt.Errorf("--exec and --dry-run are incompatible")
-	}
-
-	if agentCfgRefreshToken != "" {
-		if err := storeRefreshToken(agentCfgRefreshToken, projectDir, orgDir); err != nil {
-			return err
-		}
-		fmt.Println("Refresh token saved to ateam secrets.")
-	}
-
-	status := agent.DetectAuth(projectDir, orgDir)
-
-	if agentCfgSaveRefreshToken {
-		return saveRefreshToken(status, projectDir, orgDir)
-	}
-
-	if agentCfgMethod == "" {
-		return fmt.Errorf("specify --audit, --setup-interactive, --wipe-i-am-sure, or --method")
-	}
-	target, ok := agent.ParseAuthMethod(agentCfgMethod)
-	if !ok {
-		return fmt.Errorf("invalid --method %q (use oauth, api, or regular)", agentCfgMethod)
-	}
-
-	return runLegacyAuthFlow(target, status, projectDir, orgDir, args)
+	return runAgentConfigAudit(projectDir, orgDir)
 }
 
 func runAgentConfigAudit(projectDir, orgDir string) error {
@@ -142,35 +120,101 @@ func runAgentConfigAudit(projectDir, orgDir string) error {
 
 	printAuthSources(status)
 
-	// If interactive login detected, print export instructions
+	// Run 'claude auth status' for ground truth from Claude CLI.
+	claudeStatus := runClaudeAuthStatus()
+	fmt.Println("Claude CLI (claude auth status):")
+	if claudeStatus.err != nil {
+		fmt.Printf("  (could not run 'claude auth status': %v)\n", claudeStatus.err)
+	} else {
+		fmt.Printf("  Logged in:    %v\n", claudeStatus.loggedIn)
+		fmt.Printf("  Auth method:  %s\n", claudeStatus.authMethod)
+		if claudeStatus.apiProvider != "" {
+			fmt.Printf("  API provider: %s\n", claudeStatus.apiProvider)
+		}
+	}
+	fmt.Println()
+
+	// Mismatch detection.
+	if claudeStatus.err == nil {
+		if !claudeStatus.loggedIn && (status.HasOAuth || status.HasAPIKey) {
+			fmt.Println("  Warning: ateam detects auth tokens but claude reports not logged in.")
+			fmt.Println("  The token may be expired or invalid.")
+			fmt.Println()
+		}
+		if claudeStatus.loggedIn && status.Active == agent.AuthNone {
+			fmt.Println("  Warning: claude reports logged in but ateam detects no auth source.")
+			fmt.Println("  Claude may be using credentials not visible to ateam (e.g., macOS Keychain).")
+			fmt.Println()
+		}
+	}
+
+	// Token values are printed in full (not masked) — users need exact values
+	// for copy/paste into container configs, secrets.env, export commands, etc.
 	refreshToken := agent.ExtractRefreshToken(status.ConfigDir)
 	if refreshToken != "" {
 		fmt.Println("Interactive session detected. To use in another environment:")
 		fmt.Println()
-		fmt.Printf("  export CLAUDE_CODE_OAUTH_REFRESH_TOKEN=%s\n", maskToken(refreshToken))
+		fmt.Printf("  export CLAUDE_CODE_OAUTH_REFRESH_TOKEN=%s\n", refreshToken)
 		fmt.Println("  export CLAUDE_CODE_OAUTH_SCOPES=\"user:profile user:inference\"")
 		fmt.Println()
 		fmt.Println("  Or save to ateam secrets:")
-		fmt.Println("    ateam agent-config --save-refresh-token")
+		fmt.Println("    ateam secret CLAUDE_CODE_OAUTH_REFRESH_TOKEN --set")
 		fmt.Println()
 	}
 
 	if val := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); val != "" {
 		fmt.Println("Headless token detected. To use in another environment:")
 		fmt.Println()
-		fmt.Printf("  export CLAUDE_CODE_OAUTH_TOKEN=%s\n", maskToken(val))
+		fmt.Printf("  export CLAUDE_CODE_OAUTH_TOKEN=%s\n", val)
 		fmt.Println()
 	} else if status.HasSecretOAuth {
 		resolver := secret.NewResolver(projectDir, orgDir, secret.DefaultBackend(), nil)
 		if r := resolver.Resolve("CLAUDE_CODE_OAUTH_TOKEN"); r.Found {
 			fmt.Println("Headless token detected. To use in another environment:")
 			fmt.Println()
-			fmt.Printf("  export CLAUDE_CODE_OAUTH_TOKEN=%s\n", maskToken(r.Value))
+			fmt.Printf("  export CLAUDE_CODE_OAUTH_TOKEN=%s\n", r.Value)
 			fmt.Println()
 		}
 	}
 
 	return nil
+}
+
+type claudeAuthResult struct {
+	loggedIn    bool
+	authMethod  string
+	apiProvider string
+	err         error
+}
+
+func runClaudeAuthStatus() claudeAuthResult {
+	binary, err := exec.LookPath("claude")
+	if err != nil {
+		return claudeAuthResult{err: fmt.Errorf("claude not found in PATH")}
+	}
+
+	// JSON output for structured parsing.
+	// claude auth status exits 1 when not logged in but still outputs valid JSON.
+	jsonCmd := exec.Command(binary, "auth", "status", "--json")
+	jsonOut, err := jsonCmd.Output()
+	if err != nil && len(jsonOut) == 0 {
+		return claudeAuthResult{err: fmt.Errorf("command failed: %w", err)}
+	}
+
+	var parsed struct {
+		LoggedIn    bool   `json:"loggedIn"`
+		AuthMethod  string `json:"authMethod"`
+		APIProvider string `json:"apiProvider"`
+	}
+	if err := json.Unmarshal(jsonOut, &parsed); err != nil {
+		return claudeAuthResult{err: fmt.Errorf("unexpected output: %s", strings.TrimSpace(string(jsonOut)))}
+	}
+
+	return claudeAuthResult{
+		loggedIn:    parsed.LoggedIn,
+		authMethod:  parsed.AuthMethod,
+		apiProvider: parsed.APIProvider,
+	}
 }
 
 func runSetupInteractive(projectDir, orgDir string, args []string) error {
@@ -191,98 +235,6 @@ func runSetupInteractive(projectDir, orgDir string, args []string) error {
 	return execClaude(agent.AuthRegular, status, projectDir, orgDir, args)
 }
 
-func runWipe(projectDir, orgDir string) error {
-	if goruntime.GOOS != "linux" {
-		return fmt.Errorf("--wipe-i-am-sure is only allowed on Linux (current OS: %s)", goruntime.GOOS)
-	}
-
-	fmt.Println("[experimental] Wiping Claude Code configuration...")
-	fmt.Println()
-
-	status := agent.DetectAuth(projectDir, orgDir)
-	results := agent.Cleanup(status.ConfigDir, true, false)
-	results = append(results, agent.EnsureClaudeState(status.ConfigDir, false))
-
-	for _, r := range results {
-		if r.Action != "skip" {
-			fmt.Printf("  [%s] %s\n", r.Action, r.Description)
-		}
-	}
-
-	fmt.Println()
-	fmt.Println("Config wiped. Only settings.json preserved.")
-	return nil
-}
-
-func runLegacyAuthFlow(target agent.AuthMethod, status agent.AuthStatus, projectDir, orgDir string, args []string) error {
-	fmt.Println("Claude Code Auth")
-	fmt.Printf("  Config dir:       %s\n", status.ConfigDir)
-	fmt.Printf("  Active method:    %s\n", status.Active)
-	fmt.Printf("  Target method:    %s\n", target)
-	fmt.Println()
-
-	printAuthSources(status)
-
-	if status.Active != target {
-		if msg := agent.ValidateTarget(target, status); msg != "" {
-			return fmt.Errorf("%s", msg)
-		}
-		if warnings := agent.Conflicts(target); len(warnings) > 0 {
-			for _, w := range warnings {
-				fmt.Printf("  [warn] %s\n", w)
-			}
-			fmt.Println()
-		}
-	}
-
-	results := agent.Cleanup(status.ConfigDir, false, agentCfgDryRun)
-	results = append(results, agent.EnsureClaudeState(status.ConfigDir, agentCfgDryRun))
-
-	hasActions := false
-	for _, r := range results {
-		if r.Action != "skip" {
-			hasActions = true
-			break
-		}
-	}
-
-	if hasActions {
-		if agentCfgDryRun {
-			fmt.Println("Actions (dry-run):")
-		} else {
-			fmt.Println("Actions:")
-		}
-		for _, r := range results {
-			if r.Action == "skip" {
-				continue
-			}
-			fmt.Printf("  [%s] %s\n", r.Action, r.Description)
-		}
-		fmt.Println()
-	}
-
-	if agentCfgDryRun {
-		if hasActions {
-			fmt.Println("Dry-run complete, no changes made.")
-		} else {
-			fmt.Println("Already configured, no changes needed.")
-		}
-		return nil
-	}
-
-	if hasActions {
-		fmt.Printf("Result: %s configured\n", target)
-	} else {
-		fmt.Println("Already configured, no changes needed.")
-	}
-
-	if agentCfgExec {
-		return execClaude(target, status, projectDir, orgDir, args)
-	}
-
-	return nil
-}
-
 func printAuthSources(s agent.AuthStatus) {
 	if val := os.Getenv("ANTHROPIC_API_KEY"); val != "" {
 		fmt.Printf("  ANTHROPIC_API_KEY:            %s\n", maskEnvVar(val))
@@ -296,7 +248,7 @@ func printAuthSources(s agent.AuthStatus) {
 		if val[0] == '{' {
 			fmt.Printf("  CLAUDE_CODE_OAUTH_TOKEN:      set (JSON, %d chars)\n", len(val))
 		} else {
-			fmt.Printf("  CLAUDE_CODE_OAUTH_TOKEN:      %s\n", maskEnvVar(val))
+			fmt.Printf("  CLAUDE_CODE_OAUTH_TOKEN:      %s\n", val)
 		}
 	} else if s.HasSecretOAuth {
 		fmt.Printf("  CLAUDE_CODE_OAUTH_TOKEN:      %s\n", s.SecretOAuthInfo)
@@ -321,54 +273,6 @@ func printAuthSources(s agent.AuthStatus) {
 	}
 
 	fmt.Println()
-}
-
-func saveRefreshToken(status agent.AuthStatus, projectDir, orgDir string) error {
-	token := agent.ExtractRefreshToken(status.ConfigDir)
-	if token == "" {
-		fmt.Println("No refresh token found in " + status.ConfigDir + "/.credentials.json")
-		fmt.Println()
-		fmt.Println("To get one, do a browser login first:")
-		fmt.Println("  ateam agent-config --setup-interactive")
-		fmt.Println("  # Complete the browser login, then /exit")
-		fmt.Println("  ateam agent-config --save-refresh-token")
-		return fmt.Errorf("no refresh token available")
-	}
-	if err := storeRefreshToken(token, projectDir, orgDir); err != nil {
-		return err
-	}
-	fmt.Fprintln(os.Stderr, "Refresh token saved to ateam secrets (container-local).")
-	fmt.Fprintln(os.Stderr, "  Verify: ateam secret CLAUDE_CODE_OAUTH_REFRESH_TOKEN --get")
-	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "On any new container, run:")
-	fmt.Fprintln(os.Stderr, "  ateam agent-config --setup-interactive")
-	fmt.Fprintln(os.Stderr, "")
-	return nil
-}
-
-func storeRefreshToken(token, projectDir, orgDir string) error {
-	backend := secret.DefaultBackend()
-	resolver := secret.NewResolver(projectDir, orgDir, backend, nil)
-	scope := resolver.ScopeForName(secret.ScopeGlobal)
-
-	var err error
-	if backend == secret.BackendKeychain {
-		err = secret.KeychainSet(secret.KeychainAccount(scope.Name, scope.KeychainKey, "CLAUDE_CODE_OAUTH_REFRESH_TOKEN"), token)
-	} else {
-		store := &secret.FileStore{Path: scope.EnvFile}
-		err = store.Set("CLAUDE_CODE_OAUTH_REFRESH_TOKEN", token)
-	}
-	if err != nil {
-		return fmt.Errorf("failed to save refresh token: %w", err)
-	}
-	return nil
-}
-
-func maskToken(val string) string {
-	if len(val) <= 12 {
-		return "***"
-	}
-	return val[:8] + "***" + val[len(val)-4:]
 }
 
 func lookupEnvOptional() (*root.ResolvedEnv, error) {
@@ -400,4 +304,325 @@ func execClaude(target agent.AuthMethod, status agent.AuthStatus, projectDir, or
 
 	fmt.Printf("Exec: %s %v\n", binary, extraArgs)
 	return syscall.Exec(binary, argv, env)
+}
+
+// ---------------------------------------------------------------------------
+// Docker container helpers
+// ---------------------------------------------------------------------------
+
+func dockerExecOutput(container string, args ...string) (string, error) {
+	cmdArgs := append([]string{"exec", container}, args...)
+	cmd := exec.Command("docker", cmdArgs...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("docker exec %s %s: %w", container, strings.Join(args, " "), err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func dockerCp(src, dst string) error {
+	cmd := exec.Command("docker", "cp", src, dst)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker cp %s → %s: %w", src, dst, err)
+	}
+	return nil
+}
+
+type containerInfo struct {
+	home      string
+	user      string
+	configDir string // CLAUDE_CONFIG_DIR, empty if unset
+}
+
+// detectContainer gathers home, user, and CLAUDE_CONFIG_DIR in a single docker exec.
+func detectContainer(container, homeOverride string) (containerInfo, error) {
+	if homeOverride != "" {
+		user, _ := dockerExecOutput(container, "id", "-un")
+		if user == "" {
+			user = "root"
+		}
+		configDir, _ := dockerExecOutput(container, "sh", "-c", "echo $CLAUDE_CONFIG_DIR")
+		return containerInfo{home: homeOverride, user: user, configDir: configDir}, nil
+	}
+	out, err := dockerExecOutput(container, "sh", "-c", "echo $HOME; id -un; echo $CLAUDE_CONFIG_DIR")
+	if err != nil {
+		return containerInfo{}, fmt.Errorf("cannot detect container environment: %w", err)
+	}
+	lines := strings.SplitN(out, "\n", 3)
+	info := containerInfo{user: "root"}
+	if len(lines) >= 1 {
+		info.home = lines[0]
+	}
+	if len(lines) >= 2 && lines[1] != "" {
+		info.user = lines[1]
+	}
+	if len(lines) >= 3 {
+		info.configDir = lines[2]
+	}
+	if info.home == "" {
+		return containerInfo{}, fmt.Errorf("container %s has empty $HOME", container)
+	}
+	return info, nil
+}
+
+// copyAteamBinary copies the ateam linux binary into a container.
+func copyAteamBinary(containerName, orgDir string) error {
+	binary := findLinuxBinary(orgDir)
+	if binary == "" {
+		fmt.Println("  Warning: no linux ateam binary found (run 'make companion' to build one)")
+		return nil
+	}
+	if err := dockerCp(binary, containerName+":/usr/local/bin/ateam"); err != nil {
+		return err
+	}
+	fmt.Println("  ateam binary copied")
+	return nil
+}
+
+func resolveLocalPath(flagPath, orgDir string) (string, error) {
+	path := flagPath
+	if path == "" {
+		if orgDir == "" {
+			return "", nil
+		}
+		path = filepath.Join(orgDir, defaultSharedClaudePath)
+	}
+	if err := validateLocalPath(path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// validateLocalPath refuses paths that would risk overwriting the user's
+// own ~/.claude or ~/.claude.json. This is critical — --path should only
+// ever point to a dedicated shared-config directory, never to $HOME or
+// the default claude config location.
+func validateLocalPath(path string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil
+	}
+	abs = filepath.Clean(abs)
+	// Resolve symlinks so a link to $HOME or ~/.claude is also caught.
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	home = filepath.Clean(home)
+	if resolved, err := filepath.EvalSymlinks(home); err == nil {
+		home = resolved
+	}
+
+	if abs == home {
+		return fmt.Errorf("--path must not be your home directory (%s) — this would overwrite ~/.claude and ~/.claude.json", home)
+	}
+	claudeDir := filepath.Join(home, ".claude")
+	if abs == claudeDir {
+		return fmt.Errorf("--path must not be ~/.claude — this would pollute your Claude config directory")
+	}
+	return nil
+}
+
+func containerPathExists(container, path string) bool {
+	cmd := exec.Command("docker", "exec", container, "test", "-e", path)
+	return cmd.Run() == nil
+}
+
+// ---------------------------------------------------------------------------
+// --copy-out: container → host
+// ---------------------------------------------------------------------------
+
+func runCopyOut(containerName, flagPath, homeOverride, orgDir string) error {
+	if containerName == "" {
+		return fmt.Errorf("--container is required with --copy-out")
+	}
+
+	localPath, err := resolveLocalPath(flagPath, orgDir)
+	if err != nil {
+		return err
+	}
+	if localPath == "" {
+		return fmt.Errorf("--path is required (no .ateamorg found for default)")
+	}
+
+	ci, err := detectContainer(containerName, homeOverride)
+	if err != nil {
+		return err
+	}
+
+	claudeDir := ci.home + "/.claude"
+	claudeJSON := ci.home + "/.claude.json"
+	if ci.configDir != "" {
+		claudeDir = ci.configDir
+		claudeJSON = ""
+	}
+
+	if !containerPathExists(containerName, claudeDir) {
+		return fmt.Errorf("%s does not exist in container %s", claudeDir, containerName)
+	}
+
+	if err := os.MkdirAll(filepath.Join(localPath, ".claude"), 0755); err != nil {
+		return err
+	}
+
+	fmt.Printf("Copying from container %s (%s) → %s\n\n", containerName, ci.home, localPath)
+
+	if err := dockerCp(containerName+":"+claudeDir+"/.", filepath.Join(localPath, ".claude")+"/"); err != nil {
+		return err
+	}
+	fmt.Println("  .claude/ copied")
+
+	if claudeJSON != "" && containerPathExists(containerName, claudeJSON) {
+		if err := dockerCp(containerName+":"+claudeJSON, filepath.Join(localPath, ".claude.json")); err != nil {
+			return err
+		}
+		fmt.Println("  .claude.json copied")
+	} else if claudeJSON != "" {
+		fmt.Println("  .claude.json not found in container (skipped)")
+	}
+
+	// secrets.env is NOT copied — it is manually maintained and contains
+	// the OAuth token from 'claude setup-token'.
+	if _, err := os.Stat(filepath.Join(localPath, "secrets.env")); os.IsNotExist(err) {
+		fmt.Println()
+		fmt.Println("  Note: no secrets.env in local path.")
+		fmt.Println("  If headless agents are needed, generate an OAuth token inside the container:")
+		fmt.Println("    claude setup-token")
+		fmt.Println("  Then save it:")
+		fmt.Println("    ateam secret CLAUDE_CODE_OAUTH_TOKEN --scope org --set")
+	}
+
+	fmt.Println()
+	fmt.Println("Done.")
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// --copy-in: host → container
+// ---------------------------------------------------------------------------
+
+func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bool, orgDir string) error {
+	if containerName == "" {
+		return fmt.Errorf("--container is required with --copy-in")
+	}
+
+	localPath, err := resolveLocalPath(flagPath, orgDir)
+	if err != nil {
+		return err
+	}
+	if localPath == "" {
+		return fmt.Errorf("--path is required (no .ateamorg found for default)")
+	}
+
+	localClaudeDir := filepath.Join(localPath, ".claude")
+	if info, err := os.Stat(localClaudeDir); err != nil || !info.IsDir() {
+		return fmt.Errorf("%s does not exist — nothing to copy", localClaudeDir)
+	}
+
+	ci, err := detectContainer(containerName, homeOverride)
+	if err != nil {
+		return err
+	}
+
+	claudeDir := ci.home + "/.claude"
+	claudeJSON := ci.home + "/.claude.json"
+	if ci.configDir != "" {
+		claudeDir = ci.configDir
+		claudeJSON = ""
+	}
+
+	fmt.Printf("Copying from %s → container %s (%s, user=%s)\n\n", localPath, containerName, ci.home, ci.user)
+
+	if containerPathExists(containerName, claudeDir) {
+		if !force {
+			return fmt.Errorf("%s already exists in container %s (use --force to overwrite)", claudeDir, containerName)
+		}
+		// Clear contents without removing the directory (may be a mount point)
+		_, _ = dockerExecOutput(containerName, "sh", "-c",
+			fmt.Sprintf("rm -rf %s/* %s/.[!.]* 2>/dev/null || true", claudeDir, claudeDir))
+		fmt.Println("  cleared existing " + claudeDir)
+	}
+
+	dockerExecOutput(containerName, "mkdir", "-p", claudeDir)
+
+	if err := dockerCp(localClaudeDir+"/.", containerName+":"+claudeDir+"/"); err != nil {
+		return err
+	}
+	fmt.Println("  .claude/ copied")
+
+	// Track what was actually copied for targeted chown
+	chownPaths := claudeDir
+
+	localClaudeJSON := filepath.Join(localPath, ".claude.json")
+	if claudeJSON != "" {
+		if _, err := os.Stat(localClaudeJSON); err == nil {
+			if err := dockerCp(localClaudeJSON, containerName+":"+claudeJSON); err != nil {
+				return err
+			}
+			fmt.Println("  .claude.json copied")
+			chownPaths += " " + claudeJSON
+		}
+	}
+
+	localSecrets := filepath.Join(localPath, "secrets.env")
+	if _, err := os.Stat(localSecrets); err == nil {
+		ateamOrgDir := ci.home + "/.ateamorg"
+		dockerExecOutput(containerName, "mkdir", "-p", ateamOrgDir)
+		if err := dockerCp(localSecrets, containerName+":"+ateamOrgDir+"/secrets.env"); err != nil {
+			return err
+		}
+		fmt.Println("  secrets.env copied → " + ateamOrgDir + "/secrets.env")
+		chownPaths += " " + ateamOrgDir
+	}
+
+	dockerExecOutput(containerName, "sh", "-c",
+		fmt.Sprintf("chown -R %s:%s %s 2>/dev/null || true", ci.user, ci.user, chownPaths))
+
+	if copyAteam {
+		if err := copyAteamBinary(containerName, orgDir); err != nil {
+			return err
+		}
+	}
+
+	fmt.Println()
+	fmt.Println("Done.")
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// --audit --container: remote audit via docker exec
+// ---------------------------------------------------------------------------
+
+func runRemoteAudit(containerName, homeOverride string) error {
+	ci, err := detectContainer(containerName, homeOverride)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Remote audit: container %s (home=%s)\n\n", containerName, ci.home)
+
+	// Try ateam agent-config --audit inside the container
+	cmd := exec.Command("docker", "exec", containerName, "ateam", "agent-config", "--audit")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		// ateam not available — fall back to claude auth status
+		fmt.Println("  (ateam not found in container, falling back to claude auth status)")
+		fmt.Println()
+
+		out, err2 := dockerExecOutput(containerName, "claude", "auth", "status", "--text")
+		if err2 != nil {
+			return fmt.Errorf("neither ateam nor claude found in container %s", containerName)
+		}
+		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+			fmt.Printf("  %s\n", line)
+		}
+		fmt.Println()
+	}
+	return nil
 }

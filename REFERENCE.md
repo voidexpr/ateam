@@ -193,27 +193,36 @@ Agents declare required secrets via `required_env` in `runtime.hcl`. Validation 
 
 ### `ateam agent-config`
 
-[experimental] Audit and configure Claude Code agent authentication, primarily for Docker containers.
+[experimental] Audit and configure Claude Code agent authentication. Default action is audit.
 
 ```bash
-ateam agent-config --audit                    # show auth state and export instructions
-ateam agent-config --setup-interactive        # bootstrap interactive session from refresh token
-ateam agent-config --wipe-i-am-sure           # remove all auth state
-ateam agent-config --save-refresh-token       # extract refresh token from .credentials.json
+ateam agent-config                                        # audit (default)
+ateam agent-config --audit --container my-app             # remote audit inside a container
+ateam agent-config --copy-out --container my-app          # copy config from container to host
+ateam agent-config --copy-in --container my-app --force   # copy config into container
+ateam agent-config --setup-interactive                    # bootstrap interactive session
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--audit` | Show auth state, detected tokens, and export instructions (works everywhere) |
+| `--audit` | Show auth state, `claude auth status`, and mismatch detection (default action) |
+| `--copy-out` | Copy `.claude/` and `.claude.json` from a container to a local directory |
+| `--copy-in` | Copy `.claude/`, `.claude.json`, and `secrets.env` into a container |
+| `--container NAME` | Target container (for `--copy-out`, `--copy-in`, `--audit`) |
+| `--path PATH` | Local directory for agent config (default: `<ateamorg>/linux-shared-claude`) |
+| `--home PATH` | Override container home directory (auto-detected by default) |
+| `--force` | Overwrite existing config in container (for `--copy-in`) |
+| `--copy-ateam` | Also copy ateam linux binary into the container (for `--copy-in`) |
 | `--setup-interactive` | Bootstrap an interactive Claude session from a saved refresh token |
-| `--wipe-i-am-sure` | Remove all auth state (keeps settings.json, plugins, skills). Linux only |
-| `--save-refresh-token` | Extract refresh token from `.credentials.json` and save to ateam secrets |
-| `--container-only` | Only allow destructive operations inside Docker containers (default: true) |
 
-**`--audit`** detects all auth sources (env vars, ateam secrets, credential files, keychain) and prints export instructions for replicating auth in another environment.
+**`--audit`** detects all auth sources (env vars, ateam secrets, credential files, keychain), runs `claude auth status` for ground truth, and warns on mismatches. With `--container`, runs audit remotely via `docker exec`.
+
+**`--copy-out`** copies `.claude/` and `.claude.json` from the container but intentionally skips `secrets.env` (which is manually maintained and contains the OAuth token from `claude setup-token`).
+
+**`--copy-in`** copies `.claude/`, `.claude.json`, and `secrets.env` (if present) into the container. Use `--force` to overwrite existing config (clears contents without removing mount points). Use `--copy-ateam` to also copy the ateam linux binary.
 
 **`--setup-interactive`** is the recommended way to start interactive Claude sessions in containers:
-1. First time: do a browser login (`claude` → login → `/exit`), then `--save-refresh-token`
+1. First time: do a browser login (`claude` → login → `/exit`), then save the refresh token with `ateam secret CLAUDE_CODE_OAUTH_REFRESH_TOKEN --set`
 2. Any new container: `--setup-interactive` exchanges the refresh token for full credentials
 
 ### `ateam container-cp`

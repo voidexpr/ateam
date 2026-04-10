@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
 
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runtime"
@@ -73,11 +71,8 @@ func runContainerCp(cmd *cobra.Command, args []string) error {
 	target := containerName + ":/usr/local/bin/ateam"
 	fmt.Printf("Copying %s → %s\n", binary, target)
 
-	cp := exec.Command("docker", "cp", binary, target)
-	cp.Stdout = os.Stdout
-	cp.Stderr = os.Stderr
-	if err := cp.Run(); err != nil {
-		return fmt.Errorf("docker cp failed: %w", err)
+	if err := dockerCp(binary, target); err != nil {
+		return err
 	}
 
 	fmt.Println("Done.")
