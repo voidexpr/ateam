@@ -774,7 +774,7 @@ func printDryRunInfo(r *runner.Runner, env *root.ResolvedEnv, opts dryRunOpts) {
 		Action:    opts.Action,
 		TaskGroup: opts.TaskGroup,
 	}, time.Now(), 0, agentName, model)
-	resolvedAgent := runner.ResolveAgentForDryRun(r.Agent, tmplVars)
+	resolvedAgent := runner.ResolveAgentTemplateArgs(r.Agent, tmplVars)
 	resolvedExtraArgs := runner.ResolveTemplateArgs(r.ExtraArgs, tmplVars)
 
 	// Agent and profile
