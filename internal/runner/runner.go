@@ -500,8 +500,12 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 	if success {
 		if opts.LastMessageFilePath != "" && output != "" {
 			dir := filepath.Dir(opts.LastMessageFilePath)
-			_ = os.MkdirAll(dir, 0700)
-			_ = os.WriteFile(opts.LastMessageFilePath, []byte(output), 0600)
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to create output dir %s: %v\n", dir, err)
+			}
+			if err := os.WriteFile(opts.LastMessageFilePath, []byte(output), 0600); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to write output file %s: %v\n", opts.LastMessageFilePath, err)
+			}
 		}
 		appendLog(r.LogFile, opts.RoleID, "ok", cwd, cliStr)
 	} else {

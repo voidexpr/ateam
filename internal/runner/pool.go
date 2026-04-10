@@ -26,7 +26,12 @@ func RunPool(ctx context.Context, r *Runner, tasks []PoolTask, maxParallel int, 
 
 	for _, task := range tasks {
 		wg.Add(1)
-		sem <- struct{}{} // acquire slot
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			wg.Done()
+			continue
+		}
 
 		go func(t PoolTask) {
 			defer wg.Done()
