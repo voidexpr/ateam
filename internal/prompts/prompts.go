@@ -8,11 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/gitutil"
 )
 
+// TimestampFormat is an alias for display.TimestampFormat.
+const TimestampFormat = display.TimestampFormat
+
 const (
-	TimestampFormat               = "2006-01-02_15-04-05"
 	ReportPromptFile              = "report_prompt.md"
 	ReportBasePromptFile          = "report_base_prompt.md"
 	ReportExtraPromptFile         = "report_extra_prompt.md"
@@ -423,12 +426,11 @@ func readWith3LevelFallback(projectPath, orgPath, defaultPath, label string) (st
 	return "", fmt.Errorf("no prompt found for %s (checked %s, %s, and %s)", label, projectPath, orgPath, defaultPath)
 }
 
-// readFileOr3Level tries three paths and returns the first one that exists, or "" if none do.
+// readFileOr3Level tries three paths and returns the content of the first existing non-empty file.
+// Delegates to traceFileOr3Level to ensure consistent empty-file handling.
 func readFileOr3Level(projectPath, orgPath, defaultPath string) string {
-	for _, p := range []string{projectPath, orgPath, defaultPath} {
-		if data, err := os.ReadFile(p); err == nil {
-			return string(data)
-		}
+	if src := traceFileOr3Level(projectPath, orgPath, defaultPath); src != nil {
+		return src.Content
 	}
 	return ""
 }

@@ -15,11 +15,14 @@ import (
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/container"
+	"github.com/ateam/internal/display"
 )
 
-const (
-	TimestampFormat = "2006-01-02_15-04-05"
+// TimestampFormat is kept as an alias for backward compatibility with
+// consumers that reference runner.TimestampFormat.
+const TimestampFormat = display.TimestampFormat
 
+const (
 	ActionReport   = "report"
 	ActionRun      = "run"
 	ActionParallel = "parallel"

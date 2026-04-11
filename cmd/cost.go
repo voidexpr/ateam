@@ -197,16 +197,8 @@ type actionLine struct {
 	totalTok     int64
 }
 
-func fmtTimestamp(s string) string {
-	if s == "" {
-		return ""
-	}
-	t, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		return s
-	}
-	return t.Format(runner.TimestampFormat)
-}
+// fmtTimestamp is an alias for display.FmtRFC3339AsTimestamp.
+var fmtTimestamp = display.FmtRFC3339AsTimestamp
 
 func computeDuration(startStr, endStr string) string {
 	if startStr == "" || endStr == "" {
