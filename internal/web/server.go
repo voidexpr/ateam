@@ -200,7 +200,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, tmplName string,
 
 // ListenAndServe starts the HTTP server. Port 0 means a random available port.
 // If openBrowser is true, opens the URL in the default browser before serving.
-func (s *Server) ListenAndServe(port int, openBrowser bool) error {
+func (s *Server) ListenAndServe(port int, openBrowser bool, public bool) error {
 	mux := http.NewServeMux()
 
 	staticSub, err := fs.Sub(staticFS, "static")
@@ -228,7 +228,11 @@ func (s *Server) ListenAndServe(port int, openBrowser bool) error {
 	mux.HandleFunc("GET /p/{project}/code/{session}", s.handleCodeSessionDetail)
 	mux.HandleFunc("GET /p/{project}/code/{session}/{file}", s.handleCodeSessionFile)
 
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	host := "127.0.0.1"
+	if public {
+		host = "0.0.0.0"
+	}
+	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
 	if err != nil {
 		return err
 	}
