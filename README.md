@@ -85,11 +85,12 @@ ateam secret CLAUDE_CODE_OAUTH_TOKEN    # recommended (uses your subscription)
 ateam secret ANTHROPIC_API_KEY          # or use API directly (pay as you go)
 ```
 
-For sharing a single Claude login across containers, create a shared config directory and mount or copy it in:
+For interactive Claude in containers, mount the shared config directory and use `ateam claude`:
 
 ```bash
-ateam agent-config --copy-out --container my-app    # capture config from a container
-ateam agent-config --copy-in --container other-app  # inject into another container
+docker run -v "$(ateam env --print-org)/claude_linux_shared:/home/agent/shared_claude" ...
+# Inside the container:
+ateam claude --config-dir ~/shared_claude
 ```
 
 See [CONTAINER.md](CONTAINER.md) for Docker setup details including shared Linux agent config.
@@ -226,7 +227,9 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 | `ateam run` | Run an agent with a custom prompt |
 | `ateam parallel` | Run multiple agents in parallel, each with its own prompt |
 | `ateam secret` | Manage API keys (keychain or file) |
+| `ateam claude` | Run interactive claude in a container with shared config |
 | `ateam agent-config` | [experimental] Audit agent auth, copy config between host and containers |
+| `ateam container-cp` | Copy ateam binary into a running container |
 | `ateam env` | Show environment and configuration status |
 | `ateam serve` | Web UI for browsing reports and sessions |
 | `ateam ps` | Recent run history |

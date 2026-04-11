@@ -403,87 +403,84 @@ Shows all detected auth sources, runs `claude auth status` for ground truth, and
 
 ## Shared Linux Agent Config
 
-For running the same Claude identity across multiple containers, create a shared config directory on the host and mount it into containers.
+For running the same Claude identity across multiple containers, use a shared config directory mounted with `CLAUDE_CONFIG_DIR`. This stores all Claude state (`.credentials.json`, `.claude.json`, `settings.json`) in a single directory, avoiding the `.claude.json` loss and refresh token rotation issues that affect copy-based approaches.
 
 ### Host layout
 
 ```
 ~/.ateamorg/claude_linux_shared/
-  .claude/          # Claude config directory
-  .claude.json      # Claude account state
-  secrets.env       # CLAUDE_CODE_OAUTH_TOKEN for headless agents
+  .credentials.json  # OAuth tokens (access + refresh)
+  .claude.json       # Account state, onboarding flags
+  settings.json      # Claude settings
+  backups/           # .claude.json backups
+  sessions/          # Session data
+  ...
 ```
 
 ### One-time setup
 
 ```bash
-# 1. Start a container with a fresh volume
-./test/docker-auth/start.sh --name setup --volume ~/.ateamorg/claude_linux_shared
+# 1. Create the shared config directory
+mkdir -p ~/.ateamorg/claude_linux_shared
 
-# 2. Inside the container: interactive login
-claude auth login
-# Copy/paste URL, authorize, paste token
+# 2. Start a container with the shared dir mounted
+docker run -it \
+  -v ~/.ateamorg/claude_linux_shared:/home/agent/shared_claude \
+  your-image bash
 
-# 3. Inside the container: generate OAuth token for headless use
-claude setup-token
-# Copy/paste URL, authorize — prints the token
+# 3. Inside the container: login via ateam claude
+ateam claude --config-dir ~/shared_claude
 
-# 4. Inside the container: save token to org secrets
-ateam secret CLAUDE_CODE_OAUTH_TOKEN --scope org --set
-# Paste the token from step 3
+# 4. Complete the login flow, then /exit
+```
 
-# 5. Exit
-exit
+Or with `start.sh`:
+
+```bash
+./test/docker-auth/start.sh --name setup --shared-claude ~/.ateamorg/claude_linux_shared
+# Inside: ateam claude --config-dir ~/shared_claude
 ```
 
 ### Using the shared config
 
-**Volume mount** (recommended for containers you control):
+**Mount the directory** into any container:
 
 ```bash
 docker run \
-  -v ~/.ateamorg/claude_linux_shared/.claude:/home/agent/.claude \
-  -v ~/.ateamorg/claude_linux_shared/.claude.json:/home/agent/.claude.json \
-  -v ~/.ateamorg/claude_linux_shared/secrets.env:/home/agent/.ateamorg/secrets.env \
+  -v "$(ateam env --print-org)/claude_linux_shared:/home/agent/shared_claude" \
   ...
 ```
 
-Or with `start.sh`, which handles all three mounts automatically:
+Then run claude:
 
 ```bash
-./test/docker-auth/start.sh --name worker --volume ~/.ateamorg/claude_linux_shared
+# Via ateam (adds --dangerously-skip-permissions and --remote-control):
+ateam claude --config-dir ~/shared_claude
+
+# Or manually:
+CLAUDE_CONFIG_DIR=~/shared_claude claude --dangerously-skip-permissions --remote-control
 ```
 
-**Copy in** (for containers where you can't change mounts):
+**Why not copy?** Copying credentials to multiple containers breaks OAuth refresh token rotation. When one container refreshes its token, the other's copy is revoked. Using the revoked token triggers replay detection, invalidating all copies. A shared mount avoids this — all containers read/write the same credential file, just like multiple sessions on a single Linux host.
+
+### Injecting ateam into a container
+
+The ateam binary can be mounted or copied:
 
 ```bash
-ateam agent-config --copy-in --container my-app --force --copy-ateam
+# Mount at runtime (recommended — picks up recompiles):
+docker run -v ./build:/opt/ateam:ro ...
+
+# Or copy into a running container:
+ateam container-cp --container-name my-app
 ```
 
-This copies `.claude/`, `.claude.json`, and `secrets.env` from `~/.ateamorg/claude_linux_shared/` (default path) into the container, fixes file ownership, and optionally copies the ateam binary.
+### How it works
 
-**Copy out** (to capture a container's config):
-
-```bash
-ateam agent-config --copy-out --container my-app --path ~/.ateamorg/claude_linux_shared
-```
-
-Copies `.claude/` and `.claude.json` from the container. Does NOT overwrite `secrets.env` (it is manually maintained).
-
-### How it works inside the container
-
-- Interactive `claude` works — `.credentials.json` and `.claude.json` are present
-- `ateam run` resolves `CLAUDE_CODE_OAUTH_TOKEN` from org scope (`~/.ateamorg/secrets.env`) via the normal secret resolution chain
-- The host's own secrets are untouched — the mounted `secrets.env` only exists inside the container
-
-### Note on `.claude.json` location
-
-Claude Code stores `.claude.json` (account state) at different locations depending on configuration:
-
-- **Default**: `~/.claude.json` (home root, outside `~/.claude/`)
-- **With `CLAUDE_CONFIG_DIR`**: inside the config directory
-
-This is why the shared config needs two separate mounts for the default case. When a container is recreated with only a `~/.claude` volume, `.claude.json` is lost (it's on the container filesystem). Claude Code backs it up in `~/.claude/backups/` and prints restore instructions on startup, but mounting both files avoids this issue entirely.
+- `CLAUDE_CONFIG_DIR` tells Claude to store everything in one directory (instead of splitting between `~/.claude/` and `~/.claude.json`)
+- `ateam claude` sets this env var, unsets `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` (to avoid auth conflicts), and execs claude
+- Multiple containers sharing the same mount work because refresh token rotation updates the shared file in-place
+- `ateam run` agents are unaffected — they use `~/.claude` and `ateam secret` for auth (separate from interactive)
 
 ## Debugging
 
