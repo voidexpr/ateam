@@ -232,11 +232,11 @@ ateam agent-config --setup-interactive                    # bootstrap interactiv
 
 **`--audit`** detects all auth sources (env vars, ateam secrets, credential files, keychain), runs `claude auth status` for ground truth, and warns on mismatches. With `--container`, runs audit remotely via `docker exec`.
 
-**`--copy-out`** copies `.claude/` and `.claude.json` from the container but intentionally skips `secrets.env` (which is manually maintained and contains the OAuth token from `claude setup-token`).
+**`--copy-out`** copies `.claude/` and `.claude.json` from the container. Useful for bootstrapping `<ateamorg>/claude_linux_shared` from a container where you've already logged in. Does not copy `secrets.env` (manually maintained).
 
-**`--copy-in`** copies `.claude/`, `.claude.json`, and `secrets.env` (if present) into the container. Use `--force` to overwrite existing config (clears contents without removing mount points). Use `--copy-ateam` to also copy the ateam linux binary.
+**`--copy-in`** copies `.claude/`, `.claude.json`, and `secrets.env` (if present) into the container. **Not recommended for production use** — copying credentials breaks OAuth refresh token rotation. When one container refreshes its token, the other's copy is revoked. Use the shared mount approach instead (see [CONTAINER.md](CONTAINER.md)). Can be useful for one-time experimentation.
 
-**`--setup-interactive`** is the recommended way to start interactive Claude sessions in containers:
+**`--setup-interactive`** bootstraps interactive Claude from a saved refresh token:
 1. First time: do a browser login (`claude` → login → `/exit`), then save the refresh token with `ateam secret CLAUDE_CODE_OAUTH_REFRESH_TOKEN --set`
 2. Any new container: `--setup-interactive` exchanges the refresh token for full credentials
 
