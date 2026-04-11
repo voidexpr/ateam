@@ -173,18 +173,15 @@ func runAgentConfigAudit(projectDir, orgDir string) error {
 		}
 	}
 
-	// Token values are printed in full (not masked) — users need exact values
-	// for copy/paste into container configs, secrets.env, export commands, etc.
 	refreshToken := agent.ExtractRefreshToken(status.ConfigDir)
 	if refreshToken != "" {
-		fmt.Println("Interactive session detected. To use in another environment:")
+		fmt.Println("Interactive session detected (refresh token in .credentials.json).")
 		fmt.Println()
-		fmt.Printf("  export CLAUDE_CODE_OAUTH_REFRESH_TOKEN=%s\n", refreshToken)
-		fmt.Println("  export CLAUDE_CODE_OAUTH_SCOPES=\"user:profile user:inference\"")
-		fmt.Println()
-		fmt.Println("  Or save to ateam secrets:")
-		fmt.Println("    ateam secret CLAUDE_CODE_OAUTH_REFRESH_TOKEN --set")
-		fmt.Println()
+	}
+
+	// Check shared config dir (for container use with CLAUDE_CONFIG_DIR).
+	if orgDir != "" {
+		printSharedConfigStatus(orgDir)
 	}
 
 	return nil
@@ -280,6 +277,47 @@ func printAuthSources(s agent.AuthStatus) {
 
 	if s.HasKeychain {
 		fmt.Println("  macOS Keychain:               present")
+	}
+
+	fmt.Println()
+}
+
+func printSharedConfigStatus(orgDir string) {
+	sharedDir := filepath.Join(orgDir, defaultSharedClaudePath)
+	info, err := os.Stat(sharedDir)
+	if err != nil || !info.IsDir() {
+		fmt.Printf("Shared config:    %s (not found)\n", sharedDir)
+		fmt.Println("  Run 'mkdir -p " + sharedDir + "' to create it")
+		fmt.Println()
+		return
+	}
+
+	fmt.Printf("Shared config:    %s\n", sharedDir)
+
+	credPath := filepath.Join(sharedDir, ".credentials.json")
+	if _, err := os.Stat(credPath); err == nil {
+		refreshToken := agent.ExtractRefreshToken(sharedDir)
+		if refreshToken != "" {
+			fmt.Println("  Credentials:    present (has refresh token)")
+		} else {
+			fmt.Println("  Credentials:    present (no refresh token)")
+		}
+	} else {
+		fmt.Println("  Credentials:    absent")
+	}
+
+	claudeJSON := filepath.Join(sharedDir, ".claude.json")
+	if _, err := os.Stat(claudeJSON); err == nil {
+		fmt.Println("  .claude.json:   present")
+	} else {
+		fmt.Println("  .claude.json:   absent")
+	}
+
+	settingsJSON := filepath.Join(sharedDir, "settings.json")
+	if _, err := os.Stat(settingsJSON); err == nil {
+		fmt.Println("  settings.json:  present")
+	} else {
+		fmt.Println("  settings.json:  absent")
 	}
 
 	fmt.Println()
