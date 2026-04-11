@@ -102,6 +102,7 @@ else
 fi
 args+=(-v "$workspace:/workspace")
 args+=(-v "$ateam_build_dir:/opt/ateam:ro")
+args+=(-v "$(ateam env --print-org):/.ateamorg:ro")
 
 if [[ -n "$shared_claude" ]]; then
     shared_claude="$(cd "$shared_claude" && pwd)"
