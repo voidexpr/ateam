@@ -108,8 +108,10 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 		return nil, err
 	}
 
-	// Only validate secrets for container runs — agents handle their own auth on host.
-	if cc != nil && cc.Type != "none" {
+	// Validate and inject secrets from the secret store.
+	// On host: only for container runs (agents handle their own auth).
+	// Inside a container: always inject so agents pick up stored tokens.
+	if (cc != nil && cc.Type != "none") || runner.IsInContainer() {
 		resolver := secretResolver(env, secret.DefaultBackend())
 		if err := secret.ValidateSecrets(ac, resolver); err != nil {
 			return nil, err
