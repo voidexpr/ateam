@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os/exec"
+	"strings"
 )
 
 // CmdFactory creates an *exec.Cmd. When set on an agent Request, agents use this
@@ -31,6 +32,10 @@ type Container interface {
 	// TranslatePath maps a host path to the corresponding in-container path.
 	// Returns the original path unchanged if no mapping applies.
 	TranslatePath(path string) string
+
+	// ResolveTemplates resolves {{VAR}} placeholders in the container's
+	// config fields using the provided replacer. Mutates in place.
+	ResolveTemplates(replacer *strings.Replacer)
 }
 
 // RunOpts holds options for executing a command in a container.

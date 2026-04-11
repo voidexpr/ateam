@@ -185,47 +185,51 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.Runner
 
 func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runner.Runner {
 	return &runner.Runner{
-		Agent:                  buildAgent(ac),
-		OrgDir:                 orgDir,
-		SandboxSettings:        ac.Sandbox,
-		SandboxRWPaths:         ac.RWPaths,
-		SandboxROPaths:         ac.ROPaths,
-		SandboxDenied:          ac.DeniedPaths,
-		ConfigDir:              ac.ConfigDir,
-		ArgsInsideContainer:    ac.ArgsInsideContainer,
-		ArgsOutsideContainer:   ac.ArgsOutsideContainer,
-		SandboxInsideContainer: ac.SandboxInsideContainer,
+		Agent:  buildAgent(ac),
+		OrgDir: orgDir,
+		Sandbox: runner.SandboxConfig{
+			Settings:        ac.Sandbox,
+			RWPaths:         ac.RWPaths,
+			ROPaths:         ac.ROPaths,
+			Denied:          ac.DeniedPaths,
+			InsideContainer: ac.SandboxInsideContainer,
+		},
+		ConfigDir:            ac.ConfigDir,
+		ArgsInsideContainer:  ac.ArgsInsideContainer,
+		ArgsOutsideContainer: ac.ArgsOutsideContainer,
 	}
 }
 
 func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runner.Runner {
 	extraWriteDirs := gitWriteDirs(env.SourceDir)
 	r := &runner.Runner{
-		Agent:                  buildAgent(ac),
-		LogFile:                env.RunnerLogPath(),
-		ProjectDir:             env.ProjectDir,
-		OrgDir:                 env.OrgDir,
-		SourceDir:              env.SourceDir,
-		ProjectName:            env.ProjectName,
-		ExtraWriteDirs:         extraWriteDirs,
-		SandboxSettings:        ac.Sandbox,
-		SandboxRWPaths:         ac.RWPaths,
-		SandboxROPaths:         ac.ROPaths,
-		SandboxDenied:          ac.DeniedPaths,
-		ConfigDir:              ac.ConfigDir,
-		ArgsInsideContainer:    ac.ArgsInsideContainer,
-		ArgsOutsideContainer:   ac.ArgsOutsideContainer,
-		SandboxInsideContainer: ac.SandboxInsideContainer,
+		Agent:       buildAgent(ac),
+		LogFile:     env.RunnerLogPath(),
+		ProjectDir:  env.ProjectDir,
+		OrgDir:      env.OrgDir,
+		SourceDir:   env.SourceDir,
+		ProjectName: env.ProjectName,
+		Sandbox: runner.SandboxConfig{
+			Settings:        ac.Sandbox,
+			RWPaths:         ac.RWPaths,
+			ROPaths:         ac.ROPaths,
+			Denied:          ac.DeniedPaths,
+			ExtraWriteDirs:  extraWriteDirs,
+			InsideContainer: ac.SandboxInsideContainer,
+		},
+		ConfigDir:            ac.ConfigDir,
+		ArgsInsideContainer:  ac.ArgsInsideContainer,
+		ArgsOutsideContainer: ac.ArgsOutsideContainer,
 	}
 	if env.Config != nil {
-		r.SandboxExtraWrite = env.Config.SandboxExtra.AllowWrite
-		r.SandboxExtraRead = env.Config.SandboxExtra.AllowRead
-		r.SandboxExtraDomains = env.Config.SandboxExtra.AllowDomains
-		r.SandboxExtraExcludedCmd = env.Config.SandboxExtra.UnsandboxedCommands
+		r.Sandbox.ExtraWrite = env.Config.SandboxExtra.AllowWrite
+		r.Sandbox.ExtraRead = env.Config.SandboxExtra.AllowRead
+		r.Sandbox.ExtraDomains = env.Config.SandboxExtra.AllowDomains
+		r.Sandbox.ExtraExcludedCmd = env.Config.SandboxExtra.UnsandboxedCommands
 	}
 	// Grant read access to the entire git repo when project is nested within it
 	if env.GitRepoDir != "" && env.GitRepoDir != env.SourceDir {
-		r.SandboxExtraRead = append(r.SandboxExtraRead, env.GitRepoDir)
+		r.Sandbox.ExtraRead = append(r.Sandbox.ExtraRead, env.GitRepoDir)
 	}
 	return r
 }
@@ -826,8 +830,8 @@ func printDryRunInfo(r *runner.Runner, env *root.ResolvedEnv, opts dryRunOpts) {
 		fullArgs = append(fullArgs, runner.ResolveTemplateArgs(r.ArgsOutsideContainer, tmplVars)...)
 	}
 
-	skipSandbox := (runner.IsInContainer() || r.Container != nil) && !r.SandboxInsideContainer
-	if r.SandboxSettings != "" && !skipSandbox {
+	skipSandbox := (runner.IsInContainer() || r.Container != nil) && !r.Sandbox.InsideContainer
+	if r.Sandbox.Settings != "" && !skipSandbox {
 		fullArgs = append(fullArgs, "--settings", "<logs>/<timestamp>_settings.json")
 	}
 
@@ -863,9 +867,9 @@ func printDryRunInfo(r *runner.Runner, env *root.ResolvedEnv, opts dryRunOpts) {
 	printDryRunSecrets(r, env)
 
 	// Sandbox
-	if r.SandboxSettings != "" && !skipSandbox {
+	if r.Sandbox.Settings != "" && !skipSandbox {
 		fmt.Println("Sandbox: configured (use --verbose for full JSON)")
-	} else if r.SandboxSettings != "" && skipSandbox {
+	} else if r.Sandbox.Settings != "" && skipSandbox {
 		fmt.Println("Sandbox: skipped (inside container)")
 	}
 

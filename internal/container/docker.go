@@ -57,6 +57,23 @@ const (
 
 func (d *DockerContainer) Type() string { return "docker" }
 
+// ResolveTemplates resolves {{VAR}} placeholders in ExtraArgs, ExtraVolumes, and Env.
+func (d *DockerContainer) ResolveTemplates(r *strings.Replacer) {
+	for i, arg := range d.ExtraArgs {
+		d.ExtraArgs[i] = r.Replace(arg)
+	}
+	for i, vol := range d.ExtraVolumes {
+		d.ExtraVolumes[i] = r.Replace(vol)
+	}
+	if d.Env != nil {
+		resolved := make(map[string]string, len(d.Env))
+		for k, v := range d.Env {
+			resolved[k] = r.Replace(v)
+		}
+		d.Env = resolved
+	}
+}
+
 // Prepare builds the docker image. Implements the Container interface.
 func (d *DockerContainer) Prepare(ctx context.Context) error {
 	return d.EnsureImage(ctx)

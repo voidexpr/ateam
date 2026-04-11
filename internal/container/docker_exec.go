@@ -29,6 +29,18 @@ type DockerExecContainer struct {
 
 func (d *DockerExecContainer) Type() string { return "docker-exec" }
 
+// ResolveTemplates resolves {{VAR}} placeholders in ContainerName and WorkDir.
+// ExecTemplate is NOT resolved here — its {{CONTAINER}} and {{CMD}} placeholders
+// are expanded by CmdFactory at execution time (separate namespace).
+func (d *DockerExecContainer) ResolveTemplates(r *strings.Replacer) {
+	if strings.Contains(d.ContainerName, "{{") {
+		d.ContainerName = r.Replace(d.ContainerName)
+	}
+	if strings.Contains(d.WorkDir, "{{") {
+		d.WorkDir = r.Replace(d.WorkDir)
+	}
+}
+
 // CmdFactory returns a function that wraps commands in docker exec (or custom exec template).
 func (d *DockerExecContainer) CmdFactory() CmdFactory {
 	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
