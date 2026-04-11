@@ -65,3 +65,4 @@ Recommend replacing them with behavior-focused tests.
 - Do not suggest achieving 100% coverage (focus on high-value gaps)
 - Do not suggest tests for trivial getters/setters
 - Do not write the tests yourself — describe what's missing and why it matters
+- Do not propose github CI/CD configuration if not already in place
