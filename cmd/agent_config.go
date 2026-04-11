@@ -145,8 +145,7 @@ func runAgentConfigAudit(projectDir, orgDir string) error {
 
 	printAuthSources(status)
 
-	// Run 'claude auth status' for ground truth from Claude CLI.
-	claudeStatus := runClaudeAuthStatus()
+	claudeStatus := runClaudeAuthStatus("")
 	fmt.Println("Claude CLI (claude auth status):")
 	if claudeStatus.err != nil {
 		fmt.Printf("  (could not run 'claude auth status': %v)\n", claudeStatus.err)
@@ -194,15 +193,19 @@ type claudeAuthResult struct {
 	err         error
 }
 
-func runClaudeAuthStatus() claudeAuthResult {
+// runClaudeAuthStatus runs "claude auth status --json".
+// If configDir is non-empty, sets CLAUDE_CONFIG_DIR for the subprocess.
+func runClaudeAuthStatus(configDir string) claudeAuthResult {
 	binary, err := exec.LookPath("claude")
 	if err != nil {
 		return claudeAuthResult{err: fmt.Errorf("claude not found in PATH")}
 	}
 
-	// JSON output for structured parsing.
-	// claude auth status exits 1 when not logged in but still outputs valid JSON.
 	jsonCmd := exec.Command(binary, "auth", "status", "--json")
+	if configDir != "" {
+		jsonCmd.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+configDir)
+	}
+	// claude auth status exits 1 when not logged in but still outputs valid JSON.
 	jsonOut, err := jsonCmd.Output()
 	if err != nil && len(jsonOut) == 0 {
 		return claudeAuthResult{err: fmt.Errorf("command failed: %w", err)}
@@ -318,6 +321,15 @@ func printSharedConfigStatus(orgDir string) {
 		fmt.Println("  settings.json:  present")
 	} else {
 		fmt.Println("  settings.json:  absent")
+	}
+
+	sharedStatus := runClaudeAuthStatus(sharedDir)
+	if sharedStatus.err != nil {
+		fmt.Printf("  claude auth:    %v\n", sharedStatus.err)
+	} else if sharedStatus.loggedIn {
+		fmt.Printf("  claude auth:    logged in (%s)\n", sharedStatus.authMethod)
+	} else {
+		fmt.Println("  claude auth:    not logged in")
 	}
 
 	fmt.Println()
