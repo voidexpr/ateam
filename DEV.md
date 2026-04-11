@@ -63,6 +63,12 @@ The Makefile checks for auth before starting and fails with setup instructions i
 ### Before committing
 
 ```bash
+make check         # runs test, fmt-check, check-tidy, and lint in one command
+```
+
+Or run individual checks:
+
+```bash
 make fmt-check     # verify gofmt formatting (no changes, exit 1 if issues)
 make check-tidy    # verify go.mod is tidy (no changes, exit 1 if drift)
 make build         # build the binary (catches compile errors)
