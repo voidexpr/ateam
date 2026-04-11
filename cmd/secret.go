@@ -292,7 +292,11 @@ func saveProjectScope(resolver *secret.Resolver, projectDir, orgDir string, args
 			continue
 		}
 
-		existing, hasExisting := store.Get(name)
+		existing, hasExisting, err := store.Get(name)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  [error]   %s: %v\n", name, err)
+			continue
+		}
 		if hasExisting && existing == result.Value {
 			fmt.Printf("  [same]    %s\n", name)
 			same++
