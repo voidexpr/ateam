@@ -15,19 +15,34 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultSharedClaudePath = "linux-shared-claude"
+const defaultSharedClaudePath = "claude_linux_shared"
+const ateamContainerBinPath = "/usr/local/bin/ateam"
+
+// claudeEssentials lists the files and directories inside .claude/ that are
+// worth copying between environments. Everything else (sessions, projects,
+// cache, history, shell-snapshots, etc.) is ephemeral or machine-specific.
+var claudeEssentials = []string{
+	".credentials.json",
+	"settings.json",
+	"skills",
+	"plugins",
+	"hooks",
+	"backups",
+}
 
 var (
 	agentCfgAudit            bool
 	agentCfgSetupInteractive bool
 
-	agentCfgCopyOut   bool
-	agentCfgCopyIn    bool
-	agentCfgContainer string
-	agentCfgPath      string
-	agentCfgHome      string
-	agentCfgForce     bool
-	agentCfgCopyAteam bool
+	agentCfgCopyOut        bool
+	agentCfgCopyIn         bool
+	agentCfgContainer      string
+	agentCfgPath           string
+	agentCfgHome           string
+	agentCfgForce          bool
+	agentCfgCopyAteam      bool
+	agentCfgDryRun         bool
+	agentCfgEssentialsOnly bool
 )
 
 var agentConfigCmd = &cobra.Command{
@@ -68,6 +83,8 @@ func init() {
 	agentConfigCmd.Flags().StringVar(&agentCfgHome, "home", "", "override container home directory (auto-detected by default)")
 	agentConfigCmd.Flags().BoolVar(&agentCfgForce, "force", false, "overwrite existing config in container (for --copy-in)")
 	agentConfigCmd.Flags().BoolVar(&agentCfgCopyAteam, "copy-ateam", false, "also copy ateam linux binary into the container (for --copy-in)")
+	agentConfigCmd.Flags().BoolVar(&agentCfgDryRun, "dry-run", false, "show what would be copied without executing")
+	agentConfigCmd.Flags().BoolVar(&agentCfgEssentialsOnly, "essentials-only", false, "copy only essential files (credentials, settings, plugins, skills, hooks, backups)")
 }
 
 func runAgentConfig(cmd *cobra.Command, args []string) error {
@@ -77,12 +94,21 @@ func runAgentConfig(cmd *cobra.Command, args []string) error {
 		orgDir = env.OrgDir
 	}
 
+	// Resolve partial container names before any subcommand uses them.
+	if agentCfgContainer != "" {
+		resolved, err := resolveContainerName(agentCfgContainer)
+		if err != nil {
+			return err
+		}
+		agentCfgContainer = resolved
+	}
+
 	// --copy-out / --copy-in require --container
 	if agentCfgCopyOut {
-		return runCopyOut(agentCfgContainer, agentCfgPath, agentCfgHome, orgDir)
+		return runCopyOut(agentCfgContainer, agentCfgPath, agentCfgHome, orgDir, agentCfgDryRun, agentCfgEssentialsOnly)
 	}
 	if agentCfgCopyIn {
-		return runCopyIn(agentCfgContainer, agentCfgPath, agentCfgHome, agentCfgForce, agentCfgCopyAteam, orgDir)
+		return runCopyIn(agentCfgContainer, agentCfgPath, agentCfgHome, agentCfgForce, agentCfgCopyAteam, orgDir, agentCfgDryRun, agentCfgEssentialsOnly)
 	}
 
 	// --audit works everywhere, no container-only check.
@@ -360,13 +386,14 @@ func detectContainer(container, homeOverride string) (containerInfo, error) {
 func copyAteamBinary(containerName, orgDir string) error {
 	binary := findLinuxBinary(orgDir)
 	if binary == "" {
-		fmt.Println("  Warning: no linux ateam binary found (run 'make companion' to build one)")
-		return nil
+		return fmt.Errorf("no linux ateam binary found (run 'make companion' to build one)")
 	}
-	if err := dockerCp(binary, containerName+":/usr/local/bin/ateam"); err != nil {
+	target := containerName + ":" + ateamContainerBinPath
+	fmt.Printf("Copying %s → %s\n", binary, target)
+	if err := dockerCp(binary, target); err != nil {
 		return err
 	}
-	fmt.Println("  ateam binary copied")
+	fmt.Println("Done.")
 	return nil
 }
 
@@ -417,16 +444,39 @@ func validateLocalPath(path string) error {
 	return nil
 }
 
+func printLocalDirStatus(path string) {
+	info, err := os.Stat(path)
+	if err != nil {
+		fmt.Printf("  target %s does not exist (will create)\n", path)
+		return
+	}
+	if !info.IsDir() {
+		fmt.Printf("  target %s exists but is not a directory\n", path)
+		return
+	}
+	entries, _ := os.ReadDir(path)
+	if len(entries) == 0 {
+		fmt.Printf("  target %s exists (empty)\n", path)
+	} else {
+		fmt.Printf("  target %s exists (%d entries)\n", path, len(entries))
+	}
+}
+
 func containerPathExists(container, path string) bool {
 	cmd := exec.Command("docker", "exec", container, "test", "-e", path)
 	return cmd.Run() == nil
+}
+
+func containerDirEmpty(container, path string) bool {
+	out, err := dockerExecOutput(container, "sh", "-c", fmt.Sprintf("ls -A %s 2>/dev/null", path))
+	return err == nil && strings.TrimSpace(out) == ""
 }
 
 // ---------------------------------------------------------------------------
 // --copy-out: container → host
 // ---------------------------------------------------------------------------
 
-func runCopyOut(containerName, flagPath, homeOverride, orgDir string) error {
+func runCopyOut(containerName, flagPath, homeOverride, orgDir string, dryRun, essentialsOnly bool) error {
 	if containerName == "" {
 		return fmt.Errorf("--container is required with --copy-out")
 	}
@@ -450,24 +500,68 @@ func runCopyOut(containerName, flagPath, homeOverride, orgDir string) error {
 		return fmt.Errorf("%s does not exist in container %s", claudeDir, containerName)
 	}
 
-	if err := os.MkdirAll(filepath.Join(localPath, ".claude"), 0755); err != nil {
+	prefix := ""
+	if dryRun {
+		prefix = "[dry-run] "
+	}
+
+	localClaudeDir := filepath.Join(localPath, ".claude")
+	mode := "all"
+	if essentialsOnly {
+		mode = "essentials-only"
+	}
+	fmt.Printf("%sCopying from container %s (%s) → %s [%s]\n\n", prefix, containerName, ci.home, localPath, mode)
+
+	if dryRun {
+		printLocalDirStatus(localClaudeDir)
+	}
+
+	if essentialsOnly {
+		for _, name := range claudeEssentials {
+			src := claudeDir + "/" + name
+			if containerPathExists(containerName, src) {
+				fmt.Printf("  %s%s → %s\n", prefix, src, filepath.Join(localClaudeDir, name))
+			}
+		}
+	} else {
+		fmt.Printf("  %s%s/ → %s/\n", prefix, claudeDir, localClaudeDir)
+	}
+
+	if claudeJSON != "" && containerPathExists(containerName, claudeJSON) {
+		fmt.Printf("  %s%s → %s\n", prefix, claudeJSON, filepath.Join(localPath, ".claude.json"))
+	} else if claudeJSON != "" {
+		fmt.Println("  .claude.json not found in container (skip)")
+	}
+
+	if dryRun {
+		return nil
+	}
+
+	if err := os.MkdirAll(localClaudeDir, 0755); err != nil {
 		return err
 	}
 
-	fmt.Printf("Copying from container %s (%s) → %s\n\n", containerName, ci.home, localPath)
-
-	if err := dockerCp(containerName+":"+claudeDir+"/.", filepath.Join(localPath, ".claude")+"/"); err != nil {
-		return err
+	if essentialsOnly {
+		for _, name := range claudeEssentials {
+			src := claudeDir + "/" + name
+			if !containerPathExists(containerName, src) {
+				continue
+			}
+			dst := filepath.Join(localClaudeDir, name)
+			if err := dockerCp(containerName+":"+src, dst); err != nil {
+				return err
+			}
+		}
+	} else {
+		if err := dockerCp(containerName+":"+claudeDir+"/.", localClaudeDir+"/"); err != nil {
+			return err
+		}
 	}
-	fmt.Println("  .claude/ copied")
 
 	if claudeJSON != "" && containerPathExists(containerName, claudeJSON) {
 		if err := dockerCp(containerName+":"+claudeJSON, filepath.Join(localPath, ".claude.json")); err != nil {
 			return err
 		}
-		fmt.Println("  .claude.json copied")
-	} else if claudeJSON != "" {
-		fmt.Println("  .claude.json not found in container (skipped)")
 	}
 
 	// secrets.env is NOT copied — it is manually maintained and contains
@@ -490,7 +584,7 @@ func runCopyOut(containerName, flagPath, homeOverride, orgDir string) error {
 // --copy-in: host → container
 // ---------------------------------------------------------------------------
 
-func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bool, orgDir string) error {
+func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bool, orgDir string, dryRun, essentialsOnly bool) error {
 	if containerName == "" {
 		return fmt.Errorf("--container is required with --copy-in")
 	}
@@ -515,42 +609,105 @@ func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bo
 
 	claudeDir, claudeJSON := ci.claudePaths()
 
-	fmt.Printf("Copying from %s → container %s (%s, user=%s)\n\n", localPath, containerName, ci.home, ci.user)
+	prefix := ""
+	if dryRun {
+		prefix = "[dry-run] "
+	}
 
-	if containerPathExists(containerName, claudeDir) {
-		if !force {
+	mode := "all"
+	if essentialsOnly {
+		mode = "essentials-only"
+	}
+	fmt.Printf("%sCopying from %s → container %s (%s, user=%s) [%s]\n\n", prefix, localPath, containerName, ci.home, ci.user, mode)
+
+	claudeDirExists := containerPathExists(containerName, claudeDir)
+	claudeDirNonEmpty := claudeDirExists && !containerDirEmpty(containerName, claudeDir)
+	if claudeDirNonEmpty {
+		if !force && !dryRun {
 			return fmt.Errorf("%s already exists in container %s (use --force to overwrite)", claudeDir, containerName)
 		}
-		// Clear contents without removing the directory (may be a mount point)
-		_, _ = dockerExecOutput(containerName, "sh", "-c",
-			fmt.Sprintf("rm -rf %s/* %s/.[!.]* 2>/dev/null || true", claudeDir, claudeDir))
-		fmt.Println("  cleared existing " + claudeDir)
+		if dryRun && !force {
+			fmt.Printf("  target %s exists in container (would need --force)\n", claudeDir)
+		}
+		if force && !essentialsOnly {
+			fmt.Printf("  %sclear existing %s\n", prefix, claudeDir)
+		}
+	} else if !claudeDirExists {
+		fmt.Printf("  %screate %s\n", prefix, claudeDir)
+	}
+
+	if essentialsOnly {
+		for _, name := range claudeEssentials {
+			src := filepath.Join(localClaudeDir, name)
+			if _, err := os.Stat(src); err == nil {
+				fmt.Printf("  %s%s → %s/%s\n", prefix, src, claudeDir, name)
+			}
+		}
+	} else {
+		fmt.Printf("  %s%s/ → %s/\n", prefix, localClaudeDir, claudeDir)
+	}
+
+	localClaudeJSON := filepath.Join(localPath, ".claude.json")
+	if claudeJSON != "" {
+		if _, err := os.Stat(localClaudeJSON); err == nil {
+			fmt.Printf("  %s%s → %s\n", prefix, localClaudeJSON, claudeJSON)
+		}
+	}
+
+	localSecrets := filepath.Join(localPath, "secrets.env")
+	if _, err := os.Stat(localSecrets); err == nil {
+		ateamOrgDir := ci.home + "/.ateamorg"
+		fmt.Printf("  %s%s → %s/secrets.env\n", prefix, localSecrets, ateamOrgDir)
+	}
+
+	if copyAteam {
+		binary := findLinuxBinary(orgDir)
+		if binary != "" {
+			fmt.Printf("  %s%s → %s:%s\n", prefix, binary, containerName, ateamContainerBinPath)
+		} else {
+			fmt.Printf("  %sateam binary: not found (run 'make companion')\n", prefix)
+		}
+	}
+
+	if dryRun {
+		return nil
 	}
 
 	if _, err := dockerExecOutput(containerName, "mkdir", "-p", claudeDir); err != nil {
 		return fmt.Errorf("creating %s in container: %w", claudeDir, err)
 	}
 
-	if err := dockerCp(localClaudeDir+"/.", containerName+":"+claudeDir+"/"); err != nil {
-		return err
+	if essentialsOnly {
+		for _, name := range claudeEssentials {
+			src := filepath.Join(localClaudeDir, name)
+			if _, err := os.Stat(src); err != nil {
+				continue
+			}
+			if err := dockerCp(src, containerName+":"+claudeDir+"/"+name); err != nil {
+				return err
+			}
+		}
+	} else {
+		if claudeDirNonEmpty && force {
+			_, _ = dockerExecOutput(containerName, "sh", "-c",
+				fmt.Sprintf("rm -rf %s/* %s/.[!.]* 2>/dev/null || true", claudeDir, claudeDir))
+		}
+		if err := dockerCp(localClaudeDir+"/.", containerName+":"+claudeDir+"/"); err != nil {
+			return err
+		}
 	}
-	fmt.Println("  .claude/ copied")
 
-	// Track what was actually copied for targeted chown
 	chownPaths := claudeDir
 
-	localClaudeJSON := filepath.Join(localPath, ".claude.json")
 	if claudeJSON != "" {
 		if _, err := os.Stat(localClaudeJSON); err == nil {
 			if err := dockerCp(localClaudeJSON, containerName+":"+claudeJSON); err != nil {
 				return err
 			}
-			fmt.Println("  .claude.json copied")
 			chownPaths += " " + claudeJSON
 		}
 	}
 
-	localSecrets := filepath.Join(localPath, "secrets.env")
 	if _, err := os.Stat(localSecrets); err == nil {
 		ateamOrgDir := ci.home + "/.ateamorg"
 		if _, err := dockerExecOutput(containerName, "mkdir", "-p", ateamOrgDir); err != nil {
@@ -559,7 +716,6 @@ func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bo
 		if err := dockerCp(localSecrets, containerName+":"+ateamOrgDir+"/secrets.env"); err != nil {
 			return err
 		}
-		fmt.Println("  secrets.env copied → " + ateamOrgDir + "/secrets.env")
 		chownPaths += " " + ateamOrgDir
 	}
 
