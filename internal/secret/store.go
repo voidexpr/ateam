@@ -60,11 +60,18 @@ type FileStore struct {
 	Path string
 }
 
-// Get returns the value for name, or ("", false) if not found.
-func (s *FileStore) Get(name string) (string, bool) {
-	entries, _ := s.readAll()
+// Get returns the value for name, or ("", false, nil) if not found.
+// Returns a non-nil error only for real I/O failures (not missing files).
+func (s *FileStore) Get(name string) (string, bool, error) {
+	entries, err := s.readAll()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
 	val, ok := entries[name]
-	return val, ok
+	return val, ok, nil
 }
 
 // Set writes or updates name=value in the file.
@@ -112,13 +119,20 @@ func (s *FileStore) Delete(name string) (bool, error) {
 }
 
 // List returns all key names in the file.
-func (s *FileStore) List() []string {
-	entries, _ := s.readAll()
+// Returns a non-nil error only for real I/O failures (not missing files).
+func (s *FileStore) List() ([]string, error) {
+	entries, err := s.readAll()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
 	var names []string
 	for k := range entries {
 		names = append(names, k)
 	}
-	return names
+	return names, nil
 }
 
 func (s *FileStore) readAll() (map[string]string, error) {

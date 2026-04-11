@@ -99,7 +99,7 @@ func (r *Resolver) resolveScope(scope Scope, name string) (string, string, bool)
 		}
 	}
 	store := &FileStore{Path: scope.EnvFile}
-	if val, ok := store.Get(name); ok {
+	if val, ok, err := store.Get(name); err == nil && ok {
 		return val, "file", true
 	}
 	if r.Backend == BackendFile && canKeychain {

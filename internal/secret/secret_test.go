@@ -18,7 +18,10 @@ func TestFileStoreSetAndGet(t *testing.T) {
 		t.Fatalf("Set: %v", err)
 	}
 
-	val, ok := store.Get("API_KEY")
+	val, ok, err := store.Get("API_KEY")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
 	if !ok {
 		t.Fatal("expected key to be found")
 	}
@@ -31,7 +34,10 @@ func TestFileStoreGetMissing(t *testing.T) {
 	dir := t.TempDir()
 	store := &FileStore{Path: filepath.Join(dir, "secrets.env")}
 
-	_, ok := store.Get("NONEXISTENT")
+	_, ok, err := store.Get("NONEXISTENT")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
 	if ok {
 		t.Fatal("expected key not found")
 	}
@@ -39,7 +45,10 @@ func TestFileStoreGetMissing(t *testing.T) {
 
 func TestFileStoreGetFromNonexistentFile(t *testing.T) {
 	store := &FileStore{Path: filepath.Join(t.TempDir(), "no", "such", "file.env")}
-	_, ok := store.Get("KEY")
+	_, ok, err := store.Get("KEY")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
 	if ok {
 		t.Fatal("expected key not found for nonexistent file")
 	}
@@ -52,7 +61,10 @@ func TestFileStoreSetOverwrite(t *testing.T) {
 	_ = store.Set("KEY", "v1")
 	_ = store.Set("KEY", "v2")
 
-	val, ok := store.Get("KEY")
+	val, ok, err := store.Get("KEY")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
 	if !ok || val != "v2" {
 		t.Fatalf("expected 'v2', got %q (found=%v)", val, ok)
 	}
@@ -85,12 +97,18 @@ func TestFileStoreDelete(t *testing.T) {
 		t.Fatal("expected key to be found for deletion")
 	}
 
-	_, ok := store.Get("A")
+	_, ok, err2 := store.Get("A")
+	if err2 != nil {
+		t.Fatalf("Get: %v", err2)
+	}
 	if ok {
 		t.Fatal("expected key to be gone after deletion")
 	}
 
-	val, ok := store.Get("B")
+	val, ok, err2 := store.Get("B")
+	if err2 != nil {
+		t.Fatalf("Get: %v", err2)
+	}
 	if !ok || val != "2" {
 		t.Fatal("expected other key to remain")
 	}
@@ -129,7 +147,10 @@ func TestFileStoreList(t *testing.T) {
 	_ = store.Set("X", "1")
 	_ = store.Set("Y", "2")
 
-	names := store.List()
+	names, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
 	if len(names) != 2 {
 		t.Fatalf("expected 2 keys, got %d", len(names))
 	}
