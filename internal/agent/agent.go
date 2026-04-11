@@ -19,6 +19,8 @@ type Agent interface {
 	// DebugCommandArgs returns the full command and args the agent would execute,
 	// including extraArgs. Used for verbose/diagnostic output.
 	DebugCommandArgs(extraArgs []string) (command string, args []string)
+	// SetModel overrides the model the agent will use.
+	SetModel(model string)
 }
 
 // ModelProvider is optionally implemented by agents that expose their model name.

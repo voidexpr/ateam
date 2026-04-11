@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
@@ -146,9 +145,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	// Apply model override
 	if runModel != "" {
-		if ca, ok := r.Agent.(*agent.ClaudeAgent); ok {
-			ca.Model = runModel
-		}
+		r.Agent.SetModel(runModel)
 	}
 
 	// Dry-run: print everything and exit

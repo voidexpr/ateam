@@ -35,6 +35,8 @@ func (c *ClaudeAgent) ModelName() string {
 	return c.DefaultModel
 }
 
+func (c *ClaudeAgent) SetModel(model string) { c.Model = model }
+
 func (c *ClaudeAgent) DebugCommandArgs(extraArgs []string) (string, []string) {
 	command := c.Command
 	if command == "" {
