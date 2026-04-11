@@ -46,34 +46,39 @@ func ExpandHome(path string) string {
 	return filepath.Join(home, path[2:])
 }
 
+// SandboxConfig groups all sandbox-related settings for agent execution.
+type SandboxConfig struct {
+	Settings         string   // inline JSON settings template (from runtime.hcl)
+	RWPaths          []string // from agent config rw_paths
+	ROPaths          []string // from agent config ro_paths
+	Denied           []string // from agent config denied_paths
+	ExtraWrite       []string // from config.toml [sandbox-extra]
+	ExtraRead        []string // from config.toml [sandbox-extra]
+	ExtraDomains     []string // from config.toml [sandbox-extra]
+	ExtraExcludedCmd []string // from config.toml [sandbox-extra]
+	ExtraWriteDirs   []string // additional dirs granted sandbox write access
+	InsideContainer  bool     // if false, skip sandbox inside containers
+}
+
 // Runner orchestrates agent execution with logging, file I/O, and progress reporting.
 type Runner struct {
-	Agent                   agent.Agent
-	Container               container.Container // nil means run on host
-	LogFile                 string              // append-only runner log
-	ProjectDir              string              // .ateam/ dir
-	OrgDir                  string              // .ateamorg/ dir
-	SourceDir               string              // project root (parent of .ateam/)
-	ProjectName             string              // from config.toml
-	ExtraWriteDirs          []string            // additional dirs granted sandbox write access
-	ExtraArgs               []string            // extra args passed to the agent
-	SandboxSettings         string              // inline JSON settings template (from runtime.hcl)
-	SandboxRWPaths          []string            // from agent config rw_paths
-	SandboxROPaths          []string            // from agent config ro_paths
-	SandboxDenied           []string            // from agent config denied_paths
-	SandboxExtraWrite       []string            // from config.toml [sandbox-extra]
-	SandboxExtraRead        []string            // from config.toml [sandbox-extra]
-	SandboxExtraDomains     []string            // from config.toml [sandbox-extra]
-	SandboxExtraExcludedCmd []string            // from config.toml [sandbox-extra]
-	ConfigDir               string              // CLAUDE_CONFIG_DIR; relative resolves from ProjectDir
-	ArgsInsideContainer     []string            // extra args when inside a container
-	ArgsOutsideContainer    []string            // extra args when on the host
-	SandboxInsideContainer  bool                // if false, skip sandbox inside containers
-	CallDB                  *calldb.CallDB      // nil = no DB tracking
-	Profile                 string              // profile name for DB
-	ContainerType           string              // "none" or "docker" for DB
-	ContainerName           string              // docker container name for liveness checks
-	ProjectID               string              // project ID for DB
+	Agent                agent.Agent
+	Container            container.Container // nil means run on host
+	LogFile              string              // append-only runner log
+	ProjectDir           string              // .ateam/ dir
+	OrgDir               string              // .ateamorg/ dir
+	SourceDir            string              // project root (parent of .ateam/)
+	ProjectName          string              // from config.toml
+	ExtraArgs            []string            // extra args passed to the agent
+	Sandbox              SandboxConfig       // sandbox filesystem/network restrictions
+	ConfigDir            string              // CLAUDE_CONFIG_DIR; relative resolves from ProjectDir
+	ArgsInsideContainer  []string            // extra args when inside a container
+	ArgsOutsideContainer []string            // extra args when on the host
+	CallDB               *calldb.CallDB      // nil = no DB tracking
+	Profile              string              // profile name for DB
+	ContainerType        string              // "none" or "docker" for DB
+	ContainerName        string              // docker container name for liveness checks
+	ProjectID            string              // project ID for DB
 }
 
 // RunOpts holds per-invocation settings.
@@ -209,9 +214,9 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	// Write sandbox settings if configured.
 	// Skip when: already inside a container, OR launching into a container (r.Container != nil),
 	// unless sandbox_inside_container is explicitly true.
-	skipSandbox := (IsInContainer() || r.Container != nil) && !r.SandboxInsideContainer
+	skipSandbox := (IsInContainer() || r.Container != nil) && !r.Sandbox.InsideContainer
 	var settingsJSON []byte
-	if r.SandboxSettings != "" && !skipSandbox {
+	if r.Sandbox.Settings != "" && !skipSandbox {
 		settingsTarget := prefix + "_settings.json"
 		var err error
 		settingsJSON, err = r.writeSettings(settingsTarget, opts)
@@ -561,11 +566,11 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 // RenderSettings generates the merged sandbox settings JSON without writing to disk.
 // workDir is the effective working directory (e.g. SourceDir).
 func (r *Runner) RenderSettings(workDir string) ([]byte, error) {
-	if r.SandboxSettings == "" {
+	if r.Sandbox.Settings == "" {
 		return nil, nil
 	}
 	var settings map[string]any
-	if err := json.Unmarshal([]byte(r.SandboxSettings), &settings); err != nil {
+	if err := json.Unmarshal([]byte(r.Sandbox.Settings), &settings); err != nil {
 		return nil, fmt.Errorf("cannot parse sandbox settings: %w", err)
 	}
 
@@ -577,7 +582,7 @@ func (r *Runner) RenderSettings(workDir string) ([]byte, error) {
 // merges in runtime paths, and writes the result to settingsPath.
 func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error) {
 	var settings map[string]any
-	if err := json.Unmarshal([]byte(r.SandboxSettings), &settings); err != nil {
+	if err := json.Unmarshal([]byte(r.Sandbox.Settings), &settings); err != nil {
 		return nil, fmt.Errorf("cannot parse sandbox settings: %w", err)
 	}
 
@@ -598,36 +603,36 @@ func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error
 // extraDenyWrite contains paths to deny (e.g. the settings file itself).
 func (r *Runner) mergeSandboxPaths(settings map[string]any, workDir string, extraDenyWrite []string) {
 	runtimeWriteDirs := []string{workDir}
-	runtimeWriteDirs = append(runtimeWriteDirs, r.ExtraWriteDirs...)
-	runtimeWriteDirs = append(runtimeWriteDirs, r.SandboxRWPaths...)
-	runtimeWriteDirs = append(runtimeWriteDirs, r.SandboxExtraWrite...)
+	runtimeWriteDirs = append(runtimeWriteDirs, r.Sandbox.ExtraWriteDirs...)
+	runtimeWriteDirs = append(runtimeWriteDirs, r.Sandbox.RWPaths...)
+	runtimeWriteDirs = append(runtimeWriteDirs, r.Sandbox.ExtraWrite...)
 
 	var runtimeReadDirs []string
 	if r.OrgDir != "" {
 		runtimeReadDirs = append(runtimeReadDirs, r.OrgDir)
 	}
-	runtimeReadDirs = append(runtimeReadDirs, r.SandboxExtraRead...)
+	runtimeReadDirs = append(runtimeReadDirs, r.Sandbox.ExtraRead...)
 
 	// additionalDirectories: project root, .ateamorg/, agent ro_paths
 	runtimeAdditionalDirs := []string{workDir}
 	if r.OrgDir != "" {
 		runtimeAdditionalDirs = append(runtimeAdditionalDirs, r.OrgDir)
 	}
-	runtimeAdditionalDirs = append(runtimeAdditionalDirs, r.SandboxROPaths...)
+	runtimeAdditionalDirs = append(runtimeAdditionalDirs, r.Sandbox.ROPaths...)
 
 	mergeStringList(settings, []string{"sandbox", "filesystem", "allowWrite"}, runtimeWriteDirs)
 	mergeStringList(settings, []string{"sandbox", "filesystem", "allowRead"}, runtimeReadDirs)
 	denyPaths := append([]string{}, extraDenyWrite...)
-	denyPaths = append(denyPaths, r.SandboxDenied...)
+	denyPaths = append(denyPaths, r.Sandbox.Denied...)
 	if len(denyPaths) > 0 {
 		mergeStringList(settings, []string{"sandbox", "filesystem", "denyWrite"}, denyPaths)
 	}
 	mergeStringList(settings, []string{"permissions", "additionalDirectories"}, runtimeAdditionalDirs)
-	if len(r.SandboxExtraDomains) > 0 {
-		mergeStringList(settings, []string{"sandbox", "network", "allowedDomains"}, r.SandboxExtraDomains)
+	if len(r.Sandbox.ExtraDomains) > 0 {
+		mergeStringList(settings, []string{"sandbox", "network", "allowedDomains"}, r.Sandbox.ExtraDomains)
 	}
-	if len(r.SandboxExtraExcludedCmd) > 0 {
-		mergeStringList(settings, []string{"sandbox", "excludedCommands"}, r.SandboxExtraExcludedCmd)
+	if len(r.Sandbox.ExtraExcludedCmd) > 0 {
+		mergeStringList(settings, []string{"sandbox", "excludedCommands"}, r.Sandbox.ExtraExcludedCmd)
 	}
 }
 

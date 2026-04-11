@@ -111,29 +111,13 @@ func resolveMap(m map[string]string, r *strings.Replacer) map[string]string {
 }
 
 // resolveContainerTemplates resolves {{VAR}} placeholders in container config fields.
-// Mutates the container in place. For DockerExecContainer, the ExecTemplate is not
-// resolved here — its {{CONTAINER}} and {{CMD}} placeholders are expanded by
-// CmdFactory at execution time (separate namespace from general template vars).
+// Mutates the container in place. Each container type handles its own fields via
+// the ResolveTemplates method on the Container interface.
 func resolveContainerTemplates(c container.Container, vars TemplateVars) {
 	if c == nil {
 		return
 	}
-	r := vars.Replacer()
-	switch dc := c.(type) {
-	case *container.DockerContainer:
-		dc.ExtraArgs = resolveArgs(dc.ExtraArgs, r)
-		dc.ExtraVolumes = resolveArgs(dc.ExtraVolumes, r)
-		dc.Env = resolveMap(dc.Env, r)
-	case *container.DockerExecContainer:
-		if strings.Contains(dc.ContainerName, "{{") {
-			dc.ContainerName = r.Replace(dc.ContainerName)
-		}
-		// ExecTemplate is NOT resolved here — its {{CONTAINER}} and {{CMD}}
-		// placeholders are expanded by CmdFactory at execution time.
-		if strings.Contains(dc.WorkDir, "{{") {
-			dc.WorkDir = r.Replace(dc.WorkDir)
-		}
-	}
+	c.ResolveTemplates(vars.Replacer())
 }
 
 // BuildTemplateVars constructs a fully populated TemplateVars.

@@ -291,10 +291,12 @@ func TestRenderSettingsSandboxExtra(t *testing.T) {
 	}`
 
 	r := &Runner{
-		SandboxSettings:     sandbox,
-		SandboxExtraWrite:   []string{"/extra/write"},
-		SandboxExtraRead:    []string{"/extra/read"},
-		SandboxExtraDomains: []string{"extra.example.com"},
+		Sandbox: SandboxConfig{
+			Settings:     sandbox,
+			ExtraWrite:   []string{"/extra/write"},
+			ExtraRead:    []string{"/extra/read"},
+			ExtraDomains: []string{"extra.example.com"},
+		},
 	}
 
 	data, err := r.RenderSettings("/work")
@@ -347,7 +349,9 @@ func TestRenderSettingsNoSandboxExtra(t *testing.T) {
 	}`
 
 	r := &Runner{
-		SandboxSettings: sandbox,
+		Sandbox: SandboxConfig{
+			Settings: sandbox,
+		},
 	}
 
 	data, err := r.RenderSettings("/work")
