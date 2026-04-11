@@ -5,16 +5,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"syscall"
 
 	"github.com/ateam/internal/root"
+	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
 )
 
 var (
 	claudeConfigDir string
 	claudeRaw       bool
+	claudeDryRun    bool
 )
 
 var claudeCmd = &cobra.Command{
@@ -42,9 +45,17 @@ Examples:
 func init() {
 	claudeCmd.Flags().StringVar(&claudeConfigDir, "config-dir", "", "shared config directory (default: <orgDir>/claude_linux_shared)")
 	claudeCmd.Flags().BoolVar(&claudeRaw, "raw", false, "run claude without --dangerously-skip-permissions and --remote-control")
+	claudeCmd.Flags().BoolVar(&claudeDryRun, "dry-run", false, "show what would be executed without running")
 }
 
 func runClaude(cmd *cobra.Command, args []string) error {
+	if goruntime.GOOS != "linux" {
+		return fmt.Errorf("ateam claude is only supported on Linux (current: %s)", goruntime.GOOS)
+	}
+	if !runner.IsInContainer() {
+		return fmt.Errorf("ateam claude must be run inside a Docker container (no /.dockerenv found)")
+	}
+
 	configDir := claudeConfigDir
 
 	if configDir == "" {
@@ -88,11 +99,20 @@ func runClaude(cmd *cobra.Command, args []string) error {
 		env = unsetEnv(env, key)
 	}
 
-	fmt.Printf("  set   CLAUDE_CONFIG_DIR=%s\n", configDir)
-	for _, key := range unsetKeys {
-		fmt.Printf("  unset %s\n", key)
+	prefix := ""
+	if claudeDryRun {
+		prefix = "[dry-run] "
 	}
-	fmt.Printf("  exec  %s %s\n\n", binary, strings.Join(claudeArgs, " "))
+
+	fmt.Printf("  %sset   CLAUDE_CONFIG_DIR=%s\n", prefix, configDir)
+	for _, key := range unsetKeys {
+		fmt.Printf("  %sunset %s\n", prefix, key)
+	}
+	fmt.Printf("  %sexec  %s %s\n\n", prefix, binary, strings.Join(claudeArgs, " "))
+
+	if claudeDryRun {
+		return nil
+	}
 
 	argv := append([]string{"claude"}, claudeArgs...)
 	return syscall.Exec(binary, argv, env)
