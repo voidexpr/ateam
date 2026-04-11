@@ -1,6 +1,6 @@
 BINARY = ateam
 
-.PHONY: build build-binary companion clean tidy check-tidy test test-all test-docker test-docker-live vuln docs lint fmt fmt-check install-hooks
+.PHONY: build build-binary companion clean tidy check-tidy check test test-all test-docker test-docker-live vuln docs lint fmt fmt-check install-hooks
 
 BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
@@ -27,8 +27,10 @@ tidy:
 check-tidy:
 	go mod tidy -diff
 
+check: test fmt-check check-tidy lint
+
 test:
-	go test ./...
+	go test -race ./...
 
 test-all: test test-docker test-docker-live
 
