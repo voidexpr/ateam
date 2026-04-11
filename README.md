@@ -218,6 +218,7 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 
 | Command | Description |
 |---------|-------------|
+| `ateam install` | Create a `.ateamorg/` directory with defaults |
 | `ateam init` | Initialize a project (`.ateam/` directory) |
 | `ateam auto-setup` | Auto-configure roles for your project |
 | `ateam report` | Run role analyses |
@@ -233,6 +234,7 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 | `ateam env` | Show environment and configuration status |
 | `ateam serve` | Web UI for browsing reports and sessions |
 | `ateam ps` | Recent run history |
+| `ateam inspect` | Show details and logs for agent runs |
 | `ateam cost` | Aggregated cost and token usage |
 | `ateam prompt` | Debug prompt assembly |
 | `ateam cat` | Pretty-print stream logs |
@@ -240,6 +242,7 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 | `ateam roles` | List available roles |
 | `ateam projects` | List projects in the organization |
 | `ateam update` | Update on-disk defaults to match binary |
+| `ateam version` | Print version, build, and system information |
 
 See [REFERENCE.md](REFERENCE.md) for full flag documentation, directory layout, prompt configuration, runtime configuration, and troubleshooting.
 
@@ -311,7 +314,7 @@ Use `--help` on any command for details. See [REFERENCE.md](REFERENCE.md) for mo
 
 You can also resume sessions from role agents, for example you can use 'claude --resume' and select a specific session to dive more into the findings or why a command the agent ran failed (but start with `ateam ps`, `ateam inspect`, `ateam cat` first).
 
-### How are agents executed by default ?
+### How are agents executed by default?
 
 Both Claude and Codex use their built-in sandbox mode. For Claude this means OS-level restrictions (Seatbelt/bubblewrap) limiting filesystem and network access.
 
@@ -323,7 +326,7 @@ Use the `ateam prompt --role ROLENAME --action report` to show the exact prompt 
 
 ### Why not just /simplify in claude ?
 
-`/simplify` only looks like at code refactoring and is great to use, ateam can look at many other aspects: testing, documentation, etc ...
+`/simplify` only looks at code refactoring and is great to use, ateam can look at many other aspects: testing, documentation, etc ...
 
 It actually fits very well as a first step before a full ateam cycle:
 
@@ -345,7 +348,7 @@ The `ateam run` command is a wrapper around coding to run one-shot, unattended p
 
 You can then use `ateam run` in your own scripts and build your own workflows reusing agent/container management without the ateam prompt/artifact part. It can be ran without an ateam project but does require an ateam org (which is created in $HOME by default).
 
-For example: `ateam run "/simplify my last few commits" && git commit . -m "round of simplify" && ateam run "Identify and code at most 5 code refactoring opportunities focused on performance and security. Make sure to commit each separately as soon as they are completed, do run tests between each and fix any issue introduced" --profile docker` and then go get than nice walk outside or valuable family time while your agent is at work. You shouldn't come back to see that it got stuck asking for a bash command approval at the first step.
+For example: `ateam run "/simplify my last few commits" && git commit . -m "round of simplify" && ateam run "Identify and code at most 5 code refactoring opportunities focused on performance and security. Make sure to commit each separately as soon as they are completed, do run tests between each and fix any issue introduced" --profile docker` and then go get a nice walk outside or valuable family time while your agent is at work. You shouldn't come back to see that it got stuck asking for a bash command approval at the first step.
 
 ### What size of project is it for ?
 
