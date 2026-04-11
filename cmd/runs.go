@@ -125,9 +125,5 @@ func runStatus(r calldb.RecentRow) string {
 	return "canceled"
 }
 
-func fmtStartedAt(s string) string {
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t.Format(runner.TimestampFormat)
-	}
-	return s
-}
+// fmtStartedAt is an alias for display.FmtRFC3339AsTimestamp.
+var fmtStartedAt = display.FmtRFC3339AsTimestamp

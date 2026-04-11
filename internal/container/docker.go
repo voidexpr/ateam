@@ -128,67 +128,55 @@ func (d *DockerContainer) cleanupDockerfileTmpDir() {
 	}
 }
 
-// CmdFactory returns a function that wraps commands in `docker run --rm -i`.
-func (d *DockerContainer) CmdFactory() CmdFactory {
+// baseRunArgs builds the common docker run argument list shared by CmdFactory and DebugCommand.
+// When forExec is true, environment variables are forwarded as KEY=VALUE (resolving host values);
+// when false (for display/logging), they are passed as bare KEY names.
+func (d *DockerContainer) baseRunArgs(forExec bool) []string {
 	containerCodePath, containerWorkDir, containerOrgPath := d.containerPaths()
-
 	mount := d.mountDir()
 
-	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		dockerArgs := []string{"run", "--rm", "-i"}
+	args := []string{"run", "--rm", "-i"}
 
-		// Mount code dir (git root or source dir)
-		if mount != "" {
-			dockerArgs = append(dockerArgs, "-v", mount+":"+containerCodePath+":"+d.sourceMountMode())
-		}
+	if mount != "" {
+		args = append(args, "-v", mount+":"+containerCodePath+":"+d.sourceMountMode())
+	}
+	if d.OrgDir != "" {
+		args = append(args, "-v", d.OrgDir+":"+containerOrgPath+":rw")
+	}
+	args = append(args, d.projectDirArgs()...)
+	if d.HostCLIPath != "" {
+		args = append(args, "-v", d.HostCLIPath+":/usr/local/bin/ateam:ro")
+	}
+	if d.ClaudeCredentialsFile != "" {
+		args = append(args, "-v", d.ClaudeCredentialsFile+":/home/agent/.claude/.credentials.json:ro")
+	}
+	for _, vol := range d.ExtraVolumes {
+		args = append(args, "-v", vol)
+	}
+	args = append(args, timezoneArgs()...)
+	args = append(args, "-w", containerWorkDir)
+	args = append(args, d.ExtraArgs...)
 
-		// Mount org dir
-		if d.OrgDir != "" {
-			dockerArgs = append(dockerArgs, "-v", d.OrgDir+":"+containerOrgPath+":rw")
-		}
-
-		// Mount .ateam/ read-write (overlays the read-only source mount)
-		dockerArgs = append(dockerArgs, d.projectDirArgs()...)
-
-		// Mount ateam CLI binary
-		if d.HostCLIPath != "" {
-			dockerArgs = append(dockerArgs, "-v", d.HostCLIPath+":/usr/local/bin/ateam:ro")
-		}
-
-		// Mount .credentials.json read-only for OAuth token session context
-		if d.ClaudeCredentialsFile != "" {
-			dockerArgs = append(dockerArgs, "-v", d.ClaudeCredentialsFile+":/home/agent/.claude/.credentials.json:ro")
-		}
-
-		// Extra volumes from container config (e.g. "../data:/data:ro")
-		for _, vol := range d.ExtraVolumes {
-			dockerArgs = append(dockerArgs, "-v", vol)
-		}
-
-		// Host timezone
-		dockerArgs = append(dockerArgs, timezoneArgs()...)
-
-		// Working directory
-		dockerArgs = append(dockerArgs, "-w", containerWorkDir)
-
-		// Extra docker run args from profile
-		dockerArgs = append(dockerArgs, d.ExtraArgs...)
-
-		// Forward env vars from host (use KEY=VALUE to ensure vars
-		// injected via os.Setenv by the secret store are forwarded).
+	if forExec {
 		for _, key := range d.ForwardEnv {
 			if val, ok := os.LookupEnv(key); ok {
-				dockerArgs = append(dockerArgs, "-e", key+"="+val)
+				args = append(args, "-e", key+"="+val)
 			}
 		}
+	} else {
+		for _, key := range d.ForwardEnv {
+			args = append(args, "-e", key)
+		}
+	}
+	args = append(args, d.envArgs()...)
+	args = append(args, d.Image)
+	return args
+}
 
-		// Literal env vars (e.g. DB_HOST=localhost)
-		dockerArgs = append(dockerArgs, d.envArgs()...)
-
-		// Image
-		dockerArgs = append(dockerArgs, d.Image)
-
-		// The actual command
+// CmdFactory returns a function that wraps commands in `docker run --rm -i`.
+func (d *DockerContainer) CmdFactory() CmdFactory {
+	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		dockerArgs := d.baseRunArgs(true)
 		dockerArgs = append(dockerArgs, name)
 		dockerArgs = append(dockerArgs, args...)
 
@@ -247,35 +235,8 @@ func (d *DockerContainer) Run(ctx context.Context, opts RunOpts) error {
 
 // DebugCommand returns the full docker command string for logging.
 func (d *DockerContainer) DebugCommand(opts RunOpts) string {
-	containerCodePath, containerWorkDir, containerOrgPath := d.containerPaths()
-
-	mount := d.mountDir()
-
-	parts := []string{"docker", "run", "--rm", "-i"}
-	if mount != "" {
-		parts = append(parts, "-v", mount+":"+containerCodePath+":"+d.sourceMountMode())
-	}
-	if d.OrgDir != "" {
-		parts = append(parts, "-v", d.OrgDir+":"+containerOrgPath+":rw")
-	}
-	parts = append(parts, d.projectDirArgs()...)
-	if d.HostCLIPath != "" {
-		parts = append(parts, "-v", d.HostCLIPath+":/usr/local/bin/ateam:ro")
-	}
-	if d.ClaudeCredentialsFile != "" {
-		parts = append(parts, "-v", d.ClaudeCredentialsFile+":/home/agent/.claude/.credentials.json:ro")
-	}
-	for _, vol := range d.ExtraVolumes {
-		parts = append(parts, "-v", vol)
-	}
-	parts = append(parts, timezoneArgs()...)
-	parts = append(parts, "-w", containerWorkDir)
-	parts = append(parts, d.ExtraArgs...)
-	for _, key := range d.ForwardEnv {
-		parts = append(parts, "-e", key)
-	}
-	parts = append(parts, d.envArgs()...)
-	parts = append(parts, d.Image, opts.Command)
+	parts := append([]string{"docker"}, d.baseRunArgs(false)...)
+	parts = append(parts, opts.Command)
 	parts = append(parts, opts.Args...)
 	return strings.Join(parts, " ")
 }

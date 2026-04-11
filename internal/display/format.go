@@ -5,6 +5,22 @@ import (
 	"time"
 )
 
+// TimestampFormat is the canonical layout for ateam timestamps in file names and display.
+const TimestampFormat = "2006-01-02_15-04-05"
+
+// FmtRFC3339AsTimestamp parses an RFC3339 string and reformats it using TimestampFormat.
+// Returns the original string on parse error, or "" for empty input.
+func FmtRFC3339AsTimestamp(s string) string {
+	if s == "" {
+		return ""
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return s
+	}
+	return t.Format(TimestampFormat)
+}
+
 func FmtTokens(n int64) string {
 	if n <= 0 {
 		return ""
