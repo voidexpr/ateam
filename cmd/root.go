@@ -46,6 +46,7 @@ func init() {
 	rootCmd.AddCommand(costCmd)
 	rootCmd.AddCommand(projectRenameCmd)
 	rootCmd.AddCommand(agentConfigCmd)
+	rootCmd.AddCommand(claudeCmd)
 	rootCmd.AddCommand(containerCpCmd)
 	rootCmd.AddCommand(parallelCmd)
 	rootCmd.AddCommand(serveCmd)
