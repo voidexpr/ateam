@@ -27,17 +27,23 @@ var claudeCmd = &cobra.Command{
 .claude.json, settings.json) is stored in a single directory.
 
 By default adds --dangerously-skip-permissions and --remote-control.
-Use --raw to run claude without these flags.
+Use --raw to run claude without these flags. Only runs on Linux inside
+a Docker container.
 
-This is the recommended way to run interactive claude in Docker containers
-with a shared config mount. CLAUDE_CONFIG_DIR is set only for the claude
-process — it does not affect ateam agent execution.
+The recommended setup is to mount the shared config from the host:
+  -v "$(ateam env --print-org)/claude_linux_shared:/path/in/container"
+
+Then run: ateam claude --config-dir /path/in/container
+
+Or manually:
+  CLAUDE_CONFIG_DIR=/path/in/container claude --dangerously-skip-permissions --remote-control
 
 Examples:
-  ateam claude                                      # uses <orgDir>/claude_linux_shared
-  ateam claude --config-dir ~/shared_claude          # explicit path
-  ateam claude --raw                                 # no default flags
-  ateam claude -- -p "hello"                         # pass args to claude`,
+  ateam claude                                       # uses <orgDir>/claude_linux_shared
+  ateam claude --config-dir ~/shared_claude           # explicit path
+  ateam claude --raw                                  # no default flags
+  ateam claude -- --name "my-session"                 # pass args to claude
+  ateam claude -- -p "hello"                          # headless mode`,
 	Args: cobra.ArbitraryArgs,
 	RunE: runClaude,
 }

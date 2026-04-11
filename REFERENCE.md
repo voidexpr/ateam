@@ -226,6 +226,8 @@ ateam agent-config --setup-interactive                    # bootstrap interactiv
 | `--home PATH` | Override container home directory (auto-detected by default) |
 | `--force` | Overwrite existing config in container (for `--copy-in`) |
 | `--copy-ateam` | Also copy ateam linux binary into the container (for `--copy-in`) |
+| `--dry-run` | Show what would be copied without executing |
+| `--essentials-only` | Copy only essential files (credentials, settings, plugins, skills, hooks, backups) |
 | `--setup-interactive` | Bootstrap an interactive Claude session from a saved refresh token |
 
 **`--audit`** detects all auth sources (env vars, ateam secrets, credential files, keychain), runs `claude auth status` for ground truth, and warns on mismatches. With `--container`, runs audit remotely via `docker exec`.
@@ -249,10 +251,37 @@ ateam container-cp --profile my-app
 
 | Flag | Description |
 |------|-------------|
-| `--container-name NAME` | Target container name |
+| `--container-name NAME` | Target container name (supports partial matching) |
 | `--profile NAME` | Read container name from profile's `docker_container` field |
+| `--dry-run` | Show what would be copied without executing |
 
 Requires a pre-built linux binary (`make companion` produces `build/ateam-linux-amd64`).
+
+### `ateam claude`
+
+Run interactive claude inside a Docker container with a shared config directory. Only works on Linux inside a container.
+
+```bash
+ateam claude                                       # uses <orgDir>/claude_linux_shared
+ateam claude --config-dir ~/shared_claude           # explicit path
+ateam claude --raw                                  # no default flags
+ateam claude -- --name "my-session"                 # pass args to claude
+```
+
+| Flag | Description |
+|------|-------------|
+| `--config-dir PATH` | Shared config directory (default: `<orgDir>/claude_linux_shared`) |
+| `--raw` | Run claude without `--dangerously-skip-permissions` and `--remote-control` |
+| `--dry-run` | Show what would be executed without running |
+
+Sets `CLAUDE_CONFIG_DIR` so all Claude state (`.credentials.json`, `.claude.json`, `settings.json`) lives in a single mounted directory. Unsets `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` to avoid auth conflicts.
+
+**Recommended mount setup** (from the host):
+```bash
+docker run \
+  -v "$(ateam env --print-org)/claude_linux_shared:/home/agent/shared_claude" \
+  ...
+```
 
 ### `ateam run`
 

@@ -11,7 +11,6 @@ import (
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/root"
-	"github.com/ateam/internal/secret"
 	"github.com/spf13/cobra"
 )
 
@@ -186,21 +185,6 @@ func runAgentConfigAudit(projectDir, orgDir string) error {
 		fmt.Println("  Or save to ateam secrets:")
 		fmt.Println("    ateam secret CLAUDE_CODE_OAUTH_REFRESH_TOKEN --set")
 		fmt.Println()
-	}
-
-	if val := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); val != "" {
-		fmt.Println("Headless token detected. To use in another environment:")
-		fmt.Println()
-		fmt.Printf("  export CLAUDE_CODE_OAUTH_TOKEN=%s\n", val)
-		fmt.Println()
-	} else if status.HasSecretOAuth {
-		resolver := secret.NewResolver(projectDir, orgDir, secret.DefaultBackend(), nil)
-		if r := resolver.Resolve("CLAUDE_CODE_OAUTH_TOKEN"); r.Found {
-			fmt.Println("Headless token detected. To use in another environment:")
-			fmt.Println()
-			fmt.Printf("  export CLAUDE_CODE_OAUTH_TOKEN=%s\n", r.Value)
-			fmt.Println()
-		}
 	}
 
 	return nil
