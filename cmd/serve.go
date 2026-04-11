@@ -9,12 +9,13 @@ import (
 var (
 	servePort   int
 	serveNoOpen bool
+	servePublic bool
 )
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start a web interface for browsing reports, prompts, and runs",
-	Long: `Start a localhost-only read-only web server.
+	Long: `Start a read-only web server (localhost-only by default).
 
 When run inside a project, shows only that project.
 When run outside, lists all registered projects.
@@ -22,7 +23,8 @@ When run outside, lists all registered projects.
 Example:
   ateam serve
   ateam serve --port 8080
-  ateam serve --no-open`,
+  ateam serve --no-open
+  ateam serve --public --port 8080`,
 	Args: cobra.NoArgs,
 	RunE: runServe,
 }
@@ -30,6 +32,7 @@ Example:
 func init() {
 	serveCmd.Flags().IntVar(&servePort, "port", 0, "port to listen on (0 = random)")
 	serveCmd.Flags().BoolVar(&serveNoOpen, "no-open", false, "do not open the browser automatically")
+	serveCmd.Flags().BoolVar(&servePublic, "public", false, "bind to 0.0.0.0 instead of 127.0.0.1 (allow access from other machines)")
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -56,5 +59,5 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer srv.Close()
 
-	return srv.ListenAndServe(port, !serveNoOpen)
+	return srv.ListenAndServe(port, !serveNoOpen, servePublic)
 }
