@@ -222,7 +222,7 @@ ateam agent-config --setup-interactive                    # bootstrap interactiv
 | `--copy-out` | Copy `.claude/` and `.claude.json` from a container to a local directory |
 | `--copy-in` | Copy `.claude/`, `.claude.json`, and `secrets.env` into a container |
 | `--container NAME` | Target container (for `--copy-out`, `--copy-in`, `--audit`) |
-| `--path PATH` | Local directory for agent config (default: `<ateamorg>/linux-shared-claude`) |
+| `--path PATH` | Local directory for agent config (default: `<ateamorg>/claude_linux_shared`) |
 | `--home PATH` | Override container home directory (auto-detected by default) |
 | `--force` | Overwrite existing config in container (for `--copy-in`) |
 | `--copy-ateam` | Also copy ateam linux binary into the container (for `--copy-in`) |

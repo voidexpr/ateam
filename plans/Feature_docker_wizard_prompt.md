@@ -19,7 +19,62 @@ Make the following changes:
         * configure ateam secrets with agent env variables and API keys as needed
 * Produce:
     * Dockerfile
-    * docker.sh [--help] build | start | stop | restart | status | shell | exec | claude | codex [--container NAME]
+    * docker.sh [--help] build | precheck | start | stop | restart | status | shell | exec | claude | codex [--container NAME]
+
+Options / hints:
+* --agent yes/no
+* --ateam yes/no
+* --workspace PATH (force a specific path)
+* --syspackages yes/no (iotop, htop, etc ...)
+* --codex yes/no
+* --remote-control
+
+Actions
+precheck is designed to work with ateam precheck container script and can used as:
+
+    precheck = docker/docker.sh precheck --container
+
+It will:
+* build if necessary
+* start if necessary
+
+Q: firewall stuff ?
+Q: devcontainer ?
+
+docker/docker.sh claude --remote-control
+
+alias: dcrc
+
+.env.docker convention ?
+
+Idea:
+* also support a generic super-set docker container to get started or quickly jump onto a project with a known env
+    * see: https://github.com/CoderLuii/HolyClaude
+
+
+Additional research for ideas:
+
+    Let me search for this — there are some emerging projects in this space.Good finds. There are several projects in this space, ranging from "generate a Dockerfile for my project" to "batteries-included AI coding workstation." Here's the landscape:
+
+    ---
+
+    **1. [ClaudeBox](https://github.com/RchGrav/claudebox)** (~849 stars) — the closest match to what you described. It provides per-project Docker isolation with development profiles you can compose (e.g., `claudebox profile python ml` or `claudebox profile rust go`). It includes network isolation with project-specific firewall allowlists, GitHub CLI, delta, fzf, zsh with oh-my-zsh powerline, and automatic per-project venv creation with uv. It also handles tmux socket mounting for multi-pane workflows. Claude Code is pre-installed inside the container. The profile system is the key differentiator — it builds project-appropriate Docker images with common dev packages baked in. It's a bash script, not something that uses AI to *generate* the Dockerfile, but it's the "quickly configure docker for a given dev project" tool you're describing.
+
+    **2. [HolyClaude](https://github.com/CoderLuii/HolyClaude)** — a different philosophy: one mega-container with everything pre-installed. It bundles Claude Code, Gemini CLI, OpenAI Codex, Cursor, TaskMaster AI, Junie, and OpenCode, plus a CloudCLI web UI on port 3001, headless Chromium with Xvfb and Playwright, and 50+ dev tools including Node.js 22, Python 3, database clients, and deployment CLIs. It uses s6-overlay as PID 1 for process supervision, with bind mounts for credentials and workspace. It handles the TZ passthrough, the Chromium shm_size gotcha, UID remapping, etc. This is more "AI coding workstation" than "per-project Dockerfile generator," but it solves the "common dev packages, timezone, practical choices" part very well. The same author also has [HolyCode](https://github.com/CoderLuii/HolyCode) which wraps OpenCode instead of CloudCLI.
+
+    **3. [cco (Claude Code condom)](https://github.com/nikvdp/cco)** — thinner wrapper, different goal. One command (`cco "help me code"`) with zero configuration, no IDE dependency, instant startup, automatic macOS Keychain integration for credentials, and host UID mapping. It supports both a native sandbox mode and a Docker fallback. It also sandboxes OpenAI Codex, OpenCode, and other agents. Less opinionated about dev packages — it's more about the isolation wrapper than the environment setup.
+
+    **4. [claude-docker](https://github.com/VishalJ99/claude-docker)** — mounts your host's conda environments directly into the container so they work without Dockerfile modifications, auto-loads git config from the host, and has a modular plugin system for MCP servers. More focused on ML/conda workflows.
+
+    **5. Anthropic's official devcontainer** — a reference `.devcontainer` setup with Dockerfile, `devcontainer.json`, and `init-firewall.sh` that implements network security with domain whitelisting, works with VS Code Dev Containers extension, and comes with Claude Code preinstalled. It's the blessed starting point but fairly minimal — you'd customize it per project. Available at [code.claude.com/docs/en/devcontainer](https://code.claude.com/docs/en/devcontainer).
+
+    **6. Docker Sandboxes** — Docker's own approach. Run `sbx run claude` from inside your project and it launches Claude Code in an isolated sandbox with `--dangerously-skip-permissions` by default, using the `docker/sandbox-templates:claude-code` base image. Lightweight and ephemeral, but you can build custom images on top.
+
+    ---
+
+    **On the "AI generates the Dockerfile" angle specifically:** I didn't find a mature standalone tool that uses Claude (or any LLM) to *analyze your project and generate a custom Dockerfile*. The closest pattern is just asking Claude Code itself — `claude "generate a Dockerfile for this project with dev tools, timezone sync, and a non-root user"` — which works well in practice since it can read your `package.json`/`go.mod`/`pyproject.toml` and make reasonable choices. Docker's [compose-for-agents](https://github.com/docker/compose-for-agents) repo has some templates but it's more about agent runtimes than project-specific Dockerfile generation.
+
+    **For your ATeam use case specifically**, ClaudeBox's profile system is probably the most relevant starting point — it already handles per-project isolation, dev tooling, and credential management. The gap is that none of these projects explicitly wire up `/remote-control` support (they all focus on `--dangerously-skip-permissions` instead), so you'd still need your `claude-auth.sh` approach for the OAuth token with the `user:sessions:claude_code` scope.
 
 ---
 
@@ -113,9 +168,9 @@ The script should:
    fi
    args+=(-e "TZ=${TZ:-$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||' || echo UTC)}")
    ```
-5. **Mount shared Claude config** if it exists. Check `<ateamorg>/linux-shared-claude/` (where `<ateamorg>` is resolved from `ateam env` output or defaults to `~/.ateamorg`). If the directory contains `.claude/`, `.claude.json`, and/or `secrets.env`, mount them:
+5. **Mount shared Claude config** if it exists. Check `<ateamorg>/claude_linux_shared/` (where `<ateamorg>` is resolved from `ateam env` output or defaults to `~/.ateamorg`). If the directory contains `.claude/`, `.claude.json`, and/or `secrets.env`, mount them:
    ```bash
-   SHARED_CLAUDE="$ATEAMORG_DIR/linux-shared-claude"
+   SHARED_CLAUDE="$ATEAMORG_DIR/claude_linux_shared"
    if [[ -d "$SHARED_CLAUDE/.claude" ]]; then
        args+=(-v "$SHARED_CLAUDE/.claude:/home/agent/.claude")
    fi

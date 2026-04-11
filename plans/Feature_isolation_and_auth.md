@@ -270,7 +270,7 @@ A single host directory holds the complete Linux agent identity: credentials, ac
 ### Host layout
 
 ```
-~/.ateamorg/linux-shared-claude/
+~/.ateamorg/claude_linux_shared/
   .claude/          # mounted as $HOME/.claude
   .claude.json      # mounted as $HOME/.claude.json
   secrets.env       # mounted as $HOME/.ateamorg/secrets.env (org scope)
@@ -283,13 +283,13 @@ Three mounts from the shared dir into any container:
 
 ```bash
 docker run \
-  -v ~/.ateamorg/linux-shared-claude/.claude:/home/agent/.claude \
-  -v ~/.ateamorg/linux-shared-claude/.claude.json:/home/agent/.claude.json \
-  -v ~/.ateamorg/linux-shared-claude/secrets.env:/home/agent/.ateamorg/secrets.env \
+  -v ~/.ateamorg/claude_linux_shared/.claude:/home/agent/.claude \
+  -v ~/.ateamorg/claude_linux_shared/.claude.json:/home/agent/.claude.json \
+  -v ~/.ateamorg/claude_linux_shared/secrets.env:/home/agent/.ateamorg/secrets.env \
   ...
 ```
 
-`start.sh --volume ~/.ateamorg/linux-shared-claude` handles this automatically.
+`start.sh --volume ~/.ateamorg/claude_linux_shared` handles this automatically.
 
 Inside the container:
 - Interactive `claude` works (`.credentials.json` + `.claude.json` present)
@@ -311,7 +311,7 @@ ateam agent-config --copy-out --container NAME [--path PATH] [--home CUSTOM_HOME
 ateam agent-config --copy-in --container NAME [--path PATH] [--force] [--copy-ateam] [--home CUSTOM_HOME]
 ```
 
-`--path` defaults to `~/.ateamorg/linux-shared-claude/`.
+`--path` defaults to `~/.ateamorg/claude_linux_shared/`.
 
 `--home` overrides the container home directory. Auto-detected via `docker exec CONTAINER sh -c 'echo $HOME'` by default.
 
@@ -352,7 +352,7 @@ One-time setup for a new Linux shared agent config:
 
 ```bash
 # 1. Start a container with a fresh volume
-start.sh --name setup --volume ~/.ateamorg/linux-shared-claude
+start.sh --name setup --volume ~/.ateamorg/claude_linux_shared
 
 # 2. Inside the container: interactive login
 claude auth login

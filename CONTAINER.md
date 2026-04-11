@@ -408,7 +408,7 @@ For running the same Claude identity across multiple containers, create a shared
 ### Host layout
 
 ```
-~/.ateamorg/linux-shared-claude/
+~/.ateamorg/claude_linux_shared/
   .claude/          # Claude config directory
   .claude.json      # Claude account state
   secrets.env       # CLAUDE_CODE_OAUTH_TOKEN for headless agents
@@ -418,7 +418,7 @@ For running the same Claude identity across multiple containers, create a shared
 
 ```bash
 # 1. Start a container with a fresh volume
-./test/docker-auth/start.sh --name setup --volume ~/.ateamorg/linux-shared-claude
+./test/docker-auth/start.sh --name setup --volume ~/.ateamorg/claude_linux_shared
 
 # 2. Inside the container: interactive login
 claude auth login
@@ -442,16 +442,16 @@ exit
 
 ```bash
 docker run \
-  -v ~/.ateamorg/linux-shared-claude/.claude:/home/agent/.claude \
-  -v ~/.ateamorg/linux-shared-claude/.claude.json:/home/agent/.claude.json \
-  -v ~/.ateamorg/linux-shared-claude/secrets.env:/home/agent/.ateamorg/secrets.env \
+  -v ~/.ateamorg/claude_linux_shared/.claude:/home/agent/.claude \
+  -v ~/.ateamorg/claude_linux_shared/.claude.json:/home/agent/.claude.json \
+  -v ~/.ateamorg/claude_linux_shared/secrets.env:/home/agent/.ateamorg/secrets.env \
   ...
 ```
 
 Or with `start.sh`, which handles all three mounts automatically:
 
 ```bash
-./test/docker-auth/start.sh --name worker --volume ~/.ateamorg/linux-shared-claude
+./test/docker-auth/start.sh --name worker --volume ~/.ateamorg/claude_linux_shared
 ```
 
 **Copy in** (for containers where you can't change mounts):
@@ -460,12 +460,12 @@ Or with `start.sh`, which handles all three mounts automatically:
 ateam agent-config --copy-in --container my-app --force --copy-ateam
 ```
 
-This copies `.claude/`, `.claude.json`, and `secrets.env` from `~/.ateamorg/linux-shared-claude/` (default path) into the container, fixes file ownership, and optionally copies the ateam binary.
+This copies `.claude/`, `.claude.json`, and `secrets.env` from `~/.ateamorg/claude_linux_shared/` (default path) into the container, fixes file ownership, and optionally copies the ateam binary.
 
 **Copy out** (to capture a container's config):
 
 ```bash
-ateam agent-config --copy-out --container my-app --path ~/.ateamorg/linux-shared-claude
+ateam agent-config --copy-out --container my-app --path ~/.ateamorg/claude_linux_shared
 ```
 
 Copies `.claude/` and `.claude.json` from the container. Does NOT overwrite `secrets.env` (it is manually maintained).
