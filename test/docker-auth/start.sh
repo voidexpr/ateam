@@ -113,6 +113,10 @@ if [[ -d "$ateamorg_claude_shared_dir" ]]; then
     args+=(-v "$ateamorg_claude_shared_dir:/.ateamorg/$claude_shared_dir:rw")
 fi
 
+if [[ -e "$ateamorg_claude_shared_dir/secrets.env" ]]; then
+    args+=(-v "$ateamorg_claude_shared_dir/secrets.env:/home/agent/.config/ateam/secrets.env:ro")
+fi
+
 if [[ -n "$shared_claude" ]]; then
     shared_claude="$(cd "$shared_claude" && pwd)"
     args+=(-v "$shared_claude:/home/agent/shared_claude")
