@@ -1,10 +1,11 @@
-FROM debian:bookworm-slim
+FROM node:20-bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl sudo ca-certificates \
     ripgrep fd-find jq tree make silversearcher-ag bubblewrap socat \
     python3 python3-pip \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && npm install -g @anthropic-ai/claude-code
 
 ARG USER_UID=1000
 RUN if getent passwd $USER_UID >/dev/null 2>&1; then \
@@ -26,15 +27,6 @@ RUN ln -sf /opt/ateam/ateam-linux-amd64 /usr/local/bin/ateam
 
 COPY test/docker-auth/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
-
-# Install Claude CLI directly to /usr/local/bin (skip claude install which
-# puts files in ~/.claude/bin — conflicts with volume mount).
-ARG CLAUDE_VERSION=2.1.101
-RUN ARCH=$(uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/') \
-    && BUCKET="https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases" \
-    && VERSION=$(curl -fsSL "$BUCKET/latest") \
-    && curl -fsSL -o /usr/local/bin/claude "$BUCKET/$VERSION/linux-$ARCH/claude" \
-    && chmod +x /usr/local/bin/claude
 
 USER agent
 RUN echo "alias ll='ls -alFh'" >> ~/.bashrc \
