@@ -10,6 +10,7 @@ var (
 	servePort   int
 	serveNoOpen bool
 	servePublic bool
+	serveBind   string
 )
 
 var serveCmd = &cobra.Command{
@@ -24,7 +25,8 @@ Example:
   ateam serve
   ateam serve --port 8080
   ateam serve --no-open
-  ateam serve --public --port 8080`,
+  ateam serve --public --port 8080
+  ateam serve --bind 192.168.1.50 --port 8080`,
 	Args: cobra.NoArgs,
 	RunE: runServe,
 }
@@ -33,6 +35,7 @@ func init() {
 	serveCmd.Flags().IntVar(&servePort, "port", 0, "port to listen on (0 = random)")
 	serveCmd.Flags().BoolVar(&serveNoOpen, "no-open", false, "do not open the browser automatically")
 	serveCmd.Flags().BoolVar(&servePublic, "public", false, "bind to 0.0.0.0 instead of 127.0.0.1 (allow access from other machines)")
+	serveCmd.Flags().StringVar(&serveBind, "bind", "", "bind to a specific IP address (e.g. 192.168.1.50)")
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
@@ -59,5 +62,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer srv.Close()
 
-	return srv.ListenAndServe(port, !serveNoOpen, servePublic)
+	host := "127.0.0.1"
+	if serveBind != "" {
+		host = serveBind
+	} else if servePublic {
+		host = "0.0.0.0"
+	}
+
+	return srv.ListenAndServe(port, !serveNoOpen, host)
 }

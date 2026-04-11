@@ -423,6 +423,7 @@ Start a localhost web UI for browsing reports, reviews, sessions, and cost data.
 | `--port N` | Listen on a fixed port (default: random, configurable in `config.toml`) |
 | `--no-open` | Do not open the browser automatically |
 | `--public` | Bind to `0.0.0.0` instead of `127.0.0.1` (allow access from other machines) |
+| `--bind IP` | Bind to a specific IP address (e.g. `192.168.1.50`) |
 
 ### `ateam cat`
 
