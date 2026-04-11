@@ -15,6 +15,7 @@ import (
 )
 
 var envClaudeSandbox bool
+var envPrintOrg bool
 
 var envCmd = &cobra.Command{
 	Use:   "env",
@@ -28,12 +29,18 @@ This command is read-only — it never creates or modifies anything.`,
 
 func init() {
 	envCmd.Flags().BoolVar(&envClaudeSandbox, "claude-sandbox", false, "print the generated Claude sandbox settings JSON")
+	envCmd.Flags().BoolVar(&envPrintOrg, "print-org", false, "print the absolute path to the org directory")
 }
 
 func runEnv(cmd *cobra.Command, args []string) error {
 	env, err := root.Lookup(orgFlag, projectFlag)
 	if err != nil {
 		fmt.Printf("Org: (not found — run 'ateam install' to set up)\n")
+		return nil
+	}
+
+	if envPrintOrg {
+		fmt.Println(env.OrgDir)
 		return nil
 	}
 
@@ -186,6 +193,18 @@ func printDockerfileLine(env *root.ResolvedEnv, cwd string) {
 
 func printProjectSection(env *root.ResolvedEnv, cwd string) {
 	fmt.Printf("\nProject: %s\n", env.ProjectName)
+
+	// Bidi check: verify org knows about this project at the correct path
+	if env.OrgDir != "" && env.SourceDir != "" {
+		projectID := env.ProjectID()
+		if projectID != "" {
+			stateDir := filepath.Join(env.OrgDir, "projects", projectID)
+			if _, err := os.Stat(stateDir); os.IsNotExist(err) {
+				fmt.Printf("  Warning: project not registered in org (no %s/projects/%s)\n", filepath.Base(env.OrgDir), projectID)
+				fmt.Println("  Run 'ateam project-rename' to register this project")
+			}
+		}
+	}
 
 	dbPath := env.ProjectDBPath()
 	if fileOrSymlinkExists(dbPath) {
