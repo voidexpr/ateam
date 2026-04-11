@@ -15,6 +15,7 @@ set -euo pipefail
 #   --detach             Run in background
 #   --rm                 Remove container on exit (default: true)
 #   --keep               Don't remove container on exit
+#   --shared-claude DIR  Host directory to mount at /home/agent/shared_claude
 #
 # Everything after -- is passed to claude (e.g., -- -p "hello")
 
@@ -28,6 +29,7 @@ image="ateam-auth-test"
 interactive=true
 detach=false
 auto_rm=true
+shared_claude=""
 claude_args=()
 
 while [[ $# -gt 0 ]]; do
@@ -40,6 +42,7 @@ while [[ $# -gt 0 ]]; do
         --detach)      detach=true; interactive=false; shift ;;
         --rm)          auto_rm=true; shift ;;
         --keep)        auto_rm=false; shift ;;
+        --shared-claude) shared_claude="$2"; shift 2 ;;
         -h|--help)
             sed -n '3,/^$/{s/^# *//;p;}' "$0"
             exit 0
@@ -79,6 +82,8 @@ if [[ ! -f "$ateam_build_dir/ateam-linux-amd64" ]]; then
 fi
 
 # Build docker run args
+host_path_mode=false
+[[ "$volume" == /* ]] && host_path_mode=true
 args=(run)
 $auto_rm && args+=(--rm)
 args+=(--name "$name")
@@ -98,6 +103,11 @@ fi
 args+=(-v "$workspace:/workspace")
 args+=(-v "$ateam_build_dir:/opt/ateam:ro")
 
+if [[ -n "$shared_claude" ]]; then
+    shared_claude="$(cd "$shared_claude" && pwd)"
+    args+=(-v "$shared_claude:/home/agent/shared_claude")
+fi
+
 # Sync timezone with host
 if [[ -f /etc/localtime ]]; then
     args+=(-v "/etc/localtime:/etc/localtime:ro")
@@ -107,6 +117,7 @@ args+=(-e "TZ=${TZ:-$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/|
 echo "Container:  $name"
 echo "Volume:     $volume"
 echo "Workspace:  $workspace"
+[[ -n "$shared_claude" ]] && echo "Shared:     $shared_claude"
 echo "Image:      $image"
 
 if [[ ${#claude_args[@]} -gt 0 ]]; then
