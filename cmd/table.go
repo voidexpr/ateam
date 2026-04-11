@@ -474,16 +474,16 @@ func findLinuxBinary(orgDir string) string {
 	}
 	exe, _ = filepath.EvalSymlinks(exe)
 
-	// 2. Companion binary next to host binary (e.g. from a release archive).
-	companion := filepath.Join(filepath.Dir(exe), "ateam-linux-amd64")
-	if info, err := os.Stat(companion); err == nil && !info.IsDir() {
-		return companion
-	}
-
-	// 3. build/ directory (from `make companion` in dev).
+	// 2. build/ directory (from `make companion` in dev).
 	buildDir := filepath.Join(filepath.Dir(exe), "build", "ateam-linux-amd64")
 	if info, err := os.Stat(buildDir); err == nil && !info.IsDir() {
 		return buildDir
+	}
+
+	// 3. Companion binary next to host binary (e.g. from a release archive).
+	companion := filepath.Join(filepath.Dir(exe), "ateam-linux-amd64")
+	if info, err := os.Stat(companion); err == nil && !info.IsDir() {
+		return companion
 	}
 
 	// 4. Cached in orgDir from a prior auto cross-compilation.
@@ -551,6 +551,30 @@ func dockerExecOutput(container string, args ...string) (string, error) {
 		return "", fmt.Errorf("docker exec %s %s: %w", container, strings.Join(args, " "), err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// resolveContainerName resolves a possibly-partial container name to the exact
+// Docker container name via substring matching. An exact name matches itself.
+func resolveContainerName(name string) (string, error) {
+	out, err := exec.Command("docker", "ps", "--filter", "name="+name, "--format", "{{.Names}}").Output()
+	if err != nil {
+		return "", fmt.Errorf("docker ps: %w", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var matches []string
+	for _, l := range lines {
+		if l != "" {
+			matches = append(matches, l)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no running container matching %q", name)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("ambiguous container name %q matches %d containers: %s", name, len(matches), strings.Join(matches, ", "))
+	}
 }
 
 func dockerCp(src, dst string) error {

@@ -11,6 +11,7 @@ import (
 var (
 	containerCpProfile   string
 	containerCpContainer string
+	containerCpDryRun    bool
 )
 
 var containerCpCmd = &cobra.Command{
@@ -28,6 +29,7 @@ Example:
 func init() {
 	containerCpCmd.Flags().StringVar(&containerCpProfile, "profile", "", "profile to read container name from")
 	containerCpCmd.Flags().StringVar(&containerCpContainer, "container-name", "", "target container name (overrides profile)")
+	containerCpCmd.Flags().BoolVar(&containerCpDryRun, "dry-run", false, "show what would be copied without executing")
 }
 
 func runContainerCp(cmd *cobra.Command, args []string) error {
@@ -58,23 +60,25 @@ func runContainerCp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("specify --container-name or --profile")
 	}
 
+	containerName, err := resolveContainerName(containerName)
+	if err != nil {
+		return err
+	}
+
 	env, _ := root.Lookup("", "")
 	orgDir := ""
 	if env != nil {
 		orgDir = env.OrgDir
 	}
-	binary := findLinuxBinary(orgDir)
-	if binary == "" {
-		return fmt.Errorf("no linux ateam binary found (run 'make companion' to build one)")
+
+	if containerCpDryRun {
+		binary := findLinuxBinary(orgDir)
+		if binary == "" {
+			return fmt.Errorf("no linux ateam binary found (run 'make companion' to build one)")
+		}
+		fmt.Printf("[dry-run] %s → %s:%s\n", binary, containerName, ateamContainerBinPath)
+		return nil
 	}
 
-	target := containerName + ":/usr/local/bin/ateam"
-	fmt.Printf("Copying %s → %s\n", binary, target)
-
-	if err := dockerCp(binary, target); err != nil {
-		return err
-	}
-
-	fmt.Println("Done.")
-	return nil
+	return copyAteamBinary(containerName, orgDir)
 }
