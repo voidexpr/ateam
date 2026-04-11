@@ -192,10 +192,8 @@ func TestResolveStreamPath(t *testing.T) {
 }
 
 func TestFindOrgNotFound(t *testing.T) {
-	if _, err := os.Stat(string(os.PathSeparator) + OrgDirName); err == nil {
-		t.Skipf("/%s exists in this environment; skipping not-found test", OrgDirName)
-	}
 	tmp := resolvedTempDir(t)
+	t.Chdir(tmp)
 	_, err := FindOrg(tmp)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -203,10 +201,8 @@ func TestFindOrgNotFound(t *testing.T) {
 }
 
 func TestFindProjectNotFound(t *testing.T) {
-	if _, err := os.Stat(string(os.PathSeparator) + ProjectDirName); err == nil {
-		t.Skipf("/%s exists in this environment; skipping not-found test", ProjectDirName)
-	}
 	tmp := resolvedTempDir(t)
+	t.Chdir(tmp)
 	_, err := FindProject(tmp)
 	if err == nil {
 		t.Fatal("expected error, got nil")
