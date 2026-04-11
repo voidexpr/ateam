@@ -24,6 +24,8 @@ type MockAgent struct {
 
 func (m *MockAgent) Name() string { return "mock" }
 
+func (m *MockAgent) SetModel(model string) {}
+
 func (m *MockAgent) DebugCommandArgs(extraArgs []string) (string, []string) {
 	return "mock", nil
 }

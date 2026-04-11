@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -155,9 +154,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	setSourceWritable(r)
 
 	if parallelModel != "" {
-		if ca, ok := r.Agent.(*agent.ClaudeAgent); ok {
-			ca.Model = parallelModel
-		}
+		r.Agent.SetModel(parallelModel)
 	}
 
 	if hasProject {

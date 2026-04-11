@@ -21,6 +21,8 @@ type concurrencyTrackingAgent struct {
 
 func (a *concurrencyTrackingAgent) Name() string { return "tracking" }
 
+func (a *concurrencyTrackingAgent) SetModel(model string) {}
+
 func (a *concurrencyTrackingAgent) DebugCommandArgs(extraArgs []string) (string, []string) {
 	return "tracking", nil
 }
