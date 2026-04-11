@@ -22,9 +22,11 @@ done
 # Determine which test tags to use
 TAGS="${TEST_TAGS:-docker_integration}"
 
+VFLAG=${VERBOSE:+-v}
+
 echo "==> Running tests with tags: $TAGS"
 cd /src
-go test -tags "$TAGS" -v -count=1 -timeout 10m ./internal/container/
+go test -tags "$TAGS" $VFLAG -count=1 -timeout 10m ./internal/container/
 TEST_EXIT=$?
 
 echo "==> Stopping dockerd..."

@@ -1,0 +1,5 @@
+.ateam/
+.git/
+poc-shell/
+build/
+*.md
