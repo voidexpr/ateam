@@ -82,6 +82,22 @@ make fmt           # auto-format all .go files
 make tidy          # run go mod tidy
 ```
 
+### CI pipeline
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on pull requests:
+
+```bash
+make fmt-check     # verify gofmt formatting
+make check-tidy    # verify go.mod is tidy
+make lint          # golangci-lint
+make test          # unit tests
+make vuln          # govulncheck
+```
+
+Run the full CI suite locally with `make run-ci`.
+
+A separate workflow (`.github/workflows/docker-tests.yml`) runs `make test-docker` on pushes to `main` that touch `test/`, `Dockerfile*`, or `internal/container/`.
+
 ### Git hooks
 
 A pre-commit hook runs `fmt-check` and `check-tidy` automatically. Install it with:
