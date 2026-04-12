@@ -1,3 +1,4 @@
+// Package prompts handles prompt template assembly and rendering for agent execution.
 package prompts
 
 import (

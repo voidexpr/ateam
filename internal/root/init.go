@@ -1,3 +1,4 @@
+// Package root provides project initialization and setup for the root command including directory scaffolding and configuration.
 package root
 
 import (

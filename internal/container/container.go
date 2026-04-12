@@ -1,3 +1,4 @@
+// Package container defines the Container interface for abstracting command execution environments and provides Docker-based implementations.
 package container
 
 import (

@@ -1,3 +1,4 @@
+// Package runner orchestrates agent task execution, managing scheduling, output collection, and result persistence.
 package runner
 
 import (

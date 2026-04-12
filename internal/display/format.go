@@ -1,3 +1,4 @@
+// Package display provides output formatting utilities including timestamp formatting and display helpers.
 package display
 
 import (

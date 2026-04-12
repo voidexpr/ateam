@@ -1,3 +1,4 @@
+// Package secret provides secret storage and retrieval using multiple backends including the system keyring and file-based stores.
 package secret
 
 import (

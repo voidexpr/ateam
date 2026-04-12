@@ -1,3 +1,4 @@
+// Package streamutil defines shared JSONL event types and parsing utilities for agent output streams.
 package streamutil
 
 import "encoding/json"

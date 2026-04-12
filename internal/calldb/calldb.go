@@ -1,3 +1,4 @@
+// Package calldb provides a SQLite-based database for tracking agent execution calls and run metadata.
 package calldb
 
 import (

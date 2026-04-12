@@ -1,3 +1,4 @@
+// Package config handles loading, validating, and managing project configuration including roles and settings.
 package config
 
 import (

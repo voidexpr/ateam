@@ -1,3 +1,4 @@
+// Package gitutil provides utility functions for querying git repository metadata such as commit history and project state.
 package gitutil
 
 import (

@@ -1,3 +1,4 @@
+// Package web implements the web UI server and HTTP handlers for browsing project runs and reports.
 package web
 
 import (

@@ -1,3 +1,5 @@
+// Package agent defines the Agent interface for executing prompts and producing
+// normalized stream events, along with concrete implementations for supported backends.
 package agent
 
 import (
