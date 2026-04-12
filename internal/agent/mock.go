@@ -17,7 +17,6 @@ type MockAgent struct {
 	Err          error
 	Delay        time.Duration
 	DefaultModel string
-	Pricing      PricingTable
 
 	mu       sync.Mutex
 	Requests []Request
