@@ -234,7 +234,11 @@ func (s *Server) ListenAndServe(port int, openBrowser bool, host string) error {
 	}
 
 	actualPort := ln.Addr().(*net.TCPAddr).Port
-	s.URL = fmt.Sprintf("http://localhost:%d", actualPort)
+	displayHost := "localhost"
+	if host != "127.0.0.1" && host != "" {
+		displayHost = host
+	}
+	s.URL = fmt.Sprintf("http://%s:%d", displayHost, actualPort)
 
 	if s.singleMode {
 		s.URL += "/p/" + s.projects[0].Slug + "/"
