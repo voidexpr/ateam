@@ -21,6 +21,9 @@ type Agent interface {
 	DebugCommandArgs(extraArgs []string) (command string, args []string)
 	// SetModel overrides the model the agent will use.
 	SetModel(model string)
+	// CloneWithResolvedTemplates returns a shallow copy of the agent with
+	// {{VAR}} placeholders resolved in Args, Env, and other string fields.
+	CloneWithResolvedTemplates(replacer *strings.Replacer) Agent
 }
 
 // ModelProvider is optionally implemented by agents that expose their model name.
@@ -75,6 +78,30 @@ type StreamEvent struct {
 	IsError          bool
 	ExitCode         int
 	Err              error
+}
+
+// resolveSlice replaces {{VAR}} placeholders in each string element.
+func resolveSlice(ss []string, r *strings.Replacer) []string {
+	if ss == nil {
+		return nil
+	}
+	out := make([]string, len(ss))
+	for i, s := range ss {
+		out[i] = r.Replace(s)
+	}
+	return out
+}
+
+// resolveStringMap replaces {{VAR}} placeholders in map values. Keys are not resolved.
+func resolveStringMap(m map[string]string, r *strings.Replacer) map[string]string {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = r.Replace(v)
+	}
+	return out
 }
 
 // buildAgentArgs copies base args, appends --model if non-empty, then appends extra.

@@ -38,6 +38,13 @@ func (c *CodexAgent) ModelName() string {
 
 func (c *CodexAgent) SetModel(model string) { c.Model = model }
 
+func (c *CodexAgent) CloneWithResolvedTemplates(replacer *strings.Replacer) Agent {
+	clone := *c
+	clone.Args = resolveSlice(c.Args, replacer)
+	clone.Env = resolveStringMap(c.Env, replacer)
+	return &clone
+}
+
 func (c *CodexAgent) DebugCommandArgs(extraArgs []string) (string, []string) {
 	command := c.Command
 	if command == "" {
