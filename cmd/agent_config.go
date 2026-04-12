@@ -452,11 +452,11 @@ func resolveLocalPath(flagPath, orgDir string) (string, error) {
 func validateLocalPath(path string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil
+		return fmt.Errorf("cannot validate path: %w", err)
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
-		return nil
+		return fmt.Errorf("cannot validate path: %w", err)
 	}
 	abs = filepath.Clean(abs)
 	// Resolve symlinks so a link to $HOME or ~/.claude is also caught.
