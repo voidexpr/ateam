@@ -332,7 +332,6 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 	case "builtin":
 		return &agent.MockAgent{
 			DefaultModel: defaultModel,
-			Pricing:      pricing,
 		}
 	case "codex":
 		cmd := ac.Command
