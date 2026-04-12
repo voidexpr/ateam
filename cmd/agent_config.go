@@ -753,7 +753,7 @@ func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bo
 		chownPaths += " " + ateamOrgDir
 	}
 
-	dockerExecOutput(containerName, "sh", "-c",
+	_, _ = dockerExecOutput(containerName, "sh", "-c",
 		fmt.Sprintf("chown -R %s:%s %s 2>/dev/null || true", ci.user, ci.user, chownPaths))
 
 	if copyAteam {
