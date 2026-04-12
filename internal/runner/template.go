@@ -69,20 +69,7 @@ func resolveArgs(args []string, r *strings.Replacer) []string {
 // ResolveAgentTemplateArgs resolves templates in the agent's Args, Env values,
 // and other string fields. Clones the agent so the original config is never mutated.
 func ResolveAgentTemplateArgs(a agent.Agent, vars TemplateVars) agent.Agent {
-	r := vars.Replacer()
-	switch t := a.(type) {
-	case *agent.ClaudeAgent:
-		clone := *t
-		clone.Args = resolveArgs(t.Args, r)
-		clone.Env = resolveMap(t.Env, r)
-		return &clone
-	case *agent.CodexAgent:
-		clone := *t
-		clone.Args = resolveArgs(t.Args, r)
-		clone.Env = resolveMap(t.Env, r)
-		return &clone
-	}
-	return a
+	return a.CloneWithResolvedTemplates(vars.Replacer())
 }
 
 // ResolveTemplateString replaces {{VAR}} placeholders in a single string.
