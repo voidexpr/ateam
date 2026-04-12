@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/web"
 	"github.com/spf13/cobra"
@@ -67,6 +70,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 		host = serveBind
 	} else if servePublic {
 		host = "0.0.0.0"
+	}
+
+	if host != "127.0.0.1" && host != "::1" && host != "localhost" {
+		fmt.Fprintf(os.Stderr, "WARNING: Web UI is accessible from the network without authentication.\n")
 	}
 
 	return srv.ListenAndServe(port, !serveNoOpen, host)
