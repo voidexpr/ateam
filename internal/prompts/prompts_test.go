@@ -22,7 +22,7 @@ func TestReadWith3LevelFallback(t *testing.T) {
 
 	// Only default exists
 	_ = os.WriteFile(defaultPath, []byte("default"), 0644)
-	got, err := readWith3LevelFallback(projectPath, orgPath, defaultPath, "test")
+	got, err := readWith3LevelFallback(projectPath, orgPath, defaultPath, "", "test")
 	if err != nil {
 		t.Fatalf("default only: %v", err)
 	}
@@ -32,14 +32,14 @@ func TestReadWith3LevelFallback(t *testing.T) {
 
 	// Org override exists
 	_ = os.WriteFile(orgPath, []byte("org"), 0644)
-	got, _ = readWith3LevelFallback(projectPath, orgPath, defaultPath, "test")
+	got, _ = readWith3LevelFallback(projectPath, orgPath, defaultPath, "", "test")
 	if got != "org" {
 		t.Errorf("org override: got %q, want %q", got, "org")
 	}
 
 	// Project override exists
 	_ = os.WriteFile(projectPath, []byte("project"), 0644)
-	got, _ = readWith3LevelFallback(projectPath, orgPath, defaultPath, "test")
+	got, _ = readWith3LevelFallback(projectPath, orgPath, defaultPath, "", "test")
 	if got != "project" {
 		t.Errorf("project override: got %q, want %q", got, "project")
 	}
@@ -335,6 +335,7 @@ func TestReadWith3LevelFallbackNoneExist(t *testing.T) {
 		filepath.Join(base, "a"),
 		filepath.Join(base, "b"),
 		filepath.Join(base, "c"),
+		"",
 		"test",
 	)
 	if err == nil {
