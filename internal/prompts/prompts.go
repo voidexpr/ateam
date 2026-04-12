@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ateam/defaults"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/gitutil"
 )
@@ -78,12 +79,14 @@ func assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt strin
 		filepath.Join(projectDir, "roles", roleID, roleFile),
 		filepath.Join(orgDir, "roles", roleID, roleFile),
 		filepath.Join(orgDir, "defaults", "roles", roleID, roleFile),
+		filepath.Join("roles", roleID, roleFile),
 	)
 
 	basePrompt := readFileOr3Level(
 		filepath.Join(projectDir, baseFile),
 		filepath.Join(orgDir, baseFile),
 		filepath.Join(orgDir, "defaults", baseFile),
+		baseFile,
 	)
 
 	if rolePrompt == "" && basePrompt == "" {
@@ -241,6 +244,7 @@ func AssembleReviewPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, ex
 		filepath.Join(projectDir, "supervisor", ReviewPromptFile),
 		filepath.Join(orgDir, "supervisor", ReviewPromptFile),
 		filepath.Join(orgDir, "defaults", "supervisor", ReviewPromptFile),
+		filepath.Join("supervisor", ReviewPromptFile),
 		"supervisor",
 	)
 	if err != nil {
@@ -277,6 +281,7 @@ func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, pinfo Pr
 			filepath.Join(projectDir, "supervisor", CodeManagementPromptFile),
 			filepath.Join(orgDir, "supervisor", CodeManagementPromptFile),
 			filepath.Join(orgDir, "defaults", "supervisor", CodeManagementPromptFile),
+			filepath.Join("supervisor", CodeManagementPromptFile),
 			"code management",
 		)
 		if err != nil {
@@ -307,6 +312,7 @@ func AssembleAutoSetupPrompt(orgDir, projectDir string, pinfo ProjectInfoParams)
 		filepath.Join(projectDir, "supervisor", AutoSetupPromptFile),
 		filepath.Join(orgDir, "supervisor", AutoSetupPromptFile),
 		filepath.Join(orgDir, "defaults", "supervisor", AutoSetupPromptFile),
+		filepath.Join("supervisor", AutoSetupPromptFile),
 		"auto-setup",
 	)
 	if err != nil {
@@ -328,6 +334,7 @@ func AssembleTaskDebugPrompt(orgDir, projectDir, debugContext string, pinfo Proj
 		filepath.Join(projectDir, "supervisor", TaskDebugPromptFile),
 		filepath.Join(orgDir, "supervisor", TaskDebugPromptFile),
 		filepath.Join(orgDir, "defaults", "supervisor", TaskDebugPromptFile),
+		filepath.Join("supervisor", TaskDebugPromptFile),
 		"task-debug",
 	)
 	if err != nil {
@@ -418,19 +425,25 @@ func shortRelPath(base, target string) string {
 	return target
 }
 
-// readWith3LevelFallback tries projectPath, then orgPath, then defaultPath.
-func readWith3LevelFallback(projectPath, orgPath, defaultPath, label string) (string, error) {
-	if s := readFileOr3Level(projectPath, orgPath, defaultPath); s != "" {
+// readWith3LevelFallback tries projectPath, then orgPath, then defaultPath,
+// then embedded defaults. embeddedPath is relative to defaults.FS root.
+func readWith3LevelFallback(projectPath, orgPath, defaultPath, embeddedPath, label string) (string, error) {
+	if s := readFileOr3Level(projectPath, orgPath, defaultPath, embeddedPath); s != "" {
 		return s, nil
 	}
-	return "", fmt.Errorf("no prompt found for %s (checked %s, %s, and %s)", label, projectPath, orgPath, defaultPath)
+	return "", fmt.Errorf("no prompt found for %s (checked %s, %s, %s, and embedded)", label, projectPath, orgPath, defaultPath)
 }
 
-// readFileOr3Level tries three paths and returns the content of the first existing non-empty file.
-// Delegates to traceFileOr3Level to ensure consistent empty-file handling.
-func readFileOr3Level(projectPath, orgPath, defaultPath string) string {
+// readFileOr3Level tries three filesystem paths via traceFileOr3Level, then
+// falls back to embedded defaults. embeddedPath is relative to defaults.FS root.
+func readFileOr3Level(projectPath, orgPath, defaultPath, embeddedPath string) string {
 	if src := traceFileOr3Level(projectPath, orgPath, defaultPath); src != nil {
 		return src.Content
+	}
+	if embeddedPath != "" {
+		if data, err := defaults.FS.ReadFile(embeddedPath); err == nil {
+			return string(data)
+		}
 	}
 	return ""
 }

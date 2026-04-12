@@ -96,6 +96,7 @@ func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
 
 	// Config resolution chain
 	chain := []string{"built-in"}
+	var brokenLinks []string
 	var candidates []string
 	if env.OrgDir != "" {
 		candidates = append(candidates,
@@ -107,11 +108,31 @@ func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
 		candidates = append(candidates, filepath.Join(env.ProjectDir, "runtime.hcl"))
 	}
 	for _, p := range candidates {
-		if fileOrSymlinkExists(p) {
+		if _, err := os.Stat(p); err == nil {
 			chain = append(chain, relPath(cwd, p))
+		} else if isBrokenSymlink(p) {
+			brokenLinks = append(brokenLinks, relPath(cwd, p))
 		}
 	}
 	fmt.Printf("  Config: %s\n", strings.Join(chain, " → "))
+	for _, bl := range brokenLinks {
+		fmt.Printf("  Warning: %s is a broken symlink (ignored, using built-in defaults)\n", bl)
+	}
+
+	// Check org defaults directory itself
+	if env.OrgDir != "" {
+		defaultsDir := filepath.Join(env.OrgDir, "defaults")
+		if isBrokenSymlink(defaultsDir) {
+			fmt.Printf("  Warning: %s is a broken symlink\n", relPath(cwd, defaultsDir))
+		} else if info, err := os.Stat(defaultsDir); err == nil && info.IsDir() {
+			entries, err := os.ReadDir(defaultsDir)
+			if err != nil {
+				fmt.Printf("  Warning: %s exists but cannot be read: %v\n", relPath(cwd, defaultsDir), err)
+			} else if len(entries) == 0 {
+				fmt.Printf("  Warning: %s is empty\n", relPath(cwd, defaultsDir))
+			}
+		}
+	}
 
 	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
 	if err != nil {
@@ -269,6 +290,19 @@ func printProjectSection(env *root.ResolvedEnv, cwd string) {
 		fmt.Fprintf(w, " \t%s\t%s\t%s\n", "review", fmtDateAge(fi.ModTime()), relPath(cwd, reviewPath))
 	}
 	w.Flush()
+}
+
+// isBrokenSymlink returns true if path is a symlink whose target doesn't exist.
+func isBrokenSymlink(path string) bool {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return false
+	}
+	if fi.Mode()&os.ModeSymlink == 0 {
+		return false
+	}
+	_, err = os.Stat(path)
+	return err != nil
 }
 
 // fileOrSymlinkExists returns true if path exists as a file or symlink.
