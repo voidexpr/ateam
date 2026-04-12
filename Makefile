@@ -21,6 +21,8 @@ companion:
 		-ldflags "$(LDFLAGS)" \
 		-o build/ateam-linux-amd64 .
 
+build-all: build companion
+
 tidy:
 	go mod tidy
 
