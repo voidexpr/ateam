@@ -50,6 +50,12 @@ Also accept a file: `ateam task add --file finding.md` (same frontmatter format)
 - If no `---`, everything is description and subject is required via flag
 - Unknown keys are ignored (forward-compatible)
 - Minimal required field: `subject`
+- **Enum normalization**: ateam normalizes casing and common variations on input:
+  - Severity: `high`, `HIGH`, `High`, `hi`, `h` → `HIGH`
+  - Effort: `small`, `SMALL`, `sm`, `s`, `lo`, `low` → `SMALL`; `med`, `m`, `medium` → `MEDIUM`; `large`, `lg`, `l`, `hi`, `high` → `LARGE`
+  - State: case-insensitive, e.g. `Done` → `done`
+  - Priority: `p0`, `P0`, `0` → `P0`
+  - This means agents can write `severity: high` or `severity: HIGH` — both work
 
 ---
 
@@ -67,7 +73,6 @@ CREATE TABLE tasks (
     location      TEXT,          -- file paths, line numbers
     state         TEXT NOT NULL DEFAULT 'open',
     priority      TEXT,          -- P0, P1, P2
-    dedup_key     TEXT,
     created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
     updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
     task_group    TEXT,          -- originating report/review run
@@ -85,7 +90,6 @@ CREATE TABLE task_comments (
 );
 
 CREATE INDEX idx_tasks_state ON tasks(state);
-CREATE INDEX idx_tasks_dedup ON tasks(dedup_key);
 CREATE INDEX idx_tasks_source ON tasks(source_role);
 CREATE INDEX idx_comments_task ON task_comments(task_id);
 ```
@@ -130,18 +134,35 @@ No enforced state machine. Any transition is allowed. Every state change auto-cr
 
 ## Dedup
 
-On `ateam task add`, compute `dedup_key = lowercase(subject) + "|" + source_role`.
+**No dedup at add time.** Text hashing is brittle — one rephrased sentence and it's a "new" task. Fuzzy matching creates false positives. Both require complexity in `task add` for marginal benefit.
 
-If an existing task with the same `dedup_key` is in state `open` or `approved`:
-- Update `description`, `severity`, `effort`, `location`, `updated_at`
-- Add comment: "Updated by {reporter} (description/severity changed)"
-- Do NOT create a duplicate
+Instead, **dedup happens at review time.** The review agent already reads all tasks to triage them. Merging duplicates is a natural part of that job and costs negligible extra tokens since the agent is already reading the task list.
 
-If existing task is `done`, `failed`, `deferred`, or `wontfix`:
-- Create a new task (the finding reappeared or is different enough)
-- Add comment on the old task: "Superseded by task #{new_id}"
+### task merge
 
-This means report agents don't need to know about existing tasks at all. They just report what they find, and dedup handles the rest.
+```bash
+ateam task merge 3 8          # keep #3, close #8
+```
+
+What it does:
+- Appends to #3's comments: "Merged from #8: {#8 subject}\n{#8 description}"
+- If #8 had different severity/effort, notes the difference
+- Sets #8 state to `wontfix` with comment "Merged into #3"
+
+The review prompt includes:
+```
+If you see duplicate or overlapping findings, merge them:
+    ateam task merge TARGET_ID SOURCE_ID
+This keeps the target, closes the source with a cross-reference.
+```
+
+### Why not dedup at add time
+
+- **Hash on text**: "Fix SQL injection in auth" vs "SQL injection vulnerability in auth handler" — same finding, different hash.
+- **Hash on location**: Works for file-scoped findings but fails for cross-cutting findings ("no rate limiting across the API") or findings that span multiple files.
+- **Fuzzy matching**: False positives are worse than duplicates. A false merge loses a legitimate finding; a duplicate just creates a row the review agent closes in 2 seconds.
+
+Keeping `task add` dead simple (always creates a new task, no matching logic) means it never silently drops findings.
 
 ---
 
@@ -210,11 +231,13 @@ ateam task list --state approved             # specific state
 ateam task list --state open,approved        # multiple states
 ateam task list --role security              # from specific role
 ateam task list --sort severity              # sort (default: id)
+ateam task list --format table               # compact table (default for tty)
+ateam task list --format full                # with descriptions (default for pipe/non-tty)
+ateam task list --format oneline             # 1 line per task (for prompt injection)
 ateam task list --format json                # for programmatic use
-ateam task list --format full                # include descriptions
 ```
 
-Default output (compact table):
+**`table`** — default when stdout is a terminal. For human scanning:
 ```
 ID  STATE     SEV     EFFORT  ROLE              SUBJECT
  3  open      HIGH    SMALL   security          Secret env vars forwarded as -e KEY=VALUE
@@ -222,6 +245,47 @@ ID  STATE     SEV     EFFORT  ROLE              SUBJECT
  8  approved  HIGH    SMALL   refactor_small    Extract duplicate validation logic
 12  deferred  MEDIUM  LARGE   testing_basic     Add integration tests for container module
 ```
+
+**`full`** — default when piped (non-tty). This is what the review agent sees.
+Includes descriptions so the supervisor can make triage decisions without calling `task show` per task:
+```
+#3 [open] security | HIGH | SMALL
+Subject: Secret env vars forwarded as -e KEY=VALUE docker arguments
+Location: internal/container/docker.go:162-165
+
+Both container backends forward secret-bearing env vars as -e KEY=VALUE
+arguments to docker run or docker exec. These are visible to other local
+users via ps aux for the lifetime of the child process.
+
+Recommendation: Use Docker's --env-file with a temp file (mode 0600,
+deleted after launch) instead of per-variable -e KEY=VALUE args.
+
+---
+
+#5 [open] security | MEDIUM | MEDIUM
+Subject: Codex prompt visible in process table
+Location: internal/agent/codex.go:58
+
+The full agent prompt is passed as a positional argument. Any local user
+can read it via ps aux. Claude correctly uses stdin instead.
+
+Recommendation: Switch to stdin or write prompt to a temp file.
+
+---
+```
+
+Each task is ~50-80 tokens. 20 open tasks ≈ 1300 tokens — cheap for the review agent.
+The `---` separator makes it parseable if we ever need to split programmatically.
+The `#ID` prefix is prominent so the agent can reference it in `task update` calls.
+
+**`oneline`** — for the compact task manifest injected into report prompts:
+```
+#3 [open] HIGH SMALL security: Secret env vars forwarded as -e KEY=VALUE
+#5 [open] MEDIUM MEDIUM security: Codex prompt visible in process table
+#7 [done] MEDIUM SMALL security: extra_volumes allows arbitrary host path mounts
+```
+
+**`json`** — array of task objects, for programmatic use.
 
 ### task show
 
@@ -298,6 +362,13 @@ User edits state/severity/priority, optionally adds text above the `# ---` separ
 
 This is the "as easy as editing a markdown file" experience.
 
+### task merge
+
+```bash
+ateam task merge 3 8                           # keep #3, close #8
+ateam task merge 3 8 12                        # merge multiple into #3
+```
+
 ### task clear
 
 ```bash
@@ -366,21 +437,32 @@ This is the output of `ateam task list --role security --all --format oneline`, 
 
 ### Review agent
 
+The review prompt injects all open tasks via `ateam task list --state open --format full` directly into the prompt (same pattern as current report embedding, but structured tasks instead of prose). The agent then uses CLI calls to triage:
+
 ```markdown
 ## Your tools
 
-    ateam task list --state open --format full    # see all findings with descriptions
+    ateam task list --state open                # already included below, but you can re-query
     ateam task update ID --state approved --priority P0|P1|P2
     ateam task update ID --state deferred --comment "reason"
     ateam task update ID --state wontfix --comment "reason"
+    ateam task merge TARGET_ID SOURCE_ID        # merge duplicates
     ateam task comment ID "your assessment"
 
 ## Instructions
 
-Read all open tasks. For each, decide: approve for coding (with priority),
-defer, or wontfix. Add comments explaining cross-role interactions or
-concerns. Produce a brief review summary for the review.md file.
+The open tasks are listed below. For each, decide: approve for coding
+(with priority), defer, or wontfix. Merge duplicates. Add comments
+explaining cross-role interactions or concerns.
+
+Produce a brief review summary for the review.md file.
+
+## Open Tasks
+
+{output of ateam task list --state open --format full}
 ```
+
+The open tasks are embedded in the prompt so the agent doesn't need to spend a tool call fetching them. For 20 tasks at ~65 tokens each, that's ~1300 tokens — cheaper than the current approach of embedding 8 full reports.
 
 ### Code phase (Go loop)
 
