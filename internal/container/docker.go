@@ -82,6 +82,12 @@ func (d *DockerContainer) Prepare(ctx context.Context) error {
 // GetContainerName returns "" — oneshot containers have no persistent name.
 func (d *DockerContainer) GetContainerName() string { return "" }
 
+// SetSourceWritable marks the source mount as read-write.
+func (d *DockerContainer) SetSourceWritable(writable bool) { d.SourceWritable = writable }
+
+// SetContainerName is not supported for oneshot docker containers.
+func (d *DockerContainer) SetContainerName(_ string) bool { return false }
+
 // EnsureImage builds the docker image, relying on Docker's layer cache for speed.
 // Always runs docker build so Dockerfile changes are picked up automatically.
 func (d *DockerContainer) EnsureImage(ctx context.Context) error {
