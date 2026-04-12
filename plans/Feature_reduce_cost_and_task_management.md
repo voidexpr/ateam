@@ -314,35 +314,67 @@ Savings: 7 roles × 10K shared tokens × 0.9 discount = ~63K tokens saved per cy
 
 ### 4b. Codebase snapshot pre-step [SMALL EFFORT, DO SECOND]
 
-Before launching report agents, ateam generates a structured codebase summary in Go (no LLM, no cost):
+Before launching report agents, ateam generates a structured codebase summary in Go (no LLM, no cost). This gives agents a navigation map so they go directly to relevant files instead of spending 30-60 seconds exploring directory structure.
+
+#### Tooling research
+
+| Tool | Languages | Integration | Extracts signatures | Cross-compile safe | Speed |
+|------|-----------|-------------|--------------------|--------------------|-------|
+| **universal-ctags** | 164 | CLI (`ctags --output-format=json`) | Yes | N/A (external dep) | <1s |
+| **gotreesitter** (pure Go) | 206 | Go library import | Yes (via .scm queries) | Yes (no CGo) | ~4ms/file |
+| **scc** | Hundreds | Go library import | No (lines/complexity) | Yes | Fastest |
+
+**Recommended approach — two layers:**
+
+**Layer 1 (immediate):** Shell out to `universal-ctags --output-format=json --fields=+nKSZ`. Parse JSON in Go, group by file, filter to functions/types/interfaces/classes. Tested on ateam: ~16K tokens for 121 Go files with full signatures. Already available on most dev machines and CI (`brew install universal-ctags`, `apt install universal-ctags`). If ctags is not installed, fall back to grep-based extraction or skip (graceful degradation).
+
+**Layer 2 (medium-term):** Import `github.com/odvcencio/gotreesitter` — pure Go tree-sitter runtime, 206 grammars, no CGo. Critical for ateam's cross-compilation (`make companion` builds linux/amd64). Use per-language `.scm` query files (borrow from aider's MIT-licensed `tags.scm` collection) to extract symbol definitions and references. Build a simple reference-count ranker: symbols referenced by more files rank higher. This produces aider-quality maps without Python dependency.
+
+**Complement with scc:** Import `github.com/boyter/scc/v3` for per-file line counts and complexity scores. Builds the file tree portion of the map.
+
+**Evaluated and not recommended:**
+- **repomix** (`--compress` mode does exactly what we want): requires Node.js runtime, too heavy as dependency
+- **sourcegraph/scip, zoekt**: enterprise-grade code intelligence, far too heavy
+- **go/ast**: Go-only, not multi-language
+- **aider's repo-map**: Python-only, but its PageRank ranking algorithm is worth reimplementing in Go
+
+#### Output format
 
 ```
 # Codebase Map (auto-generated)
 
-## File Tree (87 files, 12,431 lines)
-cmd/           14 files  3,201 lines  (CLI commands)
-internal/      38 files  6,890 lines  (core logic)
+## Structure (87 files, 12,431 lines)
+cmd/           14 files  3,201 lines  complexity: 142
+internal/      38 files  6,890 lines  complexity: 298
   agent/        5 files  1,102 lines
   calldb/       3 files    892 lines
   config/       2 files    441 lines
   ...
-defaults/      22 files  1,504 lines  (prompts, config)
+defaults/      22 files  1,504 lines
 test/           5 files    844 lines
 
-## Key Entry Points
-cmd/root.go:27         rootCmd registers all subcommands
-cmd/report.go:56       reportCmd.RunE → runReport()
-internal/runner/runner.go:155  Runner.Run() executes agents
+## Key Symbols (ranked by cross-file references)
+internal/runner/runner.go:
+  func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress chan RunProgress) RunSummary
+  func (r *Runner) RunPool(ctx context.Context, tasks []PoolTask, maxParallel int) []RunSummary
+  type Runner struct
+  type RunOpts struct
+  type RunSummary struct
 
-## Dependencies (from go.mod)
-github.com/spf13/cobra v1.8.0
-modernc.org/sqlite v1.29.1
-github.com/hashicorp/hcl/v2 v2.19.1
+cmd/report.go:
+  func runReport(opts ReportOptions) error
+  type ReportOptions struct
+
+internal/prompts/prompts.go:
+  func AssembleRolePrompt(...) (string, error)
+  func AssembleReviewPrompt(...) (string, error)
+  func AssembleCodeManagementPrompt(...) (string, error)
 ...
 
-## Test Coverage
-48 test files, 12,455 lines
-go test ./... → 142 tests passing
+## Dependencies (from go.mod / package.json / requirements.txt)
+github.com/spf13/cobra v1.8.0
+modernc.org/sqlite v1.29.1
+...
 
 ## Recent Changes (last 10 commits)
 9a7b6fc Makefile: added build-all
@@ -350,13 +382,19 @@ go test ./... → 142 tests passing
 ...
 ```
 
-This is 2-5K tokens of structured context. Include it as the first section of every role's prompt. Combined with prompt reorder (4a), this shared prefix is cached across all 8 roles.
+Target: 5-20K tokens depending on codebase size. Include as the first section of every role's prompt. Combined with prompt reorder (4a), this shared prefix is cached across all 8 roles — 7 roles pay ~10% for the cached map.
 
-Agents start with a map instead of spending 30-60 seconds exploring directory structure and reading irrelevant files. They still need to deep-read files relevant to their role, but they navigate directly to them.
+#### Evidence of effectiveness
 
-**Implementation**: New function in Go (no LLM) that runs `find`, reads `go.mod`/`package.json`, counts lines, extracts function signatures via grep. Include output in `FormatProjectInfo()`. Add `session_id` column to calls table for resume support.
+No published quantitative benchmarks exist for repo maps reducing agent cost. The indirect evidence is strong:
+- aider, Claude Code, Cursor, and repomix (23K GitHub stars) all implement codebase context injection
+- aider defaults to 1K tokens for its map, expanding to 8K when no files are in chat — even a small map helps
+- A 5K-token map replaces ~10-20 exploratory tool calls per agent (ls, find, grep, cat for structure discovery)
+- With 8 parallel agents: 80-160 avoided tool calls, estimated 20-50K tokens saved per agent = 160-400K tokens/cycle
 
-**Estimated savings**: 10-30% reduction in per-role exploration ($0.05-0.20 per role × 8 = $0.40-1.60/cycle).
+**Implementation**: New `internal/codebase/` package. `GenerateMap(sourceDir string) (string, error)` tries ctags first, falls back to grep-based extraction. Complement with scc stats. Include output in `FormatProjectInfo()` or as a separate prompt section.
+
+**Estimated savings**: 10-30% reduction in per-role exploration ($0.05-0.20 per role × 8 = $0.40-1.60/cycle). The map also improves report quality by directing agents to the most important code first.
 
 ### 4c. Two-phase scan + deep-dive [MEDIUM EFFORT, BEST NEW SAVINGS]
 
