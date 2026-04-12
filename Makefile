@@ -29,9 +29,11 @@ tidy:
 check-tidy:
 	go mod tidy -diff
 
+# Developer quick health check: tests, formatting, tidiness, linting.
 check: test fmt-check check-tidy lint
 
-run-ci: fmt-check check-tidy lint test vuln
+# Full CI check: everything in 'check' plus vulnerability scanning.
+run-ci: check vuln
 
 test:
 	go test -race ./...
