@@ -3,6 +3,7 @@ package web
 import (
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -83,7 +84,10 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		if showAll {
 			limit = 100000
 		}
-		rows, _ := db.RecentRuns(calldb.RecentFilter{Limit: limit})
+		rows, err := db.RecentRuns(calldb.RecentFilter{Limit: limit})
+		if err != nil {
+			log.Printf("warning: RecentRuns: %v", err)
+		}
 		data.Runs = enrichRuns(rows, pe.ProjectDir, pe.OrgDir)
 		data.TotalRuns = len(rows)
 		if aggs, err := db.CostByAction(""); err == nil {
@@ -307,7 +311,10 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 
 	data := runsPageData{}
 	if db := s.getDB(pe); db != nil {
-		rows, _ := db.RecentRuns(calldb.RecentFilter{Limit: -1})
+		rows, err := db.RecentRuns(calldb.RecentFilter{Limit: -1})
+		if err != nil {
+			log.Printf("warning: RecentRuns: %v", err)
+		}
 		data.Runs = enrichRuns(rows, pe.ProjectDir, pe.OrgDir)
 		data.TotalRuns = len(rows)
 	}
@@ -579,7 +586,11 @@ func (s *Server) handleCost(w http.ResponseWriter, r *http.Request) {
 	data := costPageData{}
 	db := s.getDB(pe)
 	if db != nil {
-		data.Actions, _ = db.CostByAction("")
+		var err error
+		data.Actions, err = db.CostByAction("")
+		if err != nil {
+			log.Printf("warning: CostByAction: %v", err)
+		}
 		for _, a := range data.Actions {
 			data.TotalCost += a.CostUSD
 			data.TotalTokens += a.TotalTokens
@@ -682,7 +693,10 @@ func (s *Server) serveHistoryFile(w http.ResponseWriter, r *http.Request, pe *Pr
 
 // buildSessions aggregates CostByTaskGroup rows into CodeSession entries.
 func buildSessions(db *calldb.CallDB) []CodeSession {
-	tgRows, _ := db.CostByTaskGroup("")
+	tgRows, err := db.CostByTaskGroup("")
+	if err != nil {
+		log.Printf("warning: CostByTaskGroup: %v", err)
+	}
 	seen := map[string]*CodeSession{}
 	var order []string
 	for _, row := range tgRows {
@@ -748,7 +762,11 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	data := sessionDetailData{TaskGroup: taskGroup}
 
 	if db := s.getDB(pe); db != nil {
-		data.Runs, _ = db.RecentRuns(calldb.RecentFilter{TaskGroup: taskGroup, Limit: 200})
+		var err error
+		data.Runs, err = db.RecentRuns(calldb.RecentFilter{TaskGroup: taskGroup, Limit: 200})
+		if err != nil {
+			log.Printf("warning: RecentRuns: %v", err)
+		}
 		for _, run := range data.Runs {
 			data.TotalCost += run.CostUSD
 			data.TotalTokens += int64(run.InputTokens + run.OutputTokens + run.CacheReadTokens + run.CacheWriteTokens)
