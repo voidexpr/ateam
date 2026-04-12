@@ -36,6 +36,14 @@ type Container interface {
 	// ResolveTemplates resolves {{VAR}} placeholders in the container's
 	// config fields using the provided replacer. Mutates in place.
 	ResolveTemplates(replacer *strings.Replacer)
+
+	// SetSourceWritable marks the container's source mount as read-write.
+	// No-op for container types that don't manage source mounts.
+	SetSourceWritable(writable bool)
+
+	// SetContainerName overrides the container name. Returns true if the
+	// name was applied, false if not supported by this container type.
+	SetContainerName(name string) bool
 }
 
 // RunOpts holds options for executing a command in a container.

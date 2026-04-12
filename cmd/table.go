@@ -151,13 +151,12 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 }
 
 // applyContainerNameOverride replaces the container name on a runner's container
-// if a --container-name flag was provided. Only effective for docker-exec containers.
+// if a --container-name flag was provided. Only effective for container types that support it.
 func applyContainerNameOverride(r *runner.Runner, name string) {
 	if name == "" || r.Container == nil {
 		return
 	}
-	if de, ok := r.Container.(*container.DockerExecContainer); ok {
-		de.ContainerName = name
+	if r.Container.SetContainerName(name) {
 		r.ContainerName = name
 	} else {
 		fmt.Fprintf(os.Stderr, "Warning: --container-name has no effect for container type %q\n", r.ContainerType)
@@ -707,11 +706,11 @@ func isProcessAlive(pid int) bool {
 	return proc.Signal(syscall.Signal(0)) == nil
 }
 
-// setSourceWritable marks the runner's docker container as source-writable.
-// No-op if the runner doesn't use a docker container.
+// setSourceWritable marks the runner's container as source-writable.
+// No-op if the runner has no container or the container type doesn't support it.
 func setSourceWritable(r *runner.Runner) {
-	if dc, ok := r.Container.(*container.DockerContainer); ok {
-		dc.SourceWritable = true
+	if r.Container != nil {
+		r.Container.SetSourceWritable(true)
 	}
 }
 

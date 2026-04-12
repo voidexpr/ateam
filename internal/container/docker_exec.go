@@ -180,3 +180,12 @@ func (d *DockerExecContainer) Prepare(ctx context.Context) error {
 
 // GetContainerName returns the name of the user-managed container.
 func (d *DockerExecContainer) GetContainerName() string { return d.ContainerName }
+
+// SetSourceWritable is a no-op for docker-exec containers (no managed source mount).
+func (d *DockerExecContainer) SetSourceWritable(_ bool) {}
+
+// SetContainerName overrides the container name.
+func (d *DockerExecContainer) SetContainerName(name string) bool {
+	d.ContainerName = name
+	return true
+}
