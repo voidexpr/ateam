@@ -1,3 +1,4 @@
+// Package runtime handles runtime configuration parsing from HCL files and environment setup for agent execution.
 package runtime
 
 import (
