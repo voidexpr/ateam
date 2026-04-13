@@ -879,13 +879,277 @@ The current `DiscoverReports()` + full report embedding is replaced entirely. No
 
 ---
 
+## Failed Task Retry: Supervisor Diagnosis Prompt
+
+### The two-phase code cycle
+
+The mechanical Go loop handles the happy path: for each approved task, run a coding agent, record success/failure. This is cheap and deterministic.
+
+But failures are where judgment matters. A coding agent fails with "Build error: undefined function writeTempEnvFile" — is this a missing import? A wrong file? A flawed approach? The mechanical loop can't diagnose this. A supervisor can.
+
+**Phase 1 (mechanical)**: Go loop runs all approved tasks sequentially. Successes committed, failures reverted and commented. No LLM orchestration cost.
+
+**Phase 2 (supervisor diagnosis)**: If any tasks failed, spawn a supervisor agent with the failed tasks, their error context, and the ability to read code and attempt fixes. This is the only LLM-cost step in the code phase.
+
+If all tasks succeeded, phase 2 is skipped entirely. Cost: $0.
+
+### When phase 2 runs
+
+```go
+failed := db.TasksByState("failed", "WHERE code_run_group = ?", currentRunGroup)
+if len(failed) == 0 {
+    return // all tasks succeeded, no supervisor needed
+}
+// Spawn supervisor with failed tasks
+prompt := assembleFailureDignosisPrompt(failed, currentRunGroup)
+result := runner.Run(ctx, prompt, opts)
+```
+
+### Failure diagnosis prompt
+
+```markdown
+# Role: Coding Supervisor — Failure Diagnosis
+
+You are diagnosing and potentially fixing coding tasks that failed
+during the automated coding cycle. The mechanical loop already
+attempted each task with a coding agent; those agents failed.
+
+Your job:
+1. Understand why each task failed (read the error, check the code)
+2. If the fix is clear, implement it yourself and commit
+3. If the fix requires a different approach, update the task description
+   and re-approve it for the next cycle
+4. If the task is not fixable now, defer or wontfix with an explanation
+
+## Your tools
+
+```
+ateam task show ID                          # full task detail + comments
+ateam task update ID --state done --commit HASH
+ateam task update ID --state deferred --comment "reason"
+ateam task update ID --state wontfix --comment "reason"
+ateam task comment ID "diagnosis details"
+```
+
+You also have full access to the codebase: read files, run commands,
+run tests, make changes, commit.
+
+## Workflow
+
+For each failed task below:
+
+1. **Read the failure comment** to understand what the coding agent tried
+2. **Check the current code** — has it changed since the attempt?
+   (Other tasks may have succeeded and changed the codebase)
+3. **Diagnose** — is the failure due to:
+   - A simple mistake the agent made? → Fix it, commit, mark done
+   - A changed dependency from another task's commit? → Fix it, commit
+   - A fundamentally wrong approach? → Update task description with
+     the right approach, set state to `approved` for retry
+   - Missing infrastructure (tool, dependency, config)? → Defer with
+     explanation of what's needed
+   - The task itself is ill-defined? → Wontfix with explanation
+4. **Always add a comment** explaining your diagnosis, even if you fix it
+
+## Context
+
+Git log since start of coding cycle:
+{recent git log showing successful task commits}
+
+## Failed Tasks
+
+{for each failed task: full task detail + all comments, especially the
+failure comment from the mechanical loop}
+```
+
+### What the supervisor sees per failed task
+
+```
+### Failed Task #8: Extract duplicate validation logic
+
+State: failed | Severity: MEDIUM | Effort: SMALL
+Role: refactor_small | Location: cmd/report.go:112, cmd/code.go:87
+
+Description:
+  Both report.go and code.go have nearly identical option validation
+  blocks. Extract to a shared validateOpts() function.
+
+Comments:
+  [2026-04-11 08:48] refactor_small:report — Created
+  [2026-04-11 11:37] supervisor:review — approved, P1
+  [2026-04-11 22:07] ateam code — State: approved → in_progress
+  [2026-04-11 22:13] ateam code — State: in_progress → failed
+    Coding agent error: Created validateOpts() in cmd/shared.go but
+    missed call site in cmd/all.go:85. Build failed:
+    ./all.go:85:14: undefined: validateOpts
+    Changes reverted.
+
+Recent commits (context):
+  abc1234 [ateam: security] Fix extra_volumes path traversal
+  def5678 [ateam: testing_basic] Add pool edge case tests
+```
+
+The supervisor can see that other tasks modified files in `cmd/`, potentially affecting the approach. It can check if `cmd/all.go` also has the duplicated validation block that needs the new function.
+
+### Integration with ateam code
+
+```go
+func runCode(opts CodeOptions) error {
+    // Phase 1: Mechanical loop
+    approved := db.TasksByState("approved", ...)
+    for _, task := range approved {
+        runCodingAgent(task) // success → done, failure → failed + comment
+    }
+
+    // Phase 2: Supervisor diagnosis (only if failures)
+    failed := db.TasksByState("failed", "WHERE code_run_group = ?", runGroup)
+    if len(failed) > 0 {
+        fmt.Printf("Phase 2: %d failed tasks, running supervisor diagnosis...\n", len(failed))
+        prompt := assembleFailureDiagnosisPrompt(failed, runGroup)
+        supervisorResult := runner.Run(ctx, prompt, supervisorOpts)
+        // Supervisor updates task states directly via CLI
+    }
+
+    printCodeSummary(runGroup)
+    return nil
+}
+```
+
+The supervisor profile can differ from the coding agent profile (e.g., supervisor runs on host, coding agents run in Docker). The supervisor needs code access to diagnose but also needs `ateam task` CLI access.
+
+---
+
+## Evaluation: Pipeline phases as tasks
+
+### The idea
+
+Model report/review/code runs as tasks themselves:
+- `ateam report` creates a task "Run security report", state=in_progress
+- When the report agent finishes, state=done or state=failed
+- Finding tasks are children of the report task
+
+This gives a unified view: `ateam task list --all-types` shows both pipeline phases and findings. Failures at any level are visible in the same system.
+
+### Assessment: Not recommended
+
+**Against:**
+
+1. **Two fundamentally different things.** A "run security report" task has no severity, effort, location, or description. A finding has all of these. Putting both in the same table requires either nullable fields everywhere or a `type` column that bifurcates every query.
+
+2. **`agent_runs` already tracks this.** Pipeline run status, duration, error state, cost — all already in `agent_runs`. Adding pipeline tasks to the `tasks` table duplicates this data.
+
+3. **Clutters the task list.** Users running `ateam task list` want to see findings to triage, not "Run security report: done." Every query, display, and prompt would need to filter by type.
+
+4. **The problem it solves is already solved.** "Did the report phase complete?" → check `agent_runs`. "Did the review crash?" → check `agent_runs`. The report health table in the review prompt already surfaces this from `agent_runs`.
+
+**What it would add:**
+- A single place to see "everything that happened" — but `ateam ps` already does this for runs, and `ateam task list` does it for findings. Combining them isn't clearly better.
+
+**Verdict:** Keep tasks for findings/work items only. Pipeline tracking stays in `agent_runs`. The report health injection in the review prompt bridges the gap.
+
+---
+
+## Evaluation: Task relationships
+
+### The need
+
+Real relationships exist between tasks:
+- "Task #23 was reported by the security report that ran as part of run-group report-2026-04-11" → **provenance**
+- "Task #30 is a retry of task #8 with a different approach" → **retry lineage**
+- "Task #8 was merged into #3" → **dedup** (already handled by merge)
+- "Task #12 should be done before #15 (fix tests before refactoring)" → **sequencing**
+
+### Options evaluated
+
+**Option A: `parent_id` column**
+
+```sql
+ALTER TABLE tasks ADD COLUMN parent_id INTEGER REFERENCES tasks(id);
+```
+
+Simple one-level hierarchy. A finding's parent could be... what? There's no "report task" to point to (we decided against pipeline-as-tasks). So parent_id would link retries or follow-ups.
+
+Verdict: **Too narrow.** Only models one relationship type, and the most common one (provenance: which report created this) is already tracked via `report_run_group`.
+
+**Option B: `task_relations` table (n:m)**
+
+```sql
+CREATE TABLE task_relations (
+    source_id     INTEGER NOT NULL REFERENCES tasks(id),
+    target_id     INTEGER NOT NULL REFERENCES tasks(id),
+    relation_type TEXT NOT NULL,  -- 'retry_of', 'merged_into', 'depends_on', 'related'
+    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
+    PRIMARY KEY (source_id, target_id, relation_type)
+);
+```
+
+Flexible, models all relationship types. But:
+- Adds a table and joins
+- Every relationship type needs UI/prompt support
+- `depends_on` implies execution ordering — the Go loop would need topological sort
+- Agents need to discover and create relationships, adding prompt complexity and tokens
+
+Verdict: **Over-designed for now.** The only relationships that matter today are provenance (already `report_run_group`) and retry lineage (rare).
+
+**Option C: Comments + convention (no schema change)**
+
+Relationships are recorded as comments with a convention:
+```
+[2026-04-12] supervisor:code — Retry of #8: modified approach — use temp file instead of env var
+[2026-04-12] supervisor:review — Merged from #30: same issue reported by testing_basic
+[2026-04-12] supervisor:review — Related to #15: both stem from missing input validation
+```
+
+The `merge` command already creates cross-reference comments. The failure diagnosis supervisor naturally adds "Retry of #8" comments when creating follow-up tasks.
+
+Verdict: **Good enough for now.** Comments are human-readable, agent-readable (the review prompt shows them), and require no schema changes. If we need structured queries on relationships later ("show me all retries of #8"), we can add the relations table then.
+
+### Recommendation
+
+**Start with Option C (comments + convention).** Add one small schema addition for the most common structured query:
+
+```sql
+ALTER TABLE tasks ADD COLUMN retry_of INTEGER REFERENCES tasks(id);
+```
+
+When the failure diagnosis supervisor creates a new task to retry differently, set `retry_of` pointing to the original. This lets `ateam task show 8` display "Retried as #31" without parsing comments. Everything else (related, depends_on) stays in comments.
+
+The `task_relations` table (Option B) can be added later if structured relationship queries become important. The schema is designed so it can be added without breaking anything.
+
+### Updated schema
+
+```sql
+CREATE TABLE tasks (
+    id               INTEGER PRIMARY KEY,
+    subject          TEXT NOT NULL,
+    description      TEXT,
+    source_role      TEXT NOT NULL,
+    source_action    TEXT NOT NULL DEFAULT 'report',
+    severity         TEXT,
+    effort           TEXT,
+    location         TEXT,
+    state            TEXT NOT NULL DEFAULT 'open',
+    priority         TEXT,
+    created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
+    updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
+    report_run_group TEXT,          -- which report run created this
+    code_run_group   TEXT,          -- which code run attempted this
+    commit_hash      TEXT,
+    session_id       TEXT,
+    retry_of         INTEGER REFERENCES tasks(id)  -- links retries to original
+);
+```
+
+---
+
 ## What this is NOT
 
 - No assignees, no due dates, no sprints
-- No parent-child relationships or dependencies
+- No full dependency graph (retry_of is the only structured link; other relationships live in comments)
 - No custom fields or labels
 - No webhooks or notifications
 - No rich-text formatting in comments
 - No access control (anyone can change anything)
+- No pipeline-as-tasks (pipeline tracking stays in agent_runs)
 
 It's a findings list with an audit trail. Like a shared notepad with structure.
