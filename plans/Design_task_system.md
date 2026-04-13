@@ -4,6 +4,26 @@
 
 Before adding the task table, rename existing DB concepts to avoid confusion with the new "task" meaning (findings from reports). The word "task" will mean a finding; agent executions are "runs".
 
+### Design challenges evaluated
+
+**Challenge 1: Do we need a `run_groups` metadata table?**
+
+Original idea: add a `run_groups` table with structured fields (label, timestamp, extra_prompt, profile, roles) instead of parsing the `"report-2026-04-11_08-48-05"` string.
+
+Decision: **Deferred.** The table adds a join to every query and a write on every group creation. The string format already encodes label + timestamp, and `parseTaskGroupTimestamp()` works today. Add the table later when commissioning (needs to query by label) or the web UI (would display extra_prompt) actually needs it. The rename is the essential prerequisite; the metadata table is not.
+
+**Challenge 2: Alternative naming — call findings table `findings` instead of `tasks`?**
+
+If the table were called `findings`, `task_group` wouldn't conflict. But "finding" doesn't describe the full lifecycle (open → approved → coded → done). At the coding phase, they're work items. "Task" is the right general term.
+
+Decision: **Keep `tasks` as the table name, rename `task_group` → `run_group`.**
+
+**Challenge 3: Env var leakage into test processes** (see "Why not env vars" in Input Format section below).
+
+The original plan used `ATEAM_REPORTER` and `ATEAM_RUN_GROUP` env vars. Research confirmed that `buildProcessEnv()` in `agent.go:130` inherits the full parent environment — any env var leaks into test processes. Every CI/CD system has this same problem (GitHub Actions leaks `INPUT_*`, `GITHUB_*`; Buildkite leaks `BUILDKITE_*`). No standard mitigation exists except container isolation (Dagger).
+
+Decision: **Don't use env vars. Use prompt template injection** — inject reporter and run-group as literal CLI flags in the prompt. Zero leakage risk. ~10 extra tokens per finding ($0.0002). Details in Input Format section.
+
 ### Renames
 
 | Current | New | Why |
@@ -17,29 +37,6 @@ Before adding the task table, rename existing DB concepts to avoid confusion wit
 | `LatestTaskGroup()` | `LatestRunGroup()` | Consistent |
 | `TaskGroupRow` | `RunGroupRow` | Consistent |
 
-### New table: run_groups
-
-Currently `run_group` is a bare string (`"report-2026-04-11_08-48-05"`) with metadata extracted by string parsing (`parseTaskGroupTimestamp()`, `LIKE 'code-%'` prefix matching). A proper table gives us structured metadata.
-
-```sql
-CREATE TABLE IF NOT EXISTS run_groups (
-    id           TEXT PRIMARY KEY,   -- e.g. "report-2026-04-11_08-48-05"
-    label        TEXT NOT NULL,      -- "report", "code", "review", "parallel", or custom
-    started_at   TEXT NOT NULL,      -- ISO timestamp, no more string parsing
-    extra_prompt TEXT DEFAULT '',    -- the --extra-prompt value for this group
-    profile      TEXT DEFAULT '',    -- profile used
-    roles        TEXT DEFAULT ''     -- comma-separated roles (for report groups)
-);
-```
-
-`run_groups.id` matches the `agent_runs.run_group` value. Not a strict FK (ad-hoc runs may have empty run_group).
-
-This simplifies:
-- `parseTaskGroupTimestamp()` → DB lookup `GetRunGroup(id).StartedAt`
-- `LatestRunGroup()` → `WHERE label = 'code'` instead of `LIKE 'code-%'`
-- Web UI sessions page → show extra_prompt, profile alongside cost data
-- Cost reporting → join with `run_groups` for richer display
-
 ### Migration
 
 Same pattern as existing `agent_calls` → `agent_execs` migration (`calldb.go:149-206`):
@@ -51,13 +48,28 @@ DROP INDEX IF EXISTS idx_execs_task_group;
 CREATE INDEX idx_runs_run_group ON agent_runs(run_group);
 ```
 
-Detection: check for column `task_group` in `agent_execs` via PRAGMA. Backfill `run_groups` rows from existing `run_group` values (parse label and timestamp from the string).
+Detection: check for column `task_group` in `agent_execs` via PRAGMA.
 
 ### Affected files
 
 `internal/calldb/calldb.go`, `internal/calldb/queries.go`, `internal/calldb/calldb_test.go`, `internal/runner/runner.go`, `cmd/report.go`, `cmd/code.go`, `cmd/run.go`, `cmd/parallel.go`, `cmd/runs.go`, `cmd/cost.go`, `cmd/tail.go`, `cmd/inspect.go`, `cmd/pool_status.go`, `internal/web/handlers.go`, `internal/web/templates/*.html`
 
 This is mechanical — rename structs/fields/methods, update SQL strings, update templates. No logic changes.
+
+### Future: run_groups metadata table
+
+Deferred. When commissioning or web UI needs structured group metadata (extra_prompt, profile, roles, label), add a `run_groups` table joining with `agent_runs.run_group`. Schema sketch for when needed:
+
+```sql
+CREATE TABLE IF NOT EXISTS run_groups (
+    id           TEXT PRIMARY KEY,   -- e.g. "report-2026-04-11_08-48-05"
+    label        TEXT NOT NULL,      -- "report", "code", "review", "parallel", or custom
+    started_at   TEXT NOT NULL,      -- ISO timestamp
+    extra_prompt TEXT DEFAULT '',
+    profile      TEXT DEFAULT '',
+    roles        TEXT DEFAULT ''     -- comma-separated
+);
+```
 
 ---
 
