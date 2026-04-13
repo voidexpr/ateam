@@ -1,5 +1,66 @@
 # Design: Task System
 
+## Prerequisite: Rename agent_execs → agent_runs, task_group → run_group
+
+Before adding the task table, rename existing DB concepts to avoid confusion with the new "task" meaning (findings from reports). The word "task" will mean a finding; agent executions are "runs".
+
+### Renames
+
+| Current | New | Why |
+|---------|-----|-----|
+| Table `agent_execs` | `agent_runs` | "Exec" is vague; these are agent runs |
+| Column `task_group` | `run_group` | Avoids collision with `tasks` table |
+| CLI `--task-group` | `--run-group` | Consistent with DB |
+| Go structs `TaskGroup` | `RunGroup` | Consistent with DB |
+| `CostByTaskGroup()` | `CostByRunGroup()` | Consistent |
+| `CallsByTaskGroup()` | `CallsByRunGroup()` | Consistent |
+| `LatestTaskGroup()` | `LatestRunGroup()` | Consistent |
+| `TaskGroupRow` | `RunGroupRow` | Consistent |
+
+### New table: run_groups
+
+Currently `run_group` is a bare string (`"report-2026-04-11_08-48-05"`) with metadata extracted by string parsing (`parseTaskGroupTimestamp()`, `LIKE 'code-%'` prefix matching). A proper table gives us structured metadata.
+
+```sql
+CREATE TABLE IF NOT EXISTS run_groups (
+    id           TEXT PRIMARY KEY,   -- e.g. "report-2026-04-11_08-48-05"
+    label        TEXT NOT NULL,      -- "report", "code", "review", "parallel", or custom
+    started_at   TEXT NOT NULL,      -- ISO timestamp, no more string parsing
+    extra_prompt TEXT DEFAULT '',    -- the --extra-prompt value for this group
+    profile      TEXT DEFAULT '',    -- profile used
+    roles        TEXT DEFAULT ''     -- comma-separated roles (for report groups)
+);
+```
+
+`run_groups.id` matches the `agent_runs.run_group` value. Not a strict FK (ad-hoc runs may have empty run_group).
+
+This simplifies:
+- `parseTaskGroupTimestamp()` → DB lookup `GetRunGroup(id).StartedAt`
+- `LatestRunGroup()` → `WHERE label = 'code'` instead of `LIKE 'code-%'`
+- Web UI sessions page → show extra_prompt, profile alongside cost data
+- Cost reporting → join with `run_groups` for richer display
+
+### Migration
+
+Same pattern as existing `agent_calls` → `agent_execs` migration (`calldb.go:149-206`):
+
+```sql
+ALTER TABLE agent_execs RENAME TO agent_runs;
+ALTER TABLE agent_runs RENAME COLUMN task_group TO run_group;
+DROP INDEX IF EXISTS idx_execs_task_group;
+CREATE INDEX idx_runs_run_group ON agent_runs(run_group);
+```
+
+Detection: check for column `task_group` in `agent_execs` via PRAGMA. Backfill `run_groups` rows from existing `run_group` values (parse label and timestamp from the string).
+
+### Affected files
+
+`internal/calldb/calldb.go`, `internal/calldb/queries.go`, `internal/calldb/calldb_test.go`, `internal/runner/runner.go`, `cmd/report.go`, `cmd/code.go`, `cmd/run.go`, `cmd/parallel.go`, `cmd/runs.go`, `cmd/cost.go`, `cmd/tail.go`, `cmd/inspect.go`, `cmd/pool_status.go`, `internal/web/handlers.go`, `internal/web/templates/*.html`
+
+This is mechanical — rename structs/fields/methods, update SQL strings, update templates. No logic changes.
+
+---
+
 ## Input Format Decision
 
 The agent currently outputs findings as markdown with structured fields (Title, Location, Severity, Effort, Description, Recommendation). The task CLI input should match this structure with minimal ceremony.
@@ -14,10 +75,10 @@ The agent currently outputs findings as markdown with structured fields (Title, 
 
 **Winner: frontmatter + body via heredoc.** LLMs produce this pattern reliably (it's markdown frontmatter), multi-line descriptions work naturally, no escaping needed, and it's the most compact.
 
-Common fields (reporter, task-group) are injected as environment variables by the runner — the agent never passes them. This saves ~10 tokens per `ateam task add` call.
+Common fields (reporter, run-group) are injected as environment variables by the runner — the agent never passes them. This saves ~10 tokens per `ateam task add` call.
 
 ```bash
-# The agent just does this per finding. Reporter and task-group come from env.
+# The agent just does this per finding. Reporter and run-group come from env.
 ateam task add <<'EOF'
 subject: Secret env vars forwarded as -e KEY=VALUE docker arguments
 severity: MEDIUM
@@ -36,10 +97,10 @@ EOF
 The runner sets these before spawning the agent:
 ```
 ATEAM_REPORTER=security:report
-ATEAM_TASK_GROUP=report-2026-04-11_08-48-05
+ATEAM_RUN_GROUP=report-2026-04-11_08-48-05
 ```
 
-For explicit override (testing, manual use): `ateam task add --reporter security:report --task-group TG`.
+For explicit override (testing, manual use): `ateam task add --reporter security:report --run-group RG`.
 
 Also accept a file: `ateam task add --file finding.md` (same frontmatter format).
 
@@ -75,8 +136,8 @@ CREATE TABLE tasks (
     priority      TEXT,          -- P0, P1, P2
     created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
     updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
-    task_group    TEXT,          -- originating report/review run
-    code_group    TEXT,          -- code run that attempted this
+    report_run_group TEXT,       -- run_group of originating report run
+    code_run_group   TEXT,       -- run_group of code run that attempted this
     commit_hash   TEXT,
     session_id    TEXT           -- claude session for resume
 );
@@ -94,7 +155,7 @@ CREATE INDEX idx_tasks_source ON tasks(source_role);
 CREATE INDEX idx_comments_task ON task_comments(task_id);
 ```
 
-Lives in the existing `.ateam/state.sqlite` alongside the `calls` table.
+Lives in the existing `.ateam/state.sqlite` alongside the `agent_runs` and `run_groups` tables.
 
 No CHECK constraints on severity/effort/state — agents may produce variations ("Med" vs "MEDIUM") and we'd rather store and normalize than reject.
 
@@ -403,7 +464,7 @@ For each finding, call ateam task add with a heredoc:
     EOF
 
 Call this once per finding as you discover them. Your reporter identity
-and task group are set automatically.
+and run group are set automatically.
 
 After reporting all findings, produce a brief summary for the report file.
 The summary should include an overall assessment and a reference to
