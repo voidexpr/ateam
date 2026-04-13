@@ -251,6 +251,81 @@ Gas Town is **significantly more complex to use** for ATeam's goals. It's design
 
 **Key difference from ATeam:** Supacode is a developer productivity tool — a better terminal for manually running agents side by side. ATeam is an autonomous system that decides what to work on, runs agents unattended, and triages results. Supacode is the cockpit; ATeam is the autopilot.
 
+#### Ona (formerly Gitpod) ⭐⭐⭐⭐
+
+**What it is:** A cloud platform (SaaS or self-hosted VPC) for running AI software engineering agents in isolated, reproducible environments. Originally Gitpod (cloud dev environments), rebranded as Ona in 2025–2026 with a pivot toward AI agent infrastructure. Supports background agents, automations triggered by PRs/schedules/webhooks, enterprise guardrails, and kernel-level security enforcement. SOC 2 certified, GDPR compliant. Targets Fortune 500.
+
+**Agent model — own agent, not Claude Code:**
+
+Ona runs its own proprietary agent ("Ona Agent"). The underlying LLM is not disclosed publicly. The agent operates inside ephemeral cloud VMs provisioned from Dev Container configs — each task gets a fresh isolated environment with the project's full toolchain (compilers, test suites, linters, etc.).
+
+Ona Agent is steered through two mechanisms:
+- **AGENTS.md**: an open standard (Linux Foundation) placed in the repo root. Functions like CLAUDE.md — teaches the agent project conventions, commands, structure. Loaded at session start. Recommended under 60 lines.
+- **Skills** (SKILL.md files in `.ona/skills/`): reusable multi-step workflows (e.g., "create-pr", "go-tests", "sentry-triage"). Discovered automatically when task descriptions match the skill's metadata. Similar to ATeam's role prompts but more granular — each skill is a single procedure rather than a full role.
+
+Ona also supports **external agents** (Claude Code, Cursor) connecting to Ona environments via the `ona` CLI. External agents use `ona environment create` to provision a VM, then run commands inside it via `ona environment exec`. This is a different model from ATeam: Ona provides the infrastructure, the agent runs remotely inside it.
+
+**How they manage credentials/authentication:**
+
+Three-level secret hierarchy with strict precedence: **User** (highest) > **Project** > **Organization** (lowest).
+
+- **Encryption**: AES256-GCM at rest, TLS in transit. Ona employees cannot access encryption keys.
+- **Injection**: secrets are injected into environments as environment variables, files (certificates, configs mounted at specified paths), or container registry credentials. Updates propagate to running environments within 2 minutes.
+- **Build-time access**: secrets integrate with Docker BuildKit during Dev Container image builds automatically.
+- **For external agents**: the `ona` CLI authenticates via `ona login` (browser-based OAuth). Machine-to-machine auth uses service accounts or personal access tokens.
+- **Enterprise**: SSO (Google, Okta, Entra ID, PingFederate, Amazon Cognito, GitLab), OIDC for cloud resource access (e.g., AWS role assumption from inside an environment), SCIM for user provisioning.
+
+This is more sophisticated than ATeam's secret management. ATeam resolves secrets from keychain/env/files and forwards them via `docker run -e`. Ona has a full secrets management plane with scoping, encryption, and file-based injection.
+
+**How they organize tasks:**
+
+Tasks are organized as **Automations** — YAML-defined workflows (`automations.yaml`) with sequential steps:
+
+1. **Trigger**: manual, PR event, time-based schedule (hourly/daily/weekly/monthly in UTC), or webhook.
+2. **Steps** execute in sequence within the same environment. Step types:
+   - **Command**: run a shell command (e.g., `npx knip --reporter json > report.json`)
+   - **Prompt**: send a prompt to the Ona Agent with context from previous steps
+   - **Pull Request**: open a PR with the changes made
+   - **Report**: extract structured execution data
+3. **Guardrails**: command deny lists, kernel-level veto (blocks unauthorized executables), datawall (detects data exfiltration via fingerprinting).
+
+Example automation (CVE remediation):
+```
+Command step: snyk test --json > snyk-report.json
+Prompt step: "Read snyk-report.json. Resolve every CVE found..."
+Pull Request step: open PR with changes
+Trigger: scheduled weekly Sunday 8 PM UTC
+```
+
+Automations can target multiple repositories in parallel (e.g., run CVE remediation across 100 repos simultaneously). Managed via UI or CLI (`ona ai automation create automation.yaml`).
+
+This is similar to ATeam's report → review → code pipeline but more rigid: Ona's steps are a fixed sequence defined in YAML. ATeam's coordinator makes dynamic decisions about what to work on based on report content.
+
+**Pricing:** OCU-based (Ona Compute Units). Free tier: $10 in credits, 3 parallel environments. Core: from $20/month, up to 100 members, unlimited environments, GPU support. Enterprise: custom pricing, VPC deployment, SSO/OIDC, warm pools, SLA.
+
+**Overlap with ATeam:** Both run background agents for code quality tasks (security scanning, dependency updates, test improvements). Both use isolated environments. Both support scheduled execution. Both separate analysis from implementation.
+
+**What it lacks for our use case:**
+
+- **No specialized agent roles with persistent knowledge.** Ona Agent is a single general-purpose agent steered by AGENTS.md and Skills. No concept of a "testing specialist" or "security specialist" that accumulates project-specific knowledge over time. Skills are static instructions, not learned context.
+- **No coordinator/supervisor.** No LLM-powered triage layer that reads multiple reports and prioritizes. Each automation runs independently — there's no cross-automation reasoning about what matters most.
+- **Cloud-only.** Requires Ona's infrastructure (SaaS or VPC deployment). Cannot run on a developer's laptop or a simple build server with Docker. ATeam is a local CLI that works anywhere Docker runs.
+- **Closed-source agent.** The Ona Agent is proprietary. Cannot inspect, modify, or replace the agent's behavior beyond AGENTS.md and Skills. ATeam uses Claude Code directly — any improvement to Claude Code immediately benefits ATeam.
+- **No git-versioned decision trail.** Automation runs produce logs and reports, but there's no equivalent of ATeam's git repo of decisions, reports, and knowledge files that forms an auditable timeline.
+- **No cross-project knowledge.** No organization-level knowledge that agents accumulate and share between projects.
+- **Cost model tied to platform.** OCU billing combines compute + tokens. ATeam separates infrastructure cost (your own Docker) from API cost (your own Claude subscription).
+
+**Ideas to integrate:**
+
+- **AGENTS.md as a standard.** Ona's AGENTS.md is a Linux Foundation open standard. ATeam already uses CLAUDE.md for similar purposes but should consider supporting AGENTS.md as an additional context source for sub-agents — it's becoming a cross-tool convention.
+- **Command + Prompt + PR step pattern.** Ona's automation step types map cleanly to ATeam's workflow: run a deterministic command (linter, scanner), feed output to an agent prompt, have the agent create changes, open a PR. ATeam's `ateam run` could adopt this explicit step sequencing.
+- **Kernel-level guardrails (Veto).** Ona's below-agent enforcement (blocking executables, detecting data exfiltration at the kernel level) is more robust than ATeam's Docker-level isolation. Worth investigating for ATeam's container profiles — could use seccomp or AppArmor profiles to achieve similar enforcement.
+- **Secrets as files.** Ona injects secrets as mounted files at specified paths, not just env vars. ATeam currently only supports env var injection. File-based secrets are useful for certificates, SSH keys, and configs.
+- **Multi-repo automations.** Ona can run the same automation across hundreds of repos in parallel. ATeam's organization concept supports multiple projects but doesn't have a "run this across all projects" primitive yet.
+- **Skills pattern.** Ona's SKILL.md (small, focused, auto-discovered procedures) is a useful complement to ATeam's role prompts (broad, domain-wide missions). ATeam could support both: roles define what to look for, skills define how to execute specific fixes.
+
+**Key architectural difference from ATeam:** Ona is a cloud infrastructure platform — you send work to Ona's cloud, agents run there, results come back as PRs. ATeam is a local-first CLI — agents run on your machine (or any machine with Docker), using your Claude subscription, with artifacts stored as local git-tracked files. Ona abstracts away the infrastructure; ATeam gives you full control of it. Ona is better for enterprises with 100+ repos needing centralized governance. ATeam is better for individual developers or small teams wanting autonomous quality improvement without a cloud dependency.
+
 #### Other Notable Tools
 
 | Tool | What It Is | Why Not a Direct Fit |
@@ -265,7 +340,7 @@ Gas Town is **significantly more complex to use** for ATeam's goals. It's design
 
 ### B.3 Conclusion: Build or Adopt?
 
-**Recommendation: Build ATeam, but borrow heavily from Gas Town, ComposioHQ/agent-orchestrator, and OpenHands patterns.**
+**Recommendation: Build ATeam, but borrow heavily from Gas Town, ComposioHQ/agent-orchestrator, OpenHands, and Ona patterns.**
 
 No existing tool combines all of ATeam's core requirements:
 1. Scheduled, autonomous background operation (night shift).
@@ -285,6 +360,7 @@ Gas Town and agent-orchestrator come closest but are both reactive/interactive r
 - **Durable execution checkpoints** from LangGraph.
 - **Cron flow definitions** from AWS CAO.
 - **PR-Agent as a quality gate** for agent-generated changes.
+- **AGENTS.md standard**, **Command+Prompt+PR step sequencing**, **kernel-level guardrails**, and **Skills pattern** from Ona.
 
 ### B.4 Future: Feature Agents
 
