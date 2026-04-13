@@ -75,11 +75,12 @@ The agent currently outputs findings as markdown with structured fields (Title, 
 
 **Winner: frontmatter + body via heredoc.** LLMs produce this pattern reliably (it's markdown frontmatter), multi-line descriptions work naturally, no escaping needed, and it's the most compact.
 
-Common fields (reporter, run-group) are injected as environment variables by the runner — the agent never passes them. This saves ~10 tokens per `ateam task add` call.
+Common fields (reporter, run-group) are injected into the prompt template by ateam at prompt assembly time. The agent sees literal CLI flags in its instructions and copies them per finding. **No env vars are used** — this avoids leaking `ATEAM_*` variables into test processes run by the agent (see "Why not env vars" below).
 
 ```bash
-# The agent just does this per finding. Reporter and run-group come from env.
-ateam task add <<'EOF'
+# The prompt template includes the full command with flags baked in.
+# The agent copies this per finding, changing only the frontmatter.
+ateam task add --reporter security:report --run-group report-2026-04-11 <<'EOF'
 subject: Secret env vars forwarded as -e KEY=VALUE docker arguments
 severity: MEDIUM
 effort: MEDIUM
@@ -94,15 +95,20 @@ deleted after launch) instead of per-variable -e KEY=VALUE args.
 EOF
 ```
 
-The runner sets these before spawning the agent:
-```
-ATEAM_REPORTER=security:report
-ATEAM_RUN_GROUP=report-2026-04-11_08-48-05
-```
+The prompt assembly (`AssembleRolePrompt`) injects the reporter and run-group values into the instructions template. The agent never constructs these values — it copies them from the prompt.
 
-For explicit override (testing, manual use): `ateam task add --reporter security:report --run-group RG`.
+Also accept a file: `ateam task add --file finding.md --reporter security:report --run-group RG`.
 
-Also accept a file: `ateam task add --file finding.md` (same frontmatter format).
+### Why not env vars
+
+`buildProcessEnv()` in `agent.go:130` inherits the full parent environment via `os.Environ()`. Any env var set by ateam (via `os.Setenv`) leaks into:
+1. The agent subprocess (Claude)
+2. Every tool call the agent makes (bash commands)
+3. Every test process the agent runs (`go test`, `npm test`, etc.)
+
+Sandbox settings do NOT filter env vars — they only restrict filesystem and network. This means `ATEAM_REPORTER=security:report` would be visible inside `go test ./...` for the project being audited. If tests check for a clean environment or use similarly-named variables, they break.
+
+The prompt template approach costs ~10 extra tokens per finding (the flags) but has zero leakage risk. At 5 findings per report, that's ~$0.0002 — negligible.
 
 ### Parsing rules
 
