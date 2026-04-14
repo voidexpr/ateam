@@ -17,6 +17,9 @@ set -euo pipefail
 #   --keep               Don't remove container on exit
 #   --shared-claude DIR  Host directory to mount at /home/agent/shared_claude
 #
+# A persistent ~/data directory is always mounted at ~/.ateam-containers/NAME/data
+# on the host, surviving container restarts.
+#
 # Everything after -- is passed to claude (e.g., -- -p "hello")
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -100,6 +103,11 @@ else
     # Named volume: single mount for .claude/
     args+=(-v "$volume:/home/agent/.claude")
 fi
+# Persistent ~/data directory (per-container name, survives container restarts)
+data_dir="$HOME/.ateam-containers/$name/data"
+mkdir -p "$data_dir"
+args+=(-v "$data_dir:/home/agent/data")
+
 args+=(-v "$workspace:/workspace")
 args+=(-v "$ateam_build_dir:/opt/ateam:ro")
 
@@ -130,6 +138,7 @@ args+=(-e "TZ=${TZ:-$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/|
 
 echo "Container:  $name"
 echo "Volume:     $volume"
+echo "Data:       $data_dir"
 echo "Workspace:  $workspace"
 [[ -n "$shared_claude" ]] && echo "Shared:     $shared_claude"
 echo "Image:      $image"
