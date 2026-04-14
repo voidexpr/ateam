@@ -200,7 +200,19 @@ ateam secret --save-project-scope             # write all to .ateam/secrets.env
 | `--print` | Print all (or named) secrets as raw `KEY=VALUE` to stdout |
 | `--save-project-scope` | Resolve from any source and write to `.ateam/secrets.env` |
 
-Agents declare required secrets via `required_env` in `runtime.hcl`. Validation runs before any agent spawn.
+Agents declare required secrets via `required_env` in `runtime.hcl`.
+
+**Resolution order** (secret store is authoritative):
+1. Project `.ateam/secrets.env` / keychain
+2. Org `.ateamorg/secrets.env` / keychain
+3. Global `~/.config/ateam/secrets.env` / keychain
+4. Process environment (fallback only)
+
+If `ateam secret` has a value configured, it always wins over inherited environment variables. When alternatives exist (e.g., `ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN`), store-backed credentials are preferred over env-only ones. Competing alternatives are stripped from the agent's process environment to prevent credential confusion (e.g., Claude Code's auth priority is `ANTHROPIC_API_KEY > CLAUDE_CODE_OAUTH_TOKEN` — without stripping, the wrong credential could be used).
+
+**Validation** runs before agent spawn for container runs and inside containers. On host without containers, validation is skipped — agents handle their own auth (interactive login, macOS Keychain). Credential isolation (stripping competing env vars) always runs regardless of context.
+
+Use `ateam run --dry-run` to see the full credential resolution: which credentials are active, which are stripped, and their sources.
 
 **Docker usage**: secrets in OS keychains don't cross into containers. Use `--save-project-scope` to write resolved secrets to `.ateam/secrets.env`, which is mounted into containers. Inside the container, `ateam run` resolves them from the project scope automatically.
 
@@ -703,7 +715,7 @@ agent "claude-sonnet" {
 }
 ```
 
-Agents support inheritance via `base`, sandbox settings, environment variables, isolated config dirs, and `required_env` for secret validation.
+Agents support inheritance via `base`, sandbox settings, environment variables, isolated config dirs, and `required_env` for secret validation. When alternatives are declared (e.g., `required_env = ["ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"]`), the secret store takes priority over environment variables, and competing alternatives are stripped from the agent's process environment. See [`ateam secret`](#ateam-secret) for the full resolution order.
 
 ### Template Variables
 

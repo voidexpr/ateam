@@ -35,15 +35,34 @@ Secrets are stored in the OS keychain (macOS Keychain, Linux Secret Service) or 
 
 ### How secret resolution works
 
-Before spawning an agent, ateam resolves each secret declared in the agent's `required_env` using this search order: environment variable → project `.ateam/secrets.env` → org `.ateamorg/secrets.env` → global keychain/file.
+Before spawning an agent, ateam resolves each secret declared in the agent's `required_env`. The **secret store is authoritative** — if a value is configured via `ateam secret`, it always wins over inherited environment variables:
 
-If a secret is found from any source other than an existing environment variable, ateam calls `os.Setenv` to inject it into the current process. This means:
+1. Project `.ateam/secrets.env` / keychain
+2. Org `.ateamorg/secrets.env` / keychain
+3. Global `~/.config/ateam/secrets.env` / keychain
+4. Process environment (fallback only)
 
-1. The agent child process inherits the secret automatically (standard Unix env inheritance)
-2. For Docker containers, `forward_env` picks it up via `os.LookupEnv` and passes it as `docker run -e` / `docker exec -e`
-3. The injection only affects the ateam process and its children — your shell environment is not modified
+When agents declare alternatives (e.g., `ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN`), credentials found in the secret store are preferred over credentials found only in the environment, regardless of alternative order.
+
+**Credential isolation:** After resolution, ateam strips competing credential alternatives from the agent's process environment. For example, if `CLAUDE_CODE_OAUTH_TOKEN` is resolved from the secret store but `ANTHROPIC_API_KEY` also exists in the environment (perhaps set for another app), `ANTHROPIC_API_KEY` is removed from the agent's env. This prevents Claude Code from picking up the wrong credential via its own auth priority (`ANTHROPIC_API_KEY > CLAUDE_CODE_OAUTH_TOKEN`). When this happens, ateam prints a notice:
+
+```
+Notice: use CLAUDE_CODE_OAUTH_TOKEN from ateam secret (project), ignore ANTHROPIC_API_KEY from the environment
+```
+
+**Host vs container behavior:**
+
+| Context | Validation | Isolation |
+|---------|-----------|-----------|
+| Host (no container) | Skipped — agents handle their own auth (interactive login, macOS Keychain) | Always runs — strips competing env vars |
+| Container (`--profile docker`) | Required — at least one credential must be resolvable | Always runs |
+| Inside container (`/.dockerenv`) | Required | Always runs |
+
+On the host, if no `ateam secret` is configured and no credential env vars are set, ateam does not error — the agent authenticates itself (e.g., via interactive Claude Code login). Inside containers, where interactive login isn't available, at least one credential must be resolvable or ateam returns an error with setup instructions.
 
 In practice: if you run `ateam secret CLAUDE_CODE_OAUTH_TOKEN --set` on the host, then `ateam run --profile docker "do something"`, the token flows from keychain → ateam process env → `docker run -e CLAUDE_CODE_OAUTH_TOKEN=...` → agent inside container. No manual `export` needed.
+
+Use `ateam run --dry-run` to see exactly which credentials are active, which are stripped, and the resolution order.
 
 **Note on OAuth tokens:** `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) is a standalone inference-only token — it does not require `.credentials.json`. The default `docker` profile mounts `.credentials.json` read-only for interactive auth compatibility, but headless agents work with just the token. See [Docker Profiles](#docker-profiles) for details.
 

@@ -234,7 +234,7 @@ func TestResolverScopePrecedence(t *testing.T) {
 	}
 }
 
-func TestResolverEnvOverridesScopes(t *testing.T) {
+func TestResolverScopesOverrideEnv(t *testing.T) {
 	projectDir := t.TempDir()
 	projectStore := &FileStore{Path: filepath.Join(projectDir, "secrets.env")}
 	_ = projectStore.Set("TEST_SECRET_ENV_VAR", "file-value")
@@ -252,8 +252,30 @@ func TestResolverEnvOverridesScopes(t *testing.T) {
 	if !result.Found {
 		t.Fatal("expected key to be found")
 	}
+	if result.Value != "file-value" {
+		t.Fatalf("expected secret store to win over env, got %q from %q", result.Value, result.Source)
+	}
+	if result.Source != ScopeProject {
+		t.Fatalf("expected source 'project', got %q", result.Source)
+	}
+}
+
+func TestResolverEnvFallback(t *testing.T) {
+	t.Setenv("TEST_SECRET_ENV_ONLY", "env-value")
+
+	r := &Resolver{
+		Scopes: []Scope{
+			{Name: ScopeProject, EnvFile: filepath.Join(t.TempDir(), "secrets.env")},
+		},
+		Backend: BackendFile,
+	}
+
+	result := r.Resolve("TEST_SECRET_ENV_ONLY")
+	if !result.Found {
+		t.Fatal("expected key to be found via env fallback")
+	}
 	if result.Value != "env-value" {
-		t.Fatalf("expected env to win, got %q from %q", result.Value, result.Source)
+		t.Fatalf("expected env-value, got %q", result.Value)
 	}
 	if result.Source != "env" {
 		t.Fatalf("expected source 'env', got %q", result.Source)
@@ -396,6 +418,120 @@ func TestValidateSecretsNoRequiredEnv(t *testing.T) {
 	ac := &runtime.AgentConfig{}
 	if err := ValidateSecrets(ac, r); err != nil {
 		t.Fatalf("expected no error with no required env, got: %v", err)
+	}
+}
+
+// --- IsolateCredentials tests ---
+
+func TestIsolateCredentialsStripsLosingAlternative(t *testing.T) {
+	dir := t.TempDir()
+	store := &FileStore{Path: filepath.Join(dir, "secrets.env")}
+	_ = store.Set("CLAUDE_CODE_OAUTH_TOKEN", "token-from-store")
+
+	// Simulate a container env that has ANTHROPIC_API_KEY for another app.
+	t.Setenv("ANTHROPIC_API_KEY", "app-key-should-be-stripped")
+
+	r := &Resolver{
+		Scopes: []Scope{
+			{Name: ScopeProject, EnvFile: filepath.Join(dir, "secrets.env")},
+		},
+		Backend: BackendFile,
+	}
+
+	ac := &runtime.AgentConfig{
+		RequiredEnv: []string{"ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"},
+	}
+
+	results := IsolateCredentials(ac, r)
+
+	// Should have one result with ANTHROPIC_API_KEY stripped.
+	if len(results) != 1 {
+		t.Fatalf("expected 1 isolation result, got %d", len(results))
+	}
+	ir := results[0]
+	if ir.ActiveKey != "CLAUDE_CODE_OAUTH_TOKEN" {
+		t.Fatalf("expected active key CLAUDE_CODE_OAUTH_TOKEN, got %q", ir.ActiveKey)
+	}
+	if ir.ActiveSource == "env" {
+		t.Fatal("expected active source from store, not env")
+	}
+	if len(ir.Stripped) != 1 || ir.Stripped[0] != "ANTHROPIC_API_KEY" {
+		t.Fatalf("expected [ANTHROPIC_API_KEY] stripped, got %v", ir.Stripped)
+	}
+
+	// ac.Env should have CLAUDE_CODE_OAUTH_TOKEN active, ANTHROPIC_API_KEY stripped.
+	if ac.Env["CLAUDE_CODE_OAUTH_TOKEN"] != "token-from-store" {
+		t.Fatalf("expected resolved token in ac.Env, got %q", ac.Env["CLAUDE_CODE_OAUTH_TOKEN"])
+	}
+	if ac.Env["ANTHROPIC_API_KEY"] != "" {
+		t.Fatalf("expected empty string (strip marker) for ANTHROPIC_API_KEY, got %q", ac.Env["ANTHROPIC_API_KEY"])
+	}
+}
+
+func TestIsolateCredentialsNoStrippingWhenOnlyOneExists(t *testing.T) {
+	dir := t.TempDir()
+	store := &FileStore{Path: filepath.Join(dir, "secrets.env")}
+	_ = store.Set("ANTHROPIC_API_KEY", "correct-key")
+
+	r := &Resolver{
+		Scopes: []Scope{
+			{Name: ScopeProject, EnvFile: filepath.Join(dir, "secrets.env")},
+		},
+		Backend: BackendFile,
+	}
+
+	ac := &runtime.AgentConfig{
+		RequiredEnv: []string{"ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"},
+	}
+
+	results := IsolateCredentials(ac, r)
+
+	// One result (resolved) but no stripping — CLAUDE_CODE_OAUTH_TOKEN isn't in env.
+	if len(results) != 1 {
+		t.Fatalf("expected 1 isolation result, got %d", len(results))
+	}
+	if len(results[0].Stripped) != 0 {
+		t.Fatalf("expected no stripped vars, got %v", results[0].Stripped)
+	}
+	if ac.Env["ANTHROPIC_API_KEY"] != "correct-key" {
+		t.Fatalf("expected resolved key in ac.Env, got %q", ac.Env["ANTHROPIC_API_KEY"])
+	}
+}
+
+func TestIsolateCredentialsNilResolver(t *testing.T) {
+	ac := &runtime.AgentConfig{
+		RequiredEnv: []string{"KEY_A|KEY_B"},
+	}
+	results := IsolateCredentials(ac, nil)
+	if len(results) != 0 {
+		t.Fatalf("expected no results with nil resolver, got %d", len(results))
+	}
+}
+
+func TestIsolateCredentialsPreservesExistingEnv(t *testing.T) {
+	dir := t.TempDir()
+	store := &FileStore{Path: filepath.Join(dir, "secrets.env")}
+	_ = store.Set("MY_KEY", "val")
+
+	r := &Resolver{
+		Scopes: []Scope{
+			{Name: ScopeProject, EnvFile: filepath.Join(dir, "secrets.env")},
+		},
+		Backend: BackendFile,
+	}
+
+	ac := &runtime.AgentConfig{
+		RequiredEnv: []string{"MY_KEY"},
+		Env:         map[string]string{"OTHER": "keep"},
+	}
+
+	IsolateCredentials(ac, r)
+
+	if ac.Env["OTHER"] != "keep" {
+		t.Fatalf("expected OTHER to be preserved, got %q", ac.Env["OTHER"])
+	}
+	if ac.Env["MY_KEY"] != "val" {
+		t.Fatalf("expected MY_KEY to be set, got %q", ac.Env["MY_KEY"])
 	}
 }
 

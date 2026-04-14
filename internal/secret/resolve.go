@@ -71,18 +71,20 @@ func NewResolver(projectDir, orgDir string, backend Backend, opts *ResolverOpts)
 	return &Resolver{Scopes: scopes, Backend: backend}
 }
 
-// Resolve looks up a secret through: env → scoped stores.
+// Resolve looks up a secret through: scoped stores → env.
+// The secret store is authoritative: if a value is configured via ateam secret,
+// it always wins over inherited environment variables.
 func (r *Resolver) Resolve(name string) ResolveResult {
-	// Check process environment first.
-	if val, ok := os.LookupEnv(name); ok {
-		return ResolveResult{Value: val, Source: "env", Backend: "env", Found: true}
-	}
-
-	// Walk scopes (project → org → global).
+	// Walk scopes first (project → org → global). Secret store is authoritative.
 	for _, scope := range r.Scopes {
 		if val, src, ok := r.resolveScope(scope, name); ok {
 			return ResolveResult{Value: val, Source: scope.Name, Backend: src, Found: ok}
 		}
+	}
+
+	// Fall back to process environment.
+	if val, ok := os.LookupEnv(name); ok {
+		return ResolveResult{Value: val, Source: "env", Backend: "env", Found: true}
 	}
 
 	return ResolveResult{}

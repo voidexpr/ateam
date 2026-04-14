@@ -56,6 +56,8 @@ func ValidateSecrets(ac *runtime.AgentConfig, resolver *Resolver) error {
 
 // resolveRequirement checks a single requirement (possibly "A|B" alternatives).
 // If found, injects the value into the process environment and returns true.
+// Always injects via os.Setenv, even when the source is "env", to ensure the
+// resolved value is consistent after any prior stripping or overriding.
 func resolveRequirement(req string, resolver *Resolver) bool {
 	alternatives := strings.Split(req, "|")
 	for _, alt := range alternatives {
@@ -65,14 +67,88 @@ func resolveRequirement(req string, resolver *Resolver) bool {
 		}
 		result := resolver.Resolve(alt)
 		if result.Found {
-			// Inject into process env if not already there.
-			if result.Source != "env" {
-				_ = os.Setenv(alt, result.Value)
-			}
+			_ = os.Setenv(alt, result.Value)
 			return true
 		}
 	}
 	return false
+}
+
+// IsolationResult describes the outcome of credential isolation for one
+// required_env group (e.g., "ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN").
+type IsolationResult struct {
+	ActiveKey    string   // the credential that will be used
+	ActiveSource string   // where it came from: "project", "org", "global", "env"
+	Stripped     []string // competing env vars removed from agent env
+}
+
+// IsolateCredentials modifies ac.Env so that:
+//   - The resolved credential is overridden in the agent env
+//   - Competing alternatives are stripped (set to "") from the agent env
+//
+// This prevents credential confusion: e.g., if CLAUDE_CODE_OAUTH_TOKEN was
+// resolved from the secret store, ANTHROPIC_API_KEY is stripped from the agent
+// process so Claude Code doesn't pick it up via its own auth priority.
+//
+// When multiple alternatives resolve, store-backed credentials are preferred
+// over env-only fallbacks. This ensures ateam secret is authoritative even
+// when a different alternative happens to exist in the environment.
+func IsolateCredentials(ac *runtime.AgentConfig, resolver *Resolver) []IsolationResult {
+	if resolver == nil {
+		return nil
+	}
+	if ac.Env == nil {
+		ac.Env = make(map[string]string)
+	}
+	var results []IsolationResult
+	for _, req := range ac.RequiredEnv {
+		alternatives := strings.Split(req, "|")
+
+		// Resolve all alternatives, prefer store over env.
+		var storeKey, storeVal, storeSource string
+		var envKey, envVal string
+		for _, alt := range alternatives {
+			alt = strings.TrimSpace(alt)
+			if alt == "" {
+				continue
+			}
+			result := resolver.Resolve(alt)
+			if !result.Found {
+				continue
+			}
+			if result.Source != "env" && storeKey == "" {
+				storeKey, storeVal, storeSource = alt, result.Value, result.Source
+			} else if result.Source == "env" && envKey == "" {
+				envKey, envVal = alt, result.Value
+			}
+		}
+
+		resolvedKey, resolvedVal, resolvedSource := storeKey, storeVal, storeSource
+		if resolvedKey == "" {
+			resolvedKey, resolvedVal, resolvedSource = envKey, envVal, "env"
+		}
+		if resolvedKey == "" {
+			continue
+		}
+
+		ac.Env[resolvedKey] = resolvedVal
+		ir := IsolationResult{
+			ActiveKey:    resolvedKey,
+			ActiveSource: resolvedSource,
+		}
+		for _, alt := range alternatives {
+			alt = strings.TrimSpace(alt)
+			if alt == "" || alt == resolvedKey {
+				continue
+			}
+			if _, exists := os.LookupEnv(alt); exists {
+				ac.Env[alt] = ""
+				ir.Stripped = append(ir.Stripped, alt)
+			}
+		}
+		results = append(results, ir)
+	}
+	return results
 }
 
 // formatRequirement formats "A|B" as "A or B" for display.
@@ -94,15 +170,18 @@ type ResolveDetail struct {
 	Source  string // "env", "project", "org", "global"
 	Backend string // "env", "file", "keychain"
 	Masked  string // "sk-a...zQAA"
+	Status  string // "active", "stripped", "" (default/unset)
 }
 
 // ResolveAllRequired resolves all required_env and forward_env entries
 // without injecting into the process environment. For display/diagnostic use.
+// When ac.Env has been modified by IsolateCredentials, the Status field reflects
+// whether each credential is active (will be used) or stripped (removed from agent env).
 func ResolveAllRequired(ac *runtime.AgentConfig, forwardEnv []string, resolver *Resolver) []ResolveDetail {
 	seen := map[string]bool{}
 	var details []ResolveDetail
 
-	// Resolve required_env entries.
+	// Resolve required_env entries, annotating active vs stripped.
 	for _, req := range ac.RequiredEnv {
 		for _, alt := range strings.Split(req, "|") {
 			alt = strings.TrimSpace(alt)
@@ -110,7 +189,17 @@ func ResolveAllRequired(ac *runtime.AgentConfig, forwardEnv []string, resolver *
 				continue
 			}
 			seen[alt] = true
-			details = append(details, resolveOneDetail(alt, resolver))
+			d := resolveOneDetail(alt, resolver)
+			if ac.Env != nil {
+				if v, ok := ac.Env[alt]; ok {
+					if v == "" {
+						d.Status = "stripped"
+					} else {
+						d.Status = "active"
+					}
+				}
+			}
+			details = append(details, d)
 		}
 	}
 
