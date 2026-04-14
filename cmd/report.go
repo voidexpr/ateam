@@ -174,6 +174,9 @@ func runReport(opts ReportOptions) error {
 
 	taskGroup := "report-" + time.Now().Format(runner.TimestampFormat)
 
+	cliOverridesProfile := opts.Profile != "" || opts.Agent != ""
+	defaultProfile := env.Config.ResolveProfile(runner.ActionReport, "")
+
 	basePinfo := env.NewProjectInfoParams("", "report")
 	var tasks []runner.PoolTask
 	for _, roleID := range roleIDs {
@@ -185,7 +188,7 @@ func runReport(opts ReportOptions) error {
 			continue
 		}
 		roleDir := env.RoleDir(roleID)
-		tasks = append(tasks, runner.PoolTask{
+		task := runner.PoolTask{
 			Prompt: prompt,
 			RunOpts: runner.RunOpts{
 				RoleID:               roleID,
@@ -200,7 +203,23 @@ func runReport(opts ReportOptions) error {
 				Verbose:              opts.Verbose,
 				TaskGroup:            taskGroup,
 			},
-		})
+		}
+
+		if !cliOverridesProfile {
+			roleProfile := env.Config.ResolveProfile(runner.ActionReport, roleID)
+			if roleProfile != defaultProfile {
+				roleRunner, err := resolveRunner(env, roleProfile, "", runner.ActionReport, roleID, opts.DockerAutoSetup)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: cannot resolve profile %q for %s, using default — %v\n", roleProfile, roleID, err)
+				} else {
+					applyContainerNameOverride(roleRunner, opts.ContainerName)
+					applyCheaperModel(roleRunner, opts.CheaperModel)
+					task.Runner = roleRunner
+				}
+			}
+		}
+
+		tasks = append(tasks, task)
 	}
 
 	if len(tasks) == 0 {
@@ -214,7 +233,11 @@ func runReport(opts ReportOptions) error {
 				fmt.Println()
 			}
 			fmt.Printf("╔══ %s ══╗\n\n", t.RoleID)
-			printDryRunInfo(cr, env, dryRunOpts{
+			dryRunRunner := cr
+			if t.Runner != nil {
+				dryRunRunner = t.Runner
+			}
+			printDryRunInfo(dryRunRunner, env, dryRunOpts{
 				RoleID:    t.RoleID,
 				Action:    runner.ActionReport,
 				TaskGroup: taskGroup,
@@ -233,6 +256,11 @@ func runReport(opts ReportOptions) error {
 		defer db.Close()
 	}
 	cr.CallDB = db
+	for i := range tasks {
+		if tasks[i].Runner != nil {
+			tasks[i].Runner.CallDB = db
+		}
+	}
 
 	if !opts.Force {
 		if err := checkConcurrentRuns(db, "", runner.ActionReport, roleIDs); err != nil {

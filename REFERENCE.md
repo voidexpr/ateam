@@ -599,6 +599,14 @@ security = "on"
 testing_basic = "on"
 refactor_small = "off"
 
+# [supervisor]
+# code_profile = "cheap"          # use a cheaper model for coding sub-runs
+
+# [profiles]
+# [profiles.roles]
+# security = "docker"             # run security reports in Docker
+# critical_code_reviewer = "codex" # use codex agent for this role
+
 # [sandbox-extra]
 # allow_write = ["/path/to/extra/writable/dir"]
 # allow_read = ["/path/to/extra/readable/dir"]
@@ -625,6 +633,61 @@ allow_write = ["/data/output", "/tmp/scratch"]
 allow_read = ["/opt/shared-tools"]
 allow_domains = ["api.internal.example.com", "registry.npmjs.org"]
 unsandboxed_commands = ["make:*", "docker:build"]
+```
+
+### `[supervisor]`
+
+Configure which profiles the supervisor and code phases use.
+
+| Key | Description |
+|-----|-------------|
+| `default_profile` | Default profile for supervisor actions (review, code management) |
+| `review_profile` | Profile override for the review phase specifically |
+| `code_profile` | Profile for code sub-runs (passed to `ateam run --profile`) |
+| `code_supervisor_profile` | Profile for the code management supervisor itself |
+
+```toml
+[supervisor]
+code_profile = "cheap"              # use sonnet for coding sub-runs
+code_supervisor_profile = "default" # use default for the supervisor
+```
+
+### `[profiles]`
+
+Map individual roles to specific profiles or agents. This lets you run different roles with different agents or runtime configurations.
+
+```toml
+[profiles]
+[profiles.roles]
+security = "docker"               # run security reports in Docker
+critical_code_reviewer = "codex"  # use codex agent for this role
+testing_full = "docker"           # testing needs Docker for build tools
+```
+
+Values can be either a **profile name** (defined in `runtime.hcl`) or an **agent name** (also defined in `runtime.hcl`). When the value matches a known agent but not a profile, it's treated as an agent shorthand — equivalent to `--agent NAME` on the CLI.
+
+**Profile resolution order** (first match wins):
+1. CLI flag (`--profile` or `--agent`) — overrides everything
+2. `[profiles.roles]` — per-role override from config.toml
+3. `[supervisor]` action-specific profile (for review/code actions)
+4. `[supervisor]` default_profile
+5. `[project]` default_profile
+6. Built-in `"default"` profile
+
+### `[container-extra]`
+
+Add extra Docker arguments, environment forwarding, or environment variables to container runs. Merged with the container definition from `runtime.hcl`.
+
+| Key | Description |
+|-----|-------------|
+| `extra_args` | Additional `docker run` flags (e.g., `["--cpus=2", "--memory=4g"]`) |
+| `forward_env` | Additional env var names to forward into containers |
+| `env` | Static env vars to set inside containers (key-value map) |
+
+```toml
+[container-extra]
+extra_args = ["--cpus=2"]
+forward_env = ["MY_CUSTOM_TOKEN"]
 ```
 
 ### Custom Roles

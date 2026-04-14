@@ -9,6 +9,7 @@ import (
 type PoolTask struct {
 	Prompt string
 	RunOpts
+	Runner *Runner // optional per-task runner override; if nil, the pool's shared runner is used
 }
 
 // RunPool executes tasks in parallel with a maximum concurrency limit.
@@ -21,7 +22,11 @@ func RunPool(ctx context.Context, r *Runner, tasks []PoolTask, maxParallel int, 
 	var wg sync.WaitGroup
 
 	for _, task := range tasks {
-		r.LogQueued(task.RunOpts)
+		qr := r
+		if task.Runner != nil {
+			qr = task.Runner
+		}
+		qr.LogQueued(task.RunOpts)
 	}
 
 	for _, task := range tasks {
@@ -37,7 +42,11 @@ func RunPool(ctx context.Context, r *Runner, tasks []PoolTask, maxParallel int, 
 			defer wg.Done()
 			defer func() { <-sem }() // release slot
 
-			summary := r.Run(ctx, t.Prompt, t.RunOpts, progress)
+			taskRunner := r
+			if t.Runner != nil {
+				taskRunner = t.Runner
+			}
+			summary := taskRunner.Run(ctx, t.Prompt, t.RunOpts, progress)
 
 			mu.Lock()
 			results = append(results, summary)
