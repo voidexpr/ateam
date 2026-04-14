@@ -195,7 +195,7 @@ There is a very long list of potentially very useful roles to add.
 - **Multi-project support**: share org-wide defaults across projects via `.ateamorg/` (by default created in `$HOME`)
 - **Runtime profiles**: switch agent/container combos with `--profile docker` or `--profile cheap`
 - **Cost tracking**: `ateam cost` for aggregated reports, `ateam ps` for run history
-- **Secret management**: `ateam secret` stores API keys in OS keychain or `.env` files
+- **Secret management**: `ateam secret` stores API keys in OS keychain or `.env` files. Secret store is authoritative — it takes priority over inherited environment variables and competing credentials are stripped from agent processes
 
 An ateam project is a `.ateam` folder in your code base, a parent directory ($HOME by default) contains `.ateamorg`.
 * **Project**:

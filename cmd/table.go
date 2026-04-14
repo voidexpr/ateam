@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	goruntime "runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -108,15 +109,18 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 		return nil, err
 	}
 
-	// Validate and inject secrets from the secret store.
-	// On host: only for container runs (agents handle their own auth).
-	// Inside a container: always inject so agents pick up stored tokens.
+	// Validate secrets: require credentials for container runs and inside containers
+	// (where agents can't use interactive login). On host without containers,
+	// agents handle their own auth (macOS Keychain, interactive login).
+	// IsolateCredentials always runs to strip competing alternatives from the
+	// agent env — this is safe even when no secrets are configured.
+	resolver := secretResolver(env, secret.DefaultBackend())
 	if (cc != nil && cc.Type != "none") || runner.IsInContainer() {
-		resolver := secretResolver(env, secret.DefaultBackend())
 		if err := secret.ValidateSecrets(ac, resolver); err != nil {
 			return nil, err
 		}
 	}
+	logIsolationResults(os.Stderr, secret.IsolateCredentials(ac, resolver))
 
 	r := runnerFromAgentConfig(env, ac)
 	r.Profile = profileName
@@ -174,6 +178,16 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.Runner
 	if !ok {
 		return nil, fmt.Errorf("unknown agent %q", agentName)
 	}
+
+	// No container — skip hard validation (agent handles its own auth on host).
+	// IsolateCredentials still runs to strip competing env vars.
+	resolver := secretResolver(env, secret.DefaultBackend())
+	if runner.IsInContainer() {
+		if err := secret.ValidateSecrets(&ac, resolver); err != nil {
+			return nil, err
+		}
+	}
+	logIsolationResults(os.Stderr, secret.IsolateCredentials(&ac, resolver))
 
 	r := runnerFromAgentConfig(env, &ac)
 	r.Profile = "a:" + agentName
@@ -882,6 +896,21 @@ func printDryRunInfo(r *runner.Runner, env *root.ResolvedEnv, opts dryRunOpts) {
 	}
 }
 
+// logIsolationResults prints a clear message when ateam secret overrides env vars.
+func logIsolationResults(w io.Writer, results []secret.IsolationResult) {
+	for _, ir := range results {
+		if len(ir.Stripped) == 0 {
+			continue
+		}
+		src := ir.ActiveSource
+		if src != "env" {
+			src = "ateam secret (" + src + ")"
+		}
+		fmt.Fprintf(w, "Notice: use %s from %s, ignore %s from the environment\n",
+			ir.ActiveKey, src, strings.Join(ir.Stripped, ", "))
+	}
+}
+
 func printDryRunSecrets(r *runner.Runner, env *root.ResolvedEnv) {
 	rtCfg, _ := runtime.Load(env.ProjectDir, env.OrgDir)
 	if rtCfg == nil {
@@ -907,19 +936,71 @@ func printDryRunSecrets(r *runner.Runner, env *root.ResolvedEnv) {
 		return
 	}
 	resolver := secretResolver(env, secret.DefaultBackend())
+
+	// Run isolation on this copy so details reflect active/stripped status.
+	isoResults := secret.IsolateCredentials(ac, resolver)
 	details := secret.ResolveAllRequired(ac, forwardEnv, resolver)
 	if len(details) == 0 {
 		return
 	}
-	fmt.Println("Secrets:")
+
+	logIsolationResults(os.Stdout, isoResults)
+	for _, ir := range isoResults {
+		if len(ir.Stripped) > 0 {
+			fmt.Println()
+			break
+		}
+	}
+
+	fmt.Println("Secrets (resolution: ateam secret store → env fallback):")
 	for _, d := range details {
-		if d.Found {
-			fmt.Printf("  %-30s ✓ %s (%s, %s)\n", d.Name, d.Masked, d.Source, d.Backend)
-		} else {
+		switch {
+		case !d.Found:
 			fmt.Printf("  %-30s ✗ not found\n", d.Name)
+		case d.Status == "stripped":
+			fmt.Printf("  %-30s ✗ stripped  (found in %s but overridden by ateam secret)\n", d.Name, d.Source)
+		case d.Status == "active":
+			label := d.Source
+			if d.Source != "env" {
+				label = "ateam secret, " + d.Source
+			}
+			fmt.Printf("  %-30s ✓ active   %s (%s)\n", d.Name, d.Masked, label)
+		default:
+			fmt.Printf("  %-30s ✓ %s (%s, %s)\n", d.Name, d.Masked, d.Source, d.Backend)
 		}
 	}
 	fmt.Println()
+
+	// Show agent env overrides (excluding secrets already shown above).
+	if ac.Env != nil {
+		secretKeys := map[string]bool{}
+		for _, d := range details {
+			secretKeys[d.Name] = true
+		}
+		var setVars, unsetVars []string
+		for k, v := range ac.Env {
+			if secretKeys[k] {
+				continue
+			}
+			if v == "" {
+				unsetVars = append(unsetVars, k)
+			} else {
+				setVars = append(setVars, k)
+			}
+		}
+		sort.Strings(setVars)
+		sort.Strings(unsetVars)
+		if len(setVars) > 0 || len(unsetVars) > 0 {
+			fmt.Println("Agent env overrides:")
+			for _, k := range setVars {
+				fmt.Printf("  %-30s = %s\n", k, ac.Env[k])
+			}
+			for _, k := range unsetVars {
+				fmt.Printf("  %-30s   (excluded from parent env)\n", k)
+			}
+			fmt.Println()
+		}
+	}
 }
 
 // poolDisplayOpts controls how runPool renders progress and formats output.
