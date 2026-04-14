@@ -106,6 +106,12 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 
 	prof, ac, cc, err := rtCfg.ResolveProfile(profileName)
 	if err != nil {
+		// If the profile name matches a known agent, treat it as an agent
+		// shorthand (like --agent). This allows config.toml [profiles.roles]
+		// to reference agent names directly: critical_code_reviewer = "codex"
+		if _, ok := rtCfg.Agents[profileName]; ok {
+			return newRunnerFromAgent(env, profileName)
+		}
 		return nil, err
 	}
 
@@ -852,7 +858,7 @@ func printDryRunInfo(r *runner.Runner, env *root.ResolvedEnv, opts dryRunOpts) {
 	fmt.Printf("Command:\n  %s %s\n", cmd, strings.Join(args, " "))
 	fmt.Println()
 
-	// CLAUDE_CONFIG_DIR
+	// CLAUDE_CONFIG_DIR — show the agent's config_dir if set, or the env var for claude agents
 	configDir := runner.ExpandHome(runner.ResolveTemplateString(r.ConfigDir, tmplVars))
 	if configDir != "" {
 		var configPath string
@@ -863,7 +869,11 @@ func printDryRunInfo(r *runner.Runner, env *root.ResolvedEnv, opts dryRunOpts) {
 		} else {
 			configPath = configDir
 		}
-		fmt.Printf("CLAUDE_CONFIG_DIR: %s\n\n", configPath)
+		fmt.Printf("CLAUDE_CONFIG_DIR: %s (from agent config_dir)\n\n", configPath)
+	} else if agentName == "claude" {
+		if envDir, ok := os.LookupEnv("CLAUDE_CONFIG_DIR"); ok {
+			fmt.Printf("CLAUDE_CONFIG_DIR: %s (from environment)\n\n", envDir)
+		}
 	}
 
 	// Docker command
