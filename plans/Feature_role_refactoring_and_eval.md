@@ -190,9 +190,18 @@ Additionally, the `state.sqlite` database tracks runs, and concurrent writes fro
 - Con: Needs new plumbing (`--project-dir` flag threading through the entire pipeline), agents still run in the same working directory (could interact)
 - Verdict: Medium complexity. Possible but the plumbing touches many call sites.
 
-### Recommendation: Git worktrees (B) as the primary mechanism
+**E: Make it configurable `--worktree BASEDIR | --use-dirs DIR1 DIR2`** — Offer multiple options to adapt to the main scenarios: simple reporting (then use worktree), complex setup required (use --use-dirs)
 
-`ateam eval` creates ephemeral worktrees, each with its own `.ateam/` state:
+- Pro: flexible
+- Con: more work but ultimately it remains 2 separate directory, only steps before the run are different
+- Pro: different eval (full report run, review or when comparing tasks vs. report based runs) will need some of that flexibility
+
+
+### Recommendation: Worktrees by default, user-provided dirs when needed
+
+Two workspace modes, same comparison logic:
+
+**`--worktree` (default)**: Ateam creates ephemeral git worktrees. Best for quick prompt iteration on the current project — no setup needed.
 
 ```
 /tmp/ateam-eval-{ts}/
@@ -200,30 +209,112 @@ Additionally, the `state.sqlite` database tracks runs, and concurrent writes fro
 └── candidate/      ← git worktree at same commit + .ateam/ copy + candidate prompt
 ```
 
-Both worktrees share the same git objects (git worktrees are cheap — they share `.git`). Each gets an independent `.ateam/` with its own `state.sqlite`, `roles/`, and `logs/`. Both can run in parallel since they're completely isolated.
+Both worktrees share git objects (cheap). Each gets independent `.ateam/` with its own `state.sqlite`, `roles/`, and `logs/`.
+
+**`--use-dirs DIR_BASE DIR_CANDIDATE`**: User provides pre-configured directories. Best for projects that need complex setup (Docker compose, database fixtures, env-specific config) that can't be replicated by copying `.ateam/`.
+
+```bash
+# User sets up two directories manually (or via a script)
+ateam eval --role security --use-dirs ~/eval/base ~/eval/candidate --prompt @candidate.md
+```
+
+Ateam installs the candidate prompt in DIR_CANDIDATE, runs both, collects and compares. It does not create or clean up the directories — the user manages their lifecycle.
+
+Both modes feed into the same comparison pipeline. The only difference is how the workspace directories are prepared.
 
 ### Core command: `ateam eval`
 
 ```bash
-# Compare two prompts (creates worktrees automatically)
+# Basic: compare two prompts for a role (auto-creates worktrees)
 ateam eval --role security --prompt @candidate.md [--base @current.md] [--model haiku]
 
-# Compare across multiple codebases (user provides pre-existing workspaces)
+# With pre-configured directories (complex project setup)
+ateam eval --role security --prompt @candidate.md --use-dirs ~/eval/base ~/eval/candidate
+
+# Compare across multiple codebases
 ateam eval --role security --prompt @candidate.md \
   --workspace ~/projects/webapp \
   --workspace ~/projects/api-service
 
-# Compare at a specific commit
+# Compare different role names (migration, consolidation)
+ateam eval --base-role security --candidate-role security_web --prompt @security_web.md
+
+# Compare N roles vs 1 consolidated role
+ateam eval --base-roles code/small,code/module,code/architecture \
+  --candidate-role code/all --prompt @consolidated.md
+
+# At a specific commit
 ateam eval --role security --prompt @candidate.md --commit abc1234
 
 # Repeat for variance
 ateam eval --role security --prompt @candidate.md --repeat 3
+
+# Full pipeline comparison (report + review + code)
+ateam eval --pipeline --role security --prompt @candidate.md
 
 # Review results
 ateam eval results [--last | --id EVAL_ID]
 ateam eval list
 ateam eval judge --last
 ```
+
+### Eval modes beyond single-role prompt comparison
+
+The core case is "same role, two prompts." But several other comparison modes are useful:
+
+**Mode 1: Different role names, same intent** — Compare `refactor_small` (old) vs `code/small` (new) during migration. Or compare a generic `security` role against a specialized `security_web` variant.
+
+```bash
+ateam eval --base-role security --candidate-role security_web --prompt @security_web_prompt.md
+```
+
+Implementation: `--base-role` and `--candidate-role` replace the single `--role`. When only `--role` is given, both sides use the same role name (current behavior). When they differ, the base worktree runs `--base-role` with its on-disk prompt, the candidate worktree runs `--candidate-role` with `--prompt`.
+
+**Mode 2: N roles vs 1 role** — Test whether a single consolidated role (e.g., `code/all`) produces the same findings as running `code/small` + `code/module` + `code/architecture` separately.
+
+```bash
+ateam eval --base-roles code/small,code/module,code/architecture --candidate-role code/all --prompt @consolidated_prompt.md
+```
+
+The base side runs 3 roles (their reports are concatenated for comparison). The candidate side runs 1 role. Comparison: did the single role cover the same findings? At what cost delta?
+
+This is important for collection design — merging roles saves cost but might lose coverage.
+
+**Mode 3: Full pipeline comparison** — Compare report+review+code, not just reports. "Does the new prompt lead to better code changes?"
+
+```bash
+ateam eval --pipeline --role security --prompt @candidate.md
+```
+
+This runs `ateam report && ateam review && ateam code` in each worktree (or stops after review if `--stop-at review`). Comparison adds:
+- Were the same tasks approved?
+- Did coding succeed/fail differently?
+- Were git diffs similar?
+
+This is the most expensive eval but the most meaningful. Defer to v2 — start with report-only comparison.
+
+### Extensibility: eval as a runner with pluggable comparison
+
+To support these modes without a combinatorial explosion of flags, structure eval as:
+
+```
+ateam eval [MODE] [FLAGS]
+```
+
+Where MODE defaults to `report` (compare reports) but can be `review` (report+review) or `pipeline` (full cycle). Each mode defines:
+- What commands to run in each worktree
+- What artifacts to collect
+- What comparison dimensions apply
+
+```go
+type EvalMode interface {
+    Run(worktreeDir string, opts EvalOpts) error    // what to execute
+    Collect(worktreeDir string) (*EvalResult, error) // what to gather
+    Compare(base, candidate *EvalResult) *Comparison // how to compare
+}
+```
+
+Start with `ReportEvalMode` (compares reports). Add `ReviewEvalMode` and `PipelineEvalMode` later. The worktree setup, parallel execution, and result storage are shared infrastructure.
 
 ### How single-workspace eval works
 
@@ -431,14 +522,29 @@ cp candidate_security.md defaults/roles/security/report_prompt.md
 
 ### Implementation
 
+**Phase 1: Core eval (report-only, single role)**
+
 | File | Change |
 |------|--------|
-| `cmd/eval.go` | New: `ateam eval` with subcommands (run, results, list, judge) |
-| `internal/eval/worktree.go` | New: create/teardown worktrees, copy `.ateam/` state, install prompt |
+| `cmd/eval.go` | New: `ateam eval` parent command |
+| `cmd/eval_run.go` | New: `ateam eval run` (default subcommand) — workspace setup, parallel execution, comparison |
+| `cmd/eval_results.go` | New: `ateam eval results`, `ateam eval list` — display stored evals |
+| `cmd/eval_judge.go` | New: `ateam eval judge` — LLM quality comparison |
+| `internal/eval/workspace.go` | New: worktree creation/teardown, `.ateam/` copy, prompt installation. Also `--use-dirs` mode (skip creation, validate existing dirs) |
 | `internal/eval/metrics.go` | New: extract cost/tokens/context from `state.sqlite` |
 | `internal/eval/findings.go` | New: parse findings from report markdown, location-based matching |
-| `internal/eval/judge.go` | New: LLM quality comparison via haiku |
-| `internal/eval/compare.go` | New: comparison display, aggregation across workspaces |
+| `internal/eval/judge.go` | New: judge prompt assembly, haiku invocation, verdict parsing |
+| `internal/eval/compare.go` | New: comparison display, delta formatting, aggregation |
+| `internal/eval/storage.go` | New: eval.json read/write, eval directory management |
+
+**Phase 2: Extended modes (later)**
+
+| Feature | Effort |
+|---------|--------|
+| `--base-role` / `--candidate-role` (different role names) | Small — different role IDs in each worktree |
+| `--base-roles` (N vs 1 comparison) | Medium — concatenate multiple reports for comparison |
+| `--pipeline` (full report+review+code) | Large — run full pipeline in each worktree, compare tasks/commits |
+| `EvalMode` interface for pluggable comparison | Medium — refactor phase 1 into the interface |
 
 ---
 
