@@ -49,7 +49,8 @@ If you cannot figure out how to run the tests, note this and proceed carefully.
 ### 5. Verify
 
 - Run the full test suite again. Compare against your baseline.
-- If new test failures appear, investigate and fix them. If you cannot fix them, revert your changes and report failure.
+- If new test failures appear, investigate and fix them — this is part of your task, not a reason to give up. Common causes: renamed functions, changed signatures, moved files, updated behavior that tests assert on. Include those fixes in your commit.
+- Only revert if the test failures are unrelated to your change (pre-existing) or if fixing them would require changes far outside your task scope.
 - If the recommendation involved adding tests, make sure they pass.
 - Run any build steps the project requires (check CLAUDE.md for build commands).
 
@@ -81,7 +82,7 @@ When the work is completed, create a single commit:
 Recommendation: brief summary of what was recommended
 Changes: what was actually done
 Why: include the full details of the report finding and review that led to this change to be implemented
-Tests ran: list the tests execution and if the entire command(s) passed or failed
+Tests: command(s) ran, pass/fail counts, and what was done about any failures
 ```
 
 Replace `ROLE_NAME` with the reporting role's name from the recommendation's Source field (e.g., `security`, `refactor_small`, `testing_basic`). If multiple roles sourced the recommendation, use the primary one.
