@@ -50,6 +50,7 @@ func init() {
 	rootCmd.AddCommand(containerCpCmd)
 	rootCmd.AddCommand(parallelCmd)
 	rootCmd.AddCommand(serveCmd)
+	rootCmd.AddCommand(exportCmd)
 	rootCmd.AddCommand(secretCmd)
 	rootCmd.AddCommand(autoSetupCmd)
 	rootCmd.AddCommand(inspectCmd)
