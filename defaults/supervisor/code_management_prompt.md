@@ -89,7 +89,10 @@ Execute tasks one at a time, in sequence order. For each task:
    ateam run @EXECUTION_DIR/SEQ_SLUG_code_prompt.md --role ROLE
    ```
 3. **Post-check**: Verify code still builds and tests pass
-4. **Record**: Update `execution_report.md` with the outcome, only append to it during this phase
+4. **Record**: Update `execution_report.md` with the outcome, only append to it during this phase. For each task include:
+   - Test command(s) ran (e.g., `go test ./...`, `npm test`)
+   - Test results: X passed, Y failed, Z skipped
+   - If tests failed after the task: what failed and whether the coding agent fixed them
 5. **Verify git commit**: the coding agent is supposed to commit its own changes so if the git working tree has tracked files that are modified and not committed it means git commit is likely broken so abort with a clear error message
 6. **On failure**: See Error Handling. Clean up, then continue to the next task.
 
@@ -97,13 +100,26 @@ Execute tasks one at a time, in sequence order. For each task:
 
 After all tasks have been attempted:
 
-1. Complete `execution_report.md` with a summary section, only append to it
-2. Update `.ateam/supervisor/review.md`:
+1. **Test health assessment**: Run the full test suite one final time and compare to the baseline recorded during Phase 1 setup.
+   - Record: command(s) run, exit codes, pass/fail/skip counts
+   - If all tests pass: note "test suite clean" in the execution report
+   - If tests are failing that were passing before this coding cycle: spawn a dedicated fix run:
+     ```
+     ateam run "Fix the following test failures that were introduced during this
+     coding cycle. The tests were passing before the cycle started.
+     Failing tests: [list each failing test name/file].
+     Investigate each failure, fix it, and commit. Do not change test assertions
+     unless the behavioral change was intentional — fix the code instead." --role testing_basic
+     ```
+     Record the fix run outcome in the execution report.
+   - If tests were already failing before the cycle (pre-existing failures): note them but do not attempt to fix them — that's a separate task for the next review cycle.
+2. Complete `execution_report.md` with a summary section, only append to it
+3. Update `.ateam/supervisor/review.md`:
   - Annotate each task with its outcome (completed / failed / skipped) and a brief note
   - do not delete any content in the review, just add information
-3. Update the source role report.md referenced in the review to note what was addressed
+4. Update the source role report.md referenced in the review to note what was addressed
   - do not delete any content in the report file, just add information
-4. **Never modify** files under `.ateam/supervisor/history/` or `.ateam/roles/*/history/`
+5. **Never modify** files under `.ateam/supervisor/history/` or `.ateam/roles/*/history/`
 
 ## Execution Report Format
 
@@ -118,9 +134,16 @@ After all tasks have been attempted:
     - **Role**: [role name]
     - **Status**: completed | failed | skipped
     - **Details**: [what was done or why it failed]
+    - **Tests**: [command(s) ran, X passed / Y failed / Z skipped]
     - **Prompt**: [path to code prompt file]
 
     ### Task 02: ...
+
+    ## Test Health
+    - **Baseline** (before coding): [command, X passed / Y failed]
+    - **Final** (after all tasks): [command, X passed / Y failed]
+    - **New failures**: [list] or none
+    - **Fix run**: [completed/failed/not needed]
 
     ## Summary
     - **Total**: N tasks
