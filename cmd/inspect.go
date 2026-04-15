@@ -17,15 +17,16 @@ import (
 )
 
 var (
-	inspectTaskGroup       string
-	inspectLastRun         bool
-	inspectLastReport      bool
-	inspectLastReview      bool
-	inspectLastCode        bool
-	inspectAutoDebug       bool
-	inspectAutoDebugPrompt bool
-	inspectProfile         string
-	inspectAgent           string
+	inspectTaskGroup            string
+	inspectLastRun              bool
+	inspectLastReport           bool
+	inspectLastReview           bool
+	inspectLastCode             bool
+	inspectAutoDebug            bool
+	inspectAutoDebugPrompt      bool
+	inspectAutoDebugExtraPrompt string
+	inspectProfile              string
+	inspectAgent                string
 )
 
 var inspectCmd = &cobra.Command{
@@ -52,6 +53,7 @@ func init() {
 	inspectCmd.Flags().BoolVar(&inspectLastCode, "last-code", false, "select all tasks from the last code session")
 	inspectCmd.Flags().BoolVar(&inspectAutoDebug, "auto-debug", false, "launch an agent to investigate the selected runs")
 	inspectCmd.Flags().BoolVar(&inspectAutoDebugPrompt, "auto-debug-prompt", false, "print the auto-debug prompt without executing")
+	inspectCmd.Flags().StringVar(&inspectAutoDebugExtraPrompt, "auto-debug-extra-prompt", "", "additional instructions for the debug agent (text or @filepath)")
 	addProfileFlags(inspectCmd, &inspectProfile, &inspectAgent)
 }
 
@@ -107,6 +109,13 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 		prompt, err := prompts.AssembleTaskDebugPrompt(env.OrgDir, env.ProjectDir, debugContext, pinfo)
 		if err != nil {
 			return err
+		}
+		if inspectAutoDebugExtraPrompt != "" {
+			extra, err := prompts.ResolveValue(inspectAutoDebugExtraPrompt)
+			if err != nil {
+				return err
+			}
+			prompt += "\n\n# Additional Debug Instructions\n\n" + extra
 		}
 		if inspectAutoDebugPrompt {
 			fmt.Println(prompt)
