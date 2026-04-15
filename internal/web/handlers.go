@@ -228,14 +228,12 @@ func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reviewPath := pe.ProjectDir + "/supervisor/review.md"
+	reviewPath := filepath.Join(pe.ProjectDir, "supervisor", "review.md")
 	data := reviewData{}
-	if content, err := os.ReadFile(reviewPath); err == nil {
+	if content, modTime, err := readFileWithModTime(reviewPath); err == nil {
 		data.Exists = true
 		data.HTML = template.HTML(s.renderMarkdown(string(content)))
-		if info, err := os.Stat(reviewPath); err == nil {
-			data.ModTime = info.ModTime()
-		}
+		data.ModTime = modTime
 	}
 	histDir := filepath.Join(pe.ProjectDir, "supervisor", "history")
 	data.History = filterHistoryByKind(discoverHistory(histDir), "review")
@@ -482,6 +480,19 @@ type runFileData struct {
 	RunID    int64
 	FileType string
 	HTML     template.HTML
+}
+
+// readFileWithModTime reads a file and returns its content and modification time.
+func readFileWithModTime(path string) ([]byte, time.Time, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	return content, info.ModTime(), nil
 }
 
 // isPathWithin checks that absPath is under baseDir after cleaning.
@@ -789,10 +800,9 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 
 	if strings.HasPrefix(taskGroup, "code-") {
 		codeOutputPath := filepath.Join(pe.ProjectDir, "supervisor", "code_output.md")
-		if info, err := os.Stat(codeOutputPath); err == nil {
-			content, _ := os.ReadFile(codeOutputPath)
+		if content, modTime, err := readFileWithModTime(codeOutputPath); err == nil {
 			data.CodeOutputHTML = template.HTML(s.renderMarkdown(string(content)))
-			data.CodeOutputModTime = info.ModTime()
+			data.CodeOutputModTime = modTime
 		}
 	}
 
