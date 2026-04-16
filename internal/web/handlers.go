@@ -59,7 +59,11 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := overviewData{}
-	data.Reports, _ = prompts.DiscoverReports(pe.ProjectDir)
+	var err error
+	data.Reports, err = prompts.DiscoverReports(pe.ProjectDir)
+	if err != nil {
+		log.Printf("warning: DiscoverReports: %v", err)
+	}
 
 	reviewPath := filepath.Join(pe.ProjectDir, "supervisor", "review.md")
 	if info, err := os.Stat(reviewPath); err == nil {
@@ -156,7 +160,10 @@ func (s *Server) handleReports(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reports, _ := prompts.DiscoverReports(pe.ProjectDir)
+	reports, err := prompts.DiscoverReports(pe.ProjectDir)
+	if err != nil {
+		log.Printf("warning: DiscoverReports: %v", err)
+	}
 
 	s.render(w, r, "reports.html", pageData{
 		Title:       "Reports",
@@ -184,7 +191,10 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	roleID := r.PathValue("role")
-	reports, _ := prompts.DiscoverReports(pe.ProjectDir)
+	reports, err := prompts.DiscoverReports(pe.ProjectDir)
+	if err != nil {
+		log.Printf("warning: DiscoverReports: %v", err)
+	}
 	for _, rpt := range reports {
 		if rpt.RoleID == roleID {
 			histDir := filepath.Join(pe.ProjectDir, "roles", roleID, "history")
