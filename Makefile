@@ -41,10 +41,10 @@ test:
 test-all: test test-docker test-docker-live
 
 # Run docker integration tests inside Docker-in-Docker (no host impact).
-# Uses the default buildx builder (docker driver) to avoid BuildKit container
-# crashes between sessions.
+# Auto-detects a working buildx builder (falls back to plain docker build).
+BUILDX_BUILDER := $(shell docker buildx ls --format '{{.Name}}:{{.Status}}' 2>/dev/null | grep ':running' | head -1 | cut -d: -f1)
 test-docker:
-	docker buildx build --builder default --load -t ateam-test-dind -f test/Dockerfile.dind .
+	$(if $(BUILDX_BUILDER),docker buildx build --builder $(BUILDX_BUILDER) --load,docker build) -t ateam-test-dind -f test/Dockerfile.dind .
 	docker run --rm --privileged ateam-test-dind
 
 # Run live agent tests inside DinD with real Claude haiku (~$0.03).
@@ -65,7 +65,7 @@ test-docker-live: build-binary
 		echo ""; \
 		exit 1; \
 	fi; \
-	docker buildx build --builder default --load -t ateam-test-dind -f test/Dockerfile.dind . && \
+	$(if $(BUILDX_BUILDER),docker buildx build --builder $(BUILDX_BUILDER) --load,docker build) -t ateam-test-dind -f test/Dockerfile.dind . && \
 	docker run --rm --privileged \
 		-e CLAUDE_CODE_OAUTH_TOKEN="$$OAUTH" \
 		-e ANTHROPIC_API_KEY="$$APIKEY" \
