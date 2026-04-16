@@ -3,7 +3,7 @@ package streamutil
 import "testing"
 
 // =============================================================================
-// BUG: ResultEvent.Usage missing cache_write_input_tokens field
+// REGRESSION: ResultEvent.Usage missing cache_write_input_tokens field
 // File: events.go, type ResultEvent
 //
 // Claude's stream-json output includes cache_write_input_tokens in the usage
