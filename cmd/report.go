@@ -169,7 +169,7 @@ func runReport(opts ReportOptions) error {
 	if err != nil {
 		return err
 	}
-	applyContainerNameOverride(cr, opts.ContainerName)
+	applyContainerName(cr, env, opts.ContainerName)
 	applyCheaperModel(cr, opts.CheaperModel)
 
 	taskGroup := "report-" + time.Now().Format(runner.TimestampFormat)
@@ -212,7 +212,7 @@ func runReport(opts ReportOptions) error {
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: cannot resolve profile %q for %s, using default — %v\n", roleProfile, roleID, err)
 				} else {
-					applyContainerNameOverride(roleRunner, opts.ContainerName)
+					applyContainerName(roleRunner, env, opts.ContainerName)
 					applyCheaperModel(roleRunner, opts.CheaperModel)
 					task.Runner = roleRunner
 				}

@@ -170,11 +170,28 @@ ateam run "do something" --profile docker
 
 For projects that already use Docker (docker-compose, devcontainer, manually managed containers), ateam can exec into your running container without managing its lifecycle.
 
+**Quick start** — a built-in `docker-exec` profile is available with zero config:
+
+```bash
+# Set the container name per-project (stored in keychain/secrets.env)
+ateam secret CONTAINER_NAME=my-app-dev --scope project
+
+# Run using the built-in docker-exec profile
+ateam run "do something" --profile docker-exec
+
+# Or override on the command line
+ateam run "do something" --profile docker-exec --container-name my-app-dev
+```
+
+The container name is resolved with this priority: `--container-name` flag > `ateam secret CONTAINER_NAME` > `CONTAINER_NAME` env var > `docker_container` config value. Use `--dry-run` to see which source is active.
+
+**Custom config** — for more control (precheck, copy_ateam, custom exec template):
+
 ```hcl
 container "my-app" {
   type             = "docker-exec"
   docker_container = "my-app-dev"
-  precheck         = "docker-precheck.sh"
+  precheck         = ["sh", "docker-precheck.sh", "{{CONTAINER_NAME}}"]
   forward_env      = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
   copy_ateam       = true   # auto-copy ateam binary into container
   # exec           = "podman exec {{CONTAINER}} {{CMD}}"  # custom exec template
@@ -191,7 +208,22 @@ Usage:
 ateam run "do something" --profile my-app
 ```
 
-**Precheck scripts** run on the host before each exec. The container name (`{{CONTAINER_NAME}}`) is passed as `$1`:
+**Container name resolution:** Before exec, ateam validates the container is running via `docker ps` and resolves partial names to exact names. If the container isn't running, you get a clear error before the agent starts.
+
+**Precheck commands** run on the host before each exec. The `precheck` field takes a command array. Use `{{CONTAINER_NAME}}` anywhere in the args — it's replaced with the resolved container name:
+
+```hcl
+# Run a shell script, passing the container name as $1
+precheck = ["sh", "docker-precheck.sh", "{{CONTAINER_NAME}}"]
+
+# Run make
+precheck = ["make", "docker-restart"]
+
+# Run docker compose directly
+precheck = ["docker", "compose", "up", "-d"]
+```
+
+Convention-discovered scripts (`.ateam/docker-agent-precheck.sh`) automatically receive the container name as `$1`.
 
 ```bash
 #!/bin/bash

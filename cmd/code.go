@@ -200,7 +200,7 @@ func runCode(opts CodeOptions) error {
 	if err != nil {
 		return err
 	}
-	applyContainerNameOverride(cr, opts.ContainerName)
+	applyContainerName(cr, env, opts.ContainerName)
 	setSourceWritable(cr)
 	applyCheaperModel(cr, opts.CheaperModel)
 

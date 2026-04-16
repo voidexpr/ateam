@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ateam/defaults"
 	"github.com/hashicorp/hcl/v2"
@@ -59,7 +60,7 @@ type ContainerConfig struct {
 	ExecTemplate      string   // docker-exec: custom exec command (default: "docker exec {{CONTAINER}} {{CMD}}")
 	ForwardEnv        []string // env var names to forward from host into container
 	ExtraVolumes      []string // additional volume mounts, e.g. "../data:/data:ro"
-	Precheck          string   // docker/docker-exec: precheck script path, relative to .ateam/ (or "" for convention default)
+	Precheck          []string // docker/docker-exec: precheck command, e.g. ["sh", "precheck.sh"] or ["make", "restart"]
 	CopyAteam         bool     // docker-exec: copy ateam binary into container via docker cp
 	MountClaudeConfig bool     // docker: mount host ~/.claude/ read-only into container (needed for OAuth tokens)
 }
@@ -119,7 +120,7 @@ type hclContainer struct {
 	ExecTemplate      string   `hcl:"exec,optional"`
 	ForwardEnv        []string `hcl:"forward_env,optional"`
 	ExtraVolumes      []string `hcl:"extra_volumes,optional"`
-	Precheck          string   `hcl:"precheck,optional"`
+	Precheck          []string `hcl:"precheck,optional"`
 	CopyAteam         bool     `hcl:"copy_ateam,optional"`
 	MountClaudeConfig bool     `hcl:"mount_claude_config,optional"`
 }
@@ -453,26 +454,32 @@ func ResolveDockerfile(cc *ContainerConfig, projectDir, orgDir, roleID string) (
 	return tmpFile, tmpDir, nil
 }
 
-// ResolvePrecheckScript finds the precheck script using a fallback chain:
-//  1. Explicit cc.Precheck (relative to projectDir)
-//  2. .ateam/roles/<role>/docker-agent-precheck.sh (if roleID is set)
-//  3. .ateam/docker-agent-precheck.sh
-//  4. .ateamorg/docker-agent-precheck.sh
-//  5. .ateamorg/defaults/docker-agent-precheck.sh
+// ResolvePrecheckCmd resolves the precheck command for a container config.
 //
-// Returns the absolute path to the first match, or "" if none found.
-// Unlike ResolveDockerfile, there is no embedded fallback — if no script exists,
-// the precheck is simply skipped.
-func ResolvePrecheckScript(cc *ContainerConfig, projectDir, orgDir, roleID string) string {
-	if cc.Precheck != "" {
-		path := cc.Precheck
-		if !filepath.IsAbs(path) && projectDir != "" {
-			path = filepath.Join(projectDir, path)
+// When cc.Precheck is set (explicit), the first element is resolved relative
+// to projectDir and the slice is returned as-is.
+//
+// When cc.Precheck is empty, the convention fallback chain is searched:
+//  1. .ateam/roles/<role>/docker-agent-precheck.sh (if roleID is set)
+//  2. .ateam/docker-agent-precheck.sh
+//  3. .ateamorg/docker-agent-precheck.sh
+//  4. .ateamorg/defaults/docker-agent-precheck.sh
+//
+// Convention-discovered scripts are wrapped as ["sh", "<path>", "{{CONTAINER_NAME}}"]
+// so the container name is passed as $1 at execution time (after docker ps resolution).
+//
+// Returns nil if no precheck is configured or found.
+func ResolvePrecheckCmd(cc *ContainerConfig, projectDir, orgDir, roleID string) []string {
+	if len(cc.Precheck) > 0 {
+		resolved := make([]string, len(cc.Precheck))
+		copy(resolved, cc.Precheck)
+		// Resolve the first element relative to projectDir when it looks like
+		// a file path (contains a separator). Bare command names like "make"
+		// or "sh" are left for PATH resolution.
+		if strings.Contains(resolved[0], string(filepath.Separator)) && !filepath.IsAbs(resolved[0]) && projectDir != "" {
+			resolved[0] = filepath.Join(projectDir, resolved[0])
 		}
-		if _, err := os.Stat(path); err == nil {
-			return path
-		}
-		return ""
+		return resolved
 	}
 
 	const name = "docker-agent-precheck.sh"
@@ -490,10 +497,10 @@ func ResolvePrecheckScript(cc *ContainerConfig, projectDir, orgDir, roleID strin
 
 	for _, path := range candidates {
 		if _, err := os.Stat(path); err == nil {
-			return path
+			return []string{"sh", path, "{{CONTAINER_NAME}}"}
 		}
 	}
-	return ""
+	return nil
 }
 
 // WriteOrgDefaults writes the embedded runtime.hcl and Dockerfile to orgDir/defaults/.
