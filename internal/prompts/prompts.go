@@ -1,4 +1,26 @@
 // Package prompts handles prompt template assembly and rendering for agent execution.
+//
+// # Fallback hierarchy
+//
+// Every role and base prompt is resolved through a 4-level hierarchy, tried in order:
+//
+//  1. Project level  – .ateam/<file> or .ateam/roles/<role>/<file>
+//  2. Org level      – .ateamorg/<file> or .ateamorg/roles/<role>/<file>
+//  3. Org-defaults   – .ateamorg/defaults/<file> or .ateamorg/defaults/roles/<role>/<file>
+//  4. Embedded       – the defaults bundled into the binary via defaults.FS
+//
+// For role prompts and base prompts the first non-empty file found wins (first-found).
+// Extra prompts (*_extra_prompt.md) are additive: all four levels that contain a
+// non-empty file contribute, concatenated in order (org-broad → org-role → project-broad
+// → project-role).
+//
+// # Debugging prompt sources
+//
+// The Trace* functions in trace.go (TraceRolePromptSources, TraceRoleCodePromptSources,
+// TraceReviewPromptSources, TraceCodeManagementPromptSources) return the list of
+// PromptSource entries that would be assembled for a given call, without actually
+// assembling the prompt. Use these to inspect which files contribute and estimate
+// token counts.
 package prompts
 
 import (
