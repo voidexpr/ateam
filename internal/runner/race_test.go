@@ -8,7 +8,7 @@ import (
 )
 
 // =============================================================================
-// BUG: ResolveAgentTemplateArgs used to mutate shared Agent.Args without synchronization
+// REGRESSION: ResolveAgentTemplateArgs used to mutate shared Agent.Args without synchronization
 // File: template.go, func ResolveAgentTemplateArgs
 // Called from: runner.go:201 inside Run()
 //

@@ -9,7 +9,7 @@ import (
 )
 
 // =============================================================================
-// BUG: truncate slices by bytes, not runes — produces invalid UTF-8
+// REGRESSION: truncate slices by bytes, not runes — produces invalid UTF-8
 // File: runner.go, func truncate
 //
 // truncate uses len(s) (byte count) and s[:max] (byte slice). For multi-byte
@@ -58,7 +58,7 @@ func TestTruncateNoTruncationNeeded(t *testing.T) {
 }
 
 // =============================================================================
-// BUG: FormatDuration returns "60s" for durations just under 1 minute
+// REGRESSION: FormatDuration returns "60s" for durations just under 1 minute
 // File: runner.go, func FormatDuration
 //
 // At 59.5 seconds, d.Seconds() = 59.5, %.0f rounds to 60, output is "60s".
@@ -100,7 +100,7 @@ func TestFormatDurationZero(t *testing.T) {
 }
 
 // =============================================================================
-// BUG: streamTailMessages panics when n=0
+// REGRESSION: streamTailMessages panics when n=0
 // File: format.go, func streamTailMessages
 //
 // When n=0: make([]string, 0, 0) succeeds, but on first TextLine,
@@ -174,7 +174,7 @@ func TestStreamFormatterTurnCountingAccuracy(t *testing.T) {
 }
 
 // =============================================================================
-// BUG: CacheWriteTokens absent from ResultLine — never parsed or displayed
+// REGRESSION: CacheWriteTokens absent from ResultLine — never parsed or displayed
 // File: parse_stream.go (ResultLine struct), format_stream.go (display)
 //
 // The DB schema has cache_write_tokens (added in commit a695951), but:

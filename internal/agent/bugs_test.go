@@ -7,7 +7,7 @@ import (
 )
 
 // =============================================================================
-// BUG: buildProcessEnv doesn't deduplicate env vars
+// REGRESSION: buildProcessEnv doesn't deduplicate env vars
 // File: agent.go, func buildProcessEnv
 //
 // When agentEnv has a key that already exists in the process environment,
@@ -109,7 +109,7 @@ func TestBuildProcessEnvTripleDuplicate(t *testing.T) {
 }
 
 // =============================================================================
-// BUG: StreamEvent has no CacheWriteTokens field
+// REGRESSION: StreamEvent has no CacheWriteTokens field
 // File: agent.go, type StreamEvent
 //
 // The DB schema has cache_write_tokens, but StreamEvent only has
