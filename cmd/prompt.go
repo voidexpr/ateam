@@ -10,6 +10,7 @@ import (
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
+	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
 )
 
@@ -63,7 +64,7 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 }
 
 func runPromptRole() error {
-	if promptAction != "report" && promptAction != "code" {
+	if promptAction != runner.ActionReport && promptAction != runner.ActionCode {
 		return fmt.Errorf("invalid action %q for role: must be 'report' or 'code'", promptAction)
 	}
 
@@ -88,9 +89,9 @@ func runPromptRole() error {
 
 	var sources []prompts.PromptSource
 	switch promptAction {
-	case "report":
+	case runner.ActionReport:
 		sources = prompts.TraceRolePromptSources(env.OrgDir, env.ProjectDir, promptRole, env.SourceDir, extraPrompt, pinfo, promptIgnorePreviousReport)
-	case "code":
+	case runner.ActionCode:
 		sources = prompts.TraceRoleCodePromptSources(env.OrgDir, env.ProjectDir, promptRole, env.SourceDir, extraPrompt, pinfo)
 	}
 
@@ -101,9 +102,9 @@ func runPromptRole() error {
 
 	var assembled string
 	switch promptAction {
-	case "report":
+	case runner.ActionReport:
 		assembled, err = prompts.AssembleRolePrompt(env.OrgDir, env.ProjectDir, promptRole, env.SourceDir, extraPrompt, pinfo, promptIgnorePreviousReport)
-	case "code":
+	case runner.ActionCode:
 		assembled, err = prompts.AssembleRoleCodePrompt(env.OrgDir, env.ProjectDir, promptRole, env.SourceDir, extraPrompt, pinfo)
 	}
 	if err != nil {
@@ -115,7 +116,7 @@ func runPromptRole() error {
 }
 
 func runPromptSupervisor() error {
-	if promptAction != "review" && promptAction != "code" {
+	if promptAction != runner.ActionReview && promptAction != runner.ActionCode {
 		return fmt.Errorf("invalid action %q for supervisor: must be 'review' or 'code'", promptAction)
 	}
 
@@ -136,9 +137,9 @@ func runPromptSupervisor() error {
 
 	var sources []prompts.PromptSource
 	switch promptAction {
-	case "review":
+	case runner.ActionReview:
 		sources = prompts.TraceReviewPromptSources(env.OrgDir, env.ProjectDir, pinfo, extraPrompt)
-	case "code":
+	case runner.ActionCode:
 		sources = prompts.TraceCodeManagementPromptSources(env.OrgDir, env.ProjectDir, pinfo, env.ReviewPath(), extraPrompt)
 	}
 
@@ -149,9 +150,9 @@ func runPromptSupervisor() error {
 
 	var assembled string
 	switch promptAction {
-	case "review":
+	case runner.ActionReview:
 		assembled, err = prompts.AssembleReviewPrompt(env.OrgDir, env.ProjectDir, pinfo, extraPrompt, "")
-	case "code":
+	case runner.ActionCode:
 		reviewContent, readErr := os.ReadFile(env.ReviewPath())
 		if readErr != nil {
 			return fmt.Errorf("no review found at %s; run 'ateam review' first", env.ReviewPath())
