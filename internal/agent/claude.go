@@ -2,7 +2,6 @@ package agent
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -104,15 +103,9 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 		return
 	}
 
-	var stderrBuf bytes.Buffer
-	stderrWriters := []io.Writer{&stderrBuf}
-	if req.StderrFile != "" {
-		if ef, err := os.Create(req.StderrFile); err == nil {
-			defer ef.Close()
-			stderrWriters = append(stderrWriters, ef)
-		} else {
-			fmt.Fprintf(os.Stderr, "warning: cannot create stderr file %s: %v\n", req.StderrFile, err)
-		}
+	stderrWriters, streamWriter, closers := setupStreamFiles(req)
+	for _, c := range closers {
+		defer c.Close()
 	}
 	cmd.Stderr = io.MultiWriter(stderrWriters...)
 
@@ -121,18 +114,6 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 		return
 	}
 	ch <- StreamEvent{Type: "system", PID: cmd.Process.Pid}
-
-	// Open stream file for writing raw JSONL
-	var streamWriter *bufio.Writer
-	if req.StreamFile != "" {
-		if sf, err := os.Create(req.StreamFile); err == nil {
-			defer sf.Close()
-			streamWriter = bufio.NewWriter(sf)
-			defer streamWriter.Flush()
-		} else {
-			fmt.Fprintf(os.Stderr, "warning: cannot create stream file %s: %v\n", req.StreamFile, err)
-		}
-	}
 
 	startedAt := time.Now()
 
