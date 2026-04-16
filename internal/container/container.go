@@ -4,9 +4,25 @@ package container
 import (
 	"context"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 )
+
+// IsInContainer detects whether the current process is running inside a
+// container (Docker or Podman). It checks /.dockerenv (Docker),
+// /run/.containerenv (Podman), and the ATEAM_IN_CONTAINER env var override.
+func IsInContainer() bool {
+	if os.Getenv("ATEAM_IN_CONTAINER") == "1" {
+		return true
+	}
+	for _, marker := range []string{"/.dockerenv", "/run/.containerenv"} {
+		if _, err := os.Stat(marker); err == nil {
+			return true
+		}
+	}
+	return false
+}
 
 // CmdFactory creates an *exec.Cmd. When set on an agent Request, agents use this
 // instead of exec.CommandContext. For docker, this wraps commands in docker run/exec.

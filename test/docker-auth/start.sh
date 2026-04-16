@@ -118,7 +118,7 @@ args+=(-v "$ateamorg_dir:/.ateamorg:ro")
 claude_shared_dir="claude_linux_shared"
 ateamorg_claude_shared_dir="$ateamorg_dir/$claude_shared_dir"
 if [[ -d "$ateamorg_claude_shared_dir" ]]; then
-    args+=(-v "$ateamorg_claude_shared_dir:/.ateamorg/$claude_shared_dir:rw")
+    args+=(-v "$ateamorg_claude_shared_dir:/.ateamorg/$claude_shared_dir:ro")
 fi
 
 if [[ -e "$ateamorg_claude_shared_dir/secrets.env" ]]; then

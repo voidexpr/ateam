@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/runtime"
 )
 
@@ -44,8 +45,8 @@ func ValidateSecrets(ac *runtime.AgentConfig, resolver *Resolver) error {
 	first := strings.SplitN(missing[0], "|", 2)[0]
 	fmt.Fprintf(&b, "\n\nSet it with: ateam secret %s", first)
 
-	// Add container-specific guidance when inside Docker.
-	if isInDocker() {
+	// Add container-specific guidance when inside a container.
+	if container.IsInContainer() {
 		fmt.Fprintf(&b, "\n\nInside Docker container:")
 		fmt.Fprintf(&b, "\n  On the host: ateam secret %s --set", first)
 		fmt.Fprintf(&b, "\n  Then: ateam secret --save-project-scope")
@@ -236,11 +237,6 @@ func resolveOneDetail(name string, resolver *Resolver) ResolveDetail {
 		Backend: r.Backend,
 		Masked:  masked,
 	}
-}
-
-func isInDocker() bool {
-	_, err := os.Stat("/.dockerenv")
-	return err == nil
 }
 
 // CollectRequiredEnvNames returns all unique env var names from required_env
