@@ -169,7 +169,9 @@ func runReport(opts ReportOptions) error {
 	if err != nil {
 		return err
 	}
-	applyContainerName(cr, env, opts.ContainerName)
+	if err := applyContainerName(cr, env, opts.ContainerName); err != nil {
+		return err
+	}
 	applyCheaperModel(cr, opts.CheaperModel)
 
 	taskGroup := "report-" + time.Now().Format(runner.TimestampFormat)
@@ -211,8 +213,9 @@ func runReport(opts ReportOptions) error {
 				roleRunner, err := resolveRunner(env, roleProfile, "", runner.ActionReport, roleID, opts.DockerAutoSetup)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: cannot resolve profile %q for %s, using default — %v\n", roleProfile, roleID, err)
+				} else if err := applyContainerName(roleRunner, env, opts.ContainerName); err != nil {
+					return err
 				} else {
-					applyContainerName(roleRunner, env, opts.ContainerName)
 					applyCheaperModel(roleRunner, opts.CheaperModel)
 					task.Runner = roleRunner
 				}

@@ -147,7 +147,9 @@ func runReview(opts ReviewOptions) error {
 	if err != nil {
 		return err
 	}
-	applyContainerName(cr, env, opts.ContainerName)
+	if err := applyContainerName(cr, env, opts.ContainerName); err != nil {
+		return err
+	}
 	applyCheaperModel(cr, opts.CheaperModel)
 
 	db, err := openProjectDB(env)
