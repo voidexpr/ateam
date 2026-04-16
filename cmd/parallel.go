@@ -150,7 +150,9 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	applyContainerName(r, env, parallelContainerName)
+	if err := applyContainerName(r, env, parallelContainerName); err != nil {
+		return err
+	}
 	setSourceWritable(r)
 
 	if parallelModel != "" {

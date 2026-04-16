@@ -176,16 +176,16 @@ func applyContainerNameOverride(r *runner.Runner, name string) {
 // applyContainerName applies the --container-name CLI flag override, then
 // resolves {{CONTAINER_NAME}} from the secret store if the flag was not set.
 // Also sets ContainerNameSource for dry-run display.
-func applyContainerName(r *runner.Runner, env *root.ResolvedEnv, cliFlag string) {
+func applyContainerName(r *runner.Runner, env *root.ResolvedEnv, cliFlag string) error {
 	applyContainerNameOverride(r, cliFlag)
 
 	if cliFlag != "" {
 		r.ContainerNameSource = runner.ContainerNameSourceCLI
-		return
+		return nil
 	}
 	if !strings.Contains(r.ContainerName, "{{CONTAINER_NAME}}") {
 		r.ContainerNameSource = runner.ContainerNameSourceConfig
-		return
+		return nil
 	}
 	resolver := secretResolver(env, secret.DefaultBackend())
 	result := resolver.Resolve("CONTAINER_NAME")
@@ -199,7 +199,9 @@ func applyContainerName(r *runner.Runner, env *root.ResolvedEnv, cliFlag string)
 		} else {
 			r.ContainerNameSource = runner.ContainerNameSourceSecret
 		}
+		return nil
 	}
+	return fmt.Errorf("container name not set — use --container-name, ateam secret CONTAINER_NAME=<name> --scope project, or set docker_container in runtime.hcl")
 }
 
 // newRunnerFromAgent creates a Runner using a named agent directly (no profile).
