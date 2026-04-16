@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -252,5 +253,15 @@ func TestDockerExecCombinedEnvAndWorkdir(t *testing.T) {
 	// Verify command comes after container name
 	if ctrIdx+1 >= len(args) || args[ctrIdx+1] != "claude" {
 		t.Errorf("expected command after container name, args: %v", args)
+	}
+}
+
+func TestResolveRunningContainerNameEmpty(t *testing.T) {
+	_, err := ResolveRunningContainerName(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty container name")
+	}
+	if !strings.Contains(err.Error(), "container name is empty") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }

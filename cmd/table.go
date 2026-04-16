@@ -173,6 +173,35 @@ func applyContainerNameOverride(r *runner.Runner, name string) {
 	}
 }
 
+// applyContainerName applies the --container-name CLI flag override, then
+// resolves {{CONTAINER_NAME}} from the secret store if the flag was not set.
+// Also sets ContainerNameSource for dry-run display.
+func applyContainerName(r *runner.Runner, env *root.ResolvedEnv, cliFlag string) {
+	applyContainerNameOverride(r, cliFlag)
+
+	if cliFlag != "" {
+		r.ContainerNameSource = runner.ContainerNameSourceCLI
+		return
+	}
+	if !strings.Contains(r.ContainerName, "{{CONTAINER_NAME}}") {
+		r.ContainerNameSource = runner.ContainerNameSourceConfig
+		return
+	}
+	resolver := secretResolver(env, secret.DefaultBackend())
+	result := resolver.Resolve("CONTAINER_NAME")
+	if result.Found {
+		r.ContainerName = result.Value
+		if r.Container != nil {
+			r.Container.SetContainerName(result.Value)
+		}
+		if result.Source == "env" {
+			r.ContainerNameSource = runner.ContainerNameSourceEnv
+		} else {
+			r.ContainerNameSource = runner.ContainerNameSourceSecret
+		}
+	}
+}
+
 // newRunnerFromAgent creates a Runner using a named agent directly (no profile).
 func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.Runner, error) {
 	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
@@ -445,19 +474,9 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 		}, nil
 	case "docker-exec":
 		if cc.DockerContainer == "" {
-			return nil, fmt.Errorf("docker-exec container %q requires docker_container field", cc.Name)
+			cc.DockerContainer = "{{CONTAINER_NAME}}"
 		}
-		var precheckScript string
-		if cc.Precheck != "" {
-			expanded := runner.ExpandHome(cc.Precheck)
-			if filepath.IsAbs(expanded) {
-				precheckScript = expanded
-			} else if projectDir != "" {
-				precheckScript = filepath.Join(projectDir, expanded)
-			} else {
-				precheckScript = expanded
-			}
-		}
+		precheckCmd := runtime.ResolvePrecheckCmd(cc, projectDir, orgDir, roleID)
 		workDir := "/workspace"
 		if sourceDir != "" && gitRepoDir != "" && gitRepoDir != sourceDir {
 			if rel, err := filepath.Rel(gitRepoDir, sourceDir); err == nil {
@@ -469,12 +488,12 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 			hostCLIPath = findLinuxBinary(orgDir)
 		}
 		return &container.DockerExecContainer{
-			ContainerName:  cc.DockerContainer,
-			ExecTemplate:   cc.ExecTemplate,
-			ForwardEnv:     cc.ForwardEnv,
-			WorkDir:        workDir,
-			HostCLIPath:    hostCLIPath,
-			PrecheckScript: precheckScript,
+			ContainerName: cc.DockerContainer,
+			ExecTemplate:  cc.ExecTemplate,
+			ForwardEnv:    cc.ForwardEnv,
+			WorkDir:       workDir,
+			HostCLIPath:   hostCLIPath,
+			PrecheckCmd:   precheckCmd,
 		}, nil
 	default:
 		return nil, nil
@@ -578,27 +597,9 @@ func dockerExecOutput(container string, args ...string) (string, error) {
 }
 
 // resolveContainerName resolves a possibly-partial container name to the exact
-// Docker container name via substring matching. An exact name matches itself.
+// Docker container name via substring matching.
 func resolveContainerName(name string) (string, error) {
-	out, err := exec.Command("docker", "ps", "--filter", "name="+name, "--format", "{{.Names}}").Output()
-	if err != nil {
-		return "", fmt.Errorf("docker ps: %w", err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	var matches []string
-	for _, l := range lines {
-		if l != "" {
-			matches = append(matches, l)
-		}
-	}
-	switch len(matches) {
-	case 0:
-		return "", fmt.Errorf("no running container matching %q", name)
-	case 1:
-		return matches[0], nil
-	default:
-		return "", fmt.Errorf("ambiguous container name %q matches %d containers: %s", name, len(matches), strings.Join(matches, ", "))
-	}
+	return container.ResolveRunningContainerName(context.Background(), name)
 }
 
 func dockerCp(src, dst string) error {
@@ -832,8 +833,18 @@ func printDryRunInfo(r *runner.Runner, env *root.ResolvedEnv, opts dryRunOpts) {
 	}
 	if r.ContainerType != "" && r.ContainerType != "none" {
 		name := r.ContainerType
-		if r.ContainerName != "" {
-			name += " (" + runner.ResolveTemplateString(r.ContainerName, tmplVars) + ")"
+		resolvedName := runner.ResolveTemplateString(r.ContainerName, tmplVars)
+		if resolvedName != "" {
+			source := ""
+			switch r.ContainerNameSource {
+			case runner.ContainerNameSourceCLI:
+				source = ", via --container-name"
+			case runner.ContainerNameSourceSecret:
+				source = ", via ateam secret"
+			case runner.ContainerNameSourceEnv:
+				source = ", via env"
+			}
+			name += " (" + resolvedName + source + ")"
 		}
 		fmt.Printf("Container: %s\n", name)
 	}

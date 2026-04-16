@@ -384,11 +384,27 @@ profile "test" {
 
 // docker-exec: exec into a user-managed container.
 // Ateam does NOT build or start the container — use precheck for lifecycle.
-// Example:
+// Container name is resolved from: --container-name flag > ateam secret > CONTAINER_NAME env.
+// Set per-project: ateam secret CONTAINER_NAME=my-container --scope project
+container "docker-exec" {
+  type             = "docker-exec"
+  docker_container = "{{CONTAINER_NAME}}"
+  forward_env = [
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+  ]
+}
+
+profile "docker-exec" {
+  agent     = "claude"
+  container = "docker-exec"
+}
+
+// Example custom docker-exec with explicit container name and precheck:
 //   container "my-app" {
 //     type             = "docker-exec"
 //     docker_container = "my-app-dev"
-//     precheck         = "docker-precheck.sh"
+//     precheck         = ["sh", "docker-precheck.sh"]
 //     forward_env      = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
 //     # Custom exec template (default: "docker exec {{CONTAINER}} {{CMD}}")
 //     # exec = "podman exec {{CONTAINER}} {{CMD}}"

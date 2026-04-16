@@ -135,7 +135,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	applyContainerNameOverride(r, runContainerName)
+	applyContainerName(r, env, runContainerName)
 	setSourceWritable(r)
 
 	// Apply --agent-args

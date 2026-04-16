@@ -825,7 +825,7 @@ Templates are **not** resolved in:
 - Prompt files (use `{{SOURCE_DIR}}` which has its own separate substitution)
 - Sandbox settings JSON (has its own merge mechanism)
 - Dockerfile paths (use the role-based resolution chain instead)
-- Precheck script paths (use the role-based resolution chain instead; scripts receive `{{CONTAINER_NAME}}` as `$1` at runtime)
+- Precheck command args — `{{CONTAINER_NAME}}` is expanded at execution time by `RunPrecheck`, not by the general template system
 - `forward_env` key names (these are env var names, not values)
 - Map keys in `env` blocks (only values are resolved)
 - docker-exec `exec` template — uses its own `{{CONTAINER}}` and `{{CMD}}` placeholders which are expanded at execution time by the CmdFactory (separate from general template vars)
@@ -905,6 +905,21 @@ container "docker" {
   forward_env = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
 }
 ```
+
+Docker-exec runs agents inside a user-managed container (docker-compose, devcontainer, etc.). The container name can be set via config, `--container-name` flag, or `ateam secret CONTAINER_NAME --scope project`. A built-in `docker-exec` profile uses `{{CONTAINER_NAME}}` for automatic resolution.
+
+```hcl
+container "my-app" {
+  type             = "docker-exec"
+  docker_container = "my-app-dev"             # or "{{CONTAINER_NAME}}" for secret-based
+  precheck         = ["sh", "precheck.sh", "{{CONTAINER_NAME}}"]  # command array
+  forward_env      = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
+  copy_ateam       = true                     # copy ateam binary into container
+  # exec           = "podman exec {{CONTAINER}} {{CMD}}"
+}
+```
+
+The `precheck` field takes a command array. `{{CONTAINER_NAME}}` in args is replaced with the resolved container name at execution time. Convention-discovered scripts (`.ateam/docker-agent-precheck.sh`) are auto-wrapped as `["sh", "<path>", "{{CONTAINER_NAME}}"]`.
 
 Devcontainers use the project's `.devcontainer/devcontainer.json` to run agents in a pre-configured environment. The agent CLI (e.g. `claude`) must be installed inside the devcontainer. Requires `@devcontainers/cli` (`npm install -g @devcontainers/cli`).
 

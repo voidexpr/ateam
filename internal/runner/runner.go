@@ -64,6 +64,14 @@ type SandboxConfig struct {
 	InsideContainer  bool     // if false, skip sandbox inside containers
 }
 
+// ContainerNameSource values for Runner.ContainerNameSource.
+const (
+	ContainerNameSourceConfig = "config"
+	ContainerNameSourceCLI    = "cli"
+	ContainerNameSourceSecret = "secret"
+	ContainerNameSourceEnv    = "env"
+)
+
 // Runner orchestrates agent execution with logging, file I/O, and progress reporting.
 type Runner struct {
 	Agent                agent.Agent
@@ -82,6 +90,7 @@ type Runner struct {
 	Profile              string              // profile name for DB
 	ContainerType        string              // "none" or "docker" for DB
 	ContainerName        string              // docker container name for liveness checks
+	ContainerNameSource  string              // where ContainerName came from (ContainerNameSource* constants)
 	ProjectID            string              // project ID for DB
 }
 
@@ -481,6 +490,9 @@ func (r *Runner) setupContainer(ctx context.Context, req *agent.Request, cwd str
 	if err := c.Prepare(ctx); err != nil {
 		return err
 	}
+	// Refresh container name after Prepare — it may have been resolved
+	// from a partial name to the exact running container name.
+	r.ContainerName = c.GetContainerName()
 	if factory := c.CmdFactory(); factory != nil {
 		req.CmdFactory = factory
 	}

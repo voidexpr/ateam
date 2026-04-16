@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 // DockerExecContainer executes commands inside a user-managed container.
@@ -22,9 +23,13 @@ type DockerExecContainer struct {
 	// When set (via copy_ateam = true), it is copied into the container before exec.
 	HostCLIPath string
 
-	// PrecheckScript runs on the HOST before each exec.
-	// Can be used to start the container, verify health, install deps, etc.
-	PrecheckScript string
+	// PrecheckCmd runs on the HOST before each exec.
+	// {{CONTAINER_NAME}} in args is replaced with the resolved container name.
+	// Examples: ["sh", "precheck.sh", "{{CONTAINER_NAME}}"], ["make", "docker-restart"]
+	PrecheckCmd []string
+
+	prepareOnce sync.Once
+	prepareErr  error
 }
 
 func (d *DockerExecContainer) Type() string { return "docker-exec" }
@@ -122,17 +127,21 @@ func (d *DockerExecContainer) EnsureBinary(ctx context.Context) error {
 	return cmd.Run()
 }
 
-// RunPrecheck runs the precheck script on the host before agent execution.
-// The container name is passed as the first argument.
+// RunPrecheck runs the precheck command on the host before agent execution.
+// {{CONTAINER_NAME}} placeholders in args are replaced with d.ContainerName.
 func (d *DockerExecContainer) RunPrecheck(ctx context.Context) error {
-	if d.PrecheckScript == "" {
+	if len(d.PrecheckCmd) == 0 {
 		return nil
 	}
-	cmd := exec.CommandContext(ctx, "sh", d.PrecheckScript, d.ContainerName)
+	args := make([]string, len(d.PrecheckCmd))
+	for i, a := range d.PrecheckCmd {
+		args[i] = strings.ReplaceAll(a, "{{CONTAINER_NAME}}", d.ContainerName)
+	}
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("precheck script failed: %w", err)
+		return fmt.Errorf("precheck failed: %w", err)
 	}
 	return nil
 }
@@ -169,9 +178,48 @@ func (d *DockerExecContainer) TranslatePath(hostPath string) string {
 	return hostPath
 }
 
-// Prepare copies the ateam binary (if configured) and runs the precheck script.
-// Implements the Container interface.
+// ResolveRunningContainerName resolves a possibly-partial container name to the
+// exact running container name via docker ps substring matching.
+func ResolveRunningContainerName(ctx context.Context, name string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("docker-exec container name is empty — set via docker_container, --container-name, or ateam secret CONTAINER_NAME")
+	}
+	out, err := exec.CommandContext(ctx, "docker", "ps", "--filter", "name="+name, "--format", "{{.Names}}").Output()
+	if err != nil {
+		return "", fmt.Errorf("docker ps: %w", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var matches []string
+	for _, l := range lines {
+		if l != "" {
+			matches = append(matches, l)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no running container matching %q", name)
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("ambiguous container name %q matches %d containers: %s", name, len(matches), strings.Join(matches, ", "))
+	}
+}
+
+// Prepare validates the container name, copies the ateam binary (if configured),
+// and runs the precheck command. Safe to call concurrently — runs only once.
 func (d *DockerExecContainer) Prepare(ctx context.Context) error {
+	d.prepareOnce.Do(func() {
+		d.prepareErr = d.prepare(ctx)
+	})
+	return d.prepareErr
+}
+
+func (d *DockerExecContainer) prepare(ctx context.Context) error {
+	resolved, err := ResolveRunningContainerName(ctx, d.ContainerName)
+	if err != nil {
+		return err
+	}
+	d.ContainerName = resolved
 	if err := d.EnsureBinary(ctx); err != nil {
 		return fmt.Errorf("copy ateam binary failed: %w", err)
 	}
