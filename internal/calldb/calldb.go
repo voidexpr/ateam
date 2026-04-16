@@ -12,6 +12,27 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// schema defines the agent_execs table and its indexes.
+//
+// # Call lifecycle
+//
+// A row is inserted when an agent execution starts (InsertCall). When the execution
+// completes, the row is updated with timing and cost data (UpdateCall). A NULL ended_at
+// means the call is still running or crashed before it could record a result.
+//
+// # Indexes
+//
+//   - idx_execs_started   – global chronological listing (used by "ateam ps" and log views)
+//   - idx_execs_project   – per-project history filtered by time
+//   - idx_execs_action    – filter by action type (report, code, review, …) ordered by time
+//   - idx_execs_task_group – group all calls that belong to the same logical task for cost aggregation
+//   - idx_execs_role      – per-role history ordered by time
+//
+// # task_group
+//
+// task_group is a caller-supplied token that ties related agent_execs rows together
+// (e.g. all calls spawned by a single "ateam code" invocation). It enables cost and
+// token aggregation across a group without a separate join table.
 const schema = `
 CREATE TABLE IF NOT EXISTS agent_execs (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
