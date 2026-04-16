@@ -141,20 +141,16 @@ func TestStreamTailErrorNegativeMaxMessages(t *testing.T) {
 }
 
 // =============================================================================
-// BUG: FormatStream double-counts turns — both UserLine and TextLine increment
-// File: format.go, func FormatStream
+// StreamFormatter turn counting: only UserLine increments TurnNum
+// File: format_stream.go, func fmtUser
 //
-// UserLine → turnNum++ at line 61
-// TextLine → turnNum++ at line 75
-//
-// A conversation of user→assistant→user→assistant shows turns 1,2,3,4 instead
-// of 1,2. The StreamFormatter (format_stream.go) correctly only increments on
-// UserLine, so this is inconsistent and wrong.
+// A conversation of user→assistant→user→assistant should show Turn 1 and Turn 2
+// only. TextLine never increments TurnNum, so there is no double-counting.
 // =============================================================================
 
-func TestFormatStreamTurnCountingAccuracy(t *testing.T) {
+func TestStreamFormatterTurnCountingAccuracy(t *testing.T) {
 	// Build a JSONL with: system, user, assistant-text, user, assistant-text
-	// Expected: turn 1 (user), turn 2 (user) — NOT turn 1, turn 2, turn 3, turn 4
+	// Expected: Turn 1 (user), Turn 2 (user) — NOT Turn 1, Turn 2, Turn 3, Turn 4
 	content := `{"type":"system","subtype":"init","session_id":"s1","model":"test"}
 {"type":"user"}
 {"type":"assistant","message":{"content":[{"type":"text","text":"First response."}]}}
@@ -165,14 +161,15 @@ func TestFormatStreamTurnCountingAccuracy(t *testing.T) {
 	path := writeTempStreamBugs(t, content)
 
 	var buf strings.Builder
-	if err := FormatStream(path, &buf, nil); err != nil {
-		t.Fatalf("FormatStream error: %v", err)
+	sf := &StreamFormatter{Color: false}
+	if err := sf.FormatFile(path, &buf); err != nil {
+		t.Fatalf("StreamFormatter.FormatFile error: %v", err)
 	}
 	out := buf.String()
 
 	// With 2 user messages, the highest turn number should be 2, not 4.
-	if strings.Contains(out, "turn 3") || strings.Contains(out, "turn 4") {
-		t.Errorf("FormatStream inflates turn numbers — shows turn 3 or 4 for a 2-turn conversation.\nGot:\n%s", out)
+	if strings.Contains(out, "Turn 3") || strings.Contains(out, "Turn 4") {
+		t.Errorf("StreamFormatter inflates turn numbers — shows Turn 3 or Turn 4 for a 2-turn conversation.\nGot:\n%s", out)
 	}
 }
 

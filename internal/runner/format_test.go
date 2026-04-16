@@ -20,12 +20,13 @@ func writeTempStream(t *testing.T, content string) string {
 	return f.Name()
 }
 
-// TestFormatStreamOutput verifies that FormatStream produces the expected
+// TestFormatStreamOutput verifies that StreamFormatter produces the expected
 // human-readable sections from the sample fixture.
 func TestFormatStreamOutput(t *testing.T) {
 	var buf strings.Builder
-	if err := FormatStream("testdata/sample_stream.jsonl", &buf, nil); err != nil {
-		t.Fatalf("FormatStream returned error: %v", err)
+	sf := &StreamFormatter{Color: false}
+	if err := sf.FormatFile("testdata/sample_stream.jsonl", &buf); err != nil {
+		t.Fatalf("StreamFormatter.FormatFile returned error: %v", err)
 	}
 
 	out := buf.String()
@@ -33,18 +34,16 @@ func TestFormatStreamOutput(t *testing.T) {
 		desc    string
 		contain string
 	}{
-		{"system header", "── system ──"},
-		{"turn 1 header", "── turn 1 ──"},
+		{"system header", "--- session"},
+		{"turn 1 header", "=== Turn 1 ==="},
 		{"assistant text first", "I will analyze the code."},
-		{"tool use header", "▶ Bash"},
-		{"tool result content", "◀ tool output here"},
-		{"turn 2 header", "── turn 2 ──"},
+		{"tool use header", "tool #1: Bash"},
+		{"turn 2 header", "=== Turn 2 ==="},
 		{"assistant text second", "Analysis complete."},
-		{"result header", "── result ──"},
-		{"cost line", "$0.0150"},
+		{"result header", "=== Result ==="},
+		{"cost line", "Cost:"},
 		{"turns line", "Turns:"},
-		{"input tokens line", "Input:"},
-		{"output tokens line", "Output:"},
+		{"tokens line", "Tokens:"},
 	}
 	for _, c := range checks {
 		if !strings.Contains(out, c.contain) {
@@ -53,11 +52,12 @@ func TestFormatStreamOutput(t *testing.T) {
 	}
 }
 
-// TestFormatStreamMissingFile verifies that FormatStream returns an error
-// when the path does not exist.
+// TestFormatStreamMissingFile verifies that StreamFormatter.FormatFile returns
+// an error when the path does not exist.
 func TestFormatStreamMissingFile(t *testing.T) {
 	var buf strings.Builder
-	err := FormatStream("/nonexistent/path/stream.jsonl", &buf, nil)
+	sf := &StreamFormatter{Color: false}
+	err := sf.FormatFile("/nonexistent/path/stream.jsonl", &buf)
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")
 	}
@@ -72,7 +72,8 @@ func TestFormatStreamSkipsUnknownTypes(t *testing.T) {
 	path := writeTempStream(t, content)
 
 	var buf strings.Builder
-	if err := FormatStream(path, &buf, nil); err != nil {
+	sf := &StreamFormatter{Color: false}
+	if err := sf.FormatFile(path, &buf); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(buf.String(), "visible") {
