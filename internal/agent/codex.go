@@ -2,12 +2,9 @@ package agent
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -90,15 +87,9 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 		return
 	}
 
-	var stderrBuf bytes.Buffer
-	stderrWriters := []io.Writer{&stderrBuf}
-	if req.StderrFile != "" {
-		if ef, err := os.Create(req.StderrFile); err == nil {
-			defer ef.Close()
-			stderrWriters = append(stderrWriters, ef)
-		} else {
-			fmt.Fprintf(os.Stderr, "warning: cannot create stderr file %s: %v\n", req.StderrFile, err)
-		}
+	stderrWriters, streamWriter, closers := setupStreamFiles(req)
+	for _, c := range closers {
+		defer c.Close()
 	}
 	cmd.Stderr = io.MultiWriter(stderrWriters...)
 
@@ -107,17 +98,6 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 		return
 	}
 	ch <- StreamEvent{Type: "system", PID: cmd.Process.Pid}
-
-	var streamWriter *bufio.Writer
-	if req.StreamFile != "" {
-		if sf, err := os.Create(req.StreamFile); err == nil {
-			defer sf.Close()
-			streamWriter = bufio.NewWriter(sf)
-			defer streamWriter.Flush()
-		} else {
-			fmt.Fprintf(os.Stderr, "warning: cannot create stream file %s: %v\n", req.StreamFile, err)
-		}
-	}
 
 	startedAt := time.Now()
 
