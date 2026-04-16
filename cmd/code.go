@@ -157,7 +157,7 @@ func runCode(opts CodeOptions) error {
 	// --agent and --profile are mutually exclusive on ateam run.
 	subRunProfile := opts.Profile
 	if subRunProfile == "" && opts.Agent == "" {
-		subRunProfile = env.Config.ResolveProfile("run", "")
+		subRunProfile = env.Config.ResolveProfile(runner.ActionRun, "")
 	}
 
 	// Inject flags for the supervisor to pass to sub-runs.
@@ -189,7 +189,7 @@ func runCode(opts CodeOptions) error {
 
 	supervisorProfileName := opts.SupervisorProfile
 	if supervisorProfileName == "" && opts.SupervisorAgent == "" {
-		supervisorProfileName = env.Config.ResolveSupervisorProfile("code")
+		supervisorProfileName = env.Config.ResolveSupervisorProfile(runner.ActionCode)
 	}
 
 	if err := checkDockerInDocker(env, supervisorProfileName, subRunProfile); err != nil {
