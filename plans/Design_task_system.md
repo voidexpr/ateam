@@ -75,6 +75,8 @@ CREATE TABLE IF NOT EXISTS run_groups (
 
 ## Input Format Decision
 
+TODO: revisit the syntax to use ## TITLE + --- task --- and support the grouping of multiple tasks and a round-trip syntax where even a text editor could get a file with multiple tasks and edit them via 'id' attributes in the structured fields
+
 The agent currently outputs findings as markdown with structured fields (Title, Location, Severity, Effort, Description, Recommendation). The task CLI input should match this structure with minimal ceremony.
 
 **Evaluated formats:**
@@ -143,19 +145,26 @@ The prompt template approach costs ~10 extra tokens per finding (the flags) but 
 ```sql
 CREATE TABLE tasks (
     id            INTEGER PRIMARY KEY,
+
+    -- MAYBE: project TEXT NOT NULL, -- force project to be stored to more easily aggregate multiple projects
+
+    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
+    updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
+
     subject       TEXT NOT NULL,
     description   TEXT,
-    source_role   TEXT NOT NULL,
-    source_action TEXT NOT NULL DEFAULT 'report',
     severity      TEXT,          -- CRITICAL, HIGH, MEDIUM, LOW
     effort        TEXT,          -- SMALL, MEDIUM, LARGE
     location      TEXT,          -- file paths, line numbers
     state         TEXT NOT NULL DEFAULT 'open',
     priority      TEXT,          -- P0, P1, P2
-    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
-    updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S','now')),
+
+    source_role   TEXT NOT NULL,
+    source_action TEXT NOT NULL DEFAULT 'report',
+
     report_run_group TEXT,       -- run_group of originating report run
     code_run_group   TEXT,       -- run_group of code run that attempted this
+
     commit_hash   TEXT,
     session_id    TEXT           -- claude session for resume
 );
