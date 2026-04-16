@@ -32,10 +32,10 @@ const (
 	ActionDebug    = "debug"
 )
 
-// IsInContainer detects whether the current process is running inside a Docker container.
+// IsInContainer detects whether the current process is running inside a container.
+// Delegates to container.IsInContainer.
 func IsInContainer() bool {
-	_, err := os.Stat("/.dockerenv")
-	return err == nil
+	return container.IsInContainer()
 }
 
 // ExpandHome replaces a leading ~/ with the user's home directory.
@@ -862,6 +862,7 @@ func looksLikeSecret(name string) bool {
 		"KEY", "SECRET", "TOKEN", "PASSWORD", "PASSWD",
 		"CREDENTIAL", "AUTH", "PRIVATE",
 		"URL", "URI", "DSN", "CONN",
+		"PASS", "CERT", "PEM",
 	} {
 		if strings.Contains(up, substr) {
 			return true
