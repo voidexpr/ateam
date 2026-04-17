@@ -62,7 +62,7 @@ func (g inspectGlobals) restore() {
 //   - two "run" action runs in a code task group
 //
 // Note: project_id is left empty so that resolveRunSelection's call to
-// LatestTaskGroup("", prefix) — which queries WHERE project_id = '' — finds the rows.
+// LatestTaskGroup with an empty string prefix finds the rows (queries WHERE project_id = empty).
 func seedInspectDB(t *testing.T, db *calldb.CallDB) (reportTG, codeTG string) {
 	t.Helper()
 	now := time.Now()
