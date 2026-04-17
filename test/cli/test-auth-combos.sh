@@ -99,10 +99,10 @@ run_case "03  store=none       env=OAUTH      : OAUTH active (env)" "" "OAUTH" \
     'CLAUDE_CODE_OAUTH_TOKEN.*active.*env' \
     'ANTHROPIC_API_KEY.*not found'
 
-run_case "04  store=none       env=API+OAUTH  : API active (env), OAUTH masked" "" "API+OAUTH" \
-    'ANTHROPIC_API_KEY.*active.*env' \
-    'CLAUDE_CODE_OAUTH_TOKEN.*stripped' \
-    'Notice.*ANTHROPIC_API_KEY.*env.*ignore.*CLAUDE_CODE_OAUTH_TOKEN'
+run_case "04  store=none       env=API+OAUTH  : OAUTH active (env), API masked" "" "API+OAUTH" \
+    'CLAUDE_CODE_OAUTH_TOKEN.*active.*env' \
+    'ANTHROPIC_API_KEY.*stripped' \
+    'Notice.*CLAUDE_CODE_OAUTH_TOKEN.*env.*ignore.*ANTHROPIC_API_KEY'
 
 # --- Row 2: store=API ---
 run_case "05  store=API        env=none       : API active (project)" "API" "" \
@@ -143,23 +143,23 @@ run_case "12  store=OAUTH      env=API+OAUTH  : OAUTH active (project), API mask
     'Notice.*CLAUDE_CODE_OAUTH_TOKEN.*ateam secret.*ignore.*ANTHROPIC_API_KEY'
 
 # --- Row 4: store=API+OAUTH ---
-# When both are configured in the store, only the first alternative
-# (ANTHROPIC_API_KEY) is used by IsolateCredentials; OAUTH is silently unused.
-run_case "13  store=API+OAUTH  env=none       : API active (project)" "API+OAUTH" "" \
-    'ANTHROPIC_API_KEY.*active.*project' \
-    'CLAUDE_CODE_OAUTH_TOKEN.*(stripped|unused|project)'
+# When both are configured in the store, OAUTH wins at the same level;
+# API is silently unused (still in store but not selected).
+run_case "13  store=API+OAUTH  env=none       : OAUTH active (project)" "API+OAUTH" "" \
+    'CLAUDE_CODE_OAUTH_TOKEN.*active.*project' \
+    'ANTHROPIC_API_KEY.*(stripped|unused|project)'
 
-run_case "14  store=API+OAUTH  env=API        : API active (project)" "API+OAUTH" "API" \
-    'ANTHROPIC_API_KEY.*active.*project' \
-    'CLAUDE_CODE_OAUTH_TOKEN.*(stripped|unused|project)'
+run_case "14  store=API+OAUTH  env=API        : OAUTH active (project), API masked" "API+OAUTH" "API" \
+    'CLAUDE_CODE_OAUTH_TOKEN.*active.*project' \
+    'ANTHROPIC_API_KEY.*stripped'
 
-run_case "15  store=API+OAUTH  env=OAUTH      : API active (project), OAUTH masked" "API+OAUTH" "OAUTH" \
-    'ANTHROPIC_API_KEY.*active.*project' \
-    'CLAUDE_CODE_OAUTH_TOKEN.*stripped'
+run_case "15  store=API+OAUTH  env=OAUTH      : OAUTH active (project)" "API+OAUTH" "OAUTH" \
+    'CLAUDE_CODE_OAUTH_TOKEN.*active.*project' \
+    'ANTHROPIC_API_KEY.*(stripped|unused|project)'
 
-run_case "16  store=API+OAUTH  env=API+OAUTH  : API active (project), OAUTH masked" "API+OAUTH" "API+OAUTH" \
-    'ANTHROPIC_API_KEY.*active.*project' \
-    'CLAUDE_CODE_OAUTH_TOKEN.*stripped'
+run_case "16  store=API+OAUTH  env=API+OAUTH  : OAUTH active (project), API masked" "API+OAUTH" "API+OAUTH" \
+    'CLAUDE_CODE_OAUTH_TOKEN.*active.*project' \
+    'ANTHROPIC_API_KEY.*stripped'
 
 echo ""
 echo "---"

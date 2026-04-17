@@ -11,6 +11,7 @@ import (
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/root"
+	"github.com/ateam/internal/secret"
 	"github.com/spf13/cobra"
 )
 
@@ -247,7 +248,7 @@ func runSetupInteractive(projectDir, orgDir string, args []string) error {
 
 func printAuthSources(s agent.AuthStatus) {
 	if val := os.Getenv("ANTHROPIC_API_KEY"); val != "" {
-		fmt.Printf("  ANTHROPIC_API_KEY:            %s\n", maskEnvVar(val))
+		fmt.Printf("  ANTHROPIC_API_KEY:            %s\n", secret.MaskValue(val))
 	} else if s.HasSecretAPI {
 		fmt.Printf("  ANTHROPIC_API_KEY:            %s\n", s.SecretAPIInfo)
 	} else {

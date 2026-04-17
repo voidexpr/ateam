@@ -83,7 +83,7 @@ func DetectAuth(projectDir, orgDir string) AuthStatus {
 
 	if val := os.Getenv("ANTHROPIC_API_KEY"); val != "" {
 		s.HasAPIKey = true
-		s.Sources = append(s.Sources, AuthSource{Name: "apikey-env", Detail: maskValue(val)})
+		s.Sources = append(s.Sources, AuthSource{Name: "apikey-env", Detail: secret.MaskValue(val)})
 	}
 
 	if val := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); val != "" {
@@ -91,7 +91,7 @@ func DetectAuth(projectDir, orgDir string) AuthStatus {
 		if strings.HasPrefix(val, "{") {
 			s.Sources = append(s.Sources, AuthSource{Name: "oauth-env", Detail: "JSON, " + itoa(len(val)) + " chars"})
 		} else {
-			s.Sources = append(s.Sources, AuthSource{Name: "oauth-env", Detail: maskValue(val)})
+			s.Sources = append(s.Sources, AuthSource{Name: "oauth-env", Detail: secret.MaskValue(val)})
 		}
 	}
 
@@ -368,13 +368,6 @@ func credFileHasTokens(path string) bool {
 
 func hasKeychainEntry() bool {
 	return exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials").Run() == nil
-}
-
-func maskValue(val string) string {
-	if len(val) <= 8 {
-		return "***"
-	}
-	return val[:4] + "..." + val[len(val)-4:]
 }
 
 func removeFileAction(path, desc string, dryRun bool) CleanupResult {

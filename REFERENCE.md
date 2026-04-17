@@ -202,17 +202,23 @@ ateam secret --save-project-scope             # write all to .ateam/secrets.env
 
 Agents declare required secrets via `required_env` in `runtime.hcl`.
 
-**Resolution order** (secret store is authoritative):
+**Per-key resolution order** (the secret store beats the environment for the same key):
 1. Project `.ateam/secrets.env` / keychain
 2. Org `.ateamorg/secrets.env` / keychain
 3. Global `~/.config/ateam/secrets.env` / keychain
-4. Process environment (fallback only)
+4. Process environment
 
-If `ateam secret` has a value configured, it always wins over inherited environment variables. When alternatives exist (e.g., `ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN`), store-backed credentials are preferred over env-only ones. Competing alternatives are stripped from the agent's process environment to prevent credential confusion (e.g., Claude Code's auth priority is `ANTHROPIC_API_KEY > CLAUDE_CODE_OAUTH_TOKEN` — without stripping, the wrong credential could be used).
+**Alternatives (`A|B` in `required_env`):** the winner is picked in two steps:
+1. Walk alternatives at the store tier (project → org → global). The first alternative in declaration order that resolves wins.
+2. Otherwise walk alternatives at the env tier. The first alternative in declaration order that resolves wins.
+
+The default claude agents list `CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY`, so OAUTH wins any same-level tie. Cross-tier, the store still beats env — e.g., `ANTHROPIC_API_KEY` in the store beats `CLAUDE_CODE_OAUTH_TOKEN` that's only in the shell environment.
+
+**Credential isolation:** non-winning alternatives that also exist in the host environment are stripped from the agent's process. This prevents Claude Code from applying its own internal priority (`ANTHROPIC_API_KEY > CLAUDE_CODE_OAUTH_TOKEN`) to pick the wrong credential.
 
 **Validation** runs before agent spawn for container runs and inside containers. On host without containers, validation is skipped — agents handle their own auth (interactive login, macOS Keychain). Credential isolation (stripping competing env vars) always runs regardless of context.
 
-Use `ateam run --dry-run` to see the full credential resolution: which credentials are active, which are stripped, and their sources.
+Use `ateam env` to see every configured credential (including shadowed ones) and which the default agent will use. Use `ateam run --dry-run` for the per-invocation view.
 
 **Docker usage**: secrets in OS keychains don't cross into containers. Use `--save-project-scope` to write resolved secrets to `.ateam/secrets.env`, which is mounted into containers. Inside the container, `ateam run` resolves them from the project scope automatically.
 
@@ -803,7 +809,7 @@ agent "claude" {
   command = "claude"
   args    = ["-p", "--output-format", "stream-json", "--verbose"]
   sandbox = local.claude_sandbox
-  required_env = ["ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"]
+  required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]
 }
 
 agent "claude-sonnet" {
@@ -812,7 +818,7 @@ agent "claude-sonnet" {
 }
 ```
 
-Agents support inheritance via `base`, sandbox settings, environment variables, isolated config dirs, and `required_env` for secret validation. When alternatives are declared (e.g., `required_env = ["ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"]`), the secret store takes priority over environment variables, and competing alternatives are stripped from the agent's process environment. See [`ateam secret`](#ateam-secret) for the full resolution order.
+Agents support inheritance via `base`, sandbox settings, environment variables, isolated config dirs, and `required_env` for secret validation. When alternatives are declared (e.g., `required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]`), the first alternative in declaration order wins at each tier (store first, then env). Competing alternatives are stripped from the agent's process environment to avoid credential confusion. See [`ateam secret`](#ateam-secret) for the full resolution order.
 
 ### Template Variables
 

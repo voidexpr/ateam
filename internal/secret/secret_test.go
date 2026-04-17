@@ -8,6 +8,37 @@ import (
 	"github.com/ateam/internal/runtime"
 )
 
+// --- MaskValue tests ---
+
+func TestMaskValueShort(t *testing.T) {
+	for _, val := range []string{"", "a", "abcd", "abcdefgh"} {
+		if got := MaskValue(val); got != "***" {
+			t.Errorf("MaskValue(%q) = %q, want ***", val, got)
+		}
+	}
+}
+
+func TestMaskValueMedium(t *testing.T) {
+	if got := MaskValue("123456789"); got != "1234...6789" {
+		t.Errorf("MaskValue(123456789) = %q, want 1234...6789", got)
+	}
+}
+
+func TestMaskValueLong(t *testing.T) {
+	val := "sk-ant-api03-abcdef1234567890"
+	got := MaskValue(val)
+	want := "sk-a...7890"
+	if got != want {
+		t.Errorf("MaskValue(%q) = %q, want %q", val, got, want)
+	}
+	if got[:4] != val[:4] {
+		t.Errorf("prefix mismatch: got %q, want %q", got[:4], val[:4])
+	}
+	if got[len(got)-4:] != val[len(val)-4:] {
+		t.Errorf("suffix mismatch: got %q, want %q", got[len(got)-4:], val[len(val)-4:])
+	}
+}
+
 // --- FileStore tests ---
 
 func TestFileStoreSetAndGet(t *testing.T) {
@@ -495,6 +526,59 @@ func TestIsolateCredentialsNoStrippingWhenOnlyOneExists(t *testing.T) {
 	}
 	if ac.Env["ANTHROPIC_API_KEY"] != "correct-key" {
 		t.Fatalf("expected resolved key in ac.Env, got %q", ac.Env["ANTHROPIC_API_KEY"])
+	}
+}
+
+// At same level (both in env), the first alternative in the declaration
+// order wins. This test mirrors the HCL convention of putting
+// CLAUDE_CODE_OAUTH_TOKEN first so OAUTH beats API when both are in env.
+func TestIsolateCredentialsSameLevelTiebreakEnv(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "env-oauth")
+	t.Setenv("ANTHROPIC_API_KEY", "env-api")
+
+	r := &Resolver{
+		Scopes:  []Scope{{Name: ScopeProject, EnvFile: filepath.Join(t.TempDir(), "secrets.env")}},
+		Backend: BackendFile,
+	}
+	ac := &runtime.AgentConfig{
+		RequiredEnv: []string{"CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"},
+	}
+
+	results := IsolateCredentials(ac, r)
+
+	if len(results) != 1 || results[0].ActiveKey != "CLAUDE_CODE_OAUTH_TOKEN" {
+		t.Fatalf("expected OAUTH to win at same level, got %+v", results)
+	}
+	if ac.Env["CLAUDE_CODE_OAUTH_TOKEN"] != "env-oauth" {
+		t.Fatalf("expected OAUTH value in ac.Env, got %q", ac.Env["CLAUDE_CODE_OAUTH_TOKEN"])
+	}
+	if ac.Env["ANTHROPIC_API_KEY"] != "" {
+		t.Fatalf("expected ANTHROPIC_API_KEY stripped, got %q", ac.Env["ANTHROPIC_API_KEY"])
+	}
+}
+
+// At same level (both in store), OAUTH wins by declaration order.
+func TestIsolateCredentialsSameLevelTiebreakStore(t *testing.T) {
+	dir := t.TempDir()
+	store := &FileStore{Path: filepath.Join(dir, "secrets.env")}
+	_ = store.Set("CLAUDE_CODE_OAUTH_TOKEN", "store-oauth")
+	_ = store.Set("ANTHROPIC_API_KEY", "store-api")
+
+	r := &Resolver{
+		Scopes:  []Scope{{Name: ScopeProject, EnvFile: filepath.Join(dir, "secrets.env")}},
+		Backend: BackendFile,
+	}
+	ac := &runtime.AgentConfig{
+		RequiredEnv: []string{"CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"},
+	}
+
+	results := IsolateCredentials(ac, r)
+
+	if len(results) != 1 || results[0].ActiveKey != "CLAUDE_CODE_OAUTH_TOKEN" {
+		t.Fatalf("expected OAUTH to win at same level, got %+v", results)
+	}
+	if ac.Env["CLAUDE_CODE_OAUTH_TOKEN"] != "store-oauth" {
+		t.Fatalf("expected store-oauth value, got %q", ac.Env["CLAUDE_CODE_OAUTH_TOKEN"])
 	}
 }
 

@@ -76,7 +76,7 @@ func resolveRequirement(req string, resolver *Resolver) bool {
 }
 
 // IsolationResult describes the outcome of credential isolation for one
-// required_env group (e.g., "ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN").
+// required_env group (e.g., "CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY").
 type IsolationResult struct {
 	ActiveKey    string   // the credential that will be used
 	ActiveSource string   // where it came from: "project", "org", "global", "env"
@@ -224,20 +224,25 @@ func resolveOneDetail(name string, resolver *Resolver) ResolveDetail {
 	if !r.Found {
 		return ResolveDetail{Name: name}
 	}
-	masked := r.Value
-	if len(masked) > 8 {
-		masked = masked[:4] + "..." + masked[len(masked)-4:]
-	} else if len(masked) > 0 {
-		masked = "***"
-	}
 	return ResolveDetail{
 		Name:    name,
 		Found:   true,
 		Source:  r.Source,
 		Backend: r.Backend,
-		Masked:  masked,
+		Masked:  MaskValue(r.Value),
 	}
 }
+
+// MaskValue returns a short masked preview of a secret value: the first and
+// last 4 characters for long values, "***" for anything 8 chars or shorter
+// (including empty).
+func MaskValue(val string) string {
+	if len(val) <= 8 {
+		return "***"
+	}
+	return val[:4] + "..." + val[len(val)-4:]
+}
+
 
 // CollectRequiredEnvNames returns all unique env var names from required_env
 // across all agents in the config. Useful for listing all known secrets.
