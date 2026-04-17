@@ -254,6 +254,82 @@ func TestEnvArgsInOneshotCmdFactory(t *testing.T) {
 	}
 }
 
+func TestApplyAgentEnvOverridesForwardEnv(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "host-key")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "host-token")
+
+	dc := &DockerContainer{
+		Image:      "ateam-test:latest",
+		SourceDir:  "/src",
+		OrgDir:     "/org",
+		ForwardEnv: []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"},
+	}
+
+	// Simulate IsolateCredentials: OAuth wins, API key stripped
+	dc.ApplyAgentEnv(map[string]string{
+		"CLAUDE_CODE_OAUTH_TOKEN": "store-token",
+		"ANTHROPIC_API_KEY":       "",
+	})
+
+	factory := dc.CmdFactory()
+	cmd := factory(context.Background(), "claude", "-p")
+	args := cmd.Args
+
+	hasArg := func(flag, value string) bool {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) && args[i+1] == value {
+				return true
+			}
+		}
+		return false
+	}
+
+	// OAuth token should be set to the store value (not the host value)
+	if !hasArg("-e", "CLAUDE_CODE_OAUTH_TOKEN=store-token") {
+		t.Errorf("expected store-token for CLAUDE_CODE_OAUTH_TOKEN, args: %v", args)
+	}
+
+	// API key should NOT appear (stripped by isolation)
+	for i, a := range args {
+		if a == "-e" && i+1 < len(args) && strings.HasPrefix(args[i+1], "ANTHROPIC_API_KEY") {
+			t.Errorf("ANTHROPIC_API_KEY should be suppressed, got -e %s", args[i+1])
+		}
+	}
+}
+
+func TestApplyAgentEnvMergesWithExistingEnv(t *testing.T) {
+	dc := &DockerContainer{
+		Image:     "ateam-test:latest",
+		SourceDir: "/src",
+		OrgDir:    "/org",
+		Env:       map[string]string{"DB_HOST": "localhost"},
+	}
+
+	dc.ApplyAgentEnv(map[string]string{
+		"CLAUDE_CODE_OAUTH_TOKEN": "token-val",
+	})
+
+	factory := dc.CmdFactory()
+	cmd := factory(context.Background(), "claude", "-p")
+	args := cmd.Args
+
+	hasArg := func(flag, value string) bool {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) && args[i+1] == value {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !hasArg("-e", "DB_HOST=localhost") {
+		t.Errorf("existing Env entry should be preserved, args: %v", args)
+	}
+	if !hasArg("-e", "CLAUDE_CODE_OAUTH_TOKEN=token-val") {
+		t.Errorf("agent env should be merged, args: %v", args)
+	}
+}
+
 func TestEnvArgsInDebugCommand(t *testing.T) {
 	dc := &DockerContainer{
 		Image:     "ateam-test:latest",

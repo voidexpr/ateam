@@ -88,6 +88,20 @@ func (d *DockerContainer) SetSourceWritable(writable bool) { d.SourceWritable = 
 // SetContainerName is not supported for oneshot docker containers.
 func (d *DockerContainer) SetContainerName(_ string) bool { return false }
 
+// ApplyAgentEnv merges agent-level env overrides into d.Env.
+// Non-empty values override ForwardEnv; empty values suppress forwarding.
+func (d *DockerContainer) ApplyAgentEnv(env map[string]string) {
+	if len(env) == 0 {
+		return
+	}
+	if d.Env == nil {
+		d.Env = make(map[string]string, len(env))
+	}
+	for k, v := range env {
+		d.Env[k] = v
+	}
+}
+
 // EnsureImage builds the docker image, relying on Docker's layer cache for speed.
 // Always runs docker build so Dockerfile changes are picked up automatically.
 func (d *DockerContainer) EnsureImage(ctx context.Context) error {
@@ -165,12 +179,18 @@ func (d *DockerContainer) baseRunArgs(forExec bool) []string {
 
 	if forExec {
 		for _, key := range d.ForwardEnv {
+			if _, overridden := d.Env[key]; overridden {
+				continue // handled by envArgs
+			}
 			if val, ok := os.LookupEnv(key); ok {
 				args = append(args, "-e", key+"="+val)
 			}
 		}
 	} else {
 		for _, key := range d.ForwardEnv {
+			if _, overridden := d.Env[key]; overridden {
+				continue
+			}
 			args = append(args, "-e", key)
 		}
 	}
@@ -303,6 +323,8 @@ func timezoneArgs() []string {
 }
 
 // envArgs returns sorted -e KEY=VALUE args for the Env map.
+// Empty values are skipped — they serve as suppression markers
+// (e.g. from credential isolation stripping competing credentials).
 func (d *DockerContainer) envArgs() []string {
 	if len(d.Env) == 0 {
 		return nil
@@ -314,6 +336,9 @@ func (d *DockerContainer) envArgs() []string {
 	sort.Strings(keys)
 	var args []string
 	for _, k := range keys {
+		if d.Env[k] == "" {
+			continue
+		}
 		args = append(args, "-e", k+"="+d.Env[k])
 	}
 	return args

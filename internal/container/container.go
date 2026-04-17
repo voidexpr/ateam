@@ -61,6 +61,11 @@ type Container interface {
 	// SetContainerName overrides the container name. Returns true if the
 	// name was applied, false if not supported by this container type.
 	SetContainerName(name string) bool
+
+	// ApplyAgentEnv merges agent-level environment overrides into the container.
+	// Non-empty values become explicit -e KEY=VALUE flags (overriding ForwardEnv).
+	// Empty values suppress forwarding of that key entirely.
+	ApplyAgentEnv(env map[string]string)
 }
 
 // RunOpts holds options for executing a command in a container.

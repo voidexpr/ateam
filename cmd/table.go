@@ -150,6 +150,11 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 			}
 		}
 	}
+	// Apply agent env (credential isolation + agent-configured env) to the
+	// container so that ForwardEnv respects IsolateCredentials decisions.
+	if ct != nil {
+		ct.ApplyAgentEnv(ac.Env)
+	}
 	r.Container = ct
 	if cc != nil && cc.Type != "none" {
 		r.ContainerType = cc.Type

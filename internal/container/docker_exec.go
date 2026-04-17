@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -14,10 +15,11 @@ import (
 // the user's responsibility (via docker-compose, devcontainer, manual docker run, etc.).
 // An optional precheck script runs before each exec.
 type DockerExecContainer struct {
-	ContainerName string   // required: name of the running container
-	ExecTemplate  string   // exec command template (default: "docker exec {{CONTAINER}} {{CMD}}")
-	ForwardEnv    []string // env var names to forward via -e
-	WorkDir       string   // working directory inside the container
+	ContainerName string            // required: name of the running container
+	ExecTemplate  string            // exec command template (default: "docker exec {{CONTAINER}} {{CMD}}")
+	ForwardEnv    []string          // env var names to forward via -e
+	Env           map[string]string // explicit env overrides; empty values suppress ForwardEnv
+	WorkDir       string            // working directory inside the container
 
 	// HostCLIPath is the path to a Linux-compatible ateam binary on the host.
 	// When set (via copy_ateam = true), it is copied into the container before exec.
@@ -89,10 +91,14 @@ func (d *DockerExecContainer) CmdFactory() CmdFactory {
 				dockerArgs = append(dockerArgs, "-w", d.WorkDir)
 			}
 			for _, key := range d.ForwardEnv {
+				if _, overridden := d.Env[key]; overridden {
+					continue // handled below
+				}
 				if val, ok := os.LookupEnv(key); ok {
 					dockerArgs = append(dockerArgs, "-e", key+"="+val)
 				}
 			}
+			dockerArgs = append(dockerArgs, d.envArgs()...)
 			// Append everything after "docker exec" (container name + command args)
 			dockerArgs = append(dockerArgs, allArgs[2:]...)
 			cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
@@ -162,8 +168,16 @@ func (d *DockerExecContainer) DebugCommand(opts RunOpts) string {
 	// Add env forwarding info
 	var envParts []string
 	for _, key := range d.ForwardEnv {
+		if _, overridden := d.Env[key]; overridden {
+			continue
+		}
 		if _, ok := os.LookupEnv(key); ok {
 			envParts = append(envParts, "-e "+key)
+		}
+	}
+	for k, v := range d.Env {
+		if v != "" {
+			envParts = append(envParts, "-e "+k)
 		}
 	}
 	if len(envParts) > 0 {
@@ -236,4 +250,38 @@ func (d *DockerExecContainer) SetSourceWritable(_ bool) {}
 func (d *DockerExecContainer) SetContainerName(name string) bool {
 	d.ContainerName = name
 	return true
+}
+
+// envArgs returns sorted -e KEY=VALUE args for non-empty Env entries.
+func (d *DockerExecContainer) envArgs() []string {
+	if len(d.Env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(d.Env))
+	for k := range d.Env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var args []string
+	for _, k := range keys {
+		if d.Env[k] == "" {
+			continue
+		}
+		args = append(args, "-e", k+"="+d.Env[k])
+	}
+	return args
+}
+
+// ApplyAgentEnv merges agent-level env overrides into d.Env.
+// Non-empty values override ForwardEnv; empty values suppress forwarding.
+func (d *DockerExecContainer) ApplyAgentEnv(env map[string]string) {
+	if len(env) == 0 {
+		return
+	}
+	if d.Env == nil {
+		d.Env = make(map[string]string, len(env))
+	}
+	for k, v := range env {
+		d.Env[k] = v
+	}
 }
