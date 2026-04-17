@@ -1,6 +1,6 @@
 BINARY = ateam
 
-.PHONY: build build-binary companion clean tidy check-tidy check test test-all test-docker test-docker-live vuln docs lint fmt fmt-check install-hooks run-ci
+.PHONY: build build-binary companion clean tidy check-tidy check test test-all test-cli test-docker test-docker-live vuln docs lint fmt fmt-check install-hooks run-ci
 
 BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
@@ -38,7 +38,12 @@ run-ci: check vuln
 test:
 	go test -race ./...
 
-test-all: test test-docker test-docker-live
+# CLI integration tests — exercise the `ateam` binary end-to-end with an
+# isolated HOME and project dir. Requires the binary to be built.
+test-cli: build-binary
+	./test/cli/test-auth-combos.sh
+
+test-all: test test-cli test-docker test-docker-live
 
 # Run docker integration tests inside Docker-in-Docker (no host impact).
 # Auto-detects a working buildx builder (falls back to plain docker build).
