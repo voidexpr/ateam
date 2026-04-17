@@ -153,7 +153,7 @@ func showSecret(resolver *secret.Resolver, backend secret.Backend, name string) 
 
 	result := resolver.Resolve(name)
 	if result.Found {
-		masked := maskEnvVar(result.Value)
+		masked := secret.MaskValue(result.Value)
 		fmt.Printf("%s=%s (%s, %s, %d bytes)\n", name, masked, result.Source, result.Backend, len(result.Value))
 		return nil
 	}

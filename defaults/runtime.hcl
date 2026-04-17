@@ -191,7 +191,7 @@ agent "claude" {
   env = {
     CLAUDECODE = ""
   }
-  required_env = ["ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"]
+  required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]
 
   // Inside containers: skip permissions (container provides isolation).
   // Outside containers: sandbox settings are applied automatically.
@@ -207,7 +207,7 @@ agent "claude-auto" {
   env = {
     CLAUDECODE = ""
   }
-  required_env = ["ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"]
+  required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]
 }
 
 // danger: no sandbox, could be useful for debugging
@@ -218,7 +218,7 @@ agent "claude-no-sandbox" {
   env = {
     CLAUDECODE = ""
   }
-  required_env = ["ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"]
+  required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]
 }
 
 agent "claude-sonnet" {

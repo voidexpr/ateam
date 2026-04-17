@@ -29,7 +29,7 @@ agent "claude-unsandboxed" {
   command = "claude"
   args    = ["-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"]
   env     = { CLAUDECODE = "" }
-  required_env = ["ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN"]
+  required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]
 }
 
 profile "no-sandbox" {

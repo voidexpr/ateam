@@ -73,40 +73,6 @@ func TestValidateTargetRegular(t *testing.T) {
 	}
 }
 
-func TestMaskValueShort(t *testing.T) {
-	// 8 chars or fewer → "***"
-	for _, val := range []string{"", "a", "abcd", "abcdefgh"} {
-		got := maskValue(val)
-		if got != "***" {
-			t.Errorf("maskValue(%q) = %q, want %q", val, got, "***")
-		}
-	}
-}
-
-func TestMaskValueMedium(t *testing.T) {
-	// 9 chars: first 4 + "..." + last 4
-	got := maskValue("123456789")
-	if got != "1234...6789" {
-		t.Errorf("maskValue(123456789) = %q, want %q", got, "1234...6789")
-	}
-}
-
-func TestMaskValueLong(t *testing.T) {
-	val := "sk-ant-api03-abcdef1234567890"
-	got := maskValue(val)
-	want := "sk-a...7890"
-	if got != want {
-		t.Errorf("maskValue(%q) = %q, want %q", val, got, want)
-	}
-	// Verify it starts with first 4 and ends with last 4
-	if got[:4] != val[:4] {
-		t.Errorf("prefix mismatch: got %q, want %q", got[:4], val[:4])
-	}
-	if got[len(got)-4:] != val[len(val)-4:] {
-		t.Errorf("suffix mismatch: got %q, want %q", got[len(got)-4:], val[len(val)-4:])
-	}
-}
-
 func TestExtractRefreshTokenValid(t *testing.T) {
 	dir := t.TempDir()
 	creds := `{"claudeAiOauth":{"refreshToken":"rt-abc123"}}`

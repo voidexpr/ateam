@@ -92,7 +92,8 @@ func printEnv(env *root.ResolvedEnv) error {
 func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
 	fmt.Println("\nRuntime")
 
-	printAuthLines(env)
+	rtCfg, _ := runtime.Load(env.ProjectDir, env.OrgDir)
+	printAuthLines(env, rtCfg)
 
 	// Config resolution chain
 	chain := []string{"built-in"}
@@ -134,8 +135,7 @@ func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
 		}
 	}
 
-	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
-	if err != nil {
+	if rtCfg == nil {
 		return
 	}
 
@@ -155,42 +155,64 @@ func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
 	printDockerfileLine(env, cwd)
 }
 
-func printAuthLines(env *root.ResolvedEnv) {
+func printAuthLines(env *root.ResolvedEnv, rtCfg *runtime.Config) {
 	resolver := secretResolver(env, secret.DefaultBackend())
+	activeKey, defaultAgent := defaultAgentAuthStatus(rtCfg, resolver)
 
 	authVars := []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}
-	anyFound := false
-	for i, name := range authVars {
-		result := resolver.Resolve(name)
-		if !result.Found {
-			continue
-		}
-		prefix := "  Auth: "
-		if i > 0 && anyFound {
-			prefix = "        "
-		}
-		fmt.Printf("%s%s=%s (%s, %s)\n", prefix, name, maskEnvVar(result.Value), result.Source, result.Backend)
-		anyFound = true
-
-		// Check for project/global override
-		if result.Source == "project" || result.Source == "env" {
-			globalResolver := secret.NewResolver("", "", secret.DefaultBackend(), nil)
-			globalResult := globalResolver.Resolve(name)
-			if globalResult.Found && globalResult.Source != "env" && globalResult.Value != result.Value {
-				fmt.Printf("        ⚠ project value overrides global value\n")
+	any := false
+	for _, name := range authVars {
+		all := resolver.ResolveAll(name)
+		for i, r := range all {
+			prefix := "        "
+			if !any {
+				prefix = "  Auth: "
 			}
+			annotation := ""
+			switch {
+			case name == activeKey && i == 0:
+				annotation = " ✓ active"
+			case name == activeKey:
+				// Lower-priority source for the same active key.
+				annotation = " ✗ ignored (shadowed by " + all[0].Source + "-scope " + name + ")"
+			case activeKey != "":
+				annotation = " ✗ ignored (shadowed by " + activeKey + ")"
+			}
+			fmt.Printf("%s%s=%s (%s, %s)%s\n", prefix, name, secret.MaskValue(r.Value), r.Source, r.Backend, annotation)
+			any = true
 		}
 	}
-	if !anyFound {
+
+	if !any {
 		fmt.Println("  Auth: (none) — run 'ateam secret ANTHROPIC_API_KEY' to configure")
+		return
+	}
+	if activeKey != "" && defaultAgent != "" {
+		fmt.Printf("        → used by default agent %q\n", defaultAgent)
 	}
 }
 
-func maskEnvVar(val string) string {
-	if len(val) <= 8 {
-		return "***"
+// defaultAgentAuthStatus returns the active auth key and the default agent
+// name by running IsolateCredentials on a copy of the default profile's
+// agent config. Returns empty strings if rtCfg is nil or the default
+// profile is absent.
+func defaultAgentAuthStatus(rtCfg *runtime.Config, resolver *secret.Resolver) (active, agentName string) {
+	if rtCfg == nil {
+		return "", ""
 	}
-	return val[:4] + "..." + val[len(val)-4:]
+	_, ac, _, err := rtCfg.ResolveProfile("default")
+	if err != nil || ac == nil {
+		return "", ""
+	}
+	// Copy so IsolateCredentials can't mutate the cached config.
+	acCopy := *ac
+	acCopy.Env = nil
+	for _, ir := range secret.IsolateCredentials(&acCopy, resolver) {
+		if ir.ActiveKey != "" {
+			return ir.ActiveKey, ac.Name
+		}
+	}
+	return "", ac.Name
 }
 
 func printDockerfileLine(env *root.ResolvedEnv, cwd string) {

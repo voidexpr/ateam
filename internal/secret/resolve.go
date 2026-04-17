@@ -90,26 +90,68 @@ func (r *Resolver) Resolve(name string) ResolveResult {
 	return ResolveResult{}
 }
 
+// ResolveAll returns every location where `name` has a value, in priority
+// order (project → org → global → env). Within a scope, both keychain and
+// file are checked independently — so duplicates are surfaced. Unlike
+// Resolve, it does not stop at the first match and ignores r.Backend
+// preference (callers want to see every configured source).
+func (r *Resolver) ResolveAll(name string) []ResolveResult {
+	var results []ResolveResult
+	for _, scope := range r.Scopes {
+		if val, ok := lookupKeychain(scope, name); ok {
+			results = append(results, ResolveResult{Value: val, Source: scope.Name, Backend: "keychain", Found: true})
+		}
+		if val, ok := lookupFile(scope, name); ok {
+			results = append(results, ResolveResult{Value: val, Source: scope.Name, Backend: "file", Found: true})
+		}
+	}
+	if val, ok := os.LookupEnv(name); ok {
+		results = append(results, ResolveResult{Value: val, Source: "env", Backend: "env", Found: true})
+	}
+	return results
+}
+
 // resolveScope checks backends for a scope in priority order.
 // Keychain is skipped entirely when keyringAvailable() is false.
 func (r *Resolver) resolveScope(scope Scope, name string) (string, string, bool) {
-	canKeychain := keyringAvailable()
-
-	if r.Backend == BackendKeychain && canKeychain {
-		if val, err := KeychainGet(KeychainAccount(scope.Name, scope.KeychainKey, name)); err == nil && val != "" {
+	if r.Backend == BackendKeychain {
+		if val, ok := lookupKeychain(scope, name); ok {
 			return val, "keychain", true
 		}
 	}
-	store := &FileStore{Path: scope.EnvFile}
-	if val, ok, err := store.Get(name); err == nil && ok {
+	if val, ok := lookupFile(scope, name); ok {
 		return val, "file", true
 	}
-	if r.Backend == BackendFile && canKeychain {
-		if val, err := KeychainGet(KeychainAccount(scope.Name, scope.KeychainKey, name)); err == nil && val != "" {
+	if r.Backend == BackendFile {
+		if val, ok := lookupKeychain(scope, name); ok {
 			return val, "keychain", true
 		}
 	}
 	return "", "", false
+}
+
+// lookupKeychain returns the keychain value for (scope, name), or ok=false
+// if the keychain is unavailable or the entry is missing/empty.
+func lookupKeychain(scope Scope, name string) (string, bool) {
+	if !keyringAvailable() {
+		return "", false
+	}
+	val, err := KeychainGet(KeychainAccount(scope.Name, scope.KeychainKey, name))
+	if err != nil || val == "" {
+		return "", false
+	}
+	return val, true
+}
+
+// lookupFile returns the secrets.env value for (scope, name), or ok=false
+// if the file is absent or the entry isn't set.
+func lookupFile(scope Scope, name string) (string, bool) {
+	store := &FileStore{Path: scope.EnvFile}
+	val, ok, err := store.Get(name)
+	if err != nil || !ok {
+		return "", false
+	}
+	return val, true
 }
 
 // ScopeForName returns the scope matching the given name, or the default (last) scope.
