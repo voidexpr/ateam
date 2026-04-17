@@ -256,6 +256,59 @@ func TestDockerExecCombinedEnvAndWorkdir(t *testing.T) {
 	}
 }
 
+func TestDockerExecApplyAgentEnvOverridesForwardEnv(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "host-key")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "host-token")
+
+	dc := &DockerExecContainer{
+		ContainerName: "testctr",
+		ForwardEnv:    []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"},
+	}
+
+	dc.ApplyAgentEnv(map[string]string{
+		"CLAUDE_CODE_OAUTH_TOKEN": "store-token",
+		"ANTHROPIC_API_KEY":       "",
+	})
+
+	factory := dc.CmdFactory()
+	cmd := factory(context.Background(), "claude", "-p")
+	args := cmd.Args
+
+	hasArg := func(flag, value string) bool {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) && args[i+1] == value {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !hasArg("-e", "CLAUDE_CODE_OAUTH_TOKEN=store-token") {
+		t.Errorf("expected store-token for CLAUDE_CODE_OAUTH_TOKEN, args: %v", args)
+	}
+
+	for i, a := range args {
+		if a == "-e" && i+1 < len(args) && strings.HasPrefix(args[i+1], "ANTHROPIC_API_KEY") {
+			t.Errorf("ANTHROPIC_API_KEY should be suppressed, got -e %s", args[i+1])
+		}
+	}
+}
+
+func TestDockerExecApplyAgentEnvNilEnvInit(t *testing.T) {
+	dc := &DockerExecContainer{
+		ContainerName: "testctr",
+	}
+
+	dc.ApplyAgentEnv(map[string]string{"KEY": "val"})
+
+	if dc.Env == nil {
+		t.Fatal("Env should be initialized")
+	}
+	if dc.Env["KEY"] != "val" {
+		t.Errorf("expected Env[KEY]=val, got %q", dc.Env["KEY"])
+	}
+}
+
 func TestResolveRunningContainerNameEmpty(t *testing.T) {
 	_, err := ResolveRunningContainerName(context.Background(), "")
 	if err == nil {
