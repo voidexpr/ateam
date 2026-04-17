@@ -154,8 +154,6 @@ Once evaluation of the new roles is done, old roles will be removed. Migration w
 
 Reports are stateful — `ateam report` writes to `.ateam/roles/{role}/report.md`, overwrites the previous report, and the prompt assembly reads the previous report for context. You can't run base and candidate in the same `.ateam/` project without one corrupting the other.
 
-Additionally, the `state.sqlite` database tracks runs, and concurrent writes from two eval variants would intermingle.
-
 ### Approaches evaluated
 
 **A: Sequential + `--ignore-previous-report`** — Run base first, save output, run candidate second, save output. Use `--ignore-previous-report` so the candidate isn't influenced by the base run's output.
@@ -182,7 +180,7 @@ Additionally, the `state.sqlite` database tracks runs, and concurrent writes fro
 - Con: Needs new plumbing (`--project-dir` flag threading through the entire pipeline), agents still run in the same working directory (could interact)
 - Verdict: Medium complexity. Possible but the plumbing touches many call sites.
 
-**E: Make it configurable `--worktree BASEDIR | --use-dirs DIR1 DIR2`** — Offer multiple options to adapt to the main scenarios: simple reporting (then use worktree), complex setup required (use --use-dirs)
+**E: Make it configurable `--eval-mode worktree|eval-dirs|inplace` + depending on the mode `--worktree-dir BASEDIR --eval-dirs DIR1 DIR2`** — Offer multiple options to adapt to the main scenarios: simple reporting (then use worktree), complex setup required
 
 - Pro: flexible
 - Con: more work but ultimately it remains 2 separate directory, only steps before the run are different
