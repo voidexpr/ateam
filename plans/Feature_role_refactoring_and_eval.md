@@ -43,16 +43,20 @@ Because the layout is flat, **existing role discovery code needs no changes** �
 
 **2. Glob support in `--roles`** (optional, `internal/prompts/embed.go` `ResolveRoleList`)
 
-Add collection glob expansion:
-- `code.*` → all enabled roles starting with `code.`
-- `testing.*` → all enabled roles starting with `testing.`
-- `all` → unchanged (all enabled, including dotless roles)
-- `code.small` → exact match (unchanged)
-- `security` → exact match (dotless role, unchanged)
+Add collection expansion and glob support. Resolution order for each entry in `--roles`:
 
-Dotless roles are not matched by any `prefix.*` pattern — they have no collection. They are only selected by exact name or `all`.
+1. `code.small` → exact match (unchanged)
+2. `security` → exact match if a role named `security` exists (unchanged)
+3. `testing` → no exact match, but `testing.*` roles exist → expand to all enabled `testing.*` roles (includes `testing.unit`, `testing.e2e.smoke`, etc.)
+4. `testing.*` → explicit glob, expand to all enabled roles starting with `testing.`
+5. `all` → unchanged (all enabled, including dotless roles)
+6. no match → error
 
-Implementation: in `ResolveRoleList`, if a role contains `*`, treat as prefix match against all known roles. This is the only code change to discovery/resolution and is optional.
+Exact match always wins. Collection expansion (`testing` → `testing.*`) only triggers when there is no role with that exact name. This means dotless roles like `security` are never accidentally expanded.
+
+Multi-level roles work naturally: `infra.db.schema` has collection `infra` (first dot only). `--roles infra` expands to all `infra.*` roles including `infra.db.schema` and `infra.db.config`.
+
+Implementation: in `ResolveRoleList`, if no exact match, try prefix `roleID + "."` against all known roles. If matches found, use them. If a role contains `*`, treat as explicit prefix match. This is the only code change to discovery/resolution.
 
 **3. Config.toml** — quoted keys for collection roles:
 
@@ -84,7 +88,9 @@ testing
   refactor_small       on   Concrete code improvements (legacy)
 ```
 
-Implementation: `strings.SplitN(roleID, ".", 2)` — if no dot, collection is `""`. Roles with the same collection are grouped together. Roles with empty collection are shown last under a `(no collection)` header or simply ungrouped.
+Implementation: `strings.SplitN(roleID, ".", 2)` — if no dot, collection is `""`. Only the first dot matters: `infra.db.schema` has collection `infra`, not `infra.db`. Roles with the same collection are grouped together. Roles with empty collection are shown last under a `(no collection)` header or simply ungrouped.
+
+Note: first-dot vs last-dot for collection is easy to change later since it only affects display grouping. Selection/glob works the same either way (prefix matching on `roleID + "."`). Revisit if deep nesting becomes common and fine-grained groups are wanted.
 
 **5. Prompt frontmatter** —
 
