@@ -2,26 +2,34 @@
 # Runs the Go integration tests inside an isolated Docker daemon
 # so nothing touches the host system.
 #
+# Uses a multi-stage build: the official golang image handles module
+# download and build cache (avoids Go runtime bugs on Alpine/musl),
+# then everything is copied into the DinD image for test execution.
+#
 # Usage: make test-docker
 
+# Stage 1: download modules and warm build cache in a known-good environment.
+FROM golang:alpine AS modules
+RUN apk add --no-cache git
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go test -tags docker_integration -count=1 -run ^$ ./internal/container/ 2>/dev/null || true
+
+# Stage 2: DinD image with Go + cached modules for test execution.
 FROM docker:27-dind
 
-# Install build tools
 RUN apk add --no-cache git musl-dev curl
+
+COPY --from=modules /usr/local/go /usr/local/go
 ENV PATH="/usr/local/go/bin:${PATH}"
+ENV GOPATH=/root/go
 
-# Copy go.mod first, derive Go version, and install matching Go toolchain
 WORKDIR /src
-COPY go.mod .
-RUN GO_VERSION=$(grep '^go ' go.mod | awk '{print $2}') && \
-    echo "Installing Go ${GO_VERSION} (from go.mod)" && \
-    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" | tar -C /usr/local -xz
-
-# Copy project source
-COPY . .
-
-# Pre-download Go modules while building the image
-RUN go mod download
+COPY --from=modules /src /src
+COPY --from=modules /go/pkg/mod /root/go/pkg/mod
+COPY --from=modules /root/.cache/go-build /root/.cache/go-build
 
 RUN chmod +x /src/test/run-docker-tests.sh
 
