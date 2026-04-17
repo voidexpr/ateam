@@ -1,6 +1,6 @@
 # Feature: Role Collections and Prompt Eval Framework
 
-## Part 1: Role Collections via `/` Namespacing
+## Part 1: Role Collections via `.` Namespacing
 
 ### Separator options evaluated
 
@@ -8,106 +8,78 @@
 |-----------|---------|------------|------|------|
 | `/` | `--roles code/architecture` | Nested dirs (works natively) | Needs quoted keys | `code/*` natural |
 | `-` | `--roles code-architecture` | Flat (works) | Bare key OK | Ambiguous with names |
-| `.` | `--roles code.architecture` | Flat (works) | **Breaks** (`.` = nesting in TOML) | Ambiguous |
+| `.` | `--roles code.architecture` | Flat (works) | Needs quoted keys (unquoted `.` = nesting) | `code.*` natural |
 | `:` | `--roles code:architecture` | Flat (works) | Needs quoted keys | `code:*` OK |
 | frontmatter | `--roles code` (collection) | Flat (works) | No change | Needs metadata parsing |
 
-**Recommendation: `/`**. It reads naturally (`--roles code/architecture`, `--roles testing/*`), maps to nested filesystem directories without any path hacks, and the TOML quoting is minor (`"code/architecture" = "on"`).
+**Recommendation: `.`**. It reads naturally (`--roles code.architecture`, `--roles testing.*`), keeps the filesystem flat (the dot is part of the directory name, no nested dirs), and requires no changes to role discovery code. TOML quoting (`"code.architecture" = "on"`) is the same minor cost as `/` or `:`.
 
-### How `/` works with the filesystem
+### How `.` works with the filesystem
 
-`filepath.Join(projectDir, "roles", "code/architecture")` produces `.ateam/roles/code/architecture/` — nested directories. This is correct behavior, not a bug. The embedded defaults use the same layout:
+The dot is part of the directory name — the filesystem stays flat. `filepath.Join(projectDir, "roles", "code.architecture")` produces `.ateam/roles/code.architecture/`, a single directory at the same level as all other roles.
 
 ```
 defaults/roles/
-├── code/
-│   ├── small/report_prompt.md
-│   ├── module/report_prompt.md
-│   └── architecture/report_prompt.md
-├── testing/
-│   ├── basic/report_prompt.md
-│   ├── full/report_prompt.md
-│   └── flaky/report_prompt.md
-├── docs/
-│   ├── external/report_prompt.md
-│   └── internal/report_prompt.md
-└── security/
-    └── report_prompt.md          ← single role, no sub-level
+├── code.small/report_prompt.md
+├── code.module/report_prompt.md
+├── code.architecture/report_prompt.md
+├── testing.basic/report_prompt.md
+├── testing.full/report_prompt.md
+├── testing.flaky/report_prompt.md
+├── docs.external/report_prompt.md
+├── docs.internal/report_prompt.md
+└── security/report_prompt.md          ← standalone role, no collection prefix
 ```
 
-Role IDs become: `code/small`, `code/architecture`, `testing/basic`, `docs/external`, `security`. Single-level roles (no collection) still work unchanged.
+Role IDs become: `code.small`, `code.architecture`, `testing.basic`, `docs.external`, `security`. Standalone roles (no collection prefix) still work unchanged.
+
+Because the layout is flat, **existing role discovery code needs no changes** — `fs.ReadDir("roles")` and `os.ReadDir(rolesDir)` read dot-named directories as single entries. Role names are treated as opaque strings throughout the codebase (no splitting, no special-character validation).
 
 ### Changes needed
 
-**1. Role discovery** (`internal/prompts/embed.go:55-68`)
+**1. Role discovery** — no change needed.
 
-Current `discoverRoleIDs()` reads one level with `fs.ReadDir("roles")`. Change to walk two levels:
+`discoverRoleIDs()` and `scanRolesDir()` in `internal/prompts/embed.go` use single-level `fs.ReadDir` / `os.ReadDir`. Since dot-named directories are flat entries, these functions pick up `code.small`, `testing.basic`, etc. without modification.
 
-```go
-func discoverRoleIDs() []string {
-    var ids []string
-    entries, _ := fs.ReadDir(defaults.FS, "roles")
-    for _, e := range entries {
-        if !e.IsDir() { continue }
-        // Check for report_prompt.md at this level (single role)
-        if hasReportPrompt("roles/" + e.Name()) {
-            ids = append(ids, e.Name())
-            continue
-        }
-        // Check sub-level (collection)
-        subEntries, _ := fs.ReadDir(defaults.FS, "roles/" + e.Name())
-        for _, sub := range subEntries {
-            if !sub.IsDir() { continue }
-            id := e.Name() + "/" + sub.Name()
-            if hasReportPrompt("roles/" + id) {
-                ids = append(ids, id)
-            }
-        }
-    }
-    sort.Strings(ids)
-    return ids
-}
-```
-
-Same change for `scanRolesDir()` (lines 156-168) which scans project/org directories.
-
-**2. Glob support in `--roles`** (`internal/prompts/embed.go` `ResolveRoleList`)
+**2. Glob support in `--roles`** (optional, `internal/prompts/embed.go` `ResolveRoleList`)
 
 Add collection glob expansion:
-- `code/*` → all enabled roles starting with `code/`
-- `testing/*` → all enabled roles starting with `testing/`
+- `code.*` → all enabled roles starting with `code.`
+- `testing.*` → all enabled roles starting with `testing.`
 - `all` → unchanged (all enabled)
-- `code/small` → exact match (unchanged)
+- `code.small` → exact match (unchanged)
 
-Implementation: in `ResolveRoleList`, if a role contains `*`, treat as prefix match against all known roles.
+Implementation: in `ResolveRoleList`, if a role contains `*`, treat as prefix match against all known roles. This is the only code change to discovery/resolution and is optional.
 
 **3. Config.toml** — quoted keys for collection roles:
 
 ```toml
 [roles]
-"code/small" = "on"
-"code/architecture" = "off"
-"testing/basic" = "on"
-security = "on"            # no collection, still works
+"code.small" = "on"
+"code.architecture" = "off"
+"testing.basic" = "on"
+security = "on"            # standalone, still works unquoted
 ```
 
-No code change needed — Go's TOML parser handles quoted keys into `map[string]string`.
+No code change needed — BurntSushi/toml handles quoted dotted keys as literal keys into `map[string]string`. Unquoted `code.small` would be interpreted as TOML nesting — the quotes are required.
 
 **4. `ateam roles` display** — group by collection:
 
 ```
 Collection: code
-  code/small           on   Concrete code improvements: naming, duplication, ...
-  code/module          off  Module-level refactoring: interfaces, coupling, ...
-  code/architecture    off  Architecture-level analysis: layers, patterns, ...
+  code.small           on   Concrete code improvements: naming, duplication, ...
+  code.module          off  Module-level refactoring: interfaces, coupling, ...
+  code.architecture    off  Architecture-level analysis: layers, patterns, ...
 
 Collection: testing
-  testing/basic        on   Ensures minimal high-value regression tests
-  testing/full         off  Comprehensive test suite analysis
+  testing.basic        on   Ensures minimal high-value regression tests
+  testing.full         off  Comprehensive test suite analysis
 
 Standalone:
   security             on   Security vulnerability analysis
 ```
+
+Implementation: split role ID on first `.` to determine collection. Roles without `.` are standalone.
 
 **5. Prompt frontmatter** — add optional `collection:` field:
 
@@ -118,7 +90,7 @@ collection: code
 ---
 ```
 
-Informational for display/sorting, not for discovery. Discovery uses the filesystem path.
+Informational for display/sorting, not for discovery. The collection is derived from the role name prefix (before first `.`).
 
 ### Proposed collection mapping
 
@@ -138,7 +110,7 @@ Exact mapping TBD — the structure supports adding/renaming later.
 ### Migration
 
 - Old flat names (`refactor_small`) continue to work via a compatibility map
-- New names (`code/small`) are the canonical form
+- New names (`code.small`) are the canonical form
 - `ateam update` rewrites config.toml to new names
 - Both old and new names resolve to the same prompt file during transition
 - After one release cycle, remove the compat map
@@ -147,12 +119,13 @@ Exact mapping TBD — the structure supports adding/renaming later.
 
 | File | Change |
 |------|--------|
-| `internal/prompts/embed.go` | Two-level discovery, glob expansion |
-| `defaults/roles/` | Reorganize into collections |
+| `defaults/roles/` | Rename directories: `refactor_small/` → `code.small/`, etc. (flat, not nested) |
 | `defaults/config.toml` | Use new names with quoted keys |
-| `cmd/roles.go` | Group display by collection |
-| `internal/config/config.go` | No change (map[string]string handles `/` keys) |
-| `internal/root/resolve.go` | No change (filepath.Join handles nested) |
+| `cmd/roles.go` | Group display by collection (split on first `.`) |
+| `internal/prompts/embed.go` | Only if glob (`code.*`) is implemented: prefix matching in `ResolveRoleList` |
+| `internal/config/config.go` | No change (map[string]string handles `.` keys) |
+| `internal/root/resolve.go` | No change (filepath.Join handles dots in names) |
+| `internal/prompts/embed.go` | No change to discovery (`discoverRoleIDs`, `scanRolesDir`) |
 
 ---
 
@@ -237,11 +210,11 @@ ateam eval --role security --prompt @candidate.md \
   --workspace ~/projects/api-service
 
 # Compare different role names (migration, consolidation)
-ateam eval --base-role security --candidate-role security_web --prompt @security_web.md
+ateam eval --base-role security --candidate-role security.web --prompt @security.web.md
 
 # Compare N roles vs 1 consolidated role
-ateam eval --base-roles code/small,code/module,code/architecture \
-  --candidate-role code/all --prompt @consolidated.md
+ateam eval --base-roles code.small,code.module,code.architecture \
+  --candidate-role code.all --prompt @consolidated.md
 
 # At a specific commit
 ateam eval --role security --prompt @candidate.md --commit abc1234
@@ -262,18 +235,18 @@ ateam eval judge --last
 
 The core case is "same role, two prompts." But several other comparison modes are useful:
 
-**Mode 1: Different role names, same intent** — Compare `refactor_small` (old) vs `code/small` (new) during migration. Or compare a generic `security` role against a specialized `security_web` variant.
+**Mode 1: Different role names, same intent** — Compare `refactor_small` (old) vs `code.small` (new) during migration. Or compare a generic `security` role against a specialized `security.web` variant.
 
 ```bash
-ateam eval --base-role security --candidate-role security_web --prompt @security_web_prompt.md
+ateam eval --base-role security --candidate-role security.web --prompt @security.web_prompt.md
 ```
 
 Implementation: `--base-role` and `--candidate-role` replace the single `--role`. When only `--role` is given, both sides use the same role name (current behavior). When they differ, the base worktree runs `--base-role` with its on-disk prompt, the candidate worktree runs `--candidate-role` with `--prompt`.
 
-**Mode 2: N roles vs 1 role** — Test whether a single consolidated role (e.g., `code/all`) produces the same findings as running `code/small` + `code/module` + `code/architecture` separately.
+**Mode 2: N roles vs 1 role** — Test whether a single consolidated role (e.g., `code.all`) produces the same findings as running `code.small` + `code.module` + `code.architecture` separately.
 
 ```bash
-ateam eval --base-roles code/small,code/module,code/architecture --candidate-role code/all --prompt @consolidated_prompt.md
+ateam eval --base-roles code.small,code.module,code.architecture --candidate-role code.all --prompt @consolidated_prompt.md
 ```
 
 The base side runs 3 roles (their reports are concatenated for comparison). The candidate side runs 1 role. Comparison: did the single role cover the same findings? At what cost delta?
@@ -517,7 +490,7 @@ ateam eval --role security --prompt @candidate_security.md \
 ateam eval judge --last
 
 # 6. Deploy
-cp candidate_security.md defaults/roles/security/report_prompt.md
+cp candidate_security.md defaults/roles/security/report_prompt.md  # standalone role, no dot prefix
 ```
 
 ### Implementation
@@ -552,10 +525,10 @@ cp candidate_security.md defaults/roles/security/report_prompt.md
 
 **Collections:**
 - `ateam roles` shows grouped output
-- `ateam report --roles code/*` runs all code collection roles
-- `ateam report --roles code/small` runs a specific role
+- `ateam report --roles code.*` runs all code collection roles
+- `ateam report --roles code.small` runs a specific role
 - `ateam report --roles security` still works (no collection)
-- Old names (`refactor_small`) resolve to new names (`code/small`) during migration
+- Old names (`refactor_small`) resolve to new names (`code.small`) during migration
 - `go test ./...` passes
 
 **Eval:**
