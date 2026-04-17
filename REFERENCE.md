@@ -497,6 +497,40 @@ List roles configured for the current project.
 
 List all projects discovered under the current organization.
 
+### `ateam project-rename`
+
+Re-register a project with its org after a directory move, or rename its state directory.
+
+```bash
+ateam project-rename                                    # re-register current project
+ateam project-rename --old services/api --new backends/api  # rename after move
+```
+
+Without flags, re-registers the current project at its current location and cleans up stale registrations. With `--old` and `--new`, renames the legacy state directory under `.ateamorg/projects/`.
+
+| Flag | Description |
+|------|-------------|
+| `--old PATH` | Old project path (relative to org root) |
+| `--new PATH` | New project path (relative to org root) |
+| `--dry-run` | Show what would be done without executing |
+
+### `ateam export`
+
+Export project reports as a self-contained HTML file with three tabs (Overview, Review, Code) and anchor-based navigation.
+
+```bash
+ateam export                              # writes to .ateam/ateam.html
+ateam export --output report.html         # custom output path
+ateam export --project "My Project"       # override display name
+ateam export --ateam-project /path/to/.ateam  # export a specific project
+```
+
+| Flag | Description |
+|------|-------------|
+| `--output PATH` | Output file path (default: `.ateam/ateam.html`) |
+| `--project NAME` | Display name override (instead of config.toml name) |
+| `--ateam-project PATH` | Path to a `.ateam/` directory to export |
+
 ### `ateam update`
 
 Update on-disk default prompts and runtime config to match the current binary.
