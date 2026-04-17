@@ -243,7 +243,6 @@ func MaskValue(val string) string {
 	return val[:4] + "..." + val[len(val)-4:]
 }
 
-
 // CollectRequiredEnvNames returns all unique env var names from required_env
 // across all agents in the config. Useful for listing all known secrets.
 func CollectRequiredEnvNames(cfg *runtime.Config) []string {
