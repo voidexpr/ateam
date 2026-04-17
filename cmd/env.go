@@ -172,6 +172,9 @@ func printAuthLines(env *root.ResolvedEnv, rtCfg *runtime.Config) {
 			switch {
 			case name == activeKey && i == 0:
 				annotation = " ✓ active"
+				if defaultAgent != "" {
+					annotation += fmt.Sprintf(" — used by default agent %q", defaultAgent)
+				}
 			case name == activeKey:
 				// Lower-priority source for the same active key.
 				annotation = " ✗ ignored (shadowed by " + all[0].Source + "-scope " + name + ")"
@@ -185,10 +188,6 @@ func printAuthLines(env *root.ResolvedEnv, rtCfg *runtime.Config) {
 
 	if !any {
 		fmt.Println("  Auth: (none) — run 'ateam secret ANTHROPIC_API_KEY' to configure")
-		return
-	}
-	if activeKey != "" && defaultAgent != "" {
-		fmt.Printf("        → used by default agent %q\n", defaultAgent)
 	}
 }
 
