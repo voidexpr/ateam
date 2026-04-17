@@ -87,6 +87,7 @@ func TestScanStreamFileForResultFound(t *testing.T) {
 	res := scanStreamFileForResult("testdata/sample_stream.jsonl")
 	if res == nil {
 		t.Fatal("expected non-nil result event")
+		return
 	}
 	if res.Cost != 0.0150 {
 		t.Errorf("expected CostUSD 0.0150, got %f", res.Cost)
@@ -140,6 +141,7 @@ func TestScanStreamFileForResultLastWins(t *testing.T) {
 	res := scanStreamFileForResult(path)
 	if res == nil {
 		t.Fatal("expected non-nil result event")
+		return
 	}
 	if res.Cost != 0.05 {
 		t.Errorf("expected last result CostUSD 0.05, got %f", res.Cost)
@@ -157,6 +159,7 @@ func TestScanStreamFileForResultCacheWriteTokens(t *testing.T) {
 	res := scanStreamFileForResult(path)
 	if res == nil {
 		t.Fatal("expected non-nil result event")
+		return
 	}
 	if res.CacheWriteTokens != 20 {
 		t.Errorf("expected CacheWriteTokens 20, got %d", res.CacheWriteTokens)

@@ -195,6 +195,7 @@ func TestResultLineShouldHaveCacheWriteTokens(t *testing.T) {
 	res := scanStreamFileForResult(path)
 	if res == nil {
 		t.Fatal("expected non-nil result")
+		return
 	}
 
 	// The ResultLine struct has CacheReadTokens but no CacheWriteTokens.

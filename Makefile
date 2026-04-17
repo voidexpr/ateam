@@ -78,11 +78,11 @@ test-docker-live: build-binary
 		ateam-test-dind
 
 vuln:
-	@which govulncheck > /dev/null 2>&1 || go install golang.org/x/vuln/cmd/govulncheck@latest
+	go install golang.org/x/vuln/cmd/govulncheck@latest
 	$$(go env GOPATH)/bin/govulncheck ./...
 
 lint:
-	@which golangci-lint > /dev/null 2>&1 || go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 	$$(go env GOPATH)/bin/golangci-lint run ./...
 
 fmt:
