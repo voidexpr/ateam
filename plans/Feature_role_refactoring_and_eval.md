@@ -31,9 +31,9 @@ defaults/roles/
 └── security/report_prompt.md          ← standalone role, no collection prefix
 ```
 
-Role IDs become: `code.small`, `code.architecture`, `testing.basic`, `docs.external`, `security`. Standalone roles (no collection prefix) still work unchanged.
+Role IDs become: `code.small`, `code.architecture`, `testing.basic`, `docs.external`, `security`. Roles without a dot (e.g. `security`, `dependencies`) are valid and have an empty collection (`""`). Both dotted and dotless roles coexist — existing roles stay as-is.
 
-Because the layout is flat, **existing role discovery code needs no changes** — `fs.ReadDir("roles")` and `os.ReadDir(rolesDir)` read dot-named directories as single entries. Role names are treated as opaque strings throughout the codebase (no splitting, no special-character validation).
+Because the layout is flat, **existing role discovery code needs no changes** — `fs.ReadDir("roles")` and `os.ReadDir(rolesDir)` read dot-named directories as single entries. Role names are treated as opaque strings throughout the codebase (no splitting, no special-character validation). The collection is only derived when needed for display or glob matching.
 
 ### Changes needed
 
@@ -46,8 +46,11 @@ Because the layout is flat, **existing role discovery code needs no changes** �
 Add collection glob expansion:
 - `code.*` → all enabled roles starting with `code.`
 - `testing.*` → all enabled roles starting with `testing.`
-- `all` → unchanged (all enabled)
+- `all` → unchanged (all enabled, including dotless roles)
 - `code.small` → exact match (unchanged)
+- `security` → exact match (dotless role, unchanged)
+
+Dotless roles are not matched by any `prefix.*` pattern — they have no collection. They are only selected by exact name or `all`.
 
 Implementation: in `ResolveRoleList`, if a role contains `*`, treat as prefix match against all known roles. This is the only code change to discovery/resolution and is optional.
 
@@ -66,20 +69,22 @@ No code change needed — BurntSushi/toml handles quoted dotted keys as literal 
 **4. `ateam roles` display** — group by collection:
 
 ```
-Collection: code
+code
   code.small           on   Concrete code improvements: naming, duplication, ...
   code.module          off  Module-level refactoring: interfaces, coupling, ...
   code.architecture    off  Architecture-level analysis: layers, patterns, ...
 
-Collection: testing
+testing
   testing.basic        on   Ensures minimal high-value regression tests
   testing.full         off  Comprehensive test suite analysis
 
-Standalone:
+(no collection)
   security             on   Security vulnerability analysis
+  dependencies         on   Dependency health assessment
+  refactor_small       on   Concrete code improvements (legacy)
 ```
 
-Implementation: split role ID on first `.` to determine collection. Roles without `.` are standalone.
+Implementation: `strings.SplitN(roleID, ".", 2)` — if no dot, collection is `""`. Roles with the same collection are grouped together. Roles with empty collection are shown last under a `(no collection)` header or simply ungrouped.
 
 **5. Prompt frontmatter** —
 
