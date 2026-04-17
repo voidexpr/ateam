@@ -81,12 +81,13 @@ Standalone:
 
 Implementation: split role ID on first `.` to determine collection. Roles without `.` are standalone.
 
-**5. Prompt frontmatter** — add optional `collection:` field:
+**5. Prompt frontmatter** —
+
+no optional `collection:` field, only the first part before the first . is considered 'collection'
 
 ```yaml
 ---
 description: Concrete code improvements
-collection: code
 ---
 ```
 
@@ -94,32 +95,39 @@ Informational for display/sorting, not for discovery. The collection is derived 
 
 ### Proposed collection mapping
 
+Collection name is completely optional.
+
+
 | Collection | Roles | Description |
 |------------|-------|-------------|
+| 'quality' | code, testing, docs, foundation | Default roles covering most basis |
 | `code` | small, module, architecture | Code review at increasing abstraction levels |
 | `testing` | basic, full, flaky, ci | Test coverage, quality, CI health |
-| `docs` | external, internal | Documentation quality |
-| `security` | (standalone) | Security vulnerabilities |
+| `docs` | external, internal, first_time, upgrade | Documentation quality |
+| `security` | code_audit, system_audit | Security vulnerabilities |
 | `dependencies` | (standalone) | Dependency health |
 | `automation` | (standalone) | CI/CD, scripts, tooling |
 | `feedback` | engineering, project, shortcuts | Critical reviews, run less often |
 | `infra` | database_schema, database_config, production_ready | Infrastructure concerns |
 
+TODO: feedback/critic, db/audit-only vs. migration allowed, etc ...
+
 Exact mapping TBD — the structure supports adding/renaming later.
 
 ### Migration
 
-- Old flat names (`refactor_small`) continue to work via a compatibility map
+No migration needed, old names keep working.
+
+- Old flat names (`refactor_small`) continue to work, they just don't belong to any collection
 - New names (`code.small`) are the canonical form
-- `ateam update` rewrites config.toml to new names
-- Both old and new names resolve to the same prompt file during transition
-- After one release cycle, remove the compat map
+
+Once evaluation of the new roles is done, old roles will be removed. Migration will be to save them in ateamorg so they have frozen defaults for these installs alone.
 
 ### Files to modify
 
 | File | Change |
 |------|--------|
-| `defaults/roles/` | Rename directories: `refactor_small/` → `code.small/`, etc. (flat, not nested) |
+| `defaults/roles/` | Keep old directories: `refactor_small/` |
 | `defaults/config.toml` | Use new names with quoted keys |
 | `cmd/roles.go` | Group display by collection (split on first `.`) |
 | `internal/prompts/embed.go` | Only if glob (`code.*`) is implemented: prefix matching in `ResolveRoleList` |
