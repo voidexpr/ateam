@@ -2,9 +2,26 @@
 
 ATeam is designed for developers who want to focus on feature work and key architectural design aspects, while delegating more of the engineering to agents. The goal is to produce a healthy codebase with minimal human effort.
 
-ATeam is a CLI that points a crew of role-specific coding agents at your codebase. Each agent audits code across selected dimensions like code refactoring, testing, security, dependencies, documentation, etc. Then a supervisor prioritizes the findings and runs coding agents to implement fixes. It works unattended, out of the box, for any tech stack. It is solely focused on project quality and doesn't make any feature change.
+ATeam is a CLI that runs role-specific coding agents against your codebase. Each agent audits code across selected dimensions like code refactoring, testing, security, dependencies, documentation, etc. Then a supervisor prioritizes the findings and runs coding agents to implement fixes. It works unattended, out of the box, for any tech stack. It is solely focused on project quality and doesn't make any feature change.
 
 Think of it as a team of expert colleagues for software quality: they audit while you sleep, commit small focused fixes, and the next run builds on the last.
+
+If you want to work on complex tasks then keep using interactive agents, if you want to run pre-built prompts to perform a task then `ateam` helps manage them.
+
+At its core ateam is a CLI to run one-shot unattended agents with saved prompts. It layers a small workflow of parallel reports, supervisor review and supervised coding of selected tasks. But can also be used in shell commands for sequences of steps (single agent or parallel agents). The focus is on software engineering quality improvement tasks and not feature development. Feature development (or also some software engineering quality tasks) benefit from interactive agents. Ateam solves the problem of having background agent improve the code base quality behind the scene to reduce the need to explicitly do it.
+
+## Features
+
+* **use existing coding agents like claude code or codex**: leverages subscriptions instead of much more expensive APis, benefit from the expertise of llm providers. Ateam focuses on automating them
+* **flexible workflow**: you get to decide if ateam works on worktree, separate workspace, separate server or with containers (docker, devcontainer, ...)
+* **flexible isolation**: out of the box ateam uses your coding agents as-is for ease of configuration. But it also supports the following workflows:
+    * run in a sandbox on your base host: protects your files
+    * use a separate config for your coding agent (`CLAUDE_CONFIG_DIR`)
+    * run inside docker (built-in secret management for oauth or just use an already authenticated agent in the container)
+    * run outside of docker but docker exec only the agents in docker
+* **just a CLI**: can run the workflows built-in ateam (report, review, code) or ad-hoc unattended tasks (`run` for single task, `parallel` for multiple simultaneous agents)
+* **convenient tooling**: `ps` to see current/past agent runs, `inspect` for troubleshooting
+* **cost transaprency**: all agent execution track token usage and estimated cost (less relevant for subscription). Tokens are the new software engineering currency and help gauge if an error is worthwhile
 
 ## Why ATeam
 
@@ -13,14 +30,15 @@ Coding agents prioritize feature completion over software quality which is a goo
 ATeam addresses this by running quality-focused agents unattended, no interactive prompting needed, no functional changes. Just steady, incremental quality improvement that looks like the code was engineered well in the first place.
 
 Core principles:
-- **No feature work**: focus on quality, don't change behavior
-- **Unattended**: your own coding agent works without approval or interaction
-- **Safe**: sandboxing and container isolation
-- **Pragmatic**: ateam agents are prompted to adapt to the project size and maturity, audits try to automate tools (linter, test automation, security vulnerability tools, ...) rather than constantly relying on agents
-- **Simple**: reuses existing coding agents, minimal orchestration
-- **Auditable**: every artifact is a readable markdown file
-- **Stateful**: old reports or reviews are read before generating a new one so no context is lost, only one file per role so there is no bloat over time
-- **Get out of your way**: ATeam is not a generic workflow system, it is a focused report + review + code automation layer designed to preserve your attention for high-value work
+
+* **No feature work**: focus on quality, don't change behavior
+* **Unattended**: your own coding agent works without approval or interaction
+* **Safe**: sandboxing and container isolation
+* **Pragmatic**: ateam agents are prompted to adapt to the project size and maturity, audits try to automate tools (linter, test automation, security vulnerability tools, ...) rather than constantly relying on agents
+* **Simple**: reuses existing coding agents, minimal orchestration
+* **Auditable**: every artifact is a readable markdown file
+* **Stateful**: old reports or reviews are read before generating a new one so no context is lost, only one file per role so there is no bloat over time
+* **Get out of your way**: ATeam is not a generic workflow system, it is a focused report + review + code automation layer designed to preserve your attention for high-value work
 
 ## Quick Start
 
@@ -286,11 +304,31 @@ unsandboxed_commands = ["playwright"]    # commands that can't run inside a sand
 - Sandboxes can't be nested (e.g., Playwright CLI inside a sandbox)
 - All files are readable by default; sensitive paths must be explicitly excluded
 
-### Docker
+### Separate configuration for coding agents
 
-Use `--profile docker` for one-shot container isolation, or run ateam inside your own Docker setup. Agents auto-detect containers and skip sandbox/permissions — no profile switching needed.
+By default ateam uses your local agent configuration (for example `~/.claude` for Claude) that may include some settings that could be helpful (skills, plugins, mcp servers) or not helpful (custom logging of tools, custom notifications). Eventually it is recommended to use a different configuration directory (for example `~/.ateamorg/claude`) and change `runtime.hcl` to use it by default.
+
+### Docker
+#### One-shot (docker run)
+
+Use `--profile docker` for one-shot container isolation, or run ateam inside your own Docker setup. Agents auto-detect containers and skip sandbox/permissions — no profile switching needed. A default Dockerfile is used so agent is available inside of the container.
 
 See [CONTAINER.md](CONTAINER.md) for the full guide: container modes, secrets, precheck scripts, interactive Claude sessions, and agent auto-adaptation.
+
+#### docker exec
+
+Use `--profile docker-exec` to run agents within existing docker containers. Ateam makes sure that agents skip sandbox/permissions — no profile switching needed.
+
+A coding agent has be available within the container, by default an oauth token is passed so no need to authenticate inside the container. No need to install ateam itself unless you run the supervisor for coding this way. This mode is best used for code agent runs so they have access to a proper test environment.
+
+See [CONTAINER.md](CONTAINER.md) for the full guide: container modes, secrets, precheck scripts, interactive Claude sessions, and agent auto-adaptation.
+
+#### Run ateam inside a container
+
+No custom profile needed, ateam detects it runs within a container and runs agents without sandbox or permission approval. But this does require to install team inside the container and (optionally) mount the ateamorg directory to have access to defaults. Also the coding agent inside the container should be fully authenticated and optionally have an oauth token.
+
+See [CONTAINER.md](CONTAINER.md) for the full guide: container modes, secrets, precheck scripts, interactive Claude sessions, and agent auto-adaptation.
+
 
 ### Customizing Runtime
 
@@ -301,6 +339,27 @@ See [REFERENCE.md](REFERENCE.md) for complete configuration documentation.
 
 
 ## FAQ
+
+### What is ateam good for really ?
+
+* Tired of repeating the same generic instructions ?
+    * review code for logical issues and structure issues
+    * update docs
+    * write tests
+    * make sure there are no security vulnerability
+    * manage potentially deprecated dependencies
+
+You can create skills for some of these but in reality you want to run all of them and prioritize them to regularly and consistently improve the project. This is where ateam comes in.
+
+Another clear scenario to use ateam is as more code is written by agents and only modified by agents there aren't many reasons for humans to review this code or care about the project artifacts. Instead it's best to have dedicated agents constantly improve the project following known good practices. This can be prompted once and automated. This is what ateam is.
+
+Lastly you can use `ateam run` and `ateam parallel` to create your own mini agent workflow through simple bash script chaining without having to deal with complex frameworks. For example:
+
+```bash
+ateam run @./my_saved_prompt_to_decide_what_todo.md && ateam parallel --prompt "take care of problem 1" --prompt "take care of problem 2" --prompt "take care of problem 3" && ateam run "verify what the documents produced by the previous step describe and take further action"
+```
+
+You can easily swap claude/codex
 
 ### How to troubleshoot?
 
@@ -356,15 +415,19 @@ ATeam should be adaptable for projects of many size by running on the entire rep
 
 ## Future
 
+- 0.8.0 Focus has been on docker and isolated agent configuration
+- 0.9.0 Refactor roles and do some eval to use less tokens and improve accuracy
+- 1.0.0 Small improvements over what is already there
+- 2.0.0 Add an internal task system and move coding to algorithmic instead of relying on on agent prompt to consume less tokens and make the system more deterministic
+
+In General other areas of interest:
 - Reduce input token usage
-- Improve default role prompts for accuracy and token usage
-- Move more orchestration away from prompts into ateam itself
-- More agent types (gemini, cursor, ...) and containers (MacOS native container), improve sandbox configuration
+    - Adaptive report commissioning based on recent code changes (can reduce token usage)
+- Collection of roles for various phases of project life cycle: feedback on design, analyze for production (observability, etc ...), stack specific prompts, etc ...
 - Stricter testing policy and automation (opt-in)
+- More agent types (gemini, cursor, ...) and containers (MacOS native container, alternative sandboxes)
 - Built-in scheduling
-- Adaptive report commissioning based on recent code changes (can reduce token usage)
-- look at adding an evaluation cycle (after report/review and code) to potentially reject some code changes
-- maybe: explicit task system instead of relying on supervisor to orchestrate coding sessions (could save a lot of tokens but coding agents already know how to manage multiple tasks)
+- Improve reporting and better integrate ateam into various project workflow: teams where humans don't code, where they don't, solo project vs. much bigger teams, ...
 
 ## Development
 
