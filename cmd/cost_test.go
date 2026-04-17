@@ -15,7 +15,7 @@ import (
 //
 //   - report task group: two "report" runs (testing_basic + security), each 1000 input + 500 output tokens
 //   - code task group:   one "code" run (testing_basic) with 2000 input + 800 output tokens,
-//                        one "run" run (testing_basic) with 300 input + 100 output tokens
+//     one "run" run (testing_basic) with 300 input + 100 output tokens
 //   - standalone run:    one "review" run (supervisor) with no task group, 600 input + 200 output tokens
 func seedCostDB(t *testing.T, db *calldb.CallDB, projectID string) {
 	t.Helper()

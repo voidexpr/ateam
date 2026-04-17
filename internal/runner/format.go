@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"os"
 	"strings"
-	"time"
 )
 
 // knownErrors maps substrings in the last assistant message to short error descriptions.
@@ -80,8 +79,4 @@ func streamTailMessages(path string, n int) []string {
 		}
 	}
 	return messages
-}
-
-func msToDuration(ms int64) time.Duration {
-	return time.Duration(ms) * time.Millisecond
 }
