@@ -278,10 +278,11 @@ When `--repeat N` is used, scores are averaged across runs and standard deviatio
 |------|--------|
 | `cmd/eval.go` | New: `ateam eval` command — flag parsing, mode selection, orchestration |
 | `internal/eval/run.go` | New: sequential and parallel run logic, prompt swap/restore |
-| `internal/eval/metrics.go` | New: extract cost/tokens/duration from `state.sqlite` for a run |
 | `internal/eval/judge.go` | New: judge prompt assembly, LLM call, score parsing |
 | `internal/eval/compare.go` | New: side-by-side display formatting |
-| `internal/prompts/embed.go` | Add `--ignore-previous-report` support to prompt assembly |
+| `internal/prompts/` | No change — `AssembleRolePrompt` already supports `skipPreviousReport` |
+
+Cost/tokens/duration come directly from `runner.RunSummary` (returned by `Runner.Run`), so no separate metrics extraction from `state.sqlite` is needed for phase 1.
 
 ### Future extensions (not phase 1)
 
@@ -290,24 +291,48 @@ When `--repeat N` is used, scores are averaged across runs and standard deviatio
 - Persistent eval history — store results for trend tracking
 - Multi-project aggregation — run eval across N codebases, aggregate scores
 - Finding overlap analysis — automated file-location matching without LLM
+- `--repeat N` for variance across multiple runs
 
 ---
 
 ## Verification
 
 **Dot-namespaced roles:**
-- `ateam roles` lists all roles sorted alphabetically (dot-prefixed roles group naturally)
-- `ateam report --roles code` expands to all `code.*` roles via prefix expansion
-- `ateam report --roles code.*` same via explicit glob
-- `ateam report --roles code.small` runs a specific role (exact match)
+- `ateam report --roles code.small,security` accepts both dotted and dotless roles
 - `ateam report --roles security` still works (exact match, dotless role)
 - Old names (`refactor_small`) continue to work as-is
-- `go test ./...` passes
+- Config `.ateam/config.toml` with `"code.small" = "on"` (quoted key) loads correctly
+- `go test ./...` passes (incl. `TestDotNamespacedRole`)
 
 **Eval:**
 - `ateam eval --role security --prompt @candidate.md` runs sequentially, prints cost + judge scores
 - `ateam eval --role security --prompt @candidate.md --dirs . ../worktree` runs in parallel
 - `ateam eval --role security --prompt @candidate.md --model haiku` uses cheaper model
-- Judge output includes 0.0–1.0 scores per dimension and overall
-- `--ignore-previous-report` works standalone outside of eval
-- `go test ./...` passes
+- Judge output includes 0.00–1.00 scores per dimension and overall
+- `go test ./...` passes (incl. `TestParseJudgeOutput`)
+
+---
+
+## Implementation Status
+
+**Implemented (2026-04-17):**
+
+Part 1 — Dot-namespaced roles:
+- Verified end-to-end: discovery, config, validation, prompt assembly, flag parsing all handle dots transparently (no code changes required).
+- Added `TestDotNamespacedRole` in `internal/prompts/prompts_test.go` exercising a `code.small` role.
+
+Part 2 — Eval framework:
+- `cmd/eval.go` with full flag layout: `--role`, `--prompt`, `--base`, `--dirs`, `--timeout`, `--verbose`, `--no-judge`, `--judge-timeout`.
+- Shared agent flags: `--profile`, `--agent`, `--model` (apply to both sides by default).
+- Per-side overrides: `--base-profile/--base-agent/--base-model`, `--candidate-profile/--candidate-agent/--candidate-model`.
+- Judge agent: `--judge-profile/--judge-agent/--judge-model` (fall back to shared, then config).
+- Mutual exclusion between profile/agent within each scope (same pattern as `ateam report`).
+- `internal/eval/run.go`: sequential + parallel orchestration, prompt swap/restore with original backup.
+- `internal/eval/judge.go`: structured judge prompt, regex score parser, handles missing scores gracefully.
+- `internal/eval/compare.go`: side-by-side metrics table with percentage deltas.
+- Previous-report context is always skipped for eval runs (via the existing `skipPreviousReport` argument to `AssembleRolePrompt` — no new flag needed).
+
+**Deferred:**
+- Glob expansion for `--roles` (e.g. `testing`, `testing.*` → all `testing.*` roles) — simple to add later via prefix match in `ResolveRoleList`.
+- Persistent eval storage (`.ateam/eval/`).
+- Multi-workspace aggregation, `--repeat N`, N-vs-1 role comparison, full pipeline eval.
