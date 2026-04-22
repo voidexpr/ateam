@@ -160,7 +160,11 @@ func runReview(opts ReviewOptions) error {
 	cr.CallDB = db
 
 	if !opts.Force {
-		if err := checkConcurrentRuns(db, "", runner.ActionReview, nil); err != nil {
+		projectID := env.ProjectID()
+		if projectID == "" && env.OrgDir != "" {
+			return fmt.Errorf("cannot determine project ID for concurrency guard")
+		}
+		if err := checkConcurrentRuns(db, projectID, runner.ActionReview, nil); err != nil {
 			return err
 		}
 	}
