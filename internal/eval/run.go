@@ -161,9 +161,13 @@ func installPrompt(projectDir, roleID, promptText string) (func(), error) {
 
 	return func() {
 		if hadOriginal {
-			_ = os.WriteFile(path, original, 0644)
+			if err := os.WriteFile(path, original, 0644); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to restore prompt %s: %v\n", path, err)
+			}
 		} else {
-			_ = os.Remove(path)
+			if err := os.Remove(path); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to remove temp prompt %s: %v\n", path, err)
+			}
 		}
 	}, nil
 }
