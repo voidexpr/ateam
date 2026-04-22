@@ -4,33 +4,24 @@
   <h1>{{.ProjectName}}</h1>
 </div>
 
-<div class="stats-row">
+<div class="primary-actions">
+  <a href="{{if $d.HasCodeOutput}}/p/{{$.ProjectSlug}}/code/{{$d.LatestCodeSession}}/execution_report.md{{else}}/p/{{$.ProjectSlug}}/code{{end}}" class="action-card{{if not $d.HasCodeOutput}} action-empty{{end}}">
+    {{if and $d.HasCodeOutput ($d.CodeModTime.After $d.ReviewModTime)}}<span class="badge-new">New</span>{{end}}
+    <div class="action-title">Code <span class="action-arrow">&rarr;</span></div>
+    <div class="action-sub">{{if $d.HasCodeOutput}}Open latest session &middot; {{fmtDateAge $d.CodeModTime}}{{else}}No code sessions yet{{end}}</div>
+  </a>
+  <a href="/p/{{$.ProjectSlug}}/review" class="action-card{{if not $d.HasReview}} action-empty{{end}}">
+    {{if and $d.HasReview ($d.ReviewModTime.After $d.CodeModTime)}}<span class="badge-new">New</span>{{end}}
+    <div class="action-title">Review <span class="action-arrow">&rarr;</span></div>
+    <div class="action-sub">{{if $d.HasReview}}Open latest review &middot; {{fmtDateAge $d.ReviewModTime}}{{else}}No review yet{{end}}</div>
+  </a>
+</div>
+
+<div class="stats-row stats-row-secondary">
   <div class="stat-card">
     <div class="stat-label">Reports</div>
     <div class="stat-value">{{len $d.Reports}}</div>
   </div>
-  {{if $d.HasReview}}
-  <a href="/p/{{$.ProjectSlug}}/review" class="stat-card stat-card-link">
-    <div class="stat-label">Review</div>
-    <div class="stat-value">{{fmtDateAge $d.ReviewModTime}}</div>
-  </a>
-  {{else}}
-  <div class="stat-card">
-    <div class="stat-label">Review</div>
-    <div class="stat-value">&mdash;</div>
-  </div>
-  {{end}}
-  {{if $d.HasCodeOutput}}
-  <a href="/p/{{$.ProjectSlug}}/code/{{$d.LatestCodeSession}}/execution_report.md" class="stat-card stat-card-link">
-    <div class="stat-label">Last Code</div>
-    <div class="stat-value">{{fmtDateAge $d.CodeModTime}}</div>
-  </a>
-  {{else}}
-  <div class="stat-card">
-    <div class="stat-label">Last Code</div>
-    <div class="stat-value">&mdash;</div>
-  </div>
-  {{end}}
   <div class="stat-card">
     <div class="stat-label">Total Cost</div>
     <div class="stat-value">{{if gt $d.CostTotal 0.0}}{{fmtCost $d.CostTotal}}{{else}}&mdash;{{end}}</div>
