@@ -48,6 +48,11 @@ type DockerContainer struct {
 	// Env holds explicit environment variables (KEY=VALUE) to set inside the container.
 	// Unlike ForwardEnv (which forwards host values), these are literal values.
 	Env map[string]string
+
+	// prepareGuard dedupes Prepare() across clones. The container factory
+	// (cmd.buildContainer) attaches the guard; Clone() copies the pointer so
+	// all pool workers share one sync.Once.
+	prepareGuard *PrepareGuard
 }
 
 const (
@@ -59,7 +64,8 @@ func (d *DockerContainer) Type() string { return "docker" }
 
 // Clone returns a deep copy with independent slice and map backing memory
 // so per-run mutation (template resolution, env merges) does not race across
-// parallel pool workers sharing the original.
+// parallel pool workers sharing the original. The prepareGuard pointer is
+// shared on purpose — Prepare() must still fire at most once across clones.
 func (d *DockerContainer) Clone() Container {
 	cp := *d
 	cp.ForwardEnv = append([]string(nil), d.ForwardEnv...)
@@ -72,6 +78,14 @@ func (d *DockerContainer) Clone() Container {
 		}
 	}
 	return &cp
+}
+
+// UseSharedPrepareGuard attaches a shared prepare guard; subsequent Clone()s
+// propagate it so Prepare() runs exactly once across all clones. Callers that
+// construct a container via struct literal should invoke this before handing
+// the container off to a pool.
+func (d *DockerContainer) UseSharedPrepareGuard() {
+	d.prepareGuard = &PrepareGuard{}
 }
 
 // ResolveTemplates resolves {{VAR}} placeholders in ExtraArgs, ExtraVolumes, and Env.
@@ -92,8 +106,14 @@ func (d *DockerContainer) ResolveTemplates(r *strings.Replacer) {
 }
 
 // Prepare builds the docker image. Implements the Container interface.
+// When a shared PrepareGuard is attached (see UseSharedPrepareGuard), the
+// image build runs at most once per pool — subsequent clones see the
+// cached result.
 func (d *DockerContainer) Prepare(ctx context.Context) error {
-	return d.EnsureImage(ctx)
+	if d.prepareGuard == nil {
+		return d.EnsureImage(ctx)
+	}
+	return d.prepareGuard.Do(func() error { return d.EnsureImage(ctx) })
 }
 
 // GetContainerName returns "" — oneshot containers have no persistent name.

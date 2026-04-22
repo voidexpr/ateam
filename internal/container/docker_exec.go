@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
-	"sync"
 )
 
 // DockerExecContainer executes commands inside a user-managed container.
@@ -30,15 +29,17 @@ type DockerExecContainer struct {
 	// Examples: ["sh", "precheck.sh", "{{CONTAINER_NAME}}"], ["make", "docker-restart"]
 	PrecheckCmd []string
 
-	prepareOnce sync.Once
-	prepareErr  error
+	// prepareGuard dedupes Prepare side effects (docker cp + precheck) across
+	// clones, keyed on the resolved ContainerName so templated names per role
+	// get independent prepare runs while static names share one run.
+	prepareGuard *KeyedPrepareGuard
 }
 
 func (d *DockerExecContainer) Type() string { return "docker-exec" }
 
 // Clone returns a deep copy with independent slice and map backing memory.
-// The clone carries a fresh prepareOnce, so Prepare runs once per clone
-// (idempotent: name resolution + binary copy).
+// The prepareGuard pointer is shared on purpose so docker cp + precheck fire
+// at most once per resolved ContainerName across all clones.
 func (d *DockerExecContainer) Clone() Container {
 	cp := DockerExecContainer{
 		ContainerName: d.ContainerName,
@@ -47,6 +48,7 @@ func (d *DockerExecContainer) Clone() Container {
 		HostCLIPath:   d.HostCLIPath,
 		ForwardEnv:    append([]string(nil), d.ForwardEnv...),
 		PrecheckCmd:   append([]string(nil), d.PrecheckCmd...),
+		prepareGuard:  d.prepareGuard,
 	}
 	if d.Env != nil {
 		cp.Env = make(map[string]string, len(d.Env))
@@ -55,6 +57,12 @@ func (d *DockerExecContainer) Clone() Container {
 		}
 	}
 	return &cp
+}
+
+// UseSharedPrepareGuard attaches a guard so Prepare side effects (docker cp,
+// precheck) dedupe across clones keyed on the resolved ContainerName.
+func (d *DockerExecContainer) UseSharedPrepareGuard() {
+	d.prepareGuard = &KeyedPrepareGuard{}
 }
 
 // ResolveTemplates resolves {{VAR}} placeholders in ContainerName and WorkDir.
@@ -240,25 +248,26 @@ func ResolveRunningContainerName(ctx context.Context, name string) (string, erro
 	}
 }
 
-// Prepare validates the container name, copies the ateam binary (if configured),
-// and runs the precheck command. Safe to call concurrently — runs only once.
+// Prepare resolves the container name (per clone — cheap `docker ps`), then
+// runs the side-effectful steps (binary copy + precheck) at most once per
+// resolved name when a shared PrepareGuard is attached. Without a guard,
+// every call runs all steps unguarded (test / direct-use path).
 func (d *DockerExecContainer) Prepare(ctx context.Context) error {
-	d.prepareOnce.Do(func() {
-		d.prepareErr = d.prepare(ctx)
-	})
-	return d.prepareErr
-}
-
-func (d *DockerExecContainer) prepare(ctx context.Context) error {
 	resolved, err := ResolveRunningContainerName(ctx, d.ContainerName)
 	if err != nil {
 		return err
 	}
 	d.ContainerName = resolved
-	if err := d.EnsureBinary(ctx); err != nil {
-		return fmt.Errorf("copy ateam binary failed: %w", err)
+	effects := func() error {
+		if err := d.EnsureBinary(ctx); err != nil {
+			return fmt.Errorf("copy ateam binary failed: %w", err)
+		}
+		return d.RunPrecheck(ctx)
 	}
-	return d.RunPrecheck(ctx)
+	if d.prepareGuard == nil {
+		return effects()
+	}
+	return d.prepareGuard.Do(resolved, effects)
 }
 
 // GetContainerName returns the name of the user-managed container.

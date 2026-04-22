@@ -465,7 +465,7 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 				}
 			}
 		}
-		return &container.DockerContainer{
+		dc := &container.DockerContainer{
 			Image:                 image,
 			Dockerfile:            dockerfile,
 			DockerfileTmpDir:      dockerfileTmpDir,
@@ -478,7 +478,9 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 			OrgDir:                orgDir,
 			HostCLIPath:           findLinuxBinary(orgDir),
 			ClaudeCredentialsFile: claudeCredentialsFile,
-		}, nil
+		}
+		dc.UseSharedPrepareGuard()
+		return dc, nil
 	case "docker-exec":
 		if cc.DockerContainer == "" {
 			cc.DockerContainer = "{{CONTAINER_NAME}}"
@@ -494,14 +496,16 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 		if cc.CopyAteam {
 			hostCLIPath = findLinuxBinary(orgDir)
 		}
-		return &container.DockerExecContainer{
+		de := &container.DockerExecContainer{
 			ContainerName: cc.DockerContainer,
 			ExecTemplate:  cc.ExecTemplate,
 			ForwardEnv:    cc.ForwardEnv,
 			WorkDir:       workDir,
 			HostCLIPath:   hostCLIPath,
 			PrecheckCmd:   precheckCmd,
-		}, nil
+		}
+		de.UseSharedPrepareGuard()
+		return de, nil
 	default:
 		return nil, nil
 	}

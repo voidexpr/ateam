@@ -3,7 +3,9 @@ package runner
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -187,5 +189,78 @@ func TestRunPoolSharedContainerDoesNotMutateTemplate(t *testing.T) {
 	}
 	if dc.Env["ROLE"] != "{{ROLE}}" {
 		t.Errorf("shared container Env[ROLE] mutated: got %q, want %q", dc.Env["ROLE"], "{{ROLE}}")
+	}
+}
+
+// =============================================================================
+// REGRESSION: Cloning the container gave each pool worker a fresh prepareOnce,
+// so docker-exec configs with copy_ateam = true or a container-restarting
+// precheck would fire their side effects N times per pool run instead of once.
+// The fix is a shared PrepareGuard the clones all point at — this test uses a
+// fake Container to verify the guard makes it through Clone().
+// =============================================================================
+
+type countingContainer struct {
+	prepareCalls *atomic.Int64
+	guard        *container.PrepareGuard
+}
+
+func (c *countingContainer) Type() string { return "docker" }
+func (c *countingContainer) Run(context.Context, container.RunOpts) error {
+	return nil
+}
+func (c *countingContainer) DebugCommand(container.RunOpts) string { return "" }
+func (c *countingContainer) Prepare(ctx context.Context) error {
+	return c.guard.Do(func() error {
+		c.prepareCalls.Add(1)
+		return nil
+	})
+}
+func (c *countingContainer) CmdFactory() container.CmdFactory   { return nil }
+func (c *countingContainer) GetContainerName() string           { return "" }
+func (c *countingContainer) TranslatePath(p string) string      { return p }
+func (c *countingContainer) ResolveTemplates(*strings.Replacer) {}
+func (c *countingContainer) SetSourceWritable(bool)             {}
+func (c *countingContainer) SetContainerName(string) bool       { return false }
+func (c *countingContainer) ApplyAgentEnv(map[string]string)    {}
+func (c *countingContainer) Clone() container.Container {
+	cp := *c // shares prepareCalls + guard pointers — exactly what the real containers do
+	return &cp
+}
+
+func TestRunPoolSharedPrepareGuardRunsOnce(t *testing.T) {
+	dir := t.TempDir()
+
+	var calls atomic.Int64
+	fake := &countingContainer{
+		prepareCalls: &calls,
+		guard:        &container.PrepareGuard{},
+	}
+
+	mock := &agent.MockAgent{Response: "ok", Delay: 5 * time.Millisecond}
+	r := &Runner{
+		Agent:         mock,
+		Container:     fake,
+		ContainerType: "docker",
+		ProjectName:   "test",
+		SourceDir:     dir,
+	}
+
+	const numTasks = 8
+	tasks := make([]PoolTask, numTasks)
+	for i := range tasks {
+		tasks[i] = PoolTask{
+			Prompt: "p",
+			RunOpts: RunOpts{
+				RoleID:  fmt.Sprintf("role-%d", i),
+				Action:  ActionRun,
+				LogsDir: makeTaskLogsDir(dir, i),
+			},
+		}
+	}
+	_ = RunPool(context.Background(), r, tasks, 3, nil, nil)
+
+	if got := calls.Load(); got != 1 {
+		t.Errorf("Prepare ran %d times across %d pool workers, want 1 — shared guard is not propagating through Clone()", got, numTasks)
 	}
 }
