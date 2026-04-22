@@ -275,11 +275,19 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		}
 	}
 
+	// Clone the container so per-run template resolution and name refresh
+	// never mutate shared state across parallel pool workers.
+	var runContainer container.Container
+	if r.Container != nil {
+		runContainer = r.Container.Clone()
+	}
+	containerName := r.ContainerName
+
 	// Resolve {{VAR}} templates in agent args, extra args, and container fields.
 	tmplVars := BuildTemplateVars(r, opts, startedAt, callID, agentName, model)
 	extraArgs = resolveArgs(extraArgs, tmplVars.Replacer())
 	runAgent := ResolveAgentTemplateArgs(r.Agent, tmplVars)
-	resolveContainerTemplates(r.Container, tmplVars)
+	resolveContainerTemplates(runContainer, tmplVars)
 
 	// Build agent request (includes log dir creation and prompt archival).
 	req, promptFile, err := r.buildPrompt(prompt, opts, startedAt, tmplVars, cwd, streamFile, stderrFile, extraArgs)
@@ -288,8 +296,10 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	}
 
 	// Prepare container and translate request paths.
-	if err := r.setupContainer(ctx, &req, cwd); err != nil {
+	if name, err := setupContainer(ctx, runContainer, &req, cwd); err != nil {
 		return failEarly(err)
+	} else if name != "" {
+		containerName = name
 	}
 
 	command, agentArgs := runAgent.DebugCommandArgs(extraArgs)
@@ -297,9 +307,9 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 
 	if opts.Verbose {
 		fmt.Fprintf(os.Stderr, "[verbose] agent: %s\n", cliStr)
-		if r.Container != nil && r.Container.Type() != "none" {
+		if runContainer != nil && runContainer.Type() != "none" {
 			fmt.Fprintf(os.Stderr, "[verbose] container: %s\n",
-				r.Container.DebugCommand(container.RunOpts{Command: command, Args: agentArgs}))
+				runContainer.DebugCommand(container.RunOpts{Command: command, Args: agentArgs}))
 		}
 	}
 
@@ -352,7 +362,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		switch ev.Type {
 		case "system":
 			if ev.PID > 0 && r.CallDB != nil && callID > 0 {
-				if err := r.CallDB.SetPID(callID, ev.PID, r.ContainerName); err != nil {
+				if err := r.CallDB.SetPID(callID, ev.PID, containerName); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: call tracking SetPID failed: %v\n", err)
 				}
 			}
@@ -481,18 +491,16 @@ func (r *Runner) buildPrompt(prompt string, opts RunOpts, startedAt time.Time, t
 }
 
 // setupContainer prepares the container for execution and translates the
-// request's WorkDir and settings paths to container-relative paths.
-func (r *Runner) setupContainer(ctx context.Context, req *agent.Request, cwd string) error {
-	c := r.Container
+// request's WorkDir and settings paths to container-relative paths. It
+// operates on the per-run container clone (never the shared original) and
+// returns the resolved container name so the caller can record it locally.
+func setupContainer(ctx context.Context, c container.Container, req *agent.Request, cwd string) (string, error) {
 	if c == nil {
-		return nil
+		return "", nil
 	}
 	if err := c.Prepare(ctx); err != nil {
-		return err
+		return "", err
 	}
-	// Refresh container name after Prepare — it may have been resolved
-	// from a partial name to the exact running container name.
-	r.ContainerName = c.GetContainerName()
 	if factory := c.CmdFactory(); factory != nil {
 		req.CmdFactory = factory
 	}
@@ -505,7 +513,7 @@ func (r *Runner) setupContainer(ctx context.Context, req *agent.Request, cwd str
 			req.ExtraArgs[i+1] = c.TranslatePath(req.ExtraArgs[i+1])
 		}
 	}
-	return nil
+	return c.GetContainerName(), nil
 }
 
 // finalizeCall handles post-execution work: writes the output or error file,
