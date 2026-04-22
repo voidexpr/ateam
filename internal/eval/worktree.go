@@ -62,7 +62,7 @@ func SetupWorktrees(source *root.ResolvedEnv, baseDir string) (baseEnv, candEnv 
 	if isInside(realPath(baseDirAbs), repoRootReal) {
 		return nil, nil, fmt.Errorf("--git-worktree-base %s is inside the source git repo %s — choose a path outside the repo to avoid nested git repos", baseDirAbs, repoRoot)
 	}
-	if err := os.MkdirAll(baseDirAbs, 0755); err != nil {
+	if err := os.MkdirAll(baseDirAbs, 0700); err != nil {
 		return nil, nil, fmt.Errorf("create worktree base %s: %w", baseDirAbs, err)
 	}
 
@@ -196,7 +196,7 @@ func excludedAteamEntry(rel string) bool {
 // copyAteamExcludingState copies src (.ateam/) into dst, skipping state/log
 // files (see excludedAteamEntry).
 func copyAteamExcludingState(src, dst string) error {
-	if err := os.MkdirAll(dst, 0755); err != nil {
+	if err := os.MkdirAll(dst, 0700); err != nil {
 		return err
 	}
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
