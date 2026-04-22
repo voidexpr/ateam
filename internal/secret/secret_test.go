@@ -500,6 +500,13 @@ func TestIsolateCredentialsStripsLosingAlternative(t *testing.T) {
 }
 
 func TestIsolateCredentialsNoStrippingWhenOnlyOneExists(t *testing.T) {
+	orig, hadOauth := os.LookupEnv("CLAUDE_CODE_OAUTH_TOKEN")
+	os.Unsetenv("CLAUDE_CODE_OAUTH_TOKEN")
+	t.Cleanup(func() {
+		if hadOauth {
+			os.Setenv("CLAUDE_CODE_OAUTH_TOKEN", orig)
+		}
+	})
 	dir := t.TempDir()
 	store := &FileStore{Path: filepath.Join(dir, "secrets.env")}
 	_ = store.Set("ANTHROPIC_API_KEY", "correct-key")
