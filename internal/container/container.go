@@ -66,6 +66,12 @@ type Container interface {
 	// Non-empty values become explicit -e KEY=VALUE flags (overriding ForwardEnv).
 	// Empty values suppress forwarding of that key entirely.
 	ApplyAgentEnv(env map[string]string)
+
+	// Clone returns a deep copy of the container with independent slice and map
+	// backing memory. Callers that will mutate container state (notably
+	// ResolveTemplates, SetContainerName, and per-run naming) must operate on
+	// a clone when the original may be shared across goroutines.
+	Clone() Container
 }
 
 // RunOpts holds options for executing a command in a container.

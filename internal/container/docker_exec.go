@@ -36,6 +36,27 @@ type DockerExecContainer struct {
 
 func (d *DockerExecContainer) Type() string { return "docker-exec" }
 
+// Clone returns a deep copy with independent slice and map backing memory.
+// The clone carries a fresh prepareOnce, so Prepare runs once per clone
+// (idempotent: name resolution + binary copy).
+func (d *DockerExecContainer) Clone() Container {
+	cp := DockerExecContainer{
+		ContainerName: d.ContainerName,
+		ExecTemplate:  d.ExecTemplate,
+		WorkDir:       d.WorkDir,
+		HostCLIPath:   d.HostCLIPath,
+		ForwardEnv:    append([]string(nil), d.ForwardEnv...),
+		PrecheckCmd:   append([]string(nil), d.PrecheckCmd...),
+	}
+	if d.Env != nil {
+		cp.Env = make(map[string]string, len(d.Env))
+		for k, v := range d.Env {
+			cp.Env[k] = v
+		}
+	}
+	return &cp
+}
+
 // ResolveTemplates resolves {{VAR}} placeholders in ContainerName and WorkDir.
 // ExecTemplate is NOT resolved here — its {{CONTAINER}} and {{CMD}} placeholders
 // are expanded by CmdFactory at execution time (separate namespace).

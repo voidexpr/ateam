@@ -57,6 +57,23 @@ const (
 
 func (d *DockerContainer) Type() string { return "docker" }
 
+// Clone returns a deep copy with independent slice and map backing memory
+// so per-run mutation (template resolution, env merges) does not race across
+// parallel pool workers sharing the original.
+func (d *DockerContainer) Clone() Container {
+	cp := *d
+	cp.ForwardEnv = append([]string(nil), d.ForwardEnv...)
+	cp.ExtraVolumes = append([]string(nil), d.ExtraVolumes...)
+	cp.ExtraArgs = append([]string(nil), d.ExtraArgs...)
+	if d.Env != nil {
+		cp.Env = make(map[string]string, len(d.Env))
+		for k, v := range d.Env {
+			cp.Env[k] = v
+		}
+	}
+	return &cp
+}
+
 // ResolveTemplates resolves {{VAR}} placeholders in ExtraArgs, ExtraVolumes, and Env.
 func (d *DockerContainer) ResolveTemplates(r *strings.Replacer) {
 	for i, arg := range d.ExtraArgs {
