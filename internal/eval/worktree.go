@@ -185,9 +185,6 @@ func excludedAteamEntry(rel string) bool {
 			if last == "history" {
 				return true
 			}
-			if len(parts) > 3 && parts[2] == "history" {
-				return true
-			}
 		}
 	}
 	return false
@@ -230,7 +227,7 @@ func copyFile(src, dst string, mode os.FileMode) error {
 		return err
 	}
 	defer in.Close()
-	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil {
 		return err
 	}
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
