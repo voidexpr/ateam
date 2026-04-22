@@ -137,7 +137,7 @@ Eval compares two prompts for the same role by running each against the same cod
 
 No persistent eval storage in phase 1. Results are printed to stdout. The reports themselves live in the respective `.ateam/` directories if you want to inspect them after.
 
-### Two modes
+### Three modes
 
 **Mode 1: Sequential (simple, single directory)**
 
@@ -181,6 +181,39 @@ The directories can be:
 
 Ateam doesn't create or manage the directories — the user controls their lifecycle. This keeps the implementation simple and covers all isolation scenarios without ateam needing worktree/clone logic.
 
+**Mode 3: Git worktree — auto-isolation**
+
+```bash
+ateam eval --role security --prompt @candidate.md --git-worktree
+ateam eval --role security --prompt @candidate.md --git-worktree --git-worktree-base /tmp/my-eval
+```
+
+Ateam creates two git worktrees automatically so you get the isolation benefits of Mode 2 with none of the manual setup.
+
+Default worktree base: `/tmp/ateam-worktree/<flattened-abs-project-path>/`. Layout:
+
+```
+<base>/base/        ← git worktree at --detach HEAD + copied .ateam/
+<base>/candidate/   ← git worktree at --detach HEAD + copied .ateam/
+```
+
+Steps:
+1. Refuse if the source repo has uncommitted changes (`git status --porcelain` non-empty). Eval needs a well-defined commit.
+2. Refuse if `--git-worktree-base` resolves to a path inside the source git repo (would nest repos).
+3. For each side:
+   - Remove any existing worktree at that path (detached worktrees are cheap to recreate).
+   - `git worktree add --detach <path> HEAD`.
+   - Copy the parent project's `.ateam/` into `<path>/.ateam/`, excluding state/log files: `state.sqlite*`, `logs/`, `roles/*/report.md`, `roles/*/history/`, `eval/`. Config, role prompts, and extra prompts are preserved.
+4. Hand the two paths to the same parallel-run pipeline as Mode 2.
+5. Leave worktrees in place after the run (inspect, diff, etc.). No auto-cleanup in phase 1.
+
+Design decisions:
+- **Detached HEAD** (not named branches) → sidesteps "branch exists / can't rebase" problems entirely.
+- **Copy .ateam/ minus state** → consistent starting point, no prior report context skewing the eval.
+- **Error on dirty tree** → reproducible eval tied to a specific commit.
+
+Mode 2 (`--dirs`) remains for use cases that a worktree + config copy can't capture: Docker compose setups, database fixtures, env-specific config, cross-project eval.
+
 ### `--ignore-previous-report`
 
 New flag for `ateam report`. When set, the prompt assembly skips injecting the previous report content. This ensures both eval runs start from the same baseline — neither is influenced by a prior report.
@@ -193,8 +226,11 @@ This flag is useful beyond eval (e.g., force a fresh analysis), but eval is the 
 # Sequential: run in current directory
 ateam eval --role security --prompt @candidate.md
 
-# Parallel: run in two directories
+# Parallel: run in two user-provided directories
 ateam eval --role security --prompt @candidate.md --dirs . ../worktree-eval
+
+# Parallel: ateam creates detached worktrees automatically
+ateam eval --role security --prompt @candidate.md --git-worktree
 
 # Override base prompt (default: current on-disk prompt)
 ateam eval --role security --prompt @candidate.md --base @alternative_base.md
@@ -280,6 +316,7 @@ When `--repeat N` is used, scores are averaged across runs and standard deviatio
 | `internal/eval/run.go` | New: sequential and parallel run logic, prompt swap/restore |
 | `internal/eval/judge.go` | New: judge prompt assembly, LLM call, score parsing |
 | `internal/eval/compare.go` | New: side-by-side display formatting |
+| `internal/eval/worktree.go` | New: detached worktree setup + selective `.ateam/` copy (Mode 3) |
 | `internal/prompts/` | No change — `AssembleRolePrompt` already supports `skipPreviousReport` |
 
 Cost/tokens/duration come directly from `runner.RunSummary` (returned by `Runner.Run`), so no separate metrics extraction from `state.sqlite` is needed for phase 1.
@@ -307,9 +344,12 @@ Cost/tokens/duration come directly from `runner.RunSummary` (returned by `Runner
 **Eval:**
 - `ateam eval --role security --prompt @candidate.md` runs sequentially, prints cost + judge scores
 - `ateam eval --role security --prompt @candidate.md --dirs . ../worktree` runs in parallel
+- `ateam eval --role security --prompt @candidate.md --git-worktree` auto-creates detached worktrees
 - `ateam eval --role security --prompt @candidate.md --model haiku` uses cheaper model
 - Judge output includes 0.00–1.00 scores per dimension and overall
-- `go test ./...` passes (incl. `TestParseJudgeOutput`)
+- Dirty tree error: `ateam eval ... --git-worktree` in a dirty repo exits with a clear message
+- Nesting error: `ateam eval ... --git-worktree --git-worktree-base <inside-repo>` exits with a clear message
+- `go test ./...` passes (incl. `TestParseJudgeOutput` and new worktree tests)
 
 ---
 
@@ -321,7 +361,7 @@ Part 1 — Dot-namespaced roles:
 - Verified end-to-end: discovery, config, validation, prompt assembly, flag parsing all handle dots transparently (no code changes required).
 - Added `TestDotNamespacedRole` in `internal/prompts/prompts_test.go` exercising a `code.small` role.
 
-Part 2 — Eval framework:
+Part 2 — Eval framework (Modes 1 and 2):
 - `cmd/eval.go` with full flag layout: `--role`, `--prompt`, `--base`, `--dirs`, `--timeout`, `--verbose`, `--no-judge`, `--judge-timeout`.
 - Shared agent flags: `--profile`, `--agent`, `--model` (apply to both sides by default).
 - Per-side overrides: `--base-profile/--base-agent/--base-model`, `--candidate-profile/--candidate-agent/--candidate-model`.
@@ -332,7 +372,16 @@ Part 2 — Eval framework:
 - `internal/eval/compare.go`: side-by-side metrics table with percentage deltas.
 - Previous-report context is always skipped for eval runs (via the existing `skipPreviousReport` argument to `AssembleRolePrompt` — no new flag needed).
 
+**Implemented (2026-04-21):**
+
+Part 2 — Mode 3: Git worktree auto-isolation:
+- `internal/eval/worktree.go`: `SetupWorktrees` creates two detached worktrees, copies the parent's `.ateam/` minus state files (`state.sqlite*`, `logs/`, `roles/*/report.md`, `roles/*/history/`, `eval/`).
+- Default base dir: `/tmp/ateam-worktree/<flattened-abs-project-path>/`.
+- Validation: refuses if source repo has uncommitted changes; refuses if the base dir is inside the source repo (would nest repos).
+- `cmd/eval.go`: `--git-worktree` bool + `--git-worktree-base DIR` string flags; mutually exclusive with `--dirs`.
+
 **Deferred:**
 - Glob expansion for `--roles` (e.g. `testing`, `testing.*` → all `testing.*` roles) — simple to add later via prefix match in `ResolveRoleList`.
 - Persistent eval storage (`.ateam/eval/`).
-- Multi-workspace aggregation, `--repeat N`, N-vs-1 role comparison, full pipeline eval.
+- Worktree auto-cleanup after eval completes.
+- Multi-workspace aggregation, `--repeat N`, N-vs-M role comparison, full pipeline eval.
