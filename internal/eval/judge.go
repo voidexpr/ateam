@@ -135,7 +135,7 @@ func parseJudgeOutput(output string) *JudgeResult {
 			continue
 		case strings.HasPrefix(lower, "verdict:"):
 			inVerdict = true
-			verdictLines = append(verdictLines, strings.TrimSpace(strings.TrimPrefix(line, "Verdict:")))
+			verdictLines = append(verdictLines, strings.TrimSpace(line[len("verdict:"):]))
 			continue
 		}
 		if inVerdict {

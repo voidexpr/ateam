@@ -58,6 +58,21 @@ Report B:
 	}
 }
 
+func TestParseJudgeOutputLowercaseVerdict(t *testing.T) {
+	output := `Report A:
+  Overall: 0.5
+
+Report B:
+  Overall: 0.8
+
+verdict: some text
+`
+	r := parseJudgeOutput(output)
+	if r.Verdict != "some text" {
+		t.Errorf("Verdict = %q, want %q", r.Verdict, "some text")
+	}
+}
+
 func contains(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {
