@@ -94,6 +94,10 @@ func SetupWorktrees(source *root.ResolvedEnv, baseDir string) (baseEnv, candEnv 
 // org-discovery walk from /tmp/... where .ateamorg would never be found.
 func worktreeEnv(source *root.ResolvedEnv, worktreeDir string) *root.ResolvedEnv {
 	e := *source
+	if source.Config != nil {
+		cfg := *source.Config
+		e.Config = &cfg
+	}
 	e.ProjectDir = filepath.Join(worktreeDir, filepath.Base(source.ProjectDir))
 	e.SourceDir = worktreeDir
 	if source.GitRepoDir != "" {
