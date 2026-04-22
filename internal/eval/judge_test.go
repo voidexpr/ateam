@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -32,7 +33,7 @@ more concise. 20% cheaper.
 	if r.Candidate.Coverage != 0.8 || r.Candidate.Accuracy != 0.9 || r.Candidate.Actionability != 0.7 || r.Candidate.Conciseness != 0.8 || r.Candidate.Overall != 0.80 {
 		t.Errorf("Candidate scores wrong: %+v", r.Candidate)
 	}
-	if r.Verdict == "" || !contains(r.Verdict, "Candidate is better") {
+	if r.Verdict == "" || !strings.Contains(r.Verdict, "Candidate is better") {
 		t.Errorf("Verdict not captured: %q", r.Verdict)
 	}
 }
@@ -71,13 +72,4 @@ verdict: some text
 	if r.Verdict != "some text" {
 		t.Errorf("Verdict = %q, want %q", r.Verdict, "some text")
 	}
-}
-
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }
