@@ -175,7 +175,7 @@ func parseLine(line string) (string, string) {
 	if !ok {
 		return "", ""
 	}
-	return strings.TrimSpace(k), v
+	return strings.TrimSpace(k), strings.TrimSpace(v)
 }
 
 // --- Keychain backend (cross-platform via go-keyring) ---

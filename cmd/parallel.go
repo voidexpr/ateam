@@ -168,11 +168,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		r.CallDB = db
 
 		if !parallelForce {
-			projectID := env.ProjectID()
-			if projectID == "" && env.OrgDir != "" {
-				return fmt.Errorf("cannot determine project ID for concurrency guard")
-			}
-			if err := checkConcurrentRuns(db, projectID, runner.ActionParallel, nil); err != nil {
+			if err := checkConcurrentRunsEnv(db, env, runner.ActionParallel, nil); err != nil {
 				return err
 			}
 		}

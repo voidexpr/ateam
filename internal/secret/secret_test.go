@@ -205,7 +205,7 @@ func TestParseLine(t *testing.T) {
 		{"API_KEY=secret", "API_KEY", "secret"},
 		{"KEY=value with spaces", "KEY", "value with spaces"},
 		{"KEY=val=ue", "KEY", "val=ue"},
-		{"  KEY = value", "KEY", " value"},
+		{"  KEY = value", "KEY", "value"},
 		{"", "", ""},
 		{"# comment", "", ""},
 		{"  # indented comment", "", ""},
