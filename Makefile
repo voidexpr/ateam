@@ -1,6 +1,6 @@
 BINARY = ateam
 
-.PHONY: build build-binary companion clean tidy check-tidy check test test-all test-cli test-docker test-docker-live vuln docs lint fmt fmt-check install-hooks run-ci
+.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy check-tidy check test test-all test-cli test-docker test-docker-live vuln docs lint fmt fmt-check install-hooks run-ci
 
 BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
@@ -22,6 +22,24 @@ companion:
 		-o build/ateam-linux-amd64 .
 
 build-all: build companion
+
+# -race-enabled host binary. Writes to $(BINARY)-race so it coexists with the
+# normal build. `-race` requires CGO_ENABLED=1 which is the default locally.
+build-binary-race:
+	go build -race -ldflags "$(LDFLAGS)" -o $(BINARY)-race .
+
+# -race-enabled linux companion. `-race` needs CGo + a linux C toolchain; the
+# easiest portable way is to run `go build` inside a linux container so the
+# architecture follows your docker default platform (linux/arm64 on Apple
+# Silicon, linux/amd64 on Intel). Output: build/ateam-linux-race.
+companion-race:
+	mkdir -p build
+	docker run --rm -v "$(CURDIR)":/src -w /src \
+		-e CGO_ENABLED=1 \
+		golang:1.26 \
+		go build -race -ldflags "$(LDFLAGS)" -o build/ateam-linux-race .
+
+build-all-race: build-binary-race companion-race
 
 tidy:
 	go mod tidy
@@ -104,5 +122,5 @@ install-hooks:
 	@echo "Installed pre-commit hook."
 
 clean:
-	rm -f $(BINARY) ateam-linux-*
+	rm -f $(BINARY) $(BINARY)-race ateam-linux-*
 	rm -rf build/
