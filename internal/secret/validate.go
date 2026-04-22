@@ -10,8 +10,10 @@ import (
 )
 
 // ValidateSecrets checks that all required env vars for the given agent are
-// available. Found secrets are injected into the process environment via
-// os.Setenv so that container forward_env and agent code can pick them up.
+// available. It only verifies presence — resolved values flow into ac.Env
+// via IsolateCredentials (the single writer). Do NOT call os.Setenv here:
+// process-global mutation is forbidden outside main-goroutine construction
+// code (see CONCURRENCY.md).
 //
 // Note: container forward_env is NOT validated here — it's opportunistic
 // forwarding. Docker silently skips missing forward_env vars. The agent's
@@ -56,9 +58,9 @@ func ValidateSecrets(ac *runtime.AgentConfig, resolver *Resolver) error {
 }
 
 // resolveRequirement checks a single requirement (possibly "A|B" alternatives).
-// If found, injects the value into the process environment and returns true.
-// Always injects via os.Setenv, even when the source is "env", to ensure the
-// resolved value is consistent after any prior stripping or overriding.
+// Returns true if any alternative resolves. Does NOT mutate the process env —
+// IsolateCredentials is the single writer that propagates the resolved value
+// into ac.Env, from which agents and containers pick it up.
 func resolveRequirement(req string, resolver *Resolver) bool {
 	alternatives := strings.Split(req, "|")
 	for _, alt := range alternatives {
@@ -66,9 +68,7 @@ func resolveRequirement(req string, resolver *Resolver) bool {
 		if alt == "" {
 			continue
 		}
-		result := resolver.Resolve(alt)
-		if result.Found {
-			_ = os.Setenv(alt, result.Value)
+		if resolver.Resolve(alt).Found {
 			return true
 		}
 	}

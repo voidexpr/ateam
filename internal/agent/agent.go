@@ -13,6 +13,13 @@ import (
 )
 
 // Agent executes a prompt and produces normalized stream events.
+//
+// Concurrency (see CONCURRENCY.md):
+//
+//   - The Agent on a Runner is effectively read-only once dispatched to a
+//     pool; the pool calls CloneWithResolvedTemplates per task.
+//   - Run is invoked on the clone, not on the shared original, so any per-
+//     run mutation stays local to that goroutine.
 type Agent interface {
 	Name() string
 	// Run starts the agent and returns a channel of normalized events.
@@ -22,9 +29,13 @@ type Agent interface {
 	// including extraArgs. Used for verbose/diagnostic output.
 	DebugCommandArgs(extraArgs []string) (command string, args []string)
 	// SetModel overrides the model the agent will use.
+	// MUTATES — call before the Agent is shared with a pool.
 	SetModel(model string)
-	// CloneWithResolvedTemplates returns a shallow copy of the agent with
-	// {{VAR}} placeholders resolved in Args, Env, and other string fields.
+	// CloneWithResolvedTemplates returns a clone with {{VAR}} placeholders
+	// resolved in Args, Env, and other templated string fields.
+	// Implementations MUST ensure the returned value's Args and Env share
+	// no backing slice/map with the original — the pool relies on this for
+	// per-task isolation.
 	CloneWithResolvedTemplates(replacer *strings.Replacer) Agent
 }
 

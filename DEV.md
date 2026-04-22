@@ -146,6 +146,8 @@ Release archives should include both `ateam` (host) and `ateam-linux-amd64` so D
 
 Configuration lives in `runtime.hcl` with 4-level resolution: embedded defaults → org defaults → org overrides → project overrides.
 
+For the concurrency contract that governs parallel pool execution — what's shared, what gets cloned, what flows through channels — see [CONCURRENCY.md](CONCURRENCY.md).
+
 ### Agents
 
 Defined in `internal/agent/`. Each agent implements the `Agent` interface (Run, ParseStreamFile). Available agents:

@@ -73,6 +73,21 @@ const (
 )
 
 // Runner orchestrates agent execution with logging, file I/O, and progress reporting.
+//
+// Concurrency contract (see CONCURRENCY.md):
+//
+//   - All Runner fields are WRITTEN only during construction in the main
+//     goroutine (cmd/table.go:newRunner and friends, plus applyContainerName
+//     and the cmd-layer overrides). After a Runner is handed to RunPool —
+//     including PoolTask.Runner overrides — its fields become READ-ONLY.
+//   - Agent and Container fields look mutable but are cloned per task at the
+//     top of Run via CloneWithResolvedTemplates / Clone. The shared originals
+//     are never mutated inside Run.
+//   - CallDB is a *sql.DB — safe for concurrent use by stdlib guarantee,
+//     further serialized to one writer via SetMaxOpenConns(1).
+//   - Sandbox, ExtraArgs, ArgsInsideContainer, ArgsOutsideContainer: slice
+//     backing memory is read-only once construction finishes; Run copies
+//     r.ExtraArgs into a local before appending.
 type Runner struct {
 	Agent                agent.Agent
 	Container            container.Container // nil means run on host

@@ -2,7 +2,11 @@ package runner
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -27,45 +31,73 @@ import (
 // =============================================================================
 
 func TestResolveAgentTemplateArgsConcurrentRace(t *testing.T) {
-	// Shared agent — same instance used by all goroutines, mimicking RunPool.
-	a := &agent.ClaudeAgent{
-		Command: "claude",
-		Args:    []string{"-p", "--name", "{{PROJECT_DIR}}-{{ROLE}}", "--output-format", "stream-json"},
+	// Run the same stress test for each Agent implementation — each one
+	// must produce fully-cloned Args slices under concurrent template
+	// resolution.
+	cases := []struct {
+		name  string
+		build func() agent.Agent
+	}{
+		{
+			name: "claude",
+			build: func() agent.Agent {
+				return &agent.ClaudeAgent{
+					Command: "claude",
+					Args:    []string{"-p", "--name", "{{PROJECT_DIR}}-{{ROLE}}", "--output-format", "stream-json"},
+				}
+			},
+		},
+		{
+			name: "codex",
+			build: func() agent.Agent {
+				return &agent.CodexAgent{
+					Command: "codex",
+					Args:    []string{"--name", "{{PROJECT_DIR}}-{{ROLE}}", "--sandbox", "workspace-write"},
+				}
+			},
+		},
 	}
 
-	// Save original args for verification.
-	originalArgs := make([]string, len(a.Args))
-	copy(originalArgs, a.Args)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := tc.build()
+			originalArgs := argsOf(a)
+			snapshot := append([]string(nil), originalArgs...)
 
-	var wg sync.WaitGroup
-	const goroutines = 20
+			var wg sync.WaitGroup
+			const goroutines = 20
+			for i := 0; i < goroutines; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					vars := TemplateVars{ProjectDir: "project", Role: "security"}
+					resolved := ResolveAgentTemplateArgs(a, vars)
+					resolvedArgs := argsOf(resolved)
+					if !strings.Contains(strings.Join(resolvedArgs, " "), "project-security") {
+						t.Errorf("resolved args missing expected substitution: %v", resolvedArgs)
+					}
+				}()
+			}
+			wg.Wait()
 
-	for i := 0; i < goroutines; i++ {
-		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			vars := TemplateVars{
-				ProjectDir: "project",
-				Role:       "security",
+			for i, v := range argsOf(a) {
+				if v != snapshot[i] {
+					t.Errorf("shared agent Args[%d] mutated: got %q, want %q", i, v, snapshot[i])
+				}
 			}
-			resolved := ResolveAgentTemplateArgs(a, vars)
-			clone, ok := resolved.(*agent.ClaudeAgent)
-			if !ok {
-				t.Errorf("resolved agent type = %T, want *agent.ClaudeAgent", resolved)
-				return
-			}
-			if clone.Args[2] != "project-security" {
-				t.Errorf("resolved args[%d] = %q, want %q", 2, clone.Args[2], "project-security")
-			}
-		}(i)
+		})
 	}
+}
 
-	wg.Wait()
-
-	if a.Args[2] != originalArgs[2] {
-		t.Logf("After concurrent ResolveAgentTemplateArgs, agent.Args = %v", a.Args)
-		t.Logf("Original agent.Args = %v", originalArgs)
-		t.Errorf("ResolveAgentTemplateArgs mutated the shared agent's Args — templates should remain unresolved on the shared agent")
+// argsOf reads the Args slice of any supported Agent impl for assertion.
+func argsOf(a agent.Agent) []string {
+	switch v := a.(type) {
+	case *agent.ClaudeAgent:
+		return v.Args
+	case *agent.CodexAgent:
+		return v.Args
+	default:
+		return nil
 	}
 }
 
@@ -190,6 +222,156 @@ func TestRunPoolSharedContainerDoesNotMutateTemplate(t *testing.T) {
 	if dc.Env["ROLE"] != "{{ROLE}}" {
 		t.Errorf("shared container Env[ROLE] mutated: got %q, want %q", dc.Env["ROLE"], "{{ROLE}}")
 	}
+}
+
+// TestRunPoolCompletedChannelDeadlockGuard exercises the up-front refusal
+// when the caller hands in an undersized completed channel — without the
+// guard, workers would block on `completed <- summary` after maxParallel
+// summaries queue up, wedging the pool.
+func TestRunPoolCompletedChannelDeadlockGuard(t *testing.T) {
+	dir := t.TempDir()
+	mock := &agent.MockAgent{Response: "ok"}
+	r := &Runner{Agent: mock}
+
+	const numTasks = 4
+	tasks := make([]PoolTask, numTasks)
+	for i := range tasks {
+		tasks[i] = PoolTask{
+			Prompt: "p",
+			RunOpts: RunOpts{
+				RoleID:  fmt.Sprintf("role-%d", i),
+				Action:  ActionRun,
+				LogsDir: makeTaskLogsDir(dir, i),
+			},
+		}
+	}
+
+	undersized := make(chan RunSummary, 1) // cap < numTasks
+	results := RunPool(context.Background(), r, tasks, 2, nil, undersized)
+	if results != nil {
+		t.Errorf("RunPool should refuse an undersized completed channel and return nil; got %d results", len(results))
+	}
+}
+
+// TestRunPoolSharedDockerExecRace mirrors TestRunPoolSharedContainerRace
+// but targets DockerExecContainer, whose ResolveTemplates mutates
+// ContainerName and WorkDir. The per-task Clone must isolate these writes.
+func TestRunPoolSharedDockerExecRace(t *testing.T) {
+	dir := t.TempDir()
+	mock := &agent.MockAgent{Response: "ok", Delay: 10 * time.Millisecond}
+	de := &container.DockerExecContainer{
+		ContainerName: "ateam-{{ROLE}}",
+		WorkDir:       "/work/{{ROLE}}",
+		ForwardEnv:    []string{"PATH"},
+		Env:           map[string]string{"ROLE": "{{ROLE}}"},
+		// No container actually running — Prepare will fail at docker ps,
+		// but ResolveTemplates and Clone paths run first.
+	}
+	r := &Runner{
+		Agent:         mock,
+		Container:     de,
+		ContainerType: "docker-exec",
+		ProjectName:   "test",
+		SourceDir:     dir,
+	}
+
+	const numTasks = 8
+	tasks := make([]PoolTask, numTasks)
+	for i := range tasks {
+		tasks[i] = PoolTask{
+			Prompt: "p",
+			RunOpts: RunOpts{
+				RoleID:  fmt.Sprintf("role-%d", i),
+				Action:  ActionRun,
+				LogsDir: makeTaskLogsDir(dir, i),
+			},
+		}
+	}
+	_ = RunPool(context.Background(), r, tasks, 3, nil, nil)
+}
+
+// TestRunPoolRunnerFieldsUnchanged is a reflection-based guard against
+// anyone reintroducing a write to a Runner field during Run. It snapshots
+// scalar/string/slice/map fields before and after RunPool and asserts no
+// change. Interface/pointer/channel/func fields are deliberately skipped
+// — Agent/Container are exercised by their own clone-race tests, and
+// comparing pointer identity here would be either trivially-true or
+// trivially-false and wouldn't catch the kind of mutation we care about.
+func TestRunPoolRunnerFieldsUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	mock := &agent.MockAgent{Response: "ok", Delay: 5 * time.Millisecond}
+
+	r := &Runner{
+		Agent:                mock,
+		ProjectName:          "proj",
+		ProjectDir:           dir,
+		SourceDir:            dir,
+		OrgDir:               dir,
+		Profile:              "default",
+		ProjectID:            "proj-id",
+		ContainerType:        "none",
+		ContainerName:        "initial-name",
+		ContainerNameSource:  ContainerNameSourceConfig,
+		LogFile:              filepath.Join(dir, "runner.log"),
+		ExtraArgs:            []string{"-p", "--output-format", "stream-json"},
+		ArgsInsideContainer:  []string{"--inside"},
+		ArgsOutsideContainer: []string{"--outside"},
+	}
+	r.Sandbox.RWPaths = []string{"/rw"}
+	r.Sandbox.ROPaths = []string{"/ro"}
+	r.Sandbox.Denied = []string{"/no"}
+
+	before := snapshotRunnerFields(t, r)
+
+	const numTasks = 8
+	tasks := make([]PoolTask, numTasks)
+	for i := range tasks {
+		tasks[i] = PoolTask{
+			Prompt: "p",
+			RunOpts: RunOpts{
+				RoleID:  fmt.Sprintf("role-%d", i),
+				Action:  ActionRun,
+				LogsDir: makeTaskLogsDir(dir, i),
+			},
+		}
+	}
+	_ = RunPool(context.Background(), r, tasks, 3, nil, nil)
+
+	after := snapshotRunnerFields(t, r)
+
+	for name, beforeVal := range before {
+		if after[name] != beforeVal {
+			t.Errorf("Runner.%s mutated during RunPool: before=%q after=%q", name, beforeVal, after[name])
+		}
+	}
+}
+
+// snapshotRunnerFields hashes every scalar/string/slice/map field of a
+// Runner for before/after comparison. Fields of kind Interface, Ptr,
+// Chan, Func, and Struct are skipped (they're covered by dedicated clone
+// tests or are pointers to shared thread-safe primitives).
+func snapshotRunnerFields(t *testing.T, r *Runner) map[string]string {
+	t.Helper()
+	out := make(map[string]string)
+	v := reflect.ValueOf(r).Elem()
+	typ := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		f := typ.Field(i)
+		fv := v.Field(i)
+		switch fv.Kind() {
+		case reflect.String,
+			reflect.Bool,
+			reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+			reflect.Float32, reflect.Float64,
+			reflect.Slice, reflect.Map, reflect.Array:
+			h := sha256.Sum256([]byte(fmt.Sprintf("%v", fv.Interface())))
+			out[f.Name] = hex.EncodeToString(h[:8])
+		default:
+			// Interface, Ptr, Chan, Func, Struct — skip (see doc on caller).
+		}
+	}
+	return out
 }
 
 // =============================================================================
