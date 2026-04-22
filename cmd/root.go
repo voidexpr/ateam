@@ -54,5 +54,6 @@ func init() {
 	rootCmd.AddCommand(secretCmd)
 	rootCmd.AddCommand(autoSetupCmd)
 	rootCmd.AddCommand(inspectCmd)
+	rootCmd.AddCommand(evalCmd)
 	rootCmd.AddCommand(versionCmd)
 }

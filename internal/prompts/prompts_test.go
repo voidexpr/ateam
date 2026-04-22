@@ -158,6 +158,60 @@ func TestEnabledRoleIDsNilConfig(t *testing.T) {
 	}
 }
 
+func TestDotNamespacedRole(t *testing.T) {
+	base := t.TempDir()
+	orgDir := filepath.Join(base, "org")
+	projectDir := filepath.Join(base, "project")
+	roleID := "code.small"
+
+	// Filesystem discovery: dot in directory name works with flat single-level layout.
+	roleDir := filepath.Join(projectDir, "roles", roleID)
+	if err := os.MkdirAll(roleDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(roleDir, ReportPromptFile), []byte("dotted role prompt"), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	configRoles := map[string]string{
+		"code.small": "on",
+		"security":   "on",
+	}
+
+	if !IsValidRole(roleID, configRoles, projectDir, orgDir) {
+		t.Errorf("IsValidRole(%q): want true, got false", roleID)
+	}
+
+	all := AllKnownRoleIDs(configRoles, projectDir, orgDir)
+	found := false
+	for _, id := range all {
+		if id == roleID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("AllKnownRoleIDs missing %q, got %v", roleID, all)
+	}
+
+	resolved, err := ResolveRoleList([]string{"code.small", "security"}, configRoles, projectDir, orgDir)
+	if err != nil {
+		t.Fatalf("ResolveRoleList: %v", err)
+	}
+	if len(resolved) != 2 || resolved[0] != "code.small" || resolved[1] != "security" {
+		t.Errorf("ResolveRoleList = %v, want [code.small security]", resolved)
+	}
+
+	// Prompt assembly: AssembleRolePrompt finds the dotted role on disk.
+	result, err := AssembleRolePrompt(orgDir, projectDir, roleID, base, "", ProjectInfoParams{}, true)
+	if err != nil {
+		t.Fatalf("AssembleRolePrompt(%q): %v", roleID, err)
+	}
+	if !strings.Contains(result, "dotted role prompt") {
+		t.Errorf("expected role prompt content in assembled prompt, got:\n%s", result)
+	}
+}
+
 func TestResolveRoleListAllExpansionUsesAllowlist(t *testing.T) {
 	configRoles := map[string]string{
 		"security":   "on",
