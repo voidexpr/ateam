@@ -753,6 +753,14 @@ func addForceFlag(cmd *cobra.Command, dst *bool) {
 	cmd.Flags().BoolVar(dst, "force", false, "run even if the same action+role is already running")
 }
 
+func checkConcurrentRunsEnv(db *calldb.CallDB, env *root.ResolvedEnv, action string, roles []string) error {
+	projectID := env.ProjectID()
+	if projectID == "" && env.OrgDir != "" {
+		return fmt.Errorf("cannot determine project ID for concurrency guard")
+	}
+	return checkConcurrentRuns(db, projectID, action, roles)
+}
+
 // checkConcurrentRuns returns an error if any of the given roles already have a
 // live process for the same project+action. Pass roles=nil to check all roles.
 func checkConcurrentRuns(db *calldb.CallDB, projectID, action string, roles []string) error {

@@ -266,11 +266,7 @@ func runReport(opts ReportOptions) error {
 	}
 
 	if !opts.Force {
-		projectID := env.ProjectID()
-		if projectID == "" && env.OrgDir != "" {
-			return fmt.Errorf("cannot determine project ID for concurrency guard")
-		}
-		if err := checkConcurrentRuns(db, projectID, runner.ActionReport, roleIDs); err != nil {
+		if err := checkConcurrentRunsEnv(db, env, runner.ActionReport, roleIDs); err != nil {
 			return err
 		}
 	}

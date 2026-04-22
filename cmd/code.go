@@ -214,11 +214,7 @@ func runCode(opts CodeOptions) error {
 	cr.CallDB = db
 
 	if !opts.Force {
-		projectID := env.ProjectID()
-		if projectID == "" && env.OrgDir != "" {
-			return fmt.Errorf("cannot determine project ID for concurrency guard")
-		}
-		if err := checkConcurrentRuns(db, projectID, runner.ActionCode, nil); err != nil {
+		if err := checkConcurrentRunsEnv(db, env, runner.ActionCode, nil); err != nil {
 			return err
 		}
 	}
