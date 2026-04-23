@@ -95,6 +95,77 @@ func TestClaudeAgentAccumulatesTokensOnErrorExit(t *testing.T) {
 	}
 }
 
+// TestClaudeAgentEstimateNoPricingConfig simulates an old runtime.hcl
+// that has no pricing block for the claude agent — Pricing is nil AND
+// DefaultModel is empty. The run must not panic and tokens must still
+// be captured (cost falls back to 0).
+func TestClaudeAgentEstimateNoPricingConfig(t *testing.T) {
+	a := &ClaudeAgent{
+		Command: "claude",
+		// Pricing nil, DefaultModel "", Model "" — old-config scenario.
+	}
+
+	ch := a.Run(context.Background(), Request{
+		Prompt:     "test",
+		CmdFactory: shellFactory(fakeClaudeTwoTurnsNoResult),
+	})
+
+	var final StreamEvent
+	for ev := range ch {
+		if ev.Type == "error" {
+			final = ev
+		}
+	}
+	if final.Type != "error" {
+		t.Fatal("expected error event")
+	}
+	if final.InputTokens != 150 || final.OutputTokens != 50 {
+		t.Errorf("tokens = (%d,%d), want (150,50)", final.InputTokens, final.OutputTokens)
+	}
+	if final.Cost != 0 {
+		t.Errorf("Cost with no pricing config = %f, want 0", final.Cost)
+	}
+	// Model comes from the stream's system event even without config.
+	if final.Model != "claude-test-model" {
+		t.Errorf("Model = %q, want claude-test-model (from system event)", final.Model)
+	}
+}
+
+// TestClaudeAgentEstimateUnknownModelGivesZeroCost covers the case
+// where pricing IS configured, but the runtime model (from the stream
+// or config) isn't in the table — e.g. a new model released after the
+// last runtime.hcl update, with no defaultModel fallback.
+func TestClaudeAgentEstimateUnknownModelGivesZeroCost(t *testing.T) {
+	a := &ClaudeAgent{
+		Command: "claude",
+		// Table has a different model; no defaultModel match either.
+		Pricing: PricingTable{
+			"some-other-model": {InputPerToken: 0.001, OutputPerToken: 0.002},
+		},
+	}
+
+	ch := a.Run(context.Background(), Request{
+		Prompt:     "test",
+		CmdFactory: shellFactory(fakeClaudeTwoTurnsNoResult),
+	})
+
+	var final StreamEvent
+	for ev := range ch {
+		if ev.Type == "error" {
+			final = ev
+		}
+	}
+	if final.Type != "error" {
+		t.Fatal("expected error event")
+	}
+	if final.InputTokens != 150 || final.OutputTokens != 50 {
+		t.Errorf("tokens = (%d,%d), want (150,50)", final.InputTokens, final.OutputTokens)
+	}
+	if final.Cost != 0 {
+		t.Errorf("Cost with unknown model = %f, want 0", final.Cost)
+	}
+}
+
 func TestClaudeAgentEstimateNilPricingGivesZeroCost(t *testing.T) {
 	a := &ClaudeAgent{
 		Command:      "claude",
