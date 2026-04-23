@@ -81,10 +81,8 @@ func runRuns(cmd *cobra.Command, args []string) error {
 
 func printRunsTable(rows []calldb.RecentRow) {
 	w := newTable()
-	fmt.Fprintln(w, "ID\tSTARTED\tPROFILE\tACTION\tROLE\tMODEL\tDURATION\tCOST\tTOKENS\tSTATUS\tTASK_GROUP")
+	fmt.Fprintln(w, "ID\tSTARTED\tPROFILE\tACTION\tROLE\tMODEL\tDURATION\tCOST\tTOKENS\tSTATUS\tTASK_GROUP\tREASON")
 	for _, r := range rows {
-		status := runStatus(r)
-
 		started := fmtStartedAt(r.StartedAt)
 
 		dur := ""
@@ -102,18 +100,20 @@ func printRunsTable(rows []calldb.RecentRow) {
 			tokens = display.FmtTokens(total)
 		}
 
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		reason := ""
+		if r.IsError {
+			reason = runner.Truncate(runner.SingleLineText(r.ErrorMessage), 120)
+		}
+
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			r.ID, started, r.Profile, r.Action, r.Role, r.Model,
-			dur, display.FmtCost(r.CostUSD), tokens, status, r.TaskGroup)
+			dur, display.FmtCost(r.CostUSD), tokens, runStatus(r), r.TaskGroup, reason)
 	}
 	w.Flush()
 }
 
 func runStatus(r calldb.RecentRow) string {
 	if r.IsError {
-		if msg := runner.Truncate(runner.SingleLineText(r.ErrorMessage), 80); msg != "" {
-			return "error: " + msg
-		}
 		return "error"
 	}
 	if r.EndedAt != "" {
