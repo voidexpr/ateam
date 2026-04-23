@@ -36,6 +36,33 @@ func TestParseClaudeLineUnknownType(t *testing.T) {
 	}
 }
 
+func TestParseClaudeLineResultErrorFields(t *testing.T) {
+	line := `{"type":"result","is_error":true,"subtype":"error_during_execution","terminal_reason":"completed","result":"API Error: Stream idle timeout - partial response received","total_cost_usd":0.12,"duration_ms":42}`
+	typ, ev, err := ParseClaudeLine([]byte(line))
+	if err != nil {
+		t.Fatalf("ParseClaudeLine: %v", err)
+	}
+	if typ != "result" {
+		t.Fatalf("type = %q, want result", typ)
+	}
+	res, ok := ev.(*ResultEvent)
+	if !ok {
+		t.Fatalf("expected *ResultEvent, got %T", ev)
+	}
+	if !res.IsError {
+		t.Error("IsError = false, want true")
+	}
+	if res.Subtype != "error_during_execution" {
+		t.Errorf("Subtype = %q", res.Subtype)
+	}
+	if res.TerminalReason != "completed" {
+		t.Errorf("TerminalReason = %q", res.TerminalReason)
+	}
+	if res.Result != "API Error: Stream idle timeout - partial response received" {
+		t.Errorf("Result = %q", res.Result)
+	}
+}
+
 func TestParseClaudeLineNullContentBlocks(t *testing.T) {
 	line := `{"type":"assistant","message":{"content":null}}`
 	typ, ev, err := ParseClaudeLine([]byte(line))

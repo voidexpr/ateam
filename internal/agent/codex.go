@@ -83,7 +83,7 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		ch <- StreamEvent{Type: "error", Err: err, ExitCode: -1}
+		ch <- errorEvent(err, ErrorSourceAgentProcess, -1)
 		return
 	}
 
@@ -94,7 +94,7 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 	cmd.Stderr = io.MultiWriter(stderrWriters...)
 
 	if err := cmd.Start(); err != nil {
-		ch <- StreamEvent{Type: "error", Err: err, ExitCode: -1}
+		ch <- errorEvent(err, ErrorSourceAgentProcess, -1)
 		return
 	}
 	ch <- StreamEvent{Type: "system", PID: cmd.Process.Pid}
@@ -106,6 +106,7 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 
 	var lastText strings.Builder // accumulates agent_message_delta for final output
 	var itemText string          // last item.completed text (preferred over deltas)
+	var lastStreamErr string
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -156,7 +157,7 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 			if re.Model != "" {
 				model = re.Model
 			}
-			ch <- StreamEvent{
+			evOut := StreamEvent{
 				Type:         "result",
 				Output:       output,
 				Model:        model,
@@ -167,9 +168,15 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 				Turns:        1,
 				IsError:      re.IsError,
 			}
+			if re.IsError {
+				evOut.ErrorSource = ErrorSourceAgentAPI
+				evOut.ErrorCause = firstNonEmpty(re.ErrorMessage, lastStreamErr, output)
+			}
+			ch <- evOut
 
 		case "error":
 			ee := ev.(*CodexErrorEvent)
+			lastStreamErr = ee.Message
 			ch <- StreamEvent{
 				Type: "assistant",
 				Text: "error: " + ee.Message,
@@ -185,12 +192,12 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 		} else {
 			exitCode = -1
 		}
-		ch <- StreamEvent{
-			Type:       "error",
-			Err:        cmdErr,
-			ExitCode:   exitCode,
-			DurationMS: time.Since(startedAt).Milliseconds(),
+		ev := errorEvent(cmdErr, ErrorSourceAgentProcess, exitCode)
+		ev.DurationMS = time.Since(startedAt).Milliseconds()
+		if lastStreamErr != "" {
+			ev.ErrorCause = lastStreamErr
 		}
+		ch <- ev
 	}
 }
 
@@ -212,6 +219,9 @@ type CodexResultEvent struct {
 	OutputTokens int
 	DurationMS   int64
 	IsError      bool
+	// ErrorMessage carries the human-readable reason from a turn.failed
+	// event (empty for turn.completed).
+	ErrorMessage string
 }
 
 // CodexErrorEvent represents an error in Codex JSONL output.
@@ -429,12 +439,45 @@ func codexItemCompletedText(raw map[string]json.RawMessage) string {
 	return strings.Join(parts, "\n")
 }
 
-// parseCodexResult extracts tokens and duration from turn.completed / turn.failed.
+// codexErrorMessage pulls the human-readable error text out of a turn.failed
+// event. Codex nests it as either error.message (object) or error_message (flat).
+func codexErrorMessage(raw map[string]json.RawMessage) string {
+	if v, ok := raw["error"]; ok {
+		var flat string
+		if err := json.Unmarshal(v, &flat); err == nil && flat != "" {
+			return flat
+		}
+		var nested struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+		}
+		if err := json.Unmarshal(v, &nested); err == nil {
+			if nested.Message != "" {
+				return nested.Message
+			}
+			if nested.Type != "" {
+				return nested.Type
+			}
+		}
+	}
+	if v, ok := raw["error_message"]; ok {
+		var s string
+		if err := json.Unmarshal(v, &s); err == nil && s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 func parseCodexResult(raw map[string]json.RawMessage, isError bool) *CodexResultEvent {
 	re := &CodexResultEvent{IsError: isError}
 
 	if v, ok := raw["model"]; ok {
 		_ = json.Unmarshal(v, &re.Model)
+	}
+
+	if isError {
+		re.ErrorMessage = codexErrorMessage(raw)
 	}
 
 	// duration_ms or durationMs

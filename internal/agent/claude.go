@@ -63,11 +63,11 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 	// If CLAUDE_CONFIG_DIR is set (isolated mode), create the dir and require sandbox settings.
 	if configDir := resolveConfigDir(c.Env, req.Env); configDir != "" {
 		if err := os.MkdirAll(configDir, 0755); err != nil {
-			ch <- StreamEvent{Type: "error", Err: fmt.Errorf("cannot create config dir %s: %w", configDir, err), ExitCode: -1}
+			ch <- errorEvent(fmt.Errorf("cannot create config dir %s: %w", configDir, err), ErrorSourceAteamInternal, -1)
 			return
 		}
 		if !hasSettingsArg(req.ExtraArgs) {
-			ch <- StreamEvent{Type: "error", Err: fmt.Errorf("CLAUDE_CONFIG_DIR is set (%s) but no --settings specified; isolated claude requires sandbox settings", configDir), ExitCode: -1}
+			ch <- errorEvent(fmt.Errorf("CLAUDE_CONFIG_DIR is set (%s) but no --settings specified; isolated claude requires sandbox settings", configDir), ErrorSourceAteamInternal, -1)
 			return
 		}
 	}
@@ -99,7 +99,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
-		ch <- StreamEvent{Type: "error", Err: err, ExitCode: -1}
+		ch <- errorEvent(err, ErrorSourceAgentProcess, -1)
 		return
 	}
 
@@ -110,7 +110,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 	cmd.Stderr = io.MultiWriter(stderrWriters...)
 
 	if err := cmd.Start(); err != nil {
-		ch <- StreamEvent{Type: "error", Err: err, ExitCode: -1}
+		ch <- errorEvent(err, ErrorSourceAgentProcess, -1)
 		return
 	}
 	ch <- StreamEvent{Type: "system", PID: cmd.Process.Pid}
@@ -170,7 +170,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 
 		case "result":
 			res := ev.(*streamutil.ResultEvent)
-			ch <- StreamEvent{
+			evOut := StreamEvent{
 				Type:             "result",
 				Output:           lastAssistantText,
 				Cost:             res.TotalCostUSD,
@@ -183,6 +183,11 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 				IsError:          res.IsError,
 				ContextWindow:    res.MaxContextWindow(),
 			}
+			if res.IsError {
+				evOut.ErrorSource = ErrorSourceAgentAPI
+				evOut.ErrorCause = firstNonEmpty(res.Result, res.Subtype, lastAssistantText)
+			}
+			ch <- evOut
 		}
 	}
 
@@ -195,13 +200,20 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 			exitCode = -1
 		}
 		// Only emit error if we haven't sent a result event already
-		ch <- StreamEvent{
-			Type:       "error",
-			Err:        cmdErr,
-			ExitCode:   exitCode,
-			DurationMS: time.Since(startedAt).Milliseconds(),
+		ev := errorEvent(cmdErr, ErrorSourceAgentProcess, exitCode)
+		ev.DurationMS = time.Since(startedAt).Milliseconds()
+		ch <- ev
+	}
+}
+
+// firstNonEmpty returns the first non-empty string from ss.
+func firstNonEmpty(ss ...string) string {
+	for _, s := range ss {
+		if s != "" {
+			return s
 		}
 	}
+	return ""
 }
 
 // resolveConfigDir returns the CLAUDE_CONFIG_DIR value from request env (priority) or agent env.
