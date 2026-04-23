@@ -44,6 +44,28 @@ type ModelProvider interface {
 	ModelName() string
 }
 
+// Error source values for StreamEvent.ErrorSource / RunSummary.ErrorSource.
+// Kept as exported constants so callers don't duplicate string literals.
+const (
+	ErrorSourceAgentAPI      = "agent_api"      // agent CLI reported is_error=true (e.g. Anthropic/OpenAI API error)
+	ErrorSourceAgentProcess  = "agent_process"  // agent subprocess exited non-zero without a result event (crash, OOM, ...)
+	ErrorSourceAteamTimeout  = "ateam_timeout"  // ateam killed the run via context deadline
+	ErrorSourceAteamInternal = "ateam_internal" // ateam side failure (no result event, not a timeout)
+)
+
+// errorEvent builds a populated StreamEvent of type "error" carrying err.
+// exitCode is typically -1 for setup failures and the process's real exit
+// code once the subprocess has run.
+func errorEvent(err error, source string, exitCode int) StreamEvent {
+	return StreamEvent{
+		Type:        "error",
+		Err:         err,
+		ExitCode:    exitCode,
+		ErrorSource: source,
+		ErrorCause:  err.Error(),
+	}
+}
+
 // Request holds everything an agent needs to execute.
 type Request struct {
 	Prompt     string
@@ -91,6 +113,15 @@ type StreamEvent struct {
 	IsError          bool
 	ExitCode         int
 	Err              error
+
+	// ErrorCause is a human-readable description of why the run failed
+	// (e.g. "API Error: Stream idle timeout - partial response received").
+	// Populated only on failure paths.
+	ErrorCause string
+	// ErrorSource classifies the origin of the failure. One of
+	// "agent_api", "agent_process", "ateam_timeout", "ateam_internal".
+	// Populated only on failure paths.
+	ErrorSource string
 }
 
 // resolveSlice replaces {{VAR}} placeholders in each string element.

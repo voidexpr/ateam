@@ -168,6 +168,11 @@ type RunSummary struct {
 
 	StreamFilePath string
 	StderrFilePath string
+
+	// ErrorSource / ErrorCause classify why the run failed.
+	// Set only when the run ends in error. See internal/agent.ErrorSource*.
+	ErrorSource string
+	ErrorCause  string
 }
 
 // LogQueued writes a "queued" entry to the runner log.
@@ -194,11 +199,15 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			EndedAt:        time.Now(),
 			Duration:       time.Since(startedAt),
 			ExitCode:       -1,
+			IsError:        true,
 			Err:            err,
+			ErrorSource:    agent.ErrorSourceAteamInternal,
+			ErrorCause:     err.Error(),
 			StreamFilePath: streamFile,
 			StderrFilePath: stderrFile,
 		}
 		writeErrorFile(opts.ErrorMessageFilePath, s, "")
+		appendStderrSummary(stderrFile, s)
 		return s
 	}
 
@@ -550,17 +559,12 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 		appendLog(r.LogFile, opts.RoleID, "ok", cwd, cliStr)
 	} else {
 		summary.IsError = true
-		switch {
-		case ctx.Err() == context.DeadlineExceeded:
-			summary.Err = fmt.Errorf("timed out after %d minutes", opts.TimeoutMin)
-		case resultEv != nil && resultEv.Err != nil:
-			summary.Err = fmt.Errorf("agent exited with error: %w", resultEv.Err)
-		case resultEv != nil && resultEv.IsError:
-			summary.Err = fmt.Errorf("agent reported error (is_error=true)")
-		default:
-			summary.Err = fmt.Errorf("agent produced no result event")
-		}
+		source, cause := classifyFailure(ctx, resultEv, opts.TimeoutMin)
+		summary.ErrorSource = source
+		summary.ErrorCause = cause
+		summary.Err = fmt.Errorf("[%s] %s", source, cause)
 		writeErrorFile(opts.ErrorMessageFilePath, *summary, "")
+		appendStderrSummary(summary.StderrFilePath, *summary)
 		appendLog(r.LogFile, opts.RoleID, "error", cwd, cliStr, summary.Err.Error())
 	}
 
@@ -692,6 +696,10 @@ func mergeStringList(obj map[string]any, keyPath []string, values []string) {
 	m[lastKey] = existing
 }
 
+// Truncate shortens s to at most max bytes on a rune boundary, appending "…"
+// when it had to cut. Returns "" for max<=0 and the original s when it fits.
+func Truncate(s string, max int) string { return truncate(s, max) }
+
 func truncate(s string, max int) string {
 	if max <= 0 {
 		return ""
@@ -721,6 +729,44 @@ func sendProgress(ch chan<- RunProgress, p RunProgress) {
 	case ch <- p:
 	default:
 	}
+}
+
+// classifyFailure determines why a run failed given the context state and
+// the final stream event received (may be nil).
+func classifyFailure(ctx context.Context, resultEv *agent.StreamEvent, timeoutMin int) (source, cause string) {
+	switch {
+	case ctx.Err() == context.DeadlineExceeded:
+		return agent.ErrorSourceAteamTimeout,
+			fmt.Sprintf("ateam timed out the run after %d minutes", timeoutMin)
+	case resultEv != nil && resultEv.ErrorCause != "":
+		src := resultEv.ErrorSource
+		if src == "" {
+			src = agent.ErrorSourceAgentProcess
+		}
+		return src, resultEv.ErrorCause
+	case resultEv != nil && resultEv.Err != nil:
+		return agent.ErrorSourceAgentProcess, resultEv.Err.Error()
+	case resultEv != nil && resultEv.IsError:
+		return agent.ErrorSourceAgentAPI, "agent reported is_error=true with no message"
+	default:
+		return agent.ErrorSourceAteamInternal, "agent produced no result event"
+	}
+}
+
+// appendStderrSummary writes a short, grep-able failure summary to the stderr
+// log so the cause is visible without parsing _stream.jsonl. No-op if path is
+// empty or the file cannot be opened.
+func appendStderrSummary(path string, s RunSummary) {
+	if path == "" || s.ErrorSource == "" {
+		return
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "\n--- ateam: run failed ---\nsource: %s\ncause: %s\nexit: %d\nduration: %s\n",
+		s.ErrorSource, s.ErrorCause, s.ExitCode, FormatDuration(s.Duration))
 }
 
 func writeErrorFile(path string, s RunSummary, stderr string) {

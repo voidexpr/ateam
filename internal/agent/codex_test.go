@@ -18,6 +18,27 @@ func TestParseCodexLineTurnStarted(t *testing.T) {
 	}
 }
 
+func TestParseCodexLineTurnFailedCarriesError(t *testing.T) {
+	line := []byte(`{"type":"turn.failed","error":{"message":"OpenAI stream timed out","type":"stream_timeout"}}`)
+	typ, ev, err := ParseCodexLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typ != "result" {
+		t.Fatalf("type = %q, want result", typ)
+	}
+	re, ok := ev.(*CodexResultEvent)
+	if !ok {
+		t.Fatalf("expected *CodexResultEvent, got %T", ev)
+	}
+	if !re.IsError {
+		t.Error("IsError = false, want true")
+	}
+	if re.ErrorMessage != "OpenAI stream timed out" {
+		t.Errorf("ErrorMessage = %q", re.ErrorMessage)
+	}
+}
+
 func TestParseCodexLineExecCommand(t *testing.T) {
 	line := []byte(`{"type":"exec_command_begin","command":"ls -la"}`)
 	typ, ev, err := ParseCodexLine(line)

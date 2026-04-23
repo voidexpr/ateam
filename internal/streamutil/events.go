@@ -49,7 +49,17 @@ type ResultEvent struct {
 	DurationMS   int64   `json:"duration_ms"`
 	NumTurns     int     `json:"num_turns"`
 	IsError      bool    `json:"is_error"`
-	Usage        struct {
+	// Subtype distinguishes success vs. failure kinds: "success",
+	// "error_during_execution", "error_max_turns", etc.
+	Subtype string `json:"subtype"`
+	// Result carries the human-readable final text; when IsError is true
+	// this is the API error message (e.g. "Stream idle timeout - partial
+	// response received").
+	Result string `json:"result"`
+	// TerminalReason is set by Claude for stream-terminated runs, e.g.
+	// "completed", "interrupted".
+	TerminalReason string `json:"terminal_reason"`
+	Usage          struct {
 		InputTokens           int `json:"input_tokens"`
 		OutputTokens          int `json:"output_tokens"`
 		CacheReadInputTokens  int `json:"cache_read_input_tokens"`

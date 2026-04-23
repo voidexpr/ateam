@@ -111,6 +111,9 @@ func printRunsTable(rows []calldb.RecentRow) {
 
 func runStatus(r calldb.RecentRow) string {
 	if r.IsError {
+		if msg := runner.Truncate(runner.SingleLineText(r.ErrorMessage), 80); msg != "" {
+			return "error: " + msg
+		}
 		return "error"
 	}
 	if r.EndedAt != "" {
