@@ -104,6 +104,46 @@ func TestAppendStderrSummaryWritesExpectedFields(t *testing.T) {
 	}
 }
 
+func TestAppendStderrSummaryFlagsEstimatedOnProcessFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stderr.log")
+
+	summary := RunSummary{
+		ExitCode:    1,
+		Duration:    time.Second,
+		ErrorSource: agent.ErrorSourceAgentProcess,
+		ErrorCause:  "exit status 1",
+		InputTokens: 150,
+	}
+	appendStderrSummary(path, summary)
+
+	got, _ := os.ReadFile(path)
+	out := string(got)
+	if !strings.Contains(out, "estimated: true") {
+		t.Errorf("missing 'estimated: true' for process failure with tokens; got:\n%s", out)
+	}
+}
+
+func TestAppendStderrSummarySkipsEstimatedForAgentAPI(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stderr.log")
+
+	summary := RunSummary{
+		ExitCode:    1,
+		Duration:    time.Second,
+		ErrorSource: agent.ErrorSourceAgentAPI,
+		ErrorCause:  "Stream idle timeout",
+		InputTokens: 150,
+	}
+	appendStderrSummary(path, summary)
+
+	got, _ := os.ReadFile(path)
+	out := string(got)
+	if strings.Contains(out, "estimated: true") {
+		t.Errorf("agent_api failure should not be marked estimated; got:\n%s", out)
+	}
+}
+
 func TestAppendStderrSummaryNoOpWithoutSource(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "stderr.log")
