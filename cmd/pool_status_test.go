@@ -9,6 +9,52 @@ import (
 	"github.com/ateam/internal/runner"
 )
 
+func TestPoolStatusHeaderIncludesEstTokens(t *testing.T) {
+	lines := poolStatusLinesForWidth([]poolStatusRow{
+		{Label: "a", State: "queued"},
+	}, 120)
+	if !strings.Contains(lines[0], "EstTOKENS") {
+		t.Fatalf("expected header to include EstTOKENS, got %q", lines[0])
+	}
+}
+
+func TestPoolStatusRowShowsEstTokens(t *testing.T) {
+	lines := poolStatusLinesForWidth([]poolStatusRow{
+		{ExecID: 7, Label: "live", State: "running", EstTokens: 12345, Calls: 2, Detail: "1m2s"},
+	}, 120)
+	if len(lines) < 2 {
+		t.Fatalf("expected header plus row, got %d lines", len(lines))
+	}
+	// 12345 tokens → FmtTokens renders as "12.3K" (see internal/display).
+	if !strings.Contains(lines[1], "12.3K") {
+		t.Errorf("expected row to show formatted EstTOKENS; got %q", lines[1])
+	}
+}
+
+func TestNextPoolStatusRowTracksEstTokensMonotonically(t *testing.T) {
+	row := poolStatusRow{Label: "l", State: "running", EstTokens: 500}
+	// Subsequent progress reports larger cumulative totals — row takes them.
+	next := nextPoolStatusRow(row, runner.RunProgress{
+		Phase:                  runner.PhaseTool,
+		ToolName:               "Bash",
+		CumulativeInputTokens:  400,
+		CumulativeOutputTokens: 300,
+	})
+	if next.EstTokens != 700 {
+		t.Errorf("EstTokens = %d, want 700 (400+300)", next.EstTokens)
+	}
+	// A later event with smaller totals must not regress the column.
+	back := nextPoolStatusRow(next, runner.RunProgress{
+		Phase:                  runner.PhaseTool,
+		ToolName:               "Bash",
+		CumulativeInputTokens:  0,
+		CumulativeOutputTokens: 0,
+	})
+	if back.EstTokens != 700 {
+		t.Errorf("EstTokens regressed to %d, want 700", back.EstTokens)
+	}
+}
+
 func TestPoolStatusLinesIncludeIDColumn(t *testing.T) {
 	lines := poolStatusLinesForWidth([]poolStatusRow{
 		{Label: "security", State: "queued"},

@@ -61,6 +61,8 @@ and produce markdown reports. Defaults to all enabled roles.
 
 Works from any project directory — discovers the .ateamorg/ and .ateam/ structure.
 
+` + progressColumnsHelp("role") + `
+
 Example:
   ateam report
   ateam report --roles testing_basic,security
