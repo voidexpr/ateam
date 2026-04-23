@@ -140,6 +140,13 @@ type RunProgress struct {
 	StderrFilePath string
 	ContextTokens  int
 	ContextWindow  int
+
+	// Cumulative usage so far (populated as assistant events arrive; zero
+	// until the first one). EstimatedCost is computed via the agent's
+	// pricing table and is 0 when no table is configured.
+	CumulativeInputTokens  int
+	CumulativeOutputTokens int
+	EstimatedCost          float64
 }
 
 // RunSummary is the final result returned by Run.
@@ -355,24 +362,30 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		resultEv          *agent.StreamEvent
 		peakContextTokens int
 		contextWindow     int
+		cumInputTokens    int
+		cumOutputTokens   int
+		estimatedCost     float64
 	)
 
 	emitProgress := func(phase, toolName, toolInput, content string, toolCount, evCount int) {
 		sendProgress(progress, RunProgress{
-			ExecID:         callID,
-			RoleID:         opts.RoleID,
-			Phase:          phase,
-			ToolName:       toolName,
-			ToolInput:      toolInput,
-			Content:        content,
-			ToolCount:      toolCount,
-			EventCount:     evCount,
-			StartedAt:      startedAt,
-			Elapsed:        time.Since(startedAt),
-			StreamFilePath: streamFile,
-			StderrFilePath: stderrFile,
-			ContextTokens:  peakContextTokens,
-			ContextWindow:  contextWindow,
+			ExecID:                 callID,
+			RoleID:                 opts.RoleID,
+			Phase:                  phase,
+			ToolName:               toolName,
+			ToolInput:              toolInput,
+			Content:                content,
+			ToolCount:              toolCount,
+			EventCount:             evCount,
+			StartedAt:              startedAt,
+			Elapsed:                time.Since(startedAt),
+			StreamFilePath:         streamFile,
+			StderrFilePath:         stderrFile,
+			ContextTokens:          peakContextTokens,
+			ContextWindow:          contextWindow,
+			CumulativeInputTokens:  cumInputTokens,
+			CumulativeOutputTokens: cumOutputTokens,
+			EstimatedCost:          estimatedCost,
 		})
 	}
 
@@ -381,6 +394,18 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 
 		if ev.ContextTokens > peakContextTokens {
 			peakContextTokens = ev.ContextTokens
+		}
+		// Non-terminal events (assistant, tool_use) carry running totals
+		// from the agent. Terminal events (result, error) carry final
+		// totals — still monotonically ≥ the last running snapshot.
+		if ev.InputTokens > cumInputTokens {
+			cumInputTokens = ev.InputTokens
+		}
+		if ev.OutputTokens > cumOutputTokens {
+			cumOutputTokens = ev.OutputTokens
+		}
+		if ev.Cost > estimatedCost {
+			estimatedCost = ev.Cost
 		}
 
 		switch ev.Type {
@@ -767,6 +792,12 @@ func appendStderrSummary(path string, s RunSummary) {
 	defer f.Close()
 	fmt.Fprintf(f, "\n--- ateam: run failed ---\nsource: %s\ncause: %s\nexit: %d\nduration: %s\n",
 		s.ErrorSource, s.ErrorCause, s.ExitCode, FormatDuration(s.Duration))
+	// agent_api failures carry real totals from the result event; every
+	// other failure path with non-zero tokens means we reconstructed the
+	// figure from partial assistant events — flag it as estimated.
+	if s.ErrorSource != agent.ErrorSourceAgentAPI && s.InputTokens > 0 {
+		fmt.Fprintf(f, "estimated: true (tokens and cost recovered from partial stream)\n")
+	}
 }
 
 func writeErrorFile(path string, s RunSummary, stderr string) {

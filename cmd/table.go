@@ -412,6 +412,7 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 			Args:         ac.Args,
 			Model:        ac.Model,
 			DefaultModel: defaultModel,
+			Pricing:      pricing,
 			Env:          ac.Env,
 		}
 	}

@@ -22,6 +22,7 @@ type ClaudeAgent struct {
 	Args         []string          // base args from config, e.g. ["-p", "--output-format", "stream-json", "--verbose"]
 	Model        string            // optional model override (passed as --model flag)
 	DefaultModel string            // assumed model for pricing when stream doesn't report one
+	Pricing      PricingTable      // cost estimation lookup table (used to estimate cost when no result event arrives)
 	Env          map[string]string // env vars to set (empty string = exclude from parent env)
 }
 
@@ -121,6 +122,25 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	var lastAssistantText string
+	var (
+		inputTokens, outputTokens          int
+		cacheReadTokens, cacheCreateTokens int
+		resolvedModel                      string
+	)
+	// estimate returns the running cumulative fields to attach to any
+	// StreamEvent emitted from inside the scan loop or after cmd.Wait().
+	estimate := func() StreamEvent {
+		return StreamEvent{
+			Model:            firstNonEmpty(resolvedModel, c.ModelName()),
+			InputTokens:      inputTokens,
+			OutputTokens:     outputTokens,
+			CacheReadTokens:  cacheReadTokens,
+			CacheWriteTokens: cacheCreateTokens,
+			Cost: EstimateCost(c.Pricing,
+				firstNonEmpty(resolvedModel, c.ModelName()),
+				c.DefaultModel, inputTokens, outputTokens),
+		}
+	}
 
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -138,30 +158,42 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 		switch typ {
 		case "system":
 			sys := ev.(*streamutil.SystemEvent)
-			ch <- StreamEvent{Type: "system", SessionID: sys.SessionID}
+			if sys.Model != "" {
+				resolvedModel = sys.Model
+			}
+			ch <- StreamEvent{Type: "system", SessionID: sys.SessionID, Model: sys.Model}
 
 		case "assistant":
 			ast := ev.(*streamutil.AssistantEvent)
 			u := ast.Message.Usage
 			ctxTokens := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+			inputTokens += u.InputTokens
+			outputTokens += u.OutputTokens
+			cacheReadTokens += u.CacheReadInputTokens
+			cacheCreateTokens += u.CacheCreationInputTokens
+			cum := estimate()
 			var textParts []string
 			for _, block := range ast.Message.Content {
 				switch block.Type {
 				case "text":
 					textParts = append(textParts, block.Text)
 				case "tool_use":
-					ch <- StreamEvent{
-						Type:          "tool_use",
-						ToolName:      block.Name,
-						ToolInput:     strings.TrimSpace(string(block.Input)),
-						ContextTokens: ctxTokens,
-					}
+					toolEv := cum
+					toolEv.Type = "tool_use"
+					toolEv.ToolName = block.Name
+					toolEv.ToolInput = strings.TrimSpace(string(block.Input))
+					toolEv.ContextTokens = ctxTokens
+					ch <- toolEv
 				}
 			}
 			if len(textParts) > 0 {
 				text := strings.Join(textParts, "")
 				lastAssistantText = text
-				ch <- StreamEvent{Type: "assistant", Text: text, ContextTokens: ctxTokens}
+				textEv := cum
+				textEv.Type = "assistant"
+				textEv.Text = text
+				textEv.ContextTokens = ctxTokens
+				ch <- textEv
 			}
 
 		case "tool_result":
@@ -199,9 +231,18 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 		} else {
 			exitCode = -1
 		}
-		// Only emit error if we haven't sent a result event already
+		// Only emit error if we haven't sent a result event already.
+		// Attach the running token totals + estimated cost so the DB
+		// row reflects partial usage instead of zeroes.
 		ev := errorEvent(cmdErr, ErrorSourceAgentProcess, exitCode)
 		ev.DurationMS = time.Since(startedAt).Milliseconds()
+		cum := estimate()
+		ev.Model = cum.Model
+		ev.InputTokens = cum.InputTokens
+		ev.OutputTokens = cum.OutputTokens
+		ev.CacheReadTokens = cum.CacheReadTokens
+		ev.CacheWriteTokens = cum.CacheWriteTokens
+		ev.Cost = cum.Cost
 		ch <- ev
 	}
 }
