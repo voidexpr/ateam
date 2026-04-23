@@ -17,16 +17,22 @@ const (
 	poolStateRunning = "running"
 	poolStateDone    = "done"
 	poolStateError   = "ERROR"
-	poolStatusHeader = "  ID      LABEL                     STATUS   CALLS  DETAILS"
+
+	// poolStatusRowFmt is the shared template used for both the header
+	// and each data row, so column widths can't drift between them.
+	poolStatusRowFmt = "  %-7s %-25s %-8s %-9s %-6s %s"
 )
 
+var poolStatusHeader = fmt.Sprintf(poolStatusRowFmt, "ID", "LABEL", "STATUS", "EstTOKENS", "CALLS", "DETAILS")
+
 type poolStatusRow struct {
-	ExecID int64
-	Label  string
-	State  string
-	Calls  int
-	Detail string
-	Path   string
+	ExecID    int64
+	Label     string
+	State     string
+	EstTokens int // running total of input+output tokens; estimated from partial stream while the run is live
+	Calls     int
+	Detail    string
+	Path      string
 }
 
 func newPoolStatusRows(labels []string) ([]poolStatusRow, map[string]int) {
@@ -44,6 +50,21 @@ func newPoolStatusRows(labels []string) ([]poolStatusRow, map[string]int) {
 
 func clonePoolStatusRows(rows []poolStatusRow) []poolStatusRow {
 	return append([]poolStatusRow(nil), rows...)
+}
+
+// progressColumnsHelp returns a paragraph describing the live progress
+// table for inclusion in command --help text. unit is the noun for each
+// row ("task", "role", etc).
+func progressColumnsHelp(unit string) string {
+	return fmt.Sprintf(`Progress table columns:
+  ID, LABEL, STATUS, EstTOKENS, CALLS, DETAILS
+
+  EstTOKENS is the running input+output token count for each %[1]s. While a
+  %[1]s is live it is an *estimate* built from the per-turn usage reported in
+  the stream (the final total only arrives on the agent's terminal result
+  event); once the %[1]s finishes it reflects the authoritative total from
+  that event. The column exists so a crash or timeout before the terminal
+  event still gives visibility into how much the %[1]s consumed.`, unit)
 }
 
 // streamFilePrefix returns the log file prefix (without _stream.jsonl suffix)
@@ -72,7 +93,11 @@ func poolStatusRowLines(row poolStatusRow, width int) []string {
 	if row.State != poolStateQueued || row.Calls > 0 {
 		calls = strconv.Itoa(row.Calls)
 	}
-	line := strings.TrimRight(fmt.Sprintf("  %-7s %-25s %-8s %-6s %s", execID, row.Label, row.State, calls, row.Detail), " ")
+	est := ""
+	if row.EstTokens > 0 {
+		est = display.FmtTokens(int64(row.EstTokens))
+	}
+	line := strings.TrimRight(fmt.Sprintf(poolStatusRowFmt, execID, row.Label, row.State, est, calls, row.Detail), " ")
 	if row.State != poolStateDone || row.Path == "" {
 		return []string{fitPoolStatusLine(line, width)}
 	}
@@ -119,6 +144,11 @@ func nextPoolStatusRow(row poolStatusRow, p runner.RunProgress) poolStatusRow {
 	next := row
 	next.ExecID = p.ExecID
 	next.Calls = p.ToolCount
+	// Keep the cumulative token estimate monotonically increasing so a
+	// terminal event that briefly reports 0 doesn't blank the column.
+	if t := p.CumulativeInputTokens + p.CumulativeOutputTokens; t > next.EstTokens {
+		next.EstTokens = t
+	}
 	switch p.Phase {
 	case runner.PhaseInit:
 		next.State = poolStateRunning
@@ -152,6 +182,9 @@ func finalizedPoolStatusRow(row poolStatusRow, summary runner.RunSummary, state,
 	next.State = state
 	next.Detail = detail
 	next.Path = path
+	if t := summary.InputTokens + summary.OutputTokens; t > next.EstTokens {
+		next.EstTokens = t
+	}
 	return next
 }
 

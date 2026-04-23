@@ -40,6 +40,8 @@ var parallelCmd = &cobra.Command{
 Each positional argument is a prompt (text or @filepath). All tasks share a
 single runner instance and task group for unified cost tracking.
 
+` + progressColumnsHelp("task") + `
+
 Example:
   ateam parallel "analyze auth module" "analyze payment module"
   ateam parallel @task1.md @task2.md @task3.md --labels auth,payment,users
