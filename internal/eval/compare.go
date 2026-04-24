@@ -14,6 +14,11 @@ import (
 func PrintComparison(w io.Writer, roleID string, base, candidate *RunResult, judge *JudgeResult) {
 	fmt.Fprintf(w, "=== Eval: %s ===\n\n", roleID)
 
+	if base == nil || candidate == nil {
+		fmt.Fprintln(w, "(comparison unavailable: missing run result)")
+		return
+	}
+
 	fmt.Fprintln(w, "Cost & metrics:")
 	b, c := base.Summary, candidate.Summary
 	rows := []metricRow{
