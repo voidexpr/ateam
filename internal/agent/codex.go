@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -117,7 +119,11 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 		}
 
 		typ, ev, parseErr := ParseCodexLine(line)
-		if parseErr != nil || ev == nil {
+		if parseErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: skipping malformed codex JSONL line: %v\n", parseErr)
+			continue
+		}
+		if ev == nil {
 			continue
 		}
 
@@ -230,7 +236,19 @@ type CodexErrorEvent struct {
 }
 
 // ParseCodexLine parses a single JSONL line from codex exec --json output.
-func ParseCodexLine(line []byte) (string, any, error) {
+//
+// Recovers from panics inside encoding/json (same defense as
+// streamutil.ParseClaudeLine) so a single pathological line can't tear
+// down the whole run.
+func ParseCodexLine(line []byte) (typ string, ev any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			typ = ""
+			ev = nil
+			err = fmt.Errorf("panic in codex JSONL parser (line len=%d): %v", len(line), r)
+		}
+	}()
+
 	line = streamutil.TrimBOM(line)
 	if len(line) == 0 {
 		return "", nil, nil

@@ -1,7 +1,10 @@
 // Package streamutil defines shared JSONL event types and parsing utilities for agent output streams.
 package streamutil
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // Claude JSONL event types shared between agent and runner packages.
 // Superset of fields from both consumers — the JSON decoder ignores absent fields.
@@ -85,7 +88,20 @@ func (r *ResultEvent) MaxContextWindow() int {
 // ParseClaudeLine parses a single JSONL line from Claude's stream-json output.
 // Returns the event type, the parsed struct, and any error.
 // Unknown types return ("", nil, nil).
-func ParseClaudeLine(line []byte) (string, any, error) {
+//
+// Recovers from panics inside encoding/json (observed on Go 1.26.2 with
+// certain large payloads) and surfaces them as errors so a single
+// corrupt or stdlib-tripping line doesn't tear down the whole run. The
+// raw line is still on disk in _stream.jsonl for post-mortem debugging.
+func ParseClaudeLine(line []byte) (typ string, ev any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			typ = ""
+			ev = nil
+			err = fmt.Errorf("panic in claude JSONL parser (line len=%d): %v", len(line), r)
+		}
+	}()
+
 	line = TrimBOM(line)
 	if len(line) == 0 {
 		return "", nil, nil

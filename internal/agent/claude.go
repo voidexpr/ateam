@@ -151,7 +151,14 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 		}
 
 		typ, ev, parseErr := parseClaudeLine(line)
-		if parseErr != nil || ev == nil {
+		if parseErr != nil {
+			// parseClaudeLine recovers panics from encoding/json and
+			// surfaces them as errors — never silently swallow them so
+			// an operator can tell a run produced garbage lines.
+			fmt.Fprintf(os.Stderr, "Warning: skipping malformed claude JSONL line: %v\n", parseErr)
+			continue
+		}
+		if ev == nil {
 			continue
 		}
 
