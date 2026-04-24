@@ -147,7 +147,7 @@ func installPrompt(projectDir, roleID, promptText string) (func(), error) {
 		return func() {}, nil
 	}
 	path := filepath.Join(projectDir, "roles", roleID, prompts.ReportPromptFile)
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
 	}
 
