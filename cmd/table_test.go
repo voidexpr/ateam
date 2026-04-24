@@ -114,3 +114,42 @@ func TestRequireProjectDBSucceedsWhenExists(t *testing.T) {
 	}
 	db.Close()
 }
+
+func TestCheckConcurrentRunsEnv(t *testing.T) {
+	// (a) org mode with empty ProjectID → error
+	t.Run("OrgModeEmptyProjectID", func(t *testing.T) {
+		env := &root.ResolvedEnv{
+			OrgDir:    "/some/org/.ateamorg",
+			SourceDir: "", // causes ProjectID() == ""
+		}
+		err := checkConcurrentRunsEnv(nil, env, "code", nil)
+		if err == nil {
+			t.Fatal("expected error when OrgDir is set but ProjectID is empty")
+		}
+	})
+
+	// (b) non-org mode with empty ProjectID → no error
+	t.Run("NonOrgModeEmptyProjectID", func(t *testing.T) {
+		env := &root.ResolvedEnv{
+			OrgDir:    "",
+			SourceDir: "",
+		}
+		err := checkConcurrentRunsEnv(nil, env, "code", nil)
+		if err != nil {
+			t.Fatalf("expected no error when OrgDir is empty, got: %v", err)
+		}
+	})
+
+	// (c) org mode with valid ProjectID → delegates to checkConcurrentRuns (nil db returns nil)
+	t.Run("OrgModeValidProjectID", func(t *testing.T) {
+		orgDir := "/some/org/.ateamorg"
+		env := &root.ResolvedEnv{
+			OrgDir:    orgDir,
+			SourceDir: "/some/org/myproject",
+		}
+		err := checkConcurrentRunsEnv(nil, env, "code", nil)
+		if err != nil {
+			t.Fatalf("expected no error when ProjectID is valid, got: %v", err)
+		}
+	})
+}
