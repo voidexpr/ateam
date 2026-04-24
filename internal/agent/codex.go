@@ -41,6 +41,7 @@ func (c *CodexAgent) CloneWithResolvedTemplates(replacer *strings.Replacer) Agen
 	clone := *c
 	clone.Args = resolveSlice(c.Args, replacer)
 	clone.Env = resolveStringMap(c.Env, replacer)
+	clone.Pricing = c.Pricing.Clone()
 	return &clone
 }
 
