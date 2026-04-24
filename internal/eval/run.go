@@ -81,6 +81,9 @@ func RunEval(ctx context.Context, roleID string, base, candidate Variant, timeou
 	}()
 	wg.Wait()
 	if errBase != nil {
+		// Intentional: discard any successful candidate result when base fails.
+		// A comparison without a base is meaningless, and surfacing a partial
+		// candidate result would mislead callers into thinking base succeeded.
 		return nil, nil, fmt.Errorf("base run: %w", errBase)
 	}
 	if errCand != nil {
