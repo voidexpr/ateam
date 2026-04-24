@@ -59,8 +59,9 @@ Cloning happens at the top of `Runner.Run`:
 - `Runner.Container.Clone()` → per-task container with independent slice
   and map backing memory.
 - `ResolveAgentTemplateArgs(r.Agent, vars)` → per-task agent via
-  `Agent.CloneWithResolvedTemplates`, which re-allocates `Args` and
-  `Env`.
+  `Agent.CloneWithResolvedTemplates`, which re-allocates `Args`, `Env`,
+  and `Pricing` (see `PricingTable.Clone`). No map or slice backing
+  memory is shared between clones and the original.
 
 Do not spread `Clone()` calls through sub-helpers. If you find yourself
 cloning inside a Run sub-function, lift it to `Run` instead.
@@ -126,6 +127,9 @@ them via `c.Env` on their per-task clone; containers receive them via
 - `internal/runner/race_test.go`:
   - `TestResolveAgentTemplateArgsConcurrentRace/{claude,codex}` —
     clone returns fresh `Args` backing memory.
+  - `TestResolveAgentTemplateArgsClonesPricing/{claude,codex}` —
+    clone returns fresh `Pricing` map; writes through a clone don't
+    affect the original.
   - `TestRunPoolSharedContainerRace` — Docker container clone isolates
     `ExtraArgs` / `ExtraVolumes` / `Env`.
   - `TestRunPoolSharedDockerExecRace` — same for docker-exec.

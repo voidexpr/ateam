@@ -101,6 +101,81 @@ func argsOf(a agent.Agent) []string {
 	}
 }
 
+// pricingOf reads the Pricing map of any supported Agent impl.
+func pricingOf(a agent.Agent) agent.PricingTable {
+	switch v := a.(type) {
+	case *agent.ClaudeAgent:
+		return v.Pricing
+	case *agent.CodexAgent:
+		return v.Pricing
+	default:
+		return nil
+	}
+}
+
+// =============================================================================
+// REGRESSION: CloneWithResolvedTemplates used to shallow-copy the Pricing map,
+// so concurrent pool workers operated on the same backing memory. Reads are
+// safe today but the shared map was an invariant-by-convention waiting to
+// break as soon as someone added a write path. Clone must now deep-copy.
+// =============================================================================
+
+func TestResolveAgentTemplateArgsClonesPricing(t *testing.T) {
+	cases := []struct {
+		name  string
+		build func(p agent.PricingTable) agent.Agent
+	}{
+		{
+			name: "claude",
+			build: func(p agent.PricingTable) agent.Agent {
+				return &agent.ClaudeAgent{Command: "claude", Pricing: p}
+			},
+		},
+		{
+			name: "codex",
+			build: func(p agent.PricingTable) agent.Agent {
+				return &agent.CodexAgent{Command: "codex", Pricing: p}
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			original := agent.PricingTable{
+				"m1": {InputPerToken: 1e-5, OutputPerToken: 3e-5},
+				"m2": {InputPerToken: 2e-5, OutputPerToken: 4e-5},
+			}
+			a := tc.build(original)
+
+			var wg sync.WaitGroup
+			const goroutines = 20
+			for i := 0; i < goroutines; i++ {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					clone := ResolveAgentTemplateArgs(a, TemplateVars{Role: "r", ProjectDir: "p"})
+					cp := pricingOf(clone)
+					if cp == nil {
+						t.Errorf("clone %d: nil Pricing", i)
+						return
+					}
+					// Writing through the clone must not affect the original.
+					cp[fmt.Sprintf("w%d", i)] = agent.ModelPrice{InputPerToken: float64(i)}
+				}(i)
+			}
+			wg.Wait()
+
+			// The shared original must still hold only its two initial keys.
+			if got := len(pricingOf(a)); got != 2 {
+				t.Errorf("shared Pricing mutated: len = %d, want 2", got)
+			}
+			if _, ok := pricingOf(a)["w0"]; ok {
+				t.Errorf("shared Pricing gained a key from a clone — map was shallow-copied")
+			}
+		})
+	}
+}
+
 func TestResolveAgentTemplateArgsDoesNotMutateSharedAgent(t *testing.T) {
 	// Even without concurrency, the mutation is a problem:
 	// After resolving for role "security", a second resolve for role "testing"
