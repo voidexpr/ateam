@@ -127,7 +127,7 @@ func runClaude(cmd *cobra.Command, args []string) error {
 func setEnv(env []string, key, value string) []string {
 	prefix := key + "="
 	for i, e := range env {
-		if len(e) > len(prefix) && e[:len(prefix)] == prefix {
+		if strings.HasPrefix(e, prefix) {
 			env[i] = prefix + value
 			return env
 		}
@@ -139,7 +139,7 @@ func unsetEnv(env []string, key string) []string {
 	prefix := key + "="
 	out := env[:0]
 	for _, e := range env {
-		if len(e) > len(prefix) && e[:len(prefix)] == prefix {
+		if strings.HasPrefix(e, prefix) {
 			continue
 		}
 		out = append(out, e)
