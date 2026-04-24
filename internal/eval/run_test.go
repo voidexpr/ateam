@@ -226,3 +226,61 @@ func TestRunEval_CandidateFailure(t *testing.T) {
 		t.Errorf("base result Side = %v, want %v", br.Side, SideBase)
 	}
 }
+
+func TestRunEval_BaseFailure(t *testing.T) {
+	ctx := context.Background()
+	base := makeEvalVariant(t, SideBase, "", errors.New("base agent error"))
+	candidate := makeEvalVariant(t, SideCandidate, "candidate report", nil)
+
+	br, cr, err := RunEval(ctx, "testrole", base, candidate, 1, false)
+	if err == nil {
+		t.Fatal("expected non-nil error for base failure")
+	}
+	if br != nil {
+		t.Errorf("base result should be nil on base failure, got %v", br)
+	}
+	if cr != nil {
+		t.Errorf("candidate result should be nil on base failure, got %v", cr)
+	}
+}
+
+func TestRunEval_ParallelCandidateFailure(t *testing.T) {
+	ctx := context.Background()
+	base := makeEvalVariant(t, SideBase, "base parallel report", nil)
+	base.Dir = t.TempDir()
+	candidate := makeEvalVariant(t, SideCandidate, "", errors.New("parallel candidate error"))
+	candidate.Dir = t.TempDir()
+
+	br, cr, err := RunEval(ctx, "testrole", base, candidate, 1, false)
+	if err == nil {
+		t.Fatal("expected non-nil error for parallel candidate failure")
+	}
+	if br == nil {
+		t.Error("base result should be preserved when candidate fails in parallel mode")
+	}
+	if cr != nil {
+		t.Errorf("candidate result should be nil on failure, got %v", cr)
+	}
+	if br != nil && br.Side != SideBase {
+		t.Errorf("base result Side = %v, want %v", br.Side, SideBase)
+	}
+}
+
+func TestRunEval_ParallelBaseFailure(t *testing.T) {
+	ctx := context.Background()
+	base := makeEvalVariant(t, SideBase, "", errors.New("parallel base error"))
+	base.Dir = t.TempDir()
+	candidate := makeEvalVariant(t, SideCandidate, "candidate parallel report", nil)
+	candidate.Dir = t.TempDir()
+
+	br, cr, err := RunEval(ctx, "testrole", base, candidate, 1, false)
+	if err == nil {
+		t.Fatal("expected non-nil error for parallel base failure")
+	}
+	if br != nil {
+		t.Errorf("base result should be nil on base failure, got %v", br)
+	}
+	if cr != nil {
+		t.Errorf("candidate result should be discarded when base fails, got %v", cr)
+	}
+}
