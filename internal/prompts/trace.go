@@ -59,17 +59,17 @@ func traceRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt string, 
 	}
 
 	if s := traceFileOr3Level(
-		filepath.Join(projectDir, baseFile),
-		filepath.Join(orgDir, baseFile),
-		filepath.Join(orgDir, "defaults", baseFile),
+		filepath.Join(projectDir, "roles", roleID, roleFile),
+		filepath.Join(orgDir, "roles", roleID, roleFile),
+		filepath.Join(orgDir, "defaults", "roles", roleID, roleFile),
 	); s != nil {
 		sources = append(sources, *s)
 	}
 
 	if s := traceFileOr3Level(
-		filepath.Join(projectDir, "roles", roleID, roleFile),
-		filepath.Join(orgDir, "roles", roleID, roleFile),
-		filepath.Join(orgDir, "defaults", "roles", roleID, roleFile),
+		filepath.Join(projectDir, baseFile),
+		filepath.Join(orgDir, baseFile),
+		filepath.Join(orgDir, "defaults", baseFile),
 	); s != nil {
 		sources = append(sources, *s)
 	}
