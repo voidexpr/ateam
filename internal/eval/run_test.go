@@ -20,7 +20,7 @@ func TestInstallPrompt_ExistingFile(t *testing.T) {
 	roleID := "testrole"
 	path := filepath.Join(dir, "roles", roleID, prompts.ReportPromptFile)
 
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	if err := os.WriteFile(path, []byte("original content"), 0644); err != nil {
@@ -77,6 +77,26 @@ func TestInstallPrompt_NewFile(t *testing.T) {
 
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("expected file to be removed after restore, got: %v", err)
+	}
+}
+
+func TestInstallPrompt_DirectoryPermissions(t *testing.T) {
+	dir := t.TempDir()
+	roleID := "testrole"
+	path := filepath.Join(dir, "roles", roleID, prompts.ReportPromptFile)
+
+	_, err := installPrompt(dir, roleID, "content")
+	if err != nil {
+		t.Fatalf("installPrompt: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("Stat dir: %v", err)
+	}
+	got := info.Mode().Perm()
+	if got != 0700 {
+		t.Errorf("directory permissions = %04o, want 0700", got)
 	}
 }
 
