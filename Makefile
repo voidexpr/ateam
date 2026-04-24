@@ -1,6 +1,6 @@
 BINARY = ateam
 
-.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy check-tidy check test test-all test-cli test-docker test-docker-live vuln docs lint fmt fmt-check install-hooks run-ci
+.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy check-tidy check-docs check test test-all test-cli test-docker test-docker-live vuln docs lint fmt fmt-check install-hooks run-ci
 
 BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
@@ -46,6 +46,9 @@ tidy:
 
 check-tidy:
 	go mod tidy -diff
+
+check-docs: build-binary
+	./$(BINARY) roles --docs | diff - ROLES.md
 
 # Developer quick health check: tests, formatting, tidiness, linting.
 check: test fmt-check check-tidy lint
