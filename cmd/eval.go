@@ -36,6 +36,7 @@ var (
 	evalDockerAutoSetup bool
 	evalGitWorktree     bool
 	evalGitWorktreeBase string
+	evalForce           bool
 )
 
 var evalCmd = &cobra.Command{
@@ -108,6 +109,7 @@ func init() {
 	evalCmd.MarkFlagsMutuallyExclusive("dirs", "git-worktree")
 
 	addDockerAutoSetupFlag(evalCmd, &evalDockerAutoSetup)
+	addForceFlag(evalCmd, &evalForce)
 
 	_ = evalCmd.MarkFlagRequired("role")
 	_ = evalCmd.MarkFlagRequired("prompt")
@@ -180,6 +182,12 @@ func runEval(cmd *cobra.Command, args []string) error {
 	}
 	defer baseDB.Close()
 	baseRunner.CallDB = baseDB
+
+	if !evalForce {
+		if err := checkConcurrentRunsEnv(baseDB, baseEnv, runner.ActionReport, []string{evalRole}); err != nil {
+			return err
+		}
+	}
 
 	candDB := baseDB
 	if parallel {
