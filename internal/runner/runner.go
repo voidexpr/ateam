@@ -805,7 +805,9 @@ func writeErrorFile(path string, s RunSummary, stderr string) {
 		return
 	}
 	dir := filepath.Dir(path)
-	_ = os.MkdirAll(dir, 0700)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to create error file dir %s: %v\n", dir, err)
+	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Error: %s\n\n", s.RoleID)
@@ -829,14 +831,18 @@ func writeErrorFile(path string, s RunSummary, stderr string) {
 		fmt.Fprintf(&b, "## Partial Output\n\n%s\n", s.Output)
 	}
 
-	_ = os.WriteFile(path, []byte(b.String()), 0600)
+	if err := os.WriteFile(path, []byte(b.String()), 0600); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to write error file %s: %v\n", path, err)
+	}
 }
 
 func appendLog(logFile, roleID, status, cwd, cli string, extra ...string) {
 	if logFile == "" {
 		return
 	}
-	_ = os.MkdirAll(filepath.Dir(logFile), 0700)
+	if err := os.MkdirAll(filepath.Dir(logFile), 0700); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to create log dir %s: %v\n", filepath.Dir(logFile), err)
+	}
 	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		return
@@ -872,11 +878,15 @@ func archivePrompt(historyDir, promptName, prompt string, startedAt time.Time) s
 	if historyDir == "" || promptName == "" {
 		return ""
 	}
-	_ = os.MkdirAll(historyDir, 0700)
+	if err := os.MkdirAll(historyDir, 0700); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to create prompt history dir %s: %v\n", historyDir, err)
+	}
 	ts := startedAt.Format(TimestampFormat)
 	name := strings.ReplaceAll(fmt.Sprintf("%s.%s", ts, promptName), " ", "_")
 	path := filepath.Join(historyDir, name)
-	_ = os.WriteFile(path, []byte(prompt), 0600)
+	if err := os.WriteFile(path, []byte(prompt), 0600); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to archive prompt to %s: %v\n", path, err)
+	}
 	return path
 }
 
@@ -910,6 +920,9 @@ func ArchiveFile(srcPath, archiveDir, name string, ts time.Time) error {
 }
 
 func writeExecFile(path string, startedAt time.Time, opts RunOpts, prompt string, settingsJSON []byte, cliStr, cwd, agentName string) {
+	if path == "" {
+		return
+	}
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "# Command\n")
@@ -941,7 +954,9 @@ func writeExecFile(path string, startedAt time.Time, opts RunOpts, prompt string
 
 	fmt.Fprintf(&b, "\n# Prompt\n%s\n", prompt)
 
-	_ = os.WriteFile(path, []byte(b.String()), 0600)
+	if err := os.WriteFile(path, []byte(b.String()), 0600); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to write exec file %s: %v\n", path, err)
+	}
 }
 
 func extractModel(a agent.Agent) string {

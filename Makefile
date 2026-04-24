@@ -51,7 +51,7 @@ check-docs: build-binary
 	./$(BINARY) roles --docs | diff - ROLES.md
 
 # Developer quick health check: tests, formatting, tidiness, linting.
-check: test fmt-check check-tidy lint
+check: test fmt-check check-tidy check-docs lint
 
 # Full CI check: everything in 'check' plus vulnerability scanning.
 run-ci: check vuln
