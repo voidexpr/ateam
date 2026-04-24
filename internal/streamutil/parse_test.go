@@ -36,6 +36,33 @@ func TestParseClaudeLineUnknownType(t *testing.T) {
 	}
 }
 
+// TestParseClaudeLineRecoversPanic locks in the defensive recover
+// around encoding/json: regardless of what the stdlib does with a
+// pathological line, ParseClaudeLine must return a normal error and
+// must not panic up the stack. This is a regression guard for an
+// observed Go 1.26.2 crash inside (*scanner).pushParseState.
+func TestParseClaudeLineRecoversPanic(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("ParseClaudeLine must not propagate panics; recovered: %v", r)
+		}
+	}()
+	// Deeply nested JSON well past encoding/json's maxNestingDepth is
+	// handled as an error by the stdlib today, but exercises the
+	// scanner-state code path that crashed in production.
+	var b []byte
+	for i := 0; i < 20000; i++ {
+		b = append(b, '[')
+	}
+	for i := 0; i < 20000; i++ {
+		b = append(b, ']')
+	}
+	_, _, err := ParseClaudeLine(b)
+	if err == nil {
+		t.Fatal("expected an error for pathological input, got nil")
+	}
+}
+
 func TestParseClaudeLineResultErrorFields(t *testing.T) {
 	line := `{"type":"result","is_error":true,"subtype":"error_during_execution","terminal_reason":"completed","result":"API Error: Stream idle timeout - partial response received","total_cost_usd":0.12,"duration_ms":42}`
 	typ, ev, err := ParseClaudeLine([]byte(line))
