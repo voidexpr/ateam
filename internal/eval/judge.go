@@ -31,10 +31,29 @@ type JudgeResult struct {
 	Summary   runner.RunSummary
 }
 
-// RunJudge invokes r with a structured prompt asking it to score both reports
-// on coverage/accuracy/actionability/conciseness/overall and return a verdict.
-func RunJudge(ctx context.Context, r *runner.Runner, env *root.ResolvedEnv, roleID, baseReport, candidateReport string, timeoutMin int, verbose bool) (*JudgeResult, error) {
-	prompt := buildJudgePrompt(roleID, baseReport, candidateReport)
+// JudgeKind selects the wording the judge prompt uses to introduce the
+// comparison.
+type JudgeKind string
+
+const (
+	KindReport JudgeKind = "report"
+	KindReview JudgeKind = "review"
+)
+
+// JudgeInput configures a judge run. Subject is interpolated into the prompt
+// as a label; Kind picks the framing (report-vs-review wording).
+type JudgeInput struct {
+	Subject         string
+	Kind            JudgeKind
+	BaseReport      string
+	CandidateReport string
+}
+
+// RunJudge invokes r with a structured prompt asking it to score both
+// artifacts on coverage/accuracy/actionability/conciseness/overall and return
+// a verdict.
+func RunJudge(ctx context.Context, r *runner.Runner, env *root.ResolvedEnv, in JudgeInput, timeoutMin int, verbose bool) (*JudgeResult, error) {
+	prompt := buildJudgePrompt(in)
 
 	ts := time.Now().Format(runner.TimestampFormat)
 	logsDir := filepath.Join(env.ProjectDir, "logs", "eval")
@@ -60,17 +79,26 @@ func RunJudge(ctx context.Context, r *runner.Runner, env *root.ResolvedEnv, role
 	return result, nil
 }
 
-func buildJudgePrompt(roleID, baseReport, candidateReport string) string {
-	return fmt.Sprintf(`You are evaluating two analysis reports produced by the same "%s" role
-run on the same codebase. Report A used one prompt, Report B used another.
+func buildJudgePrompt(in JudgeInput) string {
+	intro := fmt.Sprintf(`You are evaluating two analysis reports for "%s" produced
+on the same codebase. Each side may aggregate one or more roles; compare
+the union of findings, not report-by-report.`, in.Subject)
+	if in.Kind == KindReview {
+		intro = fmt.Sprintf(`You are evaluating two supervisor reviews for "%s" synthesized
+from analysis reports on the same codebase. The two sides may differ in
+which roles ran, in role prompts, or in review prompts. Compare the
+quality of the synthesis itself.`, in.Subject)
+	}
 
-Score EACH report independently from 0.00 to 1.00 on these dimensions:
-- Coverage: did it find real issues; did it miss obvious ones?
+	return fmt.Sprintf(`%s
+
+Score EACH side independently from 0.00 to 1.00 on these dimensions:
+- Coverage: did it surface real issues; did it miss obvious ones?
 - Accuracy: are findings correct; any false positives?
 - Actionability: are recommendations specific enough to implement?
 - Conciseness: is it focused, or padded with generic advice?
 
-Then compute an Overall score for each report.
+Then compute an Overall score for each side.
 
 Return your evaluation in EXACTLY this format (machine-parsed):
 
@@ -103,7 +131,7 @@ Verdict: <one paragraph — which is better and why, or note if they are compara
 # Report B (candidate)
 
 %s
-`, roleID, baseReport, candidateReport)
+`, intro, in.BaseReport, in.CandidateReport)
 }
 
 var scoreLine = regexp.MustCompile(`(?i)^\s*(Coverage|Accuracy|Actionability|Conciseness|Overall)\s*:\s*([0-9.]+)`)

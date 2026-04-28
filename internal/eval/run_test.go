@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ateam/internal/agent"
@@ -131,9 +132,9 @@ func makeEvalVariant(t *testing.T, label Side, response string, errToReturn erro
 		mock = &agent.MockAgent{Response: response}
 	}
 	return Variant{
-		Label:      label,
-		PromptText: "# test prompt\nAnalyze this.",
-		Runner:     &runner.Runner{Agent: mock},
+		Label:  label,
+		Roles:  []RoleRun{{RoleID: "testrole", PromptText: "# test prompt\nAnalyze this."}},
+		Runner: &runner.Runner{Agent: mock},
 		Env: &root.ResolvedEnv{
 			ProjectDir: t.TempDir(),
 			SourceDir:  t.TempDir(),
@@ -146,7 +147,7 @@ func TestRunEval_Serial(t *testing.T) {
 	base := makeEvalVariant(t, SideBase, "base report output", nil)
 	candidate := makeEvalVariant(t, SideCandidate, "candidate report output", nil)
 
-	br, cr, err := RunEval(ctx, "testrole", base, candidate, 1, false)
+	br, cr, err := RunEval(ctx, base, candidate, 1, false)
 	if err != nil {
 		t.Fatalf("RunEval: %v", err)
 	}
@@ -182,7 +183,7 @@ func TestRunEval_Parallel(t *testing.T) {
 	candidate := makeEvalVariant(t, SideCandidate, "candidate parallel output", nil)
 	candidate.Dir = t.TempDir()
 
-	br, cr, err := RunEval(ctx, "testrole", base, candidate, 1, false)
+	br, cr, err := RunEval(ctx, base, candidate, 1, false)
 	if err != nil {
 		t.Fatalf("RunEval parallel: %v", err)
 	}
@@ -212,7 +213,7 @@ func TestRunEval_CandidateFailure(t *testing.T) {
 	base := makeEvalVariant(t, SideBase, "base report", nil)
 	candidate := makeEvalVariant(t, SideCandidate, "", errors.New("agent error"))
 
-	br, cr, err := RunEval(ctx, "testrole", base, candidate, 1, false)
+	br, cr, err := RunEval(ctx, base, candidate, 1, false)
 	if err == nil {
 		t.Fatal("expected non-nil error for candidate failure")
 	}
@@ -232,7 +233,7 @@ func TestRunEval_BaseFailure(t *testing.T) {
 	base := makeEvalVariant(t, SideBase, "", errors.New("base agent error"))
 	candidate := makeEvalVariant(t, SideCandidate, "candidate report", nil)
 
-	br, cr, err := RunEval(ctx, "testrole", base, candidate, 1, false)
+	br, cr, err := RunEval(ctx, base, candidate, 1, false)
 	if err == nil {
 		t.Fatal("expected non-nil error for base failure")
 	}
@@ -251,7 +252,7 @@ func TestRunEval_ParallelCandidateFailure(t *testing.T) {
 	candidate := makeEvalVariant(t, SideCandidate, "", errors.New("parallel candidate error"))
 	candidate.Dir = t.TempDir()
 
-	br, cr, err := RunEval(ctx, "testrole", base, candidate, 1, false)
+	br, cr, err := RunEval(ctx, base, candidate, 1, false)
 	if err == nil {
 		t.Fatal("expected non-nil error for parallel candidate failure")
 	}
@@ -266,6 +267,70 @@ func TestRunEval_ParallelCandidateFailure(t *testing.T) {
 	}
 }
 
+func TestRunEval_NvsM(t *testing.T) {
+	ctx := context.Background()
+	base := makeEvalVariant(t, SideBase, "first", nil)
+	base.Roles = []RoleRun{{RoleID: "r1"}, {RoleID: "r2"}}
+	candidate := makeEvalVariant(t, SideCandidate, "single", nil)
+	candidate.Roles = []RoleRun{{RoleID: "r3"}}
+
+	// MockAgent returns the same Response for every call; that's fine — we
+	// only need to check that the right number of runs happened and that the
+	// summary aggregates per-role results.
+	br, cr, err := RunEval(ctx, base, candidate, 1, false)
+	if err != nil {
+		t.Fatalf("RunEval: %v", err)
+	}
+	if len(br.Runs) != 2 {
+		t.Errorf("base: got %d runs, want 2", len(br.Runs))
+	}
+	if len(cr.Runs) != 1 {
+		t.Errorf("candidate: got %d runs, want 1", len(cr.Runs))
+	}
+	baseMock := base.Runner.Agent.(*agent.MockAgent)
+	if len(baseMock.Requests) != 2 {
+		t.Errorf("base mock called %d times, want 2", len(baseMock.Requests))
+	}
+	// Concatenated report (multi-role base) should include role headers.
+	if !strings.Contains(br.Report, "# Role Report: r1") || !strings.Contains(br.Report, "# Role Report: r2") {
+		t.Errorf("base report missing role headers: %q", br.Report)
+	}
+	// Single-role candidate should not have a header (just the report).
+	if strings.Contains(cr.Report, "# Role Report:") {
+		t.Errorf("single-role candidate should not have role header: %q", cr.Report)
+	}
+}
+
+func TestFormatReportPicksReviewWhenPresent(t *testing.T) {
+	runs := []RoleRunResult{{RoleID: "x", Report: "x report"}}
+	rev := &RoleRunResult{RoleID: "supervisor", Report: "review text"}
+	got := formatReport(runs, rev)
+	if got != "review text" {
+		t.Errorf("formatReport with review = %q, want %q", got, "review text")
+	}
+}
+
+func TestAggregateSummarySumsAndKeepsPeak(t *testing.T) {
+	runs := []RoleRunResult{
+		{Summary: runner.RunSummary{Cost: 0.5, InputTokens: 100, PeakContextTokens: 200, ContextWindow: 1000}},
+		{Summary: runner.RunSummary{Cost: 0.3, InputTokens: 50, PeakContextTokens: 500, ContextWindow: 1000}},
+	}
+	review := &RoleRunResult{Summary: runner.RunSummary{Cost: 0.1, InputTokens: 20, PeakContextTokens: 100}}
+	total := aggregateSummary(runs, review)
+	if total.Cost != 0.9 {
+		t.Errorf("Cost = %v, want 0.9", total.Cost)
+	}
+	if total.InputTokens != 170 {
+		t.Errorf("InputTokens = %d, want 170", total.InputTokens)
+	}
+	if total.PeakContextTokens != 500 {
+		t.Errorf("PeakContextTokens = %d, want 500 (max)", total.PeakContextTokens)
+	}
+	if total.ContextWindow != 1000 {
+		t.Errorf("ContextWindow = %d, want 1000", total.ContextWindow)
+	}
+}
+
 func TestRunEval_ParallelBaseFailure(t *testing.T) {
 	ctx := context.Background()
 	base := makeEvalVariant(t, SideBase, "", errors.New("parallel base error"))
@@ -273,7 +338,7 @@ func TestRunEval_ParallelBaseFailure(t *testing.T) {
 	candidate := makeEvalVariant(t, SideCandidate, "candidate parallel report", nil)
 	candidate.Dir = t.TempDir()
 
-	br, cr, err := RunEval(ctx, "testrole", base, candidate, 1, false)
+	br, cr, err := RunEval(ctx, base, candidate, 1, false)
 	if err == nil {
 		t.Fatal("expected non-nil error for parallel base failure")
 	}
