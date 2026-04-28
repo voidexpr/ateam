@@ -23,6 +23,17 @@ type MockAgent struct {
 	// exercise idle/stall paths in the runner.
 	HoldAfterSystem time.Duration
 
+	// ResultIsError makes the synthetic result event report is_error=true,
+	// mirroring claude's behavior when the API returns a stream-idle
+	// timeout: a rich result event followed by a non-zero process exit.
+	ResultIsError bool
+
+	// ProcessExitAfterResult, when non-zero, makes Run emit an extra
+	// "error" StreamEvent after the result event, simulating cmd.Wait
+	// returning a non-zero exit code (e.g. claude exiting 1 because
+	// is_error=true).
+	ProcessExitAfterResult int
+
 	mu       sync.Mutex
 	Requests []Request
 }
@@ -90,7 +101,7 @@ func (m *MockAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent)
 		m.writeStreamFile(req.StreamFile, response)
 	}
 
-	ch <- StreamEvent{
+	result := StreamEvent{
 		Type:         "result",
 		Output:       response,
 		Cost:         m.Cost,
@@ -98,6 +109,20 @@ func (m *MockAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent)
 		DurationMS:   time.Since(startedAt).Milliseconds(),
 		InputTokens:  100,
 		OutputTokens: 50,
+		IsError:      m.ResultIsError,
+	}
+	if m.ResultIsError {
+		result.ErrorSource = ErrorSourceAgentAPI
+	}
+	ch <- result
+
+	if m.ProcessExitAfterResult != 0 {
+		ch <- StreamEvent{
+			Type:        "error",
+			ExitCode:    m.ProcessExitAfterResult,
+			ErrorSource: ErrorSourceAgentProcess,
+			ErrorCause:  "exit status non-zero",
+		}
 	}
 }
 
