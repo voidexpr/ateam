@@ -421,6 +421,68 @@ func TestRunnerStallEmitsWarning(t *testing.T) {
 	}
 }
 
+func TestRunnerPreservesResultWhenAgentExitsNonZero(t *testing.T) {
+	// Mirrors the claude "API stream idle timeout" path: a rich result event
+	// with cost + IsError=true, immediately followed by cmd.Wait returning
+	// exit=1. The runner must preserve the result event's cost/usage and
+	// only adopt the process exit code, not overwrite resultEv with the
+	// bare error event (which would zero out cost in the DB).
+	dir := t.TempDir()
+	logsDir := filepath.Join(dir, "logs")
+	db, err := calldb.Open(filepath.Join(dir, "state.sqlite"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	r := &Runner{
+		Agent: &agent.MockAgent{
+			Response:               "partial output before stream stalled",
+			Cost:                   0.55,
+			ResultIsError:          true,
+			ProcessExitAfterResult: 1,
+		},
+		CallDB: db,
+	}
+
+	opts := RunOpts{
+		RoleID:  "stalled-api",
+		Action:  ActionRun,
+		LogsDir: logsDir,
+	}
+
+	summary := r.Run(context.Background(), "test", opts, nil)
+
+	if summary.Cost != 0.55 {
+		t.Errorf("expected cost 0.55 from result event, got %v", summary.Cost)
+	}
+	if !summary.IsError {
+		t.Errorf("expected IsError=true from result event")
+	}
+	if summary.ExitCode != 1 {
+		t.Errorf("expected ExitCode=1 merged from process error, got %d", summary.ExitCode)
+	}
+	if summary.ErrorSource != agent.ErrorSourceAgentAPI {
+		t.Errorf("expected ErrorSource=%q (preserved from result event), got %q",
+			agent.ErrorSourceAgentAPI, summary.ErrorSource)
+	}
+	if summary.InputTokens == 0 || summary.OutputTokens == 0 {
+		t.Errorf("expected non-zero token usage from result event, got in=%d out=%d",
+			summary.InputTokens, summary.OutputTokens)
+	}
+
+	row, err := db.GetRunByID(summary.ExecID)
+	if err != nil {
+		t.Fatalf("GetRunByID: %v", err)
+	}
+	if row == nil {
+		t.Fatalf("expected DB row for exec %d, got nil", summary.ExecID)
+	}
+	if row.CostUSD != 0.55 {
+		t.Errorf("DB row cost = %v, want 0.55", row.CostUSD)
+	}
+}
+
 func TestRunnerArchivesPrompt(t *testing.T) {
 	dir := t.TempDir()
 	logsDir := filepath.Join(dir, "logs")

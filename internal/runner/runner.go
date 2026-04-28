@@ -460,8 +460,19 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			}
 
 		case "error":
-			evCopy := ev
-			resultEv = &evCopy
+			// A prior "result" event already classified the run (with
+			// cost, usage, IsError, ErrorSource=agent_api). The trailing
+			// process error from cmd.Wait is usually just the agent
+			// exiting non-zero to surface its own is_error — keep the
+			// rich result and only adopt the exit code.
+			if resultEv != nil && resultEv.Type == "result" {
+				if ev.ExitCode != 0 && resultEv.ExitCode == 0 {
+					resultEv.ExitCode = ev.ExitCode
+				}
+			} else {
+				evCopy := ev
+				resultEv = &evCopy
+			}
 		}
 	}
 
