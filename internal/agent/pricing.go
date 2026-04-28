@@ -35,6 +35,29 @@ func NormalizeModel(model string) string {
 	return dateSuffix.ReplaceAllString(model, "")
 }
 
+// modelContextWindows holds the input-token context window for known
+// models. Values match what claude reports in the result event's
+// modelUsage payload.
+var modelContextWindows = map[string]int{
+	"claude-sonnet-4-6": 200000,
+	"claude-haiku-4-5":  200000,
+	"claude-opus-4-7":   200000,
+	"claude-sonnet-4-5": 200000,
+	"claude-opus-4-6":   200000,
+	"claude-haiku-4":    200000,
+}
+
+// ContextWindow returns the input-token context window for the given
+// model name (after NormalizeModel). Returns 0 when the model isn't
+// known — callers should treat that as "unknown" and skip the percentage
+// display rather than dividing by zero.
+func ContextWindow(model string) int {
+	if model == "" {
+		return 0
+	}
+	return modelContextWindows[NormalizeModel(model)]
+}
+
 // EstimateCost returns an estimated cost in USD for the given model and token counts.
 // It first tries the reported model, then falls back to defaultModel.
 // Returns 0 if neither is found or if the table is nil.

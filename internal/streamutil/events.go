@@ -24,13 +24,22 @@ type SystemEvent struct {
 type AssistantEvent struct {
 	Message struct {
 		Content []ContentBlock `json:"content"`
-		Usage   struct {
-			InputTokens              int `json:"input_tokens"`
-			OutputTokens             int `json:"output_tokens"`
-			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-		} `json:"usage"`
+		Usage   AssistantUsage `json:"usage"`
 	} `json:"message"`
+}
+
+// AssistantUsage matches claude's per-message usage payload. The
+// cache_creation sub-object is present on Sonnet 4.6 and later and breaks
+// the totals down by ephemeral TTL bucket.
+type AssistantUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+	CacheCreation            struct {
+		Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens"`
+		Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens"`
+	} `json:"cache_creation"`
 }
 
 type ContentBlock struct {
@@ -38,12 +47,44 @@ type ContentBlock struct {
 	Text  string          `json:"text,omitempty"`
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
+	// ID is set on tool_use blocks (e.g. "toolu_…") and used to pair
+	// with tool_result blocks via ToolUseID.
+	ID string `json:"id,omitempty"`
+	// ToolUseID/Content/IsError are set on tool_result blocks (claude
+	// emits these nested under user events, not as top-level events).
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	Content   string `json:"content,omitempty"`
+	IsError   bool   `json:"is_error,omitempty"`
 }
 
-type UserEvent struct{}
+// UserEvent captures the message content blocks claude emits under
+// type="user" — usually a tool_result feeding back into the next turn.
+type UserEvent struct {
+	Message struct {
+		Content []ContentBlock `json:"content"`
+	} `json:"message"`
+}
 
+// ToolResultEvent is retained for legacy/standalone tool_result lines.
+// Modern claude streams nest tool results inside UserEvent.Message.Content.
 type ToolResultEvent struct {
-	Content string `json:"content"`
+	Content   string `json:"content"`
+	ToolUseID string `json:"tool_use_id"`
+}
+
+// RateLimitEvent surfaces rate-limit decisions claude reports inline.
+// "status" is "allowed" or "throttled"; rateLimitType is "five_hour" or
+// "one_minute"; overageStatus indicates whether usage-based overage is
+// permitted on the account.
+type RateLimitEvent struct {
+	RateLimitInfo struct {
+		Status                string `json:"status"`
+		ResetsAt              int64  `json:"resetsAt"`
+		RateLimitType         string `json:"rateLimitType"`
+		OverageStatus         string `json:"overageStatus"`
+		OverageDisabledReason string `json:"overageDisabledReason"`
+		IsUsingOverage        bool   `json:"isUsingOverage"`
+	} `json:"rate_limit_info"`
 }
 
 type ResultEvent struct {
@@ -121,7 +162,11 @@ func ParseClaudeLine(line []byte) (typ string, ev any, err error) {
 		return typed.Type, &ev, nil
 
 	case "user":
-		return typed.Type, &UserEvent{}, nil
+		var ev UserEvent
+		if err := json.Unmarshal(line, &ev); err != nil {
+			return typed.Type, nil, err
+		}
+		return typed.Type, &ev, nil
 
 	case "assistant":
 		var ev AssistantEvent
@@ -139,6 +184,13 @@ func ParseClaudeLine(line []byte) (typ string, ev any, err error) {
 
 	case "result":
 		var ev ResultEvent
+		if err := json.Unmarshal(line, &ev); err != nil {
+			return typed.Type, nil, err
+		}
+		return typed.Type, &ev, nil
+
+	case "rate_limit_event":
+		var ev RateLimitEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
 			return typed.Type, nil, err
 		}

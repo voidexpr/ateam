@@ -966,7 +966,13 @@ func archivePrompt(historyDir, promptName, prompt string, startedAt time.Time) s
 }
 
 // FormatDuration returns a human-readable duration string.
+// >=1h shows "Xh Ym" (minute precision); shorter shows seconds.
 func FormatDuration(d time.Duration) string {
+	if d >= time.Hour {
+		h := int(d / time.Hour)
+		m := int((d % time.Hour) / time.Minute)
+		return fmt.Sprintf("%dh%dm", h, m)
+	}
 	rounded := d.Round(time.Second)
 	if rounded < time.Minute {
 		return fmt.Sprintf("%ds", int(rounded/time.Second))
@@ -977,6 +983,20 @@ func FormatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm", minutes)
 	}
 	return fmt.Sprintf("%dm%ds", minutes, seconds)
+}
+
+// ParseTimestampPrefix parses the leading TimestampFormat prefix
+// ("YYYY-MM-DD_HH-MM-SS") from a filename. Returns ok=false when the
+// name is too short or doesn't match. Local timezone is used.
+func ParseTimestampPrefix(name string) (time.Time, bool) {
+	if len(name) < len(TimestampFormat) {
+		return time.Time{}, false
+	}
+	t, err := time.ParseInLocation(TimestampFormat, name[:len(TimestampFormat)], time.Local)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 // ArchiveFile copies a file to archiveDir with a timestamped name.
