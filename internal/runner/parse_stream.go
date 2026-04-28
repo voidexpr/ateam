@@ -20,10 +20,17 @@ type SystemLine struct {
 
 type UserLine struct{}
 
+// MessageUsage is the per-assistant-message usage payload (tokens and
+// cache breakdown) attached to renderable lines so the formatter can
+// show context-size estimates.
+type MessageUsage = streamutil.AssistantUsage
+
 type ToolCallLine struct {
-	Name   string
-	Detail string
-	Claude *ToolCallClaudeExt
+	Name      string
+	Detail    string
+	Claude    *ToolCallClaudeExt
+	ToolUseID string        // claude tool_use block id (toolu_…); used to pair with results
+	Usage     *MessageUsage // per-message usage from the assistant event; non-nil only on the last block
 }
 
 type ToolCallClaudeExt struct {
@@ -31,15 +38,19 @@ type ToolCallClaudeExt struct {
 }
 
 type TextLine struct {
-	Text string
+	Text  string
+	Usage *MessageUsage // see ToolCallLine.Usage
 }
 
 type ThinkingLine struct {
-	Text string
+	Text  string
+	Usage *MessageUsage // see ToolCallLine.Usage
 }
 
 type ToolResultLine struct {
-	Content string
+	Content   string
+	ToolUseID string
+	IsError   bool
 }
 
 type ResultLine struct {
@@ -58,6 +69,16 @@ type ErrorLine struct {
 	Message string
 }
 
+// RateLimitLine surfaces claude's inline rate_limit_event JSONL line.
+type RateLimitLine struct {
+	Status                string
+	RateLimitType         string
+	OverageStatus         string
+	OverageDisabledReason string
+	IsUsingOverage        bool
+	ResetsAt              int64 // unix seconds
+}
+
 func (*SystemLine) displayEvent()     {}
 func (*UserLine) displayEvent()       {}
 func (*ToolCallLine) displayEvent()   {}
@@ -66,6 +87,7 @@ func (*ThinkingLine) displayEvent()   {}
 func (*ToolResultLine) displayEvent() {}
 func (*ResultLine) displayEvent()     {}
 func (*ErrorLine) displayEvent()      {}
+func (*RateLimitLine) displayEvent()  {}
 
 // streamFormat identifies the JSONL format.
 type streamFormat int
@@ -116,7 +138,7 @@ func detectFormat(line []byte) streamFormat {
 		return formatUnknown
 	}
 	switch peek.Type {
-	case "system", "assistant", "user", "tool_result", "result":
+	case "system", "assistant", "user", "tool_result", "result", "rate_limit_event":
 		return formatClaude
 	case "turn.started", "thread.started",
 		"exec_command_begin", "web_search_begin", "mcp_tool_call_begin",
@@ -151,34 +173,70 @@ func parseClaudeDisplay(line []byte) ([]DisplayEvent, error) {
 		}}, nil
 
 	case "user":
-		return []DisplayEvent{&UserLine{}}, nil
+		// Modern claude streams nest tool_result blocks inside user
+		// events. Surface each block; emit a single UserLine first so
+		// the formatter still gets the turn-divider signal.
+		u := ev.(*streamutil.UserEvent)
+		events := []DisplayEvent{&UserLine{}}
+		for _, block := range u.Message.Content {
+			if block.Type == "tool_result" {
+				events = append(events, &ToolResultLine{
+					Content:   block.Content,
+					ToolUseID: block.ToolUseID,
+					IsError:   block.IsError,
+				})
+			}
+		}
+		return events, nil
 
 	case "assistant":
 		ast := ev.(*assistantEvent)
+		// Same usage applies to every block of a multi-block message
+		// (claude charges per message), so the suffix repeats per block.
+		usage := &ast.Message.Usage
 		var events []DisplayEvent
 		for _, block := range ast.Message.Content {
 			switch block.Type {
 			case "tool_use":
 				events = append(events, &ToolCallLine{
-					Name:   block.Name,
-					Detail: toolDetail(block.Name, block.Input),
-					Claude: &ToolCallClaudeExt{Input: block.Input},
+					Name:      block.Name,
+					Detail:    toolDetail(block.Name, block.Input),
+					Claude:    &ToolCallClaudeExt{Input: block.Input},
+					ToolUseID: block.ID,
+					Usage:     usage,
 				})
 			case "text":
 				if block.Text != "" {
-					events = append(events, &TextLine{Text: block.Text})
+					events = append(events, &TextLine{Text: block.Text, Usage: usage})
 				}
 			case "thinking":
 				if block.Text != "" {
-					events = append(events, &ThinkingLine{Text: block.Text})
+					events = append(events, &ThinkingLine{Text: block.Text, Usage: usage})
 				}
 			}
 		}
 		return events, nil
 
 	case "tool_result":
+		// Legacy/standalone format. Modern streams nest tool_result
+		// inside user events (handled in case "user" above).
 		tr := ev.(*toolResultEvent)
-		return []DisplayEvent{&ToolResultLine{Content: tr.Content}}, nil
+		return []DisplayEvent{&ToolResultLine{
+			Content:   tr.Content,
+			ToolUseID: tr.ToolUseID,
+		}}, nil
+
+	case "rate_limit_event":
+		rl := ev.(*streamutil.RateLimitEvent)
+		info := rl.RateLimitInfo
+		return []DisplayEvent{&RateLimitLine{
+			Status:                info.Status,
+			RateLimitType:         info.RateLimitType,
+			OverageStatus:         info.OverageStatus,
+			OverageDisabledReason: info.OverageDisabledReason,
+			IsUsingOverage:        info.IsUsingOverage,
+			ResetsAt:              info.ResetsAt,
+		}}, nil
 
 	case "result":
 		res := ev.(*resultEvent)

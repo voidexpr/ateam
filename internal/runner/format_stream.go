@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/ateam/internal/agent"
+	"github.com/ateam/internal/display"
 )
 
 // StreamFormatter formats JSONL stream lines for human consumption.
@@ -20,6 +22,11 @@ type StreamFormatter struct {
 	DefaultModel string             // fallback model for pricing lookup
 	Pricing      agent.PricingTable // cost estimation table (nil = use native cost only)
 	Prefix       string             // for multiplexed tail: "[42:security/run] "
+	// SessionStart, when set, is rendered as an absolute clock on the
+	// session header (fmtSystem) and as the end clock on fmtResult
+	// (computed as SessionStart + result.DurationMS). Optional — zero
+	// value disables both.
+	SessionStart time.Time
 	TurnNum      int
 	ToolCount    int
 	TextCount    int
@@ -80,14 +87,13 @@ func (f *StreamFormatter) formatEvent(ev DisplayEvent) string {
 	case *ThinkingLine:
 		return f.fmtThinking(e)
 	case *ToolResultLine:
-		if f.Verbose {
-			return f.fmtToolResult(e)
-		}
-		return ""
+		return f.fmtToolResult(e)
 	case *ResultLine:
 		return f.fmtResult(e)
 	case *ErrorLine:
 		return f.fmtError(e)
+	case *RateLimitLine:
+		return f.fmtRateLimit(e)
 	}
 	return ""
 }
@@ -105,6 +111,9 @@ func (f *StreamFormatter) fmtSystem(e *SystemLine) string {
 	b.WriteString(f.dim(fmt.Sprintf("--- session %s  model=%s", short(e.SessionID, 12), e.Model)))
 	if e.Version != "" {
 		b.WriteString(f.dim(fmt.Sprintf("  v%s", e.Version)))
+	}
+	if !f.SessionStart.IsZero() {
+		b.WriteString(f.dim(fmt.Sprintf("  started=%s", f.SessionStart.Format("2006-01-02 15:04:05"))))
 	}
 	b.WriteString("\n")
 	if f.Verbose && e.Cwd != "" {
@@ -132,52 +141,90 @@ func (f *StreamFormatter) fmtToolCall(e *ToolCallLine) string {
 				fmt.Fprintf(&b, "%s           %s\n", f.Prefix, line)
 			}
 		}
+		if suffix := f.usageSuffix(e.Usage); suffix != "" {
+			fmt.Fprintf(&b, "%s           %s\n", f.Prefix, suffix)
+		}
 		return b.String()
 	}
 	detail := truncate(e.Detail, 100)
+	var line string
 	if detail != "" {
-		return fmt.Sprintf("%s%s %s\n", f.Prefix, header, f.dim(detail))
+		line = fmt.Sprintf("%s%s %s\n", f.Prefix, header, f.dim(detail))
+	} else {
+		line = fmt.Sprintf("%s%s\n", f.Prefix, header)
 	}
-	return fmt.Sprintf("%s%s\n", f.Prefix, header)
+	if suffix := f.usageSuffix(e.Usage); suffix != "" {
+		line += fmt.Sprintf("%s           %s\n", f.Prefix, suffix)
+	}
+	return line
 }
 
 func (f *StreamFormatter) fmtText(e *TextLine) string {
 	f.TextCount++
+	asError := looksLikeAPIError(e.Text)
+	colorBody := func(s string) string {
+		if asError {
+			return f.red(s)
+		}
+		return s
+	}
+	var b strings.Builder
 	if f.Verbose {
-		var b strings.Builder
 		fmt.Fprintf(&b, "%s%s\n", f.Prefix,
 			f.yellow(fmt.Sprintf("  text #%d:", f.TextCount)))
 		for _, line := range strings.Split(e.Text, "\n") {
-			fmt.Fprintf(&b, "%s    %s\n", f.Prefix, line)
+			fmt.Fprintf(&b, "%s    %s\n", f.Prefix, colorBody(line))
 		}
-		return b.String()
+	} else {
+		preview := SingleLineText(e.Text)
+		preview = truncate(preview, 120)
+		fmt.Fprintf(&b, "%s%s %s\n", f.Prefix,
+			f.yellow(fmt.Sprintf("  text #%d:", f.TextCount)),
+			colorBody(preview))
 	}
-	preview := SingleLineText(e.Text)
-	preview = truncate(preview, 120)
-	return fmt.Sprintf("%s%s %s\n", f.Prefix,
-		f.yellow(fmt.Sprintf("  text #%d:", f.TextCount)),
-		f.dim(preview))
+	if suffix := f.usageSuffix(e.Usage); suffix != "" {
+		fmt.Fprintf(&b, "%s    %s\n", f.Prefix, suffix)
+	}
+	return b.String()
 }
 
 func (f *StreamFormatter) fmtThinking(e *ThinkingLine) string {
-	if !f.Verbose {
-		return ""
-	}
 	var b strings.Builder
-	b.WriteString(f.Prefix + f.dim("  thinking:") + "\n")
-	for _, line := range strings.Split(e.Text, "\n") {
-		fmt.Fprintf(&b, "%s    %s\n", f.Prefix, f.dim(line))
+	if f.Verbose {
+		b.WriteString(f.Prefix + f.dim("  thinking:") + "\n")
+		for _, line := range strings.Split(e.Text, "\n") {
+			fmt.Fprintf(&b, "%s    %s\n", f.Prefix, f.dim(line))
+		}
+	} else {
+		// Show a single-line preview so turns made up only of thinking
+		// don't render empty.
+		preview := SingleLineText(e.Text)
+		preview = truncate(preview, 120)
+		fmt.Fprintf(&b, "%s%s %s\n", f.Prefix, f.dim("  thinking:"), f.dim(preview))
+	}
+	if suffix := f.usageSuffix(e.Usage); suffix != "" {
+		fmt.Fprintf(&b, "%s    %s\n", f.Prefix, suffix)
 	}
 	return b.String()
 }
 
 func (f *StreamFormatter) fmtToolResult(e *ToolResultLine) string {
-	content := strings.TrimSpace(e.Content)
-	if content == "" {
+	content := e.Content
+	bytes := len(content)
+	if bytes == 0 {
 		return ""
 	}
-	content = truncate(content, 500)
-	return fmt.Sprintf("%s%s\n", f.Prefix, f.dim("  result: "+content))
+	lines := strings.Count(content, "\n")
+	// A trailing newline counts as a delimiter, not a separate line.
+	if !strings.HasSuffix(content, "\n") {
+		lines++
+	}
+	body := fmt.Sprintf("  result: %s, %d lines", display.FmtBytes(bytes), lines)
+	if e.IsError {
+		body += " (error)"
+		return fmt.Sprintf("%s%s\n", f.Prefix, f.red(body))
+	}
+	return fmt.Sprintf("%s%s\n", f.Prefix, f.dim(body))
 }
 
 func (f *StreamFormatter) fmtResult(e *ResultLine) string {
@@ -193,13 +240,18 @@ func (f *StreamFormatter) fmtResult(e *ResultLine) string {
 
 	status := "ok"
 	if e.IsError {
-		status = "error"
+		status = f.red("error")
 	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n%s%s\n", f.Prefix, f.boldGreen("=== Result ==="))
 	fmt.Fprintf(&b, "%s  Status:    %s\n", f.Prefix, status)
 	fmt.Fprintf(&b, "%s  Duration:  %s\n", f.Prefix, durStr)
+	if !f.SessionStart.IsZero() && e.DurationMS > 0 {
+		end := f.SessionStart.Add(time.Duration(e.DurationMS) * time.Millisecond)
+		fmt.Fprintf(&b, "%s  Started:   %s\n", f.Prefix, f.SessionStart.Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(&b, "%s  Ended:     %s\n", f.Prefix, end.Format("2006-01-02 15:04:05"))
+	}
 	fmt.Fprintf(&b, "%s  Cost:      $%.2f\n", f.Prefix, cost)
 	if cost > 0 && e.Cost == 0 {
 		fmt.Fprintf(&b, "%s              %s\n", f.Prefix, f.dim("(estimated)"))
@@ -210,6 +262,118 @@ func (f *StreamFormatter) fmtResult(e *ResultLine) string {
 	fmt.Fprintf(&b, "%s  Events:    %d (tools=%d, text=%d)\n", f.Prefix,
 		f.EventCount, f.ToolCount, f.TextCount)
 	return b.String()
+}
+
+// fmtRateLimit renders a rate_limit_event as a single dimmed line.
+// Verbose adds the absolute reset clock and the disable reason.
+func (f *StreamFormatter) fmtRateLimit(e *RateLimitLine) string {
+	parts := []string{"rate_limit:"}
+	if e.RateLimitType != "" {
+		parts = append(parts, e.RateLimitType)
+	}
+	if e.Status != "" {
+		parts = append(parts, e.Status)
+	}
+	extras := []string{}
+	if e.ResetsAt > 0 {
+		until := time.Until(time.Unix(e.ResetsAt, 0))
+		if until > 0 {
+			extras = append(extras, fmt.Sprintf("resets in %s", FormatDuration(until)))
+		} else {
+			extras = append(extras, "resets now")
+		}
+	}
+	if e.OverageStatus != "" {
+		extras = append(extras, "overage "+e.OverageStatus)
+	}
+	if e.IsUsingOverage {
+		extras = append(extras, "using overage")
+	}
+	main := strings.Join(parts, " ")
+	if len(extras) > 0 {
+		main += " (" + strings.Join(extras, ", ") + ")"
+	}
+	out := fmt.Sprintf("%s%s\n", f.Prefix, f.dim("--- "+main))
+	if f.Verbose {
+		if e.ResetsAt > 0 {
+			out += fmt.Sprintf("%s%s\n", f.Prefix,
+				f.dim("    resetsAt="+time.Unix(e.ResetsAt, 0).Format("2006-01-02 15:04:05")))
+		}
+		if e.OverageDisabledReason != "" {
+			out += fmt.Sprintf("%s%s\n", f.Prefix,
+				f.dim("    overageDisabledReason="+e.OverageDisabledReason))
+		}
+	}
+	return out
+}
+
+// usageSuffix renders the per-message usage line shown after assistant
+// blocks in verbose mode. Returns "" when usage is nil, verbose is off,
+// or the usage is entirely zero (e.g. claude's synthetic error message).
+func (f *StreamFormatter) usageSuffix(u *MessageUsage) string {
+	if !f.Verbose || u == nil {
+		return ""
+	}
+	if u.InputTokens == 0 && u.OutputTokens == 0 &&
+		u.CacheReadInputTokens == 0 && u.CacheCreationInputTokens == 0 {
+		return ""
+	}
+	parts := []string{}
+	if u.InputTokens > 0 {
+		parts = append(parts, fmt.Sprintf("in=%s", display.FmtTokens(int64(u.InputTokens))))
+	}
+	if u.OutputTokens > 0 {
+		parts = append(parts, fmt.Sprintf("out=%s", display.FmtTokens(int64(u.OutputTokens))))
+	}
+	if u.CacheReadInputTokens > 0 {
+		parts = append(parts, fmt.Sprintf("cache_read=%s", display.FmtTokens(int64(u.CacheReadInputTokens))))
+	}
+	if u.CacheCreationInputTokens > 0 {
+		parts = append(parts, fmt.Sprintf("cache_create=%s", display.FmtTokens(int64(u.CacheCreationInputTokens))))
+	}
+	if u.CacheCreation.Ephemeral1hInputTokens > 0 {
+		parts = append(parts, fmt.Sprintf("cc_1h=%s", display.FmtTokens(int64(u.CacheCreation.Ephemeral1hInputTokens))))
+	}
+	// Context estimate: input includes the cached portions on this request,
+	// plus any cache creation. Show as absolute and percent of window.
+	ctxTokens := u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+	if ctxTokens > 0 {
+		window := agent.ContextWindow(f.Model)
+		if window > 0 {
+			pct := ctxTokens * 100 / window
+			parts = append(parts, fmt.Sprintf("ctx=%s/%s (%d%%)",
+				display.FmtTokens(int64(ctxTokens)), display.FmtTokens(int64(window)), pct))
+		} else {
+			parts = append(parts, fmt.Sprintf("ctx=%s", display.FmtTokens(int64(ctxTokens))))
+		}
+	}
+	return f.dim("[" + strings.Join(parts, " ") + "]")
+}
+
+// apiErrorPrefixes are best-effort markers for claude-CLI synthesized error
+// messages — the CLI surfaces protocol failures (stream stalls, 4xx/5xx,
+// tool loops, credit issues) as a single text block starting with one of
+// these. Heuristic only; if claude renames its prefixes this list goes stale.
+var apiErrorPrefixes = []string{
+	"API Error:",
+	"API error:",
+	"Error:",
+	"Stream idle timeout",
+	"Request timed out",
+	"Credit balance is too low",
+}
+
+func looksLikeAPIError(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	for _, p := range apiErrorPrefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *StreamFormatter) fmtError(e *ErrorLine) string {

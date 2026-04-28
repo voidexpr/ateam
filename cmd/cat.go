@@ -3,7 +3,9 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/root"
@@ -64,9 +66,14 @@ func runCatFiles(paths []string) error {
 		if len(paths) > 1 {
 			fmt.Printf("═══ %s ═══\n", path)
 		}
+		var sessionStart time.Time
+		if t, ok := runner.ParseTimestampPrefix(filepath.Base(path)); ok {
+			sessionStart = t
+		}
 		f := &runner.StreamFormatter{
-			Verbose: catVerbose,
-			Color:   color,
+			Verbose:      catVerbose,
+			Color:        color,
+			SessionStart: sessionStart,
 		}
 		if err := f.FormatFile(path, os.Stdout); err != nil {
 			return fmt.Errorf("error reading %s: %w", path, err)
@@ -131,12 +138,17 @@ func runCatIDs(args []string) error {
 		streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, row.StreamFile)
 
 		pricing, defaultModel := agentPricing(row.Agent)
+		var sessionStart time.Time
+		if t, ok := runner.ParseTimestampPrefix(row.StartedAt); ok {
+			sessionStart = t
+		}
 		f := &runner.StreamFormatter{
 			Verbose:      catVerbose,
 			Color:        color,
 			Model:        row.Model,
 			DefaultModel: defaultModel,
 			Pricing:      pricing,
+			SessionStart: sessionStart,
 		}
 		if err := f.FormatFile(streamPath, os.Stdout); err != nil {
 			fmt.Fprintf(os.Stderr, "  error reading %s: %v\n", row.StreamFile, err)
