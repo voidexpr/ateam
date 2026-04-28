@@ -80,14 +80,16 @@ func runAll(cmd *cobra.Command, args []string) error {
 	codeSubRunProfile := coalesce(allCodeProfile, allProfile)
 	codeSubRunAgent := allCodeAgent
 
-	// Phase 1: Report
+	// Phase 1: Report. Print=false to skip per-role body dumps; the pool
+	// table and failure summary cover what's useful inline, and the full
+	// bodies live at .ateam/roles/<role>/report.md.
 	fmt.Println("=== Phase 1: Report ===")
 	if err := runReport(ReportOptions{
 		Roles:           roles,
 		ExtraPrompt:     allExtraPrompt,
 		Timeout:         allTimeout,
 		Parallel:        allParallel,
-		Print:           printOutput,
+		Print:           false,
 		CheaperModel:    allCheaperModel,
 		Profile:         allReportProfile,
 		Agent:           allReportAgent,
