@@ -2,10 +2,14 @@ package runner
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ateam/internal/streamutil"
 )
 
 func TestHTMLFormatterSystem(t *testing.T) {
@@ -215,30 +219,44 @@ func TestHTMLFormatterDetailsStructure(t *testing.T) {
 	}
 }
 
-func TestHTMLFormatterThinkingHiddenNonVerbose(t *testing.T) {
+func TestHTMLFormatterThinkingPreviewNonVerbose(t *testing.T) {
 	f := &HTMLStreamFormatter{Verbose: false}
-	out := f.formatEvent(&ThinkingLine{Text: "secret thoughts"})
-	if out != "" {
-		t.Errorf("thinking should be hidden in non-verbose mode, got: %s", out)
+	out := f.formatEvent(&ThinkingLine{Text: "secret thoughts here"})
+	if !strings.Contains(out, "thinking:") {
+		t.Errorf("expected thinking preview, got: %s", out)
+	}
+	if !strings.Contains(out, "secret thoughts") {
+		t.Errorf("expected preview text in output, got: %s", out)
 	}
 }
 
-func TestHTMLFormatterToolResultHiddenNonVerbose(t *testing.T) {
+func TestHTMLFormatterToolResultSizeNonVerbose(t *testing.T) {
 	f := &HTMLStreamFormatter{Verbose: false}
-	out := f.formatEvent(&ToolResultLine{Content: "result data"})
-	if out != "" {
-		t.Errorf("tool result should be hidden in non-verbose mode, got: %s", out)
+	out := f.formatEvent(&ToolResultLine{Content: "line1\nline2\nline3\n"})
+	if !strings.Contains(out, `class="sl-dim"`) {
+		t.Errorf("expected sl-dim class, got: %s", out)
+	}
+	if !strings.Contains(out, "result:") || !strings.Contains(out, "3 lines") {
+		t.Errorf("expected size+lines summary, got: %s", out)
+	}
+	if strings.Contains(out, "line1") {
+		t.Errorf("body should not be echoed, got: %s", out)
 	}
 }
 
-func TestHTMLFormatterToolResultVerbose(t *testing.T) {
+func TestHTMLFormatterToolResultVerboseDropsBody(t *testing.T) {
+	// Verbose previously dumped the truncated body; now it shows the same
+	// compact size+lines line so HTML matches the text formatter.
 	f := &HTMLStreamFormatter{Verbose: true}
 	out := f.formatEvent(&ToolResultLine{Content: "result <data>"})
 	if !strings.Contains(out, `class="sl-dim"`) {
 		t.Errorf("expected sl-dim class, got: %s", out)
 	}
-	if !strings.Contains(out, "result &lt;data&gt;") {
-		t.Errorf("expected escaped result content, got: %s", out)
+	if !strings.Contains(out, "result:") || !strings.Contains(out, "1 lines") {
+		t.Errorf("expected size+lines summary, got: %s", out)
+	}
+	if strings.Contains(out, "&lt;data&gt;") {
+		t.Errorf("verbose should NOT echo escaped body, got: %s", out)
 	}
 }
 
@@ -310,8 +328,8 @@ func TestHTMLFormatterFormatFileWithXSSContent(t *testing.T) {
 func TestHTMLFormatterResultErrorStatus(t *testing.T) {
 	f := &HTMLStreamFormatter{}
 	out := f.formatEvent(&ResultLine{IsError: true, DurationMS: 1000})
-	if !strings.Contains(out, "Status:    error") {
-		t.Errorf("expected error status, got: %s", out)
+	if !strings.Contains(out, `<span class="sl-error">error</span>`) {
+		t.Errorf("expected sl-error span around 'error', got: %s", out)
 	}
 }
 
@@ -329,11 +347,15 @@ func TestHTMLFormatterResultEstimated(t *testing.T) {
 	}
 }
 
-func TestHTMLFormatterEmptyToolResultVerbose(t *testing.T) {
+func TestHTMLFormatterEmptyToolResult(t *testing.T) {
+	// Truly empty content produces no output, but whitespace-only content
+	// is rendered with its actual byte count — whitespace IS information.
 	f := &HTMLStreamFormatter{Verbose: true}
-	out := f.formatEvent(&ToolResultLine{Content: "   "})
-	if out != "" {
-		t.Errorf("empty/whitespace tool result should produce no output, got: %s", out)
+	if out := f.formatEvent(&ToolResultLine{Content: ""}); out != "" {
+		t.Errorf("empty tool result should produce no output, got: %s", out)
+	}
+	if out := f.formatEvent(&ToolResultLine{Content: "   "}); !strings.Contains(out, "3B") {
+		t.Errorf("whitespace tool result should show byte count, got: %s", out)
 	}
 }
 
@@ -350,5 +372,126 @@ func TestHTMLFormatterVerboseCwd(t *testing.T) {
 	out := f.formatEvent(&SystemLine{SessionID: "s1", Model: "opus", Cwd: "/home/user"})
 	if !strings.Contains(out, "cwd: /home/user") {
 		t.Errorf("expected cwd in verbose mode, got: %s", out)
+	}
+}
+
+func TestHTMLFormatterRateLimit(t *testing.T) {
+	resets := time.Now().Add(2*time.Hour + 30*time.Minute).Unix()
+	line := []byte(fmt.Sprintf(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":%d,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled_until","isUsingOverage":false}}`, resets))
+
+	var buf bytes.Buffer
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rl.jsonl")
+	if err := os.WriteFile(path, line, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	f := &HTMLStreamFormatter{}
+	if err := f.FormatFile(path, &buf); err != nil {
+		t.Fatalf("FormatFile: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `class="sl-rate-limit sl-dim"`) {
+		t.Errorf("expected sl-rate-limit class, got: %s", out)
+	}
+	if !strings.Contains(out, "five_hour") || !strings.Contains(out, "allowed") {
+		t.Errorf("expected type+status, got: %s", out)
+	}
+	if !strings.Contains(out, "resets in") {
+		t.Errorf("expected resets-in countdown, got: %s", out)
+	}
+	if strings.Contains(out, "org_level_disabled_until") {
+		t.Errorf("non-verbose should not include disable reason, got: %s", out)
+	}
+
+	var bv bytes.Buffer
+	fv := &HTMLStreamFormatter{Verbose: true}
+	if err := fv.FormatFile(path, &bv); err != nil {
+		t.Fatalf("FormatFile verbose: %v", err)
+	}
+	outv := bv.String()
+	if !strings.Contains(outv, "org_level_disabled_until") {
+		t.Errorf("verbose should include disable reason, got: %s", outv)
+	}
+	if !strings.Contains(outv, "resetsAt=") {
+		t.Errorf("verbose should include absolute resetsAt, got: %s", outv)
+	}
+}
+
+func TestHTMLFormatterUsageSuffixVerbose(t *testing.T) {
+	usage := streamutil.AssistantUsage{
+		InputTokens:              8,
+		OutputTokens:             1251,
+		CacheCreationInputTokens: 38521,
+		CacheReadInputTokens:     144121,
+	}
+	usage.CacheCreation.Ephemeral1hInputTokens = 38521
+	tl := &TextLine{Text: "hi", Usage: &usage}
+
+	fv := &HTMLStreamFormatter{Verbose: true, Model: "claude-sonnet-4-6"}
+	out := fv.formatEvent(tl)
+	if !strings.Contains(out, `class="sl-usage sl-dim"`) {
+		t.Errorf("expected sl-usage class, got: %s", out)
+	}
+	if !strings.Contains(out, "in=8") || !strings.Contains(out, "out=1.3K") {
+		t.Errorf("expected token counts, got: %s", out)
+	}
+	// 8 + 144121 + 38521 = 182650 → 91% of 200000
+	if !strings.Contains(out, "91%") {
+		t.Errorf("expected ctx percentage 91%%, got: %s", out)
+	}
+
+	// Non-verbose: no usage suffix.
+	f := &HTMLStreamFormatter{Model: "claude-sonnet-4-6"}
+	out2 := f.formatEvent(tl)
+	if strings.Contains(out2, "sl-usage") {
+		t.Errorf("non-verbose should not show usage, got: %s", out2)
+	}
+}
+
+func TestHTMLFormatterAPIErrorRed(t *testing.T) {
+	tl := &TextLine{Text: "API Error: Stream idle timeout - partial response received"}
+	f := &HTMLStreamFormatter{}
+	out := f.formatEvent(tl)
+	if !strings.Contains(out, `class="sl-text sl-error"`) {
+		t.Errorf("expected sl-error on synthetic API error text, got: %s", out)
+	}
+
+	// Non-error text should NOT get sl-error.
+	plain := &TextLine{Text: "Hello there"}
+	out2 := f.formatEvent(plain)
+	if strings.Contains(out2, "sl-error") {
+		t.Errorf("plain text should not be sl-error, got: %s", out2)
+	}
+}
+
+func TestHTMLFormatterToolResultErrorRed(t *testing.T) {
+	tr := &ToolResultLine{Content: "boom\n", IsError: true}
+	f := &HTMLStreamFormatter{}
+	out := f.formatEvent(tr)
+	if !strings.Contains(out, `class="sl-error"`) {
+		t.Errorf("expected sl-error on errored tool_result, got: %s", out)
+	}
+	if !strings.Contains(out, "(error)") {
+		t.Errorf("expected (error) marker, got: %s", out)
+	}
+}
+
+func TestHTMLFormatterSessionStart(t *testing.T) {
+	start := time.Date(2026, 4, 27, 23, 8, 54, 0, time.Local)
+	f := &HTMLStreamFormatter{SessionStart: start}
+
+	// System header should include the started clock.
+	out := f.formatEvent(&SystemLine{SessionID: "abc", Model: "claude-sonnet-4-6"})
+	if !strings.Contains(out, "started=2026-04-27 23:08:54") {
+		t.Errorf("expected started clock on session header, got: %s", out)
+	}
+
+	// Result block should show Started/Ended computed from SessionStart + duration_ms.
+	out2 := f.formatEvent(&ResultLine{DurationMS: 60000, Turns: 1})
+	if !strings.Contains(out2, "Started:") || !strings.Contains(out2, "2026-04-27 23:08:54") {
+		t.Errorf("expected Started clock in result, got: %s", out2)
+	}
+	if !strings.Contains(out2, "Ended:") || !strings.Contains(out2, "2026-04-27 23:09:54") {
+		t.Errorf("expected Ended clock in result, got: %s", out2)
 	}
 }

@@ -209,15 +209,9 @@ func (f *StreamFormatter) fmtThinking(e *ThinkingLine) string {
 }
 
 func (f *StreamFormatter) fmtToolResult(e *ToolResultLine) string {
-	content := e.Content
-	bytes := len(content)
+	bytes, lines := toolResultSize(e.Content)
 	if bytes == 0 {
 		return ""
-	}
-	lines := strings.Count(content, "\n")
-	// A trailing newline counts as a delimiter, not a separate line.
-	if !strings.HasSuffix(content, "\n") {
-		lines++
 	}
 	body := fmt.Sprintf("  result: %s, %d lines", display.FmtBytes(bytes), lines)
 	if e.IsError {
@@ -267,113 +261,28 @@ func (f *StreamFormatter) fmtResult(e *ResultLine) string {
 // fmtRateLimit renders a rate_limit_event as a single dimmed line.
 // Verbose adds the absolute reset clock and the disable reason.
 func (f *StreamFormatter) fmtRateLimit(e *RateLimitLine) string {
-	parts := []string{"rate_limit:"}
-	if e.RateLimitType != "" {
-		parts = append(parts, e.RateLimitType)
-	}
-	if e.Status != "" {
-		parts = append(parts, e.Status)
-	}
-	extras := []string{}
-	if e.ResetsAt > 0 {
-		until := time.Until(time.Unix(e.ResetsAt, 0))
-		if until > 0 {
-			extras = append(extras, fmt.Sprintf("resets in %s", FormatDuration(until)))
-		} else {
-			extras = append(extras, "resets now")
-		}
-	}
-	if e.OverageStatus != "" {
-		extras = append(extras, "overage "+e.OverageStatus)
-	}
-	if e.IsUsingOverage {
-		extras = append(extras, "using overage")
-	}
-	main := strings.Join(parts, " ")
-	if len(extras) > 0 {
-		main += " (" + strings.Join(extras, ", ") + ")"
-	}
-	out := fmt.Sprintf("%s%s\n", f.Prefix, f.dim("--- "+main))
+	header, extras := rateLimitSummary(e)
+	out := fmt.Sprintf("%s%s\n", f.Prefix, f.dim("--- "+header))
 	if f.Verbose {
-		if e.ResetsAt > 0 {
-			out += fmt.Sprintf("%s%s\n", f.Prefix,
-				f.dim("    resetsAt="+time.Unix(e.ResetsAt, 0).Format("2006-01-02 15:04:05")))
-		}
-		if e.OverageDisabledReason != "" {
-			out += fmt.Sprintf("%s%s\n", f.Prefix,
-				f.dim("    overageDisabledReason="+e.OverageDisabledReason))
+		for _, line := range extras {
+			out += fmt.Sprintf("%s%s\n", f.Prefix, f.dim("    "+line))
 		}
 	}
 	return out
 }
 
 // usageSuffix renders the per-message usage line shown after assistant
-// blocks in verbose mode. Returns "" when usage is nil, verbose is off,
-// or the usage is entirely zero (e.g. claude's synthetic error message).
+// blocks in verbose mode. Returns "" when verbose is off or there's no
+// usage data to show.
 func (f *StreamFormatter) usageSuffix(u *MessageUsage) string {
-	if !f.Verbose || u == nil {
+	if !f.Verbose {
 		return ""
 	}
-	if u.InputTokens == 0 && u.OutputTokens == 0 &&
-		u.CacheReadInputTokens == 0 && u.CacheCreationInputTokens == 0 {
+	parts := usageParts(u, f.Model)
+	if len(parts) == 0 {
 		return ""
-	}
-	parts := []string{}
-	if u.InputTokens > 0 {
-		parts = append(parts, fmt.Sprintf("in=%s", display.FmtTokens(int64(u.InputTokens))))
-	}
-	if u.OutputTokens > 0 {
-		parts = append(parts, fmt.Sprintf("out=%s", display.FmtTokens(int64(u.OutputTokens))))
-	}
-	if u.CacheReadInputTokens > 0 {
-		parts = append(parts, fmt.Sprintf("cache_read=%s", display.FmtTokens(int64(u.CacheReadInputTokens))))
-	}
-	if u.CacheCreationInputTokens > 0 {
-		parts = append(parts, fmt.Sprintf("cache_create=%s", display.FmtTokens(int64(u.CacheCreationInputTokens))))
-	}
-	if u.CacheCreation.Ephemeral1hInputTokens > 0 {
-		parts = append(parts, fmt.Sprintf("cc_1h=%s", display.FmtTokens(int64(u.CacheCreation.Ephemeral1hInputTokens))))
-	}
-	// Context estimate: input includes the cached portions on this request,
-	// plus any cache creation. Show as absolute and percent of window.
-	ctxTokens := u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
-	if ctxTokens > 0 {
-		window := agent.ContextWindow(f.Model)
-		if window > 0 {
-			pct := ctxTokens * 100 / window
-			parts = append(parts, fmt.Sprintf("ctx=%s/%s (%d%%)",
-				display.FmtTokens(int64(ctxTokens)), display.FmtTokens(int64(window)), pct))
-		} else {
-			parts = append(parts, fmt.Sprintf("ctx=%s", display.FmtTokens(int64(ctxTokens))))
-		}
 	}
 	return f.dim("[" + strings.Join(parts, " ") + "]")
-}
-
-// apiErrorPrefixes are best-effort markers for claude-CLI synthesized error
-// messages — the CLI surfaces protocol failures (stream stalls, 4xx/5xx,
-// tool loops, credit issues) as a single text block starting with one of
-// these. Heuristic only; if claude renames its prefixes this list goes stale.
-var apiErrorPrefixes = []string{
-	"API Error:",
-	"API error:",
-	"Error:",
-	"Stream idle timeout",
-	"Request timed out",
-	"Credit balance is too low",
-}
-
-func looksLikeAPIError(s string) bool {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return false
-	}
-	for _, p := range apiErrorPrefixes {
-		if strings.HasPrefix(s, p) {
-			return true
-		}
-	}
-	return false
 }
 
 func (f *StreamFormatter) fmtError(e *ErrorLine) string {
