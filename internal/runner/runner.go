@@ -865,8 +865,15 @@ func appendStderrSummary(path string, s RunSummary) {
 		return
 	}
 	defer f.Close()
-	fmt.Fprintf(f, "\n--- ateam: run failed ---\nsource: %s\ncause: %s\nexit: %d\nduration: %s\n",
-		s.ErrorSource, s.ErrorCause, s.ExitCode, FormatDuration(s.Duration))
+	started := !(s.ExitCode == -1 && s.Duration == 0)
+	fmt.Fprintf(f, "\n--- ateam: run failed ---\nsource: %s\ncause: %s\nexit: %d\nduration: %s\nstarted: %v\n",
+		s.ErrorSource, s.ErrorCause, s.ExitCode, FormatDuration(s.Duration), started)
+	if !started {
+		fmt.Fprintf(f, "note: process never launched (exit=-1, duration=0s)\n")
+	}
+	if strings.Contains(s.ErrorCause, "resource temporarily unavailable") {
+		fmt.Fprintf(f, "hint: EAGAIN on fork — OS process table full; a runaway agent spin loop likely exhausted available process slots\n")
+	}
 	// agent_api failures carry real totals from the result event; every
 	// other failure path with non-zero tokens means we reconstructed the
 	// figure from partial assistant events — flag it as estimated.
