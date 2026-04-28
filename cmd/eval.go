@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/ateam/internal/eval"
 	"github.com/ateam/internal/prompts"
@@ -14,9 +16,14 @@ import (
 
 var (
 	evalRole            string
+	evalBaseRoles       []string
+	evalCandRoles       []string
 	evalPromptArg       string
 	evalBaseArg         string
 	evalDirs            []string
+	evalReview          bool
+	evalReviewBaseArg   string
+	evalReviewCandArg   string
 	evalTimeout         int
 	evalVerbose         bool
 	evalNoJudge         bool
@@ -42,42 +49,55 @@ var (
 var evalCmd = &cobra.Command{
 	Use:   "eval",
 	Short: "Compare two prompts for a role (cost + LLM judge)",
-	Long: `Run a role twice with two prompts (base and candidate) against the same
-codebase and compare the results: cost, tokens, duration, plus an LLM judge
-that scores each report 0.00-1.00 on coverage, accuracy, actionability, and
-conciseness.
+	Long: `Run one or more roles per side (base and candidate) against the same codebase
+and compare the results: cost, tokens, duration, plus an LLM judge that scores
+each side 0.00-1.00 on coverage, accuracy, actionability, and conciseness.
+
+Roles:
+  --role X                     shorthand: both sides run [X]
+  --base-roles A,B / --candidate-roles C,D   different role sets per side
+                               (use to compare N reports vs M, e.g. consolidating)
+
+Prompt overrides (only valid when the matching side has exactly one role):
+  --prompt @file               candidate report prompt
+  --base   @file               base report prompt (default: on-disk)
+
+Review:
+  --review                     also run supervisor review per side after the
+                               role reports; the judge then compares reviews
+                               instead of reports
+  --review-base-prompt @file   override the base side's review prompt
+  --review-candidate-prompt @file   override the candidate side's review prompt
 
 Modes:
   Sequential (default): runs in the current project directory, one after the other.
-  --dirs DIR1,DIR2:     user provides two initialized ateam project dirs (e.g. two
-                        git worktrees, two clones, or different projects). Parallel.
-  --git-worktree:       ateam auto-creates two detached git worktrees (under
-                        /tmp/ateam-worktree/<project> by default) and copies the
-                        parent's .ateam/ minus state into each. Parallel. Errors
-                        if the source repo has uncommitted changes.
+  --dirs DIR1,DIR2:     user provides two initialized ateam project dirs.
+  --git-worktree:       ateam auto-creates two detached git worktrees and copies
+                        the parent's .ateam/ minus state into each. Parallel.
 
-The previous-report context is always skipped so both runs start from the same state.
+The previous-report context is always skipped so both runs start fresh.
 
 Agent selection:
   --profile/--agent/--model apply to both sides unless overridden by
-  --base-profile/--base-agent/--base-model or
-  --candidate-profile/--candidate-agent/--candidate-model.
-  The judge uses --judge-profile/--judge-agent/--judge-model (falling back to
-  --profile/--agent/--model, then config default).
+  --base-* / --candidate-*. Judge uses --judge-* (falling back to shared).
 
 Examples:
   ateam eval --role security --prompt @candidate.md
-  ateam eval --role security --prompt @candidate.md --base @old.md --model sonnet
-  ateam eval --role security --prompt @candidate.md --dirs . ../eval-worktree
   ateam eval --role security --prompt @candidate.md --git-worktree
-  ateam eval --role security --prompt @candidate.md --candidate-model haiku --judge-model sonnet`,
+  ateam eval --base-roles code.small,code.module --candidate-roles code.consolidated --review
+  ateam eval --role security --review --review-candidate-prompt @new_review.md`,
 	RunE: runEval,
 }
 
 func init() {
-	evalCmd.Flags().StringVar(&evalRole, "role", "", "role to evaluate (required)")
-	evalCmd.Flags().StringVar(&evalPromptArg, "prompt", "", "candidate prompt text or @filepath (required)")
-	evalCmd.Flags().StringVar(&evalBaseArg, "base", "", "base prompt text or @filepath (default: current on-disk prompt)")
+	evalCmd.Flags().StringVar(&evalRole, "role", "", "role to evaluate on both sides (shorthand for --base-roles X --candidate-roles X)")
+	evalCmd.Flags().StringSliceVar(&evalBaseRoles, "base-roles", nil, "comma-separated roles for the base side (defaults to --role)")
+	evalCmd.Flags().StringSliceVar(&evalCandRoles, "candidate-roles", nil, "comma-separated roles for the candidate side (defaults to --role)")
+	evalCmd.Flags().StringVar(&evalPromptArg, "prompt", "", "candidate report prompt text or @filepath (requires single candidate role)")
+	evalCmd.Flags().StringVar(&evalBaseArg, "base", "", "base report prompt text or @filepath (default: current on-disk prompt; requires single base role)")
+	evalCmd.Flags().BoolVar(&evalReview, "review", false, "also run supervisor review per side; judge compares reviews instead of reports")
+	evalCmd.Flags().StringVar(&evalReviewBaseArg, "review-base-prompt", "", "override base review prompt (text or @filepath; implies --review)")
+	evalCmd.Flags().StringVar(&evalReviewCandArg, "review-candidate-prompt", "", "override candidate review prompt (text or @filepath; implies --review)")
 	evalCmd.Flags().StringSliceVar(&evalDirs, "dirs", nil, "two project dirs for parallel mode: DIR_BASE,DIR_CANDIDATE")
 	evalCmd.Flags().BoolVar(&evalGitWorktree, "git-worktree", false, "auto-create detached git worktrees for parallel eval (see --git-worktree-base)")
 	evalCmd.Flags().StringVar(&evalGitWorktreeBase, "git-worktree-base", "", "base dir for auto-created worktrees (default: /tmp/ateam-worktree/<project>)")
@@ -110,13 +130,15 @@ func init() {
 
 	addDockerAutoSetupFlag(evalCmd, &evalDockerAutoSetup)
 	addForceFlag(evalCmd, &evalForce)
-
-	_ = evalCmd.MarkFlagRequired("role")
-	_ = evalCmd.MarkFlagRequired("prompt")
 }
 
 func runEval(cmd *cobra.Command, args []string) error {
-	candidatePrompt, err := prompts.ResolveValue(evalPromptArg)
+	baseRoles, candRoles, err := resolveEvalRoles()
+	if err != nil {
+		return err
+	}
+
+	candidatePrompt, err := prompts.ResolveOptional(evalPromptArg)
 	if err != nil {
 		return fmt.Errorf("cannot resolve candidate prompt: %w", err)
 	}
@@ -124,6 +146,22 @@ func runEval(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("cannot resolve base prompt: %w", err)
 	}
+	if candidatePrompt != "" && len(candRoles) != 1 {
+		return fmt.Errorf("--prompt requires exactly one candidate role; got %d", len(candRoles))
+	}
+	if basePrompt != "" && len(baseRoles) != 1 {
+		return fmt.Errorf("--base requires exactly one base role; got %d", len(baseRoles))
+	}
+
+	reviewBasePrompt, err := prompts.ResolveOptional(evalReviewBaseArg)
+	if err != nil {
+		return fmt.Errorf("cannot resolve --review-base-prompt: %w", err)
+	}
+	reviewCandPrompt, err := prompts.ResolveOptional(evalReviewCandArg)
+	if err != nil {
+		return fmt.Errorf("cannot resolve --review-candidate-prompt: %w", err)
+	}
+	doReview := evalReview || reviewBasePrompt != "" || reviewCandPrompt != ""
 
 	parallel := len(evalDirs) > 0 || evalGitWorktree
 	if len(evalDirs) > 0 && len(evalDirs) != 2 {
@@ -152,15 +190,25 @@ func runEval(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if !prompts.IsValidRole(evalRole, baseEnv.Config.Roles, baseEnv.ProjectDir, baseEnv.OrgDir) {
-		return fmt.Errorf("unknown role %q in %s", evalRole, baseEnv.ProjectDir)
+	if err := validateRoles(baseRoles, baseEnv); err != nil {
+		return fmt.Errorf("base side: %w", err)
 	}
-	if parallel && !prompts.IsValidRole(evalRole, candEnv.Config.Roles, candEnv.ProjectDir, candEnv.OrgDir) {
-		return fmt.Errorf("unknown role %q in %s", evalRole, candEnv.ProjectDir)
+	if parallel {
+		if err := validateRoles(candRoles, candEnv); err != nil {
+			return fmt.Errorf("candidate side: %w", err)
+		}
+	} else if err := validateRoles(candRoles, baseEnv); err != nil {
+		return fmt.Errorf("candidate side: %w", err)
 	}
 
+	// Pick a representative role for runner profile resolution: when a side
+	// has multiple roles, profile may be role-specific in config; we use the
+	// first role's profile for the whole side. Workable for v1.
+	baseRunnerRole := baseRoles[0]
+	candRunnerRole := candRoles[0]
+
 	baseRunner, err := buildEvalRunner(evalRunnerSpec{
-		env: baseEnv, action: runner.ActionReport, roleID: evalRole,
+		env: baseEnv, action: runner.ActionReport, roleID: baseRunnerRole,
 		scopeProfile: evalBaseProfile, scopeAgent: evalBaseAgent, scopeModel: evalBaseModel,
 		sharedProfile: evalProfile, sharedAgent: evalAgent, sharedModel: evalModel,
 	})
@@ -168,7 +216,7 @@ func runEval(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("base runner: %w", err)
 	}
 	candRunner, err := buildEvalRunner(evalRunnerSpec{
-		env: candEnv, action: runner.ActionReport, roleID: evalRole,
+		env: candEnv, action: runner.ActionReport, roleID: candRunnerRole,
 		scopeProfile: evalCandProfile, scopeAgent: evalCandAgent, scopeModel: evalCandModel,
 		sharedProfile: evalProfile, sharedAgent: evalAgent, sharedModel: evalModel,
 	})
@@ -184,7 +232,7 @@ func runEval(cmd *cobra.Command, args []string) error {
 	baseRunner.CallDB = baseDB
 
 	if !evalForce {
-		if err := checkConcurrentRunsEnv(baseDB, baseEnv, runner.ActionReport, []string{evalRole}); err != nil {
+		if err := checkConcurrentRunsEnv(baseDB, baseEnv, runner.ActionReport, baseRoles); err != nil {
 			return err
 		}
 	}
@@ -208,20 +256,25 @@ func runEval(cmd *cobra.Command, args []string) error {
 	defer stop()
 
 	base := eval.Variant{
-		Label: eval.SideBase, PromptText: basePrompt, Runner: baseRunner, Env: baseEnv,
+		Label: eval.SideBase, Roles: rolesToRoleRuns(baseRoles, basePrompt),
+		Runner: baseRunner, Env: baseEnv,
+		RunReview: doReview, ReviewPromptText: reviewBasePrompt,
 	}
 	cand := eval.Variant{
-		Label: eval.SideCandidate, PromptText: candidatePrompt, Runner: candRunner, Env: candEnv,
+		Label: eval.SideCandidate, Roles: rolesToRoleRuns(candRoles, candidatePrompt),
+		Runner: candRunner, Env: candEnv,
+		RunReview: doReview, ReviewPromptText: reviewCandPrompt,
 	}
 	if parallel {
 		base.Dir = baseEnv.ProjectDir
 		cand.Dir = candEnv.ProjectDir
 	}
 
-	fmt.Printf("Running eval for role %q (%s mode, %dm timeout)...\n\n",
-		evalRole, modeLabel(parallel), timeout)
+	subject := evalSubject(baseRoles, candRoles, doReview)
+	fmt.Printf("Running eval: %s (%s mode, %dm timeout)...\n\n",
+		subject, modeLabel(parallel), timeout)
 
-	baseResult, candResult, runErr := eval.RunEval(ctx, evalRole, base, cand, timeout, evalVerbose)
+	baseResult, candResult, runErr := eval.RunEval(ctx, base, cand, timeout, evalVerbose)
 	if runErr != nil {
 		if baseResult == nil || candResult == nil {
 			return runErr
@@ -241,7 +294,16 @@ func runEval(cmd *cobra.Command, args []string) error {
 		} else {
 			judgeRunner.CallDB = baseDB
 			fmt.Println("Running judge...")
-			judge, err = eval.RunJudge(ctx, judgeRunner, baseEnv, evalRole, baseResult.Report, candResult.Report, evalJudgeTimeout, evalVerbose)
+			kind := eval.KindReport
+			if doReview {
+				kind = eval.KindReview
+			}
+			judge, err = eval.RunJudge(ctx, judgeRunner, baseEnv, eval.JudgeInput{
+				Subject:         subject,
+				Kind:            kind,
+				BaseReport:      baseResult.Report,
+				CandidateReport: candResult.Report,
+			}, evalJudgeTimeout, evalVerbose)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: judge failed: %v\n", err)
 				judge = nil
@@ -250,8 +312,67 @@ func runEval(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	eval.PrintComparison(os.Stdout, evalRole, baseResult, candResult, judge)
+	eval.PrintComparison(os.Stdout, subject, baseResult, candResult, judge)
 	return nil
+}
+
+// resolveEvalRoles applies the precedence: --base-roles / --candidate-roles
+// override --role; --role is the default for whichever side hasn't specified
+// its own list.
+func resolveEvalRoles() (base, cand []string, err error) {
+	base = evalBaseRoles
+	cand = evalCandRoles
+	if len(base) == 0 && evalRole != "" {
+		base = []string{evalRole}
+	}
+	if len(cand) == 0 && evalRole != "" {
+		cand = []string{evalRole}
+	}
+	if len(base) == 0 || len(cand) == 0 {
+		return nil, nil, fmt.Errorf("specify --role, or both --base-roles and --candidate-roles")
+	}
+	return base, cand, nil
+}
+
+func validateRoles(roleIDs []string, env *root.ResolvedEnv) error {
+	for _, r := range roleIDs {
+		if !prompts.IsValidRole(r, env.Config.Roles, env.ProjectDir, env.OrgDir) {
+			return fmt.Errorf("unknown role %q in %s", r, env.ProjectDir)
+		}
+	}
+	return nil
+}
+
+// rolesToRoleRuns assigns the prompt override to the single role on a side, if
+// applicable. promptText is empty unless the caller validated len(roleIDs)==1.
+func rolesToRoleRuns(roleIDs []string, promptText string) []eval.RoleRun {
+	out := make([]eval.RoleRun, len(roleIDs))
+	for i, id := range roleIDs {
+		out[i] = eval.RoleRun{RoleID: id}
+	}
+	if promptText != "" && len(out) == 1 {
+		out[0].PromptText = promptText
+	}
+	return out
+}
+
+// evalSubject builds a short label for prompts and display.
+func evalSubject(baseRoles, candRoles []string, review bool) string {
+	prefix := "report"
+	if review {
+		prefix = "review"
+	}
+	if slices.Equal(baseRoles, candRoles) {
+		return prefix + " " + joinRoles(baseRoles)
+	}
+	return prefix + " " + joinRoles(baseRoles) + " vs " + joinRoles(candRoles)
+}
+
+func joinRoles(roles []string) string {
+	if len(roles) == 1 {
+		return roles[0]
+	}
+	return "[" + strings.Join(roles, ", ") + "]"
 }
 
 // resolveEvalEnvs returns (baseEnv, candEnv). If dirs is empty, both point to

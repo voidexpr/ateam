@@ -380,8 +380,36 @@ Part 2 — Mode 3: Git worktree auto-isolation:
 - Validation: refuses if source repo has uncommitted changes; refuses if the base dir is inside the source repo (would nest repos).
 - `cmd/eval.go`: `--git-worktree` bool + `--git-worktree-base DIR` string flags; mutually exclusive with `--dirs`.
 
+**Implemented (2026-04-28):**
+
+Part 2 — N-vs-M roles + optional review:
+- `Variant` reshaped: `Roles []RoleRun` (per-side list of role + optional prompt override) replaces the old single `PromptText`.
+- `RunResult` now holds per-role results (`Runs []RoleRunResult`), an optional `Review *RoleRunResult`, an aggregated `Summary` (sum cost/tokens/duration; max peak context), and the `Report` text passed to the judge (review output if present, else concatenated role reports with `## Role: <id>` headers).
+- New flags on `ateam eval`:
+    - `--base-roles` / `--candidate-roles` (StringSlice) — set per-side role lists. `--role X` is the shorthand: both sides default to `[X]`.
+    - `--review` — also run supervisor review per side after the role reports; the judge then compares reviews instead of reports.
+    - `--review-base-prompt` / `--review-candidate-prompt` — optional review prompt overrides (also imply `--review`).
+- Validation: `--prompt` only allowed when there is exactly one candidate role; `--base` only with one base role.
+- Reuses existing `prompts.AssembleReviewPrompt(..., customPrompt)` and `runner.Run` with `ActionReview`. When review will run, role reports are written to `env.RoleReportPath` (snapshot+restore the original to avoid polluting the project's reports in sequential mode).
+- Judge prompt branches on report-vs-review and accepts a free-form subject label so multi-role and review evals get a sensible intro.
+- Tests added in `internal/eval/run_test.go`: `TestRunEval_NvsM`, `TestFormatReportPicksReviewWhenPresent`, `TestAggregateSummarySumsAndKeepsPeak`.
+
+Use cases unlocked:
+```bash
+# Compare 2 separate roles vs 1 consolidated role
+ateam eval --base-roles code.small,code.module --candidate-roles code.consolidated --review
+
+# Compare report+review pipeline end-to-end
+ateam eval --base-roles A,B --candidate-roles C,D --review --git-worktree
+
+# Test a new review prompt against the same set of reports
+ateam eval --role security --review --review-candidate-prompt @new_review.md
+```
+
 **Deferred:**
 - Glob expansion for `--roles` (e.g. `testing`, `testing.*` → all `testing.*` roles) — simple to add later via prefix match in `ResolveRoleList`.
 - Persistent eval storage (`.ateam/eval/`).
 - Worktree auto-cleanup after eval completes.
-- Multi-workspace aggregation, `--repeat N`, N-vs-M role comparison, full pipeline eval.
+- Per-step cost breakdown in display (currently shows aggregated total).
+- Per-side review profile/agent overrides (review currently uses the side's report runner).
+- Multi-workspace aggregation, `--repeat N`, full pipeline eval (report+review+code).
