@@ -18,6 +18,11 @@ type MockAgent struct {
 	Delay        time.Duration
 	DefaultModel string
 
+	// HoldAfterSystem makes Run emit only the system event and then sleep
+	// for this duration without sending assistant/result events. Used to
+	// exercise idle/stall paths in the runner.
+	HoldAfterSystem time.Duration
+
 	mu       sync.Mutex
 	Requests []Request
 }
@@ -64,6 +69,14 @@ func (m *MockAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent)
 	startedAt := time.Now()
 
 	ch <- StreamEvent{Type: "system", SessionID: "mock-session"}
+
+	if m.HoldAfterSystem > 0 {
+		select {
+		case <-time.After(m.HoldAfterSystem):
+		case <-ctx.Done():
+		}
+		return
+	}
 
 	response := m.Response
 	if response == "" {

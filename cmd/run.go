@@ -273,6 +273,8 @@ func printProgress(ch <-chan runner.RunProgress) {
 			fmt.Fprintf(os.Stderr, "[%s] done (%s)\n", p.RoleID, ts)
 		case runner.PhaseError:
 			fmt.Fprintf(os.Stderr, "[%s] error (%s)\n", p.RoleID, ts)
+		case runner.PhaseStall:
+			fmt.Fprintf(os.Stderr, "[%s] stall: %s (%s)\n", p.RoleID, p.Content, ts)
 		}
 	}
 }

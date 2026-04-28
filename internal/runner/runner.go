@@ -107,7 +107,14 @@ type Runner struct {
 	ContainerName        string              // docker container name for liveness checks
 	ContainerNameSource  string              // where ContainerName came from (ContainerNameSource* constants)
 	ProjectID            string              // project ID for DB
+
+	// StallWarnAfter is the idle duration after which Run logs a stall
+	// warning and emits a PhaseStall progress event. Re-armed after each
+	// warning. 0 = 5m default. Negative = disable the watchdog.
+	StallWarnAfter time.Duration
 }
+
+const defaultStallWarn = 5 * time.Minute
 
 // RunOpts holds per-invocation settings.
 type RunOpts struct {
@@ -389,8 +396,22 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		})
 	}
 
-	for ev := range events {
+	stallWarn := r.StallWarnAfter
+	if stallWarn == 0 {
+		stallWarn = defaultStallWarn
+	}
+	var stallC <-chan time.Time
+	var stallTimer *time.Timer
+	if stallWarn > 0 {
+		stallTimer = time.NewTimer(stallWarn)
+		defer stallTimer.Stop()
+		stallC = stallTimer.C
+	}
+	lastEventAt := time.Now()
+
+	processEvent := func(ev agent.StreamEvent) {
 		eventCount++
+		lastEventAt = time.Now()
 
 		if ev.ContextTokens > peakContextTokens {
 			peakContextTokens = ev.ContextTokens
@@ -441,6 +462,49 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		case "error":
 			evCopy := ev
 			resultEv = &evCopy
+		}
+	}
+
+eventLoop:
+	for {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				break eventLoop
+			}
+			processEvent(ev)
+		case now := <-stallC:
+			// `select` picks randomly among ready cases, so the timer
+			// branch can win even when an event is already buffered.
+			// Try a non-blocking receive first to avoid false stalls.
+			select {
+			case ev, ok := <-events:
+				if !ok {
+					break eventLoop
+				}
+				processEvent(ev)
+				stallTimer.Reset(stallWarn)
+				continue
+			default:
+			}
+			// Once ctx is cancelled the run is already terminating;
+			// further warnings are noise. Keep the timer armed but
+			// stay quiet until events closes.
+			if ctx.Err() != nil {
+				stallTimer.Reset(stallWarn)
+				continue
+			}
+			idle := now.Sub(lastEventAt)
+			if idle < stallWarn {
+				stallTimer.Reset(stallWarn - idle)
+				continue
+			}
+			msg := fmt.Sprintf("no agent events for %s", idle.Round(time.Second))
+			fmt.Fprintf(os.Stderr, "Warning: %s [role=%s action=%s exec=%d]\n",
+				msg, opts.RoleID, opts.Action, callID)
+			appendLog(r.LogFile, opts.RoleID, PhaseStall, effectiveWorkDir(opts), msg)
+			emitProgress(PhaseStall, "", "", msg, totalTools, eventCount)
+			stallTimer.Reset(stallWarn)
 		}
 	}
 

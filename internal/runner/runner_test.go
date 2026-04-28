@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/calldb"
@@ -368,6 +370,54 @@ func TestRenderSettingsNoSandboxExtra(t *testing.T) {
 	domains := net["allowedDomains"].([]any)
 	if len(domains) != 1 {
 		t.Errorf("expected 1 domain, got %d: %v", len(domains), domains)
+	}
+}
+
+func TestRunnerStallEmitsWarning(t *testing.T) {
+	dir := t.TempDir()
+	logsDir := filepath.Join(dir, "logs")
+	logFile := filepath.Join(dir, "runner.log")
+
+	stallWarn := 75 * time.Millisecond
+	r := &Runner{
+		Agent:          &agent.MockAgent{HoldAfterSystem: 4 * stallWarn},
+		LogFile:        logFile,
+		StallWarnAfter: stallWarn,
+	}
+
+	opts := RunOpts{
+		RoleID:  "stalled",
+		Action:  ActionRun,
+		LogsDir: logsDir,
+	}
+
+	progress := make(chan RunProgress, 64)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = r.Run(ctx, "stall test", opts, progress)
+	close(progress)
+
+	var stalls int
+	var lastStallContent string
+	for p := range progress {
+		if p.Phase == PhaseStall {
+			stalls++
+			lastStallContent = p.Content
+		}
+	}
+	if stalls == 0 {
+		t.Fatalf("expected at least one PhaseStall progress event, got 0")
+	}
+	if !strings.Contains(lastStallContent, "no agent events") {
+		t.Errorf("stall content missing expected message: %q", lastStallContent)
+	}
+
+	logData, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("cannot read runner log: %v", err)
+	}
+	if !strings.Contains(string(logData), "stall") {
+		t.Errorf("expected runner log to contain 'stall', got: %s", string(logData))
 	}
 }
 

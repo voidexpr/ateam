@@ -15,6 +15,7 @@ const (
 	PhaseToolResult = "tool_result"
 	PhaseDone       = "done"
 	PhaseError      = "error"
+	PhaseStall      = "stall"
 )
 
 // Type aliases for the shared streamutil types, used throughout the runner package.

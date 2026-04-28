@@ -169,6 +169,13 @@ func nextPoolStatusRow(row poolStatusRow, p runner.RunProgress) poolStatusRow {
 	case runner.PhaseError:
 		next.State = poolStateError
 		next.Detail = elapsed
+	case runner.PhaseStall:
+		next.State = poolStateRunning
+		if p.Content != "" {
+			next.Detail = elapsed + " stall: " + p.Content
+		} else {
+			next.Detail = elapsed + " stall"
+		}
 	default:
 		next.State = poolStateRunning
 		next.Detail = elapsed
