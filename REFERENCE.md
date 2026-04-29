@@ -537,6 +537,48 @@ ateam export --ateam-project /path/to/.ateam  # export a specific project
 | `--project NAME` | Display name override (instead of config.toml name) |
 | `--ateam-project PATH` | Path to a `.ateam/` directory to export |
 
+### `ateam eval`
+
+Run a role twice (base vs candidate) and score each side with an LLM judge on coverage, accuracy, actionability, and conciseness. See [EVAL.md](EVAL.md) for full documentation.
+
+```bash
+ateam eval --role security --prompt @candidate.md
+ateam eval --role security --prompt @new.md --git-worktree
+ateam eval --base-roles code.small,code.module --candidate-roles code.consolidated --review
+ateam eval --role security --review --review-candidate-prompt @new_review.md
+```
+
+| Flag | Description |
+|------|-------------|
+| `--role NAME` | Role to run on both sides (shorthand for `--base-roles NAME --candidate-roles NAME`) |
+| `--base-roles LIST` | Comma-separated roles for the base side |
+| `--candidate-roles LIST` | Comma-separated roles for the candidate side |
+| `--prompt TEXT` | Candidate report prompt (text or `@filepath`; requires single candidate role) |
+| `--base TEXT` | Base report prompt (text or `@filepath`; requires single base role) |
+| `--review` | Run supervisor review per side after reports; judge compares reviews instead of reports |
+| `--review-base-prompt TEXT` | Override base side's review prompt (text or `@filepath`; implies `--review`) |
+| `--review-candidate-prompt TEXT` | Override candidate side's review prompt (text or `@filepath`; implies `--review`) |
+| `--dirs DIR1,DIR2` | Run each side in a pre-configured project directory (parallel) |
+| `--git-worktree` | Auto-create two detached git worktrees and run sides in parallel |
+| `--git-worktree-base PATH` | Base directory for auto-created worktrees (default: `/tmp/ateam-worktree/<project>`) |
+| `--no-judge` | Skip the LLM judge; print cost comparison only |
+| `--timeout N` | Per-run timeout in minutes (0 = config default) |
+| `--judge-timeout N` | Judge timeout in minutes (default: 10) |
+| `--profile NAME` | Runtime profile for both sides and judge |
+| `--agent NAME` | Agent for both sides (mutually exclusive with `--profile`) |
+| `--model NAME` | Model override for both sides |
+| `--base-profile NAME` | Runtime profile for the base side only |
+| `--base-agent NAME` | Agent for the base side only |
+| `--base-model NAME` | Model for the base side only |
+| `--candidate-profile NAME` | Runtime profile for the candidate side only |
+| `--candidate-agent NAME` | Agent for the candidate side only |
+| `--candidate-model NAME` | Model for the candidate side only |
+| `--judge-profile NAME` | Runtime profile for the judge |
+| `--judge-agent NAME` | Agent for the judge |
+| `--judge-model NAME` | Model for the judge |
+| `--force` | Run even if the same role+action is already in flight |
+| `--verbose` | Print agent and container commands |
+
 ### `ateam update`
 
 Update on-disk default prompts and runtime config to match the current binary.
