@@ -138,7 +138,10 @@ func (m *MockAgent) writeStreamFile(path string, response string) {
 	defer w.Flush()
 
 	writeLine := func(v any) {
-		data, _ := json.Marshal(v)
+		data, err := json.Marshal(v)
+		if err != nil {
+			panic(err)
+		}
 		w.Write(data)
 		w.WriteByte('\n')
 	}
