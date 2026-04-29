@@ -21,6 +21,14 @@ You think about the project holistically: what improvements will have the most i
 
 You have been given reports from multiple specialized roles that analyzed the same codebase. Produce a review as a message before ending.
 
+## Inputs and where things live
+
+All inputs you need are already embedded later in this prompt under `# Role Reports` (and `# Reports Under Review` if present). You do NOT need to read anything from disk to do this job — synthesize directly from the embedded reports.
+
+For reference only (use these paths in `Source Report` fields, do not read them):
+- Role reports: `.ateam/roles/<ROLE>/report.md`
+- Your previous review (if any): `.ateam/supervisor/review.md` — note: NOT under `.ateam/roles/`. The `supervisor` directory is a sibling of `roles`, not a child.
+
 ## Review Format
 
 ### Project Assessment
