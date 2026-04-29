@@ -10,8 +10,6 @@ import (
 	"github.com/ateam/internal/calldb"
 )
 
-// TestRunCatFiles calls runCatFiles with a minimal JSONL fixture and asserts
-// the output contains expected formatted content.
 func TestRunCatFiles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "stream.jsonl")
@@ -51,8 +49,6 @@ func TestRunCatFiles(t *testing.T) {
 	}
 }
 
-// TestRunCatIDs seeds a calldb entry with a known stream file and asserts that
-// runCatIDs prints the header and stream content.
 func TestRunCatIDs(t *testing.T) {
 	_, projPath, env := setupTestProject(t)
 
@@ -77,6 +73,7 @@ func TestRunCatIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open calldb: %v", err)
 	}
+	defer db.Close()
 	now := time.Now()
 	id, err := db.InsertCall(&calldb.Call{
 		ProjectID:  env.ProjectID(),
@@ -93,7 +90,6 @@ func TestRunCatIDs(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpdateCall: %v", err)
 	}
-	db.Close()
 
 	// Point the global org flag at the org parent so root.Resolve finds the project.
 	savedOrg := orgFlag
