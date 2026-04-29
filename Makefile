@@ -120,7 +120,7 @@ fmt-check:
 	fi
 
 install-hooks:
-	@printf '#!/bin/sh\nmake fmt-check && make check-tidy\n' > .git/hooks/pre-commit
+	@printf '#!/bin/sh\nmake fmt-check && make check-tidy && make check-docs\n' > .git/hooks/pre-commit
 	@chmod +x .git/hooks/pre-commit
 	@echo "Installed pre-commit hook."
 
