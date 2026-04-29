@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ateam/internal/config"
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runtime"
 	"github.com/ateam/internal/secret"
@@ -300,7 +301,7 @@ func printProjectSection(env *root.ResolvedEnv, cwd string) {
 			status = "-"
 		}
 		if hasReport {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", status, roleID, fmtDateAge(fi.ModTime()), relPath(cwd, reportPath))
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", status, roleID, display.FmtDateAge(fi.ModTime()), relPath(cwd, reportPath))
 		} else {
 			fmt.Fprintf(w, "%s\t%s\t-\t\n", status, roleID)
 		}
@@ -308,7 +309,7 @@ func printProjectSection(env *root.ResolvedEnv, cwd string) {
 
 	reviewPath := env.ReviewPath()
 	if fi, err := os.Stat(reviewPath); err == nil {
-		fmt.Fprintf(w, " \t%s\t%s\t%s\n", "review", fmtDateAge(fi.ModTime()), relPath(cwd, reviewPath))
+		fmt.Fprintf(w, " \t%s\t%s\t%s\n", "review", display.FmtDateAge(fi.ModTime()), relPath(cwd, reviewPath))
 	}
 	w.Flush()
 }

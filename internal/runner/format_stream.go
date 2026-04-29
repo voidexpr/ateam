@@ -146,7 +146,7 @@ func (f *StreamFormatter) fmtToolCall(e *ToolCallLine) string {
 		}
 		return b.String()
 	}
-	detail := truncate(e.Detail, 100)
+	detail := display.Truncate(e.Detail, 100)
 	var line string
 	if detail != "" {
 		line = fmt.Sprintf("%s%s %s\n", f.Prefix, header, f.dim(detail))
@@ -177,7 +177,7 @@ func (f *StreamFormatter) fmtText(e *TextLine) string {
 		}
 	} else {
 		preview := SingleLineText(e.Text)
-		preview = truncate(preview, 120)
+		preview = display.Truncate(preview, 120)
 		fmt.Fprintf(&b, "%s%s %s\n", f.Prefix,
 			f.yellow(fmt.Sprintf("  text #%d:", f.TextCount)),
 			colorBody(preview))
@@ -199,7 +199,7 @@ func (f *StreamFormatter) fmtThinking(e *ThinkingLine) string {
 		// Show a single-line preview so turns made up only of thinking
 		// don't render empty.
 		preview := SingleLineText(e.Text)
-		preview = truncate(preview, 120)
+		preview = display.Truncate(preview, 120)
 		fmt.Fprintf(&b, "%s%s %s\n", f.Prefix, f.dim("  thinking:"), f.dim(preview))
 	}
 	if suffix := f.usageSuffix(e.Usage); suffix != "" {
@@ -311,13 +311,13 @@ func toolDetail(name string, input json.RawMessage) string {
 		if idx := strings.IndexByte(cmd, '\n'); idx >= 0 {
 			cmd = cmd[:idx]
 		}
-		return truncate(cmd, 120)
+		return display.Truncate(cmd, 120)
 	case "Read", "Edit", "Write":
 		return str("file_path")
 	case "Glob", "Grep":
 		return str("pattern")
 	case "Agent":
-		return truncate(str("prompt"), 80)
+		return display.Truncate(str("prompt"), 80)
 	case "WebFetch":
 		return str("url")
 	case "WebSearch":

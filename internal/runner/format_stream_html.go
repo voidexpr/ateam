@@ -127,7 +127,7 @@ func (f *HTMLStreamFormatter) fmtToolCall(e *ToolCallLine) string {
 			fmt.Fprintf(&b, "\n<pre class=\"sl-tool-input\">%s</pre>", esc(input))
 		}
 	} else {
-		detail := truncate(e.Detail, 100)
+		detail := display.Truncate(e.Detail, 100)
 		if detail != "" {
 			fmt.Fprintf(&b, ` <span class="sl-dim">%s</span>`, esc(detail))
 		}
@@ -150,7 +150,7 @@ func (f *HTMLStreamFormatter) fmtText(e *TextLine) string {
 		fmt.Fprintf(&b, `<div class="%s"><span class="sl-text-label">text #%d:</span>`, klass, f.TextCount)
 		fmt.Fprintf(&b, `<pre class="sl-text-body">%s</pre>`, esc(e.Text))
 	} else {
-		preview := esc(truncate(SingleLineText(e.Text), 120))
+		preview := esc(display.Truncate(SingleLineText(e.Text), 120))
 		fmt.Fprintf(&b, `<div class="%s"><span class="sl-text-label">text #%d:</span> <span class="sl-dim">%s</span>`,
 			klass, f.TextCount, preview)
 	}
@@ -167,7 +167,7 @@ func (f *HTMLStreamFormatter) fmtThinking(e *ThinkingLine) string {
 		fmt.Fprintf(&b, "<div class=\"sl-thinking\"><span class=\"sl-dim\">thinking:</span>\n<pre class=\"sl-thinking-body\">%s</pre>",
 			esc(e.Text))
 	} else {
-		preview := esc(truncate(SingleLineText(e.Text), 120))
+		preview := esc(display.Truncate(SingleLineText(e.Text), 120))
 		fmt.Fprintf(&b, `<div class="sl-thinking"><span class="sl-dim">thinking: %s</span>`, preview)
 	}
 	if suffix := f.usageSuffixHTML(e.Usage); suffix != "" {

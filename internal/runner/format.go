@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"os"
 	"strings"
+
+	"github.com/ateam/internal/display"
 )
 
 // knownErrors maps substrings in the last assistant message to short error descriptions.
@@ -74,7 +76,7 @@ func streamTailMessages(path string, n int) []string {
 					copy(messages, messages[1:])
 					messages = messages[:n-1]
 				}
-				messages = append(messages, truncate(tl.Text, 500))
+				messages = append(messages, display.Truncate(tl.Text, 500))
 			}
 		}
 	}
