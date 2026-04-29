@@ -88,15 +88,19 @@ type ReportConfig struct {
 	ReportTimeoutMinutes int `toml:"report_timeout_minutes"`
 }
 
+func effectiveInt(override, configured int) int {
+	if override > 0 {
+		return override
+	}
+	return configured
+}
+
 type ReviewConfig struct {
 	TimeoutMinutes int `toml:"timeout_minutes"`
 }
 
 func (r ReviewConfig) EffectiveTimeout(override int) int {
-	if override > 0 {
-		return override
-	}
-	return r.TimeoutMinutes
+	return effectiveInt(override, r.TimeoutMinutes)
 }
 
 type CodeConfig struct {
@@ -104,26 +108,17 @@ type CodeConfig struct {
 }
 
 func (c CodeConfig) EffectiveTimeout(override int) int {
-	if override > 0 {
-		return override
-	}
-	return c.TimeoutMinutes
+	return effectiveInt(override, c.TimeoutMinutes)
 }
 
 // EffectiveMaxParallel returns the override if positive, otherwise the configured max_parallel.
 func (r ReportConfig) EffectiveMaxParallel(override int) int {
-	if override > 0 {
-		return override
-	}
-	return r.MaxParallel
+	return effectiveInt(override, r.MaxParallel)
 }
 
 // EffectiveTimeout returns the override if positive, otherwise the configured timeout.
 func (r ReportConfig) EffectiveTimeout(override int) int {
-	if override > 0 {
-		return override
-	}
-	return r.ReportTimeoutMinutes
+	return effectiveInt(override, r.ReportTimeoutMinutes)
 }
 
 // IsRoleEnabled returns true if status is "on" or "enabled" (backward compat).

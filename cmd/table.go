@@ -842,7 +842,6 @@ func secretResolver(env *root.ResolvedEnv, backend secret.Backend) *secret.Resol
 	return secret.NewResolver(env.ProjectDir, env.OrgDir, backend, opts)
 }
 
-func fmtDateAge(t time.Time) string { return display.FmtDateAge(t) }
 
 // dryRunOpts configures what printDryRunInfo displays.
 type dryRunOpts struct {

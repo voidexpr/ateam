@@ -176,7 +176,7 @@ func printPromptSources(out io.Writer, sources []prompts.PromptSource) {
 		totalTokens += tokens
 		modified := ""
 		if !s.ModTime.IsZero() {
-			modified = fmtDateAge(s.ModTime)
+			modified = display.FmtDateAge(s.ModTime)
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\n", s.DisplayPath(), modified, display.FmtTokens(int64(tokens)))
 	}

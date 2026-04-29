@@ -439,7 +439,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		case "assistant":
 			if ev.Text != "" {
 				lastOutput = ev.Text
-				emitProgress(PhaseThinking, "", "", truncate(ev.Text, 200), totalTools, eventCount)
+				emitProgress(PhaseThinking, "", "", display.Truncate(ev.Text, 200), totalTools, eventCount)
 			}
 
 		case "thinking":
@@ -454,10 +454,10 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		case "tool_use":
 			toolCounts[ev.ToolName]++
 			totalTools++
-			emitProgress(PhaseTool, ev.ToolName, truncate(ev.ToolInput, 200), "", totalTools, eventCount)
+			emitProgress(PhaseTool, ev.ToolName, display.Truncate(ev.ToolInput, 200), "", totalTools, eventCount)
 
 		case "tool_result":
-			emitProgress(PhaseToolResult, "", "", truncate(ev.ToolResult, 200), totalTools, eventCount)
+			emitProgress(PhaseToolResult, "", "", display.Truncate(ev.ToolResult, 200), totalTools, eventCount)
 
 		case "result":
 			evCopy := ev
@@ -736,9 +736,9 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 	}
 }
 
-// RenderSettings generates the merged sandbox settings JSON without writing to disk.
-// workDir is the effective working directory (e.g. SourceDir).
-func (r *Runner) RenderSettings(workDir string) ([]byte, error) {
+// renderSettingsJSON unmarshals, merges, and re-marshals sandbox settings.
+// Returns nil, nil when Settings is empty.
+func (r *Runner) renderSettingsJSON(workDir string, extraDenyWrite []string) ([]byte, error) {
 	if r.Sandbox.Settings == "" {
 		return nil, nil
 	}
@@ -746,26 +746,26 @@ func (r *Runner) RenderSettings(workDir string) ([]byte, error) {
 	if err := json.Unmarshal([]byte(r.Sandbox.Settings), &settings); err != nil {
 		return nil, fmt.Errorf("cannot parse sandbox settings: %w", err)
 	}
-
-	r.mergeSandboxPaths(settings, workDir, nil)
+	r.mergeSandboxPaths(settings, workDir, extraDenyWrite)
 	return json.MarshalIndent(settings, "", "  ")
+}
+
+// RenderSettings generates the merged sandbox settings JSON without writing to disk.
+// workDir is the effective working directory (e.g. SourceDir).
+func (r *Runner) RenderSettings(workDir string) ([]byte, error) {
+	return r.renderSettingsJSON(workDir, nil)
 }
 
 // writeSettings parses the inline sandbox settings JSON from the agent config,
 // merges in runtime paths, and writes the result to settingsPath.
 func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error) {
-	var settings map[string]any
-	if err := json.Unmarshal([]byte(r.Sandbox.Settings), &settings); err != nil {
-		return nil, fmt.Errorf("cannot parse sandbox settings: %w", err)
-	}
-
-	r.mergeSandboxPaths(settings, effectiveWorkDir(opts), []string{settingsPath})
-
-	data, err := json.MarshalIndent(settings, "", "  ")
+	data, err := r.renderSettingsJSON(effectiveWorkDir(opts), []string{settingsPath})
 	if err != nil {
 		return nil, err
 	}
-
+	if data == nil {
+		return nil, nil
+	}
 	if err := os.WriteFile(settingsPath, data, 0600); err != nil {
 		return nil, err
 	}
@@ -833,8 +833,6 @@ func mergeStringList(obj map[string]any, keyPath []string, values []string) {
 // Truncate shortens s to at most max bytes on a rune boundary, appending "…"
 // when it had to cut. Returns "" for max<=0 and the original s when it fits.
 func Truncate(s string, max int) string { return display.Truncate(s, max) }
-
-var truncate = display.Truncate
 
 func sendProgress(ch chan<- RunProgress, p RunProgress) {
 	if ch == nil {

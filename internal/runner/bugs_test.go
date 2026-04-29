@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/ateam/internal/display"
 )
 
 // =============================================================================
@@ -22,11 +24,11 @@ func TestTruncateMultiByteUTF8ProducesInvalidOutput(t *testing.T) {
 	// Bytes: h(1) e(1) l(1) l(1) o(1) (1) 世(3) 界(3) !(1) = 13 bytes total
 	// Truncating at 8 bytes cuts in the middle of 世 (which starts at byte 6).
 	input := "hello 世界!"
-	result := truncate(input, 8)
+	result := display.Truncate(input, 8)
 
 	// The result should be valid UTF-8.
 	if !utf8.ValidString(result) {
-		t.Errorf("truncate(%q, 8) produced invalid UTF-8: %q (bytes: %x)",
+		t.Errorf("display.Truncate(%q, 8) produced invalid UTF-8: %q (bytes: %x)",
 			input, result, []byte(result))
 	}
 }
@@ -34,24 +36,24 @@ func TestTruncateMultiByteUTF8ProducesInvalidOutput(t *testing.T) {
 func TestTruncateMultiByteEmojiSplit(t *testing.T) {
 	// Emoji like 🔥 is 4 bytes (F0 9F 94 A5). Cutting at 2 bytes splits it.
 	input := "🔥🔥🔥"
-	result := truncate(input, 5) // cuts inside second emoji
+	result := display.Truncate(input, 5) // cuts inside second emoji
 
 	if !utf8.ValidString(result) {
-		t.Errorf("truncate(%q, 5) produced invalid UTF-8: %q (bytes: %x)",
+		t.Errorf("display.Truncate(%q, 5) produced invalid UTF-8: %q (bytes: %x)",
 			input, result, []byte(result))
 	}
 }
 
 func TestTruncateASCIIStillWorks(t *testing.T) {
 	// Sanity check: ASCII strings should still work correctly.
-	result := truncate("hello world", 5)
+	result := display.Truncate("hello world", 5)
 	if result != "hello…" {
 		t.Errorf("truncate ASCII: got %q, want %q", result, "hello…")
 	}
 }
 
 func TestTruncateNoTruncationNeeded(t *testing.T) {
-	result := truncate("short", 100)
+	result := display.Truncate("short", 100)
 	if result != "short" {
 		t.Errorf("truncate no-op: got %q, want %q", result, "short")
 	}
