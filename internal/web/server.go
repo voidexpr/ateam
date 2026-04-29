@@ -250,7 +250,14 @@ func (s *Server) ListenAndServe(port int, openBrowser bool, host string) error {
 		openURL(s.URL)
 	}
 
-	return http.Serve(ln, securityHeaders(mux))
+	srv := &http.Server{
+		Handler:           securityHeaders(mux),
+		ReadHeaderTimeout: 30 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      120 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	return srv.Serve(ln)
 }
 
 func securityHeaders(next http.Handler) http.Handler {
