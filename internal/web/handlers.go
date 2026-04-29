@@ -648,6 +648,18 @@ func (s *Server) handleReportHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	roleID := r.PathValue("role")
+	roles := discoverRoles(pe)
+	validRole := false
+	for _, id := range roles {
+		if id == roleID {
+			validRole = true
+			break
+		}
+	}
+	if !validRole {
+		http.NotFound(w, r)
+		return
+	}
 	histDir := filepath.Join(pe.ProjectDir, "roles", roleID, "history")
 	s.serveHistoryFile(w, r, pe, histDir, r.PathValue("file"), roleID, "reports")
 }
