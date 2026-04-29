@@ -281,7 +281,7 @@ func snapshotFile(path string) (func(), error) {
 	}
 	return func() {
 		if hadOriginal {
-			if err := os.WriteFile(path, original, 0644); err != nil {
+			if err := os.WriteFile(path, original, 0600); err != nil {
 				fmt.Fprintf(os.Stderr, "warning: failed to restore %s: %v\n", path, err)
 			}
 		} else {
@@ -298,7 +298,7 @@ func snapshotAndWrite(path string, content []byte) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(path, content, 0644); err != nil {
+	if err := os.WriteFile(path, content, 0600); err != nil {
 		restore()
 		return nil, err
 	}
