@@ -243,6 +243,7 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 | `ateam review` | Supervisor reviews and prioritizes findings |
 | `ateam code` | Execute prioritized coding tasks |
 | `ateam all` | Full pipeline: report → review → code |
+| `ateam eval` | Compare two role prompt variants side-by-side with LLM scoring — see [EVAL.md](EVAL.md) |
 | `ateam run` | Run an agent with a custom prompt |
 | `ateam parallel` | Run multiple agents in parallel, each with its own prompt |
 | `ateam secret` | Manage API keys (keychain or file) |
@@ -251,6 +252,7 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 | `ateam container-cp` | Copy ateam binary into a running container |
 | `ateam env` | Show environment and configuration status |
 | `ateam serve` | Web UI for browsing reports and sessions |
+| `ateam export` | Export reports as a self-contained HTML file |
 | `ateam ps` | Recent run history |
 | `ateam inspect` | Show details and logs for agent runs |
 | `ateam cost` | Aggregated cost and token usage |
