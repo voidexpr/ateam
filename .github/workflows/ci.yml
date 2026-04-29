@@ -27,6 +27,7 @@ jobs:
 
       - run: make fmt-check
       - run: make check-tidy
+      - run: make check-docs
       - run: make lint
       - run: make test
       - run: make vuln
