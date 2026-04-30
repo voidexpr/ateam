@@ -25,11 +25,6 @@ func stdoutSize() (cols, rows int) {
 	return int(ws.Col), int(ws.Row)
 }
 
-func stdoutWidth() int {
-	cols, _ := stdoutSize()
-	return cols
-}
-
 func subscribeWindowResize() (<-chan os.Signal, func()) {
 	if !isTerminal() {
 		return nil, func() {}
