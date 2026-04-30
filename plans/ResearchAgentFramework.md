@@ -251,6 +251,47 @@ Gas Town is **significantly more complex to use** for ATeam's goals. It's design
 
 **Key difference from ATeam:** Supacode is a developer productivity tool — a better terminal for manually running agents side by side. ATeam is an autonomous system that decides what to work on, runs agents unattended, and triages results. Supacode is the cockpit; ATeam is the autopilot.
 
+#### Sandcastle (mattpocock/sandcastle) ⭐⭐⭐
+
+**What it is:** A TypeScript library for running coding agents inside isolated sandboxes via a programmatic `sandcastle.run()` API. Created March 2026 by Matt Pocock, 1.85K stars in ~6 weeks, 889 commits, latest release v0.5.6 (April 2026), pushed daily. Agent-agnostic (Claude Code, Codex, Pi, OpenCode, custom) and sandbox-provider-agnostic (Docker bind-mount, Podman with SELinux, Vercel Firecracker microVMs, custom providers). MIT-licensed.
+
+**How it works:** Library, not a daemon. You call `sandcastle.run({ agent: claudeCode("claude-opus-4-6"), sandbox: docker(), prompt: "..." })` and it provisions a sandbox, runs the agent inside it against your repo, captures commits, and tears it down. Returns `{ iterations, commits, branch, logFilePath }`.
+
+**Branch strategy abstraction.** Three modes selected per-run:
+- `head` — agent writes directly to the host working directory (bind-mount, default).
+- `merge-to-head` — agent works on a temp branch, sandcastle merges back when the run finishes.
+- `branch` — agent commits to a named branch (`agent/fix-42`), no merge.
+
+This is a cleaner factoring of the worktree question than most tools. ATeam's container adapter hardcodes the bind-mount + branch model; sandcastle makes it a knob.
+
+**Lifecycle hooks** at two boundaries:
+- `host.onWorktreeReady`, `host.onSandboxReady` — run on the developer's machine.
+- `sandbox.onSandboxReady` — runs inside the container (with optional `sudo`).
+
+Each hook is `{ command: string; timeoutMs?: number }`. Useful for installing project-specific deps, seeding databases, or warming caches before the agent starts.
+
+**Sandbox providers as plugins.** `docker()`, `podman()`, `vercel()`, plus a documented interface for writing your own. Vercel's Firecracker microVMs are notable — they give you cloud-isolated sandboxes without standing up infrastructure.
+
+**Overlap with ATeam:** Both run agents in isolated sandboxes against a project repo. Both are agent-agnostic in principle. Both produce commits/branches as their output artifact.
+
+**What it lacks for our use case:**
+- **On-demand only.** No scheduler, no cron, no background daemon. You invoke `sandcastle.run()` from your own code or CLI; sandcastle won't decide when to run.
+- **No coordinator or supervisor.** Single-agent invocations. You can call `createSandbox()` and chain multiple `run()` calls in the same container, but there's no LLM-powered coordinator deciding what to do next.
+- **No specialized agent roles or persistent project knowledge.** Each `run()` is stateless apart from the repo state and any hooks you wire up.
+- **No tracker/reactions/notifier integration.** Sandcastle is the sandboxing + invocation layer; you'd build the rest (issue intake, CI reaction, human escalation) on top.
+- **No web dashboard, no audit/approve/implement gating.** Programmatic only.
+- **Not a macOS seatbelt option.** Container-based isolation only — Docker/Podman locally, or a cloud microVM. Doesn't help if you specifically want process-level seatbelt sandboxing on macOS.
+- **TypeScript-only.** ATeam is Go; integrating sandcastle as a dependency means crossing a language boundary or re-implementing the abstractions.
+
+**Ideas to integrate:**
+
+- **Branch strategy as a first-class option.** ATeam should consider exposing `head` / `merge-to-head` / `branch` modes per agent run instead of always using a feature branch. `head` mode (direct writes to working tree) would simplify interactive ATeam shell use; `merge-to-head` is what most autonomous runs effectively want.
+- **Host vs sandbox lifecycle hooks.** ATeam currently has container-side setup baked into the runtime config. Splitting hooks into "runs on host before container starts" and "runs inside container after start" is cleaner — useful for things like generating credentials on the host (with access to keychain) and seeding DB schemas inside the container.
+- **Sandbox provider plugin pattern.** ATeam already has a container adapter abstraction; sandcastle's interface is worth comparing against ours. The Vercel Firecracker provider in particular is interesting if ATeam ever offers a managed cloud option — outsource the sandbox to an existing microVM platform rather than building one.
+- **Programmatic `run()` API.** ATeam exposes the agent runtime via CLI commands. A library-shaped API (callable from Go programs, not just from `ateam` invocations) would make it embeddable in custom workflows. Not a v1 priority but a clean future shape.
+
+**Key architectural difference from ATeam:** Sandcastle is a sandboxing/invocation primitive — it answers "given an agent and a repo, run the agent safely and capture the diff." ATeam is the layer above that primitive — it answers "given a project and a schedule, decide which agents to run, when, and what to do with the results." You could plausibly build ATeam on top of sandcastle (if ATeam were TypeScript) by treating sandcastle as the container adapter and adding the coordinator, scheduler, role system, and audit/implement workflow on top. The right mental model: sandcastle is the runtime ATeam already has internally, packaged as a reusable library; ATeam is everything else.
+
 #### Ona (formerly Gitpod) ⭐⭐⭐⭐
 
 **What it is:** A cloud platform (SaaS or self-hosted VPC) for running AI software engineering agents in isolated, reproducible environments. Originally Gitpod (cloud dev environments), rebranded as Ona in 2025–2026 with a pivot toward AI agent infrastructure. Supports background agents, automations triggered by PRs/schedules/webhooks, enterprise guardrails, and kernel-level security enforcement. SOC 2 certified, GDPR compliant. Targets Fortune 500.
@@ -340,7 +381,7 @@ This is similar to ATeam's report → review → code pipeline but more rigid: O
 
 ### B.3 Conclusion: Build or Adopt?
 
-**Recommendation: Build ATeam, but borrow heavily from Gas Town, ComposioHQ/agent-orchestrator, OpenHands, and Ona patterns.**
+**Recommendation: Build ATeam, but borrow heavily from Gas Town, ComposioHQ/agent-orchestrator, OpenHands, Ona, and Sandcastle patterns.**
 
 No existing tool combines all of ATeam's core requirements:
 1. Scheduled, autonomous background operation (night shift).
@@ -361,6 +402,7 @@ Gas Town and agent-orchestrator come closest but are both reactive/interactive r
 - **Cron flow definitions** from AWS CAO.
 - **PR-Agent as a quality gate** for agent-generated changes.
 - **AGENTS.md standard**, **Command+Prompt+PR step sequencing**, **kernel-level guardrails**, and **Skills pattern** from Ona.
+- **Branch strategies** (`head` / `merge-to-head` / `branch`) and **host-vs-sandbox lifecycle hooks** from Sandcastle.
 
 ### B.4 Future: Feature Agents
 
