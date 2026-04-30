@@ -252,15 +252,28 @@ func writePoolStatusLines(w io.Writer, lines []string, clear bool) {
 	}
 }
 
+// poolStatusAnchorMarker is written after each draw of the table so the
+// cursor sits on a known, blank line below the last data row. The next
+// redraw uses cursor-up (\033[<n>A) from this position to walk back over
+// the previous content and overwrite it.
+//
+// We deliberately do NOT use DECSC/DECRC (\0337 / \0338) here. Cursor
+// save/restore can become stale after a screen scroll or when running
+// inside a multiplexer (tmux, screen) that virtualizes the cursor — the
+// saved row index keeps pointing at what is now a different visual line,
+// and the redraw lands in the wrong place. Plain cursor-up from the
+// current position is less clever but consistently correct as long as
+// nothing else writes between draws.
 func savePoolStatusAnchor(w io.Writer) {
-	fmt.Fprint(w, "\r\033[2K\0337")
+	fmt.Fprint(w, "\r\033[2K")
 }
 
 func redrawPoolStatusLines(w io.Writer, lines []string, previousRows int, width int) int {
 	currentRows := totalVisualRows(lines, width)
-	fmt.Fprint(w, "\0338")
 	if previousRows > 0 {
-		fmt.Fprintf(w, "\033[%dA", previousRows)
+		fmt.Fprintf(w, "\r\033[%dA", previousRows)
+	} else {
+		fmt.Fprint(w, "\r")
 	}
 	fmt.Fprint(w, "\033[J")
 	writePoolStatusLines(w, lines, true)
