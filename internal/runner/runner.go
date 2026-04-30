@@ -448,7 +448,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			// heartbeat so the live UI keeps redrawing during long
 			// extended-thinking passes between tool calls.
 			if ev.Text != "" {
-				emitProgress(PhaseThinking, "", "", truncate(ev.Text, 200), totalTools, eventCount)
+				emitProgress(PhaseThinking, "", "", Truncate(ev.Text, 200), totalTools, eventCount)
 			}
 
 		case "tool_use":
