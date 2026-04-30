@@ -307,23 +307,88 @@ func totalVisualRows(lines []string, width int) int {
 	return total
 }
 
-func currentPoolStatusLines(rows []poolStatusRow) ([]string, int) {
-	width := stdoutWidth()
-	return poolStatusLinesForWidth(rows, width), width
+// currentPoolStatusLines renders the table for the current terminal size.
+// trimmed reports whether the returned slice was shortened to fit; callers
+// use it to know if a trailing plain dump is needed for full visibility.
+func currentPoolStatusLines(rows []poolStatusRow) (lines []string, width int, trimmed bool) {
+	width, height := stdoutSize()
+	full := poolStatusLinesForWidth(rows, width)
+	fit := fitPoolStatusLinesToHeight(rows, full, width, height)
+	return fit, width, len(fit) < len(full)
 }
 
-func printPoolStatuses(rows []poolStatusRow) int {
-	lines, width := currentPoolStatusLines(rows)
+// fitPoolStatusLinesToHeight trims the rendered table when its visual row
+// count would exceed what the terminal viewport can show. Cursor-up redraws
+// are bounded by the viewport top, so a table taller than the viewport
+// pushes its top rows into scrollback before the next redraw can clear
+// them, leaving a ghost stack of headers/first-rows behind. Keeping the
+// table inside the viewport lets `\033[<n>A` always reach the header.
+//
+// Trim policy: keep the header, prefer running rows, then done, then
+// queued. When anything is dropped, append a one-line summary so the user
+// still knows about hidden rows.
+func fitPoolStatusLinesToHeight(rows []poolStatusRow, lines []string, width, height int) []string {
+	const reserveRows = 3 // anchor + running summary + breathing room
+	if height <= 0 || len(lines) <= height-reserveRows {
+		return lines
+	}
+	maxVisible := height - reserveRows
+	if maxVisible < 2 {
+		maxVisible = 2
+	}
+	if totalVisualRows(lines, width) <= maxVisible {
+		return lines
+	}
+
+	var running, done, queued []poolStatusRow
+	for _, r := range rows {
+		switch r.State {
+		case poolStateRunning:
+			running = append(running, r)
+		case poolStateDone, poolStateError:
+			done = append(done, r)
+		default:
+			queued = append(queued, r)
+		}
+	}
+
+	out := []string{lines[0]}
+	used := visualRowsForLine(lines[0], width)
+	shown := 0
+	for _, group := range [][]poolStatusRow{running, done, queued} {
+		for _, r := range group {
+			rowLines := poolStatusRowLines(r, width)
+			cost := totalVisualRows(rowLines, width)
+			if used+cost > maxVisible-1 { // leave 1 row for summary
+				break
+			}
+			out = append(out, rowLines...)
+			used += cost
+			shown++
+		}
+	}
+
+	out = append(out, fitPoolStatusLine(poolStatusOverflowSummary(running, done, queued, len(rows)-shown), width))
+	return out
+}
+
+func poolStatusOverflowSummary(running, done, queued []poolStatusRow, hidden int) string {
+	return fmt.Sprintf("  … %d running, %d done, %d queued (%d more not shown — viewport too small)",
+		len(running), len(done), len(queued), hidden)
+}
+
+func printPoolStatuses(rows []poolStatusRow) (int, bool) {
+	lines, width, trimmed := currentPoolStatusLines(rows)
 	writePoolStatusLines(os.Stdout, lines, false)
 	savePoolStatusAnchor(os.Stdout)
-	return totalVisualRows(lines, width)
+	return totalVisualRows(lines, width), trimmed
 }
 
 func printPlainPoolStatuses(rows []poolStatusRow) {
 	writePoolStatusLines(os.Stdout, poolStatusLinesForWidth(rows, 0), false)
 }
 
-func reprintPoolStatuses(rows []poolStatusRow, previousRows int) int {
-	lines, width := currentPoolStatusLines(rows)
-	return redrawPoolStatusLines(os.Stdout, lines, previousRows, width)
+func reprintPoolStatuses(rows []poolStatusRow, previousRows int) (int, bool) {
+	lines, width, trimmed := currentPoolStatusLines(rows)
+	return redrawPoolStatusLines(os.Stdout, lines, previousRows, width), trimmed
 }

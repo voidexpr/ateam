@@ -10,15 +10,24 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func stdoutWidth() int {
+// stdoutSize returns the column and row count of stdout's terminal. Either
+// value is 0 when not a TTY or the size cannot be determined. The pool
+// status redraw needs both — bundling them into one ioctl halves syscalls
+// on the redraw hot path.
+func stdoutSize() (cols, rows int) {
 	if !isTerminal() {
-		return 0
+		return 0, 0
 	}
 	ws, err := unix.IoctlGetWinsize(int(os.Stdout.Fd()), unix.TIOCGWINSZ)
-	if err != nil || ws == nil || ws.Col == 0 {
-		return 0
+	if err != nil || ws == nil {
+		return 0, 0
 	}
-	return int(ws.Col)
+	return int(ws.Col), int(ws.Row)
+}
+
+func stdoutWidth() int {
+	cols, _ := stdoutSize()
+	return cols
 }
 
 func subscribeWindowResize() (<-chan os.Signal, func()) {

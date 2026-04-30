@@ -176,3 +176,53 @@ func TestTotalVisualRowsCountsWrappedLines(t *testing.T) {
 		t.Fatalf("expected 3 visual rows, got %d", got)
 	}
 }
+
+func TestFitPoolStatusLinesToHeightTrimsToViewport(t *testing.T) {
+	rows := []poolStatusRow{
+		{Label: "alpha", State: poolStateRunning},
+		{Label: "beta", State: poolStateRunning},
+		{Label: "gamma", State: poolStateQueued},
+		{Label: "delta", State: poolStateQueued},
+		{Label: "epsilon", State: poolStateQueued},
+	}
+	lines := poolStatusLinesForWidth(rows, 0)
+	// 6 lines (header + 5 rows), viewport 6 rows → no room: header + N rows + summary
+	got := fitPoolStatusLinesToHeight(rows, lines, 0, 6)
+	// reserveRows=3 → maxVisible=3, budget=1 → header + 1 running + summary = 3 lines
+	if len(got) != 3 {
+		t.Fatalf("expected 3 trimmed lines, got %d: %#v", len(got), got)
+	}
+	if !strings.Contains(got[0], "ID") {
+		t.Errorf("first line should be header, got %q", got[0])
+	}
+	if !strings.Contains(got[1], "alpha") {
+		t.Errorf("second line should be the first running row (alpha), got %q", got[1])
+	}
+	if !strings.Contains(got[2], "not shown") {
+		t.Errorf("last line should be the overflow summary, got %q", got[2])
+	}
+}
+
+func TestFitPoolStatusLinesToHeightPassThroughWhenFits(t *testing.T) {
+	rows := []poolStatusRow{
+		{Label: "alpha", State: poolStateRunning},
+		{Label: "beta", State: poolStateQueued},
+	}
+	lines := poolStatusLinesForWidth(rows, 0)
+	got := fitPoolStatusLinesToHeight(rows, lines, 0, 50)
+	if len(got) != len(lines) {
+		t.Fatalf("expected pass-through (%d lines), got %d", len(lines), len(got))
+	}
+}
+
+func TestFitPoolStatusLinesToHeightUnknownHeightPassesThrough(t *testing.T) {
+	rows := make([]poolStatusRow, 20)
+	for i := range rows {
+		rows[i] = poolStatusRow{Label: "r", State: poolStateQueued}
+	}
+	lines := poolStatusLinesForWidth(rows, 0)
+	got := fitPoolStatusLinesToHeight(rows, lines, 0, 0)
+	if len(got) != len(lines) {
+		t.Fatalf("zero height should disable trimming; got %d lines, want %d", len(got), len(lines))
+	}
+}
