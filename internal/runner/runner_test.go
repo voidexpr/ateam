@@ -119,6 +119,94 @@ func TestRunnerWritesOutputFile(t *testing.T) {
 	}
 }
 
+func TestRunnerPromotesOutputFileOnSuccess(t *testing.T) {
+	dir := t.TempDir()
+	logsDir := filepath.Join(dir, "logs")
+	historyDir := filepath.Join(dir, "history")
+	if err := os.MkdirAll(historyDir, 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	outputFile := filepath.Join(historyDir, "2026-04-29_00-00-00.report.md")
+	lastMessageFile := filepath.Join(dir, "report.md")
+	if err := os.WriteFile(outputFile, []byte("agent-written report"), 0600); err != nil {
+		t.Fatalf("seed output file: %v", err)
+	}
+
+	mock := &agent.MockAgent{Response: "stream tail"}
+	r := &Runner{Agent: mock}
+
+	opts := RunOpts{
+		RoleID:              "writer",
+		Action:              ActionReport,
+		LogsDir:             logsDir,
+		HistoryDir:          historyDir,
+		LastMessageFilePath: lastMessageFile,
+		OutputFilePath:      outputFile,
+	}
+
+	summary := r.Run(context.Background(), "prompt", opts, nil)
+	if summary.Err != nil {
+		t.Fatalf("unexpected error: %v", summary.Err)
+	}
+
+	got, err := os.ReadFile(lastMessageFile)
+	if err != nil {
+		t.Fatalf("read last-message: %v", err)
+	}
+	if string(got) != "agent-written report" {
+		t.Errorf("LastMessageFilePath = %q, want %q (should prefer OutputFilePath over streamed text)", string(got), "agent-written report")
+	}
+
+	histGot, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if string(histGot) != "agent-written report" {
+		t.Errorf("OutputFilePath was clobbered: got %q", string(histGot))
+	}
+}
+
+func TestRunnerFallsBackToStreamedTextWhenOutputFileEmpty(t *testing.T) {
+	dir := t.TempDir()
+	logsDir := filepath.Join(dir, "logs")
+	historyDir := filepath.Join(dir, "history")
+	outputFile := filepath.Join(historyDir, "2026-04-29_00-00-00.report.md")
+	lastMessageFile := filepath.Join(dir, "report.md")
+
+	mock := &agent.MockAgent{Response: "fallback content"}
+	r := &Runner{Agent: mock}
+
+	opts := RunOpts{
+		RoleID:              "writer",
+		Action:              ActionReport,
+		LogsDir:             logsDir,
+		HistoryDir:          historyDir,
+		LastMessageFilePath: lastMessageFile,
+		OutputFilePath:      outputFile,
+	}
+
+	summary := r.Run(context.Background(), "prompt", opts, nil)
+	if summary.Err != nil {
+		t.Fatalf("unexpected error: %v", summary.Err)
+	}
+
+	got, err := os.ReadFile(lastMessageFile)
+	if err != nil {
+		t.Fatalf("read last-message: %v", err)
+	}
+	if string(got) != "fallback content" {
+		t.Errorf("LastMessageFilePath = %q, want %q (fallback to streamed text)", string(got), "fallback content")
+	}
+
+	histGot, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if string(histGot) != "fallback content" {
+		t.Errorf("OutputFilePath = %q, want fallback content seeded", string(histGot))
+	}
+}
+
 func TestRunnerProgress(t *testing.T) {
 	dir := t.TempDir()
 	logsDir := filepath.Join(dir, "logs")

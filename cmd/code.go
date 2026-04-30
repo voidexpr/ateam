@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -169,15 +170,20 @@ func runCode(opts CodeOptions) error {
 		prompt += "- `--profile " + subRunProfile + "`\n"
 	}
 
+	timeout := env.Config.Code.EffectiveTimeout(opts.Timeout)
+	historyDir := env.ReviewHistoryDir()
+
+	startedAt := time.Now()
+	outputFile := filepath.Join(historyDir,
+		startedAt.Format(runner.TimestampFormat)+".code_output.md")
+	prompt = strings.ReplaceAll(prompt, "{{OUTPUT_FILE}}", outputFile)
+
 	if opts.DryRun {
 		fmt.Printf("╔══ code management ══╗\n\n")
 		fmt.Println(prompt)
 		fmt.Printf("\n╚══ code management ══╝\n")
 		return nil
 	}
-
-	timeout := env.Config.Code.EffectiveTimeout(opts.Timeout)
-	historyDir := env.ReviewHistoryDir()
 
 	if err := os.MkdirAll(historyDir, 0755); err != nil {
 		return fmt.Errorf("cannot create history directory: %w", err)
@@ -224,6 +230,7 @@ func runCode(opts CodeOptions) error {
 		Action:               runner.ActionCode,
 		LogsDir:              env.SupervisorLogsDir(),
 		LastMessageFilePath:  filepath.Join(supervisorDir, "code_output.md"),
+		OutputFilePath:       outputFile,
 		ErrorMessageFilePath: filepath.Join(supervisorDir, "code_error.md"),
 		WorkDir:              env.SourceDir,
 		TimeoutMin:           timeout,
@@ -231,6 +238,7 @@ func runCode(opts CodeOptions) error {
 		PromptName:           "code_management_prompt.md",
 		Verbose:              opts.Verbose,
 		TaskGroup:            taskGroup,
+		StartedAt:            startedAt,
 	}
 
 	ctx, stop := cmdContext()

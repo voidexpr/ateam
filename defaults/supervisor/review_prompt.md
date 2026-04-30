@@ -74,6 +74,14 @@ If your output is missing any section, or if it contains phrases like "no change
 
 ## Critical Output Rule
 
-Your FINAL assistant message must be the complete review following the Review Format above.
-Do not send any preamble, summary, or commentary after the review.
-The review itself IS your final output — it will be saved directly as review.md.
+Write the complete review to disk using the `Write` tool. The destination is:
+
+```
+{{OUTPUT_FILE}}
+```
+
+The full review — every section listed under Output Validation Gate, with full task descriptions — must be the `content` argument of that single `Write` call.
+
+After the `Write` call returns successfully, your FINAL assistant message must be a single short line confirming the write, e.g. `Review written to {{OUTPUT_FILE}}`. Do not include the review body in the final message; do not include any other commentary. The on-disk file is the source of truth — the harness reads it directly, so anything you stream as text is discarded.
+
+If the `Write` call fails, retry it once. If it still fails, then (and only then) emit the review as your final message so the harness can recover it from the stream.

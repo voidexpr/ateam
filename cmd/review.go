@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
@@ -127,15 +128,20 @@ func runReview(opts ReviewOptions) error {
 			"For the listed roles, include tasks you consider worthwhile even if not strictly urgent."
 	}
 
-	if opts.DryRun {
-		return printReviewDryRun(env, prompt)
-	}
-
 	timeout := env.Config.Review.EffectiveTimeout(opts.Timeout)
 
 	reviewFile := env.ReviewPath()
 	reviewDir := filepath.Dir(reviewFile)
 	historyDir := env.ReviewHistoryDir()
+
+	startedAt := time.Now()
+	outputFile := filepath.Join(historyDir,
+		startedAt.Format(runner.TimestampFormat)+".review.md")
+	prompt = strings.ReplaceAll(prompt, "{{OUTPUT_FILE}}", outputFile)
+
+	if opts.DryRun {
+		return printReviewDryRun(env, prompt)
+	}
 
 	if err := os.MkdirAll(historyDir, 0755); err != nil {
 		return fmt.Errorf("cannot create review history directory: %w", err)
@@ -170,12 +176,14 @@ func runReview(opts ReviewOptions) error {
 		Action:               runner.ActionReview,
 		LogsDir:              env.SupervisorLogsDir(),
 		LastMessageFilePath:  reviewFile,
+		OutputFilePath:       outputFile,
 		ErrorMessageFilePath: filepath.Join(reviewDir, "review_error.md"),
 		WorkDir:              env.SourceDir,
 		TimeoutMin:           timeout,
 		HistoryDir:           historyDir,
 		PromptName:           "review_prompt.md",
 		Verbose:              opts.Verbose,
+		StartedAt:            startedAt,
 	}
 
 	ctx, stop := cmdContext()
@@ -186,9 +194,9 @@ func runReview(opts ReviewOptions) error {
 		return fmt.Errorf("review failed: %w", result.Err)
 	}
 
-	if err := runner.ArchiveFile(reviewFile, historyDir, "review.md", result.StartedAt); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not archive review: %v\n", err)
-	}
+	// The agent (or runner fallback) already wrote the review into the
+	// history dir at OutputFilePath; the runner's success path promoted it
+	// to reviewFile. No post-run archive step needed.
 
 	printDone(result)
 	fmt.Printf("Review: %s\n", reviewFile)

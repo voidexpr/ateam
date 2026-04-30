@@ -228,6 +228,14 @@ follow along. Print status lines as you go:
 
 ## Critical Output Rule
 
-Your FINAL assistant message must be the complete execution report.
-Do not send any summary or commentary after the execution report.
-The execution report IS your final output — it will be saved directly as code_output.md.
+Write the complete execution report to disk using the `Write` tool. The destination is:
+
+```
+{{OUTPUT_FILE}}
+```
+
+The full execution report must be the `content` argument of that single `Write` call.
+
+After the `Write` call returns successfully, your FINAL assistant message must be a single short line confirming the write, e.g. `Execution report written to {{OUTPUT_FILE}}`. Do not include the report body in the final message; do not include any other commentary. The on-disk file is the source of truth — the harness reads it directly, so anything you stream as text is discarded.
+
+If the `Write` call fails, retry it once. If it still fails, then (and only then) emit the execution report as your final message so the harness can recover it from the stream.
