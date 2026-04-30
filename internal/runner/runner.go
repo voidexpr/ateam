@@ -910,7 +910,7 @@ func appendStderrSummary(path string, s RunSummary) {
 		return
 	}
 	defer f.Close()
-	started := !(s.ExitCode == -1 && s.Duration == 0)
+	started := s.ExitCode != -1 || s.Duration != 0
 	fmt.Fprintf(f, "\n--- ateam: run failed ---\nsource: %s\ncause: %s\nexit: %d\nduration: %s\nstarted: %v\n",
 		s.ErrorSource, s.ErrorCause, s.ExitCode, FormatDuration(s.Duration), started)
 	if !started {
