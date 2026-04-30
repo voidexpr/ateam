@@ -115,6 +115,9 @@ type Runner struct {
 	StallWarnAfter time.Duration
 }
 
+// defaultStallWarn is the idle threshold before Run logs a stall warning.
+// Five minutes accommodates slow API calls, container startup, and long
+// extended-thinking passes between events without producing false alarms.
 const defaultStallWarn = 5 * time.Minute
 
 // RunOpts holds per-invocation settings.
@@ -475,19 +478,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			}
 
 		case "error":
-			// A prior "result" event already classified the run (with
-			// cost, usage, IsError, ErrorSource=agent_api). The trailing
-			// process error from cmd.Wait is usually just the agent
-			// exiting non-zero to surface its own is_error — keep the
-			// rich result and only adopt the exit code.
-			if resultEv != nil && resultEv.Type == "result" {
-				if ev.ExitCode != 0 && resultEv.ExitCode == 0 {
-					resultEv.ExitCode = ev.ExitCode
-				}
-			} else {
-				evCopy := ev
-				resultEv = &evCopy
-			}
+			resultEv = reconcileErrorEvent(resultEv, ev)
 		}
 	}
 
@@ -586,13 +577,31 @@ eventLoop:
 	}
 
 	// Finalize: write output/error files, update DB, log result.
-	if r.finalizeCall(ctx, callID, &summary, resultEv, opts, output, cliStr, cwd) {
-		emitProgress(PhaseDone, "", "", "", totalTools, eventCount)
-	} else {
+	r.finalizeCall(ctx, callID, &summary, resultEv, opts, output, cliStr, cwd)
+	if summary.IsError {
 		emitProgress(PhaseError, "", "", "", totalTools, eventCount)
+	} else {
+		emitProgress(PhaseDone, "", "", "", totalTools, eventCount)
 	}
 
 	return summary
+}
+
+// reconcileErrorEvent decides which event to keep when a stream "error" event
+// arrives. A prior "result" event already classified the run (with cost,
+// usage, IsError, ErrorSource=agent_api); the trailing process error from
+// cmd.Wait is usually just the agent exiting non-zero to surface its own
+// is_error, so we keep the richer result and only inherit the exit code.
+// Without a prior result, the error event becomes the terminal event.
+func reconcileErrorEvent(prev *agent.StreamEvent, ev agent.StreamEvent) *agent.StreamEvent {
+	if prev != nil && prev.Type == "result" {
+		if ev.ExitCode != 0 && prev.ExitCode == 0 {
+			prev.ExitCode = ev.ExitCode
+		}
+		return prev
+	}
+	evCopy := ev
+	return &evCopy
 }
 
 // buildPrompt archives the prompt, resolves CLAUDE_CONFIG_DIR, and assembles
@@ -656,9 +665,10 @@ func setupContainer(ctx context.Context, c container.Container, req *agent.Reque
 }
 
 // finalizeCall handles post-execution work: writes the output or error file,
-// appends to the runner log, and updates the call tracking record. Returns
-// true on success.
-func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSummary, resultEv *agent.StreamEvent, opts RunOpts, output, cliStr, cwd string) bool {
+// appends to the runner log, and updates the call tracking record. On the
+// failure path it sets summary.IsError, ErrorSource, ErrorCause, and Err so
+// callers can branch off summary.IsError without a separate return value.
+func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSummary, resultEv *agent.StreamEvent, opts RunOpts, output, cliStr, cwd string) {
 	success := resultEv != nil && resultEv.Type == "result" && resultEv.ExitCode == 0 && !resultEv.IsError
 
 	if success {
@@ -735,8 +745,6 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 			fmt.Fprintf(os.Stderr, "Warning: call tracking update failed: %v\n", err)
 		}
 	}
-
-	return success
 }
 
 // RenderSettings generates the merged sandbox settings JSON without writing to disk.
@@ -959,6 +967,11 @@ func writeErrorFile(path string, s RunSummary, stderr string) {
 	}
 }
 
+// appendLog writes one line to the runner log. Pool workers may call this
+// concurrently for the same logFile; safety relies on POSIX O_APPEND atomicity
+// for writes smaller than PIPE_BUF (≥512 bytes), which holds for the single
+// pipe-delimited line we emit. Each call reopens the file rather than sharing
+// a handle so we never need an in-process mutex.
 func appendLog(logFile, roleID, status, cwd, cli string, extra ...string) {
 	if logFile == "" {
 		return
@@ -1045,21 +1058,6 @@ func ParseTimestampPrefix(name string) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return t, true
-}
-
-// ArchiveFile copies a file to archiveDir with a timestamped name.
-// The ts parameter sets the timestamp prefix; pass the run's startedAt so all
-// files for a run share the same timestamp, making association deterministic.
-func ArchiveFile(srcPath, archiveDir, name string, ts time.Time) error {
-	if err := os.MkdirAll(archiveDir, 0700); err != nil {
-		return err
-	}
-	data, err := os.ReadFile(srcPath)
-	if err != nil {
-		return err
-	}
-	archiveName := strings.ReplaceAll(fmt.Sprintf("%s.%s", ts.Format(TimestampFormat), name), " ", "_")
-	return os.WriteFile(filepath.Join(archiveDir, archiveName), data, 0600)
 }
 
 func writeExecFile(path string, startedAt time.Time, opts RunOpts, prompt string, settingsJSON []byte, cliStr, cwd, agentName string) {
