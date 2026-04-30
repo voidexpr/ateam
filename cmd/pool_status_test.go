@@ -146,14 +146,27 @@ func TestWritePoolStatusBlockRedrawClearsFromColumnZero(t *testing.T) {
 	redrawPoolStatusLines(&buf, []string{"header", "row"}, 4, 10)
 	got := buf.String()
 
-	if !strings.HasPrefix(got, "\0338\033[4A\033[J") {
-		t.Fatalf("expected redraw to restore saved cursor before moving up, got %q", got)
+	if !strings.HasPrefix(got, "\r\033[4A\033[J") {
+		t.Fatalf("expected redraw to walk back to the table's first row from current cursor, got %q", got)
 	}
 	if !strings.Contains(got, "\r\033[2Kheader\n\r\033[2Krow\n") {
 		t.Fatalf("expected redraw lines to clear before rewriting, got %q", got)
 	}
-	if !strings.HasSuffix(got, "\r\033[2K\0337") {
-		t.Fatalf("expected redraw to clear and save the anchor line below the table, got %q", got)
+	if !strings.HasSuffix(got, "\r\033[2K") {
+		t.Fatalf("expected redraw to leave cursor parked on a cleared anchor line below the table, got %q", got)
+	}
+	if strings.Contains(got, "\0337") || strings.Contains(got, "\0338") {
+		t.Fatalf("redraw should not depend on DECSC/DECRC (cursor save/restore), got %q", got)
+	}
+}
+
+func TestWritePoolStatusBlockRedrawHandlesZeroPrevious(t *testing.T) {
+	var buf bytes.Buffer
+	redrawPoolStatusLines(&buf, []string{"header"}, 0, 10)
+	got := buf.String()
+
+	if !strings.HasPrefix(got, "\r\033[J") {
+		t.Fatalf("expected zero-previous redraw to skip the cursor-up, got %q", got)
 	}
 }
 
