@@ -39,6 +39,16 @@ type ProjectEntry struct {
 	db         *calldb.CallDB // cached; may be nil
 }
 
+// SupervisorPath returns ProjectDir/supervisor/<name>.
+func (pe *ProjectEntry) SupervisorPath(name string) string {
+	return filepath.Join(pe.ProjectDir, "supervisor", name)
+}
+
+// SupervisorHistoryDir returns ProjectDir/supervisor/history.
+func (pe *ProjectEntry) SupervisorHistoryDir() string {
+	return filepath.Join(pe.ProjectDir, "supervisor", "history")
+}
+
 // Server is the ateam web server.
 type Server struct {
 	URL        string // set after ListenAndServe binds
@@ -215,14 +225,16 @@ func (s *Server) ListenAndServe(port int, openBrowser bool, host string) error {
 	mux.HandleFunc("GET /p/{project}/", s.handleOverview)
 	mux.HandleFunc("GET /p/{project}/reports", s.handleReports)
 	mux.HandleFunc("GET /p/{project}/reports/{role}", s.handleReport)
-	mux.HandleFunc("GET /p/{project}/review", s.handleReview)
+	mux.Handle("GET /p/{project}/review", s.handleReview())
+	mux.Handle("GET /p/{project}/verify", s.handleVerify())
 	mux.HandleFunc("GET /p/{project}/prompts", s.handlePrompts)
 	mux.HandleFunc("GET /p/{project}/runs", s.handleRuns)
 	mux.HandleFunc("GET /p/{project}/runs/{id}", s.handleRun)
 	mux.HandleFunc("GET /p/{project}/runs/{id}/{file}", s.handleRunFile)
 	mux.HandleFunc("GET /p/{project}/cost", s.handleCost)
 	mux.HandleFunc("GET /p/{project}/reports/{role}/history/{file}", s.handleReportHistory)
-	mux.HandleFunc("GET /p/{project}/review/history/{file}", s.handleReviewHistory)
+	mux.Handle("GET /p/{project}/review/history/{file}", s.handleSupervisorHistory("review"))
+	mux.Handle("GET /p/{project}/verify/history/{file}", s.handleSupervisorHistory("verify"))
 	mux.HandleFunc("GET /p/{project}/sessions", s.handleSessions)
 	mux.HandleFunc("GET /p/{project}/sessions/{taskgroup}", s.handleSessionDetail)
 	mux.HandleFunc("GET /p/{project}/code", s.handleCodeSessions)

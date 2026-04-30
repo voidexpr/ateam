@@ -28,6 +28,9 @@ type exportData struct {
 	CodeSession string
 	CodeAge     time.Time
 	HasCode     bool
+	VerifyHTML  template.HTML
+	VerifyAge   time.Time
+	HasVerify   bool
 }
 
 type exportReport struct {
@@ -85,6 +88,13 @@ func (s *Server) ExportHTML(opts ExportOptions) (string, error) {
 			data.CodeHTML = template.HTML(s.renderMarkdown(string(content)))
 			data.CodeAge = modTime
 		}
+	}
+
+	verifyPath := filepath.Join(pe.ProjectDir, "supervisor", "verify.md")
+	if content, modTime, err := readFileWithModTime(verifyPath); err == nil {
+		data.HasVerify = true
+		data.VerifyHTML = template.HTML(s.renderMarkdown(string(content)))
+		data.VerifyAge = modTime
 	}
 
 	var buf strings.Builder

@@ -5,16 +5,23 @@
 </div>
 
 <div class="primary-actions">
-  <a href="{{if $d.HasCodeOutput}}/p/{{$.ProjectSlug}}/code/{{$d.LatestCodeSession}}/execution_report.md{{else}}/p/{{$.ProjectSlug}}/code{{end}}" class="action-card{{if not $d.HasCodeOutput}} action-empty{{end}}">
-    {{if and $d.HasCodeOutput ($d.CodeModTime.After $d.ReviewModTime)}}<span class="badge-new">New</span>{{end}}
-    <div class="action-title">Code <span class="action-arrow">&rarr;</span></div>
-    <div class="action-sub">{{if $d.HasCodeOutput}}Open latest session &middot; {{fmtDateAge $d.CodeModTime}}{{else}}No code sessions yet{{end}}</div>
-  </a>
   <a href="/p/{{$.ProjectSlug}}/review" class="action-card{{if not $d.HasReview}} action-empty{{end}}">
     {{if and $d.HasReview ($d.ReviewModTime.After $d.CodeModTime)}}<span class="badge-new">New</span>{{end}}
     <div class="action-title">Review <span class="action-arrow">&rarr;</span></div>
     <div class="action-sub">{{if $d.HasReview}}Open latest review &middot; {{fmtDateAge $d.ReviewModTime}}{{else}}No review yet{{end}}</div>
   </a>
+  <a href="{{if $d.HasCodeOutput}}/p/{{$.ProjectSlug}}/code/{{$d.LatestCodeSession}}/execution_report.md{{else}}/p/{{$.ProjectSlug}}/code{{end}}" class="action-card{{if not $d.HasCodeOutput}} action-empty{{end}}">
+    {{if and $d.HasCodeOutput ($d.CodeModTime.After $d.ReviewModTime)}}<span class="badge-new">New</span>{{end}}
+    <div class="action-title">Code <span class="action-arrow">&rarr;</span></div>
+    <div class="action-sub">{{if $d.HasCodeOutput}}Open latest session &middot; {{fmtDateAge $d.CodeModTime}}{{else}}No code sessions yet{{end}}</div>
+  </a>
+  {{if $d.HasVerify}}
+  <a href="/p/{{$.ProjectSlug}}/verify" class="action-card">
+    {{if $d.VerifyModTime.After $d.CodeModTime}}<span class="badge-new">New</span>{{end}}
+    <div class="action-title">Verify <span class="action-arrow">&rarr;</span></div>
+    <div class="action-sub">Open latest verification &middot; {{fmtDateAge $d.VerifyModTime}}</div>
+  </a>
+  {{end}}
 </div>
 
 <div class="stats-row stats-row-secondary">
