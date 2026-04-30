@@ -47,6 +47,10 @@ type ContentBlock struct {
 	Text  string          `json:"text,omitempty"`
 	Name  string          `json:"name,omitempty"`
 	Input json.RawMessage `json:"input,omitempty"`
+	// Thinking holds the reasoning content for type="thinking" blocks
+	// (extended-thinking turns from Sonnet/Opus). The body lives under
+	// "thinking", not "text".
+	Thinking string `json:"thinking,omitempty"`
 	// ID is set on tool_use blocks (e.g. "toolu_…") and used to pair
 	// with tool_result blocks via ToolUseID.
 	ID string `json:"id,omitempty"`

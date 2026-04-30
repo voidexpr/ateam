@@ -444,6 +444,15 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 				emitProgress(PhaseThinking, "", "", truncate(ev.Text, 200), totalTools, eventCount)
 			}
 
+		case "thinking":
+			// Distinct from "assistant" so the run's Output isn't
+			// overwritten with reasoning content. Emits a progress
+			// heartbeat so the live UI keeps redrawing during long
+			// extended-thinking passes between tool calls.
+			if ev.Text != "" {
+				emitProgress(PhaseThinking, "", "", truncate(ev.Text, 200), totalTools, eventCount)
+			}
+
 		case "tool_use":
 			toolCounts[ev.ToolName]++
 			totalTools++

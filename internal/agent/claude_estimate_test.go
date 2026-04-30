@@ -15,6 +15,58 @@ func shellFactory(script string) func(ctx context.Context, _ string, _ ...string
 	}
 }
 
+const fakeClaudeThinkingThenTextThenResult = `
+printf '{"type":"system","subtype":"init","session_id":"s1","model":"claude-test-model"}\n'
+printf '{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"reasoning step one"}],"usage":{"input_tokens":10,"output_tokens":5}}}\n'
+printf '{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"reasoning step two"}],"usage":{"input_tokens":10,"output_tokens":7}}}\n'
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"final answer"}],"usage":{"input_tokens":12,"output_tokens":10}}}\n'
+printf '{"type":"result","is_error":false,"subtype":"success","duration_ms":42,"total_cost_usd":0.01}\n'
+exit 0
+`
+
+func TestClaudeAgentEmitsThinkingEvents(t *testing.T) {
+	a := &ClaudeAgent{Command: "claude", DefaultModel: "claude-test-model"}
+
+	ch := a.Run(context.Background(), Request{
+		Prompt:     "test",
+		CmdFactory: shellFactory(fakeClaudeThinkingThenTextThenResult),
+	})
+
+	var thinkingTexts []string
+	var assistantTexts []string
+	var sawResult bool
+	var resultOutput string
+	for ev := range ch {
+		switch ev.Type {
+		case "thinking":
+			thinkingTexts = append(thinkingTexts, ev.Text)
+		case "assistant":
+			if ev.Text != "" {
+				assistantTexts = append(assistantTexts, ev.Text)
+			}
+		case "result":
+			sawResult = true
+			resultOutput = ev.Output
+		}
+	}
+
+	if len(thinkingTexts) != 2 {
+		t.Fatalf("expected 2 thinking events, got %d (%v)", len(thinkingTexts), thinkingTexts)
+	}
+	if thinkingTexts[0] != "reasoning step one" || thinkingTexts[1] != "reasoning step two" {
+		t.Errorf("thinking texts = %v, want [reasoning step one, reasoning step two]", thinkingTexts)
+	}
+	if len(assistantTexts) != 1 || assistantTexts[0] != "final answer" {
+		t.Errorf("assistant texts = %v, want [final answer]", assistantTexts)
+	}
+	if !sawResult {
+		t.Fatal("expected terminal result event")
+	}
+	if resultOutput != "final answer" {
+		t.Errorf("result Output = %q, want %q (thinking content must NOT leak into Output)", resultOutput, "final answer")
+	}
+}
+
 const fakeClaudeTwoTurnsNoResult = `
 printf '{"type":"system","subtype":"init","session_id":"s1","model":"claude-test-model"}\n'
 printf '{"type":"assistant","message":{"content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":100,"output_tokens":20,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}\n'
