@@ -76,6 +76,7 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 		cmd = req.CmdFactory(ctx, command, args...)
 	} else {
 		cmd = exec.CommandContext(ctx, command, args...)
+		configureProcessLifecycle(cmd)
 	}
 	if req.WorkDir != "" && cmd.Dir == "" && req.CmdFactory == nil {
 		cmd.Dir = req.WorkDir
