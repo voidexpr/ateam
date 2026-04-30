@@ -8,10 +8,10 @@ without requesting input from humans unless absolutely necessary.
 
 - **review**: The prioritized list of tasks provided as input (see end of this prompt)
 - **task**: A single priority action from the review, with priority, description, and source role
-- **execution directory**: A timestamped folder `.ateam/supervisor/code/YYYY-MM-DD_HH-MM-SS/`
+- **execution directory** (EXECUTION_DIR): the pre-allocated folder `{{EXECUTION_DIR}}`
   storing all artifacts for this run
 - **code prompt**: The full prompt file given to a role, generated via `ateam prompt`
-- **execution report**: `execution_report.md` in the execution directory, tracking outcomes
+- **execution report**: `{{OUTPUT_FILE}}` (i.e. `EXECUTION_DIR/execution_report.md`), tracking outcomes
 
 ## Tools
 
@@ -54,8 +54,8 @@ The goals are:
 
 ### Phase 1: Setup
 
-1. Create the execution directory (EXECUTION_DIR): `.ateam/supervisor/code/YYYY-MM-DD_HH-MM-SS/`
-2. Initialize `execution_report.md` in it (see format below)
+1. Use the execution directory provided as `{{EXECUTION_DIR}}`. Create it with `mkdir -p` if it does not already exist. Do NOT invent a different timestamped path — the harness has already allocated this one and reads files from it.
+2. Initialize the execution report at `{{OUTPUT_FILE}}` (which is `EXECUTION_DIR/execution_report.md`) using the format below
 3. Run `ateam roles` to discover available roles
 4. make sure you have the latest code: `git fetch --all && git rebase`
 5. make sure there are no git dirty files (untracked files are fine), if there are any abort with a clear error message
@@ -197,15 +197,15 @@ follow along. Print status lines as you go:
   ```
 - **File operations**: print every file you create or update
   ```
-  Created: .ateam/supervisor/code/2026-03-08_14-05-30/execution_report.md
-  Generated: .ateam/supervisor/code/2026-03-08_14-05-30/01_fix_sql_injection_code_prompt.md
-  Updated: .ateam/supervisor/code/2026-03-08_14-05-30/execution_report.md
+  Created: {{OUTPUT_FILE}}
+  Generated: EXECUTION_DIR/01_fix_sql_injection_code_prompt.md
+  Updated: {{OUTPUT_FILE}}
   ```
 - **Commands**: print every ateam CLI command before running it
   ```
   Running: ateam roles
-  Running: ateam prompt --role security --action code --extra-prompt @.ateam/supervisor/code/2026-03-08_14-05-30/current_task.md
-  Running: ateam run @.ateam/supervisor/code/2026-03-08_14-05-30/01_fix_sql_injection_code_prompt.md --role security
+  Running: ateam prompt --role security --action code --extra-prompt @EXECUTION_DIR/current_task.md
+  Running: ateam run @EXECUTION_DIR/01_fix_sql_injection_code_prompt.md --role security
   ```
 - **Task outcomes**: print the result of each task immediately and include the git hash and branch used
   ```
@@ -228,14 +228,10 @@ follow along. Print status lines as you go:
 
 ## Critical Output Rule
 
-Write the complete execution report to disk using the `Write` tool. The destination is:
+The on-disk file at `{{OUTPUT_FILE}}` is the source of truth — the harness reads it directly at the end of the run, so anything you stream as text is discarded.
 
-```
-{{OUTPUT_FILE}}
-```
+Maintain it incrementally per Phase 1-4: initialize it with `Write` during Phase 1, update it with `Edit` (append per task) during Phase 3, and finalize it with the summary section during Phase 4. Its final on-disk content is what the harness reads.
 
-The full execution report must be the `content` argument of that single `Write` call.
+After the run is fully done (all phases complete and the report is fully written to disk), your FINAL assistant message must be a single short line confirming completion, e.g. `Execution report written to {{OUTPUT_FILE}}`. Do not include the report body in the final message; do not include any other commentary.
 
-After the `Write` call returns successfully, your FINAL assistant message must be a single short line confirming the write, e.g. `Execution report written to {{OUTPUT_FILE}}`. Do not include the report body in the final message; do not include any other commentary. The on-disk file is the source of truth — the harness reads it directly, so anything you stream as text is discarded.
-
-If the `Write` call fails, retry it once. If it still fails, then (and only then) emit the execution report as your final message so the harness can recover it from the stream.
+If `{{OUTPUT_FILE}}` cannot be written for any reason, emit the execution report as your final message so the harness can recover it from the stream.

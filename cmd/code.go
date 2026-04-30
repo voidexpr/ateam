@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -182,9 +183,19 @@ func runCode(opts CodeOptions) error {
 
 	timeout := env.Config.Code.EffectiveTimeout(opts.Timeout)
 	historyDir := env.ReviewHistoryDir()
+	supervisorDir := env.SupervisorDir()
 
+	// Pre-compute the execution directory so {{OUTPUT_FILE}} points at the
+	// session-dir's execution_report.md. That keeps the file the supervisor
+	// maintains during Phase 1-4 and the file the runner promotes to the
+	// canonical code_output.md as the SAME file — otherwise the Write-tool
+	// flow's "single Write at end" overrides Phase 4's incremental updates
+	// and the session-dir execution_report.md is left as a stale placeholder.
 	startedAt := time.Now()
-	prompt, outputFile := prepareOutputFile(prompt, historyDir, "code_output.md", startedAt)
+	executionDir := filepath.Join(supervisorDir, "code", startedAt.Format(runner.TimestampFormat))
+	outputFile := filepath.Join(executionDir, "execution_report.md")
+	prompt = strings.ReplaceAll(prompt, "{{EXECUTION_DIR}}", executionDir)
+	prompt = strings.ReplaceAll(prompt, "{{OUTPUT_FILE}}", outputFile)
 
 	if opts.DryRun {
 		fmt.Printf("╔══ code management ══╗\n\n")
@@ -198,8 +209,6 @@ func runCode(opts CodeOptions) error {
 	}
 
 	fmt.Printf("Code management supervisor running (%dm timeout)...\n", timeout)
-
-	supervisorDir := env.SupervisorDir()
 
 	supervisorProfileName := opts.SupervisorProfile
 	if supervisorProfileName == "" && opts.SupervisorAgent == "" {
