@@ -135,9 +135,7 @@ func runReview(opts ReviewOptions) error {
 	historyDir := env.ReviewHistoryDir()
 
 	startedAt := time.Now()
-	outputFile := filepath.Join(historyDir,
-		startedAt.Format(runner.TimestampFormat)+".review.md")
-	prompt = strings.ReplaceAll(prompt, "{{OUTPUT_FILE}}", outputFile)
+	prompt, outputFile := prepareOutputFile(prompt, historyDir, "review.md", startedAt)
 
 	if opts.DryRun {
 		return printReviewDryRun(env, prompt)

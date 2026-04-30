@@ -33,6 +33,21 @@ func cmdContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }
 
+// prepareOutputFile builds the timestamped output path inside historyDir and
+// substitutes it for the {{OUTPUT_FILE}} placeholder in prompt. The returned
+// path is what code/report/review thread into runner.RunOpts.OutputFilePath
+// so the agent's Write target and the runner's history record line up.
+func prepareOutputFile(prompt, historyDir, suffix string, startedAt time.Time) (string, string) {
+	outputFile := filepath.Join(historyDir, startedAt.Format(runner.TimestampFormat)+"."+suffix)
+	return strings.ReplaceAll(prompt, "{{OUTPUT_FILE}}", outputFile), outputFile
+}
+
+// errNoReview is the canonical error for commands that need the supervisor
+// review file before they can proceed.
+func errNoReview(reviewPath string) error {
+	return fmt.Errorf("no review found at %s; run 'ateam review' first", reviewPath)
+}
+
 // ExitError is returned by commands that need to exit with a specific non-zero code.
 type ExitError struct {
 	Code int
@@ -418,6 +433,14 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 	}
 }
 
+// deriveDockerImageName builds the per-project Docker image name. It assumes
+// the standard ateam layout where projectDir is `<orgDir>/<project>/.ateam`,
+// so filepath.Dir(projectDir) is the project root and its basename is the
+// project name (used to scope the image and avoid clashes between projects).
+func deriveDockerImageName(projectDir string) string {
+	return "ateam-" + filepath.Base(filepath.Dir(projectDir)) + ":latest"
+}
+
 // buildContainer creates a Container implementation from config.
 // Returns nil for "none" type (runner treats nil as host execution).
 // roleID is used for Dockerfile resolution (role-specific Dockerfiles).
@@ -427,8 +450,7 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 	}
 	switch cc.Type {
 	case "docker":
-		// Image name derived from project dir name
-		image := "ateam-" + filepath.Base(filepath.Dir(projectDir)) + ":latest"
+		image := deriveDockerImageName(projectDir)
 		if dockerAutoSetup {
 			if generated, names, err := runtime.AutoSetupDockerfile(sourceDir, projectDir, orgDir); err != nil {
 				fmt.Fprintf(os.Stderr, "[docker] auto-setup warning: %v\n", err)

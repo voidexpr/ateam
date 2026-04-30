@@ -193,9 +193,7 @@ func runReport(opts ReportOptions) error {
 		}
 		roleDir := env.RoleDir(roleID)
 		startedAt := time.Now()
-		outputFile := filepath.Join(env.RoleHistoryDir(roleID),
-			startedAt.Format(runner.TimestampFormat)+"."+prompts.ReportFile)
-		prompt = strings.ReplaceAll(prompt, "{{OUTPUT_FILE}}", outputFile)
+		prompt, outputFile := prepareOutputFile(prompt, env.RoleHistoryDir(roleID), prompts.ReportFile, startedAt)
 		task := runner.PoolTask{
 			Prompt: prompt,
 			RunOpts: runner.RunOpts{

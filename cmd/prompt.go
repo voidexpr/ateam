@@ -155,7 +155,7 @@ func runPromptSupervisor() error {
 	case runner.ActionCode:
 		reviewContent, readErr := os.ReadFile(env.ReviewPath())
 		if readErr != nil {
-			return fmt.Errorf("no review found at %s; run 'ateam review' first", env.ReviewPath())
+			return errNoReview(env.ReviewPath())
 		}
 		assembled, err = prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.SourceDir, pinfo, string(reviewContent), "", extraPrompt)
 	}

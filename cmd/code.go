@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +14,13 @@ import (
 	"github.com/ateam/internal/runtime"
 	"github.com/spf13/cobra"
 )
+
+// tailAttachDelay gives the supervisor goroutine a head start before the
+// tailer begins polling, so the first stream/log files exist when AddSource
+// runs. 300ms is long enough for the runner to create the call-DB row and
+// open the stream file, and short enough that interactive output still feels
+// immediate.
+const tailAttachDelay = 300 * time.Millisecond
 
 var (
 	codeReview            string
@@ -126,7 +132,7 @@ func runCode(opts CodeOptions) error {
 		reviewPath := env.ReviewPath()
 		data, err := os.ReadFile(reviewPath)
 		if err != nil {
-			return fmt.Errorf("no review found at %s; run 'ateam review' first", reviewPath)
+			return errNoReview(reviewPath)
 		}
 		reviewContent = string(data)
 	} else {
@@ -174,9 +180,7 @@ func runCode(opts CodeOptions) error {
 	historyDir := env.ReviewHistoryDir()
 
 	startedAt := time.Now()
-	outputFile := filepath.Join(historyDir,
-		startedAt.Format(runner.TimestampFormat)+".code_output.md")
-	prompt = strings.ReplaceAll(prompt, "{{OUTPUT_FILE}}", outputFile)
+	prompt, outputFile := prepareOutputFile(prompt, historyDir, "code_output.md", startedAt)
 
 	if opts.DryRun {
 		fmt.Printf("╔══ code management ══╗\n\n")
@@ -252,7 +256,7 @@ func runCode(opts CodeOptions) error {
 			close(runDone)
 		}()
 
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(tailAttachDelay)
 
 		tailer := runner.NewTailer(os.Stderr, db, isTerminal(), opts.Verbose)
 		tailer.ProjectDir = env.ProjectDir
