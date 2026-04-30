@@ -185,6 +185,20 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 				switch block.Type {
 				case "text":
 					textParts = append(textParts, block.Text)
+				case "thinking":
+					// Emit a dedicated "thinking" event so downstream consumers
+					// (progress UI, stall detection) get a heartbeat during
+					// extended-thinking turns where the model reasons silently
+					// for minutes between tool calls. The runner treats this
+					// event distinctly from "assistant" so thinking content is
+					// not promoted into the run's Output field.
+					if block.Thinking != "" {
+						thinkEv := cum
+						thinkEv.Type = "thinking"
+						thinkEv.Text = block.Thinking
+						thinkEv.ContextTokens = ctxTokens
+						ch <- thinkEv
+					}
 				case "tool_use":
 					toolEv := cum
 					toolEv.Type = "tool_use"
