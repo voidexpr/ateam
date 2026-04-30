@@ -1,8 +1,8 @@
-{{define "review.html"}}
+{{define "supervisor_output.html"}}
 {{$d := .Data}}
 <div class="page-header">
-  <h1>Supervisor Review</h1>
-  {{if $d.Exists}}<p class="subtitle">Current review &middot; {{fmtDateAge $d.ModTime}}</p>{{end}}
+  <h1>{{$d.Heading}}</h1>
+  {{if $d.Exists}}<p class="subtitle">Latest {{$d.SubtitleNoun}} &middot; {{fmtDateAge $d.ModTime}}</p>{{end}}
 </div>
 
 {{if $d.Exists}}
@@ -13,14 +13,14 @@
 </div>
 {{else}}
 <div class="empty-state">
-  <h2>No review</h2>
-  <p>Run <code>ateam review</code> to generate a supervisor review.</p>
+  <h2>No {{$d.SubtitleNoun}}</h2>
+  <p>{{$d.EmptyHelp}}</p>
 </div>
 {{end}}
 
 {{if or $d.Exists $d.History}}
 <div class="section">
-  <div class="section-title">Review History</div>
+  <div class="section-title">{{$d.HistoryTitle}}</div>
   <table class="data-table">
     <thead>
       <tr><th>Date</th><th>Age</th><th>Est. Tokens</th><th>Cost</th></tr>
@@ -35,7 +35,7 @@
       </tr>
       {{end}}
       {{range $d.History}}
-      <tr data-href="/p/{{$.ProjectSlug}}/review/history/{{.Filename}}">
+      <tr data-href="/p/{{$.ProjectSlug}}/{{$d.HistoryRoute}}/history/{{.Filename}}">
         <td>{{.Timestamp.Format "2006-01-02 15:04"}}</td>
         <td>{{fmtDateAge .Timestamp}}</td>
         <td>{{fmtTokens .TotalTokens}}</td>

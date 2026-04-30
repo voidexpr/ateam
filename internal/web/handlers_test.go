@@ -50,7 +50,7 @@ func newTestMux(s *Server) *http.ServeMux {
 	mux.HandleFunc("GET /p/{project}/runs/{id}", s.handleRun)
 	mux.HandleFunc("GET /p/{project}/runs/{id}/{file}", s.handleRunFile)
 	mux.HandleFunc("GET /p/{project}/reports/{role}", s.handleReport)
-	mux.HandleFunc("GET /p/{project}/review", s.handleReview)
+	mux.Handle("GET /p/{project}/review", s.handleReview())
 	return mux
 }
 

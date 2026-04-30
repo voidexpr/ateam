@@ -46,6 +46,8 @@ type overviewData struct {
 	HasCodeOutput     bool
 	CodeModTime       time.Time
 	LatestCodeSession string
+	HasVerify         bool
+	VerifyModTime     time.Time
 	CostTotal         float64
 	ShowAll           bool
 	TotalRuns         int
@@ -78,6 +80,12 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 			data.HasCodeOutput = true
 			data.CodeModTime = info.ModTime()
 		}
+	}
+
+	verifyPath := filepath.Join(pe.ProjectDir, "supervisor", "verify.md")
+	if info, err := os.Stat(verifyPath); err == nil {
+		data.HasVerify = true
+		data.VerifyModTime = info.ModTime()
 	}
 
 	showAll := r.URL.Query().Get("all") == "1"
@@ -222,41 +230,84 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-type reviewData struct {
+// supervisorOutputData backs both the review and verify pages: a single
+// canonical markdown file under .ateam/supervisor/ with a history of past
+// versions. Labels and route segment are filled in by the handler so the
+// shared template stays generic.
+type supervisorOutputData struct {
 	HTML               template.HTML
 	ModTime            time.Time
 	Exists             bool
-	History            []HistoryEntry // past review.md versions
+	History            []HistoryEntry
 	CurrentCostUSD     float64
 	CurrentTotalTokens int64
+
+	Heading      string        // h1 text
+	SubtitleNoun string        // "review", "verification" — used in subtitles like "Latest <noun>"
+	EmptyHelp    template.HTML // help text when the file is missing
+	HistoryTitle string        // section title for the history table
+	HistoryRoute string        // base path for history links: /p/<slug>/<route>/history/<file>
 }
 
-func (s *Server) handleReview(w http.ResponseWriter, r *http.Request) {
-	pe := s.findProject(r.PathValue("project"))
-	if pe == nil {
-		http.NotFound(w, r)
-		return
-	}
+type supervisorPageConfig struct {
+	Nav, File, Kind, PageTitle string
+	Action                     string // runner.Action* used for cost lookup
+	View                       supervisorOutputData
+}
 
-	reviewPath := filepath.Join(pe.ProjectDir, "supervisor", "review.md")
-	data := reviewData{}
-	if content, modTime, err := readFileWithModTime(reviewPath); err == nil {
-		data.Exists = true
-		data.HTML = template.HTML(s.renderMarkdown(string(content)))
-		data.ModTime = modTime
-	}
-	histDir := filepath.Join(pe.ProjectDir, "supervisor", "history")
-	data.History = filterHistoryByKind(discoverHistory(histDir), "review")
-	costs := fetchRunCosts(s.getDB(pe), runner.ActionReview, "supervisor")
-	enrichHistoryCost(data.History, costs)
-	data.CurrentCostUSD, data.CurrentTotalTokens = latestRunCost(costs)
+func (s *Server) handleSupervisorOutput(cfg supervisorPageConfig) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		pe := s.findProject(r.PathValue("project"))
+		if pe == nil {
+			http.NotFound(w, r)
+			return
+		}
 
-	s.render(w, r, "review.html", pageData{
-		Title:       "Review",
-		Nav:         "review",
-		ProjectName: pe.Name,
-		ProjectSlug: pe.Slug,
-		Data:        data,
+		data := cfg.View
+		if content, modTime, err := readFileWithModTime(pe.SupervisorPath(cfg.File)); err == nil {
+			data.Exists = true
+			data.HTML = template.HTML(s.renderMarkdown(string(content)))
+			data.ModTime = modTime
+		}
+		data.History = filterHistoryByKind(discoverHistory(pe.SupervisorHistoryDir()), cfg.Kind)
+		costs := fetchRunCosts(s.getDB(pe), cfg.Action, "supervisor")
+		enrichHistoryCost(data.History, costs)
+		data.CurrentCostUSD, data.CurrentTotalTokens = latestRunCost(costs)
+		data.HistoryRoute = cfg.Nav
+
+		s.render(w, r, "supervisor_output.html", pageData{
+			Title:       cfg.PageTitle,
+			Nav:         cfg.Nav,
+			ProjectName: pe.Name,
+			ProjectSlug: pe.Slug,
+			Data:        data,
+		})
+	}
+}
+
+func (s *Server) handleReview() http.HandlerFunc {
+	return s.handleSupervisorOutput(supervisorPageConfig{
+		Nav: "review", File: "review.md", Kind: "review", PageTitle: "Review",
+		Action: runner.ActionReview,
+		View: supervisorOutputData{
+			Heading:      "Supervisor Review",
+			SubtitleNoun: "review",
+			EmptyHelp:    template.HTML(`Run <code>ateam review</code> to generate a supervisor review.`),
+			HistoryTitle: "Review History",
+		},
+	})
+}
+
+func (s *Server) handleVerify() http.HandlerFunc {
+	return s.handleSupervisorOutput(supervisorPageConfig{
+		Nav: "verify", File: "verify.md", Kind: "verify", PageTitle: "Verify",
+		Action: runner.ActionVerify,
+		View: supervisorOutputData{
+			Heading:      "Code Verification",
+			SubtitleNoun: "verification",
+			EmptyHelp:    template.HTML(`Run <code>ateam verify</code> (or <code>ateam code --verify</code>) to have the supervisor review recent commits and run tests.`),
+			HistoryTitle: "Verify History",
+		},
 	})
 }
 
@@ -533,6 +584,8 @@ func resolvePromptFile(projectDir, action, role, streamFile string) string {
 		promptName = "review_prompt.md"
 	case runner.ActionCode:
 		promptName = "code_management_prompt.md"
+	case runner.ActionVerify:
+		promptName = prompts.CodeVerifyPromptFile
 	case runner.ActionRun:
 		promptName = "run_prompt.md"
 	default:
@@ -541,7 +594,7 @@ func resolvePromptFile(projectDir, action, role, streamFile string) string {
 	return resolveHistoryFile(projectDir, action, role, streamFile, promptName)
 }
 
-// resolveOutputFile finds the archived output file (report.md or review.md) for a run.
+// resolveOutputFile finds the archived output file (report.md, review.md, verify.md) for a run.
 func resolveOutputFile(projectDir, action, role, streamFile string) string {
 	var outputName string
 	switch action {
@@ -549,6 +602,8 @@ func resolveOutputFile(projectDir, action, role, streamFile string) string {
 		outputName = "report.md"
 	case runner.ActionReview:
 		outputName = "review.md"
+	case runner.ActionVerify:
+		outputName = "verify.md"
 	default:
 		return ""
 	}
@@ -638,6 +693,12 @@ type historyDetailData struct {
 	HTML            template.HTML
 	History         []HistoryEntry // all history entries for the timeline
 	CurrentFilename string         // which entry is being viewed
+
+	// Pre-computed by the handler so the template doesn't branch on Nav.
+	BackHref       string
+	BackLabel      string
+	HistoryTitle   string
+	HistoryBaseURL string // base for entry links: /p/<slug>/<nav>/history/ or /p/<slug>/reports/<role>/history/
 }
 
 func (s *Server) handleReportHistory(w http.ResponseWriter, r *http.Request) {
@@ -664,15 +725,15 @@ func (s *Server) handleReportHistory(w http.ResponseWriter, r *http.Request) {
 	s.serveHistoryFile(w, r, pe, histDir, r.PathValue("file"), roleID, "reports")
 }
 
-func (s *Server) handleReviewHistory(w http.ResponseWriter, r *http.Request) {
-	pe := s.findProject(r.PathValue("project"))
-	if pe == nil {
-		http.NotFound(w, r)
-		return
+func (s *Server) handleSupervisorHistory(nav string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		pe := s.findProject(r.PathValue("project"))
+		if pe == nil {
+			http.NotFound(w, r)
+			return
+		}
+		s.serveHistoryFile(w, r, pe, pe.SupervisorHistoryDir(), r.PathValue("file"), "", nav)
 	}
-
-	histDir := filepath.Join(pe.ProjectDir, "supervisor", "history")
-	s.serveHistoryFile(w, r, pe, histDir, r.PathValue("file"), "", "review")
 }
 
 func (s *Server) serveHistoryFile(w http.ResponseWriter, r *http.Request, pe *ProjectEntry, histDir, filename, roleID, nav string) {
@@ -695,33 +756,69 @@ func (s *Server) serveHistoryFile(w http.ResponseWriter, r *http.Request, pe *Pr
 	}
 	history := filterHistoryByKind(discoverHistory(histDir), kind)
 
-	action := runner.ActionReview
-	role := "supervisor"
-	if roleID != "" {
-		action = runner.ActionReport
-		role = roleID
-	}
+	action, role := historyAction(nav, roleID)
 	enrichHistoryCost(history, fetchRunCosts(s.getDB(pe), action, role))
 
+	data := historyDetailData{
+		Kind:            kind,
+		RoleID:          roleID,
+		Filename:        filename,
+		Timestamp:       entry.Timestamp,
+		HTML:            template.HTML(s.renderMarkdown(string(content))),
+		History:         history,
+		CurrentFilename: filename,
+	}
 	title := nav + " history"
 	if roleID != "" {
 		title = roleID + " history"
+		data.BackHref = fmt.Sprintf("/p/%s/reports/%s", pe.Slug, roleID)
+		data.BackLabel = roleID + " current report"
+		data.HistoryTitle = "Report History"
+		data.HistoryBaseURL = fmt.Sprintf("/p/%s/reports/%s/history/", pe.Slug, roleID)
+	} else {
+		data.BackHref = fmt.Sprintf("/p/%s/%s", pe.Slug, nav)
+		data.BackLabel = "Current " + supervisorLabel(nav)
+		data.HistoryTitle = capitalizeASCII(nav) + " History"
+		data.HistoryBaseURL = fmt.Sprintf("/p/%s/%s/history/", pe.Slug, nav)
 	}
+
 	s.render(w, r, "history_detail.html", pageData{
 		Title:       title,
 		Nav:         nav,
 		ProjectName: pe.Name,
 		ProjectSlug: pe.Slug,
-		Data: historyDetailData{
-			Kind:            kind,
-			RoleID:          roleID,
-			Filename:        filename,
-			Timestamp:       entry.Timestamp,
-			HTML:            template.HTML(s.renderMarkdown(string(content))),
-			History:         history,
-			CurrentFilename: filename,
-		},
+		Data:        data,
 	})
+}
+
+// historyAction maps a (nav, roleID) pair to the (action, role) used for cost
+// lookups on the history detail page.
+func historyAction(nav, roleID string) (action, role string) {
+	if roleID != "" {
+		return runner.ActionReport, roleID
+	}
+	switch nav {
+	case "verify":
+		return runner.ActionVerify, "supervisor"
+	default:
+		return runner.ActionReview, "supervisor"
+	}
+}
+
+// supervisorLabel returns the user-facing noun for a supervisor nav segment
+// (e.g. "review" → "review", "verify" → "verification").
+func supervisorLabel(nav string) string {
+	if nav == "verify" {
+		return "verification"
+	}
+	return nav
+}
+
+func capitalizeASCII(s string) string {
+	if s == "" || s[0] < 'a' || s[0] > 'z' {
+		return s
+	}
+	return string(s[0]-32) + s[1:]
 }
 
 // buildSessions aggregates CostByTaskGroup rows into CodeSession entries.
