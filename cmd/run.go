@@ -34,9 +34,13 @@ var (
 )
 
 var runCmd = &cobra.Command{
-	Use:   "run PROMPT_OR_@FILE",
+	Use:   "run PROMPT|@FILE|-",
 	Short: "Run an agent with a prompt",
-	Long: `Run an agent with the provided prompt text or file.
+	Long: `Run an agent with the provided prompt. The argument is either:
+  - literal prompt text
+  - @PATH to read the prompt from a file
+  - "-" (or "@-") to read the prompt from stdin until EOF
+
 Can run standalone (just needs .ateamorg/) or within a project context.
 
 With --role: validates the role exists and stores output in role directory.
@@ -49,6 +53,8 @@ Example:
   ateam run "say hello"
   ateam run "Analyze the auth module" --role security
   ateam run "test" --profile cheap
+  ateam run @prompt_file.md
+  echo "explain this code" | ateam run -
   ateam run "say hi" --model sonnet
   ateam run "quick check" --quiet`,
 	Args: cobra.ExactArgs(1),

@@ -60,10 +60,18 @@ const (
 	SandboxSettingsFile           = "ateam_claude_sandbox_extra_settings.json"
 )
 
-// ResolveValue handles the @filename convention:
-// if the value starts with "@", the rest is treated as a file path and read.
-// Otherwise the value is returned as-is.
+// ResolveValue resolves a prompt value:
+//   - "-" or "@-": read the prompt from stdin (terminated by EOF).
+//   - "@<path>":   read the prompt from the named file.
+//   - anything else: return the value as-is (literal prompt text).
 func ResolveValue(value string) (string, error) {
+	if value == "-" || value == "@-" {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("cannot read prompt from stdin: %w", err)
+		}
+		return string(data), nil
+	}
 	if strings.HasPrefix(value, "@") {
 		path := value[1:]
 		data, err := os.ReadFile(path)
