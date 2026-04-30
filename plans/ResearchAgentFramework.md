@@ -212,6 +212,79 @@ Gas Town is **significantly more complex to use** for ATeam's goals. It's design
 
 **Bottom line:** Gas Town is a more ambitious and general-purpose system. ATeam is a more focused and opinionated tool for a specific use case. If you want an interactive multi-agent factory, Gas Town is compelling. If you want a quiet night-shift crew that improves your code while you sleep, ATeam's simpler architecture is a better fit. The ideas worth borrowing from Gas Town are the structured work tracking (beads/convoys) and the crash-recovery semantics (hooks with resumable state), not the interactive tmux-based execution model.
 
+#### Archon (coleam00/archon) ⭐⭐⭐⭐
+
+**What it is:** "The first open-source harness builder for AI coding." A workflow engine that wraps coding agents in deterministic, YAML-defined DAGs of AI nodes, bash nodes, and human approval gates. 20.3K GitHub stars, 3.1K forks, created Feb 2025, pushed today, 198 open issues — among the most-starred and most-active projects in the space. TypeScript, MIT-licensed, primary runtime is Claude Code with Codex/Pi as alternatives. Archon was originally a Pydantic-AI agent builder; the current iteration is a near-total rewrite focused on coding harnesses.
+
+**Core idea:** the agent itself is non-deterministic, but you can make the *process* deterministic by wrapping the agent in a graph of explicit steps. Each step is either an AI prompt (the model has discretion), a shell command (no discretion), or a human gate (block until approved). Loops with `until` conditions let an AI step iterate until a deterministic predicate is satisfied (`ALL_TASKS_COMPLETE`, `APPROVED`, etc.).
+
+**Architecture:**
+- **Platform adapters** — Web UI, CLI, Telegram, Slack, Discord, GitHub webhooks. All inputs route through a single orchestrator and all runs surface in a unified dashboard.
+- **Orchestrator** — message routing, context management, codebase resolution.
+- **Execution engines** — separate runners for shell commands and YAML workflows.
+- **AI assistant clients** — pluggable wrappers for Claude Code, Codex, Pi.
+- **Persistent storage** — SQLite or Postgres, 7 tables (codebases, conversations, sessions, workflow runs, isolation environments, messages, workflow events).
+
+**Workflow YAML — illustrative shape:**
+```yaml
+nodes:
+  - id: plan
+    prompt: "Explore codebase and create implementation plan"
+  - id: implement
+    depends_on: [plan]
+    loop:
+      prompt: "Implement next task. Run validation."
+      until: ALL_TASKS_COMPLETE
+      fresh_context: true
+  - id: run-tests
+    depends_on: [implement]
+    bash: "bun run validate"
+  - id: approve
+    depends_on: [run-tests]
+    loop:
+      prompt: "Present changes for review"
+      until: APPROVED
+      interactive: true
+```
+
+`fresh_context: true` is notable — restarts the agent with a clean context window between loop iterations to prevent context drift. ATeam doesn't currently do this; it's a useful idea for long iterative runs.
+
+**17 built-in workflows** in `.archon/workflows/`, including:
+- `archon-fix-github-issue` — classify → investigate → implement → validate → PR.
+- `archon-idea-to-pr` — feature idea → plan → implement → validate → PR with 5 parallel reviewers.
+- `archon-comprehensive-pr-review` — multi-agent PR review with 5 parallel reviewers.
+- `archon-architect` — codebase health and complexity reduction sweeps.
+- `archon-refactor-safely` — type-check hooks and behavior verification on every step.
+- `archon-assist` — general Q&A with full Claude Code agent access.
+
+These are all customizable YAML files, so the "built-ins" double as templates.
+
+**Git worktree isolation.** Every workflow run gets its own worktree — same model as agent-orchestrator and Gas Town. Run 5 in parallel with no conflicts.
+
+**Deployment.** `archon serve` (single binary that downloads and starts the web UI), `archon` CLI, optional Docker. Self-hosted, not SaaS.
+
+**Overlap with ATeam:** High on workflow shape, low on operational model. Both wrap Claude Code in a higher-level harness, both produce PRs, both isolate runs in worktrees, both gate human approval at key points. Both treat "AI step + deterministic check" as the unit of work.
+
+**What it lacks for our use case:**
+- **No scheduler.** Workflows run on-demand via platforms, CLI, or webhooks. No cron, no daily/nightly profiles, no autonomous coordinator deciding what to run next. This is the same gap that disqualified agent-orchestrator and Supacode for ATeam's primary use case.
+- **No specialized agent roles with persistent project knowledge.** Each workflow is a fresh DAG; there's no "testing specialist that has been working on this repo for 3 months and knows where the test gaps are." Archon's DAGs are stateless apart from the repo state.
+- **No org-level knowledge or cross-project learning.** Per-codebase tables exist but nothing flows up to org defaults.
+- **No coordinator reasoning.** Routing is rule-based / event-based. There's no LLM-powered triage that reads multiple reports and decides priority.
+- **No budget/cost enforcement.** Same gap as most tools in this list.
+- **Heavy multi-platform surface area.** Telegram/Slack/Discord/GitHub adapters add value for some users but are scope ATeam doesn't need or want for v1. They also imply infrastructure (a long-running server, webhook endpoints) that pushes Archon toward "always-on service" rather than "CLI you run when you want to."
+- **TypeScript.** Same dependency-boundary concern as Sandcastle if ATeam wants to embed it.
+
+**Ideas to integrate:**
+
+- **YAML DAG workflows.** This is the strongest pattern to borrow. ATeam currently encodes per-agent execution implicitly in Go code; expressing audit/implement flows as YAML DAGs (AI nodes + bash nodes + approval gates + loops with `until` conditions) would make ATeam's workflows inspectable, version-controllable, and user-customizable. The 17 built-in workflows are essentially the same shape as ATeam's role prompts — formalizing them as YAML is a clear next step.
+- **`fresh_context` between loop iterations.** When an agent loops on "fix the next failing test," restarting with a clean context window prevents the context from filling with old failure traces. ATeam should consider this for any agent that operates in iterative cycles (especially the testing and refactor agents).
+- **Loop with deterministic exit predicate.** `until: ALL_TASKS_COMPLETE` or `until: TYPECHECK_PASSES` is a clean pattern. ATeam's current "agent runs once, coordinator decides what to do next" model could benefit from in-agent loops with bash-validated exit conditions, reducing coordinator round trips.
+- **Multi-agent parallel review.** `archon-comprehensive-pr-review` runs 5 parallel reviewers and combines their feedback. ATeam could adopt this for the review/audit phase — multiple specialist agents review the same diff in parallel, coordinator synthesizes.
+- **Platform adapters as a future plugin slot.** ATeam's notification story is currently CLI + filesystem. Archon's clean separation of "platform adapter" from "orchestrator" is worth keeping as a future architectural shape, especially for Slack/Telegram approval flows.
+- **`archon serve` single-binary web UI.** The download-and-start pattern is friendlier than docker-compose. If/when ATeam adds a dashboard, this is the bar to match.
+
+**Key architectural difference from ATeam:** Archon is a *harness builder* — its job is to make a single agent's work deterministic and repeatable by wrapping it in an explicit DAG. ATeam is an *autonomous quality system* — its job is to decide what to work on, run specialized agents on a schedule, accumulate project knowledge, and triage results for human review. They sit at different layers: an organization could plausibly use Archon DAGs *as the implementation* of ATeam's individual agent runs, with ATeam's coordinator deciding which DAG to invoke and when. Archon is the choreography for one agent's dance; ATeam is the show producer deciding which dance happens tonight.
+
 #### LangGraph ⭐⭐
 
 **What it is:** A Python-based framework from LangChain for managing multi-agent workflows using graph architectures. Organizes tasks as nodes in a directed graph with conditional edges, parallel execution, and persistent state. MIT-licensed, 120K+ GitHub stars (LangChain ecosystem). Features durable execution, human-in-the-loop checkpoints, and LangGraph Platform for deployment.
@@ -381,7 +454,7 @@ This is similar to ATeam's report → review → code pipeline but more rigid: O
 
 ### B.3 Conclusion: Build or Adopt?
 
-**Recommendation: Build ATeam, but borrow heavily from Gas Town, ComposioHQ/agent-orchestrator, OpenHands, Ona, and Sandcastle patterns.**
+**Recommendation: Build ATeam, but borrow heavily from Gas Town, ComposioHQ/agent-orchestrator, OpenHands, Ona, Sandcastle, and Archon patterns.**
 
 No existing tool combines all of ATeam's core requirements:
 1. Scheduled, autonomous background operation (night shift).
@@ -403,6 +476,7 @@ Gas Town and agent-orchestrator come closest but are both reactive/interactive r
 - **PR-Agent as a quality gate** for agent-generated changes.
 - **AGENTS.md standard**, **Command+Prompt+PR step sequencing**, **kernel-level guardrails**, and **Skills pattern** from Ona.
 - **Branch strategies** (`head` / `merge-to-head` / `branch`) and **host-vs-sandbox lifecycle hooks** from Sandcastle.
+- **YAML DAG workflows** (AI + bash + human-gate nodes), **`fresh_context` loop iterations**, and **deterministic `until` exit predicates** from Archon.
 
 ### B.4 Future: Feature Agents
 
