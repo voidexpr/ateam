@@ -192,6 +192,10 @@ func runReport(opts ReportOptions) error {
 			continue
 		}
 		roleDir := env.RoleDir(roleID)
+		startedAt := time.Now()
+		outputFile := filepath.Join(env.RoleHistoryDir(roleID),
+			startedAt.Format(runner.TimestampFormat)+"."+prompts.ReportFile)
+		prompt = strings.ReplaceAll(prompt, "{{OUTPUT_FILE}}", outputFile)
 		task := runner.PoolTask{
 			Prompt: prompt,
 			RunOpts: runner.RunOpts{
@@ -199,6 +203,7 @@ func runReport(opts ReportOptions) error {
 				Action:               runner.ActionReport,
 				LogsDir:              env.RoleLogsDir(roleID),
 				LastMessageFilePath:  env.RoleReportPath(roleID),
+				OutputFilePath:       outputFile,
 				ErrorMessageFilePath: filepath.Join(roleDir, prompts.ReportErrorFile),
 				WorkDir:              env.SourceDir,
 				TimeoutMin:           timeout,
@@ -206,6 +211,7 @@ func runReport(opts ReportOptions) error {
 				PromptName:           "report_prompt.md",
 				Verbose:              opts.Verbose,
 				TaskGroup:            taskGroup,
+				StartedAt:            startedAt,
 			},
 		}
 
@@ -286,11 +292,11 @@ func runReport(opts ReportOptions) error {
 		agentName: cr.Agent.Name(),
 		itemLabel: "role(s)",
 		onDone: func(r runner.RunSummary, cwd string) string {
-			reportPath := env.RoleReportPath(r.RoleID)
-			if err := runner.ArchiveFile(reportPath, env.RoleHistoryDir(r.RoleID), prompts.ReportFile, r.StartedAt); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not archive report for %s: %v\n", r.RoleID, err)
-			}
-			return relPath(cwd, reportPath)
+			// History file is written directly by the agent (or by the runner's
+			// fallback path when the agent did not call Write); on success the
+			// runner already promoted it to report.md, so no post-run archive
+			// step is needed.
+			return relPath(cwd, env.RoleReportPath(r.RoleID))
 		},
 	})
 

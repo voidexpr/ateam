@@ -2,6 +2,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -121,14 +122,16 @@ type RunOpts struct {
 	RoleID               string
 	Action               string // "report", "run", "code", "review"
 	LogsDir              string // flat dir for all timestamped log files
-	LastMessageFilePath  string // where to write extracted report text (on success only)
+	LastMessageFilePath  string // canonical "last successful output" path; copied from OutputFilePath on success, or written from final assistant text as a fallback
+	OutputFilePath       string // pre-computed timestamped path inside HistoryDir; the agent is told to Write its output here, and on success it is promoted to LastMessageFilePath. If empty, runner falls back to the legacy "stream final text into LastMessageFilePath" behavior.
 	ErrorMessageFilePath string // where to write error info (on failure only)
 	WorkDir              string // cwd for the subprocess
 	TimeoutMin           int
-	HistoryDir           string // where to archive the prompt
-	PromptName           string // archive name
-	Verbose              bool   // print agent and docker commands to stderr
-	TaskGroup            string // groups related calls (e.g. all tasks in one ateam code run)
+	HistoryDir           string    // where to archive the prompt
+	PromptName           string    // archive name
+	Verbose              bool      // print agent and docker commands to stderr
+	TaskGroup            string    // groups related calls (e.g. all tasks in one ateam code run)
+	StartedAt            time.Time // optional override; if zero, Run() uses time.Now(). Use to align cmd-side path computation with runner-side log/archive timestamps.
 }
 
 // RunProgress is a lightweight status sent on a channel during execution.
@@ -197,7 +200,10 @@ func (r *Runner) LogQueued(opts RunOpts) {
 
 // Run executes the agent with the given prompt and options.
 func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress chan<- RunProgress) RunSummary {
-	startedAt := time.Now()
+	startedAt := opts.StartedAt
+	if startedAt.IsZero() {
+		startedAt = time.Now()
+	}
 	var callID int64
 
 	prefix := filepath.Join(opts.LogsDir, startedAt.Format(TimestampFormat)+"_"+opts.Action)
@@ -656,12 +662,34 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 	success := resultEv != nil && resultEv.Type == "result" && resultEv.ExitCode == 0 && !resultEv.IsError
 
 	if success {
-		if opts.LastMessageFilePath != "" && output != "" {
+		// Success path: prefer the file the agent wrote via the Write tool to
+		// OutputFilePath (a timestamped path inside HistoryDir). If the agent
+		// did not use Write, fall back to the streamed final assistant text.
+		// The chosen content is written to LastMessageFilePath as the canonical
+		// "last successful run" copy, and (when missing) seeded into
+		// OutputFilePath so the history dir always has a record.
+		var content []byte
+		if opts.OutputFilePath != "" {
+			if data, err := os.ReadFile(opts.OutputFilePath); err == nil && len(bytes.TrimSpace(data)) > 0 {
+				content = data
+			}
+		}
+		if len(content) == 0 && output != "" {
+			content = []byte(output)
+			if opts.OutputFilePath != "" {
+				if err := os.MkdirAll(filepath.Dir(opts.OutputFilePath), 0700); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to create history dir %s: %v\n", filepath.Dir(opts.OutputFilePath), err)
+				} else if err := os.WriteFile(opts.OutputFilePath, content, 0600); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to write history file %s: %v\n", opts.OutputFilePath, err)
+				}
+			}
+		}
+		if opts.LastMessageFilePath != "" && len(content) > 0 {
 			dir := filepath.Dir(opts.LastMessageFilePath)
 			if err := os.MkdirAll(dir, 0700); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to create output dir %s: %v\n", dir, err)
 			}
-			if err := os.WriteFile(opts.LastMessageFilePath, []byte(output), 0600); err != nil {
+			if err := os.WriteFile(opts.LastMessageFilePath, content, 0600); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to write output file %s: %v\n", opts.LastMessageFilePath, err)
 			}
 		}

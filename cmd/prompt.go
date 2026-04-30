@@ -110,7 +110,7 @@ func runPromptRole() error {
 	if err != nil {
 		return err
 	}
-	fmt.Print(assembled)
+	fmt.Println(assembled)
 	printPromptSources(os.Stderr, sources)
 	return nil
 }
@@ -162,7 +162,7 @@ func runPromptSupervisor() error {
 	if err != nil {
 		return err
 	}
-	fmt.Print(assembled)
+	fmt.Println(assembled)
 	printPromptSources(os.Stderr, sources)
 	return nil
 }
