@@ -39,6 +39,7 @@ var (
 	codeTail              bool
 	codeDockerAutoSetup   bool
 	codeContainerName     string
+	codeVerify            bool
 )
 
 // CodeOptions holds configuration for a code run.
@@ -59,6 +60,7 @@ type CodeOptions struct {
 	Tail              bool
 	DockerAutoSetup   bool
 	ContainerName     string
+	Verify            bool // run `ateam verify` after the code phase succeeds
 }
 
 var codeCmd = &cobra.Command{
@@ -90,6 +92,7 @@ Example:
 			Tail:              codeTail,
 			DockerAutoSetup:   codeDockerAutoSetup,
 			ContainerName:     codeContainerName,
+			Verify:            codeVerify,
 		})
 	},
 }
@@ -117,6 +120,7 @@ func init() {
 	addVerboseFlag(codeCmd, &codeVerbose)
 	addForceFlag(codeCmd, &codeForce)
 	codeCmd.Flags().BoolVar(&codeTail, "tail", false, "stream live output from supervisor and sub-runs")
+	codeCmd.Flags().BoolVar(&codeVerify, "verify", false, "run 'ateam verify' after code completes successfully")
 	addDockerAutoSetupFlag(codeCmd, &codeDockerAutoSetup)
 	addContainerNameFlag(codeCmd, &codeContainerName)
 }
@@ -302,6 +306,22 @@ func runCode(opts CodeOptions) error {
 	}
 	printCodeSessionSummary(supervisorDir, opts.Print, result.Output)
 	printDone(result)
+
+	if opts.Verify {
+		fmt.Println()
+		return runVerify(VerifyOptions{
+			ExtraPrompt:     opts.ExtraPrompt,
+			Timeout:         opts.Timeout,
+			Print:           opts.Print,
+			CheaperModel:    opts.CheaperModel,
+			Profile:         opts.SupervisorProfile,
+			Agent:           opts.SupervisorAgent,
+			Verbose:         opts.Verbose,
+			Force:           opts.Force,
+			DockerAutoSetup: opts.DockerAutoSetup,
+			ContainerName:   opts.ContainerName,
+		})
+	}
 
 	return nil
 }

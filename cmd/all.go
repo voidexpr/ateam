@@ -16,6 +16,7 @@ var (
 	allRoles           []string
 	allProfile         string
 	allDockerAutoSetup bool
+	allVerify          bool
 
 	// Per-stage overrides
 	allReportProfile     string
@@ -28,17 +29,19 @@ var (
 
 var allCmd = &cobra.Command{
 	Use:   "all",
-	Short: "Run the full pipeline: report, review, and code",
+	Short: "Run the full pipeline: report, review, and code (optionally verify)",
 	Long: `Run the full ateam pipeline sequentially: report → review → code.
+Pass --verify to chain a verify phase after code.
 
 Equivalent to:
   ateam report --roles all --print && ateam review --print && ateam code --print
 
 Per-stage profile/agent overrides let you mix agents across the pipeline.
---supervisor-profile/--supervisor-agent apply to both review and code management.
+--supervisor-profile/--supervisor-agent apply to review, code management, and verify.
 
 Example:
   ateam all
+  ateam all --verify
   ateam all --extra-prompt "Focus on security"
   ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile docker
   ateam all --timeout 30`,
@@ -64,6 +67,7 @@ func init() {
 	addCheaperModelFlag(allCmd, &allCheaperModel)
 	addVerboseFlag(allCmd, &allVerbose)
 	addDockerAutoSetupFlag(allCmd, &allDockerAutoSetup)
+	allCmd.Flags().BoolVar(&allVerify, "verify", false, "run 'ateam verify' after the code phase completes")
 }
 
 func runAll(cmd *cobra.Command, args []string) error {
@@ -130,6 +134,22 @@ func runAll(cmd *cobra.Command, args []string) error {
 		DockerAutoSetup:   allDockerAutoSetup,
 	}); err != nil {
 		return fmt.Errorf("code phase failed: %w", err)
+	}
+
+	if allVerify {
+		fmt.Println("\n=== Phase 4: Verify ===")
+		if err := runVerify(VerifyOptions{
+			ExtraPrompt:     allExtraPrompt,
+			Timeout:         allTimeout,
+			Print:           printOutput,
+			CheaperModel:    allCheaperModel,
+			Profile:         allSupervisorProfile,
+			Agent:           allSupervisorAgent,
+			Verbose:         allVerbose,
+			DockerAutoSetup: allDockerAutoSetup,
+		}); err != nil {
+			return fmt.Errorf("verify phase failed: %w", err)
+		}
 	}
 
 	return nil
