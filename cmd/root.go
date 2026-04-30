@@ -33,6 +33,7 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(reportCmd)
 	rootCmd.AddCommand(reviewCmd)
+	rootCmd.AddCommand(verifyCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(projectsCmd)
 	rootCmd.AddCommand(rolesCmd)

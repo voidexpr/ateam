@@ -51,6 +51,8 @@ const (
 	ReportCommissioningPromptFile = "report_commissioning_prompt.md"
 	CodeManagementPromptFile      = "code_management_prompt.md"
 	CodeManagementExtraPromptFile = "code_management_extra_prompt.md"
+	CodeVerifyPromptFile          = "code_verify_prompt.md"
+	CodeVerifyExtraPromptFile     = "code_verify_extra_prompt.md"
 	AutoSetupPromptFile           = "auto_setup_prompt.md"
 	TaskDebugPromptFile           = "task_debug_prompt.md"
 	ReportFile                    = "report.md"
@@ -326,6 +328,45 @@ func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, pinfo Pr
 		parts = append(parts, "# Additional Instructions\n\n"+extraPrompt)
 	}
 
+	return strings.Join(parts, "\n\n---\n\n"), nil
+}
+
+// AssembleCodeVerifyPrompt builds the supervisor prompt for verifying code
+// changes made by the most recent `ateam code` run. The supervisor inspects
+// recent commits and runs the test suite; no review document is included
+// because the source of truth is the git history itself.
+func AssembleCodeVerifyPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, extraPrompt string) (string, error) {
+	return assembleSupervisorPrompt(orgDir, projectDir, pinfo, CodeVerifyPromptFile, CodeVerifyExtraPromptFile, "code verify", extraPrompt, nil)
+}
+
+// assembleSupervisorPrompt is the shared backbone for supervisor prompts that
+// load a single prompt file via the 3-level fallback, prepend project info,
+// append supervisor extras, and optionally append a list of injected sections
+// (e.g. role reports for review) plus the CLI --extra-prompt.
+func assembleSupervisorPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, promptFile, extraFile, label, extraPrompt string, sections []string) (string, error) {
+	body, err := readWith3LevelFallback(
+		filepath.Join(projectDir, "supervisor", promptFile),
+		filepath.Join(orgDir, "supervisor", promptFile),
+		filepath.Join(orgDir, "defaults", "supervisor", promptFile),
+		filepath.Join("supervisor", promptFile),
+		label,
+	)
+	if err != nil {
+		return "", err
+	}
+
+	var parts []string
+	if info := FormatProjectInfo(pinfo); info != "" {
+		parts = append(parts, info)
+	}
+	parts = append(parts, body)
+	if extraFile != "" {
+		parts = append(parts, collectSupervisorExtras(orgDir, projectDir, extraFile)...)
+	}
+	parts = append(parts, sections...)
+	if extraPrompt != "" {
+		parts = append(parts, "# Additional Instructions\n\n"+extraPrompt)
+	}
 	return strings.Join(parts, "\n\n---\n\n"), nil
 }
 

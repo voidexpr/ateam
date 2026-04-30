@@ -50,6 +50,10 @@ func (e *ResolvedEnv) ReviewHistoryDir() string {
 	return filepath.Join(e.SupervisorDir(), "history")
 }
 
+func (e *ResolvedEnv) VerifyPath() string {
+	return filepath.Join(e.SupervisorDir(), "verify.md")
+}
+
 func (e *ResolvedEnv) RunnerLogPath() string {
 	return filepath.Join(e.ProjectDir, "logs", "runner.log")
 }

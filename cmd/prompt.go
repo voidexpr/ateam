@@ -36,6 +36,7 @@ Example:
   ateam prompt --role security --action report --extra-prompt "Focus on auth"
   ateam prompt --supervisor --action review
   ateam prompt --supervisor --action code
+  ateam prompt --supervisor --action verify
   ateam prompt --role security --action report --files-only`,
 	Args: cobra.NoArgs,
 	RunE: runPrompt,
@@ -44,7 +45,7 @@ Example:
 func init() {
 	promptCmd.Flags().StringVar(&promptRole, "role", "", "role name")
 	promptCmd.Flags().BoolVar(&promptSupervisor, "supervisor", false, "generate supervisor prompt instead of role prompt")
-	promptCmd.Flags().StringVar(&promptAction, "action", "", "action type: report, code, or review (required)")
+	promptCmd.Flags().StringVar(&promptAction, "action", "", "action type: report, code, review, or verify (required)")
 	promptCmd.Flags().StringVar(&promptExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
 	promptCmd.Flags().BoolVar(&promptNoProjectInfo, "no-project-info", false, "omit ateam project context from the prompt")
 	promptCmd.Flags().BoolVar(&promptIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
@@ -116,8 +117,8 @@ func runPromptRole() error {
 }
 
 func runPromptSupervisor() error {
-	if promptAction != runner.ActionReview && promptAction != runner.ActionCode {
-		return fmt.Errorf("invalid action %q for supervisor: must be 'review' or 'code'", promptAction)
+	if promptAction != runner.ActionReview && promptAction != runner.ActionCode && promptAction != runner.ActionVerify {
+		return fmt.Errorf("invalid action %q for supervisor: must be 'review', 'code', or 'verify'", promptAction)
 	}
 
 	env, err := root.Resolve(orgFlag, projectFlag)
@@ -141,6 +142,8 @@ func runPromptSupervisor() error {
 		sources = prompts.TraceReviewPromptSources(env.OrgDir, env.ProjectDir, pinfo, extraPrompt)
 	case runner.ActionCode:
 		sources = prompts.TraceCodeManagementPromptSources(env.OrgDir, env.ProjectDir, pinfo, env.ReviewPath(), extraPrompt)
+	case runner.ActionVerify:
+		sources = prompts.TraceCodeVerifyPromptSources(env.OrgDir, env.ProjectDir, pinfo, extraPrompt)
 	}
 
 	if promptFilesOnly {
@@ -158,6 +161,8 @@ func runPromptSupervisor() error {
 			return errNoReview(env.ReviewPath())
 		}
 		assembled, err = prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.SourceDir, pinfo, string(reviewContent), "", extraPrompt)
+	case runner.ActionVerify:
+		assembled, err = prompts.AssembleCodeVerifyPrompt(env.OrgDir, env.ProjectDir, pinfo, extraPrompt)
 	}
 	if err != nil {
 		return err

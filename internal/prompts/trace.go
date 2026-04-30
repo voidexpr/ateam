@@ -127,6 +127,46 @@ func TraceReviewPromptSources(orgDir, projectDir string, pinfo ProjectInfoParams
 	return sources
 }
 
+// TraceCodeVerifyPromptSources returns the sources that contribute to a supervisor verify prompt.
+func TraceCodeVerifyPromptSources(orgDir, projectDir string, pinfo ProjectInfoParams, extraPrompt string) []PromptSource {
+	return traceSupervisorSources(orgDir, projectDir, pinfo, CodeVerifyPromptFile, CodeVerifyExtraPromptFile, nil, extraPrompt)
+}
+
+// traceSupervisorSources is the shared backbone for trace functions that
+// walk a single supervisor prompt file (via 3-level fallback) plus its
+// extra-prompt files, with optional injected sources (e.g. role reports)
+// and the CLI --extra-prompt.
+func traceSupervisorSources(orgDir, projectDir string, pinfo ProjectInfoParams, promptFile, extraFile string, injected []PromptSource, extraPrompt string) []PromptSource {
+	var sources []PromptSource
+
+	if info := FormatProjectInfo(pinfo); info != "" {
+		sources = append(sources, PromptSource{Label: "Built-in: project-info", Content: info})
+	}
+
+	if s := traceFileOr3Level(
+		filepath.Join(projectDir, "supervisor", promptFile),
+		filepath.Join(orgDir, "supervisor", promptFile),
+		filepath.Join(orgDir, "defaults", "supervisor", promptFile),
+	); s != nil {
+		sources = append(sources, *s)
+	}
+
+	if extraFile != "" {
+		sources = append(sources, traceExistingFiles([]string{
+			filepath.Join(orgDir, "supervisor", extraFile),
+			filepath.Join(projectDir, "supervisor", extraFile),
+		})...)
+	}
+
+	sources = append(sources, injected...)
+
+	if extraPrompt != "" {
+		sources = append(sources, PromptSource{Label: "CLI: --extra-prompt", Content: extraPrompt})
+	}
+
+	return sources
+}
+
 // TraceCodeManagementPromptSources returns the sources that contribute to a supervisor code prompt.
 func TraceCodeManagementPromptSources(orgDir, projectDir string, pinfo ProjectInfoParams, reviewPath, extraPrompt string) []PromptSource {
 	var sources []PromptSource

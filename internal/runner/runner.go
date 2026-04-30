@@ -28,6 +28,7 @@ const (
 	ActionParallel = "parallel"
 	ActionCode     = "code"
 	ActionReview   = "review"
+	ActionVerify   = "verify"
 	ActionDebug    = "debug"
 )
 
