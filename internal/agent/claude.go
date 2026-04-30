@@ -87,6 +87,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 		cmd = req.CmdFactory(ctx, command, args...)
 	} else {
 		cmd = exec.CommandContext(ctx, command, args...)
+		configureProcessLifecycle(cmd)
 	}
 	// Set working directory for host execution. When CmdFactory is used (e.g. Docker),
 	// the factory already handles workdir via container flags (docker -w), so we
