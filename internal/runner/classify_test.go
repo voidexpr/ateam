@@ -144,6 +144,52 @@ func TestAppendStderrSummarySkipsEstimatedForAgentAPI(t *testing.T) {
 	}
 }
 
+func TestAppendStderrSummaryTimeoutWithSubagent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stderr.log")
+
+	summary := RunSummary{
+		ExitCode:    -1,
+		Duration:    20 * time.Minute,
+		ErrorSource: agent.ErrorSourceAteamTimeout,
+		ErrorCause:  "ateam timed out the run after 20 minutes",
+		ToolCounts:  map[string]int{"Agent": 1, "Bash": 15, "Read": 8},
+	}
+	appendStderrSummary(path, summary)
+
+	got, _ := os.ReadFile(path)
+	out := string(got)
+	for _, want := range []string{
+		"Agent subagent was called 1 time(s)",
+		"subagent was likely still running",
+		"EAGAIN",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in timeout+subagent stderr summary:\n%s", want, out)
+		}
+	}
+}
+
+func TestAppendStderrSummaryTimeoutWithoutSubagent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stderr.log")
+
+	summary := RunSummary{
+		ExitCode:    -1,
+		Duration:    20 * time.Minute,
+		ErrorSource: agent.ErrorSourceAteamTimeout,
+		ErrorCause:  "ateam timed out the run after 20 minutes",
+		ToolCounts:  map[string]int{"Bash": 5},
+	}
+	appendStderrSummary(path, summary)
+
+	got, _ := os.ReadFile(path)
+	out := string(got)
+	if strings.Contains(out, "Agent subagent") {
+		t.Errorf("unexpected Agent subagent note when no Agent calls; got:\n%s", out)
+	}
+}
+
 func TestAppendStderrSummaryNoOpWithoutSource(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "stderr.log")
