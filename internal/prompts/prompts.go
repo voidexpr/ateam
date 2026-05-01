@@ -64,11 +64,17 @@ const (
 //   - "-" or "@-": read the prompt from stdin (terminated by EOF).
 //   - "@<path>":   read the prompt from the named file.
 //   - anything else: return the value as-is (literal prompt text).
+//
+// When reading stdin yields no content (e.g. an empty pipe), an error is
+// returned rather than a silent empty prompt.
 func ResolveValue(value string) (string, error) {
 	if value == "-" || value == "@-" {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return "", fmt.Errorf("cannot read prompt from stdin: %w", err)
+		}
+		if len(strings.TrimSpace(string(data))) == 0 {
+			return "", fmt.Errorf("stdin is empty: pipe a prompt or pass one as an argument")
 		}
 		return string(data), nil
 	}

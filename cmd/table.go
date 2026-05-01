@@ -831,6 +831,14 @@ func isTerminal() bool {
 	return isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
 }
 
+// stdinIsPiped reports whether stdin is a pipe or redirected file rather than
+// an interactive terminal. Commands use this to auto-read a piped prompt
+// when no positional argument is given.
+func stdinIsPiped() bool {
+	fd := os.Stdin.Fd()
+	return !isatty.IsTerminal(fd) && !isatty.IsCygwinTerminal(fd)
+}
+
 func secretResolver(env *root.ResolvedEnv, backend secret.Backend) *secret.Resolver {
 	if env == nil {
 		return secret.NewResolver("", "", backend, nil)

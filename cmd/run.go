@@ -34,12 +34,12 @@ var (
 )
 
 var runCmd = &cobra.Command{
-	Use:   "run PROMPT|@FILE|-",
+	Use:   "run [PROMPT|@FILE|-]",
 	Short: "Run an agent with a prompt",
-	Long: `Run an agent with the provided prompt. The argument is either:
-  - literal prompt text
-  - @PATH to read the prompt from a file
-  - "-" (or "@-") to read the prompt from stdin until EOF
+	Long: `Run an agent with the provided prompt. Sources, in order of precedence:
+  - the positional argument: literal prompt text, "@PATH" to read a file,
+    or "-" / "@-" to read stdin until EOF
+  - if no argument is given AND stdin is piped/redirected, read stdin
 
 Can run standalone (just needs .ateamorg/) or within a project context.
 
@@ -54,10 +54,11 @@ Example:
   ateam run "Analyze the auth module" --role security
   ateam run "test" --profile cheap
   ateam run @prompt_file.md
-  echo "explain this code" | ateam run -
+  echo "explain this code" | ateam run
+  git diff | ateam run --role critic_engineering
   ateam run "say hi" --model sonnet
   ateam run "quick check" --quiet`,
-	Args: cobra.ExactArgs(1),
+	Args: cobra.MaximumNArgs(1),
 	RunE: runRun,
 }
 
@@ -78,7 +79,11 @@ func init() {
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
-	promptText, err := prompts.ResolveValue(args[0])
+	promptArg, err := promptArgOrStdin(args)
+	if err != nil {
+		return err
+	}
+	promptText, err := prompts.ResolveValue(promptArg)
 	if err != nil {
 		return fmt.Errorf("cannot resolve prompt: %w", err)
 	}
@@ -348,4 +353,17 @@ func printRunSummary(r runner.RunSummary) {
 	if r.Err != nil {
 		fmt.Fprintf(os.Stderr, "  Error:    %v\n", r.Err)
 	}
+}
+
+// promptArgOrStdin returns the prompt argument to feed prompts.ResolveValue:
+// the explicit positional argument when given, or "-" (read stdin) when stdin
+// is piped/redirected, or an error when neither is available.
+func promptArgOrStdin(args []string) (string, error) {
+	if len(args) == 1 {
+		return args[0], nil
+	}
+	if stdinIsPiped() {
+		return "-", nil
+	}
+	return "", fmt.Errorf("no prompt provided: pass a prompt, @file, or pipe via stdin (run `ateam run --help`)")
 }

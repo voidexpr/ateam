@@ -305,18 +305,18 @@ docker run \
 
 Run an agent with a prompt. Can run standalone (just needs `.ateamorg/`) or within a project.
 
-The positional argument accepts:
-- literal prompt text
-- `@PATH` to read the prompt from a file
-- `-` (or `@-`) to read the prompt from stdin until EOF
+Prompt sources, in order of precedence:
+- the positional argument: literal prompt text, `@PATH` to read a file, or `-` / `@-` to read stdin until EOF
+- if no argument is given **and** stdin is piped/redirected, stdin is read automatically
 
 ```bash
 ateam run "say hello"
 ateam run "Analyze the auth module" --role security
 ateam run "test" --profile docker
 ateam run @prompt_file.md
-echo "explain this code" | ateam run -
-git diff | ateam run - --role critic_engineering
+echo "explain this code" | ateam run            # auto-detected
+git diff | ateam run --role critic_engineering  # auto-detected
+echo "still works" | ateam run -                # explicit "-"
 ```
 
 | Flag | Description |
