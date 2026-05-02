@@ -598,3 +598,28 @@ func TestRunnerArchivesPrompt(t *testing.T) {
 		t.Error("expected archived prompt in history dir")
 	}
 }
+
+func TestResolveExecModel(t *testing.T) {
+	configured := &agent.ClaudeAgent{DefaultModel: "claude-opus-4-7"}
+	noConfig := &agent.ClaudeAgent{}
+
+	tests := []struct {
+		name string
+		ev   *agent.StreamEvent
+		ag   agent.Agent
+		want string
+	}{
+		{"stream wins over config", &agent.StreamEvent{Model: "claude-sonnet-4-6"}, configured, "claude-sonnet-4-6"},
+		{"normalizes dated stream model", &agent.StreamEvent{Model: "claude-sonnet-4-6-2026-01-15"}, noConfig, "claude-sonnet-4-6"},
+		{"falls back to configured when stream empty", &agent.StreamEvent{Model: ""}, configured, "claude-opus-4-7"},
+		{"falls back to configured when no result event", nil, configured, "claude-opus-4-7"},
+		{"empty when nothing is known", nil, noConfig, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveExecModel(tt.ev, tt.ag); got != tt.want {
+				t.Errorf("resolveExecModel = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

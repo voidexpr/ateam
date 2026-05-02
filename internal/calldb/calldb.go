@@ -339,10 +339,7 @@ func (c *CallDB) UpdateCall(id int64, result *CallResult) error {
 		result.PeakContextTokens, result.ContextWindow,
 	}
 	if result.Model != "" {
-		// Only backfill when the row's model is currently empty so an
-		// explicit value supplied at insert time isn't overwritten by
-		// whatever the stream happens to report.
-		q += `, model = COALESCE(NULLIF(model, ''), ?)`
+		q += `, model = ?`
 		args = append(args, result.Model)
 	}
 	q += ` WHERE id = ?`

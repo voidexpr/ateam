@@ -711,12 +711,7 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 		if summary.Err != nil {
 			errMsg = summary.Err.Error()
 		}
-		// If the result event reported a model (e.g. Codex discovering the
-		// model at runtime), propagate it so the DB row is accurate.
-		resultModel := ""
-		if resultEv != nil && resultEv.Model != "" {
-			resultModel = agent.NormalizeModel(resultEv.Model)
-		}
+		resultModel := resolveExecModel(resultEv, r.Agent)
 		if err := r.CallDB.UpdateCall(callID, &calldb.CallResult{
 			EndedAt:           summary.EndedAt,
 			DurationMS:        summary.DurationMS,
@@ -1050,6 +1045,18 @@ func extractModel(a agent.Agent) string {
 		return mp.ModelName()
 	}
 	return ""
+}
+
+// resolveExecModel returns the canonical model name to write into the
+// agent_execs row at finalize time. The stream-reported model wins because
+// it reflects what actually ran; fall back to the agent's configured model
+// so rows that crashed or timed out before the stream produced a result are
+// still labelled with the requested model.
+func resolveExecModel(resultEv *agent.StreamEvent, a agent.Agent) string {
+	if resultEv != nil && resultEv.Model != "" {
+		return agent.NormalizeModel(resultEv.Model)
+	}
+	return agent.NormalizeModel(extractModel(a))
 }
 
 func hashPrompt(prompt string) string {

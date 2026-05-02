@@ -119,7 +119,7 @@ func TestInsertAndUpdate(t *testing.T) {
 	}
 }
 
-func TestUpdateCallBackfillsModelOnlyWhenEmpty(t *testing.T) {
+func TestUpdateCallWritesModelWhenProvided(t *testing.T) {
 	db := testDB(t)
 	now := time.Now()
 
@@ -146,21 +146,33 @@ func TestUpdateCallBackfillsModelOnlyWhenEmpty(t *testing.T) {
 		return m
 	}
 
-	// Empty insert is backfilled from the result event.
+	// Empty insert: the resolved model from the runner is written.
 	emptyID := insertWithModel("")
 	if err := db.UpdateCall(emptyID, &CallResult{Model: "claude-sonnet-4-6", EndedAt: now}); err != nil {
 		t.Fatalf("UpdateCall: %v", err)
 	}
 	if got := modelOf(emptyID); got != "claude-sonnet-4-6" {
-		t.Fatalf("expected backfill to claude-sonnet-4-6, got %q", got)
+		t.Fatalf("expected claude-sonnet-4-6, got %q", got)
 	}
 
-	// Non-empty insert is preserved even when the result reports a different model.
+	// Non-empty insert: stream-reported model wins (it's the model that
+	// actually ran; the runner's resolveExecModel is the single source of
+	// truth at finalize time).
 	presetID := insertWithModel("claude-opus-4-7")
 	if err := db.UpdateCall(presetID, &CallResult{Model: "claude-sonnet-4-6", EndedAt: now}); err != nil {
 		t.Fatalf("UpdateCall: %v", err)
 	}
-	if got := modelOf(presetID); got != "claude-opus-4-7" {
+	if got := modelOf(presetID); got != "claude-sonnet-4-6" {
+		t.Fatalf("expected stream model claude-sonnet-4-6 to overwrite, got %q", got)
+	}
+
+	// Empty CallResult.Model leaves the existing column untouched (the
+	// runner only passes "" when it had no signal at all).
+	preservedID := insertWithModel("claude-opus-4-7")
+	if err := db.UpdateCall(preservedID, &CallResult{EndedAt: now}); err != nil {
+		t.Fatalf("UpdateCall: %v", err)
+	}
+	if got := modelOf(preservedID); got != "claude-opus-4-7" {
 		t.Fatalf("expected preserved claude-opus-4-7, got %q", got)
 	}
 }
