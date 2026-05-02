@@ -119,6 +119,52 @@ func TestInsertAndUpdate(t *testing.T) {
 	}
 }
 
+func TestUpdateCallBackfillsModelOnlyWhenEmpty(t *testing.T) {
+	db := testDB(t)
+	now := time.Now()
+
+	insertWithModel := func(initial string) int64 {
+		id, err := db.InsertCall(&Call{
+			ProjectID: "p",
+			Agent:     "claude",
+			Container: "none",
+			Action:    "run",
+			Model:     initial,
+			StartedAt: now,
+		})
+		if err != nil {
+			t.Fatalf("InsertCall: %v", err)
+		}
+		return id
+	}
+
+	modelOf := func(id int64) string {
+		var m string
+		if err := db.db.QueryRow("SELECT model FROM agent_execs WHERE id = ?", id).Scan(&m); err != nil {
+			t.Fatalf("query model: %v", err)
+		}
+		return m
+	}
+
+	// Empty insert is backfilled from the result event.
+	emptyID := insertWithModel("")
+	if err := db.UpdateCall(emptyID, &CallResult{Model: "claude-sonnet-4-6", EndedAt: now}); err != nil {
+		t.Fatalf("UpdateCall: %v", err)
+	}
+	if got := modelOf(emptyID); got != "claude-sonnet-4-6" {
+		t.Fatalf("expected backfill to claude-sonnet-4-6, got %q", got)
+	}
+
+	// Non-empty insert is preserved even when the result reports a different model.
+	presetID := insertWithModel("claude-opus-4-7")
+	if err := db.UpdateCall(presetID, &CallResult{Model: "claude-sonnet-4-6", EndedAt: now}); err != nil {
+		t.Fatalf("UpdateCall: %v", err)
+	}
+	if got := modelOf(presetID); got != "claude-opus-4-7" {
+		t.Fatalf("expected preserved claude-opus-4-7, got %q", got)
+	}
+}
+
 func TestConcurrentInserts(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.sqlite")
 	db, err := Open(dbPath)
