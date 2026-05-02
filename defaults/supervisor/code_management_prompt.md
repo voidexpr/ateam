@@ -57,9 +57,12 @@ The goals are:
 1. Use the execution directory provided as `{{EXECUTION_DIR}}`. Create it with `mkdir -p` if it does not already exist. Do NOT invent a different timestamped path — the harness has already allocated this one and reads files from it.
 2. Initialize the execution report at `{{OUTPUT_FILE}}` (which is `EXECUTION_DIR/execution_report.md`) using the format below
 3. Run `ateam roles` to discover available roles
-4. make sure you have the latest code: `git fetch --all && git rebase`
-5. make sure there are no git dirty files (untracked files are fine), if there are any abort with a clear error message
-6. review recent commits
+4. make sure there are no git dirty files (untracked files are fine), if there are any abort with a clear error message
+5. review recent commits
+
+Do not run `git fetch`, `git pull`, or any other network-touching git command — keeping
+the branch up to date with its remote is the operator's responsibility, not yours. Work
+from whatever is currently checked out.
 
 ### Phase 2: Task Planning
 
@@ -216,6 +219,17 @@ follow along. Print status lines as you go:
   ```
   Updated execution_report.md: Task 01 completed
   ```
+
+### Monitoring long-running tasks
+
+Never use `tail -f` (or any other follow-style command that does not exit on its own)
+to watch a backgrounded task's output. `tail -f` keeps running forever, so even after
+the supervisor finishes all work the run stays alive until the wall-clock timeout
+fires — wasting up to 2 hours of API time per run.
+
+If you need to check on a backgrounded task, use the `TaskOutput` tool on the task
+itself, or read the output file with a bounded command (e.g. `tail -n 200 FILE`) and
+re-read it later. Before ending your run, stop any background tasks you started.
 
 ## Git Workflow
 
