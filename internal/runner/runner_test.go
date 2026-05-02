@@ -599,6 +599,56 @@ func TestRunnerArchivesPrompt(t *testing.T) {
 	}
 }
 
+func TestWriteExecFileIncludesAllMetadata(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x_exec.md")
+
+	writeExecFile(path, execFileInfo{
+		StartedAt:     time.Date(2026, 5, 2, 9, 8, 4, 0, time.UTC),
+		ExecID:        191,
+		Agent:         "claude",
+		Profile:       "isolated",
+		ContainerType: "docker-exec",
+		ContainerName: "myctr",
+		Action:        "run",
+		Role:          "database_schema",
+		TaskGroup:     "code-2026-05-01_23-53-28",
+		Model:         "claude-sonnet-4-6",
+		Cwd:           "/work",
+		CLI:           "claude -p --verbose",
+		SpecifiedEnv:  map[string]string{"CLAUDE_CONFIG_DIR": "/custom/cfg", "FOO": "bar"},
+		SettingsJSON:  []byte(`{"x":1}`),
+		Prompt:        "do the thing",
+	})
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	got := string(data)
+
+	// Lines that must be present so resume + forensics work.
+	for _, want := range []string{
+		"* exec_id: 191",
+		"* agent: claude",
+		"* profile: isolated",
+		"* container: docker-exec (myctr)",
+		"* model: claude-sonnet-4-6",
+		"* role: database_schema",
+		"* task_group: code-2026-05-01_23-53-28",
+		"## Specified",
+		"unsets CLAUDECODE",
+		"CLAUDE_CONFIG_DIR=/custom/cfg",
+		"FOO=bar",
+		"# Settings",
+		"# Prompt\ndo the thing",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("exec file missing %q\n--- file ---\n%s", want, got)
+		}
+	}
+}
+
 func TestResolveExecModel(t *testing.T) {
 	configured := &agent.ClaudeAgent{DefaultModel: "claude-opus-4-7"}
 	noConfig := &agent.ClaudeAgent{}

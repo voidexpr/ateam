@@ -352,7 +352,23 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	}
 
 	// Write exec file with full context for debugging.
-	writeExecFile(execTarget, startedAt, opts, prompt, settingsJSON, cliStr, cwd, agentName)
+	writeExecFile(execTarget, execFileInfo{
+		StartedAt:     startedAt,
+		ExecID:        callID,
+		Agent:         agentName,
+		Profile:       r.Profile,
+		ContainerType: r.ContainerType,
+		ContainerName: containerName,
+		Action:        opts.Action,
+		Role:          opts.RoleID,
+		TaskGroup:     opts.TaskGroup,
+		Model:         model,
+		Cwd:           cwd,
+		CLI:           cliStr,
+		SpecifiedEnv:  req.Env,
+		SettingsJSON:  settingsJSON,
+		Prompt:        prompt,
+	})
 
 	appendLog(r.LogFile, opts.RoleID, "start", cwd, cliStr,
 		relToDir(r.ProjectDir, promptFile),
@@ -1000,19 +1016,60 @@ func FormatDuration(d time.Duration) string { return display.FormatDuration(d) }
 // name is too short or doesn't match. Local timezone is used.
 func ParseTimestampPrefix(name string) (time.Time, bool) { return display.ParseTimestampPrefix(name) }
 
-func writeExecFile(path string, startedAt time.Time, opts RunOpts, prompt string, settingsJSON []byte, cliStr, cwd, agentName string) {
+// execFileInfo bundles the metadata recorded into <prefix>_exec.md so the
+// file is a self-sufficient forensic record of how a run was launched.
+// Anything that influences agent execution (profile, container, model,
+// CLAUDE_CONFIG_DIR overrides, …) belongs here.
+type execFileInfo struct {
+	StartedAt     time.Time
+	ExecID        int64
+	Agent         string
+	Profile       string
+	ContainerType string
+	ContainerName string
+	Action        string
+	Role          string
+	TaskGroup     string
+	Model         string
+	Cwd           string
+	CLI           string
+	SpecifiedEnv  map[string]string
+	SettingsJSON  []byte
+	Prompt        string
+}
+
+func writeExecFile(path string, info execFileInfo) {
 	if path == "" {
 		return
 	}
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "# Command\n")
-	fmt.Fprintf(&b, "* started: %s\n", startedAt.Format(TimestampFormat))
-	fmt.Fprintf(&b, "* agent: %s\n", agentName)
-	fmt.Fprintf(&b, "* action: %s\n", opts.Action)
-	fmt.Fprintf(&b, "* role: %s\n", opts.RoleID)
-	fmt.Fprintf(&b, "* cwd: %s\n", cwd)
-	fmt.Fprintf(&b, "* coding agent cli:\n  ```bash\n  %s\n  ```\n", cliStr)
+	fmt.Fprintf(&b, "* started: %s\n", info.StartedAt.Format(TimestampFormat))
+	if info.ExecID > 0 {
+		fmt.Fprintf(&b, "* exec_id: %d\n", info.ExecID)
+	}
+	fmt.Fprintf(&b, "* agent: %s\n", info.Agent)
+	if info.Profile != "" {
+		fmt.Fprintf(&b, "* profile: %s\n", info.Profile)
+	}
+	if info.ContainerType != "" && info.ContainerType != "none" {
+		container := info.ContainerType
+		if info.ContainerName != "" {
+			container += " (" + info.ContainerName + ")"
+		}
+		fmt.Fprintf(&b, "* container: %s\n", container)
+	}
+	if info.Model != "" {
+		fmt.Fprintf(&b, "* model: %s\n", info.Model)
+	}
+	fmt.Fprintf(&b, "* action: %s\n", info.Action)
+	fmt.Fprintf(&b, "* role: %s\n", info.Role)
+	if info.TaskGroup != "" {
+		fmt.Fprintf(&b, "* task_group: %s\n", info.TaskGroup)
+	}
+	fmt.Fprintf(&b, "* cwd: %s\n", info.Cwd)
+	fmt.Fprintf(&b, "* coding agent cli:\n  ```bash\n  %s\n  ```\n", info.CLI)
 
 	fmt.Fprintf(&b, "\n# Env\n")
 	fmt.Fprintf(&b, "## Inherited\n")
@@ -1028,12 +1085,25 @@ func writeExecFile(path string, startedAt time.Time, opts RunOpts, prompt string
 	}
 	fmt.Fprintf(&b, "\n## Specified\n")
 	fmt.Fprintf(&b, "unsets CLAUDECODE\n")
-
-	if len(settingsJSON) > 0 {
-		fmt.Fprintf(&b, "\n# Settings\n```json\n%s\n```\n", string(settingsJSON))
+	keys := make([]string, 0, len(info.SpecifiedEnv))
+	for k := range info.SpecifiedEnv {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := info.SpecifiedEnv[k]
+		if looksLikeSecret(k) {
+			fmt.Fprintf(&b, "%s=<redacted:%d>\n", k, len(v))
+		} else {
+			fmt.Fprintf(&b, "%s=%s\n", k, v)
+		}
 	}
 
-	fmt.Fprintf(&b, "\n# Prompt\n%s\n", prompt)
+	if len(info.SettingsJSON) > 0 {
+		fmt.Fprintf(&b, "\n# Settings\n```json\n%s\n```\n", string(info.SettingsJSON))
+	}
+
+	fmt.Fprintf(&b, "\n# Prompt\n%s\n", info.Prompt)
 
 	if err := os.WriteFile(path, []byte(b.String()), 0600); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to write exec file %s: %v\n", path, err)

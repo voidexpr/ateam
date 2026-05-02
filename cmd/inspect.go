@@ -101,6 +101,12 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  %-8s %s\n", size, rel)
 			allFiles = append(allFiles, rel)
 		}
+		if r.Agent == "claude" {
+			streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.StreamFile)
+			if sid, err := extractSessionID(streamPath); err == nil && sid != "" {
+				fmt.Printf("  resume:  ateam resume %d\n", r.ID)
+			}
+		}
 	}
 
 	if inspectAutoDebug || inspectAutoDebugPrompt {

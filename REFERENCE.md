@@ -428,6 +428,37 @@ ateam inspect --last-run --auto-debug-prompt
 
 The debug prompt uses the standard 3-level fallback (`supervisor/task_debug_prompt.md`). Debug reports are saved to `.ateam/logs/supervisor/`.
 
+When the selected row is a `claude` run with a recoverable session id, `inspect` prints a one-line `resume:` hint pointing at `ateam resume <id>`.
+
+### `ateam resume [EXEC_ID]`
+
+Resume a previous `claude` agent run as an interactive session. The session id is read on demand from the run's `*_stream.jsonl` (no schema changes). The resumed session runs **outside** ateam — no `agent_execs` row, no sandbox, no tracking — and picks up where the original left off.
+
+```bash
+ateam resume 191             # print session id and the resume command
+ateam resume --last          # most recent claude run
+ateam resume 191 --launch    # exec into "claude --resume <id>"
+```
+
+| Flag | Description |
+|------|-------------|
+| `--last` | Resume the most recent `claude` run instead of taking an `EXEC_ID` |
+| `--launch` | Replace the current process with `claude --resume <id>` (uses `syscall.Exec`) |
+
+`CLAUDE_CONFIG_DIR` resolution order:
+1. The value recorded under `## Specified` in the run's `*_exec.md` (canonical — what was actually used).
+2. Re-resolved from the agent's `config_dir` in the current `runtime.hcl` (best-effort fallback; the definition may have drifted since the run).
+
+Container support:
+
+| Container | Behavior |
+|-----------|----------|
+| `none` | Prints + supports `--launch` (host `claude --resume`) |
+| `docker-exec` | Prints session id and `docker exec -it <name> claude --resume <id>` recipe; refuses `--launch` (session lives inside the long-lived container) |
+| `docker` / `docker-oauth` / `docker-api` | Prints session id with a "oneshot container is gone" caveat; refuses `--launch` |
+
+Resume only supports `agent = claude`. Codex and other agents are refused with a clear message.
+
 ### `ateam version`
 
 Print version, build, and system information.
@@ -1088,7 +1119,7 @@ ateam tail --coding             # live-stream current coding session
 | `report_error.md` | `.ateam/roles/<NAME>/` | Error summary, exit code, stderr, partial output |
 | `*_stderr.log` | `.ateam/logs/roles/<NAME>/` | Raw stderr |
 | `*_stream.jsonl` | `.ateam/logs/roles/<NAME>/` | Raw JSONL event stream |
-| `*_exec.md` | `.ateam/logs/roles/<NAME>/` | Full execution context |
+| `*_exec.md` | `.ateam/logs/roles/<NAME>/` | Full execution context: exec_id, agent, profile, container (type + name), model, role, task_group, cwd, the resolved CLI, inherited env (secrets redacted), specified env overrides (e.g. `CLAUDE_CONFIG_DIR`), sandbox settings, and the prompt. Used by `ateam resume`. |
 
 Supervisor errors: `.ateam/supervisor/review_error.md` and `.ateam/supervisor/code_error.md`.
 
