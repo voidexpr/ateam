@@ -227,6 +227,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 			res := ev.(*streamutil.ResultEvent)
 			evOut := StreamEvent{
 				Type:             "result",
+				Model:            firstNonEmpty(resolvedModel, c.ModelName()),
 				Output:           lastAssistantText,
 				Cost:             res.TotalCostUSD,
 				InputTokens:      res.Usage.InputTokens,
