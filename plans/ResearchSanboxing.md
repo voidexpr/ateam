@@ -1075,6 +1075,73 @@ System management: `container system start/stop/status/version/logs/df`
 
 **For ATeam:** Apple Container is the likely successor to Docker Desktop for macOS-based agent sandboxing. The VM-per-container model gives isolation parity with Docker Sandboxes (E.13.6) without the Docker Desktop license. The CLI compatibility means ATeam's container adapter can support it as a drop-in backend. The pre-1.0 status and macOS 26+ requirement mean it's not ready as the primary backend today, but worth tracking for the next macOS cycle.
 
+#### E.13.9 Matchlock
+
+**GitHub:** [jingkaihe/matchlock](https://github.com/jingkaihe/matchlock)
+**Language:** Go
+**Platform:** Linux (Firecracker) and macOS (Apple Virtualization.framework). Same CLI on both.
+**License:** Open source. 565⭐, created Feb 2026, actively pushed.
+
+A microVM sandbox for AI agents that fills two gaps in the existing macOS-native VM tools (Apple Container, VibeBox): **default-deny network with explicit allowlist**, and **in-flight secret injection** so real credentials never enter the VM. Cross-platform with identical UX — same CLI on a Linux server and on a MacBook.
+
+**How it works:**
+
+- Each `matchlock run` boots a fresh Firecracker (Linux) or Virtualization.framework (macOS) VM with its own kernel.
+- Project directory mounted as an isolated overlay — writes are snapshotted and discarded when the VM exits unless promoted.
+- Network is sealed by default. `--allow-host api.example.com` opens specific egress; everything else is dropped.
+- **Secret injection at the network boundary:** declare `--secret OPENAI_API_KEY` and matchlock substitutes a placeholder inside the VM. When the agent makes an HTTPS call to an allowed host, the host-side proxy rewrites the placeholder with the real value before the request leaves the machine. The sandbox never sees the real key. Even if the agent is compromised, exfiltration paths are closed.
+
+**Comparison with existing entries:**
+
+- vs **VibeBox** (E.13.7): VibeBox has stronger session ergonomics (warm re-entry, multi-terminal attach) but no network filtering. Matchlock has weaker session reuse but adds network allowlist + secret injection. Complementary rather than competing.
+- vs **Apple Container** (E.13.8): Apple Container is a Docker-CLI-compatible runtime; Matchlock is a purpose-built agent sandbox with network and secret semantics built in. Apple Container needs an external proxy to do what Matchlock does natively.
+- vs **Anthropic SRT** (E.2): SRT is process-level (Seatbelt + bubblewrap) on the host; Matchlock is VM-level. Stronger isolation, higher overhead.
+- vs **Docker Desktop Sandboxes** (E.13.6): both offer credential injection. Docker Sandboxes need Docker Desktop and have richer DinD support; Matchlock has no Docker dependency and works on Linux servers without Docker Desktop licensing.
+
+**Assessment for ATeam:**
+
+| Dimension | Rating | Notes |
+|---|---|---|
+| Filesystem isolation | Excellent | VM boundary + overlay mounts (changes vanish unless promoted). |
+| Network control | Excellent | Default-deny with explicit `--allow-host`. |
+| Secret safety | Excellent | In-flight injection — real keys never reach the VM. |
+| Tool compatibility | Excellent | Full Linux environment inside the VM. |
+| Cross-platform | Excellent | Same CLI on Linux and macOS. Best in this section for portability. |
+| Overhead | Medium | VM boot per run; offset by overlay reuse. |
+| Maturity | Early | Created Feb 2026; pre-1.0. |
+
+**Best fit:** Cross-platform agent runs where the same sandbox config must work on a developer's MacBook *and* a Linux CI host, and where credential leakage is a real concern (e.g., agents handling production API keys). The secret injection model is worth borrowing even if Matchlock itself isn't adopted — ATeam could implement an equivalent proxy layer for its container adapter.
+
+#### E.13.10 Vibe (lynaghk/vibe)
+
+**GitHub:** [lynaghk/vibe](https://github.com/lynaghk/vibe)
+**Language:** Rust
+**Platform:** macOS (Apple Silicon, Ventura+) only — Apple Virtualization.framework
+**License:** Open source. 889⭐, created Jan 2026.
+
+Distinct from VibeBox (E.13.7) despite the similar name. Vibe is the simplest possible "type a command, end up in a Linux VM in ~10s" workflow for sandboxing LLM agents. No project model, no `.toml` config, no session reuse — just a fresh Debian VM per invocation. Targets users who want zero ceremony.
+
+**How it works:**
+
+- `vibe` from any directory drops you into a Debian VM with the cwd mounted.
+- ~10s cold start; VM is destroyed when you exit.
+- No persistent project state, no explicit mount syntax — current dir is the only sharing surface.
+- Pre-installed: standard build tools, git, common LLM agent CLIs.
+
+**Comparison with VibeBox:**
+
+| Dimension | Vibe | VibeBox |
+|---|---|---|
+| Session model | Ephemeral, one-shot | Persistent per-project, warm re-entry |
+| Configuration | None | `vibebox.toml` with mount allowlists |
+| Mount control | Cwd only | Explicit allowlist + `.git` masking |
+| Multi-terminal | No | Yes |
+| Best for | Throwaway exploration | Daily-driver project workflow |
+
+Both use Apple Virtualization.framework, both are Apple Silicon only, both lack network filtering.
+
+**Assessment for ATeam:** Marginal. Vibe is too unstructured for the ATeam use case (no project awareness, no mount control, no network policy). It's listed here for completeness — if a user wants the absolute lowest-friction macOS VM sandbox to play with, Vibe is the answer; for production agent workflows, VibeBox or Matchlock are better fits.
+
 ### E.14 Network Companion Tools
 
 **OpenSnitch** (Linux) and **Little Snitch** (macOS) provide per-app/domain outbound firewalling as a standalone layer. They don't provide filesystem sandboxing but can be paired with any of the above tools:
@@ -1095,3 +1162,24 @@ The March 2026 landscape adds Greywall, Fence, and clampdown as meaningful optio
 - **Reference Docker setup:** Anthropic's devcontainer is a good starting point for iptables-based container isolation without Docker Desktop. IP-based firewall is less flexible than proxy-based domain filtering but simpler to audit.
 - **Maximum Linux hardening:** clampdown when the agent needs zero access to host services or private networks.
 - **Network-only companion:** Pair Linux hosts with OpenSnitch, macOS with Little Snitch, for domain-level outbound filtering alongside any filesystem sandbox.
+- **Cross-platform agent VM with network allowlist + secret injection:** Matchlock (E.13.9) — same CLI on Linux and macOS, default-deny egress, real credentials never enter the sandbox. Worth tracking as it matures.
+
+### E.16 External Tracking: awesome-agent-sandboxes
+
+**Source:** [dloss/awesome-agent-sandboxes](https://github.com/dloss/awesome-agent-sandboxes) — a curated list of sandboxing solutions for AI agents, taxonomised by isolation level (microVM, container, process, filesystem, WASM, embedded interpreter).
+
+**Why we track it:** the sandbox space is moving fast and new tools land monthly. This list is the most comprehensive index seen so far. **Check periodically** (quarterly is probably enough) for entries that have crossed the threshold of being worth a full E-section evaluation. Triage filter for ATeam relevance:
+
+1. **macOS-native, no Docker required** (matches user constraint for local agent runs).
+2. **Default-deny network with allowlist** OR **secret injection at the boundary** (gaps in most current entries).
+3. **Agent-agnostic** (not Claude-specific).
+4. **>500⭐ or >3 months of weekly commits** (momentum filter — too many one-off experiments otherwise).
+
+Categories from the list as of May 2026 already covered above: Anthropic Sandbox Runtime (E.2), several Docker-based wrappers (E.8/E.13.6), Apple Container (E.13.8), VibeBox (E.13.7), Matchlock (E.13.9), Vibe (E.13.10).
+
+Categories worth periodic re-check:
+
+- **MicroVMs (cloud):** E2B, Sprites, Vercel Sandbox, Modal, Daytona, Runloop, exe.dev — all cloud, not a local-first fit for ATeam, but watch for self-hosted modes.
+- **Local microVMs (non-macOS):** ERA (krunvm), Gondolin (QEMU), Arrakis, Netclode (Kata) — Linux-side equivalents to Apple Container; relevant if ATeam ever runs on Linux laptops.
+- **Process / filesystem / WASM:** AgentFS (CoW filesystem isolation), Leash (Cedar policy enforcement), Wassette / Capsule / Eryx (WASM sandboxes) — orthogonal isolation models. Likely not primary backends but interesting building blocks.
+- **Container wrappers with worktree support:** packnplay — closest to ATeam's worktree model, worth a look if/when ATeam revisits the worktree story.
