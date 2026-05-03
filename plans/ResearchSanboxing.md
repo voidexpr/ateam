@@ -193,6 +193,50 @@ Given unattended background agents with budget controls and audit needs, the mos
 
 The **hooks system** is worth layering on top for project-specific blocking rules that you want committed to the repo itself. `claude-code-tools` is a good reference point for what a reusable hook pack can look like in practice.
 
+### D.10 Policy / Approval Layer Tools
+
+A new category that emerged in 2026: tools that sit *between* the agent and the OS, classifying or gating each action against a policy before it reaches a sandbox. They complement (not replace) sandboxes — the sandbox is the wall, the policy layer is the bouncer at the door.
+
+#### D.10.1 Cupcake (eqtylab/cupcake)
+
+**GitHub:** [eqtylab/cupcake](https://github.com/eqtylab/cupcake) — 258⭐, Rust, created July 2025.
+
+OPA/Rego policy enforcement compiled to WebAssembly for fast evaluation. Native integrations for Claude Code, Cursor, Factory AI, OpenCode. The flow:
+
+1. Agent prepares an action (tool call: `git push`, `fs_write`, etc.).
+2. Cupcake gathers real-time environmental "Signals" (cwd, branch, recent commits, etc.).
+3. Action + signals evaluated against compiled Wasm policies.
+4. Decision: **Allow / Modify / Block / Warn / Require Review**.
+
+Key property: policy logic lives outside the agent's context window — it doesn't consume tokens and the agent can't talk it out of a block. Useful for: locking down `git push --force`, `rm -rf /`, network egress to non-allowlisted hosts, and other categorical "never do this" rules.
+
+#### D.10.2 nah (manuelschipper/nah)
+
+**GitHub:** [manuelschipper/nah](https://github.com/manuelschipper/nah) — 417⭐, Python, created March 2026, pushed today.
+
+Context-aware safety guard with deterministic structural classification. Distinguishes commands that look similar but mean different things:
+
+- `rm -rf __pycache__` → **allowed** (cleanup of a build artifact).
+- `rm ~/.bashrc` → **paused** (shell startup file, asks for confirmation).
+- `base64 -d payload | bash` → **blocked** (hidden code execution pattern).
+- `git status` vs `git push --force` → treated differently despite being "the same Git command."
+
+Zero-config out of the box. Customisable via `~/.config/nah/config.yaml` (global) or `.nah.yaml` (per-project). Optional LLM layer can review ambiguous cases, but deterministic blocks cannot be relaxed by LLM. Integrates as a Claude Code hook or as a Claude Code plugin; guards Bash, file, search, notebook, and MCP tool calls.
+
+#### D.10.3 Other entries (tracked, not yet evaluated)
+
+From wincent's gist (E.18): predicate-secure (authz + post-run verification), claude-rule-enforcer (behavior rules), shannot (human-in-the-loop approvals), punkgo-jack (Merkle-logged audit receipts), deepclause-sdk (DML-style runtime authz). All worth a closer look if ATeam needs a richer policy story than hooks alone.
+
+#### D.10.4 Where this layer fits in ATeam
+
+ATeam already has a permission story (D.5, D.7) based on Claude Code hooks. The policy-layer tools above are a more structured upgrade path:
+
+- **Cupcake** if the policy rules are complex enough to warrant a real policy language (Rego). Best when many rules need to compose, or when audit/compliance needs the policy to be a versioned, reviewable artifact.
+- **nah** as a drop-in upgrade over hand-rolled hooks. Its deterministic command classifier is the kind of thing every project ends up writing badly; using a maintained library is a better default. Likely worth adopting as ATeam's recommended hook implementation.
+- **Custom hooks** remain the right answer for project-specific ad-hoc rules ("don't touch `infra/prod/*`") that don't justify a policy engine.
+
+The Cupcake/nah layer sits **above** the sandbox layer (E.2–E.13). The sandbox stops the agent from doing damage if a policy fails open; the policy layer stops most actions from ever reaching the sandbox boundary in the first place. They're complementary.
+
 ---
 
 ## E. Agent Sandboxing
@@ -1142,6 +1186,43 @@ Both use Apple Virtualization.framework, both are Apple Silicon only, both lack 
 
 **Assessment for ATeam:** Marginal. Vibe is too unstructured for the ATeam use case (no project awareness, no mount control, no network policy). It's listed here for completeness — if a user wants the absolute lowest-friction macOS VM sandbox to play with, Vibe is the answer; for production agent workflows, VibeBox or Matchlock are better fits.
 
+#### E.13.11 Agent Safehouse
+
+**GitHub:** [eugene1g/agent-safehouse](https://github.com/eugene1g/agent-safehouse)
+**Language:** Shell
+**Platform:** macOS (Seatbelt / `sandbox-exec`)
+**License:** Open source. 1.7K⭐, created Feb 2026, actively maintained.
+
+The current best-in-class macOS-Seatbelt-only wrapper. Pure `sandbox-exec`, no Docker, no user account tricks, no VM. Deny-first composable profiles, agent-agnostic (Claude, Codex, Amp, etc.), Homebrew-installable.
+
+**How it works:**
+
+- Built-in profiles for each major coding agent CLI plus app-hosted workflows.
+- Deny-first by default: HOME directory is metadata-only; the agent only sees what you explicitly allow.
+- Composable via flags: `--add-dirs-ro <path>` (read-only allowlist), `--add-dirs <path>` (read-write allowlist), `--append-profile <file>` (drop in machine-specific or per-project rules).
+- Per-project config layered on top of machine defaults via wrapper functions.
+
+**Comparison with existing Seatbelt entries:**
+
+- vs **Anthropic SRT** (E.2): SRT is Anthropic-official, agent-aware, JSON-configured. Safehouse is community, simpler, profile-file-configured, with Homebrew install and built-in per-agent profiles. Functionally similar; Safehouse leans more toward "ergonomic out-of-the-box" while SRT leans toward "programmable infrastructure."
+- vs **neko-kai/claude-code-sandbox** (E.3): neko-kai is a single profile for one agent. Safehouse ships profiles for multiple agents and exposes a flag-driven composition layer.
+- vs **kohkimakimoto/claude-sandbox** (E.4): kohkimakimoto is Go + TOML + Claude-only. Safehouse is shell + profile files + agent-agnostic.
+- vs **scode** (E.7): both are deny-first wrappers; Safehouse has substantially higher momentum (1.7K vs 17 stars) and richer profile composition.
+
+**Assessment for ATeam:**
+
+| Dimension | Rating | Notes |
+|---|---|---|
+| Filesystem isolation | Excellent | Deny-first; HOME metadata-only by default. |
+| Network control | Limited | Documentation focuses on filesystem; no built-in domain-level filtering. Pair with Little Snitch for network. |
+| Tool compatibility | Excellent | Same process model as the host — everything works including playwright-cli, dev Chrome, localhost Postgres. |
+| Agent-agnostic | Yes | Profiles for Claude, Codex, Amp, etc. |
+| Ease of use | Excellent | `brew install`, ready-made profiles, simple flag composition. |
+| Per-project config | Yes | Wrapper functions + appended profiles. |
+| Momentum | High | 1.7K⭐ in ~3 months, actively pushed. |
+
+**Best fit:** macOS users who want pure Seatbelt sandboxing, no Docker, no VM, and don't want to hand-roll a `.sb` profile. The deny-first composable model is the closest match to the user's stated requirements (macOS Seatbelt + no Docker + ease of use + flexible config + momentum) of anything seen in this research. Likely the recommended starting point for any new ATeam-adjacent macOS sandbox work.
+
 ### E.14 Network Companion Tools
 
 **OpenSnitch** (Linux) and **Little Snitch** (macOS) provide per-app/domain outbound firewalling as a standalone layer. They don't provide filesystem sandboxing but can be paired with any of the above tools:
@@ -1163,6 +1244,9 @@ The March 2026 landscape adds Greywall, Fence, and clampdown as meaningful optio
 - **Maximum Linux hardening:** clampdown when the agent needs zero access to host services or private networks.
 - **Network-only companion:** Pair Linux hosts with OpenSnitch, macOS with Little Snitch, for domain-level outbound filtering alongside any filesystem sandbox.
 - **Cross-platform agent VM with network allowlist + secret injection:** Matchlock (E.13.9) — same CLI on Linux and macOS, default-deny egress, real credentials never enter the sandbox. Worth tracking as it matures.
+- **macOS Seatbelt with no Docker, no VM, no user-account tricks:** Agent Safehouse (E.13.11) — deny-first, agent-agnostic profiles, Homebrew install. Highest-momentum option in this exact slot (1.7K⭐).
+- **Layer policy on top of sandbox:** prefer nah (D.10.2) over hand-rolled hooks for command classification; reach for Cupcake (D.10.1) when rules grow complex enough to need Rego.
+- **Don't double-sandbox:** when running Codex CLI, lean on its built-in modes (E.17); for Claude Code, use SRT (E.2 / E.17) rather than wrapping Claude Code in yet another Seatbelt layer.
 
 ### E.16 External Tracking: awesome-agent-sandboxes
 
@@ -1183,3 +1267,46 @@ Categories worth periodic re-check:
 - **Local microVMs (non-macOS):** ERA (krunvm), Gondolin (QEMU), Arrakis, Netclode (Kata) — Linux-side equivalents to Apple Container; relevant if ATeam ever runs on Linux laptops.
 - **Process / filesystem / WASM:** AgentFS (CoW filesystem isolation), Leash (Cedar policy enforcement), Wassette / Capsule / Eryx (WASM sandboxes) — orthogonal isolation models. Likely not primary backends but interesting building blocks.
 - **Container wrappers with worktree support:** packnplay — closest to ATeam's worktree model, worth a look if/when ATeam revisits the worktree story.
+
+### E.17 Built-In Agent CLI Sandboxes
+
+A dimension that's easy to overlook: **the agent CLIs themselves now ship sandboxing**. When picking an external sandbox layer for ATeam, it matters what the agent already provides — sometimes the right answer is "just turn on the built-in" rather than wrapping the agent in a third-party tool. Snapshot as of May 2026:
+
+| Agent CLI | Built-in mechanism | Default state | macOS | Linux | Windows |
+|---|---|---|---|---|---|
+| **OpenAI Codex CLI** | Seatbelt + Landlock + seccomp + restricted-token | **On by default**; tiered modes: `read-only`, `workspace-write`, `danger-full-access` | Seatbelt | Landlock + seccomp | Restricted tokens |
+| **Anthropic Claude Code** | `@anthropic-ai/sandbox-runtime` (E.2) — Seatbelt or bubblewrap, plus a network proxy | Off by default in CLI; cloud sessions run in full microVMs | Seatbelt | bubblewrap | n/a |
+| **Google Gemini CLI** | Seatbelt profile *or* Docker/Podman container per `.gemini/sandbox.Dockerfile` | Opt-in | Seatbelt | Docker/Podman | Docker/Podman |
+| **GitHub Copilot Coding Agent** | Ephemeral cloud sandbox VM, per-task | On (cloud-only) | n/a | n/a | n/a |
+| **Cursor / Devin / Cognition** | Hosted sandbox or dedicated cloud VM | On (cloud) | n/a | n/a | n/a |
+| **Replit Agent** | Replit VM/container | On (cloud) | n/a | n/a | n/a |
+
+**Implications for ATeam:**
+
+- **Codex CLI is the only major agent that ships sandboxing on by default**, with a published mode hierarchy. If ATeam supports Codex as an alternate runtime, the host-side sandbox layer can be relaxed — Codex already does most of the work.
+- **Claude Code's built-in sandbox is the same SRT covered in E.2**, just bundled. Running `srt` externally vs letting Claude Code invoke it internally is largely a packaging choice. The external invocation is more flexible (works for non-Claude commands inside the same session) but the internal one is one less moving part.
+- **Gemini CLI's `.gemini/sandbox.Dockerfile`** is interesting: a checked-in, project-specific sandbox image contract. This is a pattern ATeam could borrow for the Docker container adapter — let projects ship a `.ateam/sandbox.Dockerfile` that overrides the default.
+- **Cloud agents (Copilot, Devin, Cursor agent mode, Replit)** have sandboxing baked in but at a coarse grain — the whole agent run is in a VM. For ATeam's local-first model these are not direct competitors but they set a baseline expectation that "agents come pre-sandboxed."
+
+**Recommendation:** ATeam's sandbox strategy should layer with, not replace, what the agent already does. For Claude Code: rely on SRT (turn on the built-in or invoke it externally). For Codex: trust the built-in modes and add ATeam-level controls (network policy, secret injection) on top. For Gemini: let projects ship their own `sandbox.Dockerfile` per the upstream convention.
+
+### E.18 External Tracking: wincent's coding agent sandboxes guide
+
+**Source:** [gist.github.com/wincent/2752d8d97727577050c043e4ff9e386e](https://gist.github.com/wincent/2752d8d97727577050c043e4ff9e386e) — Greg Hurrell's curated landscape of sandbox technologies for AI coding agents, organised by isolation method (OS primitives → application kernels → microVMs → containers → WASM → SaaS → self-hosted SDKs → CLI sandboxes → built-in agent sandboxes → policy/audit). Created May 3, 2026; treat as a point-in-time snapshot.
+
+**Why we track it:** broader and better-categorised than the awesome-agent-sandboxes list (E.16). Particularly valuable for two dimensions our doc historically under-covered: **what the agents ship natively** (now folded into E.17 above) and **the policy/approval/audit layer** (now covered in D.10). Re-check on the same quarterly cadence as E.16, applying the same triage filter.
+
+Entries from this gist already absorbed into our doc:
+
+- **Section 1 (OS primitives):** Seatbelt and bubblewrap — covered via E.2/E.3/E.4/E.13.11.
+- **Section 7 (self-hosted):** AIO Sandbox/agent-infra was previously sketched; microsandbox and Cleanroom are new — see "worth a deep dive" below.
+- **Section 8a/b (CLI sandboxes):** Anthropic SRT (E.2), neko-kai (E.3), kohkimakimoto (E.4), cco (E.5), VibeBox (E.13.7), Matchlock (E.13.9), Vibe (E.13.10), Agent Safehouse (E.13.11). Conductor and Sculptor are commercial/UI-shaped and out of scope for this research.
+- **Section 9 (built-in):** captured in E.17.
+- **Section 10 (policy/audit):** captured in D.10.
+
+Worth a deep dive on the next refresh:
+
+- **microsandbox** (libkrun microVMs, sub-200 ms boot, MCP server) — closest competitor to Matchlock for local microVMs with agent-shaped UX.
+- **Cleanroom** (Buildkite) — microVM with deny-by-default egress; the network model is the relevant comparable to Matchlock's.
+- **container-use** (Dagger) — already noted briefly in E.8; if Dagger continues investing it may become the standard "branch + container per agent" reference and warrant a full entry.
+- **shai** (colony-2/shai) and **treebeard** (divmain/treebeard) — Linux-side ergonomic sandboxes worth checking if ATeam ever ships on Linux laptops.
