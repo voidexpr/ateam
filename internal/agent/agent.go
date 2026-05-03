@@ -44,6 +44,13 @@ type ModelProvider interface {
 	ModelName() string
 }
 
+// EnvProvider is optionally implemented by agents that expose the env they
+// will set on the spawned process (separate from the per-Request overrides).
+// Used by the runner to record the full effective env in _exec.md.
+type EnvProvider interface {
+	AgentEnv() map[string]string
+}
+
 // Error source values for StreamEvent.ErrorSource / RunSummary.ErrorSource.
 // Kept as exported constants so callers don't duplicate string literals.
 const (

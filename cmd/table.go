@@ -749,6 +749,11 @@ func addCheaperModelFlag(cmd *cobra.Command, dst *bool) {
 func applyCheaperModel(r *runner.Runner, cheaper bool) {
 	if cheaper {
 		r.ExtraArgs = append(r.ExtraArgs, "--model", cheaperModelName)
+		// Also tell the agent itself so resolveExecModel's configured-model
+		// fallback returns the cheaper name when a run crashes before the
+		// stream emits a result event. cmd/run.go does the same when --model
+		// is passed explicitly.
+		r.Agent.SetModel(cheaperModelName)
 	}
 }
 

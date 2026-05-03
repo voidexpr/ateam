@@ -37,6 +37,8 @@ func (c *CodexAgent) ModelName() string {
 
 func (c *CodexAgent) SetModel(model string) { c.Model = model }
 
+func (c *CodexAgent) AgentEnv() map[string]string { return c.Env }
+
 func (c *CodexAgent) CloneWithResolvedTemplates(replacer *strings.Replacer) Agent {
 	clone := *c
 	clone.Args = resolveSlice(c.Args, replacer)

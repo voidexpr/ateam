@@ -119,8 +119,12 @@ func runResume(cmd *cobra.Command, args []string) error {
 		if target == "" {
 			target = "<container-name>"
 		}
+		envFlag := ""
+		if configDir != "" {
+			envFlag = fmt.Sprintf(" -e CLAUDE_CONFIG_DIR=%s", configDir)
+		}
 		fmt.Println("Caveat: session lives inside the long-lived container; resuming on the host won't find it.")
-		fmt.Printf("To try inside the container:\n  docker exec -it %s claude --resume %s\n", target, sessionID)
+		fmt.Printf("To try inside the container:\n  docker exec -it%s %s claude --resume %s\n", envFlag, target, sessionID)
 		if resumeLaunch {
 			return fmt.Errorf("--launch is not supported for docker-exec runs")
 		}
@@ -249,7 +253,13 @@ func configDirFromRuntime(env *root.ResolvedEnv, row *calldb.RecentRow) string {
 		return ""
 	}
 	agentName := row.Agent
-	if row.Profile != "" {
+	switch {
+	case strings.HasPrefix(row.Profile, "a:"):
+		// Synthetic profile created by --agent runs (cmd/table.go), where
+		// the suffix names the actual agent definition (claude-isolated,
+		// claude-sonnet, …). row.Agent only stores the kind ("claude").
+		agentName = strings.TrimPrefix(row.Profile, "a:")
+	case row.Profile != "":
 		if prof, ok := cfg.Profiles[row.Profile]; ok && prof.Agent != "" {
 			agentName = prof.Agent
 		}

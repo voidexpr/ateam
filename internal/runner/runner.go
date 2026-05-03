@@ -365,7 +365,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		Model:         model,
 		Cwd:           cwd,
 		CLI:           cliStr,
-		SpecifiedEnv:  req.Env,
+		SpecifiedEnv:  mergedAgentEnv(runAgent, req.Env),
 		SettingsJSON:  settingsJSON,
 		Prompt:        prompt,
 	})
@@ -1084,7 +1084,6 @@ func writeExecFile(path string, info execFileInfo) {
 		}
 	}
 	fmt.Fprintf(&b, "\n## Specified\n")
-	fmt.Fprintf(&b, "unsets CLAUDECODE\n")
 	keys := make([]string, 0, len(info.SpecifiedEnv))
 	for k := range info.SpecifiedEnv {
 		keys = append(keys, k)
@@ -1092,9 +1091,14 @@ func writeExecFile(path string, info execFileInfo) {
 	sort.Strings(keys)
 	for _, k := range keys {
 		v := info.SpecifiedEnv[k]
-		if looksLikeSecret(k) {
+		switch {
+		case v == "":
+			// agent.Env / reqEnv entries with empty values mean "unset from
+			// the parent process env" (see buildProcessEnv).
+			fmt.Fprintf(&b, "unsets %s\n", k)
+		case looksLikeSecret(k):
 			fmt.Fprintf(&b, "%s=<redacted:%d>\n", k, len(v))
-		} else {
+		default:
 			fmt.Fprintf(&b, "%s=%s\n", k, v)
 		}
 	}
@@ -1115,6 +1119,28 @@ func extractModel(a agent.Agent) string {
 		return mp.ModelName()
 	}
 	return ""
+}
+
+// mergedAgentEnv returns the union of the agent's configured env and the
+// per-request env. reqEnv wins on conflicts, mirroring buildProcessEnv.
+// Returns nil when both inputs are empty so writeExecFile can skip the
+// section entirely.
+func mergedAgentEnv(a agent.Agent, reqEnv map[string]string) map[string]string {
+	var agentEnv map[string]string
+	if ep, ok := a.(agent.EnvProvider); ok {
+		agentEnv = ep.AgentEnv()
+	}
+	if len(agentEnv) == 0 && len(reqEnv) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(agentEnv)+len(reqEnv))
+	for k, v := range agentEnv {
+		out[k] = v
+	}
+	for k, v := range reqEnv {
+		out[k] = v
+	}
+	return out
 }
 
 // resolveExecModel returns the canonical model name to write into the

@@ -616,7 +616,7 @@ func TestWriteExecFileIncludesAllMetadata(t *testing.T) {
 		Model:         "claude-sonnet-4-6",
 		Cwd:           "/work",
 		CLI:           "claude -p --verbose",
-		SpecifiedEnv:  map[string]string{"CLAUDE_CONFIG_DIR": "/custom/cfg", "FOO": "bar"},
+		SpecifiedEnv:  map[string]string{"CLAUDE_CONFIG_DIR": "/custom/cfg", "FOO": "bar", "CLAUDECODE": ""},
 		SettingsJSON:  []byte(`{"x":1}`),
 		Prompt:        "do the thing",
 	})
