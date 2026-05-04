@@ -83,8 +83,9 @@ func TestNewPoolRendererMpb(t *testing.T) {
 
 // TestMpbPoolRendererSmoke exercises the mpb renderer's lifecycle via a
 // bytes.Buffer. mpb auto-disables ANSI rendering on non-TTY writers, so
-// the output check is loose — we just verify the API contract holds and
-// Close completes without deadlocking.
+// the bar output check is loose — we just verify the API contract
+// holds, the column header is printed, and Close completes without
+// deadlocking.
 func TestMpbPoolRendererSmoke(t *testing.T) {
 	var buf bytes.Buffer
 	r := newMpbPoolRenderer(&buf)
@@ -111,6 +112,9 @@ func TestMpbPoolRendererSmoke(t *testing.T) {
 
 	if r.Trimmed() {
 		t.Errorf("mpb renderer should report Trimmed=false")
+	}
+	if !strings.Contains(buf.String(), "LABEL") || !strings.Contains(buf.String(), "STATUS") {
+		t.Errorf("mpb renderer must print the column header above the live region:\n%s", buf.String())
 	}
 }
 

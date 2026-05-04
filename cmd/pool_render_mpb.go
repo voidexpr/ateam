@@ -39,6 +39,12 @@ type mpbPoolRenderer struct {
 }
 
 func newMpbPoolRenderer(w io.Writer) *mpbPoolRenderer {
+	// Print the column header once, above the live region. mpb's render
+	// loop only walks the cursor up over the bars it owns, so anything
+	// written before progress.New starts stays pinned in scrollback
+	// above the table — the same place the legacy renderer puts it on
+	// the first draw.
+	fmt.Fprintln(w, poolStatusHeader)
 	return &mpbPoolRenderer{
 		w:        w,
 		progress: mpb.New(mpb.WithOutput(w)),
