@@ -36,66 +36,35 @@ type mpbPoolRenderer struct {
 	bars     []*mpb.Bar // by row index; nil until first Render
 	complete []bool     // by row index; true once SetTotal-true has been issued
 	closed   bool
-
-	resizeStop func()
-	resizeDone sync.WaitGroup
 }
 
+// newMpbPoolRenderer constructs the renderer.
+//
+// Resize handling: deliberately none. mpb requeries terminal size on
+// every refresh tick (cwriter handles it), so the live viewport
+// self-corrects after a SIGWINCH without any extra work from us. A
+// previous version emitted \x1b[3J (erase-scrollback) on SIGWINCH to
+// also wipe stale rows pushed into scrollback by a viewport shrink —
+// that fixed the cosmetic "stale rows above the viewport" issue but
+// destroyed the operator's pre-run scrollback, which is far more
+// valuable. We accept that scrollback may contain stale frame rows
+// from before a resize-shrink; this is expected for cursor-arithmetic
+// rendering and the operator only sees them if they scroll up. If
+// scrollback hygiene becomes important, switch to alt-screen mode
+// (\x1b[?1049h / \x1b[?1049l) — that's a larger change because the
+// post-run summary in runPool would have to move out of the
+// alt-screen region.
 func newMpbPoolRenderer(w io.Writer) *mpbPoolRenderer {
 	// Print the column header once, above the live region. Pass the
 	// underlying writer to mpb directly (no wrapping): mpb's terminal
 	// detection is a type assertion to *os.File — wrapping os.Stdout
-	// hides it, mpb then thinks output isn't a TTY and disables auto
-	// refresh, which means no bars ever render. Resize is handled via
-	// the Progress.Write interleave path in onResize below instead of
-	// by intercepting the output.
+	// hides it and mpb disables auto refresh, which means no bars
+	// ever render.
 	fmt.Fprintln(w, poolStatusHeader)
-	r := &mpbPoolRenderer{
+	return &mpbPoolRenderer{
 		w:        w,
 		progress: mpb.New(mpb.WithOutput(w)),
 	}
-	r.subscribeResize()
-	return r
-}
-
-func (r *mpbPoolRenderer) subscribeResize() {
-	ch, stop := subscribeWindowResize()
-	if ch == nil {
-		return
-	}
-	r.resizeStop = stop
-	r.resizeDone.Add(1)
-	go func() {
-		defer r.resizeDone.Done()
-		for range ch {
-			r.onResize()
-		}
-	}()
-}
-
-// onResize injects a clear-screen + clear-scrollback + re-emitted
-// header through mpb's interleave channel. mpb queues the bytes and
-// emits them at the start of the next refresh tick, ahead of the bar
-// frame, so the next frame lands in a fresh viewport with the header
-// pinned at row 1.
-//
-//	\x1b[H  – cursor home
-//	\x1b[2J – erase viewport
-//	\x1b[3J – erase scrollback (xterm extension; supported by Apple
-//	          Terminal, iTerm2, modern xterm, alacritty, kitty, …)
-//
-// Tradeoff: any interleaved log lines that were queued ahead of this
-// resize escape get clobbered by the clear. They remain available in
-// stderr capture files, so this is acceptable for the "stop the
-// corruption" goal.
-func (r *mpbPoolRenderer) onResize() {
-	r.mu.Lock()
-	closed := r.closed
-	r.mu.Unlock()
-	if closed {
-		return
-	}
-	_, _ = r.progress.Write([]byte("\x1b[H\x1b[2J\x1b[3J" + poolStatusHeader + "\n"))
 }
 
 func (r *mpbPoolRenderer) Render(rows []poolStatusRow) {
@@ -143,13 +112,7 @@ func (r *mpbPoolRenderer) Close() {
 			r.complete[i] = true
 		}
 	}
-	stop := r.resizeStop
-	r.resizeStop = nil
 	r.mu.Unlock()
-	if stop != nil {
-		stop()
-	}
-	r.resizeDone.Wait()
 	r.progress.Wait()
 }
 

@@ -158,11 +158,11 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 		if parseErr != nil {
 			// parseClaudeLine recovers panics from encoding/json and
 			// surfaces them as errors — never silently swallow them so
-			// an operator can tell a run produced garbage lines. Routed
-			// through Warnf so the live renderer can interleave it
-			// above the status table instead of having it punch through
-			// the cursor accounting.
-			Warnf("Warning: skipping malformed claude JSONL line: %v\n", parseErr)
+			// an operator can tell a run produced garbage lines. The
+			// live renderer's std-stream redirect (cmd/std_redirect.go)
+			// captures stderr and interleaves it above the bars during
+			// pool runs, so this write is safe even mid-frame.
+			fmt.Fprintf(os.Stderr, "Warning: skipping malformed claude JSONL line: %v\n", parseErr)
 			continue
 		}
 		if ev == nil {

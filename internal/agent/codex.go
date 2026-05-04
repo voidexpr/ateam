@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -123,7 +124,7 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 
 		typ, ev, parseErr := ParseCodexLine(line)
 		if parseErr != nil {
-			Warnf("Warning: skipping malformed codex JSONL line: %v\n", parseErr)
+			fmt.Fprintf(os.Stderr, "Warning: skipping malformed codex JSONL line: %v\n", parseErr)
 			continue
 		}
 		if ev == nil {

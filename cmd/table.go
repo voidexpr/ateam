@@ -1112,11 +1112,11 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 		// When the renderer interleaves its writer (mpb), redirect
 		// process-wide os.Stdout / os.Stderr through it for the
 		// duration of the run. This catches every Go-side stray write
-		// — fmt.Fprintf, log.Printf, panic output, agent.Warnf, future
-		// call sites we haven't audited — and routes them above the
-		// live region instead of letting them corrupt the cursor
-		// accounting. Subprocess output is captured separately by the
-		// agent and not affected.
+		// — fmt.Fprintf, log.Printf, panic output, future call sites
+		// we haven't audited — and routes them above the live region
+		// instead of letting them corrupt the cursor accounting.
+		// Subprocess output is captured separately by the agent and
+		// not affected.
 		var restoreStd func()
 		if renderer.Interleaves() {
 			restoreStd = redirectStdStreams(renderer.Writer())

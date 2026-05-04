@@ -15,11 +15,11 @@ import (
 // call sites is whack-a-mole — every new contributor (or library)
 // reintroduces the bug. Redirecting the os.Stdout / os.Stderr variables
 // catches every write that goes through Go's standard library
-// (`fmt.Println`, `log.Printf`, `print`, `panic`, agent.Warnf with the
-// default sink, …). Subprocess stdout/stderr is unaffected because
-// agents capture those via cmd.StdoutPipe / setupStreamFiles before
-// they reach the parent's fds. Direct syscall.Write(1, …) would also
-// bypass this, but Go code doesn't normally do that.
+// (`fmt.Println`, `log.Printf`, `print`, `panic`, …). Subprocess
+// stdout/stderr is unaffected because agents capture those via
+// cmd.StdoutPipe / setupStreamFiles before they reach the parent's
+// fds. Direct syscall.Write(1, …) would also bypass this, but Go code
+// doesn't normally do that.
 //
 // Caller is responsible for ensuring the renderer remains alive until
 // Restore returns — drain goroutines write into sink, so closing the
