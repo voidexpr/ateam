@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -107,29 +106,24 @@ func (r *mpbPoolRenderer) Close() {
 	}
 	r.closed = true
 	// Force any still-incomplete bars to terminal so Wait can return.
-	barCount := 0
 	for i, bar := range r.bars {
 		if bar != nil && !r.complete[i] {
 			bar.SetTotal(-1, true)
 			r.complete[i] = true
 		}
-		if bar != nil {
-			barCount++
-		}
 	}
 	r.mu.Unlock()
 	r.progress.Wait()
 
-	// mpb's last frame ends with `cursor-up <barCount>`, so the cursor
-	// is sitting at the top of the bar region when Wait returns. Any
-	// subsequent write to the underlying file would overwrite the top
-	// bar. Push the cursor past the bars so the caller's post-run
-	// summary lands on a fresh line below the persisted live region.
-	if barCount > 0 {
-		if f, ok := r.w.(*os.File); ok {
-			f.WriteString(strings.Repeat("\n", barCount))
-		}
-	}
+	// Note on cursor position after Wait: mpb's cwriter buffers a
+	// `cursor-up <barCount>` escape at the END of each Flush — but it
+	// only sends that escape at the START of the *next* Flush. On
+	// shutdown there is no next Flush, so the buffered cursor-up is
+	// never emitted. The cursor is therefore left at the end of the
+	// last bar frame (one line below the last bar), which is exactly
+	// where we want it: subsequent writes by runPool — the post-run
+	// summary, failure tails — land cleanly below the persisted bars
+	// without us needing to position the cursor explicitly.
 }
 
 // makeBar constructs the bar for row i. The decorator closes over r
