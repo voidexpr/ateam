@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -106,14 +107,29 @@ func (r *mpbPoolRenderer) Close() {
 	}
 	r.closed = true
 	// Force any still-incomplete bars to terminal so Wait can return.
+	barCount := 0
 	for i, bar := range r.bars {
 		if bar != nil && !r.complete[i] {
 			bar.SetTotal(-1, true)
 			r.complete[i] = true
 		}
+		if bar != nil {
+			barCount++
+		}
 	}
 	r.mu.Unlock()
 	r.progress.Wait()
+
+	// mpb's last frame ends with `cursor-up <barCount>`, so the cursor
+	// is sitting at the top of the bar region when Wait returns. Any
+	// subsequent write to the underlying file would overwrite the top
+	// bar. Push the cursor past the bars so the caller's post-run
+	// summary lands on a fresh line below the persisted live region.
+	if barCount > 0 {
+		if f, ok := r.w.(*os.File); ok {
+			f.WriteString(strings.Repeat("\n", barCount))
+		}
+	}
 }
 
 // makeBar constructs the bar for row i. The decorator closes over r

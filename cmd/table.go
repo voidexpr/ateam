@@ -1105,6 +1105,7 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 	var statusRows []poolStatusRow
 	var labelIndex map[string]int
 	var renderer poolRenderer
+	var restoreStd func()
 	if !opts.quiet {
 		statusRows, labelIndex = newPoolStatusRows(labels)
 		renderer = newPoolRenderer(os.Stdout)
@@ -1117,20 +1118,30 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 		// instead of letting them corrupt the cursor accounting.
 		// Subprocess output is captured separately by the agent and
 		// not affected.
-		var restoreStd func()
 		if renderer.Interleaves() {
 			restoreStd = redirectStdStreams(renderer.Writer())
 		}
-		defer func() {
-			// Order matters: restore real stdout/stderr first so any
-			// final bytes drain into the renderer, then close the
-			// renderer to flush its bars.
-			if restoreStd != nil {
-				restoreStd()
-			}
-			renderer.Close()
-		}()
 	}
+	// Defer-only cleanup as a panic safety net. Normal flow tears
+	// down the live region explicitly below so the post-run summary
+	// lands on the real terminal, not interleaved through mpb.
+	liveRegionTornDown := false
+	tearDownLiveRegion := func() {
+		if liveRegionTornDown {
+			return
+		}
+		liveRegionTornDown = true
+		// Order matters: restore real stdout/stderr first so any
+		// final bytes drain into the renderer, then close the
+		// renderer to flush its bars.
+		if restoreStd != nil {
+			restoreStd()
+		}
+		if renderer != nil {
+			renderer.Close()
+		}
+	}
+	defer tearDownLiveRegion()
 
 	completedCh := make(chan runner.RunSummary, len(tasks))
 	progressCh := make(chan runner.RunProgress, 64)
@@ -1198,22 +1209,33 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 	}
 	progressDone.Wait()
 
+	var finalRows []poolStatusRow
 	if !opts.quiet {
 		statusMu.Lock()
-		finalRows := clonePoolStatusRows(statusRows)
+		finalRows = clonePoolStatusRows(statusRows)
 		if ctx.Err() == nil {
 			renderer.Render(finalRows)
 		}
 		statusMu.Unlock()
+	}
 
-		// Trimmed live view → emit a plain dump so the user sees every
-		// row's final state, not just the ones that fit during redraw.
-		// Same applies when we cancelled mid-run: the live state may be
-		// stale and the user wants to see what was queued/done at exit.
-		if ctx.Err() != nil || renderer.Trimmed() {
-			fmt.Println()
-			printPlainPoolStatusesTo(os.Stdout, finalRows)
-		}
+	// Tear down the live region BEFORE printing the summary and any
+	// failure tails. With mpb still active those writes either fight
+	// with the bar redraws (when written via opts.out / fmt.Fprintf
+	// which bypasses the redirect) or get interleaved above the bars
+	// alongside a now-redundant copy of the table — both produce the
+	// "vomit of multiple tables" symptom.
+	tearDownLiveRegion()
+
+	// Plain dump only for renderers whose live region doesn't track
+	// final state itself. mpb (Interleaves=true) already shows the
+	// authoritative state in its bars, which persist on screen after
+	// Close — re-emitting them as plain text would just duplicate.
+	// Legacy may have a partial frame on cancel or have trimmed rows;
+	// the dump fills that gap.
+	if renderer != nil && !renderer.Interleaves() && (ctx.Err() != nil || renderer.Trimmed()) {
+		fmt.Println()
+		printPlainPoolStatusesTo(os.Stdout, finalRows)
 	}
 
 	fmt.Fprintf(out, "\n%d succeeded, %d failed (%s)\n", succeeded, failed, runner.FormatDuration(time.Since(start)))
