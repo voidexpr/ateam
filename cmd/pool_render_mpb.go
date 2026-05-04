@@ -79,6 +79,7 @@ func (r *mpbPoolRenderer) Render(rows []poolStatusRow) {
 }
 
 func (r *mpbPoolRenderer) Writer() io.Writer { return r.progress }
+func (r *mpbPoolRenderer) Interleaves() bool { return true }
 func (r *mpbPoolRenderer) Trimmed() bool     { return false }
 
 func (r *mpbPoolRenderer) Close() {

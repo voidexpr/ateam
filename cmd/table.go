@@ -1109,15 +1109,26 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 		statusRows, labelIndex = newPoolStatusRows(labels)
 		renderer = newPoolRenderer(os.Stdout)
 		renderer.Render(statusRows)
-		// Route agent-emitted warnings (malformed JSONL, file failures, …)
-		// through the renderer's interleaving writer for the duration of
-		// the pool run. Direct os.Stderr writes corrupt the legacy
-		// renderer's cursor accounting and can punch through mpb's live
-		// region between refresh ticks.
-		prevWarn := agent.SetWarnWriter(renderer.Writer())
+		// When the renderer interleaves its writer (mpb), redirect
+		// process-wide os.Stdout / os.Stderr through it for the
+		// duration of the run. This catches every Go-side stray write
+		// — fmt.Fprintf, log.Printf, panic output, agent.Warnf, future
+		// call sites we haven't audited — and routes them above the
+		// live region instead of letting them corrupt the cursor
+		// accounting. Subprocess output is captured separately by the
+		// agent and not affected.
+		var restoreStd func()
+		if renderer.Interleaves() {
+			restoreStd = redirectStdStreams(renderer.Writer())
+		}
 		defer func() {
+			// Order matters: restore real stdout/stderr first so any
+			// final bytes drain into the renderer, then close the
+			// renderer to flush its bars.
+			if restoreStd != nil {
+				restoreStd()
+			}
 			renderer.Close()
-			agent.SetWarnWriter(prevWarn)
 		}()
 	}
 

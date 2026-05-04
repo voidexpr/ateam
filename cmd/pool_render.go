@@ -30,6 +30,13 @@ import (
 type poolRenderer interface {
 	Render(rows []poolStatusRow)
 	Writer() io.Writer
+	// Interleaves reports whether Writer() can be safely written to
+	// while the live region is active. true means runPool can
+	// redirect process-wide os.Stdout / os.Stderr through Writer()
+	// to capture stray library/runtime writes; false means the
+	// renderer doesn't manage its own line accounting and stray
+	// writes would still corrupt it.
+	Interleaves() bool
 	Trimmed() bool
 	Close()
 }
@@ -96,6 +103,7 @@ func (r *legacyPoolRenderer) Render(rows []poolStatusRow) {
 }
 
 func (r *legacyPoolRenderer) Writer() io.Writer { return r.w }
+func (r *legacyPoolRenderer) Interleaves() bool { return false }
 func (r *legacyPoolRenderer) Trimmed() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
