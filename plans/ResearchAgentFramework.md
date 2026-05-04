@@ -285,6 +285,59 @@ These are all customizable YAML files, so the "built-ins" double as templates.
 
 **Key architectural difference from ATeam:** Archon is a *harness builder* — its job is to make a single agent's work deterministic and repeatable by wrapping it in an explicit DAG. ATeam is an *autonomous quality system* — its job is to decide what to work on, run specialized agents on a schedule, accumulate project knowledge, and triage results for human review. They sit at different layers: an organization could plausibly use Archon DAGs *as the implementation* of ATeam's individual agent runs, with ATeam's coordinator deciding which DAG to invoke and when. Archon is the choreography for one agent's dance; ATeam is the show producer deciding which dance happens tonight.
 
+#### DSPy Compounding Engineering (Strategic-Automation) ⭐⭐⭐
+
+**What it is:** A local-first Python CLI by Strategic-Automation that implements "compounding engineering" — the idea that each engineering task should make subsequent tasks easier. Built on [DSPy](https://github.com/stanfordnlp/dspy), Stanford's declarative-LLM framework. 56⭐, ~5 months old (created Nov 2025), pushed April 2026. Smaller and less battle-tested than other entries in this section, but the *conceptual contribution* is genuinely distinct from anything else in this landscape, which is why it gets a full entry rather than a row in the table.
+
+**The core idea — "compounding engineering":** every completed unit of work automatically writes a learning artifact into a JSON knowledge base under `.knowledge/`. Every subsequent agent call automatically retrieves relevant past learnings and prepends them to the prompt. The system literally gets smarter with use, without an explicit human curating the knowledge.
+
+ATeam already implements the same loop in coarser form: report agents read the prior report and overwrite it, review agents do the same on the review file, and the coding agent updates the review with what was actually implemented. The artifact *is* the running memory; each run replaces its predecessor with an updated version. DSPy Compounding Engineering's contribution isn't the loop itself (ATeam has it) but how it's mechanised: extraction is a separate DSPy module that runs after every call, and retrieval happens at the framework layer (KBPredict wrapper) rather than via the agent re-reading and rewriting a file. That's a different cost/benefit point, discussed below.
+
+**Architecture (5 layers):**
+
+1. **CLI** — Typer-based commands: `compounding review`, `triage`, `work p1`, `plan "..."`, `generate-agent "..."`.
+2. **Orchestration** — Python workflow scripts that wire commands into multi-step processes.
+3. **Intelligence** — DSPy agents declared via `Signature` classes (typed inputs/outputs) and composed via `Module` subclasses. Optimised via DSPy teleprompters (metric-driven prompt compilation).
+4. **Knowledge** — `.knowledge/` store with auto-retrieval. Two backends: a default JSON store with keyword search (zero-dependency, easy to inspect, works out of the box) **or** an optional Qdrant vector backend for semantic retrieval. The dual-backend design is worth flagging on its own — most other tools in this space lock you into one or the other.
+5. **Infrastructure** — Git services, project context gathering, todo management, MCP server for Claude Desktop integration.
+
+**KBPredict wrapper.** The interesting primitive. Every DSPy `Predict` call is wrapped so that:
+
+- Before the call: relevant prior learnings are pulled from the KB based on the current task and injected into the prompt.
+- After the call: a separate DSPy module extracts new learnings from the result and writes them back to the KB.
+
+The agent code never has to think about retrieval or memory. It's framework-level "every call gets context, every call leaves a trace."
+
+**Multi-agent parallel review.** `compounding review` runs 10+ named specialist agents in parallel against a diff: Security Sentinel, Performance Oracle, Architecture Strategist, etc. Each is KB-augmented, so all of them benefit from accumulated patterns from prior reviews. Same shape as Archon's `comprehensive-pr-review` (5 reviewers) but with more specialists and KB augmentation.
+
+**ReAct file editing.** "Think → Act → Observe → Iterate" pattern with relevance-scored context and explicit token budgeting per step. Worth borrowing if ATeam ever needs to drive long edit sessions inside a single agent.
+
+**Workflow.** `review` produces findings → `triage` lets a human batch-classify them → `work` resolves them in isolated git worktrees with parallel processing. This is essentially ATeam's audit → approve → implement pipeline, expressed as discrete CLI commands rather than a coordinator-driven schedule.
+
+**Distribution.** Standalone CLI via `curl | sh` or pip. Docker compose provided. Python 3.10+, `uv` package manager, Ruff, FastMCP for the MCP server.
+
+**Overlap with ATeam:** Conceptual overlap is high — multi-specialist parallel review, audit/triage/implement pipeline, git worktree per task, persistent project knowledge, local-first execution, model-agnostic (OpenAI/Anthropic/Ollama/OpenRouter). Operational overlap is partial: same workflow shape, very different machinery underneath.
+
+**What it lacks for our use case:**
+
+- **No scheduler.** On-demand only. `compounding review` runs when invoked; no cron, no nightly profiles, no autonomous coordinator.
+- **No Docker / sandbox isolation.** Worktree-only. Agent has full access to the host. ATeam's container adapter is a strict superset.
+- **Uses its own DSPy-defined agents, not Claude Code.** This is a fundamentally different runtime model from ATeam's "delegate to a Claude Code subprocess." DSPy agents are programmatic LLM calls, not coding-CLI sessions, so they're weaker at multi-step file edits than Claude Code (Claude Code has been hardened on exactly this task for ~2 years).
+- **Low momentum.** 56⭐, single-organisation, no visible community traction yet. Concept-grade, not production-grade.
+- **Python-only.** ATeam is Go; embedding DSPy means a separate process or porting the abstractions.
+- **JSON KB without semantic dedup.** Knowledge accumulates, but the deduplication / promotion / forgetting story is not described in depth — risk of stale learnings drowning out current ones over months of use.
+
+**Ideas to integrate:**
+
+- **Framework-level KBPredict wrapping.** ATeam already does write-back via the report/review/code chain (each agent overwrites the artifact from the prior stage), but the loop is implemented inside agent prompts — the agent is told to read X, update X, and the human-authored prompt is responsible for getting that right. DSPy Compounding Engineering moves both halves *out* of the agent: retrieval is wrapped around every Predict call, and extraction is a separate optimised DSPy module. The benefit is that prompt rewrites can't accidentally break the memory loop, and extraction quality can be tuned independently of the agent's main task. Worth considering as a future shape: turn ATeam's "agent updates the report" pattern into a coordinator-side post-run extraction step, so the agent's job is to do the work and a separate small model is responsible for distilling learnings.
+- **Pluggable knowledge backend (JSON or vector DB).** ATeam currently stores knowledge as files in the project repo. DSPy Compounding Engineering's design — start with a zero-dependency JSON keyword-search backend, allow opt-in upgrade to Qdrant for semantic retrieval — is a clean pattern. ATeam's knowledge-as-files model is great for git diff-ability and human review but starts to creak when there are many files and the right one needs to be retrieved by relevance rather than path. A future ATeam could expose the same dual-backend choice: keep markdown-in-git as the source of truth, optionally layer a vector index for retrieval at injection time.
+- **Compounding engineering as an explicit doctrine.** The framing — "each unit of work should make the next equivalent unit cheaper" — is a useful design lens for ATeam's roadmap. It gives a pass/fail test for proposed features: does this measurably improve the agents' future effectiveness, or does it just ship this one task? ATeam's report→review→code chain already compounds in this sense; the doctrine is worth stating explicitly so future features are evaluated against it rather than just against immediate utility.
+- **DSPy signatures as a sub-agent contract format.** ATeam's specialist agents are defined via markdown role prompts. DSPy's `Signature` (typed inputs and outputs, e.g., `repo_context, diff -> findings: list[Finding]`) is a more structured contract that survives prompt rewrites. Worth considering as a future schema for agent definitions, especially if ATeam ever needs to optimise prompts via metrics.
+- **Named specialist reviewers.** "Security Sentinel," "Performance Oracle," "Architecture Strategist" — concrete role names with clear scopes. ATeam already has specialist agents; a quick audit of whether each has a tight enough scope to merit a distinct identity is worth doing.
+- **Teleprompter-style prompt compilation (long term).** DSPy compiles prompts by running the pipeline against labelled examples and optimising for a metric. ATeam doesn't have a metric for "good audit," but if it ever did (e.g., reviewer agreement rate, % findings that survive triage), DSPy-style compilation could optimise the role prompts mechanically rather than by hand-tuning.
+
+**Key architectural difference from ATeam:** DSPy Compounding Engineering is a *programmatic-LLM* tool — it treats agents as composable functions you build out of LLM calls in Python. ATeam is a *coding-agent orchestrator* — it treats agents as long-running Claude Code subprocesses you launch in containers. Different layers of abstraction. The compounding-engineering *idea* is portable across both; the DSPy *implementation* isn't a fit for ATeam's Go + Claude Code substrate. The right move is to borrow the doctrine and the KBPredict pattern, not to adopt the framework.
+
 #### LangGraph ⭐⭐
 
 **What it is:** A Python-based framework from LangChain for managing multi-agent workflows using graph architectures. Organizes tasks as nodes in a directed graph with conditional edges, parallel execution, and persistent state. MIT-licensed, 120K+ GitHub stars (LangChain ecosystem). Features durable execution, human-in-the-loop checkpoints, and LangGraph Platform for deployment.
@@ -477,6 +530,7 @@ Gas Town and agent-orchestrator come closest but are both reactive/interactive r
 - **AGENTS.md standard**, **Command+Prompt+PR step sequencing**, **kernel-level guardrails**, and **Skills pattern** from Ona.
 - **Branch strategies** (`head` / `merge-to-head` / `branch`) and **host-vs-sandbox lifecycle hooks** from Sandcastle.
 - **YAML DAG workflows** (AI + bash + human-gate nodes), **`fresh_context` loop iterations**, and **deterministic `until` exit predicates** from Archon.
+- **Compounding engineering doctrine** ("each unit of work makes the next one easier") and the **KBPredict wrapper pattern** (auto-inject prior learnings on every call, auto-codify new learnings on completion) from DSPy Compounding Engineering.
 
 ### B.4 Future: Feature Agents
 
