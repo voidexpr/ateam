@@ -181,7 +181,7 @@ func parseClaudeDisplay(line []byte) ([]DisplayEvent, error) {
 		for _, block := range u.Message.Content {
 			if block.Type == "tool_result" {
 				events = append(events, &ToolResultLine{
-					Content:   block.Content,
+					Content:   block.Content.String(),
 					ToolUseID: block.ToolUseID,
 					IsError:   block.IsError,
 				})
@@ -222,7 +222,7 @@ func parseClaudeDisplay(line []byte) ([]DisplayEvent, error) {
 		// inside user events (handled in case "user" above).
 		tr := ev.(*toolResultEvent)
 		return []DisplayEvent{&ToolResultLine{
-			Content:   tr.Content,
+			Content:   tr.Content.String(),
 			ToolUseID: tr.ToolUseID,
 		}}, nil
 

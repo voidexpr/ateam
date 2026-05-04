@@ -226,7 +226,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 
 		case "tool_result":
 			tr := ev.(*streamutil.ToolResultEvent)
-			ch <- StreamEvent{Type: "tool_result", ToolResult: tr.Content}
+			ch <- StreamEvent{Type: "tool_result", ToolResult: tr.Content.String()}
 
 		case "result":
 			res := ev.(*streamutil.ResultEvent)

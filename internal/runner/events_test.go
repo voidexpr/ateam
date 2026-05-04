@@ -167,8 +167,8 @@ func TestParseToolResult(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *toolResultEvent, got %T", ev)
 	}
-	if tr.Content != "file contents here" {
-		t.Errorf("expected 'file contents here', got %q", tr.Content)
+	if got := tr.Content.String(); got != "file contents here" {
+		t.Errorf("expected 'file contents here', got %q", got)
 	}
 }
 

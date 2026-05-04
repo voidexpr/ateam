@@ -2,9 +2,66 @@
 package streamutil
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
+
+// FlexibleContent decodes the "content" field of tool_result blocks.
+// Claude's stream-json format permits this field as either a plain
+// string or an array of nested content blocks (e.g. text + images, or
+// when Claude Code serializes results via its array path). Treating
+// it as a plain string used to fail with `cannot unmarshal array into
+// Go struct field …Content of type string` and the whole JSONL line
+// was dropped, losing token counts and tool output for that turn.
+type FlexibleContent struct {
+	// Text is populated when the JSON value is a string.
+	Text string
+	// Blocks is populated when the JSON value is an array.
+	Blocks []ContentBlock
+}
+
+// UnmarshalJSON accepts both shapes Claude is allowed to emit. Other
+// JSON kinds (numbers, objects, true/false) return an error.
+func (f *FlexibleContent) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	switch data[0] {
+	case '[':
+		return json.Unmarshal(data, &f.Blocks)
+	case '"':
+		return json.Unmarshal(data, &f.Text)
+	default:
+		return fmt.Errorf("content: expected string or array, got %q", data[:1])
+	}
+}
+
+// String returns the content as plain text. For string form it's the
+// literal value; for array form it's the concatenation of all "text"
+// blocks (joined by newlines). Non-text blocks (image, etc.) are
+// dropped because the runner's display layers don't render them.
+func (f FlexibleContent) String() string {
+	if f.Text != "" {
+		return f.Text
+	}
+	if len(f.Blocks) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, blk := range f.Blocks {
+		if blk.Type != "text" || blk.Text == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(blk.Text)
+	}
+	return b.String()
+}
 
 // Claude JSONL event types shared between agent and runner packages.
 // Superset of fields from both consumers — the JSON decoder ignores absent fields.
@@ -56,9 +113,12 @@ type ContentBlock struct {
 	ID string `json:"id,omitempty"`
 	// ToolUseID/Content/IsError are set on tool_result blocks (claude
 	// emits these nested under user events, not as top-level events).
-	ToolUseID string `json:"tool_use_id,omitempty"`
-	Content   string `json:"content,omitempty"`
-	IsError   bool   `json:"is_error,omitempty"`
+	// Content uses FlexibleContent because Claude may send either a
+	// plain string or an array of nested content blocks; see
+	// FlexibleContent.UnmarshalJSON.
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	Content   FlexibleContent `json:"content,omitempty"`
+	IsError   bool            `json:"is_error,omitempty"`
 }
 
 // UserEvent captures the message content blocks claude emits under
@@ -72,8 +132,8 @@ type UserEvent struct {
 // ToolResultEvent is retained for legacy/standalone tool_result lines.
 // Modern claude streams nest tool results inside UserEvent.Message.Content.
 type ToolResultEvent struct {
-	Content   string `json:"content"`
-	ToolUseID string `json:"tool_use_id"`
+	Content   FlexibleContent `json:"content"`
+	ToolUseID string          `json:"tool_use_id"`
 }
 
 // RateLimitEvent surfaces rate-limit decisions claude reports inline.
