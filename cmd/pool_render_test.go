@@ -57,13 +57,81 @@ func TestLegacyPoolRendererTrimmedSticky(t *testing.T) {
 	r.Close()
 }
 
-// TestNewPoolRendererDefault confirms the factory still hands back a
-// legacy renderer until the mpb backend lands.
+// TestNewPoolRendererDefault confirms the factory hands back a legacy
+// renderer when ATEAM_RENDERER is unset.
 func TestNewPoolRendererDefault(t *testing.T) {
+	t.Setenv("ATEAM_RENDERER", "")
 	var buf bytes.Buffer
 	r := newPoolRenderer(&buf)
 	if _, ok := r.(*legacyPoolRenderer); !ok {
 		t.Errorf("expected *legacyPoolRenderer, got %T", r)
 	}
 	r.Close()
+}
+
+// TestNewPoolRendererMpb confirms ATEAM_RENDERER=mpb selects the mpb
+// backend.
+func TestNewPoolRendererMpb(t *testing.T) {
+	t.Setenv("ATEAM_RENDERER", "mpb")
+	var buf bytes.Buffer
+	r := newPoolRenderer(&buf)
+	if _, ok := r.(*mpbPoolRenderer); !ok {
+		t.Errorf("expected *mpbPoolRenderer, got %T", r)
+	}
+	r.Close()
+}
+
+// TestMpbPoolRendererSmoke exercises the mpb renderer's lifecycle via a
+// bytes.Buffer. mpb auto-disables ANSI rendering on non-TTY writers, so
+// the output check is loose — we just verify the API contract holds and
+// Close completes without deadlocking.
+func TestMpbPoolRendererSmoke(t *testing.T) {
+	var buf bytes.Buffer
+	r := newMpbPoolRenderer(&buf)
+
+	rows := []poolStatusRow{
+		{Label: "alpha", State: poolStateQueued},
+		{Label: "beta", State: poolStateQueued},
+	}
+	r.Render(rows)
+
+	rows[0].State = poolStateRunning
+	rows[0].Detail = "1m"
+	r.Render(rows)
+
+	rows[0].State = poolStateDone
+	rows[0].Detail = "2m  $0.10"
+	rows[0].Path = ".ateam/roles/alpha/report.md"
+	rows[1].State = poolStateError
+	rows[1].Detail = "0s"
+	r.Render(rows)
+
+	r.Close()
+	r.Close() // idempotent
+
+	if r.Trimmed() {
+		t.Errorf("mpb renderer should report Trimmed=false")
+	}
+}
+
+// TestFormatPoolRowSingleLineInlinesPath verifies that the mpb formatter
+// embeds the report path in the detail column instead of putting it on
+// a 2nd line — bars are single-line and we don't want the column widths
+// to drift just because the row is "done".
+func TestFormatPoolRowSingleLineInlinesPath(t *testing.T) {
+	row := poolStatusRow{
+		ExecID: 42,
+		Label:  "alpha",
+		State:  poolStateDone,
+		Calls:  3,
+		Detail: "2m",
+		Path:   ".ateam/roles/alpha/report.md",
+	}
+	got := formatPoolRowSingleLine(row)
+	if !bytes.Contains([]byte(got), []byte("→ .ateam/roles/alpha/report.md")) {
+		t.Errorf("expected path inlined with arrow, got %q", got)
+	}
+	if bytes.Contains([]byte(got), []byte("\n")) {
+		t.Errorf("single-line formatter must not emit newlines, got %q", got)
+	}
 }
