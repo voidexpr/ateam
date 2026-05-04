@@ -29,7 +29,6 @@ import (
 // inline it after the detail field so the column width stays predictable.
 type mpbPoolRenderer struct {
 	w        io.Writer
-	wrapped  *resizeAwareWriter // wraps w; emits a clear+header on viewport change
 	progress *mpb.Progress
 
 	mu       sync.Mutex
@@ -43,17 +42,17 @@ type mpbPoolRenderer struct {
 }
 
 func newMpbPoolRenderer(w io.Writer) *mpbPoolRenderer {
-	// Print the column header once. The same string is also handed to
-	// the resize-aware wrapper so that on a viewport change we can
-	// rewrite it after clearing the screen — mpb itself doesn't reach
-	// into scrollback when the terminal shrinks, which is what produced
-	// the "stacked rows" symptom on the legacy renderer.
+	// Print the column header once, above the live region. Pass the
+	// underlying writer to mpb directly (no wrapping): mpb's terminal
+	// detection is a type assertion to *os.File — wrapping os.Stdout
+	// hides it, mpb then thinks output isn't a TTY and disables auto
+	// refresh, which means no bars ever render. Resize is handled via
+	// the Progress.Write interleave path in onResize below instead of
+	// by intercepting the output.
 	fmt.Fprintln(w, poolStatusHeader)
-	wrapped := newResizeAwareWriter(w, poolStatusHeader)
 	r := &mpbPoolRenderer{
 		w:        w,
-		wrapped:  wrapped,
-		progress: mpb.New(mpb.WithOutput(wrapped)),
+		progress: mpb.New(mpb.WithOutput(w)),
 	}
 	r.subscribeResize()
 	return r
@@ -69,9 +68,34 @@ func (r *mpbPoolRenderer) subscribeResize() {
 	go func() {
 		defer r.resizeDone.Done()
 		for range ch {
-			r.wrapped.markResized()
+			r.onResize()
 		}
 	}()
+}
+
+// onResize injects a clear-screen + clear-scrollback + re-emitted
+// header through mpb's interleave channel. mpb queues the bytes and
+// emits them at the start of the next refresh tick, ahead of the bar
+// frame, so the next frame lands in a fresh viewport with the header
+// pinned at row 1.
+//
+//	\x1b[H  – cursor home
+//	\x1b[2J – erase viewport
+//	\x1b[3J – erase scrollback (xterm extension; supported by Apple
+//	          Terminal, iTerm2, modern xterm, alacritty, kitty, …)
+//
+// Tradeoff: any interleaved log lines that were queued ahead of this
+// resize escape get clobbered by the clear. They remain available in
+// stderr capture files, so this is acceptable for the "stop the
+// corruption" goal.
+func (r *mpbPoolRenderer) onResize() {
+	r.mu.Lock()
+	closed := r.closed
+	r.mu.Unlock()
+	if closed {
+		return
+	}
+	_, _ = r.progress.Write([]byte("\x1b[H\x1b[2J\x1b[3J" + poolStatusHeader + "\n"))
 }
 
 func (r *mpbPoolRenderer) Render(rows []poolStatusRow) {
