@@ -1104,11 +1104,12 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 
 	var statusRows []poolStatusRow
 	var labelIndex map[string]int
-	var renderedRows int
-	var liveTrimmed bool
+	var renderer poolRenderer
 	if !opts.quiet {
 		statusRows, labelIndex = newPoolStatusRows(labels)
-		renderedRows, liveTrimmed = printPoolStatuses(statusRows)
+		renderer = newPoolRenderer(os.Stdout)
+		renderer.Render(statusRows)
+		defer renderer.Close()
 	}
 
 	completedCh := make(chan runner.RunSummary, len(tasks))
@@ -1119,28 +1120,6 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 		runner.RunPool(ctx, r, tasks, maxParallel, progressCh, completedCh)
 		close(progressCh)
 	}()
-
-	if !opts.quiet {
-		resizeCh, stopResize := subscribeWindowResize()
-		var resizeDone sync.WaitGroup
-		if resizeCh != nil {
-			resizeDone.Add(1)
-			go func() {
-				defer resizeDone.Done()
-				for range resizeCh {
-					statusMu.Lock()
-					var trimmed bool
-					renderedRows, trimmed = reprintPoolStatuses(statusRows, renderedRows)
-					liveTrimmed = liveTrimmed || trimmed
-					statusMu.Unlock()
-				}
-			}()
-		}
-		defer func() {
-			stopResize()
-			resizeDone.Wait()
-		}()
-	}
 
 	var progressDone sync.WaitGroup
 	progressDone.Add(1)
@@ -1156,9 +1135,7 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 				statusMu.Lock()
 				statusRows[idx] = nextPoolStatusRow(statusRows[idx], p)
 				if time.Since(lastRedraw) >= 500*time.Millisecond {
-					var trimmed bool
-					renderedRows, trimmed = reprintPoolStatuses(statusRows, renderedRows)
-					liveTrimmed = liveTrimmed || trimmed
+					renderer.Render(statusRows)
 					lastRedraw = time.Now()
 				}
 				statusMu.Unlock()
@@ -1185,9 +1162,7 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 				statusRows[idx] = donePoolStatusRow(statusRows[idx], result, displayPath)
 				succeeded++
 			}
-			var trimmed bool
-			renderedRows, trimmed = reprintPoolStatuses(statusRows, renderedRows)
-			liveTrimmed = liveTrimmed || trimmed
+			renderer.Render(statusRows)
 			statusMu.Unlock()
 		} else {
 			if result.Err != nil {
@@ -1207,9 +1182,7 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 		statusMu.Lock()
 		finalRows := clonePoolStatusRows(statusRows)
 		if ctx.Err() == nil {
-			var trimmed bool
-			renderedRows, trimmed = reprintPoolStatuses(finalRows, renderedRows)
-			liveTrimmed = liveTrimmed || trimmed
+			renderer.Render(finalRows)
 		}
 		statusMu.Unlock()
 
@@ -1217,9 +1190,9 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 		// row's final state, not just the ones that fit during redraw.
 		// Same applies when we cancelled mid-run: the live state may be
 		// stale and the user wants to see what was queued/done at exit.
-		if ctx.Err() != nil || liveTrimmed {
+		if ctx.Err() != nil || renderer.Trimmed() {
 			fmt.Println()
-			printPlainPoolStatuses(finalRows)
+			printPlainPoolStatusesTo(os.Stdout, finalRows)
 		}
 	}
 

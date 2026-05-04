@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -377,18 +376,18 @@ func poolStatusOverflowSummary(running, done, queued []poolStatusRow, hidden int
 		len(running), len(done), len(queued), hidden)
 }
 
-func printPoolStatuses(rows []poolStatusRow) (int, bool) {
+func printPoolStatusesTo(w io.Writer, rows []poolStatusRow) (int, bool) {
 	lines, width, trimmed := currentPoolStatusLines(rows)
-	writePoolStatusLines(os.Stdout, lines, false)
-	savePoolStatusAnchor(os.Stdout)
+	writePoolStatusLines(w, lines, false)
+	savePoolStatusAnchor(w)
 	return totalVisualRows(lines, width), trimmed
 }
 
-func printPlainPoolStatuses(rows []poolStatusRow) {
-	writePoolStatusLines(os.Stdout, poolStatusLinesForWidth(rows, 0), false)
+func printPlainPoolStatusesTo(w io.Writer, rows []poolStatusRow) {
+	writePoolStatusLines(w, poolStatusLinesForWidth(rows, 0), false)
 }
 
-func reprintPoolStatuses(rows []poolStatusRow, previousRows int) (int, bool) {
+func reprintPoolStatusesTo(w io.Writer, rows []poolStatusRow, previousRows int) (int, bool) {
 	lines, width, trimmed := currentPoolStatusLines(rows)
-	return redrawPoolStatusLines(os.Stdout, lines, previousRows, width), trimmed
+	return redrawPoolStatusLines(w, lines, previousRows, width), trimmed
 }
