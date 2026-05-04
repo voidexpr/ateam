@@ -29,6 +29,7 @@ import (
 // inline it after the detail field so the column width stays predictable.
 type mpbPoolRenderer struct {
 	w        io.Writer
+	wrapped  *resizeAwareWriter // wraps w; emits a clear+header on viewport change
 	progress *mpb.Progress
 
 	mu       sync.Mutex
@@ -36,19 +37,41 @@ type mpbPoolRenderer struct {
 	bars     []*mpb.Bar // by row index; nil until first Render
 	complete []bool     // by row index; true once SetTotal-true has been issued
 	closed   bool
+
+	resizeStop func()
+	resizeDone sync.WaitGroup
 }
 
 func newMpbPoolRenderer(w io.Writer) *mpbPoolRenderer {
-	// Print the column header once, above the live region. mpb's render
-	// loop only walks the cursor up over the bars it owns, so anything
-	// written before progress.New starts stays pinned in scrollback
-	// above the table — the same place the legacy renderer puts it on
-	// the first draw.
+	// Print the column header once. The same string is also handed to
+	// the resize-aware wrapper so that on a viewport change we can
+	// rewrite it after clearing the screen — mpb itself doesn't reach
+	// into scrollback when the terminal shrinks, which is what produced
+	// the "stacked rows" symptom on the legacy renderer.
 	fmt.Fprintln(w, poolStatusHeader)
-	return &mpbPoolRenderer{
+	wrapped := newResizeAwareWriter(w, poolStatusHeader)
+	r := &mpbPoolRenderer{
 		w:        w,
-		progress: mpb.New(mpb.WithOutput(w)),
+		wrapped:  wrapped,
+		progress: mpb.New(mpb.WithOutput(wrapped)),
 	}
+	r.subscribeResize()
+	return r
+}
+
+func (r *mpbPoolRenderer) subscribeResize() {
+	ch, stop := subscribeWindowResize()
+	if ch == nil {
+		return
+	}
+	r.resizeStop = stop
+	r.resizeDone.Add(1)
+	go func() {
+		defer r.resizeDone.Done()
+		for range ch {
+			r.wrapped.markResized()
+		}
+	}()
 }
 
 func (r *mpbPoolRenderer) Render(rows []poolStatusRow) {
@@ -96,7 +119,13 @@ func (r *mpbPoolRenderer) Close() {
 			r.complete[i] = true
 		}
 	}
+	stop := r.resizeStop
+	r.resizeStop = nil
 	r.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
+	r.resizeDone.Wait()
 	r.progress.Wait()
 }
 
