@@ -1109,7 +1109,16 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 		statusRows, labelIndex = newPoolStatusRows(labels)
 		renderer = newPoolRenderer(os.Stdout)
 		renderer.Render(statusRows)
-		defer renderer.Close()
+		// Route agent-emitted warnings (malformed JSONL, file failures, …)
+		// through the renderer's interleaving writer for the duration of
+		// the pool run. Direct os.Stderr writes corrupt the legacy
+		// renderer's cursor accounting and can punch through mpb's live
+		// region between refresh ticks.
+		prevWarn := agent.SetWarnWriter(renderer.Writer())
+		defer func() {
+			renderer.Close()
+			agent.SetWarnWriter(prevWarn)
+		}()
 	}
 
 	completedCh := make(chan runner.RunSummary, len(tasks))
