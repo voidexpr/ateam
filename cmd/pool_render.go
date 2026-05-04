@@ -44,22 +44,22 @@ type poolRenderer interface {
 // newPoolRenderer constructs the renderer used by runPool when not in
 // quiet mode. Dispatches based on ATEAM_RENDERER:
 //
-//	mpb     → mpbPoolRenderer (library-managed, no cursor arithmetic)
-//	(unset) → legacyPoolRenderer (default; preserves shipping behavior
-//	          until the mpb path is dogfooded)
+//	(unset) → mpbPoolRenderer (default; library-managed, supports
+//	          os.Stdout / os.Stderr redirection above the live region)
+//	legacy  → legacyPoolRenderer (escape hatch for the previous
+//	          cursor-arithmetic renderer; kept while the mpb path
+//	          beds in)
 //
-// Anything else falls through to the legacy renderer with no error,
-// matching how operators typically discover such knobs.
+// Any other value also falls through to mpb, matching how operators
+// typically discover such knobs.
 func newPoolRenderer(w io.Writer) poolRenderer {
 	if w == nil {
 		w = os.Stdout
 	}
-	switch os.Getenv("ATEAM_RENDERER") {
-	case "mpb":
-		return newMpbPoolRenderer(w)
-	default:
+	if os.Getenv("ATEAM_RENDERER") == "legacy" {
 		return newLegacyPoolRenderer(w)
 	}
+	return newMpbPoolRenderer(w)
 }
 
 // legacyPoolRenderer wraps the existing cursor-up + clear-to-end

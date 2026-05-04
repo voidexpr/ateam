@@ -57,10 +57,22 @@ func TestLegacyPoolRendererTrimmedSticky(t *testing.T) {
 	r.Close()
 }
 
-// TestNewPoolRendererDefault confirms the factory hands back a legacy
-// renderer when ATEAM_RENDERER is unset.
+// TestNewPoolRendererDefault confirms the factory hands back the mpb
+// renderer when ATEAM_RENDERER is unset (the new default).
 func TestNewPoolRendererDefault(t *testing.T) {
 	t.Setenv("ATEAM_RENDERER", "")
+	var buf bytes.Buffer
+	r := newPoolRenderer(&buf)
+	if _, ok := r.(*mpbPoolRenderer); !ok {
+		t.Errorf("expected *mpbPoolRenderer (default), got %T", r)
+	}
+	r.Close()
+}
+
+// TestNewPoolRendererLegacy confirms ATEAM_RENDERER=legacy selects the
+// previous cursor-arithmetic renderer as an escape hatch.
+func TestNewPoolRendererLegacy(t *testing.T) {
+	t.Setenv("ATEAM_RENDERER", "legacy")
 	var buf bytes.Buffer
 	r := newPoolRenderer(&buf)
 	if _, ok := r.(*legacyPoolRenderer); !ok {
@@ -69,14 +81,15 @@ func TestNewPoolRendererDefault(t *testing.T) {
 	r.Close()
 }
 
-// TestNewPoolRendererMpb confirms ATEAM_RENDERER=mpb selects the mpb
-// backend.
-func TestNewPoolRendererMpb(t *testing.T) {
-	t.Setenv("ATEAM_RENDERER", "mpb")
+// TestNewPoolRendererUnknownValueFallsBackToMpb verifies the mpb
+// default also catches typos / unknown values, matching how operators
+// typically discover env knobs.
+func TestNewPoolRendererUnknownValueFallsBackToMpb(t *testing.T) {
+	t.Setenv("ATEAM_RENDERER", "tui")
 	var buf bytes.Buffer
 	r := newPoolRenderer(&buf)
 	if _, ok := r.(*mpbPoolRenderer); !ok {
-		t.Errorf("expected *mpbPoolRenderer, got %T", r)
+		t.Errorf("expected unknown value to fall through to mpb, got %T", r)
 	}
 	r.Close()
 }
