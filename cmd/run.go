@@ -21,6 +21,7 @@ var (
 	runProfile         string
 	runAgent           string
 	runModel           string
+	runExtraPrompt     string
 	runNoStream        bool
 	runWorkDir         string
 	runNoSummary       bool
@@ -54,6 +55,7 @@ Example:
   ateam run "Analyze the auth module" --role security
   ateam run "test" --profile cheap
   ateam run @prompt_file.md
+  ateam run @prompt_file.md --extra-prompt "focus on the auth module"
   echo "explain this code" | ateam run
   git diff | ateam run --role critic_engineering
   ateam run "say hi" --model sonnet
@@ -65,6 +67,7 @@ Example:
 func init() {
 	runCmd.Flags().StringVar(&runRole, "role", "", "role to run (optional)")
 	runCmd.Flags().StringVar(&runModel, "model", "", "model override")
+	runCmd.Flags().StringVar(&runExtraPrompt, "extra-prompt", "", "additional instructions appended after the main prompt (text or @filepath)")
 	addProfileFlags(runCmd, &runProfile, &runAgent)
 	runCmd.Flags().BoolVar(&runNoStream, "no-stream", false, "disable progress updates during execution")
 	runCmd.Flags().BoolVar(&runNoSummary, "no-summary", false, "disable run summary after completion")
@@ -86,6 +89,13 @@ func runRun(cmd *cobra.Command, args []string) error {
 	promptText, err := prompts.ResolveValue(promptArg)
 	if err != nil {
 		return fmt.Errorf("cannot resolve prompt: %w", err)
+	}
+	extraPrompt, err := prompts.ResolveOptional(runExtraPrompt)
+	if err != nil {
+		return fmt.Errorf("cannot resolve --extra-prompt: %w", err)
+	}
+	if extraPrompt != "" {
+		promptText += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
 	}
 
 	// Try to resolve project context (optional for ateam run)
