@@ -315,3 +315,17 @@ func (d *DockerExecContainer) ApplyAgentEnv(env map[string]string) {
 		d.Env[k] = v
 	}
 }
+
+// ApplyContainerExtra merges [container-extra] config fields into d.
+// extraArgs is ignored — DockerExecContainer has no equivalent field.
+func (d *DockerExecContainer) ApplyContainerExtra(_ []string, forwardEnv []string, env map[string]string) {
+	d.ForwardEnv = append(d.ForwardEnv, forwardEnv...)
+	if len(env) > 0 {
+		if d.Env == nil {
+			d.Env = make(map[string]string, len(env))
+		}
+		for k, v := range env {
+			d.Env[k] = v
+		}
+	}
+}

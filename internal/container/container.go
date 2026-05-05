@@ -88,6 +88,13 @@ type Container interface {
 	// since construction code is single-threaded).
 	ApplyAgentEnv(env map[string]string)
 
+	// ApplyContainerExtra merges [container-extra] config fields into the container.
+	// extraArgs are appended to extra docker run args (ignored by docker-exec).
+	// forwardEnv names are appended to the ForwardEnv list.
+	// env key-value pairs are merged into the Env map.
+	// MUTATES — must be called before the container is cloned for pool dispatch.
+	ApplyContainerExtra(extraArgs, forwardEnv []string, env map[string]string)
+
 	// Clone returns a deep copy of the container. Implementations MUST:
 	//   - re-allocate every slice/map that any mutating method writes to,
 	//   - copy scalar fields by value,

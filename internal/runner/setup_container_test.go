@@ -39,6 +39,8 @@ func (f *fakeContainer) TranslatePath(p string) string {
 	return p
 }
 
+func (f *fakeContainer) ApplyContainerExtra([]string, []string, map[string]string) {}
+
 func (f *fakeContainer) ApplyAgentEnv(env map[string]string) {
 	if f.appliedEnv == nil {
 		f.appliedEnv = make(map[string]string, len(env))

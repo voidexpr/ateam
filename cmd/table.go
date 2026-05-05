@@ -152,18 +152,9 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 		return nil, err
 	}
 	// Merge per-project container extras from config.toml [container-extra]
-	if dc, ok := ct.(*container.DockerContainer); ok && env.Config != nil {
+	if ct != nil && env.Config != nil {
 		ce := env.Config.ContainerExtra
-		dc.ExtraArgs = append(dc.ExtraArgs, ce.ExtraArgs...)
-		dc.ForwardEnv = append(dc.ForwardEnv, ce.ForwardEnv...)
-		if len(ce.Env) > 0 {
-			if dc.Env == nil {
-				dc.Env = make(map[string]string, len(ce.Env))
-			}
-			for k, v := range ce.Env {
-				dc.Env[k] = v
-			}
-		}
+		ct.ApplyContainerExtra(ce.ExtraArgs, ce.ForwardEnv, ce.Env)
 	}
 	// Apply agent env (credential isolation + agent-configured env) to the
 	// container so that ForwardEnv respects IsolateCredentials decisions.

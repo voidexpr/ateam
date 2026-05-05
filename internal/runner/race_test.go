@@ -473,13 +473,14 @@ func (c *countingContainer) Prepare(ctx context.Context) error {
 		return nil
 	})
 }
-func (c *countingContainer) CmdFactory() container.CmdFactory   { return nil }
-func (c *countingContainer) GetContainerName() string           { return "" }
-func (c *countingContainer) TranslatePath(p string) string      { return p }
-func (c *countingContainer) ResolveTemplates(*strings.Replacer) {}
-func (c *countingContainer) SetSourceWritable(bool)             {}
-func (c *countingContainer) SetContainerName(string) bool       { return false }
-func (c *countingContainer) ApplyAgentEnv(map[string]string)    {}
+func (c *countingContainer) CmdFactory() container.CmdFactory                          { return nil }
+func (c *countingContainer) GetContainerName() string                                  { return "" }
+func (c *countingContainer) TranslatePath(p string) string                             { return p }
+func (c *countingContainer) ResolveTemplates(*strings.Replacer)                        {}
+func (c *countingContainer) SetSourceWritable(bool)                                    {}
+func (c *countingContainer) SetContainerName(string) bool                              { return false }
+func (c *countingContainer) ApplyAgentEnv(map[string]string)                           {}
+func (c *countingContainer) ApplyContainerExtra([]string, []string, map[string]string) {}
 func (c *countingContainer) Clone() container.Container {
 	cp := *c // shares prepareCalls + guard pointers — exactly what the real containers do
 	return &cp

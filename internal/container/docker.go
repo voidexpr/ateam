@@ -139,6 +139,20 @@ func (d *DockerContainer) ApplyAgentEnv(env map[string]string) {
 	}
 }
 
+// ApplyContainerExtra merges [container-extra] config fields into d.
+func (d *DockerContainer) ApplyContainerExtra(extraArgs, forwardEnv []string, env map[string]string) {
+	d.ExtraArgs = append(d.ExtraArgs, extraArgs...)
+	d.ForwardEnv = append(d.ForwardEnv, forwardEnv...)
+	if len(env) > 0 {
+		if d.Env == nil {
+			d.Env = make(map[string]string, len(env))
+		}
+		for k, v := range env {
+			d.Env[k] = v
+		}
+	}
+}
+
 // EnsureImage builds the docker image, relying on Docker's layer cache for speed.
 // Always runs docker build so Dockerfile changes are picked up automatically.
 func (d *DockerContainer) EnsureImage(ctx context.Context) error {
