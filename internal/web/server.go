@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ateam/internal/calldb"
@@ -36,7 +37,14 @@ type ProjectEntry struct {
 	ProjectDir string
 	OrgDir     string
 	SourceDir  string
-	db         *calldb.CallDB // cached; may be nil
+
+	// dbOnce guards lazy CallDB initialization so concurrent HTTP handlers
+	// don't open the SQLite file multiple times and overwrite each other's
+	// pointer. dbErr captures the first open failure so callers can tell a
+	// missing DB (nil, nil) from an open failure (nil, err).
+	dbOnce sync.Once
+	db     *calldb.CallDB
+	dbErr  error
 }
 
 // SupervisorPath returns ProjectDir/supervisor/<name>.
@@ -177,19 +185,13 @@ func (s *Server) findProject(slug string) *ProjectEntry {
 }
 
 func (s *Server) getDB(pe *ProjectEntry) *calldb.CallDB {
-	if pe.db != nil {
-		return pe.db
-	}
-	dbPath := filepath.Join(pe.ProjectDir, "state.sqlite")
-	db, err := calldb.OpenIfExists(dbPath)
-	if err != nil {
-		return nil
-	}
-	if db == nil {
-		return nil
-	}
-	pe.db = db
-	return db
+	pe.dbOnce.Do(func() {
+		dbPath := filepath.Join(pe.ProjectDir, "state.sqlite")
+		db, err := calldb.OpenIfExists(dbPath)
+		pe.db = db
+		pe.dbErr = err
+	})
+	return pe.db
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, tmplName string, pd pageData) {

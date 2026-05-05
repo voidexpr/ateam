@@ -3,6 +3,7 @@ package web
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -367,6 +368,81 @@ func TestGetDBDoesNotCreateFile(t *testing.T) {
 	// Verify the file was NOT created on disk.
 	if _, err := os.Stat(dbPath); !os.IsNotExist(err) {
 		t.Fatalf("expected state.sqlite to not exist, got err=%v", err)
+	}
+}
+
+// TestGetDBConcurrentOpensOnce covers the race where unsynchronized lazy
+// initialization could open the SQLite file multiple times across concurrent
+// HTTP handlers and overwrite pe.db, leaving Close unable to release every
+// open connection.
+func TestGetDBConcurrentOpensOnce(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "state.sqlite")
+
+	// Seed a real database so getDB succeeds rather than returning nil.
+	seeded, err := calldb.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	seeded.Close()
+
+	s := &Server{}
+	pe := &ProjectEntry{ProjectDir: dir}
+
+	const goroutines = 16
+	results := make([]*calldb.CallDB, goroutines)
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	start := make(chan struct{})
+	for i := 0; i < goroutines; i++ {
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			results[i] = s.getDB(pe)
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	first := results[0]
+	if first == nil {
+		t.Fatal("expected non-nil CallDB after seeding state.sqlite")
+	}
+	for i, db := range results {
+		if db != first {
+			t.Errorf("goroutine %d got a different *CallDB than the first caller — getDB raced", i)
+		}
+	}
+	if pe.dbErr != nil {
+		t.Errorf("unexpected dbErr after seeded open: %v", pe.dbErr)
+	}
+	first.Close()
+}
+
+// TestGetDBStoresOpenError ensures that an open failure surfaces via dbErr
+// instead of being collapsed to nil, so callers can distinguish "no DB" from
+// "DB exists but unreadable".
+func TestGetDBStoresOpenError(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "state.sqlite")
+	// A directory at the DB path makes Open fail in a deterministic way.
+	if err := os.Mkdir(dbPath, 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	s := &Server{}
+	pe := &ProjectEntry{ProjectDir: dir}
+
+	if got := s.getDB(pe); got != nil {
+		got.Close()
+		t.Fatal("expected nil db when open fails")
+	}
+	if pe.dbErr == nil {
+		t.Fatal("expected pe.dbErr to capture the open failure")
+	}
+	// A second call must reuse the cached error rather than re-attempting.
+	if got := s.getDB(pe); got != nil {
+		t.Errorf("expected nil on second getDB call too, got %v", got)
 	}
 }
 
