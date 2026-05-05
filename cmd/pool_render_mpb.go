@@ -36,11 +36,10 @@ type mpbPoolRenderer struct {
 	w        io.Writer
 	progress *mpb.Progress
 
-	mu       sync.Mutex
-	rows     []poolStatusRow
-	bars     []*mpb.Bar // by row index; nil until first Render
-	complete []bool     // by row index; true once SetTotal-true has been issued
-	closed   bool
+	mu     sync.Mutex
+	rows   []poolStatusRow
+	bars   []*mpb.Bar // by row index; nil until first Render
+	closed bool
 }
 
 // newMpbPoolRenderer constructs the renderer.
@@ -81,20 +80,21 @@ func (r *mpbPoolRenderer) Render(rows []poolStatusRow) {
 	r.rows = clonePoolStatusRows(rows)
 	if r.bars == nil {
 		r.bars = make([]*mpb.Bar, len(r.rows))
-		r.complete = make([]bool, len(r.rows))
 		for i := range r.rows {
 			r.bars[i] = r.makeBar(i)
 		}
 	}
 	// Mark terminal rows complete so mpb stops re-rendering them and
-	// (*Progress).Wait can return when everything finishes.
+	// (*Progress).Wait can return when everything finishes. SetTotal is
+	// idempotent (the bar's operateState handler bails out early if
+	// triggerComplete is already set), so re-issuing it on every Render
+	// for already-terminal rows is harmless.
 	for i, row := range r.rows {
-		if r.complete[i] || r.bars[i] == nil {
+		if r.bars[i] == nil {
 			continue
 		}
 		if row.State == poolStateDone || row.State == poolStateError {
 			r.bars[i].SetTotal(-1, true)
-			r.complete[i] = true
 		}
 	}
 }
@@ -108,11 +108,11 @@ func (r *mpbPoolRenderer) Close() {
 		return
 	}
 	r.closed = true
-	// Force any still-incomplete bars to terminal so Wait can return.
-	for i, bar := range r.bars {
-		if bar != nil && !r.complete[i] {
+	// Force every bar to terminal so Wait can return. SetTotal is
+	// idempotent for already-completed bars.
+	for _, bar := range r.bars {
+		if bar != nil {
 			bar.SetTotal(-1, true)
-			r.complete[i] = true
 		}
 	}
 	r.mu.Unlock()
@@ -151,11 +151,11 @@ func (r *mpbPoolRenderer) formatRow(i int) string {
 	return formatPoolRowSingleLine(r.rows[i])
 }
 
-// formatPoolRowSingleLine renders a poolStatusRow as one line of text,
-// matching the legacy poolStatusRowFmt columns. When the row has a Path
-// (terminal "done" rows), the path is appended after the detail with an
-// arrow separator instead of placed on a 2nd line — mpb bars are
-// single-line.
+// formatPoolRowSingleLine renders a poolStatusRow as one line of text
+// using the shared poolStatusRowFmt columns. When the row has a Path
+// (terminal "done" rows), the path is appended after the detail with
+// an arrow separator: mpb bars are single-line, so we can't place the
+// path on a second row.
 func formatPoolRowSingleLine(row poolStatusRow) string {
 	execID := "-"
 	if row.ExecID > 0 {
