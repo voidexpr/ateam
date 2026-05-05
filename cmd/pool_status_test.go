@@ -1,33 +1,50 @@
 package cmd
 
 import (
-	"bytes"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/ateam/internal/runner"
 )
 
 func TestPoolStatusHeaderIncludesEstTokens(t *testing.T) {
-	lines := poolStatusLinesForWidth([]poolStatusRow{
-		{Label: "a", State: "queued"},
-	}, 120)
-	if !strings.Contains(lines[0], "EstTOKENS") {
-		t.Fatalf("expected header to include EstTOKENS, got %q", lines[0])
+	if !strings.Contains(poolStatusHeader, "EstTOKENS") {
+		t.Fatalf("expected header to include EstTOKENS, got %q", poolStatusHeader)
+	}
+}
+
+func TestPoolStatusHeaderIncludesIDColumn(t *testing.T) {
+	if !strings.Contains(poolStatusHeader, "ID") {
+		t.Fatalf("expected header to include ID, got %q", poolStatusHeader)
+	}
+	if !strings.Contains(poolStatusHeader, "CALLS") {
+		t.Fatalf("expected header to include CALLS, got %q", poolStatusHeader)
+	}
+}
+
+func TestPoolStatusRowFormatsExecID(t *testing.T) {
+	queued := formatPoolRowSingleLine(poolStatusRow{Label: "security", State: poolStateQueued})
+	if !strings.Contains(queued, "-") {
+		t.Errorf("queued row should show empty exec id placeholder, got %q", queued)
+	}
+	running := formatPoolRowSingleLine(poolStatusRow{
+		ExecID: 42, Label: "testing_basic", State: poolStateRunning, Calls: 3, Detail: "12s  bash",
+	})
+	if !strings.Contains(running, "42") {
+		t.Errorf("running row should show exec id, got %q", running)
+	}
+	if !strings.Contains(running, " 3 ") {
+		t.Errorf("running row should show tool call count, got %q", running)
 	}
 }
 
 func TestPoolStatusRowShowsEstTokens(t *testing.T) {
-	lines := poolStatusLinesForWidth([]poolStatusRow{
-		{ExecID: 7, Label: "live", State: "running", EstTokens: 12345, Calls: 2, Detail: "1m2s"},
-	}, 120)
-	if len(lines) < 2 {
-		t.Fatalf("expected header plus row, got %d lines", len(lines))
-	}
+	line := formatPoolRowSingleLine(poolStatusRow{
+		ExecID: 7, Label: "live", State: poolStateRunning, EstTokens: 12345, Calls: 2, Detail: "1m2s",
+	})
 	// 12345 tokens → FmtTokens renders as "12.3K" (see internal/display).
-	if !strings.Contains(lines[1], "12.3K") {
-		t.Errorf("expected row to show formatted EstTOKENS; got %q", lines[1])
+	if !strings.Contains(line, "12.3K") {
+		t.Errorf("expected row to show formatted EstTOKENS; got %q", line)
 	}
 }
 
@@ -52,56 +69,6 @@ func TestNextPoolStatusRowTracksEstTokensMonotonically(t *testing.T) {
 	})
 	if back.EstTokens != 700 {
 		t.Errorf("EstTokens regressed to %d, want 700", back.EstTokens)
-	}
-}
-
-func TestPoolStatusLinesIncludeIDColumn(t *testing.T) {
-	lines := poolStatusLinesForWidth([]poolStatusRow{
-		{Label: "security", State: "queued"},
-		{ExecID: 42, Label: "testing_basic", State: "running", Calls: 3, Detail: "12s  bash"},
-	}, 120)
-
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 lines, got %d", len(lines))
-	}
-	if !strings.Contains(lines[0], "ID") {
-		t.Fatalf("expected header to include ID, got %q", lines[0])
-	}
-	if !strings.Contains(lines[0], "CALLS") {
-		t.Fatalf("expected header to include CALLS, got %q", lines[0])
-	}
-	if !strings.Contains(lines[1], "-") {
-		t.Fatalf("expected queued row to show empty exec id placeholder, got %q", lines[1])
-	}
-	if !strings.Contains(lines[2], "42") {
-		t.Fatalf("expected running row to show exec id, got %q", lines[2])
-	}
-	if !strings.Contains(lines[2], " 3 ") {
-		t.Fatalf("expected running row to show tool call count, got %q", lines[2])
-	}
-}
-
-func TestFitPoolStatusLineAvoidsTerminalWrap(t *testing.T) {
-	line := fitPoolStatusLine("  1234567 security running a very long detail string", 20)
-	if got := utf8.RuneCountInString(line); got > 19 {
-		t.Fatalf("expected at most 19 runes, got %d in %q", got, line)
-	}
-	if !strings.HasSuffix(line, "…") {
-		t.Fatalf("expected truncated line to end with ellipsis, got %q", line)
-	}
-}
-
-func TestDoneStatusPathIsNeverTruncated(t *testing.T) {
-	path := "very/long/path/to/report.md"
-	lines := poolStatusLinesForWidth([]poolStatusRow{
-		{ExecID: 42, Label: "testing_basic", State: "done", Calls: 3, Detail: "12:34:56  12s  $0.25  1.2K", Path: path},
-	}, 12)
-
-	if len(lines) != 3 {
-		t.Fatalf("expected header plus 2 done-row lines, got %d", len(lines))
-	}
-	if !strings.Contains(lines[2], path) {
-		t.Fatalf("expected full path to remain visible, got %q", lines[2])
 	}
 }
 
@@ -138,91 +105,5 @@ func TestNextPoolStatusRowDoesNotOverwriteDoneRow(t *testing.T) {
 	}
 	if next.Detail != "12:34:56  12s  $0.25  1.2K" {
 		t.Fatalf("expected detail to remain intact, got %q", next.Detail)
-	}
-}
-
-func TestWritePoolStatusBlockRedrawClearsFromColumnZero(t *testing.T) {
-	var buf bytes.Buffer
-	redrawPoolStatusLines(&buf, []string{"header", "row"}, 4, 10)
-	got := buf.String()
-
-	if !strings.HasPrefix(got, "\r\033[4A\033[J") {
-		t.Fatalf("expected redraw to walk back to the table's first row from current cursor, got %q", got)
-	}
-	if !strings.Contains(got, "\r\033[2Kheader\n\r\033[2Krow\n") {
-		t.Fatalf("expected redraw lines to clear before rewriting, got %q", got)
-	}
-	if !strings.HasSuffix(got, "\r\033[2K") {
-		t.Fatalf("expected redraw to leave cursor parked on a cleared anchor line below the table, got %q", got)
-	}
-	if strings.Contains(got, "\0337") || strings.Contains(got, "\0338") {
-		t.Fatalf("redraw should not depend on DECSC/DECRC (cursor save/restore), got %q", got)
-	}
-}
-
-func TestWritePoolStatusBlockRedrawHandlesZeroPrevious(t *testing.T) {
-	var buf bytes.Buffer
-	redrawPoolStatusLines(&buf, []string{"header"}, 0, 10)
-	got := buf.String()
-
-	if !strings.HasPrefix(got, "\r\033[J") {
-		t.Fatalf("expected zero-previous redraw to skip the cursor-up, got %q", got)
-	}
-}
-
-func TestTotalVisualRowsCountsWrappedLines(t *testing.T) {
-	got := totalVisualRows([]string{"12345", "123456"}, 5)
-	if got != 3 {
-		t.Fatalf("expected 3 visual rows, got %d", got)
-	}
-}
-
-func TestFitPoolStatusLinesToHeightTrimsToViewport(t *testing.T) {
-	rows := []poolStatusRow{
-		{Label: "alpha", State: poolStateRunning},
-		{Label: "beta", State: poolStateRunning},
-		{Label: "gamma", State: poolStateQueued},
-		{Label: "delta", State: poolStateQueued},
-		{Label: "epsilon", State: poolStateQueued},
-	}
-	lines := poolStatusLinesForWidth(rows, 0)
-	// 6 lines (header + 5 rows), viewport 6 rows → no room: header + N rows + summary
-	got := fitPoolStatusLinesToHeight(rows, lines, 0, 6)
-	// reserveRows=3 → maxVisible=3, budget=1 → header + 1 running + summary = 3 lines
-	if len(got) != 3 {
-		t.Fatalf("expected 3 trimmed lines, got %d: %#v", len(got), got)
-	}
-	if !strings.Contains(got[0], "ID") {
-		t.Errorf("first line should be header, got %q", got[0])
-	}
-	if !strings.Contains(got[1], "alpha") {
-		t.Errorf("second line should be the first running row (alpha), got %q", got[1])
-	}
-	if !strings.Contains(got[2], "not shown") {
-		t.Errorf("last line should be the overflow summary, got %q", got[2])
-	}
-}
-
-func TestFitPoolStatusLinesToHeightPassThroughWhenFits(t *testing.T) {
-	rows := []poolStatusRow{
-		{Label: "alpha", State: poolStateRunning},
-		{Label: "beta", State: poolStateQueued},
-	}
-	lines := poolStatusLinesForWidth(rows, 0)
-	got := fitPoolStatusLinesToHeight(rows, lines, 0, 50)
-	if len(got) != len(lines) {
-		t.Fatalf("expected pass-through (%d lines), got %d", len(lines), len(got))
-	}
-}
-
-func TestFitPoolStatusLinesToHeightUnknownHeightPassesThrough(t *testing.T) {
-	rows := make([]poolStatusRow, 20)
-	for i := range rows {
-		rows[i] = poolStatusRow{Label: "r", State: poolStateQueued}
-	}
-	lines := poolStatusLinesForWidth(rows, 0)
-	got := fitPoolStatusLinesToHeight(rows, lines, 0, 0)
-	if len(got) != len(lines) {
-		t.Fatalf("zero height should disable trimming; got %d lines, want %d", len(got), len(lines))
 	}
 }

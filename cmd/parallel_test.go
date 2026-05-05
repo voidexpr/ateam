@@ -474,18 +474,16 @@ func TestParallelTaskGroupInDB(t *testing.T) {
 }
 
 func TestParallelPoolStatusRendering(t *testing.T) {
+	if !strings.Contains(poolStatusHeader, "LABEL") {
+		t.Errorf("expected LABEL in header, got %q", poolStatusHeader)
+	}
+
 	labels := []string{"task-1", "task-2"}
 	rows, _ := newPoolStatusRows(labels)
-
-	lines := poolStatusLinesForWidth(rows, 120)
-	if !strings.Contains(lines[0], "LABEL") {
-		t.Errorf("expected LABEL in header, got %q", lines[0])
-	}
-
-	if !strings.Contains(lines[1], "task-1") {
-		t.Errorf("expected task-1 in row 1, got %q", lines[1])
-	}
-	if !strings.Contains(lines[2], "task-2") {
-		t.Errorf("expected task-2 in row 2, got %q", lines[2])
+	for _, row := range rows {
+		line := formatPoolRowSingleLine(row)
+		if !strings.Contains(line, row.Label) {
+			t.Errorf("expected %q in row line, got %q", row.Label, line)
+		}
 	}
 }

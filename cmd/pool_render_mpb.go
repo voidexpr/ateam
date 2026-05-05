@@ -16,17 +16,22 @@ import (
 // One bar per role; each bar's content is supplied by a single decor.Any
 // decorator that pulls the row's formatted line from a shared snapshot.
 //
-// Two properties matter relative to legacyPoolRenderer:
+// Two properties this gives us:
 //
 //  1. mpb owns its own render goroutine and serializes all writes.
 //     Anything written through Writer() (i.e. *mpb.Progress.Write) is
-//     interleaved above the live region instead of corrupting it.
-//  2. mpb tracks its own line count, so SIGWINCH and stray writes can't
-//     desynchronize the cursor accounting that bit the legacy renderer.
+//     interleaved above the live region — runPool plugs the
+//     std-stream redirect into this so every Go-side write to
+//     os.Stdout / os.Stderr lands above the bars instead of corrupting
+//     the cursor accounting.
+//  2. mpb tracks its own line count and requeries terminal size on
+//     each refresh tick, so the live viewport self-corrects after a
+//     SIGWINCH without explicit handling on our side.
 //
-// Single-line constraint: mpb bars are one line each. The legacy view
-// renders the report path as a 2nd line under each "done" row; here we
-// inline it after the detail field so the column width stays predictable.
+// Single-line constraint: mpb bars are one line each. Where a row has
+// a report path (terminal "done" rows), the path is inlined after the
+// detail field with an arrow separator so the column widths stay
+// predictable.
 type mpbPoolRenderer struct {
 	w        io.Writer
 	progress *mpb.Progress
@@ -95,8 +100,6 @@ func (r *mpbPoolRenderer) Render(rows []poolStatusRow) {
 }
 
 func (r *mpbPoolRenderer) Writer() io.Writer { return r.progress }
-func (r *mpbPoolRenderer) Interleaves() bool { return true }
-func (r *mpbPoolRenderer) Trimmed() bool     { return false }
 
 func (r *mpbPoolRenderer) Close() {
 	r.mu.Lock()

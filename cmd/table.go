@@ -1102,25 +1102,29 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 	}
 	cwd, _ := os.Getwd()
 
+	// The live renderer requires a TTY: mpb auto-disables ANSI rendering
+	// on non-*os.File writers and silently buffers everything, so a
+	// non-TTY run (piped, redirected, CI) would see the column header
+	// and then nothing until exit. Fall through to the plain
+	// printProgress path in that case (same path --quiet uses).
+	useLiveRenderer := !opts.quiet && isTerminal()
+
 	var statusRows []poolStatusRow
 	var labelIndex map[string]int
 	var renderer poolRenderer
 	var restoreStd func()
-	if !opts.quiet {
+	if useLiveRenderer {
 		statusRows, labelIndex = newPoolStatusRows(labels)
 		renderer = newPoolRenderer(os.Stdout)
 		renderer.Render(statusRows)
-		// When the renderer interleaves its writer (mpb), redirect
-		// process-wide os.Stdout / os.Stderr through it for the
-		// duration of the run. This catches every Go-side stray write
-		// — fmt.Fprintf, log.Printf, panic output, future call sites
-		// we haven't audited — and routes them above the live region
-		// instead of letting them corrupt the cursor accounting.
-		// Subprocess output is captured separately by the agent and
-		// not affected.
-		if renderer.Interleaves() {
-			restoreStd = redirectStdStreams(renderer.Writer())
-		}
+		// Redirect process-wide os.Stdout / os.Stderr through the
+		// renderer's interleave channel for the duration of the run.
+		// This catches every Go-side stray write — fmt.Fprintf,
+		// log.Printf, panic output, future call sites we haven't
+		// audited — and routes them above the live region instead of
+		// letting them corrupt the cursor accounting. Subprocess
+		// output is captured separately by the agent and not affected.
+		restoreStd = redirectStdStreams(renderer.Writer())
 	}
 	// Defer-only cleanup as a panic safety net. Normal flow tears
 	// down the live region explicitly below so the post-run summary
@@ -1156,7 +1160,7 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 	progressDone.Add(1)
 	go func() {
 		defer progressDone.Done()
-		if !opts.quiet {
+		if useLiveRenderer {
 			var lastRedraw time.Time
 			for p := range progressCh {
 				idx, ok := labelIndex[p.RoleID]
@@ -1179,7 +1183,7 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 	var succeeded, failed int
 	var results []runner.RunSummary
 	for result := range completedCh {
-		if !opts.quiet {
+		if useLiveRenderer {
 			statusMu.Lock()
 			idx := labelIndex[result.RoleID]
 			if result.Err != nil {
@@ -1209,12 +1213,10 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 	}
 	progressDone.Wait()
 
-	var finalRows []poolStatusRow
-	if !opts.quiet {
+	if useLiveRenderer {
 		statusMu.Lock()
-		finalRows = clonePoolStatusRows(statusRows)
 		if ctx.Err() == nil {
-			renderer.Render(finalRows)
+			renderer.Render(statusRows)
 		}
 		statusMu.Unlock()
 	}
@@ -1223,20 +1225,8 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, max
 	// failure tails. With mpb still active those writes either fight
 	// with the bar redraws (when written via opts.out / fmt.Fprintf
 	// which bypasses the redirect) or get interleaved above the bars
-	// alongside a now-redundant copy of the table — both produce the
-	// "vomit of multiple tables" symptom.
+	// alongside a now-redundant copy of the table.
 	tearDownLiveRegion()
-
-	// Plain dump only for renderers whose live region doesn't track
-	// final state itself. mpb (Interleaves=true) already shows the
-	// authoritative state in its bars, which persist on screen after
-	// Close — re-emitting them as plain text would just duplicate.
-	// Legacy may have a partial frame on cancel or have trimmed rows;
-	// the dump fills that gap.
-	if renderer != nil && !renderer.Interleaves() && (ctx.Err() != nil || renderer.Trimmed()) {
-		fmt.Println()
-		printPlainPoolStatusesTo(os.Stdout, finalRows)
-	}
 
 	fmt.Fprintf(out, "\n%d succeeded, %d failed (%s)\n", succeeded, failed, runner.FormatDuration(time.Since(start)))
 
