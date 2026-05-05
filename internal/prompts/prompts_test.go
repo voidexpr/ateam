@@ -422,6 +422,70 @@ func TestResolveValueFile(t *testing.T) {
 	}
 }
 
+func TestAssembleCodeVerifyPrompt(t *testing.T) {
+	base := t.TempDir()
+	orgDir := filepath.Join(base, "org")
+	projectDir := filepath.Join(base, "project")
+
+	// Place stub at org-defaults/supervisor level so the 3-level fallback finds it.
+	supervisorDir := filepath.Join(orgDir, "defaults", "supervisor")
+	if err := os.MkdirAll(supervisorDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	stubBody := "verify the code changes carefully"
+	if err := os.WriteFile(filepath.Join(supervisorDir, CodeVerifyPromptFile), []byte(stubBody), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	pinfo := ProjectInfoParams{
+		ProjectName: "myapp",
+		Role:        "the supervisor",
+	}
+
+	t.Run("without extra prompt", func(t *testing.T) {
+		result, err := AssembleCodeVerifyPrompt(orgDir, projectDir, pinfo, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(result, "# ATeam Project Context") {
+			t.Error("missing project-info header")
+		}
+		if !strings.Contains(result, stubBody) {
+			t.Errorf("missing prompt body %q in:\n%s", stubBody, result)
+		}
+		if strings.Contains(result, "# Additional Instructions") {
+			t.Error("unexpected Additional Instructions section when extraPrompt is empty")
+		}
+	})
+
+	t.Run("with extra prompt appended last", func(t *testing.T) {
+		extra := "run the full test suite first"
+		result, err := AssembleCodeVerifyPrompt(orgDir, projectDir, pinfo, extra)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(result, "# ATeam Project Context") {
+			t.Error("missing project-info header")
+		}
+		if !strings.Contains(result, stubBody) {
+			t.Errorf("missing prompt body %q", stubBody)
+		}
+		if !strings.Contains(result, "# Additional Instructions") {
+			t.Error("missing Additional Instructions section")
+		}
+		if !strings.Contains(result, extra) {
+			t.Errorf("missing extra prompt content %q", extra)
+		}
+		// Project info must appear before the prompt body, which must appear before extra.
+		headerIdx := strings.Index(result, "# ATeam Project Context")
+		bodyIdx := strings.Index(result, stubBody)
+		extraIdx := strings.Index(result, "# Additional Instructions")
+		if !(headerIdx < bodyIdx && bodyIdx < extraIdx) {
+			t.Errorf("sections out of order: header=%d body=%d extra=%d", headerIdx, bodyIdx, extraIdx)
+		}
+	})
+}
+
 func TestResolveValueStdin(t *testing.T) {
 	for _, sentinel := range []string{"-", "@-"} {
 		t.Run(sentinel, func(t *testing.T) {
