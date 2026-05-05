@@ -189,7 +189,10 @@ agent "claude" {
   args    = ["-p", "--output-format", "stream-json", "--verbose"]
   sandbox = local.claude_sandbox
   env = {
-    CLAUDECODE = ""
+    CLAUDECODE = "",
+    # EXPERIMENTAL: experiencing fork bombs with claude code (inside or outside of ateam)
+    #               so trying to force usage of zsh to confirm/rule out bash config
+    CLAUDE_CODE_SHELL = "/bin/zsh"
   }
   required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]
 
