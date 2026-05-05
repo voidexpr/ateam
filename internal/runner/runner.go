@@ -656,6 +656,19 @@ func setupContainer(ctx context.Context, c container.Container, req *agent.Reque
 	if err := c.Prepare(ctx); err != nil {
 		return "", err
 	}
+	// Forward request-scoped env into the container (translated to container
+	// paths). Once the agent attaches CmdFactory it skips buildProcessEnv,
+	// so without this step per-run overrides like CLAUDE_CONFIG_DIR never
+	// reach the docker invocation. req.Env itself is left untranslated so
+	// host-side preflight (e.g. mkdir for an isolated config dir) still
+	// targets the bind-mounted host path.
+	if len(req.Env) > 0 {
+		translated := make(map[string]string, len(req.Env))
+		for k, v := range req.Env {
+			translated[k] = c.TranslatePath(v)
+		}
+		c.ApplyAgentEnv(translated)
+	}
 	if factory := c.CmdFactory(); factory != nil {
 		req.CmdFactory = factory
 	}
