@@ -143,6 +143,76 @@ func TestSetupWorktreesSuccess(t *testing.T) {
 	}
 }
 
+// newNestedTestEnv places .ateam/ under a subdirectory of the repo so the
+// worktree must preserve that nested layout instead of flattening to the
+// repo root.
+func newNestedTestEnv(t *testing.T) (*root.ResolvedEnv, string) {
+	t.Helper()
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	subRel := filepath.Join("subdir", "nested")
+	projectDir := filepath.Join(repoDir, subRel, ".ateam")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	writeFile(t, filepath.Join(projectDir, "config.toml"), "[project]\nname = \"nested\"\n")
+	writeFile(t, filepath.Join(projectDir, "roles", "security", "report_prompt.md"), "prompt content")
+
+	cmd := exec.Command("git", "add", ".")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "commit", "-q", "-m", "add nested ateam")
+	cmd.Dir = repoDir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	env := &root.ResolvedEnv{
+		ProjectDir: projectDir,
+		SourceDir:  filepath.Dir(projectDir),
+	}
+	return env, repoDir
+}
+
+func TestSetupWorktreesPreservesNestedProjectLayout(t *testing.T) {
+	env, _ := newNestedTestEnv(t)
+	base := filepath.Join(t.TempDir(), "worktrees")
+
+	baseEnv, candEnv, err := SetupWorktrees(env, base)
+	if err != nil {
+		t.Fatalf("SetupWorktrees: %v", err)
+	}
+	defer cleanupWorktrees(t, env.SourceDir, baseEnv.SourceDir, candEnv.SourceDir)
+
+	for _, wt := range []*root.ResolvedEnv{baseEnv, candEnv} {
+		// .ateam/ must end up at <worktree>/subdir/nested/.ateam to mirror
+		// the source layout, not at <worktree>/.ateam.
+		wantAteam := filepath.Join(filepath.Dir(wt.SourceDir), "nested", ".ateam")
+		if wt.ProjectDir != wantAteam {
+			t.Errorf("ProjectDir = %q, want %q", wt.ProjectDir, wantAteam)
+		}
+		if _, err := os.Stat(filepath.Join(wt.ProjectDir, "config.toml")); err != nil {
+			t.Errorf("nested config.toml missing in worktree: %v", err)
+		}
+		// SourceDir is the project root (parent of .ateam/), which is the
+		// nested directory rather than the worktree (repo) root.
+		wantSource := filepath.Dir(wt.ProjectDir)
+		if wt.SourceDir != wantSource {
+			t.Errorf("SourceDir = %q, want %q", wt.SourceDir, wantSource)
+		}
+		if _, err := os.Stat(filepath.Join(wt.SourceDir, "..", "..", "README.md")); err != nil {
+			t.Errorf("worktree README.md not at expected path: %v", err)
+		}
+	}
+}
+
 func TestSetupWorktreesRejectsDirtyTree(t *testing.T) {
 	env, repoRoot := newTestEnv(t)
 	// Make the repo dirty.

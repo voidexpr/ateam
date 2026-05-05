@@ -68,13 +68,23 @@ func SetupWorktrees(source *root.ResolvedEnv, baseDir string) (baseEnv, candEnv 
 
 	baseWT := filepath.Join(baseDirAbs, "base")
 	candWT := filepath.Join(baseDirAbs, "candidate")
-	ateamDirName := filepath.Base(source.ProjectDir)
+	// Preserve the .ateam path relative to the repo root so nested projects
+	// (.ateam under a subdirectory) keep their original layout in the worktree
+	// instead of being flattened to the repo root.
+	relProject, err := filepath.Rel(repoRootReal, realPath(source.ProjectDir))
+	if err != nil {
+		return nil, nil, fmt.Errorf("compute project path relative to repo root: %w", err)
+	}
+	relProjectSlash := filepath.ToSlash(relProject)
+	if relProjectSlash == "." || strings.HasPrefix(relProjectSlash, "../") {
+		return nil, nil, fmt.Errorf("project dir %s is not inside the source git repo %s", source.ProjectDir, repoRoot)
+	}
 
 	for _, path := range []string{baseWT, candWT} {
 		if err := addDetachedWorktree(repoRoot, path); err != nil {
 			return nil, nil, err
 		}
-		wtAteam := filepath.Join(path, ateamDirName)
+		wtAteam := filepath.Join(path, relProject)
 		// Start from a clean .ateam/ so checked-out state files (if any) don't
 		// carry over alongside our copy.
 		if err := os.RemoveAll(wtAteam); err != nil {
@@ -85,21 +95,26 @@ func SetupWorktrees(source *root.ResolvedEnv, baseDir string) (baseEnv, candEnv 
 		}
 	}
 
-	return worktreeEnv(source, baseWT), worktreeEnv(source, candWT), nil
+	return worktreeEnv(source, baseWT, relProject), worktreeEnv(source, candWT, relProject), nil
 }
 
 // worktreeEnv derives a ResolvedEnv for a worktree from the source env, keeping
 // OrgDir and Config (identical across worktrees since .ateam/ is a direct copy)
 // and pointing ProjectDir/SourceDir at the worktree path. This avoids a second
 // org-discovery walk from /tmp/... where .ateamorg would never be found.
-func worktreeEnv(source *root.ResolvedEnv, worktreeDir string) *root.ResolvedEnv {
+//
+// relProject is the source's .ateam path relative to the repo root (e.g.
+// ".ateam" for a flat layout, "subdir/.ateam" for a nested project), so the
+// worktree env mirrors the original layout instead of flattening to the
+// worktree root.
+func worktreeEnv(source *root.ResolvedEnv, worktreeDir, relProject string) *root.ResolvedEnv {
 	e := *source
 	if source.Config != nil {
 		cfg := *source.Config
 		e.Config = &cfg
 	}
-	e.ProjectDir = filepath.Join(worktreeDir, filepath.Base(source.ProjectDir))
-	e.SourceDir = worktreeDir
+	e.ProjectDir = filepath.Join(worktreeDir, relProject)
+	e.SourceDir = filepath.Dir(e.ProjectDir)
 	if source.GitRepoDir != "" {
 		e.GitRepoDir = worktreeDir
 	}
