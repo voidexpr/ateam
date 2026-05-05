@@ -67,6 +67,35 @@ func TestClassifyFailureNoResult(t *testing.T) {
 	}
 }
 
+// TestClassifyFailureUserCanceled covers the operator-cancellation case.
+// Long-running commands wrap ctx with signal.NotifyContext, so Ctrl-C and
+// SIGTERM surface as context.Canceled. Without an explicit branch, those
+// runs fall through to agent_process / ateam_internal and the persisted
+// row reads like a real failure.
+func TestClassifyFailureUserCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	<-ctx.Done()
+
+	// No result event — mirrors the typical case where the agent process
+	// was killed mid-stream.
+	source, cause := classifyFailure(ctx, nil, 5)
+	if source != agent.ErrorSourceUserCanceled {
+		t.Errorf("source = %q, want %q", source, agent.ErrorSourceUserCanceled)
+	}
+	if cause == "" {
+		t.Error("cause is empty")
+	}
+
+	// With a partial agent error from the killed subprocess, cancellation
+	// still wins so the row does not read as agent_process.
+	ev := &agent.StreamEvent{Type: "error", Err: errors.New("signal: killed")}
+	source, _ = classifyFailure(ctx, ev, 5)
+	if source != agent.ErrorSourceUserCanceled {
+		t.Errorf("source with killed result = %q, want %q", source, agent.ErrorSourceUserCanceled)
+	}
+}
+
 func TestAppendStderrSummaryWritesExpectedFields(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "stderr.log")

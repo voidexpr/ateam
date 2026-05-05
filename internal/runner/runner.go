@@ -877,6 +877,12 @@ func classifyFailure(ctx context.Context, resultEv *agent.StreamEvent, timeoutMi
 	case ctx.Err() == context.DeadlineExceeded:
 		return agent.ErrorSourceAteamTimeout,
 			fmt.Sprintf("ateam timed out the run after %d minutes", timeoutMin)
+	case ctx.Err() == context.Canceled:
+		// Long-running commands wrap ctx with signal.NotifyContext, so SIGINT /
+		// SIGTERM surface here as context.Canceled. Distinguish operator-
+		// initiated cancellation from genuine agent failure so the persisted
+		// row and stderr summary don't read as "agent_process" / "ateam_internal".
+		return agent.ErrorSourceUserCanceled, "run canceled (Ctrl-C, SIGTERM, or parent context canceled)"
 	case resultEv != nil && resultEv.ErrorCause != "":
 		src := resultEv.ErrorSource
 		if src == "" {

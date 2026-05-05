@@ -58,6 +58,7 @@ const (
 	ErrorSourceAgentProcess  = "agent_process"  // agent subprocess exited non-zero without a result event (crash, OOM, ...)
 	ErrorSourceAteamTimeout  = "ateam_timeout"  // ateam killed the run via context deadline
 	ErrorSourceAteamInternal = "ateam_internal" // ateam side failure (no result event, not a timeout)
+	ErrorSourceUserCanceled  = "user_canceled"  // operator aborted the run (Ctrl-C, SIGTERM, parent ctx canceled)
 )
 
 // errorEvent builds a populated StreamEvent of type "error" carrying err.
