@@ -506,7 +506,7 @@ func containerPathExists(container, path string) bool {
 }
 
 func containerDirEmpty(container, path string) bool {
-	out, err := dockerExecOutput(container, "sh", "-c", fmt.Sprintf("ls -A %s 2>/dev/null", path))
+	out, err := dockerExecOutput(container, "sh", "-c", `ls -A "$1" 2>/dev/null`, "_", path)
 	return err == nil && strings.TrimSpace(out) == ""
 }
 
@@ -728,21 +728,21 @@ func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bo
 	} else {
 		if claudeDirNonEmpty && force {
 			_, _ = dockerExecOutput(containerName, "sh", "-c",
-				fmt.Sprintf("rm -rf %s/* %s/.[!.]* 2>/dev/null || true", claudeDir, claudeDir))
+				`rm -rf "$1"/* "$1"/.[!.]* 2>/dev/null || true`, "_", claudeDir)
 		}
 		if err := dockerCp(localClaudeDir+"/.", containerName+":"+claudeDir+"/"); err != nil {
 			return err
 		}
 	}
 
-	chownPaths := claudeDir
+	chownPaths := []string{claudeDir}
 
 	if claudeJSON != "" {
 		if _, err := os.Stat(localClaudeJSON); err == nil {
 			if err := dockerCp(localClaudeJSON, containerName+":"+claudeJSON); err != nil {
 				return err
 			}
-			chownPaths += " " + claudeJSON
+			chownPaths = append(chownPaths, claudeJSON)
 		}
 	}
 
@@ -754,11 +754,11 @@ func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bo
 		if err := dockerCp(localSecrets, containerName+":"+ateamOrgDir+"/secrets.env"); err != nil {
 			return err
 		}
-		chownPaths += " " + ateamOrgDir
+		chownPaths = append(chownPaths, ateamOrgDir)
 	}
 
-	_, _ = dockerExecOutput(containerName, "sh", "-c",
-		fmt.Sprintf("chown -R %s:%s %s 2>/dev/null || true", ci.user, ci.user, chownPaths))
+	chownArgs := append([]string{"sh", "-c", `u=$1; shift; chown -R "$u":"$u" "$@" 2>/dev/null || true`, "_", ci.user}, chownPaths...)
+	_, _ = dockerExecOutput(containerName, chownArgs...)
 
 	if copyAteam {
 		if err := copyAteamBinary(containerName, orgDir); err != nil {
