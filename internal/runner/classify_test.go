@@ -227,3 +227,48 @@ func TestAppendStderrSummaryNoOpWithoutSource(t *testing.T) {
 		t.Errorf("expected no file to be created; stat err = %v", err)
 	}
 }
+
+func TestReconcileErrorEvent(t *testing.T) {
+	// nil prev: error event becomes the terminal event.
+	ev := agent.StreamEvent{Type: "error", Err: errors.New("crash"), ExitCode: 2}
+	got := reconcileErrorEvent(nil, ev)
+	if got.ExitCode != 2 {
+		t.Errorf("nil prev: ExitCode = %d, want 2", got.ExitCode)
+	}
+	if got.Err == nil || got.Err.Error() != "crash" {
+		t.Errorf("nil prev: Err = %v, want 'crash'", got.Err)
+	}
+
+	// Non-result prev (e.g. type "assistant"): error event replaces it.
+	prev := &agent.StreamEvent{Type: "assistant", ExitCode: 0}
+	got = reconcileErrorEvent(prev, ev)
+	if got.ExitCode != 2 {
+		t.Errorf("non-result prev: ExitCode = %d, want 2", got.ExitCode)
+	}
+
+	// Result prev with zero exit code: exit code is inherited from the error event.
+	resultPrev := &agent.StreamEvent{
+		Type:        "result",
+		ExitCode:    0,
+		ErrorSource: agent.ErrorSourceAgentAPI,
+		ErrorCause:  "stream timeout",
+	}
+	got = reconcileErrorEvent(resultPrev, agent.StreamEvent{Type: "error", ExitCode: 1})
+	if got.ExitCode != 1 {
+		t.Errorf("result prev zero exit: ExitCode = %d, want 1 (inherited)", got.ExitCode)
+	}
+	if got.ErrorSource != agent.ErrorSourceAgentAPI {
+		t.Errorf("result prev zero exit: ErrorSource = %q, want agent_api (preserved)", got.ErrorSource)
+	}
+
+	// Result prev with non-zero exit code: error event exit code must not overwrite it.
+	resultPrevNonZero := &agent.StreamEvent{
+		Type:        "result",
+		ExitCode:    3,
+		ErrorSource: agent.ErrorSourceAgentAPI,
+	}
+	got = reconcileErrorEvent(resultPrevNonZero, agent.StreamEvent{Type: "error", ExitCode: 7})
+	if got.ExitCode != 3 {
+		t.Errorf("result prev non-zero exit: ExitCode = %d, want 3 (not overwritten)", got.ExitCode)
+	}
+}
