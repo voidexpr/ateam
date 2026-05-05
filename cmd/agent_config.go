@@ -473,6 +473,9 @@ func validateLocalPath(path string) error {
 		return fmt.Errorf("--path must not be your home directory (%s) — this would overwrite ~/.claude and ~/.claude.json", home)
 	}
 	claudeDir := filepath.Join(home, ".claude")
+	if resolved, err := filepath.EvalSymlinks(claudeDir); err == nil {
+		claudeDir = resolved
+	}
 	if abs == claudeDir {
 		return fmt.Errorf("--path must not be ~/.claude — this would pollute your Claude config directory")
 	}
