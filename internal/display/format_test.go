@@ -40,6 +40,42 @@ func TestFmtTokens(t *testing.T) {
 	}
 }
 
+func TestFmtRFC3339AsTimestamp(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"", ""},
+		{"2026-05-04T20:57:13Z", "2026-05-04_20-57-13"},
+		{"not-a-date", "not-a-date"},
+	}
+	for _, c := range cases {
+		if got := FmtRFC3339AsTimestamp(c.input); got != c.want {
+			t.Errorf("FmtRFC3339AsTimestamp(%q) = %q, want %q", c.input, got, c.want)
+		}
+	}
+}
+
+func TestFmtBytes(t *testing.T) {
+	cases := []struct {
+		n    int
+		want string
+	}{
+		{0, "0B"},
+		{512, "512B"},
+		{1023, "1023B"},
+		{1024, "1.0KB"},
+		{2048, "2.0KB"},
+		{1024 * 1024, "1.0MB"},
+		{3 * 1024 * 1024, "3.0MB"},
+	}
+	for _, c := range cases {
+		if got := FmtBytes(c.n); got != c.want {
+			t.Errorf("FmtBytes(%d) = %q, want %q", c.n, got, c.want)
+		}
+	}
+}
+
 func TestFmtDateAge(t *testing.T) {
 	cases := []struct {
 		t    time.Time
