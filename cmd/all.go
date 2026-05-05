@@ -17,6 +17,7 @@ var (
 	allProfile         string
 	allDockerAutoSetup bool
 	allVerify          bool
+	allContainerName   string
 
 	// Per-stage overrides
 	allReportProfile     string
@@ -67,6 +68,7 @@ func init() {
 	addCheaperModelFlag(allCmd, &allCheaperModel)
 	addVerboseFlag(allCmd, &allVerbose)
 	addDockerAutoSetupFlag(allCmd, &allDockerAutoSetup)
+	addContainerNameFlag(allCmd, &allContainerName)
 	allCmd.Flags().BoolVar(&allVerify, "verify", false, "run 'ateam verify' after the code phase completes")
 }
 
@@ -99,6 +101,7 @@ func runAll(cmd *cobra.Command, args []string) error {
 		Agent:           allReportAgent,
 		Verbose:         allVerbose,
 		DockerAutoSetup: allDockerAutoSetup,
+		ContainerName:   allContainerName,
 	}); err != nil {
 		return fmt.Errorf("report phase failed: %w", err)
 	}
@@ -115,6 +118,7 @@ func runAll(cmd *cobra.Command, args []string) error {
 		Verbose:         allVerbose,
 		Roles:           allRoles,
 		DockerAutoSetup: allDockerAutoSetup,
+		ContainerName:   allContainerName,
 	}); err != nil {
 		return fmt.Errorf("review phase failed: %w", err)
 	}
@@ -132,6 +136,7 @@ func runAll(cmd *cobra.Command, args []string) error {
 		SupervisorAgent:   allSupervisorAgent,
 		Verbose:           allVerbose,
 		DockerAutoSetup:   allDockerAutoSetup,
+		ContainerName:     allContainerName,
 	}); err != nil {
 		return fmt.Errorf("code phase failed: %w", err)
 	}
@@ -147,6 +152,7 @@ func runAll(cmd *cobra.Command, args []string) error {
 			Agent:           allSupervisorAgent,
 			Verbose:         allVerbose,
 			DockerAutoSetup: allDockerAutoSetup,
+			ContainerName:   allContainerName,
 		}); err != nil {
 			return fmt.Errorf("verify phase failed: %w", err)
 		}

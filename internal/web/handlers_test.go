@@ -51,6 +51,8 @@ func newTestMux(s *Server) *http.ServeMux {
 	mux.HandleFunc("GET /p/{project}/runs/{id}/{file}", s.handleRunFile)
 	mux.HandleFunc("GET /p/{project}/reports/{role}", s.handleReport)
 	mux.Handle("GET /p/{project}/review", s.handleReview())
+	mux.Handle("GET /p/{project}/verify", s.handleVerify())
+	mux.HandleFunc("GET /p/{project}/prompts", s.handlePrompts)
 	return mux
 }
 
@@ -620,5 +622,95 @@ func TestHandleReviewNotFoundBadProject(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("handleReview bad project status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+// --- handleVerify tests ---
+
+func TestHandleVerifyReturnsOK(t *testing.T) {
+	projectDir := t.TempDir()
+
+	supervisorDir := filepath.Join(projectDir, "supervisor")
+	if err := os.MkdirAll(supervisorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(supervisorDir, "verify.md"), []byte("# Code Verification\nAll checks passed."), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newTestServer(t, projectDir)
+	mux := newTestMux(s)
+	req := httptest.NewRequest("GET", "/p/testproj/verify", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("handleVerify status = %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Code Verification") {
+		t.Error("expected rendered markdown content 'Code Verification' in response body")
+	}
+}
+
+func TestHandleVerifyNoFile(t *testing.T) {
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMux(s)
+
+	req := httptest.NewRequest("GET", "/p/testproj/verify", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	// Should still return 200 — the handler renders a page even without verify.md.
+	if w.Code != http.StatusOK {
+		t.Errorf("handleVerify no file status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestHandleVerifyBadProject(t *testing.T) {
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMux(s)
+
+	req := httptest.NewRequest("GET", "/p/nonexistent/verify", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("handleVerify bad project status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+// --- handlePrompts tests ---
+
+func TestHandlePromptsReturnsOK(t *testing.T) {
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMux(s)
+
+	req := httptest.NewRequest("GET", "/p/testproj/prompts", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("handlePrompts status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+}
+
+func TestHandlePromptsBadProject(t *testing.T) {
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMux(s)
+
+	req := httptest.NewRequest("GET", "/p/nonexistent/prompts", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("handlePrompts bad project status = %d, want %d", w.Code, http.StatusNotFound)
 	}
 }
