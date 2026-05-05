@@ -44,6 +44,7 @@ ateam init --org-home                          # auto-create .ateamorg/ in $HOME
 | `--org-home` | Create `.ateamorg/` in `$HOME` if none exists |
 | `--org-create-prompt` | Interactively choose where to create `.ateamorg/` |
 | `--auto-setup` | Run `ateam auto-setup` after initialization |
+| `--debug` | Print step-by-step progress to stderr |
 
 ### `ateam auto-setup`
 
@@ -84,12 +85,14 @@ ateam report --rerun-failed --dry-run    # preview which roles would be rerun
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
 | `--cheaper-model` | Use a cheaper model (sonnet) |
 | `--timeout MINUTES` | Timeout per role (overrides `config.toml`) |
+| `--parallel N` | Max number of roles to run in parallel (overrides `config.toml`) |
 | `--print` | Print reports to stdout after completion |
 | `--rerun-failed` | Re-run only roles that failed in the last report round (mutually exclusive with `--roles`) |
 | `--dry-run` | Print computed prompts without running roles |
 | `--ignore-previous-report` | Do not include the role's previous report in the prompt |
 | `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
 | `--verbose` | Print agent and docker commands to stderr |
+| `--review` | Run review automatically after reports complete |
 
 ### `ateam review`
 
@@ -141,6 +144,33 @@ ateam code --dry-run
 | `--verbose` | Print agent and docker commands to stderr |
 | `--tail` | Stream live output from supervisor and sub-runs |
 | `--force` | Run even if the same action is already running |
+| `--verify` | Run `ateam verify` after code completes successfully |
+
+### `ateam verify`
+
+Have the supervisor inspect commits made by the most recent `ateam code` run, look for logical bugs, broken or missing tests, and risky changes, then run the project's test suite and record findings in a verification report.
+
+Run after `ateam code` (or use `ateam code --verify` / `ateam all --verify` to chain it automatically).
+
+```bash
+ateam verify
+ateam verify --extra-prompt "Pay extra attention to migrations"
+ateam verify --dry-run
+```
+
+| Flag | Description |
+|------|-------------|
+| `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
+| `--timeout MINUTES` | Timeout in minutes (overrides `config.toml`) |
+| `--print` | Print verification report to stdout after completion |
+| `--dry-run` | Print the computed prompt without running |
+| `--cheaper-model` | Use a cheaper model (sonnet) |
+| `--profile NAME` | Runtime profile (overrides config resolution) |
+| `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
+| `--verbose` | Print agent and docker commands to stderr |
+| `--force` | Run even if the same action is already running |
+| `--docker-auto-setup` | Auto-setup Docker container if needed |
+| `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
 
 ### `ateam all`
 
@@ -158,6 +188,7 @@ ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile 
 | `--extra-prompt TEXT` | Additional instructions passed to all phases (text or `@filepath`) |
 | `--cheaper-model` | Use a cheaper model (sonnet) |
 | `--timeout MINUTES` | Per-phase timeout (overrides config) |
+| `--parallel N` | Max parallel report roles (overrides config `max_parallel`) |
 | `--roles ROLE,...` | Run only these roles in the report phase and limit coding tasks to them in review |
 | `--profile NAME` | Profile for code sub-runs (passed to `ateam code --profile`) |
 | `--report-profile NAME` | Override profile for the report phase |
@@ -168,6 +199,7 @@ ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile 
 | `--code-agent NAME` | Override agent for code sub-runs (uses 'none' container) |
 | `--quiet` | Suppress output printing |
 | `--verbose` | Print agent and docker commands to stderr |
+| `--verify` | Run `ateam verify` after the code phase completes |
 
 ### `ateam secret`
 
@@ -388,10 +420,11 @@ ateam prompt --role security --action report --extra-prompt "Focus on auth"
 |------|-------------|
 | `--role ROLE` | Role name (mutually exclusive with `--supervisor`) |
 | `--supervisor` | Generate supervisor prompt instead of role prompt |
-| `--action ACTION` | Action type: `report` or `code` for roles; `review` or `code` for supervisor **(required)** |
+| `--action ACTION` | Action type: `report` or `code` for roles; `review`, `code`, or `verify` for supervisor **(required)** |
 | `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
 | `--no-project-info` | Omit the ATeam Project Context section |
 | `--ignore-previous-report` | Do not include the role's previous report |
+| `--files-only` | List prompt sources with token estimates instead of printing the prompt |
 
 ### `ateam env`
 
@@ -400,6 +433,7 @@ Show the current environment: organization, runtime config, project, and role st
 | Flag | Description |
 |------|-------------|
 | `--claude-sandbox` | Print the generated Claude sandbox settings JSON for the default profile |
+| `--print-org` | Print the absolute path to the org directory |
 
 ### `ateam inspect [ID...]`
 
@@ -536,6 +570,7 @@ List roles configured for the current project.
 |------|-------------|
 | `--enabled` | List enabled roles only |
 | `--available` | List all roles with status (default) |
+| `--docs` | Generate markdown documentation for built-in roles |
 
 ### `ateam projects`
 
@@ -643,6 +678,9 @@ Created by `ateam install`. Holds shared defaults and org-level overrides.
     roles/<NAME>/code_prompt.md                # per-role code prompt (where available)
     supervisor/review_prompt.md                # supervisor review prompt
     supervisor/code_management_prompt.md       # supervisor code management prompt
+    supervisor/code_verify_prompt.md           # supervisor verify prompt
+    supervisor/report_commissioning_prompt.md  # report commissioning prompt
+    supervisor/task_debug_prompt.md            # task debug prompt (used by ateam inspect --auto-debug)
     supervisor/auto_setup_prompt.md            # auto-setup prompt
   runtime.hcl                                  # org-level runtime config override (optional)
   Dockerfile                                   # org-level Dockerfile override (optional)

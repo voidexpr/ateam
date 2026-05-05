@@ -243,6 +243,7 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 | `ateam review` | Supervisor reviews and prioritizes findings |
 | `ateam code` | Execute prioritized coding tasks |
 | `ateam all` | Full pipeline: report → review → code |
+| `ateam verify` | Supervisor verifies recent code changes from `ateam code` |
 | `ateam eval` | Compare two role prompt variants side-by-side with LLM scoring — see [EVAL.md](EVAL.md) |
 | `ateam run` | Run an agent with a custom prompt |
 | `ateam parallel` | Run multiple agents in parallel, each with its own prompt |
@@ -255,12 +256,14 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 | `ateam export` | Export reports as a self-contained HTML file |
 | `ateam ps` | Recent run history |
 | `ateam inspect` | Show details and logs for agent runs |
+| `ateam resume` | Resume a previous claude agent run as an interactive session |
 | `ateam cost` | Aggregated cost and token usage |
 | `ateam prompt` | Debug prompt assembly |
 | `ateam cat` | Pretty-print stream logs |
 | `ateam tail` | Live-stream agent output |
 | `ateam roles` | List available roles |
 | `ateam projects` | List projects in the organization |
+| `ateam project-rename` | Re-register a project after a directory move, or rename its state directory |
 | `ateam update` | Update on-disk defaults to match binary |
 | `ateam version` | Print version, build, and system information |
 
