@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/ateam/internal/config"
@@ -50,39 +49,56 @@ func runRoles(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if env.Config == nil || len(env.Config.Roles) == 0 {
-		fmt.Println("No roles configured.")
+	var configRoles map[string]string
+	if env.Config != nil {
+		configRoles = env.Config.Roles
+	}
+	allKnown := prompts.AllKnownRoleIDs(configRoles, env.ProjectDir, env.OrgDir)
+	if len(allKnown) == 0 {
+		fmt.Println("No roles available.")
 		return nil
 	}
 
 	if rolesEnabled {
-		roles := env.Config.EnabledRoles()
-		if len(roles) == 0 {
+		var enabled []string
+		for _, name := range allKnown {
+			if roleStatus(configRoles, name) == config.RoleEnabled {
+				enabled = append(enabled, name)
+			}
+		}
+		if len(enabled) == 0 {
 			fmt.Println("No enabled roles.")
 			return nil
 		}
-		for _, name := range roles {
+		for _, name := range enabled {
 			fmt.Println(name)
 		}
 		return nil
 	}
 
-	// Default: --available — all roles with status
-	var names []string
-	for name := range env.Config.Roles {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
 	w := newTable()
 	fmt.Fprintln(w, "ROLE\tSTATUS\tDESCRIPTION")
-	for _, name := range names {
+	for _, name := range allKnown {
 		desc := prompts.RoleDescription(name)
-		fmt.Fprintf(w, "%s\t%s\t%s\n", name, env.Config.Roles[name], desc)
+		fmt.Fprintf(w, "%s\t%s\t%s\n", name, roleStatus(configRoles, name), desc)
 	}
 	w.Flush()
 
 	return nil
+}
+
+// roleStatus reports the effective enabled/disabled status of a role.
+// Roles missing from configRoles default to "on" so embedded defaults and
+// org/project-level role directories are not silently hidden, matching the
+// allowlist behavior used elsewhere (prompts.enabledRoleIDs).
+func roleStatus(configRoles map[string]string, name string) string {
+	if status, ok := configRoles[name]; ok {
+		if config.IsRoleEnabled(status) {
+			return config.RoleEnabled
+		}
+		return status
+	}
+	return config.RoleEnabled
 }
 
 func printRolesDocs() error {
