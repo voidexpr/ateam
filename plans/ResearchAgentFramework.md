@@ -285,9 +285,75 @@ These are all customizable YAML files, so the "built-ins" double as templates.
 
 **Key architectural difference from ATeam:** Archon is a *harness builder* — its job is to make a single agent's work deterministic and repeatable by wrapping it in an explicit DAG. ATeam is an *autonomous quality system* — its job is to decide what to work on, run specialized agents on a schedule, accumulate project knowledge, and triage results for human review. They sit at different layers: an organization could plausibly use Archon DAGs *as the implementation* of ATeam's individual agent runs, with ATeam's coordinator deciding which DAG to invoke and when. Archon is the choreography for one agent's dance; ATeam is the show producer deciding which dance happens tonight.
 
+#### Compound Engineering Plugin (EveryInc) ⭐⭐⭐⭐
+
+**What it is:** The official Compound Engineering plugin from [Every Inc.](https://every.to/) — the team (Kieran Klaassen, Dan Shipper, et al.) that coined and popularised "compound engineering." A multi-tool plugin (Claude Code primary, plus Codex, Cursor, GitHub Copilot, Gemini, Pi, OpenCode, Droid, Qwen, Kiro via Bun-based converters). 16.2K⭐, 1.3K forks, created Oct 2025, pushed today. TypeScript, MIT-licensed. Among the most-starred and most-active projects in this entire research.
+
+**The doctrine, applied:** "each unit of engineering work should make subsequent units easier — not harder." This is the originating expression of the doctrine; everything else covered in this section that mentions compounding (notably DSPy Compounding Engineering below) is a re-implementation of the same idea in different primitives. The Every methodology is documented at [every.to/guides/compound-engineering](https://every.to/guides/compound-engineering).
+
+**Architecture — a skill+agent system layered on existing coding agent CLIs:**
+
+The plugin doesn't introduce a new runtime. It ships ~38 user-facing **skills** (slash commands) and ~50 specialist **sub-agents** that the skills delegate to. The host coding agent (Claude Code, Cursor, etc.) executes the skills; the plugin provides the workflow shape, the prompts, the agent definitions, and — critically — the artifact conventions that make the loop compound.
+
+**The skill set, grouped:**
+
+- **Strategy & ideation:** `/ce-strategy` (creates and maintains `STRATEGY.md` — the product target, approach, persona, key metrics that ground every downstream decision), `/ce-ideate` (generates ideas grounded in strategy), `/ce-brainstorm` (interactive Q&A that produces a requirements doc).
+- **Planning & execution:** `/ce-plan` (structured multi-step task plan from a brainstorm doc), `/ce-work` (executes plan tasks systematically), `/ce-debug` (root-cause + test-first fix), `/ce-optimize` (iterative optimisation with parallel experiments).
+- **Review:** `/ce-code-review` (tiered multi-agent review with confidence gating), plus 25+ specialist review sub-agents (correctness, security, performance, language-specialists for Rails/Swift/TS, etc.) and 7 document-review agents (coherence, design, feasibility, product lens).
+- **The actual compounding machinery:** `/ce-compound` (document a solved problem as a reusable note), `/ce-compound-refresh` (keep/update/replace/archive learnings — the *forgetting* half of the loop), and a `ce-learnings-researcher` agent that searches the accumulated notes when other skills run.
+- **Reporting & research:** `/ce-product-pulse` (single-page time-windowed usage/performance report saved to `docs/pulse-reports/`), `/ce-sessions` (query prior Claude Code/Cursor history), `/ce-slack-research` (search org Slack), `ce-riffrec-feedback-analysis` (recordings → structured feedback).
+- **Git plumbing:** `ce-commit`, `ce-commit-push-pr`, `ce-worktree`, `ce-clean-gone-branches`.
+- **Utilities:** `/ce-demo-reel`, `/ce-setup`, `/ce-update`, `/ce-test-browser`, `/ce-test-xcode`.
+
+**Artifact-centric workflow:**
+
+Every skill produces or updates a versioned artifact in the repo. The artifacts are the workflow's memory. Each downstream skill reads upstream artifacts, so the chain is not "agent→agent message-passing" but "agent→file→agent." Artifact types:
+
+- `STRATEGY.md` — root grounding doc.
+- Brainstorm docs (requirements).
+- Plans (task breakdowns).
+- Code review reports.
+- **Compound notes** — the institutional-knowledge artifact, intentionally separate from regular docs and intentionally distilled (not the full review, just the reusable pattern).
+- `docs/pulse-reports/<date>.md` — browseable product-outcomes timeline.
+
+This is an explicit answer to the question "where does the compounding actually happen?" It's not in a vector DB or a JSON KB — it's in **markdown files committed to the repo**, with a refresh skill (`/ce-compound-refresh`) that explicitly does the keep/update/replace/archive triage so the corpus doesn't drown in stale notes.
+
+**Multi-tool support via converters:**
+
+Native install on Claude Code. For Codex, a native plugin plus a Bun installer for the custom agent definitions. For Copilot/Droid/Qwen, a native converter. For OpenCode/Pi/Gemini/Kiro, a Bun-based converter that maps the skill+agent definitions onto each tool's plugin/skill format. This is the broadest cross-runtime support of any project covered in this section.
+
+**Overlap with ATeam:**
+
+- Specialist parallel review with named roles (correctness, security, performance, language-specific) — same shape as ATeam's specialist agents and Archon's reviewer panel.
+- Strategy → plan → execute → review → document loop — same shape as ATeam's audit → review → implement.
+- Project knowledge as committed markdown — same model ATeam uses for knowledge files.
+- Artifact-driven hand-off between stages — ATeam's report→review→code chain works the same way (each stage reads and overwrites a file).
+
+It is, in fact, the most direct conceptual overlap with ATeam in this entire section. The headline difference is operational, covered next.
+
+**What it lacks for our use case:**
+
+- **Interactive only.** The whole system is invoked via slash commands inside a coding-agent CLI session. No scheduler, no daemon, no autonomous coordinator. A human types `/ce-brainstorm`, then later `/ce-plan`, etc.
+- **No container/sandbox.** Runs in the same shell as the host coding agent — inherits whatever sandboxing (or lack of it) the host provides.
+- **No workflow engine.** The "workflow" is a *documented sequence* of slash commands ("typical loop: strategy → ideate → brainstorm → plan → work → review → compound → pulse"), not an executable artifact. There's no `workflow.yaml`, no resume-from-step, no concurrent-instance lock — because there's nothing to schedule. Each skill is just a manually-invoked prompt.
+- **No budget enforcement.**
+- **No Go integration.** Plugin definitions are TypeScript + skill YAML/markdown.
+
+**Ideas to integrate (this entry contributes the most concrete patterns of any in the doc):**
+
+- **Explicit `/compound` and `/compound-refresh` skills.** ATeam's report agents already overwrite their own artifacts, but the *distillation* step — turn a finished piece of work into a reusable institutional-knowledge note, separate from the per-task report — is missing. ATeam should add an explicit "extract learnings from this run into the knowledge file" step after each agent run, plus a periodic refresh that keep/update/replace/archives the knowledge corpus. The keep/update/replace/archive vocabulary is itself worth borrowing.
+- **`STRATEGY.md` as a root grounding artifact.** Every Inc.'s convention of putting product-level strategy in a single repo-rooted file that all downstream skills read is the kind of thing that's obvious in hindsight. ATeam currently grounds agents in CLAUDE.md / role prompts / project knowledge files; adding an explicit `STRATEGY.md` (or equivalent) read by every agent would tighten the alignment between long-running agent work and current product priorities.
+- **Tiered review with confidence gating.** `/ce-code-review` runs many specialists and uses confidence calibration to suppress low-confidence findings before showing them to the user. ATeam's review pipeline could adopt the same pattern — over many runs, "every reviewer fired some low-confidence noise" is the failure mode the calibration is designed for.
+- **Compound notes as a dedicated artifact type.** Distinct from per-task reports, distinct from project knowledge, distinct from CLAUDE.md. The point is that they're the *distilled, deduplicated, refresh-cycled* form of accumulated learnings — a different lifecycle from any of the other artifacts.
+- **`docs/pulse-reports/` browseable timeline.** Time-windowed reports as named files in a directory, naturally git-versioned, naturally browseable. ATeam has run histories in CallDB; surfacing them as a similar markdown timeline (the way humans actually read history) is a UX win.
+- **Multi-tool converters.** If ATeam ever needs to support agent runtimes other than Claude Code, Every's pattern of "one source-of-truth definition, N converters per target tool" is a clean architecture.
+- **Docrine endorsement.** Adopting "compound engineering" as a stated ATeam principle now means citing Every's framing rather than coining a parallel term — fewer competing names for the same idea is better for the ecosystem.
+
+**Key architectural difference from ATeam:** The Compound Engineering Plugin is a *human-driven workflow toolkit* — a curated set of slash commands and sub-agents that a human invokes inside a coding agent session, with markdown artifacts as the connective tissue. ATeam is an *autonomous workflow system* — a scheduler that decides when and what to run, runs it without a human in the session, and reports back. Both centre on the same loop and the same artifact-based memory model. The right way to think about the relationship: ATeam should adopt the plugin's *artifact taxonomy and skill set* as its own internal vocabulary (strategy, brainstorm, plan, review, compound, refresh, pulse) and run them autonomously — i.e., what the plugin makes a human do interactively, ATeam should do unattended. They don't compete; the plugin is the manual version of what ATeam should automate.
+
 #### DSPy Compounding Engineering (Strategic-Automation) ⭐⭐⭐
 
-**What it is:** A local-first Python CLI by Strategic-Automation that implements "compounding engineering" — the idea that each engineering task should make subsequent tasks easier. Built on [DSPy](https://github.com/stanfordnlp/dspy), Stanford's declarative-LLM framework. 56⭐, ~5 months old (created Nov 2025), pushed April 2026. Smaller and less battle-tested than other entries in this section, but the *conceptual contribution* is genuinely distinct from anything else in this landscape, which is why it gets a full entry rather than a row in the table.
+**What it is:** A local-first Python CLI by Strategic-Automation that re-implements the compound-engineering doctrine (see EveryInc entry above for the canonical version) on top of [DSPy](https://github.com/stanfordnlp/dspy), Stanford's declarative-LLM framework. 56⭐, ~5 months old (created Nov 2025), pushed April 2026. Much smaller in scope and adoption than Every's plugin, but interesting for a different reason: it expresses the same loop in DSPy's typed/optimisable primitives rather than as a curated set of human-invoked slash commands. Worth a full entry as a *technique* contrast, not as a competing implementation.
 
 **The core idea — "compounding engineering":** every completed unit of work automatically writes a learning artifact into a JSON knowledge base under `.knowledge/`. Every subsequent agent call automatically retrieves relevant past learnings and prepends them to the prompt. The system literally gets smarter with use, without an explicit human curating the knowledge.
 
@@ -530,7 +596,7 @@ Gas Town and agent-orchestrator come closest but are both reactive/interactive r
 - **AGENTS.md standard**, **Command+Prompt+PR step sequencing**, **kernel-level guardrails**, and **Skills pattern** from Ona.
 - **Branch strategies** (`head` / `merge-to-head` / `branch`) and **host-vs-sandbox lifecycle hooks** from Sandcastle.
 - **YAML DAG workflows** (AI + bash + human-gate nodes), **`fresh_context` loop iterations**, and **deterministic `until` exit predicates** from Archon.
-- **Compounding engineering doctrine** ("each unit of work makes the next one easier") and the **KBPredict wrapper pattern** (auto-inject prior learnings on every call, auto-codify new learnings on completion) from DSPy Compounding Engineering.
+- **Compound engineering doctrine** ("each unit of work makes the next one easier") plus the **artifact taxonomy** (`STRATEGY.md`, brainstorm, plan, review, compound notes, pulse reports), **`/ce-compound` and `/ce-compound-refresh` distillation+keep/update/replace/archive cycle**, and **tiered review with confidence calibration** from EveryInc's Compound Engineering Plugin (the canonical implementation). The **KBPredict wrapper pattern** (framework-level auto-inject + auto-codify around every model call) from DSPy Compounding Engineering as a complementary technical primitive.
 
 ### B.4 Future: Feature Agents
 
