@@ -148,7 +148,7 @@ func resolveRunSelection(db *calldb.CallDB, env *root.ResolvedEnv, args []string
 	}
 
 	if inspectLastReport {
-		batch, err := db.LatestBatch("", "report-")
+		batch, err := db.LatestBatch(env.ProjectID(), "report-")
 		if err != nil {
 			return nil, err
 		}
@@ -159,7 +159,7 @@ func resolveRunSelection(db *calldb.CallDB, env *root.ResolvedEnv, args []string
 	}
 
 	if inspectLastCode {
-		batch, err := db.LatestBatch("", "code-")
+		batch, err := db.LatestBatch(env.ProjectID(), "code-")
 		if err != nil {
 			return nil, err
 		}

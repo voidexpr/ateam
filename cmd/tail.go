@@ -88,7 +88,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 		if !hasProject {
 			return fmt.Errorf("--coding requires a project context (run from within a project)")
 		}
-		batch, err := db.LatestBatch("", "code-")
+		batch, err := db.LatestBatch(env.ProjectID(), "code-")
 		if err != nil {
 			return fmt.Errorf("cannot find coding session: %w", err)
 		}

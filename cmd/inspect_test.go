@@ -61,9 +61,9 @@ func (g inspectGlobals) restore() {
 //   - two "report" action runs in a report batch
 //   - two "run" action runs in a code batch
 //
-// Note: project_id is left empty so that resolveRunSelection's call to
-// LatestBatch with an empty string prefix finds the rows (queries WHERE project_id = empty).
-func seedInspectDB(t *testing.T, db *calldb.CallDB) (reportBatch, codeBatch string) {
+// projectID is required so seeded rows match what resolveRunSelection's call to
+// LatestBatch(env.ProjectID(), ...) filters on.
+func seedInspectDB(t *testing.T, db *calldb.CallDB, projectID string) (reportBatch, codeBatch string) {
 	t.Helper()
 	now := time.Now()
 
@@ -72,7 +72,7 @@ func seedInspectDB(t *testing.T, db *calldb.CallDB) (reportBatch, codeBatch stri
 
 	insert := func(action, role, batch string, offset time.Duration) int64 {
 		id, err := db.InsertCall(&calldb.Call{
-			ProjectID: "", Action: action, Role: role,
+			ProjectID: projectID, Action: action, Role: role,
 			Batch: batch, StartedAt: now.Add(offset),
 		})
 		if err != nil {
@@ -105,7 +105,7 @@ func TestInspectRunSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open calldb: %v", err)
 	}
-	reportBatch, codeBatch := seedInspectDB(t, db)
+	reportBatch, codeBatch := seedInspectDB(t, db, env.ProjectID())
 	db.Close()
 
 	// Re-open a fresh handle as resolveRunSelection would.
