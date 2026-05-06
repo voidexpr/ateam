@@ -26,22 +26,22 @@ or a new resource used under the pool — read this first.
 Channels carry data between these goroutines:
 
 - `progress chan<- RunProgress` — lossy, non-blocking send from workers.
-- `completed chan<- RunSummary` — blocking, one per task + close. Caller
-  MUST provide `cap(completed) ≥ len(tasks)` OR drain concurrently with
+- `completed chan<- RunSummary` — blocking, one per agent exec + close. Caller
+  MUST provide `cap(completed) ≥ len(execs)` OR drain concurrently with
   `RunPool`; otherwise `RunPool` refuses to dispatch (see pool.go guard).
 
 ## The 7-rule contract
 
-### 1. Every Runner reachable from the task slice is read-only after dispatch
+### 1. Every Runner reachable from the exec slice is read-only after dispatch
 
-`PoolTask.Runner` can override the pool's shared Runner per task
+`PoolExec.Runner` can override the pool's shared Runner per agent exec
 (`internal/runner/pool.go:12`, used from `cmd/report.go:213`). **All**
 such Runners — the shared one plus every override — must be immutable
 once `RunPool` is called. Mutate during construction only.
 
 ### 2. Workers own their mutable state
 
-Stack-local, function parameters, or per-task clones. **No** shared
+Stack-local, function parameters, or per-agent exec clones. **No** shared
 mutable state unless it's a thread-safe primitive with a narrow,
 documented contract:
 
@@ -56,9 +56,9 @@ documented contract:
 
 Cloning happens at the top of `Runner.Run`:
 
-- `Runner.Container.Clone()` → per-task container with independent slice
+- `Runner.Container.Clone()` → per-agent exec container with independent slice
   and map backing memory.
-- `ResolveAgentTemplateArgs(r.Agent, vars)` → per-task agent via
+- `ResolveAgentTemplateArgs(r.Agent, vars)` → per-agent exec agent via
   `Agent.CloneWithResolvedTemplates`, which re-allocates `Args`, `Env`,
   and `Pricing` (see `PricingTable.Clone`). No map or slice backing
   memory is shared between clones and the original.
@@ -87,7 +87,7 @@ Safe examples:
 Forbidden: any `var foo = X` that multiple goroutines write to without
 a sync primitive.
 
-### 6. Per-task filesystem paths
+### 6. Per-agent exec filesystem paths
 
 Stream, stderr, exec, settings, prompt, and output paths are keyed by
 `startedAt` timestamp + `RoleID`. The one shared sink is the runner log
@@ -108,7 +108,7 @@ running under a pool worker:
 
 Secrets resolved by the CLI flow through `ac.Env` via `IsolateCredentials`
 (`internal/secret/validate.go`) at construction time. Agents receive
-them via `c.Env` on their per-task clone; containers receive them via
+them via `c.Env` on their per-agent exec clone; containers receive them via
 `d.Env` on theirs. `os.Setenv` is not on the path.
 
 ## What stays shared (and why it's safe)

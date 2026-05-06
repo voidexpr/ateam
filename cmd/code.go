@@ -68,7 +68,7 @@ var codeCmd = &cobra.Command{
 	Use:   "code",
 	Short: "Execute review tasks as code changes",
 	Long: `Read the review document and execute prioritized tasks as code changes,
-delegating each task to the appropriate role via ateam run.
+delegating each coding task to the appropriate role via ateam run.
 
 Example:
   ateam code
@@ -157,7 +157,7 @@ func runCode(opts CodeOptions) error {
 		return err
 	}
 
-	taskGroup := "code-" + time.Now().Format(runner.TimestampFormat)
+	batch := "code-" + time.Now().Format(runner.TimestampFormat)
 
 	pinfo := env.NewProjectInfoParams("the supervisor", "code")
 	prompt, err := prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.SourceDir, pinfo, reviewContent, customManagement, extraPrompt)
@@ -174,7 +174,7 @@ func runCode(opts CodeOptions) error {
 
 	// Inject flags for the supervisor to pass to sub-runs.
 	prompt += "\n\n# Sub-Run Flags\n\nYou MUST pass the following flags to every `ateam run` command you execute:\n"
-	prompt += "- `--task-group " + taskGroup + "` (groups all sub-tasks for cost tracking)\n"
+	prompt += "- `--batch " + batch + "` (groups all sub-execs for cost tracking)\n"
 	if opts.Agent != "" {
 		prompt += "- `--agent " + opts.Agent + "`\n"
 	} else {
@@ -254,7 +254,7 @@ func runCode(opts CodeOptions) error {
 		HistoryDir:           historyDir,
 		PromptName:           "code_management_prompt.md",
 		Verbose:              opts.Verbose,
-		TaskGroup:            taskGroup,
+		Batch:                batch,
 		StartedAt:            startedAt,
 	}
 
@@ -274,12 +274,12 @@ func runCode(opts CodeOptions) error {
 		tailer := runner.NewTailer(os.Stderr, db, isTerminal(), opts.Verbose)
 		tailer.ProjectDir = env.ProjectDir
 		tailer.OrgDir = env.OrgDir
-		tailer.TaskGroup = taskGroup
+		tailer.Batch = batch
 		if rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir); err == nil {
 			tailer.Pricing, tailer.DefaultModel = mergedPricingFromConfig(rtCfg)
 		}
 
-		if rows, err := db.CallsByTaskGroup(taskGroup); err == nil {
+		if rows, err := db.CallsByBatch(batch); err == nil {
 			for _, r := range rows {
 				if r.StreamFile != "" {
 					tailer.AddSource(r.ID, r.Role, r.Action, root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.StreamFile), r.Model)

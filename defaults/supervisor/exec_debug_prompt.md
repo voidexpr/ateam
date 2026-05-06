@@ -1,6 +1,6 @@
-# Task Debug Investigation
+# Agent Execution Debug Investigation
 
-You are investigating agent run(s) that may have encountered issues related to the environment, other tools or ateam itself.
+You are investigating agent execution(s) that may have encountered issues related to the environment, other tools or ateam itself.
 
 Some keywords to use for a quick pass:
 * "permission", "sandbox" errors
@@ -8,7 +8,7 @@ Some keywords to use for a quick pass:
 
 ## Instructions
 
-1. Read the log files listed below to understand what happened during each run
+1. Read the log files listed below to understand what happened during each execution
 2. Start with the `_exec.md` file for execution context (command, environment, settings)
 3. Check `_stderr.log` for error output
 4. Examine `_stream.jsonl` for the agent's interaction stream — look for error events, unexpected tool failures, or abrupt termination
@@ -33,6 +33,6 @@ Some keywords to use for a quick pass:
       Details:
         more information, likely cause, potential fix
 
-## Run details
+## Execution details
 
-{{TASK_DEBUG_CONTEXT}}
+{{EXEC_DEBUG_CONTEXT}}

@@ -55,8 +55,8 @@
     </thead>
     <tbody>
       {{range $d.Sessions}}
-      <tr data-href="/p/{{$.ProjectSlug}}/sessions/{{.TaskGroup}}">
-        <td data-val="{{.TaskGroup}}">{{.TaskGroup}}</td>
+      <tr data-href="/p/{{$.ProjectSlug}}/sessions/{{.Batch}}">
+        <td data-val="{{.Batch}}">{{.Batch}}</td>
         <td data-val="{{.Kind}}"><span class="badge badge-{{.Kind}}">{{.Kind}}</span></td>
         <td data-val="{{if not .Timestamp.IsZero}}{{.Timestamp.Format "2006-01-02T15:04:05"}}{{end}}">{{if not .Timestamp.IsZero}}{{fmtDateAge .Timestamp}}{{else}}&mdash;{{end}}</td>
         <td data-val="{{.RunCount}}">{{.RunCount}}</td>

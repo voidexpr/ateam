@@ -24,7 +24,7 @@ Use the `ateam` CLI for all role operations:
 
 If a **Sub-Run Flags** section is provided at the end of this prompt, you MUST pass
 ALL listed flags to every `ateam run` command. These flags control cost tracking
-(`--task-group`) and runtime profile (`--profile`) for sub-tasks.
+(`--batch`) and runtime profile (`--profile`) for sub-execs.
 
 Run `ateam --help` and `ateam COMMAND --help` for full details.
 

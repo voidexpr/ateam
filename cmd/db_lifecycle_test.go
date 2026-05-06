@@ -240,14 +240,14 @@ func TestEnvShowsNotFoundForMissingPaths(t *testing.T) {
 // --- global state save/restore helpers ---
 
 type runGlobals struct {
-	org, profile, agent, role, model, workDir, agentArgs, taskGroup, containerName string
-	noStream, noSummary, quiet, verbose, dryRun, dockerAutoSetup                   bool
+	org, profile, agent, role, model, workDir, agentArgs, batch, containerName string
+	noStream, noSummary, quiet, verbose, dryRun, dockerAutoSetup               bool
 }
 
 func saveRunGlobals() runGlobals {
 	return runGlobals{
 		org: orgFlag, profile: runProfile, agent: runAgent, role: runRole, model: runModel,
-		workDir: runWorkDir, agentArgs: runAgentArgs, taskGroup: runTaskGroup,
+		workDir: runWorkDir, agentArgs: runAgentArgs, batch: runBatch,
 		containerName: runContainerName, noStream: runNoStream, noSummary: runNoSummary,
 		quiet: runQuiet, verbose: runVerbose, dryRun: runDryRun, dockerAutoSetup: runDockerAutoSetup,
 	}
@@ -261,7 +261,7 @@ func (g runGlobals) restore() {
 	runModel = g.model
 	runWorkDir = g.workDir
 	runAgentArgs = g.agentArgs
-	runTaskGroup = g.taskGroup
+	runBatch = g.batch
 	runContainerName = g.containerName
 	runNoStream = g.noStream
 	runNoSummary = g.noSummary
@@ -272,14 +272,14 @@ func (g runGlobals) restore() {
 }
 
 type psGlobals struct {
-	org, role, action, taskGroup string
-	limit                        int
+	org, role, action, batch string
+	limit                    int
 }
 
 func savePSGlobals() psGlobals {
 	return psGlobals{
 		org: orgFlag, role: recentRole, action: recentAction,
-		taskGroup: recentTaskGroup, limit: recentLimit,
+		batch: recentBatch, limit: recentLimit,
 	}
 }
 
@@ -287,6 +287,6 @@ func (g psGlobals) restore() {
 	orgFlag = g.org
 	recentRole = g.role
 	recentAction = g.action
-	recentTaskGroup = g.taskGroup
+	recentBatch = g.batch
 	recentLimit = g.limit
 }

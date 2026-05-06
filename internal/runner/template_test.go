@@ -17,7 +17,7 @@ func TestResolveTemplateArgsAllVars(t *testing.T) {
 		ProjectDir:      "myproject",
 		Role:            "security",
 		Action:          "report",
-		TaskGroup:       "code-2026-03-31_06-09-39",
+		Batch:           "code-2026-03-31_06-09-39",
 		Timestamp:       "2026-03-31_06-09-39",
 		Profile:         "docker",
 		ExecID:          42,
@@ -36,7 +36,7 @@ func TestResolveTemplateArgsAllVars(t *testing.T) {
 		{"{{PROJECT_DIR}}", "myproject"},
 		{"{{ROLE}}", "security"},
 		{"{{ACTION}}", "report"},
-		{"{{TASK_GROUP}}", "code-2026-03-31_06-09-39"},
+		{"{{BATCH}}", "code-2026-03-31_06-09-39"},
 		{"{{TIMESTAMP}}", "2026-03-31_06-09-39"},
 		{"{{PROFILE}}", "docker"},
 		{"{{EXEC_ID}}", "42"},
@@ -432,9 +432,9 @@ func TestBuildTemplateVars(t *testing.T) {
 		ContainerType: "docker",
 	}
 	opts := RunOpts{
-		RoleID:    "security",
-		Action:    "report",
-		TaskGroup: "code-2026-01-01_00-00-00",
+		RoleID: "security",
+		Action: "report",
+		Batch:  "code-2026-01-01_00-00-00",
 	}
 	ts := time.Date(2026, 1, 1, 12, 30, 0, 0, time.UTC)
 
@@ -455,8 +455,8 @@ func TestBuildTemplateVars(t *testing.T) {
 	if vars.Action != "report" {
 		t.Errorf("Action: got %q", vars.Action)
 	}
-	if vars.TaskGroup != "code-2026-01-01_00-00-00" {
-		t.Errorf("TaskGroup: got %q", vars.TaskGroup)
+	if vars.Batch != "code-2026-01-01_00-00-00" {
+		t.Errorf("Batch: got %q", vars.Batch)
 	}
 	if vars.Timestamp != "2026-01-01_12-30-00" {
 		t.Errorf("Timestamp: got %q", vars.Timestamp)

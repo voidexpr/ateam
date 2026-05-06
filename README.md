@@ -19,7 +19,7 @@ At its core ateam is a CLI to run one-shot unattended agents with saved prompts.
     * use a separate config for your coding agent (`CLAUDE_CONFIG_DIR`)
     * run inside docker (built-in secret management for oauth or just use an already authenticated agent in the container)
     * run outside of docker but docker exec only the agents in docker
-* **just a CLI**: can run the workflows built-in ateam (report, review, code) or ad-hoc unattended tasks (`run` for single task, `parallel` for multiple simultaneous agents)
+* **just a CLI**: can run the workflows built-in ateam (report, review, code) or ad-hoc unattended agent execs (`run` for a single agent exec, `parallel` for multiple simultaneous agents)
 * **convenient tooling**: `ps` to see current/past agent runs, `inspect` for troubleshooting
 * **cost transaprency**: all agent execution track token usage and estimated cost (less relevant for subscription). Tokens are the new software engineering currency and help gauge if an error is worthwhile
 
@@ -226,7 +226,7 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
         * last review (and their history)
         * coding tasks and their execution report
     * runtime logs
-        * state.sqlite: track running tasks and statistics about them for live monitoring and cost reporting
+        * state.sqlite: track running agent execs and statistics about them for live monitoring and cost reporting
         * log files from agent execution, exact prompt used
 * **Organization**:
     * optional: overload runtime.hcl or prompts to reuse between projects

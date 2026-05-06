@@ -238,7 +238,7 @@ func (s *Server) ListenAndServe(port int, openBrowser bool, host string) error {
 	mux.Handle("GET /p/{project}/review/history/{file}", s.handleSupervisorHistory("review"))
 	mux.Handle("GET /p/{project}/verify/history/{file}", s.handleSupervisorHistory("verify"))
 	mux.HandleFunc("GET /p/{project}/sessions", s.handleSessions)
-	mux.HandleFunc("GET /p/{project}/sessions/{taskgroup}", s.handleSessionDetail)
+	mux.HandleFunc("GET /p/{project}/sessions/{batch}", s.handleSessionDetail)
 	mux.HandleFunc("GET /p/{project}/code", s.handleCodeSessions)
 	mux.HandleFunc("GET /p/{project}/code/{session}", s.handleCodeSessionDetail)
 	mux.HandleFunc("GET /p/{project}/code/{session}/{file}", s.handleCodeSessionFile)

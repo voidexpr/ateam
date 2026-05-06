@@ -1,4 +1,4 @@
-// Package runner orchestrates agent task execution, managing scheduling, output collection, and result persistence.
+// Package runner orchestrates agent execution, managing scheduling, output collection, and result persistence.
 package runner
 
 import (
@@ -71,8 +71,8 @@ const (
 //   - All Runner fields are WRITTEN only during construction in the main
 //     goroutine (cmd/table.go:newRunner and friends, plus applyContainerName
 //     and the cmd-layer overrides). After a Runner is handed to RunPool —
-//     including PoolTask.Runner overrides — its fields become READ-ONLY.
-//   - Agent and Container fields look mutable but are cloned per task at the
+//     including PoolExec.Runner overrides — its fields become READ-ONLY.
+//   - Agent and Container fields look mutable but are cloned per agent exec at the
 //     top of Run via CloneWithResolvedTemplates / Clone. The shared originals
 //     are never mutated inside Run.
 //   - CallDB is a *sql.DB — safe for concurrent use by stdlib guarantee,
@@ -124,7 +124,7 @@ type RunOpts struct {
 	HistoryDir           string    // where to archive the prompt
 	PromptName           string    // archive name
 	Verbose              bool      // print agent and docker commands to stderr
-	TaskGroup            string    // groups related calls (e.g. all tasks in one ateam code run)
+	Batch                string    // groups related agent_execs (e.g. all execs in one ateam code run)
 	StartedAt            time.Time // optional override; if zero, Run() uses time.Now(). Use to align cmd-side path computation with runner-side log/archive timestamps.
 }
 
@@ -300,7 +300,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			Container:  r.ContainerType,
 			Action:     opts.Action,
 			Role:       opts.RoleID,
-			TaskGroup:  opts.TaskGroup,
+			Batch:      opts.Batch,
 			Model:      model,
 			PromptHash: hashPrompt(prompt),
 			StartedAt:  startedAt,
@@ -361,7 +361,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		ContainerName: containerName,
 		Action:        opts.Action,
 		Role:          opts.RoleID,
-		TaskGroup:     opts.TaskGroup,
+		Batch:         opts.Batch,
 		Model:         model,
 		Cwd:           cwd,
 		CLI:           cliStr,
@@ -1048,7 +1048,7 @@ type execFileInfo struct {
 	ContainerName string
 	Action        string
 	Role          string
-	TaskGroup     string
+	Batch         string
 	Model         string
 	Cwd           string
 	CLI           string
@@ -1084,8 +1084,8 @@ func writeExecFile(path string, info execFileInfo) {
 	}
 	fmt.Fprintf(&b, "* action: %s\n", info.Action)
 	fmt.Fprintf(&b, "* role: %s\n", info.Role)
-	if info.TaskGroup != "" {
-		fmt.Fprintf(&b, "* task_group: %s\n", info.TaskGroup)
+	if info.Batch != "" {
+		fmt.Fprintf(&b, "* batch: %s\n", info.Batch)
 	}
 	fmt.Fprintf(&b, "* cwd: %s\n", info.Cwd)
 	fmt.Fprintf(&b, "* coding agent cli:\n  ```bash\n  %s\n  ```\n", info.CLI)

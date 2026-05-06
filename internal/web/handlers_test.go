@@ -124,7 +124,7 @@ func TestHandleOverviewWithDatabase(t *testing.T) {
 		ProjectID: "test-proj",
 		Action:    "report",
 		Role:      "security",
-		TaskGroup: "report-2026-04-01_10-00-00",
+		Batch:     "report-2026-04-01_10-00-00",
 		StartedAt: now.Add(-2 * time.Minute),
 	})
 	if err != nil {
@@ -244,7 +244,7 @@ func seedRun(t *testing.T, projectDir string, action, role string) int64 {
 		ProjectID:  "test-proj",
 		Action:     action,
 		Role:       role,
-		TaskGroup:  fmt.Sprintf("%s-%s", action, ts),
+		Batch:      fmt.Sprintf("%s-%s", action, ts),
 		StartedAt:  now.Add(-2 * time.Minute),
 		StreamFile: streamRel,
 	})
@@ -277,7 +277,7 @@ func TestHandleCostWithDatabase(t *testing.T) {
 			ProjectID: "test-proj",
 			Action:    action,
 			Role:      "security",
-			TaskGroup: action + "-2026-04-01_10-00-00",
+			Batch:     action + "-2026-04-01_10-00-00",
 			StartedAt: now.Add(-5 * time.Minute),
 		})
 		if err != nil {
@@ -467,7 +467,7 @@ func TestHandleRunFilePathTraversal(t *testing.T) {
 		ProjectID:  "test-proj",
 		Action:     runner.ActionReport,
 		Role:       "security",
-		TaskGroup:  "report-" + ts,
+		Batch:      "report-" + ts,
 		StartedAt:  now.Add(-2 * time.Minute),
 		StreamFile: maliciousStream,
 	})

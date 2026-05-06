@@ -14,7 +14,7 @@ var costCmd = &cobra.Command{
 	Use:   "cost",
 	Short: "Show aggregated cost reports from the call database",
 	Long: `Display aggregated cost and token usage, grouped by action type
-and by task group (code sessions, report batches, etc.).
+and by batch (code sessions, report batches, etc.).
 
 When run inside a project, results are filtered to that project by default.
 Use --project to filter explicitly.
@@ -69,10 +69,10 @@ func runCost(cmd *cobra.Command, args []string) error {
 		w.Flush()
 	}
 
-	// --- Task group breakdown ---
-	sessionRows, err := db.CostByTaskGroup("")
+	// --- Batch breakdown ---
+	sessionRows, err := db.CostByBatch("")
 	if err != nil {
-		return fmt.Errorf("task group query failed: %w", err)
+		return fmt.Errorf("batch query failed: %w", err)
 	}
 
 	if len(sessionRows) == 0 {
@@ -80,10 +80,10 @@ func runCost(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-	fmt.Println("=== Cost by Task Group ===")
+	fmt.Println("=== Cost by Batch ===")
 
 	type sessionSummary struct {
-		taskGroup    string
+		batch        string
 		actions      map[string]actionLine
 		totalCost    float64
 		totalTokens  int64
@@ -94,14 +94,14 @@ func runCost(cmd *cobra.Command, args []string) error {
 	var order []string
 
 	for _, r := range sessionRows {
-		s, ok := sessions[r.TaskGroup]
+		s, ok := sessions[r.Batch]
 		if !ok {
 			s = &sessionSummary{
-				taskGroup: r.TaskGroup,
-				actions:   make(map[string]actionLine),
+				batch:   r.Batch,
+				actions: make(map[string]actionLine),
 			}
-			sessions[r.TaskGroup] = s
-			order = append(order, r.TaskGroup)
+			sessions[r.Batch] = s
+			order = append(order, r.Batch)
 		}
 		s.actions[r.Action] = actionLine{
 			count:        r.Count,
@@ -122,18 +122,18 @@ func runCost(cmd *cobra.Command, args []string) error {
 	}
 
 	w := newTable()
-	fmt.Fprintln(w, "TASK_GROUP\tACTION\tCOUNT\tCOST\tINPUT\tOUTPUT\tCACHE_READ\tTOTAL_TOKENS\tSTARTED\tENDED\tDURATION")
+	fmt.Fprintln(w, "BATCH\tACTION\tCOUNT\tCOST\tINPUT\tOUTPUT\tCACHE_READ\tTOTAL_TOKENS\tSTARTED\tENDED\tDURATION")
 
-	prevTG := ""
-	for _, tg := range order {
-		s := sessions[tg]
+	prevBatch := ""
+	for _, batch := range order {
+		s := sessions[batch]
 		started := fmtTimestamp(s.firstStarted)
 		ended := fmtTimestamp(s.lastEnded)
 		dur := computeDuration(s.firstStarted, s.lastEnded)
 
-		displayTG := tg
-		if tg == prevTG {
-			displayTG = ""
+		displayBatch := batch
+		if batch == prevBatch {
+			displayBatch = ""
 		}
 
 		first := true
@@ -142,7 +142,7 @@ func runCost(cmd *cobra.Command, args []string) error {
 			if !ok {
 				continue
 			}
-			label := displayTG
+			label := displayBatch
 			if !first {
 				label = ""
 			}
@@ -159,7 +159,7 @@ func runCost(cmd *cobra.Command, args []string) error {
 			case runner.ActionCode, runner.ActionReport, runner.ActionReview, runner.ActionRun:
 				continue
 			}
-			label := displayTG
+			label := displayBatch
 			if !first {
 				label = ""
 			}
@@ -172,7 +172,7 @@ func runCost(cmd *cobra.Command, args []string) error {
 		}
 
 		if len(s.actions) > 1 {
-			label := displayTG
+			label := displayBatch
 			if !first {
 				label = ""
 			}
@@ -181,7 +181,7 @@ func runCost(cmd *cobra.Command, args []string) error {
 				started, ended, dur)
 		}
 
-		prevTG = tg
+		prevBatch = batch
 	}
 	w.Flush()
 

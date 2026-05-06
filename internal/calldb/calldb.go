@@ -25,14 +25,14 @@ import (
 //   - idx_execs_started   – global chronological listing (used by "ateam ps" and log views)
 //   - idx_execs_project   – per-project history filtered by time
 //   - idx_execs_action    – filter by action type (report, code, review, …) ordered by time
-//   - idx_execs_task_group – group all calls that belong to the same logical task for cost aggregation
+//   - idx_execs_batch     – group all execs that belong to the same batch for cost aggregation
 //   - idx_execs_role      – per-role history ordered by time
 //
-// # task_group
+// # batch
 //
-// task_group is a caller-supplied token that ties related agent_execs rows together
-// (e.g. all calls spawned by a single "ateam code" invocation). It enables cost and
-// token aggregation across a group without a separate join table.
+// batch is a caller-supplied token that ties related agent_execs rows together
+// (e.g. all execs spawned by a single "ateam code" invocation). It enables cost and
+// token aggregation across a batch without a separate join table.
 const schema = `
 CREATE TABLE IF NOT EXISTS agent_execs (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS agent_execs (
   container         TEXT NOT NULL DEFAULT 'none',
   action            TEXT NOT NULL DEFAULT '',
   role              TEXT NOT NULL DEFAULT '',
-  task_group        TEXT NOT NULL DEFAULT '',
+  batch             TEXT NOT NULL DEFAULT '',
   model             TEXT NOT NULL DEFAULT '',
   prompt_hash       TEXT NOT NULL DEFAULT '',
   started_at        TEXT NOT NULL,
@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS agent_execs (
 CREATE INDEX IF NOT EXISTS idx_execs_started ON agent_execs(started_at);
 CREATE INDEX IF NOT EXISTS idx_execs_project ON agent_execs(project_id, started_at);
 CREATE INDEX IF NOT EXISTS idx_execs_action ON agent_execs(action, started_at);
-CREATE INDEX IF NOT EXISTS idx_execs_task_group ON agent_execs(task_group);
+CREATE INDEX IF NOT EXISTS idx_execs_batch ON agent_execs(batch);
 CREATE INDEX IF NOT EXISTS idx_execs_role ON agent_execs(role, started_at);
 `
 
@@ -77,7 +77,7 @@ type Call struct {
 	Container  string
 	Action     string
 	Role       string
-	TaskGroup  string
+	Batch      string
 	Model      string
 	PromptHash string
 	StartedAt  time.Time
@@ -216,6 +216,9 @@ func migrate(db *sql.DB, dbPath string) error {
 		} {
 			_, _ = tx.Exec("DROP INDEX IF EXISTS " + idx)
 		}
+		// Indexed against the legacy task_group column because the rename
+		// has not happened yet at this point; the column-rename block below
+		// drops idx_execs_task_group and creates idx_execs_batch.
 		if _, err := tx.Exec(`
 			CREATE INDEX IF NOT EXISTS idx_execs_started ON agent_execs(started_at);
 			CREATE INDEX IF NOT EXISTS idx_execs_project ON agent_execs(project_id, started_at);
@@ -239,6 +242,8 @@ func migrate(db *sql.DB, dbPath string) error {
 	hasOutputFile := false
 	hasPeakContextTokens := false
 	hasContextWindow := false
+	hasTaskGroup := false
+	hasBatch := false
 	for tRows.Next() {
 		var cid int
 		var name, typ string
@@ -262,11 +267,25 @@ func migrate(db *sql.DB, dbPath string) error {
 			hasPeakContextTokens = true
 		case "context_window":
 			hasContextWindow = true
+		case "task_group":
+			hasTaskGroup = true
+		case "batch":
+			hasBatch = true
 		}
 	}
 	tRows.Close()
 	if err := tRows.Err(); err != nil {
 		return err
+	}
+
+	if hasTaskGroup && !hasBatch {
+		if _, err := tx.Exec("ALTER TABLE agent_execs RENAME COLUMN task_group TO batch"); err != nil {
+			return err
+		}
+		_, _ = tx.Exec("DROP INDEX IF EXISTS idx_execs_task_group")
+		if _, err := tx.Exec("CREATE INDEX IF NOT EXISTS idx_execs_batch ON agent_execs(batch)"); err != nil {
+			return err
+		}
 	}
 
 	if !hasPID {
@@ -307,10 +326,10 @@ func (c *CallDB) InsertCall(call *Call) (int64, error) {
 	res, err := c.db.Exec(`
 		INSERT INTO agent_execs (
 			project_id, profile, agent, container, action, role,
-			task_group, model, prompt_hash, started_at, stream_file, output_file
+			batch, model, prompt_hash, started_at, stream_file, output_file
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		call.ProjectID, call.Profile, call.Agent, call.Container,
-		call.Action, call.Role, call.TaskGroup, call.Model,
+		call.Action, call.Role, call.Batch, call.Model,
 		call.PromptHash, call.StartedAt.Format(time.RFC3339), call.StreamFile,
 		call.OutputFile,
 	)

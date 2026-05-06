@@ -13,18 +13,18 @@ import (
 // seedCostDB seeds the calldb with records spread across two task groups and
 // multiple actions with known token counts for asserting aggregated output.
 //
-//   - report task group: two "report" runs (testing_basic + security), each 1000 input + 500 output tokens
-//   - code task group:   one "code" run (testing_basic) with 2000 input + 800 output tokens,
+//   - report batch: two "report" runs (testing_basic + security), each 1000 input + 500 output tokens
+//   - code batch:   one "code" run (testing_basic) with 2000 input + 800 output tokens,
 //     one "run" run (testing_basic) with 300 input + 100 output tokens
-//   - standalone run:    one "review" run (supervisor) with no task group, 600 input + 200 output tokens
+//   - standalone run: one "review" run (supervisor) with no batch, 600 input + 200 output tokens
 func seedCostDB(t *testing.T, db *calldb.CallDB, projectID string) {
 	t.Helper()
 	now := time.Now()
 
-	insert := func(action, role, tg string, offset time.Duration, inputTok, outputTok int) {
+	insert := func(action, role, batch string, offset time.Duration, inputTok, outputTok int) {
 		id, err := db.InsertCall(&calldb.Call{
 			ProjectID: projectID, Action: action, Role: role,
-			TaskGroup: tg, StartedAt: now.Add(offset),
+			Batch: batch, StartedAt: now.Add(offset),
 		})
 		if err != nil {
 			t.Fatalf("InsertCall(%s/%s): %v", action, role, err)
@@ -40,13 +40,13 @@ func seedCostDB(t *testing.T, db *calldb.CallDB, projectID string) {
 		}
 	}
 
-	reportTG := "report-2026-03-01_09-00-00"
-	codeTG := "code-2026-03-01_10-00-00"
+	reportBatch := "report-2026-03-01_09-00-00"
+	codeBatch := "code-2026-03-01_10-00-00"
 
-	insert("report", "testing_basic", reportTG, -30*time.Minute, 1000, 500)
-	insert("report", "security", reportTG, -30*time.Minute, 1000, 500)
-	insert("code", "testing_basic", codeTG, -20*time.Minute, 2000, 800)
-	insert("run", "testing_basic", codeTG, -20*time.Minute, 300, 100)
+	insert("report", "testing_basic", reportBatch, -30*time.Minute, 1000, 500)
+	insert("report", "security", reportBatch, -30*time.Minute, 1000, 500)
+	insert("code", "testing_basic", codeBatch, -20*time.Minute, 2000, 800)
+	insert("run", "testing_basic", codeBatch, -20*time.Minute, 300, 100)
 	insert("review", "supervisor", "", -10*time.Minute, 600, 200)
 }
 
@@ -98,9 +98,9 @@ func TestCostOutputContainsActionTotals(t *testing.T) {
 	}
 }
 
-// TestCostTaskGroupBreakdown verifies that the cost command's task-group section
-// groups runs correctly and shows the task group names.
-func TestCostTaskGroupBreakdown(t *testing.T) {
+// TestCostBatchBreakdown verifies that the cost command's batch section
+// groups runs correctly and shows the batch names.
+func TestCostBatchBreakdown(t *testing.T) {
 	_, projPath, env := setupTestProject(t)
 
 	db, err := calldb.Open(env.ProjectDBPath())
@@ -124,21 +124,21 @@ func TestCostTaskGroupBreakdown(t *testing.T) {
 		t.Fatalf("runCost: %v", costErr)
 	}
 
-	// Task group section header must appear.
-	if !strings.Contains(out, "Cost by Task Group") {
-		t.Errorf("expected 'Cost by Task Group' section in output:\n%s", out)
+	// Batch section header must appear.
+	if !strings.Contains(out, "Cost by Batch") {
+		t.Errorf("expected 'Cost by Batch' section in output:\n%s", out)
 	}
 
-	// Both task groups seeded must appear.
-	for _, tg := range []string{"report-2026-03-01_09-00-00", "code-2026-03-01_10-00-00"} {
-		if !strings.Contains(out, tg) {
-			t.Errorf("expected task group %q in cost output:\n%s", tg, out)
+	// Both batches seeded must appear.
+	for _, b := range []string{"report-2026-03-01_09-00-00", "code-2026-03-01_10-00-00"} {
+		if !strings.Contains(out, b) {
+			t.Errorf("expected batch %q in cost output:\n%s", b, out)
 		}
 	}
 
-	// Task group section column headers must appear.
-	if !strings.Contains(out, "TASK_GROUP") {
-		t.Errorf("expected 'TASK_GROUP' column header in task group section:\n%s", out)
+	// Batch section column headers must appear.
+	if !strings.Contains(out, "BATCH") {
+		t.Errorf("expected 'BATCH' column header in batch section:\n%s", out)
 	}
 }
 

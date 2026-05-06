@@ -446,7 +446,7 @@ func TestGetDBStoresOpenError(t *testing.T) {
 	}
 }
 
-func TestParseTaskGroupTimestamp(t *testing.T) {
+func TestParseBatchTimestamp(t *testing.T) {
 	tests := []struct {
 		input string
 		zero  bool
@@ -462,7 +462,7 @@ func TestParseTaskGroupTimestamp(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := parseTaskGroupTimestamp(tt.input)
+			got := parseBatchTimestamp(tt.input)
 			if tt.zero {
 				if !got.IsZero() {
 					t.Errorf("expected zero time for %q, got %v", tt.input, got)
@@ -473,7 +473,7 @@ func TestParseTaskGroupTimestamp(t *testing.T) {
 				t.Fatalf("expected non-zero time for %q", tt.input)
 			}
 			if got.Year() != tt.year || got.Month() != tt.month || got.Day() != tt.day {
-				t.Errorf("parseTaskGroupTimestamp(%q) = %v, want %d-%02d-%02d", tt.input, got, tt.year, tt.month, tt.day)
+				t.Errorf("parseBatchTimestamp(%q) = %v, want %d-%02d-%02d", tt.input, got, tt.year, tt.month, tt.day)
 			}
 		})
 	}

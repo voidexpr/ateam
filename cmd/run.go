@@ -28,7 +28,7 @@ var (
 	runQuiet           bool
 	runAgentArgs       string
 	runVerbose         bool
-	runTaskGroup       string
+	runBatch           string
 	runDockerAutoSetup bool
 	runDryRun          bool
 	runContainerName   string
@@ -74,7 +74,7 @@ func init() {
 	runCmd.Flags().BoolVar(&runQuiet, "quiet", false, "disable both streaming and summary (same as --no-stream --no-summary)")
 	runCmd.Flags().StringVar(&runWorkDir, "work-dir", "", "working directory (defaults to project source dir or cwd)")
 	runCmd.Flags().StringVar(&runAgentArgs, "agent-args", "", "extra args passed to the agent CLI (appended after configured args)")
-	runCmd.Flags().StringVar(&runTaskGroup, "task-group", "", "group related calls (e.g. all tasks in one ateam code run)")
+	runCmd.Flags().StringVar(&runBatch, "batch", "", "group related agent_execs (e.g. all execs in one ateam code run)")
 	addVerboseFlag(runCmd, &runVerbose)
 	addDockerAutoSetupFlag(runCmd, &runDockerAutoSetup)
 	addContainerNameFlag(runCmd, &runContainerName)
@@ -173,7 +173,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	// Dry-run: print everything and exit
 	if runDryRun {
-		return printRunDryRun(r, env, promptText, runRole, runTaskGroup)
+		return printRunDryRun(r, env, promptText, runRole, runBatch)
 	}
 
 	// Open call tracking DB (requires project context).
@@ -198,12 +198,12 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	// Build opts
 	opts := runner.RunOpts{
-		RoleID:    runRole,
-		Action:    runner.ActionRun,
-		LogsDir:   logsDir,
-		WorkDir:   workDir,
-		Verbose:   runVerbose,
-		TaskGroup: runTaskGroup,
+		RoleID:  runRole,
+		Action:  runner.ActionRun,
+		LogsDir: logsDir,
+		WorkDir: workDir,
+		Verbose: runVerbose,
+		Batch:   runBatch,
 	}
 
 	opts.PromptName = "run_prompt.md"
@@ -316,14 +316,14 @@ func fmtContextProgress(contextTokens, contextWindow int) string {
 	return fmt.Sprintf(", ctx: %s", ctxStr)
 }
 
-func printRunDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, taskGroup string) error {
+func printRunDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, batch string) error {
 	fmt.Println("╔══ dry-run ══╗")
 	fmt.Println()
 	printDryRunInfo(r, env, dryRunOpts{
-		RoleID:    roleID,
-		Action:    runner.ActionRun,
-		TaskGroup: taskGroup,
-		Prompt:    prompt,
+		RoleID: roleID,
+		Action: runner.ActionRun,
+		Batch:  batch,
+		Prompt: prompt,
 	})
 	fmt.Println()
 	fmt.Println("╚══ dry-run ══╝")

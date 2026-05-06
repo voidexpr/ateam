@@ -75,7 +75,7 @@ func TestRunPoolBasic(t *testing.T) {
 	mock := &agent.MockAgent{Response: "pool output"}
 	r := &Runner{Agent: mock}
 
-	tasks := []PoolTask{
+	tasks := []PoolExec{
 		{Prompt: "task 1", RunOpts: RunOpts{RoleID: "role-1", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 0)}},
 		{Prompt: "task 2", RunOpts: RunOpts{RoleID: "role-2", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 1)}},
 		{Prompt: "task 3", RunOpts: RunOpts{RoleID: "role-3", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 2)}},
@@ -105,9 +105,9 @@ func TestRunPoolSemaphoreLimit(t *testing.T) {
 	tracking := &concurrencyTrackingAgent{delay: 20 * time.Millisecond}
 	r := &Runner{Agent: tracking}
 
-	tasks := make([]PoolTask, numTasks)
+	tasks := make([]PoolExec, numTasks)
 	for i := range tasks {
-		tasks[i] = PoolTask{
+		tasks[i] = PoolExec{
 			Prompt:  "task",
 			RunOpts: RunOpts{RoleID: fmt.Sprintf("role-%d", i), Action: ActionRun, LogsDir: makeTaskLogsDir(dir, i)},
 		}
@@ -129,7 +129,7 @@ func TestRunPoolCompletedChannel(t *testing.T) {
 	mock := &agent.MockAgent{Response: "completed"}
 	r := &Runner{Agent: mock}
 
-	tasks := []PoolTask{
+	tasks := []PoolExec{
 		{Prompt: "t1", RunOpts: RunOpts{RoleID: "c-role-1", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 0)}},
 		{Prompt: "t2", RunOpts: RunOpts{RoleID: "c-role-2", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 1)}},
 		{Prompt: "t3", RunOpts: RunOpts{RoleID: "c-role-3", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 2)}},
@@ -158,7 +158,7 @@ func TestRunPoolResultCollection(t *testing.T) {
 	mock := &agent.MockAgent{Response: "result-output", Cost: 0.05}
 	r := &Runner{Agent: mock}
 
-	tasks := []PoolTask{
+	tasks := []PoolExec{
 		{Prompt: "p1", RunOpts: RunOpts{RoleID: "res-role", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 0)}},
 	}
 
@@ -187,9 +187,9 @@ func TestRunPoolConcurrentResultsAreSafe(t *testing.T) {
 	r := &Runner{Agent: mock}
 
 	const numTasks = 10
-	tasks := make([]PoolTask, numTasks)
+	tasks := make([]PoolExec, numTasks)
 	for i := range tasks {
-		tasks[i] = PoolTask{
+		tasks[i] = PoolExec{
 			Prompt:  "concurrent task",
 			RunOpts: RunOpts{RoleID: fmt.Sprintf("concurrent-role-%d", i), Action: ActionRun, LogsDir: makeTaskLogsDir(dir, i)},
 		}

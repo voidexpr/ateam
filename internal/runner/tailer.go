@@ -30,7 +30,7 @@ type Tailer struct {
 	DB           *calldb.CallDB
 	ProjectDir   string // .ateam/ dir, used to resolve relative stream_file paths (new layout)
 	OrgDir       string // .ateamorg/ dir, used to resolve legacy relative stream_file paths
-	TaskGroup    string // discover new calls joining this group
+	Batch        string // discover new agent_execs joining this batch
 	ProjectID    string // for finding running calls (legacy, empty for per-project DB)
 	DiscoverAll  bool   // discover all running calls in the DB (per-project mode)
 	Action       string // "report" or "" — for --reports mode
@@ -86,7 +86,7 @@ func (t *Tailer) AddSource(id int64, role, action, streamFile, model string) {
 // Run polls stream files and DB, writing formatted output to Writer.
 // It blocks until all sources are done or ctx is cancelled.
 func (t *Tailer) Run(ctx context.Context) error {
-	discoveryMode := t.TaskGroup != "" || t.ProjectID != "" || t.DiscoverAll
+	discoveryMode := t.Batch != "" || t.ProjectID != "" || t.DiscoverAll
 	pollTick := time.NewTicker(t.PollInterval)
 	defer pollTick.Stop()
 
@@ -167,8 +167,8 @@ func (t *Tailer) discoverSources() {
 		return
 	}
 
-	if t.TaskGroup != "" {
-		rows, err := t.DB.CallsByTaskGroup(t.TaskGroup)
+	if t.Batch != "" {
+		rows, err := t.DB.CallsByBatch(t.Batch)
 		if err != nil {
 			return
 		}

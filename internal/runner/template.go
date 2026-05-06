@@ -18,7 +18,7 @@ type TemplateVars struct {
 	ProjectDir      string // last component of ProjectFullPath
 	Role            string // role ID (e.g. "security", "supervisor")
 	Action          string // action type (e.g. "report", "run", "code")
-	TaskGroup       string // task group ID (e.g. "code-2026-03-31_06-09-39")
+	Batch           string // batch ID (e.g. "code-2026-03-31_06-09-39")
 	Timestamp       string // run start time (TimestampFormat)
 	Profile         string // active profile name
 	ExecID          int64  // call tracking ID (from ateam ps)
@@ -41,7 +41,7 @@ func (v TemplateVars) Replacer() *strings.Replacer {
 		"{{PROJECT_DIR}}", v.ProjectDir,
 		"{{ROLE}}", v.Role,
 		"{{ACTION}}", v.Action,
-		"{{TASK_GROUP}}", v.TaskGroup,
+		"{{BATCH}}", v.Batch,
 		"{{TIMESTAMP}}", v.Timestamp,
 		"{{PROFILE}}", v.Profile,
 		"{{EXEC_ID}}", execID,
@@ -113,7 +113,7 @@ func BuildTemplateVars(r *Runner, opts RunOpts, startedAt time.Time, callID int6
 		ProjectName:   r.ProjectName,
 		Role:          opts.RoleID,
 		Action:        opts.Action,
-		TaskGroup:     opts.TaskGroup,
+		Batch:         opts.Batch,
 		Timestamp:     startedAt.Format(TimestampFormat),
 		Profile:       r.Profile,
 		ExecID:        callID,

@@ -245,9 +245,9 @@ func TestRunPoolSharedContainerRace(t *testing.T) {
 	}
 
 	const numTasks = 8
-	tasks := make([]PoolTask, numTasks)
+	tasks := make([]PoolExec, numTasks)
 	for i := range tasks {
-		tasks[i] = PoolTask{
+		tasks[i] = PoolExec{
 			Prompt: "p",
 			RunOpts: RunOpts{
 				RoleID:  fmt.Sprintf("role-%d", i),
@@ -282,7 +282,7 @@ func TestRunPoolSharedContainerDoesNotMutateTemplate(t *testing.T) {
 		SourceDir:     dir,
 	}
 
-	tasks := []PoolTask{
+	tasks := []PoolExec{
 		{Prompt: "p", RunOpts: RunOpts{RoleID: "alpha", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 0)}},
 		{Prompt: "p", RunOpts: RunOpts{RoleID: "beta", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 1)}},
 	}
@@ -309,9 +309,9 @@ func TestRunPoolCompletedChannelDeadlockGuard(t *testing.T) {
 	r := &Runner{Agent: mock}
 
 	const numTasks = 4
-	tasks := make([]PoolTask, numTasks)
+	tasks := make([]PoolExec, numTasks)
 	for i := range tasks {
-		tasks[i] = PoolTask{
+		tasks[i] = PoolExec{
 			Prompt: "p",
 			RunOpts: RunOpts{
 				RoleID:  fmt.Sprintf("role-%d", i),
@@ -330,7 +330,7 @@ func TestRunPoolCompletedChannelDeadlockGuard(t *testing.T) {
 
 // TestRunPoolSharedDockerExecRace mirrors TestRunPoolSharedContainerRace
 // but targets DockerExecContainer, whose ResolveTemplates mutates
-// ContainerName and WorkDir. The per-task Clone must isolate these writes.
+// ContainerName and WorkDir. The per-agent exec Clone must isolate these writes.
 func TestRunPoolSharedDockerExecRace(t *testing.T) {
 	dir := t.TempDir()
 	mock := &agent.MockAgent{Response: "ok", Delay: 10 * time.Millisecond}
@@ -351,9 +351,9 @@ func TestRunPoolSharedDockerExecRace(t *testing.T) {
 	}
 
 	const numTasks = 8
-	tasks := make([]PoolTask, numTasks)
+	tasks := make([]PoolExec, numTasks)
 	for i := range tasks {
-		tasks[i] = PoolTask{
+		tasks[i] = PoolExec{
 			Prompt: "p",
 			RunOpts: RunOpts{
 				RoleID:  fmt.Sprintf("role-%d", i),
@@ -399,9 +399,9 @@ func TestRunPoolRunnerFieldsUnchanged(t *testing.T) {
 	before := snapshotRunnerFields(t, r)
 
 	const numTasks = 8
-	tasks := make([]PoolTask, numTasks)
+	tasks := make([]PoolExec, numTasks)
 	for i := range tasks {
-		tasks[i] = PoolTask{
+		tasks[i] = PoolExec{
 			Prompt: "p",
 			RunOpts: RunOpts{
 				RoleID:  fmt.Sprintf("role-%d", i),
@@ -505,9 +505,9 @@ func TestRunPoolSharedPrepareGuardRunsOnce(t *testing.T) {
 	}
 
 	const numTasks = 8
-	tasks := make([]PoolTask, numTasks)
+	tasks := make([]PoolExec, numTasks)
 	for i := range tasks {
-		tasks[i] = PoolTask{
+		tasks[i] = PoolExec{
 			Prompt: "p",
 			RunOpts: RunOpts{
 				RoleID:  fmt.Sprintf("role-%d", i),

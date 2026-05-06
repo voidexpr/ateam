@@ -213,7 +213,7 @@ func runOneRole(ctx context.Context, role RoleRun, v Variant, timeoutMin int, ve
 		HistoryDir:           env.RoleHistoryDir(role.RoleID),
 		PromptName:           "eval_" + string(v.Label) + "_prompt.md",
 		Verbose:              verbose,
-		TaskGroup:            "eval-" + ts,
+		Batch:                "eval-" + ts,
 	}
 
 	summary := v.Runner.Run(ctx, promptText, opts, nil)
@@ -247,7 +247,7 @@ func runReviewStep(ctx context.Context, v Variant, timeoutMin int, verbose bool)
 		TimeoutMin:           timeoutMin,
 		PromptName:           "eval_" + string(v.Label) + "_review_prompt.md",
 		Verbose:              verbose,
-		TaskGroup:            "eval-" + ts,
+		Batch:                "eval-" + ts,
 	}
 
 	summary := v.Runner.Run(ctx, prompt, opts, nil)

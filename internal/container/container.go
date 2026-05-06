@@ -37,7 +37,7 @@ type CmdFactory func(ctx context.Context, name string, args ...string) *exec.Cmd
 //   - All mutating methods (ResolveTemplates, ApplyAgentEnv, SetContainerName,
 //     SetSourceWritable, Prepare's side effects on the receiver) MUST be
 //     called on a Clone, not on the shared original.
-//   - The pool clones once per task at the top of Runner.Run and routes every
+//   - The pool clones once per agent exec at the top of Runner.Run and routes every
 //     subsequent call through that clone.
 //   - Clone deep-copies every field touched by a mutating method; only
 //     thread-safe guard pointers (PrepareGuard / KeyedPrepareGuard) are
@@ -49,7 +49,7 @@ type Container interface {
 	DebugCommand(opts RunOpts) string
 
 	// Prepare performs any pre-run setup: image builds, binary copies,
-	// precheck scripts. Invoked on a per-task clone; the shared PrepareGuard
+	// precheck scripts. Invoked on a per-agent exec clone; the shared PrepareGuard
 	// ensures side effects run once per (pool × resolved name).
 	Prepare(ctx context.Context) error
 

@@ -88,14 +88,14 @@ func runTail(cmd *cobra.Command, args []string) error {
 		if !hasProject {
 			return fmt.Errorf("--coding requires a project context (run from within a project)")
 		}
-		tg, err := db.LatestTaskGroup("", "code-")
+		batch, err := db.LatestBatch("", "code-")
 		if err != nil {
 			return fmt.Errorf("cannot find coding session: %w", err)
 		}
-		if tg == "" {
+		if batch == "" {
 			return fmt.Errorf("no coding session found for this project")
 		}
-		tailer.TaskGroup = tg
+		tailer.Batch = batch
 
 	case tailReports:
 		if !hasProject {

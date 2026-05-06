@@ -54,7 +54,7 @@ const (
 	CodeVerifyPromptFile          = "code_verify_prompt.md"
 	CodeVerifyExtraPromptFile     = "code_verify_extra_prompt.md"
 	AutoSetupPromptFile           = "auto_setup_prompt.md"
-	TaskDebugPromptFile           = "task_debug_prompt.md"
+	ExecDebugPromptFile           = "exec_debug_prompt.md"
 	ReportFile                    = "report.md"
 	ReportErrorFile               = "report_error.md"
 	SandboxSettingsFile           = "ateam_claude_sandbox_extra_settings.json"
@@ -405,21 +405,21 @@ func AssembleAutoSetupPrompt(orgDir, projectDir string, pinfo ProjectInfoParams)
 	return strings.Join(parts, "\n\n---\n\n"), nil
 }
 
-// AssembleTaskDebugPrompt builds the prompt for the ps-files --auto-debug command.
-// debugContext contains the run metadata and file paths to investigate.
-func AssembleTaskDebugPrompt(orgDir, projectDir, debugContext string, pinfo ProjectInfoParams) (string, error) {
+// AssembleExecDebugPrompt builds the prompt for the ps-files --auto-debug command.
+// debugContext contains the agent_exec metadata and file paths to investigate.
+func AssembleExecDebugPrompt(orgDir, projectDir, debugContext string, pinfo ProjectInfoParams) (string, error) {
 	debugPrompt, err := readWith3LevelFallback(
-		filepath.Join(projectDir, "supervisor", TaskDebugPromptFile),
-		filepath.Join(orgDir, "supervisor", TaskDebugPromptFile),
-		filepath.Join(orgDir, "defaults", "supervisor", TaskDebugPromptFile),
-		filepath.Join("supervisor", TaskDebugPromptFile),
-		"task-debug",
+		filepath.Join(projectDir, "supervisor", ExecDebugPromptFile),
+		filepath.Join(orgDir, "supervisor", ExecDebugPromptFile),
+		filepath.Join(orgDir, "defaults", "supervisor", ExecDebugPromptFile),
+		filepath.Join("supervisor", ExecDebugPromptFile),
+		"exec-debug",
 	)
 	if err != nil {
 		return "", err
 	}
 
-	debugPrompt = strings.ReplaceAll(debugPrompt, "{{TASK_DEBUG_CONTEXT}}", debugContext)
+	debugPrompt = strings.ReplaceAll(debugPrompt, "{{EXEC_DEBUG_CONTEXT}}", debugContext)
 
 	var parts []string
 	if info := FormatProjectInfo(pinfo); info != "" {

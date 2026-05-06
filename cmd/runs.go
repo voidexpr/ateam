@@ -12,10 +12,10 @@ import (
 )
 
 var (
-	recentRole      string
-	recentAction    string
-	recentTaskGroup string
-	recentLimit     int
+	recentRole   string
+	recentAction string
+	recentBatch  string
+	recentLimit  int
 )
 
 var runsCmd = &cobra.Command{
@@ -38,7 +38,7 @@ Example:
 func init() {
 	runsCmd.Flags().StringVar(&recentRole, "role", "", "filter by role")
 	runsCmd.Flags().StringVar(&recentAction, "action", "", "filter by action (report, review, code, run)")
-	runsCmd.Flags().StringVar(&recentTaskGroup, "task-group", "", "filter by task group")
+	runsCmd.Flags().StringVar(&recentBatch, "batch", "", "filter by batch")
 	runsCmd.Flags().IntVar(&recentLimit, "limit", 30, "max rows to show")
 }
 
@@ -55,10 +55,10 @@ func runRuns(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 
 	rows, err := db.RecentRuns(calldb.RecentFilter{
-		Role:      recentRole,
-		Action:    recentAction,
-		TaskGroup: recentTaskGroup,
-		Limit:     recentLimit,
+		Role:   recentRole,
+		Action: recentAction,
+		Batch:  recentBatch,
+		Limit:  recentLimit,
 	})
 	if err != nil {
 		return fmt.Errorf("query failed: %w", err)
@@ -81,7 +81,7 @@ func runRuns(cmd *cobra.Command, args []string) error {
 
 func printRunsTable(rows []calldb.RecentRow) {
 	w := newTable()
-	fmt.Fprintln(w, "ID\tSTARTED\tPROFILE\tACTION\tROLE\tMODEL\tDURATION\tCOST\tTOKENS\tSTATUS\tTASK_GROUP\tREASON")
+	fmt.Fprintln(w, "ID\tSTARTED\tPROFILE\tACTION\tROLE\tMODEL\tDURATION\tCOST\tTOKENS\tSTATUS\tBATCH\tREASON")
 	for _, r := range rows {
 		started := fmtStartedAt(r.StartedAt)
 
@@ -107,7 +107,7 @@ func printRunsTable(rows []calldb.RecentRow) {
 
 		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			r.ID, started, r.Profile, r.Action, r.Role, r.Model,
-			dur, display.FmtCost(r.CostUSD), tokens, runStatus(r), r.TaskGroup, reason)
+			dur, display.FmtCost(r.CostUSD), tokens, runStatus(r), r.Batch, reason)
 	}
 	w.Flush()
 }

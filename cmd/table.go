@@ -848,10 +848,10 @@ func secretResolver(env *root.ResolvedEnv, backend secret.Backend) *secret.Resol
 
 // dryRunOpts configures what printDryRunInfo displays.
 type dryRunOpts struct {
-	RoleID    string
-	Action    string
-	TaskGroup string
-	Prompt    string // if non-empty, printed at the end (truncated)
+	RoleID string
+	Action string
+	Batch  string
+	Prompt string // if non-empty, printed at the end (truncated)
 }
 
 // printDryRunInfo prints resolved execution details for a dry run.
@@ -863,9 +863,9 @@ func printDryRunInfo(r *runner.Runner, env *root.ResolvedEnv, opts dryRunOpts) {
 		model = agent.NormalizeModel(mp.ModelName())
 	}
 	tmplVars := runner.BuildTemplateVars(r, runner.RunOpts{
-		RoleID:    opts.RoleID,
-		Action:    opts.Action,
-		TaskGroup: opts.TaskGroup,
+		RoleID: opts.RoleID,
+		Action: opts.Action,
+		Batch:  opts.Batch,
 	}, time.Now(), 0, agentName, model)
 	resolvedAgent := runner.ResolveAgentTemplateArgs(r.Agent, tmplVars)
 	resolvedExtraArgs := runner.ResolveTemplateArgs(r.ExtraArgs, tmplVars)
@@ -1074,13 +1074,13 @@ type poolDisplayOpts struct {
 	out       io.Writer                              // output for summary/error tails (nil = os.Stdout)
 	onDone    func(runner.RunSummary, string) string // result, cwd → display path for status row; nil → ""
 	agentName string
-	itemLabel string // used in "N failed" error, e.g. "role(s)" or "task(s)"
+	itemLabel string // used in "N failed" error, e.g. "role(s)" or "agent(s)"
 }
 
 // runPool drives a runner.Pool to completion, rendering progress and printing
 // the summary count + error tails. It returns all results and a non-nil error
 // if any tasks failed.
-func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolTask, maxParallel int, opts poolDisplayOpts) ([]runner.RunSummary, error) {
+func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolExec, maxParallel int, opts poolDisplayOpts) ([]runner.RunSummary, error) {
 	start := time.Now()
 	out := opts.out
 	if out == nil {

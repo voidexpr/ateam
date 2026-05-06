@@ -17,7 +17,7 @@ import (
 // Concurrency (see CONCURRENCY.md):
 //
 //   - The Agent on a Runner is effectively read-only once dispatched to a
-//     pool; the pool calls CloneWithResolvedTemplates per task.
+//     pool; the pool calls CloneWithResolvedTemplates per agent exec.
 //   - Run is invoked on the clone, not on the shared original, so any per-
 //     run mutation stays local to that goroutine.
 type Agent interface {
@@ -35,7 +35,7 @@ type Agent interface {
 	// resolved in Args, Env, and other templated string fields.
 	// Implementations MUST ensure the returned value's Args and Env share
 	// no backing slice/map with the original — the pool relies on this for
-	// per-task isolation.
+	// per-agent exec isolation.
 	CloneWithResolvedTemplates(replacer *strings.Replacer) Agent
 }
 

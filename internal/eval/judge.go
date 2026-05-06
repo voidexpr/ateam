@@ -66,7 +66,7 @@ func RunJudge(ctx context.Context, r *runner.Runner, env *root.ResolvedEnv, in J
 		TimeoutMin:          timeoutMin,
 		PromptName:          "eval_judge_prompt.md",
 		Verbose:             verbose,
-		TaskGroup:           "eval-judge-" + ts,
+		Batch:               "eval-judge-" + ts,
 	}
 
 	summary := r.Run(ctx, prompt, opts, nil)

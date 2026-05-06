@@ -14,7 +14,7 @@ import (
 
 var (
 	parallelLabels            []string
-	parallelTaskGroup         string
+	parallelBatch             string
 	parallelMaxParallel       int
 	parallelNoProgress        bool
 	parallelCommonPromptFirst string
@@ -38,7 +38,7 @@ var parallelCmd = &cobra.Command{
 	Long: `Run multiple agents in parallel, each with its own prompt.
 
 Each positional argument is a prompt (text or @filepath). All tasks share a
-single runner instance and task group for unified cost tracking.
+single runner instance and batch for unified cost tracking.
 
 ` + progressColumnsHelp("task") + `
 
@@ -51,16 +51,16 @@ Example:
 }
 
 func init() {
-	parallelCmd.Flags().StringSliceVar(&parallelLabels, "labels", nil, "names for each task (comma-separated, must match prompt count)")
-	parallelCmd.Flags().StringVar(&parallelTaskGroup, "task-group", "", "group related calls (default: parallel-TIMESTAMP)")
-	parallelCmd.Flags().IntVar(&parallelMaxParallel, "max-parallel", 3, "max parallel tasks")
+	parallelCmd.Flags().StringSliceVar(&parallelLabels, "labels", nil, "names for each prompt (comma-separated, must match prompt count)")
+	parallelCmd.Flags().StringVar(&parallelBatch, "batch", "", "group related agent_execs (default: parallel-TIMESTAMP)")
+	parallelCmd.Flags().IntVar(&parallelMaxParallel, "max-parallel", 3, "max parallel agents execution")
 	parallelCmd.Flags().BoolVar(&parallelNoProgress, "no-progress", false, "suppress ANSI progress table")
 	parallelCmd.Flags().StringVar(&parallelCommonPromptFirst, "common-prompt-first", "", "text or @filepath to prepend to each prompt")
 	parallelCmd.Flags().StringVar(&parallelCommonPromptLast, "common-prompt-last", "", "text or @filepath to append to each prompt")
 	addProfileFlags(parallelCmd, &parallelProfile, &parallelAgent)
 	parallelCmd.Flags().StringVar(&parallelModel, "model", "", "model override")
 	parallelCmd.Flags().StringVar(&parallelWorkDir, "work-dir", "", "working directory (defaults to project source dir or cwd)")
-	parallelCmd.Flags().IntVar(&parallelTimeout, "timeout", 0, "timeout in minutes per task")
+	parallelCmd.Flags().IntVar(&parallelTimeout, "timeout", 0, "timeout in minutes per agent execution")
 	addVerboseFlag(parallelCmd, &parallelVerbose)
 	addForceFlag(parallelCmd, &parallelForce)
 	parallelCmd.Flags().BoolVar(&parallelDryRun, "dry-run", false, "print computed prompts without running")
@@ -176,9 +176,9 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	taskGroup := parallelTaskGroup
-	if taskGroup == "" {
-		taskGroup = "parallel-" + time.Now().Format(runner.TimestampFormat)
+	batch := parallelBatch
+	if batch == "" {
+		batch = "parallel-" + time.Now().Format(runner.TimestampFormat)
 	}
 
 	baseLogsDir := env.OrgDir
@@ -186,9 +186,9 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		baseLogsDir = env.ProjectDir
 	}
 
-	tasks := make([]runner.PoolTask, len(resolvedPrompts))
+	tasks := make([]runner.PoolExec, len(resolvedPrompts))
 	for i, prompt := range resolvedPrompts {
-		tasks[i] = runner.PoolTask{
+		tasks[i] = runner.PoolExec{
 			Prompt: prompt,
 			RunOpts: runner.RunOpts{
 				RoleID:     labels[i],
@@ -197,7 +197,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 				WorkDir:    workDir,
 				TimeoutMin: parallelTimeout,
 				Verbose:    parallelVerbose,
-				TaskGroup:  taskGroup,
+				Batch:      batch,
 				PromptName: "parallel_prompt.md",
 			},
 		}
@@ -208,7 +208,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		maxParallel = 3
 	}
 
-	fmt.Fprintf(os.Stderr, "Running %d agent(s) task group: %s (max %d parallel)...\n\n", len(tasks), taskGroup, maxParallel)
+	fmt.Fprintf(os.Stderr, "Running %d agent(s) in batch %s (max %d parallel)...\n\n", len(tasks), batch, maxParallel)
 
 	ctx, stop := cmdContext()
 	defer stop()
@@ -217,7 +217,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		quiet:     !isTerminal() || parallelNoProgress,
 		out:       os.Stderr,
 		agentName: r.Agent.Name(),
-		itemLabel: "task(s)",
+		itemLabel: "agent(s)",
 	})
 
 	// Print outputs in submission order

@@ -12,7 +12,7 @@ import (
 
 // inspectGlobals captures the package-level flags used by the inspect command.
 type inspectGlobals struct {
-	taskGroup            string
+	batch                string
 	lastRun              bool
 	lastReport           bool
 	lastReview           bool
@@ -27,7 +27,7 @@ type inspectGlobals struct {
 
 func saveInspectGlobals() inspectGlobals {
 	return inspectGlobals{
-		taskGroup:            inspectTaskGroup,
+		batch:                inspectBatch,
 		lastRun:              inspectLastRun,
 		lastReport:           inspectLastReport,
 		lastReview:           inspectLastReview,
@@ -42,7 +42,7 @@ func saveInspectGlobals() inspectGlobals {
 }
 
 func (g inspectGlobals) restore() {
-	inspectTaskGroup = g.taskGroup
+	inspectBatch = g.batch
 	inspectLastRun = g.lastRun
 	inspectLastReport = g.lastReport
 	inspectLastReview = g.lastReview
@@ -56,24 +56,24 @@ func (g inspectGlobals) restore() {
 }
 
 // seedInspectDB seeds the given calldb with a set of runs for testing run selection:
-//   - one "run" action run (most recent, no task group)
+//   - one "run" action run (most recent, no batch)
 //   - one "review" action run
-//   - two "report" action runs in a report task group
-//   - two "run" action runs in a code task group
+//   - two "report" action runs in a report batch
+//   - two "run" action runs in a code batch
 //
 // Note: project_id is left empty so that resolveRunSelection's call to
-// LatestTaskGroup with an empty string prefix finds the rows (queries WHERE project_id = empty).
-func seedInspectDB(t *testing.T, db *calldb.CallDB) (reportTG, codeTG string) {
+// LatestBatch with an empty string prefix finds the rows (queries WHERE project_id = empty).
+func seedInspectDB(t *testing.T, db *calldb.CallDB) (reportBatch, codeBatch string) {
 	t.Helper()
 	now := time.Now()
 
-	reportTG = "report-2026-01-10_10-00-00"
-	codeTG = "code-2026-01-10_11-00-00"
+	reportBatch = "report-2026-01-10_10-00-00"
+	codeBatch = "code-2026-01-10_11-00-00"
 
-	insert := func(action, role, tg string, offset time.Duration) int64 {
+	insert := func(action, role, batch string, offset time.Duration) int64 {
 		id, err := db.InsertCall(&calldb.Call{
 			ProjectID: "", Action: action, Role: role,
-			TaskGroup: tg, StartedAt: now.Add(offset),
+			Batch: batch, StartedAt: now.Add(offset),
 		})
 		if err != nil {
 			t.Fatalf("InsertCall(%s/%s): %v", action, role, err)
@@ -86,15 +86,14 @@ func seedInspectDB(t *testing.T, db *calldb.CallDB) (reportTG, codeTG string) {
 		return id
 	}
 
-	insert("report", "testing_basic", reportTG, -10*time.Minute)
-	insert("report", "security", reportTG, -10*time.Minute)
+	insert("report", "testing_basic", reportBatch, -10*time.Minute)
+	insert("report", "security", reportBatch, -10*time.Minute)
 	insert("review", "supervisor", "", -8*time.Minute)
-	insert("run", "testing_basic", codeTG, -6*time.Minute)
-	insert("run", "security", codeTG, -6*time.Minute)
-	// Most recent run — no task group
+	insert("run", "testing_basic", codeBatch, -6*time.Minute)
+	insert("run", "security", codeBatch, -6*time.Minute)
 	insert("run", "testing_basic", "", -2*time.Minute)
 
-	return reportTG, codeTG
+	return reportBatch, codeBatch
 }
 
 // TestInspectRunSelection verifies that each --last-* flag selects the correct
@@ -106,7 +105,7 @@ func TestInspectRunSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open calldb: %v", err)
 	}
-	reportTG, codeTG := seedInspectDB(t, db)
+	reportBatch, codeBatch := seedInspectDB(t, db)
 	db.Close()
 
 	// Re-open a fresh handle as resolveRunSelection would.
@@ -133,16 +132,15 @@ func TestInspectRunSelection(t *testing.T) {
 		if len(rows) != 1 {
 			t.Fatalf("expected 1 row, got %d", len(rows))
 		}
-		// The most recent run has no task group and action "run"
 		if rows[0].Action != "run" {
 			t.Errorf("expected action 'run', got %q", rows[0].Action)
 		}
-		if rows[0].TaskGroup != "" {
-			t.Errorf("expected empty task group for most recent run, got %q", rows[0].TaskGroup)
+		if rows[0].Batch != "" {
+			t.Errorf("expected empty batch for most recent run, got %q", rows[0].Batch)
 		}
 	})
 
-	t.Run("last-report returns all runs in latest report task group", func(t *testing.T) {
+	t.Run("last-report returns all runs in latest report batch", func(t *testing.T) {
 		saved := saveInspectGlobals()
 		defer saved.restore()
 		inspectLastReport = true
@@ -157,8 +155,8 @@ func TestInspectRunSelection(t *testing.T) {
 			t.Fatal("expected rows, got none")
 		}
 		for _, r := range rows {
-			if r.TaskGroup != reportTG {
-				t.Errorf("expected task group %q, got %q", reportTG, r.TaskGroup)
+			if r.Batch != reportBatch {
+				t.Errorf("expected batch %q, got %q", reportBatch, r.Batch)
 			}
 			if r.Action != "report" {
 				t.Errorf("expected action 'report', got %q", r.Action)
@@ -185,7 +183,7 @@ func TestInspectRunSelection(t *testing.T) {
 		}
 	})
 
-	t.Run("last-code returns all runs in latest code task group", func(t *testing.T) {
+	t.Run("last-code returns all runs in latest code batch", func(t *testing.T) {
 		saved := saveInspectGlobals()
 		defer saved.restore()
 		inspectLastCode = true
@@ -200,8 +198,8 @@ func TestInspectRunSelection(t *testing.T) {
 			t.Fatal("expected rows, got none")
 		}
 		for _, r := range rows {
-			if r.TaskGroup != codeTG {
-				t.Errorf("expected task group %q, got %q", codeTG, r.TaskGroup)
+			if r.Batch != codeBatch {
+				t.Errorf("expected batch %q, got %q", codeBatch, r.Batch)
 			}
 		}
 	})

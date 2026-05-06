@@ -13,7 +13,7 @@ type ModelPrice struct {
 // PricingTable maps normalized model names to their per-token prices.
 type PricingTable map[string]ModelPrice
 
-// Clone returns a deep copy so per-task agent clones don't share map
+// Clone returns a deep copy so per-agent exec clones don't share map
 // backing memory with the shared original. Pricing is read-only in
 // practice, but cloning removes the invariant-by-convention: concurrent
 // pool workers operate on independent maps.

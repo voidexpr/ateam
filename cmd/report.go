@@ -176,13 +176,13 @@ func runReport(opts ReportOptions) error {
 	}
 	applyCheaperModel(cr, opts.CheaperModel)
 
-	taskGroup := "report-" + time.Now().Format(runner.TimestampFormat)
+	batch := "report-" + time.Now().Format(runner.TimestampFormat)
 
 	cliOverridesProfile := opts.Profile != "" || opts.Agent != ""
 	defaultProfile := env.Config.ResolveProfile(runner.ActionReport, "")
 
 	basePinfo := env.NewProjectInfoParams("", "report")
-	var tasks []runner.PoolTask
+	var tasks []runner.PoolExec
 	for _, roleID := range roleIDs {
 		pinfo := basePinfo
 		pinfo.Role = "role " + roleID
@@ -194,7 +194,7 @@ func runReport(opts ReportOptions) error {
 		roleDir := env.RoleDir(roleID)
 		startedAt := time.Now()
 		prompt, outputFile := prepareOutputFile(prompt, env.RoleHistoryDir(roleID), prompts.ReportFile, startedAt)
-		task := runner.PoolTask{
+		task := runner.PoolExec{
 			Prompt: prompt,
 			RunOpts: runner.RunOpts{
 				RoleID:               roleID,
@@ -208,7 +208,7 @@ func runReport(opts ReportOptions) error {
 				HistoryDir:           env.RoleHistoryDir(roleID),
 				PromptName:           "report_prompt.md",
 				Verbose:              opts.Verbose,
-				TaskGroup:            taskGroup,
+				Batch:                batch,
 				StartedAt:            startedAt,
 			},
 		}
@@ -247,9 +247,9 @@ func runReport(opts ReportOptions) error {
 				dryRunRunner = t.Runner
 			}
 			printDryRunInfo(dryRunRunner, env, dryRunOpts{
-				RoleID:    t.RoleID,
-				Action:    runner.ActionReport,
-				TaskGroup: taskGroup,
+				RoleID: t.RoleID,
+				Action: runner.ActionReport,
+				Batch:  batch,
 			})
 			fmt.Printf("\n╚══ %s ══╝\n", t.RoleID)
 		}
@@ -331,19 +331,19 @@ func runReport(opts ReportOptions) error {
 }
 
 // lastReportRolesByStatus returns (succeeded, failed) role lists from the
-// latest report task group.
+// latest report batch.
 func lastReportRolesByStatus(db *calldb.CallDB, projectID string) (succeeded, failed []string, err error) {
-	tg, err := db.LatestTaskGroup(projectID, "report-")
+	batch, err := db.LatestBatch(projectID, "report-")
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot query latest report: %w", err)
 	}
-	if tg == "" {
+	if batch == "" {
 		return nil, nil, fmt.Errorf("no previous report found")
 	}
 
-	runs, err := db.RecentRuns(calldb.RecentFilter{TaskGroup: tg, Limit: -1})
+	runs, err := db.RecentRuns(calldb.RecentFilter{Batch: batch, Limit: -1})
 	if err != nil {
-		return nil, nil, fmt.Errorf("cannot query runs for %s: %w", tg, err)
+		return nil, nil, fmt.Errorf("cannot query runs for %s: %w", batch, err)
 	}
 
 	seen := make(map[string]bool)

@@ -45,7 +45,7 @@ func TestInsertAndUpdate(t *testing.T) {
 		Container:  "none",
 		Action:     "run",
 		Role:       "security",
-		TaskGroup:  "code-2026-03-13",
+		Batch:      "code-2026-03-13",
 		Model:      "opus",
 		PromptHash: "abc123",
 		StartedAt:  now,
@@ -236,11 +236,11 @@ func seedCalls(t *testing.T, db *CallDB) {
 		result CallResult
 	}{
 		{
-			Call{ProjectID: "proj-a", Action: "report", Role: "security", TaskGroup: "report-2026-03-13_09-00-00", StartedAt: now.Add(-3 * time.Hour), StreamFile: "/logs/report_security.jsonl"},
+			Call{ProjectID: "proj-a", Action: "report", Role: "security", Batch: "report-2026-03-13_09-00-00", StartedAt: now.Add(-3 * time.Hour), StreamFile: "/logs/report_security.jsonl"},
 			CallResult{EndedAt: now.Add(-3*time.Hour + 2*time.Minute), DurationMS: 120000, CostUSD: 0.10, InputTokens: 5000, OutputTokens: 1000, CacheReadTokens: 500},
 		},
 		{
-			Call{ProjectID: "proj-a", Action: "report", Role: "testing", TaskGroup: "report-2026-03-13_09-00-00", StartedAt: now.Add(-3*time.Hour + time.Minute), StreamFile: "/logs/report_testing.jsonl"},
+			Call{ProjectID: "proj-a", Action: "report", Role: "testing", Batch: "report-2026-03-13_09-00-00", StartedAt: now.Add(-3*time.Hour + time.Minute), StreamFile: "/logs/report_testing.jsonl"},
 			CallResult{EndedAt: now.Add(-3*time.Hour + 3*time.Minute), DurationMS: 120000, CostUSD: 0.08, InputTokens: 4000, OutputTokens: 800, CacheReadTokens: 300},
 		},
 		{
@@ -248,15 +248,15 @@ func seedCalls(t *testing.T, db *CallDB) {
 			CallResult{EndedAt: now.Add(-2*time.Hour + 5*time.Minute), DurationMS: 300000, CostUSD: 0.20, InputTokens: 10000, OutputTokens: 2000, CacheReadTokens: 1000},
 		},
 		{
-			Call{ProjectID: "proj-a", Action: "code", Role: "supervisor", TaskGroup: "code-2026-03-13_10-00-00", StartedAt: now.Add(-1 * time.Hour), StreamFile: "/logs/code_supervisor.jsonl"},
+			Call{ProjectID: "proj-a", Action: "code", Role: "supervisor", Batch: "code-2026-03-13_10-00-00", StartedAt: now.Add(-1 * time.Hour), StreamFile: "/logs/code_supervisor.jsonl"},
 			CallResult{EndedAt: now.Add(-1*time.Hour + 10*time.Minute), DurationMS: 600000, CostUSD: 0.50, InputTokens: 20000, OutputTokens: 5000, CacheReadTokens: 2000},
 		},
 		{
-			Call{ProjectID: "proj-a", Action: "run", Role: "security", TaskGroup: "code-2026-03-13_10-00-00", StartedAt: now.Add(-50 * time.Minute), StreamFile: "/logs/run_security.jsonl"},
+			Call{ProjectID: "proj-a", Action: "run", Role: "security", Batch: "code-2026-03-13_10-00-00", StartedAt: now.Add(-50 * time.Minute), StreamFile: "/logs/run_security.jsonl"},
 			CallResult{EndedAt: now.Add(-45 * time.Minute), DurationMS: 300000, CostUSD: 0.15, InputTokens: 8000, OutputTokens: 1500, CacheReadTokens: 600},
 		},
 		{
-			Call{ProjectID: "proj-a", Action: "run", Role: "testing", TaskGroup: "code-2026-03-13_10-00-00", StartedAt: now.Add(-44 * time.Minute), StreamFile: "/logs/run_testing.jsonl"},
+			Call{ProjectID: "proj-a", Action: "run", Role: "testing", Batch: "code-2026-03-13_10-00-00", StartedAt: now.Add(-44 * time.Minute), StreamFile: "/logs/run_testing.jsonl"},
 			CallResult{EndedAt: now.Add(-40 * time.Minute), DurationMS: 240000, CostUSD: 0.12, InputTokens: 6000, OutputTokens: 1200, CacheReadTokens: 400},
 		},
 		{
@@ -339,14 +339,14 @@ func TestCostByAction(t *testing.T) {
 		catMap[a.Category] = a
 	}
 
-	// The two runs with task_group "code-..." should be categorized as "code-task-run"
+	// The two runs with batch "code-..." should be categorized as "code-task-run"
 	if ctr, ok := catMap["code-task-run"]; !ok {
 		t.Fatal("expected code-task-run category")
 	} else if ctr.Count != 2 {
 		t.Errorf("expected 2 code-task-run, got %d", ctr.Count)
 	}
 
-	// The standalone "run" (no code task_group) should stay as "run"
+	// The standalone "run" (no code batch) should stay as "run"
 	if r, ok := catMap["run"]; !ok {
 		t.Fatal("expected run category")
 	} else if r.Count != 1 {
@@ -366,36 +366,36 @@ func TestCostByAction(t *testing.T) {
 	}
 }
 
-func TestCostByTaskGroup(t *testing.T) {
+func TestCostByBatch(t *testing.T) {
 	db := testDB(t)
 	seedCalls(t, db)
 
-	rows, err := db.CostByTaskGroup("")
+	rows, err := db.CostByBatch("")
 	if err != nil {
-		t.Fatalf("CostByTaskGroup: %v", err)
+		t.Fatalf("CostByBatch: %v", err)
 	}
 
-	// Group rows by task_group
-	groups := make(map[string]map[string]TaskGroupRow)
+	// Group rows by batch
+	groups := make(map[string]map[string]BatchRow)
 	for _, r := range rows {
-		if groups[r.TaskGroup] == nil {
-			groups[r.TaskGroup] = make(map[string]TaskGroupRow)
+		if groups[r.Batch] == nil {
+			groups[r.Batch] = make(map[string]BatchRow)
 		}
-		groups[r.TaskGroup][r.Action] = r
+		groups[r.Batch][r.Action] = r
 	}
 
 	// code-2026-03-13_10-00-00: code + run
 	codeGroup := groups["code-2026-03-13_10-00-00"]
 	if codeGroup == nil {
-		t.Fatal("expected code task group")
+		t.Fatal("expected code batch")
 	}
 	if code, ok := codeGroup["code"]; !ok {
-		t.Fatal("expected code action in code group")
+		t.Fatal("expected code action in code batch")
 	} else if code.Count != 1 {
 		t.Errorf("expected 1 code call, got %d", code.Count)
 	}
 	if run, ok := codeGroup["run"]; !ok {
-		t.Fatal("expected run action in code group")
+		t.Fatal("expected run action in code batch")
 	} else if run.Count != 2 {
 		t.Errorf("expected 2 run calls, got %d", run.Count)
 	}
@@ -403,10 +403,10 @@ func TestCostByTaskGroup(t *testing.T) {
 	// report-2026-03-13_09-00-00: report
 	reportGroup := groups["report-2026-03-13_09-00-00"]
 	if reportGroup == nil {
-		t.Fatal("expected report task group")
+		t.Fatal("expected report batch")
 	}
 	if rep, ok := reportGroup["report"]; !ok {
-		t.Fatal("expected report action in report group")
+		t.Fatal("expected report action in report batch")
 	} else if rep.Count != 2 {
 		t.Errorf("expected 2 report calls, got %d", rep.Count)
 	}
@@ -535,6 +535,37 @@ func TestMigrateFromOldTableName(t *testing.T) {
 	if sf != expected {
 		t.Errorf("expected relative path %q, got %q", expected, sf)
 	}
+
+	// Verify task_group column was renamed to batch.
+	var hasTaskGroup, hasBatch bool
+	rows, err := db.db.Query("PRAGMA table_info(agent_execs)")
+	if err != nil {
+		t.Fatalf("PRAGMA table_info: %v", err)
+	}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var dflt sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			rows.Close()
+			t.Fatalf("scan: %v", err)
+		}
+		switch name {
+		case "task_group":
+			hasTaskGroup = true
+		case "batch":
+			hasBatch = true
+		}
+	}
+	rows.Close()
+	if hasTaskGroup {
+		t.Error("legacy task_group column still exists after migration")
+	}
+	if !hasBatch {
+		t.Error("batch column missing after migration")
+	}
 }
 
 func TestOpenIfExistsReturnsNilForMissingFile(t *testing.T) {
@@ -632,16 +663,16 @@ func TestCallsByIDs(t *testing.T) {
 	}
 }
 
-func TestCallsByTaskGroup(t *testing.T) {
+func TestCallsByBatch(t *testing.T) {
 	db := testDB(t)
 	seedCalls(t, db)
 
-	rows, err := db.CallsByTaskGroup("code-2026-03-13_10-00-00")
+	rows, err := db.CallsByBatch("code-2026-03-13_10-00-00")
 	if err != nil {
-		t.Fatalf("CallsByTaskGroup: %v", err)
+		t.Fatalf("CallsByBatch: %v", err)
 	}
 	if len(rows) != 3 {
-		t.Fatalf("expected 3 rows in code task group, got %d", len(rows))
+		t.Fatalf("expected 3 rows in code batch, got %d", len(rows))
 	}
 	// Should include the supervisor (code) and two sub-runs
 	actions := map[string]int{}
@@ -656,25 +687,25 @@ func TestCallsByTaskGroup(t *testing.T) {
 	}
 }
 
-func TestLatestTaskGroup(t *testing.T) {
+func TestLatestBatch(t *testing.T) {
 	db := testDB(t)
 	seedCalls(t, db)
 
-	tg, err := db.LatestTaskGroup("proj-a", "code-")
+	b, err := db.LatestBatch("proj-a", "code-")
 	if err != nil {
-		t.Fatalf("LatestTaskGroup: %v", err)
+		t.Fatalf("LatestBatch: %v", err)
 	}
-	if tg != "code-2026-03-13_10-00-00" {
-		t.Errorf("expected code-2026-03-13_10-00-00, got %q", tg)
+	if b != "code-2026-03-13_10-00-00" {
+		t.Errorf("expected code-2026-03-13_10-00-00, got %q", b)
 	}
 
 	// No match
-	tg, err = db.LatestTaskGroup("proj-a", "nonexistent-")
+	b, err = db.LatestBatch("proj-a", "nonexistent-")
 	if err != nil {
-		t.Fatalf("LatestTaskGroup no match: %v", err)
+		t.Fatalf("LatestBatch no match: %v", err)
 	}
-	if tg != "" {
-		t.Errorf("expected empty string, got %q", tg)
+	if b != "" {
+		t.Errorf("expected empty string, got %q", b)
 	}
 }
 
@@ -682,14 +713,14 @@ func TestRecentRunsStreamFile(t *testing.T) {
 	db := testDB(t)
 	seedCalls(t, db)
 
-	rows, err := db.RecentRuns(RecentFilter{TaskGroup: "code-2026-03-13_10-00-00"})
+	rows, err := db.RecentRuns(RecentFilter{Batch: "code-2026-03-13_10-00-00"})
 	if err != nil {
 		t.Fatalf("RecentRuns: %v", err)
 	}
 	if len(rows) != 3 {
 		t.Fatalf("expected 3 rows, got %d", len(rows))
 	}
-	// DESC order: newest first — testing is most recent in this task group
+	// DESC order: newest first — testing is most recent in this batch
 	if rows[0].StreamFile != "/logs/run_testing.jsonl" {
 		t.Errorf("expected stream file on testing (newest), got %q", rows[0].StreamFile)
 	}

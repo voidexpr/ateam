@@ -82,17 +82,17 @@ func TestRerunFailedDryRunSelectsOnlyFailed(t *testing.T) {
 		t.Fatalf("LookupFrom: %v", err)
 	}
 
-	// Seed a report task group: security succeeded, testing_basic failed.
+	// Seed a report batch: security succeeded, testing_basic failed.
 	db, err := calldb.Open(env.ProjectDBPath())
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	now := time.Now()
-	tg := "report-2026-04-01_10-00-00"
+	batch := "report-2026-04-01_10-00-00"
 
 	secID, err := db.InsertCall(&calldb.Call{
 		ProjectID: env.ProjectID(), Action: "report", Role: "security",
-		TaskGroup: tg, StartedAt: now.Add(-2 * time.Minute),
+		Batch: batch, StartedAt: now.Add(-2 * time.Minute),
 	})
 	if err != nil {
 		t.Fatalf("InsertCall: %v", err)
@@ -105,7 +105,7 @@ func TestRerunFailedDryRunSelectsOnlyFailed(t *testing.T) {
 
 	tbID, err := db.InsertCall(&calldb.Call{
 		ProjectID: env.ProjectID(), Action: "report", Role: "testing_basic",
-		TaskGroup: tg, StartedAt: now.Add(-2 * time.Minute),
+		Batch: batch, StartedAt: now.Add(-2 * time.Minute),
 	})
 	if err != nil {
 		t.Fatalf("InsertCall: %v", err)

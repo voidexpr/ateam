@@ -359,7 +359,7 @@ echo "still works" | ateam run -                # explicit "-"
 | `--model MODEL` | Model override |
 | `--work-dir PATH` | Working directory |
 | `--agent-args "ARGS"` | Extra args passed to the agent CLI |
-| `--task-group ID` | Group related calls |
+| `--batch ID` | Group related agent_execs |
 | `--no-stream` | Disable progress updates on stderr |
 | `--no-summary` | Disable cost/duration/tokens summary |
 | `--quiet` | Disable both streaming and summary |
@@ -368,7 +368,7 @@ echo "still works" | ateam run -                # explicit "-"
 
 ### `ateam parallel`
 
-Run multiple agents in parallel, each with its own prompt. All tasks share a single runner instance and task group for unified cost tracking.
+Run multiple agents in parallel, each with its own prompt. All execs share a single runner instance and batch for unified cost tracking.
 
 ```bash
 ateam parallel "analyze auth module" "analyze payment module"
@@ -377,34 +377,34 @@ ateam parallel "task A" "task B" --max-parallel 1 --common-prompt-first @context
 ateam parallel "task A" "task B" --dry-run
 ```
 
-Each positional argument is a prompt (text or `@filepath`). Tasks run concurrently up to `--max-parallel`, with a live ANSI progress table showing status, tool calls, and elapsed time per task.
+Each positional argument is a prompt (text or `@filepath`). Agent execs run concurrently up to `--max-parallel`, with a live ANSI progress table showing status, tool calls, and elapsed time per exec.
 
 | Flag | Description |
 |------|-------------|
-| `--labels LIST` | Comma-separated names for each task (must match prompt count; default: `agent-1`, `agent-2`, ...) |
-| `--max-parallel N` | Maximum concurrent tasks (default: 3) |
+| `--labels LIST` | Comma-separated names for each prompt (must match prompt count; default: `agent-1`, `agent-2`, ...) |
+| `--max-parallel N` | Maximum concurrent agent execs (default: 3) |
 | `--common-prompt-first TEXT` | Text or `@filepath` prepended to every prompt |
 | `--common-prompt-last TEXT` | Text or `@filepath` appended to every prompt |
-| `--task-group ID` | Custom task group name (default: `parallel-TIMESTAMP`) |
+| `--batch ID` | Custom batch name (default: `parallel-TIMESTAMP`) |
 | `--profile NAME` | Runtime profile |
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
 | `--model MODEL` | Model override |
 | `--work-dir PATH` | Working directory (defaults to project source dir or cwd) |
-| `--timeout MINUTES` | Timeout per task |
+| `--timeout MINUTES` | Timeout per agent exec |
 | `--no-progress` | Suppress ANSI progress table (use plain line output) |
-| `--print` | Print task outputs to stdout after completion |
+| `--print` | Print exec outputs to stdout after completion |
 | `--dry-run` | Print assembled prompts without running |
 | `--verbose` | Print agent and docker commands to stderr |
 | `--force` | Run even if the same action is already running |
 | `--docker-auto-setup` | Auto-setup Docker container if needed |
 
-**Task group**: All tasks are grouped under a single task group (visible in `ateam cost`, `ateam ps`, and `ateam serve`). Use `--task-group` to set a custom name or let it auto-generate as `parallel-TIMESTAMP`.
+**Batch**: All execs are grouped under a single batch (visible in `ateam cost`, `ateam ps`, and `ateam serve`). Use `--batch` to set a custom name or let it auto-generate as `parallel-TIMESTAMP`.
 
-**Common prompts**: Use `--common-prompt-first` and `--common-prompt-last` to inject shared context. The final prompt for each task is: `common-first + "\n\n" + task-prompt + "\n\n" + common-last`.
+**Common prompts**: Use `--common-prompt-first` and `--common-prompt-last` to inject shared context. The final prompt for each exec is: `common-first + "\n\n" + prompt + "\n\n" + common-last`.
 
-**Output**: Progress and status go to stderr. With `--print`, task outputs are printed to stdout in submission order, each preceded by a label header (omitted for single-task runs). This makes it composable with downstream tools.
+**Output**: Progress and status go to stderr. With `--print`, exec outputs are printed to stdout in submission order, each preceded by a label header (omitted for single-exec runs). This makes it composable with downstream tools.
 
-**Logs**: Each task's logs are stored under `logs/parallel/{label}/` in the project or org directory.
+**Logs**: Each exec's logs are stored under `logs/parallel/{label}/` in the project or org directory.
 
 ### `ateam prompt`
 
@@ -437,7 +437,7 @@ Show the current environment: organization, runtime config, project, and role st
 
 ### `ateam inspect [ID...]`
 
-Show the ps summary and log files for one or more agent runs. Select runs by ID, task group, or shorthand flags.
+Show the ps summary and log files for one or more agent runs. Select runs by ID, batch, or shorthand flags.
 
 ```bash
 ateam inspect 42
@@ -451,16 +451,16 @@ ateam inspect --last-run --auto-debug-prompt
 | Flag | Description |
 |------|-------------|
 | `--last-run` | Select the most recent run |
-| `--last-report` | Select all tasks from the last report batch |
+| `--last-report` | Select all execs from the last report batch |
 | `--last-review` | Select the last review run |
-| `--last-code` | Select all tasks from the last code session |
-| `--task-group NAME` | Select all runs in a task group |
+| `--last-code` | Select all execs from the last code session |
+| `--batch NAME` | Select all runs in a batch |
 | `--auto-debug` | Launch an agent in streaming mode to investigate the selected runs |
 | `--auto-debug-prompt` | Print the auto-debug prompt without executing |
 | `--profile NAME` | Profile for the auto-debug agent |
 | `--agent NAME` | Agent for the auto-debug run |
 
-The debug prompt uses the standard 3-level fallback (`supervisor/task_debug_prompt.md`). Debug reports are saved to `.ateam/logs/supervisor/`.
+The debug prompt uses the standard 3-level fallback (`supervisor/exec_debug_prompt.md`). Debug reports are saved to `.ateam/logs/supervisor/`.
 
 When the selected row is a `claude` run with a recoverable session id, `inspect` prints a one-line `resume:` hint pointing at `ateam resume <id>`.
 
@@ -680,7 +680,7 @@ Created by `ateam install`. Holds shared defaults and org-level overrides.
     supervisor/code_management_prompt.md       # supervisor code management prompt
     supervisor/code_verify_prompt.md           # supervisor verify prompt
     supervisor/report_commissioning_prompt.md  # report commissioning prompt
-    supervisor/task_debug_prompt.md            # task debug prompt (used by ateam inspect --auto-debug)
+    supervisor/exec_debug_prompt.md            # agent_exec debug prompt (used by ateam inspect --auto-debug)
     supervisor/auto_setup_prompt.md            # auto-setup prompt
   runtime.hcl                                  # org-level runtime config override (optional)
   Dockerfile                                   # org-level Dockerfile override (optional)
@@ -951,7 +951,7 @@ Agent args, profile extra args, container config fields, and agent env values su
 | `{{PROJECT_DIR}}` | Last component of the project path | `myproject` |
 | `{{ROLE}}` | Role ID | `security`, `supervisor` |
 | `{{ACTION}}` | Action type | `report`, `run`, `code`, `review` |
-| `{{TASK_GROUP}}` | Task group ID | `code-2026-03-31_06-09-39` |
+| `{{BATCH}}` | Batch ID | `code-2026-03-31_06-09-39` |
 | `{{TIMESTAMP}}` | Run start time | `2026-03-31_06-09-39` |
 | `{{PROFILE}}` | Active profile name | `docker`, `default` |
 | `{{EXEC_ID}}` | Call tracking ID (visible in `ateam ps`) | `42` |
@@ -1157,7 +1157,7 @@ ateam tail --coding             # live-stream current coding session
 | `report_error.md` | `.ateam/roles/<NAME>/` | Error summary, exit code, stderr, partial output |
 | `*_stderr.log` | `.ateam/logs/roles/<NAME>/` | Raw stderr |
 | `*_stream.jsonl` | `.ateam/logs/roles/<NAME>/` | Raw JSONL event stream |
-| `*_exec.md` | `.ateam/logs/roles/<NAME>/` | Full execution context: exec_id, agent, profile, container (type + name), model, role, task_group, cwd, the resolved CLI, inherited env (secrets redacted), specified env overrides (e.g. `CLAUDE_CONFIG_DIR`), sandbox settings, and the prompt. Used by `ateam resume`. |
+| `*_exec.md` | `.ateam/logs/roles/<NAME>/` | Full execution context: exec_id, agent, profile, container (type + name), model, role, batch, cwd, the resolved CLI, inherited env (secrets redacted), specified env overrides (e.g. `CLAUDE_CONFIG_DIR`), sandbox settings, and the prompt. Used by `ateam resume`. |
 
 Supervisor errors: `.ateam/supervisor/review_error.md` and `.ateam/supervisor/code_error.md`.
 

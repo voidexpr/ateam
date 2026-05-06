@@ -821,29 +821,29 @@ func capitalizeASCII(s string) string {
 	return string(s[0]-32) + s[1:]
 }
 
-// buildSessions aggregates CostByTaskGroup rows into CodeSession entries.
+// buildSessions aggregates CostByBatch rows into CodeSession entries.
 func buildSessions(db *calldb.CallDB) []CodeSession {
-	tgRows, err := db.CostByTaskGroup("")
+	batchRows, err := db.CostByBatch("")
 	if err != nil {
-		log.Printf("warning: CostByTaskGroup: %v", err)
+		log.Printf("warning: CostByBatch: %v", err)
 	}
 	seen := map[string]*CodeSession{}
 	var order []string
-	for _, row := range tgRows {
-		cs, ok := seen[row.TaskGroup]
+	for _, row := range batchRows {
+		cs, ok := seen[row.Batch]
 		if !ok {
-			ts := parseTaskGroupTimestamp(row.TaskGroup)
+			ts := parseBatchTimestamp(row.Batch)
 			kind := "report"
-			if strings.HasPrefix(row.TaskGroup, "code-") {
+			if strings.HasPrefix(row.Batch, "code-") {
 				kind = "code"
 			}
 			cs = &CodeSession{
-				TaskGroup: row.TaskGroup,
+				Batch:     row.Batch,
 				Timestamp: ts,
 				Kind:      kind,
 			}
-			seen[row.TaskGroup] = cs
-			order = append(order, row.TaskGroup)
+			seen[row.Batch] = cs
+			order = append(order, row.Batch)
 		}
 		cs.RunCount += row.Count
 		cs.TotalCost += row.CostUSD
@@ -888,12 +888,12 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	taskGroup := r.PathValue("taskgroup")
-	data := sessionDetailData{TaskGroup: taskGroup}
+	batch := r.PathValue("batch")
+	data := sessionDetailData{Batch: batch}
 
 	if db := s.getDB(pe); db != nil {
 		var err error
-		data.Runs, err = db.RecentRuns(calldb.RecentFilter{TaskGroup: taskGroup, Limit: 200})
+		data.Runs, err = db.RecentRuns(calldb.RecentFilter{Batch: batch, Limit: 200})
 		if err != nil {
 			log.Printf("warning: RecentRuns: %v", err)
 		}
@@ -903,7 +903,7 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ts := parseTaskGroupTimestamp(taskGroup)
+	ts := parseBatchTimestamp(batch)
 	tsPrefix := ts.Format(runner.TimestampFormat)
 
 	supHistDir := filepath.Join(pe.ProjectDir, "supervisor", "history")
@@ -917,7 +917,7 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if strings.HasPrefix(taskGroup, "code-") {
+	if strings.HasPrefix(batch, "code-") {
 		codeOutputPath := filepath.Join(pe.ProjectDir, "supervisor", "code_output.md")
 		if content, modTime, err := readFileWithModTime(codeOutputPath); err == nil {
 			data.CodeOutputHTML = template.HTML(s.renderMarkdown(string(content)))
@@ -956,7 +956,7 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.render(w, r, "session_detail.html", pageData{
-		Title:       taskGroup,
+		Title:       batch,
 		Nav:         "sessions",
 		ProjectName: pe.Name,
 		ProjectSlug: pe.Slug,
@@ -972,7 +972,7 @@ type sessionFile struct {
 }
 
 type sessionDetailData struct {
-	TaskGroup         string
+	Batch             string
 	Runs              []calldb.RecentRow
 	TotalCost         float64
 	TotalTokens       int64
@@ -982,13 +982,13 @@ type sessionDetailData struct {
 	CodeOutputModTime time.Time
 }
 
-// parseTaskGroupTimestamp extracts timestamp from "code-2026-03-19_00-35-57" or "report-2026-03-19_00-35-57".
-func parseTaskGroupTimestamp(tg string) time.Time {
-	idx := strings.IndexByte(tg, '-')
-	if idx < 0 || idx+1 >= len(tg) {
+// parseBatchTimestamp extracts timestamp from "code-2026-03-19_00-35-57" or "report-2026-03-19_00-35-57".
+func parseBatchTimestamp(batch string) time.Time {
+	idx := strings.IndexByte(batch, '-')
+	if idx < 0 || idx+1 >= len(batch) {
 		return time.Time{}
 	}
-	tsStr := tg[idx+1:]
+	tsStr := batch[idx+1:]
 	t, err := time.ParseInLocation(runner.TimestampFormat, tsStr, time.Local)
 	if err != nil {
 		return time.Time{}

@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	inspectTaskGroup            string
+	inspectBatch                string
 	inspectLastRun              bool
 	inspectLastReport           bool
 	inspectLastReview           bool
@@ -34,7 +34,7 @@ var inspectCmd = &cobra.Command{
 	Short: "Show log files for agent runs",
 	Long: `Display the ps summary and log files for one or more runs.
 
-Select runs by ID, task group, or shorthand flags.
+Select runs by ID, batch, or shorthand flags.
 
 Example:
   ateam inspect 42
@@ -46,11 +46,11 @@ Example:
 }
 
 func init() {
-	inspectCmd.Flags().StringVar(&inspectTaskGroup, "task-group", "", "select all runs in a task group")
+	inspectCmd.Flags().StringVar(&inspectBatch, "batch", "", "select all runs in a batch")
 	inspectCmd.Flags().BoolVar(&inspectLastRun, "last-run", false, "select the most recent run")
-	inspectCmd.Flags().BoolVar(&inspectLastReport, "last-report", false, "select all tasks from the last report batch")
+	inspectCmd.Flags().BoolVar(&inspectLastReport, "last-report", false, "select all execs from the last report batch")
 	inspectCmd.Flags().BoolVar(&inspectLastReview, "last-review", false, "select the last review run")
-	inspectCmd.Flags().BoolVar(&inspectLastCode, "last-code", false, "select all tasks from the last code session")
+	inspectCmd.Flags().BoolVar(&inspectLastCode, "last-code", false, "select all execs from the last code session")
 	inspectCmd.Flags().BoolVar(&inspectAutoDebug, "auto-debug", false, "launch an agent to investigate the selected runs")
 	inspectCmd.Flags().BoolVar(&inspectAutoDebugPrompt, "auto-debug-prompt", false, "print the auto-debug prompt without executing")
 	inspectCmd.Flags().StringVar(&inspectAutoDebugExtraPrompt, "auto-debug-extra-prompt", "", "additional instructions for the debug agent (text or @filepath)")
@@ -111,8 +111,8 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 
 	if inspectAutoDebug || inspectAutoDebugPrompt {
 		debugContext := buildDebugContext(rows, allFiles)
-		pinfo := env.NewProjectInfoParams("task debugger", "debug")
-		prompt, err := prompts.AssembleTaskDebugPrompt(env.OrgDir, env.ProjectDir, debugContext, pinfo)
+		pinfo := env.NewProjectInfoParams("exec debugger", "debug")
+		prompt, err := prompts.AssembleExecDebugPrompt(env.OrgDir, env.ProjectDir, debugContext, pinfo)
 		if err != nil {
 			return err
 		}
@@ -143,30 +143,30 @@ func resolveRunSelection(db *calldb.CallDB, env *root.ResolvedEnv, args []string
 		return recentRowsByIDs(db, ids)
 	}
 
-	if inspectTaskGroup != "" {
-		return db.RecentRuns(calldb.RecentFilter{TaskGroup: inspectTaskGroup})
+	if inspectBatch != "" {
+		return db.RecentRuns(calldb.RecentFilter{Batch: inspectBatch})
 	}
 
 	if inspectLastReport {
-		tg, err := db.LatestTaskGroup("", "report-")
+		batch, err := db.LatestBatch("", "report-")
 		if err != nil {
 			return nil, err
 		}
-		if tg == "" {
+		if batch == "" {
 			return nil, fmt.Errorf("no report runs found")
 		}
-		return db.RecentRuns(calldb.RecentFilter{TaskGroup: tg})
+		return db.RecentRuns(calldb.RecentFilter{Batch: batch})
 	}
 
 	if inspectLastCode {
-		tg, err := db.LatestTaskGroup("", "code-")
+		batch, err := db.LatestBatch("", "code-")
 		if err != nil {
 			return nil, err
 		}
-		if tg == "" {
+		if batch == "" {
 			return nil, fmt.Errorf("no code runs found")
 		}
-		return db.RecentRuns(calldb.RecentFilter{TaskGroup: tg})
+		return db.RecentRuns(calldb.RecentFilter{Batch: batch})
 	}
 
 	if inspectLastReview {
@@ -185,7 +185,7 @@ func resolveRunSelection(db *calldb.CallDB, env *root.ResolvedEnv, args []string
 		return rows, nil
 	}
 
-	return nil, fmt.Errorf("specify task IDs or use --last-run, --last-report, --last-review, --last-code, or --task-group")
+	return nil, fmt.Errorf("specify exec IDs or use --last-run, --last-report, --last-review, --last-code, or --batch")
 }
 
 func recentRowsByIDs(db *calldb.CallDB, ids []int64) ([]calldb.RecentRow, error) {

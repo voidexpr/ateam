@@ -15,7 +15,7 @@ type RecentRow struct {
 	Container         string
 	Action            string
 	Role              string
-	TaskGroup         string
+	Batch             string
 	Model             string
 	StartedAt         string
 	EndedAt           string
@@ -42,7 +42,7 @@ type RecentFilter struct {
 	Role      string
 	Action    string
 	Agent     string
-	TaskGroup string
+	Batch     string
 	Limit     int
 }
 
@@ -66,9 +66,9 @@ func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
 		where = append(where, "agent = ?")
 		args = append(args, f.Agent)
 	}
-	if f.TaskGroup != "" {
-		where = append(where, "task_group = ?")
-		args = append(args, f.TaskGroup)
+	if f.Batch != "" {
+		where = append(where, "batch = ?")
+		args = append(args, f.Batch)
 	}
 
 	q := "SELECT " + recentCols + " FROM agent_execs"
@@ -102,12 +102,12 @@ func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
 	return results, rows.Err()
 }
 
-const recentCols = "id, project_id, profile, COALESCE(agent,''), COALESCE(container,''), action, role, task_group, model, started_at, COALESCE(ended_at,''), COALESCE(duration_ms,0), COALESCE(exit_code,0), is_error, COALESCE(error_message,''), COALESCE(cost_usd,0), COALESCE(input_tokens,0), COALESCE(output_tokens,0), COALESCE(cache_read_tokens,0), COALESCE(cache_write_tokens,0), COALESCE(turns,0), COALESCE(pid,0), COALESCE(container_id,''), COALESCE(stream_file,''), COALESCE(output_file,''), COALESCE(peak_context_tokens,0), COALESCE(context_window,0)"
+const recentCols = "id, project_id, profile, COALESCE(agent,''), COALESCE(container,''), action, role, batch, model, started_at, COALESCE(ended_at,''), COALESCE(duration_ms,0), COALESCE(exit_code,0), is_error, COALESCE(error_message,''), COALESCE(cost_usd,0), COALESCE(input_tokens,0), COALESCE(output_tokens,0), COALESCE(cache_read_tokens,0), COALESCE(cache_write_tokens,0), COALESCE(turns,0), COALESCE(pid,0), COALESCE(container_id,''), COALESCE(stream_file,''), COALESCE(output_file,''), COALESCE(peak_context_tokens,0), COALESCE(context_window,0)"
 
 func scanRecentRow(rows *sql.Rows) (RecentRow, error) {
 	var r RecentRow
 	var isErr int
-	err := rows.Scan(&r.ID, &r.ProjectID, &r.Profile, &r.Agent, &r.Container, &r.Action, &r.Role, &r.TaskGroup, &r.Model, &r.StartedAt, &r.EndedAt, &r.DurationMS, &r.ExitCode, &isErr, &r.ErrorMessage, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens, &r.Turns, &r.PID, &r.ContainerID, &r.StreamFile, &r.OutputFile, &r.PeakContextTokens, &r.ContextWindow)
+	err := rows.Scan(&r.ID, &r.ProjectID, &r.Profile, &r.Agent, &r.Container, &r.Action, &r.Role, &r.Batch, &r.Model, &r.StartedAt, &r.EndedAt, &r.DurationMS, &r.ExitCode, &isErr, &r.ErrorMessage, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens, &r.Turns, &r.PID, &r.ContainerID, &r.StreamFile, &r.OutputFile, &r.PeakContextTokens, &r.ContextWindow)
 	r.IsError = isErr != 0
 	return r, err
 }
@@ -182,7 +182,7 @@ func (c *CallDB) CostByAction(projectID string) ([]ActionAgg, error) {
 	q := `
 		SELECT
 			CASE
-				WHEN action = 'run' AND task_group LIKE 'code-%' THEN 'code-task-run'
+				WHEN action = 'run' AND batch LIKE 'code-%' THEN 'code-task-run'
 				ELSE action
 			END AS category,
 			COUNT(*) AS cnt,
@@ -217,8 +217,8 @@ func (c *CallDB) CostByAction(projectID string) ([]ActionAgg, error) {
 	return results, rows.Err()
 }
 
-type TaskGroupRow struct {
-	TaskGroup        string
+type BatchRow struct {
+	Batch            string
 	Action           string
 	Count            int
 	CostUSD          float64
@@ -231,12 +231,12 @@ type TaskGroupRow struct {
 	LastEnded        sql.NullString
 }
 
-// CostByTaskGroup returns cost data grouped by task_group and action for all
-// runs that have a non-empty task_group (code sessions, report batches, etc.).
-func (c *CallDB) CostByTaskGroup(projectID string) ([]TaskGroupRow, error) {
+// CostByBatch returns cost data grouped by batch and action for all
+// agent_execs that have a non-empty batch (code sessions, report batches, etc.).
+func (c *CallDB) CostByBatch(projectID string) ([]BatchRow, error) {
 	q := `
 		SELECT
-			task_group,
+			batch,
 			action,
 			COUNT(*),
 			COALESCE(SUM(cost_usd), 0),
@@ -248,13 +248,13 @@ func (c *CallDB) CostByTaskGroup(projectID string) ([]TaskGroupRow, error) {
 			MIN(started_at),
 			MAX(ended_at)
 		FROM agent_execs
-		WHERE task_group != ''`
+		WHERE batch != ''`
 	var args []any
 	if projectID != "" {
 		q += " AND project_id = ?"
 		args = append(args, projectID)
 	}
-	q += " GROUP BY task_group, action ORDER BY task_group DESC, action"
+	q += " GROUP BY batch, action ORDER BY batch DESC, action"
 
 	rows, err := c.db.Query(q, args...)
 	if err != nil {
@@ -262,10 +262,10 @@ func (c *CallDB) CostByTaskGroup(projectID string) ([]TaskGroupRow, error) {
 	}
 	defer rows.Close()
 
-	var results []TaskGroupRow
+	var results []BatchRow
 	for rows.Next() {
-		var r TaskGroupRow
-		if err := rows.Scan(&r.TaskGroup, &r.Action, &r.Count, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens, &r.TotalTokens, &r.FirstStarted, &r.LastEnded); err != nil {
+		var r BatchRow
+		if err := rows.Scan(&r.Batch, &r.Action, &r.Count, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens, &r.TotalTokens, &r.FirstStarted, &r.LastEnded); err != nil {
 			return results, err
 		}
 		results = append(results, r)
@@ -279,18 +279,18 @@ type CallRow struct {
 	Model      string
 	Role       string
 	Action     string
-	TaskGroup  string
+	Batch      string
 	StartedAt  string
 	EndedAt    string
 	StreamFile string
 	OutputFile string
 }
 
-const callRowCols = `id, COALESCE(agent,''), COALESCE(model,''), role, action, task_group, started_at, COALESCE(ended_at,''), COALESCE(stream_file,''), COALESCE(output_file,'')`
+const callRowCols = `id, COALESCE(agent,''), COALESCE(model,''), role, action, batch, started_at, COALESCE(ended_at,''), COALESCE(stream_file,''), COALESCE(output_file,'')`
 
 func scanCallRow(rows *sql.Rows) (CallRow, error) {
 	var r CallRow
-	err := rows.Scan(&r.ID, &r.Agent, &r.Model, &r.Role, &r.Action, &r.TaskGroup, &r.StartedAt, &r.EndedAt, &r.StreamFile, &r.OutputFile)
+	err := rows.Scan(&r.ID, &r.Agent, &r.Model, &r.Role, &r.Action, &r.Batch, &r.StartedAt, &r.EndedAt, &r.StreamFile, &r.OutputFile)
 	return r, err
 }
 
@@ -324,9 +324,9 @@ func (c *CallDB) CallsByIDs(ids []int64) ([]CallRow, error) {
 	return results, rows.Err()
 }
 
-func (c *CallDB) CallsByTaskGroup(taskGroup string) ([]CallRow, error) {
-	q := fmt.Sprintf("SELECT %s FROM agent_execs WHERE task_group = ? ORDER BY started_at", callRowCols)
-	rows, err := c.db.Query(q, taskGroup)
+func (c *CallDB) CallsByBatch(batch string) ([]CallRow, error) {
+	q := fmt.Sprintf("SELECT %s FROM agent_execs WHERE batch = ? ORDER BY started_at", callRowCols)
+	rows, err := c.db.Query(q, batch)
 	if err != nil {
 		return nil, err
 	}
@@ -406,14 +406,14 @@ func (c *CallDB) RunCostByActionRole(action, role string) (map[string]RunCost, e
 	return result, rows.Err()
 }
 
-func (c *CallDB) LatestTaskGroup(projectID, prefix string) (string, error) {
-	q := `SELECT task_group FROM agent_execs
-		WHERE project_id = ? AND task_group LIKE ?
+func (c *CallDB) LatestBatch(projectID, prefix string) (string, error) {
+	q := `SELECT batch FROM agent_execs
+		WHERE project_id = ? AND batch LIKE ?
 		ORDER BY started_at DESC LIMIT 1`
-	var tg string
-	err := c.db.QueryRow(q, projectID, prefix+"%").Scan(&tg)
+	var batch string
+	err := c.db.QueryRow(q, projectID, prefix+"%").Scan(&batch)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
-	return tg, err
+	return batch, err
 }

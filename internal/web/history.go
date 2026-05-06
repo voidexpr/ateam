@@ -117,9 +117,9 @@ func latestRunCost(costs map[string]calldb.RunCost) (float64, int64) {
 	return rc.CostUSD, rc.TotalTokens
 }
 
-// CodeSession represents a task group session from calldb.
+// CodeSession represents a batch session from calldb.
 type CodeSession struct {
-	TaskGroup string
+	Batch     string
 	Timestamp time.Time
 	Kind      string // "code" or "report"
 	RunCount  int
