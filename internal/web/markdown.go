@@ -42,9 +42,15 @@ func (r *chromaRenderer) renderFencedCode(w util.BufWriter, source []byte, node 
 	}
 
 	if err := quick.Highlight(w, code.String(), lang, "html", "dracula"); err != nil {
-		w.WriteString("<pre><code>")
-		w.WriteString(html.EscapeString(code.String()))
-		w.WriteString("</code></pre>")
+		if _, err := w.WriteString("<pre><code>"); err != nil {
+			return gast.WalkStop, err
+		}
+		if _, err := w.WriteString(html.EscapeString(code.String())); err != nil {
+			return gast.WalkStop, err
+		}
+		if _, err := w.WriteString("</code></pre>"); err != nil {
+			return gast.WalkStop, err
+		}
 	}
 
 	return gast.WalkSkipChildren, nil

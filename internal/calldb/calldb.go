@@ -134,10 +134,15 @@ func Open(dbPath string) (*CallDB, error) {
 	// Reads can still proceed concurrently via WAL.
 	db.SetMaxOpenConns(1)
 
-	// Skip schema creation when old table exists — migrate() will rename it.
-	var hasOldTable bool
+	// Skip schema creation when either an old (agent_calls) or pre-rename
+	// (agent_execs with task_group column) table is present — migrate()
+	// brings them up to the current schema. Running the schema against a
+	// pre-rename agent_execs would fail at `CREATE INDEX idx_execs_batch`
+	// because the batch column doesn't exist yet.
+	var hasOldTable, hasNewTable bool
 	_ = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_calls'").Scan(&hasOldTable)
-	if !hasOldTable {
+	_ = db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_execs'").Scan(&hasNewTable)
+	if !hasOldTable && !hasNewTable {
 		if _, err := db.Exec(schema); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("create schema: %w", err)

@@ -480,7 +480,7 @@ func TestAssembleCodeVerifyPrompt(t *testing.T) {
 		headerIdx := strings.Index(result, "# ATeam Project Context")
 		bodyIdx := strings.Index(result, stubBody)
 		extraIdx := strings.Index(result, "# Additional Instructions")
-		if !(headerIdx < bodyIdx && bodyIdx < extraIdx) {
+		if headerIdx >= bodyIdx || bodyIdx >= extraIdx {
 			t.Errorf("sections out of order: header=%d body=%d extra=%d", headerIdx, bodyIdx, extraIdx)
 		}
 	})

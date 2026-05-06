@@ -568,6 +568,76 @@ func TestMigrateFromOldTableName(t *testing.T) {
 	}
 }
 
+// TestMigrateFromPreBatchAgentExecs covers the case where a previous version
+// already migrated agent_calls -> agent_execs but the column was still named
+// task_group. Open() must not run the new schema's CREATE INDEX on the batch
+// column before migrate() renames it.
+func TestMigrateFromPreBatchAgentExecs(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "state.sqlite")
+
+	dsn := dbPath + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	rawDB, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	_, err = rawDB.Exec(`
+		CREATE TABLE agent_execs (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id TEXT NOT NULL DEFAULT '',
+			profile TEXT NOT NULL DEFAULT '',
+			agent TEXT NOT NULL DEFAULT '',
+			container TEXT NOT NULL DEFAULT 'none',
+			action TEXT NOT NULL DEFAULT '',
+			role TEXT NOT NULL DEFAULT '',
+			task_group TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '',
+			prompt_hash TEXT NOT NULL DEFAULT '',
+			started_at TEXT NOT NULL,
+			stream_file TEXT NOT NULL DEFAULT '',
+			output_file TEXT NOT NULL DEFAULT '',
+			ended_at TEXT,
+			duration_ms INTEGER,
+			exit_code INTEGER,
+			is_error INTEGER NOT NULL DEFAULT 0,
+			error_message TEXT NOT NULL DEFAULT '',
+			cost_usd REAL,
+			input_tokens INTEGER,
+			output_tokens INTEGER,
+			cache_read_tokens INTEGER,
+			cache_write_tokens INTEGER,
+			turns INTEGER,
+			pid INTEGER NOT NULL DEFAULT 0,
+			container_id TEXT NOT NULL DEFAULT '',
+			peak_context_tokens INTEGER,
+			context_window INTEGER
+		);
+		CREATE INDEX idx_execs_task_group ON agent_execs(task_group);
+	`)
+	if err != nil {
+		t.Fatalf("create pre-batch agent_execs: %v", err)
+	}
+	_, err = rawDB.Exec(`INSERT INTO agent_execs (started_at, task_group) VALUES ('2026-01-01T00:00:00Z', 'code-2026-01-01_00-00-00')`)
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	rawDB.Close()
+
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	var batch string
+	if err := db.db.QueryRow("SELECT batch FROM agent_execs WHERE id = 1").Scan(&batch); err != nil {
+		t.Fatalf("select batch: %v", err)
+	}
+	if batch != "code-2026-01-01_00-00-00" {
+		t.Errorf("expected batch preserved, got %q", batch)
+	}
+}
+
 func TestOpenIfExistsReturnsNilForMissingFile(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "nonexistent.sqlite")
