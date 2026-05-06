@@ -2,12 +2,6 @@ name: Docker Integration Tests
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'test/**'
-      - 'Dockerfile*'
-      - 'internal/container/**'
 
 permissions:
   contents: read
