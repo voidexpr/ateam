@@ -46,8 +46,8 @@ var verifyCmd = &cobra.Command{
 look for logical bugs, broken or missing tests, and risky changes, then run
 the project's test suite and record findings in a verification report.
 
-Run after ` + "`ateam code`" + ` (or use ` + "`ateam code --verify`" + ` /
-` + "`ateam all --verify`" + ` to chain it automatically).
+` + "`ateam code`" + ` and ` + "`ateam all`" + ` chain verify automatically; run this
+command directly to re-verify, or pass ` + "`--no-verify`" + ` to skip the chained run.
 
 Example:
   ateam verify

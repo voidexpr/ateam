@@ -9,10 +9,11 @@ import (
 	"github.com/ateam/internal/root"
 )
 
-func TestAllRunsAllThreePhases(t *testing.T) {
+func TestAllRunsAllFourPhases(t *testing.T) {
 	// runAll does not expose a DryRun option. We use profile "test" which
-	// resolves to a mock agent, and verify all three phase headers appear
-	// in the output — confirming that report, review, and code are invoked.
+	// resolves to a mock agent, and verify all four phase headers appear
+	// in the output — confirming that report, review, code, and verify
+	// are invoked. Verify is the default; --no-verify skips it.
 	base := t.TempDir()
 	orgDir, err := root.InstallOrg(base)
 	if err != nil {
@@ -74,10 +75,56 @@ func TestAllRunsAllThreePhases(t *testing.T) {
 		"=== Phase 1: Report ===",
 		"=== Phase 2: Review ===",
 		"=== Phase 3: Code ===",
+		"=== Phase 4: Verify ===",
 	} {
 		if !strings.Contains(out, header) {
 			t.Errorf("expected %q in output:\n%s", header, out)
 		}
+	}
+}
+
+func TestAllNoVerifyStopsAfterCode(t *testing.T) {
+	base := t.TempDir()
+	orgDir, err := root.InstallOrg(base)
+	if err != nil {
+		t.Fatalf("InstallOrg: %v", err)
+	}
+	projPath := filepath.Join(base, "myproj")
+	if err := os.MkdirAll(projPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := root.InitProject(projPath, orgDir, root.InitProjectOpts{
+		Name:         "myproj",
+		EnabledRoles: []string{"testing_basic"},
+	}); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+
+	savedOrg := orgFlag
+	defer func() { orgFlag = savedOrg }()
+	orgFlag = filepath.Dir(orgDir)
+
+	savedRoles, savedNoVerify := allRoles, allNoVerify
+	savedRP, savedSP, savedCP := allReportProfile, allSupervisorProfile, allCodeProfile
+	defer func() {
+		allRoles, allNoVerify = savedRoles, savedNoVerify
+		allReportProfile, allSupervisorProfile, allCodeProfile = savedRP, savedSP, savedCP
+	}()
+
+	allRoles = []string{"testing_basic"}
+	allReportProfile = "test"
+	allSupervisorProfile = "test"
+	allCodeProfile = "test"
+	allNoVerify = true
+
+	out := captureStdout(t, func() {
+		withChdir(t, projPath, func() {
+			_ = runAll(nil, nil)
+		})
+	})
+
+	if strings.Contains(out, "Phase 4: Verify") {
+		t.Errorf("--no-verify should suppress Phase 4 header, got:\n%s", out)
 	}
 }
 

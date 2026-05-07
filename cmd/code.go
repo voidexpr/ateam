@@ -39,7 +39,7 @@ var (
 	codeTail              bool
 	codeDockerAutoSetup   bool
 	codeContainerName     string
-	codeVerify            bool
+	codeNoVerify          bool
 )
 
 // CodeOptions holds configuration for a code run.
@@ -60,17 +60,20 @@ type CodeOptions struct {
 	Tail              bool
 	DockerAutoSetup   bool
 	ContainerName     string
-	Verify            bool // run `ateam verify` after the code phase succeeds
+	NoVerify          bool // skip the default `ateam verify` follow-up
 }
 
 var codeCmd = &cobra.Command{
 	Use:   "code",
-	Short: "Execute review tasks as code changes",
+	Short: "Execute review tasks as code changes (followed by verify)",
 	Long: `Read the review document and execute prioritized tasks as code changes,
-delegating each coding task to the appropriate role via ateam run.
+delegating each coding task to the appropriate role via ateam run. After the
+code phase succeeds, automatically chain ateam verify to inspect the resulting
+commits and run the test suite. Pass --no-verify to skip that follow-up.
 
 Example:
   ateam code
+  ateam code --no-verify                         # stop after the code phase
   ateam code --review @custom_review.md
   ateam code --management @custom_management.md
   ateam code --dry-run`,
@@ -92,7 +95,7 @@ Example:
 			Tail:              codeTail,
 			DockerAutoSetup:   codeDockerAutoSetup,
 			ContainerName:     codeContainerName,
-			Verify:            codeVerify,
+			NoVerify:          codeNoVerify,
 		})
 	},
 }
@@ -120,7 +123,7 @@ func init() {
 	addVerboseFlag(codeCmd, &codeVerbose)
 	addForceFlag(codeCmd, &codeForce)
 	codeCmd.Flags().BoolVar(&codeTail, "tail", false, "stream live output from supervisor and sub-runs")
-	codeCmd.Flags().BoolVar(&codeVerify, "verify", false, "run 'ateam verify' after code completes successfully")
+	codeCmd.Flags().BoolVar(&codeNoVerify, "no-verify", false, "skip the verify phase that normally runs after code completes")
 	addDockerAutoSetupFlag(codeCmd, &codeDockerAutoSetup)
 	addContainerNameFlag(codeCmd, &codeContainerName)
 }
@@ -296,23 +299,23 @@ func runCode(opts CodeOptions) error {
 	printCodeSessionSummary(supervisorDir, opts.Print, result.Output)
 	printDone(result)
 
-	if opts.Verify {
-		fmt.Println()
-		return runVerify(VerifyOptions{
-			ExtraPrompt:     opts.ExtraPrompt,
-			Timeout:         opts.Timeout,
-			Print:           opts.Print,
-			CheaperModel:    opts.CheaperModel,
-			Profile:         opts.SupervisorProfile,
-			Agent:           opts.SupervisorAgent,
-			Verbose:         opts.Verbose,
-			Force:           opts.Force,
-			DockerAutoSetup: opts.DockerAutoSetup,
-			ContainerName:   opts.ContainerName,
-		})
+	if opts.NoVerify {
+		return nil
 	}
 
-	return nil
+	fmt.Println()
+	return runVerify(VerifyOptions{
+		ExtraPrompt:     opts.ExtraPrompt,
+		Timeout:         opts.Timeout,
+		Print:           opts.Print,
+		CheaperModel:    opts.CheaperModel,
+		Profile:         opts.SupervisorProfile,
+		Agent:           opts.SupervisorAgent,
+		Verbose:         opts.Verbose,
+		Force:           opts.Force,
+		DockerAutoSetup: opts.DockerAutoSetup,
+		ContainerName:   opts.ContainerName,
+	})
 }
 
 func printCodeSessionSummary(supervisorDir string, printOutput bool, output string) {

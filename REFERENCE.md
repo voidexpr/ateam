@@ -151,13 +151,13 @@ ateam code --dry-run
 | `--verbose` | Print agent and docker commands to stderr |
 | `--tail` | Stream live output from supervisor and sub-runs |
 | `--force` | Run even if the same action is already running |
-| `--verify` | Run `ateam verify` after code completes successfully |
+| `--no-verify` | Skip the verify phase that normally runs after code completes |
 
 ### `ateam verify`
 
 Have the supervisor inspect commits made by the most recent `ateam code` run, look for logical bugs, broken or missing tests, and risky changes, then run the project's test suite and record findings in a verification report.
 
-Run after `ateam code` (or use `ateam code --verify` / `ateam all --verify` to chain it automatically).
+`ateam code` and `ateam all` chain verify automatically; run this command directly to re-verify, or pass `--no-verify` to skip the chained run.
 
 ```bash
 ateam verify
@@ -181,7 +181,7 @@ ateam verify --dry-run
 
 ### `ateam all`
 
-Run the full pipeline sequentially: report → review → code.
+Run the full pipeline sequentially: report → review → code → verify. Pass `--no-verify` to stop after the code phase.
 
 `--roles` applies to both the report and review phases (and never to the code phase). `--all` and `--max-age` only affect review — report always runs only on enabled roles, since producing fresh reports for disabled roles defeats the purpose of disabling them.
 
@@ -212,7 +212,7 @@ ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile 
 | `--code-agent NAME` | Override agent for code sub-runs (uses 'none' container) |
 | `--quiet` | Suppress output printing |
 | `--verbose` | Print agent and docker commands to stderr |
-| `--verify` | Run `ateam verify` after the code phase completes |
+| `--no-verify` | Skip the verify phase that normally runs after code |
 
 ### `ateam secret`
 

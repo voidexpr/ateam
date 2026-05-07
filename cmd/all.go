@@ -18,7 +18,7 @@ var (
 	allMaxAge          string
 	allProfile         string
 	allDockerAutoSetup bool
-	allVerify          bool
+	allNoVerify        bool
 	allContainerName   string
 
 	// Per-stage overrides
@@ -32,12 +32,12 @@ var (
 
 var allCmd = &cobra.Command{
 	Use:   "all",
-	Short: "Run the full pipeline: report, review, and code (optionally verify)",
-	Long: `Run the full ateam pipeline sequentially: report → review → code.
-Pass --verify to chain a verify phase after code.
+	Short: "Run the full pipeline: report, review, code, verify",
+	Long: `Run the full ateam pipeline sequentially: report → review → code → verify.
+Pass --no-verify to skip the verify phase.
 
 Equivalent to:
-  ateam report --print && ateam review --print && ateam code --print
+  ateam report --print && ateam review --print && ateam code --print && ateam verify
 
 --roles applies to both report and review (and never affects the code phase).
 --all and --max-age only affect the review phase: report still runs only on
@@ -48,7 +48,7 @@ Per-stage profile/agent overrides let you mix agents across the pipeline.
 
 Example:
   ateam all
-  ateam all --verify
+  ateam all --no-verify                        # stop after the code phase
   ateam all --roles security,deps              # report + review only those roles
   ateam all --all                              # include disabled roles
   ateam all --max-age 2h                       # review skips reports older than 2h
@@ -80,7 +80,7 @@ func init() {
 	addVerboseFlag(allCmd, &allVerbose)
 	addDockerAutoSetupFlag(allCmd, &allDockerAutoSetup)
 	addContainerNameFlag(allCmd, &allContainerName)
-	allCmd.Flags().BoolVar(&allVerify, "verify", false, "run 'ateam verify' after the code phase completes")
+	allCmd.Flags().BoolVar(&allNoVerify, "no-verify", false, "skip the verify phase after code")
 }
 
 func runAll(cmd *cobra.Command, args []string) error {
@@ -160,21 +160,25 @@ func runAll(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("code phase failed: %w", err)
 	}
 
-	if allVerify {
-		fmt.Println("\n=== Phase 4: Verify ===")
-		if err := runVerify(VerifyOptions{
-			ExtraPrompt:     allExtraPrompt,
-			Timeout:         allTimeout,
-			Print:           printOutput,
-			CheaperModel:    allCheaperModel,
-			Profile:         allSupervisorProfile,
-			Agent:           allSupervisorAgent,
-			Verbose:         allVerbose,
-			DockerAutoSetup: allDockerAutoSetup,
-			ContainerName:   allContainerName,
-		}); err != nil {
-			return fmt.Errorf("verify phase failed: %w", err)
-		}
+	if allNoVerify {
+		return nil
+	}
+
+	// Phase 4: Verify — supervisor inspects commits made in Phase 3 and
+	// runs the test suite. Opt out with --no-verify when iterating fast.
+	fmt.Println("\n=== Phase 4: Verify ===")
+	if err := runVerify(VerifyOptions{
+		ExtraPrompt:     allExtraPrompt,
+		Timeout:         allTimeout,
+		Print:           printOutput,
+		CheaperModel:    allCheaperModel,
+		Profile:         allSupervisorProfile,
+		Agent:           allSupervisorAgent,
+		Verbose:         allVerbose,
+		DockerAutoSetup: allDockerAutoSetup,
+		ContainerName:   allContainerName,
+	}); err != nil {
+		return fmt.Errorf("verify phase failed: %w", err)
 	}
 
 	return nil

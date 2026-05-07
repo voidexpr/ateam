@@ -343,7 +343,7 @@ func (s *Server) handleVerify() http.HandlerFunc {
 		View: supervisorOutputData{
 			Heading:      "Code Verification",
 			SubtitleNoun: "verification",
-			EmptyHelp:    template.HTML(`Run <code>ateam verify</code> (or <code>ateam code --verify</code>) to have the supervisor review recent commits and run tests.`),
+			EmptyHelp:    template.HTML(`Run <code>ateam verify</code> (or let <code>ateam code</code> chain it automatically) to have the supervisor review recent commits and run tests.`),
 			HistoryTitle: "Verify History",
 		},
 	})

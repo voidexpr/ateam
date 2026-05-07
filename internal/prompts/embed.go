@@ -204,6 +204,10 @@ func DefaultSupervisorCodeManagementPrompt() string {
 	return readEmbedded("supervisor/code_management_prompt.md")
 }
 
+func DefaultSupervisorCodeVerifyPrompt() string {
+	return readEmbedded("supervisor/code_verify_prompt.md")
+}
+
 func DefaultAutoSetupPrompt() string {
 	return readEmbedded("supervisor/auto_setup_prompt.md")
 }
@@ -257,6 +261,10 @@ func embeddedFiles() []embeddedFile {
 	files = append(files, embeddedFile{
 		filepath.Join("defaults", "supervisor", CodeManagementPromptFile),
 		DefaultSupervisorCodeManagementPrompt(),
+	})
+	files = append(files, embeddedFile{
+		filepath.Join("defaults", "supervisor", CodeVerifyPromptFile),
+		DefaultSupervisorCodeVerifyPrompt(),
 	})
 	files = append(files, embeddedFile{
 		filepath.Join("defaults", "supervisor", AutoSetupPromptFile),
