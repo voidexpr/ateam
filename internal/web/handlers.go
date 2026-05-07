@@ -18,6 +18,15 @@ import (
 	"github.com/ateam/internal/runner"
 )
 
+func (s *Server) requireProject(w http.ResponseWriter, r *http.Request) *ProjectEntry {
+	pe := s.findProject(r.PathValue("project"))
+	if pe == nil {
+		http.NotFound(w, r)
+		return nil
+	}
+	return pe
+}
+
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -54,9 +63,8 @@ type overviewData struct {
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
-	pe := s.findProject(r.PathValue("project"))
+	pe := s.requireProject(w, r)
 	if pe == nil {
-		http.NotFound(w, r)
 		return
 	}
 
@@ -187,9 +195,8 @@ func enrichRuns(rows []calldb.RecentRow, projectDir, orgDir string) []overviewRu
 }
 
 func (s *Server) handleReports(w http.ResponseWriter, r *http.Request) {
-	pe := s.findProject(r.PathValue("project"))
+	pe := s.requireProject(w, r)
 	if pe == nil {
-		http.NotFound(w, r)
 		return
 	}
 
@@ -217,9 +224,8 @@ type reportData struct {
 }
 
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
-	pe := s.findProject(r.PathValue("project"))
+	pe := s.requireProject(w, r)
 	if pe == nil {
-		http.NotFound(w, r)
 		return
 	}
 
@@ -285,9 +291,8 @@ type supervisorPageConfig struct {
 
 func (s *Server) handleSupervisorOutput(cfg supervisorPageConfig) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		pe := s.findProject(r.PathValue("project"))
+		pe := s.requireProject(w, r)
 		if pe == nil {
-			http.NotFound(w, r)
 			return
 		}
 
@@ -355,9 +360,8 @@ type promptRoleEntry struct {
 }
 
 func (s *Server) handlePrompts(w http.ResponseWriter, r *http.Request) {
-	pe := s.findProject(r.PathValue("project"))
+	pe := s.requireProject(w, r)
 	if pe == nil {
-		http.NotFound(w, r)
 		return
 	}
 
@@ -393,9 +397,8 @@ type runsPageData struct {
 }
 
 func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
-	pe := s.findProject(r.PathValue("project"))
+	pe := s.requireProject(w, r)
 	if pe == nil {
-		http.NotFound(w, r)
 		return
 	}
 
@@ -429,9 +432,8 @@ type runDetailData struct {
 }
 
 func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
-	pe := s.findProject(r.PathValue("project"))
+	pe := s.requireProject(w, r)
 	if pe == nil {
-		http.NotFound(w, r)
 		return
 	}
 
@@ -474,9 +476,8 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 
 // handleRunFile serves exec or prompt markdown files associated with a run.
 func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
-	pe := s.findProject(r.PathValue("project"))
+	pe := s.requireProject(w, r)
 	if pe == nil {
-		http.NotFound(w, r)
 		return
 	}
 
@@ -702,9 +703,8 @@ type costPageData struct {
 }
 
 func (s *Server) handleCost(w http.ResponseWriter, r *http.Request) {
-	pe := s.findProject(r.PathValue("project"))
+	pe := s.requireProject(w, r)
 	if pe == nil {
-		http.NotFound(w, r)
 		return
 	}
 
@@ -755,9 +755,8 @@ type historyDetailData struct {
 }
 
 func (s *Server) handleReportHistory(w http.ResponseWriter, r *http.Request) {
-	pe := s.findProject(r.PathValue("project"))
+	pe := s.requireProject(w, r)
 	if pe == nil {
-		http.NotFound(w, r)
 		return
 	}
 
@@ -780,9 +779,8 @@ func (s *Server) handleReportHistory(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSupervisorHistory(nav string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		pe := s.findProject(r.PathValue("project"))
+		pe := s.requireProject(w, r)
 		if pe == nil {
-			http.NotFound(w, r)
 			return
 		}
 		s.serveHistoryFile(w, r, pe, pe.SupervisorHistoryDir(), r.PathValue("file"), "", nav)
@@ -965,9 +963,8 @@ func buildSessions(db *calldb.CallDB) []CodeSession {
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	pe := s.findProject(r.PathValue("project"))
+	pe := s.requireProject(w, r)
 	if pe == nil {
-		http.NotFound(w, r)
 		return
 	}
 
@@ -995,9 +992,8 @@ type sessionsPageData struct {
 }
 
 func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
-	pe := s.findProject(r.PathValue("project"))
+	pe := s.requireProject(w, r)
 	if pe == nil {
-		http.NotFound(w, r)
 		return
 	}
 
@@ -1130,9 +1126,8 @@ type codeSessionsData struct {
 }
 
 func (s *Server) handleCodeSessions(w http.ResponseWriter, r *http.Request) {
-	pe := s.findProject(r.PathValue("project"))
+	pe := s.requireProject(w, r)
 	if pe == nil {
-		http.NotFound(w, r)
 		return
 	}
 
@@ -1277,9 +1272,8 @@ type codeSessionDetailData struct {
 }
 
 func (s *Server) handleCodeSessionDetail(w http.ResponseWriter, r *http.Request) {
-	pe := s.findProject(r.PathValue("project"))
+	pe := s.requireProject(w, r)
 	if pe == nil {
-		http.NotFound(w, r)
 		return
 	}
 
@@ -1350,9 +1344,8 @@ func (s *Server) handleCodeSessionDetail(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleCodeSessionFile(w http.ResponseWriter, r *http.Request) {
-	pe := s.findProject(r.PathValue("project"))
+	pe := s.requireProject(w, r)
 	if pe == nil {
-		http.NotFound(w, r)
 		return
 	}
 
