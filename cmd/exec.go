@@ -20,6 +20,7 @@ var (
 	execProfile         string
 	execAgent           string
 	execModel           string
+	execEffort          string
 	execExtraPrompt     string
 	execNoStream        bool
 	execWorkDir         string
@@ -66,6 +67,7 @@ Example:
 func init() {
 	execCmd.Flags().StringVar(&execRole, "role", "", "role to run (optional)")
 	execCmd.Flags().StringVar(&execModel, "model", "", "model override")
+	execCmd.Flags().StringVar(&execEffort, "effort", "", "reasoning effort override, passed verbatim to the agent CLI (e.g. low/medium/high)")
 	execCmd.Flags().StringVar(&execExtraPrompt, "extra-prompt", "", "additional instructions appended after the main prompt (text or @filepath)")
 	addProfileFlags(execCmd, &execProfile, &execAgent)
 	execCmd.Flags().BoolVar(&execNoStream, "no-stream", false, "disable progress updates during execution")
@@ -160,6 +162,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	if execModel != "" {
 		r.Agent.SetModel(execModel)
 	}
+	applyEffort(r, execEffort)
 
 	if execDryRun {
 		return printExecDryRun(r, env, promptText, execRole, execBatch)

@@ -31,6 +31,11 @@ type Agent interface {
 	// SetModel overrides the model the agent will use.
 	// MUTATES — call before the Agent is shared with a pool.
 	SetModel(model string)
+	// SetEffort overrides the reasoning effort the agent will request.
+	// The string is passed through verbatim; each implementation translates
+	// it to its native CLI shape. Empty string disables the override.
+	// MUTATES — call before the Agent is shared with a pool.
+	SetEffort(effort string)
 	// CloneWithResolvedTemplates returns a clone with {{VAR}} placeholders
 	// resolved in Args, Env, and other templated string fields.
 	// Implementations MUST ensure the returned value's Args and Env share
@@ -156,12 +161,31 @@ func resolveStringMap(m map[string]string, r *strings.Replacer) map[string]strin
 	return out
 }
 
-// buildAgentArgs copies base args, appends --model if non-empty, then appends extra.
-func buildAgentArgs(base []string, model string, extra []string) []string {
+// claudeArgs builds the argv for the Claude CLI: base args, --model, --effort,
+// then extra args. Effort is passed verbatim via Claude's `--effort LEVEL` flag.
+func claudeArgs(base []string, model, effort string, extra []string) []string {
 	args := make([]string, len(base))
 	copy(args, base)
 	if model != "" {
 		args = append(args, "--model", model)
+	}
+	if effort != "" {
+		args = append(args, "--effort", effort)
+	}
+	return append(args, extra...)
+}
+
+// codexFlagArgs builds the codex argv up to (but not including) the `exec`
+// subcommand: base args, --model, and `-c model_reasoning_effort=...` for
+// effort. Codex's `-c key=value` overrides must precede the subcommand.
+func codexFlagArgs(base []string, model, effort string, extra []string) []string {
+	args := make([]string, len(base))
+	copy(args, base)
+	if model != "" {
+		args = append(args, "--model", model)
+	}
+	if effort != "" {
+		args = append(args, "-c", "model_reasoning_effort="+effort)
 	}
 	return append(args, extra...)
 }

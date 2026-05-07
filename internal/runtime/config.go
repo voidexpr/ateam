@@ -27,6 +27,7 @@ type AgentConfig struct {
 	Command     string
 	Args        []string
 	Model       string
+	Effort      string            // reasoning effort, passed verbatim to the agent CLI
 	Type        string            // "builtin" for mock, "codex", or "" for claude
 	Env         map[string]string // env vars to set (empty string = unset from parent)
 	Sandbox     string            // inline JSON settings template
@@ -88,6 +89,7 @@ type hclAgent struct {
 	Command                string            `hcl:"command,optional"`
 	Args                   []string          `hcl:"args,optional"`
 	Model                  string            `hcl:"model,optional"`
+	Effort                 string            `hcl:"effort,optional"`
 	Type                   string            `hcl:"type,optional"`
 	Env                    map[string]string `hcl:"env,optional"`
 	Sandbox                string            `hcl:"sandbox,optional"`
@@ -224,6 +226,9 @@ func (c *Config) resolveInheritance() error {
 		if ac.Model == "" {
 			ac.Model = base.Model
 		}
+		if ac.Effort == "" {
+			ac.Effort = base.Effort
+		}
 		if ac.Type == "" {
 			ac.Type = base.Type
 		}
@@ -335,6 +340,7 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 			Command:                a.Command,
 			Args:                   a.Args,
 			Model:                  a.Model,
+			Effort:                 a.Effort,
 			Type:                   a.Type,
 			Env:                    a.Env,
 			Sandbox:                a.Sandbox,

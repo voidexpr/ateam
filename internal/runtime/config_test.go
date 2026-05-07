@@ -462,6 +462,44 @@ agent "child-agent" {
 	}
 }
 
+func TestEffortFieldRoundTripAndInherits(t *testing.T) {
+	dir := t.TempDir()
+
+	hcl := `
+agent "base-agent" {
+  command = "base-cmd"
+  effort  = "high"
+}
+
+agent "child-inherit" {
+  base = "base-agent"
+}
+
+agent "child-override" {
+  base   = "base-agent"
+  effort = "low"
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load("", dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := cfg.Agents["base-agent"].Effort; got != "high" {
+		t.Errorf("base effort: got %q, want %q", got, "high")
+	}
+	if got := cfg.Agents["child-inherit"].Effort; got != "high" {
+		t.Errorf("child-inherit effort: got %q, want inherited %q", got, "high")
+	}
+	if got := cfg.Agents["child-override"].Effort; got != "low" {
+		t.Errorf("child-override effort: got %q, want %q", got, "low")
+	}
+}
+
 func TestBaseInheritanceCircular(t *testing.T) {
 	dir := t.TempDir()
 

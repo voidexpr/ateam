@@ -1,8 +1,53 @@
 package agent
 
 import (
+	"slices"
 	"testing"
 )
+
+func TestCodexAgentDebugCommandArgs(t *testing.T) {
+	a := &CodexAgent{
+		Command: "codex",
+		Args:    []string{"--ask-for-approval", "never"},
+	}
+	tests := []struct {
+		name   string
+		model  string
+		effort string
+		want   []string
+	}{
+		{
+			name: "no overrides",
+			want: []string{"--ask-for-approval", "never", "exec", "--json"},
+		},
+		{
+			name:  "model only",
+			model: "gpt-5",
+			want:  []string{"--ask-for-approval", "never", "--model", "gpt-5", "exec", "--json"},
+		},
+		{
+			name:   "effort only — must precede 'exec' subcommand",
+			effort: "high",
+			want:   []string{"--ask-for-approval", "never", "-c", "model_reasoning_effort=high", "exec", "--json"},
+		},
+		{
+			name:   "model and effort both before exec",
+			model:  "gpt-5",
+			effort: "medium",
+			want:   []string{"--ask-for-approval", "never", "--model", "gpt-5", "-c", "model_reasoning_effort=medium", "exec", "--json"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a.Model = tt.model
+			a.Effort = tt.effort
+			_, args := a.DebugCommandArgs(nil)
+			if !slices.Equal(args, tt.want) {
+				t.Errorf("args = %v, want %v", args, tt.want)
+			}
+		})
+	}
+}
 
 func TestParseCodexLineTurnStarted(t *testing.T) {
 	line := []byte(`{"type":"turn.started"}`)

@@ -1,8 +1,37 @@
 package agent
 
 import (
+	"slices"
 	"testing"
 )
+
+func TestClaudeAgentDebugCommandArgs(t *testing.T) {
+	a := &ClaudeAgent{
+		Command: "claude",
+		Args:    []string{"-p", "--verbose"},
+	}
+	tests := []struct {
+		name   string
+		model  string
+		effort string
+		want   []string
+	}{
+		{"no overrides", "", "", []string{"-p", "--verbose"}},
+		{"model only", "opus", "", []string{"-p", "--verbose", "--model", "opus"}},
+		{"effort only", "", "high", []string{"-p", "--verbose", "--effort", "high"}},
+		{"both", "opus", "high", []string{"-p", "--verbose", "--model", "opus", "--effort", "high"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a.Model = tt.model
+			a.Effort = tt.effort
+			_, args := a.DebugCommandArgs(nil)
+			if !slices.Equal(args, tt.want) {
+				t.Errorf("args = %v, want %v", args, tt.want)
+			}
+		})
+	}
+}
 
 func TestResolveConfigDir(t *testing.T) {
 	tests := []struct {

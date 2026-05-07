@@ -408,6 +408,7 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 			Command:      cmd,
 			Args:         ac.Args,
 			Model:        ac.Model,
+			Effort:       ac.Effort,
 			DefaultModel: defaultModel,
 			Pricing:      pricing,
 			Env:          ac.Env,
@@ -421,6 +422,7 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 			Command:      cmd,
 			Args:         ac.Args,
 			Model:        ac.Model,
+			Effort:       ac.Effort,
 			DefaultModel: defaultModel,
 			Pricing:      pricing,
 			Env:          ac.Env,
@@ -739,6 +741,14 @@ func addVerboseFlag(cmd *cobra.Command, dst *bool) {
 
 func addCheaperModelFlag(cmd *cobra.Command, dst *bool) {
 	cmd.Flags().BoolVar(dst, "cheaper-model", false, "use a cheaper model ("+cheaperModelName+")")
+}
+
+// applyEffort sets the agent's reasoning effort if value is non-empty.
+// Empty string is a no-op so callers can pass through unconditionally.
+func applyEffort(r *runner.Runner, value string) {
+	if value != "" {
+		r.Agent.SetEffort(value)
+	}
 }
 
 func applyCheaperModel(r *runner.Runner, cheaper bool) {

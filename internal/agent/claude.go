@@ -21,6 +21,7 @@ type ClaudeAgent struct {
 	Command      string            // e.g. "claude"
 	Args         []string          // base args from config, e.g. ["-p", "--output-format", "stream-json", "--verbose"]
 	Model        string            // optional model override (passed as --model flag)
+	Effort       string            // optional reasoning effort (passed as --effort flag)
 	DefaultModel string            // assumed model for pricing when stream doesn't report one
 	Pricing      PricingTable      // cost estimation lookup table (used to estimate cost when no result event arrives)
 	Env          map[string]string // env vars to set (empty string = exclude from parent env)
@@ -37,6 +38,8 @@ func (c *ClaudeAgent) ModelName() string {
 
 func (c *ClaudeAgent) SetModel(model string) { c.Model = model }
 
+func (c *ClaudeAgent) SetEffort(effort string) { c.Effort = effort }
+
 func (c *ClaudeAgent) AgentEnv() map[string]string { return c.Env }
 
 func (c *ClaudeAgent) CloneWithResolvedTemplates(replacer *strings.Replacer) Agent {
@@ -52,7 +55,7 @@ func (c *ClaudeAgent) DebugCommandArgs(extraArgs []string) (string, []string) {
 	if command == "" {
 		command = "claude"
 	}
-	return command, buildAgentArgs(c.Args, c.Model, extraArgs)
+	return command, claudeArgs(c.Args, c.Model, c.Effort, extraArgs)
 }
 
 func (c *ClaudeAgent) Run(ctx context.Context, req Request) <-chan StreamEvent {
@@ -77,7 +80,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 	}
 
 	// ExtraArgs may include --settings for sandbox, model overrides, etc.
-	args := buildAgentArgs(c.Args, c.Model, req.ExtraArgs)
+	args := claudeArgs(c.Args, c.Model, c.Effort, req.ExtraArgs)
 
 	command := c.Command
 	if command == "" {

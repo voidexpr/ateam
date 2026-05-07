@@ -22,6 +22,7 @@ type CodexAgent struct {
 	Command      string            // e.g. "codex"
 	Args         []string          // base args, e.g. ["--sandbox", "workspace-write", "--ask-for-approval", "never"]
 	Model        string            // optional model override (passed as --model flag)
+	Effort       string            // optional reasoning effort (passed as -c model_reasoning_effort=...)
 	DefaultModel string            // assumed model for pricing when stream doesn't report one
 	Pricing      PricingTable      // cost estimation lookup table
 	Env          map[string]string // env vars to set (empty string = exclude from parent env)
@@ -38,6 +39,8 @@ func (c *CodexAgent) ModelName() string {
 
 func (c *CodexAgent) SetModel(model string) { c.Model = model }
 
+func (c *CodexAgent) SetEffort(effort string) { c.Effort = effort }
+
 func (c *CodexAgent) AgentEnv() map[string]string { return c.Env }
 
 func (c *CodexAgent) CloneWithResolvedTemplates(replacer *strings.Replacer) Agent {
@@ -53,7 +56,7 @@ func (c *CodexAgent) DebugCommandArgs(extraArgs []string) (string, []string) {
 	if command == "" {
 		command = "codex"
 	}
-	args := append(buildAgentArgs(c.Args, c.Model, extraArgs), "exec", "--json")
+	args := append(codexFlagArgs(c.Args, c.Model, c.Effort, extraArgs), "exec", "--json")
 	return command, args
 }
 
@@ -67,7 +70,7 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 	defer close(ch)
 
 	// ExtraArgs before the exec subcommand; exec --json <prompt> — the codex one-shot invocation
-	args := append(buildAgentArgs(c.Args, c.Model, req.ExtraArgs), "exec", "--json", req.Prompt)
+	args := append(codexFlagArgs(c.Args, c.Model, c.Effort, req.ExtraArgs), "exec", "--json", req.Prompt)
 
 	command := c.Command
 	if command == "" {

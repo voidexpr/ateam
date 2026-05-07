@@ -22,6 +22,7 @@ var (
 	parallelProfile           string
 	parallelAgent             string
 	parallelModel             string
+	parallelEffort            string
 	parallelWorkDir           string
 	parallelTimeout           int
 	parallelVerbose           bool
@@ -59,6 +60,7 @@ func init() {
 	parallelCmd.Flags().StringVar(&parallelCommonPromptLast, "common-prompt-last", "", "text or @filepath to append to each prompt")
 	addProfileFlags(parallelCmd, &parallelProfile, &parallelAgent)
 	parallelCmd.Flags().StringVar(&parallelModel, "model", "", "model override")
+	parallelCmd.Flags().StringVar(&parallelEffort, "effort", "", "reasoning effort override, passed verbatim to the agent CLI")
 	parallelCmd.Flags().StringVar(&parallelWorkDir, "work-dir", "", "working directory (defaults to project source dir or cwd)")
 	parallelCmd.Flags().IntVar(&parallelTimeout, "timeout", 0, "timeout in minutes per agent execution")
 	addVerboseFlag(parallelCmd, &parallelVerbose)
@@ -160,6 +162,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	if parallelModel != "" {
 		r.Agent.SetModel(parallelModel)
 	}
+	applyEffort(r, parallelEffort)
 
 	if !hasProject {
 		return fmt.Errorf("ateam project required: no .ateam/ found")

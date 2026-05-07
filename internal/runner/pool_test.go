@@ -21,7 +21,8 @@ type concurrencyTrackingAgent struct {
 
 func (a *concurrencyTrackingAgent) Name() string { return "tracking" }
 
-func (a *concurrencyTrackingAgent) SetModel(model string) {}
+func (a *concurrencyTrackingAgent) SetModel(model string)   {}
+func (a *concurrencyTrackingAgent) SetEffort(effort string) {}
 
 func (a *concurrencyTrackingAgent) CloneWithResolvedTemplates(replacer *strings.Replacer) agent.Agent {
 	return a

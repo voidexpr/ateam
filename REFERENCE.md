@@ -84,6 +84,7 @@ ateam report --rerun-failed --dry-run    # preview which roles would be rerun
 | `--profile NAME` | Runtime profile (overrides config resolution) |
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
 | `--cheaper-model` | Use a cheaper model (sonnet) |
+| `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](#effort-levels)) |
 | `--timeout MINUTES` | Timeout per role (overrides `config.toml`) |
 | `--parallel N` | Max number of roles to run in parallel (overrides `config.toml`) |
 | `--print` | Print reports to stdout after completion |
@@ -144,6 +145,7 @@ ateam code --dry-run
 | `--profile NAME` | Profile for sub-runs (passed to `ateam exec --profile`) |
 | `--supervisor-profile NAME` | Profile for the supervisor itself |
 | `--cheaper-model` | Use a cheaper model (sonnet) |
+| `--effort VALUE` | Reasoning effort for the supervisor and every sub-run, passed verbatim to the agent CLI (see [Effort levels](#effort-levels)) |
 | `--timeout MINUTES` | Timeout in minutes (overrides `config.toml`; default 120) |
 | `--print` | Print output to stdout after completion |
 | `--dry-run` | Print the computed prompt without running |
@@ -370,6 +372,7 @@ echo "still works" | ateam exec -                # explicit "-"
 | `--profile NAME` | Runtime profile to use |
 | `--agent NAME` | Agent name from runtime.hcl (mutually exclusive with --profile) |
 | `--model MODEL` | Model override |
+| `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](#effort-levels)) |
 | `--work-dir PATH` | Working directory |
 | `--agent-args "ARGS"` | Extra args passed to the agent CLI |
 | `--batch ID` | Group related agent_execs |
@@ -402,6 +405,7 @@ Each positional argument is a prompt (text or `@filepath`). Agent execs run conc
 | `--profile NAME` | Runtime profile |
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
 | `--model MODEL` | Model override |
+| `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](#effort-levels)) |
 | `--work-dir PATH` | Working directory (defaults to project source dir or cwd) |
 | `--timeout MINUTES` | Timeout per agent exec |
 | `--no-progress` | Suppress ANSI progress table (use plain line output) |
@@ -950,6 +954,26 @@ agent "claude-sonnet" {
 ```
 
 Agents support inheritance via `base`, sandbox settings, environment variables, isolated config dirs, and `required_env` for secret validation. When alternatives are declared (e.g., `required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]`), the first alternative in declaration order wins at each tier (store first, then env). Competing alternatives are stripped from the agent's process environment to avoid credential confusion. See [`ateam secret`](#ateam-secret) for the full resolution order.
+
+### Effort levels
+
+Each agent block accepts an optional `effort = "..."` field that controls the underlying CLI's reasoning depth. The string is passed through verbatim, so `ateam` does not need to be updated when agents add new levels. CLI flags (`--effort` on `exec`, `code`, `report`, `parallel`) override the per-agent default for a single invocation.
+
+```hcl
+agent "claude-sonnet" {
+  base   = "claude"
+  effort = "high"
+}
+```
+
+Per-agent value sets at time of writing:
+
+| Agent | Native flag | Accepted values |
+|---|---|---|
+| Claude Code | `--effort LEVEL` | `low`, `medium`, `high`, `xhigh`, `max`, `auto` |
+| OpenAI Codex | `-c model_reasoning_effort=LEVEL` | `minimal`, `low`, `medium`, `high`, `xhigh` |
+
+Future agents may accept different values. `ateam` does not validate; an invalid level fails at the underlying CLI, surfacing in the run summary.
 
 ### Template Variables
 

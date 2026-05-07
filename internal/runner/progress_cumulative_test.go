@@ -15,6 +15,7 @@ type fakeProgressAgent struct{}
 
 func (*fakeProgressAgent) Name() string                                               { return "fake" }
 func (*fakeProgressAgent) SetModel(string)                                            {}
+func (*fakeProgressAgent) SetEffort(string)                                           {}
 func (a *fakeProgressAgent) CloneWithResolvedTemplates(*strings.Replacer) agent.Agent { return a }
 func (*fakeProgressAgent) DebugCommandArgs([]string) (string, []string)               { return "fake", nil }
 

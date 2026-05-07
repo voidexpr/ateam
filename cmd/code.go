@@ -40,6 +40,7 @@ var (
 	codeDockerAutoSetup   bool
 	codeContainerName     string
 	codeNoVerify          bool
+	codeEffort            string
 )
 
 // CodeOptions holds configuration for a code run.
@@ -61,6 +62,7 @@ type CodeOptions struct {
 	DockerAutoSetup   bool
 	ContainerName     string
 	NoVerify          bool // skip the default `ateam verify` follow-up
+	Effort            string
 }
 
 var codeCmd = &cobra.Command{
@@ -96,6 +98,7 @@ Example:
 			DockerAutoSetup:   codeDockerAutoSetup,
 			ContainerName:     codeContainerName,
 			NoVerify:          codeNoVerify,
+			Effort:            codeEffort,
 		})
 	},
 }
@@ -116,6 +119,7 @@ func init() {
 	addCheaperModelFlag(codeCmd, &codeCheaperModel)
 	codeCmd.Flags().StringVar(&codeProfile, "profile", "", "profile for sub-runs (passed to ateam exec --profile)")
 	codeCmd.Flags().StringVar(&codeAgent, "agent", "", "agent for sub-runs (passed to ateam exec --agent)")
+	codeCmd.Flags().StringVar(&codeEffort, "effort", "", "reasoning effort for the supervisor and every sub-run, passed verbatim to the agent CLI")
 	codeCmd.Flags().StringVar(&codeSupervisorProfile, "supervisor-profile", "", "profile for the supervisor itself")
 	codeCmd.Flags().StringVar(&codeSupervisorAgent, "supervisor-agent", "", "agent for the supervisor itself")
 	codeCmd.MarkFlagsMutuallyExclusive("profile", "agent")
@@ -182,6 +186,9 @@ func runCode(opts CodeOptions) error {
 	} else {
 		prompt += "- `--profile " + subRunProfile + "`\n"
 	}
+	if opts.Effort != "" {
+		prompt += "- `--effort " + opts.Effort + "`\n"
+	}
 
 	timeout := env.Config.Code.EffectiveTimeout(opts.Timeout)
 	supervisorDir := env.SupervisorDir()
@@ -215,6 +222,7 @@ func runCode(opts CodeOptions) error {
 	}
 	setSourceWritable(cr)
 	applyCheaperModel(cr, opts.CheaperModel)
+	applyEffort(cr, opts.Effort)
 
 	db, err := openProjectDB(env)
 	if err != nil {

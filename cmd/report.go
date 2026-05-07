@@ -30,6 +30,7 @@ var (
 	reportDockerAutoSetup      bool
 	reportContainerName        string
 	reportRerunFailed          bool
+	reportEffort               string
 )
 
 // ReportOptions holds configuration for a report run.
@@ -54,6 +55,7 @@ type ReportOptions struct {
 	DockerAutoSetup      bool
 	ContainerName        string
 	RerunFailed          bool
+	Effort               string
 }
 
 var reportCmd = &cobra.Command{
@@ -89,6 +91,7 @@ Example:
 			DockerAutoSetup:      reportDockerAutoSetup,
 			ContainerName:        reportContainerName,
 			RerunFailed:          reportRerunFailed,
+			Effort:               reportEffort,
 		})
 	},
 }
@@ -104,6 +107,7 @@ func init() {
 	reportCmd.Flags().BoolVar(&reportRerunFailed, "rerun-failed", false, "re-run only roles that failed in the last report round")
 	reportCmd.Flags().BoolVar(&reportIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
 	addCheaperModelFlag(reportCmd, &reportCheaperModel)
+	reportCmd.Flags().StringVar(&reportEffort, "effort", "", "reasoning effort override, passed verbatim to the agent CLI")
 	addProfileFlags(reportCmd, &reportProfile, &reportAgent)
 	addVerboseFlag(reportCmd, &reportVerbose)
 	addForceFlag(reportCmd, &reportForce)
@@ -178,6 +182,7 @@ func runReport(opts ReportOptions) error {
 		return err
 	}
 	applyCheaperModel(cr, opts.CheaperModel)
+	applyEffort(cr, opts.Effort)
 
 	batch := "report-" + time.Now().Format(runner.TimestampFormat)
 
@@ -220,6 +225,7 @@ func runReport(opts ReportOptions) error {
 					return err
 				} else {
 					applyCheaperModel(roleRunner, opts.CheaperModel)
+					applyEffort(roleRunner, opts.Effort)
 					task.Runner = roleRunner
 				}
 			}
