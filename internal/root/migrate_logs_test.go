@@ -73,10 +73,10 @@ func TestMigrateLogsLayout_MovesLegacyFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// DB row pointing at the legacy stream path.
+	// DB row pointing at the legacy stream path. Parse in local tz so the
+	// RFC3339-encoded started_at carries the same wall-clock the file used
+	// (that's how InsertCall stored it for real runs).
 	relStream, _ := filepath.Rel(projDir, prefix+"_stream.jsonl")
-	// Parse in local tz so the round-trip through RFC3339 / .Local() in
-	// findLegacyPrompt rebuilds the same wall-clock string the file used.
 	startedAt, _ := time.ParseInLocation("2006-01-02_15-04-05", ts, time.Local)
 	id, err := db.InsertCall(&calldb.Call{
 		Action:     "report",

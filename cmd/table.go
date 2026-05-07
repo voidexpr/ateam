@@ -93,6 +93,10 @@ func openProjectDB(env *root.ResolvedEnv) (*calldb.CallDB, error) {
 
 // requireProjectDB opens an existing per-project state.sqlite.
 // Returns an error if the database does not exist.
+//
+// Like openProjectDB, this also runs MigrateLogsLayout so read-only commands
+// (ateam ps, cat, inspect, resume, tail, cost) trigger the migration when
+// they touch the DB.
 func requireProjectDB(env *root.ResolvedEnv) (*calldb.CallDB, error) {
 	if env.ProjectDir == "" {
 		return nil, fmt.Errorf("no project context — run 'ateam init' first")
@@ -104,6 +108,9 @@ func requireProjectDB(env *root.ResolvedEnv) (*calldb.CallDB, error) {
 	}
 	if db == nil {
 		return nil, fmt.Errorf("project database not found at %s — run a command like 'ateam run' or 'ateam report' first", dbPath)
+	}
+	if err := root.MigrateLogsLayout(env, db); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: log layout migration: %v\n", err)
 	}
 	return db, nil
 }

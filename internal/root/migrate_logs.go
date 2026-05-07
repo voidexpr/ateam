@@ -147,13 +147,69 @@ func migrateRows(env *ResolvedEnv, db *calldb.CallDB) error {
 		if err := db.UpdateStreamFile(r.id, newRel); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: update stream_file for exec %d: %v\n", r.id, err)
 		}
+		// Populate output_file when the canonical/history file still exists.
+		// Without this, the web UI's run-page output link can't recover the
+		// path for migrated legacy rows (the new stream filename no longer
+		// carries a timestamp the resolver could fuzzy-match on).
+		if outRel := findLegacyOutput(env.ProjectDir, r.role, r.action, r.startedAt); outRel != "" {
+			if err := db.UpdateOutputFile(r.id, outRel); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: update output_file for exec %d: %v\n", r.id, err)
+			}
+		}
 	}
 	return nil
+}
+
+// findLegacyOutput returns the project-relative path to a row's archived
+// output file (e.g. roles/security/history/<TS>.report.md). Returns "" when
+// no matching file exists. Uses ±5s skew like findLegacyPrompt for
+// resilience against second-level timestamp drift.
+func findLegacyOutput(projectDir, role, action, startedAt string) string {
+	t, err := time.Parse(time.RFC3339, startedAt)
+	if err != nil {
+		return ""
+	}
+	histDir := legacyHistoryDir(projectDir, role, action)
+	suffix := legacyOutputSuffix(action)
+	if histDir == "" || suffix == "" {
+		return ""
+	}
+	hit := FindHistoryFileWithSkew(histDir, t, suffix)
+	if hit == "" {
+		return ""
+	}
+	rel, err := filepath.Rel(projectDir, hit)
+	if err != nil {
+		return ""
+	}
+	return rel
+}
+
+// legacyOutputSuffix maps an action to the kind suffix the legacy code wrote
+// for its primary output file in <role>/history/ or supervisor/history/.
+func legacyOutputSuffix(action string) string {
+	switch action {
+	case "report":
+		return "report.md"
+	case "review":
+		return "review.md"
+	case "verify":
+		return "verify.md"
+	case "run":
+		return "run_output.md"
+	default:
+		return ""
+	}
 }
 
 // findLegacyPrompt looks up the timestamped prompt archive for a (role, action)
 // pair, allowing a ±5s skew in case the prompt write happened in a different
 // second than the row's started_at.
+//
+// The RFC3339-encoded started_at preserves the timezone of the original run,
+// which matches what the legacy archivePrompt baked into the filename. We
+// must NOT shift to the current system's local time — that would break
+// migrations across DST or TZ moves.
 func findLegacyPrompt(projectDir, role, action, startedAt string) string {
 	t, err := time.Parse(time.RFC3339, startedAt)
 	if err != nil {
@@ -164,7 +220,7 @@ func findLegacyPrompt(projectDir, role, action, startedAt string) string {
 	if histDir == "" || suffix == "" {
 		return ""
 	}
-	return FindHistoryFileWithSkew(histDir, t.Local(), suffix)
+	return FindHistoryFileWithSkew(histDir, t, suffix)
 }
 
 func legacyHistoryDir(projectDir, role, action string) string {
