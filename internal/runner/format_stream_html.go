@@ -206,7 +206,7 @@ func (f *HTMLStreamFormatter) fmtResult(e *ResultLine) string {
 
 	cost := e.Cost
 	if cost == 0 && f.Model != "" {
-		cost = agent.EstimateCost(f.Pricing, f.Model, f.DefaultModel, e.InputTokens, e.OutputTokens)
+		cost = agent.EstimateCost(f.Pricing, f.Model, f.DefaultModel, e.InputTokens, e.CacheReadTokens, e.OutputTokens)
 	}
 
 	durSec := e.DurationMS / 1000

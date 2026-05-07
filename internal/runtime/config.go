@@ -48,8 +48,9 @@ type AgentPricing struct {
 }
 
 type ModelPricing struct {
-	InputPerMTok  float64
-	OutputPerMTok float64
+	InputPerMTok       float64
+	CachedInputPerMTok float64
+	OutputPerMTok      float64
 }
 
 type ContainerConfig struct {
@@ -107,9 +108,10 @@ type hclPricing struct {
 }
 
 type hclModel struct {
-	Name          string  `hcl:"name,label"`
-	InputPerMTok  float64 `hcl:"input_per_mtok"`
-	OutputPerMTok float64 `hcl:"output_per_mtok"`
+	Name               string  `hcl:"name,label"`
+	InputPerMTok       float64 `hcl:"input_per_mtok"`
+	CachedInputPerMTok float64 `hcl:"cached_input_per_mtok,optional"`
+	OutputPerMTok      float64 `hcl:"output_per_mtok"`
 }
 
 type hclContainer struct {
@@ -317,8 +319,9 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 			models := make(map[string]ModelPricing, len(hp.Models))
 			for _, m := range hp.Models {
 				models[m.Name] = ModelPricing{
-					InputPerMTok:  m.InputPerMTok,
-					OutputPerMTok: m.OutputPerMTok,
+					InputPerMTok:       m.InputPerMTok,
+					CachedInputPerMTok: m.CachedInputPerMTok,
+					OutputPerMTok:      m.OutputPerMTok,
 				}
 			}
 			pricing = &AgentPricing{

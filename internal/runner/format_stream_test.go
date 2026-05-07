@@ -85,16 +85,23 @@ func TestStreamFormatterResult(t *testing.T) {
 }
 
 func TestStreamFormatterCodexVerboseToolInput(t *testing.T) {
-	// Codex tool_use events have no e.Claude pointer; the verbose
-	// renderer must still surface the tool input (e.Detail).
+	// Codex tool_use events have no e.Claude pointer; verbose mode
+	// renders the full raw begin-event JSON (pretty-printed), not just
+	// the one-line Detail. This is the parity the original commit aimed
+	// for but didn't quite achieve.
 	f := &StreamFormatter{Color: false, Verbose: true}
-	line := []byte(`{"type":"exec_command_begin","command":"git status --short"}`)
+	line := []byte(`{"type":"apply_patch_begin","name":"apply_patch","arguments":{"path":"a.go"}}`)
 	out := f.FormatLine(line)
-	if !strings.Contains(out, "tool #1: exec_command") {
+	if !strings.Contains(out, "tool #1: apply_patch") {
 		t.Errorf("expected tool header, got: %s", out)
 	}
-	if !strings.Contains(out, "git status --short") {
-		t.Errorf("expected verbose codex tool input, got: %s", out)
+	// The full payload (arguments) is only visible in verbose; Detail
+	// alone would be just "apply_patch".
+	if !strings.Contains(out, `"arguments"`) {
+		t.Errorf("expected verbose to include arguments, got: %s", out)
+	}
+	if !strings.Contains(out, `"path": "a.go"`) {
+		t.Errorf("expected pretty-printed JSON with path, got: %s", out)
 	}
 }
 

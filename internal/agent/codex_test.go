@@ -88,6 +88,56 @@ func TestParseCodexLineAgentReasoningDelta(t *testing.T) {
 	}
 }
 
+func TestCodexResultCostUsesCachedRate(t *testing.T) {
+	// End-to-end: a turn.completed JSONL line with cached_input_tokens
+	// should flow through ParseCodexLine → CodexResultEvent and price
+	// the cached subset at CachedInputPerToken — not full input rate.
+	// Without cache-aware pricing, the cost would be inflated by ~2.6×
+	// for a 76% cache hit (matches the ratio we measured on run 582).
+	line := []byte(`{"type":"turn.completed","usage":{"input_tokens":94963,"cached_input_tokens":72704,"output_tokens":1204}}`)
+	_, ev, err := ParseCodexLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	re := ev.(*CodexResultEvent)
+
+	table := PricingTable{
+		"gpt-5.3-codex": {
+			InputPerToken:       1.75 / 1e6,
+			CachedInputPerToken: 0.175 / 1e6,
+			OutputPerToken:      14.00 / 1e6,
+		},
+	}
+	cost := EstimateCost(table, "gpt-5.3-codex", "", re.InputTokens, re.CacheReadTokens, re.OutputTokens)
+
+	uncached := re.InputTokens - re.CacheReadTokens
+	want := float64(uncached)*1.75/1e6 + float64(re.CacheReadTokens)*0.175/1e6 + float64(re.OutputTokens)*14.00/1e6
+	if cost < want-1e-9 || cost > want+1e-9 {
+		t.Errorf("cost = %v, want %v", cost, want)
+	}
+
+	// Sanity check: the inflated (pre-cache-aware) cost is what we used to
+	// report. Make sure we're meaningfully below it so a regression that
+	// drops the cached-rate path would fail this test.
+	inflated := float64(re.InputTokens)*1.75/1e6 + float64(re.OutputTokens)*14.00/1e6
+	if cost >= inflated*0.95 {
+		t.Errorf("cost %v not meaningfully below inflated %v — cache discount lost?", cost, inflated)
+	}
+}
+
+func TestParseCodexLineAgentReasoningAggregateDropped(t *testing.T) {
+	// The aggregate `agent_reasoning` event duplicates the streamed deltas;
+	// it should be dropped (typ="", ev=nil) so we don't double-emit.
+	line := []byte(`{"type":"agent_reasoning","text":"final summary"}`)
+	typ, ev, err := ParseCodexLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typ != "" || ev != nil {
+		t.Errorf("agent_reasoning should be dropped, got typ=%q ev=%v", typ, ev)
+	}
+}
+
 func TestParseCodexLineTurnFailedCarriesError(t *testing.T) {
 	line := []byte(`{"type":"turn.failed","error":{"message":"OpenAI stream timed out","type":"stream_timeout"}}`)
 	typ, ev, err := ParseCodexLine(line)

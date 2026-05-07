@@ -260,64 +260,86 @@ agent "codex" {
   pricing {
     default_model = "gpt-5.3-codex"
 
+    // cached_input_per_mtok matches OpenAI's prompt-cache pricing (typically
+    // 1/10 of input_per_mtok). Set on every model so cost estimates aren't
+    // inflated when the cache is warm — codex sessions hit cache aggressively
+    // and EstimateCost is the only cost source for codex (no result-event cost).
+    model "gpt-5.4-codex" {
+      input_per_mtok        = 1.75
+      cached_input_per_mtok = 0.175
+      output_per_mtok       = 14.00
+    }
+
     model "gpt-5.3-codex" {
-      input_per_mtok  = 1.75
-      output_per_mtok = 14.00
+      input_per_mtok        = 1.75
+      cached_input_per_mtok = 0.175
+      output_per_mtok       = 14.00
     }
 
     model "gpt-5.2-codex" {
-      input_per_mtok  = 1.75
-      output_per_mtok = 14.00
+      input_per_mtok        = 1.75
+      cached_input_per_mtok = 0.175
+      output_per_mtok       = 14.00
     }
 
     model "gpt-5.1-codex" {
-      input_per_mtok  = 1.25
-      output_per_mtok = 10.00
+      input_per_mtok        = 1.25
+      cached_input_per_mtok = 0.125
+      output_per_mtok       = 10.00
     }
 
     model "gpt-5" {
-      input_per_mtok  = 1.25
-      output_per_mtok = 10.00
+      input_per_mtok        = 1.25
+      cached_input_per_mtok = 0.125
+      output_per_mtok       = 10.00
     }
 
     model "gpt-5-mini" {
-      input_per_mtok  = 0.25
-      output_per_mtok = 2.00
+      input_per_mtok        = 0.25
+      cached_input_per_mtok = 0.025
+      output_per_mtok       = 2.00
     }
 
     model "gpt-5-nano" {
-      input_per_mtok  = 0.05
-      output_per_mtok = 0.40
+      input_per_mtok        = 0.05
+      cached_input_per_mtok = 0.005
+      output_per_mtok       = 0.40
     }
 
     model "gpt-4o" {
-      input_per_mtok  = 2.50
-      output_per_mtok = 10.00
+      input_per_mtok        = 2.50
+      cached_input_per_mtok = 1.25
+      output_per_mtok       = 10.00
     }
 
     model "gpt-4o-mini" {
-      input_per_mtok  = 0.15
-      output_per_mtok = 0.60
+      input_per_mtok        = 0.15
+      cached_input_per_mtok = 0.075
+      output_per_mtok       = 0.60
     }
 
     model "gpt-4.1" {
-      input_per_mtok  = 2.00
-      output_per_mtok = 8.00
+      input_per_mtok        = 2.00
+      cached_input_per_mtok = 0.50
+      output_per_mtok       = 8.00
     }
 
     model "gpt-4.1-mini" {
-      input_per_mtok  = 0.40
-      output_per_mtok = 1.60
+      input_per_mtok        = 0.40
+      cached_input_per_mtok = 0.10
+      output_per_mtok       = 1.60
     }
 
     model "o3" {
-      input_per_mtok  = 2.00
-      output_per_mtok = 8.00
+      input_per_mtok        = 2.00
+      cached_input_per_mtok = 0.50
+      output_per_mtok       = 8.00
     }
 
     model "o4-mini" {
-      input_per_mtok  = 1.10
-      output_per_mtok = 4.40
+      input_per_mtok        = 1.10
+      cached_input_per_mtok = 0.275
+      output_per_mtok       = 4.40
     }
   }
 }

@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -226,7 +227,7 @@ func (f *StreamFormatter) fmtResult(e *ResultLine) string {
 
 	cost := e.Cost
 	if cost == 0 && f.Model != "" {
-		cost = agent.EstimateCost(f.Pricing, f.Model, f.DefaultModel, e.InputTokens, e.OutputTokens)
+		cost = agent.EstimateCost(f.Pricing, f.Model, f.DefaultModel, e.InputTokens, e.CacheReadTokens, e.OutputTokens)
 	}
 
 	durSec := e.DurationMS / 1000
@@ -290,8 +291,9 @@ func (f *StreamFormatter) fmtError(e *ErrorLine) string {
 }
 
 // verboseToolInput returns the verbose tool-input body for a ToolCallLine.
-// Prefers the raw claude JSON input (so we render the full payload, not the
-// shortened one-line detail); falls back to e.Detail for codex events.
+// Renders the full raw payload (claude tool input, codex begin-event JSON)
+// when available, falling back to the one-line Detail summary so verbose
+// mode never shows less than non-verbose.
 func verboseToolInput(e *ToolCallLine) string {
 	if e.Claude != nil {
 		input := strings.TrimSpace(string(e.Claude.Input))
@@ -299,6 +301,13 @@ func verboseToolInput(e *ToolCallLine) string {
 			return input
 		}
 		return ""
+	}
+	if e.Codex != nil && len(e.Codex.RawJSON) > 0 {
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, e.Codex.RawJSON, "", "  "); err == nil {
+			return pretty.String()
+		}
+		return strings.TrimSpace(string(e.Codex.RawJSON))
 	}
 	return strings.TrimSpace(e.Detail)
 }

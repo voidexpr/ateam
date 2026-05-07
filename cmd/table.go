@@ -383,8 +383,9 @@ func buildPricingFromConfig(ap *runtime.AgentPricing) (agent.PricingTable, strin
 	table := make(agent.PricingTable, len(ap.Models))
 	for name, mp := range ap.Models {
 		table[name] = agent.ModelPrice{
-			InputPerToken:  mp.InputPerMTok / 1e6,
-			OutputPerToken: mp.OutputPerMTok / 1e6,
+			InputPerToken:       mp.InputPerMTok / 1e6,
+			CachedInputPerToken: mp.CachedInputPerMTok / 1e6,
+			OutputPerToken:      mp.OutputPerMTok / 1e6,
 		}
 	}
 	return table, ap.DefaultModel

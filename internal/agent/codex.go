@@ -138,6 +138,9 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 
 		case "thinking":
 			te := ev.(*CodexTextEvent)
+			if te.Text == "" {
+				continue
+			}
 			ch <- StreamEvent{Type: "thinking", Text: te.Text}
 
 		case "tool_use":
@@ -178,7 +181,7 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 				Type:            "result",
 				Output:          output,
 				Model:           model,
-				Cost:            EstimateCost(c.Pricing, model, c.DefaultModel, re.InputTokens, re.OutputTokens),
+				Cost:            EstimateCost(c.Pricing, model, c.DefaultModel, re.InputTokens, re.CacheReadTokens, re.OutputTokens),
 				InputTokens:     re.InputTokens,
 				OutputTokens:    re.OutputTokens,
 				CacheReadTokens: re.CacheReadTokens,
@@ -227,9 +230,14 @@ type CodexSystemEvent struct {
 }
 
 // CodexToolUseEvent represents a tool invocation in Codex JSONL output.
+//
+// RawJSON is the full original event bytes — used by the verbose formatter
+// to show the entire payload (e.g. an apply_patch diff) rather than the
+// one-line ToolInput summary.
 type CodexToolUseEvent struct {
 	ToolName  string
 	ToolInput string
+	RawJSON   []byte
 }
 
 // CodexTextEvent represents an assistant text chunk in Codex JSONL output.
@@ -287,6 +295,10 @@ func ParseCodexLine(line []byte) (typ string, ev any, err error) {
 		return "", nil, nil
 	}
 
+	// Copy the line bytes so tool_use events can outlive the scanner
+	// buffer (verbose formatter renders RawJSON later).
+	rawLine := append([]byte(nil), line...)
+
 	switch eventType {
 	case "turn.started":
 		return "system", &CodexSystemEvent{}, nil
@@ -298,12 +310,20 @@ func ParseCodexLine(line []byte) (typ string, ev any, err error) {
 		}
 		return "system", &CodexSystemEvent{SessionID: tid}, nil
 
-	case "agent_reasoning", "agent_reasoning_delta":
+	case "agent_reasoning_delta":
+		// Deltas drive the stall-watchdog heartbeat. The matching final
+		// agent_reasoning event carries the same concatenated text and is
+		// dropped below to avoid double-emit (duplicate thinking lines on
+		// replay, duplicate progress on live runs).
 		text := firstStringField(raw, "delta", "text", "reasoning")
 		return "thinking", &CodexTextEvent{Text: text}, nil
 
+	case "agent_reasoning":
+		// Aggregate of preceding agent_reasoning_delta events — drop.
+		return "", nil, nil
+
 	case "item.started":
-		return parseCodexItemStarted(raw)
+		return parseCodexItemStarted(raw, rawLine)
 
 	case "item.completed":
 		return parseCodexItemCompleted(raw)
@@ -321,6 +341,7 @@ func ParseCodexLine(line []byte) (typ string, ev any, err error) {
 		return "tool_use", &CodexToolUseEvent{
 			ToolName:  toolName,
 			ToolInput: toolInput,
+			RawJSON:   rawLine,
 		}, nil
 
 	case "agent_message_delta":
@@ -358,6 +379,7 @@ func ParseCodexLine(line []byte) (typ string, ev any, err error) {
 			return "tool_use", &CodexToolUseEvent{
 				ToolName:  toolName,
 				ToolInput: toolInput,
+				RawJSON:   rawLine,
 			}, nil
 		}
 		return "", nil, nil
@@ -366,7 +388,9 @@ func ParseCodexLine(line []byte) (typ string, ev any, err error) {
 
 // parseCodexItemStarted handles item.started events. The item.type determines
 // whether this is a tool call (command_execution) or something else.
-func parseCodexItemStarted(raw map[string]json.RawMessage) (string, any, error) {
+// rawLine is the original event bytes, propagated to CodexToolUseEvent.RawJSON
+// for verbose rendering.
+func parseCodexItemStarted(raw map[string]json.RawMessage, rawLine []byte) (string, any, error) {
 	itemRaw, ok := raw["item"]
 	if !ok {
 		return "", nil, nil
@@ -385,11 +409,13 @@ func parseCodexItemStarted(raw map[string]json.RawMessage) (string, any, error) 
 		return "tool_use", &CodexToolUseEvent{
 			ToolName:  "command_execution",
 			ToolInput: item.Command,
+			RawJSON:   rawLine,
 		}, nil
 	case "web_search":
 		return "tool_use", &CodexToolUseEvent{
 			ToolName:  "web_search",
 			ToolInput: item.Query,
+			RawJSON:   rawLine,
 		}, nil
 	case "mcp_tool_call", "custom_tool_call", "patch_apply", "apply_patch":
 		detail := item.Name
@@ -399,6 +425,7 @@ func parseCodexItemStarted(raw map[string]json.RawMessage) (string, any, error) 
 		return "tool_use", &CodexToolUseEvent{
 			ToolName:  item.Type,
 			ToolInput: detail,
+			RawJSON:   rawLine,
 		}, nil
 	}
 	return "", nil, nil

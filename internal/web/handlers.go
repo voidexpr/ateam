@@ -581,8 +581,9 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 				table := make(agent.PricingTable, len(ac.Pricing.Models))
 				for name, mp := range ac.Pricing.Models {
 					table[name] = agent.ModelPrice{
-						InputPerToken:  mp.InputPerMTok / 1e6,
-						OutputPerToken: mp.OutputPerMTok / 1e6,
+						InputPerToken:       mp.InputPerMTok / 1e6,
+						CachedInputPerToken: mp.CachedInputPerMTok / 1e6,
+						OutputPerToken:      mp.OutputPerMTok / 1e6,
 					}
 				}
 				pricing = table

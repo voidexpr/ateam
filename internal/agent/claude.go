@@ -142,7 +142,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 			CacheWriteTokens: cacheCreateTokens,
 			Cost: EstimateCost(c.Pricing,
 				firstNonEmpty(resolvedModel, c.ModelName()),
-				c.DefaultModel, inputTokens, outputTokens),
+				c.DefaultModel, inputTokens, cacheReadTokens, outputTokens),
 		}
 	}
 

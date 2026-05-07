@@ -325,6 +325,53 @@ func TestRecentRuns(t *testing.T) {
 	}
 }
 
+func TestRecentRunsAgentsFilter(t *testing.T) {
+	// Regression test for the `--last` resume bug: with many non-resumable
+	// runs in front of a claude/codex one, an in-Go scan over a fixed
+	// recent window misses it. The Agents IN(...) filter has to push the
+	// constraint to SQL and find the older resumable row anyway.
+	db := testDB(t)
+	now := time.Now()
+
+	// 50 mock runs, then one claude run that's older than all of them.
+	for i := range 50 {
+		_, err := db.InsertCall(&Call{
+			ProjectID: "p", Agent: "mock", Container: "none", Action: "run",
+			StartedAt: now.Add(time.Duration(i) * time.Second),
+		})
+		if err != nil {
+			t.Fatalf("InsertCall mock %d: %v", i, err)
+		}
+	}
+	claudeID, err := db.InsertCall(&Call{
+		ProjectID: "p", Agent: "claude", Container: "none", Action: "run",
+		StartedAt: now.Add(-1 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("InsertCall claude: %v", err)
+	}
+
+	rows, err := db.RecentRuns(RecentFilter{
+		Agents: []string{"claude", "codex"},
+		Limit:  1,
+	})
+	if err != nil {
+		t.Fatalf("RecentRuns: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != claudeID {
+		t.Fatalf("expected claude row id=%d, got %+v", claudeID, rows)
+	}
+
+	// Empty Agents falls back to single-agent behavior.
+	rows, err = db.RecentRuns(RecentFilter{Agent: "mock", Limit: 100})
+	if err != nil {
+		t.Fatalf("RecentRuns mock: %v", err)
+	}
+	if len(rows) != 50 {
+		t.Fatalf("expected 50 mock rows, got %d", len(rows))
+	}
+}
+
 func TestCostByAction(t *testing.T) {
 	db := testDB(t)
 	seedCalls(t, db)

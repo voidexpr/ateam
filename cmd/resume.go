@@ -136,6 +136,9 @@ func runResume(cmd *cobra.Command, args []string) error {
 			envFlag = fmt.Sprintf(" -e CLAUDE_CONFIG_DIR=%s", configDir)
 		}
 		fmt.Println("Caveat: session lives inside the long-lived container; resuming on the host won't find it.")
+		if row.Agent == "codex" {
+			fmt.Println("Caveat: codex auth (OPENAI_API_KEY or ~/.codex/auth.json) must already be set inside the container.")
+		}
 		fmt.Printf("To try inside the container:\n  docker exec -it%s %s %s\n", envFlag, target, hostCmdLine)
 		if resumeLaunch {
 			return fmt.Errorf("--launch is not supported for docker-exec runs")
@@ -165,19 +168,19 @@ func resumeCommand(agent, sessionID string) (string, []string) {
 
 func selectResumeRow(db *calldb.CallDB, args []string) (*calldb.RecentRow, error) {
 	if resumeLast {
-		// Skip past any non-resumable agents (e.g. mock) so --last lands on
-		// a usable row rather than erroring out on the most recent one.
-		rows, err := db.RecentRuns(calldb.RecentFilter{Limit: 20})
+		// Push the resumable-agents filter to SQL so --last works regardless
+		// of how many non-resumable runs (mock, etc.) sit in front.
+		rows, err := db.RecentRuns(calldb.RecentFilter{
+			Agents: []string{"claude", "codex"},
+			Limit:  1,
+		})
 		if err != nil {
 			return nil, err
 		}
-		for i := range rows {
-			switch rows[i].Agent {
-			case "claude", "codex":
-				return &rows[i], nil
-			}
+		if len(rows) == 0 {
+			return nil, fmt.Errorf("no recent claude or codex runs found")
 		}
-		return nil, fmt.Errorf("no recent claude or codex runs found")
+		return &rows[0], nil
 	}
 	ids, err := parseIDArgs(args)
 	if err != nil {

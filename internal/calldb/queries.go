@@ -41,7 +41,8 @@ type RecentFilter struct {
 	ProjectID string
 	Role      string
 	Action    string
-	Agent     string
+	Agent     string   // single agent (legacy); ignored when Agents is set
+	Agents    []string // any-of filter; pushed to SQL as `agent IN (...)`
 	Batch     string
 	Limit     int
 }
@@ -62,7 +63,14 @@ func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
 		where = append(where, "action = ?")
 		args = append(args, f.Action)
 	}
-	if f.Agent != "" {
+	if len(f.Agents) > 0 {
+		placeholders := strings.Repeat("?,", len(f.Agents))
+		placeholders = placeholders[:len(placeholders)-1]
+		where = append(where, "agent IN ("+placeholders+")")
+		for _, a := range f.Agents {
+			args = append(args, a)
+		}
+	} else if f.Agent != "" {
 		where = append(where, "agent = ?")
 		args = append(args, f.Agent)
 	}

@@ -117,14 +117,14 @@ func TestPricingEstimation(t *testing.T) {
 
 	// When the pricing table has the model, EstimateCost should produce
 	// a valid estimate.
-	cost := EstimateCost(pricing, "", defaultModel, 100, 50)
+	cost := EstimateCost(pricing, "", defaultModel, 100, 0, 50)
 	want := 100*1.00/1e6 + 50*2.00/1e6
 	if math.Abs(cost-want) > 1e-12 {
 		t.Errorf("EstimateCost with pricing = %v, want %v", cost, want)
 	}
 
 	// A model not in the table falls back to DefaultModel.
-	cost = EstimateCost(pricing, "unknown-model", defaultModel, 100, 50)
+	cost = EstimateCost(pricing, "unknown-model", defaultModel, 100, 0, 50)
 	if math.Abs(cost-want) > 1e-12 {
 		t.Errorf("EstimateCost fallback to default = %v, want %v", cost, want)
 	}
