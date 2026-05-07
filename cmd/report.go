@@ -199,7 +199,6 @@ func runReport(opts ReportOptions) error {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", roleID, err)
 			continue
 		}
-		startedAt := time.Now()
 		task := runner.PoolExec{
 			Prompt: prompt,
 			RunOpts: runner.RunOpts{
@@ -211,7 +210,6 @@ func runReport(opts ReportOptions) error {
 				TimeoutMin:       timeout,
 				Verbose:          opts.Verbose,
 				Batch:            batch,
-				StartedAt:        startedAt,
 			},
 		}
 
