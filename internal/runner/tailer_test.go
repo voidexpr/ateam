@@ -24,7 +24,7 @@ func TestTailerStaticFile(t *testing.T) {
 
 	var buf bytes.Buffer
 	tailer := NewTailer(&buf, nil, false, false)
-	tailer.AddSource(1, "security", "run", path, "")
+	tailer.AddSource(1, "security", "exec", path, "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -37,7 +37,7 @@ func TestTailerStaticFile(t *testing.T) {
 	if !strings.Contains(out, "Result") {
 		t.Errorf("expected Result in output, got: %s", out)
 	}
-	if !strings.Contains(out, "[1:security/run]") {
+	if !strings.Contains(out, "[1:security/exec]") {
 		t.Errorf("expected prefix in output, got: %s", out)
 	}
 }
@@ -68,7 +68,7 @@ func TestTailerGrowingFile(t *testing.T) {
 	var buf bytes.Buffer
 	tailer := NewTailer(&buf, nil, false, false)
 	tailer.PollInterval = 50 * time.Millisecond
-	tailer.AddSource(1, "test", "run", path, "")
+	tailer.AddSource(1, "test", "exec", path, "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

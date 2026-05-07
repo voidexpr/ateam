@@ -38,7 +38,7 @@ func setupTestProject(t *testing.T) (orgParent, projPath string, env *root.Resol
 }
 
 // TestInitCreatesDBAndLogDirs verifies that ateam init creates state.sqlite
-// and all expected log directories including logs/run/.
+// and the per-role logs directories.
 func TestInitCreatesDBAndLogDirs(t *testing.T) {
 	_, _, env := setupTestProject(t)
 
@@ -62,12 +62,11 @@ func TestInitCreatesDBAndLogDirs(t *testing.T) {
 		t.Errorf("expected 0 rows in fresh DB, got %d", len(rows))
 	}
 
-	// Log dirs must exist
-	for _, sub := range []string{"supervisor", "run"} {
-		dir := filepath.Join(env.ProjectDir, "logs", sub)
-		if _, err := os.Stat(dir); err != nil {
-			t.Errorf("logs/%s not created: %v", sub, err)
-		}
+	// Per-role logs dir must exist (active streams write under logs/<exec_id>/
+	// at runtime, so no need for any other init-time subdir).
+	roleDir := filepath.Join(env.ProjectDir, "logs", "roles", "testing_basic")
+	if _, err := os.Stat(roleDir); err != nil {
+		t.Errorf("logs/roles/testing_basic not created: %v", err)
 	}
 }
 
@@ -106,8 +105,8 @@ func TestRunWithMockAgent(t *testing.T) {
 	if psErr != nil {
 		t.Fatalf("ps: %v", psErr)
 	}
-	if !strings.Contains(psOut, "run") {
-		t.Errorf("ps output should contain action 'run':\n%s", psOut)
+	if !strings.Contains(psOut, "exec") {
+		t.Errorf("ps output should contain action 'exec':\n%s", psOut)
 	}
 	if !strings.Contains(psOut, "ok") {
 		t.Errorf("ps output should show status 'ok':\n%s", psOut)
@@ -123,8 +122,8 @@ func TestRunWithMockAgent(t *testing.T) {
 	if costErr != nil {
 		t.Fatalf("cost: %v", costErr)
 	}
-	if !strings.Contains(costOut, "run") {
-		t.Errorf("cost output should contain action 'run':\n%s", costOut)
+	if !strings.Contains(costOut, "exec") {
+		t.Errorf("cost output should contain action 'exec':\n%s", costOut)
 	}
 }
 

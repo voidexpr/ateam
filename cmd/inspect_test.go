@@ -56,10 +56,10 @@ func (g inspectGlobals) restore() {
 }
 
 // seedInspectDB seeds the given calldb with a set of runs for testing run selection:
-//   - one "run" action run (most recent, no batch)
+//   - one "exec" action run (most recent, no batch)
 //   - one "review" action run
 //   - two "report" action runs in a report batch
-//   - two "run" action runs in a code batch
+//   - two "exec" action runs in a code batch
 //
 // projectID is required so seeded rows match what resolveRunSelection's call to
 // LatestBatch(env.ProjectID(), ...) filters on.
@@ -89,9 +89,9 @@ func seedInspectDB(t *testing.T, db *calldb.CallDB, projectID string) (reportBat
 	insert("report", "testing_basic", reportBatch, -10*time.Minute)
 	insert("report", "security", reportBatch, -10*time.Minute)
 	insert("review", "supervisor", "", -8*time.Minute)
-	insert("run", "testing_basic", codeBatch, -6*time.Minute)
-	insert("run", "security", codeBatch, -6*time.Minute)
-	insert("run", "testing_basic", "", -2*time.Minute)
+	insert("exec", "testing_basic", codeBatch, -6*time.Minute)
+	insert("exec", "security", codeBatch, -6*time.Minute)
+	insert("exec", "testing_basic", "", -2*time.Minute)
 
 	return reportBatch, codeBatch
 }
@@ -132,8 +132,8 @@ func TestInspectRunSelection(t *testing.T) {
 		if len(rows) != 1 {
 			t.Fatalf("expected 1 row, got %d", len(rows))
 		}
-		if rows[0].Action != "run" {
-			t.Errorf("expected action 'run', got %q", rows[0].Action)
+		if rows[0].Action != "exec" {
+			t.Errorf("expected action 'exec', got %q", rows[0].Action)
 		}
 		if rows[0].Batch != "" {
 			t.Errorf("expected empty batch for most recent run, got %q", rows[0].Batch)
@@ -230,7 +230,7 @@ func TestInspectAutoDebugExtraPromptFromFile(t *testing.T) {
 	}
 	now := time.Now()
 	id, err := db.InsertCall(&calldb.Call{
-		ProjectID: "", Action: "run", Role: "testing_basic",
+		ProjectID: "", Action: "exec", Role: "testing_basic",
 		StartedAt: now.Add(-1 * time.Minute),
 	})
 	if err != nil {

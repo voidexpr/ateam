@@ -64,7 +64,7 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Auto-setup running (%dm timeout)...\n", timeout)
 
-	cr, err := resolveRunner(env, autoSetupProfile, autoSetupAgent, runner.ActionRun, "", false)
+	cr, err := resolveRunner(env, autoSetupProfile, autoSetupAgent, runner.ActionExec, "", false)
 	if err != nil {
 		return err
 	}
@@ -82,7 +82,7 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 	// canonical promotion is configured here. See plan for the eventual fix.
 	opts := runner.RunOpts{
 		RoleID:     "supervisor",
-		Action:     runner.ActionRun,
+		Action:     runner.ActionExec,
 		WorkDir:    env.SourceDir,
 		TimeoutMin: timeout,
 		Verbose:    autoSetupVerbose,

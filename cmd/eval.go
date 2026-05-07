@@ -285,7 +285,7 @@ func runEval(cmd *cobra.Command, args []string) error {
 	var judge *eval.JudgeResult
 	if !evalNoJudge && baseResult != nil && candResult != nil && baseResult.Report != "" && candResult.Report != "" {
 		judgeRunner, err := buildEvalRunner(evalRunnerSpec{
-			env: baseEnv, action: runner.ActionRun,
+			env: baseEnv, action: runner.ActionExec,
 			scopeProfile: evalJudgeProfile, scopeAgent: evalJudgeAgent, scopeModel: evalJudgeModel,
 			sharedProfile: evalProfile, sharedAgent: evalAgent, sharedModel: evalModel,
 		})

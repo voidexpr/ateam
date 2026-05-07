@@ -50,7 +50,7 @@ func TestRunnerForwardsCumulativeProgress(t *testing.T) {
 
 	opts := RunOpts{
 		RoleID: "fake",
-		Action: ActionRun,
+		Action: ActionExec,
 	}
 
 	progressCh := make(chan RunProgress, 32)

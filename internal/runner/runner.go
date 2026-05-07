@@ -27,7 +27,7 @@ const TimestampFormat = display.TimestampFormat
 
 const (
 	ActionReport   = "report"
-	ActionRun      = "run"
+	ActionExec     = "exec"
 	ActionParallel = "parallel"
 	ActionCode     = "code"
 	ActionReview   = "review"
@@ -123,7 +123,7 @@ const defaultStallWarn = 5 * time.Minute
 //   - <CanonicalDestDir>/    where runtime files are cloned on success (e.g. roles/<id>/)
 type RunOpts struct {
 	RoleID           string
-	Action           string // "report", "run", "code", "review", ...
+	Action           string // "report", "exec", "code", "review", ...
 	OutputKind       string // OutputKindReport / Review / Verify / ExecutionReport / SetupOverview / "" (no primary output)
 	CanonicalDestDir string // where runtime/<exec_id>/ files are cloned on success; "" disables promotion
 	WorkDir          string // cwd for the subprocess

@@ -190,7 +190,7 @@ func (c *CallDB) CostByAction(projectID string) ([]ActionAgg, error) {
 	q := `
 		SELECT
 			CASE
-				WHEN action = 'run' AND batch LIKE 'code-%' THEN 'code-task-run'
+				WHEN action = 'exec' AND batch LIKE 'code-%' THEN 'code-task-exec'
 				ELSE action
 			END AS category,
 			COUNT(*) AS cnt,

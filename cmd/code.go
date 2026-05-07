@@ -171,7 +171,7 @@ func runCode(opts CodeOptions) error {
 	// --agent and --profile are mutually exclusive on ateam exec.
 	subRunProfile := opts.Profile
 	if subRunProfile == "" && opts.Agent == "" {
-		subRunProfile = env.Config.ResolveProfile(runner.ActionRun, "")
+		subRunProfile = env.Config.ResolveProfile(runner.ActionExec, "")
 	}
 
 	// Inject flags for the supervisor to pass to sub-runs.

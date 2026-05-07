@@ -137,7 +137,7 @@ func runCost(cmd *cobra.Command, args []string) error {
 		}
 
 		first := true
-		for _, action := range []string{runner.ActionCode, runner.ActionReport, runner.ActionReview, runner.ActionRun} {
+		for _, action := range []string{runner.ActionCode, runner.ActionReport, runner.ActionReview, runner.ActionExec} {
 			al, ok := s.actions[action]
 			if !ok {
 				continue
@@ -156,7 +156,7 @@ func runCost(cmd *cobra.Command, args []string) error {
 		// Print any other actions not in the ordered list above.
 		for action, al := range s.actions {
 			switch action {
-			case runner.ActionCode, runner.ActionReport, runner.ActionReview, runner.ActionRun:
+			case runner.ActionCode, runner.ActionReport, runner.ActionReview, runner.ActionExec:
 				continue
 			}
 			label := displayBatch

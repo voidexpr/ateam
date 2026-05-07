@@ -15,7 +15,7 @@ import (
 //
 //   - report batch: two "report" runs (testing_basic + security), each 1000 input + 500 output tokens
 //   - code batch:   one "code" run (testing_basic) with 2000 input + 800 output tokens,
-//     one "run" run (testing_basic) with 300 input + 100 output tokens
+//     one "exec" run (testing_basic) with 300 input + 100 output tokens
 //   - standalone run: one "review" run (supervisor) with no batch, 600 input + 200 output tokens
 func seedCostDB(t *testing.T, db *calldb.CallDB, projectID string) {
 	t.Helper()
@@ -46,7 +46,7 @@ func seedCostDB(t *testing.T, db *calldb.CallDB, projectID string) {
 	insert("report", "testing_basic", reportBatch, -30*time.Minute, 1000, 500)
 	insert("report", "security", reportBatch, -30*time.Minute, 1000, 500)
 	insert("code", "testing_basic", codeBatch, -20*time.Minute, 2000, 800)
-	insert("run", "testing_basic", codeBatch, -20*time.Minute, 300, 100)
+	insert("exec", "testing_basic", codeBatch, -20*time.Minute, 300, 100)
 	insert("review", "supervisor", "", -10*time.Minute, 600, 200)
 }
 
@@ -180,7 +180,7 @@ func TestCostTotalTokensAggregation(t *testing.T) {
 	// Grand total: 1800 tokens → formatted as "1.8K"
 	now := time.Now()
 	idA, err := db.InsertCall(&calldb.Call{
-		ProjectID: env.ProjectID(), Action: "run", Role: "testing_basic",
+		ProjectID: env.ProjectID(), Action: "exec", Role: "testing_basic",
 		StartedAt: now.Add(-2 * time.Minute),
 	})
 	if err != nil {
@@ -194,7 +194,7 @@ func TestCostTotalTokensAggregation(t *testing.T) {
 	}
 
 	idB, err := db.InsertCall(&calldb.Call{
-		ProjectID: env.ProjectID(), Action: "run", Role: "security",
+		ProjectID: env.ProjectID(), Action: "exec", Role: "security",
 		StartedAt: now.Add(-3 * time.Minute),
 	})
 	if err != nil {

@@ -197,7 +197,7 @@ func legacyOutputSuffix(action string) string {
 		return "review.md"
 	case "verify":
 		return "verify.md"
-	case "run":
+	case "exec":
 		return "run_output.md"
 	default:
 		return ""
@@ -272,7 +272,7 @@ func findClosestHistoryFile(dir string, target time.Time, suffix string, window 
 
 func legacyHistoryDir(projectDir, role, action string) string {
 	switch action {
-	case "report", "run":
+	case "report", "exec":
 		if role == "" {
 			return ""
 		}
@@ -288,7 +288,7 @@ func legacyPromptSuffix(action string) string {
 	switch action {
 	case "report":
 		return "report_prompt.md"
-	case "run":
+	case "exec":
 		return "run_prompt.md"
 	case "review":
 		return "review_prompt.md"

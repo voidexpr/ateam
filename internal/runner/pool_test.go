@@ -69,9 +69,9 @@ func TestRunPoolBasic(t *testing.T) {
 	r := newTestRunner(t, dir, mock)
 
 	tasks := []PoolExec{
-		{Prompt: "task 1", RunOpts: RunOpts{RoleID: "role-1", Action: ActionRun}},
-		{Prompt: "task 2", RunOpts: RunOpts{RoleID: "role-2", Action: ActionRun}},
-		{Prompt: "task 3", RunOpts: RunOpts{RoleID: "role-3", Action: ActionRun}},
+		{Prompt: "task 1", RunOpts: RunOpts{RoleID: "role-1", Action: ActionExec}},
+		{Prompt: "task 2", RunOpts: RunOpts{RoleID: "role-2", Action: ActionExec}},
+		{Prompt: "task 3", RunOpts: RunOpts{RoleID: "role-3", Action: ActionExec}},
 	}
 
 	results := RunPool(context.Background(), r, tasks, 2, nil, nil)
@@ -102,7 +102,7 @@ func TestRunPoolSemaphoreLimit(t *testing.T) {
 	for i := range tasks {
 		tasks[i] = PoolExec{
 			Prompt:  "task",
-			RunOpts: RunOpts{RoleID: fmt.Sprintf("role-%d", i), Action: ActionRun},
+			RunOpts: RunOpts{RoleID: fmt.Sprintf("role-%d", i), Action: ActionExec},
 		}
 	}
 
@@ -123,9 +123,9 @@ func TestRunPoolCompletedChannel(t *testing.T) {
 	r := newTestRunner(t, dir, mock)
 
 	tasks := []PoolExec{
-		{Prompt: "t1", RunOpts: RunOpts{RoleID: "c-role-1", Action: ActionRun}},
-		{Prompt: "t2", RunOpts: RunOpts{RoleID: "c-role-2", Action: ActionRun}},
-		{Prompt: "t3", RunOpts: RunOpts{RoleID: "c-role-3", Action: ActionRun}},
+		{Prompt: "t1", RunOpts: RunOpts{RoleID: "c-role-1", Action: ActionExec}},
+		{Prompt: "t2", RunOpts: RunOpts{RoleID: "c-role-2", Action: ActionExec}},
+		{Prompt: "t3", RunOpts: RunOpts{RoleID: "c-role-3", Action: ActionExec}},
 	}
 
 	completed := make(chan RunSummary, len(tasks))
@@ -152,7 +152,7 @@ func TestRunPoolResultCollection(t *testing.T) {
 	r := newTestRunner(t, dir, mock)
 
 	tasks := []PoolExec{
-		{Prompt: "p1", RunOpts: RunOpts{RoleID: "res-role", Action: ActionRun}},
+		{Prompt: "p1", RunOpts: RunOpts{RoleID: "res-role", Action: ActionExec}},
 	}
 
 	results := RunPool(context.Background(), r, tasks, 1, nil, nil)
@@ -184,7 +184,7 @@ func TestRunPoolConcurrentResultsAreSafe(t *testing.T) {
 	for i := range tasks {
 		tasks[i] = PoolExec{
 			Prompt:  "concurrent task",
-			RunOpts: RunOpts{RoleID: fmt.Sprintf("concurrent-role-%d", i), Action: ActionRun},
+			RunOpts: RunOpts{RoleID: fmt.Sprintf("concurrent-role-%d", i), Action: ActionExec},
 		}
 	}
 

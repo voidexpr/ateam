@@ -81,11 +81,6 @@ func TestIntegration_BasicProject(t *testing.T) {
 			t.Errorf("logs dir missing for role %s: %v", roleID, err)
 		}
 	}
-	supervisorLogsDir := filepath.Join(projDir, "logs", "supervisor")
-	if _, err := os.Stat(supervisorLogsDir); err != nil {
-		t.Errorf("supervisor logs dir missing: %v", err)
-	}
-
 	// Verify .gitignore was created.
 	gitignorePath := filepath.Join(projDir, ".gitignore")
 	if data, err := os.ReadFile(gitignorePath); err != nil {

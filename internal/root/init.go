@@ -104,9 +104,10 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 		return "", fmt.Errorf("cannot create supervisor directory: %w", err)
 	}
 
-	// Create logs directories under .ateam/
-	if err := createLogsDirs(projDir, roleIDs); err != nil {
-		return "", err
+	for _, id := range roleIDs {
+		if err := os.MkdirAll(filepath.Join(projDir, "logs", "roles", id), 0755); err != nil {
+			return "", fmt.Errorf("cannot create role logs directory: %w", err)
+		}
 	}
 
 	// Write .gitignore for runtime artifacts
@@ -182,21 +183,6 @@ func createStateDirs(orgDir, projectID string, roleIDs []string) error {
 	}
 	if err := os.MkdirAll(filepath.Join(stateBase, "supervisor", "logs"), 0755); err != nil {
 		return fmt.Errorf("cannot create supervisor state directory: %w", err)
-	}
-	return nil
-}
-
-// createLogsDirs creates the logs directory structure under .ateam/.
-func createLogsDirs(projDir string, roleIDs []string) error {
-	for _, id := range roleIDs {
-		if err := os.MkdirAll(filepath.Join(projDir, "logs", "roles", id), 0755); err != nil {
-			return fmt.Errorf("cannot create role logs directory: %w", err)
-		}
-	}
-	for _, sub := range []string{"supervisor", "run"} {
-		if err := os.MkdirAll(filepath.Join(projDir, "logs", sub), 0755); err != nil {
-			return fmt.Errorf("cannot create %s logs directory: %w", sub, err)
-		}
 	}
 	return nil
 }

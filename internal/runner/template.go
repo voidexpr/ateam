@@ -18,7 +18,7 @@ type TemplateVars struct {
 	ProjectFullPath string // absolute path to project source dir
 	ProjectDir      string // last component of ProjectFullPath
 	Role            string // role ID (e.g. "security", "supervisor")
-	Action          string // action type (e.g. "report", "run", "code")
+	Action          string // action type (e.g. "report", "exec", "code")
 	Batch           string // batch ID (e.g. "code-2026-03-31_06-09-39")
 	Timestamp       string // run start time (TimestampFormat)
 	Profile         string // active profile name

@@ -37,7 +37,7 @@ Example:
 
 func init() {
 	runsCmd.Flags().StringVar(&recentRole, "role", "", "filter by role")
-	runsCmd.Flags().StringVar(&recentAction, "action", "", "filter by action (report, review, code, run)")
+	runsCmd.Flags().StringVar(&recentAction, "action", "", "filter by action (report, review, code, exec)")
 	runsCmd.Flags().StringVar(&recentBatch, "batch", "", "filter by batch")
 	runsCmd.Flags().IntVar(&recentLimit, "limit", 30, "max rows to show")
 }

@@ -383,7 +383,7 @@ func TestResolveProfilePriority(t *testing.T) {
 		t.Errorf("review supervisor should win, got %q", got)
 	}
 	// Supervisor default wins over project default
-	if got := cfg.ResolveProfile("run", ""); got != "sup" {
+	if got := cfg.ResolveProfile("exec", ""); got != "sup" {
 		t.Errorf("supervisor default should win, got %q", got)
 	}
 }

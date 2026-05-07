@@ -248,7 +248,7 @@ func TestRunPoolSharedContainerRace(t *testing.T) {
 			Prompt: "p",
 			RunOpts: RunOpts{
 				RoleID: fmt.Sprintf("role-%d", i),
-				Action: ActionRun,
+				Action: ActionExec,
 			},
 		}
 	}
@@ -277,8 +277,8 @@ func TestRunPoolSharedContainerDoesNotMutateTemplate(t *testing.T) {
 	r.SourceDir = dir
 
 	tasks := []PoolExec{
-		{Prompt: "p", RunOpts: RunOpts{RoleID: "alpha", Action: ActionRun}},
-		{Prompt: "p", RunOpts: RunOpts{RoleID: "beta", Action: ActionRun}},
+		{Prompt: "p", RunOpts: RunOpts{RoleID: "alpha", Action: ActionExec}},
+		{Prompt: "p", RunOpts: RunOpts{RoleID: "beta", Action: ActionExec}},
 	}
 	_ = RunPool(context.Background(), r, tasks, 1, nil, nil) // serial: isolate mutation issue from the race
 
@@ -309,7 +309,7 @@ func TestRunPoolCompletedChannelDeadlockGuard(t *testing.T) {
 			Prompt: "p",
 			RunOpts: RunOpts{
 				RoleID: fmt.Sprintf("role-%d", i),
-				Action: ActionRun,
+				Action: ActionExec,
 			},
 		}
 	}
@@ -348,7 +348,7 @@ func TestRunPoolSharedDockerExecRace(t *testing.T) {
 			Prompt: "p",
 			RunOpts: RunOpts{
 				RoleID: fmt.Sprintf("role-%d", i),
-				Action: ActionRun,
+				Action: ActionExec,
 			},
 		}
 	}
@@ -391,7 +391,7 @@ func TestRunPoolRunnerFieldsUnchanged(t *testing.T) {
 			Prompt: "p",
 			RunOpts: RunOpts{
 				RoleID: fmt.Sprintf("role-%d", i),
-				Action: ActionRun,
+				Action: ActionExec,
 			},
 		}
 	}
@@ -494,7 +494,7 @@ func TestRunPoolSharedPrepareGuardRunsOnce(t *testing.T) {
 			Prompt: "p",
 			RunOpts: RunOpts{
 				RoleID: fmt.Sprintf("role-%d", i),
-				Action: ActionRun,
+				Action: ActionExec,
 			},
 		}
 	}

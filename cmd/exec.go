@@ -130,7 +130,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	var r *runner.Runner
 	if hasProject {
-		r, err = resolveRunner(env, execProfile, execAgent, runner.ActionRun, execRole, execDockerAutoSetup)
+		r, err = resolveRunner(env, execProfile, execAgent, runner.ActionExec, execRole, execDockerAutoSetup)
 	} else {
 		profile := execProfile
 		if profile == "" && execAgent == "" {
@@ -181,7 +181,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	// stream, viewable via `ateam cat <exec_id>`.
 	opts := runner.RunOpts{
 		RoleID:     execRole,
-		Action:     runner.ActionRun,
+		Action:     runner.ActionExec,
 		WorkDir:    workDir,
 		Verbose:    execVerbose,
 		Batch:      execBatch,
@@ -288,7 +288,7 @@ func printExecDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, ba
 	fmt.Println()
 	printDryRunInfo(r, env, dryRunOpts{
 		RoleID: roleID,
-		Action: runner.ActionRun,
+		Action: runner.ActionExec,
 		Batch:  batch,
 		Prompt: prompt,
 	})

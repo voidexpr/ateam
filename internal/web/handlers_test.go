@@ -217,7 +217,7 @@ func seedRun(t *testing.T, projectDir string, action, role string) int64 {
 	// Create logs directory and stream/exec files.
 	var logsDir string
 	switch action {
-	case runner.ActionReport, runner.ActionRun:
+	case runner.ActionReport, runner.ActionExec:
 		logsDir = filepath.Join("roles", role, "history")
 	default:
 		logsDir = filepath.Join("supervisor", "history")

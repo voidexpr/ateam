@@ -43,7 +43,7 @@ func TestInsertAndUpdate(t *testing.T) {
 		Profile:    "default",
 		Agent:      "claude",
 		Container:  "none",
-		Action:     "run",
+		Action:     "exec",
 		Role:       "security",
 		Batch:      "code-2026-03-13",
 		Model:      "opus",
@@ -128,7 +128,7 @@ func TestUpdateCallWritesModelWhenProvided(t *testing.T) {
 			ProjectID: "p",
 			Agent:     "claude",
 			Container: "none",
-			Action:    "run",
+			Action:    "exec",
 			Model:     initial,
 			StartedAt: now,
 		})
@@ -197,7 +197,7 @@ func TestConcurrentInserts(t *testing.T) {
 				ProjectID: "proj",
 				Agent:     "claude",
 				Container: "none",
-				Action:    "run",
+				Action:    "exec",
 				StartedAt: time.Now(),
 			})
 		}(i)
@@ -252,15 +252,15 @@ func seedCalls(t *testing.T, db *CallDB) {
 			CallResult{EndedAt: now.Add(-1*time.Hour + 10*time.Minute), DurationMS: 600000, CostUSD: 0.50, InputTokens: 20000, OutputTokens: 5000, CacheReadTokens: 2000},
 		},
 		{
-			Call{ProjectID: "proj-a", Action: "run", Role: "security", Batch: "code-2026-03-13_10-00-00", StartedAt: now.Add(-50 * time.Minute), StreamFile: "/logs/run_security.jsonl"},
+			Call{ProjectID: "proj-a", Action: "exec", Role: "security", Batch: "code-2026-03-13_10-00-00", StartedAt: now.Add(-50 * time.Minute), StreamFile: "/logs/run_security.jsonl"},
 			CallResult{EndedAt: now.Add(-45 * time.Minute), DurationMS: 300000, CostUSD: 0.15, InputTokens: 8000, OutputTokens: 1500, CacheReadTokens: 600},
 		},
 		{
-			Call{ProjectID: "proj-a", Action: "run", Role: "testing", Batch: "code-2026-03-13_10-00-00", StartedAt: now.Add(-44 * time.Minute), StreamFile: "/logs/run_testing.jsonl"},
+			Call{ProjectID: "proj-a", Action: "exec", Role: "testing", Batch: "code-2026-03-13_10-00-00", StartedAt: now.Add(-44 * time.Minute), StreamFile: "/logs/run_testing.jsonl"},
 			CallResult{EndedAt: now.Add(-40 * time.Minute), DurationMS: 240000, CostUSD: 0.12, InputTokens: 6000, OutputTokens: 1200, CacheReadTokens: 400},
 		},
 		{
-			Call{ProjectID: "proj-a", Action: "run", Role: "security", StartedAt: now.Add(-30 * time.Minute)},
+			Call{ProjectID: "proj-a", Action: "exec", Role: "security", StartedAt: now.Add(-30 * time.Minute)},
 			CallResult{EndedAt: now.Add(-25 * time.Minute), DurationMS: 300000, CostUSD: 0.10, InputTokens: 5000, OutputTokens: 1000, CacheReadTokens: 400},
 		},
 		{
@@ -386,15 +386,15 @@ func TestCostByAction(t *testing.T) {
 		catMap[a.Category] = a
 	}
 
-	// The two runs with batch "code-..." should be categorized as "code-task-run"
-	if ctr, ok := catMap["code-task-run"]; !ok {
-		t.Fatal("expected code-task-run category")
+	// The two runs with batch "code-..." should be categorized as "code-task-exec"
+	if ctr, ok := catMap["code-task-exec"]; !ok {
+		t.Fatal("expected code-task-exec category")
 	} else if ctr.Count != 2 {
-		t.Errorf("expected 2 code-task-run, got %d", ctr.Count)
+		t.Errorf("expected 2 code-task-exec, got %d", ctr.Count)
 	}
 
-	// The standalone "run" (no code batch) should stay as "run"
-	if r, ok := catMap["run"]; !ok {
+	// The standalone "exec" (no code batch) should stay as "exec"
+	if r, ok := catMap["exec"]; !ok {
 		t.Fatal("expected run category")
 	} else if r.Count != 1 {
 		t.Errorf("expected 1 standalone run, got %d", r.Count)
@@ -441,7 +441,7 @@ func TestCostByBatch(t *testing.T) {
 	} else if code.Count != 1 {
 		t.Errorf("expected 1 code call, got %d", code.Count)
 	}
-	if run, ok := codeGroup["run"]; !ok {
+	if run, ok := codeGroup["exec"]; !ok {
 		t.Fatal("expected run action in code batch")
 	} else if run.Count != 2 {
 		t.Errorf("expected 2 run calls, got %d", run.Count)
@@ -456,6 +456,39 @@ func TestCostByBatch(t *testing.T) {
 		t.Fatal("expected report action in report batch")
 	} else if rep.Count != 2 {
 		t.Errorf("expected 2 report calls, got %d", rep.Count)
+	}
+}
+
+// TestMigrateRunActionRename verifies that legacy rows with action='run' are
+// rewritten to action='exec' on Open, matching the renamed CLI command.
+func TestMigrateRunActionRename(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "state.sqlite")
+
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	if _, err := db.RawDB().Exec(
+		`INSERT INTO agent_execs (project_id, action, role, started_at) VALUES (?, ?, ?, ?)`,
+		"proj", "run", "security", time.Now().Format(time.RFC3339),
+	); err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+	db.Close()
+
+	// Re-open: migrate() should rewrite action='run' → 'exec'.
+	db2, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("second Open: %v", err)
+	}
+	defer db2.Close()
+
+	var action string
+	if err := db2.RawDB().QueryRow(`SELECT action FROM agent_execs LIMIT 1`).Scan(&action); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if action != "exec" {
+		t.Errorf("expected action='exec' after migration, got %q", action)
 	}
 }
 
@@ -481,7 +514,7 @@ func TestMigrateIdempotent(t *testing.T) {
 	var containerID string
 	id, err := db2.InsertCall(&Call{
 		ProjectID: "proj", Agent: "claude", Container: "none",
-		Action: "run", StartedAt: time.Now(),
+		Action: "exec", StartedAt: time.Now(),
 	})
 	if err != nil {
 		t.Fatalf("InsertCall: %v", err)
@@ -799,8 +832,8 @@ func TestCallsByBatch(t *testing.T) {
 	if actions["code"] != 1 {
 		t.Errorf("expected 1 code action, got %d", actions["code"])
 	}
-	if actions["run"] != 2 {
-		t.Errorf("expected 2 run actions, got %d", actions["run"])
+	if actions["exec"] != 2 {
+		t.Errorf("expected 2 run actions, got %d", actions["exec"])
 	}
 }
 
@@ -885,8 +918,8 @@ func TestRunCostByActionRole(t *testing.T) {
 	db := testDB(t)
 	seedCalls(t, db)
 
-	// security + run: seed has two entries (IDs 5 and 7), both proj-a
-	costs, err := db.RunCostByActionRole("run", "security", "")
+	// security + exec: seed has two entries (IDs 5 and 7), both proj-a
+	costs, err := db.RunCostByActionRole("exec", "security", "")
 	if err != nil {
 		t.Fatalf("RunCostByActionRole: %v", err)
 	}
@@ -905,14 +938,14 @@ func TestRunCostByActionRole(t *testing.T) {
 	}
 
 	// Project filter: proj-a has both entries, proj-b has none for this action+role
-	costs, err = db.RunCostByActionRole("run", "security", "proj-a")
+	costs, err = db.RunCostByActionRole("exec", "security", "proj-a")
 	if err != nil {
 		t.Fatalf("RunCostByActionRole proj-a: %v", err)
 	}
 	if len(costs) != 2 {
 		t.Fatalf("expected 2 entries for proj-a, got %d", len(costs))
 	}
-	costs, err = db.RunCostByActionRole("run", "security", "proj-b")
+	costs, err = db.RunCostByActionRole("exec", "security", "proj-b")
 	if err != nil {
 		t.Fatalf("RunCostByActionRole proj-b: %v", err)
 	}
@@ -946,7 +979,7 @@ func TestFindRunning(t *testing.T) {
 	// Insert a call without UpdateCall so ended_at stays NULL
 	now := time.Now()
 	id1, err := db.InsertCall(&Call{
-		ProjectID: "proj-a", Action: "run", Role: "security",
+		ProjectID: "proj-a", Action: "exec", Role: "security",
 		StartedAt: now,
 	})
 	if err != nil {
@@ -961,7 +994,7 @@ func TestFindRunning(t *testing.T) {
 	}
 	// Different project — should not appear
 	if _, err := db.InsertCall(&Call{
-		ProjectID: "proj-b", Action: "run", Role: "security",
+		ProjectID: "proj-b", Action: "exec", Role: "security",
 		StartedAt: now,
 	}); err != nil {
 		t.Fatalf("InsertCall: %v", err)
@@ -984,7 +1017,7 @@ func TestFindRunning(t *testing.T) {
 	}
 
 	// Filter by action
-	rows, err = db.FindRunning("proj-a", "run")
+	rows, err = db.FindRunning("proj-a", "exec")
 	if err != nil {
 		t.Fatalf("FindRunning with action: %v", err)
 	}
@@ -1011,8 +1044,8 @@ func TestRenameProject(t *testing.T) {
 	now := time.Now()
 	for _, c := range []Call{
 		{ProjectID: "services_api", Action: "report", Role: "security", StartedAt: now, StreamFile: "projects/services_api/roles/security/logs/stream.jsonl"},
-		{ProjectID: "services_api", Action: "run", Role: "testing", StartedAt: now, StreamFile: "projects/services_api/roles/testing/logs/stream.jsonl"},
-		{ProjectID: "other_proj", Action: "run", Role: "security", StartedAt: now, StreamFile: "projects/other_proj/roles/security/logs/stream.jsonl"},
+		{ProjectID: "services_api", Action: "exec", Role: "testing", StartedAt: now, StreamFile: "projects/services_api/roles/testing/logs/stream.jsonl"},
+		{ProjectID: "other_proj", Action: "exec", Role: "security", StartedAt: now, StreamFile: "projects/other_proj/roles/security/logs/stream.jsonl"},
 	} {
 		if _, err := db.InsertCall(&c); err != nil {
 			t.Fatalf("InsertCall: %v", err)

@@ -658,7 +658,7 @@ func isPathWithin(absPath, baseDir string) bool {
 // promptDir returns the history directory path (relative to project dir) for an action/role.
 func promptDir(action, role string) string {
 	switch action {
-	case runner.ActionReport, runner.ActionRun:
+	case runner.ActionReport, runner.ActionExec:
 		return filepath.Join("roles", role, "history")
 	default:
 		return filepath.Join("supervisor", "history")
@@ -677,7 +677,7 @@ func resolvePromptFile(projectDir, action, role, streamFile string) string {
 		promptName = "code_management_prompt.md"
 	case runner.ActionVerify:
 		promptName = prompts.CodeVerifyPromptFile
-	case runner.ActionRun:
+	case runner.ActionExec:
 		promptName = "run_prompt.md"
 	default:
 		return ""

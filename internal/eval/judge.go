@@ -57,7 +57,7 @@ func RunJudge(ctx context.Context, r *runner.Runner, env *root.ResolvedEnv, in J
 	ts := time.Now().Format(runner.TimestampFormat)
 	opts := runner.RunOpts{
 		RoleID:     "eval-judge",
-		Action:     runner.ActionRun,
+		Action:     runner.ActionExec,
 		WorkDir:    env.SourceDir,
 		TimeoutMin: timeoutMin,
 		Verbose:    verbose,

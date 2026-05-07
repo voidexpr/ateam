@@ -77,7 +77,7 @@ func TestRunCatIDs(t *testing.T) {
 	now := time.Now()
 	id, err := db.InsertCall(&calldb.Call{
 		ProjectID:  env.ProjectID(),
-		Action:     "run",
+		Action:     "exec",
 		Role:       "testing_basic",
 		StreamFile: streamRelPath,
 		StartedAt:  now.Add(-5 * time.Minute),

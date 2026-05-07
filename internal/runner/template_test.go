@@ -232,13 +232,13 @@ func TestResolveAgentTemplateArgsCodex(t *testing.T) {
 		Args:    []string{"--name", "{{ROLE}}-{{ACTION}}"},
 		Env:     map[string]string{"ROLE": "{{ROLE}}"},
 	}
-	vars := TemplateVars{Role: "testing_basic", Action: "run"}
+	vars := TemplateVars{Role: "testing_basic", Action: "exec"}
 
 	resolved := ResolveAgentTemplateArgs(a, vars)
 	got := resolved.(*agent.CodexAgent)
 
-	if got.Args[1] != "testing_basic-run" {
-		t.Errorf("Args: got %q, want %q", got.Args[1], "testing_basic-run")
+	if got.Args[1] != "testing_basic-exec" {
+		t.Errorf("Args: got %q, want %q", got.Args[1], "testing_basic-exec")
 	}
 	if got.Env["ROLE"] != "testing_basic" {
 		t.Errorf("Env ROLE: got %q, want %q", got.Env["ROLE"], "testing_basic")

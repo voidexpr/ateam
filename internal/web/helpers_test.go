@@ -288,7 +288,7 @@ func TestPromptDir(t *testing.T) {
 		want   string
 	}{
 		{runner.ActionReport, "security", "roles/security/history"},
-		{runner.ActionRun, "testing_basic", "roles/testing_basic/history"},
+		{runner.ActionExec, "testing_basic", "roles/testing_basic/history"},
 		{runner.ActionReview, "supervisor", "supervisor/history"},
 		{runner.ActionCode, "supervisor", "supervisor/history"},
 		{"unknown", "any", "supervisor/history"},
