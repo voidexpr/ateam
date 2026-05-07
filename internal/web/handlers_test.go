@@ -714,3 +714,67 @@ func TestHandlePromptsBadProject(t *testing.T) {
 		t.Errorf("handlePrompts bad project status = %d, want %d", w.Code, http.StatusNotFound)
 	}
 }
+
+// newBrokenDBServer creates a test server whose DB path points to a directory,
+// causing calldb.OpenIfExists to fail with a deterministic error.
+func newBrokenDBServer(t *testing.T) (*Server, *http.ServeMux) {
+	t.Helper()
+	projectDir := t.TempDir()
+	dbPath := filepath.Join(projectDir, "state.sqlite")
+	if err := os.Mkdir(dbPath, 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	s := newTestServer(t, projectDir)
+	return s, newTestMux(s)
+}
+
+func TestHandleOverviewDBError(t *testing.T) {
+	s, mux := newBrokenDBServer(t)
+	_ = s
+	req := httptest.NewRequest("GET", "/p/testproj/", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("handleOverview DB error status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestHandleRunsDBError(t *testing.T) {
+	_, mux := newBrokenDBServer(t)
+	req := httptest.NewRequest("GET", "/p/testproj/runs", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("handleRuns DB error status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestHandleRunDBError(t *testing.T) {
+	_, mux := newBrokenDBServer(t)
+	req := httptest.NewRequest("GET", "/p/testproj/runs/1", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("handleRun DB error status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestHandleRunFileDBError(t *testing.T) {
+	_, mux := newBrokenDBServer(t)
+	req := httptest.NewRequest("GET", "/p/testproj/runs/1/exec", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("handleRunFile DB error status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestHandleCostDBError(t *testing.T) {
+	_, mux := newBrokenDBServer(t)
+	req := httptest.NewRequest("GET", "/p/testproj/cost", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("handleCost DB error status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+}

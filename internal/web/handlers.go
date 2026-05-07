@@ -91,7 +91,12 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	showAll := r.URL.Query().Get("all") == "1"
 	data.ShowAll = showAll
 
-	if db := s.getDB(pe); db != nil {
+	db := s.getDB(pe)
+	if db == nil && pe.dbErr != nil {
+		http.Error(w, fmt.Sprintf("failed to open database: %v", pe.dbErr), http.StatusInternalServerError)
+		return
+	}
+	if db != nil {
 		limit := 30
 		if showAll {
 			limit = 100000
@@ -395,7 +400,12 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := runsPageData{}
-	if db := s.getDB(pe); db != nil {
+	db := s.getDB(pe)
+	if db == nil && pe.dbErr != nil {
+		http.Error(w, fmt.Sprintf("failed to open database: %v", pe.dbErr), http.StatusInternalServerError)
+		return
+	}
+	if db != nil {
 		rows, err := db.RecentRuns(calldb.RecentFilter{Limit: -1})
 		if err != nil {
 			log.Printf("warning: RecentRuns: %v", err)
@@ -434,7 +444,11 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 
 	db := s.getDB(pe)
 	if db == nil {
-		http.NotFound(w, r)
+		if pe.dbErr != nil {
+			http.Error(w, fmt.Sprintf("failed to open database: %v", pe.dbErr), http.StatusInternalServerError)
+		} else {
+			http.NotFound(w, r)
+		}
 		return
 	}
 
@@ -474,7 +488,11 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 
 	db := s.getDB(pe)
 	if db == nil {
-		http.NotFound(w, r)
+		if pe.dbErr != nil {
+			http.Error(w, fmt.Sprintf("failed to open database: %v", pe.dbErr), http.StatusInternalServerError)
+		} else {
+			http.NotFound(w, r)
+		}
 		return
 	}
 
@@ -692,6 +710,10 @@ func (s *Server) handleCost(w http.ResponseWriter, r *http.Request) {
 
 	data := costPageData{}
 	db := s.getDB(pe)
+	if db == nil && pe.dbErr != nil {
+		http.Error(w, fmt.Sprintf("failed to open database: %v", pe.dbErr), http.StatusInternalServerError)
+		return
+	}
 	if db != nil {
 		var err error
 		data.Actions, err = db.CostByAction("")
@@ -949,8 +971,13 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	db := s.getDB(pe)
+	if db == nil && pe.dbErr != nil {
+		http.Error(w, fmt.Sprintf("failed to open database: %v", pe.dbErr), http.StatusInternalServerError)
+		return
+	}
 	var sessions []CodeSession
-	if db := s.getDB(pe); db != nil {
+	if db != nil {
 		sessions = buildSessions(db)
 	}
 
@@ -977,9 +1004,14 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	batch := r.PathValue("batch")
 	data := sessionDetailData{Batch: batch}
 
-	if db := s.getDB(pe); db != nil {
+	sessionDB := s.getDB(pe)
+	if sessionDB == nil && pe.dbErr != nil {
+		http.Error(w, fmt.Sprintf("failed to open database: %v", pe.dbErr), http.StatusInternalServerError)
+		return
+	}
+	if sessionDB != nil {
 		var err error
-		data.Runs, err = db.RecentRuns(calldb.RecentFilter{Batch: batch, Limit: 200})
+		data.Runs, err = sessionDB.RecentRuns(calldb.RecentFilter{Batch: batch, Limit: 200})
 		if err != nil {
 			log.Printf("warning: RecentRuns: %v", err)
 		}
