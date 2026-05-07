@@ -57,3 +57,15 @@ func GetProjectMeta(dir string) (*ProjectMeta, error) {
 
 	return meta, nil
 }
+
+// HeadHash returns the current HEAD commit hash for the repo containing dir.
+// Returns "" if git is unavailable, dir is not in a repo, or the call fails.
+func HeadHash(dir string) string {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}

@@ -18,6 +18,7 @@ import (
 	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/fsclone"
+	"github.com/ateam/internal/gitutil"
 )
 
 // TimestampFormat is kept as an alias for backward compatibility with
@@ -222,16 +223,17 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	agentName := r.Agent.Name()
 	model := agent.NormalizeModel(extractModel(r.Agent))
 	callID, err := r.CallDB.InsertCall(&calldb.Call{
-		ProjectID:  r.ProjectID,
-		Profile:    r.Profile,
-		Agent:      agentName,
-		Container:  r.ContainerType,
-		Action:     opts.Action,
-		Role:       opts.RoleID,
-		Batch:      opts.Batch,
-		Model:      model,
-		PromptHash: hashPrompt(prompt),
-		StartedAt:  startedAt,
+		ProjectID:    r.ProjectID,
+		Profile:      r.Profile,
+		Agent:        agentName,
+		Container:    r.ContainerType,
+		Action:       opts.Action,
+		Role:         opts.RoleID,
+		Batch:        opts.Batch,
+		Model:        model,
+		PromptHash:   hashPrompt(prompt),
+		StartedAt:    startedAt,
+		GitStartHash: gitutil.HeadHash(effectiveWorkDir(opts)),
 	})
 	if err != nil {
 		return failPreInsert(fmt.Errorf("call tracking insert failed: %w", err))
@@ -780,6 +782,7 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 			Model:             resultModel,
 			PeakContextTokens: summary.PeakContextTokens,
 			ContextWindow:     summary.ContextWindow,
+			GitEndHash:        gitutil.HeadHash(effectiveWorkDir(opts)),
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: call tracking update failed: %v\n", err)
 		}
