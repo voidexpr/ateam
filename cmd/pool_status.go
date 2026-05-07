@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ateam/internal/display"
+	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 )
 
@@ -68,7 +69,7 @@ func progressColumnsHelp(unit string) string {
 // run, relative to cwd. New layout: the per-exec_id dir. Legacy layout: the
 // timestamp+action prefix (with a "*" glob hint, since multiple files share it).
 func streamFilePrefix(streamPath, cwd string) string {
-	if strings.HasSuffix(streamPath, "_stream.jsonl") {
+	if root.IsLegacyStreamFile(streamPath) {
 		return relPath(cwd, strings.TrimSuffix(streamPath, "_stream.jsonl")) + "*"
 	}
 	return relPath(cwd, filepath.Dir(streamPath))

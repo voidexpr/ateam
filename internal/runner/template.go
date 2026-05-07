@@ -3,6 +3,7 @@ package runner
 import (
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -142,15 +143,15 @@ func BuildTemplateVars(r *Runner, opts RunOpts, startedAt time.Time, callID int6
 }
 
 // runtimeDirFor returns the per-exec_id agent-writable output directory.
-// Mirrors root.ResolvedEnv.RuntimeDir but lives here to avoid a package
-// cycle (root imports runner via cmd, not the reverse).
+// Lives here (rather than only on root.ResolvedEnv) so the runner can build
+// paths from just ProjectDir without taking a dependency on the root package.
 func runtimeDirFor(projectDir string, execID int64) string {
-	return filepath.Join(projectDir, "runtime", fmt.Sprintf("%d", execID))
+	return filepath.Join(projectDir, "runtime", strconv.FormatInt(execID, 10))
 }
 
 // logsDirFor returns the per-exec_id forensic log directory.
 func logsDirFor(projectDir string, execID int64) string {
-	return filepath.Join(projectDir, "logs", fmt.Sprintf("%d", execID))
+	return filepath.Join(projectDir, "logs", strconv.FormatInt(execID, 10))
 }
 
 // PrimaryOutputName maps an OutputKind to the canonical filename the agent

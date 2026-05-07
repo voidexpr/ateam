@@ -159,23 +159,12 @@ func findLegacyPrompt(projectDir, role, action, startedAt string) string {
 	if err != nil {
 		return ""
 	}
-	t = t.Local()
 	histDir := legacyHistoryDir(projectDir, role, action)
-	if histDir == "" {
-		return ""
-	}
 	suffix := legacyPromptSuffix(action)
-	if suffix == "" {
+	if histDir == "" || suffix == "" {
 		return ""
 	}
-	for _, off := range []time.Duration{0, time.Second, -time.Second, 2 * time.Second, -2 * time.Second, 5 * time.Second, -5 * time.Second} {
-		ts := t.Add(off).Format("2006-01-02_15-04-05")
-		candidate := filepath.Join(histDir, ts+"."+suffix)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-	}
-	return ""
+	return FindHistoryFileWithSkew(histDir, t.Local(), suffix)
 }
 
 func legacyHistoryDir(projectDir, role, action string) string {

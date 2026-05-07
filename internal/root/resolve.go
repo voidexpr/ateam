@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/gitutil"
@@ -384,6 +385,43 @@ func ResolveStreamPath(projectDir, orgDir, sf string) string {
 	}
 	return sf
 }
+
+// IsLegacyStreamFile reports whether streamPath uses the pre-exec_id layout
+// (`<TS>_<ACTION>_stream.jsonl` next to its sibling _exec.md / _stderr.log /
+// _settings.json files). Callers branch on this to decide whether to walk a
+// shared parent directory (new layout) or strip the suffix and append per-kind
+// suffixes (legacy layout).
+func IsLegacyStreamFile(streamPath string) bool {
+	return strings.HasSuffix(streamPath, "_stream.jsonl")
+}
+
+// HistoryTimestampSkew is the ±window FindHistoryFileWithSkew searches for
+// archived files whose write timestamp may have drifted from the run's
+// started_at by a second or two.
+var HistoryTimestampSkew = []time.Duration{
+	0,
+	time.Second, -time.Second,
+	2 * time.Second, -2 * time.Second,
+	5 * time.Second, -5 * time.Second,
+}
+
+// FindHistoryFileWithSkew looks for `<formattedTS>.<suffix>` in dir, trying
+// each offset in HistoryTimestampSkew. Returns the absolute path of the first
+// match, or "" if nothing is found.
+func FindHistoryFileWithSkew(dir string, ts time.Time, suffix string) string {
+	for _, off := range HistoryTimestampSkew {
+		candidate := filepath.Join(dir, ts.Add(off).Format(historyTimestampLayout)+"."+suffix)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
+}
+
+// historyTimestampLayout matches the format used by archivePrompt /
+// prepareOutputFile in the legacy layout. Kept as a package-private constant
+// to avoid pulling internal/display into root.
+const historyTimestampLayout = "2006-01-02_15-04-05"
 
 // resolvePath resolves rel relative to base.
 // If rel is absolute, it is returned as-is.

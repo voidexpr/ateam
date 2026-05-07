@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -736,14 +737,14 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 		appendStderrSummary(summary.StderrFilePath, *summary)
 		// Even on failure, record what was found in runtime/ so the trace is
 		// complete (files are not promoted, just listed).
-		copyEntries = listRuntimeForReport(runtimeDir)
+		copyEntries = r.listRuntimeForReport(runtimeDir)
 	}
 
 	// Re-render cmd.md with finalized run details and the file copy log.
+	// EndedAt non-zero is what flips writeCmdFile from "(pending)" to concrete values.
 	cmdInfo.Status = summaryStatus(*summary)
 	cmdInfo.EndedAt = summary.EndedAt
 	cmdInfo.ExitCode = summary.ExitCode
-	cmdInfo.HasResult = true
 	cmdInfo.FileCopy = copyEntries
 	if cmdInfo.Model == "" {
 		cmdInfo.Model = resolveExecModel(resultEv, r.Agent)
@@ -978,12 +979,12 @@ type fileCopyEntry struct {
 }
 
 // cmdFileInfo bundles the metadata recorded into logs/<exec_id>/cmd.md.
-// Written twice: once before the run starts (Status="(pending)"), then
-// re-rendered at finalize time with run-result fields and the file copy log.
+// Written twice: once before the run starts (EndedAt zero → renders as
+// "(pending)"), then re-rendered at finalize time with run-result fields
+// and the file copy log.
 type cmdFileInfo struct {
 	StartedAt     time.Time
-	EndedAt       time.Time
-	HasResult     bool // true after the run finishes; toggles "(pending)" vs concrete fields
+	EndedAt       time.Time // zero before the run finishes
 	ExecID        int64
 	Action        string
 	Role          string
@@ -1026,20 +1027,20 @@ func writeCmdFile(path string, info cmdFileInfo) {
 		fmt.Fprintf(&b, "\n## agent definition\n```hcl\n%s\n```\n", strings.TrimRight(info.AgentDef, "\n"))
 	}
 
-	// # Run details — start/end/model/status (two-pass)
+	// # Run details — start/end/model/status (two-pass; EndedAt zero on first write)
+	hasResult := !info.EndedAt.IsZero()
+	endedAt, exitCode, status := "(pending)", "(pending)", "(pending)"
+	if hasResult {
+		endedAt = info.EndedAt.Format(time.RFC3339)
+		exitCode = strconv.Itoa(info.ExitCode)
+		status = info.Status
+	}
 	fmt.Fprintf(&b, "\n# Run details\n")
 	fmt.Fprintf(&b, "* Started At: %s\n", info.StartedAt.Format(time.RFC3339))
-	if info.HasResult {
-		fmt.Fprintf(&b, "* Ended At: %s\n", info.EndedAt.Format(time.RFC3339))
-		fmt.Fprintf(&b, "* Model: %s\n", info.Model)
-		fmt.Fprintf(&b, "* Exit Code: %d\n", info.ExitCode)
-		fmt.Fprintf(&b, "* Status: %s\n", info.Status)
-	} else {
-		fmt.Fprintf(&b, "* Ended At: (pending)\n")
-		fmt.Fprintf(&b, "* Model: %s\n", info.Model)
-		fmt.Fprintf(&b, "* Exit Code: (pending)\n")
-		fmt.Fprintf(&b, "* Status: (pending)\n")
-	}
+	fmt.Fprintf(&b, "* Ended At: %s\n", endedAt)
+	fmt.Fprintf(&b, "* Model: %s\n", info.Model)
+	fmt.Fprintf(&b, "* Exit Code: %s\n", exitCode)
+	fmt.Fprintf(&b, "* Status: %s\n", status)
 
 	// # Command — invocation context
 	fmt.Fprintf(&b, "\n# Command\n")
@@ -1097,7 +1098,7 @@ func writeCmdFile(path string, info cmdFileInfo) {
 		fmt.Fprintf(&b, "\n# Settings\n```json\n%s\n```\n", string(info.SettingsJSON))
 	}
 
-	if info.HasResult {
+	if hasResult {
 		fmt.Fprintf(&b, "\n# Files Copy\n")
 		if len(info.FileCopy) == 0 {
 			fmt.Fprintf(&b, "_(no files in runtime/%d)_\n", info.ExecID)
@@ -1184,18 +1185,18 @@ func (r *Runner) promoteRuntimeFiles(runtimeDir, destDir, outputKind string) ([]
 
 // listRuntimeForReport mirrors promoteRuntimeFiles but does not copy; used on
 // the failure path so cmd.md still shows what landed in runtime/<exec_id>/.
-func listRuntimeForReport(runtimeDir string) []fileCopyEntry {
-	var entries []fileCopyEntry
+func (r *Runner) listRuntimeForReport(runtimeDir string) []fileCopyEntry {
 	dir, err := os.ReadDir(runtimeDir)
 	if err != nil {
 		return nil
 	}
+	var entries []fileCopyEntry
 	for _, e := range dir {
 		if e.IsDir() {
 			continue
 		}
 		entries = append(entries, fileCopyEntry{
-			Source: filepath.Join(filepath.Base(filepath.Dir(runtimeDir)), filepath.Base(runtimeDir), e.Name()),
+			Source: relToProject(r.ProjectDir, filepath.Join(runtimeDir, e.Name())),
 			Note:   "SKIPPED (run failed; not promoted)",
 		})
 	}

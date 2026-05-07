@@ -142,7 +142,7 @@ func resolveRunFiles(projectDir, orgDir string, row calldb.RecentRow) runFiles {
 	if _, err := os.Stat(absStream); err == nil {
 		rf.HasStream = true
 	}
-	if strings.HasSuffix(absStream, "_stream.jsonl") {
+	if root.IsLegacyStreamFile(absStream) {
 		// Legacy layout: prefix-based siblings, prompt in roles/<id>/history.
 		prefix := strings.TrimSuffix(absStream, "_stream.jsonl")
 		if _, err := os.Stat(prefix + "_exec.md"); err == nil {
@@ -486,7 +486,7 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 
 	fileType := r.PathValue("file")
 	absStream := root.ResolveStreamPath(pe.ProjectDir, pe.OrgDir, run.StreamFile)
-	legacy := strings.HasSuffix(absStream, "_stream.jsonl")
+	legacy := root.IsLegacyStreamFile(absStream)
 	logDir := filepath.Dir(absStream)
 	var absPath, title string
 
@@ -665,29 +665,15 @@ func resolveHistoryFile(projectDir, action, role, streamFile, targetName string)
 	if len(base) < 19 {
 		return ""
 	}
-	ts := base[:19]
-
-	exact := ts + "." + targetName
-	if _, err := os.Stat(filepath.Join(histDir, exact)); err == nil {
-		return exact
-	}
-
-	t, err := time.Parse(runner.TimestampFormat, ts)
+	t, err := time.Parse(runner.TimestampFormat, base[:19])
 	if err != nil {
 		return ""
 	}
-	for _, offset := range []time.Duration{
-		time.Second, -time.Second,
-		2 * time.Second, -2 * time.Second,
-		5 * time.Second, -5 * time.Second,
-	} {
-		candidate := t.Add(offset).Format(runner.TimestampFormat) + "." + targetName
-		if _, err := os.Stat(filepath.Join(histDir, candidate)); err == nil {
-			return candidate
-		}
+	hit := root.FindHistoryFileWithSkew(histDir, t, targetName)
+	if hit == "" {
+		return ""
 	}
-
-	return ""
+	return filepath.Base(hit)
 }
 
 type costPageData struct {

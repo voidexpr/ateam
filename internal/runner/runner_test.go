@@ -398,7 +398,6 @@ func TestWriteCmdFileIncludesRunDetailsAndFilesCopy(t *testing.T) {
 	writeCmdFile(path, cmdFileInfo{
 		StartedAt:     time.Date(2026, 5, 2, 9, 8, 4, 0, time.UTC),
 		EndedAt:       time.Date(2026, 5, 2, 9, 8, 30, 0, time.UTC),
-		HasResult:     true,
 		ExecID:        191,
 		Agent:         "claude",
 		AgentDef:      "agent \"claude\" {}\n",

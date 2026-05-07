@@ -198,7 +198,7 @@ func extractSessionID(path string) (string, error) {
 // both the new layout (logs/<exec_id>/{stream.jsonl, cmd.md}) and the legacy
 // prefix layout (<dir>/<TS>_<ACTION>_{stream.jsonl, exec.md}).
 func cmdMDPath(streamPath string) string {
-	if strings.HasSuffix(streamPath, "_stream.jsonl") {
+	if root.IsLegacyStreamFile(streamPath) {
 		return strings.TrimSuffix(streamPath, "_stream.jsonl") + "_exec.md"
 	}
 	return filepath.Join(filepath.Dir(streamPath), "cmd.md")
