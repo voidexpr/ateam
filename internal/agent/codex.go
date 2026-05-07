@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -138,9 +139,6 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 
 		case "thinking":
 			te := ev.(*CodexTextEvent)
-			if te.Text == "" {
-				continue
-			}
 			ch <- StreamEvent{Type: "thinking", Text: te.Text}
 
 		case "tool_use":
@@ -233,11 +231,12 @@ type CodexSystemEvent struct {
 //
 // RawJSON is the full original event bytes — used by the verbose formatter
 // to show the entire payload (e.g. an apply_patch diff) rather than the
-// one-line ToolInput summary.
+// one-line ToolInput summary. Holds an independent copy of the line bytes
+// so it survives the scanner's buffer reuse; callers must not mutate it.
 type CodexToolUseEvent struct {
 	ToolName  string
 	ToolInput string
-	RawJSON   []byte
+	RawJSON   json.RawMessage
 }
 
 // CodexTextEvent represents an assistant text chunk in Codex JSONL output.
@@ -295,9 +294,15 @@ func ParseCodexLine(line []byte) (typ string, ev any, err error) {
 		return "", nil, nil
 	}
 
-	// Copy the line bytes so tool_use events can outlive the scanner
-	// buffer (verbose formatter renders RawJSON later).
-	rawLine := append([]byte(nil), line...)
+	// toolUse builds a tool_use event with an independent copy of the line
+	// (the scanner buffer is reused on the next read).
+	toolUse := func(name, input string) (string, any, error) {
+		return "tool_use", &CodexToolUseEvent{
+			ToolName:  name,
+			ToolInput: input,
+			RawJSON:   bytes.Clone(line),
+		}, nil
+	}
 
 	switch eventType {
 	case "turn.started":
@@ -312,18 +317,19 @@ func ParseCodexLine(line []byte) (typ string, ev any, err error) {
 
 	case "agent_reasoning_delta":
 		// Deltas drive the stall-watchdog heartbeat. The matching final
-		// agent_reasoning event carries the same concatenated text and is
-		// dropped below to avoid double-emit (duplicate thinking lines on
-		// replay, duplicate progress on live runs).
+		// agent_reasoning event has the same concatenated text — dropped
+		// below to avoid double-emit on replay and duplicate progress live.
 		text := firstStringField(raw, "delta", "text", "reasoning")
+		if text == "" {
+			return "", nil, nil
+		}
 		return "thinking", &CodexTextEvent{Text: text}, nil
 
 	case "agent_reasoning":
-		// Aggregate of preceding agent_reasoning_delta events — drop.
 		return "", nil, nil
 
 	case "item.started":
-		return parseCodexItemStarted(raw, rawLine)
+		return parseCodexItemStarted(raw, toolUse)
 
 	case "item.completed":
 		return parseCodexItemCompleted(raw)
@@ -332,17 +338,6 @@ func ParseCodexLine(line []byte) (typ string, ev any, err error) {
 		// Standalone command_execution events (output/completion updates).
 		// Not a new tool call — skip.
 		return "", nil, nil
-
-	case "exec_command_begin", "web_search_begin", "mcp_tool_call_begin",
-		"custom_tool_call_begin", "patch_apply_begin", "apply_patch_begin":
-
-		toolName := strings.TrimSuffix(eventType, "_begin")
-		toolInput := codexToolDetail(raw)
-		return "tool_use", &CodexToolUseEvent{
-			ToolName:  toolName,
-			ToolInput: toolInput,
-			RawJSON:   rawLine,
-		}, nil
 
 	case "agent_message_delta":
 		var delta string
@@ -372,15 +367,11 @@ func ParseCodexLine(line []byte) (typ string, ev any, err error) {
 		return "error", &CodexErrorEvent{Message: msg}, nil
 
 	default:
-		// Match any *_begin event as a tool call (forward-compatible).
+		// Any *_begin event is a tool call — forward-compatible with
+		// future codex tool types (covers exec_command, web_search,
+		// mcp_tool_call, custom_tool_call, patch_apply, apply_patch).
 		if strings.HasSuffix(eventType, "_begin") {
-			toolName := strings.TrimSuffix(eventType, "_begin")
-			toolInput := codexToolDetail(raw)
-			return "tool_use", &CodexToolUseEvent{
-				ToolName:  toolName,
-				ToolInput: toolInput,
-				RawJSON:   rawLine,
-			}, nil
+			return toolUse(strings.TrimSuffix(eventType, "_begin"), codexToolDetail(raw))
 		}
 		return "", nil, nil
 	}
@@ -388,9 +379,8 @@ func ParseCodexLine(line []byte) (typ string, ev any, err error) {
 
 // parseCodexItemStarted handles item.started events. The item.type determines
 // whether this is a tool call (command_execution) or something else.
-// rawLine is the original event bytes, propagated to CodexToolUseEvent.RawJSON
-// for verbose rendering.
-func parseCodexItemStarted(raw map[string]json.RawMessage, rawLine []byte) (string, any, error) {
+// toolUse builds the resulting event with the original line bytes attached.
+func parseCodexItemStarted(raw map[string]json.RawMessage, toolUse func(name, input string) (string, any, error)) (string, any, error) {
 	itemRaw, ok := raw["item"]
 	if !ok {
 		return "", nil, nil
@@ -406,27 +396,15 @@ func parseCodexItemStarted(raw map[string]json.RawMessage, rawLine []byte) (stri
 	}
 	switch item.Type {
 	case "command_execution":
-		return "tool_use", &CodexToolUseEvent{
-			ToolName:  "command_execution",
-			ToolInput: item.Command,
-			RawJSON:   rawLine,
-		}, nil
+		return toolUse("command_execution", item.Command)
 	case "web_search":
-		return "tool_use", &CodexToolUseEvent{
-			ToolName:  "web_search",
-			ToolInput: item.Query,
-			RawJSON:   rawLine,
-		}, nil
+		return toolUse("web_search", item.Query)
 	case "mcp_tool_call", "custom_tool_call", "patch_apply", "apply_patch":
 		detail := item.Name
 		if detail == "" {
 			detail = item.Command
 		}
-		return "tool_use", &CodexToolUseEvent{
-			ToolName:  item.Type,
-			ToolInput: detail,
-			RawJSON:   rawLine,
-		}, nil
+		return toolUse(item.Type, detail)
 	}
 	return "", nil, nil
 }

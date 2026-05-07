@@ -302,12 +302,12 @@ func verboseToolInput(e *ToolCallLine) string {
 		}
 		return ""
 	}
-	if e.Codex != nil && len(e.Codex.RawJSON) > 0 {
+	if len(e.CodexRawJSON) > 0 {
 		var pretty bytes.Buffer
-		if err := json.Indent(&pretty, e.Codex.RawJSON, "", "  "); err == nil {
+		if err := json.Indent(&pretty, e.CodexRawJSON, "", "  "); err == nil {
 			return pretty.String()
 		}
-		return strings.TrimSpace(string(e.Codex.RawJSON))
+		return strings.TrimSpace(string(e.CodexRawJSON))
 	}
 	return strings.TrimSpace(e.Detail)
 }

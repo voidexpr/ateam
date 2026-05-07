@@ -26,23 +26,18 @@ type UserLine struct{}
 type MessageUsage = streamutil.AssistantUsage
 
 type ToolCallLine struct {
-	Name      string
-	Detail    string
-	Claude    *ToolCallClaudeExt
-	Codex     *ToolCallCodexExt
-	ToolUseID string        // claude tool_use block id (toolu_…); used to pair with results
-	Usage     *MessageUsage // per-message usage from the assistant event; non-nil only on the last block
+	Name   string
+	Detail string
+	Claude *ToolCallClaudeExt
+	// CodexRawJSON is the original codex begin-event payload, surfaced
+	// verbatim by the verbose formatter (apply_patch diffs, mcp arguments).
+	CodexRawJSON json.RawMessage
+	ToolUseID    string        // claude tool_use block id (toolu_…); used to pair with results
+	Usage        *MessageUsage // per-message usage from the assistant event; non-nil only on the last block
 }
 
 type ToolCallClaudeExt struct {
 	Input json.RawMessage
-}
-
-// ToolCallCodexExt carries the original codex begin-event JSON so the
-// verbose formatter can render the full payload (apply_patch diffs, mcp
-// arguments) instead of the one-line Detail summary.
-type ToolCallCodexExt struct {
-	RawJSON []byte
 }
 
 type TextLine struct {
@@ -282,14 +277,11 @@ func parseCodexDisplay(line []byte) ([]DisplayEvent, error) {
 
 	case "tool_use":
 		te := ev.(*agent.CodexToolUseEvent)
-		tc := &ToolCallLine{
-			Name:   te.ToolName,
-			Detail: te.ToolInput,
-		}
-		if len(te.RawJSON) > 0 {
-			tc.Codex = &ToolCallCodexExt{RawJSON: te.RawJSON}
-		}
-		return []DisplayEvent{tc}, nil
+		return []DisplayEvent{&ToolCallLine{
+			Name:         te.ToolName,
+			Detail:       te.ToolInput,
+			CodexRawJSON: te.RawJSON,
+		}}, nil
 
 	case "assistant", "item_completed":
 		te := ev.(*agent.CodexTextEvent)
@@ -307,8 +299,6 @@ func parseCodexDisplay(line []byte) ([]DisplayEvent, error) {
 
 	case "result":
 		re := ev.(*agent.CodexResultEvent)
-		// Turns=1 because `codex exec --json` is single-turn by design;
-		// no per-turn count exists in the stream (mirrors codex.go).
 		return []DisplayEvent{&ResultLine{
 			DurationMS:      re.DurationMS,
 			InputTokens:     re.InputTokens,
