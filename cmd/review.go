@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +27,8 @@ var (
 	reviewVerbose         bool
 	reviewForce           bool
 	reviewRoles           []string
+	reviewAll             bool
+	reviewMaxAge          string
 	reviewDockerAutoSetup bool
 	reviewContainerName   string
 )
@@ -41,7 +45,9 @@ type ReviewOptions struct {
 	Agent           string
 	Verbose         bool
 	Force           bool
-	Roles           []string
+	Roles           []string      // restrict review to these roles' reports
+	IncludeDisabled bool          // include reports from roles disabled in config.toml
+	MaxAge          time.Duration // freshness window; zero = no filter
 	DockerAutoSetup bool
 	ContainerName   string
 }
@@ -59,6 +65,10 @@ Example:
   ateam review --extra-prompt "Focus on security findings"
   ateam review --prompt @custom_review.md`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		maxAge, err := parseMaxAge(reviewMaxAge)
+		if err != nil {
+			return err
+		}
 		return runReview(ReviewOptions{
 			ExtraPrompt:     reviewExtraPrompt,
 			CustomPrompt:    reviewCustomPrompt,
@@ -71,10 +81,41 @@ Example:
 			Verbose:         reviewVerbose,
 			Force:           reviewForce,
 			Roles:           reviewRoles,
+			IncludeDisabled: reviewAll,
+			MaxAge:          maxAge,
 			DockerAutoSetup: reviewDockerAutoSetup,
 			ContainerName:   reviewContainerName,
 		})
 	},
+}
+
+// parseMaxAge accepts the same set as time.ParseDuration plus "Nd" (treated
+// as N*24h). Empty string returns 0 (no filter). Anything mixing days with
+// other units is rejected to keep semantics obvious.
+func parseMaxAge(s string) (time.Duration, error) {
+	if s == "" {
+		return 0, nil
+	}
+	if strings.HasSuffix(s, "d") {
+		// Reject "1d2h" — too easy to misread. Stick to plain "Nd".
+		body := strings.TrimSuffix(s, "d")
+		if body == "" || strings.ContainsAny(body, "dhms") {
+			return 0, fmt.Errorf("invalid --max-age %q: use plain Nd, or a stdlib duration like 2h30m", s)
+		}
+		days, err := strconv.Atoi(body)
+		if err != nil || days < 0 {
+			return 0, fmt.Errorf("invalid --max-age %q: %w", s, err)
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid --max-age %q: %w", s, err)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("invalid --max-age %q: must be positive", s)
+	}
+	return d, nil
 }
 
 func init() {
@@ -83,7 +124,9 @@ func init() {
 	reviewCmd.Flags().IntVar(&reviewTimeout, "timeout", 0, "timeout in minutes (overrides config)")
 	reviewCmd.Flags().BoolVar(&reviewPrint, "print", false, "print review to stdout after completion")
 	reviewCmd.Flags().BoolVar(&reviewDryRun, "dry-run", false, "print the computed prompt and list reports without running")
-	reviewCmd.Flags().StringSliceVar(&reviewRoles, "roles", nil, "limit coding tasks to these roles (reviews all reports but only assigns code tasks to listed roles)")
+	reviewCmd.Flags().StringSliceVar(&reviewRoles, "roles", nil, "limit review to these roles' reports (default: all enabled roles)")
+	reviewCmd.Flags().BoolVar(&reviewAll, "all", false, "include reports from roles disabled in config.toml")
+	reviewCmd.Flags().StringVar(&reviewMaxAge, "max-age", "", "drop reports older than this (e.g. 2h, 30m, 1d)")
 	addCheaperModelFlag(reviewCmd, &reviewCheaperModel)
 	addProfileFlags(reviewCmd, &reviewProfile, &reviewAgent)
 	addVerboseFlag(reviewCmd, &reviewVerbose)
@@ -114,17 +157,20 @@ func runReview(opts ReviewOptions) error {
 		}
 	}
 
-	pinfo := env.NewProjectInfoParams("the supervisor", "review")
-	prompt, err := prompts.AssembleReviewPrompt(env.OrgDir, env.ProjectDir, pinfo, extraPrompt, customPrompt)
-	if err != nil {
-		return err
+	selector := prompts.ReviewSelector{
+		Roles:           opts.Roles,
+		IncludeDisabled: opts.IncludeDisabled,
+		MaxAge:          opts.MaxAge,
 	}
 
-	if len(opts.Roles) > 0 {
-		prompt += "\n\n---\n\n# Role Constraint\n\n" +
-			"Assign coding tasks only to the following roles: " + strings.Join(opts.Roles, ", ") + ". " +
-			"Review and assess all reports, but mark coding tasks for unlisted roles as deferred. " +
-			"For the listed roles, include tasks you consider worthwhile even if not strictly urgent."
+	pinfo := env.NewProjectInfoParams("the supervisor", "review")
+	prompt, err := prompts.AssembleReviewPrompt(env.OrgDir, env.ProjectDir, pinfo, extraPrompt, customPrompt, selector, env.Config.Roles)
+	if err != nil {
+		var empty *prompts.ReviewEmptyError
+		if errors.As(err, &empty) {
+			return formatReviewEmpty(empty.Funnel)
+		}
+		return err
 	}
 
 	timeout := env.Config.Review.EffectiveTimeout(opts.Timeout)
@@ -193,6 +239,44 @@ func runReview(opts ReviewOptions) error {
 	}
 
 	return nil
+}
+
+// formatReviewEmpty turns a ReviewFunnel into a stderr-friendly explanation
+// of which filters reduced the report set to zero.
+func formatReviewEmpty(f prompts.ReviewFunnel) error {
+	var b strings.Builder
+	b.WriteString("no reports left after filters\n")
+	fmt.Fprintf(&b, "  available reports:   %d\n", f.Available)
+	if f.HadEnabled {
+		fmt.Fprintf(&b, "  enabled roles:       %d\n", f.Enabled)
+	}
+	if f.HadRoles() {
+		fmt.Fprintf(&b, "  matching --roles:    %d  (%s)\n", f.RolesMatch, strings.Join(f.UsedRoles, ", "))
+	}
+	if f.HadMaxAge() {
+		fmt.Fprintf(&b, "  fresher than %s:  %d\n", f.MaxAge, f.FreshEnough)
+	}
+	var hints []string
+	if f.HadMaxAge() {
+		hints = append(hints, "widen --max-age")
+	}
+	if f.HadRoles() {
+		hints = append(hints, "drop --roles")
+	}
+	if f.HadEnabled {
+		hints = append(hints, "pass --all to include disabled roles")
+	}
+	if len(hints) > 0 {
+		// Capitalize the first hint's leading rune so the line reads as a sentence.
+		first := hints[0]
+		b.WriteString(strings.ToUpper(first[:1]) + first[1:])
+		for _, h := range hints[1:] {
+			b.WriteString(", ")
+			b.WriteString(h)
+		}
+		b.WriteString(".")
+	}
+	return errors.New(b.String())
 }
 
 func printReviewDryRun(env *root.ResolvedEnv, prompt string) error {

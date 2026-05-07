@@ -227,7 +227,10 @@ func runReviewStep(ctx context.Context, v Variant, timeoutMin int, verbose bool)
 	env := v.Env
 
 	pinfo := env.NewProjectInfoParams("the supervisor", "eval-review")
-	prompt, err := prompts.AssembleReviewPrompt(env.OrgDir, env.ProjectDir, pinfo, "", v.ReviewPromptText)
+	// Eval reviews compare every variant's full set of reports — bypass the
+	// enabled-roles filter that interactive review uses by default.
+	selector := prompts.ReviewSelector{IncludeDisabled: true}
+	prompt, err := prompts.AssembleReviewPrompt(env.OrgDir, env.ProjectDir, pinfo, "", v.ReviewPromptText, selector, nil)
 	if err != nil {
 		return nil, fmt.Errorf("assemble review prompt: %w", err)
 	}

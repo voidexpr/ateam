@@ -154,7 +154,7 @@ func runPromptSupervisor() error {
 	var assembled string
 	switch promptAction {
 	case runner.ActionReview:
-		assembled, err = prompts.AssembleReviewPrompt(env.OrgDir, env.ProjectDir, pinfo, extraPrompt, "")
+		assembled, err = prompts.AssembleReviewPrompt(env.OrgDir, env.ProjectDir, pinfo, extraPrompt, "", prompts.ReviewSelector{}, env.Config.Roles)
 	case runner.ActionCode:
 		reviewContent, readErr := os.ReadFile(env.ReviewPath())
 		if readErr != nil {

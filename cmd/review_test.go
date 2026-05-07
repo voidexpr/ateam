@@ -5,9 +5,43 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ateam/internal/root"
 )
+
+func TestParseMaxAge(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"", 0, false},
+		{"2h", 2 * time.Hour, false},
+		{"30m", 30 * time.Minute, false},
+		{"90s", 90 * time.Second, false},
+		{"1d", 24 * time.Hour, false},
+		{"7d", 7 * 24 * time.Hour, false},
+		// Mixed units with d are rejected to keep semantics obvious.
+		{"1d2h", 0, true},
+		// Plain garbage.
+		{"abc", 0, true},
+		{"-1h", 0, true},
+		// Plain "d" with no number is invalid.
+		{"d", 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			got, err := parseMaxAge(tc.in)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("parseMaxAge(%q) err = %v, wantErr %v", tc.in, err, tc.wantErr)
+			}
+			if got != tc.want {
+				t.Errorf("parseMaxAge(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
 
 func setupReviewFixture(t *testing.T) (orgDir, projPath, projDir string) {
 	t.Helper()

@@ -147,6 +147,93 @@ func TestRerunFailedDryRunSelectsOnlyFailed(t *testing.T) {
 	}
 }
 
+// TestReportRoleSelectionModes covers the two ways report picks roles:
+//   - empty --roles            → enabled-only (always; --all does NOT apply to report)
+//   - explicit --roles A,B     → those exact roles regardless of enabled state
+func TestReportRoleSelectionModes(t *testing.T) {
+	base := t.TempDir()
+	orgDir, err := root.InstallOrg(base)
+	if err != nil {
+		t.Fatalf("InstallOrg: %v", err)
+	}
+	projPath := filepath.Join(base, "myproj")
+	if err := os.MkdirAll(projPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := root.InitProject(projPath, orgDir, root.InitProjectOpts{
+		Name: "myproj",
+		// security ON; testing_basic OFF (per InitProject's "everything not in
+		// EnabledRoles → off" semantics for known roles).
+		EnabledRoles: []string{"security"},
+	}); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+
+	savedOrg := orgFlag
+	defer func() { orgFlag = savedOrg }()
+	orgFlag = filepath.Dir(orgDir)
+
+	cases := []struct {
+		name     string
+		opts     ReportOptions
+		mustHave []string
+		mustOmit []string
+	}{
+		{
+			name:     "default → enabled-only",
+			opts:     ReportOptions{DryRun: true, Profile: "test"},
+			mustHave: []string{"security"},
+			mustOmit: []string{"testing_basic"},
+		},
+		{
+			name:     "explicit --roles overrides enabled",
+			opts:     ReportOptions{DryRun: true, Profile: "test", Roles: []string{"testing_basic"}},
+			mustHave: []string{"testing_basic"},
+			mustOmit: []string{"security"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var runErr error
+			out := captureStdout(t, func() {
+				withChdir(t, projPath, func() {
+					runErr = runReport(tc.opts)
+				})
+			})
+			if runErr != nil {
+				t.Fatalf("runReport: %v", runErr)
+			}
+			// Dry-run output prints "Roles: a, b, c" — find that line.
+			rolesLine := ""
+			for _, line := range strings.Split(out, "\n") {
+				if strings.HasPrefix(line, "Roles: ") {
+					rolesLine = line
+					break
+				}
+			}
+			if rolesLine == "" {
+				t.Fatalf("no 'Roles:' header in output:\n%s", out)
+			}
+			for _, want := range tc.mustHave {
+				if !strings.Contains(rolesLine, want) {
+					t.Errorf("expected %q in %q", want, rolesLine)
+				}
+			}
+			for _, omit := range tc.mustOmit {
+				// Match the role as a token, not a substring (testing_basic
+				// vs testing_full both contain "testing").
+				tokens := strings.Split(strings.TrimPrefix(rolesLine, "Roles: "), ", ")
+				for _, tok := range tokens {
+					if tok == omit {
+						t.Errorf("%q should not appear in %q", omit, rolesLine)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestRerunFailedMutuallyExclusiveWithRoles(t *testing.T) {
 	base := t.TempDir()
 	orgDir, err := root.InstallOrg(base)

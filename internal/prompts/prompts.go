@@ -237,14 +237,139 @@ func DiscoverReports(projectDir string) ([]RoleReport, error) {
 	return reports, nil
 }
 
+// ReviewSelector chooses which role reports a supervisor review actually sees.
+// All filters are applied in order and produce a ReviewFunnel for diagnostics.
+//
+//  1. Available           — DiscoverReports' result (every report.md on disk).
+//  2. Enabled filter      — drop reports whose role is not RoleEnabled (skipped if IncludeDisabled).
+//  3. Roles intersection  — keep only reports whose role appears in Roles (if non-empty).
+//  4. Freshness           — drop reports older than now - MaxAge (skipped if MaxAge == 0).
+type ReviewSelector struct {
+	Roles           []string      // empty = no role filter
+	IncludeDisabled bool          // true = skip the enabled-only step
+	MaxAge          time.Duration // zero = no freshness filter
+}
+
+// ReviewFunnel records the count of reports surviving each filter step. Used
+// to build a clear "no reports left" error when filters eliminate everything.
+//
+// Enabled is only populated when the enabled-only step actually ran (i.e.
+// !IncludeDisabled) — HadEnabled signals that. Whether the roles / max-age
+// steps ran is derivable from UsedRoles / MaxAge so they aren't stored.
+type ReviewFunnel struct {
+	Available   int
+	Enabled     int // populated only when HadEnabled
+	RolesMatch  int
+	FreshEnough int
+	HadEnabled  bool          // true when the enabled-only step ran
+	MaxAge      time.Duration // zero when no freshness filter applied
+	UsedRoles   []string      // copy of selector.Roles; empty when no --roles narrowing
+}
+
+// HadRoles reports whether a non-empty --roles list narrowed the set.
+func (f ReviewFunnel) HadRoles() bool { return len(f.UsedRoles) > 0 }
+
+// HadMaxAge reports whether a non-zero --max-age window was applied.
+func (f ReviewFunnel) HadMaxAge() bool { return f.MaxAge > 0 }
+
+// roleStatusOff is the value `config.RoleDisabled` resolves to. Hardcoded
+// here to avoid pulling internal/config into prompts (the package graph keeps
+// prompts upstream of config to prevent cycles).
+const roleStatusOff = "off"
+
+// Filter returns the reports kept after all selector steps run, plus the
+// funnel counts. configRoles is the env's role-status map (typically
+// env.Config.Roles); pass nil when there is no project config.
+func (s ReviewSelector) Filter(all []RoleReport, configRoles map[string]string) ([]RoleReport, ReviewFunnel) {
+	funnel := ReviewFunnel{
+		Available:  len(all),
+		HadEnabled: !s.IncludeDisabled,
+		MaxAge:     s.MaxAge,
+		UsedRoles:  append([]string(nil), s.Roles...),
+	}
+
+	kept := all
+	if !s.IncludeDisabled {
+		next := kept[:0:0]
+		for _, r := range kept {
+			if isRoleEnabled(configRoles, r.RoleID) {
+				next = append(next, r)
+			}
+		}
+		kept = next
+		funnel.Enabled = len(kept)
+	}
+
+	if len(s.Roles) > 0 {
+		want := make(map[string]bool, len(s.Roles))
+		for _, r := range s.Roles {
+			want[r] = true
+		}
+		next := kept[:0:0]
+		for _, r := range kept {
+			if want[r.RoleID] {
+				next = append(next, r)
+			}
+		}
+		kept = next
+	}
+	funnel.RolesMatch = len(kept)
+
+	if s.MaxAge > 0 {
+		cutoff := time.Now().Add(-s.MaxAge)
+		next := kept[:0:0]
+		for _, r := range kept {
+			if !r.ModTime.Before(cutoff) {
+				next = append(next, r)
+			}
+		}
+		kept = next
+	}
+	funnel.FreshEnough = len(kept)
+
+	return kept, funnel
+}
+
+// isRoleEnabled mirrors config.IsRoleEnabled but stays in this package to
+// avoid an import cycle (config sits below prompts in the import graph). An
+// unknown role defaults to enabled (matches config.IsRoleEnabled's default).
+func isRoleEnabled(roles map[string]string, id string) bool {
+	if roles == nil {
+		return true
+	}
+	v, ok := roles[id]
+	if !ok {
+		return true
+	}
+	return v != roleStatusOff
+}
+
+// ReviewEmptyError is returned by AssembleReviewPrompt when ReviewSelector's
+// filters eliminate every report. The funnel lets cmd/review.go format a
+// breakdown so the user knows which step zeroed things out.
+type ReviewEmptyError struct {
+	Funnel ReviewFunnel
+}
+
+func (e *ReviewEmptyError) Error() string {
+	return "no reports left after filters"
+}
+
 // AssembleReviewPrompt builds the full prompt for a supervisor review.
-func AssembleReviewPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, extraPrompt, customPrompt string) (string, error) {
-	reports, err := DiscoverReports(projectDir)
+// selector chooses which reports the supervisor actually sees; configRoles is
+// the env's role-status map (env.Config.Roles, or nil if absent).
+func AssembleReviewPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, extraPrompt, customPrompt string, selector ReviewSelector, configRoles map[string]string) (string, error) {
+	all, err := DiscoverReports(projectDir)
 	if err != nil {
 		return "", err
 	}
-	if len(reports) == 0 {
+	if len(all) == 0 {
 		return "", fmt.Errorf("no report files found in %s/roles — run 'ateam report' first", projectDir)
+	}
+
+	reports, funnel := selector.Filter(all, configRoles)
+	if len(reports) == 0 {
+		return "", &ReviewEmptyError{Funnel: funnel}
 	}
 
 	var reportContents []string

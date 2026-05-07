@@ -33,6 +33,10 @@ var (
 )
 
 // ReportOptions holds configuration for a report run.
+//
+// There is intentionally no IncludeDisabled / --all option: producing fresh
+// reports for disabled roles defeats the point of disabling them. Users who
+// want to report a specific disabled role pass it explicitly via --roles.
 type ReportOptions struct {
 	Roles                []string
 	ExtraPrompt          string
@@ -90,7 +94,7 @@ Example:
 }
 
 func init() {
-	reportCmd.Flags().StringSliceVar(&reportRoles, "roles", nil, prompts.RoleFlagUsage()+" (default: all)")
+	reportCmd.Flags().StringSliceVar(&reportRoles, "roles", nil, prompts.RoleFlagUsage()+" (default: all enabled roles)")
 	reportCmd.Flags().StringVar(&reportExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
 	reportCmd.Flags().IntVar(&reportTimeout, "timeout", 0, "timeout in minutes per role (overrides config)")
 	reportCmd.Flags().IntVar(&reportParallel, "parallel", 0, "max parallel roles (overrides config max_parallel)")

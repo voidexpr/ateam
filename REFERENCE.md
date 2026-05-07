@@ -96,12 +96,17 @@ ateam report --rerun-failed --dry-run    # preview which roles would be rerun
 
 ### `ateam review`
 
-Have the supervisor read all role reports and produce a prioritized decisions document.
+Have the supervisor read role reports and produce a prioritized decisions document.
+
+By default review only feeds reports from currently-enabled roles into the supervisor prompt. Use `--all` to include disabled roles too, `--roles` to restrict to a specific subset, and `--max-age` to drop stale reports. When all filters together leave zero reports, review exits non-zero with a per-step funnel breakdown.
 
 ```bash
 ateam review
 ateam review --extra-prompt "This is a production financial app"
 ateam review --prompt @custom_review.md
+ateam review --roles security,deps        # only these reports
+ateam review --all                         # include disabled roles' reports
+ateam review --max-age 2h                  # drop reports older than 2h
 ateam review --dry-run
 ```
 
@@ -113,7 +118,9 @@ ateam review --dry-run
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
 | `--cheaper-model` | Use a cheaper model (sonnet) |
 | `--timeout MINUTES` | Timeout (overrides `config.toml`) |
-| `--roles ROLE,...` | Limit coding tasks to these roles (reviews all reports but only assigns code tasks to listed roles) |
+| `--roles ROLE,...` | Limit review to these roles' reports (default: all enabled roles) |
+| `--all` | Include reports from roles disabled in `config.toml` |
+| `--max-age DURATION` | Drop reports older than this. Accepts stdlib durations (`30m`, `2h30m`, `90s`) and plain `Nd` (e.g. `1d`, `7d`) |
 | `--print` | Print review to stdout after completion |
 | `--dry-run` | Print computed prompt and list reports without running |
 | `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
@@ -176,10 +183,14 @@ ateam verify --dry-run
 
 Run the full pipeline sequentially: report → review → code.
 
+`--roles` applies to both the report and review phases (and never to the code phase). `--all` and `--max-age` only affect review — report always runs only on enabled roles, since producing fresh reports for disabled roles defeats the purpose of disabling them.
+
 ```bash
 ateam all
 ateam all --extra-prompt "Focus on security"
-ateam all --roles refactor_small,testing_basic
+ateam all --roles refactor_small,testing_basic   # report+review only those roles
+ateam all --all                                  # include disabled roles' stale reports in review
+ateam all --max-age 2h                           # review drops reports older than 2h
 ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile docker
 ```
 
@@ -189,7 +200,9 @@ ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile 
 | `--cheaper-model` | Use a cheaper model (sonnet) |
 | `--timeout MINUTES` | Per-phase timeout (overrides config) |
 | `--parallel N` | Max parallel report roles (overrides config `max_parallel`) |
-| `--roles ROLE,...` | Run only these roles in the report phase and limit coding tasks to them in review |
+| `--roles ROLE,...` | Limit report and review to these roles (default: all enabled roles). Does not affect the code phase. |
+| `--all` | Include reports from roles disabled in `config.toml` (review phase only). |
+| `--max-age DURATION` | Drop reports older than this in the review phase (e.g. `2h`, `30m`, `1d`). |
 | `--profile NAME` | Profile for code sub-runs (passed to `ateam code --profile`) |
 | `--report-profile NAME` | Override profile for the report phase |
 | `--report-agent NAME` | Override agent for the report phase (uses 'none' container) |

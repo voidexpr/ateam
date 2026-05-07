@@ -14,6 +14,8 @@ var (
 	allCheaperModel    bool
 	allVerbose         bool
 	allRoles           []string
+	allAll             bool
+	allMaxAge          string
 	allProfile         string
 	allDockerAutoSetup bool
 	allVerify          bool
@@ -35,7 +37,11 @@ var allCmd = &cobra.Command{
 Pass --verify to chain a verify phase after code.
 
 Equivalent to:
-  ateam report --roles all --print && ateam review --print && ateam code --print
+  ateam report --print && ateam review --print && ateam code --print
+
+--roles applies to both report and review (and never affects the code phase).
+--all and --max-age only affect the review phase: report still runs only on
+enabled roles to avoid producing stale data for roles you've disabled.
 
 Per-stage profile/agent overrides let you mix agents across the pipeline.
 --supervisor-profile/--supervisor-agent apply to review, code management, and verify.
@@ -43,6 +49,9 @@ Per-stage profile/agent overrides let you mix agents across the pipeline.
 Example:
   ateam all
   ateam all --verify
+  ateam all --roles security,deps              # report + review only those roles
+  ateam all --all                              # include disabled roles
+  ateam all --max-age 2h                       # review skips reports older than 2h
   ateam all --extra-prompt "Focus on security"
   ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile docker
   ateam all --timeout 30`,
@@ -54,7 +63,9 @@ func init() {
 	allCmd.Flags().BoolVarP(&allQuiet, "quiet", "q", false, "suppress output printing")
 	allCmd.Flags().IntVar(&allTimeout, "timeout", 0, "per-phase timeout in minutes (overrides config)")
 	allCmd.Flags().IntVar(&allParallel, "parallel", 0, "max parallel report roles (overrides config max_parallel)")
-	allCmd.Flags().StringSliceVar(&allRoles, "roles", nil, "run only these roles in the report phase and limit coding tasks to them in review")
+	allCmd.Flags().StringSliceVar(&allRoles, "roles", nil, "limit report and review to these roles' reports (default: all enabled roles)")
+	allCmd.Flags().BoolVar(&allAll, "all", false, "include reports from roles disabled in config.toml")
+	allCmd.Flags().StringVar(&allMaxAge, "max-age", "", "drop reports older than this in the review phase (e.g. 2h, 30m, 1d)")
 	allCmd.Flags().StringVar(&allProfile, "profile", "", "profile for code sub-runs (passed to ateam code --profile)")
 	allCmd.Flags().StringVar(&allReportProfile, "report-profile", "", "profile for report phase agents")
 	allCmd.Flags().StringVar(&allReportAgent, "report-agent", "", "agent for report phase (uses 'none' container)")
@@ -75,9 +86,9 @@ func init() {
 func runAll(cmd *cobra.Command, args []string) error {
 	printOutput := !allQuiet
 
-	roles := allRoles
-	if len(roles) == 0 {
-		roles = []string{"all"}
+	maxAge, err := parseMaxAge(allMaxAge)
+	if err != nil {
+		return err
 	}
 
 	// Resolve per-stage profile/agent.
@@ -86,12 +97,16 @@ func runAll(cmd *cobra.Command, args []string) error {
 	codeSubRunProfile := coalesce(allCodeProfile, allProfile)
 	codeSubRunAgent := allCodeAgent
 
-	// Phase 1: Report. Print=false to skip per-role body dumps; the pool
-	// table and failure summary cover what's useful inline, and the full
-	// bodies live at .ateam/roles/<role>/report.md.
+	// Phase 1: Report. Always produces fresh reports for the selected roles —
+	// --all is intentionally NOT threaded here: producing reports for disabled
+	// roles defeats the purpose of disabling them. Use --roles to target a
+	// specific disabled role on demand.
+	//   - empty --roles: every enabled role
+	//   - explicit --roles A,B: those exact roles
+	// Print=false: per-role bodies live at .ateam/roles/<role>/report.md.
 	fmt.Println("=== Phase 1: Report ===")
 	if err := runReport(ReportOptions{
-		Roles:           roles,
+		Roles:           allRoles,
 		ExtraPrompt:     allExtraPrompt,
 		Timeout:         allTimeout,
 		Parallel:        allParallel,
@@ -106,7 +121,9 @@ func runAll(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("report phase failed: %w", err)
 	}
 
-	// Phase 2: Review
+	// Phase 2: Review — same role-selection as Phase 1 plus --all (include
+	// disabled roles' stale reports) and --max-age (freshness window). --roles
+	// does NOT constrain coding-task assignment in Phase 3 (feature dropped).
 	fmt.Println("\n=== Phase 2: Review ===")
 	if err := runReview(ReviewOptions{
 		ExtraPrompt:     allExtraPrompt,
@@ -117,6 +134,8 @@ func runAll(cmd *cobra.Command, args []string) error {
 		Agent:           allSupervisorAgent,
 		Verbose:         allVerbose,
 		Roles:           allRoles,
+		IncludeDisabled: allAll,
+		MaxAge:          maxAge,
 		DockerAutoSetup: allDockerAutoSetup,
 		ContainerName:   allContainerName,
 	}); err != nil {
