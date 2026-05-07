@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
@@ -50,7 +51,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Printf("Binary built: %s\n\n", BuildTime)
+	fmt.Printf("Binary built: %s\n\n", FormatBuildTime(BuildTime, time.Now()))
 
 	diffs := prompts.DiffOrgDefaults(orgDir)
 	if len(diffs) == 0 {

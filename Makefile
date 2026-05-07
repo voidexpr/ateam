@@ -2,7 +2,7 @@ BINARY = ateam
 
 .PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy check-tidy check-docs check test test-all test-cli test-docker test-docker-live vuln docs lint fmt fmt-check install-hooks run-ci
 
-BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+BUILD_TIME := $(shell python3 -c 'import time; print(f"{time.time():.6f}")' 2>/dev/null || date +%s)
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
 GIT_COMMIT := $(shell git describe --always --dirty 2>/dev/null || echo unknown)
 LDFLAGS := -X github.com/ateam/cmd.BuildTime=$(BUILD_TIME) -X github.com/ateam/cmd.Version=$(VERSION) -X github.com/ateam/cmd.GitCommit=$(GIT_COMMIT)

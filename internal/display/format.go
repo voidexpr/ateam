@@ -65,10 +65,17 @@ func FmtDateAge(t time.Time) string {
 		return date + " (just now)"
 	case age < time.Hour:
 		return fmt.Sprintf("%s (%dm ago)", date, int(age.Minutes()))
-	case age < 24*time.Hour:
-		return fmt.Sprintf("%s (%dh ago)", date, int(age.Hours()))
 	default:
-		days := int(age.Hours()) / 24
-		return fmt.Sprintf("%s (%dd ago)", date, days)
+		return fmt.Sprintf("%s (%s ago)", date, FmtHoursOrDays(age, 24*time.Hour))
 	}
+}
+
+// FmtHoursOrDays renders a duration as "Xh" while under cutoff, "Yd" once at
+// or beyond it. Both use floor (e.g. 6h59m → "6h"). cutoff must be at least
+// one hour.
+func FmtHoursOrDays(d time.Duration, cutoff time.Duration) string {
+	if d < cutoff {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours())/24)
 }
