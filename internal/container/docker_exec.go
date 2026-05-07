@@ -123,8 +123,8 @@ func (d *DockerExecContainer) CmdFactory() CmdFactory {
 				if _, overridden := d.Env[key]; overridden {
 					continue // handled below
 				}
-				if val, ok := os.LookupEnv(key); ok {
-					dockerArgs = append(dockerArgs, "-e", key+"="+val)
+				if _, ok := os.LookupEnv(key); ok {
+					dockerArgs = append(dockerArgs, "-e", key)
 				}
 			}
 			dockerArgs = append(dockerArgs, d.envArgs()...)

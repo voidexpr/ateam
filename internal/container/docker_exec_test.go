@@ -28,11 +28,11 @@ func TestDockerExecEnvForwarding(t *testing.T) {
 		return false
 	}
 
-	if !hasArg("-e", "MY_SECRET=s3cret") {
-		t.Errorf("missing -e MY_SECRET=s3cret, args: %v", args)
+	if !hasArg("-e", "MY_SECRET") {
+		t.Errorf("missing -e MY_SECRET, args: %v", args)
 	}
-	if !hasArg("-e", "ANOTHER_VAR=val2") {
-		t.Errorf("missing -e ANOTHER_VAR=val2, args: %v", args)
+	if !hasArg("-e", "ANOTHER_VAR") {
+		t.Errorf("missing -e ANOTHER_VAR, args: %v", args)
 	}
 }
 
@@ -58,8 +58,8 @@ func TestDockerExecEnvForwardingSkipsUnset(t *testing.T) {
 		return false
 	}
 
-	if !hasFlag("-e", "SET_VAR=present") {
-		t.Errorf("missing -e SET_VAR=present, args: %v", args)
+	if !hasFlag("-e", "SET_VAR") {
+		t.Errorf("missing -e SET_VAR, args: %v", args)
 	}
 
 	// Unset var should not appear
@@ -230,8 +230,8 @@ func TestDockerExecCombinedEnvAndWorkdir(t *testing.T) {
 	if !hasArg("-w", "/project") {
 		t.Errorf("missing -w /project, args: %v", args)
 	}
-	if !hasArg("-e", "API_KEY=test123") {
-		t.Errorf("missing -e API_KEY=test123, args: %v", args)
+	if !hasArg("-e", "API_KEY") {
+		t.Errorf("missing -e API_KEY, args: %v", args)
 	}
 
 	// All docker-specific flags should come before container name

@@ -233,8 +233,8 @@ func (d *DockerContainer) baseRunArgs(forExec bool) []string {
 			if _, overridden := d.Env[key]; overridden {
 				continue // handled by envArgs
 			}
-			if val, ok := os.LookupEnv(key); ok {
-				args = append(args, "-e", key+"="+val)
+			if _, ok := os.LookupEnv(key); ok {
+				args = append(args, "-e", key)
 			}
 		}
 	} else {
