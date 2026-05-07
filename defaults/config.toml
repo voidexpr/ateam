@@ -15,6 +15,9 @@ timeout_minutes = 20
 [code]
 timeout_minutes = 120
 
+[run]
+timeout_minutes = 60
+
 [roles]
 automation              = "off"
 basic_project_structure = "off"

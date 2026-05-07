@@ -36,6 +36,7 @@ type Config struct {
 	Report         ReportConfig         `toml:"report"`
 	Review         ReviewConfig         `toml:"review"`
 	Code           CodeConfig           `toml:"code"`
+	Run            RunConfig            `toml:"run"`
 	Serve          ServeConfig          `toml:"serve"`
 	Roles          map[string]string    `toml:"roles"`
 	Supervisor     SupervisorConfig     `toml:"supervisor"`
@@ -109,6 +110,14 @@ type CodeConfig struct {
 
 func (c CodeConfig) EffectiveTimeout(override int) int {
 	return effectiveInt(override, c.TimeoutMinutes)
+}
+
+type RunConfig struct {
+	TimeoutMinutes int `toml:"timeout_minutes"`
+}
+
+func (r RunConfig) EffectiveTimeout(override int) int {
+	return effectiveInt(override, r.TimeoutMinutes)
 }
 
 // EffectiveMaxParallel returns the override if positive, otherwise the configured max_parallel.

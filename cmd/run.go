@@ -186,14 +186,17 @@ func runRun(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 	r.CallDB = db
 
+	timeout := env.Config.Run.EffectiveTimeout(0)
+
 	// Build opts. `run` has no canonical destination — its deliverable is the
 	// stream, viewable via `ateam cat <exec_id>`.
 	opts := runner.RunOpts{
-		RoleID:  runRole,
-		Action:  runner.ActionRun,
-		WorkDir: workDir,
-		Verbose: runVerbose,
-		Batch:   runBatch,
+		RoleID:     runRole,
+		Action:     runner.ActionRun,
+		WorkDir:    workDir,
+		Verbose:    runVerbose,
+		Batch:      runBatch,
+		TimeoutMin: timeout,
 	}
 
 	showStream := !runNoStream && !runQuiet
