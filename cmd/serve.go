@@ -42,17 +42,18 @@ func init() {
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
-	env, err := root.Resolve(orgFlag, projectFlag)
+	env, err := root.Lookup(orgFlag, projectFlag)
 	if err != nil {
 		return err
 	}
 
-	// Verify the database exists before starting the server.
-	db, err := requireProjectDB(env)
-	if err != nil {
-		return err
+	if env.ProjectDir != "" {
+		db, err := requireProjectDB(env)
+		if err != nil {
+			return err
+		}
+		db.Close()
 	}
-	db.Close()
 
 	port := servePort
 	if port == 0 && env != nil && env.Config != nil && env.Config.Serve.Port > 0 {
