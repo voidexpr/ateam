@@ -233,6 +233,14 @@ Defined in `internal/agent/`. Each agent implements the `Agent` interface (Run, 
 
 Agents receive a `CmdFactory` from the container layer. When set, they use it to spawn subprocesses instead of `exec.CommandContext` directly. This is how Docker execution works transparently.
 
+#### Codex parity caveats
+
+The codex agent matches claude on cost accounting, cache-token tracking, context utilization, verbose tool detail, and `ateam resume`. A few items are intentionally claude-only:
+
+- **OAuth login** (`claude setup-token`). OpenAI ships no equivalent; auth uses `OPENAI_API_KEY` or `~/.codex/auth.json` directly.
+- **Sandbox `--settings` JSON.** Codex CLI ships its own sandbox model (`workspace-write` / `read-only` plus approval policies). Codex sandbox flags belong in `agent "codex" { args = [...] }` in runtime.hcl, not in a settings JSON.
+- **Multi-turn turn count.** ateam invokes codex via `exec --json`, which is one-shot, so `Turns: 1` is hardcoded. A future contributor shouldn't try to "fix" this by reading a `turns` field that doesn't exist.
+
 ### Containers
 
 Defined in `internal/container/`. Each container implements the `Container` interface.

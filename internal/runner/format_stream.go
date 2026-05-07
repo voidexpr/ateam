@@ -132,11 +132,11 @@ func (f *StreamFormatter) fmtUser() string {
 func (f *StreamFormatter) fmtToolCall(e *ToolCallLine) string {
 	f.ToolCount++
 	header := f.cyan(fmt.Sprintf("  tool #%d: ", f.ToolCount)) + f.boldCyan(e.Name)
-	if f.Verbose && e.Claude != nil {
+	if f.Verbose {
 		var b strings.Builder
 		fmt.Fprintf(&b, "%s%s\n", f.Prefix, header)
-		input := strings.TrimSpace(string(e.Claude.Input))
-		if input != "" && input != "{}" && input != "null" {
+		input := verboseToolInput(e)
+		if input != "" {
 			for _, line := range strings.Split(input, "\n") {
 				fmt.Fprintf(&b, "%s           %s\n", f.Prefix, line)
 			}
@@ -287,6 +287,20 @@ func (f *StreamFormatter) usageSuffix(u *MessageUsage) string {
 
 func (f *StreamFormatter) fmtError(e *ErrorLine) string {
 	return fmt.Sprintf("%s%s\n", f.Prefix, f.red("  error: "+e.Message))
+}
+
+// verboseToolInput returns the verbose tool-input body for a ToolCallLine.
+// Prefers the raw claude JSON input (so we render the full payload, not the
+// shortened one-line detail); falls back to e.Detail for codex events.
+func verboseToolInput(e *ToolCallLine) string {
+	if e.Claude != nil {
+		input := strings.TrimSpace(string(e.Claude.Input))
+		if input != "" && input != "{}" && input != "null" {
+			return input
+		}
+		return ""
+	}
+	return strings.TrimSpace(e.Detail)
 }
 
 // toolDetail extracts a short description from the tool input.

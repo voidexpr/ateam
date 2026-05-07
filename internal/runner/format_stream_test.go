@@ -84,6 +84,20 @@ func TestStreamFormatterResult(t *testing.T) {
 	}
 }
 
+func TestStreamFormatterCodexVerboseToolInput(t *testing.T) {
+	// Codex tool_use events have no e.Claude pointer; the verbose
+	// renderer must still surface the tool input (e.Detail).
+	f := &StreamFormatter{Color: false, Verbose: true}
+	line := []byte(`{"type":"exec_command_begin","command":"git status --short"}`)
+	out := f.FormatLine(line)
+	if !strings.Contains(out, "tool #1: exec_command") {
+		t.Errorf("expected tool header, got: %s", out)
+	}
+	if !strings.Contains(out, "git status --short") {
+		t.Errorf("expected verbose codex tool input, got: %s", out)
+	}
+}
+
 func TestStreamFormatterPrefix(t *testing.T) {
 	f := &StreamFormatter{Color: false, Prefix: "[42:sec/run] "}
 	line := []byte(`{"type":"user"}`)

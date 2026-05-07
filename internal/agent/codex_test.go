@@ -13,8 +13,78 @@ func TestParseCodexLineTurnStarted(t *testing.T) {
 	if typ != "system" {
 		t.Errorf("expected type 'system', got %q", typ)
 	}
-	if ev == nil {
-		t.Error("expected non-nil event")
+	sys, ok := ev.(*CodexSystemEvent)
+	if !ok {
+		t.Fatalf("expected *CodexSystemEvent, got %T", ev)
+	}
+	if sys.SessionID != "" {
+		t.Errorf("turn.started should not carry SessionID, got %q", sys.SessionID)
+	}
+}
+
+func TestParseCodexLineThreadStartedSessionID(t *testing.T) {
+	line := []byte(`{"type":"thread.started","thread_id":"019df527-3195-79d1-a838-9adc1bebae81"}`)
+	typ, ev, err := ParseCodexLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typ != "system" {
+		t.Fatalf("type = %q, want system", typ)
+	}
+	sys, ok := ev.(*CodexSystemEvent)
+	if !ok {
+		t.Fatalf("expected *CodexSystemEvent, got %T", ev)
+	}
+	if sys.SessionID != "019df527-3195-79d1-a838-9adc1bebae81" {
+		t.Errorf("SessionID = %q", sys.SessionID)
+	}
+}
+
+func TestParseCodexLineCachedInputTokens(t *testing.T) {
+	line := []byte(`{"type":"turn.completed","usage":{"input_tokens":2420850,"cached_input_tokens":2296704,"output_tokens":16207}}`)
+	typ, ev, err := ParseCodexLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typ != "result" {
+		t.Fatalf("type = %q, want result", typ)
+	}
+	re := ev.(*CodexResultEvent)
+	if re.CacheReadTokens != 2296704 {
+		t.Errorf("CacheReadTokens = %d, want 2296704", re.CacheReadTokens)
+	}
+	if re.InputTokens != 2420850 {
+		t.Errorf("InputTokens = %d", re.InputTokens)
+	}
+	if re.OutputTokens != 16207 {
+		t.Errorf("OutputTokens = %d", re.OutputTokens)
+	}
+}
+
+func TestParseCodexLineCachedInputTokensCamelCase(t *testing.T) {
+	line := []byte(`{"type":"turn.completed","usage":{"inputTokens":100,"cachedInputTokens":80,"outputTokens":20}}`)
+	_, ev, err := ParseCodexLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	re := ev.(*CodexResultEvent)
+	if re.CacheReadTokens != 80 {
+		t.Errorf("CacheReadTokens = %d, want 80", re.CacheReadTokens)
+	}
+}
+
+func TestParseCodexLineAgentReasoningDelta(t *testing.T) {
+	line := []byte(`{"type":"agent_reasoning_delta","delta":"thinking through the diff…"}`)
+	typ, ev, err := ParseCodexLine(line)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typ != "thinking" {
+		t.Fatalf("type = %q, want thinking", typ)
+	}
+	te := ev.(*CodexTextEvent)
+	if te.Text != "thinking through the diff…" {
+		t.Errorf("Text = %q", te.Text)
 	}
 }
 

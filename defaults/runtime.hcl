@@ -275,6 +275,11 @@ agent "codex" {
       output_per_mtok = 10.00
     }
 
+    model "gpt-5" {
+      input_per_mtok  = 1.25
+      output_per_mtok = 10.00
+    }
+
     model "gpt-5-mini" {
       input_per_mtok  = 0.25
       output_per_mtok = 2.00
@@ -283,6 +288,36 @@ agent "codex" {
     model "gpt-5-nano" {
       input_per_mtok  = 0.05
       output_per_mtok = 0.40
+    }
+
+    model "gpt-4o" {
+      input_per_mtok  = 2.50
+      output_per_mtok = 10.00
+    }
+
+    model "gpt-4o-mini" {
+      input_per_mtok  = 0.15
+      output_per_mtok = 0.60
+    }
+
+    model "gpt-4.1" {
+      input_per_mtok  = 2.00
+      output_per_mtok = 8.00
+    }
+
+    model "gpt-4.1-mini" {
+      input_per_mtok  = 0.40
+      output_per_mtok = 1.60
+    }
+
+    model "o3" {
+      input_per_mtok  = 2.00
+      output_per_mtok = 8.00
+    }
+
+    model "o4-mini" {
+      input_per_mtok  = 1.10
+      output_per_mtok = 4.40
     }
   }
 }

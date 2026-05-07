@@ -144,6 +144,7 @@ func detectFormat(line []byte) streamFormat {
 		"exec_command_begin", "web_search_begin", "mcp_tool_call_begin",
 		"custom_tool_call_begin", "patch_apply_begin", "apply_patch_begin",
 		"agent_message_delta", "agent_message", "assistant_message",
+		"agent_reasoning", "agent_reasoning_delta",
 		"item.started", "item.completed", "item.updated",
 		"command_execution", "todo_list",
 		"turn.completed", "turn.failed":
@@ -268,7 +269,8 @@ func parseCodexDisplay(line []byte) ([]DisplayEvent, error) {
 
 	switch typ {
 	case "system":
-		return []DisplayEvent{&SystemLine{}}, nil
+		sys := ev.(*agent.CodexSystemEvent)
+		return []DisplayEvent{&SystemLine{SessionID: sys.SessionID}}, nil
 
 	case "tool_use":
 		te := ev.(*agent.CodexToolUseEvent)
@@ -284,14 +286,22 @@ func parseCodexDisplay(line []byte) ([]DisplayEvent, error) {
 		}
 		return nil, nil
 
+	case "thinking":
+		te := ev.(*agent.CodexTextEvent)
+		if te.Text != "" {
+			return []DisplayEvent{&ThinkingLine{Text: te.Text}}, nil
+		}
+		return nil, nil
+
 	case "result":
 		re := ev.(*agent.CodexResultEvent)
 		return []DisplayEvent{&ResultLine{
-			DurationMS:   re.DurationMS,
-			InputTokens:  re.InputTokens,
-			OutputTokens: re.OutputTokens,
-			Turns:        1,
-			IsError:      re.IsError,
+			DurationMS:      re.DurationMS,
+			InputTokens:     re.InputTokens,
+			OutputTokens:    re.OutputTokens,
+			CacheReadTokens: re.CacheReadTokens,
+			Turns:           1,
+			IsError:         re.IsError,
 		}}, nil
 
 	case "error":

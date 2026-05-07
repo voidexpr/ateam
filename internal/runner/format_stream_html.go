@@ -121,9 +121,8 @@ func (f *HTMLStreamFormatter) fmtToolCall(e *ToolCallLine) string {
 	fmt.Fprintf(&b, `<span class="sl-tool-num">tool #%d: </span>`, f.ToolCount)
 	fmt.Fprintf(&b, `<span class="sl-tool-name">%s</span>`, esc(e.Name))
 
-	if f.Verbose && e.Claude != nil {
-		input := strings.TrimSpace(string(e.Claude.Input))
-		if input != "" && input != "{}" && input != "null" {
+	if f.Verbose {
+		if input := verboseToolInput(e); input != "" {
 			fmt.Fprintf(&b, "\n<pre class=\"sl-tool-input\">%s</pre>", esc(input))
 		}
 	} else {

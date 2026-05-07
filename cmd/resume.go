@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -24,16 +25,16 @@ var (
 
 var resumeCmd = &cobra.Command{
 	Use:   "resume [EXEC_ID]",
-	Short: "Resume an interactive claude session from a previous agent run",
-	Long: `Look up the claude session id from a previous run's stream file and either
-print the resume command or launch claude --resume directly.
+	Short: "Resume an interactive agent session from a previous run",
+	Long: `Look up the session id from a previous run's stream file and either
+print the resume command or launch the agent's resume directly.
 
 The resumed session is interactive and runs outside ateam: it gets no
 agent_execs row, no sandbox settings, and no tracking. It picks up from
 the original run's last turn.
 
-Resume is supported for runs whose agent is "claude" and whose container
-is "none". For docker / docker-exec runs the session id is still printed
+Resume is supported for "claude" and "codex" runs whose container is
+"none". For docker / docker-exec runs the session id is still printed
 but --launch is refused since the session state lives inside (or with) the
 container, not on the host.`,
 	Args: cobra.MaximumNArgs(1),
@@ -41,7 +42,7 @@ container, not on the host.`,
 }
 
 func init() {
-	resumeCmd.Flags().BoolVar(&resumeLast, "last", false, "resume the most recent claude run")
+	resumeCmd.Flags().BoolVar(&resumeLast, "last", false, "resume the most recent claude or codex run")
 	resumeCmd.Flags().BoolVar(&resumeLaunch, "launch", false, "exec into the resume command instead of just printing it")
 	rootCmd.AddCommand(resumeCmd)
 }
@@ -68,8 +69,11 @@ func runResume(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if row.Agent != "claude" {
-		return fmt.Errorf("resume only supports claude (run %d used agent %q)", row.ID, row.Agent)
+	switch row.Agent {
+	case "claude", "codex":
+		// supported below
+	default:
+		return fmt.Errorf("resume only supports claude and codex (run %d used agent %q)", row.ID, row.Agent)
 	}
 	if row.StreamFile == "" {
 		return fmt.Errorf("run %d has no stream file recorded", row.ID)
@@ -105,14 +109,22 @@ func runResume(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
+	hostCmd, hostArgs := resumeCommand(row.Agent, sessionID)
+	hostCmdLine := strings.Join(append([]string{hostCmd}, hostArgs...), " ")
+
 	switch row.Container {
 	case "", "none":
-		cmdLine := fmt.Sprintf("claude --resume %s", sessionID)
-		fmt.Printf("Command: %s\n", cmdLine)
+		fmt.Printf("Command: %s\n", hostCmdLine)
 		if !resumeLaunch {
 			return nil
 		}
-		return execClaudeResume(sessionID, configDir)
+		switch row.Agent {
+		case "claude":
+			return execClaudeResume(sessionID, configDir)
+		case "codex":
+			return execCodexResume(sessionID)
+		}
+		return fmt.Errorf("resume not implemented for agent %q", row.Agent)
 
 	case "docker-exec":
 		target := row.ContainerID
@@ -120,11 +132,11 @@ func runResume(cmd *cobra.Command, args []string) error {
 			target = "<container-name>"
 		}
 		envFlag := ""
-		if configDir != "" {
+		if row.Agent == "claude" && configDir != "" {
 			envFlag = fmt.Sprintf(" -e CLAUDE_CONFIG_DIR=%s", configDir)
 		}
 		fmt.Println("Caveat: session lives inside the long-lived container; resuming on the host won't find it.")
-		fmt.Printf("To try inside the container:\n  docker exec -it%s %s claude --resume %s\n", envFlag, target, sessionID)
+		fmt.Printf("To try inside the container:\n  docker exec -it%s %s %s\n", envFlag, target, hostCmdLine)
 		if resumeLaunch {
 			return fmt.Errorf("--launch is not supported for docker-exec runs")
 		}
@@ -139,16 +151,33 @@ func runResume(cmd *cobra.Command, args []string) error {
 	}
 }
 
+// resumeCommand returns the resume command and args for an agent.
+// codex requires --include-non-interactive because ateam invokes it via
+// `codex exec --json`, which the picker hides by default.
+func resumeCommand(agent, sessionID string) (string, []string) {
+	switch agent {
+	case "codex":
+		return "codex", []string{"resume", "--include-non-interactive", sessionID}
+	default:
+		return "claude", []string{"--resume", sessionID}
+	}
+}
+
 func selectResumeRow(db *calldb.CallDB, args []string) (*calldb.RecentRow, error) {
 	if resumeLast {
-		rows, err := db.RecentRuns(calldb.RecentFilter{Agent: "claude", Limit: 1})
+		// Skip past any non-resumable agents (e.g. mock) so --last lands on
+		// a usable row rather than erroring out on the most recent one.
+		rows, err := db.RecentRuns(calldb.RecentFilter{Limit: 20})
 		if err != nil {
 			return nil, err
 		}
-		if len(rows) == 0 {
-			return nil, fmt.Errorf("no recent claude runs found")
+		for i := range rows {
+			switch rows[i].Agent {
+			case "claude", "codex":
+				return &rows[i], nil
+			}
 		}
-		return &rows[0], nil
+		return nil, fmt.Errorf("no recent claude or codex runs found")
 	}
 	ids, err := parseIDArgs(args)
 	if err != nil {
@@ -161,9 +190,10 @@ func selectResumeRow(db *calldb.CallDB, args []string) (*calldb.RecentRow, error
 	return &rows[0], nil
 }
 
-// extractSessionID returns the first non-empty session_id found in a Claude
-// stream JSONL file. Returns "" when the file has no system event with a
-// session_id (e.g. the run died before init).
+// extractSessionID returns the first non-empty session id found in an agent
+// stream JSONL file. Handles both claude (session_id on system init) and
+// codex (thread_id on thread.started). Returns "" when no id is present
+// (e.g. the run died before init).
 //
 // Capped at maxSessionScanLines so the inspect-time hint never has to read a
 // large stream end-to-end when the init event is missing.
@@ -179,19 +209,39 @@ func extractSessionID(path string) (string, error) {
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for n := 0; n < maxSessionScanLines && scanner.Scan(); n++ {
-		typ, ev, perr := streamutil.ParseClaudeLine(scanner.Bytes())
-		if perr != nil || typ != "system" {
-			continue
+		line := scanner.Bytes()
+		if id := claudeSessionID(line); id != "" {
+			return id, nil
 		}
-		sys, ok := ev.(*streamutil.SystemEvent)
-		if !ok {
-			continue
-		}
-		if sys.SessionID != "" {
-			return sys.SessionID, nil
+		if id := codexThreadID(line); id != "" {
+			return id, nil
 		}
 	}
 	return "", scanner.Err()
+}
+
+func claudeSessionID(line []byte) string {
+	typ, ev, err := streamutil.ParseClaudeLine(line)
+	if err != nil || typ != "system" {
+		return ""
+	}
+	sys, ok := ev.(*streamutil.SystemEvent)
+	if !ok {
+		return ""
+	}
+	return sys.SessionID
+}
+
+func codexThreadID(line []byte) string {
+	typ, ev, err := agent.ParseCodexLine(line)
+	if err != nil || typ != "system" {
+		return ""
+	}
+	sys, ok := ev.(*agent.CodexSystemEvent)
+	if !ok {
+		return ""
+	}
+	return sys.SessionID
 }
 
 // cmdMDPath returns the cmd.md path that pairs with a stream file, handling
@@ -297,4 +347,14 @@ func execClaudeResume(sessionID, configDir string) error {
 	fmt.Println("Interactive resume runs without ateam's sandbox.")
 	fmt.Printf("exec %s --resume %s\n", binary, sessionID)
 	return syscall.Exec(binary, []string{"claude", "--resume", sessionID}, envv)
+}
+
+func execCodexResume(sessionID string) error {
+	binary, err := exec.LookPath("codex")
+	if err != nil {
+		return fmt.Errorf("codex not found in PATH: %w", err)
+	}
+	fmt.Println("Interactive resume runs without ateam's sandbox.")
+	fmt.Printf("exec %s resume --include-non-interactive %s\n", binary, sessionID)
+	return syscall.Exec(binary, []string{"codex", "resume", "--include-non-interactive", sessionID}, os.Environ())
 }

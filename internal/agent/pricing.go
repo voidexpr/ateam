@@ -45,6 +45,21 @@ var modelContextWindows = map[string]int{
 	"claude-sonnet-4-5": 200000,
 	"claude-opus-4-6":   200000,
 	"claude-haiku-4":    200000,
+
+	// OpenAI / codex models
+	"gpt-5":         400000,
+	"gpt-5-mini":    400000,
+	"gpt-5-nano":    400000,
+	"gpt-5-codex":   400000,
+	"gpt-5.1-codex": 400000,
+	"gpt-5.2-codex": 400000,
+	"gpt-5.3-codex": 400000,
+	"gpt-4o":        128000,
+	"gpt-4o-mini":   128000,
+	"gpt-4.1":       1000000,
+	"gpt-4.1-mini":  1000000,
+	"o3":            200000,
+	"o4-mini":       200000,
 }
 
 // ContextWindow returns the input-token context window for the given

@@ -133,7 +133,12 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 
 		switch typ {
 		case "system":
-			ch <- StreamEvent{Type: "system"}
+			sys := ev.(*CodexSystemEvent)
+			ch <- StreamEvent{Type: "system", SessionID: sys.SessionID}
+
+		case "thinking":
+			te := ev.(*CodexTextEvent)
+			ch <- StreamEvent{Type: "thinking", Text: te.Text}
 
 		case "tool_use":
 			te := ev.(*CodexToolUseEvent)
@@ -167,16 +172,19 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 			if re.Model != "" {
 				model = re.Model
 			}
+			// Turns=1 because `codex exec --json` is single-turn by design;
+			// there's no per-turn count to read out of the stream.
 			evOut := StreamEvent{
-				Type:         "result",
-				Output:       output,
-				Model:        model,
-				Cost:         EstimateCost(c.Pricing, model, c.DefaultModel, re.InputTokens, re.OutputTokens),
-				InputTokens:  re.InputTokens,
-				OutputTokens: re.OutputTokens,
-				DurationMS:   re.DurationMS,
-				Turns:        1,
-				IsError:      re.IsError,
+				Type:            "result",
+				Output:          output,
+				Model:           model,
+				Cost:            EstimateCost(c.Pricing, model, c.DefaultModel, re.InputTokens, re.OutputTokens),
+				InputTokens:     re.InputTokens,
+				OutputTokens:    re.OutputTokens,
+				CacheReadTokens: re.CacheReadTokens,
+				DurationMS:      re.DurationMS,
+				Turns:           1,
+				IsError:         re.IsError,
 			}
 			if re.IsError {
 				evOut.ErrorSource = ErrorSourceAgentAPI
@@ -211,6 +219,13 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 	}
 }
 
+// CodexSystemEvent represents a thread.started / turn.started event.
+// SessionID is set only for thread.started — that's the UUID `codex resume`
+// expects.
+type CodexSystemEvent struct {
+	SessionID string
+}
+
 // CodexToolUseEvent represents a tool invocation in Codex JSONL output.
 type CodexToolUseEvent struct {
 	ToolName  string
@@ -224,11 +239,12 @@ type CodexTextEvent struct {
 
 // CodexResultEvent represents the final result in Codex JSONL output.
 type CodexResultEvent struct {
-	Model        string
-	InputTokens  int
-	OutputTokens int
-	DurationMS   int64
-	IsError      bool
+	Model           string
+	InputTokens     int
+	OutputTokens    int
+	CacheReadTokens int
+	DurationMS      int64
+	IsError         bool
 	// ErrorMessage carries the human-readable reason from a turn.failed
 	// event (empty for turn.completed).
 	ErrorMessage string
@@ -272,8 +288,19 @@ func ParseCodexLine(line []byte) (typ string, ev any, err error) {
 	}
 
 	switch eventType {
-	case "turn.started", "thread.started":
-		return "system", &struct{}{}, nil
+	case "turn.started":
+		return "system", &CodexSystemEvent{}, nil
+
+	case "thread.started":
+		var tid string
+		if v, ok := raw["thread_id"]; ok {
+			_ = json.Unmarshal(v, &tid)
+		}
+		return "system", &CodexSystemEvent{SessionID: tid}, nil
+
+	case "agent_reasoning", "agent_reasoning_delta":
+		text := firstStringField(raw, "delta", "text", "reasoning")
+		return "thinking", &CodexTextEvent{Text: text}, nil
 
 	case "item.started":
 		return parseCodexItemStarted(raw)
@@ -412,7 +439,13 @@ func codexToolDetail(raw map[string]json.RawMessage) string {
 // codexMessageText extracts text from agent_message / assistant_message events.
 // Tries .delta, .text, .message, .content in order.
 func codexMessageText(raw map[string]json.RawMessage) string {
-	for _, key := range []string{"delta", "text", "message", "content"} {
+	return firstStringField(raw, "delta", "text", "message", "content")
+}
+
+// firstStringField returns the first key's string value that unmarshals
+// successfully and is non-empty.
+func firstStringField(raw map[string]json.RawMessage, keys ...string) string {
+	for _, key := range keys {
 		v, ok := raw[key]
 		if !ok {
 			continue
@@ -509,23 +542,30 @@ func parseCodexResult(raw map[string]json.RawMessage, isError bool) *CodexResult
 		_ = json.Unmarshal(v, &re.DurationMS)
 	}
 
-	// usage.input_tokens, usage.output_tokens (with camelCase fallbacks)
+	// usage.input_tokens, usage.output_tokens, usage.cached_input_tokens
+	// (with camelCase fallbacks).
 	if v, ok := raw["usage"]; ok {
 		var usage struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
+			InputTokens       int `json:"input_tokens"`
+			OutputTokens      int `json:"output_tokens"`
+			CachedInputTokens int `json:"cached_input_tokens"`
 			// camelCase fallbacks
-			InputTokensCC  int `json:"inputTokens"`
-			OutputTokensCC int `json:"outputTokens"`
+			InputTokensCC       int `json:"inputTokens"`
+			OutputTokensCC      int `json:"outputTokens"`
+			CachedInputTokensCC int `json:"cachedInputTokens"`
 		}
 		if err := json.Unmarshal(v, &usage); err == nil {
 			re.InputTokens = usage.InputTokens
 			re.OutputTokens = usage.OutputTokens
+			re.CacheReadTokens = usage.CachedInputTokens
 			if re.InputTokens == 0 {
 				re.InputTokens = usage.InputTokensCC
 			}
 			if re.OutputTokens == 0 {
 				re.OutputTokens = usage.OutputTokensCC
+			}
+			if re.CacheReadTokens == 0 {
+				re.CacheReadTokens = usage.CachedInputTokensCC
 			}
 		}
 	}
