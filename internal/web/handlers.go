@@ -234,7 +234,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 			legacy := filterHistoryByKind(discoverHistory(histDir), "report")
 			db := s.getDB(pe)
 			fromDB := historyFromDB(db, pe.ProjectDir, runner.ActionReport, roleID, "report")
-			costs := fetchRunCosts(db, runner.ActionReport, roleID)
+			costs := fetchRunCosts(db, runner.ActionReport, roleID, pe.ProjectID())
 			enrichHistoryCost(legacy, costs)
 			history := mergeHistory(fromDB, legacy)
 			curCost, curTokens := latestRunCost(costs)
@@ -300,7 +300,7 @@ func (s *Server) handleSupervisorOutput(cfg supervisorPageConfig) http.HandlerFu
 		legacy := filterHistoryByKind(discoverHistory(pe.SupervisorHistoryDir()), cfg.Kind)
 		db := s.getDB(pe)
 		fromDB := historyFromDB(db, pe.ProjectDir, cfg.Action, "supervisor", cfg.Kind)
-		costs := fetchRunCosts(db, cfg.Action, "supervisor")
+		costs := fetchRunCosts(db, cfg.Action, "supervisor", pe.ProjectID())
 		enrichHistoryCost(legacy, costs)
 		data.History = mergeHistory(fromDB, legacy)
 		data.CurrentCostUSD, data.CurrentTotalTokens = latestRunCost(costs)
@@ -830,7 +830,7 @@ func (s *Server) serveHistoryFile(w http.ResponseWriter, r *http.Request, pe *Pr
 
 	db := s.getDB(pe)
 	legacy := filterHistoryByKind(discoverHistory(histDir), kind)
-	enrichHistoryCost(legacy, fetchRunCosts(db, action, role))
+	enrichHistoryCost(legacy, fetchRunCosts(db, action, role, pe.ProjectID()))
 	history := mergeHistory(historyFromDB(db, pe.ProjectDir, action, role, kind), legacy)
 
 	data := historyDetailData{

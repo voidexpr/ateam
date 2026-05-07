@@ -378,12 +378,18 @@ type RunCost struct {
 
 // RunCostByActionRole returns cost/token data for all runs matching the given
 // action and role, keyed by started_at formatted as runner.TimestampFormat.
-func (c *CallDB) RunCostByActionRole(action, role string) (map[string]RunCost, error) {
+// When projectID is non-empty, results are scoped to that project only.
+func (c *CallDB) RunCostByActionRole(action, role, projectID string) (map[string]RunCost, error) {
 	q := `SELECT started_at,
 			COALESCE(cost_usd, 0),
 			COALESCE(input_tokens, 0) + COALESCE(output_tokens, 0) + COALESCE(cache_read_tokens, 0) + COALESCE(cache_write_tokens, 0)
 		FROM agent_execs WHERE action = ? AND role = ?`
-	rows, err := c.db.Query(q, action, role)
+	args := []any{action, role}
+	if projectID != "" {
+		q += " AND project_id = ?"
+		args = append(args, projectID)
+	}
+	rows, err := c.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}

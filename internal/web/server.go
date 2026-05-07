@@ -47,6 +47,20 @@ type ProjectEntry struct {
 	dbErr  error
 }
 
+// ProjectID returns the project identifier for scoping DB queries.
+// Returns "" in org-less mode or when source/org dirs are unavailable.
+func (pe *ProjectEntry) ProjectID() string {
+	if pe.SourceDir == "" || pe.OrgDir == "" {
+		return ""
+	}
+	orgRoot := filepath.Dir(pe.OrgDir)
+	relPath, err := filepath.Rel(orgRoot, pe.SourceDir)
+	if err != nil {
+		return ""
+	}
+	return config.PathToProjectID(relPath)
+}
+
 // SupervisorPath returns ProjectDir/supervisor/<name>.
 func (pe *ProjectEntry) SupervisorPath(name string) string {
 	return filepath.Join(pe.ProjectDir, "supervisor", name)

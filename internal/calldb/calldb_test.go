@@ -838,8 +838,8 @@ func TestRunCostByActionRole(t *testing.T) {
 	db := testDB(t)
 	seedCalls(t, db)
 
-	// security + run: seed has two entries (IDs 5 and 7)
-	costs, err := db.RunCostByActionRole("run", "security")
+	// security + run: seed has two entries (IDs 5 and 7), both proj-a
+	costs, err := db.RunCostByActionRole("run", "security", "")
 	if err != nil {
 		t.Fatalf("RunCostByActionRole: %v", err)
 	}
@@ -857,8 +857,24 @@ func TestRunCostByActionRole(t *testing.T) {
 		t.Errorf("expected total cost 0.25, got %f", totalCost)
 	}
 
+	// Project filter: proj-a has both entries, proj-b has none for this action+role
+	costs, err = db.RunCostByActionRole("run", "security", "proj-a")
+	if err != nil {
+		t.Fatalf("RunCostByActionRole proj-a: %v", err)
+	}
+	if len(costs) != 2 {
+		t.Fatalf("expected 2 entries for proj-a, got %d", len(costs))
+	}
+	costs, err = db.RunCostByActionRole("run", "security", "proj-b")
+	if err != nil {
+		t.Fatalf("RunCostByActionRole proj-b: %v", err)
+	}
+	if len(costs) != 0 {
+		t.Fatalf("expected 0 entries for proj-b, got %d", len(costs))
+	}
+
 	// No matches
-	costs, err = db.RunCostByActionRole("nonexistent", "nobody")
+	costs, err = db.RunCostByActionRole("nonexistent", "nobody", "")
 	if err != nil {
 		t.Fatalf("RunCostByActionRole no match: %v", err)
 	}

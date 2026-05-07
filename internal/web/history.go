@@ -168,12 +168,13 @@ func mergeHistory(dbEntries, legacy []HistoryEntry) []HistoryEntry {
 	return merged
 }
 
-// fetchRunCosts returns cost/token data for all runs matching action+role.
-func fetchRunCosts(db *calldb.CallDB, action, role string) map[string]calldb.RunCost {
+// fetchRunCosts returns cost/token data for all runs matching action+role,
+// scoped to projectID when non-empty.
+func fetchRunCosts(db *calldb.CallDB, action, role, projectID string) map[string]calldb.RunCost {
 	if db == nil {
 		return nil
 	}
-	costs, err := db.RunCostByActionRole(action, role)
+	costs, err := db.RunCostByActionRole(action, role, projectID)
 	if err != nil {
 		return nil
 	}
