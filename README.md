@@ -19,7 +19,7 @@ At its core ateam is a CLI to run one-shot unattended agents with saved prompts.
     * use a separate config for your coding agent (`CLAUDE_CONFIG_DIR`)
     * run inside docker (built-in secret management for oauth or just use an already authenticated agent in the container)
     * run outside of docker but docker exec only the agents in docker
-* **just a CLI**: can run the workflows built-in ateam (report, review, code) or ad-hoc unattended agent execs (`run` for a single agent exec, `parallel` for multiple simultaneous agents)
+* **just a CLI**: can run the workflows built-in ateam (report, review, code, verify) or ad-hoc unattended agent execs (`run` for a single agent exec, `parallel` for multiple simultaneous agents)
 * **convenient tooling**: `ps` to see current/past agent runs, `inspect` for troubleshooting
 * **cost transaprency**: all agent execution track token usage and estimated cost (less relevant for subscription). Tokens are the new software engineering currency and help gauge if an error is worthwhile
 
@@ -38,7 +38,7 @@ Core principles:
 * **Simple**: reuses existing coding agents, minimal orchestration
 * **Auditable**: every artifact is a readable markdown file
 * **Stateful**: old reports or reviews are read before generating a new one so no context is lost, only one file per role so there is no bloat over time
-* **Get out of your way**: ATeam is not a generic workflow system, it is a focused report + review + code automation layer designed to preserve your attention for high-value work
+* **Get out of your way**: ATeam is not a generic workflow system, it is a focused report + review + code + verify automation layer designed to preserve your attention for high-value work
 
 ## Quick Start
 
@@ -62,11 +62,13 @@ ateam auto-setup
 # 3. Run
 ateam report                         # run all enabled role analyses
 ateam review                         # supervisor prioritizes findings
-ateam code                           # execute top-priority fixes
+ateam code                           # execute top-priority fixes (then verify)
 
 ```
 
 Once familiar with ateam just run the full pipeline: `ateam all`.
+`ateam code` and `ateam all` chain `ateam verify` automatically; pass
+`--no-verify` to stop after the code phase.
 
 You can see all artifacts under `.ateam/` or via an experimental web UI `ateam serve`.
 
@@ -124,12 +126,12 @@ git pull --rebase && make build
 ### The Pipeline
 
 ```
-ateam report  →  ateam review  →  ateam code
-   │                  │                │
-   ▼                  ▼                ▼
- Role agents       Supervisor       Supervisor
- audit code        prioritizes      delegates
- (parallel)        findings         coding tasks
+ateam report  →  ateam review  →  ateam code  →  ateam verify
+   │                  │                │                │
+   ▼                  ▼                ▼                ▼
+ Role agents       Supervisor       Supervisor       Supervisor
+ audit code        prioritizes      delegates        inspects commits
+ (parallel)        findings         coding tasks     and runs tests
 ```
 
 **Report**: Role-specific agents analyze your code and produce markdown reports. Each role focuses on one dimension (security, testing, etc.). Runs in parallel. A role is basically a markdown prompt, easy to modify or create new ones.
@@ -138,25 +140,27 @@ ateam report  →  ateam review  →  ateam code
 
 **Code**: The supervisor executes the top-priority tasks by delegating to coding agents, then records what was completed.
 
+**Verify**: The supervisor inspects the commits made during the code phase, looks for logical bugs, broken or missing tests, and risky changes, then runs the project's test suite and records findings. `ateam code` and `ateam all` chain this automatically; pass `--no-verify` to skip it.
+
 Each run archives its artifacts. The next cycle's reports incorporate previous findings, so quality improves incrementally with a memory of what has been done so far.
 
 ### Workflow Examples
 
 Daily (quick pass):
 ```bash
-ateam report --roles refactor_small,docs_external,testing_basic && ateam review && ateam code
+ateam all --roles refactor_small,docs_external,testing_basic
 ```
 
 Weekly (thorough):
 ```bash
-ateam report --roles security,dependencies,testing_full && ateam review && ateam code
+ateam all --roles security,dependencies,testing_full
 ```
 
 Step by step (with review):
 ```bash
 ateam report && ateam review --print    # inspect findings
 # optionally edit .ateam/supervisor/review.md
-ateam code                              # execute approved tasks
+ateam code                              # execute approved tasks (then verify)
 ```
 
 ### Git Integration
@@ -241,8 +245,8 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 | `ateam auto-setup` | Auto-configure roles for your project |
 | `ateam report` | Run role analyses |
 | `ateam review` | Supervisor reviews and prioritizes findings |
-| `ateam code` | Execute prioritized coding tasks |
-| `ateam all` | Full pipeline: report → review → code |
+| `ateam code` | Execute prioritized coding tasks (chains `ateam verify`; pass `--no-verify` to skip) |
+| `ateam all` | Full pipeline: report → review → code → verify |
 | `ateam verify` | Supervisor verifies recent code changes from `ateam code` |
 | `ateam eval` | Compare two role prompt variants side-by-side with LLM scoring — see [EVAL.md](EVAL.md) |
 | `ateam run` | Run an agent with a custom prompt |
@@ -403,7 +407,7 @@ ateam run "/simplify the recent commits" && ateam all
 * you can easily select which reports to run with `ateam report --roles ROLE1,ROLE2`
 * you can instruct the supervisor: `ateam review --extra-prompt "I only want tasks from refactoring_small and testing_basic"`
 
-### What if I want to use ateam in a slightly different workflow than report-review-code ?
+### What if I want to use ateam in a slightly different workflow than report-review-code-verify ?
 
 The `ateam run` command is a wrapper around coding to run one-shot, unattended prompts. You can use it to build your own automated scripts. It can also be run outside of an ateam project (but requires an ateam organization which is created by default in `$HOME`). You still benefit from ateam observability features:
 * `ateam ps` to see current and past execution

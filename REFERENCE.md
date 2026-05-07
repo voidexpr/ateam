@@ -572,7 +572,7 @@ Display recent agent runs.
 | Flag | Description |
 |------|-------------|
 | `--role ROLE` | Filter by role |
-| `--action ACTION` | Filter by action (report, review, code, run) |
+| `--action ACTION` | Filter by action (report, review, code, verify, run) |
 | `--limit N` | Max rows (default 30) |
 
 ### `ateam roles`
