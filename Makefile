@@ -101,7 +101,7 @@ test-docker-live: build-binary
 		ateam-test-dind
 
 vuln:
-	@BIN=$$(command -v govulncheck 2>/dev/null); \
+	@BIN=$$(command -v govulncheck 2>/dev/null || true); \
 	if [ -z "$$BIN" ] && [ -x "$$(go env GOPATH)/bin/govulncheck" ]; then \
 		BIN=$$(go env GOPATH)/bin/govulncheck; \
 	fi; \
@@ -118,8 +118,11 @@ vuln:
 		echo "vuln: skipping — govulncheck cannot reach the vuln database (no network or sandboxed)"; \
 		exit 0; \
 	fi; \
-	echo "$$out"; \
-	exit $$rc
+	printf '%s\n' "$$out"; \
+	if [ $$rc -ne 0 ]; then \
+		echo "vuln: govulncheck reported issues (exit $$rc)" >&2; \
+		exit $$rc; \
+	fi
 
 lint:
 	@if ! command -v golangci-lint >/dev/null 2>&1; then \
