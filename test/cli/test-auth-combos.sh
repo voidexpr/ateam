@@ -59,7 +59,7 @@ run_case() {
 
     local output
     output=$(cd "$PROJ" && env -i "${env_args[@]}" \
-        "$ATEAM" run ping --agent claude --model haiku --dry-run 2>&1)
+        "$ATEAM" exec ping --agent claude --model haiku --dry-run 2>&1)
 
     local missing=()
     for expected in "$@"; do
