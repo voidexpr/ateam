@@ -142,6 +142,75 @@ Release archives should include both `ateam` (host) and `ateam-linux-amd64` so D
 3. Run `make build` — the role is auto-discovered from the embedded filesystem
 4. Enable it in a project: `ateam init --role <name>` or edit `.ateam/config.toml`
 
+## Project on-disk layout
+
+Per-run artefacts are keyed by `agent_execs.id` (`<exec_id>`):
+
+```
+.ateam/
+  state.sqlite                                # per-project agent_execs DB
+  config.toml, runtime.hcl, …                 # config
+
+  logs/<exec_id>/                             # forensic, runner-owned
+    stream.jsonl                              # raw agent stream events
+    stderr.out                                # captured stderr
+    settings.json                             # rendered sandbox settings
+    prompt.md                                 # rendered prompt
+    cmd.md                                    # # Runtime / # Run details / # Command / # Env / # Settings / # Files Copy
+  logs/.layout-v2                             # migration sentinel
+
+  runtime/<exec_id>/                          # agent-writable output area
+    report.md | review.md | verify.md | …     # whatever the agent wrote via {{OUTPUT_FILE}} / {{OUTPUT_DIR}}
+
+  roles/<role>/                               # canonical, post-run promote target
+    report.md                                 # latest report
+    history/<TS>.report.md                    # archived outputs (kept across runs)
+  supervisor/
+    review.md, verify.md                      # canonical
+    history/<TS>.review.md, …                 # archived outputs
+    code/<exec_id>/<file>                     # `code` action canonical (per-exec_id)
+```
+
+Key invariants:
+
+- `logs/<exec_id>/` is forensics. The runner writes it; agents must not.
+- `runtime/<exec_id>/` is the agent's writable scratch. After a successful run the runner clones every non-`*_prompt.md` file to the action's canonical destination (`roles/<role>/`, `supervisor/`, `supervisor/code/<exec_id>/`, …). Source remains in `runtime/<exec_id>/`.
+- Clones use `cp -pc` on Darwin (APFS clonefile) and `cp -p --reflink=auto` on Linux (btrfs/xfs/zfs reflink) to avoid double disk usage; falls back to a regular byte copy.
+- `cmd.md` is written twice: once before the run (Run details "(pending)"), once at finalize with the actual exit code, status, and `# Files Copy` log.
+- Per-action `*_error.md` files no longer exist — failure context lives in `logs/<exec_id>/{cmd.md, stderr.out, stream.jsonl}`.
+
+### Migration of legacy projects (`internal/root/migrate_logs.go`)
+
+Pre-`<exec_id>` projects used a flat layout: `logs/{roles/<id>,parallel,run,supervisor}/<TS>_<ACTION>_{stream.jsonl,stderr.log,settings.json,exec.md}` plus history-dir prompts and per-action `*_error.md` files. `MigrateLogsLayout` runs lazily on the first DB open (both `openProjectDB` and `requireProjectDB`), is sentinel-guarded by `logs/.layout-v2`, and is idempotent.
+
+For each `agent_execs` row whose `stream_file` ends in `_stream.jsonl`:
+
+1. `os.Rename` `<TS>_<ACTION>_stream.jsonl|_stderr.log|_settings.json|_exec.md` into `logs/<id>/{stream.jsonl,stderr.out,settings.json,cmd.md}` (cmd.md content untouched).
+2. Locate the matching `<TS>.<action>_prompt.md` in `roles/<role>/history/` or `supervisor/history/` via `findClosestHistoryFile` (within `legacyPromptMatchWindow = 60s` of `started_at`); rename to `logs/<id>/prompt.md`. Started_at is parsed as RFC3339 and used directly — **no `.Local()`** — so DST/TZ moves don't break matching.
+3. Set `agent_execs.stream_file = "logs/<id>/stream.jsonl"` and (when a matching `<TS>.<kind>.md` archive exists in history) `agent_execs.output_file = "<role>/history/<TS>.<kind>.md"` so the web run-page output link still resolves.
+
+Then: delete canonical `report_error.md` / `review_error.md` / `verify_error.md` / `code_error.md` / `auto_setup_error.md`, remove `runner.log`, prune empty legacy log subdirs. Unmatched orphan files (no DB row, or skew >60s) are left in place — never destroyed.
+
+### Compatibility shims (remove after legacy data ages out)
+
+These exist so users with pre-migration databases keep working. Each has a clear marker for future removal:
+
+| Shim | Where | When to remove |
+|---|---|---|
+| `root.IsLegacyStreamFile` (`stream_file` ends in `_stream.jsonl`) | `internal/root/resolve.go` | When no `agent_execs` row in any deployed project still has a `_stream.jsonl` stream_file. |
+| Legacy branch in `cmd/inspect.go::logFilesForRun` (prefix-strip + `_exec.md`/`_settings.json`/`_stderr.log` suffixes) | `cmd/inspect.go` | Same condition as above. |
+| Legacy branch in `cmd/resume.go::cmdMDPath` (returns `_exec.md` instead of `cmd.md`) | `cmd/resume.go` | Same. |
+| Legacy branch in `cmd/pool_status.go::streamFilePrefix` (returns `<prefix>*` glob) | `cmd/pool_status.go` | Same. |
+| Legacy branch in `internal/web/handlers.go::resolveRunFiles` and `handleRunFile` | `internal/web/handlers.go` | Same. |
+| `internal/web/handlers.go::resolveHistoryFile` + `resolvePromptFile` + `resolveOutputFile` (±5s fuzzy match against `<role>/history/<TS>.<kind>.md` for runs with empty `output_file`) | `internal/web/handlers.go` | When all runs have a populated `agent_execs.output_file`. |
+| `internal/web/history.go::discoverHistory` + `mergeHistory` (filename-scan fallback merged into the DB-driven view) | `internal/web/history.go` | When `<role>/history/<TS>.<kind>.md` is no longer present in any deployed project. |
+| `internal/root/migrate_logs.go` whole file + the migration call in `cmd/table.go` | — | When legacy projects are no longer expected. Drop the sentinel constant too. |
+| `legacyOutputSuffix` / `legacyPromptSuffix` / `legacyHistoryDir` (action → kind/path mapping) | `internal/root/migrate_logs.go` | With the migration. |
+| `internal/runner/template.go::EXECUTION_DIR` template alias (legacy alias for `OUTPUT_DIR` used by older `code_management_prompt.md`) | `internal/runner/template.go` | When all in-tree and user-overloaded prompts use `{{OUTPUT_DIR}}`. |
+| Streamed-text fallback that seeds `runtime/<id>/<primary>.md` when the agent didn't `Write` | `internal/runner/runner.go` (after the event loop) | When all default prompts reliably use the `Write` tool and we sandbox-deny stray writes. |
+
+Search for `legacy` in those files to find the relevant blocks.
+
 ## Architecture: Runtime / Agents / Containers / Profiles
 
 Configuration lives in `runtime.hcl` with 4-level resolution: embedded defaults → org defaults → org overrides → project overrides.
