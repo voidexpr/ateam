@@ -778,3 +778,72 @@ func TestHandleCostDBError(t *testing.T) {
 		t.Errorf("handleCost DB error status = %d, want %d", w.Code, http.StatusInternalServerError)
 	}
 }
+
+func TestHandleRunFileLogsShowsTimestamps(t *testing.T) {
+	projectDir := t.TempDir()
+
+	dbPath := filepath.Join(projectDir, "state.sqlite")
+	db, err := calldb.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open calldb: %v", err)
+	}
+	defer db.Close()
+
+	now := time.Now()
+	ts := now.Format(runner.TimestampFormat)
+
+	logsDir := filepath.Join("roles", "security", "history")
+	absLogsDir := filepath.Join(projectDir, logsDir)
+	if err := os.MkdirAll(absLogsDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	streamBase := ts + "_report_stream.jsonl"
+	streamRel := filepath.Join(logsDir, streamBase)
+	streamLines := strings.Join([]string{
+		`{"type":"system","subtype":"init","session_id":"sid-web","model":"claude-sonnet","cwd":"/tmp"}`,
+		`{"type":"user"}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"web logs output"}]}}`,
+		`{"type":"result","total_cost_usd":0.01,"duration_ms":60000,"num_turns":1,"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":0}}`,
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(absLogsDir, streamBase), []byte(streamLines), 0644); err != nil {
+		t.Fatalf("WriteFile stream: %v", err)
+	}
+
+	callID, err := db.InsertCall(&calldb.Call{
+		ProjectID:  "test-proj",
+		Action:     runner.ActionReport,
+		Role:       "security",
+		Batch:      "report-" + ts,
+		StartedAt:  now.Add(-5 * time.Minute),
+		StreamFile: streamRel,
+	})
+	if err != nil {
+		t.Fatalf("InsertCall: %v", err)
+	}
+	if err := db.UpdateCall(callID, &calldb.CallResult{
+		EndedAt:    now,
+		DurationMS: 60000,
+		CostUSD:    0.01,
+	}); err != nil {
+		t.Fatalf("UpdateCall: %v", err)
+	}
+	db.Close()
+
+	s := newTestServer(t, projectDir)
+	mux := newTestMux(s)
+	req := httptest.NewRequest("GET", fmt.Sprintf("/p/testproj/runs/%d/logs", callID), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("handleRunFile logs status = %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Started:") {
+		t.Errorf("expected Started timestamp in logs HTML (session start plumbing):\n%s", body)
+	}
+	if !strings.Contains(body, "Ended:") {
+		t.Errorf("expected Ended timestamp in logs HTML (session start plumbing):\n%s", body)
+	}
+}

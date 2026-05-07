@@ -139,7 +139,7 @@ func runCatIDs(args []string) error {
 
 		pricing, defaultModel := agentPricing(row.Agent)
 		var sessionStart time.Time
-		if t, ok := runner.ParseTimestampPrefix(row.StartedAt); ok {
+		if t, err := time.Parse(time.RFC3339, row.StartedAt); err == nil {
 			sessionStart = t
 		}
 		f := &runner.StreamFormatter{

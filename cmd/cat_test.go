@@ -115,4 +115,10 @@ func TestRunCatIDs(t *testing.T) {
 	if !strings.Contains(out, "IDs path output") {
 		t.Errorf("expected stream text in output:\n%s", out)
 	}
+	if !strings.Contains(out, "Started:") {
+		t.Errorf("expected Started timestamp in output (RFC3339 session start plumbing):\n%s", out)
+	}
+	if !strings.Contains(out, "Ended:") {
+		t.Errorf("expected Ended timestamp in output (RFC3339 session start plumbing):\n%s", out)
+	}
 }
