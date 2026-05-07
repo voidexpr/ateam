@@ -84,7 +84,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no session id found in %s (run may not have started)", streamPath)
 	}
 
-	execMD := strings.TrimSuffix(streamPath, "_stream.jsonl") + "_exec.md"
+	execMD := cmdMDPath(streamPath)
 	configDir, configDirSource := resolveResumeConfigDir(execMD, env, row)
 
 	fmt.Printf("Run:        %d (%s/%s)\n", row.ID, row.Role, row.Action)
@@ -192,6 +192,16 @@ func extractSessionID(path string) (string, error) {
 		}
 	}
 	return "", scanner.Err()
+}
+
+// cmdMDPath returns the cmd.md path that pairs with a stream file, handling
+// both the new layout (logs/<exec_id>/{stream.jsonl, cmd.md}) and the legacy
+// prefix layout (<dir>/<TS>_<ACTION>_{stream.jsonl, exec.md}).
+func cmdMDPath(streamPath string) string {
+	if strings.HasSuffix(streamPath, "_stream.jsonl") {
+		return strings.TrimSuffix(streamPath, "_stream.jsonl") + "_exec.md"
+	}
+	return filepath.Join(filepath.Dir(streamPath), "cmd.md")
 }
 
 // resolveResumeConfigDir picks the canonical CLAUDE_CONFIG_DIR for a resume.

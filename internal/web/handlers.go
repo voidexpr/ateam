@@ -127,24 +127,44 @@ type runFiles struct {
 }
 
 // resolveRunFiles resolves associated files for a single run row.
+//
+// New layout (logs/<exec_id>/{stream.jsonl,cmd.md,prompt.md,stderr.out}):
+// every file lives in the same directory as the stream file. Legacy layout
+// (TS_ACTION_*) is detected by the "_stream.jsonl" suffix and falls back to
+// the old prefix-based discovery + ±5s prompt match.
 func resolveRunFiles(projectDir, orgDir string, row calldb.RecentRow) runFiles {
 	if row.StreamFile == "" {
 		return runFiles{}
 	}
 	absStream := root.ResolveStreamPath(projectDir, orgDir, row.StreamFile)
 	var rf runFiles
-	prefix := strings.TrimSuffix(absStream, "_stream.jsonl")
-	if _, err := os.Stat(prefix + "_exec.md"); err == nil {
-		rf.ExecFile = filepath.Base(prefix + "_exec.md")
-	}
+	rf.LogsDir = filepath.Dir(row.StreamFile)
 	if _, err := os.Stat(absStream); err == nil {
 		rf.HasStream = true
 	}
-	if info, err := os.Stat(prefix + "_stderr.log"); err == nil && info.Size() > 0 {
+	if strings.HasSuffix(absStream, "_stream.jsonl") {
+		// Legacy layout: prefix-based siblings, prompt in roles/<id>/history.
+		prefix := strings.TrimSuffix(absStream, "_stream.jsonl")
+		if _, err := os.Stat(prefix + "_exec.md"); err == nil {
+			rf.ExecFile = filepath.Base(prefix + "_exec.md")
+		}
+		if info, err := os.Stat(prefix + "_stderr.log"); err == nil && info.Size() > 0 {
+			rf.HasStderr = true
+		}
+		rf.PromptFile = resolvePromptFile(projectDir, row.Action, row.Role, row.StreamFile)
+		return rf
+	}
+	// New layout: everything in dir(streamFile).
+	dir := filepath.Dir(absStream)
+	if _, err := os.Stat(filepath.Join(dir, "cmd.md")); err == nil {
+		rf.ExecFile = "cmd.md"
+	}
+	if info, err := os.Stat(filepath.Join(dir, "stderr.out")); err == nil && info.Size() > 0 {
 		rf.HasStderr = true
 	}
-	rf.LogsDir = filepath.Dir(row.StreamFile)
-	rf.PromptFile = resolvePromptFile(projectDir, row.Action, row.Role, row.StreamFile)
+	if _, err := os.Stat(filepath.Join(dir, "prompt.md")); err == nil {
+		rf.PromptFile = "prompt.md"
+	}
 	return rf
 }
 
@@ -206,9 +226,12 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	for _, rpt := range reports {
 		if rpt.RoleID == roleID {
 			histDir := filepath.Join(pe.ProjectDir, "roles", roleID, "history")
-			history := filterHistoryByKind(discoverHistory(histDir), "report")
-			costs := fetchRunCosts(s.getDB(pe), runner.ActionReport, roleID)
-			enrichHistoryCost(history, costs)
+			legacy := filterHistoryByKind(discoverHistory(histDir), "report")
+			db := s.getDB(pe)
+			fromDB := historyFromDB(db, pe.ProjectDir, runner.ActionReport, roleID, "report")
+			costs := fetchRunCosts(db, runner.ActionReport, roleID)
+			enrichHistoryCost(legacy, costs)
+			history := mergeHistory(fromDB, legacy)
 			curCost, curTokens := latestRunCost(costs)
 			s.render(w, r, "report.html", pageData{
 				Title:       roleID + " report",
@@ -269,9 +292,12 @@ func (s *Server) handleSupervisorOutput(cfg supervisorPageConfig) http.HandlerFu
 			data.HTML = template.HTML(s.renderMarkdown(string(content)))
 			data.ModTime = modTime
 		}
-		data.History = filterHistoryByKind(discoverHistory(pe.SupervisorHistoryDir()), cfg.Kind)
-		costs := fetchRunCosts(s.getDB(pe), cfg.Action, "supervisor")
-		enrichHistoryCost(data.History, costs)
+		legacy := filterHistoryByKind(discoverHistory(pe.SupervisorHistoryDir()), cfg.Kind)
+		db := s.getDB(pe)
+		fromDB := historyFromDB(db, pe.ProjectDir, cfg.Action, "supervisor", cfg.Kind)
+		costs := fetchRunCosts(db, cfg.Action, "supervisor")
+		enrichHistoryCost(legacy, costs)
+		data.History = mergeHistory(fromDB, legacy)
 		data.CurrentCostUSD, data.CurrentTotalTokens = latestRunCost(costs)
 		data.HistoryRoute = cfg.Nav
 
@@ -460,35 +486,54 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 
 	fileType := r.PathValue("file")
 	absStream := root.ResolveStreamPath(pe.ProjectDir, pe.OrgDir, run.StreamFile)
+	legacy := strings.HasSuffix(absStream, "_stream.jsonl")
+	logDir := filepath.Dir(absStream)
 	var absPath, title string
 
 	switch fileType {
 	case "exec":
-		prefix := strings.TrimSuffix(absStream, "_stream.jsonl")
-		absPath = prefix + "_exec.md"
+		if legacy {
+			absPath = strings.TrimSuffix(absStream, "_stream.jsonl") + "_exec.md"
+		} else {
+			absPath = filepath.Join(logDir, "cmd.md")
+		}
 		title = fmt.Sprintf("Run #%d — Exec", id)
 	case "prompt":
-		promptFile := resolvePromptFile(pe.ProjectDir, run.Action, run.Role, run.StreamFile)
-		if promptFile == "" {
-			http.NotFound(w, r)
-			return
+		if legacy {
+			promptFile := resolvePromptFile(pe.ProjectDir, run.Action, run.Role, run.StreamFile)
+			if promptFile == "" {
+				http.NotFound(w, r)
+				return
+			}
+			absPath = filepath.Join(pe.ProjectDir, promptDir(run.Action, run.Role), promptFile)
+		} else {
+			absPath = filepath.Join(logDir, "prompt.md")
 		}
-		absPath = filepath.Join(pe.ProjectDir, promptDir(run.Action, run.Role), promptFile)
 		title = fmt.Sprintf("Run #%d — Prompt", id)
 	case "output":
-		outputFile := resolveOutputFile(pe.ProjectDir, run.Action, run.Role, run.StreamFile)
-		if outputFile == "" {
-			http.NotFound(w, r)
-			return
+		// Outputs live in their canonical destination (or the legacy history dir).
+		// The agent_execs.output_file column holds the canonical path for new
+		// runs; legacy runs fall back to the timestamp-matched history file.
+		if run.OutputFile != "" {
+			absPath = filepath.Join(pe.ProjectDir, run.OutputFile)
+		} else {
+			outputFile := resolveOutputFile(pe.ProjectDir, run.Action, run.Role, run.StreamFile)
+			if outputFile == "" {
+				http.NotFound(w, r)
+				return
+			}
+			absPath = filepath.Join(pe.ProjectDir, promptDir(run.Action, run.Role), outputFile)
 		}
-		absPath = filepath.Join(pe.ProjectDir, promptDir(run.Action, run.Role), outputFile)
 		title = fmt.Sprintf("Run #%d — Output", id)
 	case "logs":
 		absPath = absStream
 		title = fmt.Sprintf("Run #%d — Stream Log", id)
 	case "stderr":
-		prefix := strings.TrimSuffix(absStream, "_stream.jsonl")
-		absPath = prefix + "_stderr.log"
+		if legacy {
+			absPath = strings.TrimSuffix(absStream, "_stream.jsonl") + "_stderr.log"
+		} else {
+			absPath = filepath.Join(logDir, "stderr.out")
+		}
 		title = fmt.Sprintf("Run #%d — Stderr", id)
 	default:
 		http.NotFound(w, r)

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
@@ -176,47 +175,25 @@ func runRun(cmd *cobra.Command, args []string) error {
 		return printRunDryRun(r, env, promptText, runRole, runBatch)
 	}
 
-	// Open call tracking DB (requires project context).
-	if hasProject {
-		db, err := openProjectDB(env)
-		if err != nil {
-			return err
-		}
-		defer db.Close()
-		r.CallDB = db
+	// Project context required: every Run gets an exec_id from the project DB.
+	if !hasProject {
+		return fmt.Errorf("ateam project required: no .ateam/ found")
 	}
-
-	// Determine logs dir — always under .ateam/ when project exists.
-	var logsDir string
-	if runRole != "" {
-		logsDir = env.RoleLogsDir(runRole)
-	} else if hasProject {
-		logsDir = filepath.Join(env.ProjectDir, "logs", "run")
-	} else {
-		logsDir = filepath.Join(env.OrgDir, "logs", "run")
+	db, err := openProjectDB(env)
+	if err != nil {
+		return err
 	}
+	defer db.Close()
+	r.CallDB = db
 
-	// Build opts
+	// Build opts. `run` has no canonical destination — its deliverable is the
+	// stream, viewable via `ateam cat <exec_id>`.
 	opts := runner.RunOpts{
 		RoleID:  runRole,
 		Action:  runner.ActionRun,
-		LogsDir: logsDir,
 		WorkDir: workDir,
 		Verbose: runVerbose,
 		Batch:   runBatch,
-	}
-
-	opts.PromptName = "run_prompt.md"
-	ts := time.Now().Format(runner.TimestampFormat)
-	if runRole != "" {
-		roleDir := env.RoleDir(runRole)
-		opts.LastMessageFilePath = filepath.Join(roleDir, "history", ts+".run_output.md")
-		opts.ErrorMessageFilePath = filepath.Join(roleDir, "history", ts+".run_error.md")
-		opts.HistoryDir = env.RoleHistoryDir(runRole)
-	} else {
-		opts.LastMessageFilePath = filepath.Join(logsDir, ts+"_run_output.md")
-		opts.ErrorMessageFilePath = filepath.Join(logsDir, ts+"_run_error.md")
-		opts.HistoryDir = logsDir
 	}
 
 	showStream := !runNoStream && !runQuiet

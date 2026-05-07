@@ -1,6 +1,7 @@
 ateam
 ateam-race
 ateam-linux-*
+.roles-docs.gen
 build/
 test_projects/
 old_projects/

@@ -2,7 +2,6 @@ package runner
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -47,12 +46,11 @@ func (*fakeProgressAgent) Run(ctx context.Context, req agent.Request) <-chan age
 
 func TestRunnerForwardsCumulativeProgress(t *testing.T) {
 	dir := t.TempDir()
-	r := &Runner{Agent: &fakeProgressAgent{}}
+	r := newTestRunner(t, dir, &fakeProgressAgent{})
 
 	opts := RunOpts{
-		RoleID:  "fake",
-		Action:  ActionRun,
-		LogsDir: filepath.Join(dir, "logs"),
+		RoleID: "fake",
+		Action: ActionRun,
 	}
 
 	progressCh := make(chan RunProgress, 32)

@@ -194,26 +194,23 @@ func runOneRole(ctx context.Context, role RoleRun, v Variant, timeoutMin int, ve
 		return nil, fmt.Errorf("assemble prompt for %s: %w", role.RoleID, err)
 	}
 
-	roleDir := env.RoleDir(role.RoleID)
 	ts := time.Now().Format(runner.TimestampFormat)
-	var lastMsgPath string
+	// In eval, only the RunReview path needs the canonical role report so the
+	// downstream review step can read it. Standalone eval keeps its output
+	// confined to runtime/<exec_id>/ + logs/<exec_id>/.
+	canonical := ""
 	if v.RunReview {
-		lastMsgPath = env.RoleReportPath(role.RoleID)
-	} else {
-		lastMsgPath = filepath.Join(roleDir, "history", ts+"_eval_"+string(v.Label)+".report.md")
+		canonical = env.RoleDir(role.RoleID)
 	}
 	opts := runner.RunOpts{
-		RoleID:               role.RoleID,
-		Action:               runner.ActionReport,
-		LogsDir:              env.RoleLogsDir(role.RoleID),
-		LastMessageFilePath:  lastMsgPath,
-		ErrorMessageFilePath: filepath.Join(roleDir, "history", ts+"_eval_"+string(v.Label)+".error.md"),
-		WorkDir:              env.SourceDir,
-		TimeoutMin:           timeoutMin,
-		HistoryDir:           env.RoleHistoryDir(role.RoleID),
-		PromptName:           "eval_" + string(v.Label) + "_prompt.md",
-		Verbose:              verbose,
-		Batch:                "eval-" + ts,
+		RoleID:           role.RoleID,
+		Action:           runner.ActionReport,
+		OutputKind:       runner.OutputKindReport,
+		CanonicalDestDir: canonical,
+		WorkDir:          env.SourceDir,
+		TimeoutMin:       timeoutMin,
+		Verbose:          verbose,
+		Batch:            "eval-" + ts,
 	}
 
 	summary := v.Runner.Run(ctx, promptText, opts, nil)
@@ -236,18 +233,16 @@ func runReviewStep(ctx context.Context, v Variant, timeoutMin int, verbose bool)
 	}
 
 	ts := time.Now().Format(runner.TimestampFormat)
-	logsDir := env.SupervisorLogsDir()
 	opts := runner.RunOpts{
-		RoleID:               "supervisor",
-		Action:               runner.ActionReview,
-		LogsDir:              logsDir,
-		LastMessageFilePath:  filepath.Join(logsDir, ts+"_eval_"+string(v.Label)+".review.md"),
-		ErrorMessageFilePath: filepath.Join(logsDir, ts+"_eval_"+string(v.Label)+".review_error.md"),
-		WorkDir:              env.SourceDir,
-		TimeoutMin:           timeoutMin,
-		PromptName:           "eval_" + string(v.Label) + "_review_prompt.md",
-		Verbose:              verbose,
-		Batch:                "eval-" + ts,
+		RoleID:     "supervisor",
+		Action:     runner.ActionReview,
+		OutputKind: runner.OutputKindReview,
+		// Eval reviews are not promoted to a canonical "latest" — different
+		// variants would clobber each other. Output stays in runtime/<exec_id>/.
+		WorkDir:    env.SourceDir,
+		TimeoutMin: timeoutMin,
+		Verbose:    verbose,
+		Batch:      "eval-" + ts,
 	}
 
 	summary := v.Runner.Run(ctx, prompt, opts, nil)

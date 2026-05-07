@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/ateam/internal/prompts"
@@ -104,22 +102,15 @@ func runVerify(opts VerifyOptions) error {
 
 	timeout := env.Config.Review.EffectiveTimeout(opts.Timeout)
 
-	verifyFile := env.VerifyPath()
 	supervisorDir := env.SupervisorDir()
-	historyDir := env.ReviewHistoryDir()
 
 	startedAt := time.Now()
-	prompt, outputFile := prepareOutputFile(prompt, historyDir, "verify.md", startedAt)
 
 	if opts.DryRun {
 		fmt.Printf("╔══ verify ══╗\n\n")
 		fmt.Println(prompt)
 		fmt.Printf("\n╚══ verify ══╝\n")
 		return nil
-	}
-
-	if err := os.MkdirAll(historyDir, 0755); err != nil {
-		return fmt.Errorf("cannot create supervisor history directory: %w", err)
 	}
 
 	fmt.Printf("Supervisor verifying recent code changes (%dm timeout)...\n", timeout)
@@ -148,18 +139,14 @@ func runVerify(opts VerifyOptions) error {
 	}
 
 	runOpts := runner.RunOpts{
-		RoleID:               "supervisor",
-		Action:               runner.ActionVerify,
-		LogsDir:              env.SupervisorLogsDir(),
-		LastMessageFilePath:  verifyFile,
-		OutputFilePath:       outputFile,
-		ErrorMessageFilePath: filepath.Join(supervisorDir, "verify_error.md"),
-		WorkDir:              env.SourceDir,
-		TimeoutMin:           timeout,
-		HistoryDir:           historyDir,
-		PromptName:           prompts.CodeVerifyPromptFile,
-		Verbose:              opts.Verbose,
-		StartedAt:            startedAt,
+		RoleID:           "supervisor",
+		Action:           runner.ActionVerify,
+		OutputKind:       runner.OutputKindVerify,
+		CanonicalDestDir: supervisorDir,
+		WorkDir:          env.SourceDir,
+		TimeoutMin:       timeout,
+		Verbose:          opts.Verbose,
+		StartedAt:        startedAt,
 	}
 
 	ctx, stop := cmdContext()
@@ -171,7 +158,7 @@ func runVerify(opts VerifyOptions) error {
 	}
 
 	printDone(result)
-	fmt.Printf("Verification report: %s\n", verifyFile)
+	fmt.Printf("Verification report: %s\n", env.VerifyPath())
 
 	if opts.Print {
 		fmt.Printf("\n%s\n", result.Output)

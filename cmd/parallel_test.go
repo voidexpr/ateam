@@ -14,10 +14,26 @@ import (
 	"github.com/ateam/internal/runner"
 )
 
+// newCmdTestRunner returns a Runner backed by a temp project DB so Run() can
+// satisfy its "CallDB required" precondition.
+func newCmdTestRunner(t *testing.T, baseDir string, ag agent.Agent) *runner.Runner {
+	t.Helper()
+	db, err := calldb.Open(filepath.Join(baseDir, "state.sqlite"))
+	if err != nil {
+		t.Fatalf("open test calldb: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return &runner.Runner{
+		Agent:      ag,
+		ProjectDir: baseDir,
+		CallDB:     db,
+	}
+}
+
 func TestParallelPoolWithMockAgent(t *testing.T) {
 	dir := t.TempDir()
 	mock := &agent.MockAgent{Response: "hello from parallel", Cost: 0.02}
-	r := &runner.Runner{Agent: mock}
+	r := newCmdTestRunner(t, dir, mock)
 
 	labels := []string{"alpha", "beta", "gamma"}
 	tasks := make([]runner.PoolExec, len(labels))
@@ -25,10 +41,9 @@ func TestParallelPoolWithMockAgent(t *testing.T) {
 		tasks[i] = runner.PoolExec{
 			Prompt: fmt.Sprintf("prompt for %s", label),
 			RunOpts: runner.RunOpts{
-				RoleID:  label,
-				Action:  runner.ActionParallel,
-				LogsDir: filepath.Join(dir, "logs", label),
-				Batch:   "test-parallel-group",
+				RoleID: label,
+				Action: runner.ActionParallel,
+				Batch:  "test-parallel-group",
 			},
 		}
 	}
@@ -80,11 +95,11 @@ func TestParallelPoolPartialFailure(t *testing.T) {
 	dir := t.TempDir()
 
 	successMock := &agent.MockAgent{Response: "ok", Cost: 0.01}
-	r := &runner.Runner{Agent: successMock}
+	r := newCmdTestRunner(t, dir, successMock)
 
 	tasks := []runner.PoolExec{
-		{Prompt: "good", RunOpts: runner.RunOpts{RoleID: "good-task", Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", "good")}},
-		{Prompt: "also good", RunOpts: runner.RunOpts{RoleID: "good-task-2", Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", "good2")}},
+		{Prompt: "good", RunOpts: runner.RunOpts{RoleID: "good-task", Action: runner.ActionParallel}},
+		{Prompt: "also good", RunOpts: runner.RunOpts{RoleID: "good-task-2", Action: runner.ActionParallel}},
 	}
 
 	completedCh := make(chan runner.RunSummary, len(tasks))
@@ -111,11 +126,11 @@ func TestParallelPoolWithErrors(t *testing.T) {
 	dir := t.TempDir()
 
 	failMock := &agent.MockAgent{Err: fmt.Errorf("simulated failure")}
-	r := &runner.Runner{Agent: failMock}
+	r := newCmdTestRunner(t, dir, failMock)
 
 	tasks := []runner.PoolExec{
-		{Prompt: "fail1", RunOpts: runner.RunOpts{RoleID: "fail-a", Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", "fail-a")}},
-		{Prompt: "fail2", RunOpts: runner.RunOpts{RoleID: "fail-b", Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", "fail-b")}},
+		{Prompt: "fail1", RunOpts: runner.RunOpts{RoleID: "fail-a", Action: runner.ActionParallel}},
+		{Prompt: "fail2", RunOpts: runner.RunOpts{RoleID: "fail-b", Action: runner.ActionParallel}},
 	}
 
 	completedCh := make(chan runner.RunSummary, len(tasks))
@@ -134,11 +149,11 @@ func TestParallelPoolWithErrors(t *testing.T) {
 func TestParallelPoolProgressEvents(t *testing.T) {
 	dir := t.TempDir()
 	mock := &agent.MockAgent{Response: "progress test"}
-	r := &runner.Runner{Agent: mock}
+	r := newCmdTestRunner(t, dir, mock)
 
 	tasks := []runner.PoolExec{
-		{Prompt: "p1", RunOpts: runner.RunOpts{RoleID: "prog-1", Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", "prog-1")}},
-		{Prompt: "p2", RunOpts: runner.RunOpts{RoleID: "prog-2", Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", "prog-2")}},
+		{Prompt: "p1", RunOpts: runner.RunOpts{RoleID: "prog-1", Action: runner.ActionParallel}},
+		{Prompt: "p2", RunOpts: runner.RunOpts{RoleID: "prog-2", Action: runner.ActionParallel}},
 	}
 
 	progressCh := make(chan runner.RunProgress, 64)
@@ -262,8 +277,9 @@ func TestParallelPoolWithCallDB(t *testing.T) {
 
 	mock := &agent.MockAgent{Response: "tracked output", Cost: 0.03}
 	r := &runner.Runner{
-		Agent:  mock,
-		CallDB: db,
+		Agent:      mock,
+		ProjectDir: dir,
+		CallDB:     db,
 	}
 
 	batch := "test-parallel-" + time.Now().Format(runner.TimestampFormat)
@@ -273,10 +289,9 @@ func TestParallelPoolWithCallDB(t *testing.T) {
 		tasks[i] = runner.PoolExec{
 			Prompt: fmt.Sprintf("prompt for %s", label),
 			RunOpts: runner.RunOpts{
-				RoleID:  label,
-				Action:  runner.ActionParallel,
-				LogsDir: filepath.Join(dir, "logs", label),
-				Batch:   batch,
+				RoleID: label,
+				Action: runner.ActionParallel,
+				Batch:  batch,
 			},
 		}
 	}
@@ -325,13 +340,13 @@ func TestParallelPoolSequentialExecution(t *testing.T) {
 	dir := t.TempDir()
 
 	mock := &agent.MockAgent{Response: "sequential", Delay: 10 * time.Millisecond}
-	r := &runner.Runner{Agent: mock}
+	r := newCmdTestRunner(t, dir, mock)
 
 	tasks := make([]runner.PoolExec, 3)
 	for i := range tasks {
 		tasks[i] = runner.PoolExec{
 			Prompt:  fmt.Sprintf("seq-%d", i),
-			RunOpts: runner.RunOpts{RoleID: fmt.Sprintf("seq-%d", i), Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", fmt.Sprintf("seq-%d", i))},
+			RunOpts: runner.RunOpts{RoleID: fmt.Sprintf("seq-%d", i), Action: runner.ActionParallel},
 		}
 	}
 
@@ -358,14 +373,14 @@ func TestParallelPoolSequentialExecution(t *testing.T) {
 func TestParallelPoolOutputCollection(t *testing.T) {
 	dir := t.TempDir()
 	mock := &agent.MockAgent{Response: "collected output"}
-	r := &runner.Runner{Agent: mock}
+	r := newCmdTestRunner(t, dir, mock)
 
 	labels := []string{"first", "second", "third"}
 	tasks := make([]runner.PoolExec, len(labels))
 	for i, label := range labels {
 		tasks[i] = runner.PoolExec{
 			Prompt:  fmt.Sprintf("prompt %s", label),
-			RunOpts: runner.RunOpts{RoleID: label, Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", label)},
+			RunOpts: runner.RunOpts{RoleID: label, Action: runner.ActionParallel},
 		}
 	}
 
@@ -395,13 +410,13 @@ func TestParallelPoolContextCancellation(t *testing.T) {
 	dir := t.TempDir()
 
 	mock := &agent.MockAgent{Response: "slow", Delay: 5 * time.Second}
-	r := &runner.Runner{Agent: mock}
+	r := newCmdTestRunner(t, dir, mock)
 
 	tasks := make([]runner.PoolExec, 3)
 	for i := range tasks {
 		tasks[i] = runner.PoolExec{
 			Prompt:  "slow task",
-			RunOpts: runner.RunOpts{RoleID: fmt.Sprintf("cancel-%d", i), Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", fmt.Sprintf("cancel-%d", i))},
+			RunOpts: runner.RunOpts{RoleID: fmt.Sprintf("cancel-%d", i), Action: runner.ActionParallel},
 		}
 	}
 
@@ -433,12 +448,12 @@ func TestParallelBatchInDB(t *testing.T) {
 	defer db.Close()
 
 	mock := &agent.MockAgent{Response: "grouped"}
-	r := &runner.Runner{Agent: mock, CallDB: db}
+	r := &runner.Runner{Agent: mock, ProjectDir: dir, CallDB: db}
 
 	batch := "parallel-2026-04-03_12-00-00"
 	tasks := []runner.PoolExec{
-		{Prompt: "g1", RunOpts: runner.RunOpts{RoleID: "grp-1", Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", "grp-1"), Batch: batch}},
-		{Prompt: "g2", RunOpts: runner.RunOpts{RoleID: "grp-2", Action: runner.ActionParallel, LogsDir: filepath.Join(dir, "logs", "grp-2"), Batch: batch}},
+		{Prompt: "g1", RunOpts: runner.RunOpts{RoleID: "grp-1", Action: runner.ActionParallel, Batch: batch}},
+		{Prompt: "g2", RunOpts: runner.RunOpts{RoleID: "grp-2", Action: runner.ActionParallel, Batch: batch}},
 	}
 
 	runner.RunPool(context.Background(), r, tasks, 2, nil, nil)

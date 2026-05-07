@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ateam/internal/agent"
+	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -131,12 +132,22 @@ func makeEvalVariant(t *testing.T, label Side, response string, errToReturn erro
 	} else {
 		mock = &agent.MockAgent{Response: response}
 	}
+	projectDir := t.TempDir()
+	db, err := calldb.Open(filepath.Join(projectDir, "state.sqlite"))
+	if err != nil {
+		t.Fatalf("open eval calldb: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
 	return Variant{
-		Label:  label,
-		Roles:  []RoleRun{{RoleID: "testrole", PromptText: "# test prompt\nAnalyze this."}},
-		Runner: &runner.Runner{Agent: mock},
+		Label: label,
+		Roles: []RoleRun{{RoleID: "testrole", PromptText: "# test prompt\nAnalyze this."}},
+		Runner: &runner.Runner{
+			Agent:      mock,
+			ProjectDir: projectDir,
+			CallDB:     db,
+		},
 		Env: &root.ResolvedEnv{
-			ProjectDir: t.TempDir(),
+			ProjectDir: projectDir,
 			SourceDir:  t.TempDir(),
 		},
 	}

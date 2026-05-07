@@ -377,6 +377,21 @@ func (c *CallDB) SetPID(id int64, pid int, containerID string) error {
 	return err
 }
 
+// UpdateStreamFile sets the stream_file path for an exec row. Used after
+// InsertCall returns the new id so the path can be derived from the id (e.g.
+// logs/<id>/stream.jsonl).
+func (c *CallDB) UpdateStreamFile(id int64, streamFile string) error {
+	_, err := c.db.Exec("UPDATE agent_execs SET stream_file = ? WHERE id = ?", streamFile, id)
+	return err
+}
+
+// UpdateOutputFile sets the output_file path. Called at finalize once the
+// canonical output path is known. Display-only; not unique across rows.
+func (c *CallDB) UpdateOutputFile(id int64, outputFile string) error {
+	_, err := c.db.Exec("UPDATE agent_execs SET output_file = ? WHERE id = ?", outputFile, id)
+	return err
+}
+
 func (c *CallDB) RawDB() *sql.DB {
 	return c.db
 }

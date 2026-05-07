@@ -2,7 +2,6 @@
 package runner
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -17,6 +16,7 @@ import (
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/display"
+	"github.com/ateam/internal/fsclone"
 )
 
 // TimestampFormat is kept as an alias for backward compatibility with
@@ -83,7 +83,6 @@ const (
 type Runner struct {
 	Agent                agent.Agent
 	Container            container.Container // nil means run on host
-	LogFile              string              // append-only runner log
 	ProjectDir           string              // .ateam/ dir
 	OrgDir               string              // .ateamorg/ dir
 	SourceDir            string              // project root (parent of .ateam/)
@@ -93,8 +92,10 @@ type Runner struct {
 	ConfigDir            string              // CLAUDE_CONFIG_DIR; relative resolves from ProjectDir
 	ArgsInsideContainer  []string            // extra args when inside a container
 	ArgsOutsideContainer []string            // extra args when on the host
-	CallDB               *calldb.CallDB      // nil = no DB tracking
+	CallDB               *calldb.CallDB      // required: every Run inserts an exec row
 	Profile              string              // profile name for DB
+	ProfileDef           string              // verbatim profile definition (HCL) for cmd.md
+	AgentDef             string              // verbatim agent definition (HCL) for cmd.md
 	ContainerType        string              // "none" or "docker" for DB
 	ContainerName        string              // docker container name for liveness checks
 	ContainerNameSource  string              // where ContainerName came from (ContainerNameSource* constants)
@@ -112,20 +113,22 @@ type Runner struct {
 const defaultStallWarn = 5 * time.Minute
 
 // RunOpts holds per-invocation settings.
+//
+// All paths are derived from the exec_id returned by InsertCall — callers do
+// not pre-compute log or history paths. The runner owns:
+//   - logs/<exec_id>/        forensic artefacts (stream, stderr, settings, prompt, cmd.md)
+//   - runtime/<exec_id>/     agent-writable output area; primary file driven by OutputKind
+//   - <CanonicalDestDir>/    where runtime files are cloned on success (e.g. roles/<id>/)
 type RunOpts struct {
-	RoleID               string
-	Action               string // "report", "run", "code", "review"
-	LogsDir              string // flat dir for all timestamped log files
-	LastMessageFilePath  string // canonical "last successful output" path; copied from OutputFilePath on success, or written from final assistant text as a fallback
-	OutputFilePath       string // pre-computed timestamped path inside HistoryDir; the agent is told to Write its output here, and on success it is promoted to LastMessageFilePath. If empty, runner falls back to the legacy "stream final text into LastMessageFilePath" behavior.
-	ErrorMessageFilePath string // where to write error info (on failure only)
-	WorkDir              string // cwd for the subprocess
-	TimeoutMin           int
-	HistoryDir           string    // where to archive the prompt
-	PromptName           string    // archive name
-	Verbose              bool      // print agent and docker commands to stderr
-	Batch                string    // groups related agent_execs (e.g. all execs in one ateam code run)
-	StartedAt            time.Time // optional override; if zero, Run() uses time.Now(). Use to align cmd-side path computation with runner-side log/archive timestamps.
+	RoleID           string
+	Action           string // "report", "run", "code", "review", ...
+	OutputKind       string // OutputKindReport / Review / Verify / ExecutionReport / SetupOverview / "" (no primary output)
+	CanonicalDestDir string // where runtime/<exec_id>/ files are cloned on success; "" disables promotion
+	WorkDir          string // cwd for the subprocess
+	TimeoutMin       int
+	Verbose          bool      // print agent and docker commands to stderr
+	Batch            string    // groups related agent_execs (e.g. all execs in one ateam code run)
+	StartedAt        time.Time // optional override; if zero, Run() uses time.Now()
 }
 
 // RunProgress is a lightweight status sent on a channel during execution.
@@ -186,24 +189,65 @@ type RunSummary struct {
 	ErrorCause  string
 }
 
-// LogQueued writes a "queued" entry to the runner log.
-func (r *Runner) LogQueued(opts RunOpts) {
-	appendLog(r.LogFile, opts.RoleID, "queued", effectiveWorkDir(opts),
-		relToDir(r.ProjectDir, opts.LastMessageFilePath))
-}
-
 // Run executes the agent with the given prompt and options.
 func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress chan<- RunProgress) RunSummary {
 	startedAt := opts.StartedAt
 	if startedAt.IsZero() {
 		startedAt = time.Now()
 	}
-	var callID int64
 
-	prefix := filepath.Join(opts.LogsDir, startedAt.Format(TimestampFormat)+"_"+opts.Action)
-	streamFile := prefix + "_stream.jsonl"
-	stderrFile := prefix + "_stderr.log"
-	execTarget := prefix + "_exec.md"
+	failPreInsert := func(err error) RunSummary {
+		s := RunSummary{
+			RoleID:      opts.RoleID,
+			StartedAt:   startedAt,
+			EndedAt:     time.Now(),
+			Duration:    time.Since(startedAt),
+			ExitCode:    -1,
+			IsError:     true,
+			Err:         err,
+			ErrorSource: agent.ErrorSourceAteamInternal,
+			ErrorCause:  err.Error(),
+		}
+		return s
+	}
+
+	// Hard requirement: a project DB must exist. Without it we can't allocate
+	// an exec_id, which the new layout needs for every per-run path.
+	if r.CallDB == nil || r.ProjectDir == "" {
+		return failPreInsert(fmt.Errorf("ateam project required: no .ateam/ found"))
+	}
+
+	// Insert FIRST so callID drives logs/<id>/ and runtime/<id>/.
+	agentName := r.Agent.Name()
+	model := agent.NormalizeModel(extractModel(r.Agent))
+	callID, err := r.CallDB.InsertCall(&calldb.Call{
+		ProjectID:  r.ProjectID,
+		Profile:    r.Profile,
+		Agent:      agentName,
+		Container:  r.ContainerType,
+		Action:     opts.Action,
+		Role:       opts.RoleID,
+		Batch:      opts.Batch,
+		Model:      model,
+		PromptHash: hashPrompt(prompt),
+		StartedAt:  startedAt,
+	})
+	if err != nil {
+		return failPreInsert(fmt.Errorf("call tracking insert failed: %w", err))
+	}
+
+	logsDir := logsDirFor(r.ProjectDir, callID)
+	runtimeDir := runtimeDirFor(r.ProjectDir, callID)
+	streamFile := filepath.Join(logsDir, "stream.jsonl")
+	stderrFile := filepath.Join(logsDir, "stderr.out")
+	settingsFile := filepath.Join(logsDir, "settings.json")
+	cmdFile := filepath.Join(logsDir, "cmd.md")
+	promptFile := filepath.Join(logsDir, "prompt.md")
+
+	// Persist the canonical stream path on the row.
+	if relStream, relErr := filepath.Rel(r.ProjectDir, streamFile); relErr == nil {
+		_ = r.CallDB.UpdateStreamFile(callID, relStream)
+	}
 
 	failEarly := func(err error) RunSummary {
 		s := RunSummary{
@@ -220,7 +264,6 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			StreamFilePath: streamFile,
 			StderrFilePath: stderrFile,
 		}
-		writeErrorFile(opts.ErrorMessageFilePath, s, "")
 		appendStderrSummary(stderrFile, s)
 		return s
 	}
@@ -246,8 +289,6 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	}
 
 	// Safety warning: --dangerously-skip-permissions outside a container.
-	// Skip warning when launching into a container (r.Container != nil) since the
-	// flag will only be used inside that container.
 	if !IsInContainer() && r.Container == nil {
 		for _, a := range extraArgs {
 			if a == "--dangerously-skip-permissions" {
@@ -257,9 +298,14 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		}
 	}
 
-	// Ensure logs directory exists before writing settings or stream files.
-	if err := os.MkdirAll(opts.LogsDir, 0700); err != nil {
+	// Create the per-exec_id dirs.
+	if err := os.MkdirAll(logsDir, 0700); err != nil {
 		return failEarly(fmt.Errorf("cannot create logs directory: %w", err))
+	}
+	if opts.OutputKind != "" {
+		if err := os.MkdirAll(runtimeDir, 0700); err != nil {
+			return failEarly(fmt.Errorf("cannot create runtime directory: %w", err))
+		}
 	}
 
 	// Write sandbox settings if configured.
@@ -268,49 +314,12 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	skipSandbox := (IsInContainer() || r.Container != nil) && !r.Sandbox.InsideContainer
 	var settingsJSON []byte
 	if r.Sandbox.Settings != "" && !skipSandbox {
-		settingsTarget := prefix + "_settings.json"
-		var err error
-		settingsJSON, err = r.writeSettings(settingsTarget, opts)
-		if err != nil {
-			return failEarly(fmt.Errorf("cannot create settings file: %w", err))
+		var serr error
+		settingsJSON, serr = r.writeSettings(settingsFile, opts)
+		if serr != nil {
+			return failEarly(fmt.Errorf("cannot create settings file: %w", serr))
 		}
-		extraArgs = append(extraArgs, "--settings", settingsTarget)
-	}
-
-	// Insert call tracking record early so EXEC_ID is available for templates.
-	agentName := r.Agent.Name()
-	model := agent.NormalizeModel(extractModel(r.Agent))
-	if r.CallDB != nil {
-		relStream := streamFile
-		relOutput := opts.LastMessageFilePath
-		if r.ProjectDir != "" {
-			if rel, err := filepath.Rel(r.ProjectDir, streamFile); err == nil {
-				relStream = rel
-			}
-			if relOutput != "" {
-				if rel, err := filepath.Rel(r.ProjectDir, relOutput); err == nil {
-					relOutput = rel
-				}
-			}
-		}
-		if id, err := r.CallDB.InsertCall(&calldb.Call{
-			ProjectID:  r.ProjectID,
-			Profile:    r.Profile,
-			Agent:      agentName,
-			Container:  r.ContainerType,
-			Action:     opts.Action,
-			Role:       opts.RoleID,
-			Batch:      opts.Batch,
-			Model:      model,
-			PromptHash: hashPrompt(prompt),
-			StartedAt:  startedAt,
-			StreamFile: relStream,
-			OutputFile: relOutput,
-		}); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: call tracking insert failed: %v\n", err)
-		} else {
-			callID = id
-		}
+		extraArgs = append(extraArgs, "--settings", settingsFile)
 	}
 
 	// Clone the container so per-run template resolution and name refresh
@@ -321,16 +330,27 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	}
 	containerName := r.ContainerName
 
-	// Resolve {{VAR}} templates in agent args, extra args, and container fields.
+	// Resolve {{VAR}} templates in agent args, extra args, container fields,
+	// and the prompt itself (so {{OUTPUT_DIR}} / {{OUTPUT_FILE}} expand using
+	// the now-known callID).
 	tmplVars := BuildTemplateVars(r, opts, startedAt, callID, agentName, model)
 	extraArgs = resolveArgs(extraArgs, tmplVars.Replacer())
 	runAgent := ResolveAgentTemplateArgs(r.Agent, tmplVars)
 	resolveContainerTemplates(runContainer, tmplVars)
+	prompt = ResolveTemplateString(prompt, tmplVars)
+	// Resolve {{EXEC_ID}} (and friends) inside CanonicalDestDir so callers can
+	// build per-exec_id paths without knowing the id ahead of time.
+	opts.CanonicalDestDir = ResolveTemplateString(opts.CanonicalDestDir, tmplVars)
 
-	// Build agent request (includes log dir creation and prompt archival).
-	req, promptFile, err := r.buildPrompt(prompt, opts, startedAt, tmplVars, cwd, streamFile, stderrFile, extraArgs)
+	// Build agent request (no longer archives prompt — that's our job below).
+	req, err := r.buildRequest(prompt, tmplVars, cwd, streamFile, stderrFile, extraArgs)
 	if err != nil {
 		return failEarly(err)
+	}
+
+	// Archive the rendered prompt next to the rest of the forensics.
+	if err := os.WriteFile(promptFile, []byte(prompt), 0600); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to write prompt file %s: %v\n", promptFile, err)
 	}
 
 	// Prepare container and translate request paths.
@@ -351,28 +371,26 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		}
 	}
 
-	// Write exec file with full context for debugging.
-	writeExecFile(execTarget, execFileInfo{
+	// Pre-run cmd.md (Run details left as "(pending)" — re-rendered at finalize).
+	cmdInfo := cmdFileInfo{
 		StartedAt:     startedAt,
 		ExecID:        callID,
-		Agent:         agentName,
 		Profile:       r.Profile,
+		ProfileDef:    r.ProfileDef,
+		Agent:         agentName,
+		AgentDef:      r.AgentDef,
+		Model:         model,
 		ContainerType: r.ContainerType,
 		ContainerName: containerName,
 		Action:        opts.Action,
 		Role:          opts.RoleID,
 		Batch:         opts.Batch,
-		Model:         model,
 		Cwd:           cwd,
 		CLI:           cliStr,
 		SpecifiedEnv:  mergedAgentEnv(runAgent, req.Env),
 		SettingsJSON:  settingsJSON,
-		Prompt:        prompt,
-	})
-
-	appendLog(r.LogFile, opts.RoleID, "start", cwd, cliStr,
-		relToDir(r.ProjectDir, promptFile),
-		relToDir(r.ProjectDir, opts.LastMessageFilePath))
+	}
+	writeCmdFile(cmdFile, cmdInfo)
 
 	// Run the agent and consume events
 	events := runAgent.Run(ctx, req)
@@ -526,7 +544,6 @@ eventLoop:
 			msg := fmt.Sprintf("no agent events for %s", idle.Round(time.Second))
 			fmt.Fprintf(os.Stderr, "Warning: %s [role=%s action=%s exec=%d]\n",
 				msg, opts.RoleID, opts.Action, callID)
-			appendLog(r.LogFile, opts.RoleID, PhaseStall, effectiveWorkDir(opts), msg)
 			emitProgress(PhaseStall, "", "", msg, totalTools, eventCount)
 			stallTimer.Reset(stallWarn)
 		}
@@ -583,8 +600,25 @@ eventLoop:
 		}
 	}
 
-	// Finalize: write output/error files, update DB, log result.
-	r.finalizeCall(ctx, callID, &summary, resultEv, opts, output, cliStr, cwd)
+	// Streamed-text fallback: if the agent didn't Write a primary OUTPUT_FILE
+	// but produced text, seed it into runtime/<exec_id>/<primary>.md so the
+	// promote step still copies a non-empty canonical file. Real agents
+	// (claude with the Write tool) populate the file directly; this catches
+	// mocks and prompts that go off-script.
+	if !summary.IsError && opts.OutputKind != "" && output != "" {
+		primary := PrimaryOutputName(opts.OutputKind)
+		if primary != "" {
+			target := filepath.Join(runtimeDir, primary)
+			if _, err := os.Stat(target); os.IsNotExist(err) {
+				if err := os.WriteFile(target, []byte(output), 0600); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: write fallback output %s: %v\n", target, err)
+				}
+			}
+		}
+	}
+
+	// Finalize: promote runtime files, re-render cmd.md, update DB.
+	r.finalizeCall(ctx, callID, &summary, resultEv, opts, runtimeDir, cmdFile, cmdInfo)
 	if summary.IsError {
 		emitProgress(PhaseError, "", "", "", totalTools, eventCount)
 	} else {
@@ -611,12 +645,9 @@ func reconcileErrorEvent(prev *agent.StreamEvent, ev agent.StreamEvent) *agent.S
 	return &evCopy
 }
 
-// buildPrompt archives the prompt, resolves CLAUDE_CONFIG_DIR, and assembles
-// the agent.Request. Returns the request, the archived prompt file path, and
-// any error. The caller must ensure opts.LogsDir exists before calling.
-func (r *Runner) buildPrompt(prompt string, opts RunOpts, startedAt time.Time, tmplVars TemplateVars, cwd, streamFile, stderrFile string, extraArgs []string) (agent.Request, string, error) {
-	promptFile := archivePrompt(opts.HistoryDir, opts.PromptName, prompt, startedAt)
-
+// buildRequest resolves CLAUDE_CONFIG_DIR and assembles the agent.Request.
+// The prompt is expected to already have its templates resolved.
+func (r *Runner) buildRequest(prompt string, tmplVars TemplateVars, cwd, streamFile, stderrFile string, extraArgs []string) (agent.Request, error) {
 	// Resolve CLAUDE_CONFIG_DIR for isolated agents.
 	// Relative config_dir is resolved from ProjectDir (.ateam/); absolute is used as-is.
 	configDir := ExpandHome(ResolveTemplateString(r.ConfigDir, tmplVars))
@@ -627,22 +658,21 @@ func (r *Runner) buildPrompt(prompt string, opts RunOpts, startedAt time.Time, t
 			configPath = configDir
 		} else {
 			if r.ProjectDir == "" {
-				return agent.Request{}, "", fmt.Errorf("relative config_dir requires project context (no .ateam/ found)")
+				return agent.Request{}, fmt.Errorf("relative config_dir requires project context (no .ateam/ found)")
 			}
 			configPath = filepath.Join(r.ProjectDir, configDir)
 		}
 		reqEnv = map[string]string{"CLAUDE_CONFIG_DIR": configPath}
 	}
 
-	req := agent.Request{
+	return agent.Request{
 		Prompt:     prompt,
 		WorkDir:    cwd,
 		StreamFile: streamFile,
 		StderrFile: stderrFile,
 		ExtraArgs:  extraArgs,
 		Env:        reqEnv,
-	}
-	return req, promptFile, nil
+	}, nil
 }
 
 // setupContainer prepares the container for execution and translates the
@@ -684,55 +714,46 @@ func setupContainer(ctx context.Context, c container.Container, req *agent.Reque
 	return c.GetContainerName(), nil
 }
 
-// finalizeCall handles post-execution work: writes the output or error file,
-// appends to the runner log, and updates the call tracking record. On the
-// failure path it sets summary.IsError, ErrorSource, ErrorCause, and Err so
-// callers can branch off summary.IsError without a separate return value.
-func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSummary, resultEv *agent.StreamEvent, opts RunOpts, output, cliStr, cwd string) {
+// finalizeCall handles post-execution work: promotes runtime files to their
+// canonical destinations, re-renders cmd.md with `# Run details` filled in
+// and a `# Files Copy` section, and updates the agent_execs row. On failure
+// it sets summary.IsError, ErrorSource, ErrorCause, and Err so callers can
+// branch off summary.IsError without a separate return value.
+func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSummary, resultEv *agent.StreamEvent, opts RunOpts, runtimeDir, cmdFile string, cmdInfo cmdFileInfo) {
 	success := resultEv != nil && resultEv.Type == "result" && resultEv.ExitCode == 0 && !resultEv.IsError
 
+	var copyEntries []fileCopyEntry
+	var primaryCanonical string
+
 	if success {
-		// Success path: prefer the file the agent wrote via the Write tool to
-		// OutputFilePath (a timestamped path inside HistoryDir). If the agent
-		// did not use Write, fall back to the streamed final assistant text.
-		// The chosen content is written to LastMessageFilePath as the canonical
-		// "last successful run" copy, and (when missing) seeded into
-		// OutputFilePath so the history dir always has a record.
-		var content []byte
-		if opts.OutputFilePath != "" {
-			if data, err := os.ReadFile(opts.OutputFilePath); err == nil && len(bytes.TrimSpace(data)) > 0 {
-				content = data
-			}
-		}
-		if len(content) == 0 && output != "" {
-			content = []byte(output)
-			if opts.OutputFilePath != "" {
-				if err := os.MkdirAll(filepath.Dir(opts.OutputFilePath), 0700); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to create history dir %s: %v\n", filepath.Dir(opts.OutputFilePath), err)
-				} else if err := os.WriteFile(opts.OutputFilePath, content, 0600); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to write history file %s: %v\n", opts.OutputFilePath, err)
-				}
-			}
-		}
-		if opts.LastMessageFilePath != "" && len(content) > 0 {
-			dir := filepath.Dir(opts.LastMessageFilePath)
-			if err := os.MkdirAll(dir, 0700); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to create output dir %s: %v\n", dir, err)
-			}
-			if err := os.WriteFile(opts.LastMessageFilePath, content, 0600); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to write output file %s: %v\n", opts.LastMessageFilePath, err)
-			}
-		}
-		appendLog(r.LogFile, opts.RoleID, "ok", cwd, cliStr)
+		copyEntries, primaryCanonical = r.promoteRuntimeFiles(runtimeDir, opts.CanonicalDestDir, opts.OutputKind)
 	} else {
 		summary.IsError = true
 		source, cause := classifyFailure(ctx, resultEv, opts.TimeoutMin)
 		summary.ErrorSource = source
 		summary.ErrorCause = cause
 		summary.Err = fmt.Errorf("[%s] %s", source, cause)
-		writeErrorFile(opts.ErrorMessageFilePath, *summary, "")
 		appendStderrSummary(summary.StderrFilePath, *summary)
-		appendLog(r.LogFile, opts.RoleID, "error", cwd, cliStr, summary.Err.Error())
+		// Even on failure, record what was found in runtime/ so the trace is
+		// complete (files are not promoted, just listed).
+		copyEntries = listRuntimeForReport(runtimeDir)
+	}
+
+	// Re-render cmd.md with finalized run details and the file copy log.
+	cmdInfo.Status = summaryStatus(*summary)
+	cmdInfo.EndedAt = summary.EndedAt
+	cmdInfo.ExitCode = summary.ExitCode
+	cmdInfo.HasResult = true
+	cmdInfo.FileCopy = copyEntries
+	if cmdInfo.Model == "" {
+		cmdInfo.Model = resolveExecModel(resultEv, r.Agent)
+	}
+	writeCmdFile(cmdFile, cmdInfo)
+
+	if primaryCanonical != "" {
+		if rel, err := filepath.Rel(r.ProjectDir, primaryCanonical); err == nil {
+			_ = r.CallDB.UpdateOutputFile(callID, rel)
+		}
 	}
 
 	if r.CallDB != nil && callID > 0 {
@@ -931,99 +952,12 @@ func appendStderrSummary(path string, s RunSummary) {
 	}
 }
 
-func writeErrorFile(path string, s RunSummary, stderr string) {
-	if path == "" {
-		return
-	}
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to create error file dir %s: %v\n", dir, err)
-	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "# Error: %s\n\n", s.RoleID)
-	fmt.Fprintf(&b, "**Error:** %v\n\n", s.Err)
-	fmt.Fprintf(&b, "**Exit Code:** %d\n\n", s.ExitCode)
-	fmt.Fprintf(&b, "**Duration:** %s\n\n", FormatDuration(s.Duration))
-
-	if stderr != "" {
-		fmt.Fprintf(&b, "## Stderr\n\n```\n%s\n```\n\n", stderr)
-	}
-	if s.Cost > 0 || s.InputTokens > 0 {
-		fmt.Fprintf(&b, "## Usage\n\n")
-		fmt.Fprintf(&b, "- Cost: $%.4f\n", s.Cost)
-		fmt.Fprintf(&b, "- Turns: %d\n", s.Turns)
-		fmt.Fprintf(&b, "- Input tokens: %d\n", s.InputTokens)
-		fmt.Fprintf(&b, "- Output tokens: %d\n", s.OutputTokens)
-		fmt.Fprintf(&b, "- Cache read tokens: %d\n", s.CacheReadTokens)
-		fmt.Fprintf(&b, "- Cache write tokens: %d\n\n", s.CacheWriteTokens)
-	}
-	if s.Output != "" {
-		fmt.Fprintf(&b, "## Partial Output\n\n%s\n", s.Output)
-	}
-
-	if err := os.WriteFile(path, []byte(b.String()), 0600); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to write error file %s: %v\n", path, err)
-	}
-}
-
-// appendLog writes one line to the runner log. Pool workers may call this
-// concurrently for the same logFile; safety relies on POSIX O_APPEND atomicity
-// for writes smaller than PIPE_BUF (≥512 bytes), which holds for the single
-// pipe-delimited line we emit. Each call reopens the file rather than sharing
-// a handle so we never need an in-process mutex.
-func appendLog(logFile, roleID, status, cwd, cli string, extra ...string) {
-	if logFile == "" {
-		return
-	}
-	if err := os.MkdirAll(filepath.Dir(logFile), 0700); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to create log dir %s: %v\n", filepath.Dir(logFile), err)
-	}
-	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	ts := time.Now().Format(TimestampFormat)
-	fields := []string{ts, roleID, status, cwd, cli}
-	fields = append(fields, extra...)
-	fmt.Fprintln(f, strings.Join(fields, " | "))
-}
-
 func effectiveWorkDir(opts RunOpts) string {
 	if opts.WorkDir != "" {
 		return opts.WorkDir
 	}
 	cwd, _ := os.Getwd()
 	return cwd
-}
-
-func relToDir(base, path string) string {
-	if base == "" || path == "" {
-		return path
-	}
-	rel, err := filepath.Rel(base, path)
-	if err != nil {
-		return path
-	}
-	return rel
-}
-
-func archivePrompt(historyDir, promptName, prompt string, startedAt time.Time) string {
-	if historyDir == "" || promptName == "" {
-		return ""
-	}
-	if err := os.MkdirAll(historyDir, 0700); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to create prompt history dir %s: %v\n", historyDir, err)
-	}
-	ts := startedAt.Format(TimestampFormat)
-	name := strings.ReplaceAll(fmt.Sprintf("%s.%s", ts, promptName), " ", "_")
-	path := filepath.Join(historyDir, name)
-	if err := os.WriteFile(path, []byte(prompt), 0600); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to archive prompt to %s: %v\n", path, err)
-	}
-	return path
 }
 
 // FormatDuration returns a human-readable duration string.
@@ -1035,52 +969,89 @@ func FormatDuration(d time.Duration) string { return display.FormatDuration(d) }
 // name is too short or doesn't match. Local timezone is used.
 func ParseTimestampPrefix(name string) (time.Time, bool) { return display.ParseTimestampPrefix(name) }
 
-// execFileInfo bundles the metadata recorded into <prefix>_exec.md so the
-// file is a self-sufficient forensic record of how a run was launched.
-// Anything that influences agent execution (profile, container, model,
-// CLAUDE_CONFIG_DIR overrides, …) belongs here.
-type execFileInfo struct {
+// fileCopyEntry records one runtime/<exec_id>/* file's promote decision so
+// cmd.md can include a verifiable trace of "what landed where".
+type fileCopyEntry struct {
+	Source string // path relative to ProjectDir, e.g. "runtime/42/report.md"
+	Dest   string // path relative to ProjectDir; empty when skipped
+	Note   string // "cloned" or "SKIPPED (...)"
+}
+
+// cmdFileInfo bundles the metadata recorded into logs/<exec_id>/cmd.md.
+// Written twice: once before the run starts (Status="(pending)"), then
+// re-rendered at finalize time with run-result fields and the file copy log.
+type cmdFileInfo struct {
 	StartedAt     time.Time
+	EndedAt       time.Time
+	HasResult     bool // true after the run finishes; toggles "(pending)" vs concrete fields
 	ExecID        int64
-	Agent         string
-	Profile       string
-	ContainerType string
-	ContainerName string
 	Action        string
 	Role          string
 	Batch         string
+	Profile       string
+	ProfileDef    string
+	Agent         string
+	AgentDef      string
 	Model         string
+	ContainerType string
+	ContainerName string
 	Cwd           string
 	CLI           string
 	SpecifiedEnv  map[string]string
 	SettingsJSON  []byte
-	Prompt        string
+	ExitCode      int
+	Status        string
+	FileCopy      []fileCopyEntry
 }
 
-func writeExecFile(path string, info execFileInfo) {
+func writeCmdFile(path string, info cmdFileInfo) {
 	if path == "" {
 		return
 	}
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "# Command\n")
-	fmt.Fprintf(&b, "* started: %s\n", info.StartedAt.Format(TimestampFormat))
-	if info.ExecID > 0 {
-		fmt.Fprintf(&b, "* exec_id: %d\n", info.ExecID)
-	}
-	fmt.Fprintf(&b, "* agent: %s\n", info.Agent)
+	// # Runtime — what configured the agent (profile/agent/model)
+	fmt.Fprintf(&b, "# Runtime\n")
 	if info.Profile != "" {
 		fmt.Fprintf(&b, "* profile: %s\n", info.Profile)
 	}
-	if info.ContainerType != "" && info.ContainerType != "none" {
-		container := info.ContainerType
-		if info.ContainerName != "" {
-			container += " (" + info.ContainerName + ")"
-		}
-		fmt.Fprintf(&b, "* container: %s\n", container)
-	}
+	fmt.Fprintf(&b, "* agent: %s\n", info.Agent)
 	if info.Model != "" {
 		fmt.Fprintf(&b, "* model: %s\n", info.Model)
+	}
+	if info.ProfileDef != "" {
+		fmt.Fprintf(&b, "\n## profile definition\n```hcl\n%s\n```\n", strings.TrimRight(info.ProfileDef, "\n"))
+	}
+	if info.AgentDef != "" {
+		fmt.Fprintf(&b, "\n## agent definition\n```hcl\n%s\n```\n", strings.TrimRight(info.AgentDef, "\n"))
+	}
+
+	// # Run details — start/end/model/status (two-pass)
+	fmt.Fprintf(&b, "\n# Run details\n")
+	fmt.Fprintf(&b, "* Started At: %s\n", info.StartedAt.Format(time.RFC3339))
+	if info.HasResult {
+		fmt.Fprintf(&b, "* Ended At: %s\n", info.EndedAt.Format(time.RFC3339))
+		fmt.Fprintf(&b, "* Model: %s\n", info.Model)
+		fmt.Fprintf(&b, "* Exit Code: %d\n", info.ExitCode)
+		fmt.Fprintf(&b, "* Status: %s\n", info.Status)
+	} else {
+		fmt.Fprintf(&b, "* Ended At: (pending)\n")
+		fmt.Fprintf(&b, "* Model: %s\n", info.Model)
+		fmt.Fprintf(&b, "* Exit Code: (pending)\n")
+		fmt.Fprintf(&b, "* Status: (pending)\n")
+	}
+
+	// # Command — invocation context
+	fmt.Fprintf(&b, "\n# Command\n")
+	if info.ExecID > 0 {
+		fmt.Fprintf(&b, "* exec_id: %d\n", info.ExecID)
+	}
+	if info.ContainerType != "" && info.ContainerType != "none" {
+		c := info.ContainerType
+		if info.ContainerName != "" {
+			c += " (" + info.ContainerName + ")"
+		}
+		fmt.Fprintf(&b, "* container: %s\n", c)
 	}
 	fmt.Fprintf(&b, "* action: %s\n", info.Action)
 	fmt.Fprintf(&b, "* role: %s\n", info.Role)
@@ -1126,11 +1097,119 @@ func writeExecFile(path string, info execFileInfo) {
 		fmt.Fprintf(&b, "\n# Settings\n```json\n%s\n```\n", string(info.SettingsJSON))
 	}
 
-	fmt.Fprintf(&b, "\n# Prompt\n%s\n", info.Prompt)
+	if info.HasResult {
+		fmt.Fprintf(&b, "\n# Files Copy\n")
+		if len(info.FileCopy) == 0 {
+			fmt.Fprintf(&b, "_(no files in runtime/%d)_\n", info.ExecID)
+		} else {
+			for _, e := range info.FileCopy {
+				if e.Dest != "" {
+					fmt.Fprintf(&b, "* %s → %s  (%s)\n", e.Source, e.Dest, e.Note)
+				} else {
+					fmt.Fprintf(&b, "* %s  %s\n", e.Source, e.Note)
+				}
+			}
+		}
+	}
 
 	if err := os.WriteFile(path, []byte(b.String()), 0600); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: failed to write exec file %s: %v\n", path, err)
+		fmt.Fprintf(os.Stderr, "warning: failed to write cmd file %s: %v\n", path, err)
 	}
+}
+
+// summaryStatus maps a RunSummary onto the short label written into cmd.md's
+// `# Run details > Status`.
+func summaryStatus(s RunSummary) string {
+	switch {
+	case s.IsError && s.ErrorSource != "":
+		return "error: " + s.ErrorSource
+	case s.IsError:
+		return "error"
+	case s.ExitCode == 0:
+		return "ok"
+	default:
+		return fmt.Sprintf("exit %d", s.ExitCode)
+	}
+}
+
+// promoteRuntimeFiles clones every file in runtimeDir (except *_prompt.md —
+// see TODO) into destDir. Returns the per-file decisions for cmd.md and the
+// absolute path of the primary canonical file (if one was written), used for
+// the agent_execs.output_file column.
+//
+// TODO: get rid of this exclusion once configured prompts are kept separate
+// from files.
+func (r *Runner) promoteRuntimeFiles(runtimeDir, destDir, outputKind string) ([]fileCopyEntry, string) {
+	var entries []fileCopyEntry
+	primary := PrimaryOutputName(outputKind)
+	primaryAbs := ""
+
+	dir, err := os.ReadDir(runtimeDir)
+	if err != nil || len(dir) == 0 {
+		return entries, ""
+	}
+
+	for _, e := range dir {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		src := filepath.Join(runtimeDir, name)
+		entry := fileCopyEntry{Source: relToProject(r.ProjectDir, src)}
+		if strings.HasSuffix(name, "_prompt.md") {
+			entry.Note = "SKIPPED (*_prompt.md exclusion)"
+			entries = append(entries, entry)
+			continue
+		}
+		if destDir == "" {
+			entry.Note = "SKIPPED (action has no canonical destination)"
+			entries = append(entries, entry)
+			continue
+		}
+		dst := filepath.Join(destDir, name)
+		if err := fsclone.Clone(src, dst); err != nil {
+			entry.Note = fmt.Sprintf("FAILED (%v)", err)
+			fmt.Fprintf(os.Stderr, "Warning: clone %s → %s: %v\n", src, dst, err)
+		} else {
+			entry.Dest = relToProject(r.ProjectDir, dst)
+			entry.Note = "cloned"
+			if name == primary {
+				primaryAbs = dst
+			}
+		}
+		entries = append(entries, entry)
+	}
+	return entries, primaryAbs
+}
+
+// listRuntimeForReport mirrors promoteRuntimeFiles but does not copy; used on
+// the failure path so cmd.md still shows what landed in runtime/<exec_id>/.
+func listRuntimeForReport(runtimeDir string) []fileCopyEntry {
+	var entries []fileCopyEntry
+	dir, err := os.ReadDir(runtimeDir)
+	if err != nil {
+		return nil
+	}
+	for _, e := range dir {
+		if e.IsDir() {
+			continue
+		}
+		entries = append(entries, fileCopyEntry{
+			Source: filepath.Join(filepath.Base(filepath.Dir(runtimeDir)), filepath.Base(runtimeDir), e.Name()),
+			Note:   "SKIPPED (run failed; not promoted)",
+		})
+	}
+	return entries
+}
+
+func relToProject(projectDir, path string) string {
+	if projectDir == "" {
+		return path
+	}
+	if rel, err := filepath.Rel(projectDir, path); err == nil {
+		return rel
+	}
+	return path
 }
 
 func extractModel(a agent.Agent) string {
@@ -1142,7 +1221,7 @@ func extractModel(a agent.Agent) string {
 
 // mergedAgentEnv returns the union of the agent's configured env and the
 // per-request env. reqEnv wins on conflicts, mirroring buildProcessEnv.
-// Returns nil when both inputs are empty so writeExecFile can skip the
+// Returns nil when both inputs are empty so writeCmdFile can skip the
 // section entirely.
 func mergedAgentEnv(a agent.Agent, reqEnv map[string]string) map[string]string {
 	var agentEnv map[string]string

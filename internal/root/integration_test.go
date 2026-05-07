@@ -417,7 +417,7 @@ func TestIntegration_RelPathHelper(t *testing.T) {
 	}
 }
 
-// TestIntegration_StatePathMethods verifies RoleLogsDir, SupervisorLogsDir, etc.
+// TestIntegration_StatePathMethods verifies LogsDir, RuntimeDir, ProjectDBPath.
 func TestIntegration_StatePathMethods(t *testing.T) {
 	base := resolvedTempDir(t)
 
@@ -444,103 +444,14 @@ func TestIntegration_StatePathMethods(t *testing.T) {
 	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
 	env.populateFromConfig(projDir, cfg)
 
-	if got := env.RoleLogsDir("security"); got != filepath.Join(projDir, "logs", "roles", "security") {
-		t.Errorf("RoleLogsDir = %q, want %q", got, filepath.Join(projDir, "logs", "roles", "security"))
+	if got := env.LogsDir(42); got != filepath.Join(projDir, "logs", "42") {
+		t.Errorf("LogsDir(42) = %q, want %q", got, filepath.Join(projDir, "logs", "42"))
 	}
-	if got := env.SupervisorLogsDir(); got != filepath.Join(projDir, "logs", "supervisor") {
-		t.Errorf("SupervisorLogsDir = %q, want %q", got, filepath.Join(projDir, "logs", "supervisor"))
-	}
-	if got := env.RoleWorkspacesDir("security"); got != filepath.Join(projDir, "logs", "roles", "security", "workspaces") {
-		t.Errorf("RoleWorkspacesDir = %q, want %q", got, filepath.Join(projDir, "logs", "roles", "security", "workspaces"))
-	}
-	if got := env.RunnerLogPath(); got != filepath.Join(projDir, "logs", "runner.log") {
-		t.Errorf("RunnerLogPath = %q, want %q", got, filepath.Join(projDir, "logs", "runner.log"))
+	if got := env.RuntimeDir(42); got != filepath.Join(projDir, "runtime", "42") {
+		t.Errorf("RuntimeDir(42) = %q, want %q", got, filepath.Join(projDir, "runtime", "42"))
 	}
 	if got := env.ProjectDBPath(); got != filepath.Join(projDir, "state.sqlite") {
 		t.Errorf("ProjectDBPath = %q, want %q", got, filepath.Join(projDir, "state.sqlite"))
-	}
-}
-
-// TestIntegration_RunnerLogsDirFlow simulates what cmd/report.go and cmd/review.go do:
-// construct LogsDir from env methods, then create timestamped files like the runner would.
-func TestIntegration_RunnerLogsDirFlow(t *testing.T) {
-	base := resolvedTempDir(t)
-
-	orgDir, err := InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
-
-	projPath := filepath.Join(base, "myproj")
-	if err := os.MkdirAll(projPath, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	opts := InitProjectOpts{
-		Name:         "myproj",
-		EnabledRoles: prompts.AllRoleIDs,
-	}
-	projDir, err := InitProject(projPath, orgDir, opts)
-	if err != nil {
-		t.Fatalf("InitProject: %v", err)
-	}
-
-	cfg, _ := config.Load(projDir)
-	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
-	env.populateFromConfig(projDir, cfg)
-
-	// Verify logs dirs are under .ateam/logs/
-	roleLogsDir := env.RoleLogsDir("security")
-	t.Logf("RoleLogsDir: %s", roleLogsDir)
-	wantRoleLogsDir := filepath.Join(projDir, "logs", "roles", "security")
-	if roleLogsDir != wantRoleLogsDir {
-		t.Fatalf("RoleLogsDir = %q, want %q", roleLogsDir, wantRoleLogsDir)
-	}
-
-	// Dirs should already exist from InitProject
-	if _, err := os.Stat(roleLogsDir); err != nil {
-		t.Fatalf("role logs dir should exist after init: %v", err)
-	}
-
-	streamFile := filepath.Join(roleLogsDir, "2026-03-10_22-17-58_report_stream.jsonl")
-	if err := os.WriteFile(streamFile, []byte("test"), 0644); err != nil {
-		t.Fatalf("WriteFile stream: %v", err)
-	}
-	if _, err := os.Stat(streamFile); err != nil {
-		t.Fatalf("stream file not found after write: %v", err)
-	}
-
-	// Verify stream file relative path
-	relStream, err := filepath.Rel(projDir, streamFile)
-	if err != nil {
-		t.Fatalf("filepath.Rel: %v", err)
-	}
-	if relStream != "logs/roles/security/2026-03-10_22-17-58_report_stream.jsonl" {
-		t.Errorf("relative stream = %q, want %q", relStream, "logs/roles/security/2026-03-10_22-17-58_report_stream.jsonl")
-	}
-
-	supLogsDir := env.SupervisorLogsDir()
-	t.Logf("SupervisorLogsDir: %s", supLogsDir)
-	wantSupLogsDir := filepath.Join(projDir, "logs", "supervisor")
-	if supLogsDir != wantSupLogsDir {
-		t.Fatalf("SupervisorLogsDir = %q, want %q", supLogsDir, wantSupLogsDir)
-	}
-
-	supStream := filepath.Join(supLogsDir, "2026-03-10_22-18-00_review_stream.jsonl")
-	if err := os.WriteFile(supStream, []byte("test"), 0644); err != nil {
-		t.Fatalf("WriteFile supervisor stream: %v", err)
-	}
-
-	// Verify runner log path under .ateam/logs/
-	runnerLog := env.RunnerLogPath()
-	t.Logf("RunnerLogPath: %s", runnerLog)
-	wantRunnerLog := filepath.Join(projDir, "logs", "runner.log")
-	if runnerLog != wantRunnerLog {
-		t.Fatalf("RunnerLogPath = %q, want %q", runnerLog, wantRunnerLog)
-	}
-	// The logs/ dir already exists from InitProject
-	if err := os.WriteFile(runnerLog, []byte("log entry"), 0644); err != nil {
-		t.Fatalf("WriteFile runner log: %v", err)
 	}
 }
 
@@ -572,10 +483,10 @@ func TestIntegration_NestedProjectPaths(t *testing.T) {
 	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
 	env.populateFromConfig(projDir, cfg)
 
-	// Verify logs are under .ateam/logs/
-	wantLogsDir := filepath.Join(projDir, "logs", "roles", "security")
-	if got := env.RoleLogsDir("security"); got != wantLogsDir {
-		t.Errorf("RoleLogsDir = %q, want %q", got, wantLogsDir)
+	// Verify the per-exec_id logs path resolves under .ateam/logs/.
+	wantLogsDir := filepath.Join(projDir, "logs", "1")
+	if got := env.LogsDir(1); got != wantLogsDir {
+		t.Errorf("LogsDir(1) = %q, want %q", got, wantLogsDir)
 	}
 
 	// Verify ProjectID still works for org context

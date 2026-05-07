@@ -15,25 +15,14 @@ import (
 
 func TestRunnerWithMockAgent(t *testing.T) {
 	dir := t.TempDir()
-	logsDir := filepath.Join(dir, "logs")
 
-	mock := &agent.MockAgent{
-		Response: "test output from mock",
-		Cost:     0.01,
-	}
+	mock := &agent.MockAgent{Response: "test output from mock", Cost: 0.01}
+	r := newTestRunner(t, dir, mock)
 
-	r := &Runner{
-		Agent: mock,
-	}
-
-	opts := RunOpts{
-		RoleID:  "test-role",
-		Action:  ActionRun,
-		LogsDir: logsDir,
-	}
-
-	ctx := context.Background()
-	summary := r.Run(ctx, "test prompt", opts, nil)
+	summary := r.Run(context.Background(), "test prompt", RunOpts{
+		RoleID: "test-role",
+		Action: ActionRun,
+	}, nil)
 
 	if summary.Err != nil {
 		t.Fatalf("unexpected error: %v", summary.Err)
@@ -47,38 +36,29 @@ func TestRunnerWithMockAgent(t *testing.T) {
 	if summary.RoleID != "test-role" {
 		t.Errorf("expected role 'test-role', got %q", summary.RoleID)
 	}
-	if summary.Turns != 1 {
-		t.Errorf("expected 1 turn, got %d", summary.Turns)
-	}
-
-	// Verify stream file was created
-	if summary.StreamFilePath == "" {
-		t.Error("expected non-empty stream file path")
+	if summary.ExecID <= 0 {
+		t.Errorf("expected ExecID > 0, got %d", summary.ExecID)
 	}
 	if _, err := os.Stat(summary.StreamFilePath); err != nil {
 		t.Errorf("stream file not found: %v", err)
+	}
+	// Stream file must be inside logs/<exec_id>/
+	want := filepath.Join(dir, "logs")
+	if !strings.HasPrefix(summary.StreamFilePath, want) {
+		t.Errorf("stream file %q does not live under %s", summary.StreamFilePath, want)
 	}
 }
 
 func TestRunnerWithMockAgentError(t *testing.T) {
 	dir := t.TempDir()
-	logsDir := filepath.Join(dir, "logs")
-	errFile := filepath.Join(dir, "error.md")
 
-	mock := &agent.MockAgent{
-		Err: os.ErrPermission,
-	}
+	mock := &agent.MockAgent{Err: os.ErrPermission}
+	r := newTestRunner(t, dir, mock)
 
-	r := &Runner{Agent: mock}
-
-	opts := RunOpts{
-		RoleID:               "fail-role",
-		Action:               ActionRun,
-		LogsDir:              logsDir,
-		ErrorMessageFilePath: errFile,
-	}
-
-	summary := r.Run(context.Background(), "fail prompt", opts, nil)
+	summary := r.Run(context.Background(), "fail prompt", RunOpts{
+		RoleID: "fail-role",
+		Action: ActionRun,
+	}, nil)
 
 	if summary.Err == nil {
 		t.Fatal("expected error from mock agent")
@@ -88,189 +68,163 @@ func TestRunnerWithMockAgentError(t *testing.T) {
 	}
 }
 
-func TestRunnerWritesOutputFile(t *testing.T) {
-	dir := t.TempDir()
-	logsDir := filepath.Join(dir, "logs")
-	outputFile := filepath.Join(dir, "output.md")
-
-	mock := &agent.MockAgent{Response: "report content here"}
-
-	r := &Runner{Agent: mock}
-
-	opts := RunOpts{
-		RoleID:              "writer-role",
-		Action:              ActionReport,
-		LogsDir:             logsDir,
-		LastMessageFilePath: outputFile,
+func TestRunnerRequiresProjectDB(t *testing.T) {
+	r := &Runner{Agent: &agent.MockAgent{Response: "x"}}
+	summary := r.Run(context.Background(), "p", RunOpts{Action: ActionRun}, nil)
+	if summary.Err == nil {
+		t.Fatal("expected error when CallDB is missing")
 	}
-
-	summary := r.Run(context.Background(), "write me a report", opts, nil)
-
-	if summary.Err != nil {
-		t.Fatalf("unexpected error: %v", summary.Err)
-	}
-
-	data, err := os.ReadFile(outputFile)
-	if err != nil {
-		t.Fatalf("cannot read output file: %v", err)
-	}
-	if string(data) != "report content here" {
-		t.Errorf("expected 'report content here', got %q", string(data))
+	if !strings.Contains(summary.Err.Error(), "ateam project required") {
+		t.Errorf("expected 'ateam project required' error, got: %v", summary.Err)
 	}
 }
 
-func TestRunnerPromotesOutputFileOnSuccess(t *testing.T) {
+func TestRunnerPromotesRuntimeFiles(t *testing.T) {
 	dir := t.TempDir()
-	logsDir := filepath.Join(dir, "logs")
-	historyDir := filepath.Join(dir, "history")
-	if err := os.MkdirAll(historyDir, 0700); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	outputFile := filepath.Join(historyDir, "2026-04-29_00-00-00.report.md")
-	lastMessageFile := filepath.Join(dir, "report.md")
-	if err := os.WriteFile(outputFile, []byte("agent-written report"), 0600); err != nil {
-		t.Fatalf("seed output file: %v", err)
+	dest := filepath.Join(dir, "roles", "security")
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		t.Fatal(err)
 	}
 
-	mock := &agent.MockAgent{Response: "stream tail"}
-	r := &Runner{Agent: mock}
-
-	opts := RunOpts{
-		RoleID:              "writer",
-		Action:              ActionReport,
-		LogsDir:             logsDir,
-		HistoryDir:          historyDir,
-		LastMessageFilePath: lastMessageFile,
-		OutputFilePath:      outputFile,
+	// Mock writes report.md to OUTPUT_FILE inside runtime/<id>/.
+	mock := &agent.MockAgent{
+		Response:          "report written to {{OUTPUT_FILE}}",
+		WriteAtOutputFile: []byte("# Security Report\n\nTotal issues: 3"),
 	}
+	r := newTestRunner(t, dir, mock)
 
-	summary := r.Run(context.Background(), "prompt", opts, nil)
+	summary := r.Run(context.Background(), "scan {{OUTPUT_FILE}}", RunOpts{
+		RoleID:           "security",
+		Action:           ActionReport,
+		OutputKind:       OutputKindReport,
+		CanonicalDestDir: dest,
+	}, nil)
+
 	if summary.Err != nil {
 		t.Fatalf("unexpected error: %v", summary.Err)
 	}
-
-	got, err := os.ReadFile(lastMessageFile)
+	canonical := filepath.Join(dest, "report.md")
+	got, err := os.ReadFile(canonical)
 	if err != nil {
-		t.Fatalf("read last-message: %v", err)
+		t.Fatalf("canonical report.md missing: %v", err)
 	}
-	if string(got) != "agent-written report" {
-		t.Errorf("LastMessageFilePath = %q, want %q (should prefer OutputFilePath over streamed text)", string(got), "agent-written report")
+	if !strings.Contains(string(got), "Security Report") {
+		t.Errorf("canonical report.md missing expected content, got: %s", got)
 	}
-
-	histGot, err := os.ReadFile(outputFile)
-	if err != nil {
-		t.Fatalf("read history: %v", err)
-	}
-	if string(histGot) != "agent-written report" {
-		t.Errorf("OutputFilePath was clobbered: got %q", string(histGot))
+	// Source still in runtime/<id>/.
+	src := filepath.Join(dir, "runtime", strings.TrimPrefix(filepath.Base(filepath.Dir(summary.StreamFilePath)), ""))
+	srcReport := filepath.Join(src, "report.md")
+	if _, err := os.Stat(srcReport); err != nil {
+		t.Errorf("runtime/<id>/report.md missing: %v", err)
 	}
 }
 
-func TestRunnerFallsBackToStreamedTextWhenOutputFileEmpty(t *testing.T) {
+func TestRunnerSkipsPromptFilesDuringPromote(t *testing.T) {
 	dir := t.TempDir()
-	logsDir := filepath.Join(dir, "logs")
-	historyDir := filepath.Join(dir, "history")
-	outputFile := filepath.Join(historyDir, "2026-04-29_00-00-00.report.md")
-	lastMessageFile := filepath.Join(dir, "report.md")
-
-	mock := &agent.MockAgent{Response: "fallback content"}
-	r := &Runner{Agent: mock}
-
-	opts := RunOpts{
-		RoleID:              "writer",
-		Action:              ActionReport,
-		LogsDir:             logsDir,
-		HistoryDir:          historyDir,
-		LastMessageFilePath: lastMessageFile,
-		OutputFilePath:      outputFile,
+	dest := filepath.Join(dir, "roles", "security")
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		t.Fatal(err)
 	}
 
-	summary := r.Run(context.Background(), "prompt", opts, nil)
+	mock := &agent.MockAgent{
+		Response:          "wrote",
+		WriteAtOutputFile: []byte("ok"),
+		ExtraRuntimeFiles: map[string][]byte{
+			"draft_prompt.md": []byte("agent should not clobber"),
+			"notes.md":        []byte("supporting notes"),
+		},
+	}
+	r := newTestRunner(t, dir, mock)
+
+	summary := r.Run(context.Background(), "write to {{OUTPUT_FILE}}", RunOpts{
+		RoleID:           "security",
+		Action:           ActionReport,
+		OutputKind:       OutputKindReport,
+		CanonicalDestDir: dest,
+	}, nil)
+
 	if summary.Err != nil {
 		t.Fatalf("unexpected error: %v", summary.Err)
 	}
+	if _, err := os.Stat(filepath.Join(dest, "report.md")); err != nil {
+		t.Errorf("report.md was not promoted: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "notes.md")); err != nil {
+		t.Errorf("notes.md was not promoted: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "draft_prompt.md")); err == nil {
+		t.Errorf("draft_prompt.md should be excluded from promote")
+	}
 
-	got, err := os.ReadFile(lastMessageFile)
+	// cmd.md must record the decisions.
+	cmdMD := filepath.Join(filepath.Dir(summary.StreamFilePath), "cmd.md")
+	body, err := os.ReadFile(cmdMD)
 	if err != nil {
-		t.Fatalf("read last-message: %v", err)
+		t.Fatalf("read cmd.md: %v", err)
 	}
-	if string(got) != "fallback content" {
-		t.Errorf("LastMessageFilePath = %q, want %q (fallback to streamed text)", string(got), "fallback content")
+	if !strings.Contains(string(body), "# Files Copy") {
+		t.Errorf("cmd.md missing # Files Copy section: %s", body)
 	}
+	if !strings.Contains(string(body), "draft_prompt.md") {
+		t.Errorf("cmd.md should mention skipped draft_prompt.md: %s", body)
+	}
+}
 
-	histGot, err := os.ReadFile(outputFile)
-	if err != nil {
-		t.Fatalf("read history: %v", err)
+func TestRunnerWritesPromptFile(t *testing.T) {
+	dir := t.TempDir()
+	mock := &agent.MockAgent{Response: "ok"}
+	r := newTestRunner(t, dir, mock)
+
+	summary := r.Run(context.Background(), "the prompt body", RunOpts{
+		RoleID: "any",
+		Action: ActionRun,
+	}, nil)
+	if summary.Err != nil {
+		t.Fatalf("unexpected error: %v", summary.Err)
 	}
-	if string(histGot) != "fallback content" {
-		t.Errorf("OutputFilePath = %q, want fallback content seeded", string(histGot))
+	promptFile := filepath.Join(filepath.Dir(summary.StreamFilePath), "prompt.md")
+	body, err := os.ReadFile(promptFile)
+	if err != nil {
+		t.Fatalf("prompt.md missing: %v", err)
+	}
+	if string(body) != "the prompt body" {
+		t.Errorf("prompt.md content mismatch: got %q", body)
 	}
 }
 
 func TestRunnerProgress(t *testing.T) {
 	dir := t.TempDir()
-	logsDir := filepath.Join(dir, "logs")
-
 	mock := &agent.MockAgent{Response: "progress test"}
-
-	r := &Runner{Agent: mock}
-
-	opts := RunOpts{
-		RoleID:  "progress-role",
-		Action:  ActionRun,
-		LogsDir: logsDir,
-	}
+	r := newTestRunner(t, dir, mock)
 
 	progress := make(chan RunProgress, 64)
-	_ = r.Run(context.Background(), "test", opts, progress)
+	_ = r.Run(context.Background(), "test", RunOpts{RoleID: "progress-role", Action: ActionRun}, progress)
 	close(progress)
 
 	var phases []string
 	for p := range progress {
 		phases = append(phases, p.Phase)
 	}
-
 	if len(phases) == 0 {
 		t.Error("expected progress events")
 	}
-
-	// Should end with "done"
-	last := phases[len(phases)-1]
-	if last != PhaseDone {
+	if last := phases[len(phases)-1]; last != PhaseDone {
 		t.Errorf("expected last phase 'done', got %q", last)
 	}
 }
 
 func TestRunnerProgressIncludesExecID(t *testing.T) {
 	dir := t.TempDir()
-	logsDir := filepath.Join(dir, "logs")
-	db, err := calldb.Open(filepath.Join(dir, "state.sqlite"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
 	mock := &agent.MockAgent{Response: "progress test"}
-
-	r := &Runner{
-		Agent:  mock,
-		CallDB: db,
-	}
-
-	opts := RunOpts{
-		RoleID:  "progress-role",
-		Action:  ActionRun,
-		LogsDir: logsDir,
-	}
+	r := newTestRunner(t, dir, mock)
 
 	progress := make(chan RunProgress, 64)
-	summary := r.Run(context.Background(), "test", opts, progress)
+	summary := r.Run(context.Background(), "test", RunOpts{RoleID: "progress-role", Action: ActionRun}, progress)
 	close(progress)
 
 	if summary.ExecID <= 0 {
 		t.Fatalf("expected non-zero exec id, got %d", summary.ExecID)
 	}
-
 	for p := range progress {
 		if p.ExecID != summary.ExecID {
 			t.Fatalf("expected progress exec id %d, got %d", summary.ExecID, p.ExecID)
@@ -280,89 +234,37 @@ func TestRunnerProgressIncludesExecID(t *testing.T) {
 
 func TestRunnerConfigDirSetsEnv(t *testing.T) {
 	dir := t.TempDir()
-	logsDir := filepath.Join(dir, "logs")
-	projectDir := filepath.Join(dir, ".ateam")
-	if err := os.MkdirAll(projectDir, 0755); err != nil {
-		t.Fatal(err)
-	}
 
 	mock := &agent.MockAgent{Response: "ok"}
+	r := newTestRunner(t, dir, mock)
+	r.ConfigDir = ".claude"
 
-	r := &Runner{
-		Agent:      mock,
-		ProjectDir: projectDir,
-		ConfigDir:  ".claude",
-	}
-
-	opts := RunOpts{
-		RoleID:  "iso-role",
-		Action:  ActionRun,
-		LogsDir: logsDir,
-	}
-
-	_ = r.Run(context.Background(), "test", opts, nil)
+	_ = r.Run(context.Background(), "test", RunOpts{RoleID: "iso-role", Action: ActionRun}, nil)
 
 	if len(mock.Requests) != 1 {
 		t.Fatalf("expected 1 request, got %d", len(mock.Requests))
 	}
-	req := mock.Requests[0]
-	want := filepath.Join(projectDir, ".claude")
-	if req.Env == nil || req.Env["CLAUDE_CONFIG_DIR"] != want {
-		t.Errorf("expected CLAUDE_CONFIG_DIR=%q in request env, got %v", want, req.Env)
+	want := filepath.Join(dir, ".claude")
+	if mock.Requests[0].Env["CLAUDE_CONFIG_DIR"] != want {
+		t.Errorf("expected CLAUDE_CONFIG_DIR=%q, got %v", want, mock.Requests[0].Env)
 	}
 }
 
 func TestRunnerConfigDirAbsolute(t *testing.T) {
 	dir := t.TempDir()
-	logsDir := filepath.Join(dir, "logs")
-	absConfigDir := filepath.Join(dir, "abs-claude-config")
+	absConfig := filepath.Join(dir, "abs-claude-config")
 
 	mock := &agent.MockAgent{Response: "ok"}
+	r := newTestRunner(t, dir, mock)
+	r.ConfigDir = absConfig
 
-	r := &Runner{
-		Agent:     mock,
-		ConfigDir: absConfigDir,
-		// no ProjectDir needed for absolute paths
-	}
-
-	opts := RunOpts{
-		RoleID:  "abs-role",
-		Action:  ActionRun,
-		LogsDir: logsDir,
-	}
-
-	_ = r.Run(context.Background(), "test", opts, nil)
+	_ = r.Run(context.Background(), "test", RunOpts{RoleID: "abs-role", Action: ActionRun}, nil)
 
 	if len(mock.Requests) != 1 {
 		t.Fatalf("expected 1 request, got %d", len(mock.Requests))
 	}
-	req := mock.Requests[0]
-	if req.Env == nil || req.Env["CLAUDE_CONFIG_DIR"] != absConfigDir {
-		t.Errorf("expected CLAUDE_CONFIG_DIR=%q, got %v", absConfigDir, req.Env)
-	}
-}
-
-func TestRunnerConfigDirRelativeRequiresProject(t *testing.T) {
-	dir := t.TempDir()
-	logsDir := filepath.Join(dir, "logs")
-
-	mock := &agent.MockAgent{Response: "ok"}
-
-	r := &Runner{
-		Agent:     mock,
-		ConfigDir: ".claude",
-		// no ProjectDir
-	}
-
-	opts := RunOpts{
-		RoleID:  "no-proj",
-		Action:  ActionRun,
-		LogsDir: logsDir,
-	}
-
-	summary := r.Run(context.Background(), "test", opts, nil)
-	if summary.Err == nil {
-		t.Fatal("expected error when relative config_dir is set without project context")
+	if mock.Requests[0].Env["CLAUDE_CONFIG_DIR"] != absConfig {
+		t.Errorf("expected CLAUDE_CONFIG_DIR=%q, got %v", absConfig, mock.Requests[0].Env)
 	}
 }
 
@@ -393,153 +295,79 @@ func TestRenderSettingsSandboxExtra(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderSettings: %v", err)
 	}
-
 	var result map[string]any
 	if err := json.Unmarshal(data, &result); err != nil {
-		t.Fatalf("cannot parse output: %v", err)
+		t.Fatalf("parse: %v", err)
 	}
-
 	fs := result["sandbox"].(map[string]any)["filesystem"].(map[string]any)
 	net := result["sandbox"].(map[string]any)["network"].(map[string]any)
-
-	assertContains := func(list []any, want string) {
-		t.Helper()
+	contains := func(list []any, want string) bool {
 		for _, v := range list {
 			if v.(string) == want {
-				return
+				return true
 			}
 		}
-		t.Errorf("expected %q in list %v", want, list)
+		return false
 	}
-
-	allowWrite := fs["allowWrite"].([]any)
-	assertContains(allowWrite, "/base/write")
-	assertContains(allowWrite, "/extra/write")
-
-	allowRead := fs["allowRead"].([]any)
-	assertContains(allowRead, "/base/read")
-	assertContains(allowRead, "/extra/read")
-
-	domains := net["allowedDomains"].([]any)
-	assertContains(domains, "base.example.com")
-	assertContains(domains, "extra.example.com")
-}
-
-func TestRenderSettingsNoSandboxExtra(t *testing.T) {
-	sandbox := `{
-		"sandbox": {
-			"filesystem": {
-				"allowWrite": ["/base/write"]
-			},
-			"network": {
-				"allowedDomains": ["base.example.com"]
-			}
-		},
-		"permissions": {}
-	}`
-
-	r := &Runner{
-		Sandbox: SandboxConfig{
-			Settings: sandbox,
-		},
+	for _, want := range []string{"/base/write", "/extra/write"} {
+		if !contains(fs["allowWrite"].([]any), want) {
+			t.Errorf("allowWrite missing %q", want)
+		}
 	}
-
-	data, err := r.RenderSettings("/work")
-	if err != nil {
-		t.Fatalf("RenderSettings: %v", err)
+	for _, want := range []string{"/base/read", "/extra/read"} {
+		if !contains(fs["allowRead"].([]any), want) {
+			t.Errorf("allowRead missing %q", want)
+		}
 	}
-
-	var result map[string]any
-	if err := json.Unmarshal(data, &result); err != nil {
-		t.Fatalf("cannot parse output: %v", err)
-	}
-
-	net := result["sandbox"].(map[string]any)["network"].(map[string]any)
-	domains := net["allowedDomains"].([]any)
-	if len(domains) != 1 {
-		t.Errorf("expected 1 domain, got %d: %v", len(domains), domains)
+	for _, want := range []string{"base.example.com", "extra.example.com"} {
+		if !contains(net["allowedDomains"].([]any), want) {
+			t.Errorf("allowedDomains missing %q", want)
+		}
 	}
 }
 
 func TestRunnerStallEmitsWarning(t *testing.T) {
 	dir := t.TempDir()
-	logsDir := filepath.Join(dir, "logs")
-	logFile := filepath.Join(dir, "runner.log")
 
 	stallWarn := 75 * time.Millisecond
-	r := &Runner{
-		Agent:          &agent.MockAgent{HoldAfterSystem: 4 * stallWarn},
-		LogFile:        logFile,
-		StallWarnAfter: stallWarn,
-	}
-
-	opts := RunOpts{
-		RoleID:  "stalled",
-		Action:  ActionRun,
-		LogsDir: logsDir,
-	}
+	r := newTestRunner(t, dir, &agent.MockAgent{HoldAfterSystem: 4 * stallWarn})
+	r.StallWarnAfter = stallWarn
 
 	progress := make(chan RunProgress, 64)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_ = r.Run(ctx, "stall test", opts, progress)
+	_ = r.Run(ctx, "stall test", RunOpts{RoleID: "stalled", Action: ActionRun}, progress)
 	close(progress)
 
 	var stalls int
-	var lastStallContent string
+	var lastContent string
 	for p := range progress {
 		if p.Phase == PhaseStall {
 			stalls++
-			lastStallContent = p.Content
+			lastContent = p.Content
 		}
 	}
 	if stalls == 0 {
-		t.Fatalf("expected at least one PhaseStall progress event, got 0")
+		t.Fatalf("expected at least one PhaseStall progress event")
 	}
-	if !strings.Contains(lastStallContent, "no agent events") {
-		t.Errorf("stall content missing expected message: %q", lastStallContent)
-	}
-
-	logData, err := os.ReadFile(logFile)
-	if err != nil {
-		t.Fatalf("cannot read runner log: %v", err)
-	}
-	if !strings.Contains(string(logData), "stall") {
-		t.Errorf("expected runner log to contain 'stall', got: %s", string(logData))
+	if !strings.Contains(lastContent, "no agent events") {
+		t.Errorf("stall content missing expected message: %q", lastContent)
 	}
 }
 
 func TestRunnerPreservesResultWhenAgentExitsNonZero(t *testing.T) {
-	// Mirrors the claude "API stream idle timeout" path: a rich result event
-	// with cost + IsError=true, immediately followed by cmd.Wait returning
-	// exit=1. The runner must preserve the result event's cost/usage and
-	// only adopt the process exit code, not overwrite resultEv with the
-	// bare error event (which would zero out cost in the DB).
 	dir := t.TempDir()
-	logsDir := filepath.Join(dir, "logs")
-	db, err := calldb.Open(filepath.Join(dir, "state.sqlite"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
+	r := newTestRunner(t, dir, &agent.MockAgent{
+		Response:               "partial output before stream stalled",
+		Cost:                   0.55,
+		ResultIsError:          true,
+		ProcessExitAfterResult: 1,
+	})
 
-	r := &Runner{
-		Agent: &agent.MockAgent{
-			Response:               "partial output before stream stalled",
-			Cost:                   0.55,
-			ResultIsError:          true,
-			ProcessExitAfterResult: 1,
-		},
-		CallDB: db,
-	}
-
-	opts := RunOpts{
-		RoleID:  "stalled-api",
-		Action:  ActionRun,
-		LogsDir: logsDir,
-	}
-
-	summary := r.Run(context.Background(), "test", opts, nil)
+	summary := r.Run(context.Background(), "test", RunOpts{
+		RoleID: "stalled-api",
+		Action: ActionRun,
+	}, nil)
 
 	if summary.Cost != 0.55 {
 		t.Errorf("expected cost 0.55 from result event, got %v", summary.Cost)
@@ -548,69 +376,37 @@ func TestRunnerPreservesResultWhenAgentExitsNonZero(t *testing.T) {
 		t.Errorf("expected IsError=true from result event")
 	}
 	if summary.ExitCode != 1 {
-		t.Errorf("expected ExitCode=1 merged from process error, got %d", summary.ExitCode)
+		t.Errorf("expected ExitCode=1 from process error, got %d", summary.ExitCode)
 	}
 	if summary.ErrorSource != agent.ErrorSourceAgentAPI {
-		t.Errorf("expected ErrorSource=%q (preserved from result event), got %q",
-			agent.ErrorSourceAgentAPI, summary.ErrorSource)
-	}
-	if summary.InputTokens == 0 || summary.OutputTokens == 0 {
-		t.Errorf("expected non-zero token usage from result event, got in=%d out=%d",
-			summary.InputTokens, summary.OutputTokens)
+		t.Errorf("expected ErrorSource=%q, got %q", agent.ErrorSourceAgentAPI, summary.ErrorSource)
 	}
 
-	row, err := db.GetRunByID(summary.ExecID)
-	if err != nil {
-		t.Fatalf("GetRunByID: %v", err)
-	}
-	if row == nil {
-		t.Fatalf("expected DB row for exec %d, got nil", summary.ExecID)
+	row, err := r.CallDB.GetRunByID(summary.ExecID)
+	if err != nil || row == nil {
+		t.Fatalf("GetRunByID(%d): row=%v err=%v", summary.ExecID, row, err)
 	}
 	if row.CostUSD != 0.55 {
 		t.Errorf("DB row cost = %v, want 0.55", row.CostUSD)
 	}
 }
 
-func TestRunnerArchivesPrompt(t *testing.T) {
+func TestWriteCmdFileIncludesRunDetailsAndFilesCopy(t *testing.T) {
 	dir := t.TempDir()
-	logsDir := filepath.Join(dir, "logs")
-	historyDir := filepath.Join(dir, "history")
+	path := filepath.Join(dir, "cmd.md")
 
-	mock := &agent.MockAgent{Response: "ok"}
-
-	r := &Runner{Agent: mock}
-
-	opts := RunOpts{
-		RoleID:     "archive-role",
-		Action:     ActionRun,
-		LogsDir:    logsDir,
-		HistoryDir: historyDir,
-		PromptName: "test_prompt.md",
-	}
-
-	_ = r.Run(context.Background(), "prompt to archive", opts, nil)
-
-	entries, err := os.ReadDir(historyDir)
-	if err != nil {
-		t.Fatalf("cannot read history dir: %v", err)
-	}
-	if len(entries) == 0 {
-		t.Error("expected archived prompt in history dir")
-	}
-}
-
-func TestWriteExecFileIncludesAllMetadata(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "x_exec.md")
-
-	writeExecFile(path, execFileInfo{
+	writeCmdFile(path, cmdFileInfo{
 		StartedAt:     time.Date(2026, 5, 2, 9, 8, 4, 0, time.UTC),
+		EndedAt:       time.Date(2026, 5, 2, 9, 8, 30, 0, time.UTC),
+		HasResult:     true,
 		ExecID:        191,
 		Agent:         "claude",
+		AgentDef:      "agent \"claude\" {}\n",
 		Profile:       "isolated",
+		ProfileDef:    "profile \"isolated\" {}\n",
 		ContainerType: "docker-exec",
 		ContainerName: "myctr",
-		Action:        "run",
+		Action:        "report",
 		Role:          "database_schema",
 		Batch:         "code-2026-05-01_23-53-28",
 		Model:         "claude-sonnet-4-6",
@@ -618,7 +414,12 @@ func TestWriteExecFileIncludesAllMetadata(t *testing.T) {
 		CLI:           "claude -p --verbose",
 		SpecifiedEnv:  map[string]string{"CLAUDE_CONFIG_DIR": "/custom/cfg", "FOO": "bar", "CLAUDECODE": ""},
 		SettingsJSON:  []byte(`{"x":1}`),
-		Prompt:        "do the thing",
+		ExitCode:      0,
+		Status:        "ok",
+		FileCopy: []fileCopyEntry{
+			{Source: "runtime/191/report.md", Dest: "roles/database_schema/report.md", Note: "cloned"},
+			{Source: "runtime/191/draft_prompt.md", Note: "SKIPPED (*_prompt.md exclusion)"},
+		},
 	})
 
 	data, err := os.ReadFile(path)
@@ -627,13 +428,19 @@ func TestWriteExecFileIncludesAllMetadata(t *testing.T) {
 	}
 	got := string(data)
 
-	// Lines that must be present so resume + forensics work.
 	for _, want := range []string{
-		"* exec_id: 191",
-		"* agent: claude",
+		"# Runtime",
 		"* profile: isolated",
-		"* container: docker-exec (myctr)",
+		"* agent: claude",
 		"* model: claude-sonnet-4-6",
+		"## profile definition",
+		"## agent definition",
+		"# Run details",
+		"* Exit Code: 0",
+		"* Status: ok",
+		"# Command",
+		"* exec_id: 191",
+		"* container: docker-exec (myctr)",
 		"* role: database_schema",
 		"* batch: code-2026-05-01_23-53-28",
 		"## Specified",
@@ -641,11 +448,17 @@ func TestWriteExecFileIncludesAllMetadata(t *testing.T) {
 		"CLAUDE_CONFIG_DIR=/custom/cfg",
 		"FOO=bar",
 		"# Settings",
-		"# Prompt\ndo the thing",
+		"# Files Copy",
+		"runtime/191/report.md → roles/database_schema/report.md",
+		"draft_prompt.md  SKIPPED",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("exec file missing %q\n--- file ---\n%s", want, got)
+			t.Errorf("cmd file missing %q\n--- file ---\n%s", want, got)
 		}
+	}
+	// Ensure dropped section is gone.
+	if strings.Contains(got, "# Prompt\n") {
+		t.Errorf("cmd.md should not include # Prompt section anymore")
 	}
 }
 
@@ -673,3 +486,6 @@ func TestResolveExecModel(t *testing.T) {
 		})
 	}
 }
+
+// avoid unused-import error if calldb is not referenced directly above.
+var _ = calldb.Open

@@ -11,7 +11,8 @@ import (
 	"github.com/ateam/internal/runner"
 )
 
-// HistoryEntry represents a single archived file.
+// HistoryEntry represents one past run, surfaced either from a legacy
+// timestamped history file or from an agent_execs row.
 type HistoryEntry struct {
 	Filename    string
 	Timestamp   time.Time
@@ -19,6 +20,7 @@ type HistoryEntry struct {
 	Path        string // absolute path
 	CostUSD     float64
 	TotalTokens int64
+	ExecID      int64 // 0 for legacy entries discovered by filename scan only
 }
 
 // discoverHistory reads a history directory and returns entries sorted newest-first.
@@ -78,6 +80,62 @@ func filterHistoryByKind(entries []HistoryEntry, kind string) []HistoryEntry {
 		}
 	}
 	return result
+}
+
+// historyFromDB returns history entries for a (role, action) pair sourced from
+// agent_execs. Each row becomes one HistoryEntry whose Path points at the
+// runtime/<exec_id>/ output (when output_file is populated). Cost/tokens are
+// filled from the same row. Sorted newest-first.
+func historyFromDB(db *calldb.CallDB, projectDir, action, role, kind string) []HistoryEntry {
+	if db == nil {
+		return nil
+	}
+	rows, err := db.RecentRuns(calldb.RecentFilter{Role: role, Action: action, Limit: 100})
+	if err != nil {
+		return nil
+	}
+	out := make([]HistoryEntry, 0, len(rows))
+	for _, r := range rows {
+		ts, err := time.Parse(time.RFC3339, r.StartedAt)
+		if err != nil {
+			continue
+		}
+		path := ""
+		if r.OutputFile != "" {
+			path = filepath.Join(projectDir, r.OutputFile)
+		}
+		out = append(out, HistoryEntry{
+			Timestamp:   ts.In(time.Local),
+			Kind:        kind,
+			Path:        path,
+			CostUSD:     r.CostUSD,
+			TotalTokens: int64(r.InputTokens + r.OutputTokens + r.CacheReadTokens + r.CacheWriteTokens),
+			ExecID:      r.ID,
+		})
+	}
+	return out
+}
+
+// mergeHistory combines DB-sourced entries (preferred) with legacy filename
+// scan results, deduplicating by exec_id when the filename embeds it.
+func mergeHistory(dbEntries, legacy []HistoryEntry) []HistoryEntry {
+	seen := make(map[int64]bool, len(dbEntries))
+	for _, e := range dbEntries {
+		if e.ExecID > 0 {
+			seen[e.ExecID] = true
+		}
+	}
+	merged := append([]HistoryEntry(nil), dbEntries...)
+	for _, e := range legacy {
+		if e.ExecID > 0 && seen[e.ExecID] {
+			continue
+		}
+		merged = append(merged, e)
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		return merged[i].Timestamp.After(merged[j].Timestamp)
+	})
+	return merged
 }
 
 // fetchRunCosts returns cost/token data for all runs matching action+role.

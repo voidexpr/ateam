@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/ateam/internal/config"
@@ -54,20 +55,16 @@ func (e *ResolvedEnv) VerifyPath() string {
 	return filepath.Join(e.SupervisorDir(), "verify.md")
 }
 
-func (e *ResolvedEnv) RunnerLogPath() string {
-	return filepath.Join(e.ProjectDir, "logs", "runner.log")
+// LogsDir returns the per-exec_id forensic log directory. Holds stream.jsonl,
+// stderr.out, settings.json, prompt.md, cmd.md.
+func (e *ResolvedEnv) LogsDir(execID int64) string {
+	return filepath.Join(e.ProjectDir, "logs", strconv.FormatInt(execID, 10))
 }
 
-func (e *ResolvedEnv) RoleLogsDir(roleID string) string {
-	return filepath.Join(e.ProjectDir, "logs", "roles", roleID)
-}
-
-func (e *ResolvedEnv) SupervisorLogsDir() string {
-	return filepath.Join(e.ProjectDir, "logs", "supervisor")
-}
-
-func (e *ResolvedEnv) RoleWorkspacesDir(roleID string) string {
-	return filepath.Join(e.ProjectDir, "logs", "roles", roleID, "workspaces")
+// RuntimeDir returns the per-exec_id agent-writable output directory. Files
+// the agent writes here are cloned to canonical destinations on success.
+func (e *ResolvedEnv) RuntimeDir(execID int64) string {
+	return filepath.Join(e.ProjectDir, "runtime", strconv.FormatInt(execID, 10))
 }
 
 // ProjectDBPath returns the path to the per-project state database.

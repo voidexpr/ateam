@@ -26,6 +26,8 @@ type TemplateVars struct {
 	Model           string // resolved model name
 	ContainerType   string // container type ("none", "docker", "docker-exec", etc.)
 	ContainerName   string // docker container name (e.g. "ateam-myapp-security")
+	OutputDir       string // absolute path to <projectDir>/runtime/<exec_id>/ (where the agent should write files)
+	OutputFile      string // absolute path to OutputDir/<primary_kind> (e.g. report.md); empty when the action has no primary output
 }
 
 // Replacer builds a strings.Replacer for the current template vars.
@@ -49,6 +51,10 @@ func (v TemplateVars) Replacer() *strings.Replacer {
 		"{{MODEL}}", v.Model,
 		"{{CONTAINER_TYPE}}", v.ContainerType,
 		"{{CONTAINER_NAME}}", v.ContainerName,
+		"{{OUTPUT_DIR}}", v.OutputDir,
+		"{{OUTPUT_FILE}}", v.OutputFile,
+		// Legacy alias for code_management_prompt.md; same dir as OUTPUT_DIR.
+		"{{EXECUTION_DIR}}", v.OutputDir,
 	)
 }
 
@@ -126,5 +132,54 @@ func BuildTemplateVars(r *Runner, opts RunOpts, startedAt time.Time, callID int6
 		vars.ProjectFullPath = r.SourceDir
 		vars.ProjectDir = filepath.Base(r.SourceDir)
 	}
+	if callID > 0 && r.ProjectDir != "" {
+		vars.OutputDir = runtimeDirFor(r.ProjectDir, callID)
+		if primary := PrimaryOutputName(opts.OutputKind); primary != "" {
+			vars.OutputFile = filepath.Join(vars.OutputDir, primary)
+		}
+	}
 	return vars
 }
+
+// runtimeDirFor returns the per-exec_id agent-writable output directory.
+// Mirrors root.ResolvedEnv.RuntimeDir but lives here to avoid a package
+// cycle (root imports runner via cmd, not the reverse).
+func runtimeDirFor(projectDir string, execID int64) string {
+	return filepath.Join(projectDir, "runtime", fmt.Sprintf("%d", execID))
+}
+
+// logsDirFor returns the per-exec_id forensic log directory.
+func logsDirFor(projectDir string, execID int64) string {
+	return filepath.Join(projectDir, "logs", fmt.Sprintf("%d", execID))
+}
+
+// PrimaryOutputName maps an OutputKind to the canonical filename the agent
+// writes for that action via {{OUTPUT_FILE}}. Returns "" when the action has
+// no primary output.
+func PrimaryOutputName(kind string) string {
+	switch kind {
+	case OutputKindReport:
+		return "report.md"
+	case OutputKindReview:
+		return "review.md"
+	case OutputKindVerify:
+		return "verify.md"
+	case OutputKindExecutionReport:
+		return "execution_report.md"
+	case OutputKindSetupOverview:
+		return "setup_overview.md"
+	default:
+		return ""
+	}
+}
+
+// OutputKind* enumerates the well-known primary outputs an action produces
+// in runtime/<exec_id>/. Empty string means no primary output (run, parallel,
+// auto-debug).
+const (
+	OutputKindReport          = "report"
+	OutputKindReview          = "review"
+	OutputKindVerify          = "verify"
+	OutputKindExecutionReport = "execution_report"
+	OutputKindSetupOverview   = "setup_overview"
+)

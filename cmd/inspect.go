@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/prompts"
@@ -208,12 +207,22 @@ func logFilesForRun(env *root.ResolvedEnv, r calldb.RecentRow) []string {
 		return nil
 	}
 	streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.StreamFile)
-	prefix := strings.TrimSuffix(streamPath, "_stream.jsonl")
-
-	suffixes := []string{"_exec.md", "_settings.json", "_stream.jsonl", "_stderr.log"}
+	dir := filepath.Dir(streamPath)
+	// New layout files (logs/<exec_id>/...) plus legacy prefix-based ones for
+	// pre-migration rows whose stream path still ends in _stream.jsonl.
+	var candidates []string
+	if strings.HasSuffix(streamPath, "_stream.jsonl") {
+		prefix := strings.TrimSuffix(streamPath, "_stream.jsonl")
+		for _, s := range []string{"_exec.md", "_settings.json", "_stream.jsonl", "_stderr.log"} {
+			candidates = append(candidates, prefix+s)
+		}
+	} else {
+		for _, name := range []string{"cmd.md", "settings.json", "stream.jsonl", "stderr.out", "prompt.md"} {
+			candidates = append(candidates, filepath.Join(dir, name))
+		}
+	}
 	var files []string
-	for _, s := range suffixes {
-		path := prefix + s
+	for _, path := range candidates {
 		if _, err := os.Stat(path); err == nil {
 			files = append(files, path)
 		}
@@ -260,9 +269,6 @@ func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
 	defer dbForRun.Close()
 	r.CallDB = dbForRun
 
-	logsDir := env.SupervisorLogsDir()
-	reportPath := filepath.Join(logsDir, time.Now().Format(runner.TimestampFormat)+"_debug_report.md")
-
 	progress := make(chan runner.RunProgress, 64)
 	var progressWg sync.WaitGroup
 	progressWg.Add(1)
@@ -275,13 +281,10 @@ func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
 	defer stop()
 
 	summary := r.Run(ctx, prompt, runner.RunOpts{
-		RoleID:              "supervisor",
-		Action:              runner.ActionDebug,
-		LogsDir:             logsDir,
-		WorkDir:             env.SourceDir,
-		Verbose:             true,
-		PromptName:          "auto_debug_prompt.md",
-		LastMessageFilePath: reportPath,
+		RoleID:  "supervisor",
+		Action:  runner.ActionDebug,
+		WorkDir: env.SourceDir,
+		Verbose: true,
 	}, progress)
 
 	close(progress)
@@ -298,14 +301,10 @@ func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
 		return fmt.Errorf("auto-debug failed: %w", summary.Err)
 	}
 
-	// Print the saved debug report
-	if data, err := os.ReadFile(reportPath); err == nil && len(data) > 0 {
-		cwd, _ := os.Getwd()
-		fmt.Printf("\n--- Debug report: %s ---\n\n", relPath(cwd, reportPath))
-		fmt.Print(string(data))
-		if data[len(data)-1] != '\n' {
-			fmt.Println()
-		}
+	// Debug report lives in logs/<exec_id>/stream.jsonl; users can render it
+	// with `ateam cat <exec_id>`.
+	if summary.ExecID > 0 {
+		fmt.Printf("\nRun `ateam cat %d` to view the debug report.\n", summary.ExecID)
 	}
 
 	return nil

@@ -161,29 +161,25 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		r.Agent.SetModel(parallelModel)
 	}
 
-	if hasProject {
-		db, err := openProjectDB(env)
-		if err != nil {
-			return err
-		}
-		defer db.Close()
-		r.CallDB = db
+	if !hasProject {
+		return fmt.Errorf("ateam project required: no .ateam/ found")
+	}
+	db, err := openProjectDB(env)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	r.CallDB = db
 
-		if !parallelForce {
-			if err := checkConcurrentRunsEnv(db, env, runner.ActionParallel, nil); err != nil {
-				return err
-			}
+	if !parallelForce {
+		if err := checkConcurrentRunsEnv(db, env, runner.ActionParallel, nil); err != nil {
+			return err
 		}
 	}
 
 	batch := parallelBatch
 	if batch == "" {
 		batch = "parallel-" + time.Now().Format(runner.TimestampFormat)
-	}
-
-	baseLogsDir := env.OrgDir
-	if hasProject {
-		baseLogsDir = env.ProjectDir
 	}
 
 	tasks := make([]runner.PoolExec, len(resolvedPrompts))
@@ -193,12 +189,10 @@ func runParallel(cmd *cobra.Command, args []string) error {
 			RunOpts: runner.RunOpts{
 				RoleID:     labels[i],
 				Action:     runner.ActionParallel,
-				LogsDir:    filepath.Join(baseLogsDir, "logs", "parallel", labels[i]),
 				WorkDir:    workDir,
 				TimeoutMin: parallelTimeout,
 				Verbose:    parallelVerbose,
 				Batch:      batch,
-				PromptName: "parallel_prompt.md",
 			},
 		}
 	}

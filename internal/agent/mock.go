@@ -5,10 +5,38 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 )
+
+// runtimeFileRe matches a fully-qualified path inside runtime/<exec_id>/.
+// The runner pre-substitutes {{OUTPUT_FILE}} / {{OUTPUT_DIR}} into the prompt;
+// MockAgent recovers either the file (with ".md" suffix) or the directory
+// (path that ends in "/runtime/<digits>/" with no further file component) so
+// the test can simulate the agent's Write tool.
+var runtimeFileRe = regexp.MustCompile(`(/[^\s"]*?/runtime/\d+/[A-Za-z0-9._-]+\.md)`)
+var runtimeDirRe = regexp.MustCompile(`(/[^\s"]*?/runtime/\d+/?)(?:[\s"]|$)`)
+
+func extractOutputFile(prompt string) string {
+	if m := runtimeFileRe.FindString(prompt); m != "" {
+		return m
+	}
+	if m := runtimeDirRe.FindStringSubmatch(prompt); len(m) >= 2 {
+		// Append a placeholder filename so callers can use filepath.Dir().
+		return filepath.Join(strings.TrimRight(m[1], "/"), "_dummy_marker.md")
+	}
+	return ""
+}
+
+// filepathDir / filepathJoin: thin wrappers so the file doesn't grow another
+// import for one-off uses.
+func filepathDir(p string) string { return filepath.Dir(p) }
+func filepathJoin(parts ...string) string {
+	return filepath.Join(parts...)
+}
 
 // MockAgent is a test agent that returns canned responses.
 type MockAgent struct {
@@ -33,6 +61,18 @@ type MockAgent struct {
 	// returning a non-zero exit code (e.g. claude exiting 1 because
 	// is_error=true).
 	ProcessExitAfterResult int
+
+	// WriteAtOutputFile, when non-nil, makes Run write these bytes to the
+	// path the test pre-substituted into Request.Prompt as
+	// "report written to <PATH>" — useful for exercising the runner's
+	// runtime/<exec_id>/ → canonical promote step. Detected by scanning the
+	// prompt for "{{OUTPUT_FILE}}" patterns the runner has already resolved.
+	WriteAtOutputFile []byte
+
+	// ExtraRuntimeFiles is a name->content map written into the same dir as
+	// WriteAtOutputFile (i.e. runtime/<exec_id>/). Used to test multi-file
+	// promotion and the *_prompt.md exclusion.
+	ExtraRuntimeFiles map[string][]byte
 
 	mu       sync.Mutex
 	Requests []Request
@@ -95,6 +135,24 @@ func (m *MockAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent)
 	}
 
 	ch <- StreamEvent{Type: "assistant", Text: response}
+
+	// If the test asked us to simulate the agent's Write tool, drop the
+	// configured bytes at the OUTPUT_FILE path encoded in the prompt and any
+	// supporting files in the same directory. We extract the path from the
+	// runtime/<exec_id>/ pattern in the prompt — see runner template.go.
+	if outputFile := extractOutputFile(req.Prompt); outputFile != "" {
+		if len(m.WriteAtOutputFile) > 0 {
+			_ = os.MkdirAll(filepathDir(outputFile), 0700)
+			_ = os.WriteFile(outputFile, m.WriteAtOutputFile, 0600)
+		}
+		if len(m.ExtraRuntimeFiles) > 0 {
+			dir := filepathDir(outputFile)
+			_ = os.MkdirAll(dir, 0700)
+			for name, body := range m.ExtraRuntimeFiles {
+				_ = os.WriteFile(filepathJoin(dir, name), body, 0600)
+			}
+		}
+	}
 
 	// Write valid claude-format JSONL to stream file for FormatStream compatibility
 	if req.StreamFile != "" {

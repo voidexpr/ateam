@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -191,25 +190,19 @@ func runReport(opts ReportOptions) error {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", roleID, err)
 			continue
 		}
-		roleDir := env.RoleDir(roleID)
 		startedAt := time.Now()
-		prompt, outputFile := prepareOutputFile(prompt, env.RoleHistoryDir(roleID), prompts.ReportFile, startedAt)
 		task := runner.PoolExec{
 			Prompt: prompt,
 			RunOpts: runner.RunOpts{
-				RoleID:               roleID,
-				Action:               runner.ActionReport,
-				LogsDir:              env.RoleLogsDir(roleID),
-				LastMessageFilePath:  env.RoleReportPath(roleID),
-				OutputFilePath:       outputFile,
-				ErrorMessageFilePath: filepath.Join(roleDir, prompts.ReportErrorFile),
-				WorkDir:              env.SourceDir,
-				TimeoutMin:           timeout,
-				HistoryDir:           env.RoleHistoryDir(roleID),
-				PromptName:           "report_prompt.md",
-				Verbose:              opts.Verbose,
-				Batch:                batch,
-				StartedAt:            startedAt,
+				RoleID:           roleID,
+				Action:           runner.ActionReport,
+				OutputKind:       runner.OutputKindReport,
+				CanonicalDestDir: env.RoleDir(roleID),
+				WorkDir:          env.SourceDir,
+				TimeoutMin:       timeout,
+				Verbose:          opts.Verbose,
+				Batch:            batch,
+				StartedAt:        startedAt,
 			},
 		}
 

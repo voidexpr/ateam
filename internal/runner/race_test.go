@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -236,13 +235,11 @@ func TestRunPoolSharedContainerRace(t *testing.T) {
 		// but the race in resolveContainerTemplates runs earlier in Run().
 	}
 
-	r := &Runner{
-		Agent:         mock,
-		Container:     dc,
-		ContainerType: "docker",
-		ProjectName:   "test",
-		SourceDir:     dir,
-	}
+	r := newTestRunner(t, dir, mock)
+	r.Container = dc
+	r.ContainerType = "docker"
+	r.ProjectName = "test"
+	r.SourceDir = dir
 
 	const numTasks = 8
 	tasks := make([]PoolExec, numTasks)
@@ -250,9 +247,8 @@ func TestRunPoolSharedContainerRace(t *testing.T) {
 		tasks[i] = PoolExec{
 			Prompt: "p",
 			RunOpts: RunOpts{
-				RoleID:  fmt.Sprintf("role-%d", i),
-				Action:  ActionRun,
-				LogsDir: makeTaskLogsDir(dir, i),
+				RoleID: fmt.Sprintf("role-%d", i),
+				Action: ActionRun,
 			},
 		}
 	}
@@ -274,17 +270,15 @@ func TestRunPoolSharedContainerDoesNotMutateTemplate(t *testing.T) {
 		ExtraVolumes: []string{"/data/{{ROLE}}:/data"},
 		Env:          map[string]string{"ROLE": "{{ROLE}}"},
 	}
-	r := &Runner{
-		Agent:         mock,
-		Container:     dc,
-		ContainerType: "docker",
-		ProjectName:   "test",
-		SourceDir:     dir,
-	}
+	r := newTestRunner(t, dir, mock)
+	r.Container = dc
+	r.ContainerType = "docker"
+	r.ProjectName = "test"
+	r.SourceDir = dir
 
 	tasks := []PoolExec{
-		{Prompt: "p", RunOpts: RunOpts{RoleID: "alpha", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 0)}},
-		{Prompt: "p", RunOpts: RunOpts{RoleID: "beta", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 1)}},
+		{Prompt: "p", RunOpts: RunOpts{RoleID: "alpha", Action: ActionRun}},
+		{Prompt: "p", RunOpts: RunOpts{RoleID: "beta", Action: ActionRun}},
 	}
 	_ = RunPool(context.Background(), r, tasks, 1, nil, nil) // serial: isolate mutation issue from the race
 
@@ -306,7 +300,7 @@ func TestRunPoolSharedContainerDoesNotMutateTemplate(t *testing.T) {
 func TestRunPoolCompletedChannelDeadlockGuard(t *testing.T) {
 	dir := t.TempDir()
 	mock := &agent.MockAgent{Response: "ok"}
-	r := &Runner{Agent: mock}
+	r := newTestRunner(t, dir, mock)
 
 	const numTasks = 4
 	tasks := make([]PoolExec, numTasks)
@@ -314,9 +308,8 @@ func TestRunPoolCompletedChannelDeadlockGuard(t *testing.T) {
 		tasks[i] = PoolExec{
 			Prompt: "p",
 			RunOpts: RunOpts{
-				RoleID:  fmt.Sprintf("role-%d", i),
-				Action:  ActionRun,
-				LogsDir: makeTaskLogsDir(dir, i),
+				RoleID: fmt.Sprintf("role-%d", i),
+				Action: ActionRun,
 			},
 		}
 	}
@@ -342,13 +335,11 @@ func TestRunPoolSharedDockerExecRace(t *testing.T) {
 		// No container actually running — Prepare will fail at docker ps,
 		// but ResolveTemplates and Clone paths run first.
 	}
-	r := &Runner{
-		Agent:         mock,
-		Container:     de,
-		ContainerType: "docker-exec",
-		ProjectName:   "test",
-		SourceDir:     dir,
-	}
+	r := newTestRunner(t, dir, mock)
+	r.Container = de
+	r.ContainerType = "docker-exec"
+	r.ProjectName = "test"
+	r.SourceDir = dir
 
 	const numTasks = 8
 	tasks := make([]PoolExec, numTasks)
@@ -356,9 +347,8 @@ func TestRunPoolSharedDockerExecRace(t *testing.T) {
 		tasks[i] = PoolExec{
 			Prompt: "p",
 			RunOpts: RunOpts{
-				RoleID:  fmt.Sprintf("role-%d", i),
-				Action:  ActionRun,
-				LogsDir: makeTaskLogsDir(dir, i),
+				RoleID: fmt.Sprintf("role-%d", i),
+				Action: ActionRun,
 			},
 		}
 	}
@@ -376,22 +366,18 @@ func TestRunPoolRunnerFieldsUnchanged(t *testing.T) {
 	dir := t.TempDir()
 	mock := &agent.MockAgent{Response: "ok", Delay: 5 * time.Millisecond}
 
-	r := &Runner{
-		Agent:                mock,
-		ProjectName:          "proj",
-		ProjectDir:           dir,
-		SourceDir:            dir,
-		OrgDir:               dir,
-		Profile:              "default",
-		ProjectID:            "proj-id",
-		ContainerType:        "none",
-		ContainerName:        "initial-name",
-		ContainerNameSource:  ContainerNameSourceConfig,
-		LogFile:              filepath.Join(dir, "runner.log"),
-		ExtraArgs:            []string{"-p", "--output-format", "stream-json"},
-		ArgsInsideContainer:  []string{"--inside"},
-		ArgsOutsideContainer: []string{"--outside"},
-	}
+	r := newTestRunner(t, dir, mock)
+	r.ProjectName = "proj"
+	r.SourceDir = dir
+	r.OrgDir = dir
+	r.Profile = "default"
+	r.ProjectID = "proj-id"
+	r.ContainerType = "none"
+	r.ContainerName = "initial-name"
+	r.ContainerNameSource = ContainerNameSourceConfig
+	r.ExtraArgs = []string{"-p", "--output-format", "stream-json"}
+	r.ArgsInsideContainer = []string{"--inside"}
+	r.ArgsOutsideContainer = []string{"--outside"}
 	r.Sandbox.RWPaths = []string{"/rw"}
 	r.Sandbox.ROPaths = []string{"/ro"}
 	r.Sandbox.Denied = []string{"/no"}
@@ -404,9 +390,8 @@ func TestRunPoolRunnerFieldsUnchanged(t *testing.T) {
 		tasks[i] = PoolExec{
 			Prompt: "p",
 			RunOpts: RunOpts{
-				RoleID:  fmt.Sprintf("role-%d", i),
-				Action:  ActionRun,
-				LogsDir: makeTaskLogsDir(dir, i),
+				RoleID: fmt.Sprintf("role-%d", i),
+				Action: ActionRun,
 			},
 		}
 	}
@@ -496,13 +481,11 @@ func TestRunPoolSharedPrepareGuardRunsOnce(t *testing.T) {
 	}
 
 	mock := &agent.MockAgent{Response: "ok", Delay: 5 * time.Millisecond}
-	r := &Runner{
-		Agent:         mock,
-		Container:     fake,
-		ContainerType: "docker",
-		ProjectName:   "test",
-		SourceDir:     dir,
-	}
+	r := newTestRunner(t, dir, mock)
+	r.Container = fake
+	r.ContainerType = "docker"
+	r.ProjectName = "test"
+	r.SourceDir = dir
 
 	const numTasks = 8
 	tasks := make([]PoolExec, numTasks)
@@ -510,9 +493,8 @@ func TestRunPoolSharedPrepareGuardRunsOnce(t *testing.T) {
 		tasks[i] = PoolExec{
 			Prompt: "p",
 			RunOpts: RunOpts{
-				RoleID:  fmt.Sprintf("role-%d", i),
-				Action:  ActionRun,
-				LogsDir: makeTaskLogsDir(dir, i),
+				RoleID: fmt.Sprintf("role-%d", i),
+				Action: ActionRun,
 			},
 		}
 	}

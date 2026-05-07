@@ -41,14 +41,6 @@ func RunPool(ctx context.Context, r *Runner, tasks []PoolExec, maxParallel int, 
 	var wg sync.WaitGroup
 
 	for _, task := range tasks {
-		qr := r
-		if task.Runner != nil {
-			qr = task.Runner
-		}
-		qr.LogQueued(task.RunOpts)
-	}
-
-	for _, task := range tasks {
 		wg.Add(1)
 		select {
 		case sem <- struct{}{}:

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -182,30 +181,15 @@ func runCode(opts CodeOptions) error {
 	}
 
 	timeout := env.Config.Code.EffectiveTimeout(opts.Timeout)
-	historyDir := env.ReviewHistoryDir()
 	supervisorDir := env.SupervisorDir()
 
-	// Pre-compute the execution directory so {{OUTPUT_FILE}} points at the
-	// session-dir's execution_report.md. That keeps the file the supervisor
-	// maintains during Phase 1-4 and the file the runner promotes to the
-	// canonical code_output.md as the SAME file — otherwise the Write-tool
-	// flow's "single Write at end" overrides Phase 4's incremental updates
-	// and the session-dir execution_report.md is left as a stale placeholder.
 	startedAt := time.Now()
-	executionDir := filepath.Join(supervisorDir, "code", startedAt.Format(runner.TimestampFormat))
-	outputFile := filepath.Join(executionDir, "execution_report.md")
-	prompt = strings.ReplaceAll(prompt, "{{EXECUTION_DIR}}", executionDir)
-	prompt = strings.ReplaceAll(prompt, "{{OUTPUT_FILE}}", outputFile)
 
 	if opts.DryRun {
 		fmt.Printf("╔══ code management ══╗\n\n")
 		fmt.Println(prompt)
 		fmt.Printf("\n╚══ code management ══╝\n")
 		return nil
-	}
-
-	if err := os.MkdirAll(historyDir, 0755); err != nil {
-		return fmt.Errorf("cannot create history directory: %w", err)
 	}
 
 	fmt.Printf("Code management supervisor running (%dm timeout)...\n", timeout)
@@ -243,19 +227,15 @@ func runCode(opts CodeOptions) error {
 	}
 
 	runOpts := runner.RunOpts{
-		RoleID:               "supervisor",
-		Action:               runner.ActionCode,
-		LogsDir:              env.SupervisorLogsDir(),
-		LastMessageFilePath:  filepath.Join(supervisorDir, "code_output.md"),
-		OutputFilePath:       outputFile,
-		ErrorMessageFilePath: filepath.Join(supervisorDir, "code_error.md"),
-		WorkDir:              env.SourceDir,
-		TimeoutMin:           timeout,
-		HistoryDir:           historyDir,
-		PromptName:           "code_management_prompt.md",
-		Verbose:              opts.Verbose,
-		Batch:                batch,
-		StartedAt:            startedAt,
+		RoleID:           "supervisor",
+		Action:           runner.ActionCode,
+		OutputKind:       runner.OutputKindExecutionReport,
+		CanonicalDestDir: filepath.Join(supervisorDir, "code", "{{EXEC_ID}}"),
+		WorkDir:          env.SourceDir,
+		TimeoutMin:       timeout,
+		Verbose:          opts.Verbose,
+		Batch:            batch,
+		StartedAt:        startedAt,
 	}
 
 	ctx, stop := cmdContext()

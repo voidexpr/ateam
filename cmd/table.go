@@ -33,15 +33,6 @@ func cmdContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }
 
-// prepareOutputFile builds the timestamped output path inside historyDir and
-// substitutes it for the {{OUTPUT_FILE}} placeholder in prompt. The returned
-// path is what code/report/review thread into runner.RunOpts.OutputFilePath
-// so the agent's Write target and the runner's history record line up.
-func prepareOutputFile(prompt, historyDir, suffix string, startedAt time.Time) (string, string) {
-	outputFile := filepath.Join(historyDir, startedAt.Format(runner.TimestampFormat)+"."+suffix)
-	return strings.ReplaceAll(prompt, "{{OUTPUT_FILE}}", outputFile), outputFile
-}
-
 // errNoReview is the canonical error for commands that need the supervisor
 // review file before they can proceed.
 func errNoReview(reviewPath string) error {
@@ -82,6 +73,9 @@ func printDone(r runner.RunSummary) {
 
 // openProjectDB opens the per-project state.sqlite in .ateam/, creating it
 // if it doesn't exist. Returns an error if the project has no ProjectDir.
+//
+// On first open after upgrading to the logs/<exec_id>/ layout this also runs
+// MigrateLogsLayout — sentinel-guarded, so subsequent calls are no-ops.
 func openProjectDB(env *root.ResolvedEnv) (*calldb.CallDB, error) {
 	if env.ProjectDir == "" {
 		return nil, fmt.Errorf("no project context — run 'ateam init' first")
@@ -90,6 +84,9 @@ func openProjectDB(env *root.ResolvedEnv) (*calldb.CallDB, error) {
 	db, err := calldb.Open(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open project database %s: %w", dbPath, err)
+	}
+	if err := root.MigrateLogsLayout(env, db); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: log layout migration: %v\n", err)
 	}
 	return db, nil
 }
@@ -265,7 +262,6 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 	extraWriteDirs := gitWriteDirs(env.SourceDir)
 	r := &runner.Runner{
 		Agent:       buildAgent(ac),
-		LogFile:     env.RunnerLogPath(),
 		ProjectDir:  env.ProjectDir,
 		OrgDir:      env.OrgDir,
 		SourceDir:   env.SourceDir,
@@ -905,7 +901,7 @@ func printDryRunInfo(r *runner.Runner, env *root.ResolvedEnv, opts dryRunOpts) {
 
 	skipSandbox := (runner.IsInContainer() || r.Container != nil) && !r.Sandbox.InsideContainer
 	if r.Sandbox.Settings != "" && !skipSandbox {
-		fullArgs = append(fullArgs, "--settings", "<logs>/<timestamp>_settings.json")
+		fullArgs = append(fullArgs, "--settings", "<logs>/<exec_id>/settings.json")
 	}
 
 	// Resolved command

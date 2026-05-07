@@ -3,7 +3,6 @@ package eval
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -56,17 +55,13 @@ func RunJudge(ctx context.Context, r *runner.Runner, env *root.ResolvedEnv, in J
 	prompt := buildJudgePrompt(in)
 
 	ts := time.Now().Format(runner.TimestampFormat)
-	logsDir := filepath.Join(env.ProjectDir, "logs", "eval")
 	opts := runner.RunOpts{
-		RoleID:              "eval-judge",
-		Action:              runner.ActionRun,
-		LogsDir:             logsDir,
-		LastMessageFilePath: filepath.Join(logsDir, ts+"_judge.md"),
-		WorkDir:             env.SourceDir,
-		TimeoutMin:          timeoutMin,
-		PromptName:          "eval_judge_prompt.md",
-		Verbose:             verbose,
-		Batch:               "eval-judge-" + ts,
+		RoleID:     "eval-judge",
+		Action:     runner.ActionRun,
+		WorkDir:    env.SourceDir,
+		TimeoutMin: timeoutMin,
+		Verbose:    verbose,
+		Batch:      "eval-judge-" + ts,
 	}
 
 	summary := r.Run(ctx, prompt, opts, nil)

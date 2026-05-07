@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/ateam/internal/prompts"
@@ -79,23 +77,15 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 	cr.CallDB = db
 
-	supervisorDir := env.SupervisorDir()
-	historyDir := env.ReviewHistoryDir()
-	if err := os.MkdirAll(historyDir, 0755); err != nil {
-		return fmt.Errorf("cannot create history directory: %w", err)
-	}
-
+	// auto_setup_prompt.md still hardcodes `.ateam/setup_overview.md` instead
+	// of using {{OUTPUT_FILE}}; the agent writes there directly. No runtime/
+	// canonical promotion is configured here. See plan for the eventual fix.
 	opts := runner.RunOpts{
-		RoleID:               "supervisor",
-		Action:               runner.ActionRun,
-		LogsDir:              env.SupervisorLogsDir(),
-		WorkDir:              env.SourceDir,
-		TimeoutMin:           timeout,
-		HistoryDir:           historyDir,
-		PromptName:           "auto_setup_prompt.md",
-		Verbose:              autoSetupVerbose,
-		LastMessageFilePath:  filepath.Join(supervisorDir, "auto_setup_output.md"),
-		ErrorMessageFilePath: filepath.Join(supervisorDir, "auto_setup_error.md"),
+		RoleID:     "supervisor",
+		Action:     runner.ActionRun,
+		WorkDir:    env.SourceDir,
+		TimeoutMin: timeout,
+		Verbose:    autoSetupVerbose,
 	}
 
 	progress := make(chan runner.RunProgress, 64)

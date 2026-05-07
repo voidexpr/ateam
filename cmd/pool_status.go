@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/ateam/internal/display"
@@ -63,12 +64,14 @@ func progressColumnsHelp(unit string) string {
   event still gives visibility into how much the %[1]s consumed.`, unit)
 }
 
-// streamFilePrefix returns the log file prefix (without _stream.jsonl suffix)
-// relative to cwd, with a trailing "*" glob hint.
+// streamFilePrefix returns a friendly identifier for the log location of a
+// run, relative to cwd. New layout: the per-exec_id dir. Legacy layout: the
+// timestamp+action prefix (with a "*" glob hint, since multiple files share it).
 func streamFilePrefix(streamPath, cwd string) string {
-	prefix := strings.TrimSuffix(streamPath, "_stream.jsonl")
-	rel := relPath(cwd, prefix)
-	return rel + "*"
+	if strings.HasSuffix(streamPath, "_stream.jsonl") {
+		return relPath(cwd, strings.TrimSuffix(streamPath, "_stream.jsonl")) + "*"
+	}
+	return relPath(cwd, filepath.Dir(streamPath))
 }
 
 func formatRunningToolDetail(elapsed, toolName string, toolCount int) string {

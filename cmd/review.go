@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -131,18 +130,12 @@ func runReview(opts ReviewOptions) error {
 	timeout := env.Config.Review.EffectiveTimeout(opts.Timeout)
 
 	reviewFile := env.ReviewPath()
-	reviewDir := filepath.Dir(reviewFile)
-	historyDir := env.ReviewHistoryDir()
+	supervisorDir := env.SupervisorDir()
 
 	startedAt := time.Now()
-	prompt, outputFile := prepareOutputFile(prompt, historyDir, "review.md", startedAt)
 
 	if opts.DryRun {
 		return printReviewDryRun(env, prompt)
-	}
-
-	if err := os.MkdirAll(historyDir, 0755); err != nil {
-		return fmt.Errorf("cannot create review history directory: %w", err)
 	}
 
 	fmt.Printf("Supervisor reviewing reports (%dm timeout)...\n", timeout)
@@ -170,18 +163,14 @@ func runReview(opts ReviewOptions) error {
 	}
 
 	runOpts := runner.RunOpts{
-		RoleID:               "supervisor",
-		Action:               runner.ActionReview,
-		LogsDir:              env.SupervisorLogsDir(),
-		LastMessageFilePath:  reviewFile,
-		OutputFilePath:       outputFile,
-		ErrorMessageFilePath: filepath.Join(reviewDir, "review_error.md"),
-		WorkDir:              env.SourceDir,
-		TimeoutMin:           timeout,
-		HistoryDir:           historyDir,
-		PromptName:           "review_prompt.md",
-		Verbose:              opts.Verbose,
-		StartedAt:            startedAt,
+		RoleID:           "supervisor",
+		Action:           runner.ActionReview,
+		OutputKind:       runner.OutputKindReview,
+		CanonicalDestDir: supervisorDir,
+		WorkDir:          env.SourceDir,
+		TimeoutMin:       timeout,
+		Verbose:          opts.Verbose,
+		StartedAt:        startedAt,
 	}
 
 	ctx, stop := cmdContext()

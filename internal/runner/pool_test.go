@@ -3,7 +3,6 @@ package runner
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -63,22 +62,16 @@ func (a *concurrencyTrackingAgent) Run(ctx context.Context, req agent.Request) <
 	return ch
 }
 
-// makeTaskLogsDir returns a unique logs subdirectory for each task index,
-// avoiding file-name collisions when tasks share the same timestamp prefix.
-func makeTaskLogsDir(baseDir string, i int) string {
-	return filepath.Join(baseDir, fmt.Sprintf("task-%d", i))
-}
-
 func TestRunPoolBasic(t *testing.T) {
 	dir := t.TempDir()
 
 	mock := &agent.MockAgent{Response: "pool output"}
-	r := &Runner{Agent: mock}
+	r := newTestRunner(t, dir, mock)
 
 	tasks := []PoolExec{
-		{Prompt: "task 1", RunOpts: RunOpts{RoleID: "role-1", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 0)}},
-		{Prompt: "task 2", RunOpts: RunOpts{RoleID: "role-2", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 1)}},
-		{Prompt: "task 3", RunOpts: RunOpts{RoleID: "role-3", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 2)}},
+		{Prompt: "task 1", RunOpts: RunOpts{RoleID: "role-1", Action: ActionRun}},
+		{Prompt: "task 2", RunOpts: RunOpts{RoleID: "role-2", Action: ActionRun}},
+		{Prompt: "task 3", RunOpts: RunOpts{RoleID: "role-3", Action: ActionRun}},
 	}
 
 	results := RunPool(context.Background(), r, tasks, 2, nil, nil)
@@ -103,13 +96,13 @@ func TestRunPoolSemaphoreLimit(t *testing.T) {
 	const maxParallel = 2
 
 	tracking := &concurrencyTrackingAgent{delay: 20 * time.Millisecond}
-	r := &Runner{Agent: tracking}
+	r := newTestRunner(t, dir, tracking)
 
 	tasks := make([]PoolExec, numTasks)
 	for i := range tasks {
 		tasks[i] = PoolExec{
 			Prompt:  "task",
-			RunOpts: RunOpts{RoleID: fmt.Sprintf("role-%d", i), Action: ActionRun, LogsDir: makeTaskLogsDir(dir, i)},
+			RunOpts: RunOpts{RoleID: fmt.Sprintf("role-%d", i), Action: ActionRun},
 		}
 	}
 
@@ -127,12 +120,12 @@ func TestRunPoolCompletedChannel(t *testing.T) {
 	dir := t.TempDir()
 
 	mock := &agent.MockAgent{Response: "completed"}
-	r := &Runner{Agent: mock}
+	r := newTestRunner(t, dir, mock)
 
 	tasks := []PoolExec{
-		{Prompt: "t1", RunOpts: RunOpts{RoleID: "c-role-1", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 0)}},
-		{Prompt: "t2", RunOpts: RunOpts{RoleID: "c-role-2", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 1)}},
-		{Prompt: "t3", RunOpts: RunOpts{RoleID: "c-role-3", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 2)}},
+		{Prompt: "t1", RunOpts: RunOpts{RoleID: "c-role-1", Action: ActionRun}},
+		{Prompt: "t2", RunOpts: RunOpts{RoleID: "c-role-2", Action: ActionRun}},
+		{Prompt: "t3", RunOpts: RunOpts{RoleID: "c-role-3", Action: ActionRun}},
 	}
 
 	completed := make(chan RunSummary, len(tasks))
@@ -156,10 +149,10 @@ func TestRunPoolResultCollection(t *testing.T) {
 	dir := t.TempDir()
 
 	mock := &agent.MockAgent{Response: "result-output", Cost: 0.05}
-	r := &Runner{Agent: mock}
+	r := newTestRunner(t, dir, mock)
 
 	tasks := []PoolExec{
-		{Prompt: "p1", RunOpts: RunOpts{RoleID: "res-role", Action: ActionRun, LogsDir: makeTaskLogsDir(dir, 0)}},
+		{Prompt: "p1", RunOpts: RunOpts{RoleID: "res-role", Action: ActionRun}},
 	}
 
 	results := RunPool(context.Background(), r, tasks, 1, nil, nil)
@@ -184,14 +177,14 @@ func TestRunPoolConcurrentResultsAreSafe(t *testing.T) {
 	dir := t.TempDir()
 
 	mock := &agent.MockAgent{Response: "concurrent"}
-	r := &Runner{Agent: mock}
+	r := newTestRunner(t, dir, mock)
 
 	const numTasks = 10
 	tasks := make([]PoolExec, numTasks)
 	for i := range tasks {
 		tasks[i] = PoolExec{
 			Prompt:  "concurrent task",
-			RunOpts: RunOpts{RoleID: fmt.Sprintf("concurrent-role-%d", i), Action: ActionRun, LogsDir: makeTaskLogsDir(dir, i)},
+			RunOpts: RunOpts{RoleID: fmt.Sprintf("concurrent-role-%d", i), Action: ActionRun},
 		}
 	}
 
