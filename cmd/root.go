@@ -37,7 +37,7 @@ func init() {
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(projectsCmd)
 	rootCmd.AddCommand(rolesCmd)
-	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(execCmd)
 	rootCmd.AddCommand(promptCmd)
 	rootCmd.AddCommand(codeCmd)
 	rootCmd.AddCommand(catCmd)

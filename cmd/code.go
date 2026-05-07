@@ -51,8 +51,8 @@ type CodeOptions struct {
 	Print             bool
 	DryRun            bool
 	CheaperModel      bool
-	Profile           string // sub-run profile (--profile on ateam run)
-	Agent             string // sub-run agent (--agent on ateam run, mutually exclusive with Profile)
+	Profile           string // sub-run profile (--profile on ateam exec)
+	Agent             string // sub-run agent (--agent on ateam exec, mutually exclusive with Profile)
 	SupervisorProfile string
 	SupervisorAgent   string
 	Verbose           bool
@@ -67,7 +67,7 @@ var codeCmd = &cobra.Command{
 	Use:   "code",
 	Short: "Execute review tasks as code changes (followed by verify)",
 	Long: `Read the review document and execute prioritized tasks as code changes,
-delegating each coding task to the appropriate role via ateam run. After the
+delegating each coding task to the appropriate role via ateam exec. After the
 code phase succeeds, automatically chain ateam verify to inspect the resulting
 commits and run the test suite. Pass --no-verify to skip that follow-up.
 
@@ -114,8 +114,8 @@ func init() {
 	codeCmd.Flags().BoolVar(&codeDryRun, "dry-run", false,
 		"print the computed prompt without running")
 	addCheaperModelFlag(codeCmd, &codeCheaperModel)
-	codeCmd.Flags().StringVar(&codeProfile, "profile", "", "profile for sub-runs (passed to ateam run --profile)")
-	codeCmd.Flags().StringVar(&codeAgent, "agent", "", "agent for sub-runs (passed to ateam run --agent)")
+	codeCmd.Flags().StringVar(&codeProfile, "profile", "", "profile for sub-runs (passed to ateam exec --profile)")
+	codeCmd.Flags().StringVar(&codeAgent, "agent", "", "agent for sub-runs (passed to ateam exec --agent)")
 	codeCmd.Flags().StringVar(&codeSupervisorProfile, "supervisor-profile", "", "profile for the supervisor itself")
 	codeCmd.Flags().StringVar(&codeSupervisorAgent, "supervisor-agent", "", "agent for the supervisor itself")
 	codeCmd.MarkFlagsMutuallyExclusive("profile", "agent")
@@ -168,14 +168,14 @@ func runCode(opts CodeOptions) error {
 	}
 
 	// Resolve sub-run profile/agent once — used for both prompt injection and DinD check.
-	// --agent and --profile are mutually exclusive on ateam run.
+	// --agent and --profile are mutually exclusive on ateam exec.
 	subRunProfile := opts.Profile
 	if subRunProfile == "" && opts.Agent == "" {
 		subRunProfile = env.Config.ResolveProfile(runner.ActionRun, "")
 	}
 
 	// Inject flags for the supervisor to pass to sub-runs.
-	prompt += "\n\n# Sub-Run Flags\n\nYou MUST pass the following flags to every `ateam run` command you execute:\n"
+	prompt += "\n\n# Sub-Run Flags\n\nYou MUST pass the following flags to every `ateam exec` command you execute:\n"
 	prompt += "- `--batch " + batch + "` (groups all sub-execs for cost tracking)\n"
 	if opts.Agent != "" {
 		prompt += "- `--agent " + opts.Agent + "`\n"

@@ -295,7 +295,7 @@ func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
 		f.Close()
 	}
 
-	printRunSummary(summary)
+	printExecSummary(summary)
 
 	if summary.Err != nil {
 		return fmt.Errorf("auto-debug failed: %w", summary.Err)

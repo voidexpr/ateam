@@ -249,7 +249,7 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 | `ateam all` | Full pipeline: report → review → code → verify |
 | `ateam verify` | Supervisor verifies recent code changes from `ateam code` |
 | `ateam eval` | Compare two role prompt variants side-by-side with LLM scoring — see [EVAL.md](EVAL.md) |
-| `ateam run` | Run an agent with a custom prompt |
+| `ateam exec` | Run an agent with a custom prompt |
 | `ateam parallel` | Run multiple agents in parallel, each with its own prompt |
 | `ateam secret` | Manage API keys (keychain or file) |
 | `ateam claude` | Run interactive claude in a container with shared config |
@@ -362,10 +362,10 @@ You can create skills for some of these but in reality you want to run all of th
 
 Another clear scenario to use ateam is as more code is written by agents and only modified by agents there aren't many reasons for humans to review this code or care about the project artifacts. Instead it's best to have dedicated agents constantly improve the project following known good practices. This can be prompted once and automated. This is what ateam is.
 
-Lastly you can use `ateam run` and `ateam parallel` to create your own mini agent workflow through simple bash script chaining without having to deal with complex frameworks. For example:
+Lastly you can use `ateam exec` and `ateam parallel` to create your own mini agent workflow through simple bash script chaining without having to deal with complex frameworks. For example:
 
 ```bash
-ateam run @./my_saved_prompt_to_decide_what_todo.md && ateam parallel --prompt "take care of problem 1" --prompt "take care of problem 2" --prompt "take care of problem 3" && ateam run "verify what the documents produced by the previous step describe and take further action"
+ateam exec @./my_saved_prompt_to_decide_what_todo.md && ateam parallel --prompt "take care of problem 1" --prompt "take care of problem 2" --prompt "take care of problem 3" && ateam exec "verify what the documents produced by the previous step describe and take further action"
 ```
 
 You can easily swap claude/codex
@@ -399,7 +399,7 @@ Use the `ateam prompt --role ROLENAME --action report` to show the exact prompt 
 It actually fits very well as a first step before a full ateam cycle:
 
 ```bash
-ateam run "/simplify the recent commits" && ateam all
+ateam exec "/simplify the recent commits" && ateam all
 ```
 
 ### What if I only want to do some of the code changes or only run some of the reports ?
@@ -409,14 +409,14 @@ ateam run "/simplify the recent commits" && ateam all
 
 ### What if I want to use ateam in a slightly different workflow than report-review-code-verify ?
 
-The `ateam run` command is a wrapper around coding to run one-shot, unattended prompts. You can use it to build your own automated scripts. It can also be run outside of an ateam project (but requires an ateam organization which is created by default in `$HOME`). You still benefit from ateam observability features:
+The `ateam exec` command is a wrapper around coding to run one-shot, unattended prompts. You can use it to build your own automated scripts. It can also be run outside of an ateam project (but requires an ateam organization which is created by default in `$HOME`). You still benefit from ateam observability features:
 * `ateam ps` to see current and past execution
 * `ateam tail` to see logs in real time
 * `ateam cost` to get a token cost report
 
-You can then use `ateam run` in your own scripts and build your own workflows reusing agent/container management without the ateam prompt/artifact part. It can be ran without an ateam project but does require an ateam org (which is created in $HOME by default).
+You can then use `ateam exec` in your own scripts and build your own workflows reusing agent/container management without the ateam prompt/artifact part. It can be ran without an ateam project but does require an ateam org (which is created in $HOME by default).
 
-For example: `ateam run "/simplify my last few commits" && git commit . -m "round of simplify" && ateam run "Identify and code at most 5 code refactoring opportunities focused on performance and security. Make sure to commit each separately as soon as they are completed, do run tests between each and fix any issue introduced" --profile docker` and then go get a nice walk outside or valuable family time while your agent is at work. You shouldn't come back to see that it got stuck asking for a bash command approval at the first step.
+For example: `ateam exec "/simplify my last few commits" && git commit . -m "round of simplify" && ateam exec "Identify and code at most 5 code refactoring opportunities focused on performance and security. Make sure to commit each separately as soon as they are completed, do run tests between each and fix any issue introduced" --profile docker` and then go get a nice walk outside or valuable family time while your agent is at work. You shouldn't come back to see that it got stuck asking for a bash command approval at the first step.
 
 ### What size of project is it for ?
 

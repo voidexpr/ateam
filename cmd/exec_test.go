@@ -29,7 +29,7 @@ func captureStdout(t *testing.T, fn func()) string {
 	return buf.String()
 }
 
-func TestPrintRunDryRun(t *testing.T) {
+func TestPrintExecDryRun(t *testing.T) {
 	r := &runner.Runner{
 		Agent:   &agent.MockAgent{},
 		Profile: "test",
@@ -37,8 +37,8 @@ func TestPrintRunDryRun(t *testing.T) {
 	env := &root.ResolvedEnv{}
 
 	out := captureStdout(t, func() {
-		if err := printRunDryRun(r, env, "hello world", "security", ""); err != nil {
-			t.Errorf("printRunDryRun: %v", err)
+		if err := printExecDryRun(r, env, "hello world", "security", ""); err != nil {
+			t.Errorf("printExecDryRun: %v", err)
 		}
 	})
 
@@ -49,7 +49,7 @@ func TestPrintRunDryRun(t *testing.T) {
 	}
 }
 
-func TestRunRunDryRunNoExec(t *testing.T) {
+func TestRunExecDryRunNoExec(t *testing.T) {
 	base := t.TempDir()
 	orgDir, err := root.InstallOrg(base)
 	if err != nil {
@@ -67,26 +67,26 @@ func TestRunRunDryRunNoExec(t *testing.T) {
 	}
 
 	savedOrg, savedDryRun, savedQuiet, savedAgent, savedProfile, savedRole :=
-		orgFlag, runDryRun, runQuiet, runAgent, runProfile, runRole
+		orgFlag, execDryRun, execQuiet, execAgent, execProfile, execRole
 	defer func() {
-		orgFlag, runDryRun, runQuiet, runAgent, runProfile, runRole =
+		orgFlag, execDryRun, execQuiet, execAgent, execProfile, execRole =
 			savedOrg, savedDryRun, savedQuiet, savedAgent, savedProfile, savedRole
 	}()
 	orgFlag = filepath.Dir(orgDir) // --org takes the parent of .ateamorg/
-	runDryRun = true
-	runQuiet = true
-	runAgent = "mock"
-	runProfile = ""
-	runRole = ""
+	execDryRun = true
+	execQuiet = true
+	execAgent = "mock"
+	execProfile = ""
+	execRole = ""
 
 	var runErr error
 	captureStdout(t, func() {
 		withChdir(t, projPath, func() {
-			runErr = runRun(nil, []string{"test prompt"})
+			runErr = runExec(nil, []string{"test prompt"})
 		})
 	})
 
 	if runErr != nil {
-		t.Fatalf("runRun dry-run: %v", runErr)
+		t.Fatalf("runExec dry-run: %v", runErr)
 	}
 }

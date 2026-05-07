@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CLI test: verify `ateam run ping --dry-run` clearly shows which auth
+# CLI test: verify `ateam exec ping --dry-run` clearly shows which auth
 # method is active and which is masked across the 16 combinations of
 # ateam secret store state x env var state.
 #

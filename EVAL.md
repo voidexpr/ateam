@@ -62,7 +62,7 @@ Three scopes, with fallback:
 ```
 
 Within a single scope, `--profile` and `--agent` are mutually exclusive
-(same as `ateam report` / `ateam run`).
+(same as `ateam report` / `ateam exec`).
 
 For most prompt-comparison evals you don't need any of these — the default
 config picks the right agent and model for both sides.

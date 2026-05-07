@@ -20,10 +20,10 @@ Use the `ateam` CLI for all role operations:
     ateam roles                           # list available roles
     ateam prompt --role ROLE --action code --extra-prompt @FILE
                                           # generate a full code prompt to stdout
-    ateam run @PROMPT_FILE --role ROLE    # execute a role with a prompt file
+    ateam exec @PROMPT_FILE --role ROLE    # execute a role with a prompt file
 
 If a **Sub-Run Flags** section is provided at the end of this prompt, you MUST pass
-ALL listed flags to every `ateam run` command. These flags control cost tracking
+ALL listed flags to every `ateam exec` command. These flags control cost tracking
 (`--batch`) and runtime profile (`--profile`) for sub-execs.
 
 Run `ateam --help` and `ateam COMMAND --help` for full details.
@@ -89,7 +89,7 @@ Execute tasks one at a time, in sequence order. For each task:
 1. **Pre-check**: Verify git working tree is clean, code builds, and tests pass
 2. **Execute**:
    ```
-   ateam run @EXECUTION_DIR/SEQ_SLUG_code_prompt.md --role ROLE
+   ateam exec @EXECUTION_DIR/SEQ_SLUG_code_prompt.md --role ROLE
    ```
 3. **Post-check**: Verify code still builds and tests pass
 4. **Record**: Update `execution_report.md` with the outcome, only append to it during this phase. For each task include:
@@ -108,7 +108,7 @@ After all tasks have been attempted:
    - If all tests pass: note "test suite clean" in the execution report
    - If tests are failing that were passing before this coding cycle: spawn a dedicated fix run:
      ```
-     ateam run "Fix the following test failures that were introduced during this
+     ateam exec "Fix the following test failures that were introduced during this
      coding cycle. The tests were passing before the cycle started.
      Failing tests: [list each failing test name/file].
      Investigate each failure, fix it, and commit. Do not change test assertions
@@ -208,7 +208,7 @@ follow along. Print status lines as you go:
   ```
   Running: ateam roles
   Running: ateam prompt --role security --action code --extra-prompt @EXECUTION_DIR/current_task.md
-  Running: ateam run @EXECUTION_DIR/01_fix_sql_injection_code_prompt.md --role security
+  Running: ateam exec @EXECUTION_DIR/01_fix_sql_injection_code_prompt.md --role security
   ```
 - **Task outcomes**: print the result of each task immediately and include the git hash and branch used
   ```

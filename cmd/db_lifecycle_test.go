@@ -75,21 +75,21 @@ func TestInitCreatesDBAndLogDirs(t *testing.T) {
 func TestRunWithMockAgent(t *testing.T) {
 	orgParent, projPath, _ := setupTestProject(t)
 
-	saved := saveRunGlobals()
+	saved := saveExecGlobals()
 	defer saved.restore()
 	orgFlag = orgParent
-	runProfile = "test" // uses mock agent
-	runQuiet = true
-	runNoStream = true
+	execProfile = "test" // uses mock agent
+	execQuiet = true
+	execNoStream = true
 
 	var runErr error
 	captureStdout(t, func() {
 		withChdir(t, projPath, func() {
-			runErr = runRun(nil, []string{"hello mock"})
+			runErr = runExec(nil, []string{"hello mock"})
 		})
 	})
 	if runErr != nil {
-		t.Fatalf("runRun: %v", runErr)
+		t.Fatalf("runExec: %v", runErr)
 	}
 
 	// ps should show the run
@@ -239,36 +239,36 @@ func TestEnvShowsNotFoundForMissingPaths(t *testing.T) {
 
 // --- global state save/restore helpers ---
 
-type runGlobals struct {
+type execGlobals struct {
 	org, profile, agent, role, model, workDir, agentArgs, batch, containerName string
 	noStream, noSummary, quiet, verbose, dryRun, dockerAutoSetup               bool
 }
 
-func saveRunGlobals() runGlobals {
-	return runGlobals{
-		org: orgFlag, profile: runProfile, agent: runAgent, role: runRole, model: runModel,
-		workDir: runWorkDir, agentArgs: runAgentArgs, batch: runBatch,
-		containerName: runContainerName, noStream: runNoStream, noSummary: runNoSummary,
-		quiet: runQuiet, verbose: runVerbose, dryRun: runDryRun, dockerAutoSetup: runDockerAutoSetup,
+func saveExecGlobals() execGlobals {
+	return execGlobals{
+		org: orgFlag, profile: execProfile, agent: execAgent, role: execRole, model: execModel,
+		workDir: execWorkDir, agentArgs: execAgentArgs, batch: execBatch,
+		containerName: execContainerName, noStream: execNoStream, noSummary: execNoSummary,
+		quiet: execQuiet, verbose: execVerbose, dryRun: execDryRun, dockerAutoSetup: execDockerAutoSetup,
 	}
 }
 
-func (g runGlobals) restore() {
+func (g execGlobals) restore() {
 	orgFlag = g.org
-	runProfile = g.profile
-	runAgent = g.agent
-	runRole = g.role
-	runModel = g.model
-	runWorkDir = g.workDir
-	runAgentArgs = g.agentArgs
-	runBatch = g.batch
-	runContainerName = g.containerName
-	runNoStream = g.noStream
-	runNoSummary = g.noSummary
-	runQuiet = g.quiet
-	runVerbose = g.verbose
-	runDryRun = g.dryRun
-	runDockerAutoSetup = g.dockerAutoSetup
+	execProfile = g.profile
+	execAgent = g.agent
+	execRole = g.role
+	execModel = g.model
+	execWorkDir = g.workDir
+	execAgentArgs = g.agentArgs
+	execBatch = g.batch
+	execContainerName = g.containerName
+	execNoStream = g.noStream
+	execNoSummary = g.noSummary
+	execQuiet = g.quiet
+	execVerbose = g.verbose
+	execDryRun = g.dryRun
+	execDockerAutoSetup = g.dockerAutoSetup
 }
 
 type psGlobals struct {

@@ -16,27 +16,27 @@ import (
 )
 
 var (
-	runRole            string
-	runProfile         string
-	runAgent           string
-	runModel           string
-	runExtraPrompt     string
-	runNoStream        bool
-	runWorkDir         string
-	runNoSummary       bool
-	runQuiet           bool
-	runAgentArgs       string
-	runVerbose         bool
-	runBatch           string
-	runDockerAutoSetup bool
-	runDryRun          bool
-	runContainerName   string
+	execRole            string
+	execProfile         string
+	execAgent           string
+	execModel           string
+	execExtraPrompt     string
+	execNoStream        bool
+	execWorkDir         string
+	execNoSummary       bool
+	execQuiet           bool
+	execAgentArgs       string
+	execVerbose         bool
+	execBatch           string
+	execDockerAutoSetup bool
+	execDryRun          bool
+	execContainerName   string
 )
 
-var runCmd = &cobra.Command{
-	Use:   "run [PROMPT|@FILE|-]",
-	Short: "Run an agent with a prompt",
-	Long: `Run an agent with the provided prompt. Sources, in order of precedence:
+var execCmd = &cobra.Command{
+	Use:   "exec [PROMPT|@FILE|-]",
+	Short: "Execute an agent with a prompt",
+	Long: `Execute an agent with the provided prompt. Sources, in order of precedence:
   - the positional argument: literal prompt text, "@PATH" to read a file,
     or "-" / "@-" to read stdin until EOF
   - if no argument is given AND stdin is piped/redirected, read stdin
@@ -50,37 +50,37 @@ Streaming and summary are on by default. Use --quiet to suppress both,
 or --no-stream / --no-summary individually.
 
 Example:
-  ateam run "say hello"
-  ateam run "Analyze the auth module" --role security
-  ateam run "test" --profile cheap
-  ateam run @prompt_file.md
-  ateam run @prompt_file.md --extra-prompt "focus on the auth module"
-  echo "explain this code" | ateam run
-  git diff | ateam run --role critic_engineering
-  ateam run "say hi" --model sonnet
-  ateam run "quick check" --quiet`,
+  ateam exec "say hello"
+  ateam exec "Analyze the auth module" --role security
+  ateam exec "test" --profile cheap
+  ateam exec @prompt_file.md
+  ateam exec @prompt_file.md --extra-prompt "focus on the auth module"
+  echo "explain this code" | ateam exec
+  git diff | ateam exec --role critic_engineering
+  ateam exec "say hi" --model sonnet
+  ateam exec "quick check" --quiet`,
 	Args: cobra.MaximumNArgs(1),
-	RunE: runRun,
+	RunE: runExec,
 }
 
 func init() {
-	runCmd.Flags().StringVar(&runRole, "role", "", "role to run (optional)")
-	runCmd.Flags().StringVar(&runModel, "model", "", "model override")
-	runCmd.Flags().StringVar(&runExtraPrompt, "extra-prompt", "", "additional instructions appended after the main prompt (text or @filepath)")
-	addProfileFlags(runCmd, &runProfile, &runAgent)
-	runCmd.Flags().BoolVar(&runNoStream, "no-stream", false, "disable progress updates during execution")
-	runCmd.Flags().BoolVar(&runNoSummary, "no-summary", false, "disable run summary after completion")
-	runCmd.Flags().BoolVar(&runQuiet, "quiet", false, "disable both streaming and summary (same as --no-stream --no-summary)")
-	runCmd.Flags().StringVar(&runWorkDir, "work-dir", "", "working directory (defaults to project source dir or cwd)")
-	runCmd.Flags().StringVar(&runAgentArgs, "agent-args", "", "extra args passed to the agent CLI (appended after configured args)")
-	runCmd.Flags().StringVar(&runBatch, "batch", "", "group related agent_execs (e.g. all execs in one ateam code run)")
-	addVerboseFlag(runCmd, &runVerbose)
-	addDockerAutoSetupFlag(runCmd, &runDockerAutoSetup)
-	addContainerNameFlag(runCmd, &runContainerName)
-	runCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "print resolved command, secrets, and prompt without running")
+	execCmd.Flags().StringVar(&execRole, "role", "", "role to run (optional)")
+	execCmd.Flags().StringVar(&execModel, "model", "", "model override")
+	execCmd.Flags().StringVar(&execExtraPrompt, "extra-prompt", "", "additional instructions appended after the main prompt (text or @filepath)")
+	addProfileFlags(execCmd, &execProfile, &execAgent)
+	execCmd.Flags().BoolVar(&execNoStream, "no-stream", false, "disable progress updates during execution")
+	execCmd.Flags().BoolVar(&execNoSummary, "no-summary", false, "disable run summary after completion")
+	execCmd.Flags().BoolVar(&execQuiet, "quiet", false, "disable both streaming and summary (same as --no-stream --no-summary)")
+	execCmd.Flags().StringVar(&execWorkDir, "work-dir", "", "working directory (defaults to project source dir or cwd)")
+	execCmd.Flags().StringVar(&execAgentArgs, "agent-args", "", "extra args passed to the agent CLI (appended after configured args)")
+	execCmd.Flags().StringVar(&execBatch, "batch", "", "group related agent_execs (e.g. all execs in one ateam code run)")
+	addVerboseFlag(execCmd, &execVerbose)
+	addDockerAutoSetupFlag(execCmd, &execDockerAutoSetup)
+	addContainerNameFlag(execCmd, &execContainerName)
+	execCmd.Flags().BoolVar(&execDryRun, "dry-run", false, "print resolved command, secrets, and prompt without running")
 }
 
-func runRun(cmd *cobra.Command, args []string) error {
+func runExec(cmd *cobra.Command, args []string) error {
 	promptArg, err := promptArgOrStdin(args)
 	if err != nil {
 		return err
@@ -89,7 +89,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("cannot resolve prompt: %w", err)
 	}
-	extraPrompt, err := prompts.ResolveOptional(runExtraPrompt)
+	extraPrompt, err := prompts.ResolveOptional(execExtraPrompt)
 	if err != nil {
 		return fmt.Errorf("cannot resolve --extra-prompt: %w", err)
 	}
@@ -97,7 +97,6 @@ func runRun(cmd *cobra.Command, args []string) error {
 		promptText += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
 	}
 
-	// Try to resolve project context (optional for ateam run)
 	env, err := root.Lookup(orgFlag, projectFlag)
 	if err != nil {
 		return fmt.Errorf("cannot find .ateamorg/: %w", err)
@@ -105,25 +104,22 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	hasProject := env.ProjectDir != "" && env.Config != nil
 
-	// If role specified, require project context
-	if runRole != "" && !hasProject {
+	if execRole != "" && !hasProject {
 		return fmt.Errorf("--role requires a project context (.ateam/ directory)")
 	}
 
-	// Validate role if specified
-	if runRole != "" {
-		if !prompts.IsValidRole(runRole, env.Config.Roles, env.ProjectDir, env.OrgDir) {
-			return fmt.Errorf("unknown role: %s\nValid roles: %s", runRole, strings.Join(prompts.AllKnownRoleIDs(env.Config.Roles, env.ProjectDir, env.OrgDir), ", "))
+	if execRole != "" {
+		if !prompts.IsValidRole(execRole, env.Config.Roles, env.ProjectDir, env.OrgDir) {
+			return fmt.Errorf("unknown role: %s\nValid roles: %s", execRole, strings.Join(prompts.AllKnownRoleIDs(env.Config.Roles, env.ProjectDir, env.OrgDir), ", "))
 		}
-		if err := root.EnsureRoles(env.ProjectDir, []string{runRole}); err != nil {
+		if err := root.EnsureRoles(env.ProjectDir, []string{execRole}); err != nil {
 			return err
 		}
 	}
 
-	// Resolve working directory
 	workDir := ""
-	if runWorkDir != "" {
-		abs, err := filepath.Abs(runWorkDir)
+	if execWorkDir != "" {
+		abs, err := filepath.Abs(execWorkDir)
 		if err != nil {
 			return fmt.Errorf("cannot resolve work-dir: %w", err)
 		}
@@ -132,50 +128,43 @@ func runRun(cmd *cobra.Command, args []string) error {
 		workDir = env.SourceDir
 	}
 
-	// Resolve runner from flags or config
 	var r *runner.Runner
 	if hasProject {
-		r, err = resolveRunner(env, runProfile, runAgent, runner.ActionRun, runRole, runDockerAutoSetup)
+		r, err = resolveRunner(env, execProfile, execAgent, runner.ActionRun, execRole, execDockerAutoSetup)
 	} else {
-		// No project context — use flags or "default" profile
-		profile := runProfile
-		if profile == "" && runAgent == "" {
+		profile := execProfile
+		if profile == "" && execAgent == "" {
 			profile = "default"
 		}
-		r, err = resolveRunnerMinimal(env.OrgDir, profile, runAgent)
+		r, err = resolveRunnerMinimal(env.OrgDir, profile, execAgent)
 	}
 	if err != nil {
-		if !runDryRun {
+		if !execDryRun {
 			return err
 		}
-		// In dry-run mode, show the error but continue with what we can resolve
 		fmt.Fprintf(os.Stderr, "Warning: %v\n\n", err)
 		if r == nil {
 			return nil
 		}
 	}
 
-	if err := applyContainerName(r, env, runContainerName); err != nil {
+	if err := applyContainerName(r, env, execContainerName); err != nil {
 		return err
 	}
 	setSourceWritable(r)
 
-	// Apply --agent-args
-	if runAgentArgs != "" {
-		r.ExtraArgs = append(r.ExtraArgs, strings.Fields(runAgentArgs)...)
+	if execAgentArgs != "" {
+		r.ExtraArgs = append(r.ExtraArgs, strings.Fields(execAgentArgs)...)
 	}
 
-	// Apply model override
-	if runModel != "" {
-		r.Agent.SetModel(runModel)
+	if execModel != "" {
+		r.Agent.SetModel(execModel)
 	}
 
-	// Dry-run: print everything and exit
-	if runDryRun {
-		return printRunDryRun(r, env, promptText, runRole, runBatch)
+	if execDryRun {
+		return printExecDryRun(r, env, promptText, execRole, execBatch)
 	}
 
-	// Project context required: every Run gets an exec_id from the project DB.
 	if !hasProject {
 		return fmt.Errorf("ateam project required: no .ateam/ found")
 	}
@@ -188,19 +177,19 @@ func runRun(cmd *cobra.Command, args []string) error {
 
 	timeout := env.Config.Run.EffectiveTimeout(0)
 
-	// Build opts. `run` has no canonical destination — its deliverable is the
+	// Build opts. `exec` has no canonical destination — its deliverable is the
 	// stream, viewable via `ateam cat <exec_id>`.
 	opts := runner.RunOpts{
-		RoleID:     runRole,
+		RoleID:     execRole,
 		Action:     runner.ActionRun,
 		WorkDir:    workDir,
-		Verbose:    runVerbose,
-		Batch:      runBatch,
+		Verbose:    execVerbose,
+		Batch:      execBatch,
 		TimeoutMin: timeout,
 	}
 
-	showStream := !runNoStream && !runQuiet
-	showSummary := !runNoSummary && !runQuiet
+	showStream := !execNoStream && !execQuiet
+	showSummary := !execNoSummary && !execQuiet
 
 	var progress chan runner.RunProgress
 	var progressWg sync.WaitGroup
@@ -222,13 +211,11 @@ func runRun(cmd *cobra.Command, args []string) error {
 		progressWg.Wait()
 	}
 
-	// Stream stderr to our stderr.
 	if f, err := os.Open(result.StderrFilePath); err == nil {
 		_, _ = io.Copy(os.Stderr, f)
 		f.Close()
 	}
 
-	// Print the last message to stdout.
 	if result.Output != "" {
 		fmt.Print(result.Output)
 		if result.Output[len(result.Output)-1] != '\n' {
@@ -237,7 +224,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	if showSummary {
-		printRunSummary(result)
+		printExecSummary(result)
 	}
 
 	if result.Err != nil {
@@ -296,7 +283,7 @@ func fmtContextProgress(contextTokens, contextWindow int) string {
 	return fmt.Sprintf(", ctx: %s", ctxStr)
 }
 
-func printRunDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, batch string) error {
+func printExecDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, batch string) error {
 	fmt.Println("╔══ dry-run ══╗")
 	fmt.Println()
 	printDryRunInfo(r, env, dryRunOpts{
@@ -310,7 +297,7 @@ func printRunDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, bat
 	return nil
 }
 
-func printRunSummary(r runner.RunSummary) {
+func printExecSummary(r runner.RunSummary) {
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintf(os.Stderr, "--- Summary ---\n")
 	fmt.Fprintf(os.Stderr, "  Role:     %s\n", r.RoleID)
@@ -355,5 +342,5 @@ func promptArgOrStdin(args []string) (string, error) {
 	if stdinIsPiped() {
 		return "-", nil
 	}
-	return "", fmt.Errorf("no prompt provided: pass a prompt, @file, or pipe via stdin (run `ateam run --help`)")
+	return "", fmt.Errorf("no prompt provided: pass a prompt, @file, or pipe via stdin (run `ateam exec --help`)")
 }

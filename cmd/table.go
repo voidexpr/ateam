@@ -107,7 +107,7 @@ func requireProjectDB(env *root.ResolvedEnv) (*calldb.CallDB, error) {
 		return nil, fmt.Errorf("cannot open project database %s: %w", dbPath, err)
 	}
 	if db == nil {
-		return nil, fmt.Errorf("project database not found at %s — run a command like 'ateam run' or 'ateam report' first", dbPath)
+		return nil, fmt.Errorf("project database not found at %s — run a command like 'ateam exec' or 'ateam report' first", dbPath)
 	}
 	if err := root.MigrateLogsLayout(env, db); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: log layout migration: %v\n", err)
@@ -746,7 +746,7 @@ func applyCheaperModel(r *runner.Runner, cheaper bool) {
 		r.ExtraArgs = append(r.ExtraArgs, "--model", cheaperModelName)
 		// Also tell the agent itself so resolveExecModel's configured-model
 		// fallback returns the cheaper name when a run crashes before the
-		// stream emits a result event. cmd/run.go does the same when --model
+		// stream emits a result event. cmd/exec.go does the same when --model
 		// is passed explicitly.
 		r.Agent.SetModel(cheaperModelName)
 	}
@@ -859,7 +859,7 @@ type dryRunOpts struct {
 }
 
 // printDryRunInfo prints resolved execution details for a dry run.
-// This is the shared core used by both `run --dry-run` and `report --dry-run`.
+// This is the shared core used by both `exec --dry-run` and `report --dry-run`.
 func printDryRunInfo(r *runner.Runner, env *root.ResolvedEnv, opts dryRunOpts) {
 	agentName := r.Agent.Name()
 	var model string

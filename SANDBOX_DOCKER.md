@@ -95,7 +95,7 @@ ateam secret ANTHROPIC_API_KEY          # API key (pay as you go)
 Test that your project builds and runs tests inside Docker:
 
 ```bash
-ateam run "run the build command and tests, report issues but don't fix them" --profile docker
+ateam exec "run the build command and tests, report issues but don't fix them" --profile docker
 ```
 
 This builds the default Docker image, mounts your code, and runs the agent inside the container.

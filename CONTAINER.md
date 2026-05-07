@@ -9,7 +9,7 @@ This guide covers how to run ateam agents inside Docker containers — from simp
 ateam report --profile docker
 
 # Run a single agent in Docker
-ateam run "analyze the auth module" --profile docker
+ateam exec "analyze the auth module" --profile docker
 ```
 
 This builds a Docker image from `.ateam/Dockerfile` (or the default), runs the agent inside it, and cleans up. No additional configuration needed beyond having Docker installed and credentials set via `ateam secret`.
@@ -63,7 +63,7 @@ Because the default claude agents declare `CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API
 Notice: use CLAUDE_CODE_OAUTH_TOKEN from ateam secret (project), ignore ANTHROPIC_API_KEY from the environment
 ```
 
-Run `ateam env` to see every configured credential (including shadowed ones) and which one the default agent will actually use. Run `ateam run ... --dry-run` for the per-invocation equivalent.
+Run `ateam env` to see every configured credential (including shadowed ones) and which one the default agent will actually use. Run `ateam exec ... --dry-run` for the per-invocation equivalent.
 
 **Host vs container behavior:**
 
@@ -75,7 +75,7 @@ Run `ateam env` to see every configured credential (including shadowed ones) and
 
 On the host, if no `ateam secret` is configured and no credential env vars are set, ateam does not error — the agent authenticates itself (e.g., via interactive Claude Code login). Inside containers, where interactive login isn't available, at least one credential must be resolvable or ateam returns an error with setup instructions.
 
-In practice: if you run `ateam secret CLAUDE_CODE_OAUTH_TOKEN --set` on the host, then `ateam run --profile docker "do something"`, the token flows from keychain → ateam process env → `docker run -e CLAUDE_CODE_OAUTH_TOKEN=...` → agent inside container. No manual `export` needed.
+In practice: if you run `ateam secret CLAUDE_CODE_OAUTH_TOKEN --set` on the host, then `ateam exec --profile docker "do something"`, the token flows from keychain → ateam process env → `docker run -e CLAUDE_CODE_OAUTH_TOKEN=...` → agent inside container. No manual `export` needed.
 
 **Note on OAuth tokens:** `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) is a standalone inference-only token — it does not require `.credentials.json`. The default `docker` profile mounts `.credentials.json` read-only for interactive auth compatibility, but headless agents work with just the token. See [Docker Profiles](#docker-profiles) for details.
 
@@ -97,7 +97,7 @@ docker run \
   ...
 ```
 
-Inside the container, `ateam run` resolves `CLAUDE_CODE_OAUTH_TOKEN` from `~/.config/ateam/secrets.env` automatically — no `export` needed. See [Shared Linux Agent Config](#shared-linux-agent-config) for the full setup.
+Inside the container, `ateam exec` resolves `CLAUDE_CODE_OAUTH_TOKEN` from `~/.config/ateam/secrets.env` automatically — no `export` needed. See [Shared Linux Agent Config](#shared-linux-agent-config) for the full setup.
 
 ### Why not just use environment variables?
 
@@ -174,7 +174,7 @@ profile "docker" {
 Usage:
 ```bash
 ateam report --profile docker
-ateam run "do something" --profile docker
+ateam exec "do something" --profile docker
 ```
 
 **Customize the Dockerfile**: create `.ateam/Dockerfile` to install project-specific tools. Or run `ateam auto-setup --profile docker` to auto-detect and generate one.
@@ -190,10 +190,10 @@ For projects that already use Docker (docker-compose, devcontainer, manually man
 ateam secret CONTAINER_NAME=my-app-dev --scope project
 
 # Run using the built-in docker-exec profile
-ateam run "do something" --profile docker-exec
+ateam exec "do something" --profile docker-exec
 
 # Or override on the command line
-ateam run "do something" --profile docker-exec --container-name my-app-dev
+ateam exec "do something" --profile docker-exec --container-name my-app-dev
 ```
 
 The container name is resolved with this priority: `--container-name` flag > `ateam secret CONTAINER_NAME` > `CONTAINER_NAME` env var > `docker_container` config value. Use `--dry-run` to see which source is active.
@@ -218,7 +218,7 @@ profile "my-app" {
 
 Usage:
 ```bash
-ateam run "do something" --profile my-app
+ateam exec "do something" --profile my-app
 ```
 
 **Container name resolution:** Before exec, ateam validates the container is running via `docker ps` and resolves partial names to exact names. If the container isn't running, you get a clear error before the agent starts.
@@ -312,7 +312,7 @@ Build the linux binary with `make companion` (produces `build/ateam-linux-amd64`
 
 ```bash
 # Inside the container — just works (resolves token from global secret scope)
-ateam run "do something"
+ateam exec "do something"
 ateam report
 ```
 
@@ -329,7 +329,7 @@ No need for `--profile docker` — the default profile works everywhere.
 ateam claude --config-dir ~/shared_claude
 
 # Headless (uses CLAUDE_CODE_OAUTH_TOKEN from ~/.config/ateam/secrets.env)
-ateam run "analyze the codebase"
+ateam exec "analyze the codebase"
 ```
 
 No conflict — interactive uses `.credentials.json`, headless uses the OAuth token. The token is only injected into the agent subprocess, so your shell stays clean.
@@ -408,7 +408,7 @@ But this approach has limitations — `.claude.json` is lost on container recrea
 `CLAUDE_CODE_OAUTH_TOKEN` is needed for headless ateam agents but blocks interactive Claude features (like Remote Control). The shared config approach solves this naturally:
 
 - `ateam claude` uses `.credentials.json` (full-scope interactive login)
-- `ateam run` uses `CLAUDE_CODE_OAUTH_TOKEN` from the global secret scope
+- `ateam exec` uses `CLAUDE_CODE_OAUTH_TOKEN` from the global secret scope
 - The token is injected only into the agent subprocess — your shell stays clean
 - No conflict between interactive and headless
 
@@ -425,7 +425,7 @@ Shows all detected auth sources, runs `claude auth status` for both the default 
 
 ## Shared Linux Agent Config
 
-For running the same Claude identity across multiple containers, use a shared config directory. This provides both interactive Claude sessions (via `CLAUDE_CONFIG_DIR`) and headless `ateam run` (via the global secret scope).
+For running the same Claude identity across multiple containers, use a shared config directory. This provides both interactive Claude sessions (via `CLAUDE_CONFIG_DIR`) and headless `ateam exec` (via the global secret scope).
 
 ### Host layout
 
@@ -434,7 +434,7 @@ For running the same Claude identity across multiple containers, use a shared co
   .credentials.json  # OAuth tokens for interactive sessions (access + refresh)
   .claude.json       # Account state, onboarding flags
   settings.json      # Claude settings
-  secrets.env        # CLAUDE_CODE_OAUTH_TOKEN for headless ateam run
+  secrets.env        # CLAUDE_CODE_OAUTH_TOKEN for headless ateam exec
   ...
 ```
 
@@ -453,7 +453,7 @@ docker run -it \
 ateam claude --config-dir ~/shared_claude
 # Complete the login flow, then /exit
 
-# 4. Generate a headless token for ateam run
+# 4. Generate a headless token for ateam exec
 claude setup-token
 # Copy the token, then save it:
 echo "CLAUDE_CODE_OAUTH_TOKEN=<token>" >> ~/shared_claude/secrets.env
@@ -467,7 +467,7 @@ ateam agent-config --copy-out --container my-app --path ~/.ateamorg/claude_linux
 
 ### Mounting into containers
 
-Mount two things — the shared dir (for interactive claude) and `secrets.env` at the global secret scope path (for headless `ateam run`):
+Mount two things — the shared dir (for interactive claude) and `secrets.env` at the global secret scope path (for headless `ateam exec`):
 
 ```bash
 docker run \
@@ -485,12 +485,12 @@ ateam claude --config-dir ~/shared_claude
 # Or manually:
 CLAUDE_CONFIG_DIR=~/shared_claude claude --dangerously-skip-permissions --remote-control
 
-# Headless ateam run (uses CLAUDE_CODE_OAUTH_TOKEN from global secret scope):
-ateam run "do something"
+# Headless ateam exec (uses CLAUDE_CODE_OAUTH_TOKEN from global secret scope):
+ateam exec "do something"
 ateam report
 ```
 
-No `export` needed — `ateam run` inside a container automatically resolves secrets from the global scope (`~/.config/ateam/secrets.env`).
+No `export` needed — `ateam exec` inside a container automatically resolves secrets from the global scope (`~/.config/ateam/secrets.env`).
 
 ### Injecting ateam into a container
 
@@ -509,7 +509,7 @@ Copying credentials to multiple containers breaks OAuth refresh token rotation. 
 ### How it works
 
 - **Interactive**: `CLAUDE_CONFIG_DIR` tells Claude to store everything in one directory (instead of splitting between `~/.claude/` and `~/.claude.json`). `ateam claude` sets this, unsets API keys to avoid conflicts, and execs claude.
-- **Headless**: `secrets.env` mounted at `~/.config/ateam/secrets.env` is the global secret scope. Inside a container, `ateam run` resolves `CLAUDE_CODE_OAUTH_TOKEN` from this file and injects it into the agent subprocess. Your shell environment stays clean.
+- **Headless**: `secrets.env` mounted at `~/.config/ateam/secrets.env` is the global secret scope. Inside a container, `ateam exec` resolves `CLAUDE_CODE_OAUTH_TOKEN` from this file and injects it into the agent subprocess. Your shell environment stays clean.
 - **No conflict**: interactive Claude uses `.credentials.json` (full-scope login). Headless agents use `CLAUDE_CODE_OAUTH_TOKEN` (inference-only). These are separate auth paths — no interference.
 
 ## Debugging
@@ -517,7 +517,7 @@ Copying credentials to multiple containers breaks OAuth refresh token rotation. 
 ### Dry-run
 
 ```bash
-ateam run --dry-run "hello" --profile docker
+ateam exec --dry-run "hello" --profile docker
 ```
 
 Shows the exact agent command, docker command, secret resolution, and sandbox settings without running anything. Useful for debugging container and auth issues.

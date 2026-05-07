@@ -141,7 +141,7 @@ ateam code --dry-run
 | `--review TEXT` | Review content (text or `@filepath`; defaults to `.ateam/supervisor/review.md`) |
 | `--management TEXT` | Management prompt override (text or `@filepath`) |
 | `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
-| `--profile NAME` | Profile for sub-runs (passed to `ateam run --profile`) |
+| `--profile NAME` | Profile for sub-runs (passed to `ateam exec --profile`) |
 | `--supervisor-profile NAME` | Profile for the supervisor itself |
 | `--cheaper-model` | Use a cheaper model (sonnet) |
 | `--timeout MINUTES` | Timeout in minutes (overrides `config.toml`; default 120) |
@@ -263,9 +263,9 @@ The default claude agents list `CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY`, so O
 
 **Validation** runs before agent spawn for container runs and inside containers. On host without containers, validation is skipped — agents handle their own auth (interactive login, macOS Keychain). Credential isolation (stripping competing env vars) always runs regardless of context.
 
-Use `ateam env` to see every configured credential (including shadowed ones) and which the default agent will use. Use `ateam run --dry-run` for the per-invocation view.
+Use `ateam env` to see every configured credential (including shadowed ones) and which the default agent will use. Use `ateam exec --dry-run` for the per-invocation view.
 
-**Docker usage**: secrets in OS keychains don't cross into containers. Use `--save-project-scope` to write resolved secrets to `.ateam/secrets.env`, which is mounted into containers. Inside the container, `ateam run` resolves them from the project scope automatically.
+**Docker usage**: secrets in OS keychains don't cross into containers. Use `--save-project-scope` to write resolved secrets to `.ateam/secrets.env`, which is mounted into containers. Inside the container, `ateam exec` resolves them from the project scope automatically.
 
 ### `ateam agent-config`
 
@@ -346,7 +346,7 @@ docker run \
   ...
 ```
 
-### `ateam run`
+### `ateam exec`
 
 Run an agent with a prompt. Can run standalone (just needs `.ateamorg/`) or within a project.
 
@@ -355,13 +355,13 @@ Prompt sources, in order of precedence:
 - if no argument is given **and** stdin is piped/redirected, stdin is read automatically
 
 ```bash
-ateam run "say hello"
-ateam run "Analyze the auth module" --role security
-ateam run "test" --profile docker
-ateam run @prompt_file.md
-echo "explain this code" | ateam run            # auto-detected
-git diff | ateam run --role critic_engineering  # auto-detected
-echo "still works" | ateam run -                # explicit "-"
+ateam exec "say hello"
+ateam exec "Analyze the auth module" --role security
+ateam exec "test" --profile docker
+ateam exec @prompt_file.md
+echo "explain this code" | ateam exec            # auto-detected
+git diff | ateam exec --role critic_engineering  # auto-detected
+echo "still works" | ateam exec -                # explicit "-"
 ```
 
 | Flag | Description |
@@ -814,7 +814,7 @@ Configure which profiles the supervisor and code phases use.
 |-----|-------------|
 | `default_profile` | Default profile for supervisor actions (review, code management) |
 | `review_profile` | Profile override for the review phase specifically |
-| `code_profile` | Profile for code sub-runs (passed to `ateam run --profile`) |
+| `code_profile` | Profile for code sub-runs (passed to `ateam exec --profile`) |
 | `code_supervisor_profile` | Profile for the code management supervisor itself |
 
 ```toml
