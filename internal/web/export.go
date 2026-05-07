@@ -80,7 +80,7 @@ func (s *Server) ExportHTML(opts ExportOptions) (string, error) {
 	}
 
 	codeDir := filepath.Join(pe.ProjectDir, "supervisor", "code")
-	if latest := latestCodeSession(codeDir); latest != "" {
+	if latest := latestCodeSession(pe.ProjectDir, s.getDB(pe)); latest != "" {
 		reportPath := filepath.Join(codeDir, latest, "execution_report.md")
 		if content, modTime, err := readFileWithModTime(reportPath); err == nil {
 			data.HasCode = true

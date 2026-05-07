@@ -123,6 +123,133 @@ func TestMigrateLogsLayout_MovesLegacyFiles(t *testing.T) {
 	}
 }
 
+// TestMigrateLogsLayout_PromptSkewMatching covers prompt timestamps that drift
+// from started_at by more than the old ±5s probe (3s and 4s were silently
+// missed). Also asserts that an unmatched prompt is left in place — never
+// destroyed by migration.
+func TestMigrateLogsLayout_PromptSkewMatching(t *testing.T) {
+	cases := []struct {
+		name      string
+		skewSecs  int
+		wantMoved bool
+	}{
+		{"exact match", 0, true},
+		{"3s skew", 3, true},
+		{"4s skew", 4, true},
+		{"30s skew (within window)", 30, true},
+		{"90s skew (outside window)", 90, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			projDir := t.TempDir()
+			db, err := calldb.Open(filepath.Join(projDir, "state.sqlite"))
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			defer db.Close()
+
+			rowTime := time.Now().Truncate(time.Second)
+			fileTime := rowTime.Add(time.Duration(tc.skewSecs) * time.Second)
+
+			roleLogsDir := filepath.Join(projDir, "logs", "roles", "security")
+			if err := os.MkdirAll(roleLogsDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			fileTS := fileTime.Format("2006-01-02_15-04-05")
+			rowTS := rowTime.Format("2006-01-02_15-04-05")
+			prefix := filepath.Join(roleLogsDir, rowTS+"_report")
+			for _, suffix := range []string{"_stream.jsonl", "_stderr.log", "_settings.json", "_exec.md"} {
+				if err := os.WriteFile(prefix+suffix, []byte("legacy"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			histDir := filepath.Join(projDir, "roles", "security", "history")
+			if err := os.MkdirAll(histDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			promptPath := filepath.Join(histDir, fileTS+".report_prompt.md")
+			if err := os.WriteFile(promptPath, []byte("p"), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			relStream, _ := filepath.Rel(projDir, prefix+"_stream.jsonl")
+			id, err := db.InsertCall(&calldb.Call{
+				Action:     "report",
+				Role:       "security",
+				StartedAt:  rowTime,
+				StreamFile: relStream,
+			})
+			if err != nil {
+				t.Fatalf("InsertCall: %v", err)
+			}
+
+			env := &ResolvedEnv{ProjectDir: projDir}
+			if err := MigrateLogsLayout(env, db); err != nil {
+				t.Fatalf("MigrateLogsLayout: %v", err)
+			}
+
+			newPrompt := filepath.Join(projDir, "logs", formatInt(id), "prompt.md")
+			_, newErr := os.Stat(newPrompt)
+			_, oldErr := os.Stat(promptPath)
+			if tc.wantMoved {
+				if newErr != nil {
+					t.Errorf("expected prompt at %s after migration: %v", newPrompt, newErr)
+				}
+				if oldErr == nil {
+					t.Errorf("legacy prompt %s should have been moved", promptPath)
+				}
+			} else {
+				if newErr == nil {
+					t.Errorf("prompt should NOT have been moved (skew %ds outside window)", tc.skewSecs)
+				}
+				if oldErr != nil {
+					t.Errorf("unmatched legacy prompt must remain on disk for forensics: %v", oldErr)
+				}
+			}
+		})
+	}
+}
+
+// TestMigrateLogsLayout_LeavesUnmatchedPromptsAlone covers the scenario where
+// no DB row exists for a legacy prompt. The migration must not delete it.
+func TestMigrateLogsLayout_LeavesUnmatchedPromptsAlone(t *testing.T) {
+	projDir := t.TempDir()
+	db, err := calldb.Open(filepath.Join(projDir, "state.sqlite"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	// One legacy stream file → migration triggers, but the prompt below has
+	// no matching DB row.
+	roleLogsDir := filepath.Join(projDir, "logs", "roles", "security")
+	if err := os.MkdirAll(roleLogsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(roleLogsDir, "x_report_stream.jsonl"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	histDir := filepath.Join(projDir, "roles", "security", "history")
+	if err := os.MkdirAll(histDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	orphan := filepath.Join(histDir, "2020-01-01_00-00-00.report_prompt.md")
+	if err := os.WriteFile(orphan, []byte("orphan"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	env := &ResolvedEnv{ProjectDir: projDir}
+	if err := MigrateLogsLayout(env, db); err != nil {
+		t.Fatalf("MigrateLogsLayout: %v", err)
+	}
+
+	if _, err := os.Stat(orphan); err != nil {
+		t.Errorf("orphan prompt must NOT be deleted: %v", err)
+	}
+}
+
 // relativeIDDir returns id formatted as a directory name. Mirrors what
 // MigrateLogsLayout uses internally so the test doesn't reach into private
 // state.

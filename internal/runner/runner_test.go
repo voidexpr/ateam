@@ -117,6 +117,17 @@ func TestRunnerPromotesRuntimeFiles(t *testing.T) {
 	if _, err := os.Stat(srcReport); err != nil {
 		t.Errorf("runtime/<id>/report.md missing: %v", err)
 	}
+
+	// output_file must hold the immutable runtime path so per-run history
+	// links keep working after subsequent runs overwrite the canonical copy.
+	rows, err := r.CallDB.RecentRuns(calldb.RecentFilter{Action: ActionReport, Limit: 1})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("RecentRuns: %v rows=%d", err, len(rows))
+	}
+	wantRel, _ := filepath.Rel(dir, srcReport)
+	if rows[0].OutputFile != wantRel {
+		t.Errorf("output_file = %q, want runtime path %q (canonical-path bug regressed)", rows[0].OutputFile, wantRel)
+	}
 }
 
 func TestRunnerSkipsPromptFilesDuringPromote(t *testing.T) {

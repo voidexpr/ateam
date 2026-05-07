@@ -724,10 +724,10 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 	success := resultEv != nil && resultEv.Type == "result" && resultEv.ExitCode == 0 && !resultEv.IsError
 
 	var copyEntries []fileCopyEntry
-	var primaryCanonical string
+	var primaryRuntime string
 
 	if success {
-		copyEntries, primaryCanonical = r.promoteRuntimeFiles(runtimeDir, opts.CanonicalDestDir, opts.OutputKind)
+		copyEntries, primaryRuntime = r.promoteRuntimeFiles(runtimeDir, opts.CanonicalDestDir, opts.OutputKind)
 	} else {
 		summary.IsError = true
 		source, cause := classifyFailure(ctx, resultEv, opts.TimeoutMin)
@@ -751,8 +751,10 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 	}
 	writeCmdFile(cmdFile, cmdInfo)
 
-	if primaryCanonical != "" {
-		if rel, err := filepath.Rel(r.ProjectDir, primaryCanonical); err == nil {
+	// Persist the immutable per-exec runtime path (not the canonical, which is
+	// overwritten on every run). History views need a stable per-row pointer.
+	if primaryRuntime != "" {
+		if rel, err := filepath.Rel(r.ProjectDir, primaryRuntime); err == nil {
 			_ = r.CallDB.UpdateOutputFile(callID, rel)
 		}
 	}
@@ -1135,15 +1137,16 @@ func summaryStatus(s RunSummary) string {
 
 // promoteRuntimeFiles clones every file in runtimeDir (except *_prompt.md —
 // see TODO) into destDir. Returns the per-file decisions for cmd.md and the
-// absolute path of the primary canonical file (if one was written), used for
-// the agent_execs.output_file column.
+// absolute path of the primary file in runtimeDir (the immutable per-exec
+// copy), used for the agent_execs.output_file column. The canonical copy is
+// overwritten on subsequent runs and is not suitable as a per-row pointer.
 //
 // TODO: get rid of this exclusion once configured prompts are kept separate
 // from files.
 func (r *Runner) promoteRuntimeFiles(runtimeDir, destDir, outputKind string) ([]fileCopyEntry, string) {
 	var entries []fileCopyEntry
 	primary := PrimaryOutputName(outputKind)
-	primaryAbs := ""
+	primaryRuntime := ""
 
 	dir, err := os.ReadDir(runtimeDir)
 	if err != nil || len(dir) == 0 {
@@ -1175,12 +1178,12 @@ func (r *Runner) promoteRuntimeFiles(runtimeDir, destDir, outputKind string) ([]
 			entry.Dest = relToProject(r.ProjectDir, dst)
 			entry.Note = "cloned"
 			if name == primary {
-				primaryAbs = dst
+				primaryRuntime = src
 			}
 		}
 		entries = append(entries, entry)
 	}
-	return entries, primaryAbs
+	return entries, primaryRuntime
 }
 
 // listRuntimeForReport mirrors promoteRuntimeFiles but does not copy; used on

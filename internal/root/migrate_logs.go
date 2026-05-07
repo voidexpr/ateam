@@ -22,16 +22,17 @@ const layoutSentinel = "logs/.layout-v2"
 //     (the legacy <TS>_<ACTION>_ prefix layout), move stream/stderr/settings/
 //     exec.md into logs/<id>/ with the new filenames (stream.jsonl, stderr.out,
 //     settings.json, cmd.md). The cmd.md content is left untouched per design.
-//  2. Delete legacy *_prompt.md files in roles/<id>/history/ and supervisor/
-//     history/ — those archives are replaced by logs/<id>/prompt.md going
-//     forward. Output history files (<TS>.<kind>.md) are preserved.
-//  3. Delete legacy canonical *_error.md files (report_error.md, review_error.md,
+//     Matching legacy `*_prompt.md` archives are moved into logs/<id>/prompt.md
+//     when a prompt within ±60s of the row's started_at can be located.
+//  2. Delete legacy canonical *_error.md files (report_error.md, review_error.md,
 //     verify_error.md, code_error.md, auto_setup_error.md). Failure context now
 //     lives in logs/<id>/{cmd.md,stderr.out,stream.jsonl}.
-//  4. Remove the runner.log entirely — agent_execs is the source of truth.
-//  5. Best-effort cleanup of now-empty legacy log subdirectories.
+//  3. Remove the runner.log entirely — agent_execs is the source of truth.
+//  4. Best-effort cleanup of now-empty legacy log subdirectories.
 //
-// Per-row failures are logged to stderr but do not abort migration.
+// Per-row failures are logged to stderr but do not abort migration. Unmatched
+// `*_prompt.md` archives (no DB row, or skew >60s) are left in place — the
+// sentinel still gets written, but no forensic data is destroyed.
 func MigrateLogsLayout(env *ResolvedEnv, db *calldb.CallDB) error {
 	if env == nil || env.ProjectDir == "" || db == nil {
 		return nil
@@ -48,7 +49,6 @@ func MigrateLogsLayout(env *ResolvedEnv, db *calldb.CallDB) error {
 	if err := migrateRows(env, db); err != nil {
 		return err
 	}
-	deleteLegacyHistoryPrompts(env.ProjectDir)
 	deleteLegacyErrorFiles(env.ProjectDir)
 	_ = os.Remove(filepath.Join(env.ProjectDir, "logs", "runner.log"))
 	cleanupEmptyLegacyDirs(env.ProjectDir)
@@ -162,8 +162,10 @@ func migrateRows(env *ResolvedEnv, db *calldb.CallDB) error {
 
 // findLegacyOutput returns the project-relative path to a row's archived
 // output file (e.g. roles/security/history/<TS>.report.md). Returns "" when
-// no matching file exists. Uses ±5s skew like findLegacyPrompt for
-// resilience against second-level timestamp drift.
+// no matching file exists. Uses ±5s skew via FindHistoryFileWithSkew for
+// resilience against second-level timestamp drift; missed matches are
+// recoverable because resolveOutputFile in the web layer applies the same
+// fallback at request time.
 func findLegacyOutput(projectDir, role, action, startedAt string) string {
 	t, err := time.Parse(time.RFC3339, startedAt)
 	if err != nil {
@@ -202,9 +204,16 @@ func legacyOutputSuffix(action string) string {
 	}
 }
 
-// findLegacyPrompt looks up the timestamped prompt archive for a (role, action)
-// pair, allowing a ±5s skew in case the prompt write happened in a different
-// second than the row's started_at.
+// legacyPromptMatchWindow caps how far the prompt's archive timestamp may
+// drift from agent_execs.started_at. Empirically the gap is sub-second, but
+// the original ±5s probe missed real-world 3-4s drifts; one minute is generous
+// while still avoiding cross-run mismatches.
+const legacyPromptMatchWindow = 60 * time.Second
+
+// findLegacyPrompt locates the timestamped prompt archive for a (role, action)
+// pair by scanning the legacy history directory and picking the closest
+// `<TS>.<suffix>` file within legacyPromptMatchWindow of started_at. Returns
+// "" when no match is in window.
 //
 // The RFC3339-encoded started_at preserves the timezone of the original run,
 // which matches what the legacy archivePrompt baked into the filename. We
@@ -220,7 +229,45 @@ func findLegacyPrompt(projectDir, role, action, startedAt string) string {
 	if histDir == "" || suffix == "" {
 		return ""
 	}
-	return FindHistoryFileWithSkew(histDir, t, suffix)
+	return findClosestHistoryFile(histDir, t, suffix, legacyPromptMatchWindow)
+}
+
+// findClosestHistoryFile scans dir for files whose names match
+// `<historyTimestampLayout>.<suffix>` and returns the absolute path of the
+// candidate whose parsed timestamp is closest to target within window.
+// Returns "" when nothing matches. File timestamps are parsed in target's
+// location so callers preserve the original run's TZ.
+func findClosestHistoryFile(dir string, target time.Time, suffix string, window time.Duration) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	dotSuffix := "." + suffix
+	var bestPath string
+	bestDelta := window + time.Second
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, dotSuffix) {
+			continue
+		}
+		tsStr := strings.TrimSuffix(name, dotSuffix)
+		ts, err := time.ParseInLocation(historyTimestampLayout, tsStr, target.Location())
+		if err != nil {
+			continue
+		}
+		delta := ts.Sub(target)
+		if delta < 0 {
+			delta = -delta
+		}
+		if delta <= window && delta < bestDelta {
+			bestDelta = delta
+			bestPath = filepath.Join(dir, name)
+		}
+	}
+	return bestPath
 }
 
 func legacyHistoryDir(projectDir, role, action string) string {
@@ -251,36 +298,6 @@ func legacyPromptSuffix(action string) string {
 		return "code_management_prompt.md"
 	default:
 		return ""
-	}
-}
-
-// deleteLegacyHistoryPrompts walks roles/*/history/ and supervisor/history/ and
-// removes <TS>.<kind>_prompt.md files. Output files (<TS>.<kind>.md) are kept
-// for the web UI's legacy fallback path.
-func deleteLegacyHistoryPrompts(projectDir string) {
-	rolesDir := filepath.Join(projectDir, "roles")
-	entries, _ := os.ReadDir(rolesDir)
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		removePromptFiles(filepath.Join(rolesDir, e.Name(), "history"))
-	}
-	removePromptFiles(filepath.Join(projectDir, "supervisor", "history"))
-}
-
-func removePromptFiles(dir string) {
-	entries, _ := os.ReadDir(dir)
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		if strings.HasSuffix(e.Name(), "_prompt.md") {
-			path := filepath.Join(dir, e.Name())
-			if err := os.Remove(path); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: remove %s: %v\n", path, err)
-			}
-		}
 	}
 }
 

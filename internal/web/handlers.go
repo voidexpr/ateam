@@ -73,7 +73,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		data.ReviewModTime = info.ModTime()
 	}
 
-	if latest := latestCodeSession(filepath.Join(pe.ProjectDir, "supervisor", "code")); latest != "" {
+	if latest := latestCodeSession(pe.ProjectDir, s.getDB(pe)); latest != "" {
 		data.LatestCodeSession = latest
 		reportPath := filepath.Join(pe.ProjectDir, "supervisor", "code", latest, "execution_report.md")
 		if info, err := os.Stat(reportPath); err == nil {
@@ -768,10 +768,36 @@ func (s *Server) handleSupervisorHistory(nav string) http.HandlerFunc {
 }
 
 func (s *Server) serveHistoryFile(w http.ResponseWriter, r *http.Request, pe *ProjectEntry, histDir, filename, roleID, nav string) {
-	path := filepath.Clean(filepath.Join(histDir, filename))
-	if !isPathWithin(path, histDir) {
-		http.NotFound(w, r)
-		return
+	action, role := historyAction(nav, roleID)
+
+	var (
+		path string
+		ts   time.Time
+		kind string
+	)
+	if execID := parseExecHistoryFilename(filename); execID > 0 {
+		row, err := s.lookupExecForHistory(pe, execID, action, role)
+		if err != nil || row == nil || row.OutputFile == "" {
+			http.NotFound(w, r)
+			return
+		}
+		path = filepath.Join(pe.ProjectDir, row.OutputFile)
+		if t, err := time.Parse(time.RFC3339, row.StartedAt); err == nil {
+			ts = t.In(time.Local)
+		}
+		kind = navKind(nav)
+	} else {
+		path = filepath.Clean(filepath.Join(histDir, filename))
+		if !isPathWithin(path, histDir) {
+			http.NotFound(w, r)
+			return
+		}
+		entry := parseHistoryFilename(filename, path)
+		ts = entry.Timestamp
+		kind = entry.Kind
+	}
+	if kind == "" {
+		kind = "report"
 	}
 
 	content, err := os.ReadFile(path)
@@ -780,21 +806,16 @@ func (s *Server) serveHistoryFile(w http.ResponseWriter, r *http.Request, pe *Pr
 		return
 	}
 
-	entry := parseHistoryFilename(filename, path)
-	kind := entry.Kind
-	if kind == "" {
-		kind = "report"
-	}
-	history := filterHistoryByKind(discoverHistory(histDir), kind)
-
-	action, role := historyAction(nav, roleID)
-	enrichHistoryCost(history, fetchRunCosts(s.getDB(pe), action, role))
+	db := s.getDB(pe)
+	legacy := filterHistoryByKind(discoverHistory(histDir), kind)
+	enrichHistoryCost(legacy, fetchRunCosts(db, action, role))
+	history := mergeHistory(historyFromDB(db, pe.ProjectDir, action, role, kind), legacy)
 
 	data := historyDetailData{
 		Kind:            kind,
 		RoleID:          roleID,
 		Filename:        filename,
-		Timestamp:       entry.Timestamp,
+		Timestamp:       ts,
 		HTML:            template.HTML(s.renderMarkdown(string(content))),
 		History:         history,
 		CurrentFilename: filename,
@@ -834,6 +855,40 @@ func historyAction(nav, roleID string) (action, role string) {
 	default:
 		return runner.ActionReview, "supervisor"
 	}
+}
+
+// navKind maps the URL nav segment to the HistoryEntry.Kind tag the templates
+// expect. roleID-scoped pages always render reports.
+func navKind(nav string) string {
+	switch nav {
+	case "review":
+		return "review"
+	case "verify":
+		return "verify"
+	default:
+		return "report"
+	}
+}
+
+// lookupExecForHistory returns the agent_execs row for execID, refusing the
+// lookup unless action+role match — this prevents one role's URL from leaking
+// another role's output via a guessed exec id.
+func (s *Server) lookupExecForHistory(pe *ProjectEntry, execID int64, action, role string) (*calldb.RecentRow, error) {
+	db := s.getDB(pe)
+	if db == nil {
+		return nil, fmt.Errorf("no database for project")
+	}
+	row, err := db.GetRunByID(execID)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, fmt.Errorf("exec %d not found", execID)
+	}
+	if row.Action != action || row.Role != role {
+		return nil, fmt.Errorf("exec %d does not match action=%s role=%s", execID, action, role)
+	}
+	return row, nil
 }
 
 // supervisorLabel returns the user-facing noun for a supervisor nav segment
@@ -1027,7 +1082,10 @@ func parseBatchTimestamp(batch string) time.Time {
 	return t
 }
 
-// codeSessionEntry represents a single timestamped code session directory.
+// codeSessionEntry represents a single code session directory. Two naming
+// schemes coexist: legacy timestamp-named dirs (`2026-03-19_00-35-57/`) and
+// the current exec-id-named dirs (`42/`) produced by `cmd code` after the
+// `{{EXEC_ID}}` switch.
 type codeSessionEntry struct {
 	DirName   string
 	Timestamp time.Time
@@ -1046,8 +1104,7 @@ func (s *Server) handleCodeSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	codeDir := filepath.Join(pe.ProjectDir, "supervisor", "code")
-	sessions := scanCodeSessions(codeDir)
+	sessions := scanCodeSessions(pe.ProjectDir, s.getDB(pe))
 
 	s.render(w, r, "code_sessions.html", pageData{
 		Title:       "Code",
@@ -1058,8 +1115,25 @@ func (s *Server) handleCodeSessions(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// scanCodeSessions reads the code directory and returns sessions sorted newest-first.
-func scanCodeSessions(codeDir string) []codeSessionEntry {
+// codeSessionDirs returns the canonical and runtime directories for a session
+// dirName. For exec-id-named sessions, the runtime dir holds the per-exec
+// inputs/prompts that promoteRuntimeFiles skipped; for legacy timestamp dirs
+// only the canonical directory is meaningful (runtime returns "").
+func codeSessionDirs(projectDir, dirName string) (canonical, runtime string) {
+	canonical = filepath.Join(projectDir, "supervisor", "code", dirName)
+	if execID, err := strconv.ParseInt(dirName, 10, 64); err == nil && execID > 0 {
+		runtime = filepath.Join(projectDir, "runtime", dirName)
+	}
+	return canonical, runtime
+}
+
+// scanCodeSessions reads the code directory and returns sessions sorted
+// newest-first. Accepts both legacy timestamp dirs and exec-id dirs; for the
+// latter, timestamps come from the agent_execs row when available and the
+// task count is read from runtime/<exec_id>/ (where the *_code_prompt.md
+// files actually live — the canonical clone skips them).
+func scanCodeSessions(projectDir string, db *calldb.CallDB) []codeSessionEntry {
+	codeDir := filepath.Join(projectDir, "supervisor", "code")
 	entries, err := os.ReadDir(codeDir)
 	if err != nil {
 		return nil
@@ -1070,31 +1144,11 @@ func scanCodeSessions(codeDir string) []codeSessionEntry {
 		if !e.IsDir() {
 			continue
 		}
-		ts, err := time.ParseInLocation(runner.TimestampFormat, e.Name(), time.Local)
-		if err != nil {
+		entry, ok := buildCodeSessionEntry(projectDir, e.Name(), db)
+		if !ok {
 			continue
 		}
-		sessionDir := filepath.Join(codeDir, e.Name())
-		subEntries, _ := os.ReadDir(sessionDir)
-		var taskCount int
-		var hasReport bool
-		for _, se := range subEntries {
-			if se.IsDir() {
-				continue
-			}
-			if strings.HasSuffix(se.Name(), "_code_prompt.md") {
-				taskCount++
-			}
-			if se.Name() == "execution_report.md" {
-				hasReport = true
-			}
-		}
-		sessions = append(sessions, codeSessionEntry{
-			DirName:   e.Name(),
-			Timestamp: ts,
-			TaskCount: taskCount,
-			HasReport: hasReport,
-		})
+		sessions = append(sessions, entry)
 	}
 
 	sort.Slice(sessions, func(i, j int) bool {
@@ -1103,9 +1157,74 @@ func scanCodeSessions(codeDir string) []codeSessionEntry {
 	return sessions
 }
 
+// buildCodeSessionEntry resolves a single supervisor/code/<dirName>/ entry,
+// reading task/report metadata from the appropriate filesystem location.
+func buildCodeSessionEntry(projectDir, dirName string, db *calldb.CallDB) (codeSessionEntry, bool) {
+	canonical, runtime := codeSessionDirs(projectDir, dirName)
+
+	ts, ok := codeSessionTimestamp(dirName, canonical, db)
+	if !ok {
+		return codeSessionEntry{}, false
+	}
+
+	taskCount := 0
+	// Prompts live in runtime/ for new exec-id sessions (skipped during
+	// promote) or in the canonical dir for legacy timestamp sessions.
+	taskSource := runtime
+	if taskSource == "" {
+		taskSource = canonical
+	}
+	for _, se := range readDirOrNil(taskSource) {
+		if !se.IsDir() && strings.HasSuffix(se.Name(), "_code_prompt.md") {
+			taskCount++
+		}
+	}
+
+	_, reportErr := os.Stat(filepath.Join(canonical, "execution_report.md"))
+	return codeSessionEntry{
+		DirName:   dirName,
+		Timestamp: ts,
+		TaskCount: taskCount,
+		HasReport: reportErr == nil,
+	}, true
+}
+
+// codeSessionTimestamp resolves a session timestamp using whichever source is
+// most authoritative: the agent_execs row for exec-id sessions, the dir name
+// for legacy timestamp sessions, or the canonical dir's mtime as a fallback.
+func codeSessionTimestamp(dirName, canonical string, db *calldb.CallDB) (time.Time, bool) {
+	if execID, err := strconv.ParseInt(dirName, 10, 64); err == nil && execID > 0 {
+		if db != nil {
+			if row, err := db.GetRunByID(execID); err == nil && row != nil {
+				if t, err := time.Parse(time.RFC3339, row.StartedAt); err == nil {
+					return t.In(time.Local), true
+				}
+			}
+		}
+		if info, err := os.Stat(canonical); err == nil {
+			return info.ModTime(), true
+		}
+		return time.Time{}, true
+	}
+	if t, err := time.ParseInLocation(runner.TimestampFormat, dirName, time.Local); err == nil {
+		return t, true
+	}
+	return time.Time{}, false
+}
+
+// readDirOrNil is a forgiving os.ReadDir that swallows "not exists" so the
+// caller can write straightforward iteration.
+func readDirOrNil(dir string) []os.DirEntry {
+	if dir == "" {
+		return nil
+	}
+	entries, _ := os.ReadDir(dir)
+	return entries
+}
+
 // latestCodeSession returns the directory name of the newest code session, or "".
-func latestCodeSession(codeDir string) string {
-	sessions := scanCodeSessions(codeDir)
+func latestCodeSession(projectDir string, db *calldb.CallDB) string {
+	sessions := scanCodeSessions(projectDir, db)
 	if len(sessions) == 0 {
 		return ""
 	}
@@ -1133,15 +1252,14 @@ func (s *Server) handleCodeSessionDetail(w http.ResponseWriter, r *http.Request)
 	}
 
 	dirName := r.PathValue("session")
-	ts, err := time.ParseInLocation(runner.TimestampFormat, dirName, time.Local)
-	if err != nil {
+	canonical, runtimeDir := codeSessionDirs(pe.ProjectDir, dirName)
+	if _, err := os.Stat(canonical); err != nil {
 		http.NotFound(w, r)
 		return
 	}
 
-	sessionDir := filepath.Join(pe.ProjectDir, "supervisor", "code", dirName)
-	entries, err := os.ReadDir(sessionDir)
-	if err != nil {
+	ts, ok := codeSessionTimestamp(dirName, canonical, s.getDB(pe))
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
@@ -1151,12 +1269,13 @@ func (s *Server) handleCodeSessionDetail(w http.ResponseWriter, r *http.Request)
 		Timestamp: ts,
 	}
 
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		if e.Name() == "current_task.md" {
-			continue
+	// Walk both directories so the listing covers prompts (skipped during
+	// promote, only present in runtime/) and the canonical clones; dedupe by
+	// name keeping the newest mtime.
+	seen := map[string]int{}
+	addFile := func(dir string, e os.DirEntry) {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") || e.Name() == "current_task.md" {
+			return
 		}
 		info, _ := e.Info()
 		var size int64
@@ -1165,14 +1284,28 @@ func (s *Server) handleCodeSessionDetail(w http.ResponseWriter, r *http.Request)
 			size = info.Size()
 			modTime = info.ModTime()
 		}
-		if e.Name() == "execution_report.md" {
-			data.HasReport = true
+		if idx, ok := seen[e.Name()]; ok {
+			if modTime.After(data.Files[idx].ModTime) {
+				data.Files[idx].Size = size
+				data.Files[idx].ModTime = modTime
+			}
+			return
 		}
+		seen[e.Name()] = len(data.Files)
 		data.Files = append(data.Files, codeSessionFile{
 			Name:    e.Name(),
 			Size:    size,
 			ModTime: modTime,
 		})
+		if e.Name() == "execution_report.md" {
+			data.HasReport = true
+		}
+	}
+	for _, e := range readDirOrNil(canonical) {
+		addFile(canonical, e)
+	}
+	for _, e := range readDirOrNil(runtimeDir) {
+		addFile(runtimeDir, e)
 	}
 
 	s.render(w, r, "code_session_detail.html", pageData{
@@ -1192,7 +1325,8 @@ func (s *Server) handleCodeSessionFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dirName := r.PathValue("session")
-	if _, err := time.ParseInLocation(runner.TimestampFormat, dirName, time.Local); err != nil {
+	canonical, runtimeDir := codeSessionDirs(pe.ProjectDir, dirName)
+	if _, err := os.Stat(canonical); err != nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -1203,13 +1337,25 @@ func (s *Server) handleCodeSessionFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	absPath := filepath.Clean(filepath.Join(pe.ProjectDir, "supervisor", "code", dirName, fileName))
+	// Try the canonical dir first (post-promote clones live there). Fall
+	// back to runtime/<exec_id>/ for files like *_code_prompt.md that the
+	// promote step intentionally skips. isPathWithin is checked before the
+	// read so a malicious dirName cannot reach files outside the project.
+	absPath := filepath.Clean(filepath.Join(canonical, fileName))
 	if !isPathWithin(absPath, pe.ProjectDir) {
 		http.NotFound(w, r)
 		return
 	}
-
 	content, err := os.ReadFile(absPath)
+	if err != nil && runtimeDir != "" {
+		runtimePath := filepath.Clean(filepath.Join(runtimeDir, fileName))
+		if !isPathWithin(runtimePath, pe.ProjectDir) {
+			http.NotFound(w, r)
+			return
+		}
+		absPath = runtimePath
+		content, err = os.ReadFile(absPath)
+	}
 	if err != nil {
 		http.NotFound(w, r)
 		return

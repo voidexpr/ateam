@@ -1,15 +1,42 @@
 package web
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/runner"
 )
+
+// execHistoryFilenamePrefix marks history entries whose canonical pointer is
+// agent_execs.id. The legacy filename scan path uses timestamped names like
+// "2026-03-14_00-20-28.report.md"; DB-sourced entries use this synthetic name
+// so the existing /history/{file} routes can route them through the DB.
+const execHistoryFilenamePrefix = "exec-"
+
+// execHistoryFilename builds the synthetic filename for an agent_execs row.
+func execHistoryFilename(id int64) string {
+	return fmt.Sprintf("%s%d.md", execHistoryFilenamePrefix, id)
+}
+
+// parseExecHistoryFilename returns the agent_execs.id encoded in name, or 0
+// when name is not a synthetic exec filename.
+func parseExecHistoryFilename(name string) int64 {
+	if !strings.HasPrefix(name, execHistoryFilenamePrefix) || !strings.HasSuffix(name, ".md") {
+		return 0
+	}
+	idStr := strings.TrimSuffix(strings.TrimPrefix(name, execHistoryFilenamePrefix), ".md")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		return 0
+	}
+	return id
+}
 
 // HistoryEntry represents one past run, surfaced either from a legacy
 // timestamped history file or from an agent_execs row.
@@ -85,7 +112,8 @@ func filterHistoryByKind(entries []HistoryEntry, kind string) []HistoryEntry {
 // historyFromDB returns history entries for a (role, action) pair sourced from
 // agent_execs. Each row becomes one HistoryEntry whose Path points at the
 // runtime/<exec_id>/ output (when output_file is populated). Cost/tokens are
-// filled from the same row. Sorted newest-first.
+// filled from the same row. Sorted newest-first. Filename uses the synthetic
+// exec-<id>.md form so /history/{file} routes can dispatch to the DB.
 func historyFromDB(db *calldb.CallDB, projectDir, action, role, kind string) []HistoryEntry {
 	if db == nil {
 		return nil
@@ -100,14 +128,16 @@ func historyFromDB(db *calldb.CallDB, projectDir, action, role, kind string) []H
 		if err != nil {
 			continue
 		}
-		path := ""
-		if r.OutputFile != "" {
-			path = filepath.Join(projectDir, r.OutputFile)
+		// Skip rows without a persisted output pointer — the history detail
+		// page would 404 anyway and we'd rather not list a broken link.
+		if r.OutputFile == "" {
+			continue
 		}
 		out = append(out, HistoryEntry{
+			Filename:    execHistoryFilename(r.ID),
 			Timestamp:   ts.In(time.Local),
 			Kind:        kind,
-			Path:        path,
+			Path:        filepath.Join(projectDir, r.OutputFile),
 			CostUSD:     r.CostUSD,
 			TotalTokens: int64(r.InputTokens + r.OutputTokens + r.CacheReadTokens + r.CacheWriteTokens),
 			ExecID:      r.ID,
