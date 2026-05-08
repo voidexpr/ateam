@@ -424,7 +424,6 @@ ATeam should be adaptable for projects of many size by running on the entire rep
 
 ## Future
 
-- 0.8.0 Focus has been on docker and isolated agent configuration
 - 0.9.0 Refactor roles and do some eval to use less tokens and improve accuracy
 - 1.0.0 Small improvements over what is already there
 - 2.0.0 Add an internal task system and move coding to algorithmic instead of relying on on agent prompt to consume less tokens and make the system more deterministic
@@ -432,11 +431,15 @@ ATeam should be adaptable for projects of many size by running on the entire rep
 In General other areas of interest:
 - Reduce input token usage
     - Adaptive report commissioning based on recent code changes (can reduce token usage)
+    - tune roles
+    - use an internal findings/task system instead of read/write files
 - Collection of roles for various phases of project life cycle: feedback on design, analyze for production (observability, etc ...), stack specific prompts, etc ...
 - Stricter testing policy and automation (opt-in)
 - More agent types (gemini, cursor, ...) and containers (MacOS native container, alternative sandboxes)
-- Built-in scheduling
+- more flexible and dynamic prompts: execute commands (sandboxed) during prompt assembly, include prompt fragments, CLI args expansion in prompt, generalized mechanism to inject pre/post prompt instructions
+- more flexible workflow: execute commands before/after agents to verify/prepare work/env, jump steps, resumable steps leveraging the future internal persistent task system
 - Improve reporting and better integrate ateam into various project workflow: teams where humans don't code, where they don't, solo project vs. much bigger teams, ...
+- maybe: Built-in scheduling
 
 ## Development
 
