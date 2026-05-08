@@ -610,3 +610,90 @@ Several of these tools (OpenHands, agent-orchestrator, GitHub Copilot agent) alr
 This is essentially what agent-orchestrator already does, so we could potentially integrate it as a subcomponent or adopt its patterns when the time comes.
 
 ---
+
+## C. Articles Review
+
+Notes on external writing and research that materially shapes ATeam's design — distinct from the project surveys above. Each entry summarises what's worth carrying into ATeam and links back to source material so we can re-check the original when the synthesis here goes stale.
+
+### C.1 Christopher Meiklejohn — Multi-Agent Systems Series (April–May 2026)
+
+**Source index:** [christophermeiklejohn.com/series/multi-agent-systems](https://christophermeiklejohn.com/series/multi-agent-systems/)
+
+An eight-post survey of academic multi-agent LLM research by a distinguished distributed-systems researcher (CRDTs, Lasp, Erlang). Throughline: **MAS research is quietly rediscovering distributed systems without the vocabulary** — CAP, monotonicity, CALM theorem, CRDTs, causal consistency, fault injection are all relevant and underused. The series is academic in scope (no commercial agent products evaluated), so it is sharper on theory and failure analysis than on operational concerns like sandboxing.
+
+**Posts:**
+
+1. [The Landscape](https://christophermeiklejohn.com/ai/agents/mas-series/2026/04/24/mas-series-01-the-landscape.html) — Wave 1 (2023, *can agents coordinate?*) vs Wave 2 (2025+, *why does it fail?*). Single-agent systems with great tool interfaces (Devin, SWE-agent) outperform MAS on coding benchmarks; MAS must justify its overhead.
+2. [The Vocabulary](https://christophermeiklejohn.com/ai/agents/mas-series/2026/04/25/mas-series-02-the-vocabulary.html) — Tran et al.'s four-axis taxonomy (cooperation/competition/coopetition × centralised/decentralised/hierarchical × rule/role/model-based × static/dynamic), Zhou et al.'s five agent components, Chen et al.'s challenge levels.
+3. [Wave 1: Can Agents Coordinate At All?](https://christophermeiklejohn.com/ai/agents/mas-series/2026/04/26/mas-series-03-wave-one.html) — CAMEL, Generative Agents, ChatDev, MetaGPT, AutoGen each examined for information-passing mechanism, prompt pattern, structure, and isolation. Common gaps: no escalation, no concurrency control, fixed topologies.
+4. [Wave 2: Why It Breaks](https://christophermeiklejohn.com/ai/agents/mas-series/2026/04/27/mas-series-04-wave-two.html) — MAST (1,600 traces, 14 failure modes — see C.1.1 below), MAS-FIRE (15 fault types, capability paradox under blind-trust faults), Silo-Bench (the bottleneck is **information integration, not acquisition**).
+5. [Debate, State, and Coordination](https://christophermeiklejohn.com/ai/agents/mas-series/2026/04/28/mas-series-05-debate-state-coordination.html) — Convergent debate ([Du et al., arXiv 2305.14325](https://arxiv.org/abs/2305.14325)), adversarial debate ([Liang et al., arXiv 2305.19118](https://arxiv.org/abs/2305.19118)), the **shared notebook** mechanism ([Ou et al., arXiv 2508.12981](https://arxiv.org/abs/2508.12981); +18% hallucination reduction from append-only fact log alone). [CALM theorem](https://arxiv.org/abs/1901.01930) (Hellerstein & Alvaro) cited as the right theoretical lens.
+6. [Verification Patterns](https://christophermeiklejohn.com/ai/agents/mas-series/2026/04/29/mas-series-06-verification-patterns.html) — **The single most operationally useful post.** Three-tier taxonomy (self-verify / separate verifier / structural gate) and the **modality shift principle**: verification across representations (code → test execution, code → screenshot) is dramatically stronger than text-to-text review.
+7. [Benchmarks and What They Miss](https://christophermeiklejohn.com/ai/agents/mas-series/2026/04/30/mas-series-07-benchmarks.html) — Single-agent benchmarks (HumanEval, MBPP, SWE-bench, WebArena, AssistantBench) cannot capture coordination overhead, redundancy, recovery, or scale degradation. Multi-agent-explicit: GAIA, TravelPlanner, Silo-Bench, BrowseComp.
+8. [Open Questions](https://christophermeiklejohn.com/ai/agents/mas-series/2026/05/01/mas-series-08-open-questions.html) — Six open research gaps; nine "stealable today" patterns including artifacts-between-stages, append-only notebooks, tool-interface investment, stuck-detection with replanning, modality-shift verification, and "Docker plus permission configs" as the entire isolation recommendation.
+
+#### C.1.1 MAST: 14 Failure Modes (Cemri et al. 2025)
+
+**Paper:** [Why Do Multi-Agent LLM Systems Fail?](https://arxiv.org/abs/2503.13657) — Cemri, Pan, Yang et al., UC Berkeley Sky Computing Lab.
+**Code/data:** [multi-agent-systems-failure-taxonomy/MAST](https://github.com/multi-agent-systems-failure-taxonomy/MAST)
+**Project page:** [sky.cs.berkeley.edu/project/mast](https://sky.cs.berkeley.edu/project/mast/)
+
+Taxonomy derived from 150 expert-annotated traces (κ = 0.88), validated across 1,600+ traces from 7 frameworks. **Use this as ATeam's failure-mode coverage checklist** — if our coordinator can detect each, that's a defensible reliability story.
+
+**FC1 — Specification & System Design Failures**
+
+| ID | Mode | Description |
+|---|---|---|
+| FM-1.1 | **Disobey task specification** | Agent fails to follow stated constraints/requirements. |
+| FM-1.2 | **Disobey role specification** | Agent oversteps assigned role; behaves outside defined scope. |
+| FM-1.3 | **Step repetition** | Agent unnecessarily redoes completed steps; wastes compute without progress. |
+| FM-1.4 | **Loss of conversation history** | Context truncated unexpectedly; agent reverts to earlier state. |
+| FM-1.5 | **Unaware of termination conditions** | Agent fails to recognise when work should end; continues unnecessarily. |
+
+**FC2 — Inter-Agent Misalignment**
+
+| ID | Mode | Description |
+|---|---|---|
+| FM-2.1 | **Conversation reset** | Unwarranted dialogue restart; loses accumulated context. |
+| FM-2.2 | **Fail to ask for clarification** | Agent proceeds on ambiguous input instead of asking. |
+| FM-2.3 | **Task derailment** | Agent deviates from intended objective toward irrelevant activity. |
+| FM-2.4 | **Information withholding** | Agent has relevant knowledge but doesn't share with collaborators. |
+| FM-2.5 | **Ignored other agent's input** | Agent disregards recommendations from peers. |
+| FM-2.6 | **Reasoning–action mismatch** | Stated reasoning diverges from actual behaviour. |
+
+**FC3 — Task Verification & Termination**
+
+| ID | Mode | Description |
+|---|---|---|
+| FM-3.1 | **Premature termination** | Dialogue ends before objectives met or required information exchanged. |
+| FM-3.2 | **No or incomplete verification** | Outputs not thoroughly checked; errors propagate undetected. |
+| FM-3.3 | **Incorrect verification** | Validation runs but fails to adequately cross-check. |
+
+**Headline empirical results:** step repetition 15.7%, reasoning-action mismatch 13.2%, termination unawareness 12.4% are the most common modes across the 7 frameworks studied. Frameworks with **explicit verifier components performed measurably better** — direct support for the modality-shift / structural-gate principle from C.1 post 6.
+
+#### C.1.2 Takeaways for ATeam
+
+Ranked by leverage:
+
+1. **Modality-shift verification as a design rule.** Every transition between stages should ideally cross a modality (agent prose → committed file → linter → tests → screenshot). Deterministic gates between agent stages convert weak text-to-text review into strong structural-gate review. Most directly actionable insight in the series.
+2. **Append-only shared notebook** for cross-stage *facts* (separate from the report/review/code artifacts which are per-stage deliverables that get overwritten). Ou et al. measure +18% hallucination reduction from this single mechanism. ATeam currently overwrites artifacts; add a parallel append-only fact log.
+3. **MAST 14-mode coverage.** Use C.1.1 as a checklist for ATeam's coordinator — explicit detection (or at minimum, post-hoc identification) of each mode. Step repetition, reasoning-action mismatch, and termination unawareness are the highest-frequency failures and should be detected first.
+4. **Stuck-detection** in the coordinator (Magentic-One pattern): explicit loop counter, threshold-triggered reflection branch. Maps to FM-1.3 (step repetition) and FM-2.3 (task derailment).
+5. **Recency × relevance × importance retrieval** (Generative Agents pattern) as the score function for compounding-engineering knowledge injection — replaces naïve temporal or keyword retrieval.
+6. **CALM/CRDT thinking applied to shared state.** Make as much shared state as possible monotonic (append-only, no retraction) so multiple agents can write concurrently without locks. The mutable-JSON-KB approach signs you up for the hard version of the concurrency problem.
+
+Skip: hunting for a prompt-templating framework (the series implicitly says it's a non-issue — patterns matter, framework doesn't). The series is also weak on isolation; `ResearchSanboxing.md` is already deeper than anything covered here.
+
+#### C.1.3 Most Promising Linked Projects
+
+In rough order of ATeam relevance:
+
+1. [Magentic-One](https://github.com/microsoft/autogen) (Microsoft Research, in `autogen/python/packages/autogen-magentic-one`) — production-grade MAS with the **stuck-counter + reflection** mechanism. Most operationally mature thing the series cites and not yet in our doc. Worth a focused look.
+2. [SWE-agent](https://github.com/princeton-nlp/SWE-agent) (Princeton) — pioneered the **agent-computer interface** abstraction. Design philosophy of investing heavily in a small number of high-quality commands with built-in guardrails is worth comparing against ATeam's role-prompt approach.
+3. [Ou et al. shared-notebook paper](https://arxiv.org/abs/2508.12981) — primary source for the append-only fact log empirical result.
+4. [MetaGPT](https://github.com/FoundationAgents/MetaGPT) — already in B.2. The pub-sub-of-structured-documents pattern is closer to ATeam than the current B.2 entry credits; worth a re-read on a future revision pass.
+5. [MAST repo](https://github.com/multi-agent-systems-failure-taxonomy/MAST) — annotations and dataset for replicating the 14-mode analysis on ATeam's own traces.
+6. [AutoGen](https://github.com/microsoft/autogen) — under-opinionated framework used as the experimental harness in many Wave-2 papers. Mostly relevant as a measurement substrate for benchmarking.
+7. [Generative Agents](https://arxiv.org/abs/2304.03442) — primary source for the recency × relevance × importance retrieval scoring.
+
+---
