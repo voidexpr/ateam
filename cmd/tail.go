@@ -42,6 +42,7 @@ func init() {
 	tailCmd.Flags().BoolVar(&tailLast, "last", false, "tail the most recent run")
 	tailCmd.Flags().BoolVar(&tailVerbose, "verbose", false, "show full tool inputs and text content")
 	tailCmd.Flags().BoolVar(&tailNoColor, "no-color", false, "disable color output")
+	tailCmd.MarkFlagsMutuallyExclusive("last", "reports", "coding")
 }
 
 func runTail(cmd *cobra.Command, args []string) error {
@@ -70,18 +71,9 @@ func runTail(cmd *cobra.Command, args []string) error {
 
 	switch {
 	case len(args) > 0 || tailLast:
-		var ids []int64
-		if tailLast && len(args) == 0 {
-			id, err := lastRunID(db)
-			if err != nil {
-				return err
-			}
-			ids = []int64{id}
-		} else {
-			ids, err = parseIDArgs(args)
-			if err != nil {
-				return err
-			}
+		ids, err := resolveExecIDs(db, args, tailLast)
+		if err != nil {
+			return err
 		}
 		rows, err := db.CallsByIDs(ids)
 		if err != nil {

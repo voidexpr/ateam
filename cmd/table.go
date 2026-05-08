@@ -837,6 +837,36 @@ func parseIDArgs(args []string) ([]int64, error) {
 	return ids, nil
 }
 
+// resolveExecIDs returns the explicit IDs from args, or the most recent run's
+// ID when useLast is set and no args were given. Errors when both are
+// provided so a stray --last on a typed-ID command line surfaces instead of
+// being silently ignored.
+func resolveExecIDs(db *calldb.CallDB, args []string, useLast bool) ([]int64, error) {
+	if useLast && len(args) > 0 {
+		return nil, fmt.Errorf("--last cannot be combined with explicit IDs")
+	}
+	if useLast {
+		id, err := lastRunID(db)
+		if err != nil {
+			return nil, err
+		}
+		return []int64{id}, nil
+	}
+	return parseIDArgs(args)
+}
+
+// lastRunID returns the ID of the most recent agent_execs row.
+func lastRunID(db *calldb.CallDB) (int64, error) {
+	rows, err := db.RecentRuns(calldb.RecentFilter{Limit: 1})
+	if err != nil {
+		return 0, fmt.Errorf("query failed: %w", err)
+	}
+	if len(rows) == 0 {
+		return 0, fmt.Errorf("no runs found")
+	}
+	return rows[0].ID, nil
+}
+
 func isTerminal() bool {
 	return isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd())
 }

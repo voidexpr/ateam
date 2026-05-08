@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/ateam/internal/agent"
-	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/ateam/internal/runtime"
@@ -52,19 +51,6 @@ func runCat(cmd *cobra.Command, args []string) error {
 		return runCatFiles(args)
 	}
 	return runCatIDs(args)
-}
-
-// lastRunID returns the ID of the most recent run in db. Used by --last on
-// cat / tail / inspect to skip explicit ID lookup.
-func lastRunID(db *calldb.CallDB) (int64, error) {
-	rows, err := db.RecentRuns(calldb.RecentFilter{Limit: 1})
-	if err != nil {
-		return 0, fmt.Errorf("query failed: %w", err)
-	}
-	if len(rows) == 0 {
-		return 0, fmt.Errorf("no runs found")
-	}
-	return rows[0].ID, nil
 }
 
 func looksLikeFiles(args []string) bool {
@@ -114,18 +100,9 @@ func runCatIDs(args []string) error {
 	}
 	defer db.Close()
 
-	var ids []int64
-	if len(args) == 0 {
-		id, err := lastRunID(db)
-		if err != nil {
-			return err
-		}
-		ids = []int64{id}
-	} else {
-		ids, err = parseIDArgs(args)
-		if err != nil {
-			return err
-		}
+	ids, err := resolveExecIDs(db, args, catLast)
+	if err != nil {
+		return err
 	}
 
 	rows, err := db.CallsByIDs(ids)
