@@ -14,17 +14,20 @@ func TestClaudeAgentDebugCommandArgs(t *testing.T) {
 		name   string
 		model  string
 		effort string
+		budget string
 		want   []string
 	}{
-		{"no overrides", "", "", []string{"-p", "--verbose"}},
-		{"model only", "opus", "", []string{"-p", "--verbose", "--model", "opus"}},
-		{"effort only", "", "high", []string{"-p", "--verbose", "--effort", "high"}},
-		{"both", "opus", "high", []string{"-p", "--verbose", "--model", "opus", "--effort", "high"}},
+		{"no overrides", "", "", "", []string{"-p", "--verbose"}},
+		{"model only", "opus", "", "", []string{"-p", "--verbose", "--model", "opus"}},
+		{"effort only", "", "high", "", []string{"-p", "--verbose", "--effort", "high"}},
+		{"budget only", "", "", "5", []string{"-p", "--verbose", "--max-budget-usd", "5"}},
+		{"all three", "opus", "high", "10.5", []string{"-p", "--verbose", "--model", "opus", "--effort", "high", "--max-budget-usd", "10.5"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			a.Model = tt.model
 			a.Effort = tt.effort
+			a.MaxBudgetUSD = tt.budget
 			_, args := a.DebugCommandArgs(nil)
 			if !slices.Equal(args, tt.want) {
 				t.Errorf("args = %v, want %v", args, tt.want)

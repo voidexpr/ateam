@@ -22,6 +22,7 @@ var (
 	verifyForce           bool
 	verifyDockerAutoSetup bool
 	verifyContainerName   string
+	verifyMaxBudgetUSD    string
 )
 
 // VerifyOptions holds configuration for a verify run.
@@ -37,6 +38,7 @@ type VerifyOptions struct {
 	Force           bool
 	DockerAutoSetup bool
 	ContainerName   string
+	MaxBudgetUSD    string
 }
 
 var verifyCmd = &cobra.Command{
@@ -66,6 +68,7 @@ Example:
 			Force:           verifyForce,
 			DockerAutoSetup: verifyDockerAutoSetup,
 			ContainerName:   verifyContainerName,
+			MaxBudgetUSD:    verifyMaxBudgetUSD,
 		})
 	},
 }
@@ -81,6 +84,8 @@ func init() {
 	addForceFlag(verifyCmd, &verifyForce)
 	addDockerAutoSetupFlag(verifyCmd, &verifyDockerAutoSetup)
 	addContainerNameFlag(verifyCmd, &verifyContainerName)
+	addBudgetFlags(verifyCmd, &verifyMaxBudgetUSD, nil,
+		"USD spend cap for the supervisor (claude-only; errors on codex)", "")
 }
 
 func runVerify(opts VerifyOptions) error {
@@ -124,6 +129,9 @@ func runVerify(opts VerifyOptions) error {
 	}
 	setSourceWritable(cr)
 	applyCheaperModel(cr, opts.CheaperModel)
+	if err := applyMaxBudgetUSD(cr, opts.MaxBudgetUSD, runner.ActionVerify); err != nil {
+		return err
+	}
 
 	db, err := openProjectDB(env)
 	if err != nil {

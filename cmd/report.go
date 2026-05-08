@@ -31,6 +31,8 @@ var (
 	reportContainerName        string
 	reportRerunFailed          bool
 	reportEffort               string
+	reportMaxBudgetUSD         string
+	reportMaxBudgetBatch       string
 )
 
 // ReportOptions holds configuration for a report run.
@@ -56,6 +58,8 @@ type ReportOptions struct {
 	ContainerName        string
 	RerunFailed          bool
 	Effort               string
+	MaxBudgetUSD         string
+	MaxBudgetBatch       string
 }
 
 var reportCmd = &cobra.Command{
@@ -92,6 +96,8 @@ Example:
 			ContainerName:        reportContainerName,
 			RerunFailed:          reportRerunFailed,
 			Effort:               reportEffort,
+			MaxBudgetUSD:         reportMaxBudgetUSD,
+			MaxBudgetBatch:       reportMaxBudgetBatch,
 		})
 	},
 }
@@ -108,6 +114,9 @@ func init() {
 	reportCmd.Flags().BoolVar(&reportIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
 	addCheaperModelFlag(reportCmd, &reportCheaperModel)
 	reportCmd.Flags().StringVar(&reportEffort, "effort", "", "reasoning effort override, passed verbatim to the agent CLI")
+	addBudgetFlags(reportCmd, &reportMaxBudgetUSD, &reportMaxBudgetBatch,
+		"per-role USD spend cap (claude-only; warns on codex)",
+		"stop dispatching new roles once batch cost crosses this USD")
 	addProfileFlags(reportCmd, &reportProfile, &reportAgent)
 	addVerboseFlag(reportCmd, &reportVerbose)
 	addForceFlag(reportCmd, &reportForce)
@@ -183,6 +192,9 @@ func runReport(opts ReportOptions) error {
 	}
 	applyCheaperModel(cr, opts.CheaperModel)
 	applyEffort(cr, opts.Effort)
+	if err := applyMaxBudgetUSD(cr, opts.MaxBudgetUSD, runner.ActionReport); err != nil {
+		return err
+	}
 
 	batch := "report-" + time.Now().Format(runner.TimestampFormat)
 
@@ -224,6 +236,9 @@ func runReport(opts ReportOptions) error {
 				} else {
 					applyCheaperModel(roleRunner, opts.CheaperModel)
 					applyEffort(roleRunner, opts.Effort)
+					if err := applyMaxBudgetUSD(roleRunner, opts.MaxBudgetUSD, runner.ActionReport); err != nil {
+						return err
+					}
 					task.Runner = roleRunner
 				}
 			}
@@ -283,13 +298,19 @@ func runReport(opts ReportOptions) error {
 	fmt.Printf("Running %d role(s) (max %d parallel, %dm timeout)...\n\n",
 		len(tasks), maxParallel, timeout)
 
+	preDispatch, err := batchBudgetPrecheck(db, env.ProjectID(), batch, opts.MaxBudgetBatch)
+	if err != nil {
+		return err
+	}
+
 	ctx, stop := cmdContext()
 	defer stop()
 
 	results, runErr := runPool(ctx, cr, tasks, maxParallel, poolDisplayOpts{
-		out:       os.Stdout,
-		agentName: cr.Agent.Name(),
-		itemLabel: "role(s)",
+		out:         os.Stdout,
+		agentName:   cr.Agent.Name(),
+		itemLabel:   "role(s)",
+		preDispatch: preDispatch,
 		onDone: func(r runner.RunSummary, cwd string) string {
 			// History file is written directly by the agent (or by the runner's
 			// fallback path when the agent did not call Write); on success the

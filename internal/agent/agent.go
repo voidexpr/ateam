@@ -12,6 +12,14 @@ import (
 	"github.com/ateam/internal/container"
 )
 
+// Agent name constants — what each implementation returns from Name().
+// Use these for switching on agent type instead of comparing raw strings.
+const (
+	NameClaude = "claude"
+	NameCodex  = "codex"
+	NameMock   = "mock"
+)
+
 // Agent executes a prompt and produces normalized stream events.
 //
 // Concurrency (see CONCURRENCY.md):
@@ -36,6 +44,11 @@ type Agent interface {
 	// it to its native CLI shape. Empty string disables the override.
 	// MUTATES — call before the Agent is shared with a pool.
 	SetEffort(effort string)
+	// SetMaxBudgetUSD caps API spend for the run. Claude translates this to
+	// its native --max-budget-usd flag; agents without native support store
+	// the value but do not enforce it (callers gate via runner.NativeBudgetCap).
+	// MUTATES — call before the Agent is shared with a pool.
+	SetMaxBudgetUSD(value string)
 	// CloneWithResolvedTemplates returns a clone with {{VAR}} placeholders
 	// resolved in Args, Env, and other templated string fields.
 	// Implementations MUST ensure the returned value's Args and Env share
@@ -162,8 +175,9 @@ func resolveStringMap(m map[string]string, r *strings.Replacer) map[string]strin
 }
 
 // claudeArgs builds the argv for the Claude CLI: base args, --model, --effort,
-// then extra args. Effort is passed verbatim via Claude's `--effort LEVEL` flag.
-func claudeArgs(base []string, model, effort string, extra []string) []string {
+// --max-budget-usd, then extra args. Each override is passed verbatim via
+// Claude's native flag.
+func claudeArgs(base []string, model, effort, maxBudgetUSD string, extra []string) []string {
 	args := make([]string, len(base))
 	copy(args, base)
 	if model != "" {
@@ -171,6 +185,9 @@ func claudeArgs(base []string, model, effort string, extra []string) []string {
 	}
 	if effort != "" {
 		args = append(args, "--effort", effort)
+	}
+	if maxBudgetUSD != "" {
+		args = append(args, "--max-budget-usd", maxBudgetUSD)
 	}
 	return append(args, extra...)
 }

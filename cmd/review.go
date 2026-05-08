@@ -31,6 +31,7 @@ var (
 	reviewMaxAge          string
 	reviewDockerAutoSetup bool
 	reviewContainerName   string
+	reviewMaxBudgetUSD    string
 )
 
 // ReviewOptions holds configuration for a review run.
@@ -50,6 +51,7 @@ type ReviewOptions struct {
 	MaxAge          time.Duration // freshness window; zero = no filter
 	DockerAutoSetup bool
 	ContainerName   string
+	MaxBudgetUSD    string
 }
 
 var reviewCmd = &cobra.Command{
@@ -85,6 +87,7 @@ Example:
 			MaxAge:          maxAge,
 			DockerAutoSetup: reviewDockerAutoSetup,
 			ContainerName:   reviewContainerName,
+			MaxBudgetUSD:    reviewMaxBudgetUSD,
 		})
 	},
 }
@@ -133,6 +136,8 @@ func init() {
 	addForceFlag(reviewCmd, &reviewForce)
 	addDockerAutoSetupFlag(reviewCmd, &reviewDockerAutoSetup)
 	addContainerNameFlag(reviewCmd, &reviewContainerName)
+	addBudgetFlags(reviewCmd, &reviewMaxBudgetUSD, nil,
+		"USD spend cap for the supervisor (claude-only; errors on codex)", "")
 }
 
 func runReview(opts ReviewOptions) error {
@@ -194,6 +199,9 @@ func runReview(opts ReviewOptions) error {
 		return err
 	}
 	applyCheaperModel(cr, opts.CheaperModel)
+	if err := applyMaxBudgetUSD(cr, opts.MaxBudgetUSD, runner.ActionReview); err != nil {
+		return err
+	}
 
 	db, err := openProjectDB(env)
 	if err != nil {

@@ -23,6 +23,8 @@ var (
 	parallelAgent             string
 	parallelModel             string
 	parallelEffort            string
+	parallelMaxBudgetUSD      string
+	parallelMaxBudgetBatch    string
 	parallelWorkDir           string
 	parallelTimeout           int
 	parallelVerbose           bool
@@ -61,6 +63,9 @@ func init() {
 	addProfileFlags(parallelCmd, &parallelProfile, &parallelAgent)
 	parallelCmd.Flags().StringVar(&parallelModel, "model", "", "model override")
 	parallelCmd.Flags().StringVar(&parallelEffort, "effort", "", "reasoning effort override, passed verbatim to the agent CLI")
+	addBudgetFlags(parallelCmd, &parallelMaxBudgetUSD, &parallelMaxBudgetBatch,
+		"per-agent USD spend cap (claude-only; warns on codex)",
+		"stop dispatching new agents once batch cost crosses this USD")
 	parallelCmd.Flags().StringVar(&parallelWorkDir, "work-dir", "", "working directory (defaults to project source dir or cwd)")
 	parallelCmd.Flags().IntVar(&parallelTimeout, "timeout", 0, "timeout in minutes per agent execution")
 	addVerboseFlag(parallelCmd, &parallelVerbose)
@@ -163,6 +168,9 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		r.Agent.SetModel(parallelModel)
 	}
 	applyEffort(r, parallelEffort)
+	if err := applyMaxBudgetUSD(r, parallelMaxBudgetUSD, runner.ActionParallel); err != nil {
+		return err
+	}
 
 	if !hasProject {
 		return fmt.Errorf("ateam project required: no .ateam/ found")
@@ -207,14 +215,20 @@ func runParallel(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Running %d agent(s) in batch %s (max %d parallel)...\n\n", len(tasks), batch, maxParallel)
 
+	preDispatch, err := batchBudgetPrecheck(db, env.ProjectID(), batch, parallelMaxBudgetBatch)
+	if err != nil {
+		return err
+	}
+
 	ctx, stop := cmdContext()
 	defer stop()
 
 	results, runErr := runPool(ctx, r, tasks, maxParallel, poolDisplayOpts{
-		quiet:     !isTerminal() || parallelNoProgress,
-		out:       os.Stderr,
-		agentName: r.Agent.Name(),
-		itemLabel: "agent(s)",
+		quiet:       !isTerminal() || parallelNoProgress,
+		out:         os.Stderr,
+		agentName:   r.Agent.Name(),
+		itemLabel:   "agent(s)",
+		preDispatch: preDispatch,
 	})
 
 	// Print outputs in submission order

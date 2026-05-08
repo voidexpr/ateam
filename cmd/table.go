@@ -409,6 +409,7 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 			Args:         ac.Args,
 			Model:        ac.Model,
 			Effort:       ac.Effort,
+			MaxBudgetUSD: ac.MaxBudgetUSD,
 			DefaultModel: defaultModel,
 			Pricing:      pricing,
 			Env:          ac.Env,
@@ -423,6 +424,7 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 			Args:         ac.Args,
 			Model:        ac.Model,
 			Effort:       ac.Effort,
+			MaxBudgetUSD: ac.MaxBudgetUSD,
 			DefaultModel: defaultModel,
 			Pricing:      pricing,
 			Env:          ac.Env,
@@ -677,6 +679,17 @@ func addContainerNameFlag(cmd *cobra.Command, dst *string) {
 	cmd.Flags().StringVar(dst, "container-name", "", "override container name (for docker-exec or persistent containers)")
 }
 
+// addBudgetFlags registers --max-budget-usd and --max-budget-usd-batch on cmd.
+// perAgentDesc and batchDesc are the help strings, which vary per command
+// (e.g. "per-agent" vs "per-role" vs "for the supervisor and every sub-run").
+// Pass batchDst = nil for single-exec commands that don't manage a batch.
+func addBudgetFlags(cmd *cobra.Command, perAgentDst, batchDst *string, perAgentDesc, batchDesc string) {
+	cmd.Flags().StringVar(perAgentDst, "max-budget-usd", "", perAgentDesc)
+	if batchDst != nil {
+		cmd.Flags().StringVar(batchDst, "max-budget-usd-batch", "", batchDesc)
+	}
+}
+
 // resolveVolumePath resolves relative host paths in a volume spec and validates
 // that the resolved path stays within allowedDirs. Volume format:
 // "hostPath:containerPath[:mode]". Relative hostPath is resolved from baseDir.
@@ -748,6 +761,74 @@ func addCheaperModelFlag(cmd *cobra.Command, dst *bool) {
 func applyEffort(r *runner.Runner, value string) {
 	if value != "" {
 		r.Agent.SetEffort(value)
+	}
+}
+
+// parseBudgetUSD parses a USD amount from a CLI flag string. Empty returns 0/false.
+func parseBudgetUSD(value string) (float64, bool, error) {
+	if value == "" {
+		return 0, false, nil
+	}
+	v, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0, false, fmt.Errorf("invalid USD amount %q: %w", value, err)
+	}
+	if v < 0 {
+		return 0, false, fmt.Errorf("budget cap must be non-negative, got %v", v)
+	}
+	return v, true, nil
+}
+
+// batchBudgetPrecheck builds a closure that returns an error once the recorded
+// cost for `batch` crosses `capStr`. Returns (nil, nil) when no cap was
+// requested. Used both as a one-shot check (for single-exec actions) and as a
+// PoolOpts.PreDispatch hook. The closure only sees committed rows, so up to
+// maxParallel in-flight execs can still push the total over the cap; this
+// matches the user's "ballpark" tolerance.
+func batchBudgetPrecheck(db *calldb.CallDB, projectID, batch, capStr string) (func() error, error) {
+	cap, capSet, err := parseBudgetUSD(capStr)
+	if err != nil {
+		return nil, err
+	}
+	if !capSet || batch == "" {
+		return nil, nil
+	}
+	return func() error {
+		spent, err := db.BatchCostUSD(projectID, batch)
+		if err != nil {
+			return fmt.Errorf("cannot read batch cost: %w", err)
+		}
+		if spent >= cap {
+			return fmt.Errorf("batch %q reached cap (spent $%.4f / $%.4f)", batch, spent, cap)
+		}
+		return nil
+	}, nil
+}
+
+// applyMaxBudgetUSD sets the agent's per-run USD spend cap, gating on whether
+// the agent supports it natively. Returns an error when the cap was requested
+// but cannot be enforced for an action that requires hard enforcement.
+//
+// Only Claude has a native --max-budget-usd flag. For Codex:
+//   - parallel/report: warn (best-effort; the run-level batch cap still applies)
+//   - exec/review/code/verify: error (single-exec actions don't have a batch
+//     fallback, so silently dropping the cap would surprise the operator)
+func applyMaxBudgetUSD(r *runner.Runner, value, action string) error {
+	if value == "" {
+		return nil
+	}
+	r.Agent.SetMaxBudgetUSD(value)
+	if r.Agent.Name() != agent.NameCodex {
+		return nil
+	}
+	switch action {
+	case runner.ActionParallel, runner.ActionReport:
+		fmt.Fprintf(os.Stderr,
+			"Warning: --max-budget-usd is not enforced per-agent on codex; relying on --max-budget-usd-batch (if set) for %s.\n",
+			action)
+		return nil
+	default:
+		return fmt.Errorf("--max-budget-usd is not supported on codex for %s (no native cap; rerun with claude or drop the flag)", action)
 	}
 }
 
@@ -1114,11 +1195,12 @@ func printDryRunSecrets(r *runner.Runner, env *root.ResolvedEnv) {
 
 // poolDisplayOpts controls how runPool renders progress and formats output.
 type poolDisplayOpts struct {
-	quiet     bool                                   // suppress ANSI table; fall back to plain text progress
-	out       io.Writer                              // output for summary/error tails (nil = os.Stdout)
-	onDone    func(runner.RunSummary, string) string // result, cwd → display path for status row; nil → ""
-	agentName string
-	itemLabel string // used in "N failed" error, e.g. "role(s)" or "agent(s)"
+	quiet       bool                                   // suppress ANSI table; fall back to plain text progress
+	out         io.Writer                              // output for summary/error tails (nil = os.Stdout)
+	onDone      func(runner.RunSummary, string) string // result, cwd → display path for status row; nil → ""
+	agentName   string
+	itemLabel   string       // used in "N failed" error, e.g. "role(s)" or "agent(s)"
+	preDispatch func() error // optional precheck before each task is dispatched (e.g. batch budget cap)
 }
 
 // runPool drives a runner.Pool to completion, rendering progress and printing
@@ -1187,7 +1269,9 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolExec, max
 	var statusMu sync.Mutex
 
 	go func() {
-		runner.RunPool(ctx, r, tasks, maxParallel, progressCh, completedCh)
+		runner.RunPoolWithOpts(ctx, r, tasks, maxParallel, progressCh, completedCh, runner.PoolOpts{
+			PreDispatch: opts.preDispatch,
+		})
 		close(progressCh)
 	}()
 

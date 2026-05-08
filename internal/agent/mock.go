@@ -78,10 +78,11 @@ type MockAgent struct {
 	Requests []Request
 }
 
-func (m *MockAgent) Name() string { return "mock" }
+func (m *MockAgent) Name() string { return NameMock }
 
-func (m *MockAgent) SetModel(model string)   {}
-func (m *MockAgent) SetEffort(effort string) {}
+func (m *MockAgent) SetModel(model string)        {}
+func (m *MockAgent) SetEffort(effort string)      {}
+func (m *MockAgent) SetMaxBudgetUSD(value string) {}
 
 func (m *MockAgent) CloneWithResolvedTemplates(replacer *strings.Replacer) Agent {
 	return m

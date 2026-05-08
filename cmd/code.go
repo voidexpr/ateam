@@ -41,6 +41,8 @@ var (
 	codeContainerName     string
 	codeNoVerify          bool
 	codeEffort            string
+	codeMaxBudgetUSD      string
+	codeMaxBudgetBatch    string
 )
 
 // CodeOptions holds configuration for a code run.
@@ -63,6 +65,8 @@ type CodeOptions struct {
 	ContainerName     string
 	NoVerify          bool // skip the default `ateam verify` follow-up
 	Effort            string
+	MaxBudgetUSD      string
+	MaxBudgetBatch    string
 }
 
 var codeCmd = &cobra.Command{
@@ -99,6 +103,8 @@ Example:
 			ContainerName:     codeContainerName,
 			NoVerify:          codeNoVerify,
 			Effort:            codeEffort,
+			MaxBudgetUSD:      codeMaxBudgetUSD,
+			MaxBudgetBatch:    codeMaxBudgetBatch,
 		})
 	},
 }
@@ -120,6 +126,9 @@ func init() {
 	codeCmd.Flags().StringVar(&codeProfile, "profile", "", "profile for sub-runs (passed to ateam exec --profile)")
 	codeCmd.Flags().StringVar(&codeAgent, "agent", "", "agent for sub-runs (passed to ateam exec --agent)")
 	codeCmd.Flags().StringVar(&codeEffort, "effort", "", "reasoning effort for the supervisor and every sub-run, passed verbatim to the agent CLI")
+	addBudgetFlags(codeCmd, &codeMaxBudgetUSD, &codeMaxBudgetBatch,
+		"USD spend cap for the supervisor and every sub-run (claude-only)",
+		"stop spawning new sub-runs once the code batch crosses this USD")
 	codeCmd.Flags().StringVar(&codeSupervisorProfile, "supervisor-profile", "", "profile for the supervisor itself")
 	codeCmd.Flags().StringVar(&codeSupervisorAgent, "supervisor-agent", "", "agent for the supervisor itself")
 	codeCmd.MarkFlagsMutuallyExclusive("profile", "agent")
@@ -189,6 +198,12 @@ func runCode(opts CodeOptions) error {
 	if opts.Effort != "" {
 		prompt += "- `--effort " + opts.Effort + "`\n"
 	}
+	if opts.MaxBudgetUSD != "" {
+		prompt += "- `--max-budget-usd " + opts.MaxBudgetUSD + "`\n"
+	}
+	if opts.MaxBudgetBatch != "" {
+		prompt += "- `--max-budget-usd-batch " + opts.MaxBudgetBatch + "`\n"
+	}
 
 	timeout := env.Config.Code.EffectiveTimeout(opts.Timeout)
 	supervisorDir := env.SupervisorDir()
@@ -223,6 +238,9 @@ func runCode(opts CodeOptions) error {
 	setSourceWritable(cr)
 	applyCheaperModel(cr, opts.CheaperModel)
 	applyEffort(cr, opts.Effort)
+	if err := applyMaxBudgetUSD(cr, opts.MaxBudgetUSD, runner.ActionCode); err != nil {
+		return err
+	}
 
 	db, err := openProjectDB(env)
 	if err != nil {

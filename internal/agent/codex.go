@@ -23,12 +23,13 @@ type CodexAgent struct {
 	Args         []string          // base args, e.g. ["--sandbox", "workspace-write", "--ask-for-approval", "never"]
 	Model        string            // optional model override (passed as --model flag)
 	Effort       string            // optional reasoning effort (passed as -c model_reasoning_effort=...)
+	MaxBudgetUSD string            // stored but not enforced — codex CLI has no native budget cap
 	DefaultModel string            // assumed model for pricing when stream doesn't report one
 	Pricing      PricingTable      // cost estimation lookup table
 	Env          map[string]string // env vars to set (empty string = exclude from parent env)
 }
 
-func (c *CodexAgent) Name() string { return "codex" }
+func (c *CodexAgent) Name() string { return NameCodex }
 
 func (c *CodexAgent) ModelName() string {
 	if c.Model != "" {
@@ -40,6 +41,8 @@ func (c *CodexAgent) ModelName() string {
 func (c *CodexAgent) SetModel(model string) { c.Model = model }
 
 func (c *CodexAgent) SetEffort(effort string) { c.Effort = effort }
+
+func (c *CodexAgent) SetMaxBudgetUSD(value string) { c.MaxBudgetUSD = value }
 
 func (c *CodexAgent) AgentEnv() map[string]string { return c.Env }
 

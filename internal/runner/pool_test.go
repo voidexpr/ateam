@@ -21,8 +21,9 @@ type concurrencyTrackingAgent struct {
 
 func (a *concurrencyTrackingAgent) Name() string { return "tracking" }
 
-func (a *concurrencyTrackingAgent) SetModel(model string)   {}
-func (a *concurrencyTrackingAgent) SetEffort(effort string) {}
+func (a *concurrencyTrackingAgent) SetModel(model string)        {}
+func (a *concurrencyTrackingAgent) SetEffort(effort string)      {}
+func (a *concurrencyTrackingAgent) SetMaxBudgetUSD(value string) {}
 
 func (a *concurrencyTrackingAgent) CloneWithResolvedTemplates(replacer *strings.Replacer) agent.Agent {
 	return a
@@ -202,5 +203,37 @@ func TestRunPoolConcurrentResultsAreSafe(t *testing.T) {
 	}
 	if count != numTasks {
 		t.Errorf("expected %d completed events, got %d", numTasks, count)
+	}
+}
+
+// TestRunPoolPreDispatchAborts verifies PoolOpts.PreDispatch can stop further
+// dispatch mid-pool while letting in-flight tasks finish.
+func TestRunPoolPreDispatchAborts(t *testing.T) {
+	dir := t.TempDir()
+
+	mock := &agent.MockAgent{Response: "ok"}
+	r := newTestRunner(t, dir, mock)
+
+	tasks := []PoolExec{
+		{Prompt: "t1", RunOpts: RunOpts{RoleID: "p-1", Action: ActionExec}},
+		{Prompt: "t2", RunOpts: RunOpts{RoleID: "p-2", Action: ActionExec}},
+		{Prompt: "t3", RunOpts: RunOpts{RoleID: "p-3", Action: ActionExec}},
+		{Prompt: "t4", RunOpts: RunOpts{RoleID: "p-4", Action: ActionExec}},
+	}
+
+	// Allow the first two dispatches, then refuse — only those two should run.
+	var calls atomic.Int64
+	opts := PoolOpts{
+		PreDispatch: func() error {
+			if calls.Add(1) > 2 {
+				return fmt.Errorf("budget cap reached")
+			}
+			return nil
+		},
+	}
+
+	results := RunPoolWithOpts(context.Background(), r, tasks, 4, nil, nil, opts)
+	if len(results) != 2 {
+		t.Errorf("expected 2 results (precheck stopped after 2), got %d", len(results))
 	}
 }

@@ -21,6 +21,8 @@ var (
 	execAgent           string
 	execModel           string
 	execEffort          string
+	execMaxBudgetUSD    string
+	execMaxBudgetBatch  string
 	execExtraPrompt     string
 	execNoStream        bool
 	execWorkDir         string
@@ -68,6 +70,9 @@ func init() {
 	execCmd.Flags().StringVar(&execRole, "role", "", "role to run (optional)")
 	execCmd.Flags().StringVar(&execModel, "model", "", "model override")
 	execCmd.Flags().StringVar(&execEffort, "effort", "", "reasoning effort override, passed verbatim to the agent CLI (e.g. low/medium/high)")
+	addBudgetFlags(execCmd, &execMaxBudgetUSD, &execMaxBudgetBatch,
+		"per-agent USD spend cap (claude-only; errors on codex)",
+		"abort if --batch already exceeds this USD before starting")
 	execCmd.Flags().StringVar(&execExtraPrompt, "extra-prompt", "", "additional instructions appended after the main prompt (text or @filepath)")
 	addProfileFlags(execCmd, &execProfile, &execAgent)
 	execCmd.Flags().BoolVar(&execNoStream, "no-stream", false, "disable progress updates during execution")
@@ -163,6 +168,9 @@ func runExec(cmd *cobra.Command, args []string) error {
 		r.Agent.SetModel(execModel)
 	}
 	applyEffort(r, execEffort)
+	if err := applyMaxBudgetUSD(r, execMaxBudgetUSD, runner.ActionExec); err != nil {
+		return err
+	}
 
 	if execDryRun {
 		return printExecDryRun(r, env, promptText, execRole, execBatch)
@@ -177,6 +185,16 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 	defer db.Close()
 	r.CallDB = db
+
+	preCheck, err := batchBudgetPrecheck(db, env.ProjectID(), execBatch, execMaxBudgetBatch)
+	if err != nil {
+		return err
+	}
+	if preCheck != nil {
+		if err := preCheck(); err != nil {
+			return err
+		}
+	}
 
 	timeout := env.Config.Run.EffectiveTimeout(0)
 

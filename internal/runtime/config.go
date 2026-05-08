@@ -22,21 +22,22 @@ type Config struct {
 }
 
 type AgentConfig struct {
-	Name        string
-	Base        string // inherit unset fields from this agent
-	Command     string
-	Args        []string
-	Model       string
-	Effort      string            // reasoning effort, passed verbatim to the agent CLI
-	Type        string            // "builtin" for mock, "codex", or "" for claude
-	Env         map[string]string // env vars to set (empty string = unset from parent)
-	Sandbox     string            // inline JSON settings template
-	RWPaths     []string          // additional read-write paths merged into sandbox allowWrite
-	ROPaths     []string          // additional read-only paths merged into sandbox additionalDirectories
-	DeniedPaths []string          // paths merged into sandbox denyWrite
-	ConfigDir   string            // sets CLAUDE_CONFIG_DIR; relative paths resolve from .ateam/, absolute used as-is
-	Pricing     *AgentPricing     // cost estimation config (nil = no pricing)
-	RequiredEnv []string          // env var names that must be set; "A|B" means at least one of A or B
+	Name         string
+	Base         string // inherit unset fields from this agent
+	Command      string
+	Args         []string
+	Model        string
+	Effort       string            // reasoning effort, passed verbatim to the agent CLI
+	MaxBudgetUSD string            // per-agent USD spend cap (claude native; codex unsupported)
+	Type         string            // "builtin" for mock, "codex", or "" for claude
+	Env          map[string]string // env vars to set (empty string = unset from parent)
+	Sandbox      string            // inline JSON settings template
+	RWPaths      []string          // additional read-write paths merged into sandbox allowWrite
+	ROPaths      []string          // additional read-only paths merged into sandbox additionalDirectories
+	DeniedPaths  []string          // paths merged into sandbox denyWrite
+	ConfigDir    string            // sets CLAUDE_CONFIG_DIR; relative paths resolve from .ateam/, absolute used as-is
+	Pricing      *AgentPricing     // cost estimation config (nil = no pricing)
+	RequiredEnv  []string          // env var names that must be set; "A|B" means at least one of A or B
 
 	ArgsInsideContainer    []string // extra args when running inside a container (detected via /.dockerenv)
 	ArgsOutsideContainer   []string // extra args when running on the host
@@ -90,6 +91,7 @@ type hclAgent struct {
 	Args                   []string          `hcl:"args,optional"`
 	Model                  string            `hcl:"model,optional"`
 	Effort                 string            `hcl:"effort,optional"`
+	MaxBudgetUSD           string            `hcl:"max_budget_usd,optional"`
 	Type                   string            `hcl:"type,optional"`
 	Env                    map[string]string `hcl:"env,optional"`
 	Sandbox                string            `hcl:"sandbox,optional"`
@@ -229,6 +231,9 @@ func (c *Config) resolveInheritance() error {
 		if ac.Effort == "" {
 			ac.Effort = base.Effort
 		}
+		if ac.MaxBudgetUSD == "" {
+			ac.MaxBudgetUSD = base.MaxBudgetUSD
+		}
 		if ac.Type == "" {
 			ac.Type = base.Type
 		}
@@ -341,6 +346,7 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 			Args:                   a.Args,
 			Model:                  a.Model,
 			Effort:                 a.Effort,
+			MaxBudgetUSD:           a.MaxBudgetUSD,
 			Type:                   a.Type,
 			Env:                    a.Env,
 			Sandbox:                a.Sandbox,

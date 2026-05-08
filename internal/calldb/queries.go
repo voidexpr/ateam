@@ -239,6 +239,26 @@ type BatchRow struct {
 	LastEnded        sql.NullString
 }
 
+// BatchCostUSD returns the cumulative recorded cost for a single batch.
+// Used by --max-budget-usd-batch precheck to short-circuit further dispatch
+// once the cap is exceeded. Only counts rows with cost_usd != NULL.
+func (c *CallDB) BatchCostUSD(projectID, batch string) (float64, error) {
+	if batch == "" {
+		return 0, nil
+	}
+	q := `SELECT COALESCE(SUM(cost_usd), 0) FROM agent_execs WHERE batch = ?`
+	args := []any{batch}
+	if projectID != "" {
+		q += " AND project_id = ?"
+		args = append(args, projectID)
+	}
+	var total float64
+	if err := c.db.QueryRow(q, args...).Scan(&total); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
 // CostByBatch returns cost data grouped by batch and action for all
 // agent_execs that have a non-empty batch (code sessions, report batches, etc.).
 func (c *CallDB) CostByBatch(projectID string) ([]BatchRow, error) {

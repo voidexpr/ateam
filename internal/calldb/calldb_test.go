@@ -459,6 +459,36 @@ func TestCostByBatch(t *testing.T) {
 	}
 }
 
+func TestBatchCostUSD(t *testing.T) {
+	db := testDB(t)
+	seedCalls(t, db)
+
+	tests := []struct {
+		name      string
+		projectID string
+		batch     string
+		want      float64
+	}{
+		{"empty batch returns zero", "proj-a", "", 0},
+		{"unknown batch returns zero", "proj-a", "missing", 0},
+		{"sums report batch", "proj-a", "report-2026-03-13_09-00-00", 0.18},
+		{"sums code batch incl sub-runs", "proj-a", "code-2026-03-13_10-00-00", 0.77},
+		{"scopes by project", "proj-b", "code-2026-03-13_10-00-00", 0},
+		{"unscoped sees all projects", "", "code-2026-03-13_10-00-00", 0.77},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := db.BatchCostUSD(tt.projectID, tt.batch)
+			if err != nil {
+				t.Fatalf("BatchCostUSD: %v", err)
+			}
+			if got < tt.want-1e-9 || got > tt.want+1e-9 {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestMigrateRunActionRename verifies that legacy rows with action='run' are
 // rewritten to action='exec' on Open, matching the renamed CLI command.
 func TestMigrateRunActionRename(t *testing.T) {
