@@ -234,6 +234,21 @@ agent "claude-haiku" {
   args = ["-p", "--output-format", "stream-json", "--verbose", "--model", "haiku", "--max-budget-usd", "0.10"]
 }
 
+// claude-high: opus model with high reasoning effort, for the hardest tasks.
+agent "claude-high" {
+  base   = "claude"
+  args   = ["-p", "--output-format", "stream-json", "--verbose", "--model", "opus"]
+  effort = "high"
+}
+
+// claude-xhigh: opus model with xhigh effort. Slow + expensive — reserve
+// for the few prompts that genuinely need deeper reasoning than --high.
+agent "claude-xhigh" {
+  base   = "claude"
+  args   = ["-p", "--output-format", "stream-json", "--verbose", "--model", "opus"]
+  effort = "xhigh"
+}
+
 // claude-docker: backward compatibility alias. The base claude agent now
 // auto-detects containers and skips permissions/sandbox. Prefer using "claude" directly.
 agent "claude-docker" {
@@ -342,6 +357,14 @@ agent "codex" {
       output_per_mtok       = 4.40
     }
   }
+}
+
+// codex-high: latest codex model with high reasoning effort. Pin the model
+// explicitly (codex has no `latest`-style alias — versions are spelled out).
+agent "codex-high" {
+  base   = "codex"
+  model  = "gpt-5.4-codex"
+  effort = "high"
 }
 
 agent "mock" {
