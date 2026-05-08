@@ -351,6 +351,64 @@ It is, in fact, the most direct conceptual overlap with ATeam in this entire sec
 
 **Key architectural difference from ATeam:** The Compound Engineering Plugin is a *human-driven workflow toolkit* — a curated set of slash commands and sub-agents that a human invokes inside a coding agent session, with markdown artifacts as the connective tissue. ATeam is an *autonomous workflow system* — a scheduler that decides when and what to run, runs it without a human in the session, and reports back. Both centre on the same loop and the same artifact-based memory model. The right way to think about the relationship: ATeam should adopt the plugin's *artifact taxonomy and skill set* as its own internal vocabulary (strategy, brainstorm, plan, review, compound, refresh, pulse) and run them autonomously — i.e., what the plugin makes a human do interactively, ATeam should do unattended. They don't compete; the plugin is the manual version of what ATeam should automate.
 
+#### Guild (mathomhaus/guild) ⭐⭐⭐⭐
+
+**What it is:** A shared-context, memory, and task-coordination *substrate* for AI coding agents — explicitly **not** a framework or orchestrator. Single Go binary, embedded SQLite at `~/.guild/`, exposed to agents via an MCP server. 112⭐, created April 2026, pushed today. Among the freshest entries in this section, but the design choices are unusually well-thought-out and the timing matters: Guild ships the missing primitives that the Meiklejohn academic survey (see C.1) flags as the open research gaps in current MAS — atomic-claim concurrency, typed accumulating state, hybrid retrieval. Agent-agnostic by construction (any MCP-capable agent connects: Claude Code, Codex, Cursor).
+
+**Architecture:**
+
+Guild is a daemon-style MCP server with four memory primitives, each backed by SQLite tables and exposed as MCP tool calls. Agents don't run *inside* Guild; they run wherever they normally run (Claude Code session, Cursor session, etc.) and call Guild's tools when they need shared state. This is a fundamentally different shape from every other entry in this section: Guild is a **context layer agents share**, not a runtime that hosts them.
+
+**The four primitives:**
+
+1. **Quest** — a unit of work. Has priority, dependencies, status, and an **atomic claim** mechanism: when an agent calls `guild_quest_accept(QUEST-42)`, the database row's `claimed_by` is set under transaction; a second agent's accept call returns "already claimed." This solves the workflow-instance lock concern raised earlier in this research at the database level — the lock is part of the data model, not bolted on.
+2. **Lore** — typed knowledge entries. Five kinds: `observation`, `decision`, `research`, `principle`, `idea`. Distinct from quests and from session-handoff notes. Searchable via hybrid retrieval (see below). This is the most disciplined typed-knowledge schema seen in this research — DSPy CE has untyped JSON, EveryInc has untyped markdown, Guild forces a kind choice on every insertion.
+3. **Oath** — principles auto-loaded at every session start. Maps cleanly to ATeam's notion of role-level invariants and to EveryInc's `STRATEGY.md` — long-lived guidance that should ground every run.
+4. **Brief** — handoff notes between sessions. The agent leaving writes a brief; the next agent starting reads it. Concrete answer to the "how does the next session pick up where this one left off" question.
+
+**Hybrid retrieval.** Lore search combines BM25 keyword scoring with vector similarity, fused via **reciprocal-rank fusion**. This is essentially the structured retrieval the Meiklejohn series points to (Generative Agents' recency × relevance × importance), with a different weighting but the same intent: don't just do "most recent" or "keyword match" — combine signals.
+
+**Cascade clearing.** Quests have dependency edges. Completing a quest automatically transitions dependent quests from `blocked` to `available`. Dependency-driven task graph at the data layer.
+
+**Session lifecycle:**
+
+```
+1. Arrival   — guild_session_start()  → loads oath, prior brief, top quest
+2. Adventure — quest accept / fulfill, lore inscribe, lore search
+3. Parting   — guild_brief_write(...) before disconnect
+```
+
+The vocabulary is whimsical (quests, lore, oath, brief) but the semantics are unusually precise.
+
+**Overlap with ATeam:**
+
+- **Both centre on long-lived shared state** that survives across runs. ATeam uses markdown files committed to the repo + SQLite CallDB; Guild uses local SQLite + MCP. Same intent, different substrate.
+- **Both are agent-agnostic.** ATeam's container adapter, Guild's MCP server. Both let multiple agent runtimes plug in.
+- **Both are local-first, single-binary.** Same deployment model.
+- **Both use SQLite.** Guild for the entire memory layer; ATeam for CallDB and (potentially) coordinator state.
+
+**What it lacks for our use case:**
+
+- **No scheduler.** Guild is purely reactive — agents call its tools. No cron, no autonomous coordinator, no "decide what to work on tonight."
+- **No agent runtime.** Guild doesn't launch agents; you run them yourself in their respective editors. ATeam handles agent invocation; Guild handles the data layer agents share.
+- **No sandbox.** Same gap as the other knowledge-layer projects. Isolation is whatever the host agent provides.
+- **No specialised roles.** Same agent interface for all clients — Guild is role-neutral. ATeam's specialist-agent concept lives one layer above what Guild provides.
+- **No PR / git-worktree machinery.** Guild manages state, not code-changes-on-disk.
+- **Very young.** 3 weeks old at time of writing. Schema/API likely to churn. The ideas are sound; the implementation is alpha.
+
+**Ideas to integrate (this entry contributes the most directly portable primitives in the doc):**
+
+- **Atomic-claim quests as the workflow-instance lock.** ATeam's "two scheduler ticks fire and run the same workflow concurrently" problem has a database-shaped answer: a quests-table-equivalent in CallDB where `claimed_by` is set in a transaction, and a second claim returns ALREADY_CLAIMED. This is the right shape — not advisory file locks, not OS-level mutexes, just a row in SQLite. Adopt the pattern even if not the project.
+- **Typed lore entries** — five-kind schema (`observation` / `decision` / `research` / `principle` / `idea`) is unusually well-chosen. ATeam's knowledge files are currently free-form markdown; adding a kind-tag (or per-kind subdirectory) gives retrieval a useful filter axis without forcing structure on the body. Combine with EveryInc's compound-note distillation step: every kind has a different lifecycle (observations get superseded; principles persist; ideas need triage).
+- **`Oath` / `Brief` distinction.** ATeam currently has CLAUDE.md (cross-session, persistent) and per-run reports (this-session-only). Guild's `Oath` (always-loaded principles) and `Brief` (last-session handoff) is a cleaner two-axis model: persistent-cross-cutting vs ephemeral-handoff. Worth adopting as a vocabulary even if the implementation differs.
+- **Hybrid BM25 + vector retrieval via RRF.** When ATeam's knowledge base grows past dozens of files, naïve filename-based retrieval breaks down. Guild's RRF-fused hybrid is a concrete implementation reference. SQLite supports BM25 via FTS5 natively; vector via `sqlite-vec` extension. The Go ecosystem (which ATeam is in) has both. This is borrowable code-structure, not just an idea.
+- **Quest dependencies with cascade clearing.** ATeam's coordinator currently picks the next agent run via rule-based heuristics. Modelling task dependencies explicitly — and letting the data structure tell us which tasks are *available* at any moment — pushes scheduling logic out of code and into data, which is a maintainability win.
+- **MCP as the substrate for agent ↔ shared-state communication.** ATeam currently has agents read/write artifact files. Guild's MCP server pattern is an alternative or complement: when an agent runs, it has a tool channel to the shared-state layer that's structured (typed calls, transactional) rather than file-shaped. Worth considering for ATeam's next iteration of the agent–coordinator interface, especially as MCP becomes the de-facto cross-tool standard.
+
+**Key architectural difference from ATeam:** Guild is a **shared-state daemon**; ATeam is a **scheduled orchestrator**. They sit at different layers and could plausibly compose — ATeam's coordinator could itself be a Guild client, calling `guild_quest_create` to enqueue work, `guild_quest_accept` to lock it, and `guild_lore_inscribe` to write specialist findings. The right mental model: if EveryInc's plugin is the "human-driven version of what ATeam should automate" (per that entry's framing), Guild is the "MCP-shaped data layer ATeam might want to delegate its memory to." Whether to depend on Guild directly or to absorb the design into ATeam's own SQLite schema is an engineering call; the *primitives* are the contribution either way.
+
+**Where it fits in the C.1 takeaways:** Guild is the closest existing implementation of what the Meiklejohn series advocates. The atomic-claim concurrency model is what CALM/CRDT thinking points at; the typed lore + hybrid retrieval is what Generative Agents prefigured; the quest-dependency cascade is what append-only-monotonic state allows. If we wanted one running implementation to read for "how would the academic recommendations actually look in code," Guild is it.
+
 #### DSPy Compounding Engineering (Strategic-Automation) ⭐⭐⭐
 
 **What it is:** A local-first Python CLI by Strategic-Automation that re-implements the compound-engineering doctrine (see EveryInc entry above for the canonical version) on top of [DSPy](https://github.com/stanfordnlp/dspy), Stanford's declarative-LLM framework. 56⭐, ~5 months old (created Nov 2025), pushed April 2026. Much smaller in scope and adoption than Every's plugin, but interesting for a different reason: it expresses the same loop in DSPy's typed/optimisable primitives rather than as a curated set of human-invoked slash commands. Worth a full entry as a *technique* contrast, not as a competing implementation.
@@ -665,6 +723,7 @@ Gas Town and agent-orchestrator come closest but are both reactive/interactive r
 - **YAML DAG workflows** (AI + bash + human-gate nodes), **`fresh_context` loop iterations**, and **deterministic `until` exit predicates** from Archon.
 - **Compound engineering doctrine** ("each unit of work makes the next one easier") plus the **artifact taxonomy** (`STRATEGY.md`, brainstorm, plan, review, compound notes, pulse reports), **`/ce-compound` and `/ce-compound-refresh` distillation+keep/update/replace/archive cycle**, and **tiered review with confidence calibration** from EveryInc's Compound Engineering Plugin (the canonical implementation). The **KBPredict wrapper pattern** (framework-level auto-inject + auto-codify around every model call) from DSPy Compounding Engineering as a complementary technical primitive.
 - **Prompt fragment includes**, **team-wide shared-context file**, **stateful checklist that survives across runs** (action-verb pattern: `create/get/mark/revise`), **per-role declarative tool allowlist**, and **scripted-turn mock agent for offline regression tests** from npcsh — the subset of npcsh's ideas that don't require abandoning the "delegate to a coding CLI" model.
+- **Atomic-claim quests** (database-row-level workflow-instance lock), **typed lore entries** (`observation`/`decision`/`research`/`principle`/`idea`), **`Oath` vs `Brief` distinction** (persistent principles vs last-session handoff), **hybrid BM25 + vector retrieval via reciprocal-rank fusion** (SQLite FTS5 + `sqlite-vec`), and **quest dependencies with cascade clearing** from Guild. Together these form the most directly portable set of shared-state primitives in this research and the closest implementation of the patterns the Meiklejohn series (C.1) advocates.
 
 ### B.4 Future: Feature Agents
 
@@ -744,7 +803,7 @@ Taxonomy derived from 150 expert-annotated traces (κ = 0.88), validated across 
 Ranked by leverage:
 
 1. **Modality-shift verification as a design rule.** Every transition between stages should ideally cross a modality (agent prose → committed file → linter → tests → screenshot). Deterministic gates between agent stages convert weak text-to-text review into strong structural-gate review. Most directly actionable insight in the series.
-2. **Append-only shared notebook** for cross-stage *facts* (separate from the report/review/code artifacts which are per-stage deliverables that get overwritten). Ou et al. measure +18% hallucination reduction from this single mechanism. ATeam currently overwrites artifacts; add a parallel append-only fact log.
+2. **Append-only shared notebook** for cross-stage *facts* (separate from the report/review/code artifacts which are per-stage deliverables that get overwritten). Ou et al. measure +18% hallucination reduction from this single mechanism. ATeam currently overwrites artifacts; add a parallel append-only fact log. Closest existing implementation: **Guild's typed `Lore` entries** (B.2, ⭐⭐⭐⭐) — observation/decision/research/principle/idea kinds, BM25+vector hybrid retrieval. Read Guild as the reference implementation before designing ATeam's version.
 3. **MAST 14-mode coverage.** Use C.1.1 as a checklist for ATeam's coordinator — explicit detection (or at minimum, post-hoc identification) of each mode. Step repetition, reasoning-action mismatch, and termination unawareness are the highest-frequency failures and should be detected first.
 4. **Stuck-detection** in the coordinator (Magentic-One pattern): explicit loop counter, threshold-triggered reflection branch. Maps to FM-1.3 (step repetition) and FM-2.3 (task derailment).
 5. **Recency × relevance × importance retrieval** (Generative Agents pattern) as the score function for compounding-engineering knowledge injection — replaces naïve temporal or keyword retrieval.
