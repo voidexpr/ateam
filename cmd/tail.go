@@ -13,6 +13,7 @@ import (
 var (
 	tailReports bool
 	tailCoding  bool
+	tailLast    bool
 	tailVerbose bool
 	tailNoColor bool
 )
@@ -25,6 +26,7 @@ var tailCmd = &cobra.Command{
 Modes:
   ateam tail                 Tail all running processes (default)
   ateam tail ID [ID...]      Tail specific calls by ID
+  ateam tail --last          Tail the most recent run
   ateam tail --reports       Tail all current report runs
   ateam tail --coding        Tail current coding session (supervisor + sub-runs)
 
@@ -37,6 +39,7 @@ Options:
 func init() {
 	tailCmd.Flags().BoolVar(&tailReports, "reports", false, "tail all current report runs")
 	tailCmd.Flags().BoolVar(&tailCoding, "coding", false, "tail current coding session")
+	tailCmd.Flags().BoolVar(&tailLast, "last", false, "tail the most recent run")
 	tailCmd.Flags().BoolVar(&tailVerbose, "verbose", false, "show full tool inputs and text content")
 	tailCmd.Flags().BoolVar(&tailNoColor, "no-color", false, "disable color output")
 }
@@ -66,10 +69,19 @@ func runTail(cmd *cobra.Command, args []string) error {
 	hasProject := env.ProjectDir != ""
 
 	switch {
-	case len(args) > 0:
-		ids, err := parseIDArgs(args)
-		if err != nil {
-			return err
+	case len(args) > 0 || tailLast:
+		var ids []int64
+		if tailLast && len(args) == 0 {
+			id, err := lastRunID(db)
+			if err != nil {
+				return err
+			}
+			ids = []int64{id}
+		} else {
+			ids, err = parseIDArgs(args)
+			if err != nil {
+				return err
+			}
 		}
 		rows, err := db.CallsByIDs(ids)
 		if err != nil {

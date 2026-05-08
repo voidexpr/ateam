@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ateam/internal/agent"
+	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/ateam/internal/runtime"
@@ -17,34 +18,53 @@ import (
 var (
 	catVerbose bool
 	catNoColor bool
+	catLast    bool
 )
 
 var catCmd = &cobra.Command{
-	Use:   "cat ID|FILE [...]",
+	Use:   "cat [ID|FILE...]",
 	Short: "Pretty-print stream logs by call ID or file path",
 	Long: `Read and format stream logs for one or more completed runs.
 
 Arguments can be numeric call IDs or file paths to JSONL stream files.
+Pass --last instead of an ID to format the most recent run.
 
 Example:
   ateam cat 42
   ateam cat 42 43 44 --verbose
   ateam cat 42 --no-color
+  ateam cat --last
   ateam cat .ateam/logs/roles/security/stream.jsonl`,
-	Args: cobra.MinimumNArgs(1),
 	RunE: runCat,
 }
 
 func init() {
 	catCmd.Flags().BoolVar(&catVerbose, "verbose", false, "show full tool inputs and text content")
 	catCmd.Flags().BoolVar(&catNoColor, "no-color", false, "disable color output")
+	catCmd.Flags().BoolVar(&catLast, "last", false, "format the most recent run (when no ID is given)")
 }
 
 func runCat(cmd *cobra.Command, args []string) error {
-	if looksLikeFiles(args) {
+	if len(args) == 0 && !catLast {
+		return fmt.Errorf("specify an ID, file path, or --last")
+	}
+	if len(args) > 0 && looksLikeFiles(args) {
 		return runCatFiles(args)
 	}
 	return runCatIDs(args)
+}
+
+// lastRunID returns the ID of the most recent run in db. Used by --last on
+// cat / tail / inspect to skip explicit ID lookup.
+func lastRunID(db *calldb.CallDB) (int64, error) {
+	rows, err := db.RecentRuns(calldb.RecentFilter{Limit: 1})
+	if err != nil {
+		return 0, fmt.Errorf("query failed: %w", err)
+	}
+	if len(rows) == 0 {
+		return 0, fmt.Errorf("no runs found")
+	}
+	return rows[0].ID, nil
 }
 
 func looksLikeFiles(args []string) bool {
@@ -83,11 +103,6 @@ func runCatFiles(paths []string) error {
 }
 
 func runCatIDs(args []string) error {
-	ids, err := parseIDArgs(args)
-	if err != nil {
-		return err
-	}
-
 	env, err := root.Resolve(orgFlag, projectFlag)
 	if err != nil {
 		return fmt.Errorf("cannot find project: %w", err)
@@ -98,6 +113,20 @@ func runCatIDs(args []string) error {
 		return err
 	}
 	defer db.Close()
+
+	var ids []int64
+	if len(args) == 0 {
+		id, err := lastRunID(db)
+		if err != nil {
+			return err
+		}
+		ids = []int64{id}
+	} else {
+		ids, err = parseIDArgs(args)
+		if err != nil {
+			return err
+		}
+	}
 
 	rows, err := db.CallsByIDs(ids)
 	if err != nil {

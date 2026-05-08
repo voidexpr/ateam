@@ -459,14 +459,15 @@ Show the ps summary and log files for one or more agent runs. Select runs by ID,
 ```bash
 ateam inspect 42
 ateam inspect 42 43
-ateam inspect --last-run
+ateam inspect --last
 ateam inspect --last-report
 ateam inspect --last-report --auto-debug
-ateam inspect --last-run --auto-debug-prompt
+ateam inspect --last --auto-debug-prompt
 ```
 
 | Flag | Description |
 |------|-------------|
+| `--last` | Select the most recent run (alias for `--last-run`) |
 | `--last-run` | Select the most recent run |
 | `--last-report` | Select all execs from the last report batch |
 | `--last-review` | Select the last review run |
@@ -539,11 +540,13 @@ Pretty-print stream logs by call ID or file path.
 ```bash
 ateam cat 42
 ateam cat 42 43 44 --verbose
+ateam cat --last
 ateam cat .ateam/logs/roles/security/2026-03-31_stream.jsonl
 ```
 
 | Flag | Description |
 |------|-------------|
+| `--last` | Pretty-print the most recent run (when no ID is given) |
 | `--verbose` | Show full tool inputs and text content |
 | `--no-color` | Disable color output |
 
@@ -554,12 +557,14 @@ Live-stream agent output from running processes.
 ```bash
 ateam tail                  # all running processes
 ateam tail 42 43            # specific calls by ID
+ateam tail --last           # the most recent run
 ateam tail --reports        # current report runs
 ateam tail --coding         # current coding session
 ```
 
 | Flag | Description |
 |------|-------------|
+| `--last` | Tail the most recent run |
 | `--reports` | Tail all current report runs |
 | `--coding` | Tail the latest coding session (supervisor + sub-runs) |
 | `--verbose` | Show full tool inputs and text content |

@@ -17,6 +17,7 @@ import (
 
 var (
 	inspectBatch                string
+	inspectLast                 bool
 	inspectLastRun              bool
 	inspectLastReport           bool
 	inspectLastReview           bool
@@ -38,7 +39,7 @@ Select runs by ID, batch, or shorthand flags.
 Example:
   ateam inspect 42
   ateam inspect 42 43
-  ateam inspect --last-run
+  ateam inspect --last
   ateam inspect --last-report
   ateam inspect --last-report --auto-debug`,
 	RunE: runPsFiles,
@@ -46,6 +47,7 @@ Example:
 
 func init() {
 	inspectCmd.Flags().StringVar(&inspectBatch, "batch", "", "select all runs in a batch")
+	inspectCmd.Flags().BoolVar(&inspectLast, "last", false, "select the most recent run (alias for --last-run)")
 	inspectCmd.Flags().BoolVar(&inspectLastRun, "last-run", false, "select the most recent run")
 	inspectCmd.Flags().BoolVar(&inspectLastReport, "last-report", false, "select all execs from the last report batch")
 	inspectCmd.Flags().BoolVar(&inspectLastReview, "last-review", false, "select the last review run")
@@ -176,7 +178,7 @@ func resolveRunSelection(db *calldb.CallDB, env *root.ResolvedEnv, args []string
 		return rows, nil
 	}
 
-	if inspectLastRun {
+	if inspectLast || inspectLastRun {
 		rows, err := db.RecentRuns(calldb.RecentFilter{Limit: 1})
 		if err != nil {
 			return nil, err
@@ -184,7 +186,7 @@ func resolveRunSelection(db *calldb.CallDB, env *root.ResolvedEnv, args []string
 		return rows, nil
 	}
 
-	return nil, fmt.Errorf("specify exec IDs or use --last-run, --last-report, --last-review, --last-code, or --batch")
+	return nil, fmt.Errorf("specify exec IDs or use --last, --last-report, --last-review, --last-code, or --batch")
 }
 
 func recentRowsByIDs(db *calldb.CallDB, ids []int64) ([]calldb.RecentRow, error) {
