@@ -443,6 +443,73 @@ The agent code never has to think about retrieval or memory. It's framework-leve
 
 **Key difference from ATeam:** Supacode is a developer productivity tool — a better terminal for manually running agents side by side. ATeam is an autonomous system that decides what to work on, runs agents unattended, and triages results. Supacode is the cockpit; ATeam is the autopilot.
 
+#### npcsh (npc-worldwide/npcsh) ⭐⭐
+
+**What it is:** A Python "shell for AI" ([github.com/npc-worldwide/npcsh](https://github.com/npc-worldwide/npcsh)) that ships its own in-process agent runtime via LiteLLM (Ollama, OpenAI, Anthropic, Gemini, DeepSeek). Agents are declared as YAML `.npc` files with a Jinja2 `primary_directive` and a `jinxes:` allowlist of tools. Tools (`jinx` files) are themselves YAML with `inputs:`, `steps:`, an `engine:` (`python` or `llm`), and a `code:` body in Jinja2. Team-wide context lives in `npcsh.ctx` (shared `context`, `preferences`, `databases`) and is inherited by every agent. MIT-licensed. Targets researchers and tinkerers exploring multi-provider, custom-tool agent workflows.
+
+**Agent model — own agent, not Claude Code:**
+
+This is the key contrast with ATeam. npcsh calls `get_llm_response(prompt, npc=npc, model=npc.model, provider=npc.provider)` directly via LiteLLM and dispatches tools in-process (`npcsh/npc.py` + `npcsh/execution.py` + `npcsh/routes.py`). The agent harness, the tool executor, the streaming, and the conversation loop all live in the npcsh process. This buys:
+
+- **Fine-grained per-agent tool gating** — the `jinxes:` list on each `.npc` is the literal allowlist; ungated tools are simply not exposed to that agent.
+- **Deterministic tool mocks for tests** — they can stub `get_llm_response` and inject jinx outputs, so prompt regressions can be caught without burning tokens.
+- **Mid-turn tool composition** — `convene.jinx` and `alicanto.jinx` synthesize results across many sub-LLM calls inside a single user turn.
+- **Model-agnostic** — switching provider is a config change, not a code change.
+- **Per-call model/provider override** with full fidelity.
+
+What it pays for: every Anthropic feature ATeam gets free has to be rebuilt — prompt caching, OAuth subscription auth, sandbox isolation, the entire tool ecosystem Claude Code ships, model-specific quirks (cache breakpoints, extended thinking, streaming JSON formats). And npcsh's isolation story is empty (`subprocess.run(..., shell=True)` with a 300s timeout, no sandbox, no container, no capability dropping). ATeam is strictly ahead on isolation (Seatbelt/bubblewrap + Docker + docker-exec + UID-matched non-root + Dockerfile fallback chain).
+
+**Templated prompts and prompt composition:**
+
+This is npcsh's strongest area for ATeam comparison. Composition happens at three levels:
+
+1. **Team-wide context** (`npcsh/npc_team/npcsh.ctx`) inherited by every agent.
+2. **Per-agent persona** (`.npc` file with Jinja `primary_directive`).
+3. **Reusable jinx fragments** invoked from prompts as `{{ Jinx('delegate') }}` or `{{ Jinx('sh') }}`, each themselves a YAML+Jinja file under `npcsh/npc_team/jinxes/usr/*.jinx`.
+
+ATeam by contrast has a 4-level *file-fallback* hierarchy (project → org → org-defaults → embedded — see `internal/prompts/prompts.go`) plus a flat `{{VAR}}` `strings.Replacer` (`internal/runner/template.go`). No includes, no shared-fragment library, no team-wide context prepended to every prompt.
+
+**Inter-agent communication:**
+
+Two patterns, both in-process:
+
+- **`delegate.jinx`** — sends a task to a named NPC, runs an LLM-judged review loop up to `max_iterations` (default 10), iterating until the reviewer says "done."
+- **`convene.jinx`** — multi-NPC discussion: N rounds, each NPC contributes, randomized followups (60% probability), then a synthesis prompt aggregates everything. State lives in a shared Python `context` dict.
+
+Both work *because* npcsh holds the LLM client in-process and can cheaply spin up N "agents" that are really N prompts to the same provider. ATeam can't do this without per-agent CLI invocations (each costing its own startup + auth round-trip).
+
+**Workflow management:**
+
+No DAG, no DSL, no declarative pipeline. Each jinx's `steps:` array (almost always one step) has a `code:` block that's just Python doing imperative orchestration. `alicanto.jinx` (deep_research) expresses a 5-phase workflow as a ~1000-line Python block with a TUI, threading, pause/skip flags, and stall detection. `plan.jinx` exposes a `create/get/mark/revise` action-verb interface over a state-stored plan with a step counter.
+
+**Overlap with ATeam:** Small. Both have prompts-as-files and the concept of named "roles" (NPCs in npcsh, roles in ATeam). Both can run multiple agents. After that, the architectures diverge.
+
+**What it lacks for our use case:**
+
+- **No isolation worth speaking of.** `subprocess.run(..., shell=True)` is a non-starter for unattended overnight quality work.
+- **No subscription model.** Bring-your-own-API-key for every provider — no OAuth, no Claude Pro/Max integration. Costs are metered.
+- **No coding-CLI ecosystem.** Reimplements every tool from scratch (the jinx library) instead of inheriting what Claude Code or Codex ship.
+- **Workflow-as-Python-in-YAML** is exactly the trap ATeam should avoid. Once jinxes need conditionals or loops, they devolve into multi-hundred-line Python blocks inside YAML.
+- **No scheduled/autonomous operation.** Interactive shell first, batch second.
+- **No git-versioned audit trail.** Conversation history lives in SQLite per session; no concept of project artifacts as committable markdown.
+
+**Ideas to integrate:**
+
+- **Prompt fragment includes.** A small `{{include:fragments/X.md}}` directive resolved through ATeam's existing 4-level fallback would eliminate copy-paste across `defaults/roles/*/report_prompt.md` (the "how to commit," "test etiquette," "report header schema" boilerplate that today is duplicated across every role). Effort: low — a regex pass before `Replacer`. Don't introduce Jinja; markdown stays human-editable.
+- **Team-wide shared context.** Borrow the `npcsh.ctx` pattern: a single `defaults/shared_context.md` (4-level fallback) prepended to every prompt would centralize project facts ("we use bun, not npm; tests live in `test/`") that today are duplicated across roles or live only in agent-specific extras. ATeam already has `report_extra_prompt.md` / `review_extra_prompt.md` but they're action-specific, not universal.
+- **Stateful checklist that survives across runs.** Steal `plan.jinx`'s action-verb pattern (`create/get/mark/revise`) but persist it as markdown checkboxes in `supervisor/review.md` that the supervisor crosses off across `ateam code` invocations. Long review queues today re-prioritize from scratch each time. Effort: low-medium.
+- **Per-role declarative tool allowlist.** ATeam's roles inherit whatever the underlying CLI exposes. A first-class `tools = [...]` field in `runtime.hcl` that translates to `--allowedTools` (Claude) or codex equivalents would let a `security` role be read-only without a custom shell wrapper. Today the only lever is `agent_extra_args` as an escape hatch. Effort: low.
+- **Richer mock agent with scripted turns.** npcsh's testability comes from in-process LLM mocking. ATeam's `internal/agent/mock.go` is a single canned response — it can't simulate a tool loop. Growing it to read a `mock_script.json` describing turns/tool-calls/outputs would unlock cheap prompt regression tests, directly help `ateam eval`, and not require switching off the CLI-delegation model. Effort: medium. Value: high.
+
+**Skip explicitly:**
+
+- **Full Jinja2 templating in prompts.** ATeam is Go and prompts are markdown for humans to edit; conditionals/loops in prompts are a smell. Most npcsh jinxes that needed real logic moved into a `code:` block — the wrong direction for ATeam's "delegate to a CLI" model.
+- **`convene`-style multi-agent debate.** N× tokens for mush. ATeam's report→review pattern *is* a structured debate with the supervisor as judge, costing once per role.
+- **Workflow DSL / DAG / Python-in-YAML.** ATeam's hardcoded report→review→code→verify pipeline plus bash chaining (`exec`/`parallel`) is genuinely simpler and more legible. npcsh's `alicanto.jinx` is a cautionary tale about where conditionals in YAML lead.
+- **Shared in-process scratchpad / message bus.** ATeam's file-based fan-out (`runtime/<exec_id>/*.md`) is already a scratchpad with the bonus of being human-readable, git-diffable, and resumable. A bus would be a worse SQLite log of what's already on disk.
+
+**Key architectural difference from ATeam:** npcsh ships its own agent (LLM client + tool dispatcher + conversation loop), getting model-agnosticism, fine-grained tool gating, and deterministic mockability — at the cost of rebuilding everything Claude Code/Codex give for free (sandbox, OAuth subscription, prompt caching, model quirks, tool ecosystem). ATeam delegates to a subscription-backed CLI and inherits all of that for free, paying for it with opacity (the agent is a black box) and limited per-role tool gating. These are different products for different audiences: npcsh fits multi-provider experimentation and custom workflows; ATeam fits unattended overnight quality work on personal/team subscriptions. Neither choice is wrong — but the npcsh ideas worth borrowing are exactly the ones that don't require switching agent models (prompt fragments, shared context, stateful checklist, declarative tool allowlist, richer mock).
+
 #### Sandcastle (mattpocock/sandcastle) ⭐⭐⭐
 
 **What it is:** A TypeScript library for running coding agents inside isolated sandboxes via a programmatic `sandcastle.run()` API. Created March 2026 by Matt Pocock, 1.85K stars in ~6 weeks, 889 commits, latest release v0.5.6 (April 2026), pushed daily. Agent-agnostic (Claude Code, Codex, Pi, OpenCode, custom) and sandbox-provider-agnostic (Docker bind-mount, Podman with SELinux, Vercel Firecracker microVMs, custom providers). MIT-licensed.
@@ -597,6 +664,7 @@ Gas Town and agent-orchestrator come closest but are both reactive/interactive r
 - **Branch strategies** (`head` / `merge-to-head` / `branch`) and **host-vs-sandbox lifecycle hooks** from Sandcastle.
 - **YAML DAG workflows** (AI + bash + human-gate nodes), **`fresh_context` loop iterations**, and **deterministic `until` exit predicates** from Archon.
 - **Compound engineering doctrine** ("each unit of work makes the next one easier") plus the **artifact taxonomy** (`STRATEGY.md`, brainstorm, plan, review, compound notes, pulse reports), **`/ce-compound` and `/ce-compound-refresh` distillation+keep/update/replace/archive cycle**, and **tiered review with confidence calibration** from EveryInc's Compound Engineering Plugin (the canonical implementation). The **KBPredict wrapper pattern** (framework-level auto-inject + auto-codify around every model call) from DSPy Compounding Engineering as a complementary technical primitive.
+- **Prompt fragment includes**, **team-wide shared-context file**, **stateful checklist that survives across runs** (action-verb pattern: `create/get/mark/revise`), **per-role declarative tool allowlist**, and **scripted-turn mock agent for offline regression tests** from npcsh — the subset of npcsh's ideas that don't require abandoning the "delegate to a coding CLI" model.
 
 ### B.4 Future: Feature Agents
 
