@@ -34,7 +34,7 @@
     {{.Content}}
   </main>
   <script>
-  document.addEventListener('click',function(e){var r=e.target.closest('tr[data-href]');if(r&&!e.target.closest('th')){e.preventDefault();window.location.href=r.dataset.href}});
+  document.addEventListener('click',function(e){if(e.target.closest('a,button,th'))return;var r=e.target.closest('tr[data-href]');if(r){e.preventDefault();window.location.href=r.dataset.href}});
   (function(){
     function initSortable(table){
       var headers=table.querySelectorAll('th[data-sort]');
