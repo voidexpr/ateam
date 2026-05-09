@@ -116,7 +116,8 @@ func init() {
 	reportCmd.Flags().BoolVar(&reportRerunFailed, "rerun-failed", false, "re-run only roles that failed in the last report round")
 	reportCmd.Flags().BoolVar(&reportIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
 	addCheaperModelFlag(reportCmd, &reportCheaperModel)
-	reportCmd.Flags().StringVar(&reportModel, "model", "", "model override")
+	reportCmd.Flags().StringVar(&reportModel, "model", "",
+		"model override; takes precedence over --cheaper-model")
 	reportCmd.Flags().StringVar(&reportEffort, "effort", "", "reasoning effort override, passed verbatim to the agent CLI")
 	addBudgetFlags(reportCmd, &reportMaxBudgetUSD, &reportMaxBudgetBatch,
 		"per-role USD spend cap (claude-only; warns on codex)",
@@ -194,8 +195,7 @@ func runReport(opts ReportOptions) error {
 	if err := applyContainerName(cr, env, opts.ContainerName); err != nil {
 		return err
 	}
-	applyCheaperModel(cr, opts.CheaperModel)
-	applyModel(cr, opts.Model)
+	applyModelOverrides(cr, opts.CheaperModel, opts.Model)
 	applyEffort(cr, opts.Effort)
 	if err := applyMaxBudgetUSD(cr, opts.MaxBudgetUSD, runner.ActionReport); err != nil {
 		return err
@@ -239,8 +239,7 @@ func runReport(opts ReportOptions) error {
 				} else if err := applyContainerName(roleRunner, env, opts.ContainerName); err != nil {
 					return err
 				} else {
-					applyCheaperModel(roleRunner, opts.CheaperModel)
-					applyModel(roleRunner, opts.Model)
+					applyModelOverrides(roleRunner, opts.CheaperModel, opts.Model)
 					applyEffort(roleRunner, opts.Effort)
 					if err := applyMaxBudgetUSD(roleRunner, opts.MaxBudgetUSD, runner.ActionReport); err != nil {
 						return err

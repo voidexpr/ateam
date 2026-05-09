@@ -137,7 +137,8 @@ func init() {
 	reviewCmd.Flags().BoolVar(&reviewAll, "all", false, "include reports from roles disabled in config.toml")
 	reviewCmd.Flags().StringVar(&reviewMaxAge, "max-age", "", "drop reports older than this (e.g. 2h, 30m, 1d)")
 	addCheaperModelFlag(reviewCmd, &reviewCheaperModel)
-	reviewCmd.Flags().StringVar(&reviewModel, "model", "", "model override")
+	reviewCmd.Flags().StringVar(&reviewModel, "model", "",
+		"model override; takes precedence over --cheaper-model")
 	reviewCmd.Flags().StringVar(&reviewEffort, "effort", "", "reasoning effort override, passed verbatim to the agent CLI")
 	addProfileFlags(reviewCmd, &reviewProfile, &reviewAgent)
 	addVerboseFlag(reviewCmd, &reviewVerbose)
@@ -206,8 +207,7 @@ func runReview(opts ReviewOptions) error {
 	if err := applyContainerName(cr, env, opts.ContainerName); err != nil {
 		return err
 	}
-	applyCheaperModel(cr, opts.CheaperModel)
-	applyModel(cr, opts.Model)
+	applyModelOverrides(cr, opts.CheaperModel, opts.Model)
 	applyEffort(cr, opts.Effort)
 	if err := applyMaxBudgetUSD(cr, opts.MaxBudgetUSD, runner.ActionReview); err != nil {
 		return err

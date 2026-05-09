@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ateam/internal/agent"
@@ -271,4 +274,84 @@ func TestParseBudgetUSD(t *testing.T) {
 			}
 		})
 	}
+}
+
+// captureStderr swaps os.Stderr for a pipe while fn runs and returns whatever
+// fn wrote. Mirrors captureStdout from exec_test.go for the cases where the
+// code under test only writes to stderr (warnings, etc.).
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	old := os.Stderr
+	os.Stderr = pw
+	fn()
+	pw.Close()
+	os.Stderr = old
+	var buf bytes.Buffer
+	io.Copy(&buf, pr)
+	return buf.String()
+}
+
+// TestApplyModelOverrides locks in the precedence rule between --cheaper-model
+// and --model: if --model is set it always wins, --cheaper-model alone falls
+// back to the cheaper model name, and the helper never touches Runner.ExtraArgs
+// (the previous encoding through ExtraArgs caused dry-run output to disagree
+// with what actually ran).
+func TestApplyModelOverrides(t *testing.T) {
+	tests := []struct {
+		name        string
+		cheaper     bool
+		model       string
+		wantModel   string
+		wantWarning bool
+	}{
+		{"both unset is no-op", false, "", "", false},
+		{"cheaper only sets cheaper model", true, "", cheaperModelName, false},
+		{"model only sets explicit model", false, "opus-4", "opus-4", false},
+		{"both set: model wins with warning", true, "opus-4", "opus-4", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &agent.ClaudeAgent{}
+			r := &runner.Runner{
+				Agent:     a,
+				ExtraArgs: []string{"--existing", "arg"},
+			}
+			origExtraArgs := append([]string(nil), r.ExtraArgs...)
+
+			stderr := captureStderr(t, func() {
+				applyModelOverrides(r, tt.cheaper, tt.model)
+			})
+
+			if a.Model != tt.wantModel {
+				t.Errorf("agent.Model = %q, want %q", a.Model, tt.wantModel)
+			}
+			// ExtraArgs must be untouched: the helper sets the agent's model
+			// directly, no longer encoding it as a CLI arg.
+			if !equalStrings(r.ExtraArgs, origExtraArgs) {
+				t.Errorf("ExtraArgs mutated: got %v, want %v", r.ExtraArgs, origExtraArgs)
+			}
+			hasWarning := strings.Contains(stderr, "Warning:") &&
+				strings.Contains(stderr, "--model") &&
+				strings.Contains(stderr, "--cheaper-model")
+			if hasWarning != tt.wantWarning {
+				t.Errorf("warning emitted=%v want=%v (stderr=%q)", hasWarning, tt.wantWarning, stderr)
+			}
+		})
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

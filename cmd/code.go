@@ -128,7 +128,8 @@ func init() {
 	addCheaperModelFlag(codeCmd, &codeCheaperModel)
 	codeCmd.Flags().StringVar(&codeProfile, "profile", "", "profile for sub-runs (passed to ateam exec --profile)")
 	codeCmd.Flags().StringVar(&codeAgent, "agent", "", "agent for sub-runs (passed to ateam exec --agent)")
-	codeCmd.Flags().StringVar(&codeModel, "model", "", "model override for the supervisor and every sub-run")
+	codeCmd.Flags().StringVar(&codeModel, "model", "",
+		"model override for the supervisor and every sub-run; takes precedence over --cheaper-model")
 	codeCmd.Flags().StringVar(&codeEffort, "effort", "", "reasoning effort for the supervisor and every sub-run, passed verbatim to the agent CLI")
 	addBudgetFlags(codeCmd, &codeMaxBudgetUSD, &codeMaxBudgetBatch,
 		"USD spend cap for the supervisor and every sub-run (claude-only)",
@@ -243,8 +244,7 @@ func runCode(opts CodeOptions) error {
 		return err
 	}
 	setSourceWritable(cr)
-	applyCheaperModel(cr, opts.CheaperModel)
-	applyModel(cr, opts.Model)
+	applyModelOverrides(cr, opts.CheaperModel, opts.Model)
 	applyEffort(cr, opts.Effort)
 	if err := applyMaxBudgetUSD(cr, opts.MaxBudgetUSD, runner.ActionCode); err != nil {
 		return err

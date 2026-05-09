@@ -753,7 +753,8 @@ func addVerboseFlag(cmd *cobra.Command, dst *bool) {
 }
 
 func addCheaperModelFlag(cmd *cobra.Command, dst *bool) {
-	cmd.Flags().BoolVar(dst, "cheaper-model", false, "use a cheaper model ("+cheaperModelName+")")
+	cmd.Flags().BoolVar(dst, "cheaper-model", false,
+		"use a cheaper model ("+cheaperModelName+"); ignored if --model is also set (--model wins)")
 }
 
 // applyEffort sets the agent's reasoning effort if value is non-empty.
@@ -840,14 +841,22 @@ func applyMaxBudgetUSD(r *runner.Runner, value, action string) error {
 	}
 }
 
-func applyCheaperModel(r *runner.Runner, cheaper bool) {
-	if cheaper {
-		r.ExtraArgs = append(r.ExtraArgs, "--model", cheaperModelName)
-		// Also tell the agent itself so resolveExecModel's configured-model
-		// fallback returns the cheaper name when a run crashes before the
-		// stream emits a result event. cmd/exec.go does the same when --model
-		// is passed explicitly.
-		r.Agent.SetModel(cheaperModelName)
+// applyModelOverrides resolves --cheaper-model and --model into a single
+// agent.SetModel call. --model wins if both are set (with a stderr warning),
+// so the agent's configured model and the actual run command always agree.
+// Use this in any command that exposes both flags; commands that only expose
+// --model can keep using applyModel.
+func applyModelOverrides(r *runner.Runner, cheaper bool, model string) {
+	chosen := model
+	if cheaper && model != "" {
+		fmt.Fprintf(os.Stderr,
+			"Warning: both --model %q and --cheaper-model set; --model wins (--cheaper-model ignored).\n",
+			model)
+	} else if cheaper {
+		chosen = cheaperModelName
+	}
+	if chosen != "" {
+		r.Agent.SetModel(chosen)
 	}
 }
 

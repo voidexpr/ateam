@@ -85,7 +85,8 @@ func init() {
 	verifyCmd.Flags().BoolVar(&verifyPrint, "print", false, "print verification report to stdout after completion")
 	verifyCmd.Flags().BoolVar(&verifyDryRun, "dry-run", false, "print the computed prompt without running")
 	addCheaperModelFlag(verifyCmd, &verifyCheaperModel)
-	verifyCmd.Flags().StringVar(&verifyModel, "model", "", "model override")
+	verifyCmd.Flags().StringVar(&verifyModel, "model", "",
+		"model override; takes precedence over --cheaper-model")
 	verifyCmd.Flags().StringVar(&verifyEffort, "effort", "", "reasoning effort override, passed verbatim to the agent CLI")
 	addProfileFlags(verifyCmd, &verifyProfile, &verifyAgent)
 	addVerboseFlag(verifyCmd, &verifyVerbose)
@@ -136,8 +137,7 @@ func runVerify(opts VerifyOptions) error {
 		return err
 	}
 	setSourceWritable(cr)
-	applyCheaperModel(cr, opts.CheaperModel)
-	applyModel(cr, opts.Model)
+	applyModelOverrides(cr, opts.CheaperModel, opts.Model)
 	applyEffort(cr, opts.Effort)
 	if err := applyMaxBudgetUSD(cr, opts.MaxBudgetUSD, runner.ActionVerify); err != nil {
 		return err
