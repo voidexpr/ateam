@@ -83,15 +83,20 @@ ateam report --rerun-failed --dry-run    # preview which roles would be rerun
 | `--extra-prompt TEXT` | Additional instructions appended to every role's prompt (text or `@filepath`) |
 | `--profile NAME` | Runtime profile (overrides config resolution) |
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
-| `--cheaper-model` | Use a cheaper model (sonnet) |
+| `--cheaper-model` | Use a cheaper model (sonnet); ignored if `--model` is also set (`--model` wins) |
+| `--model MODEL` | Model override; takes precedence over `--cheaper-model` |
 | `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](#effort-levels)) |
 | `--timeout MINUTES` | Timeout per role (overrides `config.toml`) |
 | `--parallel N` | Max number of roles to run in parallel (overrides `config.toml`) |
+| `--max-budget-usd USD` | Per-role USD spend cap (claude-only; warns on codex) |
+| `--max-budget-usd-batch USD` | Stop dispatching new roles once batch cost crosses this USD |
 | `--print` | Print reports to stdout after completion |
 | `--rerun-failed` | Re-run only roles that failed in the last report round (mutually exclusive with `--roles`) |
 | `--dry-run` | Print computed prompts without running roles |
 | `--ignore-previous-report` | Do not include the role's previous report in the prompt |
 | `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
+| `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
+| `--force` | Run even if the same action+role is already running |
 | `--verbose` | Print agent and docker commands to stderr |
 | `--review` | Run review automatically after reports complete |
 
@@ -117,14 +122,19 @@ ateam review --dry-run
 | `--prompt TEXT` | Custom prompt replacing the default supervisor role entirely (text or `@filepath`) |
 | `--profile NAME` | Runtime profile (overrides config resolution) |
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
-| `--cheaper-model` | Use a cheaper model (sonnet) |
+| `--cheaper-model` | Use a cheaper model (sonnet); ignored if `--model` is also set (`--model` wins) |
+| `--model MODEL` | Model override; takes precedence over `--cheaper-model` |
+| `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](#effort-levels)) |
 | `--timeout MINUTES` | Timeout (overrides `config.toml`) |
 | `--roles ROLE,...` | Limit review to these roles' reports (default: all enabled roles) |
 | `--all` | Include reports from roles disabled in `config.toml` |
 | `--max-age DURATION` | Drop reports older than this. Accepts stdlib durations (`30m`, `2h30m`, `90s`) and plain `Nd` (e.g. `1d`, `7d`) |
+| `--max-budget-usd USD` | USD spend cap for the supervisor (claude-only; errors on codex) |
 | `--print` | Print review to stdout after completion |
 | `--dry-run` | Print computed prompt and list reports without running |
 | `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
+| `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
+| `--force` | Run even if the same action+role is already running |
 | `--verbose` | Print agent and docker commands to stderr |
 
 ### `ateam code`
@@ -143,13 +153,19 @@ ateam code --dry-run
 | `--management TEXT` | Management prompt override (text or `@filepath`) |
 | `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
 | `--profile NAME` | Profile for sub-runs (passed to `ateam exec --profile`) |
+| `--agent NAME` | Agent for sub-runs (passed to `ateam exec --agent`) |
 | `--supervisor-profile NAME` | Profile for the supervisor itself |
-| `--cheaper-model` | Use a cheaper model (sonnet) |
+| `--supervisor-agent NAME` | Agent for the supervisor itself |
+| `--cheaper-model` | Use a cheaper model (sonnet); ignored if `--model` is also set (`--model` wins) |
+| `--model MODEL` | Model override for the supervisor and every sub-run; takes precedence over `--cheaper-model` |
 | `--effort VALUE` | Reasoning effort for the supervisor and every sub-run, passed verbatim to the agent CLI (see [Effort levels](#effort-levels)) |
 | `--timeout MINUTES` | Timeout in minutes (overrides `config.toml`; default 120) |
+| `--max-budget-usd USD` | USD spend cap for the supervisor and every sub-run (claude-only) |
+| `--max-budget-usd-batch USD` | Stop spawning new sub-runs once the code batch crosses this USD |
 | `--print` | Print output to stdout after completion |
 | `--dry-run` | Print the computed prompt without running |
 | `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
+| `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
 | `--verbose` | Print agent and docker commands to stderr |
 | `--tail` | Stream live output from supervisor and sub-runs |
 | `--force` | Run even if the same action is already running |
@@ -173,12 +189,15 @@ ateam verify --dry-run
 | `--timeout MINUTES` | Timeout in minutes (overrides `config.toml`) |
 | `--print` | Print verification report to stdout after completion |
 | `--dry-run` | Print the computed prompt without running |
-| `--cheaper-model` | Use a cheaper model (sonnet) |
+| `--cheaper-model` | Use a cheaper model (sonnet); ignored if `--model` is also set (`--model` wins) |
+| `--model MODEL` | Model override; takes precedence over `--cheaper-model` |
+| `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](#effort-levels)) |
 | `--profile NAME` | Runtime profile (overrides config resolution) |
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
+| `--max-budget-usd USD` | USD spend cap for the supervisor (claude-only; errors on codex) |
 | `--verbose` | Print agent and docker commands to stderr |
 | `--force` | Run even if the same action is already running |
-| `--docker-auto-setup` | Auto-setup Docker container if needed |
+| `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
 | `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
 
 ### `ateam all`
@@ -212,7 +231,9 @@ ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile 
 | `--supervisor-agent NAME` | Override agent for the supervisor (review + code management) |
 | `--code-profile NAME` | Override profile for code sub-runs (overrides `--profile`) |
 | `--code-agent NAME` | Override agent for code sub-runs (uses 'none' container) |
-| `--quiet` | Suppress output printing |
+| `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
+| `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
+| `--quiet`, `-q` | Suppress output printing |
 | `--verbose` | Print agent and docker commands to stderr |
 | `--no-verify` | Skip the verify phase that normally runs after code |
 
@@ -375,11 +396,17 @@ echo "still works" | ateam exec -                # explicit "-"
 | `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](#effort-levels)) |
 | `--work-dir PATH` | Working directory |
 | `--agent-args "ARGS"` | Extra args passed to the agent CLI |
+| `--extra-prompt TEXT` | Additional instructions appended after the main prompt (text or `@filepath`) |
 | `--batch ID` | Group related agent_execs |
+| `--max-budget-usd USD` | Per-agent USD spend cap (claude-only; errors on codex) |
+| `--max-budget-usd-batch USD` | Abort if `--batch` already exceeds this USD before starting |
 | `--no-stream` | Disable progress updates on stderr |
 | `--no-summary` | Disable cost/duration/tokens summary |
 | `--quiet` | Disable both streaming and summary |
 | `--dry-run` | Print resolved command, secrets, container config, and prompt without running |
+| `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
+| `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
+| `--force` | Run even if the same action+role is already running |
 | `--verbose` | Print agent and docker commands to stderr |
 
 ### `ateam parallel`
@@ -408,12 +435,15 @@ Each positional argument is a prompt (text or `@filepath`). Agent execs run conc
 | `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](#effort-levels)) |
 | `--work-dir PATH` | Working directory (defaults to project source dir or cwd) |
 | `--timeout MINUTES` | Timeout per agent exec |
+| `--max-budget-usd USD` | Per-agent USD spend cap (claude-only; warns on codex) |
+| `--max-budget-usd-batch USD` | Stop dispatching new agents once batch cost crosses this USD |
 | `--no-progress` | Suppress ANSI progress table (use plain line output) |
 | `--print` | Print exec outputs to stdout after completion |
 | `--dry-run` | Print assembled prompts without running |
+| `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
+| `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
 | `--verbose` | Print agent and docker commands to stderr |
 | `--force` | Run even if the same action is already running |
-| `--docker-auto-setup` | Auto-setup Docker container if needed |
 
 **Batch**: All execs are grouped under a single batch (visible in `ateam cost`, `ateam ps`, and `ateam serve`). Use `--batch` to set a custom name or let it auto-generate as `parallel-TIMESTAMP`.
 
@@ -422,6 +452,8 @@ Each positional argument is a prompt (text or `@filepath`). Agent execs run conc
 **Output**: Progress and status go to stderr. With `--print`, exec outputs are printed to stdout in submission order, each preceded by a label header (omitted for single-exec runs). This makes it composable with downstream tools.
 
 **Logs**: Each exec's logs are stored under `logs/parallel/{label}/` in the project or org directory.
+
+**Progress table columns**: `ID, LABEL, STATUS, EstTOKENS, CALLS, DETAILS`. `EstTOKENS` is the running input+output token count for each task. While a task is live it is an *estimate* built from the per-turn usage reported in the stream (the final total only arrives on the agent's terminal result event); once the task finishes it reflects the authoritative total from that event. The column exists so a crash or timeout before the terminal event still gives visibility into how much the task consumed. The same table is also rendered by `ateam report`.
 
 ### `ateam prompt`
 
@@ -535,18 +567,18 @@ Start a localhost web UI for browsing reports, reviews, sessions, and cost data.
 
 ### `ateam cat`
 
-Pretty-print stream logs by call ID or file path.
+Read and format stream logs for one or more completed runs. Arguments can be numeric call IDs or file paths to JSONL stream files. Pass `--last` instead of an ID to format the most recent run.
 
 ```bash
 ateam cat 42
 ateam cat 42 43 44 --verbose
 ateam cat --last
-ateam cat .ateam/logs/roles/security/2026-03-31_stream.jsonl
+ateam cat .ateam/logs/roles/security/stream.jsonl
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--last` | Pretty-print the most recent run (when no ID is given) |
+| `--last` | Format the most recent run (when no ID is given) |
 | `--verbose` | Show full tool inputs and text content |
 | `--no-color` | Disable color output |
 
@@ -581,8 +613,11 @@ Display recent agent runs.
 | Flag | Description |
 |------|-------------|
 | `--role ROLE` | Filter by role |
-| `--action ACTION` | Filter by action (report, review, code, verify, exec) |
+| `--action ACTION` | Filter by action (report, review, code, exec) |
+| `--batch NAME` | Filter by batch |
 | `--limit N` | Max rows (default 30) |
+
+Output columns (12): `ID, STARTED, PROFILE, ACTION, ROLE, MODEL, DURATION, COST, TOKENS, STATUS, BATCH, REASON`.
 
 ### `ateam roles`
 
@@ -672,6 +707,7 @@ ateam eval --role security --review --review-candidate-prompt @new_review.md
 | `--judge-agent NAME` | Agent for the judge |
 | `--judge-model NAME` | Model for the judge |
 | `--force` | Run even if the same role+action is already in flight |
+| `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
 | `--verbose` | Print agent and container commands |
 
 ### `ateam update`
@@ -903,7 +939,7 @@ ateam prompt --supervisor --action review
 
 ### Prompt Resolution
 
-Prompts are resolved with a 3-level fallback: **project** → **org** → **org defaults**. The first file found wins. Extra prompts are **additive** — all matching files are included.
+Prompts are resolved with a 3-level fallback: **project** → **org** → **embedded defaults**. The first file found wins. Extra prompts are **additive** — all matching files are included.
 
 The placeholder `{{SOURCE_DIR}}` in prompts is replaced with the project source directory path.
 
