@@ -20,6 +20,10 @@ var (
 	allDockerAutoSetup bool
 	allNoVerify        bool
 	allContainerName   string
+	allModel           string
+	allEffort          string
+	allMaxBudgetUSD    string
+	allMaxBudgetBatch  string
 
 	// Per-stage overrides
 	allReportProfile     string
@@ -77,6 +81,12 @@ func init() {
 	allCmd.MarkFlagsMutuallyExclusive("supervisor-profile", "supervisor-agent")
 	allCmd.MarkFlagsMutuallyExclusive("code-profile", "code-agent")
 	addCheaperModelFlag(allCmd, &allCheaperModel)
+	allCmd.Flags().StringVar(&allModel, "model", "",
+		"model override applied to every phase; takes precedence over --cheaper-model")
+	allCmd.Flags().StringVar(&allEffort, "effort", "", "reasoning effort override applied to every phase, passed verbatim to the agent CLI")
+	addBudgetFlags(allCmd, &allMaxBudgetUSD, &allMaxBudgetBatch,
+		"per-agent USD spend cap applied to every phase (claude-only; warns on codex)",
+		"stop dispatching new agents once batch cost crosses this USD (report and code phases)")
 	addVerboseFlag(allCmd, &allVerbose)
 	addDockerAutoSetupFlag(allCmd, &allDockerAutoSetup)
 	addContainerNameFlag(allCmd, &allContainerName)
@@ -117,6 +127,10 @@ func runAll(cmd *cobra.Command, args []string) error {
 		Verbose:         allVerbose,
 		DockerAutoSetup: allDockerAutoSetup,
 		ContainerName:   allContainerName,
+		Model:           allModel,
+		Effort:          allEffort,
+		MaxBudgetUSD:    allMaxBudgetUSD,
+		MaxBudgetBatch:  allMaxBudgetBatch,
 	}); err != nil {
 		return fmt.Errorf("report phase failed: %w", err)
 	}
@@ -138,6 +152,9 @@ func runAll(cmd *cobra.Command, args []string) error {
 		MaxAge:          maxAge,
 		DockerAutoSetup: allDockerAutoSetup,
 		ContainerName:   allContainerName,
+		Model:           allModel,
+		Effort:          allEffort,
+		MaxBudgetUSD:    allMaxBudgetUSD,
 	}); err != nil {
 		return fmt.Errorf("review phase failed: %w", err)
 	}
@@ -157,6 +174,10 @@ func runAll(cmd *cobra.Command, args []string) error {
 		Verbose:           allVerbose,
 		DockerAutoSetup:   allDockerAutoSetup,
 		ContainerName:     allContainerName,
+		Model:             allModel,
+		Effort:            allEffort,
+		MaxBudgetUSD:      allMaxBudgetUSD,
+		MaxBudgetBatch:    allMaxBudgetBatch,
 		NoVerify:          true,
 	}); err != nil {
 		return fmt.Errorf("code phase failed: %w", err)
@@ -179,6 +200,9 @@ func runAll(cmd *cobra.Command, args []string) error {
 		Verbose:         allVerbose,
 		DockerAutoSetup: allDockerAutoSetup,
 		ContainerName:   allContainerName,
+		Model:           allModel,
+		Effort:          allEffort,
+		MaxBudgetUSD:    allMaxBudgetUSD,
 	}); err != nil {
 		return fmt.Errorf("verify phase failed: %w", err)
 	}

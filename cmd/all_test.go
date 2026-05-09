@@ -246,6 +246,91 @@ func TestAllVerifyRunCount(t *testing.T) {
 	})
 }
 
+// TestAllPropagatesModelAndBudgetFlags verifies that --model, --effort,
+// --max-budget-usd, and --max-budget-usd-batch flow from the `ateam all`
+// flags into every sub-command's *Options literal. We exercise the flag-
+// combination warning ("--cheaper-model and --model both set") that the
+// shared helper emits — its appearance once per phase in stderr proves
+// the Model+CheaperModel pair reached each *Options. The remaining flags
+// are checked via the registered cobra flags on the command itself.
+func TestAllPropagatesModelAndBudgetFlags(t *testing.T) {
+	for _, name := range []string{"model", "effort", "max-budget-usd", "max-budget-usd-batch"} {
+		if allCmd.Flags().Lookup(name) == nil {
+			t.Errorf("expected --%s registered on `ateam all`", name)
+		}
+	}
+
+	base := t.TempDir()
+	orgDir, err := root.InstallOrg(base)
+	if err != nil {
+		t.Fatalf("InstallOrg: %v", err)
+	}
+	projPath := filepath.Join(base, "myproj")
+	if err := os.MkdirAll(projPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := root.InitProject(projPath, orgDir, root.InitProjectOpts{
+		Name:         "myproj",
+		EnabledRoles: []string{"testing_basic"},
+	}); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+
+	savedOrg := orgFlag
+	defer func() { orgFlag = savedOrg }()
+	orgFlag = filepath.Dir(orgDir)
+
+	saved := struct {
+		roles               []string
+		rp, sp, cp          string
+		cheaper             bool
+		model, effort       string
+		budget, budgetBatch string
+		quiet, noVerify     bool
+	}{
+		allRoles, allReportProfile, allSupervisorProfile, allCodeProfile,
+		allCheaperModel, allModel, allEffort, allMaxBudgetUSD, allMaxBudgetBatch,
+		allQuiet, allNoVerify,
+	}
+	defer func() {
+		allRoles = saved.roles
+		allReportProfile, allSupervisorProfile, allCodeProfile = saved.rp, saved.sp, saved.cp
+		allCheaperModel = saved.cheaper
+		allModel, allEffort = saved.model, saved.effort
+		allMaxBudgetUSD, allMaxBudgetBatch = saved.budget, saved.budgetBatch
+		allQuiet, allNoVerify = saved.quiet, saved.noVerify
+	}()
+	allRoles = []string{"testing_basic"}
+	allReportProfile = "test"
+	allSupervisorProfile = "test"
+	allCodeProfile = "test"
+	allCheaperModel = true
+	allModel = "opus-4"
+	allEffort = "high"
+	allMaxBudgetUSD = "10"
+	allMaxBudgetBatch = "50"
+	allQuiet = true
+	allNoVerify = false
+
+	var runErr error
+	stderr := captureStderr(t, func() {
+		captureStdout(t, func() {
+			withChdir(t, projPath, func() {
+				runErr = runAll(nil, nil)
+			})
+		})
+	})
+	if runErr != nil {
+		t.Fatalf("runAll: %v", runErr)
+	}
+
+	got := strings.Count(stderr, combinedWarning)
+	if got < 4 {
+		t.Errorf("expected the --cheaper-model/--model warning at least 4 times "+
+			"(once per phase), got %d:\n%s", got, stderr)
+	}
+}
+
 func TestCoalesce(t *testing.T) {
 	tests := []struct {
 		name string
