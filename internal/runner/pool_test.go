@@ -206,6 +206,42 @@ func TestRunPoolConcurrentResultsAreSafe(t *testing.T) {
 	}
 }
 
+// TestRunPoolPerExecRunnerOverride verifies that a PoolExec carrying its own
+// Runner (set on the per-task .Runner field) is executed against that runner
+// rather than the pool's shared one. This is the path used when each role
+// needs its own agent configuration (model/effort/etc).
+func TestRunPoolPerExecRunnerOverride(t *testing.T) {
+	dir := t.TempDir()
+
+	sharedAgent := &agent.MockAgent{Response: "shared"}
+	sharedRunner := newTestRunner(t, dir, sharedAgent)
+
+	overrideAgent := &agent.MockAgent{Response: "override"}
+	overrideRunner := newTestRunner(t, dir, overrideAgent)
+
+	tasks := []PoolExec{
+		{Prompt: "t1", RunOpts: RunOpts{RoleID: "shared-role", Action: ActionExec}},
+		{Prompt: "t2", RunOpts: RunOpts{RoleID: "override-role", Action: ActionExec}, Runner: overrideRunner},
+	}
+
+	results := RunPool(context.Background(), sharedRunner, tasks, 1, nil, nil)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	got := map[string]string{}
+	for _, s := range results {
+		got[s.RoleID] = s.Output
+	}
+	if got["shared-role"] != "shared" {
+		t.Errorf("shared-role output = %q, want %q", got["shared-role"], "shared")
+	}
+	if got["override-role"] != "override" {
+		t.Errorf("override-role output = %q, want %q (per-exec Runner override not honored)",
+			got["override-role"], "override")
+	}
+}
+
 // TestRunPoolPreDispatchAborts verifies PoolOpts.PreDispatch can stop further
 // dispatch mid-pool while letting in-flight tasks finish.
 func TestRunPoolPreDispatchAborts(t *testing.T) {

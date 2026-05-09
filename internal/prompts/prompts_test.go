@@ -43,6 +43,19 @@ func TestReadWith3LevelFallback(t *testing.T) {
 	if got != "project" {
 		t.Errorf("project override: got %q, want %q", got, "project")
 	}
+
+	// embeddedPath fallback: when none of the three filesystem paths exist
+	// but a real embedded resource is referenced, the embedded content is
+	// returned. Use a path known to exist in defaults/embed.go.
+	missing := filepath.Join(base, "missing.md")
+	embedded := "supervisor/code_verify_prompt.md"
+	got, err = readWith3LevelFallback(missing, missing, missing, embedded, "test")
+	if err != nil {
+		t.Fatalf("embedded fallback: %v", err)
+	}
+	if got == "" {
+		t.Error("embedded fallback returned empty content")
+	}
 }
 
 // setupMinimalRole creates the minimum structure for AssembleRolePrompt to work:

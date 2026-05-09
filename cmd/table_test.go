@@ -246,6 +246,62 @@ func TestApplyMaxBudgetUSD(t *testing.T) {
 	}
 }
 
+func TestApplyModelAndEffort(t *testing.T) {
+	t.Run("empty model is no-op on claude", func(t *testing.T) {
+		a := &agent.ClaudeAgent{Model: "preset"}
+		r := &runner.Runner{Agent: a}
+		applyModel(r, "")
+		if a.Model != "preset" {
+			t.Errorf("Model = %q, want unchanged %q", a.Model, "preset")
+		}
+	})
+
+	t.Run("empty effort is no-op on codex", func(t *testing.T) {
+		a := &agent.CodexAgent{Effort: "preset"}
+		r := &runner.Runner{Agent: a}
+		applyEffort(r, "")
+		if a.Effort != "preset" {
+			t.Errorf("Effort = %q, want unchanged %q", a.Effort, "preset")
+		}
+	})
+
+	t.Run("non-empty model populates ClaudeAgent.Model", func(t *testing.T) {
+		a := &agent.ClaudeAgent{}
+		r := &runner.Runner{Agent: a}
+		applyModel(r, "opus-4")
+		if a.Model != "opus-4" {
+			t.Errorf("ClaudeAgent.Model = %q, want %q", a.Model, "opus-4")
+		}
+	})
+
+	t.Run("non-empty model populates CodexAgent.Model", func(t *testing.T) {
+		a := &agent.CodexAgent{}
+		r := &runner.Runner{Agent: a}
+		applyModel(r, "gpt-5")
+		if a.Model != "gpt-5" {
+			t.Errorf("CodexAgent.Model = %q, want %q", a.Model, "gpt-5")
+		}
+	})
+
+	t.Run("non-empty effort populates ClaudeAgent.Effort", func(t *testing.T) {
+		a := &agent.ClaudeAgent{}
+		r := &runner.Runner{Agent: a}
+		applyEffort(r, "high")
+		if a.Effort != "high" {
+			t.Errorf("ClaudeAgent.Effort = %q, want %q", a.Effort, "high")
+		}
+	})
+
+	t.Run("non-empty effort populates CodexAgent.Effort", func(t *testing.T) {
+		a := &agent.CodexAgent{}
+		r := &runner.Runner{Agent: a}
+		applyEffort(r, "medium")
+		if a.Effort != "medium" {
+			t.Errorf("CodexAgent.Effort = %q, want %q", a.Effort, "medium")
+		}
+	})
+}
+
 func TestParseBudgetUSD(t *testing.T) {
 	tests := []struct {
 		in      string
