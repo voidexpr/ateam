@@ -174,6 +174,78 @@ func TestAllDefaultRoles(t *testing.T) {
 	}
 }
 
+// TestAllVerifyRunCount guards against the historical bug where `ateam all`
+// ran verify twice (once via runCode's auto-chain and once in Phase 4) and
+// where --no-verify failed to suppress the auto-chain. We count occurrences
+// of the unique line that runVerify prints on entry.
+func TestAllVerifyRunCount(t *testing.T) {
+	const verifyMarker = "Supervisor verifying recent code changes"
+
+	setupProject := func(t *testing.T) string {
+		t.Helper()
+		base := t.TempDir()
+		orgDir, err := root.InstallOrg(base)
+		if err != nil {
+			t.Fatalf("InstallOrg: %v", err)
+		}
+		projPath := filepath.Join(base, "myproj")
+		if err := os.MkdirAll(projPath, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := root.InitProject(projPath, orgDir, root.InitProjectOpts{
+			Name:         "myproj",
+			EnabledRoles: []string{"testing_basic"},
+		}); err != nil {
+			t.Fatalf("InitProject: %v", err)
+		}
+		savedOrg := orgFlag
+		t.Cleanup(func() { orgFlag = savedOrg })
+		orgFlag = filepath.Dir(orgDir)
+		return projPath
+	}
+
+	savedRoles, savedNoVerify := allRoles, allNoVerify
+	savedRP, savedSP, savedCP := allReportProfile, allSupervisorProfile, allCodeProfile
+	defer func() {
+		allRoles, allNoVerify = savedRoles, savedNoVerify
+		allReportProfile, allSupervisorProfile, allCodeProfile = savedRP, savedSP, savedCP
+	}()
+	allRoles = []string{"testing_basic"}
+	allReportProfile = "test"
+	allSupervisorProfile = "test"
+	allCodeProfile = "test"
+
+	t.Run("default runs verify exactly once", func(t *testing.T) {
+		projPath := setupProject(t)
+		allNoVerify = false
+		out := captureStdout(t, func() {
+			withChdir(t, projPath, func() {
+				if err := runAll(nil, nil); err != nil {
+					t.Fatalf("runAll: %v", err)
+				}
+			})
+		})
+		if got := strings.Count(out, verifyMarker); got != 1 {
+			t.Errorf("expected verify to run exactly once, got %d:\n%s", got, out)
+		}
+	})
+
+	t.Run("--no-verify runs verify zero times", func(t *testing.T) {
+		projPath := setupProject(t)
+		allNoVerify = true
+		out := captureStdout(t, func() {
+			withChdir(t, projPath, func() {
+				if err := runAll(nil, nil); err != nil {
+					t.Fatalf("runAll: %v", err)
+				}
+			})
+		})
+		if got := strings.Count(out, verifyMarker); got != 0 {
+			t.Errorf("expected verify to run zero times with --no-verify, got %d:\n%s", got, out)
+		}
+	})
+}
+
 func TestCoalesce(t *testing.T) {
 	tests := []struct {
 		name string

@@ -142,7 +142,8 @@ func runAll(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("review phase failed: %w", err)
 	}
 
-	// Phase 3: Code
+	// Phase 3: Code. Always pass NoVerify: true so the auto-chain inside
+	// runCode is suppressed — Phase 4 below owns the single verify run.
 	fmt.Println("\n=== Phase 3: Code ===")
 	if err := runCode(CodeOptions{
 		ExtraPrompt:       allExtraPrompt,
@@ -156,6 +157,7 @@ func runAll(cmd *cobra.Command, args []string) error {
 		Verbose:           allVerbose,
 		DockerAutoSetup:   allDockerAutoSetup,
 		ContainerName:     allContainerName,
+		NoVerify:          true,
 	}); err != nil {
 		return fmt.Errorf("code phase failed: %w", err)
 	}
