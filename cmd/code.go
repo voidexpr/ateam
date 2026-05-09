@@ -40,6 +40,7 @@ var (
 	codeDockerAutoSetup   bool
 	codeContainerName     string
 	codeNoVerify          bool
+	codeModel             string
 	codeEffort            string
 	codeMaxBudgetUSD      string
 	codeMaxBudgetBatch    string
@@ -64,6 +65,7 @@ type CodeOptions struct {
 	DockerAutoSetup   bool
 	ContainerName     string
 	NoVerify          bool // skip the default `ateam verify` follow-up
+	Model             string
 	Effort            string
 	MaxBudgetUSD      string
 	MaxBudgetBatch    string
@@ -102,6 +104,7 @@ Example:
 			DockerAutoSetup:   codeDockerAutoSetup,
 			ContainerName:     codeContainerName,
 			NoVerify:          codeNoVerify,
+			Model:             codeModel,
 			Effort:            codeEffort,
 			MaxBudgetUSD:      codeMaxBudgetUSD,
 			MaxBudgetBatch:    codeMaxBudgetBatch,
@@ -125,6 +128,7 @@ func init() {
 	addCheaperModelFlag(codeCmd, &codeCheaperModel)
 	codeCmd.Flags().StringVar(&codeProfile, "profile", "", "profile for sub-runs (passed to ateam exec --profile)")
 	codeCmd.Flags().StringVar(&codeAgent, "agent", "", "agent for sub-runs (passed to ateam exec --agent)")
+	codeCmd.Flags().StringVar(&codeModel, "model", "", "model override for the supervisor and every sub-run")
 	codeCmd.Flags().StringVar(&codeEffort, "effort", "", "reasoning effort for the supervisor and every sub-run, passed verbatim to the agent CLI")
 	addBudgetFlags(codeCmd, &codeMaxBudgetUSD, &codeMaxBudgetBatch,
 		"USD spend cap for the supervisor and every sub-run (claude-only)",
@@ -195,6 +199,9 @@ func runCode(opts CodeOptions) error {
 	} else {
 		prompt += "- `--profile " + subRunProfile + "`\n"
 	}
+	if opts.Model != "" {
+		prompt += "- `--model " + opts.Model + "`\n"
+	}
 	if opts.Effort != "" {
 		prompt += "- `--effort " + opts.Effort + "`\n"
 	}
@@ -237,6 +244,7 @@ func runCode(opts CodeOptions) error {
 	}
 	setSourceWritable(cr)
 	applyCheaperModel(cr, opts.CheaperModel)
+	applyModel(cr, opts.Model)
 	applyEffort(cr, opts.Effort)
 	if err := applyMaxBudgetUSD(cr, opts.MaxBudgetUSD, runner.ActionCode); err != nil {
 		return err
@@ -341,6 +349,8 @@ func runCode(opts CodeOptions) error {
 		Force:           opts.Force,
 		DockerAutoSetup: opts.DockerAutoSetup,
 		ContainerName:   opts.ContainerName,
+		Model:           opts.Model,
+		Effort:          opts.Effort,
 	})
 }
 

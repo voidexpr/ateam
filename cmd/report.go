@@ -30,6 +30,7 @@ var (
 	reportDockerAutoSetup      bool
 	reportContainerName        string
 	reportRerunFailed          bool
+	reportModel                string
 	reportEffort               string
 	reportMaxBudgetUSD         string
 	reportMaxBudgetBatch       string
@@ -57,6 +58,7 @@ type ReportOptions struct {
 	DockerAutoSetup      bool
 	ContainerName        string
 	RerunFailed          bool
+	Model                string
 	Effort               string
 	MaxBudgetUSD         string
 	MaxBudgetBatch       string
@@ -95,6 +97,7 @@ Example:
 			DockerAutoSetup:      reportDockerAutoSetup,
 			ContainerName:        reportContainerName,
 			RerunFailed:          reportRerunFailed,
+			Model:                reportModel,
 			Effort:               reportEffort,
 			MaxBudgetUSD:         reportMaxBudgetUSD,
 			MaxBudgetBatch:       reportMaxBudgetBatch,
@@ -113,6 +116,7 @@ func init() {
 	reportCmd.Flags().BoolVar(&reportRerunFailed, "rerun-failed", false, "re-run only roles that failed in the last report round")
 	reportCmd.Flags().BoolVar(&reportIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
 	addCheaperModelFlag(reportCmd, &reportCheaperModel)
+	reportCmd.Flags().StringVar(&reportModel, "model", "", "model override")
 	reportCmd.Flags().StringVar(&reportEffort, "effort", "", "reasoning effort override, passed verbatim to the agent CLI")
 	addBudgetFlags(reportCmd, &reportMaxBudgetUSD, &reportMaxBudgetBatch,
 		"per-role USD spend cap (claude-only; warns on codex)",
@@ -191,6 +195,7 @@ func runReport(opts ReportOptions) error {
 		return err
 	}
 	applyCheaperModel(cr, opts.CheaperModel)
+	applyModel(cr, opts.Model)
 	applyEffort(cr, opts.Effort)
 	if err := applyMaxBudgetUSD(cr, opts.MaxBudgetUSD, runner.ActionReport); err != nil {
 		return err
@@ -235,6 +240,7 @@ func runReport(opts ReportOptions) error {
 					return err
 				} else {
 					applyCheaperModel(roleRunner, opts.CheaperModel)
+					applyModel(roleRunner, opts.Model)
 					applyEffort(roleRunner, opts.Effort)
 					if err := applyMaxBudgetUSD(roleRunner, opts.MaxBudgetUSD, runner.ActionReport); err != nil {
 						return err

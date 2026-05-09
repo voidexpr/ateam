@@ -764,6 +764,14 @@ func applyEffort(r *runner.Runner, value string) {
 	}
 }
 
+// applyModel sets the agent's model override if value is non-empty.
+// Empty string is a no-op so callers can pass through unconditionally.
+func applyModel(r *runner.Runner, value string) {
+	if value != "" {
+		r.Agent.SetModel(value)
+	}
+}
+
 // parseBudgetUSD parses a USD amount from a CLI flag string. Empty returns 0/false.
 func parseBudgetUSD(value string) (float64, bool, error) {
 	if value == "" {

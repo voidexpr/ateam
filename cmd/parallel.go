@@ -164,9 +164,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	}
 	setSourceWritable(r)
 
-	if parallelModel != "" {
-		r.Agent.SetModel(parallelModel)
-	}
+	applyModel(r, parallelModel)
 	applyEffort(r, parallelEffort)
 	if err := applyMaxBudgetUSD(r, parallelMaxBudgetUSD, runner.ActionParallel); err != nil {
 		return err

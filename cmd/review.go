@@ -32,6 +32,8 @@ var (
 	reviewDockerAutoSetup bool
 	reviewContainerName   string
 	reviewMaxBudgetUSD    string
+	reviewModel           string
+	reviewEffort          string
 )
 
 // ReviewOptions holds configuration for a review run.
@@ -52,6 +54,8 @@ type ReviewOptions struct {
 	DockerAutoSetup bool
 	ContainerName   string
 	MaxBudgetUSD    string
+	Model           string
+	Effort          string
 }
 
 var reviewCmd = &cobra.Command{
@@ -88,6 +92,8 @@ Example:
 			DockerAutoSetup: reviewDockerAutoSetup,
 			ContainerName:   reviewContainerName,
 			MaxBudgetUSD:    reviewMaxBudgetUSD,
+			Model:           reviewModel,
+			Effort:          reviewEffort,
 		})
 	},
 }
@@ -131,6 +137,8 @@ func init() {
 	reviewCmd.Flags().BoolVar(&reviewAll, "all", false, "include reports from roles disabled in config.toml")
 	reviewCmd.Flags().StringVar(&reviewMaxAge, "max-age", "", "drop reports older than this (e.g. 2h, 30m, 1d)")
 	addCheaperModelFlag(reviewCmd, &reviewCheaperModel)
+	reviewCmd.Flags().StringVar(&reviewModel, "model", "", "model override")
+	reviewCmd.Flags().StringVar(&reviewEffort, "effort", "", "reasoning effort override, passed verbatim to the agent CLI")
 	addProfileFlags(reviewCmd, &reviewProfile, &reviewAgent)
 	addVerboseFlag(reviewCmd, &reviewVerbose)
 	addForceFlag(reviewCmd, &reviewForce)
@@ -199,6 +207,8 @@ func runReview(opts ReviewOptions) error {
 		return err
 	}
 	applyCheaperModel(cr, opts.CheaperModel)
+	applyModel(cr, opts.Model)
+	applyEffort(cr, opts.Effort)
 	if err := applyMaxBudgetUSD(cr, opts.MaxBudgetUSD, runner.ActionReview); err != nil {
 		return err
 	}

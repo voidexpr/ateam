@@ -164,9 +164,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		r.ExtraArgs = append(r.ExtraArgs, strings.Fields(execAgentArgs)...)
 	}
 
-	if execModel != "" {
-		r.Agent.SetModel(execModel)
-	}
+	applyModel(r, execModel)
 	applyEffort(r, execEffort)
 	if err := applyMaxBudgetUSD(r, execMaxBudgetUSD, runner.ActionExec); err != nil {
 		return err
