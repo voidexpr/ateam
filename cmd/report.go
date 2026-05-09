@@ -348,7 +348,7 @@ func runReport(opts ReportOptions) error {
 
 	if opts.Review && succeeded > 0 {
 		fmt.Println()
-		return runReview(ReviewOptions{})
+		return runReview(reviewOptionsFromReport(opts))
 	}
 
 	if succeeded > 0 {
@@ -356,6 +356,27 @@ func runReport(opts ReportOptions) error {
 	}
 
 	return nil
+}
+
+// reviewOptionsFromReport carries the user's report-time overrides into the
+// auto-triggered review step so `report --review --roles X --profile Y` does
+// not silently revert the review to defaults. Zero-valued fields stay zero so
+// review's own defaulting (config, role-level profiles) still applies.
+func reviewOptionsFromReport(opts ReportOptions) ReviewOptions {
+	return ReviewOptions{
+		ExtraPrompt:     opts.ExtraPrompt,
+		Timeout:         opts.Timeout,
+		CheaperModel:    opts.CheaperModel,
+		Profile:         opts.Profile,
+		Agent:           opts.Agent,
+		Verbose:         opts.Verbose,
+		Force:           opts.Force,
+		Roles:           opts.Roles,
+		DockerAutoSetup: opts.DockerAutoSetup,
+		ContainerName:   opts.ContainerName,
+		Model:           opts.Model,
+		Effort:          opts.Effort,
+	}
 }
 
 // lastReportRolesByStatus returns (succeeded, failed) role lists from the

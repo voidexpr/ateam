@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -231,6 +232,60 @@ func TestReportRoleSelectionModes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestReviewOptionsFromReportPropagation guards against the regression where
+// `report --review --roles X` (plus runner/model overrides) silently dropped
+// the role scope and overrides on the auto-triggered review step.
+func TestReviewOptionsFromReportPropagation(t *testing.T) {
+	in := ReportOptions{
+		Roles:           []string{"security"},
+		ExtraPrompt:     "focus on auth",
+		Timeout:         42,
+		CheaperModel:    true,
+		Profile:         "docker",
+		Agent:           "claude",
+		Verbose:         true,
+		Force:           true,
+		DockerAutoSetup: true,
+		ContainerName:   "myctr",
+		Model:           "gpt-5.4",
+		Effort:          "high",
+		// Fields below should NOT leak into ReviewOptions: they're report-only
+		// or have different semantics on the review side.
+		Parallel:             4,
+		Print:                true,
+		DryRun:               true,
+		IgnorePreviousReport: true,
+		Review:               true,
+		RerunFailed:          true,
+		MaxBudgetUSD:         "1.50",
+		MaxBudgetBatch:       "10",
+	}
+	got := reviewOptionsFromReport(in)
+	want := ReviewOptions{
+		Roles:           []string{"security"},
+		ExtraPrompt:     "focus on auth",
+		Timeout:         42,
+		CheaperModel:    true,
+		Profile:         "docker",
+		Agent:           "claude",
+		Verbose:         true,
+		Force:           true,
+		DockerAutoSetup: true,
+		ContainerName:   "myctr",
+		Model:           "gpt-5.4",
+		Effort:          "high",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("propagation mismatch\n got: %+v\nwant: %+v", got, want)
+	}
+
+	// Empty ReportOptions must not clobber review defaults — a zero value in
+	// goes to a zero value out so review's own defaulting still kicks in.
+	if zero := reviewOptionsFromReport(ReportOptions{}); !reflect.DeepEqual(zero, ReviewOptions{}) {
+		t.Errorf("empty ReportOptions should produce empty ReviewOptions, got %+v", zero)
 	}
 }
 
