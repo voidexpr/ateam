@@ -204,12 +204,13 @@ func runReview(opts ReviewOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := applyContainerName(cr, env, opts.ContainerName); err != nil {
-		return err
-	}
-	applyModelOverrides(cr, opts.CheaperModel, opts.Model)
-	applyEffort(cr, opts.Effort)
-	if err := applyMaxBudgetUSD(cr, opts.MaxBudgetUSD, runner.ActionReview); err != nil {
+	if err := applyRunnerOverrides(cr, env, RunnerOverrides{
+		ContainerName: opts.ContainerName,
+		CheaperModel:  opts.CheaperModel,
+		Model:         opts.Model,
+		Effort:        opts.Effort,
+		MaxBudgetUSD:  opts.MaxBudgetUSD,
+	}, runner.ActionReview); err != nil {
 		return err
 	}
 

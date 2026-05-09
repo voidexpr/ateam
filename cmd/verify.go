@@ -133,15 +133,16 @@ func runVerify(opts VerifyOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := applyContainerName(cr, env, opts.ContainerName); err != nil {
+	if err := applyRunnerOverrides(cr, env, RunnerOverrides{
+		ContainerName: opts.ContainerName,
+		CheaperModel:  opts.CheaperModel,
+		Model:         opts.Model,
+		Effort:        opts.Effort,
+		MaxBudgetUSD:  opts.MaxBudgetUSD,
+	}, runner.ActionVerify); err != nil {
 		return err
 	}
 	setSourceWritable(cr)
-	applyModelOverrides(cr, opts.CheaperModel, opts.Model)
-	applyEffort(cr, opts.Effort)
-	if err := applyMaxBudgetUSD(cr, opts.MaxBudgetUSD, runner.ActionVerify); err != nil {
-		return err
-	}
 
 	db, err := openProjectDB(env)
 	if err != nil {

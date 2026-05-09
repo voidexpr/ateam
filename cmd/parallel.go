@@ -159,16 +159,16 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := applyContainerName(r, env, parallelContainerName); err != nil {
+	if err := applyRunnerOverrides(r, env, RunnerOverrides{
+		ContainerName:     parallelContainerName,
+		Model:             parallelModel,
+		Effort:            parallelEffort,
+		MaxBudgetUSD:      parallelMaxBudgetUSD,
+		MaxBudgetUSDBatch: parallelMaxBudgetBatch,
+	}, runner.ActionParallel); err != nil {
 		return err
 	}
 	setSourceWritable(r)
-
-	applyModel(r, parallelModel)
-	applyEffort(r, parallelEffort)
-	if err := applyMaxBudgetUSD(r, parallelMaxBudgetUSD, runner.ActionParallel); err != nil {
-		return err
-	}
 
 	if !hasProject {
 		return fmt.Errorf("ateam project required: no .ateam/ found")

@@ -192,12 +192,14 @@ func runReport(opts ReportOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := applyContainerName(cr, env, opts.ContainerName); err != nil {
-		return err
-	}
-	applyModelOverrides(cr, opts.CheaperModel, opts.Model)
-	applyEffort(cr, opts.Effort)
-	if err := applyMaxBudgetUSD(cr, opts.MaxBudgetUSD, runner.ActionReport); err != nil {
+	if err := applyRunnerOverrides(cr, env, RunnerOverrides{
+		ContainerName:     opts.ContainerName,
+		CheaperModel:      opts.CheaperModel,
+		Model:             opts.Model,
+		Effort:            opts.Effort,
+		MaxBudgetUSD:      opts.MaxBudgetUSD,
+		MaxBudgetUSDBatch: opts.MaxBudgetBatch,
+	}, runner.ActionReport); err != nil {
 		return err
 	}
 
@@ -236,14 +238,16 @@ func runReport(opts ReportOptions) error {
 				roleRunner, err := resolveRunner(env, roleProfile, "", runner.ActionReport, roleID, opts.DockerAutoSetup)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: cannot resolve profile %q for %s, using default — %v\n", roleProfile, roleID, err)
-				} else if err := applyContainerName(roleRunner, env, opts.ContainerName); err != nil {
+				} else if err := applyRunnerOverrides(roleRunner, env, RunnerOverrides{
+					ContainerName:     opts.ContainerName,
+					CheaperModel:      opts.CheaperModel,
+					Model:             opts.Model,
+					Effort:            opts.Effort,
+					MaxBudgetUSD:      opts.MaxBudgetUSD,
+					MaxBudgetUSDBatch: opts.MaxBudgetBatch,
+				}, runner.ActionReport); err != nil {
 					return err
 				} else {
-					applyModelOverrides(roleRunner, opts.CheaperModel, opts.Model)
-					applyEffort(roleRunner, opts.Effort)
-					if err := applyMaxBudgetUSD(roleRunner, opts.MaxBudgetUSD, runner.ActionReport); err != nil {
-						return err
-					}
 					task.Runner = roleRunner
 				}
 			}

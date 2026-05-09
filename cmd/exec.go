@@ -155,19 +155,19 @@ func runExec(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if err := applyContainerName(r, env, execContainerName); err != nil {
+	if err := applyRunnerOverrides(r, env, RunnerOverrides{
+		ContainerName:     execContainerName,
+		Model:             execModel,
+		Effort:            execEffort,
+		MaxBudgetUSD:      execMaxBudgetUSD,
+		MaxBudgetUSDBatch: execMaxBudgetBatch,
+	}, runner.ActionExec); err != nil {
 		return err
 	}
 	setSourceWritable(r)
 
 	if execAgentArgs != "" {
 		r.ExtraArgs = append(r.ExtraArgs, strings.Fields(execAgentArgs)...)
-	}
-
-	applyModel(r, execModel)
-	applyEffort(r, execEffort)
-	if err := applyMaxBudgetUSD(r, execMaxBudgetUSD, runner.ActionExec); err != nil {
-		return err
 	}
 
 	if execDryRun {
