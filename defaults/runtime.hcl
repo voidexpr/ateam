@@ -279,6 +279,15 @@ agent "codex" {
     // 1/10 of input_per_mtok). Set on every model so cost estimates aren't
     // inflated when the cache is warm — codex sessions hit cache aggressively
     // and EstimateCost is the only cost source for codex (no result-event cost).
+    // gpt-5.4 = the new name for what was gpt-5.4-codex (codex dropped the
+    // -codex suffix). Both names are kept so streams that report either
+    // resolve cleanly.
+    model "gpt-5.4" {
+      input_per_mtok        = 1.75
+      cached_input_per_mtok = 0.175
+      output_per_mtok       = 14.00
+    }
+
     model "gpt-5.4-codex" {
       input_per_mtok        = 1.75
       cached_input_per_mtok = 0.175
@@ -359,13 +368,13 @@ agent "codex" {
   }
 }
 
-// codex-high: latest ChatGPT-subscription-compatible codex model with high
-// reasoning effort. gpt-5.4-codex is API-only (rejected under ChatGPT auth),
-// so pin to gpt-5.3-codex — bump this when a newer model is offered to
-// subscriptions. Codex has no `latest`-style alias.
+// codex-high: latest codex model (gpt-5.4 — codex dropped the -codex
+// suffix; `~/.codex/config.toml` shows `gpt-5.3-codex` → `gpt-5.4` in the
+// model_migrations table) with high reasoning effort. Codex has no
+// `latest`-style alias, so pin the version explicitly.
 agent "codex-high" {
   base   = "codex"
-  model  = "gpt-5.3-codex"
+  model  = "gpt-5.4"
   effort = "high"
 }
 
