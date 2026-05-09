@@ -25,8 +25,8 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&orgFlag, "org", "o", "", "organization path override")
-	rootCmd.PersistentFlags().StringVarP(&projectFlag, "project", "p", "", "project name override")
+	rootCmd.PersistentFlags().StringVarP(&orgFlag, "org", "o", "", "path to org folder (.ateamorg/) or its parent — overrides cwd-based discovery")
+	rootCmd.PersistentFlags().StringVarP(&projectFlag, "project", "p", "", "path to project folder (.ateam/) or its parent — overrides cwd-based discovery")
 
 	rootCmd.AddCommand(envCmd)
 	rootCmd.AddCommand(installCmd)

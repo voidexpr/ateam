@@ -175,38 +175,46 @@ func findInPath(cwd, target string) (string, bool) {
 
 // Resolve discovers org and project directories and loads config.
 // If no .ateamorg/ is found but .ateam/ exists, operates in org-less mode.
+//
+// The overrides are location overrides (not name lookups):
+//   - orgOverride: path to .ateamorg/ itself or its parent
+//   - projectOverride: path to .ateam/ itself or its parent (project root)
+//
+// Either may be set independently; with --project alone, the org is
+// auto-discovered by walking up from the project root.
 func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
 	cwd := realPath(mustGetwd())
 
-	var orgDir string
+	var projectDir, orgDir string
 	var err error
-	if orgOverride != "" {
-		orgDir, err = resolveOrgByName(orgOverride)
+
+	if projectOverride != "" {
+		projectDir, err = resolveProjectPath(projectOverride)
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		orgDir, _ = FindOrg(cwd)
 	}
 
-	var projectDir string
-	if projectOverride != "" {
-		if orgDir == "" {
-			return nil, fmt.Errorf("--project requires an org context (.ateamorg/)")
-		}
-		projectDir, err = resolveProjectByName(orgDir, projectOverride)
-	} else {
-		if orgDir != "" {
-			projectDir, err = resolveProjectFromStateDir(orgDir, cwd)
-			if err != nil {
-				projectDir, err = FindProject(cwd)
-			}
-		} else {
-			projectDir, err = FindProject(cwd)
+	if orgOverride != "" {
+		orgDir, err = resolveOrgPath(orgOverride)
+		if err != nil {
+			return nil, err
 		}
 	}
-	if err != nil {
-		return nil, err
+
+	if orgDir == "" {
+		if projectDir != "" {
+			orgDir, _ = FindOrg(filepath.Dir(projectDir))
+		} else {
+			orgDir, _ = FindOrg(cwd)
+		}
+	}
+
+	if projectDir == "" {
+		projectDir, err = discoverProject(orgDir, cwd)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	cfg, err := config.Load(projectDir)
@@ -235,16 +243,7 @@ func LookupFrom(start string) (*ResolvedEnv, error) {
 		OrgDir: orgDir,
 	}
 
-	var projectDir string
-	var err error
-	if orgDir != "" {
-		projectDir, err = resolveProjectFromStateDir(orgDir, cwd)
-		if err != nil {
-			projectDir, err = FindProject(cwd)
-		}
-	} else {
-		projectDir, err = FindProject(cwd)
-	}
+	projectDir, err := discoverProject(orgDir, cwd)
 	if err != nil {
 		if orgDir != "" {
 			return env, nil
@@ -313,6 +312,18 @@ func WalkProjects(orgDir string, fn func(ProjectInfo) error) error {
 	return nil
 }
 
+// discoverProject finds a project directory: when orgDir is set, prefer the
+// state-dir mapping (cwd inside .ateamorg/projects/<id>/), then fall back to
+// walking up from cwd. Without an org, just walks up from cwd.
+func discoverProject(orgDir, cwd string) (string, error) {
+	if orgDir != "" {
+		if p, err := resolveProjectFromStateDir(orgDir, cwd); err == nil {
+			return p, nil
+		}
+	}
+	return FindProject(cwd)
+}
+
 // resolveProjectFromStateDir checks if cwd is inside .ateamorg/projects/<id>/
 // and resolves the project directory by reversing the project ID to a path.
 func resolveProjectFromStateDir(orgDir, cwd string) (string, error) {
@@ -340,32 +351,29 @@ func resolveProjectFromStateDir(orgDir, cwd string) (string, error) {
 	return "", fmt.Errorf("project directory not found for state %q", projectID)
 }
 
-// resolveOrgByName treats override as a path and looks for .ateamorg child there.
-func resolveOrgByName(override string) (string, error) {
-	candidate := filepath.Join(override, OrgDirName)
+// resolveOrgPath accepts either a path to .ateamorg/ itself or a parent
+// directory containing .ateamorg/ as a child.
+func resolveOrgPath(path string) (string, error) {
+	return resolveSpecialDir(path, OrgDirName, "--org")
+}
+
+// resolveProjectPath accepts either a path to .ateam/ itself or a parent
+// directory (project root) containing .ateam/ as a child.
+func resolveProjectPath(path string) (string, error) {
+	return resolveSpecialDir(path, ProjectDirName, "--project")
+}
+
+func resolveSpecialDir(path, target, flag string) (string, error) {
+	if filepath.Base(path) == target {
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			return realPath(path), nil
+		}
+	}
+	candidate := filepath.Join(path, target)
 	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
 		return realPath(candidate), nil
 	}
-	return "", fmt.Errorf("no %s/ found under %s", OrgDirName, override)
-}
-
-// resolveProjectByName searches registered projects for one with the given name.
-func resolveProjectByName(orgDir, name string) (string, error) {
-	var found string
-	err := WalkProjects(orgDir, func(p ProjectInfo) error {
-		if p.Config.Project.Name == name {
-			found = p.Dir
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	if err != nil && err != filepath.SkipAll {
-		return "", fmt.Errorf("error searching for project %q: %w", name, err)
-	}
-	if found == "" {
-		return "", fmt.Errorf("project %q not found under %s", name, filepath.Dir(orgDir))
-	}
-	return realPath(found), nil
+	return "", fmt.Errorf("%s %q: no %s/ found at or under this path", flag, path, target)
 }
 
 // ResolveStreamPath resolves a relative stream_file path to absolute.

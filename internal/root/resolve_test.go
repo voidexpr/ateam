@@ -3,6 +3,7 @@ package root
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -207,4 +208,170 @@ func TestFindProjectNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+}
+
+// makeProject creates a minimal .ateam/ directory with a loadable config.toml
+// at projectRoot/.ateam, and returns the .ateam path.
+func makeProject(t *testing.T, projectRoot, name string) string {
+	t.Helper()
+	projectDir := filepath.Join(projectRoot, ".ateam")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configContent := "[project]\nname = \"" + name + "\"\n"
+	if err := os.WriteFile(filepath.Join(projectDir, "config.toml"), []byte(configContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return projectDir
+}
+
+func makeOrg(t *testing.T, orgRoot string) string {
+	t.Helper()
+	orgDir := filepath.Join(orgRoot, ".ateamorg")
+	if err := os.MkdirAll(orgDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	return orgDir
+}
+
+func TestResolveOverrides(t *testing.T) {
+	t.Run("project flag points at project root", func(t *testing.T) {
+		base := resolvedTempDir(t)
+		projectRoot := filepath.Join(base, "myproj")
+		projectDir := makeProject(t, projectRoot, "myproj")
+
+		// run from an unrelated cwd
+		cwd := resolvedTempDir(t)
+		t.Chdir(cwd)
+
+		env, err := Resolve("", projectRoot)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if env.ProjectDir != projectDir {
+			t.Errorf("ProjectDir = %q, want %q", env.ProjectDir, projectDir)
+		}
+		if env.OrgDir != "" {
+			t.Errorf("OrgDir = %q, want empty (org-less)", env.OrgDir)
+		}
+		if env.SourceDir != projectRoot {
+			t.Errorf("SourceDir = %q, want %q", env.SourceDir, projectRoot)
+		}
+	})
+
+	t.Run("project flag points at .ateam directly", func(t *testing.T) {
+		base := resolvedTempDir(t)
+		projectRoot := filepath.Join(base, "myproj")
+		projectDir := makeProject(t, projectRoot, "myproj")
+
+		cwd := resolvedTempDir(t)
+		t.Chdir(cwd)
+
+		env, err := Resolve("", projectDir)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if env.ProjectDir != projectDir {
+			t.Errorf("ProjectDir = %q, want %q", env.ProjectDir, projectDir)
+		}
+	})
+
+	t.Run("project flag auto-discovers org by walking up", func(t *testing.T) {
+		base := resolvedTempDir(t)
+		orgDir := makeOrg(t, base)
+		projectRoot := filepath.Join(base, "myproj")
+		makeProject(t, projectRoot, "myproj")
+
+		cwd := resolvedTempDir(t)
+		t.Chdir(cwd)
+
+		env, err := Resolve("", projectRoot)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if env.OrgDir != orgDir {
+			t.Errorf("OrgDir = %q, want %q", env.OrgDir, orgDir)
+		}
+	})
+
+	t.Run("org flag points at .ateamorg directly", func(t *testing.T) {
+		base := resolvedTempDir(t)
+		orgDir := makeOrg(t, base)
+		projectRoot := filepath.Join(base, "myproj")
+		makeProject(t, projectRoot, "myproj")
+
+		t.Chdir(projectRoot)
+
+		env, err := Resolve(orgDir, "")
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if env.OrgDir != orgDir {
+			t.Errorf("OrgDir = %q, want %q", env.OrgDir, orgDir)
+		}
+	})
+
+	t.Run("org flag points at parent of .ateamorg", func(t *testing.T) {
+		base := resolvedTempDir(t)
+		orgDir := makeOrg(t, base)
+		projectRoot := filepath.Join(base, "myproj")
+		makeProject(t, projectRoot, "myproj")
+
+		t.Chdir(projectRoot)
+
+		env, err := Resolve(base, "")
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if env.OrgDir != orgDir {
+			t.Errorf("OrgDir = %q, want %q", env.OrgDir, orgDir)
+		}
+	})
+
+	t.Run("both flags resolve independently", func(t *testing.T) {
+		base := resolvedTempDir(t)
+		orgDir := makeOrg(t, base)
+		projectRoot := filepath.Join(base, "myproj")
+		projectDir := makeProject(t, projectRoot, "myproj")
+
+		cwd := resolvedTempDir(t)
+		t.Chdir(cwd)
+
+		env, err := Resolve(base, projectRoot)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if env.OrgDir != orgDir {
+			t.Errorf("OrgDir = %q, want %q", env.OrgDir, orgDir)
+		}
+		if env.ProjectDir != projectDir {
+			t.Errorf("ProjectDir = %q, want %q", env.ProjectDir, projectDir)
+		}
+	})
+
+	t.Run("project flag with nonexistent path errors", func(t *testing.T) {
+		cwd := resolvedTempDir(t)
+		t.Chdir(cwd)
+
+		_, err := Resolve("", filepath.Join(cwd, "does-not-exist"))
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "--project") {
+			t.Errorf("error %q should mention --project", err)
+		}
+	})
+
+	t.Run("org flag with nonexistent path errors", func(t *testing.T) {
+		cwd := resolvedTempDir(t)
+		t.Chdir(cwd)
+
+		_, err := Resolve(filepath.Join(cwd, "does-not-exist"), "")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "--org") {
+			t.Errorf("error %q should mention --org", err)
+		}
+	})
 }
