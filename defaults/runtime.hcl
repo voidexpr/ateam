@@ -359,11 +359,13 @@ agent "codex" {
   }
 }
 
-// codex-high: latest codex model with high reasoning effort. Pin the model
-// explicitly (codex has no `latest`-style alias — versions are spelled out).
+// codex-high: latest ChatGPT-subscription-compatible codex model with high
+// reasoning effort. gpt-5.4-codex is API-only (rejected under ChatGPT auth),
+// so pin to gpt-5.3-codex — bump this when a newer model is offered to
+// subscriptions. Codex has no `latest`-style alias.
 agent "codex-high" {
   base   = "codex"
-  model  = "gpt-5.4-codex"
+  model  = "gpt-5.3-codex"
   effort = "high"
 }
 
