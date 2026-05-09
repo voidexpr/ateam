@@ -12,10 +12,11 @@ import (
 )
 
 var (
-	recentRole   string
-	recentAction string
-	recentBatch  string
-	recentLimit  int
+	recentRole    string
+	recentAction  string
+	recentBatch   string
+	recentLimit   int
+	recentGitHash bool
 )
 
 var runsCmd = &cobra.Command{
@@ -40,6 +41,7 @@ func init() {
 	runsCmd.Flags().StringVar(&recentAction, "action", "", "filter by action (report, review, code, exec)")
 	runsCmd.Flags().StringVar(&recentBatch, "batch", "", "filter by batch")
 	runsCmd.Flags().IntVar(&recentLimit, "limit", 30, "max rows to show")
+	runsCmd.Flags().BoolVar(&recentGitHash, "git-hash", false, "append GIT_START and GIT_END columns (first 6 chars of each hash)")
 }
 
 func runRuns(cmd *cobra.Command, args []string) error {
@@ -75,13 +77,17 @@ func runRuns(cmd *cobra.Command, args []string) error {
 		rows[i], rows[j] = rows[j], rows[i]
 	}
 
-	printRunsTable(rows)
+	printRunsTable(rows, recentGitHash)
 	return nil
 }
 
-func printRunsTable(rows []calldb.RecentRow) {
+func printRunsTable(rows []calldb.RecentRow, showGitHash bool) {
 	w := newTable()
-	fmt.Fprintln(w, "ID\tSTARTED\tPROFILE\tACTION\tROLE\tMODEL\tDURATION\tCOST\tTOKENS\tSTATUS\tBATCH\tREASON")
+	header := "ID\tSTARTED\tPROFILE\tACTION\tROLE\tMODEL\tDURATION\tCOST\tTOKENS\tSTATUS\tBATCH\tREASON"
+	if showGitHash {
+		header += "\tGIT_START\tGIT_END"
+	}
+	fmt.Fprintln(w, header)
 	for _, r := range rows {
 		started := fmtStartedAt(r.StartedAt)
 
@@ -105,11 +111,22 @@ func printRunsTable(rows []calldb.RecentRow) {
 			reason = runner.Truncate(runner.SingleLineText(r.ErrorMessage), 120)
 		}
 
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s",
 			r.ID, started, r.Profile, r.Action, r.Role, r.Model,
 			dur, display.FmtCost(r.CostUSD), tokens, runStatus(r), r.Batch, reason)
+		if showGitHash {
+			fmt.Fprintf(w, "\t%s\t%s", shortHash(r.GitStartHash), shortHash(r.GitEndHash))
+		}
+		fmt.Fprintln(w)
 	}
 	w.Flush()
+}
+
+func shortHash(h string) string {
+	if len(h) <= 6 {
+		return h
+	}
+	return h[:6]
 }
 
 func runStatus(r calldb.RecentRow) string {
