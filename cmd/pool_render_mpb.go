@@ -73,8 +73,8 @@ func newMpbPoolRenderer(w io.Writer) *mpbPoolRenderer {
 
 func (r *mpbPoolRenderer) Render(rows []poolStatusRow) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.closed {
+		r.mu.Unlock()
 		return
 	}
 	r.rows = clonePoolStatusRows(rows)
@@ -84,18 +84,24 @@ func (r *mpbPoolRenderer) Render(rows []poolStatusRow) {
 			r.bars[i] = r.makeBar(i)
 		}
 	}
-	// Mark terminal rows complete so mpb stops re-rendering them and
-	// (*Progress).Wait can return when everything finishes. SetTotal is
-	// idempotent (the bar's operateState handler bails out early if
-	// triggerComplete is already set), so re-issuing it on every Render
-	// for already-terminal rows is harmless.
+	// Collect terminal bars under the lock; call SetTotal AFTER unlocking.
+	// SetTotal is a blocking send to the bar's serve goroutine, which can
+	// be mid-draw and waiting on r.mu via formatRow — holding r.mu across
+	// the call deadlocks. SetTotal is idempotent so re-issuing on each
+	// Render is harmless.
+	var done []*mpb.Bar
 	for i, row := range r.rows {
 		if r.bars[i] == nil {
 			continue
 		}
 		if row.State == poolStateDone || row.State == poolStateError {
-			r.bars[i].SetTotal(-1, true)
+			done = append(done, r.bars[i])
 		}
+	}
+	r.mu.Unlock()
+
+	for _, bar := range done {
+		bar.SetTotal(-1, true)
 	}
 }
 
@@ -108,14 +114,18 @@ func (r *mpbPoolRenderer) Close() {
 		return
 	}
 	r.closed = true
-	// Force every bar to terminal so Wait can return. SetTotal is
+	bars := append([]*mpb.Bar(nil), r.bars...)
+	r.mu.Unlock()
+
+	// SetTotal is a blocking send to each bar's serve loop, which can be
+	// mid-draw and waiting on r.mu via formatRow. Call it OUTSIDE the
+	// lock so the bar can drain its operateState channel. SetTotal is
 	// idempotent for already-completed bars.
-	for _, bar := range r.bars {
+	for _, bar := range bars {
 		if bar != nil {
 			bar.SetTotal(-1, true)
 		}
 	}
-	r.mu.Unlock()
 	r.progress.Wait()
 
 	// Note on cursor position after Wait: mpb's cwriter buffers a
