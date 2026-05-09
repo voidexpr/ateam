@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ripgrep fd-find jq tree make \
     python3 python3-pip \
     && rm -rf /var/lib/apt/lists/* \
-    && npm install -g @anthropic-ai/claude-code
+    && npm install -g @anthropic-ai/claude-code@2.1.138
 
 # node:20 already has user "node" at UID 1000. Create "agent" at a different UID,
 # or reuse node's UID if the host UID happens to match.

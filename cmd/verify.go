@@ -114,6 +114,7 @@ func runVerify(opts VerifyOptions) error {
 		return err
 	}
 
+	// Verify runs a supervisor pass like review; reuses the review timeout helper.
 	timeout := env.Config.Review.EffectiveTimeout(opts.Timeout)
 
 	supervisorDir := env.SupervisorDir()

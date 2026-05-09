@@ -60,6 +60,7 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Auto-setup runs a supervisor pass like review/verify; reuses the review timeout helper.
 	timeout := env.Config.Review.EffectiveTimeout(autoSetupTimeout)
 
 	fmt.Printf("Auto-setup running (%dm timeout)...\n", timeout)

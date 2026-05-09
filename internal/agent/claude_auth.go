@@ -220,7 +220,9 @@ func EnsureClaudeState(configDir string, dryRun bool) CleanupResult {
 	if dryRun {
 		return CleanupResult{".claude.json (create with firstStartTime)", "would"}
 	}
-	_ = os.MkdirAll(configDir, 0700)
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		return CleanupResult{".claude.json (mkdir failed: " + err.Error() + ")", "skip"}
+	}
 	content := `{"firstStartTime":"` + time.Now().UTC().Format(time.RFC3339Nano) + `"}` + "\n"
 	if err := os.WriteFile(statePath, []byte(content), 0600); err != nil {
 		return CleanupResult{".claude.json (create failed: " + err.Error() + ")", "skip"}
