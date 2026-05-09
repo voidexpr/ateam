@@ -246,11 +246,32 @@ func TestEnvArgsInOneshotCmdFactory(t *testing.T) {
 		return false
 	}
 
-	if !hasArg("-e", "DB_HOST=localhost") {
-		t.Errorf("missing -e DB_HOST=localhost, args: %v", args)
+	if !hasArg("-e", "DB_HOST") {
+		t.Errorf("missing -e DB_HOST, args: %v", args)
 	}
-	if !hasArg("-e", "DB_PORT=5432") {
-		t.Errorf("missing -e DB_PORT=5432, args: %v", args)
+	if !hasArg("-e", "DB_PORT") {
+		t.Errorf("missing -e DB_PORT, args: %v", args)
+	}
+
+	// Values must be staged into cmd.Env, not into argv.
+	for _, a := range args {
+		if strings.Contains(a, "DB_HOST=") || strings.Contains(a, "DB_PORT=") {
+			t.Errorf("Env value leaked into argv: %q", a)
+		}
+	}
+	envHas := func(kv string) bool {
+		for _, e := range cmd.Env {
+			if e == kv {
+				return true
+			}
+		}
+		return false
+	}
+	if !envHas("DB_HOST=localhost") {
+		t.Errorf("cmd.Env missing DB_HOST=localhost, got: %v", cmd.Env)
+	}
+	if !envHas("DB_PORT=5432") {
+		t.Errorf("cmd.Env missing DB_PORT=5432, got: %v", cmd.Env)
 	}
 }
 
@@ -284,15 +305,48 @@ func TestApplyAgentEnvOverridesForwardEnv(t *testing.T) {
 		return false
 	}
 
-	// OAuth token should be set to the store value (not the host value)
-	if !hasArg("-e", "CLAUDE_CODE_OAUTH_TOKEN=store-token") {
-		t.Errorf("expected store-token for CLAUDE_CODE_OAUTH_TOKEN, args: %v", args)
+	// OAuth token should be forwarded by name (value passed via cmd.Env)
+	if !hasArg("-e", "CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Errorf("expected -e CLAUDE_CODE_OAUTH_TOKEN, args: %v", args)
+	}
+	// Value must NOT leak into argv
+	for _, a := range args {
+		if strings.HasPrefix(a, "CLAUDE_CODE_OAUTH_TOKEN=") {
+			t.Errorf("OAuth token value leaked into argv: %q", a)
+		}
+		if a == "store-token" {
+			t.Errorf("OAuth token value leaked into argv as bare value: %v", args)
+		}
+	}
+	// cmd.Env must carry the store value, overriding the host value
+	envHas := func(kv string) bool {
+		for _, e := range cmd.Env {
+			if e == kv {
+				return true
+			}
+		}
+		return false
+	}
+	if !envHas("CLAUDE_CODE_OAUTH_TOKEN=store-token") {
+		t.Errorf("cmd.Env missing CLAUDE_CODE_OAUTH_TOKEN=store-token, got: %v", cmd.Env)
+	}
+	for _, e := range cmd.Env {
+		if e == "CLAUDE_CODE_OAUTH_TOKEN=host-token" {
+			t.Errorf("host value leaked into cmd.Env: %q", e)
+		}
 	}
 
 	// API key should NOT appear (stripped by isolation)
 	for i, a := range args {
 		if a == "-e" && i+1 < len(args) && strings.HasPrefix(args[i+1], "ANTHROPIC_API_KEY") {
 			t.Errorf("ANTHROPIC_API_KEY should be suppressed, got -e %s", args[i+1])
+		}
+	}
+	// Suppressed key must also be dropped from cmd.Env so the host value
+	// doesn't leak through to docker.
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "ANTHROPIC_API_KEY=") {
+			t.Errorf("ANTHROPIC_API_KEY should be suppressed from cmd.Env, got: %q", e)
 		}
 	}
 }
@@ -322,10 +376,10 @@ func TestApplyAgentEnvMergesWithExistingEnv(t *testing.T) {
 		return false
 	}
 
-	if !hasArg("-e", "DB_HOST=localhost") {
+	if !hasArg("-e", "DB_HOST") {
 		t.Errorf("existing Env entry should be preserved, args: %v", args)
 	}
-	if !hasArg("-e", "CLAUDE_CODE_OAUTH_TOKEN=token-val") {
+	if !hasArg("-e", "CLAUDE_CODE_OAUTH_TOKEN") {
 		t.Errorf("agent env should be merged, args: %v", args)
 	}
 }
@@ -343,18 +397,67 @@ func TestEnvArgsInDebugCommand(t *testing.T) {
 
 	got := dc.DebugCommand(RunOpts{Command: "claude", Args: []string{"-p"}})
 
-	// Env vars should appear sorted by key
-	if !strings.Contains(got, "-e A_VAR=one") {
-		t.Errorf("missing -e A_VAR=one in: %s", got)
+	// Env vars should appear sorted by key, key-only (values must not leak in logs)
+	if !strings.Contains(got, "-e A_VAR") {
+		t.Errorf("missing -e A_VAR in: %s", got)
 	}
-	if !strings.Contains(got, "-e B_VAR=two") {
-		t.Errorf("missing -e B_VAR=two in: %s", got)
+	if !strings.Contains(got, "-e B_VAR") {
+		t.Errorf("missing -e B_VAR in: %s", got)
+	}
+	if strings.Contains(got, "A_VAR=one") || strings.Contains(got, "B_VAR=two") {
+		t.Errorf("Env values leaked into DebugCommand output: %s", got)
 	}
 	// A_VAR should come before B_VAR
 	aIdx := strings.Index(got, "A_VAR")
 	bIdx := strings.Index(got, "B_VAR")
 	if aIdx > bIdx {
 		t.Errorf("env args not sorted: A_VAR at %d, B_VAR at %d in: %s", aIdx, bIdx, got)
+	}
+}
+
+// TestDockerRunNoSecretInArgv verifies that resolved secret values written to
+// d.Env (e.g. by IsolateCredentials) are NOT exposed via the docker run argv,
+// where they would leak through `ps aux`. The value must be passed via
+// *exec.Cmd.Env so docker inherits it without it ever appearing on argv.
+func TestDockerRunNoSecretInArgv(t *testing.T) {
+	const secret = "sk-ant-supersecret-value-DO-NOT-LEAK"
+	dc := &DockerContainer{
+		Image:     "ateam-test:latest",
+		SourceDir: "/src",
+		OrgDir:    "/org",
+		Env:       map[string]string{"ANTHROPIC_API_KEY": secret},
+	}
+
+	factory := dc.CmdFactory()
+	cmd := factory(context.Background(), "claude", "-p")
+
+	for _, a := range cmd.Args {
+		if strings.Contains(a, secret) {
+			t.Fatalf("secret value leaked into docker run argv: %q (args: %v)", a, cmd.Args)
+		}
+	}
+
+	hasArg := func(flag, value string) bool {
+		for i, a := range cmd.Args {
+			if a == flag && i+1 < len(cmd.Args) && cmd.Args[i+1] == value {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasArg("-e", "ANTHROPIC_API_KEY") {
+		t.Errorf("expected -e ANTHROPIC_API_KEY in argv, got: %v", cmd.Args)
+	}
+
+	found := false
+	for _, e := range cmd.Env {
+		if e == "ANTHROPIC_API_KEY="+secret {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected ANTHROPIC_API_KEY=<secret> in cmd.Env, got: %v", cmd.Env)
 	}
 }
 

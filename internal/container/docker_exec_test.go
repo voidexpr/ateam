@@ -283,8 +283,34 @@ func TestDockerExecApplyAgentEnvOverridesForwardEnv(t *testing.T) {
 		return false
 	}
 
-	if !hasArg("-e", "CLAUDE_CODE_OAUTH_TOKEN=store-token") {
-		t.Errorf("expected store-token for CLAUDE_CODE_OAUTH_TOKEN, args: %v", args)
+	if !hasArg("-e", "CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Errorf("expected -e CLAUDE_CODE_OAUTH_TOKEN, args: %v", args)
+	}
+	// Value must NOT leak into argv
+	for _, a := range args {
+		if strings.HasPrefix(a, "CLAUDE_CODE_OAUTH_TOKEN=") || a == "store-token" {
+			t.Errorf("OAuth token value leaked into argv: %q (args: %v)", a, args)
+		}
+	}
+	// cmd.Env must carry the store value, overriding the host value
+	envHas := func(kv string) bool {
+		for _, e := range cmd.Env {
+			if e == kv {
+				return true
+			}
+		}
+		return false
+	}
+	if !envHas("CLAUDE_CODE_OAUTH_TOKEN=store-token") {
+		t.Errorf("cmd.Env missing CLAUDE_CODE_OAUTH_TOKEN=store-token, got: %v", cmd.Env)
+	}
+	for _, e := range cmd.Env {
+		if e == "CLAUDE_CODE_OAUTH_TOKEN=host-token" {
+			t.Errorf("host value leaked into cmd.Env: %q", e)
+		}
+		if strings.HasPrefix(e, "ANTHROPIC_API_KEY=") {
+			t.Errorf("ANTHROPIC_API_KEY should be suppressed from cmd.Env, got: %q", e)
+		}
 	}
 
 	for i, a := range args {
@@ -306,6 +332,50 @@ func TestDockerExecApplyAgentEnvNilEnvInit(t *testing.T) {
 	}
 	if dc.Env["KEY"] != "val" {
 		t.Errorf("expected Env[KEY]=val, got %q", dc.Env["KEY"])
+	}
+}
+
+// TestDockerExecNoSecretInArgv verifies that resolved secret values written to
+// d.Env (e.g. by IsolateCredentials) are NOT exposed via the docker exec argv,
+// where they would leak through `ps aux`. The value must be passed via
+// *exec.Cmd.Env so docker inherits it without it ever appearing on argv.
+func TestDockerExecNoSecretInArgv(t *testing.T) {
+	const secret = "sk-ant-supersecret-exec-value-DO-NOT-LEAK"
+	dc := &DockerExecContainer{
+		ContainerName: "testctr",
+		Env:           map[string]string{"ANTHROPIC_API_KEY": secret},
+	}
+
+	factory := dc.CmdFactory()
+	cmd := factory(context.Background(), "claude", "-p")
+
+	for _, a := range cmd.Args {
+		if strings.Contains(a, secret) {
+			t.Fatalf("secret value leaked into docker exec argv: %q (args: %v)", a, cmd.Args)
+		}
+	}
+
+	hasArg := func(flag, value string) bool {
+		for i, a := range cmd.Args {
+			if a == flag && i+1 < len(cmd.Args) && cmd.Args[i+1] == value {
+				return true
+			}
+		}
+		return false
+	}
+	if !hasArg("-e", "ANTHROPIC_API_KEY") {
+		t.Errorf("expected -e ANTHROPIC_API_KEY in argv, got: %v", cmd.Args)
+	}
+
+	found := false
+	for _, e := range cmd.Env {
+		if e == "ANTHROPIC_API_KEY="+secret {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected ANTHROPIC_API_KEY=<secret> in cmd.Env, got: %v", cmd.Env)
 	}
 }
 

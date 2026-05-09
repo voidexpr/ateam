@@ -116,3 +116,34 @@ type RunOpts struct {
 	Env       map[string]string
 	ExtraArgs []string // from --container-args
 }
+
+// stagedEnv returns os.Environ() with the given Env map merged in, replacing
+// any host entries whose key appears in env. Empty env values suppress the key
+// entirely (the host value is dropped). Used to pass secret values to docker
+// CLI via *exec.Cmd.Env (inherited by docker via -e KEY) instead of -e KEY=VALUE
+// argv, which would expose secrets in `ps aux`.
+func stagedEnv(env map[string]string) []string {
+	host := os.Environ()
+	if len(env) == 0 {
+		return host
+	}
+	out := make([]string, 0, len(host)+len(env))
+	for _, kv := range host {
+		eq := strings.IndexByte(kv, '=')
+		if eq <= 0 {
+			out = append(out, kv)
+			continue
+		}
+		if _, override := env[kv[:eq]]; override {
+			continue
+		}
+		out = append(out, kv)
+	}
+	for k, v := range env {
+		if v == "" {
+			continue
+		}
+		out = append(out, k+"="+v)
+	}
+	return out
+}

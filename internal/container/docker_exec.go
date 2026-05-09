@@ -114,7 +114,7 @@ func (d *DockerExecContainer) CmdFactory() CmdFactory {
 
 		// Insert -i and env forwarding after "exec" for docker exec commands
 		if allArgs[0] == "docker" && len(allArgs) > 1 && allArgs[1] == "exec" {
-			// Rebuild as: docker exec -i [-w WORKDIR] [-e KEY=VALUE...] CONTAINER CMD...
+			// Rebuild as: docker exec -i [-w WORKDIR] [-e KEY...] CONTAINER CMD...
 			dockerArgs := []string{"exec", "-i"}
 			if d.WorkDir != "" {
 				dockerArgs = append(dockerArgs, "-w", d.WorkDir)
@@ -131,13 +131,13 @@ func (d *DockerExecContainer) CmdFactory() CmdFactory {
 			// Append everything after "docker exec" (container name + command args)
 			dockerArgs = append(dockerArgs, allArgs[2:]...)
 			cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
-			cmd.Env = os.Environ()
+			cmd.Env = stagedEnv(d.Env)
 			return cmd
 		}
 
 		// Non-docker exec template: use as-is
 		cmd := exec.CommandContext(ctx, allArgs[0], allArgs[1:]...)
-		cmd.Env = os.Environ()
+		cmd.Env = stagedEnv(d.Env)
 		return cmd
 	}
 }
@@ -282,7 +282,9 @@ func (d *DockerExecContainer) SetContainerName(name string) bool {
 	return true
 }
 
-// envArgs returns sorted -e KEY=VALUE args for non-empty Env entries.
+// envArgs returns sorted -e KEY args for non-empty Env entries.
+// Values are passed via *exec.Cmd.Env (see CmdFactory) so secrets do not
+// leak through argv (visible in `ps aux`).
 func (d *DockerExecContainer) envArgs() []string {
 	if len(d.Env) == 0 {
 		return nil
@@ -297,7 +299,7 @@ func (d *DockerExecContainer) envArgs() []string {
 		if d.Env[k] == "" {
 			continue
 		}
-		args = append(args, "-e", k+"="+d.Env[k])
+		args = append(args, "-e", k)
 	}
 	return args
 }

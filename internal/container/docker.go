@@ -258,7 +258,7 @@ func (d *DockerContainer) CmdFactory() CmdFactory {
 		dockerArgs = append(dockerArgs, args...)
 
 		cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
-		cmd.Env = os.Environ()
+		cmd.Env = stagedEnv(d.Env)
 		return cmd
 	}
 }
@@ -373,9 +373,11 @@ func timezoneArgs() []string {
 	return nil
 }
 
-// envArgs returns sorted -e KEY=VALUE args for the Env map.
-// Empty values are skipped — they serve as suppression markers
-// (e.g. from credential isolation stripping competing credentials).
+// envArgs returns sorted -e KEY args for non-empty Env entries.
+// Values are passed via *exec.Cmd.Env (see CmdFactory) so secrets do not
+// leak through argv (visible in `ps aux`). Empty values are skipped — they
+// serve as suppression markers (e.g. from credential isolation stripping
+// competing credentials).
 func (d *DockerContainer) envArgs() []string {
 	if len(d.Env) == 0 {
 		return nil
@@ -390,7 +392,7 @@ func (d *DockerContainer) envArgs() []string {
 		if d.Env[k] == "" {
 			continue
 		}
-		args = append(args, "-e", k+"="+d.Env[k])
+		args = append(args, "-e", k)
 	}
 	return args
 }
