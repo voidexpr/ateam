@@ -732,14 +732,28 @@ This is similar to ATeam's report → review → code pipeline but more rigid: O
 
 The orchestrator polls the tracker on a fixed cadence (`polling.interval_ms`, default 30s), sorts active issues by priority then creation date, and dispatches them while respecting global and per-state concurrency caps. Issue state is re-fetched mid-run so the orchestrator can stop a run whose ticket has moved to a terminal state. There is no webhook path — Symphony is deliberately pull-based so the orchestrator stays the single authority on what's running.
 
-**Isolation:**
+**Isolation, permissions, and how a webapp would actually run:**
 
-Three layers, all kept narrow:
-1. **Filesystem**: each issue gets a sanitized per-issue workspace directory under a configurable root. The SPEC says: "*workspace path MUST stay inside workspace root*" and "*agent cwd MUST be the per-issue workspace path*." Workspaces are persistent — reused across runs, not auto-deleted on success.
-2. **Process**: the agent runs as a subprocess with that workspace as `cwd`.
-3. **Claim tracking**: an in-memory `claimed` set prevents duplicate dispatch; reconciliation tears down runs whose issue becomes non-active.
+The SPEC's isolation contract is deliberately narrow. The only hard rules (§9.5, §10.1) are filesystem invariants:
 
-The SPEC is explicitly agnostic about sandbox technology and approval policy — those are left to whoever implements the spec.
+1. **Workspace confinement**: each issue gets a sanitized per-issue workspace directory under a configurable root; before launching, the orchestrator validates `cwd == workspace_path`.
+2. **Root containment**: workspace path MUST stay inside workspace root; out-of-root paths are rejected.
+3. **Name sanitization**: workspace directory names use only `[A-Za-z0-9._-]`, other characters replaced with `_`.
+
+Beyond that — and this is the surprise — the SPEC mandates **no sandbox at all**. The agent is a plain shell subprocess: §10.1 says "*Invocation: `bash -lc <codex.command>`*" with the workspace as `cwd`. There is no Docker, chroot, user-namespace, seccomp, or sandbox-exec wrapper required. §15.1 makes this explicit: "*Each implementation defines its own trust boundary… Implementations SHOULD state clearly whether they rely on auto-approved actions, operator approvals, stricter sandboxing, or some combination.*" The reference Elixir daemon picks one such trust boundary for itself — the Codex app-server's own approval/sandbox config (`approval_policy`, `thread_sandbox`, `turn_sandbox_policy`) — and the spec just defers to whatever Codex version is targeted.
+
+Workspaces are also **persistent** (§9.1: "*Workspaces are reused across runs for the same issue. Successful runs do not auto-delete workspaces*"). There's no fresh-clone-per-task or worktree-per-task primitive in the spec.
+
+**How dependencies for a real webapp get into the workspace:** entirely the team's problem. §9.3: "*The spec does not require any built-in VCS or repository bootstrap behavior. Implementations MAY populate or synchronize the workspace using implementation-defined logic and/or hooks.*" The two hooks (§9.4) are:
+
+- `after_create`: shell script run once when the workspace directory is first created.
+- `before_run`: shell script run before each agent attempt, after workspace prep.
+
+So `git clone`, `npm install`, `pip install`, Docker-Compose for Postgres, browser binaries — all of that goes in `after_create`/`before_run` (or the agent prompt itself). Symphony provides the lifecycle hook points and the per-issue dir; the team writes the bash that turns that dir into a runnable webapp.
+
+**Secrets:** §6.1 — "*Environment variables do not globally override YAML values. They are used only when a config value explicitly references them.*" Linear's `api_key` (§5.3.1) "*MAY be a literal token or `$VAR_NAME`.*" There is no global secret-injection primitive — each secret is named explicitly in `WORKFLOW.md` and resolved from the daemon's environment. Whatever environment the orchestrator process has, the agent subprocess inherits.
+
+**Net effect:** the SPEC is a deliberately thin harness — process supervision, claim tracking, lifecycle hooks, filesystem invariants — and offloads sandboxing, dependency bootstrap, and secret scoping to the implementation and to `WORKFLOW.md`. That's a defensible design choice but it means "Symphony is safe to run on a real codebase" is *not* a property the spec gives you; you get it (or don't) from how you write the hooks and which Codex sandbox profile you point at.
 
 **Proof of work:**
 
@@ -786,7 +800,7 @@ There is no separate supervisor LLM — the orchestrator is a deterministic proc
 
 Multica's pitch is structural rather than technical: agents have profiles, status, comments, and issue-creation rights, and appear in the same assignee picker as humans. Pulled from the README: "*one dashboard for all your compute. Local daemons and cloud runtimes*"; "*every solution becomes a reusable skill for the whole team. Deployments, migrations, code reviews — skills compound your team's capabilities over time.*" The product surface is GitHub-style — workspaces, issues, assignees, comments — but with agents as first-class participants.
 
-**How agents are controlled (issue-driven, not schedule-driven):**
+**How agents are controlled (issue-driven, with limited scheduling via Autopilot):**
 
 End-to-end task flow:
 
@@ -796,25 +810,67 @@ End-to-end task flow:
 4. Real-time progress streamed via WebSocket.
 5. Agent reports completion or blockers as comments on the issue.
 
-There is no cron/scheduler in the README — every run is human-initiated by assigning an issue. This is closer to ComposioHQ/agent-orchestrator's model than to ATeam's proactive scheduled audits.
+The primary pattern is human-initiated: someone assigns an issue and the daemon picks it up. There *is* a scheduling primitive — the `Autopilot` service in `server/internal/service/autopilot.go` runs cron-triggered workflows that auto-create an issue (with `{{date}}` interpolation in the title) and enqueue a task on a designated assignee agent, with a `run_only` mode that skips issue creation. But Autopilot dispatches a *fixed* workflow to a *fixed* agent — there's no LLM-driven "decide what to work on tonight" step. So Multica sits between ComposioHQ (purely reactive) and ATeam (role-driven discovery + scheduling).
 
 **Skills as the unit of reuse:**
 
 Skills are pitched as codified, reusable capabilities (migrations, deployments, code reviews) that any agent on the team can execute, with the doctrine that "*every solution becomes a reusable skill.*" The README is light on concrete mechanics — file format, storage layout, versioning, how a skill is discovered or invoked aren't specified in the prose. The pgvector dependency suggests skills (or memory adjacent to them) are embedded for retrieval, but that's not confirmed.
 
-**Runtime/isolation:**
+**Runtime/isolation — what the daemon actually does:**
 
-Local daemon on each developer machine + optional cloud runtimes, unified in one dashboard. The README mentions "worktree support" in passing but does not document an explicit isolation model (no clear statement on container vs host execution, sandbox guarantees, or per-task workspace lifecycle). Compared to Sandcastle/Symphony/Ona, Multica's isolation contract is the least explicit of the recently-reviewed entries.
+Reading `server/internal/daemon/execenv/` and `repocache/` clarifies what was vague in the README. There is no Docker layer, no container-per-task. Multica runs each agent CLI as a host subprocess from the local daemon and **delegates sandboxing entirely to the underlying CLI's own profile** — for Codex, that's macOS Seatbelt or Linux Landlock, configured by Multica writing a managed block into the user's Codex `config.toml`:
+
+- Default on Linux (and "fixed" macOS Codex versions): `sandbox_mode = "workspace-write"` with `sandbox_workspace_write.network_access = true`.
+- Fallback on macOS: `sandbox_mode = "danger-full-access"` — the [`codex-sandbox-troubleshooting.md`](https://github.com/multica-ai/multica/blob/main/docs/codex-sandbox-troubleshooting.md) doc admits that Seatbelt "*silently ignores*" the `network_access` setting in workspace-write mode, so on Mac the daemon currently drops the entire Seatbelt profile. The constant `CodexDarwinNetworkAccessFixedVersion = ""` says no Codex version with the upstream fix has shipped yet.
+- A `permissions.multica` profile concept exists in the docs as a forward path (restrict to specific domains), but the in-tree default is the all-or-nothing pair above.
+
+The non-Codex CLIs (Cursor Agent, Copilot CLI, Gemini, etc.) get whatever native sandbox each ships with — Multica doesn't add its own.
+
+**Workspace lifecycle (this is where the actual isolation lives):** `repocache` maintains *bare* git clones per `(workspace, remote URL)` and creates a **worktree per task** under a stable path, with branches named `agent/{name}/{task-id}`. If a worktree already exists from a prior task it's reused — the daemon resets to clean state and fast-forwards to the latest remote — rather than recreated. So tasks for the same agent share a worktree dir across runs but get a fresh branch each time; concurrent tasks for the *same* agent serialise on the worktree (combined with the per-agent concurrency cap below).
+
+**Env / secrets / dependencies for a webapp:** there's no spec-level secret scoping — agents inherit the daemon process's environment. Project deps (Postgres, npm, browser binaries) come from the host machine the daemon is running on. The "*Local daemons and cloud runtimes*" framing is more honest than it first sounds: local = your laptop with your tools and creds, cloud = a managed VM Multica provisions; in both cases, the agent runs as a normal process against a normal filesystem with whatever services the host has. There is no equivalent of Symphony's `after_create`/`before_run` hooks for declarative environment bootstrap.
+
+**Bottom line on isolation:** weaker by default than Sandcastle (always sandboxed), Ona (kernel-level guardrails), or Symphony's strict-sandbox implementations; stronger than Gas Town (no sandbox primitive at all) thanks to the worktree-per-task model and the Codex sandbox handoff. On macOS specifically, the workspace-write Seatbelt bug means Multica is currently running agents at "*danger-full-access*" — worth knowing before pointing it at a sensitive repo.
+
+**Task data model — two state machines, not one:**
+
+Schema (from `server/migrations/001_init.up.sql` and friends) splits human-facing work from execution:
+
+- **`issue.status`**: `backlog | todo | in_progress | in_review | done | blocked | cancelled` — the kanban-style state a human (or agent) sets via the UI.
+- **`issue.priority`**: `urgent | high | medium | low | none`.
+- **`issue_label`**: workspace-scoped labels, classic many-to-many tags.
+- **`agent_task_queue.status`**: `queued | dispatched | running | completed | failed | cancelled` — the per-execution-attempt machine. One issue can spawn many task rows over time (re-runs, retries, mention-triggered runs, autopilot runs).
+- **`agent_task_queue.runtime_id`**: pins the task to a specific runtime instance (FK to `agent_runtime`).
+- **`agent_runtime`**: tracks each daemon (per workspace), runtime mode, provider, online/offline, last_seen, device info. Created by migration `004_agent_runtime_loop`.
+
+Categorisation/organisation is therefore: **workspace → issues (with priority + labels + assignee) → tasks (queued attempts on those issues, claimed by a specific runtime → agent)**. Sub-flows that produce tasks: `EnqueueTaskForIssue` (UI assignment), `EnqueueTaskForMention` (`@agent` in a comment), `EnqueueQuickCreateTask` (one-shot), `EnqueueChatTask` (chat session), and Autopilot (cron-driven workflows that auto-create issues + enqueue tasks).
+
+There is *no* explicit "run" record beyond the task row itself — the queue table doubles as the run log. State transitions happen via `ClaimTask` (`queued → dispatched`), `StartTask` (`→ running`, sets `started_at`), `CompleteTask`/`FailTask` (`→ completed | failed`), with `MaybeRetryFailedTask` re-enqueueing for retryable failures. Each transition publishes a `protocol.EventTask*` event over the WebSocket bus.
+
+**Skills** live in their own table (`skill` + `skill_file` from migration `008_structured_skills`): name, description, `content` (text), `config` (JSONB), optional multi-file body via `skill_file`, plus an `agent_skill` junction for per-agent assignment. Skills are workspace-scoped (`UNIQUE(workspace_id, name)`), no version history table — just `updated_at`.
+
+**Concurrency and budget — answering "what stops 50 tasks from burning my tokens":**
+
+Read of `server/internal/service/task.go`, `server/internal/daemon/daemon.go`, and the migrations gives a precise (and somewhat sobering) picture:
+
+- **Per-agent cap (the primary throttle):** every `agent` row has a `MaxConcurrentTasks` field. `ClaimTask()` does an atomic check: `if running >= int64(agent.MaxConcurrentTasks) { outcome = "no_capacity"; return nil }`. So if you create 50 issues all assigned to the same agent and that agent has `MaxConcurrentTasks=2`, only 2 tasks ever leave `queued` at a time — the other 48 stay in the queue, costing nothing.
+- **Per-runtime cap (the daemon-side throttle):** the daemon's `pollLoop` builds a "task slot semaphore" with `cfg.MaxConcurrentTasks` slots ("*returns a buffered channel pre-populated with stable slot indices [0, n). Receive to acquire a slot, send the same slot back to release.*"). A slot is acquired *before* the daemon calls `ClaimTask` against the server, deliberately to "*prevent tasks from piling up in the server's `dispatched` state without corresponding execution.*" So the machine running the daemon also caps total in-flight work, regardless of how many agents are spread across it.
+- **Worktree serialisation (incidental throttle):** because `repocache` reuses a worktree path per agent, two concurrent tasks for the same agent on the same repo would clash on the working tree. In practice this means the per-agent cap is the binding constraint for repo-touching agents.
+- **Autopilot pre-flight (gating, not a budget):** `service/autopilot.go` checks runtime online-ness before enqueueing — "*if it is not online, we record a `skipped` run with a failure_reason and return without enqueueing*" — so a stale schedule doesn't dump "*thousands of doomed tasks*" into the queue. This is a sanity gate, not a rate limit.
+- **What does *not* exist:** there is no per-workspace, per-team, or org-wide concurrency cap; no token budget; no spend cap; no rate limit; no "stop after $X" enforcement. Migration `013_runtime_usage` records `input_tokens / output_tokens / cache_read_tokens / cache_write_tokens` per `(runtime_id, provider, model, date)`, but **only as observability** — nothing in the dispatch path reads those numbers. There is no `budget`, `quota`, or `limit` table anywhere in the schema; there is no package named `budget`, `cost`, `quota`, `rate`, or `limit` in `server/internal/`.
+
+So the practical answer to "*if I create 50 tasks how do I prevent burning all my tokens within minutes*" is: rely entirely on `agent.MaxConcurrentTasks` (per-agent) and the daemon's `MaxConcurrentTasks` config (per-machine). Set those low and the queue stays parked at zero cost. But within the slots you do allow, there is no token-aware admission control — a long-running, expensive prompt will burn whatever the model wants to burn, and Multica records the bill rather than capping it. For an org running paid API access on a metered plan, that's a meaningful gap; for a Pro/Max-plan setup where the cap is upstream of Multica, it matters less.
 
 **Overlap with ATeam:** Self-hosted, open-source, agent-agnostic (very broad CLI support), Docker-deployable, real-time progress streaming, durable task lifecycle. The "skills compound" angle echoes ATeam's organisational knowledge promotion. Multi-runtime support is broader than ATeam's current focus on Claude Code.
 
 **What it lacks for our use case:**
 
-- **No proactive scheduling.** Like Symphony and ComposioHQ, every run starts with a human assigning an issue. There's no equivalent of ATeam's role-driven nightly audit pass that *finds* problems on a cadence.
-- **No specialized roles with persistent project knowledge.** Agents are generic assignees. "Skills" are reusable procedures (closer to Ona's SKILL.md), not domain-specific roles that accumulate project context. Skill compounding is presented but not documented in concrete terms.
+- **Scheduling is workflow-trigger, not discovery.** Autopilot can fire predefined workflows on a cron, but it dispatches to a fixed assignee agent with a templated title — there's no LLM-driven "find what's wrong with this codebase tonight" pass. It's closer to "scheduled task runner" than to ATeam's role-driven audit.
+- **No specialized roles with persistent project knowledge.** Agents are generic assignees. "Skills" are reusable procedures (closer to Ona's SKILL.md), not domain-specific roles that accumulate project context. Skill compounding is the pitch but in code it's a workspace-scoped name+content+JSONB-config row with no version history.
 - **No audit → approve → implement separation.** Issues go straight to execution. No deliberate phase where a finding is reviewed before code is written.
 - **No coordinator reasoning.** No LLM-powered triage layer choosing what matters most. The user is the coordinator.
-- **Underspecified isolation.** Worktree support is mentioned but no explicit per-task workspace contract, no container guarantee. ATeam's harder isolation invariants (Docker container per run, throwaway worktree) are stronger by default.
+- **No token/cost budget enforcement.** Per-agent and per-runtime concurrency caps exist; spend caps don't. `runtime_usage` records token consumption but the dispatch path never reads it. Mass-assigning issues is safe from a *concurrency* standpoint (queue parks behind `MaxConcurrentTasks`) but unbounded from a *cost* standpoint within the slots that do run.
+- **Sandbox is delegated, with a known macOS gap.** Isolation is whatever the underlying CLI's profile gives you. For Codex on macOS today that's `danger-full-access` (Seatbelt's `network_access` bug). For non-Codex CLIs Multica adds nothing on top of the CLI's native sandbox. ATeam's per-run Docker container is a stronger default.
 - **Heavyweight infra footprint for what we'd use it for.** Postgres + pgvector + Next.js is appropriate for a team-collaboration product but is more dependency surface than ATeam's local-CLI + SQLite design needs.
 
 **Ideas to integrate:**
@@ -824,6 +880,10 @@ Local daemon on each developer machine + optional cloud runtimes, unified in one
 - **Issue-style task lifecycle with WebSocket progress.** The `enqueue → claim → start → complete/fail` state machine with WebSocket progress is more explicit than ATeam's run/log model. Worth comparing against `ateam ps` to see if the explicit state names tighten things up.
 - **Skills compound" naming.** Even if the implementation under the hood is similar to ATeam's role prompts and knowledge files, the framing of every solved problem becoming a team-reusable skill is a clearer story to tell users than "we accumulate project knowledge."
 - **Broad multi-CLI support as a defensive bet.** With 11 agent CLIs supported, Multica is hedged against any single agent vendor losing relevance. ATeam's Claude-Code-first stance is a coupling risk worth re-evaluating once the harness is more stable.
+- **Two-level concurrency cap (per-agent + per-runtime semaphore).** The combination of `agent.MaxConcurrentTasks` checked atomically in `ClaimTask` *plus* a daemon-side slot semaphore acquired before the claim is a clean design: it prevents runaway fan-out at *both* the queue and the executor without needing a global lock. Worth borrowing for ATeam's scheduler, especially the "acquire-slot-before-claim" ordering that keeps the server's `dispatched` state from getting ahead of actual execution.
+- **Bare-clone + worktree-per-task with branch naming convention.** `repocache` reusing a single bare clone per `(workspace, remote URL)` and creating worktrees on branches `agent/{name}/{task-id}` is more disk-efficient than ATeam's current per-run worktree approach and gives a discoverable branch namespace. The "reset and fast-forward instead of recreating" reuse pattern is a nice optimisation if/when ATeam adds longer-lived agent workspaces.
+- **Token usage table even without enforcement.** Migration `013_runtime_usage` partitioning input/output/cache-read/cache-write tokens by `(runtime_id, provider, model, date)` is a useful schema even before adding enforcement. ATeam's call DB already records cost; a similar daily roll-up by model and provider would make the data far easier to query and chart.
+- **Autopilot's online-ness pre-flight.** "*If the runtime is not online, record a `skipped` run with a failure_reason and return without enqueueing*" is exactly the right shape for avoiding the failure mode of dumping thousands of doomed runs into a queue when the executor is down. ATeam's scheduler should probably do the same check before enqueueing.
 
 **Key architectural difference from ATeam:** Multica is a *team-coordination product* — its value is in giving humans and agents a shared issue tracker, runtime dashboard, and skill library. ATeam is a *quality-maintenance harness* — its value is in deciding what to work on, doing it on a schedule, and producing a git-versioned audit trail without a human in the loop. Multica assumes a person to assign work and review results; ATeam assumes a sleeping team. They could plausibly compose: ATeam's audit roles file Multica issues; Multica routes them to the right agent CLI; the resulting PR closes the loop.
 
