@@ -12,6 +12,8 @@ See also: [Agent Orchestrator research](https://github.com/ComposioHQ/agent-orch
 
 #### ComposioHQ/agent-orchestrator ⭐⭐⭐⭐ (Closest Match)
 
+**Link:** [github.com/ComposioHQ/agent-orchestrator](https://github.com/ComposioHQ/agent-orchestrator)
+
 **What it is:** An open-source TypeScript platform (40K LOC, 3.3K tests, MIT licensed) that manages fleets of parallel coding agents. Each agent gets its own git worktree, branch, and PR. Agent-agnostic (Claude Code, Codex, Aider, OpenCode), runtime-agnostic (tmux, Docker), tracker-agnostic (GitHub, Linear). Built in 8 days by 30 concurrent AI agents orchestrating their own construction. 2.7K GitHub stars as of Feb 2026.
 
 **How agents are controlled:**
@@ -85,6 +87,8 @@ The `escalateAfter` timeout is the key interaction-detection mechanism: if an ag
 
 #### OpenHands (formerly OpenDevin) ⭐⭐⭐⭐
 
+**Link:** [github.com/All-Hands-AI/OpenHands](https://github.com/All-Hands-AI/OpenHands)
+
 **What it is:** An autonomous coding agent platform with 65K+ GitHub stars and $18.8M in funding. Supports full development loops: task decomposition, autonomous terminal execution, repository-wide edits, test-and-fix loops, and PR generation. Runs in Docker/Kubernetes sandboxes. Model-agnostic.
 
 **Overlap with ATeam:** OpenHands covers many of the same tasks — refactoring, test generation, dependency upgrades, vulnerability remediation, documentation. Their "Refactor SDK" decomposes large tasks into per-agent subtasks using dependency tree analysis.
@@ -103,6 +107,8 @@ The `escalateAfter` timeout is the key interaction-detection mechanism: if an ag
 
 #### AWS CLI Agent Orchestrator (CAO) ⭐⭐⭐
 
+**Link:** [github.com/awslabs/cli-agent-orchestrator](https://github.com/awslabs/cli-agent-orchestrator)
+
 **What it is:** A lightweight Python orchestration system by AWS Labs that manages multiple AI agent sessions in tmux terminals. Features hierarchical orchestration with a supervisor agent, session isolation, and — critically — **scheduled flows using cron expressions**.
 
 **Overlap with ATeam:** The flow/scheduling feature is exactly what ATeam needs. CAO supports cron-based automated agent execution, supervisor-worker hierarchies, and MCP-based inter-agent communication.
@@ -120,6 +126,8 @@ The `escalateAfter` timeout is the key interaction-detection mechanism: if an ag
 
 #### Qodo PR-Agent ⭐⭐⭐
 
+**Link:** [github.com/qodo-ai/pr-agent](https://github.com/qodo-ai/pr-agent)
+
 **What it is:** An open-source AI-powered PR reviewer that runs on every pull request. Handles any PR size via compression, highly customizable via JSON prompts, generates descriptions, reviews, suggestions, and test generation.
 
 **Overlap with ATeam:** PR-Agent covers code review, which is one of ATeam's sub-agent responsibilities. It's battle-tested and widely used.
@@ -134,6 +142,8 @@ The `escalateAfter` timeout is the key interaction-detection mechanism: if an ag
 - Their **PR compression strategy** for handling large diffs could inform how ATeam's coordinator summarizes agent changes for human review.
 
 #### MetaGPT ⭐⭐
+
+**Link:** [github.com/FoundationAgents/MetaGPT](https://github.com/FoundationAgents/MetaGPT)
 
 **What it is:** A multi-agent framework that simulates a software company with roles (PM, Architect, Engineer, QA). Uses SOPs (Standard Operating Procedures) to structure agent collaboration. Research-focused, strong on initial project scaffolding.
 
@@ -150,6 +160,8 @@ The `escalateAfter` timeout is the key interaction-detection mechanism: if an ag
 - MetaGPT's **incremental mode** (`--inc` flag, works with existing repos) is worth watching as it matures.
 
 #### Gas Town (steveyegge/gastown) ⭐⭐⭐⭐
+
+**Link:** [github.com/steveyegge/gastown](https://github.com/steveyegge/gastown) — see also Beads at [github.com/steveyegge/beads](https://github.com/steveyegge/beads)
 
 **What it is:** A multi-agent workspace manager by Steve Yegge (8.8K GitHub stars, written in Go). Introduces a rich metaphor: a "Mayor" AI coordinator manages "Rigs" (projects), "Polecats" (worker agents), and "Hooks" (git worktree-based persistent storage). Work is tracked via "Beads" (a git-backed issue tracking system) and "Convoys" (bundles of work items). Supports Claude Code and Codex as agent runtimes. Includes a web dashboard, tmux integration, and formula-based repeatable workflows.
 
@@ -213,6 +225,8 @@ Gas Town is **significantly more complex to use** for ATeam's goals. It's design
 **Bottom line:** Gas Town is a more ambitious and general-purpose system. ATeam is a more focused and opinionated tool for a specific use case. If you want an interactive multi-agent factory, Gas Town is compelling. If you want a quiet night-shift crew that improves your code while you sleep, ATeam's simpler architecture is a better fit. The ideas worth borrowing from Gas Town are the structured work tracking (beads/convoys) and the crash-recovery semantics (hooks with resumable state), not the interactive tmux-based execution model.
 
 #### Archon (coleam00/archon) ⭐⭐⭐⭐
+
+**Link:** [github.com/coleam00/archon](https://github.com/coleam00/archon)
 
 **What it is:** "The first open-source harness builder for AI coding." A workflow engine that wraps coding agents in deterministic, YAML-defined DAGs of AI nodes, bash nodes, and human approval gates. 20.3K GitHub stars, 3.1K forks, created Feb 2025, pushed today, 198 open issues — among the most-starred and most-active projects in the space. TypeScript, MIT-licensed, primary runtime is Claude Code with Codex/Pi as alternatives. Archon was originally a Pydantic-AI agent builder; the current iteration is a near-total rewrite focused on coding harnesses.
 
@@ -287,6 +301,8 @@ These are all customizable YAML files, so the "built-ins" double as templates.
 
 #### Compound Engineering Plugin (EveryInc) ⭐⭐⭐⭐
 
+**Link:** [github.com/EveryInc/compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin) — methodology at [every.to/guides/compound-engineering](https://every.to/guides/compound-engineering)
+
 **What it is:** The official Compound Engineering plugin from [Every Inc.](https://every.to/) — the team (Kieran Klaassen, Dan Shipper, et al.) that coined and popularised "compound engineering." A multi-tool plugin (Claude Code primary, plus Codex, Cursor, GitHub Copilot, Gemini, Pi, OpenCode, Droid, Qwen, Kiro via Bun-based converters). 16.2K⭐, 1.3K forks, created Oct 2025, pushed today. TypeScript, MIT-licensed. Among the most-starred and most-active projects in this entire research.
 
 **The doctrine, applied:** "each unit of engineering work should make subsequent units easier — not harder." This is the originating expression of the doctrine; everything else covered in this section that mentions compounding (notably DSPy Compounding Engineering below) is a re-implementation of the same idea in different primitives. The Every methodology is documented at [every.to/guides/compound-engineering](https://every.to/guides/compound-engineering).
@@ -353,6 +369,8 @@ It is, in fact, the most direct conceptual overlap with ATeam in this entire sec
 
 #### Guild (mathomhaus/guild) ⭐⭐⭐⭐
 
+**Link:** [github.com/mathomhaus/guild](https://github.com/mathomhaus/guild)
+
 **What it is:** A shared-context, memory, and task-coordination *substrate* for AI coding agents — explicitly **not** a framework or orchestrator. Single Go binary, embedded SQLite at `~/.guild/`, exposed to agents via an MCP server. 112⭐, created April 2026, pushed today. Among the freshest entries in this section, but the design choices are unusually well-thought-out and the timing matters: Guild ships the missing primitives that the Meiklejohn academic survey (see C.1) flags as the open research gaps in current MAS — atomic-claim concurrency, typed accumulating state, hybrid retrieval. Agent-agnostic by construction (any MCP-capable agent connects: Claude Code, Codex, Cursor).
 
 **Architecture:**
@@ -411,6 +429,8 @@ The vocabulary is whimsical (quests, lore, oath, brief) but the semantics are un
 
 #### DSPy Compounding Engineering (Strategic-Automation) ⭐⭐⭐
 
+**Link:** [github.com/Strategic-Automation/dspy-compounding-engineering](https://github.com/Strategic-Automation/dspy-compounding-engineering) — docs at [strategic-automation.github.io/dspy-compounding-engineering](https://strategic-automation.github.io/dspy-compounding-engineering/)
+
 **What it is:** A local-first Python CLI by Strategic-Automation that re-implements the compound-engineering doctrine (see EveryInc entry above for the canonical version) on top of [DSPy](https://github.com/stanfordnlp/dspy), Stanford's declarative-LLM framework. 56⭐, ~5 months old (created Nov 2025), pushed April 2026. Much smaller in scope and adoption than Every's plugin, but interesting for a different reason: it expresses the same loop in DSPy's typed/optimisable primitives rather than as a curated set of human-invoked slash commands. Worth a full entry as a *technique* contrast, not as a competing implementation.
 
 **The core idea — "compounding engineering":** every completed unit of work automatically writes a learning artifact into a JSON knowledge base under `.knowledge/`. Every subsequent agent call automatically retrieves relevant past learnings and prepends them to the prompt. The system literally gets smarter with use, without an explicit human curating the knowledge.
@@ -464,6 +484,8 @@ The agent code never has to think about retrieval or memory. It's framework-leve
 
 #### LangGraph ⭐⭐
 
+**Link:** [github.com/langchain-ai/langgraph](https://github.com/langchain-ai/langgraph)
+
 **What it is:** A Python-based framework from LangChain for managing multi-agent workflows using graph architectures. Organizes tasks as nodes in a directed graph with conditional edges, parallel execution, and persistent state. MIT-licensed, 120K+ GitHub stars (LangChain ecosystem). Features durable execution, human-in-the-loop checkpoints, and LangGraph Platform for deployment.
 
 **Overlap with ATeam:** LangGraph provides the orchestration primitives (state management, conditional routing, parallel execution, human checkpoints) that ATeam's coordinator needs. Its emphasis on "context engineering" — controlling exactly what context each agent sees — aligns with ATeam's layered prompt system.
@@ -480,6 +502,8 @@ The agent code never has to think about retrieval or memory. It's framework-leve
 - If ATeam's coordinator ever grows complex enough to need a graph-based workflow engine (unlikely for v1), LangGraph would be the right foundation.
 
 #### Supacode ⭐⭐
+
+**Link:** [supacode.sh](https://supacode.sh/)
 
 **What it is:** A native macOS terminal application ([supacode.sh](https://supacode.sh/)) that serves as a "command center" for running multiple coding agents in parallel. Built in Swift with The Composable Architecture (TCA) and libghostty as the terminal engine. Open source, 72 releases, requires macOS 26. Installable via `brew install supacode`.
 
@@ -502,6 +526,8 @@ The agent code never has to think about retrieval or memory. It's framework-leve
 **Key difference from ATeam:** Supacode is a developer productivity tool — a better terminal for manually running agents side by side. ATeam is an autonomous system that decides what to work on, runs agents unattended, and triages results. Supacode is the cockpit; ATeam is the autopilot.
 
 #### npcsh (npc-worldwide/npcsh) ⭐⭐
+
+**Link:** [github.com/npc-worldwide/npcsh](https://github.com/npc-worldwide/npcsh)
 
 **What it is:** A Python "shell for AI" ([github.com/npc-worldwide/npcsh](https://github.com/npc-worldwide/npcsh)) that ships its own in-process agent runtime via LiteLLM (Ollama, OpenAI, Anthropic, Gemini, DeepSeek). Agents are declared as YAML `.npc` files with a Jinja2 `primary_directive` and a `jinxes:` allowlist of tools. Tools (`jinx` files) are themselves YAML with `inputs:`, `steps:`, an `engine:` (`python` or `llm`), and a `code:` body in Jinja2. Team-wide context lives in `npcsh.ctx` (shared `context`, `preferences`, `databases`) and is inherited by every agent. MIT-licensed. Targets researchers and tinkerers exploring multi-provider, custom-tool agent workflows.
 
@@ -570,6 +596,8 @@ No DAG, no DSL, no declarative pipeline. Each jinx's `steps:` array (almost alwa
 
 #### Sandcastle (mattpocock/sandcastle) ⭐⭐⭐
 
+**Link:** [github.com/mattpocock/sandcastle](https://github.com/mattpocock/sandcastle)
+
 **What it is:** A TypeScript library for running coding agents inside isolated sandboxes via a programmatic `sandcastle.run()` API. Created March 2026 by Matt Pocock, 1.85K stars in ~6 weeks, 889 commits, latest release v0.5.6 (April 2026), pushed daily. Agent-agnostic (Claude Code, Codex, Pi, OpenCode, custom) and sandbox-provider-agnostic (Docker bind-mount, Podman with SELinux, Vercel Firecracker microVMs, custom providers). MIT-licensed.
 
 **How it works:** Library, not a daemon. You call `sandcastle.run({ agent: claudeCode("claude-opus-4-6"), sandbox: docker(), prompt: "..." })` and it provisions a sandbox, runs the agent inside it against your repo, captures commits, and tears it down. Returns `{ iterations, commits, branch, logFilePath }`.
@@ -610,6 +638,8 @@ Each hook is `{ command: string; timeoutMs?: number }`. Useful for installing pr
 **Key architectural difference from ATeam:** Sandcastle is a sandboxing/invocation primitive — it answers "given an agent and a repo, run the agent safely and capture the diff." ATeam is the layer above that primitive — it answers "given a project and a schedule, decide which agents to run, when, and what to do with the results." You could plausibly build ATeam on top of sandcastle (if ATeam were TypeScript) by treating sandcastle as the container adapter and adding the coordinator, scheduler, role system, and audit/implement workflow on top. The right mental model: sandcastle is the runtime ATeam already has internally, packaged as a reusable library; ATeam is everything else.
 
 #### Ona (formerly Gitpod) ⭐⭐⭐⭐
+
+**Link:** [ona.com](https://ona.com/) — GitHub org at [github.com/gitpod-io](https://github.com/gitpod-io)
 
 **What it is:** A cloud platform (SaaS or self-hosted VPC) for running AI software engineering agents in isolated, reproducible environments. Originally Gitpod (cloud dev environments), rebranded as Ona in 2025–2026 with a pivot toward AI agent infrastructure. Supports background agents, automations triggered by PRs/schedules/webhooks, enterprise guardrails, and kernel-level security enforcement. SOC 2 certified, GDPR compliant. Targets Fortune 500.
 
@@ -684,17 +714,130 @@ This is similar to ATeam's report → review → code pipeline but more rigid: O
 
 **Key architectural difference from ATeam:** Ona is a cloud infrastructure platform — you send work to Ona's cloud, agents run there, results come back as PRs. ATeam is a local-first CLI — agents run on your machine (or any machine with Docker), using your Claude subscription, with artifacts stored as local git-tracked files. Ona abstracts away the infrastructure; ATeam gives you full control of it. Ona is better for enterprises with 100+ repos needing centralized governance. ATeam is better for individual developers or small teams wanting autonomous quality improvement without a cloud dependency.
 
+#### Symphony (openai/symphony) ⭐⭐⭐
+
+**Link:** [github.com/openai/symphony](https://github.com/openai/symphony)
+
+**What it is:** OpenAI's Apache-2.0 reference daemon for "harness engineering" — pitched as "*Symphony turns project work into isolated, autonomous implementation runs, allowing teams to manage work instead of supervising coding agents.*" Released as a "low-key engineering preview for testing in trusted environments." Reference implementation in Elixir (~95% of the repo), with a published SPEC so teams can build their own. The agent it drives is a Codex app-server subprocess (not Claude Code).
+
+**Core abstractions (from SPEC):**
+
+- **Work item**: a Linear issue normalized to `(id, state, priority, labels, blockers)`.
+- **Run**: one execution attempt for an issue, with explicit lifecycle phases (workspace prepare → agent spawn → turns → termination).
+- **Agent**: a Codex app-server subprocess processing the issue through a multi-turn conversation, `cwd` pinned to the per-issue workspace, launched via `bash -lc`.
+- **Harness**: the orchestrator + workspace manager. Provides deterministic per-issue isolation and lifecycle management. The whole project is essentially a definition of what "harness engineering" looks like as a daemon rather than ad-hoc scripts.
+- **WORKFLOW.md**: a per-team file owning the agent prompt, config, and hooks — the unit of customization.
+
+**How work is triggered (pull, not push):**
+
+The orchestrator polls the tracker on a fixed cadence (`polling.interval_ms`, default 30s), sorts active issues by priority then creation date, and dispatches them while respecting global and per-state concurrency caps. Issue state is re-fetched mid-run so the orchestrator can stop a run whose ticket has moved to a terminal state. There is no webhook path — Symphony is deliberately pull-based so the orchestrator stays the single authority on what's running.
+
+**Isolation:**
+
+Three layers, all kept narrow:
+1. **Filesystem**: each issue gets a sanitized per-issue workspace directory under a configurable root. The SPEC says: "*workspace path MUST stay inside workspace root*" and "*agent cwd MUST be the per-issue workspace path*." Workspaces are persistent — reused across runs, not auto-deleted on success.
+2. **Process**: the agent runs as a subprocess with that workspace as `cwd`.
+3. **Claim tracking**: an in-memory `claimed` set prevents duplicate dispatch; reconciliation tears down runs whose issue becomes non-active.
+
+The SPEC is explicitly agnostic about sandbox technology and approval policy — those are left to whoever implements the spec.
+
+**Proof of work:**
+
+Each agent run produces "CI status, PR review feedback, complexity analysis, and walkthrough videos" as evidence, and the orchestrator exposes structured logs (`issue_id`, `issue_identifier`, `session_id`), token/runtime/rate-limit metrics, and an optional `/api/v1/state` snapshot of the running/retrying queue. The "manage work, not agents" pitch leans on this artifact bundle being rich enough that humans don't need to babysit the run.
+
+**Role separation (humans + system):**
+
+- **Workflow owner**: writes `WORKFLOW.md` (prompt, config, hooks).
+- **Operator**: watches logs, manages tracker state, optionally hits `/api/v1/refresh`.
+- **Orchestrator**: serializes state mutations, claims, retries with exponential backoff, stall detection, reconciliation.
+- **Agent**: executes turns; ticket writes are typically performed by the agent itself using tools.
+
+There is no separate supervisor LLM — the orchestrator is a deterministic process.
+
+**Overlap with ATeam:** Both run isolated, scheduled, autonomous coding sessions with explicit lifecycle management. Both treat "isolated per-task workspace" as a hard invariant. Both separate prompt/config (WORKFLOW.md / role prompts) from the runtime that executes it. Both produce an audit trail and metrics for observability. Both publish a spec or intentional architecture so the implementation can be replaced.
+
+**What it lacks for our use case:**
+
+- **Tracker-driven, not proactive.** Symphony only runs when an issue is on the board in the right state. There's no equivalent of ATeam's role-driven audit pass that *finds* problems on a schedule. You still need humans (or another tool) to file the tickets.
+- **One generic agent per run.** No specialized roles (testing, security, refactor) with persistent project knowledge. WORKFLOW.md is per-team, not per-domain — the same prompt handles every ticket on the board.
+- **No audit → approve → implement separation.** Runs go straight to PR. No deliberate phase where a finding is reviewed before code is written.
+- **No coordinator reasoning.** The orchestrator is a deterministic poller — priority + creation date, not LLM judgment about what matters most.
+- **Codex-only reference impl.** The reference daemon spawns Codex app-server subprocesses. Targeting Claude Code (or other CLIs) means re-implementing the SPEC, not configuring a plugin.
+- **Persistent workspaces are an unusual default.** ATeam's worktree-per-run model is throwaway-by-default; Symphony reuses per-issue dirs across runs, which is convenient for context reuse but couples runs together.
+- **Linear-only tracker integration.** SPEC is generic but the reference implementation is Linear-shaped.
+
+**Ideas to integrate:**
+
+- **The SPEC itself as a reference for harness invariants.** The "workspace path MUST stay inside workspace root," "agent cwd MUST be the per-issue workspace," reconciliation-stops-orphan-runs invariants are exactly the kind of harness rules ATeam already enforces implicitly. Worth restating ATeam's container/worktree contract in similarly tight language.
+- **Run reconciliation against tracker state.** Symphony's pattern of re-fetching issue state during a run and aborting if the ticket moved to a terminal state is a clean cancellation primitive. ATeam's coordinator could do the same against report-file state — if the underlying finding is resolved by another agent, abort the run.
+- **Pull-only scheduling as a design choice.** Symphony's deliberate avoidance of webhooks (the orchestrator must stay the single authority on what's running) is a useful counterweight to ComposioHQ's reactions-on-webhooks approach. ATeam already leans pull (cron-based profiles); Symphony is evidence that this is a reasonable place to land for autonomous systems.
+- **Proof-of-work artifact bundle.** The CI-status + PR-feedback + complexity + walkthrough-video bundle is a richer "did this run actually accomplish something" artifact than ATeam's current run logs + report diff. Worth considering a standard `proof.md` (or similar) that every run emits.
+- **`/api/v1/state` as an inspection endpoint.** ATeam currently exposes run state via `ateam ps` against the SQLite call DB. A small read-only HTTP endpoint over the same data would make dashboards and external monitoring trivial.
+
+**Key architectural difference from ATeam:** Symphony is a tracker-driven harness — issues come in, runs go out, the orchestrator's job is to make that pipeline deterministic and observable. ATeam is a *quality-driven* harness — roles look at the project itself on a schedule, decide what to work on, and produce both the finding and the fix. Symphony assumes a human (or upstream system) has already decided "this needs doing"; ATeam tries to make that decision itself. The two could plausibly compose: ATeam's audit roles file Linear issues; Symphony picks them up and implements them.
+
+#### Multica (multica-ai/multica) ⭐⭐⭐
+
+**Link:** [multica.ai](https://multica.ai/) — repo at [github.com/multica-ai/multica](https://github.com/multica-ai/multica)
+
+**What it is:** Open-source self-hosted platform that "*[turns] coding agents into real teammates — assign tasks, track progress, compound skills.*" Tagline: "*Your next 10 hires won't be human.*" 26.6K⭐, 3.2K forks, 65 releases (v0.2.29 in May 2026) — one of the most-starred entries in this entire research. TypeScript front + Go back, Next.js 16 (App Router), Chi router + sqlc + gorilla/websocket, PostgreSQL 17 with pgvector. Deployable via Docker Compose or Kubernetes. Notably broad agent compatibility — 11 CLIs out of the box: **Claude Code, Codex, GitHub Copilot CLI, OpenClaw, OpenCode, Hermes, Gemini, Pi, Cursor Agent, Kimi, Kiro CLI**, with a local daemon that "*auto-detects available CLIs*" on PATH and reports capabilities back to the server.
+
+**The framing — agents as teammates, not tools:**
+
+Multica's pitch is structural rather than technical: agents have profiles, status, comments, and issue-creation rights, and appear in the same assignee picker as humans. Pulled from the README: "*one dashboard for all your compute. Local daemons and cloud runtimes*"; "*every solution becomes a reusable skill for the whole team. Deployments, migrations, code reviews — skills compound your team's capabilities over time.*" The product surface is GitHub-style — workspaces, issues, assignees, comments — but with agents as first-class participants.
+
+**How agents are controlled (issue-driven, not schedule-driven):**
+
+End-to-end task flow:
+
+1. Create an issue (web board or `multica issue create` CLI).
+2. Assign to an agent like assigning to a colleague.
+3. Agent autonomously claims and executes — full lifecycle: "*enqueue, claim, start, complete/fail*."
+4. Real-time progress streamed via WebSocket.
+5. Agent reports completion or blockers as comments on the issue.
+
+There is no cron/scheduler in the README — every run is human-initiated by assigning an issue. This is closer to ComposioHQ/agent-orchestrator's model than to ATeam's proactive scheduled audits.
+
+**Skills as the unit of reuse:**
+
+Skills are pitched as codified, reusable capabilities (migrations, deployments, code reviews) that any agent on the team can execute, with the doctrine that "*every solution becomes a reusable skill.*" The README is light on concrete mechanics — file format, storage layout, versioning, how a skill is discovered or invoked aren't specified in the prose. The pgvector dependency suggests skills (or memory adjacent to them) are embedded for retrieval, but that's not confirmed.
+
+**Runtime/isolation:**
+
+Local daemon on each developer machine + optional cloud runtimes, unified in one dashboard. The README mentions "worktree support" in passing but does not document an explicit isolation model (no clear statement on container vs host execution, sandbox guarantees, or per-task workspace lifecycle). Compared to Sandcastle/Symphony/Ona, Multica's isolation contract is the least explicit of the recently-reviewed entries.
+
+**Overlap with ATeam:** Self-hosted, open-source, agent-agnostic (very broad CLI support), Docker-deployable, real-time progress streaming, durable task lifecycle. The "skills compound" angle echoes ATeam's organisational knowledge promotion. Multi-runtime support is broader than ATeam's current focus on Claude Code.
+
+**What it lacks for our use case:**
+
+- **No proactive scheduling.** Like Symphony and ComposioHQ, every run starts with a human assigning an issue. There's no equivalent of ATeam's role-driven nightly audit pass that *finds* problems on a cadence.
+- **No specialized roles with persistent project knowledge.** Agents are generic assignees. "Skills" are reusable procedures (closer to Ona's SKILL.md), not domain-specific roles that accumulate project context. Skill compounding is presented but not documented in concrete terms.
+- **No audit → approve → implement separation.** Issues go straight to execution. No deliberate phase where a finding is reviewed before code is written.
+- **No coordinator reasoning.** No LLM-powered triage layer choosing what matters most. The user is the coordinator.
+- **Underspecified isolation.** Worktree support is mentioned but no explicit per-task workspace contract, no container guarantee. ATeam's harder isolation invariants (Docker container per run, throwaway worktree) are stronger by default.
+- **Heavyweight infra footprint for what we'd use it for.** Postgres + pgvector + Next.js is appropriate for a team-collaboration product but is more dependency surface than ATeam's local-CLI + SQLite design needs.
+
+**Ideas to integrate:**
+
+- **The "agents as assignees" model.** Surfacing agents in the same picker as humans is a UX pattern worth borrowing if/when ATeam adds a board view — it makes the human/agent boundary explicit and permission-able rather than hidden in CLI flags.
+- **Auto-detection of available CLIs on PATH.** Multica's daemon enumerating which agent CLIs are installed and reporting capabilities to the server is a clean discovery primitive. ATeam currently assumes Claude Code by config; an "available agents" probe at startup would let `ateam` adapt to whatever the user has installed without explicit configuration.
+- **Issue-style task lifecycle with WebSocket progress.** The `enqueue → claim → start → complete/fail` state machine with WebSocket progress is more explicit than ATeam's run/log model. Worth comparing against `ateam ps` to see if the explicit state names tighten things up.
+- **Skills compound" naming.** Even if the implementation under the hood is similar to ATeam's role prompts and knowledge files, the framing of every solved problem becoming a team-reusable skill is a clearer story to tell users than "we accumulate project knowledge."
+- **Broad multi-CLI support as a defensive bet.** With 11 agent CLIs supported, Multica is hedged against any single agent vendor losing relevance. ATeam's Claude-Code-first stance is a coupling risk worth re-evaluating once the harness is more stable.
+
+**Key architectural difference from ATeam:** Multica is a *team-coordination product* — its value is in giving humans and agents a shared issue tracker, runtime dashboard, and skill library. ATeam is a *quality-maintenance harness* — its value is in deciding what to work on, doing it on a schedule, and producing a git-versioned audit trail without a human in the loop. Multica assumes a person to assign work and review results; ATeam assumes a sleeping team. They could plausibly compose: ATeam's audit roles file Multica issues; Multica routes them to the right agent CLI; the resulting PR closes the loop.
+
 #### Other Notable Tools
 
-| Tool | What It Is | Why Not a Direct Fit |
-|---|---|---|
-| **CrewAI** | Role-based agent collaboration framework | General-purpose, not code-quality focused. No scheduling, no Docker isolation. |
-| **Claude-flow (ruvnet)** | Agent orchestration for Claude with MCP | Over-engineered: 175+ MCP tools, neural routing, swarm intelligence. Too complex for our needs. |
-| **ccswarm** | Rust-native multi-agent orchestration with Claude Code | Early stage, orchestration loop not fully implemented. Good architectural ideas. |
-| **Emdash** | Desktop app for parallel coding agents (YC W26) | Interactive/GUI-focused, not background/scheduled. Supports 21 CLI agents. |
-| **runCLAUDErun** | macOS scheduler for Claude Code tasks | Simple cron-like scheduler — exactly one piece of ATeam. Too minimal alone. |
-| **OpenAgentsControl** | Plan-first development with approval gates | Pattern-matching focus (teach your patterns, agents follow them). Interesting for ATeam's "configure" mode. |
-| **AutoGen (Microsoft)** | Multi-agent framework with human-in-the-loop | Enterprise-grade but too general. Heavy setup for our specific use case. |
+| Tool | Link | What It Is | Why Not a Direct Fit |
+|---|---|---|---|
+| **CrewAI** | [github.com/crewaiinc/crewai](https://github.com/crewaiinc/crewai) | Role-based agent collaboration framework | General-purpose, not code-quality focused. No scheduling, no Docker isolation. |
+| **Claude-flow (ruvnet)** | [github.com/ruvnet/ruflo](https://github.com/ruvnet/ruflo) (renamed from `claude-flow`) | Agent orchestration for Claude with MCP | Over-engineered: 175+ MCP tools, neural routing, swarm intelligence. Too complex for our needs. |
+| **ccswarm** | [github.com/nwiizo/ccswarm](https://github.com/nwiizo/ccswarm) | Rust-native multi-agent orchestration with Claude Code | Early stage, orchestration loop not fully implemented. Good architectural ideas. |
+| **Emdash** | [github.com/generalaction/emdash](https://github.com/generalaction/emdash) | Desktop app for parallel coding agents (YC W26) | Interactive/GUI-focused, not background/scheduled. Supports 21 CLI agents. |
+| **runCLAUDErun** | [runclauderun.com](https://runclauderun.com/) — releases at [github.com/runCLAUDErun/releases](https://github.com/runCLAUDErun/releases) | macOS scheduler for Claude Code tasks | Simple cron-like scheduler — exactly one piece of ATeam. Too minimal alone. |
+| **OpenAgentsControl** | [github.com/darrenhinde/OpenAgentsControl](https://github.com/darrenhinde/OpenAgentsControl) | Plan-first development with approval gates | Pattern-matching focus (teach your patterns, agents follow them). Interesting for ATeam's "configure" mode. |
+| **AutoGen (Microsoft)** | [github.com/microsoft/autogen](https://github.com/microsoft/autogen) | Multi-agent framework with human-in-the-loop | Enterprise-grade but too general. Heavy setup for our specific use case. |
 
 ### B.3 Conclusion: Build or Adopt?
 
