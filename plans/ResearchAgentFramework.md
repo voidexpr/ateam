@@ -887,6 +887,109 @@ So the practical answer to "*if I create 50 tasks how do I prevent burning all m
 
 **Key architectural difference from ATeam:** Multica is a *team-coordination product* — its value is in giving humans and agents a shared issue tracker, runtime dashboard, and skill library. ATeam is a *quality-maintenance harness* — its value is in deciding what to work on, doing it on a schedule, and producing a git-versioned audit trail without a human in the loop. Multica assumes a person to assign work and review results; ATeam assumes a sleeping team. They could plausibly compose: ATeam's audit roles file Multica issues; Multica routes them to the right agent CLI; the resulting PR closes the loop.
 
+#### Paperclip (paperclipai/paperclip) ⭐⭐⭐⭐
+
+**Link:** [github.com/paperclipai/paperclip](https://github.com/paperclipai/paperclip)
+
+**What it is:** "*Open-source orchestration for zero-human companies.*" MIT-licensed Node.js (TypeScript 97.7%) server with embedded React UI. 63.8K⭐, 2,431 commits, latest release `v2026.428.0` (April 2026) — by far the most-starred entry in this entire research and one of the most operationally mature on governance. Distributed as a daemon process with embedded Postgres or external Postgres for production; also available as a Docker image. Deliberately framed as a "*control plane*" — org charts, budgeting, governance, goal alignment, agent coordination — rather than a wrapper around a coding-agent CLI. Adapter philosophy: "*If it can receive a heartbeat, it's hired.*" In-tree adapters: Claude Code, Codex, Cursor, Bash/CLI, HTTP/webhook bots (including OpenClaw); custom adapters via plugin system.
+
+**The framing — companies, org charts, heartbeats:**
+
+Paperclip's vocabulary is the strongest signal of intent in the field. Top-level abstractions, drawn from `packages/db/src/schema/`:
+
+- **Company** — multi-tenant container (the unit of isolation, secrets scope, budget scope).
+- **Project** — work container under a company; tied to workspaces (`project_workspaces`).
+- **Goal** — durable objective under a project (`project_goals`).
+- **Agent** — any runtime with a position in the org chart (Claude Code, Codex, a webhook bot — all the same shape).
+- **Issue** — task with `company/project/goal/parent` lineage; comments, attachments, labels.
+- **Heartbeat run** — atomic execution window; the unit of cost accounting and budget enforcement.
+
+Agents do not run continuously. Per [`docs/agents-runtime.md`](https://github.com/paperclipai/paperclip/blob/master/docs/agents-runtime.md), a heartbeat is a "*short execution window triggered by a wakeup*": start the adapter, provide context, run until exit/timeout/cancellation, store results, update UI, stop. Triggers are timer, assignment, on-demand, or automation.
+
+**How agents are controlled (heartbeat + wakeup queue + atomic checkout):**
+
+End-to-end flow (from `server/src/services/heartbeat.ts`):
+
+1. Something calls `enqueueWakeup({source, triggerDetail, ...})` — timer, an issue assignment, an `@mention`, an automation.
+2. Wakeups for the same agent are **coalesced** ("*if an agent is already running, new wakeups are merged (coalesced) instead of launching duplicate runs*"). `mergeCoalescedContextSnapshot()` folds the incoming context into whatever's already queued.
+3. The heartbeat acquires a per-agent lock — `withAgentStartLock` — so only one heartbeat ever runs concurrently per agent. This is mandatory for session-state correctness.
+4. Pre-flight gates run in order:
+   - **Budget enforcement** via `budgetService` and `BudgetEnforcementScope` (see below).
+   - **Concurrency cap** — `HEARTBEAT_MAX_CONCURRENT_RUNS` with `MIN=1, MAX=50, DEFAULT=AGENT_DEFAULT_MAX_CONCURRENT_RUNS`, normalised by `normalizeMaxConcurrentRuns()`.
+   - **Environment lease acquisition** via `envOrchestrator.releaseForRun()`.
+   - **Runtime services provisioning** via `ensureRuntimeServicesForRun()`.
+   - **Workspace realization** via the execution-workspace policy.
+5. Adapter is invoked; cost events are recorded as they arrive; on exit the run row is closed and the next coalesced wakeup (if any) fires.
+
+The "atomic checkout with execution locks" claim from the README maps to `withAgentStartLock` + the `agentTaskSessions` composite key `(companyId, agentId, adapterType, taskKey)` for session reuse across runs in the same task scope.
+
+**Isolation, permissions, and how a webapp would actually run:**
+
+The hard truth from `docs/agents-runtime.md`: "*Local CLI adapters run unsandboxed on the host machine.*" There is no Docker layer for the agent's process, no Seatbelt/Landlock wrapper around adapter subprocesses by default. `server/src/services/sandbox-provider-runtime.ts` defines an *interface* (`SandboxEnvironmentProvider`) with a "fake" provider for tests; "*plugin-backed providers are resolved through the plugin worker manager at the environment-runtime level*" — i.e. real sandboxing is a plugin extension point, not a default behaviour.
+
+Where Paperclip *does* have isolation primitives:
+
+- **Execution workspaces** (`server/src/services/execution-workspaces.ts`) come in two provider types — `git_worktree` and `local_fs` — with tracked `branchName`, `provisionCommand`, `teardownCommand`, and a `reuseEligible` flag. So workspaces can be worktrees-per-task with declarative setup/teardown commands (the npm-install / db-migrate hook story), or just a directory.
+- **Per-instance worktree config** (`server/src/worktree-config.ts`) — confusingly named, this is for running multiple Paperclip *installations* side-by-side (`~/.paperclip-worktrees/instances/{instanceId}/{db,logs,data,secrets}/`), each with its own embedded Postgres and master key. Not per-task isolation.
+- **Secrets** (`server/src/services/secrets.ts`) are the most carefully scoped piece in the system. `companySecrets` + `companySecretVersions` store material; `companySecretBindings` binds each secret to a specific `(targetType, targetId, configPath)` — `targetType` ∈ `{agent, project, environment, routine, issue, run}`. `resolveSecretValueInternal()` calls `assertBindingContext()` and throws "*Secret is not bound to {consumerType}:{consumerId} at {configPath}*" if a consumer tries to access something it's not explicitly bound to. `resolveEnvBindings()` and `resolveAdapterConfigForRuntime()` are the only injection paths. The README's "*sensitive values stay out of prompts unless a scoped run explicitly needs them*" is encoded in code, not just doctrine. There's also a `secret_access_events` table for audit.
+
+**For a real webapp test scenario:** the team writes `provisionCommand` and `teardownCommand` on the workspace, much like Symphony's `after_create`/`before_run`. `npm install`, DB migrations, fixture seeding go in there. Postgres/browsers/etc. come from the host or whatever sandbox-provider plugin is installed. Without a sandbox plugin, the agent has full host access — same posture as Multica, more explicitly documented.
+
+**Task data model — three nested machines:**
+
+From `packages/db/src/schema/`:
+
+- **`issues`** — task rows with `company/project/goal/parent` links; comments (`issue_comments`), attachments (`issue_attachments`), labels (`issue_labels`). Specific status enum names aren't quoted but the README references "*atomic checkout, first-class blocker dependencies, comments, documents, attachments*" and "*labels, and inbox state*" for organisation. Categorisation axes: company → project → goal, plus labels and inbox state. (No explicit priority enum surfaced; ordering appears to be queue/inbox-driven rather than priority-driven.)
+- **`heartbeat_runs`** + **`heartbeat_run_events`** — the actual execution log; one heartbeat = one run, with events streaming in. This is the run state machine and the cost-attribution unit.
+- **`agent_task_sessions`** — keyed by `(companyId, agentId, adapterType, taskKey)`; lets multiple heartbeats on the same task share a session/conversation across runs. Session resumption is first-class.
+
+So the structure is **company → project → goal → issue → (many) heartbeat_runs**, with `agent_task_sessions` providing continuity across runs of the same `(agent, task)` pair. Compared to Multica's two state machines (`issue.status` + `agent_task_queue.status`), Paperclip has a *third* layer — sessions — and bigger context: governance and finance lineage.
+
+**Concurrency and budget — the strongest answer to the 50-task token-burn question of any tool reviewed:**
+
+This is where Paperclip pulls ahead of every other entry. The schema has dedicated `budget_policies`, `budget_incidents`, `cost_events`, `finance_events`, and `secret_access_events` tables. The enforcement story (from `server/src/services/budgets.ts`):
+
+- **Scopes:** per-agent, per-project, per-company.
+- **Time windows:** `lifetime`, `calendar_month_utc`, with sensible defaults (projects → lifetime, agents/companies → calendar month).
+- **Thresholds:** `soft` (default 80% of budget — fires notifications) and `hard` (100% — pauses the scope).
+- **Enforcement actions on hard breach:** the scope transitions to `paused` with `pauseReason: "budget"`; `cancelWorkForScope` halts ongoing work and cancels queued work; agents go to `paused` status, projects/companies likewise.
+- **Timing:** evaluation is post-hoc (`evaluateCostEvent` runs after each cost event), but a pre-flight gate exists: `getInvocationBlock()` is called before launching an adapter and refuses to start a run when a hard stop is in effect. So you get both: *post-hoc trip* (catches a single expensive run going over) plus *pre-flight block* (catches everything queued behind it).
+
+Combined with the heartbeat layer's per-agent serialization and `HEARTBEAT_MAX_CONCURRENT_RUNS` cap, the answer to "*if I create 50 tasks how do I prevent burning all my tokens within minutes*" is:
+
+1. **Per-agent serialization** (`withAgentStartLock`) means at most one heartbeat per agent at a time. 50 tasks against 1 agent → 50 sequential heartbeats, never 50 parallel ones.
+2. **Concurrency cap** `HEARTBEAT_MAX_CONCURRENT_RUNS` (default per-agent, max 50) bounds parallelism for an agent that does allow concurrent heartbeats.
+3. **Coalescing** merges duplicate wakeups so you don't pay twice for redundant triggers.
+4. **Per-agent monthly budget** (default scope) trips on cost events and pauses the agent automatically. Queued work for the paused agent is cancelled.
+5. **Per-project / per-company budgets** catch fan-out across agents (e.g., a company-wide hard cap).
+6. **Pre-flight `getInvocationBlock`** prevents new runs from starting once a budget has tripped, so the queue doesn't keep churning attempts that would just fail expensively.
+
+This is materially stronger than Multica (which has only concurrency caps and observability tokens), and it's the only tool reviewed in this section that ships hard cost-stop semantics out of the box.
+
+**Overlap with ATeam:** Self-hosted, open-source, agent-agnostic via adapters, Postgres-backed, declarative provision/teardown hooks, structured run logs, scoped secrets, persistent project/agent state. The heartbeat + wakeup-queue + coalescing + per-agent-lock model is nearly a drop-in match for what ATeam's scheduler aspires to, and the budget enforcement is the closest in-the-wild example of the controls ATeam needs.
+
+**What it lacks for our use case:**
+
+- **No specialized roles with persistent project knowledge.** Agents are positions in an org chart, not domain-specialised auditors. "Skills" exist as a top-level directory but the abstraction is a generic adapter capability, not "testing specialist that learns this codebase over months."
+- **No audit → approve → implement separation.** Issues go to heartbeats which produce work. No deliberate phase where a finding is reviewed before code is written.
+- **No coordinator reasoning.** The wakeup queue is rule-based — timers, assignments, automations — not an LLM choosing what matters most across the company.
+- **Sandbox is a plugin extension point, not a default.** "*Local CLI adapters run unsandboxed on the host machine.*" Same baseline posture as Multica. ATeam's per-run Docker container is a stronger default.
+- **Heavyweight infrastructure for our use case.** Postgres, full UI, embedded-PG-or-prod-PG split, multi-instance worktree layout, plugin worker manager. ATeam is a single Go binary with SQLite.
+- **The "zero-human companies" framing assumes the work is already organised into goals and projects.** ATeam's premise is the opposite — the project exists, the work is unknown, the system finds it. Paperclip presupposes the issues; ATeam discovers them.
+
+**Ideas to integrate (this entry is the densest source of borrowable patterns in the doc):**
+
+- **Heartbeat + wakeup-queue + coalescing.** Treat each agent run as a discrete window triggered by a wakeup, coalesce duplicate wakeups, serialise per-agent with a start lock. ATeam's scheduler currently spawns processes; this model is more recoverable, more auditable, and gives you natural cost-accounting boundaries.
+- **Layered budget enforcement.** Per-agent + per-project + per-company scopes, `soft` (warn at 80%) and `hard` (pause at 100%) thresholds, `lifetime` and `calendar_month_utc` windows, post-hoc trip + pre-flight block. This is the gold-standard pattern in the field and ATeam should plan toward it. The `getInvocationBlock()` pre-flight gate in particular is the right shape — refuse new work when the scope is tripped, don't just record the over-spend.
+- **`pauseReason: "budget"` as a first-class agent state.** Modelling pause-by-budget separately from pause-by-user or pause-by-error makes the UX honest: the user sees *why* an agent stopped, not just that it did.
+- **`cancelWorkForScope`.** When a budget trips, cancel everything queued under that scope, not just block new starts. ATeam's reactive trigger work should adopt this — a half-paused queue is a lying queue.
+- **Secret bindings keyed by `(consumerType, consumerId, configPath)`.** `companySecretBindings` with the `assertBindingContext` runtime check is the cleanest secret-scoping model in the doc. Far stricter than ATeam's keychain/env/file resolution, which currently grants whatever the daemon process has. The audit table (`secret_access_events`) is a natural complement.
+- **Workspace providers as a typed enum (`git_worktree | local_fs`).** Paperclip codifies what's otherwise implicit. `provisionCommand` / `teardownCommand` on the workspace row (echoing Symphony's hooks) is the right place to put dependency setup — declarative, per-workspace, version-controllable.
+- **Heartbeat run + heartbeat run events as the run-log shape.** Paperclip's split — one row per run, many rows per event — is more queryable than ATeam's current call DB and aligns naturally with cost-accounting roll-ups.
+- **The "if it can receive a heartbeat, it's hired" adapter philosophy.** Naming the integration contract bluntly is good design. Anything that can be poked and respond fits — Claude Code, Codex, a webhook bot. ATeam should consider a similar minimum-shape contract for non-Claude-Code agents.
+
+**Key architectural difference from ATeam:** Paperclip is a *governance & finance plane* for autonomous agents — it presupposes that work is already organised (companies, projects, goals, issues) and focuses on running that work safely with budget controls and audit trails. ATeam is an *autonomous quality-discovery harness* — its job is to *find* what to work on against an existing codebase and get it done with minimal supervision. Paperclip's strongest contribution to ATeam is the budget/heartbeat model: even if ATeam stays organisationally simpler (no companies/goals/orgs), the heartbeat-as-billing-unit pattern, the soft/hard threshold trip, and the pre-flight invocation block are directly applicable. Of every tool reviewed in this section, Paperclip has the most pattern-overlap with what ATeam should build next on the cost-control front.
+
 #### Other Notable Tools
 
 | Tool | Link | What It Is | Why Not a Direct Fit |
@@ -901,7 +1004,7 @@ So the practical answer to "*if I create 50 tasks how do I prevent burning all m
 
 ### B.3 Conclusion: Build or Adopt?
 
-**Recommendation: Build ATeam, but borrow heavily from Gas Town, ComposioHQ/agent-orchestrator, OpenHands, Ona, Sandcastle, and Archon patterns.**
+**Recommendation: Build ATeam, but borrow heavily from Gas Town, ComposioHQ/agent-orchestrator, OpenHands, Ona, Sandcastle, Archon, and Paperclip patterns** (Paperclip in particular for the heartbeat + layered budget enforcement model).
 
 No existing tool combines all of ATeam's core requirements:
 1. Scheduled, autonomous background operation (night shift).
