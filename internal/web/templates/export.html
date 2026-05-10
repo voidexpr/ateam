@@ -152,12 +152,16 @@
       panels.forEach(function(p) { p.classList.toggle('active', p.id === id); });
     }
     function fromHash(hash) { return (hash || '').replace('#',''); }
+    function navigate(id) {
+      if (fromHash(location.hash) !== id) {
+        history.pushState(null, '', '#' + id);
+      }
+      activate(id);
+    }
     tabs.forEach(function(t) {
       t.addEventListener('click', function(e) {
         e.preventDefault();
-        var id = t.dataset.tab;
-        history.replaceState(null, '', '#' + id);
-        activate(id);
+        navigate(t.dataset.tab);
       });
     });
     window.addEventListener('hashchange', function() {
@@ -167,9 +171,7 @@
     document.querySelectorAll('[data-switch-tab]').forEach(function(el) {
       el.addEventListener('click', function(e) {
         e.preventDefault();
-        var id = el.dataset.switchTab;
-        history.replaceState(null, '', '#' + id);
-        activate(id);
+        navigate(el.dataset.switchTab);
       });
     });
     activate(fromHash(location.hash) || 'overview');
