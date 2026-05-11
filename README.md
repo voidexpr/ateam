@@ -10,6 +10,8 @@ If you want to work on complex tasks then keep using interactive agents, if you 
 
 At its core ateam is a CLI to run one-shot unattended agents with saved prompts. It layers a small workflow of parallel reports, supervisor review and supervised coding of selected tasks. But can also be used in shell commands for sequences of steps (single agent or parallel agents). The focus is on software engineering quality improvement tasks and not feature development. Feature development (or also some software engineering quality tasks) benefit from interactive agents. Ateam solves the problem of having background agent improve the code base quality behind the scene to reduce the need to explicitly do it.
 
+See [APPROACH.md](APPROACH.md) for the rationale and design principles behind ATeam.
+
 ## Features
 
 * **use existing coding agents like claude code or codex**: leverages subscriptions instead of much more expensive APis, benefit from the expertise of llm providers. Ateam focuses on automating them
@@ -113,7 +115,7 @@ docker run -v "$(ateam env --print-org)/claude_linux_shared:/home/agent/shared_c
 ateam claude --config-dir ~/shared_claude
 ```
 
-See [CONTAINER.md](CONTAINER.md) for Docker setup details including shared Linux agent config.
+See [ISOLATION.md](ISOLATION.md) for Docker setup details including shared Linux agent config.
 
 ### Upgrade
 
@@ -271,7 +273,7 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 | `ateam update` | Update on-disk defaults to match binary |
 | `ateam version` | Print version, build, and system information |
 
-See [REFERENCE.md](REFERENCE.md) for full flag documentation, directory layout, prompt configuration, runtime configuration, and troubleshooting.
+See [COMMANDS.md](COMMANDS.md) for all `ateam` commands and flags, and [CONFIG.md](CONFIG.md) for directory layout, prompt configuration, and runtime configuration.
 
 ## Isolation
 
@@ -282,6 +284,22 @@ ATeam runs unattended agents that must operate safely without constant permissio
 - **Network**: prevent data exfiltration (especially combined with filesystem access), prevent remote control
 
 **The tradeoff**: stricter restrictions increase safety but can break tools that rely on directories outside the project, Unix sockets (Docker), pipes (tsx), nested sandboxes (Playwright on macOS), or shared `/tmp` directories.
+
+### Execution modes
+
+```
+  ① Built-in sandbox           ② Docker one-shot          ③ Docker exec               ④ ATeam inside Docker
+  ──────────────────           ──────────────────         ──────────────────          ─────────────────────
+  ┌─ Host ─────────┐           ┌─ Host ─────────┐         ┌─ Host ─────────┐          ┌─ Host ──────────┐
+  │ ┌─ ateam ────┐ │           │ ┌─ ateam ────┐ │         │ ┌─ ateam ────┐ │          │ ┌─ container ─┐ │
+  │ │ ┌─ sbx ─┐  │ │           │ │ ┌─ ctnr ─┐ │ │         │ │ ┌─ run ──┐ │ │          │ │ ┌─ ateam ─┐ │ │
+  │ │ │ agent │  │ │           │ │ │ agent  │ │ │         │ │ │ agent  │ │ │          │ │ │ agent   │ │ │
+  │ │ └───────┘  │ │           │ │ └────────┘ │ │         │ │ └────────┘ │ │          │ │ └─────────┘ │ │
+  │ └────────────┘ │           │ └────────────┘ │         │ └────────────┘ │          │ └─────────────┘ │
+  └────────────────┘           └────────────────┘         └────────────────┘          └─────────────────┘
+  default profile              --profile docker           --profile docker-exec       container-native
+  fastest, no setup            fresh container per run    exec into a running env     projects only
+```
 
 ### Approaches
 
@@ -322,7 +340,7 @@ By default ateam uses your local agent configuration (for example `~/.claude` fo
 
 Use `--profile docker` for one-shot container isolation, or run ateam inside your own Docker setup. Agents auto-detect containers and skip sandbox/permissions — no profile switching needed. A default Dockerfile is used so agent is available inside of the container.
 
-See [CONTAINER.md](CONTAINER.md) for the full guide: container modes, secrets, precheck scripts, interactive Claude sessions, and agent auto-adaptation.
+See [ISOLATION.md](ISOLATION.md) for the full guide: container modes, secrets, precheck scripts, interactive Claude sessions, and agent auto-adaptation.
 
 #### docker exec
 
@@ -330,13 +348,13 @@ Use `--profile docker-exec` to run agents within existing docker containers. Ate
 
 A coding agent has be available within the container, by default an oauth token is passed so no need to authenticate inside the container. No need to install ateam itself unless you run the supervisor for coding this way. This mode is best used for code agent runs so they have access to a proper test environment.
 
-See [CONTAINER.md](CONTAINER.md) for the full guide: container modes, secrets, precheck scripts, interactive Claude sessions, and agent auto-adaptation.
+See [ISOLATION.md](ISOLATION.md) for the full guide: container modes, secrets, precheck scripts, interactive Claude sessions, and agent auto-adaptation.
 
 #### Run ateam inside a container
 
 No custom profile needed, ateam detects it runs within a container and runs agents without sandbox or permission approval. But this does require to install team inside the container and (optionally) mount the ateamorg directory to have access to defaults. Also the coding agent inside the container should be fully authenticated and optionally have an oauth token.
 
-See [CONTAINER.md](CONTAINER.md) for the full guide: container modes, secrets, precheck scripts, interactive Claude sessions, and agent auto-adaptation.
+See [ISOLATION.md](ISOLATION.md) for the full guide: container modes, secrets, precheck scripts, interactive Claude sessions, and agent auto-adaptation.
 
 
 ### Customizing Runtime
@@ -344,83 +362,12 @@ See [CONTAINER.md](CONTAINER.md) for the full guide: container modes, secrets, p
 - **`config.toml`**: simple customization — sandbox paths, container extras, unsandboxed commands, profiles
 - **`runtime.hcl`**: full control — agent definitions, container types, profiles, pricing
 
-See [REFERENCE.md](REFERENCE.md) for complete configuration documentation.
+See [CONFIG.md](CONFIG.md) for complete configuration documentation.
 
 
 ## FAQ
 
-### What is ateam good for really ?
-
-* Tired of repeating the same generic instructions ?
-    * review code for logical issues and structure issues
-    * update docs
-    * write tests
-    * make sure there are no security vulnerability
-    * manage potentially deprecated dependencies
-
-You can create skills for some of these but in reality you want to run all of them and prioritize them to regularly and consistently improve the project. This is where ateam comes in.
-
-Another clear scenario to use ateam is as more code is written by agents and only modified by agents there aren't many reasons for humans to review this code or care about the project artifacts. Instead it's best to have dedicated agents constantly improve the project following known good practices. This can be prompted once and automated. This is what ateam is.
-
-Lastly you can use `ateam exec` and `ateam parallel` to create your own mini agent workflow through simple bash script chaining without having to deal with complex frameworks. For example:
-
-```bash
-ateam exec @./my_saved_prompt_to_decide_what_todo.md && ateam parallel --prompt "take care of problem 1" --prompt "take care of problem 2" --prompt "take care of problem 3" && ateam exec "verify what the documents produced by the previous step describe and take further action"
-```
-
-You can easily swap claude/codex
-
-### How to troubleshoot?
-
-* `ateam env` — paths, roles, and available reports
-* `ateam ps` — current and past agent runs
-* `ateam tail` — live-stream agent logs
-* `ateam inspect` — full command args and logs (use `--auto-debug` for self-diagnosis)
-* `ateam cat` — pretty-print agent output (.jsonl)
-
-Use `--help` on any command for details. See [REFERENCE.md](REFERENCE.md) for more.
-
-You can also resume sessions from role agents, for example you can use 'claude --resume' and select a specific session to dive more into the findings or why a command the agent ran failed (but start with `ateam ps`, `ateam inspect`, `ateam cat` first).
-
-### How are agents executed by default?
-
-Both Claude and Codex use their built-in sandbox mode. For Claude this means OS-level restrictions (Seatbelt/bubblewrap) limiting filesystem and network access.
-
-It can easily be changed in `.ateam/config.toml` to select specific profiles and how to run agents is fully customizable in `.ateamorg/runtime.hcl`.
-
-### How to look at the exact prompts used by ateam
-
-Use the `ateam prompt --role ROLENAME --action report` to show the exact prompt used taking into account overloaded and extra prompts added.
-
-### Why not just /simplify in claude ?
-
-`/simplify` only looks at code refactoring and is great to use, ateam can look at many other aspects: testing, documentation, etc ...
-
-It actually fits very well as a first step before a full ateam cycle:
-
-```bash
-ateam exec "/simplify the recent commits" && ateam all
-```
-
-### What if I only want to do some of the code changes or only run some of the reports ?
-
-* you can easily select which reports to run with `ateam report --roles ROLE1,ROLE2`
-* you can instruct the supervisor: `ateam review --extra-prompt "I only want tasks from refactoring_small and testing_basic"`
-
-### What if I want to use ateam in a slightly different workflow than report-review-code-verify ?
-
-The `ateam exec` command is a wrapper around coding to run one-shot, unattended prompts. You can use it to build your own automated scripts. It can also be run outside of an ateam project (but requires an ateam organization which is created by default in `$HOME`). You still benefit from ateam observability features:
-* `ateam ps` to see current and past execution
-* `ateam tail` to see logs in real time
-* `ateam cost` to get a token cost report
-
-You can then use `ateam exec` in your own scripts and build your own workflows reusing agent/container management without the ateam prompt/artifact part. It can be ran without an ateam project but does require an ateam org (which is created in $HOME by default).
-
-For example: `ateam exec "/simplify my last few commits" && git commit . -m "round of simplify" && ateam exec "Identify and code at most 5 code refactoring opportunities focused on performance and security. Make sure to commit each separately as soon as they are completed, do run tests between each and fix any issue introduced" --profile docker` and then go get a nice walk outside or valuable family time while your agent is at work. You shouldn't come back to see that it got stuck asking for a bash command approval at the first step.
-
-### What size of project is it for ?
-
-ATeam should be adaptable for projects of many size by running on the entire repo for small to medium projects and have separate ateam projects for various component of bigger projects using a mono repo.
+See [FAQ.md](FAQ.md) for frequently asked questions.
 
 ## Future
 
@@ -444,3 +391,13 @@ In General other areas of interest:
 ## Development
 
 See [DEV.md](DEV.md) for development setup, testing, and architecture details.
+
+## More docs
+
+- [APPROACH.md](APPROACH.md) — rationale and design principles
+- [COMMANDS.md](COMMANDS.md) — full `ateam` command reference
+- [CONFIG.md](CONFIG.md) — directory layout, `config.toml`, `runtime.hcl`
+- [ISOLATION.md](ISOLATION.md) — sandbox and container guide (modes, secrets, auth)
+- [ROLES.md](ROLES.md) — built-in roles
+- [EVAL.md](EVAL.md) — evaluating prompt and role changes
+- [FAQ.md](FAQ.md) — frequently asked questions

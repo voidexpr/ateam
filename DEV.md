@@ -275,7 +275,7 @@ The Docker container maps host paths to fixed container paths:
 | `.ateamorg/` dir | `/.ateamorg` | read-write |
 | `~/.claude/.credentials.json` | `/home/agent/.claude/.credentials.json` | read-only (only when `mount_claude_config = true`) |
 
-The agent sees only these mount points. See `CONTAINER.md` for detailed per-mode setup. Host paths in agent arguments (stream files, stderr files, settings) are automatically translated via `TranslatePath()`. For example, `/Users/me/myproject/output.jsonl` becomes `/workspace/output.jsonl` inside the container.
+The agent sees only these mount points. See `ISOLATION.md` for detailed per-mode setup. Host paths in agent arguments (stream files, stderr files, settings) are automatically translated via `TranslatePath()`. For example, `/Users/me/myproject/output.jsonl` becomes `/workspace/output.jsonl` inside the container.
 
 The container image is built with a non-root user matching the host UID (`--build-arg USER_UID=$(id -u)`), so files written by the agent inside `/workspace` have correct ownership on the host.
 
