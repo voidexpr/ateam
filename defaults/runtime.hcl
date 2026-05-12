@@ -270,7 +270,7 @@ agent "codex" {
   args    = ["--ask-for-approval", "never"]
   required_env = ["OPENAI_API_KEY"]
 
-  args_outside_container = ["--sandbox", "workspace-write"]
+  args_outside_container = ["--sandbox", "workspace-write", "--skip-git-repo-check"]
 
   pricing {
     default_model = "gpt-5.3-codex"
