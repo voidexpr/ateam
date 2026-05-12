@@ -94,7 +94,7 @@ ateam report --rerun-failed --dry-run    # preview which roles would be rerun
 | `--rerun-failed` | Re-run only roles that failed in the last report round (mutually exclusive with `--roles`) |
 | `--dry-run` | Print computed prompts without running roles |
 | `--ignore-previous-report` | Do not include the role's previous report in the prompt |
-| `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
+| `--container-name NAME` | Override container name (for docker-exec containers) |
 | `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
 | `--force` | Run even if the same action+role is already running |
 | `--verbose` | Print agent and docker commands to stderr |
@@ -132,7 +132,7 @@ ateam review --dry-run
 | `--max-budget-usd USD` | USD spend cap for the supervisor (claude-only; errors on codex) |
 | `--print` | Print review to stdout after completion |
 | `--dry-run` | Print computed prompt and list reports without running |
-| `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
+| `--container-name NAME` | Override container name (for docker-exec containers) |
 | `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
 | `--force` | Run even if the same action+role is already running |
 | `--verbose` | Print agent and docker commands to stderr |
@@ -164,7 +164,7 @@ ateam code --dry-run
 | `--max-budget-usd-batch USD` | Stop spawning new sub-runs once the code batch crosses this USD |
 | `--print` | Print output to stdout after completion |
 | `--dry-run` | Print the computed prompt without running |
-| `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
+| `--container-name NAME` | Override container name (for docker-exec containers) |
 | `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
 | `--verbose` | Print agent and docker commands to stderr |
 | `--tail` | Stream live output from supervisor and sub-runs |
@@ -198,7 +198,7 @@ ateam verify --dry-run
 | `--verbose` | Print agent and docker commands to stderr |
 | `--force` | Run even if the same action is already running |
 | `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
-| `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
+| `--container-name NAME` | Override container name (for docker-exec containers) |
 
 ### `ateam all`
 
@@ -231,7 +231,7 @@ ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile 
 | `--supervisor-agent NAME` | Override agent for the supervisor (review + code management) |
 | `--code-profile NAME` | Override profile for code sub-runs (overrides `--profile`) |
 | `--code-agent NAME` | Override agent for code sub-runs (uses 'none' container) |
-| `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
+| `--container-name NAME` | Override container name (for docker-exec containers) |
 | `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
 | `--quiet`, `-q` | Suppress output printing |
 | `--verbose` | Print agent and docker commands to stderr |
@@ -404,7 +404,7 @@ echo "still works" | ateam exec -                # explicit "-"
 | `--no-summary` | Disable cost/duration/tokens summary |
 | `--quiet` | Disable both streaming and summary |
 | `--dry-run` | Print resolved command, secrets, container config, and prompt without running |
-| `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
+| `--container-name NAME` | Override container name (for docker-exec containers) |
 | `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
 | `--force` | Run even if the same action+role is already running |
 | `--verbose` | Print agent and docker commands to stderr |
@@ -440,7 +440,7 @@ Each positional argument is a prompt (text or `@filepath`). Agent execs run conc
 | `--no-progress` | Suppress ANSI progress table (use plain line output) |
 | `--print` | Print exec outputs to stdout after completion |
 | `--dry-run` | Print assembled prompts without running |
-| `--container-name NAME` | Override container name (for docker-exec or persistent containers) |
+| `--container-name NAME` | Override container name (for docker-exec containers) |
 | `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
 | `--verbose` | Print agent and docker commands to stderr |
 | `--force` | Run even if the same action is already running |

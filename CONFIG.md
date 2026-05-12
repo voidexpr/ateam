@@ -418,16 +418,17 @@ Pricing can go stale. Override at any level by redefining the agent's `pricing` 
 
 ### Containers
 
+Three container types are supported: `none`, `docker` (one-shot), and `docker-exec` (exec into a user-managed container).
+
 ```hcl
 container "docker" {
   type        = "docker"
-  mode        = "oneshot"        # or "persistent"
   dockerfile  = "Dockerfile"
   forward_env = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
 }
 ```
 
-Docker-exec runs agents inside a user-managed container (docker-compose, devcontainer, etc.). The container name can be set via config, `--container-name` flag, or `ateam secret CONTAINER_NAME --scope project`. A built-in `docker-exec` profile uses `{{CONTAINER_NAME}}` for automatic resolution.
+`docker-exec` runs agents inside a long-lived user-managed container (docker-compose service, devcontainer, manually started, etc.). The container name resolves from `--container-name` flag → `ateam secret CONTAINER_NAME --scope project` → `CONTAINER_NAME` env var → the `docker_container` field. A built-in `docker-exec` profile uses `{{CONTAINER_NAME}}` for secret-based resolution.
 
 ```hcl
 container "my-app" {
@@ -442,15 +443,7 @@ container "my-app" {
 
 The `precheck` field takes a command array. `{{CONTAINER_NAME}}` in args is replaced with the resolved container name at execution time. Convention-discovered scripts (`.ateam/docker-agent-precheck.sh`) are auto-wrapped as `["sh", "<path>", "{{CONTAINER_NAME}}"]`.
 
-Devcontainers use the project's `.devcontainer/devcontainer.json` to run agents in a pre-configured environment. The agent CLI (e.g. `claude`) must be installed inside the devcontainer. Requires `@devcontainers/cli` (`npm install -g @devcontainers/cli`).
-
-```hcl
-container "devcontainer" {
-  type        = "devcontainer"
-  # config_path = ".devcontainer/backend/devcontainer.json"  # optional override
-  forward_env = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
-}
-```
+**Devcontainers** are supported as a use case of `docker-exec`: write a precheck that runs `devcontainer up --workspace-folder .` to ensure the container exists, then ateam `docker exec`s into it like any other long-lived container. See [ISOLATION.md](ISOLATION.md) for the worked example. Requires `@devcontainers/cli` on the host.
 
 For authentication setup inside containers, see [ISOLATION.md](ISOLATION.md).
 
@@ -465,8 +458,13 @@ profile "default" {
 }
 
 profile "docker" {
-  agent     = "claude-docker"
+  agent     = "claude"
   container = "docker"
+}
+
+profile "docker-exec" {
+  agent     = "claude"
+  container = "docker-exec"
 }
 
 profile "cheap" {
@@ -474,14 +472,9 @@ profile "cheap" {
   container        = "none"
   agent_extra_args = ["--model", "sonnet", "--max-budget-usd", "0.50"]
 }
-
-profile "devcontainer" {
-  agent     = "claude-docker"
-  container = "devcontainer"
-}
 ```
 
-Use `--profile docker` to run in ateam's Docker, `--profile devcontainer` to run in your project's devcontainer, or `--profile cheap` for cheaper runs.
+Use `--profile docker` to run in a fresh ateam-managed container, `--profile docker-exec` to exec into a user-managed long-lived container, or `--profile cheap` for cheaper runs. See `defaults/runtime.hcl` for the full list of built-in profiles.
 
 For the resolution order when multiple profile selectors apply, see [Profile resolution order](#profiles-1) in the `[profiles]` config.toml section.
 

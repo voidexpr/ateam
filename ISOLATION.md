@@ -113,21 +113,7 @@ When the project is in a subdirectory of the git root (e.g. `repo/myapp/`), the 
 
 The `docker` profile mounts only `~/.claude/.credentials.json` read-only — no other files from `~/.claude/` are exposed. Use `--profile docker-api` for stateless API-key auth with no host mounts.
 
-### Persistent mode
-
-For projects with expensive setup (large `npm install`, DB migrations, …), use `mode = "persistent"`:
-
-```hcl
-container "docker-persistent" {
-  type        = "docker"
-  mode        = "persistent"
-  dockerfile  = "Dockerfile"
-  precheck    = "precheck.sh"           # see "Precheck scripts" below
-  forward_env = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
-}
-```
-
-A long-lived container runs with `sleep infinity`; subsequent commands use `docker exec`.
+If you have an existing long-lived container (e.g. a docker-compose service or devcontainer), prefer [③ Docker exec](#-docker--exec-into-existing-container---profile-docker-exec) — it avoids the rebuild-per-run cost.
 
 ### Per-project customization
 
@@ -156,7 +142,7 @@ These fields are **additive** — they extend the HCL container definition rathe
 | `forward_env` | `docker run` and `docker exec` | Forward host env var values into the container |
 | `env` | `docker run` and `docker exec` | Set literal env vars inside the container |
 
-`extra_args` only applies on container creation; in persistent mode, exec commands only take `-e` and `-w`. For vars you need on every exec, use `forward_env` or `env`.
+`extra_args` only applies on `docker run` (container creation). For env vars you need on every invocation, use `forward_env` or `env`.
 
 ## ③ Docker — exec into existing container (`--profile docker-exec`)
 
@@ -200,13 +186,13 @@ profile "my-app" {
 
 ### Devcontainer
 
-Use `docker-exec` with a precheck that ensures the devcontainer is up:
+Devcontainers are supported via `docker-exec` plus a precheck script that brings the container up. Define a custom container in your `runtime.hcl`:
 
 ```hcl
-container "devcontainer" {
+container "my-devcontainer" {
   type             = "docker-exec"
   docker_container = "my-project-devcontainer"
-  precheck         = "devcontainer-precheck.sh"
+  precheck         = ["sh", "devcontainer-precheck.sh", "{{CONTAINER_NAME}}"]
   forward_env      = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
 }
 ```
@@ -472,30 +458,15 @@ Copying credentials to multiple containers breaks OAuth refresh token rotation. 
 
 ## Precheck scripts
 
-For containers that need setup before each agent run (start a database, run migrations, ensure the container is up), define a precheck.
-
-In the container config (HCL):
+`docker-exec` containers can run a precheck on the host before each agent invocation — typically to ensure the target container exists, or to start dependencies like a database.
 
 ```hcl
-container "docker-persistent" {
-  type        = "docker"
-  mode        = "persistent"
-  dockerfile  = "Dockerfile"
-  precheck    = "precheck.sh"          # relative to .ateam/
-  forward_env = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
+container "my-app" {
+  type             = "docker-exec"
+  docker_container = "my-app-dev"
+  precheck         = ["sh", "docker-precheck.sh", "{{CONTAINER_NAME}}"]
+  forward_env      = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
 }
-```
-
-```bash
-# .ateam/precheck.sh
-#!/bin/sh
-pg_isready -q || pg_ctlcluster 15 main start
-```
-
-For `docker-exec` containers, precheck is an array of args that runs on the host:
-
-```hcl
-precheck = ["sh", "docker-precheck.sh", "{{CONTAINER_NAME}}"]
 ```
 
 `{{CONTAINER_NAME}}` is expanded to the resolved container name. Convention-discovered scripts (`.ateam/docker-agent-precheck.sh`) are auto-wrapped as `["sh", "<path>", "{{CONTAINER_NAME}}"]`.
@@ -553,18 +524,7 @@ ateam secret ANTHROPIC_API_KEY        # re-enter if needed
 ateam env                              # check "secrets" section
 ```
 
-### Persistent container in a bad state
-
-```bash
-docker rm -f ateam-$(basename $(pwd))-<profile>
-```
-
-The container will be recreated on the next run.
-
 ## Known limitations
 
 - **No macOS guest** — Docker containers run Linux; you can't test macOS-specific code inside.
-- **Docker Sandbox** (experimental, `--profile docker-sandbox`) — uses Docker Desktop 4.58+ microVMs. Limited to one synced workspace, can't build Docker images inside it, inner containers have restricted networking.
-- **Parallel report roles** — in one-shot mode each role gets its own container (works well). In persistent mode all roles share one container.
-- **Entrypoint env vars not visible in persistent mode** — env vars set by a custom `ENTRYPOINT` are only visible to PID 1. `docker exec` starts a new process that doesn't inherit them. Use `[container-extra.env]` in `config.toml` instead — it passes `-e` to both `docker run` and `docker exec`.
 - **Named volumes persist across runs** — volumes created via `extra_args` (e.g., `-v pgdata:/pgdata`) survive container removal (ateam uses `docker rm -f` without `-v`). Clean up manually with `docker volume rm <name>`.

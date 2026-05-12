@@ -315,12 +315,13 @@ ATeam runs unattended agents that must operate safely without constant permissio
 
 | Approach | How it works | Best for |
 |----------|-------------|----------|
-| **Sandbox** (default) | OS-level syscall restrictions (Seatbelt/bubblewrap) per command | Most projects — fast, no setup |
-| **Docker** | Isolated Linux container with controlled mounts and network | Projects needing build/test isolation, multi-tier stacks |
-| **Devcontainer** | Uses project's `.devcontainer/` environment | Projects already using devcontainers |
-| **None** | No isolation (agent runs directly on host) | Debugging, or when already inside a container |
+| **Built-in sandbox** (default) | OS-level syscall restrictions (Seatbelt/bubblewrap) per command | Most projects — fast, no setup |
+| **Docker one-shot** | Fresh Linux container built and run per command | Strong isolation; need build/test tooling |
+| **Docker exec** | Exec into an existing user-managed container (docker-compose, devcontainer, …) | You already run a long-lived dev container |
+| **ATeam inside Docker** | Run ateam itself from inside a container; agents inherit container isolation | Docker-native projects |
+| **None** | No isolation (agent runs directly on host) | Debugging only |
 
-By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for container isolation. See `defaults/runtime.hcl` for all profiles.
+By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for one-shot container isolation or `--profile docker-exec` to exec into an existing container. See `defaults/runtime.hcl` for all profiles.
 
 ### Sandbox
 
