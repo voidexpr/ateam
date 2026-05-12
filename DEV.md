@@ -171,10 +171,25 @@ Per-run artefacts are keyed by `agent_execs.id` (`<exec_id>`):
     code/<exec_id>/<file>                     # `code` action canonical (per-exec_id)
 ```
 
+Per-action canonical destinations (where `runtime/<exec_id>/` files are promoted to on success):
+
+| Action       | `CanonicalDestDir`                          | Source                  |
+|--------------|---------------------------------------------|-------------------------|
+| `report`     | `roles/<role>/`                             | `cmd/report.go`         |
+| `review`     | `supervisor/`                               | `cmd/review.go`         |
+| `verify`     | `supervisor/`                               | `cmd/verify.go`         |
+| `code`       | `supervisor/code/<exec_id>/` (per-exec_id)  | `cmd/code.go`           |
+| `exec`       | _none_ (no promotion)                       | `cmd/exec.go`           |
+| `parallel`   | _none_                                      | `cmd/parallel.go`       |
+| `auto-setup` | _none_                                      | `cmd/auto_setup.go`     |
+
 Key invariants:
 
 - `logs/<exec_id>/` is forensics. The runner writes it; agents must not.
-- `runtime/<exec_id>/` is the agent's writable scratch. After a successful run the runner clones every non-`*_prompt.md` file to the action's canonical destination (`roles/<role>/`, `supervisor/`, `supervisor/code/<exec_id>/`, …). Source remains in `runtime/<exec_id>/`.
+- `runtime/<exec_id>/` is the agent's writable scratch. The directory is created only when the action has an `OutputKind` — `report`, `review`, `verify`, `execution_report`, `setup_overview` (`internal/runner/runner.go` mkdir gate; `internal/runner/template.go::OutputKind*` / `PrimaryOutputName`). `exec`, `parallel`, `auto-setup`, `auto-debug` get no runtime dir.
+- On success the runner clones every non-`*_prompt.md` file from `runtime/<exec_id>/` to the action's canonical destination (`roles/<role>/`, `supervisor/`, `supervisor/code/<exec_id>/`, …). Source remains in `runtime/<exec_id>/`. See `promoteRuntimeFiles` in `internal/runner/runner.go`. There is no filename-level filtering beyond the `*_prompt.md` exclusion — per-action behaviour is set entirely by `RunOpts.CanonicalDestDir` in `cmd/*.go`.
+- When the action has no canonical destination (`exec`, `parallel`, `auto-setup`), nothing is promoted: files persist in `runtime/<exec_id>/` and are viewable via `ateam cat <exec_id>`. Each file gets the note `SKIPPED (action has no canonical destination)` in `cmd.md`.
+- On failure, no clone happens; `cmd.md` lists what landed in `runtime/<exec_id>/` with the note `SKIPPED (run failed; not promoted)` via `listRuntimeForReport` (`internal/runner/runner.go`).
 - Clones use `cp -pc` on Darwin (APFS clonefile) and `cp -p --reflink=auto` on Linux (btrfs/xfs/zfs reflink) to avoid double disk usage; falls back to a regular byte copy.
 - `cmd.md` is written twice: once before the run (Run details "(pending)"), once at finalize with the actual exit code, status, and `# Files Copy` log.
 - Per-action `*_error.md` files no longer exist — failure context lives in `logs/<exec_id>/{cmd.md, stderr.out, stream.jsonl}`.

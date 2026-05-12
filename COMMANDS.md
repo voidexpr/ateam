@@ -737,20 +737,38 @@ ateam tail                      # live-stream all running processes
 ateam tail --coding             # live-stream current coding session
 ```
 
-### Error Files
+### Where output goes
 
-| File | Location | Content |
-|------|----------|---------|
-| `report_error.md` | `.ateam/roles/<NAME>/` | Error summary, exit code, stderr, partial output |
-| `*_stderr.log` | `.ateam/logs/roles/<NAME>/` | Raw stderr |
-| `*_stream.jsonl` | `.ateam/logs/roles/<NAME>/` | Raw JSONL event stream |
-| `*_exec.md` | `.ateam/logs/roles/<NAME>/` | Full execution context: exec_id, agent, profile, container (type + name), model, role, batch, cwd, the resolved CLI, inherited env (secrets redacted), specified env overrides (e.g. `CLAUDE_CONFIG_DIR`), sandbox settings, and the prompt. Used by `ateam resume`. |
+Each run writes to `.ateam/runtime/<exec_id>/` (the agent's scratch directory). On success, files other than `*_prompt.md` are cloned to a per-action canonical destination; the runtime copy is left in place for forensics. On failure, nothing is cloned — files stay in `runtime/<exec_id>/` and are listed in `.ateam/logs/<exec_id>/cmd.md` under `# Files Copy`.
 
-Supervisor errors: `.ateam/supervisor/review_error.md` and `.ateam/supervisor/code_error.md`.
+| Action       | Canonical destination                          |
+|--------------|------------------------------------------------|
+| `report`     | `.ateam/roles/<role>/`                         |
+| `review`     | `.ateam/supervisor/`                           |
+| `verify`     | `.ateam/supervisor/`                           |
+| `code`       | `.ateam/supervisor/code/<exec_id>/`            |
+| `exec`       | _none_ — output stays in `.ateam/runtime/<exec_id>/` |
+| `parallel`   | _none_                                         |
+| `auto-setup` | _none_                                         |
+
+For actions with no canonical destination, view the output with `ateam cat <exec_id>`. See [DEV.md](DEV.md) "Project on-disk layout" for the full per-run layout.
+
+### Run Artifacts
+
+| Path                                  | Content                                                      |
+|---------------------------------------|--------------------------------------------------------------|
+| `.ateam/logs/<exec_id>/cmd.md`        | Run details, command, env, settings, `# Files Copy` log      |
+| `.ateam/logs/<exec_id>/stderr.out`    | Captured stderr                                              |
+| `.ateam/logs/<exec_id>/stream.jsonl`  | Raw agent stream events                                      |
+| `.ateam/logs/<exec_id>/prompt.md`     | Rendered prompt (used by `ateam resume`)                     |
+| `.ateam/logs/<exec_id>/settings.json` | Rendered sandbox settings                                    |
+| `.ateam/runtime/<exec_id>/`           | Agent-written output (preserved on both success and failure) |
+
+On failure, error context lives in `cmd.md` / `stderr.out` / `stream.jsonl`; there are no per-action `*_error.md` files.
 
 ### History
 
-Every run archives its prompt and output to `history/` with a timestamp prefix:
+The canonical copy (e.g. `.ateam/roles/<role>/report.md`, `.ateam/supervisor/review.md`) is overwritten on each successful run. Every run also archives its prompt and output to a sibling `history/` directory with a timestamp prefix, so prior versions are kept:
 
 ```bash
 ls .ateam/roles/security/history/
