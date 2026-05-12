@@ -229,6 +229,15 @@ func logFilesForRun(env *root.ResolvedEnv, r calldb.RecentRow) []string {
 			files = append(files, path)
 		}
 	}
+	runtimeDir := env.RuntimeDir(r.ID)
+	if entries, err := os.ReadDir(runtimeDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			files = append(files, filepath.Join(runtimeDir, e.Name()))
+		}
+	}
 	return files
 }
 
