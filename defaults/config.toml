@@ -21,6 +21,9 @@ timeout_minutes = 60
 [roles]
 automation              = "off"
 basic_project_structure = "off"
+"code.bugs"             = "off"
+"code.recent"           = "off"
+"code.structure"        = "off"
 critic_engineering      = "off"
 critic_project          = "off"
 database_config         = "off"
