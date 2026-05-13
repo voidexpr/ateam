@@ -292,34 +292,34 @@ There is a very long list of potentially very useful roles to add.
 
 ## Commands
 
-* Main pipeline: `all`, `report`, `review`, `code`, `verify`
-* Review documents: `server`, `export`
-* Process management: ps, inspect, tail, cat, `resume`
-* Troubleshooting: `env`, `prompt`, `roles`, `version`
-* Ad-hoc agents: `exec`, `parallel`
-* Installation and update; `init`, `install`, `update`
+* Main pipeline: [`all`](COMMANDS.md#ateam-all), [`report`](COMMANDS.md#ateam-report), [`review`](COMMANDS.md#ateam-review), [`code`](COMMANDS.md#ateam-code), [`verify`](COMMANDS.md#ateam-verify)
+* Review documents: [`serve`](COMMANDS.md#ateam-serve), [`export`](COMMANDS.md#ateam-export)
+* Process management: [`ps`](COMMANDS.md#ateam-ps), [`inspect`](COMMANDS.md#ateam-inspect-id), [`tail`](COMMANDS.md#ateam-tail), [`cat`](COMMANDS.md#ateam-cat), [`resume`](COMMANDS.md#ateam-resume-exec_id)
+* Troubleshooting: [`env`](COMMANDS.md#ateam-env), [`prompt`](COMMANDS.md#ateam-prompt), [`roles`](COMMANDS.md#ateam-roles), [`version`](COMMANDS.md#ateam-version)
+* Ad-hoc agents: [`exec`](COMMANDS.md#ateam-exec), [`parallel`](COMMANDS.md#ateam-parallel)
+* Installation and update: [`init`](COMMANDS.md#ateam-init-path), [`install`](COMMANDS.md#ateam-install-path), [`update`](COMMANDS.md#ateam-update)
 
 | Command | Description |
 |---------|-------------|
-| `ateam init` | Initialize a project (`.ateam/` directory) |
-| `ateam report` | Run role analyses |
-| `ateam review` | Supervisor reviews and prioritizes findings |
-| `ateam code` | Execute prioritized coding tasks (chains `ateam verify`; pass `--no-verify` to skip) |
-| `ateam all` | Full pipeline: report → review → code → verify |
-| `ateam verify` | Supervisor verifies recent code changes from `ateam code` |
-| `ateam exec` | Run an agent with a custom prompt |
-| `ateam parallel` | Run multiple agents in parallel, each with its own prompt |
-| `ateam env` | Show environment and configuration status |
-| `ateam serve` | Web UI for browsing reports and sessions |
-| `ateam export` | Export reports as a self-contained HTML file |
-| `ateam ps` | Recent run history |
-| `ateam inspect` | Show details and logs for agent runs |
-| `ateam resume` | Resume a previous claude agent run as an interactive session |
-| `ateam prompt` | Debug prompt assembly |
-| `ateam cat` | Pretty-print stream logs |
-| `ateam tail` | Live-stream agent output |
-| `ateam roles` | List available roles |
-| `ateam version` | Print version, build, and system information |
+| [`ateam init`](COMMANDS.md#ateam-init-path) | Initialize a project (`.ateam/` directory) |
+| [`ateam report`](COMMANDS.md#ateam-report) | Run role analyses |
+| [`ateam review`](COMMANDS.md#ateam-review) | Supervisor reviews and prioritizes findings |
+| [`ateam code`](COMMANDS.md#ateam-code) | Execute prioritized coding tasks (chains [`ateam verify`](COMMANDS.md#ateam-verify); pass `--no-verify` to skip) |
+| [`ateam all`](COMMANDS.md#ateam-all) | Full pipeline: report → review → code → verify |
+| [`ateam verify`](COMMANDS.md#ateam-verify) | Supervisor verifies recent code changes from [`ateam code`](COMMANDS.md#ateam-code) |
+| [`ateam exec`](COMMANDS.md#ateam-exec) | Run an agent with a custom prompt |
+| [`ateam parallel`](COMMANDS.md#ateam-parallel) | Run multiple agents in parallel, each with its own prompt |
+| [`ateam env`](COMMANDS.md#ateam-env) | Show environment and configuration status |
+| [`ateam serve`](COMMANDS.md#ateam-serve) | Web UI for browsing reports and sessions |
+| [`ateam export`](COMMANDS.md#ateam-export) | Export reports as a self-contained HTML file |
+| [`ateam ps`](COMMANDS.md#ateam-ps) | Recent run history |
+| [`ateam inspect`](COMMANDS.md#ateam-inspect-id) | Show details and logs for agent runs |
+| [`ateam resume`](COMMANDS.md#ateam-resume-exec_id) | Resume a previous claude agent run as an interactive session |
+| [`ateam prompt`](COMMANDS.md#ateam-prompt) | Debug prompt assembly |
+| [`ateam cat`](COMMANDS.md#ateam-cat) | Pretty-print stream logs |
+| [`ateam tail`](COMMANDS.md#ateam-tail) | Live-stream agent output |
+| [`ateam roles`](COMMANDS.md#ateam-roles) | List available roles |
+| [`ateam version`](COMMANDS.md#ateam-version) | Print version, build, and system information |
 
 See [COMMANDS.md](COMMANDS.md) for all `ateam` commands and flags, and [CONFIG.md](CONFIG.md) for directory layout, prompt configuration, and runtime configuration.
 
