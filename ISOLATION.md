@@ -17,6 +17,64 @@ See the [Execution modes diagram in README.md](README.md#execution-modes) for a 
 
 There is also a "no isolation" option (run the agent directly against the host with no sandbox) — covered briefly below; rarely the right choice.
 
+
+
+### Sandbox
+
+No config needed — works out of the box. ATeam's default sandbox restricts filesystem access to fewer directories than the agent's default and limits network to package registries and API endpoints.
+
+To customize, edit `.ateam/config.toml`:
+
+```toml
+[sandbox-extra]
+allow_write = ["/tmp/my-tool-output"]
+allow_read = ["/opt/my-sdk"]
+allow_domains = ["my-internal-registry.dev"]
+unsandboxed_commands = ["playwright"]    # commands that can't run inside a sandbox
+```
+
+**Known limitations** (will change as agents evolve):
+- Claude Code doesn't yet support Unix domain sockets or named pipes — Docker, playwright-cli and tsx must run unsandboxed
+- Sandboxes can't be nested (e.g., Playwright CLI inside a sandbox)
+- All files are readable by default; sensitive paths must be explicitly excluded
+
+### Separate configuration for coding agents
+
+By default ateam uses your local agent configuration (for example `~/.claude` for Claude) that may include some settings that could be helpful (skills, plugins, mcp servers) or not helpful (custom logging of tools, custom notifications). Eventually it is recommended to use a different configuration directory (for example `~/.ateamorg/claude`) and change `runtime.hcl` to use it by default.
+
+### Docker
+#### One-shot (docker run)
+
+Use `--profile docker` for one-shot container isolation, or run ateam inside your own Docker setup. Agents auto-detect containers and skip sandbox/permissions — no profile switching needed. A default Dockerfile is used so agent is available inside of the container.
+
+See [ISOLATION.md](ISOLATION.md) for the full guide: container modes, secrets, precheck scripts, interactive Claude sessions, and agent auto-adaptation.
+
+#### docker exec
+
+Use `--profile docker-exec` to run agents within existing docker containers. Ateam makes sure that agents skip sandbox/permissions — no profile switching needed.
+
+A coding agent has be available within the container, by default an oauth token is passed so no need to authenticate inside the container. No need to install ateam itself unless you run the supervisor for coding this way. This mode is best used for code agent runs so they have access to a proper test environment.
+
+See [ISOLATION.md](ISOLATION.md) for the full guide: container modes, secrets, precheck scripts, interactive Claude sessions, and agent auto-adaptation.
+
+#### Run ateam inside a container
+
+No custom profile needed, ateam detects it runs within a container and runs agents without sandbox or permission approval. But this does require to install team inside the container and (optionally) mount the ateamorg directory to have access to defaults. Also the coding agent inside the container should be fully authenticated and optionally have an oauth token.
+
+See [ISOLATION.md](ISOLATION.md) for the full guide: container modes, secrets, precheck scripts, interactive Claude sessions, and agent auto-adaptation.
+
+
+### Customizing Runtime
+
+- **`config.toml`**: simple customization — sandbox paths, container extras, unsandboxed commands, profiles
+- **`runtime.hcl`**: full control — agent definitions, container types, profiles, pricing
+
+See [CONFIG.md](CONFIG.md) for complete configuration documentation.
+
+
+
+
+
 ## No isolation
 
 If you run `ateam` with a profile whose container is `none` and use a custom agent that disables the sandbox (or use `--dangerously-skip-permissions` directly with `claude`), the agent operates on the host with full filesystem and network access. Useful only when ateam itself is already inside an isolated environment (e.g. CI runner, throwaway VM) — otherwise prefer the sandbox.

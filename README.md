@@ -21,7 +21,7 @@ See [APPROACH.md](APPROACH.md) for the rationale and design principles behind AT
     * use a separate config for your coding agent (`CLAUDE_CONFIG_DIR`)
     * run inside docker (built-in secret management for oauth or just use an already authenticated agent in the container)
     * run outside of docker but docker exec only the agents in docker
-* **just a CLI**: can run the workflows built-in ateam (report, review, code, verify) or ad-hoc unattended agent execs (`run` for a single agent exec, `parallel` for multiple simultaneous agents)
+* **just a CLI**: can run the workflows built-in ateam (report, review, code, verify) or ad-hoc unattended agent runs (`exec` for a single agent execution, `parallel` for multiple simultaneous agents)
 * **convenient tooling**: `ps` to see current/past agent runs, `inspect` for troubleshooting
 * **cost transaprency**: all agent execution track token usage and estimated cost (less relevant for subscription). Tokens are the new software engineering currency and help gauge if an error is worthwhile
 
@@ -62,17 +62,18 @@ ateam init
 ateam auto-setup
 
 # 3. Run
-ateam report                         # run all enabled role analyses
-ateam review                         # supervisor prioritizes findings
-ateam code                           # execute top-priority fixes (then verify)
+ateam report             # run all enabled role analyses
+ateam review             # supervisor prioritizes findings
+ateam code               # implement top-priority fixes
+ateam verify             # audits at the commits from previous phase
 
+# 4. Look (at any step)
+ataem serve              # local web server to browse documents, processes, cost
 ```
 
-Once familiar with ateam just run the full pipeline: `ateam all`.
-`ateam code` and `ateam all` chain `ateam verify` automatically; pass
-`--no-verify` to stop after the code phase.
+Once familiar with ateam just run the full pipeline: `ateam all` or `ateam all && ateam serve`.
 
-You can see all artifacts under `.ateam/` or via an experimental web UI `ateam serve`.
+You can see all artifacts using web UI `ateam serve` or under `.ateam/`
 
 Other very useful commands:
 ```bash
@@ -81,12 +82,15 @@ ateam ps
 
 # See logs of running agents
 ateam tail
+
+# Auto-debug issues using an agent
+ateam inspect EXEC_ID --auto-debug
 ```
 
 ### Prerequisites
 
 - **Go 1.25+** — installed automatically by `install.sh`
-- **[Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)** — install and authenticate before running agents
+- **[Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)** or **[Codex](https://developers.openai.com/codex/cli)** — install and authenticate before running agents (one or the other or both)
 - **Docker** (optional) — enables isolated execution via `--profile docker`
 
 ### Manual Install
@@ -98,25 +102,6 @@ cd ateam && make build
 sudo ln -s "$(pwd)/ateam" /usr/local/bin/ateam
 ```
 
-### Optional: Docker
-
-Docker agents need API credentials. Store them once with `ateam secret`:
-
-```bash
-ateam secret CLAUDE_CODE_OAUTH_TOKEN    # recommended (uses your subscription)
-ateam secret ANTHROPIC_API_KEY          # or use API directly (pay as you go)
-```
-
-For interactive Claude in containers, mount the shared config directory and use `ateam claude`:
-
-```bash
-docker run -v "$(ateam env --print-org)/claude_linux_shared:/home/agent/shared_claude" ...
-# Inside the container:
-ateam claude --config-dir ~/shared_claude
-```
-
-See [ISOLATION.md](ISOLATION.md) for Docker setup details including shared Linux agent config.
-
 ### Upgrade
 
 ```bash
@@ -125,7 +110,11 @@ git pull --rebase && make build
 
 ## How It Works
 
+By default coding agents will be ran in a sandbox providing a good balance of file system protection and ease of use out of the box. Read the [Isolation](#Isolation) section for more options on how to run your coding agents.
+
 ### The Pipeline
+
+When running `ateam all` the following steps are executed (they are also available as individual commands):
 
 ```
 ateam report  →  ateam review  →  ateam code  →  ateam verify
@@ -162,21 +151,109 @@ Step by step (with review):
 ```bash
 ateam report && ateam review --print    # inspect findings
 # optionally edit .ateam/supervisor/review.md
-ateam code                              # execute approved tasks (then verify)
+ateam code && ateam verify && ateam serve # fix, verify and serve all artifacts produced
 ```
 
-### Git Integration
+### Git
 
-Several approaches work, it's up to you to select the setup you prefer, `ateam` just runs where you want:
-- **Simplest**: run ateam in your work area, review its commits
-- **Worktree**: run ateam in a separate git worktree
-- **Branch**: create an `ateam_work` branch, cherry-pick changes
+The current version of ateam doesn't perform any git actions except `git commit` during the `code` or `verify` phases.
+
+So the git workflow is up to you:
+- **Simplest**: run ateam in your or a dedicated work area, review its commits, push.
+- **Worktree**: run ateam in a separate git worktree, review, merge/cherry-pick
+- **Branch**: same as worktree but with a dedicated work area
 
 ### Steering Ateam
 
-Add `report_extra_prompt.md` or `review_extra_prompt.md` to document:
-- Rejected approaches (so they aren't retried)
-- Project-specific guidelines applied across roles
+#### 1. Providing directions
+* for ad-hoc steering use: `--extra-prompt YOUR_INSTRUCTIONS` for any of report/review/code/verify
+    * example: `ateam all --extra-prompt "focus on the changes related to the authentication model"`
+* for persistent steering (like reject a type of findings ateam proposes) just write them in a file at the appropriate level:
+    * report level: `.ateam/roles/NAME/report_extra_prompt.md`
+    * review level: `.ateam/supervisor/review_extra_prompt.md`
+
+see more options in [CONFIG.md](CONFIG.md)
+
+#### 2. Specify selected roles
+
+It doesn't make sense to run the same roles all the time, for example:
+* during lunch run code review and test roles only
+* after a day of work do the same but add security update, documentation roles
+* once or twice a week also review dependencies and more advanced testing
+
+## Isolation
+
+ATeam runs unattended agents that must operate safely without constant permission approval requests. The field is evolving, ATeam supports multiple approaches and will adapt as best practices emerge.
+
+**Why isolation matters:**
+- **Filesystem**: prevent accidental or malicious writes outside the project, protect access to sensitive files, avoid time-wasting configuration breakages
+- **Network**: prevent data exfiltration (especially combined with filesystem access), prevent remote control
+
+**The tradeoff**: stricter restrictions increase safety but can break tools that rely on directories outside the project, Unix sockets (Docker), pipes (tsx), nested sandboxes (Playwright on macOS), or shared `/tmp` directories. Also more isolation environment like docker require more configuration, there are also extra steps to configure coding agents within containers.
+
+The exact isolation is configuration driven so highly customizable.
+
+### Execution modes
+
+```
+┌─ Host ──────────────────────────────┐   ┌─ Host ──────────────────────────────┐
+│ ┌─ ateam ─────────────────────────┐ │   │ ┌─ ateam ─────────────────────────┐ │
+│ │ ┌─ agent ─────────────────────┐ │ │   │ │ ┌─ container ─────────────────┐ │ │
+│ │ │ ┌─ sandbox ───────────────┐ │ │ │   │ │ │ ┌─ agent ─────────────────┐ │ │ │
+│ │ │ │    tools / commands     │ │ │ │   │ │ │ │    tools / commands     │ │ │ │
+│ │ │ └─────────────────────────┘ │ │ │   │ │ │ └─────────────────────────┘ │ │ │
+│ │ └─────────────────────────────┘ │ │   │ │ └─────────────────────────────┘ │ │
+│ └─────────────────────────────────┘ │   │ └─────────────────────────────────┘ │
+└─────────────────────────────────────┘   └─────────────────────────────────────┘
+① Built-in sandbox — default profile      ② Docker one-shot — --profile docker
+
+┌─ Host ──────────────────────────────┐   ┌─ Host ──────────────────────────────┐
+│ ┌─ ateam ─────────────────────────┐ │   │ ┌─ container ─────────────────────┐ │
+│ │ ┌─ running container ─────────┐ │ │   │ │ ┌─ ateam ─────────────────────┐ │ │
+│ │ │ ┌─ agent ─────────────────┐ │ │ │   │ │ │ ┌─ agent ─────────────────┐ │ │ │
+│ │ │ │    tools / commands     │ │ │ │   │ │ │ │    tools / commands     │ │ │ │
+│ │ │ └─────────────────────────┘ │ │ │   │ │ │ └─────────────────────────┘ │ │ │
+│ │ └─────────────────────────────┘ │ │   │ │ └─────────────────────────────┘ │ │
+│ └─────────────────────────────────┘ │   │ └─────────────────────────────────┘ │
+└─────────────────────────────────────┘   └─────────────────────────────────────┘
+③ Docker exec — --profile docker-exec     ④ ATeam inside Docker — container-native
+```
+
+| Approach | How it works | Best for |
+|----------|-------------|----------|
+| **Built-in sandbox** (default) | OS-level syscall restrictions (Seatbelt/bubblewrap) per command | Most projects — fast, no setup |
+| **Built-in sandbox** and **separate agent configuration** | Same as above but don't share the same configuration as interactive agents (different hooks, ...) | Useful when the default agent configuration is highly customized with notifications |
+| **Docker one-shot** | Fresh Linux container built and run per command | Strong isolation; need build/test tooling |
+| **Docker exec** | Exec into an existing user-managed container (docker-compose, devcontainer, …) | You already run a long-lived dev container |
+| **ATeam inside Docker** | Run ateam itself from inside a container; agents inherit container isolation and runs without any restriction | Docker-native projects |
+| **None** | No isolation (agent runs directly on host) | Debugging only |
+
+By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for one-shot container isolation or `--profile docker-exec` to exec into an existing container. See `defaults/runtime.hcl` for all profiles.
+
+## Key Configuration Concepts
+
+- **3-level prompt fallback**: project → org → embedded defaults. Customize at any level.
+- **Multi-project support**: share org-wide defaults across projects via `.ateamorg/` (by default created in `$HOME`)
+- **Runtime profiles**: switch agent/container combos with `--profile docker` or `--profile cheap`
+- **Cost tracking**: `ateam cost` for aggregated reports, `ateam ps` for run history
+- **Secret management**: `ateam secret` stores API keys in OS keychain or `.env` files. For a given key the store beats the environment; when an agent accepts alternatives (e.g. `CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY`), OAUTH wins any same-level tie. Competing credentials are stripped from agent processes
+
+An ateam project is a `.ateam` folder in your code base, a parent directory ($HOME by default) contains `.ateamorg`.
+* **Project**:
+    * configuration
+        * `config.toml` configured roles and general persisted settings
+        * optional: overloaded or extended prompts
+        * optional: extended coding agent or container config (`runtime.hcl`, `Dockerfile`)
+    * produced artifacts
+        * reports (and their history)
+        * last review (and their history)
+        * coding tasks and their execution report
+    * runtime logs
+        * state.sqlite: track running agent execs and statistics about them for live monitoring and cost reporting
+        * log files from agent execution, exact prompt used
+* **Organization**:
+    * optional: overload runtime.hcl or prompts to reuse between projects
+    * defaults for all roles and all config
 
 ## Roles
 
@@ -213,168 +290,38 @@ Ideas:
 
 There is a very long list of potentially very useful roles to add.
 
-## Key Concepts
-
-- **3-level prompt fallback**: project → org → embedded defaults. Customize at any level.
-- **Multi-project support**: share org-wide defaults across projects via `.ateamorg/` (by default created in `$HOME`)
-- **Runtime profiles**: switch agent/container combos with `--profile docker` or `--profile cheap`
-- **Cost tracking**: `ateam cost` for aggregated reports, `ateam ps` for run history
-- **Secret management**: `ateam secret` stores API keys in OS keychain or `.env` files. For a given key the store beats the environment; when an agent accepts alternatives (e.g. `CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY`), OAUTH wins any same-level tie. Competing credentials are stripped from agent processes
-
-An ateam project is a `.ateam` folder in your code base, a parent directory ($HOME by default) contains `.ateamorg`.
-* **Project**:
-    * configuration
-        * `config.toml` configured roles and general persisted settings
-        * optional: overloaded or extended prompts
-        * optional: extended coding agent or container config (`runtime.hcl`, `Dockerfile`)
-    * produced artifacts
-        * reports (and their history)
-        * last review (and their history)
-        * coding tasks and their execution report
-    * runtime logs
-        * state.sqlite: track running agent execs and statistics about them for live monitoring and cost reporting
-        * log files from agent execution, exact prompt used
-* **Organization**:
-    * optional: overload runtime.hcl or prompts to reuse between projects
-    * defaults for all roles and all config
-
 ## Commands
+
+* Main pipeline: `all`, `report`, `review`, `code`, `verify`
+* Review documents: `server`, `export`
+* Process management: ps, inspect, tail, cat, `resume`
+* Troubleshooting: `env`, `prompt`, `roles`, `version`
+* Ad-hoc agents: `exec`, `parallel`
+* Installation and update; `init`, `install`, `update`
 
 | Command | Description |
 |---------|-------------|
-| `ateam install` | Create a `.ateamorg/` directory with defaults |
 | `ateam init` | Initialize a project (`.ateam/` directory) |
-| `ateam auto-setup` | Auto-configure roles for your project |
 | `ateam report` | Run role analyses |
 | `ateam review` | Supervisor reviews and prioritizes findings |
 | `ateam code` | Execute prioritized coding tasks (chains `ateam verify`; pass `--no-verify` to skip) |
 | `ateam all` | Full pipeline: report → review → code → verify |
 | `ateam verify` | Supervisor verifies recent code changes from `ateam code` |
-| `ateam eval` | Compare two role prompt variants side-by-side with LLM scoring — see [EVAL.md](EVAL.md) |
 | `ateam exec` | Run an agent with a custom prompt |
 | `ateam parallel` | Run multiple agents in parallel, each with its own prompt |
-| `ateam secret` | Manage API keys (keychain or file) |
-| `ateam claude` | Run interactive claude in a container with shared config |
-| `ateam agent-config` | [experimental] Audit agent auth, copy config between host and containers |
-| `ateam container-cp` | Copy ateam binary into a running container |
 | `ateam env` | Show environment and configuration status |
 | `ateam serve` | Web UI for browsing reports and sessions |
 | `ateam export` | Export reports as a self-contained HTML file |
 | `ateam ps` | Recent run history |
 | `ateam inspect` | Show details and logs for agent runs |
 | `ateam resume` | Resume a previous claude agent run as an interactive session |
-| `ateam cost` | Aggregated cost and token usage |
 | `ateam prompt` | Debug prompt assembly |
 | `ateam cat` | Pretty-print stream logs |
 | `ateam tail` | Live-stream agent output |
 | `ateam roles` | List available roles |
-| `ateam projects` | List projects in the organization |
-| `ateam project-rename` | Re-register a project after a directory move, or rename its state directory |
-| `ateam update` | Update on-disk defaults to match binary |
 | `ateam version` | Print version, build, and system information |
 
 See [COMMANDS.md](COMMANDS.md) for all `ateam` commands and flags, and [CONFIG.md](CONFIG.md) for directory layout, prompt configuration, and runtime configuration.
-
-## Isolation
-
-ATeam runs unattended agents that must operate safely without constant permission approval. The field is evolving — ATeam supports multiple approaches and will adapt as best practices emerge.
-
-**Why isolation matters:**
-- **Filesystem**: prevent accidental or malicious writes outside the project, protect access to sensitive files, avoid time wasting configuration breakages
-- **Network**: prevent data exfiltration (especially combined with filesystem access), prevent remote control
-
-**The tradeoff**: stricter restrictions increase safety but can break tools that rely on directories outside the project, Unix sockets (Docker), pipes (tsx), nested sandboxes (Playwright on macOS), or shared `/tmp` directories.
-
-### Execution modes
-
-```
-┌─ Host ──────────────────────────────┐   ┌─ Host ──────────────────────────────┐
-│ ┌─ ateam ─────────────────────────┐ │   │ ┌─ ateam ─────────────────────────┐ │
-│ │ ┌─ agent ─────────────────────┐ │ │   │ │ ┌─ container ─────────────────┐ │ │
-│ │ │ ┌─ sandbox ───────────────┐ │ │ │   │ │ │ ┌─ agent ─────────────────┐ │ │ │
-│ │ │ │    tools / commands     │ │ │ │   │ │ │ │    tools / commands     │ │ │ │
-│ │ │ └─────────────────────────┘ │ │ │   │ │ │ └─────────────────────────┘ │ │ │
-│ │ └─────────────────────────────┘ │ │   │ │ └─────────────────────────────┘ │ │
-│ └─────────────────────────────────┘ │   │ └─────────────────────────────────┘ │
-└─────────────────────────────────────┘   └─────────────────────────────────────┘
-① Built-in sandbox — default profile      ② Docker one-shot — --profile docker
-
-┌─ Host ──────────────────────────────┐   ┌─ Host ──────────────────────────────┐
-│ ┌─ ateam ─────────────────────────┐ │   │ ┌─ container ─────────────────────┐ │
-│ │ ┌─ running container ─────────┐ │ │   │ │ ┌─ ateam ─────────────────────┐ │ │
-│ │ │ ┌─ agent ─────────────────┐ │ │ │   │ │ │ ┌─ agent ─────────────────┐ │ │ │
-│ │ │ │    tools / commands     │ │ │ │   │ │ │ │    tools / commands     │ │ │ │
-│ │ │ └─────────────────────────┘ │ │ │   │ │ │ └─────────────────────────┘ │ │ │
-│ │ └─────────────────────────────┘ │ │   │ │ └─────────────────────────────┘ │ │
-│ └─────────────────────────────────┘ │   │ └─────────────────────────────────┘ │
-└─────────────────────────────────────┘   └─────────────────────────────────────┘
-③ Docker exec — --profile docker-exec     ④ ATeam inside Docker — container-native
-```
-
-### Approaches
-
-| Approach | How it works | Best for |
-|----------|-------------|----------|
-| **Built-in sandbox** (default) | OS-level syscall restrictions (Seatbelt/bubblewrap) per command | Most projects — fast, no setup |
-| **Docker one-shot** | Fresh Linux container built and run per command | Strong isolation; need build/test tooling |
-| **Docker exec** | Exec into an existing user-managed container (docker-compose, devcontainer, …) | You already run a long-lived dev container |
-| **ATeam inside Docker** | Run ateam itself from inside a container; agents inherit container isolation | Docker-native projects |
-| **None** | No isolation (agent runs directly on host) | Debugging only |
-
-By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for one-shot container isolation or `--profile docker-exec` to exec into an existing container. See `defaults/runtime.hcl` for all profiles.
-
-### Sandbox
-
-No config needed — works out of the box. ATeam's default sandbox restricts filesystem access to fewer directories than the agent's default and limits network to package registries and API endpoints.
-
-To customize, edit `.ateam/config.toml`:
-
-```toml
-[sandbox-extra]
-allow_write = ["/tmp/my-tool-output"]
-allow_read = ["/opt/my-sdk"]
-allow_domains = ["my-internal-registry.dev"]
-unsandboxed_commands = ["playwright"]    # commands that can't run inside a sandbox
-```
-
-**Known limitations** (will change as agents evolve):
-- Claude Code doesn't yet support Unix domain sockets or named pipes — Docker, playwright-cli and tsx must run unsandboxed
-- Sandboxes can't be nested (e.g., Playwright CLI inside a sandbox)
-- All files are readable by default; sensitive paths must be explicitly excluded
-
-### Separate configuration for coding agents
-
-By default ateam uses your local agent configuration (for example `~/.claude` for Claude) that may include some settings that could be helpful (skills, plugins, mcp servers) or not helpful (custom logging of tools, custom notifications). Eventually it is recommended to use a different configuration directory (for example `~/.ateamorg/claude`) and change `runtime.hcl` to use it by default.
-
-### Docker
-#### One-shot (docker run)
-
-Use `--profile docker` for one-shot container isolation, or run ateam inside your own Docker setup. Agents auto-detect containers and skip sandbox/permissions — no profile switching needed. A default Dockerfile is used so agent is available inside of the container.
-
-See [ISOLATION.md](ISOLATION.md) for the full guide: container modes, secrets, precheck scripts, interactive Claude sessions, and agent auto-adaptation.
-
-#### docker exec
-
-Use `--profile docker-exec` to run agents within existing docker containers. Ateam makes sure that agents skip sandbox/permissions — no profile switching needed.
-
-A coding agent has be available within the container, by default an oauth token is passed so no need to authenticate inside the container. No need to install ateam itself unless you run the supervisor for coding this way. This mode is best used for code agent runs so they have access to a proper test environment.
-
-See [ISOLATION.md](ISOLATION.md) for the full guide: container modes, secrets, precheck scripts, interactive Claude sessions, and agent auto-adaptation.
-
-#### Run ateam inside a container
-
-No custom profile needed, ateam detects it runs within a container and runs agents without sandbox or permission approval. But this does require to install team inside the container and (optionally) mount the ateamorg directory to have access to defaults. Also the coding agent inside the container should be fully authenticated and optionally have an oauth token.
-
-See [ISOLATION.md](ISOLATION.md) for the full guide: container modes, secrets, precheck scripts, interactive Claude sessions, and agent auto-adaptation.
-
-
-### Customizing Runtime
-
-- **`config.toml`**: simple customization — sandbox paths, container extras, unsandboxed commands, profiles
-- **`runtime.hcl`**: full control — agent definitions, container types, profiles, pricing
-
-See [CONFIG.md](CONFIG.md) for complete configuration documentation.
-
 
 ## FAQ
 
