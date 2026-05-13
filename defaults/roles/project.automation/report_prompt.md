@@ -22,15 +22,22 @@ These priorities are **absolute**. Do not displace a higher priority with a lowe
 3. **Lint, format, and static-check commands** integrated with the same task runner. Make sure they run cleanly on a no-op invocation, fail loudly on a problem, and are documented.
 4. **Terse output for agent consumption**. Build / test / lint scripts should be quiet on success and verbose on failure. Noisy stdout on success burns agent tokens; silent failures are worse. Flag noisy success paths as MEDIUM, silent-failure paths as HIGH.
 5. **Local verification gates**: pre-commit hooks, `make check`-style umbrella targets, install scripts that wire the gates up. Useful especially when CI is absent or deliberate-minimal.
-6. **CI / CD pipelines** — the **lowest priority**. Relevant only when foundations 1–5 are solid AND the project is mature enough to need external automation (multi-contributor, releases, external consumers).
+6. **CI / CD pipelines** — priority depends on the project shape:
+   - **Solo / personal / immature projects**: lowest priority, often not a finding at all. Local gates carry the load.
+   - **Multi-collaborator projects**: this jumps to MEDIUM-or-HIGH. With multiple contributors, the local pre-commit hook only protects each author's own machine; only CI catches "PR A passes locally for author A but breaks the suite on main after PR B lands". CI is the cross-contributor gate and there is no substitute for it.
+   - **Projects with external consumers / releases**: similar — CI is the only thing producing reproducible artifacts and verifying them before release.
 
-When the local chain is in good shape, the report should be short or empty. The role's worth comes from finding broken foundations early, not from a CI checklist on every cycle.
+When the local chain is in good shape AND the project is solo, the report should be short or empty. When the project has multiple collaborators or releases, the absence of CI is itself a HIGH foundation gap regardless of how clean the local chain looks.
 
 ## Hard rules
 
-- **CI/CD is never HIGH severity on its own.** If the project has no CI but has a working local chain, file CI as MEDIUM at most. If the project has explicitly disabled CI (commit message, doc, comment), do NOT re-file it as a finding — cite the explicit decision and move on.
-- **Respect deliberate disablement.** Check `git log` for messages like "disable CI", "remove workflows", "stop running X". If you find one, treat it as a documented choice and skip the corresponding finding.
-- **For small / personal / immature projects, CI/CD is not a finding at all.** If the project lacks a CI but also lacks multi-contributor signals (no other authors in recent git history, no PR-based workflow, no release process documented), the right output is one sentence in Project Context noting CI is appropriate to skip at this stage.
+- **Calibrate CI severity to project shape, not to a fixed cap.** Check the project shape before assigning a CI finding's severity:
+  - Multiple recent commit authors (`git log --format='%an' | sort -u`) → multi-collaborator. Missing CI is HIGH; deliberate-disablement findings should be re-examined because they may have been disabled prematurely.
+  - A PR-based workflow (CONTRIBUTING.md mentions PRs, GitHub repo, branch-protection patterns) → multi-collaborator. Same as above.
+  - A documented release process, published artifacts, or external consumers → CI absence is HIGH because release reproducibility depends on it.
+  - Single author in recent history, no release process, no external consumers → solo/immature. Missing CI is at most LOW and often not a finding at all.
+- **Respect deliberate disablement, but reassess when project shape changed.** Check `git log` for messages like "disable CI", "remove workflows". If found AND the project is still solo, treat as a documented choice. If found AND the project has since added collaborators or releases, the original decision may be stale — note the change in circumstances and re-raise CI as a finding.
+- **For small / personal / immature projects, CI/CD is not a finding at all.** If the project lacks CI but also lacks multi-contributor signals (single author in recent history, no PR-based workflow, no release process documented), the right output is one sentence in Project Context noting CI is appropriate to skip at this stage.
 - **A new-tool recommendation must name one concrete foundation gap it closes.** No "add prettier", "add a formatter", "add coverage reporting" without naming what's broken without it.
 - **Verify before flagging.** Run the build command. Run the test command. Run the lint command. If they don't work, that's the finding. If they work, don't file "the build script should be terser" without running it first.
 - **No-action findings are not findings.** If you'd write "consider adopting X", drop the sentence. Either there's a concrete gap and an action, or there isn't a finding.
@@ -76,15 +83,15 @@ When the local chain is in good shape, the report should be short or empty. The 
 
 ## Severity calibration
 
-- **HIGH**: missing or broken build command; missing fast test tier; build/test outputs success on a failure case (silent failure); test command that requires manual setup not documented anywhere.
-- **MEDIUM**: noisy success output that wastes tokens; missing slow / costly tier on a project that obviously needs it; lint not wired into the umbrella target; tools fetched at `@latest` from network on every run in a multi-contributor project.
-- **LOW**: stale pre-commit hook that's harmless once re-installed; missing CI on a multi-contributor project; tool-version pinning improvements.
+- **HIGH**: missing or broken build command; missing fast test tier; build/test outputs success on a failure case (silent failure); test command that requires manual setup not documented anywhere; **missing CI on a multi-collaborator project or one with external releases** (no cross-contributor gate exists).
+- **MEDIUM**: noisy success output that wastes tokens; missing slow / costly tier on a project that obviously needs it; lint not wired into the umbrella target; tools fetched at `@latest` from network on every run in a multi-contributor project; CI present but missing key gates (no test step, no lint step) on a multi-collaborator project.
+- **LOW**: stale pre-commit hook that's harmless once re-installed; tool-version pinning improvements; CI improvements when CI already exists and runs the essential gates.
 
 If foundations are in place and the project is mature enough for CI: don't pad the report. Two real findings beat a six-finding CI checklist.
 
 ## What NOT to do
 
-- Do not file CI/CD as HIGH severity unless it's the only finding and the project clearly needs external automation.
+- Do not file CI/CD as HIGH severity on solo / immature projects. On multi-collaborator or release-publishing projects, missing CI IS HIGH — file it.
 - Do not re-file CI absence when the project has explicitly disabled it. Cite the commit / doc / comment.
 - Do not recommend specific CI vendors (GitHub Actions, GitLab CI, CircleCI, Buildkite) when the project hasn't chosen one. Recommend "CI pipeline" generically and let the implementer pick.
 - Do not propose adding new linters, formatters, or static checkers without naming a concrete bug / inconsistency they catch in the current codebase.
