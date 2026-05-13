@@ -44,6 +44,7 @@ These rules are not soft guidance — violating them is the failure mode that ma
 - **Process-table leaks**: any place a secret value reaches `argv`. `-e KEY=VALUE`, positional CLI args containing tokens, command-line passwords, prompts containing sensitive instructions passed as positional arguments instead of stdin.
 - **Log / error leaks**: secrets in `log.Printf`, exceptions that include credentials in the message, debug responses that echo headers or env vars.
 - **File-mode leaks**: secret files at 0644, parent dirs at 0755, history files containing credentials.
+- **Client-bundle exposure**: code shipped to untrusted clients is exposed by definition. Flag any secret-shaped value (API keys, tokens, internal URLs, JWT secrets) that reaches a JavaScript bundle shipped to the browser, a mobile app binary, a publicly-distributed plugin, or a downloadable CLI. Even when the source-side file looks legitimate (`.env`, normal source), ending up in a client-distributed bundle is the same threat class as committing the credential. Specifically watch: `.env` files imported into Vite/Webpack/Next.js/Vue client builds, and the `NEXT_PUBLIC_*` / `VITE_*` / `REACT_APP_*` prefixes that explicitly leak to clients; JSON config files included in mobile app bundles; plugin manifests with embedded API keys.
 
 ### Boundary integrity
 - **Path traversal**: file-serving routes that accept user-supplied path components without validating against a project-root prefix; archive extraction that doesn't reject `..` entries.
