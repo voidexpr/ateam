@@ -114,11 +114,19 @@ func printRolesDocs() error {
 		if config.IsRoleEnabled(defaultCfg.Roles[id]) {
 			status = "on"
 		}
-		desc := prompts.RoleDescription(id)
+		desc := escapeTableCell(prompts.RoleDescription(id))
 		link := fmt.Sprintf("[prompt](defaults/roles/%s/report_prompt.md)", id)
 		fmt.Fprintf(&b, "| `%s` | %s | %s | %s |\n", id, status, desc, link)
 	}
 
 	fmt.Print(b.String())
 	return nil
+}
+
+// escapeTableCell escapes characters that would corrupt a markdown table row.
+// A literal `|` in a description splits the cell across columns; backslash-
+// escape it. Newlines are flattened to spaces for the same reason.
+func escapeTableCell(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	return strings.ReplaceAll(s, "|", `\|`)
 }
