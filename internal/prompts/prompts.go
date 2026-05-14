@@ -104,6 +104,20 @@ func ResolveOptional(value string) (string, error) {
 	return ResolveValue(value)
 }
 
+// resolveBaseFileForRole picks the report base prompt file for a given role.
+// TODO: fix this before v1 — dotted-role A/B split between legacy and new
+// base prompts. Dotted-prefix roles (code.bugs, test.gaps, project.*, etc.)
+// pick up new_report_base_prompt.md so we can compare their reports against
+// legacy-role reports without contaminating the legacy baseline. Both
+// assembleRoleAction and traceRoleAction must route through this helper so
+// the assembled prompt and the `ateam prompt` trace stay consistent.
+func resolveBaseFileForRole(baseFile, roleID string) string {
+	if baseFile == ReportBasePromptFile && strings.Contains(roleID, ".") {
+		return NewReportBasePromptFile
+	}
+	return baseFile
+}
+
 // AssembleRolePrompt builds the full prompt for a role report run.
 // When skipPreviousReport is false, the role's existing report.md is
 // included as a "Previous Report" section so the role can build on prior findings.
@@ -128,14 +142,7 @@ func assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt strin
 		filepath.Join("roles", roleID, roleFile),
 	)
 
-	// TODO: fix this before v1 — dotted-role A/B split between legacy and new
-	// base prompts. Dotted-prefix roles (code.bugs, test.gaps, project.*, etc.)
-	// pick up new_report_base_prompt.md so we can compare their reports against
-	// legacy-role reports without contaminating the legacy baseline.
-	effectiveBaseFile := baseFile
-	if baseFile == ReportBasePromptFile && strings.Contains(roleID, ".") {
-		effectiveBaseFile = NewReportBasePromptFile
-	}
+	effectiveBaseFile := resolveBaseFileForRole(baseFile, roleID)
 
 	basePrompt := readFileOr3Level(
 		filepath.Join(projectDir, effectiveBaseFile),
