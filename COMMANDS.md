@@ -9,10 +9,30 @@ All commands accept:
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--org PATH` | `-o` | Organization path override (skips auto-discovery) |
-| `--project NAME` | `-p` | Project name override (skips auto-discovery) |
-| `--work-dir PATH` |       | Agent working directory (defaults to cwd). Independent of `--project` — set it to run the agent in a worktree while keeping `.ateam/` state elsewhere. |
+| `--project PATH` | `-p` | Project path override (skips auto-discovery). Discovery-only — does **not** change the agent's working directory. |
+| `--work-dir PATH` |       | Agent working directory (defaults to cwd). Independent of `--project`. |
 
 `report`, `code`, `review`, `verify`, and `all` require `--work-dir` (or cwd) to be inside a git repo or worktree; `exec` and `parallel` work in any directory.
+
+### `--project` and `--work-dir` together
+
+These two flags are orthogonal. `--project` only tells ateam where the `.ateam/` directory lives (config, prompts, state, artifacts). `--work-dir` controls where the agent's subprocess runs (cwd + sandbox grants + the path embedded in prompt context).
+
+Common patterns:
+
+```bash
+# Default: project found from cwd, agent runs in cwd.
+ateam report
+
+# Worktree: state stays with main checkout, agent works on the worktree.
+cd ~/work/myproj-feat-foo
+ateam --project ~/work/myproj report
+
+# Remote control: drive a project from elsewhere. Both flags needed.
+ateam --project ~/work/myproj --work-dir ~/work/myproj report
+```
+
+Running an action command with `--project` alone from a directory that isn't in a git repo errors out with a clear message and points at `--work-dir`.
 
 ## Commands
 

@@ -58,3 +58,21 @@ func TestRoleStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestEscapeTableCell(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"plain text", "plain text"},
+		{"local | module | architecture", `local \| module \| architecture`},
+		{"multi\nline", "multi line"},
+		{"|pipe at start|", `\|pipe at start\|`},
+		{"", ""},
+	}
+	for _, c := range cases {
+		got := escapeTableCell(c.in)
+		if got != c.want {
+			t.Errorf("escapeTableCell(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

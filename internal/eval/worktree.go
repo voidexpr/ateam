@@ -115,6 +115,11 @@ func worktreeEnv(source *root.ResolvedEnv, worktreeDir, relProject string) *root
 	}
 	e.ProjectDir = filepath.Join(worktreeDir, relProject)
 	e.SourceDir = filepath.Dir(e.ProjectDir)
+	// WorkDir must follow the worktree's source — sandbox grants and
+	// container mounts (cmd/table.go) key off env.WorkDir, so leaving it
+	// at the host's original value would mount the source checkout while
+	// the agent's subprocess runs in the worktree.
+	e.WorkDir = e.SourceDir
 	if source.GitRepoDir != "" {
 		e.GitRepoDir = worktreeDir
 	}

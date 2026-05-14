@@ -506,3 +506,28 @@ func TestNewProjectInfoParamsCachesMeta(t *testing.T) {
 		t.Error("OverrideWorkDir to a new path should clear projectMeta")
 	}
 }
+
+// TestLookupFromSeedsWorkDirFromStart verifies the regression flagged in
+// review: LookupFrom(start) must populate WorkDir from `start`, not from
+// os.Getwd(). eval --dirs A B passes explicit base/candidate paths and
+// would otherwise attach the wrong execution directory.
+func TestLookupFromSeedsWorkDirFromStart(t *testing.T) {
+	base := resolvedTempDir(t)
+	if err := os.MkdirAll(filepath.Join(base, ".ateam"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, ".ateam", "config.toml"), []byte("[project]\nname=\"p\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	other := resolvedTempDir(t)
+	t.Chdir(other)
+
+	env, err := LookupFrom(base)
+	if err != nil {
+		t.Fatalf("LookupFrom: %v", err)
+	}
+	if env.WorkDir != base {
+		t.Errorf("WorkDir = %q, want %q (the start path, not process cwd)", env.WorkDir, base)
+	}
+}

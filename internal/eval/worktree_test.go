@@ -280,3 +280,36 @@ func cleanupWorktrees(t *testing.T, repoRoot string, paths ...string) {
 		_ = cmd.Run()
 	}
 }
+
+// TestWorktreeEnvSetsWorkDir verifies the regression flagged in review: the
+// worktree env's WorkDir must follow the worktree's SourceDir, not the
+// original host source. Sandbox grants and container mounts key off
+// env.WorkDir; leaving it at the host value would mount/grant the source
+// checkout while the subprocess actually runs in the worktree.
+func TestWorktreeEnvSetsWorkDir(t *testing.T) {
+	source := &root.ResolvedEnv{
+		OrgDir:     "/host/.ateamorg",
+		ProjectDir: "/host/project/.ateam",
+		SourceDir:  "/host/project",
+		WorkDir:    "/host/project",
+		GitRepoDir: "/host/project",
+	}
+	wt := worktreeEnv(source, "/tmp/wt-abc", ".ateam")
+
+	if wt.ProjectDir != "/tmp/wt-abc/.ateam" {
+		t.Errorf("ProjectDir = %q, want /tmp/wt-abc/.ateam", wt.ProjectDir)
+	}
+	if wt.SourceDir != "/tmp/wt-abc" {
+		t.Errorf("SourceDir = %q, want /tmp/wt-abc", wt.SourceDir)
+	}
+	if wt.WorkDir != "/tmp/wt-abc" {
+		t.Errorf("WorkDir = %q, want /tmp/wt-abc (must follow worktree, not host)", wt.WorkDir)
+	}
+	if wt.GitRepoDir != "/tmp/wt-abc" {
+		t.Errorf("GitRepoDir = %q, want /tmp/wt-abc", wt.GitRepoDir)
+	}
+	// Source env must remain untouched (worktreeEnv copies by value).
+	if source.WorkDir != "/host/project" {
+		t.Errorf("worktreeEnv mutated source.WorkDir: %q", source.WorkDir)
+	}
+}

@@ -307,9 +307,10 @@ func LookupFrom(start string) (*ResolvedEnv, error) {
 	env := &ResolvedEnv{
 		OrgDir: orgDir,
 	}
-	// Set a sensible default WorkDir so callers always have one, even when
-	// project discovery fails. cmd code may override via env.OverrideWorkDir.
-	_ = env.resolveWorkDir("")
+	// Seed WorkDir from `start`, not the process cwd — callers like
+	// eval --dirs pass an explicit base/candidate path and would
+	// otherwise attach the wrong execution directory.
+	_ = env.resolveWorkDir(cwd)
 
 	projectDir, err := discoverProject(orgDir, cwd)
 	if err != nil {
