@@ -13,8 +13,9 @@ These priorities are absolute. Apply them in this order:
 
 1. **Confirmed exploitable bugs**: a real trigger path exists in the current code. Injection (SQL, command, path, template), broken auth, hardcoded credentials in committed files, deserialization that accepts untrusted input.
 2. **High-impact data exposure**: secrets leaked via the process table (`ps aux`), env vars passed as command-line arguments, secret values written to logs / error responses / debug output, credentials stored at wrong file modes.
-3. **Boundary integrity**: path traversal in file serving, unvalidated input crossing into sensitive sinks (shell, exec, eval, SQL), missing validation at trust boundaries (HTTP handlers, queue consumers, file uploaders).
-4. **Defense-in-depth on web headers / sandboxes**: only when there is no equivalent compensating control AND the change can be verified end-to-end without breaking features. Default to flagging for human review, not action.
+3. **Supply-chain integrity (install / build time)**: attack vectors against the chain that produces the project's binaries or images, not against the runtime code. Install scripts that download toolchains without checksum verification (no `sha256sum` / GPG check on a `curl … | tar` pipeline), `sudo` operations against untrusted downloads, build images using unpinned base tags (`FROM golang:alpine` vs a pinned version + digest), post-install commands run with elevated privileges, package-manager invocations bypassing lockfile integrity. Treat these as their own class — they don't show up in runtime SAST and the cost of compromise is "every binary built from now on".
+4. **Boundary integrity**: path traversal in file serving, unvalidated input crossing into sensitive sinks (shell, exec, eval, SQL), missing validation at trust boundaries (HTTP handlers, queue consumers, file uploaders).
+5. **Defense-in-depth on web headers / sandboxes**: only when there is no equivalent compensating control AND the change can be verified end-to-end without breaking features. Default to flagging for human review, not action.
 
 Lower priorities never displace higher priorities. Don't recommend a CSP tightening while a real secret leak exists.
 
@@ -45,6 +46,15 @@ These rules are not soft guidance — violating them is the failure mode that ma
 - **Log / error leaks**: secrets in `log.Printf`, exceptions that include credentials in the message, debug responses that echo headers or env vars.
 - **File-mode leaks**: secret files at 0644, parent dirs at 0755, history files containing credentials.
 - **Client-bundle exposure**: code shipped to untrusted clients is exposed by definition. Flag any secret-shaped value (API keys, tokens, internal URLs, JWT secrets) that reaches a JavaScript bundle shipped to the browser, a mobile app binary, a publicly-distributed plugin, or a downloadable CLI. Even when the source-side file looks legitimate (`.env`, normal source), ending up in a client-distributed bundle is the same threat class as committing the credential. Specifically watch: `.env` files imported into Vite/Webpack/Next.js/Vue client builds, and the `NEXT_PUBLIC_*` / `VITE_*` / `REACT_APP_*` prefixes that explicitly leak to clients; JSON config files included in mobile app bundles; plugin manifests with embedded API keys.
+
+### Supply-chain integrity (install / build time)
+- **Toolchain downloads without verification**: install scripts that fetch a Go / Node / Python / etc. toolchain via `curl` or `wget` and pipe straight into `tar -xzf` or shell, with no `sha256sum` / GPG signature check. A tampered upstream or MITM compromises every subsequent build.
+- **Unpinned base images**: `FROM golang:alpine`, `FROM node:lts`, `FROM python:slim` — pin to a specific version and ideally a digest (`@sha256:...`). Same concern for `docker run`-style usage in scripts and CI.
+- **`sudo` against untrusted input**: post-install commands that run `sudo rm -rf`, `sudo cp`, `sudo tar` etc. against paths or files whose origin is a network download. Sudo amplifies the cost of a compromise.
+- **Lockfile bypass**: package-manager invocations that re-resolve at install time (`npm install` without `--ci`, `pip install` without a frozen requirements file, `cargo install` against an untrusted index). Lockfile-bypass means the dep tree is decided at install time, not at commit time.
+- **Argument injection at boundaries**: places where user-controlled values flow into shell argv or container CLIs without shape validation. Specifically watch values starting with `--`, `-`, or containing `\n` — these can flip into flags or new commands. Container/secret names and project IDs are common entry points.
+
+These findings are about the chain that *produces* the project's binaries and images, not the runtime code. They don't surface in runtime SAST.
 
 ### Boundary integrity
 - **Path traversal**: file-serving routes that accept user-supplied path components without validating against a project-root prefix; archive extraction that doesn't reject `..` entries.
