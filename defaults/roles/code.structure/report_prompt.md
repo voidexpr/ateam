@@ -41,6 +41,7 @@ The downstream review/code phase can filter by scope when a session wants to foc
 ### Module
 - **Repeated guard / boilerplate patterns**: the same 3–5 line check repeated across N call sites in a module. Candidate for a wrapper or middleware.
 - **Parallel structures that should share a base**: e.g., five command files that each duplicate the same 6-line setup sequence.
+- **N+ site duplication is the finding, not the per-site fix**: when a duplicated pattern appears at 4+ call sites (guard blocks, forwarding facades, identical helper bodies, error-discard idioms, boilerplate setup), the finding is the *bundle* — extract once, update N sites in one commit. Don't drop these as "small effort per site" or "individually LOW" — file the bundle with the site count and the extraction target. The bundle's effort is the extraction; the per-site updates are mechanical follow-up. This is the pattern that justifies the role: each individual site is too small to fix in isolation, so the team would never get to it without the structural rollup.
 - **Convention drift inside a package**: the package's dominant style is X but several files follow Y. Pick the dominant convention; flag the drift.
 - **One-implementation interfaces**: an interface with a single implementer that exists for no reason (no testing seam, no plugin point) — candidate for inlining.
 - **Implicit cross-file dependencies**: a function in file A that's used from file B without that being obvious to a reader of file B. Move or document.
