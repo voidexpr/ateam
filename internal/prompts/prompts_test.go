@@ -225,6 +225,44 @@ func TestDotNamespacedRole(t *testing.T) {
 	}
 }
 
+// TestDottedRoleSelectsNewReportBase verifies that dotted-prefix role IDs
+// (code.bugs, test.gaps, etc.) pick up new_report_base_prompt.md, while
+// legacy non-dotted role IDs continue using report_base_prompt.md.
+// TODO: fix this before v1 — once the new base is merged into the canonical
+// file, this test can be deleted.
+func TestDottedRoleSelectsNewReportBase(t *testing.T) {
+	// Both bases live as embedded defaults; the test relies on the embedded
+	// fallback (no on-disk base) so the selection branch is exercised.
+	base := t.TempDir()
+	orgDir := filepath.Join(base, "org")
+	projectDir := filepath.Join(base, "project")
+
+	setupMinimalRole(t, orgDir, projectDir, "code.bugs")
+	setupMinimalRole(t, orgDir, projectDir, "security")
+
+	dotted, err := AssembleRolePrompt(orgDir, projectDir, "code.bugs", base, "", ProjectInfoParams{}, true)
+	if err != nil {
+		t.Fatalf("AssembleRolePrompt(code.bugs): %v", err)
+	}
+	if !strings.Contains(dotted, "Project maturity") {
+		t.Errorf("dotted role should pick new base containing 'Project maturity'; got:\n%s", dotted)
+	}
+	if !strings.Contains(dotted, "Run analytical tools when your role's findings ARE the tool's output") {
+		t.Error("dotted role should pick new base containing analytical-tools bullet")
+	}
+
+	legacy, err := AssembleRolePrompt(orgDir, projectDir, "security", base, "", ProjectInfoParams{}, true)
+	if err != nil {
+		t.Fatalf("AssembleRolePrompt(security): %v", err)
+	}
+	if strings.Contains(legacy, "Project maturity") {
+		t.Error("non-dotted role should use legacy base WITHOUT 'Project maturity' section")
+	}
+	if strings.Contains(legacy, "Run analytical tools when your role's findings ARE the tool's output") {
+		t.Error("non-dotted role should use legacy base WITHOUT analytical-tools bullet")
+	}
+}
+
 func TestResolveRoleListAllExpansionUsesAllowlist(t *testing.T) {
 	configRoles := map[string]string{
 		"security":   "on",

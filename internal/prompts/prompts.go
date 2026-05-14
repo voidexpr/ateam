@@ -40,8 +40,15 @@ import (
 const TimestampFormat = display.TimestampFormat
 
 const (
-	ReportPromptFile              = "report_prompt.md"
-	ReportBasePromptFile          = "report_base_prompt.md"
+	ReportPromptFile     = "report_prompt.md"
+	ReportBasePromptFile = "report_base_prompt.md"
+	// NewReportBasePromptFile is selected by assembleRoleAction when roleID
+	// contains a "." (the dotted-prefix new role set: code.*, test.*,
+	// project.*, etc.). Legacy roles continue to use ReportBasePromptFile.
+	// TODO: fix this before v1 — merge with ReportBasePromptFile once the new
+	// role set is validated against the legacy baseline, then delete this
+	// constant and the selection branch in assembleRoleAction.
+	NewReportBasePromptFile       = "new_report_base_prompt.md"
 	ReportExtraPromptFile         = "report_extra_prompt.md"
 	CodePromptFile                = "code_prompt.md"
 	CodeBasePromptFile            = "code_base_prompt.md"
@@ -121,11 +128,20 @@ func assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt strin
 		filepath.Join("roles", roleID, roleFile),
 	)
 
+	// TODO: fix this before v1 — dotted-role A/B split between legacy and new
+	// base prompts. Dotted-prefix roles (code.bugs, test.gaps, project.*, etc.)
+	// pick up new_report_base_prompt.md so we can compare their reports against
+	// legacy-role reports without contaminating the legacy baseline.
+	effectiveBaseFile := baseFile
+	if baseFile == ReportBasePromptFile && strings.Contains(roleID, ".") {
+		effectiveBaseFile = NewReportBasePromptFile
+	}
+
 	basePrompt := readFileOr3Level(
-		filepath.Join(projectDir, baseFile),
-		filepath.Join(orgDir, baseFile),
-		filepath.Join(orgDir, "defaults", baseFile),
-		baseFile,
+		filepath.Join(projectDir, effectiveBaseFile),
+		filepath.Join(orgDir, effectiveBaseFile),
+		filepath.Join(orgDir, "defaults", effectiveBaseFile),
+		effectiveBaseFile,
 	)
 
 	if rolePrompt == "" && basePrompt == "" {
