@@ -1,6 +1,6 @@
 # ATeam — AI Role Team for Code Analysis
 
-ATeam is designed for developers who want to focus on feature work and key architectural design aspects, while delegating more of the engineering to agents. The goal is to produce a healthy codebase with minimal human effort.
+ATeam is designed for developers who want to focus on feature work and key architectural design aspects, while delegating more of the quality software engineering to agents. The goal is to produce a healthy codebase with minimal human effort.
 
 ATeam is a CLI that runs role-specific coding agents against your codebase. Each agent audits code across selected dimensions like code refactoring, testing, security, dependencies, documentation, etc. Then a supervisor prioritizes the findings and runs coding agents to implement fixes. It works unattended, out of the box, for any tech stack. It is solely focused on project quality and doesn't make any feature change.
 
@@ -12,17 +12,19 @@ At its core ateam is a CLI to run one-shot unattended agents with saved prompts.
 
 See [APPROACH.md](APPROACH.md) for the rationale and design principles behind ATeam.
 
-## Features
+## Key Features
 
 * **use existing coding agents like claude code or codex**: leverages subscriptions instead of much more expensive APis, benefit from the expertise of llm providers. Ateam focuses on automating them
-* **flexible workflow**: you get to decide if ateam works on worktree, separate workspace, separate server or with containers (docker, devcontainer, ...)
 * **flexible isolation**: out of the box ateam uses your coding agents as-is for ease of configuration. But it also supports the following workflows:
     * run in a sandbox on your base host: protects your files
     * use a separate config for your coding agent (`CLAUDE_CONFIG_DIR`)
     * run inside docker (built-in secret management for oauth or just use an already authenticated agent in the container)
     * run outside of docker but docker exec only the agents in docker
-* **just a CLI**: can run the workflows built-in ateam (report, review, code, verify) or ad-hoc unattended agent runs (`exec` for a single agent execution, `parallel` for multiple simultaneous agents)
-* **convenient tooling**: `ps` to see current/past agent runs, `inspect` for troubleshooting
+* a of **roles** covering all core aspects of a project: code quality, testing, documentation, dependencies, security, etc ... out of the box. Adding a new role is just a single Markdown prompt file to add
+* **just a CLI**:
+    * can run the built-in ateam workflow of  parallel report, review, code, verify
+    * ad-hoc unattended agent runs (`exec` for a single agent execution, `parallel` for multiple simultaneous agents)
+* **convenient tooling**: `ps` to see current/past agent runs, `cat`, `tail`, inspect` for logs and execution details, `serve` to browse reports and reviews
 * **cost transaprency**: all agent execution track token usage and estimated cost (less relevant for subscription). Tokens are the new software engineering currency and help gauge if an error is worthwhile
 
 ## Why ATeam
@@ -40,6 +42,11 @@ Core principles:
 * **Simple**: reuses existing coding agents, minimal orchestration
 * **Auditable**: every artifact is a readable markdown file
 * **Stateful**: old reports or reviews are read before generating a new one so no context is lost, only one file per role so there is no bloat over time
+* **Complement interactive agents**: interactive agents remain best for difficult, iterative tasks and feature development but ateam can be used for its set of roles and improvement pipeline or for resusable scripts.
+
+In any case there is no silver bullet, eventually documentation might need human direction to be better structure, a major code refactoring to better handle feature requirements is needed, etc ... But the goal is to reduce human involvement in day to day software engineering tasks.
+
+
 * **Get out of your way**: ATeam is not a generic workflow system, it is a focused report + review + code + verify automation layer designed to preserve your attention for high-value work
 
 ## Quick Start
@@ -279,14 +286,11 @@ Enable/disable roles in `.ateam/config.toml` or let `ateam auto-setup` configure
 Create `roles/YOUR_NEW_ROLE_NAME/report_prompt.md` (in `.ateam/` or `.ateamorg/`), you can then run a report with `ateam report --roles YOUR_NEW_ROLE_NAME`. If you want to have it run by default enable it in `config.toml`.
 
 Ideas:
-- GDPR/PII reviewer
+- GDPR/PII privacy
 - Cloud deployment safety
-- Observability enhancer
-- Framework-specific best practices
-- Language expert
-- Performance regression detector
-- Black-box testing agent that reads feature specs and generates (potentially) failing tests, without permission to modify the source code
-- Pure maintainer: only track CVE, OS and major stack component compatibility without changing anything in the code except to support dependency upgrades
+- Observability
+- Framework, language, company infra specific best practices
+- UI Accessibility
 
 There is a very long list of potentially very useful roles to add.
 
@@ -323,6 +327,16 @@ There is a very long list of potentially very useful roles to add.
 
 See [COMMANDS.md](COMMANDS.md) for all `ateam` commands and flags, and [CONFIG.md](CONFIG.md) for directory layout, prompt configuration, and runtime configuration.
 
+## Tips and Tricks
+
+TODO:
+* separate agent config
+* customize test hooks
+* ad-hoc scripts: go to lunch, adversarial review, blackbox tester
+* perform a task in a worktree
+* multi-pass loop with budget / max rounds
+* implement all the changes from a given report with an ad-hoc prompt
+
 ## FAQ
 
 See [FAQ.md](FAQ.md) for frequently asked questions.
@@ -330,20 +344,25 @@ See [FAQ.md](FAQ.md) for frequently asked questions.
 ## Future
 
 - 0.9.0 Refactor roles and do some eval to use less tokens and improve accuracy
-- 1.0.0 Small improvements over what is already there
-- 2.0.0 Add an internal task system and move coding to algorithmic instead of relying on on agent prompt to consume less tokens and make the system more deterministic
+- 1.0.0 Cleanup in CLI options, file layout and database structure for future work
 
-In General other areas of interest:
-- Reduce input token usage
-    - Adaptive report commissioning based on recent code changes (can reduce token usage)
-    - tune roles
-    - use an internal findings/task system instead of read/write files
-- Collection of roles for various phases of project life cycle: feedback on design, analyze for production (observability, etc ...), stack specific prompts, etc ...
-- Stricter testing policy and automation (opt-in)
-- More agent types (gemini, cursor, ...) and containers (MacOS native container, alternative sandboxes)
-- more flexible and dynamic prompts: execute commands (sandboxed) during prompt assembly, include prompt fragments, CLI args expansion in prompt, generalized mechanism to inject pre/post prompt instructions
-- more flexible workflow: execute commands before/after agents to verify/prepare work/env, jump steps, resumable steps leveraging the future internal persistent task system
-- Improve reporting and better integrate ateam into various project workflow: teams where humans don't code, where they don't, solo project vs. much bigger teams, ...
+Then the focus becomes
+- add an internal task system instead of relying on files to make the unit of report/review/code a finding and not have to deal with entire files. It will reduce token consumption and make the underlying plumbing strong for find/review/edit flows. Files are still great for many workflows
+- Focus on reducing token consumption
+    - Use an internal task system and move coding to algorithmic instead of relying on on agent prompt to consume less tokens and make the system more deterministic
+    - More formal prompt evals to tune prompt
+    - Research code indexing tools to reduce code discovery cost of each report
+    - Auto-discovery of testing tools and run them outside of agents as gates
+- More flexible and generic core
+    - full prompt templating: variable expansion, inclusion, run sandboxed shell commands (integrate with Fence to have a native sandbox inside of ateam)
+    - custom resumable workflow using the task system for state tracking
+    - ad-hoc execution based on tasks with automatic life cycle management and dependencies management
+- other
+    - more agents: Pi, Gemini
+    - more containers: MacOS Containers, Fence sandbox as a lightweight consistent sandbox around any agent
+    - memory system: persist preferences and knowledge acquired per project and per org on tech stack
+- more flexible workflow
+    - make report/review/code/verify an instance of a resumable workflow system leveraging the future task system
 - maybe: Built-in scheduling
 
 ## Development
