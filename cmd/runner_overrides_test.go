@@ -215,3 +215,95 @@ func TestResolveEnvAppliesWorkDirFlag(t *testing.T) {
 		t.Errorf("GitRepoDir = %q, want %q (derived from WorkDir, not from project parent)", env.GitRepoDir, worktree)
 	}
 }
+
+// TestPathInside covers the "is child inside parent" check used by
+// applyWorkDirFlag to decide between "git-like (use project root)" and
+// "remote (use cwd)" defaults.
+func TestPathInside(t *testing.T) {
+	cases := []struct {
+		child, parent string
+		want          bool
+	}{
+		{"/a/b", "/a/b", true},     // identical → inside
+		{"/a/b/c", "/a/b", true},   // child path → inside
+		{"/a/b/c/d", "/a/b", true}, // deeper child → inside
+		{"/a", "/a/b", false},      // parent of "parent" → outside
+		{"/a/x", "/a/b", false},    // sibling → outside
+		{"/c/d", "/a/b", false},    // unrelated → outside
+		{"/a/b..c", "/a/b", false}, // tricky: not actually a descendant
+	}
+	for _, c := range cases {
+		got := pathInside(c.child, c.parent)
+		if got != c.want {
+			t.Errorf("pathInside(%q, %q) = %v, want %v", c.child, c.parent, got, c.want)
+		}
+	}
+}
+
+// TestApplyWorkDirFlag_GitLikeFromSubdir verifies that when cwd is inside the
+// project tree and no --work-dir is set, env.WorkDir is promoted to the
+// project root — pre-refactor behavior where `cd subdir && ateam report`
+// operates on the whole project.
+func TestApplyWorkDirFlag_GitLikeFromSubdir(t *testing.T) {
+	saved := workDirFlag
+	t.Cleanup(func() { workDirFlag = saved })
+	workDirFlag = ""
+
+	projectRoot := "/tmp/myproj"
+	env := &root.ResolvedEnv{
+		ProjectDir: filepath.Join(projectRoot, ".ateam"),
+		WorkDir:    filepath.Join(projectRoot, "sub", "path"), // a subdir
+	}
+	got, err := applyWorkDirFlag(env)
+	if err != nil {
+		t.Fatalf("applyWorkDirFlag: %v", err)
+	}
+	if got.WorkDir != projectRoot {
+		t.Errorf("WorkDir = %q, want %q (promoted to project root)", got.WorkDir, projectRoot)
+	}
+}
+
+// TestApplyWorkDirFlag_RemoteKeepsCwd verifies that when cwd is outside the
+// project tree (--project ../foo from elsewhere), env.WorkDir stays at cwd.
+func TestApplyWorkDirFlag_RemoteKeepsCwd(t *testing.T) {
+	saved := workDirFlag
+	t.Cleanup(func() { workDirFlag = saved })
+	workDirFlag = ""
+
+	env := &root.ResolvedEnv{
+		ProjectDir: "/tmp/myproj/.ateam",
+		WorkDir:    "/tmp/elsewhere", // outside /tmp/myproj
+	}
+	got, err := applyWorkDirFlag(env)
+	if err != nil {
+		t.Fatalf("applyWorkDirFlag: %v", err)
+	}
+	if got.WorkDir != "/tmp/elsewhere" {
+		t.Errorf("WorkDir = %q, want /tmp/elsewhere (cwd outside project tree)", got.WorkDir)
+	}
+}
+
+// TestApplyWorkDirFlag_ExplicitFlagWins verifies that --work-dir is the
+// authoritative override even when cwd happens to be inside the project tree.
+func TestApplyWorkDirFlag_ExplicitFlagWins(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git CLI required (OverrideWorkDir invokes gitutil.TopLevel)")
+	}
+	saved := workDirFlag
+	t.Cleanup(func() { workDirFlag = saved })
+
+	override := t.TempDir()
+	workDirFlag = override
+
+	env := &root.ResolvedEnv{
+		ProjectDir: "/tmp/myproj/.ateam",
+		WorkDir:    "/tmp/myproj/subdir",
+	}
+	got, err := applyWorkDirFlag(env)
+	if err != nil {
+		t.Fatalf("applyWorkDirFlag: %v", err)
+	}
+	if !filepathEqual(got.WorkDir, override) {
+		t.Errorf("WorkDir = %q, want %q (explicit --work-dir)", got.WorkDir, override)
+	}
+}

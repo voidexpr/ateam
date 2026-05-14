@@ -27,8 +27,8 @@ func Execute() error {
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&orgFlag, "org", "o", "", "path to org folder (.ateamorg/) or its parent — overrides cwd-based discovery")
-	rootCmd.PersistentFlags().StringVarP(&projectFlag, "project", "p", "", "path to project folder (.ateam/) or its parent. Discovery-only: does NOT change the agent's working directory. To run from elsewhere, also pass --work-dir.")
-	rootCmd.PersistentFlags().StringVar(&workDirFlag, "work-dir", "", "agent working directory (defaults to cwd). Independent of --project.")
+	rootCmd.PersistentFlags().StringVarP(&projectFlag, "project", "p", "", "path to project folder (.ateam/) or its parent. Agent runs at the project root when cwd is inside it (git-like) or in cwd when --project points elsewhere.")
+	rootCmd.PersistentFlags().StringVar(&workDirFlag, "work-dir", "", "agent working directory (overrides the project-aware default)")
 
 	rootCmd.AddCommand(envCmd)
 	rootCmd.AddCommand(installCmd)

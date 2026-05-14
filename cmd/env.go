@@ -271,6 +271,9 @@ func printProjectSection(env *root.ResolvedEnv, cwd string) {
 	if env.Config != nil && env.Config.Git.RemoteOriginURL != "" {
 		fmt.Printf("  Remote: %s\n", env.Config.Git.RemoteOriginURL)
 	}
+	if env.WorkDir != "" {
+		fmt.Printf("  Agent Work Dir: %s (%s)\n", env.RelPath(env.WorkDir), tildeHome(env.WorkDir))
+	}
 
 	if env.Config == nil || len(env.Config.Roles) == 0 {
 		return
