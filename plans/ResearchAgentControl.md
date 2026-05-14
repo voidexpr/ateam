@@ -365,23 +365,82 @@ CLI command for injecting instructions into running sessions. Sequence:
 
 30-second polling loop in `lifecycle-manager.ts`. Re-entrancy guard skips overlapping cycles. Probe failure preserves existing `stuck`/`needs_input` status rather than overwriting with `working`. No separate watchdog process.
 
-### C.6 Comparison Table
+### C.6 oauth-cli-coder (codeninja/oauth-cli-coder)
 
-| Concern | Gas Town | Tmux Orchestrator | CAO | ComposioHQ |
-|---|---|---|---|---|
-| **Runtime** | tmux on bare host | tmux on bare host | tmux on bare host | tmux (default) or child_process |
-| **Session model** | Long-lived, resumable | Long-lived or one-shot | One tmux session per agent | Long-lived, restorable |
-| **Stuck detection** | Witness patrol + heartbeat + daemon loop (3min cycle). Hung threshold: 30min inactivity | Heartbeat files (120s), capture-pane scanning, Claude Code hooks | Timeout-based polling only (no watchdog) | Dual-channel: terminal capture + JSONL file mtime. 30s poll cycle |
-| **Permission handling** | settings.json `skipDangerousModePermissionPrompt` + tmux keystroke injection for startup dialogs | `--dangerously-skip-permissions` or auto-approval daemon (capture-pane poll, 0.3s interval) | `--dangerously-skip-permissions` for Claude; regex detection for Q/Kiro CLI | Opt-in `permissions: skip` per project. Activity classifier detects `waiting_input` |
-| **Trust prompt** | `AcceptWorkspaceTrustDialog` sends Enter | Manual or `--dangerously-skip-permissions` | `_handle_trust_prompt()` sends Enter during init | Not explicitly handled |
-| **Message injection** | `gt nudge`: 3 modes (immediate/queue/wait-idle). Literal send-keys, chunked >512B, mutex-locked. 600ms ESC/Enter timing | `tmux send-keys` or `load-buffer`/`paste-buffer` for binary safety | Bracketed paste (`load-buffer` + `paste-buffer`), double-Enter for Claude | `C-u` clear + `send-keys -l` or named buffer. 3-retry delivery confirmation |
-| **Done detection** | `gt done` self-report + Witness bead scanning (Discover Don't Track) | `.done` files, Stop hook, completion phrases, prompt box reappearance | Provider-specific regex on capture-pane (response marker + idle prompt) | Process exit + tmux liveness + JSONL state + PR merge |
-| **Crash recovery** | Restart-first (preserve worktree+bead). Auto-respawn tmux hook. Crash loop protection (5 restarts/15min → blocked). Stale hook recovery (1hr). Redispatch (3 attempts, 5min cooldown) | Exponential backoff restart. File locking for ~/.claude. Context compaction at 20% | Timeout-based only. No auto-restart | Full restore with `--resume`. Metadata archival. Workspace validation. 2s enrichment timeout |
-| **Escalation** | GUPP violation (30min) → Deacon/Mayor. `gt help` → Witness triage. Spawn storm detection | Manual (no built-in escalation) | Supervisor notices via API, handles manually | `escalateAfter` per reaction (duration or count). Tracker resets on state change |
-| **Inter-agent comms** | 3 channels: mail (persistent), nudge (real-time), hooks (filesystem) | tmux send-keys between windows | MCP tools: handoff (sync), assign (async), send_message (inbox) | Reactions system: event → action mapping |
-| **Scheduling** | Manual dispatch by Mayor | Manual or self-scheduled check-ins | APScheduler cron with script gate | Manual `ao spawn` (no built-in scheduling) |
+**Link:** [github.com/codeninja/oauth-cli-coder](https://github.com/codeninja/oauth-cli-coder). Python 3.12+, MIT-licensed, ~140⭐. A narrow library that exists to do exactly one thing well: "*Drive **Claude Code**, **Gemini CLI**, and **Codex** programmatically — through the same tmux session they already run in.*" Supported targets: Claude Code (`opus` or `sonnet`), Gemini CLI, Codex. Not a framework — no scheduler, no orchestrator, no UI. The interesting design choices are concentrated in the controller layer, and several of them aren't documented elsewhere in this doc.
 
-### C.7 Lessons for ATeam
+#### The OAuth premise (the framing)
+
+The pitch is explicit: "*You authenticate once in your browser — oauth-cli-coder rides on top of that. No API keys, no token management, no separate credentials.*" The tool does not manage tokens itself. It runs the underlying CLI binary in a tmux session belonging to the developer's logged-in user — the CLI then "*inherits your existing OAuth tokens, browser sessions, and local config*". This is a meaningful framing distinction: most agent-control tools assume API-key auth and have to inject credentials into the agent's environment. oauth-cli-coder treats the human's existing browser-driven OAuth state as the credential surface and intentionally doesn't touch it.
+
+For ATeam this is the "Claude Code subscription, not API key" path encoded as a deliberate library posture — useful precedent if/when ATeam supports subscription auth instead of API keys.
+
+#### Session control
+
+Launches the target CLI in a **detached tmux session with a 300×100 virtual terminal**. Input goes in via **tmux buffers** rather than direct `send-keys`: "*it pastes your prompt into the pane via tmux buffers (safe for large inputs)*" — the same `load-buffer` + `paste-buffer` pattern that `claude_code_agent_farm` and ComposioHQ use for binary safety, applied as the default rather than a fallback. Output capture reads the **full tmux scrollback buffer**, not just the visible pane, so "*long responses aren't truncated*". The 300×100 virtual terminal sizing exists specifically to give the scrollback enough room before tmux truncates older lines.
+
+Sessions persist across calls via a **session registry** that records `(provider, model, startup_options)` so subsequent invocations reconnect with `--session-id` rather than respawning. Multiple concurrent sessions across providers are supported.
+
+#### Idle / done detection
+
+No marker files, no `Stop` hook, no completion phrases. The library "*polls the screen until the CLI returns to an idle prompt*" — i.e. it watches the tmux scrollback for the characteristic idle-prompt state of whichever CLI is the target (the `│ >` box for Claude Code, equivalent for Gemini / Codex). When the prompt comes back, the previous turn is treated as done and the captured scrollback is returned to the caller.
+
+This is the simplest viable approach in this section: no agent-side cooperation required, no hooks, no marker convention. The cost is that the detection is per-provider — every supported CLI needs its own idle-prompt signature in the library.
+
+#### TUI navigation (trust prompts, version notices, model picker)
+
+A dedicated **TUI controller** "*automatically navigates past startup prompts*", including "*trust dialogs*" and "*version upgrade notices*". For the easy cases it pattern-matches the screen and sends fixed keystrokes (similar to Gas Town's `AcceptStartupDialogs`). For ambiguous TUI states it has an unusual fallback: it can **optionally invoke the Gemini CLI as an LLM** to assess the current screen and decide which keys to press. This is the only LLM-assisted TUI navigation in this section — everyone else hard-codes the dialog handling.
+
+#### Stealth mode (tmux-aware CLI bypass)
+
+Possibly the most distinctive technique in the project, and not addressed by any other entry in this section. AI CLI tools can detect that they're running inside tmux (via `TMUX` / `TMUX_PANE` env vars, ancestor process tree, PTY inspection) and change behaviour — sometimes refusing to render the TUI, sometimes disabling features. oauth-cli-coder's **stealth mode** (default-on) wraps the child to hide tmux:
+
+- Scrubs `TMUX`, `TMUX_PANE`, and related env vars from the child's environment.
+- Sets `TERM=xterm-256color`.
+- Allocates a fresh PTY via the system `script` command for process isolation.
+- Uses `setsid` for process-group separation.
+- Handles Linux vs macOS `script` flag differences.
+- Falls back gracefully if `script`/`setsid` aren't installed.
+- Disable with `--no-stealth`.
+
+The library is honest about the limit: "*stealth mode detection evasion is behavioral, not guaranteed*". For ATeam — which runs agents inside Docker containers where `script` and `setsid` are available — this is an immediately borrowable pattern if Claude Code or any successor CLI starts detecting tmux ancestry.
+
+#### What it does *not* do
+
+- No scheduler, cron, or queue.
+- No budget / cost tracking.
+- No multi-agent coordination.
+- No permission auto-approval (relies on the CLI's own non-interactive flags or the human-bound OAuth state to avoid prompts).
+- No crash recovery beyond "the session is gone, start a new one".
+- No worktree / Docker isolation — runs on the host as the calling user.
+
+#### Lessons for ATeam
+
+- **Stealth-mode env scrubbing + fresh PTY via `script`/`setsid`** is the right defensive default if ATeam ever drives a CLI from inside tmux. Cheap to add to the container adapter.
+- **`load-buffer` + `paste-buffer` as the default input path**, not a fallback for "big payloads", removes a whole class of `send-keys` race-and-corruption bugs at no real cost. ATeam's container adapter should adopt this if it ever moves to interactive sessions.
+- **300×100 virtual terminal + full-scrollback capture** is a small but useful detail — most stuck/done detection failures in this section come from truncated capture buffers. Sizing the virtual terminal generously is a free reliability win.
+- **Idle-prompt-state polling as the done signal** is the lowest-coordination approach available. ATeam's current `claude -p` model gets done-detection for free (process exit); for any future interactive mode, idle-prompt polling beats marker files because it doesn't require agent-side cooperation.
+- **LLM-assisted TUI navigation as an escape hatch** for unknown dialog states is novel. ATeam probably doesn't need it now, but worth remembering — if a CLI introduces a new startup dialog tomorrow, having an LLM read the screen and decide what to press buys time before a hard-coded handler can ship.
+- **OAuth-inheritance posture.** When ATeam adds subscription-auth support (Claude Pro/Max), the right shape is the oauth-cli-coder one: don't manage tokens, run the binary as a user who's already logged in. Avoids a whole compliance/security surface.
+
+### C.7 Comparison Table
+
+| Concern | Gas Town | Tmux Orchestrator | CAO | ComposioHQ | oauth-cli-coder |
+|---|---|---|---|---|---|
+| **Runtime** | tmux on bare host | tmux on bare host | tmux on bare host | tmux (default) or child_process | tmux on bare host, 300×100 virtual terminal, `script`+`setsid` PTY wrapper |
+| **Session model** | Long-lived, resumable | Long-lived or one-shot | One tmux session per agent | Long-lived, restorable | Long-lived; session registry `(provider, model, opts)` reconnect via `--session-id` |
+| **Stuck detection** | Witness patrol + heartbeat + daemon loop (3min cycle). Hung threshold: 30min inactivity | Heartbeat files (120s), capture-pane scanning, Claude Code hooks | Timeout-based polling only (no watchdog) | Dual-channel: terminal capture + JSONL file mtime. 30s poll cycle | None (library, not orchestrator) |
+| **Permission handling** | settings.json `skipDangerousModePermissionPrompt` + tmux keystroke injection for startup dialogs | `--dangerously-skip-permissions` or auto-approval daemon (capture-pane poll, 0.3s interval) | `--dangerously-skip-permissions` for Claude; regex detection for Q/Kiro CLI | Opt-in `permissions: skip` per project. Activity classifier detects `waiting_input` | Inherits human's OAuth-logged-in state; relies on CLI's non-interactive flags |
+| **Trust prompt** | `AcceptWorkspaceTrustDialog` sends Enter | Manual or `--dangerously-skip-permissions` | `_handle_trust_prompt()` sends Enter during init | Not explicitly handled | TUI controller pattern-matches and sends keystrokes; optional LLM (Gemini CLI) fallback for unknown dialogs |
+| **Message injection** | `gt nudge`: 3 modes (immediate/queue/wait-idle). Literal send-keys, chunked >512B, mutex-locked. 600ms ESC/Enter timing | `tmux send-keys` or `load-buffer`/`paste-buffer` for binary safety | Bracketed paste (`load-buffer` + `paste-buffer`), double-Enter for Claude | `C-u` clear + `send-keys -l` or named buffer. 3-retry delivery confirmation | `load-buffer` + `paste-buffer` as the default (not a fallback); full-scrollback capture back |
+| **Done detection** | `gt done` self-report + Witness bead scanning (Discover Don't Track) | `.done` files, Stop hook, completion phrases, prompt box reappearance | Provider-specific regex on capture-pane (response marker + idle prompt) | Process exit + tmux liveness + JSONL state + PR merge | Per-CLI idle-prompt-state polling on the scrollback (no hooks, no markers) |
+| **Crash recovery** | Restart-first (preserve worktree+bead). Auto-respawn tmux hook. Crash loop protection (5 restarts/15min → blocked). Stale hook recovery (1hr). Redispatch (3 attempts, 5min cooldown) | Exponential backoff restart. File locking for ~/.claude. Context compaction at 20% | Timeout-based only. No auto-restart | Full restore with `--resume`. Metadata archival. Workspace validation. 2s enrichment timeout | None — caller's problem |
+| **Escalation** | GUPP violation (30min) → Deacon/Mayor. `gt help` → Witness triage. Spawn storm detection | Manual (no built-in escalation) | Supervisor notices via API, handles manually | `escalateAfter` per reaction (duration or count). Tracker resets on state change | None |
+| **Inter-agent comms** | 3 channels: mail (persistent), nudge (real-time), hooks (filesystem) | tmux send-keys between windows | MCP tools: handoff (sync), assign (async), send_message (inbox) | Reactions system: event → action mapping | None (single-agent library) |
+| **Scheduling** | Manual dispatch by Mayor | Manual or self-scheduled check-ins | APScheduler cron with script gate | Manual `ao spawn` (no built-in scheduling) | Caller invokes; library is synchronous per turn |
+| **Distinctive technique** | Layered watchdogs + `gt nudge` modes | Pattern-with-many-impls; capture-pane heuristics | MCP-mediated supervisor↔worker | JSONL side-channel + reactions DSL | **Stealth mode** (scrub `TMUX`/`TMUX_PANE`, fresh PTY via `script`, `setsid`); OAuth-inheritance posture |
+
+### C.8 Lessons for ATeam
 
 **Gas Town's robustness is the gold standard** — layered detection (Witness patrol + heartbeat + daemon), crash loop protection with exponential backoff, TOCTOU guards before destructive actions, spawn storm detection, stale hook recovery. ATeam should adopt the crash loop protection pattern and the "Discover Don't Track" philosophy (read state from artifacts, don't rely on notifications).
 
@@ -395,7 +454,7 @@ CLI command for injecting instructions into running sessions. Sequence:
 
 **One-shot vs long-lived is a fundamental tradeoff.** Long-lived sessions (Gas Town, tmux orchestrator) enable mid-task steering, context accumulation, and `--resume` after crashes. One-shot sessions (ATeam's `claude -p`) are simpler, stateless, and avoid the entire class of stuck-session bugs. ATeam's choice is validated by the complexity required to manage long-lived sessions — Gas Town has thousands of lines of session management code that ATeam doesn't need.
 
-### C.8 Hybrid: tmux Inside Docker
+### C.9 Hybrid: tmux Inside Docker
 
 ATeam currently uses one-shot `claude -p` in Docker containers — simple, stateless, no session management. The tmux-based frameworks (Gas Town, CAO, tmux orchestrator) use long-lived interactive sessions — more capable, but complex and fragile. A hybrid approach runs tmux *inside* the Docker container, combining Docker's isolation with tmux's interactive control.
 
@@ -542,7 +601,7 @@ This is substantially less than what Gas Town requires (no Witness, no Deacon, n
 
 A pragmatic approach: start with `claude -p` for all agent types. Add tmux-in-Docker as an alternative runtime for implement-mode agents and for any task that exceeds a cost/duration threshold where crash recovery justifies the complexity.
 
-### C.9 Non-tmux Agent Control
+### C.10 Non-tmux Agent Control
 
 Not every framework uses tmux. This section covers the four main alternatives: subprocess pipes, Docker one-shot, API-based agent loops, and REST servers inside containers. Each avoids tmux's session management complexity but introduces different tradeoffs.
 
@@ -711,7 +770,7 @@ A PTY (pseudo-terminal) creates a virtual terminal pair. The orchestrator holds 
 
 **The Agent SDK's permission callbacks are strictly better than `--dangerously-skip-permissions`** for scenarios where fine-grained control matters. For ATeam's Docker model where the container IS the sandbox, `--dangerously-skip-permissions` is fine — but if ATeam ever moves to a non-containerized model, the SDK's permission callbacks become essential.
 
-**The REST-server-inside-container pattern (SWE-ReX, sandbox-agent, OpenHands) is the most architecturally sound non-tmux approach for interactive sessions.** It gives Docker isolation + HTTP-based mid-task steering + structured events, without any tmux timing fragility. If ATeam needs interactive sessions beyond `claude -p`, this pattern is preferable to tmux-in-Docker (§C.8).
+**The REST-server-inside-container pattern (SWE-ReX, sandbox-agent, OpenHands) is the most architecturally sound non-tmux approach for interactive sessions.** It gives Docker isolation + HTTP-based mid-task steering + structured events, without any tmux timing fragility. If ATeam needs interactive sessions beyond `claude -p`, this pattern is preferable to tmux-in-Docker (§C.9).
 
 **Event sourcing (OpenHands) is the gold standard for crash recovery** — deterministic replay from an append-only log. ATeam's stream-json output already IS an append-only event log. The missing piece is a `--resume`-like mechanism that can reconstruct agent state from the log. Claude Code's `--resume` flag provides this at the session level.
 
@@ -719,7 +778,7 @@ A PTY (pseudo-terminal) creates a virtual terminal pair. The orchestrator holds 
 
 ---
 
-### C.10 Claude Code Remote Control Protocol
+### C.11 Claude Code Remote Control Protocol
 
 * Official docs from Anthropic: https://code.claude.com/docs/en/remote-control
 * Reverse Engineering notes: https://gist.github.com/sorrycc/9b9ac045d5329ac03084a465345b59c3
