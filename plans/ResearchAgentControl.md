@@ -423,24 +423,130 @@ The library is honest about the limit: "*stealth mode detection evasion is behav
 - **LLM-assisted TUI navigation as an escape hatch** for unknown dialog states is novel. ATeam probably doesn't need it now, but worth remembering — if a CLI introduces a new startup dialog tomorrow, having an LLM read the screen and decide what to press buys time before a hard-coded handler can ship.
 - **OAuth-inheritance posture.** When ATeam adds subscription-auth support (Claude Pro/Max), the right shape is the oauth-cli-coder one: don't manage tokens, run the binary as a user who's already logged in. Avoids a whole compliance/security surface.
 
-### C.7 Comparison Table
+### C.7 Multiclaude (dlorenc/multiclaude)
 
-| Concern | Gas Town | Tmux Orchestrator | CAO | ComposioHQ | oauth-cli-coder |
-|---|---|---|---|---|---|
-| **Runtime** | tmux on bare host | tmux on bare host | tmux on bare host | tmux (default) or child_process | tmux on bare host, 300×100 virtual terminal, `script`+`setsid` PTY wrapper |
-| **Session model** | Long-lived, resumable | Long-lived or one-shot | One tmux session per agent | Long-lived, restorable | Long-lived; session registry `(provider, model, opts)` reconnect via `--session-id` |
-| **Stuck detection** | Witness patrol + heartbeat + daemon loop (3min cycle). Hung threshold: 30min inactivity | Heartbeat files (120s), capture-pane scanning, Claude Code hooks | Timeout-based polling only (no watchdog) | Dual-channel: terminal capture + JSONL file mtime. 30s poll cycle | None (library, not orchestrator) |
-| **Permission handling** | settings.json `skipDangerousModePermissionPrompt` + tmux keystroke injection for startup dialogs | `--dangerously-skip-permissions` or auto-approval daemon (capture-pane poll, 0.3s interval) | `--dangerously-skip-permissions` for Claude; regex detection for Q/Kiro CLI | Opt-in `permissions: skip` per project. Activity classifier detects `waiting_input` | Inherits human's OAuth-logged-in state; relies on CLI's non-interactive flags |
-| **Trust prompt** | `AcceptWorkspaceTrustDialog` sends Enter | Manual or `--dangerously-skip-permissions` | `_handle_trust_prompt()` sends Enter during init | Not explicitly handled | TUI controller pattern-matches and sends keystrokes; optional LLM (Gemini CLI) fallback for unknown dialogs |
-| **Message injection** | `gt nudge`: 3 modes (immediate/queue/wait-idle). Literal send-keys, chunked >512B, mutex-locked. 600ms ESC/Enter timing | `tmux send-keys` or `load-buffer`/`paste-buffer` for binary safety | Bracketed paste (`load-buffer` + `paste-buffer`), double-Enter for Claude | `C-u` clear + `send-keys -l` or named buffer. 3-retry delivery confirmation | `load-buffer` + `paste-buffer` as the default (not a fallback); full-scrollback capture back |
-| **Done detection** | `gt done` self-report + Witness bead scanning (Discover Don't Track) | `.done` files, Stop hook, completion phrases, prompt box reappearance | Provider-specific regex on capture-pane (response marker + idle prompt) | Process exit + tmux liveness + JSONL state + PR merge | Per-CLI idle-prompt-state polling on the scrollback (no hooks, no markers) |
-| **Crash recovery** | Restart-first (preserve worktree+bead). Auto-respawn tmux hook. Crash loop protection (5 restarts/15min → blocked). Stale hook recovery (1hr). Redispatch (3 attempts, 5min cooldown) | Exponential backoff restart. File locking for ~/.claude. Context compaction at 20% | Timeout-based only. No auto-restart | Full restore with `--resume`. Metadata archival. Workspace validation. 2s enrichment timeout | None — caller's problem |
-| **Escalation** | GUPP violation (30min) → Deacon/Mayor. `gt help` → Witness triage. Spawn storm detection | Manual (no built-in escalation) | Supervisor notices via API, handles manually | `escalateAfter` per reaction (duration or count). Tracker resets on state change | None |
-| **Inter-agent comms** | 3 channels: mail (persistent), nudge (real-time), hooks (filesystem) | tmux send-keys between windows | MCP tools: handoff (sync), assign (async), send_message (inbox) | Reactions system: event → action mapping | None (single-agent library) |
-| **Scheduling** | Manual dispatch by Mayor | Manual or self-scheduled check-ins | APScheduler cron with script gate | Manual `ao spawn` (no built-in scheduling) | Caller invokes; library is synchronous per turn |
-| **Distinctive technique** | Layered watchdogs + `gt nudge` modes | Pattern-with-many-impls; capture-pane heuristics | MCP-mediated supervisor↔worker | JSONL side-channel + reactions DSL | **Stealth mode** (scrub `TMUX`/`TMUX_PANE`, fresh PTY via `script`, `setsid`); OAuth-inheritance posture |
+**Link:** [github.com/dlorenc/multiclaude](https://github.com/dlorenc/multiclaude). Go 99.5%, MIT-licensed, 548⭐, 227 commits on `main`, by Dan Lorenc. Install: `go install github.com/dlorenc/multiclaude/cmd/multiclaude@latest`. Prereqs: `tmux`, `git`, `gh` (authenticated). Tagline (verbatim): "*Why tell Claude what to do when you can tell Claude to tell Claude what to do?*" Self-positions as "*MMORPG, not a single-player game*" — workers as summoned party members, workspace as your character, supervisor as guild leader, merge queue as raid boss.
 
-### C.8 Lessons for ATeam
+#### Doctrine — the Brownian Ratchet
+
+The headline idea, and the framing that earns Multiclaude its own section rather than a row in C.3: agents are *expected* to do redundant, sometimes pointless work. Acceptance is gated by tests/CI, not by upstream coordination. Quoted: "*Redundant work is cheaper than blocked work*", "*Three okay PRs beat one perfect PR*", "*If tests pass, you're in*". This is the only entry in this section that explicitly embraces redundancy as a design choice rather than treating it as a failure mode to be coordinated away.
+
+Consequence for control: there is almost no inter-agent synchronisation. Each worker operates in isolation; the merge queue auto-merges anything green; failed PRs are abandoned without rescue. Stuck detection only needs to catch *dead* agents, not *wasteful* ones, because waste is acceptable.
+
+#### Tmux topology — one session, many windows
+
+Unlike Gas Town (one tmux session per Polecat), Multiclaude uses **one shared session `mc-repo` with multiple windows**:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     tmux session: mc-repo                   │
+├───────────────┬───────────────┬───────────────┬─────────────┤
+│  supervisor   │  merge-queue  │  workspace    │ swift-eagle │
+```
+
+Standard tmux UX: `tmux attach -t mc-repo`, `Ctrl-b d` detach, `Ctrl-b w` window picker. The persistent roles (supervisor, merge-queue, workspace) and each transient worker (`swift-eagle`, etc. — random animal names) each get a window. This is a smaller surface area for the human operator than Gas Town's many-sessions model, at the cost of all agents sharing one tmux server's fate.
+
+`pkg/tmux/` is a well-factored client library independent of the rest of the project: `CreateSession`, `KillSession`, `ListSessions`, `CreateWindow`, `SendKeys`, `SendKeysLiteral`, `SendEnter`, `GetPanePID`, `StartPipePane` / `StopPipePane` ("*capture all output from a tmux pane to a file*"). Multi-line input is delivered via paste-buffer ("*multiline text without triggering on each line*") — same defensive default as oauth-cli-coder (§C.6).
+
+#### How Claude Code is launched
+
+From `pkg/claude/runner.go`, every Claude Code invocation uses:
+
+- `--session-id <uuid>` — assigns a stable session for that worker
+- `--resume <uuid>` — used on restart to pick up where it left off
+- `--dangerously-skip-permissions` — yes, the simple way
+- `--append-system-prompt-file <path>` — the worker's role-specific instructions appended to Claude's default system prompt
+
+The runner `cd`s to the working directory (the worker's worktree) before launching the Claude binary. There is no hook scaffolding in `internal/hooks/` — that package contains only `CopyConfig`, which drops a project-level `hooks.json` into `.claude/settings.json` inside each worktree. So if you want Claude Code hooks (Stop, PreToolUse, etc.), you author them yourself at the project level and Multiclaude propagates them; the framework doesn't ship its own.
+
+#### Agent roles — pluggable markdown definitions, not hard-coded
+
+`internal/agents/agents.go` is a *definition loader*, not a registry of fixed roles. Agents are markdown files with:
+
+- **Name** — derived from filename minus `.md`
+- **Title** — first H1 heading
+- **Description** — first paragraph after the title
+- **Full content** — used as the agent's system-prompt-file
+
+Three sources, merged in precedence order: `local` (`~/.multiclaude/repos/<repo>/agents/`), `repo` (`<repo>/.multiclaude/agents/`), and `merged` (the combination, with repo content appended after local under a `---\n\n## Custom Instructions\n\n` separator). The architecture lets each repo carry its own canonical agent prompts in-tree while users can layer personal customisations locally.
+
+The roles called out in the README (Supervisor, Merge Queue, PR Shepherd, Workspace, Workers) are conventions — instances of this generic definition system — not separate code paths.
+
+#### Worktree model
+
+`internal/worktree/worktree.go` enforces a `workspace/<name>` branch naming convention with **1:1 branch ↔ worktree mapping**. It has migration logic for legacy "workspace" branches → `workspace/default` (avoids the git ref conflict where `workspace` and `workspace/foo` can't coexist). Two cleanup paths: `CleanupOrphanedWithDetails()` removes on-disk worktree dirs not registered in git, `CleanupMergedBranches()` deletes branches already merged upstream (skipping any branch currently checked out in an active worktree, and optionally deleting the remote copy from `origin`). `Prune()` handles git-side stale metadata.
+
+So the lifecycle is: worker spawns → its worktree+branch are created under `workspace/<animal-name>` → it works in isolation → its PR either merges (cleanup) or doesn't (also cleanup, eventually).
+
+#### Daemon — five loops, explicit cadences
+
+`internal/daemon/daemon.go` runs five concurrent loops with explicit intervals:
+
+1. **Health check** — every **2 minutes**, checks agent viability (tmux session present, window present, PID alive via `signal(0)`).
+2. **Message router** — every **2 minutes**, delivers pending messages between agents.
+3. **Wake** — every **2 minutes**, sends status nudges to agents; skips any agent nudged within the previous 2 minutes (debounce).
+4. **Worktree refresh** — every **5 minutes**, syncs worker branches against `main` (rebase). Workers that fall behind get auto-rebased — nobody else in this section does this.
+5. **Server** — socket request handler, continuous.
+
+This is a cleaner separation than Gas Town's single 3-minute daemon loop. Each loop has one job; the cadences are independent.
+
+#### Stuck detection — process-liveness only
+
+Notably different from Gas Town's heuristic stack (witness patrol, GUPP, mass-death detector). Multiclaude's "stuck" is binary: a process either responds to `signal(0)` or it doesn't. An agent is removable if:
+
+- Its tmux session/window has disappeared, **or**
+- Its PID no longer responds to signal 0, **or**
+- It set the `ReadyForCleanup` flag (i.e. it self-reported done).
+
+There's no "agent is generating tokens but spinning" detection — the Brownian-Ratchet doctrine treats that as "let it run, the PR will either pass tests or not." Cheap to implement, philosophically consistent.
+
+#### Recovery and lifecycle
+
+The daemon distinguishes **persistent** vs **transient** agents and acts differently on death:
+
+- **Persistent** (supervisor, merge-queue, workspace) — auto-restart on disappearance.
+- **Transient** (workers, reviewers) — clean up on completion: remove from state, kill the tmux window, delete the worktree, notify peers via the message system.
+
+Workers behind `main` get rebased automatically by the worktree-refresh loop, not killed — they keep working on freshly-rebased state.
+
+#### Merge gate — Merge Queue and PR Shepherd
+
+Two acceptance flows:
+
+- **Merge Queue** (single-player default) — "*If tests pass, you're in*". Auto-merges any PR with green CI.
+- **PR Shepherd** (multiplayer mode) — "*Coordinates with human reviewers, tracks approvals, respects your team's review process*". Sits behind humans rather than replacing them.
+
+Both are themselves Claude Code agents, not separate services. They run in tmux windows like everyone else, with their own system-prompt-file.
+
+#### Lessons for ATeam
+
+- **Process-liveness as the *only* stuck signal.** If your acceptance gate is strong enough (CI, tests, lint), you don't need the heuristic stuck-detection stack. ATeam's audit→implement pipeline already has a strong acceptance gate (the report exists or it doesn't, the PR passes CI or it doesn't); pruning the watchdog logic down to `signal(0)` + a self-reported done flag may be a worthwhile simplification.
+- **Five daemon loops at separate cadences** is cleaner than one big loop. The (health=2min, messages=2min, wake=2min, worktree-refresh=5min, server=continuous) split is a directly portable shape for ATeam's coordinator.
+- **Wake-loop debounce.** Sending a status-nudge to each agent every N minutes but skipping any agent nudged within the previous window prevents pile-up. Useful pattern for ATeam's reactive triggers.
+- **Persistent vs transient agent distinction at the daemon level.** Encoding "this agent restarts on death, that one cleans up on death" as data, not code, scales better than implicit lifecycle in each handler.
+- **Worktree refresh loop.** Auto-rebasing long-running workers onto `main` is the missing-piece-most-orchestrators-skip. If ATeam ever supports long-lived implement runs, this is the right way to keep them current without manual intervention.
+- **Markdown-file agent definitions with local/repo/merged precedence.** This is the same shape as ATeam's role prompts but with the local/repo overlay made explicit. ATeam's role system could adopt the `---\n\n## Custom Instructions\n\n` separator pattern for per-project customisation.
+- **`workspace/<name>` branch convention.** Discoverable, namespaced, and avoids ref conflicts (the `workspace/default` migration story is instructive — flat branch names collide with nested ones in git). ATeam's current per-run branches should pick a similar convention.
+- **The Brownian Ratchet philosophy itself.** Not directly applicable to ATeam — ATeam's roles are specialised by design, not interchangeable — but the principle "*let the acceptance gate be the only synchronisation point*" is worth holding onto. It's the right answer when coordination cost exceeds redundancy cost.
+
+### C.8 Comparison Table
+
+| Concern | Gas Town | Tmux Orchestrator | CAO | ComposioHQ | oauth-cli-coder | Multiclaude |
+|---|---|---|---|---|---|---|
+| **Runtime** | tmux on bare host | tmux on bare host | tmux on bare host | tmux (default) or child_process | tmux on bare host, 300×100 virtual terminal, `script`+`setsid` PTY wrapper | Single shared tmux session `mc-repo`, one window per agent, on bare host |
+| **Session model** | Long-lived, resumable | Long-lived or one-shot | One tmux session per agent | Long-lived, restorable | Long-lived; session registry `(provider, model, opts)` reconnect via `--session-id` | Long-lived; Claude Code launched with `--session-id <uuid>`, restarts use `--resume <uuid>` |
+| **Stuck detection** | Witness patrol + heartbeat + daemon loop (3min cycle). Hung threshold: 30min inactivity | Heartbeat files (120s), capture-pane scanning, Claude Code hooks | Timeout-based polling only (no watchdog) | Dual-channel: terminal capture + JSONL file mtime. 30s poll cycle | None (library, not orchestrator) | Process-liveness only — `signal(0)` on PID + tmux session/window presence + self-set `ReadyForCleanup` flag. Health loop every 2min |
+| **Permission handling** | settings.json `skipDangerousModePermissionPrompt` + tmux keystroke injection for startup dialogs | `--dangerously-skip-permissions` or auto-approval daemon (capture-pane poll, 0.3s interval) | `--dangerously-skip-permissions` for Claude; regex detection for Q/Kiro CLI | Opt-in `permissions: skip` per project. Activity classifier detects `waiting_input` | Inherits human's OAuth-logged-in state; relies on CLI's non-interactive flags | `--dangerously-skip-permissions`; project-level `hooks.json` copied into each worktree's `.claude/settings.json` |
+| **Trust prompt** | `AcceptWorkspaceTrustDialog` sends Enter | Manual or `--dangerously-skip-permissions` | `_handle_trust_prompt()` sends Enter during init | Not explicitly handled | TUI controller pattern-matches and sends keystrokes; optional LLM (Gemini CLI) fallback for unknown dialogs | Not explicitly handled (relies on `--dangerously-skip-permissions`) |
+| **Message injection** | `gt nudge`: 3 modes (immediate/queue/wait-idle). Literal send-keys, chunked >512B, mutex-locked. 600ms ESC/Enter timing | `tmux send-keys` or `load-buffer`/`paste-buffer` for binary safety | Bracketed paste (`load-buffer` + `paste-buffer`), double-Enter for Claude | `C-u` clear + `send-keys -l` or named buffer. 3-retry delivery confirmation | `load-buffer` + `paste-buffer` as the default (not a fallback); full-scrollback capture back | `SendKeys` / `SendKeysLiteral` / `SendEnter`; paste-buffer for multiline; message router loop delivers inter-agent messages every 2min |
+| **Done detection** | `gt done` self-report + Witness bead scanning (Discover Don't Track) | `.done` files, Stop hook, completion phrases, prompt box reappearance | Provider-specific regex on capture-pane (response marker + idle prompt) | Process exit + tmux liveness + JSONL state + PR merge | Per-CLI idle-prompt-state polling on the scrollback (no hooks, no markers) | Self-set `ReadyForCleanup` flag + CI/test pass on the PR (the merge queue is the ground truth) |
+| **Crash recovery** | Restart-first (preserve worktree+bead). Auto-respawn tmux hook. Crash loop protection (5 restarts/15min → blocked). Stale hook recovery (1hr). Redispatch (3 attempts, 5min cooldown) | Exponential backoff restart. File locking for ~/.claude. Context compaction at 20% | Timeout-based only. No auto-restart | Full restore with `--resume`. Metadata archival. Workspace validation. 2s enrichment timeout | None — caller's problem | Persistent agents (supervisor/merge-queue/workspace) auto-restart; transient agents (workers/reviewers) cleaned up + worktree deleted. Workers behind `main` auto-rebased every 5min |
+| **Escalation** | GUPP violation (30min) → Deacon/Mayor. `gt help` → Witness triage. Spawn storm detection | Manual (no built-in escalation) | Supervisor notices via API, handles manually | `escalateAfter` per reaction (duration or count). Tracker resets on state change | None | Implicit — failed PRs are abandoned (Brownian Ratchet); PR Shepherd routes to human reviewers in multiplayer mode |
+| **Inter-agent comms** | 3 channels: mail (persistent), nudge (real-time), hooks (filesystem) | tmux send-keys between windows | MCP tools: handoff (sync), assign (async), send_message (inbox) | Reactions system: event → action mapping | None (single-agent library) | Daemon-mediated message queue with 2min router loop; agents notified on peer completion |
+| **Scheduling** | Manual dispatch by Mayor | Manual or self-scheduled check-ins | APScheduler cron with script gate | Manual `ao spawn` (no built-in scheduling) | Caller invokes; library is synchronous per turn | Supervisor agent "air traffic control"; wake loop nudges idle agents every 2min (with debounce) |
+| **Distinctive technique** | Layered watchdogs + `gt nudge` modes | Pattern-with-many-impls; capture-pane heuristics | MCP-mediated supervisor↔worker | JSONL side-channel + reactions DSL | **Stealth mode** (scrub `TMUX`/`TMUX_PANE`, fresh PTY via `script`, `setsid`); OAuth-inheritance posture | **Brownian Ratchet** — accept redundant work, gate only on CI/tests; five separately-cadenced daemon loops; auto-rebase of long-running workers onto `main` |
+
+### C.9 Lessons for ATeam
 
 **Gas Town's robustness is the gold standard** — layered detection (Witness patrol + heartbeat + daemon), crash loop protection with exponential backoff, TOCTOU guards before destructive actions, spawn storm detection, stale hook recovery. ATeam should adopt the crash loop protection pattern and the "Discover Don't Track" philosophy (read state from artifacts, don't rely on notifications).
 
@@ -454,7 +560,7 @@ The library is honest about the limit: "*stealth mode detection evasion is behav
 
 **One-shot vs long-lived is a fundamental tradeoff.** Long-lived sessions (Gas Town, tmux orchestrator) enable mid-task steering, context accumulation, and `--resume` after crashes. One-shot sessions (ATeam's `claude -p`) are simpler, stateless, and avoid the entire class of stuck-session bugs. ATeam's choice is validated by the complexity required to manage long-lived sessions — Gas Town has thousands of lines of session management code that ATeam doesn't need.
 
-### C.9 Hybrid: tmux Inside Docker
+### C.10 Hybrid: tmux Inside Docker
 
 ATeam currently uses one-shot `claude -p` in Docker containers — simple, stateless, no session management. The tmux-based frameworks (Gas Town, CAO, tmux orchestrator) use long-lived interactive sessions — more capable, but complex and fragile. A hybrid approach runs tmux *inside* the Docker container, combining Docker's isolation with tmux's interactive control.
 
@@ -601,7 +707,7 @@ This is substantially less than what Gas Town requires (no Witness, no Deacon, n
 
 A pragmatic approach: start with `claude -p` for all agent types. Add tmux-in-Docker as an alternative runtime for implement-mode agents and for any task that exceeds a cost/duration threshold where crash recovery justifies the complexity.
 
-### C.10 Non-tmux Agent Control
+### C.11 Non-tmux Agent Control
 
 Not every framework uses tmux. This section covers the four main alternatives: subprocess pipes, Docker one-shot, API-based agent loops, and REST servers inside containers. Each avoids tmux's session management complexity but introduces different tradeoffs.
 
@@ -770,7 +876,7 @@ A PTY (pseudo-terminal) creates a virtual terminal pair. The orchestrator holds 
 
 **The Agent SDK's permission callbacks are strictly better than `--dangerously-skip-permissions`** for scenarios where fine-grained control matters. For ATeam's Docker model where the container IS the sandbox, `--dangerously-skip-permissions` is fine — but if ATeam ever moves to a non-containerized model, the SDK's permission callbacks become essential.
 
-**The REST-server-inside-container pattern (SWE-ReX, sandbox-agent, OpenHands) is the most architecturally sound non-tmux approach for interactive sessions.** It gives Docker isolation + HTTP-based mid-task steering + structured events, without any tmux timing fragility. If ATeam needs interactive sessions beyond `claude -p`, this pattern is preferable to tmux-in-Docker (§C.9).
+**The REST-server-inside-container pattern (SWE-ReX, sandbox-agent, OpenHands) is the most architecturally sound non-tmux approach for interactive sessions.** It gives Docker isolation + HTTP-based mid-task steering + structured events, without any tmux timing fragility. If ATeam needs interactive sessions beyond `claude -p`, this pattern is preferable to tmux-in-Docker (§C.10).
 
 **Event sourcing (OpenHands) is the gold standard for crash recovery** — deterministic replay from an append-only log. ATeam's stream-json output already IS an append-only event log. The missing piece is a `--resume`-like mechanism that can reconstruct agent state from the log. Claude Code's `--resume` flag provides this at the session level.
 
@@ -778,7 +884,7 @@ A PTY (pseudo-terminal) creates a virtual terminal pair. The orchestrator holds 
 
 ---
 
-### C.11 Claude Code Remote Control Protocol
+### C.12 Claude Code Remote Control Protocol
 
 * Official docs from Anthropic: https://code.claude.com/docs/en/remote-control
 * Reverse Engineering notes: https://gist.github.com/sorrycc/9b9ac045d5329ac03084a465345b59c3
