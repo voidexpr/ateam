@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 """
-claude-usage — Report Claude Code subscription usage limits as JSON.
+claude-usage — Report Claude Code subscription usage limits.
 
 Hits the undocumented Anthropic OAuth endpoint that Claude Code itself uses
-internally. Outputs the raw API response as JSON to stdout.
+internally.
 
-Usage:
-    claude-usage
-    claude-usage --alert-5h-max 80
-    claude-usage --alert-7d-max 90
-    claude-usage --alert-5h-max 80 --alert-7d-max 90
-    claude-usage --cache-file /tmp/usage.json --cache-ttl 30s
+Commands:
+    cat      dump the raw API JSON to stdout (default if omitted)
+    check    pretty-print the relevant utilization info
+    sleep    if any specified threshold is exceeded, sleep until the 5-hour reset
+
+All commands accept the same options:
+    --alert-5h-max PCT   exit 5 if 5-hour window utilization exceeds PCT
+    --alert-7d-max PCT   exit 7 if 7-day window utilization exceeds PCT
+    --cache-file PATH    cache the API response to PATH
+    --cache-ttl DUR      reuse cache if mtime within DUR (<N>{s,m,d})
+
+PCT may include a trailing '%' for readability.
 
 Exit codes:
     0  ok (or no thresholds specified)
-    5  --alert-5h-max threshold exceeded
-    7  --alert-7d-max threshold exceeded (only if 5h not exceeded)
+    5  --alert-5h-max threshold exceeded (cat/check only)
+    7  --alert-7d-max threshold exceeded (cat/check only)
     1  error fetching data
 
 Caveats:
@@ -37,11 +43,14 @@ import sys
 import time
 import urllib.request
 import urllib.error
+from datetime import datetime, timezone
 from pathlib import Path
 
 API_URL = "https://api.anthropic.com/api/oauth/usage"
 USER_AGENT = "claude-code/2.1.140"
 BETA_HEADER = "oauth-2025-04-20"
+
+COMMANDS = ("cat", "check", "sleep")
 
 
 def get_token_macos():
@@ -109,6 +118,26 @@ def parse_duration(s):
     return n * {"s": 1, "m": 60, "d": 86400}[unit]
 
 
+def parse_iso(s):
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def fmt_local(value):
+    """Format an ISO timestamp string or datetime as local-time 'YYYY-MM-DD HH:MM:SS'."""
+    if isinstance(value, str):
+        dt = parse_iso(value)
+        if dt is None:
+            return value
+    else:
+        dt = value
+    return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def read_cache(path, ttl_seconds):
     """Return cached data if file exists and is fresh, else None."""
     p = Path(path)
@@ -141,41 +170,119 @@ def utilization_pct(window):
     return pct
 
 
+def load_data(args):
+    """Load usage data, honoring --cache-file / --cache-ttl.
+
+    Returns (data, cache_status) where cache_status is:
+      - None if --cache-file was not provided
+      - "hit"  if cache was fresh and used
+      - "miss" if cache was stale/missing and we refetched
+    """
+    if (args.cache_file is None) != (args.cache_ttl is None):
+        sys.exit("error: --cache-file and --cache-ttl must be used together")
+
+    if args.cache_file:
+        data = read_cache(args.cache_file, parse_duration(args.cache_ttl))
+        if data is not None:
+            return data, "hit"
+
+    data = fetch_usage(get_token())
+    if args.cache_file:
+        write_cache(args.cache_file, data)
+        return data, "miss"
+    return data, None
+
+
+def cache_status_line(args, status):
+    """One-line summary of how the cache was used. None if no cache configured."""
+    if status is None:
+        return None
+    p = Path(args.cache_file)
+    mtime = fmt_local(datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc))
+    if status == "hit":
+        return f"cache: {p} (used, updated {mtime})"
+    return f"cache: {p} (refetched, updated {mtime})"
+
+
+def threshold_breaches(args, data):
+    """List of (label, value_pct, limit_pct, exit_code) for each exceeded threshold."""
+    checks = (
+        ("5-hour", "five_hour", args.alert_5h_max, 5),
+        ("7-day", "seven_day", args.alert_7d_max, 7),
+    )
+    breaches = []
+    for label, key, limit, code in checks:
+        if limit is None:
+            continue
+        pct = utilization_pct(data.get(key))
+        if pct is not None and pct > limit:
+            breaches.append((label, pct, limit, code))
+    return breaches
+
+
+def threshold_exit_code(args, data):
+    """Return 5/7 if a threshold is exceeded, else 0."""
+    breaches = threshold_breaches(args, data)
+    return breaches[0][3] if breaches else 0
+
+
+def cmd_cat(args, data, cache_status):
+    print(json.dumps(data))
+    return threshold_exit_code(args, data)
+
+
+def cmd_check(args, data, cache_status):
+    line = cache_status_line(args, cache_status)
+    if line:
+        print(line)
+    for label, key in (("5-hour", "five_hour"), ("7-day", "seven_day"), ("7-day opus", "seven_day_opus")):
+        window = data.get(key)
+        if not window:
+            continue
+        pct = utilization_pct(window) or 0.0
+        reset = window.get("resets_at")
+        print(f"{label:11} {pct:5.1f}%  resets {fmt_local(reset) if reset else '?'}")
+    for label, pct, limit, _ in threshold_breaches(args, data):
+        print(f"WARNING: {label} window at {pct:.1f}% exceeds threshold {limit:.1f}%")
+    return threshold_exit_code(args, data)
+
+
+def cmd_sleep(args, data, cache_status):
+    if threshold_exit_code(args, data) == 0:
+        return 0
+    reset = (data.get("five_hour") or {}).get("resets_at")
+    dt = parse_iso(reset)
+    if not dt:
+        sys.exit("error: cannot determine 5-hour reset time")
+    secs = (dt - datetime.now(timezone.utc)).total_seconds()
+    if secs > 0:
+        print(f"sleeping {int(secs)}s until {fmt_local(dt)}", file=sys.stderr)
+        time.sleep(secs)
+    return 0
+
+
+COMMAND_HANDLERS = {"cat": cmd_cat, "check": cmd_check, "sleep": cmd_sleep}
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Report Claude Code usage as JSON.")
+    argv = sys.argv[1:]
+    if not argv or argv[0] not in COMMANDS:
+        argv = ["cat"] + argv
+
+    parser = argparse.ArgumentParser(description="Report Claude Code usage.")
+    parser.add_argument("command", choices=COMMANDS, help="action to perform (default: cat)")
     parser.add_argument("--alert-5h-max", type=parse_pct, default=None,
-                        help="exit 5 if 5-hour window utilization exceeds this percent (e.g. 80 or 80%%)")
+                        help="threshold for 5-hour window utilization (e.g. 80 or 80%%)")
     parser.add_argument("--alert-7d-max", type=parse_pct, default=None,
-                        help="exit 7 if 7-day window utilization exceeds this percent (e.g. 90 or 90%%)")
+                        help="threshold for 7-day window utilization (e.g. 90 or 90%%)")
     parser.add_argument("--cache-file", default=None,
                         help="path to JSON cache file; used with --cache-ttl")
     parser.add_argument("--cache-ttl", default=None,
                         help="cache TTL as <N>{s,m,d} (e.g. 30s, 5m, 1d)")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    if (args.cache_file is None) != (args.cache_ttl is None):
-        sys.exit("error: --cache-file and --cache-ttl must be used together")
-
-    data = None
-    if args.cache_file:
-        data = read_cache(args.cache_file, parse_duration(args.cache_ttl))
-
-    if data is None:
-        token = get_token()
-        data = fetch_usage(token)
-        if args.cache_file:
-            write_cache(args.cache_file, data)
-
-    print(json.dumps(data))
-
-    if args.alert_5h_max is not None:
-        pct = utilization_pct(data.get("five_hour"))
-        if pct is not None and pct > args.alert_5h_max:
-            sys.exit(5)
-    if args.alert_7d_max is not None:
-        pct = utilization_pct(data.get("seven_day"))
-        if pct is not None and pct > args.alert_7d_max:
-            sys.exit(7)
+    data, cache_status = load_data(args)
+    sys.exit(COMMAND_HANDLERS[args.command](args, data, cache_status))
 
 
 if __name__ == "__main__":
