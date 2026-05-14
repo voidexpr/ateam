@@ -454,3 +454,55 @@ func TestResolveWorkDirAndGitRepoDir(t *testing.T) {
 		// See TestIntegration_BasicProject / _MonorepoSubdir for the full flow.
 	})
 }
+
+// TestNewProjectInfoParamsCachesMeta verifies that multi-role commands which
+// call NewProjectInfoParams N times only fork git log/status once. Regression
+// guard: pre-caching, ateam report on 5 roles forked git 10 times for the
+// same repo state.
+func TestNewProjectInfoParamsCachesMeta(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git CLI required")
+	}
+	tmp := resolvedTempDir(t)
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"},
+	} {
+		c := exec.Command("git", args...)
+		c.Dir = tmp
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	env := &ResolvedEnv{}
+	if err := env.OverrideWorkDir(tmp); err != nil {
+		t.Fatalf("OverrideWorkDir: %v", err)
+	}
+	if env.projectMeta != nil {
+		t.Fatal("projectMeta should start nil")
+	}
+	p1 := env.NewProjectInfoParams("role one", "report")
+	if env.projectMeta == nil {
+		t.Fatal("projectMeta should be cached after first call")
+	}
+	cached := env.projectMeta
+	p2 := env.NewProjectInfoParams("role two", "report")
+	if env.projectMeta != cached {
+		t.Errorf("second call re-ran GetProjectMeta (cached %p, now %p)", cached, env.projectMeta)
+	}
+	if p1.Meta == nil || p2.Meta == nil {
+		t.Errorf("Meta should be populated for a real repo (p1=%v, p2=%v)", p1.Meta, p2.Meta)
+	}
+	if p1.Meta != p2.Meta {
+		t.Errorf("p1.Meta and p2.Meta should be the same pointer (cached)")
+	}
+
+	// OverrideWorkDir to a different dir must invalidate the cache.
+	other := resolvedTempDir(t)
+	if err := env.OverrideWorkDir(other); err != nil {
+		t.Fatalf("OverrideWorkDir(other): %v", err)
+	}
+	if env.projectMeta != nil {
+		t.Error("OverrideWorkDir to a new path should clear projectMeta")
+	}
+}

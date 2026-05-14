@@ -151,7 +151,7 @@ func init() {
 }
 
 func runReview(opts ReviewOptions) error {
-	env, err := root.Resolve(orgFlag, projectFlag)
+	env, err := resolveEnv()
 	if err != nil {
 		return err
 	}
@@ -227,18 +227,12 @@ func runReview(opts ReviewOptions) error {
 			return err
 		}
 	}
-
-	workDir, err := resolveWorkDir(workDirFlag, env)
-	if err != nil {
-		return err
-	}
-
 	runOpts := runner.RunOpts{
 		RoleID:           "supervisor",
 		Action:           runner.ActionReview,
 		OutputKind:       runner.OutputKindReview,
 		CanonicalDestDir: supervisorDir,
-		WorkDir:          workDir,
+		WorkDir:          env.WorkDir,
 		TimeoutMin:       timeout,
 		Verbose:          opts.Verbose,
 		StartedAt:        startedAt,

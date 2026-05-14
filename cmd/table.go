@@ -151,7 +151,7 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 	r.Profile = profileName
 	r.ProjectID = env.ProjectID()
 	r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
-	ct, err := buildContainer(cc, prof, env.SourceDir, env.ProjectDir, env.OrgDir, env.GitRepoDir, roleID, dockerAutoSetup)
+	ct, err := buildContainer(cc, prof, env.WorkDir, env.ProjectDir, env.OrgDir, env.GitRepoDir, roleID, dockerAutoSetup)
 	if err != nil {
 		return nil, err
 	}
@@ -266,12 +266,15 @@ func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runne
 }
 
 func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runner.Runner {
-	extraWriteDirs := gitWriteDirs(env.SourceDir)
+	// Sandbox grants and Runner.SourceDir follow WorkDir (where the agent
+	// actually runs) — not the parent of .ateam/. This ensures --work-dir
+	// is honored end-to-end: rw to the worktree, ro to the wider git repo.
+	extraWriteDirs := gitWriteDirs(env.WorkDir)
 	r := &runner.Runner{
 		Agent:       buildAgent(ac),
 		ProjectDir:  env.ProjectDir,
 		OrgDir:      env.OrgDir,
-		SourceDir:   env.SourceDir,
+		SourceDir:   env.WorkDir,
 		ProjectName: env.ProjectName,
 		Sandbox: runner.SandboxConfig{
 			Settings:        ac.Sandbox,
@@ -291,8 +294,9 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 		r.Sandbox.ExtraDomains = env.Config.SandboxExtra.AllowDomains
 		r.Sandbox.ExtraExcludedCmd = env.Config.SandboxExtra.UnsandboxedCommands
 	}
-	// Grant read access to the entire git repo when project is nested within it
-	if env.GitRepoDir != "" && env.GitRepoDir != env.SourceDir {
+	// Grant read access to the entire git repo when WorkDir is nested within it
+	// (monorepo subdir or external worktree of a wider repo).
+	if env.GitRepoDir != "" && env.GitRepoDir != env.WorkDir {
 		r.Sandbox.ExtraRead = append(r.Sandbox.ExtraRead, env.GitRepoDir)
 	}
 	return r
@@ -508,10 +512,10 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 			cc.DockerContainer = "{{CONTAINER_NAME}}"
 		}
 		precheckCmd := runtime.ResolvePrecheckCmd(cc, projectDir, orgDir, roleID)
-		workDir := "/workspace"
+		containerWorkDir := "/workspace"
 		if sourceDir != "" && gitRepoDir != "" && gitRepoDir != sourceDir {
 			if rel, err := filepath.Rel(gitRepoDir, sourceDir); err == nil {
-				workDir = filepath.Join("/workspace", rel)
+				containerWorkDir = filepath.Join("/workspace", rel)
 			}
 		}
 		var hostCLIPath string
@@ -522,7 +526,7 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 			ContainerName: cc.DockerContainer,
 			ExecTemplate:  cc.ExecTemplate,
 			ForwardEnv:    cc.ForwardEnv,
-			WorkDir:       workDir,
+			WorkDir:       containerWorkDir,
 			HostCLIPath:   hostCLIPath,
 			PrecheckCmd:   precheckCmd,
 		}

@@ -36,6 +36,11 @@ type ResolvedEnv struct {
 	WorkDir     string // absolute path to the agent's working directory
 	GitRepoDir  string // `git rev-parse --show-toplevel` from WorkDir; "" if not a repo
 	Config      *config.Config
+
+	// projectMeta caches the `git log -1` + `git status --porcelain` result so
+	// multi-role commands fork git at most once. nil = uncached; a sentinel
+	// with empty CommitHash = "we tried, got nothing" (don't retry).
+	projectMeta *gitutil.ProjectMeta
 }
 
 func (e *ResolvedEnv) RoleDir(roleID string) string {
@@ -84,13 +89,30 @@ func (e *ResolvedEnv) ProjectDBPath() string {
 }
 
 // NewProjectInfoParams builds a ProjectInfoParams from the resolved environment.
+// Git metadata is queried in WorkDir (the agent's cwd) so the recorded HEAD
+// and uncommitted-files list reflect the code the agent will actually operate
+// on, not the parent of .ateam/. See also runner.go's HeadHash note.
+//
+// The metadata is cached on the env after the first call: multi-role commands
+// (e.g. `ateam report`) build pinfo once per role and would otherwise fork
+// `git log` + `git status` N times for unchanged repo state.
 func (e *ResolvedEnv) NewProjectInfoParams(role, action string) prompts.ProjectInfoParams {
-	meta, _ := gitutil.GetProjectMeta(e.SourceDir)
+	if e.projectMeta == nil {
+		e.projectMeta, _ = gitutil.GetProjectMeta(e.WorkDir)
+		if e.projectMeta == nil {
+			// Mark "we tried, got nothing" so we don't retry every call.
+			e.projectMeta = &gitutil.ProjectMeta{}
+		}
+	}
+	var meta *gitutil.ProjectMeta
+	if e.projectMeta.CommitHash != "" {
+		meta = e.projectMeta
+	}
 	return prompts.ProjectInfoParams{
 		OrgDir:      e.OrgDir,
 		ProjectDir:  e.ProjectDir,
 		ProjectName: e.ProjectName,
-		SourceDir:   e.SourceDir,
+		WorkDir:     e.WorkDir,
 		GitRepoDir:  e.GitRepoDir,
 		Role:        role,
 		Action:      action,
@@ -157,6 +179,7 @@ func (e *ResolvedEnv) resolveWorkDir(workDirOverride string) error {
 	}
 	e.WorkDir = target
 	e.GitRepoDir = gitutil.TopLevel(target)
+	e.projectMeta = nil // stale: WorkDir changed
 	return nil
 }
 

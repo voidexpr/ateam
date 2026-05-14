@@ -148,7 +148,7 @@ func init() {
 }
 
 func runCode(opts CodeOptions) error {
-	env, err := root.Resolve(orgFlag, projectFlag)
+	env, err := resolveEnv()
 	if err != nil {
 		return err
 	}
@@ -181,7 +181,7 @@ func runCode(opts CodeOptions) error {
 	batch := "code-" + time.Now().Format(runner.TimestampFormat)
 
 	pinfo := env.NewProjectInfoParams("the supervisor", "code")
-	prompt, err := prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.SourceDir, pinfo, reviewContent, customManagement, extraPrompt)
+	prompt, err := prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.WorkDir, pinfo, reviewContent, customManagement, extraPrompt)
 	if err != nil {
 		return err
 	}
@@ -265,18 +265,12 @@ func runCode(opts CodeOptions) error {
 			return err
 		}
 	}
-
-	workDir, err := resolveWorkDir(workDirFlag, env)
-	if err != nil {
-		return err
-	}
-
 	runOpts := runner.RunOpts{
 		RoleID:           "supervisor",
 		Action:           runner.ActionCode,
 		OutputKind:       runner.OutputKindExecutionReport,
 		CanonicalDestDir: filepath.Join(supervisorDir, "code", "{{EXEC_ID}}"),
-		WorkDir:          workDir,
+		WorkDir:          env.WorkDir,
 		TimeoutMin:       timeout,
 		Verbose:          opts.Verbose,
 		Batch:            batch,

@@ -59,7 +59,7 @@ func init() {
 }
 
 func runPsFiles(cmd *cobra.Command, args []string) error {
-	env, err := root.Resolve(orgFlag, projectFlag)
+	env, err := resolveEnv()
 	if err != nil {
 		return fmt.Errorf("cannot find project: %w", err)
 	}
@@ -294,7 +294,7 @@ func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
 	summary := r.Run(ctx, prompt, runner.RunOpts{
 		RoleID:  "supervisor",
 		Action:  runner.ActionDebug,
-		WorkDir: env.SourceDir,
+		WorkDir: env.WorkDir,
 		Verbose: true,
 	}, progress)
 

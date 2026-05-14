@@ -39,19 +39,6 @@ func requireGitRepoPreRunE(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// resolveWorkDir reconciles the persistent --work-dir flag with env.WorkDir
-// and returns the path to use as the agent's cwd. When flag is set, env.WorkDir
-// is overridden (and env.GitRepoDir is re-derived) so downstream consumers see
-// a consistent view.
-func resolveWorkDir(flag string, env *root.ResolvedEnv) (string, error) {
-	if flag != "" {
-		if err := env.OverrideWorkDir(flag); err != nil {
-			return "", err
-		}
-	}
-	return env.WorkDir, nil
-}
-
 // RunnerOverrides bundles every CLI-flag override that flows uniformly into
 // runner setup across commands. Apply with applyRunnerOverrides; commands that
 // need access to MaxBudgetUSDBatch (for batch precheck) can read it directly.

@@ -101,7 +101,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		promptText += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
 	}
 
-	env, err := root.Lookup(orgFlag, projectFlag)
+	env, err := lookupEnv()
 	if err != nil {
 		return fmt.Errorf("cannot find .ateamorg/: %w", err)
 	}
@@ -120,12 +120,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-
-	workDir, err := resolveWorkDir(workDirFlag, env)
-	if err != nil {
-		return err
-	}
-
 	var r *runner.Runner
 	if hasProject {
 		r, err = resolveRunner(env, execProfile, execAgent, runner.ActionExec, execRole, execDockerAutoSetup)
@@ -192,7 +186,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	opts := runner.RunOpts{
 		RoleID:     execRole,
 		Action:     runner.ActionExec,
-		WorkDir:    workDir,
+		WorkDir:    env.WorkDir,
 		Verbose:    execVerbose,
 		Batch:      execBatch,
 		TimeoutMin: timeout,

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/web"
 	"github.com/spf13/cobra"
 )
@@ -42,7 +41,7 @@ func init() {
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
-	env, err := root.Lookup(orgFlag, projectFlag)
+	env, err := lookupEnv()
 	if err != nil {
 		return err
 	}

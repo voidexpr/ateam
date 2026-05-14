@@ -89,7 +89,7 @@ func runCatFiles(paths []string) error {
 }
 
 func runCatIDs(args []string) error {
-	env, err := root.Resolve(orgFlag, projectFlag)
+	env, err := resolveEnv()
 	if err != nil {
 		return fmt.Errorf("cannot find project: %w", err)
 	}

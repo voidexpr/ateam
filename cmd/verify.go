@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/ateam/internal/prompts"
-	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
 )
@@ -99,7 +98,7 @@ func init() {
 }
 
 func runVerify(opts VerifyOptions) error {
-	env, err := root.Resolve(orgFlag, projectFlag)
+	env, err := resolveEnv()
 	if err != nil {
 		return err
 	}
@@ -158,18 +157,12 @@ func runVerify(opts VerifyOptions) error {
 			return err
 		}
 	}
-
-	workDir, err := resolveWorkDir(workDirFlag, env)
-	if err != nil {
-		return err
-	}
-
 	runOpts := runner.RunOpts{
 		RoleID:           "supervisor",
 		Action:           runner.ActionVerify,
 		OutputKind:       runner.OutputKindVerify,
 		CanonicalDestDir: supervisorDir,
-		WorkDir:          workDir,
+		WorkDir:          env.WorkDir,
 		TimeoutMin:       timeout,
 		Verbose:          opts.Verbose,
 		StartedAt:        startedAt,

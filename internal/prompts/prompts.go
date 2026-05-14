@@ -567,8 +567,8 @@ type ProjectInfoParams struct {
 	OrgDir      string // absolute path to .ateamorg/
 	ProjectDir  string // absolute path to .ateam/
 	ProjectName string
-	SourceDir   string // absolute path to project root
-	GitRepoDir  string // absolute path to git repo root (may differ from SourceDir)
+	WorkDir     string // absolute path of the agent's working directory
+	GitRepoDir  string // absolute path to git repo root (may differ from WorkDir)
 	Role        string // e.g. "role security" or "the supervisor"
 	Action      string // e.g. "report", "review", "code"
 	Meta        *gitutil.ProjectMeta
@@ -598,9 +598,9 @@ func FormatProjectInfo(p ProjectInfoParams) string {
 	fmt.Fprintf(&b, "* role: %s\n", p.Role)
 	b.WriteString("* project directory: . (working directory)\n")
 	b.WriteString("* reports and reviews: .ateam\n")
-	if p.GitRepoDir != "" && p.GitRepoDir != p.SourceDir {
-		rel := shortRelPath(p.SourceDir, p.GitRepoDir)
-		fmt.Fprintf(&b, "\n**IMPORTANT**: Your working directory is the project directory (.), not the git repo root (%s). Limit your findings to the project directory. Do not look at or report on code outside it.\n", rel)
+	if p.GitRepoDir != "" && p.GitRepoDir != p.WorkDir {
+		rel := shortRelPath(p.WorkDir, p.GitRepoDir)
+		fmt.Fprintf(&b, "\n**IMPORTANT**: Your working directory (.) is a subdirectory of a wider git repo at %s. Limit your findings to the working directory. Do not look at or report on code outside it.\n", rel)
 	}
 	if p.Meta != nil {
 		ts := time.Now().Format(TimestampFormat)

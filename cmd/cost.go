@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/ateam/internal/display"
-	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
 )
@@ -27,7 +26,7 @@ Example:
 }
 
 func runCost(cmd *cobra.Command, args []string) error {
-	env, err := root.Resolve(orgFlag, projectFlag)
+	env, err := resolveEnv()
 	if err != nil {
 		return fmt.Errorf("cannot find project: %w", err)
 	}

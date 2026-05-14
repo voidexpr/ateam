@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/ateam/internal/prompts"
-	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
 )
@@ -42,7 +41,7 @@ func init() {
 }
 
 func runAutoSetup(cmd *cobra.Command, args []string) error {
-	env, err := root.Resolve(orgFlag, projectFlag)
+	env, err := resolveEnv()
 	if err != nil {
 		return err
 	}
@@ -84,7 +83,7 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 	opts := runner.RunOpts{
 		RoleID:     "supervisor",
 		Action:     runner.ActionExec,
-		WorkDir:    env.SourceDir,
+		WorkDir:    env.WorkDir,
 		TimeoutMin: timeout,
 		Verbose:    autoSetupVerbose,
 	}

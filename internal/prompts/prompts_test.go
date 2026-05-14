@@ -261,7 +261,7 @@ func TestFormatProjectInfo(t *testing.T) {
 			OrgDir:      "/home/user/.ateamorg",
 			ProjectDir:  "/projects/myapp/.ateam",
 			ProjectName: "myapp",
-			SourceDir:   "/projects/myapp",
+			WorkDir:     "/projects/myapp",
 			Role:        "role security",
 		}
 		got := FormatProjectInfo(p)
@@ -277,7 +277,7 @@ func TestFormatProjectInfo(t *testing.T) {
 				t.Errorf("missing %q in output:\n%s", want, got)
 			}
 		}
-		// No absolute paths for SourceDir or ProjectDir
+		// No absolute paths for WorkDir or ProjectDir
 		if strings.Contains(got, "/projects/myapp") {
 			t.Errorf("should not contain absolute project path in output:\n%s", got)
 		}
@@ -292,7 +292,7 @@ func TestFormatProjectInfo(t *testing.T) {
 			OrgDir:      "/home/user/.ateamorg",
 			ProjectDir:  "/projects/mono/apps/myapp/.ateam",
 			ProjectName: "myapp",
-			SourceDir:   "/projects/mono/apps/myapp",
+			WorkDir:     "/projects/mono/apps/myapp",
 			GitRepoDir:  "/projects/mono",
 			Role:        "the supervisor",
 		}
@@ -300,7 +300,7 @@ func TestFormatProjectInfo(t *testing.T) {
 		if !strings.Contains(got, "**IMPORTANT**") {
 			t.Errorf("missing IMPORTANT scope warning in output:\n%s", got)
 		}
-		if !strings.Contains(got, "Limit your findings to the project directory") {
+		if !strings.Contains(got, "Limit your findings to the working directory") {
 			t.Errorf("missing scope instruction in output:\n%s", got)
 		}
 		// Should use relative path for git repo root, not absolute
@@ -317,13 +317,13 @@ func TestFormatProjectInfo(t *testing.T) {
 			OrgDir:      "/home/user/.ateamorg",
 			ProjectDir:  "/projects/myapp/.ateam",
 			ProjectName: "myapp",
-			SourceDir:   "/projects/myapp",
+			WorkDir:     "/projects/myapp",
 			GitRepoDir:  "/projects/myapp",
 			Role:        "role testing",
 		}
 		got := FormatProjectInfo(p)
 		if strings.Contains(got, "IMPORTANT") {
-			t.Error("should not contain IMPORTANT when GitRepoDir == SourceDir")
+			t.Error("should not contain IMPORTANT when GitRepoDir == WorkDir")
 		}
 	})
 
@@ -332,7 +332,7 @@ func TestFormatProjectInfo(t *testing.T) {
 			OrgDir:      "/home/user/.ateamorg",
 			ProjectDir:  "/projects/myapp/.ateam",
 			ProjectName: "myapp",
-			SourceDir:   "/projects/myapp",
+			WorkDir:     "/projects/myapp",
 			Role:        "role security",
 			Meta: &gitutil.ProjectMeta{
 				CommitHash:    "abcdef1234567890abcdef",
@@ -362,7 +362,7 @@ func TestFormatProjectInfo(t *testing.T) {
 			OrgDir:      "/home/user/.ateamorg",
 			ProjectDir:  "/projects/myapp/.ateam",
 			ProjectName: "myapp",
-			SourceDir:   "/projects/myapp",
+			WorkDir:     "/projects/myapp",
 			Role:        "role security",
 			Meta: &gitutil.ProjectMeta{
 				CommitHash:    "abc123",

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -110,54 +111,6 @@ func TestApplyRunnerOverridesMaxBudgetError(t *testing.T) {
 	}
 }
 
-// TestResolveWorkDirNoFlag confirms the helper returns env.WorkDir unchanged
-// when --work-dir is not set.
-func TestResolveWorkDirNoFlag(t *testing.T) {
-	saved := workDirFlag
-	t.Cleanup(func() { workDirFlag = saved })
-	workDirFlag = ""
-
-	env := &root.ResolvedEnv{WorkDir: "/some/preset/path"}
-	got, err := resolveWorkDir("", env)
-	if err != nil {
-		t.Fatalf("resolveWorkDir: %v", err)
-	}
-	if got != "/some/preset/path" {
-		t.Errorf("got %q, want %q", got, "/some/preset/path")
-	}
-	if env.WorkDir != "/some/preset/path" {
-		t.Errorf("env.WorkDir mutated: got %q", env.WorkDir)
-	}
-}
-
-// TestResolveWorkDirWithFlag confirms the helper invokes env.OverrideWorkDir,
-// which sets WorkDir and re-derives GitRepoDir.
-func TestResolveWorkDirWithFlag(t *testing.T) {
-	saved := workDirFlag
-	t.Cleanup(func() { workDirFlag = saved })
-
-	tmp := t.TempDir()
-	env := &root.ResolvedEnv{WorkDir: "/old/path", GitRepoDir: "/old/repo"}
-
-	got, err := resolveWorkDir(tmp, env)
-	if err != nil {
-		t.Fatalf("resolveWorkDir: %v", err)
-	}
-	// Resolve symlinks for macOS /var/folders → /private/var/folders.
-	// The function calls filepath.Abs which doesn't follow symlinks, so the
-	// returned path matches the absolutised input directly.
-	if got != tmp && !filepathEqual(got, tmp) {
-		t.Errorf("got %q, want %q", got, tmp)
-	}
-	if env.WorkDir != got {
-		t.Errorf("env.WorkDir = %q, want %q", env.WorkDir, got)
-	}
-	// tmp is not a git repo, so GitRepoDir must be cleared.
-	if env.GitRepoDir != "" {
-		t.Errorf("GitRepoDir = %q, want \"\" (non-repo tmp)", env.GitRepoDir)
-	}
-}
-
 // TestRequireGitRepoPreRunE_NonRepo verifies the PreRunE rejects work-dirs
 // that aren't inside a git repo.
 func TestRequireGitRepoPreRunE_NonRepo(t *testing.T) {
@@ -203,5 +156,62 @@ func TestRequireGitRepoPreRunE_InRepo(t *testing.T) {
 	dummy := newDummyCmd("report")
 	if err := requireGitRepoPreRunE(dummy, nil); err != nil {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestResolveEnvAppliesWorkDirFlag verifies that the persistent --work-dir flag
+// is applied BEFORE any cmd code reads env. This is the regression the four
+// review findings caught: prompt/sandbox/container all need env.WorkDir to be
+// correct at the point they consume env, not after each cmd's local override.
+func TestResolveEnvAppliesWorkDirFlag(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git CLI required")
+	}
+	savedOrg, savedProj, savedWD := orgFlag, projectFlag, workDirFlag
+	t.Cleanup(func() {
+		orgFlag, projectFlag, workDirFlag = savedOrg, savedProj, savedWD
+	})
+
+	// Layout: tmp/project/.ateam + tmp/worktree (a real git repo)
+	tmp := t.TempDir()
+	projectRoot := filepath.Join(tmp, "project")
+	ateam := filepath.Join(projectRoot, ".ateam")
+	if err := os.MkdirAll(ateam, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ateam, "config.toml"), []byte("[project]\nname=\"p\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	worktree := filepath.Join(tmp, "worktree")
+	if err := os.MkdirAll(worktree, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"},
+	} {
+		c := exec.Command("git", args...)
+		c.Dir = worktree
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	orgFlag = ""
+	projectFlag = projectRoot
+	workDirFlag = worktree
+
+	env, err := resolveEnv()
+	if err != nil {
+		t.Fatalf("resolveEnv: %v", err)
+	}
+	if env.ProjectDir != ateam && !filepathEqual(env.ProjectDir, ateam) {
+		t.Errorf("ProjectDir = %q, want %q", env.ProjectDir, ateam)
+	}
+	if env.WorkDir != worktree && !filepathEqual(env.WorkDir, worktree) {
+		t.Errorf("WorkDir = %q, want %q (--work-dir applied)", env.WorkDir, worktree)
+	}
+	if !filepathEqual(env.GitRepoDir, worktree) {
+		t.Errorf("GitRepoDir = %q, want %q (derived from WorkDir, not from project parent)", env.GitRepoDir, worktree)
 	}
 }

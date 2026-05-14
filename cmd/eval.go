@@ -170,7 +170,7 @@ func runEval(cmd *cobra.Command, args []string) error {
 
 	var baseEnv, candEnv *root.ResolvedEnv
 	if evalGitWorktree {
-		sourceEnv, err := root.Resolve(orgFlag, projectFlag)
+		sourceEnv, err := resolveEnv()
 		if err != nil {
 			return err
 		}
@@ -380,7 +380,7 @@ func joinRoles(roles []string) string {
 // from its directory.
 func resolveEvalEnvs(dirs []string) (*root.ResolvedEnv, *root.ResolvedEnv, error) {
 	if len(dirs) == 0 {
-		env, err := root.Resolve(orgFlag, projectFlag)
+		env, err := resolveEnv()
 		if err != nil {
 			return nil, nil, err
 		}

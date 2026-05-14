@@ -6,7 +6,6 @@ import (
 
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/prompts"
-	"github.com/ateam/internal/root"
 	"github.com/spf13/cobra"
 )
 
@@ -44,7 +43,7 @@ func runRoles(cmd *cobra.Command, args []string) error {
 		return printRolesDocs()
 	}
 
-	env, err := root.Resolve(orgFlag, projectFlag)
+	env, err := resolveEnv()
 	if err != nil {
 		return err
 	}

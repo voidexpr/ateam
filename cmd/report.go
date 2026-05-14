@@ -131,7 +131,7 @@ func init() {
 }
 
 func runReport(opts ReportOptions) error {
-	env, err := root.Resolve(orgFlag, projectFlag)
+	env, err := resolveEnv()
 	if err != nil {
 		return err
 	}
@@ -205,12 +205,6 @@ func runReport(opts ReportOptions) error {
 	}
 
 	batch := "report-" + time.Now().Format(runner.TimestampFormat)
-
-	workDir, err := resolveWorkDir(workDirFlag, env)
-	if err != nil {
-		return err
-	}
-
 	cliOverridesProfile := opts.Profile != "" || opts.Agent != ""
 	defaultProfile := env.Config.ResolveProfile(runner.ActionReport, "")
 
@@ -219,7 +213,7 @@ func runReport(opts ReportOptions) error {
 	for _, roleID := range roleIDs {
 		pinfo := basePinfo
 		pinfo.Role = "role " + roleID
-		prompt, err := prompts.AssembleRolePrompt(env.OrgDir, env.ProjectDir, roleID, env.SourceDir, extraPrompt, pinfo, opts.IgnorePreviousReport)
+		prompt, err := prompts.AssembleRolePrompt(env.OrgDir, env.ProjectDir, roleID, env.WorkDir, extraPrompt, pinfo, opts.IgnorePreviousReport)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", roleID, err)
 			continue
@@ -231,7 +225,7 @@ func runReport(opts ReportOptions) error {
 				Action:           runner.ActionReport,
 				OutputKind:       runner.OutputKindReport,
 				CanonicalDestDir: env.RoleDir(roleID),
-				WorkDir:          workDir,
+				WorkDir:          env.WorkDir,
 				TimeoutMin:       timeout,
 				Verbose:          opts.Verbose,
 				Batch:            batch,

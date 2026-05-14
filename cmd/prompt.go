@@ -9,7 +9,6 @@ import (
 
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
-	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
 )
@@ -69,7 +68,7 @@ func runPromptRole() error {
 		return fmt.Errorf("invalid action %q for role: must be 'report' or 'code'", promptAction)
 	}
 
-	env, err := root.Resolve(orgFlag, projectFlag)
+	env, err := resolveEnv()
 	if err != nil {
 		return err
 	}
@@ -91,9 +90,9 @@ func runPromptRole() error {
 	var sources []prompts.PromptSource
 	switch promptAction {
 	case runner.ActionReport:
-		sources = prompts.TraceRolePromptSources(env.OrgDir, env.ProjectDir, promptRole, env.SourceDir, extraPrompt, pinfo, promptIgnorePreviousReport)
+		sources = prompts.TraceRolePromptSources(env.OrgDir, env.ProjectDir, promptRole, env.WorkDir, extraPrompt, pinfo, promptIgnorePreviousReport)
 	case runner.ActionCode:
-		sources = prompts.TraceRoleCodePromptSources(env.OrgDir, env.ProjectDir, promptRole, env.SourceDir, extraPrompt, pinfo)
+		sources = prompts.TraceRoleCodePromptSources(env.OrgDir, env.ProjectDir, promptRole, env.WorkDir, extraPrompt, pinfo)
 	}
 
 	if promptFilesOnly {
@@ -104,9 +103,9 @@ func runPromptRole() error {
 	var assembled string
 	switch promptAction {
 	case runner.ActionReport:
-		assembled, err = prompts.AssembleRolePrompt(env.OrgDir, env.ProjectDir, promptRole, env.SourceDir, extraPrompt, pinfo, promptIgnorePreviousReport)
+		assembled, err = prompts.AssembleRolePrompt(env.OrgDir, env.ProjectDir, promptRole, env.WorkDir, extraPrompt, pinfo, promptIgnorePreviousReport)
 	case runner.ActionCode:
-		assembled, err = prompts.AssembleRoleCodePrompt(env.OrgDir, env.ProjectDir, promptRole, env.SourceDir, extraPrompt, pinfo)
+		assembled, err = prompts.AssembleRoleCodePrompt(env.OrgDir, env.ProjectDir, promptRole, env.WorkDir, extraPrompt, pinfo)
 	}
 	if err != nil {
 		return err
@@ -121,7 +120,7 @@ func runPromptSupervisor() error {
 		return fmt.Errorf("invalid action %q for supervisor: must be 'review', 'code', or 'verify'", promptAction)
 	}
 
-	env, err := root.Resolve(orgFlag, projectFlag)
+	env, err := resolveEnv()
 	if err != nil {
 		return err
 	}
@@ -160,7 +159,7 @@ func runPromptSupervisor() error {
 		if readErr != nil {
 			return errNoReview(env.ReviewPath())
 		}
-		assembled, err = prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.SourceDir, pinfo, string(reviewContent), "", extraPrompt)
+		assembled, err = prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.WorkDir, pinfo, string(reviewContent), "", extraPrompt)
 	case runner.ActionVerify:
 		assembled, err = prompts.AssembleCodeVerifyPrompt(env.OrgDir, env.ProjectDir, pinfo, extraPrompt)
 	}

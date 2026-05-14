@@ -34,7 +34,7 @@ func init() {
 }
 
 func runEnv(cmd *cobra.Command, args []string) error {
-	env, err := root.Lookup(orgFlag, projectFlag)
+	env, err := lookupEnv()
 	if err != nil {
 		fmt.Printf("Org: (not found — run 'ateam install' to set up)\n")
 		return nil
@@ -57,7 +57,7 @@ func printClaudeSandbox(env *root.ResolvedEnv) error {
 	if err != nil {
 		return err
 	}
-	data, err := r.RenderSettings(env.SourceDir)
+	data, err := r.RenderSettings(env.WorkDir)
 	if err != nil {
 		return err
 	}

@@ -62,7 +62,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 			SourceDir:   filepath.Dir(absPath),
 		}
 	} else {
-		env, err = root.Resolve(orgFlag, projectFlag)
+		env, err = resolveEnv()
 		if err != nil {
 			return err
 		}

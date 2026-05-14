@@ -55,7 +55,7 @@ func runProjectRename(cmd *cobra.Command, args []string) error {
 
 // runProjectReregister re-registers the current project with its org.
 func runProjectReregister() error {
-	env, err := root.Lookup(orgFlag, projectFlag)
+	env, err := lookupEnv()
 	if err != nil {
 		return err
 	}

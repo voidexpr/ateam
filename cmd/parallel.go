@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/ateam/internal/prompts"
-	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
 )
@@ -126,17 +125,11 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	env, err := root.Lookup(orgFlag, projectFlag)
+	env, err := lookupEnv()
 	if err != nil {
 		return fmt.Errorf("cannot find .ateamorg/: %w", err)
 	}
 	hasProject := env.ProjectDir != "" && env.Config != nil
-
-	workDir, err := resolveWorkDir(workDirFlag, env)
-	if err != nil {
-		return err
-	}
-
 	var r *runner.Runner
 	if hasProject {
 		r, err = resolveRunner(env, parallelProfile, parallelAgent, runner.ActionParallel, "", parallelDockerAutoSetup)
@@ -189,7 +182,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 			RunOpts: runner.RunOpts{
 				RoleID:     labels[i],
 				Action:     runner.ActionParallel,
-				WorkDir:    workDir,
+				WorkDir:    env.WorkDir,
 				TimeoutMin: parallelTimeout,
 				Verbose:    parallelVerbose,
 				Batch:      batch,

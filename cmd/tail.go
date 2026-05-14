@@ -46,7 +46,7 @@ func init() {
 }
 
 func runTail(cmd *cobra.Command, args []string) error {
-	env, err := root.Resolve(orgFlag, projectFlag)
+	env, err := resolveEnv()
 	if err != nil {
 		return fmt.Errorf("cannot find project: %w", err)
 	}
