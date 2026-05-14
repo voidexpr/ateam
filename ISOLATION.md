@@ -368,9 +368,9 @@ Setting `CLAUDE_CODE_OAUTH_TOKEN` as a shell environment variable works but caus
 - If `CLAUDE_CODE_OAUTH_TOKEN` is in your shell env, interactive Claude sessions can't use features like Remote Control.
 - With `ateam secret`, the token is resolved at runtime and only injected into the agent child process — your shell stays clean.
 
-## Authentication methods (Claude Code)
+### Authentication methods (Claude Code)
 
-This section is Claude-specific.
+Claude-specific. The other agents (codex, etc.) have a single API-key model.
 
 | Method | Token | `-p` (headless) | Interactive | Remote Control |
 |--------|-------|-----------------|-------------|----------------|
@@ -380,9 +380,9 @@ This section is Claude-specific.
 
 - **`CLAUDE_CODE_OAUTH_TOKEN`** (from `claude setup-token`) is inference-only. Works with `-p` (headless) but not for interactive sessions.
 - **Interactive login** stores full-scope credentials in `~/.claude/.credentials.json` (on Linux/Docker; macOS uses the Keychain). Supports all features.
-- **`ANTHROPIC_API_KEY`** works everywhere but is pay-per-use. Takes priority over everything else.
+- **`ANTHROPIC_API_KEY`** works everywhere but is pay-per-use. Takes priority over everything else in Claude's own auth chain (which is why ateam strips it from the agent process when a different alternative wins — see Resolution order above).
 
-### Combining interactive + headless
+#### Combining interactive + headless
 
 `CLAUDE_CODE_OAUTH_TOKEN` is needed for headless ateam agents but blocks interactive Claude features. The [shared config](#shared-linux-agent-config) approach solves this:
 
@@ -392,7 +392,7 @@ This section is Claude-specific.
 
 If `CLAUDE_CODE_OAUTH_TOKEN` is in the *shell* environment (e.g., from docker-compose), it will be used by Claude for `-p` mode but will prevent interactive features. Use `ateam agent-config` to see what auth is active.
 
-### Auditing auth state
+#### Auditing auth state
 
 ```bash
 ateam agent-config                                    # local audit (default)

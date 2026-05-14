@@ -281,6 +281,8 @@ agent "claude-sonnet" {
 
 Agents support inheritance via `base`, sandbox settings, environment variables, isolated config dirs, and `required_env` for secret validation. When alternatives are declared (e.g., `required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]`), the first alternative in declaration order wins at each tier (store first, then env). Competing alternatives are stripped from the agent's process environment to avoid credential confusion. See [`ateam secret`](COMMANDS.md#ateam-secret) for the full resolution order.
 
+`max_budget_usd = "<USD>"` can be set on an agent block as a default spend cap (claude only; codex ignores it). The CLI `--max-budget-usd` flag overrides the per-agent default for a single invocation.
+
 ### Effort levels
 
 Each agent block accepts an optional `effort = "..."` field that controls the underlying CLI's reasoning depth. The string is passed through verbatim, so `ateam` does not need to be updated when agents add new levels. CLI flags (`--effort` on `exec`, `code`, `report`, `parallel`) override the per-agent default for a single invocation.
@@ -322,6 +324,8 @@ Agent args, profile extra args, container config fields, and agent env values su
 | `{{MODEL}}` | Resolved model name | `sonnet`, `haiku` |
 | `{{CONTAINER_TYPE}}` | Container type | `none`, `docker`, `docker-exec` |
 | `{{CONTAINER_NAME}}` | Docker container name | `ateam-myapp-security` |
+| `{{OUTPUT_DIR}}` | Absolute path to the agent's writable output directory for this run (`.ateam/runtime/<exec_id>/`) | `/proj/.ateam/runtime/42` |
+| `{{OUTPUT_FILE}}` | Absolute path to the primary output file for the current action (e.g. the role's `report.md`) | `/proj/.ateam/runtime/42/report.md` |
 
 Unknown variables are left as-is (e.g. `{{UNKNOWN}}` passes through unchanged). When `EXEC_ID` is 0 (no DB tracking), it resolves to an empty string.
 
@@ -422,11 +426,14 @@ Three container types are supported: `none`, `docker` (one-shot), and `docker-ex
 
 ```hcl
 container "docker" {
-  type        = "docker"
-  dockerfile  = "Dockerfile"
-  forward_env = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
+  type                = "docker"
+  dockerfile          = "Dockerfile"
+  mount_claude_config = true     # mount ~/.claude/.credentials.json read-only (OAuth)
+  forward_env         = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
 }
 ```
+
+`mount_claude_config = true` bind-mounts the host's `~/.claude/.credentials.json` into the container as read-only — required for OAuth-token auth that needs the credential store. Stateless API-key auth (`docker-api` profile) does not need it. See [ISOLATION.md](ISOLATION.md) for the full mount layout.
 
 `docker-exec` runs agents inside a long-lived user-managed container (docker-compose service, devcontainer, manually started, etc.). The container name resolves from `--container-name` flag → `ateam secret CONTAINER_NAME --scope project` → `CONTAINER_NAME` env var → the `docker_container` field. A built-in `docker-exec` profile uses `{{CONTAINER_NAME}}` for secret-based resolution.
 

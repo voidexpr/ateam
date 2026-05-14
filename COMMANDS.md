@@ -219,6 +219,9 @@ ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile 
 |------|-------------|
 | `--extra-prompt TEXT` | Additional instructions passed to all phases (text or `@filepath`) |
 | `--cheaper-model` | Use a cheaper model (sonnet) |
+| `--model MODEL` | Model override applied to every phase; takes precedence over `--cheaper-model` |
+| `--effort VALUE` | Reasoning effort applied to every phase, passed verbatim to the agent CLI (see [Effort levels](CONFIG.md#effort-levels)) |
+| `--max-budget-usd USD` | Per-agent USD spend cap applied to every phase (claude-only; warns on codex) |
 | `--timeout MINUTES` | Per-phase timeout (overrides config) |
 | `--parallel N` | Max parallel report roles (overrides config `max_parallel`) |
 | `--roles ROLE,...` | Limit report and review to these roles (default: all enabled roles). Does not affect the code phase. |
@@ -241,7 +244,7 @@ ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile 
 
 Manage secrets (API keys). Secrets are stored in the OS keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager) or plain `.env` files.
 
-You can obtain a long lived token for claude code with:
+You can obtain a long-lived token for claude code with:
 ```bash
 claude setup-token
 ```
@@ -268,27 +271,11 @@ ateam secret --save-project-scope             # write all to .ateam/secrets.env
 | `--print` | Print all (or named) secrets as raw `KEY=VALUE` to stdout |
 | `--save-project-scope` | Resolve from any source and write to `.ateam/secrets.env` |
 
-Agents declare required secrets via `required_env` in `runtime.hcl`.
-
-**Per-key resolution order** (the secret store beats the environment for the same key):
-1. Project `.ateam/secrets.env` / keychain
-2. Org `.ateamorg/secrets.env` / keychain
-3. Global `~/.config/ateam/secrets.env` / keychain
-4. Process environment
-
-**Alternatives (`A|B` in `required_env`):** the winner is picked in two steps:
-1. Walk alternatives at the store tier (project → org → global). The first alternative in declaration order that resolves wins.
-2. Otherwise walk alternatives at the env tier. The first alternative in declaration order that resolves wins.
-
-The default claude agents list `CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY`, so OAUTH wins any same-level tie. Cross-tier, the store still beats env — e.g., `ANTHROPIC_API_KEY` in the store beats `CLAUDE_CODE_OAUTH_TOKEN` that's only in the shell environment.
-
-**Credential isolation:** non-winning alternatives that also exist in the host environment are stripped from the agent's process. This prevents Claude Code from applying its own internal priority (`ANTHROPIC_API_KEY > CLAUDE_CODE_OAUTH_TOKEN`) to pick the wrong credential.
-
-**Validation** runs before agent spawn for container runs and inside containers. On host without containers, validation is skipped — agents handle their own auth (interactive login, macOS Keychain). Credential isolation (stripping competing env vars) always runs regardless of context.
+Agents declare required secrets via `required_env` in `runtime.hcl`. Scopes (`global`, `org`, `project`) match the three storage tiers; the store always beats the process environment for the same key.
 
 Use `ateam env` to see every configured credential (including shadowed ones) and which the default agent will use. Use `ateam exec --dry-run` for the per-invocation view.
 
-**Docker usage**: secrets in OS keychains don't cross into containers. Use `--save-project-scope` to write resolved secrets to `.ateam/secrets.env`, which is mounted into containers. Inside the container, `ateam exec` resolves them from the project scope automatically.
+For the full priority chain, alternatives handling (`A|B` syntax), credential isolation, validation rules, and how secrets reach containers, see [ISOLATION.md → Secrets](ISOLATION.md#secrets).
 
 ### `ateam agent-config`
 
@@ -507,6 +494,7 @@ ateam inspect --last --auto-debug-prompt
 | `--batch NAME` | Select all runs in a batch |
 | `--auto-debug` | Launch an agent in streaming mode to investigate the selected runs |
 | `--auto-debug-prompt` | Print the auto-debug prompt without executing |
+| `--auto-debug-extra-prompt TEXT` | Additional instructions appended to the auto-debug prompt (text or `@filepath`) |
 | `--profile NAME` | Profile for the auto-debug agent |
 | `--agent NAME` | Agent for the auto-debug run |
 
@@ -548,10 +536,10 @@ Resume only supports `agent = claude`. Codex and other agents are refused with a
 Print version, build, and system information.
 
 ```
-ateam:  0.1.0
-commit: e8348b8-dirty
-built:  2026-03-30T22:58:33Z
-system: Darwin ...
+ateam:  <version>
+commit: <git-sha>
+built:  <build-timestamp>
+system: <os>
 ```
 
 ### `ateam serve`
@@ -616,6 +604,7 @@ Display recent agent runs.
 | `--action ACTION` | Filter by action (report, review, code, exec) |
 | `--batch NAME` | Filter by batch |
 | `--limit N` | Max rows (default 30) |
+| `--git-hash` | Append GIT_START and GIT_END columns (first 6 chars of each hash) |
 
 Output columns (12): `ID, STARTED, PROFILE, ACTION, ROLE, MODEL, DURATION, COST, TOKENS, STATUS, BATCH, REASON`.
 
@@ -737,7 +726,7 @@ ateam tail                      # live-stream all running processes
 ateam tail --coding             # live-stream current coding session
 ```
 
-### Where output goes
+### Where Output Goes
 
 Each run writes to `.ateam/runtime/<exec_id>/` (the agent's scratch directory). On success, files other than `*_prompt.md` are cloned to a per-action canonical destination; the runtime copy is left in place for forensics. On failure, nothing is cloned — files stay in `runtime/<exec_id>/` and are listed in `.ateam/logs/<exec_id>/cmd.md` under `# Files Copy`.
 
