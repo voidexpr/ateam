@@ -140,19 +140,15 @@ func runAll(cmd *cobra.Command, args []string) error {
 	// does NOT constrain coding-task assignment in Phase 3 (feature dropped).
 	fmt.Println("\n=== Phase 2: Review ===")
 	if err := runReview(ReviewOptions{
-		ExtraPrompt:  allExtraPrompt,
-		Timeout:      allTimeout,
-		Print:        printOutput,
-		CheaperModel: allCheaperModel,
-		Profile:      allSupervisorProfile,
-		Agent:        allSupervisorAgent,
-		Verbose:      allVerbose,
-		Roles:        allRoles,
-		// When --roles is explicit, treat it as authoritative: the named roles
-		// bypass the enabled-only gate (the Roles filter still narrows the
-		// review to exactly those roles, so scope doesn't widen). --all keeps
-		// its meaning of "include every disabled role even without naming".
-		IncludeDisabled: allAll || len(allRoles) > 0,
+		ExtraPrompt:     allExtraPrompt,
+		Timeout:         allTimeout,
+		Print:           printOutput,
+		CheaperModel:    allCheaperModel,
+		Profile:         allSupervisorProfile,
+		Agent:           allSupervisorAgent,
+		Verbose:         allVerbose,
+		Roles:           allRoles,
+		IncludeDisabled: allAll,
 		MaxAge:          maxAge,
 		DockerAutoSetup: allDockerAutoSetup,
 		ContainerName:   allContainerName,

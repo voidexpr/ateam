@@ -305,14 +305,23 @@ const roleStatusOff = "off"
 // env.Config.Roles); pass nil when there is no project config.
 func (s ReviewSelector) Filter(all []RoleReport, configRoles map[string]string) ([]RoleReport, ReviewFunnel) {
 	funnel := ReviewFunnel{
-		Available:  len(all),
-		HadEnabled: !s.IncludeDisabled,
+		Available: len(all),
+		// HadEnabled signals whether the enabled-only step actually ran. It is
+		// skipped when --all (IncludeDisabled) is set OR when --roles is set
+		// (the user named the roles authoritatively; see the gate below).
+		HadEnabled: !s.IncludeDisabled && len(s.Roles) == 0,
 		MaxAge:     s.MaxAge,
 		UsedRoles:  append([]string(nil), s.Roles...),
 	}
 
 	kept := all
-	if !s.IncludeDisabled {
+	// The enabled-only gate runs ONLY when the caller didn't explicitly name
+	// roles via --roles. When --roles is supplied the user is naming the roles
+	// they want and config.toml's enabled status should not gate them; the
+	// Roles filter below still narrows the set to exactly those names so scope
+	// can't widen. --all keeps its meaning of "include every disabled role
+	// without naming any specific one".
+	if !s.IncludeDisabled && len(s.Roles) == 0 {
 		next := kept[:0:0]
 		for _, r := range kept {
 			if isRoleEnabled(configRoles, r.RoleID) {

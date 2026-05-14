@@ -264,13 +264,12 @@ func TestReviewOptionsFromReportPropagation(t *testing.T) {
 		MaxBudgetBatch:       "10",
 	}
 	got := reviewOptionsFromReport(in)
+	// IncludeDisabled stays false here even though --roles is explicit: the
+	// Filter in internal/prompts skips the enabled-only gate whenever Roles is
+	// non-empty, so the gate is handled at the source and we don't need to
+	// duplicate the logic in the cmd layer.
 	want := ReviewOptions{
-		Roles: []string{"security"},
-		// IncludeDisabled is set true when --roles is explicit so the chained
-		// review honors the same "user named these roles, run them" authority
-		// the report layer already applied. The Roles filter still narrows to
-		// exactly the named set, so scope doesn't widen.
-		IncludeDisabled: true,
+		Roles:           []string{"security"},
 		ExtraPrompt:     "focus on auth",
 		Timeout:         42,
 		CheaperModel:    true,
@@ -289,8 +288,6 @@ func TestReviewOptionsFromReportPropagation(t *testing.T) {
 
 	// Empty ReportOptions must not clobber review defaults — a zero value in
 	// goes to a zero value out so review's own defaulting still kicks in.
-	// IncludeDisabled stays false because Roles is empty (the gate is on
-	// explicit --roles, not on every chained review).
 	if zero := reviewOptionsFromReport(ReportOptions{}); !reflect.DeepEqual(zero, ReviewOptions{}) {
 		t.Errorf("empty ReportOptions should produce empty ReviewOptions, got %+v", zero)
 	}
