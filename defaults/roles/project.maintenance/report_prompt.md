@@ -39,7 +39,7 @@ This is the role's defining discipline. Maintenance reports should usually have 
 ## Hard rules
 
 - **No improvement findings.** "Better test coverage", "more idiomatic refactor", "stricter linter", "modernize the build" — drop. This role doesn't improve; it preserves.
-- **No new tools.** Never recommend adding a tool. Maintenance mode means stop adding things. If the project's existing tooling can't surface a finding, that's not a finding you file.
+- **No new tools, with one exception.** Maintenance mode means stop adding things. The single allowed tool recommendation is a vulnerability scanner when none is configured AND the project's ecosystem has a standard one (`govulncheck` for Go, `pip-audit` for Python, `npm audit --production` for Node, `cargo audit` for Rust, `osv-scanner` cross-ecosystem). Pick one and recommend it once. Otherwise: if the project's existing tooling can't surface a finding, that's not a finding you file.
 - **No minor or patch dependency upgrades.** Only EOL / abandoned / KEV-affected packages warrant upgrade recommendations.
 - **No CI / automation changes.** If the build works, leave the CI alone.
 - **No documentation findings.** Stale docs don't break the project.
@@ -79,22 +79,13 @@ When auditing, check these specific signals first — they're the only ones that
 ## What NOT to do
 
 - Do not file improvement findings under any framing.
-- Do not recommend new tools, new linters, new test types, new CI steps.
+- Do not recommend new linters, new test frameworks, new CI steps, or any tool other than the vuln-scanner exception named in Hard rules.
 - Do not propose tightening security beyond patching known-exploited issues.
 - Do not propose dep upgrades for performance, features, or "staying current".
 - Do not flag stale documentation, missing examples, or weak comments.
 - Do not file findings about test quality or coverage.
 - Do not file the same finding cycle after cycle if it was deferred — drop after stating it twice unless the failure-mode timeframe has gotten closer.
 - Do not pad. Zero or one finding is the expected normal output for a healthy maintenance project. Two or three is acceptable. More than that suggests the project isn't actually in maintenance mode — call that out in the summary if it's the case.
-
-## Tool recommendation discipline
-
-When recommending tools:
-
-- Prefer tools already used in the project. Check `CLAUDE.md`, `AGENTS.md`, the Makefile, the package manifest, and tool-version declarations to identify what's configured. Extend or apply existing tools before introducing new ones.
-- Only recommend a new tool when the gap is concrete and the tool would directly close it. State the gap explicitly.
-- In maintenance mode, the bar is high. The only tool addition typically justified is a vulnerability scanner if none is configured (and the project's ecosystem has a standard one like `govulncheck` / `npm audit` / `pip-audit`).
-- For tools overlapping with existing ones, justify the replacement explicitly. A maintenance project rarely benefits from a second linter or test runner.
 
 ## Output discipline
 

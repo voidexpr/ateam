@@ -30,9 +30,11 @@ You have been given reports from multiple specialized roles that analyzed the sa
 
 ## Inputs and where things live
 
-All inputs you need are already embedded later in this prompt under `# Role Reports` (and `# Reports Under Review` if present). You do NOT need to read anything from disk to do this job — synthesize directly from the embedded reports.
+Role reports are already embedded later in this prompt under `# Role Reports` (and `# Reports Under Review` if present). You do NOT need to read them from disk — synthesize directly from the embedded copies.
 
-For reference only (use these paths in `Source Report` fields, do not read them):
+Policy / direction context, however, is NOT embedded. When the "Respect project policy and current direction" principle requires checking it, read these files directly: `CLAUDE.md`, `AGENTS.md`, `README` policy sections, and recent `git log`. Quote what you find; do not fabricate.
+
+For reference (use these paths in `Source Report` fields; do not re-read role reports from them):
 - Role reports: `.ateam/roles/<ROLE>/report.md`
 - Your previous review (if any): `.ateam/supervisor/review.md` — note: NOT under `.ateam/roles/`. The `supervisor` directory is a sibling of `roles`, not a child.
 

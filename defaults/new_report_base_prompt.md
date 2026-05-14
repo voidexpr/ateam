@@ -15,7 +15,7 @@ Explore the codebase thoroughly before writing your report. Read key files, unde
 
 ## Project maturity
 
-Calibrate severity and recommendation ambition to the project's maturity. A greenfield project (no production users, schema in flux) benefits from aggressive recommendations and direct schema edits; a project with real users in production needs migration discipline and concrete pain to justify change; a project in maintenance mode (no new features, signaled by `project.maintenance` being enabled or by sparse recent git activity) should produce only essential findings. The model has prior on these states; this section just makes the calibration explicit.
+Calibrate severity and recommendation ambition to the project's maturity. A greenfield project (no production users, schema in flux) benefits from aggressive recommendations and direct schema edits; a project with real users in production needs migration discipline and concrete pain to justify change. The model has prior on these states; this section just makes the calibration explicit.
 
 ## Merging old report
 
