@@ -264,10 +264,6 @@ func TestReviewOptionsFromReportPropagation(t *testing.T) {
 		MaxBudgetBatch:       "10",
 	}
 	got := reviewOptionsFromReport(in)
-	// IncludeDisabled stays false here even though --roles is explicit: the
-	// Filter in internal/prompts skips the enabled-only gate whenever Roles is
-	// non-empty, so the gate is handled at the source and we don't need to
-	// duplicate the logic in the cmd layer.
 	want := ReviewOptions{
 		Roles:           []string{"security"},
 		ExtraPrompt:     "focus on auth",

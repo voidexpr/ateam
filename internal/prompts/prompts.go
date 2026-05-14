@@ -264,13 +264,21 @@ func DiscoverReports(projectDir string) ([]RoleReport, error) {
 // All filters are applied in order and produce a ReviewFunnel for diagnostics.
 //
 //  1. Available           — DiscoverReports' result (every report.md on disk).
-//  2. Enabled filter      — drop reports whose role is not RoleEnabled (skipped if IncludeDisabled).
+//  2. Enabled filter      — drop reports whose role is not RoleEnabled (skipped if IncludeDisabled OR if Roles names them authoritatively).
 //  3. Roles intersection  — keep only reports whose role appears in Roles (if non-empty).
 //  4. Freshness           — drop reports older than now - MaxAge (skipped if MaxAge == 0).
 type ReviewSelector struct {
 	Roles           []string      // empty = no role filter
 	IncludeDisabled bool          // true = skip the enabled-only step
 	MaxAge          time.Duration // zero = no freshness filter
+}
+
+// runsEnabledGate reports whether the enabled-only step should run. It's
+// skipped when --all (IncludeDisabled) is set, or when --roles names roles
+// authoritatively (config.toml's enabled status doesn't gate explicit names;
+// the Roles filter still narrows scope to exactly those names).
+func (s ReviewSelector) runsEnabledGate() bool {
+	return !s.IncludeDisabled && len(s.Roles) == 0
 }
 
 // ReviewFunnel records the count of reports surviving each filter step. Used
@@ -305,23 +313,14 @@ const roleStatusOff = "off"
 // env.Config.Roles); pass nil when there is no project config.
 func (s ReviewSelector) Filter(all []RoleReport, configRoles map[string]string) ([]RoleReport, ReviewFunnel) {
 	funnel := ReviewFunnel{
-		Available: len(all),
-		// HadEnabled signals whether the enabled-only step actually ran. It is
-		// skipped when --all (IncludeDisabled) is set OR when --roles is set
-		// (the user named the roles authoritatively; see the gate below).
-		HadEnabled: !s.IncludeDisabled && len(s.Roles) == 0,
+		Available:  len(all),
+		HadEnabled: s.runsEnabledGate(),
 		MaxAge:     s.MaxAge,
 		UsedRoles:  append([]string(nil), s.Roles...),
 	}
 
 	kept := all
-	// The enabled-only gate runs ONLY when the caller didn't explicitly name
-	// roles via --roles. When --roles is supplied the user is naming the roles
-	// they want and config.toml's enabled status should not gate them; the
-	// Roles filter below still narrows the set to exactly those names so scope
-	// can't widen. --all keeps its meaning of "include every disabled role
-	// without naming any specific one".
-	if !s.IncludeDisabled && len(s.Roles) == 0 {
+	if s.runsEnabledGate() {
 		next := kept[:0:0]
 		for _, r := range kept {
 			if isRoleEnabled(configRoles, r.RoleID) {

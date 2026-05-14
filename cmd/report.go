@@ -364,11 +364,8 @@ func runReport(opts ReportOptions) error {
 // reviewOptionsFromReport carries the user's report-time overrides into the
 // auto-triggered review step so `report --review --roles X --profile Y` does
 // not silently revert the review to defaults. Zero-valued fields stay zero so
-// review's own defaulting (config, role-level profiles) still applies.
-//
-// IncludeDisabled is intentionally NOT set here: the Filter in
-// internal/prompts skips the enabled-only gate whenever Roles is non-empty,
-// so explicit --roles already bypasses the config gate at the source.
+// review's own defaulting (config, role-level profiles) still applies. The
+// enabled-only gate for --roles is handled in prompts.ReviewSelector.Filter.
 func reviewOptionsFromReport(opts ReportOptions) ReviewOptions {
 	return ReviewOptions{
 		ExtraPrompt:     opts.ExtraPrompt,

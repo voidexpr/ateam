@@ -62,6 +62,8 @@ func TestReviewSelector_Filter(t *testing.T) {
 	dir := t.TempDir()
 	all := makeTestReports(t, dir, mtimes)
 
+	// In every case below where --all (IncludeDisabled) or --roles is set,
+	// Enabled=0 and HadEnabled=false because the enabled-only step is skipped.
 	cases := []struct {
 		name       string
 		sel        ReviewSelector
@@ -81,20 +83,18 @@ func TestReviewSelector_Filter(t *testing.T) {
 			name: "include disabled",
 			sel:  ReviewSelector{IncludeDisabled: true},
 			want: []string{"deps", "docs", "obsoleted", "security"},
-			// Enabled=0 because the step was skipped (HadEnabled=false).
 			wantFunnel: ReviewFunnel{
 				Available: 4, Enabled: 0, RolesMatch: 4, FreshEnough: 4,
 			},
 		},
 		{
-			// --roles is authoritative: the named roles bypass the enabled-only
+			// --roles is authoritative: named roles bypass the enabled-only
 			// gate. The Roles filter still narrows scope to exactly the named
-			// set, so an unknown role name simply matches zero reports.
+			// set, so an unknown name simply matches zero reports.
 			name: "explicit roles is authoritative (bypasses enabled-only)",
 			sel:  ReviewSelector{Roles: []string{"security", "obsoleted"}},
 			want: []string{"obsoleted", "security"},
 			wantFunnel: ReviewFunnel{
-				// Enabled=0 and HadEnabled=false because the step was skipped.
 				Available: 4, Enabled: 0, RolesMatch: 2, FreshEnough: 2,
 				UsedRoles: []string{"security", "obsoleted"},
 			},
@@ -128,9 +128,6 @@ func TestReviewSelector_Filter(t *testing.T) {
 			},
 		},
 		{
-			// --roles=[docs] is authoritative (enabled-only is skipped); only
-			// the max-age window prunes it. HadEnabled=false because --roles
-			// was set.
 			name: "explicit role then max-age filters to nothing",
 			sel:  ReviewSelector{Roles: []string{"docs"}, MaxAge: time.Hour},
 			want: nil,
