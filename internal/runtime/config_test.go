@@ -864,21 +864,21 @@ func TestPricingBlockParsed(t *testing.T) {
 	if codex.Pricing == nil {
 		t.Fatal("expected non-nil pricing on codex agent")
 	}
-	if codex.Pricing.DefaultModel != "gpt-5.3-codex" {
-		t.Errorf("expected default_model 'gpt-5.3-codex', got %q", codex.Pricing.DefaultModel)
+	if codex.Pricing.DefaultModel != "gpt-5.4" {
+		t.Errorf("expected default_model 'gpt-5.4', got %q", codex.Pricing.DefaultModel)
 	}
 	if len(codex.Pricing.Models) == 0 {
 		t.Fatal("expected non-empty pricing models on codex")
 	}
-	cm, ok := codex.Pricing.Models["gpt-5.3-codex"]
+	cm, ok := codex.Pricing.Models["gpt-5.4"]
 	if !ok {
-		t.Fatal("expected 'gpt-5.3-codex' in codex pricing models")
+		t.Fatal("expected 'gpt-5.4' in codex pricing models")
 	}
 	if cm.InputPerMTok != 1.75 {
-		t.Errorf("expected gpt-5.3-codex input_per_mtok 1.75, got %v", cm.InputPerMTok)
+		t.Errorf("expected gpt-5.4 input_per_mtok 1.75, got %v", cm.InputPerMTok)
 	}
 	if cm.OutputPerMTok != 14.00 {
-		t.Errorf("expected gpt-5.3-codex output_per_mtok 14.00, got %v", cm.OutputPerMTok)
+		t.Errorf("expected gpt-5.4 output_per_mtok 14.00, got %v", cm.OutputPerMTok)
 	}
 
 	// Claude has no pricing block — it reports native cost via total_cost_usd

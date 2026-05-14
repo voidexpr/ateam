@@ -1068,7 +1068,7 @@ func writeCmdFile(path string, info cmdFileInfo) {
 	fmt.Fprintf(&b, "* coding agent cli:\n  ```bash\n  %s\n  ```\n", info.CLI)
 
 	fmt.Fprintf(&b, "\n# Env\n")
-	fmt.Fprintf(&b, "## Inherited\n")
+	fmt.Fprintf(&b, "## Inherited\n```\n")
 	env := os.Environ()
 	sort.Strings(env)
 	for _, e := range env {
@@ -1079,7 +1079,7 @@ func writeCmdFile(path string, info cmdFileInfo) {
 			fmt.Fprintf(&b, "%s\n", e)
 		}
 	}
-	fmt.Fprintf(&b, "\n## Specified\n")
+	fmt.Fprintf(&b, "```\n\n## Specified\n```\n")
 	keys := make([]string, 0, len(info.SpecifiedEnv))
 	for k := range info.SpecifiedEnv {
 		keys = append(keys, k)
@@ -1098,6 +1098,7 @@ func writeCmdFile(path string, info cmdFileInfo) {
 			fmt.Fprintf(&b, "%s=%s\n", k, v)
 		}
 	}
+	fmt.Fprintf(&b, "```\n")
 
 	if len(info.SettingsJSON) > 0 {
 		fmt.Fprintf(&b, "\n# Settings\n```json\n%s\n```\n", string(info.SettingsJSON))

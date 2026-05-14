@@ -267,13 +267,18 @@ agent "claude-isolated" {
 agent "codex" {
   type    = "codex"
   command = "codex"
-  args    = ["--ask-for-approval", "never"]
+  // All codex args are passed to `codex exec --json` as subcommand flags
+  // (see internal/agent/codex.go). --ask-for-approval is a top-level-only
+  // flag with no effect on non-interactive exec, so it's not configured.
+  // TODO: fix this once it's possible to write:
+  //         args = ["--json", "--ask-for-approval", "never", "exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "{{exec.prompt_file}}"]
+  args    = []
   required_env = ["OPENAI_API_KEY"]
 
   args_outside_container = ["--sandbox", "workspace-write", "--skip-git-repo-check"]
 
   pricing {
-    default_model = "gpt-5.3-codex"
+    default_model = "gpt-5.4"
 
     // cached_input_per_mtok matches OpenAI's prompt-cache pricing (typically
     // 1/10 of input_per_mtok). Set on every model so cost estimates aren't
@@ -282,31 +287,31 @@ agent "codex" {
     // gpt-5.4 = the new name for what was gpt-5.4-codex (codex dropped the
     // -codex suffix). Both names are kept so streams that report either
     // resolve cleanly.
+    model "gpt-5.5" {
+      input_per_mtok        = 1.75
+      cached_input_per_mtok = 0.175
+      output_per_mtok       = 14.00
+    }
+
     model "gpt-5.4" {
       input_per_mtok        = 1.75
       cached_input_per_mtok = 0.175
       output_per_mtok       = 14.00
     }
 
-    model "gpt-5.4-codex" {
+    model "gpt-5.3" {
       input_per_mtok        = 1.75
       cached_input_per_mtok = 0.175
       output_per_mtok       = 14.00
     }
 
-    model "gpt-5.3-codex" {
+    model "gpt-5.2" {
       input_per_mtok        = 1.75
       cached_input_per_mtok = 0.175
       output_per_mtok       = 14.00
     }
 
-    model "gpt-5.2-codex" {
-      input_per_mtok        = 1.75
-      cached_input_per_mtok = 0.175
-      output_per_mtok       = 14.00
-    }
-
-    model "gpt-5.1-codex" {
+    model "gpt-5.1" {
       input_per_mtok        = 1.25
       cached_input_per_mtok = 0.125
       output_per_mtok       = 10.00

@@ -192,9 +192,11 @@ func claudeArgs(base []string, model, effort, maxBudgetUSD string, extra []strin
 	return append(args, extra...)
 }
 
-// codexFlagArgs builds the codex argv up to (but not including) the `exec`
-// subcommand: base args, --model, and `-c model_reasoning_effort=...` for
-// effort. Codex's `-c key=value` overrides must precede the subcommand.
+// codexFlagArgs builds the codex flag args that follow `exec --json` and
+// precede the prompt: base args, --model, and `-c model_reasoning_effort=...`
+// for effort. Modern codex (>=0.130) accepts these as exec-subcommand flags;
+// some flags like --skip-git-repo-check are exec-only and would error if
+// placed before the subcommand.
 func codexFlagArgs(base []string, model, effort string, extra []string) []string {
 	args := make([]string, len(base))
 	copy(args, base)

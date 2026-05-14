@@ -53,16 +53,21 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Binary built: %s\n\n", FormatBuildTime(BuildTime, time.Now()))
 
-	diffs := prompts.DiffOrgDefaults(orgDir)
-	if len(diffs) == 0 {
-		fmt.Println("All prompts are up to date.")
+	promptDiffs := prompts.DiffOrgDefaults(orgDir)
+	runtimeDiffs := runtime.DiffOrgDefaults(orgDir)
+	total := len(promptDiffs) + len(runtimeDiffs)
+	if total == 0 {
+		fmt.Println("All defaults are up to date.")
 		return nil
 	}
 
 	showDiff := !updateQuiet || updateDiff
 	if showDiff {
-		fmt.Printf("Found %d prompt(s) to update:\n", len(diffs))
-		for _, d := range diffs {
+		fmt.Printf("Found %d file(s) to update:\n", total)
+		for _, d := range promptDiffs {
+			fmt.Printf("  %-55s %s\n", d.RelPath, d.Status)
+		}
+		for _, d := range runtimeDiffs {
 			fmt.Printf("  %-55s %s\n", d.RelPath, d.Status)
 		}
 		fmt.Println()
@@ -75,6 +80,6 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Printf("Updated %d prompt(s) in %s\n", len(diffs), orgDir)
+	fmt.Printf("Updated %d file(s) in %s\n", total, orgDir)
 	return nil
 }

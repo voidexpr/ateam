@@ -8,7 +8,7 @@ import (
 func TestCodexAgentDebugCommandArgs(t *testing.T) {
 	a := &CodexAgent{
 		Command: "codex",
-		Args:    []string{"--ask-for-approval", "never"},
+		Args:    []string{"--sandbox", "workspace-write"},
 	}
 	tests := []struct {
 		name   string
@@ -18,23 +18,23 @@ func TestCodexAgentDebugCommandArgs(t *testing.T) {
 	}{
 		{
 			name: "no overrides",
-			want: []string{"--ask-for-approval", "never", "exec", "--json"},
+			want: []string{"exec", "--json", "--sandbox", "workspace-write"},
 		},
 		{
 			name:  "model only",
 			model: "gpt-5",
-			want:  []string{"--ask-for-approval", "never", "--model", "gpt-5", "exec", "--json"},
+			want:  []string{"exec", "--json", "--sandbox", "workspace-write", "--model", "gpt-5"},
 		},
 		{
-			name:   "effort only — must precede 'exec' subcommand",
+			name:   "effort only — passed as exec-scoped -c override",
 			effort: "high",
-			want:   []string{"--ask-for-approval", "never", "-c", "model_reasoning_effort=high", "exec", "--json"},
+			want:   []string{"exec", "--json", "--sandbox", "workspace-write", "-c", "model_reasoning_effort=high"},
 		},
 		{
-			name:   "model and effort both before exec",
+			name:   "model and effort both after exec",
 			model:  "gpt-5",
 			effort: "medium",
-			want:   []string{"--ask-for-approval", "never", "--model", "gpt-5", "-c", "model_reasoning_effort=medium", "exec", "--json"},
+			want:   []string{"exec", "--json", "--sandbox", "workspace-write", "--model", "gpt-5", "-c", "model_reasoning_effort=medium"},
 		},
 	}
 	for _, tt := range tests {

@@ -16,11 +16,15 @@ import (
 )
 
 // CodexAgent executes prompts using the OpenAI Codex CLI.
-// Invocation: codex [args...] exec --json "prompt"
+// Invocation: codex exec --json [args...] "prompt"
+// All configured args are passed to the `exec` subcommand because most
+// codex flags relevant to non-interactive runs (--sandbox, --skip-git-repo-check,
+// -c key=value, --model, ...) are exec-scoped. Top-level-only flags like
+// --ask-for-approval don't apply: `codex exec` is non-interactive by design.
 // The prompt is passed as a positional argument, not stdin.
 type CodexAgent struct {
 	Command      string            // e.g. "codex"
-	Args         []string          // base args, e.g. ["--sandbox", "workspace-write", "--ask-for-approval", "never"]
+	Args         []string          // base args passed after `exec`, e.g. ["--sandbox", "workspace-write", "--skip-git-repo-check"]
 	Model        string            // optional model override (passed as --model flag)
 	Effort       string            // optional reasoning effort (passed as -c model_reasoning_effort=...)
 	MaxBudgetUSD string            // stored but not enforced — codex CLI has no native budget cap
@@ -59,7 +63,7 @@ func (c *CodexAgent) DebugCommandArgs(extraArgs []string) (string, []string) {
 	if command == "" {
 		command = "codex"
 	}
-	args := append(codexFlagArgs(c.Args, c.Model, c.Effort, extraArgs), "exec", "--json")
+	args := append([]string{"exec", "--json"}, codexFlagArgs(c.Args, c.Model, c.Effort, extraArgs)...)
 	return command, args
 }
 
@@ -72,8 +76,12 @@ func (c *CodexAgent) Run(ctx context.Context, req Request) <-chan StreamEvent {
 func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent) {
 	defer close(ch)
 
-	// ExtraArgs before the exec subcommand; exec --json <prompt> — the codex one-shot invocation
-	args := append(codexFlagArgs(c.Args, c.Model, c.Effort, req.ExtraArgs), "exec", "--json", req.Prompt)
+	// codex exec --json <args> <prompt> — the codex one-shot invocation.
+	// All args (base, model, effort, extra) go after the `exec` subcommand
+	// because exec-only flags like --skip-git-repo-check reject if placed
+	// before the subcommand.
+	args := append([]string{"exec", "--json"}, codexFlagArgs(c.Args, c.Model, c.Effort, req.ExtraArgs)...)
+	args = append(args, req.Prompt)
 
 	command := c.Command
 	if command == "" {

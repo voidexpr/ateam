@@ -518,6 +518,37 @@ func ResolvePrecheckCmd(cc *ContainerConfig, projectDir, orgDir, roleID string) 
 	return nil
 }
 
+// RuntimeDiff describes a single embedded default file (runtime.hcl, Dockerfile)
+// that differs from the on-disk copy under orgDir/defaults/.
+type RuntimeDiff struct {
+	RelPath string // path relative to orgDir, e.g. "defaults/runtime.hcl"
+	Status  string // "missing" (no on-disk copy) or "changed" (content differs)
+}
+
+// DiffOrgDefaults compares on-disk defaults files (runtime.hcl, Dockerfile)
+// against the embedded defaults and returns the files that differ.
+// Whitespace-only differences are ignored to match prompts.DiffOrgDefaults.
+func DiffOrgDefaults(orgDir string) []RuntimeDiff {
+	var diffs []RuntimeDiff
+	for _, name := range []string{"runtime.hcl", "Dockerfile"} {
+		rel := filepath.Join("defaults", name)
+		diskPath := filepath.Join(orgDir, rel)
+		data, err := os.ReadFile(diskPath)
+		if err != nil {
+			diffs = append(diffs, RuntimeDiff{RelPath: rel, Status: "missing"})
+			continue
+		}
+		embedded, err := defaults.FS.ReadFile(name)
+		if err != nil {
+			continue
+		}
+		if strings.TrimSpace(string(data)) != strings.TrimSpace(string(embedded)) {
+			diffs = append(diffs, RuntimeDiff{RelPath: rel, Status: "changed"})
+		}
+	}
+	return diffs
+}
+
 // WriteOrgDefaults writes the embedded runtime.hcl and Dockerfile to orgDir/defaults/.
 // When overwrite is false, existing files are not overwritten.
 func WriteOrgDefaults(orgDir string, overwrite bool) error {
