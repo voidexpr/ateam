@@ -596,8 +596,15 @@ func FormatProjectInfo(p ProjectInfoParams) string {
 	b.WriteString("You are part of the ateam software:\n")
 	fmt.Fprintf(&b, "* project name: %s\n", p.ProjectName)
 	fmt.Fprintf(&b, "* role: %s\n", p.Role)
-	b.WriteString("* project directory: . (working directory)\n")
-	b.WriteString("* reports and reviews: .ateam\n")
+	b.WriteString("* working directory: .\n")
+	// The .ateam directory may live anywhere relative to the working
+	// directory: same dir (typical), parent (subdir of project), or an
+	// unrelated path (remote-project mode where --project points elsewhere).
+	ateamRel := ".ateam"
+	if p.WorkDir != "" && p.ProjectDir != "" {
+		ateamRel = shortRelPath(p.WorkDir, p.ProjectDir)
+	}
+	fmt.Fprintf(&b, "* reports and reviews: %s\n", ateamRel)
 	if p.GitRepoDir != "" && p.GitRepoDir != p.WorkDir {
 		rel := shortRelPath(p.WorkDir, p.GitRepoDir)
 		fmt.Fprintf(&b, "\n**IMPORTANT**: Your working directory (.) is a subdirectory of a wider git repo at %s. Limit your findings to the working directory. Do not look at or report on code outside it.\n", rel)

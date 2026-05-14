@@ -10,6 +10,7 @@ import (
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
+	"github.com/ateam/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -306,4 +307,53 @@ func TestApplyWorkDirFlag_ExplicitFlagWins(t *testing.T) {
 	if !filepathEqual(got.WorkDir, override) {
 		t.Errorf("WorkDir = %q, want %q (explicit --work-dir)", got.WorkDir, override)
 	}
+}
+
+// TestPreflightContainerSupportsWorkDir guards the deliberate error path:
+// container profiles + WorkDir outside the project tree is not yet supported,
+// so we fail fast with an actionable message rather than silently produce
+// a broken mount layout.
+func TestPreflightContainerSupportsWorkDir(t *testing.T) {
+	t.Run("none container always allowed", func(t *testing.T) {
+		cc := &runtime.ContainerConfig{Type: "none"}
+		env := &root.ResolvedEnv{
+			ProjectDir: "/proj/.ateam",
+			SourceDir:  "/proj",
+			WorkDir:    "/elsewhere", // outside project tree
+		}
+		if err := preflightContainerSupportsWorkDir(cc, env); err != nil {
+			t.Errorf("none container should never trip preflight, got: %v", err)
+		}
+	})
+
+	t.Run("docker container with WorkDir inside project tree allowed", func(t *testing.T) {
+		cc := &runtime.ContainerConfig{Type: "docker"}
+		env := &root.ResolvedEnv{
+			ProjectDir: "/proj/.ateam",
+			SourceDir:  "/proj",
+			WorkDir:    "/proj", // same as project root
+		}
+		if err := preflightContainerSupportsWorkDir(cc, env); err != nil {
+			t.Errorf("docker + WorkDir==project root should be allowed, got: %v", err)
+		}
+	})
+
+	t.Run("docker container with WorkDir outside project tree errors", func(t *testing.T) {
+		cc := &runtime.ContainerConfig{Type: "docker"}
+		env := &root.ResolvedEnv{
+			ProjectDir: "/proj/.ateam",
+			SourceDir:  "/proj",
+			WorkDir:    "/elsewhere",
+		}
+		err := preflightContainerSupportsWorkDir(cc, env)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if !strings.Contains(err.Error(), "container profile") {
+			t.Errorf("error %q should mention container profile", err)
+		}
+		if !strings.Contains(err.Error(), "--work-dir") {
+			t.Errorf("error %q should mention --work-dir", err)
+		}
+	})
 }

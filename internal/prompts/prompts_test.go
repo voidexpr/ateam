@@ -270,7 +270,7 @@ func TestFormatProjectInfo(t *testing.T) {
 			"# ATeam Project Context",
 			"* project name: myapp",
 			"* role: role security",
-			"* project directory: . (working directory)",
+			"* working directory: .",
 			"* reports and reviews: .ateam",
 		} {
 			if !strings.Contains(got, want) {
@@ -587,4 +587,38 @@ func TestRoleMetaLegacyFlag(t *testing.T) {
 	if meta.Legacy || meta.Deprecated {
 		t.Errorf("code.bugs should not be legacy/deprecated; meta = %+v", meta)
 	}
+}
+
+func TestFormatProjectInfoShowsRelativeAteamPath(t *testing.T) {
+	t.Run("ateam under cwd renders as .ateam", func(t *testing.T) {
+		p := ProjectInfoParams{
+			OrgDir:      "/home/user/.ateamorg",
+			ProjectDir:  "/projects/myapp/.ateam",
+			WorkDir:     "/projects/myapp",
+			ProjectName: "myapp",
+			Role:        "role security",
+		}
+		got := FormatProjectInfo(p)
+		if !strings.Contains(got, "* reports and reviews: .ateam") {
+			t.Errorf("expected '.ateam' rendering when ProjectDir is directly under WorkDir, got:\n%s", got)
+		}
+	})
+
+	t.Run("ateam in sibling tree renders as ../path", func(t *testing.T) {
+		p := ProjectInfoParams{
+			OrgDir:      "/home/user/.ateamorg",
+			ProjectDir:  "/projects/main/.ateam",
+			WorkDir:     "/projects/worktree-feat",
+			ProjectName: "myapp",
+			Role:        "role security",
+		}
+		got := FormatProjectInfo(p)
+		if !strings.Contains(got, "../main/.ateam") {
+			t.Errorf("expected '../main/.ateam' relative rendering, got:\n%s", got)
+		}
+		// Must not lie by saying ".ateam" when the .ateam is elsewhere.
+		if strings.Contains(got, "* reports and reviews: .ateam\n") {
+			t.Errorf("must not claim '.ateam' when ProjectDir is not under WorkDir, got:\n%s", got)
+		}
+	})
 }

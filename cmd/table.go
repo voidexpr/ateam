@@ -151,6 +151,9 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 	r.Profile = profileName
 	r.ProjectID = env.ProjectID()
 	r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
+	if err := preflightContainerSupportsWorkDir(cc, env); err != nil {
+		return nil, err
+	}
 	ct, err := buildContainer(cc, prof, env.WorkDir, env.ProjectDir, env.OrgDir, env.GitRepoDir, roleID, dockerAutoSetup)
 	if err != nil {
 		return nil, err
@@ -265,11 +268,38 @@ func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runne
 	}
 }
 
+// preflightContainerSupportsWorkDir rejects container profiles when WorkDir
+// is outside the project tree (remote-project / worktree mode). Container
+// support for that case needs (a) mounting env.ProjectDir at a fixed path
+// regardless of host layout and (b) translating template-substituted host
+// paths in the rendered prompt — neither lands cleanly in this refactor.
+// Host mode handles remote WorkDir fine.
+func preflightContainerSupportsWorkDir(cc *runtime.ContainerConfig, env *root.ResolvedEnv) error {
+	if cc == nil || cc.Type == "" || cc.Type == "none" {
+		return nil
+	}
+	if env.ProjectDir == "" || env.WorkDir == "" {
+		return nil
+	}
+	if pathInside(env.WorkDir, env.SourceDir) {
+		return nil
+	}
+	return fmt.Errorf("container profile %q does not yet support running with --work-dir outside the project tree (work-dir %q, project root %q). Use a container=none profile, or run from inside the project", cc.Type, env.WorkDir, env.SourceDir)
+}
+
 func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runner.Runner {
 	// Sandbox grants and Runner.SourceDir follow WorkDir (where the agent
 	// actually runs) — not the parent of .ateam/. This ensures --work-dir
 	// is honored end-to-end: rw to the worktree, ro to the wider git repo.
 	extraWriteDirs := gitWriteDirs(env.WorkDir)
+	// Always grant write access to the project's .ateam directory. In typical
+	// project-local mode this is redundant (it's inside WorkDir), but in
+	// remote-project / worktree mode the agent still writes its runtime
+	// output and per-exec runtime/<id>/ files under env.ProjectDir even
+	// though that path is outside WorkDir.
+	if env.ProjectDir != "" {
+		extraWriteDirs = append(extraWriteDirs, env.ProjectDir)
+	}
 	r := &runner.Runner{
 		Agent:       buildAgent(ac),
 		ProjectDir:  env.ProjectDir,

@@ -77,9 +77,8 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 	cr.CallDB = db
 
-	// auto_setup_prompt.md still hardcodes `.ateam/setup_overview.md` instead
-	// of using {{OUTPUT_FILE}}; the agent writes there directly. No runtime/
-	// canonical promotion is configured here. See plan for the eventual fix.
+	// The agent writes setup_overview.md directly to env.ProjectDir; no
+	// runtime/canonical promotion is needed here.
 	opts := runner.RunOpts{
 		RoleID:     "supervisor",
 		Action:     runner.ActionExec,

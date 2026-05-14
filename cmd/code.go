@@ -196,6 +196,11 @@ func runCode(opts CodeOptions) error {
 	// Inject flags for the supervisor to pass to sub-runs.
 	prompt += "\n\n# Sub-Run Flags\n\nYou MUST pass the following flags to every `ateam exec` command you execute:\n"
 	prompt += "- `--batch " + batch + "` (groups all sub-execs for cost tracking)\n"
+	// --project is required so sub-execs resolve the right .ateam directory
+	// even when the supervisor's cwd is outside the project tree (remote-mode
+	// `ateam code --project /elsewhere`). In project-local mode the value is
+	// redundant but harmless.
+	prompt += "- `--project " + env.SourceDir + "`\n"
 	if opts.Agent != "" {
 		prompt += "- `--agent " + opts.Agent + "`\n"
 	} else {

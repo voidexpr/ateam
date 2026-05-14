@@ -492,3 +492,23 @@ func TestBuildTemplateVarsEmptySourceDir(t *testing.T) {
 		t.Errorf("ProjectDir should be empty: got %q", vars.ProjectDir)
 	}
 }
+
+// TestBuildTemplateVarsProjectFollowsProjectDir verifies that
+// ProjectFullPath/ProjectDir describe the project root (parent of .ateam),
+// not the agent's WorkDir. Regression for remote-project mode where
+// r.SourceDir (= WorkDir) diverges from the project.
+func TestBuildTemplateVarsProjectFollowsProjectDir(t *testing.T) {
+	// Remote-project: agent's WorkDir is /tmp/elsewhere, but the project
+	// lives at /Users/foo/work/myproj.
+	r := &Runner{
+		ProjectDir: "/Users/foo/work/myproj/.ateam",
+		SourceDir:  "/tmp/elsewhere", // agent's cwd in remote mode
+	}
+	vars := BuildTemplateVars(r, RunOpts{}, time.Now(), 0, "claude", "")
+	if vars.ProjectFullPath != "/Users/foo/work/myproj" {
+		t.Errorf("ProjectFullPath = %q, want /Users/foo/work/myproj", vars.ProjectFullPath)
+	}
+	if vars.ProjectDir != "myproj" {
+		t.Errorf("ProjectDir = %q, want myproj (project name, not WorkDir basename)", vars.ProjectDir)
+	}
+}

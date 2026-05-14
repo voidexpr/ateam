@@ -129,7 +129,18 @@ func BuildTemplateVars(r *Runner, opts RunOpts, startedAt time.Time, callID int6
 		ContainerType: r.ContainerType,
 		ContainerName: r.ContainerName,
 	}
-	if r.SourceDir != "" {
+	// ProjectFullPath / ProjectDir describe the project root, NOT the agent's
+	// working directory. Derive from r.ProjectDir (.ateam path) so the values
+	// stay anchored to the project even in remote-project mode where
+	// r.SourceDir (agent cwd) points elsewhere. CONFIG.md documents these as
+	// project-stable, and runtime.hcl uses them for container names, etc.
+	switch {
+	case r.ProjectDir != "":
+		projectRoot := filepath.Dir(r.ProjectDir)
+		vars.ProjectFullPath = projectRoot
+		vars.ProjectDir = filepath.Base(projectRoot)
+	case r.SourceDir != "":
+		// No project context (ad-hoc exec / org-less): fall back to SourceDir.
 		vars.ProjectFullPath = r.SourceDir
 		vars.ProjectDir = filepath.Base(r.SourceDir)
 	}
