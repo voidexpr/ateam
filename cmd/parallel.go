@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/ateam/internal/prompts"
@@ -25,7 +24,6 @@ var (
 	parallelEffort            string
 	parallelMaxBudgetUSD      string
 	parallelMaxBudgetBatch    string
-	parallelWorkDir           string
 	parallelTimeout           int
 	parallelVerbose           bool
 	parallelForce             bool
@@ -66,7 +64,6 @@ func init() {
 	addBudgetFlags(parallelCmd, &parallelMaxBudgetUSD, &parallelMaxBudgetBatch,
 		"per-agent USD spend cap (claude-only; warns on codex)",
 		"stop dispatching new agents once batch cost crosses this USD")
-	parallelCmd.Flags().StringVar(&parallelWorkDir, "work-dir", "", "working directory (defaults to project source dir or cwd)")
 	parallelCmd.Flags().IntVar(&parallelTimeout, "timeout", 0, "timeout in minutes per agent execution")
 	addVerboseFlag(parallelCmd, &parallelVerbose)
 	addForceFlag(parallelCmd, &parallelForce)
@@ -135,15 +132,9 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	}
 	hasProject := env.ProjectDir != "" && env.Config != nil
 
-	workDir := ""
-	if parallelWorkDir != "" {
-		abs, err := filepath.Abs(parallelWorkDir)
-		if err != nil {
-			return fmt.Errorf("cannot resolve work-dir: %w", err)
-		}
-		workDir = abs
-	} else if hasProject {
-		workDir = env.SourceDir
+	workDir, err := resolveWorkDir(workDirFlag, env)
+	if err != nil {
+		return err
 	}
 
 	var r *runner.Runner

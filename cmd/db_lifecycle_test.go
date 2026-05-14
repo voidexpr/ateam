@@ -246,7 +246,7 @@ type execGlobals struct {
 func saveExecGlobals() execGlobals {
 	return execGlobals{
 		org: orgFlag, profile: execProfile, agent: execAgent, role: execRole, model: execModel,
-		workDir: execWorkDir, agentArgs: execAgentArgs, batch: execBatch,
+		workDir: workDirFlag, agentArgs: execAgentArgs, batch: execBatch,
 		containerName: execContainerName, noStream: execNoStream, noSummary: execNoSummary,
 		quiet: execQuiet, verbose: execVerbose, dryRun: execDryRun, dockerAutoSetup: execDockerAutoSetup,
 	}
@@ -258,7 +258,7 @@ func (g execGlobals) restore() {
 	execAgent = g.agent
 	execRole = g.role
 	execModel = g.model
-	execWorkDir = g.workDir
+	workDirFlag = g.workDir
 	execAgentArgs = g.agentArgs
 	execBatch = g.batch
 	execContainerName = g.containerName

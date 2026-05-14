@@ -98,3 +98,35 @@ func TestHeadHashNonRepo(t *testing.T) {
 		t.Errorf("HeadHash on non-repo dir returned %q, want empty", hash)
 	}
 }
+
+func TestTopLevelInRepo(t *testing.T) {
+	dir := initTempRepo(t)
+	// Resolve symlinks: macOS may put TempDir under /var/folders which is a
+	// symlink to /private/var/folders; git's --show-toplevel returns the
+	// resolved path. Compare against the same to avoid spurious diffs.
+	wantResolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := TopLevel(dir); got != wantResolved {
+		t.Errorf("TopLevel(%q) = %q, want %q", dir, got, wantResolved)
+	}
+	// A subdirectory of the repo should resolve to the same top-level.
+	sub := filepath.Join(dir, "subdir")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if got := TopLevel(sub); got != wantResolved {
+		t.Errorf("TopLevel(subdir) = %q, want %q", got, wantResolved)
+	}
+}
+
+func TestTopLevelNonRepo(t *testing.T) {
+	dir := t.TempDir()
+	if got := TopLevel(dir); got != "" {
+		t.Errorf("TopLevel on non-repo returned %q, want empty", got)
+	}
+	if got := TopLevel(""); got != "" {
+		t.Errorf("TopLevel(\"\") returned %q, want empty", got)
+	}
+}

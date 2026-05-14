@@ -64,14 +64,17 @@ func TestIntegration_BasicProject(t *testing.T) {
 		t.Errorf("git.remote = %q, want %q", cfg.Git.RemoteOriginURL, "https://foobar/myproj.git")
 	}
 
-	// Verify resolution: source = project path, git = project path.
+	// Verify resolution: source = project path. GitRepoDir is no longer
+	// derived from config.Git.Repo — it now comes from `git rev-parse` in
+	// WorkDir at resolution time. The tmp fixture isn't a real git repo,
+	// so GitRepoDir is "" here. Real-repo behavior is covered in gitutil tests.
 	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
 	env.populateFromConfig(projDir, cfg)
 	if env.SourceDir != projPath {
 		t.Errorf("SourceDir = %q, want %q", env.SourceDir, projPath)
 	}
-	if env.GitRepoDir != projPath {
-		t.Errorf("GitRepoDir = %q, want %q", env.GitRepoDir, projPath)
+	if env.GitRepoDir != "" {
+		t.Errorf("GitRepoDir = %q, want \"\" (not a git repo)", env.GitRepoDir)
 	}
 
 	// Verify logs directories were created under .ateam/.
@@ -160,15 +163,16 @@ func TestIntegration_MonorepoSubdir(t *testing.T) {
 		t.Errorf("git.repo = %q, want %q", cfg.Git.Repo, "..")
 	}
 
-	// Verify resolution: source = subdir, git repo = parent dir.
+	// Verify resolution: source = subdir. GitRepoDir is now derived from
+	// `git rev-parse` in WorkDir, not from config.Git.Repo. The tmp fixture
+	// isn't a real git repo, so GitRepoDir is "" here.
 	env := &ResolvedEnv{OrgDir: orgDir, ProjectDir: projDir}
 	env.populateFromConfig(projDir, cfg)
 	if env.SourceDir != projPath {
 		t.Errorf("SourceDir = %q, want %q", env.SourceDir, projPath)
 	}
-	wantGit := filepath.Join(base, "level1", "myproj")
-	if env.GitRepoDir != wantGit {
-		t.Errorf("GitRepoDir = %q, want %q", env.GitRepoDir, wantGit)
+	if env.GitRepoDir != "" {
+		t.Errorf("GitRepoDir = %q, want \"\" (not a git repo)", env.GitRepoDir)
 	}
 
 	// Only "security" should be enabled.

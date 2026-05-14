@@ -223,17 +223,22 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	agentName := r.Agent.Name()
 	model := agent.NormalizeModel(extractModel(r.Agent))
 	callID, err := r.CallDB.InsertCall(&calldb.Call{
-		ProjectID:    r.ProjectID,
-		Profile:      r.Profile,
-		Agent:        agentName,
-		Container:    r.ContainerType,
-		Action:       opts.Action,
-		Role:         opts.RoleID,
-		Batch:        opts.Batch,
-		Model:        model,
-		PromptHash:   hashPrompt(prompt),
-		StartedAt:    startedAt,
+		ProjectID:  r.ProjectID,
+		Profile:    r.Profile,
+		Agent:      agentName,
+		Container:  r.ContainerType,
+		Action:     opts.Action,
+		Role:       opts.RoleID,
+		Batch:      opts.Batch,
+		Model:      model,
+		PromptHash: hashPrompt(prompt),
+		StartedAt:  startedAt,
+		// note: resolve from work-dir, not GitRepoDir or AteamDir. The recorded
+		// HEAD must reflect the code the agent actually operated on; centralizing
+		// this via GitRepoDir would record a misleading hash for worktree runs or
+		// external-repo --work-dir invocations.
 		GitStartHash: gitutil.HeadHash(effectiveWorkDir(opts)),
+		WorkDir:      effectiveWorkDir(opts),
 	})
 	if err != nil {
 		return failPreInsert(fmt.Errorf("call tracking insert failed: %w", err))
@@ -782,7 +787,10 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 			Model:             resultModel,
 			PeakContextTokens: summary.PeakContextTokens,
 			ContextWindow:     summary.ContextWindow,
-			GitEndHash:        gitutil.HeadHash(effectiveWorkDir(opts)),
+			// note: resolve from work-dir. See GitStartHash note above — the
+			// recorded HEAD must reflect the agent's actual work-dir, not a
+			// project-wide GitRepoDir or AteamDir.
+			GitEndHash: gitutil.HeadHash(effectiveWorkDir(opts)),
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: call tracking update failed: %v\n", err)
 		}

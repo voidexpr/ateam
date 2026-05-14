@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -62,7 +63,8 @@ CREATE TABLE IF NOT EXISTS agent_execs (
   pid                INTEGER NOT NULL DEFAULT 0,
   container_id       TEXT NOT NULL DEFAULT '',
   git_start_hash     TEXT NOT NULL DEFAULT '',
-  git_end_hash       TEXT NOT NULL DEFAULT ''
+  git_end_hash       TEXT NOT NULL DEFAULT '',
+  work_dir           TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_execs_started ON agent_execs(started_at);
@@ -70,6 +72,7 @@ CREATE INDEX IF NOT EXISTS idx_execs_project ON agent_execs(project_id, started_
 CREATE INDEX IF NOT EXISTS idx_execs_action ON agent_execs(action, started_at);
 CREATE INDEX IF NOT EXISTS idx_execs_batch ON agent_execs(batch);
 CREATE INDEX IF NOT EXISTS idx_execs_role ON agent_execs(role, started_at);
+CREATE INDEX IF NOT EXISTS idx_execs_work_dir ON agent_execs(work_dir);
 `
 
 type Call struct {
@@ -86,6 +89,7 @@ type Call struct {
 	StreamFile   string
 	OutputFile   string
 	GitStartHash string
+	WorkDir      string // absolute path of the agent's working directory
 }
 
 type CallResult struct {
@@ -255,6 +259,7 @@ func migrate(db *sql.DB, dbPath string) error {
 	hasBatch := false
 	hasGitStartHash := false
 	hasGitEndHash := false
+	hasWorkDir := false
 	for tRows.Next() {
 		var cid int
 		var name, typ string
@@ -286,6 +291,8 @@ func migrate(db *sql.DB, dbPath string) error {
 			hasGitStartHash = true
 		case "git_end_hash":
 			hasGitEndHash = true
+		case "work_dir":
+			hasWorkDir = true
 		}
 	}
 	tRows.Close()
@@ -343,13 +350,104 @@ func migrate(db *sql.DB, dbPath string) error {
 			return err
 		}
 	}
+	if !hasWorkDir {
+		if _, err := tx.Exec("ALTER TABLE agent_execs ADD COLUMN work_dir TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec("CREATE INDEX IF NOT EXISTS idx_execs_work_dir ON agent_execs(work_dir)"); err != nil {
+			return err
+		}
+	}
 
 	// Rename the legacy "run" action to "exec" to match the renamed CLI command.
 	if _, err := tx.Exec("UPDATE agent_execs SET action = ? WHERE action = ?", "exec", "run"); err != nil {
 		return err
 	}
 
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// Backfill work_dir from logs/<id>/cmd.md for any rows that pre-date the
+	// column. dbPath is .ateam/state.sqlite, so its parent is .ateam itself.
+	if err := backfillWorkDir(db, filepath.Dir(dbPath)); err != nil {
+		// Non-fatal: backfill failures shouldn't block Open(). Rows just stay
+		// empty and can be re-backfilled later or filled in lazily by readers.
+		fmt.Fprintf(os.Stderr, "Warning: work_dir backfill incomplete: %v\n", err)
+	}
+
+	return nil
+}
+
+// backfillWorkDir scans agent_execs for rows with empty work_dir and parses
+// the `* cwd: <path>` line from <ateamDir>/logs/<id>/cmd.md. cmd.md's cwd is
+// always absolute (runner.go writes it via os.Getwd or an absolutized flag),
+// so we store it verbatim. Missing or unparseable cmd.md leaves the row empty.
+// Updates run inside a single transaction so partial failures roll back.
+func backfillWorkDir(db *sql.DB, ateamDir string) error {
+	rows, err := db.Query(`SELECT id FROM agent_execs WHERE work_dir = ''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type pending struct {
+		id  int64
+		cwd string
+	}
+	var updates []pending
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		cmdPath := filepath.Join(ateamDir, "logs", strconv.FormatInt(id, 10), "cmd.md")
+		cwd := parseCwdFromCmdMD(cmdPath)
+		if cwd == "" {
+			continue
+		}
+		updates = append(updates, pending{id: id, cwd: cwd})
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare("UPDATE agent_execs SET work_dir = ? WHERE id = ?")
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+
+	for _, u := range updates {
+		if _, err := stmt.Exec(u.cwd, u.id); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("update id=%d: %w", u.id, err)
+		}
+	}
 	return tx.Commit()
+}
+
+// parseCwdFromCmdMD reads cmd.md and returns the value of the first `* cwd: …`
+// line. Returns "" on any read or parse failure.
+func parseCwdFromCmdMD(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if v, ok := strings.CutPrefix(line, "* cwd: "); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func (c *CallDB) InsertCall(call *Call) (int64, error) {
@@ -357,12 +455,12 @@ func (c *CallDB) InsertCall(call *Call) (int64, error) {
 		INSERT INTO agent_execs (
 			project_id, profile, agent, container, action, role,
 			batch, model, prompt_hash, started_at, stream_file, output_file,
-			git_start_hash
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			git_start_hash, work_dir
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		call.ProjectID, call.Profile, call.Agent, call.Container,
 		call.Action, call.Role, call.Batch, call.Model,
 		call.PromptHash, call.StartedAt.Format(time.RFC3339), call.StreamFile,
-		call.OutputFile, call.GitStartHash,
+		call.OutputFile, call.GitStartHash, call.WorkDir,
 	)
 	if err != nil {
 		return 0, err

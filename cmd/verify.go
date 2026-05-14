@@ -59,6 +59,7 @@ Example:
   ateam verify
   ateam verify --extra-prompt "Pay extra attention to migrations"
   ateam verify --dry-run`,
+	PreRunE: requireGitRepoPreRunE,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runVerify(VerifyOptions{
 			ExtraPrompt:     verifyExtraPrompt,
@@ -158,12 +159,17 @@ func runVerify(opts VerifyOptions) error {
 		}
 	}
 
+	workDir, err := resolveWorkDir(workDirFlag, env)
+	if err != nil {
+		return err
+	}
+
 	runOpts := runner.RunOpts{
 		RoleID:           "supervisor",
 		Action:           runner.ActionVerify,
 		OutputKind:       runner.OutputKindVerify,
 		CanonicalDestDir: supervisorDir,
-		WorkDir:          env.SourceDir,
+		WorkDir:          workDir,
 		TimeoutMin:       timeout,
 		Verbose:          opts.Verbose,
 		StartedAt:        startedAt,

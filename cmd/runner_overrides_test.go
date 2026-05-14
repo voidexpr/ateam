@@ -1,12 +1,28 @@
 package cmd
 
 import (
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
+	"github.com/spf13/cobra"
 )
+
+// filepathEqual compares paths after symlink resolution so macOS
+// /var/folders vs /private/var/folders doesn't cause spurious diffs.
+func filepathEqual(a, b string) bool {
+	ra, _ := filepath.EvalSymlinks(a)
+	rb, _ := filepath.EvalSymlinks(b)
+	return ra == rb
+}
+
+func newDummyCmd(name string) *cobra.Command {
+	return &cobra.Command{Use: name}
+}
 
 // TestApplyRunnerOverridesEmpty verifies that an empty RunnerOverrides leaves
 // the agent's tunables untouched and only marks ContainerNameSource so the
@@ -91,5 +107,101 @@ func TestApplyRunnerOverridesMaxBudgetError(t *testing.T) {
 	o := RunnerOverrides{MaxBudgetUSD: "5"}
 	if err := applyRunnerOverrides(r, &root.ResolvedEnv{}, o, runner.ActionExec); err == nil {
 		t.Fatal("expected error when codex action=exec receives --max-budget-usd, got nil")
+	}
+}
+
+// TestResolveWorkDirNoFlag confirms the helper returns env.WorkDir unchanged
+// when --work-dir is not set.
+func TestResolveWorkDirNoFlag(t *testing.T) {
+	saved := workDirFlag
+	t.Cleanup(func() { workDirFlag = saved })
+	workDirFlag = ""
+
+	env := &root.ResolvedEnv{WorkDir: "/some/preset/path"}
+	got, err := resolveWorkDir("", env)
+	if err != nil {
+		t.Fatalf("resolveWorkDir: %v", err)
+	}
+	if got != "/some/preset/path" {
+		t.Errorf("got %q, want %q", got, "/some/preset/path")
+	}
+	if env.WorkDir != "/some/preset/path" {
+		t.Errorf("env.WorkDir mutated: got %q", env.WorkDir)
+	}
+}
+
+// TestResolveWorkDirWithFlag confirms the helper invokes env.OverrideWorkDir,
+// which sets WorkDir and re-derives GitRepoDir.
+func TestResolveWorkDirWithFlag(t *testing.T) {
+	saved := workDirFlag
+	t.Cleanup(func() { workDirFlag = saved })
+
+	tmp := t.TempDir()
+	env := &root.ResolvedEnv{WorkDir: "/old/path", GitRepoDir: "/old/repo"}
+
+	got, err := resolveWorkDir(tmp, env)
+	if err != nil {
+		t.Fatalf("resolveWorkDir: %v", err)
+	}
+	// Resolve symlinks for macOS /var/folders → /private/var/folders.
+	// The function calls filepath.Abs which doesn't follow symlinks, so the
+	// returned path matches the absolutised input directly.
+	if got != tmp && !filepathEqual(got, tmp) {
+		t.Errorf("got %q, want %q", got, tmp)
+	}
+	if env.WorkDir != got {
+		t.Errorf("env.WorkDir = %q, want %q", env.WorkDir, got)
+	}
+	// tmp is not a git repo, so GitRepoDir must be cleared.
+	if env.GitRepoDir != "" {
+		t.Errorf("GitRepoDir = %q, want \"\" (non-repo tmp)", env.GitRepoDir)
+	}
+}
+
+// TestRequireGitRepoPreRunE_NonRepo verifies the PreRunE rejects work-dirs
+// that aren't inside a git repo.
+func TestRequireGitRepoPreRunE_NonRepo(t *testing.T) {
+	saved := workDirFlag
+	t.Cleanup(func() { workDirFlag = saved })
+
+	workDirFlag = t.TempDir() // empty dir, not a git repo
+
+	dummy := newDummyCmd("report")
+	err := requireGitRepoPreRunE(dummy, nil)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "report") {
+		t.Errorf("error %q should mention command name", err)
+	}
+	if !strings.Contains(err.Error(), "git repo") {
+		t.Errorf("error %q should mention git repo requirement", err)
+	}
+}
+
+// TestRequireGitRepoPreRunE_InRepo verifies the PreRunE allows real git repos.
+func TestRequireGitRepoPreRunE_InRepo(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git CLI required")
+	}
+	saved := workDirFlag
+	t.Cleanup(func() { workDirFlag = saved })
+
+	tmp := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"},
+	} {
+		c := exec.Command("git", args...)
+		c.Dir = tmp
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	workDirFlag = tmp
+
+	dummy := newDummyCmd("report")
+	if err := requireGitRepoPreRunE(dummy, nil); err != nil {
+		t.Errorf("unexpected error: %v", err)
 	}
 }

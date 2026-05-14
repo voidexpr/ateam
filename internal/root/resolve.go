@@ -19,12 +19,22 @@ const (
 )
 
 // ResolvedEnv holds all resolved paths for the org + project environment.
+//
+// Three orthogonal base dirs drive everything:
+//   - OrgDir:    where the .ateamorg/ lives (org config + project registry)
+//   - ProjectDir: the .ateam/ directory (state, config, prompts, artifacts)
+//   - WorkDir:   the agent's cwd (what code it reads/edits)
+//
+// SourceDir (parent of .ateam/) is kept for legacy callers but should be
+// treated as informational; WorkDir is what the agent actually runs in.
+// GitRepoDir is derived from WorkDir at resolution time (never from config).
 type ResolvedEnv struct {
 	OrgDir      string // absolute path to .ateamorg/ (empty in org-less mode)
 	ProjectDir  string // absolute path to .ateam/
 	ProjectName string // from config.toml
-	SourceDir   string // absolute path to project root (parent of .ateam/)
-	GitRepoDir  string // resolved from config git.repo
+	SourceDir   string // absolute path to project root (parent of .ateam/) — informational
+	WorkDir     string // absolute path to the agent's working directory
+	GitRepoDir  string // `git rev-parse --show-toplevel` from WorkDir; "" if not a repo
 	Config      *config.Config
 }
 
@@ -122,9 +132,38 @@ func (e *ResolvedEnv) populateFromConfig(projectDir string, cfg *config.Config) 
 	e.Config = cfg
 	e.ProjectName = cfg.Project.Name
 	e.SourceDir = filepath.Dir(projectDir) // project root = parent of .ateam/
-	if cfg.Git.Repo != "" {
-		e.GitRepoDir = resolvePath(e.SourceDir, cfg.Git.Repo)
+	// note: GitRepoDir is NOT derived from config.Git.Repo here. It is set later
+	// from WorkDir via gitutil.TopLevel — git is properly a function of "where
+	// the agent operates," not "where state lives." config.Git.Repo is kept in
+	// config.toml for informational/forensic use but never read at runtime.
+}
+
+// resolveWorkDir populates WorkDir and GitRepoDir from an explicit override or
+// the current working directory. Empty override → defaults to os.Getwd().
+// GitRepoDir is derived from WorkDir via gitutil.TopLevel; "" if WorkDir is
+// not inside a git repo or the git CLI is unavailable. Skips the git subprocess
+// when WorkDir is unchanged from a prior call.
+func (e *ResolvedEnv) resolveWorkDir(workDirOverride string) error {
+	target := mustGetwd()
+	if workDirOverride != "" {
+		abs, err := filepath.Abs(workDirOverride)
+		if err != nil {
+			return fmt.Errorf("cannot resolve --work-dir: %w", err)
+		}
+		target = abs
 	}
+	if e.WorkDir == target {
+		return nil
+	}
+	e.WorkDir = target
+	e.GitRepoDir = gitutil.TopLevel(target)
+	return nil
+}
+
+// OverrideWorkDir resets WorkDir to the given path and re-derives GitRepoDir.
+// Used by cmd packages after parsing the persistent --work-dir flag.
+func (e *ResolvedEnv) OverrideWorkDir(workDirOverride string) error {
+	return e.resolveWorkDir(workDirOverride)
 }
 
 // FindOrg walks up from cwd looking for a .ateamorg directory.
@@ -227,6 +266,9 @@ func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
 		ProjectDir: projectDir,
 	}
 	env.populateFromConfig(projectDir, cfg)
+	if err := env.resolveWorkDir(""); err != nil {
+		return nil, err
+	}
 
 	return env, nil
 }
@@ -242,6 +284,9 @@ func LookupFrom(start string) (*ResolvedEnv, error) {
 	env := &ResolvedEnv{
 		OrgDir: orgDir,
 	}
+	// Set a sensible default WorkDir so callers always have one, even when
+	// project discovery fails. cmd code may override via env.OverrideWorkDir.
+	_ = env.resolveWorkDir("")
 
 	projectDir, err := discoverProject(orgDir, cwd)
 	if err != nil {

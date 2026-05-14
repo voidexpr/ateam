@@ -1127,3 +1127,197 @@ func TestRenameProject(t *testing.T) {
 		t.Errorf("expected other project stream_file unchanged, got %q", sf)
 	}
 }
+
+func TestWorkDirRoundtrips(t *testing.T) {
+	db := testDB(t)
+	id, err := db.InsertCall(&Call{
+		ProjectID: "myproject",
+		Agent:     "claude",
+		Action:    "exec",
+		StartedAt: time.Now(),
+		WorkDir:   "/Users/test/myproj/worktree",
+	})
+	if err != nil {
+		t.Fatalf("InsertCall: %v", err)
+	}
+
+	rows, err := db.RecentRuns(RecentFilter{Limit: 1})
+	if err != nil {
+		t.Fatalf("RecentRuns: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].WorkDir != "/Users/test/myproj/worktree" {
+		t.Errorf("WorkDir = %q, want %q", rows[0].WorkDir, "/Users/test/myproj/worktree")
+	}
+
+	// RecentFilter.WorkDir narrows the query.
+	rows, err = db.RecentRuns(RecentFilter{Limit: 10, WorkDir: "/Users/test/myproj/worktree"})
+	if err != nil {
+		t.Fatalf("RecentRuns(WorkDir): %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != id {
+		t.Errorf("WorkDir filter returned %d rows, want 1 (id=%d)", len(rows), id)
+	}
+
+	rows, err = db.RecentRuns(RecentFilter{Limit: 10, WorkDir: "/no/such/path"})
+	if err != nil {
+		t.Fatalf("RecentRuns(WorkDir nomatch): %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("WorkDir non-match returned %d rows, want 0", len(rows))
+	}
+}
+
+func TestBackfillWorkDir(t *testing.T) {
+	// Lay out a fake .ateam/state.sqlite with logs/<id>/cmd.md fixtures.
+	ateamDir := t.TempDir()
+	dbPath := filepath.Join(ateamDir, "state.sqlite")
+
+	// Open the DB once to create the schema (which already has work_dir).
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Insert two rows: one we'll leave with empty work_dir, one with a value.
+	now := time.Now()
+	idEmpty, err := db.InsertCall(&Call{ProjectID: "p", Agent: "claude", Action: "exec", StartedAt: now})
+	if err != nil {
+		t.Fatalf("InsertCall: %v", err)
+	}
+	idHas, err := db.InsertCall(&Call{ProjectID: "p", Agent: "claude", Action: "exec", StartedAt: now, WorkDir: "/already/set"})
+	if err != nil {
+		t.Fatalf("InsertCall: %v", err)
+	}
+
+	// Write cmd.md for the empty row.
+	logsDir := filepath.Join(ateamDir, "logs", "1") // idEmpty == 1 in a fresh DB
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cmdMD := "# Runtime\n* agent: claude\n* action: exec\n* cwd: /Users/test/worktree-from-cmdmd\n"
+	if err := os.WriteFile(filepath.Join(logsDir, "cmd.md"), []byte(cmdMD), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run the backfill directly (Open already ran it once, but the cmd.md
+	// fixture wasn't there yet — re-running idempotently re-reads).
+	if err := backfillWorkDir(db.db, ateamDir); err != nil {
+		t.Fatalf("backfillWorkDir: %v", err)
+	}
+
+	// Verify: idEmpty should now have the parsed cwd; idHas is untouched.
+	rows, err := db.RecentRuns(RecentFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("RecentRuns: %v", err)
+	}
+	byID := map[int64]RecentRow{}
+	for _, r := range rows {
+		byID[r.ID] = r
+	}
+	if got := byID[idEmpty].WorkDir; got != "/Users/test/worktree-from-cmdmd" {
+		t.Errorf("backfilled WorkDir = %q, want %q", got, "/Users/test/worktree-from-cmdmd")
+	}
+	if got := byID[idHas].WorkDir; got != "/already/set" {
+		t.Errorf("pre-set WorkDir was overwritten: got %q, want %q", got, "/already/set")
+	}
+	db.Close()
+}
+
+func TestBackfillWorkDirHandlesMissingCmdMD(t *testing.T) {
+	ateamDir := t.TempDir()
+	dbPath := filepath.Join(ateamDir, "state.sqlite")
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	// Row with no cmd.md anywhere.
+	if _, err := db.InsertCall(&Call{ProjectID: "p", Agent: "claude", Action: "exec", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("InsertCall: %v", err)
+	}
+
+	if err := backfillWorkDir(db.db, ateamDir); err != nil {
+		t.Errorf("backfillWorkDir should tolerate missing cmd.md, got: %v", err)
+	}
+	rows, _ := db.RecentRuns(RecentFilter{Limit: 1})
+	if rows[0].WorkDir != "" {
+		t.Errorf("WorkDir = %q, want '' when cmd.md missing", rows[0].WorkDir)
+	}
+}
+
+func TestMigrationAddsWorkDirColumnToOldSchema(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "state.sqlite")
+
+	// Build a "pre-work_dir" schema by hand: the full current schema, minus
+	// the work_dir column and its index.
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	oldSchema := `CREATE TABLE agent_execs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		project_id TEXT NOT NULL DEFAULT '',
+		profile TEXT NOT NULL DEFAULT '',
+		agent TEXT NOT NULL DEFAULT '',
+		container TEXT NOT NULL DEFAULT 'none',
+		action TEXT NOT NULL DEFAULT '',
+		role TEXT NOT NULL DEFAULT '',
+		batch TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		prompt_hash TEXT NOT NULL DEFAULT '',
+		started_at TEXT NOT NULL,
+		stream_file TEXT NOT NULL DEFAULT '',
+		output_file TEXT NOT NULL DEFAULT '',
+		ended_at TEXT,
+		duration_ms INTEGER,
+		exit_code INTEGER,
+		is_error INTEGER NOT NULL DEFAULT 0,
+		error_message TEXT NOT NULL DEFAULT '',
+		cost_usd REAL,
+		input_tokens INTEGER,
+		output_tokens INTEGER,
+		cache_read_tokens INTEGER,
+		cache_write_tokens INTEGER,
+		turns INTEGER,
+		pid INTEGER NOT NULL DEFAULT 0,
+		container_id TEXT NOT NULL DEFAULT '',
+		git_start_hash TEXT NOT NULL DEFAULT '',
+		git_end_hash TEXT NOT NULL DEFAULT '',
+		peak_context_tokens INTEGER,
+		context_window INTEGER
+	);`
+	if _, err := raw.Exec(oldSchema); err != nil {
+		t.Fatalf("create old schema: %v", err)
+	}
+	if _, err := raw.Exec("INSERT INTO agent_execs (project_id, action, started_at) VALUES ('p', 'exec', ?)", time.Now().Format(time.RFC3339)); err != nil {
+		t.Fatalf("seed row: %v", err)
+	}
+	raw.Close()
+
+	// Now Open(): migration must ALTER TABLE ADD COLUMN work_dir and create the index.
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	// Column must exist (default '').
+	var workDir string
+	if err := db.db.QueryRow("SELECT COALESCE(work_dir,'') FROM agent_execs LIMIT 1").Scan(&workDir); err != nil {
+		t.Fatalf("read work_dir: %v", err)
+	}
+	if workDir != "" {
+		t.Errorf("expected empty default, got %q", workDir)
+	}
+
+	// Index must exist.
+	var indexName string
+	row := db.db.QueryRow("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_execs_work_dir'")
+	if err := row.Scan(&indexName); err != nil {
+		t.Errorf("idx_execs_work_dir not created: %v", err)
+	}
+}

@@ -69,3 +69,20 @@ func HeadHash(dir string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// TopLevel returns the absolute path of the git repo containing dir.
+// Returns "" if git CLI is missing, dir is not in a repo, or the call fails.
+// For a git worktree, this returns the worktree's own root (worktrees are
+// first-class git roots that share infrastructure via `--git-common-dir`).
+func TopLevel(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}

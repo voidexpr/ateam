@@ -37,6 +37,7 @@ type RecentRow struct {
 	ContextWindow     int
 	GitStartHash      string
 	GitEndHash        string
+	WorkDir           string
 }
 
 type RecentFilter struct {
@@ -46,6 +47,7 @@ type RecentFilter struct {
 	Agent     string   // single agent (legacy); ignored when Agents is set
 	Agents    []string // any-of filter; pushed to SQL as `agent IN (...)`
 	Batch     string
+	WorkDir   string // exact match on work_dir; empty disables the filter
 	Limit     int
 }
 
@@ -80,6 +82,10 @@ func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
 		where = append(where, "batch = ?")
 		args = append(args, f.Batch)
 	}
+	if f.WorkDir != "" {
+		where = append(where, "work_dir = ?")
+		args = append(args, f.WorkDir)
+	}
 
 	q := "SELECT " + recentCols + " FROM agent_execs"
 	if len(where) > 0 {
@@ -112,12 +118,12 @@ func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
 	return results, rows.Err()
 }
 
-const recentCols = "id, project_id, profile, COALESCE(agent,''), COALESCE(container,''), action, role, batch, model, started_at, COALESCE(ended_at,''), COALESCE(duration_ms,0), COALESCE(exit_code,0), is_error, COALESCE(error_message,''), COALESCE(cost_usd,0), COALESCE(input_tokens,0), COALESCE(output_tokens,0), COALESCE(cache_read_tokens,0), COALESCE(cache_write_tokens,0), COALESCE(turns,0), COALESCE(pid,0), COALESCE(container_id,''), COALESCE(stream_file,''), COALESCE(output_file,''), COALESCE(peak_context_tokens,0), COALESCE(context_window,0), COALESCE(git_start_hash,''), COALESCE(git_end_hash,'')"
+const recentCols = "id, project_id, profile, COALESCE(agent,''), COALESCE(container,''), action, role, batch, model, started_at, COALESCE(ended_at,''), COALESCE(duration_ms,0), COALESCE(exit_code,0), is_error, COALESCE(error_message,''), COALESCE(cost_usd,0), COALESCE(input_tokens,0), COALESCE(output_tokens,0), COALESCE(cache_read_tokens,0), COALESCE(cache_write_tokens,0), COALESCE(turns,0), COALESCE(pid,0), COALESCE(container_id,''), COALESCE(stream_file,''), COALESCE(output_file,''), COALESCE(peak_context_tokens,0), COALESCE(context_window,0), COALESCE(git_start_hash,''), COALESCE(git_end_hash,''), COALESCE(work_dir,'')"
 
 func scanRecentRow(rows *sql.Rows) (RecentRow, error) {
 	var r RecentRow
 	var isErr int
-	err := rows.Scan(&r.ID, &r.ProjectID, &r.Profile, &r.Agent, &r.Container, &r.Action, &r.Role, &r.Batch, &r.Model, &r.StartedAt, &r.EndedAt, &r.DurationMS, &r.ExitCode, &isErr, &r.ErrorMessage, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens, &r.Turns, &r.PID, &r.ContainerID, &r.StreamFile, &r.OutputFile, &r.PeakContextTokens, &r.ContextWindow, &r.GitStartHash, &r.GitEndHash)
+	err := rows.Scan(&r.ID, &r.ProjectID, &r.Profile, &r.Agent, &r.Container, &r.Action, &r.Role, &r.Batch, &r.Model, &r.StartedAt, &r.EndedAt, &r.DurationMS, &r.ExitCode, &isErr, &r.ErrorMessage, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens, &r.Turns, &r.PID, &r.ContainerID, &r.StreamFile, &r.OutputFile, &r.PeakContextTokens, &r.ContextWindow, &r.GitStartHash, &r.GitEndHash, &r.WorkDir)
 	r.IsError = isErr != 0
 	return r, err
 }

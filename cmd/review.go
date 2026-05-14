@@ -70,6 +70,7 @@ Example:
   ateam review
   ateam review --extra-prompt "Focus on security findings"
   ateam review --prompt @custom_review.md`,
+	PreRunE: requireGitRepoPreRunE,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		maxAge, err := parseMaxAge(reviewMaxAge)
 		if err != nil {
@@ -227,12 +228,17 @@ func runReview(opts ReviewOptions) error {
 		}
 	}
 
+	workDir, err := resolveWorkDir(workDirFlag, env)
+	if err != nil {
+		return err
+	}
+
 	runOpts := runner.RunOpts{
 		RoleID:           "supervisor",
 		Action:           runner.ActionReview,
 		OutputKind:       runner.OutputKindReview,
 		CanonicalDestDir: supervisorDir,
-		WorkDir:          env.SourceDir,
+		WorkDir:          workDir,
 		TimeoutMin:       timeout,
 		Verbose:          opts.Verbose,
 		StartedAt:        startedAt,

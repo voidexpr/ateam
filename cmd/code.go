@@ -85,6 +85,7 @@ Example:
   ateam code --review @custom_review.md
   ateam code --management @custom_management.md
   ateam code --dry-run`,
+	PreRunE: requireGitRepoPreRunE,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runCode(CodeOptions{
 			Review:            codeReview,
@@ -265,12 +266,17 @@ func runCode(opts CodeOptions) error {
 		}
 	}
 
+	workDir, err := resolveWorkDir(workDirFlag, env)
+	if err != nil {
+		return err
+	}
+
 	runOpts := runner.RunOpts{
 		RoleID:           "supervisor",
 		Action:           runner.ActionCode,
 		OutputKind:       runner.OutputKindExecutionReport,
 		CanonicalDestDir: filepath.Join(supervisorDir, "code", "{{EXEC_ID}}"),
-		WorkDir:          env.SourceDir,
+		WorkDir:          workDir,
 		TimeoutMin:       timeout,
 		Verbose:          opts.Verbose,
 		Batch:            batch,

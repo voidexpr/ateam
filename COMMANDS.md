@@ -10,6 +10,9 @@ All commands accept:
 |------|-------|-------------|
 | `--org PATH` | `-o` | Organization path override (skips auto-discovery) |
 | `--project NAME` | `-p` | Project name override (skips auto-discovery) |
+| `--work-dir PATH` |       | Agent working directory (defaults to cwd). Independent of `--project` — set it to run the agent in a worktree while keeping `.ateam/` state elsewhere. |
+
+`report`, `code`, `review`, `verify`, and `all` require `--work-dir` (or cwd) to be inside a git repo or worktree; `exec` and `parallel` work in any directory.
 
 ## Commands
 
@@ -381,7 +384,6 @@ echo "still works" | ateam exec -                # explicit "-"
 | `--agent NAME` | Agent name from runtime.hcl (mutually exclusive with --profile) |
 | `--model MODEL` | Model override |
 | `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](CONFIG.md#effort-levels)) |
-| `--work-dir PATH` | Working directory |
 | `--agent-args "ARGS"` | Extra args passed to the agent CLI |
 | `--extra-prompt TEXT` | Additional instructions appended after the main prompt (text or `@filepath`) |
 | `--batch ID` | Group related agent_execs |
@@ -420,7 +422,6 @@ Each positional argument is a prompt (text or `@filepath`). Agent execs run conc
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
 | `--model MODEL` | Model override |
 | `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](CONFIG.md#effort-levels)) |
-| `--work-dir PATH` | Working directory (defaults to project source dir or cwd) |
 | `--timeout MINUTES` | Timeout per agent exec |
 | `--max-budget-usd USD` | Per-agent USD spend cap (claude-only; warns on codex) |
 | `--max-budget-usd-batch USD` | Stop dispatching new agents once batch cost crosses this USD |

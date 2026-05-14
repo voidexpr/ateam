@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -25,7 +24,6 @@ var (
 	execMaxBudgetBatch  string
 	execExtraPrompt     string
 	execNoStream        bool
-	execWorkDir         string
 	execNoSummary       bool
 	execQuiet           bool
 	execAgentArgs       string
@@ -78,7 +76,6 @@ func init() {
 	execCmd.Flags().BoolVar(&execNoStream, "no-stream", false, "disable progress updates during execution")
 	execCmd.Flags().BoolVar(&execNoSummary, "no-summary", false, "disable run summary after completion")
 	execCmd.Flags().BoolVar(&execQuiet, "quiet", false, "disable both streaming and summary (same as --no-stream --no-summary)")
-	execCmd.Flags().StringVar(&execWorkDir, "work-dir", "", "working directory (defaults to project source dir or cwd)")
 	execCmd.Flags().StringVar(&execAgentArgs, "agent-args", "", "extra args passed to the agent CLI (appended after configured args)")
 	execCmd.Flags().StringVar(&execBatch, "batch", "", "group related agent_execs (e.g. all execs in one ateam code run)")
 	addVerboseFlag(execCmd, &execVerbose)
@@ -124,15 +121,9 @@ func runExec(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	workDir := ""
-	if execWorkDir != "" {
-		abs, err := filepath.Abs(execWorkDir)
-		if err != nil {
-			return fmt.Errorf("cannot resolve work-dir: %w", err)
-		}
-		workDir = abs
-	} else if hasProject {
-		workDir = env.SourceDir
+	workDir, err := resolveWorkDir(workDirFlag, env)
+	if err != nil {
+		return err
 	}
 
 	var r *runner.Runner

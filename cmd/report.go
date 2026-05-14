@@ -79,6 +79,7 @@ Example:
   ateam report --roles test.gaps,project.security
   ateam report --roles code.structure --extra-prompt "Focus on the auth module"
   ateam report --extra-prompt @notes.md`,
+	PreRunE: requireGitRepoPreRunE,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runReport(ReportOptions{
 			Roles:                reportRoles,
@@ -205,6 +206,11 @@ func runReport(opts ReportOptions) error {
 
 	batch := "report-" + time.Now().Format(runner.TimestampFormat)
 
+	workDir, err := resolveWorkDir(workDirFlag, env)
+	if err != nil {
+		return err
+	}
+
 	cliOverridesProfile := opts.Profile != "" || opts.Agent != ""
 	defaultProfile := env.Config.ResolveProfile(runner.ActionReport, "")
 
@@ -225,7 +231,7 @@ func runReport(opts ReportOptions) error {
 				Action:           runner.ActionReport,
 				OutputKind:       runner.OutputKindReport,
 				CanonicalDestDir: env.RoleDir(roleID),
-				WorkDir:          env.SourceDir,
+				WorkDir:          workDir,
 				TimeoutMin:       timeout,
 				Verbose:          opts.Verbose,
 				Batch:            batch,

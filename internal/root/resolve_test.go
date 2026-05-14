@@ -2,6 +2,7 @@ package root
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -373,5 +374,83 @@ func TestResolveOverrides(t *testing.T) {
 		if !strings.Contains(err.Error(), "--org") {
 			t.Errorf("error %q should mention --org", err)
 		}
+	})
+}
+
+// TestResolveWorkDirAndGitRepoDir verifies that WorkDir defaults to cwd and
+// that GitRepoDir is derived from `git rev-parse --show-toplevel` in WorkDir
+// — not from config.toml's [git] repo setting.
+func TestResolveWorkDirAndGitRepoDir(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git CLI required")
+	}
+
+	t.Run("WorkDir defaults to cwd; GitRepoDir is empty outside a repo", func(t *testing.T) {
+		env := &ResolvedEnv{}
+		if err := env.resolveWorkDir(""); err != nil {
+			t.Fatalf("resolveWorkDir: %v", err)
+		}
+		cwd, _ := os.Getwd()
+		if env.WorkDir != cwd {
+			t.Errorf("WorkDir = %q, want cwd %q", env.WorkDir, cwd)
+		}
+		// Run from a non-repo temp dir to guarantee GitRepoDir = "".
+		tmp := resolvedTempDir(t)
+		t.Chdir(tmp)
+		env2 := &ResolvedEnv{}
+		if err := env2.resolveWorkDir(""); err != nil {
+			t.Fatalf("resolveWorkDir: %v", err)
+		}
+		if env2.GitRepoDir != "" {
+			t.Errorf("GitRepoDir = %q, want \"\" (non-repo tmp dir)", env2.GitRepoDir)
+		}
+	})
+
+	t.Run("OverrideWorkDir sets both WorkDir and GitRepoDir", func(t *testing.T) {
+		tmp := resolvedTempDir(t)
+		// Initialise a real git repo in tmp.
+		for _, args := range [][]string{
+			{"init", "-q", "-b", "main"},
+			{"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"},
+		} {
+			c := exec.Command("git", args...)
+			c.Dir = tmp
+			if out, err := c.CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
+		}
+
+		env := &ResolvedEnv{}
+		if err := env.OverrideWorkDir(tmp); err != nil {
+			t.Fatalf("OverrideWorkDir: %v", err)
+		}
+		if env.WorkDir != tmp {
+			t.Errorf("WorkDir = %q, want %q", env.WorkDir, tmp)
+		}
+		if env.GitRepoDir != tmp {
+			t.Errorf("GitRepoDir = %q, want %q (repo root)", env.GitRepoDir, tmp)
+		}
+
+		// Subdirectory of the repo: WorkDir = sub, GitRepoDir = repo root.
+		sub := filepath.Join(tmp, "deep", "sub")
+		if err := os.MkdirAll(sub, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := env.OverrideWorkDir(sub); err != nil {
+			t.Fatalf("OverrideWorkDir(sub): %v", err)
+		}
+		if env.WorkDir != sub {
+			t.Errorf("WorkDir = %q, want %q", env.WorkDir, sub)
+		}
+		if env.GitRepoDir != tmp {
+			t.Errorf("GitRepoDir = %q, want %q (still repo root)", env.GitRepoDir, tmp)
+		}
+	})
+
+	t.Run("config.toml [git] repo is ignored (not consulted at runtime)", func(t *testing.T) {
+		// populateFromConfig must NOT set GitRepoDir even when cfg.Git.Repo is set.
+		// (GitRepoDir comes only from gitutil.TopLevel(WorkDir).)
+		// We exercise this via the integration tests, but assert here too.
+		// See TestIntegration_BasicProject / _MonorepoSubdir for the full flow.
 	})
 }

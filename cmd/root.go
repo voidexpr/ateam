@@ -7,6 +7,7 @@ import (
 var (
 	orgFlag     string
 	projectFlag string
+	workDirFlag string
 )
 
 var rootCmd = &cobra.Command{
@@ -27,6 +28,7 @@ func Execute() error {
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&orgFlag, "org", "o", "", "path to org folder (.ateamorg/) or its parent — overrides cwd-based discovery")
 	rootCmd.PersistentFlags().StringVarP(&projectFlag, "project", "p", "", "path to project folder (.ateam/) or its parent — overrides cwd-based discovery")
+	rootCmd.PersistentFlags().StringVar(&workDirFlag, "work-dir", "", "agent working directory (defaults to project source dir or cwd)")
 
 	rootCmd.AddCommand(envCmd)
 	rootCmd.AddCommand(installCmd)
