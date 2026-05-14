@@ -990,6 +990,97 @@ This is materially stronger than Multica (which has only concurrency caps and ob
 
 **Key architectural difference from ATeam:** Paperclip is a *governance & finance plane* for autonomous agents — it presupposes that work is already organised (companies, projects, goals, issues) and focuses on running that work safely with budget controls and audit trails. ATeam is an *autonomous quality-discovery harness* — its job is to *find* what to work on against an existing codebase and get it done with minimal supervision. Paperclip's strongest contribution to ATeam is the budget/heartbeat model: even if ATeam stays organisationally simpler (no companies/goals/orgs), the heartbeat-as-billing-unit pattern, the soft/hard threshold trip, and the pre-flight invocation block are directly applicable. Of every tool reviewed in this section, Paperclip has the most pattern-overlap with what ATeam should build next on the cost-control front.
 
+#### LibreFang (librefang/librefang) ⭐⭐⭐
+
+**Link:** [github.com/librefang/librefang](https://github.com/librefang/librefang)
+
+**What it is:** "*Libre Agent Operating System — Free as in Freedom.*" Rust-native (81.9% Rust), MIT-licensed, ~257⭐, in active beta (v2026.5.12-beta.11). 26 modular crates, distributed as a CLI + daemon + REST API + Tauri 2.0 desktop app + SDKs (JS/TS, Python, Rust, Go). Explicitly anti-chatbot, anti-Python-wrapper: "*An Agent Operating System — a full platform for running autonomous AI agents, built from scratch in Rust. Not a chatbot framework, not a Python wrapper.*" Targets a much broader space than coding-quality maintenance — 28 LLM providers, 45 messaging channel adapters (Telegram, Discord, Slack, WhatsApp, Signal, Matrix, Email, Teams, etc.) — but the kernel-level patterns are very relevant to ATeam's scheduler and isolation work, which is why it earns a full entry rather than a row in the table.
+
+**Important up-front distinction — own agent, not a CLI driver:** unlike every other recently-added entry in this section (Multica, Paperclip, Symphony, ComposioHQ, oauth-cli-coder), LibreFang **does not spawn coding-agent CLIs (Claude Code, Codex, Cursor, Gemini CLI) as subprocesses**. It has its own agent runtime calling LLM HTTP APIs directly via `librefang-llm-drivers` ("*Concrete LLM provider drivers (anthropic, openai, gemini, …) implementing the librefang-llm-driver trait*", depends on `reqwest`, no subprocess libs). Auth is API-key by default; `librefang-runtime-oauth` adds subscription-style auth ("*OAuth flows (ChatGPT, GitHub Copilot) for LibreFang runtime drivers*") for ChatGPT and Copilot specifically — notably not Claude subscription. The `librefang-acp` crate sits on the *opposite* side of the Agent Client Protocol: it "*embeds LibreFang agents in Zed/VSCode/JetBrains via stdio JSON-RPC*" — i.e. LibreFang plays the role Claude Code plays in those IDEs, rather than driving Claude Code itself. So plugging Claude Code into LibreFang would mean adding a "spawn-and-supervise-CLI" runtime that doesn't currently exist; the project's identity is closer to "Rust-native autonomous-agent SDK + cron scheduler + provider HTTP clients" than to a coding-CLI orchestrator.
+
+**The vocabulary — Hands, Skills, kernel:**
+
+- **Hand** — an autonomous capability package: a `HAND.toml` manifest plus a system prompt. Hands run on schedules without prompting and are the unit of identity, scheduling, and quota.
+- **Skill** — a sub-capability inside a Hand, optionally implemented as a WASM module (see below).
+- **Kernel** (`librefang-kernel`) — the boot-time supervisor. Owns "*agent lifecycles, scheduling, permissions, inter-agent communication, and the message-handling loop that fans requests out to LLM drivers, tools, and the memory substrate.*" Entry point: `LibreFangKernel::boot_with_config(KernelConfig)`. Sits between the HTTP/WS surface (`librefang-api`) and the execution layer (`librefang-runtime`), with `librefang-memory` for storage.
+
+The crate split is unusually disciplined. Of the 26 crates, the ATeam-relevant ones are: `librefang-kernel`, `librefang-kernel-metering` (quotas), `librefang-kernel-router`, `librefang-kernel-handle`, `librefang-runtime`, `librefang-runtime-wasm` (skill sandbox), `librefang-runtime-mcp` (MCP tool integration), `librefang-runtime-oauth`, `librefang-skills`, `librefang-hands`, `librefang-memory`, `librefang-telemetry`, `librefang-testing`. Naming alone makes the architecture more legible than most projects in this section.
+
+**Concurrency — three sequential gates (the most precise model in this doc):**
+
+From [`docs/architecture/trigger-dispatch-concurrency.md`](https://github.com/librefang/librefang/blob/main/docs/architecture/trigger-dispatch-concurrency.md), every trigger fire passes through:
+
+1. **Global lane semaphore** (`Lane::Trigger`): config `queue.concurrency.trigger_lane` (default **8**). "*Caps total in-flight trigger dispatches kernel-wide so a runaway producer*" can't melt the system. This is the missing-piece-most-other-tools-don't-have — a kernel-wide cap, separate from per-agent caps.
+2. **Per-agent semaphore**: `manifest.max_concurrent_invocations` per Hand, falling back to `queue.concurrency.default_per_agent` (default **1**). Hand-level fan-out cap.
+3. **Per-session mutex**: applied only for `session_mode = "new"` fires (fresh `SessionId` per trigger). Persistent sessions fall back to in-`send_message_full` serialisation.
+
+A safety clamp: "*persistent sessions with `max_concurrent_invocations > 1` are auto-clamped to 1 with a warning — `session_mode = 'persistent' cannot run parallel invocations safely`.*" To get real parallelism on a Hand you must set `session_mode = "new"` at manifest level; per-trigger overrides don't unlock an already-clamped semaphore.
+
+Lifecycle detail worth noting: the per-agent semaphore is created lazily on first dispatch and persists across manifest reloads; operators must `agent kill` and respawn to pick up a new `max_concurrent_invocations` value. This matters operationally — config changes are not hot-reloaded.
+
+**Sessions and per-fire budget (cron compaction):**
+
+From [`cron-session-sizing.md`](https://github.com/librefang/librefang/blob/main/docs/architecture/cron-session-sizing.md). Persistent cron Hands share *one* session per agent by default — each fire appends to that session. Three `KernelConfig` knobs control growth:
+
+- `cron_session_max_messages`: drop oldest messages before each fire if count exceeds `N`. Minimum enforced value is **4**, deliberately, "*to preserve prompt-cache reuse.*"
+- `cron_session_max_tokens`: token-based pruning using a "*CJK-aware char-weighted heuristic*" — they avoid the dependency on a real tokenizer.
+- `cron_session_compaction_mode`: either `"prune"` (drop) or `"summarize_trim"` (an LLM compresses old messages before trimming — pays an auxiliary call, gains continuity).
+
+Warn threshold defaults to **80%** of budget. The API exposes `session_message_count` and `session_token_count` for drift monitoring. Alternative: set `session_mode = "new"` and accept losing cross-fire context for predictable cost.
+
+**Isolation — pluggable tool execution backends:**
+
+From [`tool-exec-backends.md`](https://github.com/librefang/librefang/blob/main/docs/architecture/tool-exec-backends.md). A `ToolExecBackend` trait abstracts where each tool call actually runs. Four concrete implementations:
+
+- **Local**: subprocess on the daemon host (default, always available — same posture as Multica/Paperclip).
+- **Docker**: per-call container creation via existing sandbox infrastructure.
+- **SSH**: remote command execution via `russh` (feature-gated). SSH host-key verification "*is a security boundary*" — pinned SHA-256 fingerprint required; misconfiguration is treated as equivalent to daemon compromise.
+- **Daytona**: managed sandbox workspace (feature-gated).
+
+Each Hand can override the global default in its manifest. Credentials "*are never persisted; keys are read per-call and tokens sourced from environment variables only.*" This is the cleanest pluggable-exec model in this section — Docker becomes an opt-in per Hand, not an all-or-nothing daemon-level choice.
+
+**Skill sandbox (WASM):**
+
+`librefang-runtime-wasm` is the "*WASM skill sandbox.*" The README didn't render and the runtime details aren't fully documented in the public material, but the layering is clear: extension code runs in WASM, the kernel and core runtime run native. So the isolation story is two-tier: extensions are sandboxed by language (WASM), tools are sandboxed by backend (Local/Docker/SSH/Daytona). The combination is more disciplined than just "use Docker for everything."
+
+**Metering and quotas:**
+
+`librefang-kernel-metering` is the dedicated metering crate (README not yet published). README index promises "*cost metering, quota enforcement*"; per-agent budgets are mentioned in kernel orchestration material but the threshold→action contract isn't documented as precisely as Paperclip's. The schema and crate boundary suggest a Paperclip-style intent (track tokens/cost by scope, enforce thresholds) but the user-facing surface area is currently smaller.
+
+**Secrets:** AES-256-GCM vault is referenced as part of the "16 Security Layers" framing for extension management. Specifics on per-Hand binding scopes weren't recoverable from the public docs.
+
+**Task model:**
+
+LibreFang doesn't have a kanban-style issue tracker; the analogue is the *Hand* itself, plus *triggers* (cron, channel events, external triggers) that fire invocations. There is no separate "task" table in the architecture as far as the public docs show — Hands and their fires are the work units. No tags/labels/priority in the issue sense; categorisation is by Hand identity, schedule, and channel binding. This makes LibreFang less suited to ad-hoc work assignment than Multica or Paperclip, and more suited to long-lived autonomous Hands with stable identities.
+
+**Coding-agent relevance:**
+
+Tangential by domain — example Hands in the community repo include `Researcher, Collector, Predictor, Strategist, Analytics, Trader, Lead, Twitter, Reddit, LinkedIn, Clip, Browser, API Tester, DevOps`. Most of these are sales/marketing/finance/social automations, not software quality. The DevOps / API Tester / Browser Hands are the closest fit. But the kernel patterns are domain-agnostic: a Hand whose job is "audit the test suite of this repo nightly" would fit the model perfectly.
+
+**Overlap with ATeam:** Scheduled autonomous execution; per-agent identity that persists; cost/quota intent at the kernel level; pluggable execution backends including Docker; explicit scheduling primitives; SDK in multiple languages; "audit trail" framing.
+
+**What it lacks for our use case:**
+
+- **Not coding-agent-shaped.** Hands assume a domain-experienced operator wrote them. No equivalent of ATeam's specialised auditor roles for testing/refactor/security with persistent project knowledge.
+- **No coding-CLI integration** (see up-front note). LibreFang talks to LLM HTTP APIs directly; it doesn't drive Claude Code / Codex / Cursor / Gemini CLI as subprocesses. ATeam's entire model — supervising a Claude Code subprocess inside an isolated container — has no analogue here without writing a new runtime.
+- **No audit → approve → implement workflow.** Hands fire on triggers, do work, write to channels. No deliberate phase separation.
+- **No issue tracker / task board surface.** Triggers and Hands replace tickets — fine for autonomous bots, awkward if a human wants to inspect a backlog of findings.
+- **Metering / budget surface is currently sketched, not specified.** Crate exists, README pending. ATeam can't yet borrow the precise threshold/action contract the way it can from Paperclip.
+- **Heavyweight infrastructure.** 26 crates, 5 distribution forms (CLI/daemon/API/desktop/SDK), 45 channel adapters. Pulling in just the kernel patterns would mean extracting them, not reusing the project as a library.
+
+**Ideas to integrate:**
+
+- **Three-gate concurrency model (global lane + per-agent + per-session).** The cleanest formulation of "*how do I avoid runaway fan-out*" in this entire section. ATeam currently has implicit caps; making them explicit as `(lane, agent, session)` with semaphores at each level is a direct upgrade. The `Lane::Trigger` framing — distinct lanes per workload class — also generalises to other ATeam concerns (audit lane vs implement lane vs report lane).
+- **Auto-clamp persistent sessions to concurrency 1.** Refusing to let users configure a footgun ("*cannot run parallel invocations safely*") with a logged warning is good defensive design. ATeam's run/session model should have an equivalent guard for any state that isn't safe to parallelise.
+- **`session_mode = "new"` vs `"persistent"` as an explicit Hand-level setting.** Forces the tradeoff (cross-fire context vs predictable cost vs parallelism) to be made deliberately per Hand, not implicitly. ATeam roles could carry a similar attribute.
+- **Cron session compaction with `prune` vs `summarize_trim`.** The pattern of letting long-running sessions choose between cheap-but-lossy and expensive-but-coherent context management is exactly what ATeam's long-lived runs need. The minimum-4-messages guard "*to preserve prompt-cache reuse*" is a concrete insight worth borrowing — context compaction must respect the cache window.
+- **`ToolExecBackend` as a trait with Local/Docker/SSH/Daytona impls.** ATeam currently couples runtime to Docker. Lifting tool execution to a trait with multiple backends (Local for dev iteration, Docker for prod, SSH for remote, Daytona/Sandcastle for cloud) would future-proof the architecture without breaking existing flows.
+- **Per-Hand override of the global exec backend.** Each Hand can specify a different execution backend in its manifest. ATeam's roles should be able to do the same — a fast role can run Local for speed, a security role can force Docker for isolation.
+- **SSH host-key verification as a documented security boundary.** If ATeam ever supports remote execution, the LibreFang framing ("*misconfiguration creates MITM vulnerabilities equivalent to direct daemon compromise*") is the right level of seriousness.
+- **CJK-aware char-weighted heuristic for token estimation.** Avoids the tokenizer-dependency tax. ATeam's cost tracking currently relies on the provider's reported counts; a fast local heuristic for pre-flight budget checks would be a free win.
+
+**Key architectural difference from ATeam:** LibreFang is a *general-purpose autonomous-agent OS* — its job is to keep many independent agents alive, scheduled, and bounded, regardless of what those agents do. ATeam is a *coding-quality-discovery harness* — its job is to find what needs improving in a codebase and drive that work to completion. The shapes diverge on the surface (Hands + channels + LLM drivers vs roles + reports + Claude Code CLI) but the kernel-level concerns rhyme exactly: scheduling, concurrency, quotas, isolation, audit. LibreFang's three-gate concurrency model and pluggable tool-exec backends are the most directly transferable patterns of any project in this section after Paperclip's budget enforcement.
+
 #### Other Notable Tools
 
 | Tool | Link | What It Is | Why Not a Direct Fit |
