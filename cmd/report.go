@@ -365,6 +365,13 @@ func runReport(opts ReportOptions) error {
 // auto-triggered review step so `report --review --roles X --profile Y` does
 // not silently revert the review to defaults. Zero-valued fields stay zero so
 // review's own defaulting (config, role-level profiles) still applies.
+//
+// When --roles was explicit on the report invocation, the user named the roles
+// they want; the chained review must NOT filter them out via the enabled-only
+// gate when those roles are off-by-default in config.toml. The report layer
+// already treated --roles as authoritative when running them; the chained
+// review honors the same authority. The Roles filter still narrows the review
+// to exactly the named set, so this doesn't widen the scope.
 func reviewOptionsFromReport(opts ReportOptions) ReviewOptions {
 	return ReviewOptions{
 		ExtraPrompt:     opts.ExtraPrompt,
@@ -375,6 +382,7 @@ func reviewOptionsFromReport(opts ReportOptions) ReviewOptions {
 		Verbose:         opts.Verbose,
 		Force:           opts.Force,
 		Roles:           opts.Roles,
+		IncludeDisabled: len(opts.Roles) > 0,
 		DockerAutoSetup: opts.DockerAutoSetup,
 		ContainerName:   opts.ContainerName,
 		Model:           opts.Model,
