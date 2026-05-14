@@ -23,6 +23,9 @@ Caveats:
     terms (Feb 2026), reusing this token in third-party tools is technically
     a ToS violation. Use at your own risk.
   - The endpoint is undocumented and could change without notice.
+
+TODO: use the official way once it's released (claude usage ? claude limits ?)
+    see: https://github.com/anthropics/claude-code/issues/13585
 """
 
 import argparse
