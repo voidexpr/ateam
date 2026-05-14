@@ -14,7 +14,8 @@ All commands accept the same options:
     --alert-5h-max PCT   exit 5 if 5-hour window utilization exceeds PCT
     --alert-7d-max PCT   exit 7 if 7-day window utilization exceeds PCT
     --cache-file PATH    cache the API response to PATH
-    --cache-ttl DUR      reuse cache if mtime within DUR (<N>{s,m,d})
+    --cache-ttl DUR      reuse cache if mtime within DUR (<N>{s,m,h,d})
+    --max-sleep DUR      (sleep only) exit 10 if required sleep exceeds DUR
 
 PCT may include a trailing '%' for readability.
 
@@ -22,6 +23,7 @@ Exit codes:
     0  ok (or no thresholds specified)
     5  --alert-5h-max threshold exceeded (cat/check only)
     7  --alert-7d-max threshold exceeded (cat/check only)
+   10  required sleep would exceed --max-sleep (sleep only)
     1  error fetching data
 
 Caveats:
@@ -110,12 +112,12 @@ def parse_pct(s):
 
 
 def parse_duration(s):
-    """Parse a duration string like '30s', '5m', '1d' into seconds."""
-    m = re.fullmatch(r"\s*(\d+)\s*([smd])\s*", s)
+    """Parse a duration string like '30s', '5m', '2h', '1d' into seconds."""
+    m = re.fullmatch(r"\s*(\d+)\s*([smhd])\s*", s)
     if not m:
-        sys.exit(f"error: invalid --cache-ttl '{s}' (expected number followed by s/m/d)")
+        sys.exit(f"error: invalid --cache-ttl '{s}' (expected number followed by s/m/h/d)")
     n, unit = int(m.group(1)), m.group(2)
-    return n * {"s": 1, "m": 60, "d": 86400}[unit]
+    return n * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
 
 
 def parse_iso(s):
@@ -125,6 +127,20 @@ def parse_iso(s):
         return datetime.fromisoformat(s.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def fmt_duration(secs):
+    """Format a duration in seconds as 'Xd Yh Zm Ws', omitting leading zero units."""
+    secs = max(0, int(secs))
+    if secs == 0:
+        return "0s"
+    parts, started = [], False
+    for unit, n in (("d", 86400), ("h", 3600), ("m", 60), ("s", 1)):
+        v, secs = divmod(secs, n)
+        if v > 0 or started:
+            started = True
+            parts.append(f"{v}{unit}")
+    return " ".join(parts)
 
 
 def fmt_local(value):
@@ -248,6 +264,7 @@ def cmd_check(args, data, cache_status):
 
 
 def cmd_sleep(args, data, cache_status):
+    cmd_check(args, data, cache_status)
     if threshold_exit_code(args, data) == 0:
         return 0
     reset = (data.get("five_hour") or {}).get("resets_at")
@@ -255,9 +272,20 @@ def cmd_sleep(args, data, cache_status):
     if not dt:
         sys.exit("error: cannot determine 5-hour reset time")
     secs = (dt - datetime.now(timezone.utc)).total_seconds()
-    if secs > 0:
-        print(f"sleeping {int(secs)}s until {fmt_local(dt)}", file=sys.stderr)
+    if secs <= 0:
+        return 0
+    if args.max_sleep is not None:
+        max_secs = parse_duration(args.max_sleep)
+        if secs > max_secs:
+            print(f"error: would sleep {fmt_duration(secs)}, exceeds --max-sleep {fmt_duration(max_secs)}",
+                  file=sys.stderr)
+            return 10
+    print(f"sleeping {fmt_duration(secs)} until {fmt_local(dt)}", file=sys.stderr)
+    try:
         time.sleep(secs)
+    except KeyboardInterrupt:
+        print("interrupted", file=sys.stderr)
+        return 130
     return 0
 
 
@@ -278,7 +306,9 @@ def main():
     parser.add_argument("--cache-file", default=None,
                         help="path to JSON cache file; used with --cache-ttl")
     parser.add_argument("--cache-ttl", default=None,
-                        help="cache TTL as <N>{s,m,d} (e.g. 30s, 5m, 1d)")
+                        help="cache TTL as <N>{s,m,h,d} (e.g. 30s, 5m, 2h, 1d)")
+    parser.add_argument("--max-sleep", default=None,
+                        help="max sleep duration (same format as --cache-ttl); exit 10 if exceeded")
     args = parser.parse_args(argv)
 
     data, cache_status = load_data(args)
