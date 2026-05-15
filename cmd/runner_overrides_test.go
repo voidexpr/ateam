@@ -11,7 +11,6 @@ import (
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/ateam/internal/runtime"
-	"github.com/spf13/cobra"
 )
 
 // filepathEqual compares paths after symlink resolution so macOS
@@ -20,10 +19,6 @@ func filepathEqual(a, b string) bool {
 	ra, _ := filepath.EvalSymlinks(a)
 	rb, _ := filepath.EvalSymlinks(b)
 	return ra == rb
-}
-
-func newDummyCmd(name string) *cobra.Command {
-	return &cobra.Command{Use: name}
 }
 
 // TestApplyRunnerOverridesEmpty verifies that an empty RunnerOverrides leaves

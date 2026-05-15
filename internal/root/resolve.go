@@ -505,15 +505,6 @@ func FindHistoryFileWithSkew(dir string, ts time.Time, suffix string) string {
 // to avoid pulling internal/display into root.
 const historyTimestampLayout = "2006-01-02_15-04-05"
 
-// resolvePath resolves rel relative to base.
-// If rel is absolute, it is returned as-is.
-func resolvePath(base, rel string) string {
-	if filepath.IsAbs(rel) {
-		return rel
-	}
-	return filepath.Join(base, rel)
-}
-
 func realPath(p string) string {
 	r, err := filepath.EvalSymlinks(p)
 	if err != nil {
