@@ -501,6 +501,121 @@ The migration is incremental: Phases 0 and 1 don't need to be torn out when Phas
 5. **Hot-file → topic association.** When `cmd/runner.go` is the most-edited file and *no* architecture topic cites it, that's a flag worth surfacing — it likely means the project has a structural area that lacks documented architectural rationale. Surface as an `ateam-artifacts status` warning?
 6. **Validation prompt's diff size cap.** The default 800 lines is arbitrary. Should it be per-input or total? Should oversized diffs auto-promote to STALE without trying to cheap-validate?
 
+## Build vs Buy: External Options and `ateam index`
+
+The Phase 2+ artifact system isn't a greenfield design — the ecosystem has been moving in this direction. `ResearchCodebaseDiscoveryTokenReduction.md` §L catalogues the relevant projects in depth. This section answers the practical follow-up: **which existing tool, if any, should we adopt; what should we build ourselves; and what does the build-ourselves entry point look like?**
+
+### Easy-to-try external evaluations (low setup, fast signal)
+
+For each, the goal is *validating a single hypothesis* — not adopting the tool wholesale.
+
+| Tool | Hypothesis it tests | Evaluation effort | Worth doing? |
+|---|---|---|---|
+| **llmdoc** | "File-summary + content-hash + previous-summary injection is the minimum useful primitive." | ~1 hour: clone, point at ATeam repo, inspect output, measure token cost on a re-run after a single-file edit | Yes — cheapest possible sanity check that the basic pattern works. |
+| **[pdavis68/RepoMapper](https://github.com/pdavis68/RepoMapper)** | "Aider-style PageRank repo-map gives useful 'where to start' orientation independently of the rest of ATeam's stack." | ~1 hour: install, point at ATeam repo, eyeball the map vs the model-authored Project Context in `runtime/33/report.md` | Yes — direct visual comparison of mechanical PageRank vs role-authored map. Tests whether scripts can match the model on the orientation layer. |
+| **Repowise** | "Stale-detection (commit-comparison + hook-based auto-sync) catches the cases the Project Context staleness model misses." | 2–4 hours: install, run on ATeam repo, simulate code changes, observe what it flags as stale | Maybe — useful pattern reference. Adopt the *concept*, probably not the tool. |
+| **Aider's repo-map (in-process via Aider itself)** | "PageRank-ranked map fits in 1,000 tokens and is good enough as a TOC." | ~2 hours: install Aider, run `aider --show-repo-map`, inspect | Yes alongside RepoMapper — Aider has had this in production longer and the ranking heuristics are well-tuned. |
+
+**Recommended order of evaluation**: llmdoc → RepoMapper → Aider repo-map. Each is a single afternoon; together they give a strong empirical sense of where mechanical scripts can replace LLM authorship.
+
+### Heavier-but-promising external evaluations
+
+These take more effort to evaluate but answer architectural questions the lighter tools can't.
+
+| Tool | What it would replace in our design | Evaluation effort | Worth doing? |
+|---|---|---|---|
+| **CocoIndex** | The whole make-like driver layer (dependency tracking + memoisation). Could be the substrate underneath ATeam's generators. | Half-day: install, define a small flow (`file_content → file_summary`), test memoisation behaviour after a single-file edit | **Yes — this is the highest-value heavier eval.** If CocoIndex memoisation works as advertised, we'd be writing fewer custom dependency-tracking primitives. |
+| **RepoAgent** | The patch-not-regenerate, hook-driven update mechanism for *Python* projects | Half-day: clone, run against a small Python repo, observe Git hook behaviour | Yes if we're targeting Python projects; otherwise pattern-reference only. Validates the design before we re-implement for Go. |
+| **Codebase-Memory MCP** | The dependency-oracle layer (graph queries: callers, callees, impact radius) | Half-day: install MCP server, run it against ATeam, query for `Runner.Run` callers etc. | Yes — directly tests whether a graph oracle moves the needle for our roles, separate from doc-update logic. |
+| **DeepWiki** | The page-manifest concept (`.devin/wiki.json`-style explicit doc inventory) | None — observe-only via [deepwiki.com](https://deepwiki.com/). It's commercial; we're stealing the concept, not adopting the tool. | Yes — already informed our `manifest.json` design in §L.2.3. |
+
+### Why ATeam should still build the core itself
+
+After the above evaluations land, we'll know whether to integrate or build. The case for building (which I'd weight at ~70% likely as the conclusion):
+
+1. **Role-aware artifacts are unique to ATeam.** None of the external tools generate per-role views: test-selection for `test.gaps` vs for `code.bugs`; security-map vs database-map; what each role *should care about* vs what's in the repo. RepoAgent, CodeWiki, etc. generate one neutral wiki for the whole codebase. ATeam's value is in role-aware filtering, which is a layer above the wiki.
+2. **Multi-language scope.** RepoAgent is Python; bazel-diff is Bazel; pytest-testmon is Python. ATeam targets any project. The build-ourselves design specifies project-profile generators (Go / Next.js / Rust / Python / Elixir / …) with shared output contracts.
+3. **Existing infrastructure to reuse.** ATeam already has SQLite state, stream.jsonl logging, the runner pool, role prompts, and config plumbing. The artifact system maps onto these naturally — `agent_execs` rows for `action ∈ {artifact_init, artifact_validate, artifact_rebuild, artifact_patch}`; stream files in `.ateam/artifacts/.log/`; existing runner abstractions for invoking the LLM.
+4. **The provenance schema (Phase 2+) is more specific than any existing tool.** Our schema declares inputs at file + symbol granularity, separates `hard_refresh_if` from `review_if`, and tracks generator prompt SHAs. No off-the-shelf tool exposes this contract.
+5. **Patch-not-regenerate is a design rule no existing tool fully delivers.** RepoAgent gets closest but is Python-only; RepoDoc is research-only. The cheap-validate / patch / re-author tri-state is ATeam-specific.
+6. **Effort estimate is bounded.** v1 of the artifact system is ~1–2 person-weeks: file/module summarisers + SQLite dep registry + change classifier + cheap-validate LLM call wrapper + patcher + the `ateam index` command. CocoIndex could shave 2–3 days off the dependency-tracking layer if we choose to depend on it.
+
+**Build-ourselves carries one significant adoption risk** worth naming: if the evaluations of CocoIndex + Codebase-Memory + RepoMapper suggest one of them *almost* solves the problem with a thin wrapper, we should adopt — re-implementing memoisation primitives or symbol-graph queries from scratch is wasteful. Run the four-tool eval gauntlet *before* committing to build.
+
+### `ateam index` — the entry point command
+
+The CLI surface for the artifact system. Sized to match other `ateam` subcommands.
+
+```
+ateam index [flags]
+
+Build or refresh the codebase knowledge cache used by report and code agents.
+
+Flags:
+  --from-scratch          Rebuild all knowledge docs from raw source (expensive; for bootstrap or recovery)
+  --output PATH           Output directory (default: .ateam/cache/)
+  --ids ID[,ID...]        Only operate on specified artifact IDs (e.g., architecture.concurrency)
+  --validate-only         Cheap LLM validation pass; no full regeneration
+  --status                Show fresh / drift-candidate / stale / suspect counts; exit 0 if all current, 2 otherwise
+  --commit SHA            Operate against a specific commit (default: HEAD)
+  --base SHA              Treat as base for delta-aware paths (default: merge-base with default branch)
+  --model NAME            Model for LLM-backed generators (default: from config)
+  --max-cost-usd N        Halt before exceeding this LLM budget; exit 3
+  --dry-run               Print what would happen; no LLM calls
+  --jobs N                Parallel generator runs (default: from config, typically 2)
+```
+
+Conventions:
+
+- **Default output**: `.ateam/cache/` per the user spec. Below it the layout matches the §L.5 minimum-viable scheme — `knowledge/`, `state/`, `generated/`.
+- **`--from-scratch`** bypasses dependency-based reuse and re-authors every artifact. Use on bootstrap, after major schema changes, or when staleness has been flagged as unrecoverable.
+- **`--validate-only`** is the cheap default for CI / pre-commit: walks the artifact set, runs the cheap-validate prompt only on drift candidates, never re-authors. Exits non-zero if any artifact ends up marked `stale`.
+- **`--status`** is observe-only; pairs well with `watch ateam index --status` during heavy refactoring.
+- **`--max-cost-usd`** is the safety rail. Critical for `--from-scratch` runs and for unattended CI.
+
+Suggested git-hook integration:
+
+```bash
+# .git/hooks/post-commit
+ateam index --validate-only --max-cost-usd 2.0 || true
+```
+
+Suggested CI integration:
+
+```yaml
+# CI step
+- name: refresh artifacts
+  run: ateam index --validate-only --max-cost-usd 5.0
+- name: full rebuild (monthly)
+  if: github.event_name == 'schedule'
+  run: ateam index --from-scratch --max-cost-usd 20.0
+```
+
+### What lands in v1 of `ateam index`
+
+Minimum to be useful:
+
+1. **`internal/index/`** Go package with the artifact registry, dependency tracking, generator dispatch.
+2. **Deterministic generators** for `code_map.md`, `dependencies.md`, `hotspots.md`, `commands/*.md` (the script-authored artifacts).
+3. **LLM-backed generators** for `architecture/INDEX.md` and a small starting set of architecture topics (`concurrency.md`, `isolation.md`, `prompt_assembly.md`, `log_layout.md` — the four most-cited in the existing `runtime/33/report.md` Project Context).
+4. **SQLite dependency registry** at `.ateam/cache/state/doc-targets.sqlite`.
+5. **Change classifier** — Tree-sitter-based for Go (matches ATeam's own language) + a generic `git diff --stat` fallback for unknown project types.
+6. **Cheap-validate prompt** per §L.3.6.
+7. **`ateam index` command** with the flags above.
+8. **`agent_execs` integration** so artifact runs appear in `state.sqlite` and `ateam ps` alongside reports.
+
+What can wait for v2:
+
+- Multi-language Tree-sitter coverage (start Go-only; add Python/JS/Rust as ATeam targets them).
+- Symbol-level dependency granularity (start file-level; add symbol-level for hot files).
+- Coverage-based test-selection (start with conventions; add coverage when there's pain).
+- MCP server exposing the cache to non-Claude-Code agents.
+- Cross-project artifact sharing.
+
+### Open implementation questions
+
+Folded back into the existing "Open questions" section below — see specifically: cold-cache penalty per project type, staleness model granularity, supervisor input cost.
+
 ## Open questions (not blocking, worth keeping on the radar)
 
 1. **Cold-cache penalty per project type.** ATeam-on-ATeam shows 84% reduction. Does this hold on a 10× larger codebase? On a Python/JS project? Worth measuring once.
