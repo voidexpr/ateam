@@ -2,6 +2,13 @@
 
 *Date: 2026-05-14*
 
+> **Scope of this document.** This is **outside research only** — a survey of repository-map / structural-graph / RAG / prompt-caching / analyzer techniques drawn from the wider ecosystem. It does **not** account for ATeam's own mechanisms or measured behaviour. For anything ATeam-specific, use the two companion documents:
+>
+> - **[Research_InvestigateReportLogsForTokenUsage.md](./Research_InvestigateReportLogsForTokenUsage.md)** — empirical analysis of real ATeam stream.jsonl traces. Quantifies what actually costs tokens and which interventions help in practice.
+> - **[Feature_TokenReduction.md](./Feature_TokenReduction.md)** — integrated findings and the proposed implementation plan. **This is the doc to act on.** It supersedes the priority order in §H below.
+>
+> Where this document and the empirical docs disagree, the empirical docs win. Several recommendations here (notably the structural-graph layer in §C.3, the Aider-style PageRank framing in §C.1, and the §F experiment design) are over-engineered for what the data actually shows is needed — see `Feature_TokenReduction.md` for the corrected priority order.
+
 ---
 
 ## A. Executive Summary
