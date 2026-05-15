@@ -94,11 +94,46 @@ The data-only log analyst and the role-only domain expert independently propose 
 
 Same conclusion from independent inputs → strong design signal.
 
+## Shared Architecture Context (Phase 0)
+
+A judgment-bearing layer that sits underneath the mechanical Facts block. The data argues for it as the *first* move, ahead of the Facts script.
+
+**Why first.** The warm-run `Project Context` content I sampled is dominated by facts a script can't produce: the concurrency contract, the `runtime/` vs `logs/` invariant, "`applyRunnerOverrides` is the boilerplate model", "intentional A/B branching in `prompts.go`". Those are convention and rationale — distilled judgment. A competent role would re-derive `wc -l`/`git log`/make-targets in 2–3 turns; it cannot re-derive conventions cheaply. So the per-token value of a stable conventions layer is higher than that of the mechanical Facts block.
+
+**Why this isn't a new authoring project.** ATeam already has the content. The redundancy analysis shows 3–5 cold roles independently reading `CLAUDE.md`, `CONCURRENCY.md`, `DEV.md`, `ISOLATION.md`, `AGENTS.md`. The fact that roles bother to read them under cost pressure says they carry load-bearing information. The Phase 0 work is **inject what exists** — not write what's missing.
+
+**Steps.**
+
+1. Add a `[shared_architecture]` block in `config.toml`: `enabled`, `docs = [...]` (default: `CLAUDE.md`, `CONCURRENCY.md`, `DEV.md` when present), `max_tokens` (default ~6K), `position = "first_stable"`.
+2. Extend `internal/prompts/` to concatenate the listed docs as a single preamble, placed immediately after the system prompt (cache-friendly position). Skip silently if a listed doc doesn't exist.
+3. Render a header before each injected doc (`# Shared Architecture Context: CONCURRENCY.md`) so the model can cite it.
+4. Token-cap the block; if over budget, truncate later docs first and emit a single warning line.
+5. **Only** author a consolidated `ARCHITECTURE.md` if the measurement below shows existing docs aren't sufficient. Don't write a new doc speculatively.
+
+**Effort.** ~50 LOC + config knob + golden-output tests + one integration test asserting the block lands in the right prompt position. Smaller than the Facts block.
+
+**4-baseline measurement (attributes savings between the layers).**
+
+| Arm | What's in the prompt | Hypothesis |
+|---|---|---|
+| A | Current cold baseline | $42/cycle (known) |
+| B | A + shared architecture docs injected | Closes a meaningful fraction of the cold-cache gap on its own |
+| C | B + auto-Facts block | Closes most of the remaining gap |
+| D | C + prior report (warm) | Approaches the $13/cycle warm baseline (known) |
+
+Running A→D on the same commit attributes the savings layer-by-layer. If B alone gets close to D, existing docs are sufficient and no new authoring is needed. If B is flat and C is large, the mechanical facts are doing the work and doc-injection is secondary. If both contribute, both layers are justified.
+
+**Risk and mitigations.** A wrong architecture doc is more dangerous than no doc — agents treat it as authoritative. Two safeguards:
+
+- **Prefer source-of-truth over summaries.** Inject `CONCURRENCY.md` itself, not a meta-summary. Source of truth lives next to the code it describes and rots more visibly.
+- **Staleness markers if/when authoring a new doc.** Any new consolidated doc carries a `Last verified: <commit>` line and a list of "anchor files" (e.g., `runner.go`, `prompts.go`). CI flags drift when an anchor file changes without the doc being touched.
+
 ## Revised priority order (replaces §H of ResearchCodebaseDiscoveryTokenReduction.md)
 
 | Phase | What | Evidence | Est. impact |
 |---|---|---|---|
-| **1** | **Auto-generate Project Facts block** (module/lang/build/top-files/recent-commits/make-targets/default-roles) injected into every role prompt | Cold-vs-warm gap is 84%; 60% of the closing content is mechanical facts that scripts produce more reliably | Closes the cold-run penalty (~$20/cycle on first run at a new SHA) without depending on a prior report existing |
+| **0** | **Inject existing architecture docs** (`CLAUDE.md` / `CONCURRENCY.md` / `DEV.md` / `ISOLATION.md` as available) as a stable prompt preamble — see [Shared Architecture Context](#shared-architecture-context-phase-0) | 3–5 cold roles independently read these docs today; warm-run Project Context content is dominated by conventions a script can't produce | Plausibly the larger half of the cold-cache gap; cheaper than the Facts block to ship |
+| **1** | **Auto-generate Project Facts block** (module/lang/build/top-files/recent-commits/make-targets/default-roles) injected into every role prompt | Cold-vs-warm gap is 84%; the mechanical fraction of the closing content is what scripts produce more reliably than the model | Closes the remaining mechanical-facts portion of the cold-run penalty |
 | **2** | **Convert `Project Context` to structured YAML** with `scope / conventions / reverified / revisit / stale_after` fields | Eliminates hallucination risk in re-verification; lets supervisor consume `scope.out` to dedupe across roles | Quality win + supervisor reliability |
 | **3** | **Per-role discovery layer** (govulncheck for `project.dependencies`, coverage for `test.gaps`, function-per-file counts for `code.structure`, etc. — full list in appendix of `Research_InvestigateReportLogsForTokenUsage.md`) | Specific roles still over-read at warm: `code.bugs` 51 file reads, `test.gaps` 18 calls. Pre-computed per-role data trims this. | ~$2–4/cycle |
 | **4** | **Turn-cap + "name your suspects first" preamble for wandering roles** | `code.bugs` is the only warm role still >20 turns. Surgical fix, not architectural. | ~$1–2/cycle on `code.bugs`-class roles |
@@ -107,18 +142,21 @@ Same conclusion from independent inputs → strong design signal.
 
 ## Next experiment
 
-**Smallest cost / largest impact next move**: Phase 1, isolated.
+**Smallest cost / largest impact next move**: ship Phase 0, measure the layered A→D baselines described in [Shared Architecture Context](#shared-architecture-context-phase-0), then decide whether Phase 1 follows immediately or whether the doc-injection layer alone closed enough of the gap.
 
-1. Build `internal/projectmap` package (~150 LOC Go). Generates a Project Facts block from `git`, `wc`, `find`, `go list`, `defaults/config.toml`. Format per the rerun-doc recommendation (module/LOC/top-files/recent-commits/make-targets/default-roles).
-2. Wire into `internal/prompts/` so the runner injects it for every role automatically.
-3. **Run the 14 dotted roles cold with the Facts block injected but no prior report.** Compare against the existing cold baseline (in `state.sqlite`, ids 1–20).
+Concretely:
 
-**Hypothesis:** cold-with-Facts approaches warm-with-prior-report cost (~$13/cycle), proving the cold-cache penalty is closable without a prior report.
+1. Implement Phase 0 (~50 LOC, see steps in that section).
+2. Run all 14 dotted roles cold against the same commit used for the existing cold baseline (ids 1–20 in `state.sqlite`).
+3. Compare against arm A (cold baseline) and arm D (warm baseline, already in the data).
+4. If the result lands close to arm D: ship Phase 0 as-is, defer Phase 1 until the next bottleneck surfaces.
+5. If the result is between A and D with a meaningful remaining gap: implement Phase 1 (Facts block) and re-run as arm C.
 
-**Decision criteria:**
-- If cold-with-Facts ≤ $20/cycle and ≥ same finding count: ship it as Phase 1, proceed to Phase 2.
-- If cold-with-Facts is between $20–$30: investigate which roles didn't benefit and why; iterate on Facts content.
-- If cold-with-Facts ≥ $30: the role-authored Project Context is carrying more weight than the mechanical facts, and Phase 2 (structured PC) becomes urgent ahead of Phase 1.
+**Decision criteria** (whole-cycle cost):
+
+- ≤ $18 → ship Phase 0; defer Phase 1.
+- $18–$28 → ship Phase 0; proceed with Phase 1; re-measure.
+- ≥ $28 → existing docs aren't carrying enough; either authoring a consolidated `ARCHITECTURE.md` or accelerating Phase 2 (structured Project Context) becomes the priority.
 
 ## `code.bugs` track (separate from main fix)
 
