@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ateam/defaults"
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/container"
 )
@@ -510,5 +511,43 @@ func TestBuildTemplateVarsProjectFollowsProjectDir(t *testing.T) {
 	}
 	if vars.ProjectDir != "myproj" {
 		t.Errorf("ProjectDir = %q, want myproj (project name, not WorkDir basename)", vars.ProjectDir)
+	}
+}
+
+// TestSelfDocsSubstitution verifies that {{ATEAM_OWN_*}} placeholders resolve
+// to the content registered in defaults.SelfDocs by package main at init().
+// We seed the map directly here so the test doesn't depend on main running.
+func TestSelfDocsSubstitution(t *testing.T) {
+	saved := make(map[string]string, len(defaults.SelfDocs))
+	for k, v := range defaults.SelfDocs {
+		saved[k] = v
+	}
+	defer func() {
+		for k := range defaults.SelfDocs {
+			delete(defaults.SelfDocs, k)
+		}
+		for k, v := range saved {
+			defaults.SelfDocs[k] = v
+		}
+	}()
+
+	defaults.SelfDocs["README"] = "README-CONTENT"
+	defaults.SelfDocs["COMMANDS"] = "COMMANDS-CONTENT"
+	defaults.SelfDocs["CONFIG"] = "CONFIG-CONTENT"
+	defaults.SelfDocs["ISOLATION"] = "ISOLATION-CONTENT"
+	defaults.SelfDocs["ROLES"] = "ROLES-CONTENT"
+
+	r := TemplateVars{}.Replacer()
+	cases := map[string]string{
+		"{{ATEAM_OWN_README}}":    "README-CONTENT",
+		"{{ATEAM_OWN_COMMANDS}}":  "COMMANDS-CONTENT",
+		"{{ATEAM_OWN_CONFIG}}":    "CONFIG-CONTENT",
+		"{{ATEAM_OWN_ISOLATION}}": "ISOLATION-CONTENT",
+		"{{ATEAM_OWN_ROLES}}":     "ROLES-CONTENT",
+	}
+	for placeholder, want := range cases {
+		if got := r.Replace(placeholder); got != want {
+			t.Errorf("%s resolved to %q, want %q", placeholder, got, want)
+		}
 	}
 }

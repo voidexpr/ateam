@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ateam/defaults"
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/container"
 )
@@ -56,6 +57,14 @@ func (v TemplateVars) Replacer() *strings.Replacer {
 		"{{OUTPUT_FILE}}", v.OutputFile,
 		// Legacy alias for code_management_prompt.md; same dir as OUTPUT_DIR.
 		"{{EXECUTION_DIR}}", v.OutputDir,
+		// ateam's own docs, embedded in the binary. Prompts that need
+		// ateam-specific knowledge (commands, config, isolation, roles) can
+		// inline these instead of asking the agent to grep the host project.
+		"{{ATEAM_OWN_README}}", defaults.SelfDocs["README"],
+		"{{ATEAM_OWN_COMMANDS}}", defaults.SelfDocs["COMMANDS"],
+		"{{ATEAM_OWN_CONFIG}}", defaults.SelfDocs["CONFIG"],
+		"{{ATEAM_OWN_ISOLATION}}", defaults.SelfDocs["ISOLATION"],
+		"{{ATEAM_OWN_ROLES}}", defaults.SelfDocs["ROLES"],
 	)
 }
 
