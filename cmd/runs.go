@@ -29,9 +29,9 @@ When run inside a project, results are filtered to that project by default.
 
 Example:
   ateam ps
-  ateam ps --role security
+  ateam ps --role project.security
   ateam ps --action report
-  ateam ps --project myproject --role testing_basic`,
+  ateam ps --project myproject --role test.gaps`,
 	Args: cobra.NoArgs,
 	RunE: runRuns,
 }

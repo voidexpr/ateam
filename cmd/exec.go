@@ -54,12 +54,12 @@ or --no-stream / --no-summary individually.
 
 Example:
   ateam exec "say hello"
-  ateam exec "Analyze the auth module" --role security
+  ateam exec "Analyze the auth module" --role project.security
   ateam exec "test" --profile cheap
   ateam exec @prompt_file.md
   ateam exec @prompt_file.md --extra-prompt "focus on the auth module"
   echo "explain this code" | ateam exec
-  git diff | ateam exec --role critic_engineering
+  git diff | ateam exec --role critic.engineering
   ateam exec "say hi" --model sonnet
   ateam exec "quick check" --quiet`,
 	Args: cobra.MaximumNArgs(1),

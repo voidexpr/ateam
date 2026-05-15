@@ -25,7 +25,7 @@ Your scope is narrow on purpose: only the diff and its immediate test files. You
 ## What to look for
 
 - **New branch, no test**: the diff adds an `if`/`switch` case or a new error return, and no test in the diff exercises that branch. State the branch and the input class that triggers it.
-- **New function, no test**: a new exported function or a new non-trivial internal helper added with no corresponding test. Be careful: trivial getters, type definitions, and pass-through wrappers don't need tests (carry forward the "Few / High signal" discipline from `testing_basic`).
+- **New function, no test**: a new exported function or a new non-trivial internal helper added with no corresponding test. Be careful: trivial getters, type definitions, and pass-through wrappers don't need tests — apply the "few but high-signal" discipline shared with `test.gaps`.
 - **Changed signature, stale test**: a function's signature or return semantics changed, and the existing test still passes only because the test assertion didn't depend on the changed part. The test now under-protects the function.
 - **Bug fix with no regression test**: the diff fixes a bug (`fix:`, `correct`, `repair`, mentions of a wrong condition / silent failure / panic) and adds no test that would have failed before the fix. State the input that would have triggered the bug pre-fix.
 - **New CLI flag or command without flag-parsing test**: a new flag was wired through; there's no test asserting the flag's default, its non-default value, or its propagation to the runner. Cite the established flag-test pattern in the project (e.g., `cmd/code_test.go`'s `TestCodeDryRunAgentInjection`) so the recommendation is concrete.

@@ -94,16 +94,16 @@ timeout_minutes = 120
 # port = 8080  # fixed port for 'ateam serve' (default: random)
 
 [roles]
-security = "on"
-testing_basic = "on"
-refactor_small = "off"
+"project.security" = "on"
+"test.gaps" = "on"
+"code.structure" = "off"
 
 # [supervisor]
 # code_profile = "cheap"          # use a cheaper model for coding sub-runs
 
 # [profiles]
 # [profiles.roles]
-# security = "docker"             # run security reports in Docker
+# "project.security" = "docker"    # run security reports in Docker
 # critical_code_reviewer = "codex" # use codex agent for this role
 
 # [sandbox-extra]
@@ -158,9 +158,9 @@ Map individual roles to specific profiles or agents. This lets you run different
 ```toml
 [profiles]
 [profiles.roles]
-security = "docker"               # run security reports in Docker
+"project.security" = "docker"     # run security reports in Docker
 critical_code_reviewer = "codex"  # use codex agent for this role
-testing_full = "docker"           # testing needs Docker for build tools
+"test.gaps" = "docker"            # if test discovery needs Docker for the project's runner
 ```
 
 Values can be either a **profile name** (defined in `runtime.hcl`) or an **agent name** (also defined in `runtime.hcl`). When the value matches a known agent but not a profile, it's treated as an agent shorthand — equivalent to `--agent NAME` on the CLI.

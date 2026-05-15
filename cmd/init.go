@@ -34,7 +34,7 @@ Use --org-create-prompt for an interactive choice, or --org-create PATH.
 
 Example:
   ateam init
-  ateam init --name myproject --role testing_basic,security
+  ateam init --name myproject --role test.gaps,project.security
   ateam init --org-home`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInit,

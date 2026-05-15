@@ -85,7 +85,7 @@ Why: include the full details of the report finding and review that led to this 
 Tests: command(s) ran, pass/fail counts, and what was done about any failures
 ```
 
-Replace `ROLE_NAME` with the reporting role's name from the recommendation's Source field (e.g., `security`, `refactor_small`, `testing_basic`). If multiple roles sourced the recommendation, use the primary one.
+Replace `ROLE_NAME` with the reporting role's name from the recommendation's Source field (e.g., `code.bugs`, `project.security`, `test.gaps`). If multiple roles sourced the recommendation, use the primary one.
 
 ## Failure Report
 

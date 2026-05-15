@@ -77,14 +77,29 @@ func runRoles(cmd *cobra.Command, args []string) error {
 	}
 
 	w := newTable()
-	fmt.Fprintln(w, "ROLE\tSTATUS\tDESCRIPTION")
+	fmt.Fprintln(w, "ROLE\tSTATUS\tFLAGS\tDESCRIPTION")
 	for _, name := range allKnown {
-		desc := prompts.RoleDescription(name)
-		fmt.Fprintf(w, "%s\t%s\t%s\n", name, roleStatus(configRoles, name), desc)
+		meta := prompts.RoleMeta(name)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, roleStatus(configRoles, name), roleFlags(meta), meta.Description)
 	}
 	w.Flush()
 
 	return nil
+}
+
+// roleFlags renders the legacy/deprecated frontmatter flags for a role as a
+// comma-separated string ("legacy", "deprecated", "legacy,deprecated", or
+// empty). Used by `ateam roles` to surface the same signals that drive the
+// `--docs` filter so users see why a legacy role doesn't appear in ROLES.md.
+func roleFlags(meta prompts.RoleMetadata) string {
+	var flags []string
+	if meta.Legacy {
+		flags = append(flags, "legacy")
+	}
+	if meta.Deprecated {
+		flags = append(flags, "deprecated")
+	}
+	return strings.Join(flags, ",")
 }
 
 // roleStatus reports the effective enabled/disabled status of a role.

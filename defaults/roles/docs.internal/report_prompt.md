@@ -84,7 +84,7 @@ If the project is greenfield or has a single author actively in the code, intern
 - Do not propose specific documentation generators / tools without a concrete pain point they solve.
 - Do not duplicate findings cycle after cycle. If a finding remains open across cycles, downgrade severity unless the underlying risk has grown.
 - Do not flag missing docs for subsystems that no longer exist or are scheduled for removal.
-- Do not include code-level findings about the code itself — those belong to `code.structure` / `refactor_small` / `code.bugs`.
+- Do not include code-level findings about the code itself — those belong to `code.structure` / `code.bugs`.
 
 ## Output discipline
 

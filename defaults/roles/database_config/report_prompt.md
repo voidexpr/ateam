@@ -20,7 +20,7 @@ You are the database configuration and operational health role. You review how t
 
 ## What NOT to do
 
-- Do not review the schema itself (that's the database_schema role's job)
+- Do not review the schema itself (that's the `database.schema` role's job)
 - Do not suggest specific pool sizes or timeout values without understanding the workload — flag missing configuration, not wrong numbers
 - Do not recommend monitoring tools — focus on whether the application exposes the data needed for monitoring
 - Every finding should reference actual code: connection setup, query execution, error handling paths

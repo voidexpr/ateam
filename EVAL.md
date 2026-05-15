@@ -12,7 +12,7 @@ review** so you can compare consolidations and review prompts.
 
 ```bash
 # Compare a candidate prompt against the current on-disk prompt
-ateam eval --role security --prompt @candidate.md
+ateam eval --role project.security --prompt @candidate.md
 ```
 
 The previous-report context is always skipped, so both runs start fresh.
@@ -69,16 +69,16 @@ config picks the right agent and model for both sides.
 
 ```bash
 # Cheap iteration: haiku for both sides, sonnet for the judge
-ateam eval --role security --prompt @c.md --model haiku --judge-model sonnet
+ateam eval --role project.security --prompt @c.md --model haiku --judge-model sonnet
 
 # Compare base claude vs candidate codex
-ateam eval --role security --prompt @c.md --base-agent claude --candidate-agent codex
+ateam eval --role project.security --prompt @c.md --base-agent claude --candidate-agent codex
 ```
 
 ## What's printed
 
 ```
-=== Eval: report security ===
+=== Eval: report project.security ===
 
 Cost & metrics:
                 Base          Candidate     Delta
@@ -143,7 +143,7 @@ the max. The judge sees the concatenated reports (or the review, if
 
 ```bash
 # Smoke-test a new prompt
-ateam eval --role security --prompt @candidate.md --git-worktree
+ateam eval --role project.security --prompt @candidate.md --git-worktree
 
 # Does consolidating two roles lose findings?
 ateam eval --base-roles code.small,code.module \
@@ -151,10 +151,10 @@ ateam eval --base-roles code.small,code.module \
            --review --git-worktree
 
 # Tune a review prompt against the same set of reports
-ateam eval --role security --review \
+ateam eval --role project.security --review \
            --review-candidate-prompt @new_review.md
 
 # Cheap iteration: small model both sides, bigger model for the judge
-ateam eval --role security --prompt @c.md \
+ateam eval --role project.security --prompt @c.md \
            --model haiku --judge-model sonnet --no-judge
 ```

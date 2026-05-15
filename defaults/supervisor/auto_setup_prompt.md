@@ -43,14 +43,20 @@ Create a concise project overview in `.ateam/setup_overview.md`. This file is us
 
 Read the current `.ateam/config.toml` and update the `[roles]` section. Turn roles on/off based on what makes sense:
 
-- **Always on**: `refactor_small` (every project benefits)
-- **On if tests exist**: `testing_basic`, `testing_full` (only if the project has tests or should have them)
-- **On if external docs exist**: `docs_external` (README, API docs)
-- **On if internal docs matter**: `docs_internal` (code comments, architecture)
-- **On for production apps**: `security`, `production_assessment`
-- **On if dependencies exist**: `dependencies` (package.json, go.mod, Cargo.toml, etc.)
-- **Off for small/early projects**: `testing_full`, `production_assessment`
-- **Database roles**: only if a database is clearly used
+Prefer the dotted `collection.role` set (legacy single-name roles like `security` or `refactor_small` are kept on disk but deprecated — don't enable them).
+
+- **Always on**: `code.structure` (project-wide structural quality), `code.bugs` (bug hunt), `code.recent` (review the last few commits)
+- **On if tests exist or should**: `test.gaps` (coverage holes), `test.recent` (tests for recent changes)
+- **On if tests exist and are non-trivial**: `test.quality` (flakiness, weak assertions, over-mocking)
+- **On if external docs exist**: `docs.external` (README, install, public API)
+- **On if internal docs matter**: `docs.internal` (architecture, internal protocols, agent-facing instructions)
+- **On for production apps**: `project.security`, `project.production_ready`
+- **On if dependencies exist**: `project.dependencies` (package.json, go.mod, Cargo.toml, etc.)
+- **On for cross-cutting design review**: `design.architecture`
+- **On for build/test/lint foundations**: `project.automation`
+- **Database role**: `database.schema` only if a database with a managed schema is clearly used
+- **Off for small/early or maintenance-only projects**: `test.quality`, `project.production_ready`, `design.architecture`; consider `project.maintenance` instead for dormant projects
+- **Off by default unless explicitly opted in**: `critic.*`, `perf.*`, `docs.followable`, `test.blackbox`, `project.discover_cmd`
 
 Example:
 ```bash

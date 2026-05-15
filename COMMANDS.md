@@ -30,7 +30,7 @@ If no `.ateamorg/` is found, one is created in `$HOME` by default. Use `--org-cr
 
 ```bash
 ateam init
-ateam init --name myproject --role testing_basic,security
+ateam init --name myproject --role test.gaps,project.security
 ateam init --auto-setup                        # initialize and auto-configure
 ateam init --org-home                          # auto-create .ateamorg/ in $HOME
 ```
@@ -70,7 +70,7 @@ Run one or more roles in parallel to analyze the project and produce markdown re
 
 ```bash
 ateam report --roles all
-ateam report --roles security,testing_basic
+ateam report --roles project.security,test.gaps
 ateam report --roles all --extra-prompt "Focus on the API layer"
 ateam report --roles all --dry-run
 ateam report --rerun-failed              # re-run only roles that failed last time
@@ -110,7 +110,7 @@ By default review only feeds reports from currently-enabled roles into the super
 ateam review
 ateam review --extra-prompt "This is a production financial app"
 ateam review --prompt @custom_review.md
-ateam review --roles security,deps        # only these reports
+ateam review --roles project.security,project.dependencies        # only these reports
 ateam review --all                         # include disabled roles' reports
 ateam review --max-age 2h                  # drop reports older than 2h
 ateam review --dry-run
@@ -209,7 +209,7 @@ Run the full pipeline sequentially: report → review → code → verify. Pass 
 ```bash
 ateam all
 ateam all --extra-prompt "Focus on security"
-ateam all --roles refactor_small,testing_basic   # report+review only those roles
+ateam all --roles code.structure,test.gaps   # report+review only those roles
 ateam all --all                                  # include disabled roles' stale reports in review
 ateam all --max-age 2h                           # review drops reports older than 2h
 ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile docker
@@ -366,11 +366,11 @@ Prompt sources, in order of precedence:
 
 ```bash
 ateam exec "say hello"
-ateam exec "Analyze the auth module" --role security
+ateam exec "Analyze the auth module" --role project.security
 ateam exec "test" --profile docker
 ateam exec @prompt_file.md
 echo "explain this code" | ateam exec            # auto-detected
-git diff | ateam exec --role critic_engineering  # auto-detected
+git diff | ateam exec --role critic.engineering  # auto-detected
 echo "still works" | ateam exec -                # explicit "-"
 ```
 
@@ -447,9 +447,9 @@ Each positional argument is a prompt (text or `@filepath`). Agent execs run conc
 Resolve and print the full prompt for a role or supervisor without running it.
 
 ```bash
-ateam prompt --role security --action report
+ateam prompt --role project.security --action report
 ateam prompt --supervisor --action review
-ateam prompt --role security --action report --extra-prompt "Focus on auth"
+ateam prompt --role project.security --action report --extra-prompt "Focus on auth"
 ```
 
 | Flag | Description |
@@ -661,10 +661,10 @@ ateam export --ateam-project /path/to/.ateam  # export a specific project
 Run a role twice (base vs candidate) and score each side with an LLM judge on coverage, accuracy, actionability, and conciseness. See [EVAL.md](EVAL.md) for full documentation.
 
 ```bash
-ateam eval --role security --prompt @candidate.md
-ateam eval --role security --prompt @new.md --git-worktree
+ateam eval --role project.security --prompt @candidate.md
+ateam eval --role project.security --prompt @new.md --git-worktree
 ateam eval --base-roles code.small,code.module --candidate-roles code.consolidated --review
-ateam eval --role security --review --review-candidate-prompt @new_review.md
+ateam eval --role project.security --review --review-candidate-prompt @new_review.md
 ```
 
 | Flag | Description |
@@ -713,9 +713,9 @@ Update on-disk default prompts and runtime config to match the current binary.
 ### Debugging Prompts
 
 ```bash
-ateam report --roles security --dry-run      # print prompt without running
+ateam report --roles project.security --dry-run      # print prompt without running
 ateam review --dry-run                       # print prompt and list reports
-ateam prompt --role security --action report  # resolve and print a role prompt
+ateam prompt --role project.security --action report  # resolve and print a role prompt
 ```
 
 ### Stream Logs

@@ -58,7 +58,7 @@ ateam exec "/simplify the recent commits" && ateam all
 ## What if I only want to do some of the code changes or only run some of the reports ?
 
 * you can easily select which reports to run with `ateam report --roles ROLE1,ROLE2`
-* you can instruct the supervisor: `ateam review --extra-prompt "I only want tasks from refactoring_small and testing_basic"`
+* you can instruct the supervisor: `ateam review --extra-prompt "I only want tasks from code.structure and test.gaps"`
 
 ## What if I want to use ateam in a slightly different workflow than report-review-code-verify ?
 

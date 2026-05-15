@@ -76,8 +76,8 @@ Works from any project directory — discovers the .ateamorg/ and .ateam/ struct
 
 Example:
   ateam report
-  ateam report --roles testing_basic,security
-  ateam report --roles refactor_small --extra-prompt "Focus on the auth module"
+  ateam report --roles test.gaps,project.security
+  ateam report --roles code.structure --extra-prompt "Focus on the auth module"
   ateam report --extra-prompt @notes.md`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runReport(ReportOptions{

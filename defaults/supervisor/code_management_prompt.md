@@ -112,7 +112,7 @@ After all tasks have been attempted:
      coding cycle. The tests were passing before the cycle started.
      Failing tests: [list each failing test name/file].
      Investigate each failure, fix it, and commit. Do not change test assertions
-     unless the behavioral change was intentional — fix the code instead." --role testing_basic
+     unless the behavioral change was intentional — fix the code instead." --role test.gaps
      ```
      Record the fix run outcome in the execution report.
    - If tests were already failing before the cycle (pre-existing failures): note them but do not attempt to fix them — that's a separate task for the next review cycle.

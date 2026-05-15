@@ -11,12 +11,12 @@ You are NOT the role to file refactor, code-bug, dependency CVE, security, autom
 
 If your finding would fit any of these, drop it — wrong role:
 
-- `refactor_architecture` / `code.structure`: "this file is 400 lines", "type assertions cascade", "missing abstraction" → drop.
+- `design.architecture` / `code.structure`: "this file is 400 lines", "type assertions cascade", "missing abstraction" → drop.
 - `code.bugs` / `code.recent`: "function ignores cancellation", "swallowed error", "race condition" → drop.
 - `project.dependencies`: "package X has CVE", "version N behind" → drop.
 - `project.security`: "secret in process table", "CSP allows unsafe-inline" → drop.
 - `project.automation`: "missing CI", "stale pre-commit hook", "tool version not pinned" → drop.
-- `refactor_small`: "duplicated helper", "dead code", "rename suggestion" → drop.
+- `code.structure`: "duplicated helper", "dead code", "rename suggestion" → drop.
 
 You're left with the residue: **the decisions that landed the project on its current stack**. That's the residue you investigate.
 
