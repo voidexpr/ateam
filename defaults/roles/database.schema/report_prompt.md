@@ -103,6 +103,11 @@ A recommendation that lacks any of these on a mature project is a broken finding
 - **SQLite specifically**: WAL mode (`PRAGMA journal_mode=WAL`), `busy_timeout`, `synchronous`. If the app doesn't set these, recommend them once. This is a one-time finding, not a recurring report item.
 - **No other engine's runtime config belongs here** — Postgres/MySQL server config is operations-team territory.
 
+### Security
+- in general we want to scope permissions to the narrowest scope possible: read-only, read-write and only keep DDL permissions for admin scripts or tools (unless for the rare apps that might require it), for example:
+  - Connections used by applications should not have ADMIN privileges if the concept exists in the database and there is no clear feature in the application relying on it
+  - if a CLI or App is clearly read-only and using a user with WRITE privileges recommend to downgrade the user
+
 ## Severity calibration
 
 - **CRITICAL**: schema definition that is syntactically broken or will fail at startup (truncated SQL, missing semicolons in destructive operations, unreferenced FK to a non-existent table). Rare.
