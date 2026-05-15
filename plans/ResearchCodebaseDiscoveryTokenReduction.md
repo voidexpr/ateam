@@ -1032,3 +1032,697 @@ That will reduce token usage much more reliably than asking agents to write bett
 - [SCIP protocol](https://github.com/sourcegraph/scip)
 - [Codebase-Memory MCP](https://github.com/cs-zhanglei/codebase-memory) — structural code graph as MCP server
 - [Semgrep CE](https://github.com/semgrep/semgrep), [CodeQL](https://codeql.github.com/), [Trivy](https://github.com/aquasecurity/trivy), [Gitleaks](https://github.com/gitleaks/gitleaks), [jscpd](https://github.com/kucherenko/jscpd), [SQLFluff](https://sqlfluff.com/), [Atlas](https://atlasgo.io/), [SchemaSpy](https://schemaspy.org/)
+
+# Appendix: Incremental Maintenance of Codebase Information - RAW DUMP
+
+Research report: incremental LLM-maintained codebase knowledge for ateam
+
+As of May 14, 2026
+
+Bottom line
+
+Yes, people are actively exploring this, but under several different names:
+
+* repository-level documentation generation
+* living code wiki
+* persistent codebase memory
+* code graph / repository knowledge graph
+* incremental LLM dataflow
+* test impact analysis
+* agent instruction files / rules
+
+The exact thing you described — Makefile-like dependency tracking for LLM-generated architecture, test, verification, and code-map documents — is not yet a mature, standard open-source product. But the pieces exist. The closest matches are:
+
+1. RepoDoc: research prototype closest to your idea. It uses a repository knowledge graph, Git diffs, AST change detection, semantic impact propagation, and selective documentation regeneration.
+2. RepoAgent: open-source LLM documentation maintainer with Git-integrated incremental updates, but currently narrower and Python-oriented.
+3. CocoIndex: general incremental dataflow framework for LLM transformations; very relevant for “only recompute affected pieces.”
+4. Repowise / llmdoc / LLM wiki prototypes: practical early tools for codebase wikis, file hashes, Git checkpoints, and stale detection.
+5. Codebase-Memory, CodeRLM, GitNexus, CodeGraphContext: structural code graph systems that can serve as the dependency oracle for deciding which summaries are stale.
+6. pytest-testmon, Nx affected, Bazel/bazel-diff, Jest changed-file modes: deterministic tools that already solve part of “what tests/verification commands should run when.”
+
+My recommendation for ateam: do not make the LLM the only source of dependency truth. Treat LLM-written docs as derived build artifacts whose inputs are file hashes, symbol hashes, graph edges, analyzer outputs, test coverage data, and prompt/model versions.
+
+⸻
+
+1. The core pattern: docs as build targets
+
+The best mental model is exactly the one you proposed: generated knowledge documents as build artifacts.
+
+Traditional build systems already solve the analogous problem: determine which outputs need to be rebuilt when inputs change. GNU Make describes its job as automatically determining which pieces of a program need recompilation and issuing the relevant commands; Bazel goes further with declared inputs/outputs, action graphs, and cacheable actions.  ￼
+
+For ateam, the equivalent is:
+
+source files + graph indexes + tests + configs + prior docs
+  → generated knowledge docs
+  → coding agents / review agents / report agents
+
+Each generated doc should have a dependency declaration, not just a Git hash.
+
+Example:
+
+target: .ateam/knowledge/architecture.md
+kind: architecture_summary
+commit: 8b7a6c...
+generator:
+  name: architecture-doc-v3
+  prompt_sha: 91d0...
+  model: gpt-5.5-pro
+inputs:
+  files:
+    - path: package.json
+      blob: 1ab4...
+    - path: src/server/routes.ts
+      blob: 99ef...
+  symbols:
+    - name: BillingService
+      signature_hash: 42cd...
+    - name: UserController.create
+      signature_hash: c1a8...
+  graph_edges:
+    - src/server/routes.ts -> src/billing/BillingService.ts
+  derived_indexes:
+    - route_index_sha: 771a...
+    - schema_index_sha: 3d21...
+staleness:
+  hard_refresh_if:
+    - input_blob_changed
+    - public_symbol_signature_changed
+    - module_dependency_edge_changed
+    - generator_prompt_changed
+  review_if:
+    - new_file_in_relevant_module
+    - new_route_added
+    - new_database_table_added
+
+The important detail: the commit hash is necessary but not sufficient. A doc should say both:
+
+Generated from commit abc123
+
+and:
+
+Generated from these exact source spans, symbols, graph edges, commands, analyzer versions, and prompts.
+
+That lets you do Make/Bazel-like invalidation rather than “regenerate everything every commit.”
+
+⸻
+
+2. RepoAgent: Git-aware repository documentation maintenance
+
+RepoAgent is one of the clearest open-source explorations of LLM-maintained code documentation. It aims to generate, maintain, and update repository documentation, and its paper describes three stages: global structure analysis, documentation generation, and documentation update integrated with Git. It builds a project tree, extracts AST-level class/function structure, uses Jedi for caller/callee references, and forms a dependency graph.  ￼
+
+The most relevant part for your idea is its update mechanism. RepoAgent’s paper describes a Git pre-commit hook that checks code changes and updates documentation for affected objects. It updates documentation when an object’s source changes, when referrers no longer reference it, or when new references appear; it also intentionally avoids updating some documentation when only referenced objects change, because references are included primarily for background context rather than direct ownership.  ￼
+
+Why it matters for ateam
+
+RepoAgent is a strong signal that LLM-maintained docs should be tied to code objects and Git changes, not generated as one giant repo summary.
+
+It is especially relevant for:
+
+* per-file summaries;
+* per-class/per-function summaries;
+* maintaining local code documentation;
+* storing dependency-aware documentation units.
+
+Limitations
+
+RepoAgent is narrower than your desired system. Its own paper notes Python-specific limitations due to Jedi, the need for human oversight, hallucination risk, and immature documentation quality evaluation.  ￼
+
+For ateam, RepoAgent is useful as a pattern, but not sufficient as the full solution for:
+
+* architecture documents;
+* test-selection documents;
+* verification-command documents;
+* security maps;
+* database maps;
+* multi-language repositories.
+
+⸻
+
+3. RepoDoc: closest research match to “Makefile for summary docs”
+
+RepoDoc is probably the closest direct research match to what you are describing.
+
+It builds a repository knowledge graph and uses that graph as the semantic foundation for documentation. Its incremental update section describes taking the existing knowledge graph, existing generated documentation, and a commit diff, then producing updated documentation with minimal regeneration. The paper describes stages including change detection from Git diff plus AST analysis, semantic impact propagation through the RepoKG, selective regeneration, and validation of cross-references.  ￼
+
+This is very close to your desired flow:
+
+changed files
+  → changed AST entities
+  → affected graph nodes
+  → affected documentation sections
+  → selectively regenerate only those sections
+
+RepoDoc reports large efficiency gains from incremental updates, including reduced update time and token usage compared with full regeneration. Treat those as research results to validate on your own repos, but the approach is directly relevant.  ￼
+
+Why it matters for ateam
+
+RepoDoc points to the right architecture:
+
+Do not map docs directly to files only.
+Map docs to semantic entities and graph relationships.
+
+For example, architecture.md should not depend on every file in src/. It should depend on:
+
+* module graph;
+* public APIs;
+* entrypoints;
+* routes;
+* database schema;
+* important service boundaries;
+* cross-module dependencies;
+* selected representative files.
+
+Then a file change only invalidates architecture.md if it changes one of those relevant entities or relationships.
+
+Limitation
+
+RepoDoc is a research system, not necessarily a production-ready drop-in tool. But conceptually, it is the strongest match for ateam’s “minimum LLM work” goal.
+
+⸻
+
+4. CodeWiki, DeepWiki, Google Code Wiki: holistic codebase wikis
+
+Several projects focus on generating full codebase wikis rather than just local docstrings.
+
+CodeWiki
+
+CodeWiki is an open-source framework for generating repository-level documentation across multiple languages. It emphasizes hierarchical decomposition, recursive agentic processing, static-analysis dependency graphs, Tree-sitter extraction, cross-file/cross-module interactions, and system-level diagrams.  ￼
+
+This is relevant for the kinds of documents you listed:
+
+* architecture;
+* code map;
+* module interactions;
+* data flows;
+* high-level system understanding.
+
+CodeWiki seems more focused on generating comprehensive docs than on minimal incremental refresh, but its decomposition and dependency-graph approach are useful patterns for ateam.
+
+DeepWiki
+
+Cognition’s DeepWiki is a commercial/non-open system that automatically indexes repositories and produces architecture diagrams, source-linked docs, summaries, and Q&A. It also supports .devin/wiki.json, which lets users steer which pages should exist and what they should cover.  ￼
+
+The .devin/wiki.json idea is especially useful: ateam should have an explicit wiki/page manifest rather than asking the LLM to invent the doc structure every time.
+
+Example:
+
+{
+  "pages": [
+    {
+      "path": ".ateam/knowledge/architecture.md",
+      "purpose": "Explain system architecture, module boundaries, and key flows"
+    },
+    {
+      "path": ".ateam/knowledge/test-selection.md",
+      "purpose": "Explain what tests to run for different changes"
+    },
+    {
+      "path": ".ateam/knowledge/verification-commands.md",
+      "purpose": "List verified commands and when they apply"
+    },
+    {
+      "path": ".ateam/knowledge/code-map.md",
+      "purpose": "Map important code areas, entrypoints, schemas, and ownership"
+    }
+  ]
+}
+
+Google Code Wiki
+
+Google has also previewed Code Wiki, described as a platform that scans a full codebase and regenerates documentation after changes, with structured wiki pages, source links, diagrams, and chat over the generated wiki.  ￼
+
+This supports the general thesis that “living codebase wiki” is a real direction. However, from what is publicly described, it sounds more like continuous regeneration after changes than a fully transparent, open-source, minimal-delta Makefile-style system.
+
+⸻
+
+5. CocoIndex: incremental LLM dataflow
+
+CocoIndex is one of the most relevant infrastructure ideas even though it is not only for code documentation. It frames indexing as:
+
+target_state = transformation(source_state)
+
+and tracks dependencies so only affected portions are recomputed. Its code-wiki example describes scanning directories, extracting structured information from Python files using LLMs, aggregating file summaries, and generating Markdown/Mermaid documentation.  ￼
+
+The key feature for your use case is memoization/incrementality. CocoIndex describes using memo=True so unchanged inputs and unchanged transformation code skip recomputation, avoiding unnecessary remote LLM calls. It also discusses choosing granularity — directory, file, or smaller semantic units — and only reprocessing modified files or newly added projects.  ￼
+
+Why it matters for ateam
+
+CocoIndex is very close to the “LLM Makefile engine” layer.
+
+You could model:
+
+file_summary = LLM(file_content)
+module_summary = LLM(file_summaries + module_graph)
+architecture_doc = LLM(module_summaries + entrypoints + graph)
+test_selection_doc = deterministic_test_map + LLM_explanation
+verification_doc = command_registry + LLM_explanation
+
+Then recompute only the affected derived nodes.
+
+Caveat
+
+CocoIndex gives you incremental dataflow. It does not automatically know which code changes semantically affect architecture, tests, or verification. For that, you still need a code graph, coverage graph, build graph, or LLM classifier.
+
+⸻
+
+6. Hash-based and Git-checkpoint code wiki tools
+
+There are also smaller practical tools that match parts of your idea.
+
+llmdoc
+
+llmdoc scans a codebase, generates concise summaries, stores them either as comment headers or an index file, and uses SHA-256 hashes to detect changed files so only modified files require LLM calls. It also includes the previous summary during incremental updates.  ￼
+
+This is the simplest useful version of your system:
+
+file hash changed?
+  yes → update file summary
+  no  → reuse previous file summary
+
+It is not enough for architecture-level staleness, but it is a good primitive.
+
+Repowise
+
+Repowise is another practical early project. It positions itself as codebase intelligence for AI-assisted engineering, with generated docs, dependency graphs, Git analytics, and MCP-style access. Its docs describe detecting when a wiki is stale by comparing the last indexed commit to HEAD, plus auto-sync methods such as post-commit hooks, file watchers, webhooks, and polling.  ￼
+
+This is relevant to ateam because it treats stale knowledge as a first-class operational problem.
+
+LLM wiki idea
+
+Andrej Karpathy’s “LLM wiki” idea is not specific to code, but it describes the broader pattern: instead of rediscovering context on every query, an LLM incrementally builds and maintains a persistent wiki, integrates new sources, resolves contradictions, and keeps a navigable index/log.  ￼
+
+A code-specific article adapts that idea to Git: ingest HEAD, record the last commit, later diff last_commit..HEAD, update affected pages, and advance the checkpoint.  ￼
+
+For ateam, this suggests a useful principle:
+
+Agents should not repeatedly rediscover the repo.
+They should read a maintained, source-linked, stale-aware knowledge base.
+
+⸻
+
+7. Structural code graphs: the dependency oracle
+
+To decide whether a summary is stale, file hashes alone are not enough. You need to know what each file means in the codebase.
+
+That is where code graph systems matter.
+
+Relevant projects
+
+Codebase-Memory builds a persistent Tree-sitter-based knowledge graph exposed through MCP, with structural queries such as call graph traversal and impact analysis. Its paper reports large token reductions compared with file-exploration baselines.  ￼
+
+CodeRLM is a Rust server that indexes project files and symbols using Tree-sitter and exposes APIs for structure, symbols, source, callers, tests, grep, and targeted context retrieval.  ￼
+
+GitNexus and CodeGraphContext are newer projects in the same family: local code graph databases / MCP servers that index dependencies, calls, clusters, execution flows, and expose that context to AI agents.  ￼
+
+Aider’s repo map is also relevant: it uses Tree-sitter and graph ranking to create compact code maps for coding agents. It is not primarily a persistent doc updater, but it is strong evidence that compact graph-derived maps are useful for agent context.  ￼
+
+How this applies to stale summary docs
+
+A code graph lets you move from this crude rule:
+
+src/** changed → refresh architecture.md
+
+to this better rule:
+
+changed file contains only private helper body change
+  → refresh file summary only
+changed public symbol signature
+  → refresh file summary, module summary, code map, docs map
+changed route/auth/schema/entrypoint
+  → refresh architecture, security map, verification commands
+new file imported by core module
+  → classify and maybe add to architecture/code map
+new test file added
+  → refresh test-selection doc
+
+This is where the major token savings will come from.
+
+⸻
+
+8. Test and verification command selection: use deterministic tools first
+
+For “what tests to run when” and “what verification commands to run when,” the strongest existing work is not LLM-first. It is test impact analysis and build graph analysis.
+
+Useful tools and patterns
+
+pytest-testmon selects tests affected by changed files or methods by collecting dependencies between tests and executed code using Coverage.py, then comparing code changes against that dependency database.  ￼
+
+Nx affected computes affected projects/tasks from a base and head commit, allowing commands to run only on projects impacted by changes.  ￼
+
+bazel-diff computes affected Bazel targets between two Git revisions, which can be used to select the exact build/test set.  ￼
+
+Jest has changed-file modes such as running tests related to changes since a branch or commit.  ￼
+
+Recommendation for ateam
+
+Do not ask an LLM to invent test-selection logic from scratch. Instead:
+
+coverage data
++ build graph
++ package/project graph
++ test file naming conventions
++ historical test runs
++ LLM explanation layer
+
+The LLM can maintain a readable document like:
+```
+# What tests to run when
+## Backend route changes
+Run:
+- npm test -- routes
+- npm test -- auth
+- npm run typecheck
+Generated from:
+- route index
+- Jest dependency graph
+- package.json scripts
+- historical changed-file test mappings
+```
+But the actual mapping should come from deterministic sources whenever possible.
+
+⸻
+
+9. Agent instruction files and rules: useful destination, not enough by themselves
+
+There is also a separate ecosystem around persistent agent instructions:
+
+* AGENTS.md
+* CLAUDE.md
+* Cursor rules
+* Windsurf rules/memories
+* Cline memory/context systems
+* llms.txt
+
+OpenAI Codex documents AGENTS.md as project instructions that Codex reads before work, with root and nested files and a 32 KiB size cap.  ￼
+
+Windsurf distinguishes memories, rules, and AGENTS.md, and supports activation modes such as always-on, model-decision, glob-based, and manual activation. That is relevant because it points toward progressive disclosure: do not always include every summary; include the right summary when the agent is working in the matching area.  ￼
+
+Cline’s docs also highlight context window pressure, token usage, checkpoints, and ways to reduce baseline token use.  ￼
+
+Recommendation for ateam
+
+Use agent instruction files as entrypoints, not as the whole knowledge base.
+
+Example root AGENTS.md:
+```
+# Agent instructions
+Before broad exploration, read:
+- .ateam/knowledge/index.md
+Use area-specific docs only when relevant:
+- .ateam/knowledge/architecture.md
+- .ateam/knowledge/code-map.md
+- .ateam/knowledge/test-selection.md
+- .ateam/knowledge/verification-commands.md
+- .ateam/knowledge/security-map.md
+Each doc includes freshness metadata and source dependencies.
+Do not trust docs marked stale or suspect.
+```
+Then let ateam decide which doc to expose based on role and touched files.
+
+⸻
+
+10. Recommended ateam design
+
+I would build this as a knowledge build system.
+
+10.1 Generated docs
+
+Start with a small set:
+
+.ateam/knowledge/index.md
+.ateam/knowledge/architecture.md
+.ateam/knowledge/code-map.md
+.ateam/knowledge/test-selection.md
+.ateam/knowledge/verification-commands.md
+.ateam/knowledge/security-map.md
+.ateam/knowledge/database-map.md
+.ateam/knowledge/docs-map.md
+
+Each doc should contain:
+
+commit: <git_sha>
+status: current | stale | suspect | partial
+generated_at: <timestamp>
+generator: <name>
+prompt_sha: <sha>
+model: <model>
+input_summary:
+  files: <count>
+  symbols: <count>
+  graph_edges: <count>
+  analyzer_outputs: <count>
+stale_if:
+  - ...
+
+10.2 Store dependency metadata outside Markdown too
+
+Do not parse Markdown frontmatter as the source of truth. Store a machine-readable registry:
+
+.ateam/state/doc_targets.sqlite
+
+Tables:
+
+doc_target
+doc_input_file
+doc_input_symbol
+doc_input_graph_edge
+doc_input_command
+doc_input_analyzer
+doc_generation_run
+doc_staleness_event
+
+10.3 Use hierarchical summaries
+
+Avoid regenerating top-level docs directly from raw source.
+
+Use a tree:
+
+file summaries
+  → module summaries
+  → subsystem summaries
+  → architecture summary
+
+Then a changed file updates only:
+
+file summary
+possibly module summary
+possibly subsystem summary
+rarely architecture summary
+
+This is the same general idea used by RepoAgent’s bottom-up documentation generation and RepoDoc’s graph/impact propagation, but adapted to your ateam docs.  ￼
+
+10.4 Classify changes before calling the LLM
+
+For every Git diff:
+
+changed files
+  → changed AST entities
+  → changed public signatures?
+  → changed imports/dependencies?
+  → changed routes?
+  → changed DB schema?
+  → changed test files?
+  → changed package/build config?
+  → changed docs?
+
+Only then decide which summaries need LLM work.
+
+Example:
+
+Private function body changed
+  → update file summary only if summary references behavior
+  → no architecture refresh
+New route added
+  → update code map
+  → update architecture if new entrypoint/subsystem
+  → update security map
+  → update docs map
+  → update verification/test-selection docs
+package.json scripts changed
+  → update verification-commands.md
+  → maybe update test-selection.md
+new migration added
+  → update database-map.md
+  → maybe update architecture/security/docs maps
+
+10.5 New-file handling
+
+Your idea that an LLM should judge whether new files need inclusion is right, but use a two-stage process.
+
+First, deterministic classification:
+
+path
+extension/language
+imports
+exports
+symbols
+test naming
+route patterns
+schema/migration patterns
+config file names
+dependency graph location
+
+Then call the LLM only if needed:
+
+Given:
+- new file path
+- extracted symbols
+- imports/exports
+- nearest module summary
+- existing doc page manifest
+Decide:
+1. Which knowledge docs, if any, need updates?
+2. Which section should change?
+3. Is this a local implementation detail or architecture-relevant?
+4. What minimal patch should be made?
+
+This avoids spending tokens on obvious cases like:
+
+new snapshot file
+new generated file
+new test fixture
+new private helper
+
+10.6 Use patching, not regeneration
+
+When a doc is affected, do not ask:
+
+Rewrite architecture.md from scratch.
+
+Ask:
+
+Given old section X, changed facts Y, and source evidence Z,
+produce a minimal patch to section X.
+
+Then validate:
+
+- all cited files exist
+- all cited symbols exist
+- commands still exist
+- no stale commit hash remains
+- generated doc references only current facts
+
+This is closer to Make’s incremental rebuild principle and much cheaper than full regeneration.
+
+⸻
+
+11. Who is furthest ahead?
+
+Closest to your exact research idea
+
+RepoDoc is the closest conceptual match: repository knowledge graph, Git diff, AST change detection, semantic impact propagation, and selective regeneration.  ￼
+
+Closest open-source practical starting point
+
+RepoAgent is a useful starting point for Git-aware incremental code documentation, especially for Python and object-level docs.  ￼
+
+CocoIndex is a strong candidate for the incremental computation layer if you want to build your own system.  ￼
+
+Repowise and llmdoc are useful practical references for Git checkpointing, file hashes, stale wikis, and cheap summary refresh.  ￼
+
+Best codebase understanding / wiki generation systems
+
+CodeWiki, DeepWiki, and Google Code Wiki are the most relevant for holistic architecture/code-map documentation. CodeWiki is open source; DeepWiki and Google Code Wiki are more polished commercial/platform-style examples.  ￼
+
+Best dependency oracle layer
+
+Codebase-Memory, CodeRLM, GitNexus, and CodeGraphContext are the most relevant for building the dependency graph that tells you which docs are affected.  ￼
+
+Best for “what tests to run when”
+
+Use deterministic systems first: pytest-testmon, Nx affected, bazel-diff/Bazel, and Jest changed-file modes. The LLM should explain and maintain the human-readable policy, not be the only mechanism deciding test impact.  ￼
+
+⸻
+
+12. Practical first implementation for ateam
+
+A good MVP would be:
+
+1. Generate file-level summaries with content hashes.
+2. Generate module-level summaries from file summaries.
+3. Generate architecture/code-map docs from module summaries + graph facts.
+4. Generate test-selection docs from coverage/build/test-impact data.
+5. Generate verification-command docs from package scripts, CI config, and historical successful commands.
+6. Store every doc target’s dependencies in SQLite.
+7. On each commit, compute changed files/symbols/edges.
+8. Rebuild only affected summaries.
+9. Mark uncertain docs as suspect, not current.
+10. Let agents consume only relevant current docs.
+
+A minimal layout:
+
+.ateam/
+  knowledge/
+    index.md
+    architecture.md
+    code-map.md
+    test-selection.md
+    verification-commands.md
+    security-map.md
+    database-map.md
+  state/
+    manifest.sqlite
+    graph.sqlite
+    summaries.sqlite
+    doc-targets.sqlite
+    test-impact.sqlite
+  generated/
+    file-summaries/
+    module-summaries/
+    analyzer-results/
+
+A minimal rebuild algorithm:
+
+changed_files = git_diff(base, head)
+changed_entities = ast_index.diff(changed_files)
+changed_edges = graph.diff(changed_entities)
+affected_leaf_summaries = files_with_changed_hashes(changed_files)
+affected_module_summaries = modules_containing(affected_leaf_summaries)
+affected_docs = dependency_registry.query(
+    files=changed_files,
+    symbols=changed_entities,
+    graph_edges=changed_edges,
+)
+for doc in affected_docs:
+    if doc.can_patch:
+        llm_patch_doc_section(doc, changed_facts)
+    else:
+        llm_regenerate_doc(doc)
+mark_unaffected_docs_current_at(head)
+mark_uncertain_docs_suspect(head)
+
+The main design rule:
+
+LLM work should happen at the smallest semantic unit that changed.
+
+Not:
+
+Run all agents and regenerate all summaries every commit.
+
+⸻
+
+Final assessment
+
+Your instinct is right. These summary documents would likely be very beneficial for ateam and for coding agents generally, but only if they are treated as versioned, dependency-tracked, evidence-linked build artifacts.
+
+The field is moving in that direction, but it is fragmented:
+
+* RepoAgent and RepoDoc explore incremental repository documentation.
+* CodeWiki, DeepWiki, and Google Code Wiki explore generated codebase wikis.
+* CocoIndex explores incremental LLM dataflow.
+* Codebase-Memory and CodeRLM explore persistent code graphs.
+* pytest-testmon, Nx, Bazel, and Jest already solve parts of test impact analysis.
+* AGENTS.md/rules systems provide a place for agents to consume the resulting knowledge.
+
+For ateam, the novel and useful thing would be to combine these into one workflow:
+
+code graph
++ build/test impact graph
++ generated doc targets
++ file/symbol/edge hashes
++ Git checkpoints
++ minimal LLM patching
++ stale/suspect/current status
+
+That would give you the benefit of long-lived architecture/test/verification/code-map documents without paying the cost of re-reading and re-summarizing the whole repository on every agent run.
+
