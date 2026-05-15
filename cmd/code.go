@@ -85,7 +85,6 @@ Example:
   ateam code --review @custom_review.md
   ateam code --management @custom_management.md
   ateam code --dry-run`,
-	PreRunE: requireGitRepoPreRunE,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runCode(CodeOptions{
 			Review:            codeReview,
@@ -152,6 +151,9 @@ func runCode(opts CodeOptions) error {
 	if err != nil {
 		return err
 	}
+	if err := requireGitRepo(env, "code"); err != nil {
+		return err
+	}
 
 	var reviewContent string
 	if opts.Review == "" {
@@ -199,8 +201,10 @@ func runCode(opts CodeOptions) error {
 	// --project is required so sub-execs resolve the right .ateam directory
 	// even when the supervisor's cwd is outside the project tree (remote-mode
 	// `ateam code --project /elsewhere`). In project-local mode the value is
-	// redundant but harmless.
-	prompt += "- `--project " + env.SourceDir + "`\n"
+	// redundant but harmless. shellQuoteSingle keeps paths with spaces or
+	// shell-significant chars intact when the supervisor templates them into
+	// `ateam exec` commands.
+	prompt += "- `--project " + shellQuoteSingle(env.SourceDir) + "`\n"
 	if opts.Agent != "" {
 		prompt += "- `--agent " + opts.Agent + "`\n"
 	} else {

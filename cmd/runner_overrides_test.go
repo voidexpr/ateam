@@ -112,50 +112,30 @@ func TestApplyRunnerOverridesMaxBudgetError(t *testing.T) {
 	}
 }
 
-// TestRequireGitRepoPreRunE_NonRepo verifies the PreRunE rejects work-dirs
-// that aren't inside a git repo.
-func TestRequireGitRepoPreRunE_NonRepo(t *testing.T) {
-	saved := workDirFlag
-	t.Cleanup(func() { workDirFlag = saved })
-
-	workDirFlag = t.TempDir() // empty dir, not a git repo
-
-	dummy := newDummyCmd("report")
-	err := requireGitRepoPreRunE(dummy, nil)
+// TestRequireGitRepo_EmptyGitRepoDirErrors checks the post-resolveEnv gate.
+// requireGitRepo reads env.GitRepoDir, which resolveEnv populates from the
+// final WorkDir — so it validates the path the runner will actually use,
+// not whatever cwd was at PreRunE time (the previous bug).
+func TestRequireGitRepo_EmptyGitRepoDirErrors(t *testing.T) {
+	env := &root.ResolvedEnv{WorkDir: "/tmp/not-a-repo"}
+	err := requireGitRepo(env, "report")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if !strings.Contains(err.Error(), "report") {
-		t.Errorf("error %q should mention command name", err)
+		t.Errorf("error %q should mention action name", err)
 	}
 	if !strings.Contains(err.Error(), "git repo") {
 		t.Errorf("error %q should mention git repo requirement", err)
 	}
 }
 
-// TestRequireGitRepoPreRunE_InRepo verifies the PreRunE allows real git repos.
-func TestRequireGitRepoPreRunE_InRepo(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git CLI required")
+func TestRequireGitRepo_NonEmptyGitRepoDirPasses(t *testing.T) {
+	env := &root.ResolvedEnv{
+		WorkDir:    "/repo",
+		GitRepoDir: "/repo",
 	}
-	saved := workDirFlag
-	t.Cleanup(func() { workDirFlag = saved })
-
-	tmp := t.TempDir()
-	for _, args := range [][]string{
-		{"init", "-q", "-b", "main"},
-		{"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"},
-	} {
-		c := exec.Command("git", args...)
-		c.Dir = tmp
-		if out, err := c.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
-	workDirFlag = tmp
-
-	dummy := newDummyCmd("report")
-	if err := requireGitRepoPreRunE(dummy, nil); err != nil {
+	if err := requireGitRepo(env, "report"); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
@@ -356,4 +336,27 @@ func TestPreflightContainerSupportsWorkDir(t *testing.T) {
 			t.Errorf("error %q should mention --work-dir", err)
 		}
 	})
+}
+
+// TestShellQuoteSingle covers POSIX shell single-quoting used to keep paths
+// with spaces or shell-significant chars intact when they're embedded into
+// supervisor prompts (cmd/code.go injects --project with this helper).
+func TestShellQuoteSingle(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"simple", `'simple'`},
+		{"with space", `'with space'`},
+		{"with/slashes", `'with/slashes'`},
+		{"", `''`},
+		{`it's`, `'it'\''s'`},    // single quote escape
+		{`a$b\c"d`, `'a$b\c"d'`}, // $ \ " all safe inside single quotes
+		{"/Users/foo/My Project/proj", `'/Users/foo/My Project/proj'`},
+	}
+	for _, c := range cases {
+		got := shellQuoteSingle(c.in)
+		if got != c.want {
+			t.Errorf("shellQuoteSingle(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
 }

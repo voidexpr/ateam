@@ -55,6 +55,7 @@ func setupReviewFixture(t *testing.T) (orgDir, projPath, projDir string) {
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
 	}
+	initTestGitRepo(t, projPath)
 	projDir, err = root.InitProject(projPath, orgDir, root.InitProjectOpts{
 		Name:         "myproj",
 		EnabledRoles: []string{"testing_basic"},

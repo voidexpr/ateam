@@ -59,8 +59,7 @@ Example:
   ateam all --extra-prompt "Focus on security"
   ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile docker
   ateam all --timeout 30`,
-	PreRunE: requireGitRepoPreRunE,
-	RunE:    runAll,
+	RunE: runAll,
 }
 
 func init() {

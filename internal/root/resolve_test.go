@@ -390,9 +390,12 @@ func TestResolveWorkDirAndGitRepoDir(t *testing.T) {
 		if err := env.resolveWorkDir(""); err != nil {
 			t.Fatalf("resolveWorkDir: %v", err)
 		}
+		// WorkDir is realPath'd so it matches env.ProjectDir / env.SourceDir
+		// (also realPath'd at discovery). Compare against the resolved cwd.
 		cwd, _ := os.Getwd()
-		if env.WorkDir != cwd {
-			t.Errorf("WorkDir = %q, want cwd %q", env.WorkDir, cwd)
+		wantCwd := realPath(cwd)
+		if env.WorkDir != wantCwd {
+			t.Errorf("WorkDir = %q, want realPath(cwd) %q", env.WorkDir, wantCwd)
 		}
 		// Run from a non-repo temp dir to guarantee GitRepoDir = "".
 		tmp := resolvedTempDir(t)
@@ -529,5 +532,32 @@ func TestLookupFromSeedsWorkDirFromStart(t *testing.T) {
 	}
 	if env.WorkDir != base {
 		t.Errorf("WorkDir = %q, want %q (the start path, not process cwd)", env.WorkDir, base)
+	}
+}
+
+// TestResolveWorkDirCanonicalisesSymlinks verifies the fix for the
+// symlink-unsafe in-tree detection finding: env.WorkDir is realPath'd so
+// callers comparing it to ProjectDir (also realPath'd at discovery) use
+// the same canonical form.
+func TestResolveWorkDirCanonicalisesSymlinks(t *testing.T) {
+	tmp := resolvedTempDir(t)
+	realDir := filepath.Join(tmp, "real")
+	if err := os.MkdirAll(realDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	symlink := filepath.Join(tmp, "link")
+	if err := os.Symlink(realDir, symlink); err != nil {
+		t.Fatal(err)
+	}
+
+	env := &ResolvedEnv{}
+	if err := env.OverrideWorkDir(symlink); err != nil {
+		t.Fatalf("OverrideWorkDir: %v", err)
+	}
+	// WorkDir must equal the symlink target, not the symlink path —
+	// otherwise pathInside(WorkDir, projectRoot) misclassifies a symlinked
+	// cwd as outside the project tree.
+	if env.WorkDir != realDir {
+		t.Errorf("WorkDir = %q, want realPath %q (symlink should resolve)", env.WorkDir, realDir)
 	}
 }

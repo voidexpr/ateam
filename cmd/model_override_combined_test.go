@@ -34,6 +34,7 @@ func setupMiniProject(t *testing.T, enabled []string) (orgDir, projPath, projDir
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
 	}
+	initTestGitRepo(t, projPath)
 	projDir, err = root.InitProject(projPath, orgDir, root.InitProjectOpts{
 		Name:         "myproj",
 		EnabledRoles: enabled,

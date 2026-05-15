@@ -2,41 +2,32 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
+	"strings"
 
-	"github.com/ateam/internal/gitutil"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
-	"github.com/spf13/cobra"
 )
 
-// requireGitRepoPreRunE is the cobra PreRunE for action commands (report,
-// code, review, verify, all) that require their work-dir to be inside a git
-// repo or worktree. exec/parallel skip this check by design — they are the
-// "run anywhere" commands.
-//
-// The check resolves --work-dir (or os.Getwd()) and runs gitutil.TopLevel.
-// Missing git CLI is treated the same as "not a repo" — both fail closed.
-func requireGitRepoPreRunE(cmd *cobra.Command, _ []string) error {
-	workDir := workDirFlag
-	if workDir == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("cannot determine current directory: %w", err)
-		}
-		workDir = cwd
-	} else {
-		abs, err := filepath.Abs(workDir)
-		if err != nil {
-			return fmt.Errorf("cannot resolve --work-dir: %w", err)
-		}
-		workDir = abs
+// shellQuoteSingle returns s wrapped in POSIX shell single quotes. Single
+// quotes inside s are escaped as `'\”`. Use when injecting filesystem paths
+// (which may contain spaces or other shell-significant chars) into prompts
+// the supervisor templates into shell commands.
+func shellQuoteSingle(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// requireGitRepo asserts that env.WorkDir is inside a git repo or worktree.
+// Called from the runE of report/code/review/verify/all *after* resolveEnv
+// has applied --work-dir and the project-aware promotion policy, so the
+// check validates the same path the runner will actually use. PreRunE was
+// the wrong layer: it validated the pre-promotion cwd, which could pass for
+// a subdir-that-is-its-own-repo while the post-promotion WorkDir landed
+// outside any repo.
+func requireGitRepo(env *root.ResolvedEnv, action string) error {
+	if env.GitRepoDir != "" {
+		return nil
 	}
-	if gitutil.TopLevel(workDir) == "" {
-		return fmt.Errorf("%s requires the work directory to be inside a git repo or worktree; %q is not in one. Run from inside a repo or pass --work-dir <repo-path>", cmd.Name(), workDir)
-	}
-	return nil
+	return fmt.Errorf("%s requires the work directory to be inside a git repo or worktree; %q is not in one. Run from inside a repo or pass --work-dir <repo-path>", action, env.WorkDir)
 }
 
 // RunnerOverrides bundles every CLI-flag override that flows uniformly into

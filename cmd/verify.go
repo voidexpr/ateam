@@ -58,7 +58,6 @@ Example:
   ateam verify
   ateam verify --extra-prompt "Pay extra attention to migrations"
   ateam verify --dry-run`,
-	PreRunE: requireGitRepoPreRunE,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runVerify(VerifyOptions{
 			ExtraPrompt:     verifyExtraPrompt,
@@ -100,6 +99,9 @@ func init() {
 func runVerify(opts VerifyOptions) error {
 	env, err := resolveEnv()
 	if err != nil {
+		return err
+	}
+	if err := requireGitRepo(env, "verify"); err != nil {
 		return err
 	}
 

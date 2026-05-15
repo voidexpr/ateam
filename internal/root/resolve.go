@@ -174,6 +174,11 @@ func (e *ResolvedEnv) resolveWorkDir(workDirOverride string) error {
 		}
 		target = abs
 	}
+	// Resolve symlinks so comparisons against env.ProjectDir / env.SourceDir
+	// (both realPath'd at discovery time) use the same canonical form.
+	// Without this, a symlinked cwd inside the project is misclassified as
+	// "outside the project tree" by the cwd-in-project check.
+	target = realPath(target)
 	if e.WorkDir == target {
 		return nil
 	}

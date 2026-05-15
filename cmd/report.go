@@ -79,7 +79,6 @@ Example:
   ateam report --roles test.gaps,project.security
   ateam report --roles code.structure --extra-prompt "Focus on the auth module"
   ateam report --extra-prompt @notes.md`,
-	PreRunE: requireGitRepoPreRunE,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runReport(ReportOptions{
 			Roles:                reportRoles,
@@ -133,6 +132,9 @@ func init() {
 func runReport(opts ReportOptions) error {
 	env, err := resolveEnv()
 	if err != nil {
+		return err
+	}
+	if err := requireGitRepo(env, "report"); err != nil {
 		return err
 	}
 

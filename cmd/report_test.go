@@ -22,6 +22,7 @@ func TestReportDryRun(t *testing.T) {
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
 	}
+	initTestGitRepo(t, projPath)
 	projDir, err := root.InitProject(projPath, orgDir, root.InitProjectOpts{
 		Name:         "myproj",
 		EnabledRoles: []string{"testing_basic"},
@@ -69,6 +70,7 @@ func TestRerunFailedDryRunSelectsOnlyFailed(t *testing.T) {
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
 	}
+	initTestGitRepo(t, projPath)
 	_, err = root.InitProject(projPath, orgDir, root.InitProjectOpts{
 		Name:         "myproj",
 		EnabledRoles: []string{"testing_basic", "security"},
@@ -161,6 +163,7 @@ func TestReportRoleSelectionModes(t *testing.T) {
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
 	}
+	initTestGitRepo(t, projPath)
 	if _, err := root.InitProject(projPath, orgDir, root.InitProjectOpts{
 		Name: "myproj",
 		// security ON; testing_basic OFF (per InitProject's "everything not in
@@ -299,6 +302,7 @@ func TestRerunFailedMutuallyExclusiveWithRoles(t *testing.T) {
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
 	}
+	initTestGitRepo(t, projPath)
 	if _, err := root.InitProject(projPath, orgDir, root.InitProjectOpts{
 		Name:         "myproj",
 		EnabledRoles: []string{"testing_basic"},

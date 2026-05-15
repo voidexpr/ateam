@@ -23,6 +23,7 @@ func TestAllRunsAllFourPhases(t *testing.T) {
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
 	}
+	initTestGitRepo(t, projPath)
 	if _, err := root.InitProject(projPath, orgDir, root.InitProjectOpts{
 		Name:         "myproj",
 		EnabledRoles: []string{"testing_basic"},
@@ -93,6 +94,7 @@ func TestAllNoVerifyStopsAfterCode(t *testing.T) {
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
 	}
+	initTestGitRepo(t, projPath)
 	if _, err := root.InitProject(projPath, orgDir, root.InitProjectOpts{
 		Name:         "myproj",
 		EnabledRoles: []string{"testing_basic"},
@@ -139,6 +141,7 @@ func TestAllDefaultRoles(t *testing.T) {
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
 	}
+	initTestGitRepo(t, projPath)
 	if _, err := root.InitProject(projPath, orgDir, root.InitProjectOpts{
 		Name:         "myproj",
 		EnabledRoles: []string{"testing_basic"},
@@ -192,6 +195,7 @@ func TestAllVerifyRunCount(t *testing.T) {
 		if err := os.MkdirAll(projPath, 0755); err != nil {
 			t.Fatal(err)
 		}
+		initTestGitRepo(t, projPath)
 		if _, err := root.InitProject(projPath, orgDir, root.InitProjectOpts{
 			Name:         "myproj",
 			EnabledRoles: []string{"testing_basic"},
@@ -269,6 +273,7 @@ func TestAllPropagatesModelAndBudgetFlags(t *testing.T) {
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
 	}
+	initTestGitRepo(t, projPath)
 	if _, err := root.InitProject(projPath, orgDir, root.InitProjectOpts{
 		Name:         "myproj",
 		EnabledRoles: []string{"testing_basic"},

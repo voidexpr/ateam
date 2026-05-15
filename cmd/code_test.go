@@ -19,6 +19,7 @@ func TestCodeDryRunAgentInjection(t *testing.T) {
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
 	}
+	initTestGitRepo(t, projPath)
 	if _, err := root.InitProject(projPath, orgDir, root.InitProjectOpts{
 		Name:         "myproj",
 		EnabledRoles: []string{"testing_basic"},
@@ -61,6 +62,7 @@ func TestCodeDryRunSupervisorAgentOverride(t *testing.T) {
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
 	}
+	initTestGitRepo(t, projPath)
 	if _, err := root.InitProject(projPath, orgDir, root.InitProjectOpts{
 		Name:         "myproj",
 		EnabledRoles: []string{"testing_basic"},
