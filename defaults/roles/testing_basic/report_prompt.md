@@ -1,5 +1,7 @@
 ---
 description: Ensures a minimal set of high-value regression tests covering critical paths.
+deprecated: true
+legacy: true
 ---
 # Role: Minimal Regression Testing
 

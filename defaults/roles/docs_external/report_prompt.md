@@ -1,5 +1,7 @@
 ---
 description: Reviews user-facing documentation: README quality, install instructions, API docs, and accuracy.
+deprecated: true
+legacy: true
 ---
 # Role: External Documentation
 

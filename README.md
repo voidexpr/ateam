@@ -144,14 +144,14 @@ Each run archives its artifacts. The next cycle's reports incorporate previous f
 
 ### Workflow Examples
 
-Daily (quick pass):
+Daily (quick pass, focused on recent changes):
 ```bash
-ateam all --roles refactor_small,docs_external,testing_basic
+ateam all --roles code.recent,test.recent
 ```
 
 Weekly (thorough):
 ```bash
-ateam all --roles security,dependencies,testing_full
+ateam all --roles code.bugs,test.gaps,project.security,project.dependencies,design.architecture
 ```
 
 Step by step (with review):
@@ -266,20 +266,25 @@ An ateam project is a `.ateam` folder in your code base, a parent directory ($HO
 
 Many built-in roles covering security, testing, documentation, dependencies, refactoring, and more. See [ROLES.md](ROLES.md) for full descriptions.
 
-**Enabled by default** (8 roles):
+Roles are organized into collections using a `collection.role` naming convention (e.g. `code.bugs`, `test.recent`). Older single-name roles like `security` or `refactor_small` are kept on disk for backward compatibility but hidden from listings — see [ROLES.md](ROLES.md) for the canonical list.
+
+**Enabled by default** (11 roles):
 
 | Role | Description |
 |------|-------------|
-| `database_schema` | Analyzes schema definitions, migrations, indexes, constraints, and naming conventions. |
-| `dependencies` | Assesses dependency health: outdated packages, unused deps, duplicates, and CVE vulnerabilities. |
-| `docs_external` | Reviews user-facing documentation: README quality, install instructions, API docs, and accuracy. |
-| `docs_internal` | Assesses developer-facing docs: architecture guides, onboarding, inline comments, and config docs. |
-| `project_characteristics` | Produces a structured project profile: size, complexity, tech stack, test coverage, and activity. |
-| `refactor_small` | Concrete code improvements: naming, duplication, error handling, dead code, and conventions. |
-| `security` | Security vulnerability analysis: injection, auth flaws, hardcoded secrets, input validation, and CVEs. |
-| `testing_basic` | Ensures a minimal set of high-value regression tests covering critical paths. |
+| `code.bugs` | Hunts for logic bugs across the codebase — wrong conditions, broken contracts, silent failures, lifecycle and concurrency issues — with strict false-positive filtering. |
+| `code.recent` | Reviews recent changes (uncommitted + last few commits) for bugs, regressions, duplication, and structural slips before they harden into debt. |
+| `code.structure` | Project-wide structural quality — duplication, anti-patterns, naming, layering, missing/unnecessary abstractions — tagged by scope (local \| module \| architecture). |
+| `design.architecture` | System-design review — where logic should live across layers, API/contract design quality, service boundary decisions, and cross-component operational contracts. |
+| `docs.external` | Maintains user-facing docs — README, install, usage examples, public API reference. Drives both presence and accuracy with README-size discipline. |
+| `docs.internal` | Maintains engineer-facing technical depth — architecture, internal protocols/formats, build/test setup rationale, per-area design principles, and agent-facing instructions. |
+| `project.automation` | Project foundations and automation — strict priority order: build/verification first, multi-tier test commands, then lint/format, then hooks, with CI/CD as the lowest priority. |
+| `project.dependencies` | Conservative dependency health review — flags abandoned/EOL packages, deprecated APIs in use, exploitable CVEs, and major-version-gap blockers. |
+| `project.security` | First-line security review — focuses on confirmed exploitable bugs and data exposure with realistic triggers. |
+| `test.gaps` | Project-wide missing-test discovery — untested CLI commands, untested user-visible workflows, 0%-coverage functions on reachable paths, and integration boundaries with no end-to-end test. |
+| `test.recent` | Checks that recent changes have appropriate test coverage — new branches exercised, modified contracts re-tested, bug fixes locked in by regression tests. |
 
-Enable/disable roles in `.ateam/config.toml` or let `ateam auto-setup` configure them based on your project.
+Role enablement is opt-in: only roles explicitly listed as `on` in `config.toml` are included when running `ateam report --roles all`. Edit `.ateam/config.toml` to enable additional roles, or let `ateam auto-setup` configure them based on your project. Any role can still be run by name (`ateam report --roles code.bugs,test.quality`) regardless of its default status.
 
 ### Creating Custom Roles
 

@@ -521,3 +521,70 @@ func TestResolveValueStdin(t *testing.T) {
 		})
 	}
 }
+
+func TestParsePromptFrontmatter(t *testing.T) {
+	cases := []struct {
+		name     string
+		content  string
+		wantMeta RoleMetadata
+		wantBody string
+	}{
+		{
+			name:     "description only",
+			content:  "---\ndescription: Hello world\n---\n# Body\n",
+			wantMeta: RoleMetadata{Description: "Hello world"},
+			wantBody: "# Body\n",
+		},
+		{
+			name:     "deprecated and legacy flags",
+			content:  "---\ndescription: Old role\ndeprecated: true\nlegacy: true\n---\nbody",
+			wantMeta: RoleMetadata{Description: "Old role", Deprecated: true, Legacy: true},
+			wantBody: "body",
+		},
+		{
+			name:     "deprecated without legacy",
+			content:  "---\ndescription: Still listed\ndeprecated: true\n---\nbody",
+			wantMeta: RoleMetadata{Description: "Still listed", Deprecated: true},
+			wantBody: "body",
+		},
+		{
+			name:     "no frontmatter",
+			content:  "# Just a body\n",
+			wantMeta: RoleMetadata{},
+			wantBody: "# Just a body\n",
+		},
+		{
+			name:     "false flags are not set",
+			content:  "---\ndescription: New\ndeprecated: false\nlegacy: false\n---\nbody",
+			wantMeta: RoleMetadata{Description: "New"},
+			wantBody: "body",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			meta, body := ParsePromptFrontmatter(tc.content)
+			if meta != tc.wantMeta {
+				t.Errorf("meta = %+v, want %+v", meta, tc.wantMeta)
+			}
+			if body != tc.wantBody {
+				t.Errorf("body = %q, want %q", body, tc.wantBody)
+			}
+		})
+	}
+}
+
+func TestRoleMetaLegacyFlag(t *testing.T) {
+	// security is an embedded legacy role marked deprecated + legacy.
+	meta := RoleMeta("security")
+	if !meta.Legacy {
+		t.Errorf("security should be marked legacy; meta = %+v", meta)
+	}
+	if !meta.Deprecated {
+		t.Errorf("security should be marked deprecated; meta = %+v", meta)
+	}
+	// code.bugs is a dotted current role — neither flag should be set.
+	meta = RoleMeta("code.bugs")
+	if meta.Legacy || meta.Deprecated {
+		t.Errorf("code.bugs should not be legacy/deprecated; meta = %+v", meta)
+	}
+}

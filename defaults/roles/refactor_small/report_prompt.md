@@ -1,5 +1,7 @@
 ---
 description: Concrete code improvements: naming, duplication, error handling, dead code, and conventions.
+deprecated: true
+legacy: true
 ---
 # Role: Small Refactoring
 

@@ -1,5 +1,7 @@
 ---
 description: Audits CI/CD pipelines, linting, formatting, pre-commit hooks, and build automation gaps.
+deprecated: true
+legacy: true
 ---
 # Role: Automation
 

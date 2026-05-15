@@ -1,5 +1,7 @@
 ---
 description: Looks for the laziest correct solution: replace custom code with existing tools, cut unnecessary complexity.
+deprecated: true
+legacy: true
 ---
 # Role: Shortcut Taker
 

@@ -1,5 +1,7 @@
 ---
 description: Reviews connection management, pooling, timeouts, transactions, and operational readiness.
+deprecated: true
+legacy: true
 ---
 # Role: Database Configuration
 

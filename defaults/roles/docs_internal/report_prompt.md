@@ -1,5 +1,7 @@
 ---
 description: Assesses developer-facing docs: architecture guides, onboarding, inline comments, and config docs.
+deprecated: true
+legacy: true
 ---
 # Role: Internal Documentation
 

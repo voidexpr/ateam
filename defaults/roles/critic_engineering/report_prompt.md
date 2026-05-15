@@ -1,5 +1,7 @@
 ---
 description: Senior engineer perspective: evaluates tech choices, flags over-engineering or reinvented wheels.
+deprecated: true
+legacy: true
 ---
 # Role: Engineering Critic
 

@@ -1,5 +1,7 @@
 ---
 description: Security vulnerability analysis: injection, auth flaws, hardcoded secrets, input validation, and CVEs.
+deprecated: true
+legacy: true
 ---
 # Role: Security
 

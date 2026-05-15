@@ -1,5 +1,7 @@
 ---
 description: Analyzes schema definitions, migrations, indexes, constraints, and naming conventions.
+deprecated: true
+legacy: true
 ---
 # Role: Database Schema
 

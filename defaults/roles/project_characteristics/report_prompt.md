@@ -1,5 +1,7 @@
 ---
 description: Produces a structured project profile: size, complexity, tech stack, test coverage, and activity.
+deprecated: true
+legacy: true
 ---
 # Role: Project Characteristics
 

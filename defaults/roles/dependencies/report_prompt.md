@@ -1,5 +1,7 @@
 ---
 description: Assesses dependency health: outdated packages, unused deps, duplicates, and CVE vulnerabilities.
+deprecated: true
+legacy: true
 ---
 # Role: Dependencies
 

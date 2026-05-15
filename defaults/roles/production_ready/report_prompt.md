@@ -1,5 +1,7 @@
 ---
 description: Audits for production readiness: auth gaps, unsafe flags, secrets in code, and data exposure.
+deprecated: true
+legacy: true
 ---
 # Role: Production Readiness
 

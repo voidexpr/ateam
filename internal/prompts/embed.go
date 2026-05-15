@@ -21,36 +21,64 @@ type PromptDiff struct {
 // AllRoleIDs is the sorted list of role IDs discovered from embedded prompt files.
 var AllRoleIDs = discoverRoleIDs()
 
+// RoleMetadata holds the recognized frontmatter fields of a role prompt.
+// Legacy roles are predecessors superseded by a dotted-prefix replacement —
+// they are hidden from `ateam roles --docs` but still discoverable when named
+// explicitly. Deprecated roles still appear in the docs but are flagged so
+// users see the deprecation before adopting them.
+type RoleMetadata struct {
+	Description string
+	Deprecated  bool
+	Legacy      bool
+}
+
 // ParsePromptFrontmatter extracts YAML frontmatter from a markdown prompt.
-// Returns the description (if present) and the body without frontmatter.
-func ParsePromptFrontmatter(content string) (description, body string) {
+// Returns the parsed metadata and the body without frontmatter.
+func ParsePromptFrontmatter(content string) (meta RoleMetadata, body string) {
 	if !strings.HasPrefix(content, "---\n") {
-		return "", content
+		return RoleMetadata{}, content
 	}
 	end := strings.Index(content[4:], "\n---\n")
 	if end < 0 {
-		return "", content
+		return RoleMetadata{}, content
 	}
 	frontmatter := content[4 : 4+end]
 	body = strings.TrimLeft(content[4+end+5:], "\n")
 	for _, line := range strings.Split(frontmatter, "\n") {
-		if strings.HasPrefix(line, "description:") {
-			description = strings.TrimSpace(strings.TrimPrefix(line, "description:"))
+		if v, ok := trimFrontmatterField(line, "description:"); ok {
+			meta.Description = v
+		} else if v, ok := trimFrontmatterField(line, "deprecated:"); ok {
+			meta.Deprecated = v == "true"
+		} else if v, ok := trimFrontmatterField(line, "legacy:"); ok {
+			meta.Legacy = v == "true"
 		}
 	}
-	return description, body
+	return meta, body
 }
 
-// RoleDescription returns the description from a role's report_prompt.md frontmatter.
-// Falls back to "" if the role has no frontmatter, no description field, or is not embedded.
-func RoleDescription(roleID string) string {
+func trimFrontmatterField(line, prefix string) (string, bool) {
+	if !strings.HasPrefix(line, prefix) {
+		return "", false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(line, prefix)), true
+}
+
+// RoleMeta returns the parsed frontmatter for a built-in role. Returns the
+// zero value when the role isn't embedded or has no frontmatter.
+func RoleMeta(roleID string) RoleMetadata {
 	path := fmt.Sprintf("roles/%s/report_prompt.md", roleID)
 	data, err := defaults.FS.ReadFile(path)
 	if err != nil {
-		return ""
+		return RoleMetadata{}
 	}
-	desc, _ := ParsePromptFrontmatter(string(data))
-	return desc
+	meta, _ := ParsePromptFrontmatter(string(data))
+	return meta
+}
+
+// RoleDescription returns the description from a role's report_prompt.md
+// frontmatter. Falls back to "" when missing.
+func RoleDescription(roleID string) string {
+	return RoleMeta(roleID).Description
 }
 
 func discoverRoleIDs() []string {

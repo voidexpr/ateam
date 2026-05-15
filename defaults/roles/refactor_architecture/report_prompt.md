@@ -1,5 +1,7 @@
 ---
 description: High-level structural analysis: coupling, circular deps, layering violations, and module organization.
+deprecated: true
+legacy: true
 ---
 # Role: Architecture Analysis
 

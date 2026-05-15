@@ -1,5 +1,7 @@
 ---
 description: Product manager perspective: questions whether the project scope and approach are justified.
+deprecated: true
+legacy: true
 ---
 # Role: Project Critic
 

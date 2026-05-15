@@ -1,5 +1,7 @@
 ---
 description: Reviews project layout, build system, config files, naming conventions, and entry points.
+deprecated: true
+legacy: true
 ---
 # Role: Project Structure
 

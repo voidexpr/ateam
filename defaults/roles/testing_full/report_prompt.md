@@ -1,5 +1,7 @@
 ---
 description: Comprehensive testing analysis: unit/integration/e2e gaps, edge cases, flaky tests, and CI reliability.
+deprecated: true
+legacy: true
 ---
 # Role: Full Testing
 
