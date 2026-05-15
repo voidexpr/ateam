@@ -36,7 +36,13 @@ func init() {
 func runEnv(cmd *cobra.Command, args []string) error {
 	env, err := lookupEnv()
 	if err != nil {
-		fmt.Printf("Org: (not found — run 'ateam install' to set up)\n")
+		// Differentiate "no org/project anywhere" (the bootstrap case) from
+		// explicit-flag failures, which carry their own actionable message.
+		if orgFlag != "" || projectFlag != "" {
+			fmt.Printf("Resolve failed: %s\n", err)
+		} else {
+			fmt.Printf("Org: (not found — run 'ateam install' to set up)\n")
+		}
 		return nil
 	}
 

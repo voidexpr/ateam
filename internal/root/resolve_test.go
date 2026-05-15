@@ -561,3 +561,47 @@ func TestResolveWorkDirCanonicalisesSymlinks(t *testing.T) {
 		t.Errorf("WorkDir = %q, want realPath %q (symlink should resolve)", env.WorkDir, realDir)
 	}
 }
+
+// TestResolveProjectPathWalksUpFromSubdir verifies that --project PATH walks
+// up to find .ateam/ — the same semantics as flag-less discovery. Before
+// this, `ateam --project . ...` from a subdir of the project errored out
+// with "no .ateam/ found at or under this path".
+func TestResolveProjectPathWalksUpFromSubdir(t *testing.T) {
+	base := resolvedTempDir(t)
+	projectRoot := filepath.Join(base, "myproj")
+	projectDir := makeProject(t, projectRoot, "myproj")
+
+	subdir := filepath.Join(projectRoot, "deep", "sub", "path")
+	if err := os.MkdirAll(subdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveProjectPath(subdir)
+	if err != nil {
+		t.Fatalf("resolveProjectPath(subdir): %v", err)
+	}
+	if got != projectDir {
+		t.Errorf("resolveProjectPath = %q, want %q (project root via walk-up)", got, projectDir)
+	}
+}
+
+// TestResolveProjectPathWalksUpFromDotRelative covers the exact failing case
+// the user reported: cwd inside the project, `--project .` from a subdir.
+func TestResolveProjectPathWalksUpFromDotRelative(t *testing.T) {
+	base := resolvedTempDir(t)
+	projectRoot := filepath.Join(base, "myproj")
+	projectDir := makeProject(t, projectRoot, "myproj")
+	subdir := filepath.Join(projectRoot, "defaults", "roles")
+	if err := os.MkdirAll(subdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(subdir)
+
+	got, err := resolveProjectPath(".")
+	if err != nil {
+		t.Fatalf(`resolveProjectPath("."): %v`, err)
+	}
+	if got != projectDir {
+		t.Errorf(`resolveProjectPath(".") = %q, want %q`, got, projectDir)
+	}
+}

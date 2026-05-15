@@ -425,14 +425,17 @@ func resolveProjectFromStateDir(orgDir, cwd string) (string, error) {
 	return "", fmt.Errorf("project directory not found for state %q", projectID)
 }
 
-// resolveOrgPath accepts either a path to .ateamorg/ itself or a parent
-// directory containing .ateamorg/ as a child.
+// resolveOrgPath accepts a path to .ateamorg/ itself, a parent directory
+// containing .ateamorg/, or any descendant of one — discovery walks up
+// from the given path, matching flag-less discovery semantics.
 func resolveOrgPath(path string) (string, error) {
 	return resolveSpecialDir(path, OrgDirName, "--org")
 }
 
-// resolveProjectPath accepts either a path to .ateam/ itself or a parent
-// directory (project root) containing .ateam/ as a child.
+// resolveProjectPath accepts a path to .ateam/ itself, a project root
+// containing .ateam/, or any subdirectory of one — discovery walks up
+// so `ateam --project . ...` from `defaults/roles` finds the project,
+// just like running with no flag would.
 func resolveProjectPath(path string) (string, error) {
 	return resolveSpecialDir(path, ProjectDirName, "--project")
 }
@@ -443,11 +446,16 @@ func resolveSpecialDir(path, target, flag string) (string, error) {
 			return realPath(path), nil
 		}
 	}
-	candidate := filepath.Join(path, target)
-	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-		return realPath(candidate), nil
+	// Absolutise before walking — findDirUp stops at the relative "." root
+	// otherwise, breaking `--project .` from a subdir of the project.
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("%s %q: cannot resolve absolute path: %w", flag, path, err)
 	}
-	return "", fmt.Errorf("%s %q: no %s/ found at or under this path", flag, path, target)
+	if found, err := findDirUp(abs, target, ""); err == nil {
+		return found, nil
+	}
+	return "", fmt.Errorf("%s %q: no %s/ found at or above this path", flag, path, target)
 }
 
 // ResolveStreamPath resolves a relative stream_file path to absolute.
