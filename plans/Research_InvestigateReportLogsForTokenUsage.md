@@ -189,7 +189,215 @@ Cross-role discovery overlap is real (40% of tool-result tokens, ~$4-6 of the $4
 amplification (71% of cache_read) and excessive turn count. The strongest empirical signal is the code.structure rerun: same role, same code, 77% cost reduction by skipping warmup and going straight to targeted reads. Reproducing that
 pattern across roles via prompt changes and a pre-fetched project map would shift roughly 30-40% of total cycle cost — much more than the discovery-deduplication slice alone would yield.
 
+# 2nd Run Analysis
+
+Here we re-ran all roles to check some of the assumptions made above.
+
+Analysis of the re-run + critique of Project Context
+
+## Re-run confirms the warmup hypothesis — strongly
+
+Same 14 roles, same code base, same model. With prior reports on disk to "re-verify":
+
+┌──────────────────────────────────────────────┬─────────────────────┬─────────────────────────────────────────────────────────────┬──────────┐
+│                    Metric                    │ Cold run (16 roles) │               Re-run (14 roles, same project)               │    Δ     │
+├──────────────────────────────────────────────┼─────────────────────┼─────────────────────────────────────────────────────────────┼──────────┤
+│ Total cost                                   │ $42.57              │ $13.05                                                      │ -69%     │
+├──────────────────────────────────────────────┼─────────────────────┼─────────────────────────────────────────────────────────────┼──────────┤
+│ Total cache_read                             │ 50.0M               │ 8.0M                                                        │ -84%     │
+├──────────────────────────────────────────────┼─────────────────────┼─────────────────────────────────────────────────────────────┼──────────┤
+│ Total tool calls                             │ 796                 │ 228                                                         │ -71%     │
+├──────────────────────────────────────────────┼─────────────────────┼─────────────────────────────────────────────────────────────┼──────────┤
+│ Median turns per role                        │ 66                  │ 18                                                          │ -73%     │
+├──────────────────────────────────────────────┼─────────────────────┼─────────────────────────────────────────────────────────────┼──────────┤
+│ Roles with 9-10/10 warmup orientation        │ 10/16               │ 0/14                                                        │ gone     │
+├──────────────────────────────────────────────┼─────────────────────┼─────────────────────────────────────────────────────────────┼──────────┤
+│ Redundant-call ratio (across roles in batch) │ 40.3%               │ 11.7%                                                       │ dropped  │
+├──────────────────────────────────────────────┼─────────────────────┼─────────────────────────────────────────────────────────────┼──────────┤
+│ Naive baseline-share of cache_read           │ 72%                 │ 165% (saturated; baseline now bigger than tool-result load) │ inverted │
+└──────────────────────────────────────────────┴─────────────────────┴─────────────────────────────────────────────────────────────┴──────────┘
+
+No findings were lost. Comparing finding counts across the 13 role pairs that ran in both batches:
+
+role                        first → rerun
+code.bugs                       8 → 8
+code.structure                 11 → 11
+test.quality                    9 → 9
+test.blackbox                  13 → 14   (+1)
+docs.followable                 8 → 8
+docs.internal                   8 → 8
+docs.external                   9 → 9
+project.security                3 → 4    (+1)
+project.dependencies            1 → 1
+project.automation              3 → 3
+project.production_ready        4 → 4
+test.gaps                       8 → 9    (+1)
+test.recent                     4 → 7    (+3)
+
+Three roles gained findings — test.recent jumped from 4 to 7 because the headroom freed up by skipping warmup let it look at more recent diff. So the cost savings are not a quality trade-off; in this dataset they're a strict win.
+
+This is the cleanest A/B you could ask for on the "warmup is the dominant cost" hypothesis. It empirically validates the recommendation I made in the previous turn. The Project Context section is doing the job a precomputed project map
+would do — plus things a script can't do.
+
+## What Project Context actually contains
+
+I read sections from runs 32, 33, 36, 38, 41 to characterize the content. The role-by-role variance is large, but the items break into five categories:
+
+┌─────────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────────────┐
+│      Category       │                                                                     Example                                                                     │                        Source of value                         │
+├─────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────┤
+│ Mechanical facts    │ "171 .go files, ~44k LOC", "Biggest non-test files: handlers.go 1433, table.go 1390, runner.go 1282…", "HEAD commit 6dcf9a0", "Default-on       │ A script could produce these more accurately. Currently        │
+│                     │ roles: database_schema, dependencies, …", "Build targets: build, companion, test, …"                                                            │ generated by the model.                                        │
+├─────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────┤
+│ Role-anchored       │ "Event loop at runner.go:513-553, classifyFailure at line 902, promoteRuntimeFiles at line 1160"                                                │ Role-specific judgment about which surfaces matter.            │
+│ landmarks           │                                                                                                                                                 │ Mechanical-ish but the selection is role-specific.             │
+├─────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────┤
+│ Conventions         │ "All stream scanners use 64KB/1MB buffer pairs", "runtime/<exec_id>/ is agent-writable, logs/<exec_id>/ is forensic", "Helper that already      │ Pure model judgment. Encodes patterns the role learned. High   │
+│ remembered          │ exists for boilerplate: cmd/runner_overrides.go::applyRunnerOverrides"                                                                          │ value.                                                         │
+├─────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────┤
+│ Re-verification     │ "README.md:78 re-read (ataem serve still present); EVAL.md:158-159 re-read (--judge-model sonnet --no-judge still co-present); install.sh:86    │ High value as audit trail. Unverified — model claims, no       │
+│ claims              │ re-read…"                                                                                                                                       │ enforcement.                                                   │
+├─────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────┤
+│ Scope /             │ "Out of scope for this role: dependency CVEs (handled by project.dependencies); coverage gaps; feature/design recommendations.", "do not        │ Pure recalibration. Prevents the role from churning on items   │
+│ don't-re-flag       │ propose adding auth in future cycles without owner confirmation"                                                                                │ another role owns. High value.                                 │
+├─────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────┤
+│ Forward pointers    │ "Files / dirs to revisit in future cycles: …"                                                                                                   │ Memory for next run. Medium value.                             │
+└─────────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────┘
+
+The mix is wildly different per role — code.bugs (run 36) is 90% role-anchored landmarks + conventions. project.automation (run 38) is 60% mechanical facts. docs.followable (run 32) is 30% re-verification + 70% forward-looking notes.
+
+## Criticism
+
+1. Mechanical facts are the biggest waste. "171 .go files, ~44k LOC", file-size lists, recent-commit headers, default-on roles, Makefile target lists — every role generates some of these. They are:
+- Generatable by wc, find, git log, grep — exactly the discovery the model is supposed to skip. Including them in Project Context implicitly forces the next run to either re-verify them (defeating the point) or trust the model's memory
+(risky if code changes).
+- Hallucination-prone. The previous-cycle base/docs reports both confidently asserted that voidexpr/ateam.git was a broken clone URL and that AGENTS.md/CLAUDE.md were duplicates with no shared mechanism. Both wrong. If wrong facts persist in Project Context across runs, the model treats its own prior hallucination as a load-bearing premise.
+- Duplicated across roles. Every Project Context section repeats the Go version, the build commands, the file-size leaders. Across 14 roles × ~50 tokens of repeated facts = ~700 tokens of redundancy in the corpus.
+
+2. Re-verification claims are unverifiable. When docs.followable (run 32) writes "README.md:78 re-read (ataem serve still present)", no part of the harness checks that it's true. The model might have written this without actually running a Read. There's no audit log of which tool calls produced which re-verification claim. This is a trust gap that grows over cycles.
+
+3. The format is human-prose, not structured. Bullet points are fine for human readers but they prevent the harness from doing useful things:
+- The supervisor cannot reliably parse "out of scope" items to avoid passing them as findings.
+- A future role cannot consume just the "conventions remembered" section.
+- Project Context can't be diffed across runs in a meaningful way (only line-by-line, which is too noisy).
+
+4. Length is unbounded. Run 33 (code.structure) has a ~700-token Project Context with 9 detailed bullets. Run 32 (docs.followable) has ~500 tokens with verification details. Run 40 (project.production_ready) has ~200. There's no convention for how long it should be or what must be included. The amplification cost (it becomes input on the next run) scales with length × turn count of the next run.
+
+5. There's no model of when context should be discarded. If the codebase substantially changes, the carried-over Project Context becomes stale. Currently the only signal is the model noticing "head commit unchanged since prior report" — fragile, and not enforced.
+
+6. Conflation of two different concerns. Project Context simultaneously serves as:
+- (a) Memory for the next run of the same role
+- (b) Documentation for human readers of the report
+
+These have conflicting requirements: (a) wants minimal structured data the model can consume efficiently; (b) wants prose with rationale. Trying to be both makes it good at neither.
+
+## Recommendations
+
+### Keep (these are uniquely role-judgment, no script can replace)
+
+- Out-of-scope declarations. "Dependency CVEs handled by project.dependencies" is exactly the kind of cross-role coordination the supervisor needs to honor. Move it to a structured field.
+- Conventions remembered. "Stream scanners use 64KB/1MB buffers", "runtime/ is agent-writable, logs/ is forensic". These are patterns the role discovered the hard way. No script produces them.
+- Re-verification status (with audit). The mechanism is good; it needs enforcement (next section).
+- Forward pointers. "Files to revisit next cycle" is memory the model can act on.
+
+### Replace with a mechanical pre-injection
+
+Add a Project Facts block auto-rendered by the harness into every role prompt:
+```
+## Project Facts (auto-generated <timestamp>, commit <sha>)
+
+- module: github.com/ateam, go 1.26.3
+- 171 .go files, ~44k LOC; 14 test files; 17 internal packages
+- 10 largest non-test files:
+    1433  internal/web/handlers.go
+    1390  cmd/table.go
+    1282  internal/runner/runner.go
+    ... (top 10)
+- recent commits (last 5):
+    6dcf9a0  prompts: fix three internal contradictions ...
+    2f81a30  review: --roles is authoritative everywhere
+    ...
+- default-on roles (defaults/config.toml): database_schema, dependencies, docs_external, docs_internal, project_characteristics, refactor_small, security, testing_basic
+- make targets: build, companion, test, test-cli, test-docker, test-docker-live, check, run-ci, vuln, install-hooks
+- ateam ps (last 10): <id, role, action, status, batch>
+```
+Implementation: ~80 LOC, identical to what stream-audit.py does but a different shape. Belongs at cmd/<something>.go so the runner injects it automatically.
+
+This eliminates mechanical facts from every Project Context section. The model stops spending attention on counting files and listing build targets. Roles get more accurate facts than the model could produce from memory.
+
+### Enhance — make Project Context structured and auditable
+
+A schema like:
+
+project_context:
+  scope:
+    in: "experience of following documented procedures"
+    out:
+      - "doc-content quality → docs.external"
+      - "internal docs structure → docs.internal"
+  conventions:
+    - "stream scanners use 64KB/1MB buffer pairs"
+    - "runtime/<exec_id>/ agent-writable, logs/<exec_id>/ forensic"
+  reverified:
+    - {ref: "README.md:78", claim: "ataem serve typo still present", verified_via: "tool_use_id=…"}
+    - {ref: "EVAL.md:158-159", claim: "--judge-model + --no-judge contradiction still present", verified_via: "tool_use_id=…"}
+  revisit:
+    - "README.md Quick Start"
+    - "FAQ.md parallel/exec examples"
+    - "install.sh:86"
+  stale_after_commits: ["a file:line changed", ...]   # auto-injected
+
+Three immediate wins:
+1. The harness can verify reverified claims by linking them to actual tool_use_ids in stream.jsonl. If a role claims "re-read README.md:78" but no Read of README.md happened that run, the supervisor can flag it.
+2. The supervisor can consume scope.out to avoid bouncing items between roles.
+3. The harness can invalidate carried-over context when the cited commit changes (stale_after_commits).
+
+Render the YAML back as prose for the human-readable report (don't lose the readability), but keep the structured form for machine consumption.
+
+Don't separate it into a new script — bake it into the runner
+
+A standalone ateam project-facts command would be useful, but the real win is having the runner automatically inject the facts block + parsed prior Project Context into every role prompt. That makes the optimization invariant — roles
+can't accidentally skip it. The current behavior is "model voluntarily reads prior report.md if it remembers to" — which 14/14 roles did in this batch (good), but isn't guaranteed.
+
+Sketch:
+```go
+// internal/prompts/prompts.go or similar
+func AssembleRolePrompt(role string, env *root.ResolvedEnv) (string, error) {
+    parts := []string{
+        rolePromptTemplate(role),
+        ProjectFacts(env),                 // auto: wc, git log, defaults/config.toml
+        PriorProjectContext(role, env),    // structured carry-over from prior report
+        RecentChangesSince(role, env),     // git log since last report's HEAD
+    }
+    return strings.Join(parts, "\n\n"), nil
+}
+```
+This is small (~150 LOC), test-shaped (golden-output tests on ProjectFacts), and would land in the existing prompt-assembly machinery without restructuring.
+
+### Add measurement to the harness so the next round of tuning is data-driven
+
+Three counters worth tracking per run, written next to stream.jsonl:
+
+1. Warmup density (orientation calls in first 10 tool calls). Today it's 0/14 in this batch; in cold-cache runs it spikes. If a future change regresses this, you'd see it immediately. The data is already in stream-audit.py warmup.
+2. Re-verification accuracy. For each reverified claim in Project Context, link to the tool_use_id that produced it. % verified vs % claimed = a quality signal.
+3. Findings stability. % of findings retained from prior-run-of-same-role. Three roles gained findings here; none lost. A future regression that drops findings should show up as a stability drop.
+
+These can all live in stream-audit.py or a sibling ateam role-stats command.
+
+### Treat the cold-cache → warm-cache gap as the design point
+
+The 84% cache_read reduction between cold and warm runs is the strongest evidence that the system is dramatically over-paying when a role runs for the first time. The Project Context mechanism solves it for subsequent runs but not for the
+ first run. The mitigation is: the auto-injected Project Facts block above also serves as the first-run substitute for what previous runs' Project Context provides on later runs.
+
+Combined: cold runs get Project Facts (mechanical), warm runs get Project Facts + Prior Project Context (mechanical + role memory). Both paths skip warmup. The gap closes.
+
+## Bottom line
+
+Don't replace Project Context with scripts. Replace the mechanical 60% of Project Context with scripts, structure the remaining 40% so it's verifiable, and inject both via the runner so it's invariant rather than role-discretion. The empirical case is already in the data: 14/14 roles in this batch ran 3-4× cheaper than their cold-cache versions while producing equal-or-better findings — that's the design target. The current implementation is a clever workaround that proves the design works; productionizing it means moving the mechanism from "model voluntarily writes good Project Context" to "harness enforces good Project Context."
+
 # Appendix: Ideas about pre-computing some of the information agents need
+
+**IMPORTANT**: this script was designed by another agent without reading the reports above. That agent (unlike the report above) understood each role very well and was asked to point out role specific needs/similarities/differences.
 
 Spec: Project map pre-pass for ateam role reports
 
@@ -310,10 +518,8 @@ Generic core: always rebuilt from current state. It's cheap (seconds) and accura
 Role-specific: cached by SHA with delta refresh on dirty tree.
 
 - If <short-sha>/ exists AND tree clean → full reuse, instant.
-- If <short-sha>/ exists AND tree dirty → cheap re-derived sections (diff stat, uncommitted file list, recent activity) rebuilt; expensive sections (coverage, dep registry, import
- graph) reused.
-- If <short-sha>/ doesn't exist → check for the most-recent cached SHA. If the diff between that SHA and HEAD is small (< 50 files), refresh only affected sections (re-run
-coverage on touched packages, regen function inventory for touched files). Otherwise full rebuild.
+- If <short-sha>/ exists AND tree dirty → cheap re-derived sections (diff stat, uncommitted file list, recent activity) rebuilt; expensive sections (coverage, dep registry, import graph) reused.
+- If <short-sha>/ doesn't exist → check for the most-recent cached SHA. If the diff between that SHA and HEAD is small (< 50 files), refresh only affected sections (re-run coverage on touched packages, regen function inventory for touched files). Otherwise full rebuild.
 - --rebuild flag forces full rebuild for safety.
 
 This keeps re-runs at the same commit free, and small-diff re-runs cheap.
@@ -351,17 +557,11 @@ The map is what's there, not what to do about it.
 - Expensive role-specific (coverage, dep registry, full dupl scan): 10–60 seconds first time, free after; 5–20 KB each.
 - Total cache footprint per SHA: well under 1 MB.
 
-For a typical full cycle (4–6 roles enabled), expect ~30 seconds extra wall-clock the first time at a new SHA, near-zero on re-run. In return: each role's first 5–10 discovery
-turns become "read the map" instead of "grep + read + grep + read", and many role reports already include these facts in their "Project Context" section — that section can now be
-much shorter (or generated from the map directly).
+For a typical full cycle (4–6 roles enabled), expect ~30 seconds extra wall-clock the first time at a new SHA, near-zero on re-run. In return: each role's first 5–10 discovery turns become "read the map" instead of "grep + read + grep + read", and many role reports already include these facts in their "Project Context" section — that section can now be much shorter (or generated from the map directly).
 
 ## Open questions worth deciding before implementation
 
-- Per-project vs per-org cache location. Currently proposed at .ateam/cache/project_map/. Per-project is simpler; per-org could share generic-core across worktrees of the same
-repo. Probably per-project to start.
-- Markdown-only or JSON-too. Markdown is what the prompt eats. JSON is what delta-detection needs. The proposal keeps both; that's a duplication. Could generate JSON and convert
-to markdown on inject. Probably fine to keep both for clarity.
-- Should the map script itself be a role? Tempting (consistent UX, leverages role discovery) but the script is deterministic shell-and-tool work, not LLM judgment. Better as a
-separate command (ateam map [--rebuild]) that runs implicitly before report/all and can be triggered explicitly for inspection.
-- What's the right "base" for git diff base..HEAD in code.recent / test.recent? Default branch tip, last tag, configurable, or always HEAD~5? Probably configurable with a default
-of "merge-base with default branch, fallback to HEAD~5 if no default branch detected".
+- Per-project vs per-org cache location. Currently proposed at .ateam/cache/project_map/. Per-project is simpler; per-org could share generic-core across worktrees of the same repo. Probably per-project to start.
+- Markdown-only or JSON-too. Markdown is what the prompt eats. JSON is what delta-detection needs. The proposal keeps both; that's a duplication. Could generate JSON and convert to markdown on inject. Probably fine to keep both for clarity.
+- Should the map script itself be a role? Tempting (consistent UX, leverages role discovery) but the script is deterministic shell-and-tool work, not LLM judgment. Better as a separate command (ateam map [--rebuild]) that runs implicitly before report/all and can be triggered explicitly for inspection.
+- What's the right "base" for git diff base..HEAD in code.recent / test.recent? Default branch tip, last tag, configurable, or always HEAD~5? Probably configurable with a default of "merge-base with default branch, fallback to HEAD~5 if no default branch detected".
