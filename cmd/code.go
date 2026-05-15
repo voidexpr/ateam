@@ -151,7 +151,7 @@ func runCode(opts CodeOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := requireGitRepo(env, "code"); err != nil {
+	if err := requireGitRepo(env, runner.ActionCode); err != nil {
 		return err
 	}
 

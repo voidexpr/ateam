@@ -101,7 +101,7 @@ func runVerify(opts VerifyOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := requireGitRepo(env, "verify"); err != nil {
+	if err := requireGitRepo(env, runner.ActionVerify); err != nil {
 		return err
 	}
 

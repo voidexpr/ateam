@@ -154,7 +154,7 @@ func runReview(opts ReviewOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := requireGitRepo(env, "review"); err != nil {
+	if err := requireGitRepo(env, runner.ActionReview); err != nil {
 		return err
 	}
 

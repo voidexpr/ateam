@@ -134,7 +134,7 @@ func runReport(opts ReportOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := requireGitRepo(env, "report"); err != nil {
+	if err := requireGitRepo(env, runner.ActionReport); err != nil {
 		return err
 	}
 
