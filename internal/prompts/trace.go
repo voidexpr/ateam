@@ -66,11 +66,10 @@ func traceRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt string, 
 		sources = append(sources, *s)
 	}
 
-	effectiveBaseFile := resolveBaseFileForRole(baseFile, roleID)
 	if s := traceFileOr3Level(
-		filepath.Join(projectDir, effectiveBaseFile),
-		filepath.Join(orgDir, effectiveBaseFile),
-		filepath.Join(orgDir, "defaults", effectiveBaseFile),
+		filepath.Join(projectDir, baseFile),
+		filepath.Join(orgDir, baseFile),
+		filepath.Join(orgDir, "defaults", baseFile),
 	); s != nil {
 		sources = append(sources, *s)
 	}

@@ -188,14 +188,6 @@ func DefaultReportBasePrompt() string {
 	return readEmbedded("report_base_prompt.md")
 }
 
-// DefaultNewReportBasePrompt returns the embedded new report base prompt used
-// by dotted-prefix roles.
-// TODO: fix this before v1 — fold into DefaultReportBasePrompt once the new
-// role set is validated.
-func DefaultNewReportBasePrompt() string {
-	return readEmbedded("new_report_base_prompt.md")
-}
-
 func DefaultCodeBasePrompt() string {
 	return readEmbedded("code_base_prompt.md")
 }
@@ -253,12 +245,6 @@ func embeddedFiles() []embeddedFile {
 	files = append(files, embeddedFile{
 		filepath.Join("defaults", ReportBasePromptFile),
 		DefaultReportBasePrompt(),
-	})
-	// TODO: fix this before v1 — remove once new_report_base_prompt.md is
-	// merged into report_base_prompt.md.
-	files = append(files, embeddedFile{
-		filepath.Join("defaults", NewReportBasePromptFile),
-		DefaultNewReportBasePrompt(),
 	})
 	files = append(files, embeddedFile{
 		filepath.Join("defaults", CodeBasePromptFile),

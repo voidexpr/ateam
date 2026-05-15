@@ -11,6 +11,10 @@ The project source code is in the current working directory.
 
 Explore the codebase thoroughly before writing your report. Read key files, understand the structure, and base every finding on actual code you've seen.
 
+## Project maturity
+
+Calibrate severity and recommendation ambition to the project's maturity. A greenfield project (no production users, schema in flux) benefits from aggressive recommendations and direct schema edits; a project with real users in production needs migration discipline and concrete pain to justify change. The model has prior on these states; this section just makes the calibration explicit.
+
 ## Merging old report
 
 When processing an existing report you must omit completed work unless it mentions an impact on future tasks.
@@ -19,7 +23,7 @@ When processing an existing report you must omit completed work unless it mentio
 
 ## Role performing the audit
 
-Specify which role you are use, what model you are using and other attributes related to the model (thinking enable, level of thinking, ...)
+Specify which role you are running, what model you are using and other attributes related to the model (thinking enable, level of thinking, ...)
 
 ## Report Format
 
@@ -53,7 +57,7 @@ List the key specifics about the project being analyzed from your specific role 
 - Be actionable — every finding should have a clear next step
 - Be honest — if the code is fine in your area, say so. An empty report is better than invented issues.
 - Do NOT include code blocks with proposed fixes (that comes later in the implementation phase)
-- Recommend a tool to automate your objects if it is appropriate to the language and tech stack analyzed
+- **Run analytical tools when your role's findings ARE the tool's output.** Some role lenses depend on data only tools can produce: dependency CVEs (`govulncheck`, `npm audit`, `pip-audit`), coverage gaps (`go test -coverprofile` + `go tool cover -func`, `pytest --cov`), dependency currency (`go list -m -u all`, `npm outdated`), license inventory (`go-licenses`), benchmark / profiler output. For those lenses, run the tool first and base the report on its output. For lenses unrelated to tool output (refactoring, design, documentation, code review), recommend tools in findings when appropriate but do NOT re-run linters, formatters, type-checkers, or test runners during the report — those are dev/CI's job, not the LLM's.
 - Start your report directly with the `# Summary` heading — no preamble text like "Here's my report:"
 - Use `#` for top-level headings, not `##`
 - When you are done generating the report make sure it contains all the information you meant for it to contain and is not truncated
@@ -81,4 +85,3 @@ The full report — starting with `# Summary` and containing every section liste
 After the `Write` call returns successfully, your FINAL assistant message must be a single short line confirming the write, e.g. `Report written to {{OUTPUT_FILE}}`. Do not include the report body in the final message; do not include any other commentary. The on-disk file is the source of truth — the harness reads it directly, so anything you stream as text is discarded.
 
 If the `Write` call fails, retry it once. If it still fails, then (and only then) emit the report as your final message so the harness can recover it from the stream.
-
