@@ -381,5 +381,4 @@ See [DEV.md](DEV.md) for development setup, testing, and architecture details.
 - [CONFIG.md](CONFIG.md) — directory layout, `config.toml`, `runtime.hcl`
 - [ISOLATION.md](ISOLATION.md) — sandbox and container guide (modes, secrets, auth)
 - [ROLES.md](ROLES.md) — built-in roles
-- [EVAL.md](EVAL.md) — evaluating prompt and role changes
 - [FAQ.md](FAQ.md) — frequently asked questions
