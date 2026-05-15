@@ -505,7 +505,7 @@ ateam inspect 42 43
 ateam inspect --last
 ateam inspect --last-report
 ateam inspect --last-report --auto-debug
-ateam inspect --last --auto-debug-prompt
+ateam inspect --last --auto-debug --extra-prompt "focus on the timeout"
 ```
 
 | Flag | Description |
@@ -517,8 +517,7 @@ ateam inspect --last --auto-debug-prompt
 | `--last-code` | Select all execs from the last code session |
 | `--batch NAME` | Select all runs in a batch |
 | `--auto-debug` | Launch an agent in streaming mode to investigate the selected runs |
-| `--auto-debug-prompt` | Print the auto-debug prompt without executing |
-| `--auto-debug-extra-prompt TEXT` | Additional instructions appended to the auto-debug prompt (text or `@filepath`) |
+| `--extra-prompt TEXT` | Additional instructions appended to the auto-debug prompt (text or `@filepath`) |
 | `--profile NAME` | Profile for the auto-debug agent |
 | `--agent NAME` | Agent for the auto-debug run |
 

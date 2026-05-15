@@ -16,17 +16,16 @@ import (
 )
 
 var (
-	inspectBatch                string
-	inspectLast                 bool
-	inspectLastRun              bool
-	inspectLastReport           bool
-	inspectLastReview           bool
-	inspectLastCode             bool
-	inspectAutoDebug            bool
-	inspectAutoDebugPrompt      bool
-	inspectAutoDebugExtraPrompt string
-	inspectProfile              string
-	inspectAgent                string
+	inspectBatch       string
+	inspectLast        bool
+	inspectLastRun     bool
+	inspectLastReport  bool
+	inspectLastReview  bool
+	inspectLastCode    bool
+	inspectAutoDebug   bool
+	inspectExtraPrompt string
+	inspectProfile     string
+	inspectAgent       string
 )
 
 var inspectCmd = &cobra.Command{
@@ -53,8 +52,7 @@ func init() {
 	inspectCmd.Flags().BoolVar(&inspectLastReview, "last-review", false, "select the last review run")
 	inspectCmd.Flags().BoolVar(&inspectLastCode, "last-code", false, "select all execs from the last code session")
 	inspectCmd.Flags().BoolVar(&inspectAutoDebug, "auto-debug", false, "launch an agent to investigate the selected runs")
-	inspectCmd.Flags().BoolVar(&inspectAutoDebugPrompt, "auto-debug-prompt", false, "print the auto-debug prompt without executing")
-	inspectCmd.Flags().StringVar(&inspectAutoDebugExtraPrompt, "auto-debug-extra-prompt", "", "additional instructions for the debug agent (text or @filepath)")
+	inspectCmd.Flags().StringVar(&inspectExtraPrompt, "extra-prompt", "", "additional instructions for the auto-debug agent (text or @filepath)")
 	addProfileFlags(inspectCmd, &inspectProfile, &inspectAgent)
 }
 
@@ -110,29 +108,36 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if inspectAutoDebug || inspectAutoDebugPrompt {
-		debugContext := buildDebugContext(rows, allFiles)
-		pinfo := env.NewProjectInfoParams("exec debugger", "debug")
-		prompt, err := prompts.AssembleExecDebugPrompt(env.OrgDir, env.ProjectDir, debugContext, pinfo)
+	if inspectAutoDebug {
+		prompt, err := buildAutoDebugPrompt(env, rows, allFiles, inspectExtraPrompt)
 		if err != nil {
 			return err
-		}
-		if inspectAutoDebugExtraPrompt != "" {
-			extra, err := prompts.ResolveValue(inspectAutoDebugExtraPrompt)
-			if err != nil {
-				return err
-			}
-			prompt += "\n\n# Additional Debug Instructions\n\n" + extra
-		}
-		if inspectAutoDebugPrompt {
-			fmt.Println(prompt)
-			return nil
 		}
 		fmt.Printf("\n--- Auto-debug ---\n")
 		return launchAutoDebug(env, prompt)
 	}
 
 	return nil
+}
+
+// buildAutoDebugPrompt assembles the auto-debug prompt for a set of runs.
+// extraPrompt is resolved (text or @filepath) and appended under an
+// "Additional Debug Instructions" heading when non-empty.
+func buildAutoDebugPrompt(env *root.ResolvedEnv, rows []calldb.RecentRow, files []string, extraPrompt string) (string, error) {
+	debugContext := buildDebugContext(rows, files)
+	pinfo := env.NewProjectInfoParams("exec debugger", "debug")
+	prompt, err := prompts.AssembleExecDebugPrompt(env.OrgDir, env.ProjectDir, debugContext, pinfo)
+	if err != nil {
+		return "", err
+	}
+	if extraPrompt != "" {
+		extra, err := prompts.ResolveValue(extraPrompt)
+		if err != nil {
+			return "", err
+		}
+		prompt += "\n\n# Additional Debug Instructions\n\n" + extra
+	}
+	return prompt, nil
 }
 
 func resolveRunSelection(db *calldb.CallDB, env *root.ResolvedEnv, args []string) ([]calldb.RecentRow, error) {

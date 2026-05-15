@@ -12,32 +12,30 @@ import (
 
 // inspectGlobals captures the package-level flags used by the inspect command.
 type inspectGlobals struct {
-	batch                string
-	lastRun              bool
-	lastReport           bool
-	lastReview           bool
-	lastCode             bool
-	autoDebug            bool
-	autoDebugPrompt      bool
-	autoDebugExtraPrompt string
-	profile              string
-	agent                string
-	org                  string
+	batch       string
+	lastRun     bool
+	lastReport  bool
+	lastReview  bool
+	lastCode    bool
+	autoDebug   bool
+	extraPrompt string
+	profile     string
+	agent       string
+	org         string
 }
 
 func saveInspectGlobals() inspectGlobals {
 	return inspectGlobals{
-		batch:                inspectBatch,
-		lastRun:              inspectLastRun,
-		lastReport:           inspectLastReport,
-		lastReview:           inspectLastReview,
-		lastCode:             inspectLastCode,
-		autoDebug:            inspectAutoDebug,
-		autoDebugPrompt:      inspectAutoDebugPrompt,
-		autoDebugExtraPrompt: inspectAutoDebugExtraPrompt,
-		profile:              inspectProfile,
-		agent:                inspectAgent,
-		org:                  orgFlag,
+		batch:       inspectBatch,
+		lastRun:     inspectLastRun,
+		lastReport:  inspectLastReport,
+		lastReview:  inspectLastReview,
+		lastCode:    inspectLastCode,
+		autoDebug:   inspectAutoDebug,
+		extraPrompt: inspectExtraPrompt,
+		profile:     inspectProfile,
+		agent:       inspectAgent,
+		org:         orgFlag,
 	}
 }
 
@@ -48,8 +46,7 @@ func (g inspectGlobals) restore() {
 	inspectLastReview = g.lastReview
 	inspectLastCode = g.lastCode
 	inspectAutoDebug = g.autoDebug
-	inspectAutoDebugPrompt = g.autoDebugPrompt
-	inspectAutoDebugExtraPrompt = g.autoDebugExtraPrompt
+	inspectExtraPrompt = g.extraPrompt
 	inspectProfile = g.profile
 	inspectAgent = g.agent
 	orgFlag = g.org
@@ -217,60 +214,31 @@ func TestInspectRunSelection(t *testing.T) {
 	})
 }
 
-// TestInspectAutoDebugExtraPromptFromFile verifies that --auto-debug-extra-prompt
-// with a @filepath reference loads the file's contents and includes them in the
-// printed debug prompt.
-func TestInspectAutoDebugExtraPromptFromFile(t *testing.T) {
-	base, projPath, env := setupTestProject(t)
+// TestBuildAutoDebugPromptExtraFromFile verifies that --extra-prompt with a
+// @filepath reference loads the file's contents and includes them under an
+// "Additional Debug Instructions" heading in the assembled debug prompt.
+func TestBuildAutoDebugPromptExtraFromFile(t *testing.T) {
+	base, _, env := setupTestProject(t)
 
-	// Seed a run so the inspect command can find something to inspect.
-	db, err := calldb.Open(env.ProjectDBPath())
-	if err != nil {
-		t.Fatalf("Open calldb: %v", err)
-	}
-	now := time.Now()
-	id, err := db.InsertCall(&calldb.Call{
-		ProjectID: "", Action: "exec", Role: "testing_basic",
-		StartedAt: now.Add(-1 * time.Minute),
-	})
-	if err != nil {
-		t.Fatalf("InsertCall: %v", err)
-	}
-	if err := db.UpdateCall(id, &calldb.CallResult{
-		EndedAt: now, DurationMS: 60000,
-	}); err != nil {
-		t.Fatalf("UpdateCall: %v", err)
-	}
-	db.Close()
-
-	// Write an extra prompt file with known content.
 	extraFile := filepath.Join(base, "extra_debug.txt")
 	const extraContent = "investigate the flaky test in suite alpha"
 	if err := os.WriteFile(extraFile, []byte(extraContent), 0600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	saved := saveInspectGlobals()
-	defer saved.restore()
-	orgFlag = filepath.Dir(env.OrgDir)
-	inspectLastRun = true
-	inspectAutoDebugPrompt = true // print prompt, don't exec agent
-	inspectAutoDebugExtraPrompt = "@" + extraFile
+	rows := []calldb.RecentRow{{
+		ID: 42, Action: "exec", Role: "test.gaps",
+		StartedAt: time.Now().Add(-1 * time.Minute).Format(time.RFC3339),
+	}}
 
-	var runErr error
-	out := captureStdout(t, func() {
-		withChdir(t, projPath, func() {
-			runErr = runPsFiles(nil, nil)
-		})
-	})
-
-	if runErr != nil {
-		t.Fatalf("runPsFiles: %v", runErr)
+	prompt, err := buildAutoDebugPrompt(env, rows, nil, "@"+extraFile)
+	if err != nil {
+		t.Fatalf("buildAutoDebugPrompt: %v", err)
 	}
-	if !strings.Contains(out, extraContent) {
-		t.Errorf("expected extra prompt content %q in output:\n%s", extraContent, out)
+	if !strings.Contains(prompt, extraContent) {
+		t.Errorf("expected extra prompt content %q in assembled prompt:\n%s", extraContent, prompt)
 	}
-	if !strings.Contains(out, "Additional Debug Instructions") {
-		t.Errorf("expected 'Additional Debug Instructions' section in output:\n%s", out)
+	if !strings.Contains(prompt, "Additional Debug Instructions") {
+		t.Errorf("expected 'Additional Debug Instructions' section in assembled prompt:\n%s", prompt)
 	}
 }
