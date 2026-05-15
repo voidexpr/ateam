@@ -134,8 +134,7 @@ Running A→D on the same commit attributes the savings layer-by-layer. If B alo
 |---|---|---|---|
 | **0** | **Inject existing architecture docs** (`CLAUDE.md` / `CONCURRENCY.md` / `DEV.md` / `ISOLATION.md` as available) as a stable prompt preamble — see [Shared Architecture Context](#shared-architecture-context-phase-0) | 3–5 cold roles independently read these docs today; warm-run Project Context content is dominated by conventions a script can't produce | Plausibly the larger half of the cold-cache gap; cheaper than the Facts block to ship |
 | **1** | **Auto-generate Project Facts block** (module/lang/build/top-files/recent-commits/make-targets/default-roles) injected into every role prompt | Cold-vs-warm gap is 84%; the mechanical fraction of the closing content is what scripts produce more reliably than the model | Closes the remaining mechanical-facts portion of the cold-run penalty |
-| **2** | **Convert `Project Context` to structured YAML** with `scope / conventions / reverified / revisit / stale_after` fields | Eliminates hallucination risk in re-verification; lets supervisor consume `scope.out` to dedupe across roles | Quality win + supervisor reliability |
-| **3** | **Per-role discovery layer** (govulncheck for `project.dependencies`, coverage for `test.gaps`, function-per-file counts for `code.structure`, etc. — full list in appendix of `Research_InvestigateReportLogsForTokenUsage.md`) | Specific roles still over-read at warm: `code.bugs` 51 file reads, `test.gaps` 18 calls. Pre-computed per-role data trims this. | ~$2–4/cycle |
+| **2+** | **Artifact system with provenance** — code map, architecture topics (with TOC), command catalogues, dependency summary, each with declared inputs and make-like incremental update via cheap-validate / patch / re-author. Subsumes the previously-listed Phase 2 (structured Project Context) and Phase 3 (per-role discovery). See [Artifact System with Provenance](#artifact-system-with-provenance-phase-2). | Forward-looking endpoint of the plan: eliminates ad-hoc Project Context, makes preprocessing-vs-LLM division explicit, supports on-demand topic injection. | Long-term: closes the residual variance between roles after Phases 0–1 land. |
 | **4** | **Turn-cap + "name your suspects first" preamble for wandering roles** | `code.bugs` is the only warm role still >20 turns. Surgical fix, not architectural. | ~$1–2/cycle on `code.bugs`-class roles |
 | **5** | **Audit hook linking `reverified` claims to `tool_use_id`s in stream.jsonl** | Closes the trust gap that compounds over cycles | Quality only |
 | ~~6+~~ | ~~Structural graph, Aider PageRank, hybrid RAG~~ | Discovery is now 12% of cycle cost; further attack on it is third-order | Defer indefinitely |
@@ -167,6 +166,340 @@ Once Phase 1 lands, `code.bugs` will be the conspicuous outlier. Three suggested
 3. **Per-role pattern bank**: pre-grep for `_ =` discards, empty catch/recover, `time.Sleep` in non-test code, panic call sites — feed results into the role prompt. This is the appendix's role-specific layer applied to `code.bugs`.
 
 Run as an A/B against current `code.bugs` after Phase 1 ships.
+
+## Artifact System with Provenance (Phase 2+)
+
+This is the forward-looking endpoint Phases 0 and 1 are building toward: replace the ad-hoc `Project Context` section with a small set of **provenance-tagged artifacts**, maintained by a make-like driver that reruns generators only when their declared inputs change. Most artifacts are deterministic scripts; a few (architecture topics) are LLM-authored. The whole system runs **outside** the report lifecycle — it's preprocessing, not a report phase.
+
+### Goal
+
+Lean heavily on cheap deterministic scripts for everything that can be derived from the codebase. Reserve LLM authorship for the judgment-heavy slice (conventions, architectural rationale). Make staleness deterministic and incremental — most commits don't trigger any LLM work. Make the always-injected slice small (a TOC + code map + commands) and let roles pull architectural detail on demand.
+
+### The artifact set
+
+A small fixed catalogue, contract-stable across project types:
+
+| Artifact | Author | Always injected? | Purpose |
+|---|---|---|---|
+| `code_map.md` | script | yes (small) | File tree, package layout, top-LOC files, entry points. 90% mechanical (`wc`, `find`, `git log`, build-file parsers). |
+| `architecture/INDEX.md` | LLM, small | yes | TOC: one line per topic + the source files that justify it. Always seen by every role. |
+| `architecture/<topic>.md` | LLM, judgment-bearing | **no — on-demand** | One per topic (concurrency, isolation, prompt-assembly, error-handling, log-layout, …). Fetched by role config declaration or runtime tool call. |
+| `commands/test.md` | script + light LLM tagging | role-conditional | Test commands tagged with triggers (`when src/auth/** changes`, `before release`, etc.). |
+| `commands/build.md` | script + light LLM tagging | role-conditional | Build / lint / typecheck / format commands. |
+| `commands/ops.md` | script + light LLM tagging | role-conditional | make targets, deploy scripts, operational tasks. |
+| `dependencies.md` | script | yes (small) | Direct deps with one-line purpose; runtime requirements. |
+| `hotspots.md` | script | yes (small) | Most-edited files in recent N commits, biggest non-test files, files with high churn × size product. Pure `git log` + `wc` analysis. |
+
+LLM authorship is concentrated where judgment matters: architecture topics (substantive) and trigger-tagging on commands (small). Everything else is deterministic.
+
+### Provenance schema
+
+Every artifact carries a `.meta.yaml` sibling. This is the load-bearing piece — it's what lets the driver decide when to rerun what:
+
+```yaml
+artifact: architecture/concurrency.md
+artifact_id: architecture.concurrency                 # stable ID, role configs reference this
+generated_at: 2026-05-15T12:00:00Z
+generated_by_model: claude-opus-4-7
+generation_commit: 6dcf9a09f51a
+generator: ateam-artifact-generator-v0.1
+inputs:
+  - path: internal/runner/runner.go
+    blob_sha: <git blob sha at generation time>
+    symbols: [Runner.Run, RunPool, CloneWithResolvedTemplates]  # optional, sub-file granularity
+  - path: internal/runner/pool.go
+    blob_sha: <sha>
+  - path: CONCURRENCY.md
+    blob_sha: <sha>
+last_validated_at: 2026-05-15T12:00:00Z
+last_validated_commit: 6dcf9a09f51a
+validation_history:                                   # rolling, cap N entries
+  - { at: 2026-05-15T12:00:00Z, commit: 6dcf9a09f51a, outcome: generated, cost_usd: 1.42 }
+toc_entry: "Concurrency contract — runner fields read-only after RunPool dispatch, per-exec cloning model."
+```
+
+Two granularities for `inputs`:
+
+- **File-level (default)**: `blob_sha` only. Cheap, coarse. Any change to the file invalidates.
+- **Symbol-level (optional)**: `symbols` list of named functions/types with AST-subtree hashes. Survives comment / whitespace / unrelated-method changes. Tree-sitter or universal-ctags can produce these. Add only when measurement shows file-level granularity is invalidating unnecessarily.
+
+`artifact_id` is the stable handle role configs reference. Renaming the file changes the path but not the ID.
+
+### Storage layout
+
+```
+.ateam/artifacts/
+  code_map.md
+  code_map.meta.yaml
+  dependencies.md
+  dependencies.meta.yaml
+  hotspots.md
+  hotspots.meta.yaml
+  architecture/
+    INDEX.md
+    INDEX.meta.yaml
+    concurrency.md
+    concurrency.meta.yaml
+    isolation.md
+    isolation.meta.yaml
+    prompt_assembly.md
+    prompt_assembly.meta.yaml
+    ...
+  commands/
+    test.md
+    test.meta.yaml
+    build.md
+    build.meta.yaml
+    ops.md
+    ops.meta.yaml
+  .lock                                # held during validate/rebuild
+  .log/                                # per-artifact run logs
+    architecture.concurrency-2026-05-15T120000Z.jsonl
+    ...
+```
+
+Living under `.ateam/artifacts/` keeps it next to `runtime/` and `logs/` without conflating semantics. Artifacts are checked in by default (they're authored content); the `.log/` directory is gitignored.
+
+### The make-like driver
+
+A single command with subcommands, callable from a git hook, CI, or the report runner:
+
+```
+ateam-artifacts status                     # show what's fresh / drift-candidate / stale
+ateam-artifacts validate [--ids ...]       # cheap: SHA compare + LLM "is this still right?" for drift candidates
+ateam-artifacts rebuild [--ids ...]        # expensive: re-author
+ateam-artifacts validate --as-of HEAD~1    # for git hook integration
+ateam-artifacts init                       # bootstrap a fresh project (one-time, expensive)
+```
+
+Per-artifact state machine:
+
+```
+all input blob_shas match current tree    → FRESH (do nothing, free)
+one or more input shas differ             → DRIFT_CANDIDATE
+                                          → cheap-validate (one LLM call with diff)
+                                            → STILL_CORRECT → bump last_validated_commit (~$0.10)
+                                            → NEEDS_PATCH   → patch the affected sections (~$0.50)
+                                            → STALE         → full re-author (~$1–3)
+```
+
+The cheap validation prompt is small and structured:
+
+```
+You authored this artifact at commit <C0>:
+
+  ## Artifact: architecture/concurrency.md
+  <artifact body>
+
+Since then, the following inputs have changed (showing diffs):
+
+  ## internal/runner/runner.go (diff against C0)
+  <unified diff, capped at N lines>
+
+  ## CONCURRENCY.md (diff against C0)
+  <unified diff>
+
+Question: Is this artifact still accurate as of HEAD?
+Respond with JSON:
+  {"status": "still_correct", "notes": "<one line>"}                                              OR
+  {"status": "needs_patch", "sections": ["<heading>", ...], "reason": "<why>", "guidance": ...}   OR
+  {"status": "stale", "reason": "<why>"}
+
+Do not include any text outside the JSON.
+```
+
+The cheap path is one model call, small input, tiny output. The patch / re-author paths fall back to a full generation prompt with the same input set.
+
+### On-demand injection contract
+
+This is the lever that keeps the always-injected slice small.
+
+**Always injected** (stable prefix, cache-friendly):
+- `code_map.md`
+- `architecture/INDEX.md` (the TOC)
+- `dependencies.md`
+- `hotspots.md`
+- The role-relevant subset of `commands/*.md`
+
+Total budget: ~6–10K tokens.
+
+**On-demand**, two paths:
+
+1. **Role config declaration.** A role lists the architecture topics it cares about up-front:
+
+   ```yaml
+   # defaults/roles/code.structure.yaml (sketch)
+   role: code.structure
+   architecture_topics:                  # pre-injected after the always-injected block
+     - architecture.prompt_assembly
+     - architecture.log_layout
+   commands:
+     - test
+     - build
+     - ops
+   on_demand_topics: true                # may also fetch any other topic via tool
+   token_budget:
+     architecture_topics: 5000           # cap before truncation
+   ```
+
+   The prompt assembler reads this, looks up the artifact files by `artifact_id`, and injects them as a stable second-tier block.
+
+2. **Runtime tool fetch.** The role exposes a tool:
+
+   ```json
+   {
+     "tool": "fetch_architecture_topic",
+     "args": { "topic_id": "architecture.concurrency" }
+   }
+   ```
+
+   Returns the topic file content as a tool result. Lives outside the cached prefix (it's a tool result, not part of the system prompt), so it doesn't pollute cache reuse across roles.
+
+For a CLI-arg change, the role sees the TOC entry "*Concurrency contract — runner fields read-only after RunPool dispatch*", recognises its change doesn't touch Runner, and never fetches the topic. For a `runner.go` change, the role's config (or a runtime fetch) pulls the concurrency topic in.
+
+### Worked example: a developer adds a `--quiet` flag
+
+Walking the lifecycle on a concrete change:
+
+1. **Commit lands.** `cmd/report.go` and `cmd/root.go` change. No source files cited by any architecture topic are touched.
+2. **Git hook fires `ateam-artifacts validate`.**
+3. **Driver compares blob_shas:**
+   - `code_map.md` inputs (`go.mod`, top-LOC file list, `git log`): one input touched (`git log` output changes). Driver could rerun the deterministic script — sub-second, free.
+   - `architecture/concurrency.md` inputs (`internal/runner/runner.go`, `CONCURRENCY.md`): no touched inputs. **FRESH.** No LLM call.
+   - `architecture/prompt_assembly.md` inputs: no touched inputs. **FRESH.**
+   - `commands/test.md` inputs (`Makefile`, CI files): unchanged. **FRESH.**
+   - `commands/build.md` inputs: unchanged. **FRESH.**
+4. **Net cost of the commit's artifact update:** zero LLM calls, ~100 ms of script work.
+
+Compare to a commit that refactors `runner.go`:
+
+1. `internal/runner/runner.go` blob_sha changes.
+2. `architecture/concurrency.md` is a drift candidate.
+3. Cheap-validate runs — one model call with the diff. Output: `{"status": "still_correct"}` → just bumps `last_validated_commit`. ~$0.15.
+4. Or output: `{"status": "needs_patch", "sections": ["Cloning Model"]}` → driver runs a patch generation for that section. ~$0.50.
+5. Or output: `{"status": "stale"}` → driver re-authors the whole topic. ~$1.50.
+
+The expensive paths only fire on actual drift. The dominant path is FRESH.
+
+### Project-type adaptation
+
+Contracts are generic. Generators are project-aware. A small detector picks the generator stack:
+
+| Marker file | Project profile | Generator stack |
+|---|---|---|
+| `go.mod` | Go | `go list`, `wc`, `find`, govulncheck-aware deps |
+| `package.json` + `next.config.*` | Next.js webapp | `npm ls`, package.json scripts, Vite/Next config awareness |
+| `package.json` + `react-native.config.*` | React Native | npm + Metro |
+| `Cargo.toml` | Rust | `cargo metadata`, Cargo aliases |
+| `pyproject.toml` | Python | `pip-tools`, `pyproject` script section |
+| `mix.exs` | Elixir | `mix deps.tree`, mix tasks |
+| (none of the above) | Generic | `find`, `git log`, `wc` only |
+
+The differences:
+
+- **What counts as "top-LOC files"**: each profile has its own ignore list (vendored, generated, minified, lock files).
+- **Where commands live**: Makefile vs npm scripts vs Cargo aliases vs mix tasks vs `pyproject.toml [tool.poetry.scripts]`.
+- **Which dependency manifest to parse.**
+- **What "test command" / "build command" / "lint command" looks like.**
+
+But every profile emits artifacts conforming to the same schema. A `commands/test.md` from a Go project and from a Next.js project look structurally identical: a list of `{trigger, command, when_to_run}` entries. Roles consume the schema without knowing the project type.
+
+The generic fallback exists so unknown project types still get a degraded-but-functional artifact set.
+
+### Configuration
+
+```toml
+[artifacts]
+enabled = true
+allow_network = false                        # blocks LLM calls in CI without explicit opt-in
+generator_concurrency = 2                    # cap simultaneous LLM rebuilds
+prune_log_after = "30d"
+
+[artifacts.budget]
+max_total_tokens_injected = 10000            # always-injected slice cap
+max_topic_tokens = 3000                      # per architecture topic
+max_cheap_validate_diff_lines = 800          # truncation for the validation prompt
+
+[artifacts.architecture]
+topics_seed = []                             # optional: maintainer can pre-declare topic names
+allow_new_topics = true                      # whether the generator may propose new topics
+```
+
+Roles declare their topic interests in their own config (see role-config sketch above).
+
+### Cost characteristics
+
+For a stable project, average cost per commit, by path:
+
+| Path | Frequency | Cost per artifact |
+|---|---|---|
+| No input file touched | most commits | $0 |
+| Input touched, validation says still correct | common | ~$0.10–0.30 |
+| Input touched, validation says needs patch | uncommon | ~$0.50–1.50 |
+| Major refactor → multiple artifacts stale | rare | ~$3–10 across all artifacts |
+| Cold start (`ateam-artifacts init`) | once per project | ~$5–15 |
+
+For a project in active refactoring, you might see $1–5 per commit in artifact updates — paid **once**, not once per report. A subsequent report cycle that consumes the artifacts is dramatically cheaper than today's ~$13 warm baseline because the report no longer pays for the `Project Context` authorship.
+
+### Bootstrap protocol
+
+The first run is expensive and produces artifacts the maintainer should review.
+
+```bash
+ateam-artifacts init                # generates the full set at HEAD
+ateam-artifacts status              # human-readable summary
+$EDITOR .ateam/artifacts/architecture/INDEX.md   # maintainer reviews TOC
+$EDITOR .ateam/artifacts/architecture/*.md       # maintainer spot-checks topics
+git add .ateam/artifacts/ && git commit -m "bootstrap artifacts"
+```
+
+Strongly recommend maintainer review on bootstrap and after any full re-author. Periodic full-rebuild (e.g. monthly via CI) acts as a backstop against silent validation false-OKs.
+
+### Audit trail
+
+Every artifact run produces a stream log alongside the existing report logs:
+
+```
+.ateam/artifacts/.log/<artifact_id>-<timestamp>.jsonl
+```
+
+The `agent_execs` table in `state.sqlite` gains rows with `action ∈ {artifact_init, artifact_validate, artifact_rebuild, artifact_patch}`. Cost, model, turns, status all tracked the same way as report runs.
+
+This gives operators a complete history: "*who validated `architecture.concurrency` and what did they say?*" → query the table.
+
+### Failure modes and recovery
+
+| Failure | Detection | Recovery |
+|---|---|---|
+| LLM authors a wrong artifact at bootstrap | Maintainer review on init; periodic full-rebuild surfaces drift between artifact and source | Re-run with `--rebuild --ids <bad-artifact>` after maintainer notes the issue |
+| Validation gives false OK (drift went unnoticed) | Periodic full-rebuild backstop; report runs that read the artifact may surface contradictions | Schedule `ateam-artifacts rebuild --all` monthly; investigate any report that flags artifact-vs-code disagreement |
+| Corrupt or missing artifact | `ateam-artifacts status` reports MISSING/INVALID; report runner falls back to no-artifact behaviour | `ateam-artifacts rebuild --ids <id>` |
+| Two processes try to rebuild simultaneously | `.lock` file in `.ateam/artifacts/` | Second process waits; surfaces error if lock held > N seconds |
+| Project-type detector picks the wrong profile | Generated `commands/*.md` look wrong | `[artifacts].project_profile = "go"` override in config |
+| Network calls blocked in CI | `allow_network = false` makes registry-dependent generators degrade | Skip dep-status-from-registry sections silently; flag in `status` output |
+
+### Migration from Phase 0/1
+
+Phases 0 and 1 are pre-artifact. The migration path:
+
+1. **Phase 0 ships first** — inject existing project docs (`CLAUDE.md`, `CONCURRENCY.md`, etc.) into the prompt as a stable preamble. This is the cheapest cold-cache fix.
+2. **Phase 1 ships second** — auto-Facts block. Mechanical orientation. Together with Phase 0, this closes most of the cold-cache penalty for first-time runs.
+3. **Phase 2+ supersedes Phases 0 and 1 mechanism, not function.** Once the artifact system exists:
+   - `code_map.md` (artifact) replaces the Phase 1 Facts block — same content, better cache locality, provenance-tracked.
+   - `architecture/INDEX.md` + selected topics replace the Phase 0 doc-injection — same content (drawn from the same source docs), but now with on-demand fetch.
+   - The model-authored `Project Context` section in reports shrinks to **only** the role-specific role-state-after-this-run memory: findings to revisit, conventions newly discovered, scope declarations. The mechanical and architectural slices go to artifacts.
+4. **Roles get a new prompt-assembly contract**: always-injected block (small, stable, cacheable) + role-declared topic block (medium, cache-eligible per role) + runtime tool fetches (uncached).
+
+The migration is incremental: Phases 0 and 1 don't need to be torn out when Phase 2+ ships. The artifact system can co-exist with doc-injection for a transition period.
+
+### Open design questions specific to the artifact system
+
+1. **Topic granularity.** Too few topics = nothing benefits from on-demand fetch. Too many = TOC bloat. Initial heuristic: a topic is a candidate when (a) it has a coherent single-paragraph answer, (b) less than 50% of roles need it, (c) it's non-trivial to re-derive from source. Worth measuring topic-hit-rate per role to tune.
+2. **Should symbol-level provenance be opt-in per-artifact or per-input?** Probably per-input — `runner.go` warrants symbol-level (changes often, most changes don't affect the concurrency doc); `CONCURRENCY.md` doesn't need it (small, infrequently touched).
+3. **Cross-project artifact reuse?** When ATeam manages multiple projects, the architecture topics are project-specific but the *template* for a topic could be reusable. Probably out of scope for v1.
+4. **Should the artifact builder propose its own topic list?** On `init`, the LLM scans the source docs and proposes a TOC. Maintainer can edit. Or accept a pre-declared `topics_seed` list. Probably support both.
+5. **Hot-file → topic association.** When `cmd/runner.go` is the most-edited file and *no* architecture topic cites it, that's a flag worth surfacing — it likely means the project has a structural area that lacks documented architectural rationale. Surface as an `ateam-artifacts status` warning?
+6. **Validation prompt's diff size cap.** The default 800 lines is arbitrary. Should it be per-input or total? Should oversized diffs auto-promote to STALE without trying to cheap-validate?
 
 ## Open questions (not blocking, worth keeping on the radar)
 
