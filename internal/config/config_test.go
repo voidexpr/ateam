@@ -124,11 +124,11 @@ func TestDefaultConfig(t *testing.T) {
 	if len(cfg.Roles) == 0 {
 		t.Fatal("Roles should not be empty")
 	}
-	if cfg.Roles["security"] != "on" {
-		t.Errorf("Roles[security] = %q, want %q", cfg.Roles["security"], "on")
+	if cfg.Roles["code.bugs"] != "on" {
+		t.Errorf("Roles[code.bugs] = %q, want %q", cfg.Roles["code.bugs"], "on")
 	}
-	if cfg.Roles["automation"] != "off" {
-		t.Errorf("Roles[automation] = %q, want %q", cfg.Roles["automation"], "off")
+	if cfg.Roles["test.blackbox"] != "off" {
+		t.Errorf("Roles[test.blackbox] = %q, want %q", cfg.Roles["test.blackbox"], "off")
 	}
 }
 

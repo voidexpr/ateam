@@ -149,10 +149,11 @@ func TestEnabledRoleIDsAllowlist(t *testing.T) {
 
 	got := enabledRoleIDs(configRoles, allKnown)
 
-	// alpha: "on" → included; beta: "off" → excluded; gamma: "enabled" → included;
-	// delta: "disabled" → excluded; epsilon: "weird_value" → excluded (allowlist);
-	// zeta: not in configRoles → included (enabled by default).
-	want := map[string]bool{"alpha": true, "gamma": true, "zeta": true}
+	// Only roles explicitly listed as "on" or "enabled" are included.
+	// alpha: "on" → included; gamma: "enabled" → included.
+	// beta/delta: explicit off; epsilon: unrecognized status; zeta: unlisted —
+	// all excluded.
+	want := map[string]bool{"alpha": true, "gamma": true}
 	if len(got) != len(want) {
 		t.Fatalf("enabledRoleIDs returned %v, want keys %v", got, want)
 	}
@@ -230,25 +231,20 @@ func TestResolveRoleListAllExpansionUsesAllowlist(t *testing.T) {
 		"security":   "on",
 		"automation": "off",
 	}
-	// "all" should expand only to roles with status "on" or "enabled", plus
-	// embedded roles not listed in configRoles (which default to enabled).
+	// "all" expands only to roles explicitly listed as "on" or "enabled".
+	// Built-in roles not present in configRoles (e.g. "code.bugs") and roles
+	// listed as "off" are both excluded.
 	roles, err := ResolveRoleList([]string{"all"}, configRoles, "", "")
 	if err != nil {
 		t.Fatalf("ResolveRoleList: %v", err)
 	}
 	for _, r := range roles {
-		if r == "automation" {
-			t.Errorf("'automation' (status 'off') should not appear in 'all' expansion")
+		if r != "security" {
+			t.Errorf("unexpected role %q in 'all' expansion; only 'security' should be included", r)
 		}
 	}
-	found := false
-	for _, r := range roles {
-		if r == "security" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("'security' (status 'on') should appear in 'all' expansion")
+	if len(roles) != 1 || roles[0] != "security" {
+		t.Errorf("expected exactly [security] in 'all' expansion, got %v", roles)
 	}
 }
 

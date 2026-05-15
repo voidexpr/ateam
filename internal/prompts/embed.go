@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ateam/defaults"
+	"github.com/ateam/internal/config"
 )
 
 // PromptDiff describes a prompt file that differs from the embedded default.
@@ -109,19 +110,18 @@ func ResolveRoleList(ids []string, configRoles map[string]string, projectDir, or
 	return result, nil
 }
 
-// enabledRoleIDs filters allKnown to only roles that are enabled in configRoles.
-// Uses allowlist logic (same as config.IsRoleEnabled): only "on" or "enabled" statuses
-// are considered enabled. Roles not present in configRoles default to enabled so that
-// custom roles and embedded roles without an explicit config entry are included.
-// When configRoles is nil, all are returned.
+// enabledRoleIDs filters allKnown to roles whose configRoles status is
+// considered enabled by config.IsRoleEnabled. Roles are expensive to run, so
+// enablement is always opt-in: unlisted roles are excluded from "all"
+// expansion. When configRoles is nil, all are returned so callers without a
+// loaded config still get the full set.
 func enabledRoleIDs(configRoles map[string]string, allKnown []string) []string {
 	if configRoles == nil {
 		return allKnown
 	}
 	var enabled []string
 	for _, id := range allKnown {
-		status, inConfig := configRoles[id]
-		if !inConfig || status == "on" || status == "enabled" {
+		if config.IsRoleEnabled(configRoles[id]) {
 			enabled = append(enabled, id)
 		}
 	}

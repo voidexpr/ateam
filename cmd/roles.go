@@ -88,17 +88,14 @@ func runRoles(cmd *cobra.Command, args []string) error {
 }
 
 // roleStatus reports the effective enabled/disabled status of a role.
-// Roles missing from configRoles default to "on" so embedded defaults and
-// org/project-level role directories are not silently hidden, matching the
-// allowlist behavior used elsewhere (prompts.enabledRoleIDs).
+// Roles are opt-in: a role is "on" only if configRoles explicitly lists it as
+// "on" or "enabled". Anything else — unlisted, "off", or an unrecognized
+// status — is "off".
 func roleStatus(configRoles map[string]string, name string) string {
-	if status, ok := configRoles[name]; ok {
-		if config.IsRoleEnabled(status) {
-			return config.RoleEnabled
-		}
-		return status
+	if config.IsRoleEnabled(configRoles[name]) {
+		return config.RoleEnabled
 	}
-	return config.RoleEnabled
+	return config.RoleDisabled
 }
 
 func printRolesDocs() error {

@@ -6,7 +6,7 @@ import (
 	"github.com/ateam/internal/config"
 )
 
-func TestRoleStatusDefaultsToEnabled(t *testing.T) {
+func TestRoleStatus(t *testing.T) {
 	cases := []struct {
 		name        string
 		configRoles map[string]string
@@ -14,16 +14,22 @@ func TestRoleStatusDefaultsToEnabled(t *testing.T) {
 		want        string
 	}{
 		{
-			name:        "missing entry defaults to on",
+			name:        "missing from config defaults to off",
 			configRoles: map[string]string{"other": "on"},
 			role:        "security",
-			want:        config.RoleEnabled,
+			want:        config.RoleDisabled,
 		},
 		{
-			name:        "nil config defaults to on",
+			name:        "nil config defaults to off",
 			configRoles: nil,
 			role:        "security",
-			want:        config.RoleEnabled,
+			want:        config.RoleDisabled,
+		},
+		{
+			name:        "custom role missing from config defaults to off",
+			configRoles: map[string]string{"other": "on"},
+			role:        "my_custom_role",
+			want:        config.RoleDisabled,
 		},
 		{
 			name:        "explicit on",
@@ -38,10 +44,10 @@ func TestRoleStatusDefaultsToEnabled(t *testing.T) {
 			want:        config.RoleEnabled,
 		},
 		{
-			name:        "explicit off is preserved",
+			name:        "explicit off",
 			configRoles: map[string]string{"security": "off"},
 			role:        "security",
-			want:        "off",
+			want:        config.RoleDisabled,
 		},
 	}
 	for _, tc := range cases {

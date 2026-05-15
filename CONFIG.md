@@ -209,7 +209,7 @@ Roles are discovered from the union of:
 - `.ateamorg/roles/<NAME>/report_prompt.md` (org-level, shared across projects)
 - `.ateam/roles/<NAME>/report_prompt.md` (project-level)
 
-Custom roles not listed in `config.toml` default to enabled and are included in `--roles all`. Add the role to `config.toml` with `off` to exclude it.
+Roles are opt-in: only roles explicitly listed in `config.toml` with status `on` (or the legacy `enabled`) are included in `--roles all`. Unlisted roles — built-in or custom — and roles set to `off` are excluded from the `all` expansion. They can still be run by naming them directly: `ateam report --roles my_custom_role` works without any `config.toml` entry as long as the role's `report_prompt.md` exists.
 
 ## Prompt Configuration
 
