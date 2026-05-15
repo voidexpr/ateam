@@ -311,16 +311,17 @@ func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
 		f.Close()
 	}
 
+	if summary.Output != "" {
+		fmt.Print(summary.Output)
+		if summary.Output[len(summary.Output)-1] != '\n' {
+			fmt.Println()
+		}
+	}
+
 	printExecSummary(summary)
 
 	if summary.Err != nil {
 		return fmt.Errorf("auto-debug failed: %w", summary.Err)
-	}
-
-	// Debug report lives in logs/<exec_id>/stream.jsonl; users can render it
-	// with `ateam cat <exec_id>`.
-	if summary.ExecID > 0 {
-		fmt.Printf("\nRun `ateam cat %d` to view the debug report.\n", summary.ExecID)
 	}
 
 	return nil
