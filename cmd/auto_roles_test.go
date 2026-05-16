@@ -1,8 +1,15 @@
 package cmd
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/ateam/internal/calldb"
 )
 
 func TestParseAutoRolesOutput(t *testing.T) {
@@ -108,5 +115,132 @@ RECOMMENDED_ROLES: code.bugs,,test.recent,
 				t.Errorf("rationale missing substring %q; got:\n%s", tc.wantRationaleSubstring, rationale)
 			}
 		})
+	}
+}
+
+// TestBuildAutoRolesContextHappyPath verifies that the pre-baked bundle
+// includes every section header and reflects the seeded inputs (roles
+// listing, a report file age, review content, execution_report path, and
+// git log/diff for the base commit looked up from the DB).
+func TestBuildAutoRolesContextHappyPath(t *testing.T) {
+	base, projPath, env := setupTestProject(t)
+
+	// initTestGitRepo gives us an initial empty commit; treat that hash as the
+	// "prior review's base" so the bundle's diff window has something to show.
+	initTestGitRepo(t, base)
+	firstHash := gitHead(t, base)
+	writeAndCommit(t, base, "src/feature.go", "package main\n// added since last review\n", "add feature")
+
+	// Make the env operate from inside the git repo.
+	if err := env.OverrideWorkDir(base); err != nil {
+		t.Fatalf("OverrideWorkDir: %v", err)
+	}
+
+	// Seed a prior review run carrying firstHash as its GitStartHash.
+	db, err := calldb.Open(env.ProjectDBPath())
+	if err != nil {
+		t.Fatalf("Open calldb: %v", err)
+	}
+	now := time.Now()
+	rowID, err := db.InsertCall(&calldb.Call{
+		ProjectID: env.ProjectID(), Action: "review", Role: "supervisor",
+		StartedAt: now.Add(-30 * time.Minute), GitStartHash: firstHash,
+	})
+	if err != nil {
+		t.Fatalf("InsertCall: %v", err)
+	}
+	if err := db.UpdateCall(rowID, &calldb.CallResult{EndedAt: now, DurationMS: 60000}); err != nil {
+		t.Fatalf("UpdateCall: %v", err)
+	}
+	db.Close()
+
+	// Seed a per-role report.md, a review.md, and an execution_report.md.
+	mustWrite(t, filepath.Join(projPath, ".ateam", "roles", "code.bugs", "report.md"), "# Bug findings\n- Finding 1\n")
+	mustWrite(t, filepath.Join(projPath, ".ateam", "supervisor", "review.md"), "# Review\n\nSelected: code.bugs:Finding-1\nDeferred: nothing\n")
+	mustWrite(t, filepath.Join(projPath, ".ateam", "runtime", "999", "execution_report.md"), "# Execution\n\nApplied Finding-1\n")
+
+	got, err := buildAutoRolesContext(env)
+	if err != nil {
+		t.Fatalf("buildAutoRolesContext: %v", err)
+	}
+
+	wantSubstrings := []string{
+		"### Roles configured for this project",
+		"### Per-role report freshness",
+		"### Latest review",
+		"### Latest code-cycle execution report",
+		"### Git base for diff",
+		firstHash[:7],
+		fmt.Sprintf("from review agent_exec %d", rowID),
+		"### Git log since base",
+		"### Git diff stat since base",
+		"add feature",         // from the second commit
+		"Selected: code.bugs", // from review.md
+		"Applied Finding-1",   // from execution_report.md
+		"code.bugs",           // from per-role report freshness
+	}
+	for _, s := range wantSubstrings {
+		if !strings.Contains(got, s) {
+			t.Errorf("output missing %q\n---\n%s", s, got)
+		}
+	}
+}
+
+// TestBuildAutoRolesContextFallback verifies that with no prior review row in
+// the DB, the bundle falls back to HEAD~N and labels the source.
+func TestBuildAutoRolesContextFallback(t *testing.T) {
+	base, _, env := setupTestProject(t)
+	initTestGitRepo(t, base)
+	if err := env.OverrideWorkDir(base); err != nil {
+		t.Fatalf("OverrideWorkDir: %v", err)
+	}
+
+	got, err := buildAutoRolesContext(env)
+	if err != nil {
+		t.Fatalf("buildAutoRolesContext: %v", err)
+	}
+	if !strings.Contains(got, fmt.Sprintf("HEAD~%d", autoRolesFallbackBaseCommits)) {
+		t.Errorf("expected HEAD~%d fallback label; got:\n%s", autoRolesFallbackBaseCommits, got)
+	}
+	if !strings.Contains(got, "no prior review found") {
+		t.Errorf("expected fallback explanation; got:\n%s", got)
+	}
+}
+
+// --- test helpers ---
+
+func writeAndCommit(t *testing.T, dir, relPath, content, msg string) {
+	t.Helper()
+	mustWrite(t, filepath.Join(dir, relPath), content)
+	for _, args := range [][]string{
+		{"add", relPath},
+		{"commit", "-m", msg},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+}
+
+func gitHead(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %v", err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func mustWrite(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile %s: %v", path, err)
 	}
 }

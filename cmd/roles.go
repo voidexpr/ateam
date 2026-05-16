@@ -2,7 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/prompts"
@@ -75,15 +78,20 @@ func runRoles(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	w := newTable()
-	fmt.Fprintln(w, "ROLE\tSTATUS\tFLAGS\tDESCRIPTION")
+	writeRoleListing(os.Stdout, configRoles, allKnown)
+	return nil
+}
+
+// writeRoleListing renders the same `ateam roles` table to w. Shared by the
+// CLI command (w = stdout) and the --auto-roles context bundle (w = buffer).
+func writeRoleListing(w io.Writer, configRoles map[string]string, allKnown []string) {
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "ROLE\tSTATUS\tFLAGS\tDESCRIPTION")
 	for _, name := range allKnown {
 		meta := prompts.RoleMeta(name)
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, roleStatus(configRoles, name), roleFlags(meta), meta.Description)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", name, roleStatus(configRoles, name), roleFlags(meta), meta.Description)
 	}
-	w.Flush()
-
-	return nil
+	tw.Flush()
 }
 
 // roleFlags renders the legacy/deprecated frontmatter flags for a role as a

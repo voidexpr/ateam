@@ -31,6 +31,11 @@ type TemplateVars struct {
 	ContainerName   string // docker container name (e.g. "ateam-myapp-security")
 	OutputDir       string // absolute path to <projectDir>/runtime/<exec_id>/ (where the agent should write files)
 	OutputFile      string // absolute path to OutputDir/<primary_kind> (e.g. report.md); empty when the action has no primary output
+
+	// AutoRolesCommandsOutput is the pre-baked context bundle injected into
+	// `{{ATEAM_AUTO_ROLES_COMMANDS_OUTPUT}}` for the --auto-roles planner agent.
+	// Copied from RunOpts.AutoRolesCommandsOutput; empty for every other action.
+	AutoRolesCommandsOutput string
 }
 
 // Replacer builds a strings.Replacer for the current template vars.
@@ -69,6 +74,9 @@ func (v TemplateVars) Replacer() *strings.Replacer {
 		// Contract marker for the --auto-roles planner output; same constant
 		// is read back by cmd/auto_roles.go::parseAutoRolesOutput.
 		"{{AUTO_ROLES_MARKER}}", prompts.AutoRolesMarker,
+		// Pre-baked context bundle for the --auto-roles planner agent. Computed
+		// by cmd/auto_roles.go before the run; empty for every other action.
+		"{{ATEAM_AUTO_ROLES_COMMANDS_OUTPUT}}", v.AutoRolesCommandsOutput,
 	)
 }
 
@@ -130,17 +138,18 @@ func resolveContainerTemplates(c container.Container, vars TemplateVars) {
 // BuildTemplateVars constructs a fully populated TemplateVars.
 func BuildTemplateVars(r *Runner, opts RunOpts, startedAt time.Time, callID int64, agentName, model string) TemplateVars {
 	vars := TemplateVars{
-		ProjectName:   r.ProjectName,
-		Role:          opts.RoleID,
-		Action:        opts.Action,
-		Batch:         opts.Batch,
-		Timestamp:     startedAt.Format(TimestampFormat),
-		Profile:       r.Profile,
-		ExecID:        callID,
-		Agent:         agentName,
-		Model:         model,
-		ContainerType: r.ContainerType,
-		ContainerName: r.ContainerName,
+		ProjectName:             r.ProjectName,
+		Role:                    opts.RoleID,
+		Action:                  opts.Action,
+		Batch:                   opts.Batch,
+		Timestamp:               startedAt.Format(TimestampFormat),
+		Profile:                 r.Profile,
+		ExecID:                  callID,
+		Agent:                   agentName,
+		Model:                   model,
+		ContainerType:           r.ContainerType,
+		ContainerName:           r.ContainerName,
+		AutoRolesCommandsOutput: opts.AutoRolesCommandsOutput,
 	}
 	// ProjectFullPath / ProjectDir describe the project root, NOT the agent's
 	// working directory. Derive from r.ProjectDir (.ateam path) so the values

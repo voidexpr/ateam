@@ -53,6 +53,11 @@ func runAutoRoles(env *root.ResolvedEnv, profile, agentName string, verbose, pla
 // Profile/agent override the runner selection the same way they do for the
 // surrounding `report` / `all` invocation.
 func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbose bool) (rationale string, roles []string, err error) {
+	commandsOutput, err := buildAutoRolesContext(env)
+	if err != nil {
+		return "", nil, fmt.Errorf("build auto-roles context: %w", err)
+	}
+
 	pinfo := env.NewProjectInfoParams("the supervisor", "auto-roles")
 	prompt, err := prompts.AssembleAutoRolesPrompt(env.OrgDir, env.ProjectDir, pinfo)
 	if err != nil {
@@ -86,12 +91,13 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 	defer stop()
 
 	summary := cr.Run(ctx, prompt, runner.RunOpts{
-		RoleID:     "supervisor",
-		Action:     runner.ActionExec,
-		OutputKind: runner.OutputKindAutoRoles,
-		WorkDir:    env.WorkDir,
-		TimeoutMin: timeout,
-		Verbose:    verbose,
+		RoleID:                  "supervisor",
+		Action:                  runner.ActionExec,
+		OutputKind:              runner.OutputKindAutoRoles,
+		WorkDir:                 env.WorkDir,
+		TimeoutMin:              timeout,
+		Verbose:                 verbose,
+		AutoRolesCommandsOutput: commandsOutput,
 	}, progress)
 
 	close(progress)
@@ -104,7 +110,7 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 		return "", nil, fmt.Errorf("auto-roles agent returned no exec ID; cannot locate output file")
 	}
 
-	outputPath := filepath.Join(env.RuntimeDir(summary.ExecID), "auto_roles.md")
+	outputPath := filepath.Join(env.RuntimeDir(summary.ExecID), runner.PrimaryOutputName(runner.OutputKindAutoRoles))
 	content, err := os.ReadFile(outputPath)
 	if err != nil {
 		return "", nil, fmt.Errorf("read auto-roles output (%s): %w", outputPath, err)

@@ -131,6 +131,11 @@ type RunOpts struct {
 	Verbose          bool      // print agent and docker commands to stderr
 	Batch            string    // groups related agent_execs (e.g. all execs in one ateam code run)
 	StartedAt        time.Time // optional override; if zero, Run() uses time.Now()
+
+	// AutoRolesCommandsOutput is the pre-baked context bundle injected into
+	// `{{ATEAM_AUTO_ROLES_COMMANDS_OUTPUT}}` for the --auto-roles planner agent.
+	// Only set by cmd/auto_roles.go; empty for every other action.
+	AutoRolesCommandsOutput string
 }
 
 // RunProgress is a lightweight status sent on a channel during execution.

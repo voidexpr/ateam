@@ -551,3 +551,15 @@ func TestSelfDocsSubstitution(t *testing.T) {
 		}
 	}
 }
+
+// TestAutoRolesCommandsOutputSubstitution verifies that the per-call macro
+// {{ATEAM_AUTO_ROLES_COMMANDS_OUTPUT}} resolves to the value passed in via
+// RunOpts.AutoRolesCommandsOutput.
+func TestAutoRolesCommandsOutputSubstitution(t *testing.T) {
+	vars := TemplateVars{AutoRolesCommandsOutput: "<pre-baked context body>"}
+	got := vars.Replacer().Replace("Before {{ATEAM_AUTO_ROLES_COMMANDS_OUTPUT}} after.")
+	want := "Before <pre-baked context body> after."
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}

@@ -5,17 +5,13 @@ description: Recommend which roles to run report for at this point in time
 
 Ateam runs role-specific agents that audit this codebase, then a supervisor reviews their findings and a coder implements selected fixes. Given the current state, recent code changes, and prior runs, recommend which roles to run this round and at what depth.
 
-## Inspect (do this first)
+## Current state
 
-Run these commands and read their output before deciding. The git-diff step is the primary input.
+The harness has already collected every input you need for this decision. Read the sections below; do **not** re-run these commands.
 
-- `ateam roles` — current per-role status (`on` / `off` in `config.toml`), plus `legacy` / `deprecated` flags.
-- `ls -lt .ateam/roles/*/report.md` — age of each role's last report.
-- `cat .ateam/supervisor/review.md` — last review. It cites the commit it ran on and which findings were selected vs. deferred or rejected.
-- Latest code cycle: `find .ateam -type f -name execution_report.md | xargs ls -lt | head -1` then read the file. It records which fixes were applied.
-- **Changes since the last review's commit**: `git log <commit>..HEAD --stat` and `git diff <commit>..HEAD --stat`. Group changes by area (database, scripts, docs, tests, source).
+{{ATEAM_AUTO_ROLES_COMMANDS_OUTPUT}}
 
-For a role whose purpose isn't obvious from `ateam roles`, read its prompt with `ateam prompt --action report --role NAME`. Prompts can be long — only do this for unfamiliar custom roles.
+If a role name above is unfamiliar (typically a custom role added by this project), read its prompt with `ateam prompt --action report --role NAME` — that's the only tool call you should need.
 
 ## Decide
 
