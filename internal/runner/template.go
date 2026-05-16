@@ -10,6 +10,7 @@ import (
 	"github.com/ateam/defaults"
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/container"
+	"github.com/ateam/internal/prompts"
 )
 
 // TemplateVars holds the variables available for {{VAR}} substitution
@@ -65,6 +66,9 @@ func (v TemplateVars) Replacer() *strings.Replacer {
 		"{{ATEAM_OWN_CONFIG}}", defaults.SelfDocs["CONFIG"],
 		"{{ATEAM_OWN_ISOLATION}}", defaults.SelfDocs["ISOLATION"],
 		"{{ATEAM_OWN_ROLES}}", defaults.SelfDocs["ROLES"],
+		// Contract marker for the --auto-roles planner output; same constant
+		// is read back by cmd/auto_roles.go::parseAutoRolesOutput.
+		"{{AUTO_ROLES_MARKER}}", prompts.AutoRolesMarker,
 	)
 }
 
@@ -189,6 +193,8 @@ func PrimaryOutputName(kind string) string {
 		return "execution_report.md"
 	case OutputKindSetupOverview:
 		return "setup_overview.md"
+	case OutputKindAutoRoles:
+		return "auto_roles.md"
 	default:
 		return ""
 	}
@@ -203,4 +209,5 @@ const (
 	OutputKindVerify          = "verify"
 	OutputKindExecutionReport = "execution_report"
 	OutputKindSetupOverview   = "setup_overview"
+	OutputKindAutoRoles       = "auto_roles"
 )

@@ -42,7 +42,28 @@ Bias toward short role lists. Two well-chosen roles produce a better review than
 
 ## Output
 
-1. **Rationale** (2–4 lines): which roles you picked or skipped and why, noting each role's current status (`on` / `off` / not listed).
-2. **One recommended command** on its own line, exact. Optionally print the two other depth variants for the same role list as alternatives the human can pick instead.
+Write your recommendation to:
 
-Do not execute the commands. Print and stop.
+```
+{{OUTPUT_FILE}}
+```
+
+The file must contain, in this order:
+
+1. **Rationale** (2–4 lines): which roles you picked or skipped and why, noting each role's current status (`on` / `off` / not listed).
+2. **Three copy-paste command variants** for the same role list, in a single fenced code block:
+   ```
+   ateam report --roles X,Y
+   ateam report --roles X,Y --review
+   ateam all --roles X,Y
+   ```
+   Replace `X,Y` with your recommended comma-separated role list (no spaces around commas).
+3. **A final marker line on its own line, no markdown formatting:**
+
+   ```
+   {{AUTO_ROLES_MARKER}} X,Y
+   ```
+
+   Same role list as above, comma-separated, no spaces. If you recommend running no roles (everything's fresh and the existing review is current), emit exactly `{{AUTO_ROLES_MARKER}}` with nothing after the colon — ateam reads this as "no work to do".
+
+After the `Write` call returns successfully, your FINAL assistant message must be a single short confirmation line, e.g. `Auto-roles written to {{OUTPUT_FILE}}`. The on-disk file is the source of truth — ateam parses it directly. Do not execute any of the recommended commands.

@@ -24,6 +24,8 @@ var (
 	allEffort          string
 	allMaxBudgetUSD    string
 	allMaxBudgetBatch  string
+	allAutoRoles       bool
+	allPlanOnly        bool
 
 	// Per-stage overrides
 	allReportProfile     string
@@ -91,10 +93,35 @@ func init() {
 	addDockerAutoSetupFlag(allCmd, &allDockerAutoSetup)
 	addContainerNameFlag(allCmd, &allContainerName)
 	allCmd.Flags().BoolVar(&allNoVerify, "no-verify", false, "skip the verify phase after code")
+	addAutoRolesFlags(allCmd, &allAutoRoles, &allPlanOnly)
 }
 
 func runAll(cmd *cobra.Command, args []string) error {
 	printOutput := !allQuiet
+
+	if allAutoRoles {
+		if len(allRoles) > 0 {
+			return fmt.Errorf("--auto-roles and --roles are mutually exclusive")
+		}
+	} else if allPlanOnly {
+		return fmt.Errorf("--plan-only requires --auto-roles")
+	}
+
+	if allAutoRoles {
+		env, err := resolveEnv()
+		if err != nil {
+			return err
+		}
+		// Planner runs as a supervisor pass, so reuse --supervisor-profile/-agent.
+		roles, done, err := runAutoRoles(env, allSupervisorProfile, allSupervisorAgent, allVerbose, allPlanOnly)
+		if err != nil {
+			return err
+		}
+		if done {
+			return nil
+		}
+		allRoles = roles
+	}
 
 	maxAge, err := parseMaxAge(allMaxAge)
 	if err != nil {

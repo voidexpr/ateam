@@ -34,6 +34,8 @@ var (
 	reportEffort               string
 	reportMaxBudgetUSD         string
 	reportMaxBudgetBatch       string
+	reportAutoRoles            bool
+	reportPlanOnly             bool
 )
 
 // ReportOptions holds configuration for a report run.
@@ -62,6 +64,8 @@ type ReportOptions struct {
 	Effort               string
 	MaxBudgetUSD         string
 	MaxBudgetBatch       string
+	AutoRoles            bool
+	PlanOnly             bool
 }
 
 var reportCmd = &cobra.Command{
@@ -101,6 +105,8 @@ Example:
 			Effort:               reportEffort,
 			MaxBudgetUSD:         reportMaxBudgetUSD,
 			MaxBudgetBatch:       reportMaxBudgetBatch,
+			AutoRoles:            reportAutoRoles,
+			PlanOnly:             reportPlanOnly,
 		})
 	},
 }
@@ -127,6 +133,7 @@ func init() {
 	addForceFlag(reportCmd, &reportForce)
 	addDockerAutoSetupFlag(reportCmd, &reportDockerAutoSetup)
 	addContainerNameFlag(reportCmd, &reportContainerName)
+	addAutoRolesFlags(reportCmd, &reportAutoRoles, &reportPlanOnly)
 }
 
 func runReport(opts ReportOptions) error {
@@ -138,11 +145,32 @@ func runReport(opts ReportOptions) error {
 		return err
 	}
 
-	// Resolve role list — either from --rerun-failed (DB) or --roles flag.
+	if opts.AutoRoles {
+		if len(opts.Roles) > 0 {
+			return fmt.Errorf("--auto-roles and --roles are mutually exclusive")
+		}
+		if opts.RerunFailed {
+			return fmt.Errorf("--auto-roles and --rerun-failed are mutually exclusive")
+		}
+	} else if opts.PlanOnly {
+		return fmt.Errorf("--plan-only requires --auto-roles")
+	}
+
+	// Resolve role list — either from --auto-roles (planner agent),
+	// --rerun-failed (DB), or --roles flag.
 	var roleIDs []string
 	var db *calldb.CallDB
 
-	if opts.RerunFailed {
+	if opts.AutoRoles {
+		roles, done, err := runAutoRoles(env, opts.Profile, opts.Agent, opts.Verbose, opts.PlanOnly)
+		if err != nil {
+			return err
+		}
+		if done {
+			return nil
+		}
+		roleIDs = roles
+	} else if opts.RerunFailed {
 		if len(opts.Roles) > 0 {
 			return fmt.Errorf("--rerun-failed and --roles are mutually exclusive")
 		}

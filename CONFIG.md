@@ -20,7 +20,7 @@ Created by `ateam install`. Holds shared defaults and org-level overrides.
     supervisor/review_prompt.md                # supervisor review prompt
     supervisor/code_management_prompt.md       # supervisor code management prompt
     supervisor/code_verify_prompt.md           # supervisor verify prompt
-    supervisor/report_commissioning_prompt.md  # report commissioning prompt
+    supervisor/report_auto_roles_prompt.md     # auto-roles recommendation prompt (used by --auto-roles)
     supervisor/exec_debug_prompt.md            # agent_exec debug prompt (used by ateam inspect --auto-debug)
     supervisor/auto_setup_prompt.md            # auto-setup prompt
   runtime.hcl                                  # org-level runtime config override (optional)

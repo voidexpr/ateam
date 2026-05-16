@@ -101,6 +101,8 @@ ateam report --roles all --extra-prompt "Focus on the API layer"
 ateam report --roles all --dry-run
 ateam report --rerun-failed              # re-run only roles that failed last time
 ateam report --rerun-failed --dry-run    # preview which roles would be rerun
+ateam report --auto-roles                # let a planner agent pick the role list
+ateam report --auto-roles --plan-only    # print the recommendation, don't run
 ```
 
 | Flag | Description |
@@ -125,6 +127,8 @@ ateam report --rerun-failed --dry-run    # preview which roles would be rerun
 | `--force` | Run even if the same action+role is already running |
 | `--verbose` | Print agent and docker commands to stderr |
 | `--review` | Run review automatically after reports complete |
+| `--auto-roles` | Spawn a planner agent (`defaults/supervisor/report_auto_roles_prompt.md`) that inspects git history since the last review, prior reports, and the latest code-cycle execution report, then picks a short role list. Mutually exclusive with `--roles` and `--rerun-failed`. |
+| `--plan-only` | With `--auto-roles`: print the planner's rationale and recommended commands, then exit before running any reports. |
 
 ### `ateam review`
 
@@ -239,6 +243,8 @@ ateam all --roles code.structure,test.gaps   # report+review only those roles
 ateam all --all                                  # include disabled roles' stale reports in review
 ateam all --max-age 2h                           # review drops reports older than 2h
 ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile docker
+ateam all --auto-roles                           # planner picks the role list before the pipeline runs
+ateam all --auto-roles --plan-only               # print the recommendation, don't execute the pipeline
 ```
 
 | Flag | Description |
@@ -265,6 +271,8 @@ ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile 
 | `--quiet`, `-q` | Suppress output printing |
 | `--verbose` | Print agent and docker commands to stderr |
 | `--no-verify` | Skip the verify phase that normally runs after code |
+| `--auto-roles` | Spawn a planner agent before phase 1 that picks the role list based on git history, prior reports, and the last code-cycle execution report. Mutually exclusive with `--roles`. |
+| `--plan-only` | With `--auto-roles`: print the planner's rationale and recommended commands, then exit before running any phase. |
 
 ### `ateam secret`
 

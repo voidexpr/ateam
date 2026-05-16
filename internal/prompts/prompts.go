@@ -48,7 +48,7 @@ const (
 	CodeExtraPromptFile           = "code_extra_prompt.md"
 	ReviewPromptFile              = "review_prompt.md"
 	ReviewExtraPromptFile         = "review_extra_prompt.md"
-	ReportCommissioningPromptFile = "report_commissioning_prompt.md"
+	ReportAutoRolesPromptFile     = "report_auto_roles_prompt.md"
 	CodeManagementPromptFile      = "code_management_prompt.md"
 	CodeManagementExtraPromptFile = "code_management_extra_prompt.md"
 	CodeVerifyPromptFile          = "code_verify_prompt.md"
@@ -59,6 +59,14 @@ const (
 	ReportErrorFile               = "report_error.md"
 	SandboxSettingsFile           = "ateam_claude_sandbox_extra_settings.json"
 )
+
+// AutoRolesMarker is the contract line the `--auto-roles` planner agent
+// writes at the end of its output file. The substring after the colon is
+// comma-separated role IDs (no spaces); an empty value means "no roles need
+// running". Substituted into the prompt as `{{AUTO_ROLES_MARKER}}` and parsed
+// back by cmd/auto_roles.go::parseAutoRolesOutput. Keeping it as a single
+// exported constant prevents prompt-vs-parser drift.
+const AutoRolesMarker = "RECOMMENDED_ROLES:"
 
 // ResolveValue resolves a prompt value:
 //   - "-" or "@-": read the prompt from stdin (terminated by EOF).
@@ -484,6 +492,14 @@ func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, pinfo Pr
 // because the source of truth is the git history itself.
 func AssembleCodeVerifyPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, extraPrompt string) (string, error) {
 	return assembleSupervisorPrompt(orgDir, projectDir, pinfo, CodeVerifyPromptFile, CodeVerifyExtraPromptFile, "code verify", extraPrompt, nil)
+}
+
+// AssembleAutoRolesPrompt builds the supervisor prompt that recommends which
+// roles to run this round, based on git history since the last review, prior
+// reports, the latest review file, and the last code-cycle execution report.
+// Invoked by `ateam report --auto-roles` and `ateam all --auto-roles`.
+func AssembleAutoRolesPrompt(orgDir, projectDir string, pinfo ProjectInfoParams) (string, error) {
+	return assembleSupervisorPrompt(orgDir, projectDir, pinfo, ReportAutoRolesPromptFile, "", "auto-roles", "", nil)
 }
 
 // assembleSupervisorPrompt is the shared backbone for supervisor prompts that

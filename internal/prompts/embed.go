@@ -224,8 +224,8 @@ func DefaultSupervisorReviewPrompt() string {
 	return readEmbedded("supervisor/review_prompt.md")
 }
 
-func DefaultSupervisorCommissioningPrompt() string {
-	return readEmbedded("supervisor/report_commissioning_prompt.md")
+func DefaultSupervisorAutoRolesPrompt() string {
+	return readEmbedded("supervisor/report_auto_roles_prompt.md")
 }
 
 func DefaultSupervisorCodeManagementPrompt() string {
@@ -283,8 +283,8 @@ func embeddedFiles() []embeddedFile {
 		DefaultSupervisorReviewPrompt(),
 	})
 	files = append(files, embeddedFile{
-		filepath.Join("defaults", "supervisor", ReportCommissioningPromptFile),
-		DefaultSupervisorCommissioningPrompt(),
+		filepath.Join("defaults", "supervisor", ReportAutoRolesPromptFile),
+		DefaultSupervisorAutoRolesPrompt(),
 	})
 	files = append(files, embeddedFile{
 		filepath.Join("defaults", "supervisor", CodeManagementPromptFile),
