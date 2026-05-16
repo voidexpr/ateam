@@ -225,6 +225,146 @@ Two granularities for `inputs`:
 
 `artifact_id` is the stable handle role configs reference. Renaming the file changes the path but not the ID.
 
+### Self-declared provenance: the LLM authors its own manifest
+
+The schema above is silent on *who writes it*. The answer that makes the system work: **the LLM authors both the artifact and its own deps manifest in a single call**. The LLM is the only entity that actually knows which files determined the artifact's content; asking a human or a heuristic to curate the dep list is asking them to mentally re-do the LLM's analysis.
+
+Operational implication: every generator prompt instructs the LLM to emit *two* outputs.
+
+```
+LLM call: "Read these candidate driver files. Produce:
+  (1) tests_overview.md — the summary
+  (2) tests_overview.deps.yaml — the exact files whose contents
+      determined (1), with blob SHAs at HEAD, plus the file-name
+      patterns that, if they appear later, should trigger a review."
+```
+
+One token spend, two products, atomic.
+
+#### Extended manifest with pattern-based `review_if`
+
+The basic `inputs:` shape in the previous subsection covers files known at generation time. It does not cover the load-bearing failure mode: *a new file appears later that should have been an input*. To address that, the manifest splits into two halves:
+
+```yaml
+artifact: tests_overview
+artifact_id: tests.overview
+generator:
+  prompt_sha: 91d0...
+  model: claude-opus-4-7
+  generated_at: 2026-05-15T12:00:00Z
+  generated_commit: 6dcf9a09f51a
+
+hard_refresh_if:
+  files:
+    - { path: Makefile,                       blob_sha: 1ab4... }
+    - { path: package.json,                   blob_sha: 99ef... }
+    - { path: .github/workflows/test.yml,     blob_sha: 42cd... }
+  symbols: []                                  # optional, sub-file granularity
+
+review_if:
+  patterns:
+    - "*.config.{js,ts,toml,yaml}"
+    - "Makefile.*"
+    - "scripts/test-*"
+    - "tox.ini"
+    - "pytest.ini"
+
+last_validated_commit: 6dcf9a09f51a
+validation_history:
+  - { at: 2026-05-15T12:00:00Z, commit: 6dcf9a09f51a, outcome: generated, cost_usd: 1.42 }
+```
+
+- **`hard_refresh_if.files`** — the LLM declares specific files whose content was directly summarised. Blob SHA mismatch on any of these triggers a full validate-or-patch cycle.
+- **`review_if.patterns`** — the LLM declares glob patterns that, if a *new* file matching one appears in the tree (or an existing matched file changes), trigger a cheap validation pass. This is the answer to "a new `cargo.toml` lands and no existing dep references it" — the pattern catches it.
+
+The patterns are LLM-authored too. The model is good at predicting "what kinds of files would be relevant to a test-commands summary that I haven't seen yet" — it's just one more thing to ask for in the same call.
+
+#### Sample one-call output
+
+When the LLM authors `tests_overview` the first time, the generator prompt expects a structured response with two fenced blocks:
+
+````
+=== ARTIFACT: tests_overview.md ===
+
+# Test Commands
+
+The project uses three test runners across its Go and JavaScript code:
+
+## Default suite
+`make test` — runs `go test ./...` plus `go vet`.
+
+## Docker-bound integration
+`make test-docker` — required for any changes to agent/container/runner code.
+
+[…]
+
+=== MANIFEST: tests_overview.deps.yaml ===
+
+artifact: tests_overview
+artifact_id: tests.overview
+generator: { prompt_sha: 91d0..., model: claude-opus-4-7, generated_at: ..., generated_commit: ... }
+hard_refresh_if:
+  files:
+    - { path: Makefile,                       blob_sha: 1ab4... }
+    - { path: .github/workflows/test.yml,     blob_sha: 99ef... }
+review_if:
+  patterns:
+    - "Makefile.*"
+    - "*.config.{js,ts}"
+    - "pyproject.toml"
+````
+
+`ateam index` parses both blocks from the same response, writes them to disk side-by-side. The driver-side recipe is uniform across artifacts — only the deps manifest varies.
+
+#### Why not just emit a per-artifact Makefile?
+
+The natural first instinct (and what was first proposed in chat) is for the LLM to emit `tests_overview.makefile` directly. That works but has friction:
+
+- Make syntax is awkward for the LLM to author robustly (escaping, line continuation, special characters in paths).
+- Per-artifact Makefiles duplicate the recipe (the regen command) N times.
+- Make can't express `review_if.patterns` cleanly — Make only triggers on declared deps, not on new files matching globs.
+- Tying the data format to one orchestration engine forecloses on alternatives (DVC, a Go-native driver, CocoIndex).
+
+The cleaner split: LLM authors the *declarative manifest* (`.deps.yaml`); a deterministic ATeam-side converter generates Make rules (or feeds the manifest to a Go driver) from it. The LLM never has to know Make syntax.
+
+If you do want Make orchestration, the converter emits one tiny shim per artifact:
+
+```make
+# .ateam/cache/tests_overview.mk — auto-generated from tests_overview.deps.yaml
+.ateam/cache/tests_overview.md: Makefile .github/workflows/test.yml
+```
+
+…and a single hand-written top-level Makefile picks them up:
+
+```make
+# .ateam/cache/Makefile — generic, never regenerated
+include $(wildcard .ateam/cache/*.mk)
+
+.ateam/cache/%.md: .ateam/cache/%.deps.yaml
+	ateam index --ids $*
+```
+
+`review_if.patterns` are still enforced separately by `ateam index` (since Make can't express them).
+
+#### Stale dep-list risk
+
+The load-bearing concern with LLM-authored deps is dep-list drift: the manifest declares the dep set at time T, but at T+1 the project gains a new file the LLM couldn't predict. Mitigations, increasing in cost:
+
+1. **`review_if.patterns`** (already shown). The LLM writes the patterns at generation time. A new file matching a pattern at any later commit triggers a cheap validation. Patterns + a one-line LLM call ("does this new file affect `tests_overview`?") is enough to catch most cases.
+2. **Periodic full re-author**. `ateam index --from-scratch` on a monthly cron. Backstop for accumulated drift that patterns missed.
+3. **New-file classifier** (optional, deferred to v2). When *any* new file lands at any path, run a small deterministic classifier ("does this look like a driver for any cached artifact?") and trigger a review when it might be. Cheap, no LLM call until something matches.
+
+`review_if.patterns` + monthly full re-author probably gets 95% of the safety; the new-file classifier is the v2 tightening.
+
+#### What this changes about the v1 plan
+
+Two concrete adjustments to the v1 scope (in §*What lands in v1 of `ateam index`*):
+
+- Every LLM-backed generator prompt explicitly demands the two-output format. Add a parser to `ateam index` that splits the response.
+- `hard_refresh_if.files` and `review_if.patterns` are first-class fields in the SQLite registry, not optional add-ons. The change classifier consults both on every commit.
+
+The recipe to author either becomes one prompt template parameterised by `artifact_id`, since the structure is uniform across artifacts.
+
 ### Storage layout
 
 ```
