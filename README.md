@@ -319,6 +319,7 @@ There is a very long list of potentially very useful roles to add.
 | [`ateam exec`](COMMANDS.md#ateam-exec) | Run an agent with a custom prompt |
 | [`ateam parallel`](COMMANDS.md#ateam-parallel) | Run multiple agents in parallel, each with its own prompt |
 | [`ateam env`](COMMANDS.md#ateam-env) | Show environment and configuration status |
+| [`ateam project-info`](COMMANDS.md#ateam-project-info-path) | Emit generic, language-agnostic orientation about a git repository |
 | [`ateam serve`](COMMANDS.md#ateam-serve) | Web UI for browsing reports and sessions |
 | [`ateam export`](COMMANDS.md#ateam-export) | Export reports as a self-contained HTML file |
 | [`ateam ps`](COMMANDS.md#ateam-ps) | Recent run history |

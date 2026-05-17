@@ -503,6 +503,23 @@ Show the current environment: organization, runtime config, project, and role st
 | `--claude-sandbox` | Print the generated Claude sandbox settings JSON for the default profile |
 | `--print-org` | Print the absolute path to the org directory |
 
+### `ateam project-info [PATH]`
+
+Emit a small set of generic, language- and build-system-agnostic facts about a git repository: top-level entries, tracked-file count, recent commits, docs at the root, detected manifest files (`go.mod` / `package.json` / `Cargo.toml` / `pyproject.toml` / `Makefile` / …), and HEAD plus working-tree status.
+
+The data is read-only and depends only on `git`. The output is intended as a stable, scriptable summary; downstream callers can consume the JSON form via `--format json`.
+
+```bash
+ateam project-info                          # markdown summary for cwd's git repo
+ateam project-info /path/to/repo            # against another directory
+ateam project-info --format json            # machine-readable
+ateam project-info --format json | jq .head_hash
+```
+
+| Flag | Description |
+|------|-------------|
+| `--format` | Output format: `markdown` (default) or `json` |
+
 ### `ateam inspect [ID...]`
 
 Show the ps summary and log files for one or more agent runs. Select runs by ID, batch, or shorthand flags.
