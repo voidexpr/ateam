@@ -73,11 +73,11 @@ func addCommit(t *testing.T, dir, path, content, msg string) {
 
 func TestCollectBasicGoRepo(t *testing.T) {
 	dir := initTempRepo(t, map[string]string{
-		"README.md":      "# test\n",
-		"go.mod":         "module example.com/test\n\ngo 1.21\n",
-		"main.go":        "package main\n",
+		"README.md":       "# test\n",
+		"go.mod":          "module example.com/test\n\ngo 1.21\n",
+		"main.go":         "package main\n",
 		"internal/x/x.go": "package x\n",
-		"Makefile":       "test:\n\techo ok\n",
+		"Makefile":        "test:\n\techo ok\n",
 	})
 
 	info, err := Collect(dir)
@@ -286,7 +286,7 @@ func TestMarkdownNonRepo(t *testing.T) {
 
 func TestJSONRoundtrip(t *testing.T) {
 	dir := initTempRepo(t, map[string]string{
-		"go.mod":   "module x\n",
+		"go.mod":    "module x\n",
 		"README.md": "# x\n",
 	})
 	info, err := Collect(dir)

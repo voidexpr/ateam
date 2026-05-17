@@ -125,17 +125,17 @@ var knownManifests = []string{
 // load-bearing and should appear in TopLevelEntries even though they
 // otherwise look like hidden config.
 var hiddenAllowlist = map[string]struct{}{
-	".github":          {},
-	".gitlab":          {},
-	".gitea":           {},
-	".ateam":           {},
-	".devcontainer":    {},
-	".vscode":          {},
-	".idea":            {},
-	".circleci":        {},
-	".cargo":           {},
-	".config":          {},
-	".ci":              {},
+	".github":       {},
+	".gitlab":       {},
+	".gitea":        {},
+	".ateam":        {},
+	".devcontainer": {},
+	".vscode":       {},
+	".idea":         {},
+	".circleci":     {},
+	".cargo":        {},
+	".config":       {},
+	".ci":           {},
 }
 
 // docExts is the set of file extensions that count as "documentation"
