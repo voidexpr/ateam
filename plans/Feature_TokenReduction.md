@@ -94,6 +94,198 @@ The data-only log analyst and the role-only domain expert independently propose 
 
 Same conclusion from independent inputs → strong design signal.
 
+## Stack-aware project-info extension (Phase 0.5)
+
+The cheapest single change in this whole document. **Extends the existing `# ATeam Project Context` preamble** (already injected at the top of every role prompt) with a small block of orientation facts. No new infrastructure, no new commands, no new directories — just additional shell-outs in the existing prompt-assembly path.
+
+The base prompt today emits ~7 lines of preamble (project name, role, project dir, timestamp, last commit, working-tree status). The trace data shows roles spending 6–10 of their first 10 tool calls re-deriving things this preamble could just *contain*. Filling that gap eliminates most of the cold-cache penalty for mechanical orientation.
+
+### Why this comes before Phase 0
+
+Phase 0 (doc injection) carries judgment-bearing content from `CLAUDE.md` / `CONCURRENCY.md` / `DEV.md`. Phase 0.5 carries mechanical orientation that any role would re-derive in its first turns. They're complementary, but **Phase 0.5 is cheaper to ship and likely captures the larger fraction of the cold-cache penalty** because the empirical warmup pattern is overwhelmingly orientation (`ls`, `find`, `wc -l`, `git log`), not concept-level (which is where Phase 0 helps).
+
+### Two-layer architecture (language- and tool-agnostic)
+
+The original sketch was Go-and-Makefile-shaped. The corrected architecture detects the stack and emits stack-appropriate facts, with a generic fallback. It works on any git repo regardless of language or build system.
+
+**Layer A — Universal core (always emitted; depends only on `git`).** Works on any git repository, any language, any stack. No external tools required.
+
+| Field | Source |
+|---|---|
+| Top-level entries | `git ls-files \| awk -F/ '{print $1}' \| sort -u \| head -30` |
+| Total tracked files | `git ls-files \| wc -l` |
+| Recent commits (last 10) | `git log --oneline -10` |
+| Doc files at root | `git ls-files \| grep -E '^[^/]+\.(md\|rst\|adoc\|txt)$'` |
+| Detected manifests | `git ls-files \| grep -E '^(go\.mod\|package\.json\|Cargo\.toml\|pyproject\.toml\|requirements\.txt\|Gemfile\|mix\.exs\|build\.gradle\|pom\.xml\|composer\.json\|setup\.py\|deno\.json\|build\.zig\|CMakeLists\.txt\|Makefile\|justfile\|Taskfile\.yml)$'` |
+| Prior reports for this role | from `state.sqlite` + `.ateam/runtime/` |
+| Working tree status, last commit | already in preamble |
+
+**Layer B — Stack profiles (detected from manifests in Layer A).** Each profile is a small Go function that runs only if its manifest is present and produces a uniformly-shaped block. Skip silently when the relevant CLI isn't installed. Profile inventory for v1:
+
+| Profile | Detected via | Identity | Commands extractor | Source LOC filter | Layout |
+|---|---|---|---|---|---|
+| **Go** | `go.mod` | `go list -m` + `go version` | `Makefile` targets, `make help` if available | `*.go`, exclude `*_test.go` | `go list ./...` |
+| **Node.js / TypeScript** | `package.json` | `name`+`version` from JSON | `package.json scripts` | `*.{ts,tsx,js,jsx}`, exclude `*.test.*` / `*.spec.*` | top-level dirs under `src/` or `app/` |
+| **Python** | `pyproject.toml` / `setup.py` / `requirements.txt` | `[project]` name+version | `pyproject.toml [tool.poetry.scripts]`, `[tool.pytest]`, `Makefile` | `*.py`, exclude `test_*.py` / `*_test.py` | `__init__.py` discovery, ≤3 deep |
+| **Rust** | `Cargo.toml` | `[package]` name+version | `Cargo.toml [alias]` + `cargo --list` | `*.rs`, exclude `tests/` | `cargo metadata` workspace members |
+| **Elixir** | `mix.exs` | parsed `mix.exs` | `mix help` | `*.{ex,exs}`, exclude `test/` | `lib/` top-level dirs |
+| **Java/Kotlin (Gradle)** | `build.gradle{,.kts}` | parsed root project name | `gradle tasks --group=...` | `*.{java,kt}`, exclude `*Test.{java,kt}` | `settings.gradle` modules |
+| **Generic fallback** | (no profile match) | — | `Makefile` / `justfile` / `Taskfile.yml` if present | top files by raw `wc -l` from `git ls-files`, excluding `.{lock,json,yaml,yml,toml,md,svg,csv}` | top-level dirs from `git ls-files` |
+
+**Detection is purely manifest presence.** Polyglot projects (Go backend + Next.js frontend, etc.) emit **multiple profile sections in sequence**, ordered by tracked-file count (dominant stack first). Unknown stacks fall to Generic, which is degraded but non-empty.
+
+### Example outputs
+
+**Go project (ATeam itself):**
+
+```
+## Quick orientation (auto-generated; do not re-derive)
+
+Universal:
+* Top-level: cmd, internal, defaults, scripts, plans, README.md, AGENTS.md,
+  CLAUDE.md, CONCURRENCY.md, DEV.md, ISOLATION.md, Makefile, go.mod, go.sum
+* Tracked files: 412
+* Recent commits (last 10):
+    6dcf9a0  prompts: fix three internal contradictions surfaced in review
+    2f81a30  review: --roles is authoritative everywhere
+    [...]
+* Manifests detected: go.mod, Makefile
+* Docs at root: README.md, AGENTS.md, CLAUDE.md, CONCURRENCY.md, DEV.md, ISOLATION.md
+* Prior reports for this role: .ateam/runtime/3/, .ateam/runtime/23/, .ateam/runtime/33/
+
+Profile: Go (detected via go.mod)
+* Module: github.com/ateam, go 1.26.3
+* Internal packages: agent, calldb, container, display, eval, fsclone, gitutil,
+  prompts, root, runner, runtime, secret, streamutil, web
+* Top non-test .go files by LOC:
+    1433  internal/web/handlers.go
+    1390  cmd/table.go
+    1282  internal/runner/runner.go
+    [...]
+* Make targets: build, companion, test, test-cli, test-docker, check, run-ci, vuln
+
+Do not re-run ls / find / wc / git log on the project root —
+the orientation above is current and authoritative.
+```
+
+**Polyglot (Go backend + Node frontend):**
+
+```
+Universal: [...]
+Manifests detected: go.mod, package.json
+
+Profile: Node.js / TypeScript (detected via package.json) — 1,247 tracked files
+* Package: @org/web v0.18.2
+* npm scripts: dev, build, start, lint, test, test:e2e, format, typecheck
+* Top non-test .ts/.tsx files by LOC: [...]
+* Source dirs: app/, lib/, components/
+
+Profile: Go (detected via go.mod) — 312 tracked files
+* Module: github.com/org/api, go 1.24
+* Top non-test .go files by LOC: [...]
+* Make targets: build, test, lint
+
+Do not re-run ls / find / wc / git log on the project root —
+the orientation above is current and authoritative.
+```
+
+**Unknown stack (Zig, Nim, custom build):**
+
+```
+Universal: [...]
+Manifests detected: build.zig
+
+Profile: Generic fallback (no recognised stack manifest)
+* Top files by LOC (source-looking; excludes lock/yaml/json/md):
+     402  src/main.zig
+     [...]
+* Build commands (Makefile / justfile / Taskfile): make build, make test
+* Source dirs (heuristic): src/
+
+Do not re-run ls / find / wc / git log on the project root —
+the orientation above is current and authoritative.
+```
+
+### Implementation shape
+
+```
+internal/projectinfo/
+  info.go              — top-level assembler
+  universal.go         — git-only facts
+  profile.go           — Profile interface + DetectAll(root)
+  profile_go.go
+  profile_node.go
+  profile_python.go
+  profile_rust.go
+  profile_elixir.go
+  profile_gradle.go
+  profile_generic.go   — fallback
+```
+
+```go
+type Profile interface {
+    Name() string
+    Detected(root string) bool
+    Render(root string, cfg Config) (string, error)
+    TrackedFileCount(root string) int
+}
+
+func Assemble(root string, role string, cfg Config) string {
+    var b strings.Builder
+    b.WriteString(Universal(root, role))
+    profiles := DetectAll(root)
+    sort.Slice(profiles, func(i,j int) bool {
+        return profiles[i].TrackedFileCount(root) > profiles[j].TrackedFileCount(root)
+    })
+    if len(profiles) == 0 {
+        b.WriteString(Generic{}.Render(root, cfg))
+    } else {
+        for _, p := range profiles { b.WriteString(p.Render(root, cfg)) }
+    }
+    b.WriteString(footer)
+    return b.String()
+}
+```
+
+Each profile is ~30–80 LOC + golden-output tests. Total v1 (universal + 6 profiles + generic + assembler): ~600–800 LOC. Half a day to two days.
+
+External CLIs (go, npm, cargo, pip, mix, gradle) are **advisory** — if not installed, the profile emits manifest-only facts and skips tool-derived fields. No new hard dependencies.
+
+### Token budget
+
+| Layer | Tokens |
+|---|---|
+| Universal core | ~250 |
+| One profile | ~150 |
+| Polyglot (2 profiles) | ~400 |
+| Worst case (4 profiles) | ~700 |
+
+All well under the ~6–10K cache-friendly preamble cap.
+
+### What this changes about Phase 1
+
+The previously-listed Phase 1 ("Auto-generate Project Facts block") is **subsumed by Phase 0.5**. The Facts block was Go-and-Makefile-shaped; Phase 0.5 generalises it correctly. Once Phase 0.5 ships, the dedicated Facts block is no longer needed — the orientation it would carry is already in the preamble.
+
+### Configuration
+
+```toml
+[projectinfo]
+enabled = true
+include_recent_commits = 10
+top_files_per_profile = 10
+max_total_tokens = 1500          # safety cap; truncate excess profiles
+profiles = []                     # empty = auto-detect; can override
+exclude_paths = ["vendor/", "node_modules/", ".git/"]
+```
+
+### A/B procedure (cheap)
+
+1. Implement `internal/projectinfo/`. Wire into the existing preamble assembler (probably `internal/prompts/`).
+2. Pick three roles with high cold-warmup density: `code.structure`, `test.gaps`, `docs.external`. Run cold against a fresh project (or re-run against the recorded baseline — ids 1–20 in `state.sqlite`).
+3. Measure: warmup density (target ≤ 2/10 in first 10 calls), total cost, finding count.
+4. If warmup density drops to 0–2/10 and finding count is preserved: ship to all roles. Phase 0 (doc injection) becomes the next experiment.
+5. If warmup density doesn't drop: inspect which calls survive and add the corresponding bullet to the relevant profile.
+
 ## Shared Architecture Context (Phase 0)
 
 A judgment-bearing layer that sits underneath the mechanical Facts block. The data argues for it as the *first* move, ahead of the Facts script.
@@ -132,8 +324,9 @@ Running A→D on the same commit attributes the savings layer-by-layer. If B alo
 
 | Phase | What | Evidence | Est. impact |
 |---|---|---|---|
-| **0** | **Inject existing architecture docs** (`CLAUDE.md` / `CONCURRENCY.md` / `DEV.md` / `ISOLATION.md` as available) as a stable prompt preamble — see [Shared Architecture Context](#shared-architecture-context-phase-0) | 3–5 cold roles independently read these docs today; warm-run Project Context content is dominated by conventions a script can't produce | Plausibly the larger half of the cold-cache gap; cheaper than the Facts block to ship |
-| **1** | **Auto-generate Project Facts block** (module/lang/build/top-files/recent-commits/make-targets/default-roles) injected into every role prompt | Cold-vs-warm gap is 84%; the mechanical fraction of the closing content is what scripts produce more reliably than the model | Closes the remaining mechanical-facts portion of the cold-run penalty |
+| **0.5** | **Stack-aware project-info extension** — extend the existing `# ATeam Project Context` preamble with universal-core orientation + stack-detected profile blocks (Go / Node / Python / Rust / Elixir / Gradle / Generic). Language- and tool-agnostic. See [Stack-aware project-info extension](#stack-aware-project-info-extension-phase-05). | Cold-vs-warm gap is 84%; 10/16 cold roles spent ≥7 of first 10 calls on `ls` / `find` / `wc` / `git log` — exactly what this block contains. Half-day to ship. | Cheapest single change; likely captures the largest mechanical-orientation slice. |
+| **0** | **Inject existing architecture docs** (`CLAUDE.md` / `CONCURRENCY.md` / `DEV.md` / `ISOLATION.md` as available) as a stable prompt preamble — see [Shared Architecture Context](#shared-architecture-context-phase-0) | 3–5 cold roles independently read these docs today; warm-run Project Context content is dominated by conventions a script can't produce | The judgment-layer complement to Phase 0.5; closes the conventions-and-rationale gap that scripts can't fill |
+| ~~**1**~~ | ~~Auto-generate Project Facts block~~ | **Subsumed by Phase 0.5.** The Facts block was Go-and-Makefile-shaped; Phase 0.5 generalises it correctly. | — |
 | **2+** | **Artifact system with provenance** — code map, architecture topics (with TOC), command catalogues, dependency summary, each with declared inputs and make-like incremental update via cheap-validate / patch / re-author. Subsumes the previously-listed Phase 2 (structured Project Context) and Phase 3 (per-role discovery). See [Artifact System with Provenance](#artifact-system-with-provenance-phase-2). | Forward-looking endpoint of the plan: eliminates ad-hoc Project Context, makes preprocessing-vs-LLM division explicit, supports on-demand topic injection. | Long-term: closes the residual variance between roles after Phases 0–1 land. |
 | **4** | **Turn-cap + "name your suspects first" preamble for wandering roles** | `code.bugs` is the only warm role still >20 turns. Surgical fix, not architectural. | ~$1–2/cycle on `code.bugs`-class roles |
 | **5** | **Audit hook linking `reverified` claims to `tool_use_id`s in stream.jsonl** | Closes the trust gap that compounds over cycles | Quality only |
@@ -141,21 +334,31 @@ Running A→D on the same commit attributes the savings layer-by-layer. If B alo
 
 ## Next experiment
 
-**Smallest cost / largest impact next move**: ship Phase 0, measure the layered A→D baselines described in [Shared Architecture Context](#shared-architecture-context-phase-0), then decide whether Phase 1 follows immediately or whether the doc-injection layer alone closed enough of the gap.
+**Smallest cost / largest impact next move**: ship Phase 0.5, measure, then layer Phase 0 on top.
 
-Concretely:
+Sequencing:
 
-1. Implement Phase 0 (~50 LOC, see steps in that section).
-2. Run all 14 dotted roles cold against the same commit used for the existing cold baseline (ids 1–20 in `state.sqlite`).
-3. Compare against arm A (cold baseline) and arm D (warm baseline, already in the data).
-4. If the result lands close to arm D: ship Phase 0 as-is, defer Phase 1 until the next bottleneck surfaces.
-5. If the result is between A and D with a meaningful remaining gap: implement Phase 1 (Facts block) and re-run as arm C.
+1. **Phase 0.5 first** (half-day to two days). Implement `internal/projectinfo/` with universal core + Go profile + Generic fallback. Wire into the existing preamble assembler. Other profiles (Node, Python, Rust, Elixir, Gradle) can land incrementally as you encounter projects that need them.
+2. Run all 14 dotted roles cold against the same commit used for the existing cold baseline (ids 1–20 in `state.sqlite`). Measure warmup density, total cost, finding count.
+3. **Phase 0 second** (additional ~half-day). Add doc injection for `CLAUDE.md` / `CONCURRENCY.md` / `DEV.md` / `ISOLATION.md` on top of Phase 0.5. Re-run.
+4. Compare against arm A (existing cold baseline) and arm D (warm baseline, already in the data).
+
+The full A→D matrix is now:
+
+| Arm | What's in the prompt | Hypothesis |
+|---|---|---|
+| A | Current cold baseline | $42/cycle (known) |
+| A+ | + Phase 0.5 (stack-aware project-info) | Closes the mechanical-orientation gap |
+| B | A+ + Phase 0 (architecture docs injected) | Closes the conventions/judgment gap |
+| D | B + prior report (warm) | $13/cycle warm baseline (known) |
+
+Running A→A+→B→D on the same commit attributes savings layer-by-layer.
 
 **Decision criteria** (whole-cycle cost):
 
-- ≤ $18 → ship Phase 0; defer Phase 1.
-- $18–$28 → ship Phase 0; proceed with Phase 1; re-measure.
-- ≥ $28 → existing docs aren't carrying enough; either authoring a consolidated `ARCHITECTURE.md` or accelerating Phase 2 (structured Project Context) becomes the priority.
+- ≤ $18 after A+ alone → ship Phase 0.5; Phase 0 is a refinement, not urgent.
+- $18–$28 after A+ → ship Phase 0.5; proceed with Phase 0; re-measure.
+- ≥ $28 after both A+ and B → the role-authored Project Context is carrying more weight than mechanical + judgment layers; either author a consolidated `ARCHITECTURE.md` or accelerate Phase 2+ (artifact system).
 
 ## `code.bugs` track (separate from main fix)
 
