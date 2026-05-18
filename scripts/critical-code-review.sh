@@ -7,10 +7,11 @@ set -euo pipefail
 #   Round 2 — reviewer assesses the response (rejections, regressions),
 #             coder finalizes.
 #
-# Demonstrates how to compose a short multi-agent workflow with the
+# Demonstrates how to compose a short multi-agent resumable workflow with the
 # `ateam exec --agent` primitive. Reports land as agent_*_r{1,2}.md in
 # the working directory; prior runs are timestamp-backed up.
 
+# see .ateam/runtime.hcl or ~/.ateamorg/runtime.hcl for agent definitions
 reviewer="codex"
 coder="claude"
 
@@ -91,7 +92,7 @@ echo "Reviewer: $reviewer"
 echo "   Coder: $coder"
 echo "   Scope: $scope"
 
-maybe_run "$reviewer_r1" "$reviewer" "Round 1 — review" <<EOF
+maybe_run "$reviewer_r1" "$reviewer" "Round 1: review" <<EOF
 You are the reviewer. Critically audit and write your findings to $reviewer_r1.
 
 - Be skeptical, form your own opinion.
@@ -102,7 +103,7 @@ You are the reviewer. Critically audit and write your findings to $reviewer_r1.
 $scope
 EOF
 
-maybe_run "$coder_r1" "$coder" "Round 1 — fixes" <<EOF
+maybe_run "$coder_r1" "$coder" "Round 1: fixes" <<EOF
 You are the coder. The reviewer wrote findings to $reviewer_r1.
 Apply the fixes you agree with; push back in writing on the ones you don't.
 
@@ -116,23 +117,34 @@ Write a single report to $coder_r1 with three sections:
   3. Tests — exact command(s) run and pass/fail counts.
 EOF
 
-maybe_run "$reviewer_r2" "$reviewer" "Round 2 — re-review" <<EOF
+maybe_run "$reviewer_r2" "$reviewer" "Round 2: re-review" <<EOF
 You are the reviewer. Your round-1 findings are in $reviewer_r1; the coder's response is in $coder_r1.
 
 - Did they incorrectly reject any finding? Provide more evidence or concede.
 - Did the fixes introduce regressions? Spot-check the diff since your first review.
-- Are the test runs in $coder_r1 credible (right command for this project, real output)?
+- Are the test runs in $coder_r1 credible (right command for this project and these changes)?
 
 Write your updated assessment to $reviewer_r2 (overwriting OK).
 EOF
 
-maybe_run "$coder_r2" "$coder" "Round 2 — final fixes" <<EOF
-You are the coder. The reviewer's follow-up is in $reviewer_r2; your prior response is in $coder_r1.
+maybe_run "$coder_r2" "$coder" "Round 2: final fixes" <<EOF
+You are the coder. We are doing rounds of code review:
+- The first review was in: $reviewer_r1
+- You worked on it and produced: $coder_r1
+- The reviewer follow-up is: $reviewer_r2
 
 Apply remaining recommendations or state precisely why each should not be done.
 Re-run the same build and test commands you used in round 1 and record the results.
+
+Commit your changes with prefix 'critical code review:', use a commit per
+finding when possible, it's ok to group changes to the same file in a single commit.
+
 Write to $coder_r2 with the same three-section structure as before, and end your
 final message with a one-paragraph summary (counts of applied vs. pushed back + test result).
 EOF
 
 step "done"
+
+ateam ps --limit 4
+echo ""
+cat "$coder_r2"
