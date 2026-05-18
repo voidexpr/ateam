@@ -14,6 +14,41 @@ set -euo pipefail
 reviewer="codex"
 coder="claude"
 
+usage() {
+  cat <<HELP
+Usage: $(basename "$0") [--focus HINT] [--help]
+
+Two-agent critical code review:
+  Round 1 — reviewer ($reviewer) audits, coder ($coder) applies fixes.
+  Round 2 — reviewer assesses the response, coder finalizes.
+
+Options:
+  --focus HINT   Steer the round-1 reviewer's scope. Substituted verbatim
+                 into the reviewer prompt, so phrase it as the thing to
+                 audit. Examples:
+                   --focus "commit abc1234"
+                   --focus "recent work only"
+                   --focus "the new auth feature"
+                 When omitted, the reviewer audits the diff of HEAD.
+  -h, --help     Show this message and exit.
+
+Reports are written as agent_*_r{1,2}.md in the current directory; prior
+runs are renamed with a timestamp suffix before each step.
+HELP
+}
+
+focus=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --focus)   focus="${2:?--focus requires an argument}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *)         echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+# scope="${focus:-the diff of HEAD (the most recent commit)}"
+scope="$focus"
+
 reviewer_r1="agent_${reviewer}_r1.md"
 coder_r1="agent_${coder}_r1.md"
 reviewer_r2="agent_${reviewer}_r2.md"
@@ -38,19 +73,21 @@ run() {
 for f in "$reviewer_r1" "$coder_r1" "$reviewer_r2" "$coder_r2"; do backup "$f"; done
 
 echo "Reviewer: $reviewer  Coder: $coder"
+echo "Scope:    $scope"
 
 run "$reviewer" "Round 1 — review" <<EOF
-You are the reviewer. Critically audit the diff of HEAD (the most recent commit) and write
-your findings to $reviewer_r1. The coder ($coder) will respond.
+You are the reviewer. Critically audit and write your findings to $reviewer_r1.
 
 - Be skeptical, form your own opinion.
 - Skip nits. Surface clear bugs and structural choices that will hurt future changes.
 - Flag missing test coverage for new code paths.
 - Check that the change doesn't silently break existing features.
+
+$scope
 EOF
 
 run "$coder" "Round 1 — fixes" <<EOF
-You are the coder. The reviewer ($reviewer) wrote findings to $reviewer_r1.
+You are the coder. The reviewer wrote findings to $reviewer_r1.
 Apply the fixes you agree with; push back in writing on the ones you don't.
 
 After your changes, build and test the project using whatever commands this
