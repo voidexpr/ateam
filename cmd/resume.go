@@ -111,10 +111,17 @@ func runResume(cmd *cobra.Command, args []string) error {
 
 	hostCmd, hostArgs := resumeCommand(row.Agent, sessionID)
 	hostCmdLine := strings.Join(append([]string{hostCmd}, hostArgs...), " ")
+	// Prepend CLAUDE_CONFIG_DIR so the printed command is copy-pasteable; the
+	// informational line above is easy to miss and resuming with the wrong
+	// config dir silently picks up a different agent profile.
+	hostCmdLineWithEnv := hostCmdLine
+	if row.Agent == "claude" && configDir != "" {
+		hostCmdLineWithEnv = "CLAUDE_CONFIG_DIR=" + shellQuoteSingle(configDir) + " " + hostCmdLine
+	}
 
 	switch row.Container {
 	case "", "none":
-		fmt.Printf("Command: %s\n", hostCmdLine)
+		fmt.Printf("Command: %s\n", hostCmdLineWithEnv)
 		if !resumeLaunch {
 			return nil
 		}
@@ -344,11 +351,13 @@ func execClaudeResume(sessionID, configDir string) error {
 		return fmt.Errorf("claude not found in PATH: %w", err)
 	}
 	envv := os.Environ()
+	envPrefix := ""
 	if configDir != "" {
 		envv = setEnv(envv, "CLAUDE_CONFIG_DIR", configDir)
+		envPrefix = "CLAUDE_CONFIG_DIR=" + shellQuoteSingle(configDir) + " "
 	}
 	fmt.Println("Interactive resume runs without ateam's sandbox.")
-	fmt.Printf("exec %s --resume %s\n", binary, sessionID)
+	fmt.Printf("exec %s%s --resume %s\n", envPrefix, binary, sessionID)
 	return syscall.Exec(binary, []string{"claude", "--resume", sessionID}, envv)
 }
 
