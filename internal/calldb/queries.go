@@ -41,14 +41,15 @@ type RecentRow struct {
 }
 
 type RecentFilter struct {
-	ProjectID string
-	Role      string
-	Action    string
-	Agent     string   // single agent (legacy); ignored when Agents is set
-	Agents    []string // any-of filter; pushed to SQL as `agent IN (...)`
-	Batch     string
-	WorkDir   string // exact match on work_dir; empty disables the filter
-	Limit     int
+	ProjectID   string
+	Role        string
+	Action      string
+	Agent       string   // single agent (legacy); ignored when Agents is set
+	Agents      []string // any-of filter; pushed to SQL as `agent IN (...)`
+	Batch       string
+	WorkDir     string // exact match on work_dir; empty disables the filter
+	Limit       int
+	SuccessOnly bool // when true, exclude rows where is_error = 1
 }
 
 func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
@@ -85,6 +86,9 @@ func (c *CallDB) RecentRuns(f RecentFilter) ([]RecentRow, error) {
 	if f.WorkDir != "" {
 		where = append(where, "work_dir = ?")
 		args = append(args, f.WorkDir)
+	}
+	if f.SuccessOnly {
+		where = append(where, "is_error = 0")
 	}
 
 	q := "SELECT " + recentCols + " FROM agent_execs"

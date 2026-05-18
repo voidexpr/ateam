@@ -187,10 +187,12 @@ func TestBuildAutoRolesContextHappyPath(t *testing.T) {
 }
 
 // TestBuildAutoRolesContextFallback verifies that with no prior review row in
-// the DB, the bundle falls back to HEAD~N and labels the source.
+// the DB, the bundle falls back gracefully. With a single-commit repo
+// HEAD~N is unavailable and root == HEAD, so the planner must see the initial
+// commit directly (not an empty range or git error placeholders).
 func TestBuildAutoRolesContextFallback(t *testing.T) {
 	base, _, env := setupTestProject(t)
-	initTestGitRepo(t, base)
+	initTestGitRepo(t, base) // one commit — HEAD~5 unavailable, root == HEAD
 	if err := env.OverrideWorkDir(base); err != nil {
 		t.Fatalf("OverrideWorkDir: %v", err)
 	}
@@ -199,11 +201,34 @@ func TestBuildAutoRolesContextFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAutoRolesContext: %v", err)
 	}
-	if !strings.Contains(got, fmt.Sprintf("HEAD~%d", autoRolesFallbackBaseCommits)) {
-		t.Errorf("expected HEAD~%d fallback label; got:\n%s", autoRolesFallbackBaseCommits, got)
+	if !strings.Contains(got, "single-commit repo") {
+		t.Errorf("expected single-commit fallback explanation; got:\n%s", got)
 	}
-	if !strings.Contains(got, "no prior review found") {
-		t.Errorf("expected fallback explanation; got:\n%s", got)
+	// The git sections must use the direct-HEAD variant, not the range variant.
+	if !strings.Contains(got, "### Git log (initial commit") {
+		t.Errorf("expected direct-HEAD log section header; got:\n%s", got)
+	}
+	if !strings.Contains(got, "### Git diff stat (initial commit") {
+		t.Errorf("expected direct-HEAD diff section header; got:\n%s", got)
+	}
+	// The sections must not contain git error placeholders.
+	for _, section := range []string{"### Git log (initial commit", "### Git diff stat (initial commit"} {
+		idx := strings.Index(got, section)
+		if idx < 0 {
+			continue // already reported above
+		}
+		excerpt := got[idx:]
+		if nextSection := strings.Index(excerpt[len(section):], "###"); nextSection > 0 {
+			excerpt = excerpt[:len(section)+nextSection]
+		}
+		if strings.Contains(excerpt, "_(git") && strings.Contains(excerpt, "failed:") {
+			t.Errorf("section %q contains a git error placeholder:\n%s", section, excerpt)
+		}
+	}
+	// The log section must contain actual commit content (the "init" message from
+	// initTestGitRepo), proving the single-commit is shown, not an empty range.
+	if !strings.Contains(got, "init") {
+		t.Errorf("expected initial commit message in log section; got:\n%s", got)
 	}
 }
 

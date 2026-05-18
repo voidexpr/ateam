@@ -25,8 +25,8 @@ func addAutoRolesFlags(cmd *cobra.Command, autoRolesDst, planOnlyDst *bool) {
 // whether the caller should proceed. Returns done=true when the caller should
 // `return nil` (planner recommended no roles, or PlanOnly was requested). The
 // role list is meaningful only when done is false.
-func runAutoRoles(env *root.ResolvedEnv, profile, agentName string, verbose, planOnly bool) (roles []string, done bool, err error) {
-	rationale, recommended, err := autoRolesRecommend(env, profile, agentName, verbose)
+func runAutoRoles(env *root.ResolvedEnv, profile, agentName string, verbose, planOnly, dockerAutoSetup bool) (roles []string, done bool, err error) {
+	rationale, recommended, err := autoRolesRecommend(env, profile, agentName, verbose, dockerAutoSetup)
 	if err != nil {
 		return nil, false, err
 	}
@@ -52,7 +52,7 @@ func runAutoRoles(env *root.ResolvedEnv, profile, agentName string, verbose, pla
 //
 // Profile/agent override the runner selection the same way they do for the
 // surrounding `report` / `all` invocation.
-func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbose bool) (rationale string, roles []string, err error) {
+func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbose, dockerAutoSetup bool) (rationale string, roles []string, err error) {
 	commandsOutput, err := buildAutoRolesContext(env)
 	if err != nil {
 		return "", nil, fmt.Errorf("build auto-roles context: %w", err)
@@ -64,7 +64,7 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 		return "", nil, fmt.Errorf("assemble auto-roles prompt: %w", err)
 	}
 
-	cr, err := resolveRunner(env, profile, agentName, runner.ActionExec, "", false)
+	cr, err := resolveRunner(env, profile, agentName, runner.ActionReview, "", dockerAutoSetup)
 	if err != nil {
 		return "", nil, fmt.Errorf("resolve auto-roles runner: %w", err)
 	}

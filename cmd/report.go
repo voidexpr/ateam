@@ -162,7 +162,7 @@ func runReport(opts ReportOptions) error {
 	var db *calldb.CallDB
 
 	if opts.AutoRoles {
-		roles, done, err := runAutoRoles(env, opts.Profile, opts.Agent, opts.Verbose, opts.PlanOnly)
+		roles, done, err := runAutoRoles(env, opts.Profile, opts.Agent, opts.Verbose, opts.PlanOnly, opts.DockerAutoSetup)
 		if err != nil {
 			return err
 		}

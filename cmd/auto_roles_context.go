@@ -73,35 +73,98 @@ func buildAutoRolesContext(env *root.ResolvedEnv) (string, error) {
 
 	fmt.Fprintf(&b, "### Git base for diff: `%s` (%s)\n\n", baseHash, baseLabel)
 
-	fmt.Fprintf(&b, "### Git log since base (`git log %s..HEAD --stat`)\n\n", baseHash)
-	fmt.Fprintln(&b, "```")
-	writeGitCommand(&b, env.WorkDir, autoRolesGitLogMaxLines, "log", baseHash+"..HEAD", "--stat")
-	fmt.Fprintln(&b, "```")
-	fmt.Fprintln(&b)
+	if baseHash == "" {
+		// Single-commit repo: root == HEAD, so the range syntax would be empty.
+		// Show the initial commit directly instead.
+		fmt.Fprintln(&b, "### Git log (initial commit; `git log -1 HEAD --stat`)")
+		fmt.Fprintln(&b)
+		fmt.Fprintln(&b, "```")
+		writeGitCommand(&b, env.WorkDir, autoRolesGitLogMaxLines, "log", "-1", "HEAD", "--stat")
+		fmt.Fprintln(&b, "```")
+		fmt.Fprintln(&b)
 
-	fmt.Fprintf(&b, "### Git diff stat since base (`git diff %s..HEAD --stat`)\n\n", baseHash)
-	fmt.Fprintln(&b, "```")
-	writeGitCommand(&b, env.WorkDir, autoRolesGitDiffStatMaxLines, "diff", baseHash+"..HEAD", "--stat")
-	fmt.Fprintln(&b, "```")
+		fmt.Fprintln(&b, "### Git diff stat (initial commit; `git show --stat HEAD`)")
+		fmt.Fprintln(&b)
+		fmt.Fprintln(&b, "```")
+		writeGitCommand(&b, env.WorkDir, autoRolesGitDiffStatMaxLines, "show", "--stat", "HEAD")
+		fmt.Fprintln(&b, "```")
+	} else {
+		fmt.Fprintf(&b, "### Git log since base (`git log %s..HEAD --stat`)\n\n", baseHash)
+		fmt.Fprintln(&b, "```")
+		writeGitCommand(&b, env.WorkDir, autoRolesGitLogMaxLines, "log", baseHash+"..HEAD", "--stat")
+		fmt.Fprintln(&b, "```")
+		fmt.Fprintln(&b)
+
+		fmt.Fprintf(&b, "### Git diff stat since base (`git diff %s..HEAD --stat`)\n\n", baseHash)
+		fmt.Fprintln(&b, "```")
+		writeGitCommand(&b, env.WorkDir, autoRolesGitDiffStatMaxLines, "diff", baseHash+"..HEAD", "--stat")
+		fmt.Fprintln(&b, "```")
+	}
 
 	return b.String(), nil
 }
 
 // autoRolesGitBase returns the commit hash to use as the diff base, plus a
 // human-readable label explaining where it came from. Lookup order:
-//  1. The git_start_hash of the most recent review run for this project.
-//  2. Fallback: HEAD~autoRolesFallbackBaseCommits.
+//  1. The git_start_hash of the most recent successful review run for this project.
+//  2. Fallback: HEAD~autoRolesFallbackBaseCommits (if the repo has enough commits).
+//  3. Fallback: the initial (root) commit when the repo has 2–N commits (root != HEAD).
+//  4. Empty string when the repo has exactly one commit (root == HEAD); callers must
+//     show HEAD directly because the <root>..HEAD range would be empty.
 func autoRolesGitBase(env *root.ResolvedEnv, db *calldb.CallDB) (hash, label string) {
 	rows, err := db.RecentRuns(calldb.RecentFilter{
-		ProjectID: env.ProjectID(),
-		Action:    runner.ActionReview,
-		Limit:     1,
+		ProjectID:   env.ProjectID(),
+		Action:      runner.ActionReview,
+		Limit:       1,
+		SuccessOnly: true,
 	})
 	if err == nil && len(rows) > 0 && rows[0].GitStartHash != "" {
 		return rows[0].GitStartHash, fmt.Sprintf("from review agent_exec %d at %s", rows[0].ID, rows[0].StartedAt)
 	}
-	return fmt.Sprintf("HEAD~%d", autoRolesFallbackBaseCommits),
-		fmt.Sprintf("no prior review found; falling back to HEAD~%d", autoRolesFallbackBaseCommits)
+	fallbackRef := fmt.Sprintf("HEAD~%d", autoRolesFallbackBaseCommits)
+	if gitRefExists(env.WorkDir, fallbackRef) {
+		return fallbackRef, fmt.Sprintf("no prior review found; falling back to %s", fallbackRef)
+	}
+	if rootHash := gitRootCommit(env.WorkDir); rootHash != "" {
+		if rootHash == gitCurrentHead(env.WorkDir) {
+			// Single-commit repo: root IS HEAD, so <root>..HEAD is always empty.
+			// Return an empty hash so buildAutoRolesContext shows the commit directly.
+			return "", "no prior review; single-commit repo, showing initial commit directly"
+		}
+		return rootHash, fmt.Sprintf("no prior review found; %s unavailable, falling back to initial commit", fallbackRef)
+	}
+	return fallbackRef, fmt.Sprintf("no prior review found; falling back to %s", fallbackRef)
+}
+
+// gitCurrentHead returns the full SHA of HEAD, or empty string on failure.
+func gitCurrentHead(workDir string) string {
+	var buf bytes.Buffer
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = workDir
+	cmd.Stdout = &buf
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(buf.String())
+}
+
+// gitRefExists reports whether refName resolves to a commit in workDir.
+func gitRefExists(workDir, refName string) bool {
+	cmd := exec.Command("git", "rev-parse", "--verify", refName)
+	cmd.Dir = workDir
+	return cmd.Run() == nil
+}
+
+// gitRootCommit returns the hash of the oldest commit reachable from HEAD.
+func gitRootCommit(workDir string) string {
+	var buf bytes.Buffer
+	cmd := exec.Command("git", "rev-list", "--max-parents=0", "HEAD")
+	cmd.Dir = workDir
+	cmd.Stdout = &buf
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(buf.String())
 }
 
 // writeRoleReportFreshness lists each .ateam/roles/<role>/report.md with its

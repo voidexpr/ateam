@@ -113,7 +113,7 @@ func runAll(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		// Planner runs as a supervisor pass, so reuse --supervisor-profile/-agent.
-		roles, done, err := runAutoRoles(env, allSupervisorProfile, allSupervisorAgent, allVerbose, allPlanOnly)
+		roles, done, err := runAutoRoles(env, allSupervisorProfile, allSupervisorAgent, allVerbose, allPlanOnly, allDockerAutoSetup)
 		if err != nil {
 			return err
 		}

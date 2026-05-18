@@ -17,7 +17,7 @@ If a role name above is unfamiliar (typically a custom role added by this projec
 
 Apply in order, stop at the first match:
 
-1. **No code changes since the last review** → recommend `ateam review` alone (or nothing if the existing review is still current). Regenerating reports against unchanged code wastes tokens.
+1. **No code changes since the last review** → recommend no roles (emit `{{AUTO_ROLES_MARKER}}` with nothing after the colon). The existing review is still current; the user can run `ateam review` manually if needed. Regenerating reports against unchanged code wastes tokens.
 2. **Recent changes touched a role's territory** → run that role. Examples:
  - SQL / migration / schema → `database.schema`
  - Build / CI / lint / hooks → `project.automation`
