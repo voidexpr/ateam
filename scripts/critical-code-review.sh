@@ -16,7 +16,7 @@ coder="claude"
 
 usage() {
   cat <<HELP
-Usage: $(basename "$0") [--focus HINT] [--help]
+Usage: $(basename "$0") [--focus HINT] [--restart] [--help]
 
 Two-agent critical code review:
   Round 1 — reviewer ($reviewer) audits, coder ($coder) applies fixes.
@@ -30,17 +30,26 @@ Options:
                    --focus "recent work only"
                    --focus "the new auth feature"
                  When omitted, the reviewer audits the diff of HEAD.
+                 Ignored when round 1 is being resumed from cache.
+  --restart      Force a fresh run: rename existing reports with a timestamp
+                 suffix even if the previous run did not complete.
   -h, --help     Show this message and exit.
 
-Reports are written as agent_*_r{1,2}.md in the current directory; prior
-runs are renamed with a timestamp suffix before each step.
+Resume behaviour: each step writes one report file (agent_*_r{1,2}.md). On
+re-run, any step whose file is already non-empty is skipped. The final step
+writes ${coder}'s round-2 report, so when that file exists the previous run
+is treated as complete: the four reports are renamed with a timestamp suffix
+and the script starts fresh. Use --restart to force the same reset
+mid-pipeline.
 HELP
 }
 
 focus=""
+restart=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --focus)   focus="${2:?--focus requires an argument}"; shift 2 ;;
+    --restart) restart=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *)         echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -64,18 +73,25 @@ step() {
   printf '\n\033[1;36m── %s ──\033[0m\n' "$1"
 }
 
-run() {
-  local agent="$1"
-  step "$2"
+maybe_run() {
+  local out="$1" agent="$2" label="$3"
+  if [ -s "$out" ]; then
+    step "$label by $agent — cached ($out), skipping"
+    return 0
+  fi
+  step "$label by $agent"
   ateam exec --agent "$agent"
 }
 
-for f in "$reviewer_r1" "$coder_r1" "$reviewer_r2" "$coder_r2"; do backup "$f"; done
+if [ "$restart" = true ] || [ -s "$coder_r2" ]; then
+  for f in "$reviewer_r1" "$coder_r1" "$reviewer_r2" "$coder_r2"; do backup "$f"; done
+fi
 
-echo "Reviewer: $reviewer  Coder: $coder"
-echo "Scope:    $scope"
+echo "Reviewer: $reviewer"
+echo "   Coder: $coder"
+echo "   Scope: $scope"
 
-run "$reviewer" "Round 1 — review" <<EOF
+maybe_run "$reviewer_r1" "$reviewer" "Round 1 — review" <<EOF
 You are the reviewer. Critically audit and write your findings to $reviewer_r1.
 
 - Be skeptical, form your own opinion.
@@ -86,7 +102,7 @@ You are the reviewer. Critically audit and write your findings to $reviewer_r1.
 $scope
 EOF
 
-run "$coder" "Round 1 — fixes" <<EOF
+maybe_run "$coder_r1" "$coder" "Round 1 — fixes" <<EOF
 You are the coder. The reviewer wrote findings to $reviewer_r1.
 Apply the fixes you agree with; push back in writing on the ones you don't.
 
@@ -100,7 +116,7 @@ Write a single report to $coder_r1 with three sections:
   3. Tests — exact command(s) run and pass/fail counts.
 EOF
 
-run "$reviewer" "Round 2 — re-review" <<EOF
+maybe_run "$reviewer_r2" "$reviewer" "Round 2 — re-review" <<EOF
 You are the reviewer. Your round-1 findings are in $reviewer_r1; the coder's response is in $coder_r1.
 
 - Did they incorrectly reject any finding? Provide more evidence or concede.
@@ -110,7 +126,7 @@ You are the reviewer. Your round-1 findings are in $reviewer_r1; the coder's res
 Write your updated assessment to $reviewer_r2 (overwriting OK).
 EOF
 
-run "$coder" "Round 2 — final fixes" <<EOF
+maybe_run "$coder_r2" "$coder" "Round 2 — final fixes" <<EOF
 You are the coder. The reviewer's follow-up is in $reviewer_r2; your prior response is in $coder_r1.
 
 Apply remaining recommendations or state precisely why each should not be done.
