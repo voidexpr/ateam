@@ -193,6 +193,15 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 			cacheCreateTokens += u.CacheCreationInputTokens
 			cum := estimate()
 			var textParts []string
+			// firstEmission carries IsModelResponse so the runner can count
+			// one turn per assistant message regardless of block layout.
+			firstEmission := true
+			markFirst := func(ev *StreamEvent) {
+				if firstEmission {
+					ev.IsModelResponse = true
+					firstEmission = false
+				}
+			}
 			for _, block := range ast.Message.Content {
 				switch block.Type {
 				case "text":
@@ -209,6 +218,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 						thinkEv.Type = "thinking"
 						thinkEv.Text = block.Thinking
 						thinkEv.ContextTokens = ctxTokens
+						markFirst(&thinkEv)
 						ch <- thinkEv
 					}
 				case "tool_use":
@@ -217,6 +227,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 					toolEv.ToolName = block.Name
 					toolEv.ToolInput = strings.TrimSpace(string(block.Input))
 					toolEv.ContextTokens = ctxTokens
+					markFirst(&toolEv)
 					ch <- toolEv
 				}
 			}
@@ -227,6 +238,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 				textEv.Type = "assistant"
 				textEv.Text = text
 				textEv.ContextTokens = ctxTokens
+				markFirst(&textEv)
 				ch <- textEv
 			}
 

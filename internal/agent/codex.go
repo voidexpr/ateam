@@ -174,7 +174,10 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 			te := ev.(*CodexTextEvent)
 			if te.Text != "" {
 				itemText = te.Text
-				ch <- StreamEvent{Type: "assistant", Text: te.Text}
+				// IsModelResponse marks the finalized assistant message for
+				// the runner's turn counter (delta-stream "assistant" events
+				// above are skipped to avoid over-counting one response).
+				ch <- StreamEvent{Type: "assistant", Text: te.Text, IsModelResponse: true}
 			}
 
 		case "result":

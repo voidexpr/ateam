@@ -472,7 +472,7 @@ Each positional argument is a prompt (text or `@filepath`). Agent execs run conc
 
 **Logs**: Each exec's logs are stored under `logs/parallel/{label}/` in the project or org directory.
 
-**Progress table columns**: `ID, LABEL, STATUS, EstTOKENS, CALLS, DETAILS`. `EstTOKENS` is the running input+output token count for each task. While a task is live it is an *estimate* built from the per-turn usage reported in the stream (the final total only arrives on the agent's terminal result event); once the task finishes it reflects the authoritative total from that event. The column exists so a crash or timeout before the terminal event still gives visibility into how much the task consumed. The same table is also rendered by `ateam report`.
+**Progress table columns**: `ID, LABEL, STATUS, EstTOKENS, TURNS, DETAILS`. `EstTOKENS` is the running input+output token count for each task. While a task is live it is an *estimate* built from the per-turn usage reported in the stream (the final total only arrives on the agent's terminal result event); once the task finishes it reflects the authoritative total from that event. The column exists so a crash or timeout before the terminal event still gives visibility into how much the task consumed. The same table is also rendered by `ateam report`.
 
 ### `ateam prompt`
 

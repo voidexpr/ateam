@@ -232,10 +232,11 @@ func TestParallelPoolStatusIntegration(t *testing.T) {
 		Phase:     runner.PhaseTool,
 		ToolName:  "Bash",
 		ToolCount: 3,
+		TurnCount: 2,
 		Elapsed:   5 * time.Second,
 	})
-	if rows[0].Calls != 3 {
-		t.Errorf("expected 3 calls, got %d", rows[0].Calls)
+	if rows[0].Turns != 2 {
+		t.Errorf("expected 2 turns, got %d", rows[0].Turns)
 	}
 	if !strings.Contains(rows[0].Detail, "Bash") {
 		t.Errorf("expected detail to contain 'Bash', got %q", rows[0].Detail)

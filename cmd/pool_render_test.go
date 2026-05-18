@@ -61,7 +61,7 @@ func TestFormatPoolRowSingleLineInlinesPath(t *testing.T) {
 		ExecID: 42,
 		Label:  "alpha",
 		State:  poolStateDone,
-		Calls:  3,
+		Turns:  3,
 		Detail: "2m",
 		Path:   ".ateam/roles/alpha/report.md",
 	}

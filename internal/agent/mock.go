@@ -136,7 +136,7 @@ func (m *MockAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent)
 		response = "mock response"
 	}
 
-	ch <- StreamEvent{Type: "assistant", Text: response}
+	ch <- StreamEvent{Type: "assistant", Text: response, IsModelResponse: true}
 
 	// If the test asked us to simulate the agent's Write tool, drop the
 	// configured bytes at the OUTPUT_FILE path encoded in the prompt and any

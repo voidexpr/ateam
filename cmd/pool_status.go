@@ -21,14 +21,14 @@ const (
 	poolStatusRowFmt = "  %-7s %-25s %-8s %-9s %-6s %s"
 )
 
-var poolStatusHeader = fmt.Sprintf(poolStatusRowFmt, "ID", "LABEL", "STATUS", "EstTOKENS", "CALLS", "DETAILS")
+var poolStatusHeader = fmt.Sprintf(poolStatusRowFmt, "ID", "LABEL", "STATUS", "EstTOKENS", "TURNS", "DETAILS")
 
 type poolStatusRow struct {
 	ExecID    int64
 	Label     string
 	State     string
 	EstTokens int // running total of input+output tokens; estimated from partial stream while the run is live
-	Calls     int
+	Turns     int
 	Detail    string
 	Path      string
 }
@@ -55,7 +55,7 @@ func clonePoolStatusRows(rows []poolStatusRow) []poolStatusRow {
 // row ("task", "role", etc).
 func progressColumnsHelp(unit string) string {
 	return fmt.Sprintf(`Progress table columns:
-  ID, LABEL, STATUS, EstTOKENS, CALLS, DETAILS
+  ID, LABEL, STATUS, EstTOKENS, TURNS, DETAILS
 
   EstTOKENS is the running input+output token count for each %[1]s. While a
   %[1]s is live it is an *estimate* built from the per-turn usage reported in
@@ -94,9 +94,11 @@ func nextPoolStatusRow(row poolStatusRow, p runner.RunProgress) poolStatusRow {
 	elapsed := runner.FormatDuration(p.Elapsed)
 	next := row
 	next.ExecID = p.ExecID
-	next.Calls = p.ToolCount
-	// Keep the cumulative token estimate monotonically increasing so a
-	// terminal event that briefly reports 0 doesn't blank the column.
+	// Keep both counters monotonically increasing so a terminal event that
+	// briefly reports 0 doesn't blank the column.
+	if p.TurnCount > next.Turns {
+		next.Turns = p.TurnCount
+	}
 	if t := p.CumulativeInputTokens + p.CumulativeOutputTokens; t > next.EstTokens {
 		next.EstTokens = t
 	}
@@ -142,6 +144,9 @@ func finalizedPoolStatusRow(row poolStatusRow, summary runner.RunSummary, state,
 	next.Path = path
 	if t := summary.InputTokens + summary.OutputTokens; t > next.EstTokens {
 		next.EstTokens = t
+	}
+	if summary.Turns > next.Turns {
+		next.Turns = summary.Turns
 	}
 	return next
 }

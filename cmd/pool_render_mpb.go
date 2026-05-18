@@ -171,9 +171,9 @@ func formatPoolRowSingleLine(row poolStatusRow) string {
 	if row.ExecID > 0 {
 		execID = strconv.FormatInt(row.ExecID, 10)
 	}
-	calls := "-"
-	if row.State != poolStateQueued || row.Calls > 0 {
-		calls = strconv.Itoa(row.Calls)
+	turns := "-"
+	if row.State != poolStateQueued || row.Turns > 0 {
+		turns = strconv.Itoa(row.Turns)
 	}
 	est := ""
 	if row.EstTokens > 0 {
@@ -187,5 +187,5 @@ func formatPoolRowSingleLine(row poolStatusRow) string {
 			detail = row.Path
 		}
 	}
-	return strings.TrimRight(fmt.Sprintf(poolStatusRowFmt, execID, row.Label, row.State, est, calls, detail), " ")
+	return strings.TrimRight(fmt.Sprintf(poolStatusRowFmt, execID, row.Label, row.State, est, turns, detail), " ")
 }

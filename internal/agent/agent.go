@@ -148,6 +148,12 @@ type StreamEvent struct {
 	// "agent_api", "agent_process", "ateam_timeout", "ateam_internal".
 	// Populated only on failure paths.
 	ErrorSource string
+
+	// IsModelResponse is set on exactly one event per model response so the
+	// runner can count turns consistently across agents (Claude reports
+	// num_turns in its result event, Codex doesn't — counting this flag
+	// gives a uniform value).
+	IsModelResponse bool
 }
 
 // resolveSlice replaces {{VAR}} placeholders in each string element.

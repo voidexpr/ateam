@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/ateam/internal/calldb"
@@ -82,13 +83,13 @@ func runRuns(cmd *cobra.Command, args []string) error {
 
 func printRunsTable(rows []calldb.RecentRow, showGitHash bool) {
 	w := newTable()
-	header := "ID\tSTARTED\tPROFILE\tACTION\tROLE\tMODEL\tDURATION\tCOST\tTOKENS\tSTATUS\tBATCH\tREASON"
+	header := "ID\tSTARTED\tPROFILE\tACTION\tROLE\tMODEL\tDURATION\tCOST\tTOKENS\tTURNS\tSTATUS\tBATCH\tREASON"
 	if showGitHash {
 		header += "\tGIT_START\tGIT_END"
 	}
 	fmt.Fprintln(w, header)
 	for _, r := range rows {
-		started := fmtStartedAt(r.StartedAt)
+		started := display.FmtRFC3339Compact(r.StartedAt)
 
 		dur := ""
 		if r.DurationMS > 0 {
@@ -110,9 +111,14 @@ func printRunsTable(rows []calldb.RecentRow, showGitHash bool) {
 			reason = runner.Truncate(runner.SingleLineText(r.ErrorMessage), 120)
 		}
 
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s",
+		turns := ""
+		if r.Turns > 0 {
+			turns = strconv.Itoa(r.Turns)
+		}
+
+		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s",
 			r.ID, started, r.Profile, r.Action, r.Role, r.Model,
-			dur, display.FmtCost(r.CostUSD), tokens, runStatus(r), r.Batch, reason)
+			dur, display.FmtCost(r.CostUSD), tokens, turns, runStatus(r), r.Batch, reason)
 		if showGitHash {
 			fmt.Fprintf(w, "\t%s\t%s", shortHash(r.GitStartHash), shortHash(r.GitEndHash))
 		}

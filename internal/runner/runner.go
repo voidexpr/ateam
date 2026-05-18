@@ -147,6 +147,7 @@ type RunProgress struct {
 	ToolInput      string
 	Content        string
 	ToolCount      int
+	TurnCount      int
 	EventCount     int
 	Elapsed        time.Duration
 	StartedAt      time.Time
@@ -412,6 +413,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		toolCounts        = make(map[string]int)
 		eventCount        int
 		totalTools        int
+		observedTurns     int
 		lastOutput        string
 		resultEv          *agent.StreamEvent
 		peakContextTokens int
@@ -430,6 +432,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 			ToolInput:              toolInput,
 			Content:                content,
 			ToolCount:              toolCount,
+			TurnCount:              observedTurns,
 			EventCount:             evCount,
 			StartedAt:              startedAt,
 			Elapsed:                time.Since(startedAt),
@@ -459,6 +462,10 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	processEvent := func(ev agent.StreamEvent) {
 		eventCount++
 		lastEventAt = time.Now()
+
+		if ev.IsModelResponse {
+			observedTurns++
+		}
 
 		if ev.ContextTokens > peakContextTokens {
 			peakContextTokens = ev.ContextTokens
@@ -591,7 +598,6 @@ eventLoop:
 		if summary.DurationMS == 0 {
 			summary.DurationMS = duration.Milliseconds()
 		}
-		summary.Turns = resultEv.Turns
 		summary.IsError = resultEv.IsError
 		summary.InputTokens = resultEv.InputTokens
 		summary.OutputTokens = resultEv.OutputTokens
@@ -604,13 +610,20 @@ eventLoop:
 		if res := scanStreamFileForResult(streamFile); res != nil {
 			summary.Cost = res.Cost
 			summary.DurationMS = res.DurationMS
-			summary.Turns = res.Turns
 			summary.InputTokens = res.InputTokens
 			summary.OutputTokens = res.OutputTokens
 			summary.CacheReadTokens = res.CacheReadTokens
 			summary.CacheWriteTokens = res.CacheWriteTokens
 			summary.ContextWindow = res.ContextWindow
 		}
+	}
+
+	// Turns: prefer the count we observed from IsModelResponse markers
+	// across agents. Fall back to the agent-reported value only when we
+	// saw nothing (e.g. early crash before any assistant event).
+	summary.Turns = observedTurns
+	if summary.Turns == 0 && resultEv != nil {
+		summary.Turns = resultEv.Turns
 	}
 
 	// Streamed-text fallback: if the agent didn't Write a primary OUTPUT_FILE

@@ -17,8 +17,8 @@ func TestPoolStatusHeaderIncludesIDColumn(t *testing.T) {
 	if !strings.Contains(poolStatusHeader, "ID") {
 		t.Fatalf("expected header to include ID, got %q", poolStatusHeader)
 	}
-	if !strings.Contains(poolStatusHeader, "CALLS") {
-		t.Fatalf("expected header to include CALLS, got %q", poolStatusHeader)
+	if !strings.Contains(poolStatusHeader, "TURNS") {
+		t.Fatalf("expected header to include TURNS, got %q", poolStatusHeader)
 	}
 }
 
@@ -28,19 +28,19 @@ func TestPoolStatusRowFormatsExecID(t *testing.T) {
 		t.Errorf("queued row should show empty exec id placeholder, got %q", queued)
 	}
 	running := formatPoolRowSingleLine(poolStatusRow{
-		ExecID: 42, Label: "testing_basic", State: poolStateRunning, Calls: 3, Detail: "12s  bash",
+		ExecID: 42, Label: "testing_basic", State: poolStateRunning, Turns: 3, Detail: "12s  bash",
 	})
 	if !strings.Contains(running, "42") {
 		t.Errorf("running row should show exec id, got %q", running)
 	}
 	if !strings.Contains(running, " 3 ") {
-		t.Errorf("running row should show tool call count, got %q", running)
+		t.Errorf("running row should show turn count, got %q", running)
 	}
 }
 
 func TestPoolStatusRowShowsEstTokens(t *testing.T) {
 	line := formatPoolRowSingleLine(poolStatusRow{
-		ExecID: 7, Label: "live", State: poolStateRunning, EstTokens: 12345, Calls: 2, Detail: "1m2s",
+		ExecID: 7, Label: "live", State: poolStateRunning, EstTokens: 12345, Turns: 2, Detail: "1m2s",
 	})
 	// 12345 tokens → FmtTokens renders as "12.3K" (see internal/display).
 	if !strings.Contains(line, "12.3K") {
@@ -85,7 +85,7 @@ func TestNextPoolStatusRowDoesNotOverwriteDoneRow(t *testing.T) {
 		ExecID: 42,
 		Label:  "testing_basic",
 		State:  "done",
-		Calls:  3,
+		Turns:  3,
 		Detail: "12:34:56  12s  $0.25  1.2K",
 		Path:   "reports/testing_basic/report.md",
 	}
@@ -94,7 +94,7 @@ func TestNextPoolStatusRowDoesNotOverwriteDoneRow(t *testing.T) {
 		ExecID:    42,
 		Phase:     runner.PhaseTool,
 		ToolName:  "Bash",
-		ToolCount: 99,
+		TurnCount: 99,
 	})
 
 	if next.State != poolStateDone {

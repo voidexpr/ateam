@@ -9,9 +9,10 @@ import (
 // TimestampFormat is the canonical layout for ateam timestamps in file names and display.
 const TimestampFormat = "2006-01-02_15-04-05"
 
-// FmtRFC3339AsTimestamp parses an RFC3339 string and reformats it using TimestampFormat.
-// Returns the original string on parse error, or "" for empty input.
-func FmtRFC3339AsTimestamp(s string) string {
+// fmtRFC3339 parses s as RFC3339 and renders it with layout. When local is
+// true the time is converted to the local zone before formatting. Returns
+// the original string on parse error, or "" for empty input.
+func fmtRFC3339(s, layout string, local bool) string {
 	if s == "" {
 		return ""
 	}
@@ -19,8 +20,17 @@ func FmtRFC3339AsTimestamp(s string) string {
 	if err != nil {
 		return s
 	}
-	return t.Format(TimestampFormat)
+	if local {
+		t = t.Local()
+	}
+	return t.Format(layout)
 }
+
+// FmtRFC3339AsTimestamp reformats an RFC3339 string using TimestampFormat.
+func FmtRFC3339AsTimestamp(s string) string { return fmtRFC3339(s, TimestampFormat, false) }
+
+// FmtRFC3339Compact renders an RFC3339 string as "MM-DD HH:MM:SS" in the local zone.
+func FmtRFC3339Compact(s string) string { return fmtRFC3339(s, "01-02 15:04:05", true) }
 
 func FmtTokens(n int64) string {
 	if n <= 0 {
