@@ -1,6 +1,0 @@
-state.sqlite
-state.sqlite-wal
-state.sqlite-shm
-logs/
-cache/
-secrets.env
