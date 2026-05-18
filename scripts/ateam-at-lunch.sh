@@ -105,6 +105,19 @@ fi
 cd "$worktree_path"
 echo "Working in: $(pwd)"
 
+test_guide="ateam-at-lunch-how-to-test.md"
+function write-testing-guide {
+   ateam exec --cheaper-model <<EOF
+Find out how to run tests for this project.
+- Read CLAUDE.md, build system files and other potential development documentation
+- Only look at the top level and if nothing found look one level down
+Document:
+- the test command(s) to quickly check code
+- the more thorough test commands and when to use them
+Write it as a markdown file called $test_guide
+EOF
+}
+
 # Reused for the three build+test passes. The agent finds the right commands;
 # we don't bake any specific tool into the script so it works across stacks.
 build_and_test_prompt='Build and run the project'\''s minimal / fast tests.

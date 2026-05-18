@@ -59,10 +59,12 @@ done
 # scope="${focus:-the diff of HEAD (the most recent commit)}"
 scope="$focus"
 
-reviewer_r1="agent_${reviewer}_r1.md"
-coder_r1="agent_${coder}_r1.md"
-reviewer_r2="agent_${reviewer}_r2.md"
-coder_r2="agent_${coder}_r2.md"
+base_dir=".ateam/shared/critical_code_review"
+mkdir -p "$base_dir"
+reviewer_r1="$base_dir/agent_${reviewer}_r1.md"
+coder_r1="$base_dir/agent_${coder}_r1.md"
+reviewer_r2="$base_dir/agent_${reviewer}_r2.md"
+coder_r2="$base_dir/agent_${coder}_r2.md"
 
 backup() {
   [ -f "$1" ] || return 0
