@@ -10,6 +10,7 @@ import (
 
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/gitutil"
+	"github.com/ateam/internal/projectinfo"
 	"github.com/ateam/internal/prompts"
 )
 
@@ -41,6 +42,13 @@ type ResolvedEnv struct {
 	// multi-role commands fork git at most once. nil = uncached; a sentinel
 	// with empty CommitHash = "we tried, got nothing" (don't retry).
 	projectMeta *gitutil.ProjectMeta
+
+	// quickOrientation caches the pre-rendered Markdown produced by
+	// projectinfo.Info.Markdown(). nil = not yet evaluated; an empty string
+	// pointer = "we tried, got nothing or the feature is disabled".
+	// Populated lazily by NewProjectInfoParams when ATEAM_QUICK_ORIENTATION
+	// is set; see plans/Feature_TokenReduction.md (Phase 0.5).
+	quickOrientation *string
 }
 
 func (e *ResolvedEnv) RoleDir(roleID string) string {
@@ -96,6 +104,12 @@ func (e *ResolvedEnv) ProjectDBPath() string {
 // The metadata is cached on the env after the first call: multi-role commands
 // (e.g. `ateam report`) build pinfo once per role and would otherwise fork
 // `git log` + `git status` N times for unchanged repo state.
+//
+// When ATEAM_QUICK_ORIENTATION is set to a truthy value (1/true/yes), the
+// pre-rendered Markdown from projectinfo.Info.Markdown() is also cached and
+// attached to QuickOrientation. This is the wire-up for the Phase 0.5
+// experiment described in plans/Feature_TokenReduction.md — opt-in so the
+// existing baseline is unaffected unless the env var is set.
 func (e *ResolvedEnv) NewProjectInfoParams(role, action string) prompts.ProjectInfoParams {
 	if e.projectMeta == nil {
 		e.projectMeta, _ = gitutil.GetProjectMeta(e.WorkDir)
@@ -108,16 +122,45 @@ func (e *ResolvedEnv) NewProjectInfoParams(role, action string) prompts.ProjectI
 	if e.projectMeta.CommitHash != "" {
 		meta = e.projectMeta
 	}
-	return prompts.ProjectInfoParams{
-		OrgDir:      e.OrgDir,
-		ProjectDir:  e.ProjectDir,
-		ProjectName: e.ProjectName,
-		WorkDir:     e.WorkDir,
-		GitRepoDir:  e.GitRepoDir,
-		Role:        role,
-		Action:      action,
-		Meta:        meta,
+	if e.quickOrientation == nil {
+		e.quickOrientation = collectQuickOrientation(e.WorkDir)
 	}
+	return prompts.ProjectInfoParams{
+		OrgDir:           e.OrgDir,
+		ProjectDir:       e.ProjectDir,
+		ProjectName:      e.ProjectName,
+		WorkDir:          e.WorkDir,
+		GitRepoDir:       e.GitRepoDir,
+		Role:             role,
+		Action:           action,
+		Meta:             meta,
+		QuickOrientation: *e.quickOrientation,
+	}
+}
+
+// collectQuickOrientation renders the project-info "Quick orientation" block
+// when ATEAM_QUICK_ORIENTATION is enabled. Returns a pointer to an empty
+// string when the feature is disabled or the collection fails, so callers
+// can use a nil cache pointer to mean "not yet evaluated".
+func collectQuickOrientation(workDir string) *string {
+	empty := ""
+	if !quickOrientationEnabled() {
+		return &empty
+	}
+	info, err := projectinfo.Collect(workDir)
+	if err != nil || info == nil {
+		return &empty
+	}
+	md := info.Markdown()
+	return &md
+}
+
+func quickOrientationEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("ATEAM_QUICK_ORIENTATION"))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 // ProjectID returns the project identifier derived from the source directory path.
@@ -184,7 +227,8 @@ func (e *ResolvedEnv) resolveWorkDir(workDirOverride string) error {
 	}
 	e.WorkDir = target
 	e.GitRepoDir = gitutil.TopLevel(target)
-	e.projectMeta = nil // stale: WorkDir changed
+	e.projectMeta = nil      // stale: WorkDir changed
+	e.quickOrientation = nil // stale: WorkDir changed
 	return nil
 }
 

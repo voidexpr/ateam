@@ -588,6 +588,13 @@ type ProjectInfoParams struct {
 	Role        string // e.g. "role security" or "the supervisor"
 	Action      string // e.g. "report", "review", "code"
 	Meta        *gitutil.ProjectMeta
+
+	// QuickOrientation, when non-empty, is appended to the project context as
+	// an auto-generated orientation block (top-level layout, recent commits,
+	// detected manifests, …). Produced by internal/projectinfo.Info.Markdown().
+	// Opt-in via the ATEAM_QUICK_ORIENTATION env var; see
+	// plans/Feature_TokenReduction.md (Phase 0.5) for design context.
+	QuickOrientation string
 }
 
 // FormatProjectInfo builds the ateam project context section.
@@ -628,19 +635,27 @@ func FormatProjectInfo(p ProjectInfoParams) string {
 	if p.Meta != nil {
 		ts := time.Now().Format(TimestampFormat)
 		fmt.Fprintf(&b, "* timestamp: %s\n", ts)
-		hash := p.Meta.CommitHash
-		if len(hash) > 12 {
-			hash = hash[:12]
-		}
-		fmt.Fprintf(&b, "* last commit: %s - %s - \"%s\"\n", hash, p.Meta.CommitDate, p.Meta.CommitMessage)
-		if len(p.Meta.Uncommitted) > 0 {
-			fmt.Fprintf(&b, "* uncommitted changes: %d file(s)\n", len(p.Meta.Uncommitted))
-			for _, f := range p.Meta.Uncommitted {
-				fmt.Fprintf(&b, "  * `%s`\n", f)
+		// When QuickOrientation is enabled it carries the commit + working-tree
+		// state (and the uncommitted-file list), so don't duplicate them here.
+		if p.QuickOrientation == "" {
+			hash := p.Meta.CommitHash
+			if len(hash) > 12 {
+				hash = hash[:12]
 			}
-		} else {
-			b.WriteString("* working tree: clean\n")
+			fmt.Fprintf(&b, "* last commit: %s - %s - \"%s\"\n", hash, p.Meta.CommitDate, p.Meta.CommitMessage)
+			if len(p.Meta.Uncommitted) > 0 {
+				fmt.Fprintf(&b, "* uncommitted changes: %d file(s)\n", len(p.Meta.Uncommitted))
+				for _, f := range p.Meta.Uncommitted {
+					fmt.Fprintf(&b, "  * `%s`\n", f)
+				}
+			} else {
+				b.WriteString("* working tree: clean\n")
+			}
 		}
+	}
+	if p.QuickOrientation != "" {
+		b.WriteString("\n")
+		b.WriteString(p.QuickOrientation)
 	}
 	return b.String()
 }

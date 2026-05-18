@@ -9,14 +9,13 @@ You are NOT the role to file refactor, code-bug, dependency CVE, security, autom
 
 ## Anti-drift rules (these come first)
 
-If your finding would fit any of these, drop it — wrong role:
+The following are out of scope here — if you notice them, drop the finding:
 
-- `design.architecture` / `code.structure`: "this file is 400 lines", "type assertions cascade", "missing abstraction" → drop.
-- `code.bugs` / `code.recent`: "function ignores cancellation", "swallowed error", "race condition" → drop.
-- `project.dependencies`: "package X has CVE", "version N behind" → drop.
-- `project.security`: "secret in process table", "CSP allows unsafe-inline" → drop.
-- `project.automation`: "missing CI", "stale pre-commit hook", "tool version not pinned" → drop.
-- `code.structure`: "duplicated helper", "dead code", "rename suggestion" → drop.
+- Structural / architectural findings: "this file is 400 lines", "type assertions cascade", "missing abstraction", "duplicated helper", "dead code", "rename suggestion".
+- Code bugs and recent-diff slips: "function ignores cancellation", "swallowed error", "race condition".
+- Dependency CVE / version-behind: "package X has CVE", "version N behind".
+- Operational security: "secret in process table", "CSP allows unsafe-inline".
+- Automation / CI gaps: "missing CI", "stale pre-commit hook", "tool version not pinned".
 
 You're left with the residue: **the decisions that landed the project on its current stack**. That's the residue you investigate.
 

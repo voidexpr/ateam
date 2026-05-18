@@ -1,0 +1,1 @@
+The previous report's findings all still hold based on my verification (file sizes unchanged, pricing duplication present, legacy layout branches still present, applyModel still dead in prod, A/B TODO still in place). I'll write the standalone report.

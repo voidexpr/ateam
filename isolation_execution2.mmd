@@ -1,0 +1,32 @@
+flowchart TB
+  subgraph H1["Base host"]
+    subgraph A1["ateam"]
+      subgraph AG1["Agent"]
+        S1["Sandbox<br/>file access + commands"]
+      end
+    end
+  end
+
+  subgraph H2["Base host"]
+    subgraph A2["ateam"]
+      subgraph D2["Docker one-shot container"]
+        AG2["Agent<br/>no permission checks"]
+      end
+    end
+  end
+
+  subgraph H3["Base host"]
+    subgraph A3["ateam"]
+      subgraph D3["Docker exec into existing container"]
+        AG3["Agent<br/>no permission checks"]
+      end
+    end
+  end
+
+  subgraph H4["Base host"]
+    subgraph D4["Docker container"]
+      subgraph A4["ateam"]
+        AG4["Agent<br/>no permission checks"]
+      end
+    end
+  end

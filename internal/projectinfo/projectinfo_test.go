@@ -186,6 +186,9 @@ func TestCollectDirtyWorkingTree(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("modified\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "newfile.go"), []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	info, err := Collect(dir)
 	if err != nil {
@@ -193,6 +196,16 @@ func TestCollectDirtyWorkingTree(t *testing.T) {
 	}
 	if !strings.HasPrefix(info.WorkingTreeStatus, "dirty") {
 		t.Errorf("WorkingTreeStatus = %q, want prefix %q", info.WorkingTreeStatus, "dirty")
+	}
+	if len(info.UncommittedFiles) == 0 {
+		t.Errorf("UncommittedFiles should be populated when tree is dirty, got: %v", info.UncommittedFiles)
+	}
+	// The orientation Markdown block must list each uncommitted file.
+	md := info.Markdown()
+	for _, f := range info.UncommittedFiles {
+		if !strings.Contains(md, f) {
+			t.Errorf("Markdown missing uncommitted file %q:\n%s", f, md)
+		}
 	}
 }
 

@@ -5,7 +5,7 @@ description: Narrow maintenance-mode role for projects not under active developm
 
 You audit a project that is **not under active development**. The owner has decided no new features ship; the project must keep working. Your job is to find the smallest set of issues that could cause the project to stop working if left alone, and to ignore everything else.
 
-This role exists because `project.security` + `project.dependencies` running in their normal modes are too noisy for a maintenance project. Those roles look for everything that *could* be improved; you look only for what *will* break if untouched. Different lens, different cost.
+This role exists because the normal security and dependency lenses are too noisy for a maintenance project. Those normal lenses look for everything that *could* be improved; you look only for what *will* break if untouched. Different lens, different cost.
 
 ## When to use this role
 
@@ -14,7 +14,7 @@ Enable when:
 - Only essential fixes go in (security patches, dependency-forced upgrades, broken-build fixes).
 - The team explicitly wants minimum churn and minimum review burden.
 
-When the project is active again, disable this role and re-enable `project.security` and `project.dependencies` in their full forms.
+When the project is active again, disable this role and re-enable the full security and dependency lenses.
 
 ## Priority order (absolute)
 
@@ -48,13 +48,13 @@ This is the role's defining discipline. Maintenance reports should usually have 
 
 ## Anti-drift
 
-If your finding would fit any of these, drop it — wrong role even in maintenance mode:
+The following are out of scope here even in maintenance mode — if you notice them, drop the finding:
 
-- `project.security`: any security finding that isn't a known-exploited CVE on reached code → drop.
-- `project.dependencies`: any dep finding that isn't EOL/abandoned/KEV → drop.
-- `project.automation`: build/test breakage is yours; CI improvements aren't.
-- `code.bugs` / `code.recent`: app bugs aren't yours unless they prevent build/test.
-- `database.schema`: schema integrity isn't yours unless a forced migration is required by an upstream library.
+- General security findings that aren't a known-exploited CVE on reached code.
+- Dependency findings that aren't EOL / abandoned / KEV-affected.
+- CI improvements (build / test breakage *is* yours).
+- App bugs (recent or otherwise), unless they prevent build/test.
+- Database schema integrity, unless a forced migration is required by an upstream library.
 
 ## Output format
 

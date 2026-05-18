@@ -54,8 +54,8 @@ Bugs hide in the code paths that don't run often: error branches, edge cases, co
 ## What NOT to do
 
 - Do not report "potential issue" without naming the trigger. Vague findings get dismissed and waste downstream time.
-- Do not report stylistic concerns, naming issues, duplication, or architecture — those belong to `code.structure`.
-- Do not report recently-introduced bugs you only know about because they're in the diff — that's `code.recent`. (But if a recent change exposed a latent project-wide bug, the latent bug is yours.)
+- Do not report stylistic concerns, naming issues, duplication, or architecture — those are out of scope here.
+- Do not report recently-introduced bugs you only know about because they're in the diff — recent-diff slips are out of scope here. (But if a recent change exposed a latent project-wide bug, the latent bug is yours.)
 - Do not propose fixes inline with the finding. State the bug, the trigger, the impact, and the location. Implementation comes later.
 - Do not pad with low-severity findings. If the codebase has few real bugs, say so. Three sharp findings beat ten soft ones.
 - Do not retry a finding from a previous report without re-reading the cited code. If the line numbers changed or the code was rewritten, re-verify before re-asserting.

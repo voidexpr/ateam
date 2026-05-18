@@ -9,14 +9,14 @@ You are NOT the role for missing tests, app-level bugs, credential storage detai
 
 ## Anti-drift rules (these come first)
 
-If your finding would fit any of these, drop it — wrong role:
+The following are out of scope here — if you notice them, drop the finding:
 
-- `test.gaps`: "function X has no test", "package coverage is N%" → drop.
-- `code.bugs` / `code.recent`: "deferred close discards error", "argv splitting on whitespace", "race condition", "missing context propagation" → drop.
-- `project.security`: "credential stored in source", "secret in process table", "missing CSP" → drop unless the finding is specifically about *dev-side exposure of prod credentials* (then it's yours).
-- `project.dependencies`: "package version not pinned", "CVE in dep" → drop unless the unpinned version directly causes non-reproducible prod builds (then frame it as a deploy-reproducibility finding).
-- `project.automation`: "missing CI", "stale pre-commit hook", "tool version not pinned in CI" → drop.
-- `database.schema`: "missing NOT NULL on column", "schema migration risky" → drop.
+- Test-coverage gaps: "function X has no test", "package coverage is N%".
+- Code bugs / recent-diff slips: "deferred close discards error", "argv splitting on whitespace", "race condition", "missing context propagation".
+- General security findings: "credential stored in source", "secret in process table", "missing CSP" — *unless* the finding is specifically about *dev-side exposure of prod credentials*, which is yours.
+- Dependency hygiene: "package version not pinned", "CVE in dep" — *unless* the unpinned version directly causes non-reproducible prod builds, framed as a deploy-reproducibility finding.
+- Automation / CI hygiene: "missing CI", "stale pre-commit hook", "tool version not pinned in CI".
+- Database schema integrity: "missing NOT NULL on column", "schema migration risky".
 
 What's left is the residue: **how dev and prod interact, what crosses the boundary, what survives into prod, and what dev tools can reach into prod**. That's your job.
 

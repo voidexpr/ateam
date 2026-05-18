@@ -337,8 +337,8 @@ See [COMMANDS.md](COMMANDS.md) for all `ateam` commands and flags, and [CONFIG.m
 
 TODO:
 * separate agent config
-* customize test hooks
-* ad-hoc scripts: go to lunch, adversarial review, blackbox tester
+* document test commands in CLAUDE.md, which tests to run when (be careful of sandbox restrictions)
+* ad-hoc scripts: go to lunch, adversarial review, blackbox tester, "focus" approach
 * perform a task in a worktree
 * multi-pass loop with budget / max rounds
 * implement all the changes from a given report with an ad-hoc prompt
@@ -348,6 +348,23 @@ TODO:
 See [FAQ.md](FAQ.md) for frequently asked questions.
 
 ## Future
+
+Ateam was born from the frustration of dealing with constant permission approval notices and having to constantly prompt coding agents to refactor code, add tests, audit security, review code when agents themselves are very good at finding issues. This is mostly achieved via the flexible isolation options and running one-shot unattended agents in multiple stages. Coding agents have been surprisingly brittle so stability has been an issue but it has improved to be able to get more stable runs. Cost is defintively going up and maxing the use of subscriptions price subsidy is already gone for Claude Code (June 15th 2026 pricing model change). But it is just a reality that coding a long term project is a lot more than getting a feature to work and cost expectations need to be adjusted.
+
+The vision moving forward is to improve ateam along the following paths:
+* reduce token usage
+    * tokens are the currency of AI and the metric to optimize for: cheaper, runs faster, want to use the right amount of tokens to get the best possible results to avoid having to redo work or deal with issues that could have been preventing by being a bit more thorough
+    * this means introducing a task system to have a granularity of work that is finer grain than an entire file and track review/code status on it, do evals to improve prompts
+* improve the quality engineering component
+    * allow humans to focus on features and do barely any code review, testing and other similar tasks because they know ateam will keep improving this area automatically
+    * this means improving prompts, adding more workflows (see the scripts doing adversarial reviews/testing, lunch time runs vs. daily vs. weekly), maybe ways to hint ateam to steer it toward the current needs (or have ateam surface these priorities as questions)
+* autonomy and safety
+    * add more agent support, add more isolation options (built-in consistent sandbox independent of the agent, MacOS native containers, ...)
+    * gracefully handle LLM provider outages (failover from one another to the other, pause/resume), usage restrictions (short term windows, long term windows / budget) so that ateam pipelines complete no matter what
+* improve ateam as an orchestration layer (in addition to currently available exec/parallel)
+    * orchestration of multiple stages into resumable, observable workflows
+    * manage prompts by providing easy ways to add pre/post instructions and code so that the coding agents waists less tokens and time discovering information that can be algorithmically discovered and to verify the work produced deterministically. It is how ateam itself is evolving: start with prompts doing most of the heavy lifting and as the process matures move more to code before/after LLMs
+    * better context reuse: try to avoid running from scratch everytime by reusing discovery of a codebase/
 
 - 0.9.0 Refactor roles and do some eval to use less tokens and improve accuracy
 - 1.0.0 Cleanup in CLI options, file layout and database structure for future work

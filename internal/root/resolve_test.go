@@ -508,6 +508,92 @@ func TestNewProjectInfoParamsCachesMeta(t *testing.T) {
 	if env.projectMeta != nil {
 		t.Error("OverrideWorkDir to a new path should clear projectMeta")
 	}
+	if env.quickOrientation != nil {
+		t.Error("OverrideWorkDir to a new path should clear quickOrientation")
+	}
+}
+
+func TestNewProjectInfoParamsQuickOrientation(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git CLI required")
+	}
+	tmp := resolvedTempDir(t)
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"},
+	} {
+		c := exec.Command("git", args...)
+		c.Dir = tmp
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	t.Run("disabled by default", func(t *testing.T) {
+		// Explicitly clear in case the surrounding shell exports it.
+		t.Setenv("ATEAM_QUICK_ORIENTATION", "")
+		env := &ResolvedEnv{}
+		if err := env.OverrideWorkDir(tmp); err != nil {
+			t.Fatalf("OverrideWorkDir: %v", err)
+		}
+		p := env.NewProjectInfoParams("role one", "report")
+		if p.QuickOrientation != "" {
+			t.Errorf("QuickOrientation should be empty when env var unset, got: %q", p.QuickOrientation)
+		}
+		if env.quickOrientation == nil || *env.quickOrientation != "" {
+			t.Errorf("cache should hold empty-string sentinel when disabled, got: %v", env.quickOrientation)
+		}
+	})
+
+	t.Run("populated when ATEAM_QUICK_ORIENTATION=1", func(t *testing.T) {
+		t.Setenv("ATEAM_QUICK_ORIENTATION", "1")
+		env := &ResolvedEnv{}
+		if err := env.OverrideWorkDir(tmp); err != nil {
+			t.Fatalf("OverrideWorkDir: %v", err)
+		}
+		p1 := env.NewProjectInfoParams("role one", "report")
+		if !strings.Contains(p1.QuickOrientation, "## Quick orientation") {
+			t.Errorf("QuickOrientation missing expected header:\n%s", p1.QuickOrientation)
+		}
+		// Cache reuse: second call should return the same pointer (avoids
+		// re-running git ls-files / git log per role).
+		cached := env.quickOrientation
+		p2 := env.NewProjectInfoParams("role two", "report")
+		if env.quickOrientation != cached {
+			t.Errorf("second call re-collected quickOrientation (cached %p, now %p)", cached, env.quickOrientation)
+		}
+		if p1.QuickOrientation != p2.QuickOrientation {
+			t.Error("p1 and p2 should share the same rendered QuickOrientation")
+		}
+	})
+
+	t.Run("truthy values accepted", func(t *testing.T) {
+		for _, v := range []string{"1", "true", "TRUE", "yes", "on", "  true  "} {
+			t.Setenv("ATEAM_QUICK_ORIENTATION", v)
+			env := &ResolvedEnv{}
+			if err := env.OverrideWorkDir(tmp); err != nil {
+				t.Fatalf("OverrideWorkDir: %v", err)
+			}
+			p := env.NewProjectInfoParams("role", "report")
+			if p.QuickOrientation == "" {
+				t.Errorf("ATEAM_QUICK_ORIENTATION=%q should enable the block", v)
+			}
+		}
+	})
+
+	t.Run("falsy values rejected", func(t *testing.T) {
+		for _, v := range []string{"", "0", "false", "no", "off", "anything-else"} {
+			t.Setenv("ATEAM_QUICK_ORIENTATION", v)
+			env := &ResolvedEnv{}
+			if err := env.OverrideWorkDir(tmp); err != nil {
+				t.Fatalf("OverrideWorkDir: %v", err)
+			}
+			p := env.NewProjectInfoParams("role", "report")
+			if p.QuickOrientation != "" {
+				t.Errorf("ATEAM_QUICK_ORIENTATION=%q should NOT enable the block, got: %q", v, p.QuickOrientation)
+			}
+		}
+	})
 }
 
 // TestLookupFromSeedsWorkDirFromStart verifies the regression flagged in

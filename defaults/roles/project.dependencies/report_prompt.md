@@ -81,7 +81,7 @@ Without an explicit opt-in extra prompt, default to the conservative posture.
 
 - Do not file minor / patch findings. "v2.2.0 → v2.23.1" is not a finding unless the gap covers an abandonment, a deprecation, or an exploitable CVE.
 - Do not file patches whose notes show they don't apply to this project's platforms.
-- Do not propose `go install ... @latest` pinning, `go.mod` tool directives, or similar reproducibility plumbing. That's `project.automation`'s call when the project is mature enough.
+- Do not propose `go install ... @latest` pinning, `go.mod` tool directives, or similar reproducibility plumbing. Automation / CI reproducibility plumbing is out of scope here.
 - Do not list "N versions behind" tables as findings; if you want to track currency, put the table in Project Context where it's reference material, not a backlog item.
 - Do not recommend swapping packages for alternative libraries. That's a critic role's job.
 - Do not include code blocks with proposed manifest edits.

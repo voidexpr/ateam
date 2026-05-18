@@ -390,6 +390,75 @@ func TestFormatProjectInfo(t *testing.T) {
 			t.Error("short hash should be kept as-is")
 		}
 	})
+
+	t.Run("quick orientation appended when non-empty", func(t *testing.T) {
+		p := ProjectInfoParams{
+			OrgDir:           "/home/user/.ateamorg",
+			ProjectDir:       "/projects/myapp/.ateam",
+			ProjectName:      "myapp",
+			WorkDir:          "/projects/myapp",
+			Role:             "role security",
+			QuickOrientation: "## Quick orientation (auto-generated; do not re-derive)\n\nUniversal:\n* Top-level: cmd, internal, README.md\n",
+		}
+		got := FormatProjectInfo(p)
+		if !strings.Contains(got, "## Quick orientation") {
+			t.Errorf("missing quick-orientation block:\n%s", got)
+		}
+		// Block must appear AFTER the existing project-info bullets so the
+		// stable preamble stays cache-friendly.
+		projectIdx := strings.Index(got, "# ATeam Project Context")
+		orientIdx := strings.Index(got, "## Quick orientation")
+		if projectIdx < 0 || orientIdx < 0 || orientIdx < projectIdx {
+			t.Errorf("quick orientation should come after the project-info header; project=%d orient=%d", projectIdx, orientIdx)
+		}
+	})
+
+	t.Run("quick orientation omitted when empty", func(t *testing.T) {
+		p := ProjectInfoParams{
+			ProjectName: "myapp",
+			WorkDir:     "/projects/myapp",
+			Role:        "role security",
+		}
+		got := FormatProjectInfo(p)
+		if strings.Contains(got, "Quick orientation") {
+			t.Errorf("quick-orientation block should be absent when QuickOrientation is empty:\n%s", got)
+		}
+	})
+
+	t.Run("quick orientation suppresses duplicated meta lines", func(t *testing.T) {
+		// When orientation is on, the existing block must NOT also emit
+		// `* last commit:` / `* working tree:` / `* uncommitted changes:` —
+		// those move into the orientation block. Timestamp stays here because
+		// it reflects the run start, not the commit time.
+		p := ProjectInfoParams{
+			ProjectName: "myapp",
+			WorkDir:     "/projects/myapp",
+			Role:        "role security",
+			Meta: &gitutil.ProjectMeta{
+				CommitHash:    "abc123def456",
+				CommitDate:    "2026-05-18_10-00-00",
+				CommitMessage: "subject",
+				Uncommitted:   []string{" M src/foo.go", "?? new.go"},
+			},
+			QuickOrientation: "## Quick orientation (auto-generated; do not re-derive)\n\nUniversal:\n* Working tree: dirty (2 files)\n    M src/foo.go\n    ?? new.go\n* Last commit: abc123def456 (2026-05-18_10-00-00) — subject\n",
+		}
+		got := FormatProjectInfo(p)
+		if strings.Contains(got, "* last commit:") {
+			t.Errorf("`* last commit:` should be suppressed when orientation is on:\n%s", got)
+		}
+		if strings.Contains(got, "* working tree:") {
+			t.Errorf("`* working tree:` should be suppressed when orientation is on:\n%s", got)
+		}
+		if strings.Contains(got, "* uncommitted changes:") {
+			t.Errorf("`* uncommitted changes:` should be suppressed when orientation is on:\n%s", got)
+		}
+		if !strings.Contains(got, "* timestamp:") {
+			t.Errorf("timestamp should still be emitted (reflects run time):\n%s", got)
+		}
+		if !strings.Contains(got, "## Quick orientation") {
+			t.Errorf("orientation block missing:\n%s", got)
+		}
+	})
 }
 
 func TestReadWith3LevelFallbackNoneExist(t *testing.T) {

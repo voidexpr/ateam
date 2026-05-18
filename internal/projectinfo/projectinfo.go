@@ -58,6 +58,10 @@ type Info struct {
 	// "dirty (N files)" when there are, or "unknown" when git is unavailable.
 	WorkingTreeStatus string `json:"working_tree_status"`
 
+	// UncommittedFiles lists the porcelain status lines (one per file) when
+	// the working tree is dirty. Empty when clean or git is unavailable.
+	UncommittedFiles []string `json:"uncommitted_files,omitempty"`
+
 	// TopLevelEntries lists names of entries directly under Dir, including
 	// directories. Hidden entries (starting with ".") are excluded except
 	// for a small allowlist (.github, .gitlab, .ateam) that commonly
@@ -269,6 +273,7 @@ func (i *Info) collectGitFacts() {
 			i.WorkingTreeStatus = "clean"
 		} else {
 			i.WorkingTreeStatus = fmt.Sprintf("dirty (%d files)", len(meta.Uncommitted))
+			i.UncommittedFiles = meta.Uncommitted
 		}
 	}
 
@@ -363,6 +368,9 @@ func (i *Info) Markdown() string {
 	}
 	if i.WorkingTreeStatus != "" {
 		fmt.Fprintf(&b, "* Working tree: %s\n", i.WorkingTreeStatus)
+		for _, f := range i.UncommittedFiles {
+			fmt.Fprintf(&b, "    %s\n", f)
+		}
 	}
 	if len(i.RecentCommits) > 0 {
 		b.WriteString("* Recent commits (newest first):\n")
@@ -377,7 +385,7 @@ func (i *Info) Markdown() string {
 		fmt.Fprintf(&b, "* Manifests detected: %s\n", strings.Join(i.Manifests, ", "))
 	}
 
-	b.WriteString("\nDo not re-run `ls` / `find` / `wc` / `git log` on the project root — the above is current and authoritative.\n")
+	b.WriteString("\nThe orientation above is current and authoritative. Do NOT re-run `ls` / `find` / `wc` / `git log` / `grep` on the project root or inside `.ateam/`. Your role's own prior report (if any) is already attached as a \"# Previous Report\" section below — do not search for it on disk. Other roles' reports under `.ateam/roles/*/report.md` and `.ateam/runtime/*/report.md` are out of scope for this role.\n")
 	return b.String()
 }
 
