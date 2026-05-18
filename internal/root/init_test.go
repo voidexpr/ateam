@@ -99,13 +99,8 @@ func TestInitProject(t *testing.T) {
 		t.Errorf("projDir = %q, want %q", projDir, wantProj)
 	}
 
-	// Verify role history dirs.
-	for _, id := range prompts.AllRoleIDs {
-		histDir := filepath.Join(projDir, "roles", id, "history")
-		if info, err := os.Stat(histDir); err != nil || !info.IsDir() {
-			t.Errorf("expected role history dir %s to exist", histDir)
-		}
-	}
+	// Per-role history dirs are NOT pre-created at init — they only appear
+	// when the legacy log-migration path writes archived files.
 
 	// Verify supervisor history dir.
 	supHist := filepath.Join(projDir, "supervisor", "history")

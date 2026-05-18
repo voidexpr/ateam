@@ -92,13 +92,6 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 		roleIDs = prompts.AllRoleIDs
 	}
 
-	for _, id := range roleIDs {
-		dir := filepath.Join(projDir, "roles", id, "history")
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return "", fmt.Errorf("cannot create role directory %s: %w", dir, err)
-		}
-	}
-
 	supervisorHistory := filepath.Join(projDir, "supervisor", "history")
 	if err := os.MkdirAll(supervisorHistory, 0755); err != nil {
 		return "", fmt.Errorf("cannot create supervisor directory: %w", err)
@@ -159,14 +152,12 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 	return projDir, nil
 }
 
-// EnsureRoles creates missing role dirs under the project for the given roles.
-// The project role dirs (history) are best-effort (may fail on read-only mounts);
-// the logs dirs under .ateam/logs/ are required for logging.
+// EnsureRoles creates the per-role logs directories the runner needs to stream
+// stdout/stderr into. The history dirs under roles/<id>/history are not
+// pre-created — they are written to on demand by the legacy log migration
+// path (and don't exist for fresh runs at all).
 func EnsureRoles(projectDir string, roleIDs []string) error {
 	for _, roleID := range roleIDs {
-		if err := os.MkdirAll(filepath.Join(projectDir, "roles", roleID, "history"), 0755); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: cannot create project role directory for %s: %v\n", roleID, err)
-		}
 		if err := os.MkdirAll(filepath.Join(projectDir, "logs", "roles", roleID), 0755); err != nil {
 			return fmt.Errorf("cannot create role logs directory: %w", err)
 		}
@@ -188,9 +179,9 @@ func createStateDirs(orgDir, projectID string, roleIDs []string) error {
 }
 
 // WriteProjectGitignore writes the .gitignore file inside .ateam/ to exclude
-// runtime artifacts (state.sqlite and logs/).
+// runtime artifacts (state.sqlite, logs/, runtime/, cache/, secrets).
 func WriteProjectGitignore(projDir string) error {
-	content := "state.sqlite\nstate.sqlite-wal\nstate.sqlite-shm\nlogs/\ncache/\nsecrets.env\n"
+	content := "state.sqlite\nstate.sqlite-wal\nstate.sqlite-shm\nlogs/\nruntime/\ncache/\nsecrets.env\n"
 	return os.WriteFile(filepath.Join(projDir, ".gitignore"), []byte(content), 0644)
 }
 

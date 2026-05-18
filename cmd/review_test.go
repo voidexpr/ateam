@@ -71,6 +71,9 @@ func TestReviewDryRun(t *testing.T) {
 
 	// Create a non-empty report so AssembleReviewPrompt succeeds.
 	reportPath := filepath.Join(projDir, "roles", "testing_basic", "report.md")
+	if err := os.MkdirAll(filepath.Dir(reportPath), 0755); err != nil {
+		t.Fatalf("MkdirAll role dir: %v", err)
+	}
 	if err := os.WriteFile(reportPath, []byte("# Findings\n\nsome findings"), 0644); err != nil {
 		t.Fatalf("WriteFile report: %v", err)
 	}
@@ -103,6 +106,9 @@ func TestReviewDryRunEmptyReport(t *testing.T) {
 	// An empty report.md is discovered by DiscoverReports but has empty content.
 	// AssembleReviewPrompt should handle it without panic.
 	reportPath := filepath.Join(projDir, "roles", "testing_basic", "report.md")
+	if err := os.MkdirAll(filepath.Dir(reportPath), 0755); err != nil {
+		t.Fatalf("MkdirAll role dir: %v", err)
+	}
 	if err := os.WriteFile(reportPath, []byte(""), 0644); err != nil {
 		t.Fatalf("WriteFile empty report: %v", err)
 	}

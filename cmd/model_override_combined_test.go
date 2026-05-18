@@ -78,6 +78,9 @@ func TestReviewWarnsWhenCheaperAndModelBothSet(t *testing.T) {
 	orgDir, projPath, projDir := setupMiniProject(t, []string{"testing_basic"})
 	// runReview needs at least one non-empty report on disk.
 	reportPath := filepath.Join(projDir, "roles", "testing_basic", "report.md")
+	if err := os.MkdirAll(filepath.Dir(reportPath), 0755); err != nil {
+		t.Fatalf("MkdirAll role dir: %v", err)
+	}
 	if err := os.WriteFile(reportPath, []byte("# Findings\n\nsome findings"), 0644); err != nil {
 		t.Fatalf("WriteFile report: %v", err)
 	}
