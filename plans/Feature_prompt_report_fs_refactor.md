@@ -212,33 +212,90 @@ Both kinds of step compose. Recursive resolution applies to scripts the same way
 
 For now, `cmd/report.go` / `cmd/review.go` / etc. keep their current "do everything in Go" shape, just calling the new `Assembler`. The stage executor is a follow-up. **There is no separate `workflow` layer in the codebase as part of this refactor** — action/role vocabulary stays user-facing without a matching internal abstraction.
 
-### Sketch: candidate built-in actions
+### Where the line is: stage actions vs. runner core
 
-Not in scope for this refactor — but worth listing as a target for the follow-up. Each maps roughly to behavior ateam already performs in Go today, hidden inside the runner or per-command code.
+Not all "things ateam does around a prompt" become stage actions. The line:
+- **Stage action** = business logic specific to a prompt or family of prompts. Express-able as a discrete, named, opt-in step. Could realistically live in a script.
+- **Runner core** = infrastructure plumbing every agent invocation needs. Stays hardcoded in `internal/runner/`. Not user-configurable.
 
-| Action | Phase | What it does |
+### Stage-action candidates grounded in today's code
+
+Each maps to behavior ateam already performs in Go today, scattered across `cmd/` and the runner. Migrating these to declarative stage actions is the v1 goal of the stage executor (follow-up refactor, **not in scope here**).
+
+| Action | Phase | What it does today | Where (file:line) | Universal or per-prompt |
+|---|---|---|---|---|
+| `project-info` | pre | `gitutil.GetProjectMeta` + `FormatProjectInfo()` injects git HEAD + uncommitted-files block into the prompt. Cached per env. | `internal/root/resolve.go:91-121`, called by every `cmd/*.go` | Universal |
+| `concurrent-run-check` | pre | Query DB for live processes matching project+action+role; block unless `--force`. | `cmd/table.go:921-948` | report / code / verify / review |
+| `budget-precheck` | pre | Gate new dispatches against accumulated batch cost (`--max-budget-usd-batch`). | `cmd/table.go:825-849` | report / code / verify (batch mode) |
+| `discover-reports` | pre | Scan `shared/report/*/...md`, filter by `--roles/--all/--max-age`, error if empty. | `cmd/review.go:177-184`, `prompts/prompts.go:209-242` | review |
+| `load-prerequisite` | pre | Read a required prior artifact (e.g. `code` reads `shared/review/review.md`, bails if missing). Generalizable with a path parameter. | `cmd/code.go:158-171` | code, verify |
+| `source-writable` | pre | Flag container to allow writes to project source. | `cmd/table.go:905-911` | code / verify / auto_setup / inspect |
+| `copy-runtime-files` | post | Copy every file from `runtime/<exec_id>/` to `SHARED_PROMPT_DIR/`. Today excludes `*_prompt.md` (legacy; the refactor removes the need for the exclusion). | `internal/runner/runner.go:1150-1199` | report / review / auto_setup; NOT code / code_management |
+| `chain-next` | post | Optional next stage on success (`report --review` → `ateam review`; `code` → `ateam verify` unless `--no-verify`). | `cmd/report.go:354-356`, `cmd/code.go:347-365` | report (opt-in), code (default-on) |
+
+That's the v1 catalog grounded in actual code. Nothing speculative.
+
+### Aspirational additions (real new capabilities, not pull-outs)
+
+Beyond the catalog above, these are genuine new behaviors the stage system would enable. Listed for completeness; design when there's a concrete need.
+
+| Action | Phase | What it would do |
 |---|---|---|
-| `copy-runtime-files` | post | Copy `OUTPUT_DIR/*` to `SHARED_PROMPT_DIR/` (current `promoteRuntimeFiles` behavior). |
-| `project-map` | pre | Generate a structured project summary (file tree, language stats, key entry points) into `OUTPUT_DIR/project_map.md`. |
-| `inject-shared` | pre | Inline files from `SHARED_BASE_DIR` (e.g. all role reports, the review) into the prompt's context window. Today done inline in supervisor prompts. |
-| `create-git-worktree` | pre | Create an isolated worktree for code agents; sets `WORKTREE_DIR` env var. |
-| `git-commit` | post | Stage and commit changes produced by a code prompt. |
-| `run-tests` | post | Run the project's test command; record pass/fail and output. |
-| `validate-schema` | post | Validate the primary output against a declared JSON/Markdown schema. |
-| `update-task` | post | Update a task tracker (Linear/GitHub/etc.) with the run result. |
-| `log-telemetry` | post | Emit run metadata (cost, duration, tokens) to a configured sink. |
+| `project-map` | pre | Richer than `project-info`: file tree, language stats, key entry points into `OUTPUT_DIR/project_map.md`. |
+| `inject-shared` | pre | Inline files from `SHARED_BASE_DIR` directly into the prompt (alternative to `discover-reports`-style hardcoded inlining; useful for arbitrary cross-prompt data). |
+| `create-git-worktree` | pre | Isolated worktree for code agents (today agents do their own worktree handling via their tools). |
+| `git-commit` | post | Stage and commit code changes (today the agent commits via its Write+Bash tools). |
+| `run-tests` | post | Run project test command; record pass/fail. |
+| `validate-schema` | post | Validate primary output against a declared JSON/Markdown schema. |
+| `update-task` | post | Push run result to a task tracker. |
+| `log-telemetry` | post | Emit run metadata to a configured sink. |
 
-Frontmatter strawman (format TBD — YAML or TOML):
+### What stays in the runner core (never a stage action)
+
+These are infrastructure every agent invocation needs. Hardcoded in `internal/runner/`. Not user-configurable, not pluggable.
+
+**Pre-execution:**
+- Allocate `exec_id` and insert call row (`InsertCall`)
+- Create `logs/<exec_id>/` and `runtime/<exec_id>/` directories
+- Container preparation, sandbox JSON generation, `settings.json` materialization
+- Template-variable resolution (the `{{VAR}}` substitution engine itself)
+- Resolved-prompt archival to `logs/<exec_id>/prompt.md`
+- Initial `cmd.md` render with run context
+
+**Post-execution:**
+- Event-stream processing (assistant / thinking / tool_use / tool_result / result / error events)
+- Cost & token accounting from stream events; budget enforcement reactions
+- PID recording for liveness tracking
+- `output-fallback`: seed `runtime/<id>/<primary>.md` if the agent didn't write the primary file
+- `finalizeCall` (success determination from `resultEv != nil && ExitCode==0 && !IsError`)
+- `classifyFailure` (timeout / cancellation / agent error / no-result categorization, `ErrorSource` / `ErrorCause`)
+- `appendStderrSummary` (grep-able failure summary)
+- Final `cmd.md` re-render with concrete values and file-copy log
+- `UpdateCall` (EndedAt, DurationMS, ExitCode, IsError, costs, tokens, model, peak context, git end hash)
+- Progress channel finalization
+
+### What's already in templates (and not Go logic anymore)
+
+`{{PROJECT_*}}`, `{{OUTPUT_*}}`, `{{ATEAM_OWN_*}}` (the recent `71d2544` work), `{{ROLE}}`, `{{ACTION}}`, `{{BATCH}}`, `{{TIMESTAMP}}`, `{{PROFILE}}`, `{{EXEC_ID}}`, `{{AGENT}}`, `{{MODEL}}`, `{{CONTAINER_*}}`. Resolved in `internal/runner/template.go:37-68`.
+
+### Things checked but not present today
+
+- Git worktree creation in Go (agents handle it themselves)
+- History archival to `roles/<R>/history/` / `supervisor/history/` (directories exist but nothing writes to them — runtime/ now provides history by construction)
+- Container teardown / `defer c.Stop()` (relies on Docker lifecycle)
+- Auto-commit / PR creation in Go (agents do this via their tools)
+- Log rotation / cleanup
+
+### Frontmatter strawman (format TBD — YAML or TOML)
 
 ```yaml
 ---
 pre:
-  - project-map
-  - inject-shared: [shared/report]
+  - project-info
+  - load-prerequisite: shared/review/review.md
 post:
   - copy-runtime-files
-  - run-tests
-  - on_failure: stop
+  - chain-next: verify
 ---
 ```
 
@@ -470,13 +527,15 @@ Assembly for 'report/security':
 
 ### Stage-related (drives a follow-up design pass)
 
-1. **Built-in action catalog** — initial set, naming convention, input/output contract. Candidates from today's hidden Go: `copy-runtime-files`, `project-map`, `create-git-worktree`, `run-tests`, `git-commit`, `update-task`, `validate-schema`. Minimum useful set for v1?
-2. **Frontmatter format** — YAML or TOML inside the prompt file? Where on dir-level prompts (`prompt.md`) do dir-level pre/post action declarations live?
-3. **Step ordering within a phase** — built-in actions and scripts at the same level: built-ins first then scripts, or one unified ordered list?
-4. **Multiple scripts per level** — sequence-prefixed (`010-copy.exec.post.sh`), glob `*.exec.post.sh`, or manifest in frontmatter?
-5. **Recursive script resolution direction** — pre phase: root → leaf. Post phase: leaf → root (mirroring `prompt.post.md` being inside the dir-level post). Confirm.
-6. **Failure semantics** — does a failed pre step block the prompt? Does a failed post step fail the stage? Per-step `on_failure` policy?
-7. **Today's promotion behavior preserved during transition** — until the stage executor lands, `cmd/report.go` / `cmd/review.go` / `cmd/auto_setup.go` keep calling `promoteRuntimeFiles`. Once the executor lands, those promotions become explicit `copy-runtime-files` actions on the report/review/auto_setup prompts.
+1. **Built-in action v1 catalog locked at the grounded list above** (`project-info`, `concurrent-run-check`, `budget-precheck`, `discover-reports`, `load-prerequisite`, `source-writable`, `copy-runtime-files`, `chain-next`). Confirm this is the right starting set — no speculative additions in v1.
+2. **Action parameter shape** — actions like `load-prerequisite: shared/review/review.md` and `chain-next: verify` take a single string. Others may want richer params (e.g. `discover-reports` could take selector flags). Single-value vs key-value shape — pick one convention.
+3. **Frontmatter format** — YAML or TOML inside the prompt file? Where on dir-level prompts (`prompt.md`) do dir-level pre/post action declarations live?
+4. **Step ordering within a phase** — built-in actions and scripts at the same level: built-ins first then scripts, or one unified ordered list?
+5. **Multiple scripts per level** — sequence-prefixed (`010-copy.exec.post.sh`), glob `*.exec.post.sh`, or manifest in frontmatter?
+6. **Recursive script resolution direction** — pre phase: root → leaf. Post phase: leaf → root (mirroring `prompt.post.md` being inside the dir-level post). Confirm.
+7. **Failure semantics** — does a failed pre step block the prompt? Does a failed post step fail the stage? Per-step `on_failure` policy?
+8. **Today's promotion behavior preserved during transition** — until the stage executor lands, `cmd/report.go` / `cmd/review.go` / `cmd/auto_setup.go` keep calling `promoteRuntimeFiles`. `cmd/code.go` / `cmd/code_management.go` / `cmd/verify.go` continue NOT to promote (artifacts stay in `runtime/<exec_id>/`). Once the executor lands, the promotions become explicit `copy-runtime-files` actions on the report/review/auto_setup prompts.
+9. **Per-prompt vs per-workflow scope for actions** — some hardcoded behaviors today are per-command (e.g. `discover-reports` only for review; `source-writable` only for code/verify/auto_setup/inspect). In the stage model these would be declared in the corresponding prompt's frontmatter. Confirm this is the granularity (per-prompt) rather than per-command.
 
 ### Prompt-system questions (smaller)
 
