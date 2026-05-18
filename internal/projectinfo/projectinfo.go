@@ -385,7 +385,7 @@ func (i *Info) Markdown() string {
 		fmt.Fprintf(&b, "* Manifests detected: %s\n", strings.Join(i.Manifests, ", "))
 	}
 
-	b.WriteString("\nThe orientation above is current and authoritative. Do NOT re-run `ls` / `find` / `wc` / `git log` / `grep` on the project root or inside `.ateam/`. Your role's own prior report (if any) is already attached as a \"# Previous Report\" section below — do not search for it on disk. Other roles' reports under `.ateam/roles/*/report.md` and `.ateam/runtime/*/report.md` are out of scope for this role.\n")
+	b.WriteString("\nThe orientation above is current and authoritative. Do NOT re-run `ls` / `find` / `wc` / `git log` / `grep` on the project root or inside `.ateam/`. Don't look for files in `.ateam/` unless they are specifically listed elsewhere in this prompt — anything you find on your own may be stale, may belong to a different role, or may be a partial artifact from an unrelated run. Acting on it will produce incorrect or duplicated findings. The complete prior context for this role is whatever this prompt explicitly includes; there is nothing else to fetch.\n")
 	return b.String()
 }
 

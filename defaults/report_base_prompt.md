@@ -17,9 +17,12 @@ Calibrate severity and recommendation ambition to the project's maturity. A gree
 
 ## Merging old report
 
-When processing an existing report you must omit completed work unless it mentions an impact on future tasks.
+When a `# Previous Report` section is present in this prompt, process it as follows:
 
-**CRITICAL**: If a previous report contains unresolved findings, you MUST re-include every unresolved finding in your new report with full details (Title, Location, Severity, Effort, Description, Recommendation). Do NOT summarize them as "same as before" or "no changes since last report". Each re-run must produce a complete, self-contained report regardless of whether the codebase changed. The downstream coding step reads ONLY your final report — if findings are missing, they will never be addressed.
+- Omit completed work unless it mentions an impact on future tasks.
+- **CRITICAL**: every unresolved finding from that section MUST be re-included in your new report with full details (Title, Location, Severity, Effort, Description, Recommendation). Do NOT summarize them as "same as before" or "no changes since last report". The downstream coding step reads ONLY your final report — if findings are missing, they will never be addressed.
+
+When no `# Previous Report` section is present in this prompt, this is a fresh cycle: produce a complete standalone report and ignore any merge-related guidance below.
 
 ## Role performing the audit
 
@@ -27,7 +30,7 @@ Specify which role you are running, what model you are using and other attribute
 
 ## Report Format
 
-**IMPORTANT: if a prior report is provided re-include the findings that haven't been addressed with a potentially updated priority. Always produce a full standalone report, don't just refer to a previous version.**
+**IMPORTANT: when a `# Previous Report` section is present in this prompt, re-include the findings that haven't been addressed with a potentially updated priority. When absent, just produce the full standalone report. Always produce a complete report — don't refer to a previous version.**
 
 Structure your report as follows:
 

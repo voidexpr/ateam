@@ -6,6 +6,8 @@ build/
 test_projects/
 old_projects/
 test_data
+ateam_base/
+ateam_candidate/
 .env
 .ateam/
 .superpowers/

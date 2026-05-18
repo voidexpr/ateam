@@ -111,11 +111,16 @@ func TestAssembleRolePromptSkipPreviousReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.Contains(result, "# Previous Report") {
-		t.Error("previous report should be excluded when skipPreviousReport=true")
+	// Match the section header, not the backtick-quoted reference that
+	// may appear in the base prompt's merging instructions.
+	if strings.Contains(result, "# Previous Report\n") {
+		t.Error("previous report section should be excluded when skipPreviousReport=true")
 	}
 	if strings.Contains(result, "previous findings here") {
 		t.Error("previous report content should be excluded when skipPreviousReport=true")
+	}
+	if strings.Contains(result, "# Prior Report Status") {
+		t.Error("prior-report-status notice should be excluded when skipPreviousReport=true")
 	}
 }
 
@@ -127,13 +132,21 @@ func TestAssembleRolePromptNoPreviousReportFile(t *testing.T) {
 
 	setupMinimalRole(t, orgDir, projectDir, roleID)
 
-	// No report.md exists — should succeed without "Previous Report"
+	// No report.md exists — should succeed with a "Prior Report Status" notice
+	// instead of a "# Previous Report" section, so the agent knows the absence
+	// is intentional and doesn't snoop disk for one.
 	result, err := AssembleRolePrompt(orgDir, projectDir, roleID, base, "", ProjectInfoParams{}, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.Contains(result, "# Previous Report") {
-		t.Error("should not contain Previous Report when no report file exists")
+	if strings.Contains(result, "# Previous Report\n") {
+		t.Error("should not contain '# Previous Report' section when no report file exists")
+	}
+	if !strings.Contains(result, "# Prior Report Status") {
+		t.Errorf("expected '# Prior Report Status' notice when no prior report, got:\n%s", result)
+	}
+	if !strings.Contains(result, "No prior report exists for this role") {
+		t.Error("expected explicit absence notice in Prior Report Status block")
 	}
 }
 

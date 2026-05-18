@@ -161,6 +161,8 @@ func assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt strin
 			header := fmt.Sprintf("# Previous Report\n\nWhat follows is the previous report that was generated (and possibly updated with the tasks completed) on %s (%s ago). It might be outdated but it will give you some context of what has been done.\n\n",
 				modTime.Format(TimestampFormat), formatAge(age))
 			parts = append(parts, header+content)
+		} else {
+			parts = append(parts, "# Prior Report Status\n\nNo prior report exists for this role. This is a fresh cycle — disregard any \"merge prior findings\" guidance in the base prompt and produce a complete standalone report. Do not search `.ateam/` for one; it isn't there.")
 		}
 	}
 
