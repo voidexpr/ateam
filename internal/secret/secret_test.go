@@ -350,6 +350,71 @@ func TestResolverNotFound(t *testing.T) {
 	}
 }
 
+func TestResolveAll(t *testing.T) {
+	dir := t.TempDir()
+	store := &FileStore{Path: filepath.Join(dir, "secrets.env")}
+	_ = store.Set("KEY_ONE", "value-one")
+	_ = store.Set("KEY_TWO", "value-two")
+
+	r := &Resolver{
+		Scopes: []Scope{
+			{Name: ScopeProject, EnvFile: filepath.Join(dir, "secrets.env")},
+		},
+		Backend: BackendFile,
+	}
+
+	resultsOne := r.ResolveAll("KEY_ONE")
+	if len(resultsOne) != 1 {
+		t.Fatalf("expected 1 result for KEY_ONE, got %d", len(resultsOne))
+	}
+	if !resultsOne[0].Found || resultsOne[0].Value != "value-one" {
+		t.Fatalf("expected KEY_ONE=value-one, got %+v", resultsOne[0])
+	}
+	if resultsOne[0].Source != ScopeProject {
+		t.Fatalf("expected source 'project' for KEY_ONE, got %q", resultsOne[0].Source)
+	}
+
+	resultsTwo := r.ResolveAll("KEY_TWO")
+	if len(resultsTwo) != 1 {
+		t.Fatalf("expected 1 result for KEY_TWO, got %d", len(resultsTwo))
+	}
+	if !resultsTwo[0].Found || resultsTwo[0].Value != "value-two" {
+		t.Fatalf("expected KEY_TWO=value-two, got %+v", resultsTwo[0])
+	}
+	if resultsTwo[0].Source != ScopeProject {
+		t.Fatalf("expected source 'project' for KEY_TWO, got %q", resultsTwo[0].Source)
+	}
+}
+
+func TestResolveAllRequired_MissingSecret(t *testing.T) {
+	missingKey := "TOTALLY_MISSING_REQUIRED_KEY"
+	if _, ok := os.LookupEnv(missingKey); ok {
+		t.Fatalf("precondition: %s must not exist in env", missingKey)
+	}
+
+	r := &Resolver{
+		Scopes: []Scope{
+			{Name: ScopeProject, EnvFile: filepath.Join(t.TempDir(), "secrets.env")},
+		},
+		Backend: BackendFile,
+	}
+
+	ac := &runtime.AgentConfig{
+		RequiredEnv: []string{missingKey},
+	}
+
+	details := ResolveAllRequired(ac, nil, r)
+	if len(details) != 1 {
+		t.Fatalf("expected 1 detail, got %d", len(details))
+	}
+	if details[0].Name != missingKey {
+		t.Fatalf("expected detail to name missing key %q, got %q", missingKey, details[0].Name)
+	}
+	if details[0].Found {
+		t.Fatalf("expected Found=false for missing secret, got %+v", details[0])
+	}
+}
+
 // --- ScopeForName tests ---
 
 func TestScopeForName(t *testing.T) {
