@@ -55,6 +55,14 @@ install_go() {
             local url="https://go.dev/dl/${tarball}"
             info "Downloading $url"
             curl -fsSL "$url" -o "/tmp/$tarball"
+            info "Verifying checksum..."
+            curl -fsSL "https://go.dev/dl/${tarball}.sha256" -o "/tmp/${tarball}.sha256"
+            echo "$(cat "/tmp/${tarball}.sha256")  /tmp/${tarball}" | sha256sum -c - || {
+                err "Checksum verification failed — aborting installation"
+                rm -f "/tmp/$tarball" "/tmp/${tarball}.sha256"
+                exit 1
+            }
+            rm "/tmp/${tarball}.sha256"
             sudo rm -rf /usr/local/go
             sudo tar -C /usr/local -xzf "/tmp/$tarball"
             rm "/tmp/$tarball"
