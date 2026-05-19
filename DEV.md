@@ -142,6 +142,39 @@ Release archives should include both `ateam` (host) and `ateam-linux-amd64` so D
 3. Run `make build` — the role is auto-discovered from the embedded filesystem
 4. Enable it in a project: `ateam init --role <name>` or edit `.ateam/config.toml`
 
+### Prompt assembly order
+
+When a role runs, `internal/prompts/prompts.go::assembleRoleAction` concatenates these parts (separated by `---`):
+
+1. ATeam Project Context (header line, role/action, working dir, git/orientation block — built by `FormatProjectInfo`)
+2. Role-specific prompt (`report_prompt.md` or `code_prompt.md`)
+3. Base prompt (`report_base_prompt.md` or `code_base_prompt.md`) — shared format/output rules
+4. Extra prompts (`*_extra_prompt.md`) — additive across all levels, in order: org broad → org role → project broad → project role
+5. Previous report (the role's existing `report.md`, with age) — skipped for code action; replaced by a "fresh cycle" notice when no prior report exists
+6. CLI `--extra-prompt` text under "# Additional Instructions"
+
+### Resolution precedence
+
+Each role/base prompt file is resolved by `readFileOr3Level` (whose package comment in `prompts.go` documents the chain as 4-level):
+
+1. Project — `.ateam/<file>` or `.ateam/roles/<name>/<file>`
+2. Org — `.ateamorg/<file>` or `.ateamorg/roles/<name>/<file>`
+3. Org defaults — `.ateamorg/defaults/<file>` or `.ateamorg/defaults/roles/<name>/<file>`
+4. Embedded — bundled into the binary via `defaults.FS` (`defaults/roles/<name>/...`)
+
+First non-empty match wins for role/base prompts. `*_extra_prompt.md` is additive (every level that contributes a non-empty file is appended). Use `ateam prompt --role <name> [--code]` to inspect the assembled prompt and which sources contributed.
+
+### Template variables
+
+Inside any prompt file, `{{VAR}}` placeholders are substituted by `internal/runner/template.go`. The canonical list lives in the `TemplateVars` struct and its `Replacer()` method — examples: `{{PROJECT_NAME}}`, `{{ROLE}}`, `{{ACTION}}`, `{{EXEC_ID}}`, `{{OUTPUT_DIR}}`, `{{OUTPUT_FILE}}`, `{{AGENT}}`, `{{MODEL}}`, `{{ATEAM_OWN_README}}` (embedded self-docs), `{{AUTO_ROLES_MARKER}}`. Add new placeholders there only; unknown `{{VAR}}` tokens are left as-is.
+
+### `code_prompt.md` and the supervisor code phase
+
+The per-role `code_prompt.md` is independent from the supervisor's code-management phase:
+
+- **Role level** — when `defaults/roles/<name>/code_prompt.md` exists, `ateam code --role <name>` (and `--code-prompt`) assembles the role's code prompt via `AssembleRoleCodePrompt`, using `code_base_prompt.md` instead of `report_base_prompt.md` and never including the previous report.
+- **Supervisor level** — `ateam code` (no role) drives the supervisor via `defaults/supervisor/code_management_prompt.md` (assembled by `AssembleCodeManagementPrompt`). The supervisor splits the review into individual tasks and writes per-task `<SEQ>_<SLUG>_code_prompt.md` files into `{{EXECUTION_DIR}}`, then invokes `ateam exec @... --role <ROLE>` for each. Adding a role's own `code_prompt.md` is what lets those per-task `exec` invocations target it.
+
 ## Project on-disk layout
 
 Per-run artefacts are keyed by `agent_execs.id` (`<exec_id>`):

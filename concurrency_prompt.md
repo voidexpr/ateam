@@ -1,3 +1,4 @@
+<!-- Historical: forensic prompt used to investigate concurrency/SIGSEGV issues; see CONCURRENCY.md for current guidance -->
 Please review this plan and provide feedback. Our goal is to make concurrency bugs very unlikely but having strong architectural patterns that future code changes can follow.
 
 Provide critical feedback.

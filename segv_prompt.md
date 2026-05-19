@@ -1,3 +1,4 @@
+<!-- Historical: forensic prompt used to investigate concurrency/SIGSEGV issues; see CONCURRENCY.md for current guidance -->
 Please summarize this stack trace and associated information:
 
 agent@listmanager-docker:/workspace$ ateam report --extra-prompt "focus mostly on code quality and test coverage" && ateam review --extra-prompt "focus mostly on code quality and test coverage" --print
