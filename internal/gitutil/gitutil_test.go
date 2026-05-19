@@ -130,3 +130,27 @@ func TestTopLevelNonRepo(t *testing.T) {
 		t.Errorf("TopLevel(\"\") returned %q, want empty", got)
 	}
 }
+
+func TestCurrentBranch(t *testing.T) {
+	// Named branch: initTempRepo creates a "main" branch.
+	dir := initTempRepo(t)
+	if got := CurrentBranch(dir); got != "main" {
+		t.Errorf("CurrentBranch on named branch = %q, want %q", got, "main")
+	}
+
+	// Non-git directory: must return "".
+	nonRepo := t.TempDir()
+	if got := CurrentBranch(nonRepo); got != "" {
+		t.Errorf("CurrentBranch on non-repo = %q, want empty", got)
+	}
+
+	// Detached HEAD: must return "".
+	c := exec.Command("git", "checkout", "--detach", "HEAD")
+	c.Dir = dir
+	if out, err := c.CombinedOutput(); err != nil {
+		t.Fatalf("git checkout --detach: %v\n%s", err, out)
+	}
+	if got := CurrentBranch(dir); got != "" {
+		t.Errorf("CurrentBranch on detached HEAD = %q, want empty", got)
+	}
+}

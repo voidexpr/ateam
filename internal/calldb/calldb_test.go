@@ -39,17 +39,18 @@ func TestInsertAndUpdate(t *testing.T) {
 
 	now := time.Now()
 	id, err := db.InsertCall(&Call{
-		ProjectID:  "myproject",
-		Profile:    "default",
-		Agent:      "claude",
-		Container:  "none",
-		Action:     "exec",
-		Role:       "security",
-		Batch:      "code-2026-03-13",
-		Model:      "opus",
-		PromptHash: "abc123",
-		StartedAt:  now,
-		StreamFile: "/tmp/stream.jsonl",
+		ProjectID:      "myproject",
+		Profile:        "default",
+		Agent:          "claude",
+		Container:      "none",
+		Action:         "exec",
+		Role:           "security",
+		Batch:          "code-2026-03-13",
+		Model:          "opus",
+		PromptHash:     "abc123",
+		StartedAt:      now,
+		StreamFile:     "/tmp/stream.jsonl",
+		GitStartBranch: "feature-x",
 	})
 	if err != nil {
 		t.Fatalf("InsertCall: %v", err)
@@ -71,6 +72,7 @@ func TestInsertAndUpdate(t *testing.T) {
 		Turns:             3,
 		PeakContextTokens: 42000,
 		ContextWindow:     200000,
+		GitEndBranch:      "feature-x",
 	})
 	if err != nil {
 		t.Fatalf("UpdateCall: %v", err)
@@ -78,9 +80,10 @@ func TestInsertAndUpdate(t *testing.T) {
 
 	var costUSD float64
 	var inputTokens, cacheWriteTokens, peakCtx, ctxWindow int
+	var gitStartBranch, gitEndBranch string
 	err = db.db.QueryRow(
-		"SELECT cost_usd, input_tokens, cache_write_tokens, peak_context_tokens, context_window FROM agent_execs WHERE id = ?", id,
-	).Scan(&costUSD, &inputTokens, &cacheWriteTokens, &peakCtx, &ctxWindow)
+		"SELECT cost_usd, input_tokens, cache_write_tokens, peak_context_tokens, context_window, git_start_branch, git_end_branch FROM agent_execs WHERE id = ?", id,
+	).Scan(&costUSD, &inputTokens, &cacheWriteTokens, &peakCtx, &ctxWindow, &gitStartBranch, &gitEndBranch)
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -98,6 +101,12 @@ func TestInsertAndUpdate(t *testing.T) {
 	}
 	if ctxWindow != 200000 {
 		t.Fatalf("expected 200000 context_window, got %d", ctxWindow)
+	}
+	if gitStartBranch != "feature-x" {
+		t.Fatalf("expected git_start_branch %q, got %q", "feature-x", gitStartBranch)
+	}
+	if gitEndBranch != "feature-x" {
+		t.Fatalf("expected git_end_branch %q, got %q", "feature-x", gitEndBranch)
 	}
 
 	// Verify the fields also roundtrip through RecentRuns.
@@ -1167,6 +1176,75 @@ func TestWorkDirRoundtrips(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Errorf("WorkDir non-match returned %d rows, want 0", len(rows))
+	}
+}
+
+func TestMigrationAddsGitBranchColumnsToOldSchema(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "state.sqlite")
+
+	// Build a schema that has git_start_hash/git_end_hash but not the branch columns.
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	oldSchema := `CREATE TABLE agent_execs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		project_id TEXT NOT NULL DEFAULT '',
+		profile TEXT NOT NULL DEFAULT '',
+		agent TEXT NOT NULL DEFAULT '',
+		container TEXT NOT NULL DEFAULT 'none',
+		action TEXT NOT NULL DEFAULT '',
+		role TEXT NOT NULL DEFAULT '',
+		batch TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		prompt_hash TEXT NOT NULL DEFAULT '',
+		started_at TEXT NOT NULL,
+		stream_file TEXT NOT NULL DEFAULT '',
+		output_file TEXT NOT NULL DEFAULT '',
+		ended_at TEXT,
+		duration_ms INTEGER,
+		exit_code INTEGER,
+		is_error INTEGER NOT NULL DEFAULT 0,
+		error_message TEXT NOT NULL DEFAULT '',
+		cost_usd REAL,
+		input_tokens INTEGER,
+		output_tokens INTEGER,
+		cache_read_tokens INTEGER,
+		cache_write_tokens INTEGER,
+		turns INTEGER,
+		pid INTEGER NOT NULL DEFAULT 0,
+		container_id TEXT NOT NULL DEFAULT '',
+		git_start_hash TEXT NOT NULL DEFAULT '',
+		git_end_hash TEXT NOT NULL DEFAULT '',
+		peak_context_tokens INTEGER,
+		context_window INTEGER,
+		work_dir TEXT NOT NULL DEFAULT ''
+	);`
+	if _, err := raw.Exec(oldSchema); err != nil {
+		t.Fatalf("create old schema: %v", err)
+	}
+	if _, err := raw.Exec("INSERT INTO agent_execs (project_id, action, started_at) VALUES ('p', 'exec', ?)", time.Now().Format(time.RFC3339)); err != nil {
+		t.Fatalf("seed row: %v", err)
+	}
+	raw.Close()
+
+	// Open() must add git_start_branch and git_end_branch via migration.
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	// Both columns must exist with default ''.
+	var startBranch, endBranch string
+	if err := db.db.QueryRow("SELECT COALESCE(git_start_branch,''), COALESCE(git_end_branch,'') FROM agent_execs LIMIT 1").Scan(&startBranch, &endBranch); err != nil {
+		t.Fatalf("read branch columns: %v", err)
+	}
+	if startBranch != "" {
+		t.Errorf("expected empty default for git_start_branch, got %q", startBranch)
+	}
+	if endBranch != "" {
+		t.Errorf("expected empty default for git_end_branch, got %q", endBranch)
 	}
 }
 

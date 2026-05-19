@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ateam/internal/gitutil"
 )
 
 // initTempRepo creates a fresh git repo in t.TempDir() with the supplied
@@ -322,6 +324,26 @@ func TestJSONRoundtrip(t *testing.T) {
 	}
 	if len(round.RecentCommits) != len(info.RecentCommits) {
 		t.Errorf("RecentCommits len = %d, want %d", len(round.RecentCommits), len(info.RecentCommits))
+	}
+}
+
+func TestCollectWithMetaReusesMeta(t *testing.T) {
+	dir := initTempRepo(t, map[string]string{"README.md": "# test\n"})
+
+	meta, err := gitutil.GetProjectMeta(dir)
+	if err != nil {
+		t.Fatalf("GetProjectMeta: %v", err)
+	}
+
+	const sentinel = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	meta.CommitHash = sentinel
+
+	info, err := CollectWithMeta(dir, meta)
+	if err != nil {
+		t.Fatalf("CollectWithMeta: %v", err)
+	}
+	if info.HeadHash != sentinel {
+		t.Errorf("HeadHash = %q, want sentinel %q — meta was not reused", info.HeadHash, sentinel)
 	}
 }
 
