@@ -120,7 +120,7 @@ func (e *ResolvedEnv) NewProjectInfoParams(role, action string) prompts.ProjectI
 		meta = e.projectMeta
 	}
 	if e.quickOrientation == nil {
-		e.quickOrientation = collectQuickOrientation(e.WorkDir, e.projectMeta)
+		e.quickOrientation = collectQuickOrientation(e.WorkDir, meta)
 	}
 	return prompts.ProjectInfoParams{
 		OrgDir:           e.OrgDir,
