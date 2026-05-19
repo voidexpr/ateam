@@ -3,11 +3,53 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/ateam/internal/root"
 )
+
+// TestPrintCodeSessionSummaryPicksByExecID verifies that printCodeSessionSummary
+// selects the directory matching result.ExecID, not the lexicographically last
+// entry under <supervisorDir>/code/. Without this, once EXEC_ID >= 10 the
+// summary would consistently show stale content (e.g. "9" sorts after "11").
+func TestPrintCodeSessionSummaryPicksByExecID(t *testing.T) {
+	supervisorDir := t.TempDir()
+	codeDir := filepath.Join(supervisorDir, "code")
+	if err := os.MkdirAll(codeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create directories 1..11 with distinctive execution_report.md content.
+	for i := 1; i <= 11; i++ {
+		d := filepath.Join(codeDir, strconv.Itoa(i))
+		if err := os.MkdirAll(d, 0755); err != nil {
+			t.Fatal(err)
+		}
+		report := []byte("REPORT-" + strconv.Itoa(i) + "\n")
+		if err := os.WriteFile(filepath.Join(d, "execution_report.md"), report, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out := captureStdout(t, func() {
+		printCodeSessionSummary(supervisorDir, 11, false, "")
+	})
+
+	if !strings.Contains(out, "REPORT-11") {
+		t.Errorf("expected REPORT-11 in output, got:\n%s", out)
+	}
+	// Guard against the old lexicographic behavior: "9" sorts after "11", so
+	// the buggy implementation would surface REPORT-9 instead of REPORT-11.
+	if strings.Contains(out, "REPORT-9\n") {
+		t.Errorf("output should not contain REPORT-9 when execID=11:\n%s", out)
+	}
+	wantSession := filepath.Join("code", "11")
+	if !strings.Contains(out, wantSession) {
+		t.Errorf("expected session path containing %q in output:\n%s", wantSession, out)
+	}
+}
 
 func TestCodeDryRunAgentInjection(t *testing.T) {
 	base := t.TempDir()

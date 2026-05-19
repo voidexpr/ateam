@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -342,7 +343,7 @@ func runCode(opts CodeOptions) error {
 	if result.Err != nil {
 		return fmt.Errorf("code execution failed: %w", result.Err)
 	}
-	printCodeSessionSummary(supervisorDir, opts.Print, result.Output)
+	printCodeSessionSummary(supervisorDir, result.ExecID, opts.Print, result.Output)
 	printDone(result)
 
 	if opts.NoVerify {
@@ -366,16 +367,15 @@ func runCode(opts CodeOptions) error {
 	})
 }
 
-func printCodeSessionSummary(supervisorDir string, printOutput bool, output string) {
+func printCodeSessionSummary(supervisorDir string, execID int64, printOutput bool, output string) {
 	cwd, _ := os.Getwd()
 	lastMsg := relPath(cwd, filepath.Join(supervisorDir, "code_output.md"))
 
-	entries, _ := os.ReadDir(filepath.Join(supervisorDir, "code"))
 	var sessionDir string
-	for i := len(entries) - 1; i >= 0; i-- {
-		if entries[i].IsDir() {
-			sessionDir = filepath.Join(supervisorDir, "code", entries[i].Name())
-			break
+	if execID > 0 {
+		candidate := filepath.Join(supervisorDir, "code", strconv.FormatInt(execID, 10))
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			sessionDir = candidate
 		}
 	}
 
