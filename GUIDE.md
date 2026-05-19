@@ -4,6 +4,10 @@ TODO
 
 ## Which Isolation Model to choose in which situation
 
+## Provide feedback and/or steer reports/reviews
+* extra prompt in files
+* extra prompt on the CLI
+
 ## Focused runs, what roles to run when
 
 ### Ad-hoc scripts
