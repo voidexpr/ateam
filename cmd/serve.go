@@ -3,6 +3,8 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/ateam/internal/web"
 	"github.com/spf13/cobra"
@@ -76,5 +78,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "WARNING: Web UI is accessible from the network without authentication.\n")
 	}
 
+	enableJobControl()
+
 	return srv.ListenAndServe(port, !serveNoOpen, host)
+}
+
+// enableJobControl makes CTRL-Z (SIGTSTP) suspend the process so the shell
+// can background it with `bg` and bring it back with `fg`. The Go runtime
+// silently drops SIGTSTP in this binary, so we catch it and re-raise as
+// SIGSTOP, which the kernel cannot let any handler swallow.
+func enableJobControl() {
+	tstp := make(chan os.Signal, 1)
+	signal.Notify(tstp, syscall.SIGTSTP)
+	go func() {
+		for range tstp {
+			_ = syscall.Kill(os.Getpid(), syscall.SIGSTOP)
+		}
+	}()
 }
