@@ -333,15 +333,9 @@ There is a very long list of potentially very useful roles to add.
 
 See [COMMANDS.md](COMMANDS.md) for all `ateam` commands and flags, and [CONFIG.md](CONFIG.md) for directory layout, prompt configuration, and runtime configuration.
 
-## Tips and Tricks
+## How to best use ateam
 
-TODO:
-* separate agent config
-* document test commands in CLAUDE.md, which tests to run when (be careful of sandbox restrictions)
-* ad-hoc scripts: go to lunch, adversarial review, blackbox tester, "focus" approach
-* perform a task in a worktree
-* multi-pass loop with budget / max rounds
-* implement all the changes from a given report with an ad-hoc prompt
+See [GUIDE.md](GUIDE.md)
 
 ## FAQ
 
@@ -399,4 +393,5 @@ See [DEV.md](DEV.md) for development setup, testing, and architecture details.
 - [CONFIG.md](CONFIG.md) — directory layout, `config.toml`, `runtime.hcl`
 - [ISOLATION.md](ISOLATION.md) — sandbox and container guide (modes, secrets, auth)
 - [ROLES.md](ROLES.md) — built-in roles
+- [GUIDE.md](GUIDE.md) - how to, best practices, tips and tricks
 - [FAQ.md](FAQ.md) — frequently asked questions
