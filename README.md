@@ -75,7 +75,7 @@ ateam code               # implement top-priority fixes
 ateam verify             # audits at the commits from previous phase
 
 # 4. Look (at any step)
-ataem serve              # local web server to browse documents, processes, cost
+ateam serve              # local web server to browse documents, processes, cost
 ```
 
 Once familiar with ateam just run the full pipeline: `ateam all` or `ateam all && ateam serve`.
@@ -96,14 +96,14 @@ ateam inspect EXEC_ID --auto-debug
 
 ### Prerequisites
 
-- **Go 1.25+** — installed automatically by `install.sh`
+- **Go 1.26+** — installed automatically by `install.sh`
 - **[Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)** or **[Codex](https://developers.openai.com/codex/cli)** — install and authenticate before running agents (one or the other or both)
 - **Docker** (optional) — enables isolated execution via `--profile docker`
 
 ### Manual Install
 
 ```bash
-go version          # ensure Go 1.25+
+go version          # ensure Go 1.26+
 git clone https://github.com/voidexpr/ateam.git
 cd ateam && make build
 sudo ln -s "$(pwd)/ateam" /usr/local/bin/ateam
