@@ -12,11 +12,12 @@ import (
 )
 
 var (
-	recentRole    string
-	recentAction  string
-	recentBatch   string
-	recentLimit   int
-	recentGitHash bool
+	recentRole      string
+	recentAction    string
+	recentBatch     string
+	recentLimit     int
+	recentGitHash   bool
+	recentGitBranch bool
 )
 
 var runsCmd = &cobra.Command{
@@ -42,6 +43,7 @@ func init() {
 	runsCmd.Flags().StringVar(&recentBatch, "batch", "", "filter by batch")
 	runsCmd.Flags().IntVar(&recentLimit, "limit", 30, "max rows to show")
 	runsCmd.Flags().BoolVar(&recentGitHash, "git-hash", false, "append GIT_START and GIT_END columns (first 6 chars of each hash)")
+	runsCmd.Flags().BoolVar(&recentGitBranch, "git-branch", false, "append GIT_START_BRANCH and GIT_END_BRANCH columns")
 }
 
 func runRuns(cmd *cobra.Command, args []string) error {
@@ -77,15 +79,18 @@ func runRuns(cmd *cobra.Command, args []string) error {
 		rows[i], rows[j] = rows[j], rows[i]
 	}
 
-	printRunsTable(rows, recentGitHash)
+	printRunsTable(rows, recentGitHash, recentGitBranch)
 	return nil
 }
 
-func printRunsTable(rows []calldb.RecentRow, showGitHash bool) {
+func printRunsTable(rows []calldb.RecentRow, showGitHash, showGitBranch bool) {
 	w := newTable()
 	header := "ID\tSTARTED\tPROFILE\tACTION\tROLE\tMODEL\tDURATION\tCOST\tTOKENS\tTURNS\tSTATUS\tBATCH\tREASON"
 	if showGitHash {
 		header += "\tGIT_START\tGIT_END"
+	}
+	if showGitBranch {
+		header += "\tGIT_START_BRANCH\tGIT_END_BRANCH"
 	}
 	fmt.Fprintln(w, header)
 	for _, r := range rows {
@@ -121,6 +126,9 @@ func printRunsTable(rows []calldb.RecentRow, showGitHash bool) {
 			dur, display.FmtCost(r.CostUSD), tokens, turns, runStatus(r), r.Batch, reason)
 		if showGitHash {
 			fmt.Fprintf(w, "\t%s\t%s", shortHash(r.GitStartHash), shortHash(r.GitEndHash))
+		}
+		if showGitBranch {
+			fmt.Fprintf(w, "\t%s\t%s", r.GitStartBranch, r.GitEndBranch)
 		}
 		fmt.Fprintln(w)
 	}

@@ -76,7 +76,7 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no runs found")
 	}
 
-	printRunsTable(rows, false)
+	printRunsTable(rows, false, false)
 
 	cwd, _ := os.Getwd()
 	var allFiles []string

@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS agent_execs (
   container_id       TEXT NOT NULL DEFAULT '',
   git_start_hash     TEXT NOT NULL DEFAULT '',
   git_end_hash       TEXT NOT NULL DEFAULT '',
+  git_start_branch   TEXT NOT NULL DEFAULT '',
+  git_end_branch     TEXT NOT NULL DEFAULT '',
   work_dir           TEXT NOT NULL DEFAULT ''
 );
 
@@ -76,20 +78,21 @@ CREATE INDEX IF NOT EXISTS idx_execs_work_dir ON agent_execs(work_dir);
 `
 
 type Call struct {
-	ProjectID    string
-	Profile      string
-	Agent        string
-	Container    string
-	Action       string
-	Role         string
-	Batch        string
-	Model        string
-	PromptHash   string
-	StartedAt    time.Time
-	StreamFile   string
-	OutputFile   string
-	GitStartHash string
-	WorkDir      string // absolute path of the agent's working directory
+	ProjectID      string
+	Profile        string
+	Agent          string
+	Container      string
+	Action         string
+	Role           string
+	Batch          string
+	Model          string
+	PromptHash     string
+	StartedAt      time.Time
+	StreamFile     string
+	OutputFile     string
+	GitStartHash   string
+	GitStartBranch string
+	WorkDir        string // absolute path of the agent's working directory
 }
 
 type CallResult struct {
@@ -108,6 +111,7 @@ type CallResult struct {
 	PeakContextTokens int
 	ContextWindow     int
 	GitEndHash        string
+	GitEndBranch      string
 }
 
 type CallDB struct {
@@ -259,6 +263,8 @@ func migrate(db *sql.DB, dbPath string) error {
 	hasBatch := false
 	hasGitStartHash := false
 	hasGitEndHash := false
+	hasGitStartBranch := false
+	hasGitEndBranch := false
 	hasWorkDir := false
 	for tRows.Next() {
 		var cid int
@@ -291,6 +297,10 @@ func migrate(db *sql.DB, dbPath string) error {
 			hasGitStartHash = true
 		case "git_end_hash":
 			hasGitEndHash = true
+		case "git_start_branch":
+			hasGitStartBranch = true
+		case "git_end_branch":
+			hasGitEndBranch = true
 		case "work_dir":
 			hasWorkDir = true
 		}
@@ -347,6 +357,16 @@ func migrate(db *sql.DB, dbPath string) error {
 	}
 	if !hasGitEndHash {
 		if _, err := tx.Exec("ALTER TABLE agent_execs ADD COLUMN git_end_hash TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if !hasGitStartBranch {
+		if _, err := tx.Exec("ALTER TABLE agent_execs ADD COLUMN git_start_branch TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if !hasGitEndBranch {
+		if _, err := tx.Exec("ALTER TABLE agent_execs ADD COLUMN git_end_branch TEXT NOT NULL DEFAULT ''"); err != nil {
 			return err
 		}
 	}
@@ -455,12 +475,12 @@ func (c *CallDB) InsertCall(call *Call) (int64, error) {
 		INSERT INTO agent_execs (
 			project_id, profile, agent, container, action, role,
 			batch, model, prompt_hash, started_at, stream_file, output_file,
-			git_start_hash, work_dir
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			git_start_hash, git_start_branch, work_dir
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		call.ProjectID, call.Profile, call.Agent, call.Container,
 		call.Action, call.Role, call.Batch, call.Model,
 		call.PromptHash, call.StartedAt.Format(time.RFC3339), call.StreamFile,
-		call.OutputFile, call.GitStartHash, call.WorkDir,
+		call.OutputFile, call.GitStartHash, call.GitStartBranch, call.WorkDir,
 	)
 	if err != nil {
 		return 0, err
@@ -479,14 +499,14 @@ func (c *CallDB) UpdateCall(id int64, result *CallResult) error {
 			input_tokens = ?, output_tokens = ?, cache_read_tokens = ?,
 			cache_write_tokens = ?, turns = ?,
 			peak_context_tokens = ?, context_window = ?,
-			git_end_hash = ?`
+			git_end_hash = ?, git_end_branch = ?`
 	args := []any{
 		result.EndedAt.Format(time.RFC3339), result.DurationMS, result.ExitCode,
 		isError, result.ErrorMessage, result.CostUSD,
 		result.InputTokens, result.OutputTokens, result.CacheReadTokens,
 		result.CacheWriteTokens, result.Turns,
 		result.PeakContextTokens, result.ContextWindow,
-		result.GitEndHash,
+		result.GitEndHash, result.GitEndBranch,
 	}
 	if result.Model != "" {
 		q += `, model = ?`

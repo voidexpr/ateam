@@ -653,6 +653,7 @@ Display recent agent runs.
 | `--batch NAME` | Filter by batch |
 | `--limit N` | Max rows (default 30) |
 | `--git-hash` | Append GIT_START and GIT_END columns (first 6 chars of each hash) |
+| `--git-branch` | Append GIT_START_BRANCH and GIT_END_BRANCH columns |
 
 Output columns (12): `ID, STARTED, PROFILE, ACTION, ROLE, MODEL, DURATION, COST, TOKENS, STATUS, BATCH, REASON`.
 

@@ -243,8 +243,9 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		// HEAD must reflect the code the agent actually operated on; centralizing
 		// this via GitRepoDir would record a misleading hash for worktree runs or
 		// external-repo --work-dir invocations.
-		GitStartHash: gitutil.HeadHash(effectiveWorkDir(opts)),
-		WorkDir:      effectiveWorkDir(opts),
+		GitStartHash:   gitutil.HeadHash(effectiveWorkDir(opts)),
+		GitStartBranch: gitutil.CurrentBranch(effectiveWorkDir(opts)),
+		WorkDir:        effectiveWorkDir(opts),
 	})
 	if err != nil {
 		return failPreInsert(fmt.Errorf("call tracking insert failed: %w", err))
@@ -808,7 +809,8 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 			// note: resolve from work-dir. See GitStartHash note above — the
 			// recorded HEAD must reflect the agent's actual work-dir, not a
 			// project-wide GitRepoDir or AteamDir.
-			GitEndHash: gitutil.HeadHash(effectiveWorkDir(opts)),
+			GitEndHash:   gitutil.HeadHash(effectiveWorkDir(opts)),
+			GitEndBranch: gitutil.CurrentBranch(effectiveWorkDir(opts)),
 		}); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: call tracking update failed: %v\n", err)
 		}

@@ -70,6 +70,23 @@ func HeadHash(dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// CurrentBranch returns the branch name at HEAD for the repo containing dir.
+// Returns "" if git is unavailable, dir is not in a repo, the call fails, or
+// HEAD is detached (rev-parse's literal "HEAD" is normalized to "").
+func CurrentBranch(dir string) string {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	b := strings.TrimSpace(string(out))
+	if b == "HEAD" {
+		return ""
+	}
+	return b
+}
+
 // TopLevel returns the absolute path of the git repo containing dir.
 // Returns "" if git CLI is missing, dir is not in a repo, or the call fails.
 // For a git worktree, this returns the worktree's own root (worktrees are
