@@ -45,9 +45,8 @@ type ResolvedEnv struct {
 
 	// quickOrientation caches the pre-rendered Markdown produced by
 	// projectinfo.Info.Markdown(). nil = not yet evaluated; an empty string
-	// pointer = "we tried, got nothing or the feature is disabled".
-	// Populated lazily by NewProjectInfoParams when ATEAM_QUICK_ORIENTATION
-	// is set; see plans/Feature_TokenReduction.md (Phase 0.5).
+	// pointer = "we tried, got nothing". Populated lazily by
+	// NewProjectInfoParams; see plans/Feature_TokenReduction.md (Phase 0.5).
 	quickOrientation *string
 }
 
@@ -105,11 +104,9 @@ func (e *ResolvedEnv) ProjectDBPath() string {
 // (e.g. `ateam report`) build pinfo once per role and would otherwise fork
 // `git log` + `git status` N times for unchanged repo state.
 //
-// When ATEAM_QUICK_ORIENTATION is set to a truthy value (1/true/yes), the
-// pre-rendered Markdown from projectinfo.Info.Markdown() is also cached and
-// attached to QuickOrientation. This is the wire-up for the Phase 0.5
-// experiment described in plans/Feature_TokenReduction.md — opt-in so the
-// existing baseline is unaffected unless the env var is set.
+// The pre-rendered Markdown from projectinfo.Info.Markdown() is always
+// attached to QuickOrientation (Phase 0.5 — see plans/Feature_TokenReduction.md).
+// Collection failures degrade gracefully to an empty string.
 func (e *ResolvedEnv) NewProjectInfoParams(role, action string) prompts.ProjectInfoParams {
 	if e.projectMeta == nil {
 		e.projectMeta, _ = gitutil.GetProjectMeta(e.WorkDir)
@@ -123,7 +120,7 @@ func (e *ResolvedEnv) NewProjectInfoParams(role, action string) prompts.ProjectI
 		meta = e.projectMeta
 	}
 	if e.quickOrientation == nil {
-		e.quickOrientation = collectQuickOrientation(e.WorkDir)
+		e.quickOrientation = collectQuickOrientation(e.WorkDir, e.projectMeta)
 	}
 	return prompts.ProjectInfoParams{
 		OrgDir:           e.OrgDir,
@@ -138,29 +135,18 @@ func (e *ResolvedEnv) NewProjectInfoParams(role, action string) prompts.ProjectI
 	}
 }
 
-// collectQuickOrientation renders the project-info "Quick orientation" block
-// when ATEAM_QUICK_ORIENTATION is enabled. Returns a pointer to an empty
-// string when the feature is disabled or the collection fails, so callers
+// collectQuickOrientation renders the project-info "Quick orientation" block,
+// reusing the supplied ProjectMeta to avoid forking git log/status a second
+// time. Returns a pointer to an empty string when collection fails, so callers
 // can use a nil cache pointer to mean "not yet evaluated".
-func collectQuickOrientation(workDir string) *string {
+func collectQuickOrientation(workDir string, meta *gitutil.ProjectMeta) *string {
 	empty := ""
-	if !quickOrientationEnabled() {
-		return &empty
-	}
-	info, err := projectinfo.Collect(workDir)
+	info, err := projectinfo.CollectWithMeta(workDir, meta)
 	if err != nil || info == nil {
 		return &empty
 	}
 	md := info.Markdown()
 	return &md
-}
-
-func quickOrientationEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("ATEAM_QUICK_ORIENTATION"))) {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
 }
 
 // ProjectID returns the project identifier derived from the source directory path.

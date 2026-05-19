@@ -529,24 +529,7 @@ func TestNewProjectInfoParamsQuickOrientation(t *testing.T) {
 		}
 	}
 
-	t.Run("disabled by default", func(t *testing.T) {
-		// Explicitly clear in case the surrounding shell exports it.
-		t.Setenv("ATEAM_QUICK_ORIENTATION", "")
-		env := &ResolvedEnv{}
-		if err := env.OverrideWorkDir(tmp); err != nil {
-			t.Fatalf("OverrideWorkDir: %v", err)
-		}
-		p := env.NewProjectInfoParams("role one", "report")
-		if p.QuickOrientation != "" {
-			t.Errorf("QuickOrientation should be empty when env var unset, got: %q", p.QuickOrientation)
-		}
-		if env.quickOrientation == nil || *env.quickOrientation != "" {
-			t.Errorf("cache should hold empty-string sentinel when disabled, got: %v", env.quickOrientation)
-		}
-	})
-
-	t.Run("populated when ATEAM_QUICK_ORIENTATION=1", func(t *testing.T) {
-		t.Setenv("ATEAM_QUICK_ORIENTATION", "1")
+	t.Run("always populated for a git repo", func(t *testing.T) {
 		env := &ResolvedEnv{}
 		if err := env.OverrideWorkDir(tmp); err != nil {
 			t.Fatalf("OverrideWorkDir: %v", err)
@@ -564,34 +547,6 @@ func TestNewProjectInfoParamsQuickOrientation(t *testing.T) {
 		}
 		if p1.QuickOrientation != p2.QuickOrientation {
 			t.Error("p1 and p2 should share the same rendered QuickOrientation")
-		}
-	})
-
-	t.Run("truthy values accepted", func(t *testing.T) {
-		for _, v := range []string{"1", "true", "TRUE", "yes", "on", "  true  "} {
-			t.Setenv("ATEAM_QUICK_ORIENTATION", v)
-			env := &ResolvedEnv{}
-			if err := env.OverrideWorkDir(tmp); err != nil {
-				t.Fatalf("OverrideWorkDir: %v", err)
-			}
-			p := env.NewProjectInfoParams("role", "report")
-			if p.QuickOrientation == "" {
-				t.Errorf("ATEAM_QUICK_ORIENTATION=%q should enable the block", v)
-			}
-		}
-	})
-
-	t.Run("falsy values rejected", func(t *testing.T) {
-		for _, v := range []string{"", "0", "false", "no", "off", "anything-else"} {
-			t.Setenv("ATEAM_QUICK_ORIENTATION", v)
-			env := &ResolvedEnv{}
-			if err := env.OverrideWorkDir(tmp); err != nil {
-				t.Fatalf("OverrideWorkDir: %v", err)
-			}
-			p := env.NewProjectInfoParams("role", "report")
-			if p.QuickOrientation != "" {
-				t.Errorf("ATEAM_QUICK_ORIENTATION=%q should NOT enable the block, got: %q", v, p.QuickOrientation)
-			}
 		}
 	})
 }

@@ -157,7 +157,21 @@ const recentCommitsDefault = 10
 // Collect gathers universal-core facts about dir. The directory must
 // exist and be readable. All git-derived fields degrade gracefully when
 // git is unavailable or dir is not a repo.
+//
+// Callers that already hold a fresh ProjectMeta for dir should use
+// CollectWithMeta to avoid forking `git log` + `git status` a second time.
 func Collect(dir string) (*Info, error) {
+	return collectFrom(dir, nil)
+}
+
+// CollectWithMeta is like Collect but reuses a pre-fetched ProjectMeta
+// for HEAD facts (commit hash/date/subject, uncommitted files) instead
+// of forking git again. Pass meta=nil to fall back to Collect's behavior.
+func CollectWithMeta(dir string, meta *gitutil.ProjectMeta) (*Info, error) {
+	return collectFrom(dir, meta)
+}
+
+func collectFrom(dir string, meta *gitutil.ProjectMeta) (*Info, error) {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve %q: %w", dir, err)
@@ -182,7 +196,7 @@ func Collect(dir string) (*Info, error) {
 	info.collectManifests()
 
 	if info.GitRepo {
-		info.collectGitFacts()
+		info.collectGitFacts(meta)
 	}
 
 	return info, nil
@@ -263,9 +277,11 @@ func (i *Info) collectManifests() {
 	i.Manifests = found
 }
 
-func (i *Info) collectGitFacts() {
-	// HEAD facts via existing gitutil package.
-	if meta, err := gitutil.GetProjectMeta(i.Dir); err == nil && meta != nil {
+func (i *Info) collectGitFacts(meta *gitutil.ProjectMeta) {
+	if meta == nil {
+		meta, _ = gitutil.GetProjectMeta(i.Dir)
+	}
+	if meta != nil {
 		i.HeadHash = meta.CommitHash
 		i.HeadDate = meta.CommitDate
 		i.HeadSubject = meta.CommitMessage

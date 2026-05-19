@@ -591,11 +591,10 @@ type ProjectInfoParams struct {
 	Action      string // e.g. "report", "review", "code"
 	Meta        *gitutil.ProjectMeta
 
-	// QuickOrientation, when non-empty, is appended to the project context as
-	// an auto-generated orientation block (top-level layout, recent commits,
-	// detected manifests, …). Produced by internal/projectinfo.Info.Markdown().
-	// Opt-in via the ATEAM_QUICK_ORIENTATION env var; see
-	// plans/Feature_TokenReduction.md (Phase 0.5) for design context.
+	// QuickOrientation is appended to the project context as an auto-generated
+	// orientation block (top-level layout, recent commits, detected manifests,
+	// …). Produced by internal/projectinfo.Info.Markdown(). Empty when
+	// collection fails. See plans/Feature_TokenReduction.md (Phase 0.5).
 	QuickOrientation string
 }
 
