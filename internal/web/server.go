@@ -8,9 +8,11 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	goruntime "runtime"
 	"strings"
 	"sync"
@@ -74,6 +76,7 @@ func (pe *ProjectEntry) SupervisorHistoryDir() string {
 // Server is the ateam web server.
 type Server struct {
 	URL        string // set after ListenAndServe binds
+	PortSource string // optional human-readable origin of the port (e.g. ".ateam/cache/serve.port"), shown in the startup banner
 	orgDir     string
 	projects   []ProjectEntry
 	singleMode bool
@@ -272,7 +275,11 @@ func (s *Server) ListenAndServe(port int, openBrowser bool, host string) error {
 	if s.singleMode {
 		s.URL += "/p/" + s.projects[0].Slug + "/"
 	}
-	fmt.Fprintf(os.Stderr, "Serving at %s\n", s.URL)
+	if s.PortSource != "" {
+		fmt.Fprintf(os.Stderr, "(port in %s) Serving at %s\n", s.PortSource, s.URL)
+	} else {
+		fmt.Fprintf(os.Stderr, "Serving at %s\n", s.URL)
+	}
 
 	if openBrowser {
 		openURL(s.URL)
@@ -297,17 +304,87 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-func openURL(url string) {
-	var cmd string
+func openURL(target string) {
+	if goruntime.GOOS == "darwin" && strings.HasPrefix(defaultBrowserBundleID(), "com.google.chrome") {
+		if focusChromeTab(target) {
+			return
+		}
+	}
+	var cmd *exec.Cmd
 	switch goruntime.GOOS {
 	case "darwin":
-		cmd = "open"
+		cmd = exec.Command("open", target)
 	case "windows":
-		cmd = "start"
+		// `start` is a cmd.exe builtin, not a binary, so go through rundll32
+		// which avoids cmd's URL-escaping quirks.
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
 	default:
-		cmd = "xdg-open"
+		if b := strings.TrimSpace(os.Getenv("BROWSER")); b != "" {
+			cmd = exec.Command(b, target)
+		} else {
+			cmd = exec.Command("xdg-open", target)
+		}
 	}
-	_ = exec.Command(cmd, url).Start()
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "could not launch browser (%v); open %s manually\n", err, target)
+	}
+}
+
+var lsHandlerRoleRE = regexp.MustCompile(`LSHandlerRoleAll\s*=\s*"?([^";]+)"?`)
+
+// defaultBrowserBundleID returns the macOS default HTTP handler bundle ID
+// (lowercased, e.g. "com.google.chrome"). Empty on error or off-darwin.
+func defaultBrowserBundleID() string {
+	if goruntime.GOOS != "darwin" {
+		return ""
+	}
+	out, err := exec.Command("defaults", "read", "com.apple.LaunchServices/com.apple.launchservices.secure", "LSHandlers").Output()
+	if err != nil {
+		return ""
+	}
+	for _, block := range strings.Split(string(out), "}") {
+		if !strings.Contains(block, "LSHandlerURLScheme = http;") {
+			continue
+		}
+		if m := lsHandlerRoleRE.FindStringSubmatch(block); len(m) > 1 {
+			return strings.ToLower(strings.TrimSpace(m[1]))
+		}
+	}
+	return ""
+}
+
+// focusChromeTab asks Chrome via AppleScript to activate any existing tab
+// whose URL shares target's scheme://host:port prefix, opening a new tab only
+// when none matches. Returns false if osascript fails or Chrome isn't reachable
+// so the caller can fall back to plain `open`.
+func focusChromeTab(target string) bool {
+	u, err := url.Parse(target)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	prefix := u.Scheme + "://" + u.Host + "/"
+	script := fmt.Sprintf(`tell application "Google Chrome"
+	set matched to false
+	repeat with w in windows
+		set i to 1
+		repeat with t in tabs of w
+			if URL of t starts with %q then
+				set active tab index of w to i
+				set index of w to 1
+				activate
+				set matched to true
+				exit repeat
+			end if
+			set i to i + 1
+		end repeat
+		if matched then exit repeat
+	end repeat
+	if not matched then
+		open location %q
+		activate
+	end if
+end tell`, prefix, target)
+	return exec.Command("osascript", "-e", script).Run() == nil
 }
 
 // uniqueSlug returns slug if unused, otherwise appends -2, -3, etc.

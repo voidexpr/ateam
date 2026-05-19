@@ -2,10 +2,15 @@ package cmd
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 
+	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/web"
 	"github.com/spf13/cobra"
 )
@@ -56,9 +61,16 @@ func runServe(cmd *cobra.Command, args []string) error {
 		db.Close()
 	}
 
-	port := servePort
-	if port == 0 && env != nil && env.Config != nil && env.Config.Serve.Port > 0 {
-		port = env.Config.Serve.Port
+	host := "127.0.0.1"
+	if serveBind != "" {
+		host = serveBind
+	} else if servePublic {
+		host = "0.0.0.0"
+	}
+
+	port, portSource, err := resolveServePort(env, host)
+	if err != nil {
+		return err
 	}
 
 	srv, err := web.New(env)
@@ -66,13 +78,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer srv.Close()
-
-	host := "127.0.0.1"
-	if serveBind != "" {
-		host = serveBind
-	} else if servePublic {
-		host = "0.0.0.0"
-	}
+	srv.PortSource = portSource
 
 	if host != "127.0.0.1" && host != "::1" && host != "localhost" {
 		fmt.Fprintf(os.Stderr, "WARNING: Web UI is accessible from the network without authentication.\n")
@@ -81,6 +87,69 @@ func runServe(cmd *cobra.Command, args []string) error {
 	enableJobControl()
 
 	return srv.ListenAndServe(port, !serveNoOpen, host)
+}
+
+// resolveServePort decides which port to bind. Explicit --port and a
+// configured Serve.Port take precedence. Otherwise, when running inside a
+// project, the port is remembered in .ateam/cache/serve.port so successive
+// `ateam serve` invocations reuse the same URL — letting the browser refocus
+// the existing tab instead of opening a new one. Returns the port plus a
+// human-readable source path to show in the startup banner (empty when not
+// using the cache file).
+func resolveServePort(env *root.ResolvedEnv, host string) (int, string, error) {
+	if servePort > 0 {
+		return servePort, "", nil
+	}
+	if env != nil && env.Config != nil && env.Config.Serve.Port > 0 {
+		return env.Config.Serve.Port, "", nil
+	}
+	if env == nil || env.ProjectDir == "" {
+		return 0, "", nil
+	}
+
+	portFile := filepath.Join(env.ProjectDir, "cache", "serve.port")
+	display := portFile
+	if env.SourceDir != "" {
+		if rel, err := filepath.Rel(env.SourceDir, portFile); err == nil {
+			display = rel
+		}
+	}
+
+	if data, err := os.ReadFile(portFile); err == nil {
+		if cached, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil && cached > 0 && isPortFree(host, cached) {
+			return cached, display, nil
+		}
+	}
+
+	port, err := pickFreePort(host)
+	if err != nil {
+		return 0, "", fmt.Errorf("pick free port: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(portFile), 0o755); err != nil {
+		return 0, "", fmt.Errorf("create cache dir: %w", err)
+	}
+	if err := os.WriteFile(portFile, []byte(strconv.Itoa(port)+"\n"), 0o644); err != nil {
+		return 0, "", fmt.Errorf("write %s: %w", portFile, err)
+	}
+	return port, display, nil
+}
+
+func isPortFree(host string, port int) bool {
+	ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+	if err != nil {
+		return false
+	}
+	_ = ln.Close()
+	return true
+}
+
+func pickFreePort(host string) (int, error) {
+	ln, err := net.Listen("tcp", net.JoinHostPort(host, "0"))
+	if err != nil {
+		return 0, err
+	}
+	defer ln.Close()
+	return ln.Addr().(*net.TCPAddr).Port, nil
 }
 
 // enableJobControl makes CTRL-Z (SIGTSTP) suspend the process so the shell
