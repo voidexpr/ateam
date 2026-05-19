@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -127,6 +128,69 @@ func TestRunnerPromotesRuntimeFiles(t *testing.T) {
 	wantRel, _ := filepath.Rel(dir, srcReport)
 	if rows[0].OutputFile != wantRel {
 		t.Errorf("output_file = %q, want runtime path %q (canonical-path bug regressed)", rows[0].OutputFile, wantRel)
+	}
+}
+
+// TestRunnerRecordsOutputFileEvenWhenCloneFails pins the fix from commit
+// f615104: promoteRuntimeFiles must record the runtime path on the call row
+// even when the canonical clone fails. Without this, `ateam cat` / `ateam
+// inspect` would report no output for a successful run (output_file stays
+// empty) — a P1 data-loss issue in the DB.
+func TestRunnerRecordsOutputFileEvenWhenCloneFails(t *testing.T) {
+	dir := t.TempDir()
+	// Pre-create the canonical dest path as a regular file. fsclone.Clone
+	// calls MkdirAll on filepath.Dir(dst); when that path exists as a file
+	// the call fails and Clone returns an error before any byte is copied.
+	dest := filepath.Join(dir, "roles", "security")
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte("not a directory"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &agent.MockAgent{
+		Response:          "report written to {{OUTPUT_FILE}}",
+		WriteAtOutputFile: []byte("# Security Report\n\nTotal issues: 3"),
+	}
+	r := newTestRunner(t, dir, mock)
+
+	summary := r.Run(context.Background(), "scan {{OUTPUT_FILE}}", RunOpts{
+		RoleID:           "security",
+		Action:           ActionReport,
+		OutputKind:       OutputKindReport,
+		CanonicalDestDir: dest,
+	}, nil)
+
+	// The agent succeeded; clone failures inside finalize are logged but
+	// must not flip the run to error.
+	if summary.Err != nil {
+		t.Fatalf("unexpected run error: %v", summary.Err)
+	}
+	if summary.IsError {
+		t.Fatalf("clone failure must not surface as run error (summary.IsError=true)")
+	}
+
+	// runtime/<exec_id>/report.md must still exist on disk — the runner's
+	// streamed-text fallback (or the mock's OUTPUT_FILE write) put it there
+	// before promote ran.
+	runtimeReport := filepath.Join(dir, "runtime", strconv.FormatInt(summary.ExecID, 10), "report.md")
+	if _, err := os.Stat(runtimeReport); err != nil {
+		t.Errorf("runtime report missing after failed promote: %v", err)
+	}
+
+	// agent_execs.output_file must point at the immutable runtime copy even
+	// though the canonical clone failed.
+	rows, err := r.CallDB.RecentRuns(calldb.RecentFilter{Action: ActionReport, Limit: 1})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("RecentRuns: %v rows=%d", err, len(rows))
+	}
+	wantRel, _ := filepath.Rel(dir, runtimeReport)
+	if rows[0].OutputFile == "" {
+		t.Errorf("output_file empty after clone failure (primaryRuntime regression)")
+	}
+	if rows[0].OutputFile != wantRel {
+		t.Errorf("output_file = %q, want %q", rows[0].OutputFile, wantRel)
 	}
 }
 

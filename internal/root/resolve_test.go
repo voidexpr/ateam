@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -547,6 +548,29 @@ func TestNewProjectInfoParamsQuickOrientation(t *testing.T) {
 		}
 		if p1.QuickOrientation != p2.QuickOrientation {
 			t.Error("p1 and p2 should share the same rendered QuickOrientation")
+		}
+	})
+
+	// Regression for commit fc71159: in a non-git working tree (or any tree
+	// where GetProjectMeta fails) the cached &gitutil.ProjectMeta{} sentinel
+	// must be normalized to nil before reaching collectQuickOrientation —
+	// otherwise the orientation block claims a clean tree and risks rendering
+	// an empty HeadHash as if it were a real commit.
+	t.Run("non-git tree does not invent commit hash or clean status", func(t *testing.T) {
+		nonGitDir := resolvedTempDir(t)
+		env := &ResolvedEnv{}
+		if err := env.OverrideWorkDir(nonGitDir); err != nil {
+			t.Fatalf("OverrideWorkDir: %v", err)
+		}
+		p := env.NewProjectInfoParams("role", "report")
+		if !strings.Contains(p.QuickOrientation, "## Quick orientation") {
+			t.Fatalf("QuickOrientation missing header for non-git tree:\n%s", p.QuickOrientation)
+		}
+		if regexp.MustCompile(`\b[0-9a-f]{40}\b`).MatchString(p.QuickOrientation) {
+			t.Errorf("non-git QuickOrientation contains a 40-hex hash:\n%s", p.QuickOrientation)
+		}
+		if strings.Contains(p.QuickOrientation, "Working tree: clean") {
+			t.Errorf("non-git QuickOrientation falsely reports a clean working tree:\n%s", p.QuickOrientation)
 		}
 	})
 }
