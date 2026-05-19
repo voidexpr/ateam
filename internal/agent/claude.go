@@ -242,6 +242,14 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 				ch <- textEv
 			}
 
+		case "user":
+			usr := ev.(*streamutil.UserEvent)
+			for _, block := range usr.Message.Content {
+				if block.ToolUseID != "" {
+					ch <- StreamEvent{Type: "tool_result", ToolResult: block.Content.String()}
+				}
+			}
+
 		case "tool_result":
 			tr := ev.(*streamutil.ToolResultEvent)
 			ch <- StreamEvent{Type: "tool_result", ToolResult: tr.Content.String()}
