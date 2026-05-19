@@ -5,6 +5,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
@@ -172,7 +173,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 
 	batch := parallelBatch
 	if batch == "" {
-		batch = "parallel-" + time.Now().Format(runner.TimestampFormat)
+		batch = "parallel-" + time.Now().Format(display.TimestampFormat)
 	}
 
 	tasks := make([]runner.PoolExec, len(resolvedPrompts))

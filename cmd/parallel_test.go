@@ -11,6 +11,7 @@ import (
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/calldb"
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/runner"
 )
 
@@ -283,7 +284,7 @@ func TestParallelPoolWithCallDB(t *testing.T) {
 		CallDB:     db,
 	}
 
-	batch := "test-parallel-" + time.Now().Format(runner.TimestampFormat)
+	batch := "test-parallel-" + time.Now().Format(display.TimestampFormat)
 	labels := []string{"task-a", "task-b"}
 	tasks := make([]runner.PoolExec, len(labels))
 	for i, label := range labels {

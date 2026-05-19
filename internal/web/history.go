@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/ateam/internal/calldb"
-	"github.com/ateam/internal/runner"
+	"github.com/ateam/internal/display"
 )
 
 // execHistoryFilenamePrefix marks history entries whose canonical pointer is
@@ -82,7 +82,7 @@ func parseHistoryFilename(name, path string) HistoryEntry {
 		return HistoryEntry{}
 	}
 	tsStr := name[:19]
-	t, err := time.ParseInLocation(runner.TimestampFormat, tsStr, time.Local)
+	t, err := time.ParseInLocation(display.TimestampFormat, tsStr, time.Local)
 	if err != nil {
 		return HistoryEntry{}
 	}
@@ -185,7 +185,7 @@ func fetchRunCosts(db *calldb.CallDB, action, role, projectID string) map[string
 // using a pre-fetched cost map.
 func enrichHistoryCost(entries []HistoryEntry, costs map[string]calldb.RunCost) {
 	for i := range entries {
-		key := entries[i].Timestamp.Format(runner.TimestampFormat)
+		key := entries[i].Timestamp.Format(display.TimestampFormat)
 		if rc, ok := costs[key]; ok {
 			entries[i].CostUSD = rc.CostUSD
 			entries[i].TotalTokens = rc.TotalTokens

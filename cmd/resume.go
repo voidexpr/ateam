@@ -11,8 +11,8 @@ import (
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/calldb"
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
-	"github.com/ateam/internal/runner"
 	"github.com/ateam/internal/runtime"
 	"github.com/ateam/internal/streamutil"
 	"github.com/spf13/cobra"
@@ -338,7 +338,7 @@ func configDirFromRuntime(env *root.ResolvedEnv, row *calldb.RecentRow) string {
 	if !ok || ac.ConfigDir == "" {
 		return ""
 	}
-	dir := runner.ExpandHome(ac.ConfigDir)
+	dir := display.ExpandHome(ac.ConfigDir)
 	if !filepath.IsAbs(dir) && env.ProjectDir != "" {
 		dir = filepath.Join(env.ProjectDir, dir)
 	}

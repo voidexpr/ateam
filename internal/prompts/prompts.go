@@ -36,9 +36,6 @@ import (
 	"github.com/ateam/internal/gitutil"
 )
 
-// TimestampFormat is an alias for display.TimestampFormat.
-const TimestampFormat = display.TimestampFormat
-
 const (
 	ReportPromptFile              = "report_prompt.md"
 	ReportBasePromptFile          = "report_base_prompt.md"
@@ -159,7 +156,7 @@ func assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt strin
 		if content, modTime, err := readFileWithModTime(filepath.Join(projectDir, "roles", roleID, ReportFile)); err == nil && content != "" {
 			age := time.Since(modTime)
 			header := fmt.Sprintf("# Previous Report\n\nWhat follows is the previous report that was generated (and possibly updated with the tasks completed) on %s (%s ago). It might be outdated but it will give you some context of what has been done.\n\n",
-				modTime.Format(TimestampFormat), formatAge(age))
+				modTime.Format(display.TimestampFormat), formatAge(age))
 			parts = append(parts, header+content)
 		} else {
 			parts = append(parts, "# Prior Report Status\n\nNo prior report exists for this role. This is a fresh cycle — disregard any \"merge prior findings\" guidance in the base prompt and produce a complete standalone report. Do not search `.ateam/` for one; it isn't there.")
@@ -396,7 +393,7 @@ func AssembleReviewPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, ex
 		reportContents = append(reportContents,
 			fmt.Sprintf("# Role Report: %s\n\n%s", r.RoleID, r.Content))
 		manifestLines = append(manifestLines,
-			fmt.Sprintf("| %s | %s |", r.RoleID, r.ModTime.Format(TimestampFormat)))
+			fmt.Sprintf("| %s | %s |", r.RoleID, r.ModTime.Format(display.TimestampFormat)))
 	}
 
 	allReports := strings.Join(reportContents, "\n\n---\n\n")
@@ -634,7 +631,7 @@ func FormatProjectInfo(p ProjectInfoParams) string {
 		fmt.Fprintf(&b, "\n**IMPORTANT**: Your working directory (.) is a subdirectory of a wider git repo at %s. Limit your findings to the working directory. Do not look at or report on code outside it.\n", rel)
 	}
 	if p.Meta != nil {
-		ts := time.Now().Format(TimestampFormat)
+		ts := time.Now().Format(display.TimestampFormat)
 		fmt.Fprintf(&b, "* timestamp: %s\n", ts)
 		// When QuickOrientation is enabled it carries the commit + working-tree
 		// state (and the uncommitted-file list), so don't duplicate them here.

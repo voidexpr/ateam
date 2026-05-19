@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ateam/internal/calldb"
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -234,7 +235,7 @@ func runReport(opts ReportOptions) error {
 		return err
 	}
 
-	batch := "report-" + time.Now().Format(runner.TimestampFormat)
+	batch := "report-" + time.Now().Format(display.TimestampFormat)
 	cliOverridesProfile := opts.Profile != "" || opts.Agent != ""
 	defaultProfile := env.Config.ResolveProfile(runner.ActionReport, "")
 

@@ -14,6 +14,7 @@ import (
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/calldb"
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -711,7 +712,7 @@ func resolveHistoryFile(projectDir, action, role, streamFile, targetName string)
 	if len(base) < 19 {
 		return ""
 	}
-	t, err := time.Parse(runner.TimestampFormat, base[:19])
+	t, err := time.Parse(display.TimestampFormat, base[:19])
 	if err != nil {
 		return ""
 	}
@@ -1045,11 +1046,11 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ts := parseBatchTimestamp(batch)
-	tsPrefix := ts.Format(runner.TimestampFormat)
+	tsPrefix := ts.Format(display.TimestampFormat)
 
 	supHistDir := filepath.Join(pe.ProjectDir, "supervisor", "history")
 	for _, entry := range discoverHistory(supHistDir) {
-		if entry.Timestamp.Format(runner.TimestampFormat) == tsPrefix {
+		if entry.Timestamp.Format(display.TimestampFormat) == tsPrefix {
 			data.SupervisorFiles = append(data.SupervisorFiles, sessionFile{
 				HistoryEntry: entry,
 				Label:        "supervisor/" + entry.Kind,
@@ -1072,7 +1073,7 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if t, err := time.Parse(time.RFC3339, run.StartedAt); err == nil {
-			runTimestamps[run.Role] = append(runTimestamps[run.Role], t.Format(runner.TimestampFormat))
+			runTimestamps[run.Role] = append(runTimestamps[run.Role], t.Format(display.TimestampFormat))
 		}
 	}
 
@@ -1085,7 +1086,7 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 			tsSet[ts] = true
 		}
 		for _, entry := range allEntries {
-			if tsSet[entry.Timestamp.Format(runner.TimestampFormat)] {
+			if tsSet[entry.Timestamp.Format(display.TimestampFormat)] {
 				data.RoleFiles = append(data.RoleFiles, sessionFile{
 					HistoryEntry: entry,
 					Label:        roleID + "/" + entry.Kind,
@@ -1130,7 +1131,7 @@ func parseBatchTimestamp(batch string) time.Time {
 		return time.Time{}
 	}
 	tsStr := batch[idx+1:]
-	t, err := time.ParseInLocation(runner.TimestampFormat, tsStr, time.Local)
+	t, err := time.ParseInLocation(display.TimestampFormat, tsStr, time.Local)
 	if err != nil {
 		return time.Time{}
 	}
@@ -1260,7 +1261,7 @@ func codeSessionTimestamp(dirName, canonical string, db *calldb.CallDB) (time.Ti
 		}
 		return time.Time{}, true
 	}
-	if t, err := time.ParseInLocation(runner.TimestampFormat, dirName, time.Local); err == nil {
+	if t, err := time.ParseInLocation(display.TimestampFormat, dirName, time.Local); err == nil {
 		return t, true
 	}
 	return time.Time{}, false

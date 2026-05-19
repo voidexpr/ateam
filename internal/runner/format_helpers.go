@@ -115,7 +115,7 @@ func rateLimitSummary(e *RateLimitLine) (header string, verboseExtras []string) 
 	if e.ResetsAt > 0 {
 		until := time.Until(time.Unix(e.ResetsAt, 0))
 		if until > 0 {
-			extras = append(extras, fmt.Sprintf("resets in %s", FormatDuration(until)))
+			extras = append(extras, fmt.Sprintf("resets in %s", display.FormatDuration(until)))
 		} else {
 			extras = append(extras, "resets now")
 		}

@@ -419,7 +419,7 @@ type RunCost struct {
 }
 
 // RunCostByActionRole returns cost/token data for all runs matching the given
-// action and role, keyed by started_at formatted as runner.TimestampFormat.
+// action and role, keyed by started_at formatted as display.TimestampFormat.
 // When projectID is non-empty, results are scoped to that project only.
 func (c *CallDB) RunCostByActionRole(action, role, projectID string) (map[string]RunCost, error) {
 	q := `SELECT started_at,

@@ -98,10 +98,10 @@ func printRunsTable(rows []calldb.RecentRow, showGitHash, showGitBranch bool) {
 
 		dur := ""
 		if r.DurationMS > 0 {
-			dur = runner.FormatDuration(time.Duration(r.DurationMS) * time.Millisecond)
+			dur = display.FormatDuration(time.Duration(r.DurationMS) * time.Millisecond)
 		} else if r.EndedAt == "" {
 			if t, err := time.Parse(time.RFC3339, r.StartedAt); err == nil {
-				dur = runner.FormatDuration(time.Since(t))
+				dur = display.FormatDuration(time.Since(t))
 			}
 		}
 
@@ -113,7 +113,7 @@ func printRunsTable(rows []calldb.RecentRow, showGitHash, showGitBranch bool) {
 
 		reason := ""
 		if r.IsError {
-			reason = runner.Truncate(runner.SingleLineText(r.ErrorMessage), 120)
+			reason = display.Truncate(runner.SingleLineText(r.ErrorMessage), 120)
 		}
 
 		turns := ""

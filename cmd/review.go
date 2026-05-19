@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -316,7 +317,7 @@ func printReviewDryRun(env *root.ResolvedEnv, prompt string) error {
 		if relPath == "" {
 			relPath = r.Path
 		}
-		fmt.Printf("  %s  %-30s %s\n", r.ModTime.Format(runner.TimestampFormat), r.RoleID, relPath)
+		fmt.Printf("  %s  %-30s %s\n", r.ModTime.Format(display.TimestampFormat), r.RoleID, relPath)
 	}
 
 	fmt.Printf("\n╔══ supervisor ══╗\n\n")

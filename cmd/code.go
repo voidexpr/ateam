@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -180,7 +181,7 @@ func runCode(opts CodeOptions) error {
 		return err
 	}
 
-	batch := "code-" + time.Now().Format(runner.TimestampFormat)
+	batch := "code-" + time.Now().Format(display.TimestampFormat)
 
 	pinfo := env.NewProjectInfoParams("the supervisor", "code")
 	prompt, err := prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.WorkDir, pinfo, reviewContent, customManagement, extraPrompt)

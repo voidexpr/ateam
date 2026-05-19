@@ -21,10 +21,6 @@ import (
 	"github.com/ateam/internal/gitutil"
 )
 
-// TimestampFormat is kept as an alias for backward compatibility with
-// consumers that reference runner.TimestampFormat.
-const TimestampFormat = display.TimestampFormat
-
 const (
 	ActionReport   = "report"
 	ActionExec     = "exec"
@@ -40,9 +36,6 @@ const (
 func IsInContainer() bool {
 	return container.IsInContainer()
 }
-
-// ExpandHome replaces a leading ~/ with the user's home directory.
-func ExpandHome(path string) string { return display.ExpandHome(path) }
 
 // SandboxConfig groups all sandbox-related settings for agent execution.
 type SandboxConfig struct {
@@ -677,7 +670,7 @@ func reconcileErrorEvent(prev *agent.StreamEvent, ev agent.StreamEvent) *agent.S
 func (r *Runner) buildRequest(prompt string, tmplVars TemplateVars, cwd, streamFile, stderrFile string, extraArgs []string) (agent.Request, error) {
 	// Resolve CLAUDE_CONFIG_DIR for isolated agents.
 	// Relative config_dir is resolved from ProjectDir (.ateam/); absolute is used as-is.
-	configDir := ExpandHome(ResolveTemplateString(r.ConfigDir, tmplVars))
+	configDir := display.ExpandHome(ResolveTemplateString(r.ConfigDir, tmplVars))
 	var reqEnv map[string]string
 	if configDir != "" {
 		var configPath string
@@ -911,10 +904,6 @@ func mergeStringList(obj map[string]any, keyPath []string, values []string) {
 	m[lastKey] = existing
 }
 
-// Truncate shortens s to at most max bytes on a rune boundary, appending "…"
-// when it had to cut. Returns "" for max<=0 and the original s when it fits.
-func Truncate(s string, max int) string { return display.Truncate(s, max) }
-
 func sendProgress(ch chan<- RunProgress, p RunProgress) {
 	if ch == nil {
 		return
@@ -967,7 +956,7 @@ func appendStderrSummary(path string, s RunSummary) {
 	defer f.Close()
 	started := s.ExitCode != -1 || s.Duration != 0
 	fmt.Fprintf(f, "\n--- ateam: run failed ---\nsource: %s\ncause: %s\nexit: %d\nduration: %s\nstarted: %v\n",
-		s.ErrorSource, s.ErrorCause, s.ExitCode, FormatDuration(s.Duration), started)
+		s.ErrorSource, s.ErrorCause, s.ExitCode, display.FormatDuration(s.Duration), started)
 	if !started {
 		fmt.Fprintf(f, "note: process never launched (exit=-1, duration=0s)\n")
 	}
@@ -993,10 +982,6 @@ func effectiveWorkDir(opts RunOpts) string {
 	cwd, _ := os.Getwd()
 	return cwd
 }
-
-// FormatDuration returns a human-readable duration string.
-// >=1h shows "XhYm" (minute precision); shorter shows seconds.
-func FormatDuration(d time.Duration) string { return display.FormatDuration(d) }
 
 // ParseTimestampPrefix parses the leading TimestampFormat prefix
 // ("YYYY-MM-DD_HH-MM-SS") from a filename. Returns ok=false when the

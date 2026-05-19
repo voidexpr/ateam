@@ -68,7 +68,7 @@ func printDone(r runner.RunSummary) {
 	if c := display.FmtCost(r.Cost); c != "" {
 		costSuffix = ", " + c
 	}
-	fmt.Printf("Done (%s%s)\n\n", runner.FormatDuration(r.Duration), costSuffix)
+	fmt.Printf("Done (%s%s)\n\n", display.FormatDuration(r.Duration), costSuffix)
 }
 
 // openProjectDB opens the per-project state.sqlite in .ateam/, creating it
@@ -732,7 +732,7 @@ func resolveVolumePath(vol, baseDir string, allowedDirs ...string) (string, erro
 	if len(parts) < 2 {
 		return vol, nil
 	}
-	hostPath := runner.ExpandHome(parts[0])
+	hostPath := display.ExpandHome(parts[0])
 	if !filepath.IsAbs(hostPath) {
 		hostPath = filepath.Join(baseDir, hostPath)
 	}
@@ -1090,7 +1090,7 @@ func printDryRunInfo(r *runner.Runner, env *root.ResolvedEnv, opts dryRunOpts) {
 	fmt.Println()
 
 	// CLAUDE_CONFIG_DIR — show the agent's config_dir if set, or the env var for claude agents
-	configDir := runner.ExpandHome(runner.ResolveTemplateString(r.ConfigDir, tmplVars))
+	configDir := display.ExpandHome(runner.ResolveTemplateString(r.ConfigDir, tmplVars))
 	if configDir != "" {
 		var configPath string
 		if filepath.IsAbs(configDir) {
@@ -1398,7 +1398,7 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolExec, max
 	// alongside a now-redundant copy of the table.
 	tearDownLiveRegion()
 
-	fmt.Fprintf(out, "\n%d succeeded, %d failed (%s)\n", succeeded, failed, runner.FormatDuration(time.Since(start)))
+	fmt.Fprintf(out, "\n%d succeeded, %d failed (%s)\n", succeeded, failed, display.FormatDuration(time.Since(start)))
 
 	if failed > 0 {
 		for _, result := range results {

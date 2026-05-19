@@ -257,8 +257,8 @@ func TestLatestRunCost(t *testing.T) {
 }
 
 func TestEnrichHistoryCost(t *testing.T) {
-	ts1, _ := time.ParseInLocation(runner.TimestampFormat, "2026-03-14_00-20-28", time.Local)
-	ts2, _ := time.ParseInLocation(runner.TimestampFormat, "2026-03-15_10-00-00", time.Local)
+	ts1, _ := time.ParseInLocation(display.TimestampFormat, "2026-03-14_00-20-28", time.Local)
+	ts2, _ := time.ParseInLocation(display.TimestampFormat, "2026-03-15_10-00-00", time.Local)
 
 	entries := []HistoryEntry{
 		{Timestamp: ts1},

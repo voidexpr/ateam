@@ -10,6 +10,7 @@ import (
 	"github.com/ateam/defaults"
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/container"
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
 )
 
@@ -142,7 +143,7 @@ func BuildTemplateVars(r *Runner, opts RunOpts, startedAt time.Time, callID int6
 		Role:                    opts.RoleID,
 		Action:                  opts.Action,
 		Batch:                   opts.Batch,
-		Timestamp:               startedAt.Format(TimestampFormat),
+		Timestamp:               startedAt.Format(display.TimestampFormat),
 		Profile:                 r.Profile,
 		ExecID:                  callID,
 		Agent:                   agentName,

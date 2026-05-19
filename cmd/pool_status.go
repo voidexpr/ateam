@@ -91,7 +91,7 @@ func nextPoolStatusRow(row poolStatusRow, p runner.RunProgress) poolStatusRow {
 	if poolStatusTerminal(row.State) {
 		return row
 	}
-	elapsed := runner.FormatDuration(p.Elapsed)
+	elapsed := display.FormatDuration(p.Elapsed)
 	next := row
 	next.ExecID = p.ExecID
 	// Keep both counters monotonically increasing so a terminal event that
@@ -154,7 +154,7 @@ func finalizedPoolStatusRow(row poolStatusRow, summary runner.RunSummary, state,
 func errorPoolStatusRow(row poolStatusRow, summary runner.RunSummary, cwd string) poolStatusRow {
 	return finalizedPoolStatusRow(row, summary, poolStateError, strings.TrimSpace(fmt.Sprintf("%s  %s  %s  %s  %s",
 		summary.EndedAt.Format("15:04:05"),
-		runner.FormatDuration(summary.Duration),
+		display.FormatDuration(summary.Duration),
 		poolStatusTokens(summary),
 		poolStatusContext(summary),
 		streamFilePrefix(summary.StreamFilePath, cwd),
@@ -164,7 +164,7 @@ func errorPoolStatusRow(row poolStatusRow, summary runner.RunSummary, cwd string
 func donePoolStatusRow(row poolStatusRow, summary runner.RunSummary, path string) poolStatusRow {
 	return finalizedPoolStatusRow(row, summary, poolStateDone, strings.TrimSpace(fmt.Sprintf("%s  %s  %s  %s  %s",
 		summary.EndedAt.Format("15:04:05"),
-		runner.FormatDuration(summary.Duration),
+		display.FormatDuration(summary.Duration),
 		poolStatusCost(summary),
 		poolStatusTokens(summary),
 		poolStatusContext(summary),

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ateam/internal/calldb"
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/runner"
 )
 
@@ -212,7 +213,7 @@ func seedRun(t *testing.T, projectDir string, action, role string) int64 {
 	defer db.Close()
 
 	now := time.Now()
-	ts := now.Format(runner.TimestampFormat)
+	ts := now.Format(display.TimestampFormat)
 
 	// Create logs directory and stream/exec files.
 	var logsDir string
@@ -459,7 +460,7 @@ func TestHandleRunFilePathTraversal(t *testing.T) {
 	}
 
 	now := time.Now()
-	ts := now.Format(runner.TimestampFormat)
+	ts := now.Format(display.TimestampFormat)
 	// Craft a stream file path that tries to escape the project directory.
 	maliciousStream := filepath.Join("..", "..", "etc", ts+"_report_stream.jsonl")
 
@@ -790,7 +791,7 @@ func TestHandleRunFileLogsShowsTimestamps(t *testing.T) {
 	defer db.Close()
 
 	now := time.Now()
-	ts := now.Format(runner.TimestampFormat)
+	ts := now.Format(display.TimestampFormat)
 
 	logsDir := filepath.Join("roles", "security", "history")
 	absLogsDir := filepath.Join(projectDir, logsDir)

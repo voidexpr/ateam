@@ -208,5 +208,5 @@ func computeDuration(startStr, endStr string) string {
 	if err1 != nil || err2 != nil {
 		return ""
 	}
-	return runner.FormatDuration(end.Sub(start))
+	return display.FormatDuration(end.Sub(start))
 }

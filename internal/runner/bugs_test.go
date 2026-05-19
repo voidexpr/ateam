@@ -73,7 +73,7 @@ func TestFormatDurationBoundaryAt59Point5Seconds(t *testing.T) {
 	// But "60s" is inconsistent — 60 seconds = 1 minute.
 	d := 59*time.Second + 500*time.Millisecond
 
-	result := FormatDuration(d)
+	result := display.FormatDuration(d)
 	if result == "60s" {
 		t.Errorf("FormatDuration(%v) = %q — 60 seconds should display as a minute, not '60s'", d, result)
 	}
@@ -81,21 +81,21 @@ func TestFormatDurationBoundaryAt59Point5Seconds(t *testing.T) {
 
 func TestFormatDurationBoundaryAt59Point9Seconds(t *testing.T) {
 	d := 59*time.Second + 999*time.Millisecond
-	result := FormatDuration(d)
+	result := display.FormatDuration(d)
 	if result == "60s" {
 		t.Errorf("FormatDuration(%v) = %q — should not show '60s'", d, result)
 	}
 }
 
 func TestFormatDurationExactlyOneMinute(t *testing.T) {
-	result := FormatDuration(time.Minute)
+	result := display.FormatDuration(time.Minute)
 	if result != "1m" {
 		t.Errorf("FormatDuration(1m) = %q, want %q", result, "1m")
 	}
 }
 
 func TestFormatDurationZero(t *testing.T) {
-	result := FormatDuration(0)
+	result := display.FormatDuration(0)
 	if result != "0s" {
 		t.Errorf("FormatDuration(0) = %q, want %q", result, "0s")
 	}

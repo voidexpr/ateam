@@ -240,7 +240,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 func printProgress(ch <-chan runner.RunProgress) {
 	for p := range ch {
-		ts := runner.FormatDuration(p.Elapsed)
+		ts := display.FormatDuration(p.Elapsed)
 		switch p.Phase {
 		case runner.PhaseInit:
 			fmt.Fprintf(os.Stderr, "[%s] initializing...\n", p.RoleID)
@@ -305,7 +305,7 @@ func printExecSummary(r runner.RunSummary) {
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintf(os.Stderr, "--- Summary ---\n")
 	fmt.Fprintf(os.Stderr, "  Role:     %s\n", r.RoleID)
-	fmt.Fprintf(os.Stderr, "  Duration: %s\n", runner.FormatDuration(r.Duration))
+	fmt.Fprintf(os.Stderr, "  Duration: %s\n", display.FormatDuration(r.Duration))
 	if r.Cost > 0 {
 		fmt.Fprintf(os.Stderr, "  Cost:     $%.2f\n", r.Cost)
 	}
