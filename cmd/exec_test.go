@@ -13,20 +13,31 @@ import (
 	"github.com/ateam/internal/runner"
 )
 
-func captureStdout(t *testing.T, fn func()) string {
+func captureStdout(t *testing.T, fn func()) (out string) {
 	t.Helper()
 	pr, pw, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
 	}
 	old := os.Stdout
+	defer func() { os.Stdout = old }()
 	os.Stdout = pw
-	fn()
-	pw.Close()
-	os.Stdout = old
+
 	var buf bytes.Buffer
-	io.Copy(&buf, pr)
-	return buf.String()
+	done := make(chan struct{})
+	go func() {
+		io.Copy(&buf, pr)
+		close(done)
+	}()
+
+	defer func() {
+		pw.Close()
+		<-done
+		out = buf.String()
+	}()
+
+	fn()
+	return
 }
 
 func TestPrintExecDryRun(t *testing.T) {
