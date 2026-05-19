@@ -20,12 +20,12 @@ See [APPROACH.md](APPROACH.md) for the rationale and design principles behind AT
     * use a separate config for your coding agent (`CLAUDE_CONFIG_DIR`)
     * run inside docker (built-in secret management for oauth or just use an already authenticated agent in the container)
     * run outside of docker but docker exec only the agents in docker
-* a of **roles** covering all core aspects of a project: code quality, testing, documentation, dependencies, security, etc ... out of the box. Adding a new role is just a single Markdown prompt file to add
+* a set of **roles** covering all core aspects of a project: code quality, testing, documentation, dependencies, security, etc ... out of the box. Adding a new role is just a single Markdown prompt file to add
 * **just a CLI**:
     * can run the built-in ateam workflow of  parallel report, review, code, verify
     * ad-hoc unattended agent runs (`exec` for a single agent execution, `parallel` for multiple simultaneous agents)
-* **convenient tooling**: `ps` to see current/past agent runs, `cat`, `tail`, inspect` for logs and execution details, `serve` to browse reports and reviews
-* **cost transaprency**: all agent execution track token usage and estimated cost (less relevant for subscription). Tokens are the new software engineering currency and help gauge if an error is worthwhile
+* **convenient tooling**: `ps` to see current/past agent runs, `cat`, `tail`, `inspect` for logs and execution details, `serve` to browse reports and reviews
+* **cost transparency**: all agent execution track token usage and estimated cost (less relevant for subscription). Tokens are the new software engineering currency and help gauge if an error is worthwhile
 
 ## Why ATeam
 
@@ -42,7 +42,7 @@ Core principles:
 * **Simple**: reuses existing coding agents, minimal orchestration
 * **Auditable**: every artifact is a readable markdown file
 * **Stateful**: old reports or reviews are read before generating a new one so no context is lost, only one file per role so there is no bloat over time
-* **Complement interactive agents**: interactive agents remain best for difficult, iterative tasks and feature development but ateam can be used for its set of roles and improvement pipeline or for resusable scripts.
+* **Complement interactive agents**: interactive agents remain best for difficult, iterative tasks and feature development but ateam can be used for its set of roles and improvement pipeline or for reusable scripts.
 
 In any case there is no silver bullet, eventually documentation might need human direction to be better structure, a major code refactoring to better handle feature requirements is needed, etc ... But the goal is to reduce human involvement in day to day software engineering tasks.
 
@@ -306,11 +306,12 @@ There is a very long list of potentially very useful roles to add.
 * Process management: [`ps`](COMMANDS.md#ateam-ps), [`inspect`](COMMANDS.md#ateam-inspect-id), [`tail`](COMMANDS.md#ateam-tail), [`cat`](COMMANDS.md#ateam-cat), [`resume`](COMMANDS.md#ateam-resume-exec_id)
 * Troubleshooting: [`env`](COMMANDS.md#ateam-env), [`prompt`](COMMANDS.md#ateam-prompt), [`roles`](COMMANDS.md#ateam-roles), [`version`](COMMANDS.md#ateam-version)
 * Ad-hoc agents: [`exec`](COMMANDS.md#ateam-exec), [`parallel`](COMMANDS.md#ateam-parallel)
-* Installation and update: [`init`](COMMANDS.md#ateam-init-path), [`install`](COMMANDS.md#ateam-install-path), [`update`](COMMANDS.md#ateam-update)
+* Installation and update: [`init`](COMMANDS.md#ateam-init-path), [`auto-setup`](COMMANDS.md#ateam-auto-setup), [`install`](COMMANDS.md#ateam-install-path), [`update`](COMMANDS.md#ateam-update)
 
 | Command | Description |
 |---------|-------------|
 | [`ateam init`](COMMANDS.md#ateam-init-path) | Initialize a project (`.ateam/` directory) |
+| [`ateam auto-setup`](COMMANDS.md#ateam-auto-setup) | Auto-configure roles for the current project |
 | [`ateam report`](COMMANDS.md#ateam-report) | Run role analyses |
 | [`ateam review`](COMMANDS.md#ateam-review) | Supervisor reviews and prioritizes findings |
 | [`ateam code`](COMMANDS.md#ateam-code) | Execute prioritized coding tasks (chains [`ateam verify`](COMMANDS.md#ateam-verify); pass `--no-verify` to skip) |
@@ -343,7 +344,7 @@ See [FAQ.md](FAQ.md) for frequently asked questions.
 
 ## Future
 
-Ateam was born from the frustration of dealing with constant permission approval notices and having to constantly prompt coding agents to refactor code, add tests, audit security, review code when agents themselves are very good at finding issues. This is mostly achieved via the flexible isolation options and running one-shot unattended agents in multiple stages. Coding agents have been surprisingly brittle so stability has been an issue but it has improved to be able to get more stable runs. Cost is defintively going up and maxing the use of subscriptions price subsidy is already gone for Claude Code (June 15th 2026 pricing model change). But it is just a reality that coding a long term project is a lot more than getting a feature to work and cost expectations need to be adjusted.
+Ateam was born from the frustration of dealing with constant permission approval notices and having to constantly prompt coding agents to refactor code, add tests, audit security, review code when agents themselves are very good at finding issues. This is mostly achieved via the flexible isolation options and running one-shot unattended agents in multiple stages. Coding agents have been surprisingly brittle so stability has been an issue but it has improved to be able to get more stable runs. Cost is definitively going up and maxing the use of subscriptions price subsidy is already gone for Claude Code (June 15th 2026 pricing model change). But it is just a reality that coding a long term project is a lot more than getting a feature to work and cost expectations need to be adjusted.
 
 The vision moving forward is to improve ateam along the following paths:
 * reduce token usage
@@ -357,7 +358,7 @@ The vision moving forward is to improve ateam along the following paths:
     * gracefully handle LLM provider outages (failover from one another to the other, pause/resume), usage restrictions (short term windows, long term windows / budget) so that ateam pipelines complete no matter what
 * improve ateam as an orchestration layer (in addition to currently available exec/parallel)
     * orchestration of multiple stages into resumable, observable workflows
-    * manage prompts by providing easy ways to add pre/post instructions and code so that the coding agents waists less tokens and time discovering information that can be algorithmically discovered and to verify the work produced deterministically. It is how ateam itself is evolving: start with prompts doing most of the heavy lifting and as the process matures move more to code before/after LLMs
+    * manage prompts by providing easy ways to add pre/post instructions and code so that the coding agents waste less tokens and time discovering information that can be algorithmically discovered and to verify the work produced deterministically. It is how ateam itself is evolving: start with prompts doing most of the heavy lifting and as the process matures move more to code before/after LLMs
     * better context reuse: try to avoid running from scratch everytime by reusing discovery of a codebase/
 
 - 0.9.0 Refactor roles and do some eval to use less tokens and improve accuracy
