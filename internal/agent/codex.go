@@ -220,6 +220,10 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 		}
 	}
 
+	if err := scanner.Err(); err != nil {
+		ch <- errorEvent(fmt.Errorf("stream truncated: %w", err), ErrorSourceAgentProcess, -1)
+	}
+
 	cmdErr := cmd.Wait()
 	exitCode := 0
 	if cmdErr != nil {
