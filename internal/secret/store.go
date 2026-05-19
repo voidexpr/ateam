@@ -81,7 +81,10 @@ func (s *FileStore) Set(name, value string) error {
 		return err
 	}
 
-	lines, _ := readLines(s.Path)
+	lines, err := readLines(s.Path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	found := false
 	for i, line := range lines {
 		key, _ := parseLine(line)

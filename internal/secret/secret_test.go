@@ -113,6 +113,32 @@ func TestFileStoreSetCreatesDir(t *testing.T) {
 	}
 }
 
+func TestFileStoreSetReturnsErrorOnReadFailure(t *testing.T) {
+	// If readLines returns a non-IsNotExist error, Set must propagate it
+	// rather than silently truncating the file with only the new value.
+	// Using a directory as the path triggers a read error from bufio.Scanner
+	// (reads on a directory return EISDIR on Linux).
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secrets.env")
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	store := &FileStore{Path: path}
+	if err := store.Set("KEY", "value"); err == nil {
+		t.Fatal("expected Set to return an error when the secrets file cannot be read, got nil")
+	}
+
+	// The path should still be a directory (Set must not have overwritten it).
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("expected path to remain a directory; Set may have overwritten it")
+	}
+}
+
 func TestFileStoreDelete(t *testing.T) {
 	dir := t.TempDir()
 	store := &FileStore{Path: filepath.Join(dir, "secrets.env")}
