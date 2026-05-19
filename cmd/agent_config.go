@@ -259,7 +259,7 @@ func printAuthSources(s agent.AuthStatus) {
 		if val[0] == '{' {
 			fmt.Printf("  CLAUDE_CODE_OAUTH_TOKEN:      set (JSON, %d chars)\n", len(val))
 		} else {
-			fmt.Printf("  CLAUDE_CODE_OAUTH_TOKEN:      %s\n", val)
+			fmt.Printf("  CLAUDE_CODE_OAUTH_TOKEN:      %s\n", secret.MaskValue(val))
 		}
 	} else if s.HasSecretOAuth {
 		fmt.Printf("  CLAUDE_CODE_OAUTH_TOKEN:      %s\n", s.SecretOAuthInfo)
