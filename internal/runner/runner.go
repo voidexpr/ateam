@@ -1203,15 +1203,15 @@ func (r *Runner) promoteRuntimeFiles(runtimeDir, destDir, outputKind string) ([]
 			continue
 		}
 		dst := filepath.Join(destDir, name)
+		if name == primary {
+			primaryRuntime = src
+		}
 		if err := fsclone.Clone(src, dst); err != nil {
 			entry.Note = fmt.Sprintf("FAILED (%v)", err)
 			fmt.Fprintf(os.Stderr, "Warning: clone %s → %s: %v\n", src, dst, err)
 		} else {
 			entry.Dest = relToProject(r.ProjectDir, dst)
 			entry.Note = "cloned"
-			if name == primary {
-				primaryRuntime = src
-			}
 		}
 		entries = append(entries, entry)
 	}
