@@ -48,6 +48,33 @@ func TestValidateLocalPath(t *testing.T) {
 	})
 }
 
+// TestRunAgentConfigAudit walks the read-only audit path with empty project
+// and org dirs. The function emits a header line, an auth-sources block, and
+// either a claude CLI status or a "could not run" notice — none of which
+// require Docker or real credentials.
+func TestRunAgentConfigAudit(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runAgentConfigAudit("", "")
+	})
+	if runErr != nil {
+		t.Fatalf("runAgentConfigAudit: %v", runErr)
+	}
+	for _, want := range []string{
+		"Claude Code Agent Configuration Audit",
+		"Config dir:",
+		"Active auth:",
+		"ANTHROPIC_API_KEY:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in audit output:\n%s", want, out)
+		}
+	}
+}
+
 // TestPrintAuthSourcesMasksPlainOAuthToken pins the secret-masking behavior
 // added in commit c8922bb. Without these assertions a refactor of
 // printAuthSources can silently print live tokens into bug reports / CI logs.

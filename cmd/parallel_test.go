@@ -15,6 +15,41 @@ import (
 	"github.com/ateam/internal/runner"
 )
 
+// TestParallelDryRun exercises the --dry-run path of `ateam parallel`: it
+// should print each computed prompt (with common prefix/suffix and label
+// banner) to stdout and exit without touching the runner or DB.
+func TestParallelDryRun(t *testing.T) {
+	saved := struct {
+		labels                  []string
+		commonFirst, commonLast string
+		dryRun                  bool
+	}{parallelLabels, parallelCommonPromptFirst, parallelCommonPromptLast, parallelDryRun}
+	defer func() {
+		parallelLabels = saved.labels
+		parallelCommonPromptFirst = saved.commonFirst
+		parallelCommonPromptLast = saved.commonLast
+		parallelDryRun = saved.dryRun
+	}()
+
+	parallelLabels = []string{"alpha", "beta"}
+	parallelCommonPromptFirst = "PREFIX"
+	parallelCommonPromptLast = "SUFFIX"
+	parallelDryRun = true
+
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runParallel(nil, []string{"task one", "task two"})
+	})
+	if runErr != nil {
+		t.Fatalf("runParallel dry-run: %v", runErr)
+	}
+	for _, want := range []string{"alpha", "beta", "task one", "task two", "PREFIX", "SUFFIX"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in dry-run output:\n%s", want, out)
+		}
+	}
+}
+
 // newCmdTestRunner returns a Runner backed by a temp project DB so Run() can
 // satisfy its "CallDB required" precondition.
 func newCmdTestRunner(t *testing.T, baseDir string, ag agent.Agent) *runner.Runner {
