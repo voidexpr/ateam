@@ -379,8 +379,14 @@ agent "codex" {
 // `latest`-style alias, so pin the version explicitly.
 agent "codex-high" {
   base   = "codex"
-  model  = "gpt-5.4"
+  model  = "gpt-5.5"
   effort = "high"
+}
+
+agent "codex-xhigh" {
+  base   = "codex"
+  model  = "gpt-5.5"
+  effort = "xhigh"
 }
 
 agent "mock" {
