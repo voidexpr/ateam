@@ -916,6 +916,92 @@ A PTY (pseudo-terminal) creates a virtual terminal pair. The orchestrator holds 
 
 **Failure modes**: pattern matching brittleness (any output format change breaks automation), race conditions (async PTY reads with interleaved output), no structured output (must strip ANSI codes), buffer deadlocks. PTY adds complexity without benefit when `claude -p` or the Agent SDK is available.
 
+#### Hidden PTY + HTTP Proxy Interception (clarp)
+
+**Link:** [github.com/dn00/clarp](https://github.com/dn00/clarp) — "CLARP: Claude API Relay Proxy". TypeScript / Node.js 20–24 LTS, `node-pty` for the PTY, custom localhost HTTP proxy for SSE interception.
+
+**The premise.** clarp solves a specific operational problem: `claude -p` is the clean structured-output interface that everything in this research (including ATeam) wants to use, but it bills per-token against the metered Claude API. An interactive Claude Code session, by contrast, bills against the subscription plan. clarp wraps the *interactive* Claude Code in a way that **exposes the exact same protocol as `claude -p`** — same stdin stream-json, same stdout event schema — but the underlying tokens flow through the subscription. From the caller's perspective it's a drop-in replacement: `clarp -p "explain this function"` instead of `claude -p "explain this function"`.
+
+**How it actually controls Claude Code.** Three coordinated mechanisms:
+
+1. **Hidden PTY via `node-pty`.** clarp spawns Claude Code in a pseudo-terminal it owns end-to-end. The terminal is never shown to the user — it's purely an integration surface that makes Claude Code think it's interactive. This is the same `node-pty` library VS Code uses for its integrated terminal; clarp's twist is that the PTY exists only for protocol fidelity, not display.
+2. **`ANTHROPIC_BASE_URL` redirection to a localhost proxy.** Before spawning, clarp picks a random port on `127.0.0.1`, starts a proxy server there, and injects `ANTHROPIC_BASE_URL=http://127.0.0.1:{port}` into the spawned process's environment. Claude Code obeys the env var and sends all its HTTP traffic through the proxy. The proxy then forwards each request to `api.anthropic.com` **byte-for-byte unchanged** — it does not rewrite auth tokens, bodies, or anything Claude depends on. The only modifications are: read HTTP headers (for routing) and strip `Accept-Encoding` (to parse SSE uncompressed). Bound to `127.0.0.1` only — no external attack surface.
+3. **PID-file polling for session state.** Rather than scraping the PTY or relying on stdout markers, clarp watches `~/.claude/sessions/{pid}.json` for state transitions:
+
+| State | Meaning | Event emitted |
+|---|---|---|
+| `busy` | Processing a turn | `session_state_changed: running` |
+| `idle` | Ready for next prompt | `session_state_changed: idle` + `result` |
+| `waiting` | Permission required | `session_state_changed: requires_action` + `control_request` |
+
+This is the **same dual-channel idea** as ComposioHQ's JSONL side-channel (§C.5) and Gas Town's bead scanning (§C.2) — read state from a file Claude writes, don't ask Claude what state it's in — but applied at a different file (the session PID file rather than the conversation JSONL).
+
+**Message injection and multi-turn handling.** clarp accepts three input shapes: a plain prompt as a CLI arg, NDJSON stream-json on stdin, or piped text. For multi-turn: "prompts are queued and dispatched sequentially — clarp waits for Claude to be idle before sending the next prompt." The same wait-for-idle semantics as Harnex's `--wait-for-idle` (§C.7b), but here the idle signal is the PID-file transition rather than scrollback prompt detection.
+
+**Control requests via stdin.** Interrupts, permission responses, and state queries are sent as JSON objects on stdin:
+
+```json
+{"type":"control_request","request_id":"int-1","request":{"subtype":"interrupt"}}
+```
+
+This is parity with the Claude Code SDK's control-request channel — clarp is mirroring the SDK protocol, not inventing its own.
+
+**Permission handling.** When Claude needs tool approval, clarp emits a `control_request` event with the tool details; an external client responds with `control_response` (allow/deny) over stdin. `--dangerously-skip-permissions` auto-confirms; trust dialogs are auto-approved under the same flag, otherwise clarp exits with a message. No tmux keystroke injection, no settings-file swapping — the permission flow is purely stream-json.
+
+**Idle/done detection.** PID-file polling, not subprocess exit codes. `busy → idle` is the turn-complete signal. `--continue` resumes the most recent session; `--resume <id>` targets a specific one — same flag surface as Claude Code itself.
+
+**Stuck detection and recovery.** Currently thin: the README describes the recovery story as "the proxy architecture must hold; if Claude stops honoring `ANTHROPIC_BASE_URL`, the proxy approach fails and requires switching backends." Acknowledged as a known limitation, with a planned mitigation:
+
+- **A JSONL-transcript backend (planned).** "Tails Claude's session file for block-level events without any proxy" — a fallback for environments where the proxy approach isn't suitable. The `ObservationBackend` interface (below) is explicitly designed so this can drop in.
+
+**The `ObservationBackend` interface (the most ATeam-relevant idea).** clarp's proxy is pluggable behind a TypeScript interface:
+
+```typescript
+interface ObservationBackend {
+  prepare(): Promise<void>;
+  getClaudeEnv(): Record<string, string>;
+  startObserving(opts): Promise<void>;
+  stop(): Promise<void>;
+  onObservation(cb: (obs: Observation) => void): void;
+}
+```
+
+This means "how we observe Claude" is a swappable strategy: HTTP proxy today, JSONL tail tomorrow, something else later. The same shape ATeam's monitoring layer should adopt if it ever wants to add backends beyond stream-json scraping.
+
+**Observability and debug surface.**
+
+- **Stream-json parity** with native `claude -p`: `stream_event`, `assistant`, `system.init`, `system.session_state_changed`, `system.status`, `system.api_retry`, `rate_limit_event`, `result`, `control_request`. Tested for parity via `npm run parity:stream` (runs native + clarp on identical prompts, diffs public stream).
+- **Schema coverage in tests:** 25 SDK output types + 21 control-request subtypes validated.
+- **Debug flags:** `CLARP_DEBUG=1` (proxy/session), `CLARP_DEBUG_PTY=1` (hidden screen output), `CLARP_DEBUG_API=1` (redacted API summaries — request IDs, model, token limits, tool counts), `CLARP_DEBUG_API_TEXT=1` (adds short text previews). The redacted-by-default posture is the right call for a tool that sits between auth tokens and the wire.
+
+**What clarp does *not* do.**
+
+- **Not a watchdog.** No stall detection, no heartbeat, no force-resume. If the PTY hangs, the proxy keeps running with no traffic and the caller is on its own.
+- **Not multi-session.** One PTY per clarp invocation. Multiple parallel agents = multiple clarp processes = multiple proxy ports.
+- **Not Docker-aware.** Runs on the host with the user's Claude credentials. Inside a container the credential story changes and the README doesn't cover it.
+- **Not a permission policy.** Forwards `control_request` events; doesn't decide.
+- **Not a sandbox.** "No code changes to Claude" is the whole point — clarp is transparent to Claude. Whatever Claude can do, the proxy can't stop.
+
+**Lessons for ATeam.**
+
+- **The subscription-vs-API cost question is real.** ATeam currently uses `claude -p` against metered tokens. clarp's existence is a direct response to that being expensive at scale (and ComposioHQ explicitly noted burning through Pro Max limits with 30 concurrent agents — §B.2). For an autonomous night-shift system, a clarp-style adapter is a plausible path to running on a subscription. The cost arithmetic is worth doing.
+- **PID-file polling as a state channel is underused.** ATeam reads stream-json on stdout; clarp reads `~/.claude/sessions/{pid}.json` for state. The PID file gives you `busy/idle/waiting` without any output parsing — strictly cheaper and more reliable for "is the agent idle now" than scanning the event stream. Worth adding to ATeam's container monitoring (the file is inside the container's `~/.claude` and can be read from the host or via `docker exec cat`).
+- **The `ObservationBackend` pluggability is the right shape for ATeam's monitoring layer.** Today ATeam couples "how we read agent state" tightly to stream-json. Lifting it behind a clarp-style interface (with backends for stream-json, PID-file polling, JSONL tail, HTTP proxy) lets ATeam mix-and-match per environment without rewriting the runner.
+- **`ANTHROPIC_BASE_URL` is the cleanest control point clarp surfaces.** ATeam already injects env vars into Docker containers; injecting `ANTHROPIC_BASE_URL` for a local proxy (test harness, request logging, replay capture, cost attribution) is a one-line change with a lot of downstream value. The proxy doesn't have to be clarp — even a plain logging proxy would give ATeam per-request observability it currently doesn't have.
+- **Schema-pinned parity tests are how you safely depend on `claude -p`.** clarp's parity test suite (25 SDK output types, 21 control-request subtypes, `npm run parity:stream` differential) is the kind of test ATeam should have but doesn't. Claude Code's output schema does change between releases; pinning the shapes ATeam reads in a parity test means upgrade breaks are visible immediately rather than after a 3am run silently truncates.
+- **The brittleness clarp acknowledges is the brittleness ATeam already lives with.** "If Claude stops honoring `ANTHROPIC_BASE_URL`, this fails" — equivalent to ATeam's "if Claude stops emitting `result`, the watchdog must intervene." Both designs are bets on a private Anthropic-side contract holding. clarp's planned JSONL-tail fallback is a model worth copying: have a second observation path ready, behind the same interface, before the primary one breaks.
+
+**Where this fits relative to the rest of §C.11.** clarp is a fourth point in the design space alongside Subprocess Pipes, Docker One-Shot, and REST-in-Container. The summary:
+
+| Approach | How you talk to Claude | How you read state | Sandbox |
+|---|---|---|---|
+| Subprocess Pipes (Agent SDK) | stdin/stdout JSON | stream events | Process |
+| Docker One-Shot (ATeam) | `claude -p` invocation | stream-json on stdout | Container |
+| REST-in-Container (OpenHands) | HTTP into container | Event log | Container |
+| **clarp** | **stdin stream-json into hidden PTY** | **PID file + intercepted SSE** | **None (host)** |
+
+clarp is the option that *trades sandbox for cost* — useful when you want `claude -p` semantics against subscription billing and you're already comfortable running on the host. Not a fit for ATeam's container-first posture as the primary runner, but a strong candidate as an *optional* backend for cost-sensitive deployments — exactly the pluggability story its `ObservationBackend` interface anticipates.
+
 #### Comparison: Failure Modes by Approach
 
 | Failure | Subprocess Pipe | Docker One-Shot | API Loop | REST-in-Container |
