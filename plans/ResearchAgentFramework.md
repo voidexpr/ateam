@@ -299,6 +299,77 @@ These are all customizable YAML files, so the "built-ins" double as templates.
 
 **Key architectural difference from ATeam:** Archon is a *harness builder* — its job is to make a single agent's work deterministic and repeatable by wrapping it in an explicit DAG. ATeam is an *autonomous quality system* — its job is to decide what to work on, run specialized agents on a schedule, accumulate project knowledge, and triage results for human review. They sit at different layers: an organization could plausibly use Archon DAGs *as the implementation* of ATeam's individual agent runs, with ATeam's coordinator deciding which DAG to invoke and when. Archon is the choreography for one agent's dance; ATeam is the show producer deciding which dance happens tonight.
 
+#### mixpeek/amux ⭐⭐⭐⭐
+
+**Link:** [github.com/mixpeek/amux](https://github.com/mixpeek/amux) — site at [amux.io](https://amux.io)
+
+**What it is:** "Open-source control plane for AI agents." A **single-file Python application** (with inline HTML/CSS/JS) that runs dozens of parallel Claude Code sessions via tmux and exposes them as a web dashboard + REST API + mobile PWA + native iOS app. Zero external dependencies beyond `tmux` and `python3`; restarts automatically on file edits. MIT + Commons Clause (free to self-host, no commercial resale). Currently **Claude Code only**.
+
+Positioning: ComposioHQ agent-orchestrator (§B.2) optimises for *issue → PR* feature work; amux optimises for *running many Claude sessions unattended for hours, including overnight*, with self-healing as the headline feature. It is the closest existing analogue to the "night shift" framing in ATeam's pitch.
+
+**How agents are controlled:**
+
+Sessions are registered with `amux register <name> --dir <path> --yolo` (the `--yolo` flag is the equivalent of `--dangerously-skip-permissions`), started with `amux start`, and managed through three layers:
+
+- **tmux output watching** (ANSI-stripped, no Claude Code hooks). The watchdog scans pane scrollback every ~3–15 s and fires actions on matched conditions. This is the same dual-channel idea ComposioHQ uses (§C.5) but amux relies on terminal capture alone — no JSONL side-channel.
+- **REST API:** `POST /api/sessions/{name}/send` to send a task, `GET /api/sessions/{name}/peek?lines=N` to inspect output, `POST /api/board/{id}/claim` for atomic kanban claims.
+- **Global memory injection:** "Agents get the full API reference in their global memory, so plain-English orchestration just works" — i.e., every session is primed with the amux REST surface so agents can call each other without bespoke plumbing.
+
+**Self-healing watchdog (the headline feature):**
+
+| Condition | Action | Cooldown |
+|---|---|---|
+| Context usage <50% remaining | Sends `/compact` | 5-minute |
+| Redacted-thinking corruption detected in pane | Restarts session, replays last message | — |
+| Stuck prompt (with `CC_AUTO_CONTINUE=1`) | Auto-responds based on prompt shape | — |
+| Fleet-wide `/rate-limit-options` prompt | Presses option 1 on every blocked session, parses reset time from scrollback, schedules a resume nudge | 10s base + 3s tick; 5-min safety fallback for unparseable reset times |
+
+The rate-limit handler has three modes: `off` (manual), `capped` (default — max 3 auto-resumes per session per day), `unlimited`. This is more aggressive than anything in Gas Town or ComposioHQ and directly addresses the "context compaction at 3am" failure mode the README highlights. ATeam currently has no equivalent — when Claude hits a rate limit mid-run the call simply fails.
+
+**Coordination primitives:**
+
+- **Kanban board** — SQLite-backed with auto-generated keys (e.g. `PROJ-5`), **atomic compare-and-swap claiming** so two agents can't grab the same task. Custom columns, iCal sync. CLI: `amux board add "title"`, `amux board doing PROJ-1`, `amux board done PROJ-1`. This is the artifact-coordination pattern ATeam currently approximates with run rows in `calldb`.
+- **Channels** — 1:1 inter-session chat with `@mentions`. No persistence/history details documented. The first instance in this research of *agent-to-agent realtime IM* as a primitive (Gas Town's `nudge` is closer to mail than chat).
+- **Notes** — markdown documents that agents can read, write, and reference across sessions. A persistent-knowledge layer scoped to the host, not the session. Conceptually equivalent to a shared, agent-writable wiki — closest analogue is Gas Town's bead documents but writable by any session.
+- **Conversation fork** — clone a session's history into a new session on a separate branch. Useful for "try two approaches from the same context" without re-running the lead-up.
+- **Git conflict detection** — warns when agents share a dir+branch, one-click isolation. The `workspace/<name>` problem multiclaude solves implicitly (§C.7).
+- **Scheduler** — "named cron-style recurring jobs with built-in management UI." Syntax not documented; this is the closest amux gets to ATeam's `cron` / night-shift profile, but is plain recurrence not policy-aware scheduling.
+
+**Dashboard, mobile, and human ergonomics:**
+
+- Web dashboard (served on `https://localhost:8822`) with session cards (status, token spend, quick actions), live terminal peek with file explorer, full-screen tiled multi-agent view, markdown editor, search across all output.
+- **Mobile PWA** (iOS/Android) plus a **native iOS app on the App Store**. Background Sync replays commands on reconnect; offline support for session management, board checking, messaging.
+- TLS is auto-generated: Tailscale cert → mkcert → self-signed fallback. README warns "Never expose port 8822 to the internet" — there is **no built-in auth**, use Tailscale or `--bind` to localhost.
+
+**Numbers / stack notes:**
+
+- Single Python file (~the entire app, including UI). Restarts on edit. SQLite for persistence.
+- Token tracking is per-session daily spend with cache reads broken out separately.
+- Persistent UUIDs survive stop/start so dashboard state and history don't churn.
+
+**Overlap with ATeam:** Very high on the "run many Claude sessions unattended" axis. Same problems being solved: parallel sessions, self-healing on context/rate-limit, scheduling, kanban coordination, observability. Different defaults: amux is **operator-facing** (dashboard + mobile + REST) while ATeam is **scheduler-facing** (cron-driven, prompt-shaped, no GUI).
+
+**What it lacks for our use case:**
+
+- **No specialised agent roles.** Every session is a raw Claude Code session — no audit/implement/review separation, no role prompts with project knowledge, no role-tuned timeouts.
+- **No coordinator reasoning.** The scheduler runs recurring jobs but doesn't decide *what* to work on next based on project state. Coordination is human-driven via the dashboard.
+- **No audit → approve → implement gate.** Closer to ComposioHQ's "issue → PR" flow than ATeam's deliberate phase separation.
+- **No sandbox isolation.** "Tmux-native, agents run in user's environment" — there is no equivalent of ATeam's Docker boundary. The `--yolo` registration is the only operating mode demonstrated.
+- **Claude Code only.** No Codex, no OpenCode, no agent-agnostic interface. The watchdog patterns (context-compaction prompt shape, redacted-thinking marker) are Claude-specific.
+- **No org-level knowledge sharing.** Notes are per-host, not promoted across projects.
+- **License gotcha.** MIT + Commons Clause means free self-host but no commercial resale — relevant if ATeam ever wanted to wrap amux components.
+
+**Ideas to integrate:**
+
+- **The self-healing watchdog patterns are the most directly portable contribution in this entire research.** The four conditions (context <50% → `/compact`; redacted-thinking → restart + replay; stuck prompt → auto-continue; rate-limit fleet handling with parsed reset time) are concrete, low-cost, and address failure modes ATeam currently has no answer for. The `capped` default (max 3 auto-resumes/day) is a sensible policy default ATeam should adopt verbatim.
+- **Atomic-claim kanban as the coordination substrate.** SQLite CAS for task claiming is exactly the primitive ATeam's coordinator needs once multi-agent runs start touching the same workdirs. Cheaper and more legible than per-run locks in calldb.
+- **Notes as a persistent agent-writable layer.** ATeam currently uses role prompts as the only persistent knowledge — a shared notes store agents can append to between runs would let project knowledge compound without changing the prompt files.
+- **Channels (`@mention` between sessions) for coordinator → worker steering.** ATeam already has stream-json + the runner; adding a typed inter-agent message bus would let the coordinator nudge live sessions without restarting them. The Gas Town `nudge` patterns (§C.2) apply.
+- **Web dashboard with attention zones and live terminal peek.** ATeam currently has no GUI; a single-file dashboard following amux's "zero deps, restarts on edit" philosophy is the right MVP shape — not a separate Next.js app like ComposioHQ.
+- **`workspace/<name>` style git isolation with one-click conflict resolution.** Cheap UX improvement over silent conflicts in calldb.
+
+**Key architectural difference from ATeam:** amux is a **single-host operator console** — its goal is to make 30 simultaneous human-prompted Claude sessions tractable from a phone. ATeam is a **scheduled autonomous quality system** — its goal is to make Claude do work *no human prompted it for* on a cadence, with deliberate phase gates. amux would be a plausible *frontend* for ATeam's coordinator (the dashboard, kanban, notes, channels are all features ATeam lacks); ATeam would be a plausible *brain* for amux (the role system, audit gate, scheduling policy are all features amux lacks).
+
 #### Compound Engineering Plugin (EveryInc) ⭐⭐⭐⭐
 
 **Link:** [github.com/EveryInc/compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin) — methodology at [every.to/guides/compound-engineering](https://every.to/guides/compound-engineering)
@@ -366,6 +437,74 @@ It is, in fact, the most direct conceptual overlap with ATeam in this entire sec
 - **Docrine endorsement.** Adopting "compound engineering" as a stated ATeam principle now means citing Every's framing rather than coining a parallel term — fewer competing names for the same idea is better for the ecosystem.
 
 **Key architectural difference from ATeam:** The Compound Engineering Plugin is a *human-driven workflow toolkit* — a curated set of slash commands and sub-agents that a human invokes inside a coding agent session, with markdown artifacts as the connective tissue. ATeam is an *autonomous workflow system* — a scheduler that decides when and what to run, runs it without a human in the session, and reports back. Both centre on the same loop and the same artifact-based memory model. The right way to think about the relationship: ATeam should adopt the plugin's *artifact taxonomy and skill set* as its own internal vocabulary (strategy, brainstorm, plan, review, compound, refresh, pulse) and run them autonomously — i.e., what the plugin makes a human do interactively, ATeam should do unattended. They don't compete; the plugin is the manual version of what ATeam should automate.
+
+#### metaswarm (dsifry/metaswarm) ⭐⭐⭐⭐
+
+**Link:** [github.com/dsifry/metaswarm](https://github.com/dsifry/metaswarm) — by [Dave Sifry](https://linkedin.com/in/dsifry) (Technorati / Linuxcare / Lyft / Reddit). MIT-licensed. Extracted from a production multi-tenant SaaS codebase "where it has been writing production-level code with 100% test coverage, TDD, and spec-driven development across hundreds of autonomous PRs."
+
+**What it is:** A **plugin/extension** (not a runtime) that ships **18 agent personas, 13 skills, 15 commands, and quality rubrics** into Claude Code, Gemini CLI, *and* Codex CLI from a single repo. Cross-platform via three installer paths: `claude plugin install metaswarm`, `gemini extensions install …`, or `codex` marketplace; plus an `npx metaswarm init` that detects which CLIs are installed and registers itself everywhere. Stands explicitly on two shoulders: **BEADS** (Steve Yegge's git-native issue tracker — already covered under Gas Town §B.2) as the coordination backbone, and **obra/superpowers** as the skill methodology baseline.
+
+**The workflow it enforces:**
+
+A 9-phase pipeline, top-level: *Research → Plan → Design Review Gate → Work Unit Decomposition → Orchestrated Execution → Final Review → PR Creation → PR Shepherd → Closure & Learning*. The most distinctive parts:
+
+- **Design Review Gate (parallel, 5 reviewers).** PM, Architect, Designer, Security, CTO personas all review the plan concurrently. **3-iteration cap** before escalating to a human — the same `escalateAfter` pattern ComposioHQ uses for runtime events (§C.5), applied to the plan-review phase.
+- **4-phase orchestrated execution loop (per work unit):** `IMPLEMENT → VALIDATE → ADVERSARIAL REVIEW → COMMIT`. The orchestrator "validates independently (never trusts subagent self-reports)" — it re-runs tests itself rather than reading the implementer's claim of green. Adversarial reviewers check Definition-of-Done compliance with **file:line evidence** required.
+- **Cross-model adversarial review.** "Writer always reviewed by different model." If Claude implements, Codex or Gemini reviews — and vice versa. This is the most concrete answer in this entire research to the "single-model echo chamber" failure mode that the Meiklejohn MAS survey (§C.1) flags. Cost optimisation is the secondary benefit; the primary benefit is genuine cross-model adversarial signal.
+- **Recursive orchestration (swarm of swarms).** A Swarm Coordinator spawns Issue Orchestrators which spawn sub-orchestrators for complex epics. This is the same shape as Multica's nested swarms (§B.2) but the recursion is policy, not vibe — driven by work-unit decomposition.
+- **PR Shepherd.** Once a PR is open, an agent monitors CI, addresses review comments, and resolves threads autonomously until merge. Equivalent in spirit to ComposioHQ's reactions system (CI-fail → send-to-agent) but expressed as a dedicated agent role rather than a webhook DSL.
+
+**Knowledge system (the compounding piece):**
+
+- **BEADS for everything stateful.** Quests/lore/decisions all live in `.beads/` in the repo (git-versioned). "Approved plans and execution state persist to disk via BEADS, surviving context compaction and session interruption." This is the most explicit answer in the entire research to *the* context-loss problem ATeam currently has no story for: a compaction-survival mechanism baked into the workflow's persistence layer, not added on top.
+- **`bd prime` — selective knowledge priming.** The knowledge base is intentionally allowed to grow unbounded (hundreds/thousands of entries), but agents don't load all of it. `bd prime --files "src/api/auth/**" --keywords "authentication" --work-type implementation` filters to *just* the entries relevant to the files about to be touched. This is the practical answer to "how does the knowledge base scale without consuming the context window" — the same problem Guild (later this section) tries to solve via hybrid retrieval, but solved here via explicit, narrow filter queries the agent constructs from its current task scope.
+- **Self-reflection after every merge.** `/self-reflect` runs after PR merge and extracts: code-review patterns (from human + bot reviewers), build/test failure causes, architectural-decision rationale — writes them back as structured JSONL knowledge entries. **Conversation introspection** is the spicier piece: it also analyses the *Claude session itself* looking for user-repetition (= candidate skill) and user-disagreements (= preference to capture). This is the EveryInc Compound Engineering doctrine actually implemented as a hook, with the introspection-of-the-session dimension that EveryInc does not have.
+- **JSONL fact store schema.** Patterns, gotchas, decisions, anti-patterns — typed entries, not free-text. Closest analogue is Guild's typed lore (§B.2), but metaswarm's types are software-engineering-shaped (gotcha/decision/anti-pattern) where Guild's are generic-cognition-shaped (observation/decision/research/principle/idea).
+
+**Quality enforcement:**
+
+- **Mandatory TDD.** Not optional. Coverage thresholds enforced as a **blocking gate before PR creation** via `.coverage-thresholds.json`. The PR doesn't open if coverage drops.
+- **Workflow gate intercepts.** "Agents cannot skip design review, plan review, or knowledge capture." Phrased as policy in the README, implemented as commands that won't execute their downstream phase without the upstream artifact present.
+- **Rubrics directory.** Standardised review criteria checked into the repo for code, architecture, security, testing, planning, and adversarial spec compliance. Closest analogue is ATeam's role prompts, but explicitly factored out from the agent definition into a separate rubric the reviewer is forced to apply.
+
+**Supported platforms and how the cross-CLI story actually works:**
+
+| Platform | Install | Commands |
+|---|---|---|
+| Claude Code | Plugin marketplace | `/start-task`, `/setup`, etc. |
+| Gemini CLI | Extension install | `/metaswarm:start-task`, etc. |
+| Codex CLI | Plugin marketplace | `$start`, `$setup`, etc. |
+
+Each platform gets its own command syntax (`/`, `/metaswarm:`, `$`) but the underlying skills, agents, and rubrics are the same files. The cross-platform pattern is interesting: instead of a universal agent abstraction, metaswarm ships **per-CLI manifest files** (`plugin.json` for Claude, `gemini-extension.json`, `.codex/install.sh`) plus separate command directories. Same skill content, three thin adapters. This is the same "one source of truth, N converters" pattern EveryInc uses (§B.2), but the converters are install-time manifests rather than runtime translators.
+
+**Numbers / posture:**
+
+- 18 agent personas, 13 skills, 15 commands, multiple rubric files.
+- Hooks: `SessionStart` + `PreCompact` (platform-aware) — the `PreCompact` hook is the explicit context-loss countermeasure.
+- Requires: BEADS CLI v0.40+, GitHub CLI, Node 18+, Playwright (optional, for the visual review skill that screenshots web UIs).
+- The README is unusually candid about provenance — extracted from a working production codebase, not a green-field design — which gives the workflow choices more weight.
+
+**Overlap with ATeam:** Higher than any other entry in this section on the specific dimensions of *workflow rigour and quality enforcement*. Both insist on TDD, adversarial review, knowledge capture, role specialisation, and human escalation at gates. The 9-phase workflow is a strict superset of ATeam's audit→implement→review skeleton.
+
+**What it lacks for our use case:**
+
+- **No autonomous scheduling.** metaswarm is started by a human typing `/start-task <description>`. There is no cron, no night/day profile, no coordinator deciding what to work on. It is *deeply* workflow-rigorous but still human-triggered — closer to ComposioHQ-on-steroids than to ATeam's autonomous loop.
+- **No budget or cost enforcement.** Cross-model delegation is described as "optional for cost savings" but there is no per-run cap, no daily budget, no escalation on cost.
+- **No sandbox isolation.** Each session runs in the host CLI's normal environment; no Docker boundary.
+- **No org-level layer.** Knowledge is per-repo (in `.beads/`); no mechanism to promote patterns across projects.
+- **Heavy install footprint.** BEADS + GitHub CLI + Node + Playwright + per-CLI plugin install. ATeam's value prop includes "drop a binary, point it at a repo, walk away" — metaswarm goes the other direction.
+
+**Ideas to integrate:**
+
+- **The IMPLEMENT → VALIDATE → ADVERSARIAL REVIEW → COMMIT loop, verbatim.** Especially the "orchestrator validates independently, never trusts subagent self-reports" rule. ATeam's coordinator currently reads agent reports without re-running the tests. Adopting the independent-validation step would close the most obvious correctness gap.
+- **Cross-model adversarial review as a policy, not a feature.** "Writer always reviewed by different model" is a one-line rule with outsized effect. If ATeam ever supports Codex or Gemini as alternative runtimes, this should be the *default*, not an option.
+- **`bd prime` selective priming over global context loading.** ATeam currently loads the full role prompt every run. A `prime --files <scope> --work-type <kind>` filter applied to the knowledge base before each run would let ATeam grow institutional memory without growing prompt size.
+- **`PreCompact` hook for state survival.** ATeam has no story for what happens when a session gets compacted mid-run. metaswarm persists plan + execution state to BEADS specifically so the next session resumes from disk. Adopting an equivalent pre-compact handoff is cheap and removes a current ATeam failure mode.
+- **Coverage threshold as a blocking PR gate.** `.coverage-thresholds.json` is a one-file mechanism for making coverage a precondition of PR creation. ATeam's review role could enforce the same thing without prompt-engineering the threshold each run.
+- **Conversation introspection during self-reflection.** Watching the user's *own messages* for repetition (= missing skill) and disagreement (= preference to capture) is a knowledge-extraction channel ATeam doesn't currently mine. ATeam already records calls; running an introspection pass over them post-run is a natural extension.
+- **Rubrics as separate files.** ATeam's review role embeds criteria in the prompt. Factoring rubrics into separate, version-controlled files (so a "review against rubric X" call is parameterised) is a cleaner separation and lets humans tune the rubric without touching the role.
+
+**Key architectural difference from ATeam:** metaswarm is a **workflow framework you install into a coding agent** — its goal is to make a human-launched session execute a rigorous SDLC end-to-end. ATeam is **an autonomous scheduler that drives coding agents** — its goal is to make the *decision to start a session* autonomous and policy-driven. They are stacked, not competing: a plausible architecture is **ATeam decides what to work on and when, then drives a metaswarm-equipped Claude Code session to do it**. metaswarm is the right answer to "what should the agent do inside the session" — exactly the layer ATeam currently underspecifies. The 9-phase workflow, BEADS persistence, cross-model review, and self-reflection loop are all directly importable into ATeam's role definitions without contradicting any ATeam design choice.
 
 #### Guild (mathomhaus/guild) ⭐⭐⭐⭐
 

@@ -529,6 +529,65 @@ Both are themselves Claude Code agents, not separate services. They run in tmux 
 - **`workspace/<name>` branch convention.** Discoverable, namespaced, and avoids ref conflicts (the `workspace/default` migration story is instructive — flat branch names collide with nested ones in git). ATeam's current per-run branches should pick a similar convention.
 - **The Brownian Ratchet philosophy itself.** Not directly applicable to ATeam — ATeam's roles are specialised by design, not interchangeable — but the principle "*let the acceptance gate be the only synchronisation point*" is worth holding onto. It's the right answer when coordination cost exceeds redundancy cost.
 
+### C.7b Harnex (jikkuatwork/harnex)
+
+Harnex is a **Ruby gem** (Ruby 3.x, stdlib-only) that wraps Claude Code, Codex, OpenCode, or any terminal CLI in a local control harness. Positioning is narrower than the platforms above: it is a **single-host CLI for launching, sending, peeking, and stopping agents** — no dashboard, no kanban, no orchestrator. The closest analogue is oauth-cli-coder (§C.6) but with first-class tmux support and per-agent PTY adapters.
+
+#### Runtime model
+
+Two backends are exposed via the same surface:
+
+- **Tmux-backed** (`harnex run codex --id planner --tmux planner`) — each agent gets a dedicated tmux window; the pane is the source of truth for I/O and `harnex pane --id <id> --lines 30` returns a scrollback snapshot. Clean shutdown is done by tmux `send-keys` of the native exit sequence rather than `kill`.
+- **Subprocess/PTY adapters** — Claude Code, Codex, and OpenCode each have dedicated adapters. Codex uses the **JSON-RPC `codex app-server`** path (requires Codex CLI ≥ 0.128.0) and gets structured task-completion events, approval mediation, and token-usage capture out of the box. Generic CLIs fall back to "local API, logs, status, and best-effort prompt detection".
+
+#### Done / idle detection
+
+Per-CLI heuristics rather than a universal protocol:
+
+- Codex JSON-RPC delivers a `task_complete` event — used by `harnex wait --id <id> --until task_complete` (a clean structured-completion signal, the same shape ATeam already gets from Claude Code's `Stop` hook).
+- Claude / OpenCode use prompt-shape detection on scrollback to flip an `idle` state. `harnex send --id <id> --message "…" --wait-for-idle` blocks the caller until the agent returns to its prompt.
+- `--auto-stop` terminates after "first task completion or PTY prompt return" — useful for one-shot `harnex run` invocations where the caller wants the gem to behave like a synchronous batch runner.
+
+#### Permission and TUI handling
+
+The Claude Code adapter explicitly handles "workspace trust, and vim mode handling" inside the PTY. This is the same problem Gas Town's `AcceptStartupDialogs()` solves with tmux keystroke injection (§C.2) — Harnex solves it inside the adapter rather than in a watchdog patrolling pane content. Less robust if a new dialog appears, but simpler and tied directly to the agent type.
+
+#### Stuck detection and force-resume
+
+Harnex has presets — a clean idea worth borrowing:
+
+| Preset | `--stall-after` | `--max-resumes` |
+|---|---|---|
+| `plan` | 3m | 2 |
+| `impl` | 8m | 1 |
+| `gate` | 15m | 0 |
+
+`--watch` enables stall monitoring; when no output is seen within `--stall-after`, the harness "force-resumes" up to `--max-resumes` times before giving up. The plan/impl/gate naming maps directly to ATeam's audit/implement/review phases — a one-knob policy bundle that's much friendlier than tuning a global hung threshold.
+
+#### Observability
+
+`.harnex/dispatch.jsonl` records per-dispatch timing, exit classification, token usage, and operational counters (`stalls`, `force_resumes`, `disconnections`) plus volume metrics (`lines_changed`, `output_lines`). `harnex events --id <id>` streams the JSONL live, and `harnex logs --id <id> --follow` tails the transcript. This is **append-only structured events** — the same pattern as Claude Code's session JSONL (§C.5) and ATeam's CallDB, but at the harness level rather than the agent level.
+
+#### Message injection
+
+`harnex send --id <id> --message "text"` queues if the agent is busy; the queue drains when the agent goes idle. `--wait-for-idle` blocks the caller until processing finishes. The semantics are similar to Gas Town's `nudge --mode wait-idle` (§C.2) but the queue is per-session and managed entirely by Harnex (no external file queue).
+
+#### What it does *not* do
+
+- **No watchdog beyond stall detection.** No heartbeats, no liveness scan of child processes, no crash-loop protection. If the agent disappears between stall ticks, it's the caller's problem.
+- **No multi-host or REST.** Single-machine CLI only — no daemon mode, no API, no dashboard. amux (§B.2) is the opposite end of this spectrum.
+- **No worktree management.** Caller picks `--dir`; Harnex doesn't create branches or isolate workspaces.
+- **No inter-agent comms.** "Coordinate them" in the README means the *caller* coordinates by calling `harnex send` against multiple IDs — there is no message bus, no channels.
+- **No permission policy.** Inherits whatever the wrapped CLI does; no equivalent of `--dangerously-skip-permissions` injection or `settings-autonomous.json`.
+
+#### Lessons for ATeam
+
+- **Phase-tuned stall presets (`plan` / `impl` / `gate`) are a clean abstraction.** ATeam currently uses one global timeout; bundling `(stall_after, max_resumes)` per role would let `audit` fail fast while `implement` gets more rope. The naming choice already matches ATeam's vocabulary.
+- **Per-adapter completion detection beats a single universal protocol.** Harnex commits to per-agent adapters and gets structured `task_complete` from Codex JSON-RPC, scrollback prompt detection from Claude, etc. ATeam's current Docker+`claude -p` model is fine for Claude, but if/when Codex support lands, the JSON-RPC `codex app-server` path is the right hook — not stdout scraping.
+- **`dispatch.jsonl` at the harness level is the right granularity for cost/operability metrics.** Today ATeam's CallDB captures agent-level calls; a harness-level dispatch record (with `stalls`, `force_resumes`, `lines_changed`) would give the coordinator the operational view it needs without parsing Claude's stream-json.
+- **`--auto-stop` for one-shot invocations.** ATeam's runner already behaves this way, but Harnex's explicit flag is a useful UX hint — making "one-shot vs persistent" a first-class CLI distinction rather than a mode buried in config.
+- **What Harnex confirms about ATeam's design.** Both projects converge on: per-agent adapters > universal protocol; append-only JSONL > live IPC; per-phase timeouts > global threshold. Harnex is a smaller, library-shaped expression of the same instincts.
+
 ### C.8 Comparison Table
 
 | Concern | Gas Town | Tmux Orchestrator | CAO | ComposioHQ | oauth-cli-coder | Multiclaude |
