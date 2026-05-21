@@ -11,29 +11,60 @@ We also want a model where logic moves easily in/out of LLM prompts, balancing t
 ## Goals
 
 1. **Split prompts from generated outputs** — `prompts/` for configuration, `shared/` (and per-execution `runtime/<exec_id>/`) for generated artifacts.
-2. **Minimal framework, conventions in templates** — the framework provides a small set of primitives (resolution, substitution, includes, frontmatter); conventions for pre/post composition live in shipped templates, not in framework rules.
-3. **Explicit, readable assembly** — opening the dir-level template shows exactly what gets assembled, in what order. No hidden auto-inclusion.
+2. **Minimal framework, conventions in filenames** — the framework provides a small set of primitives (resolution, substitution, includes, frontmatter); composition is encoded in filename patterns, not in template-file orchestration.
+3. **Explicit, readable assembly** — running `ls` on a prompts directory tells you exactly what wraps each role. No template file to open, no hidden recursion to memorize.
 4. **Structural naming safety** — a user-defined role named `review` cannot collide with the singleton review action; they live in different namespaces.
 5. **Stage-ready** — frontmatter is the home for declarative stage metadata (pre_exec/post_exec lists, enablement, future params). The stage executor is a follow-up; this refactor lays the substrate.
 6. **Future-friendly** — clean hooks for richer template directives, CLI ad-hoc additions, and per-prompt frontmatter.
 
 ## Naming convention
 
-Three kinds of file in `prompts/`:
+All files used by the framework follow a deterministic, suffix-driven pattern. The `_` prefix marks dir-level structural files; everything else is role-related.
 
-| File | Purpose | Invokable as a prompt? |
-|---|---|---|
-| `<name>.prompt.md` | Named prompt. Body content. Optional YAML frontmatter. | Yes — `:dir/name` or `:name` |
-| `_template.md` | Directory template. Wraps named prompts in this directory via `{{include}}` directives. Optional YAML frontmatter. | No — purely structural |
-| Other `*.md` (e.g. `prompt.pre.<NAME>.md`, `<name>.prompt.pre.<NAME>.md`, library fragments) | Content fragments. Referenced by templates via `{{include}}` / `{{include?}}` / `{{include_glob}}`. | No — included only |
+### File patterns
 
-The framework's behavior is determined entirely by these file kinds plus what a template's body and frontmatter say. There is no hardcoded "auto-prepend the dir base" rule.
+| Pattern | Means |
+|---|---|
+| `<role>.prompt.md` | Role `<role>` main body. Invokable as `:dir/<role>` or `:<role>`. Optional YAML frontmatter. |
+| `<role>.pre.md` | Role pre, single (overloads across anchors). |
+| `<role>.pre.<NAME>.md` | Role pre fragment named `<NAME>` (composes with other `<role>.pre.*.md` files). |
+| `<role>.post.md` | Role post, single. |
+| `<role>.post.<NAME>.md` | Role post fragment named `<NAME>`. |
+| `_pre.md` | Dir-level pre, single (overloads). |
+| `_pre.<NAME>.md` | Dir-level pre named `<NAME>` (composes). |
+| `_post.md` | Dir-level post, single. |
+| `_post.<NAME>.md` | Dir-level post named `<NAME>`. |
+
+Any other `*.md` file is an arbitrary content fragment; the framework parser ignores it, but it can be referenced explicitly via `{{include}}`.
+
+### Restrictions on role names
+
+Two rules ensure unambiguous parsing:
+
+1. **Cannot start with `_`** — that prefix is reserved for dir-level structural files.
+2. **Cannot end with `.pre` or `.post`** — prevents greedy-parse ambiguity. A hypothetical role `code.pre` would make `code.pre.pre.scope.md` parse two ways (role `code.pre` pre `scope` vs. role `code` pre `pre.scope`).
+
+Otherwise role names are any dot-separated identifier: `security`, `code.bugs`, `project.security`, `review`, `prompt`, `pre_check`, etc.
+
+### Parsing (deterministic, suffix-driven)
+
+For any `*.md` file in the prompts tree, the parser picks the first matching pattern, suffix-anchored, with `<role>` greedy on the LEFT:
+
+1. Ends with `.prompt.md` → role main, role = everything before `.prompt.md`.
+2. Ends with `.pre.md` or `.pre.<NAME>.md` → role pre, role = everything before the final `.pre`.
+3. Ends with `.post.md` or `.post.<NAME>.md` → role post, role = everything before the final `.post`.
+4. Filename is `_pre.md` or `_pre.<NAME>.md` (no role prefix) → dir-level pre.
+5. Filename is `_post.md` or `_post.<NAME>.md` → dir-level post.
+6. Otherwise → arbitrary include, ignored by the framework parser.
+
+Role-name restrictions are validated after parsing. Violations error at load with a clear message.
 
 ### Identifiers
 
 Names use forward-slash paths, no leading prefix:
 - `review` — singleton named prompt at root (file: `review.prompt.md`)
-- `report/security` — named prompt inside `report/` directory (file: `report/security.prompt.md`, wrapped by `report/_template.md` if present)
+- `report/security` — named prompt inside `report/` directory (file: `report/security.prompt.md`)
+- `code.bugs` — dotted role names work (file: `code.bugs.prompt.md`)
 - `crawl/web/sitea` — deeper nesting (future)
 
 The CLI surfaces these with a leading `:` to distinguish from raw text and file refs: `:review`, `:report/security`. The `:` syntax lives at the CLI layer; the core module accepts plain paths.
@@ -49,26 +80,30 @@ The CLI surfaces these with a leading `:` to distinguish from raw text and file 
   secrets.env
   logs/
   prompts/
-    _template.md             # root template — wraps singletons at root
-    review.prompt.md         # singleton
+    _pre.intro.md            # root-level pre, composes with other _pre.*.md
+    _post.disclosure.md      # root-level post
+    review.prompt.md         # singleton role
+    review.pre.format.md     # (optional) per-role pre fragment
     auto_setup.prompt.md
     code_management.prompt.md
     code_verify.prompt.md
     exec_debug.prompt.md
     report_commissioning.prompt.md
     report/
-      _template.md                          # dir template — wraps roles in report/
-      prompt.pre.default.md                 # (optional) dir-level pre fragment — suffix is free-form
-      prompt.post.disclosure.md             # (optional) dir-level post fragment
-      security.prompt.md                    # role body
-      security.prompt.pre.scope.md          # (optional) per-role pre fragment
-      security.prompt.post.format.md        # (optional) per-role post fragment
+      _pre.format.md         # report dir-level pre — applies to every role in report/
+      _pre.severity.md       # composes lexically with above
+      _post.checklist.md     # report dir-level post
+      security.prompt.md     # role main
+      security.pre.scope.md  # (optional) per-role pre fragment
+      security.post.format.md# (optional) per-role post fragment
       test_gaps.prompt.md
+      code.bugs.prompt.md    # dotted role names are fine
+      code.bugs.pre.realistic.md
       ...
-      gather-deps.sh                        # arbitrary script; referenced from frontmatter
+      gather-deps.sh         # arbitrary script; referenced from frontmatter
       validate.sh
     code/
-      _template.md
+      _pre.constraints.md
       security.prompt.md
       ...
   shared/
@@ -90,25 +125,41 @@ Same restructuring applies to `.ateamorg/` and the embedded `defaults/` tree. (T
 
 ## Framework primitives (the whole list)
 
-The framework provides exactly these primitives. Everything else — pre/post composition, action ordering, etc. — is convention encoded in templates.
+The framework provides exactly these primitives. Composition is built into the naming convention — there is no template file to author.
 
 1. **Prompt resolution by name across anchors.** Anchors ordered most-specific to least: project → org → embedded. Fallback semantics (first hit wins).
-2. **`{{var}}` substitution.** Existing template variables (`{{PROJECT_*}}`, `{{OUTPUT_*}}`, `{{EXEC_ID}}`, `{{ATEAM_OWN_*}}`, `{{CONTAINER_*}}`, etc.) plus new `{{prompt.name}}` and `{{prompt.path}}`.
-3. **`{{include PATH}}`** — inline a file's content. **First-match across anchors.** Error if no anchor has the file.
-4. **`{{include? PATH}}`** — inline a file's content. **First-match across anchors.** Produces empty string if no anchor has it. (Same rule as `{{include}}`; the `?` only signals optional.)
-5. **`{{include_glob PATTERN}}`** — inline files matching a glob, in deterministic order: within each anchor sorted lexically; across anchors most-general first (embedded → org → project). Empty string if no matches.
-6. **YAML frontmatter parsing** for `*.prompt.md` and `_template.md`. Strict schema (small fixed key set); unknown keys reject with a clear error.
-7. **Two file kinds** as defined above (`*.prompt.md` invokable, `_template.md` structural, anything else is a fragment included only via `{{include}}` / `{{include?}}` / `{{include_glob}}`).
+2. **Filename-based assembly.** Given a prompt name `<dir>/<role>`, the assembler discovers all matching files (role main, role pre/post fragments, dir-level pre/post fragments at every directory up the chain) and composes them per the assembly order below. No template file mediates this.
+3. **`{{var}}` substitution.** Existing template variables (`{{PROJECT_*}}`, `{{OUTPUT_*}}`, `{{EXEC_ID}}`, `{{ATEAM_OWN_*}}`, `{{CONTAINER_*}}`, etc.) plus new `{{prompt.name}}`, `{{prompt.path}}`, `{{LABEL}}`, `{{PROJECT_INFO}}`, `{{ROLE_REPORTS}}`.
+4. **`{{include PATH}}`** — inline a file's content at this position. **First-match across anchors.** Error if no anchor has the file.
+5. **`{{include? PATH}}`** — inline a file's content. **First-match across anchors.** Produces empty string if no anchor has it.
+6. **`{{include_glob PATTERN}}`** — inline files matching a glob, in deterministic order: within each anchor sorted lexically; across anchors most-general first (embedded → org → project). Empty string if no matches. Used internally by the assembler to find pre/post fragments; can also be called explicitly from any markdown file.
+7. **YAML frontmatter parsing** on `<role>.prompt.md` and on dir-level structural files. Strict schema; unknown keys reject with a clear error.
 
 ### One rule for file composition across anchors
 
-**Same filename always overloads** — embedded's `security.prompt.pre.md` and project's `security.prompt.pre.md` are the same file at different anchors; first-match (project) wins. Never additive.
+**Same filename always overloads** — embedded's `_pre.intro.md` and project's `_pre.intro.md` are the same file at different anchors; first-match (project) wins. Never additive.
 
-**Different filenames compose via `{{include_glob}}`** — if you want multiple fragments to all contribute, give them distinct names. Embedded ships `security.prompt.pre.default.md`, org adds `security.prompt.pre.org_lessons.md`, project adds `security.prompt.pre.local.md`. They are three different files; a template that does `{{include_glob security.prompt.pre.*.md}}` picks up all three, in lexical order within each anchor, embedded→org→project across anchors. Authors can prefix numerically (`01_`, `02_`) to control order explicitly.
+**Different filenames compose** — if you want multiple fragments to all contribute, give them distinct names. Embedded ships `_pre.intro.md`, org adds `_pre.org_policy.md`, project adds `_pre.local.md`. They are three different files; the assembler picks up all three (lexical order within each anchor, embedded → org → project across anchors). Authors can prefix numerically (`01_`, `02_`) to control order explicitly.
 
-This collapses the previous "is this additive or first-match?" question into one rule: **filenames are the unit of overloading; sets of related filenames are the unit of composition**. Intent is explicit in the filename.
+This is one rule for the whole system: **filenames are the unit of overloading; sets of related filenames are the unit of composition**. Intent is explicit in the filename.
 
-(Naming convention `<basename>.prompt.<pre|post>.<NAME>.md` is provisional; the operator and exact pattern shape may be adjusted before implementation.)
+### Assembly order for `:dir1/dir2/role`
+
+```
+[CLI --pre-prompt]
+  [root _pre.*.md]              (all matching files, composed)
+    [dir1 _pre.*.md]
+      [dir2 _pre.*.md]
+        [role.pre.*.md]         (role-level pre fragments)
+        [role.prompt.md]        (main, first-match)
+        [role.post.*.md]        (role-level post fragments)
+      [dir2 _post.*.md]
+    [dir1 _post.*.md]
+  [root _post.*.md]
+[CLI --post-prompt]
+```
+
+Each `_pre.*.md` / `_post.*.md` slot expands to all matching files at that directory level, composed across anchors per the rule above. Role-level pre/post is just inside the innermost dir-level pre/post.
 
 ### Substitution inside include paths
 
@@ -117,121 +168,68 @@ Include paths may contain `{{var}}` substitutions. Resolution is two-pass:
 1. Substitute `{{var}}` inside the include path text.
 2. Resolve the include against anchors.
 
-So `{{include_glob {{prompt.name}}.prompt.pre.*.md}}` resolves `{{prompt.name}}` first (e.g. to `security`), then finds all files matching `security.prompt.pre.*.md` across all anchors and inlines them (within-anchor lexical order, embedded → org → project across anchors).
+So `{{include_glob {{prompt.name}}.pre.*.md}}` resolves `{{prompt.name}}` first (e.g. to `security`), then finds all files matching `security.pre.*.md` across all anchors and inlines them (within-anchor lexical order, embedded → org → project across anchors). The assembler uses `{{include_glob}}` internally to find pre/post fragments at every directory level; the same primitive is available inside any markdown file for ad-hoc composition.
 
 ### Cycles, depth, errors
 
 - `{{include}}` recursion is depth-limited (e.g. 16 levels). Cycle detection errors at preview/assembly time.
 - `{{include? }}` produces empty on missing; never errors for missing files.
-- A template that references `{{prompt.name}}` but is invoked without a body (e.g. `:report` without a leaf) errors at preview time.
+- Invoking a directory name without a leaf (e.g. `:report` instead of `:report/security`) errors at preview time — directories are namespaces, not invokable prompts.
 - YAML frontmatter parse errors are loud at preview time.
 
 ### Orphan-fragment detection (catches typos)
 
-At preview/load time, the assembler walks every file matching `*.prompt.pre.md`, `*.prompt.pre.*.md`, `*.prompt.post.md`, and `*.prompt.post.*.md` across all anchors. For each, the base `<name>` (text before `.prompt.`) is extracted and a matching `<name>.prompt.md` is required in some anchor. If none does, error:
+At preview/load time, the assembler walks every file matching `<role>.pre.md`, `<role>.pre.<NAME>.md`, `<role>.post.md`, `<role>.post.<NAME>.md` across all anchors. For each, the parsed `<role>` is checked against the set of known roles (basenames of `<role>.prompt.md` files at any anchor). If no matching `<role>.prompt.md` exists anywhere, error:
 
 ```
-orphan fragment: report/securty.prompt.pre.local.md
+orphan fragment: report/securty.pre.scope.md
   no matching report/securty.prompt.md found in any anchor
   did you mean: security?
 ```
 
 Levenshtein hint when the base name is close to an existing prompt. Catches the typo failure mode cheaply.
 
-Dir-level fragments (`prompt.pre.md`, `prompt.post.md`, `prompt.pre.<NAME>.md`, `prompt.post.<NAME>.md`) are exempt — they don't pair with any specific named prompt.
+Dir-level fragments (`_pre.md`, `_post.md`, `_pre.<NAME>.md`, `_post.<NAME>.md`) are not subject to this check — they don't pair with any specific named prompt.
 
-## Templates: conventions live here, not in the framework
+## Composition: dir-level and role-level wrappers (replaces the template concept)
 
-ateam ships embedded default templates that encode the standard report/review pipeline. Users inherit them; users who want different behavior override the template at their project or org anchor.
+There is no `_template.md` file. The assembly order is **encoded in the filenames** and the directory chain. Reading `ls` of a directory tells you exactly what wraps each role; opening any single file is enough to understand its content.
 
-### Root template (`defaults/prompts/_template.md`)
-
-Wraps singletons at root (`:review`, `:auto_setup`, `:code_management`, `:code_verify`, `:exec_debug`, `:report_commissioning`).
-
-```yaml
----
-post_exec: [copy-runtime-files]
----
-{{PROJECT_INFO}}
-
-{{include_glob prompt.pre.*.md}}
-{{include_glob {{prompt.name}}.prompt.pre.*.md}}
-
-{{include {{prompt.name}}.prompt.md}}
-
-{{include_glob {{prompt.name}}.prompt.post.*.md}}
-{{include_glob prompt.post.*.md}}
-```
-
-`{{PROJECT_INFO}}` is a template variable (category A) — its expansion is the formatted git HEAD + uncommitted-files block that's part of every prompt today. It is NOT a `pre_exec` action.
-
-`{{include_glob}}` picks up all fragments matching the pattern. Embedded contributes its `prompt.pre.default.md` (if any), org contributes its `prompt.pre.org_policy.md` (if any), project contributes its `prompt.pre.local.md` (if any) — all included, embedded first, project last. Drop a new file at any anchor to add content; no template edit needed.
-
-### Review template (`defaults/prompts/review.prompt.md`, singleton)
-
-Since review is a singleton at root, it uses the root template. The review prompt's body references `{{ROLE_REPORTS}}`:
+### What gets assembled for `:report/security`
 
 ```
-You are reviewing the role reports gathered for this project.
-
-{{ROLE_REPORTS}}
-
-Synthesize across reports. Identify cross-cutting issues, conflicts between
-recommendations, and the smallest sequence of changes that addresses the most
-high-priority findings.
+[CLI --pre-prompt]                          (outermost ad-hoc)
+  prompts/_pre.*.md                         (root dir-level pre, composed)
+    prompts/report/_pre.*.md                (report dir-level pre, composed)
+      prompts/report/security.pre.*.md      (role-level pre, composed)
+      prompts/report/security.prompt.md     (role main, first-match)
+      prompts/report/security.post.*.md     (role-level post, composed)
+    prompts/report/_post.*.md               (report dir-level post)
+  prompts/_post.*.md                        (root dir-level post)
+[CLI --post-prompt]
 ```
 
-`{{ROLE_REPORTS}}` is a template variable provided by ateam — it expands to the discovered + filtered role reports inlined as a section. The framework handles the `--roles` / `--all` / `--max-age` filtering and produces the text. Same category-A mechanism as `{{PROJECT_INFO}}`.
+Each slot expands to all files matching the pattern at that anchor, composed in lexical order within an anchor, embedded → org → project across anchors.
 
-### Report template (`defaults/prompts/report/_template.md`)
+### What ateam ships in embedded defaults
 
-Wraps role bodies with report-shaped instructions.
+The embedded defaults seed concrete files for the standard workflows.
 
-```yaml
----
-post_exec: [copy-runtime-files]
----
-You are performing a {{prompt.name}} report on this project.
+**Root level** (`defaults/prompts/`):
+- `_pre.context.md` — block containing `{{PROJECT_INFO}}` (so every prompt gets project context).
+- `review.prompt.md` — review singleton (body references `{{ROLE_REPORTS}}`).
+- `auto_setup.prompt.md`, `code_management.prompt.md`, `code_verify.prompt.md`, `exec_debug.prompt.md`, `report_commissioning.prompt.md` — other singletons.
 
-{{PROJECT_INFO}}
+**Report directory** (`defaults/prompts/report/`):
+- `_pre.intro.md` — "You are performing a {{prompt.name}} report on this project. Your speciality and approach:"
+- `_post.format.md` — "Format your findings as severity-tagged markdown sections, scoped by file path. Use this scale: blocker / high / medium / low. Skip findings without a realistic exploit path or measurable impact."
+- `security.prompt.md`, `test_gaps.prompt.md`, `code.bugs.prompt.md`, etc. — pure role bodies (no boilerplate).
 
-{{include_glob prompt.pre.*.md}}
-{{include_glob {{prompt.name}}.prompt.pre.*.md}}
+Reading `ls defaults/prompts/report/` tells you: there's a shared intro applied to every report, a shared format applied to every report, and N role-specific files. No file to open to "understand the wrap."
 
-Your specialty and approach:
-
-{{include {{prompt.name}}.prompt.md}}
-
-{{include_glob {{prompt.name}}.prompt.post.*.md}}
-{{include_glob prompt.post.*.md}}
-
-Format your findings as severity-tagged markdown sections, scoped by file path.
-Use this scale: blocker / high / medium / low.
-Skip findings without a realistic exploit path or measurable impact.
-```
-
-### Code template (`defaults/prompts/code/_template.md`)
-
-Similar shape; the code_management template uses `{{include /shared/review/review.md}}` (first-match, errors if missing) where today `cmd/code.go` reads review.md and bails:
-
-```yaml
----
-pre_exec: [concurrent-run-check, source-writable]
----
-You are managing a code change based on this review.
-
-{{PROJECT_INFO}}
-
-The review you must act on:
-
-{{include shared/review/review.md}}
-
-{{include_glob {{prompt.name}}.prompt.pre.*.md}}
-{{include {{prompt.name}}.prompt.md}}
-{{include_glob {{prompt.name}}.prompt.post.*.md}}
-```
-
-Note: `copy-runtime-files` is intentionally absent — code outputs are diffs/commits.
+**Code directory** (`defaults/prompts/code/`):
+- Similar shape, with code-specific framing.
+- The `code_management` singleton's body uses `{{include shared/review/review.md}}` directly (first-match, errors if missing) — replacing today's `cmd/code.go` read+inline-or-bail logic.
 
 ### What a role file looks like
 
@@ -241,31 +239,33 @@ Focus on confirmed exploitable bugs and data exposure with realistic triggers.
 Refuse to break working features with defensive header tightening.
 ```
 
-No frontmatter, no boilerplate. Pure body content. Wrapped by the dir template's includes.
+No frontmatter, no boilerplate. Pure body content. The dir-level `_pre.*.md` and `_post.*.md` files at every level above are applied automatically per the assembly order.
 
 ### Project-level customization patterns
 
 **Recommended (surgical, upgrade-safe):**
-- Add `report/security.prompt.pre.<NAME>.md` at project or org anchor → composed into security's pre via the template's `{{include_glob security.prompt.pre.*.md}}`. Use a meaningful `<NAME>` (e.g. `local_scope`, `policy`, `01_priority`). Numeric prefixes order multiple fragments.
-- Add `report/prompt.post.<NAME>.md` at project or org anchor → applies to every report in this project/org via `{{include_glob prompt.post.*.md}}`.
-- Override `report/_template.md` frontmatter to add `./my-extra-validate.sh` to `post_exec`.
+- Add `report/security.pre.<NAME>.md` at project or org anchor → composes into security's pre alongside whatever embedded ships. Use a meaningful `<NAME>` (e.g. `local_scope`, `policy`, `01_priority`). Numeric prefixes control order.
+- Add `report/_post.<NAME>.md` at project or org anchor → applies to every role in `report/` in this project/org.
+- Add `_pre.<NAME>.md` at the prompts root → applies to every prompt in every dir.
 - Add a brand-new `report/<my-custom>.prompt.md` → custom role. No upgrade conflict because there's no embedded version.
+- Frontmatter on a role's `<role>.prompt.md` adds `pre_exec` / `post_exec` actions for that role (additive to dir-level frontmatter, if any).
 
 **Avoid (drift risk on ateam upgrade):**
-- Overriding `report/security.prompt.md` wholesale at project anchor. You'll lose embedded improvements when ateam upgrades. If you genuinely need a different security role, fork it under a different name (e.g. `security_strict.prompt.md`) — that becomes a custom role with no upgrade risk.
-- Overriding `report/_template.md` wholesale unless you actually need different structure for every report.
+- Overriding `report/security.prompt.md` wholesale at project anchor — you'll lose embedded improvements when ateam upgrades. If you genuinely need a different security role, fork it under a different name (e.g. `security_strict.prompt.md`) — that becomes a custom role with no upgrade risk.
+- Overriding `report/_pre.intro.md` wholesale unless you actually want to replace the shipped intro entirely.
 
-Each recommended pattern is a single file edit. None affects others.
+Each recommended pattern is a single file drop. None affects others.
 
-### Why this beats "framework auto-includes everything"
+### Why this scheme
 
-Open `report/_template.md` and the assembly order is **literally the file**. No knowledge of framework rules needed. Customizing the structure means editing this file, not memorizing how the framework's recursive walk behaves.
-
-The cost: more lines in the embedded default template. The framework gets simpler in exchange.
+- **`ls` is documentation.** A directory's contents tell you everything that wraps the roles in it. No template file mediates.
+- **Forgot-an-include is impossible.** The assembler walks the directory chain and discovers all matching files automatically. You can't forget what you didn't have to write.
+- **Fixed structure where it counts.** Header → role pre → role main → role post → footer at every level. You give up the ability to invent custom shapes; you gain readability.
+- **Flexibility is preserved via `{{include}}`.** Inside any file (header, role body, footer), you can `{{include}}` other content for complex composition. Same template engine, used inside slots instead of orchestrating them.
 
 ## How a role is identified
 
-A role is the basename of a `*.prompt.md` file inside a directory that has a `_template.md` (or in a directory without a template, where each file is just a standalone prompt). An "action" is the directory name at the top of `prompts/`. A role exists iff `prompts/report/<role>.prompt.md` exists somewhere in the resolution chain. Singleton actions (named prompts at root) cannot be mistaken for roles — different namespaces, collision is structurally impossible.
+A role is the basename `<role>` of a file matching `<role>.prompt.md`. An "action" is the directory name at the top of `prompts/`. A role exists iff `prompts/<action>/<role>.prompt.md` exists somewhere in the resolution chain. Singleton actions (named prompts at root) live alongside roles in different dirs; they cannot collide.
 
 There are no `Role` or `Action` types in the core. The CLI keeps role/action vocabulary for discoverability (`ateam report --roles security`); under the hood that maps to `Assemble("report/security")`.
 
@@ -289,9 +289,9 @@ Future addition (deferred): `{{shell CMD}}` directive for user-defined scripts w
 
 Work done before or after the agent runs. Output is captured as logging only — never seen by the agent in its prompt. Used for environment setup, post-run validation, and side effects.
 
-Mechanisms in v1: ordered steps declared in YAML frontmatter as `pre_exec:` / `post_exec:` lists on `_template.md` (dir-level) and individual `<name>.prompt.md` (per-prompt). A step is either:
+Mechanisms in v1: ordered steps declared in YAML frontmatter. Dir-level lists live in `_meta.yaml` (or another agreed-on dir-level metadata file — see open question below); role-level lists live in `<role>.prompt.md` frontmatter. A step is either:
 - a **built-in action** referenced by name (e.g. `copy-runtime-files`, `concurrent-run-check`) — implemented in ateam's Go code.
-- a **script path** relative to the template's directory — black-box subprocess that gets the run's environment.
+- a **script path** relative to the file's directory — black-box subprocess that gets the run's environment.
 
 **Key property:** these do NOT run during preview. Preview only shows what *would* run. Side effects are expected and acceptable at run time (creating dirs, copying files, running tests, committing).
 
@@ -309,25 +309,33 @@ A **stage** is the unit of "one LLM invocation with deterministic wrapping." A s
 2. **Prompt** — the LLM call, using the assembled prompt. Assembly-time content (category A above) is already baked into the prompt text at this point.
 3. **Post** — runtime validation, copy/version files, update tracking, log telemetry. From frontmatter `post_exec` list.
 
-Pre and post lists are ordered. Composition: per-prompt frontmatter lists **extend** dir-template lists. Order in the YAML list is the execution order.
+Pre and post lists are ordered. Composition: per-role frontmatter lists **extend** dir-level lists. Order in the YAML list is the execution order.
 
-Frontmatter on `report/_template.md`:
+### Where does dir-level frontmatter live?
+
+Since there's no `_template.md` file anymore, dir-level `pre_exec` / `post_exec` declarations need a home. **Open question** — options:
+- (a) On any dir-level structural file (`_pre.md`, `_post.md`, `_pre.<NAME>.md`, `_post.<NAME>.md`) — frontmatter merged across all such files at the dir level.
+- (b) A dedicated `_meta.yaml` (or `_meta.md` with only frontmatter) per directory, one source of truth.
+- (c) Only on `<role>.prompt.md` — no dir-level declarations; users must replicate per role.
+
+(b) is cleanest (single source per dir, separates structure from content); (a) is most consistent with the "filenames carry meaning" theme. Pin down before implementation.
+
+Per-role frontmatter on `<role>.prompt.md`:
 ```yaml
 ---
-pre_exec: [concurrent-run-check, source-writable, ./gather-deps.sh]
-post_exec: [copy-runtime-files, ./validate.sh]
----
-```
-
-Frontmatter on `report/security.prompt.md`:
-```yaml
----
+pre_exec: [./security-extra-setup.sh]
 post_exec: [./security-extra-validate.sh]
 ---
 Focus on confirmed exploitable bugs...
 ```
 
-Assembling `:report/security` runs `pre_exec` = `[concurrent-run-check, source-writable, ./gather-deps.sh]` and `post_exec` = `[copy-runtime-files, ./validate.sh, ./security-extra-validate.sh]`. None of these contribute to prompt text.
+Assuming option (b) — `report/_meta.yaml`:
+```yaml
+pre_exec: [concurrent-run-check, source-writable, ./gather-deps.sh]
+post_exec: [copy-runtime-files, ./validate.sh]
+```
+
+Assembling `:report/security` then runs `pre_exec` = `[concurrent-run-check, source-writable, ./gather-deps.sh, ./security-extra-setup.sh]` and `post_exec` = `[copy-runtime-files, ./validate.sh, ./security-extra-validate.sh]`. None of these contribute to prompt text.
 
 **This refactor does not implement the stage executor.** It establishes the substrate:
 - The filesystem layout where actions get declared (frontmatter).
@@ -351,7 +359,7 @@ What ateam does in Go today around an invocation, split by which mechanism in th
 |---|---|---|
 | `gitutil.GetProjectMeta` + `FormatProjectInfo()` → git HEAD + uncommitted-files block prepended to every prompt | `internal/root/resolve.go:91-121`, called by every `cmd/*.go` | `{{PROJECT_INFO}}` template variable (computed once per env, cached) |
 | `prompts.DiscoverReports` → scan `shared/report/*/<name>.md`, filter by `--roles/--all/--max-age`, inline as "# Role Reports" section into the review prompt | `cmd/review.go:177-184`, `prompts/prompts.go:209-242` | `{{ROLE_REPORTS}}` template variable (provided by ateam; encapsulates discovery + filtering + inlining) |
-| `cmd/code.go:158-171` reads `shared/review/review.md`, errors if missing, inlines into code_management prompt | `cmd/code.go:158-171` | `{{include /shared/review/review.md}}` in the code_management template — first-match (errors if missing), inlines content. No special action needed. |
+| `cmd/code.go:158-171` reads `shared/review/review.md`, errors if missing, inlines into code_management prompt | `cmd/code.go:158-171` | `{{include /shared/review/review.md}}` in the `code_management.prompt.md` body — first-match (errors if missing), inlines content. No special action needed. |
 
 These do NOT belong in `pre_exec` frontmatter. They are part of the prompt's content; they are computed during assembly; they have no effect on the runtime environment.
 
@@ -433,7 +441,7 @@ Infrastructure every agent invocation needs.
 
 ## Ad-hoc prompts and CLI-injected stages
 
-For lightweight workflows the user doesn't want to put a full template + role files in the prompt tree. Common case: `ateam parallel` over a few hand-written prompt files, with shared orchestration declared via CLI flags.
+For lightweight workflows the user doesn't want to set up a full dir structure with role files. Common case: `ateam parallel` over a few hand-written prompt files, with shared orchestration declared via CLI flags.
 
 ```
 ateam parallel @file1.md @file2.md \
@@ -454,7 +462,7 @@ A prompt can come from three places, with the same assembly pipeline:
 2. **File reference**: `@path/to/file.md` — absolute or relative path. Frontmatter is parsed if present.
 3. **Inline text or stdin** — passed as a positional argument or piped.
 
-For (2) and (3) there is no `_template.md` wrapping — the prompt is **standalone**. The file body (after frontmatter, if any) is what the agent sees, plus the outermost CLI pre/post wrappers and any CLI-injected pre/post-exec actions.
+For (2) and (3) there is no dir-level wrap — the prompt is **standalone**. The file body (after frontmatter, if any) is what the agent sees, plus the outermost CLI pre/post wrappers and any CLI-injected pre/post-exec actions.
 
 `{{prompt.name}}` for ad-hoc prompts defaults to the file's basename without extension (`file1` for `@file1.md`), or the `--label` value if provided, or empty for raw inline/stdin.
 
@@ -462,7 +470,7 @@ For (2) and (3) there is no `_template.md` wrapping — the prompt is **standalo
 
 Two new flag families mirror the frontmatter declarations:
 
-- `--pre-exec ACTION` (repeatable) — appended to whatever `pre_exec` the template/file frontmatter declares. CLI items run **after** template/frontmatter items in the pre phase (so user CLI hooks see the template's setup already done).
+- `--pre-exec ACTION` (repeatable) — appended to whatever `pre_exec` the dir-level and role-level frontmatter declare. CLI items run **after** frontmatter-declared items in the pre phase (so user CLI hooks see the standard setup already done).
 - `--post-exec ACTION` (repeatable) — appended to `post_exec`. Same ordering.
 
 CLI items go through the same expansion as frontmatter items (substitutions, builtin-vs-script resolution). Existing `--pre-prompt TEXT` / `--post-prompt TEXT` keep their meaning (outermost raw-text wrap).
@@ -470,9 +478,9 @@ CLI items go through the same expansion as frontmatter items (substitutions, bui
 **Action vs script syntax.** Bare names resolve against the built-in actions registry (`concurrent-run-check`, `copy-runtime-files`, etc.). Path-like values (starting with `./`, `/`, or `~`) are scripts. The explicit `builtin:NAME` prefix is supported for clarity (and matches the user's mental model in mixed examples).
 
 **Script path resolution.** Differs by source:
-- Frontmatter in `_template.md` or `<name>.prompt.md`: relative paths resolve from the file's directory.
+- Frontmatter in dir-level metadata or `<role>.prompt.md`: relative paths resolve from the file's directory.
 - CLI `--pre-exec` / `--post-exec`: relative paths resolve from the user's CWD (where they invoked `ateam`).
-- This matches user expectation: template-declared scripts ship with the template; CLI-injected scripts are project-local.
+- This matches user expectation: prompt-tree-declared scripts ship with the prompts; CLI-injected scripts are project-local.
 
 ### Labels (`--labels`)
 
@@ -491,15 +499,15 @@ Pre-exec / post-exec scripts referencing `{{LABEL}}` get the per-job substitutio
 
 For any run (built-in workflow or ad-hoc), the final `pre_exec` list is:
 
-1. Items from the dir-template's frontmatter (if any).
+1. Items from the dir-level frontmatter (if any).
 2. Items from the named prompt's frontmatter (if any).
 3. Items from `--pre-exec` CLI flags (in order).
 
-Same shape for `post_exec`. Same general layering for the prompt-text wrap (CLI `--pre-prompt` outermost, then template/file body, then CLI `--post-prompt`).
+Same shape for `post_exec`. Same general layering for the prompt-text wrap (CLI `--pre-prompt` outermost, then assembled prompt body, then CLI `--post-prompt`).
 
 ### Why not put orchestration in each file?
 
-For one or two ad-hoc files, frontmatter in each works. For "N similar jobs with the same hooks," the CLI form is the right place: one declaration covers N jobs, and each job's per-job substitutions (`{{LABEL}}`) flow naturally. For ateam's built-in workflows (report, code, review), the orchestration lives in the shipped `_template.md` files — same mechanism, different home.
+For one or two ad-hoc files, frontmatter in each works. For "N similar jobs with the same hooks," the CLI form is the right place: one declaration covers N jobs, and each job's per-job substitutions (`{{LABEL}}`) flow naturally. For ateam's built-in workflows (report, code, review), the orchestration lives in the shipped dir-level metadata — same mechanism, different home.
 
 ### Inline frontmatter on stdin / heredoc
 
@@ -528,15 +536,15 @@ The system is a **layered specialization engine**. Each design goal maps to exac
 | Goal | Layer | How |
 |---|---|---|
 | Project-level customization | Anchors (project / org / embedded) | Higher-priority anchor's `main` wins; `{{include?}}` is additive across anchors. |
-| Cross-cutting policy for a group of prompts | Dir-template `_template.md` | Wraps every role body; the body content of the template IS the structure. |
-| Specialization of one named prompt | Project-anchor `<name>.prompt.pre.<NAME>.md` / `.post.<NAME>.md` (fragments composed by the template via `{{include_glob}}`) | Surgical additions persisted in the repo; multiple distinct files compose across anchors. |
+| Cross-cutting policy for a group of prompts | Dir-level `_pre.*.md` / `_post.*.md` files | Composed into every role's assembly automatically based on directory placement. |
+| Specialization of one named prompt | Project-anchor `<role>.pre.<NAME>.md` / `<role>.post.<NAME>.md` fragments | Surgical additions persisted in the repo; multiple distinct files compose across anchors. |
 | Temporary / one-off override | CLI `--pre-prompt` / `--post-prompt` (outermost wrap, raw text) | Doesn't persist; one run. |
 | Inject deterministic context INTO the prompt (save the agent the work) | Category A: template variables (`{{PROJECT_INFO}}`, `{{ROLE_REPORTS}}`, future `{{shell CMD}}`) and `{{include}}` directives. Computed during assembly. | Idempotent, side-effect-free; runs during preview too. |
 | Set up the runtime environment BEFORE the agent runs | Category B: stage **pre** phase (frontmatter `pre_exec`) | concurrent-run-check, budget-precheck, source-writable, future worktree creation. Side effects expected; does NOT run during preview. |
 | Side effects AFTER the agent runs (artifacts, tests, commits, telemetry) | Category B: stage **post** phase (frontmatter `post_exec`) | copy-runtime-files, chain-next, run tests, schema-validate, build, commit, update tracker. |
 | Compose shared paragraphs across prompts | `{{include :name}}` | One source of truth for shared content; resolves through anchors. |
 | Runtime-varying values (same template, different inputs) | Future frontmatter `params:` + CLI `--param k=v` + `{{param.k}}` | Single mechanism; defer until concrete need. |
-| Filter "run all enabled" prompts | Future frontmatter `enabled_from:` on `_template.md` (delegates to a metadata source like `config.toml`) | Keeps prompt-system content-only; enablement is workflow metadata. |
+| Filter "run all enabled" prompts | Future frontmatter `enabled_from:` on dir-level metadata file (delegates to a source like `config.toml`) | Keeps prompt-system content-only; enablement is workflow metadata. |
 
 Two recurring patterns:
 
@@ -545,7 +553,7 @@ Two recurring patterns:
 
 ## Code structure: `internal/prompts/` (the `PromptAssembler` module)
 
-The core abstraction is a `PromptAssembler` that knows nothing about ateam workflows. It takes anchors and assembles a named prompt by resolving its `_template.md` (if any) and recursively expanding `{{include}}` / `{{include?}}` directives.
+The core abstraction is a `PromptAssembler` that knows nothing about ateam workflows. Given a prompt name `<dir>/<role>`, it walks the directory chain from root to leaf, discovers all matching `_pre.*.md`, `_post.*.md`, `<role>.pre.*.md`, `<role>.prompt.md`, `<role>.post.*.md` files across anchors, and composes them per the assembly order. It also expands `{{include}}` / `{{include?}}` / `{{include_glob}}` directives inside any included content.
 
 ### Sketch
 
@@ -572,14 +580,14 @@ type Frontmatter struct {
 type ResolvedFile struct {
     Anchor   string
     Path     string  // within the anchor
-    Kind     string  // "template" | "named" | "fragment-via-include?" | "cli-pre" | "cli-post"
-    ViaInclude string // include directive that produced this (empty if direct)
+    Slot     string  // "dir-pre" | "dir-post" | "role-pre" | "role-main" | "role-post" | "cli-pre" | "cli-post"
+    Depth    int     // 0 = root, 1 = first subdir, etc. (for dir-level slots)
 }
 
 type Resolution struct {
     Name        string
     Files       []ResolvedFile  // ordered as they contribute to the final text
-    Frontmatter Frontmatter     // merged: dir-template + per-prompt
+    Frontmatter Frontmatter     // merged: all dir-level + role-level
 }
 
 type Assembler struct {
@@ -601,18 +609,20 @@ func (a *Assembler) ListNamedPrompts(dir string) ([]string, error)
 
 - **`fs.FS` for anchors** handles disk and embedded uniformly.
 - **No `Resolver`/`Assembler` split** — three methods on one type.
-- **`{{include}}` and `{{include?}}` are handled by the Assembler**, not by Templater. The Templater handles only variable substitution. This is because include resolution requires anchor knowledge that the Templater doesn't have.
-- **Two-pass expansion**: variable substitution inside include paths first, then resolve includes, then variable substitution in the final content.
-- **`ListNamedPrompts(dir)`** is what role discovery reduces to. Filters out `_template.md` and fragment files; returns invokable basenames.
+- **`{{include*}}` directives are handled by the Assembler**, not the Templater. The Templater handles only variable substitution. Include resolution requires anchor knowledge.
+- **Assembly is filename-driven** — no template file orchestrates it. The Assembler discovers `_pre.*.md`, `_post.*.md`, and role pre/main/post files by pattern.
+- **Two-pass expansion** for `{{include* ... {{var}} ...}}` paths: variable substitution inside include paths first, then resolve includes, then final variable substitution.
+- **`ListNamedPrompts(dir)`** is what role discovery reduces to. Filters by pattern; returns invokable basenames (excludes dir-level structural files).
+- **Orphan-fragment validation** runs at load: every `<role>.pre.*.md` and `<role>.post.*.md` requires a matching `<role>.prompt.md`.
 - **Outside the module:** `:` syntax parsing (CLI), workflow knowledge, action/role vocabulary, template variable values (Templater wraps these), migration of old layouts, stage execution (follow-up refactor).
 
 ### What changes outside `internal/prompts/`
 
 - `internal/root/resolve.go` — replace path helpers with prompt-name-based lookups.
 - `internal/runner/runner.go:1156` — drop the `*_prompt.md` exclusion in `promoteRuntimeFiles`. Update canonical destination to `SharedPromptDir(promptName)/<basename>.md`.
-- `internal/runner/template.go` — add `SHARED_BASE_DIR` and `SHARED_PROMPT_DIR` template variables. `PrimaryOutputName()` becomes `<promptBasename>.md`.
-- `defaults/` — rename files into the new tree; ship `_template.md` defaults; update `//go:embed`.
-- `cmd/*.go` — remove `RoleID: "supervisor"` hardcodes; route through `Assemble(name)`. Rework `cmd/prompt.go` to accept positional `:report/security` and `--preview` / `--content` flags.
+- `internal/runner/template.go` — add `SHARED_BASE_DIR`, `SHARED_PROMPT_DIR`, `PROJECT_INFO`, `ROLE_REPORTS`, `LABEL` template variables. `PrimaryOutputName()` becomes `<promptBasename>.md`.
+- `defaults/` — rename files into the new tree; ship `_pre.*.md` / `_post.*.md` defaults; update `//go:embed`.
+- `cmd/*.go` — remove `RoleID: "supervisor"` hardcodes; route through `Assemble(name)`. Rework `cmd/prompt.go` to accept positional `:report/security` and `--preview` / `--content` flags. Add `--pre-exec`, `--post-exec`, `--labels`.
 - `internal/config/config.go` — `SupervisorConfig` struct stays; filesystem-only change.
 - `internal/web/handlers.go`, `internal/web/export.go` — update artifact read paths.
 
@@ -651,7 +661,7 @@ These do NOT belong in `pre_exec` frontmatter — they're prompt content, comput
 
 `{{prompt.body}}` is **not** a variable. Where the previous approach used it, templates use `{{include {{prompt.name}}.prompt.md}}` — explicit inclusion.
 
-**Default-destination guidance:** prompts write to `{{OUTPUT_DIR}}` (per-execution, free history). Promotion to `{{SHARED_PROMPT_DIR}}` is reserved for outputs that need to be visible to other agents (report → review, review → code_management, auto_setup → user/future agents). Today's `promoteRuntimeFiles` Go path handles this hardcoded for known workflows; eventually it's the `copy-runtime-files` action declared in `_template.md` frontmatter.
+**Default-destination guidance:** prompts write to `{{OUTPUT_DIR}}` (per-execution, free history). Promotion to `{{SHARED_PROMPT_DIR}}` is reserved for outputs that need to be visible to other agents (report → review, review → code_management, auto_setup → user/future agents). Today's `promoteRuntimeFiles` Go path handles this hardcoded for known workflows; eventually it's the `copy-runtime-files` action declared in dir-level metadata.
 
 ## Shared artifacts model
 
@@ -670,7 +680,7 @@ When an artifact must be visible to other agents:
 
 ### Promotion
 
-Today: hardcoded Go (`promoteRuntimeFiles`). Future (stage executor): explicit `copy-runtime-files` action in `_template.md` frontmatter. This refactor keeps Go-side promotion for now to minimize moving parts.
+Today: hardcoded Go (`promoteRuntimeFiles`). Future (stage executor): explicit `copy-runtime-files` action in dir-level metadata. This refactor keeps Go-side promotion for now to minimize moving parts.
 
 ## Auto-migration
 
@@ -684,18 +694,18 @@ On `ateam` startup, when `.ateam/` or `.ateamorg/` is loaded, detect the old lay
 |---|---|
 | `.ateam/roles/<R>/report_prompt.md` | `.ateam/prompts/report/<R>.prompt.md` |
 | `.ateam/roles/<R>/code_prompt.md` | `.ateam/prompts/code/<R>.prompt.md` |
-| `.ateam/roles/<R>/report_extra_prompt.md` | `.ateam/prompts/report/<R>.prompt.post.extra.md` |
-| `.ateam/roles/<R>/code_extra_prompt.md` | `.ateam/prompts/code/<R>.prompt.post.extra.md` |
+| `.ateam/roles/<R>/report_extra_prompt.md` | `.ateam/prompts/report/<R>.post.extra.md` |
+| `.ateam/roles/<R>/code_extra_prompt.md` | `.ateam/prompts/code/<R>.post.extra.md` |
 | `.ateam/roles/<R>/report.md` | `.ateam/shared/report/<R>/<R>.md` |
 | `.ateam/roles/<R>/history/...` | dropped (history now via `runtime/<exec_id>/`) |
-| `.ateam/report_base_prompt.md` | merged into `.ateam/prompts/report/_template.md` body (above the role include) |
-| `.ateam/code_base_prompt.md` | merged into `.ateam/prompts/code/_template.md` body |
-| `.ateam/report_extra_prompt.md` | `.ateam/prompts/report/prompt.post.legacy.md` (picked up by template's `{{include_glob prompt.post.*.md}}`) |
-| `.ateam/code_extra_prompt.md` | `.ateam/prompts/code/prompt.post.legacy.md` |
+| `.ateam/report_base_prompt.md` | `.ateam/prompts/report/_pre.base.md` |
+| `.ateam/code_base_prompt.md` | `.ateam/prompts/code/_pre.base.md` |
+| `.ateam/report_extra_prompt.md` | `.ateam/prompts/report/_post.extra.md` |
+| `.ateam/code_extra_prompt.md` | `.ateam/prompts/code/_post.extra.md` |
 | `.ateam/supervisor/review_prompt.md` | `.ateam/prompts/review.prompt.md` |
-| `.ateam/supervisor/review_extra_prompt.md` | `.ateam/prompts/review.prompt.post.extra.md` (root template picks up via `{{include_glob {{prompt.name}}.prompt.post.*.md}}`) |
+| `.ateam/supervisor/review_extra_prompt.md` | `.ateam/prompts/review.post.extra.md` |
 | `.ateam/supervisor/code_management_prompt.md` | `.ateam/prompts/code_management.prompt.md` |
-| `.ateam/supervisor/code_management_extra_prompt.md` | `.ateam/prompts/code_management.prompt.post.extra.md` |
+| `.ateam/supervisor/code_management_extra_prompt.md` | `.ateam/prompts/code_management.post.extra.md` |
 | `.ateam/supervisor/code_verify_prompt.md` | `.ateam/prompts/code_verify.prompt.md` |
 | `.ateam/supervisor/auto_setup_prompt.md` | `.ateam/prompts/auto_setup.prompt.md` |
 | `.ateam/supervisor/exec_debug_prompt.md` | `.ateam/prompts/exec_debug.prompt.md` |
@@ -705,7 +715,7 @@ On `ateam` startup, when `.ateam/` or `.ateamorg/` is loaded, detect the old lay
 | `.ateam/supervisor/history/...` | dropped |
 | `.ateam/setup_overview.md` | `.ateam/shared/auto_setup/auto_setup.md` |
 
-For built-in embedded defaults: ateam ships new `_template.md` files at root and at `report/` / `code/`. The migration step at the project anchor doesn't write these (they come from embedded defaults); it only moves user-authored files into the new layout.
+For built-in embedded defaults: ateam ships new `_pre.*.md` and `_post.*.md` files at root and inside `report/`, `code/`. The migration step at the project anchor doesn't write these (they come from embedded defaults); it only moves user-authored files into the new layout.
 
 After migration, remove the now-empty `roles/` and `supervisor/` directories. Print a one-line notice on stderr on first migration. Implementation in a new `internal/migrate/v1_layout.go`, called from `internal/root/resolve.go` when env is first materialized.
 
@@ -724,25 +734,35 @@ After migration, remove the now-empty `roles/` and `supervisor/` directories. Pr
 $ ateam prompt :report/security --preview
 Assembly for 'report/security':
 
-Frontmatter (merged from dir-template + named prompt):
+Frontmatter (merged from dir-level + role-level):
   pre_exec:  [concurrent-run-check]
   post_exec: [copy-runtime-files]
 
 Resolution:
   [CLI]      --pre-prompt                                                (empty)
-  [embedded] prompts/report/_template.md                                 (dir template)
-    {{PROJECT_INFO}}                                                     (variable)
-    via {{include_glob prompt.pre.*.md}}:
-      [embedded] prompts/report/prompt.pre.default.md
-      [project]  prompts/report/prompt.pre.local.md
-    via {{include_glob security.prompt.pre.*.md}}:
-      [project]  prompts/report/security.prompt.pre.scope.md
-    via {{include security.prompt.md}}:
-      [embedded] prompts/report/security.prompt.md                       (role body, first-match)
-    via {{include_glob security.prompt.post.*.md}}:
-      (no matches)
-    via {{include_glob prompt.post.*.md}}:
-      [project]  prompts/report/prompt.post.disclosure.md
+
+  root _pre.*.md:
+    [embedded] prompts/_pre.context.md            (contains {{PROJECT_INFO}})
+
+  report _pre.*.md:
+    [embedded] prompts/report/_pre.intro.md
+    [project]  prompts/report/_pre.local.md       (added by project anchor)
+
+  security.pre.*.md:
+    [project]  prompts/report/security.pre.scope.md
+
+  security.prompt.md:
+    [embedded] prompts/report/security.prompt.md  (first-match overload)
+
+  security.post.*.md:
+    (no matches)
+
+  report _post.*.md:
+    [embedded] prompts/report/_post.format.md
+
+  root _post.*.md:
+    (no matches)
+
   [CLI]      --post-prompt                                               (empty)
 ```
 
@@ -762,26 +782,27 @@ Resolution:
 
 ### Stage-related (drives a follow-up design pass)
 
-1. **Pre/post exec action v1 catalog** (category B only — content injection actions moved to category A): `concurrent-run-check`, `budget-precheck`, `source-writable` (pre); `copy-runtime-files`, `chain-next` (post). Confirm.
-2. **Assembly-time content injection v1**: `{{PROJECT_INFO}}` and `{{ROLE_REPORTS}}` as template variables (replacing today's hardcoded `FormatProjectInfo` and `DiscoverReports` Go logic). Plus `{{include /shared/review/review.md}}` in code's template (replacing today's `cmd/code.go` read+inline). Confirm.
-3. **Action parameter shape** — single string vs key-value map. Recommend single string for v1 (matches `chain-next: <action>`).
-4. **Script ordering**: explicit YAML list order — no glob, no numeric prefix.
-5. **Failure semantics** — does a failed pre step block the prompt? Does a failed post step fail the stage? Per-step `on_failure: stop|continue` policy.
-6. **Per-prompt frontmatter merge with dir-template frontmatter**: append by default (`pre_exec` lists concatenate). `replace: true` opt-in for full override.
-7. **Today's promotion behavior preserved during transition** — `cmd/report.go` / `cmd/review.go` / `cmd/auto_setup.go` keep calling `promoteRuntimeFiles`. `cmd/code.go` / `cmd/code_management.go` / `cmd/verify.go` continue NOT to promote. Once the stage executor lands, the promotions become explicit `copy-runtime-files` actions in `_template.md` frontmatter.
-8. **`{{ROLE_REPORTS}}` filtering inputs** — today's review reads `--roles`, `--all`, `--max-age` from CLI flags and applies them. As a template variable, how are those filter inputs passed? Probably as additional run-context that the variable resolver reads (CLI → run context → variable expansion). Pin down before implementation.
-9. **CLI-injected `--pre-exec` / `--post-exec` shape** — single string per flag, repeatable (matches `--pre-prompt` shape). Action expansion (substitutions, builtin-vs-script) runs at execution time, not flag-parse time. Confirm.
-10. **`{{LABEL}}` default for non-parallel runs** — empty string, or same as `{{prompt.name}}`? Empty is cleaner (clearly means "no per-job context"). Confirm.
+1. **Pre/post exec action v1 catalog** (category B only — content injection lives in template vars, see category A): `concurrent-run-check`, `budget-precheck`, `source-writable` (pre); `copy-runtime-files`, `chain-next` (post). Confirm.
+2. **Assembly-time content injection v1**: `{{PROJECT_INFO}}` and `{{ROLE_REPORTS}}` as template variables. Plus `{{include /shared/review/review.md}}` in code_management's prompt (replacing today's `cmd/code.go` read+inline). Confirm.
+3. **Where dir-level frontmatter lives.** Now that `_template.md` is gone, dir-level `pre_exec`/`post_exec` declarations need a home. Options: (a) on `_pre.md`/`_post.md` files; (b) dedicated `_meta.yaml` per dir; (c) only on `<role>.prompt.md`. Recommend (b). **Decide.**
+4. **Action parameter shape** — single string vs key-value map. Recommend single string for v1.
+5. **Script ordering** — explicit YAML list order.
+6. **Failure semantics** — does a failed pre step block the prompt? Does a failed post step fail the stage? Per-step `on_failure: stop|continue` policy.
+7. **Per-role frontmatter merge with dir-level frontmatter** — append by default (`pre_exec` lists concatenate). `replace: true` opt-in for full override.
+8. **Today's promotion behavior preserved during transition** — `cmd/report.go` / `cmd/review.go` / `cmd/auto_setup.go` keep calling `promoteRuntimeFiles`. `cmd/code.go` / `cmd/code_management.go` / `cmd/verify.go` continue NOT to promote. Once the stage executor lands, promotions become explicit `copy-runtime-files` actions in dir-level frontmatter.
+9. **`{{ROLE_REPORTS}}` filtering inputs** — today's review reads `--roles`, `--all`, `--max-age` and applies them. As a template variable, filter inputs flow via run-context. Pin down.
+10. **CLI-injected `--pre-exec` / `--post-exec` shape** — single string per flag, repeatable. Action expansion runs at execution time, not flag-parse time. Confirm.
+11. **`{{LABEL}}` default for non-parallel runs** — empty string (recommended) or same as `{{prompt.name}}`. Confirm.
 
 ### Prompt-system questions
 
-7. **`{{include?}}` semantics across anchors**: additive (recommended) or first-match. Locked: **additive**.
-8. **`{{include}}` (non-`?`) semantics**: first-match (recommended) or additive. Locked: **first-match, error if missing**.
-9. **Setup overview filename** — auto-migration renames `setup_overview.md` → `auto_setup/auto_setup.md`. Acceptable break, or keep historical name?
-10. **`ateam roles` output** — keep as role-listing, or unify under `ateam prompts list` / `ateam stages list`? Decided after the refactor lands.
-11. **Specialization for runtime-varying values** — frontmatter `params:` + CLI `--param k=v` + `{{param.k}}`. Deferred.
-12. **Enablement: "run all enabled prompts in parallel" — where does enabled/disabled metadata live?** ateam keeps `config.toml [roles]`. For future mini-workflows: frontmatter `enabled_from:` on `_template.md` pointing at an enablement source, or inline `enabled: [a, b, c]`. Revisit when a second workflow surfaces.
-13. **Frontmatter schema strictness** — strict allow-list (recommended) so unknown keys error. Reserves space for future keys and prevents silent typos. Lock as: strict.
+12. **`{{include?}}` semantics across anchors** — first-match (same as `{{include}}`, just optional). Locked.
+13. **`{{include_glob}}` semantics across anchors** — additive (all matches, embedded → org → project, lexical within anchor). Locked.
+14. **Setup overview filename** — auto-migration renames `setup_overview.md` → `auto_setup/auto_setup.md`. Acceptable break, or keep historical name?
+15. **`ateam roles` output** — keep as role-listing, or unify under `ateam prompts list` / `ateam stages list`? Decided after the refactor lands.
+16. **Specialization for runtime-varying values** — frontmatter `params:` + CLI `--param k=v` + `{{param.k}}`. Deferred.
+17. **Enablement** — ateam keeps `config.toml [roles]`. For future mini-workflows: frontmatter `enabled_from:` on dir-level metadata, or inline `enabled: [a, b, c]`. Revisit when a second workflow surfaces.
+18. **Frontmatter schema strictness** — strict allow-list (recommended) so unknown keys error. Lock as: strict.
 
 ## Critical files to read before implementing
 
@@ -804,71 +825,80 @@ Resolution:
 5. End-to-end on a fresh `./test_data/` project: `ateam init`, `ateam report --roles project.security`, verify the report lands at `.ateam/shared/report/project.security/project.security.md`. Then `ateam review`, verify it lands at `.ateam/shared/review/review.md`.
 6. **Migration test** — project with old layout (artifacts plus overrides at all levels), run `ateam` once, verify behavior. Re-run to confirm idempotence.
 7. **Org-override test** — both org-level and project-level overrides for the same role; confirm anchor fallback still works.
-8. **Include resolution test** — `{{include?}}` additive: create a project with the same fragment file at embedded, org, and project anchors; assert the assembled output concatenates all three in most-general-first order. `{{include}}` first-match: assert project wins; remove project file and assert org wins; etc.
-9. **Frontmatter test** — invalid YAML errors at preview; unknown key errors; pre_exec list ordering preserved; per-prompt frontmatter extends dir-template frontmatter.
-10. Manual smoke: `ateam prompt :review`, `ateam prompt :code_management`, `ateam prompt :report/project.security`.
-11. **Preview tool** — `ateam prompt :report/project.security --preview` lists every contributing file with anchor tags AND merged frontmatter, in the exact assembly order. `--preview --content` produces the full assembled text.
+8. **Composition test** — `{{include}}` / `{{include?}}` first-match: create the same filename at embedded, org, and project anchors; assert project's wins. `{{include_glob}}` additive: create distinct filenames at each anchor matching the glob; assert all are concatenated in most-general-first order. Dir-level `_pre.*.md`: same composition; multiple files at one anchor sorted lexically.
+9. **Frontmatter test** — invalid YAML errors at preview; unknown key errors; pre_exec list ordering preserved; per-role frontmatter extends dir-level frontmatter.
+10. **Role-name validation test** — `_security.prompt.md` (starts with `_`) errors at load. `code.pre.prompt.md` (ends with `.pre`) errors. Both messages clearly state the rule.
+11. **Orphan-fragment test** — `securty.pre.scope.md` (typo) errors with Levenshtein hint suggesting `security`.
+12. Manual smoke: `ateam prompt :review`, `ateam prompt :code_management`, `ateam prompt :report/project.security`.
+13. **Preview tool** — `ateam prompt :report/project.security --preview` lists every contributing file with anchor tags AND merged frontmatter, in the exact assembly order. `--preview --content` produces the full assembled text.
 
 ---
 
-## Initial approach (rejected)
+## Earlier approaches (rejected)
 
-For posterity. The earlier draft of this spec used a different mechanism: **convention-driven recursive composition encoded in the framework**, no template directives, no frontmatter (initially). It was abandoned for the reasons noted at the bottom of this section.
+The design went through two earlier shapes before landing on the current dir-level `_pre.*.md` / `_post.*.md` scheme. Both are documented here for posterity.
 
-### Mechanism
+### Rejected approach 1: convention-driven recursive composition
 
-- File kinds: `<name>.prompt.md` (named prompt), `prompt.md` (dir base, auto-prepended), `prompt.pre.md` / `prompt.post.md` (dir-level pre/post), `<name>.prompt.pre.md` / `<name>.prompt.post.md` (per-named pre/post). All meaning baked into the framework by filename.
+The first draft baked composition into the framework: filenames carried meaning, and the framework recursively walked the directory chain.
+
+**Mechanism:**
+- File kinds: `<name>.prompt.md` (named prompt), `prompt.md` (dir base, auto-prepended), `prompt.pre.md` / `prompt.post.md` (dir-level pre/post), `<name>.prompt.pre.md` / `<name>.prompt.post.md` (per-named pre/post).
 - Recursive composition: for any prompt at path `P`, walk strict prefixes shortest→longest, then `P` itself. At each level: pre (additive across anchors) + main (first-match) + post (additive). The framework hardcoded "main is fallback, pre/post are additive."
 - `prompt.md` at a directory level was **auto-prepended** to every named prompt below it. No template directive, no opt-in.
-- A later evolution introduced `_template.prompt.md` as a directory wrapper file with `{{prompt.body}}` substitution. The convention-driven composition still applied around it.
-- A still-later evolution considered `_.toml` / `_.yaml` sidecar metadata files for declaring stage actions; rejected for file proliferation.
 
-### What it looked like
+**Why rejected:**
+1. **"Inserted first vs inserted last" was a forced choice.** The framework's rule put the dir base BEFORE the role's body, but many real wrappers (report format, output structure) belong AFTER. Splitting "the dir's shared instructions" between `prompt.md` (before) and `prompt.post.md` (after) was awkward.
+2. **Hardcoded composition in the framework.** "Why did the assembled prompt include X?" required knowing the recursive walk rules, not reading the files.
+3. **No natural home for declarative metadata** (stage actions, enablement). Parallel mechanisms kept being invented.
+4. **Naming explosion.** ~6 file patterns with rules between them.
 
+### Rejected approach 2: template file + `{{include}}` directives
+
+The second draft tried to make composition explicit by putting it in a per-directory `_template.md` file that used `{{include}}` / `{{include?}}` / `{{include_glob}}` to orchestrate fragments.
+
+**Mechanism:**
+- `_template.md` was a structural file (not invokable) that wrapped each role in the directory.
+- Templates used `{{include}}` directives to pull in dir-level fragments (`prompt.pre.<NAME>.md`), per-role fragments (`<role>.prompt.pre.<NAME>.md`), and the role body itself.
+- YAML frontmatter on `_template.md` declared dir-level stage actions (`pre_exec`, `post_exec`).
+- Naming used `<role>.prompt.pre.<NAME>.md` and `prompt.pre.<NAME>.md` (no `_` prefix).
+
+**Example shipped template:**
+```yaml
+---
+post_exec: [copy-runtime-files]
+---
+You are performing a {{prompt.name}} report on this project.
+
+{{PROJECT_INFO}}
+
+{{include_glob prompt.pre.*.md}}
+{{include_glob {{prompt.name}}.prompt.pre.*.md}}
+
+{{include {{prompt.name}}.prompt.md}}
+
+{{include_glob {{prompt.name}}.prompt.post.*.md}}
+{{include_glob prompt.post.*.md}}
+
+Format your findings as severity-tagged markdown sections...
 ```
-prompts/
-  report/
-    prompt.md              # dir base, auto-prepended to every role
-    prompt.pre.md          # dir-level pre
-    prompt.post.md         # dir-level post (after every named prompt's triplet)
-    security.prompt.md     # role
-    security.prompt.pre.md
-    security.prompt.post.md
-  review.prompt.md
-  review.prompt.pre.md
-  review.prompt.post.md
-```
 
-Assembly for `:report/security`:
-```
-[CLI pre]
-  prompts/prompt.pre.md (root)
-  prompts/prompt.md (root, if any)
-    prompts/report/prompt.pre.md
-    prompts/report/prompt.md
-      prompts/report/security.prompt.pre.md
-      prompts/report/security.prompt.md
-      prompts/report/security.prompt.post.md
-    prompts/report/prompt.post.md
-  prompts/prompt.post.md (root, if any)
-[CLI post]
-```
-
-### Why it was rejected
-
-1. **"Inserted first vs inserted last" was a forced choice.** The framework's rule put the dir base BEFORE the role's body, but many real wrappers (report format, output structure) belong AFTER. The split between `prompt.md` (before) and `prompt.post.md` (after) was awkward — you had to mentally separate "the dir's shared instructions" between two files when they were really one wrapper.
-2. **Hardcoded composition in the framework.** "Why did the assembled prompt include X?" required knowing the framework's recursive walk rules, not reading the files. The implicit auto-prepend was magic — convenient at first, opaque under pressure.
-3. **No natural home for declarative metadata.** Stage actions (pre_exec/post_exec, enablement) need somewhere to live. The convention-based approach kept inventing parallel mechanisms (sibling exec files, separate metadata files, in-prompt directives) and each had its own ordering ambiguity or file-proliferation problem.
-4. **The naming explosion.** With per-role and per-dir pre/post, plus templates and template pre/post, the framework had to know about ~6 file patterns and the rules between them. The new approach has 2 file kinds plus arbitrary fragments.
-5. **The dir-template `_template.prompt.md` evolution still had hidden rules.** The framework decided what was "main" vs "wrapper" by filename, what got substituted where, and how anchor levels composed. Hidden complexity.
+**Why rejected:**
+1. **Templates are opaque.** To know what gets assembled, you must open the template file and read its `{{include}}` boilerplate. `ls` alone doesn't tell you anything.
+2. **Boilerplate cost.** Every templated directory needed 5+ `{{include}}` lines just to wire up the standard convention. Authoring a new workflow meant writing or copying this boilerplate.
+3. **Subtle ambiguity in dotted filenames.** `prompt.pre.foo.md` could parse as either dir-level pre or role "prompt" pre fragment "foo." The required reservation of `prompt`/`pre`/`post` as forbidden role-name suffixes was hard to defend in writing.
+4. **`.prompt.` infix duplication.** Files like `security.prompt.pre.scope.md` repeated `.prompt.` unnecessarily.
 
 ### What carried forward to the chosen approach
 
-- The directory split between `prompts/` (config), `shared/` (cross-agent), `runtime/` (per-run).
-- The action-first identifier model (`:report/security`, `:review`).
-- The anchor system (project → org → embedded).
+- Directory split between `prompts/` (config), `shared/` (cross-agent), `runtime/` (per-run).
+- Action-first identifier model (`:report/security`, `:review`).
+- Anchor system (project → org → embedded).
 - Auto-migration of old layouts.
 - The Stage concept (pre/prompt/post phases) and the grounded built-in action catalog.
-- The substitution variables `{{prompt.name}}`, `{{prompt.path}}` (originally proposed as `{{prompt.body}}` too, dropped in favor of explicit `{{include {{prompt.name}}.prompt.md}}`).
+- The "one rule" for filename composition (same name = overload; different name = compose).
+- Template engine primitives: `{{include}}`, `{{include?}}`, `{{include_glob}}`, `{{var}}`, YAML frontmatter parsing.
+- Substitution variables `{{prompt.name}}`, `{{prompt.path}}`, `{{LABEL}}`, `{{PROJECT_INFO}}`, `{{ROLE_REPORTS}}`.
+- Ad-hoc prompt mechanics (`@file.md`, stdin, CLI `--pre-exec`/`--post-exec`).
 
-The chosen approach replaces the hardcoded recursive composition with explicit `{{include}}` directives in templates, and moves declarative metadata into YAML frontmatter on `_template.md` and `<name>.prompt.md` files.
+The chosen approach drops the template file entirely. Assembly is filename-driven: `_pre.*.md`, `_post.*.md` (dir-level, structural — marked by `_` prefix), and `<role>.prompt.md`, `<role>.pre.*.md`, `<role>.post.*.md` (role-level). The framework discovers the matching files and composes them per the fixed assembly order; `{{include*}}` directives remain available inside any file for ad-hoc composition.
