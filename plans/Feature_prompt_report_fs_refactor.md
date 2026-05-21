@@ -414,6 +414,96 @@ Infrastructure every agent invocation needs.
 - Auto-commit / PR creation in Go
 - Log rotation / cleanup
 
+## Ad-hoc prompts and CLI-injected stages
+
+For lightweight workflows the user doesn't want to put a full template + role files in the prompt tree. Common case: `ateam parallel` over a few hand-written prompt files, with shared orchestration declared via CLI flags.
+
+```
+ateam parallel @file1.md @file2.md \
+  --pre-exec 'builtin:create-git-worktree {{LABEL}}' \
+  --pre-exec './my-script.sh {{LABEL}}' \
+  --post-exec './my-other-script.py' \
+  --labels job1,job2 \
+  --post-prompt "pay attention to this custom instruction"
+```
+
+This pattern needs the following spec additions.
+
+### Prompt sources
+
+A prompt can come from three places, with the same assembly pipeline:
+
+1. **Named prompt**: `:name` or `:dir/name` — resolved through the anchor system.
+2. **File reference**: `@path/to/file.md` — absolute or relative path. Frontmatter is parsed if present.
+3. **Inline text or stdin** — passed as a positional argument or piped.
+
+For (2) and (3) there is no `_template.md` wrapping — the prompt is **standalone**. The file body (after frontmatter, if any) is what the agent sees, plus the outermost CLI pre/post wrappers and any CLI-injected pre/post-exec actions.
+
+`{{prompt.name}}` for ad-hoc prompts defaults to the file's basename without extension (`file1` for `@file1.md`), or the `--label` value if provided, or empty for raw inline/stdin.
+
+### CLI-injected stage actions
+
+Two new flag families mirror the frontmatter declarations:
+
+- `--pre-exec ACTION` (repeatable) — appended to whatever `pre_exec` the template/file frontmatter declares. CLI items run **after** template/frontmatter items in the pre phase (so user CLI hooks see the template's setup already done).
+- `--post-exec ACTION` (repeatable) — appended to `post_exec`. Same ordering.
+
+CLI items go through the same expansion as frontmatter items (substitutions, builtin-vs-script resolution). Existing `--pre-prompt TEXT` / `--post-prompt TEXT` keep their meaning (outermost raw-text wrap).
+
+**Action vs script syntax.** Bare names resolve against the built-in actions registry (`concurrent-run-check`, `copy-runtime-files`, etc.). Path-like values (starting with `./`, `/`, or `~`) are scripts. The explicit `builtin:NAME` prefix is supported for clarity (and matches the user's mental model in mixed examples).
+
+**Script path resolution.** Differs by source:
+- Frontmatter in `_template.md` or `<name>.prompt.md`: relative paths resolve from the file's directory.
+- CLI `--pre-exec` / `--post-exec`: relative paths resolve from the user's CWD (where they invoked `ateam`).
+- This matches user expectation: template-declared scripts ship with the template; CLI-injected scripts are project-local.
+
+### Labels (`--labels`)
+
+`ateam parallel` accepts `--labels A,B,C` matching the order of positional prompt sources. Within each job, `{{LABEL}}` resolves to that job's label.
+
+If `--labels` is omitted, defaults are:
+- For `@file.md`: the file's basename (`file1` from `@file1.md`).
+- For inline/stdin: positional index (`job-1`, `job-2`, …).
+- For `:named/prompt`: the prompt's last path component (matches `{{prompt.name}}`).
+
+`{{LABEL}}` is distinct from `{{prompt.name}}`. `prompt.name` identifies the prompt CONTENT (source); `LABEL` identifies the JOB within a parallel batch. For `ateam parallel @site-a.md @site-b.md --labels east,west`, prompt 1 has `prompt.name = site-a`, `LABEL = east`.
+
+Pre-exec / post-exec scripts referencing `{{LABEL}}` get the per-job substitution. Concretely, this makes the worktree-per-job pattern trivial: `--pre-exec 'builtin:create-git-worktree myproj-{{LABEL}}'` creates one worktree per parallel job.
+
+### Final composition for a run
+
+For any run (built-in workflow or ad-hoc), the final `pre_exec` list is:
+
+1. Items from the dir-template's frontmatter (if any).
+2. Items from the named prompt's frontmatter (if any).
+3. Items from `--pre-exec` CLI flags (in order).
+
+Same shape for `post_exec`. Same general layering for the prompt-text wrap (CLI `--pre-prompt` outermost, then template/file body, then CLI `--post-prompt`).
+
+### Why not put orchestration in each file?
+
+For one or two ad-hoc files, frontmatter in each works. For "N similar jobs with the same hooks," the CLI form is the right place: one declaration covers N jobs, and each job's per-job substitutions (`{{LABEL}}`) flow naturally. For ateam's built-in workflows (report, code, review), the orchestration lives in the shipped `_template.md` files — same mechanism, different home.
+
+### Inline frontmatter on stdin / heredoc
+
+When the prompt source is stdin or a heredoc, standard YAML frontmatter works:
+
+```
+ateam exec <<EOF
+---
+pre_exec: [./my_script.sh {{prompt.name}}]
+post_exec: [./my_other_script.sh]
+---
+{{include ./local_file.md}}
+
+do something
+
+{{include? ./custom_instructions.md}}
+EOF
+```
+
+Whether this is heavily used is an open question (the user noted: "for this use case it's better to just run the pre_exec scripts before/after `ateam exec`"). The framework supports it because frontmatter is uniform across all prompt sources, but the killer use case is `ateam parallel` with CLI flags, not single-shot inline.
+
 ## How the layers map to the design goals
 
 The system is a **layered specialization engine**. Each design goal maps to exactly one layer; new requirements should fit an existing layer or surface a missing one.
@@ -521,6 +611,9 @@ The existing `OUTPUT_DIR` / `OUTPUT_FILE` / `EXEC_ID` / `PROFILE` / `AGENT` / `M
 | `{{ROLE}}` | Last path component. `security` for `:report/security`; `review` for singleton. | Keeps current basename semantics; never empty. |
 | `{{prompt.name}}` (new) | Same as `{{ROLE}}` — last path component. | Preferred inside templates. |
 | `{{prompt.path}}` (new) | Full prompt path, e.g. `report/security`. | Unambiguous identifier. |
+| `{{LABEL}}` (new) | Per-job label inside a parallel batch (from `--labels`, or default by source). Distinct from `{{prompt.name}}`. Empty for single-shot non-parallel runs. | Used in pre/post-exec scripts to disambiguate per-job state (worktree names, output directories). |
+
+**Future direction: dotted namespaces.** New variables will tend toward `namespace.attribute` form (`prompt.name`, `prompt.path`, future `git.repo_name`, `git.branch`, `arg.X` for CLI-passed params). Existing ALL_CAPS variables (`PROJECT_NAME`, `OUTPUT_DIR`, etc.) stay as-is for backward compat — no renames in this refactor.
 
 ### Output / artifact vars
 
@@ -658,6 +751,8 @@ Resolution:
 6. **Per-prompt frontmatter merge with dir-template frontmatter**: append by default (`pre_exec` lists concatenate). `replace: true` opt-in for full override.
 7. **Today's promotion behavior preserved during transition** — `cmd/report.go` / `cmd/review.go` / `cmd/auto_setup.go` keep calling `promoteRuntimeFiles`. `cmd/code.go` / `cmd/code_management.go` / `cmd/verify.go` continue NOT to promote. Once the stage executor lands, the promotions become explicit `copy-runtime-files` actions in `_template.md` frontmatter.
 8. **`{{ROLE_REPORTS}}` filtering inputs** — today's review reads `--roles`, `--all`, `--max-age` from CLI flags and applies them. As a template variable, how are those filter inputs passed? Probably as additional run-context that the variable resolver reads (CLI → run context → variable expansion). Pin down before implementation.
+9. **CLI-injected `--pre-exec` / `--post-exec` shape** — single string per flag, repeatable (matches `--pre-prompt` shape). Action expansion (substitutions, builtin-vs-script) runs at execution time, not flag-parse time. Confirm.
+10. **`{{LABEL}}` default for non-parallel runs** — empty string, or same as `{{prompt.name}}`? Empty is cleaner (clearly means "no per-job context"). Confirm.
 
 ### Prompt-system questions
 
