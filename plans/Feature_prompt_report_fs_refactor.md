@@ -281,7 +281,7 @@ Mechanisms in v1:
 - **Template variables** — `{{PROJECT_INFO}}`, `{{ROLE_REPORTS}}`, `{{PROJECT_NAME}}`, `{{ATEAM_OWN_*}}`, etc. ateam computes these once per env and inlines them where referenced.
 - **Includes** — `{{include FILE}}` (required, first-match), `{{include? FILE}}` (optional, first-match), `{{include_glob PATTERN}}` (composes all matches across anchors). Inline file content.
 
-Future addition (deferred): `{{shell CMD}}` directive for user-defined scripts whose stdout becomes prompt content. Inert during preview only if explicitly marked side-effect-free; otherwise preview is the only safe way to run them.
+Future addition (deferred): `{{shell CMD}}` directive for user-defined scripts whose stdout becomes prompt content. See the Stage concept's "Forward look" subsection for the full spec — scripts must be idempotent/read-only; preview runs them with `ATEAM_PREVIEW=1` env var set; side-effecting work belongs in `pre_exec`. Scripts can call `ateam flow` for runtime flow control without mixing concerns.
 
 **Key property:** these run during preview. `ateam prompt :NAME --preview --content` shows the actual assembled prompt — that means assembly-time content has been computed. Anything in this category must be **idempotent and side-effect-free**.
 
@@ -438,6 +438,88 @@ Infrastructure every agent invocation needs.
 - Container teardown / `defer c.Stop()`
 - Auto-commit / PR creation in Go
 - Log rotation / cleanup
+
+### Forward look: `ateam flow` and `{{shell}}` (stage-executor follow-up, not in this refactor)
+
+Two related primitives extend the stage system without changing what we've already designed. They're called out here so the spec stays consistent with where the design is heading.
+
+#### `ateam flow <action>` — runtime flow control from scripts
+
+A new CLI subcommand that scripts (in `pre_exec`, `post_exec`, or even `{{shell}}` directives) call to signal lifecycle decisions back to the runner. Cleanly separates "decide what should happen" (script) from "framework reacts" (runner).
+
+**v1 action set:**
+
+| Action | What it does |
+|---|---|
+| `ateam flow skip [--reason TEXT]` | Don't invoke the LLM for this job. Mark as skipped in the call DB. Post_exec doesn't run. `chain-next` doesn't fire. |
+| `ateam flow error [--reason TEXT]` | Don't invoke the LLM. Mark as failed (with reason). Counts as failure in batch summary. |
+| `ateam flow abort [--reason TEXT]` | Kill the entire `ateam parallel` batch. In-flight jobs receive SIGTERM; pending jobs marked cancelled. |
+| `ateam flow continue` | Explicit no-op signal. Enables clean `... && ateam flow continue \|\| ateam flow error` shell patterns. |
+| `ateam flow note <text>` | Attach a free-form note to the run record. Visible in `ateam ps`, `ateam history`, the DB. Use for "found cached result" type observations that aren't full skips. |
+
+**Future actions (deferred until concrete need):**
+- `set <key> <value>` / `get <key>` — run-scoped K/V store (post_exec can read what pre_exec computed).
+- `retry [--after SECONDS]` — schedule a retry of this job.
+- `defer [--until TIMESTAMP]` — requeue at a future time.
+- `output <file>` — declare a non-default primary output file.
+- `promote <src> <dst>` — explicit copy from `runtime/` to `shared/`.
+- `fork <name>`, `wait <exec_id>` — dynamic fan-out / job dependencies inside a batch.
+
+**Storage:**
+- In-flight: `runtime/<exec_id>/_flow.toml` — append-only during the run. Runner reads at decision points (before LLM, before post_exec, after post_exec). File-based, no DB lock contention with many parallel writers.
+- Historical: call DB row's `status` field gains `skipped` / `aborted` values; new `flow_reason` text column captures the message.
+
+**Discovery:**
+- `ATEAM_EXEC_ID` env var (ateam already sets project/role env for child processes). Scripts ateam launches inherit it.
+- Optional `--exec-id` flag for explicit override (escape hatch for sandboxes or sub-processes that strip env).
+
+**Example — pre_exec gates the run:**
+```bash
+#!/bin/sh
+# .ateam/prompts/crawl/check-needed.sh, declared in dir-level pre_exec
+if [ "$(stat -c %Y source.json)" -le "$(cat .last_crawl 2>/dev/null || echo 0)" ]; then
+  ateam flow skip --reason "source unchanged since last crawl"
+  exit 0
+fi
+```
+
+Works the same for `ateam exec` (single job) and `ateam parallel` (N independent jobs, each with its own flow signal).
+
+#### `{{shell CMD}}` — assembly-time content injection (Category A)
+
+Already noted as "Out of scope" earlier; now formalized for symmetry with `ateam flow`.
+
+`{{shell CMD}}` runs `CMD` during prompt assembly; its stdout becomes part of the prompt body. Used for deterministic context injection that the agent would otherwise have to compute itself.
+
+```
+{{shell git diff --stat HEAD~5}}
+{{shell ./pick-paragraph.sh "$ATEAM_STATE"}}
+```
+
+**Rules:**
+
+1. **Scripts must be idempotent and read-only** beyond `ateam flow` side effects. Assembly may run during `--preview`; scripts that write files or call external APIs don't belong here (use `pre_exec` instead).
+2. **`ATEAM_PREVIEW=1` env var is set during preview** runs. Scripts that need to branch on "is this a real run or a preview?" check that.
+3. **Frontmatter is NOT modifiable from `{{shell}}`.** Frontmatter is parsed before content; assembly-time scripts run during content expansion and can't retroactively change it. To influence the runtime (e.g. "skip this job"), call `ateam flow skip` from inside the shell script — the runner picks up the flow signal after assembly completes and acts on it before launching the LLM.
+4. **Two-pass expansion** (like includes): `{{var}}` substitutions inside `{{shell CMD}}` are resolved first, then the shell command runs.
+
+#### How `ateam flow` and `{{shell}}` compose
+
+Assembly-time decision flow:
+1. Prompt is assembled. `{{shell ./check.sh}}` runs; the script calls `ateam flow skip` if it determines no work is needed.
+2. Assembly completes; prompt text is built normally.
+3. Runner reads `_flow.toml` before launching the agent.
+4. If `skip` was signalled, the LLM is never invoked. Status recorded; batch summary reflects the skip.
+
+This two-stage flow (assembly produces content + flow signals; runner acts on signals after assembly) cleanly separates content composition from lifecycle control. Neither mechanism leaks into the other.
+
+#### What we get vs. cost
+
+- Solves the conditional-run-in-parallel case the file-system approach can't express in shell pipelines.
+- Solves the "skip a job without writing a custom dispatcher" case (Option 4 in the brainstorm).
+- One new CLI subcommand (`ateam flow`), one new flow-state file (`_flow.toml`), one expansion of the call DB schema (status enum, reason text).
+- `{{shell}}` is one additional template-engine primitive.
+- Both are **post-refactor** — this refactor establishes the substrate (assembler module, frontmatter, anchors). The stage executor follow-up implements `ateam flow` and `{{shell}}`.
 
 ## Ad-hoc prompts and CLI-injected stages
 
@@ -771,7 +853,8 @@ Resolution:
 ## Out of scope (deliberately deferred)
 
 - Executable pre/post scripts and built-in actions — frontmatter format is locked, execution is the stage-executor follow-up.
-- `{{shell CMD}}` template directive — assembly-time script execution (category A). Inert-during-preview question to be resolved when implemented.
+- `{{shell CMD}}` template directive — assembly-time script execution (category A). Spec'd in the Stage concept's "Forward look" subsection; implemented post-refactor alongside `ateam flow`.
+- `ateam flow` CLI subcommand for runtime flow control (`skip` / `error` / `abort` / `continue` / `note`). Spec'd in the Stage concept's "Forward look" subsection; implemented post-refactor.
 - Frontmatter `params:` + CLI `--param k=v` for runtime parameterization. One mechanism only when it lands.
 - Multi-target adders (`prepend_to: [a, b]`) — `{{include}}` + shared library file handles it via the library pattern.
 - Renaming `code_management` to something shorter.
