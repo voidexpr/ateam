@@ -1242,4 +1242,3 @@ func printDryRunSecrets(r *runner.Runner, env *root.ResolvedEnv) {
 		}
 	}
 }
-
