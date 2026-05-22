@@ -50,6 +50,14 @@ The patterns that emerge in any such system:
 
 For simple systems, all these patterns are better written directly in the app — that way it only pays for the features it needs. ateam provides the framework once the patterns start compounding: the exact prompt used is cached, and `ateam ps` / `ateam inspect` surface metrics and logs.
 
+### Why prompts belong outside the app
+
+LLM-integrated apps have three layers: **prompts** (instructions to the model — half code in that they handle inputs and shape outputs, half configuration in that they steer behavior), **procedural logic** (scripts and actions around the prompt — pre, during via hooks or CLI options, post), and a **driver** (the CLI or workflow that ties everything together).
+
+At day one all three change together. Once the app stabilizes, the driver and the procedural logic settle into normal code-review pace. **Prompts keep changing** — they're closer to copy than code, and they want non-development-style updates: the model missed a class of findings, emphasis shifts, a project needs different framing, a domain term changes.
+
+That mismatch is why agentic apps eventually externalize their prompts: the file is the unit of change, not the function. ateam provides that structure — a tree of files, diffable, overridable per project / org / embedded — so prompt evolution doesn't pay code-review tax for every wording tweak.
+
 ### What ateam provides
 
 Each feature maps to one or more design challenges above.
