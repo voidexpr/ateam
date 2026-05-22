@@ -15,9 +15,13 @@ The motivating use case is `/review` — Codex's interactive review slash comman
 
 ## Status
 
-**v1 landed in commit `621076c` ("Add codex tmux agent")** — it does the architectural skeleton (tmuxctl, codex adapter, agent type, runtime.hcl wiring, basic tests). This document now tracks **v1.1**: the fixes required to ship the feature, drawn from a follow-up architectural review against Gas Town / oauth-cli-coder lessons and an external code review.
+**v1 landed in commit `621076c` ("Add codex tmux agent")** — the architectural skeleton (tmuxctl, codex adapter, agent type, runtime.hcl wiring, basic tests).
 
-Below the original architecture sections, the **v1.1 plan** lists what changes and in what order.
+**v1.1 landed in commit `97b5ecc` ("codex-tmux: usable for /review and free-form prompts; token tracking; concurrency")** — folds PR 1 through PR 4 of the original v1.1 plan into a single commit, plus the live-fix iterations from end-to-end testing against codex v0.132.0. Live-verified by running `ateam exec "/review the pending changes" --agent codex-tmux` against the actual codex binary; codex produced a real review (and caught a regression I had introduced — the dogfood loop works).
+
+**Outstanding**: container mode (PR 5, the "ateam debugs ateam" dogfood path) and a few documented limitations. See *What's still open* at the bottom.
+
+Below the original architecture sections, the **v1.1 plan** lists what changes shipped and in what order.
 
 ## Why tmux specifically
 
@@ -344,60 +348,66 @@ Tracked as a v2 follow-on (requires tmux+codex in the container image, host-side
 
 ---
 
-## v1.1 implementation sequence
+## v1.1 implementation sequence — all DONE except PR 5
 
-Each PR is independently shippable and testable.
+All shipped together in commit `97b5ecc` (and the follow-up live-fix iterations against codex v0.132.0).
 
-### PR 1 — Correctness (the bugs that cause wrong results)
+### PR 1 — Correctness ✅ DONE
 
 Goal: stop reporting completion before Codex is actually done.
 
-1. Sentinel-marker prompt-echo path (multi-line support, single-line detection).
-2. Require ≥2 consecutive `PromptReady` matches before IDLE.
-3. Busy-indicator scan (`Esc to interrupt`, `Thinking…`, spinner glyphs) — short-circuit IDLE.
-4. Tighter `waitInputEcho`: bottom-N lines + prompt marker + sentinel.
-5. NBSP normalization in `PromptReady`.
-6. `-u` flag on every tmux command.
-7. Bump default pane to 300×100.
-8. New tests: multi-line prompt, consecutive-idle, busy-indicator, NBSP, sentinel round-trip.
+1. ✅ Sentinel-marker prompt-echo path (multi-line support, single-line detection). Free-form prompts get an `[ateam-end-<rand>]` suffix; slash commands send as-is so codex's slash parser fires.
+2. ✅ ≥2 consecutive `PromptReady` matches before IDLE.
+3. ✅ Busy-indicator scan (`Esc to interrupt`, `Thinking…`, etc.) — short-circuits IDLE.
+4. ✅ Tighter `waitInputEcho`: bottom-20 non-empty lines; slash-command marker anchored to the `› ` prompt prefix so banner substrings (like `/model to change`) can't false-match.
+5. ✅ NBSP normalization in `PromptReady`.
+6. ✅ `-u` UTF-8 flag on every tmux command.
+7. ✅ Default pane 300×100.
+8. ✅ Tests: `TestPreparePrompt*`, `TestCodexBusyDetector`, `TestPromptReadyNormalizesNBSP`, `TestExtractCommandOutputMultiLineSentinel`, …
 
-### PR 2 — Lifecycle, PIDs, concurrency, CODEX_HOME cleanup
+**Late additions from live testing**:
+- ✅ Slash commands type via `send-keys -l` (paste-buffer breaks slash-command parsing for single-line input).
+- ✅ Submit key is `Enter` with a 100ms debounce, not `C-Enter` (codex v0.132.0 treats `C-Enter` as newline-insert).
+- ✅ Slash-command extraction fallback: when codex renders a slash command with a custom header (e.g. `>> Code review started <<`) instead of the standard `› /cmd` echo, take post-banner content.
+- ✅ `CleanCapture` strips blank + non-ASCII-only decorative lines from extracted output and error diagnostics.
+- ✅ `consecutiveQuiet` resets on every quiescence-condition failure (not only on busy).
+
+### PR 2 — Lifecycle, PIDs, concurrency, CODEX_HOME cleanup ✅ DONE
 
 Goal: enable `ateam parallel` / `ateam report` with codex-tmux, clean Ctrl-C, and remove the v1 CODEX_HOME risk surface.
 
-1. **Delete v1 CODEX_HOME staging code entirely** — `ensureWritableCodexHome`, `writeCodexTmuxConfig`, `seedCodexHomeFile`, the CODEX_HOME branch in `codexTmuxEnv`. Codex reads/writes `~/.codex/` natively; ateam does not interpose.
-2. Plumb `ResolvedEnv.ProjectDir` to `tmuxctl.New`; move socket to `<ProjectDir>/.ateam/cache/tmux/exec-<EXEC_ID>.sock`. Drop `nearestGoModule` and `ATEAM_TMUX_SOCKET_DIR`.
-3. Use EXEC_ID-based session name (`ateam-codex-<EXEC_ID>`).
-4. Apply `configureProcessLifecycle` to the tmux server cmd.
-5. Drop the `defer sess.Kill(context.Background())` on the cancel path; keep an explicit `KillSession` only on the success path.
-6. Query `pane_pid` via `tmux display-message` after `waitReady`; emit `StreamEvent{Type: "system", Subtype: "process_start", PID: panePid}`.
-7. Reject `container != none` for `codex-tmux` at runner construction with a clear error.
-8. Surface `tmux_session_name` in the synthetic stream JSON and the dry-run output.
-9. New tests: concurrent runs (N≥3), Ctrl-C delivers SIGHUP/SIGKILL to inner codex within 1s, container-mode rejection, no `CODEX_HOME` env var is set by the agent.
+1. ✅ All v1 CODEX_HOME staging code deleted. Codex uses `~/.codex/` natively.
+2. ✅ `tmuxctl.New` takes `socketPath` from the caller; the codex adapter computes `<ProjectDir>/cache/tmux/exec-<EXEC_ID>.sock`. Falls back to `/tmp/ateam-codex-<hash>-<execid>.sock` when the natural path would exceed `sockaddr_un.sun_path` (sunPathSafeMax=100). `ATEAM_TMUX_SOCKET_DIR` env var and `nearestGoModule` helper removed.
+3. ✅ EXEC_ID-based session name (`ateam-codex-<EXEC_ID>`).
+4. ✅ `Setpgid` + `cmd.Cancel` (SIGTERM to process group) + `WaitDelay` on the tmux server cmd. Ctrl-C cascades to the codex process cleanly.
+5. ✅ Success-path-only `KillSession` (skipped on `ctx.Err() != nil` — the process group teardown handles it).
+6. ✅ `pane_pid` queried via `tmux display-message -p '#{pane_pid}'` after waitReady; emitted as `StreamEvent{Type: "system", Subtype: "process_start", PID: panePID}`. Runner records it in `agent_execs.pid`.
+7. ✅ Container-mode rejected at runner construction with a clear error. Also rejected for `resolveRunnerMinimal` (outside a project) with actionable guidance — caught by codex's own review.
+8. ✅ `tmux_session_name`, `tmux_socket_path`, and `pane_pid` surfaced in the synthetic result stream.
+9. ✅ Tests: `TestRejectCodexTmuxWithoutProject`, `TestSocketPathFallsBackOnLongPath`, `TestCodexTmuxRunRejectsMissing*`, …
 
-### PR 3 — Observability heartbeat (stall watchdog fix, no token tracking yet)
+### PR 3 — Observability heartbeat ✅ DONE
 
-Goal: progress UI works during long runs; stall watchdog stops mis-firing.
+Goal: stall watchdog stops mis-firing on long runs.
 
-1. In `waitIdle`, when the pane hash changes, emit a `thinking` event with a short pane delta. Throttle to one per 5–10s to avoid spam.
-2. Update the synthetic stream to record per-event timing (`time_to_ready`, `time_to_idle`).
-3. New tests: heartbeat fires on hash change, doesn't fire when pane is static, is rate-limited.
+1. ✅ `OnHeartbeat` callback fired by `waitIdle` on pane-hash change, rate-limited to `DefaultHeartbeatInterval` (8s). Agent emits `thinking` events with a short pane-tail preview.
+2. ✅ Per-event timing recorded in the synthetic stream JSON (`tmux.start`, `assistant`, `result`).
+3. ✅ Tests: `TestHeartbeatPreview`.
 
-### PR 4 — Token/cost via Codex session logs (research → implement)
+### PR 4 — Token/cost via Codex session logs ✅ DONE
 
-Goal: cost/usage parity with `codex exec --json` if the session log format permits.
+Goal: cost/usage parity with `codex exec --json`.
 
-1. **Research spike** (non-code): run codex with a known `CODEX_HOME` and one `/review` invocation. Inspect `$CODEX_HOME/sessions/<id>/`:
-   - file layout, write cadence, schema,
-   - whether token counts and `tool_use`/`tool_result` events are present,
-   - format stability hint (look for version field or schema commitment).
-2. If clean JSONL with usage: add `internal/codex/sessionlog.go` — a goroutine tailing the session file in parallel with the tmux pane watcher. Emit normal `assistant`, `tool_use`, `tool_result`, `result` events with token/cost fields. Wire `Pricing` table into the agent's cost estimation path (it's currently dead-carry).
-3. If not: document codex-tmux as `$0` and skip implementation. File a follow-on for a statusline-script-based approach.
-4. New tests: session-log parser with recorded fixtures.
+1. ✅ **Research confirmed**: codex's rollout JSONL at `~/.codex/sessions/<date>/rollout-*.jsonl` carries `event_msg.token_count` events with `input_tokens`, `output_tokens`, `cached_input_tokens`, `reasoning_output_tokens`, `total_tokens`, `model_context_window`. `task_complete` carries `duration_ms`, `time_to_first_token_ms`. Format is stable for both `codex_exec` and `codex-tui` originators.
+2. ✅ `internal/codex/sessionlog.go` implements `FindSessionLog` (matches by cwd + timestamp; 5s slack) and `ReadSessionStats` (one-shot read after waitIdle, no goroutine tailing — simpler and sufficient for v1.1).
+3. ✅ `EstimateCost` wired into the agent's result event; previously dead-carry Pricing table now produces real cost. Result event carries InputTokens/OutputTokens/CacheReadTokens/ContextTokens/ContextWindow/Cost. Live-verified at $0.16 for a 44s `/review` run.
+4. ✅ Tests: `TestReadSessionStatsFixture`, `TestFindSessionLogIgnoresStaleFiles`, `TestFindSessionLogMatchesCWD` with a recorded `testdata/rollout-sample.jsonl`.
 
-### PR 5 (optional) — Container mode
+**Known limitation** (documented in `FindSessionLog` source): two concurrent codex-tmux runs in the **same workdir** within the 5-second slack window can have their token stats misattributed. Concurrent runs in different workdirs are isolated. Mitigation if it becomes painful: inject a per-EXEC_ID marker into the prompt body so codex echoes it into the session log, then prefer files whose first `user_message` contains that marker.
 
-Out of v1 scope. Tracked as a follow-on; documented but not implemented.
+### PR 5 — Container mode 🟡 NOT DONE
+
+Still tracked as v2. Required for the "ateam debugs ateam via codex-tmux inside docker" dogfood pattern. Estimated 60–80 LOC plus tests; see *What's still open* below.
 
 ## Open questions resolved
 
@@ -413,9 +423,28 @@ Out of v1 scope. Tracked as a follow-on; documented but not implemented.
 
 A general-purpose interactive-agent framework. Resist scope creep — every project that grew beyond this size did so because it needed multi-agent coordination, persistent sessions, or watchdog supervision. None of that applies to synchronous "invoke one slash command and return."
 
+## What's still open
+
+### Real work, sized
+
+| Item | Why | Estimate |
+|---|---|---|
+| **Container-mode for codex-tmux** (PR 5) | Unlocks the `ateam exec ... --profile codex-tmux-docker` dogfood — Claude Code outside docker drives ateam, which spawns a docker container with tmux+codex inside. Requires lifting the `container != none` guard, plumbing CmdFactory through tmuxctl invocations, swapping PanePID emission to the docker-exec wrapper PID, and standing up auth provisioning inside the container *(flag: auth — see test/docker-auth)*. | 60–80 LOC + integration test. Half-day if `docker exec` doesn't fight paste-buffer; can be longer if it does. |
+| **Submenu navigation** | `/review` on its own opens an interactive preset picker; ateam exec sends one prompt and waits, so the run hangs at the menu. **Workaround**: pass inline args (`/review the pending changes`) — codex bypasses the menu. **Real fix**: accept multi-line prompts where lines 2+ are menu keystrokes; add a menu-detection state to `waitIdle`. | ~50 LOC + tests. Only worth doing if other slash commands also gate on menus. |
+| **Concurrent runs same-workdir token attribution** | Documented limitation in `FindSessionLog`. Two concurrent codex-tmux runs in the same workdir can swap token stats. Fix: inject a per-EXEC_ID marker into the prompt that codex echoes into the session log, then match on it. | ~30 LOC + test. Low priority unless someone hits it. |
+
+### Smaller polish
+
+- The PromptReady regex is verified against codex 0.132.0; both Dockerfiles pin `@openai/codex@0.133.0`. Pin a single source of truth and surface a clearer error if codex version drifts beyond the tested set.
+- `Args_inside_container` for codex-tmux currently set to `[]` in runtime.hcl. If container mode lands, those need real values.
+- Multi-instance live test (N≥3 concurrent codex-tmux runs in different projects) — not exercised today; would catch socket-path collision regressions and ProjectDir plumbing bugs.
+
+### Auth (flagged, do not touch without explicit ask)
+
+- `test/docker-auth/` now installs codex 0.133.0 but **no codex auth provisioning**. Following the claude pattern (`extract-refresh-token.sh`, `claude_inject.sh`) would mean a `codex_inject.sh` equivalent — explicitly out of scope per repeated instruction to avoid auth work. Document path; do not implement without explicit go-ahead.
+
 ## Out-of-scope follow-ons (parking lot)
 
-- Container mode (v2).
 - Headless Codex via `codex app-server` JSON-RPC — separate adapter, study Harnex.
 - Multi-turn interactive Codex.
 - Live output streaming to the operator — `StartPipePane` exists if we ever want it.
