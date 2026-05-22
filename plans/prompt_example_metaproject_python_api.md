@@ -4,204 +4,49 @@ Source example: `../metaproject/metaproject.py`
 
 This explores a different direction than the prompt-filesystem proposal: keep a
 small Python layer for workflows that are inherently programmable, but make the
-programmability structured. The core distinction stays the same:
+programmability structured. Split into two pieces:
+
+- **Framework** — reusable, knows nothing about metaproject. Defines the
+  `Ctx` / `Flow` / `ExecPrompt` / `ExecAction` / `PromptBundle` / `Runner`
+  primitives, the parallel runner, and a few generic exec-action helpers
+  (`SkipIf`, `EnsureParents`, `BackupFiles`).
+- **Metaproject** — every line that's specific to discover/audit/fix/verify,
+  the five scopes, the `reports/` layout, and the CLI. Built on top of the
+  framework.
+
+The core distinction stays the same:
 
 | Concept | Meaning |
 |---|---|
-| `ExecPrompt` | Runs during prompt assembly. Its output is included in the prompt. Runs during preview. |
-| `ExecAction` | Runs before or after the agent. Its output is not included in the prompt. Does not run during preview. |
+| `ExecPrompt` | Runs during prompt assembly. Its output is part of the prompt. Runs during preview. |
+| `ExecAction` | Runs before or after the agent. Output not in the prompt. Does NOT run during preview. |
 | `PromptBundle` | One executable agent unit: prompt parts plus pre/post exec actions. |
-| `Runner` | Registry and executor for bundles. Handles preview, run, and parallel run. |
+| `Runner` | Registry + executor. Handles preview, serial run, parallel run. |
 
-This is probably a better fit for `metaproject.py` than pure prompt files. The
-workflow has real algorithmic state: manifests, mtimes, target parsing,
-incremental discovery, fan-out, and report listings. The API below keeps that in
-Python while preventing it from becoming one long string-building script.
+## The framework (`ateam_runner.py`)
 
-## Minimal API Shape
+Generic. Reusable for any agent workflow.
 
 ```python
-class ExecPrompt(Protocol):
-    def render(self, ctx: Ctx) -> str: ...
+"""ateam_runner.py — generic prompt-bundle runner.
 
-class ExecAction(Protocol):
-    def run(self, ctx: Ctx) -> Flow: ...
-
-@dataclass
-class PromptBundle:
-    name: str
-    prompt: list[str | ExecPrompt]
-    pre_exec: list[ExecAction] = field(default_factory=list)
-    post_exec: list[ExecAction] = field(default_factory=list)
-
-class Runner:
-    def add(self, bundle: PromptBundle) -> None: ...
-    def preview(self, name: str, target: Target, *, scope: str | None = None) -> str: ...
-    def run(self, name: str, target: Target, *, force: bool = False) -> Result: ...
-    def run_many(self, names: list[str], target: Target, *, force: bool = False) -> list[Result]: ...
-```
-
-The improvement over the current script is not that Python disappears. It is
-that each piece gets a sharper type:
-
-- prompt text and deterministic prompt context are `ExecPrompt`
-- skip checks, backups, and promotion are `ExecAction`
-- `audit/test`, `fix/docker`, and `discover` are named `PromptBundle`s
-- the CLI is mostly target parsing and pipeline selection
-
-## Reference Implementation
-
-This implementation keeps the behavior of `metaproject.py`, but changes scoped
-stages from serial execution to parallel execution. For each target, `discover`
-always runs before `audit`, `fix`, or `verify`, because the overview and
-`files.toml` are prerequisites for scoped work.
-
-```python
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["click>=8.1"]
-# ///
+A small Python framework for bundling a prompt with optional pre/post exec
+actions. Bundles can be previewed (renders the prompt, no actions) or run
+(executes the agent via `ateam exec`, with pre/post actions firing around the
+agent call). Multiple bundles run in parallel via `run_many`.
+"""
 from __future__ import annotations
 
 import concurrent.futures
 import shutil
 import subprocess
-import tomllib
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Literal, Protocol
-
-import click
+from typing import Any, Callable, Literal, Protocol
 
 
-# === Project constants ===
-
-SCRIPT_DIR = Path(__file__).resolve().parent
-BASE_DIR = SCRIPT_DIR
-BASE_REPORTS = BASE_DIR / "reports"
-
-ALL_SCOPES = ["claude", "gitconfig", "build", "test", "docker"]
-PIPELINE = ["discover", "audit", "fix", "verify"]
-
-ACTION_CHAIN: dict[str, list[str]] = {
-    "discover": ["discover"],
-    "audit": ["audit"],
-    "fix": ["fix"],
-    "verify": ["verify"],
-    "discover+": PIPELINE,
-    "audit+": ["audit", "fix", "verify"],
-    "fix+": ["fix", "verify"],
-    "all": PIPELINE,
-}
-
-META_ACTIONS = ["projects", "prompt", "reports"]
-ALL_CLI_ACTIONS = list(ACTION_CHAIN.keys()) + META_ACTIONS
-
-
-# === Output layout ===
-
-def report_path(action: str, scope: str, project: str) -> Path:
-    return BASE_REPORTS / project / scope / f"{action}.md"
-
-
-def structured_report_path(action: str, scope: str, project: str, filename: str) -> Path:
-    return BASE_REPORTS / project / scope / filename
-
-
-def overview_path(project: str) -> Path:
-    return BASE_REPORTS / project / "overview.md"
-
-
-def files_toml_path(project: str) -> Path:
-    return BASE_REPORTS / project / "files.toml"
-
-
-# === Workflow data ===
-
-@dataclass(frozen=True)
-class Target:
-    label: str
-    path: Path
-
-    @property
-    def path_abs(self) -> Path:
-        return self.path.absolute()
-
-    @property
-    def path_canonical(self) -> Path:
-        return self.path.resolve()
-
-    @classmethod
-    def parse(cls, raw: str) -> "Target":
-        if ":" not in raw:
-            raise click.BadParameter(f"target {raw!r} must be in LABEL:PATH form")
-        label, path = raw.split(":", 1)
-        if not label or "/" in label or ".." in label:
-            raise click.BadParameter(
-                f"label {label!r} must be a safe directory name (no '/' or '..')"
-            )
-        if not path:
-            data = read_files_toml(label)
-            meta = (data or {}).get("meta") or {}
-            path = meta.get("path_canonical") or meta.get("path_used") or ""
-            if not path:
-                raise click.BadParameter(
-                    f"label {label!r} is not yet discovered; pass LABEL:PATH"
-                )
-
-        p = Path(path).expanduser()
-        if not p.is_dir():
-            raise click.BadParameter(
-                f"project path {path!r} does not exist or is not a directory"
-            )
-        check = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=p,
-            capture_output=True,
-            text=True,
-        )
-        if check.returncode != 0 or check.stdout.strip() != "true":
-            raise click.BadParameter(
-                f"project path {path!r} is not inside a git work tree"
-            )
-        return cls(label, p)
-
-
-@dataclass(frozen=True)
-class Ctx:
-    target: Target
-    action: str
-    scope: str | None
-    force: bool = False
-    dry_run: bool = False
-    base_dir: Path = BASE_DIR
-    base_reports: Path = BASE_REPORTS
-
-    @property
-    def label(self) -> str:
-        return self.target.label
-
-    @property
-    def path(self) -> Path:
-        return self.target.path
-
-    @property
-    def bundle_name(self) -> str:
-        return f"{self.action}/{self.scope}" if self.scope else self.action
-
-    @property
-    def role(self) -> str:
-        return f"{self.scope}/{self.label}" if self.scope else self.label
-
-    def output(self, filename: str) -> Path:
-        if self.scope is None:
-            return self.base_reports / self.label / filename
-        return structured_report_path(self.action, self.scope, self.label, filename)
-
-
-# === Minimal framework ===
+# === Flow control ===
 
 FlowState = Literal["continue", "skip", "error"]
 
@@ -211,99 +56,82 @@ class Flow:
     state: FlowState = "continue"
     reason: str = ""
 
-    @classmethod
-    def cont(cls) -> "Flow":
-        return cls("continue")
 
-    @classmethod
-    def skip(cls, reason: str) -> "Flow":
-        return cls("skip", reason)
-
-    @classmethod
-    def error(cls, reason: str) -> "Flow":
-        return cls("error", reason)
-
+# === Context ===
 
 @dataclass(frozen=True)
-class Result:
-    bundle: str
-    target: str
-    flow: Flow
-    output: Path | None = None
+class Ctx:
+    """Per-invocation context. Workflows stash their own state in `data`."""
+    work_dir: Path
+    role: str = ""          # passed to `ateam exec --role`
+    action: str = ""        # passed to `ateam exec --action`
+    force: bool = False
+    dry_run: bool = False
+    data: dict[str, Any] = field(default_factory=dict)
 
+
+# === Protocols ===
 
 class ExecPrompt(Protocol):
+    """Produces text inserted into the prompt. Runs during preview."""
     def render(self, ctx: Ctx) -> str: ...
 
 
 class ExecAction(Protocol):
+    """Runs before or after the agent. Output is NOT in the prompt."""
     def run(self, ctx: Ctx) -> Flow: ...
 
 
 PromptPart = str | ExecPrompt
 
 
-@dataclass(frozen=True)
-class ExecPromptFn:
-    fn: Callable[[Ctx], str]
+# === Adapters — lift plain functions into protocols ===
 
+@dataclass(frozen=True)
+class PromptFn:
+    fn: Callable[[Ctx], str]
     def render(self, ctx: Ctx) -> str:
         return self.fn(ctx)
 
 
 @dataclass(frozen=True)
-class ReadFile:
-    path: Callable[[Ctx], Path]
-    missing: str = ""
-
-    def render(self, ctx: Ctx) -> str:
-        p = self.path(ctx)
-        if not p.exists():
-            return self.missing
-        text = p.read_text()
-        return text if text.strip() else self.missing
-
-
-@dataclass(frozen=True)
-class ExecActionFn:
+class ActionFn:
     fn: Callable[[Ctx], Flow]
-
     def run(self, ctx: Ctx) -> Flow:
         return self.fn(ctx)
 
+
+# === Common exec-action helpers ===
 
 @dataclass(frozen=True)
 class SkipIf:
     predicate: Callable[[Ctx], bool]
     reason: Callable[[Ctx], str]
-
     def run(self, ctx: Ctx) -> Flow:
-        if self.predicate(ctx):
-            return Flow.skip(self.reason(ctx))
-        return Flow.cont()
+        return Flow("skip", self.reason(ctx)) if self.predicate(ctx) else Flow()
 
 
 @dataclass(frozen=True)
 class EnsureParents:
     paths: Callable[[Ctx], list[Path]]
-
     def run(self, ctx: Ctx) -> Flow:
         for p in self.paths(ctx):
             p.parent.mkdir(parents=True, exist_ok=True)
-        return Flow.cont()
+        return Flow()
 
 
 @dataclass(frozen=True)
 class BackupFiles:
     paths: Callable[[Ctx], list[Path]]
-
     def run(self, ctx: Ctx) -> Flow:
         ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         for p in self.paths(ctx):
             if p.exists():
                 shutil.copy2(p, p.with_name(f"{p.stem}.{ts}{p.suffix}"))
-        return Flow.cont()
+        return Flow()
 
+
+# === Bundle and result ===
 
 @dataclass(frozen=True)
 class PromptBundle:
@@ -311,16 +139,19 @@ class PromptBundle:
     prompt: list[PromptPart]
     pre_exec: list[ExecAction] = field(default_factory=list)
     post_exec: list[ExecAction] = field(default_factory=list)
-    output: Callable[[Ctx], Path | None] = lambda _ctx: None
 
-    @property
-    def action(self) -> str:
-        return self.name.split("/", 1)[0]
 
-    @property
-    def scope(self) -> str | None:
-        parts = self.name.split("/", 1)
-        return parts[1] if len(parts) == 2 else None
+@dataclass(frozen=True)
+class Result:
+    bundle: str
+    flow: Flow
+
+
+# === Runner ===
+
+def render_prompt(bundle: PromptBundle, ctx: Ctx) -> str:
+    chunks = [p if isinstance(p, str) else p.render(ctx) for p in bundle.prompt]
+    return "\n".join(c.rstrip() for c in chunks if c.strip()) + "\n"
 
 
 class Runner:
@@ -332,228 +163,248 @@ class Runner:
             raise ValueError(f"duplicate bundle: {bundle.name}")
         self.bundles[bundle.name] = bundle
 
-    def ctx(
-        self,
-        name: str,
-        target: Target,
-        *,
-        force: bool = False,
-        dry_run: bool = False,
-    ) -> Ctx:
+    def preview(self, name: str, ctx: Ctx) -> str:
+        return render_prompt(self.bundles[name], ctx)
+
+    def run(self, name: str, ctx: Ctx) -> Result:
         bundle = self.bundles[name]
-        return Ctx(
-            target=target,
-            action=bundle.action,
-            scope=bundle.scope,
-            force=force,
-            dry_run=dry_run,
-        )
-
-    def preview(self, name: str, target: Target, *, force: bool = False) -> str:
-        return self.render(self.bundles[name], self.ctx(name, target, force=force))
-
-    def render(self, bundle: PromptBundle, ctx: Ctx) -> str:
-        chunks: list[str] = []
-        for part in bundle.prompt:
-            if isinstance(part, str):
-                chunks.append(part)
-            else:
-                chunks.append(part.render(ctx))
-        return "\n".join(c.rstrip() for c in chunks if c.strip()) + "\n"
-
-    def run(
-        self,
-        name: str,
-        target: Target,
-        *,
-        force: bool = False,
-        dry_run: bool = False,
-    ) -> Result:
-        bundle = self.bundles[name]
-        ctx = self.ctx(name, target, force=force, dry_run=dry_run)
-        prompt = self.render(bundle, ctx)
-        output = bundle.output(ctx)
-
-        if dry_run:
-            self.print_preview(ctx, prompt)
-            return Result(name, target.label, Flow.cont(), output)
-
+        prompt = render_prompt(bundle, ctx)
+        if ctx.dry_run:
+            print(f"---- PROMPT ({name}, work-dir: {ctx.work_dir}) ----")
+            print(prompt)
+            print("---- END PROMPT ----")
+            return Result(name, Flow())
         for action in bundle.pre_exec:
             flow = action.run(ctx)
-            if flow.state == "skip":
-                return Result(name, target.label, flow, output)
-            if flow.state == "error":
-                raise click.ClickException(f"{name}: {flow.reason}")
-
-        self.exec_agent(ctx, prompt)
-
+            if flow.state != "continue":
+                return Result(name, flow)
+        subprocess.run(
+            ["ateam", "exec",
+             "--work-dir", str(ctx.work_dir),
+             "--action", ctx.action or name,
+             "--role", ctx.role or name],
+            input=prompt, text=True, check=True,
+        )
         for action in bundle.post_exec:
             flow = action.run(ctx)
             if flow.state == "error":
-                raise click.ClickException(f"{name}: {flow.reason}")
+                return Result(name, flow)
+        return Result(name, Flow())
 
-        return Result(name, target.label, Flow.cont(), output)
-
-    def run_many(
-        self,
-        names: list[str],
-        target: Target,
-        *,
-        force: bool = False,
-        dry_run: bool = False,
-        workers: int | None = None,
-    ) -> list[Result]:
-        if len(names) == 1 or dry_run:
-            return [self.run(n, target, force=force, dry_run=dry_run) for n in names]
-
-        max_workers = workers or min(len(names), 5)
-        results: list[Result] = []
+    def run_many(self, items: list[tuple[str, Ctx]],
+                 *, workers: int | None = None) -> list[Result]:
+        if len(items) == 1 or all(c.dry_run for _, c in items):
+            return [self.run(n, c) for n, c in items]
+        max_workers = workers or min(len(items), 5)
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-            future_to_name = {
-                pool.submit(self.run, n, target, force=force, dry_run=False): n
-                for n in names
-            }
-            for future in concurrent.futures.as_completed(future_to_name):
-                results.append(future.result())
-        return results
+            futures = [pool.submit(self.run, n, c) for n, c in items]
+            return [f.result() for f in concurrent.futures.as_completed(futures)]
+```
 
-    def exec_agent(self, ctx: Ctx, prompt: str) -> None:
-        subprocess.run(
-            [
-                "ateam",
-                "exec",
-                "--work-dir",
-                str(ctx.path),
-                "--action",
-                ctx.action,
-                "--role",
-                ctx.role,
-            ],
-            input=prompt,
-            text=True,
-            check=True,
-        )
+**Framework size: ~130 lines** (including blank lines and comments).
 
-    def print_preview(self, ctx: Ctx, prompt: str) -> None:
-        click.echo(
-            f"---------- PROMPT (work-dir: {ctx.path}, "
-            f"action: {ctx.action}, role: {ctx.role}) ----------"
-        )
-        click.echo(prompt)
-        click.echo("---------- END PROMPT ----------")
+## The metaproject script
 
+Everything below is specific to discover/audit/fix/verify, the five scopes, and
+the `reports/` layout. The framework above stays untouched.
 
-# === Git state and manifest helpers ===
+```python
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["click>=8.1"]
+# ///
+"""metaproject.py — discover/audit/fix/verify across projects."""
+from __future__ import annotations
 
-def git_state(project_dir: Path) -> tuple[str, str]:
-    branch = subprocess.run(
-        ["git", "symbolic-ref", "--short", "HEAD"],
-        cwd=project_dir,
-        capture_output=True,
-        text=True,
-    ).stdout.strip() or "DETACHED"
-    commit = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=project_dir,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    return branch, commit
+import subprocess
+import tomllib
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Callable
+
+import click
+
+from ateam_runner import (
+    Ctx, Flow, PromptBundle, Runner, PromptFn, SkipIf,
+    EnsureParents, BackupFiles,
+)
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+BASE_REPORTS = SCRIPT_DIR / "reports"
+ALL_SCOPES = ["claude", "gitconfig", "build", "test", "docker"]
+PIPELINE = ["discover", "audit", "fix", "verify"]
+ACTION_CHAIN: dict[str, list[str]] = {
+    "discover": ["discover"], "audit": ["audit"], "fix": ["fix"], "verify": ["verify"],
+    "discover+": PIPELINE, "audit+": ["audit", "fix", "verify"],
+    "fix+": ["fix", "verify"], "all": PIPELINE,
+}
+META_ACTIONS = ["projects", "prompt", "reports"]
 
 
-def read_files_toml(project: str) -> dict | None:
-    p = files_toml_path(project)
-    if not p.exists():
-        return None
-    return tomllib.loads(p.read_text())
+# === Target & per-run context ===
+
+@dataclass(frozen=True)
+class Target:
+    label: str
+    path: Path
+
+    @classmethod
+    def parse(cls, raw: str) -> "Target":
+        if ":" not in raw:
+            raise click.BadParameter(f"target {raw!r} must be LABEL:PATH")
+        label, path = raw.split(":", 1)
+        if not label or "/" in label or ".." in label:
+            raise click.BadParameter(f"label {label!r} must be safe (no '/' or '..')")
+        if not path:
+            data = read_files_toml(label)
+            meta = (data or {}).get("meta") or {}
+            path = meta.get("path_canonical") or meta.get("path_used") or ""
+            if not path:
+                raise click.BadParameter(f"label {label!r} not yet discovered")
+        p = Path(path).expanduser()
+        if not p.is_dir():
+            raise click.BadParameter(f"path {path!r} is not a directory")
+        check = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"],
+                               cwd=p, capture_output=True, text=True)
+        if check.returncode != 0 or check.stdout.strip() != "true":
+            raise click.BadParameter(f"path {path!r} not inside a git work tree")
+        return cls(label, p)
 
 
-def scope_files(t: Target, data: dict, scope: str) -> list[Path]:
-    rels = data.get("files", {}).get(scope, []) or []
-    return [t.path / r for r in rels]
-
-
-def all_tracked_files(t: Target, data: dict) -> list[Path]:
-    return [
-        t.path / r
-        for files in data.get("files", {}).values()
-        for r in (files or [])
-    ]
-
-
-def files_newer_than(reference: Path, files: list[Path]) -> list[Path]:
-    if not reference.exists():
-        return [f for f in files if f.exists()]
-    ref = reference.stat().st_mtime
-    return [f for f in files if f.exists() and f.stat().st_mtime > ref]
-
-
-def skip_followup(parent: Path, child: Path) -> bool:
-    return child.exists() and parent.exists() and child.stat().st_mtime >= parent.stat().st_mtime
-
-
-def read_or_placeholder(p: Path, missing: str) -> str:
-    if not p.exists():
-        return missing
-    text = p.read_text()
-    return text if text.strip() else missing
-
-
-def changes_since_overview(ctx: Ctx) -> str:
-    if ctx.scope is None:
-        return "(no scope)"
-    data = read_files_toml(ctx.label)
-    if data is None:
-        return "(no files.toml - discover has not run)"
-    tracked = scope_files(ctx.target, data, ctx.scope)
-    if not tracked:
-        return f"(no files tracked for scope {ctx.scope!r})"
-    op = overview_path(ctx.label)
-    changed = files_newer_than(op, tracked) if op.exists() else tracked
-    if not changed:
-        return "(nothing has changed since the overview was written)"
-    return "\n".join(f"- `{p.relative_to(ctx.path)}`" for p in changed)
-
-
-# === Prompt text helpers ===
-
-def intro(ctx: Ctx) -> str:
-    suffix = f" (scope {ctx.scope!r})" if ctx.scope else ""
-    return (
-        f"You are running {ctx.action!r}{suffix} for project "
-        f"{ctx.label!r} at {str(ctx.path)!r}.\n"
-        "Keep your focus very narrow to the instruction below."
+def ctx_for(target: Target, bundle: str, *, force: bool, dry_run: bool) -> Ctx:
+    action, _, scope = bundle.partition("/")
+    return Ctx(
+        work_dir=target.path,
+        action=action,
+        role=f"{scope}/{target.label}" if scope else target.label,
+        force=force, dry_run=dry_run,
+        data={"label": target.label, "path": target.path, "target": target,
+              "action": action, "scope": scope or None},
     )
 
 
-def footer(ctx: Ctx, output: Path) -> str:
-    return f"\nSave your report on project {ctx.label!r} ({str(ctx.path)!r}) at: {output}\n"
+# === Output layout ===
+
+def report_path(action: str, scope: str, label: str) -> Path:
+    return BASE_REPORTS / label / scope / f"{action}.md"
+
+def overview_path(label: str) -> Path:
+    return BASE_REPORTS / label / "overview.md"
+
+def files_toml_path(label: str) -> Path:
+    return BASE_REPORTS / label / "files.toml"
+
+def tests_toml_path(label: str) -> Path:
+    return BASE_REPORTS / label / "test" / "tests.toml"
+
+def outputs_for(ctx: Ctx) -> list[Path]:
+    action, scope, label = ctx.data["action"], ctx.data["scope"], ctx.data["label"]
+    if action == "discover":
+        return [overview_path(label), files_toml_path(label)]
+    paths = [report_path(action, scope, label)]
+    if action == "audit" and scope == "test":
+        paths.append(tests_toml_path(label))
+    return paths
+
+
+# === Git + manifest helpers ===
+
+def git_state(p: Path) -> tuple[str, str]:
+    branch = subprocess.run(["git", "symbolic-ref", "--short", "HEAD"],
+                            cwd=p, capture_output=True, text=True).stdout.strip() or "DETACHED"
+    commit = subprocess.run(["git", "rev-parse", "HEAD"],
+                            cwd=p, capture_output=True, text=True).stdout.strip()
+    return branch, commit
+
+def read_files_toml(label: str) -> dict | None:
+    p = files_toml_path(label)
+    return tomllib.loads(p.read_text()) if p.exists() else None
+
+def scope_files(t: Target, data: dict, scope: str) -> list[Path]:
+    return [t.path / r for r in (data.get("files", {}).get(scope) or [])]
+
+def all_tracked_files(t: Target, data: dict) -> list[Path]:
+    return [t.path / r for fs in data.get("files", {}).values() for r in (fs or [])]
+
+def files_newer_than(ref: Path, files: list[Path]) -> list[Path]:
+    if not ref.exists():
+        return [f for f in files if f.exists()]
+    rt = ref.stat().st_mtime
+    return [f for f in files if f.exists() and f.stat().st_mtime > rt]
+
+def read_or(p: Path, missing: str) -> str:
+    if not p.exists():
+        return missing
+    t = p.read_text()
+    return t if t.strip() else missing
+
+
+# === Skip predicates ===
+
+def discover_is_fresh(ctx: Ctx) -> bool:
+    if ctx.force:
+        return False
+    label = ctx.data["label"]
+    data = read_files_toml(label)
+    if data is None:
+        return False
+    return not files_newer_than(files_toml_path(label),
+                                all_tracked_files(ctx.data["target"], data))
+
+def audit_is_fresh(ctx: Ctx) -> bool:
+    if ctx.force:
+        return False
+    label, scope = ctx.data["label"], ctx.data["scope"]
+    out = report_path("audit", scope, label)
+    data = read_files_toml(label)
+    if data is None or not out.exists():
+        return False
+    files = scope_files(ctx.data["target"], data, scope)
+    return True if not files else not files_newer_than(out, files)
+
+def followup_is_fresh(parent: str, child: str) -> Callable[[Ctx], bool]:
+    def check(ctx: Ctx) -> bool:
+        if ctx.force:
+            return False
+        label, scope = ctx.data["label"], ctx.data["scope"]
+        p, c = report_path(parent, scope, label), report_path(child, scope, label)
+        return c.exists() and p.exists() and c.stat().st_mtime >= p.stat().st_mtime
+    return check
+
+def skip_reason(ctx: Ctx) -> str:
+    label, scope, action = ctx.data["label"], ctx.data["scope"], ctx.data["action"]
+    return f"{action}/{scope}/{label}: up to date" if scope else f"{action}/{label}: up to date"
+
+
+# === Prompt builders ===
+
+def intro(ctx: Ctx) -> str:
+    scope = ctx.data["scope"]
+    sx = f" (scope {scope!r})" if scope else ""
+    return (f"You are running {ctx.data['action']!r}{sx} for project "
+            f"{ctx.data['label']!r} at '{ctx.data['path']}'.\n"
+            "Keep your focus very narrow to the instruction below.")
+
+def footer(ctx: Ctx, out: Path) -> str:
+    return f"\nSave your report on project '{ctx.data['label']}' at: {out}\n"
 
 
 def discover_prompt(ctx: Ctx) -> str:
-    data = read_files_toml(ctx.label)
-    changed: list[Path] | None = None
-    if data is not None:
-        changed = files_newer_than(files_toml_path(ctx.label), all_tracked_files(ctx.target, data))
-
-    branch, commit = git_state(ctx.path)
+    label, target = ctx.data["label"], ctx.data["target"]
+    data = read_files_toml(label)
+    branch, commit = git_state(target.path)
     now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    op = overview_path(ctx.label)
-    fp = files_toml_path(ctx.label)
-    meta = f"""\
-[meta]
-git_branch       = "{branch}"
-git_commit_hash  = "{commit}"
-discovered_at    = "{now}"
-path_used        = "{ctx.target.path_abs}"
-path_canonical   = "{ctx.target.path_canonical}"
-"""
+    op, fp = overview_path(label), files_toml_path(label)
+    meta = (f'[meta]\ngit_branch       = "{branch}"\n'
+            f'git_commit_hash  = "{commit}"\ndiscovered_at    = "{now}"\n'
+            f'path_used        = "{target.path.absolute()}"\n'
+            f'path_canonical   = "{target.path.resolve()}"\n')
+    if data is None:
+        body = f"""{intro(ctx)}
 
-    if changed is None:
-        body = f"""\
-{intro(ctx)}
-
-Goals - produce two files:
+Goals — produce two files:
 1. Overview: '{op}'
 2. TOML manifest: '{fp}'
 
@@ -561,7 +412,7 @@ The overview is a concise narrative covering:
 * what the project is, language/stack
 * how to build, or "no build step"
 * how to run tests by category, or "no tests"
-* dev-environment setup, Docker, devcontainer, or similar if any
+* dev-environment setup (Docker, devcontainer, etc.) if any
 * anything non-obvious for troubleshooting
 
 The TOML must use exactly this structure:
@@ -574,15 +425,14 @@ build     = ["Makefile", "..."]
 test      = ["..."]
 docker    = ["Dockerfile", "..."]
 
-Paths are relative to '{ctx.path}'. List the smallest set of files an auditor
-would need to read to evaluate each scope. Use [] for scopes with nothing
-relevant.
+Paths are relative to '{target.path}'. List the smallest set of files an auditor
+would need to read to evaluate each scope. Use [] for scopes with nothing relevant.
 
-Copy the [meta] block verbatim. Do not invent additional sections."""
+Copy the [meta] block verbatim."""
     else:
-        changed_list = "\n".join(f"  - {p.relative_to(ctx.path)}" for p in changed)
-        body = f"""\
-{intro(ctx)}
+        changed = files_newer_than(fp, all_tracked_files(target, data))
+        changed_list = "\n".join(f"  - {p.relative_to(target.path)}" for p in changed)
+        body = f"""{intro(ctx)}
 
 Incremental update. Existing artifacts:
 * Overview: '{op}'
@@ -592,294 +442,164 @@ Files changed since last discover:
 {changed_list}
 
 Inspect ONLY these files. Minimum-effort update:
-* Update '{op}' only if the changes meaningfully affect what it says.
-* Update '{fp}' [files] sections only if the relevant file lists changed.
-* In both cases, even if you change nothing else, replace the [meta] block with:
+* Update '{op}' only if changes meaningfully affect it.
+* Update '{fp}' [files] sections only if the relevant lists changed.
+* Always replace the [meta] block with:
 
 {meta}"""
-
     return body + footer(ctx, op)
 
 
-def audit_header(ctx: Ctx) -> str:
-    return f"{intro(ctx)}\nUse the Project Overview above for context. Do NOT redo discovery."
-
-
-def fix_prompt(ctx: Ctx) -> str:
-    assert ctx.scope is not None
-    audit_out = report_path("audit", ctx.scope, ctx.label)
-    out = report_path("fix", ctx.scope, ctx.label)
-    return f"""\
-{intro(ctx)}
-Look at '{audit_out}' if it exists; if not, you are done and your
-last message must be exactly: "no audit items to implement".
-Otherwise make the recommended changes inside '{ctx.path}'.
-{footer(ctx, out)}"""
-
-
-def verify_prompt(ctx: Ctx) -> str:
-    assert ctx.scope is not None
-    fix_out = report_path("fix", ctx.scope, ctx.label)
-    out = report_path("verify", ctx.scope, ctx.label)
-    return f"""\
-{intro(ctx)}
-Look at '{fix_out}' - it documents improvements for scope '{ctx.scope}'.
-Go to '{ctx.path}' and try to follow the steps / run the commands.
-If there are issues, fix them and update '{fix_out}' to be accurate.
-For any change you make in that file, note that you made changes, why,
-and what they are.
-{footer(ctx, out)}"""
-
-
-# === Scope-specific audit bodies ===
-
-SCOPE_AUDIT: dict[str, Callable[[Ctx], str]] = {}
-
-
-def scope_audit(name: str):
-    def deco(fn: Callable[[Ctx], str]) -> Callable[[Ctx], str]:
-        SCOPE_AUDIT[name] = fn
-        return fn
-    return deco
-
-
-@scope_audit("claude")
-def audit_claude(ctx: Ctx) -> str:
-    return f"""\
-Recommend improvements to CLAUDE.md in '{ctx.path}' so it clearly documents:
+SCOPE_AUDIT: dict[str, str] = {
+    "claude": """\
+Recommend improvements to CLAUDE.md in '{path}' so it clearly documents:
 * git usage, if non-standard
 * how to build, or N/A
 * how to run tests, by category if multiple
 * common troubleshooting steps
 Be specific: cite missing sections, vague instructions, or commands that
-do not match what the overview describes."""
-
-
-@scope_audit("gitconfig")
-def audit_gitconfig(ctx: Ctx) -> str:
-    return f"""\
-Verify git identity for '{ctx.label}' at '{ctx.path}':
-* user.name is set, locally or globally - note which
-* user.email is set, locally or globally - note which
-Report what is configured. Any identity is acceptable for now."""
-
-
-@scope_audit("build")
-def audit_build(ctx: Ctx) -> str:
-    return f"""\
-Audit the build story for '{ctx.label}'. Flag:
+do not match what the overview describes.""",
+    "gitconfig": """\
+Verify git identity for '{label}' at '{path}':
+* user.name is set, locally or globally — note which
+* user.email is set, locally or globally — note which
+Report what is configured. Any identity is acceptable for now.""",
+    "build": """\
+Audit the build story for '{label}'. Flag:
 * commands that do not work as documented
 * missing prerequisites or env vars
 * inconsistencies between overview and actual project files
-If the stack does not need a build step, state that and stop."""
-
-
-@scope_audit("test")
-def audit_test(ctx: Ctx) -> str:
-    return f"""\
-Audit the test commands for '{ctx.label}', your work as 2 parts:
+If the stack does not need a build step, state that and stop.""",
+    "test": """\
+Audit the test commands for '{label}' in 2 parts.
 
 ### Commands that exist today
-
-Here we are only interested in what can be run today. Document:
-* The test framework(s) in use
-* The command for each category, and the directory it should be run from
-* Any setup required to run tests, services, fixtures, env vars
+Only document what can be run today:
+* the test framework(s) in use
+* the command for each category, and the directory it should be run from
+* any setup required to run tests (services, fixtures, env vars)
 If no tests exist, report that explicitly.
 
-Write a structured toml file in '{ctx.output("tests.toml")}':
+Write a structured toml file in '{tests_toml}':
 
     [tests]
     fast=QUICK_VERIFICATION_COMMAND
     all=RUN_ABSOLUTELY_ALL_TESTS
     AREA_X=COMMAND_X
     AREA_Y=COMMAND_Y
-    ...
 
-where all caps words are replaced by actual commands. Areas are things like
-'backend', 'frontend', 'cli', or 'benchmark'.
+Replace placeholders with actual commands. Areas are things like 'backend',
+'frontend', 'cli', or 'benchmark'.
 
 ### How complete is the test story
-
 Flag:
-* test commands that do not match what the project actually supports
-* missing categories, e.g. there are e2e tests but no documented runner
-* broken or skipped suites worth surfacing
-"""
-
-
-@scope_audit("docker")
-def audit_docker(ctx: Ctx) -> str:
-    return f"""\
-Audit the dev-environment-in-Docker setup for '{ctx.label}'. Flag:
+* test commands that do not match what the project supports
+* missing categories (e.g. e2e tests with no documented runner)
+* broken or skipped suites worth surfacing""",
+    "docker": """\
+Audit the dev-environment-in-Docker setup for '{label}'. Flag:
 * broken Dockerfile / compose / devcontainer
 * commands that do not match what is documented
 If no Docker setup exists, recommend whether one would be valuable given
-the project's stack, and stop if not."""
+the project's stack, and stop if not.""",
+}
 
 
 def audit_prompt(ctx: Ctx) -> str:
-    assert ctx.scope is not None
-    out = report_path("audit", ctx.scope, ctx.label)
-    return f"""\
-# Context
+    label, scope, target = ctx.data["label"], ctx.data["scope"], ctx.data["target"]
+    out = report_path("audit", scope, label)
+    overview = read_or(overview_path(label), "(no overview yet)")
+    data = read_files_toml(label)
+    if data is None:
+        changes = "(no files.toml — discover has not run)"
+    else:
+        tracked = scope_files(target, data, scope)
+        if not tracked:
+            changes = f"(no files tracked for scope {scope!r})"
+        else:
+            op = overview_path(label)
+            ch = files_newer_than(op, tracked) if op.exists() else tracked
+            changes = ("(nothing has changed)" if not ch
+                       else "\n".join(f"- `{p.relative_to(target.path)}`" for p in ch))
+    body = SCOPE_AUDIT[scope].format(path=target.path, label=label,
+                                     tests_toml=tests_toml_path(label))
+    return f"""# Context
 
 # Project Overview
 
-{read_or_placeholder(overview_path(ctx.label), "(no overview yet - discover has not run)")}
+{overview}
 
 # File changes since overview was produced
 
-{changes_since_overview(ctx)}
+{changes}
 
 # Previous report
 
-{read_or_placeholder(out, "(none)")}
+{read_or(out, "(none)")}
 
 # Action
 
-{audit_header(ctx)}
+{intro(ctx)}
+Use the Project Overview above for context. Do NOT redo discovery.
 
-{SCOPE_AUDIT[ctx.scope](ctx)}
+{body}
 {footer(ctx, out)}"""
 
 
-# === ExecAction implementations for metaproject ===
-
-def discover_is_fresh(ctx: Ctx) -> bool:
-    if ctx.force:
-        return False
-    data = read_files_toml(ctx.label)
-    if data is None:
-        return False
-    return not files_newer_than(files_toml_path(ctx.label), all_tracked_files(ctx.target, data))
-
-
-def audit_is_fresh(ctx: Ctx) -> bool:
-    assert ctx.scope is not None
-    if ctx.force:
-        return False
-    out = report_path("audit", ctx.scope, ctx.label)
-    data = read_files_toml(ctx.label)
-    if data is None or not out.exists():
-        return False
-    files = scope_files(ctx.target, data, ctx.scope)
-    if not files:
-        return True
-    return not files_newer_than(out, files)
+def fix_prompt(ctx: Ctx) -> str:
+    label, scope = ctx.data["label"], ctx.data["scope"]
+    audit_out = report_path("audit", scope, label)
+    out = report_path("fix", scope, label)
+    return f"""{intro(ctx)}
+Look at '{audit_out}' if it exists; if not, you are done and your last
+message must be exactly: "no audit items to implement".
+Otherwise make the recommended changes inside '{ctx.data['path']}'.
+{footer(ctx, out)}"""
 
 
-def followup_is_fresh(parent_action: str, child_action: str) -> Callable[[Ctx], bool]:
-    def check(ctx: Ctx) -> bool:
-        assert ctx.scope is not None
-        if ctx.force:
-            return False
-        parent = report_path(parent_action, ctx.scope, ctx.label)
-        child = report_path(child_action, ctx.scope, ctx.label)
-        return skip_followup(parent, child)
-
-    return check
-
-
-def skip_reason(ctx: Ctx) -> str:
-    if ctx.scope:
-        return f"{ctx.action}/{ctx.scope}/{ctx.label}: up to date"
-    return f"{ctx.action}/{ctx.label}: up to date"
-
-
-def output_paths_for(ctx: Ctx) -> list[Path]:
-    if ctx.action == "discover":
-        return [overview_path(ctx.label), files_toml_path(ctx.label)]
-    assert ctx.scope is not None
-    paths = [report_path(ctx.action, ctx.scope, ctx.label)]
-    if ctx.action == "audit" and ctx.scope == "test":
-        paths.append(structured_report_path("audit", "test", ctx.label, "tests.toml"))
-    return paths
+def verify_prompt(ctx: Ctx) -> str:
+    label, scope = ctx.data["label"], ctx.data["scope"]
+    fix_out = report_path("fix", scope, label)
+    out = report_path("verify", scope, label)
+    return f"""{intro(ctx)}
+Look at '{fix_out}' — it documents improvements for scope '{scope}'.
+Go to '{ctx.data['path']}' and try to follow the steps / run the commands.
+If there are issues, fix them and update '{fix_out}' to be accurate. For any
+change in that file, note that you made changes, why, and what they are.
+{footer(ctx, out)}"""
 
 
 # === Bundle registration ===
 
 def build_runner() -> Runner:
-    runner = Runner()
-
-    runner.add(
-        PromptBundle(
-            name="discover",
-            prompt=[ExecPromptFn(discover_prompt)],
-            pre_exec=[
-                SkipIf(discover_is_fresh, skip_reason),
-                EnsureParents(output_paths_for),
-                BackupFiles(output_paths_for),
-            ],
-            output=lambda ctx: overview_path(ctx.label),
-        )
-    )
-
+    r = Runner()
+    setup = [EnsureParents(outputs_for), BackupFiles(outputs_for)]
+    r.add(PromptBundle(
+        name="discover",
+        prompt=[PromptFn(discover_prompt)],
+        pre_exec=[SkipIf(discover_is_fresh, skip_reason), *setup],
+    ))
     for scope in ALL_SCOPES:
-        runner.add(
-            PromptBundle(
-                name=f"audit/{scope}",
-                prompt=[ExecPromptFn(audit_prompt)],
-                pre_exec=[
-                    SkipIf(audit_is_fresh, skip_reason),
-                    EnsureParents(output_paths_for),
-                    BackupFiles(output_paths_for),
-                ],
-                output=lambda ctx: report_path("audit", ctx.scope or "", ctx.label),
-            )
-        )
-
-        runner.add(
-            PromptBundle(
-                name=f"fix/{scope}",
-                prompt=[ExecPromptFn(fix_prompt)],
-                pre_exec=[
-                    SkipIf(followup_is_fresh("audit", "fix"), skip_reason),
-                    EnsureParents(output_paths_for),
-                    BackupFiles(output_paths_for),
-                ],
-                output=lambda ctx: report_path("fix", ctx.scope or "", ctx.label),
-            )
-        )
-
-        runner.add(
-            PromptBundle(
-                name=f"verify/{scope}",
-                prompt=[ExecPromptFn(verify_prompt)],
-                pre_exec=[
-                    SkipIf(followup_is_fresh("fix", "verify"), skip_reason),
-                    EnsureParents(output_paths_for),
-                    BackupFiles(output_paths_for),
-                ],
-                output=lambda ctx: report_path("verify", ctx.scope or "", ctx.label),
-            )
-        )
-
-    return runner
+        r.add(PromptBundle(f"audit/{scope}", [PromptFn(audit_prompt)],
+                           [SkipIf(audit_is_fresh, skip_reason), *setup]))
+        r.add(PromptBundle(f"fix/{scope}", [PromptFn(fix_prompt)],
+                           [SkipIf(followup_is_fresh("audit", "fix"), skip_reason), *setup]))
+        r.add(PromptBundle(f"verify/{scope}", [PromptFn(verify_prompt)],
+                           [SkipIf(followup_is_fresh("fix", "verify"), skip_reason), *setup]))
+    return r
 
 
-# === Environment setup and meta actions ===
+# === Init / list_projects / list_reports ===
 
 def init(verbose: bool) -> None:
-    if not (BASE_DIR / ".ateam").is_dir():
-        result = subprocess.run(
-            ["ateam", "init"],
-            cwd=BASE_DIR,
-            capture_output=True,
-            text=True,
-        )
-        if result.stderr:
-            click.echo(result.stderr, err=True, nl=False)
-        if result.returncode != 0:
-            if result.stdout:
-                click.echo(result.stdout, nl=False)
-            raise click.ClickException(f"ateam init failed (exit {result.returncode})")
-
-    env = subprocess.run(
-        ["ateam", "--project", str(BASE_DIR), "env"],
-        capture_output=True,
-        text=True,
-    )
+    if not (SCRIPT_DIR / ".ateam").is_dir():
+        r = subprocess.run(["ateam", "init"], cwd=SCRIPT_DIR, capture_output=True, text=True)
+        if r.stderr:
+            click.echo(r.stderr, err=True, nl=False)
+        if r.returncode != 0:
+            raise click.ClickException(f"ateam init failed (exit {r.returncode})")
+    env = subprocess.run(["ateam", "--project", str(SCRIPT_DIR), "env"],
+                         capture_output=True, text=True)
     if verbose or env.returncode != 0:
         if env.stdout:
             click.echo(env.stdout, nl=False)
@@ -887,37 +607,32 @@ def init(verbose: bool) -> None:
             click.echo(env.stderr, err=True, nl=False)
     if env.returncode != 0:
         raise click.ClickException(f"ateam env failed (exit {env.returncode})")
-
     BASE_REPORTS.mkdir(parents=True, exist_ok=True)
 
 
 def list_projects(short: bool) -> None:
     if not BASE_REPORTS.exists():
         return
-    candidates = sorted(
-        c for c in BASE_REPORTS.iterdir()
-        if c.is_dir() and (c / "files.toml").exists()
-    )
+    cands = sorted(c for c in BASE_REPORTS.iterdir()
+                   if c.is_dir() and (c / "files.toml").exists())
     if short:
-        for c in candidates:
+        for c in cands:
             click.echo(c.name)
         return
-
-    rows: list[tuple[str, str, str, str, str]] = []
-    for c in candidates:
+    rows: list[tuple[str, ...]] = []
+    for c in cands:
         try:
             data = tomllib.loads((c / "files.toml").read_text())
         except tomllib.TOMLDecodeError as e:
             rows.append((c.name, f"(malformed: {e})", "", "", ""))
             continue
-        meta = data.get("meta") or {}
-        path = meta.get("path_canonical") or meta.get("path_used") or "?"
-        branch = meta.get("git_branch", "?")
-        commit = (meta.get("git_commit_hash") or "")[:8] or "?"
-        ts = meta.get("discovered_at", "?")
+        m = data.get("meta") or {}
+        path = m.get("path_canonical") or m.get("path_used") or "?"
+        branch = m.get("git_branch", "?")
+        commit = (m.get("git_commit_hash") or "")[:8] or "?"
+        ts = m.get("discovered_at", "?")
         scopes = sorted(s for s, fs in (data.get("files") or {}).items() if fs)
         rows.append((c.name, path, f"[{branch}@{commit}]", ts, ", ".join(scopes) or "-"))
-
     if not rows:
         return
     widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]) - 1)]
@@ -930,181 +645,134 @@ def list_reports() -> None:
     if not BASE_REPORTS.exists():
         return
     click.echo("project,scope,action,relative_path")
-    actions = {f"{a}.md" for a in ("audit", "fix", "verify")}
-    for project_dir in sorted(BASE_REPORTS.iterdir()):
-        if not project_dir.is_dir():
+    wanted = {f"{a}.md" for a in ("audit", "fix", "verify")}
+    for pd in sorted(BASE_REPORTS.iterdir()):
+        if not pd.is_dir():
             continue
-        for scope_dir in sorted(project_dir.iterdir()):
-            if not scope_dir.is_dir():
+        for sd in sorted(pd.iterdir()):
+            if not sd.is_dir():
                 continue
-            for f in sorted(scope_dir.iterdir()):
-                if not f.is_file() or f.name not in actions:
-                    continue
-                rel = f.relative_to(BASE_DIR)
-                click.echo(f"{project_dir.name},{scope_dir.name},{f.stem},{rel}")
+            for f in sorted(sd.iterdir()):
+                if f.is_file() and f.name in wanted:
+                    click.echo(f"{pd.name},{sd.name},{f.stem},{f.relative_to(SCRIPT_DIR)}")
 
 
-# === Pipeline execution ===
+# === Pipeline ===
 
-def bundle_names_for_stage(stage: str, scopes: list[str]) -> list[str]:
-    if stage == "discover":
-        return ["discover"]
-    return [f"{stage}/{scope}" for scope in scopes]
-
-
-def run_target_pipeline(
-    runner: Runner,
-    target: Target,
-    stages: list[str],
-    scopes: list[str],
-    *,
-    force: bool,
-    dry_run: bool,
-) -> None:
-    # Discover is a prerequisite for overview.md and files.toml. Even when the
-    # requested action is audit/fix/verify, run discover first for this target.
-    if any(stage in stages for stage in ("audit", "fix", "verify")) and "discover" not in stages:
+def run_pipeline(runner: Runner, target: Target, stages: list[str], scopes: list[str],
+                 *, force: bool, dry_run: bool) -> None:
+    if any(s in stages for s in ("audit", "fix", "verify")) and "discover" not in stages:
         stages = ["discover"] + stages
-
     for stage in stages:
-        names = bundle_names_for_stage(stage, scopes)
-        results = runner.run_many(names, target, force=force, dry_run=dry_run)
-        for result in sorted(results, key=lambda r: r.bundle):
-            if result.flow.state == "skip":
-                click.echo(f"= {result.bundle}/{result.target}: {result.flow.reason}")
+        names = ["discover"] if stage == "discover" else [f"{stage}/{s}" for s in scopes]
+        items = [(n, ctx_for(target, n, force=force, dry_run=dry_run)) for n in names]
+        for r in sorted(runner.run_many(items), key=lambda r: r.bundle):
+            if r.flow.state == "skip":
+                click.echo(f"= {r.bundle}/{target.label}: {r.flow.reason}")
             else:
-                click.echo(f"-> {result.bundle}/{result.target}: {result.output or ''}")
+                click.echo(f"→ {r.bundle}/{target.label}: done")
 
 
 # === CLI ===
 
 @click.command(context_settings={"help_option_names": ["-h", "--help"]})
-@click.argument("action", type=click.Choice(ALL_CLI_ACTIONS))
+@click.argument("action", type=click.Choice(list(ACTION_CHAIN.keys()) + META_ACTIONS))
 @click.argument("targets", nargs=-1, metavar="[TARGET...]")
-@click.option("--dry-run", is_flag=True, help="Print prompts without executing.")
-@click.option(
-    "--scope",
-    default="all",
-    show_default=True,
-    type=click.Choice(["all", *ALL_SCOPES]),
-    help="Audit scope, ignored by discover.",
-)
-@click.option("--force", is_flag=True, help="Bypass all change-detection skips.")
-@click.option("--short", is_flag=True, help="With projects: one name per line.")
-@click.option(
-    "--for",
-    "for_action",
-    type=click.Choice(PIPELINE),
-    default="audit",
-    show_default=True,
-    help="With prompt: which pipeline step to preview.",
-)
-@click.option("-v", "--verbose", is_flag=True, help="Show ateam env output.")
-def main(
-    action: str,
-    targets: tuple[str, ...],
-    dry_run: bool,
-    scope: str,
-    force: bool,
-    short: bool,
-    for_action: str,
-    verbose: bool,
-) -> None:
-    """Run discover/audit/fix/verify across projects.
-
-    TARGET format: LABEL:PATH, for example myproj:/path/to/myproj.
-    After a project has been discovered once, LABEL: is enough.
-
-    Scoped stages run in parallel per target. Discover always runs first when a
-    later stage needs overview.md and files.toml.
-    """
+@click.option("--dry-run", is_flag=True)
+@click.option("--scope", default="all", type=click.Choice(["all", *ALL_SCOPES]))
+@click.option("--force", is_flag=True)
+@click.option("--short", is_flag=True)
+@click.option("--for", "for_action", type=click.Choice(PIPELINE), default="audit")
+@click.option("-v", "--verbose", is_flag=True)
+def main(action, targets, dry_run, scope, force, short, for_action, verbose):
+    """discover/audit/fix/verify across projects."""
     runner = build_runner()
 
     if action == "projects":
-        if targets:
-            raise click.UsageError("'projects' takes no targets")
-        list_projects(short)
-        return
-
+        if targets: raise click.UsageError("'projects' takes no targets")
+        list_projects(short); return
     if action == "reports":
-        if targets:
-            raise click.UsageError("'reports' takes no targets")
-        list_reports()
-        return
-
+        if targets: raise click.UsageError("'reports' takes no targets")
+        list_reports(); return
     if action == "prompt":
         if len(targets) != 1:
             raise click.UsageError("'prompt' requires exactly one TARGET")
-        target = Target.parse(targets[0])
-        if for_action == "discover":
-            click.echo(runner.preview("discover", target, force=force))
-            return
-        if scope == "all":
+        t = Target.parse(targets[0])
+        bundle = "discover" if for_action == "discover" else f"{for_action}/{scope}"
+        if for_action != "discover" and scope == "all":
             raise click.UsageError(f"'prompt --for {for_action}' requires --scope")
-        click.echo(runner.preview(f"{for_action}/{scope}", target, force=force))
+        click.echo(runner.preview(bundle, ctx_for(t, bundle, force=force, dry_run=True)))
         return
 
     if not targets:
-        raise click.UsageError("at least one TARGET is required for this action")
-
+        raise click.UsageError("at least one TARGET is required")
     parsed = [Target.parse(t) for t in targets]
     stages = list(ACTION_CHAIN[action])
     scopes = ALL_SCOPES if scope == "all" else [scope]
-
     if not dry_run:
         init(verbose)
-
     for target in parsed:
-        run_target_pipeline(
-            runner,
-            target,
-            stages,
-            scopes,
-            force=force,
-            dry_run=dry_run,
-        )
+        run_pipeline(runner, target, stages, scopes, force=force, dry_run=dry_run)
 
 
 if __name__ == "__main__":
     main()
 ```
 
-## Why This Is Better Than The Current Script
+## Line count
+
+| File | Lines | Of which |
+|---|---:|---|
+| `ateam_runner.py` (framework) | ~130 | Reusable for any agent workflow |
+| `metaproject.py` (this workflow only) | ~360 | ~210 lines of Python, ~150 lines of literal prompt text in multi-line strings |
+| **Total** | **~490** | Original `metaproject.py` was 754 lines |
+
+The reduction (754 → 490) is real but moderate. The bigger win is structural:
+
+- The framework (~130 lines) is now reusable. A second workflow in this style
+  would only pay for its own ~360-line script.
+- Of the 360 metaproject lines, ~150 are literal prompt text inside multi-line
+  strings — that's prompt *content*, not control flow. Strip those and the
+  Python control flow + helpers fit in ~210 lines.
+- Each piece has one job:
+  - `ateam_runner.py`: prompt-bundle execution, parallelism, skip/backup helpers
+  - `metaproject.py`: target parsing, paths, prompt text, skip predicates, CLI
+  - prompt text: lives in clearly-marked multi-line strings inside the script
+
+## Why this is better than the current script
 
 The current script already has the right ingredients, but they are not first
 class. This version makes them first class:
 
-| Current script | Python API version |
+| Current `metaproject.py` | Python API version |
 |---|---|
 | `build_audit_prompt()` manually assembles every section | `PromptBundle(prompt=[...])` names the prompt parts |
-| `run_audit()` mixes skip, backup, prompt, and execution | `pre_exec`, `prompt`, and `Runner.run()` separate them |
-| scope functions are registered separately from run behavior | each scope becomes `audit/<scope>`, `fix/<scope>`, `verify/<scope>` bundles |
-| scoped work is serial | scoped bundles run through `Runner.run_many()` in parallel |
-| preview is separate ad hoc code | `Runner.preview()` renders the same bundle prompt without actions |
+| `run_audit()` mixes skip, backup, prompt, and execution | `pre_exec`, `prompt`, `Runner.run()` separate them |
+| Scope functions registered separately from run behavior | Each scope becomes `audit/<scope>`, `fix/<scope>`, `verify/<scope>` bundles |
+| Scoped work is serial | Scoped bundles run through `Runner.run_many()` in parallel |
+| Preview is separate ad hoc code | `Runner.preview()` renders the same bundle prompt without actions |
 
-The strongest improvement is the execution order:
+Per-target execution order with this version:
 
-```text
+```
 for each target:
   discover
-  audit/claude, audit/gitconfig, audit/build, audit/test, audit/docker in parallel
-  fix/claude, fix/gitconfig, fix/build, fix/test, fix/docker in parallel
+  audit/claude, audit/gitconfig, audit/build, audit/test, audit/docker  in parallel
+  fix/claude,   fix/gitconfig,   fix/build,   fix/test,   fix/docker    in parallel
   verify/claude, verify/gitconfig, verify/build, verify/test, verify/docker in parallel
 ```
 
-That keeps overview generation deterministic and first, but removes the slow
-serial loop over independent scopes.
+Overview generation stays deterministic and first; the slow serial loop over
+independent scopes goes away.
 
-## Remaining Design Questions
+## Open design questions
 
-1. `PromptBundle` is a good name for one executable agent unit, but `Runner`
-   might be too generic. `PromptRunner` or `AgentRunner` would be clearer in a
-   larger codebase.
-2. `ExecPromptFn` and `ExecActionFn` are adapter names, not user-facing
-   concepts. The important names are still `ExecPrompt` and `ExecAction`.
-3. The generic API should probably standardize result capture from `ateam exec`
+1. `PromptBundle` is a good name for one executable agent unit; `Runner` might
+   be too generic. `PromptRunner` or `AgentRunner` would be clearer in a larger
+   codebase.
+2. The generic API should probably standardize result capture from `ateam exec`
    instead of assuming the agent writes directly to the instructed output path.
-4. Parallel execution needs a configurable worker limit. Five scopes maps well
+3. Parallel execution needs a configurable worker limit. Five scopes maps well
    to this example, but generic workflows need budget and concurrency controls.
-5. If this became part of ateam, the Python API should expose the same preview
-   and process metadata that the CLI exposes, not hide it behind subprocesses.
+4. If this became part of ateam, the Python API should expose the same preview
+   and process metadata that the CLI exposes — not hide it behind subprocesses.

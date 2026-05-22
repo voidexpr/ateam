@@ -394,7 +394,7 @@ Future addition (deferred): `{{shell CMD}}` directive for user-defined scripts w
 
 Work done before or after the agent runs. Output is captured as logging only — never seen by the agent in its prompt. Used for environment setup, post-run validation, and side effects.
 
-Mechanisms in v1: ordered steps declared in YAML frontmatter. Dir-level lists live in `_meta.yaml` (or another agreed-on dir-level metadata file — see open question below); role-level lists live in `<role>.prompt.md` frontmatter. A step is either:
+Mechanisms in v1: ordered steps declared in YAML frontmatter on prompt-tree markdown files. Dir-level lists live in frontmatter on any `_pre.*.md` or `_post.*.md` file in the dir (lists merge across all such files); role-level lists live in `<role>.prompt.md` frontmatter. A step is either:
 - a **built-in action** referenced by name (e.g. `copy-runtime-files`, `concurrent-run-check`) — implemented in ateam's Go code.
 - a **script path** relative to the file's directory — black-box subprocess that gets the run's environment.
 
@@ -418,12 +418,7 @@ Pre and post lists are ordered. Composition: per-role frontmatter lists **extend
 
 ### Where does dir-level frontmatter live?
 
-Since there's no `_template.md` file anymore, dir-level `pre_exec` / `post_exec` declarations need a home. **Open question** — options:
-- (a) On any dir-level structural file (`_pre.md`, `_post.md`, `_pre.<NAME>.md`, `_post.<NAME>.md`) — frontmatter merged across all such files at the dir level.
-- (b) A dedicated `_meta.yaml` (or `_meta.md` with only frontmatter) per directory, one source of truth.
-- (c) Only on `<role>.prompt.md` — no dir-level declarations; users must replicate per role.
-
-(b) is cleanest (single source per dir, separates structure from content); (a) is most consistent with the "filenames carry meaning" theme. Pin down before implementation.
+**Decided**: on any `_pre.*.md` or `_post.*.md` file in the directory. Frontmatter lists merge across all such files in the dir. There is no separate metadata file (no `_meta.yaml`); structural files carry both content and metadata.
 
 Per-role frontmatter on `<role>.prompt.md`:
 ```yaml
@@ -434,13 +429,19 @@ post_exec: [./security-extra-validate.sh]
 Focus on confirmed exploitable bugs...
 ```
 
-Assuming option (b) — `report/_meta.yaml`:
+Dir-level frontmatter on (e.g.) `report/_pre.intro.md`:
 ```yaml
+---
 pre_exec: [concurrent-run-check, source-writable, ./gather-deps.sh]
 post_exec: [copy-runtime-files, ./validate.sh]
+---
+You are performing a {{prompt.name}} report on this project.
+[... rest of the pre fragment's markdown body ...]
 ```
 
 Assembling `:report/security` then runs `pre_exec` = `[concurrent-run-check, source-writable, ./gather-deps.sh, ./security-extra-setup.sh]` and `post_exec` = `[copy-runtime-files, ./validate.sh, ./security-extra-validate.sh]`. None of these contribute to prompt text.
+
+If multiple structural files in the same dir carry frontmatter (e.g. both `_pre.intro.md` and `_post.format.md` declare `pre_exec` entries), the lists concatenate in lexical filename order. This is consistent with how the content fragments themselves compose.
 
 **This refactor does not implement the stage executor.** It establishes the substrate:
 - The filesystem layout where actions get declared (frontmatter).
@@ -972,7 +973,7 @@ Resolution:
 
 1. **Pre/post exec action v1 catalog** (category B only — content injection lives in template vars, see category A): `concurrent-run-check`, `budget-precheck`, `source-writable` (pre); `copy-runtime-files`, `chain-next` (post). Confirm.
 2. **Assembly-time content injection v1**: `{{PROJECT_INFO}}` and `{{ROLE_REPORTS}}` as template variables. Plus `{{include /shared/review/review.md}}` in code_management's prompt (replacing today's `cmd/code.go` read+inline). Confirm.
-3. **Where dir-level frontmatter lives.** Now that `_template.md` is gone, dir-level `pre_exec`/`post_exec` declarations need a home. Options: (a) on `_pre.md`/`_post.md` files; (b) dedicated `_meta.yaml` per dir; (c) only on `<role>.prompt.md`. Recommend (b). **Decide.**
+3. **Where dir-level frontmatter lives** — **decided**: on any `_pre.*.md` or `_post.*.md` file in the directory. Frontmatter lists merge across all such files in lexical order. No separate `_meta.yaml`. Documented in the Stage concept section above.
 4. **Action parameter shape** — single string vs key-value map. Recommend single string for v1.
 5. **Script ordering** — explicit YAML list order.
 6. **Failure semantics** — does a failed pre step block the prompt? Does a failed post step fail the stage? Per-step `on_failure: stop|continue` policy.

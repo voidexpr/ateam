@@ -34,12 +34,10 @@ files into stable shared paths for the next stage.
 .ateam/
   prompts/
     metaproject/
-      _meta.yaml
-      _pre.project.md
+      _pre.project.md           # carries dir-level pre_exec in its frontmatter
       discover.prompt.md
       audit/
-        _meta.yaml
-        _pre.context.md
+        _pre.context.md         # carries dir-level pre_exec / post_exec
         _post.output.md
         claude.prompt.md
         gitconfig.prompt.md
@@ -47,8 +45,7 @@ files into stable shared paths for the next stage.
         test.prompt.md
         docker.prompt.md
       fix/
-        _meta.yaml
-        _pre.context.md
+        _pre.context.md         # dir-level pre_exec / post_exec in frontmatter
         _post.output.md
         claude.prompt.md
         gitconfig.prompt.md
@@ -56,8 +53,7 @@ files into stable shared paths for the next stage.
         test.prompt.md
         docker.prompt.md
       verify/
-        _meta.yaml
-        _pre.context.md
+        _pre.context.md         # dir-level pre_exec / post_exec in frontmatter
         _post.output.md
         claude.prompt.md
         gitconfig.prompt.md
@@ -136,43 +132,57 @@ This is much cleaner than using `{{LABEL}}` for target identity. `{{LABEL}}` can
 stay a per-job label for parallel execution; target identity is a real input
 argument.
 
-## Dir Metadata
+## Dir-level metadata
 
-This example assumes the proposal chooses the recommended `_meta.yaml` option for
-dir-level frontmatter.
+Dir-level `pre_exec` / `post_exec` declarations live in YAML frontmatter on any
+`_pre.*.md` or `_post.*.md` file in that directory. When multiple structural
+files in the same dir carry frontmatter, the lists merge.
 
-`.ateam/prompts/metaproject/_meta.yaml`:
+For metaproject, place the frontmatter on `_pre.context.md` (one file per dir):
+
+`.ateam/prompts/metaproject/_pre.project.md`:
 
 ```yaml
+---
 pre_exec:
   - concurrent-run-check
+---
 ```
 
-`.ateam/prompts/metaproject/audit/_meta.yaml`:
+(The body of `_pre.project.md` follows the frontmatter — see "Shared Root
+Wrapper" below.)
+
+`.ateam/prompts/metaproject/audit/_pre.context.md`:
 
 ```yaml
+---
 pre_exec:
   - ./../scripts/skip-audit.sh {{arg.target_label}} {{prompt.name}}
 post_exec:
   - ./../scripts/promote-metaproject.sh {{arg.target_label}} audit {{prompt.name}}
+---
 ```
 
-`.ateam/prompts/metaproject/fix/_meta.yaml`:
+`.ateam/prompts/metaproject/fix/_pre.context.md`:
 
 ```yaml
+---
 pre_exec:
   - ./../scripts/skip-followup.sh {{arg.target_label}} {{prompt.name}} audit fix
 post_exec:
   - ./../scripts/promote-metaproject.sh {{arg.target_label}} fix {{prompt.name}}
+---
 ```
 
-`.ateam/prompts/metaproject/verify/_meta.yaml`:
+`.ateam/prompts/metaproject/verify/_pre.context.md`:
 
 ```yaml
+---
 pre_exec:
   - ./../scripts/skip-followup.sh {{arg.target_label}} {{prompt.name}} fix verify
 post_exec:
   - ./../scripts/promote-metaproject.sh {{arg.target_label}} verify {{prompt.name}}
+---
 ```
 
 The scripts above are exactly the deterministic logic now embedded in
@@ -583,7 +593,7 @@ concerns:
 * `ls .ateam/prompts/metaproject/audit/` shows every audit scope.
 * Opening `audit/test.prompt.md` shows only the test audit instruction.
 * Opening `audit/_pre.context.md` shows the common context for every audit.
-* `_meta.yaml` shows lifecycle hooks without reading Python.
+* Frontmatter on `_pre.*.md` / `_post.*.md` shows lifecycle hooks without reading Python.
 
 For workflow debugging, it is only more readable if `ateam prompt --preview`
 shows the assembled prompt, merged frontmatter, resolved args, and ordered
