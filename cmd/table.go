@@ -447,6 +447,26 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 			Pricing:      pricing,
 			Env:          ac.Env,
 		}
+	case "codex-tmux":
+		cmd := ac.Command
+		if cmd == "" {
+			cmd = "codex"
+		}
+		return &agent.CodexTmuxAgent{
+			Command:          cmd,
+			Args:             ac.Args,
+			Model:            ac.Model,
+			Effort:           ac.Effort,
+			MaxBudgetUSD:     ac.MaxBudgetUSD,
+			DefaultModel:     defaultModel,
+			Pricing:          pricing,
+			Env:              ac.Env,
+			StartTimeout:     parseRuntimeDuration(ac.StartTimeout, "start_timeout"),
+			BusyTimeout:      parseRuntimeDuration(ac.BusyTimeout, "busy_timeout"),
+			QuiescenceWindow: parseRuntimeDuration(ac.QuiescenceWindow, "quiescence_window"),
+			TmuxWidth:        ac.TmuxWidth,
+			TmuxHeight:       ac.TmuxHeight,
+		}
 	default: // "claude", "", or any unknown type
 		cmd := ac.Command
 		if cmd == "" {
@@ -463,6 +483,18 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 			Env:          ac.Env,
 		}
 	}
+}
+
+func parseRuntimeDuration(value, field string) time.Duration {
+	if value == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: invalid runtime.hcl %s %q: %v\n", field, value, err)
+		return 0
+	}
+	return d
 }
 
 // deriveDockerImageName builds the per-project Docker image name. It assumes
@@ -851,7 +883,7 @@ func batchBudgetPrecheck(db *calldb.CallDB, projectID, batch, capStr string) (fu
 // the agent supports it natively. Returns an error when the cap was requested
 // but cannot be enforced for an action that requires hard enforcement.
 //
-// Only Claude has a native --max-budget-usd flag. For Codex:
+// Only Claude has a native --max-budget-usd flag. For Codex / codex-tmux:
 //   - parallel/report: warn (best-effort; the run-level batch cap still applies)
 //   - exec/review/code/verify: error (single-exec actions don't have a batch
 //     fallback, so silently dropping the cap would surprise the operator)
@@ -860,17 +892,18 @@ func applyMaxBudgetUSD(r *runner.Runner, value, action string) error {
 		return nil
 	}
 	r.Agent.SetMaxBudgetUSD(value)
-	if r.Agent.Name() != agent.NameCodex {
+	if r.Agent.Name() != agent.NameCodex && r.Agent.Name() != agent.NameCodexTmux {
 		return nil
 	}
 	switch action {
 	case runner.ActionParallel, runner.ActionReport:
 		fmt.Fprintf(os.Stderr,
-			"Warning: --max-budget-usd is not enforced per-agent on codex; relying on --max-budget-usd-batch (if set) for %s.\n",
+			"Warning: --max-budget-usd is not enforced per-agent on %s; relying on --max-budget-usd-batch (if set) for %s.\n",
+			r.Agent.Name(),
 			action)
 		return nil
 	default:
-		return fmt.Errorf("--max-budget-usd is not supported on codex for %s (no native cap; rerun with claude or drop the flag)", action)
+		return fmt.Errorf("--max-budget-usd is not supported on %s for %s (no native cap; rerun with claude or drop the flag)", r.Agent.Name(), action)
 	}
 }
 

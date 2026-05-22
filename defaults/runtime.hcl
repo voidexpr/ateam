@@ -389,6 +389,32 @@ agent "codex-xhigh" {
   effort = "xhigh"
 }
 
+// codex-tmux: drives the interactive Codex TUI through tmux so slash commands
+// unavailable to `codex exec` can run unattended. Example:
+//   ateam exec "/review" --agent codex-tmux
+agent "codex-tmux" {
+  base    = "codex"
+  type    = "codex-tmux"
+  command = "codex"
+  args    = ["--no-alt-screen", "-s", "workspace-write", "-a", "never", "-c", "check_for_update_on_startup=false", "--disable", "apps", "--disable", "plugins"]
+  model   = "gpt-5.5"
+  effort  = "xhigh"
+
+  start_timeout     = "15s"
+  busy_timeout      = "20m"
+  quiescence_window = "2s"
+  tmux_width        = 200
+  tmux_height       = 50
+
+  // Interactive Codex normally reuses ~/.codex auth; don't require
+  // OPENAI_API_KEY inherited from the headless codex agent.
+  required_env = []
+
+  // Avoid inheriting exec-only codex args such as --skip-git-repo-check.
+  args_outside_container = []
+  args_inside_container  = []
+}
+
 agent "mock" {
   type = "builtin"
   required_env = []
@@ -464,6 +490,11 @@ profile "isolated" {
 
 profile "codex" {
   agent     = "codex"
+  container = "none"
+}
+
+profile "codex-tmux" {
+  agent     = "codex-tmux"
   container = "none"
 }
 

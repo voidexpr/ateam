@@ -239,16 +239,17 @@ func TestEnvShowsNotFoundForMissingPaths(t *testing.T) {
 // --- global state save/restore helpers ---
 
 type execGlobals struct {
-	org, profile, agent, role, action, model, workDir, agentArgs, batch, containerName string
-	noStream, noSummary, quiet, verbose, dryRun, dockerAutoSetup                       bool
+	org, profile, agent, role, action, model, effort, workDir, agentArgs, batch, containerName string
+	maxBudgetUSD, maxBudgetBatch, extraPrompt                                                  string
+	noStream, noSummary, quiet, verbose, dryRun, dockerAutoSetup                               bool
 }
 
 func saveExecGlobals() execGlobals {
 	return execGlobals{
-		org: orgFlag, profile: execProfile, agent: execAgent, role: execRole, action: execAction, model: execModel,
-		workDir: workDirFlag, agentArgs: execAgentArgs, batch: execBatch,
-		containerName: execContainerName, noStream: execNoStream, noSummary: execNoSummary,
-		quiet: execQuiet, verbose: execVerbose, dryRun: execDryRun, dockerAutoSetup: execDockerAutoSetup,
+		org: orgFlag, profile: execProfile, agent: execAgent, role: execRole, action: execAction, model: execModel, effort: execEffort,
+		workDir: workDirFlag, agentArgs: execAgentArgs, batch: execBatch, containerName: execContainerName,
+		maxBudgetUSD: execMaxBudgetUSD, maxBudgetBatch: execMaxBudgetBatch, extraPrompt: execExtraPrompt,
+		noStream: execNoStream, noSummary: execNoSummary, quiet: execQuiet, verbose: execVerbose, dryRun: execDryRun, dockerAutoSetup: execDockerAutoSetup,
 	}
 }
 
@@ -259,10 +260,14 @@ func (g execGlobals) restore() {
 	execRole = g.role
 	execAction = g.action
 	execModel = g.model
+	execEffort = g.effort
 	workDirFlag = g.workDir
 	execAgentArgs = g.agentArgs
 	execBatch = g.batch
 	execContainerName = g.containerName
+	execMaxBudgetUSD = g.maxBudgetUSD
+	execMaxBudgetBatch = g.maxBudgetBatch
+	execExtraPrompt = g.extraPrompt
 	execNoStream = g.noStream
 	execNoSummary = g.noSummary
 	execQuiet = g.quiet

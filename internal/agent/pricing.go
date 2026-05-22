@@ -62,6 +62,7 @@ var modelContextWindows = map[string]int{
 	"gpt-5.3-codex": 400000,
 	"gpt-5.4-codex": 400000,
 	"gpt-5.4":       400000, // codex CLI's new name for gpt-5.4-codex (suffix dropped)
+	"gpt-5.5":       400000,
 	"gpt-4o":        128000,
 	"gpt-4o-mini":   128000,
 	// 1,047,576 = OpenAI's published gpt-4.1 / gpt-4.1-mini context window

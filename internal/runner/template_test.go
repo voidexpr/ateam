@@ -246,6 +246,25 @@ func TestResolveAgentTemplateArgsCodex(t *testing.T) {
 	}
 }
 
+func TestResolveAgentTemplateArgsCodexTmux(t *testing.T) {
+	a := &agent.CodexTmuxAgent{
+		Command: "codex",
+		Args:    []string{"--name", "{{ROLE}}-{{ACTION}}"},
+		Env:     map[string]string{"ROLE": "{{ROLE}}"},
+	}
+	vars := TemplateVars{Role: "testing_basic", Action: "review"}
+
+	resolved := ResolveAgentTemplateArgs(a, vars)
+	got := resolved.(*agent.CodexTmuxAgent)
+
+	if got.Args[1] != "testing_basic-review" {
+		t.Errorf("Args: got %q, want %q", got.Args[1], "testing_basic-review")
+	}
+	if got.Env["ROLE"] != "testing_basic" {
+		t.Errorf("Env ROLE: got %q, want %q", got.Env["ROLE"], "testing_basic")
+	}
+}
+
 func TestResolveAgentTemplateArgsDoesNotMutateOriginal(t *testing.T) {
 	original := &agent.ClaudeAgent{
 		Command: "claude",

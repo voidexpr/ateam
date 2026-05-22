@@ -15,9 +15,10 @@ import (
 // Agent name constants — what each implementation returns from Name().
 // Use these for switching on agent type instead of comparing raw strings.
 const (
-	NameClaude = "claude"
-	NameCodex  = "codex"
-	NameMock   = "mock"
+	NameClaude    = "claude"
+	NameCodex     = "codex"
+	NameCodexTmux = "codex-tmux"
+	NameMock      = "mock"
 )
 
 // Agent executes a prompt and produces normalized stream events.

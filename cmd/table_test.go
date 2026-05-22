@@ -224,6 +224,7 @@ func TestApplyMaxBudgetUSD(t *testing.T) {
 		{"codex review errors", &agent.CodexAgent{}, "5", runner.ActionReview, true, "5"},
 		{"codex code errors", &agent.CodexAgent{}, "5", runner.ActionCode, true, "5"},
 		{"codex verify errors", &agent.CodexAgent{}, "5", runner.ActionVerify, true, "5"},
+		{"codex-tmux review errors", &agent.CodexTmuxAgent{}, "5", runner.ActionReview, true, "5"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -240,6 +241,10 @@ func TestApplyMaxBudgetUSD(t *testing.T) {
 			case *agent.CodexAgent:
 				if a.MaxBudgetUSD != tt.wantStore {
 					t.Errorf("codex.MaxBudgetUSD = %q, want %q", a.MaxBudgetUSD, tt.wantStore)
+				}
+			case *agent.CodexTmuxAgent:
+				if a.MaxBudgetUSD != tt.wantStore {
+					t.Errorf("codex-tmux.MaxBudgetUSD = %q, want %q", a.MaxBudgetUSD, tt.wantStore)
 				}
 			}
 		})

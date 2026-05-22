@@ -14,7 +14,7 @@ func TestLoadDefaults(t *testing.T) {
 		t.Fatalf("unexpected error loading defaults: %v", err)
 	}
 
-	for _, name := range []string{"claude", "claude-sonnet", "claude-haiku", "codex", "mock"} {
+	for _, name := range []string{"claude", "claude-sonnet", "claude-haiku", "codex", "codex-tmux", "mock"} {
 		if _, ok := cfg.Agents[name]; !ok {
 			t.Errorf("expected %q agent in defaults", name)
 		}
@@ -24,7 +24,7 @@ func TestLoadDefaults(t *testing.T) {
 			t.Errorf("expected %q container in defaults", name)
 		}
 	}
-	for _, name := range []string{"default", "cheap", "cheapest", "docker", "codex", "test"} {
+	for _, name := range []string{"default", "cheap", "cheapest", "docker", "codex", "codex-tmux", "test"} {
 		if _, ok := cfg.Profiles[name]; !ok {
 			t.Errorf("expected %q profile in defaults", name)
 		}
@@ -305,6 +305,46 @@ func TestCodexAgentConfig(t *testing.T) {
 	}
 	if ac.Command != "codex" {
 		t.Errorf("expected command 'codex', got %q", ac.Command)
+	}
+}
+
+func TestCodexTmuxAgentConfig(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ac := cfg.Agents["codex-tmux"]
+	if ac.Type != "codex-tmux" {
+		t.Errorf("expected codex-tmux agent type 'codex-tmux', got %q", ac.Type)
+	}
+	if ac.Command != "codex" {
+		t.Errorf("expected command 'codex', got %q", ac.Command)
+	}
+	if ac.Model != "gpt-5.5" {
+		t.Errorf("expected model 'gpt-5.5', got %q", ac.Model)
+	}
+	if ac.Effort != "xhigh" {
+		t.Errorf("expected effort 'xhigh', got %q", ac.Effort)
+	}
+	wantArgs := []string{"--no-alt-screen", "-s", "workspace-write", "-a", "never", "-c", "check_for_update_on_startup=false", "--disable", "apps", "--disable", "plugins"}
+	if !slices.Equal(ac.Args, wantArgs) {
+		t.Errorf("unexpected codex-tmux args: got %v want %v", ac.Args, wantArgs)
+	}
+	if ac.StartTimeout != "15s" || ac.BusyTimeout != "20m" || ac.QuiescenceWindow != "2s" {
+		t.Errorf("unexpected timeouts: start=%q busy=%q quiescence=%q", ac.StartTimeout, ac.BusyTimeout, ac.QuiescenceWindow)
+	}
+	if ac.TmuxWidth != 200 || ac.TmuxHeight != 50 {
+		t.Errorf("unexpected tmux size: %dx%d", ac.TmuxWidth, ac.TmuxHeight)
+	}
+	if len(ac.RequiredEnv) != 0 {
+		t.Errorf("expected codex-tmux not to require env by default, got %v", ac.RequiredEnv)
+	}
+	if len(ac.ArgsOutsideContainer) != 0 {
+		t.Errorf("expected codex-tmux not to inherit exec-only outside args, got %v", ac.ArgsOutsideContainer)
+	}
+	if ac.Pricing == nil || ac.Pricing.DefaultModel != "gpt-5.4" {
+		t.Errorf("expected codex-tmux to inherit codex pricing, got %+v", ac.Pricing)
 	}
 }
 

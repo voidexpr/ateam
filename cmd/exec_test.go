@@ -78,12 +78,8 @@ func TestRunExecDryRunNoExec(t *testing.T) {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg, savedDryRun, savedQuiet, savedAgent, savedProfile, savedRole :=
-		orgFlag, execDryRun, execQuiet, execAgent, execProfile, execRole
-	defer func() {
-		orgFlag, execDryRun, execQuiet, execAgent, execProfile, execRole =
-			savedOrg, savedDryRun, savedQuiet, savedAgent, savedProfile, savedRole
-	}()
+	saved := saveExecGlobals()
+	defer saved.restore()
 	orgFlag = filepath.Dir(orgDir) // --org takes the parent of .ateamorg/
 	execDryRun = true
 	execQuiet = true
@@ -100,6 +96,43 @@ func TestRunExecDryRunNoExec(t *testing.T) {
 
 	if runErr != nil {
 		t.Fatalf("runExec dry-run: %v", runErr)
+	}
+}
+
+func TestRunExecDryRunCodexTmuxCheapSettings(t *testing.T) {
+	orgParent, projPath, _ := setupTestProject(t)
+
+	saved := saveExecGlobals()
+	defer saved.restore()
+	orgFlag = orgParent
+	execDryRun = true
+	execQuiet = true
+	execProfile = ""
+	execAgent = "codex-tmux"
+	execModel = "gpt-5.5"
+	execEffort = "low"
+
+	var runErr error
+	out := captureStdout(t, func() {
+		withChdir(t, projPath, func() {
+			runErr = runExec(nil, []string{"ping"})
+		})
+	})
+
+	if runErr != nil {
+		t.Fatalf("runExec dry-run: %v", runErr)
+	}
+	for _, want := range []string{
+		"Agent:     codex-tmux",
+		"--model gpt-5.5",
+		"model_reasoning_effort=low",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in dry-run output:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "model_reasoning_effort=xhigh") {
+		t.Errorf("dry-run retained default expensive reasoning effort:\n%s", out)
 	}
 }
 

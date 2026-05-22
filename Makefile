@@ -1,4 +1,9 @@
 BINARY = ateam
+GO_CACHE_DIR := $(CURDIR)/.cache/go-build
+GO_TOOL_BIN := $(CURDIR)/.cache/bin
+GO_CMD ?= go
+GO := GOCACHE=$(GO_CACHE_DIR) $(GO_CMD)
+GO_INSTALL := GOBIN=$(GO_TOOL_BIN) $(GO)
 
 .PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy check-tidy check-docs check test test-all test-cli test-docker test-docker-live vuln docs lint fmt fmt-check install-hooks run-ci
 
@@ -10,14 +15,14 @@ LDFLAGS := -X github.com/ateam/cmd.BuildTime=$(BUILD_TIME) -X github.com/ateam/c
 build: build-binary
 
 build-binary:
-	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BINARY) .
 
 docs: build-binary
 	./$(BINARY) roles --docs > ROLES.md
 
 companion:
 	mkdir -p build
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build \
 		-ldflags "$(LDFLAGS)" \
 		-o build/ateam-linux-amd64 .
 
@@ -26,7 +31,7 @@ build-all: build companion
 # -race-enabled host binary. Writes to $(BINARY)-race so it coexists with the
 # normal build. `-race` requires CGO_ENABLED=1 which is the default locally.
 build-binary-race:
-	go build -race -ldflags "$(LDFLAGS)" -o $(BINARY)-race .
+	$(GO) build -race -ldflags "$(LDFLAGS)" -o $(BINARY)-race .
 
 # -race-enabled linux companion. `-race` needs CGo + a linux C toolchain; the
 # easiest portable way is to run `go build` inside a linux container so the
@@ -42,10 +47,10 @@ companion-race:
 build-all-race: build-binary-race companion-race
 
 tidy:
-	go mod tidy
+	$(GO) mod tidy
 
 check-tidy:
-	go mod tidy -diff
+	$(GO) mod tidy -diff
 
 check-docs: build-binary
 	./$(BINARY) roles --docs > .roles-docs.gen
@@ -59,7 +64,7 @@ check: test fmt-check check-tidy check-docs lint
 run-ci: check vuln
 
 test:
-	go test -race ./...
+	$(GO) test -race ./...
 
 # CLI integration tests — exercise the `ateam` binary end-to-end with an
 # isolated HOME and project dir. Requires the binary to be built.
@@ -102,18 +107,22 @@ test-docker-live: build-binary
 
 vuln:
 	@BIN=$$(command -v govulncheck 2>/dev/null || true); \
-	if [ -z "$$BIN" ] && [ -x "$$(go env GOPATH)/bin/govulncheck" ]; then \
-		BIN=$$(go env GOPATH)/bin/govulncheck; \
+	if [ -z "$$BIN" ] && [ -x "$(GO_TOOL_BIN)/govulncheck" ]; then \
+		BIN="$(GO_TOOL_BIN)/govulncheck"; \
+	fi; \
+	if [ -z "$$BIN" ] && [ -x "$$($(GO) env GOPATH)/bin/govulncheck" ]; then \
+		BIN=$$($(GO) env GOPATH)/bin/govulncheck; \
 	fi; \
 	if [ -z "$$BIN" ]; then \
-		if go install golang.org/x/vuln/cmd/govulncheck@latest >/dev/null 2>&1; then \
-			BIN=$$(go env GOPATH)/bin/govulncheck; \
+		mkdir -p "$(GO_TOOL_BIN)"; \
+		if $(GO_INSTALL) install golang.org/x/vuln/cmd/govulncheck@latest >/dev/null 2>&1; then \
+			BIN="$(GO_TOOL_BIN)/govulncheck"; \
 		else \
 			echo "vuln: skipping — cannot install govulncheck (no network or sandboxed)"; \
 			exit 0; \
 		fi; \
 	fi; \
-	out=$$("$$BIN" ./... 2>&1); rc=$$?; \
+	out=$$(GOCACHE="$(GO_CACHE_DIR)" "$$BIN" ./... 2>&1); rc=$$?; \
 	if [ $$rc -ne 0 ] && echo "$$out" | grep -q "fetching vulnerabilities"; then \
 		echo "vuln: skipping — govulncheck cannot reach the vuln database (no network or sandboxed)"; \
 		exit 0; \
@@ -126,14 +135,17 @@ vuln:
 
 lint:
 	@if ! command -v golangci-lint >/dev/null 2>&1; then \
-		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest; \
+		mkdir -p "$(GO_TOOL_BIN)"; \
+		$(GO_INSTALL) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest; \
 	fi
 	@if command -v golangci-lint >/dev/null 2>&1; then \
 		BIN=$$(command -v golangci-lint); \
+	elif [ -x "$(GO_TOOL_BIN)/golangci-lint" ]; then \
+		BIN="$(GO_TOOL_BIN)/golangci-lint"; \
 	else \
-		BIN=$$(go env GOPATH)/bin/golangci-lint; \
+		BIN=$$($(GO) env GOPATH)/bin/golangci-lint; \
 	fi; \
-	"$$BIN" run ./...
+	GOCACHE="$(GO_CACHE_DIR)" GOLANGCI_LINT_CACHE="$(CURDIR)/.cache/golangci-lint" "$$BIN" run ./...
 
 fmt:
 	gofmt -w .

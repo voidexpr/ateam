@@ -22,22 +22,27 @@ type Config struct {
 }
 
 type AgentConfig struct {
-	Name         string
-	Base         string // inherit unset fields from this agent
-	Command      string
-	Args         []string
-	Model        string
-	Effort       string            // reasoning effort, passed verbatim to the agent CLI
-	MaxBudgetUSD string            // per-agent USD spend cap (claude native; codex unsupported)
-	Type         string            // "builtin" for mock, "codex", or "" for claude
-	Env          map[string]string // env vars to set (empty string = unset from parent)
-	Sandbox      string            // inline JSON settings template
-	RWPaths      []string          // additional read-write paths merged into sandbox allowWrite
-	ROPaths      []string          // additional read-only paths merged into sandbox additionalDirectories
-	DeniedPaths  []string          // paths merged into sandbox denyWrite
-	ConfigDir    string            // sets CLAUDE_CONFIG_DIR; relative paths resolve from .ateam/, absolute used as-is
-	Pricing      *AgentPricing     // cost estimation config (nil = no pricing)
-	RequiredEnv  []string          // env var names that must be set; "A|B" means at least one of A or B
+	Name             string
+	Base             string // inherit unset fields from this agent
+	Command          string
+	Args             []string
+	Model            string
+	Effort           string            // reasoning effort, passed verbatim to the agent CLI
+	MaxBudgetUSD     string            // per-agent USD spend cap (claude native; codex unsupported)
+	Type             string            // "builtin" for mock, "codex", or "" for claude
+	StartTimeout     string            // codex-tmux duration string, e.g. "15s"
+	BusyTimeout      string            // codex-tmux duration string, e.g. "20m"
+	QuiescenceWindow string            // codex-tmux duration string, e.g. "2s"
+	TmuxWidth        int               // codex-tmux pane width
+	TmuxHeight       int               // codex-tmux pane height
+	Env              map[string]string // env vars to set (empty string = unset from parent)
+	Sandbox          string            // inline JSON settings template
+	RWPaths          []string          // additional read-write paths merged into sandbox allowWrite
+	ROPaths          []string          // additional read-only paths merged into sandbox additionalDirectories
+	DeniedPaths      []string          // paths merged into sandbox denyWrite
+	ConfigDir        string            // sets CLAUDE_CONFIG_DIR; relative paths resolve from .ateam/, absolute used as-is
+	Pricing          *AgentPricing     // cost estimation config (nil = no pricing)
+	RequiredEnv      []string          // env var names that must be set; "A|B" means at least one of A or B
 
 	ArgsInsideContainer    []string // extra args when running inside a container (detected via /.dockerenv)
 	ArgsOutsideContainer   []string // extra args when running on the host
@@ -93,6 +98,11 @@ type hclAgent struct {
 	Effort                 string            `hcl:"effort,optional"`
 	MaxBudgetUSD           string            `hcl:"max_budget_usd,optional"`
 	Type                   string            `hcl:"type,optional"`
+	StartTimeout           string            `hcl:"start_timeout,optional"`
+	BusyTimeout            string            `hcl:"busy_timeout,optional"`
+	QuiescenceWindow       string            `hcl:"quiescence_window,optional"`
+	TmuxWidth              int               `hcl:"tmux_width,optional"`
+	TmuxHeight             int               `hcl:"tmux_height,optional"`
 	Env                    map[string]string `hcl:"env,optional"`
 	Sandbox                string            `hcl:"sandbox,optional"`
 	RWPaths                []string          `hcl:"rw_paths,optional"`
@@ -237,6 +247,21 @@ func (c *Config) resolveInheritance() error {
 		if ac.Type == "" {
 			ac.Type = base.Type
 		}
+		if ac.StartTimeout == "" {
+			ac.StartTimeout = base.StartTimeout
+		}
+		if ac.BusyTimeout == "" {
+			ac.BusyTimeout = base.BusyTimeout
+		}
+		if ac.QuiescenceWindow == "" {
+			ac.QuiescenceWindow = base.QuiescenceWindow
+		}
+		if ac.TmuxWidth == 0 {
+			ac.TmuxWidth = base.TmuxWidth
+		}
+		if ac.TmuxHeight == 0 {
+			ac.TmuxHeight = base.TmuxHeight
+		}
 		if ac.Env == nil {
 			ac.Env = base.Env
 		}
@@ -348,6 +373,11 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 			Effort:                 a.Effort,
 			MaxBudgetUSD:           a.MaxBudgetUSD,
 			Type:                   a.Type,
+			StartTimeout:           a.StartTimeout,
+			BusyTimeout:            a.BusyTimeout,
+			QuiescenceWindow:       a.QuiescenceWindow,
+			TmuxWidth:              a.TmuxWidth,
+			TmuxHeight:             a.TmuxHeight,
 			Env:                    a.Env,
 			Sandbox:                a.Sandbox,
 			RWPaths:                a.RWPaths,

@@ -55,6 +55,15 @@ func TestResolveAgentTemplateArgsConcurrentRace(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "codex-tmux",
+			build: func() agent.Agent {
+				return &agent.CodexTmuxAgent{
+					Command: "codex",
+					Args:    []string{"--name", "{{PROJECT_DIR}}-{{ROLE}}", "--sandbox", "workspace-write"},
+				}
+			},
+		},
 	}
 
 	for _, tc := range cases {
@@ -95,6 +104,8 @@ func argsOf(a agent.Agent) []string {
 		return v.Args
 	case *agent.CodexAgent:
 		return v.Args
+	case *agent.CodexTmuxAgent:
+		return v.Args
 	default:
 		return nil
 	}
@@ -106,6 +117,8 @@ func pricingOf(a agent.Agent) agent.PricingTable {
 	case *agent.ClaudeAgent:
 		return v.Pricing
 	case *agent.CodexAgent:
+		return v.Pricing
+	case *agent.CodexTmuxAgent:
 		return v.Pricing
 	default:
 		return nil
@@ -134,6 +147,12 @@ func TestResolveAgentTemplateArgsClonesPricing(t *testing.T) {
 			name: "codex",
 			build: func(p agent.PricingTable) agent.Agent {
 				return &agent.CodexAgent{Command: "codex", Pricing: p}
+			},
+		},
+		{
+			name: "codex-tmux",
+			build: func(p agent.PricingTable) agent.Agent {
+				return &agent.CodexTmuxAgent{Command: "codex", Pricing: p}
 			},
 		},
 	}

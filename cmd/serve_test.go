@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -58,6 +59,7 @@ func startServeAndWaitForURL(t *testing.T) string {
 	case url = <-urlCh:
 	case err := <-errCh:
 		os.Stderr = origStderr
+		skipIfListenDenied(t, err)
 		t.Fatalf("runServe exited before binding: %v", err)
 	case <-time.After(5 * time.Second):
 		os.Stderr = origStderr
@@ -68,6 +70,18 @@ func startServeAndWaitForURL(t *testing.T) string {
 		t.Fatal("serve did not print a URL")
 	}
 	return url
+}
+
+func skipIfListenDenied(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		return
+	}
+	if errors.Is(err, os.ErrPermission) ||
+		strings.Contains(err.Error(), "operation not permitted") ||
+		strings.Contains(err.Error(), "permission denied") {
+		t.Skipf("local TCP listen is not permitted in this environment: %v", err)
+	}
 }
 
 func setupServeProject(t *testing.T) string {
@@ -140,6 +154,7 @@ func TestServeBindsExplicitPort(t *testing.T) {
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
+		skipIfListenDenied(t, err)
 		t.Fatalf("Listen: %v", err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
