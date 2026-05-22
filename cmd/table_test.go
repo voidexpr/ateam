@@ -12,6 +12,7 @@ import (
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
+	"github.com/ateam/internal/runtime"
 )
 
 func TestOpenProjectDBCreatesProjectDB(t *testing.T) {
@@ -400,6 +401,35 @@ func TestApplyModelOverrides(t *testing.T) {
 				strings.Contains(stderr, "--cheaper-model")
 			if hasWarning != tt.wantWarning {
 				t.Errorf("warning emitted=%v want=%v (stderr=%q)", hasWarning, tt.wantWarning, stderr)
+			}
+		})
+	}
+}
+
+// TestRejectCodexTmuxWithoutProject covers the guard that prevents
+// resolveRunnerMinimal from constructing a codex-tmux runner outside a
+// project. The agent's run-time check would otherwise fail with the cryptic
+// "requires project context" — this gate fails earlier with actionable text.
+func TestRejectCodexTmuxWithoutProject(t *testing.T) {
+	cases := []struct {
+		name      string
+		typ       string
+		wantError bool
+	}{
+		{"codex-tmux is rejected", agent.NameCodexTmux, true},
+		{"claude is allowed", agent.NameClaude, false},
+		{"codex is allowed", agent.NameCodex, false},
+		{"empty type is allowed", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ac := &runtime.AgentConfig{Type: tc.typ}
+			err := rejectCodexTmuxWithoutProject(ac)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("err=%v want error=%v", err, tc.wantError)
+			}
+			if tc.wantError && !strings.Contains(err.Error(), "project context") {
+				t.Errorf("error message missing 'project context': %v", err)
 			}
 		})
 	}

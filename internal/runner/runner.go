@@ -356,7 +356,7 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	opts.CanonicalDestDir = ResolveTemplateString(opts.CanonicalDestDir, tmplVars)
 
 	// Build agent request (no longer archives prompt — that's our job below).
-	req, err := r.buildRequest(prompt, tmplVars, cwd, streamFile, stderrFile, extraArgs)
+	req, err := r.buildRequest(prompt, tmplVars, cwd, streamFile, stderrFile, extraArgs, callID)
 	if err != nil {
 		return failEarly(err)
 	}
@@ -695,7 +695,7 @@ func reconcileErrorEvent(prev *agent.StreamEvent, ev agent.StreamEvent) *agent.S
 
 // buildRequest resolves CLAUDE_CONFIG_DIR and assembles the agent.Request.
 // The prompt is expected to already have its templates resolved.
-func (r *Runner) buildRequest(prompt string, tmplVars TemplateVars, cwd, streamFile, stderrFile string, extraArgs []string) (agent.Request, error) {
+func (r *Runner) buildRequest(prompt string, tmplVars TemplateVars, cwd, streamFile, stderrFile string, extraArgs []string, execID int64) (agent.Request, error) {
 	// Resolve CLAUDE_CONFIG_DIR for isolated agents.
 	// Relative config_dir is resolved from ProjectDir (.ateam/); absolute is used as-is.
 	configDir := display.ExpandHome(ResolveTemplateString(r.ConfigDir, tmplVars))
@@ -720,6 +720,7 @@ func (r *Runner) buildRequest(prompt string, tmplVars TemplateVars, cwd, streamF
 		StderrFile: stderrFile,
 		ExtraArgs:  extraArgs,
 		Env:        reqEnv,
+		ExecID:     execID,
 	}, nil
 }
 

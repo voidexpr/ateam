@@ -133,6 +133,14 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 		return nil, err
 	}
 
+	// codex-tmux is host-only in v1: container support requires tmux+codex
+	// inside the image plus host↔container path translation that isn't
+	// wired up. Reject loudly here instead of silently mis-staging things
+	// inside a container that can't run tmux.
+	if ac.Type == agent.NameCodexTmux && cc != nil && cc.Type != "none" {
+		return nil, fmt.Errorf("codex-tmux is host-only in v1; profile %q binds it to container type %q. Use a container=none profile or `--agent codex-tmux`", profileName, cc.Type)
+	}
+
 	// Validate secrets: require credentials for container runs and inside containers
 	// (where agents can't use interactive login). On host without containers,
 	// agents handle their own auth (macOS Keychain, interactive login).
@@ -286,6 +294,16 @@ func preflightContainerSupportsWorkDir(cc *runtime.ContainerConfig, env *root.Re
 	return fmt.Errorf("container profile %q does not yet support running with --work-dir outside the project tree (work-dir %q, project root %q). Use a container=none profile, or run from inside the project", cc.Type, env.WorkDir, env.SourceDir)
 }
 
+// setCodexTmuxProjectDir is called by the runner builders after the agent is
+// constructed but before the Runner is returned. codex-tmux needs ProjectDir
+// to derive its tmux socket path (`<ProjectDir>/.ateam/cache/tmux/exec-<id>.sock`),
+// and the buildAgent helper doesn't see ResolvedEnv directly.
+func setCodexTmuxProjectDir(a agent.Agent, projectDir string) {
+	if ct, ok := a.(*agent.CodexTmuxAgent); ok {
+		ct.ProjectDir = projectDir
+	}
+}
+
 func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runner.Runner {
 	// Sandbox grants and Runner.SourceDir follow WorkDir (where the agent
 	// actually runs) — not the parent of .ateam/. This ensures --work-dir
@@ -328,6 +346,7 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 	if env.GitRepoDir != "" && env.GitRepoDir != env.WorkDir {
 		r.Sandbox.ExtraRead = append(r.Sandbox.ExtraRead, env.GitRepoDir)
 	}
+	setCodexTmuxProjectDir(r.Agent, env.ProjectDir)
 	return r
 }
 
@@ -353,6 +372,9 @@ func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.Runner
 		if !ok {
 			return nil, fmt.Errorf("unknown agent %q", agentFlag)
 		}
+		if err := rejectCodexTmuxWithoutProject(&ac); err != nil {
+			return nil, err
+		}
 		r := minimalRunnerFromAgentConfig(orgDir, &ac)
 		r.Profile = "a:" + agentFlag
 		return r, nil
@@ -364,10 +386,25 @@ func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.Runner
 		if err != nil {
 			return nil, err
 		}
+		if err := rejectCodexTmuxWithoutProject(ac); err != nil {
+			return nil, err
+		}
 		r := minimalRunnerFromAgentConfig(orgDir, ac)
 		r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
 		return r, nil
 	}
+}
+
+// rejectCodexTmuxWithoutProject errors out when codex-tmux is selected from a
+// no-project context. The agent needs `<ProjectDir>/cache/tmux/` to land its
+// socket; without ResolvedEnv.ProjectDir we'd later fail inside the agent
+// with the cryptic "requires project context" message. Catch it here so the
+// operator gets actionable guidance instead.
+func rejectCodexTmuxWithoutProject(ac *runtime.AgentConfig) error {
+	if ac == nil || ac.Type != agent.NameCodexTmux {
+		return nil
+	}
+	return fmt.Errorf("codex-tmux requires project context (a .ateam/ directory); run from inside an ateam project or use a different agent")
 }
 
 // resolveRunner builds a Runner from --profile/--agent flags, falling back to config resolution.
@@ -452,6 +489,9 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 		if cmd == "" {
 			cmd = "codex"
 		}
+		// ProjectDir is set later in runnerFromAgentConfig (after we know
+		// the resolved env) — buildAgent is called from minimalRunner too
+		// where ProjectDir isn't available; the runner layer fills it in.
 		return &agent.CodexTmuxAgent{
 			Command:          cmd,
 			Args:             ac.Args,

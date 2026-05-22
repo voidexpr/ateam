@@ -20,11 +20,25 @@ RUN go test -tags docker_integration -count=1 -run ^$ ./internal/container/ 2>/d
 # Stage 2: DinD image with Go + cached modules for test execution.
 FROM docker:27-dind
 
-RUN apk add --no-cache git musl-dev curl
+# Base packages for `make test-docker` plus tmux/node/codex/claude-code so the
+# same image doubles as a `make claude-in-docker` dev shell where Claude Code
+# can drive `ateam exec --agent codex-tmux` against the real codex binary —
+# the macOS host sandbox can't fork tmux, but the linux container can.
+#
+# Codex pinned to 0.133.0: that's the version the prompt regex in
+# internal/codex/adapter.go is verified against. Bump deliberately when you've
+# re-verified PromptReady against a newer TUI.
+RUN apk add --no-cache \
+    git musl-dev curl bash jq \
+    tmux nodejs npm \
+ && npm install -g --no-audit --no-fund \
+    @openai/codex@0.133.0 \
+    @anthropic-ai/claude-code
 
 COPY --from=modules /usr/local/go /usr/local/go
 ENV PATH="/usr/local/go/bin:${PATH}"
 ENV GOPATH=/root/go
+ENV ATEAM_IN_CONTAINER=1
 
 WORKDIR /src
 COPY --from=modules /src /src
@@ -33,4 +47,7 @@ COPY --from=modules /root/.cache/go-build /root/.cache/go-build
 
 RUN chmod +x /src/test/run-docker-tests.sh
 
+# Default entrypoint runs the test suite (used by `make test-docker`).
+# `make claude-in-docker` overrides this to launch `claude` instead, with the
+# project and ~/.codex / ~/.claude bind-mounted in.
 ENTRYPOINT ["/src/test/run-docker-tests.sh"]

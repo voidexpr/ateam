@@ -334,7 +334,7 @@ func TestCodexTmuxAgentConfig(t *testing.T) {
 	if ac.StartTimeout != "15s" || ac.BusyTimeout != "20m" || ac.QuiescenceWindow != "2s" {
 		t.Errorf("unexpected timeouts: start=%q busy=%q quiescence=%q", ac.StartTimeout, ac.BusyTimeout, ac.QuiescenceWindow)
 	}
-	if ac.TmuxWidth != 200 || ac.TmuxHeight != 50 {
+	if ac.TmuxWidth != 300 || ac.TmuxHeight != 100 {
 		t.Errorf("unexpected tmux size: %dx%d", ac.TmuxWidth, ac.TmuxHeight)
 	}
 	if len(ac.RequiredEnv) != 0 {

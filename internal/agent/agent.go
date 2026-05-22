@@ -102,6 +102,10 @@ type Request struct {
 	ExtraArgs  []string             // from --agent-args
 	Env        map[string]string    // env vars to set/override
 	CmdFactory container.CmdFactory // if set, agent uses this to create subprocesses instead of exec.CommandContext
+	// ExecID is the calldb row ID for this run. Agents that need a
+	// run-unique identifier (e.g. codex-tmux for socket+session naming)
+	// read it here; 0 means "no ExecID available" (early failures, tests).
+	ExecID int64
 }
 
 // StreamEvent is the normalized in-memory event type all agents produce.

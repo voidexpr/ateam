@@ -1,8 +1,7 @@
 package agent
 
 import (
-	"os"
-	"path/filepath"
+	"context"
 	"slices"
 	"strings"
 	"testing"
@@ -41,6 +40,7 @@ func TestCodexTmuxAgentCloneCopiesMutableFields(t *testing.T) {
 		StartTimeout:     time.Second,
 		BusyTimeout:      2 * time.Second,
 		QuiescenceWindow: 3 * time.Second,
+		ProjectDir:       "/tmp/project",
 	}
 	r := strings.NewReplacer("{{ROLE}}", "security")
 
@@ -58,55 +58,38 @@ func TestCodexTmuxAgentCloneCopiesMutableFields(t *testing.T) {
 	if a.Pricing["m"].InputPerToken != 1 {
 		t.Errorf("original pricing mutated: %v", a.Pricing)
 	}
-}
-
-func TestCodexTmuxEnvCreatesWritableCodexHome(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	srcDir := filepath.Join(home, ".codex")
-	if err := os.MkdirAll(srcDir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(srcDir, "auth.json"), []byte(`{"token":"x"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(srcDir, "config.toml"), []byte("model = \"gpt-5.5\"\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	workdir := t.TempDir()
-	env, err := codexTmuxEnv(workdir, nil, nil)
-	if err != nil {
-		t.Fatalf("codexTmuxEnv: %v", err)
-	}
-	wantHome := filepath.Join(workdir, ".cache", "codex-home")
-	if env["CODEX_HOME"] != wantHome {
-		t.Fatalf("CODEX_HOME = %q, want %q", env["CODEX_HOME"], wantHome)
-	}
-	if _, err := os.Lstat(filepath.Join(wantHome, "auth.json")); err != nil {
-		t.Fatalf("auth.json not seeded: %v", err)
-	}
-	if _, err := os.Lstat(filepath.Join(wantHome, "config.toml")); err != nil {
-		t.Fatalf("config.toml not seeded: %v", err)
-	}
-	config, err := os.ReadFile(filepath.Join(wantHome, "config.toml"))
-	if err != nil {
-		t.Fatalf("read generated config: %v", err)
-	}
-	if strings.Contains(string(config), "model =") {
-		t.Fatalf("generated config inherited user config: %q", config)
-	}
-	if !strings.Contains(string(config), "trust_level = \"trusted\"") {
-		t.Fatalf("generated config does not trust workdir: %q", config)
+	if clone.ProjectDir != "/tmp/project" {
+		t.Errorf("ProjectDir lost in clone: %q", clone.ProjectDir)
 	}
 }
 
-func TestCodexTmuxEnvHonorsExplicitCodexHome(t *testing.T) {
-	env, err := codexTmuxEnv(t.TempDir(), map[string]string{"CODEX_HOME": "/custom"}, nil)
-	if err != nil {
-		t.Fatalf("codexTmuxEnv: %v", err)
+// TestCodexTmuxRunRejectsMissingProjectDir ensures the agent fails fast when
+// the runner forgot to populate ProjectDir, instead of trying to write the
+// tmux socket somewhere unpredictable.
+func TestCodexTmuxRunRejectsMissingProjectDir(t *testing.T) {
+	a := &CodexTmuxAgent{Command: "/bin/true"}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	got := Result(a.Run(ctx, Request{Prompt: "hello", ExecID: 1}))
+	if got.Type != "error" {
+		t.Fatalf("expected terminal error event, got %+v", got)
 	}
-	if env["CODEX_HOME"] != "/custom" {
-		t.Fatalf("CODEX_HOME = %q, want /custom", env["CODEX_HOME"])
+	if !strings.Contains(got.ErrorCause, "project context") {
+		t.Errorf("error cause = %q, want substring 'project context'", got.ErrorCause)
+	}
+}
+
+// TestCodexTmuxRunRejectsMissingExecID ensures the agent fails fast without
+// an EXEC_ID — without it we'd lose per-run socket isolation.
+func TestCodexTmuxRunRejectsMissingExecID(t *testing.T) {
+	a := &CodexTmuxAgent{Command: "/bin/true", ProjectDir: t.TempDir()}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	got := Result(a.Run(ctx, Request{Prompt: "hello"})) // ExecID = 0
+	if got.Type != "error" {
+		t.Fatalf("expected terminal error event, got %+v", got)
+	}
+	if !strings.Contains(got.ErrorCause, "ExecID") {
+		t.Errorf("error cause = %q, want substring 'ExecID'", got.ErrorCause)
 	}
 }

@@ -6,9 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +15,13 @@ import (
 
 // CodexTmuxAgent drives the interactive Codex TUI through tmux so TUI-only
 // input such as /review can be used from normal ATeam runs.
+//
+// Auth and config: this agent does NOT manipulate `$CODEX_HOME`. Codex reads
+// `~/.codex/` natively. The first trust dialog in a new workdir is
+// auto-accepted (Enter) which causes Codex to write one
+// `[projects."<workdir>"] trust_level = "trusted"` entry to the user's
+// `~/.codex/config.toml` — identical to running codex by hand. See
+// `plans/feature_codex_tmux_agent.md` for the full rationale.
 type CodexTmuxAgent struct {
 	Command          string
 	Args             []string
@@ -32,6 +36,11 @@ type CodexTmuxAgent struct {
 	QuiescenceWindow time.Duration
 	TmuxWidth        int
 	TmuxHeight       int
+	// ProjectDir is the absolute path to the ateam project (the dir that
+	// contains `.ateam/`). Used to root the tmux socket and any future
+	// per-run scratch state. Set by cmd/table.go from ResolvedEnv at
+	// agent construction time so it survives clone-for-pool dispatch.
+	ProjectDir string
 }
 
 func (c *CodexTmuxAgent) Name() string { return NameCodexTmux }
@@ -81,11 +90,20 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		defer c.Close()
 	}
 	stderr := io.MultiWriter(stderrWriters...)
-	env, envErr := codexTmuxEnv(req.WorkDir, c.Env, req.Env)
-	if envErr != nil {
-		ch <- errorEvent(envErr, ErrorSourceAteamInternal, -1)
+
+	if c.ProjectDir == "" {
+		ch <- errorEvent(fmt.Errorf("codex-tmux requires project context (no .ateam/ found)"), ErrorSourceAteamInternal, -1)
 		return
 	}
+	if req.ExecID <= 0 {
+		ch <- errorEvent(fmt.Errorf("codex-tmux requires ExecID on the request"), ErrorSourceAteamInternal, -1)
+		return
+	}
+
+	sessionName := codextui.SessionName(req.ExecID)
+	socketPath := codextui.SocketPath(c.ProjectDir, req.ExecID)
+
+	env := explicitEnv(c.Env, req.Env)
 
 	cfg := codextui.TmuxConfig{
 		Command:          firstNonEmpty(c.Command, "codex"),
@@ -102,12 +120,32 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		BusyTimeout:      c.BusyTimeout,
 		QuiescenceWindow: c.QuiescenceWindow,
 		CmdFactory:       tmuxctl.CmdFactory(req.CmdFactory),
+		SessionName:      sessionName,
+		SocketPath:       socketPath,
+		OnPanePID: func(pid int) {
+			// Emit the codex pane PID so the runner records it in
+			// agent_execs.pid. The runner's processEvent handler
+			// reads ev.PID off the first system event; the subtype
+			// `process_start` is what other agents emit too.
+			ch <- StreamEvent{Type: "system", Subtype: "process_start", PID: pid, Model: c.ModelName()}
+		},
+		OnHeartbeat: func(preview string) {
+			// Surface pane-change heartbeats as `thinking` events. The
+			// runner's stall watchdog resets on every event, so a
+			// long-running /review that emits no other intermediate
+			// output stops mis-firing "agent stalled" warnings. Text is
+			// a short pane preview so an operator tailing the live log
+			// sees forward progress.
+			ch <- StreamEvent{Type: "thinking", Text: preview}
+		},
 	}
 
 	start := time.Now()
 	writeSyntheticStream(streamWriter, "tmux.start", map[string]any{
-		"initial_input": req.Prompt,
-		"model":         c.ModelName(),
+		"initial_input":     req.Prompt,
+		"model":             c.ModelName(),
+		"tmux_session_name": sessionName,
+		"tmux_socket_path":  socketPath,
 	})
 
 	result, err := codextui.RunTmux(ctx, cfg)
@@ -120,13 +158,33 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 	}
 
 	model := c.ModelName()
+	// Prefer the model name Codex itself recorded in its rollout JSONL —
+	// that's the actual model used after any --profile / fast-mode tweaks.
+	if result.SessionStats.Model != "" {
+		model = result.SessionStats.Model
+	}
+	contextWindow := ContextWindow(model)
+	if result.SessionStats.ContextWindow > 0 {
+		contextWindow = result.SessionStats.ContextWindow
+	}
 	resultEvent := StreamEvent{
-		Type:          "result",
-		Output:        result.Output,
-		Model:         model,
-		DurationMS:    result.Duration.Milliseconds(),
-		Turns:         1,
-		ContextWindow: ContextWindow(model),
+		Type:            "result",
+		Output:          result.Output,
+		Model:           model,
+		DurationMS:      result.Duration.Milliseconds(),
+		Turns:           1,
+		ContextWindow:   contextWindow,
+		InputTokens:     result.SessionStats.InputTokens,
+		OutputTokens:    result.SessionStats.OutputTokens,
+		CacheReadTokens: result.SessionStats.CachedInputTokens,
+		ContextTokens:   result.SessionStats.TotalTokens,
+		Cost: EstimateCost(c.Pricing, model, c.DefaultModel,
+			result.SessionStats.InputTokens,
+			result.SessionStats.CachedInputTokens,
+			result.SessionStats.OutputTokens),
+	}
+	if result.SessionStats.DurationMS > 0 {
+		resultEvent.DurationMS = result.SessionStats.DurationMS
 	}
 	if resultEvent.DurationMS == 0 {
 		resultEvent.DurationMS = time.Since(start).Milliseconds()
@@ -134,7 +192,10 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 	if err != nil {
 		fmt.Fprintf(stderr, "codex-tmux: %v\n", err)
 		if result.RawCapture != "" {
-			fmt.Fprintf(stderr, "\n--- codex tmux capture ---\n%s\n--- end codex tmux capture ---\n", result.RawCapture)
+			// Strip empty + non-ASCII-only decorative lines so the
+			// diagnostic isn't padded with dozens of blank lines and
+			// horizontal separators.
+			fmt.Fprintf(stderr, "\n--- codex tmux capture ---\n%s\n--- end codex tmux capture ---\n", codextui.CleanCapture(result.RawCapture))
 		}
 		resultEvent.IsError = true
 		resultEvent.ExitCode = -1
@@ -157,6 +218,16 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		"idle_signal":       string(result.IdleSignal),
 		"tmux_session_name": result.SessionName,
 		"output_chars":      len(result.Output),
+		"pane_pid":          result.PanePID,
+		"session_log":       result.SessionStats.SessionLogPath,
+		"input_tokens":      result.SessionStats.InputTokens,
+		"output_tokens":     result.SessionStats.OutputTokens,
+		"cached_tokens":     result.SessionStats.CachedInputTokens,
+		"reasoning_tokens":  result.SessionStats.ReasoningTokens,
+		"total_tokens":      result.SessionStats.TotalTokens,
+		"context_window":    result.SessionStats.ContextWindow,
+		"task_complete":     result.SessionStats.TaskCompleteFound,
+		"cost_usd":          resultEvent.Cost,
 	})
 	ch <- resultEvent
 }
@@ -173,91 +244,6 @@ func explicitEnv(agentEnv, reqEnv map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
-}
-
-func codexTmuxEnv(workdir string, agentEnv, reqEnv map[string]string) (map[string]string, error) {
-	env := explicitEnv(agentEnv, reqEnv)
-	if _, ok := env["CODEX_HOME"]; ok {
-		return env, nil
-	}
-	codexHome, err := ensureWritableCodexHome(workdir)
-	if err != nil {
-		return nil, err
-	}
-	if env == nil {
-		env = map[string]string{}
-	}
-	env["CODEX_HOME"] = codexHome
-	return env, nil
-}
-
-func ensureWritableCodexHome(workdir string) (string, error) {
-	if workdir == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return "", err
-		}
-		workdir = cwd
-	}
-	dir := filepath.Join(workdir, ".cache", "codex-home")
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", fmt.Errorf("create codex home %s: %w", dir, err)
-	}
-	if err := seedCodexHomeFile(dir, "auth.json"); err != nil {
-		return "", err
-	}
-	if err := writeCodexTmuxConfig(dir, workdir); err != nil {
-		return "", err
-	}
-	return dir, nil
-}
-
-func writeCodexTmuxConfig(dstDir, workdir string) error {
-	dst := filepath.Join(dstDir, "config.toml")
-	if info, err := os.Lstat(dst); err == nil && info.Mode()&os.ModeSymlink != 0 {
-		if err := os.Remove(dst); err != nil {
-			return err
-		}
-	} else if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-
-	var b strings.Builder
-	b.WriteString("check_for_update_on_startup = false\n\n")
-	if workdir != "" {
-		b.WriteString("[projects.")
-		b.WriteString(strconv.Quote(workdir))
-		b.WriteString("]\ntrust_level = \"trusted\"\n")
-	}
-	return os.WriteFile(dst, []byte(b.String()), 0600)
-}
-
-func seedCodexHomeFile(dstDir, name string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	src := filepath.Join(home, ".codex", name)
-	if _, err := os.Stat(src); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	dst := filepath.Join(dstDir, name)
-	if _, err := os.Lstat(dst); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.Symlink(src, dst); err == nil {
-		return nil
-	}
-	content, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, content, 0600)
 }
 
 func writeSyntheticStream(w *bufio.Writer, typ string, fields map[string]any) {

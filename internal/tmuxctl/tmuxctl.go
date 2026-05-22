@@ -10,15 +10,24 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
-// Codex and other TUIs render differently depending on terminal size. Keep
-// the default wide enough that Codex's bottom input box and status line do not
-// wrap during prompt detection.
+// serverGraceDelay is the time exec.Cmd.WaitDelay gives the tmux server to
+// shut down after ctx cancellation before pipes are force-closed. Matches
+// the agent package's processGraceDelay (kept independent to avoid the
+// tmuxctl → agent import cycle).
+const serverGraceDelay = 30 * time.Second
+
+// Codex and other TUIs render differently depending on terminal size. The
+// default has to be wide enough that Codex's bottom input box and status line
+// do not wrap during prompt detection, and tall enough that the response
+// scrollback isn't unnecessarily fragmented. 300x100 follows oauth-cli-coder's
+// tested choice and tracks long `/review` output without column wrapping.
 const (
-	DefaultWidth  = 200
-	DefaultHeight = 50
+	DefaultWidth  = 300
+	DefaultHeight = 100
 )
 
 // CmdFactory matches the command factory used by the container package without
@@ -38,10 +47,17 @@ type Session struct {
 	serverOutput bytes.Buffer
 }
 
-// New creates a detached tmux session running cmd.
-func New(ctx context.Context, name string, width, height int, env []string, workdir string, cmd []string, factory CmdFactory) (*Session, error) {
+// New creates a detached tmux session running cmd. socketPath is the absolute
+// path where the per-session unix socket will live; its parent directory is
+// created (mode 0700) if missing. The caller is responsible for choosing a
+// path that's unique per concurrent session — codex-tmux derives it from
+// project dir and EXEC_ID.
+func New(ctx context.Context, socketPath, name string, width, height int, env []string, workdir string, cmd []string, factory CmdFactory) (*Session, error) {
 	if name == "" {
 		return nil, fmt.Errorf("tmux session name is required")
+	}
+	if socketPath == "" {
+		return nil, fmt.Errorf("tmux socket path is required")
 	}
 	if len(cmd) == 0 || cmd[0] == "" {
 		return nil, fmt.Errorf("tmux session command is required")
@@ -59,14 +75,13 @@ func New(ctx context.Context, name string, width, height int, env []string, work
 		scrubbedEnv = nil
 	}
 
-	socket, err := socketPath(name, workdir)
-	if err != nil {
-		return nil, err
+	if err := os.MkdirAll(filepath.Dir(socketPath), 0700); err != nil {
+		return nil, fmt.Errorf("create tmux socket dir: %w", err)
 	}
 
 	s := &Session{
 		Name:       name,
-		SocketPath: socket,
+		SocketPath: socketPath,
 		Width:      width,
 		Height:     height,
 		cmdFactory: factory,
@@ -74,7 +89,7 @@ func New(ctx context.Context, name string, width, height int, env []string, work
 	}
 	sessionCommand := shellCommand(cmd)
 	if factory == nil {
-		scriptPath := filepath.Join(filepath.Dir(socket), "cmd-"+safeSocketName(name)+".sh")
+		scriptPath := filepath.Join(filepath.Dir(socketPath), "cmd-"+safeSocketName(name)+".sh")
 		if err := writeCommandScript(scriptPath, env, workdir, cmd); err != nil {
 			return nil, err
 		}
@@ -153,6 +168,23 @@ func (s *Session) TypeLiteral(ctx context.Context, text string) error {
 	return s.run(ctx, nil, "send-keys", "-l", "-t", s.Name, text)
 }
 
+// PanePID returns the foreground process PID running in the session's pane.
+// For codex-tmux this is the codex process itself (not the tmux server),
+// which is what the runner records in agent_execs.pid so its liveness probe
+// reports the real agent state.
+func (s *Session) PanePID(ctx context.Context) (int, error) {
+	out, err := s.output(ctx, "display-message", "-p", "-t", s.Name, "#{pane_pid}")
+	if err != nil {
+		return 0, err
+	}
+	pidStr := strings.TrimSpace(out)
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil {
+		return 0, fmt.Errorf("tmux pane_pid: parse %q: %w", pidStr, err)
+	}
+	return pid, nil
+}
+
 // Capture returns the rendered pane contents. When full is true, scrollback is
 // included from the beginning through the visible region.
 func (s *Session) Capture(ctx context.Context, full bool) (string, error) {
@@ -206,8 +238,27 @@ func sleepReady(ctx context.Context, d time.Duration) error {
 }
 
 func (s *Session) startServer(ctx context.Context) error {
-	tmuxArgs := []string{"-D", "-S", s.SocketPath}
+	// -u forces UTF-8 regardless of locale so pane captures contain
+	// the Codex border glyphs and the `›` prompt prefix verbatim.
+	tmuxArgs := []string{"-u", "-D", "-S", s.SocketPath}
 	cmd := exec.CommandContext(ctx, "tmux", tmuxArgs...)
+	// Put the server in its own process group so ctx-cancel SIGTERMs the
+	// whole tree (server + every codex/shell process running in its panes)
+	// in a single syscall. This is what makes a stray Ctrl-C from the
+	// operator cleanly tear down the codex-tmux run without leaving
+	// orphaned processes — same pattern claude.go / codex.go use for their
+	// agent CLI invocations.
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Setpgid = true
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+	}
+	cmd.WaitDelay = serverGraceDelay
 	if s.env != nil {
 		cmd.Env = s.env
 	}
@@ -252,10 +303,10 @@ func (s *Session) output(ctx context.Context, args ...string) (string, error) {
 }
 
 func (s *Session) command(ctx context.Context, stdin *strings.Reader, args ...string) (string, error) {
-	tmuxArgs := args
-	if s.SocketPath != "" {
-		tmuxArgs = append([]string{"-S", s.SocketPath}, args...)
-	}
+	// -u: force UTF-8 to keep border glyphs and the `›` prompt intact in
+	// captures regardless of the locale tmux inherited. SocketPath is
+	// required by New(), so the per-session -S flag is unconditional.
+	tmuxArgs := append([]string{"-u", "-S", s.SocketPath}, args...)
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if stdin != nil {
@@ -306,42 +357,12 @@ func transientSocketError(out string) bool {
 		strings.Contains(out, "Connection refused")
 }
 
-func socketPath(name, workdir string) (string, error) {
-	dir := os.Getenv("ATEAM_TMUX_SOCKET_DIR")
-	if dir == "" {
-		base := workdir
-		if base == "" {
-			cwd, err := os.Getwd()
-			if err != nil {
-				return "", err
-			}
-			base = nearestGoModule(cwd)
-		}
-		dir = filepath.Join(base, ".cache", "tmux")
-	}
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", err
-	}
-	abs := filepath.Join(dir, "ateam-"+safeSocketName(name)+".sock")
-	if cwd, err := os.Getwd(); err == nil {
-		if rel, err := filepath.Rel(cwd, abs); err == nil && len(rel) < len(abs) {
-			return rel, nil
-		}
-	}
-	return abs, nil
-}
-
-func nearestGoModule(dir string) string {
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return dir
-		}
-		dir = parent
-	}
+// SafeSocketName sanitizes a session name for use in filesystem paths. It
+// preserves alphanumerics, dash, underscore, and dot; other bytes become `_`.
+// Exported because the codex adapter uses it to derive the script-path
+// suffix that ends up inside the socket dir.
+func SafeSocketName(name string) string {
+	return safeSocketName(name)
 }
 
 func safeSocketName(name string) string {

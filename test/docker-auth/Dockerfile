@@ -9,7 +9,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen \
     && locale-gen \
     && rm -rf /var/lib/apt/lists/* \
-    && npm install -g @anthropic-ai/claude-code
+    && npm install -g @anthropic-ai/claude-code \
+    && npm install -g @openai/codex@0.133.0
+# Codex pinned to 0.133.0: the version the prompt regex in
+# internal/codex/adapter.go is verified against. Bump deliberately when
+# you've re-verified PromptReady against a newer TUI.
+#
+# NOTE on auth: this Dockerfile does NOT touch ~/.codex or any codex login
+# state. Provisioning codex auth inside the container is out of scope here —
+# follow the same pattern as the existing claude refresh-token bootstrap (see
+# test/docker-auth/README.md, extract-refresh-token.sh, claude_inject.sh).
 
 ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 

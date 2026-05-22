@@ -2,7 +2,9 @@ package tmuxctl
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,9 +19,21 @@ func TestSessionSendLiteralCapture(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	name := "ateam-tmuxctl-test-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	// Use a short name + path under /tmp. sockaddr_un.sun_path is capped at
+	// 104 bytes on macOS, and t.TempDir() lives under /var/folders/.../T/
+	// which already eats ~90 chars before any filename — long enough
+	// timestamps push the socket over the limit and tmux fails with
+	// "File name too long" at bind time. /tmp is short and writable on
+	// every supported OS.
+	name := "tmuxt" + strconv.FormatInt(time.Now().UnixNano()%1_000_000, 10)
+	dir, err := os.MkdirTemp("/tmp", "tmuxt-")
+	if err != nil {
+		t.Skipf("cannot create /tmp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	socketPath := filepath.Join(dir, name+".sock")
 
-	s, err := New(ctx, name, 80, 20, nil, "", []string{"sh", "-c", "printf READY; cat"}, nil)
+	s, err := New(ctx, socketPath, name, 80, 20, nil, "", []string{"sh", "-c", "printf READY; cat"}, nil)
 	if err != nil {
 		t.Skipf("tmux unavailable in this environment: %v", err)
 	}

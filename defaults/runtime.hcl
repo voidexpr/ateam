@@ -403,8 +403,10 @@ agent "codex-tmux" {
   start_timeout     = "15s"
   busy_timeout      = "20m"
   quiescence_window = "2s"
-  tmux_width        = 200
-  tmux_height       = 50
+  // 300x100 follows oauth-cli-coder's tested choice: long `/review` output
+  // wraps at narrower widths and breaks the prompt regex.
+  tmux_width        = 300
+  tmux_height       = 100
 
   // Interactive Codex normally reuses ~/.codex auth; don't require
   // OPENAI_API_KEY inherited from the headless codex agent.

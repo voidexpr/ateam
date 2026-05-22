@@ -5,7 +5,7 @@ GO_CMD ?= go
 GO := GOCACHE=$(GO_CACHE_DIR) $(GO_CMD)
 GO_INSTALL := GOBIN=$(GO_TOOL_BIN) $(GO)
 
-.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy check-tidy check-docs check test test-all test-cli test-docker test-docker-live vuln docs lint fmt fmt-check install-hooks run-ci
+.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy check-tidy check-docs check test test-all test-cli test-docker test-docker-live claude-in-docker vuln docs lint fmt fmt-check install-hooks run-ci
 
 BUILD_TIME := $(shell python3 -c 'import time; print(f"{time.time():.6f}")' 2>/dev/null || date +%s)
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
@@ -70,6 +70,7 @@ test:
 # isolated HOME and project dir. Requires the binary to be built.
 test-cli: build-binary
 	./test/cli/test-auth-combos.sh
+	./test/cli/test-codex-tmux-dryrun.sh
 
 test-all: test test-cli test-docker test-docker-live
 
@@ -79,6 +80,24 @@ BUILDX_BUILDER := $(shell docker buildx ls --format '{{.Name}}:{{.Status}}' 2>/d
 test-docker:
 	$(if $(BUILDX_BUILDER),docker buildx build --builder $(BUILDX_BUILDER) --load,docker build) -t ateam-test-dind -f test/Dockerfile.dind .
 	docker run --rm --privileged ateam-test-dind
+
+# Drop into an interactive Claude Code session running inside the dind image,
+# with the project and ~/.codex / ~/.claude bind-mounted. Use this when you
+# need Claude Code to drive codex-tmux end-to-end — the macOS host sandbox
+# can't fork tmux's inner shell, but the linux container has no such limit.
+#
+# Usage: make claude-in-docker
+# Then ask Claude to: `go test -count=1 -run TestRunTmuxFakeCodexTUI ./internal/codex/`
+# Or: `./build/ateam-linux-amd64 exec --agent codex-tmux "/help"`
+claude-in-docker:
+	$(if $(BUILDX_BUILDER),docker buildx build --builder $(BUILDX_BUILDER) --load,docker build) -t ateam-test-dind -f test/Dockerfile.dind .
+	docker run -it --rm --privileged \
+	  -v $(PWD):/src \
+	  -v $$HOME/.codex:/root/.codex \
+	  -v $$HOME/.claude:/root/.claude \
+	  -w /src \
+	  --entrypoint claude \
+	  ateam-test-dind
 
 # Run live agent tests inside DinD with real Claude haiku (~$0.03).
 # Auth: uses ateam secret resolution (keychain, secrets.env, or env vars).
