@@ -1039,6 +1039,7 @@ That will reduce token usage much more reliably than asking agents to write bett
 - [bazel-diff](https://github.com/Tinder/bazel-diff) — affected Bazel targets between two Git revisions
 - [DeepWiki (Cognition)](https://deepwiki.com/) — `.devin/wiki.json` page-manifest concept
 - Karpathy's "LLM wiki" concept post (broader pattern; not code-specific)
+- [Anthropic — How Claude Code works in large codebases](https://claude.com/blog/how-claude-code-works-in-large-codebases-best-practices-and-where-to-start) — Anthropic's own guidance on scoping CLAUDE.md, hooks, sub-agents, LSP, and MCP for large repos (see §M below)
 
 ## L. Incremental Maintenance of Codebase Information
 
@@ -1485,3 +1486,163 @@ code graph
 ```
 
 That gives long-lived architecture / test / verification / code-map documents without paying the cost of re-reading and re-summarising the whole repository on every agent run.
+
+---
+
+## M. Anthropic's Official Guidance — How Claude Code Works in Large Codebases
+
+*Source: [How Claude Code works in large codebases — best practices and where to start](https://claude.com/blog/how-claude-code-works-in-large-codebases-best-practices-and-where-to-start) (Anthropic, May 2026).*
+
+This section captures Anthropic's own guidance on running Claude Code in large repos and reconciles it with the rest of this document. Most of it **confirms** the architecture proposed in §A and §J; a handful of points add **new mechanisms** (path-scoped Skills, Stop-hook CLAUDE.md updates, MCP-exposed structured search) that ATeam should adopt.
+
+### M.1 The headline claim — and what it means for ATeam's RAG decision
+
+> "Claude Code navigates a codebase the way a software engineer would: it traverses the file system, reads files, uses grep to find exactly what it needs, and follows references across the codebase."
+>
+> "There's no embedding pipeline or centralized index to maintain as thousands of engineers commit new code."
+
+This is the most load-bearing line in the post for ATeam. It **directly validates** §C.4's verdict that semantic retrieval is over-engineered for ATeam's use case, and validates the whole §A "deterministic facts + targeted tools" stack. Anthropic's own product team does *not* run a vector index against the codebase — they grep, read files, and follow references. ATeam should not build a vector store either; the empirical doc (Feature_TokenReduction.md) reached the same conclusion via measurement, and this is independent confirmation from the vendor.
+
+**The flip side:** the same line explicitly bounds the approach — *"Claude's ability to help in a large codebase is bounded by its ability to find the right context."* Too much loaded context degrades performance; too little leaves it navigating blind. The whole point of §C.1–§C.3 (repo maps, lexical/symbol search, structural graph) is to give the agent **targeted findability**, not pre-loaded context.
+
+### M.2 Hierarchical CLAUDE.md — root for pointers, subdirs for local rules
+
+Anthropic prescribes a layered CLAUDE.md structure:
+
+- **Root CLAUDE.md** — "pointers and critical gotchas only; everything else drifts into noise." High-level overview, one or two paragraphs of survival rules.
+- **Subdirectory CLAUDE.md files** — local conventions, test commands scoped to that directory, build commands for that service.
+- **Loading model** — "Claude automatically walks up the directory tree and loads every CLAUDE.md file it finds along the way, so root-level context is never lost." Initialize Claude in the subdirectory you're working in, not the repo root.
+
+The cost of getting this wrong is measurable: *"Running the full suite when Claude changed one service causes timeouts and wastes context on irrelevant output."* The recommended fix is per-subdir test commands in the local CLAUDE.md.
+
+**For ATeam.** This maps cleanly onto §L's "docs as build targets" and §C.8's role-specific retrieval. Practical implications:
+
+- The generated knowledge documents from §L should be authored as a **hierarchy of CLAUDE.md files**, not a single monolithic one. ATeam's audit role should produce per-subdir CLAUDE.md updates when it discovers new local conventions or test commands.
+- ATeam runs should be **invoked with `cwd` set to the relevant subdirectory** when the task is scoped, not always at repo root. The runner currently defaults to the workdir's repo root — this should become a per-task decision driven by the role and the work-unit scope.
+- Per-subdir test commands in CLAUDE.md is exactly the mechanism §L.2.7 (Test/verification command selection) needs. The recommendation lives in `<subdir>/CLAUDE.md`, not in a side-channel database.
+
+### M.3 `.claude/settings.json` for version-controlled exclusions
+
+Anthropic recommends using `.claude/settings.json` with `permissions.deny` rules to version-control exclusions, "ensuring every developer on the team gets the same noise reduction without configuring it themselves."
+
+**For ATeam.** This is the right place to encode "don't read these files" rules (build artifacts, vendored deps, generated code) so every agent invocation honours them. ATeam should:
+
+- Ship a default `.claude/settings.json` template with `permissions.deny` for the obvious noise paths (`node_modules/`, `build/`, `dist/`, `vendor/`, `*.min.js`, large lockfiles).
+- Let projects override via their own checked-in `.claude/settings.json`.
+- Stop relying on prose instructions in CLAUDE.md to tell agents "don't read X" — make it a permission denial that fails fast.
+
+### M.4 Skills with progressive disclosure and path-scoped activation
+
+> "In a large codebase with dozens of task types, not all expertise needs to be present in every session. Skills solve this through progressive disclosure, offloading specialized workflows and domain knowledge that would otherwise compete for context space."
+
+Skills can also be **scoped to specific paths so they only activate in the relevant part of the codebase**.
+
+**For ATeam — this is the missing primitive in §C.8.** §C.8 prescribes role-specific retrieval policies but treats them as prompt-engineering. Skills are a mechanism: the skill loads only when the path glob matches, the description is short enough to fit in every session's discovery loop, and the body is consulted on demand. The implications:
+
+- ATeam's roles (audit, implement, review, security, deps, docs) should be reified as **path-scoped Skills**, not as monolithic role prompts loaded into every run. The audit Skill activates when the work touches code; the deps Skill activates when the work touches `package.json` / `go.mod` / `requirements.txt`.
+- Per-project specializations (e.g. "Django ORM conventions for this repo") become Skills shipped in the repo's `.claude/skills/`, scoped to the relevant paths.
+- This is *cheaper* than the role-prompt approach because it doesn't pay the prompt cost for skills that don't apply.
+
+### M.5 Hooks — three concrete patterns
+
+Three hook patterns Anthropic explicitly endorses:
+
+1. **Stop hook → propose CLAUDE.md updates while the context is fresh.** This is the feedback loop §L describes but does not specify a trigger for. The Stop hook is the trigger.
+2. **Start hook → load team-specific context dynamically.** Each developer gets the right setup for their module without manual configuration.
+3. **Hooks for deterministic checks (linting, formatting).** "Hooks enforce the rules deterministically and produce more consistent results than relying on Claude to remember an instruction." This is §C.6 (Deterministic Analyzers Before LLM Review) but at the hook layer, not the runner layer.
+
+**For ATeam.**
+
+- The **Stop hook → patch the appropriate CLAUDE.md** pattern is the missing piece of §L. ATeam should ship a default Stop hook that runs after every agent session and proposes targeted CLAUDE.md updates based on what the session discovered (new gotchas, surprising file locations, command-not-found-and-then-found pairs). The hook can write to a queue file; a separate ATeam role reviews the queue and merges accepted updates. This closes §L's loop without requiring the agent itself to remember to update the doc.
+- The **Start hook → context priming** is a place to inject §C.8's role-specific retrieval. The Start hook can read the work-unit description, decide which role applies, and load the matching context block before the agent's first turn.
+- For deterministic checks, the runner-level invocation of analyzers (§C.6) and the hook-level enforcement should both exist — hooks catch within-session violations, runner-level analyzers gate the run.
+
+### M.6 Sub-agents — read-only mapping → file → main agent edits
+
+> "A subagent is an isolated Claude instance with its own context window that takes a task, does the work, and returns only the final result to the parent."
+>
+> "Spin up a read-only subagent to map a subsystem and write findings to a file, then have the main agent edit with the full picture."
+
+**For ATeam — this is exactly the architecture §C.5 (Evidence-Linked Agent Ledger) prescribes,** with the addition that Anthropic explicitly recommends *file-mediated* handoff between sub-agent and main agent. Two implications:
+
+- ATeam's audit→implement separation should be implemented as **sub-agent → file → main agent**, not as two top-level runs sharing CallDB. The audit sub-agent has its own context window, returns only the findings file, and the implement agent reads the file. Total context the implement agent sees: its own role prompt + the findings file + the code it needs to edit. No bleed-through from the audit agent's exploration noise.
+- The findings file is the **evidence-linked observation** of §C.5. Same artifact, just spawned by a sub-agent rather than a peer agent.
+
+This shifts ATeam's architecture in a useful direction: instead of "ateam runs audit then implement as separate top-level invocations," it becomes "ateam runs implement with an audit sub-agent that produces the findings file as its first step." Cheaper, simpler, and matches Anthropic's intended Claude Code shape.
+
+### M.7 LSP integration — symbol-level precision
+
+> "LSP returns only the references that point to the same symbol, so the filtering happens before Claude reads anything."
+
+This addresses the failure mode in §C.2 where grepping a common function name returns "thousands of matches." Anthropic notes one enterprise customer deployed LSP integrations org-wide *before* their Claude Code rollout specifically for C/C++ navigation at scale.
+
+**For ATeam.** §C.2 already recommends LSP-grade lookups; this is independent confirmation that it matters at scale. Concrete plan:
+
+- Install language servers (`gopls`, `pyright`, `typescript-language-server`, etc.) inside the ATeam container image as part of the runtime.
+- Expose LSP's `references` / `definition` / `implementations` as **MCP tools** (see §M.8) the agent can call, rather than relying on the agent to know how to drive the LSP protocol directly.
+- For Go specifically (ATeam's own codebase), `gopls` is already standard tooling; the missing piece is the MCP wrapper.
+
+### M.8 MCP servers — structured search as a tool
+
+> "MCP servers are how Claude connects to internal tools, data sources, and APIs that it can't otherwise reach."
+
+Sophisticated teams "built MCP servers exposing structured search as a tool Claude can call directly."
+
+**For ATeam.** This is the right delivery mechanism for everything in §C.1–§C.3 and §C.6. Rather than pre-loading repo maps, structural graph results, and analyzer outputs into the prompt, ATeam should:
+
+- Run a **per-run MCP server** inside the container that exposes: repo-map query, symbol lookup, callers/callees, recent-diff impact, test lookup, schema lookup, prior-findings query, analyzer-output query.
+- The agent calls these on demand. The context cost is the MCP tool catalog (small, cacheable) plus only the responses to actual queries.
+- This is **strictly better than the alternative** of pre-loading the same information, because it shifts cost from "every run pays for the full graph" to "every run pays only for the parts of the graph it actually consults."
+
+### M.9 Maintenance cadence — review every 3-6 months
+
+> "Teams should expect to do a meaningful configuration review every three to six months" as model capabilities evolve.
+
+Rules that once helped may become constraining with newer models. CLAUDE.md content that compensated for an old model's weakness is dead weight against a newer one.
+
+**For ATeam.** Two operational implications:
+
+- Schedule a **quarterly review job** that audits CLAUDE.md files for staleness — rules that haven't been triggered in N runs, advice that contradicts current model behaviour, gotchas that no longer apply.
+- Track CallDB metrics that surface "rules whose violation rate has dropped to zero" — these are candidates for removal because the underlying problem is gone (model improved, code changed, convention solidified).
+
+### M.10 What Anthropic does *not* recommend (notable omissions)
+
+- **No vector indexing of the codebase.** Explicit. Reinforces ATeam's decision in §C.4.
+- **No "summarize the repo into a giant CLAUDE.md" pattern.** The opposite — root file is pointers and gotchas only, everything else is layered.
+- **No "load all CLAUDE.md files at startup" pattern.** It's hierarchical, walked from cwd upward, on demand.
+- **No prescribed schema for skills, hooks, or sub-agent communication beyond files.** The file system is the integration substrate; this is exactly the §L principle and the §C.5 ledger principle, restated.
+
+### M.11 Reconciliation — what changes in §A's architecture
+
+Nothing in §A is contradicted. The blog adds these mechanisms and refinements:
+
+| §A element | Update from this blog post |
+|---|---|
+| Index the repo per commit | Confirmed — but the *delivery* of the index to the agent should be via MCP tools, not pre-loaded context. |
+| Give agents tools, not giant context | Confirmed — Anthropic explicitly says no embedding pipeline, no centralized index, agent uses grep + file reads + LSP. |
+| Store agent work as evidence-linked observations | Confirmed and **strengthened** — the sub-agent → file → main-agent pattern is exactly this, recommended by Anthropic. |
+| Run deterministic analyzers before the LLM | Confirmed — and additionally enforced at the hook layer, not just the runner. |
+| Prompt caching + scheduling | Not directly addressed in this post; §C.7 still applies. |
+
+**New elements to add to §A:**
+
+1. **Path-scoped Skills as the unit of role specialization** (replacing monolithic role prompts).
+2. **Hierarchical CLAUDE.md** as the canonical knowledge format, with per-subdir files for local commands and conventions.
+3. **Stop hook → CLAUDE.md update queue** as the §L feedback loop trigger.
+4. **MCP server inside the container** exposing repo-map / symbol / analyzer / ledger queries as agent-callable tools.
+5. **Quarterly CLAUDE.md staleness review** as a scheduled ATeam job.
+
+### M.12 ATeam priority recommendations from this post
+
+In rough order of cost-vs-value:
+
+1. **Ship a default `.claude/settings.json` template with `permissions.deny` for obvious noise paths.** Cheap. High value. Stops every agent from reading `node_modules/` etc.
+2. **Set ATeam's runner `cwd` to the work-unit's scoped subdirectory when possible**, not always repo root. Walks the CLAUDE.md hierarchy correctly and reduces test-command blast radius.
+3. **Implement the sub-agent → file → main-agent pattern for audit → implement.** Replaces the current two-top-level-run pattern with one run that spawns the audit as a sub-agent. Smaller context for the implement agent, same evidence-linked artifact.
+4. **Stop hook → queue CLAUDE.md update proposals.** Closes §L's feedback loop without making the agent remember to do it.
+5. **Per-subdir CLAUDE.md with scoped test/build commands.** Concrete fix for the "ran the full suite, timed out" failure mode.
+6. **Path-scoped Skills for ATeam roles.** Larger refactor — fold the existing role prompts into Skills with path globs.
+7. **MCP server for repo-map / symbol / analyzer / ledger queries.** Larger still — the right shape once the §C.1–§C.6 pieces are individually working.
+8. **Quarterly CLAUDE.md staleness review** as a scheduled ATeam job. Operational.
+
+Items 1–5 are small enough to implement individually as PRs. Items 6–8 are architectural and belong on the same roadmap as the §A index/ledger/analyzer stack — not separate work, just the right delivery layer for that work.
