@@ -283,6 +283,59 @@ Agents support inheritance via `base`, sandbox settings, environment variables, 
 
 `max_budget_usd = "<USD>"` can be set on an agent block as a default spend cap (claude only; codex ignores it). The CLI `--max-budget-usd` flag overrides the per-agent default for a single invocation.
 
+#### `codex-tmux` (experimental)
+
+`codex-tmux` drives the interactive Codex CLI through a detached `tmux` session and captures its output as a normal ateam run. It's an **experiment** — primarily to get experience with tmux-based agent wrappers, and to make Codex's TUI-only slash commands (`/review` in particular) usable from unattended pipelines that today rely on `claude -p` / `codex exec` for headless work.
+
+```hcl
+agent "codex-tmux" {
+  base    = "codex"
+  type    = "codex-tmux"
+  command = "codex"
+  model   = "gpt-5.5"
+  effort  = "xhigh"
+
+  start_timeout     = "15s"
+  busy_timeout      = "20m"
+  quiescence_window = "2s"
+  tmux_width        = 300
+  tmux_height       = 100
+}
+
+profile "codex-tmux" {
+  agent     = "codex-tmux"
+  container = "none"
+}
+```
+
+**Example — running `/review` unattended**:
+
+```sh
+# Works: codex's /review accepts inline scope arguments, runs the review
+# directly and produces output back to ateam.
+ateam exec "/review the pending changes" --agent codex-tmux
+```
+
+**Known limitation — interactive submenus**:
+
+```sh
+# Does NOT work: bare /review opens an interactive preset picker
+# ("Review against base branch", "Review uncommitted changes", ...).
+# codex-tmux v1 only sends one prompt and waits for completion — it
+# can't navigate the submenu, so the run times out at busy_timeout.
+ateam exec "/review" --agent codex-tmux
+```
+
+Always pass the scope inline (e.g. `/review the pending changes`, `/review the staged changes`, `/review HEAD~3..HEAD`) so codex bypasses the preset picker and runs the review directly. Other interactive slash commands that gate on submenus will hit the same limitation.
+
+**Constraints**:
+- **Host-only** — pairing with `container != "none"` is rejected at runner construction. `codex-tmux` needs a project (`.ateam/` directory) for its tmux socket; running outside a project errors with actionable guidance.
+- **Auth** — reuses your existing `~/.codex/auth.json` natively. ateam does not stage a custom `CODEX_HOME`. The first run in a new workdir auto-accepts codex's trust dialog and persists one `[projects."<workdir>"]` entry in your `~/.codex/config.toml` — same outcome as a hand-typed `codex` session.
+- **Token tracking** — costs and token usage are mined from `~/.codex/sessions/<date>/rollout-*.jsonl` after the run.
+- **Concurrency** — multiple `codex-tmux` runs in different projects are isolated by EXEC_ID-based sockets and session names; concurrent runs in the same workdir use an EXEC_ID-tagged marker in the prompt body to keep their token stats from swapping. For slash-command prompts (where no marker can be injected), concurrent runs in the same workdir may misattribute token stats — open the issue if you hit it.
+
+See `plans/feature_codex_tmux_agent.md` for the design rationale.
+
 ### Effort levels
 
 Each agent block accepts an optional `effort = "..."` field that controls the underlying CLI's reasoning depth. The string is passed through verbatim, so `ateam` does not need to be updated when agents add new levels. CLI flags (`--effort` on `exec`, `code`, `report`, `parallel`) override the per-agent default for a single invocation.

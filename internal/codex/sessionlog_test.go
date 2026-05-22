@@ -52,7 +52,7 @@ func TestFindSessionLogIgnoresStaleFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	since, _ := time.Parse(time.RFC3339, "2026-05-22T17:59:00Z")
-	path, err := FindSessionLog(home, "/some/workdir", since)
+	path, err := FindSessionLog(home, "/some/workdir", since, "")
 	if err != nil {
 		t.Fatalf("FindSessionLog: %v", err)
 	}
@@ -80,11 +80,61 @@ func TestFindSessionLogMatchesCWD(t *testing.T) {
 		t.Fatal(err)
 	}
 	since, _ := time.Parse(time.RFC3339, "2026-05-22T17:59:00Z")
-	path, err := FindSessionLog(home, workdir, since)
+	path, err := FindSessionLog(home, workdir, since, "")
 	if err != nil {
 		t.Fatalf("FindSessionLog: %v", err)
 	}
 	if path != rollout {
 		t.Errorf("path = %q, want %q", path, rollout)
+	}
+}
+
+// TestFindSessionLogMarkerDisambiguates: when two rollout files match the
+// same workdir+timestamp window, prefer the one whose first user_message
+// contains the EXEC_ID marker — locks in the concurrent-run fix that
+// resolves the v1.1 known limitation.
+func TestFindSessionLogMarkerDisambiguates(t *testing.T) {
+	home := t.TempDir()
+	workdir := t.TempDir()
+	sessions := filepath.Join(home, "sessions", "2026", "05", "22")
+	if err := os.MkdirAll(sessions, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// Two rollout files for the same workdir, one second apart. Both pass
+	// the cwd + timestamp filter. Without the marker the timestamp
+	// tiebreaker would pick the second one ("ourID" run), so we use the
+	// marker to deliberately pick the OTHER file ("theirID" run).
+	mkRollout := func(name, ts, userMsg string) string {
+		p := filepath.Join(sessions, name)
+		meta := `{"timestamp":"` + ts + `","type":"session_meta","payload":{"id":"` + name + `","cwd":"` + workdir + `","timestamp":"` + ts + `","originator":"codex-tui","cli_version":"0.132.0"}}`
+		um := `{"timestamp":"` + ts + `","type":"event_msg","payload":{"type":"user_message","message":"` + userMsg + `"}}`
+		body := meta + "\n" + um + "\n"
+		if err := os.WriteFile(p, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		when, _ := time.Parse(time.RFC3339, ts)
+		_ = os.Chtimes(p, when, when)
+		return p
+	}
+	older := mkRollout("rollout-A.jsonl", "2026-05-22T18:00:00Z", "Please review [ateam-exec-42]")
+	_ = mkRollout("rollout-B.jsonl", "2026-05-22T18:00:01Z", "Please review [ateam-exec-43]")
+
+	since, _ := time.Parse(time.RFC3339, "2026-05-22T17:59:00Z")
+	// With marker for exec 42 → must return the OLDER file even though
+	// the timestamp tiebreaker would prefer the newer one.
+	path, err := FindSessionLog(home, workdir, since, "[ateam-exec-42]")
+	if err != nil {
+		t.Fatalf("FindSessionLog: %v", err)
+	}
+	if path != older {
+		t.Errorf("path = %q, want %q (marker should override timestamp tiebreaker)", path, older)
+	}
+	// Without marker → timestamp tiebreaker picks the newer file.
+	path, err = FindSessionLog(home, workdir, since, "")
+	if err != nil {
+		t.Fatalf("FindSessionLog: %v", err)
+	}
+	if path == older {
+		t.Errorf("path = %q, expected the newer of the two without a marker", path)
 	}
 }

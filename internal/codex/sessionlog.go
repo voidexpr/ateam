@@ -34,20 +34,21 @@ type SessionStats struct {
 
 // FindSessionLog locates the most recent rollout-*.jsonl under codexHome whose
 // session_meta.payload.cwd matches workdir AND whose session_meta.payload
-// timestamp is at or after `since`. Returns the empty string (no error) if
-// no matching file is found.
+// timestamp is at or after `since`.
 //
-// We match on cwd + timestamp because Codex doesn't accept a session-ID hint
-// from the CLI; this is the most-specific signal available.
+// When `marker` is non-empty, files are additionally filtered to those whose
+// first `event_msg.user_message` contains the marker substring. That handles
+// the otherwise-ambiguous case of two codex-tmux runs starting in the same
+// workdir within the 5-second slack window — the agent layer injects an
+// EXEC_ID-tagged sentinel via SessionLogMarker so each run can find its own
+// rollout file unambiguously.
 //
-// LIMITATION: two codex-tmux runs that start in the same workdir within the
-// 5-second slack window may select the wrong file. The "latest by timestamp"
-// tiebreaker biases toward the most recent run, so Run A may end up reading
-// Run B's tokens. Concurrent runs in different workdirs are unaffected.
-// Mitigation if this becomes a real issue: surface a per-EXEC_ID marker into
-// the prompt body that codex echoes into its session log, then prefer files
-// whose first user_message contains that marker.
-func FindSessionLog(codexHome, workdir string, since time.Time) (string, error) {
+// Empty `marker` (e.g. for slash-command prompts where we don't inject text)
+// falls back to the cwd+timestamp tie-breaker — that path still works for
+// the common single-run-per-workdir case.
+//
+// Returns the empty string (no error) if no matching file is found.
+func FindSessionLog(codexHome, workdir string, since time.Time, marker string) (string, error) {
 	if codexHome == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -105,12 +106,60 @@ func FindSessionLog(codexHome, workdir string, since time.Time) (string, error) 
 	if len(matches) == 0 {
 		return "", nil
 	}
+	// When the caller supplied an EXEC_ID marker, prefer files whose first
+	// user_message contains it. This is the disambiguation hook for
+	// concurrent runs in the same workdir.
+	if marker != "" {
+		for _, e := range matches {
+			if firstUserMessageContains(e.path, marker) {
+				return e.path, nil
+			}
+		}
+		// Fall through if no marked match — the run may have failed before
+		// codex echoed the user_message, in which case the timestamp
+		// tiebreaker is the best we can do.
+	}
 	// Sort by session_meta timestamp ascending; the latest match is the
 	// most likely candidate for "our" session.
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].meta.Timestamp < matches[j].meta.Timestamp
 	})
 	return matches[len(matches)-1].path, nil
+}
+
+// firstUserMessageContains scans a rollout JSONL for the first
+// `event_msg` record with `payload.type == "user_message"` and returns
+// true iff that message contains `marker` as a substring. Cheap — we
+// only read until the first match (rollouts typically put the user
+// message a few records after session_meta).
+func firstUserMessageContains(path, marker string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		var rec rolloutRecord
+		if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {
+			continue
+		}
+		if rec.Type != "event_msg" {
+			continue
+		}
+		var pe struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(rec.Payload, &pe); err != nil {
+			continue
+		}
+		if pe.Type == "user_message" {
+			return strings.Contains(pe.Message, marker)
+		}
+	}
+	return false
 }
 
 // ReadSessionStats fully reads a rollout JSONL and returns the aggregated

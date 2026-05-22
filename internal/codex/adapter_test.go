@@ -270,7 +270,7 @@ func TestExtractCommandOutputRequiresEcho(t *testing.T) {
 }
 
 func TestPreparePromptSlashCommand(t *testing.T) {
-	d := preparePrompt("/review")
+	d := preparePrompt("/review", 0)
 	if !d.IsSlashCommand {
 		t.Errorf("IsSlashCommand = false, want true for /review")
 	}
@@ -283,7 +283,7 @@ func TestPreparePromptSlashCommand(t *testing.T) {
 }
 
 func TestPreparePromptFreeFormGetsSentinel(t *testing.T) {
-	d := preparePrompt("Please review the changes")
+	d := preparePrompt("Please review the changes", 0)
 	if d.IsSlashCommand {
 		t.Errorf("IsSlashCommand = true, want false")
 	}
@@ -296,12 +296,12 @@ func TestPreparePromptFreeFormGetsSentinel(t *testing.T) {
 }
 
 func TestPreparePromptMultiLineFreeForm(t *testing.T) {
-	d := preparePrompt("Line one\nLine two\nLine three")
+	d := preparePrompt("Line one\nLine two\nLine three", 0)
 	if d.IsSlashCommand {
 		t.Errorf("IsSlashCommand = true, want false for multi-line")
 	}
 	// Multi-line slash-shaped first line is *not* a slash command.
-	d2 := preparePrompt("/review\nplease look at @file.md")
+	d2 := preparePrompt("/review\nplease look at @file.md", 0)
 	if d2.IsSlashCommand {
 		t.Errorf("IsSlashCommand = true, want false for multi-line `/`-prefixed prompt")
 	}

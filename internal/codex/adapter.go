@@ -77,6 +77,13 @@ type TmuxConfig struct {
 	SocketPath string
 	// SessionName is the tmux session name. Required. Caller derives from EXEC_ID.
 	SessionName string
+	// ExecID is the calldb row ID for this run. Used to derive a stable
+	// sentinel that gets embedded in free-form prompts so the same run's
+	// rollout JSONL can be reliably identified — even when a concurrent
+	// codex-tmux run in the same workdir would otherwise be ambiguous.
+	// Zero = no marker (falls back to cwd+timestamp matching, the v1.1
+	// behavior; OK for slash commands where we can't safely inject text).
+	ExecID int64
 	// OnPanePID, if non-nil, is invoked once with the pane's foreground PID
 	// after the codex TUI is ready. The codex-tmux agent uses this to emit
 	// a `system` event so the runner can record the real PID in agent_execs.
@@ -134,19 +141,38 @@ type promptDelivery struct {
 // per-run sentinel is appended on its own line; the sentinel becomes the
 // echo marker — single-line, guaranteed not to be split by Codex's input
 // wrapping, and vanishingly unlikely to collide with model output.
-func preparePrompt(prompt string) promptDelivery {
+//
+// When execID > 0, free-form prompts use a deterministic sentinel tied to
+// the exec ID (`[ateam-exec-<id>]`). Codex echoes this into the rollout
+// JSONL's user_message, letting FindSessionLog disambiguate concurrent
+// codex-tmux runs in the same workdir. execID == 0 (e.g. unit tests) falls
+// back to a random sentinel.
+func preparePrompt(prompt string, execID int64) promptDelivery {
 	trimmed := strings.TrimSpace(prompt)
 	if strings.HasPrefix(trimmed, "/") && !strings.Contains(trimmed, "\n") {
 		return promptDelivery{SentText: prompt, EchoMarker: trimmed, IsSlashCommand: true}
 	}
-	sentinel := newSentinel()
+	sentinel := newSentinel(execID)
 	return promptDelivery{
 		SentText:   prompt + "\n" + sentinel,
 		EchoMarker: sentinel,
 	}
 }
 
-func newSentinel() string {
+// SessionLogMarker returns the marker string preparePrompt injects into
+// free-form prompts for a given EXEC_ID. Exposed so FindSessionLog can match
+// rollout files by user_message content.
+func SessionLogMarker(execID int64) string {
+	if execID <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("[ateam-exec-%d]", execID)
+}
+
+func newSentinel(execID int64) string {
+	if execID > 0 {
+		return SessionLogMarker(execID)
+	}
 	var buf [10]byte
 	if _, err := rand.Read(buf[:]); err != nil {
 		// rand.Read effectively never fails on linux/darwin; fall back to
@@ -236,7 +262,7 @@ func RunTmux(ctx context.Context, cfg TmuxConfig) (TmuxResult, error) {
 		cfg.OnPanePID(panePID)
 	}
 
-	delivery := preparePrompt(cfg.InitialInput)
+	delivery := preparePrompt(cfg.InitialInput, cfg.ExecID)
 	// Slash commands must be TYPED char-by-char (send-keys -l) so codex's TUI
 	// slash-command parser sees the `/` as a keystroke and enters slash mode.
 	// Pasting "/review" via bracketed paste arrives as bulk content, codex
@@ -293,8 +319,16 @@ func RunTmux(ctx context.Context, cfg TmuxConfig) (TmuxResult, error) {
 	}
 	// Best-effort: mine the Codex rollout JSONL for token/cost. Never fails
 	// the run — the pane output we already have is the source of truth for
-	// success/failure; this just enriches the metrics.
-	if logPath, ferr := FindSessionLog("", cfg.WorkDir, started); ferr == nil && logPath != "" {
+	// success/failure; this just enriches the metrics. When the prompt was
+	// free-form, we passed an EXEC_ID-tagged sentinel through preparePrompt;
+	// FindSessionLog uses that to disambiguate concurrent runs in the same
+	// workdir. Slash commands have no marker (we can't safely inject text)
+	// and fall back to cwd+timestamp matching.
+	marker := ""
+	if !delivery.IsSlashCommand {
+		marker = SessionLogMarker(cfg.ExecID)
+	}
+	if logPath, ferr := FindSessionLog("", cfg.WorkDir, started, marker); ferr == nil && logPath != "" {
 		if stats, rerr := ReadSessionStats(logPath); rerr == nil {
 			result.SessionStats = stats
 		}

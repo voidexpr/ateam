@@ -15,6 +15,7 @@ See [APPROACH.md](APPROACH.md) for the rationale and design principles behind AT
 ## Key Features
 
 * **use existing coding agents like claude code or codex**: leverages subscriptions instead of much more expensive APis, benefit from the expertise of llm providers. Ateam focuses on automating them
+    * an experimental `codex-tmux` agent additionally drives codex's interactive TUI through `tmux`, so TUI-only slash commands like `/review` can run in unattended pipelines (see [CONFIG.md](CONFIG.md#codex-tmux-experimental))
 * **flexible isolation**: out of the box ateam uses your coding agents as-is for ease of configuration. But it also supports the following workflows:
     * run in a sandbox on your base host: protects your files
     * use a separate config for your coding agent (`CLAUDE_CONFIG_DIR`)

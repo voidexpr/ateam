@@ -122,6 +122,7 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		CmdFactory:       tmuxctl.CmdFactory(req.CmdFactory),
 		SessionName:      sessionName,
 		SocketPath:       socketPath,
+		ExecID:           req.ExecID,
 		OnPanePID: func(pid int) {
 			// Emit the codex pane PID so the runner records it in
 			// agent_execs.pid. The runner's processEvent handler
