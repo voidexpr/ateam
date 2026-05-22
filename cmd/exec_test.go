@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ateam/internal/agent"
+	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 )
@@ -48,7 +49,7 @@ func TestPrintExecDryRun(t *testing.T) {
 	env := &root.ResolvedEnv{}
 
 	out := captureStdout(t, func() {
-		if err := printExecDryRun(r, env, "hello world", "security", ""); err != nil {
+		if err := printExecDryRun(r, env, "hello world", "security", runner.ActionExec, ""); err != nil {
 			t.Errorf("printExecDryRun: %v", err)
 		}
 	})
@@ -99,5 +100,82 @@ func TestRunExecDryRunNoExec(t *testing.T) {
 
 	if runErr != nil {
 		t.Fatalf("runExec dry-run: %v", runErr)
+	}
+}
+
+func TestFormatInitLine(t *testing.T) {
+	cases := []struct {
+		name string
+		in   runner.RunProgress
+		want string
+	}{
+		{
+			name: "init with model and session",
+			in:   runner.RunProgress{Phase: runner.PhaseInit, Subtype: "init", Model: "claude-opus-4-7", SessionID: "abc123"},
+			want: "init: model=claude-opus-4-7 session=abc123",
+		},
+		{
+			name: "init with no payload falls back to placeholder",
+			in:   runner.RunProgress{Phase: runner.PhaseInit, Subtype: "init"},
+			want: "initializing...",
+		},
+		{
+			name: "compact boundary renders distinctly",
+			in:   runner.RunProgress{Phase: runner.PhaseInit, Subtype: "compact_boundary"},
+			want: "context compacted",
+		},
+		{
+			name: "unknown subtype is shown verbatim",
+			in:   runner.RunProgress{Phase: runner.PhaseInit, Subtype: "rate_limited"},
+			want: "init: rate_limited",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := formatInitLine(c.in); got != c.want {
+				t.Errorf("formatInitLine = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// TestRunExecRecordsCustomAction verifies the --action flag is plumbed all the
+// way through to the CallDB record so `ateam ps --action <name>` can filter on it.
+func TestRunExecRecordsCustomAction(t *testing.T) {
+	orgParent, projPath, env := setupTestProject(t)
+
+	saved := saveExecGlobals()
+	defer saved.restore()
+	orgFlag = orgParent
+	execProfile = "test" // uses mock agent
+	execAction = "audit" // custom action label
+	execQuiet = true
+	execNoStream = true
+
+	var runErr error
+	captureStdout(t, func() {
+		withChdir(t, projPath, func() {
+			runErr = runExec(nil, []string{"hello mock"})
+		})
+	})
+	if runErr != nil {
+		t.Fatalf("runExec: %v", runErr)
+	}
+
+	db, err := calldb.Open(env.ProjectDBPath())
+	if err != nil {
+		t.Fatalf("Open CallDB: %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.RecentRuns(calldb.RecentFilter{Action: "audit", Limit: 10})
+	if err != nil {
+		t.Fatalf("RecentRuns: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row with action=audit, got %d", len(rows))
+	}
+	if rows[0].Action != "audit" {
+		t.Errorf("expected row.Action=audit, got %q", rows[0].Action)
 	}
 }

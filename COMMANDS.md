@@ -411,6 +411,7 @@ echo "still works" | ateam exec -                # explicit "-"
 | Flag | Description |
 |------|-------------|
 | `--role ROLE` | Role to run (optional — requires project context) |
+| `--action NAME` | Action label recorded for this run (default `exec`). Free-form; affects `ps`/template vars/labels, not output promotion |
 | `--profile NAME` | Runtime profile to use |
 | `--agent NAME` | Agent name from runtime.hcl (mutually exclusive with --profile) |
 | `--model MODEL` | Model override |

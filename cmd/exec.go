@@ -16,6 +16,7 @@ import (
 
 var (
 	execRole            string
+	execAction          string
 	execProfile         string
 	execAgent           string
 	execModel           string
@@ -66,6 +67,7 @@ Example:
 
 func init() {
 	execCmd.Flags().StringVar(&execRole, "role", "", "role to run (optional)")
+	execCmd.Flags().StringVar(&execAction, "action", runner.ActionExec, "action label recorded for this run (free-form; affects ps/template vars/labels, not output promotion)")
 	execCmd.Flags().StringVar(&execModel, "model", "", "model override")
 	execCmd.Flags().StringVar(&execEffort, "effort", "", "reasoning effort override, passed verbatim to the agent CLI (e.g. low/medium/high)")
 	addBudgetFlags(execCmd, &execMaxBudgetUSD, &execMaxBudgetBatch,
@@ -122,7 +124,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 	var r *runner.Runner
 	if hasProject {
-		r, err = resolveRunner(env, execProfile, execAgent, runner.ActionExec, execRole, execDockerAutoSetup)
+		r, err = resolveRunner(env, execProfile, execAgent, execAction, execRole, execDockerAutoSetup)
 	} else {
 		profile := execProfile
 		if profile == "" && execAgent == "" {
@@ -146,7 +148,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		Effort:            execEffort,
 		MaxBudgetUSD:      execMaxBudgetUSD,
 		MaxBudgetUSDBatch: execMaxBudgetBatch,
-	}, runner.ActionExec); err != nil {
+	}, execAction); err != nil {
 		return err
 	}
 	setSourceWritable(r)
@@ -156,7 +158,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 
 	if execDryRun {
-		return printExecDryRun(r, env, promptText, execRole, execBatch)
+		return printExecDryRun(r, env, promptText, execRole, execAction, execBatch)
 	}
 
 	if !hasProject {
@@ -185,7 +187,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	// stream, viewable via `ateam cat <exec_id>`.
 	opts := runner.RunOpts{
 		RoleID:     execRole,
-		Action:     runner.ActionExec,
+		Action:     execAction,
 		WorkDir:    env.WorkDir,
 		Verbose:    execVerbose,
 		Batch:      execBatch,
@@ -308,12 +310,12 @@ func fmtContextProgress(contextTokens, contextWindow int) string {
 	return fmt.Sprintf(", ctx: %s", ctxStr)
 }
 
-func printExecDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, batch string) error {
+func printExecDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, action, batch string) error {
 	fmt.Println("╔══ dry-run ══╗")
 	fmt.Println()
 	printDryRunInfo(r, env, dryRunOpts{
 		RoleID: roleID,
-		Action: runner.ActionExec,
+		Action: action,
 		Batch:  batch,
 		Prompt: prompt,
 	})

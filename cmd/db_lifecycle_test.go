@@ -239,13 +239,13 @@ func TestEnvShowsNotFoundForMissingPaths(t *testing.T) {
 // --- global state save/restore helpers ---
 
 type execGlobals struct {
-	org, profile, agent, role, model, workDir, agentArgs, batch, containerName string
-	noStream, noSummary, quiet, verbose, dryRun, dockerAutoSetup               bool
+	org, profile, agent, role, action, model, workDir, agentArgs, batch, containerName string
+	noStream, noSummary, quiet, verbose, dryRun, dockerAutoSetup                       bool
 }
 
 func saveExecGlobals() execGlobals {
 	return execGlobals{
-		org: orgFlag, profile: execProfile, agent: execAgent, role: execRole, model: execModel,
+		org: orgFlag, profile: execProfile, agent: execAgent, role: execRole, action: execAction, model: execModel,
 		workDir: workDirFlag, agentArgs: execAgentArgs, batch: execBatch,
 		containerName: execContainerName, noStream: execNoStream, noSummary: execNoSummary,
 		quiet: execQuiet, verbose: execVerbose, dryRun: execDryRun, dockerAutoSetup: execDockerAutoSetup,
@@ -257,6 +257,7 @@ func (g execGlobals) restore() {
 	execProfile = g.profile
 	execAgent = g.agent
 	execRole = g.role
+	execAction = g.action
 	execModel = g.model
 	workDirFlag = g.workDir
 	execAgentArgs = g.agentArgs

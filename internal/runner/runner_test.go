@@ -288,6 +288,31 @@ func TestRunnerProgress(t *testing.T) {
 	}
 }
 
+func TestRunnerProgressInitCarriesAgentInfo(t *testing.T) {
+	dir := t.TempDir()
+	mock := &agent.MockAgent{Response: "init test"}
+	r := newTestRunner(t, dir, mock)
+
+	progress := make(chan RunProgress, 64)
+	_ = r.Run(context.Background(), "p", RunOpts{RoleID: "init-role", Action: ActionExec}, progress)
+	close(progress)
+
+	var inits []RunProgress
+	for p := range progress {
+		if p.Phase == PhaseInit {
+			inits = append(inits, p)
+		}
+	}
+	if len(inits) != 1 {
+		t.Fatalf("expected exactly one PhaseInit event, got %d", len(inits))
+	}
+	// MockAgent reports a SessionID; the runner must propagate it onto
+	// the progress event so the live UI can show something useful.
+	if inits[0].SessionID != "mock-session" {
+		t.Errorf("expected SessionID=mock-session on PhaseInit, got %q", inits[0].SessionID)
+	}
+}
+
 func TestRunnerProgressIncludesExecID(t *testing.T) {
 	dir := t.TempDir()
 	mock := &agent.MockAgent{Response: "progress test"}
