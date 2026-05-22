@@ -243,7 +243,7 @@ func printProgress(ch <-chan runner.RunProgress) {
 		ts := display.FormatDuration(p.Elapsed)
 		switch p.Phase {
 		case runner.PhaseInit:
-			fmt.Fprintf(os.Stderr, "[%s] initializing...\n", p.RoleID)
+			fmt.Fprintf(os.Stderr, "[%s] %s\n", p.RoleID, formatInitLine(p))
 		case runner.PhaseThinking:
 			if p.Content != "" {
 				fmt.Fprintf(os.Stderr, "[%s] %s (%s)\n", p.RoleID, singleLine(p.Content), ts)
@@ -275,6 +275,27 @@ func singleLine(s string) string {
 	return runner.SingleLineText(s)
 }
 
+func formatInitLine(p runner.RunProgress) string {
+	switch p.Subtype {
+	case "compact_boundary":
+		return "context compacted"
+	case "", "init":
+		parts := []string{}
+		if p.Model != "" {
+			parts = append(parts, "model="+p.Model)
+		}
+		if p.SessionID != "" {
+			parts = append(parts, "session="+p.SessionID)
+		}
+		if len(parts) == 0 {
+			return "initializing..."
+		}
+		return "init: " + strings.Join(parts, " ")
+	default:
+		return "init: " + p.Subtype
+	}
+}
+
 func fmtContextProgress(contextTokens, contextWindow int) string {
 	if contextTokens <= 0 {
 		return ""
@@ -304,6 +325,9 @@ func printExecDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, ba
 func printExecSummary(r runner.RunSummary) {
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintf(os.Stderr, "--- Summary ---\n")
+	if r.ExecID > 0 {
+		fmt.Fprintf(os.Stderr, "  ExecID:   %d\n", r.ExecID)
+	}
 	fmt.Fprintf(os.Stderr, "  Role:     %s\n", r.RoleID)
 	fmt.Fprintf(os.Stderr, "  Duration: %s\n", display.FormatDuration(r.Duration))
 	if r.Cost > 0 {

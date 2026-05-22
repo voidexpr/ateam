@@ -136,6 +136,7 @@ type RunProgress struct {
 	ExecID         int64
 	RoleID         string
 	Phase          string
+	Subtype        string // populated for PhaseInit: "init", "compact_boundary", ...
 	ToolName       string
 	ToolInput      string
 	Content        string
@@ -148,6 +149,10 @@ type RunProgress struct {
 	StderrFilePath string
 	ContextTokens  int
 	ContextWindow  int
+
+	// Populated for PhaseInit when the agent reports them.
+	Model     string
+	SessionID string
 
 	// Cumulative usage so far (populated as assistant events arrive; zero
 	// until the first one). EstimatedCost is computed via the agent's
@@ -484,7 +489,30 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 					fmt.Fprintf(os.Stderr, "Warning: call tracking SetPID failed: %v\n", err)
 				}
 			}
-			emitProgress(PhaseInit, "", "", "", 0, eventCount)
+			// "process_start" carries only the PID and would otherwise emit
+			// a content-less init line; the real init event follows from the
+			// agent's own stream.
+			if ev.Subtype != "process_start" {
+				sendProgress(progress, RunProgress{
+					ExecID:                 callID,
+					RoleID:                 opts.RoleID,
+					Phase:                  PhaseInit,
+					Subtype:                ev.Subtype,
+					Model:                  ev.Model,
+					SessionID:              ev.SessionID,
+					TurnCount:              observedTurns,
+					EventCount:             eventCount,
+					StartedAt:              startedAt,
+					Elapsed:                time.Since(startedAt),
+					StreamFilePath:         streamFile,
+					StderrFilePath:         stderrFile,
+					ContextTokens:          peakContextTokens,
+					ContextWindow:          contextWindow,
+					CumulativeInputTokens:  cumInputTokens,
+					CumulativeOutputTokens: cumOutputTokens,
+					EstimatedCost:          estimatedCost,
+				})
+			}
 
 		case "assistant":
 			if ev.Text != "" {

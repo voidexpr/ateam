@@ -124,7 +124,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 		ch <- errorEvent(err, ErrorSourceAgentProcess, -1)
 		return
 	}
-	ch <- StreamEvent{Type: "system", PID: cmd.Process.Pid}
+	ch <- StreamEvent{Type: "system", Subtype: "process_start", PID: cmd.Process.Pid}
 
 	startedAt := time.Now()
 
@@ -181,7 +181,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 			if sys.Model != "" {
 				resolvedModel = sys.Model
 			}
-			ch <- StreamEvent{Type: "system", SessionID: sys.SessionID, Model: sys.Model}
+			ch <- StreamEvent{Type: "system", Subtype: sys.Subtype, SessionID: sys.SessionID, Model: sys.Model}
 
 		case "assistant":
 			ast := ev.(*streamutil.AssistantEvent)

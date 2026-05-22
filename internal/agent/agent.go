@@ -109,6 +109,7 @@ type StreamEvent struct {
 	Type string // "system", "assistant", "tool_use", "tool_result", "result", "error"
 
 	// system
+	Subtype   string // "process_start" (synthetic, carries PID), "init", "compact_boundary", ...
 	SessionID string
 	Model     string
 	PID       int
