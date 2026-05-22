@@ -506,6 +506,88 @@ Each platform gets its own command syntax (`/`, `/metaswarm:`, `$`) but the unde
 
 **Key architectural difference from ATeam:** metaswarm is a **workflow framework you install into a coding agent** — its goal is to make a human-launched session execute a rigorous SDLC end-to-end. ATeam is **an autonomous scheduler that drives coding agents** — its goal is to make the *decision to start a session* autonomous and policy-driven. They are stacked, not competing: a plausible architecture is **ATeam decides what to work on and when, then drives a metaswarm-equipped Claude Code session to do it**. metaswarm is the right answer to "what should the agent do inside the session" — exactly the layer ATeam currently underspecifies. The 9-phase workflow, BEADS persistence, cross-model review, and self-reflection loop are all directly importable into ATeam's role definitions without contradicting any ATeam design choice.
 
+#### Routa (phodal/routa) ⭐⭐⭐⭐
+
+**Link:** [github.com/phodal/routa](https://github.com/phodal/routa) — by Phodal (the author of AutoDev). ~1K⭐, 170 forks, active release cadence (v0.18.1 as of April 2026). MIT-licensed. TypeScript 5.9 + Next.js 16.2 (web) / Rust + Axum (server) / Tauri (desktop) — an unusually polyglot stack for this section.
+
+**What it is:** A **workspace-first multi-agent coordination platform for software delivery**, organised around a **Kanban board** rather than chat threads. The slogan that captures the design intent: "the same card becomes stricter over time." A backlog card starts as a fuzzy idea, accumulates a canonical YAML story when refined, gains an execution brief when promoted to Todo, attaches Dev Evidence during implementation, gets a Gate verdict on review, and finally a Done summary. The card *is* the artifact — work isn't recorded in transcripts, it's grown onto the card itself.
+
+**The Kanban model (the core abstraction):**
+
+| Lane | Specialist agent | Contract |
+|---|---|---|
+| Backlog | **Backlog Refiner** | Clarifies scope, produces canonical YAML story |
+| Todo | **Todo Orchestrator** | Validates story, produces execution-ready brief |
+| Dev | **Dev Crafter** | Implements *only the scoped change*, runs verification, commits, appends Dev Evidence |
+| Review | **Review Guard** | Independently re-verifies every acceptance criterion |
+| Done | **Done Reporter** | Records completion summary |
+| Blocked | **Blocked Resolver** | Classifies blockers, routes appropriately |
+
+The three core role primitives are named: **"ROUTA coordinates, CRAFTER implements, GATE verifies."** The lane specialists in the table above are instantiations of these primitives applied per column. The specialist prompts live as YAML in `resources/specialists/workflows/kanban/*.yaml`; the core role prompts are `resources/specialists/core/{routa,crafter,gate}.yaml`. Prompts are *data*, not code — same shape as multiclaude's markdown role files (§C.7) but with a tighter contract.
+
+**The Dev Crafter's constraints** are unusually explicit and the most directly portable piece of the design:
+
+- Refuse to start coding *unless the story is executable* (the Todo Orchestrator must have produced a brief).
+- Implement *only the scoped change* — no opportunistic refactors.
+- Run validation and commit work.
+- Maintain a clean git state.
+- Append Dev Evidence to the card.
+
+That "refuse unless executable" rule is the implementation of a workflow gate at the agent prompt level: the agent is structurally prevented from starting work on a card that hasn't been refined, regardless of what the orchestrator hands it. metaswarm enforces equivalent gates at the orchestrator (§B.2); Routa enforces them at the agent.
+
+**The Review Gate Architecture (three layers, decided independently):**
+
+A single reviewer is the obvious failure mode for autonomous workflows — the agent that wrote the code is biased, the agent reviewing alone can be sycophantic, single-model review is an echo chamber (the MAS literature in §C.1 is explicit about this). Routa stacks three layers, each answering a different question:
+
+1. **Harness Monitor** — *"what happened?"* Surfaces traces, changed files, executed commands, git state, and attribution. Mechanical, non-judging.
+2. **Entrix Fitness** — *"what should be true?"* Enforces hard gates, evidence requirements, and file-budget or policy checks. Rule-based, not LLM-based.
+3. **Gate Specialist** — *"can this move forward?"* The LLM reviewer, but only consulted after the first two have passed and with their outputs as inputs.
+
+This separation is the cleanest expression in this research of *what a review gate should actually look like*: deterministic observation, then policy validation, then LLM judgment. Each layer can fail independently; the LLM never sees the artifact in isolation.
+
+**Evidence-driven gates.** The README is explicit that the gate "does not allow partial approval." Either the evidence is present and the criteria are met, or the card stays in Review. No "looks good with caveats." This is the same instinct as metaswarm's "writer always reviewed by different model" — the design choice is to make review a binary gate, not a probabilistic signal.
+
+**Integration surfaces (an unusually long list).** "ACP, MCP, A2A, AG-UI, A2UI, REST, and SSE." MCP is the obvious one; the rest matter because Routa is positioning as a *platform* that other agents plug into rather than a runtime that hosts them. Provider-specific runtimes are normalised through adapters — the agent layer is decoupled from the orchestration layer.
+
+**Session lifecycle and observability.**
+
+- Sessions support "create, prompt, cancel, reconnect, streaming, and trace inspection flows." Streaming is SSE. Reconnect is first-class — sessions are *durable objects*, not in-memory state, so a disconnected client can pick a session back up.
+- Workspaces, sessions, tasks, traces, codebases, and worktrees are all **durable objects**. Docker + PostgreSQL persistence.
+- The Harness Monitor's outputs (traces, changed files, commands, git state) are *queryable*, not just logged — they exist as records the Gate Specialist consults, the dashboard renders, and the API exposes.
+
+**Dual-runtime: web and desktop.**
+
+- Web runtime: Next.js pages and route handlers in `src/`.
+- Desktop runtime: Tauri shell on top of an Axum server in `crates/routa-server/` (port `127.0.0.1:3210`).
+- Both expose the same API. Schema is pinned by `api-contract.yaml` — the contract is checked into the repo, not negotiated at runtime.
+
+The desktop shell is notable: most entries in this section ship a web dashboard (amux §B.2, ComposioHQ §B.2, metaswarm via the underlying agent CLI). A Tauri-packaged native app is a different distribution bet — operator UX in a single binary, no `https://localhost:8822` for the user to remember.
+
+**Scheduling and automation.** "Schedules, webhooks, background tasks, and workflow runs for automation beyond one-off prompts." The README is light on syntax but the existence of named scheduling primitives (rather than just cron) is closer to ATeam's profile-driven scheduling than amux's plain cron-style jobs.
+
+**Overlap with ATeam:** High on workflow rigor and observability, moderate on autonomy. The card-as-artifact pattern, the three-layer review gate, the Dev Crafter's "refuse unless executable" constraint, and the durable-objects persistence model are all features ATeam should aspire to. The Kanban-first organising metaphor is a different choice — ATeam currently has run rows in CallDB; Routa has cards that grow.
+
+**What it lacks for our use case:**
+
+- **No autonomous coordinator.** Routa makes work *visible* on a board, but the board still needs cards added to it. There is no concept of "the system decides what cards to create based on project state" — that's the operator's job. ATeam's coordinator-decides-what-to-work-on premise is absent.
+- **No sandbox story.** The Dev Crafter runs in whatever environment the workspace provides; no Docker isolation per session. Compared to ATeam's container-first model, this is a regression.
+- **No specialised quality roles beyond review.** Audit/security/test-coverage roles aren't separately named; the Review Guard is one reviewer covering all criteria. metaswarm's parallel 5-reviewer design gate (§B.2) is more sophisticated.
+- **No budget enforcement.** No per-card cost cap, daily ceiling, or model-cost attribution beyond traces.
+- **No cross-model adversarial review.** Single Gate Specialist; no requirement that the reviewer be a different model than the implementer (metaswarm's strongest single rule).
+- **No persistent agent identity / org knowledge.** Specialist prompts are static YAML; no equivalent of metaswarm's self-reflection loop or BEADS-backed knowledge that compounds across cards.
+- **Heavy stack to adopt.** TypeScript + Rust + Tauri + PostgreSQL is a non-trivial deployment compared to ATeam's "drop a binary, point at a repo" pitch.
+
+**Ideas to integrate:**
+
+- **The card-as-artifact growth model.** ATeam currently emits run reports as separate markdown files; folding them into a single durable record that grows (story → brief → evidence → verdict → summary) is a strictly better narrative artifact for humans skimming history. This is the same compounding-evidence pattern as Compound Engineering's `.compound/` files (§B.2) but with a single per-task spine instead of phase-separated files.
+- **The three-layer review gate (Harness Monitor → Entrix Fitness → Gate Specialist) is the cleanest answer in this research to "what does a good review actually look like."** ATeam's review role today is a single LLM pass on a diff. Splitting it into (1) mechanical trace/diff/git-state collection, (2) deterministic policy checks (test coverage, file budgets, scope adherence), (3) LLM judgment with the prior two as inputs is directly portable and would dramatically reduce review failure modes. The Entrix Fitness layer in particular — *deterministic, not LLM-based* — is the missing layer ATeam currently approximates with prompt instructions.
+- **"Refuse unless executable" as an agent-level guardrail, not just an orchestrator-level gate.** ATeam's audit→implement→review flow assumes the orchestrator hands the implementer a valid plan. Routa builds the precondition into the Crafter's prompt, so the agent itself refuses to start on an under-specified card. Defence in depth — both layers check.
+- **Specialist YAML per lane, core YAML for role primitives.** The two-tier specialist/core split (`workflows/kanban/*.yaml` vs `core/{routa,crafter,gate}.yaml`) is a cleaner factoring than ATeam's per-role prompts. Adopting it would let ATeam reuse a single "implementer" core across multiple specialised contexts (audit-implementer, refactor-implementer, test-implementer).
+- **Durable objects with pinned `api-contract.yaml`.** Versioned-schema-as-source-of-truth for the API between runtimes (web/desktop/CLI) is the right discipline for ATeam if it ever grows a non-CLI surface. Today everything is `claude -p` + CallDB; pinning a contract before adding a second runtime saves a future migration.
+- **The Tauri-packaged desktop UI as a deployment option.** Not urgent for ATeam, but worth noting that single-binary native distribution (vs. localhost web server) is a real distribution path for operator tooling.
+
+**Key architectural difference from ATeam:** Routa is a **board, not a scheduler** — its job is to make multi-agent work *legible* (every state transition visible, every artifact accumulated on the card, every decision recorded), but the *decision to start a card* is human or external. ATeam is a **scheduler, not a board** — its job is to make multi-agent work *autonomous* (the system picks what to work on, when, and with which role), but the work history today is comparatively opaque. The two are complementary in the most literal way: **Routa's card-and-gate model is the visibility layer ATeam currently lacks; ATeam's coordinator is the scheduling layer Routa currently lacks.** A plausible end-state architecture would have ATeam's coordinator create Routa-style cards, route them through Routa-style lanes with Routa-style three-layer gates, and surface the board as ATeam's operator UI.
+
 #### Guild (mathomhaus/guild) ⭐⭐⭐⭐
 
 **Link:** [github.com/mathomhaus/guild](https://github.com/mathomhaus/guild)
