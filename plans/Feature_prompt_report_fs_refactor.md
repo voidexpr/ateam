@@ -2,6 +2,16 @@
 
 The immediate goal is to restructure ateam's artifacts between prompts and generated files. The longer-term design goal is to provide a generic prompt system that supports many workflows beyond `report/review/code/verify`, with the same simple core mechanics. The report/review/code/verify workflow just happens to use that more generic prompt system. Similarly, arbitrary spawned agents should have flexibility to store and read files in private and shared spaces.
 
+## Related documents
+
+Other files in `plans/` that illustrate and stress-test this design:
+
+- **`prompt_example_metaproject.md`** — full worked example: translating `metaproject.py` (a multi-project audit/fix/verify pipeline) into the filesystem proposal. Surfaces `{{arg.*}}` and parameterized promotion as needs.
+- **`prompt_example_metaproject_python_api.md`** — alternative direction: a small typed Python API (`Ctx` / `PromptBundle` / `Runner`) on top of `ateam exec`. Splits framework (~130 lines, reusable) from workflow code (~360 lines).
+- **`prompt_example_release_crawl.md`** — three-way comparison (shell / filesystem / Python API) on a tighter workflow (release-notes crawler). Tests the question "when is each approach worth the migration cost?"
+
+Read this spec first; the examples are concrete tests of the design.
+
 ## Problem space
 
 ### Context
@@ -827,8 +837,9 @@ The existing `OUTPUT_DIR` / `OUTPUT_FILE` / `EXEC_ID` / `PROFILE` / `AGENT` / `M
 | `{{prompt.name}}` (new) | Same as `{{ROLE}}` — last path component. | Preferred inside templates. |
 | `{{prompt.path}}` (new) | Full prompt path, e.g. `report/security`. | Unambiguous identifier. |
 | `{{LABEL}}` (new) | Per-job label inside a parallel batch (from `--labels`, or default by source). Distinct from `{{prompt.name}}`. Empty for single-shot non-parallel runs. | Used in pre/post-exec scripts to disambiguate per-job state (worktree names, output directories). |
+| `{{arg.<key>}}` (planned for stage-executor follow-up) | Value of `--arg <key>=<value>` passed on the CLI. Multiple `--arg` flags accumulate; one namespace per invocation. | The metaproject and crawl examples surfaced this as a real need — cross-project workflows need per-invocation identity (`{{arg.target_label}}`) distinct from `{{LABEL}}`. Plan to add alongside the stage executor. |
 
-**Future direction: dotted namespaces.** New variables will tend toward `namespace.attribute` form (`prompt.name`, `prompt.path`, future `git.repo_name`, `git.branch`, `arg.X` for CLI-passed params). Existing ALL_CAPS variables (`PROJECT_NAME`, `OUTPUT_DIR`, etc.) stay as-is for backward compat — no renames in this refactor.
+**Dotted namespaces are the convention for new variables.** `prompt.name`, `prompt.path`, `arg.X`, and future `git.repo_name` / `git.branch` follow this. Existing ALL_CAPS variables (`PROJECT_NAME`, `OUTPUT_DIR`, etc.) stay as-is for backward compatibility — no renames in this refactor.
 
 ### Output / artifact vars
 
@@ -868,7 +879,24 @@ When an artifact must be visible to other agents:
 
 ### Promotion
 
-Today: hardcoded Go (`promoteRuntimeFiles`). Future (stage executor): explicit `copy-runtime-files` action in dir-level metadata. This refactor keeps Go-side promotion for now to minimize moving parts.
+Today: hardcoded Go (`promoteRuntimeFiles`). Future (stage executor): explicit `copy-runtime-files` action in dir-level metadata.
+
+**Parameterized promotion (planned for stage-executor follow-up).** The default `copy-runtime-files` action promotes `OUTPUT_DIR/*` → `SHARED_PROMPT_DIR/`. Real workflows (the metaproject example surfaced this) need richer targets — e.g. `OUTPUT_DIR/report.md` → `<shared>/metaproject/<target>/<scope>/report.md`. The follow-up should support either:
+- Action parameters: `copy-runtime-files --to <pattern>` with `{{arg.*}}` and `{{prompt.*}}` substitution in the destination, or
+- A user-provided script in `post_exec` that does the copy explicitly.
+
+The promotion model itself is also worth revisiting (see pending question 19); the runtime/shared split is not as intuitive as it could be.
+
+### Overridable directory locations (planned)
+
+`ateam exec` and `ateam parallel` should accept CLI flags to override the default `.ateam/` subtrees:
+- `--prompt-dir DIR` — where prompts live (default `.ateam/prompts/`)
+- `--runtime-dir DIR` — where per-execution scratch lands (default `.ateam/runtime/`)
+- `--shared-dir DIR` — where cross-agent artifacts land (default `.ateam/shared/`)
+
+Not every workflow wants its outputs under `.ateam/`. The metaproject example uses a top-level `reports/` directory because the audit reports are first-class user-visible artifacts, not internal ateam state. With `--shared-dir reports`, the framework writes to `reports/<prompt-path>/...` instead of `.ateam/shared/<prompt-path>/...`. The prompt assembler and template variables transparently follow the override.
+
+`--prompt-dir` is more advanced — useful when a project keeps its own custom prompt tree outside `.ateam/` (e.g. shared across repos via a submodule). When set, it stacks on the anchor chain: the explicit `--prompt-dir` becomes an additional project-level anchor checked first.
 
 ## Auto-migration
 
@@ -992,6 +1020,43 @@ Resolution:
 16. **Specialization for runtime-varying values** — frontmatter `params:` + CLI `--param k=v` + `{{param.k}}`. Deferred.
 17. **Enablement** — ateam keeps `config.toml [roles]`. For future mini-workflows: frontmatter `enabled_from:` on dir-level metadata, or inline `enabled: [a, b, c]`. Revisit when a second workflow surfaces.
 18. **Frontmatter schema strictness** — strict allow-list (recommended) so unknown keys error. Lock as: strict.
+19. **Better model for runtime/shared file promotion.** The current split — agent writes to `OUTPUT_DIR` (`runtime/<exec_id>/`) and then promotion copies selected files to `SHARED_PROMPT_DIR` (`shared/<prompt-path>/`) — works but isn't intuitive. Most filesystem-backed systems either write to the canonical location directly (and overwrite) or use a staging/commit pattern (write to staging, atomically move). Ours is closer to staging-then-promote, but the "what gets promoted" decision is currently hardcoded Go (and planned to become declarative `copy-runtime-files`). Worth a design pass: is there a cleaner model? E.g. agents always write to the canonical shared path; the runtime dir is a tee'd copy purely for history; promotion goes away as a concept. Or: prompt frontmatter declares which output files are "shared" vs "scratch," and the runner enforces the split at write time. Defer until after the substrate lands, but flag explicitly that the current model is the weakest part of the design.
+
+## Implementation order
+
+The Verification plan covers *how* to verify; this is *what to build first*. The substrate (this refactor) ships before the stage executor.
+
+### Phase 1: substrate (this refactor)
+
+1. **`internal/prompts/` rewrite** — `Assembler` module with `fs.FS`-based anchors (project → org → embedded), filename-pattern parser (`<role>.prompt.md`, `<role>.pre.[NAME.]md`, `<role>.post.[NAME.]md`, `_pre.[NAME.]md`, `_post.[NAME.]md`), role-name validation (no `_` prefix, no `.pre`/`.post` suffix), and orphan-fragment detection. Returns `Resolution { Files, Frontmatter }`.
+2. **Template directives**: `{{include}}` (first-match, error if missing), `{{include?}}` (first-match, silent if missing), `{{include_glob}}` (additive across anchors, lexical within anchor). Variable substitution already exists; integrate into the Assembler.
+3. **`internal/migrate/v1_layout.go`** — auto-migration from old layout. Idempotent. Hooked into `internal/root/resolve.go` when env is first materialized.
+4. **`defaults/` tree restructure** — rename files into `defaults/prompts/...`, drop `_template.md` concept, ship `_pre.<NAME>.md` and `_post.<NAME>.md` for the standard workflows. Update `//go:embed`.
+5. **`internal/root/resolve.go`** — replace `RoleDir`/`RoleReportPath`/`SupervisorDir`/`ReviewPath`/`VerifyPath` with prompt-name-based helpers (`SharedArtifactPath(promptName)`, etc.).
+6. **`internal/runner/runner.go`** — drop the `*_prompt.md` exclusion in `promoteRuntimeFiles` (line 1156). Update canonical destination to use new helpers.
+7. **`internal/runner/template.go`** — add new template variables: `{{prompt.name}}`, `{{prompt.path}}`, `{{LABEL}}`, `{{PROJECT_INFO}}`, `{{ROLE_REPORTS}}`, `{{SHARED_BASE_DIR}}`, `{{SHARED_PROMPT_DIR}}`. `PrimaryOutputName()` becomes `<prompt-basename>.md`.
+8. **`cmd/*.go` rewiring** — remove `RoleID: "supervisor"` hardcodes (`cmd/review.go:233`, `cmd/code.go:278`, `cmd/auto_setup.go:83`, `cmd/verify.go:163`, `cmd/inspect.go:300`). Route through `Assemble(name)`. Rework `cmd/prompt.go` for positional `:report/security` and `--preview` / `--content` flags. Add `--pre-exec`, `--post-exec`, `--labels` to `ateam parallel`.
+9. **`ateam prompt :NAME --preview` tool** — pretty-print the `Resolution` (ordered files with anchor tags + merged frontmatter). `--preview --content` adds the assembled text.
+10. **`internal/web/`** — update artifact read paths in `handlers.go` and `export.go`.
+11. **Documentation pass** — `CONFIG.md`, `ROLES.md`, `README.md`, `ISOLATION.md`.
+
+### Phase 2: stage executor (follow-up refactor)
+
+After Phase 1 ships:
+
+12. Frontmatter `pre_exec` / `post_exec` execution (built-in actions + scripts).
+13. Built-in action catalog: `concurrent-run-check`, `budget-precheck`, `source-writable`, `copy-runtime-files`, `chain-next`. Replace today's hardcoded Go promotion with declarative `copy-runtime-files`.
+14. `ateam flow` subcommand (`skip`, `error`, `abort`, `continue`, `note`) + `runtime/<exec_id>/_flow.toml` channel + call-DB schema additions.
+15. `{{shell CMD}}` template directive (assembly-time, idempotent).
+16. `{{arg.<key>}}` CLI-passed argument namespace + `--arg key=value` flag.
+17. Parameterized `copy-runtime-files` (or equivalent) to support cross-project shared paths.
+18. `--prompt-dir DIR` / `--runtime-dir DIR` / `--shared-dir DIR` CLI flags on `ateam exec` / `ateam parallel` to override default `.ateam/` subtrees.
+
+### Phase 3: optional simplifications
+
+- Revisit the runtime/shared promotion model (pending question 19).
+- Frontmatter `params:` + CLI `--param k=v` (if a use case demands runtime-varying values beyond `{{arg.*}}`).
+- Frontmatter `enabled_from:` for cross-workflow enablement.
 
 ## Critical files to read before implementing
 
