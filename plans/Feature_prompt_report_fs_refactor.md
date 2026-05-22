@@ -8,67 +8,104 @@ The immediate goal is to restructure ateam's artifacts between prompts and gener
 
 Here we are talking about programs that make use of prompts without user interaction. When interaction is needed, skills, MCP servers, and built-in sub-agent management are the right tools for reuse, maintainability, and performance.
 
-For unattended agentic flows we are dealing with bigger prompts doing more at once, often a pipeline of them — the classic parallel research/summarize pattern, multi-review steps, and so on. This can cover research tasks (gather information from the web and summarize, index, structure), codebase audits and fixes, and unattended tasks triggered by an outside event (an email triggers data extraction; a job gets started, or the data is stored in a structured way for other parts of the system to act on).
+**Audience:** developers building LLM-integrated tooling who have outgrown ad-hoc shell scripts and one-off prompt files but don't want (or need) a full workflow engine.
+
+For unattended agentic flows we deal with bigger prompts doing more per call, often a pipeline of them — the classic parallel research/summarize pattern, multi-review steps, and so on. This covers research tasks (gather information from the web and summarize, index, structure), codebase audits and fixes, and unattended tasks triggered by an outside event (an email triggers data extraction; a job gets started, or the data is stored in a structured way for other parts of the system to act on).
+
+### A worked example
+
+An email arrives describing a bug in a service. A realistic workflow:
+
+1. Extracts a reproducer from the email body (one LLM call).
+2. Spawns four agents **in parallel** to investigate the codebase from different angles — security, performance, dependency hygiene, recent commits — each writing findings to its own scratch space.
+3. Waits for all four; runs a **synthesizing review** that reads their outputs and identifies the most likely root cause and a recommended fix.
+4. **Conditionally**: if the review's confidence is high, a code agent attempts the patch; if not, the workflow halts and posts findings to a ticket.
+5. After the patch, runs project tests **as a gate**. Tests fail → roll back. Tests pass → open a PR.
+
+Every step exercises one of the design challenges below. The parallel investigation step needs per-task pre/post (worktree setup), the synthesizing review needs cross-step data flow (reading investigator outputs), the conditional patch needs cheap "is work needed?" checks, and the gate is deterministic algorithmic logic after the agent runs.
 
 ### Design challenges
 
-In an LLM-based system involving prompts, the following patterns emerge:
+The patterns that emerge in any such system:
 
 - **Prompt assembly.**
-  - Factor out common definitions to help maintain prompts.
-    - Ex: common context, report format instructions.
-  - Include dynamic content (i.e. execute code during prompt assembly).
-    - Instead of asking the LLM to compute information and waste tokens, include the content in the prompt before invoking the LLM.
-    - Ex: prior output for context, datasets that would otherwise have to be discovered, git log info for code-related tasks.
-  - At run time, add custom instructions and keep the rest of the prompt as-is.
-    - Ex: focus on area X, skip Y, pay special attention to a/b/c.
-  - When there is a notion of installation/project/context for the prompt to execute in:
-    - Create prompts shared between projects and prompts that are project-specific.
-    - Overload some prompts specifically for that project.
-- **Run algorithmic logic** (scripts, programs, built-in commands) before and after the agent acts on a prompt.
-  - Ex: set up a git worktree before; run tests after the agent codes (as a gate).
-- **Conditionally execute prompts.** Prompts are expensive and slow; if we know the work isn't needed, skip it.
-  - Ex: enable or disable part of a prompt, or an entire prompt that is part of a larger workflow.
-- **Take sequential steps and run them in parallel** when they are independent, then wait for them to complete.
-  - Any pre/post execution logic has to be part of each parallel task.
+  - **Factor out** common definitions to help maintain prompts (common context, report format instructions).
+  - **Include dynamic content** — execute code during prompt assembly to inject prior output, datasets, git log info. Avoids paying the LLM to derive information it could be told.
+  - **Add runtime custom instructions** while keeping the rest of the prompt as-is ("focus on area X", "skip Y", "pay special attention to a/b/c").
+  - **Share prompts between projects** while supporting project-specific overloads.
+- **Run algorithmic logic** (scripts, programs, built-in commands) before and after the agent acts on a prompt. Set up a git worktree before; run tests as a gate after.
+- **Conditionally execute prompts.** Prompts are expensive and slow; if we know the work isn't needed, skip it. Enable/disable part of a prompt, or skip an entire prompt that is part of a larger workflow.
+- **Run independent steps in parallel** and wait for them to complete. Any pre/post execution logic must be part of each parallel task.
+- **Treat compute as a constrained resource.** Track per-run cost; gate batches against a budget; pick cheaper models for cheap stages and expensive ones for hard stages. This loops back into prompt assembly (shorter, more constrained prompts may suit cheaper models).
 
-For simple systems, all these patterns are better written directly in the app — that way it only pays for the features it needs. ateam provides the framework to execute and audit these systems: the exact prompt used is cached, and `ateam ps` / `ateam inspect` surface metrics and logs.
-
-### Code complexity
-
-A few "deep" features to consider:
-
-- Quickly need a feature to preview dynamic prompts.
-- When executing scripts to dynamically include their output in a prompt, we may want to ensure these scripts are read-only and properly sandboxed.
-- There is a general pattern of agents producing files that:
-  - Need to be read back to maintain state between executions and then overwritten — we lose history.
-  - History is also useful for comparing what is being found, but if all files are timestamped historically, they make writing prompts in agents more complex (and agents may find creative ways to discover these files).
-  - Some files may be agent-type-specific; others may be shared between agents.
-  - So each project ends up inventing its own way to manage agent artifacts.
-  - Need a finer grain of work than a file, with some handoff / state management (a task or issue system, or a messaging system — though messaging feels less appropriate).
-- We want to templatize prompts; most programming languages are actually pretty good at this (shell and Python especially).
-- Prompts get harder to read when littered with dynamic sections and function-call chains that compose them. Each project does this differently. After a few use cases, it matters.
-- Workflows: step A, parallel step B, step C, conditionally do step D or E — or maybe skip back to A.
-
-### Accuracy and cost
-
-Both dynamic prompts and before/after agent execution code are natural evolutions of a prompt: remove work from the agent's plate to use fewer tokens, increase determinism, and reduce latency.
-
-### Conclusion
-
-It's great to start with agents taking care of a lot, but over time this kind of system evolves in this direction. What started as a simple script — then a CLI with top-level actions, then debugging steps — gets stuck on one of the deeper features (parallelism with ad-hoc instructions and/or script execution, side effects, readability, …).
+For simple systems, all these patterns are better written directly in the app — that way it only pays for the features it needs. ateam provides the framework once the patterns start compounding: the exact prompt used is cached, and `ateam ps` / `ateam inspect` surface metrics and logs.
 
 ### What ateam provides
 
-| Feature | Benefit |
-|---|---|
-| File-based layout for prompts | Easy audit; standardized (maintainability, readability) |
-| Overload, compose (include), add pre/post instructions as files or on the CLI | Prompt fragment management (maintainability, readability) |
-| Dynamic prompt generation via lightweight templating and command output inclusion (in a read-only sandbox) | Saves tokens; faster agent execution; better determinism (not guaranteed) |
-| Support for running code before/after the agent runs | Determinism, environment setup, gating |
-| Bundling before/after code with the agent prompt for easy switching between serial and parallel execution | Saves development time; reduces latency |
-| Process tracking, cost tracking, log file management, agent-led run debugging | Easier to manage and debug |
-| Prompt preview | Readability of the system |
+Each feature maps to one or more design challenges above.
+
+| Feature | Addresses | Benefit |
+|---|---|---|
+| File-based layout for prompts | Assembly / factor out | Easy audit; standardized; maintainability, readability |
+| Overload, compose (include), pre/post instructions as files or on the CLI | Assembly / overload, runtime instructions | Prompt fragment management; surgical customization |
+| Dynamic prompt generation via lightweight templating + command output (in a read-only sandbox) | Assembly / dynamic content | Saves tokens; faster agent execution; better determinism (not guaranteed) |
+| Pre/post code execution around the agent | Algorithmic logic | Determinism, environment setup, gating |
+| Bundling pre/post code with the prompt for easy switching between serial and parallel | Parallelism | Saves development time; reduces latency |
+| Per-job labels and CLI-injected exec for parallel batches | Parallelism | Same orchestration across N independent tasks |
+| Conditional execution via runtime flow control (`ateam flow skip`/`error`/`abort`) | Conditional execution | Skip expensive work cleanly, even inside parallel batches |
+| Process tracking, cost tracking, log file management, agent-led run debugging | Cost, reproducibility | Easier to manage; manageable cost; debuggable runs |
+| Prompt preview | Readability | Inspect what will be sent before sending it |
+
+### What ateam does NOT do
+
+To bound expectations:
+
+- **Not a scheduler.** No cron, no event triggers. Use systemd timers, GitHub Actions, or whatever your existing infrastructure provides.
+- **Not interactive.** No chat UI, no human-in-the-loop turn-taking. ateam runs agents unattended.
+- **Not multi-tenant.** Runs are local to a project; no shared scheduler across teams.
+- **Not a model gateway.** ateam wraps existing CLI agents (Claude Code, Codex) — it doesn't talk to model APIs directly.
+
+### Implementation challenges
+
+A few "deep" features any system in this space eventually needs:
+
+- **Prompt preview** — being able to ask "what would actually be sent if I ran this?" without running it. Essential once the assembly involves dynamic content or multi-anchor layering.
+- **Sandboxing for dynamic content scripts.** Assembly-time scripts whose output enters the prompt should be read-only and bounded; their side effects can't be cleaned up after the prompt is sent.
+- **Agent artifact management.** Agents produce files that:
+  - Need to be read back to maintain state between executions, then overwritten — we lose history.
+  - Are useful as history for comparisons, but timestamped files complicate prompt-writing (and agents may find creative ways to discover them).
+  - May be agent-type-specific or shared across agents.
+  - Each project ends up inventing its own way to manage these.
+  - Granularity finer than "a file" may be needed (tasks, issues for handoff/state). Messaging-style coordination is usually overkill.
+- **Prompt templating without a programming language.** Most languages (shell, Python) template strings well, but importing one bleeds host-language semantics into prompts and hurts readability for an LLM.
+- **Readability under composition.** Prompts get harder to read when littered with dynamic sections and function-call chains. Each project does this differently; after a few use cases, consistency matters.
+- **Workflow shape.** Step A → parallel step B → step C → conditionally do step D or E, or skip back to A. Composable, but reaching for Airflow is overkill for most cases.
+
+### Why this matters for LLM systems specifically
+
+The drivers behind moving work out of the LLM (assembly-time content injection + pre/post execution) are five distinct things, often conflated:
+
+- **Tokens.** Every computed value the agent has to derive is paid for in input or output tokens. Move it out and the bill drops.
+- **Latency.** Local computation that takes 50ms can save an LLM round-trip of seconds.
+- **Determinism.** A script returns the same output for the same input; an LLM doesn't.
+- **Trust.** The LLM can do anything; you can't prove it won't. Moving a check, transformation, or side effect into deterministic code means the result is bounded and inspectable. Mature systems migrate toward "I need to *guarantee* this happens correctly," a guarantee the LLM can't make.
+- **Reproducibility.** LLM outputs are non-deterministic; the same prompt run twice can produce different results. When something goes wrong, you need to reconstruct exactly what was sent, what came back, what scripts ran around it, and in what context. ateam captures all of this; without it, debugging an LLM-based system is guessing.
+
+The last two are specific to LLM systems and don't show up in conventional pipelines. They're why audit infrastructure isn't optional polish — it's how you make an LLM-based system trustworthy enough to act unattended.
+
+### Evolution: where systems get stuck
+
+Most LLM-integrated tooling follows a similar arc. Knowing where you are helps recognize the next wall:
+
+| Stage | Looks like | Hits a wall when |
+|---|---|---|
+| 1 | One prompt, called from a shell script | You need a small variation for one project |
+| 2 | A CLI with subcommands and flags | You want parallelism over many similar prompts |
+| 3 | A workflow with pre/post hooks per step | Debugging requires reconstructing the exact prompt that was sent |
+| 4 | Workflow + audit trail | Different teams need different policies layered onto the same prompts |
+| 5 | Workflow + audit + layered composition (this) | (you tell us) |
+
+It's great to start with agents taking care of a lot, but over time these systems evolve toward more structure. What started as a simple script — then a CLI with top-level actions, then debugging steps — gets stuck on one of the deeper features: parallelism with ad-hoc instructions, script execution side effects, readability under composition.
 
 ## Why this refactor
 
