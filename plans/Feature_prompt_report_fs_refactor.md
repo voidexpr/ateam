@@ -2,7 +2,75 @@
 
 The immediate goal is to restructure ateam's artifacts between prompts and generated files. The longer-term design goal is to provide a generic prompt system that supports many workflows beyond `report/review/code/verify`, with the same simple core mechanics. The report/review/code/verify workflow just happens to use that more generic prompt system. Similarly, arbitrary spawned agents should have flexibility to store and read files in private and shared spaces.
 
-## Context
+## Problem space
+
+### Context
+
+Here we are talking about programs that make use of prompts without user interaction. When interaction is needed, skills, MCP servers, and built-in sub-agent management are the right tools for reuse, maintainability, and performance.
+
+For unattended agentic flows we are dealing with bigger prompts doing more at once, often a pipeline of them — the classic parallel research/summarize pattern, multi-review steps, and so on. This can cover research tasks (gather information from the web and summarize, index, structure), codebase audits and fixes, and unattended tasks triggered by an outside event (an email triggers data extraction; a job gets started, or the data is stored in a structured way for other parts of the system to act on).
+
+### Design challenges
+
+In an LLM-based system involving prompts, the following patterns emerge:
+
+- **Prompt assembly.**
+  - Factor out common definitions to help maintain prompts.
+    - Ex: common context, report format instructions.
+  - Include dynamic content (i.e. execute code during prompt assembly).
+    - Instead of asking the LLM to compute information and waste tokens, include the content in the prompt before invoking the LLM.
+    - Ex: prior output for context, datasets that would otherwise have to be discovered, git log info for code-related tasks.
+  - At run time, add custom instructions and keep the rest of the prompt as-is.
+    - Ex: focus on area X, skip Y, pay special attention to a/b/c.
+  - When there is a notion of installation/project/context for the prompt to execute in:
+    - Create prompts shared between projects and prompts that are project-specific.
+    - Overload some prompts specifically for that project.
+- **Run algorithmic logic** (scripts, programs, built-in commands) before and after the agent acts on a prompt.
+  - Ex: set up a git worktree before; run tests after the agent codes (as a gate).
+- **Conditionally execute prompts.** Prompts are expensive and slow; if we know the work isn't needed, skip it.
+  - Ex: enable or disable part of a prompt, or an entire prompt that is part of a larger workflow.
+- **Take sequential steps and run them in parallel** when they are independent, then wait for them to complete.
+  - Any pre/post execution logic has to be part of each parallel task.
+
+For simple systems, all these patterns are better written directly in the app — that way it only pays for the features it needs. ateam provides the framework to execute and audit these systems: the exact prompt used is cached, and `ateam ps` / `ateam inspect` surface metrics and logs.
+
+### Code complexity
+
+A few "deep" features to consider:
+
+- Quickly need a feature to preview dynamic prompts.
+- When executing scripts to dynamically include their output in a prompt, we may want to ensure these scripts are read-only and properly sandboxed.
+- There is a general pattern of agents producing files that:
+  - Need to be read back to maintain state between executions and then overwritten — we lose history.
+  - History is also useful for comparing what is being found, but if all files are timestamped historically, they make writing prompts in agents more complex (and agents may find creative ways to discover these files).
+  - Some files may be agent-type-specific; others may be shared between agents.
+  - So each project ends up inventing its own way to manage agent artifacts.
+  - Need a finer grain of work than a file, with some handoff / state management (a task or issue system, or a messaging system — though messaging feels less appropriate).
+- We want to templatize prompts; most programming languages are actually pretty good at this (shell and Python especially).
+- Prompts get harder to read when littered with dynamic sections and function-call chains that compose them. Each project does this differently. After a few use cases, it matters.
+- Workflows: step A, parallel step B, step C, conditionally do step D or E — or maybe skip back to A.
+
+### Accuracy and cost
+
+Both dynamic prompts and before/after agent execution code are natural evolutions of a prompt: remove work from the agent's plate to use fewer tokens, increase determinism, and reduce latency.
+
+### Conclusion
+
+It's great to start with agents taking care of a lot, but over time this kind of system evolves in this direction. What started as a simple script — then a CLI with top-level actions, then debugging steps — gets stuck on one of the deeper features (parallelism with ad-hoc instructions and/or script execution, side effects, readability, …).
+
+### What ateam provides
+
+| Feature | Benefit |
+|---|---|
+| File-based layout for prompts | Easy audit; standardized (maintainability, readability) |
+| Overload, compose (include), add pre/post instructions as files or on the CLI | Prompt fragment management (maintainability, readability) |
+| Dynamic prompt generation via lightweight templating and command output inclusion (in a read-only sandbox) | Saves tokens; faster agent execution; better determinism (not guaranteed) |
+| Support for running code before/after the agent runs | Determinism, environment setup, gating |
+| Bundling before/after code with the agent prompt for easy switching between serial and parallel execution | Saves development time; reduces latency |
+| Process tracking, cost tracking, log file management, agent-led run debugging | Easier to manage and debug |
+| Prompt preview | Readability of the system |
+
+## Why this refactor
 
 Today, prompts (configuration) and generated outputs are entangled under the same trees, and the codebase carries two parallel abstractions (`roles/<NAME>/...` vs `supervisor/...`) that complicate prompt resolution, role discovery, and output promotion. `internal/runner/runner.go:1156` already has a TODO acknowledging the split is overdue: "get rid of this exclusion once configured prompts are kept separate from files."
 
