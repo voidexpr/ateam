@@ -579,11 +579,44 @@ A new CLI subcommand that scripts (in `pre_exec`, `post_exec`, or even `{{shell}
 | `ateam flow error [--reason TEXT]` | Don't invoke the LLM. Mark as failed (with reason). Counts as failure in batch summary. |
 | `ateam flow abort [--reason TEXT]` | Kill the entire `ateam parallel` batch. In-flight jobs receive SIGTERM; pending jobs marked cancelled. |
 | `ateam flow continue` | Explicit no-op signal. Enables clean `... && ateam flow continue \|\| ateam flow error` shell patterns. |
-| `ateam flow note <text>` | Attach a free-form note to the run record. Visible in `ateam ps`, `ateam history`, the DB. Use for "found cached result" type observations that aren't full skips. |
+| `ateam flow note <text>` | Attach a free-form note to the run record. Visible in `ateam ps`, `ateam inspect`, the DB. Use for "found cached result" type observations that aren't full skips. |
+
+**Richer v2 action set (before the "future" deferral).** The v1 set above is the minimum needed for the substrate. The following extend it to make script-driven workflows self-sufficient — without them, any non-trivial post-LLM business logic forces an external dispatcher (a Python wrapper, a Makefile, etc.).
+
+**Pre-exec additions:**
+
+| Action | What it does |
+|---|---|
+| `ateam flow completed [--reason TEXT]` | Script did the work itself; no LLM call needed. Like `skip` but marks success. The script is responsible for writing the output to the normal output path (`runtime/<exec_id>/<primary>.md`). post_exec runs normally (promotion, chain-next, telemetry). DB row records `status = completed-by-script` (distinct from `completed-by-agent`). |
+
+Useful when a deterministic path handles the common case and the LLM is only needed for edge cases (e.g. a formatter handles 90% of inputs; the LLM handles the 10% with non-obvious diffs).
+
+**Post-exec additions:**
+
+| Action | What it does |
+|---|---|
+| `ateam flow redo --extra TEXT` | Re-run the same prompt with an appended instruction. New `exec_id` with `parent_exec_id` pointing at the original; the prior attempt is preserved on disk and in the DB. Loop-guarded by frontmatter `max_redos: N` (default 2). Default skips pre_exec on the redo (gating already passed); opt-in `--rerun-pre`. Output lands in the redo's `runtime/<exec_id>/`; promotion runs after the redo settles. |
+| `ateam flow fallback --profile X` (or `--agent X`) | Re-run with a different agent/profile. Same audit shape (new exec_id, parent pointer). Useful when one agent's API is degraded but the workflow shouldn't fail the whole batch. |
+| `ateam flow retry [--after N \| --until-reset \| --backoff POLICY]` | Re-run with the same config after a wait. One action, three policies: explicit sleep, rate-limit-aware sleep (parse headers from prior error, sleep until reset), exponential backoff for 5xx. |
+
+**Boundary: what belongs in `ateam flow` vs. in ateam core.** Pure transient-error handling (5xx, rate limits) should be **inside ateam itself** as profile config (e.g. `retry_on: [api_5xx, rate_limit]`, `max_retries: 3`, `backoff: exponential`) rather than driven by `post_exec` scripts. Every workflow wants this; re-implementing it per-script is a footgun. The only retry case that genuinely needs `ateam flow` is the **business-logic** one — script inspects the output and decides "almost right, redo with this hint." Pure transient retry should be invisible to scripts.
+
+**`on_failure` is a separate primitive, not a flow action.** When a pre_exec script returns a non-zero exit (e.g. the deterministic shortcut tried but failed), the right answer is a step-level `on_failure: stop | continue | fallback_to_llm` declared in frontmatter — not a flow action. The script doesn't decide "should the LLM run on my error?"; the workflow author declares that policy once. See pending question #6.
+
+**Rich post_exec context: `runtime/<exec_id>/_run.json`.** post_exec scripts need more than env vars to make business decisions. Write a JSON document at the start of post_exec (before user scripts run) containing:
+
+- **Identity:** `exec_id`, `parent_exec_id` (for redo/fallback chains), `batch`, `work_dir`, `prompt_path`, `args` (resolved `{{arg.*}}` namespace).
+- **Config:** `agent`, `profile`, `model`, `effort`, container info.
+- **Timing:** `started_at`, `ended_at`, `elapsed_ms`.
+- **Cost:** `usd`, tokens by category (`input`, `output`, `cache_read`, `cache_write`).
+- **Outcome:** `exit_code`, `is_error`, `failure_category` (`timeout` | `api` | `budget` | `no_result`), `peak_context`.
+- **Output:** `primary_output_path`, file list under `runtime/<exec_id>/`.
+- **Activity summary:** tool_use counts by tool name, assistant message count, thinking token count.
+
+This is what unlocks non-trivial post_exec scripts: "did the agent run tests? → if no tool_use of Bash, `redo` with stronger instruction"; "produced the expected output file?"; "cost exceeded budget → `flow error` and stop, don't redo." None of this is doable from env vars alone. The `--auto-debug` agent reads the same JSON the post_exec script does — single source of truth for "what happened in this run."
 
 **Future actions (deferred until concrete need):**
 - `set <key> <value>` / `get <key>` — run-scoped K/V store (post_exec can read what pre_exec computed).
-- `retry [--after SECONDS]` — schedule a retry of this job.
 - `defer [--until TIMESTAMP]` — requeue at a future time.
 - `output <file>` — declare a non-default primary output file.
 - `promote <src> <dst>` — explicit copy from `runtime/` to `shared/`.
@@ -734,6 +767,82 @@ EOF
 ```
 
 Whether this is heavily used is an open question (the user noted: "for this use case it's better to just run the pre_exec scripts before/after `ateam exec`"). The framework supports it because frontmatter is uniform across all prompt sources, but the killer use case is `ateam parallel` with CLI flags, not single-shot inline.
+
+## Python framework as external orchestration
+
+Some workflows are dominated by **algorithmic state** — typed config across N variants, per-job pre-flight checks, conditional skips, parallel batches with structured per-job results. The filesystem-and-`ateam-flow` path expresses this through scripts + frontmatter; for code-heavy workflows a small typed Python framework on top of `ateam exec` is often clearer. The crawl and metaproject examples both ended up there.
+
+This section captures the framework shape and the two implementation patterns. Full worked example: `plans/prompt_example_metaproject_python_api.md`.
+
+### Framework primitives
+
+A reusable `ateam_runner.py` module (~130 lines) provides:
+
+| Primitive | Role |
+|---|---|
+| `Ctx` | Per-invocation context: `work_dir`, `role`, `action`, `force`, `dry_run`, `data: dict`. Workflows stash typed state in `data`. |
+| `ExecPrompt` (protocol) | Produces text inserted into the prompt. Runs during preview. (Category A.) |
+| `ExecAction` (protocol) | Runs before or after the agent. Output is NOT in the prompt. Does NOT run during preview. (Category B.) Returns `Flow("continue" \| "skip" \| "error")`. |
+| `PromptBundle` | One executable agent unit: `name`, `prompt: list[PromptPart]`, `pre_exec: list[ExecAction]`, `post_exec: list[ExecAction]`. |
+| `Runner` | Registry + executor. `add(bundle)`, `preview(name, ctx)`, `run(name, ctx)`, `run_many(items, workers=N)`. |
+| Helpers | `SkipIf(predicate, reason)`, `EnsureParents(paths)`, `BackupFiles(paths)`, `PromptFn(fn)`, `ActionFn(fn)`. |
+
+The vocabulary mirrors this spec exactly: `ExecPrompt` ≡ Category A, `ExecAction` ≡ Category B, `Flow` ≡ `ateam flow`. The Python framework is the same model expressed in code instead of filesystem layout. Workflow-specific code (one Python file per workflow) defines its `PromptBundle`s, registers them with a `Runner`, and ties into the workflow's CLI.
+
+### Pattern A: framework calls `ateam exec`, parallelism stays in Python
+
+What the metaproject and crawl examples show. `PromptBundle.run` does:
+
+1. Render the prompt in Python (no ateam assembler involved).
+2. Run `pre_exec` actions in Python; honor `Flow("skip")` / `Flow("error")`.
+3. `subprocess.run(["ateam", "exec", "--work-dir", ..., "--action", ..., "--role", ..., ...], input=prompt, text=True, check=True)`.
+4. Run `post_exec` actions in Python.
+
+`Runner.run_many()` uses `ThreadPoolExecutor`; each thread is one `ateam exec` subprocess.
+
+**Pattern A gap list (small):**
+
+1. **`--work-dir DIR` on `ateam exec`** — already supported.
+2. **`--action NAME` on `ateam exec`** — already supported.
+3. **Ad-hoc role/action accepted as free-form tracking labels** when the prompt comes from stdin (no registry check). Confirm or add.
+4. **Emit `exec_id` on stdout/stderr in a parseable form** so the framework can correlate to `ateam inspect`. Either a `--print-exec-id` flag or a structured line on stderr like `exec_id=<id>`. Optional but small.
+5. **Progress visible to the framework** — see "Progress telemetry" below.
+
+Pattern A is the natural target: small additions to `ateam exec`, Python keeps ownership of typed config and conditional logic, ateam keeps ownership of the agent invocation + audit trail.
+
+### Pattern B: framework hands the batch to `ateam parallel`
+
+In principle, the framework could build N prompts and let ateam fan them out. In practice this requires substantially more from ateam:
+
+1. **Per-job `--work-dir`, `--role`, `--action`** — today `ateam parallel` shares these across the batch. No per-positional override syntax exists.
+2. **Per-job `--arg key=value`** — the `{{arg.*}}` namespace (Phase 2 of the refactor).
+3. **`ateam flow` actions** for skip/error/redo/fallback (Phase 2).
+4. **Per-job pre/post hooks that are more than shell scripts.** The Python framework's hooks close over typed `Tool` state and Python helpers. `ateam parallel --pre-exec` is one declaration applied to all jobs; varying behavior per job means hooks read `{{arg.*}}` and re-implement the logic in shell.
+5. **Machine-readable per-job result on stdout.** `Runner.run_many()` returns `[Result(bundle, flow)]`. `ateam parallel` emits progress + exit code, not structured per-job outcomes. Needs a JSON-lines mode or a per-job status file.
+
+Pattern B effectively requires all of Phase 2 plus a per-job argument surface that isn't in the current spec. It only makes sense when the **entire** bundle (including hooks) is expressible in ateam-native primitives — at which point the Python framework stops carrying its weight and you're in the filesystem-proposal world.
+
+**Recommendation:** for the Python framework path, target Pattern A and keep parallelism in Python. The two patterns are complementary, not competing — Python framework for code-heavy / algorithmic workflows, filesystem layout for prompt-heavy / content-edited workflows.
+
+### Progress telemetry: the missing piece (both patterns)
+
+`ateam parallel` renders live per-agent stats — token counts, current tool, elapsed time, context size — straight from the in-process event stream. Those values likely never land in `state.sqlite`; they're rendered in-memory and lost when the process exits.
+
+That's fine when ateam owns the whole batch, but it breaks both patterns above:
+
+- **Pattern A:** each `ateam exec` subprocess is opaque to its siblings and to the orchestrating Python script. To surface "agent is currently in tool X, 42k tokens in" across a batch, the framework would have to re-parse the event stream itself or poll subprocess stdout.
+- **Pattern B:** the live table is great for humans but doesn't survive past process exit; the calling script gets no structured per-job timeline.
+
+**Proposal: make both `ateam exec` and `ateam parallel` write progress to the call DB** (token deltas, current tool, peak context, elapsed) — batched per N events or per second to avoid write storms. In return:
+
+- `ateam ps` works the same whether the agent was launched by `ateam parallel`, `ateam exec`, or a Python subprocess.
+- External orchestrators can opt into progress display by reading the DB without re-parsing the event stream.
+- Post-mortem inspection has the same fidelity as live inspection.
+- The `_run.json` written by post_exec gets richer "what actually happened" data for free.
+
+**Complement: structured progress output from `ateam exec`.** A `--progress-format=jsonl` flag emits one JSON line per progress event on a chosen channel (stderr, or a fd passed via `--progress-fd`). Cheaper than DB writes, lower latency for consumers that want live feedback without polling the DB.
+
+Both together — DB-backed for persistence + streaming output for low-latency consumers — is the obvious complete answer. This is the single most useful set of additions to make ateam pleasant to drive from any external orchestrator (Python framework, shell loop, CI pipeline). It also helps `ateam ps` work uniformly regardless of who launched the agent.
 
 ## How the layers map to the design goals
 
@@ -1030,6 +1139,10 @@ Resolution:
 18. **Frontmatter schema strictness** — strict allow-list (recommended) so unknown keys error. Lock as: strict.
 19. **Better model for runtime/shared file promotion.** The current split — agent writes to `OUTPUT_DIR` (`runtime/<exec_id>/`) and then promotion copies selected files to `SHARED_PROMPT_DIR` (`shared/<prompt-path>/`) — works but isn't intuitive. Most filesystem-backed systems either write to the canonical location directly (and overwrite) or use a staging/commit pattern (write to staging, atomically move). Ours is closer to staging-then-promote, but the "what gets promoted" decision is currently hardcoded Go (and planned to become declarative `copy-runtime-files`). Worth a design pass: is there a cleaner model? E.g. agents always write to the canonical shared path; the runtime dir is a tee'd copy purely for history; promotion goes away as a concept. Or: prompt frontmatter declares which output files are "shared" vs "scratch," and the runner enforces the split at write time. Defer until after the substrate lands, but flag explicitly that the current model is the weakest part of the design.
 
+20. **Progress telemetry in the call DB.** Both `ateam exec` and `ateam parallel` should write per-event progress (token deltas, current tool, peak context, elapsed) to `state.sqlite` so `ateam ps` works uniformly regardless of how the agent was launched, and external orchestrators (see "Python framework as external orchestration") can read live state without re-parsing event streams. Complementary: a `--progress-format=jsonl` mode on `ateam exec` for low-latency streaming consumers. Today `ateam parallel` shows live stats in-process but those values aren't persisted; `ateam exec` doesn't show them at all. Lock the storage shape (batched writes per N events or per second to avoid write storms), then implement.
+
+21. **Python framework integration shape.** The Python framework (`ateam_runner.py`) is documented here but not in-tree. Decide: ship it as a sibling package (`python/ateam_runner/`), document it as an example only, or extract its primitive set into ateam-native equivalents over time. Confirm during Phase 2.
+
 ## Implementation order
 
 The Verification plan covers *how* to verify; this is *what to build first*. The substrate (this refactor) ships before the stage executor.
@@ -1054,11 +1167,17 @@ After Phase 1 ships:
 
 12. Frontmatter `pre_exec` / `post_exec` execution (built-in actions + scripts).
 13. Built-in action catalog: `concurrent-run-check`, `budget-precheck`, `source-writable`, `copy-runtime-files`, `chain-next`. Replace today's hardcoded Go promotion with declarative `copy-runtime-files`.
-14. `ateam flow` subcommand (`skip`, `error`, `abort`, `continue`, `note`) + `runtime/<exec_id>/_flow.toml` channel + call-DB schema additions.
-15. `{{shell CMD}}` template directive (assembly-time, idempotent).
-16. `{{arg.<key>}}` CLI-passed argument namespace + `--arg key=value` flag.
-17. Parameterized `copy-runtime-files` (or equivalent) to support cross-project shared paths.
-18. `--prompt-dir DIR` / `--runtime-dir DIR` / `--shared-dir DIR` CLI flags on `ateam exec` / `ateam parallel` to override default `.ateam/` subtrees.
+14. `ateam flow` subcommand v1 (`skip`, `error`, `abort`, `continue`, `note`) + `runtime/<exec_id>/_flow.toml` channel + call-DB schema additions (`status` enum gains `skipped` / `aborted` / `completed-by-script`; new `flow_reason` text column; `parent_exec_id` for redo/fallback chains).
+15. `ateam flow` subcommand v2 (`completed` for pre_exec; `redo --extra`, `fallback --profile`, `retry --after/--until-reset/--backoff` for post_exec) + `max_redos` frontmatter key + `parent_exec_id` audit chain wiring.
+16. **`runtime/<exec_id>/_run.json` writer** — populated at the start of post_exec with identity / config / timing / cost / outcome / activity-summary fields (see Stage concept "Forward look"). Same JSON consumed by `--auto-debug`.
+17. **`on_failure` step-level policy** (`stop` | `continue` | `fallback_to_llm`) on frontmatter pre/post-exec entries (pending question #6).
+18. **Progress telemetry persistence (pending question #20).** Both `ateam exec` and `ateam parallel` write batched progress events (tokens, current tool, peak context, elapsed) to the call DB. Add `--progress-format=jsonl` on `ateam exec` for streaming consumers.
+19. **Built-in transient-error handling** in profile config: `retry_on: [api_5xx, rate_limit]`, `max_retries`, `backoff`. Replaces the "script-driven transient retry" mistake before it becomes a habit.
+20. `{{shell CMD}}` template directive (assembly-time, idempotent).
+21. `{{arg.<key>}}` CLI-passed argument namespace + `--arg key=value` flag.
+22. Parameterized `copy-runtime-files` (or equivalent) to support cross-project shared paths.
+23. `--prompt-dir DIR` / `--runtime-dir DIR` / `--shared-dir DIR` CLI flags on `ateam exec` / `ateam parallel` to override default `.ateam/` subtrees.
+24. **Pattern A polish for the Python framework path:** confirm ad-hoc `--role` / `--action` accepted without registry check on stdin-fed `ateam exec`; emit `exec_id` in a parseable form (`--print-exec-id` or stderr line) so external orchestrators correlate to `ateam inspect`.
 
 ### Phase 3: optional simplifications
 

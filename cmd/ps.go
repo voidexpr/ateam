@@ -12,15 +12,15 @@ import (
 )
 
 var (
-	recentRole      string
-	recentAction    string
-	recentBatch     string
-	recentLimit     int
-	recentGitHash   bool
-	recentGitBranch bool
+	psRole      string
+	psAction    string
+	psBatch     string
+	psLimit     int
+	psGitHash   bool
+	psGitBranch bool
 )
 
-var runsCmd = &cobra.Command{
+var psCmd = &cobra.Command{
 	Use:   "ps",
 	Short: "Show recent agent runs from the call database",
 	Long: `Display summary data about recent runs, with optional filtering
@@ -34,19 +34,19 @@ Example:
   ateam ps --action report
   ateam ps --project myproject --role test.gaps`,
 	Args: cobra.NoArgs,
-	RunE: runRuns,
+	RunE: runPs,
 }
 
 func init() {
-	runsCmd.Flags().StringVar(&recentRole, "role", "", "filter by role")
-	runsCmd.Flags().StringVar(&recentAction, "action", "", "filter by action (report, review, code, exec)")
-	runsCmd.Flags().StringVar(&recentBatch, "batch", "", "filter by batch")
-	runsCmd.Flags().IntVar(&recentLimit, "limit", 30, "max rows to show")
-	runsCmd.Flags().BoolVar(&recentGitHash, "git-hash", false, "append GIT_START and GIT_END columns (first 6 chars of each hash)")
-	runsCmd.Flags().BoolVar(&recentGitBranch, "git-branch", false, "append GIT_START_BRANCH and GIT_END_BRANCH columns")
+	psCmd.Flags().StringVar(&psRole, "role", "", "filter by role")
+	psCmd.Flags().StringVar(&psAction, "action", "", "filter by action (report, review, code, exec)")
+	psCmd.Flags().StringVar(&psBatch, "batch", "", "filter by batch")
+	psCmd.Flags().IntVar(&psLimit, "limit", 30, "max rows to show")
+	psCmd.Flags().BoolVar(&psGitHash, "git-hash", false, "append GIT_START and GIT_END columns (first 6 chars of each hash)")
+	psCmd.Flags().BoolVar(&psGitBranch, "git-branch", false, "append GIT_START_BRANCH and GIT_END_BRANCH columns")
 }
 
-func runRuns(cmd *cobra.Command, args []string) error {
+func runPs(cmd *cobra.Command, args []string) error {
 	env, err := resolveEnv()
 	if err != nil {
 		return fmt.Errorf("cannot find project: %w", err)
@@ -59,10 +59,10 @@ func runRuns(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 
 	rows, err := db.RecentRuns(calldb.RecentFilter{
-		Role:   recentRole,
-		Action: recentAction,
-		Batch:  recentBatch,
-		Limit:  recentLimit,
+		Role:   psRole,
+		Action: psAction,
+		Batch:  psBatch,
+		Limit:  psLimit,
 	})
 	if err != nil {
 		return fmt.Errorf("query failed: %w", err)
@@ -79,7 +79,7 @@ func runRuns(cmd *cobra.Command, args []string) error {
 		rows[i], rows[j] = rows[j], rows[i]
 	}
 
-	printRunsTable(rows, recentGitHash, recentGitBranch)
+	printRunsTable(rows, psGitHash, psGitBranch)
 	return nil
 }
 

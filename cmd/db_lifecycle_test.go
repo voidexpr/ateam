@@ -99,7 +99,7 @@ func TestRunWithMockAgent(t *testing.T) {
 	var psErr error
 	psOut := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
-			psErr = runRuns(nil, nil)
+			psErr = runPs(nil, nil)
 		})
 	})
 	if psErr != nil {
@@ -157,7 +157,7 @@ func TestPSFailsWithoutDB(t *testing.T) {
 	var psErr error
 	captureStdout(t, func() {
 		withChdir(t, projPath, func() {
-			psErr = runRuns(nil, nil)
+			psErr = runPs(nil, nil)
 		})
 	})
 	if psErr == nil {
@@ -278,15 +278,15 @@ type psGlobals struct {
 
 func savePSGlobals() psGlobals {
 	return psGlobals{
-		org: orgFlag, role: recentRole, action: recentAction,
-		batch: recentBatch, limit: recentLimit,
+		org: orgFlag, role: psRole, action: psAction,
+		batch: psBatch, limit: psLimit,
 	}
 }
 
 func (g psGlobals) restore() {
 	orgFlag = g.org
-	recentRole = g.role
-	recentAction = g.action
-	recentBatch = g.batch
-	recentLimit = g.limit
+	psRole = g.role
+	psAction = g.action
+	psBatch = g.batch
+	psLimit = g.limit
 }
