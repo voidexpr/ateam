@@ -45,7 +45,7 @@ var execCmd = &cobra.Command{
 
 Can run standalone (just needs .ateamorg/) or within a project context.
 
-With --role: validates the role exists and stores output in role directory.
+With --role: stores output in the role directory (role name is accepted as-is).
 Without --role: runs as ad-hoc, stores output in project or org logs.
 
 Streaming and summary are on by default. Use --quiet to suppress both,
@@ -115,9 +115,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 
 	if execRole != "" {
-		if !prompts.IsValidRole(execRole, env.Config.Roles, env.ProjectDir, env.OrgDir) {
-			return fmt.Errorf("unknown role: %s\nValid roles: %s", execRole, strings.Join(prompts.AllKnownRoleIDs(env.Config.Roles, env.ProjectDir, env.OrgDir), ", "))
-		}
 		if err := root.EnsureRoles(env.ProjectDir, []string{execRole}); err != nil {
 			return err
 		}
