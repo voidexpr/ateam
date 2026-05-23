@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -142,6 +143,200 @@ func TestServeBindsRandomPort(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+// TestResolveServePortReusesCachedFreePort writes a known-free port to the
+// cache file and asserts resolveServePort returns it. This is the tab-refocus
+// promise: rerunning `ateam serve` reuses the same URL.
+func TestResolveServePortReusesCachedFreePort(t *testing.T) {
+	defer saveServeGlobals()()
+	setupServeProject(t)
+
+	servePort = 0
+	serveBind = ""
+	servePublic = false
+
+	env, err := lookupEnv()
+	if err != nil {
+		t.Fatalf("lookupEnv: %v", err)
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		skipIfListenDenied(t, err)
+		t.Fatalf("Listen: %v", err)
+	}
+	cachedPort := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	portFile := filepath.Join(env.ProjectDir, "cache", "serve.port")
+	if err := os.MkdirAll(filepath.Dir(portFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(portFile, []byte(strconv.Itoa(cachedPort)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	port, source, err := resolveServePort(env, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("resolveServePort: %v", err)
+	}
+	if port != cachedPort {
+		t.Errorf("port = %d, want cached %d", port, cachedPort)
+	}
+	if source == "" {
+		t.Errorf("source = %q, want non-empty cache path", source)
+	}
+}
+
+// TestResolveServePortPicksNewWhenCacheBusy holds a listener on the cached
+// port so isPortFree fails, then verifies resolveServePort returns a fresh
+// port and updates the cache file. Guards against the regression where a
+// stale cache silently keeps reusing an occupied port.
+func TestResolveServePortPicksNewWhenCacheBusy(t *testing.T) {
+	defer saveServeGlobals()()
+	setupServeProject(t)
+
+	servePort = 0
+	serveBind = ""
+	servePublic = false
+
+	env, err := lookupEnv()
+	if err != nil {
+		t.Fatalf("lookupEnv: %v", err)
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		skipIfListenDenied(t, err)
+		t.Fatalf("Listen: %v", err)
+	}
+	defer ln.Close()
+	busyPort := ln.Addr().(*net.TCPAddr).Port
+
+	portFile := filepath.Join(env.ProjectDir, "cache", "serve.port")
+	if err := os.MkdirAll(filepath.Dir(portFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(portFile, []byte(strconv.Itoa(busyPort)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	port, _, err := resolveServePort(env, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("resolveServePort: %v", err)
+	}
+	if port == busyPort {
+		t.Errorf("port = %d, expected a different port from busy %d", port, busyPort)
+	}
+	if port <= 0 {
+		t.Errorf("port = %d, want > 0", port)
+	}
+
+	data, err := os.ReadFile(portFile)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	stored, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatalf("Atoi: %v", err)
+	}
+	if stored != port {
+		t.Errorf("cached port after pick = %d, want %d", stored, port)
+	}
+}
+
+// TestResolveServePortExplicitFlagBypassesCache verifies --port short-circuits
+// resolveServePort: a pre-existing cache file must be neither read nor touched.
+func TestResolveServePortExplicitFlagBypassesCache(t *testing.T) {
+	defer saveServeGlobals()()
+	setupServeProject(t)
+
+	servePort = 23456
+	serveBind = ""
+	servePublic = false
+
+	env, err := lookupEnv()
+	if err != nil {
+		t.Fatalf("lookupEnv: %v", err)
+	}
+
+	portFile := filepath.Join(env.ProjectDir, "cache", "serve.port")
+	if err := os.MkdirAll(filepath.Dir(portFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const cachedPort = 34567
+	if err := os.WriteFile(portFile, []byte(strconv.Itoa(cachedPort)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	port, source, err := resolveServePort(env, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("resolveServePort: %v", err)
+	}
+	if port != 23456 {
+		t.Errorf("port = %d, want explicit 23456", port)
+	}
+	if source != "" {
+		t.Errorf("source = %q, want empty (cache bypassed)", source)
+	}
+
+	data, err := os.ReadFile(portFile)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	stored, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatalf("Atoi: %v", err)
+	}
+	if stored != cachedPort {
+		t.Errorf("cache file modified: stored = %d, want untouched %d", stored, cachedPort)
+	}
+}
+
+// TestResolveServePortWritesCacheWhenMissing covers the cold-start path: no
+// cache file present, resolveServePort must pick a port and persist it so the
+// next invocation can reuse the same URL.
+func TestResolveServePortWritesCacheWhenMissing(t *testing.T) {
+	defer saveServeGlobals()()
+	setupServeProject(t)
+
+	servePort = 0
+	serveBind = ""
+	servePublic = false
+
+	env, err := lookupEnv()
+	if err != nil {
+		t.Fatalf("lookupEnv: %v", err)
+	}
+
+	portFile := filepath.Join(env.ProjectDir, "cache", "serve.port")
+	if _, err := os.Stat(portFile); !os.IsNotExist(err) {
+		t.Fatalf("expected no cache file, got err=%v", err)
+	}
+
+	port, source, err := resolveServePort(env, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("resolveServePort: %v", err)
+	}
+	if port <= 0 {
+		t.Errorf("port = %d, want > 0", port)
+	}
+	if source == "" {
+		t.Errorf("source = %q, want non-empty path", source)
+	}
+
+	data, err := os.ReadFile(portFile)
+	if err != nil {
+		t.Fatalf("cache file not written: %v", err)
+	}
+	stored, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatalf("cache content invalid: %v", err)
+	}
+	if stored != port {
+		t.Errorf("cached port = %d, want %d", stored, port)
 	}
 }
 
