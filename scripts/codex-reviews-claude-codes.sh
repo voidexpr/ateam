@@ -100,6 +100,8 @@ After your changes, build and test the project using whatever commands this
 codebase conventionally uses (check the README, CLAUDE.md/AGENTS.md, Makefile,
 or equivalent). Record the exact commands you ran and their results.
 
+If build and tests are successful, do a git commit according to the project's standards.
+
 Write a single report to $coder_out with three sections:
   1. Applied — what you fixed and why.
   2. Pushed back — what you rejected and why.
