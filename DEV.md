@@ -7,7 +7,7 @@ make build companion    # builds the ateam binary + the linux binary for docker
 make clean    # removes the binary
 ```
 
-Requires Go 1.25+.
+Requires Go 1.26+.
 
 ## Tests
 
