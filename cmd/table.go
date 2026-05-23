@@ -594,11 +594,25 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 	}
 }
 
-// findLinuxBinary locates or builds a Linux/AMD64 ateam binary for Docker.
+// linuxCompanionName is the on-disk name of the linux companion binary for
+// the host's CPU arch (e.g. ateam-linux-arm64 on Apple Silicon,
+// ateam-linux-amd64 on Intel). Matched to the host arch because the
+// container engine on the host typically defaults to the same platform —
+// running an amd64 ateam under x86_64 emulation in an arm64 container
+// triggers Go runtime GC crashes ("found pointer to free object").
+func linuxCompanionName() string {
+	return "ateam-linux-" + goruntime.GOARCH
+}
+
+// findLinuxBinary locates or builds a linux ateam binary for the host's
+// arch, suitable for pushing into a same-arch Docker container.
 // Search order: self (if linux), companion binary, org cache, cross-compile.
 func findLinuxBinary(orgDir string) string {
-	// 1. Already on target platform — use the running binary.
-	if goruntime.GOOS == "linux" && goruntime.GOARCH == "amd64" {
+	name := linuxCompanionName()
+
+	// 1. Already on linux — the running binary is linux/<host arch> by
+	// definition, so just use it.
+	if goruntime.GOOS == "linux" {
 		if exe, err := os.Executable(); err == nil {
 			return exe
 		}
@@ -612,20 +626,20 @@ func findLinuxBinary(orgDir string) string {
 	exe, _ = filepath.EvalSymlinks(exe)
 
 	// 2. build/ directory (from `make companion` in dev).
-	buildDir := filepath.Join(filepath.Dir(exe), "build", "ateam-linux-amd64")
+	buildDir := filepath.Join(filepath.Dir(exe), "build", name)
 	if info, err := os.Stat(buildDir); err == nil && !info.IsDir() {
 		return buildDir
 	}
 
 	// 3. Companion binary next to host binary (e.g. from a release archive).
-	companion := filepath.Join(filepath.Dir(exe), "ateam-linux-amd64")
+	companion := filepath.Join(filepath.Dir(exe), name)
 	if info, err := os.Stat(companion); err == nil && !info.IsDir() {
 		return companion
 	}
 
 	// 4. Cached in orgDir from a prior auto cross-compilation.
 	if orgDir != "" {
-		cached := filepath.Join(orgDir, "cache", "ateam-linux-amd64")
+		cached := filepath.Join(orgDir, "cache", name)
 		if info, err := os.Stat(cached); err == nil && !info.IsDir() {
 			return cached
 		}
@@ -639,13 +653,13 @@ func findLinuxBinary(orgDir string) string {
 	}
 
 	fmt.Fprintf(os.Stderr, "Warning: no Linux ateam binary found for Docker; "+
-		"place ateam-linux-amd64 next to %s or install Go to cross-compile\n", exe)
+		"place %s next to %s or install Go to cross-compile\n", name, exe)
 	return ""
 }
 
-// crossBuildIfPossible cross-compiles ateam for linux/amd64 if go.mod exists
-// next to hostExe and `go` is in PATH. The result is cached in orgDir/cache/
-// and reused if the host binary hasn't changed.
+// crossBuildIfPossible cross-compiles ateam for linux/<host arch> if go.mod
+// exists next to hostExe and `go` is in PATH. The result is cached in
+// orgDir/cache/ and reused if the host binary hasn't changed.
 func crossBuildIfPossible(hostExe, orgDir string) string {
 	modDir := filepath.Dir(hostExe)
 	if _, err := os.Stat(filepath.Join(modDir, "go.mod")); err != nil {
@@ -659,7 +673,7 @@ func crossBuildIfPossible(hostExe, orgDir string) string {
 	if err := os.MkdirAll(cacheDir, 0700); err != nil {
 		return ""
 	}
-	target := filepath.Join(cacheDir, "ateam-linux-amd64")
+	target := filepath.Join(cacheDir, linuxCompanionName())
 
 	// Rebuild only if the target is missing or older than the host binary.
 	hostInfo, _ := os.Stat(hostExe)
@@ -668,10 +682,10 @@ func crossBuildIfPossible(hostExe, orgDir string) string {
 		return target
 	}
 
-	fmt.Fprintf(os.Stderr, "Cross-compiling ateam for linux/amd64...\n")
+	fmt.Fprintf(os.Stderr, "Cross-compiling ateam for linux/%s...\n", goruntime.GOARCH)
 	cmd := exec.Command("go", "build", "-o", target, ".")
 	cmd.Dir = modDir
-	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0")
+	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+goruntime.GOARCH, "CGO_ENABLED=0")
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: cross-build failed: %v\n", err)

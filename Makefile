@@ -20,11 +20,16 @@ build-binary:
 docs: build-binary
 	./$(BINARY) roles --docs > ROLES.md
 
+# Build a linux companion binary for the host's CPU arch — Apple Silicon
+# devs get arm64 to match their default Docker platform; Intel/Linux x86_64
+# devs get amd64. Override with `make companion HOST_ARCH=amd64` to force.
+HOST_ARCH ?= $(shell $(GO_CMD) env GOHOSTARCH)
+
 companion:
 	mkdir -p build
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 $(GO) build \
+	GOOS=linux GOARCH=$(HOST_ARCH) CGO_ENABLED=0 $(GO) build \
 		-ldflags "$(LDFLAGS)" \
-		-o build/ateam-linux-amd64 .
+		-o build/ateam-linux-$(HOST_ARCH) .
 
 build-all: build companion
 
@@ -88,7 +93,7 @@ test-docker:
 #
 # Usage: make claude-in-docker
 # Then ask Claude to: `go test -count=1 -run TestRunTmuxFakeCodexTUI ./internal/codex/`
-# Or: `./build/ateam-linux-amd64 exec --agent codex-tmux "/help"`
+# Or: `./build/ateam-linux-$(HOST_ARCH) exec --agent codex-tmux "/help"`
 claude-in-docker:
 	$(if $(BUILDX_BUILDER),docker buildx build --builder $(BUILDX_BUILDER) --load,docker build) -t ateam-test-dind -f test/Dockerfile.dind .
 	docker run -it --rm --privileged \

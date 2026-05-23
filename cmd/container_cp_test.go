@@ -94,7 +94,7 @@ func TestContainerCPDryRunPrintsPlan(t *testing.T) {
 	if err := os.MkdirAll(cacheDir, 0700); err != nil {
 		t.Fatalf("mkdir cache: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(cacheDir, "ateam-linux-amd64"), []byte("stub"), 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(cacheDir, linuxCompanionName()), []byte("stub"), 0755); err != nil {
 		t.Fatalf("seed linux binary stub: %v", err)
 	}
 
@@ -204,11 +204,11 @@ func TestContainerCPProfileMissingDockerContainerFails(t *testing.T) {
 
 // TestContainerCPMissingBinaryFailsClearly drives the dry-run past container
 // resolution to the binary lookup, then asserts the actionable error when no
-// Linux ateam binary is present. On linux/amd64 findLinuxBinary always
-// returns os.Executable(), so this path is only reachable on other platforms.
+// Linux ateam binary is present. On linux hosts findLinuxBinary always
+// returns os.Executable(), so this path is only reachable elsewhere.
 func TestContainerCPMissingBinaryFailsClearly(t *testing.T) {
-	if goruntime.GOOS == "linux" && goruntime.GOARCH == "amd64" {
-		t.Skip("linux/amd64 always finds the running binary; missing-binary path unreachable")
+	if goruntime.GOOS == "linux" {
+		t.Skip("linux host always finds the running binary; missing-binary path unreachable")
 	}
 
 	projPath, _ := setupContainerCpProject(t, "p", "foo")
