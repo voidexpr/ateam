@@ -172,6 +172,54 @@ func TestFormatInitLine(t *testing.T) {
 	}
 }
 
+// TestRunExecAcceptsUnknownRoleAndCreatesDir locks in the behavior introduced
+// by fd99869 ("exec: accept any --role name without validation"): runExec must
+// accept arbitrary role names without checking them against a known list, and
+// must create the role's logs directory as a side effect.
+func TestRunExecAcceptsUnknownRoleAndCreatesDir(t *testing.T) {
+	cases := []struct {
+		name string
+		role string
+	}{
+		{name: "unknown simple role", role: "made_up_role_for_test"},
+		{name: "collection-style role", role: "made.up_role"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			orgParent, projPath, env := setupTestProject(t)
+
+			saved := saveExecGlobals()
+			defer saved.restore()
+			orgFlag = orgParent
+			execDryRun = true
+			execQuiet = true
+			execAgent = "mock"
+			execProfile = ""
+			execRole = tc.role
+
+			prompt := "exercise role " + tc.role
+			var runErr error
+			out := captureStdout(t, func() {
+				withChdir(t, projPath, func() {
+					runErr = runExec(nil, []string{prompt})
+				})
+			})
+			if runErr != nil {
+				t.Fatalf("runExec with role %q: %v", tc.role, runErr)
+			}
+
+			roleDir := filepath.Join(env.ProjectDir, "logs", "roles", tc.role)
+			if _, err := os.Stat(roleDir); err != nil {
+				t.Errorf("role logs dir %s not created: %v", roleDir, err)
+			}
+
+			if !strings.Contains(out, tc.role) {
+				t.Errorf("expected role %q to appear in dry-run output:\n%s", tc.role, out)
+			}
+		})
+	}
+}
+
 // TestRunExecRecordsCustomAction verifies the --action flag is plumbed all the
 // way through to the CallDB record so `ateam ps --action <name>` can filter on it.
 func TestRunExecRecordsCustomAction(t *testing.T) {
