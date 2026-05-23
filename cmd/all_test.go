@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -333,6 +334,99 @@ func TestAllPropagatesModelAndBudgetFlags(t *testing.T) {
 	if got < 4 {
 		t.Errorf("expected the --cheaper-model/--model warning at least 4 times "+
 			"(once per phase), got %d:\n%s", got, stderr)
+	}
+}
+
+// TestAllAutoRolesPlanOnlySkipsAllPhases verifies the user-visible contract:
+// with --auto-roles --plan-only, the planner runs exactly once, its rationale
+// reaches stdout, and none of the report/review/code/verify phases execute.
+func TestAllAutoRolesPlanOnlySkipsAllPhases(t *testing.T) {
+	const rationaleMarker = "PLANNER_RATIONALE_FIXED_MARKER"
+
+	savedRunAutoRoles := runAutoRoles
+	defer func() { runAutoRoles = savedRunAutoRoles }()
+
+	var callCount int
+	runAutoRoles = func(env *root.ResolvedEnv, profile, agentName string, verbose, planOnly, dockerAutoSetup bool) ([]string, bool, error) {
+		callCount++
+		fmt.Println(rationaleMarker)
+		return nil, true, nil
+	}
+
+	base := t.TempDir()
+	orgDir, err := root.InstallOrg(base)
+	if err != nil {
+		t.Fatalf("InstallOrg: %v", err)
+	}
+	projPath := filepath.Join(base, "myproj")
+	if err := os.MkdirAll(projPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	initTestGitRepo(t, projPath)
+	if _, err := root.InitProject(projPath, orgDir, root.InitProjectOpts{
+		Name:         "myproj",
+		EnabledRoles: []string{"testing_basic"},
+	}); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+
+	savedOrg := orgFlag
+	defer func() { orgFlag = savedOrg }()
+	orgFlag = filepath.Dir(orgDir)
+
+	savedRoles, savedAuto, savedPlanOnly := allRoles, allAutoRoles, allPlanOnly
+	defer func() {
+		allRoles, allAutoRoles, allPlanOnly = savedRoles, savedAuto, savedPlanOnly
+	}()
+	allRoles = nil
+	allAutoRoles = true
+	allPlanOnly = true
+
+	var runErr error
+	out := captureStdout(t, func() {
+		withChdir(t, projPath, func() {
+			runErr = runAll(nil, nil)
+		})
+	})
+	if runErr != nil {
+		t.Fatalf("runAll: %v", runErr)
+	}
+
+	if callCount != 1 {
+		t.Errorf("expected planner to run exactly once, got %d", callCount)
+	}
+	if !strings.Contains(out, rationaleMarker) {
+		t.Errorf("expected planner output %q in stdout, got:\n%s", rationaleMarker, out)
+	}
+	for _, header := range []string{
+		"=== Phase 1: Report ===",
+		"=== Phase 2: Review ===",
+		"=== Phase 3: Code ===",
+		"=== Phase 4: Verify ===",
+	} {
+		if strings.Contains(out, header) {
+			t.Errorf("did not expect %q in plan-only output, got:\n%s", header, out)
+		}
+	}
+}
+
+// TestAutoRolesAndRolesMutuallyExclusive verifies runAll rejects the
+// combination of --auto-roles with explicit --roles before doing any work.
+func TestAutoRolesAndRolesMutuallyExclusive(t *testing.T) {
+	savedRoles, savedAuto, savedPlanOnly := allRoles, allAutoRoles, allPlanOnly
+	defer func() {
+		allRoles, allAutoRoles, allPlanOnly = savedRoles, savedAuto, savedPlanOnly
+	}()
+	allRoles = []string{"testing_basic"}
+	allAutoRoles = true
+	allPlanOnly = false
+
+	err := runAll(nil, nil)
+	if err == nil {
+		t.Fatalf("expected error when --auto-roles and --roles are both set, got nil")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("expected mutual-exclusion error, got: %v", err)
 	}
 }
 

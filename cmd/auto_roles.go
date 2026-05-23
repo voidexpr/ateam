@@ -25,7 +25,10 @@ func addAutoRolesFlags(cmd *cobra.Command, autoRolesDst, planOnlyDst *bool) {
 // whether the caller should proceed. Returns done=true when the caller should
 // `return nil` (planner recommended no roles, or PlanOnly was requested). The
 // role list is meaningful only when done is false.
-func runAutoRoles(env *root.ResolvedEnv, profile, agentName string, verbose, planOnly, dockerAutoSetup bool) (roles []string, done bool, err error) {
+//
+// Declared as a var so tests can stub the planner without spinning up a real
+// agent runner (see cmd/all_test.go).
+var runAutoRoles = func(env *root.ResolvedEnv, profile, agentName string, verbose, planOnly, dockerAutoSetup bool) (roles []string, done bool, err error) {
 	rationale, recommended, err := autoRolesRecommend(env, profile, agentName, verbose, dockerAutoSetup)
 	if err != nil {
 		return nil, false, err
