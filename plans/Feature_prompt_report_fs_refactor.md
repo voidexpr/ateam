@@ -16,6 +16,10 @@ The immediate goal is to restructure ateam's artifacts between prompts and gener
 
 **No `:promptname` CLI syntax.** Since users don't invoke ateam against arbitrary prompts directly, the `:dir/role` invocation surface isn't needed. Roles continue to be selected via existing flags (`ateam report --roles security` etc.). The naming convention still distinguishes role files from dir-level wrappers for the assembler.
 
+**Uniform `--pre-prompt` / `--post-prompt` across all prompt-taking commands.** Every command that takes a prompt — `report`, `code`, `review`, `verify`, `auto_setup`, `exec`, `parallel` — accepts the same `--pre-prompt TEXT` / `--post-prompt TEXT` for ad-hoc inline wrap (Category A, content only). Resolution order: anchors → dir-level `_pre`/`_post` → role-level `pre`/`post` → CLI `--pre-prompt` / `--post-prompt` (outermost).
+
+**Customization story.** Editing prompt content lives in `.ateam/prompts/`. Anything beyond that — new workflow shapes, conditional skip, multi-project orchestration with per-job state — uses the Python framework in `plans/python_framework_examples/`. The longer-term direction for that framework is a separate `ateam-workflow` project (see Pending Q6); v1 keeps it as a forkable design artifact under `plans/`.
+
 ## Related documents
 
 - **`plans/python_framework_examples/`** — the Python framework (`ateam.py` ~280 lines) plus two example workflows (`crawl.py`, `metaproject.py`). This is the maintained reference for code-driven workflow customization. Users who need more than prompt-content editing fork or copy this.
@@ -758,6 +762,7 @@ Concrete deliverables, each scoped to be a discrete piece of work. Order matters
 - Template directives: `{{include}}`, `{{include?}}`, `{{include_glob}}` with the documented semantics.
 - New template variables in the `scope.name` convention: `{{prompt.name}}`, `{{prompt.path}}`, `{{project.info}}`, `{{role.reports}}`, `{{exec.shared_base_dir}}`, `{{exec.shared_prompt_dir}}`. (Full rename of legacy ALL_CAPS variables is Task 7.)
 - `internal/migrate/v1_layout.go` — idempotent auto-migration from the table above, called from `internal/root/resolve.go` on first env materialization. Stderr notice on first migration.
+- **Migration failure handling:** stop and surface the error; leave whatever was already moved in place. Idempotency means a re-run picks up where it left off. Do NOT roll back partial migration (too complex; not worth the engineering for a one-time event). Error message must say "migration paused at <step>; re-run ateam to continue."
 - `defaults/` tree restructured (`defaults/prompts/...`), embed updated, `_pre.*.md` / `_post.*.md` defaults shipped for the standard workflows.
 - `internal/root/resolve.go` path helpers replaced with prompt-name-based lookups.
 - `internal/runner/runner.go` — drop the `*_prompt.md` exclusion at line 1156; update canonical destination to `SharedPromptDir(promptName)/<basename>.md`.
@@ -782,6 +787,13 @@ Concrete deliverables, each scoped to be a discrete piece of work. Order matters
 
 **Out of scope:** exposing Stages as a public Go API; allowing users to register custom Stages; new built-in workflows (this task is restructuring, not adding).
 
+**Design decisions to make at the start of this task** (not pre-decided in the spec):
+
+1. **Stage vs existing `internal/runner/runner.go` relationship.** Three plausible shapes — Stage wraps Runner (PreActions → `runner.Run` → PostActions); Stage replaces Runner (fold the existing Runner into Stage's dispatch); Stage coexists (built-ins use Stage, exec/parallel keep calling Runner directly). The right answer depends on how tangled Runner is with each command site — assess and pick before starting the rewrite.
+2. **Where Ctx is constructed.** Per-command Cobra wrappers build it from flag values; or a shared `buildCtx(cmd, args)` helper handles the common case with per-command extensions. Likely the latter, but confirm by trying both.
+3. **Action dependency on Runner internals.** Today's hardcoded actions reach into `cmd/table.go` helpers + `internal/runner/` types. PreAction/PostAction signatures need access to whatever subset they actually use — minimize the surface so actions stay small and testable.
+4. **How `exec` and `parallel` interact with Stage.** They don't fit the Stage shape (no named role, no fixed prompt assembler). Two options: leave them outside Stage entirely, or model them as a degenerate Stage with no PreExec/PostExec. Likely the former.
+
 ### Task 3: Progress telemetry — `exec` output format + shared code with `parallel` + DB writes
 
 **Deliverable:** `ateam exec` emits structured progress, both `exec` and `parallel` write progress events to the call DB, `ateam ps` works uniformly.
@@ -795,6 +807,18 @@ Concrete deliverables, each scoped to be a discrete piece of work. Order matters
 - `exec_id` emission discoverable from outside (`--print-exec-id` flag or stderr line); orchestrators can correlate to `ateam inspect <id>`.
 - `ateam ps` shows running `exec` invocations alongside `parallel` ones.
 - `ateam inspect <exec_id>` shows per-event history for completed runs.
+
+**Indicative event shape** (for design grounding — exact schema is the task's to lock):
+
+```jsonl
+{"v":1,"ts":"2026-05-22T15:01:02.123Z","exec_id":"abc123","event":"tool_start","tool":"Bash","input_preview":"go test ./..."}
+{"v":1,"ts":"2026-05-22T15:01:08.456Z","exec_id":"abc123","event":"tool_end","tool":"Bash","exit":0,"duration_ms":6333}
+{"v":1,"ts":"2026-05-22T15:01:09.789Z","exec_id":"abc123","event":"token_count","input":12450,"output":340,"cache_read":8200}
+{"v":1,"ts":"2026-05-22T15:01:10.234Z","exec_id":"abc123","event":"assistant_message","preview":"I'll start by reading..."}
+{"v":1,"ts":"2026-05-22T15:01:30.567Z","exec_id":"abc123","event":"result","status":"success","cost_usd":0.0421}
+```
+
+Conventions to lock in the task: `v` for schema version (start at 1); `ts` ISO-8601 with millis; `exec_id` on every event; `event` from the closed vocabulary above; event-specific fields after.
 
 **Out of scope:** real-time aggregation across processes, replay / time-travel, SSE HTTP endpoint, structured `_run.json` for post-exec consumption (since v1 has no post-exec hook surface for users).
 
@@ -838,9 +862,47 @@ The recent rename to `psCmd` is complete; this is a cleanup pass if anything was
 
 **Ordering note:** do alongside or immediately after Task 1 to avoid the embedded defaults ever shipping with ALL_CAPS names in v1.
 
+### Task 8: Normalize `--pre-prompt` / `--post-prompt` across all prompt-taking commands
+
+**Deliverable:** every command that takes a prompt accepts the same `--pre-prompt TEXT` / `--post-prompt TEXT` flags for ad-hoc inline wrap.
+
+**Acceptance:**
+
+- Audit current state across `report`, `code`, `review`, `verify`, `auto_setup`, `exec`, `parallel` — which commands accept the flags today, which don't. Make every prompt-taking command accept them with identical semantics.
+- Flag values are text or `@filepath` (matching the existing `--extra-prompt` shape on `exec`).
+- Wrap order is documented and consistent: anchors → dir-level `_pre`/`_post` → role-level `pre`/`post` → CLI `--pre-prompt` (outermost head) / `--post-prompt` (outermost tail).
+- `ateam <cmd> --help` text describes the flag identically across commands (extract to a shared help fragment if helpful).
+- Tests verify a fixture prompt assembles with the CLI wrap correctly for each command that takes prompts.
+
+**Out of scope:** `--pre-exec` / `--post-exec` (those are execution hooks; explicitly dropped per the Decision summary); `--extra-prompt` (the existing `exec` flag stays as-is for backward compatibility; document overlap with `--post-prompt`).
+
 ---
 
-The big tasks (1, 2, 3, 4, 7) are mostly parallelizable once Task 1's assembler shape exists. Task 2 depends on Task 1 for the Ctx + assembler shape. Task 3 is fully independent. Task 7 is tightly coupled to Task 1 and best done by the same person.
+The big tasks (1, 2, 3, 4, 7) are mostly parallelizable once Task 1's assembler shape exists. Task 2 depends on Task 1 for the Ctx + assembler shape. Task 3 is fully independent. Task 7 is tightly coupled to Task 1 and best done by the same person. Tasks 5 (docs), 6 (cleanup), and 8 (CLI normalize) can land last.
+
+## Scope guardrails
+
+While implementing, things to actively NOT do:
+
+- **Don't expose `internal/stage` as a public API.** Even if the abstraction looks clean, exporting it commits us to a compatibility surface. Keep it internal; external orchestration is `ateam exec` as a subprocess.
+- **Don't introduce frontmatter keys beyond what the spec lists.** Strict allow-list. If a key seems useful, add it to "Pending questions" with a use case rather than implementing it.
+- **Don't add `--pre-exec` / `--post-exec` / `--arg` / `--prompt-dir` CLI flags.** Those are explicitly dropped from v1. The Python framework is the answer for the use cases they'd address.
+- **Don't backport ALL_CAPS aliases past Task 7's migration.** Once migrated, prompts use the new names. Aliases would entrench the old vocabulary and complicate the engine.
+- **Don't extend `ateam parallel` with per-job overrides** (`--work-dir`, `--role`, `--action`). It stays "N prompts, shared everything." Multi-project orchestration is shell+& or Python.
+- **Don't reintroduce the `:promptname` CLI syntax.** Roles continue to be selected via command flags.
+- **Don't grow the agent CLI wrapper logic** (`internal/agent/...`). This refactor is about prompts and dispatch shape; the agent invocation layer stays as-is.
+
+## Definition of done (whole refactor)
+
+v1 of this refactor is complete when:
+
+1. **All eight tasks ship** with their acceptance criteria met.
+2. **All verification plan items pass** (see below).
+3. **A fresh user (no prior `.ateam/`)** can run `ateam init` + `ateam report --roles project.security` + `ateam review` against `./test_data/` and get expected outputs at the documented paths.
+4. **A migrated user (old `.ateam/` layout)** gets transparent migration on first command, with their prior customizations preserved at the correct new paths.
+5. **`plans/python_framework_examples/crawl.py` runs end-to-end** against a fixture using the new `ateam exec` interface, and `ateam ps` shows its runs while in flight.
+6. **`make run-ci` passes** and `make test-docker` passes.
+7. **Documentation is updated** (Task 5) — README, CONFIG.md, ROLES.md, ISOLATION.md reflect the new layout, the customization story, and the Python-framework escape hatch.
 
 ## Pending questions
 
@@ -888,6 +950,9 @@ Several of the earlier pending questions become moot with the narrowed scope. Th
 13. **Progress telemetry test** (Task 3) — `ateam exec --progress-format=jsonl` against a short prompt, parse the emitted events, confirm DB rows exist for the same events.
 14. Manual smoke: `ateam prompt --action review`, `ateam prompt --action code --role management`, `ateam prompt --action report --role project.security`.
 15. **External orchestration smoke** — run `plans/python_framework_examples/crawl.py` (or equivalent) against a fixture, confirm `ateam ps` sees the runs.
+16. **Variable rename migration test** (Task 7) — user prompt containing `{{OUTPUT_DIR}}`, `{{EXEC_ID}}`, `{{ROLE_REPORTS}}` etc. migrates to `{{exec.output_dir}}`, `{{exec.id}}`, `{{role.reports}}`. Literal ALL_CAPS text that isn't a known variable name is left untouched.
+17. **Template error test** (Task 7) — `{{prompt.unknown_key}}` errors at assembly with the key in the message; `{{foo.bar}}` (unknown namespace) passes through as literal text.
+18. **CLI uniformity test** (Task 8) — `--pre-prompt "X"` and `--post-prompt "Y"` work identically across `report`, `code`, `review`, `verify`, `auto_setup`, `exec`, `parallel`. Wrap order matches the documented resolution (CLI outermost).
 
 ---
 
