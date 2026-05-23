@@ -293,11 +293,7 @@ func (i *Info) collectGitFacts(meta *gitutil.ProjectMeta) {
 		}
 	}
 
-	i.Branch = runGit(i.Dir, "rev-parse", "--abbrev-ref", "HEAD")
-	if i.Branch == "HEAD" {
-		// Detached HEAD — leave Branch empty so consumers can distinguish.
-		i.Branch = ""
-	}
+	i.Branch = gitutil.CurrentBranch(i.Dir)
 
 	if out := runGit(i.Dir, "ls-files"); out != "" {
 		// runGit already TrimSpaces, so lines = (newline count) + 1.
