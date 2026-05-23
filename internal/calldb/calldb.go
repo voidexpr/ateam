@@ -34,6 +34,23 @@ import (
 // batch is a caller-supplied token that ties related agent_execs rows together
 // (e.g. all execs spawned by a single "ateam code" invocation). It enables cost and
 // token aggregation across a batch without a separate join table.
+//
+// # Columns
+//
+// Non-obvious column semantics:
+//
+//   - ended_at         – NULL while still running; also NULL (never set) for execs that were killed before completion.
+//   - duration_ms      – NULL while still running; otherwise computed from ended_at - started_at in milliseconds.
+//   - exit_code        – NULL while still running or killed; 0 = success, non-zero = failure.
+//   - is_error         – set by the agent protocol to flag an error reported by the agent itself (independent of OS exit code).
+//   - error_message    – human-readable description of the failure; free-form, may be empty even when is_error is set.
+//   - exit_code vs. is_error vs. error_message – three independent error indicators: exit_code is the OS process exit code,
+//     is_error is the agent-protocol error flag, and error_message is a human description. Any combination may be present.
+//   - git_start_branch / git_end_branch – empty string on detached HEAD or in a non-git directory.
+//   - output_file      – empty string has two meanings: either the file has not yet been written, or this is a legacy row
+//     without the field; consumers should check for file existence before reading.
+//   - work_dir         – host filesystem path; may differ from the container-internal path when running in docker.
+//   - container_id     – empty string for non-containerized runs.
 const schema = `
 CREATE TABLE IF NOT EXISTS agent_execs (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
