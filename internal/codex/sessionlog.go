@@ -326,15 +326,19 @@ func ArchiveSessionLog(srcPath, dstPath string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer dst.Close()
 
 	gz := gzip.NewWriter(dst)
 	defer gz.Close()
 	n, err := io.Copy(gz, src)
 	if err != nil {
+		dst.Close()
 		return n, err
 	}
 	if err := gz.Close(); err != nil {
+		dst.Close()
+		return n, err
+	}
+	if err := dst.Close(); err != nil {
 		return n, err
 	}
 	return n, nil
