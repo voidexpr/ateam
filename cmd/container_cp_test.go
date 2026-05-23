@@ -84,7 +84,19 @@ profile %q {
 // copy. We stub resolveContainerName so the test never shells out to docker
 // (which would also need a matching running container).
 func TestContainerCPDryRunPrintsPlan(t *testing.T) {
-	projPath, _ := setupContainerCpProject(t, "p", "foo")
+	projPath, orgDir := setupContainerCpProject(t, "p", "foo")
+
+	// findLinuxBinary searches a fixed set of paths. On non-linux/amd64
+	// hosts none of them exist under `go test` (the test exe lives in a
+	// temp dir with no go.mod for cross-compile fallback), so seed the
+	// orgDir cache slot with a placeholder so the dry-run can resolve it.
+	cacheDir := filepath.Join(orgDir, "cache")
+	if err := os.MkdirAll(cacheDir, 0700); err != nil {
+		t.Fatalf("mkdir cache: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheDir, "ateam-linux-amd64"), []byte("stub"), 0755); err != nil {
+		t.Fatalf("seed linux binary stub: %v", err)
+	}
 
 	saved := saveContainerCpGlobals()
 	defer saved.restore()
