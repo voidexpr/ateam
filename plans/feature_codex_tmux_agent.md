@@ -19,7 +19,17 @@ The motivating use case is `/review` — Codex's interactive review slash comman
 
 **v1.1 landed in commit `97b5ecc` ("codex-tmux: usable for /review and free-form prompts; token tracking; concurrency")** — folds PR 1 through PR 4 of the original v1.1 plan into a single commit, plus the live-fix iterations from end-to-end testing against codex v0.132.0. Live-verified by running `ateam exec "/review the pending changes" --agent codex-tmux` against the actual codex binary; codex produced a real review (and caught a regression I had introduced — the dogfood loop works).
 
-**Outstanding**: container mode (PR 5, the "ateam debugs ateam" dogfood path) and a few documented limitations. See *What's still open* at the bottom.
+**v1.2 — observability + the bugs codex caught reviewing v1.1** (5 commits):
+
+| Commit | What |
+|---|---|
+| `ae165ad` | Scope `CodexBusy` to the bottom of the pane. Fixes the 20-minute timeout regression caused by old "Esc to interrupt" text latched in scrollback. |
+| `1066815` | Per-EXEC_ID `tmux.log` (JSONL trace of every send + hash-deduped captures, eager-flushed for `tail -f`). |
+| `64d0e45` | Live-tail codex rollout JSONL into `stream.jsonl`, translated to the codex-exec-stream shape `parse_stream.go` already understands — `ateam tail` / `ateam cat` now work in real time. |
+| `6880b32` | gzip-archive the codex rollout to `.ateam/logs/<EXEC_ID>/codex-session.jsonl.gz` on completion so `ateam inspect` lists it and it survives a CODEX_HOME wipe. |
+| `037ee2d` | Three correctness bugs codex's `/review` caught in v1.1: always `sess.Kill` on cancel; `StripTrailingPrompt` normalizes NBSP like `PromptReady`; `CleanCapture` preserves Unicode-only content (CJK/emoji) and only strips known decorative ranges. |
+
+**Outstanding**: container mode (PR 5, the "ateam debugs ateam" dogfood path). See *What's still open* at the bottom.
 
 Below the original architecture sections, the **v1.1 plan** lists what changes shipped and in what order.
 
@@ -417,7 +427,7 @@ Still tracked as v2. Required for the "ateam debugs ateam via codex-tmux inside 
 | Single Codex binary version pin? | Tested against v0.132.0; pin recorded in CallDB row; prompt regex carries a "tested against vX.Y" comment. |
 | How does ATeam discover Codex auth state? | ATeam does not touch auth. Codex reads `~/.codex/auth.json` natively (no CODEX_HOME override). v1.1 doesn't add discovery; if the user isn't logged in, `start_timeout` fires with the auth-prompt capture for diagnosis. |
 | Multiple slash commands or just `/review` for v1? | Any prompt the operator types. Sentinel marker means `/review`, `/help`, free-form text, multi-line `@file` prompts all work uniformly. |
-| Stream output back live, or only on completion? | Completion only for v1/v1.1. Pane-change heartbeats give progress without true streaming. `StartPipePane` remains the path to live streaming if ever needed. |
+| Stream output back live, or only on completion? | v1/v1.1 was completion-only with pane-change heartbeats. **v1.2 added true streaming**: a goroutine tails codex's rollout JSONL, translates each event to the codex-exec-stream shape `parse_stream.go` already parses, and writes to `stream.jsonl` per-event with eager flush. `ateam tail` / `ateam cat` work in real time. |
 
 ## What this is *not*
 
@@ -447,5 +457,5 @@ A general-purpose interactive-agent framework. Resist scope creep — every proj
 
 - Headless Codex via `codex app-server` JSON-RPC — separate adapter, study Harnex.
 - Multi-turn interactive Codex.
-- Live output streaming to the operator — `StartPipePane` exists if we ever want it.
+- ~~Live output streaming to the operator~~ — ✅ done in v1.2 via tailing the codex rollout JSONL (commit `64d0e45`); `ateam tail` / `ateam cat` work in near-real-time. `StartPipePane` is unused — if response_item streaming events were ever needed (vs the current event_msg-level granularity), that's the path.
 - A general `ateam tui <slash-command>` for arbitrary CLIs — premature; build this first, generalise if a second use case appears.
