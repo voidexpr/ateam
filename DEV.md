@@ -9,6 +9,10 @@ make clean    # removes the binary
 
 Requires Go 1.26+.
 
+### Optional runtime dependencies
+
+- `tmux` is required by the `codex-tmux` agent; if absent, `internal/tmuxctl` unit tests skip and codex-tmux runs fail at startup.
+
 ## Tests
 
 ```bash
@@ -277,6 +281,7 @@ Defined in `internal/agent/`. Each agent implements the `Agent` interface (Run, 
 | `claude-haiku` | Claude with haiku model + budget cap |
 | `claude-isolated` | Claude with project-local config dir |
 | `codex` | OpenAI Codex CLI |
+| `codex-tmux` | OpenAI Codex CLI driven through tmux for TUI-only slash commands (experimental, host-only) |
 | `mock` | Built-in mock for testing |
 
 Agents receive a `CmdFactory` from the container layer. When set, they use it to spawn subprocesses instead of `exec.CommandContext` directly. This is how Docker execution works transparently.
@@ -288,6 +293,15 @@ The codex agent matches claude on cost accounting, cache-token tracking, context
 - **OAuth login** (`claude setup-token`). OpenAI ships no equivalent; auth uses `OPENAI_API_KEY` or `~/.codex/auth.json` directly.
 - **Sandbox `--settings` JSON.** Codex CLI ships its own sandbox model (`workspace-write` / `read-only` plus approval policies). Codex sandbox flags belong in `agent "codex" { args = [...] }` in runtime.hcl, not in a settings JSON.
 - **Multi-turn turn count.** ateam invokes codex via `exec --json`, which is one-shot, so `Turns: 1` is hardcoded. A future contributor shouldn't try to "fix" this by reading a `turns` field that doesn't exist.
+
+#### codex-tmux design notes
+
+`codex-tmux` drives the interactive Codex TUI through a tmux session so that TUI-only slash commands (`/review`, etc.) can be invoked unattended. Key constraints:
+
+- **Host-only in v1.** Rejected with an actionable error at `cmd/table.go:140–142` when a profile binds it to a non-`none` container, and at `cmd/table.go:398–407` when invoked without project context. Container support would require tmux+codex inside the image plus host↔container path translation that isn't wired up.
+- **Per-`EXEC_ID` socket and session naming.** The tmux socket lives under `<ProjectDir>/cache/tmux/` and the session name embeds the `EXEC_ID`, so concurrent runs in the same workdir don't collide.
+- **Token/cost data is sourced from `$CODEX_HOME/sessions/...`** (the rollout JSONL Codex writes itself), not from a streamed JSON channel — the TUI doesn't emit one. The agent live-tails that rollout into `stream.jsonl` and archives it to `codex-session.jsonl.gz` on completion.
+- The original design rationale lives in [`plans/feature_codex_tmux_agent.md`](plans/feature_codex_tmux_agent.md) — historical, not normative.
 
 ### Containers
 

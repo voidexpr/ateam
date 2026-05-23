@@ -30,6 +30,7 @@ A Go CLI to manage unattended agent + software engineering quality oriented prom
 
 ## How to test
 * ateam testing requires to create and delete files, use ./test_data/
+* `internal/tmuxctl` tests skip when tmux is unavailable
 
 ### Always
 * `make test`: always use, they run quickly
