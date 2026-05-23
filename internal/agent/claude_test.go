@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"slices"
 	"testing"
 )
@@ -56,6 +57,39 @@ func TestResolveConfigDir(t *testing.T) {
 				t.Errorf("resolveConfigDir() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestClaudeRunEmitsToolResultForUserEventBlocks covers the "user" case
+// in ClaudeAgent.run: a content block with a tool_use_id produces a
+// "tool_result" StreamEvent, and a block without tool_use_id is dropped.
+// This guards the stall-watchdog heartbeat for modern Claude CLI runs
+// where tool results arrive nested inside user events.
+func TestClaudeRunEmitsToolResultForUserEventBlocks(t *testing.T) {
+	script := `
+printf '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_kept","content":"kept-result"}]}}\n'
+printf '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"dropped-because-no-tool-use-id"}]}}\n'
+exit 0
+`
+	a := &ClaudeAgent{Command: "claude", DefaultModel: "claude-test-model"}
+
+	ch := a.Run(context.Background(), Request{
+		Prompt:     "test",
+		CmdFactory: shellFactory(script),
+	})
+
+	var toolResults []StreamEvent
+	for ev := range ch {
+		if ev.Type == "tool_result" {
+			toolResults = append(toolResults, ev)
+		}
+	}
+
+	if len(toolResults) != 1 {
+		t.Fatalf("expected exactly 1 tool_result event, got %d: %+v", len(toolResults), toolResults)
+	}
+	if toolResults[0].ToolResult != "kept-result" {
+		t.Errorf("ToolResult = %q, want %q", toolResults[0].ToolResult, "kept-result")
 	}
 }
 
