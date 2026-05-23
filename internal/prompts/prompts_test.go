@@ -577,6 +577,156 @@ func TestAssembleCodeVerifyPrompt(t *testing.T) {
 	})
 }
 
+func TestAssembleCodeManagementPrompt(t *testing.T) {
+	base := t.TempDir()
+	orgDir := filepath.Join(base, "org")
+	projectDir := filepath.Join(base, "project")
+	sourceDir := filepath.Join(base, "src")
+
+	supervisorDir := filepath.Join(orgDir, "defaults", "supervisor")
+	if err := os.MkdirAll(supervisorDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	stubBody := "manage the code changes for {{SOURCE_DIR}}"
+	if err := os.WriteFile(filepath.Join(supervisorDir, CodeManagementPromptFile), []byte(stubBody), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	pinfo := ProjectInfoParams{
+		ProjectName: "myapp",
+		Role:        "the supervisor",
+	}
+	reviewContent := "task list from supervisor review"
+
+	t.Run("without extra prompt", func(t *testing.T) {
+		result, err := AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir, pinfo, reviewContent, "", "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if result == "" {
+			t.Fatal("expected non-empty result")
+		}
+		if !strings.Contains(result, "# ATeam Project Context") {
+			t.Error("missing project-info header")
+		}
+		// {{SOURCE_DIR}} should be substituted to "."
+		if !strings.Contains(result, "manage the code changes for .") {
+			t.Errorf("expected {{SOURCE_DIR}} substitution in body, got:\n%s", result)
+		}
+		if !strings.Contains(result, "# Review") {
+			t.Error("missing Review section")
+		}
+		if !strings.Contains(result, reviewContent) {
+			t.Errorf("missing review content %q", reviewContent)
+		}
+		if strings.Contains(result, "# Additional Instructions") {
+			t.Error("unexpected Additional Instructions section when extraPrompt is empty")
+		}
+	})
+
+	t.Run("with custom prompt overrides fallback", func(t *testing.T) {
+		custom := "custom management prompt for {{SOURCE_DIR}}"
+		result, err := AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir, pinfo, reviewContent, custom, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(result, "custom management prompt for .") {
+			t.Errorf("expected custom prompt with substitution, got:\n%s", result)
+		}
+		if strings.Contains(result, stubBody) || strings.Contains(result, "manage the code changes for .") {
+			t.Errorf("custom prompt should replace stub body, got:\n%s", result)
+		}
+	})
+
+	t.Run("with extra prompt appended last", func(t *testing.T) {
+		extra := "follow extra rules"
+		result, err := AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir, pinfo, reviewContent, "", extra)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !strings.Contains(result, "# Additional Instructions") {
+			t.Error("missing Additional Instructions section")
+		}
+		if !strings.Contains(result, extra) {
+			t.Errorf("missing extra prompt content %q", extra)
+		}
+		// Section order: project info → body → review → extra
+		headerIdx := strings.Index(result, "# ATeam Project Context")
+		bodyIdx := strings.Index(result, "manage the code changes for .")
+		reviewIdx := strings.Index(result, "# Review")
+		extraIdx := strings.Index(result, "# Additional Instructions")
+		if !(headerIdx < bodyIdx && bodyIdx < reviewIdx && reviewIdx < extraIdx) {
+			t.Errorf("sections out of order: header=%d body=%d review=%d extra=%d",
+				headerIdx, bodyIdx, reviewIdx, extraIdx)
+		}
+	})
+}
+
+func TestAssembleAutoRolesPrompt(t *testing.T) {
+	base := t.TempDir()
+	orgDir := filepath.Join(base, "org")
+	projectDir := filepath.Join(base, "project")
+
+	supervisorDir := filepath.Join(orgDir, "defaults", "supervisor")
+	if err := os.MkdirAll(supervisorDir, 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	stubBody := "recommend which roles to run, ending with " + AutoRolesMarker
+	if err := os.WriteFile(filepath.Join(supervisorDir, ReportAutoRolesPromptFile), []byte(stubBody), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	pinfo := ProjectInfoParams{
+		ProjectName: "myapp",
+		Role:        "the supervisor",
+	}
+
+	result, err := AssembleAutoRolesPrompt(orgDir, projectDir, pinfo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == "" {
+		t.Fatal("expected non-empty result")
+	}
+	if !strings.Contains(result, "# ATeam Project Context") {
+		t.Error("missing project-info header")
+	}
+	if !strings.Contains(result, stubBody) {
+		t.Errorf("missing prompt body %q in:\n%s", stubBody, result)
+	}
+	// Project info must appear before the prompt body.
+	headerIdx := strings.Index(result, "# ATeam Project Context")
+	bodyIdx := strings.Index(result, stubBody)
+	if headerIdx < 0 || bodyIdx < 0 || headerIdx >= bodyIdx {
+		t.Errorf("sections out of order: header=%d body=%d", headerIdx, bodyIdx)
+	}
+}
+
+func TestDefaultPromptAccessorsNonEmpty(t *testing.T) {
+	cases := []struct {
+		name string
+		fn   func() string
+	}{
+		{"DefaultRolePrompt(security)", func() string { return DefaultRolePrompt("security") }},
+		{"DefaultReportBasePrompt", DefaultReportBasePrompt},
+		{"DefaultCodeBasePrompt", DefaultCodeBasePrompt},
+		{"DefaultSupervisorReviewPrompt", DefaultSupervisorReviewPrompt},
+		{"DefaultSupervisorAutoRolesPrompt", DefaultSupervisorAutoRolesPrompt},
+		{"DefaultSupervisorCodeManagementPrompt", DefaultSupervisorCodeManagementPrompt},
+		{"DefaultSupervisorCodeVerifyPrompt", DefaultSupervisorCodeVerifyPrompt},
+		{"DefaultAutoSetupPrompt", DefaultAutoSetupPrompt},
+		{"DefaultExecDebugPrompt", DefaultExecDebugPrompt},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.fn()
+			if strings.TrimSpace(got) == "" {
+				t.Errorf("%s returned empty content", tc.name)
+			}
+		})
+	}
+}
+
 func TestResolveValueStdin(t *testing.T) {
 	for _, sentinel := range []string{"-", "@-"} {
 		t.Run(sentinel, func(t *testing.T) {
