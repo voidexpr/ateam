@@ -655,7 +655,7 @@ func TestAssembleCodeManagementPrompt(t *testing.T) {
 		bodyIdx := strings.Index(result, "manage the code changes for .")
 		reviewIdx := strings.Index(result, "# Review")
 		extraIdx := strings.Index(result, "# Additional Instructions")
-		if !(headerIdx < bodyIdx && bodyIdx < reviewIdx && reviewIdx < extraIdx) {
+		if headerIdx >= bodyIdx || bodyIdx >= reviewIdx || reviewIdx >= extraIdx {
 			t.Errorf("sections out of order: header=%d body=%d review=%d extra=%d",
 				headerIdx, bodyIdx, reviewIdx, extraIdx)
 		}
