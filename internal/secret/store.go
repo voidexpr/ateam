@@ -104,7 +104,10 @@ func (s *FileStore) Set(name, value string) error {
 func (s *FileStore) Delete(name string) (bool, error) {
 	lines, err := readLines(s.Path)
 	if err != nil {
-		return false, nil // file doesn't exist, nothing to delete
+		if os.IsNotExist(err) {
+			return false, nil // file doesn't exist, nothing to delete
+		}
+		return false, err
 	}
 	var out []string
 	found := false
