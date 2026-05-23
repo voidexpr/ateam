@@ -25,8 +25,7 @@ GIT_COMMIT=$(cd "$REPO_ROOT" && git describe --always --dirty 2>/dev/null || ech
 LDFLAGS="-X github.com/ateam/cmd.BuildTime=$BUILD_TIME -X github.com/ateam/cmd.Version=$VERSION -X github.com/ateam/cmd.GitCommit=$GIT_COMMIT"
 
 echo "Cross-compiling ateam for linux/$GOARCH..."
-make -C ../.. companion
-# GOOS=linux GOARCH="$GOARCH" CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o "$REPO_ROOT/build/ateam-linux-amd64" "$REPO_ROOT"
+make -C "$REPO_ROOT" companion HOST_ARCH="$GOARCH"
 
 # Build base image (no ateam binary — mounted at runtime by start.sh)
 echo "Building image $IMAGE_NAME..."
@@ -38,4 +37,4 @@ docker build \
 echo ""
 echo "Image:   $IMAGE_NAME"
 echo "Claude:  $(docker run --rm "$IMAGE_NAME" claude --version 2>/dev/null || echo 'unknown')"
-echo "Ateam:   build/ateam-linux-amd64 (mounted at runtime)"
+echo "Ateam:   build/ateam-linux-$GOARCH (mounted at runtime)"

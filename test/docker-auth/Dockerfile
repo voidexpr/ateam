@@ -37,8 +37,20 @@ RUN mkdir -p /data /artifacts /output /agent-data \
 # Allow agent to fix volume mount ownership
 RUN echo "agent ALL=(root) NOPASSWD: /bin/chown" >> /etc/sudoers.d/agent-chown
 
-# /opt/ateam is mounted at runtime; symlink so ateam is on PATH
-RUN ln -sf /opt/ateam/ateam-linux-amd64 /usr/local/bin/ateam \
+# /opt/ateam is mounted at runtime. Install a wrapper that exec's the
+# companion binary matching this container's CPU arch — running an
+# amd64 binary under x86_64 emulation in an arm64 container triggers
+# Go GC crashes ("found pointer to free object").
+RUN printf '%s\n' \
+    '#!/bin/sh' \
+    'case "$(uname -m)" in' \
+    '    x86_64)        arch=amd64 ;;' \
+    '    aarch64|arm64) arch=arm64 ;;' \
+    '    *)             arch="$(uname -m)" ;;' \
+    'esac' \
+    'exec "/opt/ateam/ateam-linux-$arch" "$@"' \
+    > /usr/local/bin/ateam \
+    && chmod 0755 /usr/local/bin/ateam \
     && ln -sf /usr/bin/batcat /usr/local/bin/bat
 
 COPY test/docker-auth/entrypoint.sh /usr/local/bin/entrypoint.sh

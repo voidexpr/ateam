@@ -76,11 +76,19 @@ fi
 
 workspace="$(cd "$workspace" && pwd)"
 
-# Check for ateam linux binary
+# Check for an ateam linux binary matching this host's arch. The
+# in-container wrapper at /usr/local/bin/ateam picks the same one via
+# `uname -m`, so any present companion satisfies the check for that
+# host; we surface a clear error if none is present at all.
 ateam_build_dir="$REPO_ROOT/build"
-if [[ ! -f "$ateam_build_dir/ateam-linux-amd64" ]]; then
-    echo "Error: build/ateam-linux-amd64 not found" >&2
-    echo "  Run: ./test/docker-auth/build.sh" >&2
+case "$(uname -m)" in
+    x86_64)        host_arch=amd64 ;;
+    aarch64|arm64) host_arch=arm64 ;;
+    *)             host_arch="$(uname -m)" ;;
+esac
+if [[ ! -f "$ateam_build_dir/ateam-linux-$host_arch" ]]; then
+    echo "Error: build/ateam-linux-$host_arch not found" >&2
+    echo "  Run: make companion  (or ./test/docker-auth/build.sh)" >&2
     exit 1
 fi
 
