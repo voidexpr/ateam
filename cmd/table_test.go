@@ -435,6 +435,95 @@ func TestRejectCodexTmuxWithoutProject(t *testing.T) {
 	}
 }
 
+// TestCodexTmuxRejectedWithNonNoneContainer covers the host-only constraint
+// at cmd/table.go:140-142: codex-tmux must not be bound to a container type
+// other than "none". This is a different code path and a different error
+// message than TestRejectCodexTmuxWithoutProject (which guards the
+// no-project-context case).
+func TestCodexTmuxRejectedWithNonNoneContainer(t *testing.T) {
+	cases := []struct {
+		name          string
+		containerType string
+	}{
+		{"docker", "docker"},
+		{"docker-exec", "docker-exec"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			projectDir := filepath.Join(dir, "project", ".ateam")
+			if err := os.MkdirAll(projectDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			profileName := "codex-tmux-on-" + tc.containerType
+			hcl := `
+container "ct-test" {
+  type             = "` + tc.containerType + `"
+  docker_container = "user-managed"
+}
+
+profile "` + profileName + `" {
+  agent     = "codex-tmux"
+  container = "ct-test"
+}
+`
+			if err := os.WriteFile(filepath.Join(projectDir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			env := &root.ResolvedEnv{
+				ProjectDir: projectDir,
+				SourceDir:  filepath.Dir(projectDir),
+				WorkDir:    filepath.Dir(projectDir),
+			}
+
+			_, err := newRunner(env, profileName, "", false)
+			if err == nil {
+				t.Fatalf("expected host-only rejection error, got nil")
+			}
+			msg := err.Error()
+			if !strings.Contains(msg, "codex-tmux") {
+				t.Errorf("error message missing 'codex-tmux': %v", err)
+			}
+			if !strings.Contains(msg, tc.containerType) {
+				t.Errorf("error message missing container type %q: %v", tc.containerType, err)
+			}
+		})
+	}
+}
+
+// TestCodexTmuxAllowedWithNoneContainer is the happy-path companion to
+// TestCodexTmuxRejectedWithNonNoneContainer: codex-tmux bound to a "none"
+// container must pass the host-only gate at cmd/table.go:140-142.
+func TestCodexTmuxAllowedWithNoneContainer(t *testing.T) {
+	dir := t.TempDir()
+	projectDir := filepath.Join(dir, "project", ".ateam")
+	if err := os.MkdirAll(projectDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	env := &root.ResolvedEnv{
+		ProjectDir: projectDir,
+		SourceDir:  filepath.Dir(projectDir),
+		WorkDir:    filepath.Dir(projectDir),
+	}
+
+	// The embedded defaults define profile "codex-tmux" with container "none".
+	r, err := newRunner(env, "codex-tmux", "", false)
+	if err != nil {
+		t.Fatalf("newRunner: unexpected error: %v", err)
+	}
+	if r == nil {
+		t.Fatal("newRunner returned nil runner")
+	}
+	if r.Agent == nil || r.Agent.Name() != agent.NameCodexTmux {
+		t.Errorf("unexpected agent: got %v, want %s", r.Agent, agent.NameCodexTmux)
+	}
+	if r.ContainerType != "none" {
+		t.Errorf("ContainerType = %q, want %q", r.ContainerType, "none")
+	}
+}
+
 func equalStrings(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
