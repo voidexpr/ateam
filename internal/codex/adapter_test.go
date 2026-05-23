@@ -295,6 +295,58 @@ func TestPreparePromptFreeFormGetsSentinel(t *testing.T) {
 	}
 }
 
+// TestPreparePromptInjectsExecIDMarker: with a non-zero EXEC_ID the sentinel
+// is deterministic and matches SessionLogMarker, so FindSessionLog can use
+// it to disambiguate concurrent same-workdir runs. With EXEC_ID == 0 the
+// sentinel is random (back-compat for unit tests / early-bootstrap paths).
+func TestPreparePromptInjectsExecIDMarker(t *testing.T) {
+	t.Run("execID > 0 yields stable marker", func(t *testing.T) {
+		d := preparePrompt("Please review", 42)
+		want := SessionLogMarker(42)
+		if want != "[ateam-exec-42]" {
+			t.Fatalf("SessionLogMarker(42) = %q, want [ateam-exec-42]", want)
+		}
+		if d.EchoMarker != want {
+			t.Errorf("EchoMarker = %q, want %q", d.EchoMarker, want)
+		}
+		if !strings.HasSuffix(d.SentText, "\n"+want) {
+			t.Errorf("SentText should end with the marker on its own line, got %q", d.SentText)
+		}
+		// Same EXEC_ID must produce the same marker every time — that's
+		// what makes the disambiguation deterministic.
+		d2 := preparePrompt("Please review", 42)
+		if d2.EchoMarker != d.EchoMarker {
+			t.Errorf("EXEC_ID-tagged marker is not deterministic: %q vs %q", d.EchoMarker, d2.EchoMarker)
+		}
+	})
+
+	t.Run("execID == 0 falls back to a random sentinel", func(t *testing.T) {
+		d1 := preparePrompt("Please review", 0)
+		d2 := preparePrompt("Please review", 0)
+		if d1.EchoMarker == d2.EchoMarker {
+			t.Errorf("EXEC_ID=0 sentinel should be random, got identical %q twice", d1.EchoMarker)
+		}
+		if !strings.HasPrefix(d1.EchoMarker, "[ateam-end-") {
+			t.Errorf("EXEC_ID=0 sentinel = %q, want [ateam-end-...] prefix", d1.EchoMarker)
+		}
+	})
+
+	t.Run("slash commands never inject a marker", func(t *testing.T) {
+		// Slash commands ship as-is so codex's slash parser fires; we
+		// can't safely append a sentinel without breaking the command.
+		d := preparePrompt("/review the pending changes", 42)
+		if !d.IsSlashCommand {
+			t.Fatalf("IsSlashCommand = false, want true")
+		}
+		if d.SentText != "/review the pending changes" {
+			t.Errorf("SentText = %q, want unchanged slash command", d.SentText)
+		}
+		if strings.Contains(d.SentText, "[ateam-exec-") {
+			t.Errorf("slash-command SentText should not carry an exec marker, got %q", d.SentText)
+		}
+	})
+}
+
 func TestPreparePromptMultiLineFreeForm(t *testing.T) {
 	d := preparePrompt("Line one\nLine two\nLine three", 0)
 	if d.IsSlashCommand {
