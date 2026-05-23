@@ -133,24 +133,67 @@ type promptDelivery struct {
 	SentText       string // what we type into the TUI
 	EchoMarker     string // line we look for to confirm Codex echoed the prompt
 	IsSlashCommand bool
+	// FollowupSteps are tmux key sequences sent after the initial input has
+	// been submitted and waitIdle returns. Used to navigate interactive
+	// submenus that a slash command may open (e.g. `/review` shows a
+	// preset picker before running). Each non-empty element is one
+	// `send-keys` call with whitespace-split key names; the user can mix
+	// literal characters and named keys: `2 Enter`, `Down Down Enter`,
+	// `Tab` etc. Empty when the prompt has no follow-up lines.
+	FollowupSteps [][]string
 }
 
 // preparePrompt returns the text to type plus the echo marker to look for.
-// For slash commands (single-line, starting with `/`), the marker is the
-// prompt itself and the text is sent unchanged. For everything else, a
-// per-run sentinel is appended on its own line; the sentinel becomes the
-// echo marker — single-line, guaranteed not to be split by Codex's input
-// wrapping, and vanishingly unlikely to collide with model output.
 //
-// When execID > 0, free-form prompts use a deterministic sentinel tied to
-// the exec ID (`[ateam-exec-<id>]`). Codex echoes this into the rollout
-// JSONL's user_message, letting FindSessionLog disambiguate concurrent
-// codex-tmux runs in the same workdir. execID == 0 (e.g. unit tests) falls
-// back to a random sentinel.
+// Three shapes:
+//
+//  1. Slash command, single line — e.g. `/review the pending changes`.
+//     Sent verbatim so codex's slash parser fires. EchoMarker is the
+//     prompt itself. No follow-up steps.
+//
+//  2. Slash command with follow-up lines — e.g. `/review\n2 Enter`. The
+//     first line is the slash command (sent verbatim); subsequent
+//     non-empty lines are tmux key sequences to apply after the initial
+//     submit settles. Used to navigate interactive submenus (codex's
+//     bare `/review` opens a preset picker). Each follow-up line is
+//     whitespace-split into tmux key names (`Down`, `Enter`, `Tab`, or
+//     bare characters); empty lines are ignored.
+//
+//  3. Free-form (default) — anything else. A sentinel is appended on
+//     its own line; the sentinel becomes the echo marker. Multi-line
+//     content ships via paste-buffer (bracketed paste) so embedded
+//     newlines stay as input newlines rather than premature submits.
+//     When execID > 0 the sentinel is deterministic
+//     (`[ateam-exec-<id>]`) — codex echoes it into the rollout JSONL's
+//     user_message, letting FindSessionLog disambiguate concurrent
+//     codex-tmux runs in the same workdir. execID == 0 (unit tests)
+//     falls back to a random sentinel.
 func preparePrompt(prompt string, execID int64) promptDelivery {
 	trimmed := strings.TrimSpace(prompt)
-	if strings.HasPrefix(trimmed, "/") && !strings.Contains(trimmed, "\n") {
-		return promptDelivery{SentText: prompt, EchoMarker: trimmed, IsSlashCommand: true}
+	if strings.HasPrefix(trimmed, "/") {
+		// Slash command — split off any follow-up lines as menu steps.
+		lines := strings.Split(prompt, "\n")
+		firstLine := strings.TrimRight(lines[0], "\r")
+		first := strings.TrimSpace(firstLine)
+		if first == "" || !strings.HasPrefix(first, "/") {
+			// Defensive: leading blank or whitespace pushed the slash
+			// to a later line. Treat as free-form to avoid surprises.
+		} else {
+			var steps [][]string
+			for _, line := range lines[1:] {
+				s := strings.TrimSpace(line)
+				if s == "" {
+					continue
+				}
+				steps = append(steps, strings.Fields(s))
+			}
+			return promptDelivery{
+				SentText:       first,
+				EchoMarker:     first,
+				IsSlashCommand: true,
+				FollowupSteps:  steps,
+			}
+		}
 	}
 	sentinel := newSentinel(execID)
 	return promptDelivery{
@@ -303,6 +346,39 @@ func RunTmux(ctx context.Context, cfg TmuxConfig) (TmuxResult, error) {
 		hbInterval = DefaultHeartbeatInterval
 	}
 	idleSignal, err := waitIdle(ctx, sess, ready, cfg.BusyTimeout, cfg.QuiescenceWindow, cfg.OnHeartbeat, hbInterval)
+
+	// Multi-line slash command: navigate any interactive submenu codex
+	// opened by sending the follow-up key sequences. Each step is
+	// re-captured-then-waited so codex has a chance to react before the
+	// next step fires. waitIdle's `initial` argument is the pre-step
+	// pane so its quiescence check waits for an actual change.
+	if err == nil {
+		for _, step := range delivery.FollowupSteps {
+			if len(step) == 0 {
+				continue
+			}
+			pre, perr := sess.Capture(ctx, true)
+			if perr != nil {
+				err = perr
+				break
+			}
+			if perr := sleepShort(ctx, submitDebounce); perr != nil {
+				err = perr
+				break
+			}
+			if perr := sess.SendKeys(ctx, step...); perr != nil {
+				err = perr
+				break
+			}
+			var iderr error
+			idleSignal, iderr = waitIdle(ctx, sess, pre, cfg.BusyTimeout, cfg.QuiescenceWindow, cfg.OnHeartbeat, hbInterval)
+			if iderr != nil {
+				err = iderr
+				break
+			}
+		}
+	}
+
 	raw, capErr := sess.Capture(context.Background(), true)
 	if capErr != nil && err == nil {
 		err = capErr

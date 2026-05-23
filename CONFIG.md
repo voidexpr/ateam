@@ -316,17 +316,31 @@ profile "codex-tmux" {
 ateam exec "/review the pending changes" --agent codex-tmux
 ```
 
-**Known limitation — interactive submenus**:
+**Interactive submenus — two ways to handle them**:
+
+Some slash commands (notably bare `/review`) open an interactive preset picker before they run. There are two ways to get past that:
 
 ```sh
-# Does NOT work: bare /review opens an interactive preset picker
-# ("Review against base branch", "Review uncommitted changes", ...).
-# codex-tmux v1 only sends one prompt and waits for completion — it
-# can't navigate the submenu, so the run times out at busy_timeout.
-ateam exec "/review" --agent codex-tmux
+# Option A — pass the scope inline so codex bypasses the picker entirely:
+ateam exec "/review the pending changes" --agent codex-tmux
+ateam exec "/review the staged changes"  --agent codex-tmux
+ateam exec "/review HEAD~3..HEAD"        --agent codex-tmux
+
+# Option B — multi-line prompt where lines 2+ are tmux keystrokes that
+# navigate the picker. First line is the slash command; each subsequent
+# non-empty line is one `tmux send-keys` call with whitespace-split keys
+# (literals like `2` or `y`, named keys like `Enter`/`Down`/`Tab`/`Esc`).
+# Each step is run after the previous state settles. This works for any
+# slash command whose flow is a fixed keystroke sequence.
+
+# Example: select option 2 ("Review uncommitted changes") from /review's picker:
+ateam exec "$(printf '/review\n2 Enter\n')" --agent codex-tmux
+
+# Example: arrow-key navigation (when the menu lacks numeric shortcuts):
+ateam exec "$(printf '/review\nDown Down Enter\n')" --agent codex-tmux
 ```
 
-Always pass the scope inline (e.g. `/review the pending changes`, `/review the staged changes`, `/review HEAD~3..HEAD`) so codex bypasses the preset picker and runs the review directly. Other interactive slash commands that gate on submenus will hit the same limitation.
+Empty lines in the multi-line prompt are ignored. Option A is preferred when the slash command accepts inline arguments (no fragile keystroke choreography); Option B is the escape hatch for commands that genuinely require menu interaction.
 
 **Constraints**:
 - **Host-only** — pairing with `container != "none"` is rejected at runner construction. `codex-tmux` needs a project (`.ateam/` directory) for its tmux socket; running outside a project errors with actionable guidance.

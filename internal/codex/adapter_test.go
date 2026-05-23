@@ -352,11 +352,64 @@ func TestPreparePromptMultiLineFreeForm(t *testing.T) {
 	if d.IsSlashCommand {
 		t.Errorf("IsSlashCommand = true, want false for multi-line")
 	}
-	// Multi-line slash-shaped first line is *not* a slash command.
-	d2 := preparePrompt("/review\nplease look at @file.md", 0)
-	if d2.IsSlashCommand {
-		t.Errorf("IsSlashCommand = true, want false for multi-line `/`-prefixed prompt")
+	if len(d.FollowupSteps) != 0 {
+		t.Errorf("FollowupSteps = %v, want empty for free-form", d.FollowupSteps)
 	}
+}
+
+// equalSteps compares two [][]string by value. slices.Equal won't work on
+// nested slices because []string isn't comparable.
+func equalSteps(a, b [][]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !slices.Equal(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// TestPreparePromptSlashWithFollowupSteps: a multi-line prompt whose first
+// line is a slash command is treated as the slash command plus follow-up
+// menu navigation keystrokes. Each non-empty subsequent line is split into
+// tmux key names; blank lines are ignored.
+func TestPreparePromptSlashWithFollowupSteps(t *testing.T) {
+	t.Run("digit then Enter to pick a menu option", func(t *testing.T) {
+		d := preparePrompt("/review\n2 Enter\n", 0)
+		if !d.IsSlashCommand {
+			t.Fatalf("IsSlashCommand = false, want true")
+		}
+		if d.SentText != "/review" {
+			t.Errorf("SentText = %q, want %q (initial line only)", d.SentText, "/review")
+		}
+		wantSteps := [][]string{{"2", "Enter"}}
+		if !equalSteps(d.FollowupSteps, wantSteps) {
+			t.Errorf("FollowupSteps = %v, want %v", d.FollowupSteps, wantSteps)
+		}
+	})
+
+	t.Run("multiple steps, blank lines ignored", func(t *testing.T) {
+		d := preparePrompt("/review\n\nDown\n\nDown Enter\n", 0)
+		if !d.IsSlashCommand {
+			t.Fatalf("IsSlashCommand = false, want true")
+		}
+		wantSteps := [][]string{{"Down"}, {"Down", "Enter"}}
+		if !equalSteps(d.FollowupSteps, wantSteps) {
+			t.Errorf("FollowupSteps = %v, want %v", d.FollowupSteps, wantSteps)
+		}
+	})
+
+	t.Run("single-line slash command has no followups", func(t *testing.T) {
+		d := preparePrompt("/review the pending changes", 0)
+		if !d.IsSlashCommand {
+			t.Fatalf("IsSlashCommand = false, want true")
+		}
+		if len(d.FollowupSteps) != 0 {
+			t.Errorf("FollowupSteps = %v, want empty", d.FollowupSteps)
+		}
+	})
 }
 
 func TestHeartbeatPreview(t *testing.T) {
