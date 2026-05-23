@@ -212,7 +212,7 @@ v1 had two problems on the cancel path:
 1. `configureProcessLifecycle` was not applied to the server cmd → no process group → kill may not cascade reliably on macOS.
 2. `defer sess.Kill(context.Background())` ran on the *background* context, racing the ctx-driven kill. This adds noise and complexity for no benefit on the cancel path.
 
-v1.1: apply `configureProcessLifecycle`, drop the `Kill(Background)` defer on the cancel path. Keep an explicit `KillSession` on the **success path only** (clean up the socket and CODEX_HOME promptly instead of waiting for SIGHUP propagation).
+v1.1 tried "apply `configureProcessLifecycle` to the server cmd, drop the `Kill(Background)` defer on the cancel path, keep `KillSession` on the success path only" — reasoning that the ctx-driven SIGTERM cascade would handle teardown. **v1.2 reverted to always-on `KillSession` defer** (commit `389d4c4`): tmux puts each pane in its own process group, so the cascade only kills the tmux server's pgrp, leaving codex potentially orphaned, plus the per-run socket + bootstrap script lingering under `.ateam/cache/tmux/`. The defer now uses a fresh background context so cancellation of the run ctx doesn't poison the cleanup itself.
 
 ## Capturing the result
 
@@ -390,7 +390,7 @@ Goal: enable `ateam parallel` / `ateam report` with codex-tmux, clean Ctrl-C, an
 2. ✅ `tmuxctl.New` takes `socketPath` from the caller; the codex adapter computes `<ProjectDir>/cache/tmux/exec-<EXEC_ID>.sock`. Falls back to `/tmp/ateam-codex-<hash>-<execid>.sock` when the natural path would exceed `sockaddr_un.sun_path` (sunPathSafeMax=100). `ATEAM_TMUX_SOCKET_DIR` env var and `nearestGoModule` helper removed.
 3. ✅ EXEC_ID-based session name (`ateam-codex-<EXEC_ID>`).
 4. ✅ `Setpgid` + `cmd.Cancel` (SIGTERM to process group) + `WaitDelay` on the tmux server cmd. Ctrl-C cascades to the codex process cleanly.
-5. ✅ Success-path-only `KillSession` (skipped on `ctx.Err() != nil` — the process group teardown handles it).
+5. ✅ Always-on `KillSession` defer (initially success-path-only in v1.1; v1.2 commit `389d4c4` flipped this to always kill — tmux puts each pane in its own process group, so the `exec.CommandContext + Setpgid` cascade can leave codex orphaned plus the per-run socket + bootstrap script lingering under `.ateam/cache/tmux/`).
 6. ✅ `pane_pid` queried via `tmux display-message -p '#{pane_pid}'` after waitReady; emitted as `StreamEvent{Type: "system", Subtype: "process_start", PID: panePID}`. Runner records it in `agent_execs.pid`.
 7. ✅ Container-mode rejected at runner construction with a clear error. Also rejected for `resolveRunnerMinimal` (outside a project) with actionable guidance — caught by codex's own review.
 8. ✅ `tmux_session_name`, `tmux_socket_path`, and `pane_pid` surfaced in the synthetic result stream.
