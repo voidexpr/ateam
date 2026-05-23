@@ -115,15 +115,10 @@ func TestStreamTailErrorZeroMaxMessages(t *testing.T) {
 `
 	path := writeTempStreamBugs(t, content)
 
-	// This should NOT panic. With n=0, it should return "" gracefully.
-	defer func() {
-		if r := recover(); r != nil {
-			t.Fatalf("StreamTailError panicked with maxMessages=0: %v", r)
-		}
-	}()
-
 	result := StreamTailError(path, "agent", 0)
-	_ = result // we just care it doesn't panic
+	if result != "" {
+		t.Fatalf("expected empty string, got %q", result)
+	}
 }
 
 func TestStreamTailErrorNegativeMaxMessages(t *testing.T) {
@@ -131,15 +126,10 @@ func TestStreamTailErrorNegativeMaxMessages(t *testing.T) {
 `
 	path := writeTempStreamBugs(t, content)
 
-	// Negative n causes make([]string, 0, n) to panic.
-	defer func() {
-		if r := recover(); r != nil {
-			t.Fatalf("StreamTailError panicked with maxMessages=-1: %v", r)
-		}
-	}()
-
 	result := StreamTailError(path, "agent", -1)
-	_ = result
+	if result != "" {
+		t.Fatalf("expected empty string, got %q", result)
+	}
 }
 
 // =============================================================================
@@ -175,18 +165,7 @@ func TestStreamFormatterTurnCountingAccuracy(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// REGRESSION: CacheWriteTokens absent from ResultLine — never parsed or displayed
-// File: parse_stream.go (ResultLine struct), format_stream.go (display)
-//
-// The DB schema has cache_write_tokens (added in commit a695951), but:
-// - streamutil.ResultEvent.Usage has no CacheWriteTokens field
-// - runner.ResultLine has no CacheWriteTokens field
-// - runner.StreamEvent has no CacheWriteTokens field
-// - runner.RunSummary.CacheWriteTokens is always 0
-//
-// So cache_write_tokens in the DB is always 0 — the data is silently dropped.
-// =============================================================================
+// Verifies CacheWriteTokens propagation from JSONL into ResultLine.
 
 func TestResultLineShouldHaveCacheWriteTokens(t *testing.T) {
 	// Parse a result event that includes cache_write_input_tokens.
