@@ -183,9 +183,11 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 	}
 
 	result, err := codextui.RunTmux(ctx, cfg)
-	// Stop the live tailer and wait for its goroutine to exit before
-	// writing synthetic events — both share streamWriter and the
-	// goroutine may still be flushing when RunTmux returns.
+	// Stop the live tailer now that codex has finished — its post-run
+	// ReadSessionStats read (inside RunTmux) already captured the final
+	// usage, and any new lines codex writes during shutdown are noise.
+	// Wait for the tailer goroutine to exit before writing further to
+	// streamWriter; bufio.Writer is not goroutine-safe.
 	tailCancel()
 	tailWg.Wait()
 	if result.SessionName != "" {
