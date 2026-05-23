@@ -23,11 +23,11 @@ The motivating use case is `/review` — Codex's interactive review slash comman
 
 | Commit | What |
 |---|---|
-| `ae165ad` | Scope `CodexBusy` to the bottom of the pane. Fixes the 20-minute timeout regression caused by old "Esc to interrupt" text latched in scrollback. |
-| `1066815` | Per-EXEC_ID `tmux.log` (JSONL trace of every send + hash-deduped captures, eager-flushed for `tail -f`). |
-| `64d0e45` | Live-tail codex rollout JSONL into `stream.jsonl`, translated to the codex-exec-stream shape `parse_stream.go` already understands — `ateam tail` / `ateam cat` now work in real time. |
-| `6880b32` | gzip-archive the codex rollout to `.ateam/logs/<EXEC_ID>/codex-session.jsonl.gz` on completion so `ateam inspect` lists it and it survives a CODEX_HOME wipe. |
-| `037ee2d` | Three correctness bugs codex's `/review` caught in v1.1: always `sess.Kill` on cancel; `StripTrailingPrompt` normalizes NBSP like `PromptReady`; `CleanCapture` preserves Unicode-only content (CJK/emoji) and only strips known decorative ranges. |
+| `9048ced` | Scope `CodexBusy` to the bottom of the pane. Fixes the 20-minute timeout regression caused by old "Esc to interrupt" text latched in scrollback. |
+| `47f35c8` | Per-EXEC_ID `tmux.log` (JSONL trace of every send + hash-deduped captures, eager-flushed for `tail -f`). |
+| `a40e7b0` | Live-tail codex rollout JSONL into `stream.jsonl`, translated to the codex-exec-stream shape `parse_stream.go` already understands — `ateam tail` / `ateam cat` now work in real time. |
+| `e1b1beb` | gzip-archive the codex rollout to `.ateam/logs/<EXEC_ID>/codex-session.jsonl.gz` on completion so `ateam inspect` lists it and it survives a CODEX_HOME wipe. |
+| `389d4c4` | Three correctness bugs codex's `/review` caught in v1.1: always `sess.Kill` on cancel; `StripTrailingPrompt` normalizes NBSP like `PromptReady`; `CleanCapture` preserves Unicode-only content (CJK/emoji) and only strips known decorative ranges. |
 
 **Outstanding**: container mode (PR 5, the "ateam debugs ateam" dogfood path). See *What's still open* at the bottom.
 
@@ -457,5 +457,5 @@ A general-purpose interactive-agent framework. Resist scope creep — every proj
 
 - Headless Codex via `codex app-server` JSON-RPC — separate adapter, study Harnex.
 - Multi-turn interactive Codex.
-- ~~Live output streaming to the operator~~ — ✅ done in v1.2 via tailing the codex rollout JSONL (commit `64d0e45`); `ateam tail` / `ateam cat` work in near-real-time. `StartPipePane` is unused — if response_item streaming events were ever needed (vs the current event_msg-level granularity), that's the path.
+- ~~Live output streaming to the operator~~ — ✅ done in v1.2 via tailing the codex rollout JSONL (commit `a40e7b0`); `ateam tail` / `ateam cat` work in near-real-time. `StartPipePane` is unused — if response_item streaming events were ever needed (vs the current event_msg-level granularity), that's the path.
 - A general `ateam tui <slash-command>` for arbitrary CLIs — premature; build this first, generalise if a second use case appears.
