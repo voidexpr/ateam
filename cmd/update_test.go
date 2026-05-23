@@ -111,4 +111,3 @@ func withUpdateRun(t *testing.T, dir string, diff, quiet bool, fn func()) string
 	})
 	return out
 }
-
