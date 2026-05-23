@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -201,11 +202,24 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 	archivedBytes := int64(0)
 	if result.SessionStats.SessionLogPath != "" && req.StreamFile != "" {
 		dst := filepath.Join(filepath.Dir(req.StreamFile), "codex-session.jsonl.gz")
-		if n, aerr := codextui.ArchiveSessionLog(result.SessionStats.SessionLogPath, dst); aerr == nil {
+		if n, aerr := codextui.GzipCopyFile(result.SessionStats.SessionLogPath, dst); aerr == nil {
 			archivedPath = dst
 			archivedBytes = n
 		} else {
 			fmt.Fprintf(stderr, "codex-tmux: failed to archive codex session log to %s: %v\n", dst, aerr)
+		}
+	}
+	// Best-effort: gzip-replace tmux.log with tmux.log.gz. Trace files
+	// for long /review runs reach ~1MB and compress ~15x; the .gz still
+	// streams cleanly under `gunzip -c | less`.
+	if tmuxLog := tmuxLogPathFor(req.StreamFile); tmuxLog != "" {
+		if _, statErr := os.Stat(tmuxLog); statErr == nil {
+			dst := tmuxLog + ".gz"
+			if _, aerr := codextui.GzipCopyFile(tmuxLog, dst); aerr == nil {
+				_ = os.Remove(tmuxLog)
+			} else {
+				fmt.Fprintf(stderr, "codex-tmux: failed to gzip %s: %v\n", tmuxLog, aerr)
+			}
 		}
 	}
 	if result.Output != "" {

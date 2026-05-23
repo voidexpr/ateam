@@ -92,19 +92,19 @@ func TestFindSessionLogMatchesCWD(t *testing.T) {
 	}
 }
 
-// TestArchiveSessionLogGzipRoundtrip verifies the gzip-copy preserves
-// content byte-for-byte and writes a real gzip stream (so `gunzip < file`
-// works for the user, and `ateam inspect` can show the archive size).
-func TestArchiveSessionLogGzipRoundtrip(t *testing.T) {
+// TestGzipCopyFileRoundtrip verifies the gzip-copy preserves content
+// byte-for-byte and writes a real gzip stream (so `gunzip < file` works
+// for the user, and `ateam inspect` can show the archive size).
+func TestGzipCopyFileRoundtrip(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "rollout.jsonl")
 	content := strings.Repeat(`{"type":"event_msg","payload":{"type":"agent_message","message":"hello world"}}`+"\n", 100)
 	if err := os.WriteFile(src, []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
 	dst := filepath.Join(t.TempDir(), "out", "codex-session.jsonl.gz")
-	n, err := ArchiveSessionLog(src, dst)
+	n, err := GzipCopyFile(src, dst)
 	if err != nil {
-		t.Fatalf("ArchiveSessionLog: %v", err)
+		t.Fatalf("GzipCopyFile: %v", err)
 	}
 	if int(n) != len(content) {
 		t.Errorf("returned bytes = %d, want %d (uncompressed)", n, len(content))
@@ -132,11 +132,11 @@ func TestArchiveSessionLogGzipRoundtrip(t *testing.T) {
 	}
 }
 
-// TestArchiveSessionLogRejectsMissingSrc: cleanly errors instead of
+// TestGzipCopyFileRejectsMissingSrc: cleanly errors instead of
 // creating an empty archive when the source doesn't exist.
-func TestArchiveSessionLogRejectsMissingSrc(t *testing.T) {
+func TestGzipCopyFileRejectsMissingSrc(t *testing.T) {
 	dst := filepath.Join(t.TempDir(), "out.gz")
-	_, err := ArchiveSessionLog(filepath.Join(t.TempDir(), "no-such-file"), dst)
+	_, err := GzipCopyFile(filepath.Join(t.TempDir(), "no-such-file"), dst)
 	if err == nil {
 		t.Fatal("expected error for missing src")
 	}

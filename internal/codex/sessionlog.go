@@ -297,21 +297,16 @@ func pathEqual(a, b string) bool {
 	return ra == rb
 }
 
-// ArchiveSessionLog gzip-copies the codex rollout JSONL at srcPath to
-// dstPath. Intended for post-run preservation in `.ateam/logs/<EXEC_ID>/`
-// so the rollout survives even if the user later wipes their CODEX_HOME —
-// and so `ateam inspect` lists it next to the other per-run artifacts.
-//
-// Codex rollout files for long /review runs reach 10s of MB (mostly tool
-// output); gzip typically shrinks them 5-10x because the content is JSONL
-// with repetitive keys.
+// GzipCopyFile gzip-copies srcPath to dstPath. Used post-run for both the
+// codex rollout JSONL (preserves it after a CODEX_HOME wipe) and the
+// per-EXEC_ID tmux.log (shrinks the verbose trace 10-20x).
 //
 // dstPath's parent dir is created (0700) if missing. Returns the
 // uncompressed byte count on success — useful for the synthetic stream's
 // final result event.
-func ArchiveSessionLog(srcPath, dstPath string) (int64, error) {
+func GzipCopyFile(srcPath, dstPath string) (int64, error) {
 	if srcPath == "" || dstPath == "" {
-		return 0, fmt.Errorf("codex.ArchiveSessionLog: src and dst paths are required")
+		return 0, fmt.Errorf("codex.GzipCopyFile: src and dst paths are required")
 	}
 	src, err := os.Open(srcPath)
 	if err != nil {
