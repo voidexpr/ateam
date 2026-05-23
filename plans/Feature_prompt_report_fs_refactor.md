@@ -1,16 +1,26 @@
 # Feature: Prompt & artifact filesystem refactor
 
-The immediate goal is to restructure ateam's artifacts between prompts and generated files. The longer-term design goal is to provide a generic prompt system that supports many workflows beyond `report/review/code/verify`, with the same simple core mechanics. The report/review/code/verify workflow just happens to use that more generic prompt system. Similarly, arbitrary spawned agents should have flexibility to store and read files in private and shared spaces.
+The immediate goal is to restructure ateam's artifacts between prompts and generated files. After several design rounds, **the v1 scope is narrower than earlier drafts proposed.** This document captures the chosen direction up front, then the design detail; everything that was considered and dropped lives in "Explored but not pursued" at the end so the rationale survives if we revisit it.
+
+## Decision summary
+
+**ateam stays sharp as a CLI.** The five built-in workflows (report, code, review, verify, auto_setup) plus `exec` and `parallel` are the surface. Users customize prompt *content* via the file system; they do NOT extend ateam with new workflow shapes. New built-in workflows require Go contributions.
+
+**Prompts split from artifacts.** `.ateam/prompts/` for configuration; `.ateam/shared/` for cross-agent artifacts; `.ateam/runtime/<exec_id>/` for per-run scratch. Old `roles/<R>/...` and `supervisor/...` layouts auto-migrate idempotently on first load.
+
+**No user-pluggable execution.** Frontmatter is parsed (strict allow-list) but only ateam-recognized keys do anything; user-defined `pre_exec` / `post_exec` lists are NOT honored. No `ateam flow`, no `{{shell CMD}}`, no `{{arg.*}}`, no parameterized promotion. Built-in workflows keep their hardcoded Go pre/post logic. The Python framework in `plans/python_framework_examples/` is the answer for anything beyond editing prompt content.
+
+**Better telemetry.** `ateam exec` gains structured progress output and writes progress events to the call DB; `parallel` shares the same code path. `ateam ps` / `ateam inspect` work uniformly regardless of who launched the agent — including external orchestrators driving `ateam exec` from Python or shell.
+
+**Internal Go cleanup.** The five built-in commands collapse onto an internal `Stage` abstraction with `PreAction` / `PostAction` types. Same vocabulary as the Python framework, expressed once in Go, used by the dispatch loop. Not exposed publicly. Adding a 6th built-in becomes a Stage definition + a thin Cobra wrapper, not a sixth `cmd/X.go` that duplicates the pattern.
+
+**No `:promptname` CLI syntax.** Since users don't invoke ateam against arbitrary prompts directly, the `:dir/role` invocation surface isn't needed. Roles continue to be selected via existing flags (`ateam report --roles security` etc.). The naming convention still distinguishes role files from dir-level wrappers for the assembler.
 
 ## Related documents
 
-Other files in `plans/` that illustrate and stress-test this design:
-
-- **`prompt_example_metaproject.md`** — full worked example: translating `metaproject.py` (a multi-project audit/fix/verify pipeline) into the filesystem proposal. Surfaces `{{arg.*}}` and parameterized promotion as needs.
-- **`prompt_example_metaproject_python_api.md`** — alternative direction: a small typed Python API (`Ctx` / `PromptBundle` / `Runner`) on top of `ateam exec`. Splits framework (~130 lines, reusable) from workflow code (~360 lines).
-- **`prompt_example_release_crawl.md`** — three-way comparison (shell / filesystem / Python API) on a tighter workflow (release-notes crawler). Tests the question "when is each approach worth the migration cost?"
-
-Read this spec first; the examples are concrete tests of the design.
+- **`plans/python_framework_examples/`** — the Python framework (`ateam.py` ~280 lines) plus two example workflows (`crawl.py`, `metaproject.py`). This is the maintained reference for code-driven workflow customization. Users who need more than prompt-content editing fork or copy this.
+- **`plans/prompt_example_metaproject.md`** — earlier exploration of expressing the metaproject workflow purely through the filesystem (frontmatter exec hooks, scripts, parameterized promotion). Concluded that even with all of those features, a thin Python dispatcher is still needed. Preserved as input that led to the current scope.
+- **`plans/prompt_example_metaproject_python_api.md`** / **`plans/prompt_example_release_crawl.md`** — three-way comparisons (shell / filesystem / Python) on real workloads. Showed that Python wins for code-heavy workflows and shell wins for simple ones; the file-based middle ground rarely earns its keep.
 
 ## Problem space
 
@@ -32,7 +42,9 @@ An email arrives describing a bug in a service. A realistic workflow:
 4. **Conditionally**: if the review's confidence is high, a code agent attempts the patch; if not, the workflow halts and posts findings to a ticket.
 5. After the patch, runs project tests **as a gate**. Tests fail → roll back. Tests pass → open a PR.
 
-Every step exercises one of the design challenges below. The parallel investigation step needs per-task pre/post (worktree setup), the synthesizing review needs cross-step data flow (reading investigator outputs), the conditional patch needs cheap "is work needed?" checks, and the gate is deterministic algorithmic logic after the agent runs.
+A workflow this shaped is **not** something v1 ateam tries to express in its config. The four parallel investigators + the conditional synthesizing review + the test gate → all of that lives in the orchestrator (Python framework, shell, CI pipeline). ateam owns the prompt content for each step and the audit trail for each agent invocation; the orchestrator owns the shape.
+
+This is the line v1 draws: **prompts are config (ateam-owned), workflows are code (orchestrator-owned).**
 
 ### Design challenges
 
@@ -44,17 +56,17 @@ The patterns that emerge in any such system:
   - **Add runtime custom instructions** while keeping the rest of the prompt as-is ("focus on area X", "skip Y", "pay special attention to a/b/c").
   - **Share prompts between projects** while supporting project-specific overloads.
 - **Run algorithmic logic** (scripts, programs, built-in commands) before and after the agent acts on a prompt. Set up a git worktree before; run tests as a gate after.
-- **Conditionally execute prompts.** Prompts are expensive and slow; if we know the work isn't needed, skip it. Enable/disable part of a prompt, or skip an entire prompt that is part of a larger workflow.
-- **Run independent steps in parallel** and wait for them to complete. Any pre/post execution logic must be part of each parallel task.
-- **Treat compute as a constrained resource.** Track per-run cost; gate batches against a budget; pick cheaper models for cheap stages and expensive ones for hard stages. This loops back into prompt assembly (shorter, more constrained prompts may suit cheaper models).
+- **Conditionally execute prompts.** Prompts are expensive and slow; if we know the work isn't needed, skip it.
+- **Run independent steps in parallel** and wait for them to complete.
+- **Treat compute as a constrained resource.** Track per-run cost; gate batches against a budget.
 
-For simple systems, all these patterns are better written directly in the app — that way it only pays for the features it needs. ateam provides the framework once the patterns start compounding: the exact prompt used is cached, and `ateam ps` / `ateam inspect` surface metrics and logs.
+For ateam itself, only the prompt-assembly bullets are in scope. The rest is delegated to the orchestrator. Built-in workflows do the algorithmic work they need in Go; external workflows do it in Python (or whatever).
 
 ### Why prompts belong outside the app
 
-LLM-integrated apps have three layers: **prompts** (instructions to the model — half code in that they handle inputs and shape outputs, half configuration in that they steer behavior), **procedural logic** (scripts and actions around the prompt — pre, during via hooks or CLI options, post), and a **driver** (the CLI or workflow that ties everything together).
+LLM-integrated apps have three layers: **prompts** (instructions to the model — half code in that they handle inputs and shape outputs, half configuration in that they steer behavior), **procedural logic** (scripts and actions around the prompt), and a **driver** (the CLI or workflow).
 
-At day one all three change together. Once the app stabilizes, the driver and the procedural logic settle into normal code-review pace. **Prompts keep changing** — they're closer to copy than code, and they want non-development-style updates: the model missed a class of findings, emphasis shifts, a project needs different framing, a domain term changes.
+At day one all three change together. Once the app stabilizes, the driver and procedural logic settle into normal code-review pace. **Prompts keep changing** — they're closer to copy than code, and they want non-development-style updates: the model missed a class of findings, emphasis shifts, a project needs different framing, a domain term changes.
 
 That mismatch is why agentic apps eventually externalize their prompts: the file is the unit of change, not the function. ateam provides that structure — a tree of files, diffable, overridable per project / org / embedded — so prompt evolution doesn't pay code-review tax for every wording tweak.
 
@@ -65,80 +77,53 @@ Each feature maps to one or more design challenges above.
 | Feature | Addresses | Benefit |
 |---|---|---|
 | File-based layout for prompts | Assembly / factor out | Easy audit; standardized; maintainability, readability |
-| Overload, compose (include), pre/post instructions as files or on the CLI | Assembly / overload, runtime instructions | Prompt fragment management; surgical customization |
-| Dynamic prompt generation via lightweight templating + command output (in a read-only sandbox) | Assembly / dynamic content | Saves tokens; faster agent execution; better determinism (not guaranteed) |
-| Pre/post code execution around the agent | Algorithmic logic | Determinism, environment setup, gating |
-| Bundling pre/post code with the prompt for easy switching between serial and parallel | Parallelism | Saves development time; reduces latency |
-| Per-job labels and CLI-injected exec for parallel batches | Parallelism | Same orchestration across N independent tasks |
-| Conditional execution via runtime flow control (`ateam flow skip`/`error`/`abort`) | Conditional execution | Skip expensive work cleanly, even inside parallel batches |
-| Process tracking, cost tracking, log file management, agent-led run debugging | Cost, reproducibility | Easier to manage; manageable cost; debuggable runs |
+| Overload, compose (include), pre/post wrappers as files | Assembly / overload, runtime instructions | Prompt fragment management; surgical customization |
+| CLI ad-hoc `--pre-prompt` / `--post-prompt` text wrap | Assembly / runtime instructions | One-off framing without persisting |
+| `ateam parallel` for N prompts in one project | Parallelism | Same orchestration across N independent prompts |
+| Process tracking, cost tracking, structured progress output, agent-led run debugging | Cost, reproducibility, external orchestration | Easier to manage; debuggable runs; orchestrators can consume |
 | Prompt preview | Readability | Inspect what will be sent before sending it |
 
-### What ateam does NOT do
-
-To bound expectations:
+### What ateam does NOT do (v1)
 
 - **Not a scheduler.** No cron, no event triggers. Use systemd timers, GitHub Actions, or whatever your existing infrastructure provides.
-- **Not interactive.** No chat UI, no human-in-the-loop turn-taking. ateam runs agents unattended.
+- **Not interactive.** No chat UI, no human-in-the-loop turn-taking.
 - **Not multi-tenant.** Runs are local to a project; no shared scheduler across teams.
 - **Not a model gateway.** ateam wraps existing CLI agents (Claude Code, Codex) — it doesn't talk to model APIs directly.
+- **Not a workflow engine.** No user-defined `pre_exec` / `post_exec`, no `ateam flow`, no `{{shell}}`. The Python framework handles workflow customization; ateam handles agent invocation + audit trail.
 
-### Implementation challenges
+### Implementation challenges still in scope for v1
 
-A few "deep" features any system in this space eventually needs:
-
-- **Prompt preview** — being able to ask "what would actually be sent if I ran this?" without running it. Essential once the assembly involves dynamic content or multi-anchor layering.
-- **Sandboxing for dynamic content scripts.** Assembly-time scripts whose output enters the prompt should be read-only and bounded; their side effects can't be cleaned up after the prompt is sent.
-- **Agent artifact management.** Agents produce files that:
-  - Need to be read back to maintain state between executions, then overwritten — we lose history.
-  - Are useful as history for comparisons, but timestamped files complicate prompt-writing (and agents may find creative ways to discover them).
-  - May be agent-type-specific or shared across agents.
-  - Each project ends up inventing its own way to manage these.
-  - Granularity finer than "a file" may be needed (tasks, issues for handoff/state). Messaging-style coordination is usually overkill.
-- **Prompt templating without a programming language.** Most languages (shell, Python) template strings well, but importing one bleeds host-language semantics into prompts and hurts readability for an LLM.
-- **Readability under composition.** Prompts get harder to read when littered with dynamic sections and function-call chains. Each project does this differently; after a few use cases, consistency matters.
-- **Workflow shape.** Step A → parallel step B → step C → conditionally do step D or E, or skip back to A. Composable, but reaching for Airflow is overkill for most cases.
+- **Prompt preview** — "what would actually be sent if I ran this?" without running it.
+- **Prompt templating without a programming language** — `{{var}}` substitution, `{{include}}` for composition. Bounded vocabulary; no host language semantics bleed into prompts.
+- **Readability under composition.** Filename-driven assembly keeps the "what wraps this prompt" question answerable by `ls`.
 
 ### Why this matters for LLM systems specifically
 
 The drivers behind moving work out of the LLM (assembly-time content injection + pre/post execution) are five distinct things, often conflated:
 
-- **Tokens.** Every computed value the agent has to derive is paid for in input or output tokens. Move it out and the bill drops.
+- **Tokens.** Every computed value the agent has to derive is paid for in input or output tokens.
 - **Latency.** Local computation that takes 50ms can save an LLM round-trip of seconds.
 - **Determinism.** A script returns the same output for the same input; an LLM doesn't.
-- **Trust.** The LLM can do anything; you can't prove it won't. Moving a check, transformation, or side effect into deterministic code means the result is bounded and inspectable. Mature systems migrate toward "I need to *guarantee* this happens correctly," a guarantee the LLM can't make.
+- **Trust.** The LLM can do anything; you can't prove it won't. Moving a check, transformation, or side effect into deterministic code means the result is bounded and inspectable.
 - **Reproducibility.** LLM outputs are non-deterministic; the same prompt run twice can produce different results. When something goes wrong, you need to reconstruct exactly what was sent, what came back, what scripts ran around it, and in what context. ateam captures all of this; without it, debugging an LLM-based system is guessing.
 
-The last two are specific to LLM systems and don't show up in conventional pipelines. They're why audit infrastructure isn't optional polish — it's how you make an LLM-based system trustworthy enough to act unattended.
-
-### Evolution: where systems get stuck
-
-Most LLM-integrated tooling follows a similar arc. Knowing where you are helps recognize the next wall:
-
-| Stage | Looks like | Hits a wall when |
-|---|---|---|
-| 1 | One prompt, called from a shell script | You need a small variation for one project |
-| 2 | A CLI with subcommands and flags | You want parallelism over many similar prompts |
-| 3 | A workflow with pre/post hooks per step | Debugging requires reconstructing the exact prompt that was sent |
-| 4 | Workflow + audit trail | Different teams need different policies layered onto the same prompts |
-| 5 | Workflow + audit + layered composition (this) | (you tell us) |
-
-It's great to start with agents taking care of a lot, but over time these systems evolve toward more structure. What started as a simple script — then a CLI with top-level actions, then debugging steps — gets stuck on one of the deeper features: parallelism with ad-hoc instructions, script execution side effects, readability under composition.
+In v1, ateam handles the first four for assembly-time content (template variables + includes). For the fifth (reproducibility), ateam owns the audit trail of agent invocations; the orchestrator owns the audit trail of its own logic around them.
 
 ## Why this refactor
 
 Today, prompts (configuration) and generated outputs are entangled under the same trees, and the codebase carries two parallel abstractions (`roles/<NAME>/...` vs `supervisor/...`) that complicate prompt resolution, role discovery, and output promotion. `internal/runner/runner.go:1156` already has a TODO acknowledging the split is overdue: "get rid of this exclusion once configured prompts are kept separate from files."
 
-We also want a model where logic moves easily in/out of LLM prompts, balancing token usage, determinism, and the LLM's decision power. The same system should make it cheap to specialize a generic prompt to a use case, or temporarily override behavior in a specific context (e.g. "never report on X here", "pay attention to Y").
+We also want a model where layered overrides (project / org / embedded) and surgical specialization (per-role fragments) are first-class — without dragging in a full workflow engine.
 
 ## Goals
 
 1. **Split prompts from generated outputs** — `prompts/` for configuration, `shared/` (and per-execution `runtime/<exec_id>/`) for generated artifacts.
-2. **Minimal framework, conventions in filenames** — the framework provides a small set of primitives (resolution, substitution, includes, frontmatter); composition is encoded in filename patterns, not in template-file orchestration.
-3. **Explicit, readable assembly** — running `ls` on a prompts directory tells you exactly what wraps each role. No template file to open, no hidden recursion to memorize.
-4. **Structural naming safety** — a user-defined role named `review` cannot collide with the singleton review action; they live in different namespaces.
-5. **Stage-ready** — frontmatter is the home for declarative stage metadata (pre_exec/post_exec lists, enablement, future params). The stage executor is a follow-up; this refactor lays the substrate.
-6. **Future-friendly** — clean hooks for richer template directives, CLI ad-hoc additions, and per-prompt frontmatter.
+2. **Filename-driven assembly** — composition encoded in filename patterns and directory placement, not in template-file orchestration. `ls` of a directory tells you what wraps each role.
+3. **Layered anchors** — project → org → embedded. Same filename overloads (first hit wins); distinct filenames compose.
+4. **Structural naming safety** — dir-level structural files prefixed with `_`; role-level files use the role basename. Parser deterministic.
+5. **Internal Go cleanup** — built-in commands collapse onto a `Stage` abstraction with `PreAction` / `PostAction` types. Same vocabulary as the Python framework, expressed once in Go.
+6. **Better external-orchestrator support** — `ateam exec` emits structured progress, writes events to the call DB, sharing the code path with `parallel`. Telemetry uniform regardless of who launched the agent.
+7. **Easy future flag: `--prompt-dir DIR`** — the assembler takes a `prompt_dir` parameter throughout. Adding the CLI flag later becomes plumbing, not a refactor.
 
 ## Naming convention
 
@@ -148,7 +133,7 @@ All files used by the framework follow a deterministic, suffix-driven pattern. T
 
 | Pattern | Means |
 |---|---|
-| `<role>.prompt.md` | Role `<role>` main body. Invokable as `:dir/<role>` or `:<role>`. Optional YAML frontmatter. |
+| `<role>.prompt.md` | Role `<role>` main body. Optional YAML frontmatter. |
 | `<role>.pre.md` | Role pre, single (overloads across anchors). |
 | `<role>.pre.<NAME>.md` | Role pre fragment named `<NAME>` (composes with other `<role>.pre.*.md` files). |
 | `<role>.post.md` | Role post, single. |
@@ -167,7 +152,7 @@ Two rules ensure unambiguous parsing:
 1. **Cannot start with `_`** — that prefix is reserved for dir-level structural files.
 2. **Cannot end with `.pre` or `.post`** — prevents greedy-parse ambiguity. A hypothetical role `code.pre` would make `code.pre.pre.scope.md` parse two ways (role `code.pre` pre `scope` vs. role `code` pre `pre.scope`).
 
-Otherwise role names are any dot-separated identifier: `security`, `code.bugs`, `project.security`, `review`, `prompt`, `pre_check`, etc.
+Otherwise role names are any dot-separated identifier: `security`, `code.bugs`, `project.security`, `review`, etc.
 
 ### Parsing (deterministic, suffix-driven)
 
@@ -176,23 +161,24 @@ For any `*.md` file in the prompts tree, the parser picks the first matching pat
 1. Ends with `.prompt.md` → role main, role = everything before `.prompt.md`.
 2. Ends with `.pre.md` or `.pre.<NAME>.md` → role pre, role = everything before the final `.pre`.
 3. Ends with `.post.md` or `.post.<NAME>.md` → role post, role = everything before the final `.post`.
-4. Filename is `_pre.md` or `_pre.<NAME>.md` (no role prefix) → dir-level pre.
+4. Filename is `_pre.md` or `_pre.<NAME>.md` → dir-level pre.
 5. Filename is `_post.md` or `_post.<NAME>.md` → dir-level post.
 6. Otherwise → arbitrary include, ignored by the framework parser.
 
 Role-name restrictions are validated after parsing. Violations error at load with a clear message.
 
-### Identifiers
+### How roles are invoked
 
-Names use forward-slash paths, no leading prefix:
-- `review` — singleton named prompt at root (file: `review.prompt.md`)
-- `report/security` — named prompt inside `report/` directory (file: `report/security.prompt.md`)
-- `code.bugs` — dotted role names work (file: `code.bugs.prompt.md`)
-- `crawl/web/sitea` — deeper nesting (future)
+Roles are selected by existing built-in commands' flags:
 
-The CLI surfaces these with a leading `:` to distinguish from raw text and file refs: `:review`, `:report/security`. The `:` syntax lives at the CLI layer; the core module accepts plain paths.
+```
+ateam report --roles security
+ateam report --roles project.security
+ateam code --roles auth.refactor
+ateam review              # singleton
+```
 
-`:dir-name` without a leaf (e.g. `:report`) is **not** an invokable name — directories are namespaces, not prompts.
+No `:dir/role` CLI syntax is introduced — that was speculative for a more open workflow surface that v1 doesn't ship. The internal assembler accepts a path-style name (`report/security`); the CLI maps `--action report --roles X` to that path.
 
 ## Target layout
 
@@ -203,8 +189,7 @@ The CLI surfaces these with a leading `:` to distinguish from raw text and file 
   secrets.env
   logs/
   prompts/
-    _pre.intro.md            # root-level pre, composes with other _pre.*.md
-    _post.disclosure.md      # root-level post
+    _pre.context.md          # root-level pre, applies to every prompt
     review.prompt.md         # singleton role
     review.pre.format.md     # (optional) per-role pre fragment
     auto_setup.prompt.md
@@ -213,18 +198,13 @@ The CLI surfaces these with a leading `:` to distinguish from raw text and file 
     exec_debug.prompt.md
     report_commissioning.prompt.md
     report/
-      _pre.format.md         # report dir-level pre — applies to every role in report/
-      _pre.severity.md       # composes lexically with above
-      _post.checklist.md     # report dir-level post
+      _pre.intro.md          # report dir-level pre — applies to every role in report/
+      _post.format.md        # report dir-level post
       security.prompt.md     # role main
       security.pre.scope.md  # (optional) per-role pre fragment
-      security.post.format.md# (optional) per-role post fragment
       test_gaps.prompt.md
-      code.bugs.prompt.md    # dotted role names are fine
-      code.bugs.pre.realistic.md
+      code.bugs.prompt.md
       ...
-      gather-deps.sh         # arbitrary script; referenced from frontmatter
-      validate.sh
     code/
       _pre.constraints.md
       security.prompt.md
@@ -239,34 +219,31 @@ The CLI surfaces these with a leading `:` to distinguish from raw text and file 
       verify.md
     auto_setup/
       auto_setup.md
-    history/                 # reserved
   runtime/
-    <exec_id>/               # per-run scratch, the default destination for prompt writes
+    <exec_id>/               # per-run scratch, default destination for prompt writes
 ```
 
-Same restructuring applies to `.ateamorg/` and the embedded `defaults/` tree. (The previously planned `.ateamorg/defaults/` tier is dropped — updating embedded defaults now requires a rebuild, which is acceptable since defaults change infrequently and keeping a separate runtime defaults tier added complexity without saving much.)
+Same restructuring applies to `.ateamorg/` and the embedded `defaults/` tree.
 
 ## Framework primitives (the whole list)
 
 The framework provides exactly these primitives. Composition is built into the naming convention — there is no template file to author.
 
-1. **Prompt resolution by name across anchors.** Anchors ordered most-specific to least: project → org → embedded. Fallback semantics (first hit wins).
-2. **Filename-based assembly.** Given a prompt name `<dir>/<role>`, the assembler discovers all matching files (role main, role pre/post fragments, dir-level pre/post fragments at every directory up the chain) and composes them per the assembly order below. No template file mediates this.
-3. **`{{var}}` substitution.** Existing template variables (`{{PROJECT_*}}`, `{{OUTPUT_*}}`, `{{EXEC_ID}}`, `{{ATEAM_OWN_*}}`, `{{CONTAINER_*}}`, etc.) plus new `{{prompt.name}}`, `{{prompt.path}}`, `{{LABEL}}`, `{{PROJECT_INFO}}`, `{{ROLE_REPORTS}}`.
-4. **`{{include PATH}}`** — inline a file's content at this position. **First-match across anchors.** Error if no anchor has the file.
-5. **`{{include? PATH}}`** — inline a file's content. **First-match across anchors.** Produces empty string if no anchor has it.
-6. **`{{include_glob PATTERN}}`** — inline files matching a glob, in deterministic order: within each anchor sorted lexically; across anchors most-general first (embedded → org → project). Empty string if no matches. Used internally by the assembler to find pre/post fragments; can also be called explicitly from any markdown file.
-7. **YAML frontmatter parsing** on `<role>.prompt.md` and on dir-level structural files. Strict schema; unknown keys reject with a clear error.
+1. **Prompt resolution by name across anchors.** Anchors ordered most-specific to least: project → org → embedded. First hit wins.
+2. **Filename-based assembly.** Given a prompt name `<dir>/<role>`, the assembler discovers all matching files and composes them per the assembly order below.
+3. **`{{var}}` substitution.** Template variables in the `scope.name` convention: `prompt.*`, `exec.*`, `project.*`, `git.*`, `container.*`, `env.NAME`, `ateam.*`, `role.*`. See the "Template variables" section for the full list. Old ALL_CAPS forms (`OUTPUT_DIR`, `EXEC_ID`, `PROJECT_NAME`, …) auto-migrate to the new names in user prompts.
+4. **`{{include PATH}}`** — inline a file's content. **First-match across anchors.** Error if no anchor has the file.
+5. **`{{include? PATH}}`** — inline a file's content. **First-match across anchors.** Empty string if no anchor has it.
+6. **`{{include_glob PATTERN}}`** — inline files matching a glob, deterministic order: within each anchor sorted lexically; across anchors most-general first (embedded → org → project). Empty string if no matches. Used internally by the assembler to find pre/post fragments; can also be called explicitly.
+7. **YAML frontmatter parsing** on `<role>.prompt.md` and on dir-level structural files. **Strict allow-list** — unknown keys reject with a clear error. v1 honors no user-pluggable keys; the parser exists to validate format and reserve the surface for future ateam-internal metadata.
 
 ### One rule for file composition across anchors
 
-**Same filename always overloads** — embedded's `_pre.intro.md` and project's `_pre.intro.md` are the same file at different anchors; first-match (project) wins. Never additive.
+**Same filename always overloads** — embedded's `_pre.context.md` and project's `_pre.context.md` are the same file at different anchors; first-match (project) wins. Never additive.
 
-**Different filenames compose** — if you want multiple fragments to all contribute, give them distinct names. Embedded ships `_pre.intro.md`, org adds `_pre.org_policy.md`, project adds `_pre.local.md`. They are three different files; the assembler picks up all three (lexical order within each anchor, embedded → org → project across anchors). Authors can prefix numerically (`01_`, `02_`) to control order explicitly.
+**Different filenames compose** — if you want multiple fragments to all contribute, give them distinct names. Embedded ships `_pre.context.md`, org adds `_pre.org_policy.md`, project adds `_pre.local.md`. They are three different files; the assembler picks up all three (lexical order within each anchor, embedded → org → project across anchors).
 
-This is one rule for the whole system: **filenames are the unit of overloading; sets of related filenames are the unit of composition**. Intent is explicit in the filename.
-
-### Assembly order for `:dir1/dir2/role`
+### Assembly order for `dir1/dir2/role`
 
 ```
 [CLI --pre-prompt]
@@ -282,7 +259,7 @@ This is one rule for the whole system: **filenames are the unit of overloading; 
 [CLI --post-prompt]
 ```
 
-Each `_pre.*.md` / `_post.*.md` slot expands to all matching files at that directory level, composed across anchors per the rule above. Role-level pre/post is just inside the innermost dir-level pre/post.
+Each `_pre.*.md` / `_post.*.md` slot expands to all matching files at that directory level, composed across anchors per the rule above.
 
 ### Substitution inside include paths
 
@@ -291,14 +268,11 @@ Include paths may contain `{{var}}` substitutions. Resolution is two-pass:
 1. Substitute `{{var}}` inside the include path text.
 2. Resolve the include against anchors.
 
-So `{{include_glob {{prompt.name}}.pre.*.md}}` resolves `{{prompt.name}}` first (e.g. to `security`), then finds all files matching `security.pre.*.md` across all anchors and inlines them (within-anchor lexical order, embedded → org → project across anchors). The assembler uses `{{include_glob}}` internally to find pre/post fragments at every directory level; the same primitive is available inside any markdown file for ad-hoc composition.
-
 ### Cycles, depth, errors
 
 - `{{include}}` recursion is depth-limited (e.g. 16 levels). Cycle detection errors at preview/assembly time.
 - `{{include? }}` produces empty on missing; never errors for missing files.
-- Invoking a directory name without a leaf (e.g. `:report` instead of `:report/security`) errors at preview time — directories are namespaces, not invokable prompts.
-- YAML frontmatter parse errors are loud at preview time.
+- YAML frontmatter parse errors are loud at preview time. Unknown frontmatter keys error.
 
 ### Orphan-fragment detection (catches typos)
 
@@ -310,15 +284,13 @@ orphan fragment: report/securty.pre.scope.md
   did you mean: security?
 ```
 
-Levenshtein hint when the base name is close to an existing prompt. Catches the typo failure mode cheaply.
+Levenshtein hint when the base name is close to an existing prompt.
 
-Dir-level fragments (`_pre.md`, `_post.md`, `_pre.<NAME>.md`, `_post.<NAME>.md`) are not subject to this check — they don't pair with any specific named prompt.
+## Composition: dir-level and role-level wrappers
 
-## Composition: dir-level and role-level wrappers (replaces the template concept)
+There is no template file. The assembly order is **encoded in the filenames** and the directory chain. Reading `ls` of a directory tells you exactly what wraps each role; opening any single file is enough to understand its content.
 
-There is no `_template.md` file. The assembly order is **encoded in the filenames** and the directory chain. Reading `ls` of a directory tells you exactly what wraps each role; opening any single file is enough to understand its content.
-
-### What gets assembled for `:report/security`
+### What gets assembled for `report/security`
 
 ```
 [CLI --pre-prompt]                          (outermost ad-hoc)
@@ -332,688 +304,338 @@ There is no `_template.md` file. The assembly order is **encoded in the filename
 [CLI --post-prompt]
 ```
 
-Each slot expands to all files matching the pattern at that anchor, composed in lexical order within an anchor, embedded → org → project across anchors.
-
 ### What ateam ships in embedded defaults
 
-The embedded defaults seed concrete files for the standard workflows.
-
 **Root level** (`defaults/prompts/`):
-- `_pre.context.md` — block containing `{{PROJECT_INFO}}` (so every prompt gets project context).
-- `review.prompt.md` — review singleton (body references `{{ROLE_REPORTS}}`).
+- `_pre.context.md` — block containing `{{project.info}}` (every prompt gets project context).
+- `review.prompt.md` — review singleton (body references `{{role.reports}}`).
 - `auto_setup.prompt.md`, `code_management.prompt.md`, `code_verify.prompt.md`, `exec_debug.prompt.md`, `report_commissioning.prompt.md` — other singletons.
 
 **Report directory** (`defaults/prompts/report/`):
-- `_pre.intro.md` — "You are performing a {{prompt.name}} report on this project. Your speciality and approach:"
-- `_post.format.md` — "Format your findings as severity-tagged markdown sections, scoped by file path. Use this scale: blocker / high / medium / low. Skip findings without a realistic exploit path or measurable impact."
-- `security.prompt.md`, `test_gaps.prompt.md`, `code.bugs.prompt.md`, etc. — pure role bodies (no boilerplate).
+- `_pre.intro.md` — "You are performing a {{prompt.name}} report on this project."
+- `_post.format.md` — "Format your findings as severity-tagged markdown sections..."
+- `security.prompt.md`, `test_gaps.prompt.md`, `code.bugs.prompt.md`, etc. — pure role bodies.
 
-Reading `ls defaults/prompts/report/` tells you: there's a shared intro applied to every report, a shared format applied to every report, and N role-specific files. No file to open to "understand the wrap."
-
-**Code directory** (`defaults/prompts/code/`):
-- Similar shape, with code-specific framing.
-- The `code_management` singleton's body uses `{{include shared/review/review.md}}` directly (first-match, errors if missing) — replacing today's `cmd/code.go` read+inline-or-bail logic.
-
-### What a role file looks like
-
-`defaults/prompts/report/security.prompt.md`:
-```
-Focus on confirmed exploitable bugs and data exposure with realistic triggers.
-Refuse to break working features with defensive header tightening.
-```
-
-No frontmatter, no boilerplate. Pure body content. The dir-level `_pre.*.md` and `_post.*.md` files at every level above are applied automatically per the assembly order.
+Reading `ls defaults/prompts/report/` tells you: there's a shared intro, a shared format, N role-specific files. No file to open to "understand the wrap."
 
 ### Project-level customization patterns
 
 **Recommended (surgical, upgrade-safe):**
-- Add `report/security.pre.<NAME>.md` at project or org anchor → composes into security's pre alongside whatever embedded ships. Use a meaningful `<NAME>` (e.g. `local_scope`, `policy`, `01_priority`). Numeric prefixes control order.
-- Add `report/_post.<NAME>.md` at project or org anchor → applies to every role in `report/` in this project/org.
+- Add `report/security.pre.<NAME>.md` at project or org anchor → composes into security's pre alongside whatever embedded ships.
+- Add `report/_post.<NAME>.md` at project or org anchor → applies to every role in `report/`.
 - Add `_pre.<NAME>.md` at the prompts root → applies to every prompt in every dir.
-- Add a brand-new `report/<my-custom>.prompt.md` → custom role. No upgrade conflict because there's no embedded version.
-- Frontmatter on a role's `<role>.prompt.md` adds `pre_exec` / `post_exec` actions for that role (additive to dir-level frontmatter, if any).
+- Add a brand-new `report/<my-custom>.prompt.md` → custom role. No upgrade conflict.
 
 **Avoid (drift risk on ateam upgrade):**
-- Overriding `report/security.prompt.md` wholesale at project anchor — you'll lose embedded improvements when ateam upgrades. If you genuinely need a different security role, fork it under a different name (e.g. `security_strict.prompt.md`) — that becomes a custom role with no upgrade risk.
-- Overriding `report/_pre.intro.md` wholesale unless you actually want to replace the shipped intro entirely.
-
-Each recommended pattern is a single file drop. None affects others.
+- Overriding `report/security.prompt.md` wholesale at project anchor — you'll lose embedded improvements when ateam upgrades. If you need a different security role, fork it under a different name (e.g. `security_strict.prompt.md`).
 
 ### Why this scheme
 
-- **`ls` is documentation.** A directory's contents tell you everything that wraps the roles in it. No template file mediates.
-- **Forgot-an-include is impossible.** The assembler walks the directory chain and discovers all matching files automatically. You can't forget what you didn't have to write.
-- **Fixed structure where it counts.** Header → role pre → role main → role post → footer at every level. You give up the ability to invent custom shapes; you gain readability.
-- **Flexibility is preserved via `{{include}}`.** Inside any file (header, role body, footer), you can `{{include}}` other content for complex composition. Same template engine, used inside slots instead of orchestrating them.
+- **`ls` is documentation.** A directory's contents tell you everything that wraps the roles in it.
+- **Forgot-an-include is impossible.** The assembler walks the directory chain and discovers all matching files automatically.
+- **Fixed structure where it counts.** Header → role pre → role main → role post → footer at every level.
+- **Flexibility preserved via `{{include}}`.** Inside any file you can `{{include}}` other content.
 
 ## How a role is identified
 
 A role is the basename `<role>` of a file matching `<role>.prompt.md`. An "action" is the directory name at the top of `prompts/`. A role exists iff `prompts/<action>/<role>.prompt.md` exists somewhere in the resolution chain. Singleton actions (named prompts at root) live alongside roles in different dirs; they cannot collide.
 
-There are no `Role` or `Action` types in the core. The CLI keeps role/action vocabulary for discoverability (`ateam report --roles security`); under the hood that maps to `Assemble("report/security")`.
+The CLI keeps role/action vocabulary (`ateam report --roles security`); the assembler accepts the path-style equivalent (`report/security`).
 
 ## Two kinds of "extra work" around a prompt
 
-The system distinguishes two fundamentally different categories of work that ateam performs around an LLM invocation. They must not be conflated.
+The system distinguishes two fundamentally different categories of work that ateam performs around an LLM invocation.
 
 ### A. Assembly-time content injection — output goes INTO the prompt
 
-Data the agent reads. Computed during prompt assembly. Saves the agent from doing the work itself (or makes it possible for the agent to act on context it couldn't otherwise see).
+Data the agent reads. Computed during prompt assembly. Saves the agent from doing the work itself.
 
 Mechanisms in v1:
-- **Template variables** — `{{PROJECT_INFO}}`, `{{ROLE_REPORTS}}`, `{{PROJECT_NAME}}`, `{{ATEAM_OWN_*}}`, etc. ateam computes these once per env and inlines them where referenced.
-- **Includes** — `{{include FILE}}` (required, first-match), `{{include? FILE}}` (optional, first-match), `{{include_glob PATTERN}}` (composes all matches across anchors). Inline file content.
+- **Template variables** — `{{project.info}}`, `{{role.reports}}`, `{{project.name}}`, etc. Computed once per env and inlined.
+- **Includes** — `{{include FILE}}`, `{{include? FILE}}`, `{{include_glob PATTERN}}`.
 
-Future addition (deferred): `{{shell CMD}}` directive for user-defined scripts whose stdout becomes prompt content. See the Stage concept's "Forward look" subsection for the full spec — scripts must be idempotent/read-only; preview runs them with `ATEAM_PREVIEW=1` env var set; side-effecting work belongs in `pre_exec`. Scripts can call `ateam flow` for runtime flow control without mixing concerns.
-
-**Key property:** these run during preview. `ateam prompt :NAME --preview --content` shows the actual assembled prompt — that means assembly-time content has been computed. Anything in this category must be **idempotent and side-effect-free**.
+**Key property:** these run during preview. Anything in this category must be **idempotent and side-effect-free**.
 
 ### B. Pre / post execution hooks — output does NOT go into the prompt
 
-Work done before or after the agent runs. Output is captured as logging only — never seen by the agent in its prompt. Used for environment setup, post-run validation, and side effects.
+Work done before or after the agent runs. **In v1, this is NOT user-pluggable.** Built-in workflows have hardcoded Go pre/post logic; users can't add their own hooks via frontmatter, scripts, or any other surface.
 
-Mechanisms in v1: ordered steps declared in YAML frontmatter on prompt-tree markdown files. Dir-level lists live in frontmatter on any `_pre.*.md` or `_post.*.md` file in the dir (lists merge across all such files); role-level lists live in `<role>.prompt.md` frontmatter. A step is either:
-- a **built-in action** referenced by name (e.g. `copy-runtime-files`, `concurrent-run-check`) — implemented in ateam's Go code.
-- a **script path** relative to the file's directory — black-box subprocess that gets the run's environment.
+Today's built-in pre-hooks (kept in Go for v1):
 
-**Key property:** these do NOT run during preview. Preview only shows what *would* run. Side effects are expected and acceptable at run time (creating dirs, copying files, running tests, committing).
-
-### Where past brainstorming conflated them
-
-Earlier drafts put `project-info` and `discover-reports` in `pre_exec`. That was wrong: their **output is part of the prompt content**, not the runtime environment. They belong in category A (template variables / includes), not B (frontmatter exec lists). The action catalog below is corrected accordingly.
-
-The two categories are connected at the run level (a pre-exec script might write a file that an `{{include}}` later picks up), but the mechanisms are separate and live in different parts of the spec.
-
-## The Stage concept (framing for what comes next)
-
-A **stage** is the unit of "one LLM invocation with deterministic wrapping." A stage has three phases:
-
-1. **Pre** — environment setup, gating checks. From frontmatter `pre_exec` list.
-2. **Prompt** — the LLM call, using the assembled prompt. Assembly-time content (category A above) is already baked into the prompt text at this point.
-3. **Post** — runtime validation, copy/version files, update tracking, log telemetry. From frontmatter `post_exec` list.
-
-Pre and post lists are ordered. Composition: per-role frontmatter lists **extend** dir-level lists. Order in the YAML list is the execution order.
-
-### Where does dir-level frontmatter live?
-
-**Decided**: on any `_pre.*.md` or `_post.*.md` file in the directory. Frontmatter lists merge across all such files in the dir. There is no separate metadata file (no `_meta.yaml`); structural files carry both content and metadata.
-
-Per-role frontmatter on `<role>.prompt.md`:
-```yaml
----
-pre_exec: [./security-extra-setup.sh]
-post_exec: [./security-extra-validate.sh]
----
-Focus on confirmed exploitable bugs...
-```
-
-Dir-level frontmatter on (e.g.) `report/_pre.intro.md`:
-```yaml
----
-pre_exec: [concurrent-run-check, source-writable, ./gather-deps.sh]
-post_exec: [copy-runtime-files, ./validate.sh]
----
-You are performing a {{prompt.name}} report on this project.
-[... rest of the pre fragment's markdown body ...]
-```
-
-Assembling `:report/security` then runs `pre_exec` = `[concurrent-run-check, source-writable, ./gather-deps.sh, ./security-extra-setup.sh]` and `post_exec` = `[copy-runtime-files, ./validate.sh, ./security-extra-validate.sh]`. None of these contribute to prompt text.
-
-If multiple structural files in the same dir carry frontmatter (e.g. both `_pre.intro.md` and `_post.format.md` declare `pre_exec` entries), the lists concatenate in lexical filename order. This is consistent with how the content fragments themselves compose.
-
-**This refactor does not implement the stage executor.** It establishes the substrate:
-- The filesystem layout where actions get declared (frontmatter).
-- The prompt-assembly engine (`{{include}}`, substitution, anchors).
-- Today's hidden Go-side promotion will become an explicit `copy-runtime-files` action.
-
-For now, `cmd/report.go` / `cmd/review.go` / etc. keep their current shape, just calling the new `Assembler`. The stage executor is a follow-up.
-
-### Where the line is: stage actions vs. runner core
-
-- **Stage action** = business logic specific to a prompt or family of prompts. Express-able as a discrete, named, opt-in step. Could realistically live in a script.
-- **Runner core** = infrastructure plumbing every agent invocation needs. Stays hardcoded in `internal/runner/`. Not user-configurable.
-
-### Today's hardcoded Go logic, re-sorted by category
-
-What ateam does in Go today around an invocation, split by which mechanism in the new world handles it.
-
-**Category A — Assembly-time content injection (becomes template variables or includes)**
-
-| Today's hardcoded Go | Where (file:line) | New-world mechanism |
-|---|---|---|
-| `gitutil.GetProjectMeta` + `FormatProjectInfo()` → git HEAD + uncommitted-files block prepended to every prompt | `internal/root/resolve.go:91-121`, called by every `cmd/*.go` | `{{PROJECT_INFO}}` template variable (computed once per env, cached) |
-| `prompts.DiscoverReports` → scan `shared/report/*/<name>.md`, filter by `--roles/--all/--max-age`, inline as "# Role Reports" section into the review prompt | `cmd/review.go:177-184`, `prompts/prompts.go:209-242` | `{{ROLE_REPORTS}}` template variable (provided by ateam; encapsulates discovery + filtering + inlining) |
-| `cmd/code.go:158-171` reads `shared/review/review.md`, errors if missing, inlines into code_management prompt | `cmd/code.go:158-171` | `{{include /shared/review/review.md}}` in the `code_management.prompt.md` body — first-match (errors if missing), inlines content. No special action needed. |
-
-These do NOT belong in `pre_exec` frontmatter. They are part of the prompt's content; they are computed during assembly; they have no effect on the runtime environment.
-
-**Category B — Pre-execution hooks (stays as `pre_exec` actions)**
-
-| Action | What it does today | Where (file:line) | Universal or per-prompt |
+| Hook | What it does | Where (file:line) | Used by |
 |---|---|---|---|
-| `concurrent-run-check` | Query DB for live processes matching project+action+role; block unless `--force`. | `cmd/table.go:921-948` | report / code / verify / review |
+| `concurrent-run-check` | Query DB for live processes matching project+action+role; block unless `--force`. | `cmd/table.go:921-948` | report / code / verify / review / parallel |
 | `budget-precheck` | Gate new dispatches against accumulated batch cost. | `cmd/table.go:825-849` | report / code / verify (batch mode) |
 | `source-writable` | Flag container to allow writes to project source. | `cmd/table.go:905-911` | code / verify / auto_setup / inspect |
 
-**Category B — Post-execution hooks (stays as `post_exec` actions)**
+Today's built-in post-hooks (kept in Go for v1):
 
-| Action | What it does today | Where (file:line) | Universal or per-prompt |
+| Hook | What it does | Where (file:line) | Used by |
 |---|---|---|---|
-| `copy-runtime-files` | Copy every file from `runtime/<exec_id>/` to `SHARED_PROMPT_DIR/`. | `internal/runner/runner.go:1150-1199` | report / review / auto_setup |
+| `copy-runtime-files` (promotion) | Copy every file from `runtime/<exec_id>/` to `exec.shared_prompt_dir/`. | `internal/runner/runner.go:1150-1199` | report / review / auto_setup |
 | `chain-next` | Optional next stage on success (`report --review` → `ateam review`; `code` → `ateam verify` unless `--no-verify`). | `cmd/report.go:354-356`, `cmd/code.go:347-365` | report (opt-in), code (default-on) |
 
-That's the v1 catalog. Nothing speculative.
+After the internal Stage refactor (next section), these become typed `PreAction` / `PostAction` values registered on each Stage definition. Still not user-pluggable; just cleaner internally.
 
-### Aspirational additions (real new capabilities, not pull-outs)
+**What external orchestrators do.** Anything Category B that's specific to a custom workflow lives in the orchestrator (Python framework, shell, CI). ateam exposes enough on `ateam exec` (`--work-dir`, `--role`, `--action`) and `ateam ps` / `ateam inspect` for orchestrators to drive runs and read back outcomes. See "External orchestration: the Python framework" below.
 
-Listed for completeness; design when there's concrete need.
+## Internal Go restructuring (Stage / PreAction / PostAction)
 
-**Category A (future template variables / directives)**
+The five built-in commands today (`cmd/report.go`, `cmd/code.go`, `cmd/review.go`, `cmd/verify.go`, `cmd/auto_setup.go`) hand-write the same shape: resolve env → build prompt → check concurrent runs → run agent → promote files → maybe chain to next stage. Each does it slightly differently; helpers in `cmd/table.go` get called from each site individually.
 
-| Mechanism | What it would do |
-|---|---|
-| `{{PROJECT_MAP}}` | Richer than `{{PROJECT_INFO}}`: file tree, language stats, key entry points. Template variable. |
-| `{{shell CMD}}` directive | Run a script during assembly, inline stdout into the prompt. For user-provided context-gathering scripts. |
-| `{{include /SHARED/...}}` | Already covered by the include primitive; just convention. |
-
-**Category B (future pre/post-exec actions)**
-
-| Action | Phase | What it would do |
-|---|---|---|
-| `create-git-worktree` | pre | Isolated worktree for code agents. |
-| `git-commit` | post | Stage and commit code changes. |
-| `run-tests` | post | Run project test command; record pass/fail. |
-| `validate-schema` | post | Validate primary output against a declared schema. |
-| `update-task` | post | Push run result to a task tracker. |
-| `log-telemetry` | post | Emit run metadata to a configured sink. |
-
-### What stays in the runner core (never a stage action)
-
-Infrastructure every agent invocation needs.
-
-**Pre-execution:**
-- Allocate `exec_id` and insert call row (`InsertCall`)
-- Create `logs/<exec_id>/` and `runtime/<exec_id>/` directories
-- Container preparation, sandbox JSON generation, `settings.json` materialization
-- Template-variable resolution (the engine itself)
-- Resolved-prompt archival to `logs/<exec_id>/prompt.md`
-- Initial `cmd.md` render with run context
-
-**Post-execution:**
-- Event-stream processing (assistant / thinking / tool_use / tool_result / result / error)
-- Cost & token accounting; budget enforcement
-- PID recording for liveness tracking
-- `output-fallback`: seed `runtime/<id>/<primary>.md` if the agent didn't write the primary file
-- `finalizeCall` (success determination)
-- `classifyFailure` (timeout / cancellation / agent error / no-result)
-- `appendStderrSummary`
-- Final `cmd.md` re-render
-- `UpdateCall` (EndedAt, DurationMS, ExitCode, IsError, costs, tokens, model, peak context, git end hash)
-- Progress channel finalization
-
-### What's already in templates (and not Go logic anymore)
-
-`{{PROJECT_*}}`, `{{OUTPUT_*}}`, `{{ATEAM_OWN_*}}`, `{{ROLE}}`, `{{ACTION}}`, `{{BATCH}}`, `{{TIMESTAMP}}`, `{{PROFILE}}`, `{{EXEC_ID}}`, `{{AGENT}}`, `{{MODEL}}`, `{{CONTAINER_*}}`. Resolved in `internal/runner/template.go:37-68`.
-
-### Things checked but not present today
-
-- Git worktree creation in Go
-- History archival
-- Container teardown / `defer c.Stop()`
-- Auto-commit / PR creation in Go
-- Log rotation / cleanup
-
-### Forward look: `ateam flow` and `{{shell}}` (stage-executor follow-up, not in this refactor)
-
-Two related primitives extend the stage system without changing what we've already designed. They're called out here so the spec stays consistent with where the design is heading.
-
-#### `ateam flow <action>` — runtime flow control from scripts
-
-A new CLI subcommand that scripts (in `pre_exec`, `post_exec`, or even `{{shell}}` directives) call to signal lifecycle decisions back to the runner. Cleanly separates "decide what should happen" (script) from "framework reacts" (runner).
-
-**v1 action set:**
-
-| Action | What it does |
-|---|---|
-| `ateam flow skip [--reason TEXT]` | Don't invoke the LLM for this job. Mark as skipped in the call DB. Post_exec doesn't run. `chain-next` doesn't fire. |
-| `ateam flow error [--reason TEXT]` | Don't invoke the LLM. Mark as failed (with reason). Counts as failure in batch summary. |
-| `ateam flow abort [--reason TEXT]` | Kill the entire `ateam parallel` batch. In-flight jobs receive SIGTERM; pending jobs marked cancelled. |
-| `ateam flow continue` | Explicit no-op signal. Enables clean `... && ateam flow continue \|\| ateam flow error` shell patterns. |
-| `ateam flow note <text>` | Attach a free-form note to the run record. Visible in `ateam ps`, `ateam inspect`, the DB. Use for "found cached result" type observations that aren't full skips. |
-
-**Richer v2 action set (before the "future" deferral).** The v1 set above is the minimum needed for the substrate. The following extend it to make script-driven workflows self-sufficient — without them, any non-trivial post-LLM business logic forces an external dispatcher (a Python wrapper, a Makefile, etc.).
-
-**Pre-exec additions:**
-
-| Action | What it does |
-|---|---|
-| `ateam flow completed [--reason TEXT]` | Script did the work itself; no LLM call needed. Like `skip` but marks success. The script is responsible for writing the output to the normal output path (`runtime/<exec_id>/<primary>.md`). post_exec runs normally (promotion, chain-next, telemetry). DB row records `status = completed-by-script` (distinct from `completed-by-agent`). |
-
-Useful when a deterministic path handles the common case and the LLM is only needed for edge cases (e.g. a formatter handles 90% of inputs; the LLM handles the 10% with non-obvious diffs).
-
-**Post-exec additions:**
-
-| Action | What it does |
-|---|---|
-| `ateam flow redo --extra TEXT` | Re-run the same prompt with an appended instruction. New `exec_id` with `parent_exec_id` pointing at the original; the prior attempt is preserved on disk and in the DB. Loop-guarded by frontmatter `max_redos: N` (default 2). Default skips pre_exec on the redo (gating already passed); opt-in `--rerun-pre`. Output lands in the redo's `runtime/<exec_id>/`; promotion runs after the redo settles. |
-| `ateam flow fallback --profile X` (or `--agent X`) | Re-run with a different agent/profile. Same audit shape (new exec_id, parent pointer). Useful when one agent's API is degraded but the workflow shouldn't fail the whole batch. |
-| `ateam flow retry [--after N \| --until-reset \| --backoff POLICY]` | Re-run with the same config after a wait. One action, three policies: explicit sleep, rate-limit-aware sleep (parse headers from prior error, sleep until reset), exponential backoff for 5xx. |
-
-**Boundary: what belongs in `ateam flow` vs. in ateam core.** Pure transient-error handling (5xx, rate limits) should be **inside ateam itself** as profile config (e.g. `retry_on: [api_5xx, rate_limit]`, `max_retries: 3`, `backoff: exponential`) rather than driven by `post_exec` scripts. Every workflow wants this; re-implementing it per-script is a footgun. The only retry case that genuinely needs `ateam flow` is the **business-logic** one — script inspects the output and decides "almost right, redo with this hint." Pure transient retry should be invisible to scripts.
-
-**`on_failure` is a separate primitive, not a flow action.** When a pre_exec script returns a non-zero exit (e.g. the deterministic shortcut tried but failed), the right answer is a step-level `on_failure: stop | continue | fallback_to_llm` declared in frontmatter — not a flow action. The script doesn't decide "should the LLM run on my error?"; the workflow author declares that policy once. See pending question #6.
-
-**Rich post_exec context: `runtime/<exec_id>/_run.json`.** post_exec scripts need more than env vars to make business decisions. Write a JSON document at the start of post_exec (before user scripts run) containing:
-
-- **Identity:** `exec_id`, `parent_exec_id` (for redo/fallback chains), `batch`, `work_dir`, `prompt_path`, `args` (resolved `{{arg.*}}` namespace).
-- **Config:** `agent`, `profile`, `model`, `effort`, container info.
-- **Timing:** `started_at`, `ended_at`, `elapsed_ms`.
-- **Cost:** `usd`, tokens by category (`input`, `output`, `cache_read`, `cache_write`).
-- **Outcome:** `exit_code`, `is_error`, `failure_category` (`timeout` | `api` | `budget` | `no_result`), `peak_context`.
-- **Output:** `primary_output_path`, file list under `runtime/<exec_id>/`.
-- **Activity summary:** tool_use counts by tool name, assistant message count, thinking token count.
-
-This is what unlocks non-trivial post_exec scripts: "did the agent run tests? → if no tool_use of Bash, `redo` with stronger instruction"; "produced the expected output file?"; "cost exceeded budget → `flow error` and stop, don't redo." None of this is doable from env vars alone. The `--auto-debug` agent reads the same JSON the post_exec script does — single source of truth for "what happened in this run."
-
-**Future actions (deferred until concrete need):**
-- `set <key> <value>` / `get <key>` — run-scoped K/V store (post_exec can read what pre_exec computed).
-- `defer [--until TIMESTAMP]` — requeue at a future time.
-- `output <file>` — declare a non-default primary output file.
-- `promote <src> <dst>` — explicit copy from `runtime/` to `shared/`.
-- `fork <name>`, `wait <exec_id>` — dynamic fan-out / job dependencies inside a batch.
-
-**Storage:**
-- In-flight: `runtime/<exec_id>/_flow.toml` — append-only during the run. Runner reads at decision points (before LLM, before post_exec, after post_exec). File-based, no DB lock contention with many parallel writers.
-- Historical: call DB row's `status` field gains `skipped` / `aborted` values; new `flow_reason` text column captures the message.
-
-**Discovery:**
-- `ATEAM_EXEC_ID` env var (ateam already sets project/role env for child processes). Scripts ateam launches inherit it.
-- Optional `--exec-id` flag for explicit override (escape hatch for sandboxes or sub-processes that strip env).
-
-**Example — pre_exec gates the run:**
-```bash
-#!/bin/sh
-# .ateam/prompts/crawl/check-needed.sh, declared in dir-level pre_exec
-if [ "$(stat -c %Y source.json)" -le "$(cat .last_crawl 2>/dev/null || echo 0)" ]; then
-  ateam flow skip --reason "source unchanged since last crawl"
-  exit 0
-fi
-```
-
-Works the same for `ateam exec` (single job) and `ateam parallel` (N independent jobs, each with its own flow signal).
-
-#### `{{shell CMD}}` — assembly-time content injection (Category A)
-
-Already noted as "Out of scope" earlier; now formalized for symmetry with `ateam flow`.
-
-`{{shell CMD}}` runs `CMD` during prompt assembly; its stdout becomes part of the prompt body. Used for deterministic context injection that the agent would otherwise have to compute itself.
-
-```
-{{shell git diff --stat HEAD~5}}
-{{shell ./pick-paragraph.sh "$ATEAM_STATE"}}
-```
-
-**Rules:**
-
-1. **Scripts must be idempotent and read-only** beyond `ateam flow` side effects. Assembly may run during `--preview`; scripts that write files or call external APIs don't belong here (use `pre_exec` instead).
-2. **`ATEAM_PREVIEW=1` env var is set during preview** runs. Scripts that need to branch on "is this a real run or a preview?" check that.
-3. **Frontmatter is NOT modifiable from `{{shell}}`.** Frontmatter is parsed before content; assembly-time scripts run during content expansion and can't retroactively change it. To influence the runtime (e.g. "skip this job"), call `ateam flow skip` from inside the shell script — the runner picks up the flow signal after assembly completes and acts on it before launching the LLM.
-4. **Two-pass expansion** (like includes): `{{var}}` substitutions inside `{{shell CMD}}` are resolved first, then the shell command runs.
-
-#### How `ateam flow` and `{{shell}}` compose
-
-Assembly-time decision flow:
-1. Prompt is assembled. `{{shell ./check.sh}}` runs; the script calls `ateam flow skip` if it determines no work is needed.
-2. Assembly completes; prompt text is built normally.
-3. Runner reads `_flow.toml` before launching the agent.
-4. If `skip` was signalled, the LLM is never invoked. Status recorded; batch summary reflects the skip.
-
-This two-stage flow (assembly produces content + flow signals; runner acts on signals after assembly) cleanly separates content composition from lifecycle control. Neither mechanism leaks into the other.
-
-#### What we get vs. cost
-
-- Solves the conditional-run-in-parallel case the file-system approach can't express in shell pipelines.
-- Solves the "skip a job without writing a custom dispatcher" case (Option 4 in the brainstorm).
-- One new CLI subcommand (`ateam flow`), one new flow-state file (`_flow.toml`), one expansion of the call DB schema (status enum, reason text).
-- `{{shell}}` is one additional template-engine primitive.
-- Both are **post-refactor** — this refactor establishes the substrate (assembler module, frontmatter, anchors). The stage executor follow-up implements `ateam flow` and `{{shell}}`.
-
-## Ad-hoc prompts and CLI-injected stages
-
-For lightweight workflows the user doesn't want to set up a full dir structure with role files. Common case: `ateam parallel` over a few hand-written prompt files, with shared orchestration declared via CLI flags.
-
-```
-ateam parallel @file1.md @file2.md \
-  --pre-exec 'builtin:create-git-worktree {{LABEL}}' \
-  --pre-exec './my-script.sh {{LABEL}}' \
-  --post-exec './my-other-script.py' \
-  --labels job1,job2 \
-  --post-prompt "pay attention to this custom instruction"
-```
-
-This pattern needs the following spec additions.
-
-### Prompt sources
-
-A prompt can come from three places, with the same assembly pipeline:
-
-1. **Named prompt**: `:name` or `:dir/name` — resolved through the anchor system.
-2. **File reference**: `@path/to/file.md` — absolute or relative path. Frontmatter is parsed if present.
-3. **Inline text or stdin** — passed as a positional argument or piped.
-
-For (2) and (3) there is no dir-level wrap — the prompt is **standalone**. The file body (after frontmatter, if any) is what the agent sees, plus the outermost CLI pre/post wrappers and any CLI-injected pre/post-exec actions.
-
-`{{prompt.name}}` for ad-hoc prompts defaults to the file's basename without extension (`file1` for `@file1.md`), or the `--label` value if provided, or empty for raw inline/stdin.
-
-### CLI-injected stage actions
-
-Two new flag families mirror the frontmatter declarations:
-
-- `--pre-exec ACTION` (repeatable) — appended to whatever `pre_exec` the dir-level and role-level frontmatter declare. CLI items run **after** frontmatter-declared items in the pre phase (so user CLI hooks see the standard setup already done).
-- `--post-exec ACTION` (repeatable) — appended to `post_exec`. Same ordering.
-
-CLI items go through the same expansion as frontmatter items (substitutions, builtin-vs-script resolution). Existing `--pre-prompt TEXT` / `--post-prompt TEXT` keep their meaning (outermost raw-text wrap).
-
-**Action vs script syntax.** Bare names resolve against the built-in actions registry (`concurrent-run-check`, `copy-runtime-files`, etc.). Path-like values (starting with `./`, `/`, or `~`) are scripts. The explicit `builtin:NAME` prefix is supported for clarity (and matches the user's mental model in mixed examples).
-
-**Script path resolution.** Differs by source:
-- Frontmatter in dir-level metadata or `<role>.prompt.md`: relative paths resolve from the file's directory.
-- CLI `--pre-exec` / `--post-exec`: relative paths resolve from the user's CWD (where they invoked `ateam`).
-- This matches user expectation: prompt-tree-declared scripts ship with the prompts; CLI-injected scripts are project-local.
-
-### Labels (`--labels`)
-
-`ateam parallel` accepts `--labels A,B,C` matching the order of positional prompt sources. Within each job, `{{LABEL}}` resolves to that job's label.
-
-If `--labels` is omitted, defaults are:
-- For `@file.md`: the file's basename (`file1` from `@file1.md`).
-- For inline/stdin: positional index (`job-1`, `job-2`, …).
-- For `:named/prompt`: the prompt's last path component (matches `{{prompt.name}}`).
-
-`{{LABEL}}` is distinct from `{{prompt.name}}`. `prompt.name` identifies the prompt CONTENT (source); `LABEL` identifies the JOB within a parallel batch. For `ateam parallel @site-a.md @site-b.md --labels east,west`, prompt 1 has `prompt.name = site-a`, `LABEL = east`.
-
-Pre-exec / post-exec scripts referencing `{{LABEL}}` get the per-job substitution. Concretely, this makes the worktree-per-job pattern trivial: `--pre-exec 'builtin:create-git-worktree myproj-{{LABEL}}'` creates one worktree per parallel job.
-
-### Final composition for a run
-
-For any run (built-in workflow or ad-hoc), the final `pre_exec` list is:
-
-1. Items from the dir-level frontmatter (if any).
-2. Items from the named prompt's frontmatter (if any).
-3. Items from `--pre-exec` CLI flags (in order).
-
-Same shape for `post_exec`. Same general layering for the prompt-text wrap (CLI `--pre-prompt` outermost, then assembled prompt body, then CLI `--post-prompt`).
-
-### Why not put orchestration in each file?
-
-For one or two ad-hoc files, frontmatter in each works. For "N similar jobs with the same hooks," the CLI form is the right place: one declaration covers N jobs, and each job's per-job substitutions (`{{LABEL}}`) flow naturally. For ateam's built-in workflows (report, code, review), the orchestration lives in the shipped dir-level metadata — same mechanism, different home.
-
-### Inline frontmatter on stdin / heredoc
-
-When the prompt source is stdin or a heredoc, standard YAML frontmatter works:
-
-```
-ateam exec <<EOF
----
-pre_exec: [./my_script.sh {{prompt.name}}]
-post_exec: [./my_other_script.sh]
----
-{{include ./local_file.md}}
-
-do something
-
-{{include? ./custom_instructions.md}}
-EOF
-```
-
-Whether this is heavily used is an open question (the user noted: "for this use case it's better to just run the pre_exec scripts before/after `ateam exec`"). The framework supports it because frontmatter is uniform across all prompt sources, but the killer use case is `ateam parallel` with CLI flags, not single-shot inline.
-
-## Python framework as external orchestration
-
-Some workflows are dominated by **algorithmic state** — typed config across N variants, per-job pre-flight checks, conditional skips, parallel batches with structured per-job results. The filesystem-and-`ateam-flow` path expresses this through scripts + frontmatter; for code-heavy workflows a small typed Python framework on top of `ateam exec` is often clearer. The crawl and metaproject examples both ended up there.
-
-This section captures the framework shape and the two implementation patterns. Full worked example: `plans/prompt_example_metaproject_python_api.md`.
-
-### Framework primitives
-
-A reusable `ateam_runner.py` module (~130 lines) provides:
-
-| Primitive | Role |
-|---|---|
-| `Ctx` | Per-invocation context: `work_dir`, `role`, `action`, `force`, `dry_run`, `data: dict`. Workflows stash typed state in `data`. |
-| `ExecPrompt` (protocol) | Produces text inserted into the prompt. Runs during preview. (Category A.) |
-| `ExecAction` (protocol) | Runs before or after the agent. Output is NOT in the prompt. Does NOT run during preview. (Category B.) Returns `Flow("continue" \| "skip" \| "error")`. |
-| `PromptBundle` | One executable agent unit: `name`, `prompt: list[PromptPart]`, `pre_exec: list[ExecAction]`, `post_exec: list[ExecAction]`. |
-| `Runner` | Registry + executor. `add(bundle)`, `preview(name, ctx)`, `run(name, ctx)`, `run_many(items, workers=N)`. |
-| Helpers | `SkipIf(predicate, reason)`, `EnsureParents(paths)`, `BackupFiles(paths)`, `PromptFn(fn)`, `ActionFn(fn)`. |
-
-The vocabulary mirrors this spec exactly: `ExecPrompt` ≡ Category A, `ExecAction` ≡ Category B, `Flow` ≡ `ateam flow`. The Python framework is the same model expressed in code instead of filesystem layout. Workflow-specific code (one Python file per workflow) defines its `PromptBundle`s, registers them with a `Runner`, and ties into the workflow's CLI.
-
-### Pattern A: framework calls `ateam exec`, parallelism stays in Python
-
-What the metaproject and crawl examples show. `PromptBundle.run` does:
-
-1. Render the prompt in Python (no ateam assembler involved).
-2. Run `pre_exec` actions in Python; honor `Flow("skip")` / `Flow("error")`.
-3. `subprocess.run(["ateam", "exec", "--work-dir", ..., "--action", ..., "--role", ..., ...], input=prompt, text=True, check=True)`.
-4. Run `post_exec` actions in Python.
-
-`Runner.run_many()` uses `ThreadPoolExecutor`; each thread is one `ateam exec` subprocess.
-
-**Pattern A gap list (small):**
-
-1. **`--work-dir DIR` on `ateam exec`** — already supported.
-2. **`--action NAME` on `ateam exec`** — already supported.
-3. **Ad-hoc role/action accepted as free-form tracking labels** when the prompt comes from stdin (no registry check). Confirm or add.
-4. **Emit `exec_id` on stdout/stderr in a parseable form** so the framework can correlate to `ateam inspect`. Either a `--print-exec-id` flag or a structured line on stderr like `exec_id=<id>`. Optional but small.
-5. **Progress visible to the framework** — see "Progress telemetry" below.
-
-Pattern A is the natural target: small additions to `ateam exec`, Python keeps ownership of typed config and conditional logic, ateam keeps ownership of the agent invocation + audit trail.
-
-### Pattern B: framework hands the batch to `ateam parallel`
-
-In principle, the framework could build N prompts and let ateam fan them out. In practice this requires substantially more from ateam:
-
-1. **Per-job `--work-dir`, `--role`, `--action`** — today `ateam parallel` shares these across the batch. No per-positional override syntax exists.
-2. **Per-job `--arg key=value`** — the `{{arg.*}}` namespace (Phase 2 of the refactor).
-3. **`ateam flow` actions** for skip/error/redo/fallback (Phase 2).
-4. **Per-job pre/post hooks that are more than shell scripts.** The Python framework's hooks close over typed `Tool` state and Python helpers. `ateam parallel --pre-exec` is one declaration applied to all jobs; varying behavior per job means hooks read `{{arg.*}}` and re-implement the logic in shell.
-5. **Machine-readable per-job result on stdout.** `Runner.run_many()` returns `[Result(bundle, flow)]`. `ateam parallel` emits progress + exit code, not structured per-job outcomes. Needs a JSON-lines mode or a per-job status file.
-
-Pattern B effectively requires all of Phase 2 plus a per-job argument surface that isn't in the current spec. It only makes sense when the **entire** bundle (including hooks) is expressible in ateam-native primitives — at which point the Python framework stops carrying its weight and you're in the filesystem-proposal world.
-
-**Recommendation:** for the Python framework path, target Pattern A and keep parallelism in Python. The two patterns are complementary, not competing — Python framework for code-heavy / algorithmic workflows, filesystem layout for prompt-heavy / content-edited workflows.
-
-### Progress telemetry: the missing piece (both patterns)
-
-`ateam parallel` renders live per-agent stats — token counts, current tool, elapsed time, context size — straight from the in-process event stream. Those values likely never land in `state.sqlite`; they're rendered in-memory and lost when the process exits.
-
-That's fine when ateam owns the whole batch, but it breaks both patterns above:
-
-- **Pattern A:** each `ateam exec` subprocess is opaque to its siblings and to the orchestrating Python script. To surface "agent is currently in tool X, 42k tokens in" across a batch, the framework would have to re-parse the event stream itself or poll subprocess stdout.
-- **Pattern B:** the live table is great for humans but doesn't survive past process exit; the calling script gets no structured per-job timeline.
-
-**Proposal: make both `ateam exec` and `ateam parallel` write progress to the call DB** (token deltas, current tool, peak context, elapsed) — batched per N events or per second to avoid write storms. In return:
-
-- `ateam ps` works the same whether the agent was launched by `ateam parallel`, `ateam exec`, or a Python subprocess.
-- External orchestrators can opt into progress display by reading the DB without re-parsing the event stream.
-- Post-mortem inspection has the same fidelity as live inspection.
-- The `_run.json` written by post_exec gets richer "what actually happened" data for free.
-
-**Complement: structured progress output from `ateam exec`.** A `--progress-format=jsonl` flag emits one JSON line per progress event on a chosen channel (stderr, or a fd passed via `--progress-fd`). Cheaper than DB writes, lower latency for consumers that want live feedback without polling the DB.
-
-Both together — DB-backed for persistence + streaming output for low-latency consumers — is the obvious complete answer. This is the single most useful set of additions to make ateam pleasant to drive from any external orchestrator (Python framework, shell loop, CI pipeline). It also helps `ateam ps` work uniformly regardless of who launched the agent.
-
-## How the layers map to the design goals
-
-The system is a **layered specialization engine**. Each design goal maps to exactly one layer; new requirements should fit an existing layer or surface a missing one.
-
-| Goal | Layer | How |
-|---|---|---|
-| Project-level customization | Anchors (project / org / embedded) | Higher-priority anchor's `main` wins; `{{include?}}` is additive across anchors. |
-| Cross-cutting policy for a group of prompts | Dir-level `_pre.*.md` / `_post.*.md` files | Composed into every role's assembly automatically based on directory placement. |
-| Specialization of one named prompt | Project-anchor `<role>.pre.<NAME>.md` / `<role>.post.<NAME>.md` fragments | Surgical additions persisted in the repo; multiple distinct files compose across anchors. |
-| Temporary / one-off override | CLI `--pre-prompt` / `--post-prompt` (outermost wrap, raw text) | Doesn't persist; one run. |
-| Inject deterministic context INTO the prompt (save the agent the work) | Category A: template variables (`{{PROJECT_INFO}}`, `{{ROLE_REPORTS}}`, future `{{shell CMD}}`) and `{{include}}` directives. Computed during assembly. | Idempotent, side-effect-free; runs during preview too. |
-| Set up the runtime environment BEFORE the agent runs | Category B: stage **pre** phase (frontmatter `pre_exec`) | concurrent-run-check, budget-precheck, source-writable, future worktree creation. Side effects expected; does NOT run during preview. |
-| Side effects AFTER the agent runs (artifacts, tests, commits, telemetry) | Category B: stage **post** phase (frontmatter `post_exec`) | copy-runtime-files, chain-next, run tests, schema-validate, build, commit, update tracker. |
-| Compose shared paragraphs across prompts | `{{include :name}}` | One source of truth for shared content; resolves through anchors. |
-| Runtime-varying values (same template, different inputs) | Future frontmatter `params:` + CLI `--param k=v` + `{{param.k}}` | Single mechanism; defer until concrete need. |
-| Filter "run all enabled" prompts | Future frontmatter `enabled_from:` on dir-level metadata file (delegates to a source like `config.toml`) | Keeps prompt-system content-only; enablement is workflow metadata. |
-
-Two recurring patterns:
-
-1. **Specialize a generic prompt.** Write the prompt as generic as possible (embedded default), layer specializations via project-anchor fragments. The dir-template's `{{include?}}` slots are the standard specialization points.
-2. **Move that bit out of the prompt.** Every deterministic operation is a candidate for `pre_exec` / `post_exec`. Reduces token cost, increases reliability.
-
-## Code structure: `internal/prompts/` (the `PromptAssembler` module)
-
-The core abstraction is a `PromptAssembler` that knows nothing about ateam workflows. Given a prompt name `<dir>/<role>`, it walks the directory chain from root to leaf, discovers all matching `_pre.*.md`, `_post.*.md`, `<role>.pre.*.md`, `<role>.prompt.md`, `<role>.post.*.md` files across anchors, and composes them per the assembly order. It also expands `{{include}}` / `{{include?}}` / `{{include_glob}}` directives inside any included content.
+This refactor introduces an internal `Stage` abstraction that captures the shape once, and reframes each built-in command as a Stage definition + a thin Cobra wrapper.
 
 ### Sketch
 
 ```go
-package prompts
-
-type Anchor struct {
-    Name string  // "project", "org", "embedded" — for preview/debug
-    FS   fs.FS   // os.DirFS or embed.FS subtree, uniform
+// internal/stage/stage.go
+type Stage struct {
+    Name      string             // "report" / "code" / "review" / ...
+    Action    string             // ateam-action label (passes to call DB)
+    Prompt    PromptAssembler    // builds the prompt string from Ctx
+    PreExec   []PreAction        // gating + setup, in declaration order
+    PostExec  []PostAction       // promotion + chaining + telemetry
 }
 
-type Templater interface {
-    // Expand variables in content; handles {{var}} but NOT includes.
-    // Includes are handled by the Assembler itself (it owns include resolution).
-    Expand(content string) (string, error)
-}
+type PreAction  interface{ Run(*Ctx) error }
+type PostAction interface{ Run(*Ctx, *Result) error }
 
-type Frontmatter struct {
-    PreExec    []string `yaml:"pre_exec"`
-    PostExec   []string `yaml:"post_exec"`
-    // Future: EnabledFrom, Params, etc. Strict allow-list of keys.
+// internal/stage/ctx.go
+type Ctx struct {
+    Env       *root.ResolvedEnv
+    Roles     []string
+    Profile   string
+    Agent     string
+    Model     string
+    Effort    string
+    Force     bool
+    DryRun    bool
+    Batch     string
+    Budget    BudgetConfig
+    DB        *calldb.CallDB
+    // ... additional typed fields as needed
 }
-
-type ResolvedFile struct {
-    Anchor   string
-    Path     string  // within the anchor
-    Slot     string  // "dir-pre" | "dir-post" | "role-pre" | "role-main" | "role-post" | "cli-pre" | "cli-post"
-    Depth    int     // 0 = root, 1 = first subdir, etc. (for dir-level slots)
-}
-
-type Resolution struct {
-    Name        string
-    Files       []ResolvedFile  // ordered as they contribute to the final text
-    Frontmatter Frontmatter     // merged: all dir-level + role-level
-}
-
-type Assembler struct {
-    Anchors   []Anchor
-    Templater Templater
-}
-
-type AssembleOpts struct {
-    CLIPre  string  // --pre-prompt (raw text, outermost)
-    CLIPost string  // --post-prompt (raw text, outermost)
-}
-
-func (a *Assembler) Resolve(name string) (*Resolution, error)
-func (a *Assembler) Assemble(name string, opts AssembleOpts) (string, error)
-func (a *Assembler) ListNamedPrompts(dir string) ([]string, error)
 ```
 
-### Design notes
+### Vocabulary mirrors the Python framework
 
-- **`fs.FS` for anchors** handles disk and embedded uniformly.
-- **No `Resolver`/`Assembler` split** — three methods on one type.
-- **`{{include*}}` directives are handled by the Assembler**, not the Templater. The Templater handles only variable substitution. Include resolution requires anchor knowledge.
-- **Assembly is filename-driven** — no template file orchestrates it. The Assembler discovers `_pre.*.md`, `_post.*.md`, and role pre/main/post files by pattern.
-- **Two-pass expansion** for `{{include* ... {{var}} ...}}` paths: variable substitution inside include paths first, then resolve includes, then final variable substitution.
-- **`ListNamedPrompts(dir)`** is what role discovery reduces to. Filters by pattern; returns invokable basenames (excludes dir-level structural files).
-- **Orphan-fragment validation** runs at load: every `<role>.pre.*.md` and `<role>.post.*.md` requires a matching `<role>.prompt.md`.
-- **Outside the module:** `:` syntax parsing (CLI), workflow knowledge, action/role vocabulary, template variable values (Templater wraps these), migration of old layouts, stage execution (follow-up refactor).
+This is deliberate: the Python framework in `plans/python_framework_examples/ateam.py` already validates this shape externally. The Go internals adopt the same vocabulary so that ateam's own code and the Python framework's code can be read against each other. Single mental model, two implementations.
 
-### What changes outside `internal/prompts/`
+| Python framework | Go internal equivalent |
+|---|---|
+| `Ctx` | `stage.Ctx` |
+| `PromptBundle.prompt` (callable / file / string parts) | `Stage.Prompt` (assembler returning a string) |
+| `PromptBundle.pre_exec`, `PromptBundle.post_exec` | `Stage.PreExec`, `Stage.PostExec` |
+| `Flow("continue" / "skip" / "error")` | `error` return from `PreAction.Run` (nil = continue; `ErrSkip` = skip; other = error) |
+| `SkipIf`, `EnsureParents`, `BackupFiles` | Same shape as registered `PreAction` implementations |
+| `Runner.run(name, ctx)` | `stage.Run(stage, ctx)` |
 
-- `internal/root/resolve.go` — replace path helpers with prompt-name-based lookups.
-- `internal/runner/runner.go:1156` — drop the `*_prompt.md` exclusion in `promoteRuntimeFiles`. Update canonical destination to `SharedPromptDir(promptName)/<basename>.md`.
-- `internal/runner/template.go` — add `SHARED_BASE_DIR`, `SHARED_PROMPT_DIR`, `PROJECT_INFO`, `ROLE_REPORTS`, `LABEL` template variables. `PrimaryOutputName()` becomes `<promptBasename>.md`.
-- `defaults/` — rename files into the new tree; ship `_pre.*.md` / `_post.*.md` defaults; update `//go:embed`.
-- `cmd/*.go` — remove `RoleID: "supervisor"` hardcodes; route through `Assemble(name)`. Rework `cmd/prompt.go` to accept positional `:report/security` and `--preview` / `--content` flags. Add `--pre-exec`, `--post-exec`, `--labels`.
-- `internal/config/config.go` — `SupervisorConfig` struct stays; filesystem-only change.
-- `internal/web/handlers.go`, `internal/web/export.go` — update artifact read paths.
+The Go side stays internal — no public API contract, no exported `stage` package. If a user wants Go composition they vendor the package; the supported surface is `ateam exec` as a subprocess (same as Python).
 
-## Template variables (changes & additions)
+### The built-in action catalog becomes real types
 
-The existing `OUTPUT_DIR` / `OUTPUT_FILE` / `EXEC_ID` / `PROFILE` / `AGENT` / `MODEL` / `PROJECT_*` / `CONTAINER_*` template variables keep their semantics. Several new variables are introduced; some replace previously hardcoded Go content-injection.
+Today's hardcoded functions become small typed values:
+
+```go
+// internal/stage/actions/concurrent.go
+type ConcurrentRunCheck struct{}
+func (ConcurrentRunCheck) Run(ctx *stage.Ctx) error { ... }  // existing logic
+
+// internal/stage/actions/promote.go
+type CopyRuntimeFiles struct{}
+func (CopyRuntimeFiles) Run(ctx *stage.Ctx, r *stage.Result) error { ... }
+```
+
+Each Stage definition declares which actions it wants:
+
+```go
+// cmd/report.go (simplified)
+var reportStage = stage.Stage{
+    Name:    "report",
+    Action:  "report",
+    Prompt:  prompts.AssembleReport,
+    PreExec: []stage.PreAction{
+        actions.ConcurrentRunCheck{},
+        actions.BudgetPrecheck{},
+    },
+    PostExec: []stage.PostAction{
+        actions.CopyRuntimeFiles{},
+        actions.ChainNext{Next: "review", Opt: "--review"},
+    },
+}
+
+func runReport(cmd *cobra.Command, args []string) error {
+    ctx := buildCtx(cmd, args)
+    return stage.Run(reportStage, ctx)
+}
+```
+
+`cmd/report.go` ends up much smaller. So do `cmd/code.go`, `cmd/review.go`, `cmd/verify.go`, `cmd/auto_setup.go`. The dispatch loop lives in one place — meaning when progress telemetry lands, it's wired once in `stage.Run` instead of five times in five cmd files.
+
+### Why this isn't user-pluggable
+
+A Stage definition is Go code, not config. There's no way for a user's `.ateam/` to register a new Stage, add a PreAction, or modify the PreAction list of an existing built-in. The Stage abstraction exists for ateam's own engineering benefit (less duplication, easier testing, easier feature addition); it deliberately doesn't expose a user-facing surface.
+
+If you want a new workflow shape, use the Python framework.
+
+### Test seam falls out naturally
+
+With Stage in place, you can unit-test the pre/post chain against a synthetic Ctx, mocking the agent step in the middle. Today's command-level tests stay; cheaper unit tests appear underneath.
+
+## Template variables
+
+**Naming convention: `scope.name`.** The existing ALL_CAPS variables (`OUTPUT_DIR`, `EXEC_ID`, `PROJECT_NAME`, etc.) are renamed into dotted namespaces — `exec.output_dir`, `exec.id`, `project.name` — for readability and extensibility. The rename is its own task (Task 7); the spec describes the v1 outcome.
+
+The dotted vocabulary matches the Python framework's (`exec.shared_dir`, `exec.runtime_dir`, `exec.work_dir`, `prompt.name`, `arg.KEY`, `env.NAME`) so a reader who knows one knows the other.
+
+### Namespaces
+
+| Scope | What lives there |
+|---|---|
+| `prompt.*` | Identity of the prompt being assembled (name, path, action). |
+| `exec.*` | Per-execution state — id, work dir, output paths, shared paths, profile, agent, model, batch, timestamp. |
+| `project.*` | Project identity — name, root dir, info block (git HEAD + uncommitted files). |
+| `git.*` | Git-derived metadata — repo, branch, commit, head_short, dirty. |
+| `container.*` | Container metadata when running in one. |
+| `env.NAME` | Process environment variable. |
+| `ateam.*` | ateam self-metadata (own path, version). |
+| `role.*` | Role-set computations like `role.reports` (assembly-time inlined prior reports). |
 
 ### Identity vars
 
-| Variable | New value | Notes |
+| Variable | Value | Notes |
 |---|---|---|
-| `{{ACTION}}` | Top-level path component of the prompt name. `report` for `:report/security`; `review` for `:review`. | "supervisor" goes away. |
-| `{{ROLE}}` | Last path component. `security` for `:report/security`; `review` for singleton. | Keeps current basename semantics; never empty. |
-| `{{prompt.name}}` (new) | Same as `{{ROLE}}` — last path component. | Preferred inside templates. |
-| `{{prompt.path}}` (new) | Full prompt path, e.g. `report/security`. | Unambiguous identifier. |
-| `{{LABEL}}` (new) | Per-job label inside a parallel batch (from `--labels`, or default by source). Distinct from `{{prompt.name}}`. Empty for single-shot non-parallel runs. | Used in pre/post-exec scripts to disambiguate per-job state (worktree names, output directories). |
-| `{{arg.<key>}}` (planned for stage-executor follow-up) | Value of `--arg <key>=<value>` passed on the CLI. Multiple `--arg` flags accumulate; one namespace per invocation. | The metaproject and crawl examples surfaced this as a real need — cross-project workflows need per-invocation identity (`{{arg.target_label}}`) distinct from `{{LABEL}}`. Plan to add alongside the stage executor. |
-
-**Dotted namespaces are the convention for new variables.** `prompt.name`, `prompt.path`, `arg.X`, and future `git.repo_name` / `git.branch` follow this. Existing ALL_CAPS variables (`PROJECT_NAME`, `OUTPUT_DIR`, etc.) stay as-is for backward compatibility — no renames in this refactor.
+| `{{prompt.name}}` | Last path component (e.g. `security` for `report/security`). | Never empty. Was `{{ROLE}}`. |
+| `{{prompt.path}}` | Full prompt path (e.g. `report/security`). | Unambiguous identifier. |
+| `{{prompt.action}}` | Top-level path component (e.g. `report` for `report/security`; `review` for `review`). | Was `{{ACTION}}`. "supervisor" goes away post-migration. |
 
 ### Output / artifact vars
 
-| Variable | New value | Notes |
+| Variable | Value | Replaces |
 |---|---|---|
-| `{{OUTPUT_FILE}}` | `OUTPUT_DIR/<prompt-basename>.md` | Uniformly derived. `setup_overview.md` becomes `auto_setup.md` post-migration. |
-| `{{SHARED_BASE_DIR}}` (new) | Absolute path to `.ateam/shared/` | Use sparingly. |
-| `{{SHARED_PROMPT_DIR}}` (new) | Absolute path to `.ateam/shared/<prompt-path>/` | Always a directory. |
+| `{{exec.id}}` | Execution ID for this run. | `{{EXEC_ID}}` |
+| `{{exec.output_dir}}` | `.ateam/runtime/<exec_id>/` — per-execution scratch. | `{{OUTPUT_DIR}}` |
+| `{{exec.output_file}}` | `exec.output_dir/<prompt-basename>.md` — primary output. | `{{OUTPUT_FILE}}` |
+| `{{exec.shared_base_dir}}` | Absolute path to `.ateam/shared/`. | (new) |
+| `{{exec.shared_prompt_dir}}` | Absolute path to `.ateam/shared/<prompt-path>/`. | (new) |
+| `{{exec.batch}}` | Batch identifier when launched via `parallel` or with `--batch`. | `{{BATCH}}` |
+| `{{exec.timestamp}}` | Run start timestamp. | `{{TIMESTAMP}}` |
+| `{{exec.profile}}`, `{{exec.agent}}`, `{{exec.model}}`, `{{exec.effort}}` | Resolved per-run config. | `{{PROFILE}}` / `{{AGENT}}` / `{{MODEL}}` |
 
-### Assembly-time content injection (was hardcoded Go)
+### Project / git / container vars
 
-| Variable | Expansion | Replaces |
+| Variable | Value | Replaces |
 |---|---|---|
-| `{{PROJECT_INFO}}` (new) | Formatted block: git HEAD hash, uncommitted-files list. Computed once per env, cached. | Today's `gitutil.GetProjectMeta` + `FormatProjectInfo()` injected by every `cmd/*.go` |
-| `{{ROLE_REPORTS}}` (new) | Inlined role reports from `shared/report/*/<name>.md`, filtered per the run's `--roles` / `--all` / `--max-age`. Section header included. Empty if no reports. | Today's `prompts.DiscoverReports` + inlining in `AssembleReviewPrompt` |
+| `{{project.name}}`, `{{project.root}}` | Project identity. | `{{PROJECT_NAME}}`, `{{PROJECT_ROOT}}` |
+| `{{project.info}}` | Formatted block: git HEAD hash + uncommitted files list. Computed once per env, cached. Replaces the per-`cmd/*.go` `gitutil.GetProjectMeta` + `FormatProjectInfo()` injection. | (new content; was hardcoded Go) |
+| `{{git.repo}}`, `{{git.branch}}`, `{{git.commit}}`, `{{git.head_short}}`, `{{git.dirty}}` | Git facts. Computed once, cached. | Partially in `{{PROJECT_*}}` today; split out cleanly. |
+| `{{container.*}}` | Container metadata. | `{{CONTAINER_*}}` |
+| `{{ateam.own_bin}}`, `{{ateam.own_version}}`, etc. | ateam self-info. | `{{ATEAM_OWN_*}}` |
 
-These do NOT belong in `pre_exec` frontmatter — they're prompt content, computed during assembly, idempotent.
+### Environment
+
+| Variable | Value |
+|---|---|
+| `{{env.NAME}}` | Value of the named environment variable. Missing variable errors at assembly time. |
+
+### Role / report assembly
+
+| Variable | Value | Replaces |
+|---|---|---|
+| `{{role.reports}}` | Inlined role reports from `shared/report/*/<name>.md`, with the resolved role set + `--max-age` filter applied (from the run's Ctx). Section header included. Empty if no reports. | `{{ROLE_REPORTS}}` (was `DiscoverReports` + inlining in `AssembleReviewPrompt`) |
+
+These are part of the prompt's content; they are computed during assembly; they have no effect on the runtime environment.
 
 `{{prompt.body}}` is **not** a variable. Where the previous approach used it, templates use `{{include {{prompt.name}}.prompt.md}}` — explicit inclusion.
 
-**Default-destination guidance:** prompts write to `{{OUTPUT_DIR}}` (per-execution, free history). Promotion to `{{SHARED_PROMPT_DIR}}` is reserved for outputs that need to be visible to other agents (report → review, review → code_management, auto_setup → user/future agents). Today's `promoteRuntimeFiles` Go path handles this hardcoded for known workflows; eventually it's the `copy-runtime-files` action declared in dir-level metadata.
+### Migration of ALL_CAPS variables in user prompts
+
+Auto-migration (Task 1) rewrites known ALL_CAPS variable references in user-authored `.ateam/prompts/*.md` files to the new dotted form. Unknown ALL_CAPS tokens (literal text the user wrote that isn't an ateam variable) are left untouched. The migration is reported on stderr alongside the layout migration. The embedded `defaults/` tree ships with the new names from the start.
 
 ## Shared artifacts model
 
-### `OUTPUT_DIR` — per-execution (default, preferred)
+### `exec.output_dir` — per-execution (default)
 
-`OUTPUT_DIR` = `.ateam/runtime/<exec_id>/`. Every prompt run gets a fresh directory. **History falls out for free** — past runs are right there on disk under different exec IDs.
+`exec.output_dir` = `.ateam/runtime/<exec_id>/`. Every prompt run gets a fresh directory. **History falls out for free** — past runs are right there on disk under different exec IDs.
 
-In most cases, this is the only destination a prompt needs.
-
-### `SHARED_PROMPT_DIR` / `SHARED_BASE_DIR` — cross-agent sharing (opt-in)
+### `exec.shared_prompt_dir` / `exec.shared_base_dir` — cross-agent sharing (opt-in)
 
 When an artifact must be visible to other agents:
-- `SHARED_BASE_DIR` = `.ateam/shared/`
-- `SHARED_PROMPT_DIR` = `.ateam/shared/<prompt-path>/`
+- `exec.shared_base_dir` = `.ateam/shared/`
+- `exec.shared_prompt_dir` = `.ateam/shared/<prompt-path>/`
 - Primary output: `<prompt-basename>.md` inside that dir.
 
 ### Promotion
 
-Today: hardcoded Go (`promoteRuntimeFiles`). Future (stage executor): explicit `copy-runtime-files` action in dir-level metadata.
+Hardcoded Go (`promoteRuntimeFiles`). Becomes a `CopyRuntimeFiles` PostAction on Stages that need it (report, review, auto_setup). Stages that shouldn't promote (code, verify) simply don't list it.
 
-**Parameterized promotion (planned for stage-executor follow-up).** The default `copy-runtime-files` action promotes `OUTPUT_DIR/*` → `SHARED_PROMPT_DIR/`. Real workflows (the metaproject example surfaced this) need richer targets — e.g. `OUTPUT_DIR/report.md` → `<shared>/metaproject/<target>/<scope>/report.md`. The follow-up should support either:
-- Action parameters: `copy-runtime-files --to <pattern>` with `{{arg.*}}` and `{{prompt.*}}` substitution in the destination, or
-- A user-provided script in `post_exec` that does the copy explicitly.
+The runtime/shared split is acknowledged as the weakest part of the model — see Pending question 4. Worth a design pass once the substrate is in place.
 
-The promotion model itself is also worth revisiting (see pending question 19); the runtime/shared split is not as intuitive as it could be.
+## Progress telemetry
 
-### Overridable directory locations (planned)
+**Goal.** External orchestrators (Python framework, shell scripts, CI pipelines) need to see what ateam is doing during a run, not just at the end. `ateam ps` and `ateam inspect` should work uniformly regardless of who launched the agent.
 
-`ateam exec` and `ateam parallel` should accept CLI flags to override the default `.ateam/` subtrees:
-- `--prompt-dir DIR` — where prompts live (default `.ateam/prompts/`)
-- `--runtime-dir DIR` — where per-execution scratch lands (default `.ateam/runtime/`)
-- `--shared-dir DIR` — where cross-agent artifacts land (default `.ateam/shared/`)
+**Use cases.**
 
-Not every workflow wants its outputs under `.ateam/`. The metaproject example uses a top-level `reports/` directory because the audit reports are first-class user-visible artifacts, not internal ateam state. With `--shared-dir reports`, the framework writes to `reports/<prompt-path>/...` instead of `.ateam/shared/<prompt-path>/...`. The prompt assembler and template variables transparently follow the override.
+1. Python framework driving N parallel `ateam exec` subprocesses wants a live view: "agent X is in tool Y, 42k tokens in." Today the subprocess output streams to the parent terminal and is hard to consume programmatically.
+2. `ateam ps` should show progress for runs launched by `ateam exec`, not just runs launched by `ateam parallel`.
+3. Post-mortem inspection of a completed run should have the same fidelity as live inspection.
+4. CI pipelines should be able to detect "agent stalled" or "agent in unexpected tool" without parsing free-form output.
 
-`--prompt-dir` is more advanced — useful when a project keeps its own custom prompt tree outside `.ateam/` (e.g. shared across repos via a submodule). When set, it stacks on the anchor chain: the explicit `--prompt-dir` becomes an additional project-level anchor checked first.
+**Requirements.**
+
+- **Structured progress output from `ateam exec`.** A flag like `--progress-format=jsonl` (or `--progress-fd=N`) emits one JSON line per progress event on a chosen channel. Format: at minimum `{ts, event, ...event-specific fields}` where `event` is one of `tool_start`, `tool_end`, `assistant_message`, `thinking`, `token_count`, `result`. Schema versioned.
+- **Progress events written to the call DB.** Both `ateam exec` and `ateam parallel` write a batched stream of progress events to `state.sqlite` so `ateam ps` and `ateam inspect` work uniformly. Batching strategy left to implementation (per N events / per second / on tool-boundaries) to avoid write storms.
+- **Shared code path between `exec` and `parallel`.** `ateam parallel` already renders live per-agent stats in memory; that rendering should consume the same event source as the DB writes + structured output, not duplicate it.
+- **`exec_id` discoverable from outside.** Either a `--print-exec-id` flag or a structured line on stderr like `exec_id=<id>` so the orchestrator can correlate to `ateam inspect <id>` after the run.
+
+**Out of scope for this telemetry work.**
+
+- Real-time aggregation across multiple parallel processes (each process writes its own events; querying is via DB).
+- Replay / time-travel inspection.
+- Server-sent-events HTTP endpoint (the web UI already polls; that's separate).
+
+**Design left to the implementing task.** Exact event schema, batching strategy, DB table layout, output format details — all owned by the task that implements this. The requirements above are the constraints.
+
+## External orchestration: the Python framework
+
+For workflow customization beyond editing prompt content, the answer is **`plans/python_framework_examples/ateam.py`** — a small (~280 lines) Python framework that wraps `ateam exec`.
+
+### What it provides
+
+- `PromptBundle` (name + prompt parts + pre/post hooks).
+- `Ctx` with typed fields plus `args` (template namespace) and `data` (Python objects).
+- `Runner` with `add`, `preview`, `run`, `run_many` (parallelism via `ThreadPoolExecutor`).
+- `Flow("continue" | "skip" | "error")` for pre/post hook control.
+- Helpers: `SkipIf`, `EnsureParents`, `BackupFiles`, `PromptFn`, `ActionFn`.
+- **External prompt files** via `PromptFile`, with templating (`{{prompt.*}}`, `{{arg.*}}`, `{{env.*}}`, `{{exec.shared_dir}}`, `{{exec.runtime_dir}}`, `{{exec.work_dir}}`) and `{{include}}` / `{{include?}}`.
+- `Runner(prompt_dir=..., shared_dir=...)` for external prompt trees and custom artifact destinations.
+
+### What it gives up vs. ateam-native
+
+- No anchor system (project / org / embedded). Workflow authors using Python typically control all the prompts in one tree.
+- No frontmatter parsing (workflow logic is Python).
+- No call DB / sandbox / container — those still come from `ateam exec`.
+
+### How it wraps ateam
+
+```python
+subprocess.run(["ateam", "exec",
+                "--work-dir", str(ctx.work_dir),
+                "--action", ctx.action or name,
+                "--role", ctx.role or name],
+               input=prompt, text=True, check=True)
+```
+
+Each Python thread = one `ateam exec` subprocess. ateam handles agent invocation + audit trail; Python handles prompt assembly + skip/error logic + parallelism.
+
+### Example: the metaproject workflow
+
+`plans/python_framework_examples/metaproject.py` (~360 lines) shows the full pattern: 5 scopes × 4 actions (discover/audit/fix/verify) across multiple target projects, with skip predicates per stage and externalized audit-body prompts under `plans/python_framework_examples/prompts/metaproject/audit/`. Built-in ateam couldn't express this without growing significantly.
+
+### Distribution
+
+The framework lives in `plans/python_framework_examples/` as a design artifact users fork or copy. Not bundled with the ateam binary; not published as a pip package (yet — see Pending question 21). A potential next step is to spin this up as `ateam-workflow`, a separate project that owns the prompt management story for code-driven workflows.
 
 ## Auto-migration
 
@@ -1048,34 +670,32 @@ On `ateam` startup, when `.ateam/` or `.ateamorg/` is loaded, detect the old lay
 | `.ateam/supervisor/history/...` | dropped |
 | `.ateam/setup_overview.md` | `.ateam/shared/auto_setup/auto_setup.md` |
 
-For built-in embedded defaults: ateam ships new `_pre.*.md` and `_post.*.md` files at root and inside `report/`, `code/`. The migration step at the project anchor doesn't write these (they come from embedded defaults); it only moves user-authored files into the new layout.
-
 After migration, remove the now-empty `roles/` and `supervisor/` directories. Print a one-line notice on stderr on first migration. Implementation in a new `internal/migrate/v1_layout.go`, called from `internal/root/resolve.go` when env is first materialized.
 
-## What this refactor does NOT change
+## `ateam prompt --preview` (in scope)
 
-- `runtime/<exec_id>/` per-run scratch dirs and the `OUTPUT_*` template variables — mechanism unchanged; only canonical destination paths change.
-- `config.toml` schema.
-- `runtime.hcl`, agent/profile/container config.
-- `state.sqlite`, `secrets.env`, `logs/`, `cache/` at `.ateam/` root.
-
-## `ateam prompt :NAME --preview` (in scope)
-
-`Resolve()` produces the exact ordered file list AND the parsed frontmatter. Pretty-printing both ships with the refactor — it is the maintainability story for the whole layered design.
+Without `:syntax`, the CLI shape is flag-based, mirroring existing commands:
 
 ```
-$ ateam prompt :report/security --preview
+ateam prompt --action report --role security --preview
+ateam prompt --action report --role security --preview --content
+ateam prompt --action review --preview
+```
+
+The output pretty-prints the resolved ordered file list with anchor tags, plus the merged frontmatter:
+
+```
+$ ateam prompt --action report --role security --preview
 Assembly for 'report/security':
 
 Frontmatter (merged from dir-level + role-level):
-  pre_exec:  [concurrent-run-check]
-  post_exec: [copy-runtime-files]
+  (no recognized keys)
 
 Resolution:
   [CLI]      --pre-prompt                                                (empty)
 
   root _pre.*.md:
-    [embedded] prompts/_pre.context.md            (contains {{PROJECT_INFO}})
+    [embedded] prompts/_pre.context.md            (contains {{project.info}})
 
   report _pre.*.md:
     [embedded] prompts/report/_pre.intro.md
@@ -1101,121 +721,282 @@ Resolution:
 
 `--preview --content` dumps the actual concatenated text.
 
-## Out of scope (deliberately deferred)
+## What this refactor does NOT change
 
-- Executable pre/post scripts and built-in actions — frontmatter format is locked, execution is the stage-executor follow-up.
-- `{{shell CMD}}` template directive — assembly-time script execution (category A). Spec'd in the Stage concept's "Forward look" subsection; implemented post-refactor alongside `ateam flow`.
-- `ateam flow` CLI subcommand for runtime flow control (`skip` / `error` / `abort` / `continue` / `note`). Spec'd in the Stage concept's "Forward look" subsection; implemented post-refactor.
-- Frontmatter `params:` + CLI `--param k=v` for runtime parameterization. One mechanism only when it lands.
-- Multi-target adders (`prepend_to: [a, b]`) — `{{include}}` + shared library file handles it via the library pattern.
-- Renaming `code_management` to something shorter.
-- Reserved-name validation for user role IDs (structurally impossible with the new namespacing).
-- Built-in prompt content changes — only file renames in this refactor.
+- `runtime/<exec_id>/` per-run scratch dirs and the `OUTPUT_*` template variables — mechanism unchanged.
+- `config.toml` schema.
+- `runtime.hcl`, agent/profile/container config.
+- `state.sqlite`, `secrets.env`, `logs/`, `cache/` at `.ateam/` root.
 
-## Pending questions / open directions
+## What this refactor explicitly does NOT do
 
-### Stage-related (drives a follow-up design pass)
+These were considered in earlier drafts and deliberately dropped. They live in "Explored but not pursued" at the end of this document if you want to revisit:
 
-1. **Pre/post exec action v1 catalog** (category B only — content injection lives in template vars, see category A): `concurrent-run-check`, `budget-precheck`, `source-writable` (pre); `copy-runtime-files`, `chain-next` (post). Confirm.
-2. **Assembly-time content injection v1**: `{{PROJECT_INFO}}` and `{{ROLE_REPORTS}}` as template variables. Plus `{{include /shared/review/review.md}}` in code_management's prompt (replacing today's `cmd/code.go` read+inline). Confirm.
-3. **Where dir-level frontmatter lives** — **decided**: on any `_pre.*.md` or `_post.*.md` file in the directory. Frontmatter lists merge across all such files in lexical order. No separate `_meta.yaml`. Documented in the Stage concept section above.
-4. **Action parameter shape** — single string vs key-value map. Recommend single string for v1.
-5. **Script ordering** — explicit YAML list order.
-6. **Failure semantics** — does a failed pre step block the prompt? Does a failed post step fail the stage? Per-step `on_failure: stop|continue` policy.
-7. **Per-role frontmatter merge with dir-level frontmatter** — append by default (`pre_exec` lists concatenate). `replace: true` opt-in for full override.
-8. **Today's promotion behavior preserved during transition** — `cmd/report.go` / `cmd/review.go` / `cmd/auto_setup.go` keep calling `promoteRuntimeFiles`. `cmd/code.go` / `cmd/code_management.go` / `cmd/verify.go` continue NOT to promote. Once the stage executor lands, promotions become explicit `copy-runtime-files` actions in dir-level frontmatter.
-9. **`{{ROLE_REPORTS}}` filtering inputs** — today's review reads `--roles`, `--all`, `--max-age` and applies them. As a template variable, filter inputs flow via run-context. Pin down.
-10. **CLI-injected `--pre-exec` / `--post-exec` shape** — single string per flag, repeatable. Action expansion runs at execution time, not flag-parse time. Confirm.
-11. **`{{LABEL}}` default for non-parallel runs** — empty string (recommended) or same as `{{prompt.name}}`. Confirm.
+- **User-pluggable execution hooks.** No frontmatter `pre_exec` / `post_exec` lists, no script registry, no `--pre-exec` / `--post-exec` CLI flags.
+- **`ateam flow` CLI subcommand** (skip / error / abort / continue / note / completed / redo / fallback / retry).
+- **`{{shell CMD}}` template directive** for assembly-time script execution.
+- **`{{arg.<key>}}` CLI argument namespace.**
+- **Parameterized promotion.** Today's `promoteRuntimeFiles` becomes the `CopyRuntimeFiles` PostAction with the same hardcoded destination derivation.
+- **Per-job `--work-dir` / `--role` / `--action` on `ateam parallel`.** Stays "N prompts, shared everything." Multi-project orchestration uses shell + `&` or Python.
+- **`runtime/<exec_id>/_run.json`** post-exec context file.
+- **`:dir/role` CLI invocation syntax.** Roles selected through existing command flags.
+- **`--prompt-dir DIR` / `--runtime-dir DIR` / `--shared-dir DIR` CLI flags.** The assembler is *parameterized* on `prompt_dir` internally (so adding the flag later is plumbing), but the flags themselves don't ship in v1.
+- **Public Go API for Stages.** The internal `stage` package is unexported; the supported integration surface is `ateam exec` as a subprocess.
 
-### Prompt-system questions
+## Immediate work / Tasks
 
-12. **`{{include?}}` semantics across anchors** — first-match (same as `{{include}}`, just optional). Locked.
-13. **`{{include_glob}}` semantics across anchors** — additive (all matches, embedded → org → project, lexical within anchor). Locked.
-14. **Setup overview filename** — auto-migration renames `setup_overview.md` → `auto_setup/auto_setup.md`. Acceptable break, or keep historical name?
-15. **`ateam roles` output** — keep as role-listing, or unify under `ateam prompts list` / `ateam stages list`? Decided after the refactor lands.
-16. **Specialization for runtime-varying values** — frontmatter `params:` + CLI `--param k=v` + `{{param.k}}`. Deferred.
-17. **Enablement** — ateam keeps `config.toml [roles]`. For future mini-workflows: frontmatter `enabled_from:` on dir-level metadata, or inline `enabled: [a, b, c]`. Revisit when a second workflow surfaces.
-18. **Frontmatter schema strictness** — strict allow-list (recommended) so unknown keys error. Lock as: strict.
-19. **Better model for runtime/shared file promotion.** The current split — agent writes to `OUTPUT_DIR` (`runtime/<exec_id>/`) and then promotion copies selected files to `SHARED_PROMPT_DIR` (`shared/<prompt-path>/`) — works but isn't intuitive. Most filesystem-backed systems either write to the canonical location directly (and overwrite) or use a staging/commit pattern (write to staging, atomically move). Ours is closer to staging-then-promote, but the "what gets promoted" decision is currently hardcoded Go (and planned to become declarative `copy-runtime-files`). Worth a design pass: is there a cleaner model? E.g. agents always write to the canonical shared path; the runtime dir is a tee'd copy purely for history; promotion goes away as a concept. Or: prompt frontmatter declares which output files are "shared" vs "scratch," and the runner enforces the split at write time. Defer until after the substrate lands, but flag explicitly that the current model is the weakest part of the design.
+Concrete deliverables, each scoped to be a discrete piece of work. Order matters where listed; otherwise parallelizable.
 
-20. **Progress telemetry in the call DB.** Both `ateam exec` and `ateam parallel` should write per-event progress (token deltas, current tool, peak context, elapsed) to `state.sqlite` so `ateam ps` works uniformly regardless of how the agent was launched, and external orchestrators (see "Python framework as external orchestration") can read live state without re-parsing event streams. Complementary: a `--progress-format=jsonl` mode on `ateam exec` for low-latency streaming consumers. Today `ateam parallel` shows live stats in-process but those values aren't persisted; `ateam exec` doesn't show them at all. Lock the storage shape (batched writes per N events or per second to avoid write storms), then implement.
+### Task 1: Prompt-directory refactor (assembler + migration)
 
-21. **Python framework integration shape.** The Python framework (`ateam_runner.py`) is documented here but not in-tree. Decide: ship it as a sibling package (`python/ateam_runner/`), document it as an example only, or extract its primitive set into ateam-native equivalents over time. Confirm during Phase 2.
+**Deliverable:** `.ateam/prompts/` exists, `.ateam/shared/` exists, old layouts auto-migrate, built-in commands assemble through the new tree.
 
-## Implementation order
+**Acceptance:**
 
-The Verification plan covers *how* to verify; this is *what to build first*. The substrate (this refactor) ships before the stage executor.
+- `internal/prompts/` rewritten with `Assembler` module: `fs.FS`-based anchors (project → org → embedded), filename-pattern parser, role-name validation, orphan-fragment detection.
+- **`Assembler` takes `prompt_dir` as a parameter throughout.** Not a global, not hardcoded — passed through construction and threaded into the anchor list. This is the change that makes a future `--prompt-dir DIR` flag a small wiring job rather than a refactor. Same shape for `shared_dir`.
+- Template directives: `{{include}}`, `{{include?}}`, `{{include_glob}}` with the documented semantics.
+- New template variables in the `scope.name` convention: `{{prompt.name}}`, `{{prompt.path}}`, `{{project.info}}`, `{{role.reports}}`, `{{exec.shared_base_dir}}`, `{{exec.shared_prompt_dir}}`. (Full rename of legacy ALL_CAPS variables is Task 7.)
+- `internal/migrate/v1_layout.go` — idempotent auto-migration from the table above, called from `internal/root/resolve.go` on first env materialization. Stderr notice on first migration.
+- `defaults/` tree restructured (`defaults/prompts/...`), embed updated, `_pre.*.md` / `_post.*.md` defaults shipped for the standard workflows.
+- `internal/root/resolve.go` path helpers replaced with prompt-name-based lookups.
+- `internal/runner/runner.go` — drop the `*_prompt.md` exclusion at line 1156; update canonical destination to `SharedPromptDir(promptName)/<basename>.md`.
+- `cmd/*.go` rewired to use the assembler (no `RoleID: "supervisor"` hardcodes).
+- `internal/web/handlers.go` and `internal/web/export.go` updated for new artifact paths.
+- Frontmatter parsing in place (strict allow-list) but no exec keys honored. Unknown keys error.
 
-### Phase 1: substrate (this refactor)
+**Out of scope:** the `--prompt-dir` CLI flag (parameter is enough); any user-pluggable exec; the `:syntax` CLI form.
 
-1. **`internal/prompts/` rewrite** — `Assembler` module with `fs.FS`-based anchors (project → org → embedded), filename-pattern parser (`<role>.prompt.md`, `<role>.pre.[NAME.]md`, `<role>.post.[NAME.]md`, `_pre.[NAME.]md`, `_post.[NAME.]md`), role-name validation (no `_` prefix, no `.pre`/`.post` suffix), and orphan-fragment detection. Returns `Resolution { Files, Frontmatter }`.
-2. **Template directives**: `{{include}}` (first-match, error if missing), `{{include?}}` (first-match, silent if missing), `{{include_glob}}` (additive across anchors, lexical within anchor). Variable substitution already exists; integrate into the Assembler.
-3. **`internal/migrate/v1_layout.go`** — auto-migration from old layout. Idempotent. Hooked into `internal/root/resolve.go` when env is first materialized.
-4. **`defaults/` tree restructure** — rename files into `defaults/prompts/...`, drop `_template.md` concept, ship `_pre.<NAME>.md` and `_post.<NAME>.md` for the standard workflows. Update `//go:embed`.
-5. **`internal/root/resolve.go`** — replace `RoleDir`/`RoleReportPath`/`SupervisorDir`/`ReviewPath`/`VerifyPath` with prompt-name-based helpers (`SharedArtifactPath(promptName)`, etc.).
-6. **`internal/runner/runner.go`** — drop the `*_prompt.md` exclusion in `promoteRuntimeFiles` (line 1156). Update canonical destination to use new helpers.
-7. **`internal/runner/template.go`** — add new template variables: `{{prompt.name}}`, `{{prompt.path}}`, `{{LABEL}}`, `{{PROJECT_INFO}}`, `{{ROLE_REPORTS}}`, `{{SHARED_BASE_DIR}}`, `{{SHARED_PROMPT_DIR}}`. `PrimaryOutputName()` becomes `<prompt-basename>.md`.
-8. **`cmd/*.go` rewiring** — remove `RoleID: "supervisor"` hardcodes (`cmd/review.go:233`, `cmd/code.go:278`, `cmd/auto_setup.go:83`, `cmd/verify.go:163`, `cmd/inspect.go:300`). Route through `Assemble(name)`. Rework `cmd/prompt.go` for positional `:report/security` and `--preview` / `--content` flags. Add `--pre-exec`, `--post-exec`, `--labels` to `ateam parallel`.
-9. **`ateam prompt :NAME --preview` tool** — pretty-print the `Resolution` (ordered files with anchor tags + merged frontmatter). `--preview --content` adds the assembled text.
-10. **`internal/web/`** — update artifact read paths in `handlers.go` and `export.go`.
-11. **Documentation pass** — `CONFIG.md`, `ROLES.md`, `README.md`, `ISOLATION.md`.
+### Task 2: Internal Stage / PreAction / PostAction refactor
 
-### Phase 2: stage executor (follow-up refactor)
+**Deliverable:** built-in commands run through a shared internal Stage abstraction.
 
-After Phase 1 ships:
+**Acceptance:**
 
-12. Frontmatter `pre_exec` / `post_exec` execution (built-in actions + scripts).
-13. Built-in action catalog: `concurrent-run-check`, `budget-precheck`, `source-writable`, `copy-runtime-files`, `chain-next`. Replace today's hardcoded Go promotion with declarative `copy-runtime-files`.
-14. `ateam flow` subcommand v1 (`skip`, `error`, `abort`, `continue`, `note`) + `runtime/<exec_id>/_flow.toml` channel + call-DB schema additions (`status` enum gains `skipped` / `aborted` / `completed-by-script`; new `flow_reason` text column; `parent_exec_id` for redo/fallback chains).
-15. `ateam flow` subcommand v2 (`completed` for pre_exec; `redo --extra`, `fallback --profile`, `retry --after/--until-reset/--backoff` for post_exec) + `max_redos` frontmatter key + `parent_exec_id` audit chain wiring.
-16. **`runtime/<exec_id>/_run.json` writer** — populated at the start of post_exec with identity / config / timing / cost / outcome / activity-summary fields (see Stage concept "Forward look"). Same JSON consumed by `--auto-debug`.
-17. **`on_failure` step-level policy** (`stop` | `continue` | `fallback_to_llm`) on frontmatter pre/post-exec entries (pending question #6).
-18. **Progress telemetry persistence (pending question #20).** Both `ateam exec` and `ateam parallel` write batched progress events (tokens, current tool, peak context, elapsed) to the call DB. Add `--progress-format=jsonl` on `ateam exec` for streaming consumers.
-19. **Built-in transient-error handling** in profile config: `retry_on: [api_5xx, rate_limit]`, `max_retries`, `backoff`. Replaces the "script-driven transient retry" mistake before it becomes a habit.
-20. `{{shell CMD}}` template directive (assembly-time, idempotent).
-21. `{{arg.<key>}}` CLI-passed argument namespace + `--arg key=value` flag.
-22. Parameterized `copy-runtime-files` (or equivalent) to support cross-project shared paths.
-23. `--prompt-dir DIR` / `--runtime-dir DIR` / `--shared-dir DIR` CLI flags on `ateam exec` / `ateam parallel` to override default `.ateam/` subtrees.
-24. **Pattern A polish for the Python framework path:** confirm ad-hoc `--role` / `--action` accepted without registry check on stdin-fed `ateam exec`; emit `exec_id` in a parseable form (`--print-exec-id` or stderr line) so external orchestrators correlate to `ateam inspect`.
+- `internal/stage/` package: `Stage` type, `Ctx` struct, `PreAction` / `PostAction` interfaces, `Run` dispatch function.
+- `internal/stage/actions/` package with typed implementations of today's hardcoded hooks: `ConcurrentRunCheck`, `BudgetPrecheck`, `SourceWritable`, `CopyRuntimeFiles`, `ChainNext`.
+- `cmd/report.go`, `cmd/code.go`, `cmd/review.go`, `cmd/verify.go`, `cmd/auto_setup.go` rewritten as Stage definitions + Cobra wrappers. Per-command logic that doesn't fit the Stage shape (CLI flag parsing, validation messages) stays in `cmd/`.
+- Stage definitions registered in a `cmd/registry.go` (or similar) for discoverability.
+- Internal — package not exported, no public API contract.
+- All existing tests pass; new unit tests for the Stage runner against synthetic Ctx.
 
-### Phase 3: optional simplifications
+**Out of scope:** exposing Stages as a public Go API; allowing users to register custom Stages; new built-in workflows (this task is restructuring, not adding).
 
-- Revisit the runtime/shared promotion model (pending question 19).
-- Frontmatter `params:` + CLI `--param k=v` (if a use case demands runtime-varying values beyond `{{arg.*}}`).
-- Frontmatter `enabled_from:` for cross-workflow enablement.
+### Task 3: Progress telemetry — `exec` output format + shared code with `parallel` + DB writes
+
+**Deliverable:** `ateam exec` emits structured progress, both `exec` and `parallel` write progress events to the call DB, `ateam ps` works uniformly.
+
+**Acceptance** (requirements; exact design left to the implementing task):
+
+- `ateam exec --progress-format=jsonl` (or `--progress-fd=N`) emits per-event JSON lines on the chosen channel.
+- Event vocabulary at minimum: `tool_start`, `tool_end`, `assistant_message`, `thinking`, `token_count`, `result`. Versioned schema.
+- Progress events persisted to `state.sqlite` (table layout / batching strategy chosen by the task).
+- `ateam exec` and `ateam parallel` consume the same event source (no duplicated event handling). Today's in-memory parallel rendering feeds off the same stream.
+- `exec_id` emission discoverable from outside (`--print-exec-id` flag or stderr line); orchestrators can correlate to `ateam inspect <id>`.
+- `ateam ps` shows running `exec` invocations alongside `parallel` ones.
+- `ateam inspect <exec_id>` shows per-event history for completed runs.
+
+**Out of scope:** real-time aggregation across processes, replay / time-travel, SSE HTTP endpoint, structured `_run.json` for post-exec consumption (since v1 has no post-exec hook surface for users).
+
+### Task 4: `ateam prompt --preview` CLI
+
+**Deliverable:** the preview tool described above.
+
+**Acceptance:**
+
+- `ateam prompt --action X --role Y --preview` pretty-prints the resolution + merged frontmatter, with anchor tags on every file.
+- `--preview --content` adds the full assembled text.
+- Errors loudly on invalid frontmatter, orphan fragments, role-name violations, missing required includes.
+
+### Task 5: Documentation pass
+
+- `CONFIG.md` — new prompt layout + customization patterns.
+- `ROLES.md` — anchor-based override patterns.
+- `README.md` — updated commands and customization story.
+- `ISOLATION.md` — verify no impact on container/sandbox semantics; refresh if anything changed.
+- Reference `plans/python_framework_examples/` for "I need more than prompt-content customization."
+
+### Task 6 (smaller): drop the `runs.go` → `ps.go` rename's remnants, if any
+
+The recent rename to `psCmd` is complete; this is a cleanup pass if anything was missed.
+
+### Task 7: Rename template variables to the `scope.name` convention
+
+**Deliverable:** all template variables follow the dotted-namespace convention described in the "Template variables" section. Old ALL_CAPS forms are mapped to the new forms during migration.
+
+**Acceptance:**
+
+- `internal/runner/template.go` renamed/restructured to dispatch by namespace: `prompt.*`, `exec.*`, `project.*`, `git.*`, `container.*`, `env.NAME`, `ateam.*`, `role.*`. Resolution is one function per namespace; adding a new variable in a namespace is a one-line change.
+- `{{env.NAME}}` reads from process environment; missing variable errors at assembly time with the variable name in the message.
+- `{{git.*}}` set computed once per env, cached: `repo`, `branch`, `commit`, `head_short`, `dirty`.
+- `defaults/prompts/*` rewritten to use the new variable names. Embedded defaults ship the new vocabulary from v1.
+- Auto-migration (Task 1's migrator) gains a content-rewrite pass that updates known ALL_CAPS variable references in user-authored `.ateam/prompts/*.md` files to the new dotted form. Unknown ALL_CAPS tokens are left untouched. Migration is logged on stderr.
+- Migration mapping table is closed (no aliases). Once a v1 ateam binary sees a project, the prompts use the new names.
+- Tests: rename mapping is exhaustive for current variables; assembler emits clear errors for unknown variables in a known namespace; unknown namespaces pass through unchanged (so literal `{{foo.bar}}` text agents emit stays as-is).
+
+**Out of scope:** keeping ALL_CAPS aliases past migration; new namespaces beyond the ones listed in the spec (`git.*` is the only meaningfully new one — existing variables redistribute into the others).
+
+**Ordering note:** do alongside or immediately after Task 1 to avoid the embedded defaults ever shipping with ALL_CAPS names in v1.
+
+---
+
+The big tasks (1, 2, 3, 4, 7) are mostly parallelizable once Task 1's assembler shape exists. Task 2 depends on Task 1 for the Ctx + assembler shape. Task 3 is fully independent. Task 7 is tightly coupled to Task 1 and best done by the same person.
+
+## Pending questions
+
+Several of the earlier pending questions become moot with the narrowed scope. The remaining ones:
+
+1. **Setup overview filename** — auto-migration renames `setup_overview.md` → `auto_setup/auto_setup.md`. Acceptable break, or keep historical name?
+2. **`ateam roles` output** — keep as role-listing, or unify under `ateam prompts list`? Decide after Task 1 lands.
+3. **Frontmatter schema strictness** — strict allow-list (locked: strict). What ateam-internal keys, if any, get added in v1? Probably none; reserved for future.
+4. **Runtime/shared promotion model** — current split (agent writes to `exec.output_dir`, then promotion copies selected files to `exec.shared_prompt_dir`) works but isn't intuitive. Worth a design pass after Task 1 + Task 2 land: is there a cleaner model? E.g. agents always write to the canonical shared path; the runtime dir is a tee'd copy purely for history; promotion goes away as a concept. Or: prompt frontmatter declares which output files are "shared" vs "scratch," and the runner enforces the split at write time. Defer until after the substrate lands; flag explicitly that the current model is the weakest part of the design.
+5. **Progress event schema versioning** — owned by Task 3.
+6. **Python framework distribution.** Stay in `plans/python_framework_examples/`, promote to top-level `python/` or `examples/`, or spin out as a separate `ateam-workflow` project? Probably stays in `plans/` until external users start asking for it; the `ateam-workflow` idea is the more ambitious vision (typed `actions × entities × roles/scopes` data model, eventually resumable multi-step workflows) and is a meaningful side project of its own.
+
+### Resolved (recorded here so a future reader doesn't reopen them)
+
+- **`{{role.reports}}` filter inputs.** Expands to the resolved role set for the current invocation, with the existing `--roles` / `--all` / `--max-age` filters applied. The Stage's `Ctx` carries the resolved filter; the assembler reads it when expanding the variable. Same behavior as today's review command; no new template-argument syntax.
+- **Enablement.** Stays in `config.toml [roles]`. No frontmatter `enabled:` or `enabled_from:` key in v1.
 
 ## Critical files to read before implementing
 
-- `internal/prompts/prompts.go` — the current resolver this refactor replaces
+- `internal/prompts/prompts.go` — current resolver this refactor replaces
 - `internal/prompts/embed.go` — role discovery from embedded FS
 - `internal/root/resolve.go` — path helpers
 - `internal/runner/runner.go:737, 1156-1199` — `promoteRuntimeFiles`
 - `internal/runner/template.go:17-33, 180-195` — template vars and primary output names
 - `defaults/embed.go` + the `defaults/` tree
-- `cmd/review.go`, `cmd/code.go`, `cmd/auto_setup.go`, `cmd/verify.go`, `cmd/inspect.go`, `cmd/prompt.go`, `cmd/roles.go`, `cmd/report.go`
+- `cmd/review.go`, `cmd/code.go`, `cmd/auto_setup.go`, `cmd/verify.go`, `cmd/inspect.go`, `cmd/prompt.go`, `cmd/roles.go`, `cmd/report.go`, `cmd/table.go`
 - `internal/web/handlers.go`, `internal/web/export.go`
 - `CONFIG.md`, `ROLES.md`, `README.md`, `ISOLATION.md` for doc updates
+- `plans/python_framework_examples/ateam.py` — the external orchestration reference
 
 ## Verification plan
 
 1. `make build` + `go test ./...` after each significant step.
 2. `make test-docker` once at the end.
-3. **Golden prompt test** — capture `ateam prompt --role <r> --action report` and `ateam prompt --supervisor --action review` outputs before the refactor; after, run the equivalent `ateam prompt :report/<r>` and `ateam prompt :review` and diff. Should be byte-identical modulo intentional ordering changes.
+3. **Golden prompt test** — capture `ateam prompt --role <r> --action report` and `ateam prompt --supervisor --action review` outputs before the refactor; after, run the equivalent `ateam prompt --action report --role <r>` and `ateam prompt --action review` and diff. Should be byte-identical modulo intentional ordering changes.
 4. `ateam roles` lists the same set of roles before/after.
 5. End-to-end on a fresh `./test_data/` project: `ateam init`, `ateam report --roles project.security`, verify the report lands at `.ateam/shared/report/project.security/project.security.md`. Then `ateam review`, verify it lands at `.ateam/shared/review/review.md`.
 6. **Migration test** — project with old layout (artifacts plus overrides at all levels), run `ateam` once, verify behavior. Re-run to confirm idempotence.
 7. **Org-override test** — both org-level and project-level overrides for the same role; confirm anchor fallback still works.
-8. **Composition test** — `{{include}}` / `{{include?}}` first-match: create the same filename at embedded, org, and project anchors; assert project's wins. `{{include_glob}}` additive: create distinct filenames at each anchor matching the glob; assert all are concatenated in most-general-first order. Dir-level `_pre.*.md`: same composition; multiple files at one anchor sorted lexically.
-9. **Frontmatter test** — invalid YAML errors at preview; unknown key errors; pre_exec list ordering preserved; per-role frontmatter extends dir-level frontmatter.
-10. **Role-name validation test** — `_security.prompt.md` (starts with `_`) errors at load. `code.pre.prompt.md` (ends with `.pre`) errors. Both messages clearly state the rule.
-11. **Orphan-fragment test** — `securty.pre.scope.md` (typo) errors with Levenshtein hint suggesting `security`.
-12. Manual smoke: `ateam prompt :review`, `ateam prompt :code_management`, `ateam prompt :report/project.security`.
-13. **Preview tool** — `ateam prompt :report/project.security --preview` lists every contributing file with anchor tags AND merged frontmatter, in the exact assembly order. `--preview --content` produces the full assembled text.
+8. **Composition test** — `{{include}}` / `{{include?}}` first-match: create the same filename at embedded, org, and project anchors; assert project's wins. `{{include_glob}}` additive: create distinct filenames at each anchor matching the glob; assert all are concatenated in most-general-first order. Dir-level `_pre.*.md`: same composition.
+9. **Frontmatter test** — invalid YAML errors at preview; unknown key errors.
+10. **Role-name validation test** — `_security.prompt.md` (starts with `_`) errors at load. `code.pre.prompt.md` (ends with `.pre`) errors.
+11. **Orphan-fragment test** — `securty.pre.scope.md` (typo) errors with Levenshtein hint.
+12. **Stage refactor test** — internal `stage.Run` against synthetic Ctx with mocked agent step; pre-actions fire in order, post-actions fire in order, errors propagate correctly.
+13. **Progress telemetry test** (Task 3) — `ateam exec --progress-format=jsonl` against a short prompt, parse the emitted events, confirm DB rows exist for the same events.
+14. Manual smoke: `ateam prompt --action review`, `ateam prompt --action code --role management`, `ateam prompt --action report --role project.security`.
+15. **External orchestration smoke** — run `plans/python_framework_examples/crawl.py` (or equivalent) against a fixture, confirm `ateam ps` sees the runs.
 
 ---
 
-## Earlier approaches (rejected)
+# Explored but not pursued
+
+The sections below capture design directions that earlier drafts pursued and that v1 explicitly drops. Preserved here so the rationale survives — if any of this becomes worth revisiting, the design notes don't need to be re-derived.
+
+## File-based execution hooks (frontmatter `pre_exec` / `post_exec` + scripts)
+
+The strongest competing direction was making execution hooks user-pluggable: dir-level and role-level frontmatter declares ordered lists of pre-exec and post-exec steps; each step is either a built-in action name (`copy-runtime-files`, `concurrent-run-check`) or a script path. Combined with runtime flow control (`ateam flow skip / error / abort / continue / note`), assembly-time scripting (`{{shell CMD}}`), and CLI-injected stages (`--pre-exec`, `--post-exec`, `--arg key=value`), this would let users build new workflow shapes entirely inside `.ateam/`.
+
+### Why it was dropped
+
+1. **Files everywhere.** A non-trivial workflow ends up as 10+ frontmatter-bearing `.md` files + a `scripts/` directory of small shell scripts. The Python framework's single-file expression of the same workflow (typed Python + 5 small markdown prompts for the static content) reads dramatically better.
+2. **The "small piece of logic" gap doesn't exist in practice.** People want either "edit this prompt's wording" (file system handles cleanly) or "build a real workflow" (needs typed code, control flow, error handling — Python wins). The frontmatter-hook middle ground rarely earns its keep.
+3. **Surface area cost.** `ateam flow`, `{{shell}}`, `{{arg.*}}`, parameterized promotion, on_failure policy, per-step retry, redo loops — each is a small feature, but the bag of them roughly doubles the spec. And once `ateam` ships them, removing them is hard.
+4. **The CLI promise stays cleaner without them.** "ateam is a sharp CLI you use from shell scripts" is a stronger story than "ateam is a workflow engine with a DSL."
+5. **External orchestration in Python is genuinely good.** `plans/python_framework_examples/` proves that ~280 lines of framework + ~50 lines per workflow gets you typed config, structured results, parallel execution, and skip semantics — without inventing new languages or scattering logic across files.
+
+### The Stage concept (framing the dropped design)
+
+A **stage** was the unit of "one LLM invocation with deterministic wrapping" — three phases (pre / prompt / post). Pre and post lists were ordered; per-role frontmatter extended dir-level frontmatter; dir-level frontmatter lived on `_pre.*.md` / `_post.*.md` files alongside their content.
+
+Example dir-level frontmatter (dropped):
+
+```yaml
+---
+pre_exec: [concurrent-run-check, source-writable, ./gather-deps.sh]
+post_exec: [copy-runtime-files, ./validate.sh]
+---
+You are performing a {{prompt.name}} report on this project.
+[... rest of the pre fragment's markdown body ...]
+```
+
+Per-role frontmatter would have extended dir-level lists by appending — `[concurrent-run-check, source-writable, ./gather-deps.sh, ./security-extra-setup.sh]` for an `audit/security.prompt.md` with its own `pre_exec`.
+
+### The `ateam flow` subcommand (dropped)
+
+A CLI scripts (in `pre_exec` / `post_exec` / `{{shell}}`) would call to signal lifecycle decisions back to the runner. Action set (v1 + richer v2):
+
+| Action | What it would have done |
+|---|---|
+| `ateam flow skip [--reason TEXT]` | Don't invoke the LLM; mark skipped. |
+| `ateam flow completed [--reason TEXT]` | Script did the work; mark success without invoking LLM. |
+| `ateam flow error [--reason TEXT]` | Don't invoke the LLM; mark failed. |
+| `ateam flow abort [--reason TEXT]` | Kill the entire `ateam parallel` batch. |
+| `ateam flow continue` | Explicit no-op signal. |
+| `ateam flow note <text>` | Attach a free-form note to the run record. |
+| `ateam flow redo --extra TEXT` | Re-run the same prompt with appended instruction. New `exec_id` with `parent_exec_id`. |
+| `ateam flow fallback --profile X` | Re-run with different agent/profile. |
+| `ateam flow retry [--after N \| --until-reset \| --backoff POLICY]` | Re-run after a wait policy. |
+
+Storage was to be `runtime/<exec_id>/_flow.toml` (append-only during run) plus call-DB schema additions (`status` enum gains `skipped` / `aborted` / `completed-by-script`; new `flow_reason` text column; `parent_exec_id` for redo chains).
+
+Discovery via `ATEAM_EXEC_ID` env var on scripts ateam launched.
+
+### `{{shell CMD}}` template directive (dropped)
+
+Runs `CMD` during prompt assembly; stdout becomes prompt body. Scripts had to be idempotent and read-only beyond `ateam flow` side effects (assembly may run during `--preview`). `ATEAM_PREVIEW=1` env var set during preview. Two-pass expansion like includes: variables inside `{{shell CMD}}` resolved first, then shell runs.
+
+### Rich post_exec context: `runtime/<exec_id>/_run.json` (dropped)
+
+JSON document written at the start of post_exec containing identity / config / timing / cost / outcome / activity-summary fields. Would have been consumed by post_exec scripts and `--auto-debug` alike. Dropped because there's no user-pluggable post_exec to consume it.
+
+### `{{arg.<key>}}` namespace + `--arg key=value` CLI (dropped)
+
+Per-invocation typed argument surface. Would have let one prompt template parameterize per invocation (e.g. `{{arg.target_label}}` for multi-target metaproject runs). Dropped because the multi-target use case is exactly what the Python framework handles naturally (typed config in Python).
+
+### Parameterized promotion (dropped)
+
+The default `copy-runtime-files` action would have grown a `--to <pattern>` form with `{{arg.*}}` / `{{prompt.*}}` substitution in the destination, supporting workflows like the metaproject's `reports/<target>/<scope>/audit.md` layout. Dropped because v1's promotion stays hardcoded per Stage.
+
+### `on_failure` step-level policy (dropped)
+
+Per-step `on_failure: stop | continue | fallback_to_llm` in frontmatter would have governed what happens when a pre_exec script returned non-zero. Dropped along with the user-pluggable exec lists.
+
+### `--prompt-dir DIR` / `--runtime-dir DIR` / `--shared-dir DIR` CLI flags (deferred)
+
+CLI flags to override the default `.ateam/` subtrees were planned to let workflows like the metaproject example use a top-level `reports/` directory for user-visible artifacts. Deferred for v1 — but the assembler is parameterized on `prompt_dir` internally so adding the flag later is small. The Python framework already supports `--shared-dir`-equivalent via `Runner(shared_dir=...)`.
+
+## Ad-hoc prompts and CLI-injected stages
+
+Earlier drafts let `ateam parallel` accept per-job pre/post exec hooks via CLI flags:
+
+```
+ateam parallel @file1.md @file2.md \
+  --pre-exec 'builtin:create-git-worktree {{LABEL}}' \
+  --pre-exec './my-script.sh {{LABEL}}' \
+  --post-exec './my-other-script.py' \
+  --labels job1,job2 \
+  --post-prompt "pay attention to this custom instruction"
+```
+
+Combined with the file-based exec story (each `--pre-exec` either a built-in action name or a script path, with the same expansion as frontmatter items), this would have made `ateam parallel` a small workflow engine of its own.
+
+Dropped along with frontmatter exec. `ateam parallel` stays "N prompts, shared everything." Multi-project orchestration with per-job differences goes to shell + `&` or Python.
+
+The `--pre-prompt` / `--post-prompt` CLI flags (raw text wrap, Category A only) stay — those are content-only and useful for one-off framing without persisting.
+
+## The "Pattern B" Python framework approach
+
+The Python framework had two possible architectures:
+
+- **Pattern A** — framework calls `ateam exec` per job, parallelism stays in Python. **Chosen.** Small ateam-side gap list (`--work-dir`, `--action`, ad-hoc role/action acceptance, exec_id emission), Python keeps ownership of typed config and conditional logic.
+- **Pattern B** — framework hands the batch to `ateam parallel`. **Dropped.** Required all of the Phase-2 work above (per-job `--work-dir`, per-job args, `ateam flow`, per-job hooks, machine-readable per-job results). At which point the Python framework stopped carrying its weight — you'd be back in the filesystem proposal.
+
+Pattern A is in `plans/python_framework_examples/`.
+
+## Earlier rejected approaches
 
 The design went through two earlier shapes before landing on the current dir-level `_pre.*.md` / `_post.*.md` scheme. Both are documented here for posterity.
 
@@ -1225,61 +1006,37 @@ The first draft baked composition into the framework: filenames carried meaning,
 
 **Mechanism:**
 - File kinds: `<name>.prompt.md` (named prompt), `prompt.md` (dir base, auto-prepended), `prompt.pre.md` / `prompt.post.md` (dir-level pre/post), `<name>.prompt.pre.md` / `<name>.prompt.post.md` (per-named pre/post).
-- Recursive composition: for any prompt at path `P`, walk strict prefixes shortest→longest, then `P` itself. At each level: pre (additive across anchors) + main (first-match) + post (additive). The framework hardcoded "main is fallback, pre/post are additive."
+- Recursive composition: for any prompt at path `P`, walk strict prefixes shortest→longest, then `P` itself. At each level: pre (additive across anchors) + main (first-match) + post (additive).
 - `prompt.md` at a directory level was **auto-prepended** to every named prompt below it. No template directive, no opt-in.
 
 **Why rejected:**
-1. **"Inserted first vs inserted last" was a forced choice.** The framework's rule put the dir base BEFORE the role's body, but many real wrappers (report format, output structure) belong AFTER. Splitting "the dir's shared instructions" between `prompt.md` (before) and `prompt.post.md` (after) was awkward.
-2. **Hardcoded composition in the framework.** "Why did the assembled prompt include X?" required knowing the recursive walk rules, not reading the files.
-3. **No natural home for declarative metadata** (stage actions, enablement). Parallel mechanisms kept being invented.
-4. **Naming explosion.** ~6 file patterns with rules between them.
+1. "Inserted first vs inserted last" was a forced choice. Many real wrappers (report format, output structure) belong AFTER. Splitting between `prompt.md` (before) and `prompt.post.md` (after) was awkward.
+2. Hardcoded composition in the framework — "Why did the assembled prompt include X?" required knowing the recursive walk rules, not reading the files.
+3. No natural home for declarative metadata (stage actions, enablement).
+4. Naming explosion — ~6 file patterns with rules between them.
 
 ### Rejected approach 2: template file + `{{include}}` directives
 
-The second draft tried to make composition explicit by putting it in a per-directory `_template.md` file that used `{{include}}` / `{{include?}}` / `{{include_glob}}` to orchestrate fragments.
+The second draft tried to make composition explicit by putting it in a per-directory `_template.md` file that used `{{include}}` directives to orchestrate fragments.
 
 **Mechanism:**
-- `_template.md` was a structural file (not invokable) that wrapped each role in the directory.
-- Templates used `{{include}}` directives to pull in dir-level fragments (`prompt.pre.<NAME>.md`), per-role fragments (`<role>.prompt.pre.<NAME>.md`), and the role body itself.
-- YAML frontmatter on `_template.md` declared dir-level stage actions (`pre_exec`, `post_exec`).
-- Naming used `<role>.prompt.pre.<NAME>.md` and `prompt.pre.<NAME>.md` (no `_` prefix).
-
-**Example shipped template:**
-```yaml
----
-post_exec: [copy-runtime-files]
----
-You are performing a {{prompt.name}} report on this project.
-
-{{PROJECT_INFO}}
-
-{{include_glob prompt.pre.*.md}}
-{{include_glob {{prompt.name}}.prompt.pre.*.md}}
-
-{{include {{prompt.name}}.prompt.md}}
-
-{{include_glob {{prompt.name}}.prompt.post.*.md}}
-{{include_glob prompt.post.*.md}}
-
-Format your findings as severity-tagged markdown sections...
-```
+- `_template.md` was a structural file that wrapped each role in the directory.
+- Templates used `{{include}}` directives to pull in dir-level fragments, per-role fragments, and the role body itself.
+- YAML frontmatter on `_template.md` declared dir-level stage actions.
 
 **Why rejected:**
-1. **Templates are opaque.** To know what gets assembled, you must open the template file and read its `{{include}}` boilerplate. `ls` alone doesn't tell you anything.
-2. **Boilerplate cost.** Every templated directory needed 5+ `{{include}}` lines just to wire up the standard convention. Authoring a new workflow meant writing or copying this boilerplate.
-3. **Subtle ambiguity in dotted filenames.** `prompt.pre.foo.md` could parse as either dir-level pre or role "prompt" pre fragment "foo." The required reservation of `prompt`/`pre`/`post` as forbidden role-name suffixes was hard to defend in writing.
-4. **`.prompt.` infix duplication.** Files like `security.prompt.pre.scope.md` repeated `.prompt.` unnecessarily.
+1. Templates are opaque. To know what gets assembled, you must open the template file and read its `{{include}}` boilerplate. `ls` alone doesn't tell you anything.
+2. Boilerplate cost. Every templated directory needed 5+ `{{include}}` lines.
+3. Subtle ambiguity in dotted filenames. `prompt.pre.foo.md` could parse two ways.
+4. `.prompt.` infix duplication. Files like `security.prompt.pre.scope.md` repeated `.prompt.` unnecessarily.
 
 ### What carried forward to the chosen approach
 
 - Directory split between `prompts/` (config), `shared/` (cross-agent), `runtime/` (per-run).
-- Action-first identifier model (`:report/security`, `:review`).
 - Anchor system (project → org → embedded).
 - Auto-migration of old layouts.
-- The Stage concept (pre/prompt/post phases) and the grounded built-in action catalog.
 - The "one rule" for filename composition (same name = overload; different name = compose).
-- Template engine primitives: `{{include}}`, `{{include?}}`, `{{include_glob}}`, `{{var}}`, YAML frontmatter parsing.
-- Substitution variables `{{prompt.name}}`, `{{prompt.path}}`, `{{LABEL}}`, `{{PROJECT_INFO}}`, `{{ROLE_REPORTS}}`.
-- Ad-hoc prompt mechanics (`@file.md`, stdin, CLI `--pre-exec`/`--post-exec`).
+- Template engine primitives: `{{include}}`, `{{include?}}`, `{{include_glob}}`, `{{var}}`, YAML frontmatter parsing (strict allow-list).
+- Substitution variables `{{prompt.name}}`, `{{prompt.path}}`, `{{PROJECT_INFO}}`, `{{ROLE_REPORTS}}`.
 
-The chosen approach drops the template file entirely. Assembly is filename-driven: `_pre.*.md`, `_post.*.md` (dir-level, structural — marked by `_` prefix), and `<role>.prompt.md`, `<role>.pre.*.md`, `<role>.post.*.md` (role-level). The framework discovers the matching files and composes them per the fixed assembly order; `{{include*}}` directives remain available inside any file for ad-hoc composition.
+The chosen approach drops the template file entirely. Assembly is filename-driven: `_pre.*.md`, `_post.*.md` (dir-level, structural — marked by `_` prefix), and `<role>.prompt.md`, `<role>.pre.*.md`, `<role>.post.*.md` (role-level). The framework discovers matching files and composes them per the fixed assembly order; `{{include*}}` directives remain available inside any file for ad-hoc composition.
