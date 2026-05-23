@@ -8,6 +8,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	codextui "github.com/ateam/internal/codex"
@@ -160,6 +161,7 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 	// Stops when this run's context is canceled or the function returns.
 	tailCtx, tailCancel := context.WithCancel(ctx)
 	defer tailCancel()
+	var tailWg sync.WaitGroup
 	if streamWriter != nil {
 		marker := ""
 		// Free-form prompts get an EXEC_ID marker injected by
@@ -170,17 +172,22 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		if !strings.HasPrefix(strings.TrimSpace(req.Prompt), "/") {
 			marker = codextui.SessionLogMarker(req.ExecID)
 		}
-		go codextui.TailSessionLog(tailCtx, "", req.WorkDir, start, marker, func(line []byte) {
-			_, _ = streamWriter.Write(line)
-			_ = streamWriter.Flush()
-		})
+		tailWg.Add(1)
+		go func() {
+			defer tailWg.Done()
+			codextui.TailSessionLog(tailCtx, "", req.WorkDir, start, marker, func(line []byte) {
+				_, _ = streamWriter.Write(line)
+				_ = streamWriter.Flush()
+			})
+		}()
 	}
 
 	result, err := codextui.RunTmux(ctx, cfg)
-	// Stop the live tailer now that codex has finished — its post-run
-	// ReadSessionStats read (inside RunTmux) already captured the final
-	// usage, and any new lines codex writes during shutdown are noise.
+	// Stop the live tailer and wait for its goroutine to exit before
+	// writing synthetic events — both share streamWriter and the
+	// goroutine may still be flushing when RunTmux returns.
 	tailCancel()
+	tailWg.Wait()
 	if result.SessionName != "" {
 		ch <- StreamEvent{Type: "system", Subtype: "tmux_session", SessionID: result.SessionName, Model: c.ModelName()}
 	}
