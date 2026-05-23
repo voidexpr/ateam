@@ -1,8 +1,11 @@
 package codex
 
 import (
+	"compress/gzip"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -86,6 +89,56 @@ func TestFindSessionLogMatchesCWD(t *testing.T) {
 	}
 	if path != rollout {
 		t.Errorf("path = %q, want %q", path, rollout)
+	}
+}
+
+// TestArchiveSessionLogGzipRoundtrip verifies the gzip-copy preserves
+// content byte-for-byte and writes a real gzip stream (so `gunzip < file`
+// works for the user, and `ateam inspect` can show the archive size).
+func TestArchiveSessionLogGzipRoundtrip(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "rollout.jsonl")
+	content := strings.Repeat(`{"type":"event_msg","payload":{"type":"agent_message","message":"hello world"}}`+"\n", 100)
+	if err := os.WriteFile(src, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(t.TempDir(), "out", "codex-session.jsonl.gz")
+	n, err := ArchiveSessionLog(src, dst)
+	if err != nil {
+		t.Fatalf("ArchiveSessionLog: %v", err)
+	}
+	if int(n) != len(content) {
+		t.Errorf("returned bytes = %d, want %d (uncompressed)", n, len(content))
+	}
+	if _, err := os.Stat(dst); err != nil {
+		t.Fatalf("dst missing: %v", err)
+	}
+	// Verify the gzip is decodable and the content matches.
+	f, err := os.Open(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatalf("gzip.NewReader: %v", err)
+	}
+	defer gz.Close()
+	got, err := io.ReadAll(gz)
+	if err != nil {
+		t.Fatalf("read gz: %v", err)
+	}
+	if string(got) != content {
+		t.Errorf("roundtrip mismatch:\ngot  %d bytes\nwant %d bytes", len(got), len(content))
+	}
+}
+
+// TestArchiveSessionLogRejectsMissingSrc: cleanly errors instead of
+// creating an empty archive when the source doesn't exist.
+func TestArchiveSessionLogRejectsMissingSrc(t *testing.T) {
+	dst := filepath.Join(t.TempDir(), "out.gz")
+	_, err := ArchiveSessionLog(filepath.Join(t.TempDir(), "no-such-file"), dst)
+	if err == nil {
+		t.Fatal("expected error for missing src")
 	}
 }
 

@@ -177,8 +177,27 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 	}
 
 	result, err := codextui.RunTmux(ctx, cfg)
+	// Stop the live tailer now that codex has finished — its post-run
+	// ReadSessionStats read (inside RunTmux) already captured the final
+	// usage, and any new lines codex writes during shutdown are noise.
+	tailCancel()
 	if result.SessionName != "" {
 		ch <- StreamEvent{Type: "system", Subtype: "tmux_session", SessionID: result.SessionName, Model: c.ModelName()}
+	}
+
+	// Best-effort: gzip-copy the rollout JSONL into .ateam/logs/<EXEC_ID>/
+	// so `ateam inspect` lists it and the rollout survives a CODEX_HOME
+	// wipe. Failures don't fail the run.
+	archivedPath := ""
+	archivedBytes := int64(0)
+	if result.SessionStats.SessionLogPath != "" && req.StreamFile != "" {
+		dst := filepath.Join(filepath.Dir(req.StreamFile), "codex-session.jsonl.gz")
+		if n, aerr := codextui.ArchiveSessionLog(result.SessionStats.SessionLogPath, dst); aerr == nil {
+			archivedPath = dst
+			archivedBytes = n
+		} else {
+			fmt.Fprintf(stderr, "codex-tmux: failed to archive codex session log to %s: %v\n", dst, aerr)
+		}
 	}
 	if result.Output != "" {
 		ch <- StreamEvent{Type: "assistant", Text: result.Output, IsModelResponse: true}
@@ -248,6 +267,8 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		"output_chars":      len(result.Output),
 		"pane_pid":          result.PanePID,
 		"session_log":       result.SessionStats.SessionLogPath,
+		"session_log_gz":    archivedPath,
+		"session_log_bytes": archivedBytes,
 		"input_tokens":      result.SessionStats.InputTokens,
 		"output_tokens":     result.SessionStats.OutputTokens,
 		"cached_tokens":     result.SessionStats.CachedInputTokens,

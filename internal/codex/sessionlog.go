@@ -2,8 +2,10 @@ package codex
 
 import (
 	"bufio"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -293,6 +295,49 @@ func pathEqual(a, b string) bool {
 		rb = b
 	}
 	return ra == rb
+}
+
+// ArchiveSessionLog gzip-copies the codex rollout JSONL at srcPath to
+// dstPath. Intended for post-run preservation in `.ateam/logs/<EXEC_ID>/`
+// so the rollout survives even if the user later wipes their CODEX_HOME —
+// and so `ateam inspect` lists it next to the other per-run artifacts.
+//
+// Codex rollout files for long /review runs reach 10s of MB (mostly tool
+// output); gzip typically shrinks them 5-10x because the content is JSONL
+// with repetitive keys.
+//
+// dstPath's parent dir is created (0700) if missing. Returns the
+// uncompressed byte count on success — useful for the synthetic stream's
+// final result event.
+func ArchiveSessionLog(srcPath, dstPath string) (int64, error) {
+	if srcPath == "" || dstPath == "" {
+		return 0, fmt.Errorf("codex.ArchiveSessionLog: src and dst paths are required")
+	}
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return 0, err
+	}
+	defer src.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dstPath), 0700); err != nil {
+		return 0, err
+	}
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		return 0, err
+	}
+	defer dst.Close()
+
+	gz := gzip.NewWriter(dst)
+	defer gz.Close()
+	n, err := io.Copy(gz, src)
+	if err != nil {
+		return n, err
+	}
+	if err := gz.Close(); err != nil {
+		return n, err
+	}
+	return n, nil
 }
 
 // rolloutRecord is the JSONL envelope shared by every record in a Codex
