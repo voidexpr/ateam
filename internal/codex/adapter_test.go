@@ -473,7 +473,7 @@ func TestCodexBusyIgnoresScrollback(t *testing.T) {
 	var tail strings.Builder
 	tail.WriteString("<< Code review finished >>\n")
 	for i := 0; i < 25; i++ {
-		tail.WriteString(fmt.Sprintf("• Finding %d: text\n", i))
+		fmt.Fprintf(&tail, "• Finding %d: text\n", i)
 	}
 	tail.WriteString("› \n  gpt-5.5 xhigh · ~/repo · Context 5% used\n")
 	rendered := scrollback.String() + tail.String()

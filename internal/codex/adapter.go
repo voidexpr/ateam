@@ -98,6 +98,12 @@ type TmuxConfig struct {
 	// changes constantly during a Codex turn (cursor, status bar) so an
 	// uncapped heartbeat would spam the stream.
 	HeartbeatInterval time.Duration
+	// TmuxLogPath, when non-empty, enables a per-run JSONL trace of every
+	// tmux interaction (sends, captures-with-hash-dedup, waitReady /
+	// waitIdle decisions, errors). Eager-flushed so `tail -f` works on a
+	// stuck run. The codex-tmux agent points this at
+	// `.ateam/logs/<EXEC_ID>/tmux.log` next to the other per-exec logs.
+	TmuxLogPath string
 }
 
 // DefaultHeartbeatInterval is the throttle floor for OnHeartbeat callbacks.
@@ -275,8 +281,25 @@ func RunTmux(ctx context.Context, cfg TmuxConfig) (TmuxResult, error) {
 	args := InteractiveArgs(cfg.Args, cfg.Model, cfg.Effort, cfg.ExtraArgs)
 	cmd := append([]string{cfg.Command}, args...)
 
+	tracer, traceCloser, _ := newTmuxTracer(cfg.TmuxLogPath, started)
+	if traceCloser != nil {
+		defer traceCloser.Close()
+	}
+	tracer.event("start", map[string]any{
+		"session":    sessionName,
+		"socket":     cfg.SocketPath,
+		"command":    strings.Join(cmd, " "),
+		"model":      cfg.Model,
+		"effort":     cfg.Effort,
+		"exec_id":    cfg.ExecID,
+		"workdir":    cfg.WorkDir,
+		"prompt_len": len(cfg.InitialInput),
+		"prompt":     cfg.InitialInput,
+	})
+
 	sess, err := tmuxctl.New(ctx, cfg.SocketPath, sessionName, cfg.Width, cfg.Height, envList(cfg.Env), cfg.WorkDir, cmd, cfg.CmdFactory)
 	if err != nil {
+		tracer.event("error", map[string]any{"stage": "tmuxctl.New", "err": err.Error()})
 		return TmuxResult{SessionName: sessionName, Duration: time.Since(started)}, err
 	}
 	// Success-path-only cleanup. On ctx-cancel the tmux server's process
@@ -291,11 +314,13 @@ func RunTmux(ctx context.Context, cfg TmuxConfig) (TmuxResult, error) {
 		}
 	}()
 
-	ready, err := waitReady(ctx, sess, cfg.StartTimeout)
+	ready, err := waitReady(ctx, sess, cfg.StartTimeout, tracer)
 	if err != nil {
 		raw, _ := sess.Capture(context.Background(), true)
+		tracer.event("error", map[string]any{"stage": "waitReady", "err": err.Error()})
 		return TmuxResult{RawCapture: raw, SessionName: sessionName, Duration: time.Since(started)}, err
 	}
+	tracer.event("waitReady.ok", map[string]any{})
 
 	// Once codex is past its onboarding/dialogs we can ask tmux for the
 	// pane's foreground PID — that's the codex process we want recorded in
@@ -304,6 +329,7 @@ func RunTmux(ctx context.Context, cfg TmuxConfig) (TmuxResult, error) {
 	if panePID > 0 && cfg.OnPanePID != nil {
 		cfg.OnPanePID(panePID)
 	}
+	tracer.event("pane_pid", map[string]any{"pid": panePID})
 
 	delivery := preparePrompt(cfg.InitialInput, cfg.ExecID)
 	// Slash commands must be TYPED char-by-char (send-keys -l) so codex's TUI
@@ -316,14 +342,18 @@ func RunTmux(ctx context.Context, cfg TmuxConfig) (TmuxResult, error) {
 	// transmit `\n` as an Enter keystroke and submit the partial prompt.
 	var sendErr error
 	if delivery.IsSlashCommand {
+		tracer.event("type-literal", map[string]any{"text": delivery.SentText, "slash": true})
 		sendErr = sess.TypeLiteral(ctx, delivery.SentText)
 	} else {
+		tracer.event("send-literal", map[string]any{"text": delivery.SentText, "marker": delivery.EchoMarker})
 		sendErr = sess.SendLiteral(ctx, delivery.SentText)
 	}
 	if sendErr != nil {
+		tracer.event("error", map[string]any{"stage": "send-prompt", "err": sendErr.Error()})
 		return TmuxResult{SessionName: sessionName, Duration: time.Since(started)}, sendErr
 	}
 	if err := waitInputEcho(ctx, sess, delivery.EchoMarker, delivery.IsSlashCommand, 2*time.Second); err != nil {
+		tracer.event("error", map[string]any{"stage": "waitInputEcho", "err": err.Error()})
 		return TmuxResult{SessionName: sessionName, Duration: time.Since(started)}, err
 	}
 	// Debounce between input delivery and the submit key. gastown's
@@ -337,7 +367,9 @@ func RunTmux(ctx context.Context, cfg TmuxConfig) (TmuxResult, error) {
 	// either no-ops or inserts a newline depending on terminal capability
 	// flags (we observed v0.132.0 treating C-Enter as newline-insert on
 	// single-line `/review`, leaving the prompt unsubmitted).
+	tracer.event("send-keys", map[string]any{"keys": []string{"Enter"}, "stage": "submit"})
 	if err := sess.SendKeys(ctx, "Enter"); err != nil {
+		tracer.event("error", map[string]any{"stage": "submit", "err": err.Error()})
 		return TmuxResult{SessionName: sessionName, Duration: time.Since(started)}, err
 	}
 
@@ -345,7 +377,8 @@ func RunTmux(ctx context.Context, cfg TmuxConfig) (TmuxResult, error) {
 	if hbInterval <= 0 {
 		hbInterval = DefaultHeartbeatInterval
 	}
-	idleSignal, err := waitIdle(ctx, sess, ready, cfg.BusyTimeout, cfg.QuiescenceWindow, cfg.OnHeartbeat, hbInterval)
+	idleSignal, err := waitIdle(ctx, sess, ready, cfg.BusyTimeout, cfg.QuiescenceWindow, cfg.OnHeartbeat, hbInterval, tracer)
+	tracer.event("waitIdle.return", map[string]any{"signal": string(idleSignal), "err_present": err != nil})
 
 	// Multi-line slash command: navigate any interactive submenu codex
 	// opened by sending the follow-up key sequences. Each step is
@@ -353,7 +386,7 @@ func RunTmux(ctx context.Context, cfg TmuxConfig) (TmuxResult, error) {
 	// next step fires. waitIdle's `initial` argument is the pre-step
 	// pane so its quiescence check waits for an actual change.
 	if err == nil {
-		for _, step := range delivery.FollowupSteps {
+		for i, step := range delivery.FollowupSteps {
 			if len(step) == 0 {
 				continue
 			}
@@ -366,12 +399,14 @@ func RunTmux(ctx context.Context, cfg TmuxConfig) (TmuxResult, error) {
 				err = perr
 				break
 			}
+			tracer.event("send-keys", map[string]any{"keys": step, "stage": "followup", "index": i})
 			if perr := sess.SendKeys(ctx, step...); perr != nil {
 				err = perr
 				break
 			}
 			var iderr error
-			idleSignal, iderr = waitIdle(ctx, sess, pre, cfg.BusyTimeout, cfg.QuiescenceWindow, cfg.OnHeartbeat, hbInterval)
+			idleSignal, iderr = waitIdle(ctx, sess, pre, cfg.BusyTimeout, cfg.QuiescenceWindow, cfg.OnHeartbeat, hbInterval, tracer)
+			tracer.event("waitIdle.return", map[string]any{"signal": string(idleSignal), "err_present": iderr != nil, "stage": "followup", "index": i})
 			if iderr != nil {
 				err = iderr
 				break
@@ -418,7 +453,7 @@ func RunTmux(ctx context.Context, cfg TmuxConfig) (TmuxResult, error) {
 	return result, nil
 }
 
-func waitReady(ctx context.Context, sess *tmuxctl.Session, timeout time.Duration) (string, error) {
+func waitReady(ctx context.Context, sess *tmuxctl.Session, timeout time.Duration, tracer *tmuxTracer) (string, error) {
 	deadline := time.Now().Add(timeout)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -428,6 +463,7 @@ func waitReady(ctx context.Context, sess *tmuxctl.Session, timeout time.Duration
 		if err != nil {
 			return "", err
 		}
+		tracer.capture(rendered, PromptReady(rendered), CodexBusy(rendered))
 		if PromptReady(rendered) {
 			return rendered, nil
 		}
@@ -513,7 +549,7 @@ func echoVisible(rendered, marker string, isSlashCommand bool) bool {
 	return false
 }
 
-func waitIdle(ctx context.Context, sess *tmuxctl.Session, initial string, timeout, quiescence time.Duration, onHeartbeat func(string), hbInterval time.Duration) (IdleSignal, error) {
+func waitIdle(ctx context.Context, sess *tmuxctl.Session, initial string, timeout, quiescence time.Duration, onHeartbeat func(string), hbInterval time.Duration, tracer *tmuxTracer) (IdleSignal, error) {
 	deadline := time.Now().Add(timeout)
 	initialHash := stableHash(initial)
 	lastHash := initialHash
@@ -547,6 +583,7 @@ func waitIdle(ctx context.Context, sess *tmuxctl.Session, initial string, timeou
 
 		busy := CodexBusy(rendered)
 		ready := PromptReady(rendered)
+		tracer.capture(rendered, ready, busy)
 
 		// Busy indicator overrides any prompt-match: Codex's TUI redraws a
 		// prompt-shaped line during inter-tool gaps while still working.

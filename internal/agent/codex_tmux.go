@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -123,6 +124,10 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		SessionName:      sessionName,
 		SocketPath:       socketPath,
 		ExecID:           req.ExecID,
+		// tmux.log lands next to stream.jsonl / stderr.out under the
+		// per-EXEC_ID logs dir. Real-time diagnostic that survives stuck
+		// runs (where stream.jsonl is still empty).
+		TmuxLogPath: tmuxLogPathFor(req.StreamFile),
 		OnPanePID: func(pid int) {
 			// Emit the codex pane PID so the runner records it in
 			// agent_execs.pid. The runner's processEvent handler
@@ -231,6 +236,16 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		"cost_usd":          resultEvent.Cost,
 	})
 	ch <- resultEvent
+}
+
+// tmuxLogPathFor returns the per-EXEC_ID tmux.log path derived from the
+// runner-supplied stream file. Empty if no stream file (early-failure or
+// test paths) — codex/RunTmux treats empty as "tracing disabled".
+func tmuxLogPathFor(streamFile string) string {
+	if streamFile == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(streamFile), "tmux.log")
 }
 
 func explicitEnv(agentEnv, reqEnv map[string]string) map[string]string {
