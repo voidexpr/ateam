@@ -302,16 +302,16 @@ func RunTmux(ctx context.Context, cfg TmuxConfig) (TmuxResult, error) {
 		tracer.event("error", map[string]any{"stage": "tmuxctl.New", "err": err.Error()})
 		return TmuxResult{SessionName: sessionName, Duration: time.Since(started)}, err
 	}
-	// Success-path-only cleanup. On ctx-cancel the tmux server's process
-	// group is SIGTERMed by exec.CommandContext+Setpgid (see startServer),
-	// which cascades to the codex process inside the pane — no explicit
-	// kill needed. Keeping this defer here so a normal-return path tidies
-	// up the socket and the per-session script file promptly instead of
-	// waiting for SIGHUP to propagate.
+	// Always tear down the session, including on ctx cancellation. The
+	// exec.CommandContext + Setpgid combo only signals the tmux server's
+	// process group; the codex process inside the pane is in a *different*
+	// process group (tmux puts each pane in its own pgrp) and may survive
+	// the cascade. sess.Kill explicitly issues kill-session, then removes
+	// the per-run socket and bootstrap script — without it a canceled run
+	// leaks artifacts under .ateam/cache/tmux/. Use a fresh context so
+	// the cleanup itself isn't poisoned by the canceled run ctx.
 	defer func() {
-		if ctx.Err() == nil {
-			_ = sess.Kill(context.Background())
-		}
+		_ = sess.Kill(context.Background())
 	}()
 
 	ready, err := waitReady(ctx, sess, cfg.StartTimeout, tracer)
@@ -709,6 +709,11 @@ func normalizeLineForMatch(line string) string {
 
 // StripTrailingPrompt removes the final Codex input prompt redraw from a full
 // pane capture.
+//
+// Matches go through normalizeLineForMatch so a status line emitted with
+// non-breaking spaces (locale-dependent) is still recognized. PromptReady
+// has the same normalization; we need them in sync or one of the strip-
+// vs-detect halves leaks the trailing prompt into ExtractCommandOutput.
 func StripTrailingPrompt(rendered string) string {
 	lines := strings.Split(strings.ReplaceAll(rendered, "\r\n", "\n"), "\n")
 	end := len(lines)
@@ -716,11 +721,11 @@ func StripTrailingPrompt(rendered string) string {
 		end--
 	}
 	for i := end - 1; i >= 0 && i >= end-12; i-- {
-		if !codexStatusLine.MatchString(lines[i]) {
+		if !codexStatusLine.MatchString(normalizeLineForMatch(lines[i])) {
 			continue
 		}
 		for j := i - 1; j >= 0 && j >= i-4; j-- {
-			if codexInputPrompt.MatchString(lines[j]) {
+			if codexInputPrompt.MatchString(normalizeLineForMatch(lines[j])) {
 				return strings.TrimRight(strings.Join(lines[:j], "\n"), "\n")
 			}
 		}
@@ -810,6 +815,13 @@ func CleanCapture(s string) string {
 	return strings.Join(out, "\n")
 }
 
+// isEmptyOrDecorative reports whether a line carries no content the user
+// would want in the captured output. A line is decorative iff every
+// non-whitespace rune is in the known-decorative set (box-drawing,
+// block elements, em-dash/horizontal-bar separators). Any ASCII letter,
+// CJK character, emoji, or other content rune keeps the line — the
+// earlier "all non-ASCII = drop" heuristic incorrectly nuked localized
+// prose and Unicode-only code/output.
 func isEmptyOrDecorative(line string) bool {
 	if strings.TrimSpace(line) == "" {
 		return true
@@ -818,11 +830,27 @@ func isEmptyOrDecorative(line string) bool {
 		if r == ' ' || r == '\t' {
 			continue
 		}
-		if r < 128 {
-			return false
+		if isDecorativeRune(r) {
+			continue
 		}
+		return false
 	}
 	return true
+}
+
+// isDecorativeRune is the explicit set of Unicode ranges/runes codex uses
+// for visual chrome: box-drawing, block elements, and the two long-dash
+// separators that show up in `─ Worked for Xm Ys ─` etc.
+func isDecorativeRune(r rune) bool {
+	switch {
+	case r >= 0x2500 && r <= 0x257F: // Box Drawing
+		return true
+	case r >= 0x2580 && r <= 0x259F: // Block Elements
+		return true
+	case r == 0x2014, r == 0x2015: // em dash, horizontal bar
+		return true
+	}
+	return false
 }
 
 var (

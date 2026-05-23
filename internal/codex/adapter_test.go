@@ -233,6 +233,60 @@ func TestCleanCapture(t *testing.T) {
 	}
 }
 
+// TestCleanCapturePreservesUnicodeContent: localized prose, CJK, or
+// emoji-only lines must NOT be dropped — the old heuristic ("all
+// non-ASCII = decorative") nuked legit content. Only known decorative
+// ranges (box-drawing, block elements, long-dash separators) get
+// stripped.
+func TestCleanCapturePreservesUnicodeContent(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "CJK localized line survives",
+			in:   "Header\n你好世界\n────\nFooter",
+			want: "Header\n你好世界\nFooter",
+		},
+		{
+			name: "emoji-only line survives",
+			in:   "Header\n🎉🚀✨\n────\nFooter",
+			want: "Header\n🎉🚀✨\nFooter",
+		},
+		{
+			name: "pure box-drawing dropped",
+			in:   "Header\n╭───────╮\n│       │\n╰───────╯\nFooter",
+			// `│       │` is all decorative + whitespace → dropped too.
+			want: "Header\nFooter",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CleanCapture(tc.in)
+			if got != tc.want {
+				t.Errorf("CleanCapture =\n%q\nwant\n%q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestStripTrailingPromptNormalizesNBSP locks in the symmetry with
+// PromptReady: the trailing input redraw must strip even when the
+// status separator or `›` glyph uses U+00A0 NBSP rather than ASCII space
+// (locale-dependent codex rendering).
+func TestStripTrailingPromptNormalizesNBSP(t *testing.T) {
+	nbsp := " "
+	rendered := "Body content\n\n›" + nbsp + "Improve documentation in @filename\n\n  gpt-5.5" + nbsp + "xhigh" + nbsp + "·" + nbsp + "~/repo\n"
+	got := StripTrailingPrompt(rendered)
+	if strings.Contains(got, "Improve documentation") {
+		t.Errorf("StripTrailingPrompt leaked the NBSP-suffixed input redraw:\n%s", got)
+	}
+	if !strings.Contains(got, "Body content") {
+		t.Errorf("StripTrailingPrompt dropped real body content:\n%s", got)
+	}
+}
+
 func TestSocketPathFallsBackOnLongPath(t *testing.T) {
 	// Short path: stays in-tree.
 	short := SocketPath("/p/.ateam", 1)
