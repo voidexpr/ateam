@@ -691,8 +691,9 @@ func dockerExecOutput(container string, args ...string) (string, error) {
 }
 
 // resolveContainerName resolves a possibly-partial container name to the exact
-// Docker container name via substring matching.
-func resolveContainerName(name string) (string, error) {
+// Docker container name via substring matching. Stored in a var so tests can
+// stub out the Docker dependency, mirroring runAutoRoles.
+var resolveContainerName = func(name string) (string, error) {
 	return container.ResolveRunningContainerName(context.Background(), name)
 }
 
