@@ -214,24 +214,24 @@ func logFilesForRun(env *root.ResolvedEnv, r calldb.RecentRow) []string {
 		return nil
 	}
 	streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.StreamFile)
-	// New layout files (logs/<exec_id>/...) plus legacy prefix-based ones for
-	// pre-migration rows whose stream path still ends in _stream.jsonl.
-	var candidates []string
+	var files []string
 	if root.IsLegacyStreamFile(streamPath) {
 		prefix := strings.TrimSuffix(streamPath, "_stream.jsonl")
 		for _, s := range []string{"_exec.md", "_settings.json", "_stream.jsonl", "_stderr.log"} {
-			candidates = append(candidates, prefix+s)
+			path := prefix + s
+			if _, err := os.Stat(path); err == nil {
+				files = append(files, path)
+			}
 		}
 	} else {
 		dir := filepath.Dir(streamPath)
-		for _, name := range []string{"cmd.md", "settings.json", "stream.jsonl", "stderr.out", "prompt.md"} {
-			candidates = append(candidates, filepath.Join(dir, name))
-		}
-	}
-	var files []string
-	for _, path := range candidates {
-		if _, err := os.Stat(path); err == nil {
-			files = append(files, path)
+		if entries, err := os.ReadDir(dir); err == nil {
+			for _, e := range entries {
+				if e.IsDir() {
+					continue
+				}
+				files = append(files, filepath.Join(dir, e.Name()))
+			}
 		}
 	}
 	runtimeDir := env.RuntimeDir(r.ID)
