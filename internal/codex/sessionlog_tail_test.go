@@ -150,8 +150,8 @@ func TestTailSessionLogEndToEnd(t *testing.T) {
 	writeAppend(`{"timestamp":"` + day.Format(time.RFC3339Nano) + `","type":"session_meta","payload":{"id":"sess-99","cwd":"` + workdir + `","timestamp":"` + day.Format(time.RFC3339Nano) + `","originator":"codex-tui","cli_version":"0.133.0"}}` + "\n")
 	writeAppend(`{"type":"event_msg","payload":{"type":"user_message","message":"Please look [ateam-exec-99]"}}` + "\n")
 
-	// Give tailer a chance to discover + open + read up to here.
-	time.Sleep(900 * time.Millisecond)
+	// Wait for the tailer to discover the file and emit thread.started.
+	waitForEventType(t, &mu, &received, "thread.started", 2*time.Second)
 
 	// 2) turn_context (model) and agent_message — must surface as
 	//    turn-started shape later.
@@ -159,14 +159,14 @@ func TestTailSessionLogEndToEnd(t *testing.T) {
 	writeAppend(`{"type":"event_msg","payload":{"type":"task_started"}}` + "\n")
 	writeAppend(`{"type":"event_msg","payload":{"type":"agent_message","message":"Hello world."}}` + "\n")
 
-	time.Sleep(900 * time.Millisecond)
+	waitForEventType(t, &mu, &received, "agent_message", 2*time.Second)
 
 	// 3) token_count then task_complete — mirrors real Codex wire order
 	// where token data arrives in token_count, not task_complete.
 	writeAppend(`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":7,"cached_input_tokens":40,"total_tokens":107}}}}` + "\n")
 	writeAppend(`{"type":"event_msg","payload":{"type":"task_complete","duration_ms":12345}}` + "\n")
 
-	time.Sleep(900 * time.Millisecond)
+	waitForEventType(t, &mu, &received, "turn.completed", 2*time.Second)
 	cancel()
 	<-tailDone
 
@@ -197,6 +197,37 @@ func TestTailSessionLogEndToEnd(t *testing.T) {
 		if !found {
 			t.Errorf("missing %q in emitted types: %v\n%s", w, types, joinLines(received))
 		}
+	}
+}
+
+// waitForEventType polls received (under mu) every 25ms until an event
+// with the given "type" appears, or the timeout fires with a clear
+// diagnostic message. The tailer polls at 500ms, so callers should pass
+// a timeout that covers several tick intervals.
+func waitForEventType(t *testing.T, mu *sync.Mutex, received *[][]byte, eventType string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		mu.Lock()
+		for _, ln := range *received {
+			var ev map[string]any
+			if err := json.Unmarshal(ln, &ev); err != nil {
+				continue
+			}
+			if asString(ev["type"]) == eventType {
+				mu.Unlock()
+				return
+			}
+		}
+		snapshot := append([][]byte(nil), (*received)...)
+		mu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out after %s waiting for event type %q; got %d events:\n%s",
+				timeout, eventType, len(snapshot), joinLines(snapshot))
+		}
+		<-ticker.C
 	}
 }
 
