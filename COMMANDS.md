@@ -408,6 +408,8 @@ git diff | ateam exec --role critic.engineering  # auto-detected
 echo "still works" | ateam exec -                # explicit "-"
 ```
 
+When used with `--agent codex-tmux` the prompt has an extra shape: the first line may be a `/slash` command and subsequent lines are tmux keystroke sequences (e.g. `2 Enter`, `Down Down Enter`) sent after the slash command's submenu appears. See [`codex-tmux` in CONFIG.md](CONFIG.md#codex-tmux-experimental) for the working example and the picker workaround.
+
 | Flag | Description |
 |------|-------------|
 | `--role ROLE` | Role to run (optional — requires project context) |
