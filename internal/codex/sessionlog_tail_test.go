@@ -36,8 +36,12 @@ func TestTranslateSessionLineEachVariant(t *testing.T) {
 			want: map[string]any{"type": "agent_message", "message": "Looking at the diff…"},
 		},
 		{
+			// Real Codex rollouts put token counts in a separate token_count
+			// event; task_complete only carries duration/completion fields.
+			// The translator stores the last token_count in tailState and
+			// reads it here.
 			name: "event_msg task_complete -> turn.completed with usage",
-			in:   `{"type":"event_msg","payload":{"type":"task_complete","duration_ms":12345,"info":{"total_token_usage":{"input_tokens":1000,"output_tokens":50,"cached_input_tokens":200,"total_tokens":1050}}}}`,
+			in:   `{"type":"event_msg","payload":{"type":"task_complete","duration_ms":12345}}`,
 			want: map[string]any{
 				"type":        "turn.completed",
 				"model":       "gpt-5.5",
@@ -52,10 +56,12 @@ func TestTranslateSessionLineEachVariant(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// task_complete needs `state.Model` to be set; prime via a
-			// preceding turn_context (the real wire order codex uses).
+			// Prime state to match real Codex wire order: turn_context
+			// sets the model; token_count (which precedes task_complete)
+			// populates LastTokenUsage.
 			state := tailState{}
 			translateSessionLine([]byte(`{"type":"turn_context","payload":{"model":"gpt-5.5"}}`), &state)
+			translateSessionLine([]byte(`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"output_tokens":50,"cached_input_tokens":200,"total_tokens":1050}}}}`), &state)
 			out := translateSessionLine([]byte(tc.in), &state)
 			if out == nil {
 				t.Fatalf("translator returned nil for %s", tc.name)
@@ -155,8 +161,10 @@ func TestTailSessionLogEndToEnd(t *testing.T) {
 
 	time.Sleep(900 * time.Millisecond)
 
-	// 3) task_complete with usage.
-	writeAppend(`{"type":"event_msg","payload":{"type":"task_complete","duration_ms":12345,"info":{"total_token_usage":{"input_tokens":100,"output_tokens":7,"cached_input_tokens":40}}}}` + "\n")
+	// 3) token_count then task_complete — mirrors real Codex wire order
+	// where token data arrives in token_count, not task_complete.
+	writeAppend(`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":7,"cached_input_tokens":40,"total_tokens":107}}}}` + "\n")
+	writeAppend(`{"type":"event_msg","payload":{"type":"task_complete","duration_ms":12345}}` + "\n")
 
 	time.Sleep(900 * time.Millisecond)
 	cancel()

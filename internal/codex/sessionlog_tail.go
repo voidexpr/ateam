@@ -57,6 +57,16 @@ func TailSessionLog(ctx context.Context, codexHome, workdir string, since time.T
 				}
 				continue
 			}
+			// When a marker is set, verify the file actually contains
+			// it — FindSessionLog may have returned a timestamp-fallback
+			// file belonging to a concurrent run before our user_message
+			// is flushed.
+			if marker != "" && !firstUserMessageContains(path, marker) {
+				if sleepCtx(ctx, poll) != nil {
+					return
+				}
+				continue
+			}
 			opened, err := os.Open(path)
 			if err != nil {
 				// Either codex hasn't created it yet (race) or
@@ -107,8 +117,9 @@ func TailSessionLog(ctx context.Context, codexHome, workdir string, since time.T
 // later record needs (e.g. model name from turn_context arrives before
 // task_complete, which wants to record it in `turn.completed.model`).
 type tailState struct {
-	Model    string
-	ThreadID string
+	Model          string
+	ThreadID       string
+	LastTokenUsage tokenUsage // populated by the most recent token_count event
 }
 
 // translateSessionLine maps one codex rollout JSONL record to one
@@ -160,8 +171,16 @@ func translateSessionLine(line []byte, state *tailState) []byte {
 				"message": pe.Message,
 			})
 
+		case "token_count":
+			// Store cumulative usage so task_complete can read it.
+			// Real Codex rollouts put token data here, not in task_complete.
+			if u := pe.Info.TotalTokenUsage; u.TotalTokens > 0 || u.InputTokens > 0 {
+				state.LastTokenUsage = u
+			}
+			return nil
+
 		case "task_complete":
-			usage := pe.Info.TotalTokenUsage
+			usage := state.LastTokenUsage
 			return marshalLine(map[string]any{
 				"type":        "turn.completed",
 				"model":       state.Model,
@@ -172,13 +191,6 @@ func translateSessionLine(line []byte, state *tailState) []byte {
 					"cached_input_tokens": usage.CachedInputTokens,
 				},
 			})
-
-		case "token_count":
-			// Cumulative usage; we report the final usage at
-			// task_complete to avoid emitting many turn.completed
-			// look-alikes (parse_stream would treat each as
-			// terminal).
-			return nil
 		}
 	}
 	return nil
