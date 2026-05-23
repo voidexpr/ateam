@@ -154,6 +154,28 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		"tmux_socket_path":  socketPath,
 	})
 
+	// Live-tail codex's rollout JSONL into stream.jsonl. Each translated
+	// line is a codex-exec-stream-shape event (turn.started, agent_message,
+	// turn.completed) that parse_stream.go renders for `ateam tail`/`cat`.
+	// Stops when this run's context is canceled or the function returns.
+	tailCtx, tailCancel := context.WithCancel(ctx)
+	defer tailCancel()
+	if streamWriter != nil {
+		marker := ""
+		// Free-form prompts get an EXEC_ID marker injected by
+		// preparePrompt; match it here so we lock onto OUR session
+		// file even if a concurrent codex-tmux run shares the workdir.
+		// Slash commands have no marker (we can't inject text); fall
+		// back to cwd+timestamp matching.
+		if !strings.HasPrefix(strings.TrimSpace(req.Prompt), "/") {
+			marker = codextui.SessionLogMarker(req.ExecID)
+		}
+		go codextui.TailSessionLog(tailCtx, "", req.WorkDir, start, marker, func(line []byte) {
+			_, _ = streamWriter.Write(line)
+			_ = streamWriter.Flush()
+		})
+	}
+
 	result, err := codextui.RunTmux(ctx, cfg)
 	if result.SessionName != "" {
 		ch <- StreamEvent{Type: "system", Subtype: "tmux_session", SessionID: result.SessionName, Model: c.ModelName()}
