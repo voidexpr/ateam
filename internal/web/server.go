@@ -18,11 +18,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
+	"github.com/ateam/internal/runtime"
 	"github.com/yuin/goldmark"
 )
 
@@ -47,6 +49,14 @@ type ProjectEntry struct {
 	dbOnce sync.Once
 	db     *calldb.CallDB
 	dbErr  error
+
+	// pricingOnce guards lazy loading of the runtime pricing config. The
+	// runtime HCL is read once per ProjectEntry and converted into per-agent
+	// PricingTable / default-model maps so HTTP handlers don't re-read it
+	// from disk on every request.
+	pricingOnce  sync.Once
+	pricing      map[string]agent.PricingTable
+	defaultModel map[string]string
 }
 
 // ProjectID returns the project identifier for scoping DB queries.
@@ -209,6 +219,36 @@ func (s *Server) getDB(pe *ProjectEntry) *calldb.CallDB {
 		pe.dbErr = err
 	})
 	return pe.db
+}
+
+// loadPricing lazily reads the project's runtime pricing config and returns
+// the per-agent PricingTable and default-model maps. The maps are cached on
+// the ProjectEntry so subsequent calls don't re-read the HCL from disk.
+func (s *Server) loadPricing(pe *ProjectEntry) (map[string]agent.PricingTable, map[string]string) {
+	pe.pricingOnce.Do(func() {
+		pe.pricing = make(map[string]agent.PricingTable)
+		pe.defaultModel = make(map[string]string)
+		rtCfg, _ := runtime.Load(pe.ProjectDir, pe.OrgDir)
+		if rtCfg == nil {
+			return
+		}
+		for name, ac := range rtCfg.Agents {
+			if ac.Pricing == nil {
+				continue
+			}
+			table := make(agent.PricingTable, len(ac.Pricing.Models))
+			for mname, mp := range ac.Pricing.Models {
+				table[mname] = agent.ModelPrice{
+					InputPerToken:       mp.InputPerMTok / 1e6,
+					CachedInputPerToken: mp.CachedInputPerMTok / 1e6,
+					OutputPerToken:      mp.OutputPerMTok / 1e6,
+				}
+			}
+			pe.pricing[name] = table
+			pe.defaultModel[name] = ac.Pricing.DefaultModel
+		}
+	})
+	return pe.pricing, pe.defaultModel
 }
 
 func (s *Server) render(w http.ResponseWriter, r *http.Request, tmplName string, pd pageData) {

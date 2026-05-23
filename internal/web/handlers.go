@@ -12,13 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
-	"github.com/ateam/internal/runtime"
 )
 
 func (s *Server) requireProject(w http.ResponseWriter, r *http.Request) *ProjectEntry {
@@ -575,22 +573,9 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 		if t, err := time.Parse(time.RFC3339, run.StartedAt); err == nil {
 			sessionStart = t
 		}
-		var pricing agent.PricingTable
-		var defaultModel string
-		if rtCfg, _ := runtime.Load(pe.ProjectDir, pe.OrgDir); rtCfg != nil {
-			if ac, ok := rtCfg.Agents[run.Agent]; ok && ac.Pricing != nil {
-				table := make(agent.PricingTable, len(ac.Pricing.Models))
-				for name, mp := range ac.Pricing.Models {
-					table[name] = agent.ModelPrice{
-						InputPerToken:       mp.InputPerMTok / 1e6,
-						CachedInputPerToken: mp.CachedInputPerMTok / 1e6,
-						OutputPerToken:      mp.OutputPerMTok / 1e6,
-					}
-				}
-				pricing = table
-				defaultModel = ac.Pricing.DefaultModel
-			}
-		}
+		pricingByAgent, defaultModelByAgent := s.loadPricing(pe)
+		pricing := pricingByAgent[run.Agent]
+		defaultModel := defaultModelByAgent[run.Agent]
 		f := &runner.HTMLStreamFormatter{
 			Model:        run.Model,
 			DefaultModel: defaultModel,
