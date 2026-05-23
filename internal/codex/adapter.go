@@ -614,15 +614,32 @@ func heartbeatPreview(rendered string) string {
 // CodexBusy reports whether the rendered pane shows Codex actively working.
 // Used by waitIdle to suppress false-positive completions during inter-tool
 // gaps where a prompt-shaped line briefly appears.
+//
+// CRITICAL: scope the scan to the bottom of the pane (busyScanLines tail).
+// `capture-pane -S -` returns the full scrollback, which preserves every
+// historical busy phase. A naive strings.Contains over the whole capture
+// matches "Esc to interrupt" left over from a tool call that finished 10
+// minutes ago and never clears — that's the bug that caused a 20m
+// busy_timeout on a /review run that actually completed at 12m.
 func CodexBusy(rendered string) bool {
-	lc := strings.ToLower(normalizeLineForMatch(rendered))
-	for _, marker := range codexBusyMarkers {
-		if strings.Contains(lc, marker) {
-			return true
+	for _, line := range nonEmptyTail(rendered, busyScanLines) {
+		lc := strings.ToLower(normalizeLineForMatch(line))
+		for _, marker := range codexBusyMarkers {
+			if strings.Contains(lc, marker) {
+				return true
+			}
 		}
 	}
 	return false
 }
+
+// busyScanLines bounds how many non-empty tail lines CodexBusy inspects.
+// Codex renders the active "Esc to interrupt" / "Thinking…" indicators
+// near the input box (typically the last 2–4 lines: input row + hint +
+// status). Matching PromptReady's tail size keeps the two signals
+// symmetric. Anything larger risks pulling in tool-output lines from
+// the just-completed turn that mention these strings in flavor text.
+const busyScanLines = 10
 
 // PromptReady detects Codex CLI v0.132.0's idle input prompt shape. The stable
 // visual cue is a bottom input line beginning with `›` followed by a status line

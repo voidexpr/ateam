@@ -2,6 +2,7 @@ package codex
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -451,6 +452,45 @@ func TestCodexBusyDetector(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("%s: CodexBusy = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// TestCodexBusyIgnoresScrollback is the regression test for the 20m timeout:
+// during a long /review run, every busy phase rendered "Esc to interrupt"
+// into the pane. capture-pane -S - returns the full scrollback, so once the
+// indicator ever appeared, a naive strings.Contains found it forever and
+// waitIdle never declared completion. The fix is to scan only the bottom
+// `busyScanLines` non-empty tail lines.
+func TestCodexBusyIgnoresScrollback(t *testing.T) {
+	// Lots of scrollback with busy markers.
+	var scrollback strings.Builder
+	for i := 0; i < 50; i++ {
+		scrollback.WriteString("• Ran some tool call\n")
+		scrollback.WriteString("  Esc to interrupt\n")
+	}
+	// Plenty of post-busy clean content so the bottom busyScanLines have
+	// no markers (this is the post-completion state of a long run).
+	var tail strings.Builder
+	tail.WriteString("<< Code review finished >>\n")
+	for i := 0; i < 25; i++ {
+		tail.WriteString(fmt.Sprintf("• Finding %d: text\n", i))
+	}
+	tail.WriteString("› \n  gpt-5.5 xhigh · ~/repo · Context 5% used\n")
+	rendered := scrollback.String() + tail.String()
+
+	if CodexBusy(rendered) {
+		t.Fatalf("CodexBusy = true; old `Esc to interrupt` in scrollback must not latch.")
+	}
+}
+
+// TestCodexBusyDetectsRecentMarker locks in the positive case: when the
+// indicator IS in the bottom of the pane (active tool call), we still
+// detect it.
+func TestCodexBusyDetectsRecentMarker(t *testing.T) {
+	rendered := strings.Repeat("• old work\n", 100) +
+		"• Ran rg --files\n  Esc to interrupt\n  output…\n"
+	if !CodexBusy(rendered) {
+		t.Fatalf("CodexBusy = false; recent `Esc to interrupt` should still be detected")
 	}
 }
 
