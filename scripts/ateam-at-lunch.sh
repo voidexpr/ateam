@@ -135,10 +135,10 @@ build_and_test_prompt='Build and run the project'\''s minimal / fast tests.
 step "Initial build + test"
 ateam exec --agent claude <<<"$build_and_test_prompt"
 
-step "ateam exec /simplify"
-ateam exec --agent claude <<<"/simplify"
+step "ateam exec /code-review"
+ateam exec --agent claude <<<"/code-review xhigh for recent changes"
 
-step "Re-test after /simplify"
+step "Re-test after /code-review"
 ateam exec --agent claude <<<"$build_and_test_prompt"
 
 step "ateam all (verify / refactor / add tests on recent changes)"
