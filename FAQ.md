@@ -45,14 +45,14 @@ It can easily be changed in `.ateam/config.toml` to select specific profiles and
 
 Use the `ateam prompt --role ROLENAME --action report` to show the exact prompt used taking into account overloaded and extra prompts added.
 
-## Why not just /simplify in claude ?
+## Why not just /code-review (aka /simplify) in claude ?
 
-`/simplify` only looks at code refactoring and is great to use, ateam can look at many other aspects: testing, documentation, etc ...
+`/code-review` only looks at potential bugs and code refactoring and is great to use, ateam can look at many other aspects: testing, documentation, etc ...
 
 It actually fits very well as a first step before a full ateam cycle:
 
 ```bash
-ateam exec "/simplify the recent commits" && ateam all
+ateam exec "/code-review high for recent commits" && git commit . -m "/code-review" && ateam all
 ```
 
 ## What if I only want to do some of the code changes or only run some of the reports ?
