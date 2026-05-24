@@ -115,6 +115,7 @@ class ActionFn:
 
 # === External prompt files ===
 
+# TODO: add built-in support for pre/post prompt customization
 @dataclass(frozen=True)
 class PromptFile:
     """A prompt fragment read from Runner.prompt_dir, with templating applied."""
@@ -200,6 +201,7 @@ class Runner:
         self.shared_dir = shared_dir
         self.runtime_dir = runtime_dir
 
+    # TODO: support CLI level pre/post prompt instruction
     def add(self, bundle: PromptBundle) -> None:
         if bundle.name in self.bundles:
             raise ValueError(f"duplicate bundle: {bundle.name}")
