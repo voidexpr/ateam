@@ -11,6 +11,7 @@ Your task is to review these changes:
 - run all test cases and investigate failures
     - don't just run the most minimal tests, run all of them
 - make sure no coding tasks cheated by modifying the code where test cases actually found a real issue
+- make sure all code changes have properly been checked in: no uncommitted changes
 
 Record all your findings using the structure below.
 
