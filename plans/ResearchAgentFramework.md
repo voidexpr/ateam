@@ -370,6 +370,54 @@ The rate-limit handler has three modes: `off` (manual), `capped` (default — ma
 
 **Key architectural difference from ATeam:** amux is a **single-host operator console** — its goal is to make 30 simultaneous human-prompted Claude sessions tractable from a phone. ATeam is a **scheduled autonomous quality system** — its goal is to make Claude do work *no human prompted it for* on a cadence, with deliberate phase gates. amux would be a plausible *frontend* for ATeam's coordinator (the dashboard, kanban, notes, channels are all features ATeam lacks); ATeam would be a plausible *brain* for amux (the role system, audit gate, scheduling policy are all features amux lacks).
 
+#### Claude Squad (smtg-ai/claude-squad) ⭐⭐⭐
+
+**Link:** [github.com/smtg-ai/claude-squad](https://github.com/smtg-ai/claude-squad). **7.6K⭐**, AGPL-3.0, Go (89.7%), distributed as a single binary called `cs` via Homebrew or curl-install to `~/.local/bin`. By SMTG AI.
+
+**What it is:** A **terminal-only multi-agent manager** — a TUI on top of tmux + git worktrees that lets one human juggle several coding agents in parallel from a single keyboard. Closest sibling to amux but stripped of everything amux added: no web dashboard, no mobile PWA, no kanban, no channels, no notes, no scheduler, no self-healing watchdog. Just the parallel-sessions-in-tmux-with-worktrees core. The narrowness is intentional and the 7.6K stars suggest it's the right surface for the human-operator use case.
+
+**The full surface in keystrokes** (this is most of the product):
+
+| Key | Action |
+|---|---|
+| `n` | new session |
+| `N` | new session with prompt |
+| `↵` / `o` | attach to session |
+| `ctrl-q` | detach |
+| `c` | **commit changes and pause session** (the standout primitive) |
+| `r` | resume paused session |
+| `D` | kill session |
+| `s` | push branch via `gh` |
+| `tab` | switch between preview / diff views |
+
+**Agent-agnostic by construction.** Agents are launched via `cs -p "<command>"`, where the command is whatever invocation runs the agent. Examples in the README: `cs -p "codex"`, `cs -p "aider --model ollama_chat/gemma3:1b"`. Supports Claude Code, Codex, Gemini, Aider, "other local agents." This is the same agent-agnostic posture as ComposioHQ but achieved with much less code — there are no per-agent adapters; the agent is whatever CLI you point it at, and the TUI doesn't try to understand its output.
+
+**Isolation model.** tmux session per agent + git worktree per session, "so each session works on its own branch." This is the same shape as Multiclaude (§C.7) and the recommended pattern from amux's git-conflict detection. The combination is the closest thing this section has to a "default sensible architecture for parallel coding agents." `~/.claude-squad/config.json` holds named profiles for switching between agent types at session creation.
+
+**The `c` key — commit-and-pause — is the most interesting primitive.** It's the cheapest expression of "checkpoint this session so I can come back to it." Combined with `r` (resume), it gives an operator a soft-stop they can apply without losing state: agent finished what they wanted, commit the work in the worktree, suspend the tmux session, free their attention. Most other tools in this section either run sessions continuously (amux) or kill them on completion (ComposioHQ); Claude Squad's notion of *pause-as-first-class* is unusually clean for a TUI tool.
+
+**Yolo / autoyes mode.** `-y, --autoyes` is the flag — **explicitly marked `[experimental]`** — that auto-accepts permission prompts across instances. The README's tone here is more cautious than amux's `--yolo`-by-default posture; the operator is expected to opt in deliberately.
+
+**What it doesn't have.** The README is explicit about the gaps and they matter when comparing to ATeam:
+
+- **No idle/completion detection.** No equivalent of amux's watchdog, ComposioHQ's JSONL classifier, or oauth-cli-coder's per-CLI idle-prompt heuristics. The human attaches and looks.
+- **No scheduling.** No cron, no recurring jobs, no profiles.
+- **No logging / audit trail.** Sessions live in tmux scrollback; nothing is written to a structured store.
+- **No metrics / cost tracking.** No token accounting, no per-session spend.
+- **No error recovery.** README's stated guidance for a stuck session is "update your program to latest version."
+- **No multi-host / REST / dashboard.** Single machine, single operator, single terminal.
+
+**Overlap with ATeam:** Moderate on the runtime layer (both use tmux + worktrees as the unit of isolation), near-zero on the autonomy layer (Claude Squad is a *manual* parallel operator console; ATeam is an *autonomous* scheduler). The two solve adjacent problems in the human-attention dimension: Claude Squad maximises a human's ability to drive N agents in parallel; ATeam removes the human from the loop entirely.
+
+**What's worth lifting:**
+
+- **Agent-agnostic launch via `cs -p "<command>"`.** Don't write per-agent adapters at the runtime layer — pass through a command string and let whatever CLI runs handle its own protocol. ATeam currently has `agent` types in `runtime.hcl` (`claude`, `codex`, `codex-tmux`); the pass-through pattern would generalise this to "whatever binary the user wants" with the role prompt as the input. Useful for experimentation with new agent CLIs without code changes.
+- **`commit-and-pause` (`c`) as a first-class operator primitive.** ATeam currently has no concept of *pausing* a run mid-flight while preserving its state. For interactive ATeam shell use (when a human wants to step in, commit progress, and let the agent continue later), this is a clean primitive. The implementation is small: stop the agent, `git commit` whatever's in the worktree, leave the worktree intact, mark the run paused in CallDB.
+- **Profiles as named launch configurations.** A small UX improvement: named tuples of `(agent, model, startup_options)` that the operator can switch between at session creation. ATeam's `runtime.hcl` already does this in a more elaborate form; the README pattern is a reminder to keep the human-facing handle short and discoverable.
+- **The narrowness itself is a lesson.** 7.6K stars for "tmux + worktrees + a TUI keyboard interface" suggests the *minimum viable parallel-agents tool* is much smaller than amux or ComposioHQ. For ATeam's interactive shell mode (when a developer is at the terminal and wants to nudge agents directly), Claude Squad's surface is the right ambition — not amux's full platform.
+
+**Key architectural difference from ATeam:** Claude Squad is **a parallel-agents operator console** — its goal is to let one human juggle several agent sessions from one terminal, with the operator's attention as the scheduling primitive. ATeam is **an autonomous quality scheduler** — its goal is to remove the operator from the loop entirely so agents run on a cadence the operator doesn't watch. They share the runtime substrate (tmux + worktrees) but solve disjoint problems on top of it. Plausibly: an operator could use Claude Squad during the day for feature work and ATeam at night for quality work, sharing the same worktree conventions and the same tmux infrastructure between them.
+
 #### Compound Engineering Plugin (EveryInc) ⭐⭐⭐⭐
 
 **Link:** [github.com/EveryInc/compound-engineering-plugin](https://github.com/EveryInc/compound-engineering-plugin) — methodology at [every.to/guides/compound-engineering](https://every.to/guides/compound-engineering)
