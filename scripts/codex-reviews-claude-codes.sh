@@ -1,15 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Two-agent loop: codex (via tmux + /review) reviews, claude implements.
-#
-# Round 1 — codex-tmux runs `/review <custom> . Write your review to codex_review.md`.
-# Round 2 — claude reads codex_review.md and either applies each finding or
-#           explains in writing why it pushes back.
-#
-# Reports land in .ateam/shared/codex_reviews_claude_codes/. Prior runs are
-# timestamp-backed up on re-run (or with --restart).
-
 reviewer="codex-tmux"
 coder="claude"
 
@@ -17,9 +8,12 @@ usage() {
   cat <<HELP
 Usage: $(basename "$0") [--restart] [--help] [CUSTOM ...]
 
-Two-agent review:
-  Round 1 — $reviewer runs /review on CUSTOM and writes codex_review.md.
-  Round 2 — $coder applies findings or pushes back in writing.
+Two-agent loop: codex (via tmux + /review) reviews, claude implements.
+  Round 1 — $reviewer runs /review on CUSTOM, writes codex_review.md.
+  Round 2 — $coder applies findings or pushes back in writing,
+            then builds + tests and commits if green.
+
+Reports land in .ateam/shared/codex_reviews_claude_codes/.
 
 Arguments:
   CUSTOM         Substituted verbatim into the /review command. Examples:
@@ -30,15 +24,15 @@ Arguments:
                  Ignored when round 1 is being resumed from cache.
 
 Options:
-  --restart      Force a fresh run: rename existing reports with a timestamp
-                 suffix even if the previous run did not complete.
+  --restart      Force a fresh run: timestamp-rename existing reports
+                 even if the previous run did not complete.
   -h, --help     Show this message and exit.
 
-Resume behaviour: each step writes one report file. On re-run, any step whose
-file is already non-empty is skipped. The final step writes ${coder}'s report,
-so when that file exists the previous run is treated as complete: both reports
-are renamed with a timestamp suffix and the script starts fresh. Use --restart
-to force the same reset mid-pipeline.
+Resume: each step writes one report file. On re-run, any step whose file is
+already non-empty is skipped. The final step writes ${coder}'s report, so
+when that file exists the previous run is treated as complete: both reports
+are timestamp-renamed and the script starts fresh. Use --restart to force
+the same reset mid-pipeline.
 HELP
 }
 
