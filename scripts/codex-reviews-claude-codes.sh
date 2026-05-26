@@ -2,7 +2,7 @@
 set -euo pipefail
 
 reviewer="codex-tmux"
-coder="claude"
+coder="claude-high"
 
 usage() {
   cat <<HELP
