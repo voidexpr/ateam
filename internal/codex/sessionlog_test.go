@@ -36,6 +36,9 @@ func TestReadSessionStatsFixture(t *testing.T) {
 	if !stats.TaskCompleteFound || !stats.TokenCountFound {
 		t.Errorf("completion flags missing: %+v", stats)
 	}
+	if stats.TurnCount != 3 {
+		t.Errorf("TurnCount = %d, want 3 (one per agent_message)", stats.TurnCount)
+	}
 }
 
 // TestFindSessionLogIgnoresStaleFiles verifies that we don't return a file

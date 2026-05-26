@@ -223,7 +223,12 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		}
 	}
 	if result.Output != "" {
-		ch <- StreamEvent{Type: "assistant", Text: result.Output, IsModelResponse: true}
+		// IsModelResponse is intentionally NOT set here: the rollout JSONL
+		// records each intermediate `agent_message` event, and SessionStats
+		// reports the count via TurnCount. Setting IsModelResponse on this
+		// single emission would clobber that with a hardcoded 1 (the runner
+		// prefers observedTurns over resultEv.Turns whenever it's nonzero).
+		ch <- StreamEvent{Type: "assistant", Text: result.Output}
 		writeSyntheticStream(streamWriter, "assistant", map[string]any{"text": result.Output})
 	}
 
@@ -237,12 +242,18 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 	if result.SessionStats.ContextWindow > 0 {
 		contextWindow = result.SessionStats.ContextWindow
 	}
+	turns := result.SessionStats.TurnCount
+	if turns == 0 {
+		// Rollout JSONL wasn't located (e.g. codex crashed before writing
+		// any agent_message). Default to 1 so the column isn't blank.
+		turns = 1
+	}
 	resultEvent := StreamEvent{
 		Type:            "result",
 		Output:          result.Output,
 		Model:           model,
 		DurationMS:      result.Duration.Milliseconds(),
-		Turns:           1,
+		Turns:           turns,
 		ContextWindow:   contextWindow,
 		InputTokens:     result.SessionStats.InputTokens,
 		OutputTokens:    result.SessionStats.OutputTokens,
@@ -300,6 +311,7 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		"context_window":    result.SessionStats.ContextWindow,
 		"task_complete":     result.SessionStats.TaskCompleteFound,
 		"cost_usd":          resultEvent.Cost,
+		"turns":             turns,
 	})
 	ch <- resultEvent
 }
