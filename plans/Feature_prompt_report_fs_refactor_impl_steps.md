@@ -24,16 +24,19 @@ Task 7 (variable rename to `scope.name`) is folded in at Phase B so embedded def
 10. **Content-rewrite pass** in the migrator: rewrite known ALL_CAPS vars in user-authored `.ateam/prompts/*.md` to dotted form. Closed mapping table (no aliases past migration).
 11. **Wire migrator into `internal/root/resolve.go`** on first env materialization. One-line stderr notice on first migration.
 
-## Phase D — Restructure embedded defaults
+## Phase D + E — Restructure defaults and rewire callers (combined)
 
-12. **Move `defaults/roles/<R>/report_prompt.md` → `defaults/prompts/report/<R>.prompt.md`**, same for `code/`. Move `defaults/supervisor/*` → `defaults/prompts/*.prompt.md` per the migration map.
+Originally split, but Phase D as an isolated step provided no value: moving
+defaults out from under the old readers is itself a "breaking" change, so
+either we do it together with the caller rewire (Phase E) or we dual-ship
+content in the embedded FS. Dual-ship wastes binary size and confuses
+readers. Combined.
+
+12. **Move `defaults/roles/<R>/report_prompt.md` → `defaults/prompts/report/<R>.prompt.md`**, same for `code/`. Move `defaults/supervisor/*` → `defaults/prompts/*.prompt.md` per the migration map. Easiest path: run the migrator (`migrate.V1Layout`) against `defaults/` and commit the result.
 13. **Author `defaults/prompts/_pre.context.md`** containing `{{project.info}}` (replaces the per-cmd hardcoded `FormatProjectInfo` injection).
-14. **Author `defaults/prompts/report/_pre.intro.md`** and `_post.format.md` (move the shared report framing out of `report_base_prompt.md`).
-15. **Update `defaults/embed.go`** if path globs need adjusting.
-
-## Phase E — Rewire callers
-
-16. **`internal/root/resolve.go`** — replace direct path helpers with prompt-name-based lookups via the assembler.
+14. **Author `defaults/prompts/report/_pre.intro.md`** and `_post.format.md` (split the shared report framing out of `report_base_prompt.md`).
+15. **Update `defaults/embed.go`** with `prompts/**/*.md` and `shared/**/*.md` globs; drop the old role/supervisor globs.
+16. **`internal/root/resolve.go`** — replace direct path helpers (`RoleDir`, `SupervisorDir`, `RoleReportPath`, `ReviewPath`, `VerifyPath`) with prompt-name-based lookups via the assembler. Flip the `applyV1LayoutMigration` gate from `ATEAM_AUTO_MIGRATE=1` opt-in to "on by default, opt-out via `ATEAM_NO_MIGRATE=1`".
 17. **`internal/runner/runner.go:1156`** — drop the `*_prompt.md` exclusion; update canonical destination to `SharedPromptDir(promptName)/<basename>.md`.
 18. **`cmd/*.go`** — rewire `report`, `code`, `review`, `verify`, `auto_setup`, `inspect`, `prompt`, `roles` to use the assembler. Drop `RoleID: "supervisor"` hardcodes. Per-cmd `FormatProjectInfo` injection goes away (now in `_pre.context.md`).
 19. **`internal/web/handlers.go`, `internal/web/export.go`** — update artifact paths to read from `shared/...` instead of `roles/<R>/...` and `supervisor/...`.
