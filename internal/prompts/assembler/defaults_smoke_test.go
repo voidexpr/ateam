@@ -64,3 +64,47 @@ func TestDefaultsReachableViaAssembler(t *testing.T) {
 		t.Errorf("_pre.context.md should reference {{project.info}}, got %q", string(root.Content))
 	}
 }
+
+// TestAssembleAgainstRealDefaults exercises the full assembly pipeline
+// against the shipped defaults — proves the engine + anchors + Assemble +
+// embedded prompts hang together end-to-end before any cmd/ rewires arrive.
+func TestAssembleAgainstRealDefaults(t *testing.T) {
+	a := assembler.New(assembler.BuildAnchors("", "", defaults.FS))
+	vars := assembler.MapVars{
+		Prompt:  map[string]string{"name": "security", "path": "report/security", "action": "report"},
+		Exec:    map[string]string{"output_file": "/tmp/report.md", "output_dir": "/tmp"},
+		Project: map[string]string{"info": "# Test project info", "name": "ateam"},
+	}
+
+	res, err := a.Assemble("report/security", vars, nil)
+	if err != nil {
+		t.Fatalf("Assemble failed: %v", err)
+	}
+
+	if !strings.Contains(res.Prompt, "# Test project info") {
+		t.Error("expected {{project.info}} expansion in output")
+	}
+	if !strings.Contains(res.Prompt, "performing the security report") {
+		t.Error("expected report/_pre.intro.md expansion with role name")
+	}
+	// _pre.base.md is shipped from the old report_base_prompt.md and contains
+	// the format/output instructions.
+	if !strings.Contains(res.Prompt, "Report Format") {
+		t.Error("expected report/_pre.base.md content")
+	}
+	// Sections should include at least: root_pre, multiple dir_pre:report,
+	// role_main. Spot-check slot diversity.
+	slots := make(map[string]int)
+	for _, s := range res.Sections {
+		slots[s.Slot]++
+	}
+	if slots["root_pre"] == 0 {
+		t.Error("missing root_pre slot")
+	}
+	if slots["dir_pre:report"] < 2 {
+		t.Errorf("dir_pre:report count = %d, want >=2", slots["dir_pre:report"])
+	}
+	if slots["role_main"] != 1 {
+		t.Errorf("role_main count = %d, want 1", slots["role_main"])
+	}
+}
