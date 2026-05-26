@@ -10,6 +10,7 @@ import (
 
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/gitutil"
+	"github.com/ateam/internal/migrate"
 	"github.com/ateam/internal/projectinfo"
 	"github.com/ateam/internal/prompts"
 )
@@ -339,6 +340,10 @@ func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
 		return env, nil
 	}
 
+	if err := applyV1LayoutMigration(projectDir, orgDir); err != nil {
+		return nil, err
+	}
+
 	cfg, err := config.Load(projectDir)
 	if err != nil {
 		return nil, err
@@ -354,6 +359,41 @@ func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
 	}
 
 	return env, nil
+}
+
+// applyV1LayoutMigration upgrades pre-v1 .ateam / .ateamorg layouts in place.
+// Idempotent: a stat-only check skips quickly when nothing to do. On the
+// first material change to a directory, a one-line notice is written to
+// stderr. Migration failures stop further work; re-running picks up where
+// the failed run left off.
+//
+// Currently OFF by default and gated behind ATEAM_AUTO_MIGRATE=1. The
+// migrator's destination paths (prompts/, shared/) are not yet read by
+// cmd/* — those callers still read roles/ and supervisor/ directly, so
+// auto-migration would silently move data out from under the old code.
+// Phase E of the prompt-fs refactor rewires the callers; when that lands
+// this gate flips to "on by default, opt-out via ATEAM_NO_MIGRATE=1".
+func applyV1LayoutMigration(projectDir, orgDir string) error {
+	if os.Getenv("ATEAM_AUTO_MIGRATE") != "1" {
+		return nil
+	}
+	for _, dir := range []string{projectDir, orgDir} {
+		if dir == "" {
+			continue
+		}
+		res, err := migrate.V1Layout(dir)
+		if err != nil {
+			return fmt.Errorf("migrate %s: %w", dir, err)
+		}
+		if res.Changed() {
+			fmt.Fprintf(os.Stderr, "ateam: migrated %s to v1 prompts layout (%d moves, %d rewrites, %d cleanups)\n",
+				dir, len(res.Moved), len(res.Rewrote), len(res.RemovedDirs))
+			for _, w := range res.Warnings {
+				fmt.Fprintf(os.Stderr, "ateam: migration warning: %s\n", w)
+			}
+		}
+	}
+	return nil
 }
 
 // LookupFrom discovers org and project from the given starting path without creating anything.
@@ -381,6 +421,10 @@ func LookupFrom(start string) (*ResolvedEnv, error) {
 	}
 
 	env.ProjectDir = projectDir
+
+	if err := applyV1LayoutMigration(projectDir, orgDir); err != nil {
+		return env, nil
+	}
 
 	cfg, err := config.Load(projectDir)
 	if err != nil {

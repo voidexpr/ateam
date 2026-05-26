@@ -1,0 +1,401 @@
+package migrate
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// writeTree creates files (and their parent dirs) under root.
+func writeTree(t *testing.T, root string, files map[string]string) {
+	t.Helper()
+	for rel, content := range files {
+		full := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// exists reports whether root/rel is present on disk.
+func exists(root, rel string) bool {
+	_, err := os.Lstat(filepath.Join(root, rel))
+	return err == nil
+}
+
+// read returns the content of root/rel (fatals on missing).
+func read(t *testing.T, root, rel string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(root, rel))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestNeedsMigration(t *testing.T) {
+	t.Run("empty dir", func(t *testing.T) {
+		if NeedsMigration(t.TempDir()) {
+			t.Fatal("empty dir should not need migration")
+		}
+	})
+	t.Run("has roles", func(t *testing.T) {
+		root := t.TempDir()
+		os.Mkdir(filepath.Join(root, "roles"), 0o755)
+		if !NeedsMigration(root) {
+			t.Fatal("roles/ presence should trigger migration")
+		}
+	})
+	t.Run("has setup_overview", func(t *testing.T) {
+		root := t.TempDir()
+		os.WriteFile(filepath.Join(root, "setup_overview.md"), nil, 0o644)
+		if !NeedsMigration(root) {
+			t.Fatal("setup_overview.md should trigger migration")
+		}
+	})
+	t.Run("only v1 layout", func(t *testing.T) {
+		root := t.TempDir()
+		os.MkdirAll(filepath.Join(root, "prompts", "report"), 0o755)
+		if NeedsMigration(root) {
+			t.Fatal("v1-only layout should not need migration")
+		}
+	})
+}
+
+func TestV1LayoutStaticMoves(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"report_base_prompt.md":                "report base",
+		"code_base_prompt.md":                  "code base",
+		"report_extra_prompt.md":               "report extra",
+		"supervisor/review_prompt.md":          "review body",
+		"supervisor/review_extra_prompt.md":    "review extra",
+		"supervisor/code_management_prompt.md": "code mgmt",
+		"supervisor/code_verify_prompt.md":     "verify body",
+		"supervisor/auto_setup_prompt.md":      "auto setup",
+		"supervisor/exec_debug_prompt.md":      "exec debug",
+		"supervisor/review.md":                 "old review output",
+		"supervisor/verify.md":                 "old verify output",
+		"setup_overview.md":                    "overview",
+	})
+
+	r, err := V1Layout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Changed() {
+		t.Fatal("expected changes")
+	}
+
+	wantTargets := []string{
+		"prompts/report/_pre.base.md",
+		"prompts/code/_pre.base.md",
+		"prompts/report/_post.extra.md",
+		"prompts/review.prompt.md",
+		"prompts/review.post.extra.md",
+		"prompts/code_management.prompt.md",
+		"prompts/code_verify.prompt.md",
+		"prompts/auto_setup.prompt.md",
+		"prompts/exec_debug.prompt.md",
+		"shared/review/review.md",
+		"shared/verify/verify.md",
+		"shared/auto_setup/auto_setup.md",
+	}
+	for _, p := range wantTargets {
+		if !exists(root, p) {
+			t.Errorf("missing %s", p)
+		}
+	}
+
+	// Sources should be gone.
+	wantGone := []string{
+		"report_base_prompt.md",
+		"supervisor/review_prompt.md",
+		"setup_overview.md",
+	}
+	for _, p := range wantGone {
+		if exists(root, p) {
+			t.Errorf("source %s should be removed", p)
+		}
+	}
+
+	// Content preserved.
+	if read(t, root, "prompts/review.prompt.md") != "review body" {
+		t.Error("content not preserved on move")
+	}
+
+	// supervisor/ should be removed since everything moved.
+	if exists(root, "supervisor") {
+		t.Error("empty supervisor/ should be removed")
+	}
+}
+
+func TestV1LayoutRoleMoves(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"roles/security/report_prompt.md":       "security report",
+		"roles/security/code_prompt.md":         "security code",
+		"roles/security/report_extra_prompt.md": "security extra",
+		"roles/security/report.md":              "security output",
+		"roles/security/history/2026-01-01.md":  "old history",
+		"roles/code.bugs/report_prompt.md":      "dotted role report",
+	})
+	r, err := V1Layout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, want := range []string{
+		"prompts/report/security.prompt.md",
+		"prompts/code/security.prompt.md",
+		"prompts/report/security.post.extra.md",
+		"shared/report/security/security.md",
+		"prompts/report/code.bugs.prompt.md",
+	} {
+		if !exists(root, want) {
+			t.Errorf("missing %s", want)
+		}
+	}
+
+	// history/ dropped.
+	if exists(root, "roles/security/history") {
+		t.Error("roles/security/history should be removed")
+	}
+	// Empty role dir cleaned up.
+	if exists(root, "roles/security") {
+		t.Error("empty roles/security should be removed")
+	}
+	// roles/ cleaned up.
+	if exists(root, "roles") {
+		t.Error("empty roles/ should be removed")
+	}
+
+	// Sanity on result counts.
+	if len(r.Moved) < 5 {
+		t.Errorf("expected ≥5 moves, got %d", len(r.Moved))
+	}
+}
+
+func TestV1LayoutContentRewrite(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"supervisor/review_prompt.md": "Review {{ROLE}} for {{PROJECT_NAME}}\nOutput to {{OUTPUT_DIR}}\nSource: {{SOURCE_DIR}}",
+	})
+	r, err := V1Layout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := read(t, root, "prompts/review.prompt.md")
+	want := "Review {{prompt.name}} for {{project.name}}\nOutput to {{exec.output_dir}}\nSource: ."
+	if got != want {
+		t.Fatalf("rewrite produced wrong content:\n got:  %q\n want: %q", got, want)
+	}
+	if len(r.Rewrote) != 1 || r.Rewrote[0] != "prompts/review.prompt.md" {
+		t.Errorf("Rewrote = %v, want [prompts/review.prompt.md]", r.Rewrote)
+	}
+}
+
+func TestV1LayoutIdempotent(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"supervisor/review_prompt.md":     "body",
+		"roles/security/report_prompt.md": "{{ROLE}} body",
+	})
+
+	r1, err := V1Layout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r1.Changed() {
+		t.Fatal("first pass should change things")
+	}
+
+	r2, err := V1Layout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.Changed() {
+		t.Fatalf("second pass should be no-op, got Result=%+v", r2)
+	}
+	// Content unchanged on second pass.
+	if read(t, root, "prompts/report/security.prompt.md") != "{{prompt.name}} body" {
+		t.Error("content drifted on second pass")
+	}
+}
+
+func TestV1LayoutSkipsExistingTarget(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"supervisor/review_prompt.md": "old",
+		"prompts/review.prompt.md":    "new — should not be overwritten",
+	})
+	r, err := V1Layout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Source preserved, target intact.
+	if !exists(root, "supervisor/review_prompt.md") {
+		t.Error("source should remain when target exists")
+	}
+	if read(t, root, "prompts/review.prompt.md") != "new — should not be overwritten" {
+		t.Error("target should not have been overwritten")
+	}
+	if len(r.Warnings) == 0 {
+		t.Error("expected warning about skipped move")
+	}
+}
+
+func TestV1LayoutPreservesUnknownFiles(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"supervisor/code_output.md":              "old runtime artifact",
+		"supervisor/code_verification_report.md": "another artifact",
+		"supervisor/review_prompt.md":            "real prompt",
+	})
+	if _, err := V1Layout(root); err != nil {
+		t.Fatal(err)
+	}
+	// Unmapped files stay where they were; supervisor/ is therefore not removed.
+	if !exists(root, "supervisor/code_output.md") {
+		t.Error("unknown file should be preserved")
+	}
+	if !exists(root, "supervisor") {
+		t.Error("non-empty supervisor/ should not be removed")
+	}
+}
+
+// TestRsyncFixture runs the migrator against a real .ateam tree copied into a
+// tempdir. Source dirs are read-only — even a buggy migrator can't damage them.
+// Skips if the source isn't present (CI / fresh checkout).
+func TestRsyncFixture(t *testing.T) {
+	homeAteam := filepath.Join(os.Getenv("HOME"), "projects", "ateam", ".ateam")
+	if _, err := os.Stat(homeAteam); err != nil {
+		t.Skipf("fixture not available: %v", err)
+	}
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skipf("rsync not available: %v", err)
+	}
+
+	tempRoot := t.TempDir()
+	dst := filepath.Join(tempRoot, ".ateam")
+	cmd := exec.Command("rsync", "-a", "--exclude=state.sqlite*", "--exclude=logs", "--exclude=runtime",
+		"--exclude=cache", "--exclude=secrets.env*", homeAteam+"/", dst+"/")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("rsync failed: %v\n%s", err, out)
+	}
+
+	if !NeedsMigration(dst) {
+		t.Fatal("real fixture should need migration")
+	}
+
+	r1, err := V1Layout(dst)
+	if err != nil {
+		t.Fatalf("first pass failed: %v", err)
+	}
+	if !r1.Changed() {
+		t.Fatal("expected first pass to change things")
+	}
+	t.Logf("first pass: %d moves, %d rewrites, %d removed dirs, %d warnings",
+		len(r1.Moved), len(r1.Rewrote), len(r1.RemovedDirs), len(r1.Warnings))
+
+	// Spot-checks based on what this real fixture contains: it ships role
+	// report outputs + supervisor review/verify outputs + a review extras
+	// fragment, but relies on embedded defaults for the prompts themselves.
+	for _, p := range []string{
+		"shared/review/review.md",
+		"shared/verify/verify.md",
+		"prompts/review.post.extra.md",
+	} {
+		if !exists(dst, p) {
+			t.Errorf("expected %s after migration", p)
+		}
+	}
+	// At least one role report output landed in shared/report/.
+	matches, err := filepath.Glob(filepath.Join(dst, "shared/report/*/*.md"))
+	if err != nil || len(matches) == 0 {
+		t.Errorf("expected migrated role report outputs, got %v (err %v)", matches, err)
+	}
+
+	// Second pass must be a no-op.
+	r2, err := V1Layout(dst)
+	if err != nil {
+		t.Fatalf("second pass failed: %v", err)
+	}
+	if r2.Changed() {
+		t.Fatalf("second pass should be no-op, got %+v", r2)
+	}
+}
+
+// TestRsyncListmanagerFixture exercises setup_overview.md migration on the
+// listmanager fixture.
+func TestRsyncListmanagerFixture(t *testing.T) {
+	src := filepath.Join(os.Getenv("HOME"), "projects", "ateam", "test_data", "projects", "listmanager", ".ateam")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("fixture not available: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(src, "setup_overview.md")); err != nil {
+		t.Skipf("listmanager fixture missing setup_overview.md: %v", err)
+	}
+	if _, err := exec.LookPath("rsync"); err != nil {
+		t.Skipf("rsync not available: %v", err)
+	}
+
+	dst := filepath.Join(t.TempDir(), ".ateam")
+	cmd := exec.Command("rsync", "-a", "--exclude=state.sqlite*", "--exclude=logs", "--exclude=runtime",
+		"--exclude=cache", src+"/", dst+"/")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("rsync failed: %v\n%s", err, out)
+	}
+
+	if _, err := V1Layout(dst); err != nil {
+		t.Fatal(err)
+	}
+
+	want := "shared/auto_setup/auto_setup.md"
+	if !exists(dst, want) {
+		t.Errorf("listmanager setup_overview.md should have moved to %s", want)
+	}
+	if exists(dst, "setup_overview.md") {
+		t.Error("setup_overview.md should be removed at root after migration")
+	}
+}
+
+func TestMoveSourceMissingIsNoop(t *testing.T) {
+	root := t.TempDir()
+	var r Result
+	moved, err := move(root, "missing.md", "prompts/foo.md", &r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved {
+		t.Fatal("expected moved=false")
+	}
+	if len(r.Moved) != 0 {
+		t.Fatal("expected no Moved entries")
+	}
+}
+
+func TestMoveWarnsOnExistingTarget(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"src.md": "source",
+		"dst.md": "dest",
+	})
+	var r Result
+	moved, err := move(root, "src.md", "dst.md", &r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved {
+		t.Fatal("expected moved=false when target exists")
+	}
+	if len(r.Warnings) != 1 || !strings.Contains(r.Warnings[0], "already exists") {
+		t.Errorf("expected target-exists warning, got %v", r.Warnings)
+	}
+}
