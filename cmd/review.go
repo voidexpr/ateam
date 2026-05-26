@@ -193,8 +193,12 @@ func runReview(opts ReviewOptions) error {
 
 	timeout := env.Config.Review.EffectiveTimeout(opts.Timeout)
 
-	reviewFile := env.ReviewPath()
-	supervisorDir := env.SupervisorDir()
+	// v1 layout: promotion writes to .ateam/shared/review/. The canonical
+	// review.md filename is preserved during transition; a follow-up will
+	// rename to <prompt-basename>.md once {{exec.output_file}} is wired
+	// through the new template namespace.
+	sharedDir := env.SharedPromptDir("review")
+	reviewFile := filepath.Join(sharedDir, "review.md")
 
 	startedAt := time.Now()
 
@@ -234,7 +238,7 @@ func runReview(opts ReviewOptions) error {
 		RoleID:           "supervisor",
 		Action:           runner.ActionReview,
 		OutputKind:       runner.OutputKindReview,
-		CanonicalDestDir: supervisorDir,
+		CanonicalDestDir: sharedDir,
 		WorkDir:          env.WorkDir,
 		TimeoutMin:       timeout,
 		Verbose:          opts.Verbose,

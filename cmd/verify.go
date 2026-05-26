@@ -119,7 +119,10 @@ func runVerify(opts VerifyOptions) error {
 	// Verify runs a supervisor pass like review; reuses the review timeout helper.
 	timeout := env.Config.Review.EffectiveTimeout(opts.Timeout)
 
-	supervisorDir := env.SupervisorDir()
+	// v1 layout: promotion writes to .ateam/shared/verify/. See cmd/review.go
+	// for the rationale on keeping verify.md as the canonical filename
+	// during the transition.
+	sharedDir := env.SharedPromptDir("verify")
 
 	startedAt := time.Now()
 
@@ -163,7 +166,7 @@ func runVerify(opts VerifyOptions) error {
 		RoleID:           "supervisor",
 		Action:           runner.ActionVerify,
 		OutputKind:       runner.OutputKindVerify,
-		CanonicalDestDir: supervisorDir,
+		CanonicalDestDir: sharedDir,
 		WorkDir:          env.WorkDir,
 		TimeoutMin:       timeout,
 		Verbose:          opts.Verbose,

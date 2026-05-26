@@ -212,36 +212,72 @@ type RoleReport struct {
 	Content string
 }
 
-// DiscoverReports scans the project's roles directory for report.md files.
+// DiscoverReports scans the project for role report.md files. It checks both
+// the v1 location (shared/report/<role>/report.md, where cmd/report.go's
+// promotion now writes) and the legacy location (roles/<role>/report.md, for
+// pre-migration projects). Per-role: if both exist, the newer one wins. The
+// legacy path can be dropped once auto-migration is default-on and projects
+// have been migrated.
 func DiscoverReports(projectDir string) ([]RoleReport, error) {
-	rolesDir := filepath.Join(projectDir, "roles")
-	entries, err := os.ReadDir(rolesDir)
-	if err != nil {
-		return nil, fmt.Errorf("cannot read roles directory: %w (run 'ateam report' first)", err)
+	reports := make(map[string]RoleReport) // role → most-recent report
+
+	collect := func(dir string, pathFn func(role string) string) error {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			reportPath := pathFn(entry.Name())
+			data, err := os.ReadFile(reportPath)
+			if err != nil {
+				continue
+			}
+			info, err := os.Stat(reportPath)
+			if err != nil {
+				continue
+			}
+			rr := RoleReport{
+				RoleID:  entry.Name(),
+				Path:    reportPath,
+				ModTime: info.ModTime(),
+				Content: string(data),
+			}
+			if existing, ok := reports[entry.Name()]; !ok || rr.ModTime.After(existing.ModTime) {
+				reports[entry.Name()] = rr
+			}
+		}
+		return nil
 	}
 
-	var reports []RoleReport
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		reportPath := filepath.Join(rolesDir, entry.Name(), ReportFile)
-		data, err := os.ReadFile(reportPath)
-		if err != nil {
-			continue
-		}
-		info, err := os.Stat(reportPath)
-		if err != nil {
-			continue
-		}
-		reports = append(reports, RoleReport{
-			RoleID:  entry.Name(),
-			Path:    reportPath,
-			ModTime: info.ModTime(),
-			Content: string(data),
-		})
+	sharedReportDir := filepath.Join(projectDir, "shared", "report")
+	if err := collect(sharedReportDir, func(role string) string {
+		return filepath.Join(sharedReportDir, role, ReportFile)
+	}); err != nil {
+		return nil, fmt.Errorf("cannot read shared/report directory: %w", err)
 	}
-	return reports, nil
+
+	legacyRolesDir := filepath.Join(projectDir, "roles")
+	if err := collect(legacyRolesDir, func(role string) string {
+		return filepath.Join(legacyRolesDir, role, ReportFile)
+	}); err != nil {
+		return nil, fmt.Errorf("cannot read roles directory: %w", err)
+	}
+
+	if len(reports) == 0 {
+		return nil, fmt.Errorf("no report.md files found in %s/shared/report or %s/roles (run 'ateam report' first)", projectDir, projectDir)
+	}
+
+	out := make([]RoleReport, 0, len(reports))
+	for _, r := range reports {
+		out = append(out, r)
+	}
+	return out, nil
 }
 
 // ReviewSelector chooses which role reports a supervisor review actually sees.

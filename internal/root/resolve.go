@@ -62,7 +62,18 @@ func (e *ResolvedEnv) SupervisorDir() string {
 }
 
 func (e *ResolvedEnv) RoleReportPath(roleID string) string {
-	return filepath.Join(e.RoleDir(roleID), prompts.ReportFile)
+	// Dual-read: prefer the v1 shared/report/<role>/report.md (where the
+	// runner now promotes new artifacts), fall back to the legacy
+	// roles/<role>/report.md for pre-migration projects.
+	v1 := filepath.Join(e.SharedPromptDir("report/"+roleID), prompts.ReportFile)
+	if _, err := os.Stat(v1); err == nil {
+		return v1
+	}
+	legacy := filepath.Join(e.RoleDir(roleID), prompts.ReportFile)
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	return v1
 }
 
 func (e *ResolvedEnv) RoleHistoryDir(roleID string) string {
@@ -70,7 +81,18 @@ func (e *ResolvedEnv) RoleHistoryDir(roleID string) string {
 }
 
 func (e *ResolvedEnv) ReviewPath() string {
-	return filepath.Join(e.SupervisorDir(), "review.md")
+	// v1 location preferred; legacy supervisor/ falls back so pre-migration
+	// projects keep working until ATEAM_AUTO_MIGRATE flips default-on.
+	v1 := filepath.Join(e.SharedDir(), "review", "review.md")
+	if _, err := os.Stat(v1); err == nil {
+		return v1
+	}
+	legacy := filepath.Join(e.SupervisorDir(), "review.md")
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	// Neither exists yet — return the v1 path so writers create it there.
+	return v1
 }
 
 func (e *ResolvedEnv) ReviewHistoryDir() string {
@@ -78,7 +100,16 @@ func (e *ResolvedEnv) ReviewHistoryDir() string {
 }
 
 func (e *ResolvedEnv) VerifyPath() string {
-	return filepath.Join(e.SupervisorDir(), "verify.md")
+	// Same dual-read pattern as ReviewPath — see the note there.
+	v1 := filepath.Join(e.SharedDir(), "verify", "verify.md")
+	if _, err := os.Stat(v1); err == nil {
+		return v1
+	}
+	legacy := filepath.Join(e.SupervisorDir(), "verify.md")
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	return v1
 }
 
 // StateDir returns the directory that owns state.sqlite, logs/, and runtime/
