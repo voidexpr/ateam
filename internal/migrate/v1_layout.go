@@ -14,7 +14,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 )
 
@@ -189,6 +188,14 @@ var staticMigrations = []Move{
 // roleMigrations are renames templated over each <R> dir under roles/.
 // Source is relative to roles/<R>/; target is relative to root, with <R>
 // substituted in.
+//
+// Note: the spec's mapping for the report output is
+// `roles/<R>/report.md → shared/report/<R>/<R>.md` (filename = role
+// basename). v1 keeps the legacy `report.md` filename so the migrator
+// agrees with what cmd/report.go's promotion writes; a later commit
+// rewires the runtime side (PrimaryOutputName, DiscoverReports,
+// {{exec.output_file}}) and at that point the migrator's report.md
+// destination also flips to <R>.md.
 var roleMigrations = []struct {
 	from string // under roles/<R>/
 	to   string // under root, with %s = role name
@@ -197,7 +204,7 @@ var roleMigrations = []struct {
 	{from: "code_prompt.md", to: "prompts/code/%s.prompt.md"},
 	{from: "report_extra_prompt.md", to: "prompts/report/%s.post.extra.md"},
 	{from: "code_extra_prompt.md", to: "prompts/code/%s.post.extra.md"},
-	{from: "report.md", to: "shared/report/%s/%s.md"},
+	{from: "report.md", to: "shared/report/%s/report.md"},
 }
 
 func moveStatic(root string, r *Result) error {
@@ -225,12 +232,7 @@ func moveRoles(root string, r *Result) error {
 		role := e.Name()
 		for _, rm := range roleMigrations {
 			from := filepath.Join("roles", role, rm.from)
-			var to string
-			if strings.Count(rm.to, "%s") == 2 {
-				to = fmt.Sprintf(rm.to, role, role)
-			} else {
-				to = fmt.Sprintf(rm.to, role)
-			}
+			to := fmt.Sprintf(rm.to, role)
 			if _, err := move(root, from, to, r); err != nil {
 				return err
 			}

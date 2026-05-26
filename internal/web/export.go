@@ -72,7 +72,7 @@ func (s *Server) ExportHTML(opts ExportOptions) (string, error) {
 		})
 	}
 
-	reviewPath := filepath.Join(pe.ProjectDir, "supervisor", "review.md")
+	reviewPath := reviewPath(pe.ProjectDir)
 	if content, modTime, err := readFileWithModTime(reviewPath); err == nil {
 		data.HasReview = true
 		data.ReviewHTML = template.HTML(s.renderMarkdown(string(content)))
@@ -90,7 +90,7 @@ func (s *Server) ExportHTML(opts ExportOptions) (string, error) {
 		}
 	}
 
-	verifyPath := filepath.Join(pe.ProjectDir, "supervisor", "verify.md")
+	verifyPath := verifyPath(pe.ProjectDir)
 	if content, modTime, err := readFileWithModTime(verifyPath); err == nil {
 		data.HasVerify = true
 		data.VerifyHTML = template.HTML(s.renderMarkdown(string(content)))

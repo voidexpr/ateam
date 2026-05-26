@@ -6,10 +6,9 @@ import (
 	"testing"
 )
 
-// TestResolveTriggersV1MigrationWhenEnabled verifies the wiring between
-// Resolve() and the v1-layout migrator: with ATEAM_AUTO_MIGRATE=1 set, an
-// old-layout .ateam tree is rewritten on first Resolve().
-func TestResolveTriggersV1MigrationWhenEnabled(t *testing.T) {
+// TestResolveTriggersV1MigrationByDefault verifies that Resolve() runs the
+// v1-layout migrator on first contact with an old-layout .ateam tree.
+func TestResolveTriggersV1MigrationByDefault(t *testing.T) {
 	tmp := resolvedTempDir(t)
 	projectDir := filepath.Join(tmp, "myproj")
 	ateamDir := filepath.Join(projectDir, ".ateam")
@@ -27,7 +26,6 @@ func TestResolveTriggersV1MigrationWhenEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Setenv("ATEAM_AUTO_MIGRATE", "1")
 	prevWd, _ := os.Getwd()
 	t.Cleanup(func() { _ = os.Chdir(prevWd) })
 	if err := os.Chdir(projectDir); err != nil {
@@ -51,10 +49,11 @@ func TestResolveTriggersV1MigrationWhenEnabled(t *testing.T) {
 	}
 }
 
-// TestResolveSkipsV1MigrationByDefault verifies the gate works the other way:
-// without ATEAM_AUTO_MIGRATE=1, an old-layout tree is left untouched, so the
-// pre-Phase-E callers keep working.
-func TestResolveSkipsV1MigrationByDefault(t *testing.T) {
+// TestResolveSkipsV1MigrationWhenSuppressed verifies the opt-out gate:
+// with ATEAM_NO_MIGRATE=1 set, an old-layout tree is left untouched. Useful
+// for one-off recovery or debugging the legacy layout in place.
+func TestResolveSkipsV1MigrationWhenSuppressed(t *testing.T) {
+	t.Setenv("ATEAM_NO_MIGRATE", "1")
 	tmp := resolvedTempDir(t)
 	projectDir := filepath.Join(tmp, "myproj")
 	ateamDir := filepath.Join(projectDir, ".ateam")
@@ -81,9 +80,9 @@ func TestResolveSkipsV1MigrationByDefault(t *testing.T) {
 	}
 
 	if _, err := os.Stat(filepath.Join(ateamDir, "supervisor", "review_prompt.md")); err != nil {
-		t.Error("default Resolve should not have migrated supervisor/review_prompt.md")
+		t.Error("with ATEAM_NO_MIGRATE=1, supervisor/review_prompt.md should remain")
 	}
 	if _, err := os.Stat(filepath.Join(ateamDir, "prompts", "review.prompt.md")); err == nil {
-		t.Error("default Resolve should not have created prompts/review.prompt.md")
+		t.Error("with ATEAM_NO_MIGRATE=1, prompts/review.prompt.md should not be created")
 	}
 }

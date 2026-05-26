@@ -154,7 +154,7 @@ func TestV1LayoutRoleMoves(t *testing.T) {
 		"prompts/report/security.prompt.md",
 		"prompts/code/security.prompt.md",
 		"prompts/report/security.post.extra.md",
-		"shared/report/security/security.md",
+		"shared/report/security/report.md",
 		"prompts/report/code.bugs.prompt.md",
 	} {
 		if !exists(root, want) {

@@ -76,7 +76,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		log.Printf("warning: DiscoverReports: %v", err)
 	}
 
-	reviewPath := filepath.Join(pe.ProjectDir, "supervisor", "review.md")
+	reviewPath := reviewPath(pe.ProjectDir)
 	if info, err := os.Stat(reviewPath); err == nil {
 		data.HasReview = true
 		data.ReviewModTime = info.ModTime()
@@ -91,7 +91,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	verifyPath := filepath.Join(pe.ProjectDir, "supervisor", "verify.md")
+	verifyPath := verifyPath(pe.ProjectDir)
 	if info, err := os.Stat(verifyPath); err == nil {
 		data.HasVerify = true
 		data.VerifyModTime = info.ModTime()
@@ -298,7 +298,17 @@ func (s *Server) handleSupervisorOutput(cfg supervisorPageConfig) http.HandlerFu
 		}
 
 		data := cfg.View
-		if content, modTime, err := readFileWithModTime(pe.SupervisorPath(cfg.File)); err == nil {
+		// Prefer the v1 shared/ path for known supervisor outputs; fall back
+		// to SupervisorPath for unmigrated projects and for anything not yet
+		// in shared/.
+		artifactPath := pe.SupervisorPath(cfg.File)
+		switch cfg.File {
+		case "review.md":
+			artifactPath = reviewPath(pe.ProjectDir)
+		case "verify.md":
+			artifactPath = verifyPath(pe.ProjectDir)
+		}
+		if content, modTime, err := readFileWithModTime(artifactPath); err == nil {
 			data.Exists = true
 			data.HTML = template.HTML(s.renderMarkdown(string(content)))
 			data.ModTime = modTime

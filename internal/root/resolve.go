@@ -483,14 +483,11 @@ func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
 // stderr. Migration failures stop further work; re-running picks up where
 // the failed run left off.
 //
-// Currently OFF by default and gated behind ATEAM_AUTO_MIGRATE=1. The
-// migrator's destination paths (prompts/, shared/) are not yet read by
-// cmd/* — those callers still read roles/ and supervisor/ directly, so
-// auto-migration would silently move data out from under the old code.
-// Phase E of the prompt-fs refactor rewires the callers; when that lands
-// this gate flips to "on by default, opt-out via ATEAM_NO_MIGRATE=1".
+// Default-on as of the cmd/* rewires that read from shared/ paths. Set
+// ATEAM_NO_MIGRATE=1 to suppress (one-off recovery, debugging an old
+// layout, or tests that build legacy fixtures).
 func applyV1LayoutMigration(projectDir, orgDir string) error {
-	if os.Getenv("ATEAM_AUTO_MIGRATE") != "1" {
+	if os.Getenv("ATEAM_NO_MIGRATE") == "1" {
 		return nil
 	}
 	for _, dir := range []string{projectDir, orgDir} {
