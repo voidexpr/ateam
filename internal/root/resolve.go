@@ -8,11 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ateam/defaults"
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/gitutil"
 	"github.com/ateam/internal/migrate"
 	"github.com/ateam/internal/projectinfo"
 	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/prompts/assembler"
 )
 
 const (
@@ -108,6 +110,30 @@ func (e *ResolvedEnv) RuntimeDir(execID int64) string {
 // StateDir so scratch-mode invocations resolve to <OrgDir>/state.sqlite.
 func (e *ResolvedEnv) ProjectDBPath() string {
 	return filepath.Join(e.StateDir(), "state.sqlite")
+}
+
+// SharedDir returns the v1 cross-agent artifact directory: .ateam/shared/.
+// Promoted role reports and supervisor outputs land in subdirs of this path
+// (shared/report/<role>/<role>.md, shared/review/review.md, etc.). The
+// caller is responsible for creating subdirs.
+func (e *ResolvedEnv) SharedDir() string {
+	return filepath.Join(e.ProjectDir, "shared")
+}
+
+// SharedPromptDir returns the canonical destination directory for a prompt
+// path's primary output (`<role>.md`). For nested paths like "report/security"
+// it's shared/report/security/. For singletons like "review" it's
+// shared/review/.
+func (e *ResolvedEnv) SharedPromptDir(promptPath string) string {
+	return filepath.Join(append([]string{e.ProjectDir, "shared"}, strings.Split(promptPath, "/")...)...)
+}
+
+// Assembler returns a v1 prompt Assembler with the standard project →
+// org → embedded anchor chain. New on each call (cheap — just an FS handle
+// per anchor); callers should cache if they need multiple lookups within
+// one operation.
+func (e *ResolvedEnv) Assembler() *assembler.Assembler {
+	return assembler.New(assembler.BuildAnchors(e.ProjectDir, e.OrgDir, defaults.FS))
 }
 
 // NewProjectInfoParams builds a ProjectInfoParams from the resolved environment.
