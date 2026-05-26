@@ -223,11 +223,10 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		}
 	}
 	if result.Output != "" {
-		// IsModelResponse is intentionally NOT set here: the rollout JSONL
-		// records each intermediate `agent_message` event, and SessionStats
-		// reports the count via TurnCount. Setting IsModelResponse on this
-		// single emission would clobber that with a hardcoded 1 (the runner
-		// prefers observedTurns over resultEv.Turns whenever it's nonzero).
+		// IsModelResponse is intentionally NOT set here: SessionStats.TurnCount
+		// already reports the real number of API roundtrips, and the runner
+		// prefers observedTurns over resultEv.Turns whenever it's nonzero —
+		// so emitting IsModelResponse once would clobber TurnCount with 1.
 		ch <- StreamEvent{Type: "assistant", Text: result.Output}
 		writeSyntheticStream(streamWriter, "assistant", map[string]any{"text": result.Output})
 	}

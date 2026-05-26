@@ -37,7 +37,7 @@ func TestReadSessionStatsFixture(t *testing.T) {
 		t.Errorf("completion flags missing: %+v", stats)
 	}
 	if stats.TurnCount != 3 {
-		t.Errorf("TurnCount = %d, want 3 (one per agent_message)", stats.TurnCount)
+		t.Errorf("TurnCount = %d, want 3 (one per token_count event)", stats.TurnCount)
 	}
 }
 

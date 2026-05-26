@@ -32,10 +32,12 @@ type SessionStats struct {
 	SessionLogPath     string
 	TaskCompleteFound  bool
 	TokenCountFound    bool
-	// TurnCount is the number of `agent_message` events found in the rollout
-	// — one per textual assistant emission between tool calls. Used as the
-	// codex-tmux equivalent of Claude's `num_turns`. A run that produced a
-	// single final answer reports 1; multi-step tool-using runs report N.
+	// TurnCount is the number of `token_count` events in the rollout. Codex
+	// emits one per API roundtrip (tool-using round or final response), which
+	// matches Claude's `num_turns` semantics. The codex-tui originator
+	// records exactly one `agent_message` per run regardless of how many
+	// rounds the agent went through, so counting that instead would always
+	// report 1 — see commit history.
 	TurnCount int
 }
 
@@ -208,6 +210,7 @@ func ReadSessionStats(path string) (SessionStats, error) {
 					stats.ContextWindow = pe.ModelContextWindow
 				}
 			case "token_count":
+				stats.TurnCount++
 				if pe.Info.TotalTokenUsage.TotalTokens > 0 || pe.Info.TotalTokenUsage.InputTokens > 0 {
 					stats.InputTokens = pe.Info.TotalTokenUsage.InputTokens
 					stats.OutputTokens = pe.Info.TotalTokenUsage.OutputTokens
@@ -224,8 +227,6 @@ func ReadSessionStats(path string) (SessionStats, error) {
 				stats.TimeToFirstTokenMS = pe.TimeToFirstTokenMS
 				stats.LastAgentMessage = pe.LastAgentMessage
 				stats.TaskCompleteFound = true
-			case "agent_message":
-				stats.TurnCount++
 			}
 		case "turn_context":
 			var tc turnContext
