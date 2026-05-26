@@ -141,6 +141,83 @@ The `escalateAfter` timeout is the key interaction-detection mechanism: if an ag
 - Consider integrating PR-Agent as a **quality gate** in ATeam's workflow. After a sub-agent creates a PR, run PR-Agent on it as an automated reviewer before human approval.
 - Their **PR compression strategy** for handling large diffs could inform how ATeam's coordinator summarizes agent changes for human review.
 
+#### Claude Code — Code Review (Anthropic managed service) ⭐⭐⭐⭐
+
+**Link:** [code.claude.com/docs/en/code-review](https://code.claude.com/docs/en/code-review). Research preview, Team and Enterprise subscriptions only, not available with Zero Data Retention. Billed separately via usage credits, $15–25 per review on average. The locally-runnable sibling is the `/code-review` slash command in Claude Code (renamed from `/simplify` at v2.1.147); for self-hosted CI integration the analogues are Claude Code GitHub Actions and GitLab CI/CD.
+
+**What it is:** Anthropic's first-party, **GitHub-integrated managed service** that runs multi-agent review on every PR. Not a CLI, not a framework you install — an organisation admin installs the Claude GitHub App, picks repositories, picks a trigger mode (once on PR open / on every push / manual), and PRs are reviewed by a fleet of agents running on Anthropic infrastructure. Findings post as inline comments on the diff with a severity tag (🔴 Important, 🟡 Nit, 🟣 Pre-existing), plus a `Claude Code Review` check run with a severity table and per-line annotations. The check completes with a **neutral conclusion** so it never blocks merging through branch protection — the team decides whether to gate merges by parsing the check output themselves.
+
+This is structurally the closest thing in this section to "what ATeam's review sub-agent would look like if shipped as a hosted product." Multi-agent specialised analysis, verification step to filter false positives, severity ranking, customisable via repo-level config files, manual re-trigger via `@claude review`. The difference is operational: it's *hosted, PR-gated, single-tenant-per-org, billed by Anthropic*; ATeam is *self-hosted, scheduled, multi-project, runs on the user's own Claude credits*.
+
+**How reviews work (the agent shape):**
+
+When a review triggers, **multiple agents analyse the diff and surrounding code in parallel** on Anthropic infrastructure. Each agent looks for a different class of issue (the docs are deliberately non-specific about how many or what they specialise in). Then a separate **verification step** checks every candidate finding against actual code behaviour to filter false positives. Findings are then deduplicated, ranked by severity, and posted as inline comments with a collapsible "extended reasoning" section per finding that explains *why* it was flagged and *how* it was verified. Reviews take ~20 minutes on average and scale in cost with PR size.
+
+This is the same shape ATeam already uses for the audit phase — specialist agents look at different classes of concern, a coordination step deduplicates and ranks, the human sees a triaged report — but expressed in the PR-comment medium instead of markdown reports.
+
+**Customisation — `CLAUDE.md` and `REVIEW.md`:**
+
+Two repository-level config files shape what the review flags, and they differ in *strength*:
+
+- **`CLAUDE.md`** (project memory, also used by interactive Claude Code) is read as **project context**. Newly introduced violations of `CLAUDE.md` statements are flagged as **nit-level** findings. Bidirectional: if a PR changes code such that a `CLAUDE.md` statement is now outdated, Claude flags that the docs need updating too. Subdirectory `CLAUDE.md` files apply only under their path.
+- **`REVIEW.md`** (review-only) is **injected verbatim into the system prompt of every agent in the review pipeline as the highest-priority instruction block**. `@` import syntax is *not* expanded. Used to redefine what severity means for the repo, cap nit volume, skip paths/branch patterns, add repo-specific must-check rules, set a verification bar, define re-review convergence behaviour, shape the summary.
+
+The example `REVIEW.md` in the docs is short and prescriptive — "Reserve Important for findings that would break behaviour, leak data, or block a rollback"; "report at most five Nits per review, say 'plus N similar items' otherwise"; "do not report anything CI already enforces"; "always check that new API routes have an integration test." This is a much tighter prompt-engineering surface than ATeam's role prompts — single file, no skill or sub-agent indirection, freeform markdown read as plain instructions.
+
+**Triggers and operational model:**
+
+Three trigger modes per repository: **Once after PR creation**, **After every push**, or **Manual**. Plus two comment commands that work in any mode:
+
+- `@claude review` — starts a review and **subscribes the PR to push-triggered reviews going forward**.
+- `@claude review once` — single review, no subscription. Use for long-running PRs where every push would be wasteful.
+
+Manual triggers work on draft PRs (the explicit ask overrides draft status). Replying to inline findings doesn't prompt Claude — to act on a finding you fix the code and push; the next push-triggered run resolves the thread when the issue is gone. Each comment ships with 👍 / 👎 reactions pre-attached for one-click rating; Anthropic uses these post-merge to tune the reviewer.
+
+**Check-run output and gating:**
+
+The `Claude Code Review` check appears alongside CI checks. Its **Details** view contains a per-finding severity table (file:line + issue), and per-line annotations also render in the **Files changed** tab — these survive even when an inline comment is rejected because the line moved.
+
+The check always completes neutrally so branch protection never blocks on it. For teams that want to gate merges, the last line of the Details text is a machine-readable HTML comment with severity counts that can be parsed from CI:
+
+```bash
+gh api repos/OWNER/REPO/check-runs/CHECK_RUN_ID \
+  --jq '.output.text | split("bughunter-severity: ")[1] | split(" -->")[0] | fromjson'
+```
+
+This returns `{"normal": N, "nit": N, "pre_existing": N}`. A team's CI workflow can read it and fail when `normal > 0`. This "non-blocking by default, opt-in gating" posture is a useful pattern ATeam should consider for its own audit reports.
+
+**Operational details worth noting:**
+
+- **Re-run from GitHub's Checks tab does NOT retrigger Code Review** — the only ways to re-run are `@claude review once` as a comment or pushing a new commit. The "rerun button is a no-op" surprise is documented.
+- **Failed/timed-out runs do not auto-retry.** Same recovery — comment or push.
+- **Spend cap** can be configured at the org level; when reached, a single comment is posted on the PR explaining the skip, and reviews resume next billing period.
+- **Per-repo average cost per review** is shown in the admin table. The "every push" mode is the most expensive lever.
+- **Findings that reference deleted lines** (because the PR was pushed during the review) appear under an **Additional findings** heading in the review body rather than as inline comments — a useful pattern for not silently dropping findings whose anchor moved.
+
+**Overlap with ATeam:** Structurally high, operationally low. The agent shape is essentially identical (multiple specialist agents in parallel → verification step → deduplication → severity-ranked report). The customisation surface (`CLAUDE.md` for project context + `REVIEW.md` for review-only override) is a cleaner expression of the same idea as ATeam's role.md files. Both treat the review as **non-blocking by default with optional gating**. Both target correctness over style.
+
+**What it lacks for our use case:**
+
+- **PR-triggered only, no schedule.** Same gap that disqualified Qodo PR-Agent and most of the section: it reacts to PRs, it doesn't proactively scan the codebase on a cadence looking for things to improve.
+- **Review only, no implementation phase.** It comments, it doesn't make changes. ATeam's audit → approve → implement loop has no equivalent here — the human still has to do (or prompt for) the fix.
+- **Hosted, not self-hosted.** Anthropic infrastructure, Anthropic billing, requires Team/Enterprise subscription, not available with ZDR. ATeam's self-hosted, pay-by-Claude-credits posture is the opposite trade-off. For repos that can use this, "use this for review and ATeam for everything else" is a reasonable mixed posture.
+- **GitHub-only.** GitLab teams use the separate GitLab CI/CD integration; self-hosted GitHub Enterprise Server uses a different integration. ATeam is git-host-agnostic by virtue of doing nothing PR-shaped itself.
+- **No persistent project knowledge across reviews.** Every review reads the current `CLAUDE.md` and `REVIEW.md`, but there's no "the reviewer learnt last week that this module has flaky tests and stops flagging them" — feedback (👍/👎) is aggregated globally by Anthropic, not retained per-repo as state the reviewer reads back.
+- **No coordinator reasoning across runs.** A review is one PR. ATeam's coordinator can read multiple agent reports and decide what to do next; Code Review can't.
+- **Single specialisation (review).** No audit, no testing, no refactor, no documentation, no security as separate roles with their own prompts. The pipeline is internal and not user-configurable beyond `REVIEW.md`.
+
+**Ideas to integrate:**
+
+- **`REVIEW.md` as the cleanest expression of "what to flag and how loud":** a single repo-root markdown file, injected verbatim as highest-priority instruction, freeform. Much simpler than a per-agent role file hierarchy. ATeam could adopt a `.ateam/REVIEW.md` (or per-role `.ateam/AUDIT.md`, `.ateam/REFACTOR.md`) file that gets injected at the top of every role prompt before the role's own template. This gives users one obvious place to dial severity, cap noise, skip paths, and add repo-specific rules — without forking the role prompt files. Worth lifting verbatim as a feature.
+- **Bidirectional `CLAUDE.md` enforcement.** Code Review flags both *new code that violates `CLAUDE.md`* and *changes that make `CLAUDE.md` outdated*. ATeam's audit agent could do the same — treat the project's documentation as a peer artifact to the code, and flag drift in either direction.
+- **The "machine-readable severity tally on a comment line" pattern** (`<!-- bughunter-severity: {...} -->`) is a clean way to expose ATeam's audit findings to a team's CI without it parsing markdown. If ATeam ever wants to integrate with CI as a non-blocking advisory check, this is the right shape: write a check run with a neutral conclusion, append the parseable tally, let the team decide whether to gate on it.
+- **Pre-attached 👍/👎 reactions on every finding** as a built-in feedback channel. ATeam's reports could ship with the same — each finding gets a one-character ack/nack the human writes into the report file (or clicks in a future dashboard) — and the coordinator reads these back next run to tune what each role flags.
+- **"Suppress new nits after the first review on the same PR/branch" convergence rule.** Borrow this directly. ATeam's audit agent should know whether it has reviewed a branch before and avoid re-emitting the same nits when only one line changed.
+- **`Additional findings` heading for findings whose anchor moved.** ATeam's reports should never silently drop a finding because the file changed between audit and report-rendering — surface them in a separate section.
+- **The neutral check-run + parseable tally pattern for non-blocking gating.** This is the right default for ATeam's CI story: never block by default, expose a machine-readable summary that teams can opt into gating on.
+
+**Key architectural difference from ATeam:** Code Review is the **same agent shape ATeam uses, packaged as a hosted GitHub-integrated review service**. They share the multi-agent-with-verification structure, the severity-ranked output, the markdown-config customisation surface, and the "non-blocking by default" posture. They differ on every operational axis: hosted vs. self-hosted, PR-gated vs. scheduled, review-only vs. full audit→implement loop, GitHub-only vs. host-agnostic, Anthropic-billed vs. user-billed. The right framing isn't "alternative to ATeam" — it's "what one of ATeam's specialist agents looks like when Anthropic ships it themselves." For teams that can use it, running Code Review on PRs *and* ATeam on a schedule is a coherent combination: Code Review catches the bug the human is about to merge, ATeam finds the work the human hasn't thought to do yet.
+
 #### MetaGPT ⭐⭐
 
 **Link:** [github.com/FoundationAgents/MetaGPT](https://github.com/FoundationAgents/MetaGPT)
