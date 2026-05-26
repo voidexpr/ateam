@@ -12,8 +12,8 @@ set -euo pipefail
 # the working directory; prior runs are timestamp-backed up.
 
 # see .ateam/runtime.hcl or ~/.ateamorg/runtime.hcl for agent definitions
-reviewer="codex"
-coder="claude"
+reviewer="codex-high"
+coder="claude-high"
 
 usage() {
   cat <<HELP
