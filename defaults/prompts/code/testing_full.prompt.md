@@ -1,0 +1,1 @@
+You are allowed to write tests but not to change the code being tested. If the code doesn't match the intended use report a test failures and document a task for the code to change to be testable. Someone else needs to assess if the code or the test need to be fixed.
