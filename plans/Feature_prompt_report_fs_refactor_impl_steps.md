@@ -2,7 +2,33 @@
 
 Companion to `Feature_prompt_report_fs_refactor.md`. Covers the foundational refactor — the assembler, template engine rename, auto-migration, embedded-defaults restructure, and caller rewire. Tasks 2 (Stage), 3 (telemetry), 4 (`prompt --preview`), 8 (`--pre/post-prompt` normalize) come after this lands.
 
-Task 7 (variable rename to `scope.name`) is folded in at Phase B so embedded defaults never ship with ALL_CAPS variables in v1.
+Task 7 (variable rename to `scope.name`) — **revised mid-flight**: the new engine accepts both vocabularies via a compat shim, so the structural refactor is decoupled from the rename. Defaults stay in `{{ALL_CAPS}}` through Phase E; a follow-up mechanical pass migrates them to dotted form. See commit 992ea3a for rationale.
+
+## Progress as of 2026-05-26
+
+**Done** (commits on `small-fixes`):
+
+- ✅ Phase A — parser + validator + Anchor/Assembler (commit 56b835b)
+- ✅ Phase B — template engine + includes + frontmatter + orphan detection + varmap (56b835b)
+- ✅ Phase B.5b — engine ALL_CAPS compat shim + migrator structural-only (992ea3a)
+- ✅ Phase C — v1 layout migrator with real-fixture tests (a1d2b8d)
+- ✅ Phase E.1 — BuildAnchors factory (65afadf)
+- ✅ Phase E.12-15 — dual-ship defaults at v1 paths + framing files + embed.go (ac99c4b)
+- ✅ Phase E.Assemble — anchor-chain assembly per spec order + real-defaults smoke test (527d61c)
+- ✅ Phase E.16 — ResolvedEnv.SharedDir/SharedPromptDir/Assembler helpers (cc5da8c)
+- ✅ Task 4 (early) — `ateam prompt --preview` using the new pipeline (a3edaa3)
+
+**Remaining**:
+
+- Phase E.17 — `internal/runner/runner.go`: drop the `*_prompt.md` exclusion at line 1156; promotion writes to `SharedPromptDir(promptName)/<basename>.md` instead of `roles/<R>/`. **Coupled with E.19** since web reads the same paths.
+- Phase E.18 — `cmd/*.go` rewires: replace `prompts.AssembleRolePrompt` / `AssembleReviewPrompt` / etc. with `env.Assembler().Assemble(...)`. Plumb `{{role.reports}}` through `BuildAssemblerVars`. Drop `RoleID: "supervisor"` hardcodes. Drop per-cmd `FormatProjectInfo` injection (now in `_pre.context.md`). **Biggest single piece.**
+- Phase E.19 — `internal/web/handlers.go`, `internal/web/export.go`: read artifacts from `shared/...` instead of `roles/<R>/...` and `supervisor/...`. Coupled with E.17.
+- Phase E.gate — Flip `applyV1LayoutMigration` from `ATEAM_AUTO_MIGRATE=1` opt-in to "on by default, `ATEAM_NO_MIGRATE=1` opt-out". Should land in the same commit as the cmd/* rewires.
+- Phase F — full verification per spec (golden prompt diff, idempotence under real load, etc.).
+- **Follow-up commits** (independent of v1 release):
+  - Mechanical `{{ALL_CAPS}}` → `{{dotted.form}}` rewrite over `defaults/prompts/` + re-enable assembler.RewriteContent in the migrator (deferred per 992ea3a).
+  - Remove dual-shipped legacy paths from `defaults/` + their embed globs (once nothing reads them).
+  - Tasks 2 (Stage), 3 (telemetry), 8 (--pre/post-prompt normalize), 5 (docs).
 
 ## Phase A — Foundation: assembler skeleton (no behavior change yet)
 
