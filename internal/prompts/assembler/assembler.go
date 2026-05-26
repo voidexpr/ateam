@@ -72,21 +72,25 @@ func (a *Assembler) FirstMatch(path string) (Match, bool, error) {
 	return Match{}, false, nil
 }
 
-// AllMatches returns every file matching `pattern` across all anchors,
+// AllMatches returns every file matching any of `patterns` across all anchors,
 // deduplicating by path. Each path is emitted once at the slot of the
 // most-general anchor that has it; the content comes from the most-specific
 // anchor that has it (so an override doesn't move the file's position, only
 // replaces its content). Within each anchor's slot, files sort lexically.
 //
+// Multiple patterns are unioned per anchor before sorting, so callers can pass
+// both a singleton and a fragment glob (e.g. "_pre.md" and "_pre.*.md") and
+// get them composed together in lexical order.
+//
 // Empty result on no matches is not an error.
-func (a *Assembler) AllMatches(pattern string) ([]Match, error) {
+func (a *Assembler) AllMatches(patterns ...string) ([]Match, error) {
 	// First pass: for each path, identify the most-specific anchor that has it
 	// (content source).
 	contentSrc := make(map[string]int)
 	for idx, anc := range a.anchors {
-		matches, err := fs.Glob(anc.FS, pattern)
+		matches, err := globAny(anc.FS, patterns)
 		if err != nil {
-			return nil, fmt.Errorf("glob %q in anchor %s: %w", pattern, anc.Name, err)
+			return nil, fmt.Errorf("glob %v in anchor %s: %w", patterns, anc.Name, err)
 		}
 		for _, m := range matches {
 			if _, seen := contentSrc[m]; !seen {
@@ -101,9 +105,9 @@ func (a *Assembler) AllMatches(pattern string) ([]Match, error) {
 	var out []Match
 	for idx := len(a.anchors) - 1; idx >= 0; idx-- {
 		anc := a.anchors[idx]
-		matches, err := fs.Glob(anc.FS, pattern)
+		matches, err := globAny(anc.FS, patterns)
 		if err != nil {
-			return nil, fmt.Errorf("glob %q in anchor %s: %w", pattern, anc.Name, err)
+			return nil, fmt.Errorf("glob %v in anchor %s: %w", patterns, anc.Name, err)
 		}
 		sort.Strings(matches)
 		for _, m := range matches {
@@ -117,6 +121,26 @@ func (a *Assembler) AllMatches(pattern string) ([]Match, error) {
 			}
 			out = append(out, Match{Anchor: srcAnc.Name, Path: m, Content: data})
 			emitted[m] = true
+		}
+	}
+	return out, nil
+}
+
+// globAny returns the union of fs.Glob results for every pattern against fsys,
+// deduplicating paths a single file may match under more than one pattern.
+func globAny(fsys fs.FS, patterns []string) ([]string, error) {
+	var out []string
+	seen := make(map[string]bool)
+	for _, p := range patterns {
+		matches, err := fs.Glob(fsys, p)
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range matches {
+			if !seen[m] {
+				seen[m] = true
+				out = append(out, m)
+			}
 		}
 	}
 	return out, nil

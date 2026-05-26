@@ -61,6 +61,74 @@ func TestAssembleNestedAllSlots(t *testing.T) {
 	}
 }
 
+func TestAssembleSingletonFragments(t *testing.T) {
+	// Singleton pre/post (no <NAME>) must compose alongside named fragments at
+	// each slot. Lexically, `_pre.md` sorts after `_pre.context.md`.
+	anchors := mkAnchors(
+		nil, nil,
+		map[string]string{
+			"_pre.md":                   "ROOT-PRE-SINGLE",
+			"_pre.context.md":           "ROOT-PRE-NAMED",
+			"report/_pre.md":            "DIR-PRE-SINGLE",
+			"report/security.pre.md":    "ROLE-PRE-SINGLE",
+			"report/security.prompt.md": "MAIN",
+			"report/security.post.md":   "ROLE-POST-SINGLE",
+			"report/_post.md":           "DIR-POST-SINGLE",
+		},
+	)
+	a := New(anchors)
+	res, err := a.Assemble("report/security", mkVars(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "ROOT-PRE-NAMED\n\nROOT-PRE-SINGLE\n\nDIR-PRE-SINGLE\n\nROLE-PRE-SINGLE\n\nMAIN\n\nROLE-POST-SINGLE\n\nDIR-POST-SINGLE"
+	if res.Prompt != want {
+		t.Fatalf("Prompt =\n%q\nwant\n%q", res.Prompt, want)
+	}
+}
+
+func TestAssembleStripsFrontmatter(t *testing.T) {
+	// Frontmatter on the role main (and on fragments) must be parsed off, not
+	// rendered into the output.
+	anchors := mkAnchors(
+		nil, nil,
+		map[string]string{
+			"_pre.context.md":           "---\ndescription: ctx\n---\nROOT-PRE",
+			"report/security.prompt.md": "---\ndescription: sec\ndeprecated: true\n---\nMAIN-BODY",
+		},
+	)
+	a := New(anchors)
+	res, err := a.Assemble("report/security", mkVars(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Prompt, "description") || strings.Contains(res.Prompt, "---") {
+		t.Fatalf("frontmatter leaked into prompt:\n%q", res.Prompt)
+	}
+	if res.Prompt != "ROOT-PRE\n\nMAIN-BODY" {
+		t.Fatalf("Prompt = %q", res.Prompt)
+	}
+}
+
+func TestAssembleBadFrontmatterErrors(t *testing.T) {
+	// Unknown frontmatter keys must surface as an error at assembly time,
+	// tagged with the anchor:path location.
+	anchors := mkAnchors(
+		nil, nil,
+		map[string]string{
+			"report/security.prompt.md": "---\nbogus: nope\n---\nMAIN",
+		},
+	)
+	a := New(anchors)
+	_, err := a.Assemble("report/security", mkVars(), nil)
+	if err == nil || !strings.Contains(err.Error(), "unknown key") {
+		t.Fatalf("expected unknown-key frontmatter error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "report/security.prompt.md") {
+		t.Fatalf("error should name the offending file, got %v", err)
+	}
+}
+
 func TestAssembleMissingMainErrors(t *testing.T) {
 	anchors := mkAnchors(
 		map[string]string{"_pre.context.md": "ROOT-PRE"},

@@ -195,10 +195,18 @@ func runPromptPreview() error {
 	}
 	a := env.Assembler()
 
-	// Surface orphans before assembly so a typo is caught first.
-	orphans, _ := a.FindOrphans()
+	// Surface orphans before assembly so a typo is caught first. Per the
+	// spec's "errors loudly on orphan fragments", any orphan fails the
+	// command after all are printed.
+	orphans, err := a.FindOrphans()
+	if err != nil {
+		return fmt.Errorf("scanning for orphan fragments: %w", err)
+	}
 	for _, o := range orphans {
 		fmt.Fprintln(os.Stderr, o.Error())
+	}
+	if len(orphans) > 0 {
+		return fmt.Errorf("found %d orphan fragment(s); fix or remove them before assembling", len(orphans))
 	}
 
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, promptAction)

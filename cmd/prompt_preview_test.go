@@ -66,6 +66,35 @@ func TestPromptPreviewRoleReport(t *testing.T) {
 	}
 }
 
+func TestPromptPreviewFailsOnOrphanFragment(t *testing.T) {
+	projectDir := setupMinimalAteamProject(t)
+	// A role pre fragment with a typo'd role name and no matching
+	// <role>.prompt.md anywhere — an orphan the preview must reject.
+	orphanDir := projectDir + "/.ateam/prompts/report"
+	if err := os.MkdirAll(orphanDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(orphanDir+"/securty.pre.scope.md", []byte("oops"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prev, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(resetPromptFlags)
+	promptRole = "security"
+	promptAction = "report"
+	promptPreview = true
+
+	err := runPromptPreview()
+	if err == nil || !strings.Contains(err.Error(), "orphan") {
+		t.Fatalf("expected orphan-fragment error, got %v", err)
+	}
+}
+
 func TestPromptPreviewBadAction(t *testing.T) {
 	t.Cleanup(resetPromptFlags)
 	promptRole = "security"

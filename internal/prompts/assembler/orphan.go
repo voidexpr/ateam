@@ -1,6 +1,7 @@
 package assembler
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"path"
@@ -53,6 +54,11 @@ func (a *Assembler) FindOrphans() ([]*OrphanError, error) {
 	for _, anc := range a.anchors {
 		err := fs.WalkDir(anc.FS, ".", func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
+				// A missing prompts/ subtree means this anchor simply has no
+				// fragments — not an error (mirrors BuildAnchors' handling).
+				if errors.Is(err, fs.ErrNotExist) {
+					return nil
+				}
 				return err
 			}
 			if d.IsDir() {

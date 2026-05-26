@@ -60,7 +60,15 @@ func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine) (Asse
 
 	var sections []Section
 	addRendered := func(slot, anchor, path, raw string) error {
-		rendered, err := engine.Render(raw, vars)
+		_, body, err := ParseFrontmatter(raw)
+		if err != nil {
+			loc := path
+			if anchor != "" {
+				loc = anchor + ":" + path
+			}
+			return fmt.Errorf("frontmatter %s: %w", loc, err)
+		}
+		rendered, err := engine.Render(body, vars)
 		if err != nil {
 			loc := path
 			if anchor != "" {
@@ -91,10 +99,9 @@ func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine) (Asse
 	// 1. Dir-level pres, root → leaf.
 	for i := 0; i <= len(dirs); i++ {
 		dir := strings.Join(dirs[:i], "/")
-		pattern := joinName(dir, "_pre.*.md")
-		matches, err := a.AllMatches(pattern)
+		matches, err := a.AllMatches(fragmentGlobs(dir, "_pre")...)
 		if err != nil {
-			return AssembleResult{}, fmt.Errorf("glob %q: %w", pattern, err)
+			return AssembleResult{}, fmt.Errorf("glob dir pre %q: %w", dir, err)
 		}
 		slot := "root_pre"
 		if dir != "" {
@@ -108,10 +115,9 @@ func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine) (Asse
 	dir := strings.Join(dirs, "/")
 
 	// 2. Role-level pres.
-	rolePrePattern := joinName(dir, role+".pre.*.md")
-	rolePres, err := a.AllMatches(rolePrePattern)
+	rolePres, err := a.AllMatches(fragmentGlobs(dir, role+".pre")...)
 	if err != nil {
-		return AssembleResult{}, fmt.Errorf("glob %q: %w", rolePrePattern, err)
+		return AssembleResult{}, fmt.Errorf("glob role pre %q: %w", joinName(dir, role), err)
 	}
 	if err := addMatches("role_pre", rolePres); err != nil {
 		return AssembleResult{}, err
@@ -131,10 +137,9 @@ func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine) (Asse
 	}
 
 	// 4. Role-level posts.
-	rolePostPattern := joinName(dir, role+".post.*.md")
-	rolePosts, err := a.AllMatches(rolePostPattern)
+	rolePosts, err := a.AllMatches(fragmentGlobs(dir, role+".post")...)
 	if err != nil {
-		return AssembleResult{}, fmt.Errorf("glob %q: %w", rolePostPattern, err)
+		return AssembleResult{}, fmt.Errorf("glob role post %q: %w", joinName(dir, role), err)
 	}
 	if err := addMatches("role_post", rolePosts); err != nil {
 		return AssembleResult{}, err
@@ -143,10 +148,9 @@ func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine) (Asse
 	// 5. Dir-level posts, leaf → root.
 	for i := len(dirs); i >= 0; i-- {
 		d := strings.Join(dirs[:i], "/")
-		pattern := joinName(d, "_post.*.md")
-		matches, err := a.AllMatches(pattern)
+		matches, err := a.AllMatches(fragmentGlobs(d, "_post")...)
 		if err != nil {
-			return AssembleResult{}, fmt.Errorf("glob %q: %w", pattern, err)
+			return AssembleResult{}, fmt.Errorf("glob dir post %q: %w", d, err)
 		}
 		slot := "root_post"
 		if d != "" {
@@ -165,6 +169,17 @@ func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine) (Asse
 		Prompt:   strings.Join(parts2, "\n\n"),
 		Sections: sections,
 	}, nil
+}
+
+// fragmentGlobs returns the singleton + named-fragment glob pair for a
+// pre/post base ("_pre", "_post", "<role>.pre", "<role>.post") at `dir`. The
+// singleton (`<base>.md`) and fragments (`<base>.<NAME>.md`) both contribute;
+// AllMatches unions and lex-sorts them.
+func fragmentGlobs(dir, base string) []string {
+	return []string{
+		joinName(dir, base+".md"),
+		joinName(dir, base+".*.md"),
+	}
 }
 
 // joinName joins a directory and a filename pattern. Empty dir returns just
