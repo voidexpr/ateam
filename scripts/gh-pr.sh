@@ -419,13 +419,13 @@ $mode_line
 For each section in the report:
   - APPLY:     make the change in code.
   - ENHANCE:   apply the original suggestion AND the enhancement.
-  - PUSH BACK: do NOT change code. Plan a GitHub reply. In-thread reply:
+  - PUSH BACK: do NOT change code. Plan a GitHub reply using the
+               _gh_or_print helper (see below). Prefer inline reply:
                  gh api -X POST \\
                    repos/$pr_repo/pulls/$prid/comments/{COMMENT_ID}/replies \\
                    -f body="..."
                (the comment IDs are in $cache_dir/inline-comments.json).
-               PR-level comment fallback (use when there's no thread or
-               when a fork-only token would 403 on the upstream reply):
+               PR-level comment fallback (use when there is no thread):
                  gh pr comment $prid --repo $pr_repo -b "..."
 
 In stage-only mode (default), $submit_script must be a self-contained
@@ -436,6 +436,29 @@ work:
   2. One gh-command block per push-back, with a brief comment line
      above each saying which finding it's for.
 Make it idempotent where you can.
+
+IMPORTANT — wrapping gh comment commands in $submit_script:
+Every gh command that posts a comment or reply MUST be wrapped with
+_gh_or_print. The helper will be prepended to the script automatically
+— do NOT define it yourself. Signature:
+
+  _gh_or_print "MANUAL_URL" "BODY" gh-args...
+
+MANUAL_URL: the GitHub URL the user should visit to post manually.
+            For inline replies: the review thread URL on the PR.
+            For PR-level comments: $pr_url
+BODY: the exact comment text, identical to what you pass to gh.
+
+Examples:
+  _gh_or_print "$pr_url" \\
+    "My push-back reasoning here." \\
+    gh api -X POST \\
+      repos/$pr_repo/pulls/$prid/comments/12345/replies \\
+      -f body="My push-back reasoning here."
+
+  _gh_or_print "$pr_url" \\
+    "My push-back reasoning here." \\
+    gh pr comment $prid --repo $pr_repo -b "My push-back reasoning here."
 
 After the code changes (regardless of mode):
   - Build and test using this project's conventional commands (check
@@ -450,6 +473,31 @@ Write $do_log (overwriting OK) with:
 
 End with a one-line summary: counts + whether anything was pushed.
 EOF
+
+  # Inject _gh_or_print helper into the generated submit_script so comment
+  # commands fall back to printing the URL + body when permissions fail.
+  if [ -s "$submit_script" ]; then
+    local tmp
+    tmp=$(mktemp)
+    head -n1 "$submit_script" > "$tmp"        # preserve shebang
+    cat >> "$tmp" <<'HELPER'
+
+# Try a gh comment command; fall back to printing the URL + body for manual posting.
+# Usage: _gh_or_print MANUAL_URL BODY GH_ARGS...
+_gh_or_print() {
+  local url="$1" body="$2"; shift 2
+  if ! "$@" 2>/dev/null; then
+    printf '\n=== Could not post comment automatically ===\n'
+    printf 'Visit:  %s\n' "$url"
+    printf 'Paste:\n---\n%s\n---\n' "$body"
+  fi
+}
+
+HELPER
+    tail -n +2 "$submit_script" >> "$tmp"     # rest of script
+    mv "$tmp" "$submit_script"
+    chmod +x "$submit_script"
+  fi
 
   step "do-feedback complete"
   echo "PR:          ${pr_url:-(unknown)}"
