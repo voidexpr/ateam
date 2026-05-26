@@ -9,15 +9,16 @@ final_file="$base_dir/coding_report.md"
 codex_agent="codex-tmux"
 claude_agent="claude-high"
 coding_agent="claude-high"
-mode="xhigh"
+mode="high"
 focus="recent changes"
 
 usage() {
   cat <<HELP
 Usage: $(basename "$0") [options]
 
-Two parallel reviews (codex + claude) of recent changes, then a merge
-step that applies the fixes both agree on and pushes back on the rest.
+Two parallel reviews (codex with /review + claude code with /code-review $mode)
+of recent changes, then a merge step that applies the fixes both agree on and
+pushes back on the rest.
 Reviews are cached; --force re-runs them. The two review files are
 timestamp-archived at the end so the next run starts fresh; the merged
 $final_file is kept.
