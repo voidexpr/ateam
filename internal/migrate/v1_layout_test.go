@@ -181,23 +181,21 @@ func TestV1LayoutRoleMoves(t *testing.T) {
 	}
 }
 
-func TestV1LayoutContentRewrite(t *testing.T) {
+// V1 migration is structural only — ALL_CAPS variables stay in place and are
+// handled by the engine's compat shim at render time. Content rewriting is a
+// separate mechanical pass that will run later via assembler.RewriteContent.
+func TestV1LayoutLeavesContentUnchanged(t *testing.T) {
 	root := t.TempDir()
+	original := "Review {{ROLE}} for {{PROJECT_NAME}}\nOutput to {{OUTPUT_DIR}}\nSource: {{SOURCE_DIR}}"
 	writeTree(t, root, map[string]string{
-		"supervisor/review_prompt.md": "Review {{ROLE}} for {{PROJECT_NAME}}\nOutput to {{OUTPUT_DIR}}\nSource: {{SOURCE_DIR}}",
+		"supervisor/review_prompt.md": original,
 	})
-	r, err := V1Layout(root)
-	if err != nil {
+	if _, err := V1Layout(root); err != nil {
 		t.Fatal(err)
 	}
-
 	got := read(t, root, "prompts/review.prompt.md")
-	want := "Review {{prompt.name}} for {{project.name}}\nOutput to {{exec.output_dir}}\nSource: ."
-	if got != want {
-		t.Fatalf("rewrite produced wrong content:\n got:  %q\n want: %q", got, want)
-	}
-	if len(r.Rewrote) != 1 || r.Rewrote[0] != "prompts/review.prompt.md" {
-		t.Errorf("Rewrote = %v, want [prompts/review.prompt.md]", r.Rewrote)
+	if got != original {
+		t.Fatalf("content should be unchanged after structural migration:\n got:  %q\n want: %q", got, original)
 	}
 }
 
@@ -223,9 +221,8 @@ func TestV1LayoutIdempotent(t *testing.T) {
 	if r2.Changed() {
 		t.Fatalf("second pass should be no-op, got Result=%+v", r2)
 	}
-	// Content unchanged on second pass.
-	if read(t, root, "prompts/report/security.prompt.md") != "{{prompt.name}} body" {
-		t.Error("content drifted on second pass")
+	if read(t, root, "prompts/report/security.prompt.md") != "{{ROLE}} body" {
+		t.Error("content drifted on second pass (should be preserved unchanged)")
 	}
 }
 
@@ -301,8 +298,8 @@ func TestRsyncFixture(t *testing.T) {
 	if !r1.Changed() {
 		t.Fatal("expected first pass to change things")
 	}
-	t.Logf("first pass: %d moves, %d rewrites, %d removed dirs, %d warnings",
-		len(r1.Moved), len(r1.Rewrote), len(r1.RemovedDirs), len(r1.Warnings))
+	t.Logf("first pass: %d moves, %d removed dirs, %d warnings",
+		len(r1.Moved), len(r1.RemovedDirs), len(r1.Warnings))
 
 	// Spot-checks based on what this real fixture contains: it ships role
 	// report outputs + supervisor review/verify outputs + a review extras

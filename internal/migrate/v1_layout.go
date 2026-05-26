@@ -14,22 +14,22 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"syscall"
-
-	"github.com/ateam/internal/prompts/assembler"
 )
 
 // Result summarizes a migration pass. Empty Result with nil error means no
 // migration was needed.
+//
+// v1 migrations are structural only — file moves + history cleanup. Variable
+// renames ({{ROLE}} → {{prompt.name}} etc.) are handled at render time by the
+// engine's ALL_CAPS compat shim. A separate mechanical pass can run
+// assembler.RewriteContent over user prompts in a follow-up; the data type
+// here doesn't track rewrites since this migrator doesn't perform them.
 type Result struct {
 	// Moved is the list of (old → new) renames performed, with paths relative
 	// to the migration root.
 	Moved []Move
-	// Rewrote is the list of files whose content was rewritten by the
-	// ALL_CAPS → dotted variable migrator, relative to the migration root.
-	Rewrote []string
 	// RemovedDirs lists directories cleaned up after migration (empty roles/,
 	// supervisor/, history/ subtrees).
 	RemovedDirs []string
@@ -46,7 +46,7 @@ type Move struct {
 
 // Changed reports whether the pass actually changed anything on disk.
 func (r Result) Changed() bool {
-	return len(r.Moved) > 0 || len(r.Rewrote) > 0 || len(r.RemovedDirs) > 0
+	return len(r.Moved) > 0 || len(r.RemovedDirs) > 0
 }
 
 // NeedsMigration returns true if root contains any pre-v1 layout indicators.
@@ -84,9 +84,6 @@ func V1Layout(root string) (Result, error) {
 		return r, err
 	}
 	if err := moveRoles(root, &r); err != nil {
-		return r, err
-	}
-	if err := rewritePromptContents(root, &r); err != nil {
 		return r, err
 	}
 	if err := cleanup(root, &r); err != nil {
@@ -239,45 +236,6 @@ func moveRoles(root string, r *Result) error {
 			}
 		}
 	}
-	return nil
-}
-
-func rewritePromptContents(root string, r *Result) error {
-	promptsDir := filepath.Join(root, "prompts")
-	if _, err := os.Lstat(promptsDir); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil
-		}
-		return err
-	}
-	var rewrote []string
-	err := filepath.WalkDir(promptsDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("read %s: %w", path, err)
-		}
-		rewritten := assembler.RewriteContent(string(data))
-		if rewritten == string(data) {
-			return nil
-		}
-		if err := os.WriteFile(path, []byte(rewritten), 0o644); err != nil {
-			return fmt.Errorf("write %s: %w", path, err)
-		}
-		rel, _ := filepath.Rel(root, path)
-		rewrote = append(rewrote, rel)
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	sort.Strings(rewrote)
-	r.Rewrote = append(r.Rewrote, rewrote...)
 	return nil
 }
 

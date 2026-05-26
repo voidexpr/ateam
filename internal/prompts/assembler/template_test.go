@@ -214,6 +214,38 @@ func TestRenderNestedDirective(t *testing.T) {
 	}
 }
 
+func TestRenderLegacyAllCapsCompat(t *testing.T) {
+	// {{ROLE}} should resolve as {{prompt.name}} via the v1 compat shim, so
+	// defaults and user prompts can ship with ALL_CAPS during the
+	// transitional release without first being mechanically rewritten.
+	e := NewEngine(nil, 0)
+	v := mkVars()
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"ROLE → prompt.name", "role={{ROLE}}", "role=security"},
+		{"PROJECT_NAME → project.name", "{{PROJECT_NAME}}", "ateam"},
+		{"OUTPUT_DIR → exec.output_dir", "to {{OUTPUT_DIR}}/x", "to /tmp/runtime/42/x"},
+		{"EXECUTION_DIR alias also works", "cd {{EXECUTION_DIR}}", "cd /tmp/runtime/42"},
+		{"SOURCE_DIR → literal '.'", "wd: {{SOURCE_DIR}}", "wd: ."},
+		{"unknown ALL_CAPS still passes through", "{{MY_USER_TOKEN}}", "{{MY_USER_TOKEN}}"},
+		{"mixed legacy + dotted", "{{ROLE}} and {{prompt.action}}", "security and report"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := e.Render(tc.in, v)
+			if err != nil {
+				t.Fatalf("Render err: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRenderIncludeRecursiveExpansion(t *testing.T) {
 	// Included content itself contains a var reference; it expands.
 	anchors := mkAnchors(

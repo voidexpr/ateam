@@ -168,11 +168,15 @@ func (e *Engine) resolve(directive string, vars Vars, depth int) (string, error)
 		return "{{" + directive + "}}", nil
 	}
 
-	// No-space token. Variable lookup requires a `.`; otherwise pass through
-	// (legacy ALL_CAPS that hasn't been migrated, or agent-emitted text).
+	// No-space token. Variable lookup requires a `.` (the new dotted form).
+	// Tokens without a dot are routed through the legacy ALL_CAPS compat
+	// shim: {{ROLE}} resolves the same as {{prompt.name}}, {{SOURCE_DIR}}
+	// expands to ".", etc. This lets v1 defaults and user prompts keep
+	// shipping with ALL_CAPS until a follow-up commit does the mechanical
+	// rename — the structural refactor stays independent from the rename.
 	dot := strings.IndexByte(directive, '.')
 	if dot <= 0 || dot == len(directive)-1 {
-		return "{{" + directive + "}}", nil
+		return e.resolveLegacy(directive, vars, depth)
 	}
 	ns, key := directive[:dot], directive[dot+1:]
 	val, known, err := vars.Resolve(ns, key)
@@ -183,6 +187,20 @@ func (e *Engine) resolve(directive string, vars Vars, depth int) (string, error)
 		return "{{" + directive + "}}", nil
 	}
 	return val, nil
+}
+
+// resolveLegacy handles a dotless `{{NAME}}` token. If NAME is a known
+// ALL_CAPS variable, it routes through the v1 mapping (recursing once via
+// the dotted form). Otherwise the token passes through verbatim — keeps
+// agent-emitted braces and unknown identifiers alone.
+func (e *Engine) resolveLegacy(name string, vars Vars, depth int) (string, error) {
+	if dotted, ok := VarRenameMap[name]; ok {
+		return e.resolve(dotted, vars, depth)
+	}
+	if literal, ok := VarLiteralRewrites[name]; ok {
+		return literal, nil
+	}
+	return "{{" + name + "}}", nil
 }
 
 func (e *Engine) include(arg string, vars Vars, depth int, optional bool) (string, error) {

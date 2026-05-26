@@ -386,8 +386,8 @@ func applyV1LayoutMigration(projectDir, orgDir string) error {
 			return fmt.Errorf("migrate %s: %w", dir, err)
 		}
 		if res.Changed() {
-			fmt.Fprintf(os.Stderr, "ateam: migrated %s to v1 prompts layout (%d moves, %d rewrites, %d cleanups)\n",
-				dir, len(res.Moved), len(res.Rewrote), len(res.RemovedDirs))
+			fmt.Fprintf(os.Stderr, "ateam: migrated %s to v1 prompts layout (%d moves, %d cleanups)\n",
+				dir, len(res.Moved), len(res.RemovedDirs))
 			for _, w := range res.Warnings {
 				fmt.Fprintf(os.Stderr, "ateam: migration warning: %s\n", w)
 			}
