@@ -136,6 +136,65 @@ func (e *ResolvedEnv) Assembler() *assembler.Assembler {
 	return assembler.New(assembler.BuildAnchors(e.ProjectDir, e.OrgDir, defaults.FS))
 }
 
+// BuildAssemblerVars produces the per-namespace variable map the new
+// template engine resolves against. `promptPath` is the full v1 path
+// (e.g. "report/security" or "review"); the trailing segment becomes
+// {{prompt.name}}, the leading segment becomes {{prompt.action}}.
+//
+// roleLabel is the human-friendly identifier used in the project info
+// block — typically "role security" for roles or "the supervisor" for
+// singletons. action is the OutputKind verb (report/code/review/...).
+// They're separate from promptPath because the project info block has
+// historically formatted them differently from the file-system path.
+//
+// Empty values are populated with sensible defaults so a prompt that
+// references {{exec.id}} on a preview call (which has no exec ID yet)
+// just renders the empty string instead of erroring.
+func (e *ResolvedEnv) BuildAssemblerVars(promptPath, roleLabel, action string) assembler.MapVars {
+	parts := strings.Split(promptPath, "/")
+	promptName := promptPath
+	promptAction := action
+	if len(parts) > 1 {
+		promptName = parts[len(parts)-1]
+		if promptAction == "" {
+			promptAction = parts[0]
+		}
+	}
+	vars := assembler.MapVars{
+		Prompt: map[string]string{
+			"name":   promptName,
+			"path":   promptPath,
+			"action": promptAction,
+		},
+		Project: map[string]string{
+			"name":      e.ProjectName,
+			"root":      e.SourceDir,
+			"full_path": e.SourceDir,
+			"dir":       filepath.Base(e.SourceDir),
+		},
+		Exec: map[string]string{
+			"id":          "",
+			"output_dir":  "",
+			"output_file": "",
+		},
+		Container: map[string]string{},
+		Ateam: map[string]string{
+			"own_readme":        defaults.SelfDocs["README"],
+			"own_commands":      defaults.SelfDocs["COMMANDS"],
+			"own_config":        defaults.SelfDocs["CONFIG"],
+			"own_isolation":     defaults.SelfDocs["ISOLATION"],
+			"own_roles":         defaults.SelfDocs["ROLES"],
+			"auto_roles_marker": prompts.AutoRolesMarker,
+		},
+		EnvLookup: os.LookupEnv,
+	}
+	if roleLabel != "" {
+		pinfo := e.NewProjectInfoParams(roleLabel, action)
+		vars.Project["info"] = prompts.FormatProjectInfo(pinfo)
+	}
+	return vars
+}
+
 // NewProjectInfoParams builds a ProjectInfoParams from the resolved environment.
 // Git metadata is queried in WorkDir (the agent's cwd) so the recorded HEAD
 // and uncommitted-files list reflect the code the agent will actually operate
