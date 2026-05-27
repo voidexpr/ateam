@@ -204,9 +204,11 @@ func (e *ResolvedEnv) BuildAssemblerVars(promptPath, roleLabel, action string) a
 			"dir":       filepath.Base(e.SourceDir),
 		},
 		Exec: map[string]string{
-			"id":          "",
-			"output_dir":  "",
-			"output_file": "",
+			"id":                         "",
+			"output_dir":                 "",
+			"output_file":                "",
+			"debug_context":              "",
+			"auto_roles_commands_output": "",
 		},
 		Container: map[string]string{},
 		Ateam: map[string]string{

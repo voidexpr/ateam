@@ -129,11 +129,14 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 // "Additional Debug Instructions" heading when non-empty.
 func buildAutoDebugPrompt(env *root.ResolvedEnv, rows []calldb.RecentRow, files []string, extraPrompt string) (string, error) {
 	debugContext := buildDebugContext(rows, files)
-	pinfo := env.NewProjectInfoParams("exec debugger", "debug")
-	prompt, err := prompts.AssembleExecDebugPrompt(env.OrgDir, env.ProjectDir, debugContext, pinfo)
+	a := env.Assembler()
+	vars := env.BuildAssemblerVars("exec_debug", "exec debugger", "debug")
+	vars.Exec["debug_context"] = debugContext
+	res, err := a.Assemble("exec_debug", vars, nil)
 	if err != nil {
 		return "", err
 	}
+	prompt := res.Prompt
 	if extraPrompt != "" {
 		extra, err := prompts.ResolveValue(extraPrompt)
 		if err != nil {

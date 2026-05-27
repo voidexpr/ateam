@@ -184,10 +184,30 @@ func runCode(opts CodeOptions) error {
 
 	batch := "code-" + time.Now().Format(display.TimestampFormat)
 
-	pinfo := env.NewProjectInfoParams("the supervisor", "code")
-	prompt, err := prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.WorkDir, pinfo, reviewContent, customManagement, extraPrompt)
-	if err != nil {
-		return err
+	var prompt string
+	if customManagement == "" {
+		// Default: build the supervisor body via the v1 assembler. Review
+		// content and --extra-prompt are appended manually (same pattern as
+		// review_v1) so they land in the legacy order.
+		a := env.Assembler()
+		vars := env.BuildAssemblerVars("code_management", "the supervisor", "code")
+		res, err := a.Assemble("code_management", vars, nil)
+		if err != nil {
+			return err
+		}
+		prompt = res.Prompt + "\n\n---\n\n# Review\n\n" + reviewContent
+		if extraPrompt != "" {
+			prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
+		}
+	} else {
+		// --prompt overrides the supervisor body wholesale; keep the legacy
+		// path until the new assembler has a "replace role main" surface.
+		pinfo := env.NewProjectInfoParams("the supervisor", "code")
+		var err error
+		prompt, err = prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.WorkDir, pinfo, reviewContent, customManagement, extraPrompt)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Resolve sub-run profile/agent once — used for both prompt injection and DinD check.

@@ -61,11 +61,14 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 		return "", nil, fmt.Errorf("build auto-roles context: %w", err)
 	}
 
-	pinfo := env.NewProjectInfoParams("the supervisor", "auto-roles")
-	prompt, err := prompts.AssembleAutoRolesPrompt(env.OrgDir, env.ProjectDir, pinfo)
+	a := env.Assembler()
+	vars := env.BuildAssemblerVars("report_auto_roles", "the supervisor", "auto-roles")
+	vars.Exec["auto_roles_commands_output"] = commandsOutput
+	res, err := a.Assemble("report_auto_roles", vars, nil)
 	if err != nil {
 		return "", nil, fmt.Errorf("assemble auto-roles prompt: %w", err)
 	}
+	prompt := res.Prompt
 
 	cr, err := resolveRunner(env, profile, agentName, runner.ActionReview, "", dockerAutoSetup)
 	if err != nil {
