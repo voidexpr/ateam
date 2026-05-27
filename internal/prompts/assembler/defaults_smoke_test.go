@@ -26,8 +26,8 @@ func TestDefaultsReachableViaAssembler(t *testing.T) {
 		"auto_setup.prompt.md",
 		"exec_debug.prompt.md",
 		"report_auto_roles.prompt.md",
-		"report/_pre.base.md",
-		"code/_pre.base.md",
+		"report/_post.format.md",
+		"code/_post.format.md",
 	} {
 		m, ok, err := a.FirstMatch(p)
 		if err != nil {
@@ -50,13 +50,13 @@ func TestDefaultsReachableViaAssembler(t *testing.T) {
 		}
 	}
 
-	// AllMatches picks up multiple dir-level pres under report/.
+	// AllMatches picks up the dir-level pre under report/.
 	matches, err := a.AllMatches("report/_pre.*.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(matches) < 2 {
-		t.Errorf("report _pre.*.md AllMatches: got %d, want >=2", len(matches))
+	if len(matches) < 1 {
+		t.Errorf("report _pre.*.md AllMatches: got %d, want >=1", len(matches))
 	}
 	// Verify _pre.context.md uses the new dotted variable.
 	root, ok, _ := a.FirstMatch("_pre.context.md")
@@ -87,13 +87,16 @@ func TestAssembleAgainstRealDefaults(t *testing.T) {
 	if !strings.Contains(res.Prompt, "performing the security report") {
 		t.Error("expected report/_pre.intro.md expansion with role name")
 	}
-	// _pre.base.md is shipped from the old report_base_prompt.md and contains
-	// the format/output instructions.
+	// Report Format / Output Validation lives in _post.format.md after the
+	// base-prompt split.
 	if !strings.Contains(res.Prompt, "Report Format") {
-		t.Error("expected report/_pre.base.md content")
+		t.Error("expected report/_post.format.md content (Report Format header)")
 	}
-	// Sections should include at least: root_pre, multiple dir_pre:report,
-	// role_main. Spot-check slot diversity.
+	if !strings.Contains(res.Prompt, "Output Validation Gate") {
+		t.Error("expected report/_post.format.md content (Output Validation Gate)")
+	}
+	// Sections should include at least: root_pre, dir_pre:report, role_main,
+	// dir_post:report.
 	slots := make(map[string]int)
 	for _, s := range res.Sections {
 		slots[s.Slot]++
@@ -101,10 +104,13 @@ func TestAssembleAgainstRealDefaults(t *testing.T) {
 	if slots["root_pre"] == 0 {
 		t.Error("missing root_pre slot")
 	}
-	if slots["dir_pre:report"] < 2 {
-		t.Errorf("dir_pre:report count = %d, want >=2", slots["dir_pre:report"])
+	if slots["dir_pre:report"] == 0 {
+		t.Errorf("dir_pre:report count = %d, want >=1", slots["dir_pre:report"])
 	}
 	if slots["role_main"] != 1 {
 		t.Errorf("role_main count = %d, want 1", slots["role_main"])
+	}
+	if slots["dir_post:report"] == 0 {
+		t.Errorf("dir_post:report count = %d, want >=1", slots["dir_post:report"])
 	}
 }

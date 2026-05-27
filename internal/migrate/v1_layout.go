@@ -160,8 +160,13 @@ func copyFile(src, dst string) error {
 
 // staticMigrations are renames whose source path is fixed (no <role> glob).
 var staticMigrations = []Move{
-	{From: "report_base_prompt.md", To: "prompts/report/_pre.base.md"},
-	{From: "code_base_prompt.md", To: "prompts/code/_pre.base.md"},
+	// Base prompts get the post-format slot: they're predominantly output /
+	// validation / format rules that the v1 layout puts AFTER the role body.
+	// Pre-style framing for report (intro, source location, calibration)
+	// lives in defaults' shipped _pre.intro.md and isn't user-overridable
+	// from the base prompt.
+	{From: "report_base_prompt.md", To: "prompts/report/_post.format.md"},
+	{From: "code_base_prompt.md", To: "prompts/code/_post.format.md"},
 	{From: "report_extra_prompt.md", To: "prompts/report/_post.extra.md"},
 	{From: "code_extra_prompt.md", To: "prompts/code/_post.extra.md"},
 

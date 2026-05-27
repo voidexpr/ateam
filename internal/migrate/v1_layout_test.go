@@ -93,8 +93,8 @@ func TestV1LayoutStaticMoves(t *testing.T) {
 	}
 
 	wantTargets := []string{
-		"prompts/report/_pre.base.md",
-		"prompts/code/_pre.base.md",
+		"prompts/report/_post.format.md",
+		"prompts/code/_post.format.md",
 		"prompts/report/_post.extra.md",
 		"prompts/review.prompt.md",
 		"prompts/review.post.extra.md",
