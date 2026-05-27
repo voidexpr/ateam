@@ -62,6 +62,29 @@ func assembleReviewV1(env *root.ResolvedEnv, selector prompts.ReviewSelector, ex
 	return prompt, nil
 }
 
+// assembleSupervisorV1 is the generic single-prompt supervisor assembler:
+// builds promptPath via env.Assembler() and appends the --extra-prompt CLI
+// value as a hardcoded "# Additional Instructions" suffix. Used by verify,
+// code-management, exec-debug, auto-roles — singletons that have no role
+// reports / manifest of their own. Review has its own assembleReviewV1
+// because it needs the reports block woven into the legacy order.
+//
+// roleLabel and action go into BuildAssemblerVars so {{project.info}}
+// renders identically to the legacy AssembleXxx path.
+func assembleSupervisorV1(env *root.ResolvedEnv, promptPath, roleLabel, action, extraPrompt string) (string, error) {
+	a := env.Assembler()
+	vars := env.BuildAssemblerVars(promptPath, roleLabel, action)
+	res, err := a.Assemble(promptPath, vars, nil)
+	if err != nil {
+		return "", err
+	}
+	prompt := res.Prompt
+	if extraPrompt != "" {
+		prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
+	}
+	return prompt, nil
+}
+
 // formatReportsBlock renders the manifest table + bundled report contents in
 // the same shape AssembleReviewPrompt produced. Lives here so the new
 // pipeline can keep that block as a single {{role.reports}} variable; the

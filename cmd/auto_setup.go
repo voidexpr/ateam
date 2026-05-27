@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
 )
@@ -46,8 +45,7 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	pinfo := env.NewProjectInfoParams("the supervisor", "auto-setup")
-	prompt, err := prompts.AssembleAutoSetupPrompt(env.OrgDir, env.ProjectDir, pinfo)
+	prompt, err := assembleSupervisorV1(env, "auto_setup", "the supervisor", "auto-setup", "")
 	if err != nil {
 		return err
 	}

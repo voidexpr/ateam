@@ -110,8 +110,7 @@ func runVerify(opts VerifyOptions) error {
 		return err
 	}
 
-	pinfo := env.NewProjectInfoParams("the supervisor", "verify")
-	prompt, err := prompts.AssembleCodeVerifyPrompt(env.OrgDir, env.ProjectDir, pinfo, extraPrompt)
+	prompt, err := assembleSupervisorV1(env, "code_verify", "the supervisor", "verify", extraPrompt)
 	if err != nil {
 		return err
 	}
