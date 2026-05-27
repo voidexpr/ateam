@@ -251,19 +251,65 @@ func TestV1LayoutSkipsExistingTarget(t *testing.T) {
 func TestV1LayoutPreservesUnknownFiles(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
-		"supervisor/code_output.md":              "old runtime artifact",
-		"supervisor/code_verification_report.md": "another artifact",
-		"supervisor/review_prompt.md":            "real prompt",
+		"supervisor/my_local_notes.md":  "user-authored file",
+		"supervisor/other_random.txt":   "another user file",
+		"supervisor/review_prompt.md":   "real prompt",
+		"roles/security/my_scratch.txt": "user role scratch",
 	})
 	if _, err := V1Layout(root); err != nil {
 		t.Fatal(err)
 	}
-	// Unmapped files stay where they were; supervisor/ is therefore not removed.
-	if !exists(root, "supervisor/code_output.md") {
-		t.Error("unknown file should be preserved")
+	// Genuinely unknown files (not in junkSupervisor / junkPerRole) stay where
+	// they were; supervisor/ and roles/security/ therefore aren't removed.
+	for _, p := range []string{
+		"supervisor/my_local_notes.md",
+		"supervisor/other_random.txt",
+		"roles/security/my_scratch.txt",
+	} {
+		if !exists(root, p) {
+			t.Errorf("unknown file %s should be preserved", p)
+		}
 	}
 	if !exists(root, "supervisor") {
 		t.Error("non-empty supervisor/ should not be removed")
+	}
+	if !exists(root, "roles/security") {
+		t.Error("non-empty roles/security/ should not be removed")
+	}
+}
+
+// TestV1LayoutCleansJunkArtifacts confirms the migrator drops the well-known
+// runtime leftovers (last_run_*.md per role, code_output.md +
+// code_verification_report.md under supervisor) so otherwise-empty parents
+// get cleaned up. Genuine user files are untouched (covered by
+// TestV1LayoutPreservesUnknownFiles).
+func TestV1LayoutCleansJunkArtifacts(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"roles/security/last_run_output.md":      "stderr from last run",
+		"roles/security/last_run_error.md":       "error from last run",
+		"supervisor/code_output.md":              "stale code output",
+		"supervisor/code_verification_report.md": "stale verify summary",
+	})
+	if _, err := V1Layout(root); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{
+		"roles/security/last_run_output.md",
+		"roles/security/last_run_error.md",
+		"supervisor/code_output.md",
+		"supervisor/code_verification_report.md",
+	} {
+		if exists(root, p) {
+			t.Errorf("junk file %s should be removed", p)
+		}
+	}
+	// With nothing else under them, roles/ and supervisor/ are cleaned up too.
+	if exists(root, "roles") {
+		t.Error("roles/ should be removed after junk cleanup")
+	}
+	if exists(root, "supervisor") {
+		t.Error("supervisor/ should be removed after junk cleanup")
 	}
 }
 

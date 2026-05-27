@@ -241,7 +241,20 @@ func moveRoles(root string, r *Result) error {
 	return nil
 }
 
-// cleanup removes history/ subdirs (dropped per spec) and any now-empty
+// junkLeftoverFiles are well-known runtime artifacts that lingered under the
+// old layout and are not migrated anywhere — overwritten on every run, no
+// value once the layout flips. Removing them lets the otherwise-empty
+// roles/<R>/ and supervisor/ dirs get cleaned up by the empty-dir pass.
+//
+//   - roles/<R>/last_run_output.md / last_run_error.md: per-role stderr
+//     forensics from before the v1 logs/<exec_id>/ tree took over.
+//   - supervisor/code_output.md / code_verification_report.md: per-run
+//     supervisor summaries replaced by .ateam/runtime/<exec_id>/ artifacts.
+var junkPerRole = []string{"last_run_output.md", "last_run_error.md"}
+var junkSupervisor = []string{"code_output.md", "code_verification_report.md"}
+
+// cleanup removes history/ subdirs (dropped per spec), drops the well-known
+// per-role and supervisor junk files listed above, then removes any now-empty
 // roles/<R>/, roles/, supervisor/ directories. Non-empty parents are left
 // alone — unknown files stay where they are.
 func cleanup(root string, r *Result) error {
@@ -259,6 +272,16 @@ func cleanup(root string, r *Result) error {
 				rel, _ := filepath.Rel(root, hist)
 				r.RemovedDirs = append(r.RemovedDirs, rel)
 			}
+			// roles/<R>/last_run_*.md — drop.
+			for _, f := range junkPerRole {
+				p := filepath.Join(rolesDir, e.Name(), f)
+				if removed, err := removeFileIfExists(p); err != nil {
+					return err
+				} else if removed {
+					rel, _ := filepath.Rel(root, p)
+					r.RemovedDirs = append(r.RemovedDirs, rel)
+				}
+			}
 		}
 	}
 	// 2. supervisor/history/ — drop.
@@ -266,6 +289,15 @@ func cleanup(root string, r *Result) error {
 		return err
 	} else if removed {
 		r.RemovedDirs = append(r.RemovedDirs, "supervisor/history")
+	}
+	// 2b. supervisor/code_output.md, code_verification_report.md — drop.
+	for _, f := range junkSupervisor {
+		p := filepath.Join(root, "supervisor", f)
+		if removed, err := removeFileIfExists(p); err != nil {
+			return err
+		} else if removed {
+			r.RemovedDirs = append(r.RemovedDirs, "supervisor/"+f)
+		}
 	}
 	// 3. Empty roles/<R>/, roles/, supervisor/.
 	if entries, err := os.ReadDir(rolesDir); err == nil {
@@ -302,6 +334,22 @@ func removeIfExists(dir string) (bool, error) {
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		return false, fmt.Errorf("remove %s: %w", dir, err)
+	}
+	return true, nil
+}
+
+// removeFileIfExists deletes a single file (not a directory). Returns
+// (true, nil) when the file existed and was removed, (false, nil) when it
+// was absent, or (false, err) on permission / unexpected errors.
+func removeFileIfExists(path string) (bool, error) {
+	if _, err := os.Lstat(path); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := os.Remove(path); err != nil {
+		return false, fmt.Errorf("remove %s: %w", path, err)
 	}
 	return true, nil
 }
