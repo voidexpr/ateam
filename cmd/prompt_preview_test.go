@@ -31,8 +31,8 @@ func TestPromptPreviewSupervisorReview(t *testing.T) {
 	if !strings.Contains(out, "role_main") {
 		t.Errorf("expected role_main row, got:\n%s", out)
 	}
-	if !strings.Contains(out, "review.prompt.md") {
-		t.Errorf("expected review.prompt.md row, got:\n%s", out)
+	if !strings.Contains(out, "defaults/prompts/review.prompt.md") {
+		t.Errorf("expected anchor-prefixed review.prompt.md row, got:\n%s", out)
 	}
 }
 
@@ -58,7 +58,7 @@ func TestPromptPreviewRoleReport(t *testing.T) {
 	if !strings.Contains(out, `"report/security"`) {
 		t.Errorf("missing prompt path header, got:\n%s", out)
 	}
-	if !strings.Contains(out, "report/security.prompt.md") {
+	if !strings.Contains(out, "defaults/prompts/report/security.prompt.md") {
 		t.Errorf("missing role_main path, got:\n%s", out)
 	}
 	if !strings.Contains(out, "--- assembled prompt ---") {

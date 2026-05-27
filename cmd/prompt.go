@@ -9,6 +9,7 @@ import (
 
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
 )
@@ -219,7 +220,7 @@ func runPromptPreview() error {
 	fmt.Fprintf(w, "Assembly for %q (%d sections)\n\n", promptPath, len(res.Sections))
 	fmt.Fprintln(w, "SLOT\tANCHOR\tPATH")
 	for _, s := range res.Sections {
-		fmt.Fprintf(w, "%s\t[%s]\t%s\n", s.Slot, s.Anchor, s.Path)
+		fmt.Fprintf(w, "%s\t[%s]\t%s\n", s.Slot, s.Anchor, displayAnchorPath(env, s.Anchor, s.Path))
 	}
 	w.Flush()
 
@@ -229,6 +230,23 @@ func runPromptPreview() error {
 		fmt.Println(res.Prompt)
 	}
 	return nil
+}
+
+// displayAnchorPath formats an anchor-relative path for human-readable
+// preview output. Paths from the project anchor are prefixed with
+// `.ateam/prompts/`, org with `.ateamorg/prompts/`, embedded with
+// `defaults/prompts/` (the in-source location of the built-in prompts).
+// Unknown anchor names fall through to the bare path.
+func displayAnchorPath(env *root.ResolvedEnv, anchor, relPath string) string {
+	switch anchor {
+	case "project":
+		return ".ateam/prompts/" + relPath
+	case "org":
+		return ".ateamorg/prompts/" + relPath
+	case "embedded":
+		return "defaults/prompts/" + relPath
+	}
+	return relPath
 }
 
 // promptPathForCurrentFlags maps the existing --role/--supervisor/--action
