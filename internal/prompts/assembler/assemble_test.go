@@ -55,7 +55,7 @@ func TestAssembleNestedAllSlots(t *testing.T) {
 			t.Errorf("section[%d] slot = %q, want %q", i, s.Slot, wantOrder[i])
 		}
 	}
-	want := "ROOT-PRE\n\nDIR-PRE\n\nROLE-PRE\n\nMAIN-BODY\n\nROLE-POST\n\nDIR-POST"
+	want := "ROOT-PRE\n\n---\n\nDIR-PRE\n\n---\n\nROLE-PRE\n\n---\n\nMAIN-BODY\n\n---\n\nROLE-POST\n\n---\n\nDIR-POST"
 	if res.Prompt != want {
 		t.Fatalf("Prompt mismatch:\n got: %q\nwant: %q", res.Prompt, want)
 	}
@@ -81,7 +81,7 @@ func TestAssembleSingletonFragments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "ROOT-PRE-NAMED\n\nROOT-PRE-SINGLE\n\nDIR-PRE-SINGLE\n\nROLE-PRE-SINGLE\n\nMAIN\n\nROLE-POST-SINGLE\n\nDIR-POST-SINGLE"
+	want := "ROOT-PRE-NAMED\n\n---\n\nROOT-PRE-SINGLE\n\n---\n\nDIR-PRE-SINGLE\n\n---\n\nROLE-PRE-SINGLE\n\n---\n\nMAIN\n\n---\n\nROLE-POST-SINGLE\n\n---\n\nDIR-POST-SINGLE"
 	if res.Prompt != want {
 		t.Fatalf("Prompt =\n%q\nwant\n%q", res.Prompt, want)
 	}
@@ -102,10 +102,10 @@ func TestAssembleStripsFrontmatter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(res.Prompt, "description") || strings.Contains(res.Prompt, "---") {
+	if strings.Contains(res.Prompt, "description") {
 		t.Fatalf("frontmatter leaked into prompt:\n%q", res.Prompt)
 	}
-	if res.Prompt != "ROOT-PRE\n\nMAIN-BODY" {
+	if res.Prompt != "ROOT-PRE\n\n---\n\nMAIN-BODY" {
 		t.Fatalf("Prompt = %q", res.Prompt)
 	}
 }
@@ -154,7 +154,7 @@ func TestAssembleVarSubstitution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "Working on ateam.\n\nRole: security (action report)."
+	want := "Working on ateam.\n\n---\n\nRole: security (action report)."
 	if res.Prompt != want {
 		t.Fatalf("Prompt = %q, want %q", res.Prompt, want)
 	}
@@ -225,7 +225,7 @@ func TestAssembleOverloadAcrossAnchors(t *testing.T) {
 	}
 	// _pre.intro keeps embedded slot (most-general), project content;
 	// _pre.extra is project-only (project slot).
-	want := "PROJECT-OVERRIDE\n\nPROJECT-EXTRA\n\nMAIN"
+	want := "PROJECT-OVERRIDE\n\n---\n\nPROJECT-EXTRA\n\n---\n\nMAIN"
 	if res.Prompt != want {
 		t.Fatalf("Prompt = %q\nwant %q", res.Prompt, want)
 	}

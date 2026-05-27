@@ -182,7 +182,17 @@ func runReview(opts ReviewOptions) error {
 	}
 
 	pinfo := env.NewProjectInfoParams("the supervisor", "review")
-	prompt, err := prompts.AssembleReviewPrompt(env.OrgDir, env.ProjectDir, pinfo, extraPrompt, customPrompt, selector, env.Config.Roles)
+	var prompt string
+	if customPrompt == "" {
+		// Default: assemble via the v1 pipeline so user-authored review.pre.*
+		// / review.post.* fragments and {{project.info}} get picked up.
+		prompt, err = assembleReviewV1(env, selector, extraPrompt)
+	} else {
+		// --prompt overrides the supervisor body wholesale; keep the legacy
+		// path for that branch until the new assembler has a "replace role
+		// main" surface.
+		prompt, err = prompts.AssembleReviewPrompt(env.OrgDir, env.ProjectDir, pinfo, extraPrompt, customPrompt, selector, env.Config.Roles)
+	}
 	if err != nil {
 		var empty *prompts.ReviewEmptyError
 		if errors.As(err, &empty) {
