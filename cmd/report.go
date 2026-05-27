@@ -239,12 +239,9 @@ func runReport(opts ReportOptions) error {
 	cliOverridesProfile := opts.Profile != "" || opts.Agent != ""
 	defaultProfile := env.Config.ResolveProfile(runner.ActionReport, "")
 
-	basePinfo := env.NewProjectInfoParams("", "report")
 	var tasks []runner.PoolExec
 	for _, roleID := range roleIDs {
-		pinfo := basePinfo
-		pinfo.Role = "role " + roleID
-		prompt, err := prompts.AssembleRolePrompt(env.OrgDir, env.ProjectDir, roleID, env.WorkDir, extraPrompt, pinfo, opts.IgnorePreviousReport)
+		prompt, err := assembleRoleReportV1(env, roleID, extraPrompt, opts.IgnorePreviousReport)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", roleID, err)
 			continue
