@@ -10,6 +10,24 @@ If you want to work on complex tasks then keep using interactive agents, if you 
 
 At its core ateam is a CLI to run one-shot unattended agents with saved prompts. It layers a small workflow of parallel reports, supervisor review and supervised coding of selected tasks. But can also be used in shell commands for sequences of steps (single agent or parallel agents). The focus is on software engineering quality improvement tasks and not feature development. Feature development (or also some software engineering quality tasks) benefit from interactive agents. Ateam solves the problem of having background agent improve the code base quality behind the scene to reduce the need to explicitly do it.
 
+Maybe:
+Ateam focus is on:
+* flexible agent execution
+    * safe isolated execution
+    * no request approval interrupting execution, pure unattended agent
+    * prompt once and run with any agent, no lock-in
+    * tracks cost, logs for easy troubleshooting
+* pre-built pipeline for entire code enhancement
+    * flexible full execution or step by step audit
+    * pre-built prompts along many dimensions
+    * web tool to review artifacts produced by ateam
+* a simple command line that can be used in more complex workflow
+    * want to perform adversarial reviews ? see scripts/ for examples
+    * want something simple chaining sequential and parallel agents ? a simple bash script typical suffices
+    * want complex prompt assembly and pre/post execution script ? just wrap the ateam CLI and build the framework you need. An example is available in python/ateam.py
+
+The goal is to define asynchronous processes mixing agents and scripts to free up more time to focus where human attention is needed and not for tasks that can be prompted once and require little supervision/decision making once completed.
+
 See [APPROACH.md](APPROACH.md) for the rationale and design principles behind ATeam.
 
 ## Key Features
