@@ -173,7 +173,8 @@ locals {
           "api.anthropic.com",
           "pypi.org",
           "crates.io",
-          "proxy.golang.org"
+          "proxy.golang.org",
+          "vuln.go.dev"
         ],
         "allowLocalBinding": true
       }
