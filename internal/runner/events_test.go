@@ -1,6 +1,9 @@
 package runner
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -221,5 +224,46 @@ func TestParseResultWithIsError(t *testing.T) {
 	res := ev.(*resultEvent)
 	if !res.IsError {
 		t.Error("expected is_error true")
+	}
+}
+
+func TestScanStreamFileForFinalText_Claude(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stream.jsonl")
+	content := strings.Join([]string{
+		`{"type":"system","subtype":"init","session_id":"s1","model":"opus"}`,
+		`{"type":"user"}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"first turn"}]}}`,
+		`{"type":"user"}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"PASSED: "},{"type":"text","text":"all good"}]}}`,
+		`{"type":"result","total_cost_usd":0.01,"duration_ms":5000,"num_turns":2,"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":0}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got := scanStreamFileForFinalText(path)
+	want := "PASSED: all good"
+	if got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
+func TestScanStreamFileForFinalText_NoText(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "stream.jsonl")
+	content := `{"type":"result","total_cost_usd":0.01,"duration_ms":5000,"num_turns":0,"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got := scanStreamFileForFinalText(path)
+	if got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestScanStreamFileForFinalText_MissingFile(t *testing.T) {
+	got := scanStreamFileForFinalText("/nonexistent/path/stream.jsonl")
+	if got != "" {
+		t.Errorf("expected empty for missing file, got %q", got)
 	}
 }

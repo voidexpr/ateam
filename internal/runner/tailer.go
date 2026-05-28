@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -21,6 +22,7 @@ type TailSource struct {
 	offset     int64
 	partial    []byte // incomplete last line
 	done       bool
+	emitted    bool // final-message JSONL line already written
 }
 
 // Tailer multiplexes live streaming from one or more JSONL stream files.
@@ -39,8 +41,16 @@ type Tailer struct {
 	Pricing      agent.PricingTable // cost estimation table forwarded to formatters
 	DefaultModel string             // fallback model for pricing lookup
 	WaitTimeout  time.Duration      // how long to wait for first source (default 30s)
-	sources      []*TailSource
-	knownIDs     map[int64]bool
+	// FinalMessageOnly suppresses the formatted stream output and instead
+	// writes one JSONL line to Writer per source as it completes. The line
+	// carries the call's metadata plus the final assistant message text
+	// under "final_message". Designed for pipelining parallel runs.
+	FinalMessageOnly bool
+	// AnyError is set to true after Run returns when any tailed source
+	// ended with is_error=true. Callers use it to choose a non-zero exit.
+	AnyError bool
+	sources  []*TailSource
+	knownIDs map[int64]bool
 }
 
 // NewTailer creates a Tailer with sensible defaults.
@@ -266,13 +276,15 @@ func (t *Tailer) pollSource(src *TailSource) {
 		copy(src.partial, remainder)
 	}
 	for _, line := range lines {
-		if out := src.Formatter.FormatLine(line); out != "" {
+		out := src.Formatter.FormatLine(line)
+		if out != "" && !t.FinalMessageOnly {
 			fmt.Fprint(t.Writer, out)
 		}
 	}
 
 	if src.Formatter.HasResult() {
 		src.done = true
+		t.maybeEmitFinal(src)
 	}
 }
 
@@ -316,9 +328,53 @@ func (t *Tailer) checkDone() {
 			if src := idxMap[c.ID]; src != nil {
 				t.pollSource(src)
 				src.done = true
+				t.maybeEmitFinal(src)
 			}
 		}
 	}
+}
+
+// maybeEmitFinal writes one JSONL line for src to Writer when running in
+// FinalMessageOnly mode. It is idempotent per source (guarded by emitted)
+// and updates AnyError when the run ended with is_error=true.
+func (t *Tailer) maybeEmitFinal(src *TailSource) {
+	if !t.FinalMessageOnly || src.emitted || t.DB == nil {
+		return
+	}
+	row, err := t.DB.GetRunByID(src.ID)
+	if err != nil || row == nil {
+		return
+	}
+	src.emitted = true
+	if row.IsError {
+		t.AnyError = true
+	}
+	rec := map[string]any{
+		"exec_id":            row.ID,
+		"agent":              row.Agent,
+		"model":              row.Model,
+		"role":               row.Role,
+		"action":             row.Action,
+		"batch":              row.Batch,
+		"started_at":         row.StartedAt,
+		"ended_at":           row.EndedAt,
+		"duration_ms":        row.DurationMS,
+		"is_error":           row.IsError,
+		"exit_code":          row.ExitCode,
+		"error_message":      row.ErrorMessage,
+		"cost_usd":           row.CostUSD,
+		"input_tokens":       row.InputTokens,
+		"output_tokens":      row.OutputTokens,
+		"cache_read_tokens":  row.CacheReadTokens,
+		"cache_write_tokens": row.CacheWriteTokens,
+		"turns":              row.Turns,
+		"final_message":      scanStreamFileForFinalText(src.StreamFile),
+	}
+	line, err := json.Marshal(rec)
+	if err != nil {
+		return
+	}
+	fmt.Fprintln(t.Writer, string(line))
 }
 
 func (t *Tailer) allDone() bool {

@@ -642,11 +642,12 @@ ateam cat .ateam/logs/roles/security/stream.jsonl
 Live-stream agent output from running processes.
 
 ```bash
-ateam tail                  # all running processes
-ateam tail 42 43            # specific calls by ID
-ateam tail --last           # the most recent run
-ateam tail --reports        # current report runs
-ateam tail --coding         # current coding session
+ateam tail                                 # all running processes
+ateam tail 42 43                           # specific calls by ID
+ateam tail --last                          # the most recent run
+ateam tail --reports                       # current report runs
+ateam tail --coding                        # current coding session
+ateam tail 42 43 --final-message | jq .    # wait for finish, JSONL per run
 ```
 
 | Flag | Description |
@@ -656,6 +657,7 @@ ateam tail --coding         # current coding session
 | `--coding` | Tail the latest coding session (supervisor + sub-runs) |
 | `--verbose` | Show full tool inputs and text content |
 | `--no-color` | Disable color output |
+| `--final-message` | Suppress the formatted stream and instead emit one JSONL line per run on stdout as each one finishes. Each line carries the call metadata (`exec_id`, `agent`, `model`, `role`, `action`, `batch`, `started_at`, `ended_at`, `duration_ms`, `is_error`, `exit_code`, `error_message`, `cost_usd`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `turns`) plus `final_message` (the last assistant message text). Exits non-zero if any run reported `is_error=true`. Works with any selector (IDs, `--last`, `--reports`, `--coding`, or none for all running). Designed for pipelining parallel runs: spawn N agents, then `ateam tail --final-message \| jq -r .final_message` to act on each as it completes. |
 
 ### `ateam cost`
 

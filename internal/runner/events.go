@@ -45,6 +45,43 @@ func extractReportText(ev *assistantEvent) string {
 	return strings.Join(parts, "")
 }
 
+// scanStreamFileForFinalText reads a stream JSONL file and returns the
+// concatenated text of the last assistant message. Returns "" if the file
+// has no text content. Handles both Claude (one assistant JSONL line may
+// hold multiple text blocks) and Codex (one assistant/item_completed line
+// per text emission).
+func scanStreamFileForFinalText(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	var last string
+	hint := formatUnknown
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		events, detected, err := parseDisplayLine(scanner.Bytes(), hint)
+		if err != nil || len(events) == 0 {
+			continue
+		}
+		if hint == formatUnknown {
+			hint = detected
+		}
+		var parts []string
+		for _, ev := range events {
+			if tl, ok := ev.(*TextLine); ok && tl.Text != "" {
+				parts = append(parts, tl.Text)
+			}
+		}
+		if len(parts) > 0 {
+			last = strings.Join(parts, "")
+		}
+	}
+	return last
+}
+
 // scanStreamFileForResult reads a stream JSONL file and returns the last
 // ResultLine found, or nil if none exists. Handles both Claude and Codex formats.
 // Used as a fallback to extract cost/usage data when the event channel was

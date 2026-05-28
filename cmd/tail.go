@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/ateam/internal/root"
@@ -11,11 +12,12 @@ import (
 )
 
 var (
-	tailReports bool
-	tailCoding  bool
-	tailLast    bool
-	tailVerbose bool
-	tailNoColor bool
+	tailReports      bool
+	tailCoding       bool
+	tailLast         bool
+	tailVerbose      bool
+	tailNoColor      bool
+	tailFinalMessage bool
 )
 
 var tailCmd = &cobra.Command{
@@ -31,8 +33,12 @@ Modes:
   ateam tail --coding        Tail current coding session (supervisor + sub-runs)
 
 Options:
-  --verbose        Show full tool inputs and text content
-  --no-color       Disable color output`,
+  --verbose          Show full tool inputs and text content
+  --no-color         Disable color output
+  --final-message    Suppress streaming output; wait for each run to finish
+                     and emit one JSONL line per run on stdout with the call
+                     metadata and the final assistant message. Pipelines
+                     nicely with jq. Exits non-zero if any run errored.`,
 	RunE: runTail,
 }
 
@@ -42,6 +48,7 @@ func init() {
 	tailCmd.Flags().BoolVar(&tailLast, "last", false, "tail the most recent run")
 	tailCmd.Flags().BoolVar(&tailVerbose, "verbose", false, "show full tool inputs and text content")
 	tailCmd.Flags().BoolVar(&tailNoColor, "no-color", false, "disable color output")
+	tailCmd.Flags().BoolVar(&tailFinalMessage, "final-message", false, "wait for runs to finish and emit one JSONL line per run with metadata and final assistant text")
 	tailCmd.MarkFlagsMutuallyExclusive("last", "reports", "coding")
 }
 
@@ -58,9 +65,16 @@ func runTail(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 
 	color := !tailNoColor && isTerminal()
-	tailer := runner.NewTailer(os.Stderr, db, color, tailVerbose)
+	writer := io.Writer(os.Stderr)
+	if tailFinalMessage {
+		// JSONL must go to stdout so it composes with shell pipelines.
+		writer = os.Stdout
+		color = false
+	}
+	tailer := runner.NewTailer(writer, db, color, tailVerbose)
 	tailer.ProjectDir = env.ProjectDir
 	tailer.OrgDir = env.OrgDir
+	tailer.FinalMessageOnly = tailFinalMessage
 
 	// Load runtime config to provide pricing for cost estimation.
 	if rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir); err == nil {
@@ -120,5 +134,11 @@ func runTail(cmd *cobra.Command, args []string) error {
 	ctx, stop := cmdContext()
 	defer stop()
 
-	return tailer.Run(ctx)
+	if err := tailer.Run(ctx); err != nil {
+		return err
+	}
+	if tailFinalMessage && tailer.AnyError {
+		return fmt.Errorf("one or more runs ended in error")
+	}
+	return nil
 }
