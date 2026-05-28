@@ -2,10 +2,12 @@ package cmd
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 
@@ -110,7 +112,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 	}
 
 	streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, row.StreamFile)
-	sessionID, err := extractSessionID(streamPath)
+	sessionID, err := resolveSessionID(streamPath, row.Agent)
 	if err != nil {
 		return fmt.Errorf("cannot read session id from %s: %w", streamPath, err)
 	}
@@ -118,6 +120,26 @@ func runResume(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no session id found in %s (run may not have started)", streamPath)
 	}
 
+	printResumeInfo(env, row, streamPath, sessionID)
+
+	if !resumeLaunch {
+		return nil
+	}
+	switch row.Container {
+	case "", "none":
+		return launchResume(env, row, streamPath, sessionID)
+	case "docker-exec":
+		return fmt.Errorf("--launch is not supported for docker-exec runs")
+	default:
+		return fmt.Errorf("--launch is not supported for %s containers", row.Container)
+	}
+}
+
+// printResumeInfo prints the metadata block and resume command for a run.
+// Shared by `ateam resume` (always) and `ateam inspect` (when a session id
+// is recoverable) so the two surfaces stay aligned. Container-specific
+// shaping (docker-exec recipe, oneshot caveat) is handled here too.
+func printResumeInfo(env *root.ResolvedEnv, row *calldb.RecentRow, streamPath, sessionID string) {
 	execMD := cmdMDPath(streamPath)
 	configDir, configDirSource := resolveResumeConfigDir(execMD, env, row)
 
@@ -125,6 +147,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 	if row.Profile != "" {
 		fmt.Printf("Profile:    %s\n", row.Profile)
 	}
+	fmt.Printf("Agent:      %s\n", row.Agent)
 	if row.Container != "" && row.Container != "none" {
 		container := row.Container
 		if row.ContainerID != "" {
@@ -139,30 +162,18 @@ func runResume(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
-	hostCmd, hostArgs := resumeCommand(row.Agent, sessionID)
-	hostCmdLine := joinCmd(hostCmd, hostArgs)
-	// Prepend CLAUDE_CONFIG_DIR so the printed command is copy-pasteable; the
-	// informational line above is easy to miss and resuming with the wrong
-	// config dir silently picks up a different agent profile.
-	hostCmdLineWithEnv := hostCmdLine
-	if row.Agent == agent.NameClaude && configDir != "" {
-		hostCmdLineWithEnv = "CLAUDE_CONFIG_DIR=" + shellQuoteSingle(configDir) + " " + hostCmdLine
-	}
-
+	hostCmdLine := resumeNativeCommandLine(row.Agent, sessionID)
 	switch row.Container {
 	case "", "none":
-		fmt.Printf("Command: %s\n", hostCmdLineWithEnv)
-		if !resumeLaunch {
-			return nil
+		// Prepend CLAUDE_CONFIG_DIR so the printed command is copy-pasteable;
+		// the informational line above is easy to miss and resuming with the
+		// wrong config dir silently picks up a different agent profile.
+		cmdLine := hostCmdLine
+		if row.Agent == agent.NameClaude && configDir != "" {
+			cmdLine = "CLAUDE_CONFIG_DIR=" + shellQuoteSingle(configDir) + " " + hostCmdLine
 		}
-		switch row.Agent {
-		case agent.NameClaude:
-			return execResume(hostCmd, hostArgs, claudeResumeEnv(configDir))
-		case agent.NameCodex, agent.NameCodexTmux:
-			return execResume(hostCmd, hostArgs, nil)
-		}
-		return fmt.Errorf("resume not implemented for agent %q", row.Agent)
-
+		fmt.Println("To resume run:")
+		fmt.Println(cmdLine)
 	case "docker-exec":
 		target := row.ContainerID
 		if target == "" {
@@ -176,19 +187,26 @@ func runResume(cmd *cobra.Command, args []string) error {
 		if row.Agent == agent.NameCodex || row.Agent == agent.NameCodexTmux {
 			fmt.Println("Caveat: codex auth (OPENAI_API_KEY or ~/.codex/auth.json) must already be set inside the container.")
 		}
-		fmt.Printf("To try inside the container:\n  docker exec -it%s %s %s\n", envFlag, target, hostCmdLine)
-		if resumeLaunch {
-			return fmt.Errorf("--launch is not supported for docker-exec runs")
-		}
-		return nil
-
+		fmt.Println("To resume inside the container run:")
+		fmt.Printf("  docker exec -it%s %s %s\n", envFlag, target, hostCmdLine)
 	default:
 		fmt.Println("Caveat: oneshot container is gone; session state likely unrecoverable.")
-		if resumeLaunch {
-			return fmt.Errorf("--launch is not supported for %s containers", row.Container)
-		}
-		return nil
 	}
+}
+
+// launchResume execs into the agent-native resume command for a host-only
+// run. Caller already validated row.Container is "" / "none".
+func launchResume(env *root.ResolvedEnv, row *calldb.RecentRow, streamPath, sessionID string) error {
+	hostCmd, hostArgs := resumeCommand(row.Agent, sessionID)
+	switch row.Agent {
+	case agent.NameClaude:
+		execMD := cmdMDPath(streamPath)
+		configDir, _ := resolveResumeConfigDir(execMD, env, row)
+		return execResume(hostCmd, hostArgs, claudeResumeEnv(configDir))
+	case agent.NameCodex, agent.NameCodexTmux:
+		return execResume(hostCmd, hostArgs, nil)
+	}
+	return fmt.Errorf("resume not implemented for agent %q", row.Agent)
 }
 
 // resumeCommand returns the resume command and args for an agent. The
@@ -281,6 +299,87 @@ func extractSessionID(path string) (string, error) {
 		}
 	}
 	return "", scanner.Err()
+}
+
+// resolveSessionID returns the session id for a run, trying agent-specific
+// fallbacks when the generic head-of-stream scan comes up empty. The codex-tmux
+// agent in particular may not have written a thread.started line into
+// stream.jsonl (older runs predating the rollout-tailer, or runs where the
+// tailer never located the rollout in time) — its synthetic result event
+// carries the id at the tail of the file instead.
+func resolveSessionID(streamPath, agentName string) (string, error) {
+	sid, err := extractSessionID(streamPath)
+	if err != nil {
+		return "", err
+	}
+	if sid != "" {
+		return sid, nil
+	}
+	if agentName == agent.NameCodexTmux {
+		return extractCodexTmuxSessionID(streamPath), nil
+	}
+	return "", nil
+}
+
+// codexTmuxRolloutPattern matches the UUID embedded in a codex rollout
+// filename, e.g. rollout-2026-05-22T15-55-53-019e51e6-fcb4-7053-a700-0bdf7662e1a5.jsonl[.gz].
+var codexTmuxRolloutPattern = regexp.MustCompile(`([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.gz)?$`)
+
+// codexTmuxResultMeta captures the fields in a codex-tmux synthetic result
+// event that can be used to recover the session id.
+type codexTmuxResultMeta struct {
+	SessionID    string `json:"session_id"`
+	SessionLog   string `json:"session_log"`
+	SessionLogGz string `json:"session_log_gz"`
+}
+
+// extractCodexTmuxSessionID scans a codex-tmux stream.jsonl end-to-end for
+// the synthetic result event and returns either its explicit session_id
+// field or the UUID parsed out of the rollout filename. Returns "" when no
+// recoverable id is present.
+func extractCodexTmuxSessionID(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	var last codexTmuxResultMeta
+	for scanner.Scan() {
+		if m, ok := parseCodexTmuxResult(scanner.Bytes()); ok {
+			last = m
+		}
+	}
+	if last.SessionID != "" {
+		return last.SessionID
+	}
+	for _, p := range []string{last.SessionLogGz, last.SessionLog} {
+		if m := codexTmuxRolloutPattern.FindStringSubmatch(filepath.Base(p)); len(m) >= 2 {
+			return m[1]
+		}
+	}
+	return ""
+}
+
+// parseCodexTmuxResult decodes one stream.jsonl line and returns its session
+// metadata if it's the codex-tmux synthetic result event. The tmux_session_name
+// field is what disambiguates it from claude/codex result events (which share
+// the same `type: "result"`).
+func parseCodexTmuxResult(line []byte) (codexTmuxResultMeta, bool) {
+	var v struct {
+		codexTmuxResultMeta
+		Type            string `json:"type"`
+		TmuxSessionName string `json:"tmux_session_name"`
+	}
+	if err := json.Unmarshal(line, &v); err != nil {
+		return codexTmuxResultMeta{}, false
+	}
+	if v.Type != "result" || v.TmuxSessionName == "" {
+		return codexTmuxResultMeta{}, false
+	}
+	return v.codexTmuxResultMeta, true
 }
 
 func claudeSessionID(line []byte) string {

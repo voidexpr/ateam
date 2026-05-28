@@ -88,8 +88,18 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 		}
 
 		started := fmtStartedAt(r.StartedAt)
-		fmt.Printf("\n=== [ID:%d] %s/%s %s ===\n", r.ID, r.Role, r.Action, started)
+		fmt.Printf("\n=== [ID:%d] %s/%s %s ===\n\n", r.ID, r.Role, r.Action, started)
 
+		if isResumableAgent(r.Agent) {
+			streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.StreamFile)
+			if sid, err := resolveSessionID(streamPath, r.Agent); err == nil && sid != "" {
+				row := r // addressable copy for the shared printer
+				printResumeInfo(env, &row, streamPath, sid)
+				fmt.Println()
+			}
+		}
+		fmt.Println("Files:")
+		fmt.Println()
 		for _, f := range files {
 			info, statErr := os.Stat(f)
 			size := ""
@@ -99,15 +109,6 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 			rel := relPath(cwd, f)
 			fmt.Printf("  %-8s %s\n", size, rel)
 			allFiles = append(allFiles, rel)
-		}
-		if isResumableAgent(r.Agent) {
-			streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.StreamFile)
-			if sid, err := extractSessionID(streamPath); err == nil && sid != "" {
-				fmt.Printf("  resume:  ateam resume %d\n", r.ID)
-				// Native command (honors ATEAM_RESUME_*_CMD overrides) so
-				// operators can copy-paste without going through ateam.
-				fmt.Printf("           %s\n", resumeNativeCommandLine(r.Agent, sid))
-			}
 		}
 	}
 

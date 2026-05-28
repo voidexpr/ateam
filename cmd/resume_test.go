@@ -134,6 +134,58 @@ func TestResumeBinaryFallback(t *testing.T) {
 	}
 }
 
+func TestResolveSessionIDCodexTmuxFromResultEvent(t *testing.T) {
+	// Codex-tmux runs where the live tailer never wrote a thread.started
+	// line: the synthetic result event carries the session id (new field)
+	// or, failing that, the rollout filename embeds the UUID.
+	dir := t.TempDir()
+	stream := filepath.Join(dir, "stream.jsonl")
+
+	const sid = "019e51e6-fcb4-7053-a700-0bdf7662e1a5"
+	// Old-format result: no explicit session_id, must fall back to filename.
+	oldLine := `{"type":"result","tmux_session_name":"ateam-codex-141",` +
+		`"session_log":"/Users/x/.codex/sessions/2026/05/22/rollout-2026-05-22T15-55-53-` + sid + `.jsonl"}`
+	body := `{"type":"tmux.start","tmux_session_name":"ateam-codex-141"}
+` + oldLine + "\n"
+	if err := os.WriteFile(stream, []byte(body), 0600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := resolveSessionID(stream, "codex-tmux")
+	if err != nil {
+		t.Fatalf("resolveSessionID: %v", err)
+	}
+	if got != sid {
+		t.Errorf("session id = %q, want %q (from rollout filename)", got, sid)
+	}
+
+	// Generic extractor (no agent hint) ignores the synthetic result event.
+	got, _ = extractSessionID(stream)
+	if got != "" {
+		t.Errorf("extractSessionID alone should not find codex-tmux result id, got %q", got)
+	}
+
+	// New-format result with explicit session_id wins over the filename.
+	const newSID = "abcdef01-2345-6789-abcd-ef0123456789"
+	newLine := `{"type":"result","tmux_session_name":"x","session_id":"` + newSID + `",` +
+		`"session_log":"/tmp/rollout-2026-05-22T00-00-00-` + sid + `.jsonl"}`
+	if err := os.WriteFile(stream, []byte(newLine+"\n"), 0600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err = resolveSessionID(stream, "codex-tmux")
+	if err != nil {
+		t.Fatalf("resolveSessionID: %v", err)
+	}
+	if got != newSID {
+		t.Errorf("session id = %q, want explicit %q", got, newSID)
+	}
+
+	// Non-codex-tmux agents do not get the fallback.
+	got, _ = resolveSessionID(stream, "codex")
+	if got != "" {
+		t.Errorf("non-tmux agent should not trigger fallback, got %q", got)
+	}
+}
+
 func TestResumeNativeCommandLine(t *testing.T) {
 	t.Setenv(envResumeClaudeCmd, "")
 	t.Setenv(envResumeCodexCmd, "")

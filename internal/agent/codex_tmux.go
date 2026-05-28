@@ -297,6 +297,10 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		"tmux_session_name": result.SessionName,
 		"output_chars":      len(result.Output),
 		"pane_pid":          result.PanePID,
+		// session_id is the codex rollout id (session_meta.id). Recorded
+		// here so `ateam resume` can recover it even when the live tailer
+		// never managed to translate the session_meta record into stream.jsonl.
+		"session_id":        result.SessionStats.SessionID,
 		"session_log":       result.SessionStats.SessionLogPath,
 		"session_log_gz":    archivedPath,
 		"session_log_bytes": archivedBytes,
