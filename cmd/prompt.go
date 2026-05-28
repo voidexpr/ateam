@@ -24,6 +24,7 @@ var (
 	promptFilesOnly            bool
 	promptPreview              bool
 	promptPreviewContent       bool
+	promptShowFiles            bool
 )
 
 var promptCmd = &cobra.Command{
@@ -54,11 +55,15 @@ func init() {
 	promptCmd.Flags().BoolVar(&promptFilesOnly, "files-only", false, "list prompt sources with token estimates instead of printing the prompt")
 	promptCmd.Flags().BoolVar(&promptPreview, "preview", false, "assemble via the v1 assembler and print a per-section breakdown (anchor + path + slot)")
 	promptCmd.Flags().BoolVar(&promptPreviewContent, "content", false, "with --preview, also print the full assembled text")
+	promptCmd.Flags().BoolVar(&promptShowFiles, "show-files", false, "assemble via the v1 assembler and print each section interleaved with anchor/path markers; troubleshooting view, not for agent consumption")
 	promptCmd.MarkFlagsMutuallyExclusive("role", "supervisor")
 	_ = promptCmd.MarkFlagRequired("action")
 }
 
 func runPrompt(cmd *cobra.Command, args []string) error {
+	if promptShowFiles {
+		return runPromptShowFiles()
+	}
 	if promptPreview {
 		return runPromptPreview()
 	}
@@ -228,6 +233,67 @@ func runPromptPreview() error {
 		fmt.Println()
 		fmt.Println("--- assembled prompt ---")
 		fmt.Println(res.Prompt)
+	}
+	return nil
+}
+
+// runPromptShowFiles assembles the prompt via the v1 pipeline and prints
+// each rendered section interleaved with a visible marker showing which
+// anchor + file it came from. Troubleshooting view — markers are not
+// markdown, so any agent would choke on them; the output is for a human
+// confirming "this paragraph is from defaults/.../security.prompt.md" at
+// a glance.
+//
+// Marker format is bracketed by `========` rules with the anchor in
+// square brackets and the on-disk path next to it:
+//
+//	==================================================================
+//	[embedded] defaults/prompts/_pre.context.md   (slot: root_pre)
+//	==================================================================
+//
+//	<rendered content of that file>
+//
+// The same Assemble call as --preview is used, so the section list,
+// frontmatter stripping, template expansion, and section order all match
+// what a real run produces.
+func runPromptShowFiles() error {
+	env, err := resolveEnv()
+	if err != nil {
+		return err
+	}
+	promptPath, roleLabel, err := promptPathForCurrentFlags()
+	if err != nil {
+		return err
+	}
+	a := env.Assembler()
+
+	orphans, err := a.FindOrphans()
+	if err != nil {
+		return fmt.Errorf("scan for orphan fragments: %w", err)
+	}
+	for _, o := range orphans {
+		fmt.Fprintln(os.Stderr, o.Error())
+	}
+	if len(orphans) > 0 {
+		return fmt.Errorf("found %d orphan fragment(s); fix or remove them before assembling", len(orphans))
+	}
+
+	vars := env.BuildAssemblerVars(promptPath, roleLabel, promptAction)
+	res, err := a.Assemble(promptPath, vars, nil)
+	if err != nil {
+		return err
+	}
+
+	const rule = "=================================================================="
+	for i, s := range res.Sections {
+		if i > 0 {
+			fmt.Println()
+		}
+		fmt.Println(rule)
+		fmt.Printf("[%s] %s   (slot: %s)\n", s.Anchor, displayAnchorPath(env, s.Anchor, s.Path), s.Slot)
+		fmt.Println(rule)
+		fmt.Println()
+		fmt.Println(s.Content)
 	}
 	return nil
 }

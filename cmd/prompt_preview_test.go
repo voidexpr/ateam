@@ -95,6 +95,45 @@ func TestPromptPreviewFailsOnOrphanFragment(t *testing.T) {
 	}
 }
 
+func TestPromptShowFilesInterleavesMarkers(t *testing.T) {
+	projectDir := setupMinimalAteamProject(t)
+	prev, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(resetPromptFlags)
+	promptSupervisor = true
+	promptAction = "review"
+	promptShowFiles = true
+
+	out := captureStdout(t, func() {
+		if err := runPromptShowFiles(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	// Marker rule + slot/anchor line must appear for each section.
+	if !strings.Contains(out, "==================================================================") {
+		t.Errorf("missing rule-line markers, got:\n%s", out)
+	}
+	if !strings.Contains(out, "[embedded] defaults/prompts/_pre.context.md") {
+		t.Errorf("missing root_pre marker, got:\n%s", out)
+	}
+	if !strings.Contains(out, "(slot: root_pre)") {
+		t.Errorf("missing slot label on marker, got:\n%s", out)
+	}
+	if !strings.Contains(out, "(slot: role_main)") {
+		t.Errorf("missing role_main slot, got:\n%s", out)
+	}
+	// Content should follow each marker. {{project.info}} expansion happens
+	// in root_pre's content; check the expanded header is present.
+	if !strings.Contains(out, "ATeam Project Context") {
+		t.Errorf("missing rendered content from _pre.context.md, got:\n%s", out)
+	}
+}
+
 func TestPromptPreviewBadAction(t *testing.T) {
 	t.Cleanup(resetPromptFlags)
 	promptRole = "security"
@@ -142,6 +181,7 @@ func resetPromptFlags() {
 	promptSupervisor = false
 	promptPreview = false
 	promptPreviewContent = false
+	promptShowFiles = false
 	promptExtraPrompt = ""
 	promptNoProjectInfo = false
 	promptIgnorePreviousReport = false
