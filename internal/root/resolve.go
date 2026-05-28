@@ -204,9 +204,18 @@ func (e *ResolvedEnv) BuildAssemblerVars(promptPath, roleLabel, action string) a
 			"dir":       filepath.Base(e.SourceDir),
 		},
 		Exec: map[string]string{
-			"id":                         "",
-			"output_dir":                 "",
-			"output_file":                "",
+			"id": "",
+			// output_dir / output_file are runner-deferred: their values depend
+			// on the exec ID, which isn't allocated until Runner.Run. Emit the
+			// runner's own placeholders back so the assembled prompt still
+			// carries {{OUTPUT_DIR}} / {{OUTPUT_FILE}} for the runner's
+			// ResolveTemplateString to fill (see runner.BuildTemplateVars).
+			// Resolving them to "" here would consume the placeholders before
+			// the runner can populate them, leaving agents with a blank
+			// destination. On a preview call (no runner) they render as the
+			// placeholder text, which signals "resolved at run time."
+			"output_dir":                 "{{OUTPUT_DIR}}",
+			"output_file":                "{{OUTPUT_FILE}}",
 			"debug_context":              "",
 			"auto_roles_commands_output": "",
 		},

@@ -28,6 +28,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -277,6 +278,13 @@ func DiscoverReports(projectDir string) ([]RoleReport, error) {
 	for _, r := range reports {
 		out = append(out, r)
 	}
+	// Sort by RoleID so a given report set always yields the same order:
+	// downstream ReviewSelector.Filter and formatReportsBlock preserve this
+	// order, so without it the review prompt (and its hash) would vary run to
+	// run from Go's randomized map iteration.
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].RoleID < out[j].RoleID
+	})
 	return out, nil
 }
 

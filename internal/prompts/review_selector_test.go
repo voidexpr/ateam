@@ -45,6 +45,33 @@ func roleIDs(rs []RoleReport) []string {
 	return out
 }
 
+// TestDiscoverReportsStableOrder verifies DiscoverReports returns reports
+// sorted by RoleID. Without the sort, Go's randomized map iteration would make
+// downstream review prompts (and their hashes) vary run to run for the same
+// report set.
+func TestDiscoverReportsStableOrder(t *testing.T) {
+	projectDir := t.TempDir()
+	now := time.Now()
+	makeTestReports(t, projectDir, map[string]time.Time{
+		"security":     now,
+		"dependencies": now,
+		"performance":  now,
+		"docs":         now,
+	})
+	got, err := DiscoverReports(projectDir)
+	if err != nil {
+		t.Fatalf("DiscoverReports: %v", err)
+	}
+	ids := make([]string, len(got))
+	for i, r := range got {
+		ids[i] = r.RoleID
+	}
+	want := []string{"dependencies", "docs", "performance", "security"}
+	if !reflect.DeepEqual(ids, want) {
+		t.Errorf("RoleID order = %v, want %v", ids, want)
+	}
+}
+
 func TestReviewSelector_Filter(t *testing.T) {
 	now := time.Now()
 	mtimes := map[string]time.Time{

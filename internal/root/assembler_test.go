@@ -3,6 +3,7 @@ package root
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -54,6 +55,33 @@ func TestEnvAssemblerResolvesDefaults(t *testing.T) {
 	}
 	if _, ok, err := a.FirstMatch("review.prompt.md"); err != nil || !ok {
 		t.Errorf("FirstMatch(review.prompt.md): ok=%v err=%v", ok, err)
+	}
+}
+
+// TestBuildAssemblerVarsDefersOutputPaths locks in the contract that the
+// assembler must not resolve {{OUTPUT_DIR}} / {{OUTPUT_FILE}} — those depend on
+// the exec ID and are filled later by the runner. Resolving them to "" at
+// assembly time would strip the placeholders and leave agents with a blank
+// destination block.
+func TestBuildAssemblerVarsDefersOutputPaths(t *testing.T) {
+	env := &ResolvedEnv{}
+	vars := env.BuildAssemblerVars("report/security", "", "report")
+	if got := vars.Exec["output_dir"]; got != "{{OUTPUT_DIR}}" {
+		t.Errorf("exec.output_dir = %q, want {{OUTPUT_DIR}}", got)
+	}
+	if got := vars.Exec["output_file"]; got != "{{OUTPUT_FILE}}" {
+		t.Errorf("exec.output_file = %q, want {{OUTPUT_FILE}}", got)
+	}
+
+	// End-to-end: assembling the shipped default report prompt must keep the
+	// placeholder intact so runner.ResolveTemplateString can fill it.
+	vars.Project["info"] = "INFO" // avoid forking git for project info
+	res, err := env.Assembler().Assemble("report/security", vars, nil)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	if !strings.Contains(res.Prompt, "{{OUTPUT_FILE}}") {
+		t.Error("assembled report prompt dropped {{OUTPUT_FILE}} placeholder")
 	}
 }
 
