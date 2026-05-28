@@ -23,9 +23,8 @@ var (
 	promptNoProjectInfo        bool
 	promptIgnorePreviousReport bool
 	promptSupervisor           bool
-	promptPreview              bool
-	promptPreviewContent       bool
-	promptShowFiles            bool
+	promptPaths                bool
+	promptInlinePaths          bool
 )
 
 var promptCmd = &cobra.Command{
@@ -41,8 +40,8 @@ Example:
   ateam prompt --supervisor --action review
   ateam prompt --supervisor --action code
   ateam prompt --supervisor --action verify
-  ateam prompt --role security --action report --preview
-  ateam prompt --role security --action report --show-files`,
+  ateam prompt --role security --action report --paths
+  ateam prompt --role security --action report --inline-paths`,
 	Args: cobra.NoArgs,
 	RunE: runPrompt,
 }
@@ -54,19 +53,18 @@ func init() {
 	promptCmd.Flags().StringVar(&promptExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
 	promptCmd.Flags().BoolVar(&promptNoProjectInfo, "no-project-info", false, "omit ateam project context from the prompt")
 	promptCmd.Flags().BoolVar(&promptIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
-	promptCmd.Flags().BoolVar(&promptPreview, "preview", false, "assemble via the v1 assembler and print a per-section breakdown (slot + anchor + path + mod time + tokens)")
-	promptCmd.Flags().BoolVar(&promptPreviewContent, "content", false, "with --preview, also print the full assembled text")
-	promptCmd.Flags().BoolVar(&promptShowFiles, "show-files", false, "assemble via the v1 assembler and print each section interleaved with anchor/path markers; troubleshooting view, not for agent consumption")
+	promptCmd.Flags().BoolVar(&promptPaths, "paths", false, "show a per-section breakdown table (slot + anchor + path + mod time + tokens); no prompt body")
+	promptCmd.Flags().BoolVar(&promptInlinePaths, "inline-paths", false, "print the full prompt with each section preceded by an anchor/path/mod-time/tokens header; troubleshooting view, not for agent consumption")
 	promptCmd.MarkFlagsMutuallyExclusive("role", "supervisor")
 	_ = promptCmd.MarkFlagRequired("action")
 }
 
 func runPrompt(cmd *cobra.Command, args []string) error {
-	if promptShowFiles {
-		return runPromptShowFiles()
+	if promptInlinePaths {
+		return runPromptInlinePaths()
 	}
-	if promptPreview {
-		return runPromptPreview()
+	if promptPaths {
+		return runPromptPaths()
 	}
 	if promptSupervisor {
 		return runPromptSupervisor()
@@ -175,64 +173,88 @@ func runPromptSupervisor() error {
 	return nil
 }
 
-// runPromptPreview uses the v1 assembler to compose the prompt for the given
-// role + action (or supervisor + action) and prints a per-section breakdown
-// showing which anchor + path + slot each fragment came from. With --content
-// it also prints the joined prompt text. Errors loudly on missing roles,
-// orphan fragments, and template render failures — the spec's stated goals
-// for the preview command.
-func runPromptPreview() error {
+// sectionDigest is one row of per-section metadata both --paths and
+// --inline-paths emit. Centralizes the path-prefix / mod-time / token-count
+// computation so the two modes share one shape.
+type sectionDigest struct {
+	Slot     string
+	Anchor   string
+	Path     string // anchor-rooted, e.g. ".ateam/prompts/_pre.context.md"
+	Modified string // human-readable, "embedded"/"<date>" or "<date> (build)" fallback
+	Tokens   int
+	Content  string // rendered, post-template-expansion
+}
+
+// assembleForInspection runs the v1 assembler for the current flag set and
+// returns the assembled result plus per-section digests in one call. Both
+// --paths and --inline-paths use it; the only difference between the two
+// modes is how they format these digests for output.
+//
+// Orphan fragments are surfaced to stderr and turned into a hard error per
+// the spec's "errors loudly on orphan fragments".
+func assembleForInspection() (string, []sectionDigest, error) {
 	env, err := resolveEnv()
 	if err != nil {
-		return err
+		return "", nil, err
 	}
 	promptPath, roleLabel, err := promptPathForCurrentFlags()
 	if err != nil {
-		return err
+		return "", nil, err
 	}
 	a := env.Assembler()
 
-	// Surface orphans before assembly so a typo is caught first. Per the
-	// spec's "errors loudly on orphan fragments", any orphan fails the
-	// command after all are printed.
 	orphans, err := a.FindOrphans()
 	if err != nil {
-		return fmt.Errorf("scanning for orphan fragments: %w", err)
+		return "", nil, fmt.Errorf("scanning for orphan fragments: %w", err)
 	}
 	for _, o := range orphans {
 		fmt.Fprintln(os.Stderr, o.Error())
 	}
 	if len(orphans) > 0 {
-		return fmt.Errorf("found %d orphan fragment(s); fix or remove them before assembling", len(orphans))
+		return "", nil, fmt.Errorf("found %d orphan fragment(s); fix or remove them before assembling", len(orphans))
 	}
 
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, promptAction)
 	res, err := a.Assemble(promptPath, vars, nil)
 	if err != nil {
-		return err
+		return "", nil, err
 	}
 
 	anchorFS := anchorFSMap(a)
+	digests := make([]sectionDigest, len(res.Sections))
+	for i, s := range res.Sections {
+		digests[i] = sectionDigest{
+			Slot:     s.Slot,
+			Anchor:   s.Anchor,
+			Path:     displayAnchorPath(env, s.Anchor, s.Path),
+			Modified: sectionModTime(anchorFS, s.Anchor, s.Path),
+			Tokens:   prompts.EstimateTokens(s.Content),
+			Content:  s.Content,
+		}
+	}
+	return promptPath, digests, nil
+}
+
+// runPromptPaths emits the per-section table that --paths produces:
+// columns slot / anchor / path / mod-time / est-tokens plus a TOTAL row.
+// No prompt body is printed — use --inline-paths if you want the rendered
+// content alongside the metadata.
+func runPromptPaths() error {
+	promptPath, digests, err := assembleForInspection()
+	if err != nil {
+		return err
+	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintf(w, "Assembly for %q (%d sections)\n\n", promptPath, len(res.Sections))
+	fmt.Fprintf(w, "Assembly for %q (%d sections)\n\n", promptPath, len(digests))
 	fmt.Fprintln(w, "SLOT\tANCHOR\tPATH\tLAST MODIFIED\tEST. TOKENS")
 	var totalTokens int
-	for _, s := range res.Sections {
-		toks := prompts.EstimateTokens(s.Content)
-		totalTokens += toks
+	for _, d := range digests {
+		totalTokens += d.Tokens
 		fmt.Fprintf(w, "%s\t[%s]\t%s\t%s\t%s\n",
-			s.Slot, s.Anchor, displayAnchorPath(env, s.Anchor, s.Path),
-			sectionModTime(anchorFS, s.Anchor, s.Path),
-			display.FmtTokens(int64(toks)))
+			d.Slot, d.Anchor, d.Path, d.Modified, display.FmtTokens(int64(d.Tokens)))
 	}
 	fmt.Fprintf(w, "TOTAL\t\t\t\t%s\n", display.FmtTokens(int64(totalTokens)))
 	w.Flush()
-
-	if promptPreviewContent {
-		fmt.Println()
-		fmt.Println("--- assembled prompt ---")
-		fmt.Println(res.Prompt)
-	}
 	return nil
 }
 
@@ -274,63 +296,37 @@ func sectionModTime(anchorFS map[string]fs.FS, anchor, path string) string {
 	return display.FmtDateAge(t)
 }
 
-// runPromptShowFiles assembles the prompt via the v1 pipeline and prints
-// each rendered section interleaved with a visible marker showing which
-// anchor + file it came from. Troubleshooting view — markers are not
-// markdown, so any agent would choke on them; the output is for a human
-// confirming "this paragraph is from defaults/.../security.prompt.md" at
-// a glance.
-//
-// Marker format is bracketed by `========` rules with the anchor in
-// square brackets and the on-disk path next to it:
+// runPromptInlinePaths prints the rendered prompt with each composed
+// section preceded by a metadata header. Same data as --paths, just
+// interleaved with the content so a human can visually trace any output
+// paragraph back to its source file:
 //
 //	==================================================================
-//	[embedded] defaults/prompts/_pre.context.md   (slot: root_pre)
+//	[embedded] defaults/prompts/_pre.context.md
+//	slot: root_pre   modified: 05/28 (just now) (build)   tokens: 660
 //	==================================================================
 //
 //	<rendered content of that file>
 //
-// The same Assemble call as --preview is used, so the section list,
-// frontmatter stripping, template expansion, and section order all match
-// what a real run produces.
-func runPromptShowFiles() error {
-	env, err := resolveEnv()
+// The headers are not markdown, so the output is for a human only — feed
+// the agent the body from a regular run instead.
+func runPromptInlinePaths() error {
+	_, digests, err := assembleForInspection()
 	if err != nil {
 		return err
 	}
-	promptPath, roleLabel, err := promptPathForCurrentFlags()
-	if err != nil {
-		return err
-	}
-	a := env.Assembler()
-
-	orphans, err := a.FindOrphans()
-	if err != nil {
-		return fmt.Errorf("scan for orphan fragments: %w", err)
-	}
-	for _, o := range orphans {
-		fmt.Fprintln(os.Stderr, o.Error())
-	}
-	if len(orphans) > 0 {
-		return fmt.Errorf("found %d orphan fragment(s); fix or remove them before assembling", len(orphans))
-	}
-
-	vars := env.BuildAssemblerVars(promptPath, roleLabel, promptAction)
-	res, err := a.Assemble(promptPath, vars, nil)
-	if err != nil {
-		return err
-	}
-
 	const rule = "=================================================================="
-	for i, s := range res.Sections {
+	for i, d := range digests {
 		if i > 0 {
 			fmt.Println()
 		}
 		fmt.Println(rule)
-		fmt.Printf("[%s] %s   (slot: %s)\n", s.Anchor, displayAnchorPath(env, s.Anchor, s.Path), s.Slot)
+		fmt.Printf("[%s] %s\n", d.Anchor, d.Path)
+		fmt.Printf("slot: %s   modified: %s   tokens: %s\n",
+			d.Slot, d.Modified, display.FmtTokens(int64(d.Tokens)))
 		fmt.Println(rule)
 		fmt.Println()
-		fmt.Println(s.Content)
+		fmt.Println(d.Content)
 	}
 	return nil
 }

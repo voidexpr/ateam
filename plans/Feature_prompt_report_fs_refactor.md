@@ -676,20 +676,22 @@ On `ateam` startup, when `.ateam/` or `.ateamorg/` is loaded, detect the old lay
 
 After migration, remove the now-empty `roles/` and `supervisor/` directories. Print a one-line notice on stderr on first migration. Implementation in a new `internal/migrate/v1_layout.go`, called from `internal/root/resolve.go` when env is first materialized.
 
-## `ateam prompt --preview` (in scope)
+## `ateam prompt` inspection modes (in scope)
+
+> **Shipped naming**: this section uses the spec's original `--preview` / `--content` names. The shipped CLI tightened these to `--paths` (table view) and `--inline-paths` (full prompt with per-section anchor/path/mod-time/tokens headers); `--content` was dropped since `--inline-paths` subsumes it. The user-facing reference is `COMMANDS.md#ateam-prompt`.
 
 Without `:syntax`, the CLI shape is flag-based, mirroring existing commands:
 
 ```
-ateam prompt --action report --role security --preview
-ateam prompt --action report --role security --preview --content
-ateam prompt --action review --preview
+ateam prompt --action report --role security --paths
+ateam prompt --action report --role security --inline-paths
+ateam prompt --action review --paths
 ```
 
 The output pretty-prints the resolved ordered file list with anchor tags, plus the merged frontmatter:
 
 ```
-$ ateam prompt --action report --role security --preview
+$ ateam prompt --action report --role security --paths
 Assembly for 'report/security':
 
 Frontmatter (merged from dir-level + role-level):
@@ -723,7 +725,7 @@ Resolution:
   [CLI]      --post-prompt                                               (empty)
 ```
 
-`--preview --content` dumps the actual concatenated text.
+`--inline-paths` dumps the actual concatenated text, with each section preceded by an anchor/path/mod-time/tokens header.
 
 ## What this refactor does NOT change
 
@@ -822,14 +824,14 @@ Conventions to lock in the task: `v` for schema version (start at 1); `ts` ISO-8
 
 **Out of scope:** real-time aggregation across processes, replay / time-travel, SSE HTTP endpoint, structured `_run.json` for post-exec consumption (since v1 has no post-exec hook surface for users).
 
-### Task 4: `ateam prompt --preview` CLI
+### Task 4: `ateam prompt` inspection modes
 
-**Deliverable:** the preview tool described above.
+**Deliverable:** the inspection tool described above. (Shipped as `--paths` / `--inline-paths`; see the note at the top of that section.)
 
 **Acceptance:**
 
-- `ateam prompt --action X --role Y --preview` pretty-prints the resolution + merged frontmatter, with anchor tags on every file.
-- `--preview --content` adds the full assembled text.
+- `ateam prompt --action X --role Y --paths` pretty-prints the resolution + merged frontmatter, with anchor tags on every file.
+- `--inline-paths` adds the full assembled text, each section preceded by an anchor/path/mod-time/tokens header.
 - Errors loudly on invalid frontmatter, orphan fragments, role-name violations, missing required includes.
 
 ### Task 5: Documentation pass

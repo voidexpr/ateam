@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestPromptPreviewSupervisorReview(t *testing.T) {
+func TestPromptPathsSupervisorReview(t *testing.T) {
 	// Setup: empty-but-valid .ateam project so resolveEnv succeeds.
 	projectDir := setupMinimalAteamProject(t)
 	prev, _ := os.Getwd()
@@ -18,10 +18,10 @@ func TestPromptPreviewSupervisorReview(t *testing.T) {
 	t.Cleanup(resetPromptFlags)
 	promptSupervisor = true
 	promptAction = "review"
-	promptPreview = true
+	promptPaths = true
 
 	out := captureStdout(t, func() {
-		if err := runPromptPreview(); err != nil {
+		if err := runPromptPaths(); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -36,40 +36,10 @@ func TestPromptPreviewSupervisorReview(t *testing.T) {
 	}
 }
 
-func TestPromptPreviewRoleReport(t *testing.T) {
-	projectDir := setupMinimalAteamProject(t)
-	prev, _ := os.Getwd()
-	t.Cleanup(func() { _ = os.Chdir(prev) })
-	if err := os.Chdir(projectDir); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Cleanup(resetPromptFlags)
-	promptRole = "security"
-	promptAction = "report"
-	promptPreview = true
-	promptPreviewContent = true
-
-	out := captureStdout(t, func() {
-		if err := runPromptPreview(); err != nil {
-			t.Fatal(err)
-		}
-	})
-	if !strings.Contains(out, `"report/security"`) {
-		t.Errorf("missing prompt path header, got:\n%s", out)
-	}
-	if !strings.Contains(out, "defaults/prompts/report/security.prompt.md") {
-		t.Errorf("missing role_main path, got:\n%s", out)
-	}
-	if !strings.Contains(out, "--- assembled prompt ---") {
-		t.Errorf("--content should print the assembled prompt, got:\n%s", out)
-	}
-}
-
-func TestPromptPreviewFailsOnOrphanFragment(t *testing.T) {
+func TestPromptPathsFailsOnOrphanFragment(t *testing.T) {
 	projectDir := setupMinimalAteamProject(t)
 	// A role pre fragment with a typo'd role name and no matching
-	// <role>.prompt.md anywhere — an orphan the preview must reject.
+	// <role>.prompt.md anywhere — an orphan the inspection modes must reject.
 	orphanDir := projectDir + "/.ateam/prompts/report"
 	if err := os.MkdirAll(orphanDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -87,15 +57,15 @@ func TestPromptPreviewFailsOnOrphanFragment(t *testing.T) {
 	t.Cleanup(resetPromptFlags)
 	promptRole = "security"
 	promptAction = "report"
-	promptPreview = true
+	promptPaths = true
 
-	err := runPromptPreview()
+	err := runPromptPaths()
 	if err == nil || !strings.Contains(err.Error(), "orphan") {
 		t.Fatalf("expected orphan-fragment error, got %v", err)
 	}
 }
 
-func TestPromptShowFilesInterleavesMarkers(t *testing.T) {
+func TestPromptInlinePathsInterleavesHeaders(t *testing.T) {
 	projectDir := setupMinimalAteamProject(t)
 	prev, _ := os.Getwd()
 	t.Cleanup(func() { _ = os.Chdir(prev) })
@@ -106,39 +76,39 @@ func TestPromptShowFilesInterleavesMarkers(t *testing.T) {
 	t.Cleanup(resetPromptFlags)
 	promptSupervisor = true
 	promptAction = "review"
-	promptShowFiles = true
+	promptInlinePaths = true
 
 	out := captureStdout(t, func() {
-		if err := runPromptShowFiles(); err != nil {
+		if err := runPromptInlinePaths(); err != nil {
 			t.Fatal(err)
 		}
 	})
 
-	// Marker rule + slot/anchor line must appear for each section.
+	// Rule line + anchor/path line + metadata line must appear.
 	if !strings.Contains(out, "==================================================================") {
 		t.Errorf("missing rule-line markers, got:\n%s", out)
 	}
 	if !strings.Contains(out, "[embedded] defaults/prompts/_pre.context.md") {
-		t.Errorf("missing root_pre marker, got:\n%s", out)
+		t.Errorf("missing root_pre header, got:\n%s", out)
 	}
-	if !strings.Contains(out, "(slot: root_pre)") {
-		t.Errorf("missing slot label on marker, got:\n%s", out)
+	if !strings.Contains(out, "slot: root_pre") || !strings.Contains(out, "tokens:") {
+		t.Errorf("missing metadata line, got:\n%s", out)
 	}
-	if !strings.Contains(out, "(slot: role_main)") {
-		t.Errorf("missing role_main slot, got:\n%s", out)
+	if !strings.Contains(out, "slot: role_main") {
+		t.Errorf("missing role_main metadata line, got:\n%s", out)
 	}
-	// Content should follow each marker. {{project.info}} expansion happens
+	// Content should follow each header. {{project.info}} expansion happens
 	// in root_pre's content; check the expanded header is present.
 	if !strings.Contains(out, "ATeam Project Context") {
 		t.Errorf("missing rendered content from _pre.context.md, got:\n%s", out)
 	}
 }
 
-func TestPromptPreviewBadAction(t *testing.T) {
+func TestPromptPathsBadAction(t *testing.T) {
 	t.Cleanup(resetPromptFlags)
 	promptRole = "security"
 	promptAction = "nonsense"
-	promptPreview = true
+	promptPaths = true
 	_, _, err := promptPathForCurrentFlags()
 	if err == nil || !strings.Contains(err.Error(), "invalid action") {
 		t.Fatalf("expected invalid-action error, got %v", err)
@@ -179,9 +149,8 @@ func resetPromptFlags() {
 	promptRole = ""
 	promptAction = ""
 	promptSupervisor = false
-	promptPreview = false
-	promptPreviewContent = false
-	promptShowFiles = false
+	promptPaths = false
+	promptInlinePaths = false
 	promptExtraPrompt = ""
 	promptNoProjectInfo = false
 	promptIgnorePreviousReport = false

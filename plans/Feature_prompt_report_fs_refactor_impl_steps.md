@@ -30,7 +30,7 @@ Env helpers + migration runtime:
 
 cmd/* rewires (all main paths):
 - ✅ Promotion writes to `shared/` for review/verify/report (bad0c88)
-- ✅ `ateam prompt --preview` via new pipeline (a3edaa3) + anchor-rooted output paths (ac6690d)
+- ✅ `ateam prompt --paths` / `--inline-paths` inspection modes via new pipeline (a3edaa3, ac6690d, 1444eef, 997d02e, 9760755, this commit) — shipped names were tightened during the rewires; the spec's `--preview` / `--content` became `--paths` (table) and `--inline-paths` (full prompt with per-section anchor/path headers).
 - ✅ `ateam review` (000c067)
 - ✅ `ateam verify` + `ateam auto_setup` via shared `assembleSupervisorV1` helper (7f5ec56)
 - ✅ `ateam report --roles X` role-templated + previous-report inline (f4e0a64)
@@ -82,7 +82,7 @@ Need to confirm with `grep -rn "AssembleRolePrompt\|AssembleReviewPrompt\|Assemb
 **Test approach:**
 - `make run-ci` after each step
 - rsync of `~/projects/ateam/.ateam` → tempdir → migrate → exercise all commands
-- Specific check: `go test ./...` should pass, plus `ateam prompt --supervisor --action review --preview` should produce the same output as before the cleanup
+- Specific check: `go test ./...` should pass, plus `ateam prompt --supervisor --action review --paths` should produce the same output as before the cleanup
 
 **Acceptance:** binary shrinks ~250KB; nothing in `defaults/{roles,supervisor}` and no `report_base_prompt.md`/`code_base_prompt.md` at the root.
 
@@ -102,17 +102,16 @@ Need to confirm with `grep -rn "AssembleRolePrompt\|AssembleReviewPrompt\|Assemb
 **Test approach:**
 - Diff before/after of a sample assembled prompt — bytes should be identical.
 - `make run-ci` clean.
-- Verify against rsync'd fixture: `ateam prompt --role security --action report --preview --content` should produce identical output.
+- Verify against rsync'd fixture: `ateam prompt --role security --action report --inline-paths` should produce identical content per-section.
 
 **Acceptance:** zero `{{[A-Z]` matches in `defaults/prompts/` (the rewriter leaves user-emitted `{{` text alone, so no semantic changes).
 
 ### Step 3 — Convert `cmd/prompt.go` non-preview branches
 
-**Why:** `ateam prompt --role X --action report` (without `--preview`) currently uses the legacy `AssembleRolePrompt` and prints sources via `TraceRolePromptSources`. Inconsistent with what the actual `ateam report` command produces (which now uses the v1 assembler).
+**Why:** `ateam prompt --role X --action report` (without `--paths` / `--inline-paths`) currently uses the legacy `AssembleRolePrompt` and prints sources via `TraceRolePromptSources`. Inconsistent with what the actual `ateam report` command produces (which now uses the v1 assembler).
 
 **Files:**
 - `cmd/prompt.go` — `runPromptRole` and `runPromptSupervisor`
-- The `--files-only` flag should also work (currently uses legacy `PromptSource` shape; needs `AssembleResult.Sections` instead)
 
 **Approach:**
 ```go
@@ -127,19 +126,18 @@ func runPromptRole() error {
         // add a v1 helper.
     }
     fmt.Println(prompt)
-    // --files-only: walk env.Assembler().Assemble(...).Sections and print.
 }
 ```
 
-For `--files-only`, repurpose the `printPromptSources` helper to take `AssembleResult.Sections` (already has anchor + path + slot) plus the rendered content for token estimation.
+The `--paths` / `--inline-paths` modes already use the v1 assembler; this step replaces the *default* (no-flag) branch's legacy `AssembleXxx` + `printPromptSources` tail.
 
 **Risk:** low. `cmd/prompt` is for inspection, not for running agents. Output shape changes are acceptable.
 
 **Test approach:**
-- `cmd/prompt_preview_test.go` already covers the new path; add equivalent tests for the non-preview branches.
-- Spot check that `ateam prompt --role X --action report` (without preview) prints the same prompt body that `ateam report --roles X --dry-run` shows.
+- `cmd/prompt_preview_test.go` already covers `--paths` / `--inline-paths`; add equivalent tests for the default branches.
+- Spot check that `ateam prompt --role X --action report` prints the same prompt body that `ateam report --roles X --dry-run` shows.
 
-**Acceptance:** non-preview paths use `env.Assembler()`; `prompts.TraceXxx` functions become unused and can be deleted.
+**Acceptance:** default paths use `env.Assembler()`; `prompts.TraceXxx` functions become unused and can be deleted.
 
 ### Step 4 — code.go destination design + role-templated code v1 path
 

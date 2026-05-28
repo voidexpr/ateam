@@ -15,7 +15,7 @@ import (
 func savePromptGlobals() func() {
 	role, sup, action := promptRole, promptSupervisor, promptAction
 	extra, noPI, ipr := promptExtraPrompt, promptNoProjectInfo, promptIgnorePreviousReport
-	prev, content, show := promptPreview, promptPreviewContent, promptShowFiles
+	paths, inline := promptPaths, promptInlinePaths
 	return func() {
 		promptRole = role
 		promptSupervisor = sup
@@ -23,9 +23,8 @@ func savePromptGlobals() func() {
 		promptExtraPrompt = extra
 		promptNoProjectInfo = noPI
 		promptIgnorePreviousReport = ipr
-		promptPreview = prev
-		promptPreviewContent = content
-		promptShowFiles = show
+		promptPaths = paths
+		promptInlinePaths = inline
 	}
 }
 
@@ -80,18 +79,17 @@ func TestPromptRoleDryRun(t *testing.T) {
 	}
 }
 
-// TestPromptPreviewListsAllSources verifies that --preview prints the
+// TestPromptPathsListsAllSources verifies that --paths prints the
 // per-section breakdown with anchor, path, mod-time, and token columns,
-// plus a TOTAL row. Replaces the old --files-only smoke test that was
-// removed alongside the flag.
-func TestPromptPreviewListsAllSources(t *testing.T) {
+// plus a TOTAL row.
+func TestPromptPathsListsAllSources(t *testing.T) {
 	defer savePromptGlobals()()
 	projPath := setupPromptProject(t)
 
 	promptRole = "testing_basic"
 	promptAction = runner.ActionReport
 	promptSupervisor = false
-	promptPreview = true
+	promptPaths = true
 
 	var runErr error
 	out := captureStdout(t, func() {
@@ -100,11 +98,11 @@ func TestPromptPreviewListsAllSources(t *testing.T) {
 		})
 	})
 	if runErr != nil {
-		t.Fatalf("runPrompt --preview: %v", runErr)
+		t.Fatalf("runPrompt --paths: %v", runErr)
 	}
 	for _, want := range []string{"SLOT", "ANCHOR", "PATH", "LAST MODIFIED", "EST. TOKENS", "TOTAL"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("expected %q in --preview output:\n%s", want, out)
+			t.Errorf("expected %q in --paths output:\n%s", want, out)
 		}
 	}
 }

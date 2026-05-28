@@ -479,13 +479,32 @@ Each positional argument is a prompt (text or `@filepath`). Agent execs run conc
 
 ### `ateam prompt`
 
-Resolve and print the full prompt for a role or supervisor without running it.
+Resolve and print the full prompt for a role or supervisor without running it. Default mode prints the assembled prompt body. Two inspection modes (`--paths`, `--inline-paths`) trace where each part of the prompt came from — useful when debugging an override or wondering whether a project-level fragment is taking effect.
 
 ```bash
-ateam prompt --role project.security --action report
+ateam prompt --role project.security --action report                   # print the assembled prompt
 ateam prompt --supervisor --action review
 ateam prompt --role project.security --action report --extra-prompt "Focus on auth"
+
+ateam prompt --role project.security --action report --paths           # tabular per-section breakdown
+ateam prompt --role project.security --action report --inline-paths    # full prompt with per-section anchor/path headers
 ```
+
+`--paths` example output:
+
+```
+Assembly for "report/project.security" (5 sections)
+
+SLOT             ANCHOR      PATH                                                LAST MODIFIED             EST. TOKENS
+root_pre         [embedded]  defaults/prompts/_pre.context.md                    05/28 (just now) (build)  660
+dir_pre:report   [embedded]  defaults/prompts/report/_pre.intro.md               05/28 (just now) (build)  501
+role_main        [embedded]  defaults/prompts/report/project.security.prompt.md  05/28 (just now) (build)  568
+role_post        [project]   .ateam/prompts/report/project.security.post.extra.md  03/18 (70d ago)         39
+dir_post:report  [embedded]  defaults/prompts/report/_post.format.md             05/28 (just now) (build)  1.0K
+TOTAL                                                                                                      2.8K
+```
+
+`--inline-paths` prints the same sections in assembly order, each preceded by a metadata header so you can visually trace any paragraph of the prompt back to its source file. Headers are not markdown; the output is for a human, not for feeding to an agent.
 
 | Flag | Description |
 |------|-------------|
@@ -495,7 +514,8 @@ ateam prompt --role project.security --action report --extra-prompt "Focus on au
 | `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
 | `--no-project-info` | Omit the ATeam Project Context section |
 | `--ignore-previous-report` | Do not include the role's previous report |
-| `--files-only` | List prompt sources with token estimates instead of printing the prompt |
+| `--paths` | Show the per-section breakdown table (slot / anchor / path / last modified / est. tokens). No prompt body printed. |
+| `--inline-paths` | Print the full prompt with each section preceded by an anchor/path/mod-time/tokens header. Troubleshooting view, not for agent consumption. |
 
 ### `ateam env`
 
