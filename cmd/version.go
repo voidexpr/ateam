@@ -39,14 +39,26 @@ func runVersion(cmd *cobra.Command, args []string) error {
 // Returns the raw string unchanged when BuildTime can't be parsed (e.g.
 // "unknown" in dev builds).
 func FormatBuildTime(ts string, now time.Time) string {
+	t := ParseBuildTime(ts)
+	if t.IsZero() {
+		return ts
+	}
+	dur := display.FmtHoursOrDays(now.Sub(t), 48*time.Hour)
+	return fmt.Sprintf("%s (%s) %s ago", ts, t.Local().Format("2006-01-02 15:04:05 MST"), dur)
+}
+
+// ParseBuildTime parses the ldflag-stamped BuildTime (unix seconds with
+// optional fractional component) into a time.Time. Returns the zero time
+// when ts is empty, "unknown" (dev build), or otherwise unparseable.
+func ParseBuildTime(ts string) time.Time {
+	if ts == "" || ts == "unknown" {
+		return time.Time{}
+	}
 	secs, err := strconv.ParseFloat(ts, 64)
 	if err != nil {
-		return ts
+		return time.Time{}
 	}
 	whole := int64(secs)
 	nanos := int64((secs - float64(whole)) * float64(time.Second))
-	t := time.Unix(whole, nanos)
-
-	dur := display.FmtHoursOrDays(now.Sub(t), 48*time.Hour)
-	return fmt.Sprintf("%s (%s) %s ago", ts, t.Local().Format("2006-01-02 15:04:05 MST"), dur)
+	return time.Unix(whole, nanos)
 }

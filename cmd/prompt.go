@@ -250,9 +250,11 @@ func anchorFSMap(a *assembler.Assembler) map[string]fs.FS {
 }
 
 // sectionModTime stats path against the anchor's FS and returns a
-// human-readable mod-time string. Embedded files have no meaningful mtime
-// (embed.FS reports the zero time) and surface as "embedded"; stat
-// failures surface as "-".
+// human-readable mod-time string. For project / org anchors that's the
+// file's real ModTime. For the embedded anchor, embed.FS reports the
+// zero time, so we substitute the binary's own build time — the content
+// is frozen at build time, so the build time IS effectively the embedded
+// file's last-modified. Stat failures surface as "-".
 func sectionModTime(anchorFS map[string]fs.FS, anchor, path string) string {
 	fsys, ok := anchorFS[anchor]
 	if !ok {
@@ -264,6 +266,9 @@ func sectionModTime(anchorFS map[string]fs.FS, anchor, path string) string {
 	}
 	t := info.ModTime()
 	if t.IsZero() {
+		if bt := ParseBuildTime(BuildTime); !bt.IsZero() {
+			return display.FmtDateAge(bt) + " (build)"
+		}
 		return "embedded"
 	}
 	return display.FmtDateAge(t)
