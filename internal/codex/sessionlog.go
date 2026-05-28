@@ -32,12 +32,10 @@ type SessionStats struct {
 	SessionLogPath     string
 	TaskCompleteFound  bool
 	TokenCountFound    bool
-	// TurnCount is the number of `token_count` events in the rollout. Codex
-	// emits one per API roundtrip (tool-using round or final response), which
-	// matches Claude's `num_turns` semantics. The codex-tui originator
-	// records exactly one `agent_message` per run regardless of how many
-	// rounds the agent went through, so counting that instead would always
-	// report 1 — see commit history.
+	// TurnCount is the number of `token_count` events in the rollout — one
+	// per API roundtrip, matching Claude's `num_turns` semantics. The
+	// codex-tui originator only writes a single `agent_message` per run
+	// regardless of tool-use rounds, so that field can't be used.
 	TurnCount int
 }
 
