@@ -551,7 +551,7 @@ ateam inspect --last --auto-debug --extra-prompt "focus on the timeout"
 
 The debug prompt uses the standard 3-level fallback (`supervisor/exec_debug_prompt.md`). Debug reports are saved to `.ateam/logs/supervisor/`.
 
-When the selected row is a resumable run (`claude`, `codex`, or `codex-tmux`) with a recoverable session id, `inspect` prints a one-line `resume:` hint pointing at `ateam resume <id>`.
+When the selected row is a resumable run (`claude`, `codex`, or `codex-tmux`) with a recoverable session id, `inspect` prints a two-line `resume:` block — the `ateam resume <id>` shortcut plus the agent-native command (`claude --resume <sid>` or `codex resume --include-non-interactive <sid>`). The native line honors `ATEAM_RESUME_*_CMD` overrides (see [`ateam resume`](#ateam-resume-exec_id) below) so the printed command matches what would actually run.
 
 ### `ateam resume [EXEC_ID]`
 

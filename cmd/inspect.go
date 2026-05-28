@@ -104,6 +104,9 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 			streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.StreamFile)
 			if sid, err := extractSessionID(streamPath); err == nil && sid != "" {
 				fmt.Printf("  resume:  ateam resume %d\n", r.ID)
+				// Native command (honors ATEAM_RESUME_*_CMD overrides) so
+				// operators can copy-paste without going through ateam.
+				fmt.Printf("           %s\n", resumeNativeCommandLine(r.Agent, sid))
 			}
 		}
 	}

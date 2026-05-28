@@ -435,3 +435,12 @@ func joinCmd(cmd string, args []string) string {
 	}
 	return cmd + " " + strings.Join(args, " ")
 }
+
+// resumeNativeCommandLine returns the agent-native resume command line
+// (honoring ATEAM_RESUME_*_CMD env vars). Shared by `ateam resume` (for
+// the `Command:` line) and `ateam inspect` (for the resume hint), so
+// both surfaces stay consistent.
+func resumeNativeCommandLine(agentName, sessionID string) string {
+	bin, args := resumeCommand(agentName, sessionID)
+	return joinCmd(bin, args)
+}

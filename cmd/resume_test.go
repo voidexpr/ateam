@@ -134,6 +134,30 @@ func TestResumeBinaryFallback(t *testing.T) {
 	}
 }
 
+func TestResumeNativeCommandLine(t *testing.T) {
+	t.Setenv(envResumeClaudeCmd, "")
+	t.Setenv(envResumeCodexCmd, "")
+
+	cases := map[string]string{
+		"claude":     "claude --resume abc",
+		"codex":      "codex resume --include-non-interactive abc",
+		"codex-tmux": "codex resume --include-non-interactive abc",
+	}
+	for agent, want := range cases {
+		if got := resumeNativeCommandLine(agent, "abc"); got != want {
+			t.Errorf("agent=%s: %q, want %q", agent, got, want)
+		}
+	}
+
+	// Env override flows through to the shared formatter (this is what
+	// `ateam inspect` uses when surfacing the resume hint).
+	t.Setenv(envResumeCodexCmd, "/opt/codex --foo")
+	want := "/opt/codex --foo resume --include-non-interactive abc"
+	if got := resumeNativeCommandLine("codex-tmux", "abc"); got != want {
+		t.Errorf("codex env override: %q, want %q", got, want)
+	}
+}
+
 func TestIsResumableAgent(t *testing.T) {
 	for _, a := range []string{"claude", "codex", "codex-tmux"} {
 		if !isResumableAgent(a) {
