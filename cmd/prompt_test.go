@@ -15,7 +15,7 @@ import (
 func savePromptGlobals() func() {
 	role, sup, action := promptRole, promptSupervisor, promptAction
 	extra, noPI, ipr := promptExtraPrompt, promptNoProjectInfo, promptIgnorePreviousReport
-	files := promptFilesOnly
+	prev, content, show := promptPreview, promptPreviewContent, promptShowFiles
 	return func() {
 		promptRole = role
 		promptSupervisor = sup
@@ -23,7 +23,9 @@ func savePromptGlobals() func() {
 		promptExtraPrompt = extra
 		promptNoProjectInfo = noPI
 		promptIgnorePreviousReport = ipr
-		promptFilesOnly = files
+		promptPreview = prev
+		promptPreviewContent = content
+		promptShowFiles = show
 	}
 }
 
@@ -63,7 +65,6 @@ func TestPromptRoleDryRun(t *testing.T) {
 	promptRole = "testing_basic"
 	promptAction = runner.ActionReport
 	promptSupervisor = false
-	promptFilesOnly = false
 
 	var runErr error
 	out := captureStdout(t, func() {
@@ -79,17 +80,18 @@ func TestPromptRoleDryRun(t *testing.T) {
 	}
 }
 
-// TestPromptFilesOnlyListsAllSources verifies that --files-only prints the
-// list of prompt sources (with a TOTAL row) to stdout instead of the prompt
-// content. This is a read-only smoke test.
-func TestPromptFilesOnlyListsAllSources(t *testing.T) {
+// TestPromptPreviewListsAllSources verifies that --preview prints the
+// per-section breakdown with anchor, path, mod-time, and token columns,
+// plus a TOTAL row. Replaces the old --files-only smoke test that was
+// removed alongside the flag.
+func TestPromptPreviewListsAllSources(t *testing.T) {
 	defer savePromptGlobals()()
 	projPath := setupPromptProject(t)
 
 	promptRole = "testing_basic"
 	promptAction = runner.ActionReport
 	promptSupervisor = false
-	promptFilesOnly = true
+	promptPreview = true
 
 	var runErr error
 	out := captureStdout(t, func() {
@@ -98,11 +100,11 @@ func TestPromptFilesOnlyListsAllSources(t *testing.T) {
 		})
 	})
 	if runErr != nil {
-		t.Fatalf("runPrompt --files-only: %v", runErr)
+		t.Fatalf("runPrompt --preview: %v", runErr)
 	}
-	for _, want := range []string{"PATH", "EST. TOKENS", "TOTAL"} {
+	for _, want := range []string{"SLOT", "ANCHOR", "PATH", "LAST MODIFIED", "EST. TOKENS", "TOTAL"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("expected %q in --files-only output:\n%s", want, out)
+			t.Errorf("expected %q in --preview output:\n%s", want, out)
 		}
 	}
 }

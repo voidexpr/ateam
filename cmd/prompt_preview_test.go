@@ -185,7 +185,6 @@ func resetPromptFlags() {
 	promptExtraPrompt = ""
 	promptNoProjectInfo = false
 	promptIgnorePreviousReport = false
-	promptFilesOnly = false
 }
 
 // setupMinimalAteamProject creates a tempdir with a minimal .ateam/config.toml

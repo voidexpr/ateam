@@ -3,12 +3,14 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
@@ -21,7 +23,6 @@ var (
 	promptNoProjectInfo        bool
 	promptIgnorePreviousReport bool
 	promptSupervisor           bool
-	promptFilesOnly            bool
 	promptPreview              bool
 	promptPreviewContent       bool
 	promptShowFiles            bool
@@ -40,7 +41,8 @@ Example:
   ateam prompt --supervisor --action review
   ateam prompt --supervisor --action code
   ateam prompt --supervisor --action verify
-  ateam prompt --role security --action report --files-only`,
+  ateam prompt --role security --action report --preview
+  ateam prompt --role security --action report --show-files`,
 	Args: cobra.NoArgs,
 	RunE: runPrompt,
 }
@@ -52,8 +54,7 @@ func init() {
 	promptCmd.Flags().StringVar(&promptExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
 	promptCmd.Flags().BoolVar(&promptNoProjectInfo, "no-project-info", false, "omit ateam project context from the prompt")
 	promptCmd.Flags().BoolVar(&promptIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
-	promptCmd.Flags().BoolVar(&promptFilesOnly, "files-only", false, "list prompt sources with token estimates instead of printing the prompt")
-	promptCmd.Flags().BoolVar(&promptPreview, "preview", false, "assemble via the v1 assembler and print a per-section breakdown (anchor + path + slot)")
+	promptCmd.Flags().BoolVar(&promptPreview, "preview", false, "assemble via the v1 assembler and print a per-section breakdown (slot + anchor + path + mod time + tokens)")
 	promptCmd.Flags().BoolVar(&promptPreviewContent, "content", false, "with --preview, also print the full assembled text")
 	promptCmd.Flags().BoolVar(&promptShowFiles, "show-files", false, "assemble via the v1 assembler and print each section interleaved with anchor/path markers; troubleshooting view, not for agent consumption")
 	promptCmd.MarkFlagsMutuallyExclusive("role", "supervisor")
@@ -108,11 +109,6 @@ func runPromptRole() error {
 		sources = prompts.TraceRoleCodePromptSources(env.OrgDir, env.ProjectDir, promptRole, env.WorkDir, extraPrompt, pinfo)
 	}
 
-	if promptFilesOnly {
-		printPromptSources(os.Stdout, sources)
-		return nil
-	}
-
 	var assembled string
 	switch promptAction {
 	case runner.ActionReport:
@@ -156,11 +152,6 @@ func runPromptSupervisor() error {
 		sources = prompts.TraceCodeManagementPromptSources(env.OrgDir, env.ProjectDir, pinfo, env.ReviewPath(), extraPrompt)
 	case runner.ActionVerify:
 		sources = prompts.TraceCodeVerifyPromptSources(env.OrgDir, env.ProjectDir, pinfo, extraPrompt)
-	}
-
-	if promptFilesOnly {
-		printPromptSources(os.Stdout, sources)
-		return nil
 	}
 
 	var assembled string
@@ -221,12 +212,20 @@ func runPromptPreview() error {
 		return err
 	}
 
+	anchorFS := anchorFSMap(a)
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintf(w, "Assembly for %q (%d sections)\n\n", promptPath, len(res.Sections))
-	fmt.Fprintln(w, "SLOT\tANCHOR\tPATH")
+	fmt.Fprintln(w, "SLOT\tANCHOR\tPATH\tLAST MODIFIED\tEST. TOKENS")
+	var totalTokens int
 	for _, s := range res.Sections {
-		fmt.Fprintf(w, "%s\t[%s]\t%s\n", s.Slot, s.Anchor, displayAnchorPath(env, s.Anchor, s.Path))
+		toks := prompts.EstimateTokens(s.Content)
+		totalTokens += toks
+		fmt.Fprintf(w, "%s\t[%s]\t%s\t%s\t%s\n",
+			s.Slot, s.Anchor, displayAnchorPath(env, s.Anchor, s.Path),
+			sectionModTime(anchorFS, s.Anchor, s.Path),
+			display.FmtTokens(int64(toks)))
 	}
+	fmt.Fprintf(w, "TOTAL\t\t\t\t%s\n", display.FmtTokens(int64(totalTokens)))
 	w.Flush()
 
 	if promptPreviewContent {
@@ -235,6 +234,39 @@ func runPromptPreview() error {
 		fmt.Println(res.Prompt)
 	}
 	return nil
+}
+
+// anchorFSMap indexes an Assembler's anchors by name so the preview can
+// stat each section's source file via the FS that owns it (project's
+// os.DirFS gives real mod times; the embedded anchor's fs.Sub gives a
+// zero time, which sectionModTime renders as "embedded").
+func anchorFSMap(a *assembler.Assembler) map[string]fs.FS {
+	anchors := a.Anchors()
+	out := make(map[string]fs.FS, len(anchors))
+	for _, anc := range anchors {
+		out[anc.Name] = anc.FS
+	}
+	return out
+}
+
+// sectionModTime stats path against the anchor's FS and returns a
+// human-readable mod-time string. Embedded files have no meaningful mtime
+// (embed.FS reports the zero time) and surface as "embedded"; stat
+// failures surface as "-".
+func sectionModTime(anchorFS map[string]fs.FS, anchor, path string) string {
+	fsys, ok := anchorFS[anchor]
+	if !ok {
+		return "-"
+	}
+	info, err := fs.Stat(fsys, path)
+	if err != nil {
+		return "-"
+	}
+	t := info.ModTime()
+	if t.IsZero() {
+		return "embedded"
+	}
+	return display.FmtDateAge(t)
 }
 
 // runPromptShowFiles assembles the prompt via the v1 pipeline and prints
