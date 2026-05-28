@@ -26,11 +26,15 @@ import (
 //
 // Previous report inclusion mirrors the legacy "no prior" sentinel so the
 // agent's "merge old report" workflow gets the same signal in either branch.
-func assembleRoleReportV1(env *root.ResolvedEnv, roleID, extraPrompt string, skipPreviousReport bool) (string, error) {
+//
+// roleLabel feeds the {{project.info}} block (typically "role <roleID>");
+// pass "" to suppress the project info section entirely — matches the
+// legacy `--no-project-info` flag's behavior.
+func assembleRoleReportV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt string, skipPreviousReport bool) (string, error) {
 	promptPath := "report/" + roleID
 
 	a := env.Assembler()
-	vars := env.BuildAssemblerVars(promptPath, "role "+roleID, "report")
+	vars := env.BuildAssemblerVars(promptPath, roleLabel, "report")
 	res, err := a.Assemble(promptPath, vars, nil)
 	if err != nil {
 		return "", err
@@ -40,6 +44,28 @@ func assembleRoleReportV1(env *root.ResolvedEnv, roleID, extraPrompt string, ski
 	if !skipPreviousReport {
 		prompt += "\n\n---\n\n" + previousReportBlock(env, roleID)
 	}
+	if extraPrompt != "" {
+		prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
+	}
+	return prompt, nil
+}
+
+// assembleRoleCodeV1 is the role-templated counterpart for "code" actions —
+// `ateam prompt --role X --action code` (and any future per-role code
+// command). No previous-report block: code prompts never include the
+// prior report, since the source of truth for "what changed" is the git
+// history of the patch the role will land.
+//
+// roleLabel feeds {{project.info}}; pass "" to suppress.
+func assembleRoleCodeV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt string) (string, error) {
+	promptPath := "code/" + roleID
+	a := env.Assembler()
+	vars := env.BuildAssemblerVars(promptPath, roleLabel, "code")
+	res, err := a.Assemble(promptPath, vars, nil)
+	if err != nil {
+		return "", err
+	}
+	prompt := res.Prompt
 	if extraPrompt != "" {
 		prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
 	}

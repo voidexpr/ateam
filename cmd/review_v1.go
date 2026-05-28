@@ -32,7 +32,9 @@ import (
 // Returns the same ReviewEmptyError as the legacy path when the selector's
 // filters eliminate every report, so the cmd-level error handler stays
 // unchanged.
-func assembleReviewV1(env *root.ResolvedEnv, selector prompts.ReviewSelector, extraPrompt string) (string, error) {
+// roleLabel feeds {{project.info}} ("the supervisor" for live runs); pass
+// "" to suppress.
+func assembleReviewV1(env *root.ResolvedEnv, selector prompts.ReviewSelector, roleLabel, extraPrompt string) (string, error) {
 	all, err := prompts.DiscoverReports(env.ProjectDir)
 	if err != nil {
 		return "", err
@@ -46,7 +48,7 @@ func assembleReviewV1(env *root.ResolvedEnv, selector prompts.ReviewSelector, ex
 	}
 
 	a := env.Assembler()
-	vars := env.BuildAssemblerVars("review", "the supervisor", "review")
+	vars := env.BuildAssemblerVars("review", roleLabel, "review")
 	res, err := a.Assemble("review", vars, nil)
 	if err != nil {
 		return "", err

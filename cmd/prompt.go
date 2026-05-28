@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"strings"
@@ -94,31 +93,22 @@ func runPromptRole() error {
 		return err
 	}
 
-	var pinfo prompts.ProjectInfoParams
-	if !promptNoProjectInfo {
-		pinfo = env.NewProjectInfoParams("role "+promptRole, promptAction)
-	}
-
-	var sources []prompts.PromptSource
-	switch promptAction {
-	case runner.ActionReport:
-		sources = prompts.TraceRolePromptSources(env.OrgDir, env.ProjectDir, promptRole, env.WorkDir, extraPrompt, pinfo, promptIgnorePreviousReport)
-	case runner.ActionCode:
-		sources = prompts.TraceRoleCodePromptSources(env.OrgDir, env.ProjectDir, promptRole, env.WorkDir, extraPrompt, pinfo)
+	roleLabel := "role " + promptRole
+	if promptNoProjectInfo {
+		roleLabel = ""
 	}
 
 	var assembled string
 	switch promptAction {
 	case runner.ActionReport:
-		assembled, err = prompts.AssembleRolePrompt(env.OrgDir, env.ProjectDir, promptRole, env.WorkDir, extraPrompt, pinfo, promptIgnorePreviousReport)
+		assembled, err = assembleRoleReportV1(env, promptRole, roleLabel, extraPrompt, promptIgnorePreviousReport)
 	case runner.ActionCode:
-		assembled, err = prompts.AssembleRoleCodePrompt(env.OrgDir, env.ProjectDir, promptRole, env.WorkDir, extraPrompt, pinfo)
+		assembled, err = assembleRoleCodeV1(env, promptRole, roleLabel, extraPrompt)
 	}
 	if err != nil {
 		return err
 	}
 	fmt.Println(assembled)
-	printPromptSources(os.Stderr, sources)
 	return nil
 }
 
@@ -137,39 +127,40 @@ func runPromptSupervisor() error {
 		return err
 	}
 
-	var pinfo prompts.ProjectInfoParams
-	if !promptNoProjectInfo {
-		pinfo = env.NewProjectInfoParams("the supervisor", promptAction)
-	}
-
-	var sources []prompts.PromptSource
-	switch promptAction {
-	case runner.ActionReview:
-		sources = prompts.TraceReviewPromptSources(env.OrgDir, env.ProjectDir, pinfo, extraPrompt)
-	case runner.ActionCode:
-		sources = prompts.TraceCodeManagementPromptSources(env.OrgDir, env.ProjectDir, pinfo, env.ReviewPath(), extraPrompt)
-	case runner.ActionVerify:
-		sources = prompts.TraceCodeVerifyPromptSources(env.OrgDir, env.ProjectDir, pinfo, extraPrompt)
+	roleLabel := "the supervisor"
+	if promptNoProjectInfo {
+		roleLabel = ""
 	}
 
 	var assembled string
 	switch promptAction {
 	case runner.ActionReview:
-		assembled, err = prompts.AssembleReviewPrompt(env.OrgDir, env.ProjectDir, pinfo, extraPrompt, "", prompts.ReviewSelector{}, env.Config.Roles)
+		assembled, err = assembleReviewV1(env, prompts.ReviewSelector{}, roleLabel, extraPrompt)
 	case runner.ActionCode:
 		reviewContent, readErr := os.ReadFile(env.ReviewPath())
 		if readErr != nil {
 			return errNoReview(env.ReviewPath())
 		}
-		assembled, err = prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.WorkDir, pinfo, string(reviewContent), "", extraPrompt)
+		// Supervisor body + Review + (extra) — same shape cmd/code.go's
+		// default branch produces; keep them in lockstep so preview
+		// matches what the real run sends.
+		a := env.Assembler()
+		vars := env.BuildAssemblerVars("code_management", roleLabel, "code")
+		res, asmErr := a.Assemble("code_management", vars, nil)
+		if asmErr != nil {
+			return asmErr
+		}
+		assembled = res.Prompt + "\n\n---\n\n# Review\n\n" + string(reviewContent)
+		if extraPrompt != "" {
+			assembled += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
+		}
 	case runner.ActionVerify:
-		assembled, err = prompts.AssembleCodeVerifyPrompt(env.OrgDir, env.ProjectDir, pinfo, extraPrompt)
+		assembled, err = assembleSupervisorV1(env, "code_verify", roleLabel, "verify", extraPrompt)
 	}
 	if err != nil {
 		return err
 	}
 	fmt.Println(assembled)
-	printPromptSources(os.Stderr, sources)
 	return nil
 }
 
@@ -375,21 +366,4 @@ func promptPathForCurrentFlags() (path, label string, err error) {
 		return "code/" + promptRole, "role " + promptRole, nil
 	}
 	return "", "", fmt.Errorf("invalid action %q for role: must be 'report' or 'code'", promptAction)
-}
-
-func printPromptSources(out io.Writer, sources []prompts.PromptSource) {
-	w := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(w, "PATH\tLAST MODIFIED\tEST. TOKENS")
-	var totalTokens int
-	for _, s := range sources {
-		tokens := prompts.EstimateTokens(s.Content)
-		totalTokens += tokens
-		modified := ""
-		if !s.ModTime.IsZero() {
-			modified = display.FmtDateAge(s.ModTime)
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\n", s.DisplayPath(), modified, display.FmtTokens(int64(tokens)))
-	}
-	fmt.Fprintf(w, "TOTAL\t\t%s\n", display.FmtTokens(int64(totalTokens)))
-	w.Flush()
 }

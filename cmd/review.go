@@ -186,7 +186,7 @@ func runReview(opts ReviewOptions) error {
 	if customPrompt == "" {
 		// Default: assemble via the v1 pipeline so user-authored review.pre.*
 		// / review.post.* fragments and {{project.info}} get picked up.
-		prompt, err = assembleReviewV1(env, selector, extraPrompt)
+		prompt, err = assembleReviewV1(env, selector, "the supervisor", extraPrompt)
 	} else {
 		// --prompt overrides the supervisor body wholesale; keep the legacy
 		// path for that branch until the new assembler has a "replace role
