@@ -84,7 +84,7 @@ claude_pid=""
 if [ ! -s "$claude_file" ]; then
   step "claude review ($claude_agent, $mode) → $claude_file"
   ateam exec --agent "$claude_agent" --action "code-review" --role claude <<EOF &
-/code-review $mode $focus, write results to $claude_file
+/code-review $mode --fix $focus, write results to $claude_file
 EOF
   claude_pid=$!
 else
