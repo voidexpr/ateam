@@ -58,98 +58,6 @@ func TestReadWith3LevelFallback(t *testing.T) {
 	}
 }
 
-// setupMinimalRole creates the minimum structure for AssembleRolePrompt to work:
-// a role prompt file at defaults level.
-func setupMinimalRole(t *testing.T, orgDir, projectDir, roleID string) {
-	t.Helper()
-	roleDir := filepath.Join(orgDir, "defaults", "roles", roleID)
-	_ = os.MkdirAll(roleDir, 0755)
-	_ = os.WriteFile(filepath.Join(roleDir, ReportPromptFile), []byte("role prompt"), 0644)
-
-	roleProjectDir := filepath.Join(projectDir, "roles", roleID)
-	_ = os.MkdirAll(roleProjectDir, 0755)
-}
-
-func TestAssembleRolePromptIncludesPreviousReport(t *testing.T) {
-	base := t.TempDir()
-	orgDir := filepath.Join(base, "org")
-	projectDir := filepath.Join(base, "project")
-	roleID := "security"
-
-	setupMinimalRole(t, orgDir, projectDir, roleID)
-
-	reportPath := filepath.Join(projectDir, "roles", roleID, ReportFile)
-	_ = os.WriteFile(reportPath, []byte("previous findings here"), 0644)
-
-	result, err := AssembleRolePrompt(orgDir, projectDir, roleID, base, "", ProjectInfoParams{}, false)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(result, "# Previous Report") {
-		t.Error("expected '# Previous Report' section in prompt")
-	}
-	if !strings.Contains(result, "It might be outdated but it will give you some context") {
-		t.Error("expected context instructions in Previous Report header")
-	}
-	if !strings.Contains(result, "previous findings here") {
-		t.Errorf("expected previous report content in prompt, got:\n%s", result)
-	}
-}
-
-func TestAssembleRolePromptSkipPreviousReport(t *testing.T) {
-	base := t.TempDir()
-	orgDir := filepath.Join(base, "org")
-	projectDir := filepath.Join(base, "project")
-	roleID := "security"
-
-	setupMinimalRole(t, orgDir, projectDir, roleID)
-
-	reportPath := filepath.Join(projectDir, "roles", roleID, ReportFile)
-	_ = os.WriteFile(reportPath, []byte("previous findings here"), 0644)
-
-	result, err := AssembleRolePrompt(orgDir, projectDir, roleID, base, "", ProjectInfoParams{}, true)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	// Match the section header, not the backtick-quoted reference that
-	// may appear in the base prompt's merging instructions.
-	if strings.Contains(result, "# Previous Report\n") {
-		t.Error("previous report section should be excluded when skipPreviousReport=true")
-	}
-	if strings.Contains(result, "previous findings here") {
-		t.Error("previous report content should be excluded when skipPreviousReport=true")
-	}
-	if strings.Contains(result, "# Prior Report Status") {
-		t.Error("prior-report-status notice should be excluded when skipPreviousReport=true")
-	}
-}
-
-func TestAssembleRolePromptNoPreviousReportFile(t *testing.T) {
-	base := t.TempDir()
-	orgDir := filepath.Join(base, "org")
-	projectDir := filepath.Join(base, "project")
-	roleID := "security"
-
-	setupMinimalRole(t, orgDir, projectDir, roleID)
-
-	// No report.md exists — should succeed with a "Prior Report Status" notice
-	// instead of a "# Previous Report" section, so the agent knows the absence
-	// is intentional and doesn't snoop disk for one.
-	result, err := AssembleRolePrompt(orgDir, projectDir, roleID, base, "", ProjectInfoParams{}, false)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if strings.Contains(result, "# Previous Report\n") {
-		t.Error("should not contain '# Previous Report' section when no report file exists")
-	}
-	if !strings.Contains(result, "# Prior Report Status") {
-		t.Errorf("expected '# Prior Report Status' notice when no prior report, got:\n%s", result)
-	}
-	if !strings.Contains(result, "No prior report exists for this role") {
-		t.Error("expected explicit absence notice in Prior Report Status block")
-	}
-}
-
 func TestEnabledRoleIDsAllowlist(t *testing.T) {
 	configRoles := map[string]string{
 		"alpha":   "on",
@@ -185,20 +93,18 @@ func TestEnabledRoleIDsNilConfig(t *testing.T) {
 	}
 }
 
+// TestDotNamespacedRole exercises the IsValidRole / AllKnownRoleIDs /
+// ResolveRoleList chain for role IDs containing dots (e.g. "code.small").
+// Validity is sourced from configRoles since the v1 path scanner
+// (scanV1Roles) doesn't run against bare temp dirs — it expects
+// `<dir>/prompts/report/<id>.prompt.md`. The dotted-name handling is the
+// same regardless of where the role is registered, so configRoles alone
+// is sufficient to verify the round trip.
 func TestDotNamespacedRole(t *testing.T) {
 	base := t.TempDir()
 	orgDir := filepath.Join(base, "org")
 	projectDir := filepath.Join(base, "project")
 	roleID := "code.small"
-
-	// Filesystem discovery: dot in directory name works with flat single-level layout.
-	roleDir := filepath.Join(projectDir, "roles", roleID)
-	if err := os.MkdirAll(roleDir, 0755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(roleDir, ReportPromptFile), []byte("dotted role prompt"), 0644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
 
 	configRoles := map[string]string{
 		"code.small": "on",
@@ -227,15 +133,6 @@ func TestDotNamespacedRole(t *testing.T) {
 	}
 	if len(resolved) != 2 || resolved[0] != "code.small" || resolved[1] != "security" {
 		t.Errorf("ResolveRoleList = %v, want [code.small security]", resolved)
-	}
-
-	// Prompt assembly: AssembleRolePrompt finds the dotted role on disk.
-	result, err := AssembleRolePrompt(orgDir, projectDir, roleID, base, "", ProjectInfoParams{}, true)
-	if err != nil {
-		t.Fatalf("AssembleRolePrompt(%q): %v", roleID, err)
-	}
-	if !strings.Contains(result, "dotted role prompt") {
-		t.Errorf("expected role prompt content in assembled prompt, got:\n%s", result)
 	}
 }
 
@@ -513,70 +410,6 @@ func TestResolveValueFile(t *testing.T) {
 	}
 }
 
-func TestAssembleCodeVerifyPrompt(t *testing.T) {
-	base := t.TempDir()
-	orgDir := filepath.Join(base, "org")
-	projectDir := filepath.Join(base, "project")
-
-	// Place stub at org-defaults/supervisor level so the 3-level fallback finds it.
-	supervisorDir := filepath.Join(orgDir, "defaults", "supervisor")
-	if err := os.MkdirAll(supervisorDir, 0755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	stubBody := "verify the code changes carefully"
-	if err := os.WriteFile(filepath.Join(supervisorDir, CodeVerifyPromptFile), []byte(stubBody), 0644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	pinfo := ProjectInfoParams{
-		ProjectName: "myapp",
-		Role:        "the supervisor",
-	}
-
-	t.Run("without extra prompt", func(t *testing.T) {
-		result, err := AssembleCodeVerifyPrompt(orgDir, projectDir, pinfo, "")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !strings.Contains(result, "# ATeam Project Context") {
-			t.Error("missing project-info header")
-		}
-		if !strings.Contains(result, stubBody) {
-			t.Errorf("missing prompt body %q in:\n%s", stubBody, result)
-		}
-		if strings.Contains(result, "# Additional Instructions") {
-			t.Error("unexpected Additional Instructions section when extraPrompt is empty")
-		}
-	})
-
-	t.Run("with extra prompt appended last", func(t *testing.T) {
-		extra := "run the full test suite first"
-		result, err := AssembleCodeVerifyPrompt(orgDir, projectDir, pinfo, extra)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !strings.Contains(result, "# ATeam Project Context") {
-			t.Error("missing project-info header")
-		}
-		if !strings.Contains(result, stubBody) {
-			t.Errorf("missing prompt body %q", stubBody)
-		}
-		if !strings.Contains(result, "# Additional Instructions") {
-			t.Error("missing Additional Instructions section")
-		}
-		if !strings.Contains(result, extra) {
-			t.Errorf("missing extra prompt content %q", extra)
-		}
-		// Project info must appear before the prompt body, which must appear before extra.
-		headerIdx := strings.Index(result, "# ATeam Project Context")
-		bodyIdx := strings.Index(result, stubBody)
-		extraIdx := strings.Index(result, "# Additional Instructions")
-		if headerIdx >= bodyIdx || bodyIdx >= extraIdx {
-			t.Errorf("sections out of order: header=%d body=%d extra=%d", headerIdx, bodyIdx, extraIdx)
-		}
-	})
-}
-
 func TestAssembleCodeManagementPrompt(t *testing.T) {
 	base := t.TempDir()
 	orgDir := filepath.Join(base, "org")
@@ -660,46 +493,6 @@ func TestAssembleCodeManagementPrompt(t *testing.T) {
 				headerIdx, bodyIdx, reviewIdx, extraIdx)
 		}
 	})
-}
-
-func TestAssembleAutoRolesPrompt(t *testing.T) {
-	base := t.TempDir()
-	orgDir := filepath.Join(base, "org")
-	projectDir := filepath.Join(base, "project")
-
-	supervisorDir := filepath.Join(orgDir, "defaults", "supervisor")
-	if err := os.MkdirAll(supervisorDir, 0755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	stubBody := "recommend which roles to run, ending with " + AutoRolesMarker
-	if err := os.WriteFile(filepath.Join(supervisorDir, ReportAutoRolesPromptFile), []byte(stubBody), 0644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	pinfo := ProjectInfoParams{
-		ProjectName: "myapp",
-		Role:        "the supervisor",
-	}
-
-	result, err := AssembleAutoRolesPrompt(orgDir, projectDir, pinfo)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result == "" {
-		t.Fatal("expected non-empty result")
-	}
-	if !strings.Contains(result, "# ATeam Project Context") {
-		t.Error("missing project-info header")
-	}
-	if !strings.Contains(result, stubBody) {
-		t.Errorf("missing prompt body %q in:\n%s", stubBody, result)
-	}
-	// Project info must appear before the prompt body.
-	headerIdx := strings.Index(result, "# ATeam Project Context")
-	bodyIdx := strings.Index(result, stubBody)
-	if headerIdx < 0 || bodyIdx < 0 || headerIdx >= bodyIdx {
-		t.Errorf("sections out of order: header=%d body=%d", headerIdx, bodyIdx)
-	}
 }
 
 func TestResolveValueStdin(t *testing.T) {

@@ -96,12 +96,16 @@ Code-review fixes wave (6503a77, 458d915):
 - ✅ **`assembleRoleCodeV1`** — emits a clear "no code prompt defined for role X" message (wrapping the assembler's "no role main" error) for the ~37 of 40 embedded roles without a per-role code prompt.
 - ✅ **`cmd/roles.go`** dead markdown link fixed; ROLES.md regenerated.
 
+Step 5 wave (dead-code cleanup):
+- ✅ **Step 5 (Option B) done** — deleted 6 dead `Assemble*` (`AssembleRolePrompt`, `AssembleRoleCodePrompt`, `AssembleCodeVerifyPrompt`, `AssembleAutoRolesPrompt`, `AssembleAutoSetupPrompt`, `AssembleExecDebugPrompt`), 5 dead `Trace*` (`TraceRolePromptSources`, `TraceRoleCodePromptSources`, `TraceReviewPromptSources`, `TraceCodeVerifyPromptSources`, `TraceCodeManagementPromptSources`), plus all helpers used only by them (`assembleRoleAction`, `collectRoleExtras`, `assembleSupervisorPrompt`, `traceRoleAction`, `traceSupervisorSources`, `traceExistingFiles`, `traceFile`, `readFileWithModTime`, `formatAge`). Tests for deleted functions removed. `TestIntegration_3LevelPromptFallback` deleted (no v1 equivalent — the 3-level fallback is a legacy artifact). Net −800 lines.
+- Survivors: `AssembleReviewPrompt` + `AssembleCodeManagementPrompt` (still used by `cmd/review.go` / `cmd/code.go` `--prompt` override branches, both via their customPrompt branch — the non-custom branch is dead but reachable via the surviving wrappers and harmless). `readWith3LevelFallback` / `readFileOr3Level` / `traceFileOr3Level` survive as their backing helpers.
+
 ### Remaining
 
 Loose ends, ordered by recommended sequence:
 
 4. **`code.go` per-exec destination design** — biggest remaining structural decision. See Step 4 detail below.
-5. **Drop dead legacy `prompts.AssembleXxx` AND `prompts.Trace*` functions** — only `AssembleReviewPrompt` / `AssembleCodeManagementPrompt` retain live callers (the `--prompt` override branches in `cmd/review.go` / `cmd/code.go`). All Trace* are dead after the web rewire. See Step 5 detail.
+5a. **(Optional) Step 5 Option A** — replace the two surviving `Assemble*` functions with a v1 "replace role main" surface so the `--prompt` branches in `cmd/review.go` / `cmd/code.go` go through the same path as the default branches. Closely related to Task 8 (`--pre-prompt` / `--post-prompt` normalization); design together. Would let us delete the remaining `readWith3LevelFallback` family.
 6. **Primary-output filename rename** — `shared/report/<R>/report.md` → `shared/report/<R>/<R>.md` per spec. See Step 6.
 7. **Drop legacy dual-read in env helpers** — `RoleReportPath` / `ReviewPath` / `VerifyPath` in `internal/root/resolve.go` still stat the pre-migration paths. Post-release cleanup; not blocking v1.
 8. **Phase F verification** — golden prompt diff, idempotence under load, real-project migration tests.

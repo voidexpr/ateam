@@ -1,26 +1,21 @@
-// Package prompts handles prompt template assembly and rendering for agent execution.
+// Package prompts hosts the supporting types and helpers around prompt
+// assembly. The v1 composition pipeline lives in internal/prompts/assembler
+// (anchor-based filename-driven composition); this package keeps the
+// runtime-side surfaces that aren't part of that pipeline:
 //
-// # Fallback hierarchy
-//
-// Every role and base prompt is resolved through a 4-level hierarchy, tried in order:
-//
-//  1. Project level  – .ateam/<file> or .ateam/roles/<role>/<file>
-//  2. Org level      – .ateamorg/<file> or .ateamorg/roles/<role>/<file>
-//  3. Org-defaults   – .ateamorg/defaults/<file> or .ateamorg/defaults/roles/<role>/<file>
-//  4. Embedded       – the defaults bundled into the binary via defaults.FS
-//
-// For role prompts and base prompts the first non-empty file found wins (first-found).
-// Extra prompts (*_extra_prompt.md) are additive: all four levels that contain a
-// non-empty file contribute, concatenated in order (org-broad → org-role → project-broad
-// → project-role).
-//
-// # Debugging prompt sources
-//
-// The Trace* functions in trace.go (TraceRolePromptSources, TraceRoleCodePromptSources,
-// TraceReviewPromptSources, TraceCodeManagementPromptSources) return the list of
-// PromptSource entries that would be assembled for a given call, without actually
-// assembling the prompt. Use these to inspect which files contribute and estimate
-// token counts.
+//   - Report discovery (DiscoverReports, ReviewSelector, RoleReport)
+//   - Project-info formatting (FormatProjectInfo, ProjectInfoParams)
+//   - Frontmatter + role metadata (ParsePromptFrontmatter, RoleMeta, AllRoleIDs,
+//     IsValidRole, AllKnownRoleIDs) — see embed.go
+//   - Token estimation + display helpers (EstimateTokens, PromptSource)
+//   - Embedded-defaults installation (DiffOrgDefaults, WriteOrgDefaults)
+//   - The two surviving legacy AssembleXxxPrompt functions that the
+//     `--prompt` override branches in cmd/review.go / cmd/code.go still
+//     route through (AssembleReviewPrompt, AssembleCodeManagementPrompt).
+//     Their non-custom branches read via the legacy 3-level fallback
+//     helpers (readWith3LevelFallback / readFileOr3Level); those branches
+//     are dead in practice (the default paths go through the v1 helpers
+//     in cmd/*_v1.go) but reach compile-time validity via these wrappers.
 package prompts
 
 import (
@@ -101,86 +96,6 @@ func ResolveOptional(value string) (string, error) {
 		return "", nil
 	}
 	return ResolveValue(value)
-}
-
-// AssembleRolePrompt builds the full prompt for a role report run.
-// When skipPreviousReport is false, the role's existing report.md is
-// included as a "Previous Report" section so the role can build on prior findings.
-func AssembleRolePrompt(orgDir, projectDir, roleID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, skipPreviousReport bool) (string, error) {
-	return assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt, pinfo,
-		ReportBasePromptFile, ReportPromptFile, ReportExtraPromptFile, skipPreviousReport)
-}
-
-// AssembleRoleCodePrompt builds the full prompt for a role code run.
-// Code prompts never include the previous report.
-func AssembleRoleCodePrompt(orgDir, projectDir, roleID, sourceDir, extraPrompt string, pinfo ProjectInfoParams) (string, error) {
-	return assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt, pinfo,
-		CodeBasePromptFile, CodePromptFile, CodeExtraPromptFile, true)
-}
-
-// Prompt sequence: ATeam Project Context → Role-specific prompt → Base prompt (format/output) → Extra prompts → Previous report → CLI extra
-func assembleRoleAction(orgDir, projectDir, roleID, sourceDir, extraPrompt string, pinfo ProjectInfoParams, baseFile, roleFile, extraFile string, skipPreviousReport bool) (string, error) {
-	rolePrompt := readFileOr3Level(
-		filepath.Join(projectDir, "roles", roleID, roleFile),
-		filepath.Join(orgDir, "roles", roleID, roleFile),
-		filepath.Join(orgDir, "defaults", "roles", roleID, roleFile),
-		filepath.Join("roles", roleID, roleFile),
-	)
-
-	basePrompt := readFileOr3Level(
-		filepath.Join(projectDir, baseFile),
-		filepath.Join(orgDir, baseFile),
-		filepath.Join(orgDir, "defaults", baseFile),
-		baseFile,
-	)
-
-	if rolePrompt == "" && basePrompt == "" {
-		return "", fmt.Errorf("no prompt found for role %s action %s", roleID, strings.TrimSuffix(roleFile, ".md"))
-	}
-
-	var parts []string
-	if info := FormatProjectInfo(pinfo); info != "" {
-		parts = append(parts, info)
-	}
-	if rolePrompt != "" {
-		_, roleBody := ParsePromptFrontmatter(rolePrompt)
-		parts = append(parts, strings.ReplaceAll(roleBody, "{{SOURCE_DIR}}", "."))
-	}
-	if basePrompt != "" {
-		parts = append(parts, strings.ReplaceAll(basePrompt, "{{SOURCE_DIR}}", "."))
-	}
-
-	extras := collectRoleExtras(orgDir, projectDir, roleID, extraFile)
-	parts = append(parts, extras...)
-
-	if !skipPreviousReport {
-		if content, modTime, err := readFileWithModTime(filepath.Join(projectDir, "roles", roleID, ReportFile)); err == nil && content != "" {
-			age := time.Since(modTime)
-			header := fmt.Sprintf("# Previous Report\n\nWhat follows is the previous report that was generated (and possibly updated with the tasks completed) on %s (%s ago). It might be outdated but it will give you some context of what has been done.\n\n",
-				modTime.Format(display.TimestampFormat), formatAge(age))
-			parts = append(parts, header+content)
-		} else {
-			parts = append(parts, "# Prior Report Status\n\nNo prior report exists for this role. This is a fresh cycle — disregard any \"merge prior findings\" guidance in the base prompt and produce a complete standalone report. Do not search `.ateam/` for one; it isn't there.")
-		}
-	}
-
-	if extraPrompt != "" {
-		parts = append(parts, "# Additional Instructions\n\n"+extraPrompt)
-	}
-
-	return strings.Join(parts, "\n\n---\n\n"), nil
-}
-
-// collectRoleExtras gathers extra prompt files from all levels (no defaults).
-// Order: org broad → org role-specific → project broad → project role-specific.
-func collectRoleExtras(orgDir, projectDir, roleID, extraFile string) []string {
-	paths := []string{
-		filepath.Join(orgDir, extraFile),
-		filepath.Join(orgDir, "roles", roleID, extraFile),
-		filepath.Join(projectDir, extraFile),
-		filepath.Join(projectDir, "roles", roleID, extraFile),
-	}
-	return readAllExisting(paths)
 }
 
 // collectSupervisorExtras gathers extra prompt files from org and project levels.
@@ -529,98 +444,6 @@ func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, pinfo Pr
 	return strings.Join(parts, "\n\n---\n\n"), nil
 }
 
-// AssembleCodeVerifyPrompt builds the supervisor prompt for verifying code
-// changes made by the most recent `ateam code` run. The supervisor inspects
-// recent commits and runs the test suite; no review document is included
-// because the source of truth is the git history itself.
-func AssembleCodeVerifyPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, extraPrompt string) (string, error) {
-	return assembleSupervisorPrompt(orgDir, projectDir, pinfo, CodeVerifyPromptFile, CodeVerifyExtraPromptFile, "code verify", extraPrompt, nil)
-}
-
-// AssembleAutoRolesPrompt builds the supervisor prompt that recommends which
-// roles to run this round, based on git history since the last review, prior
-// reports, the latest review file, and the last code-cycle execution report.
-// Invoked by `ateam report --auto-roles` and `ateam all --auto-roles`.
-func AssembleAutoRolesPrompt(orgDir, projectDir string, pinfo ProjectInfoParams) (string, error) {
-	return assembleSupervisorPrompt(orgDir, projectDir, pinfo, ReportAutoRolesPromptFile, "", "auto-roles", "", nil)
-}
-
-// assembleSupervisorPrompt is the shared backbone for supervisor prompts that
-// load a single prompt file via the 3-level fallback, prepend project info,
-// append supervisor extras, and optionally append a list of injected sections
-// (e.g. role reports for review) plus the CLI --extra-prompt.
-func assembleSupervisorPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, promptFile, extraFile, label, extraPrompt string, sections []string) (string, error) {
-	body, err := readWith3LevelFallback(
-		filepath.Join(projectDir, "supervisor", promptFile),
-		filepath.Join(orgDir, "supervisor", promptFile),
-		filepath.Join(orgDir, "defaults", "supervisor", promptFile),
-		filepath.Join("supervisor", promptFile),
-		label,
-	)
-	if err != nil {
-		return "", err
-	}
-
-	var parts []string
-	if info := FormatProjectInfo(pinfo); info != "" {
-		parts = append(parts, info)
-	}
-	parts = append(parts, body)
-	if extraFile != "" {
-		parts = append(parts, collectSupervisorExtras(orgDir, projectDir, extraFile)...)
-	}
-	parts = append(parts, sections...)
-	if extraPrompt != "" {
-		parts = append(parts, "# Additional Instructions\n\n"+extraPrompt)
-	}
-	return strings.Join(parts, "\n\n---\n\n"), nil
-}
-
-// AssembleAutoSetupPrompt builds the prompt for the auto-setup command.
-func AssembleAutoSetupPrompt(orgDir, projectDir string, pinfo ProjectInfoParams) (string, error) {
-	setupPrompt, err := readWith3LevelFallback(
-		filepath.Join(projectDir, "supervisor", AutoSetupPromptFile),
-		filepath.Join(orgDir, "supervisor", AutoSetupPromptFile),
-		filepath.Join(orgDir, "defaults", "supervisor", AutoSetupPromptFile),
-		filepath.Join("supervisor", AutoSetupPromptFile),
-		"auto-setup",
-	)
-	if err != nil {
-		return "", err
-	}
-
-	var parts []string
-	if info := FormatProjectInfo(pinfo); info != "" {
-		parts = append(parts, info)
-	}
-	parts = append(parts, setupPrompt)
-	return strings.Join(parts, "\n\n---\n\n"), nil
-}
-
-// AssembleExecDebugPrompt builds the prompt for the ps-files --auto-debug command.
-// debugContext contains the agent_exec metadata and file paths to investigate.
-func AssembleExecDebugPrompt(orgDir, projectDir, debugContext string, pinfo ProjectInfoParams) (string, error) {
-	debugPrompt, err := readWith3LevelFallback(
-		filepath.Join(projectDir, "supervisor", ExecDebugPromptFile),
-		filepath.Join(orgDir, "supervisor", ExecDebugPromptFile),
-		filepath.Join(orgDir, "defaults", "supervisor", ExecDebugPromptFile),
-		filepath.Join("supervisor", ExecDebugPromptFile),
-		"exec-debug",
-	)
-	if err != nil {
-		return "", err
-	}
-
-	debugPrompt = strings.ReplaceAll(debugPrompt, "{{EXEC_DEBUG_CONTEXT}}", debugContext)
-
-	var parts []string
-	if info := FormatProjectInfo(pinfo); info != "" {
-		parts = append(parts, info)
-	}
-	parts = append(parts, debugPrompt)
-	return strings.Join(parts, "\n\n---\n\n"), nil
-}
-
 // ProjectInfoParams holds the values needed to build the project info section.
 type ProjectInfoParams struct {
 	OrgDir      string // absolute path to .ateamorg/
@@ -737,48 +560,6 @@ func readFileOr3Level(projectPath, orgPath, defaultPath, embeddedPath string) st
 		}
 	}
 	return ""
-}
-
-func readFileWithModTime(path string) (string, time.Time, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return "", time.Time{}, err
-	}
-	return strings.TrimSpace(string(data)), info.ModTime(), nil
-}
-
-func formatAge(d time.Duration) string {
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		m := int(d.Minutes())
-		if m == 1 {
-			return "1 minute"
-		}
-		return fmt.Sprintf("%d minutes", m)
-	case d < 24*time.Hour:
-		h := int(d.Hours())
-		if h == 1 {
-			return "1 hour"
-		}
-		return fmt.Sprintf("%d hours", h)
-	default:
-		days := int(d.Hours() / 24)
-		if days == 1 {
-			return "1 day"
-		}
-		return fmt.Sprintf("%d days", days)
-	}
 }
 
 // WriteIfNotExists writes content to path only if the file does not already exist.
