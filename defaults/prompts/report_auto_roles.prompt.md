@@ -9,7 +9,7 @@ Ateam runs role-specific agents that audit this codebase, then a supervisor revi
 
 The harness has already collected every input you need for this decision. Read the sections below; do **not** re-run these commands.
 
-{{ATEAM_AUTO_ROLES_COMMANDS_OUTPUT}}
+{{exec.auto_roles_commands_output}}
 
 If a role name above is unfamiliar (typically a custom role added by this project), read its prompt with `ateam prompt --action report --role NAME` — that's the only tool call you should need.
 
@@ -17,7 +17,7 @@ If a role name above is unfamiliar (typically a custom role added by this projec
 
 Apply in order, stop at the first match:
 
-1. **No code changes since the last review** → recommend no roles (emit `{{AUTO_ROLES_MARKER}}` with nothing after the colon). The existing review is still current; the user can run `ateam review` manually if needed. Regenerating reports against unchanged code wastes tokens.
+1. **No code changes since the last review** → recommend no roles (emit `{{ateam.auto_roles_marker}}` with nothing after the colon). The existing review is still current; the user can run `ateam review` manually if needed. Regenerating reports against unchanged code wastes tokens.
 2. **Recent changes touched a role's territory** → run that role. Examples:
  - SQL / migration / schema → `database.schema`
  - Build / CI / lint / hooks → `project.automation`
@@ -41,7 +41,7 @@ Bias toward short role lists. Two well-chosen roles produce a better review than
 Write your recommendation to:
 
 ```
-{{OUTPUT_FILE}}
+{{exec.output_file}}
 ```
 
 The file must contain, in this order:
@@ -57,9 +57,9 @@ The file must contain, in this order:
 3. **A final marker line on its own line, no markdown formatting:**
 
    ```
-   {{AUTO_ROLES_MARKER}} X,Y
+   {{ateam.auto_roles_marker}} X,Y
    ```
 
-   Same role list as above, comma-separated, no spaces. If you recommend running no roles (everything's fresh and the existing review is current), emit exactly `{{AUTO_ROLES_MARKER}}` with nothing after the colon — ateam reads this as "no work to do".
+   Same role list as above, comma-separated, no spaces. If you recommend running no roles (everything's fresh and the existing review is current), emit exactly `{{ateam.auto_roles_marker}}` with nothing after the colon — ateam reads this as "no work to do".
 
-After the `Write` call returns successfully, your FINAL assistant message must be a single short confirmation line, e.g. `Auto-roles written to {{OUTPUT_FILE}}`. The on-disk file is the source of truth — ateam parses it directly. Do not execute any of the recommended commands.
+After the `Write` call returns successfully, your FINAL assistant message must be a single short confirmation line, e.g. `Auto-roles written to {{exec.output_file}}`. The on-disk file is the source of truth — ateam parses it directly. Do not execute any of the recommended commands.

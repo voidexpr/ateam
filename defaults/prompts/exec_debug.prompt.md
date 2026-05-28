@@ -35,4 +35,4 @@ Some keywords to use for a quick pass:
 
 ## Execution details
 
-{{EXEC_DEBUG_CONTEXT}}
+{{exec.debug_context}}

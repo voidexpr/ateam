@@ -8,10 +8,10 @@ without requesting input from humans unless absolutely necessary.
 
 - **review**: The prioritized list of tasks provided as input (see end of this prompt)
 - **task**: A single priority action from the review, with priority, description, and source role
-- **execution directory** (EXECUTION_DIR): the pre-allocated folder `{{EXECUTION_DIR}}`
+- **execution directory** (EXECUTION_DIR): the pre-allocated folder `{{exec.output_dir}}`
   storing all artifacts for this run
 - **code prompt**: The full prompt file given to a role, generated via `ateam prompt`
-- **execution report**: `{{OUTPUT_FILE}}` (i.e. `EXECUTION_DIR/execution_report.md`), tracking outcomes
+- **execution report**: `{{exec.output_file}}` (i.e. `EXECUTION_DIR/execution_report.md`), tracking outcomes
 
 ## Tools
 
@@ -54,8 +54,8 @@ The goals are:
 
 ### Phase 1: Setup
 
-1. Use the execution directory provided as `{{EXECUTION_DIR}}`. Create it with `mkdir -p` if it does not already exist. Do NOT invent a different timestamped path — the harness has already allocated this one and reads files from it.
-2. Initialize the execution report at `{{OUTPUT_FILE}}` (which is `EXECUTION_DIR/execution_report.md`) using the format below
+1. Use the execution directory provided as `{{exec.output_dir}}`. Create it with `mkdir -p` if it does not already exist. Do NOT invent a different timestamped path — the harness has already allocated this one and reads files from it.
+2. Initialize the execution report at `{{exec.output_file}}` (which is `EXECUTION_DIR/execution_report.md`) using the format below
 3. Run `ateam roles` to discover available roles
 4. make sure there are no git dirty files (untracked files are fine), if there are any abort with a clear error message
 5. review recent commits
@@ -200,9 +200,9 @@ follow along. Print status lines as you go:
   ```
 - **File operations**: print every file you create or update
   ```
-  Created: {{OUTPUT_FILE}}
+  Created: {{exec.output_file}}
   Generated: EXECUTION_DIR/01_fix_sql_injection_code_prompt.md
-  Updated: {{OUTPUT_FILE}}
+  Updated: {{exec.output_file}}
   ```
 - **Commands**: print every ateam CLI command before running it
   ```
@@ -242,10 +242,10 @@ re-read it later. Before ending your run, stop any background tasks you started.
 
 ## Critical Output Rule
 
-The on-disk file at `{{OUTPUT_FILE}}` is the source of truth — the harness reads it directly at the end of the run, so anything you stream as text is discarded.
+The on-disk file at `{{exec.output_file}}` is the source of truth — the harness reads it directly at the end of the run, so anything you stream as text is discarded.
 
 Maintain it incrementally per Phase 1-4: initialize it with `Write` during Phase 1, update it with `Edit` (append per task) during Phase 3, and finalize it with the summary section during Phase 4. Its final on-disk content is what the harness reads.
 
-After the run is fully done (all phases complete and the report is fully written to disk), your FINAL assistant message must be a single short line confirming completion, e.g. `Execution report written to {{OUTPUT_FILE}}`. Do not include the report body in the final message; do not include any other commentary.
+After the run is fully done (all phases complete and the report is fully written to disk), your FINAL assistant message must be a single short line confirming completion, e.g. `Execution report written to {{exec.output_file}}`. Do not include the report body in the final message; do not include any other commentary.
 
-If `{{OUTPUT_FILE}}` cannot be written for any reason, emit the execution report as your final message so the harness can recover it from the stream.
+If `{{exec.output_file}}` cannot be written for any reason, emit the execution report as your final message so the harness can recover it from the stream.

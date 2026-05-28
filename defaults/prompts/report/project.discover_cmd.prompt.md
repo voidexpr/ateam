@@ -9,7 +9,7 @@ This role is **active**: it writes files. That overrides the default read-only p
 
 - `.ateam/cache/test_quick.sh` — fast feedback loop. Targets the change site, skips slow tiers, finishes in seconds-to-low-minutes. Safe to run on every iteration during development.
 - `.ateam/cache/tests_all.sh` — comprehensive verification. Runs every test tier the project supports, including Docker / integration / end-to-end. Run before commit, before push, or after a structural change.
-- The standard report at `{{OUTPUT_FILE}}`.
+- The standard report at `{{exec.output_file}}`.
 
 Do not modify any other file in the project source tree.
 
@@ -100,7 +100,7 @@ Capture for future runs of this role: task runner used, test framework(s), tier 
 3. **Write `.ateam/cache/test_quick.sh`** with the `Write` tool. Then **`.ateam/cache/tests_all.sh`** the same way.
 4. Mark both executable with a Bash call: `chmod +x .ateam/cache/test_quick.sh .ateam/cache/tests_all.sh`.
 5. **Verify both run.** Execute each script. If a script fails because of a discovery mistake (wrong target name, wrong path), fix the script and re-run. Do not write the report until both scripts have run cleanly at least once.
-6. Write the report to `{{OUTPUT_FILE}}` as the final Write call.
+6. Write the report to `{{exec.output_file}}` as the final Write call.
 
 If a script can't be made to pass (e.g., the project's tests are genuinely broken on main), say so in the report — record the exact failure under Findings as HIGH, and leave the script in place so the user can reproduce.
 

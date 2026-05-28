@@ -42,11 +42,11 @@ describe the step taken to solve it and the new git commit hash
 Write the complete code verification report to disk using the `Write` tool. The destination is:
 
 ```
-{{OUTPUT_FILE}}
+{{exec.output_file}}
 ```
 
 The full report — every section listed above, with the per-commit review and any issues found — must be the `content` argument of that single `Write` call.
 
-After the `Write` call returns successfully, your FINAL assistant message must be a single short line confirming the write, e.g. `Verification report written to {{OUTPUT_FILE}}`. Do not include the report body in the final message; do not include any other commentary. The on-disk file is the source of truth — the harness reads it directly, so anything you stream as text is discarded.
+After the `Write` call returns successfully, your FINAL assistant message must be a single short line confirming the write, e.g. `Verification report written to {{exec.output_file}}`. Do not include the report body in the final message; do not include any other commentary. The on-disk file is the source of truth — the harness reads it directly, so anything you stream as text is discarded.
 
 If the `Write` call fails, retry it once. If it still fails, then (and only then) emit the verification report as your final message so the harness can recover it from the stream.

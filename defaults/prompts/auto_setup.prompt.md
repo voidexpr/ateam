@@ -17,7 +17,7 @@ Read README.md and scan the top-level directory structure. Identify:
 
 ### 2. Write the setup overview
 
-Create a concise project overview at `{{PROJECT_FULL_PATH}}/.ateam/setup_overview.md`. This file is used as a reference during setup and is not included in agent prompts (agents read the codebase directly, and project context is maintained in CLAUDE.md or similar files).
+Create a concise project overview at `{{project.full_path}}/.ateam/setup_overview.md`. This file is used as a reference during setup and is not included in agent prompts (agents read the codebase directly, and project context is maintained in CLAUDE.md or similar files).
 
 ```markdown
 # Project Overview

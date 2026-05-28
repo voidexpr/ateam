@@ -50,11 +50,11 @@ If your output is missing any section, or if it contains phrases like "no change
 Write the complete report to disk using the `Write` tool. The destination is:
 
 ```
-{{OUTPUT_FILE}}
+{{exec.output_file}}
 ```
 
 The full report — starting with `# Summary` and containing every section listed under Output Validation Gate — must be the `content` argument of that single `Write` call.
 
-After the `Write` call returns successfully, your FINAL assistant message must be a single short line confirming the write, e.g. `Report written to {{OUTPUT_FILE}}`. Do not include the report body in the final message; do not include any other commentary. The on-disk file is the source of truth — the harness reads it directly, so anything you stream as text is discarded.
+After the `Write` call returns successfully, your FINAL assistant message must be a single short line confirming the write, e.g. `Report written to {{exec.output_file}}`. Do not include the report body in the final message; do not include any other commentary. The on-disk file is the source of truth — the harness reads it directly, so anything you stream as text is discarded.
 
 If the `Write` call fails, retry it once. If it still fails, then (and only then) emit the report as your final message so the harness can recover it from the stream.
