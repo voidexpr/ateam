@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/ateam/internal/display"
@@ -59,21 +60,19 @@ func assembleRoleReportV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt 
 // roleLabel feeds {{project.info}}; pass "" to suppress.
 //
 // Only roles that ship `code/<roleID>.prompt.md` are previewable; the
-// assembler hard-requires a role main file. When no such prompt exists,
-// surface a clearer error than the assembler's generic "no role main..."
-// message — preview is the only consumer of this function, so the
-// guidance should point users at the (small) set of code-capable roles.
+// assembler errors with "no role main..." when none exists. We wrap that
+// to point users at the (small) set of code-capable roles — preview is
+// this function's only consumer, so the guidance is worth the extra
+// sentence.
 func assembleRoleCodeV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt string) (string, error) {
 	promptPath := "code/" + roleID
 	a := env.Assembler()
-
-	if _, ok, err := a.FirstMatch(promptPath + ".prompt.md"); err == nil && !ok {
-		return "", fmt.Errorf("no code prompt defined for role %q. Code prompts are role-specific; only roles that ship code/<role>.prompt.md (project, org, or embedded) can preview a code action", roleID)
-	}
-
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, "code")
 	res, err := a.Assemble(promptPath, vars, nil)
 	if err != nil {
+		if strings.Contains(err.Error(), "no role main") {
+			return "", fmt.Errorf("no code prompt defined for role %q. Code prompts are role-specific; only roles that ship code/<role>.prompt.md (project, org, or embedded) can preview a code action", roleID)
+		}
 		return "", err
 	}
 	prompt := res.Prompt

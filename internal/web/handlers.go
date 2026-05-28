@@ -15,6 +15,7 @@ import (
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 )
@@ -376,12 +377,22 @@ func (s *Server) handlePrompts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// One env + assembler shared across all roles on the page — the anchor
+	// chain is identical for every role, so building it 2N times is waste.
+	env := &root.ResolvedEnv{
+		ProjectDir:  pe.ProjectDir,
+		OrgDir:      pe.OrgDir,
+		ProjectName: pe.Name,
+		SourceDir:   pe.SourceDir,
+	}
+	a := env.Assembler()
+
 	roles := discoverRoles(pe)
 	data := promptsPageData{}
 	for _, roleID := range roles {
 		entry := promptRoleEntry{RoleID: roleID}
-		entry.ReportSources = assemblerSourcesForRole(pe, roleID, "report")
-		entry.CodeSources = assemblerSourcesForRole(pe, roleID, "code")
+		entry.ReportSources = assemblerSourcesForRole(env, a, pe, roleID, "report")
+		entry.CodeSources = assemblerSourcesForRole(env, a, pe, roleID, "code")
 		for _, src := range entry.ReportSources {
 			entry.ReportTokens += prompts.EstimateTokens(src.Content)
 		}
@@ -410,18 +421,10 @@ func (s *Server) handlePrompts(w http.ResponseWriter, r *http.Request) {
 // many roles without a per-role code prompt) so the per-role view still
 // renders.
 //
-// A minimal ResolvedEnv is constructed from pe so the canonical
-// env.Assembler() / env.BuildAssemblerVars helpers do the heavy lifting —
-// no duplicated MapVars construction here. Passing roleLabel="" suppresses
-// the {{project.info}} section (matching the legacy trace path's shape).
-func assemblerSourcesForRole(pe *ProjectEntry, roleID, action string) []prompts.PromptSource {
-	env := &root.ResolvedEnv{
-		ProjectDir:  pe.ProjectDir,
-		OrgDir:      pe.OrgDir,
-		ProjectName: pe.Name,
-		SourceDir:   pe.SourceDir,
-	}
-	a := env.Assembler()
+// env + a are the shared per-request env and assembler; pe is only used for
+// the display-path conversion. Passing roleLabel="" suppresses the
+// {{project.info}} section (matching the legacy trace path's shape).
+func assemblerSourcesForRole(env *root.ResolvedEnv, a *assembler.Assembler, pe *ProjectEntry, roleID, action string) []prompts.PromptSource {
 	promptPath := action + "/" + roleID
 
 	// Skip role+action combos that don't ship a main prompt — common for

@@ -147,12 +147,7 @@ func runPromptSupervisor() error {
 		// values (batch, profile, model, ...) depend on the live `ateam code`
 		// invocation, so the preview uses placeholders that show the shape;
 		// the user sees "this becomes a real value at run time."
-		previewFlags := SubRunFlags{
-			Batch:      "<batch-id>",
-			ProjectDir: shellQuoteSingle(env.SourceDir),
-			Profile:    "<profile>",
-		}
-		assembled, err = assembleCodeManagementV1(env, roleLabel, string(reviewContent), previewFlags, extraPrompt)
+		assembled, err = assembleCodeManagementV1(env, roleLabel, string(reviewContent), previewSubRunFlags(env.SourceDir), extraPrompt)
 	case runner.ActionVerify:
 		assembled, err = assembleSupervisorV1(env, "code_verify", roleLabel, "verify", extraPrompt)
 	}
@@ -254,10 +249,10 @@ func assembleForInspection() (string, []sectionDigest, error) {
 			Content:  content,
 		})
 	}
-
-	extraSection := ""
-	if extraPrompt != "" {
-		extraSection = "# Additional Instructions\n\n" + extraPrompt
+	addExtra := func() {
+		if extraPrompt != "" {
+			addLive("extra_prompt", "(--extra-prompt)", "# Additional Instructions\n\n"+extraPrompt)
+		}
 	}
 
 	if promptSupervisor {
@@ -268,22 +263,19 @@ func assembleForInspection() (string, []sectionDigest, error) {
 				reports, _ := (prompts.ReviewSelector{}).Filter(all, env.Config.Roles)
 				addLive("reports", "(assembleReviewV1: manifest + bundled role reports)", formatReportsBlock(reports))
 			}
-			addLive("extra_prompt", "(--extra-prompt)", extraSection)
+			addExtra()
 		case runner.ActionCode:
 			reviewContent, readErr := os.ReadFile(env.ReviewPath())
 			if readErr != nil {
 				return "", nil, errNoReview(env.ReviewPath())
 			}
 			addLive("review", env.ReviewPath(), "# Review\n\n"+string(reviewContent))
-			addLive("extra_prompt", "(--extra-prompt)", extraSection)
-			previewFlags := SubRunFlags{
-				Batch:      "<batch-id>",
-				ProjectDir: shellQuoteSingle(env.SourceDir),
-				Profile:    "<profile>",
-			}
-			addLive("sub_run_flags", "(cmd/code.go: rendered from --batch / --profile / --agent / --model / --effort / --max-budget-*)", previewFlags.Render())
+			// extra_prompt goes BEFORE sub_run_flags to match assembleCodeManagementV1's
+			// ordering — the supervisor's last context is the flag list.
+			addExtra()
+			addLive("sub_run_flags", "(cmd/code.go: rendered from --batch / --profile / --agent / --model / --effort / --max-budget-*)", previewSubRunFlags(env.SourceDir).Render())
 		case runner.ActionVerify:
-			addLive("extra_prompt", "(--extra-prompt)", extraSection)
+			addExtra()
 		}
 	} else {
 		switch promptAction {
@@ -291,9 +283,9 @@ func assembleForInspection() (string, []sectionDigest, error) {
 			if !promptIgnorePreviousReport {
 				addLive("previous_report", env.RoleReportPath(promptRole), previousReportBlock(env, promptRole))
 			}
-			addLive("extra_prompt", "(--extra-prompt)", extraSection)
+			addExtra()
 		case runner.ActionCode:
-			addLive("extra_prompt", "(--extra-prompt)", extraSection)
+			addExtra()
 		}
 	}
 

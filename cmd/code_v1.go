@@ -27,46 +27,47 @@ type SubRunFlags struct {
 	MaxBudgetBatch string
 }
 
-// Render produces the "# Sub-Run Flags" markdown block. Returns "" when no
-// flags would be emitted (defensive — every caller today sets at least Batch
-// + ProjectDir, but the helper is conservative).
+// previewSubRunFlags returns the placeholder-valued SubRunFlags the preview
+// paths (cmd/prompt.go) use to render a representative Sub-Run Flags block
+// without knowing the exec-time values. Centralized here so the two preview
+// callsites (supervisor --action code, and the --paths/--inline-paths
+// inspection synthesis) stay byte-for-byte identical.
+func previewSubRunFlags(sourceDir string) SubRunFlags {
+	return SubRunFlags{
+		Batch:      "<batch-id>",
+		ProjectDir: shellQuoteSingle(sourceDir),
+		Profile:    "<profile>",
+	}
+}
+
+// Render produces the "# Sub-Run Flags" markdown block. Every caller today
+// sets at least Batch + ProjectDir, so the header is always followed by
+// content; empty optional fields just skip their bullet.
 func (s SubRunFlags) Render() string {
 	var b strings.Builder
 	b.WriteString("# Sub-Run Flags\n\nYou MUST pass the following flags to every `ateam exec` command you execute:\n")
-	wrote := false
 	if s.Batch != "" {
 		fmt.Fprintf(&b, "- `--batch %s` (groups all sub-execs for cost tracking)\n", s.Batch)
-		wrote = true
 	}
 	if s.ProjectDir != "" {
 		fmt.Fprintf(&b, "- `--project %s`\n", s.ProjectDir)
-		wrote = true
 	}
 	if s.Agent != "" {
 		fmt.Fprintf(&b, "- `--agent %s`\n", s.Agent)
-		wrote = true
 	} else if s.Profile != "" {
 		fmt.Fprintf(&b, "- `--profile %s`\n", s.Profile)
-		wrote = true
 	}
 	if s.Model != "" {
 		fmt.Fprintf(&b, "- `--model %s`\n", s.Model)
-		wrote = true
 	}
 	if s.Effort != "" {
 		fmt.Fprintf(&b, "- `--effort %s`\n", s.Effort)
-		wrote = true
 	}
 	if s.MaxBudgetUSD != "" {
 		fmt.Fprintf(&b, "- `--max-budget-usd %s`\n", s.MaxBudgetUSD)
-		wrote = true
 	}
 	if s.MaxBudgetBatch != "" {
 		fmt.Fprintf(&b, "- `--max-budget-usd-batch %s`\n", s.MaxBudgetBatch)
-		wrote = true
-	}
-	if !wrote {
-		return ""
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -93,8 +94,6 @@ func assembleCodeManagementV1(env *root.ResolvedEnv, roleLabel, reviewContent st
 	// Sub-Run Flags appear AFTER extraPrompt so the last thing the supervisor
 	// reads is the bullet list of flags it must pass to `ateam exec` — same
 	// ordering the pre-refactor inline assembly used.
-	if block := flags.Render(); block != "" {
-		prompt += "\n\n" + block
-	}
+	prompt += "\n\n" + flags.Render()
 	return prompt, nil
 }

@@ -354,29 +354,22 @@ func WriteOrgDefaults(orgDir string, overwrite bool) error {
 }
 
 // cleanLegacyOrgDefaults removes the pre-v1 defaults tree from an upgraded
-// org. Idempotent (no-op when paths are already absent). Emits a one-line
-// stderr notice per removal so the user has a record of what was cleaned.
-// Failures are logged but not fatal — the org sync itself already succeeded.
+// org. Idempotent (RemoveAll is a no-op on missing paths and handles both
+// files and dirs). Emits a one-line stderr notice per removal so the user
+// has a record of what was cleaned. Failures are logged but not fatal —
+// the org sync itself already succeeded.
 func cleanLegacyOrgDefaults(orgDir string) {
 	defaultsDir := filepath.Join(orgDir, "defaults")
-	for _, rel := range []string{"roles", "supervisor"} {
+	stale := []string{"roles", "supervisor", "report_base_prompt.md", "code_base_prompt.md"}
+	for _, rel := range stale {
 		path := filepath.Join(defaultsDir, rel)
-		if _, err := os.Stat(path); err == nil {
-			if err := os.RemoveAll(path); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not remove stale %s: %v\n", path, err)
-				continue
-			}
-			fmt.Fprintf(os.Stderr, "removed stale legacy defaults: %s\n", path)
+		if _, err := os.Stat(path); err != nil {
+			continue // absent — nothing to clean.
 		}
-	}
-	for _, file := range []string{"report_base_prompt.md", "code_base_prompt.md"} {
-		path := filepath.Join(defaultsDir, file)
-		if _, err := os.Stat(path); err == nil {
-			if err := os.Remove(path); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not remove stale %s: %v\n", path, err)
-				continue
-			}
-			fmt.Fprintf(os.Stderr, "removed stale legacy defaults: %s\n", path)
+		if err := os.RemoveAll(path); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not remove stale %s: %v\n", path, err)
+			continue
 		}
+		fmt.Fprintf(os.Stderr, "removed stale legacy defaults: %s\n", path)
 	}
 }

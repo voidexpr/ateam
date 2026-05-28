@@ -225,10 +225,7 @@ func runCode(opts CodeOptions) error {
 		if err != nil {
 			return err
 		}
-		prompt = legacyPrompt
-		if block := subRunFlags.Render(); block != "" {
-			prompt += "\n\n" + block
-		}
+		prompt = legacyPrompt + "\n\n" + subRunFlags.Render()
 	}
 
 	timeout := env.Config.Code.EffectiveTimeout(opts.Timeout)
