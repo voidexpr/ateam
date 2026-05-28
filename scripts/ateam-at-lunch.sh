@@ -136,7 +136,7 @@ step "Initial build + test"
 ateam exec --agent claude <<<"$build_and_test_prompt"
 
 step "ateam exec /code-review"
-ateam exec --agent claude <<<"/code-review xhigh for recent changes"
+ateam exec --agent claude <<<"/code-review xhigh --fix for recent changes"
 
 step "Re-test after /code-review"
 ateam exec --agent claude <<<"$build_and_test_prompt"
