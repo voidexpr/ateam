@@ -116,7 +116,7 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 		return "", nil, fmt.Errorf("auto-roles agent returned no exec ID; cannot locate output file")
 	}
 
-	outputPath := filepath.Join(env.RuntimeDir(summary.ExecID), runner.PrimaryOutputName(runner.OutputKindAutoRoles))
+	outputPath := filepath.Join(env.RuntimeDir(summary.ExecID), runner.PrimaryOutputName(runner.OutputKindAutoRoles, ""))
 	content, err := os.ReadFile(outputPath)
 	if err != nil {
 		return "", nil, fmt.Errorf("read auto-roles output (%s): %w", outputPath, err)

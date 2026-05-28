@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -74,21 +75,57 @@ func NeedsMigration(root string) bool {
 // On the first hard error (e.g. permission denied on a target), the function
 // returns immediately with whatever was already done in Result. The error
 // message tells the user to re-run after fixing the underlying cause.
+//
+// renameLegacyReportFiles always runs (even when NeedsMigration is false)
+// because projects already on the v1 layout may still hold the pre-Step-6
+// `shared/report/<role>/report.md` filename; the rename pass collapses
+// them to the spec's `<role>.md`.
 func V1Layout(root string) (Result, error) {
 	var r Result
-	if !NeedsMigration(root) {
-		return r, nil
+	if NeedsMigration(root) {
+		if err := moveStatic(root, &r); err != nil {
+			return r, err
+		}
+		if err := moveRoles(root, &r); err != nil {
+			return r, err
+		}
+		if err := cleanup(root, &r); err != nil {
+			return r, err
+		}
 	}
-	if err := moveStatic(root, &r); err != nil {
-		return r, err
-	}
-	if err := moveRoles(root, &r); err != nil {
-		return r, err
-	}
-	if err := cleanup(root, &r); err != nil {
+	if err := renameLegacyReportFiles(root, &r); err != nil {
 		return r, err
 	}
 	return r, nil
+}
+
+// renameLegacyReportFiles walks shared/report/<R>/ and renames any
+// `report.md` to `<R>.md` (the spec filename). Idempotent: a per-role
+// `<R>.md` already on disk takes precedence — the older `report.md` is
+// removed when its content matches (cleanup) or renamed to
+// `report.md.legacy` with a warning when it differs (manual reconciliation).
+// Quiet no-op when the shared/report tree doesn't exist yet.
+func renameLegacyReportFiles(root string, r *Result) error {
+	sharedReportDir := filepath.Join(root, "shared", "report")
+	entries, err := os.ReadDir(sharedReportDir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("read shared/report: %w", err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		role := e.Name()
+		from := filepath.Join("shared", "report", role, "report.md")
+		to := filepath.Join("shared", "report", role, role+".md")
+		if _, err := move(root, from, to, r); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // move performs a single rename if `from` exists. Returns:
@@ -191,25 +228,25 @@ var staticMigrations = []Move{
 }
 
 // roleMigrations are renames templated over each <R> dir under roles/.
-// Source is relative to roles/<R>/; target is relative to root, with <R>
-// substituted in.
+// Source is relative to roles/<R>/; target is relative to root, with `{role}`
+// substituted in (allows the same role to appear more than once in a path —
+// notably the spec's `shared/report/<R>/<R>.md`).
 //
-// Note: the spec's mapping for the report output is
-// `roles/<R>/report.md → shared/report/<R>/<R>.md` (filename = role
-// basename). v1 keeps the legacy `report.md` filename so the migrator
-// agrees with what cmd/report.go's promotion writes; a later commit
-// rewires the runtime side (PrimaryOutputName, DiscoverReports,
-// {{exec.output_file}}) and at that point the migrator's report.md
-// destination also flips to <R>.md.
+// The report.md destination uses the spec's `<role>.md` filename
+// (shared/report/<R>/<R>.md) to match what the runner now writes via
+// PrimaryOutputName(OutputKindReport, promptName). Projects that ran
+// through a pre-Step-6 binary will have files at the older
+// `shared/report/<R>/report.md` path — renameReportFiles catches those
+// on the next migration invocation.
 var roleMigrations = []struct {
 	from string // under roles/<R>/
-	to   string // under root, with %s = role name
+	to   string // under root, with `{role}` placeholders
 }{
-	{from: "report_prompt.md", to: "prompts/report/%s.prompt.md"},
-	{from: "code_prompt.md", to: "prompts/code/%s.prompt.md"},
-	{from: "report_extra_prompt.md", to: "prompts/report/%s.post.extra.md"},
-	{from: "code_extra_prompt.md", to: "prompts/code/%s.post.extra.md"},
-	{from: "report.md", to: "shared/report/%s/report.md"},
+	{from: "report_prompt.md", to: "prompts/report/{role}.prompt.md"},
+	{from: "code_prompt.md", to: "prompts/code/{role}.prompt.md"},
+	{from: "report_extra_prompt.md", to: "prompts/report/{role}.post.extra.md"},
+	{from: "code_extra_prompt.md", to: "prompts/code/{role}.post.extra.md"},
+	{from: "report.md", to: "shared/report/{role}/{role}.md"},
 }
 
 func moveStatic(root string, r *Result) error {
@@ -237,7 +274,7 @@ func moveRoles(root string, r *Result) error {
 		role := e.Name()
 		for _, rm := range roleMigrations {
 			from := filepath.Join("roles", role, rm.from)
-			to := fmt.Sprintf(rm.to, role)
+			to := strings.ReplaceAll(rm.to, "{role}", role)
 			if _, err := move(root, from, to, r); err != nil {
 				return err
 			}

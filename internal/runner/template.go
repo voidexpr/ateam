@@ -169,7 +169,7 @@ func BuildTemplateVars(r *Runner, opts RunOpts, startedAt time.Time, callID int6
 	}
 	if callID > 0 && r.StateDir() != "" {
 		vars.OutputDir = runtimeDirFor(r.StateDir(), callID)
-		if primary := PrimaryOutputName(opts.OutputKind); primary != "" {
+		if primary := PrimaryOutputName(opts.OutputKind, opts.PromptName); primary != "" {
 			vars.OutputFile = filepath.Join(vars.OutputDir, primary)
 		}
 	}
@@ -191,9 +191,20 @@ func logsDirFor(projectDir string, execID int64) string {
 // PrimaryOutputName maps an OutputKind to the canonical filename the agent
 // writes for that action via {{OUTPUT_FILE}}. Returns "" when the action has
 // no primary output.
-func PrimaryOutputName(kind string) string {
+//
+// For OutputKindReport, the filename is `<promptName>.md` (e.g.
+// `security.md` for the security role) so each role's report lands at a
+// role-distinct path under shared/report/<role>/. Other kinds have a
+// fixed filename and ignore promptName; OutputKindReport with an empty
+// promptName falls back to the historical "report.md" so legacy callers
+// that haven't been wired to set PromptName don't silently lose their
+// output.
+func PrimaryOutputName(kind, promptName string) string {
 	switch kind {
 	case OutputKindReport:
+		if promptName != "" {
+			return promptName + ".md"
+		}
 		return "report.md"
 	case OutputKindReview:
 		return "review.md"

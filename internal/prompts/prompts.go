@@ -128,12 +128,15 @@ type RoleReport struct {
 	Content string
 }
 
-// DiscoverReports scans the project for role report.md files. It checks both
-// the v1 location (shared/report/<role>/report.md, where cmd/report.go's
-// promotion now writes) and the legacy location (roles/<role>/report.md, for
-// pre-migration projects). Per-role: if both exist, the newer one wins. The
-// legacy path can be dropped once auto-migration is default-on and projects
-// have been migrated.
+// DiscoverReports scans the project for role report files. It checks, in
+// order of preference:
+//  1. v1 spec: shared/report/<role>/<role>.md (current write target)
+//  2. v1 transitional: shared/report/<role>/report.md (pre-Step-6 filename)
+//  3. legacy: roles/<role>/report.md (pre-migration projects)
+//
+// Per-role: the newest of any matches wins. The transitional and legacy
+// branches stay alive until auto-migration's second-pass rename has run
+// against every active project.
 func DiscoverReports(projectDir string) ([]RoleReport, error) {
 	reports := make(map[string]RoleReport) // role → most-recent report
 
@@ -172,6 +175,13 @@ func DiscoverReports(projectDir string) ([]RoleReport, error) {
 	}
 
 	sharedReportDir := filepath.Join(projectDir, "shared", "report")
+	// v1 spec filename: <role>/<role>.md
+	if err := collect(sharedReportDir, func(role string) string {
+		return filepath.Join(sharedReportDir, role, role+".md")
+	}); err != nil {
+		return nil, fmt.Errorf("cannot read shared/report directory: %w", err)
+	}
+	// v1 transitional filename: <role>/report.md (overridden by <role>.md when newer)
 	if err := collect(sharedReportDir, func(role string) string {
 		return filepath.Join(sharedReportDir, role, ReportFile)
 	}); err != nil {
@@ -186,7 +196,7 @@ func DiscoverReports(projectDir string) ([]RoleReport, error) {
 	}
 
 	if len(reports) == 0 {
-		return nil, fmt.Errorf("no report.md files found in %s/shared/report or %s/roles (run 'ateam report' first)", projectDir, projectDir)
+		return nil, fmt.Errorf("no report files found in %s/shared/report or %s/roles (run 'ateam report' first)", projectDir, projectDir)
 	}
 
 	out := make([]RoleReport, 0, len(reports))

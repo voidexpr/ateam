@@ -118,6 +118,7 @@ type RunOpts struct {
 	RoleID           string
 	Action           string // "report", "exec", "code", "review", ...
 	OutputKind       string // OutputKindReport / Review / Verify / ExecutionReport / SetupOverview / "" (no primary output)
+	PromptName       string // basename of the assembled prompt — e.g. "security" for `report/security`. Only consulted for OutputKindReport, where it drives the primary output filename (security.md); kinds with fixed names (review/verify/...) ignore it.
 	CanonicalDestDir string // where runtime/<exec_id>/ files are cloned on success; "" disables promotion
 	WorkDir          string // cwd for the subprocess
 	TimeoutMin       int
@@ -666,7 +667,7 @@ eventLoop:
 	// (claude with the Write tool) populate the file directly; this catches
 	// mocks and prompts that go off-script.
 	if !summary.IsError && opts.OutputKind != "" && output != "" {
-		primary := PrimaryOutputName(opts.OutputKind)
+		primary := PrimaryOutputName(opts.OutputKind, opts.PromptName)
 		if primary != "" {
 			target := filepath.Join(runtimeDir, primary)
 			if _, err := os.Stat(target); os.IsNotExist(err) {
@@ -788,7 +789,7 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 	var primaryRuntime string
 
 	if success {
-		copyEntries, primaryRuntime = r.promoteRuntimeFiles(runtimeDir, opts.CanonicalDestDir, opts.OutputKind)
+		copyEntries, primaryRuntime = r.promoteRuntimeFiles(runtimeDir, opts.CanonicalDestDir, opts.OutputKind, opts.PromptName)
 	} else {
 		summary.IsError = true
 		source, cause := classifyFailure(ctx, resultEv, opts.TimeoutMin)
@@ -1203,9 +1204,9 @@ func summaryStatus(s RunSummary) string {
 //
 // TODO: get rid of this exclusion once configured prompts are kept separate
 // from files.
-func (r *Runner) promoteRuntimeFiles(runtimeDir, destDir, outputKind string) ([]fileCopyEntry, string) {
+func (r *Runner) promoteRuntimeFiles(runtimeDir, destDir, outputKind, promptName string) ([]fileCopyEntry, string) {
 	var entries []fileCopyEntry
-	primary := PrimaryOutputName(outputKind)
+	primary := PrimaryOutputName(outputKind, promptName)
 	primaryRuntime := ""
 
 	dir, err := os.ReadDir(runtimeDir)

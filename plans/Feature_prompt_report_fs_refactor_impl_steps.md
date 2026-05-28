@@ -100,14 +100,16 @@ Step 5 wave (dead-code cleanup):
 - ✅ **Step 5 (Option B) done** — deleted 6 dead `Assemble*` (`AssembleRolePrompt`, `AssembleRoleCodePrompt`, `AssembleCodeVerifyPrompt`, `AssembleAutoRolesPrompt`, `AssembleAutoSetupPrompt`, `AssembleExecDebugPrompt`), 5 dead `Trace*` (`TraceRolePromptSources`, `TraceRoleCodePromptSources`, `TraceReviewPromptSources`, `TraceCodeVerifyPromptSources`, `TraceCodeManagementPromptSources`), plus all helpers used only by them (`assembleRoleAction`, `collectRoleExtras`, `assembleSupervisorPrompt`, `traceRoleAction`, `traceSupervisorSources`, `traceExistingFiles`, `traceFile`, `readFileWithModTime`, `formatAge`). Tests for deleted functions removed. `TestIntegration_3LevelPromptFallback` deleted (no v1 equivalent — the 3-level fallback is a legacy artifact). Net −800 lines.
 - Survivors: `AssembleReviewPrompt` + `AssembleCodeManagementPrompt` (still used by `cmd/review.go` / `cmd/code.go` `--prompt` override branches, both via their customPrompt branch — the non-custom branch is dead but reachable via the surviving wrappers and harmless). `readWith3LevelFallback` / `readFileOr3Level` / `traceFileOr3Level` survive as their backing helpers.
 
+Step 6 wave (primary-output filename rename):
+- ✅ **Step 6 done** — `shared/report/<R>/report.md` → `shared/report/<R>/<R>.md` per spec. Changes: (a) `RunOpts` gains a `PromptName` field; `PrimaryOutputName(kind, promptName)` returns `<promptName>.md` for `OutputKindReport` (empty falls back to `report.md` for unrwired callers); (b) `cmd/report.go` sets `RunOpts.PromptName = roleID`; (c) runner's `promoteRuntimeFiles` and fallback writer pass `opts.PromptName` through; (d) `env.RoleReportPath` triple-reads (v1 `<role>.md` → v1 transitional `report.md` → legacy `roles/<R>/report.md`); (e) `prompts.DiscoverReports` same triple-scan; (f) migrator's `roleMigrations[report.md]` writes `shared/report/<R>/<R>.md` via `{role}` template; (g) new `renameLegacyReportFiles` pass always runs (even when `NeedsMigration=false`) so projects already on v1 with the transitional filename get renamed to the spec form on next invocation; (h) new tests cover fresh migration + second-pass rename + idempotence.
+
 ### Remaining
 
 Loose ends, ordered by recommended sequence:
 
 4. **`code.go` per-exec destination design** — biggest remaining structural decision. See Step 4 detail below.
 5a. **(Optional) Step 5 Option A** — replace the two surviving `Assemble*` functions with a v1 "replace role main" surface so the `--prompt` branches in `cmd/review.go` / `cmd/code.go` go through the same path as the default branches. Closely related to Task 8 (`--pre-prompt` / `--post-prompt` normalization); design together. Would let us delete the remaining `readWith3LevelFallback` family.
-6. **Primary-output filename rename** — `shared/report/<R>/report.md` → `shared/report/<R>/<R>.md` per spec. See Step 6.
-7. **Drop legacy dual-read in env helpers** — `RoleReportPath` / `ReviewPath` / `VerifyPath` in `internal/root/resolve.go` still stat the pre-migration paths. Post-release cleanup; not blocking v1.
+7. **Drop legacy dual-read in env helpers** — `RoleReportPath` / `ReviewPath` / `VerifyPath` in `internal/root/resolve.go` still stat the pre-migration paths (and Step 6 added a third tier — the transitional v1 `report.md` — to `RoleReportPath`). Drop these after auto-migration has been default-on for a release and projects have all been touched. Not blocking v1.
 8. **Phase F verification** — golden prompt diff, idempotence under load, real-project migration tests.
 9. **Docs (Task 5)** — README, CONFIG.md, ROLES.md, ISOLATION.md.
 

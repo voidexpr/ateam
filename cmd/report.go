@@ -252,6 +252,7 @@ func runReport(opts ReportOptions) error {
 				RoleID:           roleID,
 				Action:           runner.ActionReport,
 				OutputKind:       runner.OutputKindReport,
+				PromptName:       roleID, // → primary output `<roleID>.md`
 				CanonicalDestDir: env.SharedPromptDir("report/" + roleID),
 				WorkDir:          env.WorkDir,
 				TimeoutMin:       timeout,

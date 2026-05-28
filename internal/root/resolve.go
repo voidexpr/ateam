@@ -62,12 +62,18 @@ func (e *ResolvedEnv) SupervisorDir() string {
 }
 
 func (e *ResolvedEnv) RoleReportPath(roleID string) string {
-	// Dual-read: prefer the v1 shared/report/<role>/report.md (where the
-	// runner now promotes new artifacts), fall back to the legacy
-	// roles/<role>/report.md for pre-migration projects.
-	v1 := filepath.Join(e.SharedPromptDir("report/"+roleID), prompts.ReportFile)
+	// Triple-read: prefer the v1 spec filename `shared/report/<role>/<role>.md`
+	// (what the runner now writes), then the older `shared/report/<role>/report.md`
+	// (projects that ran the report under the prior filename and haven't been
+	// re-migrated yet), then the legacy pre-v1 `roles/<role>/report.md`. The
+	// migrator's second-pass rename eventually collapses the middle case.
+	v1 := filepath.Join(e.SharedPromptDir("report/"+roleID), roleID+".md")
 	if _, err := os.Stat(v1); err == nil {
 		return v1
+	}
+	v1Old := filepath.Join(e.SharedPromptDir("report/"+roleID), prompts.ReportFile)
+	if _, err := os.Stat(v1Old); err == nil {
+		return v1Old
 	}
 	legacy := filepath.Join(e.RoleDir(roleID), prompts.ReportFile)
 	if _, err := os.Stat(legacy); err == nil {

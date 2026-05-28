@@ -154,12 +154,16 @@ func TestV1LayoutRoleMoves(t *testing.T) {
 		"prompts/report/security.prompt.md",
 		"prompts/code/security.prompt.md",
 		"prompts/report/security.post.extra.md",
-		"shared/report/security/report.md",
+		"shared/report/security/security.md",
 		"prompts/report/code.bugs.prompt.md",
 	} {
 		if !exists(root, want) {
 			t.Errorf("missing %s", want)
 		}
+	}
+	// Spec filename: <role>.md, not report.md.
+	if exists(root, "shared/report/security/report.md") {
+		t.Error("shared/report/security/report.md should have been renamed to security.md per spec")
 	}
 
 	// history/ dropped.
@@ -223,6 +227,54 @@ func TestV1LayoutIdempotent(t *testing.T) {
 	}
 	if read(t, root, "prompts/report/security.prompt.md") != "{{ROLE}} body" {
 		t.Error("content drifted on second pass (should be preserved unchanged)")
+	}
+}
+
+// TestV1LayoutSecondPassRenamesReportMd covers an already-v1-migrated
+// project that ran through a pre-Step-6 binary: shared/report/<R>/report.md
+// exists but the spec wants <R>.md. NeedsMigration is false (no pre-v1
+// artifacts), but the rename pass still runs and collapses report.md to
+// <role>.md.
+func TestV1LayoutSecondPassRenamesReportMd(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"shared/report/security/report.md":  "old filename",
+		"shared/report/code.bugs/report.md": "dotted role",
+	})
+
+	r, err := V1Layout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for old, want := range map[string]string{
+		"shared/report/security/security.md":   "old filename",
+		"shared/report/code.bugs/code.bugs.md": "dotted role",
+	} {
+		if !exists(root, old) {
+			t.Errorf("expected %s after rename", old)
+		}
+		if got := read(t, root, old); got != want {
+			t.Errorf("%s content = %q, want %q", old, got, want)
+		}
+	}
+	if exists(root, "shared/report/security/report.md") {
+		t.Error("old shared/report/security/report.md should have been renamed")
+	}
+	if exists(root, "shared/report/code.bugs/report.md") {
+		t.Error("old shared/report/code.bugs/report.md should have been renamed")
+	}
+	if !r.Changed() {
+		t.Error("expected Changed=true for the rename pass")
+	}
+
+	// Idempotence: second invocation is a no-op.
+	r2, err := V1Layout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.Changed() {
+		t.Errorf("second pass should be a no-op, got Result=%+v", r2)
 	}
 }
 
