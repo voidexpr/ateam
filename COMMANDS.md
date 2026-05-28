@@ -551,22 +551,40 @@ ateam inspect --last --auto-debug --extra-prompt "focus on the timeout"
 
 The debug prompt uses the standard 3-level fallback (`supervisor/exec_debug_prompt.md`). Debug reports are saved to `.ateam/logs/supervisor/`.
 
-When the selected row is a `claude` run with a recoverable session id, `inspect` prints a one-line `resume:` hint pointing at `ateam resume <id>`.
+When the selected row is a resumable run (`claude`, `codex`, or `codex-tmux`) with a recoverable session id, `inspect` prints a one-line `resume:` hint pointing at `ateam resume <id>`.
 
 ### `ateam resume [EXEC_ID]`
 
-Resume a previous `claude` agent run as an interactive session. The session id is read on demand from the run's `*_stream.jsonl` (no schema changes). The resumed session runs **outside** ateam — no `agent_execs` row, no sandbox, no tracking — and picks up where the original left off.
+Resume a previous agent run as an interactive session. The session id is read on demand from the run's `*_stream.jsonl` (no schema changes). The resumed session runs **outside** ateam — no `agent_execs` row, no sandbox, no tracking — and picks up where the original left off.
+
+Supported agents: `claude`, `codex`, `codex-tmux`. Codex and codex-tmux share the same on-disk session id (codex rollout JSONL) and the same `codex` CLI, so resume is identical for both.
 
 ```bash
 ateam resume 191             # print session id and the resume command
-ateam resume --last          # most recent claude run
-ateam resume 191 --launch    # exec into "claude --resume <id>"
+ateam resume --last          # most recent claude / codex / codex-tmux run
+ateam resume 191 --launch    # exec into "claude --resume <id>" (or "codex resume ...")
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--last` | Resume the most recent `claude` run instead of taking an `EXEC_ID` |
-| `--launch` | Replace the current process with `claude --resume <id>` (uses `syscall.Exec`) |
+| `--last` | Resume the most recent `claude`, `codex`, or `codex-tmux` run instead of taking an `EXEC_ID` |
+| `--launch` | Replace the current process with the resume command (uses `syscall.Exec`) |
+
+Resume command per agent:
+
+| Agent | Command (under `--launch`) |
+|-------|----------------------------|
+| `claude` | `claude --resume <session-id>` |
+| `codex` / `codex-tmux` | `codex resume --include-non-interactive <session-id>` (the flag exposes sessions started by `codex exec --json`, which the interactive picker hides by default) |
+
+Environment variable overrides for the resume binary:
+
+| Env var | Default | Applies to |
+|---------|---------|------------|
+| `ATEAM_RESUME_CLAUDE_CMD` | `claude` | `claude` runs |
+| `ATEAM_RESUME_CODEX_CMD`  | `codex`  | `codex` and `codex-tmux` runs |
+
+Each may include extra leading arguments — the value is parsed with `strings.Fields`, the first token becomes the binary, and the remaining tokens are prepended to the resume args. Example: `ATEAM_RESUME_CLAUDE_CMD="my-claude --foo"` runs `my-claude --foo --resume <id>`.
 
 `CLAUDE_CONFIG_DIR` resolution order:
 1. The value recorded under `## Specified` in the run's `*_exec.md` (canonical — what was actually used).
@@ -576,11 +594,9 @@ Container support:
 
 | Container | Behavior |
 |-----------|----------|
-| `none` | Prints + supports `--launch` (host `claude --resume`) |
-| `docker-exec` | Prints session id and `docker exec -it <name> claude --resume <id>` recipe; refuses `--launch` (session lives inside the long-lived container) |
+| `none` | Prints + supports `--launch` (host `claude --resume` / `codex resume`) |
+| `docker-exec` | Prints session id and a `docker exec -it <name> ...` recipe; refuses `--launch` (session lives inside the long-lived container). Codex / codex-tmux runs warn that codex auth must already be set inside the container. |
 | `docker` / `docker-oauth` / `docker-api` | Prints session id with a "oneshot container is gone" caveat; refuses `--launch` |
-
-Resume only supports `agent = claude`. Codex and other agents are refused with a clear message.
 
 ### `ateam version`
 

@@ -33,18 +33,50 @@ The resumed session is interactive and runs outside ateam: it gets no
 agent_execs row, no sandbox settings, and no tracking. It picks up from
 the original run's last turn.
 
-Resume is supported for "claude" and "codex" runs whose container is
-"none". For docker / docker-exec runs the session id is still printed
-but --launch is refused since the session state lives inside (or with) the
-container, not on the host.`,
+Resume is supported for "claude", "codex", and "codex-tmux" runs whose
+container is "none". For docker / docker-exec runs the session id is
+still printed but --launch is refused since the session state lives
+inside (or with) the container, not on the host.
+
+The binary used for resume can be overridden via env vars:
+  ATEAM_RESUME_CLAUDE_CMD  (default: "claude")
+  ATEAM_RESUME_CODEX_CMD   (default: "codex"; used for codex and codex-tmux)
+Each may include extra arguments (e.g. "my-claude --foo") which are
+parsed with strings.Fields and prepended to the resume args.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runResume,
 }
 
 func init() {
-	resumeCmd.Flags().BoolVar(&resumeLast, "last", false, "resume the most recent claude or codex run")
+	resumeCmd.Flags().BoolVar(&resumeLast, "last", false, "resume the most recent claude, codex, or codex-tmux run")
 	resumeCmd.Flags().BoolVar(&resumeLaunch, "launch", false, "exec into the resume command instead of just printing it")
 	rootCmd.AddCommand(resumeCmd)
+}
+
+// Env vars overriding the binary (and optional leading args) used by
+// `ateam resume --launch`. Parsed via strings.Fields, so "my-claude --foo"
+// becomes the binary "my-claude" with prefix arg "--foo".
+const (
+	envResumeClaudeCmd = "ATEAM_RESUME_CLAUDE_CMD"
+	envResumeCodexCmd  = "ATEAM_RESUME_CODEX_CMD"
+)
+
+// resumableAgents lists the agent names whose runs can be resumed. Codex
+// and codex-tmux share the same on-disk session id and the same `codex`
+// CLI, so they're handled identically below.
+var resumableAgents = []string{
+	agent.NameClaude,
+	agent.NameCodex,
+	agent.NameCodexTmux,
+}
+
+func isResumableAgent(name string) bool {
+	for _, a := range resumableAgents {
+		if a == name {
+			return true
+		}
+	}
+	return false
 }
 
 func runResume(cmd *cobra.Command, args []string) error {
@@ -69,11 +101,9 @@ func runResume(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	switch row.Agent {
-	case "claude", "codex":
-		// supported below
-	default:
-		return fmt.Errorf("resume only supports claude and codex (run %d used agent %q)", row.ID, row.Agent)
+	if !isResumableAgent(row.Agent) {
+		return fmt.Errorf("resume only supports %s (run %d used agent %q)",
+			strings.Join(resumableAgents, ", "), row.ID, row.Agent)
 	}
 	if row.StreamFile == "" {
 		return fmt.Errorf("run %d has no stream file recorded", row.ID)
@@ -110,12 +140,12 @@ func runResume(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	hostCmd, hostArgs := resumeCommand(row.Agent, sessionID)
-	hostCmdLine := strings.Join(append([]string{hostCmd}, hostArgs...), " ")
+	hostCmdLine := joinCmd(hostCmd, hostArgs)
 	// Prepend CLAUDE_CONFIG_DIR so the printed command is copy-pasteable; the
 	// informational line above is easy to miss and resuming with the wrong
 	// config dir silently picks up a different agent profile.
 	hostCmdLineWithEnv := hostCmdLine
-	if row.Agent == "claude" && configDir != "" {
+	if row.Agent == agent.NameClaude && configDir != "" {
 		hostCmdLineWithEnv = "CLAUDE_CONFIG_DIR=" + shellQuoteSingle(configDir) + " " + hostCmdLine
 	}
 
@@ -126,10 +156,10 @@ func runResume(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 		switch row.Agent {
-		case "claude":
-			return execClaudeResume(sessionID, configDir)
-		case "codex":
-			return execCodexResume(sessionID)
+		case agent.NameClaude:
+			return execResume(hostCmd, hostArgs, claudeResumeEnv(configDir))
+		case agent.NameCodex, agent.NameCodexTmux:
+			return execResume(hostCmd, hostArgs, nil)
 		}
 		return fmt.Errorf("resume not implemented for agent %q", row.Agent)
 
@@ -139,11 +169,11 @@ func runResume(cmd *cobra.Command, args []string) error {
 			target = "<container-name>"
 		}
 		envFlag := ""
-		if row.Agent == "claude" && configDir != "" {
+		if row.Agent == agent.NameClaude && configDir != "" {
 			envFlag = fmt.Sprintf(" -e CLAUDE_CONFIG_DIR=%s", configDir)
 		}
 		fmt.Println("Caveat: session lives inside the long-lived container; resuming on the host won't find it.")
-		if row.Agent == "codex" {
+		if row.Agent == agent.NameCodex || row.Agent == agent.NameCodexTmux {
 			fmt.Println("Caveat: codex auth (OPENAI_API_KEY or ~/.codex/auth.json) must already be set inside the container.")
 		}
 		fmt.Printf("To try inside the container:\n  docker exec -it%s %s %s\n", envFlag, target, hostCmdLine)
@@ -161,16 +191,39 @@ func runResume(cmd *cobra.Command, args []string) error {
 	}
 }
 
-// resumeCommand returns the resume command and args for an agent.
+// resumeCommand returns the resume command and args for an agent. The
+// binary (and optional leading args) comes from ATEAM_RESUME_{CLAUDE,CODEX}_CMD
+// when set, otherwise defaults to "claude" / "codex".
+//
 // codex requires --include-non-interactive because ateam invokes it via
-// `codex exec --json`, which the picker hides by default.
-func resumeCommand(agent, sessionID string) (string, []string) {
-	switch agent {
-	case "codex":
-		return "codex", []string{"resume", "--include-non-interactive", sessionID}
+// `codex exec --json`, which the picker hides by default. The same flag
+// is harmless for codex-tmux runs (whose rollout also originates from a
+// codex CLI session).
+func resumeCommand(agentName, sessionID string) (string, []string) {
+	switch agentName {
+	case agent.NameCodex, agent.NameCodexTmux:
+		bin, prefix := resumeBinary(envResumeCodexCmd, "codex")
+		args := append(prefix, "resume", "--include-non-interactive", sessionID)
+		return bin, args
 	default:
-		return "claude", []string{"--resume", sessionID}
+		bin, prefix := resumeBinary(envResumeClaudeCmd, "claude")
+		args := append(prefix, "--resume", sessionID)
+		return bin, args
 	}
+}
+
+// resumeBinary parses an ATEAM_RESUME_*_CMD env var into (binary, prefixArgs).
+// Empty env var falls back to the default name with no prefix args.
+func resumeBinary(envKey, def string) (string, []string) {
+	raw := strings.TrimSpace(os.Getenv(envKey))
+	if raw == "" {
+		return def, nil
+	}
+	fields := strings.Fields(raw)
+	if len(fields) == 0 {
+		return def, nil
+	}
+	return fields[0], fields[1:]
 }
 
 func selectResumeRow(db *calldb.CallDB, args []string) (*calldb.RecentRow, error) {
@@ -178,14 +231,14 @@ func selectResumeRow(db *calldb.CallDB, args []string) (*calldb.RecentRow, error
 		// Push the resumable-agents filter to SQL so --last works regardless
 		// of how many non-resumable runs (mock, etc.) sit in front.
 		rows, err := db.RecentRuns(calldb.RecentFilter{
-			Agents: []string{"claude", "codex"},
+			Agents: resumableAgents,
 			Limit:  1,
 		})
 		if err != nil {
 			return nil, err
 		}
 		if len(rows) == 0 {
-			return nil, fmt.Errorf("no recent claude or codex runs found")
+			return nil, fmt.Errorf("no recent %s runs found", strings.Join(resumableAgents, "/"))
 		}
 		return &rows[0], nil
 	}
@@ -345,28 +398,40 @@ func configDirFromRuntime(env *root.ResolvedEnv, row *calldb.RecentRow) string {
 	return dir
 }
 
-func execClaudeResume(sessionID, configDir string) error {
-	binary, err := exec.LookPath("claude")
+// execResume replaces the current process with `name args...`, applying
+// any extra env overrides (currently just CLAUDE_CONFIG_DIR). Both
+// resumable agent kinds (claude / codex / codex-tmux) flow through here.
+func execResume(name string, args []string, extraEnv map[string]string) error {
+	binary, err := exec.LookPath(name)
 	if err != nil {
-		return fmt.Errorf("claude not found in PATH: %w", err)
+		return fmt.Errorf("%s not found in PATH: %w", name, err)
 	}
 	envv := os.Environ()
 	envPrefix := ""
-	if configDir != "" {
-		envv = setEnv(envv, "CLAUDE_CONFIG_DIR", configDir)
-		envPrefix = "CLAUDE_CONFIG_DIR=" + shellQuoteSingle(configDir) + " "
+	for k, v := range extraEnv {
+		envv = setEnv(envv, k, v)
+		envPrefix += k + "=" + shellQuoteSingle(v) + " "
 	}
+	argv := append([]string{name}, args...)
 	fmt.Println("Interactive resume runs without ateam's sandbox.")
-	fmt.Printf("exec %s%s --resume %s\n", envPrefix, binary, sessionID)
-	return syscall.Exec(binary, []string{"claude", "--resume", sessionID}, envv)
+	fmt.Printf("exec %s%s\n", envPrefix, joinCmd(binary, args))
+	return syscall.Exec(binary, argv, envv)
 }
 
-func execCodexResume(sessionID string) error {
-	binary, err := exec.LookPath("codex")
-	if err != nil {
-		return fmt.Errorf("codex not found in PATH: %w", err)
+// claudeResumeEnv returns the env overrides to apply when launching a
+// claude resume. Nil/empty configDir means "no override".
+func claudeResumeEnv(configDir string) map[string]string {
+	if configDir == "" {
+		return nil
 	}
-	fmt.Println("Interactive resume runs without ateam's sandbox.")
-	fmt.Printf("exec %s resume --include-non-interactive %s\n", binary, sessionID)
-	return syscall.Exec(binary, []string{"codex", "resume", "--include-non-interactive", sessionID}, os.Environ())
+	return map[string]string{"CLAUDE_CONFIG_DIR": configDir}
+}
+
+// joinCmd renders a command + args as a single space-separated line for
+// printing. Not shell-safe — display only.
+func joinCmd(cmd string, args []string) string {
+	if len(args) == 0 {
+		return cmd
+	}
+	return cmd + " " + strings.Join(args, " ")
 }

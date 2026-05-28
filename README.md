@@ -348,7 +348,7 @@ There is a very long list of potentially very useful roles to add.
 | [`ateam export`](COMMANDS.md#ateam-export) | Export reports as a self-contained HTML file |
 | [`ateam ps`](COMMANDS.md#ateam-ps) | Recent run history |
 | [`ateam inspect`](COMMANDS.md#ateam-inspect-id) | Show details and logs for agent runs |
-| [`ateam resume`](COMMANDS.md#ateam-resume-exec_id) | Resume a previous claude agent run as an interactive session |
+| [`ateam resume`](COMMANDS.md#ateam-resume-exec_id) | Resume a previous claude, codex, or codex-tmux run as an interactive session |
 | [`ateam prompt`](COMMANDS.md#ateam-prompt) | Debug prompt assembly |
 | [`ateam cat`](COMMANDS.md#ateam-cat) | Pretty-print stream logs |
 | [`ateam tail`](COMMANDS.md#ateam-tail) | Live-stream agent output |

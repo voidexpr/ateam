@@ -66,6 +66,11 @@ func TestExtractSessionIDCodexThreadID(t *testing.T) {
 }
 
 func TestResumeCommand(t *testing.T) {
+	// Make sure env-var overrides from the host don't leak into the
+	// default-binary assertions below.
+	t.Setenv(envResumeClaudeCmd, "")
+	t.Setenv(envResumeCodexCmd, "")
+
 	tests := []struct {
 		agent   string
 		wantBin string
@@ -73,6 +78,7 @@ func TestResumeCommand(t *testing.T) {
 	}{
 		{"claude", "claude", "--resume"},
 		{"codex", "codex", "resume"},
+		{"codex-tmux", "codex", "resume"},
 	}
 	for _, tt := range tests {
 		bin, args := resumeCommand(tt.agent, "abc")
@@ -86,18 +92,58 @@ func TestResumeCommand(t *testing.T) {
 			t.Errorf("agent=%s: last arg = %q, want session id", tt.agent, args[len(args)-1])
 		}
 	}
-	// codex requires --include-non-interactive (else `exec --json` sessions
-	// are hidden from the picker).
-	_, args := resumeCommand("codex", "abc")
-	found := false
-	for _, a := range args {
-		if a == "--include-non-interactive" {
-			found = true
-			break
+	// codex (and codex-tmux) require --include-non-interactive (else
+	// `exec --json` sessions are hidden from the picker).
+	for _, a := range []string{"codex", "codex-tmux"} {
+		_, args := resumeCommand(a, "abc")
+		found := false
+		for _, x := range args {
+			if x == "--include-non-interactive" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s resume args missing --include-non-interactive: %v", a, args)
 		}
 	}
-	if !found {
-		t.Errorf("codex resume args missing --include-non-interactive: %v", args)
+}
+
+func TestResumeCommandEnvOverride(t *testing.T) {
+	t.Setenv(envResumeClaudeCmd, "my-claude --foo")
+	t.Setenv(envResumeCodexCmd, "/opt/bin/codex-wrap")
+
+	bin, args := resumeCommand("claude", "sess-1")
+	wantArgs := []string{"--foo", "--resume", "sess-1"}
+	if bin != "my-claude" || !equalStrings(args, wantArgs) {
+		t.Errorf("claude override: bin=%q args=%v, want my-claude %v", bin, args, wantArgs)
+	}
+
+	bin, args = resumeCommand("codex-tmux", "sess-2")
+	wantArgs = []string{"resume", "--include-non-interactive", "sess-2"}
+	if bin != "/opt/bin/codex-wrap" || !equalStrings(args, wantArgs) {
+		t.Errorf("codex-tmux override: bin=%q args=%v, want /opt/bin/codex-wrap %v", bin, args, wantArgs)
+	}
+}
+
+func TestResumeBinaryFallback(t *testing.T) {
+	t.Setenv(envResumeClaudeCmd, "   ")
+	bin, prefix := resumeBinary(envResumeClaudeCmd, "claude")
+	if bin != "claude" || len(prefix) != 0 {
+		t.Errorf("whitespace env should fall back: bin=%q prefix=%v", bin, prefix)
+	}
+}
+
+func TestIsResumableAgent(t *testing.T) {
+	for _, a := range []string{"claude", "codex", "codex-tmux"} {
+		if !isResumableAgent(a) {
+			t.Errorf("%s should be resumable", a)
+		}
+	}
+	for _, a := range []string{"mock", "", "claude-something"} {
+		if isResumableAgent(a) {
+			t.Errorf("%s should NOT be resumable", a)
+		}
 	}
 }
 

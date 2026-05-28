@@ -301,6 +301,7 @@ The codex agent matches claude on cost accounting, cache-token tracking, context
 - **Host-only in v1.** Rejected with an actionable error at `cmd/table.go:140–142` when a profile binds it to a non-`none` container, and at `cmd/table.go:398–407` when invoked without project context. Container support would require tmux+codex inside the image plus host↔container path translation that isn't wired up.
 - **Per-`EXEC_ID` socket and session naming.** The tmux socket lives under `<ProjectDir>/cache/tmux/` and the session name embeds the `EXEC_ID`, so concurrent runs in the same workdir don't collide.
 - **Token/cost data is sourced from `$CODEX_HOME/sessions/...`** (the rollout JSONL Codex writes itself), not from a streamed JSON channel — the TUI doesn't emit one. The agent live-tails that rollout into `stream.jsonl` and archives it to `codex-session.jsonl.gz` on completion.
+- **`ateam resume` works** because the live-tailed rollout translates `session_meta` into a `thread.started` line in `stream.jsonl`, carrying the same session id the `codex` CLI uses. Resume runs `codex resume --include-non-interactive <id>`, identical to the regular `codex` agent.
 - The original design rationale lives in [`plans/feature_codex_tmux_agent.md`](plans/feature_codex_tmux_agent.md) — historical, not normative.
 
 ### Containers

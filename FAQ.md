@@ -33,7 +33,7 @@ You can easily swap claude/codex
 
 Use `--help` on any command for details. See [COMMANDS.md](COMMANDS.md) for more.
 
-You can also resume sessions from role agents, for example you can use 'claude --resume' and select a specific session to dive more into the findings or why a command the agent ran failed (but start with `ateam ps`, `ateam inspect`, `ateam cat` first).
+You can also resume sessions from role agents via `ateam resume <id>` (or `ateam resume --last`), which prints the agent's native resume command and, with `--launch`, exec's into it. Supported for `claude`, `codex`, and `codex-tmux` runs. Override the binary with `ATEAM_RESUME_CLAUDE_CMD` / `ATEAM_RESUME_CODEX_CMD` (see [COMMANDS.md](COMMANDS.md#ateam-resume-exec_id)). Start with `ateam ps`, `ateam inspect`, `ateam cat` first.
 
 ## How are agents executed by default?
 
