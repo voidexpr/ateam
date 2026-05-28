@@ -193,6 +193,68 @@ Update `README.md`, `CONFIG.md`, `ROLES.md`, `ISOLATION.md` for the new layout:
 
 Also update `COMMANDS.md` — already updated for `ateam prompt --paths`/`--inline-paths` (commit 44a6437); verify no other commands changed surface in the refactor.
 
+## Test suite structure
+
+Tests track source roughly 1:1:
+
+- **Unit / package tests** in `internal/prompts/assembler/`:
+  - `parser_test.go`, `validate_test.go` — pure-function table tests
+  - `assembler_test.go` — `Anchor` + `FirstMatch` / `AllMatches` over `fstest.MapFS`
+  - `assemble_test.go` — composition order, frontmatter strip, overload semantics
+  - `template_test.go` — engine resolve + include directives + cycle/depth
+  - `varmap_test.go` — ALL_CAPS → dotted rewriting; plus `TestVarRenameMapCoversCurrentRunnerVars` which enumerates current runner vars to catch new additions that need a mapping
+  - `frontmatter_test.go`, `orphan_test.go`, `anchors_test.go`
+  - `defaults_smoke_test.go` — integration smoke against the shipped `defaults.FS`; catches embed-glob drift early
+
+- **Migrator tests** in `internal/migrate/v1_layout_test.go`:
+  - Synthetic-tree tests (`TestV1LayoutStaticMoves`, `TestV1LayoutRoleMoves`, `TestV1LayoutIdempotent`, `TestV1LayoutPreservesUnknownFiles`, `TestV1LayoutCleansJunkArtifacts`)
+  - **`TestRsyncFixture`** — the canonical real-repo test pattern. rsyncs `~/projects/ateam/.ateam` (skipped if absent), runs migrator, asserts shape. Re-runs to confirm idempotence. Use this pattern for new migration features.
+  - `TestRsyncListmanagerFixture` — same shape against the listmanager test_data fixture
+
+- **Env helper tests** in `internal/root/`:
+  - `assembler_test.go` — `SharedDir` / `SharedPromptDir` / `Assembler()` / `BuildAssemblerVars`
+  - `migrate_v1_test.go` — `applyV1LayoutMigration` wired into `Resolve()`
+  - `integration_test.go::TestIntegration_3LevelPromptFallback` — exercises the LEGACY `prompts.AssembleRolePrompt`; keep alive until Step 5 drops that function
+
+- **cmd-level tests** in `cmd/`:
+  - `prompt_test.go` — `runPrompt` end-to-end (no flag), `--paths` smoke
+  - `prompt_preview_test.go` — `--paths` / `--inline-paths` / orphan detection / `promptPathForCurrentFlags` mapping
+  - `review_test.go`, `report_test.go`, `all_test.go`, `verify_test.go` (if it exists) — command-level flow with mock agent
+
+- **Web tests** in `internal/web/`:
+  - `helpers_test.go`, `code_sessions_test.go`, `export_test.go` — hand-built fixtures; touched in Step 4 if you reshape code sessions
+
+**Conventions:**
+- Use `t.TempDir()` for unit tests. For shell-level reproduction, `mktemp -d /tmp/ateam-XXXXXX` and rsync from the live fixtures.
+- The `cmd/` tests share `setupPromptProject`, `captureStdout`, `savePromptGlobals`/`resetPromptFlags` helpers across files; reuse rather than duplicate.
+- Real-fixture tests skip when the source isn't available (CI / fresh checkout) — they use `t.Skipf`. Keep this pattern when adding new ones; don't break CI on machines without `~/projects/ateam`.
+
+## What v1 doesn't yet support (out of scope for this refactor)
+
+The spec called for more than this refactor covers. These tasks stay open for follow-up work:
+
+- **Task 2 (Stage abstraction)** — internal Go cleanup that would collapse `report` / `review` / `verify` / `auto_setup` etc. onto a `Stage` type with `PreAction` / `PostAction`. None of this exists yet. Each cmd is still hand-written; the v1 helpers (`assembleRoleReportV1` etc.) sit alongside but don't reach into runner internals.
+- **Task 3 (Progress telemetry)** — `ateam exec` should emit structured JSON progress events that get persisted to `state.sqlite`; `ateam parallel` should share the same stream. Not started. Today `parallel` still renders directly to the terminal in memory and `exec` doesn't emit anything structured.
+- **Task 8 (`--pre-prompt` / `--post-prompt` normalization)** — every prompt-taking command should accept `--pre-prompt TEXT` / `--post-prompt TEXT` for ad-hoc inline wrap, with consistent semantics. Today: `--extra-prompt` exists on `report` / `review` / `verify` / `exec` with overlapping but inconsistent behavior; no `--pre-prompt`; no formal outer-wrap surface in the assembler.
+
+The "replace role main" surface in the v1 assembler that Step 5-A needs is closely related to Task 8's `--pre/post-prompt` surface — both extend the assembler with caller-supplied overrides. Could be designed together.
+
+## `prompts.AllRoleIDs` init-order gotcha
+
+`internal/prompts/embed.go` declares:
+
+```go
+var AllRoleIDs = discoverRoleIDs()
+```
+
+This runs at package load time, before any test setup. It walks the embedded `defaults.FS` at `prompts/report/`. Implications:
+
+- **Test code that mutates `defaults.FS`** can't shift `AllRoleIDs` after init. (Go's `embed.FS` is read-only anyway, but worth flagging.)
+- **Tests that check role-presence behavior** (e.g. `TestPromptRoleDryRun` calling with `promptRole = "testing_basic"`) depend on `testing_basic` being in `defaults/prompts/report/`. If a role gets deleted/renamed in defaults, the relevant cmd tests pick up the change automatically through `AllRoleIDs` but a hardcoded role name in a test won't.
+- **Init order matters for any future "discover roles dynamically" feature** — if you ever want to add a runtime role-discovery hook, plumb it through a function call, not a package-level var.
+
+If you're working on the cmd-level tests and seeing weird "unknown role" errors, check that the role you reference exists in `defaults/prompts/report/<role>.prompt.md`.
+
 ## Things to know that aren't obvious
 
 - **The migrator runs in `Resolve()` and `LookupFrom()`** — both. So `ateam ps`, `ateam env`, anything that touches a project, triggers migration on first contact. `ATEAM_NO_MIGRATE=1` disables.
