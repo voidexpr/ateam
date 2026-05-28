@@ -318,9 +318,14 @@ func TestIntegration_3LevelPromptFallback(t *testing.T) {
 	roleID := "security"
 	sourceDir := projPath
 
-	// Level 1: default content is written by InstallOrg.
-	// The defaults file exists at orgDir/defaults/roles/security/report_prompt.md.
+	// Level 1: legacy org-defaults path. InstallOrg now writes the v1
+	// layout (defaults/prompts/...), so manually create the legacy dir
+	// here — this test exercises the LEGACY prompts.AssembleRolePrompt
+	// fallback chain, which still reads from defaults/roles/<r>/report_prompt.md.
 	defaultFile := filepath.Join(orgDir, "defaults", "roles", roleID, "report_prompt.md")
+	if err := os.MkdirAll(filepath.Dir(defaultFile), 0755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(defaultFile, []byte("default content"), 0644); err != nil {
 		t.Fatal(err)
 	}

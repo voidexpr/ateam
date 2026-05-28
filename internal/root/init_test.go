@@ -35,16 +35,16 @@ func TestInstallOrg(t *testing.T) {
 		t.Errorf("expected supervisor dir %s to exist", supervisorDir)
 	}
 
-	// Verify at least one default prompt file exists.
+	// Verify at least one default prompt file exists (v1 path).
 	if len(prompts.AllRoleIDs) > 0 {
-		promptFile := filepath.Join(orgDir, "defaults", "roles", prompts.AllRoleIDs[0], "report_prompt.md")
+		promptFile := filepath.Join(orgDir, "defaults", "prompts", "report", prompts.AllRoleIDs[0]+".prompt.md")
 		if _, err := os.Stat(promptFile); err != nil {
 			t.Errorf("expected prompt file %s to exist: %v", promptFile, err)
 		}
 	}
 
-	// Verify supervisor review prompt exists.
-	reviewPrompt := filepath.Join(orgDir, "defaults", "supervisor", "review_prompt.md")
+	// Verify supervisor review prompt exists (v1 path).
+	reviewPrompt := filepath.Join(orgDir, "defaults", "prompts", "review.prompt.md")
 	if _, err := os.Stat(reviewPrompt); err != nil {
 		t.Errorf("expected supervisor prompt %s to exist: %v", reviewPrompt, err)
 	}

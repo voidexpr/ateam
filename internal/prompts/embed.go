@@ -65,8 +65,12 @@ func trimFrontmatterField(line, prefix string) (string, bool) {
 
 // RoleMeta returns the parsed frontmatter for a built-in role. Returns the
 // zero value when the role isn't embedded or has no frontmatter.
+//
+// Reads from the v1 path (defaults/prompts/report/<role>.prompt.md);
+// the legacy roles/<role>/report_prompt.md fallback was dropped when
+// the dual-shipped defaults tree went away.
 func RoleMeta(roleID string) RoleMetadata {
-	path := fmt.Sprintf("roles/%s/report_prompt.md", roleID)
+	path := fmt.Sprintf("prompts/report/%s.prompt.md", roleID)
 	data, err := defaults.FS.ReadFile(path)
 	if err != nil {
 		return RoleMetadata{}
@@ -81,23 +85,33 @@ func RoleDescription(roleID string) string {
 	return RoleMeta(roleID).Description
 }
 
+// discoverRoleIDs walks the embedded prompts/report/ tree and returns the
+// list of <role> basenames (i.e. the part before .prompt.md). Role IDs may
+// contain dots ("code.bugs", "report.security") — those are preserved.
 func discoverRoleIDs() []string {
-	entries, err := fs.ReadDir(defaults.FS, "roles")
+	entries, err := fs.ReadDir(defaults.FS, "prompts/report")
 	if err != nil {
 		return nil
 	}
 	var ids []string
 	for _, e := range entries {
 		if e.IsDir() {
-			ids = append(ids, e.Name())
+			continue
 		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".prompt.md") || strings.HasPrefix(name, "_") {
+			continue
+		}
+		ids = append(ids, strings.TrimSuffix(name, ".prompt.md"))
 	}
 	sort.Strings(ids)
 	return ids
 }
 
 // IsValidRole returns true if id is a built-in role, exists in configRoles,
-// or has a role directory with a report_prompt.md under projectDir or orgDir.
+// or has a role prompt under projectDir or orgDir. Checks both the v1 path
+// (prompts/report/<id>.prompt.md) and the legacy path (roles/<id>/report_prompt.md)
+// so pre-migration project/org trees keep validating until they're touched.
 func IsValidRole(id string, configRoles map[string]string, projectDir, orgDir string) bool {
 	for _, known := range AllRoleIDs {
 		if known == id {
@@ -108,10 +122,16 @@ func IsValidRole(id string, configRoles map[string]string, projectDir, orgDir st
 		return true
 	}
 	for _, dir := range []string{projectDir, orgDir} {
-		if dir != "" {
-			if _, err := os.Stat(filepath.Join(dir, "roles", id, ReportPromptFile)); err == nil {
-				return true
-			}
+		if dir == "" {
+			continue
+		}
+		v1 := filepath.Join(dir, "prompts", "report", id+".prompt.md")
+		if _, err := os.Stat(v1); err == nil {
+			return true
+		}
+		legacy := filepath.Join(dir, "roles", id, ReportPromptFile)
+		if _, err := os.Stat(legacy); err == nil {
+			return true
 		}
 	}
 	return false
@@ -157,8 +177,9 @@ func enabledRoleIDs(configRoles map[string]string, allKnown []string) []string {
 }
 
 // AllKnownRoleIDs returns the sorted union of embedded defaults, config-defined,
-// .ateamorg/ org-level, and .ateam/ project-level role IDs.
-// A directory counts as a role if it contains a report_prompt.md.
+// .ateamorg/ org-level, and .ateam/ project-level role IDs. Scans both the
+// v1 (prompts/report/<id>.prompt.md) and legacy (roles/<id>/report_prompt.md)
+// shapes so pre-migration trees still surface their roles.
 func AllKnownRoleIDs(configRoles map[string]string, projectDir, orgDir string) []string {
 	seen := make(map[string]bool, len(AllRoleIDs)+len(configRoles))
 	for _, id := range AllRoleIDs {
@@ -167,11 +188,12 @@ func AllKnownRoleIDs(configRoles map[string]string, projectDir, orgDir string) [
 	for id := range configRoles {
 		seen[id] = true
 	}
-	if projectDir != "" {
-		scanRolesDir(seen, filepath.Join(projectDir, "roles"))
-	}
-	if orgDir != "" {
-		scanRolesDir(seen, filepath.Join(orgDir, "roles"))
+	for _, dir := range []string{projectDir, orgDir} {
+		if dir == "" {
+			continue
+		}
+		scanV1Roles(seen, filepath.Join(dir, "prompts", "report"))
+		scanLegacyRoles(seen, filepath.Join(dir, "roles"))
 	}
 	all := make([]string, 0, len(seen))
 	for id := range seen {
@@ -181,7 +203,30 @@ func AllKnownRoleIDs(configRoles map[string]string, projectDir, orgDir string) [
 	return all
 }
 
-func scanRolesDir(seen map[string]bool, rolesDir string) {
+// scanV1Roles walks reportDir for <id>.prompt.md files and adds each <id> to
+// the set. Hidden / dir-level structural files (basename starts with `_`) are
+// skipped — those are framework files, not role identifiers.
+func scanV1Roles(seen map[string]bool, reportDir string) {
+	entries, err := os.ReadDir(reportDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasSuffix(name, ".prompt.md") || strings.HasPrefix(name, "_") {
+			continue
+		}
+		seen[strings.TrimSuffix(name, ".prompt.md")] = true
+	}
+}
+
+// scanLegacyRoles walks the pre-migration roles/<id>/ shape and registers
+// each <id> that has a report_prompt.md. Kept so a project with
+// ATEAM_NO_MIGRATE=1 still surfaces its roles.
+func scanLegacyRoles(seen map[string]bool, rolesDir string) {
 	entries, err := os.ReadDir(rolesDir)
 	if err != nil {
 		return
@@ -208,42 +253,9 @@ func readEmbedded(name string) string {
 	return string(data)
 }
 
-func DefaultRolePrompt(roleID string) string {
-	return readEmbedded(fmt.Sprintf("roles/%s/report_prompt.md", roleID))
-}
-
-func DefaultReportBasePrompt() string {
-	return readEmbedded("report_base_prompt.md")
-}
-
-func DefaultCodeBasePrompt() string {
-	return readEmbedded("code_base_prompt.md")
-}
-
-func DefaultSupervisorReviewPrompt() string {
-	return readEmbedded("supervisor/review_prompt.md")
-}
-
-func DefaultSupervisorAutoRolesPrompt() string {
-	return readEmbedded("supervisor/report_auto_roles_prompt.md")
-}
-
-func DefaultSupervisorCodeManagementPrompt() string {
-	return readEmbedded("supervisor/code_management_prompt.md")
-}
-
-func DefaultSupervisorCodeVerifyPrompt() string {
-	return readEmbedded("supervisor/code_verify_prompt.md")
-}
-
-func DefaultAutoSetupPrompt() string {
-	return readEmbedded("supervisor/auto_setup_prompt.md")
-}
-
-func DefaultExecDebugPrompt() string {
-	return readEmbedded("supervisor/exec_debug_prompt.md")
-}
-
+// DefaultSandboxSettings returns the embedded sandbox-settings JSON. Only
+// per-file accessor kept after the legacy dual-ship was dropped — sandbox
+// settings live at the defaults/ root, not under defaults/prompts/.
 func DefaultSandboxSettings() string {
 	return readEmbedded(SandboxSettingsFile)
 }
@@ -253,58 +265,37 @@ type embeddedFile struct {
 	content string
 }
 
-// embeddedFiles returns all default files as relPath -> content pairs.
+// embeddedFiles enumerates the default files that DiffOrgDefaults /
+// WriteOrgDefaults sync into the user's .ateamorg/defaults/ tree. Walks the
+// v1 prompts/ subtree once (so adding a default to defaults/prompts/ shows
+// up here automatically, no manual list to maintain) plus the standalone
+// sandbox-settings JSON.
+//
+// The returned paths are relative-to-orgDir: `defaults/prompts/...` and
+// `defaults/ateam_claude_sandbox_extra_settings.json`. Callers prefix
+// orgDir to get the on-disk destination.
 func embeddedFiles() []embeddedFile {
 	var files []embeddedFile
-	for _, id := range AllRoleIDs {
-		files = append(files, embeddedFile{
-			filepath.Join("defaults", "roles", id, ReportPromptFile),
-			DefaultRolePrompt(id),
-		})
-		// Include per-role code_prompt.md if present in the embedded FS.
-		codePath := fmt.Sprintf("roles/%s/%s", id, CodePromptFile)
-		if data, err := defaults.FS.ReadFile(codePath); err == nil {
-			files = append(files, embeddedFile{
-				filepath.Join("defaults", "roles", id, CodePromptFile),
-				string(data),
-			})
+	_ = fs.WalkDir(defaults.FS, "prompts", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
 		}
-	}
-	files = append(files, embeddedFile{
-		filepath.Join("defaults", ReportBasePromptFile),
-		DefaultReportBasePrompt(),
+		if !strings.HasSuffix(d.Name(), ".md") {
+			return nil
+		}
+		data, err := defaults.FS.ReadFile(p)
+		if err != nil {
+			return nil
+		}
+		files = append(files, embeddedFile{
+			rel:     filepath.Join("defaults", filepath.FromSlash(p)),
+			content: string(data),
+		})
+		return nil
 	})
 	files = append(files, embeddedFile{
-		filepath.Join("defaults", CodeBasePromptFile),
-		DefaultCodeBasePrompt(),
-	})
-	files = append(files, embeddedFile{
-		filepath.Join("defaults", "supervisor", ReviewPromptFile),
-		DefaultSupervisorReviewPrompt(),
-	})
-	files = append(files, embeddedFile{
-		filepath.Join("defaults", "supervisor", ReportAutoRolesPromptFile),
-		DefaultSupervisorAutoRolesPrompt(),
-	})
-	files = append(files, embeddedFile{
-		filepath.Join("defaults", "supervisor", CodeManagementPromptFile),
-		DefaultSupervisorCodeManagementPrompt(),
-	})
-	files = append(files, embeddedFile{
-		filepath.Join("defaults", "supervisor", CodeVerifyPromptFile),
-		DefaultSupervisorCodeVerifyPrompt(),
-	})
-	files = append(files, embeddedFile{
-		filepath.Join("defaults", "supervisor", AutoSetupPromptFile),
-		DefaultAutoSetupPrompt(),
-	})
-	files = append(files, embeddedFile{
-		filepath.Join("defaults", "supervisor", ExecDebugPromptFile),
-		DefaultExecDebugPrompt(),
-	})
-	files = append(files, embeddedFile{
-		filepath.Join("defaults", SandboxSettingsFile),
-		DefaultSandboxSettings(),
+		rel:     filepath.Join("defaults", SandboxSettingsFile),
+		content: DefaultSandboxSettings(),
 	})
 	return files
 }

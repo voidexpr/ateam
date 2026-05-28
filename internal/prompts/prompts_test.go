@@ -48,7 +48,7 @@ func TestReadWith3LevelFallback(t *testing.T) {
 	// but a real embedded resource is referenced, the embedded content is
 	// returned. Use a path known to exist in defaults/embed.go.
 	missing := filepath.Join(base, "missing.md")
-	embedded := "supervisor/code_verify_prompt.md"
+	embedded := "prompts/code_verify.prompt.md"
 	got, err = readWith3LevelFallback(missing, missing, missing, embedded, "test")
 	if err != nil {
 		t.Fatalf("embedded fallback: %v", err)
@@ -699,31 +699,6 @@ func TestAssembleAutoRolesPrompt(t *testing.T) {
 	bodyIdx := strings.Index(result, stubBody)
 	if headerIdx < 0 || bodyIdx < 0 || headerIdx >= bodyIdx {
 		t.Errorf("sections out of order: header=%d body=%d", headerIdx, bodyIdx)
-	}
-}
-
-func TestDefaultPromptAccessorsNonEmpty(t *testing.T) {
-	cases := []struct {
-		name string
-		fn   func() string
-	}{
-		{"DefaultRolePrompt(security)", func() string { return DefaultRolePrompt("security") }},
-		{"DefaultReportBasePrompt", DefaultReportBasePrompt},
-		{"DefaultCodeBasePrompt", DefaultCodeBasePrompt},
-		{"DefaultSupervisorReviewPrompt", DefaultSupervisorReviewPrompt},
-		{"DefaultSupervisorAutoRolesPrompt", DefaultSupervisorAutoRolesPrompt},
-		{"DefaultSupervisorCodeManagementPrompt", DefaultSupervisorCodeManagementPrompt},
-		{"DefaultSupervisorCodeVerifyPrompt", DefaultSupervisorCodeVerifyPrompt},
-		{"DefaultAutoSetupPrompt", DefaultAutoSetupPrompt},
-		{"DefaultExecDebugPrompt", DefaultExecDebugPrompt},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := tc.fn()
-			if strings.TrimSpace(got) == "" {
-				t.Errorf("%s returned empty content", tc.name)
-			}
-		})
 	}
 }
 

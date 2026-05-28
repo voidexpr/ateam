@@ -21,7 +21,7 @@ func TestUpdateDiffShowsChangedFile(t *testing.T) {
 		t.Fatal("prompts.AllRoleIDs is empty; embedded defaults missing")
 	}
 	roleID := prompts.AllRoleIDs[0]
-	rel := filepath.Join("defaults", "roles", roleID, "report_prompt.md")
+	rel := filepath.Join("defaults", "prompts", "report", roleID+".prompt.md")
 	rolePrompt := filepath.Join(tmp, root.OrgDirName, rel)
 	if err := os.WriteFile(rolePrompt, []byte("mutated content\n"), 0644); err != nil {
 		t.Fatalf("mutate prompt: %v", err)
@@ -48,13 +48,13 @@ func TestUpdateOverwritesStaleDefault(t *testing.T) {
 		t.Fatal("prompts.AllRoleIDs is empty; embedded defaults missing")
 	}
 	roleID := prompts.AllRoleIDs[0]
-	embeddedPath := filepath.Join("roles", roleID, "report_prompt.md")
+	embeddedPath := filepath.Join("prompts", "report", roleID+".prompt.md")
 	want, err := defaults.FS.ReadFile(embeddedPath)
 	if err != nil {
 		t.Fatalf("read embedded %s: %v", embeddedPath, err)
 	}
 
-	rolePrompt := filepath.Join(tmp, root.OrgDirName, "defaults", "roles", roleID, "report_prompt.md")
+	rolePrompt := filepath.Join(tmp, root.OrgDirName, "defaults", "prompts", "report", roleID+".prompt.md")
 	if err := os.WriteFile(rolePrompt, []byte("mutated content\n"), 0644); err != nil {
 		t.Fatalf("mutate prompt: %v", err)
 	}

@@ -32,8 +32,8 @@ func TestRunInstallCreatesOrgFixture(t *testing.T) {
 		}
 	}
 
-	// Embedded supervisor prompt must be present.
-	supervisorPrompt := filepath.Join(orgDir, "defaults", "supervisor", "review_prompt.md")
+	// Embedded supervisor prompt must be present at the v1 path.
+	supervisorPrompt := filepath.Join(orgDir, "defaults", "prompts", "review.prompt.md")
 	if _, err := os.Stat(supervisorPrompt); err != nil {
 		t.Errorf("expected %s to exist: %v", supervisorPrompt, err)
 	}
@@ -43,7 +43,7 @@ func TestRunInstallCreatesOrgFixture(t *testing.T) {
 		t.Fatal("prompts.AllRoleIDs is empty; embedded defaults missing")
 	}
 	for _, id := range prompts.AllRoleIDs {
-		rolePrompt := filepath.Join(orgDir, "defaults", "roles", id, "report_prompt.md")
+		rolePrompt := filepath.Join(orgDir, "defaults", "prompts", "report", id+".prompt.md")
 		if _, err := os.Stat(rolePrompt); err != nil {
 			t.Errorf("expected role prompt %s to exist: %v", rolePrompt, err)
 		}
