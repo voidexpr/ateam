@@ -83,16 +83,27 @@ cmd/* rewires (all main paths):
 
 Cleanup wave:
 - ✅ **Step 2** — mechanical `{{ALL_CAPS}}` → `{{dotted.form}}` rewrite over `defaults/prompts/` (51ee9a5). 8 files touched. No semantic change.
-- ✅ **Step 1** — drop dual-shipped legacy defaults (97b55e0). Removed `defaults/{roles,supervisor,*_base_prompt.md}` and their embed globs. `RoleMeta` / `discoverRoleIDs` / `IsValidRole` / `embeddedFiles` now read from `defaults/prompts/`. Pre-migration projects still validate via legacy-path fallback in `IsValidRole` / `scanLegacyRoles`. Binary ~250KB lighter.
+- ✅ **Step 1** — drop dual-shipped legacy defaults (97b55e0). Removed `defaults/{roles,supervisor,*_base_prompt.md}` and their embed globs. `RoleMeta` / `discoverRoleIDs` / `IsValidRole` / `embeddedFiles` now read from `defaults/prompts/`. Binary ~250KB lighter.
+
+Code-review fixes wave (6503a77, 458d915):
+- ✅ **Step 7 partial** — `IsValidRole` and `AllKnownRoleIDs` no longer dual-read legacy paths; `scanLegacyRoles` deleted. Auto-migration is default-on so pre-migration trees get upgraded on first contact. Remaining dual-read: `RoleReportPath` / `ReviewPath` / `VerifyPath` in `internal/root/resolve.go` (see Step 7 below).
+- ✅ **Web wired to v1 assembler** — `internal/web/handlers.go::handlePrompts` no longer calls `prompts.TraceRolePromptSources` / `TraceRoleCodePromptSources`; a new `assemblerSourcesForRole` helper composes via `env.Assembler()`. The Trace* functions in `internal/prompts/trace.go` now have **no live callers** and are deletion candidates under Step 5.
+- ✅ **`BuildAssemblerVars` defers all runner placeholders** — `exec.id`, `exec.batch`, `exec.timestamp`, `exec.profile`, `exec.agent`, `exec.model`, `container.type`, `container.name` now resolve to `{{EXEC_ID}}` etc. so the runner's `strings.Replacer` fills them at exec time (matching the existing pattern for `output_dir` / `output_file`). User prompts using legacy ALL_CAPS via the compat shim no longer hit "unknown key". `vars.Project["info"]` is always populated so `--no-project-info` works. `Role` map seeded with `reports=""`.
+- ✅ **Stale legacy orgDir cleanup** — `WriteOrgDefaults` now strips pre-v1 `defaults/{roles,supervisor,*_base_prompt.md}` from upgraded orgs with stderr notices. Migrator's `resolveExistingTarget` handles target-exists conflicts via `.legacy` rename (or dedupe when content matches).
+- ✅ **Boot-time guards** — `discoverRoleIDs` and `embeddedFiles` panic on empty/walk-error so a future `defaults/embed.go` regression surfaces at binary startup instead of silently degrading every command.
+- ✅ **`cmd/code_v1.go`** — extracted `SubRunFlags` + `assembleCodeManagementV1` helper shared by `cmd/code.go` (real values from `CodeOptions`) and `cmd/prompt.go --supervisor --action code` preview (placeholder values via `previewSubRunFlags(sourceDir)`).
+- ✅ **`ateam prompt --paths`/`--inline-paths` preview parity** — honors `--no-project-info` / `--extra-prompt` / `--ignore-previous-report`, synthesizes `[live]` sections for previous-report / reports manifest / review body / sub-run flags / extra-prompt so inspection output byte-matches the live run. Flags marked mutually exclusive.
+- ✅ **`assembleRoleCodeV1`** — emits a clear "no code prompt defined for role X" message (wrapping the assembler's "no role main" error) for the ~37 of 40 embedded roles without a per-role code prompt.
+- ✅ **`cmd/roles.go`** dead markdown link fixed; ROLES.md regenerated.
 
 ### Remaining
 
 Loose ends, ordered by recommended sequence:
 
 4. **`code.go` per-exec destination design** — biggest remaining structural decision. See Step 4 detail below.
-5. **Drop dead legacy `prompts.AssembleXxx` functions** — most are now unreferenced after Step 3 + the customPrompt branches being the only remaining callers. See Step 5 detail.
+5. **Drop dead legacy `prompts.AssembleXxx` AND `prompts.Trace*` functions** — only `AssembleReviewPrompt` / `AssembleCodeManagementPrompt` retain live callers (the `--prompt` override branches in `cmd/review.go` / `cmd/code.go`). All Trace* are dead after the web rewire. See Step 5 detail.
 6. **Primary-output filename rename** — `shared/report/<R>/report.md` → `shared/report/<R>/<R>.md` per spec. See Step 6.
-7. **Drop legacy dual-read in env helpers** — post-release cleanup, deferred.
+7. **Drop legacy dual-read in env helpers** — `RoleReportPath` / `ReviewPath` / `VerifyPath` in `internal/root/resolve.go` still stat the pre-migration paths. Post-release cleanup; not blocking v1.
 8. **Phase F verification** — golden prompt diff, idempotence under load, real-project migration tests.
 9. **Docs (Task 5)** — README, CONFIG.md, ROLES.md, ISOLATION.md.
 
@@ -123,27 +134,34 @@ Each slice is sized for one commit. Order is recommended but most are independen
 - `TestRsyncFixture` extension: assert `supervisor/code/597/` (from the real ~/projects/ateam fixture) ends up at `shared/code_runs/597/` with all files intact.
 - Manual `ateam serve` against migrated fixture; click Code → session detail → verify files load.
 
-### Step 5 — Drop dead legacy `prompts.AssembleXxx` functions
+### Step 5 — Drop dead legacy `prompts.AssembleXxx` and `prompts.Trace*` functions
 
-**Why:** after Steps 1+3, most legacy assembler entry points are dead code. Live callers per `grep -rn "prompts\.AssembleXxx" --include="*.go" .`:
+**Why:** after Steps 1+3 and the code-review-fixes wave (6503a77), only two legacy entry points retain live callers. Verify with:
+```
+grep -rn "prompts\.Assemble\|prompts\.Trace" --include="*.go" . | grep -v _test.go | grep -v "^Binary"
+```
 
-- `prompts.AssembleReviewPrompt` — `cmd/review.go` `--prompt` branch (customPrompt overrides supervisor body)
-- `prompts.AssembleCodeManagementPrompt` — `cmd/code.go` `--prompt` branch (customManagement)
-- *All other* `Assemble*` (`AssembleRolePrompt`, `AssembleRoleCodePrompt`, `AssembleCodeVerifyPrompt`, `AssembleAutoSetupPrompt`, `AssembleAutoRolesPrompt`, `AssembleExecDebugPrompt`) — **no live callers**, only comment references
+Live (as of HEAD):
+- `prompts.AssembleReviewPrompt` — `cmd/review.go:194` `--prompt` branch (customPrompt overrides supervisor body)
+- `prompts.AssembleCodeManagementPrompt` — `cmd/code.go:224` `--prompt` branch (customManagement)
+
+Dead (no live callers, only comment references):
+- `AssembleRolePrompt`, `AssembleRoleCodePrompt`, `AssembleCodeVerifyPrompt`, `AssembleAutoSetupPrompt`, `AssembleAutoRolesPrompt`, `AssembleExecDebugPrompt`
+- `TraceRolePromptSources`, `TraceRoleCodePromptSources`, `TraceReviewPromptSources`, `TraceCodeManagementPromptSources`, `TraceCodeVerifyPromptSources` (web rewire in 6503a77 dropped the last live callers)
 
 **Options:**
-- **A. Add `--prompt` support to the v1 assembler.** Either a "replace role main" option on `Assemble`, or have the helpers (`assembleReviewV1`, `assembleSupervisorV1`) accept an override string. Then drop the customPrompt branches AND all legacy `Assemble*` functions entirely.
-- **B. Keep legacy code only for `--prompt`.** Delete the unused functions plus their helpers (`readWith3LevelFallback`, `assembleRoleAction`, `assembleSupervisorPrompt`, `readFileOr3Level`). Keep `AssembleReviewPrompt` + `AssembleCodeManagementPrompt`.
+- **A. Add `--prompt` support to the v1 assembler.** Either a "replace role main" option on `Assemble`, or have the helpers (`assembleReviewV1`, `assembleSupervisorV1`) accept an override string. Then drop the customPrompt branches AND all remaining legacy `Assemble*` functions entirely.
+- **B. Keep `AssembleReviewPrompt` + `AssembleCodeManagementPrompt` only.** Delete everything else (all 6 dead `Assemble*`, all 5 dead `Trace*`, plus their helpers: `assembleRoleAction`, `collectRoleExtras`, `assembleSupervisorPrompt`, `traceRoleAction`, `traceSupervisorSources`, `readWith3LevelFallback`, `readFileOr3Level`, `readFileWithModTime`, `formatAge`, `traceFileOr3Level`).
 
-**Recommendation:** B first (zero-risk cleanup), then A.
+**Recommendation:** B first (zero-risk cleanup; ~700 lines deleted from `internal/prompts/`), then A as a follow-up that ties in with Task 8's `--pre-prompt`/`--post-prompt` surface design.
 
 **Files for B:**
-- `internal/prompts/prompts.go` — delete `AssembleRolePrompt`, `AssembleRoleCodePrompt`, `AssembleCodeVerifyPrompt`, `AssembleAutoSetupPrompt`, `AssembleAutoRolesPrompt`, `AssembleExecDebugPrompt`, `assembleRoleAction`, `collectRoleExtras`, `assembleSupervisorPrompt`, `readWith3LevelFallback`, `readFileOr3Level`, `readFileWithModTime`, `formatAge`, `traceFileOr3Level` (if only used by the deleted functions)
-- `internal/prompts/trace.go` — `TraceCodeVerifyPromptSources`, `TraceCodeManagementPromptSources`, `TraceReviewPromptSources` if not used by web anymore. But web/handlers.go still calls `TraceRolePromptSources` + `TraceRoleCodePromptSources`, so keep those. Verify with grep.
-- `internal/prompts/prompts_test.go` — delete tests for deleted functions
-- `internal/root/integration_test.go::TestIntegration_3LevelPromptFallback` — currently exercises legacy `AssembleRolePrompt`; if `AssembleRolePrompt` goes, delete or rewrite this test to exercise v1
+- `internal/prompts/prompts.go` — delete the 6 dead Assemble* + their helpers listed above. Roughly half of the 750-line file.
+- `internal/prompts/trace.go` — delete the 5 dead Trace* + `traceRoleAction` + `traceSupervisorSources` + any other helpers used only by them.
+- `internal/prompts/prompts_test.go` and `internal/prompts/trace_test.go` — delete tests for deleted functions.
+- `internal/root/integration_test.go::TestIntegration_3LevelPromptFallback` — exercises legacy `AssembleRolePrompt`; delete (no v1 equivalent — the 3-level fallback is an artifact of the old layout, not v1 semantics).
 
-**Risk:** low if grep is thorough. The `prompts` package keeps surface needed elsewhere: `RoleMetadata`, `DiscoverReports`, `ResolveValue` / `ResolveOptional`, `ReviewSelector`, `ReviewEmptyError`, `RoleReport`, `IsValidRole`, `AllKnownRoleIDs`, `AllRoleIDs`, `RoleMeta`, `EstimateTokens`, `FormatProjectInfo`, `ProjectInfoParams`, `ParsePromptFrontmatter`, `AutoRolesMarker`, the file constants (`ReportFile` etc.).
+**Risk:** low if grep is thorough. The `prompts` package keeps surface needed elsewhere: `RoleMetadata`, `DiscoverReports`, `ResolveValue` / `ResolveOptional`, `ReviewSelector`, `ReviewEmptyError`, `RoleReport`, `IsValidRole`, `AllKnownRoleIDs`, `AllRoleIDs`, `RoleMeta`, `EstimateTokens`, `FormatProjectInfo`, `ProjectInfoParams`, `ParsePromptFrontmatter`, `AutoRolesMarker`, `PromptSource` (still used by `internal/web` via `assemblerSourcesForRole`), the file constants (`ReportFile` etc.).
 
 **Test approach:** `go build ./...` catches any missed callers; `make run-ci` validates lint+fmt.
 
@@ -168,9 +186,11 @@ Each slice is sized for one commit. Order is recommended but most are independen
 
 ### Step 7 — Drop legacy dual-read in env helpers
 
-**Why:** `RoleReportPath`, `ReviewPath`, `VerifyPath`, `IsValidRole`, `scanLegacyRoles` still do `os.Stat` dual-read for pre-migration projects. Once auto-migration has been default-on for a release and projects have all been touched at least once, the legacy fallback can go.
+**Status:** partially done in 6503a77. `IsValidRole`, `AllKnownRoleIDs`, `scanLegacyRoles` no longer dual-read; only the path helpers remain.
 
-**Defer until post-release.** Not blocking v1; cleanup for next iteration.
+**Remaining:** `RoleReportPath`, `ReviewPath`, `VerifyPath` in `internal/root/resolve.go` still `os.Stat` the legacy paths (`roles/<r>/report.md`, `supervisor/review.md`, `supervisor/verify.md`) and return them if present. Web's `latestCodeSession` / `scanCodeSessions` may also still dual-read (verify with grep when this step runs).
+
+**Defer until post-release.** Auto-migration is default-on, so practical impact is zero for any user who has run ateam at least once with a current binary. Cleanup for next iteration.
 
 ### Step 8 — Phase F verification
 
