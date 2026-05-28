@@ -141,7 +141,7 @@ func printRolesDocs() error {
 		if meta.Deprecated {
 			desc = "**Deprecated.** " + desc
 		}
-		link := fmt.Sprintf("[prompt](defaults/roles/%s/report_prompt.md)", id)
+		link := fmt.Sprintf("[prompt](defaults/prompts/report/%s.prompt.md)", id)
 		fmt.Fprintf(&b, "| `%s` | %s | %s | %s |\n", id, status, desc, link)
 	}
 

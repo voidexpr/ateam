@@ -57,9 +57,20 @@ func assembleRoleReportV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt 
 // history of the patch the role will land.
 //
 // roleLabel feeds {{project.info}}; pass "" to suppress.
+//
+// Only roles that ship `code/<roleID>.prompt.md` are previewable; the
+// assembler hard-requires a role main file. When no such prompt exists,
+// surface a clearer error than the assembler's generic "no role main..."
+// message — preview is the only consumer of this function, so the
+// guidance should point users at the (small) set of code-capable roles.
 func assembleRoleCodeV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt string) (string, error) {
 	promptPath := "code/" + roleID
 	a := env.Assembler()
+
+	if _, ok, err := a.FirstMatch(promptPath + ".prompt.md"); err == nil && !ok {
+		return "", fmt.Errorf("no code prompt defined for role %q. Code prompts are role-specific; only roles that ship code/<role>.prompt.md (project, org, or embedded) can preview a code action", roleID)
+	}
+
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, "code")
 	res, err := a.Assemble(promptPath, vars, nil)
 	if err != nil {

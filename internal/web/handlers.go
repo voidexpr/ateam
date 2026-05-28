@@ -377,13 +377,11 @@ func (s *Server) handlePrompts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	roles := discoverRoles(pe)
-	var pinfo prompts.ProjectInfoParams // empty, no CLI context
-
 	data := promptsPageData{}
 	for _, roleID := range roles {
 		entry := promptRoleEntry{RoleID: roleID}
-		entry.ReportSources = prompts.TraceRolePromptSources(pe.OrgDir, pe.ProjectDir, roleID, pe.SourceDir, "", pinfo, true)
-		entry.CodeSources = prompts.TraceRoleCodePromptSources(pe.OrgDir, pe.ProjectDir, roleID, pe.SourceDir, "", pinfo)
+		entry.ReportSources = assemblerSourcesForRole(pe, roleID, "report")
+		entry.CodeSources = assemblerSourcesForRole(pe, roleID, "code")
 		for _, src := range entry.ReportSources {
 			entry.ReportTokens += prompts.EstimateTokens(src.Content)
 		}
@@ -400,6 +398,66 @@ func (s *Server) handlePrompts(w http.ResponseWriter, r *http.Request) {
 		ProjectSlug: pe.Slug,
 		Data:        data,
 	})
+}
+
+// assemblerSourcesForRole composes the v1 prompt for `<action>/<roleID>` and
+// converts its assembler sections into the legacy PromptSource shape the web
+// templates already consume. Replaces the legacy prompts.TraceRolePromptSources
+// / TraceRoleCodePromptSources path, which read only pre-migration disk paths
+// and went stale after defaults/{roles,supervisor} were dropped.
+//
+// Returns an empty slice when the role lacks a prompt for `action` (e.g. the
+// many roles without a per-role code prompt) so the per-role view still
+// renders.
+//
+// A minimal ResolvedEnv is constructed from pe so the canonical
+// env.Assembler() / env.BuildAssemblerVars helpers do the heavy lifting —
+// no duplicated MapVars construction here. Passing roleLabel="" suppresses
+// the {{project.info}} section (matching the legacy trace path's shape).
+func assemblerSourcesForRole(pe *ProjectEntry, roleID, action string) []prompts.PromptSource {
+	env := &root.ResolvedEnv{
+		ProjectDir:  pe.ProjectDir,
+		OrgDir:      pe.OrgDir,
+		ProjectName: pe.Name,
+		SourceDir:   pe.SourceDir,
+	}
+	a := env.Assembler()
+	promptPath := action + "/" + roleID
+
+	// Skip role+action combos that don't ship a main prompt — common for
+	// "code" where only a few roles define one. FirstMatch is cheap.
+	if _, ok, err := a.FirstMatch(promptPath + ".prompt.md"); err != nil || !ok {
+		return nil
+	}
+
+	vars := env.BuildAssemblerVars(promptPath, "", action)
+	res, err := a.Assemble(promptPath, vars, nil)
+	if err != nil {
+		return nil
+	}
+	out := make([]prompts.PromptSource, 0, len(res.Sections))
+	for _, sec := range res.Sections {
+		out = append(out, prompts.PromptSource{
+			Path:    webDisplayPath(pe, sec.Anchor, sec.Path),
+			Content: sec.Content,
+		})
+	}
+	return out
+}
+
+// webDisplayPath produces a stable, anchor-rooted absolute path for the
+// PromptSource.Path field. Uses pe.* paths instead of hardcoded prefixes —
+// the web request may be for a project at any on-disk location.
+func webDisplayPath(pe *ProjectEntry, anchor, relPath string) string {
+	switch anchor {
+	case "project":
+		return filepath.Join(pe.ProjectDir, "prompts", relPath)
+	case "org":
+		return filepath.Join(pe.OrgDir, "prompts", relPath)
+	case "embedded":
+		return filepath.Join("defaults", "prompts", relPath)
+	}
+	return relPath
 }
 
 type runsPageData struct {

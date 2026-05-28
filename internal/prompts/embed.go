@@ -88,10 +88,15 @@ func RoleDescription(roleID string) string {
 // discoverRoleIDs walks the embedded prompts/report/ tree and returns the
 // list of <role> basenames (i.e. the part before .prompt.md). Role IDs may
 // contain dots ("code.bugs", "report.security") — those are preserved.
+//
+// Panics on read failure or empty result. Either means the embed itself is
+// broken (a `//go:embed` directive in defaults/embed.go was renamed,
+// mistyped, or accidentally narrowed). Failing at binary boot is preferable
+// to silently shipping a CLI with zero roles.
 func discoverRoleIDs() []string {
 	entries, err := fs.ReadDir(defaults.FS, "prompts/report")
 	if err != nil {
-		return nil
+		panic(fmt.Sprintf("read embedded prompts/report: %v", err))
 	}
 	var ids []string
 	for _, e := range entries {
@@ -104,14 +109,20 @@ func discoverRoleIDs() []string {
 		}
 		ids = append(ids, strings.TrimSuffix(name, ".prompt.md"))
 	}
+	if len(ids) == 0 {
+		panic("embedded prompts/report/ contains no <role>.prompt.md files — defaults/embed.go regression?")
+	}
 	sort.Strings(ids)
 	return ids
 }
 
 // IsValidRole returns true if id is a built-in role, exists in configRoles,
-// or has a role prompt under projectDir or orgDir. Checks both the v1 path
-// (prompts/report/<id>.prompt.md) and the legacy path (roles/<id>/report_prompt.md)
-// so pre-migration project/org trees keep validating until they're touched.
+// or has a v1 role prompt under projectDir or orgDir. The auto-migrator runs
+// at every env Resolve() (see internal/migrate/v1_layout.go), so projects
+// with legacy `roles/<id>/report_prompt.md` files get upgraded on first
+// contact — by the time validation runs, the v1 paths exist. Validation here
+// matches what the assembler can actually consume; users opting out of
+// migration via ATEAM_NO_MIGRATE=1 must place files at the v1 paths.
 func IsValidRole(id string, configRoles map[string]string, projectDir, orgDir string) bool {
 	for _, known := range AllRoleIDs {
 		if known == id {
@@ -127,10 +138,6 @@ func IsValidRole(id string, configRoles map[string]string, projectDir, orgDir st
 		}
 		v1 := filepath.Join(dir, "prompts", "report", id+".prompt.md")
 		if _, err := os.Stat(v1); err == nil {
-			return true
-		}
-		legacy := filepath.Join(dir, "roles", id, ReportPromptFile)
-		if _, err := os.Stat(legacy); err == nil {
 			return true
 		}
 	}
@@ -177,9 +184,10 @@ func enabledRoleIDs(configRoles map[string]string, allKnown []string) []string {
 }
 
 // AllKnownRoleIDs returns the sorted union of embedded defaults, config-defined,
-// .ateamorg/ org-level, and .ateam/ project-level role IDs. Scans both the
-// v1 (prompts/report/<id>.prompt.md) and legacy (roles/<id>/report_prompt.md)
-// shapes so pre-migration trees still surface their roles.
+// .ateamorg/ org-level, and .ateam/ project-level role IDs at the v1 path
+// (prompts/report/<id>.prompt.md). Pre-migration `roles/<id>/` directories
+// are NOT scanned — the auto-migrator (default-on) upgrades them before this
+// runs, and the v1 assembler can't consume legacy paths anyway.
 func AllKnownRoleIDs(configRoles map[string]string, projectDir, orgDir string) []string {
 	seen := make(map[string]bool, len(AllRoleIDs)+len(configRoles))
 	for _, id := range AllRoleIDs {
@@ -193,7 +201,6 @@ func AllKnownRoleIDs(configRoles map[string]string, projectDir, orgDir string) [
 			continue
 		}
 		scanV1Roles(seen, filepath.Join(dir, "prompts", "report"))
-		scanLegacyRoles(seen, filepath.Join(dir, "roles"))
 	}
 	all := make([]string, 0, len(seen))
 	for id := range seen {
@@ -204,8 +211,9 @@ func AllKnownRoleIDs(configRoles map[string]string, projectDir, orgDir string) [
 }
 
 // scanV1Roles walks reportDir for <id>.prompt.md files and adds each <id> to
-// the set. Hidden / dir-level structural files (basename starts with `_`) are
-// skipped — those are framework files, not role identifiers.
+// the set. Hidden / dir-level structural files (basename starts with `_`) and
+// dotfiles (basename starts with `.`) are skipped — those are framework files
+// or OS detritus, not role identifiers.
 func scanV1Roles(seen map[string]bool, reportDir string) {
 	entries, err := os.ReadDir(reportDir)
 	if err != nil {
@@ -216,27 +224,13 @@ func scanV1Roles(seen map[string]bool, reportDir string) {
 			continue
 		}
 		name := e.Name()
-		if !strings.HasSuffix(name, ".prompt.md") || strings.HasPrefix(name, "_") {
+		if !strings.HasSuffix(name, ".prompt.md") {
+			continue
+		}
+		if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
 			continue
 		}
 		seen[strings.TrimSuffix(name, ".prompt.md")] = true
-	}
-}
-
-// scanLegacyRoles walks the pre-migration roles/<id>/ shape and registers
-// each <id> that has a report_prompt.md. Kept so a project with
-// ATEAM_NO_MIGRATE=1 still surfaces its roles.
-func scanLegacyRoles(seen map[string]bool, rolesDir string) {
-	entries, err := os.ReadDir(rolesDir)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			if _, err := os.Stat(filepath.Join(rolesDir, e.Name(), ReportPromptFile)); err == nil {
-				seen[e.Name()] = true
-			}
-		}
 	}
 }
 
@@ -276,16 +270,16 @@ type embeddedFile struct {
 // orgDir to get the on-disk destination.
 func embeddedFiles() []embeddedFile {
 	var files []embeddedFile
-	_ = fs.WalkDir(defaults.FS, "prompts", func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
+	err := fs.WalkDir(defaults.FS, "prompts", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		if !strings.HasSuffix(d.Name(), ".md") {
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
 			return nil
 		}
 		data, err := defaults.FS.ReadFile(p)
 		if err != nil {
-			return nil
+			return fmt.Errorf("read embedded %s: %w", p, err)
 		}
 		files = append(files, embeddedFile{
 			rel:     filepath.Join("defaults", filepath.FromSlash(p)),
@@ -293,6 +287,17 @@ func embeddedFiles() []embeddedFile {
 		})
 		return nil
 	})
+	if err != nil {
+		// Walking defaults.FS only fails when the embed itself is broken
+		// (e.g. a `//go:embed` directive was mistyped or the subtree was
+		// renamed). That's a build-time programmer error; surface it
+		// loudly at first call rather than silently shipping an empty
+		// org tree.
+		panic(fmt.Sprintf("embed walk failed: %v", err))
+	}
+	if len(files) == 0 {
+		panic("embed contains no prompts/*.md files — defaults/embed.go regression?")
+	}
 	files = append(files, embeddedFile{
 		rel:     filepath.Join("defaults", SandboxSettingsFile),
 		content: DefaultSandboxSettings(),
@@ -320,6 +325,13 @@ func DiffOrgDefaults(orgDir string) []PromptDiff {
 
 // WriteOrgDefaults writes default prompt files to the org directory's defaults/.
 // If overwrite is true, existing files are replaced; otherwise they are skipped.
+//
+// Also strips stale legacy defaults from upgraded orgs — `defaults/roles/`,
+// `defaults/supervisor/`, and the root-level `*_base_prompt.md` files were
+// removed from the embed in commit 97b55e0 but still sit on disk from
+// prior installs. Leaving them there confuses the legacy trace helpers
+// (internal/prompts/trace.go) that the web UI still consults; cleanup
+// keeps the org tree honest.
 func WriteOrgDefaults(orgDir string, overwrite bool) error {
 	write := WriteIfNotExists
 	if overwrite {
@@ -337,5 +349,34 @@ func WriteOrgDefaults(orgDir string, overwrite bool) error {
 			return err
 		}
 	}
+	cleanLegacyOrgDefaults(orgDir)
 	return nil
+}
+
+// cleanLegacyOrgDefaults removes the pre-v1 defaults tree from an upgraded
+// org. Idempotent (no-op when paths are already absent). Emits a one-line
+// stderr notice per removal so the user has a record of what was cleaned.
+// Failures are logged but not fatal — the org sync itself already succeeded.
+func cleanLegacyOrgDefaults(orgDir string) {
+	defaultsDir := filepath.Join(orgDir, "defaults")
+	for _, rel := range []string{"roles", "supervisor"} {
+		path := filepath.Join(defaultsDir, rel)
+		if _, err := os.Stat(path); err == nil {
+			if err := os.RemoveAll(path); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not remove stale %s: %v\n", path, err)
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "removed stale legacy defaults: %s\n", path)
+		}
+	}
+	for _, file := range []string{"report_base_prompt.md", "code_base_prompt.md"} {
+		path := filepath.Join(defaultsDir, file)
+		if _, err := os.Stat(path); err == nil {
+			if err := os.Remove(path); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not remove stale %s: %v\n", path, err)
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "removed stale legacy defaults: %s\n", path)
+		}
+	}
 }

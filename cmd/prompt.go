@@ -55,6 +55,7 @@ func init() {
 	promptCmd.Flags().BoolVar(&promptPaths, "paths", false, "show a per-section breakdown table (slot + anchor + path + mod time + tokens); no prompt body")
 	promptCmd.Flags().BoolVar(&promptInlinePaths, "inline-paths", false, "print the full prompt with each section preceded by an anchor/path/mod-time/tokens header; troubleshooting view, not for agent consumption")
 	promptCmd.MarkFlagsMutuallyExclusive("role", "supervisor")
+	promptCmd.MarkFlagsMutuallyExclusive("paths", "inline-paths")
 	_ = promptCmd.MarkFlagRequired("action")
 }
 
@@ -141,19 +142,17 @@ func runPromptSupervisor() error {
 		if readErr != nil {
 			return errNoReview(env.ReviewPath())
 		}
-		// Supervisor body + Review + (extra) — same shape cmd/code.go's
-		// default branch produces; keep them in lockstep so preview
-		// matches what the real run sends.
-		a := env.Assembler()
-		vars := env.BuildAssemblerVars("code_management", roleLabel, "code")
-		res, asmErr := a.Assemble("code_management", vars, nil)
-		if asmErr != nil {
-			return asmErr
+		// Use the same helper cmd/code.go invokes so the preview matches what
+		// the real run sends — including the Sub-Run Flags block. Exact flag
+		// values (batch, profile, model, ...) depend on the live `ateam code`
+		// invocation, so the preview uses placeholders that show the shape;
+		// the user sees "this becomes a real value at run time."
+		previewFlags := SubRunFlags{
+			Batch:      "<batch-id>",
+			ProjectDir: shellQuoteSingle(env.SourceDir),
+			Profile:    "<profile>",
 		}
-		assembled = res.Prompt + "\n\n---\n\n# Review\n\n" + string(reviewContent)
-		if extraPrompt != "" {
-			assembled += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
-		}
+		assembled, err = assembleCodeManagementV1(env, roleLabel, string(reviewContent), previewFlags, extraPrompt)
 	case runner.ActionVerify:
 		assembled, err = assembleSupervisorV1(env, "code_verify", roleLabel, "verify", extraPrompt)
 	}
@@ -181,6 +180,16 @@ type sectionDigest struct {
 // --paths and --inline-paths use it; the only difference between the two
 // modes is how they format these digests for output.
 //
+// Honors the same flag suite that runPromptRole / runPromptSupervisor do —
+// --no-project-info, --extra-prompt, --ignore-previous-report — so the
+// inspection output reflects what the corresponding `ateam report` /
+// `ateam review` / `ateam code` / `ateam verify` run would assemble.
+//
+// Sections beyond the assembler's composition (previous-report, reports
+// manifest, review body, sub-run flags, --extra-prompt) are recorded with
+// Anchor="live" and a descriptive Path so the user can tell them from
+// fragment files on disk.
+//
 // Orphan fragments are surfaced to stderr and turned into a hard error per
 // the spec's "errors loudly on orphan fragments".
 func assembleForInspection() (string, []sectionDigest, error) {
@@ -188,9 +197,17 @@ func assembleForInspection() (string, []sectionDigest, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	promptPath, roleLabel, err := promptPathForCurrentFlags()
+	extraPrompt, err := prompts.ResolveOptional(promptExtraPrompt)
 	if err != nil {
 		return "", nil, err
+	}
+	promptPath, defaultLabel, err := promptPathForCurrentFlags()
+	if err != nil {
+		return "", nil, err
+	}
+	roleLabel := defaultLabel
+	if promptNoProjectInfo {
+		roleLabel = ""
 	}
 	a := env.Assembler()
 
@@ -212,17 +229,74 @@ func assembleForInspection() (string, []sectionDigest, error) {
 	}
 
 	anchorFS := anchorFSMap(a)
-	digests := make([]sectionDigest, len(res.Sections))
-	for i, s := range res.Sections {
-		digests[i] = sectionDigest{
+	digests := make([]sectionDigest, 0, len(res.Sections)+3)
+	for _, s := range res.Sections {
+		digests = append(digests, sectionDigest{
 			Slot:     s.Slot,
 			Anchor:   s.Anchor,
 			Path:     displayAnchorPath(env, s.Anchor, s.Path),
 			Modified: sectionModTime(anchorFS, s.Anchor, s.Path),
 			Tokens:   prompts.EstimateTokens(s.Content),
 			Content:  s.Content,
+		})
+	}
+
+	addLive := func(slot, source, content string) {
+		if content == "" {
+			return
+		}
+		digests = append(digests, sectionDigest{
+			Slot:     slot,
+			Anchor:   "live",
+			Path:     source,
+			Modified: "-",
+			Tokens:   prompts.EstimateTokens(content),
+			Content:  content,
+		})
+	}
+
+	extraSection := ""
+	if extraPrompt != "" {
+		extraSection = "# Additional Instructions\n\n" + extraPrompt
+	}
+
+	if promptSupervisor {
+		switch promptAction {
+		case runner.ActionReview:
+			all, derr := prompts.DiscoverReports(env.ProjectDir)
+			if derr == nil {
+				reports, _ := (prompts.ReviewSelector{}).Filter(all, env.Config.Roles)
+				addLive("reports", "(assembleReviewV1: manifest + bundled role reports)", formatReportsBlock(reports))
+			}
+			addLive("extra_prompt", "(--extra-prompt)", extraSection)
+		case runner.ActionCode:
+			reviewContent, readErr := os.ReadFile(env.ReviewPath())
+			if readErr != nil {
+				return "", nil, errNoReview(env.ReviewPath())
+			}
+			addLive("review", env.ReviewPath(), "# Review\n\n"+string(reviewContent))
+			addLive("extra_prompt", "(--extra-prompt)", extraSection)
+			previewFlags := SubRunFlags{
+				Batch:      "<batch-id>",
+				ProjectDir: shellQuoteSingle(env.SourceDir),
+				Profile:    "<profile>",
+			}
+			addLive("sub_run_flags", "(cmd/code.go: rendered from --batch / --profile / --agent / --model / --effort / --max-budget-*)", previewFlags.Render())
+		case runner.ActionVerify:
+			addLive("extra_prompt", "(--extra-prompt)", extraSection)
+		}
+	} else {
+		switch promptAction {
+		case runner.ActionReport:
+			if !promptIgnorePreviousReport {
+				addLive("previous_report", env.RoleReportPath(promptRole), previousReportBlock(env, promptRole))
+			}
+			addLive("extra_prompt", "(--extra-prompt)", extraSection)
+		case runner.ActionCode:
+			addLive("extra_prompt", "(--extra-prompt)", extraSection)
 		}
 	}
+
 	return promptPath, digests, nil
 }
 

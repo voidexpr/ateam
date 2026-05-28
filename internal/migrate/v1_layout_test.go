@@ -226,7 +226,7 @@ func TestV1LayoutIdempotent(t *testing.T) {
 	}
 }
 
-func TestV1LayoutSkipsExistingTarget(t *testing.T) {
+func TestV1LayoutTargetExistsDifferentContent(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
 		"supervisor/review_prompt.md": "old",
@@ -236,15 +236,46 @@ func TestV1LayoutSkipsExistingTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Source preserved, target intact.
-	if !exists(root, "supervisor/review_prompt.md") {
-		t.Error("source should remain when target exists")
+	// Target intact (content differs, never overwritten); source renamed to
+	// .legacy so it's out of the read path but inspectable by the user.
+	if exists(root, "supervisor/review_prompt.md") {
+		t.Error("source should have been renamed to .legacy when target exists with different content")
+	}
+	if !exists(root, "supervisor/review_prompt.md.legacy") {
+		t.Error("source should be preserved at .legacy")
+	}
+	if read(t, root, "supervisor/review_prompt.md.legacy") != "old" {
+		t.Error(".legacy file should hold the original source content")
 	}
 	if read(t, root, "prompts/review.prompt.md") != "new — should not be overwritten" {
 		t.Error("target should not have been overwritten")
 	}
 	if len(r.Warnings) == 0 {
-		t.Error("expected warning about skipped move")
+		t.Error("expected warning about target conflict")
+	}
+}
+
+func TestV1LayoutTargetExistsIdenticalContent(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"supervisor/review_prompt.md": "same content both places",
+		"prompts/review.prompt.md":    "same content both places",
+	})
+	r, err := V1Layout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Content matches — source removed as duplicate cleanup, no warning.
+	if exists(root, "supervisor/review_prompt.md") {
+		t.Error("source should have been removed when target has identical content")
+	}
+	if read(t, root, "prompts/review.prompt.md") != "same content both places" {
+		t.Error("target should remain intact")
+	}
+	for _, warn := range r.Warnings {
+		if strings.Contains(warn, "review_prompt.md") {
+			t.Errorf("did not expect warning for identical-content cleanup, got: %s", warn)
+		}
 	}
 }
 

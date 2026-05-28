@@ -184,32 +184,6 @@ func runCode(opts CodeOptions) error {
 
 	batch := "code-" + time.Now().Format(display.TimestampFormat)
 
-	var prompt string
-	if customManagement == "" {
-		// Default: build the supervisor body via the v1 assembler. Review
-		// content and --extra-prompt are appended manually (same pattern as
-		// review_v1) so they land in the legacy order.
-		a := env.Assembler()
-		vars := env.BuildAssemblerVars("code_management", "the supervisor", "code")
-		res, err := a.Assemble("code_management", vars, nil)
-		if err != nil {
-			return err
-		}
-		prompt = res.Prompt + "\n\n---\n\n# Review\n\n" + reviewContent
-		if extraPrompt != "" {
-			prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
-		}
-	} else {
-		// --prompt overrides the supervisor body wholesale; keep the legacy
-		// path until the new assembler has a "replace role main" surface.
-		pinfo := env.NewProjectInfoParams("the supervisor", "code")
-		var err error
-		prompt, err = prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.WorkDir, pinfo, reviewContent, customManagement, extraPrompt)
-		if err != nil {
-			return err
-		}
-	}
-
 	// Resolve sub-run profile/agent once — used for both prompt injection and DinD check.
 	// --agent and --profile are mutually exclusive on ateam exec.
 	subRunProfile := opts.Profile
@@ -217,32 +191,44 @@ func runCode(opts CodeOptions) error {
 		subRunProfile = env.Config.ResolveProfile(runner.ActionExec, "")
 	}
 
-	// Inject flags for the supervisor to pass to sub-runs.
-	prompt += "\n\n# Sub-Run Flags\n\nYou MUST pass the following flags to every `ateam exec` command you execute:\n"
-	prompt += "- `--batch " + batch + "` (groups all sub-execs for cost tracking)\n"
 	// --project is required so sub-execs resolve the right .ateam directory
 	// even when the supervisor's cwd is outside the project tree (remote-mode
 	// `ateam code --project /elsewhere`). In project-local mode the value is
 	// redundant but harmless. shellQuoteSingle keeps paths with spaces or
 	// shell-significant chars intact when the supervisor templates them into
 	// `ateam exec` commands.
-	prompt += "- `--project " + shellQuoteSingle(env.SourceDir) + "`\n"
-	if opts.Agent != "" {
-		prompt += "- `--agent " + opts.Agent + "`\n"
+	subRunFlags := SubRunFlags{
+		Batch:          batch,
+		ProjectDir:     shellQuoteSingle(env.SourceDir),
+		Agent:          opts.Agent,
+		Profile:        subRunProfile,
+		Model:          opts.Model,
+		Effort:         opts.Effort,
+		MaxBudgetUSD:   opts.MaxBudgetUSD,
+		MaxBudgetBatch: opts.MaxBudgetBatch,
+	}
+
+	var prompt string
+	if customManagement == "" {
+		var err error
+		prompt, err = assembleCodeManagementV1(env, "the supervisor", reviewContent, subRunFlags, extraPrompt)
+		if err != nil {
+			return err
+		}
 	} else {
-		prompt += "- `--profile " + subRunProfile + "`\n"
-	}
-	if opts.Model != "" {
-		prompt += "- `--model " + opts.Model + "`\n"
-	}
-	if opts.Effort != "" {
-		prompt += "- `--effort " + opts.Effort + "`\n"
-	}
-	if opts.MaxBudgetUSD != "" {
-		prompt += "- `--max-budget-usd " + opts.MaxBudgetUSD + "`\n"
-	}
-	if opts.MaxBudgetBatch != "" {
-		prompt += "- `--max-budget-usd-batch " + opts.MaxBudgetBatch + "`\n"
+		// --prompt overrides the supervisor body wholesale; keep the legacy
+		// path until the new assembler has a "replace role main" surface.
+		// Sub-Run Flags still get appended via SubRunFlags.Render() so the
+		// supervisor's exec invocations carry --batch/--project/etc.
+		pinfo := env.NewProjectInfoParams("the supervisor", "code")
+		legacyPrompt, err := prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.WorkDir, pinfo, reviewContent, customManagement, extraPrompt)
+		if err != nil {
+			return err
+		}
+		prompt = legacyPrompt
+		if block := subRunFlags.Render(); block != "" {
+			prompt += "\n\n" + block
+		}
 	}
 
 	timeout := env.Config.Code.EffectiveTimeout(opts.Timeout)

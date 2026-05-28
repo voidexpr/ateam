@@ -204,22 +204,40 @@ func (e *ResolvedEnv) BuildAssemblerVars(promptPath, roleLabel, action string) a
 			"dir":       filepath.Base(e.SourceDir),
 		},
 		Exec: map[string]string{
-			"id": "",
-			// output_dir / output_file are runner-deferred: their values depend
-			// on the exec ID, which isn't allocated until Runner.Run. Emit the
-			// runner's own placeholders back so the assembled prompt still
-			// carries {{OUTPUT_DIR}} / {{OUTPUT_FILE}} for the runner's
-			// ResolveTemplateString to fill (see runner.BuildTemplateVars).
-			// Resolving them to "" here would consume the placeholders before
-			// the runner can populate them, leaving agents with a blank
-			// destination. On a preview call (no runner) they render as the
-			// placeholder text, which signals "resolved at run time."
-			"output_dir":                 "{{OUTPUT_DIR}}",
-			"output_file":                "{{OUTPUT_FILE}}",
+			// Runner-deferred keys: each renders to the runner's own ALL_CAPS
+			// placeholder so the assembled prompt still carries `{{EXEC_ID}}`
+			// etc. for runner.TemplateVars.Replacer to fill at exec time (see
+			// internal/runner/template.go). Resolving them to "" here would
+			// consume the placeholder before the runner can populate it,
+			// leaving the agent with a blank value. On a preview call (no
+			// runner) they render as the placeholder text, which honestly
+			// signals "resolved at run time."
+			"id":          "{{EXEC_ID}}",
+			"batch":       "{{BATCH}}",
+			"timestamp":   "{{TIMESTAMP}}",
+			"profile":     "{{PROFILE}}",
+			"agent":       "{{AGENT}}",
+			"model":       "{{MODEL}}",
+			"output_dir":  "{{OUTPUT_DIR}}",
+			"output_file": "{{OUTPUT_FILE}}",
+			// Assembly-time keys: filled by the caller before Assemble. Empty
+			// default lets the engine render `{{exec.debug_context}}` to ""
+			// for prompts that don't use it instead of hard-erroring.
 			"debug_context":              "",
 			"auto_roles_commands_output": "",
 		},
-		Container: map[string]string{},
+		Container: map[string]string{
+			"type": "{{CONTAINER_TYPE}}",
+			"name": "{{CONTAINER_NAME}}",
+		},
+		// Role-set computations. `reports` is currently produced by the v1
+		// helpers (formatReportsBlock in cmd/review_v1.go) and appended after
+		// assembly, not consumed via {{role.reports}}. Seed it empty so the
+		// engine doesn't error on user prompts that still reference the
+		// legacy `{{ROLE_REPORTS}}` (compat shim routes it through here).
+		Role: map[string]string{
+			"reports": "",
+		},
 		Ateam: map[string]string{
 			"own_readme":        defaults.SelfDocs["README"],
 			"own_commands":      defaults.SelfDocs["COMMANDS"],
@@ -230,9 +248,15 @@ func (e *ResolvedEnv) BuildAssemblerVars(promptPath, roleLabel, action string) a
 		},
 		EnvLookup: os.LookupEnv,
 	}
+	// Always seed project.info so prompts that reference {{project.info}} (notably
+	// the embedded `_pre.context.md`) render to a string instead of erroring with
+	// "unknown key in project namespace". An empty value is what --no-project-info
+	// expects: the assembler's whitespace-only filter then drops the fragment.
 	if roleLabel != "" {
 		pinfo := e.NewProjectInfoParams(roleLabel, action)
 		vars.Project["info"] = prompts.FormatProjectInfo(pinfo)
+	} else {
+		vars.Project["info"] = ""
 	}
 	return vars
 }

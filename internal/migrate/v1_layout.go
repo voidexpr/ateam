@@ -94,7 +94,9 @@ func V1Layout(root string) (Result, error) {
 // move performs a single rename if `from` exists. Returns:
 //   - moved=true if the rename happened
 //   - moved=false, nil error if `from` is missing (already migrated or never present)
-//   - moved=false, nil error + warning recorded if `to` already exists (skip)
+//   - moved=false, nil error if `to` already exists (source resolved per
+//     resolveExistingTarget — removed when identical, renamed to <src>.legacy
+//     when different, left untouched when even the .legacy slot is taken)
 //   - moved=false, non-nil error on filesystem failure
 //
 // Cross-device renames fall back to copy+delete; same-FS renames are atomic.
@@ -109,9 +111,7 @@ func move(root, from, to string, r *Result) (bool, error) {
 		return false, fmt.Errorf("stat %s: %w", from, err)
 	}
 	if _, err := os.Lstat(dst); err == nil {
-		r.Warnings = append(r.Warnings,
-			fmt.Sprintf("skipped move %s → %s: target already exists (manual cleanup needed)", from, to))
-		return false, nil
+		return false, resolveExistingTarget(src, dst, from, to, r)
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return false, fmt.Errorf("stat %s: %w", to, err)
 	}
@@ -341,6 +341,45 @@ func removeIfExists(dir string) (bool, error) {
 		return false, fmt.Errorf("remove %s: %w", dir, err)
 	}
 	return true, nil
+}
+
+// resolveExistingTarget handles the case where `dst` already exists during a
+// move. Three branches:
+//   - identical content → remove the legacy source (cleanup; no warning, the
+//     migration is effectively complete)
+//   - different content → rename source to <src>.legacy and warn; user can
+//     inspect both files
+//   - <src>.legacy also occupied → record the original "manual cleanup" warning
+//     and leave both files in place
+//
+// Returns nil on success (any branch); only filesystem errors propagate.
+func resolveExistingTarget(src, dst, from, to string, r *Result) error {
+	srcData, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", from, err)
+	}
+	dstData, err := os.ReadFile(dst)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", to, err)
+	}
+	if string(srcData) == string(dstData) {
+		if err := os.Remove(src); err != nil {
+			return fmt.Errorf("remove duplicate %s: %w", from, err)
+		}
+		return nil
+	}
+	legacy := src + ".legacy"
+	if _, err := os.Lstat(legacy); err == nil {
+		r.Warnings = append(r.Warnings,
+			fmt.Sprintf("skipped move %s → %s: target exists with different content AND %s.legacy is taken (manual cleanup needed)", from, to, from))
+		return nil
+	}
+	if err := os.Rename(src, legacy); err != nil {
+		return fmt.Errorf("rename %s → %s.legacy: %w", from, from, err)
+	}
+	r.Warnings = append(r.Warnings,
+		fmt.Sprintf("kept %s.legacy: target %s already exists with different content; inspect both and remove the .legacy file when satisfied", from, to))
+	return nil
 }
 
 // removeFileIfExists deletes a single file (not a directory). Returns
