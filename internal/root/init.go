@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/config"
@@ -178,11 +179,63 @@ func createStateDirs(orgDir, projectID string, roleIDs []string) error {
 	return nil
 }
 
+// projectGitignoreEntries lists the entries ateam guarantees in .ateam/.gitignore.
+// EnsureProjectGitignore appends any that are missing so projects created by an
+// older binary self-heal on the next ateam command. Order matches the original
+// `ateam init` output so a fresh project still produces a deterministic file.
+var projectGitignoreEntries = []string{
+	"state.sqlite",
+	"state.sqlite-wal",
+	"state.sqlite-shm",
+	"logs/",
+	"runtime/",
+	"cache/",
+	"secrets.env",
+}
+
 // WriteProjectGitignore writes the .gitignore file inside .ateam/ to exclude
-// runtime artifacts (state.sqlite, logs/, runtime/, cache/, secrets).
+// runtime artifacts. Used by `ateam init` to create the file from scratch;
+// EnsureProjectGitignore handles the in-place upgrade case for existing
+// projects.
 func WriteProjectGitignore(projDir string) error {
-	content := "state.sqlite\nstate.sqlite-wal\nstate.sqlite-shm\nlogs/\nruntime/\ncache/\nsecrets.env\n"
+	content := strings.Join(projectGitignoreEntries, "\n") + "\n"
 	return os.WriteFile(filepath.Join(projDir, ".gitignore"), []byte(content), 0644)
+}
+
+// EnsureProjectGitignore appends any required entries that aren't already in
+// .ateam/.gitignore (added in entry-list order), preserving user-added lines.
+// Quiet no-op when every required entry is already present. Creates the file
+// when it's missing entirely.
+func EnsureProjectGitignore(projDir string) error {
+	path := filepath.Join(projDir, ".gitignore")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return WriteProjectGitignore(projDir)
+		}
+		return err
+	}
+	present := make(map[string]bool)
+	for _, line := range strings.Split(string(data), "\n") {
+		present[strings.TrimSpace(line)] = true
+	}
+	var missing []string
+	for _, entry := range projectGitignoreEntries {
+		if !present[entry] {
+			missing = append(missing, entry)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	// Ensure a trailing newline before our additions so we don't join the
+	// last user line with the first required entry.
+	out := string(data)
+	if !strings.HasSuffix(out, "\n") {
+		out += "\n"
+	}
+	out += strings.Join(missing, "\n") + "\n"
+	return os.WriteFile(path, []byte(out), 0644)
 }
 
 // generateKeychainKey creates a stable identifier for keychain lookups.

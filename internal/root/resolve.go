@@ -464,6 +464,13 @@ func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
 	if err := applyV1LayoutMigration(projectDir, orgDir); err != nil {
 		return nil, err
 	}
+	// Best-effort: keep .ateam/.gitignore in sync with required entries so
+	// projects created by an older binary self-heal (notably for `runtime/`,
+	// added after the original gitignore template). Failure here is non-fatal
+	// — never block ateam on a gitignore update.
+	if err := EnsureProjectGitignore(projectDir); err != nil {
+		fmt.Fprintf(os.Stderr, "ateam: warning: cannot update .ateam/.gitignore: %v\n", err)
+	}
 
 	cfg, err := config.Load(projectDir)
 	if err != nil {
@@ -550,6 +557,9 @@ func LookupFrom(start string) (*ResolvedEnv, error) {
 	// like cmd/init.go printing a blank project section with no failure shown.
 	if err := applyV1LayoutMigration(projectDir, orgDir); err != nil {
 		return env, err
+	}
+	if err := EnsureProjectGitignore(projectDir); err != nil {
+		fmt.Fprintf(os.Stderr, "ateam: warning: cannot update .ateam/.gitignore: %v\n", err)
 	}
 
 	cfg, err := config.Load(projectDir)

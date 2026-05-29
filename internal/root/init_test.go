@@ -3,6 +3,7 @@ package root
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ateam/internal/config"
@@ -195,4 +196,73 @@ func TestInitProjectDuplicateName(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for duplicate project name, got nil")
 	}
+}
+
+func TestEnsureProjectGitignore(t *testing.T) {
+	t.Run("creates file when missing", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := EnsureProjectGitignore(dir); err != nil {
+			t.Fatalf("EnsureProjectGitignore: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+		if err != nil {
+			t.Fatalf("ReadFile: %v", err)
+		}
+		for _, want := range projectGitignoreEntries {
+			if !strings.Contains(string(data), want) {
+				t.Errorf("missing %q in fresh .gitignore:\n%s", want, data)
+			}
+		}
+	})
+
+	t.Run("appends missing entries, preserves user content", func(t *testing.T) {
+		dir := t.TempDir()
+		const userContent = "# my notes\nlocal_scratch/\n"
+		// Stale .gitignore — missing runtime/ (the historical gap that motivated
+		// this helper) plus state.sqlite-shm.
+		stale := userContent + "state.sqlite\nstate.sqlite-wal\nlogs/\ncache/\nsecrets.env\n"
+		path := filepath.Join(dir, ".gitignore")
+		if err := os.WriteFile(path, []byte(stale), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := EnsureProjectGitignore(dir); err != nil {
+			t.Fatalf("EnsureProjectGitignore: %v", err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := string(data)
+		if !strings.Contains(got, "runtime/") {
+			t.Errorf("runtime/ should have been appended:\n%s", got)
+		}
+		if !strings.Contains(got, "state.sqlite-shm") {
+			t.Errorf("state.sqlite-shm should have been appended:\n%s", got)
+		}
+		if !strings.Contains(got, "# my notes") || !strings.Contains(got, "local_scratch/") {
+			t.Errorf("user content not preserved:\n%s", got)
+		}
+	})
+
+	t.Run("no-op when all entries present", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := WriteProjectGitignore(dir); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, ".gitignore")
+		before, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := EnsureProjectGitignore(dir); err != nil {
+			t.Fatal(err)
+		}
+		after, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(before) != string(after) {
+			t.Errorf("file changed when all entries already present:\nbefore: %q\nafter: %q", before, after)
+		}
+	})
 }
