@@ -174,7 +174,7 @@ func (e *ResolvedEnv) BuildAssemblerVars(promptPath, roleLabel, action string) a
 			"dir":       filepath.Base(e.SourceDir),
 		},
 		Exec: map[string]string{
-			// Runner-deferred keys: each renders to the runner's own ALL_CAPS
+			// AgentExecutor-deferred keys: each renders to the runner's own ALL_CAPS
 			// placeholder so the assembled prompt still carries `{{EXEC_ID}}`
 			// etc. for runner.TemplateVars.Replacer to fill at exec time (see
 			// internal/runner/template.go). Resolving them to "" here would

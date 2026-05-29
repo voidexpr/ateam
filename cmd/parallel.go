@@ -131,7 +131,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot find .ateamorg/: %w", err)
 	}
 	hasProject := env.ProjectDir != "" && env.Config != nil
-	var r *runner.Runner
+	var r *runner.AgentExecutor
 	if hasProject {
 		r, err = resolveRunner(env, parallelProfile, parallelAgent, runner.ActionParallel, "", parallelDockerAutoSetup)
 	} else {

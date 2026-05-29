@@ -4,7 +4,7 @@ The ateam pool (`runner.RunPool`) runs N agents in parallel. Two SIGSEGVs
 in production came from shared mutable state bleeding into worker
 goroutines. This document is the contract that prevents new ones.
 
-If you're adding a field to `Runner`, a method to `Container` / `Agent`,
+If you're adding a field to `AgentExecutor`, a method to `Container` / `Agent`,
 or a new resource used under the pool — read this first.
 
 ## Goroutine map
@@ -19,7 +19,7 @@ or a new resource used under the pool — read this first.
                                   ├─ acquires semaphore (maxParallel)
                                   └─ spawns N worker goroutines
                                       │
-                                      └─ each: Runner.Run → Agent.Run →
+                                      └─ each: AgentExecutor.Execute → Agent.Run →
                                                its own exec.Cmd + JSON scanner
 ```
 
@@ -32,11 +32,11 @@ Channels carry data between these goroutines:
 
 ## The 7-rule contract
 
-### 1. Every Runner reachable from the exec slice is read-only after dispatch
+### 1. Every AgentExecutor reachable from the exec slice is read-only after dispatch
 
-`PoolExec.Runner` can override the pool's shared Runner per agent exec
+`PoolExec.AgentExecutor` can override the pool's shared AgentExecutor per agent exec
 (`internal/runner/pool.go:12`, used from `cmd/report.go:213`). **All**
-such Runners — the shared one plus every override — must be immutable
+such AgentExecutors — the shared one plus every override — must be immutable
 once `RunPool` is called. Mutate during construction only.
 
 ### 2. Workers own their mutable state
@@ -45,7 +45,7 @@ Stack-local, function parameters, or per-agent exec clones. **No** shared
 mutable state unless it's a thread-safe primitive with a narrow,
 documented contract:
 
-- `*sql.DB` (`Runner.CallDB`) — stdlib-safe, further serialized with
+- `*sql.DB` (`AgentExecutor.CallDB`) — stdlib-safe, further serialized with
   `SetMaxOpenConns(1)`.
 - `*container.PrepareGuard` / `*KeyedPrepareGuard` — sync.Once (+ mutex
   for the keyed variant) shared on purpose across clones so `Prepare`
@@ -54,9 +54,9 @@ documented contract:
 
 ### 3. Clone at one boundary
 
-Cloning happens at the top of `Runner.Run`:
+Cloning happens at the top of `AgentExecutor.Execute`:
 
-- `Runner.Container.Clone()` → per-agent exec container with independent slice
+- `AgentExecutor.Container.Clone()` → per-agent exec container with independent slice
   and map backing memory.
 - `ResolveAgentTemplateArgs(r.Agent, vars)` → per-agent exec agent via
   `Agent.CloneWithResolvedTemplates`, which re-allocates `Args`, `Env`,
@@ -91,14 +91,14 @@ a sync primitive.
 
 Stream, stderr, exec, settings, prompt, and output paths are keyed by
 `startedAt` timestamp + `RoleID`. The one shared sink is the runner log
-(`Runner.LogFile`, append-only). Keep log lines short — concurrent
+(`AgentExecutor.LogFile`, append-only). Keep log lines short — concurrent
 `write(2)` to a regular file is best-effort and may interleave on long
 writes. The log is never read back for crash recovery, so interleaving is
 a cosmetic issue, not a correctness one.
 
 ### 7. No process-global mutation from the pool path
 
-Forbidden inside `Runner.Run`, `Agent.Run`, or any `Container` method
+Forbidden inside `AgentExecutor.Execute`, `Agent.Run`, or any `Container` method
 running under a pool worker:
 
 - `os.Setenv`, `os.Unsetenv`, `os.Chdir` — these mutate the process
@@ -115,11 +115,11 @@ them via `c.Env` on their per-agent exec clone; containers receive them via
 
 | Resource | Why it's safe |
 |---|---|
-| `Runner.CallDB` | `*sql.DB` stdlib-concurrent, `SetMaxOpenConns(1)` serializes. |
-| `Runner.Container.prepareGuard` | `sync.Once` (or `sync.Mutex`-guarded per-key `sync.Once`). Shared on purpose so `Prepare` runs once per pool. |
+| `AgentExecutor.CallDB` | `*sql.DB` stdlib-concurrent, `SetMaxOpenConns(1)` serializes. |
+| `AgentExecutor.Container.prepareGuard` | `sync.Once` (or `sync.Mutex`-guarded per-key `sync.Once`). Shared on purpose so `Prepare` runs once per pool. |
 | `progress` / `completed` channels | Go channels. Payloads are value types or owned-once maps. |
 | `cmd/table.go` display `statusRows` / `renderedRows` | `statusMu`-protected. All reads and writes hold the mutex. |
-| `Runner.LogFile` | Append-only. Best-effort; may interleave on long lines. |
+| `AgentExecutor.LogFile` | Append-only. Best-effort; may interleave on long lines. |
 | `os.Stderr` verbose/warn writes | Kernel-serialized per `write(2)`; long multi-write messages may interleave cosmetically. |
 
 ## Tests that enforce this
@@ -140,7 +140,7 @@ them via `c.Env` on their per-agent exec clone; containers receive them via
   - `TestRunPoolCompletedChannelDeadlockGuard` — undersized `completed`
     is rejected.
   - `TestRunPoolRunnerFieldsUnchanged` — reflection-walk over
-    scalar/string/slice/map fields; fails if any Runner field is
+    scalar/string/slice/map fields; fails if any AgentExecutor field is
     mutated during `Run`.
 - `internal/container/prepare_guard_test.go`:
   - `TestPrepareGuardRunsOnce`, `TestKeyedPrepareGuardDedupesPerKey`,
@@ -153,6 +153,6 @@ production SIGSEGVs against the race detector.
 ## When in doubt
 
 Prefer cloning over locking. Prefer channels over shared maps. If you're
-tempted to add a `sync.Mutex` to a Runner field, you're probably about to
+tempted to add a `sync.Mutex` to a AgentExecutor field, you're probably about to
 violate rule 1 or 2 — revisit and see if the data can be cloned or moved
 onto `RunOpts` / `TaskContext` instead.

@@ -83,7 +83,7 @@ func TestApplyMaxBudgetUSD(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := &runner.Runner{Agent: tt.agent}
+			r := &runner.AgentExecutor{Agent: tt.agent}
 			err := applyMaxBudgetUSD(r, tt.value, tt.action)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("err=%v wantErr=%v", err, tt.wantErr)
@@ -109,7 +109,7 @@ func TestApplyMaxBudgetUSD(t *testing.T) {
 func TestApplyModelAndEffort(t *testing.T) {
 	t.Run("empty model is no-op on claude", func(t *testing.T) {
 		a := &agent.ClaudeAgent{Model: "preset"}
-		r := &runner.Runner{Agent: a}
+		r := &runner.AgentExecutor{Agent: a}
 		applyModel(r, "")
 		if a.Model != "preset" {
 			t.Errorf("Model = %q, want unchanged %q", a.Model, "preset")
@@ -118,7 +118,7 @@ func TestApplyModelAndEffort(t *testing.T) {
 
 	t.Run("empty effort is no-op on codex", func(t *testing.T) {
 		a := &agent.CodexAgent{Effort: "preset"}
-		r := &runner.Runner{Agent: a}
+		r := &runner.AgentExecutor{Agent: a}
 		applyEffort(r, "")
 		if a.Effort != "preset" {
 			t.Errorf("Effort = %q, want unchanged %q", a.Effort, "preset")
@@ -127,7 +127,7 @@ func TestApplyModelAndEffort(t *testing.T) {
 
 	t.Run("non-empty model populates ClaudeAgent.Model", func(t *testing.T) {
 		a := &agent.ClaudeAgent{}
-		r := &runner.Runner{Agent: a}
+		r := &runner.AgentExecutor{Agent: a}
 		applyModel(r, "opus-4")
 		if a.Model != "opus-4" {
 			t.Errorf("ClaudeAgent.Model = %q, want %q", a.Model, "opus-4")
@@ -136,7 +136,7 @@ func TestApplyModelAndEffort(t *testing.T) {
 
 	t.Run("non-empty model populates CodexAgent.Model", func(t *testing.T) {
 		a := &agent.CodexAgent{}
-		r := &runner.Runner{Agent: a}
+		r := &runner.AgentExecutor{Agent: a}
 		applyModel(r, "gpt-5")
 		if a.Model != "gpt-5" {
 			t.Errorf("CodexAgent.Model = %q, want %q", a.Model, "gpt-5")
@@ -145,7 +145,7 @@ func TestApplyModelAndEffort(t *testing.T) {
 
 	t.Run("non-empty effort populates ClaudeAgent.Effort", func(t *testing.T) {
 		a := &agent.ClaudeAgent{}
-		r := &runner.Runner{Agent: a}
+		r := &runner.AgentExecutor{Agent: a}
 		applyEffort(r, "high")
 		if a.Effort != "high" {
 			t.Errorf("ClaudeAgent.Effort = %q, want %q", a.Effort, "high")
@@ -154,7 +154,7 @@ func TestApplyModelAndEffort(t *testing.T) {
 
 	t.Run("non-empty effort populates CodexAgent.Effort", func(t *testing.T) {
 		a := &agent.CodexAgent{}
-		r := &runner.Runner{Agent: a}
+		r := &runner.AgentExecutor{Agent: a}
 		applyEffort(r, "medium")
 		if a.Effort != "medium" {
 			t.Errorf("CodexAgent.Effort = %q, want %q", a.Effort, "medium")
@@ -213,7 +213,7 @@ func captureStderr(t *testing.T, fn func()) string {
 
 // TestApplyModelOverrides locks in the precedence rule between --cheaper-model
 // and --model: if --model is set it always wins, --cheaper-model alone falls
-// back to the cheaper model name, and the helper never touches Runner.ExtraArgs
+// back to the cheaper model name, and the helper never touches AgentExecutor.ExtraArgs
 // (the previous encoding through ExtraArgs caused dry-run output to disagree
 // with what actually ran).
 func TestApplyModelOverrides(t *testing.T) {
@@ -232,7 +232,7 @@ func TestApplyModelOverrides(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			a := &agent.ClaudeAgent{}
-			r := &runner.Runner{
+			r := &runner.AgentExecutor{
 				Agent:     a,
 				ExtraArgs: []string{"--existing", "arg"},
 			}

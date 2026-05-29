@@ -445,7 +445,7 @@ func TestResolveContainerTemplatesDockerExecNoTemplates(t *testing.T) {
 // --- BuildTemplateVars ---
 
 func TestBuildTemplateVars(t *testing.T) {
-	r := &Runner{
+	r := &AgentExecutor{
 		ProjectName:   "myproject",
 		SourceDir:     "/home/user/projects/myproject",
 		Profile:       "docker",
@@ -499,7 +499,7 @@ func TestBuildTemplateVars(t *testing.T) {
 }
 
 func TestBuildTemplateVarsEmptySourceDir(t *testing.T) {
-	r := &Runner{}
+	r := &AgentExecutor{}
 	opts := RunOpts{RoleID: "security", Action: "report"}
 	ts := time.Now()
 
@@ -520,7 +520,7 @@ func TestBuildTemplateVarsEmptySourceDir(t *testing.T) {
 func TestBuildTemplateVarsProjectFollowsProjectDir(t *testing.T) {
 	// Remote-project: agent's WorkDir is /tmp/elsewhere, but the project
 	// lives at /Users/foo/work/myproj.
-	r := &Runner{
+	r := &AgentExecutor{
 		ProjectDir: "/Users/foo/work/myproj/.ateam",
 		SourceDir:  "/tmp/elsewhere", // agent's cwd in remote mode
 	}

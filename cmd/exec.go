@@ -137,7 +137,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-	var r *runner.Runner
+	var r *runner.AgentExecutor
 	if hasProject {
 		r, err = resolveRunner(env, execProfile, execAgent, execAction, execRole, execDockerAutoSetup)
 	} else {
@@ -227,7 +227,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	ctx, stop := cmdContext()
 	defer stop()
-	result := r.Run(ctx, promptText, opts, progress)
+	result := r.Execute(ctx, promptText, opts, progress)
 
 	if progress != nil {
 		close(progress)
@@ -327,7 +327,7 @@ func fmtContextProgress(contextTokens, contextWindow int) string {
 	return fmt.Sprintf(", ctx: %s", ctxStr)
 }
 
-func printExecDryRun(r *runner.Runner, env *root.ResolvedEnv, prompt, roleID, action, batch string) error {
+func printExecDryRun(r *runner.AgentExecutor, env *root.ResolvedEnv, prompt, roleID, action, batch string) error {
 	fmt.Println("╔══ dry-run ══╗")
 	fmt.Println()
 	printDryRunInfo(r, env, dryRunOpts{

@@ -42,7 +42,7 @@ func captureStdout(t *testing.T, fn func()) (out string) {
 }
 
 func TestPrintExecDryRun(t *testing.T) {
-	r := &runner.Runner{
+	r := &runner.AgentExecutor{
 		Agent:   &agent.MockAgent{},
 		Profile: "test",
 	}

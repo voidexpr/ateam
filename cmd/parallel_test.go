@@ -50,16 +50,16 @@ func TestParallelDryRun(t *testing.T) {
 	}
 }
 
-// newCmdTestRunner returns a Runner backed by a temp project DB so Run() can
+// newCmdTestRunner returns a AgentExecutor backed by a temp project DB so Run() can
 // satisfy its "CallDB required" precondition.
-func newCmdTestRunner(t *testing.T, baseDir string, ag agent.Agent) *runner.Runner {
+func newCmdTestRunner(t *testing.T, baseDir string, ag agent.Agent) *runner.AgentExecutor {
 	t.Helper()
 	db, err := calldb.Open(filepath.Join(baseDir, "state.sqlite"))
 	if err != nil {
 		t.Fatalf("open test calldb: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	return &runner.Runner{
+	return &runner.AgentExecutor{
 		Agent:      ag,
 		ProjectDir: baseDir,
 		CallDB:     db,
@@ -313,7 +313,7 @@ func TestParallelPoolWithCallDB(t *testing.T) {
 	defer db.Close()
 
 	mock := &agent.MockAgent{Response: "tracked output", Cost: 0.03}
-	r := &runner.Runner{
+	r := &runner.AgentExecutor{
 		Agent:      mock,
 		ProjectDir: dir,
 		CallDB:     db,
@@ -485,7 +485,7 @@ func TestParallelBatchInDB(t *testing.T) {
 	defer db.Close()
 
 	mock := &agent.MockAgent{Response: "grouped"}
-	r := &runner.Runner{Agent: mock, ProjectDir: dir, CallDB: db}
+	r := &runner.AgentExecutor{Agent: mock, ProjectDir: dir, CallDB: db}
 
 	batch := "parallel-2026-04-03_12-00-00"
 	tasks := []runner.PoolExec{

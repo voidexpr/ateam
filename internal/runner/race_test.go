@@ -21,7 +21,7 @@ import (
 // File: template.go, func ResolveAgentTemplateArgs
 // Called from: runner.go:201 inside Run()
 //
-// RunPool calls r.Run() in parallel goroutines sharing the same Runner (and
+// RunPool calls r.Execute() in parallel goroutines sharing the same AgentExecutor (and
 // thus the same r.Agent). ResolveAgentTemplateArgs writes to agent.Args
 // (t.Args = ResolveTemplateArgs(t.Args, vars)), creating a data race when
 // multiple goroutines resolve templates concurrently.
@@ -278,7 +278,7 @@ func TestRunPoolSharedContainerRace(t *testing.T) {
 }
 
 func TestRunPoolSharedContainerDoesNotMutateTemplate(t *testing.T) {
-	// Independently of concurrency, Runner.Run should not leave the shared
+	// Independently of concurrency, AgentExecutor.Execute should not leave the shared
 	// container's templated fields resolved — subsequent runs for different
 	// roles need the placeholders intact.
 	dir := t.TempDir()
@@ -375,7 +375,7 @@ func TestRunPoolSharedDockerExecRace(t *testing.T) {
 }
 
 // TestRunPoolRunnerFieldsUnchanged is a reflection-based guard against
-// anyone reintroducing a write to a Runner field during Run. It snapshots
+// anyone reintroducing a write to a AgentExecutor field during Run. It snapshots
 // scalar/string/slice/map fields before and after RunPool and asserts no
 // change. Interface/pointer/channel/func fields are deliberately skipped
 // — Agent/Container are exercised by their own clone-race tests, and
@@ -420,16 +420,16 @@ func TestRunPoolRunnerFieldsUnchanged(t *testing.T) {
 
 	for name, beforeVal := range before {
 		if after[name] != beforeVal {
-			t.Errorf("Runner.%s mutated during RunPool: before=%q after=%q", name, beforeVal, after[name])
+			t.Errorf("AgentExecutor.%s mutated during RunPool: before=%q after=%q", name, beforeVal, after[name])
 		}
 	}
 }
 
 // snapshotRunnerFields hashes every scalar/string/slice/map field of a
-// Runner for before/after comparison. Fields of kind Interface, Ptr,
+// AgentExecutor for before/after comparison. Fields of kind Interface, Ptr,
 // Chan, Func, and Struct are skipped (they're covered by dedicated clone
 // tests or are pointers to shared thread-safe primitives).
-func snapshotRunnerFields(t *testing.T, r *Runner) map[string]string {
+func snapshotRunnerFields(t *testing.T, r *AgentExecutor) map[string]string {
 	t.Helper()
 	out := make(map[string]string)
 	v := reflect.ValueOf(r).Elem()

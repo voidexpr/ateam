@@ -15,7 +15,7 @@ import (
 type PoolExec struct {
 	Prompt string
 	RunOpts
-	Runner *Runner // optional per-agent exec runner override; if nil, the pool's shared runner is used
+	AgentExecutor *AgentExecutor // optional per-agent exec runner override; if nil, the pool's shared runner is used
 }
 
 // PoolOpts configures optional behavior for RunPoolWithOpts.
@@ -39,12 +39,12 @@ type PoolOpts struct {
 //     An obviously-undersized channel is rejected up-front: callers are
 //     returned an empty slice and a warning is printed rather than
 //     silently hanging.
-func RunPool(ctx context.Context, r *Runner, tasks []PoolExec, maxParallel int, progress chan<- RunProgress, completed chan<- RunSummary) []RunSummary {
+func RunPool(ctx context.Context, r *AgentExecutor, tasks []PoolExec, maxParallel int, progress chan<- RunProgress, completed chan<- RunSummary) []RunSummary {
 	return RunPoolWithOpts(ctx, r, tasks, maxParallel, progress, completed, PoolOpts{})
 }
 
 // RunPoolWithOpts is RunPool plus optional hooks (see PoolOpts).
-func RunPoolWithOpts(ctx context.Context, r *Runner, tasks []PoolExec, maxParallel int, progress chan<- RunProgress, completed chan<- RunSummary, opts PoolOpts) []RunSummary {
+func RunPoolWithOpts(ctx context.Context, r *AgentExecutor, tasks []PoolExec, maxParallel int, progress chan<- RunProgress, completed chan<- RunSummary, opts PoolOpts) []RunSummary {
 	if completed != nil && cap(completed) < len(tasks) {
 		fmt.Fprintf(os.Stderr,
 			"RunPool: completed channel buffer (%d) is smaller than len(tasks) (%d); "+
@@ -111,10 +111,10 @@ func RunPoolWithOpts(ctx context.Context, r *Runner, tasks []PoolExec, maxParall
 					}
 				}()
 				taskRunner := r
-				if t.Runner != nil {
-					taskRunner = t.Runner
+				if t.AgentExecutor != nil {
+					taskRunner = t.AgentExecutor
 				}
-				summary = taskRunner.Run(ctx, t.Prompt, t.RunOpts, progress)
+				summary = taskRunner.Execute(ctx, t.Prompt, t.RunOpts, progress)
 			}()
 
 			record(summary)

@@ -94,9 +94,9 @@ func printArtifact(path, streamFallback string) {
 	}
 }
 
-// newRunner creates a Runner using the resolved profile from runtime.hcl.
+// newRunner creates a AgentExecutor using the resolved profile from runtime.hcl.
 // roleID is optional — used for role-specific Dockerfile resolution.
-func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetup bool) (*runner.Runner, error) {
+func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetup bool) (*runner.AgentExecutor, error) {
 	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
 	if err != nil {
 		return nil, fmt.Errorf("cannot load runtime.hcl: %w", err)
@@ -167,7 +167,7 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 
 // applyContainerNameOverride replaces the container name on a runner's container
 // if a --container-name flag was provided. Only effective for container types that support it.
-func applyContainerNameOverride(r *runner.Runner, name string) {
+func applyContainerNameOverride(r *runner.AgentExecutor, name string) {
 	if name == "" || r.Container == nil {
 		return
 	}
@@ -181,7 +181,7 @@ func applyContainerNameOverride(r *runner.Runner, name string) {
 // applyContainerName applies the --container-name CLI flag override, then
 // resolves {{CONTAINER_NAME}} from the secret store if the flag was not set.
 // Also sets ContainerNameSource for dry-run display.
-func applyContainerName(r *runner.Runner, env *root.ResolvedEnv, cliFlag string) error {
+func applyContainerName(r *runner.AgentExecutor, env *root.ResolvedEnv, cliFlag string) error {
 	applyContainerNameOverride(r, cliFlag)
 
 	if cliFlag != "" {
@@ -209,8 +209,8 @@ func applyContainerName(r *runner.Runner, env *root.ResolvedEnv, cliFlag string)
 	return fmt.Errorf("container name not set — use --container-name, ateam secret CONTAINER_NAME=<name> --scope project, or set docker_container in runtime.hcl")
 }
 
-// newRunnerFromAgent creates a Runner using a named agent directly (no profile).
-func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.Runner, error) {
+// newRunnerFromAgent creates a AgentExecutor using a named agent directly (no profile).
+func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.AgentExecutor, error) {
 	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
 	if err != nil {
 		return nil, fmt.Errorf("cannot load runtime.hcl: %w", err)
@@ -238,8 +238,8 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.Runner
 	return r, nil
 }
 
-func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runner.Runner {
-	r := &runner.Runner{
+func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runner.AgentExecutor {
+	r := &runner.AgentExecutor{
 		Agent:  buildAgent(ac),
 		OrgDir: orgDir,
 		Sandbox: runner.SandboxConfig{
@@ -278,7 +278,7 @@ func preflightContainerSupportsWorkDir(cc *runtime.ContainerConfig, env *root.Re
 }
 
 // setCodexTmuxProjectDir is called by the runner builders after the agent is
-// constructed but before the Runner is returned. codex-tmux needs ProjectDir
+// constructed but before the AgentExecutor is returned. codex-tmux needs ProjectDir
 // to derive its tmux socket path (`<ProjectDir>/.ateam/cache/tmux/exec-<id>.sock`),
 // and the buildAgent helper doesn't see ResolvedEnv directly.
 func setCodexTmuxProjectDir(a agent.Agent, projectDir string) {
@@ -287,8 +287,8 @@ func setCodexTmuxProjectDir(a agent.Agent, projectDir string) {
 	}
 }
 
-func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runner.Runner {
-	// Sandbox grants and Runner.SourceDir follow WorkDir (where the agent
+func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runner.AgentExecutor {
+	// Sandbox grants and AgentExecutor.SourceDir follow WorkDir (where the agent
 	// actually runs) — not the parent of .ateam/. This ensures --work-dir
 	// is honored end-to-end: rw to the worktree, ro to the wider git repo.
 	extraWriteDirs := gitWriteDirs(env.WorkDir)
@@ -300,7 +300,7 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 	if env.ProjectDir != "" {
 		extraWriteDirs = append(extraWriteDirs, env.ProjectDir)
 	}
-	r := &runner.Runner{
+	r := &runner.AgentExecutor{
 		Agent:       buildAgent(ac),
 		ProjectDir:  env.ProjectDir,
 		OrgDir:      env.OrgDir,
@@ -333,15 +333,15 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 	return r
 }
 
-// newRunnerDefault creates a Runner using the default profile.
-func newRunnerDefault(env *root.ResolvedEnv) (*runner.Runner, error) {
+// newRunnerDefault creates a AgentExecutor using the default profile.
+func newRunnerDefault(env *root.ResolvedEnv) (*runner.AgentExecutor, error) {
 	profileName := env.Config.ResolveProfile("", "")
 	return newRunner(env, profileName, "", false)
 }
 
-// resolveRunnerMinimal builds a Runner without project context (just org dir).
+// resolveRunnerMinimal builds a AgentExecutor without project context (just org dir).
 // Docker containers are not supported without project context.
-func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.Runner, error) {
+func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.AgentExecutor, error) {
 	rtCfg, err := runtime.Load("", orgDir)
 	if err != nil {
 		return nil, fmt.Errorf("cannot load runtime.hcl: %w", err)
@@ -394,8 +394,8 @@ func rejectCodexTmuxWithoutStateDir(ac *runtime.AgentConfig, stateDir string) er
 	return fmt.Errorf("codex-tmux requires a state directory (a .ateam/ or .ateamorg/); run from inside one or use a different agent")
 }
 
-// resolveRunner builds a Runner from --profile/--agent flags, falling back to config resolution.
-func resolveRunner(env *root.ResolvedEnv, profileFlag, agentFlag, action, roleID string, dockerAutoSetup bool) (*runner.Runner, error) {
+// resolveRunner builds a AgentExecutor from --profile/--agent flags, falling back to config resolution.
+func resolveRunner(env *root.ResolvedEnv, profileFlag, agentFlag, action, roleID string, dockerAutoSetup bool) (*runner.AgentExecutor, error) {
 	switch {
 	case profileFlag != "" && agentFlag != "":
 		return nil, fmt.Errorf("--profile and --agent are mutually exclusive")
@@ -866,7 +866,7 @@ func addCheaperModelFlag(cmd *cobra.Command, dst *bool) {
 
 // applyEffort sets the agent's reasoning effort if value is non-empty.
 // Empty string is a no-op so callers can pass through unconditionally.
-func applyEffort(r *runner.Runner, value string) {
+func applyEffort(r *runner.AgentExecutor, value string) {
 	if value != "" {
 		r.Agent.SetEffort(value)
 	}
@@ -874,7 +874,7 @@ func applyEffort(r *runner.Runner, value string) {
 
 // applyModel sets the agent's model override if value is non-empty.
 // Empty string is a no-op so callers can pass through unconditionally.
-func applyModel(r *runner.Runner, value string) {
+func applyModel(r *runner.AgentExecutor, value string) {
 	if value != "" {
 		r.Agent.SetModel(value)
 	}
@@ -929,7 +929,7 @@ func batchBudgetPrecheck(db *calldb.CallDB, projectID, batch, capStr string) (fu
 //   - parallel/report: warn (best-effort; the run-level batch cap still applies)
 //   - exec/review/code/verify: error (single-exec actions don't have a batch
 //     fallback, so silently dropping the cap would surprise the operator)
-func applyMaxBudgetUSD(r *runner.Runner, value, action string) error {
+func applyMaxBudgetUSD(r *runner.AgentExecutor, value, action string) error {
 	if value == "" {
 		return nil
 	}
@@ -954,7 +954,7 @@ func applyMaxBudgetUSD(r *runner.Runner, value, action string) error {
 // so the agent's configured model and the actual run command always agree.
 // Use this in any command that exposes both flags; commands that only expose
 // --model can keep using applyModel.
-func applyModelOverrides(r *runner.Runner, cheaper bool, model string) {
+func applyModelOverrides(r *runner.AgentExecutor, cheaper bool, model string) {
 	chosen := model
 	if cheaper && model != "" {
 		fmt.Fprintf(os.Stderr,
@@ -978,7 +978,7 @@ func isProcessAlive(pid int) bool {
 
 // setSourceWritable marks the runner's container as source-writable.
 // No-op if the runner has no container or the container type doesn't support it.
-func setSourceWritable(r *runner.Runner) {
+func setSourceWritable(r *runner.AgentExecutor) {
 	if r.Container != nil {
 		r.Container.SetSourceWritable(true)
 	}
@@ -1025,7 +1025,7 @@ type dryRunOpts struct {
 
 // printDryRunInfo prints resolved execution details for a dry run.
 // This is the shared core used by both `exec --dry-run` and `report --dry-run`.
-func printDryRunInfo(r *runner.Runner, env *root.ResolvedEnv, opts dryRunOpts) {
+func printDryRunInfo(r *runner.AgentExecutor, env *root.ResolvedEnv, opts dryRunOpts) {
 	agentName := r.Agent.Name()
 	var model string
 	if mp, ok := r.Agent.(agent.ModelProvider); ok {
@@ -1145,7 +1145,7 @@ func logIsolationResults(w io.Writer, results []secret.IsolationResult) {
 	}
 }
 
-func printDryRunSecrets(r *runner.Runner, env *root.ResolvedEnv) {
+func printDryRunSecrets(r *runner.AgentExecutor, env *root.ResolvedEnv) {
 	rtCfg, _ := runtime.Load(env.ProjectDir, env.OrgDir)
 	if rtCfg == nil {
 		return

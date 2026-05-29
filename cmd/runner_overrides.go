@@ -45,7 +45,7 @@ type RunnerOverrides struct {
 // applyRunnerOverrides runs the per-flag apply* helpers in the order previously
 // duplicated across cmd/{code,exec,parallel,report,review,verify}.go. action is
 // forwarded to applyMaxBudgetUSD for action-specific gating.
-func applyRunnerOverrides(r *runner.Runner, env *root.ResolvedEnv, o RunnerOverrides, action string) error {
+func applyRunnerOverrides(r *runner.AgentExecutor, env *root.ResolvedEnv, o RunnerOverrides, action string) error {
 	if err := applyContainerName(r, env, o.ContainerName); err != nil {
 		return err
 	}

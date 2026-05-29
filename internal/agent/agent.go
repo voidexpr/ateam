@@ -25,7 +25,7 @@ const (
 //
 // Concurrency (see CONCURRENCY.md):
 //
-//   - The Agent on a Runner is effectively read-only once dispatched to a
+//   - The Agent on a AgentExecutor is effectively read-only once dispatched to a
 //     pool; the pool calls CloneWithResolvedTemplates per agent exec.
 //   - Run is invoked on the clone, not on the shared original, so any per-
 //     run mutation stays local to that goroutine.

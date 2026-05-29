@@ -27,7 +27,7 @@ type poolDisplayOpts struct {
 // runPool drives a runner.Pool to completion, rendering progress and printing
 // the summary count + error tails. It returns all results and a non-nil error
 // if any tasks failed.
-func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolExec, maxParallel int, opts poolDisplayOpts) ([]runner.RunSummary, error) {
+func runPool(ctx context.Context, r *runner.AgentExecutor, tasks []runner.PoolExec, maxParallel int, opts poolDisplayOpts) ([]runner.RunSummary, error) {
 	start := time.Now()
 	out := opts.out
 	if out == nil {

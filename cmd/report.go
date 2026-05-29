@@ -293,7 +293,7 @@ func runReport(opts ReportOptions) error {
 				}, runner.ActionReport); err != nil {
 					return err
 				} else {
-					task.Runner = roleRunner
+					task.AgentExecutor = roleRunner
 				}
 			}
 		}
@@ -313,8 +313,8 @@ func runReport(opts ReportOptions) error {
 			}
 			fmt.Printf("╔══ %s ══╗\n\n", t.RoleID)
 			dryRunRunner := cr
-			if t.Runner != nil {
-				dryRunRunner = t.Runner
+			if t.AgentExecutor != nil {
+				dryRunRunner = t.AgentExecutor
 			}
 			printDryRunInfo(dryRunRunner, env, dryRunOpts{
 				RoleID: t.RoleID,
@@ -336,8 +336,8 @@ func runReport(opts ReportOptions) error {
 	}
 	cr.CallDB = db
 	for i := range tasks {
-		if tasks[i].Runner != nil {
-			tasks[i].Runner.CallDB = db
+		if tasks[i].AgentExecutor != nil {
+			tasks[i].AgentExecutor.CallDB = db
 		}
 	}
 

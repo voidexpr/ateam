@@ -118,7 +118,7 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 
 	ctx, stop := cmdContext()
 	defer stop()
-	result := cr.Run(ctx, prompt, opts, progress)
+	result := cr.Execute(ctx, prompt, opts, progress)
 
 	close(progress)
 	progressWg.Wait()

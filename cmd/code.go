@@ -301,7 +301,7 @@ func runCode(opts CodeOptions) error {
 	if opts.Tail {
 		runDone := make(chan struct{})
 		go func() {
-			result = cr.Run(ctx, prompt, runOpts, nil)
+			result = cr.Execute(ctx, prompt, runOpts, nil)
 			close(runDone)
 		}()
 
@@ -340,7 +340,7 @@ func runCode(opts CodeOptions) error {
 			printProgress(progress)
 		}()
 
-		result = cr.Run(ctx, prompt, runOpts, progress)
+		result = cr.Execute(ctx, prompt, runOpts, progress)
 
 		close(progress)
 		progressWg.Wait()

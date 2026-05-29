@@ -96,7 +96,7 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 	ctx, stop := cmdContext()
 	defer stop()
 
-	summary := cr.Run(ctx, prompt, runner.RunOpts{
+	summary := cr.Execute(ctx, prompt, runner.RunOpts{
 		RoleID:                  "supervisor",
 		Action:                  runner.ActionExec,
 		OutputKind:              runner.OutputKindAutoRoles,

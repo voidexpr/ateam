@@ -32,12 +32,12 @@ type CmdFactory func(ctx context.Context, name string, args ...string) *exec.Cmd
 //
 // Concurrency (see CONCURRENCY.md):
 //
-//   - The shared Container value held on a Runner is effectively read-only
-//     once the Runner is dispatched to a pool.
+//   - The shared Container value held on a AgentExecutor is effectively read-only
+//     once the AgentExecutor is dispatched to a pool.
 //   - All mutating methods (ResolveTemplates, ApplyAgentEnv, SetContainerName,
 //     SetSourceWritable, Prepare's side effects on the receiver) MUST be
 //     called on a Clone, not on the shared original.
-//   - The pool clones once per agent exec at the top of Runner.Run and routes every
+//   - The pool clones once per agent exec at the top of AgentExecutor.Execute and routes every
 //     subsequent call through that clone.
 //   - Clone deep-copies every field touched by a mutating method; only
 //     thread-safe guard pointers (PrepareGuard / KeyedPrepareGuard) are

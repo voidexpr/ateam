@@ -189,7 +189,7 @@ func runVerify(opts VerifyOptions) error {
 
 	ctx, stop := cmdContext()
 	defer stop()
-	result := cr.Run(ctx, prompt, runOpts, nil)
+	result := cr.Execute(ctx, prompt, runOpts, nil)
 
 	if result.Err != nil {
 		return fmt.Errorf("verify failed: %w", result.Err)

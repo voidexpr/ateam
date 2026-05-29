@@ -26,7 +26,7 @@ func filepathEqual(a, b string) bool {
 // dry-run display has a value to render.
 func TestApplyRunnerOverridesEmpty(t *testing.T) {
 	a := &agent.ClaudeAgent{}
-	r := &runner.Runner{Agent: a}
+	r := &runner.AgentExecutor{Agent: a}
 
 	if err := applyRunnerOverrides(r, &root.ResolvedEnv{}, RunnerOverrides{}, runner.ActionExec); err != nil {
 		t.Fatalf("applyRunnerOverrides: %v", err)
@@ -51,7 +51,7 @@ func TestApplyRunnerOverridesEmpty(t *testing.T) {
 // intentionally false so Model wins straightforwardly.
 func TestApplyRunnerOverridesFull(t *testing.T) {
 	a := &agent.ClaudeAgent{}
-	r := &runner.Runner{
+	r := &runner.AgentExecutor{
 		Agent:         a,
 		ContainerName: "config-container",
 	}
@@ -86,7 +86,7 @@ func TestApplyRunnerOverridesFull(t *testing.T) {
 // older applyModel that ignored --cheaper-model).
 func TestApplyRunnerOverridesCheaperModel(t *testing.T) {
 	a := &agent.ClaudeAgent{}
-	r := &runner.Runner{Agent: a}
+	r := &runner.AgentExecutor{Agent: a}
 
 	o := RunnerOverrides{CheaperModel: true}
 	if err := applyRunnerOverrides(r, &root.ResolvedEnv{}, o, runner.ActionExec); err != nil {
@@ -100,7 +100,7 @@ func TestApplyRunnerOverridesCheaperModel(t *testing.T) {
 // TestApplyRunnerOverridesMaxBudgetError verifies the helper propagates the
 // codex-on-single-exec error from applyMaxBudgetUSD instead of swallowing it.
 func TestApplyRunnerOverridesMaxBudgetError(t *testing.T) {
-	r := &runner.Runner{Agent: &agent.CodexAgent{}}
+	r := &runner.AgentExecutor{Agent: &agent.CodexAgent{}}
 	o := RunnerOverrides{MaxBudgetUSD: "5"}
 	if err := applyRunnerOverrides(r, &root.ResolvedEnv{}, o, runner.ActionExec); err == nil {
 		t.Fatal("expected error when codex action=exec receives --max-budget-usd, got nil")

@@ -137,7 +137,7 @@ func resolveContainerTemplates(c container.Container, vars TemplateVars) {
 }
 
 // BuildTemplateVars constructs a fully populated TemplateVars.
-func BuildTemplateVars(r *Runner, opts RunOpts, startedAt time.Time, callID int64, agentName, model string) TemplateVars {
+func BuildTemplateVars(r *AgentExecutor, opts RunOpts, startedAt time.Time, callID int64, agentName, model string) TemplateVars {
 	vars := TemplateVars{
 		ProjectName:             r.ProjectName,
 		Role:                    opts.RoleID,

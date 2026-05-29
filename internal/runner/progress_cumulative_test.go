@@ -56,7 +56,7 @@ func TestRunnerForwardsCumulativeProgress(t *testing.T) {
 	}
 
 	progressCh := make(chan RunProgress, 32)
-	summary := r.Run(context.Background(), "prompt", opts, progressCh)
+	summary := r.Execute(context.Background(), "prompt", opts, progressCh)
 	close(progressCh)
 
 	if summary.Err != nil {

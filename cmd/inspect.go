@@ -338,7 +338,7 @@ func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
 	ctx, stop := cmdContext()
 	defer stop()
 
-	summary := r.Run(ctx, prompt, runner.RunOpts{
+	summary := r.Execute(ctx, prompt, runner.RunOpts{
 		RoleID:  "supervisor",
 		Action:  runner.ActionDebug,
 		WorkDir: env.WorkDir,

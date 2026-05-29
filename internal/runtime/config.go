@@ -77,7 +77,7 @@ type ProfileConfig struct {
 	Name               string
 	Agent              string   // references AgentConfig name
 	Container          string   // references ContainerConfig name
-	AgentExtraArgs     []string // appended to Runner.ExtraArgs
+	AgentExtraArgs     []string // appended to AgentExecutor.ExtraArgs
 	ContainerExtraArgs []string // reserved for container launch args
 }
 

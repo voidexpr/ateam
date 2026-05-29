@@ -51,7 +51,7 @@ type SandboxConfig struct {
 	InsideContainer  bool     // if false, skip sandbox inside containers
 }
 
-// ContainerNameSource values for Runner.ContainerNameSource.
+// ContainerNameSource values for AgentExecutor.ContainerNameSource.
 const (
 	ContainerNameSourceConfig = "config"
 	ContainerNameSourceCLI    = "cli"
@@ -59,14 +59,14 @@ const (
 	ContainerNameSourceEnv    = "env"
 )
 
-// Runner orchestrates agent execution with logging, file I/O, and progress reporting.
+// AgentExecutor orchestrates agent execution with logging, file I/O, and progress reporting.
 //
 // Concurrency contract (see CONCURRENCY.md):
 //
-//   - All Runner fields are WRITTEN only during construction in the main
+//   - All AgentExecutor fields are WRITTEN only during construction in the main
 //     goroutine (cmd/table.go:newRunner and friends, plus applyContainerName
-//     and the cmd-layer overrides). After a Runner is handed to RunPool —
-//     including PoolExec.Runner overrides — its fields become READ-ONLY.
+//     and the cmd-layer overrides). After a AgentExecutor is handed to RunPool —
+//     including PoolExec.AgentExecutor overrides — its fields become READ-ONLY.
 //   - Agent and Container fields look mutable but are cloned per agent exec at the
 //     top of Run via CloneWithResolvedTemplates / Clone. The shared originals
 //     are never mutated inside Run.
@@ -75,7 +75,7 @@ const (
 //   - Sandbox, ExtraArgs, ArgsInsideContainer, ArgsOutsideContainer: slice
 //     backing memory is read-only once construction finishes; Run copies
 //     r.ExtraArgs into a local before appending.
-type Runner struct {
+type AgentExecutor struct {
 	Agent                agent.Agent
 	Container            container.Container // nil means run on host
 	ProjectDir           string              // .ateam/ dir
@@ -202,15 +202,15 @@ type RunSummary struct {
 // the relative stream/output paths recorded in agent_execs. Mirrors
 // root.ResolvedEnv.StateDir so callers driving the runner from a scratch
 // context (no .ateam/) land logs in <OrgDir>/ instead.
-func (r *Runner) StateDir() string {
+func (r *AgentExecutor) StateDir() string {
 	if r.ProjectDir != "" {
 		return r.ProjectDir
 	}
 	return r.OrgDir
 }
 
-// Run executes the agent with the given prompt and options.
-func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress chan<- RunProgress) RunSummary {
+// Execute runs the agent with the given prompt and options.
+func (r *AgentExecutor) Execute(ctx context.Context, prompt string, opts RunOpts, progress chan<- RunProgress) RunSummary {
 	startedAt := opts.StartedAt
 	if startedAt.IsZero() {
 		startedAt = time.Now()
@@ -711,7 +711,7 @@ func reconcileErrorEvent(prev *agent.StreamEvent, ev agent.StreamEvent) *agent.S
 
 // buildRequest resolves CLAUDE_CONFIG_DIR and assembles the agent.Request.
 // The prompt is expected to already have its templates resolved.
-func (r *Runner) buildRequest(prompt string, tmplVars TemplateVars, cwd, streamFile, stderrFile string, extraArgs []string, execID int64) (agent.Request, error) {
+func (r *AgentExecutor) buildRequest(prompt string, tmplVars TemplateVars, cwd, streamFile, stderrFile string, extraArgs []string, execID int64) (agent.Request, error) {
 	// Resolve CLAUDE_CONFIG_DIR for isolated agents.
 	// Relative config_dir is resolved from ProjectDir (.ateam/); absolute is used as-is.
 	configDir := display.ExpandHome(ResolveTemplateString(r.ConfigDir, tmplVars))
@@ -785,7 +785,7 @@ func setupContainer(ctx context.Context, c container.Container, req *agent.Reque
 // and a `# Files Copy` section, and updates the agent_execs row. On failure
 // it sets summary.IsError, ErrorSource, ErrorCause, and Err so callers can
 // branch off summary.IsError without a separate return value.
-func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSummary, resultEv *agent.StreamEvent, opts RunOpts, runtimeDir, cmdFile string, cmdInfo cmdFileInfo) {
+func (r *AgentExecutor) finalizeCall(ctx context.Context, callID int64, summary *RunSummary, resultEv *agent.StreamEvent, opts RunOpts, runtimeDir, cmdFile string, cmdInfo cmdFileInfo) {
 	success := resultEv != nil && resultEv.Type == "result" && resultEv.ExitCode == 0 && !resultEv.IsError
 
 	var copyEntries []fileCopyEntry
@@ -859,7 +859,7 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 
 // renderSettingsJSON unmarshals, merges, and re-marshals sandbox settings.
 // Returns nil, nil when Settings is empty.
-func (r *Runner) renderSettingsJSON(workDir string, extraDenyWrite []string) ([]byte, error) {
+func (r *AgentExecutor) renderSettingsJSON(workDir string, extraDenyWrite []string) ([]byte, error) {
 	if r.Sandbox.Settings == "" {
 		return nil, nil
 	}
@@ -873,13 +873,13 @@ func (r *Runner) renderSettingsJSON(workDir string, extraDenyWrite []string) ([]
 
 // RenderSettings generates the merged sandbox settings JSON without writing to disk.
 // workDir is the effective working directory (e.g. SourceDir).
-func (r *Runner) RenderSettings(workDir string) ([]byte, error) {
+func (r *AgentExecutor) RenderSettings(workDir string) ([]byte, error) {
 	return r.renderSettingsJSON(workDir, nil)
 }
 
 // writeSettings parses the inline sandbox settings JSON from the agent config,
 // merges in runtime paths, and writes the result to settingsPath.
-func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error) {
+func (r *AgentExecutor) writeSettings(settingsPath string, opts RunOpts) ([]byte, error) {
 	data, err := r.renderSettingsJSON(effectiveWorkDir(opts), []string{settingsPath})
 	if err != nil {
 		return nil, err
@@ -895,7 +895,7 @@ func (r *Runner) writeSettings(settingsPath string, opts RunOpts) ([]byte, error
 
 // mergeSandboxPaths merges runtime-discovered paths into the parsed settings JSON.
 // extraDenyWrite contains paths to deny (e.g. the settings file itself).
-func (r *Runner) mergeSandboxPaths(settings map[string]any, workDir string, extraDenyWrite []string) {
+func (r *AgentExecutor) mergeSandboxPaths(settings map[string]any, workDir string, extraDenyWrite []string) {
 	runtimeWriteDirs := []string{workDir}
 	runtimeWriteDirs = append(runtimeWriteDirs, r.Sandbox.ExtraWriteDirs...)
 	runtimeWriteDirs = append(runtimeWriteDirs, r.Sandbox.RWPaths...)
@@ -1218,7 +1218,7 @@ func summaryStatus(s RunSummary) string {
 // session emits, not user-visible output.
 // TODO: get rid of this exclusion once configured prompts are kept separate
 // from files.
-func (r *Runner) promoteRuntimeFiles(runtimeDir, destDir, destFile, outputKind, promptName string) ([]fileCopyEntry, string) {
+func (r *AgentExecutor) promoteRuntimeFiles(runtimeDir, destDir, destFile, outputKind, promptName string) ([]fileCopyEntry, string) {
 	var entries []fileCopyEntry
 	primary := PrimaryOutputName(outputKind, promptName)
 	primaryRuntime := ""
@@ -1274,7 +1274,7 @@ func (r *Runner) promoteRuntimeFiles(runtimeDir, destDir, destFile, outputKind, 
 
 // listRuntimeForReport mirrors promoteRuntimeFiles but does not copy; used on
 // the failure path so cmd.md still shows what landed in runtime/<exec_id>/.
-func (r *Runner) listRuntimeForReport(runtimeDir string) []fileCopyEntry {
+func (r *AgentExecutor) listRuntimeForReport(runtimeDir string) []fileCopyEntry {
 	dir, err := os.ReadDir(runtimeDir)
 	if err != nil {
 		return nil

@@ -20,7 +20,7 @@ func TestRunnerWithMockAgent(t *testing.T) {
 	mock := &agent.MockAgent{Response: "test output from mock", Cost: 0.01}
 	r := newTestRunner(t, dir, mock)
 
-	summary := r.Run(context.Background(), "test prompt", RunOpts{
+	summary := r.Execute(context.Background(), "test prompt", RunOpts{
 		RoleID: "test-role",
 		Action: ActionExec,
 	}, nil)
@@ -56,7 +56,7 @@ func TestRunnerWithMockAgentError(t *testing.T) {
 	mock := &agent.MockAgent{Err: os.ErrPermission}
 	r := newTestRunner(t, dir, mock)
 
-	summary := r.Run(context.Background(), "fail prompt", RunOpts{
+	summary := r.Execute(context.Background(), "fail prompt", RunOpts{
 		RoleID: "fail-role",
 		Action: ActionExec,
 	}, nil)
@@ -70,8 +70,8 @@ func TestRunnerWithMockAgentError(t *testing.T) {
 }
 
 func TestRunnerRequiresStateDir(t *testing.T) {
-	r := &Runner{Agent: &agent.MockAgent{Response: "x"}}
-	summary := r.Run(context.Background(), "p", RunOpts{Action: ActionExec}, nil)
+	r := &AgentExecutor{Agent: &agent.MockAgent{Response: "x"}}
+	summary := r.Execute(context.Background(), "p", RunOpts{Action: ActionExec}, nil)
 	if summary.Err == nil {
 		t.Fatal("expected error when CallDB is missing")
 	}
@@ -94,7 +94,7 @@ func TestRunnerPromotesRuntimeFiles(t *testing.T) {
 	}
 	r := newTestRunner(t, dir, mock)
 
-	summary := r.Run(context.Background(), "scan {{OUTPUT_FILE}}", RunOpts{
+	summary := r.Execute(context.Background(), "scan {{OUTPUT_FILE}}", RunOpts{
 		RoleID:           "security",
 		Action:           ActionReport,
 		OutputKind:       OutputKindReport,
@@ -155,7 +155,7 @@ func TestRunnerRecordsOutputFileEvenWhenCloneFails(t *testing.T) {
 	}
 	r := newTestRunner(t, dir, mock)
 
-	summary := r.Run(context.Background(), "scan {{OUTPUT_FILE}}", RunOpts{
+	summary := r.Execute(context.Background(), "scan {{OUTPUT_FILE}}", RunOpts{
 		RoleID:           "security",
 		Action:           ActionReport,
 		OutputKind:       OutputKindReport,
@@ -211,7 +211,7 @@ func TestRunnerSkipsPromptFilesDuringPromote(t *testing.T) {
 	}
 	r := newTestRunner(t, dir, mock)
 
-	summary := r.Run(context.Background(), "write to {{OUTPUT_FILE}}", RunOpts{
+	summary := r.Execute(context.Background(), "write to {{OUTPUT_FILE}}", RunOpts{
 		RoleID:           "security",
 		Action:           ActionReport,
 		OutputKind:       OutputKindReport,
@@ -250,7 +250,7 @@ func TestRunnerWritesPromptFile(t *testing.T) {
 	mock := &agent.MockAgent{Response: "ok"}
 	r := newTestRunner(t, dir, mock)
 
-	summary := r.Run(context.Background(), "the prompt body", RunOpts{
+	summary := r.Execute(context.Background(), "the prompt body", RunOpts{
 		RoleID: "any",
 		Action: ActionExec,
 	}, nil)
@@ -273,7 +273,7 @@ func TestRunnerProgress(t *testing.T) {
 	r := newTestRunner(t, dir, mock)
 
 	progress := make(chan RunProgress, 64)
-	_ = r.Run(context.Background(), "test", RunOpts{RoleID: "progress-role", Action: ActionExec}, progress)
+	_ = r.Execute(context.Background(), "test", RunOpts{RoleID: "progress-role", Action: ActionExec}, progress)
 	close(progress)
 
 	var phases []string
@@ -294,7 +294,7 @@ func TestRunnerProgressInitCarriesAgentInfo(t *testing.T) {
 	r := newTestRunner(t, dir, mock)
 
 	progress := make(chan RunProgress, 64)
-	_ = r.Run(context.Background(), "p", RunOpts{RoleID: "init-role", Action: ActionExec}, progress)
+	_ = r.Execute(context.Background(), "p", RunOpts{RoleID: "init-role", Action: ActionExec}, progress)
 	close(progress)
 
 	var inits []RunProgress
@@ -319,7 +319,7 @@ func TestRunnerProgressIncludesExecID(t *testing.T) {
 	r := newTestRunner(t, dir, mock)
 
 	progress := make(chan RunProgress, 64)
-	summary := r.Run(context.Background(), "test", RunOpts{RoleID: "progress-role", Action: ActionExec}, progress)
+	summary := r.Execute(context.Background(), "test", RunOpts{RoleID: "progress-role", Action: ActionExec}, progress)
 	close(progress)
 
 	if summary.ExecID <= 0 {
@@ -339,7 +339,7 @@ func TestRunnerConfigDirSetsEnv(t *testing.T) {
 	r := newTestRunner(t, dir, mock)
 	r.ConfigDir = ".claude"
 
-	_ = r.Run(context.Background(), "test", RunOpts{RoleID: "iso-role", Action: ActionExec}, nil)
+	_ = r.Execute(context.Background(), "test", RunOpts{RoleID: "iso-role", Action: ActionExec}, nil)
 
 	if len(mock.Requests) != 1 {
 		t.Fatalf("expected 1 request, got %d", len(mock.Requests))
@@ -358,7 +358,7 @@ func TestRunnerConfigDirAbsolute(t *testing.T) {
 	r := newTestRunner(t, dir, mock)
 	r.ConfigDir = absConfig
 
-	_ = r.Run(context.Background(), "test", RunOpts{RoleID: "abs-role", Action: ActionExec}, nil)
+	_ = r.Execute(context.Background(), "test", RunOpts{RoleID: "abs-role", Action: ActionExec}, nil)
 
 	if len(mock.Requests) != 1 {
 		t.Fatalf("expected 1 request, got %d", len(mock.Requests))
@@ -382,7 +382,7 @@ func TestRenderSettingsSandboxExtra(t *testing.T) {
 		"permissions": {}
 	}`
 
-	r := &Runner{
+	r := &AgentExecutor{
 		Sandbox: SandboxConfig{
 			Settings:     sandbox,
 			ExtraWrite:   []string{"/extra/write"},
@@ -436,7 +436,7 @@ func TestRunnerStallEmitsWarning(t *testing.T) {
 	progress := make(chan RunProgress, 64)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_ = r.Run(ctx, "stall test", RunOpts{RoleID: "stalled", Action: ActionExec}, progress)
+	_ = r.Execute(ctx, "stall test", RunOpts{RoleID: "stalled", Action: ActionExec}, progress)
 	close(progress)
 
 	var stalls int
@@ -464,7 +464,7 @@ func TestRunnerPreservesResultWhenAgentExitsNonZero(t *testing.T) {
 		ProcessExitAfterResult: 1,
 	})
 
-	summary := r.Run(context.Background(), "test", RunOpts{
+	summary := r.Execute(context.Background(), "test", RunOpts{
 		RoleID: "stalled-api",
 		Action: ActionExec,
 	}, nil)

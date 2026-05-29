@@ -65,7 +65,7 @@ func (a *concurrencyTrackingAgent) Run(ctx context.Context, req agent.Request) <
 }
 
 // panicAgent panics synchronously inside Run, simulating an unexpected nil
-// deref or similar fault reached through Runner.Run on a worker goroutine.
+// deref or similar fault reached through AgentExecutor.Execute on a worker goroutine.
 type panicAgent struct{}
 
 func (panicAgent) Name() string           { return "panic" }
@@ -268,7 +268,7 @@ func TestRunPoolConcurrentResultsAreSafe(t *testing.T) {
 }
 
 // TestRunPoolPerExecRunnerOverride verifies that a PoolExec carrying its own
-// Runner (set on the per-task .Runner field) is executed against that runner
+// AgentExecutor (set on the per-task .AgentExecutor field) is executed against that runner
 // rather than the pool's shared one. This is the path used when each role
 // needs its own agent configuration (model/effort/etc).
 func TestRunPoolPerExecRunnerOverride(t *testing.T) {
@@ -282,7 +282,7 @@ func TestRunPoolPerExecRunnerOverride(t *testing.T) {
 
 	tasks := []PoolExec{
 		{Prompt: "t1", RunOpts: RunOpts{RoleID: "shared-role", Action: ActionExec}},
-		{Prompt: "t2", RunOpts: RunOpts{RoleID: "override-role", Action: ActionExec}, Runner: overrideRunner},
+		{Prompt: "t2", RunOpts: RunOpts{RoleID: "override-role", Action: ActionExec}, AgentExecutor: overrideRunner},
 	}
 
 	results := RunPool(context.Background(), sharedRunner, tasks, 1, nil, nil)
@@ -298,7 +298,7 @@ func TestRunPoolPerExecRunnerOverride(t *testing.T) {
 		t.Errorf("shared-role output = %q, want %q", got["shared-role"], "shared")
 	}
 	if got["override-role"] != "override" {
-		t.Errorf("override-role output = %q, want %q (per-exec Runner override not honored)",
+		t.Errorf("override-role output = %q, want %q (per-exec AgentExecutor override not honored)",
 			got["override-role"], "override")
 	}
 }
