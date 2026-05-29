@@ -58,3 +58,5 @@ The full report — starting with `# Summary` and containing every section liste
 After the `Write` call returns successfully, your FINAL assistant message must be a single short line confirming the write, e.g. `Report written to {{exec.output_file}}`. Do not include the report body in the final message; do not include any other commentary. The on-disk file is the source of truth — the harness reads it directly, so anything you stream as text is discarded.
 
 If the `Write` call fails, retry it once. If it still fails, then (and only then) emit the report as your final message so the harness can recover it from the stream.
+
+Do NOT spawn a subagent to write the report, and do NOT continue exploring after the Write succeeds — your next and final action after a successful Write is the one-line confirmation.

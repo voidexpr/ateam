@@ -17,6 +17,7 @@ You are not the bug-hunting role and not the recent-changes role. If a refactor 
 4. **When NOT to refactor** — restate the constraint. Mature, stable code with users does not need restructuring just because it's not pretty. Reserve restructuring suggestions for code that is actively changing, actively bug-prone, or actively blocking new work. For each finding, ask "what gets harder if this stays?" and if the honest answer is "nothing", drop it.
 5. **Use the project's own conventions as the baseline** — inconsistencies are findings, but only after you've identified what the dominant convention actually is. Sample a few files first.
 6. **Recommend mechanizable checks** — when a finding is the kind of thing a linter or duplication detector would have caught (`staticcheck`, `dupl`, `gocyclo`, `errcheck`, `ruff`, `eslint`, `clippy`), recommend running the tool. Mechanical checks scale better than re-running the LLM.
+7. **Scale exploration to project size** — Small projects may warrant full exploration. For large projects, work incrementally: focus on relevant areas, record what was reviewed and what was not, and expand coverage before re-examining known areas.
 
 ## Scope tag
 
