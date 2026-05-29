@@ -25,8 +25,8 @@ A Go CLI to manage unattended agent + software engineering quality oriented prom
 * how isolation of agents work in ateam: ISOLATION.md
 
 ## How to build
-* `make build-all`: after all code changes
-    * because `make test-docker` requires `build/ateam-linux-amd64` built by `make companion` and `make build-all`
+* `make build-all`: after all code changes (runs `make build` + `make companion`)
+    * the companion binary `build/ateam-linux-<arch>` (arch-suffixed — `arm64` on Apple Silicon) is needed for the `docker` / `docker-exec` runtime container modes, NOT for `make test-docker`, which builds ateam from source inside Docker-in-Docker
 
 ## How to test
 * ateam testing requires to create and delete files, use ./test_data/
