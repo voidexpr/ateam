@@ -106,14 +106,28 @@ Step 6 wave (primary-output filename rename):
 Step 4 wave (code per-exec destination):
 - ✅ **Step 4 (minimal) done** — `supervisor/code/<exec>/` → `shared/code/<exec>/`. Changes: (a) migrator gains `moveDir` helper (same-FS `os.Rename` only — EXDEV errors with a "move it manually" message; target-exists is a warn, not an automatic merge); (b) `staticDirMigrations` adds `supervisor/code → shared/code`; (c) `cmd/code.go`'s `CanonicalDestDir` flips to `shared/code/{{EXEC_ID}}` and `printCodeSessionSummary` dual-reads (shared first, supervisor fallback); (d) web's `codeSessionDirs` dual-reads, `scanCodeSessions` merges entries from both dirs (deduping by dirName, shared preferred); (e) `cmd/auto_roles_context.go`'s execution-report glob picks up both paths; (f) `internal/web/export.go` and the `handleCode` report-path lookup route through `codeSessionDirs` so they pick up the new location automatically. Tests cover the dir move + idempotence + conflict warn + scanCodeSessions preferring shared/.
 
+Step 5a wave (replace-role-main + drop legacy Assemble*):
+- ✅ **Step 5 Option A done** — `AssembleOptions {ReplaceRoleMain, PrePrompt, PostPrompt}` lands in the assembler; `--prompt` flows into `ReplaceRoleMain`; `--pre-prompt` / `--post-prompt` ride through the assembler at the outermost positions. The two surviving legacy assemblers (`AssembleReviewPrompt`, `AssembleCodeManagementPrompt`) plus the 3-level fallback helpers (`readWith3LevelFallback`, `readFileOr3Level`, `traceFileOr3Level`) are deleted. `internal/prompts` shrinks again. All v1 helpers (`assembleReviewV1`, `assembleSupervisorV1`, `assembleRoleReportV1`, `assembleRoleCodeV1`, `assembleCodeManagementV1`) accept the new override parameters; both default and `--prompt` paths now go through the same v1 pipeline.
+
+Task 8 wave (CLI `--pre-prompt`/`--post-prompt` normalization):
+- ✅ **Task 8 done** — `--pre-prompt` / `--post-prompt` added to `report`, `code`, `review`, `verify`, `auto-setup`, `prompt`, and `all`. Same text-or-`@filepath` shape as `--extra-prompt`. Wrap order: anchors → dir-level `_pre`/`_post` → role-level pre/post → CLI `--pre-prompt` (outermost head) / `--post-prompt` (outermost tail). Test in `cmd/prompt_test.go::TestPromptPrePostWrap` covers ordering end-to-end. `exec`/`parallel`/`inspect` (raw-prompt commands that don't go through the assembler) still rely on `--extra-prompt`; a future commit can add raw-prompt pre/post if needed.
+
+Step 7 wave (drop dual-reads):
+- ✅ **Step 7 done** — `env.RoleReportPath` returns only the v1 spec path; `ReviewPath` / `VerifyPath` drop the legacy `supervisor/` fallback; `prompts.DiscoverReports` scans only `shared/report/<role>/<role>.md`; web's `codeSessionDirs` returns only `shared/code/<dirName>/`; `scanCodeSessions` reads only `shared/code/`; `cmd/code.go::printCodeSessionSummary` drops the legacy candidate loop; `cmd/auto_roles_context.go::writeLatestExecutionReport` drops the `supervisor/code/*/` glob. Test fixtures across `internal/prompts/review_selector_test.go`, `internal/web/{export,handlers,code_sessions}_test.go` updated to v1 paths.
+
+Step 8 wave (Phase F verification):
+- ✅ **Step 8 done** — `TestV1LayoutIdempotentAfterArtifacts` mirrors the real-world cycle (migrate → run report/review/code → re-migrate, second pass = no-op). `scripts/capture_golden_prompts.sh` captures `ateam prompt --inline-paths` for a representative role set into a snapshot dir so the user can `diff -r before/ after/` to verify the refactor preserved per-section content across upgrades. Real-project migration parade is covered by existing `TestRsyncFixture` / `TestRsyncListmanagerFixture`.
+
+Step 9 wave (docs):
+- ✅ **Step 9 done** — README.md customization section + custom-role example updated to v1 paths and new flag surface. CONFIG.md directory-layout diagrams rewritten for `.ateamorg/prompts/` + `.ateam/{prompts,shared,runtime,logs}/`; new "Prompt Composition" section documents filename patterns and assembly order; old `supervisor/`/`roles/` examples replaced. COMMANDS.md tables for `report`/`review`/`code`/`verify`/`all`/`prompt` get `--pre-prompt` and `--post-prompt` rows. ISOLATION.md verified clean of legacy refs. ROLES.md regenerates in CI.
+
 ### Remaining
 
-Loose ends, ordered by recommended sequence:
+All Step 1–9 / Task 8 work is complete. Open follow-ups documented elsewhere:
 
-5a. **(Optional) Step 5 Option A** — replace the two surviving `Assemble*` functions with a v1 "replace role main" surface so the `--prompt` branches in `cmd/review.go` / `cmd/code.go` go through the same path as the default branches. Closely related to Task 8 (`--pre-prompt` / `--post-prompt` normalization); design together. Would let us delete the remaining `readWith3LevelFallback` family.
-7. **Drop legacy dual-read in env helpers** — `RoleReportPath` / `ReviewPath` / `VerifyPath` in `internal/root/resolve.go` still stat the pre-migration paths (and Step 6 added a third tier — the transitional v1 `report.md` — to `RoleReportPath`). Step 4 also added a dual-read in web's `codeSessionDirs` and a triple-glob in `auto_roles_context.go::writeLatestExecutionReport`. Drop all of these after auto-migration has been default-on for a release and projects have all been touched. Not blocking v1.
-8. **Phase F verification** — golden prompt diff, idempotence under load, real-project migration tests.
-9. **Docs (Task 5)** — README, CONFIG.md, ROLES.md, ISOLATION.md.
+- **Task 2** (Stage abstraction) — internal Go cleanup that would collapse `report`/`review`/`verify`/`auto-setup` onto a `Stage` type. Out of scope for the v1 refactor; see spec.
+- **Task 3** (Progress telemetry) — `ateam exec` structured progress + DB persistence + shared with `parallel`. Out of scope for the v1 refactor; see spec.
+- **`--pre-prompt`/`--post-prompt` on raw-prompt commands** (`exec`, `parallel`, `inspect --auto-debug`) — small follow-up; today those commands rely on `--extra-prompt` only.
 
 ## Detailed remaining coding steps
 

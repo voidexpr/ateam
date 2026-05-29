@@ -180,7 +180,7 @@ ateam all --roles code.bugs,test.gaps,project.security,project.dependencies,desi
 Step by step (with review):
 ```bash
 ateam report && ateam review --print    # inspect findings
-# optionally edit .ateam/supervisor/review.md
+# optionally edit .ateam/shared/review/review.md
 ateam code && ateam verify && ateam serve # fix, verify and serve all artifacts produced
 ```
 
@@ -196,11 +196,15 @@ So the git workflow is up to you:
 ### Steering Ateam
 
 #### 1. Providing directions
-* for ad-hoc steering use: `--extra-prompt YOUR_INSTRUCTIONS` for any of report/review/code/verify
+* for ad-hoc steering, every prompt-taking command accepts three text-or-`@file` flags:
+    * `--extra-prompt TEXT` — appended after the assembled body, inside the prompt
+    * `--pre-prompt TEXT` — wrapped at the very front, outermost
+    * `--post-prompt TEXT` — wrapped at the very end, outermost
     * example: `ateam all --extra-prompt "focus on the changes related to the authentication model"`
-* for persistent steering (like reject a type of findings ateam proposes) just write them in a file at the appropriate level:
-    * report level: `.ateam/roles/NAME/report_extra_prompt.md`
-    * review level: `.ateam/supervisor/review_extra_prompt.md`
+* for persistent steering (like reject a type of findings ateam proposes) write them as composable fragments at the appropriate level:
+    * project-level role override: `.ateam/prompts/report/NAME.post.extra.md` (composes with the embedded role)
+    * project-level supervisor review override: `.ateam/prompts/review.post.extra.md`
+    * org-level (shared across projects): same paths under `.ateamorg/prompts/`
 
 see more options in [CONFIG.md](CONFIG.md)
 
@@ -311,7 +315,7 @@ Role enablement is opt-in: only roles explicitly listed as `on` in `config.toml`
 
 ### Creating Custom Roles
 
-Create `roles/YOUR_NEW_ROLE_NAME/report_prompt.md` (in `.ateam/` or `.ateamorg/`), you can then run a report with `ateam report --roles YOUR_NEW_ROLE_NAME`. If you want to have it run by default enable it in `config.toml`.
+Create `prompts/report/YOUR_NEW_ROLE_NAME.prompt.md` (in `.ateam/` for project-scoped or `.ateamorg/` for org-shared). You can then run a report with `ateam report --roles YOUR_NEW_ROLE_NAME`. To have it run by default, enable it in `config.toml`.
 
 Ideas:
 - GDPR/PII privacy

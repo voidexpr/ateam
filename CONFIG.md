@@ -4,71 +4,75 @@ Configuration files and runtime config for ATeam. For command-line invocations, 
 
 ## Directory Layout
 
+Prompts compose via a 3-anchor chain: **project (`.ateam/`) → org (`.ateamorg/`) → embedded** (built into the ateam binary). The same filename at a more-specific anchor overrides; different filenames at any anchor compose additively (see [Prompt Composition](#prompt-composition) below).
+
 ### Organization: `.ateamorg/`
 
 Created by `ateam install`. Holds shared defaults and org-level overrides.
 
 ```
 .ateamorg/
-  defaults/                                    # embedded defaults written to disk
+  defaults/                                    # embedded defaults written to disk (kept in sync via `ateam update`)
     runtime.hcl                                # runtime config (agents, containers, profiles)
     Dockerfile                                 # default Dockerfile for container builds
-    report_base_prompt.md                      # shared report base instructions
-    code_base_prompt.md                        # shared code base instructions
-    roles/<NAME>/report_prompt.md              # per-role report prompt
-    roles/<NAME>/code_prompt.md                # per-role code prompt (where available)
-    supervisor/review_prompt.md                # supervisor review prompt
-    supervisor/code_management_prompt.md       # supervisor code management prompt
-    supervisor/code_verify_prompt.md           # supervisor verify prompt
-    supervisor/report_auto_roles_prompt.md     # auto-roles recommendation prompt (used by --auto-roles)
-    supervisor/exec_debug_prompt.md            # agent_exec debug prompt (used by ateam inspect --auto-debug)
-    supervisor/auto_setup_prompt.md            # auto-setup prompt
+    prompts/                                   # the v1 prompt tree (mirrors what the binary ships)
+      _pre.context.md                          # root-level pre — applied to every prompt
+      review.prompt.md                         # supervisor review body
+      code_management.prompt.md                # supervisor code-management body
+      code_verify.prompt.md                    # supervisor verify body
+      auto_setup.prompt.md                     # auto-setup body
+      exec_debug.prompt.md                     # inspect --auto-debug body
+      report_auto_roles.prompt.md              # --auto-roles planner body
+      report/
+        _pre.intro.md                          # dir-level pre — applied to every role/<R>.prompt.md
+        _post.format.md                        # dir-level post — output format / validation
+        <NAME>.prompt.md                       # per-role report bodies
+      code/
+        _post.format.md                        # dir-level post for the (small) set of code-capable roles
+        <NAME>.prompt.md                       # per-role code bodies (only ships for a few roles)
   runtime.hcl                                  # org-level runtime config override (optional)
   Dockerfile                                   # org-level Dockerfile override (optional)
-  report_base_prompt.md                        # org-level report base override (optional)
-  code_base_prompt.md                          # org-level code base override (optional)
-  report_extra_prompt.md                       # org-wide extra instructions for reports (optional)
-  code_extra_prompt.md                         # org-wide extra instructions for code (optional)
-  roles/                                       # org-level role overrides
-    <NAME>/report_prompt.md
-    <NAME>/report_extra_prompt.md
-    <NAME>/code_prompt.md
-    <NAME>/code_extra_prompt.md
-  supervisor/                                  # org-level supervisor overrides
-    review_prompt.md
-    review_extra_prompt.md
-    code_management_prompt.md
-    code_management_extra_prompt.md
+  prompts/                                     # org-level prompt overrides (any filename from defaults/prompts/)
+    _pre.<NAME>.md                             # add an org-wide pre fragment to every prompt
+    report/<NAME>.prompt.md                    # override a role's body
+    report/<NAME>.post.<NAME>.md               # add a composable post fragment to a role
+    review.post.extra.md                       # add a composable extra to the supervisor review
+    # … any other file matching the filename patterns defaults/prompts/ ships with
 ```
 
 ### Project: `.ateam/`
 
-Created by `ateam init`. Self-contained: config, prompts, reports, and runtime state.
+Created by `ateam init`. Self-contained: config, prompts, generated artifacts, and runtime state.
 
-Versioned files are at the top level. Runtime artifacts (`logs/`, `state.sqlite`, `secrets.env`) are gitignored.
+Versioned files are at the top level. Runtime artifacts (`logs/`, `runtime/`, `state.sqlite`, `secrets.env`) are gitignored.
 
 ```
 .ateam/
-  .gitignore                                 # excludes state.sqlite*, logs/, secrets.env
-  config.toml                                # project configuration
-  setup_overview.md                           # project overview from auto-setup (not included in prompts)
-  state.sqlite                               # call database [gitignored]
-  secrets.env                                # project-scoped secrets [gitignored]
-  runtime.hcl                                # project-level runtime override (optional)
-  roles/<NAME>/
-    report_prompt.md                         # role report prompt override (optional)
-    report_extra_prompt.md                   # extra instructions (optional)
-    code_prompt.md                           # role code prompt override (optional)
-    code_extra_prompt.md                     # extra instructions (optional)
-    report.md                                # latest successful report
-    history/                                 # timestamped archive
-  supervisor/
-    review_prompt.md                         # supervisor override (optional)
-    review_extra_prompt.md                   # extra instructions (optional)
-    review.md                                # latest successful review
-    history/
-  logs/                                      # runtime logs [gitignored]
+  .gitignore                                   # excludes state.sqlite*, logs/, runtime/, secrets.env
+  config.toml                                  # project configuration
+  state.sqlite                                 # call database [gitignored]
+  secrets.env                                  # project-scoped secrets [gitignored]
+  runtime.hcl                                  # project-level runtime override (optional)
+
+  prompts/                                     # project-level prompt overrides
+    _pre.<NAME>.md                             # project-wide pre fragment
+    review.post.<NAME>.md                      # project-wide review post fragment
+    report/<NAME>.prompt.md                    # role body override
+    report/<NAME>.post.<NAME>.md               # composable role post fragment
+    # … same filename patterns as .ateamorg/prompts/
+
+  shared/                                      # cross-agent artifacts (gitignored or versioned per project policy)
+    report/<NAME>/<NAME>.md                    # latest successful report per role
+    review/review.md                           # latest successful supervisor review
+    verify/verify.md                           # latest successful verification report
+    auto_setup/auto_setup.md                   # auto-setup output
+    code/<exec_id>/                            # per-exec code-session artifacts
+
+  runtime/<exec_id>/                           # per-execution scratch [gitignored]
+  logs/<exec_id>/                              # forensic logs (stream, stderr, cmd.md) [gitignored]
 ```
+
+The auto-migrator upgrades pre-v1 layouts (`roles/`, `supervisor/`, `*_base_prompt.md`) to this shape on first contact. `ATEAM_NO_MIGRATE=1` opts out — not recommended unless you know why.
 
 ## `config.toml`
 
@@ -193,64 +197,90 @@ forward_env = ["MY_CUSTOM_TOKEN"]
 
 ### Custom Roles
 
-Create a custom role by adding a directory with a `report_prompt.md` — no config.toml registration needed:
+Create a custom role by adding a `<NAME>.prompt.md` file under `prompts/report/` — no config.toml registration needed:
 
 ```bash
-mkdir -p .ateam/roles/my_custom_role
+mkdir -p .ateam/prompts/report
 # write your prompt
-vim .ateam/roles/my_custom_role/report_prompt.md
+vim .ateam/prompts/report/my_custom_role.prompt.md
 # run it
 ateam report --roles my_custom_role
 ```
 
 Roles are discovered from the union of:
-- Built-in defaults (embedded in the binary)
+- Built-in defaults (embedded in the binary, under `defaults/prompts/report/`)
 - `config.toml` `[roles]` entries
-- `.ateamorg/roles/<NAME>/report_prompt.md` (org-level, shared across projects)
-- `.ateam/roles/<NAME>/report_prompt.md` (project-level)
+- `.ateamorg/prompts/report/<NAME>.prompt.md` (org-level, shared across projects)
+- `.ateam/prompts/report/<NAME>.prompt.md` (project-level)
 
-Roles are opt-in: only roles explicitly listed in `config.toml` with status `on` (or the legacy `enabled`) are included in `--roles all`. Unlisted roles — built-in or custom — and roles set to `off` are excluded from the `all` expansion. They can still be run by naming them directly: `ateam report --roles my_custom_role` works without any `config.toml` entry as long as the role's `report_prompt.md` exists.
+Roles are opt-in: only roles explicitly listed in `config.toml` with status `on` (or the legacy `enabled`) are included in `--roles all`. Unlisted roles — built-in or custom — and roles set to `off` are excluded from the `all` expansion. They can still be run by naming them directly: `ateam report --roles my_custom_role` works without any `config.toml` entry as long as the role's `.prompt.md` file exists.
 
-## Prompt Configuration
+## Prompt Composition
 
-All prompt files can be customized at the project level (`.ateam/`), organization level (`.ateamorg/`), or rely on built-in defaults.
+Prompts are assembled by walking the **project → org → embedded** anchor chain and composing files by filename pattern. There is no template file to author — the assembly order is encoded in the names.
 
-To add instructions without replacing the default prompt, use `*_extra_prompt.md` files. To inspect what prompt will be used:
+### Filename Patterns
+
+| Pattern | Means |
+|---|---|
+| `<role>.prompt.md` | Role main body. First-match wins across anchors (most-specific overrides). |
+| `<role>.pre.<NAME>.md` | Role pre fragment named `<NAME>` (additive — composes with other `<role>.pre.*.md`). |
+| `<role>.post.<NAME>.md` | Role post fragment (additive). |
+| `_pre.<NAME>.md` | Dir-level pre — applied to every role in this directory (additive). |
+| `_post.<NAME>.md` | Dir-level post (additive). |
+
+### Assembly Order
+
+For `prompts/report/security`:
+
+```
+[--pre-prompt]                          (CLI, outermost head)
+  _pre.<NAME>.md                        (root-level pre — every prompt)
+    report/_pre.<NAME>.md               (dir-level pre — every report role)
+      report/security.pre.<NAME>.md     (role-level pre fragments)
+      report/security.prompt.md         (role main — first match wins)
+      report/security.post.<NAME>.md    (role-level post fragments)
+    report/_post.<NAME>.md              (dir-level post — every report role)
+  _post.<NAME>.md                       (root-level post)
+[--extra-prompt]                        (CLI, appended after the assembled body)
+[--post-prompt]                         (CLI, outermost tail)
+```
+
+### Inspecting Assembly
 
 ```bash
-ateam prompt --role ROLE --action report
-ateam prompt --supervisor --action review
+ateam prompt --role ROLE --action report                  # print the assembled prompt
+ateam prompt --role ROLE --action report --paths          # tabular per-section breakdown
+ateam prompt --role ROLE --action report --inline-paths   # full prompt with per-section headers
+ateam prompt --supervisor --action review --paths
 ```
 
-### Prompt Resolution
+### Common Override Patterns
 
-Prompts are resolved with a 3-level fallback: **project** → **org** → **embedded defaults**. The first file found wins. Extra prompts are **additive** — all matching files are included.
+**Add an instruction to every prompt without touching the embedded defaults:**
 
-The placeholder `{{SOURCE_DIR}}` in prompts is replaced with the project source directory path.
-
-### Role Prompt Assembly (report and code)
-
-```
-ATeam Project Context → Base prompt → Role prompt → Extra prompts → CLI --extra-prompt
+```bash
+echo "Pay extra attention to memory safety." > .ateam/prompts/_pre.memory.md
 ```
 
-### Supervisor Prompt Assembly (review and code)
+**Add a role-specific note that survives upgrades:**
 
+```bash
+echo "For this project, treat any C extensions as untrusted." \
+  > .ateam/prompts/report/project.security.post.notes.md
 ```
-ATeam Project Context → Action prompt → Extra prompts → Reports/Review → CLI --extra-prompt
+
+**Override a role wholesale (drift risk on upgrade):**
+
+```bash
+# Edit `.ateam/prompts/report/project.security.prompt.md` directly.
+# Better: fork it under a new name (project_security_strict.prompt.md)
+# so embedded improvements still land for the original.
 ```
 
-### Extra Prompt Locations
+### Template Variables
 
-For roles (e.g. report):
-1. `.ateamorg/report_extra_prompt.md` — org-wide
-2. `.ateamorg/roles/<NAME>/report_extra_prompt.md` — org role-specific
-3. `.ateam/report_extra_prompt.md` — project-wide
-4. `.ateam/roles/<NAME>/report_extra_prompt.md` — project role-specific
-
-For supervisors (e.g. review):
-1. `.ateamorg/supervisor/review_extra_prompt.md` — org-level
-2. `.ateam/supervisor/review_extra_prompt.md` — project-level
+Prompts can reference `{{namespace.key}}` variables. The runner fills `{{exec.*}}` placeholders at execution time; the assembler fills `{{prompt.*}}`, `{{project.*}}`, `{{ateam.*}}`, `{{role.*}}`, and `{{env.NAME}}` at assembly time. Legacy ALL_CAPS forms (`{{OUTPUT_DIR}}`, `{{ROLE}}`, etc.) are auto-translated via a compat shim — existing user prompts keep working without rewrites.
 
 ## Runtime Configuration
 

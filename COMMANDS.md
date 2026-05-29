@@ -109,6 +109,8 @@ ateam report --auto-roles --plan-only    # print the recommendation, don't run
 |------|-------------|
 | `--roles LIST` | Comma-separated role list, or `all` (default: all enabled roles) |
 | `--extra-prompt TEXT` | Additional instructions appended to every role's prompt (text or `@filepath`) |
+| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`) |
+| `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`) |
 | `--profile NAME` | Runtime profile (overrides config resolution) |
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
 | `--cheaper-model` | Use a cheaper model (sonnet); ignored if `--model` is also set (`--model` wins) |
@@ -127,7 +129,7 @@ ateam report --auto-roles --plan-only    # print the recommendation, don't run
 | `--force` | Run even if the same action+role is already running |
 | `--verbose` | Print agent and docker commands to stderr |
 | `--review` | Run review automatically after reports complete |
-| `--auto-roles` | Spawn a planner agent (`defaults/supervisor/report_auto_roles_prompt.md`) that inspects git history since the last review, prior reports, and the latest code-cycle execution report, then picks a short role list. Mutually exclusive with `--roles` and `--rerun-failed`. |
+| `--auto-roles` | Spawn a planner agent (`defaults/prompts/report_auto_roles.prompt.md`) that inspects git history since the last review, prior reports, and the latest code-cycle execution report, then picks a short role list. Mutually exclusive with `--roles` and `--rerun-failed`. |
 | `--plan-only` | With `--auto-roles`: print the planner's rationale and recommended commands, then exit before running any reports. |
 
 ### `ateam review`
@@ -149,6 +151,8 @@ ateam review --dry-run
 | Flag | Description |
 |------|-------------|
 | `--extra-prompt TEXT` | Additional instructions appended to the supervisor prompt (text or `@filepath`) |
+| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt (text or `@filepath`) |
+| `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt (text or `@filepath`) |
 | `--prompt TEXT` | Custom prompt replacing the default supervisor role entirely (text or `@filepath`) |
 | `--profile NAME` | Runtime profile (overrides config resolution) |
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
@@ -179,9 +183,11 @@ ateam code --dry-run
 
 | Flag | Description |
 |------|-------------|
-| `--review TEXT` | Review content (text or `@filepath`; defaults to `.ateam/supervisor/review.md`) |
+| `--review TEXT` | Review content (text or `@filepath`; defaults to `.ateam/shared/review/review.md`) |
 | `--management TEXT` | Management prompt override (text or `@filepath`) |
 | `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
+| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt (text or `@filepath`) |
+| `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt (text or `@filepath`) |
 | `--profile NAME` | Profile for sub-runs (passed to `ateam exec --profile`) |
 | `--agent NAME` | Agent for sub-runs (passed to `ateam exec --agent`) |
 | `--supervisor-profile NAME` | Profile for the supervisor itself |
@@ -216,6 +222,8 @@ ateam verify --dry-run
 | Flag | Description |
 |------|-------------|
 | `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
+| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt (text or `@filepath`) |
+| `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt (text or `@filepath`) |
 | `--timeout MINUTES` | Timeout in minutes (overrides `config.toml`) |
 | `--print` | Print verification report to stdout after completion |
 | `--dry-run` | Print the computed prompt without running |
@@ -250,6 +258,8 @@ ateam all --auto-roles --plan-only               # print the recommendation, don
 | Flag | Description |
 |------|-------------|
 | `--extra-prompt TEXT` | Additional instructions passed to all phases (text or `@filepath`) |
+| `--pre-prompt TEXT` | Text wrapped at the very front of every phase's assembled prompt (text or `@filepath`) |
+| `--post-prompt TEXT` | Text wrapped at the very end of every phase's assembled prompt (text or `@filepath`) |
 | `--cheaper-model` | Use a cheaper model (sonnet) |
 | `--model MODEL` | Model override applied to every phase; takes precedence over `--cheaper-model` |
 | `--effort VALUE` | Reasoning effort applied to every phase, passed verbatim to the agent CLI (see [Effort levels](CONFIG.md#effort-levels)) |
@@ -512,6 +522,8 @@ TOTAL                                                                           
 | `--supervisor` | Generate supervisor prompt instead of role prompt |
 | `--action ACTION` | Action type: `report` or `code` for roles; `review`, `code`, or `verify` for supervisor **(required)** |
 | `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
+| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt (text or `@filepath`) |
+| `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt (text or `@filepath`) |
 | `--no-project-info` | Omit the ATeam Project Context section |
 | `--ignore-previous-report` | Do not include the role's previous report |
 | `--paths` | Show the per-section breakdown table (slot / anchor / path / last modified / est. tokens). No prompt body printed. |
@@ -569,7 +581,7 @@ ateam inspect --last --auto-debug --extra-prompt "focus on the timeout"
 | `--profile NAME` | Profile for the auto-debug agent |
 | `--agent NAME` | Agent for the auto-debug run |
 
-The debug prompt uses the standard 3-level fallback (`supervisor/exec_debug_prompt.md`). Debug reports are saved to `.ateam/logs/supervisor/`.
+The debug prompt is composed via the v1 assembler (`prompts/exec_debug.prompt.md`). Debug reports are saved to `.ateam/logs/supervisor/`.
 
 For each row, `inspect` prints the same metadata + `To resume run:` block that `ateam resume` produces (when the agent is resumable — `claude`, `codex`, `codex-tmux` — and a session id is recoverable from the stream file), followed by a `Files:` listing of every log + runtime artifact for that run. The resume block honors `ATEAM_RESUME_*_CMD` overrides (see [`ateam resume`](#ateam-resume-exec_id) below) so the printed command matches what would actually run.
 
@@ -648,7 +660,7 @@ Read and format stream logs for one or more completed runs. Arguments can be num
 ateam cat 42
 ateam cat 42 43 44 --verbose
 ateam cat --last
-ateam cat .ateam/logs/roles/security/stream.jsonl
+ateam cat .ateam/logs/42/stream.jsonl
 ```
 
 | Flag | Description |
@@ -781,13 +793,13 @@ Each run writes to `.ateam/runtime/<exec_id>/` (the agent's scratch directory). 
 
 | Action       | Canonical destination                          |
 |--------------|------------------------------------------------|
-| `report`     | `.ateam/roles/<role>/`                         |
-| `review`     | `.ateam/supervisor/`                           |
-| `verify`     | `.ateam/supervisor/`                           |
-| `code`       | `.ateam/supervisor/code/<exec_id>/`            |
+| `report`     | `.ateam/shared/report/<role>/<role>.md`        |
+| `review`     | `.ateam/shared/review/review.md`               |
+| `verify`     | `.ateam/shared/verify/verify.md`               |
+| `code`       | `.ateam/shared/code/<exec_id>/`                |
+| `auto-setup` | `.ateam/shared/auto_setup/auto_setup.md`       |
 | `exec`       | _none_ — output stays in `.ateam/runtime/<exec_id>/` |
 | `parallel`   | _none_                                         |
-| `auto-setup` | _none_                                         |
 
 For actions with no canonical destination, view the output with `ateam cat <exec_id>`. See [DEV.md](DEV.md) "Project on-disk layout" for the full per-run layout.
 

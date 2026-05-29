@@ -230,6 +230,67 @@ func TestV1LayoutIdempotent(t *testing.T) {
 	}
 }
 
+// TestV1LayoutIdempotentAfterArtifacts mirrors a real-world cycle: the
+// migrator runs against a pre-v1 project, the user then runs `ateam
+// report` + `ateam review` (here simulated by writing the v1 artifacts
+// those commands produce), and the migrator runs again on the next ateam
+// invocation. The second pass must be a no-op — even with real artifact
+// directories present, NeedsMigration must return false and
+// renameLegacyReportFiles must find nothing to do. This is Step 8's
+// "idempotence under load" verification.
+func TestV1LayoutIdempotentAfterArtifacts(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		// Pre-v1 layout for migration.
+		"roles/security/report_prompt.md":      "security body",
+		"supervisor/review_prompt.md":          "review body",
+		"supervisor/code_management_prompt.md": "code mgmt body",
+	})
+
+	// Pass 1: structural migration.
+	r1, err := V1Layout(root)
+	if err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	if !r1.Changed() {
+		t.Fatal("first pass should change things")
+	}
+
+	// Simulate `ateam report --roles security` + `ateam review` running:
+	// each writes its primary artifact under shared/ at the v1 spec path.
+	writeTree(t, root, map[string]string{
+		"shared/report/security/security.md": "# Security Report\n\nFindings...",
+		"shared/review/review.md":            "# Supervisor Review\n\nDecisions...",
+		// And a code session from `ateam code` would land here.
+		"shared/code/42/execution_report.md":    "# Execution Report\n\nDone.",
+		"shared/code/42/01_task_code_prompt.md": "first task body",
+		// Runtime artifacts too (per-exec scratch, untouched by migrator).
+		"runtime/42/execution_report.md": "report",
+		"logs/42/stream.jsonl":           `{"ts":"...","event":"..."}`,
+	})
+
+	// Pass 2: must be a complete no-op.
+	r2, err := V1Layout(root)
+	if err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if r2.Changed() {
+		t.Errorf("second pass should be a no-op despite real artifacts on disk, got Result=%+v", r2)
+	}
+
+	// Verify artifacts survived untouched.
+	for path, want := range map[string]string{
+		"shared/report/security/security.md": "# Security Report\n\nFindings...",
+		"shared/review/review.md":            "# Supervisor Review\n\nDecisions...",
+		"shared/code/42/execution_report.md": "# Execution Report\n\nDone.",
+		"runtime/42/execution_report.md":     "report",
+	} {
+		if got := read(t, root, path); got != want {
+			t.Errorf("%s drifted: got %q, want %q", path, got, want)
+		}
+	}
+}
+
 // TestV1LayoutMovesCodeSessions covers Step 4: the supervisor/code/<exec>/
 // tree is the last directory under supervisor/ and moves to shared/code/.
 // Whole subtree (per-exec files: code_prompt.md, execution_report.md, …)
