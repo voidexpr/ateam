@@ -53,12 +53,12 @@ func init() {
 }
 
 func runTail(cmd *cobra.Command, args []string) error {
-	env, err := resolveEnv()
+	env, err := lookupEnv()
 	if err != nil {
 		return fmt.Errorf("cannot find project: %w", err)
 	}
 
-	db, err := requireProjectDB(env)
+	db, err := requireStateDB(env)
 	if err != nil {
 		return err
 	}

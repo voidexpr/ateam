@@ -54,7 +54,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 
 	if env.ProjectDir != "" {
-		db, err := requireProjectDB(env)
+		db, err := requireStateDB(env)
 		if err != nil {
 			return err
 		}

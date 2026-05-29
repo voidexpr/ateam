@@ -218,7 +218,7 @@ func runReview(opts ReviewOptions) error {
 		return err
 	}
 
-	db, err := openProjectDB(env)
+	db, err := openStateDB(env)
 	if err != nil {
 		return err
 	}

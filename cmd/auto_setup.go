@@ -70,7 +70,7 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 	}
 	setSourceWritable(cr)
 
-	db, err := openProjectDB(env)
+	db, err := openStateDB(env)
 	if err != nil {
 		return err
 	}

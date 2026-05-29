@@ -34,7 +34,7 @@ const (
 // per-section failure (missing review file, not in a git repo, etc.) is
 // inlined as a labeled placeholder so the agent still sees what is available.
 func buildAutoRolesContext(env *root.ResolvedEnv) (string, error) {
-	db, err := openProjectDB(env)
+	db, err := openStateDB(env)
 	if err != nil {
 		return "", fmt.Errorf("open project DB for auto-roles context: %w", err)
 	}

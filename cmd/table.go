@@ -215,7 +215,7 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.Runner
 }
 
 func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runner.Runner {
-	return &runner.Runner{
+	r := &runner.Runner{
 		Agent:  buildAgent(ac),
 		OrgDir: orgDir,
 		Sandbox: runner.SandboxConfig{
@@ -229,6 +229,9 @@ func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runne
 		ArgsInsideContainer:  ac.ArgsInsideContainer,
 		ArgsOutsideContainer: ac.ArgsOutsideContainer,
 	}
+	// Scratch mode: codex-tmux roots its socket at <OrgDir>/cache/tmux/.
+	setCodexTmuxProjectDir(r.Agent, orgDir)
+	return r
 }
 
 // preflightContainerSupportsWorkDir rejects container profiles when WorkDir
@@ -302,7 +305,7 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 	if env.GitRepoDir != "" && env.GitRepoDir != env.WorkDir {
 		r.Sandbox.ExtraRead = append(r.Sandbox.ExtraRead, env.GitRepoDir)
 	}
-	setCodexTmuxProjectDir(r.Agent, env.ProjectDir)
+	setCodexTmuxProjectDir(r.Agent, env.StateDir())
 	return r
 }
 
@@ -328,7 +331,7 @@ func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.Runner
 		if !ok {
 			return nil, fmt.Errorf("unknown agent %q", agentFlag)
 		}
-		if err := rejectCodexTmuxWithoutProject(&ac); err != nil {
+		if err := rejectCodexTmuxWithoutStateDir(&ac, orgDir); err != nil {
 			return nil, err
 		}
 		r := minimalRunnerFromAgentConfig(orgDir, &ac)
@@ -342,7 +345,7 @@ func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.Runner
 		if err != nil {
 			return nil, err
 		}
-		if err := rejectCodexTmuxWithoutProject(ac); err != nil {
+		if err := rejectCodexTmuxWithoutStateDir(ac, orgDir); err != nil {
 			return nil, err
 		}
 		r := minimalRunnerFromAgentConfig(orgDir, ac)
@@ -351,16 +354,20 @@ func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.Runner
 	}
 }
 
-// rejectCodexTmuxWithoutProject errors out when codex-tmux is selected from a
-// no-project context. The agent needs `<ProjectDir>/cache/tmux/` to land its
-// socket; without ResolvedEnv.ProjectDir we'd later fail inside the agent
-// with the cryptic "requires project context" message. Catch it here so the
-// operator gets actionable guidance instead.
-func rejectCodexTmuxWithoutProject(ac *runtime.AgentConfig) error {
+// rejectCodexTmuxWithoutStateDir errors out when codex-tmux has no anchor for
+// its tmux socket. The agent writes to `<StateDir>/cache/tmux/`, where
+// StateDir is the project's .ateam/ if present else the org's .ateamorg/.
+// With neither resolved we'd fail inside the agent with a cryptic "requires
+// project context" message; catch it here so the operator gets actionable
+// guidance instead.
+func rejectCodexTmuxWithoutStateDir(ac *runtime.AgentConfig, stateDir string) error {
 	if ac == nil || ac.Type != agent.NameCodexTmux {
 		return nil
 	}
-	return fmt.Errorf("codex-tmux requires project context (a .ateam/ directory); run from inside an ateam project or use a different agent")
+	if stateDir != "" {
+		return nil
+	}
+	return fmt.Errorf("codex-tmux requires a state directory (a .ateam/ or .ateamorg/); run from inside one or use a different agent")
 }
 
 // resolveRunner builds a Runner from --profile/--agent flags, falling back to config resolution.

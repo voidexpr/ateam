@@ -260,30 +260,32 @@ func TestApplyModelOverrides(t *testing.T) {
 	}
 }
 
-// TestRejectCodexTmuxWithoutProject covers the guard that prevents
-// resolveRunnerMinimal from constructing a codex-tmux runner outside a
-// project. The agent's run-time check would otherwise fail with the cryptic
-// "requires project context" — this gate fails earlier with actionable text.
-func TestRejectCodexTmuxWithoutProject(t *testing.T) {
+// TestRejectCodexTmuxWithoutStateDir covers the guard that prevents
+// resolveRunnerMinimal from constructing a codex-tmux runner when neither
+// .ateam/ nor .ateamorg/ is resolved. With a state dir present (project or
+// org), codex-tmux is allowed and its socket lives under <stateDir>/cache/tmux/.
+func TestRejectCodexTmuxWithoutStateDir(t *testing.T) {
 	cases := []struct {
 		name      string
 		typ       string
+		stateDir  string
 		wantError bool
 	}{
-		{"codex-tmux is rejected", agent.NameCodexTmux, true},
-		{"claude is allowed", agent.NameClaude, false},
-		{"codex is allowed", agent.NameCodex, false},
-		{"empty type is allowed", "", false},
+		{"codex-tmux is rejected without state dir", agent.NameCodexTmux, "", true},
+		{"codex-tmux is allowed with org state dir", agent.NameCodexTmux, "/tmp/org", false},
+		{"claude is allowed without state dir", agent.NameClaude, "", false},
+		{"codex is allowed without state dir", agent.NameCodex, "", false},
+		{"empty type is allowed", "", "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ac := &runtime.AgentConfig{Type: tc.typ}
-			err := rejectCodexTmuxWithoutProject(ac)
+			err := rejectCodexTmuxWithoutStateDir(ac, tc.stateDir)
 			if (err != nil) != tc.wantError {
 				t.Fatalf("err=%v want error=%v", err, tc.wantError)
 			}
-			if tc.wantError && !strings.Contains(err.Error(), "project context") {
-				t.Errorf("error message missing 'project context': %v", err)
+			if tc.wantError && !strings.Contains(err.Error(), "state directory") {
+				t.Errorf("error message missing 'state directory': %v", err)
 			}
 		})
 	}

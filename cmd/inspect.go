@@ -57,12 +57,12 @@ func init() {
 }
 
 func runPsFiles(cmd *cobra.Command, args []string) error {
-	env, err := resolveEnv()
+	env, err := lookupEnv()
 	if err != nil {
 		return fmt.Errorf("cannot find project: %w", err)
 	}
 
-	db, err := requireProjectDB(env)
+	db, err := requireStateDB(env)
 	if err != nil {
 		return err
 	}
@@ -282,7 +282,7 @@ func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
 
 	setSourceWritable(r)
 
-	dbForRun, err := openProjectDB(env)
+	dbForRun, err := openStateDB(env)
 	if err != nil {
 		return err
 	}

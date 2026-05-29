@@ -672,6 +672,8 @@ Display recent agent runs.
 | `--role ROLE` | Filter by role |
 | `--action ACTION` | Filter by action (report, review, code, exec) |
 | `--batch NAME` | Filter by batch |
+| `--work-dir PATH` | Filter by the agent's working directory (absolute path; resolved against cwd) |
+| `--pwd` | Shortcut for `--work-dir $(pwd)` |
 | `--limit N` | Max rows (default 30) |
 | `--git-hash` | Append GIT_START and GIT_END columns (first 6 chars of each hash) |
 | `--git-branch` | Append GIT_START_BRANCH and GIT_END_BRANCH columns |

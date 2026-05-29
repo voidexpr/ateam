@@ -89,11 +89,11 @@ func runResume(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--last cannot be combined with an exec ID")
 	}
 
-	env, err := resolveEnv()
+	env, err := lookupEnv()
 	if err != nil {
 		return fmt.Errorf("cannot find project: %w", err)
 	}
-	db, err := requireProjectDB(env)
+	db, err := requireStateDB(env)
 	if err != nil {
 		return err
 	}

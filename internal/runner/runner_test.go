@@ -69,14 +69,14 @@ func TestRunnerWithMockAgentError(t *testing.T) {
 	}
 }
 
-func TestRunnerRequiresProjectDB(t *testing.T) {
+func TestRunnerRequiresStateDir(t *testing.T) {
 	r := &Runner{Agent: &agent.MockAgent{Response: "x"}}
 	summary := r.Run(context.Background(), "p", RunOpts{Action: ActionExec}, nil)
 	if summary.Err == nil {
 		t.Fatal("expected error when CallDB is missing")
 	}
-	if !strings.Contains(summary.Err.Error(), "ateam project required") {
-		t.Errorf("expected 'ateam project required' error, got: %v", summary.Err)
+	if !strings.Contains(summary.Err.Error(), "state directory required") {
+		t.Errorf("expected 'state directory required' error, got: %v", summary.Err)
 	}
 }
 

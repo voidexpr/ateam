@@ -78,21 +78,35 @@ func (e *ResolvedEnv) VerifyPath() string {
 	return filepath.Join(e.SupervisorDir(), "verify.md")
 }
 
+// StateDir returns the directory that owns state.sqlite, logs/, and runtime/
+// for the current invocation. Inside an ateam project this is ProjectDir
+// (.ateam/). Outside one — scratch mode — this is OrgDir (.ateamorg/), so
+// `ateam exec` / `ateam parallel` from arbitrary cwds still record into a
+// stable, user-owned location instead of littering throwaway dirs.
+// Returns "" only when neither is set (treat as a hard error at the caller).
+func (e *ResolvedEnv) StateDir() string {
+	if e.ProjectDir != "" {
+		return e.ProjectDir
+	}
+	return e.OrgDir
+}
+
 // LogsDir returns the per-exec_id forensic log directory. Holds stream.jsonl,
 // stderr.out, settings.json, prompt.md, cmd.md.
 func (e *ResolvedEnv) LogsDir(execID int64) string {
-	return filepath.Join(e.ProjectDir, "logs", strconv.FormatInt(execID, 10))
+	return filepath.Join(e.StateDir(), "logs", strconv.FormatInt(execID, 10))
 }
 
 // RuntimeDir returns the per-exec_id agent-writable output directory. Files
 // the agent writes here are cloned to canonical destinations on success.
 func (e *ResolvedEnv) RuntimeDir(execID int64) string {
-	return filepath.Join(e.ProjectDir, "runtime", strconv.FormatInt(execID, 10))
+	return filepath.Join(e.StateDir(), "runtime", strconv.FormatInt(execID, 10))
 }
 
-// ProjectDBPath returns the path to the per-project state database.
+// ProjectDBPath returns the path to the state.sqlite database. Anchored at
+// StateDir so scratch-mode invocations resolve to <OrgDir>/state.sqlite.
 func (e *ResolvedEnv) ProjectDBPath() string {
-	return filepath.Join(e.ProjectDir, "state.sqlite")
+	return filepath.Join(e.StateDir(), "state.sqlite")
 }
 
 // NewProjectInfoParams builds a ProjectInfoParams from the resolved environment.
@@ -308,10 +322,21 @@ func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
 	}
 
 	if projectDir == "" {
-		projectDir, err = discoverProject(orgDir, cwd)
-		if err != nil {
+		projectDir, _ = discoverProject(orgDir, cwd)
+	}
+
+	// Scratch mode: org resolved but no .ateam/ above cwd. Return a
+	// project-less env. Callers that strictly require a project
+	// (report/code/review/verify/…) still check env.ProjectDir.
+	if projectDir == "" {
+		if orgDir == "" {
+			return nil, fmt.Errorf("no .ateamorg/ or .ateam/ found")
+		}
+		env := &ResolvedEnv{OrgDir: orgDir}
+		if err := env.resolveWorkDir(""); err != nil {
 			return nil, err
 		}
+		return env, nil
 	}
 
 	cfg, err := config.Load(projectDir)

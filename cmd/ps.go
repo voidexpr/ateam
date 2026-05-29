@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -15,6 +17,8 @@ var (
 	psRole      string
 	psAction    string
 	psBatch     string
+	psWorkDir   string
+	psPwd       bool
 	psLimit     int
 	psGitHash   bool
 	psGitBranch bool
@@ -32,7 +36,9 @@ Example:
   ateam ps
   ateam ps --role project.security
   ateam ps --action report
-  ateam ps --project myproject --role test.gaps`,
+  ateam ps --project myproject --role test.gaps
+  ateam ps --work-dir /Users/me/projects/foo
+  ateam ps --pwd                                # only runs that happened in $(pwd)`,
 	Args: cobra.NoArgs,
 	RunE: runPs,
 }
@@ -41,28 +47,36 @@ func init() {
 	psCmd.Flags().StringVar(&psRole, "role", "", "filter by role")
 	psCmd.Flags().StringVar(&psAction, "action", "", "filter by action (report, review, code, exec)")
 	psCmd.Flags().StringVar(&psBatch, "batch", "", "filter by batch")
+	psCmd.Flags().StringVar(&psWorkDir, "work-dir", "", "filter by the agent's working directory (absolute path; resolved against cwd)")
+	psCmd.Flags().BoolVar(&psPwd, "pwd", false, "shortcut for --work-dir $(pwd)")
 	psCmd.Flags().IntVar(&psLimit, "limit", 30, "max rows to show")
 	psCmd.Flags().BoolVar(&psGitHash, "git-hash", false, "append GIT_START and GIT_END columns (first 6 chars of each hash)")
 	psCmd.Flags().BoolVar(&psGitBranch, "git-branch", false, "append GIT_START_BRANCH and GIT_END_BRANCH columns")
 }
 
 func runPs(cmd *cobra.Command, args []string) error {
-	env, err := resolveEnv()
+	env, err := lookupEnv()
 	if err != nil {
-		return fmt.Errorf("cannot find project: %w", err)
+		return err
 	}
 
-	db, err := requireProjectDB(env)
+	db, err := requireStateDB(env)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 
+	workDirFilter, err := resolvePsWorkDirFilter()
+	if err != nil {
+		return err
+	}
+
 	rows, err := db.RecentRuns(calldb.RecentFilter{
-		Role:   psRole,
-		Action: psAction,
-		Batch:  psBatch,
-		Limit:  psLimit,
+		Role:    psRole,
+		Action:  psAction,
+		Batch:   psBatch,
+		WorkDir: workDirFilter,
+		Limit:   psLimit,
 	})
 	if err != nil {
 		return fmt.Errorf("query failed: %w", err)
@@ -160,3 +174,28 @@ func runStatus(r calldb.RecentRow) string {
 
 // fmtStartedAt is an alias for display.FmtRFC3339AsTimestamp.
 var fmtStartedAt = display.FmtRFC3339AsTimestamp
+
+// resolvePsWorkDirFilter combines --work-dir and --pwd into a single
+// absolute-path filter. --pwd alone resolves to os.Getwd(); --work-dir
+// (relative or absolute) resolves against the process cwd. Setting both is
+// an error: they would always agree only when --work-dir equals cwd.
+func resolvePsWorkDirFilter() (string, error) {
+	if psPwd && psWorkDir != "" {
+		return "", fmt.Errorf("--pwd and --work-dir are mutually exclusive")
+	}
+	if psPwd {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("cannot read cwd for --pwd: %w", err)
+		}
+		return cwd, nil
+	}
+	if psWorkDir == "" {
+		return "", nil
+	}
+	abs, err := filepath.Abs(psWorkDir)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve --work-dir %q: %w", psWorkDir, err)
+	}
+	return abs, nil
+}

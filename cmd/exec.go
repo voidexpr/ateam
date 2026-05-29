@@ -158,10 +158,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		return printExecDryRun(r, env, promptText, execRole, execAction, execBatch)
 	}
 
-	if !hasProject {
-		return fmt.Errorf("ateam project required: no .ateam/ found")
-	}
-	db, err := openProjectDB(env)
+	db, err := openStateDB(env)
 	if err != nil {
 		return err
 	}
@@ -178,7 +175,12 @@ func runExec(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	timeout := env.Config.Run.EffectiveTimeout(0)
+	// Scratch mode (no project config) skips the run-timeout default; the
+	// agent's own timeout still applies.
+	var timeout int
+	if hasProject {
+		timeout = env.Config.Run.EffectiveTimeout(0)
+	}
 
 	// Build opts. `exec` has no canonical destination — its deliverable is the
 	// stream, viewable via `ateam cat <exec_id>`.

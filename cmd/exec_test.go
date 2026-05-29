@@ -220,6 +220,87 @@ func TestRunExecAcceptsUnknownRoleAndCreatesDir(t *testing.T) {
 	}
 }
 
+// TestRunExecScratchModeWritesToOrgDB verifies that `ateam exec` from a cwd
+// with no .ateam/ but a discoverable .ateamorg/ records a row in
+// <OrgDir>/state.sqlite, writes logs under <OrgDir>/logs/<id>/, and captures
+// the absolute cwd in agent_execs.work_dir.
+func TestRunExecScratchModeWritesToOrgDB(t *testing.T) {
+	base := t.TempDir()
+	orgDir, err := root.InstallOrg(base)
+	if err != nil {
+		t.Fatalf("InstallOrg: %v", err)
+	}
+
+	// Scratch cwd: any dir under base that is NOT a project.
+	scratchDir := filepath.Join(base, "scratch_workspace")
+	if err := os.MkdirAll(scratchDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := saveExecGlobals()
+	defer saved.restore()
+	orgFlag = base
+	execProfile = "test" // mock agent
+	execAction = "audit"
+	execQuiet = true
+	execNoStream = true
+
+	var runErr error
+	captureStdout(t, func() {
+		withChdir(t, scratchDir, func() {
+			runErr = runExec(nil, []string{"scratch hello"})
+		})
+	})
+	if runErr != nil {
+		t.Fatalf("runExec: %v", runErr)
+	}
+
+	// state.sqlite must land in the org dir, not a project dir.
+	orgDBPath := filepath.Join(orgDir, "state.sqlite")
+	if _, err := os.Stat(orgDBPath); err != nil {
+		t.Fatalf("org state.sqlite missing: %v", err)
+	}
+
+	db, err := calldb.Open(orgDBPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	rows, err := db.RecentRuns(calldb.RecentFilter{Action: "audit", Limit: 10})
+	if err != nil {
+		t.Fatalf("RecentRuns: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].WorkDir == "" {
+		t.Errorf("expected non-empty work_dir on scratch row")
+	}
+	// resolved cwd may differ from scratchDir via symlinks on macOS — compare
+	// suffix to stay tolerant of /private prefixing.
+	if !strings.HasSuffix(rows[0].WorkDir, "scratch_workspace") {
+		t.Errorf("expected work_dir to end in scratch_workspace, got %q", rows[0].WorkDir)
+	}
+
+	// Logs should land under the org dir.
+	logsDir := filepath.Join(orgDir, "logs", "1")
+	if _, err := os.Stat(filepath.Join(logsDir, "cmd.md")); err != nil {
+		t.Errorf("expected cmd.md at %s: %v", logsDir, err)
+	}
+
+	// --work-dir filter should match this row.
+	psWorkDir = rows[0].WorkDir
+	defer func() { psWorkDir = "" }()
+	filtered, err := db.RecentRuns(calldb.RecentFilter{WorkDir: rows[0].WorkDir, Limit: 10})
+	if err != nil {
+		t.Fatalf("RecentRuns filter: %v", err)
+	}
+	if len(filtered) != 1 {
+		t.Errorf("expected 1 row from --work-dir filter, got %d", len(filtered))
+	}
+}
+
 // TestRunExecRecordsCustomAction verifies the --action flag is plumbed all the
 // way through to the CallDB record so `ateam ps --action <name>` can filter on it.
 func TestRunExecRecordsCustomAction(t *testing.T) {

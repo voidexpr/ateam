@@ -155,10 +155,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	}
 	setSourceWritable(r)
 
-	if !hasProject {
-		return fmt.Errorf("ateam project required: no .ateam/ found")
-	}
-	db, err := openProjectDB(env)
+	db, err := openStateDB(env)
 	if err != nil {
 		return err
 	}

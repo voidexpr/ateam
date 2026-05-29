@@ -195,6 +195,17 @@ type RunSummary struct {
 	ErrorCause  string
 }
 
+// StateDir returns the directory that anchors logs/<id>/, runtime/<id>/, and
+// the relative stream/output paths recorded in agent_execs. Mirrors
+// root.ResolvedEnv.StateDir so callers driving the runner from a scratch
+// context (no .ateam/) land logs in <OrgDir>/ instead.
+func (r *Runner) StateDir() string {
+	if r.ProjectDir != "" {
+		return r.ProjectDir
+	}
+	return r.OrgDir
+}
+
 // Run executes the agent with the given prompt and options.
 func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress chan<- RunProgress) RunSummary {
 	startedAt := opts.StartedAt
@@ -217,10 +228,10 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		return s
 	}
 
-	// Hard requirement: a project DB must exist. Without it we can't allocate
-	// an exec_id, which the new layout needs for every per-run path.
-	if r.CallDB == nil || r.ProjectDir == "" {
-		return failPreInsert(fmt.Errorf("ateam project required: no .ateam/ found"))
+	// Hard requirement: a state dir + DB must exist. StateDir is the project
+	// dir when inside one, else the org dir (scratch mode for exec/parallel).
+	if r.CallDB == nil || r.StateDir() == "" {
+		return failPreInsert(fmt.Errorf("ateam state directory required: no .ateam/ or .ateamorg/ found"))
 	}
 
 	// Insert FIRST so callID drives logs/<id>/ and runtime/<id>/.
@@ -250,16 +261,18 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 		return failPreInsert(fmt.Errorf("call tracking insert failed: %w", err))
 	}
 
-	logsDir := logsDirFor(r.ProjectDir, callID)
-	runtimeDir := runtimeDirFor(r.ProjectDir, callID)
+	stateDir := r.StateDir()
+	logsDir := logsDirFor(stateDir, callID)
+	runtimeDir := runtimeDirFor(stateDir, callID)
 	streamFile := filepath.Join(logsDir, "stream.jsonl")
 	stderrFile := filepath.Join(logsDir, "stderr.out")
 	settingsFile := filepath.Join(logsDir, "settings.json")
 	cmdFile := filepath.Join(logsDir, "cmd.md")
 	promptFile := filepath.Join(logsDir, "prompt.md")
 
-	// Persist the canonical stream path on the row.
-	if relStream, relErr := filepath.Rel(r.ProjectDir, streamFile); relErr == nil {
+	// Persist the canonical stream path on the row, relative to the state dir
+	// the DB lives in.
+	if relStream, relErr := filepath.Rel(stateDir, streamFile); relErr == nil {
 		_ = r.CallDB.UpdateStreamFile(callID, relStream)
 	}
 
@@ -704,10 +717,11 @@ func (r *Runner) buildRequest(prompt string, tmplVars TemplateVars, cwd, streamF
 		if filepath.IsAbs(configDir) {
 			configPath = configDir
 		} else {
-			if r.ProjectDir == "" {
-				return agent.Request{}, fmt.Errorf("relative config_dir requires project context (no .ateam/ found)")
+			stateDir := r.StateDir()
+			if stateDir == "" {
+				return agent.Request{}, fmt.Errorf("relative config_dir requires a project (.ateam/) or org (.ateamorg/) directory")
 			}
-			configPath = filepath.Join(r.ProjectDir, configDir)
+			configPath = filepath.Join(stateDir, configDir)
 		}
 		reqEnv = map[string]string{"CLAUDE_CONFIG_DIR": configPath}
 	}
@@ -801,7 +815,7 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 	// Persist the immutable per-exec runtime path (not the canonical, which is
 	// overwritten on every run). History views need a stable per-row pointer.
 	if primaryRuntime != "" {
-		if rel, err := filepath.Rel(r.ProjectDir, primaryRuntime); err == nil {
+		if rel, err := filepath.Rel(r.StateDir(), primaryRuntime); err == nil {
 			_ = r.CallDB.UpdateOutputFile(callID, rel)
 		}
 	}
@@ -1199,13 +1213,14 @@ func (r *Runner) promoteRuntimeFiles(runtimeDir, destDir, outputKind string) ([]
 		return entries, ""
 	}
 
+	stateDir := r.StateDir()
 	for _, e := range dir {
 		if e.IsDir() {
 			continue
 		}
 		name := e.Name()
 		src := filepath.Join(runtimeDir, name)
-		entry := fileCopyEntry{Source: relToProject(r.ProjectDir, src)}
+		entry := fileCopyEntry{Source: relToStateDir(stateDir, src)}
 		if strings.HasSuffix(name, "_prompt.md") {
 			entry.Note = "SKIPPED (*_prompt.md exclusion)"
 			entries = append(entries, entry)
@@ -1224,7 +1239,7 @@ func (r *Runner) promoteRuntimeFiles(runtimeDir, destDir, outputKind string) ([]
 			entry.Note = fmt.Sprintf("FAILED (%v)", err)
 			fmt.Fprintf(os.Stderr, "Warning: clone %s → %s: %v\n", src, dst, err)
 		} else {
-			entry.Dest = relToProject(r.ProjectDir, dst)
+			entry.Dest = relToStateDir(stateDir, dst)
 			entry.Note = "cloned"
 		}
 		entries = append(entries, entry)
@@ -1239,24 +1254,28 @@ func (r *Runner) listRuntimeForReport(runtimeDir string) []fileCopyEntry {
 	if err != nil {
 		return nil
 	}
+	stateDir := r.StateDir()
 	var entries []fileCopyEntry
 	for _, e := range dir {
 		if e.IsDir() {
 			continue
 		}
 		entries = append(entries, fileCopyEntry{
-			Source: relToProject(r.ProjectDir, filepath.Join(runtimeDir, e.Name())),
+			Source: relToStateDir(stateDir, filepath.Join(runtimeDir, e.Name())),
 			Note:   "SKIPPED (run failed; not promoted)",
 		})
 	}
 	return entries
 }
 
-func relToProject(projectDir, path string) string {
-	if projectDir == "" {
+// relToStateDir returns path rewritten relative to stateDir, falling back to
+// the absolute path if Rel fails or stateDir is empty. Used by promoteRuntimeFiles
+// to render compact source/dest entries in cmd.md.
+func relToStateDir(stateDir, path string) string {
+	if stateDir == "" {
 		return path
 	}
-	if rel, err := filepath.Rel(projectDir, path); err == nil {
+	if rel, err := filepath.Rel(stateDir, path); err == nil {
 		return rel
 	}
 	return path

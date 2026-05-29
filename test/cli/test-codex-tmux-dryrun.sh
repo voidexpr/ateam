@@ -66,31 +66,43 @@ run_dryrun_inside_project() {
     ok "$label"
 }
 
-# Case 2: inside an org dir but outside any project (.ateamorg/ resolves
-# but no .ateam/), codex-tmux must error cleanly with the actionable
-# "project context" guidance. This is the path that exercises
-# resolveRunnerMinimal — locks in the guard added after the v1.1 review
-# caught the regression where minimal-runner construction fell through
-# to the agent's cryptic startup-time "requires project context" later.
-run_reject_outside_project() {
-    local label="02  org-only (no project): errors with project-context guidance"
-    # $TMPROOT/work is the org root (.ateamorg lives directly inside it);
-    # a sibling subdir is inside the org but outside any project.
+# Case 2: org-only (no .ateam/) is the scratch-mode path. codex-tmux must
+# resolve to an actionable dry-run that roots its tmux socket under the org
+# dir's cache/. Previously this case was rejected up-front; the rejection now
+# only triggers when neither .ateam/ nor .ateamorg/ is found.
+run_codex_tmux_in_scratch_mode() {
+    local label="02  org-only (no project): codex-tmux dry-run uses org cache dir"
     local stray="$TMPROOT/work/no-project"
     mkdir -p "$stray"
-    # Use the non-dry-run path: --dry-run intentionally downgrades errors
-    # to warnings (exit 0). Without --dry-run, runner construction fails
-    # cleanly *before* any codex/tmux process is started, so this assertion
-    # never invokes the actual codex binary even if one exists on PATH.
     local out rc
-    out=$(cd "$stray" && "$ATEAM" exec --agent codex-tmux "/help" 2>&1)
+    out=$(cd "$stray" && "$ATEAM" exec --agent codex-tmux --dry-run "/help" 2>&1)
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        fail "$label" "expected exit 0 in scratch mode, got $rc; output:\n$out"
+        return
+    fi
+    if ! grep -qE "Agent:.*codex-tmux" <<<"$out"; then
+        fail "$label" "missing 'Agent: codex-tmux' in dry-run; output:\n$out"
+        return
+    fi
+    ok "$label"
+}
+
+# Case 2b: with neither an org nor a project resolvable, rejection still
+# fires and points at the missing state directory.
+run_reject_without_any_state_dir() {
+    local label="02b no .ateam/ or .ateamorg/: codex-tmux rejected with state-dir guidance"
+    local stray="$TMPROOT/orphan"
+    mkdir -p "$stray"
+    local out rc
+    out=$(cd "$stray" && HOME="$stray" "$ATEAM" exec --agent codex-tmux "/help" 2>&1)
     rc=$?
     if [ "$rc" -eq 0 ]; then
         fail "$label" "expected non-zero exit, got 0; output:\n$out"
         return
     fi
-    if ! grep -q "project context" <<<"$out"; then
-        fail "$label" "missing 'project context' in error; output:\n$out"
+    if ! grep -qE "state directory|\.ateamorg|\.ateam" <<<"$out"; then
+        fail "$label" "missing state-dir / .ateam(org) guidance; output:\n$out"
         return
     fi
     ok "$label"
@@ -118,7 +130,8 @@ echo "Running codex-tmux CLI dry-run tests..."
 echo
 
 run_dryrun_inside_project
-run_reject_outside_project
+run_codex_tmux_in_scratch_mode
+run_reject_without_any_state_dir
 run_profile_resolves
 
 echo

@@ -277,14 +277,15 @@ func (g execGlobals) restore() {
 }
 
 type psGlobals struct {
-	org, role, action, batch string
-	limit                    int
+	org, role, action, batch, workDir string
+	pwd                               bool
+	limit                             int
 }
 
 func savePSGlobals() psGlobals {
 	return psGlobals{
 		org: orgFlag, role: psRole, action: psAction,
-		batch: psBatch, limit: psLimit,
+		batch: psBatch, workDir: psWorkDir, pwd: psPwd, limit: psLimit,
 	}
 }
 
@@ -293,5 +294,7 @@ func (g psGlobals) restore() {
 	psRole = g.role
 	psAction = g.action
 	psBatch = g.batch
+	psWorkDir = g.workDir
+	psPwd = g.pwd
 	psLimit = g.limit
 }

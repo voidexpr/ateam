@@ -167,8 +167,8 @@ func BuildTemplateVars(r *Runner, opts RunOpts, startedAt time.Time, callID int6
 		vars.ProjectFullPath = r.SourceDir
 		vars.ProjectDir = filepath.Base(r.SourceDir)
 	}
-	if callID > 0 && r.ProjectDir != "" {
-		vars.OutputDir = runtimeDirFor(r.ProjectDir, callID)
+	if callID > 0 && r.StateDir() != "" {
+		vars.OutputDir = runtimeDirFor(r.StateDir(), callID)
 		if primary := PrimaryOutputName(opts.OutputKind); primary != "" {
 			vars.OutputFile = filepath.Join(vars.OutputDir, primary)
 		}

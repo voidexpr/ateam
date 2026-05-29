@@ -175,7 +175,7 @@ func runReport(opts ReportOptions) error {
 		if len(opts.Roles) > 0 {
 			return fmt.Errorf("--rerun-failed and --roles are mutually exclusive")
 		}
-		db, err = requireProjectDB(env)
+		db, err = requireStateDB(env)
 		if err != nil {
 			if opts.DryRun {
 				fmt.Println("No previous report found (no project database).")
@@ -314,7 +314,7 @@ func runReport(opts ReportOptions) error {
 
 	// Open DB if not already opened by --rerun-failed.
 	if db == nil {
-		db, err = openProjectDB(env)
+		db, err = openStateDB(env)
 		if err != nil {
 			return err
 		}

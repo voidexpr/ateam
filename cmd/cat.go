@@ -89,12 +89,12 @@ func runCatFiles(paths []string) error {
 }
 
 func runCatIDs(args []string) error {
-	env, err := resolveEnv()
+	env, err := lookupEnv()
 	if err != nil {
 		return fmt.Errorf("cannot find project: %w", err)
 	}
 
-	db, err := requireProjectDB(env)
+	db, err := requireStateDB(env)
 	if err != nil {
 		return err
 	}

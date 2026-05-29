@@ -73,7 +73,7 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 	}
 	setSourceWritable(cr)
 
-	db, err := openProjectDB(env)
+	db, err := openStateDB(env)
 	if err != nil {
 		return "", nil, fmt.Errorf("open project DB for auto-roles: %w", err)
 	}
