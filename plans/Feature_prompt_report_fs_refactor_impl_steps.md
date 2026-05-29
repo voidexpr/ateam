@@ -35,8 +35,8 @@ Default-on; `ATEAM_NO_MIGRATE=1` opts out. Runs in `Resolve()` and `LookupFrom()
 
 - `staticMigrations`: per-file moves (`supervisor/review_prompt.md` → `prompts/review.prompt.md`, etc.).
 - `staticDirMigrations`: per-directory moves (currently just `supervisor/code` → `shared/code`). Uses `moveDir()` — same-FS `os.Rename` only; EXDEV errors with a "move it manually" message.
-- `roleMigrations`: per-role moves templated with `{role}` substitution. Includes `report.md` → `shared/report/<role>/<role>.md` (the spec filename, not the older `report.md`).
-- `renameLegacyReportFiles`: **always** runs (even when `NeedsMigration=false`). Walks `shared/report/<R>/` and renames any `report.md` to `<R>.md`. Catches projects that ran on a pre-Step-6 binary, were already on v1, and would otherwise stay on the transitional filename forever.
+- `roleMigrations`: per-role moves templated with `{role}` substitution. Includes `report.md` → `shared/report/<role>.md` (the v1 flat layout — one file per role, no per-role subdir).
+- `flattenSharedLayout`: **always** runs (even when `NeedsMigration=false`). Hoists pre-flat `shared/report/<R>/<R>.md` (or the older transitional `shared/report/<R>/report.md`) to `shared/report/<R>.md`, and `shared/{review,verify,auto_setup}/<X>.md` to `shared/<X>.md`. Removes the now-empty per-role/per-action dirs. Catches projects that ran on a pre-flat binary and would otherwise stay on the nested layout forever.
 - `resolveExistingTarget`: when a per-file `move()` finds the target already exists, compares content. Identical → removes source (cleanup); different → renames source to `<src>.legacy` with a warning. `moveDir` is simpler — target-exists is always a warn, no automatic merge.
 - `cleanup`: drops `history/`, well-known junk files (`last_run_*.md`, `code_output.md`), and empty `roles/<R>/` + `supervisor/` dirs.
 
@@ -47,7 +47,7 @@ Default-on; `ATEAM_NO_MIGRATE=1` opts out. Runs in `Resolve()` and `LookupFrom()
 - `Assembler()` → standard 3-anchor chain (project → org → embedded).
 - `BuildAssemblerVars(promptPath, roleLabel, action)` → `MapVars` with namespaces populated for the current env. Runner-deferred placeholders (`exec.id`, `exec.batch`, `exec.timestamp`, `exec.profile`, `exec.agent`, `exec.model`, `exec.output_dir`, `exec.output_file`, `container.type`, `container.name`) resolve to the runner's literal placeholder (e.g. `{{EXEC_ID}}`) so `internal/runner/template.go::Replacer` fills them at exec time. `roleLabel=""` suppresses the `{{project.info}}` block (matches `--no-project-info`).
 - `SharedDir()`, `SharedPromptDir(promptPath)` → v1 artifact destination paths.
-- `RoleReportPath(roleID)` → v1 only (`shared/report/<role>/<role>.md`). Auto-migration covers the legacy paths before this is consulted.
+- `RoleReportPath(roleID)` → v1 flat (`shared/report/<role>.md`). `ReviewPath`/`VerifyPath`/`AutoSetupPath` are the singleton flat siblings (`shared/review.md`, etc.). Auto-migration covers the legacy and pre-flat nested paths before these are consulted.
 - `ReviewPath()`, `VerifyPath()` → v1 only (`shared/{review,verify}/...`). Same rationale.
 - `applyV1LayoutMigration(projectDir, orgDir)` runs in `Resolve()` and `LookupFrom()`.
 
@@ -131,7 +131,7 @@ Use this section to find the right file when something misbehaves.
 | Web `/p/<project>/code/<session>/` shows wrong files | `internal/web/handlers.go::codeSessionDirs` / `scanCodeSessions` / `buildCodeSessionEntry` |
 | Migrator skips files / re-migrates / fails on conflict | `internal/migrate/v1_layout.go::move` (per-file) + `moveDir` (recursive) + `resolveExistingTarget` (conflict handler). Idempotence assertions live in `TestV1LayoutIdempotent*` |
 | `ateam serve` history view lost old code sessions after upgrade | `cmd/code.go` writes to `shared/code/`; old `supervisor/code/<exec>/` should have migrated. If not, look at `staticDirMigrations` + `moveDir`. `EXDEV` cross-FS surfaces an explicit error |
-| `report.md` survives instead of being renamed to `<role>.md` | `internal/migrate/v1_layout.go::renameLegacyReportFiles` — always runs, even when `NeedsMigration=false`. Check whether the user's `shared/report/<R>/` has a non-renamable `<R>.md` already on disk |
+| Nested `shared/report/<R>/<R>.md` (or `report.md`) survives instead of being hoisted to flat | `internal/migrate/v1_layout.go::flattenSharedLayout` — always runs, even when `NeedsMigration=false`. Check whether the flat `shared/report/<R>.md` already exists with different content (source kept as `.legacy`, warning surfaced) |
 | Embedded defaults didn't get picked up | `defaults/embed.go` (the `//go:embed` directives) + `discoverRoleIDs` / `embeddedFiles` (which panic on empty result — surfaces embed regressions at boot) |
 | Test failures after touching `prompts/report/*.prompt.md` | `prompts.AllRoleIDs` is built at package init; CI's `make check-docs` regenerates ROLES.md and diffs against the committed copy. Run `make docs` to refresh |
 | `make run-ci` fails on `check-docs` | Run `make docs` to regenerate `ROLES.md` (`./ateam roles --docs > ROLES.md`) |
@@ -214,7 +214,7 @@ Tests track source roughly 1:1. Conventions:
 
 ### Web (`internal/web/`)
 
-- `helpers_test.go`, `code_sessions_test.go`, `export_test.go`, `handlers_test.go` — hand-built fixtures. **All v1 paths** (`shared/report/<role>/<role>.md`, `shared/review/review.md`, `shared/code/<exec>/`).
+- `helpers_test.go`, `code_sessions_test.go`, `export_test.go`, `handlers_test.go` — hand-built fixtures. **All v1 flat paths** (`shared/report/<role>.md`, `shared/review.md`, `shared/code/<exec>/`).
 
 ### Verification scripts (`scripts/`)
 

@@ -265,15 +265,15 @@ func runReport(opts ReportOptions) error {
 		task := runner.PoolExec{
 			Prompt: prompt,
 			RunOpts: runner.RunOpts{
-				RoleID:           roleID,
-				Action:           runner.ActionReport,
-				OutputKind:       runner.OutputKindReport,
-				PromptName:       roleID, // → primary output `<roleID>.md`
-				CanonicalDestDir: env.SharedPromptDir("report/" + roleID),
-				WorkDir:          env.WorkDir,
-				TimeoutMin:       timeout,
-				Verbose:          opts.Verbose,
-				Batch:            batch,
+				RoleID:            roleID,
+				Action:            runner.ActionReport,
+				OutputKind:        runner.OutputKindReport,
+				PromptName:        roleID, // → primary output `<roleID>.md`
+				CanonicalDestFile: env.RoleReportPath(roleID),
+				WorkDir:           env.WorkDir,
+				TimeoutMin:        timeout,
+				Verbose:           opts.Verbose,
+				Batch:             batch,
 			},
 		}
 

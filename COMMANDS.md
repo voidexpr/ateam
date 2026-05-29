@@ -183,7 +183,7 @@ ateam code --dry-run
 
 | Flag | Description |
 |------|-------------|
-| `--review TEXT` | Review content (text or `@filepath`; defaults to `.ateam/shared/review/review.md`) |
+| `--review TEXT` | Review content (text or `@filepath`; defaults to `.ateam/shared/review.md`) |
 | `--management TEXT` | Management prompt override (text or `@filepath`) |
 | `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
 | `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt (text or `@filepath`) |
@@ -793,17 +793,17 @@ ateam tail --coding             # live-stream current coding session
 
 ### Where Output Goes
 
-Each run writes to `.ateam/runtime/<exec_id>/` (the agent's scratch directory). On success, files other than `*_prompt.md` are cloned to a per-action canonical destination; the runtime copy is left in place for forensics. On failure, nothing is cloned — files stay in `runtime/<exec_id>/` and are listed in `.ateam/logs/<exec_id>/cmd.md` under `# Files Copy`.
+Each run writes to `.ateam/runtime/<exec_id>/` (the agent's scratch directory). On success, the primary output is promoted to its canonical destination. Single-file actions (`report`/`review`/`verify`/`auto-setup`) promote only the primary file — any sidecars the agent wrote stay in `runtime/<exec_id>/` (visible via `ateam inspect <id>`). `code` promotes every file (besides `*_prompt.md`) because its session naturally produces a tree. On failure, nothing is cloned — files stay in `runtime/<exec_id>/` and are listed in `.ateam/logs/<exec_id>/cmd.md` under `# Files Copy`.
 
-| Action       | Canonical destination                          |
-|--------------|------------------------------------------------|
-| `report`     | `.ateam/shared/report/<role>/<role>.md`        |
-| `review`     | `.ateam/shared/review/review.md`               |
-| `verify`     | `.ateam/shared/verify/verify.md`               |
-| `code`       | `.ateam/shared/code/<exec_id>/`                |
-| `auto-setup` | `.ateam/shared/auto_setup/auto_setup.md`       |
+| Action       | Canonical destination                                |
+|--------------|------------------------------------------------------|
+| `report`     | `.ateam/shared/report/<role>.md`                     |
+| `review`     | `.ateam/shared/review.md`                            |
+| `verify`     | `.ateam/shared/verify.md`                            |
+| `code`       | `.ateam/shared/code/<exec_id>/` (whole session dir)  |
+| `auto-setup` | `.ateam/shared/auto_setup.md` (written by the agent directly) |
 | `exec`       | _none_ — output stays in `.ateam/runtime/<exec_id>/` |
-| `parallel`   | _none_                                         |
+| `parallel`   | _none_                                               |
 
 For actions with no canonical destination, view the output with `ateam cat <exec_id>`. See [DEV.md](DEV.md) "Project on-disk layout" for the full per-run layout.
 

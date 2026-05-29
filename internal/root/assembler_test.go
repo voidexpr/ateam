@@ -29,18 +29,22 @@ func TestSharedDir(t *testing.T) {
 	}
 }
 
-func TestSharedPromptDir(t *testing.T) {
+func TestFlatSharedPaths(t *testing.T) {
 	env := &ResolvedEnv{ProjectDir: "/abs/.ateam"}
 	cases := []struct {
-		in, want string
+		name string
+		got  string
+		want string
 	}{
-		{"review", "/abs/.ateam/shared/review"},
-		{"report/security", "/abs/.ateam/shared/report/security"},
-		{"code/refactor_small", "/abs/.ateam/shared/code/refactor_small"},
+		{"RoleReportPath", env.RoleReportPath("security"), "/abs/.ateam/shared/report/security.md"},
+		{"RoleReportPath dotted role", env.RoleReportPath("project.security"), "/abs/.ateam/shared/report/project.security.md"},
+		{"ReviewPath", env.ReviewPath(), "/abs/.ateam/shared/review.md"},
+		{"VerifyPath", env.VerifyPath(), "/abs/.ateam/shared/verify.md"},
+		{"AutoSetupPath", env.AutoSetupPath(), "/abs/.ateam/shared/auto_setup.md"},
 	}
 	for _, c := range cases {
-		if got := env.SharedPromptDir(c.in); got != c.want {
-			t.Errorf("SharedPromptDir(%q) = %q, want %q", c.in, got, c.want)
+		if c.got != c.want {
+			t.Errorf("%s = %q, want %q", c.name, c.got, c.want)
 		}
 	}
 }

@@ -61,7 +61,7 @@ func buildAutoRolesContext(env *root.ResolvedEnv) (string, error) {
 	writeRoleReportFreshness(&b, env.ProjectDir)
 	fmt.Fprintln(&b)
 
-	fmt.Fprintln(&b, "### Latest review (`.ateam/shared/review/review.md`)")
+	fmt.Fprintln(&b, "### Latest review (`.ateam/shared/review.md`)")
 	fmt.Fprintln(&b)
 	writeReviewContent(&b, env.ReviewPath())
 	fmt.Fprintln(&b)
@@ -167,8 +167,8 @@ func gitRootCommit(workDir string) string {
 	return strings.TrimSpace(buf.String())
 }
 
-// writeRoleReportFreshness lists each role report at the v1 path
-// (.ateam/shared/report/<role>/<role>.md) with its age and size. Newest first.
+// writeRoleReportFreshness lists each role report at the v1 flat path
+// (.ateam/shared/report/<role>.md) with its age and size. Newest first.
 func writeRoleReportFreshness(b *strings.Builder, projectDir string) {
 	reports, err := prompts.DiscoverReports(projectDir)
 	if err != nil || len(reports) == 0 {

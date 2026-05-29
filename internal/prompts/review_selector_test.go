@@ -10,16 +10,16 @@ import (
 	"time"
 )
 
-// makeTestReports writes a shared/report/<id>/<id>.md file per entry under
-// projectDir (v1 layout), with the requested mtime. Returns the slice
+// makeTestReports writes a shared/report/<id>.md file per entry under
+// projectDir (v1 flat layout), with the requested mtime. Returns the slice
 // DiscoverReports would yield.
 func makeTestReports(t *testing.T, projectDir string, entries map[string]time.Time) []RoleReport {
 	t.Helper()
+	dir := filepath.Join(projectDir, "shared", "report")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
 	for role, mtime := range entries {
-		dir := filepath.Join(projectDir, "shared", "report", role)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			t.Fatal(err)
-		}
 		path := filepath.Join(dir, role+".md")
 		if err := os.WriteFile(path, []byte("body for "+role), 0644); err != nil {
 			t.Fatal(err)

@@ -117,10 +117,10 @@ After all tasks have been attempted:
      Record the fix run outcome in the execution report.
    - If tests were already failing before the cycle (pre-existing failures): note them but do not attempt to fix them — that's a separate task for the next review cycle.
 2. Complete `execution_report.md` with a summary section, only append to it
-3. Update `.ateam/shared/review/review.md`:
+3. Update `.ateam/shared/review.md`:
   - Annotate each task with its outcome (completed / failed / skipped) and a brief note
   - do not delete any content in the review, just add information
-4. Update the source role report referenced in the review (`.ateam/shared/report/<role>/<role>.md`) to note what was addressed
+4. Update the source role report referenced in the review (`.ateam/shared/report/<role>.md`) to note what was addressed
   - do not delete any content in the report file, just add information
 
 ## Execution Report Format

@@ -95,11 +95,11 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 	cr.CallDB = db
 
-	// The agent writes the overview directly to the v1 location
-	// .ateam/shared/auto_setup/auto_setup.md; no runtime/canonical promotion
-	// is needed here. Writing the v1 path (rather than the pre-v1
-	// setup_overview.md) avoids re-triggering layout migration on the next
-	// ateam command.
+	// The agent writes the overview directly to the v1 flat location
+	// .ateam/shared/auto_setup.md; no runtime/canonical promotion is needed
+	// here. Writing the v1 path (rather than the pre-v1 setup_overview.md or
+	// the pre-flat shared/auto_setup/auto_setup.md) avoids re-triggering
+	// layout migration on the next ateam command.
 	opts := runner.RunOpts{
 		RoleID:     "supervisor",
 		Action:     runner.ActionExec,

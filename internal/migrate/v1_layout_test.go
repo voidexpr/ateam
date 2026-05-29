@@ -102,13 +102,19 @@ func TestV1LayoutStaticMoves(t *testing.T) {
 		"prompts/code_verify.prompt.md",
 		"prompts/auto_setup.prompt.md",
 		"prompts/exec_debug.prompt.md",
-		"shared/review/review.md",
-		"shared/verify/verify.md",
-		"shared/auto_setup/auto_setup.md",
+		"shared/review.md",
+		"shared/verify.md",
+		"shared/auto_setup.md",
 	}
 	for _, p := range wantTargets {
 		if !exists(root, p) {
 			t.Errorf("missing %s", p)
+		}
+	}
+	// Pre-flat per-action dirs must not exist after migration.
+	for _, p := range []string{"shared/review", "shared/verify", "shared/auto_setup"} {
+		if exists(root, p) {
+			t.Errorf("pre-flat dir %s should not be created", p)
 		}
 	}
 
@@ -154,16 +160,16 @@ func TestV1LayoutRoleMoves(t *testing.T) {
 		"prompts/report/security.prompt.md",
 		"prompts/code/security.prompt.md",
 		"prompts/report/security.post.extra.md",
-		"shared/report/security/security.md",
+		"shared/report/security.md",
 		"prompts/report/code.bugs.prompt.md",
 	} {
 		if !exists(root, want) {
 			t.Errorf("missing %s", want)
 		}
 	}
-	// Spec filename: <role>.md, not report.md.
-	if exists(root, "shared/report/security/report.md") {
-		t.Error("shared/report/security/report.md should have been renamed to security.md per spec")
+	// v1 flat layout: no per-role subdir under shared/report/.
+	if exists(root, "shared/report/security") {
+		t.Error("pre-flat shared/report/security/ should not exist after migration")
 	}
 
 	// history/ dropped.
@@ -257,11 +263,12 @@ func TestV1LayoutIdempotentAfterArtifacts(t *testing.T) {
 	}
 
 	// Simulate `ateam report --roles security` + `ateam review` running:
-	// each writes its primary artifact under shared/ at the v1 spec path.
+	// each writes its primary artifact under shared/ at the v1 flat path.
 	writeTree(t, root, map[string]string{
-		"shared/report/security/security.md": "# Security Report\n\nFindings...",
-		"shared/review/review.md":            "# Supervisor Review\n\nDecisions...",
-		// And a code session from `ateam code` would land here.
+		"shared/report/security.md": "# Security Report\n\nFindings...",
+		"shared/review.md":          "# Supervisor Review\n\nDecisions...",
+		// And a code session from `ateam code` would land here (per-session
+		// dir is the one shared/ layout that keeps a subdir per run).
 		"shared/code/42/execution_report.md":    "# Execution Report\n\nDone.",
 		"shared/code/42/01_task_code_prompt.md": "first task body",
 		// Runtime artifacts too (per-exec scratch, untouched by migrator).
@@ -280,8 +287,8 @@ func TestV1LayoutIdempotentAfterArtifacts(t *testing.T) {
 
 	// Verify artifacts survived untouched.
 	for path, want := range map[string]string{
-		"shared/report/security/security.md": "# Security Report\n\nFindings...",
-		"shared/review/review.md":            "# Supervisor Review\n\nDecisions...",
+		"shared/report/security.md":          "# Security Report\n\nFindings...",
+		"shared/review.md":                   "# Supervisor Review\n\nDecisions...",
 		"shared/code/42/execution_report.md": "# Execution Report\n\nDone.",
 		"runtime/42/execution_report.md":     "report",
 	} {
@@ -374,16 +381,18 @@ func TestV1LayoutCodeDirTargetExists(t *testing.T) {
 	}
 }
 
-// TestV1LayoutSecondPassRenamesReportMd covers an already-v1-migrated
-// project that ran through a pre-Step-6 binary: shared/report/<R>/report.md
-// exists but the spec wants <R>.md. NeedsMigration is false (no pre-v1
-// artifacts), but the rename pass still runs and collapses report.md to
-// <role>.md.
-func TestV1LayoutSecondPassRenamesReportMd(t *testing.T) {
+// TestV1LayoutFlattenSharedReports covers projects already on a pre-flat v1
+// layout: shared/report/<R>/<R>.md (current v1 spec) or the older
+// shared/report/<R>/report.md (pre-Step-6 transitional). NeedsMigration is
+// false in both cases, but the flatten pass still runs and hoists the file
+// to shared/report/<R>.md, then removes the now-empty <R>/ dir.
+func TestV1LayoutFlattenSharedReports(t *testing.T) {
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
-		"shared/report/security/report.md":  "old filename",
-		"shared/report/code.bugs/report.md": "dotted role",
+		// pre-flat spec layout
+		"shared/report/security/security.md": "spec filename",
+		// pre-flat with older transitional filename
+		"shared/report/code.bugs/report.md": "older filename",
 	})
 
 	r, err := V1Layout(root)
@@ -391,25 +400,26 @@ func TestV1LayoutSecondPassRenamesReportMd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for old, want := range map[string]string{
-		"shared/report/security/security.md":   "old filename",
-		"shared/report/code.bugs/code.bugs.md": "dotted role",
+	for flat, want := range map[string]string{
+		"shared/report/security.md":  "spec filename",
+		"shared/report/code.bugs.md": "older filename",
 	} {
-		if !exists(root, old) {
-			t.Errorf("expected %s after rename", old)
+		if !exists(root, flat) {
+			t.Errorf("expected %s after flatten", flat)
+			continue
 		}
-		if got := read(t, root, old); got != want {
-			t.Errorf("%s content = %q, want %q", old, got, want)
+		if got := read(t, root, flat); got != want {
+			t.Errorf("%s content = %q, want %q", flat, got, want)
 		}
 	}
-	if exists(root, "shared/report/security/report.md") {
-		t.Error("old shared/report/security/report.md should have been renamed")
-	}
-	if exists(root, "shared/report/code.bugs/report.md") {
-		t.Error("old shared/report/code.bugs/report.md should have been renamed")
+	// Old nested dirs should be gone.
+	for _, oldDir := range []string{"shared/report/security", "shared/report/code.bugs"} {
+		if exists(root, oldDir) {
+			t.Errorf("pre-flat dir %s should have been removed", oldDir)
+		}
 	}
 	if !r.Changed() {
-		t.Error("expected Changed=true for the rename pass")
+		t.Error("expected Changed=true for the flatten pass")
 	}
 
 	// Idempotence: second invocation is a no-op.
@@ -419,6 +429,49 @@ func TestV1LayoutSecondPassRenamesReportMd(t *testing.T) {
 	}
 	if r2.Changed() {
 		t.Errorf("second pass should be a no-op, got Result=%+v", r2)
+	}
+}
+
+// TestV1LayoutFlattenSharedSingletons mirrors the report flatten for the
+// supervisor singletons: shared/review/review.md, shared/verify/verify.md,
+// shared/auto_setup/auto_setup.md → flat siblings under shared/.
+func TestV1LayoutFlattenSharedSingletons(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"shared/review/review.md":         "review body",
+		"shared/verify/verify.md":         "verify body",
+		"shared/auto_setup/auto_setup.md": "setup body",
+	})
+
+	r, err := V1Layout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for flat, want := range map[string]string{
+		"shared/review.md":     "review body",
+		"shared/verify.md":     "verify body",
+		"shared/auto_setup.md": "setup body",
+	} {
+		if got := read(t, root, flat); got != want {
+			t.Errorf("%s = %q, want %q", flat, got, want)
+		}
+	}
+	for _, oldDir := range []string{"shared/review", "shared/verify", "shared/auto_setup"} {
+		if exists(root, oldDir) {
+			t.Errorf("pre-flat dir %s should have been removed", oldDir)
+		}
+	}
+	if !r.Changed() {
+		t.Error("expected Changed=true")
+	}
+
+	r2, err := V1Layout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.Changed() {
+		t.Errorf("second pass should be no-op, got %+v", r2)
 	}
 }
 
@@ -578,16 +631,16 @@ func TestRsyncFixture(t *testing.T) {
 	// report outputs + supervisor review/verify outputs + a review extras
 	// fragment, but relies on embedded defaults for the prompts themselves.
 	for _, p := range []string{
-		"shared/review/review.md",
-		"shared/verify/verify.md",
+		"shared/review.md",
+		"shared/verify.md",
 		"prompts/review.post.extra.md",
 	} {
 		if !exists(dst, p) {
 			t.Errorf("expected %s after migration", p)
 		}
 	}
-	// At least one role report output landed in shared/report/.
-	matches, err := filepath.Glob(filepath.Join(dst, "shared/report/*/*.md"))
+	// At least one role report output landed flat under shared/report/.
+	matches, err := filepath.Glob(filepath.Join(dst, "shared/report/*.md"))
 	if err != nil || len(matches) == 0 {
 		t.Errorf("expected migrated role report outputs, got %v (err %v)", matches, err)
 	}
@@ -627,7 +680,7 @@ func TestRsyncListmanagerFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	want := "shared/auto_setup/auto_setup.md"
+	want := "shared/auto_setup.md"
 	if !exists(dst, want) {
 		t.Errorf("listmanager setup_overview.md should have moved to %s", want)
 	}
@@ -671,37 +724,51 @@ func TestMoveWarnsOnExistingTarget(t *testing.T) {
 }
 
 // TestRoleNamedReportNotDeleted guards the data-loss edge where a role is
-// literally named "report": renameLegacyReportFiles computes
-// shared/report/report/report.md for both source and destination, and without
-// a from==to guard the dst-exists branch would treat the file as its own
-// duplicate and remove it.
+// literally named "report": the source path collapses to
+// shared/report/report/report.md and the flat target to
+// shared/report/report.md. Without care, the duplicate-source-name list in
+// flattenSharedReports could attempt the same move twice or the from==to
+// guard in move() could misfire. The file must end up at the flat path with
+// its content intact, and re-running must be a no-op.
 func TestRoleNamedReportNotDeleted(t *testing.T) {
 	root := t.TempDir()
-	rel := filepath.Join("shared", "report", "report", "report.md")
-	writeTree(t, root, map[string]string{rel: "the only report\n"})
+	nested := filepath.Join("shared", "report", "report", "report.md")
+	flat := filepath.Join("shared", "report", "report.md")
+	writeTree(t, root, map[string]string{nested: "the only report\n"})
 
-	for i := 0; i < 2; i++ { // idempotent: re-running must not destroy it either
-		if _, err := V1Layout(root); err != nil {
-			t.Fatalf("V1Layout pass %d: %v", i, err)
-		}
-		if !exists(root, rel) {
-			t.Fatalf("pass %d: report for role \"report\" was deleted", i)
-		}
-		if got := read(t, root, rel); got != "the only report\n" {
-			t.Fatalf("pass %d: report content changed: %q", i, got)
-		}
+	// Pass 1: nested → flat.
+	if _, err := V1Layout(root); err != nil {
+		t.Fatalf("V1Layout pass 0: %v", err)
+	}
+	if !exists(root, flat) {
+		t.Fatalf("pass 0: report for role \"report\" missing at flat path %s", flat)
+	}
+	if got := read(t, root, flat); got != "the only report\n" {
+		t.Fatalf("pass 0: report content changed: %q", got)
+	}
+
+	// Pass 2: idempotent — must not destroy the file we just hoisted.
+	if _, err := V1Layout(root); err != nil {
+		t.Fatalf("V1Layout pass 1: %v", err)
+	}
+	if !exists(root, flat) {
+		t.Fatalf("pass 1: flat report deleted on re-run")
+	}
+	if got := read(t, root, flat); got != "the only report\n" {
+		t.Fatalf("pass 1: report content changed: %q", got)
 	}
 }
 
 // TestDirectoryAtFileTargetWarns guards against a directory sitting where a
 // file move expects its target: move() must warn and skip rather than
 // os.ReadFile the directory and abort the whole migration with an EISDIR.
+// Setup: flattenSharedReports wants to hoist shared/report/security/security.md
+// to shared/report/security.md, but a directory already squats the flat target.
 func TestDirectoryAtFileTargetWarns(t *testing.T) {
 	root := t.TempDir()
-	// Legacy report to migrate, but a directory already squats the target file.
 	writeTree(t, root, map[string]string{
-		filepath.Join("shared", "report", "security", "report.md"):                "legacy\n",
-		filepath.Join("shared", "report", "security", "security.md", "stray.txt"): "x\n",
+		filepath.Join("shared", "report", "security", "security.md"):  "nested body\n",
+		filepath.Join("shared", "report", "security.md", "stray.txt"): "x\n",
 	})
 
 	r, err := V1Layout(root)

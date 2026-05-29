@@ -88,9 +88,9 @@ type RoleReport struct {
 	Content string
 }
 
-// DiscoverReports scans `shared/report/<role>/<role>.md` (the v1 spec path)
-// and returns one RoleReport per role. Auto-migration handles the legacy
-// `roles/<role>/report.md` and the pre-Step-6 `shared/report/<role>/report.md`
+// DiscoverReports scans `shared/report/<role>.md` (the v1 flat layout) and
+// returns one RoleReport per role. Auto-migration handles the legacy
+// `roles/<role>/report.md` and the pre-flat `shared/report/<role>/<role>.md`
 // before this is consulted.
 func DiscoverReports(projectDir string) ([]RoleReport, error) {
 	sharedReportDir := filepath.Join(projectDir, "shared", "report")
@@ -104,11 +104,15 @@ func DiscoverReports(projectDir string) ([]RoleReport, error) {
 
 	out := make([]RoleReport, 0, len(entries))
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if entry.IsDir() {
 			continue
 		}
-		role := entry.Name()
-		reportPath := filepath.Join(sharedReportDir, role, role+".md")
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		role := strings.TrimSuffix(name, ".md")
+		reportPath := filepath.Join(sharedReportDir, name)
 		data, err := os.ReadFile(reportPath)
 		if err != nil {
 			continue

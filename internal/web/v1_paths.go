@@ -13,20 +13,20 @@ import (
 // Once the migrator is default-on and projects have been migrated, the
 // legacy fallback can be removed in one pass.
 
-// reviewPath returns the v1 shared/review/review.md if present, else the
+// reviewPath returns the v1 flat shared/review.md if present, else the
 // legacy supervisor/review.md.
 func reviewPath(projectDir string) string {
-	v1 := filepath.Join(projectDir, "shared", "review", "review.md")
+	v1 := filepath.Join(projectDir, "shared", "review.md")
 	if _, err := os.Stat(v1); err == nil {
 		return v1
 	}
 	return filepath.Join(projectDir, "supervisor", "review.md")
 }
 
-// verifyPath returns the v1 shared/verify/verify.md if present, else the
+// verifyPath returns the v1 flat shared/verify.md if present, else the
 // legacy supervisor/verify.md.
 func verifyPath(projectDir string) string {
-	v1 := filepath.Join(projectDir, "shared", "verify", "verify.md")
+	v1 := filepath.Join(projectDir, "shared", "verify.md")
 	if _, err := os.Stat(v1); err == nil {
 		return v1
 	}

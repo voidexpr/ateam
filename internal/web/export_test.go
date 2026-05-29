@@ -10,21 +10,17 @@ import (
 func TestExportHTMLContainsProjectNameAndReport(t *testing.T) {
 	projectDir := t.TempDir()
 
-	// Seed a role report so DiscoverReports finds content (v1 layout).
-	roleDir := filepath.Join(projectDir, "shared", "report", "security")
-	if err := os.MkdirAll(roleDir, 0755); err != nil {
+	// Seed a role report so DiscoverReports finds content (v1 flat layout).
+	reportDir := filepath.Join(projectDir, "shared", "report")
+	if err := os.MkdirAll(reportDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(roleDir, "security.md"), []byte("# Security Report\nAll clear."), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(reportDir, "security.md"), []byte("# Security Report\nAll clear."), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Seed a review file (v1 layout).
-	reviewDir := filepath.Join(projectDir, "shared", "review")
-	if err := os.MkdirAll(reviewDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(reviewDir, "review.md"), []byte("# Supervisor Review\nLooks good."), 0644); err != nil {
+	// Seed a review file (v1 flat layout).
+	if err := os.WriteFile(filepath.Join(projectDir, "shared", "review.md"), []byte("# Supervisor Review\nLooks good."), 0644); err != nil {
 		t.Fatal(err)
 	}
 

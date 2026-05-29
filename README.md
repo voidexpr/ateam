@@ -180,7 +180,7 @@ ateam all --roles code.bugs,test.gaps,project.security,project.dependencies,desi
 Step by step (with review):
 ```bash
 ateam report && ateam review --print    # inspect findings
-# optionally edit .ateam/shared/review/review.md
+# optionally edit .ateam/shared/review.md
 ateam code && ateam verify && ateam serve # fix, verify and serve all artifacts produced
 ```
 

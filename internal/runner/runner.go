@@ -113,18 +113,20 @@ const defaultStallWarn = 5 * time.Minute
 // not pre-compute log or history paths. The runner owns:
 //   - logs/<exec_id>/        forensic artefacts (stream, stderr, settings, prompt, cmd.md)
 //   - runtime/<exec_id>/     agent-writable output area; primary file driven by OutputKind
-//   - <CanonicalDestDir>/    where runtime files are cloned on success (e.g. roles/<id>/)
+//   - <CanonicalDestDir>/    where runtime files are cloned on success (every file copied; used by code's per-session dir)
+//   - <CanonicalDestFile>    single-file mode: only the primary runtime file is promoted to this exact path; sidecars stay in runtime/<exec_id>/
 type RunOpts struct {
-	RoleID           string
-	Action           string // "report", "exec", "code", "review", ...
-	OutputKind       string // OutputKindReport / Review / Verify / ExecutionReport / SetupOverview / "" (no primary output)
-	PromptName       string // basename of the assembled prompt — e.g. "security" for `report/security`. Only consulted for OutputKindReport, where it drives the primary output filename (security.md); kinds with fixed names (review/verify/...) ignore it.
-	CanonicalDestDir string // where runtime/<exec_id>/ files are cloned on success; "" disables promotion
-	WorkDir          string // cwd for the subprocess
-	TimeoutMin       int
-	Verbose          bool      // print agent and docker commands to stderr
-	Batch            string    // groups related agent_execs (e.g. all execs in one ateam code run)
-	StartedAt        time.Time // optional override; if zero, Run() uses time.Now()
+	RoleID            string
+	Action            string // "report", "exec", "code", "review", ...
+	OutputKind        string // OutputKindReport / Review / Verify / ExecutionReport / SetupOverview / "" (no primary output)
+	PromptName        string // basename of the assembled prompt — e.g. "security" for `report/security`. Only consulted for OutputKindReport, where it drives the primary output filename (security.md); kinds with fixed names (review/verify/...) ignore it.
+	CanonicalDestDir  string // copy-all mode: every runtime file is cloned into this dir on success. Mutually exclusive with CanonicalDestFile.
+	CanonicalDestFile string // single-file mode: only the primary runtime file is cloned to this exact path. Mutually exclusive with CanonicalDestDir.
+	WorkDir           string // cwd for the subprocess
+	TimeoutMin        int
+	Verbose           bool      // print agent and docker commands to stderr
+	Batch             string    // groups related agent_execs (e.g. all execs in one ateam code run)
+	StartedAt         time.Time // optional override; if zero, Run() uses time.Now()
 
 	// AutoRolesCommandsOutput is the pre-baked context bundle injected into
 	// `{{ATEAM_AUTO_ROLES_COMMANDS_OUTPUT}}` for the --auto-roles planner agent.
@@ -364,9 +366,10 @@ func (r *Runner) Run(ctx context.Context, prompt string, opts RunOpts, progress 
 	runAgent := ResolveAgentTemplateArgs(r.Agent, tmplVars)
 	resolveContainerTemplates(runContainer, tmplVars)
 	prompt = ResolveTemplateString(prompt, tmplVars)
-	// Resolve {{EXEC_ID}} (and friends) inside CanonicalDestDir so callers can
-	// build per-exec_id paths without knowing the id ahead of time.
+	// Resolve {{EXEC_ID}} (and friends) inside the canonical-dest paths so
+	// callers can build per-exec_id paths without knowing the id ahead of time.
 	opts.CanonicalDestDir = ResolveTemplateString(opts.CanonicalDestDir, tmplVars)
+	opts.CanonicalDestFile = ResolveTemplateString(opts.CanonicalDestFile, tmplVars)
 
 	// Build agent request (no longer archives prompt — that's our job below).
 	req, err := r.buildRequest(prompt, tmplVars, cwd, streamFile, stderrFile, extraArgs, callID)
@@ -789,7 +792,7 @@ func (r *Runner) finalizeCall(ctx context.Context, callID int64, summary *RunSum
 	var primaryRuntime string
 
 	if success {
-		copyEntries, primaryRuntime = r.promoteRuntimeFiles(runtimeDir, opts.CanonicalDestDir, opts.OutputKind, opts.PromptName)
+		copyEntries, primaryRuntime = r.promoteRuntimeFiles(runtimeDir, opts.CanonicalDestDir, opts.CanonicalDestFile, opts.OutputKind, opts.PromptName)
 	} else {
 		summary.IsError = true
 		source, cause := classifyFailure(ctx, resultEv, opts.TimeoutMin)
@@ -1196,15 +1199,26 @@ func summaryStatus(s RunSummary) string {
 	}
 }
 
-// promoteRuntimeFiles clones every file in runtimeDir (except *_prompt.md —
-// see TODO) into destDir. Returns the per-file decisions for cmd.md and the
-// absolute path of the primary file in runtimeDir (the immutable per-exec
-// copy), used for the agent_execs.output_file column. The canonical copy is
-// overwritten on subsequent runs and is not suitable as a per-row pointer.
+// promoteRuntimeFiles promotes successful runtime output to its canonical
+// destination. Two modes:
 //
+//   - destDir set: copy-all — clone every file in runtimeDir into destDir.
+//     Used by code's per-session layout (shared/code/<exec_id>/).
+//   - destFile set: single-file — clone only the primary runtime file (named
+//     per OutputKind) to that exact path; sidecars stay in runtimeDir. Used
+//     by report/review/verify (shared/report/<role>.md, shared/review.md, ...).
+//   - neither set: no promotion.
+//
+// Returns the per-file decisions for cmd.md and the absolute path of the
+// primary file in runtimeDir (the immutable per-exec copy), used for the
+// agent_execs.output_file column. The canonical copy is overwritten on
+// subsequent runs and is not suitable as a per-row pointer.
+//
+// `*_prompt.md` files are always skipped — they're sub-run prompts the code
+// session emits, not user-visible output.
 // TODO: get rid of this exclusion once configured prompts are kept separate
 // from files.
-func (r *Runner) promoteRuntimeFiles(runtimeDir, destDir, outputKind, promptName string) ([]fileCopyEntry, string) {
+func (r *Runner) promoteRuntimeFiles(runtimeDir, destDir, destFile, outputKind, promptName string) ([]fileCopyEntry, string) {
 	var entries []fileCopyEntry
 	primary := PrimaryOutputName(outputKind, promptName)
 	primaryRuntime := ""
@@ -1227,14 +1241,24 @@ func (r *Runner) promoteRuntimeFiles(runtimeDir, destDir, outputKind, promptName
 			entries = append(entries, entry)
 			continue
 		}
-		if destDir == "" {
+		if name == primary {
+			primaryRuntime = src
+		}
+		var dst string
+		switch {
+		case destFile != "":
+			if name != primary {
+				entry.Note = "SKIPPED (single-file mode; sidecar stays in runtime)"
+				entries = append(entries, entry)
+				continue
+			}
+			dst = destFile
+		case destDir != "":
+			dst = filepath.Join(destDir, name)
+		default:
 			entry.Note = "SKIPPED (action has no canonical destination)"
 			entries = append(entries, entry)
 			continue
-		}
-		dst := filepath.Join(destDir, name)
-		if name == primary {
-			primaryRuntime = src
 		}
 		if err := fsclone.Clone(src, dst); err != nil {
 			entry.Note = fmt.Sprintf("FAILED (%v)", err)

@@ -76,10 +76,11 @@ func NeedsMigration(root string) bool {
 // returns immediately with whatever was already done in Result. The error
 // message tells the user to re-run after fixing the underlying cause.
 //
-// renameLegacyReportFiles always runs (even when NeedsMigration is false)
-// because projects already on the v1 layout may still hold the pre-Step-6
-// `shared/report/<role>/report.md` filename; the rename pass collapses
-// them to the spec's `<role>.md`.
+// flattenSharedLayout always runs (even when NeedsMigration is false)
+// because projects already on a pre-flat v1 layout still hold artifacts at
+// shared/<action>/<action>.md (and the older shared/report/<role>/report.md
+// transitional filename); the flatten pass collapses them to
+// shared/report/<role>.md and shared/<action>.md.
 func V1Layout(root string) (Result, error) {
 	var r Result
 	if NeedsMigration(root) {
@@ -96,19 +97,49 @@ func V1Layout(root string) (Result, error) {
 			return r, err
 		}
 	}
-	if err := renameLegacyReportFiles(root, &r); err != nil {
+	if err := flattenSharedLayout(root, &r); err != nil {
 		return r, err
 	}
 	return r, nil
 }
 
-// renameLegacyReportFiles walks shared/report/<R>/ and renames any
-// `report.md` to `<R>.md` (the spec filename). Idempotent: a per-role
-// `<R>.md` already on disk takes precedence — the older `report.md` is
-// removed when its content matches (cleanup) or renamed to
-// `report.md.legacy` with a warning when it differs (manual reconciliation).
-// Quiet no-op when the shared/report tree doesn't exist yet.
-func renameLegacyReportFiles(root string, r *Result) error {
+// flattenSharedLayout collapses the pre-flat v1 nested artifact layout to
+// the flat layout:
+//   - shared/report/<R>/<R>.md  → shared/report/<R>.md
+//   - shared/report/<R>/report.md (pre-Step-6 transitional) → shared/report/<R>.md
+//   - shared/review/review.md   → shared/review.md
+//   - shared/verify/verify.md   → shared/verify.md
+//   - shared/auto_setup/auto_setup.md → shared/auto_setup.md
+//
+// Idempotent: a flat file already on disk takes precedence; the nested
+// source is removed when its content matches (cleanup) or renamed to
+// `<src>.legacy` with a warning when it differs (manual reconciliation).
+// Empty per-role/per-action dirs are removed after their file is hoisted.
+// Quiet no-op when none of the source paths exist.
+func flattenSharedLayout(root string, r *Result) error {
+	if err := flattenSharedReports(root, r); err != nil {
+		return err
+	}
+	for _, action := range []string{"review", "verify", "auto_setup"} {
+		from := filepath.Join("shared", action, action+".md")
+		to := filepath.Join("shared", action+".md")
+		moved, err := move(root, from, to, r)
+		if err != nil {
+			return err
+		}
+		if moved {
+			recordRemoveIfEmpty(root, filepath.Join("shared", action), r)
+		}
+	}
+	return nil
+}
+
+// flattenSharedReports walks shared/report/<R>/ and hoists either
+// `<R>.md` or the older `report.md` to shared/report/<R>.md, then removes
+// the now-empty <R>/ dir. Both nested filenames may coexist; if so, the
+// spec name (<R>.md) wins and report.md is reconciled by move()'s
+// resolveExistingTarget against the destination.
+func flattenSharedReports(root string, r *Result) error {
 	sharedReportDir := filepath.Join(root, "shared", "report")
 	entries, err := os.ReadDir(sharedReportDir)
 	if err != nil {
@@ -122,13 +153,34 @@ func renameLegacyReportFiles(root string, r *Result) error {
 			continue
 		}
 		role := e.Name()
-		from := filepath.Join("shared", "report", role, "report.md")
-		to := filepath.Join("shared", "report", role, role+".md")
-		if _, err := move(root, from, to, r); err != nil {
-			return err
+		dst := filepath.Join("shared", "report", role+".md")
+		// Spec filename first so report.md (older) reconciles against an
+		// already-promoted <R>.md rather than the other way around.
+		for _, srcName := range []string{role + ".md", "report.md"} {
+			src := filepath.Join("shared", "report", role, srcName)
+			if _, err := move(root, src, dst, r); err != nil {
+				return err
+			}
 		}
+		recordRemoveIfEmpty(root, filepath.Join("shared", "report", role), r)
 	}
 	return nil
+}
+
+// recordRemoveIfEmpty calls removeIfEmpty(fullPath) and, on a successful
+// rmdir, records the relative path in r.RemovedDirs. Non-rmdir errors are
+// downgraded to warnings — the migration shouldn't abort because of
+// leftover housekeeping after a successful hoist.
+func recordRemoveIfEmpty(root, rel string, r *Result) {
+	full := filepath.Join(root, rel)
+	removed, err := removeIfEmpty(full)
+	if err != nil {
+		r.Warnings = append(r.Warnings, fmt.Sprintf("could not remove empty dir %s: %v", rel, err))
+		return
+	}
+	if removed {
+		r.RemovedDirs = append(r.RemovedDirs, rel)
+	}
 }
 
 // move performs a single rename if `from` exists. Returns:
@@ -243,10 +295,13 @@ var staticMigrations = []Move{
 	{From: "supervisor/report_commissioning_extra_prompt.md", To: "prompts/report_commissioning.post.extra.md"},
 	{From: "supervisor/report_auto_roles_prompt.md", To: "prompts/report_auto_roles.prompt.md"},
 
-	{From: "supervisor/review.md", To: "shared/review/review.md"},
-	{From: "supervisor/verify.md", To: "shared/verify/verify.md"},
+	// v1 flat shared artifacts: single-file outputs land directly under
+	// shared/ (no per-action subdir). The pre-flat shared/<action>/<action>.md
+	// layout is collapsed by flattenSharedLayout on every migration pass.
+	{From: "supervisor/review.md", To: "shared/review.md"},
+	{From: "supervisor/verify.md", To: "shared/verify.md"},
 
-	{From: "setup_overview.md", To: "shared/auto_setup/auto_setup.md"},
+	{From: "setup_overview.md", To: "shared/auto_setup.md"},
 }
 
 // staticDirMigrations are directory renames (not single files). The migrator
@@ -264,15 +319,13 @@ var staticDirMigrations = []Move{
 
 // roleMigrations are renames templated over each <R> dir under roles/.
 // Source is relative to roles/<R>/; target is relative to root, with `{role}`
-// substituted in (allows the same role to appear more than once in a path —
-// notably the spec's `shared/report/<R>/<R>.md`).
+// substituted in.
 //
-// The report.md destination uses the spec's `<role>.md` filename
-// (shared/report/<R>/<R>.md) to match what the runner now writes via
-// PrimaryOutputName(OutputKindReport, promptName). Projects that ran
-// through a pre-Step-6 binary will have files at the older
-// `shared/report/<R>/report.md` path — renameReportFiles catches those
-// on the next migration invocation.
+// The report.md destination uses the v1 flat path (shared/report/<R>.md) —
+// one file per role, directly under shared/report/. Projects that ran
+// through an earlier ateam binary may have files at the older
+// shared/report/<R>/<R>.md or shared/report/<R>/report.md paths;
+// flattenSharedLayout catches both on the next migration invocation.
 var roleMigrations = []struct {
 	from string // under roles/<R>/
 	to   string // under root, with `{role}` placeholders
@@ -281,7 +334,7 @@ var roleMigrations = []struct {
 	{from: "code_prompt.md", to: "prompts/code/{role}.prompt.md"},
 	{from: "report_extra_prompt.md", to: "prompts/report/{role}.post.extra.md"},
 	{from: "code_extra_prompt.md", to: "prompts/code/{role}.post.extra.md"},
-	{from: "report.md", to: "shared/report/{role}/{role}.md"},
+	{from: "report.md", to: "shared/report/{role}.md"},
 }
 
 func moveStatic(root string, r *Result) error {

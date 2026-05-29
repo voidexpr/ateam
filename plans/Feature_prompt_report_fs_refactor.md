@@ -215,14 +215,12 @@ No `:dir/role` CLI syntax is introduced — that was speculative for a more open
       ...
   shared/
     report/
-      security/
-        security.md          # primary output
-    review/
-      review.md
-    verify/
-      verify.md
-    auto_setup/
-      auto_setup.md
+      security.md            # primary output, one file per role
+    review.md
+    verify.md
+    auto_setup.md
+    code/
+      <exec_id>/             # code sessions keep a per-session dir (many files per run)
   runtime/
     <exec_id>/               # per-run scratch, default destination for prompt writes
 ```
@@ -655,7 +653,7 @@ On `ateam` startup, when `.ateam/` or `.ateamorg/` is loaded, detect the old lay
 | `.ateam/roles/<R>/code_prompt.md` | `.ateam/prompts/code/<R>.prompt.md` |
 | `.ateam/roles/<R>/report_extra_prompt.md` | `.ateam/prompts/report/<R>.post.extra.md` |
 | `.ateam/roles/<R>/code_extra_prompt.md` | `.ateam/prompts/code/<R>.post.extra.md` |
-| `.ateam/roles/<R>/report.md` | `.ateam/shared/report/<R>/<R>.md` |
+| `.ateam/roles/<R>/report.md` | `.ateam/shared/report/<R>.md` |
 | `.ateam/roles/<R>/history/...` | dropped (history now via `runtime/<exec_id>/`) |
 | `.ateam/report_base_prompt.md` | `.ateam/prompts/report/_pre.base.md` |
 | `.ateam/code_base_prompt.md` | `.ateam/prompts/code/_pre.base.md` |
@@ -669,10 +667,10 @@ On `ateam` startup, when `.ateam/` or `.ateamorg/` is loaded, detect the old lay
 | `.ateam/supervisor/auto_setup_prompt.md` | `.ateam/prompts/auto_setup.prompt.md` |
 | `.ateam/supervisor/exec_debug_prompt.md` | `.ateam/prompts/exec_debug.prompt.md` |
 | `.ateam/supervisor/report_commissioning_prompt.md` | `.ateam/prompts/report_commissioning.prompt.md` |
-| `.ateam/supervisor/review.md` | `.ateam/shared/review/review.md` |
-| `.ateam/supervisor/verify.md` | `.ateam/shared/verify/verify.md` |
+| `.ateam/supervisor/review.md` | `.ateam/shared/review.md` |
+| `.ateam/supervisor/verify.md` | `.ateam/shared/verify.md` |
 | `.ateam/supervisor/history/...` | dropped |
-| `.ateam/setup_overview.md` | `.ateam/shared/auto_setup/auto_setup.md` |
+| `.ateam/setup_overview.md` | `.ateam/shared/auto_setup.md` |
 
 After migration, remove the now-empty `roles/` and `supervisor/` directories. Print a one-line notice on stderr on first migration. Implementation in a new `internal/migrate/v1_layout.go`, called from `internal/root/resolve.go` when env is first materialized.
 
@@ -913,7 +911,7 @@ Several of the earlier pending questions become moot with the narrowed scope. Th
 1. **Setup overview filename** — auto-migration renames `setup_overview.md` → `auto_setup/auto_setup.md`. Acceptable break, or keep historical name?
 2. **`ateam roles` output** — keep as role-listing, or unify under `ateam prompts list`? Decide after Task 1 lands.
 3. **Frontmatter schema strictness** — strict allow-list (locked: strict). What ateam-internal keys, if any, get added in v1? Probably none; reserved for future.
-4. **Runtime/shared promotion model** — current split (agent writes to `exec.output_dir`, then promotion copies selected files to `exec.shared_prompt_dir`) works but isn't intuitive. Worth a design pass after Task 1 + Task 2 land: is there a cleaner model? E.g. agents always write to the canonical shared path; the runtime dir is a tee'd copy purely for history; promotion goes away as a concept. Or: prompt frontmatter declares which output files are "shared" vs "scratch," and the runner enforces the split at write time. Defer until after the substrate lands; flag explicitly that the current model is the weakest part of the design.
+4. **Runtime/shared promotion model** — single-file actions (`report`/`review`/`verify`/`auto_setup`) now promote a single primary file from `runtime/<exec_id>/` to a flat `shared/<...>.md` path; sidecars stay in `runtime/<exec_id>/` and are surfaced by `ateam inspect`. `code` keeps the "copy every runtime file into a per-session dir" semantics because its session naturally produces a tree. Q4 is largely answered, but the deeper version remains open: could prompt frontmatter declare which output files are "shared" vs "scratch" and the runner enforce the split at write time? Defer until a real need surfaces.
 5. **Progress event schema versioning** — owned by Task 3.
 6. **Python framework distribution.** Stay in `plans/python_framework_examples/`, promote to top-level `python/` or `examples/`, or spin out as a separate `ateam-workflow` project? Probably stays in `plans/` until external users start asking for it; the `ateam-workflow` idea is the more ambitious vision (typed `actions × entities × roles/scopes` data model, eventually resumable multi-step workflows) and is a meaningful side project of its own.
 
@@ -941,7 +939,7 @@ Several of the earlier pending questions become moot with the narrowed scope. Th
 2. `make test-docker` once at the end.
 3. **Golden prompt test** — capture `ateam prompt --role <r> --action report` and `ateam prompt --supervisor --action review` outputs before the refactor; after, run the equivalent `ateam prompt --action report --role <r>` and `ateam prompt --action review` and diff. Should be byte-identical modulo intentional ordering changes.
 4. `ateam roles` lists the same set of roles before/after.
-5. End-to-end on a fresh `./test_data/` project: `ateam init`, `ateam report --roles project.security`, verify the report lands at `.ateam/shared/report/project.security/project.security.md`. Then `ateam review`, verify it lands at `.ateam/shared/review/review.md`.
+5. End-to-end on a fresh `./test_data/` project: `ateam init`, `ateam report --roles project.security`, verify the report lands at `.ateam/shared/report/project.security.md`. Then `ateam review`, verify it lands at `.ateam/shared/review.md`.
 6. **Migration test** — project with old layout (artifacts plus overrides at all levels), run `ateam` once, verify behavior. Re-run to confirm idempotence.
 7. **Org-override test** — both org-level and project-level overrides for the same role; confirm anchor fallback still works.
 8. **Composition test** — `{{include}}` / `{{include?}}` first-match: create the same filename at embedded, org, and project anchors; assert project's wins. `{{include_glob}}` additive: create distinct filenames at each anchor matching the glob; assert all are concatenated in most-general-first order. Dir-level `_pre.*.md`: same composition.

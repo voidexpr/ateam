@@ -62,12 +62,12 @@ func (e *ResolvedEnv) SupervisorDir() string {
 }
 
 // RoleReportPath returns the canonical v1 path for the role's report file
-// (shared/report/<role>/<role>.md). Auto-migration (default-on) collapses
-// the older pre-Step-6 filename and the legacy roles/<role>/report.md
+// (shared/report/<role>.md). Auto-migration (default-on) collapses the
+// legacy roles/<role>/report.md and the pre-flat shared/report/<role>/<role>.md
 // before this is consulted; ATEAM_NO_MIGRATE=1 users must place files at
 // the v1 path themselves.
 func (e *ResolvedEnv) RoleReportPath(roleID string) string {
-	return filepath.Join(e.SharedPromptDir("report/"+roleID), roleID+".md")
+	return filepath.Join(e.SharedDir(), "report", roleID+".md")
 }
 
 func (e *ResolvedEnv) RoleHistoryDir(roleID string) string {
@@ -75,9 +75,10 @@ func (e *ResolvedEnv) RoleHistoryDir(roleID string) string {
 }
 
 // ReviewPath returns the canonical v1 path for the supervisor review file.
-// Auto-migration handles the legacy supervisor/review.md location.
+// Auto-migration handles the legacy supervisor/review.md and the pre-flat
+// shared/review/review.md locations.
 func (e *ResolvedEnv) ReviewPath() string {
-	return filepath.Join(e.SharedDir(), "review", "review.md")
+	return filepath.Join(e.SharedDir(), "review.md")
 }
 
 func (e *ResolvedEnv) ReviewHistoryDir() string {
@@ -85,9 +86,18 @@ func (e *ResolvedEnv) ReviewHistoryDir() string {
 }
 
 // VerifyPath returns the canonical v1 path for the supervisor verification
-// file. Auto-migration handles the legacy supervisor/verify.md location.
+// file. Auto-migration handles the legacy supervisor/verify.md and the
+// pre-flat shared/verify/verify.md locations.
 func (e *ResolvedEnv) VerifyPath() string {
-	return filepath.Join(e.SharedDir(), "verify", "verify.md")
+	return filepath.Join(e.SharedDir(), "verify.md")
+}
+
+// AutoSetupPath returns the canonical v1 path for the supervisor's
+// auto-setup overview file. Auto-migration handles the legacy
+// setup_overview.md and the pre-flat shared/auto_setup/auto_setup.md
+// locations.
+func (e *ResolvedEnv) AutoSetupPath() string {
+	return filepath.Join(e.SharedDir(), "auto_setup.md")
 }
 
 // StateDir returns the directory that owns state.sqlite, logs/, and runtime/
@@ -122,19 +132,13 @@ func (e *ResolvedEnv) ProjectDBPath() string {
 }
 
 // SharedDir returns the v1 cross-agent artifact directory: .ateam/shared/.
-// Promoted role reports and supervisor outputs land in subdirs of this path
-// (shared/report/<role>/<role>.md, shared/review/review.md, etc.). The
-// caller is responsible for creating subdirs.
+// Promoted role reports and supervisor outputs land as flat files under this
+// path (shared/report/<role>.md, shared/review.md, shared/verify.md,
+// shared/auto_setup.md). Code sessions are the exception — they keep a
+// per-session subdir at shared/code/<exec_id>/ because they produce many
+// files per run. Callers are responsible for creating subdirs they need.
 func (e *ResolvedEnv) SharedDir() string {
 	return filepath.Join(e.ProjectDir, "shared")
-}
-
-// SharedPromptDir returns the canonical destination directory for a prompt
-// path's primary output (`<role>.md`). For nested paths like "report/security"
-// it's shared/report/security/. For singletons like "review" it's
-// shared/review/.
-func (e *ResolvedEnv) SharedPromptDir(promptPath string) string {
-	return filepath.Join(append([]string{e.ProjectDir, "shared"}, strings.Split(promptPath, "/")...)...)
 }
 
 // Assembler returns a v1 prompt Assembler with the standard project →

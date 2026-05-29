@@ -134,10 +134,9 @@ func runVerify(opts VerifyOptions) error {
 	// Verify runs a supervisor pass like review; reuses the review timeout helper.
 	timeout := env.Config.Review.EffectiveTimeout(opts.Timeout)
 
-	// v1 layout: promotion writes to .ateam/shared/verify/. See cmd/review.go
-	// for the rationale on keeping verify.md as the canonical filename
-	// during the transition.
-	sharedDir := env.SharedPromptDir("verify")
+	// v1 flat layout: promotion writes to .ateam/shared/verify.md (the file,
+	// not a per-action subdir). Sidecars stay in runtime/<exec_id>/.
+	verifyFile := env.VerifyPath()
 
 	startedAt := time.Now()
 
@@ -178,14 +177,14 @@ func runVerify(opts VerifyOptions) error {
 		}
 	}
 	runOpts := runner.RunOpts{
-		RoleID:           "supervisor",
-		Action:           runner.ActionVerify,
-		OutputKind:       runner.OutputKindVerify,
-		CanonicalDestDir: sharedDir,
-		WorkDir:          env.WorkDir,
-		TimeoutMin:       timeout,
-		Verbose:          opts.Verbose,
-		StartedAt:        startedAt,
+		RoleID:            "supervisor",
+		Action:            runner.ActionVerify,
+		OutputKind:        runner.OutputKindVerify,
+		CanonicalDestFile: verifyFile,
+		WorkDir:           env.WorkDir,
+		TimeoutMin:        timeout,
+		Verbose:           opts.Verbose,
+		StartedAt:         startedAt,
 	}
 
 	ctx, stop := cmdContext()

@@ -211,12 +211,10 @@ func runReview(opts ReviewOptions) error {
 
 	timeout := env.Config.Review.EffectiveTimeout(opts.Timeout)
 
-	// v1 layout: promotion writes to .ateam/shared/review/. The canonical
-	// review.md filename is preserved during transition; a follow-up will
-	// rename to <prompt-basename>.md once {{exec.output_file}} is wired
-	// through the new template namespace.
-	sharedDir := env.SharedPromptDir("review")
-	reviewFile := filepath.Join(sharedDir, "review.md")
+	// v1 flat layout: promotion writes to .ateam/shared/review.md (the file,
+	// not a per-action subdir). Single-file promotion keeps any sidecars in
+	// runtime/<exec_id>/ where `ateam inspect` can surface them.
+	reviewFile := env.ReviewPath()
 
 	startedAt := time.Now()
 
@@ -253,14 +251,14 @@ func runReview(opts ReviewOptions) error {
 		}
 	}
 	runOpts := runner.RunOpts{
-		RoleID:           "supervisor",
-		Action:           runner.ActionReview,
-		OutputKind:       runner.OutputKindReview,
-		CanonicalDestDir: sharedDir,
-		WorkDir:          env.WorkDir,
-		TimeoutMin:       timeout,
-		Verbose:          opts.Verbose,
-		StartedAt:        startedAt,
+		RoleID:            "supervisor",
+		Action:            runner.ActionReview,
+		OutputKind:        runner.OutputKindReview,
+		CanonicalDestFile: reviewFile,
+		WorkDir:           env.WorkDir,
+		TimeoutMin:        timeout,
+		Verbose:           opts.Verbose,
+		StartedAt:         startedAt,
 	}
 
 	ctx, stop := cmdContext()
