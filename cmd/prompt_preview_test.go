@@ -65,6 +65,57 @@ func TestPromptPathsFailsOnOrphanFragment(t *testing.T) {
 	}
 }
 
+// TestPromptPathsAllowsUnrelatedOrphan exercises the NON-BLOCKING half of the
+// orphan-filter branch the v1 refactor added to runPromptPaths()/assembleForInspection().
+// An orphan fragment that is NOT tied to the previewed prompt (different dir,
+// unrelated role) must be surfaced on stderr but must NOT fail the preview —
+// the real `ateam report` run never calls FindOrphans and succeeds for the
+// previewed role, so the inspection must agree. Reverting the branch (blocking
+// on ANY orphan, the way TestPromptPathsFailsOnOrphanFragment expects for a
+// tied orphan) makes this test fail.
+func TestPromptPathsAllowsUnrelatedOrphan(t *testing.T) {
+	projectDir := setupMinimalAteamProject(t)
+	// Stray fragment for a role that no longer exists, in an unrelated dir
+	// (code/, not the previewed report/). No code/tombstone.prompt.md exists in
+	// any anchor, so FindOrphans reports it — but it is not tied to report/security.
+	orphanDir := projectDir + "/.ateam/prompts/code"
+	if err := os.MkdirAll(orphanDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(orphanDir+"/tombstone.post.cleanup.md", []byte("leftover"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	prev, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(resetPromptFlags)
+	promptRole = "security"
+	promptAction = "report"
+	promptPaths = true
+
+	var stderr string
+	out := captureStdout(t, func() {
+		stderr = captureStderr(t, func() {
+			if err := runPromptPaths(); err != nil {
+				t.Fatalf("expected nil error for an unrelated orphan, got %v", err)
+			}
+		})
+	})
+
+	// The preview still renders — the orphan did not abort assembly.
+	if !strings.Contains(out, `Assembly for "report/security"`) {
+		t.Errorf("expected assembly header for report/security, got:\n%s", out)
+	}
+	// ...but the orphan is still reported, just non-fatally.
+	if !strings.Contains(stderr, "orphan fragment") || !strings.Contains(stderr, "tombstone") {
+		t.Errorf("expected the stray orphan surfaced on stderr, got:\n%s", stderr)
+	}
+}
+
 func TestPromptInlinePathsInterleavesHeaders(t *testing.T) {
 	projectDir := setupMinimalAteamProject(t)
 	prev, _ := os.Getwd()

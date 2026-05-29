@@ -600,6 +600,35 @@ func TestLookupFromSeedsWorkDirFromStart(t *testing.T) {
 	}
 }
 
+// TestLookupFromMalformedConfigReturnsError locks in the v1-refactor contract:
+// a malformed .ateam/config.toml now surfaces a NON-NIL error from LookupFrom.
+// Previously the parse failure was swallowed and returned as (env, nil), which
+// left callers (e.g. cmd/init.go) printing a blank project section with no
+// failure shown. Reverting the `config.Load` error-propagation change makes
+// this test fail.
+func TestLookupFromMalformedConfigReturnsError(t *testing.T) {
+	base := resolvedTempDir(t)
+	if err := os.MkdirAll(filepath.Join(base, ".ateam"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Bare key with no '=' — not parseable TOML.
+	if err := os.WriteFile(filepath.Join(base, ".ateam", "config.toml"), []byte("this is not valid toml\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run from an unrelated cwd; LookupFrom walks up from `base` (a /var/folders
+	// tempdir with no .ateamorg ancestor), so discovery is deterministic and
+	// cannot pick up the host's real ~/.ateamorg — same isolation as the
+	// passing tests above.
+	other := resolvedTempDir(t)
+	t.Chdir(other)
+
+	_, err := LookupFrom(base)
+	if err == nil {
+		t.Fatal("expected non-nil error for malformed .ateam/config.toml, got nil")
+	}
+}
+
 // TestResolveWorkDirCanonicalisesSymlinks verifies the fix for the
 // symlink-unsafe in-tree detection finding: env.WorkDir is realPath'd so
 // callers comparing it to ProjectDir (also realPath'd at discovery) use
