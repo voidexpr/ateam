@@ -230,6 +230,89 @@ func TestV1LayoutIdempotent(t *testing.T) {
 	}
 }
 
+// TestV1LayoutMovesCodeSessions covers Step 4: the supervisor/code/<exec>/
+// tree is the last directory under supervisor/ and moves to shared/code/.
+// Whole subtree (per-exec files: code_prompt.md, execution_report.md, …)
+// rides along atomically.
+func TestV1LayoutMovesCodeSessions(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"supervisor/code/597/code_prompt.md":      "first task",
+		"supervisor/code/597/execution_report.md": "report content",
+		"supervisor/code/598/01_other_prompt.md":  "second task",
+	})
+
+	r, err := V1Layout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for path, want := range map[string]string{
+		"shared/code/597/code_prompt.md":      "first task",
+		"shared/code/597/execution_report.md": "report content",
+		"shared/code/598/01_other_prompt.md":  "second task",
+	} {
+		if !exists(root, path) {
+			t.Errorf("missing %s after migration", path)
+			continue
+		}
+		if got := read(t, root, path); got != want {
+			t.Errorf("%s content = %q, want %q", path, got, want)
+		}
+	}
+
+	if exists(root, "supervisor/code") {
+		t.Error("supervisor/code/ should be moved away, not left behind")
+	}
+	if exists(root, "supervisor") {
+		t.Error("now-empty supervisor/ should be removed by cleanup")
+	}
+	if !r.Changed() {
+		t.Error("expected Changed=true")
+	}
+
+	// Idempotence: re-running V1Layout is a no-op once the dir is at the new
+	// location and supervisor/ has been swept away.
+	r2, err := V1Layout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r2.Changed() {
+		t.Errorf("second pass should be a no-op, got Result=%+v", r2)
+	}
+}
+
+// TestV1LayoutCodeDirTargetExists covers the conflict path: a project that
+// ran a pre-Step-4 binary AND a post-Step-4 binary ends up with sessions at
+// both supervisor/code/ and shared/code/. The migrator warns + leaves both
+// in place rather than attempting an automatic merge — exec_ids are
+// disjoint in practice, so the user can `mv supervisor/code/* shared/code/`
+// themselves to consolidate.
+func TestV1LayoutCodeDirTargetExists(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"supervisor/code/100/code_prompt.md": "old session",
+		"shared/code/200/code_prompt.md":     "new session",
+	})
+
+	r, err := V1Layout(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Both paths still exist.
+	if !exists(root, "supervisor/code/100/code_prompt.md") {
+		t.Error("legacy supervisor/code/100/ should be preserved on conflict")
+	}
+	if !exists(root, "shared/code/200/code_prompt.md") {
+		t.Error("v1 shared/code/200/ should be preserved on conflict")
+	}
+	// Warning surfaces.
+	if len(r.Warnings) == 0 || !strings.Contains(r.Warnings[0], "supervisor/code") {
+		t.Errorf("expected warning about supervisor/code conflict, got %v", r.Warnings)
+	}
+}
+
 // TestV1LayoutSecondPassRenamesReportMd covers an already-v1-migrated
 // project that ran through a pre-Step-6 binary: shared/report/<R>/report.md
 // exists but the spec wants <R>.md. NeedsMigration is false (no pre-v1

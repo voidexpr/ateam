@@ -100,3 +100,66 @@ func TestScanCodeSessions_LegacyTimestampDirsStillWork(t *testing.T) {
 		t.Errorf("HasReport must be true")
 	}
 }
+
+// TestScanCodeSessions_PrefersSharedOverSupervisor covers Step 4's v1
+// location (shared/code/) — new runs write there, scanCodeSessions must
+// pick them up. With both paths populated, shared/ wins (dedup by dirName).
+func TestScanCodeSessions_PrefersSharedOverSupervisor(t *testing.T) {
+	projDir := t.TempDir()
+	db, err := calldb.Open(filepath.Join(projDir, "state.sqlite"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	rowTime := time.Date(2026, 5, 28, 12, 0, 0, 0, time.Local)
+	id, err := db.InsertCall(&calldb.Call{
+		Action:    "code",
+		Role:      "supervisor",
+		StartedAt: rowTime,
+	})
+	if err != nil {
+		t.Fatalf("InsertCall: %v", err)
+	}
+	idStr := itoa(id)
+
+	// New session at the v1 location.
+	v1Canonical := filepath.Join(projDir, "shared", "code", idStr)
+	if err := os.MkdirAll(v1Canonical, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(v1Canonical, "execution_report.md"), []byte("v1"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Legacy session — different exec id, still readable.
+	legacyTS := "2026-04-01_10-00-00"
+	legacyDir := filepath.Join(projDir, "supervisor", "code", legacyTS)
+	if err := os.MkdirAll(legacyDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "execution_report.md"), []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions := scanCodeSessions(projDir, db)
+	if len(sessions) != 2 {
+		t.Fatalf("want 2 sessions (v1 + legacy), got %d", len(sessions))
+	}
+
+	names := map[string]bool{}
+	for _, s := range sessions {
+		names[s.DirName] = true
+	}
+	if !names[idStr] {
+		t.Errorf("missing v1 session %s, sessions=%v", idStr, names)
+	}
+	if !names[legacyTS] {
+		t.Errorf("missing legacy session %s, sessions=%v", legacyTS, names)
+	}
+
+	// codeSessionDirs for the v1 session resolves to shared/.
+	canonical, _ := codeSessionDirs(projDir, idStr)
+	if canonical != v1Canonical {
+		t.Errorf("codeSessionDirs(%s) canonical = %q, want %q", idStr, canonical, v1Canonical)
+	}
+}

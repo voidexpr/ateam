@@ -283,7 +283,7 @@ func runCode(opts CodeOptions) error {
 		RoleID:           "supervisor",
 		Action:           runner.ActionCode,
 		OutputKind:       runner.OutputKindExecutionReport,
-		CanonicalDestDir: filepath.Join(supervisorDir, "code", "{{EXEC_ID}}"),
+		CanonicalDestDir: filepath.Join(env.SharedDir(), "code", "{{EXEC_ID}}"),
 		WorkDir:          env.WorkDir,
 		TimeoutMin:       timeout,
 		Verbose:          opts.Verbose,
@@ -346,7 +346,7 @@ func runCode(opts CodeOptions) error {
 	if result.Err != nil {
 		return fmt.Errorf("code execution failed: %w", result.Err)
 	}
-	printCodeSessionSummary(supervisorDir, result.ExecID, opts.Print, result.Output)
+	printCodeSessionSummary(env.SharedDir(), supervisorDir, result.ExecID, opts.Print, result.Output)
 	printDone(result)
 
 	if opts.NoVerify {
@@ -370,15 +370,24 @@ func runCode(opts CodeOptions) error {
 	})
 }
 
-func printCodeSessionSummary(supervisorDir string, execID int64, printOutput bool, output string) {
+func printCodeSessionSummary(sharedDir, supervisorDir string, execID int64, printOutput bool, output string) {
 	cwd, _ := os.Getwd()
 	lastMsg := relPath(cwd, filepath.Join(supervisorDir, "code_output.md"))
 
+	// New runs write to shared/code/<id>/ (Step 4); pre-Step-4 sessions
+	// still live at supervisor/code/<id>/. Prefer the new path, fall back
+	// to the legacy one for projects/exec_ids that predate the move.
 	var sessionDir string
 	if execID > 0 {
-		candidate := filepath.Join(supervisorDir, "code", strconv.FormatInt(execID, 10))
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			sessionDir = candidate
+		idStr := strconv.FormatInt(execID, 10)
+		for _, candidate := range []string{
+			filepath.Join(sharedDir, "code", idStr),
+			filepath.Join(supervisorDir, "code", idStr),
+		} {
+			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+				sessionDir = candidate
+				break
+			}
 		}
 	}
 

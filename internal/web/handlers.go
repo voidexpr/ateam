@@ -85,7 +85,8 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 
 	if latest := latestCodeSession(pe.ProjectDir, s.getDB(pe)); latest != "" {
 		data.LatestCodeSession = latest
-		reportPath := filepath.Join(pe.ProjectDir, "supervisor", "code", latest, "execution_report.md")
+		canonical, _ := codeSessionDirs(pe.ProjectDir, latest)
+		reportPath := filepath.Join(canonical, "execution_report.md")
 		if info, err := os.Stat(reportPath); err == nil {
 			data.HasCodeOutput = true
 			data.CodeModTime = info.ModTime()
@@ -1230,36 +1231,61 @@ func (s *Server) handleCodeSessions(w http.ResponseWriter, r *http.Request) {
 // dirName. For exec-id-named sessions, the runtime dir holds the per-exec
 // inputs/prompts that promoteRuntimeFiles skipped; for legacy timestamp dirs
 // only the canonical directory is meaningful (runtime returns "").
+//
+// Canonical is dual-read: prefer the v1 shared/code/<dirName>/ location
+// (where cmd/code.go now writes), fall back to the pre-Step-4
+// supervisor/code/<dirName>/ for projects whose old sessions haven't been
+// migrated. Returns the v1 path when neither exists so writers create
+// new content under shared/.
 func codeSessionDirs(projectDir, dirName string) (canonical, runtime string) {
-	canonical = filepath.Join(projectDir, "supervisor", "code", dirName)
+	v1 := filepath.Join(projectDir, "shared", "code", dirName)
+	if _, err := os.Stat(v1); err == nil {
+		canonical = v1
+	} else if legacy := filepath.Join(projectDir, "supervisor", "code", dirName); existsDir(legacy) {
+		canonical = legacy
+	} else {
+		canonical = v1
+	}
 	if execID, err := strconv.ParseInt(dirName, 10, 64); err == nil && execID > 0 {
 		runtime = filepath.Join(projectDir, "runtime", dirName)
 	}
 	return canonical, runtime
 }
 
-// scanCodeSessions reads the code directory and returns sessions sorted
-// newest-first. Accepts both legacy timestamp dirs and exec-id dirs; for the
+func existsDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+// scanCodeSessions reads the code directories (shared/code/ and the
+// pre-Step-4 supervisor/code/ fallback) and returns sessions sorted
+// newest-first. Same dirName appearing in both is deduped, preferring
+// shared/. Accepts both legacy timestamp dirs and exec-id dirs; for the
 // latter, timestamps come from the agent_execs row when available and the
 // task count is read from runtime/<exec_id>/ (where the *_code_prompt.md
 // files actually live — the canonical clone skips them).
 func scanCodeSessions(projectDir string, db *calldb.CallDB) []codeSessionEntry {
-	codeDir := filepath.Join(projectDir, "supervisor", "code")
-	entries, err := os.ReadDir(codeDir)
-	if err != nil {
-		return nil
-	}
-
+	seen := make(map[string]bool)
 	var sessions []codeSessionEntry
-	for _, e := range entries {
-		if !e.IsDir() {
+	for _, codeDir := range []string{
+		filepath.Join(projectDir, "shared", "code"),
+		filepath.Join(projectDir, "supervisor", "code"),
+	} {
+		entries, err := os.ReadDir(codeDir)
+		if err != nil {
 			continue
 		}
-		entry, ok := buildCodeSessionEntry(projectDir, e.Name(), db)
-		if !ok {
-			continue
+		for _, e := range entries {
+			if !e.IsDir() || seen[e.Name()] {
+				continue
+			}
+			seen[e.Name()] = true
+			entry, ok := buildCodeSessionEntry(projectDir, e.Name(), db)
+			if !ok {
+				continue
+			}
+			sessions = append(sessions, entry)
 		}
-		sessions = append(sessions, entry)
 	}
 
 	sort.Slice(sessions, func(i, j int) bool {

@@ -86,6 +86,9 @@ func V1Layout(root string) (Result, error) {
 		if err := moveStatic(root, &r); err != nil {
 			return r, err
 		}
+		if err := moveStaticDirs(root, &r); err != nil {
+			return r, err
+		}
 		if err := moveRoles(root, &r); err != nil {
 			return r, err
 		}
@@ -227,6 +230,19 @@ var staticMigrations = []Move{
 	{From: "setup_overview.md", To: "shared/auto_setup/auto_setup.md"},
 }
 
+// staticDirMigrations are directory renames (not single files). The migrator
+// moves the entire tree atomically with os.Rename — works same-filesystem,
+// errors on EXDEV with a "move it manually" message. Target-exists is a
+// loud warning (no automatic merge); the user reconciles by hand.
+//
+// supervisor/code/ holds per-exec sub-run history (code_prompt.md +
+// execution_report.md + …). It's the last directory tree under supervisor/
+// and moves to shared/code/ to align with the rest of the v1 artifact
+// layout.
+var staticDirMigrations = []Move{
+	{From: "supervisor/code", To: "shared/code"},
+}
+
 // roleMigrations are renames templated over each <R> dir under roles/.
 // Source is relative to roles/<R>/; target is relative to root, with `{role}`
 // substituted in (allows the same role to appear more than once in a path —
@@ -255,6 +271,56 @@ func moveStatic(root string, r *Result) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func moveStaticDirs(root string, r *Result) error {
+	for _, m := range staticDirMigrations {
+		if err := moveDir(root, m.From, m.To, r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// moveDir is the directory counterpart to move(). os.Rename on a directory
+// moves the whole tree atomically when both paths are on the same
+// filesystem; cross-device moves (rare for paths inside one .ateam/) error
+// out with a "move it manually" message rather than attempting a recursive
+// copy. Target-exists is a loud warning — directories are too expensive to
+// recursively diff, so the user reconciles by hand.
+func moveDir(root, from, to string, r *Result) error {
+	src := filepath.Join(root, from)
+	dst := filepath.Join(root, to)
+
+	info, err := os.Lstat(src)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("stat %s: %w", from, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s exists but is not a directory; expected to migrate a directory tree", from)
+	}
+	if _, err := os.Lstat(dst); err == nil {
+		r.Warnings = append(r.Warnings,
+			fmt.Sprintf("skipped dir move %s → %s: target already exists (manual reconciliation needed; rename or merge by hand, then re-run)", from, to))
+		return nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("stat %s: %w", to, err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(to), err)
+	}
+	if err := os.Rename(src, dst); err != nil {
+		if errors.Is(err, syscall.EXDEV) {
+			return fmt.Errorf("cross-device dir move %s → %s not supported; move it manually with `mv %s %s` then re-run ateam", from, to, src, dst)
+		}
+		return fmt.Errorf("rename %s → %s: %w (migration paused; re-run ateam to continue)", from, to, err)
+	}
+	r.Moved = append(r.Moved, Move{From: from, To: to})
 	return nil
 }
 

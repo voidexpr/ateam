@@ -12,11 +12,12 @@ import (
 
 // TestPrintCodeSessionSummaryPicksByExecID verifies that printCodeSessionSummary
 // selects the directory matching result.ExecID, not the lexicographically last
-// entry under <supervisorDir>/code/. Without this, once EXEC_ID >= 10 the
-// summary would consistently show stale content (e.g. "9" sorts after "11").
+// entry under shared/code/. Without this, once EXEC_ID >= 10 the summary would
+// consistently show stale content (e.g. "9" sorts after "11").
 func TestPrintCodeSessionSummaryPicksByExecID(t *testing.T) {
-	supervisorDir := t.TempDir()
-	codeDir := filepath.Join(supervisorDir, "code")
+	sharedDir := t.TempDir()
+	supervisorDir := t.TempDir() // unused for this scenario but the signature wants it
+	codeDir := filepath.Join(sharedDir, "code")
 	if err := os.MkdirAll(codeDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +35,7 @@ func TestPrintCodeSessionSummaryPicksByExecID(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		printCodeSessionSummary(supervisorDir, 11, false, "")
+		printCodeSessionSummary(sharedDir, supervisorDir, 11, false, "")
 	})
 
 	if !strings.Contains(out, "REPORT-11") {
