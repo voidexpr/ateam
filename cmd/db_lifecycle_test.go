@@ -240,7 +240,7 @@ func TestEnvShowsNotFoundForMissingPaths(t *testing.T) {
 
 type execGlobals struct {
 	org, profile, agent, role, action, model, effort, workDir, agentArgs, batch, containerName string
-	maxBudgetUSD, maxBudgetBatch, extraPrompt                                                  string
+	maxBudgetUSD, maxBudgetBatch, extraPrompt, prePrompt, postPrompt                           string
 	noStream, noSummary, quiet, verbose, dryRun, dockerAutoSetup                               bool
 }
 
@@ -249,6 +249,7 @@ func saveExecGlobals() execGlobals {
 		org: orgFlag, profile: execProfile, agent: execAgent, role: execRole, action: execAction, model: execModel, effort: execEffort,
 		workDir: workDirFlag, agentArgs: execAgentArgs, batch: execBatch, containerName: execContainerName,
 		maxBudgetUSD: execMaxBudgetUSD, maxBudgetBatch: execMaxBudgetBatch, extraPrompt: execExtraPrompt,
+		prePrompt: execPrePrompt, postPrompt: execPostPrompt,
 		noStream: execNoStream, noSummary: execNoSummary, quiet: execQuiet, verbose: execVerbose, dryRun: execDryRun, dockerAutoSetup: execDockerAutoSetup,
 	}
 }
@@ -268,6 +269,8 @@ func (g execGlobals) restore() {
 	execMaxBudgetUSD = g.maxBudgetUSD
 	execMaxBudgetBatch = g.maxBudgetBatch
 	execExtraPrompt = g.extraPrompt
+	execPrePrompt = g.prePrompt
+	execPostPrompt = g.postPrompt
 	execNoStream = g.noStream
 	execNoSummary = g.noSummary
 	execQuiet = g.quiet

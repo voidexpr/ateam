@@ -429,7 +429,9 @@ When used with `--agent codex-tmux` the prompt has an extra shape: the first lin
 | `--model MODEL` | Model override |
 | `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](CONFIG.md#effort-levels)) |
 | `--agent-args "ARGS"` | Extra args passed to the agent CLI |
-| `--extra-prompt TEXT` | Additional instructions appended after the main prompt (text or `@filepath`) |
+| `--extra-prompt TEXT` | Additional instructions appended after the main prompt under an "Additional Instructions" heading (text or `@filepath`) |
+| `--pre-prompt TEXT` | Text wrapped at the very front of the prompt, before the main body (text or `@filepath`) |
+| `--post-prompt TEXT` | Text wrapped at the very end of the prompt, after `--extra-prompt` (text or `@filepath`) |
 | `--batch ID` | Group related agent_execs |
 | `--max-budget-usd USD` | Per-agent USD spend cap (claude-only; errors on codex) |
 | `--max-budget-usd-batch USD` | Abort if `--batch` already exceeds this USD before starting |
@@ -577,7 +579,9 @@ ateam inspect --last --auto-debug --extra-prompt "focus on the timeout"
 | `--last-code` | Select all execs from the last code session |
 | `--batch NAME` | Select all runs in a batch |
 | `--auto-debug` | Launch an agent in streaming mode to investigate the selected runs |
-| `--extra-prompt TEXT` | Additional instructions appended to the auto-debug prompt (text or `@filepath`) |
+| `--extra-prompt TEXT` | Additional instructions appended to the auto-debug prompt under an "Additional Debug Instructions" heading (text or `@filepath`) |
+| `--pre-prompt TEXT` | Text wrapped at the very front of the auto-debug prompt (text or `@filepath`) |
+| `--post-prompt TEXT` | Text wrapped at the very end of the auto-debug prompt, after `--extra-prompt` (text or `@filepath`) |
 | `--profile NAME` | Profile for the auto-debug agent |
 | `--agent NAME` | Agent for the auto-debug run |
 

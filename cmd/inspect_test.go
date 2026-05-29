@@ -231,7 +231,7 @@ func TestBuildAutoDebugPromptExtraFromFile(t *testing.T) {
 		StartedAt: time.Now().Add(-1 * time.Minute).Format(time.RFC3339),
 	}}
 
-	prompt, err := buildAutoDebugPrompt(env, rows, nil, "@"+extraFile)
+	prompt, err := buildAutoDebugPrompt(env, rows, nil, "@"+extraFile, "", "")
 	if err != nil {
 		t.Fatalf("buildAutoDebugPrompt: %v", err)
 	}
@@ -240,5 +240,41 @@ func TestBuildAutoDebugPromptExtraFromFile(t *testing.T) {
 	}
 	if !strings.Contains(prompt, "Additional Debug Instructions") {
 		t.Errorf("expected 'Additional Debug Instructions' section in assembled prompt:\n%s", prompt)
+	}
+}
+
+// TestBuildAutoDebugPromptPrePostWrap verifies that --pre-prompt lands at the
+// very front and --post-prompt at the very end of the auto-debug prompt, with
+// --extra-prompt between the assembled body and --post-prompt.
+func TestBuildAutoDebugPromptPrePostWrap(t *testing.T) {
+	_, _, env := setupTestProject(t)
+	rows := []calldb.RecentRow{{
+		ID: 7, Action: "exec", Role: "test.gaps",
+		StartedAt: time.Now().Add(-1 * time.Minute).Format(time.RFC3339),
+	}}
+
+	const pre = "PRE-MARKER"
+	const post = "POST-MARKER"
+	const extra = "EXTRA-MARKER"
+
+	prompt, err := buildAutoDebugPrompt(env, rows, nil, extra, pre, post)
+	if err != nil {
+		t.Fatalf("buildAutoDebugPrompt: %v", err)
+	}
+
+	preIdx := strings.Index(prompt, pre)
+	extraIdx := strings.Index(prompt, extra)
+	postIdx := strings.Index(prompt, post)
+	if preIdx < 0 || extraIdx < 0 || postIdx < 0 {
+		t.Fatalf("missing marker(s) in prompt:\n%s", prompt)
+	}
+	if preIdx >= extraIdx || extraIdx >= postIdx {
+		t.Errorf("expected order pre < extra < post (got %d, %d, %d):\n%s", preIdx, extraIdx, postIdx, prompt)
+	}
+	if preIdx != 0 {
+		t.Errorf("expected --pre-prompt at position 0, got %d", preIdx)
+	}
+	if !strings.HasSuffix(strings.TrimRight(prompt, "\n"), post) {
+		t.Errorf("expected --post-prompt at the very end of the prompt:\n%s", prompt)
 	}
 }

@@ -66,7 +66,7 @@ Default-on; `ATEAM_NO_MIGRATE=1` opts out. Runs in `Resolve()` and `LookupFrom()
 - `cmd/{report_v1,review_v1,code_v1}.go` — v1 helpers: `assembleRoleReportV1`, `assembleRoleCodeV1`, `assembleReviewV1`, `assembleSupervisorV1`, `assembleCodeManagementV1`, `formatReportsBlock`, `previousReportBlock`, `previewSubRunFlags`, `SubRunFlags`.
 - All 7 prompt-taking commands (`report`, `review`, `code`, `verify`, `auto-setup`, `prompt`, `all`) accept `--pre-prompt TEXT` / `--post-prompt TEXT` (text or `@filepath`). Wrap order: anchors → dir-level `_pre`/`_post` → role-level pre/post → CLI `--pre-prompt` (outermost head) → … → `--post-prompt` (outermost tail).
 - `--extra-prompt` stays as a separate flag, appended after the assembled body but before any outer `--post-prompt` wrap. Different position from `--post-prompt` by design — `--extra-prompt` is inside the prompt, `--post-prompt` wraps it.
-- `exec`, `parallel`, `inspect --auto-debug` are raw-prompt commands that don't go through the assembler. They still have `--extra-prompt` only; `--pre-prompt` / `--post-prompt` haven't been added because there's nothing for them to wrap (the raw prompt is the whole thing).
+- `exec` and `inspect --auto-debug` now accept `--pre-prompt` / `--post-prompt` alongside `--extra-prompt`. `exec` is raw-prompt — pre wraps at the very front, post wraps at the very end, extra sits between body and post under `# Additional Instructions`. `inspect --auto-debug` goes through the assembler and mirrors `assembleSupervisorV1`: pre/post ride through `AssembleOptions`; when `--extra-prompt` is set, post is held back and appended after the `# Additional Debug Instructions` block. `parallel` still has neither — it doesn't take a single prompt to wrap.
 
 ### Web (`internal/web/`)
 
@@ -227,7 +227,7 @@ These are open per `Feature_prompt_report_fs_refactor.md` but were explicitly ou
 
 - **Task 2 (Stage abstraction)** — internal Go cleanup that would collapse `report` / `review` / `verify` / `auto_setup` etc. onto a `Stage` type with `PreAction` / `PostAction`. None of this exists yet. Each cmd is still hand-written; the v1 helpers (`assembleRoleReportV1` etc.) sit alongside but don't reach into runner internals.
 - **Task 3 (Progress telemetry)** — `ateam exec` should emit structured JSON progress events that get persisted to `state.sqlite`; `ateam parallel` should share the same stream. Not started. Today `parallel` renders directly to the terminal in memory and `exec` doesn't emit anything structured.
-- **`--pre-prompt` / `--post-prompt` on raw-prompt commands** — `exec`, `parallel`, `inspect --auto-debug` take a raw prompt and don't go through the assembler. They have `--extra-prompt` only. Adding pre/post for raw prompts is straightforward string wrap; low priority because the user can just construct the wrapped prompt themselves and pass it whole.
+- **`--pre-prompt` / `--post-prompt` on `parallel`** — `parallel` takes an N-prompt batch with no single body to wrap; pre/post weren't added. `exec` and `inspect --auto-debug` now accept them (see Architecture quick map → cmd layer).
 
 ## Commit history (recent first, on `small-fixes` branch)
 
