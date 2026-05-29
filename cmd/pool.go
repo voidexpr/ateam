@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/runner"
 )
@@ -119,16 +120,21 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolExec, max
 		}
 	}()
 
-	var succeeded, failed int
+	var succeeded, failed, skipped int
 	var results []runner.RunSummary
 	for result := range completedCh {
+		isSkipped := result.ErrorSource == agent.ErrorSourceSkipped
 		if useLiveRenderer {
 			statusMu.Lock()
 			idx := labelIndex[result.RoleID]
-			if result.Err != nil {
+			switch {
+			case isSkipped:
+				statusRows[idx] = skippedPoolStatusRow(statusRows[idx], result)
+				skipped++
+			case result.Err != nil:
 				statusRows[idx] = errorPoolStatusRow(statusRows[idx], result, cwd)
 				failed++
-			} else {
+			default:
 				displayPath := ""
 				if opts.onDone != nil {
 					displayPath = opts.onDone(result, cwd)
@@ -139,9 +145,12 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolExec, max
 			renderer.Render(statusRows)
 			statusMu.Unlock()
 		} else {
-			if result.Err != nil {
+			switch {
+			case isSkipped:
+				skipped++
+			case result.Err != nil:
 				failed++
-			} else {
+			default:
 				if opts.onDone != nil {
 					opts.onDone(result, cwd)
 				}
@@ -167,7 +176,11 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolExec, max
 	// alongside a now-redundant copy of the table.
 	tearDownLiveRegion()
 
-	fmt.Fprintf(out, "\n%d succeeded, %d failed (%s)\n", succeeded, failed, display.FormatDuration(time.Since(start)))
+	if skipped > 0 {
+		fmt.Fprintf(out, "\n%d succeeded, %d failed, %d skipped (%s)\n", succeeded, failed, skipped, display.FormatDuration(time.Since(start)))
+	} else {
+		fmt.Fprintf(out, "\n%d succeeded, %d failed (%s)\n", succeeded, failed, display.FormatDuration(time.Since(start)))
+	}
 
 	if failed > 0 {
 		for _, result := range results {
@@ -186,8 +199,13 @@ func runPool(ctx context.Context, r *runner.Runner, tasks []runner.PoolExec, max
 		}
 	}
 
-	if failed > 0 {
+	switch {
+	case failed > 0 && skipped > 0:
+		return results, fmt.Errorf("%d %s failed, %d skipped", failed, opts.itemLabel, skipped)
+	case failed > 0:
 		return results, fmt.Errorf("%d %s failed", failed, opts.itemLabel)
+	case skipped > 0:
+		return results, fmt.Errorf("%d %s skipped", skipped, opts.itemLabel)
 	}
 	return results, nil
 }

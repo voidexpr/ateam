@@ -64,6 +64,67 @@ func (a *concurrencyTrackingAgent) Run(ctx context.Context, req agent.Request) <
 	return ch
 }
 
+// panicAgent panics synchronously inside Run, simulating an unexpected nil
+// deref or similar fault reached through Runner.Run on a worker goroutine.
+type panicAgent struct{}
+
+func (panicAgent) Name() string           { return "panic" }
+func (panicAgent) SetModel(string)        {}
+func (panicAgent) SetEffort(string)       {}
+func (panicAgent) SetMaxBudgetUSD(string) {}
+func (a panicAgent) CloneWithResolvedTemplates(*strings.Replacer) agent.Agent {
+	return a
+}
+func (panicAgent) DebugCommandArgs([]string) (string, []string) { return "panic", nil }
+func (panicAgent) Run(context.Context, agent.Request) <-chan agent.StreamEvent {
+	panic("boom in agent.Run")
+}
+
+// TestRunPoolRecoversWorkerPanic verifies that a panic on one task is converted
+// into a failed-task summary instead of tearing down the process, and that
+// sibling tasks still complete.
+func TestRunPoolRecoversWorkerPanic(t *testing.T) {
+	dir := t.TempDir()
+	r := newTestRunner(t, dir, panicAgent{})
+
+	tasks := []PoolExec{
+		{Prompt: "boom", RunOpts: RunOpts{RoleID: "panic-role", Action: ActionExec}},
+	}
+
+	completed := make(chan RunSummary, len(tasks))
+	results := RunPool(context.Background(), r, tasks, 1, nil, completed)
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	s := results[0]
+	if s.Err == nil {
+		t.Fatal("expected a non-nil Err for the panicking task")
+	}
+	if !s.IsError || s.ErrorSource != agent.ErrorSourceAteamInternal {
+		t.Errorf("expected IsError + ateam_internal source, got IsError=%v source=%q", s.IsError, s.ErrorSource)
+	}
+	if !strings.Contains(s.ErrorCause, "panic: boom in agent.Run") {
+		t.Errorf("expected panic message in ErrorCause, got %q", s.ErrorCause)
+	}
+	if !strings.Contains(s.ErrorCause, "goroutine") {
+		t.Errorf("expected a stack trace in ErrorCause, got %q", s.ErrorCause)
+	}
+	if s.RoleID != "panic-role" {
+		t.Errorf("expected RoleID preserved on panic summary, got %q", s.RoleID)
+	}
+
+	// The summary must also reach the completed channel so the cmd-layer
+	// drain loop accounts for it.
+	var fromCh int
+	for range completed {
+		fromCh++
+	}
+	if fromCh != 1 {
+		t.Errorf("expected 1 summary on completed channel, got %d", fromCh)
+	}
+}
+
 func TestRunPoolBasic(t *testing.T) {
 	dir := t.TempDir()
 
@@ -269,7 +330,22 @@ func TestRunPoolPreDispatchAborts(t *testing.T) {
 	}
 
 	results := RunPoolWithOpts(context.Background(), r, tasks, 4, nil, nil, opts)
-	if len(results) != 2 {
-		t.Errorf("expected 2 results (precheck stopped after 2), got %d", len(results))
+	// 2 tasks dispatched + 2 surfaced as skipped summaries = 4 total.
+	if len(results) != 4 {
+		t.Fatalf("expected 4 results (2 dispatched + 2 skipped), got %d", len(results))
+	}
+	var dispatched, skipped int
+	for _, s := range results {
+		if s.ErrorSource == agent.ErrorSourceSkipped {
+			skipped++
+			if s.Err != nil {
+				t.Errorf("skipped summary for %q should have nil Err, got %v", s.RoleID, s.Err)
+			}
+		} else {
+			dispatched++
+		}
+	}
+	if dispatched != 2 || skipped != 2 {
+		t.Errorf("expected 2 dispatched + 2 skipped, got %d dispatched + %d skipped", dispatched, skipped)
 	}
 }

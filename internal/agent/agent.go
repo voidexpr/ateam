@@ -78,6 +78,7 @@ const (
 	ErrorSourceAteamTimeout  = "ateam_timeout"  // ateam killed the run via context deadline
 	ErrorSourceAteamInternal = "ateam_internal" // ateam side failure (no result event, not a timeout)
 	ErrorSourceUserCanceled  = "user_canceled"  // operator aborted the run (Ctrl-C, SIGTERM, parent ctx canceled)
+	ErrorSourceSkipped       = "skipped"        // task was never dispatched (e.g. --max-budget-usd-batch cap reached mid-batch)
 )
 
 // errorEvent builds a populated StreamEvent of type "error" carrying err.

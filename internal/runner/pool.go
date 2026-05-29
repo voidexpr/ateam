@@ -4,7 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"sync"
+	"time"
+
+	"github.com/ateam/internal/agent"
 )
 
 // PoolExec pairs a prompt with its run options for the worker pool.
@@ -54,10 +58,31 @@ func RunPoolWithOpts(ctx context.Context, r *Runner, tasks []PoolExec, maxParall
 	var results []RunSummary
 	var wg sync.WaitGroup
 
-	for _, task := range tasks {
+	// record appends a summary to results and, if requested, forwards it on
+	// the completed channel. Safe to call concurrently from workers and from
+	// the dispatch loop. The completed send never blocks because the caller
+	// guarantees cap(completed) >= len(tasks) and every task produces at most
+	// one summary (dispatched OR skipped, never both).
+	record := func(s RunSummary) {
+		mu.Lock()
+		results = append(results, s)
+		mu.Unlock()
+		if completed != nil {
+			completed <- s
+		}
+	}
+
+	for i := range tasks {
+		task := tasks[i]
 		if opts.PreDispatch != nil {
 			if err := opts.PreDispatch(); err != nil {
 				fmt.Fprintf(os.Stderr, "Pool: stopping dispatch — %v\n", err)
+				// Surface the tasks that were never dispatched instead of
+				// dropping them silently: emit a skipped summary per remaining
+				// task so the batch reports them and exits non-zero.
+				for _, skipped := range tasks[i:] {
+					record(skippedSummary(skipped, err))
+				}
 				break
 			}
 		}
@@ -74,19 +99,25 @@ func RunPoolWithOpts(ctx context.Context, r *Runner, tasks []PoolExec, maxParall
 			defer wg.Done()
 			defer func() { <-sem }() // release slot
 
-			taskRunner := r
-			if t.Runner != nil {
-				taskRunner = t.Runner
-			}
-			summary := taskRunner.Run(ctx, t.Prompt, t.RunOpts, progress)
+			var summary RunSummary
+			func() {
+				// A panic in Run (or the agent it dispatches) would otherwise
+				// tear down the whole process and every sibling agent. Recover
+				// in-frame, turn it into a failed-task summary, and let the
+				// batch continue.
+				defer func() {
+					if rv := recover(); rv != nil {
+						summary = panicSummary(t, rv)
+					}
+				}()
+				taskRunner := r
+				if t.Runner != nil {
+					taskRunner = t.Runner
+				}
+				summary = taskRunner.Run(ctx, t.Prompt, t.RunOpts, progress)
+			}()
 
-			mu.Lock()
-			results = append(results, summary)
-			mu.Unlock()
-
-			if completed != nil {
-				completed <- summary
-			}
+			record(summary)
 		}(task)
 	}
 
@@ -95,4 +126,45 @@ func RunPoolWithOpts(ctx context.Context, r *Runner, tasks []PoolExec, maxParall
 		close(completed)
 	}
 	return results
+}
+
+// panicSummary builds a failed-task summary from a recovered panic value. The
+// stack trace is captured into ErrorCause so the panic stays diagnosable. Err
+// is set so the cmd layer counts the task as failed.
+func panicSummary(t PoolExec, rv any) RunSummary {
+	stack := debug.Stack()
+	now := time.Now()
+	started := t.StartedAt
+	if started.IsZero() {
+		started = now
+	}
+	err := fmt.Errorf("panic: %v", rv)
+	return RunSummary{
+		RoleID:      t.RoleID,
+		StartedAt:   started,
+		EndedAt:     now,
+		Duration:    now.Sub(started),
+		ExitCode:    -1,
+		IsError:     true,
+		Err:         err,
+		ErrorSource: agent.ErrorSourceAteamInternal,
+		ErrorCause:  fmt.Sprintf("panic: %v\n\n%s", rv, stack),
+	}
+}
+
+// skippedSummary builds a summary for a task that PreDispatch refused to
+// dispatch (e.g. --max-budget-usd-batch reached). It is marked skipped rather
+// than failed so the cmd layer can report it in its own "X skipped" bucket;
+// Err is left nil to keep skipped distinct from failed.
+func skippedSummary(t PoolExec, cause error) RunSummary {
+	now := time.Now()
+	return RunSummary{
+		RoleID:      t.RoleID,
+		StartedAt:   now,
+		EndedAt:     now,
+		ExitCode:    -1,
+		IsError:     true,
+		ErrorSource: agent.ErrorSourceSkipped,
+		ErrorCause:  fmt.Sprintf("skipped: %v", cause),
+	}
 }

@@ -15,6 +15,7 @@ const (
 	poolStateRunning = "running"
 	poolStateDone    = "done"
 	poolStateError   = "ERROR"
+	poolStateSkipped = "SKIPPED"
 
 	// poolStatusRowFmt is the shared template used for both the header
 	// and each data row, so column widths can't drift between them.
@@ -159,6 +160,14 @@ func errorPoolStatusRow(row poolStatusRow, summary runner.RunSummary, cwd string
 		poolStatusContext(summary),
 		streamFilePrefix(summary.StreamFilePath, cwd),
 	)), "")
+}
+
+func skippedPoolStatusRow(row poolStatusRow, summary runner.RunSummary) poolStatusRow {
+	detail := summary.ErrorCause
+	if detail == "" {
+		detail = "skipped"
+	}
+	return finalizedPoolStatusRow(row, summary, poolStateSkipped, detail, "")
 }
 
 func donePoolStatusRow(row poolStatusRow, summary runner.RunSummary, path string) poolStatusRow {
