@@ -277,7 +277,7 @@ func runReview(opts ReviewOptions) error {
 	fmt.Printf("Review: %s\n", reviewFile)
 
 	if opts.Print {
-		fmt.Printf("\n%s\n", result.Output)
+		printArtifact(reviewFile, result.Output)
 	}
 
 	return nil

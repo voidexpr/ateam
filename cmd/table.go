@@ -70,6 +70,30 @@ func printDone(r runner.RunSummary) {
 	fmt.Printf("Done (%s%s)\n\n", display.FormatDuration(r.Duration), costSuffix)
 }
 
+// printArtifact prints the on-disk artifact at path for --print. The shipped
+// single-file prompts (review, verify, report, auto_setup) instruct the agent
+// to write its output via the Write tool and end with a one-line confirmation
+// message — "the on-disk file is the source of truth, anything you stream as
+// text is discarded." So --print must read the file, not the stream. The
+// prompts' documented recovery path is "if Write fails, emit the body as the
+// final message," so streamFallback is printed when the file is missing or
+// empty. Quiet no-op when both are empty.
+func printArtifact(path, streamFallback string) {
+	if path != "" {
+		data, err := os.ReadFile(path)
+		if err == nil && len(data) > 0 {
+			fmt.Printf("\n%s", string(data))
+			if data[len(data)-1] != '\n' {
+				fmt.Println()
+			}
+			return
+		}
+	}
+	if streamFallback != "" {
+		fmt.Printf("\n%s\n", streamFallback)
+	}
+}
+
 // newRunner creates a Runner using the resolved profile from runtime.hcl.
 // roleID is optional — used for role-specific Dockerfile resolution.
 func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetup bool) (*runner.Runner, error) {

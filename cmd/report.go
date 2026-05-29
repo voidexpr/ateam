@@ -386,7 +386,8 @@ func runReport(opts ReportOptions) error {
 			if r.Err != nil {
 				continue
 			}
-			fmt.Printf("\n══════ %s ══════\n\n%s\n", r.RoleID, r.Output)
+			fmt.Printf("\n══════ %s ══════\n", r.RoleID)
+			printArtifact(env.RoleReportPath(r.RoleID), r.Output)
 		}
 	}
 

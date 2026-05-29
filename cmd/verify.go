@@ -199,7 +199,7 @@ func runVerify(opts VerifyOptions) error {
 	fmt.Printf("Verification report: %s\n", env.VerifyPath())
 
 	if opts.Print {
-		fmt.Printf("\n%s\n", result.Output)
+		printArtifact(verifyFile, result.Output)
 	}
 
 	return nil
