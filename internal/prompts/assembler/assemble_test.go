@@ -384,3 +384,45 @@ func TestAssembleEmptyOverridesNoOp(t *testing.T) {
 		}
 	}
 }
+
+// TestAssembleErrorsOnEmptyRoleMainOverride covers a subtle bug: an
+// empty/whitespace `<role>.prompt.md` at a more-specific anchor (e.g.
+// project) would silently shadow the embedded fallback — Assemble's
+// FirstMatch returns the empty project file, addRendered's whitespace
+// filter drops the section, and the result has no role_main at all
+// (empty Prompt, no error). The fix: error explicitly when the
+// resolved role main renders to whitespace.
+func TestAssembleErrorsOnEmptyRoleMainOverride(t *testing.T) {
+	anchors := mkAnchors(
+		map[string]string{"report/security.prompt.md": "   \n"},
+		nil,
+		map[string]string{"report/security.prompt.md": "REAL ROLE BODY"},
+	)
+	a := New(anchors)
+	_, err := a.Assemble("report/security", mkVars(), nil, nil)
+	if err == nil {
+		t.Fatal("expected error when project override renders to whitespace, got nil")
+	}
+	if !strings.Contains(err.Error(), "empty after rendering") {
+		t.Errorf("expected 'empty after rendering' in error, got: %v", err)
+	}
+}
+
+// TestAssembleErrorsOnEmptyReplaceRoleMain mirrors the above for the CLI
+// override path: passing only-whitespace via opts.ReplaceRoleMain is a
+// hard error, not a silent empty result.
+func TestAssembleErrorsOnEmptyReplaceRoleMain(t *testing.T) {
+	anchors := mkAnchors(
+		nil, nil,
+		map[string]string{"review.prompt.md": "EMBEDDED BODY"},
+	)
+	a := New(anchors)
+	opts := &AssembleOptions{ReplaceRoleMain: "   \n\t"}
+	_, err := a.Assemble("review", mkVars(), nil, opts)
+	if err == nil {
+		t.Fatal("expected error when ReplaceRoleMain is whitespace, got nil")
+	}
+	if !strings.Contains(err.Error(), "empty after rendering") {
+		t.Errorf("expected 'empty after rendering' in error, got: %v", err)
+	}
+}

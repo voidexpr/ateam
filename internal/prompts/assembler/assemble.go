@@ -186,10 +186,18 @@ func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine, opts 
 	}
 
 	// 3. Role main: either the CLI override (replaces the file) or the
-	// first-match across anchors.
+	// first-match across anchors. Required — the assembler errors when no
+	// role body is found OR when the resolved body is empty/whitespace.
+	// Empty content is treated as a missing role, not a silent skip, so
+	// an accidentally-empty project override doesn't ghost the embedded
+	// body without surfacing the problem.
+	mainCountBefore := len(sections)
 	if opts.ReplaceRoleMain != "" {
 		if err := addCLI("role_main", "(--prompt)", opts.ReplaceRoleMain); err != nil {
 			return AssembleResult{}, err
+		}
+		if len(sections) == mainCountBefore {
+			return AssembleResult{}, fmt.Errorf("role main override (opts.ReplaceRoleMain) is empty after rendering — provide non-whitespace content or omit the override")
 		}
 	} else {
 		mainPath := joinName(dir, role+".prompt.md")
@@ -202,6 +210,9 @@ func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine, opts 
 		}
 		if err := addRendered("role_main", main.Anchor, main.Path, string(main.Content)); err != nil {
 			return AssembleResult{}, err
+		}
+		if len(sections) == mainCountBefore {
+			return AssembleResult{}, fmt.Errorf("role main at %s:%s is empty after rendering — the file exists but contains only whitespace, which would silently shadow any embedded fallback; remove the file or add a body", main.Anchor, main.Path)
 		}
 	}
 
