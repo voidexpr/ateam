@@ -154,9 +154,10 @@ func TestBuildAutoRolesContextHappyPath(t *testing.T) {
 	}
 	db.Close()
 
-	// Seed a per-role report.md, a review.md, and an execution_report.md.
-	mustWrite(t, filepath.Join(projPath, ".ateam", "roles", "code.bugs", "report.md"), "# Bug findings\n- Finding 1\n")
-	mustWrite(t, filepath.Join(projPath, ".ateam", "supervisor", "review.md"), "# Review\n\nSelected: code.bugs:Finding-1\nDeferred: nothing\n")
+	// Seed a per-role report, a review, and an execution_report at their v1
+	// shared/ locations — the paths auto-roles context reads post-migration.
+	mustWrite(t, filepath.Join(projPath, ".ateam", "shared", "report", "code.bugs", "code.bugs.md"), "# Bug findings\n- Finding 1\n")
+	mustWrite(t, filepath.Join(projPath, ".ateam", "shared", "review", "review.md"), "# Review\n\nSelected: code.bugs:Finding-1\nDeferred: nothing\n")
 	mustWrite(t, filepath.Join(projPath, ".ateam", "runtime", "999", "execution_report.md"), "# Execution\n\nApplied Finding-1\n")
 
 	got, err := buildAutoRolesContext(env)

@@ -53,8 +53,12 @@ func assembleRoleReportV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt,
 	if extraPrompt != "" {
 		prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
 	}
-	if strings.TrimSpace(postPrompt) != "" {
-		prompt += "\n\n---\n\n" + postPrompt
+	post, err := renderCLIWrapper(a, vars, postPrompt)
+	if err != nil {
+		return "", err
+	}
+	if post != "" {
+		prompt += "\n\n---\n\n" + post
 	}
 	return prompt, nil
 }
@@ -88,16 +92,20 @@ func assembleRoleCodeV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt, p
 	if extraPrompt != "" {
 		prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
 	}
-	if strings.TrimSpace(postPrompt) != "" {
-		prompt += "\n\n---\n\n" + postPrompt
+	post, err := renderCLIWrapper(a, vars, postPrompt)
+	if err != nil {
+		return "", err
+	}
+	if post != "" {
+		prompt += "\n\n---\n\n" + post
 	}
 	return prompt, nil
 }
 
 // previousReportBlock returns the inline "# Previous Report" section (or
 // "no prior report" sentinel) for roleID, formatted the same way the legacy
-// path did. Source path is env.RoleReportPath which dual-reads v1
-// (shared/report/<role>/report.md) and legacy (roles/<role>/report.md).
+// path did. Source path is env.RoleReportPath — the canonical v1
+// shared/report/<role>/<role>.md (auto-migration handles legacy locations).
 func previousReportBlock(env *root.ResolvedEnv, roleID string) string {
 	path := env.RoleReportPath(roleID)
 	data, err := os.ReadFile(path)

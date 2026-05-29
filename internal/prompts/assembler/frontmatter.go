@@ -29,6 +29,11 @@ var AllowedFrontmatterKeys = []string{"description", "deprecated", "legacy"}
 // offending key in the message. Malformed frontmatter (missing closing `---`,
 // non-key:value lines, invalid bool values) also errors.
 func ParseFrontmatter(content string) (Frontmatter, string, error) {
+	// Normalize CRLF up front so detection and the body return are line-ending
+	// agnostic. Without this a Windows-authored file starting "---\r\n" fails
+	// the LF-only prefix check and leaks the whole frontmatter block verbatim
+	// into the rendered prompt.
+	content = strings.ReplaceAll(content, "\r\n", "\n")
 	if !strings.HasPrefix(content, "---\n") {
 		return Frontmatter{}, content, nil
 	}
@@ -59,8 +64,7 @@ func ParseFrontmatter(content string) (Frontmatter, string, error) {
 			return Frontmatter{}, content, fmt.Errorf("frontmatter line %d: expected `key: value`, got %q", lineNo+1, trimmed)
 		}
 		key := strings.TrimSpace(trimmed[:colon])
-		val := strings.TrimSpace(trimmed[colon+1:])
-		val = strings.Trim(val, `"`) // tolerate quoted strings
+		val := unquoteValue(strings.TrimSpace(trimmed[colon+1:]))
 
 		switch key {
 		case "description":
@@ -82,6 +86,17 @@ func ParseFrontmatter(content string) (Frontmatter, string, error) {
 		}
 	}
 	return fm, body, nil
+}
+
+// unquoteValue strips a single balanced pair of surrounding double quotes.
+// Unlike strings.Trim(s, `"`), it leaves values whose first/last rune merely
+// happens to be a quote intact: `say "hi"` stays `say "hi"`, while a fully
+// wrapped `"hi"` unwraps to `hi`.
+func unquoteValue(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s[1 : len(s)-1]
+	}
+	return s
 }
 
 func parseBool(s string) (bool, error) {

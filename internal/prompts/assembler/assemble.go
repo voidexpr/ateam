@@ -256,13 +256,6 @@ func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine, opts 
 	}, nil
 }
 
-// SectionSeparator is the literal string Assemble places between adjacent
-// composed sections. `\n\n---\n\n` renders as a Markdown horizontal rule, so
-// the assembled prompt visually separates each fragment — and matches the
-// separator the legacy prompts.AssembleXxx functions used. Exported so the
-// preview command can show it explicitly when helpful.
-const SectionSeparator = "\n\n---\n\n"
-
 // fragmentGlobs returns the singleton + named-fragment glob pair for a
 // pre/post base ("_pre", "_post", "<role>.pre", "<role>.post") at `dir`. The
 // singleton (`<base>.md`) and fragments (`<base>.<NAME>.md`) both contribute;

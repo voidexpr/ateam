@@ -141,6 +141,16 @@ func renameLegacyReportFiles(root string, r *Result) error {
 //
 // Cross-device renames fall back to copy+delete; same-FS renames are atomic.
 func move(root, from, to string, r *Result) (bool, error) {
+	// A no-op rename (from == to) can arise when a path templated over a role
+	// id collapses the source and destination onto the same file — e.g. a role
+	// literally named "report" makes renameLegacyReportFiles compute
+	// shared/report/report/report.md for both. Without this guard the
+	// dst-exists branch below would treat the file as its own duplicate and
+	// delete it. Nothing to do here.
+	if from == to {
+		return false, nil
+	}
+
 	src := filepath.Join(root, from)
 	dst := filepath.Join(root, to)
 
@@ -150,7 +160,16 @@ func move(root, from, to string, r *Result) (bool, error) {
 		}
 		return false, fmt.Errorf("stat %s: %w", from, err)
 	}
-	if _, err := os.Lstat(dst); err == nil {
+	if info, err := os.Lstat(dst); err == nil {
+		// A directory sitting at the file target can't be reconciled by the
+		// content-compare path (resolveExistingTarget would os.ReadFile a
+		// directory and abort the whole migration with a confusing EISDIR).
+		// Warn and skip like moveDir does for an occupied directory target.
+		if info.IsDir() {
+			r.Warnings = append(r.Warnings,
+				fmt.Sprintf("skipped move %s → %s: target exists and is a directory (manual reconciliation needed; rename or merge by hand, then re-run)", from, to))
+			return false, nil
+		}
 		return false, resolveExistingTarget(src, dst, from, to, r)
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return false, fmt.Errorf("stat %s: %w", to, err)

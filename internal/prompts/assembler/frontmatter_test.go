@@ -116,3 +116,42 @@ func TestParseFrontmatterErrors(t *testing.T) {
 		})
 	}
 }
+
+// TestParseFrontmatterCRLF verifies CRLF-authored frontmatter is detected and
+// stripped rather than leaking the block verbatim into the body.
+func TestParseFrontmatterCRLF(t *testing.T) {
+	in := "---\r\ndescription: hi\r\n---\r\nBody line\r\n"
+	fm, body, err := ParseFrontmatter(in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fm.Description != "hi" {
+		t.Errorf("description = %q, want %q", fm.Description, "hi")
+	}
+	if strings.Contains(body, "---") || strings.Contains(body, "description") {
+		t.Errorf("frontmatter leaked into body: %q", body)
+	}
+	if strings.TrimSpace(body) != "Body line" {
+		t.Errorf("body = %q, want %q", body, "Body line")
+	}
+}
+
+// TestParseFrontmatterQuoteHandling verifies a value is only unwrapped when it
+// is a fully balanced quoted pair — an interior or trailing quote stays put.
+func TestParseFrontmatterQuoteHandling(t *testing.T) {
+	cases := map[string]string{
+		`description: "hello"`:   "hello",
+		`description: say "hi"`:  `say "hi"`,
+		`description: plain`:     "plain",
+		`description: "wrapped"`: "wrapped",
+	}
+	for in, want := range cases {
+		fm, _, err := ParseFrontmatter("---\n" + in + "\n---\nbody")
+		if err != nil {
+			t.Fatalf("%q: unexpected error: %v", in, err)
+		}
+		if fm.Description != want {
+			t.Errorf("%q -> description = %q, want %q", in, fm.Description, want)
+		}
+	}
+}

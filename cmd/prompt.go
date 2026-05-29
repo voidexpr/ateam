@@ -216,6 +216,14 @@ func assembleForInspection() (string, []sectionDigest, error) {
 	if err != nil {
 		return "", nil, err
 	}
+	prePrompt, err := prompts.ResolveOptional(promptPrePrompt)
+	if err != nil {
+		return "", nil, err
+	}
+	postPrompt, err := prompts.ResolveOptional(promptPostPrompt)
+	if err != nil {
+		return "", nil, err
+	}
 	promptPath, defaultLabel, err := promptPathForCurrentFlags()
 	if err != nil {
 		return "", nil, err
@@ -226,19 +234,34 @@ func assembleForInspection() (string, []sectionDigest, error) {
 	}
 	a := env.Assembler()
 
+	// Orphan scan: every orphan is surfaced to stderr for visibility, but only
+	// orphans tied to the previewed prompt block the preview. An orphan is
+	// "tied" when it sits in the previewed directory AND its role either equals
+	// the previewed role or is a near-miss typo of it (Hint). A stray fragment
+	// for an unrelated role (e.g. a deleted role's leftover .post.*) must not
+	// fail `ateam prompt --paths` when the real `ateam report` run — which
+	// never calls FindOrphans — succeeds for the previewed role.
+	previewDir, previewRole := splitPromptPath(promptPath)
 	orphans, err := a.FindOrphans()
 	if err != nil {
 		return "", nil, fmt.Errorf("scanning for orphan fragments: %w", err)
 	}
+	var blocking int
 	for _, o := range orphans {
 		fmt.Fprintln(os.Stderr, o.Error())
+		if o.Dir == previewDir && (o.Role == previewRole || o.Hint == previewRole) {
+			blocking++
+		}
 	}
-	if len(orphans) > 0 {
-		return "", nil, fmt.Errorf("found %d orphan fragment(s); fix or remove them before assembling", len(orphans))
+	if blocking > 0 {
+		return "", nil, fmt.Errorf("found %d orphan fragment(s) for the previewed prompt %q; fix or remove them before assembling", blocking, promptPath)
 	}
 
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, promptAction)
-	res, err := a.Assemble(promptPath, vars, nil, nil)
+	// Pre-prompt rides through the assembler (lands as the front cli_pre_prompt
+	// section); post-prompt is appended after the synthesized live sections
+	// below so the preview mirrors the real run's outermost-tail ordering.
+	res, err := a.Assemble(promptPath, vars, nil, &assembler.AssembleOptions{PrePrompt: prePrompt})
 	if err != nil {
 		return "", nil, err
 	}
@@ -309,7 +332,26 @@ func assembleForInspection() (string, []sectionDigest, error) {
 		}
 	}
 
+	// CLI post-prompt is the outermost tail wrapper, after every synthesized
+	// live section — matching where the real run appends it.
+	post, perr := renderCLIWrapper(a, vars, postPrompt)
+	if perr != nil {
+		return "", nil, perr
+	}
+	addLive("cli_post_prompt", "(--post-prompt)", post)
+
 	return promptPath, digests, nil
+}
+
+// splitPromptPath splits a v1 prompt path ("report/security", "review") into
+// its directory and trailing role/name segments — the same (dir, role) shape
+// FindOrphans records for each fragment, so the inspection orphan check can
+// match orphans against the previewed prompt.
+func splitPromptPath(promptPath string) (dir, role string) {
+	parts := strings.Split(promptPath, "/")
+	role = parts[len(parts)-1]
+	dir = strings.Join(parts[:len(parts)-1], "/")
+	return dir, role
 }
 
 // runPromptPaths emits the per-section table that --paths produces:

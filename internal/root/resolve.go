@@ -514,9 +514,13 @@ func applyV1LayoutMigration(projectDir, orgDir string) error {
 		if res.Changed() {
 			fmt.Fprintf(os.Stderr, "ateam: migrated %s to v1 prompts layout (%d moves, %d cleanups)\n",
 				dir, len(res.Moved), len(res.RemovedDirs))
-			for _, w := range res.Warnings {
-				fmt.Fprintf(os.Stderr, "ateam: migration warning: %s\n", w)
-			}
+		}
+		// Warnings are surfaced even when nothing moved — a conflict-only pass
+		// (target already exists, a directory blocks a file target, …) records
+		// a warning but leaves Changed() false, and the user still needs to
+		// reconcile by hand.
+		for _, w := range res.Warnings {
+			fmt.Fprintf(os.Stderr, "ateam: migration warning: %s\n", w)
 		}
 	}
 	return nil
@@ -548,13 +552,17 @@ func LookupFrom(start string) (*ResolvedEnv, error) {
 
 	env.ProjectDir = projectDir
 
+	// Migration and config-load failures are real errors, not the "project not
+	// found" case handled above — surface them (matching Resolve) instead of
+	// returning a config-less env with a nil error, which would leave callers
+	// like cmd/init.go printing a blank project section with no failure shown.
 	if err := applyV1LayoutMigration(projectDir, orgDir); err != nil {
-		return env, nil
+		return env, err
 	}
 
 	cfg, err := config.Load(projectDir)
 	if err != nil {
-		return env, nil
+		return env, err
 	}
 
 	env.populateFromConfig(projectDir, cfg)

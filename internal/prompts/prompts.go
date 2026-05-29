@@ -9,13 +9,8 @@
 //     IsValidRole, AllKnownRoleIDs) — see embed.go
 //   - Token estimation + display helpers (EstimateTokens, PromptSource)
 //   - Embedded-defaults installation (DiffOrgDefaults, WriteOrgDefaults)
-//   - The two surviving legacy AssembleXxxPrompt functions that the
-//     `--prompt` override branches in cmd/review.go / cmd/code.go still
-//     route through (AssembleReviewPrompt, AssembleCodeManagementPrompt).
-//     Their non-custom branches read via the legacy 3-level fallback
-//     helpers (readWith3LevelFallback / readFileOr3Level); those branches
-//     are dead in practice (the default paths go through the v1 helpers
-//     in cmd/*_v1.go) but reach compile-time validity via these wrappers.
+//   - Report-set selection for review (ReviewSelector, ReviewFunnel,
+//     ReviewEmptyError), consumed by the v1 assembly helpers in cmd/*_v1.go.
 package prompts
 
 import (
@@ -32,24 +27,12 @@ import (
 )
 
 const (
-	ReportPromptFile              = "report_prompt.md"
-	ReportBasePromptFile          = "report_base_prompt.md"
-	ReportExtraPromptFile         = "report_extra_prompt.md"
-	CodePromptFile                = "code_prompt.md"
-	CodeBasePromptFile            = "code_base_prompt.md"
-	CodeExtraPromptFile           = "code_extra_prompt.md"
-	ReviewPromptFile              = "review_prompt.md"
-	ReviewExtraPromptFile         = "review_extra_prompt.md"
-	ReportAutoRolesPromptFile     = "report_auto_roles_prompt.md"
-	CodeManagementPromptFile      = "code_management_prompt.md"
-	CodeManagementExtraPromptFile = "code_management_extra_prompt.md"
-	CodeVerifyPromptFile          = "code_verify_prompt.md"
-	CodeVerifyExtraPromptFile     = "code_verify_extra_prompt.md"
-	AutoSetupPromptFile           = "auto_setup_prompt.md"
-	ExecDebugPromptFile           = "exec_debug_prompt.md"
-	ReportFile                    = "report.md"
-	ReportErrorFile               = "report_error.md"
-	SandboxSettingsFile           = "ateam_claude_sandbox_extra_settings.json"
+	// CodeVerifyPromptFile is the legacy verify-prompt filename the web UI's
+	// prompt-source lookup still keys on (internal/web/handlers.go).
+	CodeVerifyPromptFile = "code_verify_prompt.md"
+	// SandboxSettingsFile is the standalone sandbox-settings JSON shipped
+	// alongside the embedded prompts (see DefaultSandboxSettings).
+	SandboxSettingsFile = "ateam_claude_sandbox_extra_settings.json"
 )
 
 // AutoRolesMarker is the contract line the `--auto-roles` planner agent
@@ -271,9 +254,10 @@ func isRoleEnabled(roles map[string]string, id string) bool {
 	return v != roleStatusOff
 }
 
-// ReviewEmptyError is returned by AssembleReviewPrompt when ReviewSelector's
-// filters eliminate every report. The funnel lets cmd/review.go format a
-// breakdown so the user knows which step zeroed things out.
+// ReviewEmptyError is returned by the review assembly path (cmd's
+// assembleReviewV1) when ReviewSelector's filters eliminate every report. The
+// funnel lets cmd/review.go format a breakdown so the user knows which step
+// zeroed things out.
 type ReviewEmptyError struct {
 	Funnel ReviewFunnel
 }

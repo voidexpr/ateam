@@ -35,8 +35,8 @@ Role reports are already embedded later in this prompt under `# Role Reports` (a
 Policy / direction context, however, is NOT embedded. When the "Respect project policy and current direction" principle requires checking it, read these files directly: `CLAUDE.md`, `AGENTS.md`, `README` policy sections, and recent `git log`. Quote what you find; do not fabricate.
 
 For reference (use these paths in `Source Report` fields; do not re-read role reports from them):
-- Role reports: `.ateam/roles/<ROLE>/report.md`
-- Your previous review (if any): `.ateam/supervisor/review.md` — note: NOT under `.ateam/roles/`. The `supervisor` directory is a sibling of `roles`, not a child.
+- Role reports: `.ateam/shared/report/<ROLE>/<ROLE>.md`
+- Your previous review (if any): `.ateam/shared/review/review.md`
 
 ## Review Format
 
@@ -47,7 +47,7 @@ For reference (use these paths in `Source Report` fields; do not re-read role re
 The top 5-10 things that should be done, in order. For each:
 - **Action**: What to do (specific and actionable)
 - **Source Role**: use the exact role name(s) from the reports and timestamp when the report was generated
-- **Source Report**: Which role report(s) identified this and timestamp when the report was generated as a relative path starting by .ateam (example: .ateam/roles/ROLE/report.md)
+- **Source Report**: Which role report(s) identified this and timestamp when the report was generated as a relative path starting by .ateam (example: .ateam/shared/report/ROLE/ROLE.md)
 - **Priority**: P0 (do now) / P1 (do soon) / P2 (do eventually)
 - **Effort**: SMALL / MEDIUM / LARGE
 - **Rationale**: Why this is prioritized here

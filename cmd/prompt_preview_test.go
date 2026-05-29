@@ -173,3 +173,38 @@ func setupMinimalAteamProject(t *testing.T) string {
 	}
 	return tmp
 }
+
+// TestPromptInlinePathsRendersPrePostPrompt verifies the inspection modes
+// include --pre-prompt / --post-prompt and render template variables in them
+// (the post-prompt is appended manually in the real run, so it must go through
+// the same engine rather than being emitted as a raw string).
+func TestPromptInlinePathsRendersPrePostPrompt(t *testing.T) {
+	projectDir := setupMinimalAteamProject(t)
+	prev, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(resetPromptFlags)
+	promptSupervisor = true
+	promptAction = "review"
+	promptInlinePaths = true
+	promptPrePrompt = "PRE for {{project.name}}"
+	promptPostPrompt = "POST for {{project.name}}"
+
+	out := captureStdout(t, func() {
+		if err := runPromptInlinePaths(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(out, "cli_pre_prompt") || !strings.Contains(out, "PRE for testproj") {
+		t.Errorf("pre-prompt missing or unrendered, got:\n%s", out)
+	}
+	if !strings.Contains(out, "cli_post_prompt") || !strings.Contains(out, "POST for testproj") {
+		t.Errorf("post-prompt missing or unrendered, got:\n%s", out)
+	}
+	if strings.Contains(out, "{{project.name}}") {
+		t.Errorf("template var left unresolved in CLI wrappers, got:\n%s", out)
+	}
+}

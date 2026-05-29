@@ -68,8 +68,12 @@ func assembleReviewV1(env *root.ResolvedEnv, selector prompts.ReviewSelector, ro
 	if extraPrompt != "" {
 		prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
 	}
-	if strings.TrimSpace(postPrompt) != "" {
-		prompt += "\n\n---\n\n" + postPrompt
+	post, err := renderCLIWrapper(a, vars, postPrompt)
+	if err != nil {
+		return "", err
+	}
+	if post != "" {
+		prompt += "\n\n---\n\n" + post
 	}
 	return prompt, nil
 }
@@ -109,8 +113,12 @@ func assembleSupervisorV1(env *root.ResolvedEnv, promptPath, roleLabel, action, 
 		return "", err
 	}
 	prompt := res.Prompt + "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
-	if strings.TrimSpace(postPrompt) != "" {
-		prompt += "\n\n---\n\n" + postPrompt
+	post, err := renderCLIWrapper(a, vars, postPrompt)
+	if err != nil {
+		return "", err
+	}
+	if post != "" {
+		prompt += "\n\n---\n\n" + post
 	}
 	return prompt, nil
 }

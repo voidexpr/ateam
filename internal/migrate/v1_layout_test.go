@@ -669,3 +669,49 @@ func TestMoveWarnsOnExistingTarget(t *testing.T) {
 		t.Errorf("expected target-exists warning, got %v", r.Warnings)
 	}
 }
+
+// TestRoleNamedReportNotDeleted guards the data-loss edge where a role is
+// literally named "report": renameLegacyReportFiles computes
+// shared/report/report/report.md for both source and destination, and without
+// a from==to guard the dst-exists branch would treat the file as its own
+// duplicate and remove it.
+func TestRoleNamedReportNotDeleted(t *testing.T) {
+	root := t.TempDir()
+	rel := filepath.Join("shared", "report", "report", "report.md")
+	writeTree(t, root, map[string]string{rel: "the only report\n"})
+
+	for i := 0; i < 2; i++ { // idempotent: re-running must not destroy it either
+		if _, err := V1Layout(root); err != nil {
+			t.Fatalf("V1Layout pass %d: %v", i, err)
+		}
+		if !exists(root, rel) {
+			t.Fatalf("pass %d: report for role \"report\" was deleted", i)
+		}
+		if got := read(t, root, rel); got != "the only report\n" {
+			t.Fatalf("pass %d: report content changed: %q", i, got)
+		}
+	}
+}
+
+// TestDirectoryAtFileTargetWarns guards against a directory sitting where a
+// file move expects its target: move() must warn and skip rather than
+// os.ReadFile the directory and abort the whole migration with an EISDIR.
+func TestDirectoryAtFileTargetWarns(t *testing.T) {
+	root := t.TempDir()
+	// Legacy report to migrate, but a directory already squats the target file.
+	writeTree(t, root, map[string]string{
+		filepath.Join("shared", "report", "security", "report.md"):                "legacy\n",
+		filepath.Join("shared", "report", "security", "security.md", "stray.txt"): "x\n",
+	})
+
+	r, err := V1Layout(root)
+	if err != nil {
+		t.Fatalf("V1Layout returned error instead of warning: %v", err)
+	}
+	if len(r.Warnings) == 0 {
+		t.Fatalf("expected a warning for the directory-at-target conflict, got none")
+	}
+	if !strings.Contains(r.Warnings[0], "directory") {
+		t.Errorf("warning should mention the directory conflict, got %q", r.Warnings[0])
+	}
+}

@@ -61,9 +61,9 @@ func buildAutoRolesContext(env *root.ResolvedEnv) (string, error) {
 	writeRoleReportFreshness(&b, env.ProjectDir)
 	fmt.Fprintln(&b)
 
-	fmt.Fprintln(&b, "### Latest review (`.ateam/supervisor/review.md`)")
+	fmt.Fprintln(&b, "### Latest review (`.ateam/shared/review/review.md`)")
 	fmt.Fprintln(&b)
-	writeReviewContent(&b, env.ProjectDir)
+	writeReviewContent(&b, env.ReviewPath())
 	fmt.Fprintln(&b)
 
 	fmt.Fprintln(&b, "### Latest code-cycle execution report")
@@ -167,49 +167,27 @@ func gitRootCommit(workDir string) string {
 	return strings.TrimSpace(buf.String())
 }
 
-// writeRoleReportFreshness lists each .ateam/roles/<role>/report.md with its
-// age and size. Newest first.
+// writeRoleReportFreshness lists each role report at the v1 path
+// (.ateam/shared/report/<role>/<role>.md) with its age and size. Newest first.
 func writeRoleReportFreshness(b *strings.Builder, projectDir string) {
-	rolesDir := filepath.Join(projectDir, "roles")
-	entries, err := os.ReadDir(rolesDir)
-	if err != nil {
-		fmt.Fprintf(b, "_(no roles directory at %s: %v)_\n", rolesDir, err)
-		return
-	}
-	type rep struct {
-		role string
-		path string
-		info os.FileInfo
-	}
-	var reports []rep
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		p := filepath.Join(rolesDir, e.Name(), "report.md")
-		info, err := os.Stat(p)
-		if err != nil {
-			continue
-		}
-		reports = append(reports, rep{role: e.Name(), path: p, info: info})
-	}
-	if len(reports) == 0 {
+	reports, err := prompts.DiscoverReports(projectDir)
+	if err != nil || len(reports) == 0 {
 		fmt.Fprintln(b, "_(no per-role reports yet)_")
 		return
 	}
 	sort.Slice(reports, func(i, j int) bool {
-		return reports[i].info.ModTime().After(reports[j].info.ModTime())
+		return reports[i].ModTime.After(reports[j].ModTime)
 	})
 	fmt.Fprintln(b, "```")
 	for _, r := range reports {
-		fmt.Fprintf(b, "%-30s  %-22s  %s\n", r.role, display.FmtDateAge(r.info.ModTime()), display.FmtBytes(int(r.info.Size())))
+		fmt.Fprintf(b, "%-30s  %-22s  %s\n", r.RoleID, display.FmtDateAge(r.ModTime), display.FmtBytes(len(r.Content)))
 	}
 	fmt.Fprintln(b, "```")
 }
 
-// writeReviewContent inlines the latest supervisor review (truncated if huge).
-func writeReviewContent(b *strings.Builder, projectDir string) {
-	path := filepath.Join(projectDir, "supervisor", "review.md")
+// writeReviewContent inlines the latest supervisor review (truncated if huge)
+// from the given v1 review path.
+func writeReviewContent(b *strings.Builder, path string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(b, "_(no review yet: %v)_\n", err)

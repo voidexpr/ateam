@@ -73,6 +73,27 @@ func (s SubRunFlags) Render() string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// renderCLIWrapper renders a CLI-supplied wrapper string (the held-back
+// --post-prompt) through the same template engine the assembler uses for
+// anchor content, so `{{project.name}}` etc. resolve exactly as they do when
+// the assembler owns the wrap. Returns "" for whitespace-only input (matching
+// the assembler's empty-section drop). Callers that append --post-prompt
+// manually (because it must land after report/review/sub-run-flag blocks) use
+// this so the held wrapper isn't emitted as an unresolved raw string.
+func renderCLIWrapper(a *assembler.Assembler, vars assembler.Vars, text string) (string, error) {
+	if strings.TrimSpace(text) == "" {
+		return "", nil
+	}
+	rendered, err := assembler.NewEngine(a, 0).Render(text, vars)
+	if err != nil {
+		return "", fmt.Errorf("rendering --post-prompt: %w", err)
+	}
+	if strings.TrimSpace(rendered) == "" {
+		return "", nil
+	}
+	return rendered, nil
+}
+
 // assembleCodeManagementV1 builds the supervisor's code-management prompt:
 // the assembler's `code_management` composition (with optional CLI
 // overrides), then Review, then --extra-prompt, then Sub-Run Flags, then
@@ -104,8 +125,12 @@ func assembleCodeManagementV1(env *root.ResolvedEnv, roleLabel, reviewContent st
 	// flag list near the end — same ordering the pre-refactor inline
 	// assembly used.
 	prompt += "\n\n" + flags.Render()
-	if strings.TrimSpace(postPrompt) != "" {
-		prompt += "\n\n---\n\n" + postPrompt
+	post, err := renderCLIWrapper(a, vars, postPrompt)
+	if err != nil {
+		return "", err
+	}
+	if post != "" {
+		prompt += "\n\n---\n\n" + post
 	}
 	return prompt, nil
 }
