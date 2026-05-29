@@ -110,7 +110,7 @@ func runVerify(opts VerifyOptions) error {
 		return err
 	}
 
-	prompt, err := assembleSupervisorV1(env, "code_verify", "the supervisor", "verify", extraPrompt)
+	prompt, err := assembleSupervisorV1(env, "code_verify", "the supervisor", "verify", extraPrompt, "", "")
 	if err != nil {
 		return err
 	}

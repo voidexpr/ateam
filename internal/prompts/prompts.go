@@ -27,7 +27,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ateam/defaults"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/gitutil"
 )
@@ -96,28 +95,6 @@ func ResolveOptional(value string) (string, error) {
 		return "", nil
 	}
 	return ResolveValue(value)
-}
-
-// collectSupervisorExtras gathers extra prompt files from org and project levels.
-func collectSupervisorExtras(orgDir, projectDir, extraFile string) []string {
-	paths := []string{
-		filepath.Join(orgDir, "supervisor", extraFile),
-		filepath.Join(projectDir, "supervisor", extraFile),
-	}
-	return readAllExisting(paths)
-}
-
-func readAllExisting(paths []string) []string {
-	var results []string
-	for _, p := range paths {
-		if data, err := os.ReadFile(p); err == nil {
-			content := strings.TrimSpace(string(data))
-			if content != "" {
-				results = append(results, content)
-			}
-		}
-	}
-	return results
 }
 
 // RoleReport holds metadata about a discovered role report file.
@@ -339,121 +316,6 @@ func (e *ReviewEmptyError) Error() string {
 	return "no reports left after filters"
 }
 
-// AssembleReviewPrompt builds the full prompt for a supervisor review.
-// selector chooses which reports the supervisor actually sees; configRoles is
-// the env's role-status map (env.Config.Roles, or nil if absent).
-func AssembleReviewPrompt(orgDir, projectDir string, pinfo ProjectInfoParams, extraPrompt, customPrompt string, selector ReviewSelector, configRoles map[string]string) (string, error) {
-	all, err := DiscoverReports(projectDir)
-	if err != nil {
-		return "", err
-	}
-	if len(all) == 0 {
-		return "", fmt.Errorf("no report files found in %s/roles — run 'ateam report' first", projectDir)
-	}
-
-	reports, funnel := selector.Filter(all, configRoles)
-	if len(reports) == 0 {
-		return "", &ReviewEmptyError{Funnel: funnel}
-	}
-
-	var reportContents []string
-	var manifestLines []string
-	for _, r := range reports {
-		reportContents = append(reportContents,
-			fmt.Sprintf("# Role Report: %s\n\n%s", r.RoleID, r.Content))
-		manifestLines = append(manifestLines,
-			fmt.Sprintf("| %s | %s |", r.RoleID, r.ModTime.Format(display.TimestampFormat)))
-	}
-
-	allReports := strings.Join(reportContents, "\n\n---\n\n")
-
-	var manifest string
-	if len(manifestLines) > 0 {
-		manifest = "# Reports Under Review\n\n| Role | Generated |\n|------|----------|\n" +
-			strings.Join(manifestLines, "\n")
-	}
-
-	projectInfo := FormatProjectInfo(pinfo)
-
-	if customPrompt != "" {
-		var parts []string
-		if projectInfo != "" {
-			parts = append(parts, projectInfo)
-		}
-		parts = append(parts, customPrompt)
-		if manifest != "" {
-			parts = append(parts, manifest)
-		}
-		parts = append(parts, "# Role Reports\n\n"+allReports)
-		return strings.Join(parts, "\n\n---\n\n"), nil
-	}
-
-	supervisorPrompt, err := readWith3LevelFallback(
-		filepath.Join(projectDir, "supervisor", ReviewPromptFile),
-		filepath.Join(orgDir, "supervisor", ReviewPromptFile),
-		filepath.Join(orgDir, "defaults", "supervisor", ReviewPromptFile),
-		filepath.Join("supervisor", ReviewPromptFile),
-		"supervisor",
-	)
-	if err != nil {
-		return "", err
-	}
-
-	var parts []string
-	if projectInfo != "" {
-		parts = append(parts, projectInfo)
-	}
-	parts = append(parts, supervisorPrompt)
-	parts = append(parts, collectSupervisorExtras(orgDir, projectDir, ReviewExtraPromptFile)...)
-	if manifest != "" {
-		parts = append(parts, manifest)
-	}
-	parts = append(parts, "# Role Reports\n\n"+allReports)
-	if extraPrompt != "" {
-		parts = append(parts, "# Additional Instructions\n\n"+extraPrompt)
-	}
-
-	return strings.Join(parts, "\n\n---\n\n"), nil
-}
-
-// AssembleCodeManagementPrompt builds the full prompt for a supervisor code run.
-// reviewContent is the review document to include. customPrompt overrides 3-level fallback if non-empty.
-func AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir string, pinfo ProjectInfoParams, reviewContent, customPrompt, extraPrompt string) (string, error) {
-	var mgmtPrompt string
-	var err error
-
-	if customPrompt != "" {
-		mgmtPrompt = customPrompt
-	} else {
-		mgmtPrompt, err = readWith3LevelFallback(
-			filepath.Join(projectDir, "supervisor", CodeManagementPromptFile),
-			filepath.Join(orgDir, "supervisor", CodeManagementPromptFile),
-			filepath.Join(orgDir, "defaults", "supervisor", CodeManagementPromptFile),
-			filepath.Join("supervisor", CodeManagementPromptFile),
-			"code management",
-		)
-		if err != nil {
-			return "", err
-		}
-	}
-
-	mgmtPrompt = strings.ReplaceAll(mgmtPrompt, "{{SOURCE_DIR}}", ".")
-
-	var parts []string
-	if info := FormatProjectInfo(pinfo); info != "" {
-		parts = append(parts, info)
-	}
-	parts = append(parts, mgmtPrompt)
-	parts = append(parts, collectSupervisorExtras(orgDir, projectDir, CodeManagementExtraPromptFile)...)
-
-	parts = append(parts, "# Review\n\n"+reviewContent)
-	if extraPrompt != "" {
-		parts = append(parts, "# Additional Instructions\n\n"+extraPrompt)
-	}
-
-	return strings.Join(parts, "\n\n---\n\n"), nil
-}
-
 // ProjectInfoParams holds the values needed to build the project info section.
 type ProjectInfoParams struct {
 	OrgDir      string // absolute path to .ateamorg/
@@ -547,29 +409,6 @@ func shortRelPath(base, target string) string {
 		}
 	}
 	return target
-}
-
-// readWith3LevelFallback tries projectPath, then orgPath, then defaultPath,
-// then embedded defaults. embeddedPath is relative to defaults.FS root.
-func readWith3LevelFallback(projectPath, orgPath, defaultPath, embeddedPath, label string) (string, error) {
-	if s := readFileOr3Level(projectPath, orgPath, defaultPath, embeddedPath); s != "" {
-		return s, nil
-	}
-	return "", fmt.Errorf("no prompt found for %s (checked %s, %s, %s, and embedded)", label, projectPath, orgPath, defaultPath)
-}
-
-// readFileOr3Level tries three filesystem paths via traceFileOr3Level, then
-// falls back to embedded defaults. embeddedPath is relative to defaults.FS root.
-func readFileOr3Level(projectPath, orgPath, defaultPath, embeddedPath string) string {
-	if src := traceFileOr3Level(projectPath, orgPath, defaultPath); src != nil {
-		return src.Content
-	}
-	if embeddedPath != "" {
-		if data, err := defaults.FS.ReadFile(embeddedPath); err == nil {
-			return string(data)
-		}
-	}
-	return ""
 }
 
 // WriteIfNotExists writes content to path only if the file does not already exist.

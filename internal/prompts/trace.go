@@ -1,7 +1,6 @@
 package prompts
 
 import (
-	"os"
 	"strings"
 	"time"
 )
@@ -36,27 +35,4 @@ func EstimateTokens(s string) int {
 		return 0
 	}
 	return (len(s) + 3) / 4
-}
-
-// traceFileOr3Level tries paths in order and returns a PromptSource for the
-// first existing non-empty file. Used by prompts.go's readFileOr3Level (still
-// reachable from the legacy AssembleReviewPrompt / AssembleCodeManagementPrompt
-// non-custom branches that the `--prompt` callers don't exercise).
-func traceFileOr3Level(paths ...string) *PromptSource {
-	for _, p := range paths {
-		info, err := os.Stat(p)
-		if err != nil {
-			continue
-		}
-		data, err := os.ReadFile(p)
-		if err != nil {
-			continue
-		}
-		content := strings.TrimSpace(string(data))
-		if content == "" {
-			continue
-		}
-		return &PromptSource{Path: p, ModTime: info.ModTime(), Content: content}
-	}
-	return nil
 }

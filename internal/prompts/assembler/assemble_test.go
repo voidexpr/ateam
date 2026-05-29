@@ -12,7 +12,7 @@ func TestAssembleSingleton(t *testing.T) {
 		map[string]string{"review.prompt.md": "REVIEW BODY"},
 	)
 	a := New(anchors)
-	res, err := a.Assemble("review", mkVars(), nil)
+	res, err := a.Assemble("review", mkVars(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestAssembleNestedAllSlots(t *testing.T) {
 		},
 	)
 	a := New(anchors)
-	res, err := a.Assemble("report/security", mkVars(), nil)
+	res, err := a.Assemble("report/security", mkVars(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestAssembleSingletonFragments(t *testing.T) {
 		},
 	)
 	a := New(anchors)
-	res, err := a.Assemble("report/security", mkVars(), nil)
+	res, err := a.Assemble("report/security", mkVars(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestAssembleStripsFrontmatter(t *testing.T) {
 		},
 	)
 	a := New(anchors)
-	res, err := a.Assemble("report/security", mkVars(), nil)
+	res, err := a.Assemble("report/security", mkVars(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestAssembleBadFrontmatterErrors(t *testing.T) {
 		},
 	)
 	a := New(anchors)
-	_, err := a.Assemble("report/security", mkVars(), nil)
+	_, err := a.Assemble("report/security", mkVars(), nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "unknown key") {
 		t.Fatalf("expected unknown-key frontmatter error, got %v", err)
 	}
@@ -135,7 +135,7 @@ func TestAssembleMissingMainErrors(t *testing.T) {
 		nil, nil,
 	)
 	a := New(anchors)
-	_, err := a.Assemble("report/security", mkVars(), nil)
+	_, err := a.Assemble("report/security", mkVars(), nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "no role main") {
 		t.Fatalf("expected missing-main error, got %v", err)
 	}
@@ -150,7 +150,7 @@ func TestAssembleVarSubstitution(t *testing.T) {
 		},
 	)
 	a := New(anchors)
-	res, err := a.Assemble("report/security", mkVars(), nil)
+	res, err := a.Assemble("report/security", mkVars(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestAssembleAllCapsCompatViaEngine(t *testing.T) {
 		},
 	)
 	a := New(anchors)
-	res, err := a.Assemble("report/security", mkVars(), nil)
+	res, err := a.Assemble("report/security", mkVars(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestAssembleEmptyFragmentsSkipped(t *testing.T) {
 		},
 	)
 	a := New(anchors)
-	res, err := a.Assemble("report/security", mkVars(), nil)
+	res, err := a.Assemble("report/security", mkVars(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestAssembleOverloadAcrossAnchors(t *testing.T) {
 		},
 	)
 	a := New(anchors)
-	res, err := a.Assemble("report/security", mkVars(), nil)
+	res, err := a.Assemble("report/security", mkVars(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,5 +228,159 @@ func TestAssembleOverloadAcrossAnchors(t *testing.T) {
 	want := "PROJECT-OVERRIDE\n\n---\n\nPROJECT-EXTRA\n\n---\n\nMAIN"
 	if res.Prompt != want {
 		t.Fatalf("Prompt = %q\nwant %q", res.Prompt, want)
+	}
+}
+
+func TestAssemblePrePromptWrap(t *testing.T) {
+	anchors := mkAnchors(
+		nil, nil,
+		map[string]string{"review.prompt.md": "BODY"},
+	)
+	a := New(anchors)
+	opts := &AssembleOptions{PrePrompt: "PRE"}
+	res, err := a.Assemble("review", mkVars(), nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "PRE\n\n---\n\nBODY"
+	if res.Prompt != want {
+		t.Fatalf("Prompt = %q, want %q", res.Prompt, want)
+	}
+	// First section is the CLI pre.
+	if len(res.Sections) != 2 || res.Sections[0].Slot != "cli_pre_prompt" || res.Sections[0].Anchor != "cli" {
+		t.Fatalf("first section = %+v", res.Sections[0])
+	}
+	if res.Sections[0].Path != "(--pre-prompt)" {
+		t.Errorf("first section path = %q, want (--pre-prompt)", res.Sections[0].Path)
+	}
+}
+
+func TestAssemblePostPromptWrap(t *testing.T) {
+	anchors := mkAnchors(
+		nil, nil,
+		map[string]string{"review.prompt.md": "BODY"},
+	)
+	a := New(anchors)
+	opts := &AssembleOptions{PostPrompt: "POST"}
+	res, err := a.Assemble("review", mkVars(), nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "BODY\n\n---\n\nPOST"
+	if res.Prompt != want {
+		t.Fatalf("Prompt = %q, want %q", res.Prompt, want)
+	}
+	last := res.Sections[len(res.Sections)-1]
+	if last.Slot != "cli_post_prompt" || last.Anchor != "cli" || last.Path != "(--post-prompt)" {
+		t.Fatalf("last section = %+v", last)
+	}
+}
+
+func TestAssembleReplaceRoleMain(t *testing.T) {
+	// Anchor has a main file; opts.ReplaceRoleMain overrides it. Framing
+	// (dir_pre / dir_post) still composes.
+	anchors := mkAnchors(
+		map[string]string{
+			"_pre.context.md":        "ROOT-PRE",
+			"report/_post.format.md": "DIR-POST",
+		},
+		nil,
+		map[string]string{"report/security.prompt.md": "ORIGINAL-MAIN"},
+	)
+	a := New(anchors)
+	opts := &AssembleOptions{ReplaceRoleMain: "CUSTOM-BODY"}
+	res, err := a.Assemble("report/security", mkVars(), nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(res.Prompt, "ORIGINAL-MAIN") {
+		t.Errorf("expected ORIGINAL-MAIN replaced, got:\n%s", res.Prompt)
+	}
+	if !strings.Contains(res.Prompt, "CUSTOM-BODY") {
+		t.Errorf("expected CUSTOM-BODY in result, got:\n%s", res.Prompt)
+	}
+	if !strings.Contains(res.Prompt, "ROOT-PRE") || !strings.Contains(res.Prompt, "DIR-POST") {
+		t.Errorf("framing should still compose, got:\n%s", res.Prompt)
+	}
+	// role_main section comes from CLI now.
+	var foundMain bool
+	for _, s := range res.Sections {
+		if s.Slot == "role_main" {
+			foundMain = true
+			if s.Anchor != "cli" || s.Path != "(--prompt)" {
+				t.Errorf("role_main section = %+v, want anchor=cli path=(--prompt)", s)
+			}
+		}
+	}
+	if !foundMain {
+		t.Error("missing role_main section")
+	}
+}
+
+func TestAssembleReplaceRoleMainWithoutAnchorFile(t *testing.T) {
+	// ReplaceRoleMain works even when no <role>.prompt.md exists in any
+	// anchor — the caller's body stands in. Useful when a caller wants to
+	// assemble a brand-new prompt without first writing a placeholder file.
+	anchors := mkAnchors(
+		map[string]string{
+			"report/_pre.intro.md": "DIR-PRE",
+		},
+		nil, nil,
+	)
+	a := New(anchors)
+	opts := &AssembleOptions{ReplaceRoleMain: "ONLY-BODY"}
+	res, err := a.Assemble("report/newrole", mkVars(), nil, opts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(res.Prompt, "ONLY-BODY") || !strings.Contains(res.Prompt, "DIR-PRE") {
+		t.Errorf("result:\n%s", res.Prompt)
+	}
+}
+
+func TestAssembleAllOverridesTogether(t *testing.T) {
+	anchors := mkAnchors(
+		nil, nil,
+		map[string]string{"review.prompt.md": "ANCHOR-MAIN"},
+	)
+	a := New(anchors)
+	opts := &AssembleOptions{
+		PrePrompt:       "PRE",
+		ReplaceRoleMain: "OVERRIDE-MAIN",
+		PostPrompt:      "POST",
+	}
+	res, err := a.Assemble("review", mkVars(), nil, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "PRE\n\n---\n\nOVERRIDE-MAIN\n\n---\n\nPOST"
+	if res.Prompt != want {
+		t.Fatalf("Prompt = %q\nwant %q", res.Prompt, want)
+	}
+	if strings.Contains(res.Prompt, "ANCHOR-MAIN") {
+		t.Error("ANCHOR-MAIN should be replaced")
+	}
+}
+
+func TestAssembleEmptyOverridesNoOp(t *testing.T) {
+	// Empty/whitespace overrides drop silently, same prompt as nil opts.
+	anchors := mkAnchors(
+		nil, nil,
+		map[string]string{"review.prompt.md": "BODY"},
+	)
+	a := New(anchors)
+	for _, opts := range []*AssembleOptions{
+		nil,
+		{},
+		{PrePrompt: "", PostPrompt: "", ReplaceRoleMain: ""},
+		{PrePrompt: "  \n\t", PostPrompt: "\n"},
+	} {
+		res, err := a.Assemble("review", mkVars(), nil, opts)
+		if err != nil {
+			t.Fatalf("opts=%+v: %v", opts, err)
+		}
+		if res.Prompt != "BODY" {
+			t.Fatalf("opts=%+v: Prompt = %q, want BODY", opts, res.Prompt)
+		}
 	}
 }

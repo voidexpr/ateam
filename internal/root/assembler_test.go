@@ -76,7 +76,7 @@ func TestBuildAssemblerVarsDefersOutputPaths(t *testing.T) {
 	// End-to-end: assembling the shipped default report prompt must keep the
 	// placeholder intact so runner.ResolveTemplateString can fill it.
 	vars.Project["info"] = "INFO" // avoid forking git for project info
-	res, err := env.Assembler().Assemble("report/security", vars, nil)
+	res, err := env.Assembler().Assemble("report/security", vars, nil, nil)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}

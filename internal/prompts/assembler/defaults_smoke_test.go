@@ -76,7 +76,7 @@ func TestAssembleAgainstRealDefaults(t *testing.T) {
 		Project: map[string]string{"info": "# Test project info", "name": "ateam"},
 	}
 
-	res, err := a.Assemble("report/security", vars, nil)
+	res, err := a.Assemble("report/security", vars, nil, nil)
 	if err != nil {
 		t.Fatalf("Assemble failed: %v", err)
 	}

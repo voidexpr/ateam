@@ -208,24 +208,12 @@ func runCode(opts CodeOptions) error {
 		MaxBudgetBatch: opts.MaxBudgetBatch,
 	}
 
-	var prompt string
-	if customManagement == "" {
-		var err error
-		prompt, err = assembleCodeManagementV1(env, "the supervisor", reviewContent, subRunFlags, extraPrompt)
-		if err != nil {
-			return err
-		}
-	} else {
-		// --prompt overrides the supervisor body wholesale; keep the legacy
-		// path until the new assembler has a "replace role main" surface.
-		// Sub-Run Flags still get appended via SubRunFlags.Render() so the
-		// supervisor's exec invocations carry --batch/--project/etc.
-		pinfo := env.NewProjectInfoParams("the supervisor", "code")
-		legacyPrompt, err := prompts.AssembleCodeManagementPrompt(env.OrgDir, env.ProjectDir, env.WorkDir, pinfo, reviewContent, customManagement, extraPrompt)
-		if err != nil {
-			return err
-		}
-		prompt = legacyPrompt + "\n\n" + subRunFlags.Render()
+	// Both default and --prompt paths now go through assembleCodeManagementV1;
+	// the override (customManagement) flows into the assembler's
+	// ReplaceRoleMain option so framing fragments compose either way.
+	prompt, err := assembleCodeManagementV1(env, "the supervisor", reviewContent, subRunFlags, extraPrompt, customManagement, "", "")
+	if err != nil {
+		return err
 	}
 
 	timeout := env.Config.Code.EffectiveTimeout(opts.Timeout)

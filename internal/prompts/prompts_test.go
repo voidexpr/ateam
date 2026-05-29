@@ -9,55 +9,6 @@ import (
 	"github.com/ateam/internal/gitutil"
 )
 
-func TestReadWith3LevelFallback(t *testing.T) {
-	base := t.TempDir()
-
-	projectPath := filepath.Join(base, "project", "report_prompt.md")
-	orgPath := filepath.Join(base, "org", "report_prompt.md")
-	defaultPath := filepath.Join(base, "defaults", "report_prompt.md")
-
-	_ = os.MkdirAll(filepath.Dir(projectPath), 0755)
-	_ = os.MkdirAll(filepath.Dir(orgPath), 0755)
-	_ = os.MkdirAll(filepath.Dir(defaultPath), 0755)
-
-	// Only default exists
-	_ = os.WriteFile(defaultPath, []byte("default"), 0644)
-	got, err := readWith3LevelFallback(projectPath, orgPath, defaultPath, "", "test")
-	if err != nil {
-		t.Fatalf("default only: %v", err)
-	}
-	if got != "default" {
-		t.Errorf("default only: got %q, want %q", got, "default")
-	}
-
-	// Org override exists
-	_ = os.WriteFile(orgPath, []byte("org"), 0644)
-	got, _ = readWith3LevelFallback(projectPath, orgPath, defaultPath, "", "test")
-	if got != "org" {
-		t.Errorf("org override: got %q, want %q", got, "org")
-	}
-
-	// Project override exists
-	_ = os.WriteFile(projectPath, []byte("project"), 0644)
-	got, _ = readWith3LevelFallback(projectPath, orgPath, defaultPath, "", "test")
-	if got != "project" {
-		t.Errorf("project override: got %q, want %q", got, "project")
-	}
-
-	// embeddedPath fallback: when none of the three filesystem paths exist
-	// but a real embedded resource is referenced, the embedded content is
-	// returned. Use a path known to exist in defaults/embed.go.
-	missing := filepath.Join(base, "missing.md")
-	embedded := "prompts/code_verify.prompt.md"
-	got, err = readWith3LevelFallback(missing, missing, missing, embedded, "test")
-	if err != nil {
-		t.Fatalf("embedded fallback: %v", err)
-	}
-	if got == "" {
-		t.Error("embedded fallback returned empty content")
-	}
-}
-
 func TestEnabledRoleIDsAllowlist(t *testing.T) {
 	configRoles := map[string]string{
 		"alpha":   "on",
@@ -371,20 +322,6 @@ func TestFormatProjectInfo(t *testing.T) {
 	})
 }
 
-func TestReadWith3LevelFallbackNoneExist(t *testing.T) {
-	base := t.TempDir()
-	_, err := readWith3LevelFallback(
-		filepath.Join(base, "a"),
-		filepath.Join(base, "b"),
-		filepath.Join(base, "c"),
-		"",
-		"test",
-	)
-	if err == nil {
-		t.Fatal("expected error when no files exist")
-	}
-}
-
 func TestResolveValueLiteral(t *testing.T) {
 	got, err := ResolveValue("hello world")
 	if err != nil {
@@ -408,91 +345,6 @@ func TestResolveValueFile(t *testing.T) {
 	if got != "from file" {
 		t.Errorf("got %q, want %q", got, "from file")
 	}
-}
-
-func TestAssembleCodeManagementPrompt(t *testing.T) {
-	base := t.TempDir()
-	orgDir := filepath.Join(base, "org")
-	projectDir := filepath.Join(base, "project")
-	sourceDir := filepath.Join(base, "src")
-
-	supervisorDir := filepath.Join(orgDir, "defaults", "supervisor")
-	if err := os.MkdirAll(supervisorDir, 0755); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
-	}
-	stubBody := "manage the code changes for {{SOURCE_DIR}}"
-	if err := os.WriteFile(filepath.Join(supervisorDir, CodeManagementPromptFile), []byte(stubBody), 0644); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	pinfo := ProjectInfoParams{
-		ProjectName: "myapp",
-		Role:        "the supervisor",
-	}
-	reviewContent := "task list from supervisor review"
-
-	t.Run("without extra prompt", func(t *testing.T) {
-		result, err := AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir, pinfo, reviewContent, "", "")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if result == "" {
-			t.Fatal("expected non-empty result")
-		}
-		if !strings.Contains(result, "# ATeam Project Context") {
-			t.Error("missing project-info header")
-		}
-		// {{SOURCE_DIR}} should be substituted to "."
-		if !strings.Contains(result, "manage the code changes for .") {
-			t.Errorf("expected {{SOURCE_DIR}} substitution in body, got:\n%s", result)
-		}
-		if !strings.Contains(result, "# Review") {
-			t.Error("missing Review section")
-		}
-		if !strings.Contains(result, reviewContent) {
-			t.Errorf("missing review content %q", reviewContent)
-		}
-		if strings.Contains(result, "# Additional Instructions") {
-			t.Error("unexpected Additional Instructions section when extraPrompt is empty")
-		}
-	})
-
-	t.Run("with custom prompt overrides fallback", func(t *testing.T) {
-		custom := "custom management prompt for {{SOURCE_DIR}}"
-		result, err := AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir, pinfo, reviewContent, custom, "")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !strings.Contains(result, "custom management prompt for .") {
-			t.Errorf("expected custom prompt with substitution, got:\n%s", result)
-		}
-		if strings.Contains(result, stubBody) || strings.Contains(result, "manage the code changes for .") {
-			t.Errorf("custom prompt should replace stub body, got:\n%s", result)
-		}
-	})
-
-	t.Run("with extra prompt appended last", func(t *testing.T) {
-		extra := "follow extra rules"
-		result, err := AssembleCodeManagementPrompt(orgDir, projectDir, sourceDir, pinfo, reviewContent, "", extra)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !strings.Contains(result, "# Additional Instructions") {
-			t.Error("missing Additional Instructions section")
-		}
-		if !strings.Contains(result, extra) {
-			t.Errorf("missing extra prompt content %q", extra)
-		}
-		// Section order: project info → body → review → extra
-		headerIdx := strings.Index(result, "# ATeam Project Context")
-		bodyIdx := strings.Index(result, "manage the code changes for .")
-		reviewIdx := strings.Index(result, "# Review")
-		extraIdx := strings.Index(result, "# Additional Instructions")
-		if headerIdx >= bodyIdx || bodyIdx >= reviewIdx || reviewIdx >= extraIdx {
-			t.Errorf("sections out of order: header=%d body=%d review=%d extra=%d",
-				headerIdx, bodyIdx, reviewIdx, extraIdx)
-		}
-	})
 }
 
 func TestResolveValueStdin(t *testing.T) {

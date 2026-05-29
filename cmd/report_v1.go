@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ateam/internal/display"
+	"github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
 )
 
@@ -31,12 +32,16 @@ import (
 // roleLabel feeds the {{project.info}} block (typically "role <roleID>");
 // pass "" to suppress the project info section entirely — matches the
 // legacy `--no-project-info` flag's behavior.
-func assembleRoleReportV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt string, skipPreviousReport bool) (string, error) {
+func assembleRoleReportV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt, prePrompt, postPrompt string, skipPreviousReport bool) (string, error) {
 	promptPath := "report/" + roleID
 
 	a := env.Assembler()
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, "report")
-	res, err := a.Assemble(promptPath, vars, nil)
+	// Pre-prompt rides through the assembler; post-prompt is held until
+	// after the manually-appended previous-report block + extraPrompt so
+	// it stays as the outermost tail wrapper.
+	opts := &assembler.AssembleOptions{PrePrompt: prePrompt}
+	res, err := a.Assemble(promptPath, vars, nil, opts)
 	if err != nil {
 		return "", err
 	}
@@ -47,6 +52,9 @@ func assembleRoleReportV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt 
 	}
 	if extraPrompt != "" {
 		prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
+	}
+	if strings.TrimSpace(postPrompt) != "" {
+		prompt += "\n\n---\n\n" + postPrompt
 	}
 	return prompt, nil
 }
@@ -64,11 +72,12 @@ func assembleRoleReportV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt 
 // to point users at the (small) set of code-capable roles — preview is
 // this function's only consumer, so the guidance is worth the extra
 // sentence.
-func assembleRoleCodeV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt string) (string, error) {
+func assembleRoleCodeV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt, prePrompt, postPrompt string) (string, error) {
 	promptPath := "code/" + roleID
 	a := env.Assembler()
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, "code")
-	res, err := a.Assemble(promptPath, vars, nil)
+	opts := &assembler.AssembleOptions{PrePrompt: prePrompt}
+	res, err := a.Assemble(promptPath, vars, nil, opts)
 	if err != nil {
 		if strings.Contains(err.Error(), "no role main") {
 			return "", fmt.Errorf("no code prompt defined for role %q. Code prompts are role-specific; only roles that ship code/<role>.prompt.md (project, org, or embedded) can preview a code action", roleID)
@@ -78,6 +87,9 @@ func assembleRoleCodeV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt st
 	prompt := res.Prompt
 	if extraPrompt != "" {
 		prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
+	}
+	if strings.TrimSpace(postPrompt) != "" {
+		prompt += "\n\n---\n\n" + postPrompt
 	}
 	return prompt, nil
 }

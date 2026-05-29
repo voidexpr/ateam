@@ -64,7 +64,7 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 	a := env.Assembler()
 	vars := env.BuildAssemblerVars("report_auto_roles", "the supervisor", "auto-roles")
 	vars.Exec["auto_roles_commands_output"] = commandsOutput
-	res, err := a.Assemble("report_auto_roles", vars, nil)
+	res, err := a.Assemble("report_auto_roles", vars, nil, nil)
 	if err != nil {
 		return "", nil, fmt.Errorf("assemble auto-roles prompt: %w", err)
 	}

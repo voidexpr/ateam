@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
 )
 
@@ -73,17 +74,25 @@ func (s SubRunFlags) Render() string {
 }
 
 // assembleCodeManagementV1 builds the supervisor's code-management prompt:
-// the assembler's `code_management` composition, then Review, then optional
-// Sub-Run Flags, then optional --extra-prompt. Shared by cmd/code.go's
-// runCode (passes a real SubRunFlags from CodeOptions) and cmd/prompt.go's
-// supervisor preview (passes a placeholder SubRunFlags so the preview shows
-// the same structure the live run sends).
+// the assembler's `code_management` composition (with optional CLI
+// overrides), then Review, then --extra-prompt, then Sub-Run Flags, then
+// --post-prompt. Shared by cmd/code.go's runCode (real SubRunFlags from
+// CodeOptions) and cmd/prompt.go's supervisor preview (placeholder
+// SubRunFlags via previewSubRunFlags).
 //
-// roleLabel feeds {{project.info}}; pass "" to suppress.
-func assembleCodeManagementV1(env *root.ResolvedEnv, roleLabel, reviewContent string, flags SubRunFlags, extraPrompt string) (string, error) {
+// roleLabel feeds {{project.info}}; pass "" to suppress. customPrompt
+// (--prompt) replaces the supervisor body via ReplaceRoleMain; framing
+// fragments still compose. prePrompt rides through the assembler;
+// postPrompt is held until after Sub-Run Flags so it stays the outermost
+// tail wrapper.
+func assembleCodeManagementV1(env *root.ResolvedEnv, roleLabel, reviewContent string, flags SubRunFlags, extraPrompt, customPrompt, prePrompt, postPrompt string) (string, error) {
 	a := env.Assembler()
 	vars := env.BuildAssemblerVars("code_management", roleLabel, "code")
-	res, err := a.Assemble("code_management", vars, nil)
+	opts := &assembler.AssembleOptions{
+		ReplaceRoleMain: customPrompt,
+		PrePrompt:       prePrompt,
+	}
+	res, err := a.Assemble("code_management", vars, nil, opts)
 	if err != nil {
 		return "", err
 	}
@@ -91,9 +100,12 @@ func assembleCodeManagementV1(env *root.ResolvedEnv, roleLabel, reviewContent st
 	if extraPrompt != "" {
 		prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
 	}
-	// Sub-Run Flags appear AFTER extraPrompt so the last thing the supervisor
-	// reads is the bullet list of flags it must pass to `ateam exec` — same
-	// ordering the pre-refactor inline assembly used.
+	// Sub-Run Flags appear AFTER extraPrompt so the supervisor reads the
+	// flag list near the end — same ordering the pre-refactor inline
+	// assembly used.
 	prompt += "\n\n" + flags.Render()
+	if strings.TrimSpace(postPrompt) != "" {
+		prompt += "\n\n---\n\n" + postPrompt
+	}
 	return prompt, nil
 }

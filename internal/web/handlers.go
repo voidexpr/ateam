@@ -435,7 +435,7 @@ func assemblerSourcesForRole(env *root.ResolvedEnv, a *assembler.Assembler, pe *
 	}
 
 	vars := env.BuildAssemblerVars(promptPath, "", action)
-	res, err := a.Assemble(promptPath, vars, nil)
+	res, err := a.Assemble(promptPath, vars, nil, nil)
 	if err != nil {
 		return nil
 	}

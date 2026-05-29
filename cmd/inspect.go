@@ -132,7 +132,7 @@ func buildAutoDebugPrompt(env *root.ResolvedEnv, rows []calldb.RecentRow, files 
 	a := env.Assembler()
 	vars := env.BuildAssemblerVars("exec_debug", "exec debugger", "debug")
 	vars.Exec["debug_context"] = debugContext
-	res, err := a.Assemble("exec_debug", vars, nil)
+	res, err := a.Assemble("exec_debug", vars, nil, nil)
 	if err != nil {
 		return "", err
 	}

@@ -241,7 +241,7 @@ func runReport(opts ReportOptions) error {
 
 	var tasks []runner.PoolExec
 	for _, roleID := range roleIDs {
-		prompt, err := assembleRoleReportV1(env, roleID, "role "+roleID, extraPrompt, opts.IgnorePreviousReport)
+		prompt, err := assembleRoleReportV1(env, roleID, "role "+roleID, extraPrompt, "", "", opts.IgnorePreviousReport)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", roleID, err)
 			continue

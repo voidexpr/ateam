@@ -45,7 +45,7 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	prompt, err := assembleSupervisorV1(env, "auto_setup", "the supervisor", "auto-setup", "")
+	prompt, err := assembleSupervisorV1(env, "auto_setup", "the supervisor", "auto-setup", "", "", "")
 	if err != nil {
 		return err
 	}

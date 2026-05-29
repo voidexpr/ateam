@@ -102,9 +102,9 @@ func runPromptRole() error {
 	var assembled string
 	switch promptAction {
 	case runner.ActionReport:
-		assembled, err = assembleRoleReportV1(env, promptRole, roleLabel, extraPrompt, promptIgnorePreviousReport)
+		assembled, err = assembleRoleReportV1(env, promptRole, roleLabel, extraPrompt, "", "", promptIgnorePreviousReport)
 	case runner.ActionCode:
-		assembled, err = assembleRoleCodeV1(env, promptRole, roleLabel, extraPrompt)
+		assembled, err = assembleRoleCodeV1(env, promptRole, roleLabel, extraPrompt, "", "")
 	}
 	if err != nil {
 		return err
@@ -136,7 +136,7 @@ func runPromptSupervisor() error {
 	var assembled string
 	switch promptAction {
 	case runner.ActionReview:
-		assembled, err = assembleReviewV1(env, prompts.ReviewSelector{}, roleLabel, extraPrompt)
+		assembled, err = assembleReviewV1(env, prompts.ReviewSelector{}, roleLabel, extraPrompt, "", "", "")
 	case runner.ActionCode:
 		reviewContent, readErr := os.ReadFile(env.ReviewPath())
 		if readErr != nil {
@@ -147,9 +147,9 @@ func runPromptSupervisor() error {
 		// values (batch, profile, model, ...) depend on the live `ateam code`
 		// invocation, so the preview uses placeholders that show the shape;
 		// the user sees "this becomes a real value at run time."
-		assembled, err = assembleCodeManagementV1(env, roleLabel, string(reviewContent), previewSubRunFlags(env.SourceDir), extraPrompt)
+		assembled, err = assembleCodeManagementV1(env, roleLabel, string(reviewContent), previewSubRunFlags(env.SourceDir), extraPrompt, "", "", "")
 	case runner.ActionVerify:
-		assembled, err = assembleSupervisorV1(env, "code_verify", roleLabel, "verify", extraPrompt)
+		assembled, err = assembleSupervisorV1(env, "code_verify", roleLabel, "verify", extraPrompt, "", "")
 	}
 	if err != nil {
 		return err
@@ -218,7 +218,7 @@ func assembleForInspection() (string, []sectionDigest, error) {
 	}
 
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, promptAction)
-	res, err := a.Assemble(promptPath, vars, nil)
+	res, err := a.Assemble(promptPath, vars, nil, nil)
 	if err != nil {
 		return "", nil, err
 	}

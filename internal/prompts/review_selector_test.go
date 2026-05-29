@@ -1,7 +1,6 @@
 package prompts
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -180,7 +179,11 @@ func TestReviewSelector_Filter(t *testing.T) {
 	}
 }
 
-func TestAssembleReviewPrompt_EmptyAfterFilter(t *testing.T) {
+// TestReviewSelectorFilterFunnelOnEmpty covers the funnel computation
+// when all reports are filtered out — the same shape consumers
+// (assembleReviewV1) turn into a ReviewEmptyError. Tests the funnel
+// without going through any of the now-deleted assembler wrappers.
+func TestReviewSelectorFilterFunnelOnEmpty(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
 	makeTestReports(t, dir, map[string]time.Time{
@@ -189,18 +192,16 @@ func TestAssembleReviewPrompt_EmptyAfterFilter(t *testing.T) {
 	})
 	configRoles := map[string]string{"security": "on", "docs": "on"}
 
-	pinfo := ProjectInfoParams{ProjectName: "test", ProjectDir: dir}
-	_, err := AssembleReviewPrompt("", dir, pinfo, "", "",
-		ReviewSelector{Roles: []string{"security"}, MaxAge: time.Nanosecond},
-		configRoles)
-	if err == nil {
-		t.Fatal("expected ReviewEmptyError, got nil")
+	all, err := DiscoverReports(dir)
+	if err != nil {
+		t.Fatalf("DiscoverReports: %v", err)
 	}
-	var empty *ReviewEmptyError
-	if !errors.As(err, &empty) {
-		t.Fatalf("expected *ReviewEmptyError, got %T: %v", err, err)
+	selector := ReviewSelector{Roles: []string{"security"}, MaxAge: time.Nanosecond}
+	filtered, funnel := selector.Filter(all, configRoles)
+	if len(filtered) != 0 {
+		t.Fatalf("expected empty filter result, got %d reports", len(filtered))
 	}
-	if empty.Funnel.Available != 2 || empty.Funnel.RolesMatch != 1 || empty.Funnel.FreshEnough != 0 {
-		t.Errorf("funnel mismatch: %+v", empty.Funnel)
+	if funnel.Available != 2 || funnel.RolesMatch != 1 || funnel.FreshEnough != 0 {
+		t.Errorf("funnel mismatch: %+v", funnel)
 	}
 }

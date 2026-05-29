@@ -21,6 +21,32 @@ type AssembleResult struct {
 	Sections []Section
 }
 
+// AssembleOptions carries caller-supplied overrides that wrap or replace
+// parts of the assembled prompt. nil = no overrides (the default).
+//
+//   - ReplaceRoleMain swaps in this text as the role's main body — all the
+//     surrounding framing (root_pre, dir_pre, role_pre, role_post, dir_post,
+//     root_post) still composes normally. Used by `ateam review --prompt`,
+//     `ateam code --prompt`, and any future "I want everything except the
+//     role body" CLI surface. Frontmatter parsing is skipped for the
+//     override (the caller passes raw text); template-variable expansion
+//     still runs so {{project.info}} etc. resolve.
+//   - PrePrompt is wrapped at the very front of the assembled output,
+//     before any anchor-discovered content. Used by `--pre-prompt TEXT` on
+//     every prompt-taking command.
+//   - PostPrompt is wrapped at the very end, after every anchor-discovered
+//     section. Used by `--post-prompt TEXT`.
+//
+// Each field is rendered through the same template engine as anchor
+// content (so `{{project.name}}` etc. work inside CLI-provided text).
+// Whitespace-only values are dropped — they don't add an empty section to
+// the result.
+type AssembleOptions struct {
+	ReplaceRoleMain string
+	PrePrompt       string
+	PostPrompt      string
+}
+
 // Assemble walks the anchor chain and composes the prompt at `promptPath`
 // per the spec's assembly order:
 //
@@ -43,9 +69,17 @@ type AssembleResult struct {
 // `promptPath` is the path without `.prompt.md` extension — e.g.
 // "report/security" or "review" — and may be `/`-separated for nested dirs.
 //
-// Errors when no `<role>.prompt.md` is found in any anchor. Missing dir-level
-// or role-level fragments simply contribute nothing (no error).
-func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine) (AssembleResult, error) {
+// Errors when no `<role>.prompt.md` is found in any anchor (unless
+// opts.ReplaceRoleMain is set — then the missing file is fine, the
+// caller's body stands in). Missing dir-level or role-level fragments
+// simply contribute nothing (no error).
+//
+// opts may be nil for the default "no overrides" path. See AssembleOptions
+// for the override surfaces.
+func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine, opts *AssembleOptions) (AssembleResult, error) {
+	if opts == nil {
+		opts = &AssembleOptions{}
+	}
 	if engine == nil {
 		engine = NewEngine(a, 0)
 	}
@@ -95,6 +129,34 @@ func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine) (Asse
 		}
 		return nil
 	}
+	// addCLI is for caller-supplied overrides (pre/post/replace-main). Goes
+	// through the same render+whitespace-filter path as anchor content so
+	// `{{project.info}}` etc. work inside CLI text, and an empty value
+	// silently drops.
+	addCLI := func(slot, source, body string) error {
+		if strings.TrimSpace(body) == "" {
+			return nil
+		}
+		rendered, err := engine.Render(body, vars)
+		if err != nil {
+			return fmt.Errorf("rendering %s: %w", slot, err)
+		}
+		if strings.TrimSpace(rendered) == "" {
+			return nil
+		}
+		sections = append(sections, Section{
+			Anchor:  "cli",
+			Path:    source,
+			Slot:    slot,
+			Content: rendered,
+		})
+		return nil
+	}
+
+	// 0. CLI pre-prompt — outermost wrapper at the front.
+	if err := addCLI("cli_pre_prompt", "(--pre-prompt)", opts.PrePrompt); err != nil {
+		return AssembleResult{}, err
+	}
 
 	// 1. Dir-level pres, root → leaf.
 	for i := 0; i <= len(dirs); i++ {
@@ -123,17 +185,24 @@ func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine) (Asse
 		return AssembleResult{}, err
 	}
 
-	// 3. Role main (first-match wins).
-	mainPath := joinName(dir, role+".prompt.md")
-	main, ok, err := a.FirstMatch(mainPath)
-	if err != nil {
-		return AssembleResult{}, fmt.Errorf("lookup %q: %w", mainPath, err)
-	}
-	if !ok {
-		return AssembleResult{}, fmt.Errorf("no role main at %s in any anchor", mainPath)
-	}
-	if err := addRendered("role_main", main.Anchor, main.Path, string(main.Content)); err != nil {
-		return AssembleResult{}, err
+	// 3. Role main: either the CLI override (replaces the file) or the
+	// first-match across anchors.
+	if opts.ReplaceRoleMain != "" {
+		if err := addCLI("role_main", "(--prompt)", opts.ReplaceRoleMain); err != nil {
+			return AssembleResult{}, err
+		}
+	} else {
+		mainPath := joinName(dir, role+".prompt.md")
+		main, ok, err := a.FirstMatch(mainPath)
+		if err != nil {
+			return AssembleResult{}, fmt.Errorf("lookup %q: %w", mainPath, err)
+		}
+		if !ok {
+			return AssembleResult{}, fmt.Errorf("no role main at %s in any anchor", mainPath)
+		}
+		if err := addRendered("role_main", main.Anchor, main.Path, string(main.Content)); err != nil {
+			return AssembleResult{}, err
+		}
 	}
 
 	// 4. Role-level posts.
@@ -159,6 +228,11 @@ func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine) (Asse
 		if err := addMatches(slot, matches); err != nil {
 			return AssembleResult{}, err
 		}
+	}
+
+	// 6. CLI post-prompt — outermost wrapper at the end.
+	if err := addCLI("cli_post_prompt", "(--post-prompt)", opts.PostPrompt); err != nil {
+		return AssembleResult{}, err
 	}
 
 	parts2 := make([]string, len(sections))

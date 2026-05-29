@@ -6,35 +6,35 @@ import (
 
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
 )
 
-// assembleReviewV1 builds the supervisor review prompt via the v1 assembler
-// instead of the legacy prompts.AssembleReviewPrompt path. The composed
-// output mirrors the legacy structure so existing user-authored
-// review.post.extra.md fragments keep landing in the same position:
+// assembleReviewV1 builds the supervisor review prompt via the v1 assembler.
+// Composition order:
 //
-//	_pre.context.md          {{project.info}}
-//	review.prompt.md         supervisor body
-//	review.post.*.md         user-authored extras (composed via assembler)
-//	<reports block>          manifest + bundled role reports (appended)
-//	<extraPrompt>            --extra-prompt CLI value (appended)
+//	[--pre-prompt]            (outermost head)
+//	_pre.context.md           {{project.info}}
+//	review.prompt.md          supervisor body (or customPrompt via ReplaceRoleMain)
+//	review.post.*.md          user-authored extras
+//	<reports block>           manifest + bundled role reports (appended)
+//	<extraPrompt>             --extra-prompt CLI value (appended)
+//	[--post-prompt]           (outermost tail)
 //
-// Reports are appended manually rather than via a fragment file because the
-// assembler's per-slot composition order is anchor-first (embedded →
-// project), which would put project-authored extras AFTER an embedded
-// reports fragment — the opposite of the legacy ordering. Appending keeps
-// extras → reports → CLI, matching legacy bytes.
+// Reports are appended manually (not via a fragment file) because the
+// assembler's per-slot composition is anchor-first (embedded → project),
+// which would put project-authored extras AFTER an embedded reports
+// fragment — the opposite of the legacy ordering. Appending keeps
+// extras → reports → extra-prompt, matching legacy bytes.
 //
-// `--prompt` (customPrompt) is NOT handled here — that branch still uses
-// the legacy path; the caller in runReview decides which to use.
-//
-// Returns the same ReviewEmptyError as the legacy path when the selector's
-// filters eliminate every report, so the cmd-level error handler stays
-// unchanged.
 // roleLabel feeds {{project.info}} ("the supervisor" for live runs); pass
-// "" to suppress.
-func assembleReviewV1(env *root.ResolvedEnv, selector prompts.ReviewSelector, roleLabel, extraPrompt string) (string, error) {
+// "" to suppress. customPrompt replaces the supervisor body wholesale via
+// the assembler's ReplaceRoleMain option. prePrompt / postPrompt wrap the
+// assembled output at the outermost positions.
+//
+// Returns the same ReviewEmptyError as the assembler-only path when the
+// selector's filters eliminate every report.
+func assembleReviewV1(env *root.ResolvedEnv, selector prompts.ReviewSelector, roleLabel, extraPrompt, customPrompt, prePrompt, postPrompt string) (string, error) {
 	all, err := prompts.DiscoverReports(env.ProjectDir)
 	if err != nil {
 		return "", err
@@ -49,7 +49,14 @@ func assembleReviewV1(env *root.ResolvedEnv, selector prompts.ReviewSelector, ro
 
 	a := env.Assembler()
 	vars := env.BuildAssemblerVars("review", roleLabel, "review")
-	res, err := a.Assemble("review", vars, nil)
+	// Pre-prompt rides through the assembler (lands before _pre.context.md).
+	// Post-prompt is held until after the manually-appended reports block +
+	// extraPrompt so it stays as the outermost tail wrapper.
+	opts := &assembler.AssembleOptions{
+		ReplaceRoleMain: customPrompt,
+		PrePrompt:       prePrompt,
+	}
+	res, err := a.Assemble("review", vars, nil, opts)
 	if err != nil {
 		return "", err
 	}
@@ -61,28 +68,49 @@ func assembleReviewV1(env *root.ResolvedEnv, selector prompts.ReviewSelector, ro
 	if extraPrompt != "" {
 		prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
 	}
+	if strings.TrimSpace(postPrompt) != "" {
+		prompt += "\n\n---\n\n" + postPrompt
+	}
 	return prompt, nil
 }
 
 // assembleSupervisorV1 is the generic single-prompt supervisor assembler:
 // builds promptPath via env.Assembler() and appends the --extra-prompt CLI
 // value as a hardcoded "# Additional Instructions" suffix. Used by verify,
-// code-management, exec-debug, auto-roles — singletons that have no role
-// reports / manifest of their own. Review has its own assembleReviewV1
-// because it needs the reports block woven into the legacy order.
+// exec-debug, auto-roles — singletons that have no role reports / manifest
+// of their own. Review has its own assembleReviewV1 because it needs the
+// reports block woven into the legacy order.
 //
 // roleLabel and action go into BuildAssemblerVars so {{project.info}}
-// renders identically to the legacy AssembleXxx path.
-func assembleSupervisorV1(env *root.ResolvedEnv, promptPath, roleLabel, action, extraPrompt string) (string, error) {
+// renders identically to the legacy AssembleXxx path. prePrompt /
+// postPrompt wrap at the outermost positions; extraPrompt sits between
+// the assembled body and post-prompt.
+func assembleSupervisorV1(env *root.ResolvedEnv, promptPath, roleLabel, action, extraPrompt, prePrompt, postPrompt string) (string, error) {
 	a := env.Assembler()
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, action)
-	res, err := a.Assemble(promptPath, vars, nil)
+	opts := &assembler.AssembleOptions{
+		PrePrompt:  prePrompt,
+		PostPrompt: postPrompt,
+	}
+	if extraPrompt == "" {
+		// No extra-prompt → assembler can own the entire wrap.
+		res, err := a.Assemble(promptPath, vars, nil, opts)
+		if err != nil {
+			return "", err
+		}
+		return res.Prompt, nil
+	}
+	// extraPrompt needs to land between the assembled body and post-prompt,
+	// matching the legacy "extras live between body and outer wrap" shape.
+	// Pull post-prompt out of the assembler call and append it manually.
+	opts.PostPrompt = ""
+	res, err := a.Assemble(promptPath, vars, nil, opts)
 	if err != nil {
 		return "", err
 	}
-	prompt := res.Prompt
-	if extraPrompt != "" {
-		prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
+	prompt := res.Prompt + "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
+	if strings.TrimSpace(postPrompt) != "" {
+		prompt += "\n\n---\n\n" + postPrompt
 	}
 	return prompt, nil
 }
