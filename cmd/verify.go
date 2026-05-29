@@ -6,6 +6,8 @@ import (
 
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/runner"
+	"github.com/ateam/internal/stage"
+	"github.com/ateam/internal/stage/actions"
 	"github.com/spf13/cobra"
 )
 
@@ -55,8 +57,9 @@ var verifyCmd = &cobra.Command{
 look for logical bugs, broken or missing tests, and risky changes, then run
 the project's test suite and record findings in a verification report.
 
-` + "`ateam code`" + ` and ` + "`ateam all`" + ` chain verify automatically; run this
-command directly to re-verify, or pass ` + "`--no-verify`" + ` to skip the chained run.
+Run after ` + "`ateam code`" + ` to inspect the resulting commits, or use
+` + "`ateam all`" + ` for the full pipeline which always runs verify as the
+final phase.
 
 Example:
   ateam verify
@@ -126,6 +129,8 @@ func runVerify(opts VerifyOptions) error {
 		return err
 	}
 
+	// Assemble the prompt up front so --dry-run can print it without
+	// spinning up the executor + DB.
 	prompt, err := assembleSupervisorV1(env, "code_verify", "the supervisor", "verify", extraPrompt, prePrompt, postPrompt)
 	if err != nil {
 		return err
@@ -137,8 +142,6 @@ func runVerify(opts VerifyOptions) error {
 	// v1 flat layout: promotion writes to .ateam/shared/verify.md (the file,
 	// not a per-action subdir). Sidecars stay in runtime/<exec_id>/.
 	verifyFile := env.VerifyPath()
-
-	startedAt := time.Now()
 
 	if opts.DryRun {
 		fmt.Printf("╔══ verify ══╗\n\n")
@@ -171,36 +174,41 @@ func runVerify(opts VerifyOptions) error {
 	defer db.Close()
 	cr.CallDB = db
 
-	if !opts.Force {
-		if err := checkConcurrentRunsEnv(db, env, runner.ActionVerify, nil); err != nil {
-			return err
-		}
-	}
-	runOpts := runner.RunOpts{
-		RoleID:            "supervisor",
-		Action:            runner.ActionVerify,
-		OutputKind:        runner.OutputKindVerify,
-		CanonicalDestFile: verifyFile,
-		WorkDir:           env.WorkDir,
-		TimeoutMin:        timeout,
-		Verbose:           opts.Verbose,
-		StartedAt:         startedAt,
-	}
-
 	ctx, stop := cmdContext()
 	defer stop()
-	result := cr.Execute(ctx, prompt, runOpts, nil)
+	startedAt := time.Now()
 
-	if result.Err != nil {
-		return fmt.Errorf("verify failed: %w", result.Err)
-	}
-
-	printDone(result)
-	fmt.Printf("Verification report: %s\n", env.VerifyPath())
-
-	if opts.Print {
-		printArtifact(verifyFile, result.Output)
-	}
-
-	return nil
+	return stage.Run(stage.Stage{
+		Name:   "verify",
+		Action: runner.ActionVerify,
+		BuildPrompt: func(*stage.Ctx) (string, error) {
+			return prompt, nil
+		},
+		BuildRunOpts: func(*stage.Ctx) runner.RunOpts {
+			return runner.RunOpts{
+				RoleID:            "supervisor",
+				Action:            runner.ActionVerify,
+				OutputKind:        runner.OutputKindVerify,
+				CanonicalDestFile: verifyFile,
+				WorkDir:           env.WorkDir,
+				TimeoutMin:        timeout,
+				Verbose:           opts.Verbose,
+				StartedAt:         startedAt,
+			}
+		},
+		Pre: []stage.Action{
+			actions.CheckConcurrentRuns{If: !opts.Force, Action: runner.ActionVerify},
+		},
+		Post: []stage.Action{
+			actions.FailOnExecError{Label: "verify"},
+			actions.PrintDone{},
+			actions.PrintArtifactPath{Label: "Verification report", Path: verifyFile},
+			actions.PrintArtifactBody{If: opts.Print, Path: verifyFile},
+		},
+	}, &stage.Ctx{
+		Context:  ctx,
+		Env:      env,
+		Executor: cr,
+		DB:       db,
+	})
 }
