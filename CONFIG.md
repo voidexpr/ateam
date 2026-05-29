@@ -587,9 +587,9 @@ For the resolution order when multiple profile selectors apply, see [Profile res
 Typically only coding agents need to run inside docker so they can build and run tests in an isolated environment. Basic docker config from [README.md](README.md) is enough. But if you want the supervisor itself to run in docker and launch ateam coding agents then a Linux build of ateam must be available inside of docker. Cross-compile the Linux companion binary:
 
 ```bash
-make companion    # produces build/ateam-linux-amd64
+make companion    # produces build/ateam-linux-<arch>
 ```
 
-The binary is automatically found by ateam from `build/`. For installations without a git checkout, place `ateam-linux-amd64` next to the host `ateam` binary.
+The binary is automatically found by ateam from `build/`. For installations without a git checkout, place `ateam-linux-<arch>` next to the host `ateam` binary.
 
 For complete Docker setup including secrets, precheck scripts, and interactive sessions, see [ISOLATION.md](ISOLATION.md).

@@ -183,7 +183,7 @@ profile "my-app" {
 }
 ```
 
-- `copy_ateam = true` runs `docker cp` of the linux binary before each exec. Requires `make companion` (produces `build/ateam-linux-amd64`). Manual variant: `ateam container-cp --container-name my-app-dev`.
+- `copy_ateam = true` runs `docker cp` of the linux binary before each exec. Requires `make companion` (produces `build/ateam-linux-<arch>`). Manual variant: `ateam container-cp --container-name my-app-dev`.
 - `exec` supports `{{CONTAINER}}` and `{{CMD}}` placeholders for podman / ssh / kubectl wrappers.
 
 ### Devcontainer
@@ -222,7 +222,7 @@ docker run \
   ...
 ```
 
-Build the linux binary with `make companion` (produces `build/ateam-linux-amd64`).
+Build the linux binary with `make companion` (produces `build/ateam-linux-<arch>`).
 
 Running agents inside the container:
 
@@ -491,7 +491,7 @@ Typically only the `code` action benefits from Docker (it needs to build and run
 If you want the supervisor itself to run in Docker and launch coding agents from inside it, a Linux build of ateam must be available inside the container:
 
 ```bash
-make companion    # produces build/ateam-linux-amd64
+make companion    # produces build/ateam-linux-<arch>
 ```
 
 ATeam auto-detects the binary and mounts it at `/usr/local/bin/ateam` inside the container.

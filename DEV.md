@@ -100,7 +100,7 @@ make vuln          # govulncheck
 
 Run the full CI suite locally with `make run-ci`.
 
-A separate workflow (`.github/workflows/docker-tests.yml`) runs `make test-docker` on pushes to `main` that touch `test/`, `Dockerfile*`, or `internal/container/`.
+A separate workflow (`.github/workflows/docker-tests.yml`) runs `make test-docker`. It is `workflow_dispatch`-only — triggered manually from the Actions tab, not on push or pull request.
 
 ### Git hooks
 
@@ -122,62 +122,82 @@ make test-docker   # Docker-in-Docker integration tests (see below)
 
 ## Docker binary resolution
 
-Docker containers need a Linux/AMD64 ateam binary mounted at `/usr/local/bin/ateam`. The `findLinuxBinary()` function resolves it with this search chain:
+Docker containers need a linux ateam binary (matching the host's CPU arch — `ateam-linux-<arch>`, e.g. `arm64` on Apple Silicon) mounted at `/usr/local/bin/ateam`. The `findLinuxBinary()` function resolves it with this search chain:
 
-1. **Host is linux/amd64** — uses the running binary directly
-2. **Companion binary** — `ateam-linux-amd64` next to the host `ateam` binary (e.g. from a release archive)
-3. **Build directory** — `build/ateam-linux-amd64` from `make companion`
-4. **Org cache** — `.ateamorg/cache/ateam-linux-amd64` from a prior auto cross-compilation
+1. **Host is linux** — uses the running binary directly (it is already linux/`<host arch>`)
+2. **Build directory** — `build/ateam-linux-<arch>` from `make companion`
+3. **Companion binary** — `ateam-linux-<arch>` next to the host `ateam` binary (e.g. from a release archive)
+4. **Org cache** — `.ateamorg/cache/ateam-linux-<arch>` from a prior auto cross-compilation
 5. **Cross-compile** — builds automatically if `go` and `go.mod` are available
 6. **Warning** — prints a message and returns empty (Docker mount is skipped)
 
 For developers building from source, cross-compilation happens automatically (step 5). To pre-build the companion binary:
 
 ```bash
-make companion    # produces build/ateam-linux-amd64
+make companion    # produces build/ateam-linux-<arch>
 ```
 
-Release archives should include both `ateam` (host) and `ateam-linux-amd64` so Docker mode works without a Go compiler.
+Release archives should include both `ateam` (host) and `ateam-linux-<arch>` so Docker mode works without a Go compiler.
 
 ## Adding a new role
 
-1. Create `defaults/roles/<name>/report_prompt.md`
-2. Optionally add `code_prompt.md` for code-action support
-3. Run `make build` — the role is auto-discovered from the embedded filesystem
+1. Create `defaults/prompts/report/<name>.prompt.md` (the role's main report body)
+2. Optionally add `defaults/prompts/code/<name>.prompt.md` for code-action support
+3. Run `make build` — the prompt tree is embedded via `defaults.FS`, so the role is discoverable from the embedded anchor
 4. Enable it in a project: `ateam init --role <name>` or edit `.ateam/config.toml`
+
+Prompt assembly is implemented in `internal/prompts/assembler/`. The sections below describe the parts most relevant when adding or overriding a role.
 
 ### Prompt assembly order
 
-When a role runs, `internal/prompts/prompts.go::assembleRoleAction` concatenates these parts (separated by `---`):
+A role's prompt is composed by `(*Assembler).Assemble` (`internal/prompts/assembler/assemble.go`), which walks the anchor chain and joins these slots with `---` separators (given a `promptPath` like `report/<name>` — the trailing segment is the role, the leading segment is the action dir):
 
-1. ATeam Project Context (header line, role/action, working dir, git/orientation block — built by `FormatProjectInfo`)
-2. Role-specific prompt (`report_prompt.md` or `code_prompt.md`)
-3. Base prompt (`report_base_prompt.md` or `code_base_prompt.md`) — shared format/output rules
-4. Extra prompts (`*_extra_prompt.md`) — additive across all levels, in order: org broad → org role → project broad → project role
-5. Previous report (the role's existing `report.md`, with age) — skipped for code action; replaced by a "fresh cycle" notice when no prior report exists
-6. CLI `--extra-prompt` text under "# Additional Instructions"
+1. CLI pre-prompt (`opts.PrePrompt`, from `--pre-prompt`) — outermost front wrapper
+2. Dir-level pre fragments (`_pre.md` / `_pre.*.md`), root → leaf (e.g. `report/_pre.intro.md`)
+3. Role-level pre fragments (`<name>.pre.*.md`)
+4. Role main — first-match `<name>.prompt.md` across anchors, or `opts.ReplaceRoleMain` when the caller supplies a body. Required: assembly errors if neither a file nor an override resolves to non-whitespace content
+5. Role-level post fragments (`<name>.post.*.md`)
+6. Dir-level post fragments (`_post.md` / `_post.*.md`), leaf → root (e.g. `report/_post.format.md` carries the shared format/output rules)
+7. CLI post-prompt (`opts.PostPrompt`, from `--post-prompt`) — outermost tail wrapper
+
+`Assemble` produces the body and per-section provenance only. The ATeam Project Context header (`{{project.info}}`), the previous-report block, and the `# Additional Instructions` (`--extra-prompt`) block are appended around the assembled body by the cmd layer — see `assembleRoleReportV1` in `cmd/report_v1.go`, which inserts the previous-report block (skipped for code actions; a "fresh cycle" notice replaces it when no prior report exists) before the post-prompt tail.
 
 ### Resolution precedence
 
-Each role/base prompt file is resolved by `readFileOr3Level` (whose package comment in `prompts.go` documents the chain as 4-level):
+The anchor chain is built by `assembler.BuildAnchors(projectDir, orgDir, embedded)` (`internal/prompts/assembler/anchors.go`) and wired up by `(*ResolvedEnv).Assembler()` (`internal/root/resolve.go`). Anchors are listed most-specific first, each rooted at the anchor's `prompts/` subdir:
 
-1. Project — `.ateam/<file>` or `.ateam/roles/<name>/<file>`
-2. Org — `.ateamorg/<file>` or `.ateamorg/roles/<name>/<file>`
-3. Org defaults — `.ateamorg/defaults/<file>` or `.ateamorg/defaults/roles/<name>/<file>`
-4. Embedded — bundled into the binary via `defaults.FS` (`defaults/roles/<name>/...`)
+1. Project — `<projectDir>/prompts/`
+2. Org — `<orgDir>/prompts/` (omitted when there is no org)
+3. Embedded — `defaults/prompts/` via `defaults.FS`
 
-First non-empty match wins for role/base prompts. `*_extra_prompt.md` is additive (every level that contributes a non-empty file is appended). Use `ateam prompt --role <name> [--code]` to inspect the assembled prompt and which sources contributed.
+Two resolution modes (`internal/prompts/assembler/assembler.go`):
+
+- **`FirstMatch`** — most-specific anchor wins. Used for the role main (`<name>.prompt.md`) and for `{{include}}` / `{{include?}}`.
+- **`AllMatches`** — every distinct path contributes; when the same path exists in multiple anchors, the most-specific anchor's content wins but the fragment keeps the slot position of the most-general anchor that has it. Files sort lexically within an anchor. Used for the `_pre`/`_post` and `<name>.pre`/`<name>.post` fragment globs and for `{{include_glob}}`.
+
+Use `ateam prompt --role <name> [--action code]` to inspect the assembled prompt and which anchors contributed each section.
 
 ### Template variables
 
-Inside any prompt file, `{{VAR}}` placeholders are substituted by `internal/runner/template.go`. The canonical list lives in the `TemplateVars` struct and its `Replacer()` method — examples: `{{PROJECT_NAME}}`, `{{ROLE}}`, `{{ACTION}}`, `{{EXEC_ID}}`, `{{OUTPUT_DIR}}`, `{{OUTPUT_FILE}}`, `{{AGENT}}`, `{{MODEL}}`, `{{ATEAM_OWN_README}}` (embedded self-docs), `{{AUTO_ROLES_MARKER}}`. Add new placeholders there only; unknown `{{VAR}}` tokens are left as-is.
+Prompt-file variables and runtime.hcl/agent-arg variables are two distinct systems — do not conflate them:
 
-### `code_prompt.md` and the supervisor code phase
+- **Prompt-file content** uses dotted `{{namespace.key}}` directives resolved by the assembler engine (`internal/prompts/assembler/template.go`, `MapVars`). Recognized namespaces: `prompt`, `exec`, `project`, `git`, `container`, `ateam`, `role`, `env`. The canonical variable names — plus the legacy ALL_CAPS → dotted compatibility mapping — live in `internal/prompts/assembler/varmap.go` (`VarRenameMap` and `VarLiteralRewrites`); add new prompt variables there. Legacy ALL_CAPS tokens (`{{ROLE}}`, `{{OUTPUT_FILE}}`, …) still resolve via that map until the mechanical rename lands. The engine also handles `{{include path}}`, `{{include? path}}`, and `{{include_glob pattern}}`. Unknown namespaces and unmatched tokens pass through verbatim.
+- **Agent CLI args and container fields from `runtime.hcl`** use ALL_CAPS `{{VAR}}` placeholders substituted by `internal/runner/template.go` — the `TemplateVars` struct and its `Replacer()` method (e.g. `{{AGENT}}`, `{{MODEL}}`, `{{CONTAINER_NAME}}`, `{{OUTPUT_DIR}}`). This is a separate substitution pass over `runtime.hcl` values, not over prompt-file content; add new placeholders to `TemplateVars.Replacer()`. Unknown `{{VAR}}` tokens are left as-is.
 
-The per-role `code_prompt.md` is independent from the supervisor's code-management phase:
+### CLI override surface (`AssembleOptions`)
 
-- **Role level** — when `defaults/roles/<name>/code_prompt.md` exists, `ateam code --role <name>` (and `--code-prompt`) assembles the role's code prompt via `AssembleRoleCodePrompt`, using `code_base_prompt.md` instead of `report_base_prompt.md` and never including the previous report.
-- **Supervisor level** — `ateam code` (no role) drives the supervisor via `defaults/supervisor/code_management_prompt.md` (assembled by `AssembleCodeManagementPrompt`). The supervisor splits the review into individual tasks and writes per-task `<SEQ>_<SLUG>_code_prompt.md` files into `{{EXECUTION_DIR}}`, then invokes `ateam exec @... --role <ROLE>` for each. Adding a role's own `code_prompt.md` is what lets those per-task `exec` invocations target it.
+`Assemble` takes an `*AssembleOptions` (`assemble.go`) carrying caller-supplied overrides; `nil` means no overrides. Each field is rendered through the same template engine as anchor content, and whitespace-only values are dropped:
+
+- `ReplaceRoleMain` — swaps in caller text as the role's main body (slot 4); all surrounding framing (pre/post fragments, CLI wrappers) still composes. Used by `ateam review --prompt` and `ateam code --prompt`.
+- `PrePrompt` — wrapped at the very front, before any anchor content (`--pre-prompt`).
+- `PostPrompt` — wrapped at the very end, after every anchor section (`--post-prompt`).
+
+### Role code prompts and the supervisor code phase
+
+A per-role code prompt (`code/<name>.prompt.md`) is independent from the supervisor's code-management phase:
+
+- **Role level** — when `code/<name>.prompt.md` exists (project, org, or embedded), `ateam code --role <name>` and `ateam prompt --role <name> --action code` assemble the `code/<name>` path with no previous-report block (the source of truth for "what changed" is the patch's git history). See `assembleRoleCodeV1` in `cmd/code_v1.go`.
+- **Supervisor level** — `ateam code` (no role) drives the supervisor via the `code_management.prompt.md` body, assembled by `assembleCodeManagementV1` (`cmd/code_v1.go`) through the same `Assemble` path. The supervisor splits the review into individual tasks and writes per-task code prompts into `{{OUTPUT_DIR}}` (the prompt still ships the legacy `{{EXECUTION_DIR}}` alias for the same directory), then invokes `ateam exec @... --role <name>` for each. A role's own `code/<name>.prompt.md` is what lets those per-task `exec` invocations target it.
 
 ## Project on-disk layout
 

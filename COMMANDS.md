@@ -372,7 +372,7 @@ ateam container-cp --profile my-app
 | `--profile NAME` | Read container name from profile's `docker_container` field |
 | `--dry-run` | Show what would be copied without executing |
 
-Requires a pre-built linux binary (`make companion` produces `build/ateam-linux-amd64`).
+Requires a pre-built linux binary (`make companion` produces `build/ateam-linux-<arch>`).
 
 ### `ateam claude`
 
