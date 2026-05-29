@@ -5,7 +5,7 @@ GO_CMD ?= go
 GO := GOCACHE=$(GO_CACHE_DIR) $(GO_CMD)
 GO_INSTALL := GOBIN=$(GO_TOOL_BIN) $(GO)
 
-.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy check-tidy check-docs check test test-all test-cli test-docker test-docker-live claude-in-docker vuln docs lint fmt fmt-check install-hooks run-ci
+.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy check-tidy check-docs check test test-all test-cli test-docker test-docker-live claude-in-docker vuln deadcode docs lint fmt fmt-check install-hooks run-ci
 
 BUILD_TIME := $(shell python3 -c 'import time; print(f"{time.time():.6f}")' 2>/dev/null || date +%s)
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
@@ -65,8 +65,8 @@ check-docs: build-binary
 # Developer quick health check: tests, formatting, tidiness, linting.
 check: test fmt-check check-tidy check-docs lint
 
-# Full CI check: everything in 'check' plus vulnerability scanning.
-run-ci: check vuln
+# Full CI check: everything in 'check' plus vulnerability and dead-code scanning.
+run-ci: check vuln deadcode
 
 test:
 	$(GO) test -race ./...
@@ -155,6 +155,39 @@ vuln:
 	if [ $$rc -ne 0 ]; then \
 		echo "vuln: govulncheck reported issues (exit $$rc)" >&2; \
 		exit $$rc; \
+	fi
+
+# Whole-program dead-code gate: fails on any unreachable function in the
+# module. `-test` counts functions exercised only by the test suite (e.g.
+# runner.RunPool) as live, so test-only seams are not flagged. Install-or-skip
+# handling mirrors `vuln` so sandboxed/offline runs degrade gracefully.
+deadcode:
+	@BIN=$$(command -v deadcode 2>/dev/null || true); \
+	if [ -z "$$BIN" ] && [ -x "$(GO_TOOL_BIN)/deadcode" ]; then \
+		BIN="$(GO_TOOL_BIN)/deadcode"; \
+	fi; \
+	if [ -z "$$BIN" ] && [ -x "$$($(GO) env GOPATH)/bin/deadcode" ]; then \
+		BIN=$$($(GO) env GOPATH)/bin/deadcode; \
+	fi; \
+	if [ -z "$$BIN" ]; then \
+		mkdir -p "$(GO_TOOL_BIN)"; \
+		if $(GO_INSTALL) install golang.org/x/tools/cmd/deadcode@latest >/dev/null 2>&1; then \
+			BIN="$(GO_TOOL_BIN)/deadcode"; \
+		else \
+			echo "deadcode: skipping — cannot install deadcode (no network or sandboxed)"; \
+			exit 0; \
+		fi; \
+	fi; \
+	out=$$(GOCACHE="$(GO_CACHE_DIR)" "$$BIN" -test ./... 2>&1); rc=$$?; \
+	if [ $$rc -ne 0 ]; then \
+		printf '%s\n' "$$out"; \
+		echo "deadcode: analysis failed (exit $$rc)" >&2; \
+		exit $$rc; \
+	fi; \
+	if [ -n "$$out" ]; then \
+		printf '%s\n' "$$out"; \
+		echo "deadcode: unreachable functions found (see above)" >&2; \
+		exit 1; \
 	fi
 
 lint:

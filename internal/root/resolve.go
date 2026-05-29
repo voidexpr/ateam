@@ -53,10 +53,6 @@ type ResolvedEnv struct {
 	quickOrientation *string
 }
 
-func (e *ResolvedEnv) RoleDir(roleID string) string {
-	return filepath.Join(e.ProjectDir, "roles", roleID)
-}
-
 func (e *ResolvedEnv) SupervisorDir() string {
 	return filepath.Join(e.ProjectDir, "supervisor")
 }
@@ -70,19 +66,11 @@ func (e *ResolvedEnv) RoleReportPath(roleID string) string {
 	return filepath.Join(e.SharedDir(), "report", roleID+".md")
 }
 
-func (e *ResolvedEnv) RoleHistoryDir(roleID string) string {
-	return filepath.Join(e.RoleDir(roleID), "history")
-}
-
 // ReviewPath returns the canonical v1 path for the supervisor review file.
 // Auto-migration handles the legacy supervisor/review.md and the pre-flat
 // shared/review/review.md locations.
 func (e *ResolvedEnv) ReviewPath() string {
 	return filepath.Join(e.SharedDir(), "review.md")
-}
-
-func (e *ResolvedEnv) ReviewHistoryDir() string {
-	return filepath.Join(e.SupervisorDir(), "history")
 }
 
 // VerifyPath returns the canonical v1 path for the supervisor verification

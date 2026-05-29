@@ -357,14 +357,6 @@ func transientSocketError(out string) bool {
 		strings.Contains(out, "Connection refused")
 }
 
-// SafeSocketName sanitizes a session name for use in filesystem paths. It
-// preserves alphanumerics, dash, underscore, and dot; other bytes become `_`.
-// Exported because the codex adapter uses it to derive the script-path
-// suffix that ends up inside the socket dir.
-func SafeSocketName(name string) string {
-	return safeSocketName(name)
-}
-
 func safeSocketName(name string) string {
 	var b strings.Builder
 	for _, r := range name {

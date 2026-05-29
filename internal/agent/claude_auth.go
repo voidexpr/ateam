@@ -179,30 +179,6 @@ func ValidateTarget(target AuthMethod, status AuthStatus) string {
 	return ""
 }
 
-// Conflicts returns warning strings about env vars that conflict
-// with the target method.
-func Conflicts(target AuthMethod) []string {
-	var warnings []string
-	switch target {
-	case AuthOAuth:
-		if os.Getenv("ANTHROPIC_API_KEY") != "" {
-			warnings = append(warnings, "ANTHROPIC_API_KEY is set and takes priority over oauth — will be removed from exec env")
-		}
-	case AuthAPI:
-		if os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") != "" {
-			warnings = append(warnings, "CLAUDE_CODE_OAUTH_TOKEN is set (lower priority than api key)")
-		}
-	case AuthRegular:
-		if os.Getenv("ANTHROPIC_API_KEY") != "" {
-			warnings = append(warnings, "ANTHROPIC_API_KEY is set and takes priority over interactive login — will be removed from exec env")
-		}
-		if os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") != "" {
-			warnings = append(warnings, "CLAUDE_CODE_OAUTH_TOKEN is set and takes priority over interactive login — will be removed from exec env")
-		}
-	}
-	return warnings
-}
-
 // CleanupResult describes one cleanup action taken or skipped.
 type CleanupResult struct {
 	Description string

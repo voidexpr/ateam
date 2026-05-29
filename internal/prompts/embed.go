@@ -79,12 +79,6 @@ func RoleMeta(roleID string) RoleMetadata {
 	return meta
 }
 
-// RoleDescription returns the description from a role's report_prompt.md
-// frontmatter. Falls back to "" when missing.
-func RoleDescription(roleID string) string {
-	return RoleMeta(roleID).Description
-}
-
 // discoverRoleIDs walks the embedded prompts/report/ tree and returns the
 // list of <role> basenames (i.e. the part before .prompt.md). Role IDs may
 // contain dots ("code.bugs", "report.security") — those are preserved.
