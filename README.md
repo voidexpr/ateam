@@ -85,7 +85,8 @@ ateam init
 # 2. Authenticate your coding agent (pick what you use — without this `ateam report` will fail)
 claude                                            # interactive Claude Code login, then exit
 # or store credentials with ateam:
-ateam secret CLAUDE_CODE_OAUTH_TOKEN --set        # OAuth token (reads from stdin)
+claude setup-token                                # produces a long-lived OAuth token to paste below
+ateam secret CLAUDE_CODE_OAUTH_TOKEN --set        # paste the token from setup-token (reads from stdin)
 ateam secret ANTHROPIC_API_KEY --set              # or an API key
 
 # 3. Auto-configure roles for your project (optional)
@@ -136,7 +137,11 @@ sudo ln -s "$(pwd)/ateam" /usr/local/bin/ateam
 
 ```bash
 git pull --rebase && make build-all
+ateam update --diff   # preview which embedded prompts changed
+ateam update          # sync on-disk prompts to the new embedded defaults
 ```
+
+Run `ateam update` after rebuilding: on-disk org/project prompts shadow the binary's embedded defaults, so without it prompt changes shipped in the new version silently don't take effect. Use `ateam update --diff` first to preview the changes.
 
 ## How It Works
 

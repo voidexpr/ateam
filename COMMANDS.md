@@ -822,10 +822,11 @@ On failure, error context lives in `cmd.md` / `stderr.out` / `stream.jsonl`; the
 
 ### History
 
-The canonical copy (e.g. `.ateam/roles/<role>/report.md`, `.ateam/supervisor/review.md`) is overwritten on each successful run. Every run also archives its prompt and output to a sibling `history/` directory with a timestamp prefix, so prior versions are kept:
+The canonical copy of each artifact lives in the flattened `.ateam/shared/` tree (e.g. `.ateam/shared/report/<role>.md`, `.ateam/shared/review.md`) and is overwritten on each successful run. Prior versions are not archived under the canonical path; instead, every run keeps its own per-run directories keyed by `<exec_id>`:
 
 ```bash
-ls .ateam/roles/security/history/
-# 2026-03-08_15-04-00.report_prompt.md
-# 2026-03-08_15-04-00.report.md
+.ateam/runtime/<exec_id>/   # the agent-written output for that run (preserved on success and failure)
+.ateam/logs/<exec_id>/      # rendered prompt, stream, stderr, and settings for that run
 ```
+
+Use `ateam ps` to list past runs and `ateam inspect <exec_id>` to browse a specific run's prompt and output.
