@@ -166,7 +166,7 @@ ateam report  →  ateam review  →  ateam code  →  ateam verify
 
 **Code**: The supervisor executes the top-priority tasks by delegating to coding agents, then records what was completed.
 
-**Verify**: The supervisor inspects the commits made during the code phase, looks for logical bugs, broken or missing tests, and risky changes, then runs the project's test suite and records findings. `ateam code` and `ateam all` chain this automatically; pass `--no-verify` to skip it.
+**Verify**: The supervisor inspects the commits made during the code phase, looks for logical bugs, broken or missing tests, and risky changes, then runs the project's test suite and records findings. `ateam code` stops after the code phase — run `ateam verify` explicitly, or use `ateam all` which always runs verify as the final phase.
 
 Each run archives its artifacts. The next cycle's reports incorporate previous findings, so quality improves incrementally with a memory of what has been done so far.
 
@@ -346,8 +346,8 @@ There is a very long list of potentially very useful roles to add.
 | [`ateam auto-setup`](COMMANDS.md#ateam-auto-setup) | Auto-configure roles for the current project |
 | [`ateam report`](COMMANDS.md#ateam-report) | Run role analyses |
 | [`ateam review`](COMMANDS.md#ateam-review) | Supervisor reviews and prioritizes findings |
-| [`ateam code`](COMMANDS.md#ateam-code) | Execute prioritized coding tasks (chains [`ateam verify`](COMMANDS.md#ateam-verify); pass `--no-verify` to skip) |
-| [`ateam all`](COMMANDS.md#ateam-all) | Full pipeline: report → review → code → verify |
+| [`ateam code`](COMMANDS.md#ateam-code) | Execute prioritized coding tasks (run [`ateam verify`](COMMANDS.md#ateam-verify) after, or use `ateam all` for the full pipeline) |
+| [`ateam all`](COMMANDS.md#ateam-all) | Full pipeline: report → review → code → verify (verify always runs) |
 | [`ateam verify`](COMMANDS.md#ateam-verify) | Supervisor verifies recent code changes from [`ateam code`](COMMANDS.md#ateam-code) |
 | [`ateam exec`](COMMANDS.md#ateam-exec) | Run an agent with a custom prompt |
 | [`ateam parallel`](COMMANDS.md#ateam-parallel) | Run multiple agents in parallel, each with its own prompt |

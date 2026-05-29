@@ -124,7 +124,6 @@ func TestCodeWarnsWhenCheaperAndModelBothSet(t *testing.T) {
 					Review:            "# Test Review\n\nsome tasks",
 					SupervisorProfile: "test",
 					Profile:           "test",
-					NoVerify:          true,
 					CheaperModel:      true,
 					Model:             "opus-4",
 				})

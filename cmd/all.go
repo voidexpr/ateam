@@ -20,7 +20,6 @@ var (
 	allMaxAge          string
 	allProfile         string
 	allDockerAutoSetup bool
-	allNoVerify        bool
 	allContainerName   string
 	allModel           string
 	allEffort          string
@@ -42,7 +41,8 @@ var allCmd = &cobra.Command{
 	Use:   "all",
 	Short: "Run the full pipeline: report, review, code, verify",
 	Long: `Run the full ateam pipeline sequentially: report → review → code → verify.
-Pass --no-verify to skip the verify phase.
+All four phases always run — to stop earlier, invoke the individual
+commands instead (e.g. ateam report && ateam review && ateam code).
 
 Equivalent to:
   ateam report --print && ateam review --print && ateam code --print && ateam verify
@@ -56,7 +56,6 @@ Per-stage profile/agent overrides let you mix agents across the pipeline.
 
 Example:
   ateam all
-  ateam all --no-verify                        # stop after the code phase
   ateam all --roles security,deps              # report + review only those roles
   ateam all --all                              # include disabled roles
   ateam all --max-age 2h                       # review skips reports older than 2h
@@ -96,7 +95,6 @@ func init() {
 	addVerboseFlag(allCmd, &allVerbose)
 	addDockerAutoSetupFlag(allCmd, &allDockerAutoSetup)
 	addContainerNameFlag(allCmd, &allContainerName)
-	allCmd.Flags().BoolVar(&allNoVerify, "no-verify", false, "skip the verify phase after code")
 	addAutoRolesFlags(allCmd, &allAutoRoles, &allPlanOnly)
 }
 
@@ -194,8 +192,8 @@ func runAll(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("review phase failed: %w", err)
 	}
 
-	// Phase 3: Code. Always pass NoVerify: true so the auto-chain inside
-	// runCode is suppressed — Phase 4 below owns the single verify run.
+	// Phase 3: Code. runCode no longer chains verify on its own; Phase 4
+	// below is the single verify run for the pipeline.
 	fmt.Println("\n=== Phase 3: Code ===")
 	if err := runCode(CodeOptions{
 		ExtraPrompt:       allExtraPrompt,
@@ -215,17 +213,14 @@ func runAll(cmd *cobra.Command, args []string) error {
 		Effort:            allEffort,
 		MaxBudgetUSD:      allMaxBudgetUSD,
 		MaxBudgetBatch:    allMaxBudgetBatch,
-		NoVerify:          true,
 	}); err != nil {
 		return fmt.Errorf("code phase failed: %w", err)
 	}
 
-	if allNoVerify {
-		return nil
-	}
-
 	// Phase 4: Verify — supervisor inspects commits made in Phase 3 and
-	// runs the test suite. Opt out with --no-verify when iterating fast.
+	// runs the test suite. Always runs; the pipeline isn't complete without
+	// it. Users who want to iterate without verify should invoke the phases
+	// individually instead of `ateam all`.
 	fmt.Println("\n=== Phase 4: Verify ===")
 	if err := runVerify(VerifyOptions{
 		ExtraPrompt:     allExtraPrompt,

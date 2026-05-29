@@ -43,7 +43,6 @@ var (
 	codeTail              bool
 	codeDockerAutoSetup   bool
 	codeContainerName     string
-	codeNoVerify          bool
 	codeModel             string
 	codeEffort            string
 	codeMaxBudgetUSD      string
@@ -70,7 +69,6 @@ type CodeOptions struct {
 	Tail              bool
 	DockerAutoSetup   bool
 	ContainerName     string
-	NoVerify          bool // skip the default `ateam verify` follow-up
 	Model             string
 	Effort            string
 	MaxBudgetUSD      string
@@ -79,18 +77,19 @@ type CodeOptions struct {
 
 var codeCmd = &cobra.Command{
 	Use:   "code",
-	Short: "Execute review tasks as code changes (followed by verify)",
+	Short: "Execute review tasks as code changes",
 	Long: `Read the review document and execute prioritized tasks as code changes,
-delegating each coding task to the appropriate role via ateam exec. After the
-code phase succeeds, automatically chain ateam verify to inspect the resulting
-commits and run the test suite. Pass --no-verify to skip that follow-up.
+delegating each coding task to the appropriate role via ateam exec. The
+command stops after the code phase — run ateam verify (or ateam all) to
+inspect the resulting commits and run the test suite.
 
 Example:
   ateam code
-  ateam code --no-verify                         # stop after the code phase
   ateam code --review @custom_review.md
   ateam code --management @custom_management.md
-  ateam code --dry-run`,
+  ateam code --dry-run
+  ateam code && ateam verify                     # explicit verify follow-up
+  ateam all                                      # full pipeline incl. verify`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runCode(CodeOptions{
 			Review:            codeReview,
@@ -111,7 +110,6 @@ Example:
 			Tail:              codeTail,
 			DockerAutoSetup:   codeDockerAutoSetup,
 			ContainerName:     codeContainerName,
-			NoVerify:          codeNoVerify,
 			Model:             codeModel,
 			Effort:            codeEffort,
 			MaxBudgetUSD:      codeMaxBudgetUSD,
@@ -153,7 +151,6 @@ func init() {
 	addVerboseFlag(codeCmd, &codeVerbose)
 	addForceFlag(codeCmd, &codeForce)
 	codeCmd.Flags().BoolVar(&codeTail, "tail", false, "stream live output from supervisor and sub-runs")
-	codeCmd.Flags().BoolVar(&codeNoVerify, "no-verify", false, "skip the verify phase that normally runs after code completes")
 	addDockerAutoSetupFlag(codeCmd, &codeDockerAutoSetup)
 	addContainerNameFlag(codeCmd, &codeContainerName)
 }
@@ -354,26 +351,7 @@ func runCode(opts CodeOptions) error {
 	}
 	printCodeSessionSummary(env.SharedDir(), supervisorDir, result.ExecID, opts.Print, result.Output)
 	printDone(result)
-
-	if opts.NoVerify {
-		return nil
-	}
-
-	fmt.Println()
-	return runVerify(VerifyOptions{
-		ExtraPrompt:     opts.ExtraPrompt,
-		Timeout:         opts.Timeout,
-		Print:           opts.Print,
-		CheaperModel:    opts.CheaperModel,
-		Profile:         opts.SupervisorProfile,
-		Agent:           opts.SupervisorAgent,
-		Verbose:         opts.Verbose,
-		Force:           opts.Force,
-		DockerAutoSetup: opts.DockerAutoSetup,
-		ContainerName:   opts.ContainerName,
-		Model:           opts.Model,
-		Effort:          opts.Effort,
-	})
+	return nil
 }
 
 func printCodeSessionSummary(sharedDir, supervisorDir string, execID int64, printOutput bool, output string) {

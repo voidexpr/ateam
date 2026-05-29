@@ -205,13 +205,14 @@ ateam code --dry-run
 | `--verbose` | Print agent and docker commands to stderr |
 | `--tail` | Stream live output from supervisor and sub-runs |
 | `--force` | Run even if the same action is already running |
-| `--no-verify` | Skip the verify phase that normally runs after code completes |
+
+`ateam code` stops after the code phase. Run `ateam verify` afterward (or `ateam all` for the full pipeline) to inspect the commits and run the test suite.
 
 ### `ateam verify`
 
 Have the supervisor inspect commits made by the most recent `ateam code` run, look for logical bugs, broken or missing tests, and risky changes, then run the project's test suite and record findings in a verification report.
 
-`ateam code` and `ateam all` chain verify automatically; run this command directly to re-verify, or pass `--no-verify` to skip the chained run.
+Run it explicitly after `ateam code`, or rely on `ateam all` which always runs verify as the final pipeline phase.
 
 ```bash
 ateam verify
@@ -240,7 +241,7 @@ ateam verify --dry-run
 
 ### `ateam all`
 
-Run the full pipeline sequentially: report → review → code → verify. Pass `--no-verify` to stop after the code phase.
+Run the full pipeline sequentially: report → review → code → verify. Verify always runs as the final phase — to stop earlier, run the individual commands instead (e.g. `ateam report && ateam review && ateam code`).
 
 `--roles` applies to both the report and review phases (and never to the code phase). `--all` and `--max-age` only affect review — report always runs only on enabled roles, since producing fresh reports for disabled roles defeats the purpose of disabling them.
 
@@ -280,7 +281,6 @@ ateam all --auto-roles --plan-only               # print the recommendation, don
 | `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
 | `--quiet`, `-q` | Suppress output printing |
 | `--verbose` | Print agent and docker commands to stderr |
-| `--no-verify` | Skip the verify phase that normally runs after code |
 | `--auto-roles` | Spawn a planner agent before phase 1 that picks the role list based on git history, prior reports, and the last code-cycle execution report. Mutually exclusive with `--roles`. |
 | `--plan-only` | With `--auto-roles`: print the planner's rationale and recommended commands, then exit before running any phase. |
 
