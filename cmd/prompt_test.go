@@ -16,6 +16,7 @@ func savePromptGlobals() func() {
 	role, sup, action := promptRole, promptSupervisor, promptAction
 	extra, noPI, ipr := promptExtraPrompt, promptNoProjectInfo, promptIgnorePreviousReport
 	paths, inline := promptPaths, promptInlinePaths
+	pre, post := promptPrePrompt, promptPostPrompt
 	return func() {
 		promptRole = role
 		promptSupervisor = sup
@@ -25,6 +26,8 @@ func savePromptGlobals() func() {
 		promptIgnorePreviousReport = ipr
 		promptPaths = paths
 		promptInlinePaths = inline
+		promptPrePrompt = pre
+		promptPostPrompt = post
 	}
 }
 
@@ -76,6 +79,47 @@ func TestPromptRoleDryRun(t *testing.T) {
 	}
 	if strings.TrimSpace(out) == "" {
 		t.Errorf("expected assembled prompt on stdout, got empty output")
+	}
+}
+
+// TestPromptPrePostWrap verifies that --pre-prompt and --post-prompt land at
+// the outermost positions of the assembled prompt — pre before any anchor
+// content, post after every other section (including --extra-prompt and any
+// live-synthesized blocks).
+func TestPromptPrePostWrap(t *testing.T) {
+	defer savePromptGlobals()()
+	projPath := setupPromptProject(t)
+
+	promptRole = "testing_basic"
+	promptAction = runner.ActionReport
+	promptSupervisor = false
+	promptExtraPrompt = "EXTRA-MARKER"
+	promptPrePrompt = "PRE-MARKER"
+	promptPostPrompt = "POST-MARKER"
+
+	var runErr error
+	out := captureStdout(t, func() {
+		withChdir(t, projPath, func() {
+			runErr = runPrompt(nil, nil)
+		})
+	})
+	if runErr != nil {
+		t.Fatalf("runPrompt: %v", runErr)
+	}
+	preIdx := strings.Index(out, "PRE-MARKER")
+	extraIdx := strings.Index(out, "EXTRA-MARKER")
+	postIdx := strings.Index(out, "POST-MARKER")
+	if preIdx < 0 || extraIdx < 0 || postIdx < 0 {
+		t.Fatalf("missing markers in output: pre=%d extra=%d post=%d\n%s", preIdx, extraIdx, postIdx, out)
+	}
+	// PRE first, EXTRA in the middle, POST last.
+	if preIdx >= extraIdx || extraIdx >= postIdx {
+		t.Errorf("expected order PRE < EXTRA < POST, got pre=%d extra=%d post=%d", preIdx, extraIdx, postIdx)
+	}
+	// PRE should land BEFORE the project-info header from _pre.context.md.
+	headerIdx := strings.Index(out, "# ATeam Project Context")
+	if headerIdx > 0 && preIdx >= headerIdx {
+		t.Errorf("expected PRE before project-info header, got pre=%d header=%d", preIdx, headerIdx)
 	}
 }
 

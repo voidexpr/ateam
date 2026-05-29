@@ -152,6 +152,8 @@ func resetPromptFlags() {
 	promptPaths = false
 	promptInlinePaths = false
 	promptExtraPrompt = ""
+	promptPrePrompt = ""
+	promptPostPrompt = ""
 	promptNoProjectInfo = false
 	promptIgnorePreviousReport = false
 }

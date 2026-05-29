@@ -223,15 +223,14 @@ func writeReviewContent(b *strings.Builder, projectDir string) {
 }
 
 // writeLatestExecutionReport finds the most recent execution_report.md across
-// .ateam/runtime/<id>/, .ateam/shared/code/<id>/, and the pre-Step-4
-// .ateam/supervisor/code/<id>/ fallback. Each layout puts the file exactly
-// one level deep, so a glob is cheaper and clearer than a recursive walk.
+// .ateam/runtime/<id>/ and .ateam/shared/code/<id>/ and inlines its header
+// (first N lines). Each layout puts the file exactly one level deep, so a
+// glob is cheaper and clearer than a recursive walk.
 func writeLatestExecutionReport(b *strings.Builder, projectDir string) {
 	var candidates []string
 	for _, pattern := range []string{
 		filepath.Join(projectDir, "runtime", "*", "execution_report.md"),
 		filepath.Join(projectDir, "shared", "code", "*", "execution_report.md"),
-		filepath.Join(projectDir, "supervisor", "code", "*", "execution_report.md"),
 	} {
 		matches, _ := filepath.Glob(pattern) // bad-pattern error is impossible with fixed patterns
 		candidates = append(candidates, matches...)

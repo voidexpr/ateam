@@ -61,61 +61,33 @@ func (e *ResolvedEnv) SupervisorDir() string {
 	return filepath.Join(e.ProjectDir, "supervisor")
 }
 
+// RoleReportPath returns the canonical v1 path for the role's report file
+// (shared/report/<role>/<role>.md). Auto-migration (default-on) collapses
+// the older pre-Step-6 filename and the legacy roles/<role>/report.md
+// before this is consulted; ATEAM_NO_MIGRATE=1 users must place files at
+// the v1 path themselves.
 func (e *ResolvedEnv) RoleReportPath(roleID string) string {
-	// Triple-read: prefer the v1 spec filename `shared/report/<role>/<role>.md`
-	// (what the runner now writes), then the older `shared/report/<role>/report.md`
-	// (projects that ran the report under the prior filename and haven't been
-	// re-migrated yet), then the legacy pre-v1 `roles/<role>/report.md`. The
-	// migrator's second-pass rename eventually collapses the middle case.
-	v1 := filepath.Join(e.SharedPromptDir("report/"+roleID), roleID+".md")
-	if _, err := os.Stat(v1); err == nil {
-		return v1
-	}
-	v1Old := filepath.Join(e.SharedPromptDir("report/"+roleID), prompts.ReportFile)
-	if _, err := os.Stat(v1Old); err == nil {
-		return v1Old
-	}
-	legacy := filepath.Join(e.RoleDir(roleID), prompts.ReportFile)
-	if _, err := os.Stat(legacy); err == nil {
-		return legacy
-	}
-	return v1
+	return filepath.Join(e.SharedPromptDir("report/"+roleID), roleID+".md")
 }
 
 func (e *ResolvedEnv) RoleHistoryDir(roleID string) string {
 	return filepath.Join(e.RoleDir(roleID), "history")
 }
 
+// ReviewPath returns the canonical v1 path for the supervisor review file.
+// Auto-migration handles the legacy supervisor/review.md location.
 func (e *ResolvedEnv) ReviewPath() string {
-	// v1 location preferred; legacy supervisor/ falls back so pre-migration
-	// projects keep working until ATEAM_AUTO_MIGRATE flips default-on.
-	v1 := filepath.Join(e.SharedDir(), "review", "review.md")
-	if _, err := os.Stat(v1); err == nil {
-		return v1
-	}
-	legacy := filepath.Join(e.SupervisorDir(), "review.md")
-	if _, err := os.Stat(legacy); err == nil {
-		return legacy
-	}
-	// Neither exists yet — return the v1 path so writers create it there.
-	return v1
+	return filepath.Join(e.SharedDir(), "review", "review.md")
 }
 
 func (e *ResolvedEnv) ReviewHistoryDir() string {
 	return filepath.Join(e.SupervisorDir(), "history")
 }
 
+// VerifyPath returns the canonical v1 path for the supervisor verification
+// file. Auto-migration handles the legacy supervisor/verify.md location.
 func (e *ResolvedEnv) VerifyPath() string {
-	// Same dual-read pattern as ReviewPath — see the note there.
-	v1 := filepath.Join(e.SharedDir(), "verify", "verify.md")
-	if _, err := os.Stat(v1); err == nil {
-		return v1
-	}
-	legacy := filepath.Join(e.SupervisorDir(), "verify.md")
-	if _, err := os.Stat(legacy); err == nil {
-		return legacy
-	}
-	return v1
+	return filepath.Join(e.SharedDir(), "verify", "verify.md")
 }
 
 // StateDir returns the directory that owns state.sqlite, logs/, and runtime/

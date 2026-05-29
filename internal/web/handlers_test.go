@@ -516,12 +516,12 @@ func TestHandleRunFileNotFoundBadProject(t *testing.T) {
 func TestHandleReportReturnsOK(t *testing.T) {
 	projectDir := t.TempDir()
 
-	// Create a report file that DiscoverReports will find.
-	roleDir := filepath.Join(projectDir, "roles", "security")
+	// Create a report file that DiscoverReports will find (v1 layout).
+	roleDir := filepath.Join(projectDir, "shared", "report", "security")
 	if err := os.MkdirAll(roleDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(roleDir, "report.md"), []byte("# Security Report\nAll clear."), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(roleDir, "security.md"), []byte("# Security Report\nAll clear."), 0644); err != nil {
 		t.Fatal(err)
 	}
 

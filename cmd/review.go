@@ -19,6 +19,8 @@ import (
 var (
 	reviewExtraPrompt     string
 	reviewCustomPrompt    string
+	reviewPrePrompt       string
+	reviewPostPrompt      string
 	reviewTimeout         int
 	reviewPrint           bool
 	reviewDryRun          bool
@@ -41,6 +43,8 @@ var (
 type ReviewOptions struct {
 	ExtraPrompt     string
 	CustomPrompt    string
+	PrePrompt       string
+	PostPrompt      string
 	Timeout         int
 	Print           bool
 	DryRun          bool
@@ -79,6 +83,8 @@ Example:
 		return runReview(ReviewOptions{
 			ExtraPrompt:     reviewExtraPrompt,
 			CustomPrompt:    reviewCustomPrompt,
+			PrePrompt:       reviewPrePrompt,
+			PostPrompt:      reviewPostPrompt,
 			Timeout:         reviewTimeout,
 			Print:           reviewPrint,
 			DryRun:          reviewDryRun,
@@ -129,8 +135,10 @@ func parseMaxAge(s string) (time.Duration, error) {
 }
 
 func init() {
-	reviewCmd.Flags().StringVar(&reviewExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
+	reviewCmd.Flags().StringVar(&reviewExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath); appended after reports, before the outer --post-prompt wrap")
 	reviewCmd.Flags().StringVar(&reviewCustomPrompt, "prompt", "", "custom prompt replacing default supervisor role (text or @filepath)")
+	reviewCmd.Flags().StringVar(&reviewPrePrompt, "pre-prompt", "", "text wrapped at the very front of the assembled prompt (text or @filepath)")
+	reviewCmd.Flags().StringVar(&reviewPostPrompt, "post-prompt", "", "text wrapped at the very end of the assembled prompt (text or @filepath)")
 	reviewCmd.Flags().IntVar(&reviewTimeout, "timeout", 0, "timeout in minutes (overrides config)")
 	reviewCmd.Flags().BoolVar(&reviewPrint, "print", false, "print review to stdout after completion")
 	reviewCmd.Flags().BoolVar(&reviewDryRun, "dry-run", false, "print the computed prompt and list reports without running")
@@ -168,6 +176,14 @@ func runReview(opts ReviewOptions) error {
 	if err != nil {
 		return err
 	}
+	prePrompt, err := prompts.ResolveOptional(opts.PrePrompt)
+	if err != nil {
+		return err
+	}
+	postPrompt, err := prompts.ResolveOptional(opts.PostPrompt)
+	if err != nil {
+		return err
+	}
 
 	if len(opts.Roles) > 0 {
 		if _, err := prompts.ResolveRoleList(opts.Roles, env.Config.Roles, env.ProjectDir, env.OrgDir); err != nil {
@@ -184,7 +200,7 @@ func runReview(opts ReviewOptions) error {
 	// Both default and --prompt paths now go through assembleReviewV1; the
 	// override flows into the assembler's ReplaceRoleMain option so framing
 	// fragments compose either way.
-	prompt, err := assembleReviewV1(env, selector, "the supervisor", extraPrompt, customPrompt, "", "")
+	prompt, err := assembleReviewV1(env, selector, "the supervisor", extraPrompt, customPrompt, prePrompt, postPrompt)
 	if err != nil {
 		var empty *prompts.ReviewEmptyError
 		if errors.As(err, &empty) {

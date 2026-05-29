@@ -4,16 +4,20 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
 )
 
 var (
-	autoSetupProfile string
-	autoSetupAgent   string
-	autoSetupVerbose bool
-	autoSetupDryRun  bool
-	autoSetupTimeout int
+	autoSetupProfile     string
+	autoSetupAgent       string
+	autoSetupVerbose     bool
+	autoSetupDryRun      bool
+	autoSetupTimeout     int
+	autoSetupExtraPrompt string
+	autoSetupPrePrompt   string
+	autoSetupPostPrompt  string
 )
 
 var autoSetupCmd = &cobra.Command{
@@ -37,6 +41,9 @@ func init() {
 	addVerboseFlag(autoSetupCmd, &autoSetupVerbose)
 	autoSetupCmd.Flags().BoolVar(&autoSetupDryRun, "dry-run", false, "print the prompt without running")
 	autoSetupCmd.Flags().IntVar(&autoSetupTimeout, "timeout", 0, "timeout in minutes (overrides config)")
+	autoSetupCmd.Flags().StringVar(&autoSetupExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
+	autoSetupCmd.Flags().StringVar(&autoSetupPrePrompt, "pre-prompt", "", "text wrapped at the very front of the assembled prompt (text or @filepath)")
+	autoSetupCmd.Flags().StringVar(&autoSetupPostPrompt, "post-prompt", "", "text wrapped at the very end of the assembled prompt (text or @filepath)")
 }
 
 func runAutoSetup(cmd *cobra.Command, args []string) error {
@@ -45,7 +52,20 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	prompt, err := assembleSupervisorV1(env, "auto_setup", "the supervisor", "auto-setup", "", "", "")
+	extraPrompt, err := prompts.ResolveOptional(autoSetupExtraPrompt)
+	if err != nil {
+		return err
+	}
+	prePrompt, err := prompts.ResolveOptional(autoSetupPrePrompt)
+	if err != nil {
+		return err
+	}
+	postPrompt, err := prompts.ResolveOptional(autoSetupPostPrompt)
+	if err != nil {
+		return err
+	}
+
+	prompt, err := assembleSupervisorV1(env, "auto_setup", "the supervisor", "auto-setup", extraPrompt, prePrompt, postPrompt)
 	if err != nil {
 		return err
 	}

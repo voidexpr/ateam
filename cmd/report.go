@@ -17,6 +17,8 @@ import (
 var (
 	reportRoles                []string
 	reportExtraPrompt          string
+	reportPrePrompt            string
+	reportPostPrompt           string
 	reportTimeout              int
 	reportParallel             int
 	reportPrint                bool
@@ -47,6 +49,8 @@ var (
 type ReportOptions struct {
 	Roles                []string
 	ExtraPrompt          string
+	PrePrompt            string
+	PostPrompt           string
 	Timeout              int
 	Parallel             int
 	Print                bool
@@ -88,6 +92,8 @@ Example:
 		return runReport(ReportOptions{
 			Roles:                reportRoles,
 			ExtraPrompt:          reportExtraPrompt,
+			PrePrompt:            reportPrePrompt,
+			PostPrompt:           reportPostPrompt,
 			Timeout:              reportTimeout,
 			Parallel:             reportParallel,
 			Print:                reportPrint,
@@ -114,7 +120,9 @@ Example:
 
 func init() {
 	reportCmd.Flags().StringSliceVar(&reportRoles, "roles", nil, prompts.RoleFlagUsage()+" (default: all enabled roles)")
-	reportCmd.Flags().StringVar(&reportExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
+	reportCmd.Flags().StringVar(&reportExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath); appended after extras, before the outer --post-prompt wrap")
+	reportCmd.Flags().StringVar(&reportPrePrompt, "pre-prompt", "", "text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or @filepath)")
+	reportCmd.Flags().StringVar(&reportPostPrompt, "post-prompt", "", "text wrapped at the very end of the assembled prompt, after every other section (text or @filepath)")
 	reportCmd.Flags().IntVar(&reportTimeout, "timeout", 0, "timeout in minutes per role (overrides config)")
 	reportCmd.Flags().IntVar(&reportParallel, "parallel", 0, "max parallel roles (overrides config max_parallel)")
 	reportCmd.Flags().BoolVar(&reportPrint, "print", false, "print reports to stdout after completion")
@@ -217,6 +225,14 @@ func runReport(opts ReportOptions) error {
 	if err != nil {
 		return err
 	}
+	prePrompt, err := prompts.ResolveOptional(opts.PrePrompt)
+	if err != nil {
+		return err
+	}
+	postPrompt, err := prompts.ResolveOptional(opts.PostPrompt)
+	if err != nil {
+		return err
+	}
 
 	timeout := env.Config.Report.EffectiveTimeout(opts.Timeout)
 
@@ -241,7 +257,7 @@ func runReport(opts ReportOptions) error {
 
 	var tasks []runner.PoolExec
 	for _, roleID := range roleIDs {
-		prompt, err := assembleRoleReportV1(env, roleID, "role "+roleID, extraPrompt, "", "", opts.IgnorePreviousReport)
+		prompt, err := assembleRoleReportV1(env, roleID, "role "+roleID, extraPrompt, prePrompt, postPrompt, opts.IgnorePreviousReport)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", roleID, err)
 			continue

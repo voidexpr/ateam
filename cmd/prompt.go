@@ -19,6 +19,8 @@ var (
 	promptRole                 string
 	promptAction               string
 	promptExtraPrompt          string
+	promptPrePrompt            string
+	promptPostPrompt           string
 	promptNoProjectInfo        bool
 	promptIgnorePreviousReport bool
 	promptSupervisor           bool
@@ -50,6 +52,8 @@ func init() {
 	promptCmd.Flags().BoolVar(&promptSupervisor, "supervisor", false, "generate supervisor prompt instead of role prompt")
 	promptCmd.Flags().StringVar(&promptAction, "action", "", "action type: report, code, review, or verify (required)")
 	promptCmd.Flags().StringVar(&promptExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
+	promptCmd.Flags().StringVar(&promptPrePrompt, "pre-prompt", "", "text wrapped at the very front of the assembled prompt (text or @filepath)")
+	promptCmd.Flags().StringVar(&promptPostPrompt, "post-prompt", "", "text wrapped at the very end of the assembled prompt (text or @filepath)")
 	promptCmd.Flags().BoolVar(&promptNoProjectInfo, "no-project-info", false, "omit ateam project context from the prompt")
 	promptCmd.Flags().BoolVar(&promptIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
 	promptCmd.Flags().BoolVar(&promptPaths, "paths", false, "show a per-section breakdown table (slot + anchor + path + mod time + tokens); no prompt body")
@@ -93,6 +97,14 @@ func runPromptRole() error {
 	if err != nil {
 		return err
 	}
+	prePrompt, err := prompts.ResolveOptional(promptPrePrompt)
+	if err != nil {
+		return err
+	}
+	postPrompt, err := prompts.ResolveOptional(promptPostPrompt)
+	if err != nil {
+		return err
+	}
 
 	roleLabel := "role " + promptRole
 	if promptNoProjectInfo {
@@ -102,9 +114,9 @@ func runPromptRole() error {
 	var assembled string
 	switch promptAction {
 	case runner.ActionReport:
-		assembled, err = assembleRoleReportV1(env, promptRole, roleLabel, extraPrompt, "", "", promptIgnorePreviousReport)
+		assembled, err = assembleRoleReportV1(env, promptRole, roleLabel, extraPrompt, prePrompt, postPrompt, promptIgnorePreviousReport)
 	case runner.ActionCode:
-		assembled, err = assembleRoleCodeV1(env, promptRole, roleLabel, extraPrompt, "", "")
+		assembled, err = assembleRoleCodeV1(env, promptRole, roleLabel, extraPrompt, prePrompt, postPrompt)
 	}
 	if err != nil {
 		return err
@@ -127,6 +139,14 @@ func runPromptSupervisor() error {
 	if err != nil {
 		return err
 	}
+	prePrompt, err := prompts.ResolveOptional(promptPrePrompt)
+	if err != nil {
+		return err
+	}
+	postPrompt, err := prompts.ResolveOptional(promptPostPrompt)
+	if err != nil {
+		return err
+	}
 
 	roleLabel := "the supervisor"
 	if promptNoProjectInfo {
@@ -136,7 +156,7 @@ func runPromptSupervisor() error {
 	var assembled string
 	switch promptAction {
 	case runner.ActionReview:
-		assembled, err = assembleReviewV1(env, prompts.ReviewSelector{}, roleLabel, extraPrompt, "", "", "")
+		assembled, err = assembleReviewV1(env, prompts.ReviewSelector{}, roleLabel, extraPrompt, "", prePrompt, postPrompt)
 	case runner.ActionCode:
 		reviewContent, readErr := os.ReadFile(env.ReviewPath())
 		if readErr != nil {
@@ -147,9 +167,9 @@ func runPromptSupervisor() error {
 		// values (batch, profile, model, ...) depend on the live `ateam code`
 		// invocation, so the preview uses placeholders that show the shape;
 		// the user sees "this becomes a real value at run time."
-		assembled, err = assembleCodeManagementV1(env, roleLabel, string(reviewContent), previewSubRunFlags(env.SourceDir), extraPrompt, "", "", "")
+		assembled, err = assembleCodeManagementV1(env, roleLabel, string(reviewContent), previewSubRunFlags(env.SourceDir), extraPrompt, "", prePrompt, postPrompt)
 	case runner.ActionVerify:
-		assembled, err = assembleSupervisorV1(env, "code_verify", roleLabel, "verify", extraPrompt, "", "")
+		assembled, err = assembleSupervisorV1(env, "code_verify", roleLabel, "verify", extraPrompt, prePrompt, postPrompt)
 	}
 	if err != nil {
 		return err

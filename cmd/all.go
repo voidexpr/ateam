@@ -8,6 +8,8 @@ import (
 
 var (
 	allExtraPrompt     string
+	allPrePrompt       string
+	allPostPrompt      string
 	allQuiet           bool
 	allTimeout         int
 	allParallel        int
@@ -66,6 +68,8 @@ Example:
 
 func init() {
 	allCmd.Flags().StringVar(&allExtraPrompt, "extra-prompt", "", "additional instructions passed to all phases (text or @filepath)")
+	allCmd.Flags().StringVar(&allPrePrompt, "pre-prompt", "", "text wrapped at the very front of every phase's assembled prompt (text or @filepath)")
+	allCmd.Flags().StringVar(&allPostPrompt, "post-prompt", "", "text wrapped at the very end of every phase's assembled prompt (text or @filepath)")
 	allCmd.Flags().BoolVarP(&allQuiet, "quiet", "q", false, "suppress output printing")
 	allCmd.Flags().IntVar(&allTimeout, "timeout", 0, "per-phase timeout in minutes (overrides config)")
 	allCmd.Flags().IntVar(&allParallel, "parallel", 0, "max parallel report roles (overrides config max_parallel)")
@@ -145,6 +149,8 @@ func runAll(cmd *cobra.Command, args []string) error {
 	if err := runReport(ReportOptions{
 		Roles:           allRoles,
 		ExtraPrompt:     allExtraPrompt,
+		PrePrompt:       allPrePrompt,
+		PostPrompt:      allPostPrompt,
 		Timeout:         allTimeout,
 		Parallel:        allParallel,
 		Print:           false,
@@ -168,6 +174,8 @@ func runAll(cmd *cobra.Command, args []string) error {
 	fmt.Println("\n=== Phase 2: Review ===")
 	if err := runReview(ReviewOptions{
 		ExtraPrompt:     allExtraPrompt,
+		PrePrompt:       allPrePrompt,
+		PostPrompt:      allPostPrompt,
 		Timeout:         allTimeout,
 		Print:           printOutput,
 		CheaperModel:    allCheaperModel,
@@ -191,6 +199,8 @@ func runAll(cmd *cobra.Command, args []string) error {
 	fmt.Println("\n=== Phase 3: Code ===")
 	if err := runCode(CodeOptions{
 		ExtraPrompt:       allExtraPrompt,
+		PrePrompt:         allPrePrompt,
+		PostPrompt:        allPostPrompt,
 		Timeout:           allTimeout,
 		Print:             printOutput,
 		CheaperModel:      allCheaperModel,
@@ -219,6 +229,8 @@ func runAll(cmd *cobra.Command, args []string) error {
 	fmt.Println("\n=== Phase 4: Verify ===")
 	if err := runVerify(VerifyOptions{
 		ExtraPrompt:     allExtraPrompt,
+		PrePrompt:       allPrePrompt,
+		PostPrompt:      allPostPrompt,
 		Timeout:         allTimeout,
 		Print:           printOutput,
 		CheaperModel:    allCheaperModel,

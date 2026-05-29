@@ -28,6 +28,8 @@ var (
 	codeReview            string
 	codeManagement        string
 	codeExtraPrompt       string
+	codePrePrompt         string
+	codePostPrompt        string
 	codeTimeout           int
 	codePrint             bool
 	codeDryRun            bool
@@ -53,6 +55,8 @@ type CodeOptions struct {
 	Review            string
 	Management        string
 	ExtraPrompt       string
+	PrePrompt         string
+	PostPrompt        string
 	Timeout           int
 	Print             bool
 	DryRun            bool
@@ -92,6 +96,8 @@ Example:
 			Review:            codeReview,
 			Management:        codeManagement,
 			ExtraPrompt:       codeExtraPrompt,
+			PrePrompt:         codePrePrompt,
+			PostPrompt:        codePostPrompt,
 			Timeout:           codeTimeout,
 			Print:             codePrint,
 			DryRun:            codeDryRun,
@@ -120,7 +126,11 @@ func init() {
 	codeCmd.Flags().StringVar(&codeManagement, "management", "",
 		"management prompt override (text or @filepath)")
 	codeCmd.Flags().StringVar(&codeExtraPrompt, "extra-prompt", "",
-		"additional instructions (text or @filepath)")
+		"additional instructions (text or @filepath); appended after Review, before Sub-Run Flags")
+	codeCmd.Flags().StringVar(&codePrePrompt, "pre-prompt", "",
+		"text wrapped at the very front of the supervisor prompt (text or @filepath)")
+	codeCmd.Flags().StringVar(&codePostPrompt, "post-prompt", "",
+		"text wrapped at the very end of the supervisor prompt, after Sub-Run Flags (text or @filepath)")
 	codeCmd.Flags().IntVar(&codeTimeout, "timeout", 0,
 		"timeout in minutes (overrides config)")
 	codeCmd.Flags().BoolVar(&codePrint, "print", false,
@@ -181,6 +191,14 @@ func runCode(opts CodeOptions) error {
 	if err != nil {
 		return err
 	}
+	prePrompt, err := prompts.ResolveOptional(opts.PrePrompt)
+	if err != nil {
+		return err
+	}
+	postPrompt, err := prompts.ResolveOptional(opts.PostPrompt)
+	if err != nil {
+		return err
+	}
 
 	batch := "code-" + time.Now().Format(display.TimestampFormat)
 
@@ -211,7 +229,7 @@ func runCode(opts CodeOptions) error {
 	// Both default and --prompt paths now go through assembleCodeManagementV1;
 	// the override (customManagement) flows into the assembler's
 	// ReplaceRoleMain option so framing fragments compose either way.
-	prompt, err := assembleCodeManagementV1(env, "the supervisor", reviewContent, subRunFlags, extraPrompt, customManagement, "", "")
+	prompt, err := assembleCodeManagementV1(env, "the supervisor", reviewContent, subRunFlags, extraPrompt, customManagement, prePrompt, postPrompt)
 	if err != nil {
 		return err
 	}
@@ -362,20 +380,13 @@ func printCodeSessionSummary(sharedDir, supervisorDir string, execID int64, prin
 	cwd, _ := os.Getwd()
 	lastMsg := relPath(cwd, filepath.Join(supervisorDir, "code_output.md"))
 
-	// New runs write to shared/code/<id>/ (Step 4); pre-Step-4 sessions
-	// still live at supervisor/code/<id>/. Prefer the new path, fall back
-	// to the legacy one for projects/exec_ids that predate the move.
+	// New runs write to shared/code/<id>/; auto-migration moves any
+	// pre-Step-4 supervisor/code/<id>/ trees ahead of this read.
 	var sessionDir string
 	if execID > 0 {
-		idStr := strconv.FormatInt(execID, 10)
-		for _, candidate := range []string{
-			filepath.Join(sharedDir, "code", idStr),
-			filepath.Join(supervisorDir, "code", idStr),
-		} {
-			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-				sessionDir = candidate
-				break
-			}
+		candidate := filepath.Join(sharedDir, "code", strconv.FormatInt(execID, 10))
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			sessionDir = candidate
 		}
 	}
 

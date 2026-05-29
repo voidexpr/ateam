@@ -105,81 +105,47 @@ type RoleReport struct {
 	Content string
 }
 
-// DiscoverReports scans the project for role report files. It checks, in
-// order of preference:
-//  1. v1 spec: shared/report/<role>/<role>.md (current write target)
-//  2. v1 transitional: shared/report/<role>/report.md (pre-Step-6 filename)
-//  3. legacy: roles/<role>/report.md (pre-migration projects)
-//
-// Per-role: the newest of any matches wins. The transitional and legacy
-// branches stay alive until auto-migration's second-pass rename has run
-// against every active project.
+// DiscoverReports scans `shared/report/<role>/<role>.md` (the v1 spec path)
+// and returns one RoleReport per role. Auto-migration handles the legacy
+// `roles/<role>/report.md` and the pre-Step-6 `shared/report/<role>/report.md`
+// before this is consulted.
 func DiscoverReports(projectDir string) ([]RoleReport, error) {
-	reports := make(map[string]RoleReport) // role → most-recent report
-
-	collect := func(dir string, pathFn func(role string) string) error {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			return err
-		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			reportPath := pathFn(entry.Name())
-			data, err := os.ReadFile(reportPath)
-			if err != nil {
-				continue
-			}
-			info, err := os.Stat(reportPath)
-			if err != nil {
-				continue
-			}
-			rr := RoleReport{
-				RoleID:  entry.Name(),
-				Path:    reportPath,
-				ModTime: info.ModTime(),
-				Content: string(data),
-			}
-			if existing, ok := reports[entry.Name()]; !ok || rr.ModTime.After(existing.ModTime) {
-				reports[entry.Name()] = rr
-			}
-		}
-		return nil
-	}
-
 	sharedReportDir := filepath.Join(projectDir, "shared", "report")
-	// v1 spec filename: <role>/<role>.md
-	if err := collect(sharedReportDir, func(role string) string {
-		return filepath.Join(sharedReportDir, role, role+".md")
-	}); err != nil {
-		return nil, fmt.Errorf("cannot read shared/report directory: %w", err)
-	}
-	// v1 transitional filename: <role>/report.md (overridden by <role>.md when newer)
-	if err := collect(sharedReportDir, func(role string) string {
-		return filepath.Join(sharedReportDir, role, ReportFile)
-	}); err != nil {
+	entries, err := os.ReadDir(sharedReportDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("no report files found under %s (run 'ateam report' first)", sharedReportDir)
+		}
 		return nil, fmt.Errorf("cannot read shared/report directory: %w", err)
 	}
 
-	legacyRolesDir := filepath.Join(projectDir, "roles")
-	if err := collect(legacyRolesDir, func(role string) string {
-		return filepath.Join(legacyRolesDir, role, ReportFile)
-	}); err != nil {
-		return nil, fmt.Errorf("cannot read roles directory: %w", err)
+	out := make([]RoleReport, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		role := entry.Name()
+		reportPath := filepath.Join(sharedReportDir, role, role+".md")
+		data, err := os.ReadFile(reportPath)
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(reportPath)
+		if err != nil {
+			continue
+		}
+		out = append(out, RoleReport{
+			RoleID:  role,
+			Path:    reportPath,
+			ModTime: info.ModTime(),
+			Content: string(data),
+		})
 	}
 
-	if len(reports) == 0 {
-		return nil, fmt.Errorf("no report files found in %s/shared/report or %s/roles (run 'ateam report' first)", projectDir, projectDir)
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no report files found under %s (run 'ateam report' first)", sharedReportDir)
 	}
 
-	out := make([]RoleReport, 0, len(reports))
-	for _, r := range reports {
-		out = append(out, r)
-	}
 	// Sort by RoleID so a given report set always yields the same order:
 	// downstream ReviewSelector.Filter and formatReportsBlock preserve this
 	// order, so without it the review prompt (and its hash) would vary run to

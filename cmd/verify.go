@@ -11,6 +11,8 @@ import (
 
 var (
 	verifyExtraPrompt     string
+	verifyPrePrompt       string
+	verifyPostPrompt      string
 	verifyTimeout         int
 	verifyPrint           bool
 	verifyDryRun          bool
@@ -29,6 +31,8 @@ var (
 // VerifyOptions holds configuration for a verify run.
 type VerifyOptions struct {
 	ExtraPrompt     string
+	PrePrompt       string
+	PostPrompt      string
 	Timeout         int
 	Print           bool
 	DryRun          bool
@@ -61,6 +65,8 @@ Example:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runVerify(VerifyOptions{
 			ExtraPrompt:     verifyExtraPrompt,
+			PrePrompt:       verifyPrePrompt,
+			PostPrompt:      verifyPostPrompt,
 			Timeout:         verifyTimeout,
 			Print:           verifyPrint,
 			DryRun:          verifyDryRun,
@@ -80,6 +86,8 @@ Example:
 
 func init() {
 	verifyCmd.Flags().StringVar(&verifyExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
+	verifyCmd.Flags().StringVar(&verifyPrePrompt, "pre-prompt", "", "text wrapped at the very front of the assembled prompt (text or @filepath)")
+	verifyCmd.Flags().StringVar(&verifyPostPrompt, "post-prompt", "", "text wrapped at the very end of the assembled prompt (text or @filepath)")
 	verifyCmd.Flags().IntVar(&verifyTimeout, "timeout", 0, "timeout in minutes (overrides config)")
 	verifyCmd.Flags().BoolVar(&verifyPrint, "print", false, "print verification report to stdout after completion")
 	verifyCmd.Flags().BoolVar(&verifyDryRun, "dry-run", false, "print the computed prompt without running")
@@ -109,8 +117,16 @@ func runVerify(opts VerifyOptions) error {
 	if err != nil {
 		return err
 	}
+	prePrompt, err := prompts.ResolveOptional(opts.PrePrompt)
+	if err != nil {
+		return err
+	}
+	postPrompt, err := prompts.ResolveOptional(opts.PostPrompt)
+	if err != nil {
+		return err
+	}
 
-	prompt, err := assembleSupervisorV1(env, "code_verify", "the supervisor", "verify", extraPrompt, "", "")
+	prompt, err := assembleSupervisorV1(env, "code_verify", "the supervisor", "verify", extraPrompt, prePrompt, postPrompt)
 	if err != nil {
 		return err
 	}
