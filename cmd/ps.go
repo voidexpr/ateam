@@ -179,23 +179,35 @@ var fmtStartedAt = display.FmtRFC3339AsTimestamp
 // absolute-path filter. --pwd alone resolves to os.Getwd(); --work-dir
 // (relative or absolute) resolves against the process cwd. Setting both is
 // an error: they would always agree only when --work-dir equals cwd.
+//
+// The path is passed through filepath.EvalSymlinks so it matches the
+// symlink-resolved value stored on agent_execs.work_dir (root.realPath
+// canonicalizes the runner's WorkDir at resolution time, e.g. /tmp →
+// /private/tmp on macOS). Without this, --pwd from /tmp/foo would never
+// match a row stored as /private/tmp/foo.
 func resolvePsWorkDirFilter() (string, error) {
 	if psPwd && psWorkDir != "" {
 		return "", fmt.Errorf("--pwd and --work-dir are mutually exclusive")
 	}
-	if psPwd {
+	var raw string
+	switch {
+	case psPwd:
 		cwd, err := os.Getwd()
 		if err != nil {
 			return "", fmt.Errorf("cannot read cwd for --pwd: %w", err)
 		}
-		return cwd, nil
-	}
-	if psWorkDir == "" {
+		raw = cwd
+	case psWorkDir != "":
+		abs, err := filepath.Abs(psWorkDir)
+		if err != nil {
+			return "", fmt.Errorf("cannot resolve --work-dir %q: %w", psWorkDir, err)
+		}
+		raw = abs
+	default:
 		return "", nil
 	}
-	abs, err := filepath.Abs(psWorkDir)
-	if err != nil {
-		return "", fmt.Errorf("cannot resolve --work-dir %q: %w", psWorkDir, err)
+	if resolved, err := filepath.EvalSymlinks(raw); err == nil {
+		return resolved, nil
 	}
-	return abs, nil
+	return raw, nil
 }

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -16,6 +17,13 @@ func resolveEnv() (*root.ResolvedEnv, error) {
 	env, err := root.Resolve(orgFlag, projectFlag)
 	if err != nil {
 		return nil, err
+	}
+	// root.Resolve returns a project-less env when only --org resolves
+	// (scratch mode for exec/parallel). Commands using resolveEnv strictly
+	// require a project — surface the missing .ateam/ here so callers can
+	// rely on env.ProjectDir / env.Config being populated.
+	if env.ProjectDir == "" {
+		return nil, fmt.Errorf("no .ateam/ found — this command requires a project context; run 'ateam init' first")
 	}
 	return applyWorkDirFlag(env)
 }

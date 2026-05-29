@@ -491,8 +491,14 @@ func configDirFromRuntime(env *root.ResolvedEnv, row *calldb.RecentRow) string {
 		return ""
 	}
 	dir := display.ExpandHome(ac.ConfigDir)
-	if !filepath.IsAbs(dir) && env.ProjectDir != "" {
-		dir = filepath.Join(env.ProjectDir, dir)
+	// Match runner.buildRequest: relative config_dir is rooted at StateDir
+	// (project dir if set, else org dir for scratch-mode runs). Without
+	// this, a scratch-mode resume would hand the agent a relative path
+	// the shell resolves against $PWD, losing the original CLAUDE_CONFIG_DIR.
+	if !filepath.IsAbs(dir) {
+		if stateDir := env.StateDir(); stateDir != "" {
+			dir = filepath.Join(stateDir, dir)
+		}
 	}
 	return dir
 }
