@@ -452,7 +452,34 @@ func TestHandleRunFileUnknownType(t *testing.T) {
 func TestHandleRunFilePathTraversal(t *testing.T) {
 	projectDir := t.TempDir()
 
-	// Create a database with a run whose StreamFile contains a path traversal.
+	// Place a REAL, readable file OUTSIDE the project directory. For the "exec"
+	// file type with a legacy stream path, handleRunFile derives the served file
+	// by replacing the "_stream.jsonl" suffix with "_exec.md" — so the secret
+	// lives at <outside>/secret_exec.md and the crafted stream points at
+	// <outside>/secret_stream.jsonl.
+	outsideDir := t.TempDir()
+	const canary = "TOPSECRETcanaryDEADBEEFdonotleak"
+	secretFile := filepath.Join(outsideDir, "secret_exec.md")
+	if err := os.WriteFile(secretFile, []byte(canary), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	// Sanity-check the fixture: the file must be readable, otherwise an
+	// incidental read failure (not the guard) would make this test pass.
+	if data, err := os.ReadFile(secretFile); err != nil || string(data) != canary {
+		t.Fatalf("outside file not readable as expected: %v", err)
+	}
+
+	// Build a project-relative stream path (containing "..") that resolves to
+	// the outside directory.
+	streamTarget := filepath.Join(outsideDir, "secret_stream.jsonl")
+	maliciousStream, err := filepath.Rel(projectDir, streamTarget)
+	if err != nil {
+		t.Fatalf("Rel: %v", err)
+	}
+	if !strings.Contains(maliciousStream, "..") {
+		t.Fatalf("expected a traversal path, got %q", maliciousStream)
+	}
+
 	dbPath := filepath.Join(projectDir, "state.sqlite")
 	db, err := calldb.Open(dbPath)
 	if err != nil {
@@ -461,9 +488,6 @@ func TestHandleRunFilePathTraversal(t *testing.T) {
 
 	now := time.Now()
 	ts := now.Format(display.TimestampFormat)
-	// Craft a stream file path that tries to escape the project directory.
-	maliciousStream := filepath.Join("..", "..", "etc", ts+"_report_stream.jsonl")
-
 	callID, err := db.InsertCall(&calldb.Call{
 		ProjectID:  "test-proj",
 		Action:     runner.ActionReport,
@@ -490,9 +514,15 @@ func TestHandleRunFilePathTraversal(t *testing.T) {
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
-	// The isPathWithin check should block serving a file outside the project dir.
+	// The isPathWithin guard must block serving a file outside the project dir.
+	// Because the target file genuinely exists and is readable, a 200 here can
+	// only mean the guard was bypassed — this is NOT an incidental file-absence
+	// 404. Removing the guard makes os.ReadFile succeed and serve the canary.
 	if w.Code == http.StatusOK {
-		t.Errorf("handleRunFile path traversal returned 200, expected non-200 (got %d)", w.Code)
+		t.Errorf("handleRunFile path traversal returned 200, expected blocked (got %d)", w.Code)
+	}
+	if strings.Contains(w.Body.String(), canary) {
+		t.Errorf("response leaked the contents of an out-of-project file")
 	}
 }
 

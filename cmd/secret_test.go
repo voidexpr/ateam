@@ -162,6 +162,92 @@ func TestGetSecretProjectOverridesOrg(t *testing.T) {
 	}
 }
 
+// TestSecretWriteRoundTrip exercises the cmd-level write path (setSecret →
+// deleteSecret) against the file backend, which was previously uncovered. It
+// also asserts project-over-org scope precedence: a project-scoped secret
+// shadows an org-scoped one of the same name.
+func TestSecretWriteRoundTrip(t *testing.T) {
+	projectDir, orgDir, resolver := setupSecretFixture(t)
+
+	// setSecret/deleteSecret read package-level flag state; save and restore it.
+	origScope, origValue := secretScope, secretValue
+	t.Cleanup(func() { secretScope, secretValue = origScope, origValue })
+
+	const name = "ROUNDTRIP_SECRET"
+
+	// Write into the project scope via setSecret.
+	secretScope = secret.ScopeProject
+	secretValue = "proj-value"
+	captureStdout(t, func() {
+		if err := setSecret(resolver, secret.BackendFile, name); err != nil {
+			t.Fatalf("setSecret: %v", err)
+		}
+	})
+
+	// Read it back via getSecret (raw value to stdout).
+	out := captureStdout(t, func() {
+		if err := getSecret(resolver, name); err != nil {
+			t.Fatalf("getSecret: %v", err)
+		}
+	})
+	if out != "proj-value" {
+		t.Errorf("getSecret after setSecret = %q, want %q", out, "proj-value")
+	}
+
+	// showSecret reports the masked status; it must name the project source
+	// and must NOT leak the raw value.
+	show := captureStdout(t, func() {
+		if err := showSecret(resolver, secret.BackendFile, name); err != nil {
+			t.Fatalf("showSecret: %v", err)
+		}
+	})
+	if !strings.Contains(show, name+"=") {
+		t.Errorf("showSecret missing %q line:\n%s", name, show)
+	}
+	if strings.Contains(show, "proj-value") {
+		t.Errorf("showSecret leaked the raw value:\n%s", show)
+	}
+	if !strings.Contains(show, secret.ScopeProject) {
+		t.Errorf("showSecret should report the project source:\n%s", show)
+	}
+
+	// Seed the SAME name in org scope; the project value must still win.
+	orgStore := &secret.FileStore{Path: filepath.Join(orgDir, "secrets.env")}
+	if err := orgStore.Set(name, "org-value"); err != nil {
+		t.Fatalf("orgStore.Set: %v", err)
+	}
+	out = captureStdout(t, func() {
+		if err := getSecret(resolver, name); err != nil {
+			t.Fatalf("getSecret (precedence): %v", err)
+		}
+	})
+	if out != "proj-value" {
+		t.Errorf("project scope should shadow org, got %q", out)
+	}
+
+	// Delete the project-scoped secret; the org value is then resolved.
+	secretScope = secret.ScopeProject
+	captureStdout(t, func() {
+		if err := deleteSecret(resolver, secret.BackendFile, name); err != nil {
+			t.Fatalf("deleteSecret: %v", err)
+		}
+	})
+	out = captureStdout(t, func() {
+		if err := getSecret(resolver, name); err != nil {
+			t.Fatalf("getSecret after delete: %v", err)
+		}
+	})
+	if out != "org-value" {
+		t.Errorf("after deleting project secret, org should resolve, got %q", out)
+	}
+
+	// The project secrets.env should no longer carry the name.
+	projStore := &secret.FileStore{Path: filepath.Join(projectDir, "secrets.env")}
+	if _, ok, _ := projStore.Get(name); ok {
+		t.Errorf("%q still present in project secrets.env after delete", name)
+	}
+}
+
 func TestListSecretsFileStoreEmpty(t *testing.T) {
 	dir := t.TempDir()
 	store := &secret.FileStore{Path: filepath.Join(dir, "secrets.env")}
