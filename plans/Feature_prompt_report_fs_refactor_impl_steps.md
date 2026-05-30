@@ -346,6 +346,32 @@ Result: each migrated cmd has ~30 lines of inline setup before `stage.Run(...)`.
 - `cmd/{verify,review,auto_setup,code}_test.go` — per-cmd happy-path tests against the mock agent, verifying the migrated path emits the right starting line + Done summary + artifact pointer.
 - All existing cmd tests (TestAll*, TestVerifyWarnsWhenCheaperAndModelBothSet, TestReviewDryRun, TestCodeDryRun*) continue to pass through the migrations — the public `runXxx` contract is unchanged.
 
+### Final tally
+
+7 commits land the Task 2 work, on top of the prerequisite `runner.Runner` → `runner.AgentExecutor` rename (`8f7cba4`, separate concern but blocking — see its commit body for why):
+
+```
+8f7cba4 runner: rename Runner → AgentExecutor, Run → Execute
+33366e8 stage: Phase A — skeleton (Stage, Ctx, Action, ErrSkip, Executor, Run)
+06ff449 stage/actions: Phase B — CheckConcurrentRuns, FailOnExecError, PrintDone, PrintArtifactPath, PrintArtifactBody
+75c939f cmd/verify: Phase C — first real consumer
+b8f05f6 cmd/{auto_setup,review}: Phase D — added Ctx.Progress
+2168ac3 cmd/code: Phase E — added Stage.RunAgent hook for --tail
+a83514f plans: Phase F decision — report stays hand-written
+```
+
+Cumulative diff: ~+1000 lines new (`internal/stage/` + tests + per-cmd happy-path tests), ~-270 lines removed (`printDone` + the inline Execute/Post boilerplate across verify/review/auto_setup/code).
+
+What's available for downstream work:
+- **Task 3 hook point**: `stage.Run` in `internal/stage/run.go` is the single dispatch site for the 4 supervisor singletons. Wiring progress telemetry there once covers report-via-RunPool's mirror in `runner/pool.go` (where the per-task `Execute` calls live), so the two-file touch covers all 5 commands.
+- **Stage API surface for new commands**: a new built-in workflow (e.g. a future `ateam audit`) defines `Stage{...}` + `*stage.Ctx{...}`, picks Pre/Post actions, calls `stage.Run`. No need to hand-write the envelope.
+- **Test fixtures**: `internal/stage/stage_test.go::fakeExecutor` is reusable for unit-testing any new action without spinning up a real `AgentExecutor`.
+
+What did NOT happen, deliberately:
+- No public `stage` package — internal/ on purpose, per the spec's "no Go-API contract" boundary.
+- No user-pluggable stages — the `Stage` declaration is Go code, not config. Spec is firm on this.
+- No `runner.AgentExecutor` interface — the type stays concrete; only `stage.Executor` (the one method `stage.Run` needs) is an interface, scoped to the stage package.
+
 ## Out of scope (spec follow-ups)
 
 These are open per `Feature_prompt_report_fs_refactor.md` but were explicitly out-of-scope for the v1 refactor:
