@@ -60,6 +60,16 @@ Default-on; `ATEAM_NO_MIGRATE=1` opts out. Runs in `Resolve()` and `LookupFrom()
 - `WriteOrgDefaults` strips stale pre-v1 `defaults/{roles,supervisor,*_base_prompt.md}` from upgraded orgs via `cleanLegacyOrgDefaults`. Logs each removal to stderr.
 - `IsValidRole` / `AllKnownRoleIDs` / `scanV1Roles` read only the v1 path (`prompts/report/<id>.prompt.md`); auto-migration covers the legacy `roles/<id>/` shape before they run.
 
+### Stage abstraction (`internal/stage/`, `internal/stage/actions/`)
+
+Task 2 from the spec — **in progress**. Captures the pre/agent-run/post envelope that built-in commands share. See [Task 2: Stage abstraction — in progress](#task-2-stage-abstraction--in-progress) for the design rationale and migration status.
+
+- `internal/stage/stage.go`: `Stage` (static declaration), `Ctx` (per-invocation state), `Action` interface (single signature for both Pre and Post), `Executor` interface (the minimal surface needed from `*runner.AgentExecutor` — fakable in tests), `ErrSkip` sentinel.
+- `internal/stage/run.go`: `Run(s Stage, c *Ctx) error` — drives Pre → BuildPrompt → BuildRunOpts → Execute (or `RunAgent` hook) → Post.
+- `internal/stage/actions/actions.go`: reusable typed actions: `CheckConcurrentRuns`, `FailOnExecError`, `PrintDone`, `PrintArtifactPath`, `PrintArtifactBody`.
+
+cmd-specific actions live in their cmd file (e.g. `printCodeSessionAction` in `cmd/code.go`) — the boundary is "shared across ≥2 stages → actions package."
+
 ### cmd layer
 
 - `cmd/{report,review,verify,code,auto_setup,inspect,prompt}.go` — all wired through v1 helpers. Default and `--prompt` (customPrompt) paths both go through the v1 assembler via `AssembleOptions.ReplaceRoleMain`.
@@ -221,12 +231,106 @@ Tests track source roughly 1:1. Conventions:
 - `capture_golden_prompts.sh` — captures `ateam prompt --inline-paths` for a representative role set into a snapshot dir. Run once before an upgrade and once after; `diff -r` to verify content preserved.
 - `rewrite_defaults_vars.go` (`//go:build ignore`) — one-shot tool that walks a prompts tree and applies `assembler.RewriteContent` ALL_CAPS → dotted. Used once for the defaults; available as a template if a `ateam migrate-prompts` subcommand ever lands.
 
+## Task 2: Stage abstraction — in progress
+
+Status as of the current `small-fixes` tip: 4 of 5 supervisor commands migrated through the new `internal/stage` abstraction. `cmd/report.go` (Phase F) is the next and last cmd-layer migration. The abstraction has held up so far; one unplanned API addition (`Stage.RunAgent`) was the only design change after Phase A.
+
+### Migration status
+
+| Cmd | Phase | Commit | Notes |
+|---|---|---|---|
+| (skeleton) | A | `33366e8` | Stage + Ctx + Action + ErrSkip + Executor interface + Run |
+| (actions) | B | `06ff449` | `CheckConcurrentRuns`, `FailOnExecError`, `PrintDone`, `PrintArtifactPath`, `PrintArtifactBody` |
+| `verify` | C | `75c939f` | Simplest singleton; reference shape for the migration pattern |
+| `auto_setup` + `review` | D | `b8f05f6` | Added `Ctx.Progress` for live-progress drain goroutine |
+| `code` | E | `2168ac3` | Added `Stage.RunAgent` hook for the `--tail` concurrent tailer |
+| `report` | F | (pending) | `RunPool` parallelism — Stage shape may need a variant |
+
+`exec` and `parallel` stay out of Stage entirely, per the spec: they take a raw prompt with no fixed shape worth abstracting.
+
+### Design decisions (the four the spec called out)
+
+1. **Stage vs Runner relationship** — Stage *wraps* `AgentExecutor`, doesn't replace it. Runner (renamed to `AgentExecutor`, commit `8f7cba4` — see the rename's commit body for the rationale) handles the per-invocation mechanics; Stage handles the envelope around it. Clean separation.
+2. **Ctx construction** — each cmd's Cobra wrapper builds the Ctx directly from its flag globals. No shared `buildCtx` helper; the variability between cmds (which subset of flags, which action label, which override fields) made the helper less useful than expected. Closures over cmd-layer locals carry the rest.
+3. **Action dependency on Runner internals** — actions take a `*Ctx`, nothing else. The Ctx exposes `Executor` (interface), `Env`, `DB`, `Result`, `Prompt`, `Progress`. Actions that need `*runner.AgentExecutor` specifics (none so far) would type-assert at the call site. Minimal surface; no leaks.
+4. **`exec` and `parallel` interact with Stage how?** — they don't. Their shape (raw prompt, no canonical destination, no Pre/Post hooks beyond what's inline) doesn't match. Kept out of Stage entirely.
+
+### What ended up in Stage vs cmd
+
+This is the key design call worth flagging — it's leaner than the spec proposed. The Stage absorbs the **agent-invocation envelope**:
+
+- **In Stage**: `BuildPrompt`, `BuildRunOpts`, the Pre/Post chain around the Execute call, the (optional) `RunAgent` override for non-default execution mechanics.
+- **In cmd (inline)**: env resolve, git-repo gate, prompt resolution + assembly, dry-run early-return, starting line, `resolveRunner` + `applyRunnerOverrides` + `setSourceWritable`, `openStateDB` + wiring DB to executor, `defer db.Close()`, progress channel + drain goroutine + cleanup defers, `cmdContext` setup.
+
+The spec proposed making most of that cmd-inline setup into `PreAction` types (`ResolveExecutor`, `ApplyOverrides`, `SetSourceWritable`, `OpenDB`). Tried it in design; rejected because:
+- Each command resolves the executor with slightly different flags (profile/agent/role label/docker-auto-setup); abstracting it would force a giant action-config struct that mirrors the cmd-options struct anyway.
+- The DB needs `defer db.Close()` in cmd-layer scope; Stage.Run can't own its lifetime cleanly.
+- Setup is sequential, no branching, no reuse value beyond "I wrote fewer lines in each cmd."
+
+Result: each migrated cmd has ~30 lines of inline setup before `stage.Run(...)`. Verbose but uniform; the envelope around it is declarative.
+
+### API surface
+
+`Stage`:
+
+| Field | Required | Purpose |
+|---|---|---|
+| `Name` | yes | User-facing label ("report", "verify", ...) |
+| `Action` | yes | `agent_execs.action` value (use `runner.Action*` constants) |
+| `BuildPrompt` | yes | Closure returning the prompt string from Ctx |
+| `BuildRunOpts` | yes | Closure returning `runner.RunOpts` |
+| `Pre` | no | Actions run before BuildPrompt/Execute |
+| `Post` | no | Actions run after Execute, with `Ctx.Result` populated |
+| `RunAgent` | no | Override the default `Executor.Execute` call (used by `code --tail`) |
+
+`Ctx`:
+
+| Field | Set by | Purpose |
+|---|---|---|
+| `Context` | cmd | Cancellation context for the agent run |
+| `Env` | cmd | Resolved ateam env |
+| `Executor` | cmd | Configured `*runner.AgentExecutor` (satisfies the `Executor` interface) |
+| `DB` | cmd | Open call DB (cmd owns Close via defer) |
+| `Progress` | cmd | Optional `chan<- runner.RunProgress`; cmd owns the chan's lifetime |
+| `Prompt` | `Stage.Run` | Populated by `BuildPrompt`; visible to Post actions |
+| `Result` | `Stage.Run` | Populated after `Execute` returns; read by Post actions |
+| `Extra` | (escape hatch) | `map[string]any` for cross-action state; currently unused — candidate for deletion if Phase F doesn't claim it |
+
+`Action`: single interface `Run(*Ctx) error`. Phase is determined by which slice on Stage holds the action. `ErrSkip` sentinel: a Pre action returns it to end the stage successfully without running the agent or any Post action.
+
+### Effects on cmd code observed during migration
+
+- **`cmd/table.go::printDone` deleted** (Phase E) — all 4 migrated stages route through `actions.PrintDone`. The cmd/internal duplication that existed during Phases C–E disappeared in one move when the lint pass caught it dead.
+- **`printArtifact` and `checkConcurrentRunsEnv` still used** by `report.go` and `parallel.go`; cleanup deferred to Phase F.
+- **First unplanned API change**: `Stage.RunAgent` (Phase E) — `code --tail` runs Execute concurrently with a DB tailer, which broke the sequential model the initial design assumed. Made the hook nullable so verify/review/auto_setup keep using the default path. The hook is the only API surface change after Phase A; encouraging signal that the abstraction is roughly the right shape.
+- **Closures-over-cmd-scope works well** — `BuildPrompt`, `BuildRunOpts`, and `RunAgent` all capture cmd-layer locals (env, opts, prompt, timeout, db) without plumbing through Ctx. Originally feared the closures would be ugly; in practice they're 5–10 lines each and make the per-cmd specifics obvious next to the shared Pre/Post chain.
+- **The cmd-layer setup section is converging** — every migrated cmd now has the same 7-line ritual (resolve env → git gate → resolve prompts → assemble → compute timeout/paths → dry-run early-return → starting line). Tempting to factor into a helper after Phase F lands; want to see report's variations first.
+- **Per-cmd custom actions** — `printCodeSessionAction` in `cmd/code.go` is the first demonstration that narrow actions can live next to the cmd that uses them. Right granularity: shared actions in the package, narrow ones inline.
+
+### Open questions
+
+- **Phase F (report) shape** — `report` runs N agents concurrently via `runner.RunPool`. Stage's "Pre → BuildPrompt → BuildRunOpts → Execute → Post" model assumes one agent invocation. Three options for Phase F:
+  1. Add a `Stage.RunPool` variant (or a `Stages` plural type) that drives multiple per-role substages.
+  2. Use `RunAgent` for everything — report's `RunAgent` closure calls `runner.RunPool`. Single Execute → single Result is awkward for an N-agent run; would need to invent a synthetic Result that summarizes the pool. Probably wrong shape.
+  3. report stays partly hand-written: cmd assembles per-role prompts, calls RunPool, then a Stage runs only the shared Post processing (printDone for aggregate stats, optionally chaining to review). Pre actions (git gate, budget precheck, concurrent-run check) stay inline.
+  Likely (3), but I'll know once I start.
+
+- **`Ctx.Extra` map** — added as an escape hatch in Phase A; zero users through Phase E. If Phase F doesn't need it, delete in a follow-up. Discourages reaching for `map[string]any` when typed action fields work.
+
+- **`Executor` interface vs concrete `*runner.AgentExecutor`** — the interface was added so stage tests can fake the Execute call without a real AgentExecutor. No action has needed `*AgentExecutor` specifics yet. If that stays true through Phase F, the interface is the right call.
+
+### Test footprint
+
+- `internal/stage/stage_test.go` — 11 unit tests against synthetic Stage + fake Executor: ordering, ErrSkip, Pre/Post error propagation, BuildPrompt error, missing executor, missing hooks, nil Ctx, progress forwarding (nil + populated), `RunAgent` override.
+- `internal/stage/actions/actions_test.go` — per-action tests with a real call DB for `CheckConcurrentRuns`; stdout-capture for the print actions.
+- `cmd/{verify,review,auto_setup,code}_test.go` — per-cmd happy-path tests against the mock agent, verifying the migrated path emits the right starting line + Done summary + artifact pointer.
+- All existing cmd tests (TestAll*, TestVerifyWarnsWhenCheaperAndModelBothSet, TestReviewDryRun, TestCodeDryRun*) continue to pass through the migrations — the public `runXxx` contract is unchanged.
+
 ## Out of scope (spec follow-ups)
 
 These are open per `Feature_prompt_report_fs_refactor.md` but were explicitly out-of-scope for the v1 refactor:
 
-- **Task 2 (Stage abstraction)** — internal Go cleanup that would collapse `report` / `review` / `verify` / `auto_setup` etc. onto a `Stage` type with `PreAction` / `PostAction`. None of this exists yet. Each cmd is still hand-written; the v1 helpers (`assembleRoleReportV1` etc.) sit alongside but don't reach into runner internals.
-- **Task 3 (Progress telemetry)** — `ateam exec` should emit structured JSON progress events that get persisted to `state.sqlite`; `ateam parallel` should share the same stream. Not started. Today `parallel` renders directly to the terminal in memory and `exec` doesn't emit anything structured.
+- **Task 3 (Progress telemetry)** — `ateam exec` should emit structured JSON progress events that get persisted to `state.sqlite`; `ateam parallel` should share the same stream. Not started. Today `parallel` renders directly to the terminal in memory and `exec` doesn't emit anything structured. **Note**: Task 2's Stage abstraction is the natural single hook point for this — Phase F will land it in `stage.Run`, replacing the need to wire 5 cmd files individually.
 - **`--pre-prompt` / `--post-prompt` on `parallel`** — `parallel` takes an N-prompt batch with no single body to wrap; pre/post weren't added. `exec` and `inspect --auto-debug` now accept them (see Architecture quick map → cmd layer).
 
 ## Commit history (recent first, on `small-fixes` branch)
