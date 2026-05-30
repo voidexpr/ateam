@@ -97,6 +97,14 @@ type Ctx struct {
 	// run has completed. Read by Post actions.
 	Result *runner.RunSummary
 
+	// Progress is the channel passed straight to Executor.Execute. Nil
+	// means no progress events are emitted (the verify/review shape).
+	// Lifetime is the cmd-layer's: it creates the chan, spawns the
+	// drain goroutine, and closes the chan / waits for the goroutine
+	// after stage.Run returns. Stage.Run only forwards the chan; it
+	// does not own it.
+	Progress chan<- runner.RunProgress
+
 	// Extra is an escape hatch for action-specific scratch data that
 	// must flow between actions. Use sparingly — prefer typed fields
 	// on the action struct itself when possible.

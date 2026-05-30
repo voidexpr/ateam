@@ -52,11 +52,10 @@ func Run(s Stage, c *Ctx) error {
 		return fmt.Errorf("stage %q: no executor set on Ctx — a Pre action must populate Ctx.Executor before the agent runs", s.Name)
 	}
 	runOpts := s.BuildRunOpts(c)
-	// Progress handling is deferred to a later phase — the first stage to
-	// need a live progress channel (auto_setup, code) will introduce the
-	// hook on Stage. For now (verify-shaped stages), nil is the same as
-	// today's hand-written code.
-	result := c.Executor.Execute(c.Context, c.Prompt, runOpts, nil)
+	// c.Progress is nil for verify/review-shape stages and carries the
+	// channel for auto_setup/code. The cmd-layer owns the channel's
+	// lifetime; Stage.Run just forwards it.
+	result := c.Executor.Execute(c.Context, c.Prompt, runOpts, c.Progress)
 	c.Result = &result
 
 	for _, a := range s.Post {

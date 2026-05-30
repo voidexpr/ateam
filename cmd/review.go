@@ -13,6 +13,8 @@ import (
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
+	"github.com/ateam/internal/stage"
+	"github.com/ateam/internal/stage/actions"
 	"github.com/spf13/cobra"
 )
 
@@ -245,42 +247,42 @@ func runReview(opts ReviewOptions) error {
 	defer db.Close()
 	cr.CallDB = db
 
-	if !opts.Force {
-		if err := checkConcurrentRunsEnv(db, env, runner.ActionReview, nil); err != nil {
-			return err
-		}
-	}
-	runOpts := runner.RunOpts{
-		RoleID:            "supervisor",
-		Action:            runner.ActionReview,
-		OutputKind:        runner.OutputKindReview,
-		CanonicalDestFile: reviewFile,
-		WorkDir:           env.WorkDir,
-		TimeoutMin:        timeout,
-		Verbose:           opts.Verbose,
-		StartedAt:         startedAt,
-	}
-
 	ctx, stop := cmdContext()
 	defer stop()
-	result := cr.Execute(ctx, prompt, runOpts, nil)
 
-	if result.Err != nil {
-		return fmt.Errorf("review failed: %w", result.Err)
-	}
-
-	// The agent (or runner fallback) already wrote the review into the
-	// history dir at OutputFilePath; the runner's success path promoted it
-	// to reviewFile. No post-run archive step needed.
-
-	printDone(result)
-	fmt.Printf("Review: %s\n", reviewFile)
-
-	if opts.Print {
-		printArtifact(reviewFile, result.Output)
-	}
-
-	return nil
+	return stage.Run(stage.Stage{
+		Name:   "review",
+		Action: runner.ActionReview,
+		BuildPrompt: func(*stage.Ctx) (string, error) {
+			return prompt, nil
+		},
+		BuildRunOpts: func(*stage.Ctx) runner.RunOpts {
+			return runner.RunOpts{
+				RoleID:            "supervisor",
+				Action:            runner.ActionReview,
+				OutputKind:        runner.OutputKindReview,
+				CanonicalDestFile: reviewFile,
+				WorkDir:           env.WorkDir,
+				TimeoutMin:        timeout,
+				Verbose:           opts.Verbose,
+				StartedAt:         startedAt,
+			}
+		},
+		Pre: []stage.Action{
+			actions.CheckConcurrentRuns{If: !opts.Force, Action: runner.ActionReview},
+		},
+		Post: []stage.Action{
+			actions.FailOnExecError{Label: "review"},
+			actions.PrintDone{},
+			actions.PrintArtifactPath{Label: "Review", Path: reviewFile},
+			actions.PrintArtifactBody{If: opts.Print, Path: reviewFile},
+		},
+	}, &stage.Ctx{
+		Context:  ctx,
+		Env:      env,
+		Executor: cr,
+		DB:       db,
+	})
 }
 
 // formatReviewEmpty turns a ReviewFunnel into a stderr-friendly explanation

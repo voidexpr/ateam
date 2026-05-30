@@ -128,3 +128,41 @@ func TestReviewDryRunEmptyReport(t *testing.T) {
 		t.Fatalf("runReview with empty report: %v", runErr)
 	}
 }
+
+// TestReviewStageHappyPath exercises the migrated runReview end-to-end
+// against the mock agent: starting line, Stage Post chain emits Done +
+// "Review:" pointer + the --print body.
+func TestReviewStageHappyPath(t *testing.T) {
+	orgDir, projPath, projDir := setupReviewFixture(t)
+
+	// Seed a flat-layout report so DiscoverReports finds something.
+	reportPath := filepath.Join(projDir, "shared", "report", "testing_basic.md")
+	if err := os.MkdirAll(filepath.Dir(reportPath), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(reportPath, []byte("# Findings\n\nclean."), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	savedOrg := orgFlag
+	defer func() { orgFlag = savedOrg }()
+	orgFlag = filepath.Dir(orgDir)
+
+	out := captureStdout(t, func() {
+		withChdir(t, projPath, func() {
+			if err := runReview(ReviewOptions{Profile: "test", Print: true}); err != nil {
+				t.Fatalf("runReview: %v", err)
+			}
+		})
+	})
+
+	for _, want := range []string{
+		"Supervisor reviewing reports",
+		"Done (",
+		"Review:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in output:\n%s", want, out)
+		}
+	}
+}

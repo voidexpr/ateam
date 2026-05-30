@@ -13,18 +13,20 @@ import (
 // pre-configured summary. Stand-in for *runner.AgentExecutor in the
 // dispatch-logic tests.
 type fakeExecutor struct {
-	called  bool
-	gotCtx  context.Context
-	gotProm string
-	gotOpts runner.RunOpts
-	ret     runner.RunSummary
+	called      bool
+	gotCtx      context.Context
+	gotProm     string
+	gotOpts     runner.RunOpts
+	gotProgress chan<- runner.RunProgress
+	ret         runner.RunSummary
 }
 
-func (f *fakeExecutor) Execute(ctx context.Context, prompt string, opts runner.RunOpts, _ chan<- runner.RunProgress) runner.RunSummary {
+func (f *fakeExecutor) Execute(ctx context.Context, prompt string, opts runner.RunOpts, p chan<- runner.RunProgress) runner.RunSummary {
 	f.called = true
 	f.gotCtx = ctx
 	f.gotProm = prompt
 	f.gotOpts = opts
+	f.gotProgress = p
 	return f.ret
 }
 
@@ -216,6 +218,32 @@ func TestRunNilCtxErrors(t *testing.T) {
 	}
 	if err := Run(s, nil); err == nil {
 		t.Error("expected error for nil Ctx, got nil")
+	}
+}
+
+func TestRunForwardsProgressChannel(t *testing.T) {
+	exec := &fakeExecutor{}
+	s := makeStage(exec, nil, nil)
+	ch := make(chan runner.RunProgress, 1)
+	c := newCtx()
+	c.Progress = ch
+	if err := Run(s, c); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if exec.gotProgress == nil {
+		t.Error("Executor.Execute received nil progress; expected the chan from Ctx.Progress")
+	}
+}
+
+func TestRunForwardsNilProgressByDefault(t *testing.T) {
+	exec := &fakeExecutor{}
+	s := makeStage(exec, nil, nil)
+	c := newCtx() // no Progress set
+	if err := Run(s, c); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if exec.gotProgress != nil {
+		t.Error("Executor.Execute received a non-nil progress; expected nil when Ctx.Progress is unset")
 	}
 }
 
