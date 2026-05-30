@@ -14,6 +14,8 @@ import (
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/ateam/internal/runtime"
+	"github.com/ateam/internal/stage"
+	"github.com/ateam/internal/stage/actions"
 	"github.com/spf13/cobra"
 )
 
@@ -277,60 +279,50 @@ func runCode(opts CodeOptions) error {
 	defer db.Close()
 	cr.CallDB = db
 
-	if !opts.Force {
-		if err := checkConcurrentRunsEnv(db, env, runner.ActionCode, nil); err != nil {
-			return err
-		}
-	}
-	runOpts := runner.RunOpts{
-		RoleID:           "supervisor",
-		Action:           runner.ActionCode,
-		OutputKind:       runner.OutputKindExecutionReport,
-		CanonicalDestDir: filepath.Join(env.SharedDir(), "code", "{{EXEC_ID}}"),
-		WorkDir:          env.WorkDir,
-		TimeoutMin:       timeout,
-		Verbose:          opts.Verbose,
-		Batch:            batch,
-		StartedAt:        startedAt,
-	}
-
 	ctx, stop := cmdContext()
 	defer stop()
 
-	var result runner.RunSummary
+	// Two execution modes through the same Stage:
+	//   - --tail: a custom RunAgent closure spawns Execute in a goroutine
+	//     and drives a DB tailer alongside it. No progress channel —
+	//     the tailer reads stream files from disk.
+	//   - default: Stage.Run does the standard Execute call. A progress
+	//     drain goroutine consumes the channel and prints lines.
+	var runAgent func(c *stage.Ctx, runOpts runner.RunOpts) runner.RunSummary
+	var ctxProgress chan<- runner.RunProgress
 	if opts.Tail {
-		runDone := make(chan struct{})
-		go func() {
-			result = cr.Execute(ctx, prompt, runOpts, nil)
-			close(runDone)
-		}()
-
-		time.Sleep(tailAttachDelay)
-
-		tailer := runner.NewTailer(os.Stderr, db, isTerminal(), opts.Verbose)
-		tailer.ProjectDir = env.ProjectDir
-		tailer.OrgDir = env.OrgDir
-		tailer.Batch = batch
-		if rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir); err == nil {
-			tailer.Pricing, tailer.DefaultModel = mergedPricingFromConfig(rtCfg)
-		}
-
-		if rows, err := db.CallsByBatch(batch); err == nil {
-			for _, r := range rows {
-				if r.StreamFile != "" {
-					tailer.AddSource(r.ID, r.Role, r.Action, root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.StreamFile), r.Model)
+		runAgent = func(c *stage.Ctx, runOpts runner.RunOpts) runner.RunSummary {
+			var result runner.RunSummary
+			runDone := make(chan struct{})
+			go func() {
+				result = c.Executor.Execute(c.Context, c.Prompt, runOpts, nil)
+				close(runDone)
+			}()
+			time.Sleep(tailAttachDelay)
+			tailer := runner.NewTailer(os.Stderr, db, isTerminal(), opts.Verbose)
+			tailer.ProjectDir = env.ProjectDir
+			tailer.OrgDir = env.OrgDir
+			tailer.Batch = batch
+			if rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir); err == nil {
+				tailer.Pricing, tailer.DefaultModel = mergedPricingFromConfig(rtCfg)
+			}
+			if rows, err := db.CallsByBatch(batch); err == nil {
+				for _, r := range rows {
+					if r.StreamFile != "" {
+						tailer.AddSource(r.ID, r.Role, r.Action, root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.StreamFile), r.Model)
+					}
 				}
 			}
-		}
-
-		tailCtx, tailCancel := context.WithCancel(ctx)
-		go func() {
+			tailCtx, tailCancel := context.WithCancel(c.Context)
+			go func() {
+				<-runDone
+				time.Sleep(time.Second)
+				tailCancel()
+			}()
+			_ = tailer.Run(tailCtx)
 			<-runDone
-			time.Sleep(time.Second)
-			tailCancel()
-		}()
-		_ = tailer.Run(tailCtx)
-		<-runDone
+			return result
+		}
 	} else {
 		progress := make(chan runner.RunProgress, 64)
 		var progressWg sync.WaitGroup
@@ -339,18 +331,65 @@ func runCode(opts CodeOptions) error {
 			defer progressWg.Done()
 			printProgress(progress)
 		}()
-
-		result = cr.Execute(ctx, prompt, runOpts, progress)
-
-		close(progress)
-		progressWg.Wait()
+		defer progressWg.Wait()
+		defer close(progress)
+		ctxProgress = progress
 	}
 
-	if result.Err != nil {
-		return fmt.Errorf("code execution failed: %w", result.Err)
-	}
-	printCodeSessionSummary(env.SharedDir(), supervisorDir, result.ExecID, opts.Print, result.Output)
-	printDone(result)
+	return stage.Run(stage.Stage{
+		Name:   "code",
+		Action: runner.ActionCode,
+		BuildPrompt: func(*stage.Ctx) (string, error) {
+			return prompt, nil
+		},
+		BuildRunOpts: func(*stage.Ctx) runner.RunOpts {
+			return runner.RunOpts{
+				RoleID:           "supervisor",
+				Action:           runner.ActionCode,
+				OutputKind:       runner.OutputKindExecutionReport,
+				CanonicalDestDir: filepath.Join(env.SharedDir(), "code", "{{EXEC_ID}}"),
+				WorkDir:          env.WorkDir,
+				TimeoutMin:       timeout,
+				Verbose:          opts.Verbose,
+				Batch:            batch,
+				StartedAt:        startedAt,
+			}
+		},
+		RunAgent: runAgent, // nil for default mode, custom for --tail
+		Pre: []stage.Action{
+			actions.CheckConcurrentRuns{If: !opts.Force, Action: runner.ActionCode},
+		},
+		Post: []stage.Action{
+			actions.FailOnExecError{Label: "code execution"},
+			printCodeSessionAction{
+				SharedDir:     env.SharedDir(),
+				SupervisorDir: supervisorDir,
+				Print:         opts.Print,
+			},
+			actions.PrintDone{},
+		},
+	}, &stage.Ctx{
+		Context:  ctx,
+		Env:      env,
+		Executor: cr,
+		DB:       db,
+		Progress: ctxProgress,
+	})
+}
+
+// printCodeSessionAction is a code-specific Post action that emits the
+// per-session summary (execution_report.md contents, session dir, file
+// list). Lives here rather than in internal/stage/actions because it
+// only makes sense for `ateam code` — other stages have flat single-
+// file artifacts that PrintArtifactPath/PrintArtifactBody handle.
+type printCodeSessionAction struct {
+	SharedDir     string
+	SupervisorDir string
+	Print         bool
+}
+
+func (a printCodeSessionAction) Run(c *stage.Ctx) error {
+	printCodeSessionSummary(a.SharedDir, a.SupervisorDir, c.Result.ExecID, a.Print, c.Result.Output)
 	return nil
 }
 

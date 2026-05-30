@@ -135,3 +135,50 @@ func TestCodeDryRunSupervisorAgentOverride(t *testing.T) {
 		t.Fatalf("runCode dry-run with supervisor-agent override: %v", runErr)
 	}
 }
+
+// TestCodeStageHappyPath exercises the migrated runCode end-to-end
+// against the mock agent: starting line, Stage Post chain emits Done +
+// session summary (via printCodeSessionAction).
+func TestCodeStageHappyPath(t *testing.T) {
+	base := t.TempDir()
+	orgDir, err := root.InstallOrg(base)
+	if err != nil {
+		t.Fatalf("InstallOrg: %v", err)
+	}
+	projPath := filepath.Join(base, "myproj")
+	if err := os.MkdirAll(projPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	initTestGitRepo(t, projPath)
+	if _, err := root.InitProject(projPath, orgDir, root.InitProjectOpts{
+		Name:         "myproj",
+		EnabledRoles: []string{"testing_basic"},
+	}); err != nil {
+		t.Fatalf("InitProject: %v", err)
+	}
+
+	savedOrg := orgFlag
+	defer func() { orgFlag = savedOrg }()
+	orgFlag = filepath.Dir(orgDir)
+
+	out := captureStdout(t, func() {
+		withChdir(t, projPath, func() {
+			if err := runCode(CodeOptions{
+				Review:            "# Test Review\n\nsome tasks",
+				SupervisorProfile: "test", // mock agent
+				Profile:           "test",
+			}); err != nil {
+				t.Fatalf("runCode: %v", err)
+			}
+		})
+	})
+
+	for _, want := range []string{
+		"Code management supervisor running",
+		"Done (",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in output:\n%s", want, out)
+		}
+	}
+}

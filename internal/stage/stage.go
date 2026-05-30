@@ -47,6 +47,16 @@ type Stage struct {
 	// OutputKind, PromptName, ...). Required.
 	BuildRunOpts func(*Ctx) runner.RunOpts
 
+	// RunAgent overrides the default agent-invocation step. When nil,
+	// Stage.Run calls Ctx.Executor.Execute(Ctx.Context, Ctx.Prompt,
+	// runOpts, Ctx.Progress) directly. Set it when the stage needs
+	// non-default execution mechanics — notably code --tail, which runs
+	// Execute concurrently with a DB tailer goroutine. The closure
+	// owns the agent invocation in full (progress channel, cancellation,
+	// any concurrent UI it drives) and returns the resulting summary;
+	// Stage.Run still populates Ctx.Result from the return value.
+	RunAgent func(c *Ctx, runOpts runner.RunOpts) runner.RunSummary
+
 	// Pre runs before the agent invocation, in declaration order. Each
 	// action can mutate the Ctx (set Executor, DB, …) and returns:
 	//   - nil          → continue to the next action

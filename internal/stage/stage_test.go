@@ -235,6 +235,29 @@ func TestRunForwardsProgressChannel(t *testing.T) {
 	}
 }
 
+func TestRunAgentHookOverridesDefaultExecute(t *testing.T) {
+	defaultExec := &fakeExecutor{}
+	customCalled := false
+	s := makeStage(defaultExec, nil, nil)
+	s.RunAgent = func(c *Ctx, _ runner.RunOpts) runner.RunSummary {
+		customCalled = true
+		return runner.RunSummary{ExecID: 7}
+	}
+	c := newCtx()
+	if err := Run(s, c); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !customCalled {
+		t.Error("RunAgent hook was not called")
+	}
+	if defaultExec.called {
+		t.Error("Default Executor.Execute should not have been called when RunAgent is set")
+	}
+	if c.Result == nil || c.Result.ExecID != 7 {
+		t.Errorf("Ctx.Result should hold the RunAgent return value; got %+v", c.Result)
+	}
+}
+
 func TestRunForwardsNilProgressByDefault(t *testing.T) {
 	exec := &fakeExecutor{}
 	s := makeStage(exec, nil, nil)

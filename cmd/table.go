@@ -62,14 +62,6 @@ func relPath(cwd, path string) string {
 	return rel
 }
 
-func printDone(r runner.RunSummary) {
-	costSuffix := ""
-	if c := display.FmtCost(r.Cost); c != "" {
-		costSuffix = ", " + c
-	}
-	fmt.Printf("Done (%s%s)\n\n", display.FormatDuration(r.Duration), costSuffix)
-}
-
 // printArtifact prints the on-disk artifact at path for --print. The shipped
 // single-file prompts (review, verify, report, auto_setup) instruct the agent
 // to write its output via the Write tool and end with a one-line confirmation

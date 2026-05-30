@@ -3,6 +3,8 @@ package stage
 import (
 	"errors"
 	"fmt"
+
+	"github.com/ateam/internal/runner"
 )
 
 // Run drives a Stage end-to-end against c:
@@ -52,10 +54,17 @@ func Run(s Stage, c *Ctx) error {
 		return fmt.Errorf("stage %q: no executor set on Ctx — a Pre action must populate Ctx.Executor before the agent runs", s.Name)
 	}
 	runOpts := s.BuildRunOpts(c)
-	// c.Progress is nil for verify/review-shape stages and carries the
-	// channel for auto_setup/code. The cmd-layer owns the channel's
-	// lifetime; Stage.Run just forwards it.
-	result := c.Executor.Execute(c.Context, c.Prompt, runOpts, c.Progress)
+	// Default path: c.Progress is nil for verify/review-shape stages and
+	// carries the channel for auto_setup/code. The cmd-layer owns the
+	// channel's lifetime; Stage.Run just forwards it. When the stage
+	// supplies a custom RunAgent, that closure owns the agent invocation
+	// in full (used by code --tail to interleave Execute with a tailer).
+	var result runner.RunSummary
+	if s.RunAgent != nil {
+		result = s.RunAgent(c, runOpts)
+	} else {
+		result = c.Executor.Execute(c.Context, c.Prompt, runOpts, c.Progress)
+	}
 	c.Result = &result
 
 	for _, a := range s.Post {
