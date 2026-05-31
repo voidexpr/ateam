@@ -75,6 +75,7 @@ func RunPoolWithOpts(ctx context.Context, r *AgentExecutor, tasks []PoolExec, ma
 		}
 	}
 
+loop:
 	for i := range tasks {
 		task := tasks[i]
 		if opts.PreDispatch != nil {
@@ -95,7 +96,14 @@ func RunPoolWithOpts(ctx context.Context, r *AgentExecutor, tasks []PoolExec, ma
 		case sem <- struct{}{}:
 		case <-ctx.Done():
 			wg.Done()
-			continue
+			// Same shape as the PreDispatch branch above: surface the
+			// current task and the un-dispatched remainder as skipped
+			// instead of dropping them silently when ctx is cancelled
+			// (e.g. Ctrl-C) before all tasks are picked up.
+			for _, skipped := range tasks[i:] {
+				record(skippedSummary(skipped, ctx.Err()))
+			}
+			break loop
 		}
 
 		go func(t PoolExec) {

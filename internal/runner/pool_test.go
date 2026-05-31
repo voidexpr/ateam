@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -300,6 +301,138 @@ func TestRunPoolPerExecRunnerOverride(t *testing.T) {
 	if got["override-role"] != "override" {
 		t.Errorf("override-role output = %q, want %q (per-exec AgentExecutor override not honored)",
 			got["override-role"], "override")
+	}
+}
+
+// signalAgent closes `started` on its first Run call and then blocks on
+// `release` (independent of ctx) so the pool's worker slot stays held until the
+// test explicitly lets it finish. This lets a test deterministically cancel ctx
+// after dispatch has started but before the worker releases its sem slot — the
+// only state in which the ctx.Done() branch of the dispatch select can win
+// without racing the worker.
+type signalAgent struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (a *signalAgent) Name() string           { return "signal" }
+func (a *signalAgent) SetModel(string)        {}
+func (a *signalAgent) SetEffort(string)       {}
+func (a *signalAgent) SetMaxBudgetUSD(string) {}
+func (a *signalAgent) CloneWithResolvedTemplates(*strings.Replacer) agent.Agent {
+	return a
+}
+func (a *signalAgent) DebugCommandArgs([]string) (string, []string) { return "signal", nil }
+func (a *signalAgent) Run(ctx context.Context, _ agent.Request) <-chan agent.StreamEvent {
+	ch := make(chan agent.StreamEvent, 4)
+	a.once.Do(func() { close(a.started) })
+	go func() {
+		defer close(ch)
+		select {
+		case <-a.release:
+		case <-ctx.Done():
+		}
+		ch <- agent.StreamEvent{Type: "system", SessionID: "signal-session"}
+		ch <- agent.StreamEvent{Type: "assistant", Text: "ok"}
+		ch <- agent.StreamEvent{Type: "result", Output: "ok", ExitCode: 0}
+	}()
+	return ch
+}
+
+// TestRunPoolCtxCancelSkipsUnDispatched verifies that when ctx is cancelled
+// mid-dispatch (e.g. Ctrl-C with more tasks than worker slots), the un-dispatched
+// remainder is surfaced as skipped summaries rather than dropped silently.
+// Mirrors the existing PreDispatch coverage above.
+func TestRunPoolCtxCancelSkipsUnDispatched(t *testing.T) {
+	dir := t.TempDir()
+
+	ag := &signalAgent{started: make(chan struct{}), release: make(chan struct{})}
+	r := newTestRunner(t, dir, ag)
+
+	const numTasks = 5
+	tasks := make([]PoolExec, numTasks)
+	for i := range tasks {
+		tasks[i] = PoolExec{
+			Prompt:  "task",
+			RunOpts: RunOpts{RoleID: fmt.Sprintf("cancel-role-%d", i), Action: ActionExec},
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Cancel only after the first worker has actually entered agent.Run, so
+	// the sem slot is guaranteed held when ctx.Done fires in the dispatch select.
+	go func() {
+		<-ag.started
+		cancel()
+	}()
+
+	completed := make(chan RunSummary, numTasks)
+
+	// Drain completed concurrently. The first skipped summary tells us the
+	// dispatch loop's ctx.Done() branch has fired, so it is safe to release
+	// the in-flight worker and let RunPool return.
+	var (
+		mu        sync.Mutex
+		summaries []RunSummary
+	)
+	released := false
+	drainDone := make(chan struct{})
+	go func() {
+		defer close(drainDone)
+		for s := range completed {
+			mu.Lock()
+			summaries = append(summaries, s)
+			mu.Unlock()
+			if !released && s.ErrorSource == agent.ErrorSourceSkipped {
+				released = true
+				close(ag.release)
+			}
+		}
+	}()
+
+	results := RunPoolWithOpts(ctx, r, tasks, 1, nil, completed, PoolOpts{})
+	<-drainDone
+
+	// Safety net: ensure release is closed even if no skip ever arrived (would
+	// indicate the bug regressed and the test would otherwise hang).
+	if !released {
+		close(ag.release)
+	}
+
+	if len(results) != numTasks {
+		t.Fatalf("expected %d results (dispatched + skipped), got %d", numTasks, len(results))
+	}
+
+	mu.Lock()
+	fromCh := len(summaries)
+	mu.Unlock()
+	if fromCh != numTasks {
+		t.Errorf("expected %d completed events, got %d", numTasks, fromCh)
+	}
+
+	seen := map[string]int{}
+	var skipped int
+	for _, s := range results {
+		seen[s.RoleID]++
+		if s.ErrorSource == agent.ErrorSourceSkipped {
+			skipped++
+			if s.ErrorCause == "" || !strings.Contains(s.ErrorCause, context.Canceled.Error()) {
+				t.Errorf("skipped summary for %q should carry ctx.Err() in ErrorCause, got %q",
+					s.RoleID, s.ErrorCause)
+			}
+		}
+	}
+	for i := 0; i < numTasks; i++ {
+		id := fmt.Sprintf("cancel-role-%d", i)
+		if seen[id] != 1 {
+			t.Errorf("role %q: expected exactly 1 result, got %d", id, seen[id])
+		}
+	}
+	if skipped == 0 {
+		t.Errorf("expected at least one skipped task after ctx cancel, got 0")
 	}
 }
 
