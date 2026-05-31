@@ -31,20 +31,23 @@ type PoolOpts struct {
 // It returns results in completion order. If completed is non-nil, each
 // RunSummary is sent on it as the agent exec finishes (before the final return).
 //
-// Channel contract (see CONCURRENCY.md):
-//   - progress: non-blocking send. Callers may pass a small buffer or nil.
+// Contract:
+//   - onProgress: synchronous callback invoked from every worker goroutine
+//     for each agent's RunProgress event. May be nil. Implementations own
+//     their own thread-safety. For chan-driven consumers, wrap a buffered
+//     chan with ProgressChan to preserve drop-on-overflow semantics.
 //   - completed: blocking send, one per agent exec plus a close. Callers MUST
 //     provide a buffer ≥ len(tasks) OR drain it concurrently with RunPool;
 //     otherwise workers deadlock after maxParallel summaries queue up.
 //     An obviously-undersized channel is rejected up-front: callers are
 //     returned an empty slice and a warning is printed rather than
 //     silently hanging.
-func RunPool(ctx context.Context, r *AgentExecutor, tasks []PoolExec, maxParallel int, progress chan<- RunProgress, completed chan<- RunSummary) []RunSummary {
-	return RunPoolWithOpts(ctx, r, tasks, maxParallel, progress, completed, PoolOpts{})
+func RunPool(ctx context.Context, r *AgentExecutor, tasks []PoolExec, maxParallel int, onProgress func(RunProgress), completed chan<- RunSummary) []RunSummary {
+	return RunPoolWithOpts(ctx, r, tasks, maxParallel, onProgress, completed, PoolOpts{})
 }
 
 // RunPoolWithOpts is RunPool plus optional hooks (see PoolOpts).
-func RunPoolWithOpts(ctx context.Context, r *AgentExecutor, tasks []PoolExec, maxParallel int, progress chan<- RunProgress, completed chan<- RunSummary, opts PoolOpts) []RunSummary {
+func RunPoolWithOpts(ctx context.Context, r *AgentExecutor, tasks []PoolExec, maxParallel int, onProgress func(RunProgress), completed chan<- RunSummary, opts PoolOpts) []RunSummary {
 	if completed != nil && cap(completed) < len(tasks) {
 		fmt.Fprintf(os.Stderr,
 			"RunPool: completed channel buffer (%d) is smaller than len(tasks) (%d); "+
@@ -114,7 +117,7 @@ func RunPoolWithOpts(ctx context.Context, r *AgentExecutor, tasks []PoolExec, ma
 				if t.AgentExecutor != nil {
 					taskRunner = t.AgentExecutor
 				}
-				summary = taskRunner.Execute(ctx, t.Prompt, t.RunOpts, progress)
+				summary = taskRunner.Execute(ctx, t.Prompt, t.RunOpts, onProgress)
 			}()
 
 			record(summary)

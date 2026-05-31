@@ -107,13 +107,13 @@ type Ctx struct {
 	// run has completed. Read by Post actions.
 	Result *runner.RunSummary
 
-	// Progress is the channel passed straight to Executor.Execute. Nil
-	// means no progress events are emitted (the verify/review shape).
-	// Lifetime is the cmd-layer's: it creates the chan, spawns the
-	// drain goroutine, and closes the chan / waits for the goroutine
-	// after stage.Run returns. Stage.Run only forwards the chan; it
-	// does not own it.
-	Progress chan<- runner.RunProgress
+	// OnProgress is the callback passed straight to Executor.Execute.
+	// Nil disables progress events (the verify/review shape). The
+	// cmd-layer owns lifetime: it either constructs a closure directly,
+	// or wraps a buffered chan via runner.ProgressChan and manages the
+	// chan + drain goroutine itself; stage.Run only forwards the
+	// callback.
+	OnProgress func(runner.RunProgress)
 
 	// Extra is an escape hatch for action-specific scratch data that
 	// must flow between actions. Use sparingly — prefer typed fields
@@ -126,7 +126,7 @@ type Ctx struct {
 // Lives in the stage package so tests can stand up a fake without
 // pulling in the runner machinery.
 type Executor interface {
-	Execute(ctx context.Context, prompt string, opts runner.RunOpts, progress chan<- runner.RunProgress) runner.RunSummary
+	Execute(ctx context.Context, prompt string, opts runner.RunOpts, onProgress func(runner.RunProgress)) runner.RunSummary
 }
 
 // Action is implemented by both Pre and Post actions. The phase is

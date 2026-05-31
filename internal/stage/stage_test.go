@@ -17,16 +17,16 @@ type fakeExecutor struct {
 	gotCtx      context.Context
 	gotProm     string
 	gotOpts     runner.RunOpts
-	gotProgress chan<- runner.RunProgress
+	gotProgress func(runner.RunProgress)
 	ret         runner.RunSummary
 }
 
-func (f *fakeExecutor) Execute(ctx context.Context, prompt string, opts runner.RunOpts, p chan<- runner.RunProgress) runner.RunSummary {
+func (f *fakeExecutor) Execute(ctx context.Context, prompt string, opts runner.RunOpts, onProgress func(runner.RunProgress)) runner.RunSummary {
 	f.called = true
 	f.gotCtx = ctx
 	f.gotProm = prompt
 	f.gotOpts = opts
-	f.gotProgress = p
+	f.gotProgress = onProgress
 	return f.ret
 }
 
@@ -221,17 +221,22 @@ func TestRunNilCtxErrors(t *testing.T) {
 	}
 }
 
-func TestRunForwardsProgressChannel(t *testing.T) {
+func TestRunForwardsOnProgressCallback(t *testing.T) {
 	exec := &fakeExecutor{}
 	s := makeStage(exec, nil, nil)
-	ch := make(chan runner.RunProgress, 1)
+	called := false
 	c := newCtx()
-	c.Progress = ch
+	c.OnProgress = func(runner.RunProgress) { called = true }
 	if err := Run(s, c); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if exec.gotProgress == nil {
-		t.Error("Executor.Execute received nil progress; expected the chan from Ctx.Progress")
+		t.Error("Executor.Execute received nil callback; expected the closure from Ctx.OnProgress")
+	}
+	// Drive it once so the test exercises forwarding end-to-end.
+	exec.gotProgress(runner.RunProgress{})
+	if !called {
+		t.Error("expected OnProgress callback to be invoked when Executor fires events")
 	}
 }
 

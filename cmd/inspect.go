@@ -343,7 +343,7 @@ func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
 		Action:  runner.ActionDebug,
 		WorkDir: env.WorkDir,
 		Verbose: true,
-	}, progress)
+	}, runner.ProgressChan(progress))
 
 	close(progress)
 	progressWg.Wait()

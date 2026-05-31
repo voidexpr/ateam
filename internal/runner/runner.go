@@ -210,7 +210,12 @@ func (r *AgentExecutor) StateDir() string {
 }
 
 // Execute runs the agent with the given prompt and options.
-func (r *AgentExecutor) Execute(ctx context.Context, prompt string, opts RunOpts, progress chan<- RunProgress) RunSummary {
+//
+// onProgress, if non-nil, is invoked synchronously for each RunProgress
+// event. It may fire from multiple internal goroutines; implementations
+// own their own thread-safety. Pass nil to disable progress reporting.
+// For chan-based consumers, wrap a chan with ProgressChan.
+func (r *AgentExecutor) Execute(ctx context.Context, prompt string, opts RunOpts, onProgress func(RunProgress)) RunSummary {
 	startedAt := opts.StartedAt
 	if startedAt.IsZero() {
 		startedAt = time.Now()
@@ -439,7 +444,7 @@ func (r *AgentExecutor) Execute(ctx context.Context, prompt string, opts RunOpts
 	)
 
 	emitProgress := func(phase, toolName, toolInput, content string, toolCount, evCount int) {
-		sendProgress(progress, RunProgress{
+		safeEmit(onProgress, RunProgress{
 			ExecID:                 callID,
 			RoleID:                 opts.RoleID,
 			Phase:                  phase,
@@ -509,7 +514,7 @@ func (r *AgentExecutor) Execute(ctx context.Context, prompt string, opts RunOpts
 			// a content-less init line; the real init event follows from the
 			// agent's own stream.
 			if ev.Subtype != "process_start" {
-				sendProgress(progress, RunProgress{
+				safeEmit(onProgress, RunProgress{
 					ExecID:                 callID,
 					RoleID:                 opts.RoleID,
 					Phase:                  PhaseInit,
@@ -951,13 +956,32 @@ func mergeStringList(obj map[string]any, keyPath []string, values []string) {
 	m[lastKey] = existing
 }
 
-func sendProgress(ch chan<- RunProgress, p RunProgress) {
-	if ch == nil {
+// safeEmit calls fn(p) when fn is non-nil. Receiver is the synchronous
+// progress callback contract; non-blocking semantics (drop on overflow)
+// are the responsibility of the callback implementation. ProgressChan
+// preserves the legacy drop-on-full chan behavior for callers wrapping
+// a buffered chan.
+func safeEmit(fn func(RunProgress), p RunProgress) {
+	if fn == nil {
 		return
 	}
-	select {
-	case ch <- p:
-	default:
+	fn(p)
+}
+
+// ProgressChan adapts a buffered RunProgress chan into the onProgress
+// callback shape Execute / RunPool expect. The send is non-blocking
+// (select/default), preserving the drop-on-overflow semantic the
+// previous chan-based API guaranteed. Returns nil when ch is nil so the
+// caller can pass the result directly.
+func ProgressChan(ch chan<- RunProgress) func(RunProgress) {
+	if ch == nil {
+		return nil
+	}
+	return func(p RunProgress) {
+		select {
+		case ch <- p:
+		default:
+		}
 	}
 }
 

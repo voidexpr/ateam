@@ -104,7 +104,7 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 		TimeoutMin:              timeout,
 		Verbose:                 verbose,
 		AutoRolesCommandsOutput: commandsOutput,
-	}, progress)
+	}, runner.ProgressChan(progress))
 
 	close(progress)
 	progressWg.Wait()

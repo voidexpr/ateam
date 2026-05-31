@@ -90,7 +90,7 @@ func runPool(ctx context.Context, r *runner.AgentExecutor, tasks []runner.PoolEx
 	var statusMu sync.Mutex
 
 	go func() {
-		runner.RunPoolWithOpts(ctx, r, tasks, maxParallel, progressCh, completedCh, runner.PoolOpts{
+		runner.RunPoolWithOpts(ctx, r, tasks, maxParallel, runner.ProgressChan(progressCh), completedCh, runner.PoolOpts{
 			PreDispatch: opts.preDispatch,
 		})
 		close(progressCh)

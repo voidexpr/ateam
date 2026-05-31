@@ -140,10 +140,10 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 			actions.PrintArtifactBody{If: true, Path: ""},
 		},
 	}, &stage.Ctx{
-		Context:  ctx,
-		Env:      env,
-		Executor: cr,
-		DB:       db,
-		Progress: progress,
+		Context:    ctx,
+		Env:        env,
+		Executor:   cr,
+		DB:         db,
+		OnProgress: runner.ProgressChan(progress),
 	})
 }

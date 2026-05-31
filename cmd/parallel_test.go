@@ -200,7 +200,7 @@ func TestParallelPoolProgressEvents(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runner.RunPool(context.Background(), r, tasks, 2, progressCh, completedCh)
+		runner.RunPool(context.Background(), r, tasks, 2, runner.ProgressChan(progressCh), completedCh)
 		close(progressCh)
 	}()
 

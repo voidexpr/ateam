@@ -273,7 +273,7 @@ func TestRunnerProgress(t *testing.T) {
 	r := newTestRunner(t, dir, mock)
 
 	progress := make(chan RunProgress, 64)
-	_ = r.Execute(context.Background(), "test", RunOpts{RoleID: "progress-role", Action: ActionExec}, progress)
+	_ = r.Execute(context.Background(), "test", RunOpts{RoleID: "progress-role", Action: ActionExec}, ProgressChan(progress))
 	close(progress)
 
 	var phases []string
@@ -294,7 +294,7 @@ func TestRunnerProgressInitCarriesAgentInfo(t *testing.T) {
 	r := newTestRunner(t, dir, mock)
 
 	progress := make(chan RunProgress, 64)
-	_ = r.Execute(context.Background(), "p", RunOpts{RoleID: "init-role", Action: ActionExec}, progress)
+	_ = r.Execute(context.Background(), "p", RunOpts{RoleID: "init-role", Action: ActionExec}, ProgressChan(progress))
 	close(progress)
 
 	var inits []RunProgress
@@ -319,7 +319,7 @@ func TestRunnerProgressIncludesExecID(t *testing.T) {
 	r := newTestRunner(t, dir, mock)
 
 	progress := make(chan RunProgress, 64)
-	summary := r.Execute(context.Background(), "test", RunOpts{RoleID: "progress-role", Action: ActionExec}, progress)
+	summary := r.Execute(context.Background(), "test", RunOpts{RoleID: "progress-role", Action: ActionExec}, ProgressChan(progress))
 	close(progress)
 
 	if summary.ExecID <= 0 {
@@ -436,7 +436,7 @@ func TestRunnerStallEmitsWarning(t *testing.T) {
 	progress := make(chan RunProgress, 64)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_ = r.Execute(ctx, "stall test", RunOpts{RoleID: "stalled", Action: ActionExec}, progress)
+	_ = r.Execute(ctx, "stall test", RunOpts{RoleID: "stalled", Action: ActionExec}, ProgressChan(progress))
 	close(progress)
 
 	var stalls int

@@ -227,7 +227,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	ctx, stop := cmdContext()
 	defer stop()
-	result := r.Execute(ctx, promptText, opts, progress)
+	result := r.Execute(ctx, promptText, opts, runner.ProgressChan(progress))
 
 	if progress != nil {
 		close(progress)

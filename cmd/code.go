@@ -289,7 +289,7 @@ func runCode(opts CodeOptions) error {
 	//   - default: Stage.Run does the standard Execute call. A progress
 	//     drain goroutine consumes the channel and prints lines.
 	var runAgent func(c *stage.Ctx, runOpts runner.RunOpts) runner.RunSummary
-	var ctxProgress chan<- runner.RunProgress
+	var ctxProgress func(runner.RunProgress)
 	if opts.Tail {
 		runAgent = func(c *stage.Ctx, runOpts runner.RunOpts) runner.RunSummary {
 			var result runner.RunSummary
@@ -333,7 +333,7 @@ func runCode(opts CodeOptions) error {
 		}()
 		defer progressWg.Wait()
 		defer close(progress)
-		ctxProgress = progress
+		ctxProgress = runner.ProgressChan(progress)
 	}
 
 	return stage.Run(stage.Stage{
@@ -369,11 +369,11 @@ func runCode(opts CodeOptions) error {
 			actions.PrintDone{},
 		},
 	}, &stage.Ctx{
-		Context:  ctx,
-		Env:      env,
-		Executor: cr,
-		DB:       db,
-		Progress: ctxProgress,
+		Context:    ctx,
+		Env:        env,
+		Executor:   cr,
+		DB:         db,
+		OnProgress: ctxProgress,
 	})
 }
 
