@@ -8,6 +8,8 @@ import (
 
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/display"
+	"github.com/ateam/internal/flow"
+	"github.com/ateam/internal/flow/actions"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -255,73 +257,96 @@ func runReport(opts ReportOptions) error {
 	cliOverridesProfile := opts.Profile != "" || opts.Agent != ""
 	defaultProfile := env.Config.ResolveProfile(runner.ActionReport, "")
 
-	var tasks []runner.PoolExec
+	overrides := RunnerOverrides{
+		ContainerName:     opts.ContainerName,
+		CheaperModel:      opts.CheaperModel,
+		Model:             opts.Model,
+		Effort:            opts.Effort,
+		MaxBudgetUSD:      opts.MaxBudgetUSD,
+		MaxBudgetUSDBatch: opts.MaxBudgetBatch,
+	}
+
+	// Build per-role bundles. Each bundle's Env carries a (possibly
+	// role-specific) Executor — the outer Parallel doesn't see roles or
+	// profiles. Render errors here surface as warnings + a skipped role,
+	// matching the prior behavior.
+	type roleBundle struct {
+		roleID string
+		bundle flow.PromptBundle
+		runner *runner.AgentExecutor
+	}
+	var rbs []roleBundle
 	for _, roleID := range roleIDs {
+		roleID := roleID
+
 		prompt, err := assembleRoleReportV1(env, roleID, "role "+roleID, extraPrompt, prePrompt, postPrompt, opts.IgnorePreviousReport)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", roleID, err)
 			continue
 		}
-		task := runner.PoolExec{
-			Prompt: prompt,
-			RunOpts: runner.RunOpts{
-				RoleID:            roleID,
-				Action:            runner.ActionReport,
-				OutputKind:        runner.OutputKindReport,
-				PromptName:        roleID, // → primary output `<roleID>.md`
-				CanonicalDestFile: env.RoleReportPath(roleID),
-				WorkDir:           env.WorkDir,
-				TimeoutMin:        timeout,
-				Verbose:           opts.Verbose,
-				Batch:             batch,
-			},
-		}
 
+		roleRunner := cr
 		if !cliOverridesProfile {
-			roleProfile := env.Config.ResolveProfile(runner.ActionReport, roleID)
-			if roleProfile != defaultProfile {
-				roleRunner, err := resolveRunner(env, roleProfile, "", runner.ActionReport, roleID, opts.DockerAutoSetup)
+			if roleProfile := env.Config.ResolveProfile(runner.ActionReport, roleID); roleProfile != defaultProfile {
+				rr, err := resolveRunner(env, roleProfile, "", runner.ActionReport, roleID, opts.DockerAutoSetup)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: cannot resolve profile %q for %s, using default — %v\n", roleProfile, roleID, err)
-				} else if err := applyRunnerOverrides(roleRunner, env, RunnerOverrides{
-					ContainerName:     opts.ContainerName,
-					CheaperModel:      opts.CheaperModel,
-					Model:             opts.Model,
-					Effort:            opts.Effort,
-					MaxBudgetUSD:      opts.MaxBudgetUSD,
-					MaxBudgetUSDBatch: opts.MaxBudgetBatch,
-				}, runner.ActionReport); err != nil {
+				} else if err := applyRunnerOverrides(rr, env, overrides, runner.ActionReport); err != nil {
 					return err
 				} else {
-					task.AgentExecutor = roleRunner
+					roleRunner = rr
 				}
 			}
 		}
 
-		tasks = append(tasks, task)
+		runOpts := runner.RunOpts{
+			RoleID:            roleID,
+			Action:            runner.ActionReport,
+			OutputKind:        runner.OutputKindReport,
+			PromptName:        roleID, // → primary output `<roleID>.md`
+			CanonicalDestFile: env.RoleReportPath(roleID),
+			WorkDir:           env.WorkDir,
+			TimeoutMin:        timeout,
+			Verbose:           opts.Verbose,
+			Batch:             batch,
+		}
+
+		bundle := flow.PromptBundle{
+			Name:   roleID,
+			Role:   roleID,
+			Action: runner.ActionReport,
+			Render: func(flow.RuntimeEnv) (string, error) {
+				return prompt, nil
+			},
+			RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
+				return runOpts
+			},
+		}
+		if opts.Print {
+			bundle.PostExec = append(bundle.PostExec,
+				actions.PrintArtifactBody{If: true, Path: env.RoleReportPath(roleID)})
+		}
+
+		rbs = append(rbs, roleBundle{roleID: roleID, bundle: bundle, runner: roleRunner})
 	}
 
-	if len(tasks) == 0 {
+	if len(rbs) == 0 {
 		return fmt.Errorf("no valid roles to run")
 	}
 
 	if opts.DryRun {
 		fmt.Printf("Roles: %s\n\n", strings.Join(roleIDs, ", "))
-		for i, t := range tasks {
+		for i, rb := range rbs {
 			if i > 0 {
 				fmt.Println()
 			}
-			fmt.Printf("╔══ %s ══╗\n\n", t.RoleID)
-			dryRunRunner := cr
-			if t.AgentExecutor != nil {
-				dryRunRunner = t.AgentExecutor
-			}
-			printDryRunInfo(dryRunRunner, env, dryRunOpts{
-				RoleID: t.RoleID,
+			fmt.Printf("╔══ %s ══╗\n\n", rb.roleID)
+			printDryRunInfo(rb.runner, env, dryRunOpts{
+				RoleID: rb.roleID,
 				Action: runner.ActionReport,
 				Batch:  batch,
 			})
-			fmt.Printf("\n╚══ %s ══╝\n", t.RoleID)
+			fmt.Printf("\n╚══ %s ══╝\n", rb.roleID)
 		}
 		return nil
 	}
@@ -335,10 +360,8 @@ func runReport(opts ReportOptions) error {
 		defer db.Close()
 	}
 	cr.CallDB = db
-	for i := range tasks {
-		if tasks[i].AgentExecutor != nil {
-			tasks[i].AgentExecutor.CallDB = db
-		}
+	for i := range rbs {
+		rbs[i].runner.CallDB = db
 	}
 
 	if !opts.Force {
@@ -350,7 +373,7 @@ func runReport(opts ReportOptions) error {
 	maxParallel := env.Config.Report.EffectiveMaxParallel(opts.Parallel)
 
 	fmt.Printf("Running %d role(s) (max %d parallel, %dm timeout)...\n\n",
-		len(tasks), maxParallel, timeout)
+		len(rbs), maxParallel, timeout)
 
 	preDispatch, err := batchBudgetPrecheck(db, env.ProjectID(), batch, opts.MaxBudgetBatch)
 	if err != nil {
@@ -360,50 +383,76 @@ func runReport(opts ReportOptions) error {
 	ctx, stop := cmdContext()
 	defer stop()
 
-	results, runErr := runPool(ctx, cr, tasks, maxParallel, poolDisplayOpts{
-		out:         os.Stdout,
-		agentName:   cr.Agent.Name(),
-		itemLabel:   "role(s)",
-		preDispatch: preDispatch,
-		onDone: func(r runner.RunSummary, cwd string) string {
-			// History file is written directly by the agent (or by the runner's
-			// fallback path when the agent did not call Write); on success the
-			// runner already promoted it to report.md, so no post-run archive
-			// step is needed.
-			return relPath(cwd, env.RoleReportPath(r.RoleID))
+	// Bake each bundle's Executor into its Env override; collect Steps
+	// and labels for the reporter.
+	steps := make([]flow.Step, 0, len(rbs))
+	labels := make([]string, 0, len(rbs))
+	for i := range rbs {
+		rb := &rbs[i]
+		roleEnv := flow.RuntimeEnv{
+			Executor: rb.runner,
+			WorkDir:  env.WorkDir,
+			Role:     rb.roleID,
+			Action:   runner.ActionReport,
+			Batch:    batch,
+		}
+		rb.bundle.Env = &roleEnv
+		steps = append(steps, rb.bundle)
+		labels = append(labels, rb.roleID)
+	}
+
+	tr := newTableReporter(tableReporterOpts{
+		out:       os.Stdout,
+		labels:    labels,
+		agentName: cr.Agent.Name(),
+		itemLabel: "role(s)",
+		onDone: func(s runner.RunSummary, cwd string) string {
+			return relPath(cwd, env.RoleReportPath(s.RoleID))
 		},
 	})
 
-	var succeeded int
-	for _, r := range results {
-		if r.Err == nil {
-			succeeded++
-		}
+	pipeline := flow.Pipeline{
+		Name: "report",
+		Steps: []flow.Step{
+			flow.Parallel{
+				Name:        "roles",
+				Steps:       steps,
+				Workers:     maxParallel,
+				PreDispatch: preDispatch,
+			},
+		},
 	}
+	rtEnv := flow.RuntimeEnv{
+		WorkDir: env.WorkDir,
+		Action:  runner.ActionReport,
+		Batch:   batch,
+	}
+	rc := flow.RunCtx{
+		Ctx:      ctx,
+		DB:       db,
+		Resolved: env,
+		Reporter: tr,
+	}
+	flow.Run(pipeline, rtEnv, rc)
+	runErr := tr.Close()
 
-	if opts.Print && succeeded > 0 {
-		for _, r := range results {
-			if r.Err != nil {
-				continue
-			}
-			fmt.Printf("\n══════ %s ══════\n", r.RoleID)
-			printArtifact(env.RoleReportPath(r.RoleID), r.Output)
-		}
+	succeeded, failed, _ := tr.Counts()
+
+	// All-success rule for --review: don't auto-trigger when any role
+	// failed. (Previously gated on succeeded > 0 — a single failure would
+	// still kick off review against an incomplete set.)
+	if opts.Review && failed == 0 && succeeded > 0 {
+		fmt.Println()
+		return runReview(reviewOptionsFromReport(opts))
 	}
 
 	if runErr != nil {
 		return runErr
 	}
 
-	if opts.Review && succeeded > 0 {
-		fmt.Println()
-		return runReview(reviewOptionsFromReport(opts))
-	}
-
 	if succeeded > 0 {
 		fmt.Printf("\nRun 'ateam review' to have the supervisor synthesize findings.\n")
 	}
-
 	return nil
 }
 
