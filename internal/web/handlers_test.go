@@ -878,3 +878,102 @@ func TestHandleRunFileLogsShowsTimestamps(t *testing.T) {
 		t.Errorf("expected Ended timestamp in logs HTML (session start plumbing):\n%s", body)
 	}
 }
+
+// TestServeHistoryFilePathTraversal exercises the isPathWithin guard inside
+// serveHistoryFile. The handler accepts a {file} URL segment and joins it with
+// the role/supervisor history dir; a filename containing ".." that resolves
+// outside histDir must be blocked. The path is fed via direct method call so
+// the test is not subject to http.ServeMux's path-cleaning of ".." segments.
+func TestServeHistoryFilePathTraversal(t *testing.T) {
+	projectDir := t.TempDir()
+	histDir := filepath.Join(projectDir, "roles", "security", "history")
+	if err := os.MkdirAll(histDir, 0755); err != nil {
+		t.Fatalf("MkdirAll histDir: %v", err)
+	}
+
+	// Real, readable file OUTSIDE the project directory. If the guard is
+	// bypassed, os.ReadFile would succeed and leak the canary into the
+	// rendered page — so a 200 with no canary is not a meaningful pass.
+	outsideDir := t.TempDir()
+	const canary = "TOPSECRETcanaryHISTORYdonotleak"
+	secretFile := filepath.Join(outsideDir, "secret.md")
+	if err := os.WriteFile(secretFile, []byte(canary), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if data, err := os.ReadFile(secretFile); err != nil || string(data) != canary {
+		t.Fatalf("outside file not readable as expected: %v", err)
+	}
+
+	// Build a histDir-relative filename (containing "..") that resolves to the
+	// outside secret file.
+	maliciousFile, err := filepath.Rel(histDir, secretFile)
+	if err != nil {
+		t.Fatalf("Rel: %v", err)
+	}
+	if !strings.Contains(maliciousFile, "..") {
+		t.Fatalf("expected a traversal path, got %q", maliciousFile)
+	}
+
+	s := newTestServer(t, projectDir)
+	pe := &s.projects[0]
+	req := httptest.NewRequest("GET", "/p/testproj/reports/security/history/"+maliciousFile, nil)
+	w := httptest.NewRecorder()
+	s.serveHistoryFile(w, req, pe, histDir, maliciousFile, "security", "reports")
+
+	if w.Code == http.StatusOK {
+		t.Errorf("serveHistoryFile path traversal returned 200, expected blocked (got %d)", w.Code)
+	}
+	if strings.Contains(w.Body.String(), canary) {
+		t.Errorf("response leaked the contents of an out-of-project file")
+	}
+}
+
+// TestHandleCodeSessionFilePathTraversal exercises the isPathWithin guard
+// inside handleCodeSessionFile. The {session} URL segment is joined with
+// "shared/code/" and the {file} segment; a {session} value containing ".."
+// that resolves outside the project must be blocked. r.SetPathValue feeds the
+// crafted values directly so http.ServeMux's path-cleaning does not strip
+// them.
+func TestHandleCodeSessionFilePathTraversal(t *testing.T) {
+	projectDir := t.TempDir()
+
+	// Real, readable file OUTSIDE the project directory. Naming it "*.md" is
+	// required because the handler rejects non-.md filenames before the
+	// guard fires.
+	outsideDir := t.TempDir()
+	const canary = "TOPSECRETcanaryCODESESSIONdonotleak"
+	secretFile := filepath.Join(outsideDir, "secret.md")
+	if err := os.WriteFile(secretFile, []byte(canary), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if data, err := os.ReadFile(secretFile); err != nil || string(data) != canary {
+		t.Fatalf("outside file not readable as expected: %v", err)
+	}
+
+	// Build a {session} value such that filepath.Join(projectDir,"shared",
+	// "code", session) resolves to outsideDir. The fileName check rejects
+	// "/" and ".." in the filename, so the traversal must live in session.
+	codeBase := filepath.Join(projectDir, "shared", "code")
+	maliciousSession, err := filepath.Rel(codeBase, outsideDir)
+	if err != nil {
+		t.Fatalf("Rel: %v", err)
+	}
+	if !strings.Contains(maliciousSession, "..") {
+		t.Fatalf("expected a traversal session, got %q", maliciousSession)
+	}
+
+	s := newTestServer(t, projectDir)
+	req := httptest.NewRequest("GET", "/p/testproj/code/x/secret.md", nil)
+	req.SetPathValue("project", "testproj")
+	req.SetPathValue("session", maliciousSession)
+	req.SetPathValue("file", "secret.md")
+	w := httptest.NewRecorder()
+	s.handleCodeSessionFile(w, req)
+
+	if w.Code == http.StatusOK {
+		t.Errorf("handleCodeSessionFile path traversal returned 200, expected blocked (got %d)", w.Code)
+	}
+	if strings.Contains(w.Body.String(), canary) {
+		t.Errorf("response leaked the contents of an out-of-project file")
+	}
+}
