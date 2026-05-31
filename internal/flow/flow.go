@@ -495,9 +495,12 @@ func (p Parallel) runConcurrently(rc RunCtx, env RuntimeEnv, workers int) []Resu
 // skippedDispatchResult builds a Skip Result for a Step that PreDispatch
 // refused to dispatch. The reason carries the PreDispatch error message
 // so cmd-layer reductions can surface "skipped: budget reached" etc.
+// Bundle is populated when the step is a PromptBundle so consumers that
+// reach for r.Bundle.Name (failure summaries, debugging) don't nil-deref.
 func skippedDispatchResult(s Step, env RuntimeEnv, cause error) Result {
 	return Result{
-		Env: env,
+		Bundle: bundleOfStep(s),
+		Env:    env,
 		Flow: Flow{
 			State:  StateSkip,
 			Reason: fmt.Sprintf("not dispatched: %v", cause),
@@ -511,13 +514,24 @@ func skippedDispatchResult(s Step, env RuntimeEnv, cause error) Result {
 func panicResult(s Step, env RuntimeEnv, rv any) Result {
 	err := fmt.Errorf("panic in step %q: %v", s.name(), rv)
 	return Result{
-		Env: env,
+		Bundle: bundleOfStep(s),
+		Env:    env,
 		Flow: Flow{
 			State:  StateError,
 			Reason: fmt.Sprintf("panic: %v\n\n%s", rv, debug.Stack()),
 			Err:    err,
 		},
 	}
+}
+
+// bundleOfStep returns a pointer to the underlying PromptBundle if s is
+// one, else a placeholder bundle carrying only the step name. Used by
+// the skip/panic result constructors so Result.Bundle is never nil.
+func bundleOfStep(s Step) *PromptBundle {
+	if b, ok := s.(PromptBundle); ok {
+		return &b
+	}
+	return &PromptBundle{Name: s.name()}
 }
 
 // ============================================================

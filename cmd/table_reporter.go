@@ -150,9 +150,10 @@ func (r *tableReporter) BundleEnd(b flow.BundleInfo, res flow.Result) {
 
 // StageEnd marks any queued-but-never-started rows as skipped. PreDispatch
 // failures emit a StateSkip Result without firing BundleStart/End for the
-// skipped bundle, so these rows would otherwise stay in "queued" forever.
-// The framework's StageOutcome provides the aggregate skipped count for
-// the cmd-layer summary.
+// skipped bundle, so these rows would otherwise stay in "queued" forever
+// AND r.skipped (incremented only in BundleEnd) would undercount them.
+// We count the late skips here so Close()'s summary line and
+// errorFromCounts() reflect them and the cmd exits non-zero.
 func (r *tableReporter) StageEnd(_ flow.StageInfo, _ flow.StageOutcome) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -160,6 +161,7 @@ func (r *tableReporter) StageEnd(_ flow.StageInfo, _ flow.StageOutcome) {
 		if r.rows[i].State == poolStateQueued {
 			r.rows[i].State = poolStateSkipped
 			r.rows[i].Detail = "not dispatched"
+			r.skipped++
 		}
 	}
 	r.render()

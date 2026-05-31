@@ -9,7 +9,6 @@ import (
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/flow"
-	"github.com/ateam/internal/flow/actions"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -322,11 +321,6 @@ func runReport(opts ReportOptions) error {
 				return runOpts
 			},
 		}
-		if opts.Print {
-			bundle.PostExec = append(bundle.PostExec,
-				actions.PrintArtifactBody{If: true, Path: env.RoleReportPath(roleID)})
-		}
-
 		rbs = append(rbs, roleBundle{roleID: roleID, bundle: bundle, runner: roleRunner})
 	}
 
@@ -432,6 +426,25 @@ func runReport(opts ReportOptions) error {
 	runErr := tr.Close()
 
 	succeeded, failed, _ := tr.Counts()
+
+	// --print prints per-role bodies in submission (roleIDs) order so the
+	// output is deterministic regardless of which role finishes first.
+	// Done after tr.Close so the bodies land below the torn-down table
+	// region, never interleaved with progress redraws.
+	if opts.Print && succeeded > 0 {
+		outputByRole := map[string]string{}
+		for _, s := range tr.Results() {
+			if s.Err == nil && !s.IsError {
+				outputByRole[s.RoleID] = s.Output
+			}
+		}
+		for _, rb := range rbs {
+			roleID := rb.roleID
+			path := env.RoleReportPath(roleID)
+			fmt.Printf("\n══════ %s ══════\n", roleID)
+			printArtifact(path, outputByRole[roleID])
+		}
+	}
 
 	// All-success rule for --review: don't auto-trigger when any role
 	// failed. (Previously gated on succeeded > 0 — a single failure would

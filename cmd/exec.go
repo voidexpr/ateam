@@ -320,8 +320,8 @@ func printExecSummary(r runner.RunSummary) {
 	}
 	fmt.Fprintf(os.Stderr, "  Role:     %s\n", r.RoleID)
 	fmt.Fprintf(os.Stderr, "  Duration: %s\n", display.FormatDuration(r.Duration))
-	if r.Cost > 0 {
-		fmt.Fprintf(os.Stderr, "  Cost:     $%.2f\n", r.Cost)
+	if c := display.FmtCost(r.Cost); c != "" {
+		fmt.Fprintf(os.Stderr, "  Cost:     %s\n", c)
 	}
 	if r.Turns > 0 {
 		fmt.Fprintf(os.Stderr, "  Turns:    %d\n", r.Turns)
