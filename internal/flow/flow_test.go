@@ -502,6 +502,54 @@ func TestParallel_PanicRecovered(t *testing.T) {
 	}
 }
 
+// TestParallel_PanicEmitsBundleEnd verifies that a panic inside a
+// PromptBundle's Render still pairs BundleStart with BundleEnd carrying
+// the Error Result, so reporters (e.g. tableReporter) can count it.
+func TestParallel_PanicEmitsBundleEnd(t *testing.T) {
+	exec := &fakeExecutor{}
+	rep := &recordingReporter{}
+	rc := RunCtx{Ctx: context.Background(), Reporter: rep}
+	env := newEnv(exec)
+
+	panicking := PromptBundle{
+		Name:    "boom",
+		Render:  func(RuntimeEnv) (string, error) { panic("synthetic panic") },
+		RunOpts: func(RuntimeEnv) runner.RunOpts { return runner.RunOpts{} },
+	}
+	par := Parallel{
+		Name:    "fan",
+		Workers: 4,
+		Steps: []Step{
+			makeBundle("a", nil),
+			panicking,
+			makeBundle("c", nil),
+		},
+	}
+	Run(par, env, rc)
+
+	if got, want := rep.countOf("BundleStart"), 3; got != want {
+		t.Errorf("BundleStart count: got %d want %d", got, want)
+	}
+	if got, want := rep.countOf("BundleEnd"), 3; got != want {
+		t.Errorf("BundleEnd count: got %d want %d — panic skipped reporter", got, want)
+	}
+
+	sawPanicEnd := false
+	rep.mu.Lock()
+	for _, e := range rep.Events {
+		if e.Kind != "BundleEnd" || e.BundleInfo.Name != "boom" {
+			continue
+		}
+		if e.Result.Flow.State == StateError && strings.Contains(e.Result.Flow.Reason, "panic") {
+			sawPanicEnd = true
+		}
+	}
+	rep.mu.Unlock()
+	if !sawPanicEnd {
+		t.Error("expected BundleEnd for 'boom' with StateError + panic reason")
+	}
+}
+
 func TestParallel_DryRun(t *testing.T) {
 	exec := &fakeExecutor{}
 	rc := newCtx()

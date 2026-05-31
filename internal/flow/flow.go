@@ -245,7 +245,7 @@ type PromptBundle struct {
 
 func (b PromptBundle) name() string { return b.Name }
 
-func (b PromptBundle) execute(rc RunCtx, env RuntimeEnv) []Result {
+func (b PromptBundle) execute(rc RunCtx, env RuntimeEnv) (out []Result) {
 	if b.Env != nil {
 		env = *b.Env
 	}
@@ -258,6 +258,17 @@ func (b PromptBundle) execute(rc RunCtx, env RuntimeEnv) []Result {
 		rc.Reporter.BundleEnd(bi, r)
 		return []Result{r}
 	}
+
+	// Recover panics here (not just at the worker level) so BundleStart is
+	// always paired with BundleEnd. Without this, a panic in Render /
+	// PreExec / Executor leaves the reporter row stuck mid-state and the
+	// command-level counts disagree with the synthetic Error Result the
+	// worker would otherwise append.
+	defer func() {
+		if rv := recover(); rv != nil {
+			out = emit(panicResult(b, env, rv))
+		}
+	}()
 
 	for _, a := range b.PreExec {
 		f := a.Run(rc, env, nil)
