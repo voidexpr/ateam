@@ -425,31 +425,41 @@ func runReport(opts ReportOptions) error {
 	flow.Run(roles, rtEnv, rc)
 	runErr := tr.Close()
 
-	succeeded, failed, _ := tr.Counts()
+	succeeded, failed, skipped := tr.Counts()
 
 	// --print prints per-role bodies in submission (roleIDs) order so the
 	// output is deterministic regardless of which role finishes first.
 	// Done after tr.Close so the bodies land below the torn-down table
 	// region, never interleaved with progress redraws.
+	//
+	// Only roles that succeeded in THIS run are printed: printArtifact
+	// falls back to reading the on-disk report when given an empty
+	// fallback, so iterating failed/skipped roles would surface stale
+	// reports from prior runs under the current run's header.
 	if opts.Print && succeeded > 0 {
 		outputByRole := map[string]string{}
 		for _, s := range tr.Results() {
-			if s.Err == nil && !s.IsError {
+			if s.Err == nil && !s.IsError && s.RoleID != "" {
 				outputByRole[s.RoleID] = s.Output
 			}
 		}
 		for _, rb := range rbs {
 			roleID := rb.roleID
+			output, ok := outputByRole[roleID]
+			if !ok {
+				continue
+			}
 			path := env.RoleReportPath(roleID)
 			fmt.Printf("\n══════ %s ══════\n", roleID)
-			printArtifact(path, outputByRole[roleID])
+			printArtifact(path, output)
 		}
 	}
 
 	// All-success rule for --review: don't auto-trigger when any role
-	// failed. (Previously gated on succeeded > 0 — a single failure would
-	// still kick off review against an incomplete set.)
-	if opts.Review && failed == 0 && succeeded > 0 {
+	// failed or was skipped (e.g. PreDispatch budget cap). Reviewing a
+	// partial set would synthesize findings against stale reports for the
+	// missing roles.
+	if opts.Review && failed == 0 && skipped == 0 && succeeded > 0 {
 		fmt.Println()
 		return runReview(reviewOptionsFromReport(opts))
 	}
