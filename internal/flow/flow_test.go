@@ -405,6 +405,7 @@ func TestParallel_PreDispatchSkipsRemaining(t *testing.T) {
 	}
 
 	succeeded, skipped := 0, 0
+	skippedNames := map[string]bool{}
 	for _, r := range out.Steps[0].Results {
 		switch r.Flow.State {
 		case StateContinue:
@@ -414,10 +415,20 @@ func TestParallel_PreDispatchSkipsRemaining(t *testing.T) {
 			if !strings.Contains(r.Flow.Reason, "budget exhausted") {
 				t.Errorf("expected skip reason to carry PreDispatch error; got %q", r.Flow.Reason)
 			}
+			if r.Bundle == nil || r.Bundle.Name == "" {
+				t.Errorf("skipped result missing Bundle; got %#v", r.Bundle)
+			} else {
+				skippedNames[r.Bundle.Name] = true
+			}
 		}
 	}
 	if succeeded != 2 || skipped != 3 {
 		t.Errorf("got %d succeeded / %d skipped; want 2 / 3", succeeded, skipped)
+	}
+	for _, want := range []string{"c", "d", "e"} {
+		if !skippedNames[want] {
+			t.Errorf("expected skipped Bundle.Name %q, got set %v", want, skippedNames)
+		}
 	}
 	if exec.Calls()[0].Prompt != "hello" {
 		t.Errorf("agent should have been invoked for the 2 dispatched bundles")
@@ -489,6 +500,9 @@ func TestParallel_PanicRecovered(t *testing.T) {
 		case StateError:
 			if strings.Contains(r.Flow.Reason, "panic") {
 				sawPanic = true
+				if r.Bundle == nil || r.Bundle.Name != "boom" {
+					t.Errorf("panic result Bundle: got %#v want Name=boom", r.Bundle)
+				}
 			}
 		case StateContinue:
 			succeeded++
