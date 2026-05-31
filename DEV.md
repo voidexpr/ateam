@@ -49,11 +49,13 @@ The Makefile checks for auth before starting and fails with setup instructions i
 
 ## CI and pre-commit gates
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on pull requests; it executes `fmt-check`, `check-tidy`, `lint`, `test`, and `vuln`. `make run-ci` reproduces the same pipeline locally (plus `deadcode`).
+GitHub Actions (`.github/workflows/ci.yml`) is `workflow_dispatch`-only — triggered manually from the Actions tab, not on push or pull request. Its single step runs `make run-ci`, which expands to `check + vuln + deadcode` where `check = test + fmt-check + check-tidy + check-docs + lint`.
 
-A separate workflow (`.github/workflows/docker-tests.yml`) runs `make test-docker`. It is `workflow_dispatch`-only — triggered manually from the Actions tab, not on push or pull request.
+Because nothing auto-gates push or PR, contributors and agents must run `make run-ci` locally before committing. The pre-commit hook described below covers a subset; `make run-ci` is the full gate.
 
-The pre-commit hook installed by `make install-hooks` blocks commits that fail `fmt-check`, `check-tidy`, `check-docs`, or `lint`. It does not run the full test suite.
+A separate workflow (`.github/workflows/docker-tests.yml`) runs `make test-docker`. It is also `workflow_dispatch`-only.
+
+The pre-commit hook installed by `make install-hooks` blocks commits that fail `fmt-check`, `check-tidy`, `check-docs`, or `lint`. It does not run `test`, `vuln`, or `deadcode` — run `make run-ci` for that.
 
 ## Docker binary resolution
 
