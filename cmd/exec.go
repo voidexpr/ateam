@@ -5,9 +5,9 @@ import (
 	"io"
 	"os"
 	"strings"
-	"sync"
 
 	"github.com/ateam/internal/display"
+	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -214,25 +214,41 @@ func runExec(cmd *cobra.Command, args []string) error {
 	showStream := !execNoStream && !execQuiet
 	showSummary := !execNoSummary && !execQuiet
 
-	var progress chan runner.RunProgress
-	var progressWg sync.WaitGroup
-	if showStream {
-		progress = make(chan runner.RunProgress, 64)
-		progressWg.Add(1)
-		go func() {
-			defer progressWg.Done()
-			printProgress(progress)
-		}()
-	}
-
 	ctx, stop := cmdContext()
 	defer stop()
-	result := r.Execute(ctx, promptText, opts, runner.ProgressChan(progress))
 
-	if progress != nil {
-		close(progress)
-		progressWg.Wait()
+	bundle := flow.PromptBundle{
+		Name:   "exec",
+		Role:   execRole,
+		Action: execAction,
+		Render: func(flow.RuntimeEnv) (string, error) {
+			return promptText, nil
+		},
+		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
+			return opts
+		},
 	}
+	rtEnv := flow.RuntimeEnv{
+		Executor: r,
+		WorkDir:  env.WorkDir,
+		Role:     execRole,
+		Action:   execAction,
+		Batch:    execBatch,
+	}
+	rc := flow.RunCtx{
+		Ctx:      ctx,
+		DB:       db,
+		Resolved: env,
+		Reporter: &execReporter{StdoutReporter: &flow.StdoutReporter{Stream: showStream}},
+	}
+	pr := flow.Run(bundle, rtEnv, rc)
+
+	// Single-bundle Pipeline → one step, one Result with the Summary.
+	res := pr.Steps[0].Results[0]
+	if res.Summary == nil {
+		return fmt.Errorf("internal: flow.Run returned no Summary")
+	}
+	result := *res.Summary
 
 	if f, err := os.Open(result.StderrFilePath); err == nil {
 		_, _ = io.Copy(os.Stderr, f)
@@ -256,6 +272,16 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	return nil
 }
+
+// execReporter wraps a StdoutReporter for AgentEvent stream output but
+// suppresses the "Done (dur, cost)" BundleEnd line — exec emits its own
+// richer "--- Summary ---" block via printExecSummary, gated by
+// --no-summary / --quiet, so the flow line would be redundant.
+type execReporter struct {
+	*flow.StdoutReporter
+}
+
+func (*execReporter) BundleEnd(flow.BundleInfo, flow.Result) {}
 
 func printProgress(ch <-chan runner.RunProgress) {
 	for p := range ch {

@@ -20,7 +20,7 @@ import (
 //
 //  1. mpb owns its own render goroutine and serializes all writes.
 //     Anything written through Writer() (i.e. *mpb.Progress.Write) is
-//     interleaved above the live region — runPool plugs the
+//     interleaved above the live region — tableReporter plugs the
 //     std-stream redirect into this so every Go-side write to
 //     os.Stdout / os.Stderr lands above the bars instead of corrupting
 //     the cursor accounting.
@@ -56,7 +56,7 @@ type mpbPoolRenderer struct {
 // rendering and the operator only sees them if they scroll up. If
 // scrollback hygiene becomes important, switch to alt-screen mode
 // (\x1b[?1049h / \x1b[?1049l) — that's a larger change because the
-// post-run summary in runPool would have to move out of the
+// post-run summary in tableReporter would have to move out of the
 // alt-screen region.
 func newMpbPoolRenderer(w io.Writer) *mpbPoolRenderer {
 	// Print the column header once, above the live region. Pass the
@@ -134,7 +134,7 @@ func (r *mpbPoolRenderer) Close() {
 	// shutdown there is no next Flush, so the buffered cursor-up is
 	// never emitted. The cursor is therefore left at the end of the
 	// last bar frame (one line below the last bar), which is exactly
-	// where we want it: subsequent writes by runPool — the post-run
+	// where we want it: subsequent writes by tableReporter — the post-run
 	// summary, failure tails — land cleanly below the persisted bars
 	// without us needing to position the cursor explicitly.
 }

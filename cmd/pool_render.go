@@ -6,7 +6,7 @@ import (
 )
 
 // poolRenderer is the abstraction over the live multi-row status table
-// that runPool drives. There is currently one implementation
+// that tableReporter drives. There is currently one implementation
 // (mpbPoolRenderer); the interface is kept because the seam helps tests
 // and leaves room for an alt-screen variant without rewriting call
 // sites.
@@ -15,10 +15,10 @@ import (
 //
 //   - Render is idempotent on rows. The first call performs whatever
 //     initial setup the implementation needs (printing the header).
-//     Subsequent calls update the live region in place. runPool calls
+//     Subsequent calls update the live region in place. tableReporter calls
 //     it on every progress event and on each completion.
 //   - Writer returns an io.Writer for stray output that should be
-//     interleaved above the live region. runPool plugs this into
+//     interleaved above the live region. tableReporter plugs this into
 //     redirectStdStreams so every Go-side write to os.Stdout / os.Stderr
 //     is captured and routed through the renderer instead of corrupting
 //     the live region.
@@ -30,7 +30,7 @@ type poolRenderer interface {
 	Close()
 }
 
-// newPoolRenderer constructs the renderer runPool drives when stdout
+// newPoolRenderer constructs the renderer tableReporter drives when stdout
 // is a terminal and !opts.quiet. Non-TTY callers must skip this and
 // fall through to the plain printProgress path; mpb auto-disables ANSI
 // rendering on non-*os.File writers and would silently buffer

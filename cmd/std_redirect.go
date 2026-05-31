@@ -23,7 +23,7 @@ import (
 //
 // Caller is responsible for ensuring the renderer remains alive until
 // Restore returns — drain goroutines write into sink, so closing the
-// renderer first would race with in-flight bytes. runPool's defer
+// renderer first would race with in-flight bytes. tableReporter's defer
 // ordering (Restore before renderer.Close) guarantees this.
 type stdRedirect struct {
 	origStdout, origStderr *os.File

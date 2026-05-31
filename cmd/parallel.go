@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ateam/internal/display"
+	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
@@ -173,27 +174,12 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		batch = "parallel-" + time.Now().Format(display.TimestampFormat)
 	}
 
-	tasks := make([]runner.PoolExec, len(resolvedPrompts))
-	for i, prompt := range resolvedPrompts {
-		tasks[i] = runner.PoolExec{
-			Prompt: prompt,
-			RunOpts: runner.RunOpts{
-				RoleID:     labels[i],
-				Action:     runner.ActionParallel,
-				WorkDir:    env.WorkDir,
-				TimeoutMin: parallelTimeout,
-				Verbose:    parallelVerbose,
-				Batch:      batch,
-			},
-		}
-	}
-
 	maxParallel := parallelMaxParallel
 	if maxParallel <= 0 {
 		maxParallel = 3
 	}
 
-	fmt.Fprintf(os.Stderr, "Running %d agent(s) in batch %s (max %d parallel)...\n\n", len(tasks), batch, maxParallel)
+	fmt.Fprintf(os.Stderr, "Running %d agent(s) in batch %s (max %d parallel)...\n\n", len(resolvedPrompts), batch, maxParallel)
 
 	preDispatch, err := batchBudgetPrecheck(db, env.ProjectID(), batch, parallelMaxBudgetBatch)
 	if err != nil {
@@ -203,29 +189,73 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	ctx, stop := cmdContext()
 	defer stop()
 
-	results, runErr := runPool(ctx, r, tasks, maxParallel, poolDisplayOpts{
-		quiet:       !isTerminal() || parallelNoProgress,
-		out:         os.Stderr,
-		agentName:   r.Agent.Name(),
-		itemLabel:   "agent(s)",
-		preDispatch: preDispatch,
-	})
-
-	// Print outputs in submission order
-	var succeeded int
-	for _, result := range results {
-		if result.Err == nil {
-			succeeded++
+	// One PromptBundle per submitted prompt; all share the same runner.
+	steps := make([]flow.Step, len(resolvedPrompts))
+	for i, prompt := range resolvedPrompts {
+		i, prompt := i, prompt
+		steps[i] = flow.PromptBundle{
+			Name:   labels[i],
+			Role:   labels[i],
+			Action: runner.ActionParallel,
+			Render: func(flow.RuntimeEnv) (string, error) {
+				return prompt, nil
+			},
+			RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
+				return runner.RunOpts{
+					RoleID:     labels[i],
+					Action:     runner.ActionParallel,
+					WorkDir:    env.WorkDir,
+					TimeoutMin: parallelTimeout,
+					Verbose:    parallelVerbose,
+					Batch:      batch,
+				}
+			},
 		}
 	}
-	if parallelPrint && succeeded > 0 {
-		outputByLabel := make(map[string]string, len(results))
-		for _, result := range results {
-			if result.Err == nil {
-				outputByLabel[result.RoleID] = result.Output
+
+	tr := newTableReporter(tableReporterOpts{
+		out:       os.Stderr,
+		labels:    labels,
+		agentName: r.Agent.Name(),
+		itemLabel: "agent(s)",
+		quiet:     !isTerminal() || parallelNoProgress,
+	})
+
+	pipeline := flow.Pipeline{
+		Name: "parallel",
+		Steps: []flow.Step{
+			flow.Parallel{
+				Name:        "agents",
+				Steps:       steps,
+				Workers:     maxParallel,
+				PreDispatch: preDispatch,
+			},
+		},
+	}
+	rtEnv := flow.RuntimeEnv{
+		Executor: r,
+		WorkDir:  env.WorkDir,
+		Action:   runner.ActionParallel,
+		Batch:    batch,
+	}
+	rc := flow.RunCtx{
+		Ctx:      ctx,
+		DB:       db,
+		Resolved: env,
+		Reporter: tr,
+	}
+	flow.Run(pipeline, rtEnv, rc)
+	runErr := tr.Close()
+
+	// Print outputs in submission order (labels[] is authoritative).
+	if parallelPrint {
+		outputByLabel := make(map[string]string)
+		for _, summary := range tr.Results() {
+			if summary.Err == nil && !summary.IsError {
+				outputByLabel[summary.RoleID] = summary.Output
 			}
 		}
-		multiTask := len(tasks) > 1
+		multiTask := len(resolvedPrompts) > 1
 		for _, label := range labels {
 			output, ok := outputByLabel[label]
 			if !ok {
