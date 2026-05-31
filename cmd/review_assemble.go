@@ -10,7 +10,7 @@ import (
 	"github.com/ateam/internal/root"
 )
 
-// assembleReviewV1 builds the supervisor review prompt via the v1 assembler.
+// assembleReview builds the supervisor review prompt via the assembler.
 // Composition order:
 //
 //	[--pre-prompt]            (outermost head)
@@ -34,7 +34,7 @@ import (
 //
 // Returns the same ReviewEmptyError as the assembler-only path when the
 // selector's filters eliminate every report.
-func assembleReviewV1(env *root.ResolvedEnv, selector prompts.ReviewSelector, roleLabel, extraPrompt, customPrompt, prePrompt, postPrompt string) (string, error) {
+func assembleReview(env *root.ResolvedEnv, selector prompts.ReviewSelector, roleLabel, extraPrompt, customPrompt, prePrompt, postPrompt string) (string, error) {
 	all, err := prompts.DiscoverReports(env.ProjectDir)
 	if err != nil {
 		return "", err
@@ -78,18 +78,18 @@ func assembleReviewV1(env *root.ResolvedEnv, selector prompts.ReviewSelector, ro
 	return prompt, nil
 }
 
-// assembleSupervisorV1 is the generic single-prompt supervisor assembler:
+// assembleSupervisor is the generic single-prompt supervisor assembler:
 // builds promptPath via env.Assembler() and appends the --extra-prompt CLI
 // value as a hardcoded "# Additional Instructions" suffix. Used by verify,
 // exec-debug, auto-roles — singletons that have no role reports / manifest
-// of their own. Review has its own assembleReviewV1 because it needs the
+// of their own. Review has its own assembleReview because it needs the
 // reports block woven into the legacy order.
 //
 // roleLabel and action go into BuildAssemblerVars so {{project.info}}
 // renders identically to the legacy AssembleXxx path. prePrompt /
 // postPrompt wrap at the outermost positions; extraPrompt sits between
 // the assembled body and post-prompt.
-func assembleSupervisorV1(env *root.ResolvedEnv, promptPath, roleLabel, action, extraPrompt, prePrompt, postPrompt string) (string, error) {
+func assembleSupervisor(env *root.ResolvedEnv, promptPath, roleLabel, action, extraPrompt, prePrompt, postPrompt string) (string, error) {
 	a := env.Assembler()
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, action)
 	opts := &assembler.AssembleOptions{

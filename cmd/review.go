@@ -199,10 +199,10 @@ func runReview(opts ReviewOptions) error {
 		MaxAge:          opts.MaxAge,
 	}
 
-	// Both default and --prompt paths now go through assembleReviewV1; the
+	// Both default and --prompt paths now go through assembleReview; the
 	// override flows into the assembler's ReplaceRoleMain option so framing
 	// fragments compose either way.
-	prompt, err := assembleReviewV1(env, selector, "the supervisor", extraPrompt, customPrompt, prePrompt, postPrompt)
+	prompt, err := assembleReview(env, selector, "the supervisor", extraPrompt, customPrompt, prePrompt, postPrompt)
 	if err != nil {
 		var empty *prompts.ReviewEmptyError
 		if errors.As(err, &empty) {

@@ -188,7 +188,7 @@ func runReportV2(opts ReportOptions) error {
 			Action: runner.ActionReport,
 			Env:    &roleEnv,
 			Render: func(e flow.RuntimeEnv) (string, error) {
-				return assembleRoleReportV1(env, rid, "role "+rid, extra, pre, post, opts.IgnorePreviousReport)
+				return assembleRoleReport(env, rid, "role "+rid, extra, pre, post, opts.IgnorePreviousReport)
 			},
 			RunOpts: func(e flow.RuntimeEnv) runner.RunOpts {
 				return runner.RunOpts{

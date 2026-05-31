@@ -181,7 +181,7 @@ func TestReviewSelector_Filter(t *testing.T) {
 
 // TestReviewSelectorFilterFunnelOnEmpty covers the funnel computation
 // when all reports are filtered out — the same shape consumers
-// (assembleReviewV1) turn into a ReviewEmptyError. Tests the funnel
+// (assembleReview) turn into a ReviewEmptyError. Tests the funnel
 // without going through any of the now-deleted assembler wrappers.
 func TestReviewSelectorFilterFunnelOnEmpty(t *testing.T) {
 	dir := t.TempDir()

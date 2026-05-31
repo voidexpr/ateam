@@ -131,7 +131,7 @@ func runVerify(opts VerifyOptions) error {
 
 	// Assemble the prompt up front so --dry-run can print it without
 	// spinning up the executor + DB.
-	prompt, err := assembleSupervisorV1(env, "code_verify", "the supervisor", "verify", extraPrompt, prePrompt, postPrompt)
+	prompt, err := assembleSupervisor(env, "code_verify", "the supervisor", "verify", extraPrompt, prePrompt, postPrompt)
 	if err != nil {
 		return err
 	}

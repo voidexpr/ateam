@@ -200,8 +200,8 @@ func (e *ResolvedEnv) BuildAssemblerVars(promptPath, roleLabel, action string) a
 			"type": "{{CONTAINER_TYPE}}",
 			"name": "{{CONTAINER_NAME}}",
 		},
-		// Role-set computations. `reports` is currently produced by the v1
-		// helpers (formatReportsBlock in cmd/review_v1.go) and appended after
+		// Role-set computations. `reports` is currently produced by the
+		// assemble helpers (formatReportsBlock in cmd/review_assemble.go) and appended after
 		// assembly, not consumed via {{role.reports}}. Seed it empty so the
 		// engine doesn't error on user prompts that still reference the
 		// legacy `{{ROLE_REPORTS}}` (compat shim routes it through here).

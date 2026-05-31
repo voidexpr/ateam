@@ -85,7 +85,7 @@ The user-facing assembly model (anchor chain, filename patterns, `FirstMatch` vs
 - `assembler.BuildAnchors(projectDir, orgDir, embedded)` (`internal/prompts/assembler/anchors.go`) builds the project → org → embedded chain, wired up by `(*ResolvedEnv).Assembler()` (`internal/root/resolve.go`).
 - Prompt-file `{{namespace.key}}` directives are resolved by `internal/prompts/assembler/template.go` and `MapVars`. The canonical variable names plus the legacy ALL_CAPS → dotted compatibility mapping live in `internal/prompts/assembler/varmap.go` (`VarRenameMap`, `VarLiteralRewrites`) — add new prompt variables there.
 - `runtime.hcl` ALL_CAPS `{{VAR}}` placeholders (agent CLI args, container fields) are a *separate* substitution pass handled by `TemplateVars.Replacer()` in `internal/runner/template.go`. Add new placeholders there. Do not conflate the two systems.
-- The `ATeam Project Context` header, the previous-report block, and the `# Additional Instructions` block are appended around the assembled body by the cmd layer (see `assembleRoleReportV1` in `cmd/report_v1.go`), not by the assembler itself.
+- The `ATeam Project Context` header, the previous-report block, and the `# Additional Instructions` block are appended around the assembled body by the cmd layer (see `assembleRoleReport` in `cmd/report_assemble.go`), not by the assembler itself.
 
 ### CLI override surface (`AssembleOptions`)
 
@@ -99,8 +99,8 @@ The user-facing assembly model (anchor chain, filename patterns, `FirstMatch` vs
 
 A per-role `code/<name>.prompt.md` is independent from the supervisor's code-management phase:
 
-- **Role level** — when `code/<name>.prompt.md` exists (project, org, or embedded), `ateam code --role <name>` and `ateam prompt --role <name> --action code` assemble the `code/<name>` path with no previous-report block (the source of truth for "what changed" is the patch's git history). See `assembleRoleCodeV1` in `cmd/report_v1.go`.
-- **Supervisor level** — `ateam code` (no role) drives the supervisor via the `code_management.prompt.md` body, assembled by `assembleCodeManagementV1` (`cmd/code_v1.go`). The supervisor splits the review into individual tasks and writes per-task code prompts into `{{OUTPUT_DIR}}` (the prompt still ships the legacy `{{EXECUTION_DIR}}` alias for the same directory), then invokes `ateam exec @... --role <name>` for each. A role's own `code/<name>.prompt.md` is what lets those per-task `exec` invocations target it.
+- **Role level** — when `code/<name>.prompt.md` exists (project, org, or embedded), `ateam code --role <name>` and `ateam prompt --role <name> --action code` assemble the `code/<name>` path with no previous-report block (the source of truth for "what changed" is the patch's git history). See `assembleRoleCode` in `cmd/report_assemble.go`.
+- **Supervisor level** — `ateam code` (no role) drives the supervisor via the `code_management.prompt.md` body, assembled by `assembleCodeManagementV1` (`cmd/code_assemble.go`). The supervisor splits the review into individual tasks and writes per-task code prompts into `{{OUTPUT_DIR}}` (the prompt still ships the legacy `{{EXECUTION_DIR}}` alias for the same directory), then invokes `ateam exec @... --role <name>` for each. A role's own `code/<name>.prompt.md` is what lets those per-task `exec` invocations target it.
 
 ## Project on-disk layout (runner contract)
 

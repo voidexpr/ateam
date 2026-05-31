@@ -114,9 +114,9 @@ func runPromptRole() error {
 	var assembled string
 	switch promptAction {
 	case runner.ActionReport:
-		assembled, err = assembleRoleReportV1(env, promptRole, roleLabel, extraPrompt, prePrompt, postPrompt, promptIgnorePreviousReport)
+		assembled, err = assembleRoleReport(env, promptRole, roleLabel, extraPrompt, prePrompt, postPrompt, promptIgnorePreviousReport)
 	case runner.ActionCode:
-		assembled, err = assembleRoleCodeV1(env, promptRole, roleLabel, extraPrompt, prePrompt, postPrompt)
+		assembled, err = assembleRoleCode(env, promptRole, roleLabel, extraPrompt, prePrompt, postPrompt)
 	}
 	if err != nil {
 		return err
@@ -156,7 +156,7 @@ func runPromptSupervisor() error {
 	var assembled string
 	switch promptAction {
 	case runner.ActionReview:
-		assembled, err = assembleReviewV1(env, prompts.ReviewSelector{}, roleLabel, extraPrompt, "", prePrompt, postPrompt)
+		assembled, err = assembleReview(env, prompts.ReviewSelector{}, roleLabel, extraPrompt, "", prePrompt, postPrompt)
 	case runner.ActionCode:
 		reviewContent, readErr := os.ReadFile(env.ReviewPath())
 		if readErr != nil {
@@ -169,7 +169,7 @@ func runPromptSupervisor() error {
 		// the user sees "this becomes a real value at run time."
 		assembled, err = assembleCodeManagementV1(env, roleLabel, string(reviewContent), previewSubRunFlags(env.SourceDir), extraPrompt, "", prePrompt, postPrompt)
 	case runner.ActionVerify:
-		assembled, err = assembleSupervisorV1(env, "code_verify", roleLabel, "verify", extraPrompt, prePrompt, postPrompt)
+		assembled, err = assembleSupervisor(env, "code_verify", roleLabel, "verify", extraPrompt, prePrompt, postPrompt)
 	}
 	if err != nil {
 		return err
@@ -304,7 +304,7 @@ func assembleForInspection() (string, []sectionDigest, error) {
 			all, derr := prompts.DiscoverReports(env.ProjectDir)
 			if derr == nil {
 				reports, _ := (prompts.ReviewSelector{}).Filter(all, env.Config.Roles)
-				addLive("reports", "(assembleReviewV1: manifest + bundled role reports)", formatReportsBlock(reports))
+				addLive("reports", "(assembleReview: manifest + bundled role reports)", formatReportsBlock(reports))
 			}
 			addExtra()
 		case runner.ActionCode:

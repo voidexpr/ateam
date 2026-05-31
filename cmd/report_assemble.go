@@ -11,7 +11,7 @@ import (
 	"github.com/ateam/internal/root"
 )
 
-// assembleRoleReportV1 builds a single role's report prompt via the v1
+// assembleRoleReport builds a single role's report prompt via the
 // assembler. Mirrors prompts.AssembleRolePrompt but composes through the
 // new pipeline (anchor walk + Vars + Assemble) instead of the hardcoded
 // 4-level fallback in internal/prompts.
@@ -32,7 +32,7 @@ import (
 // roleLabel feeds the {{project.info}} block (typically "role <roleID>");
 // pass "" to suppress the project info section entirely — matches the
 // legacy `--no-project-info` flag's behavior.
-func assembleRoleReportV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt, prePrompt, postPrompt string, skipPreviousReport bool) (string, error) {
+func assembleRoleReport(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt, prePrompt, postPrompt string, skipPreviousReport bool) (string, error) {
 	promptPath := "report/" + roleID
 
 	a := env.Assembler()
@@ -63,7 +63,7 @@ func assembleRoleReportV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt,
 	return prompt, nil
 }
 
-// assembleRoleCodeV1 is the role-templated counterpart for "code" actions —
+// assembleRoleCode is the role-templated counterpart for "code" actions —
 // `ateam prompt --role X --action code` (and any future per-role code
 // command). No previous-report block: code prompts never include the
 // prior report, since the source of truth for "what changed" is the git
@@ -76,7 +76,7 @@ func assembleRoleReportV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt,
 // to point users at the (small) set of code-capable roles — preview is
 // this function's only consumer, so the guidance is worth the extra
 // sentence.
-func assembleRoleCodeV1(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt, prePrompt, postPrompt string) (string, error) {
+func assembleRoleCode(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt, prePrompt, postPrompt string) (string, error) {
 	promptPath := "code/" + roleID
 	a := env.Assembler()
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, "code")

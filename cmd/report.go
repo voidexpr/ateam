@@ -278,7 +278,7 @@ func runReport(opts ReportOptions) error {
 	for _, roleID := range roleIDs {
 		roleID := roleID
 
-		prompt, err := assembleRoleReportV1(env, roleID, "role "+roleID, extraPrompt, prePrompt, postPrompt, opts.IgnorePreviousReport)
+		prompt, err := assembleRoleReport(env, roleID, "role "+roleID, extraPrompt, prePrompt, postPrompt, opts.IgnorePreviousReport)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", roleID, err)
 			continue
