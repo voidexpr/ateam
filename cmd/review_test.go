@@ -85,7 +85,7 @@ func TestReviewDryRun(t *testing.T) {
 	var runErr error
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
-			runErr = runReview(ReviewOptions{DryRun: true, Profile: "test"})
+			runErr = runReview(ReviewOptions{CommonExecFlags: CommonExecFlags{Profile: "test"}, DryRun: true})
 		})
 	})
 
@@ -120,7 +120,7 @@ func TestReviewDryRunEmptyReport(t *testing.T) {
 	var runErr error
 	captureStdout(t, func() {
 		withChdir(t, projPath, func() {
-			runErr = runReview(ReviewOptions{DryRun: true, Profile: "test"})
+			runErr = runReview(ReviewOptions{CommonExecFlags: CommonExecFlags{Profile: "test"}, DryRun: true})
 		})
 	})
 
@@ -150,7 +150,7 @@ func TestReviewStageHappyPath(t *testing.T) {
 
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
-			if err := runReview(ReviewOptions{Profile: "test", Print: true}); err != nil {
+			if err := runReview(ReviewOptions{CommonExecFlags: CommonExecFlags{Profile: "test"}, Print: true}); err != nil {
 				t.Fatalf("runReview: %v", err)
 			}
 		})

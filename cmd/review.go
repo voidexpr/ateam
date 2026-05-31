@@ -19,50 +19,26 @@ import (
 )
 
 var (
-	reviewExtraPrompt     string
-	reviewCustomPrompt    string
-	reviewPrePrompt       string
-	reviewPostPrompt      string
-	reviewTimeout         int
-	reviewPrint           bool
-	reviewDryRun          bool
-	reviewCheaperModel    bool
-	reviewProfile         string
-	reviewAgent           string
-	reviewVerbose         bool
-	reviewForce           bool
-	reviewRoles           []string
-	reviewAll             bool
-	reviewMaxAge          string
-	reviewDockerAutoSetup bool
-	reviewContainerName   string
-	reviewMaxBudgetUSD    string
-	reviewModel           string
-	reviewEffort          string
+	reviewFlags        CommonExecFlags
+	reviewCustomPrompt string
+	reviewPrint        bool
+	reviewDryRun       bool
+	reviewForce        bool
+	reviewRoles        []string
+	reviewAll          bool
+	reviewMaxAge       string
 )
 
 // ReviewOptions holds configuration for a review run.
 type ReviewOptions struct {
-	ExtraPrompt     string
+	CommonExecFlags
 	CustomPrompt    string
-	PrePrompt       string
-	PostPrompt      string
-	Timeout         int
 	Print           bool
 	DryRun          bool
-	CheaperModel    bool
-	Profile         string
-	Agent           string
-	Verbose         bool
 	Force           bool
 	Roles           []string      // restrict review to these roles' reports
 	IncludeDisabled bool          // include reports from roles disabled in config.toml
 	MaxAge          time.Duration // freshness window; zero = no filter
-	DockerAutoSetup bool
-	ContainerName   string
-	MaxBudgetUSD    string
-	Model           string
-	Effort          string
 }
 
 var reviewCmd = &cobra.Command{
@@ -83,26 +59,14 @@ Example:
 			return err
 		}
 		return runReview(ReviewOptions{
-			ExtraPrompt:     reviewExtraPrompt,
+			CommonExecFlags: reviewFlags,
 			CustomPrompt:    reviewCustomPrompt,
-			PrePrompt:       reviewPrePrompt,
-			PostPrompt:      reviewPostPrompt,
-			Timeout:         reviewTimeout,
 			Print:           reviewPrint,
 			DryRun:          reviewDryRun,
-			CheaperModel:    reviewCheaperModel,
-			Profile:         reviewProfile,
-			Agent:           reviewAgent,
-			Verbose:         reviewVerbose,
 			Force:           reviewForce,
 			Roles:           reviewRoles,
 			IncludeDisabled: reviewAll,
 			MaxAge:          maxAge,
-			DockerAutoSetup: reviewDockerAutoSetup,
-			ContainerName:   reviewContainerName,
-			MaxBudgetUSD:    reviewMaxBudgetUSD,
-			Model:           reviewModel,
-			Effort:          reviewEffort,
 		})
 	},
 }
@@ -137,27 +101,22 @@ func parseMaxAge(s string) (time.Duration, error) {
 }
 
 func init() {
-	reviewCmd.Flags().StringVar(&reviewExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath); appended after reports, before the outer --post-prompt wrap")
+	registerCommonExecFlags(reviewCmd, &reviewFlags, commonFlagUsage{
+		ExtraPrompt:  "additional instructions (text or @filepath); appended after reports, before the outer --post-prompt wrap",
+		PrePrompt:    "text wrapped at the very front of the assembled prompt (text or @filepath)",
+		PostPrompt:   "text wrapped at the very end of the assembled prompt (text or @filepath)",
+		Timeout:      "timeout in minutes (overrides config)",
+		Model:        "model override; takes precedence over --cheaper-model",
+		Effort:       "reasoning effort override, passed verbatim to the agent CLI",
+		MaxBudgetUSD: "USD spend cap for the supervisor (claude-only; errors on codex)",
+	})
 	reviewCmd.Flags().StringVar(&reviewCustomPrompt, "prompt", "", "custom prompt replacing default supervisor role (text or @filepath)")
-	reviewCmd.Flags().StringVar(&reviewPrePrompt, "pre-prompt", "", "text wrapped at the very front of the assembled prompt (text or @filepath)")
-	reviewCmd.Flags().StringVar(&reviewPostPrompt, "post-prompt", "", "text wrapped at the very end of the assembled prompt (text or @filepath)")
-	reviewCmd.Flags().IntVar(&reviewTimeout, "timeout", 0, "timeout in minutes (overrides config)")
 	reviewCmd.Flags().BoolVar(&reviewPrint, "print", false, "print review to stdout after completion")
 	reviewCmd.Flags().BoolVar(&reviewDryRun, "dry-run", false, "print the computed prompt and list reports without running")
 	reviewCmd.Flags().StringSliceVar(&reviewRoles, "roles", nil, "limit review to these roles' reports (default: all enabled roles)")
 	reviewCmd.Flags().BoolVar(&reviewAll, "all", false, "include reports from roles disabled in config.toml")
 	reviewCmd.Flags().StringVar(&reviewMaxAge, "max-age", "", "drop reports older than this (e.g. 2h, 30m, 1d)")
-	addCheaperModelFlag(reviewCmd, &reviewCheaperModel)
-	reviewCmd.Flags().StringVar(&reviewModel, "model", "",
-		"model override; takes precedence over --cheaper-model")
-	reviewCmd.Flags().StringVar(&reviewEffort, "effort", "", "reasoning effort override, passed verbatim to the agent CLI")
-	addProfileFlags(reviewCmd, &reviewProfile, &reviewAgent)
-	addVerboseFlag(reviewCmd, &reviewVerbose)
 	addForceFlag(reviewCmd, &reviewForce)
-	addDockerAutoSetupFlag(reviewCmd, &reviewDockerAutoSetup)
-	addContainerNameFlag(reviewCmd, &reviewContainerName)
-	addBudgetFlags(reviewCmd, &reviewMaxBudgetUSD, nil,
-		"USD spend cap for the supervisor (claude-only; errors on codex)", "")
 }
 
 func runReview(opts ReviewOptions) error {

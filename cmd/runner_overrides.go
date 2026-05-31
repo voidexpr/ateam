@@ -6,6 +6,7 @@ import (
 
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
+	"github.com/spf13/cobra"
 )
 
 // shellQuoteSingle returns s wrapped in POSIX shell single quotes. Single
@@ -52,4 +53,73 @@ func applyRunnerOverrides(r *runner.AgentExecutor, env *root.ResolvedEnv, o Runn
 	applyModelOverrides(r, o.CheaperModel, o.Model)
 	applyEffort(r, o.Effort)
 	return applyMaxBudgetUSD(r, o.MaxBudgetUSD, action)
+}
+
+// CommonExecFlags bundles the 13 flag fields shared by code/report/review/
+// verify. Embed anonymously in each command's Options struct so callers can
+// access fields directly (e.g. opts.Profile) and adding a new shared flag
+// means one struct change instead of editing every per-command Options.
+type CommonExecFlags struct {
+	ExtraPrompt     string
+	PrePrompt       string
+	PostPrompt      string
+	Timeout         int
+	CheaperModel    bool
+	Profile         string
+	Agent           string
+	Verbose         bool
+	DockerAutoSetup bool
+	ContainerName   string
+	Model           string
+	Effort          string
+	MaxBudgetUSD    string
+}
+
+// commonFlagUsage carries the per-command usage strings for the flags
+// registered by registerCommonExecFlags. Each command's help text differs
+// (e.g. report says "per-role", code says "for the supervisor and every
+// sub-run"), so the helper does not invent defaults — callers supply the
+// usage strings verbatim from the previously-duplicated init() sites.
+//
+// CustomProfile / CustomAgent: when both empty, --profile and --agent are
+// registered via the shared addProfileFlags helper (used by report, review,
+// verify). When set, --profile and --agent are registered with the supplied
+// usage strings and marked mutually exclusive (the code command needs its
+// own sub-run-oriented help text).
+type commonFlagUsage struct {
+	ExtraPrompt   string
+	PrePrompt     string
+	PostPrompt    string
+	Timeout       string
+	Model         string
+	Effort        string
+	MaxBudgetUSD  string
+	CustomProfile string
+	CustomAgent   string
+}
+
+// registerCommonExecFlags registers the 13 CommonExecFlags fields as cobra
+// flags on cmd. Callers register --max-budget-usd-batch (when applicable)
+// and command-specific flags (--force, --dry-run, --print, etc.) separately;
+// MaxBudgetBatch is intentionally not part of CommonExecFlags because not
+// every command exposes it.
+func registerCommonExecFlags(cmd *cobra.Command, f *CommonExecFlags, usage commonFlagUsage) {
+	cmd.Flags().StringVar(&f.ExtraPrompt, "extra-prompt", "", usage.ExtraPrompt)
+	cmd.Flags().StringVar(&f.PrePrompt, "pre-prompt", "", usage.PrePrompt)
+	cmd.Flags().StringVar(&f.PostPrompt, "post-prompt", "", usage.PostPrompt)
+	cmd.Flags().IntVar(&f.Timeout, "timeout", 0, usage.Timeout)
+	addCheaperModelFlag(cmd, &f.CheaperModel)
+	if usage.CustomProfile != "" || usage.CustomAgent != "" {
+		cmd.Flags().StringVar(&f.Profile, "profile", "", usage.CustomProfile)
+		cmd.Flags().StringVar(&f.Agent, "agent", "", usage.CustomAgent)
+		cmd.MarkFlagsMutuallyExclusive("profile", "agent")
+	} else {
+		addProfileFlags(cmd, &f.Profile, &f.Agent)
+	}
+	cmd.Flags().StringVar(&f.Model, "model", "", usage.Model)
+	cmd.Flags().StringVar(&f.Effort, "effort", "", usage.Effort)
+	addVerboseFlag(cmd, &f.Verbose)
+	addDockerAutoSetupFlag(cmd, &f.DockerAutoSetup)
+	addContainerNameFlag(cmd, &f.ContainerName)
+	cmd.Flags().StringVar(&f.MaxBudgetUSD, "max-budget-usd", "", usage.MaxBudgetUSD)
 }

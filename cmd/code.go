@@ -18,51 +18,31 @@ import (
 )
 
 var (
+	codeFlags             CommonExecFlags
 	codeReview            string
 	codeManagement        string
-	codeExtraPrompt       string
-	codePrePrompt         string
-	codePostPrompt        string
-	codeTimeout           int
 	codePrint             bool
 	codeDryRun            bool
-	codeCheaperModel      bool
-	codeProfile           string
-	codeAgent             string
 	codeSupervisorProfile string
 	codeSupervisorAgent   string
-	codeVerbose           bool
 	codeForce             bool
-	codeDockerAutoSetup   bool
-	codeContainerName     string
-	codeModel             string
-	codeEffort            string
-	codeMaxBudgetUSD      string
 	codeMaxBudgetBatch    string
 )
 
-// CodeOptions holds configuration for a code run.
+// CodeOptions holds configuration for a code run. CommonExecFlags is embedded
+// so the 13 shared fields (Profile, Model, Effort, etc.) are reachable via
+// promoted-field access (e.g. opts.Profile). Code's --profile/--agent describe
+// the sub-run, not the supervisor — the supervisor uses SupervisorProfile /
+// SupervisorAgent below.
 type CodeOptions struct {
+	CommonExecFlags
 	Review            string
 	Management        string
-	ExtraPrompt       string
-	PrePrompt         string
-	PostPrompt        string
-	Timeout           int
 	Print             bool
 	DryRun            bool
-	CheaperModel      bool
-	Profile           string // sub-run profile (--profile on ateam exec)
-	Agent             string // sub-run agent (--agent on ateam exec, mutually exclusive with Profile)
 	SupervisorProfile string
 	SupervisorAgent   string
-	Verbose           bool
 	Force             bool
-	DockerAutoSetup   bool
-	ContainerName     string
-	Model             string
-	Effort            string
-	MaxBudgetUSD      string
 	MaxBudgetBatch    string
 }
 
@@ -83,26 +63,14 @@ Example:
   ateam all                                      # full pipeline incl. verify`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runCode(CodeOptions{
+			CommonExecFlags:   codeFlags,
 			Review:            codeReview,
 			Management:        codeManagement,
-			ExtraPrompt:       codeExtraPrompt,
-			PrePrompt:         codePrePrompt,
-			PostPrompt:        codePostPrompt,
-			Timeout:           codeTimeout,
 			Print:             codePrint,
 			DryRun:            codeDryRun,
-			CheaperModel:      codeCheaperModel,
-			Profile:           codeProfile,
-			Agent:             codeAgent,
 			SupervisorProfile: codeSupervisorProfile,
 			SupervisorAgent:   codeSupervisorAgent,
-			Verbose:           codeVerbose,
 			Force:             codeForce,
-			DockerAutoSetup:   codeDockerAutoSetup,
-			ContainerName:     codeContainerName,
-			Model:             codeModel,
-			Effort:            codeEffort,
-			MaxBudgetUSD:      codeMaxBudgetUSD,
 			MaxBudgetBatch:    codeMaxBudgetBatch,
 		})
 	},
@@ -113,35 +81,27 @@ func init() {
 		"review content (text or @filepath; defaults to .ateam/supervisor/review.md)")
 	codeCmd.Flags().StringVar(&codeManagement, "management", "",
 		"management prompt override (text or @filepath)")
-	codeCmd.Flags().StringVar(&codeExtraPrompt, "extra-prompt", "",
-		"additional instructions (text or @filepath); appended after Review, before Sub-Run Flags")
-	codeCmd.Flags().StringVar(&codePrePrompt, "pre-prompt", "",
-		"text wrapped at the very front of the supervisor prompt (text or @filepath)")
-	codeCmd.Flags().StringVar(&codePostPrompt, "post-prompt", "",
-		"text wrapped at the very end of the supervisor prompt, after Sub-Run Flags (text or @filepath)")
-	codeCmd.Flags().IntVar(&codeTimeout, "timeout", 0,
-		"timeout in minutes (overrides config)")
+	registerCommonExecFlags(codeCmd, &codeFlags, commonFlagUsage{
+		ExtraPrompt:   "additional instructions (text or @filepath); appended after Review, before Sub-Run Flags",
+		PrePrompt:     "text wrapped at the very front of the supervisor prompt (text or @filepath)",
+		PostPrompt:    "text wrapped at the very end of the supervisor prompt, after Sub-Run Flags (text or @filepath)",
+		Timeout:       "timeout in minutes (overrides config)",
+		Model:         "model override for the supervisor and every sub-run; takes precedence over --cheaper-model",
+		Effort:        "reasoning effort for the supervisor and every sub-run, passed verbatim to the agent CLI",
+		MaxBudgetUSD:  "USD spend cap for the supervisor and every sub-run (claude-only)",
+		CustomProfile: "profile for sub-runs (passed to ateam exec --profile)",
+		CustomAgent:   "agent for sub-runs (passed to ateam exec --agent)",
+	})
 	codeCmd.Flags().BoolVar(&codePrint, "print", false,
 		"print output to stdout after completion")
 	codeCmd.Flags().BoolVar(&codeDryRun, "dry-run", false,
 		"print the computed prompt without running")
-	addCheaperModelFlag(codeCmd, &codeCheaperModel)
-	codeCmd.Flags().StringVar(&codeProfile, "profile", "", "profile for sub-runs (passed to ateam exec --profile)")
-	codeCmd.Flags().StringVar(&codeAgent, "agent", "", "agent for sub-runs (passed to ateam exec --agent)")
-	codeCmd.Flags().StringVar(&codeModel, "model", "",
-		"model override for the supervisor and every sub-run; takes precedence over --cheaper-model")
-	codeCmd.Flags().StringVar(&codeEffort, "effort", "", "reasoning effort for the supervisor and every sub-run, passed verbatim to the agent CLI")
-	addBudgetFlags(codeCmd, &codeMaxBudgetUSD, &codeMaxBudgetBatch,
-		"USD spend cap for the supervisor and every sub-run (claude-only)",
+	codeCmd.Flags().StringVar(&codeMaxBudgetBatch, "max-budget-usd-batch", "",
 		"stop spawning new sub-runs once the code batch crosses this USD")
 	codeCmd.Flags().StringVar(&codeSupervisorProfile, "supervisor-profile", "", "profile for the supervisor itself")
 	codeCmd.Flags().StringVar(&codeSupervisorAgent, "supervisor-agent", "", "agent for the supervisor itself")
-	codeCmd.MarkFlagsMutuallyExclusive("profile", "agent")
 	codeCmd.MarkFlagsMutuallyExclusive("supervisor-profile", "supervisor-agent")
-	addVerboseFlag(codeCmd, &codeVerbose)
 	addForceFlag(codeCmd, &codeForce)
-	addDockerAutoSetupFlag(codeCmd, &codeDockerAutoSetup)
-	addContainerNameFlag(codeCmd, &codeContainerName)
 }
 
 func runCode(opts CodeOptions) error {

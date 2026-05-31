@@ -23,8 +23,8 @@ func TestVerifyStageHappyPath(t *testing.T) {
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
 			if err := runVerify(VerifyOptions{
-				Profile: "test", // mock agent
-				Print:   true,
+				CommonExecFlags: CommonExecFlags{Profile: "test"}, // mock agent
+				Print:           true,
 			}); err != nil {
 				t.Fatalf("runVerify: %v", err)
 			}
@@ -63,8 +63,8 @@ func TestVerifyStageDryRunSkipsExecutor(t *testing.T) {
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
 			if err := runVerify(VerifyOptions{
-				Profile: "test",
-				DryRun:  true,
+				CommonExecFlags: CommonExecFlags{Profile: "test"},
+				DryRun:          true,
 			}); err != nil {
 				t.Fatalf("runVerify dry-run: %v", err)
 			}

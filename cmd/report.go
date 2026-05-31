@@ -16,27 +16,15 @@ import (
 )
 
 var (
+	reportFlags                CommonExecFlags
 	reportRoles                []string
-	reportExtraPrompt          string
-	reportPrePrompt            string
-	reportPostPrompt           string
-	reportTimeout              int
 	reportParallel             int
 	reportPrint                bool
 	reportDryRun               bool
 	reportIgnorePreviousReport bool
-	reportCheaperModel         bool
-	reportProfile              string
-	reportAgent                string
-	reportVerbose              bool
 	reportForce                bool
 	reportReview               bool
-	reportDockerAutoSetup      bool
-	reportContainerName        string
 	reportRerunFailed          bool
-	reportModel                string
-	reportEffort               string
-	reportMaxBudgetUSD         string
 	reportMaxBudgetBatch       string
 	reportAutoRoles            bool
 	reportPlanOnly             bool
@@ -48,27 +36,15 @@ var (
 // reports for disabled roles defeats the point of disabling them. Users who
 // want to report a specific disabled role pass it explicitly via --roles.
 type ReportOptions struct {
+	CommonExecFlags
 	Roles                []string
-	ExtraPrompt          string
-	PrePrompt            string
-	PostPrompt           string
-	Timeout              int
 	Parallel             int
 	Print                bool
 	DryRun               bool
 	IgnorePreviousReport bool
-	CheaperModel         bool
-	Profile              string
-	Agent                string
-	Verbose              bool
 	Force                bool
 	Review               bool
-	DockerAutoSetup      bool
-	ContainerName        string
 	RerunFailed          bool
-	Model                string
-	Effort               string
-	MaxBudgetUSD         string
 	MaxBudgetBatch       string
 	AutoRoles            bool
 	PlanOnly             bool
@@ -91,27 +67,15 @@ Example:
   ateam report --extra-prompt @notes.md`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runReport(ReportOptions{
+			CommonExecFlags:      reportFlags,
 			Roles:                reportRoles,
-			ExtraPrompt:          reportExtraPrompt,
-			PrePrompt:            reportPrePrompt,
-			PostPrompt:           reportPostPrompt,
-			Timeout:              reportTimeout,
 			Parallel:             reportParallel,
 			Print:                reportPrint,
 			DryRun:               reportDryRun,
 			IgnorePreviousReport: reportIgnorePreviousReport,
-			CheaperModel:         reportCheaperModel,
-			Profile:              reportProfile,
-			Agent:                reportAgent,
-			Verbose:              reportVerbose,
 			Force:                reportForce,
 			Review:               reportReview,
-			DockerAutoSetup:      reportDockerAutoSetup,
-			ContainerName:        reportContainerName,
 			RerunFailed:          reportRerunFailed,
-			Model:                reportModel,
-			Effort:               reportEffort,
-			MaxBudgetUSD:         reportMaxBudgetUSD,
 			MaxBudgetBatch:       reportMaxBudgetBatch,
 			AutoRoles:            reportAutoRoles,
 			PlanOnly:             reportPlanOnly,
@@ -121,28 +85,24 @@ Example:
 
 func init() {
 	reportCmd.Flags().StringSliceVar(&reportRoles, "roles", nil, prompts.RoleFlagUsage()+" (default: all enabled roles)")
-	reportCmd.Flags().StringVar(&reportExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath); appended after extras, before the outer --post-prompt wrap")
-	reportCmd.Flags().StringVar(&reportPrePrompt, "pre-prompt", "", "text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or @filepath)")
-	reportCmd.Flags().StringVar(&reportPostPrompt, "post-prompt", "", "text wrapped at the very end of the assembled prompt, after every other section (text or @filepath)")
-	reportCmd.Flags().IntVar(&reportTimeout, "timeout", 0, "timeout in minutes per role (overrides config)")
+	registerCommonExecFlags(reportCmd, &reportFlags, commonFlagUsage{
+		ExtraPrompt:  "additional instructions (text or @filepath); appended after extras, before the outer --post-prompt wrap",
+		PrePrompt:    "text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or @filepath)",
+		PostPrompt:   "text wrapped at the very end of the assembled prompt, after every other section (text or @filepath)",
+		Timeout:      "timeout in minutes per role (overrides config)",
+		Model:        "model override; takes precedence over --cheaper-model",
+		Effort:       "reasoning effort override, passed verbatim to the agent CLI",
+		MaxBudgetUSD: "per-role USD spend cap (claude-only; warns on codex)",
+	})
 	reportCmd.Flags().IntVar(&reportParallel, "parallel", 0, "max parallel roles (overrides config max_parallel)")
 	reportCmd.Flags().BoolVar(&reportPrint, "print", false, "print reports to stdout after completion")
 	reportCmd.Flags().BoolVar(&reportReview, "review", false, "run review automatically after reports complete")
 	reportCmd.Flags().BoolVar(&reportDryRun, "dry-run", false, "print resolved commands for each role without running")
 	reportCmd.Flags().BoolVar(&reportRerunFailed, "rerun-failed", false, "re-run only roles that failed in the last report round")
 	reportCmd.Flags().BoolVar(&reportIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
-	addCheaperModelFlag(reportCmd, &reportCheaperModel)
-	reportCmd.Flags().StringVar(&reportModel, "model", "",
-		"model override; takes precedence over --cheaper-model")
-	reportCmd.Flags().StringVar(&reportEffort, "effort", "", "reasoning effort override, passed verbatim to the agent CLI")
-	addBudgetFlags(reportCmd, &reportMaxBudgetUSD, &reportMaxBudgetBatch,
-		"per-role USD spend cap (claude-only; warns on codex)",
+	reportCmd.Flags().StringVar(&reportMaxBudgetBatch, "max-budget-usd-batch", "",
 		"stop dispatching new roles once batch cost crosses this USD")
-	addProfileFlags(reportCmd, &reportProfile, &reportAgent)
-	addVerboseFlag(reportCmd, &reportVerbose)
 	addForceFlag(reportCmd, &reportForce)
-	addDockerAutoSetupFlag(reportCmd, &reportDockerAutoSetup)
-	addContainerNameFlag(reportCmd, &reportContainerName)
 	addAutoRolesFlags(reportCmd, &reportAutoRoles, &reportPlanOnly)
 }
 
@@ -490,18 +450,20 @@ func shouldAutoReview(reviewOpt bool, failed, skipped, succeeded int) bool {
 // enabled-only gate for --roles is handled in prompts.ReviewSelector.Filter.
 func reviewOptionsFromReport(opts ReportOptions) ReviewOptions {
 	return ReviewOptions{
-		ExtraPrompt:     opts.ExtraPrompt,
-		Timeout:         opts.Timeout,
-		CheaperModel:    opts.CheaperModel,
-		Profile:         opts.Profile,
-		Agent:           opts.Agent,
-		Verbose:         opts.Verbose,
-		Force:           opts.Force,
-		Roles:           opts.Roles,
-		DockerAutoSetup: opts.DockerAutoSetup,
-		ContainerName:   opts.ContainerName,
-		Model:           opts.Model,
-		Effort:          opts.Effort,
+		CommonExecFlags: CommonExecFlags{
+			ExtraPrompt:     opts.ExtraPrompt,
+			Timeout:         opts.Timeout,
+			CheaperModel:    opts.CheaperModel,
+			Profile:         opts.Profile,
+			Agent:           opts.Agent,
+			Verbose:         opts.Verbose,
+			DockerAutoSetup: opts.DockerAutoSetup,
+			ContainerName:   opts.ContainerName,
+			Model:           opts.Model,
+			Effort:          opts.Effort,
+		},
+		Force: opts.Force,
+		Roles: opts.Roles,
 	}
 }
 

@@ -12,42 +12,18 @@ import (
 )
 
 var (
-	verifyExtraPrompt     string
-	verifyPrePrompt       string
-	verifyPostPrompt      string
-	verifyTimeout         int
-	verifyPrint           bool
-	verifyDryRun          bool
-	verifyCheaperModel    bool
-	verifyProfile         string
-	verifyAgent           string
-	verifyVerbose         bool
-	verifyForce           bool
-	verifyDockerAutoSetup bool
-	verifyContainerName   string
-	verifyMaxBudgetUSD    string
-	verifyModel           string
-	verifyEffort          string
+	verifyFlags  CommonExecFlags
+	verifyPrint  bool
+	verifyDryRun bool
+	verifyForce  bool
 )
 
 // VerifyOptions holds configuration for a verify run.
 type VerifyOptions struct {
-	ExtraPrompt     string
-	PrePrompt       string
-	PostPrompt      string
-	Timeout         int
-	Print           bool
-	DryRun          bool
-	CheaperModel    bool
-	Profile         string
-	Agent           string
-	Verbose         bool
-	Force           bool
-	DockerAutoSetup bool
-	ContainerName   string
-	MaxBudgetUSD    string
-	Model           string
-	Effort          string
+	CommonExecFlags
+	Print  bool
+	DryRun bool
+	Force  bool
 }
 
 var verifyCmd = &cobra.Command{
@@ -67,44 +43,27 @@ Example:
   ateam verify --dry-run`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runVerify(VerifyOptions{
-			ExtraPrompt:     verifyExtraPrompt,
-			PrePrompt:       verifyPrePrompt,
-			PostPrompt:      verifyPostPrompt,
-			Timeout:         verifyTimeout,
+			CommonExecFlags: verifyFlags,
 			Print:           verifyPrint,
 			DryRun:          verifyDryRun,
-			CheaperModel:    verifyCheaperModel,
-			Profile:         verifyProfile,
-			Agent:           verifyAgent,
-			Verbose:         verifyVerbose,
 			Force:           verifyForce,
-			DockerAutoSetup: verifyDockerAutoSetup,
-			ContainerName:   verifyContainerName,
-			MaxBudgetUSD:    verifyMaxBudgetUSD,
-			Model:           verifyModel,
-			Effort:          verifyEffort,
 		})
 	},
 }
 
 func init() {
-	verifyCmd.Flags().StringVar(&verifyExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
-	verifyCmd.Flags().StringVar(&verifyPrePrompt, "pre-prompt", "", "text wrapped at the very front of the assembled prompt (text or @filepath)")
-	verifyCmd.Flags().StringVar(&verifyPostPrompt, "post-prompt", "", "text wrapped at the very end of the assembled prompt (text or @filepath)")
-	verifyCmd.Flags().IntVar(&verifyTimeout, "timeout", 0, "timeout in minutes (overrides config)")
+	registerCommonExecFlags(verifyCmd, &verifyFlags, commonFlagUsage{
+		ExtraPrompt:  "additional instructions (text or @filepath)",
+		PrePrompt:    "text wrapped at the very front of the assembled prompt (text or @filepath)",
+		PostPrompt:   "text wrapped at the very end of the assembled prompt (text or @filepath)",
+		Timeout:      "timeout in minutes (overrides config)",
+		Model:        "model override; takes precedence over --cheaper-model",
+		Effort:       "reasoning effort override, passed verbatim to the agent CLI",
+		MaxBudgetUSD: "USD spend cap for the supervisor (claude-only; errors on codex)",
+	})
 	verifyCmd.Flags().BoolVar(&verifyPrint, "print", false, "print verification report to stdout after completion")
 	verifyCmd.Flags().BoolVar(&verifyDryRun, "dry-run", false, "print the computed prompt without running")
-	addCheaperModelFlag(verifyCmd, &verifyCheaperModel)
-	verifyCmd.Flags().StringVar(&verifyModel, "model", "",
-		"model override; takes precedence over --cheaper-model")
-	verifyCmd.Flags().StringVar(&verifyEffort, "effort", "", "reasoning effort override, passed verbatim to the agent CLI")
-	addProfileFlags(verifyCmd, &verifyProfile, &verifyAgent)
-	addVerboseFlag(verifyCmd, &verifyVerbose)
 	addForceFlag(verifyCmd, &verifyForce)
-	addDockerAutoSetupFlag(verifyCmd, &verifyDockerAutoSetup)
-	addContainerNameFlag(verifyCmd, &verifyContainerName)
-	addBudgetFlags(verifyCmd, &verifyMaxBudgetUSD, nil,
-		"USD spend cap for the supervisor (claude-only; errors on codex)", "")
 }
 
 func runVerify(opts VerifyOptions) error {

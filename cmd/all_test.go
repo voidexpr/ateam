@@ -211,8 +211,8 @@ func TestCodeStopsAfterCodePhase(t *testing.T) {
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
 			_ = runCode(CodeOptions{
+				CommonExecFlags:   CommonExecFlags{Profile: "test"},
 				Review:            "# Test Review\n\nsome tasks",
-				Profile:           "test",
 				SupervisorProfile: "test",
 			})
 		})

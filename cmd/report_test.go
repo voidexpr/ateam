@@ -42,9 +42,9 @@ func TestReportDryRun(t *testing.T) {
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
 			runErr = runReport(ReportOptions{
-				Roles:   []string{"testing_basic"},
-				DryRun:  true,
-				Profile: "test",
+				CommonExecFlags: CommonExecFlags{Profile: "test"},
+				Roles:           []string{"testing_basic"},
+				DryRun:          true,
 			})
 		})
 	})
@@ -132,9 +132,9 @@ func TestRerunFailedDryRunSelectsOnlyFailed(t *testing.T) {
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
 			runErr = runReport(ReportOptions{
-				RerunFailed: true,
-				DryRun:      true,
-				Profile:     "test",
+				CommonExecFlags: CommonExecFlags{Profile: "test"},
+				RerunFailed:     true,
+				DryRun:          true,
 			})
 		})
 	})
@@ -188,13 +188,13 @@ func TestReportRoleSelectionModes(t *testing.T) {
 	}{
 		{
 			name:     "default → enabled-only",
-			opts:     ReportOptions{DryRun: true, Profile: "test"},
+			opts:     ReportOptions{CommonExecFlags: CommonExecFlags{Profile: "test"}, DryRun: true},
 			mustHave: []string{"security"},
 			mustOmit: []string{"testing_basic"},
 		},
 		{
 			name:     "explicit --roles overrides enabled",
-			opts:     ReportOptions{DryRun: true, Profile: "test", Roles: []string{"testing_basic"}},
+			opts:     ReportOptions{CommonExecFlags: CommonExecFlags{Profile: "test"}, DryRun: true, Roles: []string{"testing_basic"}},
 			mustHave: []string{"testing_basic"},
 			mustOmit: []string{"security"},
 		},
@@ -246,18 +246,22 @@ func TestReportRoleSelectionModes(t *testing.T) {
 // the role scope and overrides on the auto-triggered review step.
 func TestReviewOptionsFromReportPropagation(t *testing.T) {
 	in := ReportOptions{
-		Roles:           []string{"security"},
-		ExtraPrompt:     "focus on auth",
-		Timeout:         42,
-		CheaperModel:    true,
-		Profile:         "docker",
-		Agent:           "claude",
-		Verbose:         true,
-		Force:           true,
-		DockerAutoSetup: true,
-		ContainerName:   "myctr",
-		Model:           "gpt-5.4",
-		Effort:          "high",
+		CommonExecFlags: CommonExecFlags{
+			ExtraPrompt:     "focus on auth",
+			Timeout:         42,
+			CheaperModel:    true,
+			Profile:         "docker",
+			Agent:           "claude",
+			Verbose:         true,
+			DockerAutoSetup: true,
+			ContainerName:   "myctr",
+			Model:           "gpt-5.4",
+			Effort:          "high",
+			// MaxBudgetUSD should NOT leak — verified below via want.
+			MaxBudgetUSD: "1.50",
+		},
+		Roles: []string{"security"},
+		Force: true,
 		// Fields below should NOT leak into ReviewOptions: they're report-only
 		// or have different semantics on the review side.
 		Parallel:             4,
@@ -266,23 +270,24 @@ func TestReviewOptionsFromReportPropagation(t *testing.T) {
 		IgnorePreviousReport: true,
 		Review:               true,
 		RerunFailed:          true,
-		MaxBudgetUSD:         "1.50",
 		MaxBudgetBatch:       "10",
 	}
 	got := reviewOptionsFromReport(in)
 	want := ReviewOptions{
-		Roles:           []string{"security"},
-		ExtraPrompt:     "focus on auth",
-		Timeout:         42,
-		CheaperModel:    true,
-		Profile:         "docker",
-		Agent:           "claude",
-		Verbose:         true,
-		Force:           true,
-		DockerAutoSetup: true,
-		ContainerName:   "myctr",
-		Model:           "gpt-5.4",
-		Effort:          "high",
+		CommonExecFlags: CommonExecFlags{
+			ExtraPrompt:     "focus on auth",
+			Timeout:         42,
+			CheaperModel:    true,
+			Profile:         "docker",
+			Agent:           "claude",
+			Verbose:         true,
+			DockerAutoSetup: true,
+			ContainerName:   "myctr",
+			Model:           "gpt-5.4",
+			Effort:          "high",
+		},
+		Roles: []string{"security"},
+		Force: true,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("propagation mismatch\n got: %+v\nwant: %+v", got, want)
@@ -321,10 +326,10 @@ func TestRerunFailedMutuallyExclusiveWithRoles(t *testing.T) {
 	captureStdout(t, func() {
 		withChdir(t, projPath, func() {
 			runErr = runReport(ReportOptions{
-				RerunFailed: true,
-				Roles:       []string{"testing_basic"},
-				DryRun:      true,
-				Profile:     "test",
+				CommonExecFlags: CommonExecFlags{Profile: "test"},
+				RerunFailed:     true,
+				Roles:           []string{"testing_basic"},
+				DryRun:          true,
 			})
 		})
 	})

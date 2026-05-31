@@ -57,11 +57,13 @@ func TestReportWarnsWhenCheaperAndModelBothSet(t *testing.T) {
 		captureStdout(t, func() {
 			withChdir(t, projPath, func() {
 				runErr = runReport(ReportOptions{
-					Roles:        []string{"testing_basic"},
-					DryRun:       true,
-					Profile:      "test",
-					CheaperModel: true,
-					Model:        "opus-4",
+					CommonExecFlags: CommonExecFlags{
+						Profile:      "test",
+						CheaperModel: true,
+						Model:        "opus-4",
+					},
+					Roles:  []string{"testing_basic"},
+					DryRun: true,
 				})
 			})
 		})
@@ -94,9 +96,11 @@ func TestReviewWarnsWhenCheaperAndModelBothSet(t *testing.T) {
 		captureStdout(t, func() {
 			withChdir(t, projPath, func() {
 				runErr = runReview(ReviewOptions{
-					Profile:      "test",
-					CheaperModel: true,
-					Model:        "opus-4",
+					CommonExecFlags: CommonExecFlags{
+						Profile:      "test",
+						CheaperModel: true,
+						Model:        "opus-4",
+					},
 				})
 			})
 		})
@@ -121,11 +125,13 @@ func TestCodeWarnsWhenCheaperAndModelBothSet(t *testing.T) {
 		captureStdout(t, func() {
 			withChdir(t, projPath, func() {
 				runErr = runCode(CodeOptions{
+					CommonExecFlags: CommonExecFlags{
+						Profile:      "test",
+						CheaperModel: true,
+						Model:        "opus-4",
+					},
 					Review:            "# Test Review\n\nsome tasks",
 					SupervisorProfile: "test",
-					Profile:           "test",
-					CheaperModel:      true,
-					Model:             "opus-4",
 				})
 			})
 		})
@@ -150,9 +156,11 @@ func TestVerifyWarnsWhenCheaperAndModelBothSet(t *testing.T) {
 		captureStdout(t, func() {
 			withChdir(t, projPath, func() {
 				runErr = runVerify(VerifyOptions{
-					Profile:      "test",
-					CheaperModel: true,
-					Model:        "opus-4",
+					CommonExecFlags: CommonExecFlags{
+						Profile:      "test",
+						CheaperModel: true,
+						Model:        "opus-4",
+					},
 				})
 			})
 		})

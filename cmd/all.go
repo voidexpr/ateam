@@ -136,6 +136,23 @@ func runAll(cmd *cobra.Command, args []string) error {
 	codeSubRunProfile := coalesce(allCodeProfile, allProfile)
 	codeSubRunAgent := allCodeAgent
 
+	// commonBase carries the 13 ateam-all flag values that are identical
+	// across every phase. Per-phase profile/agent (and MaxBudgetUSD edge
+	// cases) override the embedded copy below.
+	commonBase := CommonExecFlags{
+		ExtraPrompt:     allExtraPrompt,
+		PrePrompt:       allPrePrompt,
+		PostPrompt:      allPostPrompt,
+		Timeout:         allTimeout,
+		CheaperModel:    allCheaperModel,
+		Verbose:         allVerbose,
+		DockerAutoSetup: allDockerAutoSetup,
+		ContainerName:   allContainerName,
+		Model:           allModel,
+		Effort:          allEffort,
+		MaxBudgetUSD:    allMaxBudgetUSD,
+	}
+
 	// Phase 1: Report. Always produces fresh reports for the selected roles —
 	// --all is intentionally NOT threaded here: producing reports for disabled
 	// roles defeats the purpose of disabling them. Use --roles to target a
@@ -144,23 +161,14 @@ func runAll(cmd *cobra.Command, args []string) error {
 	//   - explicit --roles A,B: those exact roles
 	// Print=false: per-role bodies live at .ateam/roles/<role>/report.md.
 	fmt.Println("=== Phase 1: Report ===")
+	reportCommon := commonBase
+	reportCommon.Profile = allReportProfile
+	reportCommon.Agent = allReportAgent
 	if err := runReport(ReportOptions{
+		CommonExecFlags: reportCommon,
 		Roles:           allRoles,
-		ExtraPrompt:     allExtraPrompt,
-		PrePrompt:       allPrePrompt,
-		PostPrompt:      allPostPrompt,
-		Timeout:         allTimeout,
 		Parallel:        allParallel,
 		Print:           false,
-		CheaperModel:    allCheaperModel,
-		Profile:         allReportProfile,
-		Agent:           allReportAgent,
-		Verbose:         allVerbose,
-		DockerAutoSetup: allDockerAutoSetup,
-		ContainerName:   allContainerName,
-		Model:           allModel,
-		Effort:          allEffort,
-		MaxBudgetUSD:    allMaxBudgetUSD,
 		MaxBudgetBatch:  allMaxBudgetBatch,
 	}); err != nil {
 		return fmt.Errorf("report phase failed: %w", err)
@@ -170,24 +178,15 @@ func runAll(cmd *cobra.Command, args []string) error {
 	// disabled roles' stale reports) and --max-age (freshness window). --roles
 	// does NOT constrain coding-task assignment in Phase 3 (feature dropped).
 	fmt.Println("\n=== Phase 2: Review ===")
+	supervisorCommon := commonBase
+	supervisorCommon.Profile = allSupervisorProfile
+	supervisorCommon.Agent = allSupervisorAgent
 	if err := runReview(ReviewOptions{
-		ExtraPrompt:     allExtraPrompt,
-		PrePrompt:       allPrePrompt,
-		PostPrompt:      allPostPrompt,
-		Timeout:         allTimeout,
+		CommonExecFlags: supervisorCommon,
 		Print:           printOutput,
-		CheaperModel:    allCheaperModel,
-		Profile:         allSupervisorProfile,
-		Agent:           allSupervisorAgent,
-		Verbose:         allVerbose,
 		Roles:           allRoles,
 		IncludeDisabled: allAll,
 		MaxAge:          maxAge,
-		DockerAutoSetup: allDockerAutoSetup,
-		ContainerName:   allContainerName,
-		Model:           allModel,
-		Effort:          allEffort,
-		MaxBudgetUSD:    allMaxBudgetUSD,
 	}); err != nil {
 		return fmt.Errorf("review phase failed: %w", err)
 	}
@@ -195,23 +194,14 @@ func runAll(cmd *cobra.Command, args []string) error {
 	// Phase 3: Code. runCode no longer chains verify on its own; Phase 4
 	// below is the single verify run for the pipeline.
 	fmt.Println("\n=== Phase 3: Code ===")
+	codeCommon := commonBase
+	codeCommon.Profile = codeSubRunProfile
+	codeCommon.Agent = codeSubRunAgent
 	if err := runCode(CodeOptions{
-		ExtraPrompt:       allExtraPrompt,
-		PrePrompt:         allPrePrompt,
-		PostPrompt:        allPostPrompt,
-		Timeout:           allTimeout,
+		CommonExecFlags:   codeCommon,
 		Print:             printOutput,
-		CheaperModel:      allCheaperModel,
-		Profile:           codeSubRunProfile,
-		Agent:             codeSubRunAgent,
 		SupervisorProfile: allSupervisorProfile,
 		SupervisorAgent:   allSupervisorAgent,
-		Verbose:           allVerbose,
-		DockerAutoSetup:   allDockerAutoSetup,
-		ContainerName:     allContainerName,
-		Model:             allModel,
-		Effort:            allEffort,
-		MaxBudgetUSD:      allMaxBudgetUSD,
 		MaxBudgetBatch:    allMaxBudgetBatch,
 	}); err != nil {
 		return fmt.Errorf("code phase failed: %w", err)
@@ -223,20 +213,8 @@ func runAll(cmd *cobra.Command, args []string) error {
 	// individually instead of `ateam all`.
 	fmt.Println("\n=== Phase 4: Verify ===")
 	if err := runVerify(VerifyOptions{
-		ExtraPrompt:     allExtraPrompt,
-		PrePrompt:       allPrePrompt,
-		PostPrompt:      allPostPrompt,
-		Timeout:         allTimeout,
+		CommonExecFlags: supervisorCommon,
 		Print:           printOutput,
-		CheaperModel:    allCheaperModel,
-		Profile:         allSupervisorProfile,
-		Agent:           allSupervisorAgent,
-		Verbose:         allVerbose,
-		DockerAutoSetup: allDockerAutoSetup,
-		ContainerName:   allContainerName,
-		Model:           allModel,
-		Effort:          allEffort,
-		MaxBudgetUSD:    allMaxBudgetUSD,
 	}); err != nil {
 		return fmt.Errorf("verify phase failed: %w", err)
 	}

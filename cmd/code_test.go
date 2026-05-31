@@ -79,9 +79,9 @@ func TestCodeDryRunAgentInjection(t *testing.T) {
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
 			runErr = runCode(CodeOptions{
-				DryRun: true,
-				Review: "# Test Review\n\nsome tasks",
-				Agent:  "mock",
+				CommonExecFlags: CommonExecFlags{Agent: "mock"},
+				DryRun:          true,
+				Review:          "# Test Review\n\nsome tasks",
 			})
 		})
 	})
@@ -123,10 +123,10 @@ func TestCodeDryRunSupervisorAgentOverride(t *testing.T) {
 	captureStdout(t, func() {
 		withChdir(t, projPath, func() {
 			runErr = runCode(CodeOptions{
+				CommonExecFlags: CommonExecFlags{Agent: "mock"},
 				DryRun:          true,
 				Review:          "# Test Review\n\nsome tasks",
 				SupervisorAgent: "mock",
-				Agent:           "mock",
 			})
 		})
 	})
@@ -164,9 +164,9 @@ func TestCodeStageHappyPath(t *testing.T) {
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
 			if err := runCode(CodeOptions{
+				CommonExecFlags:   CommonExecFlags{Profile: "test"},
 				Review:            "# Test Review\n\nsome tasks",
 				SupervisorProfile: "test", // mock agent
-				Profile:           "test",
 			}); err != nil {
 				t.Fatalf("runCode: %v", err)
 			}
