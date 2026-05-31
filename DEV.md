@@ -1,25 +1,10 @@
 # ATeam Development Guide
 
-## Build
+> **Commands and general dev info live in [CLAUDE.md](CLAUDE.md)** — build (`make build-all`), test tiers (`make test` / `test-cli` / `test-docker` / `test-docker-live` / `test-all`), quality (`make check`, `make run-ci`, `make fmt`, `make tidy`, `make install-hooks`), and git workflow. CLAUDE.md is loaded automatically in every agent session and is also the right starting point for humans. This file covers internals: what those commands actually do, on-disk layout, runner contract, prompt-assembly internals, legacy migration, compat shims.
 
-```bash
-make build companion    # builds the ateam binary + the linux binary for docker
-make clean    # removes the binary
-```
+Requires Go 1.26+. Optional runtime dependency: `tmux` (needed by the `codex-tmux` agent; `internal/tmuxctl` unit tests skip when tmux is absent).
 
-Requires Go 1.26+.
-
-### Optional runtime dependencies
-
-- `tmux` is required by the `codex-tmux` agent; if absent, `internal/tmuxctl` unit tests skip and codex-tmux runs fail at startup.
-
-## Tests
-
-```bash
-make test             # unit tests (no Docker needed)
-make test-docker      # docker integration tests via Docker-in-Docker
-make test-docker-live # live agent tests via DinD (requires API auth, ~$0.03)
-```
+## Test harness internals
 
 ### Docker integration tests (`make test-docker`)
 
@@ -62,63 +47,13 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 The Makefile checks for auth before starting and fails with setup instructions if neither is set. The tests themselves also fail (not skip) when auth is missing — this catches configuration issues in CI.
 
-## Code Quality
+## CI and pre-commit gates
 
-### Before committing
-
-```bash
-make check         # runs test, fmt-check, check-tidy, and lint in one command
-```
-
-Or run individual checks:
-
-```bash
-make fmt-check     # verify gofmt formatting (no changes, exit 1 if issues)
-make check-tidy    # verify go.mod is tidy (no changes, exit 1 if drift)
-make build         # build the binary (catches compile errors)
-make test          # unit tests
-```
-
-To fix formatting or tidy issues:
-
-```bash
-make fmt           # auto-format all .go files
-make tidy          # run go mod tidy
-```
-
-### CI pipeline
-
-GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on pull requests:
-
-```bash
-make fmt-check     # verify gofmt formatting
-make check-tidy    # verify go.mod is tidy
-make lint          # golangci-lint
-make test          # unit tests
-make vuln          # govulncheck
-```
-
-Run the full CI suite locally with `make run-ci`.
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and on pull requests; it executes `fmt-check`, `check-tidy`, `lint`, `test`, and `vuln`. `make run-ci` reproduces the same pipeline locally (plus `deadcode`).
 
 A separate workflow (`.github/workflows/docker-tests.yml`) runs `make test-docker`. It is `workflow_dispatch`-only — triggered manually from the Actions tab, not on push or pull request.
 
-### Git hooks
-
-A pre-commit hook runs `fmt-check` and `check-tidy` automatically. Install it with:
-
-```bash
-make install-hooks
-```
-
-This creates `.git/hooks/pre-commit` that blocks commits with formatting or module drift issues.
-
-### Additional checks
-
-```bash
-make lint          # golangci-lint (requires golangci-lint installed)
-make vuln          # govulncheck for known vulnerabilities (installs itself if missing)
-make test-docker   # Docker-in-Docker integration tests (see below)
-```
+The pre-commit hook installed by `make install-hooks` blocks commits that fail `fmt-check`, `check-tidy`, `check-docs`, or `lint`. It does not run the full test suite.
 
 ## Docker binary resolution
 
@@ -131,13 +66,7 @@ Docker containers need a linux ateam binary (matching the host's CPU arch — `a
 5. **Cross-compile** — builds automatically if `go` and `go.mod` are available
 6. **Warning** — prints a message and returns empty (Docker mount is skipped)
 
-For developers building from source, cross-compilation happens automatically (step 5). To pre-build the companion binary:
-
-```bash
-make companion    # produces build/ateam-linux-<arch>
-```
-
-Release archives should include both `ateam` (host) and `ateam-linux-<arch>` so Docker mode works without a Go compiler.
+For developers building from source, cross-compilation happens automatically (step 5). Release archives should include both `ateam` (host) and `ateam-linux-<arch>` so Docker mode works without a Go compiler.
 
 ## Adding a new role
 
@@ -146,60 +75,34 @@ Release archives should include both `ateam` (host) and `ateam-linux-<arch>` so 
 3. Run `make build` — the prompt tree is embedded via `defaults.FS`, so the role is discoverable from the embedded anchor
 4. Enable it in a project: `ateam init --role <name>` or edit `.ateam/config.toml`
 
-Prompt assembly is implemented in `internal/prompts/assembler/`. The sections below describe the parts most relevant when adding or overriding a role.
+The user-facing assembly model (anchor chain, filename patterns, `FirstMatch` vs `AllMatches`, template variables) is documented in **[CONFIG.md → Prompt Composition](CONFIG.md#prompt-composition)** and **[CONFIG.md → Template Variables](CONFIG.md#template-variables)**. The sections below cover the dev-only deltas.
 
-### Prompt assembly order
+### Assembly internals — code pointers
 
-A role's prompt is composed by `(*Assembler).Assemble` (`internal/prompts/assembler/assemble.go`), which walks the anchor chain and joins these slots with `---` separators (given a `promptPath` like `report/<name>` — the trailing segment is the role, the leading segment is the action dir):
-
-1. CLI pre-prompt (`opts.PrePrompt`, from `--pre-prompt`) — outermost front wrapper
-2. Dir-level pre fragments (`_pre.md` / `_pre.*.md`), root → leaf (e.g. `report/_pre.intro.md`)
-3. Role-level pre fragments (`<name>.pre.*.md`)
-4. Role main — first-match `<name>.prompt.md` across anchors, or `opts.ReplaceRoleMain` when the caller supplies a body. Required: assembly errors if neither a file nor an override resolves to non-whitespace content
-5. Role-level post fragments (`<name>.post.*.md`)
-6. Dir-level post fragments (`_post.md` / `_post.*.md`), leaf → root (e.g. `report/_post.format.md` carries the shared format/output rules)
-7. CLI post-prompt (`opts.PostPrompt`, from `--post-prompt`) — outermost tail wrapper
-
-`Assemble` produces the body and per-section provenance only. The ATeam Project Context header (`{{project.info}}`), the previous-report block, and the `# Additional Instructions` (`--extra-prompt`) block are appended around the assembled body by the cmd layer — see `assembleRoleReportV1` in `cmd/report_v1.go`, which inserts the previous-report block (skipped for code actions; a "fresh cycle" notice replaces it when no prior report exists) before the post-prompt tail.
-
-### Resolution precedence
-
-The anchor chain is built by `assembler.BuildAnchors(projectDir, orgDir, embedded)` (`internal/prompts/assembler/anchors.go`) and wired up by `(*ResolvedEnv).Assembler()` (`internal/root/resolve.go`). Anchors are listed most-specific first, each rooted at the anchor's `prompts/` subdir:
-
-1. Project — `<projectDir>/prompts/`
-2. Org — `<orgDir>/prompts/` (omitted when there is no org)
-3. Embedded — `defaults/prompts/` via `defaults.FS`
-
-Two resolution modes (`internal/prompts/assembler/assembler.go`):
-
-- **`FirstMatch`** — most-specific anchor wins. Used for the role main (`<name>.prompt.md`) and for `{{include}}` / `{{include?}}`.
-- **`AllMatches`** — every distinct path contributes; when the same path exists in multiple anchors, the most-specific anchor's content wins but the fragment keeps the slot position of the most-general anchor that has it. Files sort lexically within an anchor. Used for the `_pre`/`_post` and `<name>.pre`/`<name>.post` fragment globs and for `{{include_glob}}`.
-
-Use `ateam prompt --role <name> [--action code]` to inspect the assembled prompt and which anchors contributed each section.
-
-### Template variables
-
-Prompt-file variables and runtime.hcl/agent-arg variables are two distinct systems — do not conflate them:
-
-- **Prompt-file content** uses dotted `{{namespace.key}}` directives resolved by the assembler engine (`internal/prompts/assembler/template.go`, `MapVars`). Recognized namespaces: `prompt`, `exec`, `project`, `git`, `container`, `ateam`, `role`, `env`. The canonical variable names — plus the legacy ALL_CAPS → dotted compatibility mapping — live in `internal/prompts/assembler/varmap.go` (`VarRenameMap` and `VarLiteralRewrites`); add new prompt variables there. Legacy ALL_CAPS tokens (`{{ROLE}}`, `{{OUTPUT_FILE}}`, …) still resolve via that map until the mechanical rename lands. The engine also handles `{{include path}}`, `{{include? path}}`, and `{{include_glob pattern}}`. Unknown namespaces and unmatched tokens pass through verbatim.
-- **Agent CLI args and container fields from `runtime.hcl`** use ALL_CAPS `{{VAR}}` placeholders substituted by `internal/runner/template.go` — the `TemplateVars` struct and its `Replacer()` method (e.g. `{{AGENT}}`, `{{MODEL}}`, `{{CONTAINER_NAME}}`, `{{OUTPUT_DIR}}`). This is a separate substitution pass over `runtime.hcl` values, not over prompt-file content; add new placeholders to `TemplateVars.Replacer()`. Unknown `{{VAR}}` tokens are left as-is.
+- `(*Assembler).Assemble` (`internal/prompts/assembler/assemble.go`) walks the anchor chain and joins the slots described in CONFIG.md.
+- `assembler.BuildAnchors(projectDir, orgDir, embedded)` (`internal/prompts/assembler/anchors.go`) builds the project → org → embedded chain, wired up by `(*ResolvedEnv).Assembler()` (`internal/root/resolve.go`).
+- Prompt-file `{{namespace.key}}` directives are resolved by `internal/prompts/assembler/template.go` and `MapVars`. The canonical variable names plus the legacy ALL_CAPS → dotted compatibility mapping live in `internal/prompts/assembler/varmap.go` (`VarRenameMap`, `VarLiteralRewrites`) — add new prompt variables there.
+- `runtime.hcl` ALL_CAPS `{{VAR}}` placeholders (agent CLI args, container fields) are a *separate* substitution pass handled by `TemplateVars.Replacer()` in `internal/runner/template.go`. Add new placeholders there. Do not conflate the two systems.
+- The `ATeam Project Context` header, the previous-report block, and the `# Additional Instructions` block are appended around the assembled body by the cmd layer (see `assembleRoleReportV1` in `cmd/report_v1.go`), not by the assembler itself.
 
 ### CLI override surface (`AssembleOptions`)
 
-`Assemble` takes an `*AssembleOptions` (`assemble.go`) carrying caller-supplied overrides; `nil` means no overrides. Each field is rendered through the same template engine as anchor content, and whitespace-only values are dropped:
+`Assemble` takes an `*AssembleOptions` (`internal/prompts/assembler/assemble.go`) carrying caller-supplied overrides; `nil` means no overrides. Each field is rendered through the same template engine as anchor content; whitespace-only values are dropped.
 
-- `ReplaceRoleMain` — swaps in caller text as the role's main body (slot 4); all surrounding framing (pre/post fragments, CLI wrappers) still composes. Used by `ateam review --prompt` and `ateam code --prompt`.
+- `ReplaceRoleMain` — swaps in caller text as the role's main body; all surrounding framing (pre/post fragments, CLI wrappers) still composes. Used by `ateam review --prompt` and `ateam code --prompt`.
 - `PrePrompt` — wrapped at the very front, before any anchor content (`--pre-prompt`).
 - `PostPrompt` — wrapped at the very end, after every anchor section (`--post-prompt`).
 
-### Role code prompts and the supervisor code phase
+### Role code prompts vs. supervisor code phase
 
-A per-role code prompt (`code/<name>.prompt.md`) is independent from the supervisor's code-management phase:
+A per-role `code/<name>.prompt.md` is independent from the supervisor's code-management phase:
 
 - **Role level** — when `code/<name>.prompt.md` exists (project, org, or embedded), `ateam code --role <name>` and `ateam prompt --role <name> --action code` assemble the `code/<name>` path with no previous-report block (the source of truth for "what changed" is the patch's git history). See `assembleRoleCodeV1` in `cmd/report_v1.go`.
-- **Supervisor level** — `ateam code` (no role) drives the supervisor via the `code_management.prompt.md` body, assembled by `assembleCodeManagementV1` (`cmd/code_v1.go`) through the same `Assemble` path. The supervisor splits the review into individual tasks and writes per-task code prompts into `{{OUTPUT_DIR}}` (the prompt still ships the legacy `{{EXECUTION_DIR}}` alias for the same directory), then invokes `ateam exec @... --role <name>` for each. A role's own `code/<name>.prompt.md` is what lets those per-task `exec` invocations target it.
+- **Supervisor level** — `ateam code` (no role) drives the supervisor via the `code_management.prompt.md` body, assembled by `assembleCodeManagementV1` (`cmd/code_v1.go`). The supervisor splits the review into individual tasks and writes per-task code prompts into `{{OUTPUT_DIR}}` (the prompt still ships the legacy `{{EXECUTION_DIR}}` alias for the same directory), then invokes `ateam exec @... --role <name>` for each. A role's own `code/<name>.prompt.md` is what lets those per-task `exec` invocations target it.
 
-## Project on-disk layout
+## Project on-disk layout (runner contract)
+
+The user-facing directory tree is in **[CONFIG.md → Directory Layout](CONFIG.md#directory-layout)**. This section is the runner-internal contract — who writes what, when, and the per-action promotion rules.
 
 Per-run artefacts are keyed by `agent_execs.id` (`<exec_id>`):
 
@@ -285,93 +188,40 @@ Search for `legacy` in those files to find the relevant blocks.
 
 ## Architecture: Runtime / Agents / Containers / Profiles
 
-Configuration lives in `runtime.hcl` with 4-level resolution: embedded defaults → org defaults → org overrides → project overrides.
+The configuration surface (HCL syntax, the 4-level resolution chain, agent/container/profile fields, `[container-extra]`, built-in profile catalogue) is documented in **[CONFIG.md → Runtime Configuration](CONFIG.md#runtime-configuration)**. The Docker mount layout, Dockerfile fallback chain, secret resolution, and the four execution modes are in **[ISOLATION.md](ISOLATION.md)**. For the concurrency contract that governs parallel pool execution see **[CONCURRENCY.md](CONCURRENCY.md)**.
 
-For the concurrency contract that governs parallel pool execution — what's shared, what gets cloned, what flows through channels — see [CONCURRENCY.md](CONCURRENCY.md).
+The remainder of this section covers contributor-only details — the Go-side surface and the agents whose internals don't fit cleanly in CONFIG.md.
 
-### Agents
+### Agent and container Go surface
 
-Defined in `internal/agent/`. Each agent implements the `Agent` interface (Run, ParseStreamFile). Available agents:
+- Each agent under `internal/agent/` implements the `Agent` interface (`Run`, `ParseStreamFile`). Built-ins: `claude`, `claude-docker`, `claude-sonnet`, `claude-haiku`, `claude-isolated`, `codex`, `codex-tmux`, `mock`.
+- Each container under `internal/container/` implements the `Container` interface. Built-ins: `none`, `docker`, `docker-exec`.
+- Agents receive a `CmdFactory` from the container layer. When set, they use it to spawn subprocesses instead of `exec.CommandContext` directly. This is how Docker execution works transparently — the agent code is unaware.
 
-| Agent | Description |
-|-------|-------------|
-| `claude` | Claude Code CLI with sandbox settings (for host execution) |
-| `claude-docker` | Claude without sandbox, `--dangerously-skip-permissions` (for containers) |
-| `claude-sonnet` | Claude with sonnet model + budget cap |
-| `claude-haiku` | Claude with haiku model + budget cap |
-| `claude-isolated` | Claude with project-local config dir |
-| `codex` | OpenAI Codex CLI |
-| `codex-tmux` | OpenAI Codex CLI driven through tmux for TUI-only slash commands (experimental, host-only) |
-| `mock` | Built-in mock for testing |
+### Codex parity caveats
 
-Agents receive a `CmdFactory` from the container layer. When set, they use it to spawn subprocesses instead of `exec.CommandContext` directly. This is how Docker execution works transparently.
-
-#### Codex parity caveats
-
-The codex agent matches claude on cost accounting, cache-token tracking, context utilization, verbose tool detail, and `ateam resume`. A few items are intentionally claude-only:
+The codex agent matches claude on cost accounting, cache-token tracking, context utilization, verbose tool detail, and `ateam resume`. A few items are intentionally claude-only — a future contributor shouldn't try to "fix" them:
 
 - **OAuth login** (`claude setup-token`). OpenAI ships no equivalent; auth uses `OPENAI_API_KEY` or `~/.codex/auth.json` directly.
 - **Sandbox `--settings` JSON.** Codex CLI ships its own sandbox model (`workspace-write` / `read-only` plus approval policies). Codex sandbox flags belong in `agent "codex" { args = [...] }` in runtime.hcl, not in a settings JSON.
-- **Multi-turn turn count.** ateam invokes codex via `exec --json`, which is one-shot, so `Turns: 1` is hardcoded. A future contributor shouldn't try to "fix" this by reading a `turns` field that doesn't exist.
+- **Multi-turn turn count.** ateam invokes codex via `exec --json`, which is one-shot, so `Turns: 1` is hardcoded. There is no `turns` field to read.
 
-#### codex-tmux design notes
+### codex-tmux design notes
 
-`codex-tmux` drives the interactive Codex TUI through a tmux session so that TUI-only slash commands (`/review`, etc.) can be invoked unattended. Key constraints:
+User-facing usage is in [CONFIG.md → `codex-tmux`](CONFIG.md#codex-tmux-experimental). Internals worth knowing if you touch the agent:
 
 - **Host-only in v1.** Rejected with an actionable error at `cmd/table.go:140–142` when a profile binds it to a non-`none` container, and at `cmd/table.go:398–407` when invoked without project context. Container support would require tmux+codex inside the image plus host↔container path translation that isn't wired up.
 - **Per-`EXEC_ID` socket and session naming.** The tmux socket lives under `<ProjectDir>/cache/tmux/` and the session name embeds the `EXEC_ID`, so concurrent runs in the same workdir don't collide.
 - **Token/cost data is sourced from `$CODEX_HOME/sessions/...`** (the rollout JSONL Codex writes itself), not from a streamed JSON channel — the TUI doesn't emit one. The agent live-tails that rollout into `stream.jsonl` and archives it to `codex-session.jsonl.gz` on completion.
 - **`ateam resume` works** because the live-tailed rollout translates `session_meta` into a `thread.started` line in `stream.jsonl`, carrying the same session id the `codex` CLI uses. Resume runs `codex resume --include-non-interactive <id>`, identical to the regular `codex` agent.
-- The original design rationale lives in [`plans/feature_codex_tmux_agent.md`](plans/feature_codex_tmux_agent.md) — historical, not normative.
+- Original design rationale: [`plans/feature_codex_tmux_agent.md`](plans/feature_codex_tmux_agent.md) — historical, not normative.
 
-### Containers
+### Container `extra_volumes` (HCL example)
 
-Defined in `internal/container/`. Each container implements the `Container` interface.
-
-| Container | Description |
-|-----------|-------------|
-| `none` | Direct host execution (default) |
-| `docker` | One-shot `docker run --rm -i` per invocation |
-| `docker-exec` | Exec into a user-managed container |
-
-#### Dockerfile resolution
-
-The Dockerfile used to build the container image is resolved with a fallback chain (first match wins):
-
-1. `.ateam/roles/<role>/Dockerfile` — role-specific (when a role is specified)
-2. `.ateam/Dockerfile` — project-level
-3. `.ateamorg/Dockerfile` — org-level
-4. `.ateamorg/defaults/Dockerfile` — org defaults
-5. Embedded default — built into the `ateam` binary
-
-This follows the same pattern as prompt resolution. A security-focused role can use a locked-down container while other roles use the project default.
-
-The filename searched for comes from the container config's `dockerfile` field (defaults to `"Dockerfile"`).
-
-#### Docker path mapping
-
-The Docker container maps host paths to fixed container paths:
-
-| Host path | Container path | Mode |
-|-----------|----------------|------|
-| Project source dir | `/workspace` | read-only by default; read-write for `code`, `run`, `parallel`, `inspect`, `auto-setup` |
-| `.ateamorg/` dir | `/.ateamorg` | read-write |
-| `~/.claude/.credentials.json` | `/home/agent/.claude/.credentials.json` | read-only (only when `mount_claude_config = true`) |
-
-The agent sees only these mount points. See `ISOLATION.md` for detailed per-mode setup. Host paths in agent arguments (stream files, stderr files, settings) are automatically translated via `TranslatePath()`. For example, `/Users/me/myproject/output.jsonl` becomes `/workspace/output.jsonl` inside the container.
-
-The container image is built with a non-root user matching the host UID (`--build-arg USER_UID=$(id -u)`), so files written by the agent inside `/workspace` have correct ownership on the host.
-
-Env vars listed in `forward_env` are passed to `docker run -e`, forwarding their values from the host process.
-
-#### Custom mounts and docker args
-
-To give the agent access to directories outside the standard mounts, use `extra_volumes` on a container definition and/or `container_extra_args` on a profile. Paths can be relative to the project source dir for portability.
-
-Example `.ateam/runtime.hcl`:
+CONFIG.md lists `ExtraVolumes` in the template-vars table but doesn't show the HCL example. To give the agent access to directories outside the standard mounts, use `extra_volumes` on a container definition (paths can be relative to the project source dir for portability) and/or `container_extra_args` on a profile.
 
 ```hcl
-// Extend the default docker container with custom mounts
+// .ateam/runtime.hcl — extend the default docker container with custom mounts
 container "docker-with-data" {
   type        = "docker"
   dockerfile  = "Dockerfile"
@@ -385,34 +235,11 @@ container "docker-with-data" {
 profile "docker-data" {
   agent     = "claude-docker"
   container = "docker-with-data"
-  // Extra docker run args (e.g. resource limits, network, capabilities)
   container_extra_args = ["--cpus=2", "--memory=4g"]
 }
 ```
 
-The agent can then read files from `/data` and `/tools` inside the container. Relative host paths in `extra_volumes` are resolved from the project source directory, making the config portable across machines.
-
-`container_extra_args` passes raw flags to `docker run`, useful for resource limits, network modes, or capabilities that don't have dedicated config fields.
-
-### Profiles
-
-Profiles combine an agent + container. Defined in `runtime.hcl`:
-
-```hcl
-profile "docker" {
-  agent     = "claude-docker"
-  container = "docker"
-}
-```
-
-| Field | Description |
-|-------|-------------|
-| `agent` | Agent name from runtime.hcl |
-| `container` | Container name from runtime.hcl |
-| `agent_extra_args` | Appended to agent CLI args |
-| `container_extra_args` | Passed as extra `docker run` flags |
-
-Select via `--profile` flag or `config.toml` per action/role.
+Relative host paths in `extra_volumes` are resolved from the project source directory, making the config portable across machines. `container_extra_args` passes raw flags to `docker run` for resource limits, network modes, or capabilities that don't have dedicated config fields.
 
 ## Maintenance Commands
 
@@ -428,5 +255,3 @@ ateam project-rename --old services/api --new backends/api
 |------|-------------|
 | `--old PATH` | Old project path (relative to org root) **(required)** |
 | `--new PATH` | New project path (relative to org root) **(required)** |
-
-

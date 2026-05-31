@@ -19,6 +19,7 @@ A Go CLI to manage unattended agent + software engineering quality oriented prom
 
 ## How to learn
 * README.md: mission, core features, core commands
+* DEV.md: internals — on-disk layout, runner contract, prompt-assembly internals, legacy migration, compat shims
 * when changing agent related code or code dealing with concurrency: CONCURRENCY.md
 * how to run ateam: COMMANDS.md
 * how to configure ateam: CONFIG.md
@@ -44,3 +45,10 @@ A Go CLI to manage unattended agent + software engineering quality oriented prom
 
 ### Full regression run
 * `make test-all`: runs all of the above, run when making extensive changes, slower and incurs API costs
+
+## How to check code quality
+* `make check`: quick local health check — test + fmt-check + check-tidy + check-docs + lint
+* `make run-ci`: full CI pipeline — `check` plus `vuln` and `deadcode`; run before commit (also referenced in the git section above)
+* `make fmt`: auto-format with gofmt
+* `make tidy`: `go mod tidy`
+* `make install-hooks`: install pre-commit hook (runs fmt-check, check-tidy, check-docs, lint)
