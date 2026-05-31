@@ -194,6 +194,16 @@ The configuration surface (HCL syntax, the 4-level resolution chain, agent/conta
 
 The remainder of this section covers contributor-only details — the Go-side surface and the agents whose internals don't fit cleanly in CONFIG.md.
 
+### `internal/flow` (composition framework)
+
+The spine of every agent-running cmd (`exec`, `parallel`, `verify`, `review`, `auto_setup`, `code`, `report`). A `Step` is one of three types: `PromptBundle` (leaf — one agent invocation, with `PreExec` / `PostExec` `Action` hooks), `Pipeline` (sequence; stops on first errored step, skip results don't stop the chain), `Parallel` (fan-out with bounded workers and per-step panic recovery; does not short-circuit on errors). Cmds enter through `flow.Run`, which always returns `PipelineResult`; single-bundle callers use `flow.RunBundle`.
+
+- `RunCtx` carries the per-execution session: `context.Context`, `*calldb.CallDB`, `*root.ResolvedEnv`, and the `Reporter`. Threaded unchanged through every Step.
+- `RuntimeEnv` is the "where & how to invoke the agent" config (executor, workdir, role, action, dry-run, batch, prompt-dir) and is freely rebound at composition boundaries via `Pipeline.Env` / `Parallel.Env` / `PromptBundle.Env`.
+- `Reporter` is the single observability seam — bundle/stage lifecycle, agent progress events, skipped-step notifications. Cmd-layer TUIs and JSON reporters implement it; `NoopReporter` is the default.
+
+Design rationale and the Phase F→G migration: [`plans/Feature_prompt_report_fs_refactor_phaseG.md`](plans/Feature_prompt_report_fs_refactor_phaseG.md). The pre-Phase-G `internal/stage` package has been removed; do not reference it.
+
 ### Agent and container Go surface
 
 - Each agent under `internal/agent/` implements the `Agent` interface (`Run`, `ParseStreamFile`). Built-ins: `claude`, `claude-docker`, `claude-sonnet`, `claude-haiku`, `claude-isolated`, `codex`, `codex-tmux`, `mock`.
