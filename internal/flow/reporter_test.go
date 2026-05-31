@@ -10,34 +10,28 @@ import (
 	"github.com/ateam/internal/runner"
 )
 
-func TestStdoutReporter_BundleLifecycle(t *testing.T) {
+func TestStdoutReporter_BundleEndSuccess(t *testing.T) {
 	var buf bytes.Buffer
 	r := &StdoutReporter{Out: &buf}
 
 	bi := BundleInfo{Name: "verify", Role: "supervisor", Action: "verify"}
-	r.BundleStart(bi)
 	r.BundleEnd(bi, Result{
 		Flow:    Flow{State: StateContinue},
 		Summary: &runner.RunSummary{Duration: 12 * time.Second, Cost: 0.012},
 	})
 
-	out := buf.String()
-	wantContains := []string{"Starting verify", "Done ("}
-	for _, w := range wantContains {
-		if !strings.Contains(out, w) {
-			t.Errorf("output missing %q:\n%s", w, out)
-		}
+	if got := buf.String(); !strings.Contains(got, "Done (") {
+		t.Errorf("expected 'Done (' in output: %q", got)
 	}
 }
 
-func TestStdoutReporter_BundleStartRoleSameAsName(t *testing.T) {
-	// When BundleInfo.Role == Name (e.g. "report" → role label same), do
-	// not duplicate it in parens.
+func TestStdoutReporter_BundleStartIsNoOp(t *testing.T) {
+	// Cmd-layer owns the starting line; StdoutReporter must not duplicate.
 	var buf bytes.Buffer
 	r := &StdoutReporter{Out: &buf}
-	r.BundleStart(BundleInfo{Name: "verify", Role: "verify", Action: "verify"})
-	if got := buf.String(); strings.Contains(got, "(role verify)") {
-		t.Errorf("did not expect role-paren echo: %q", got)
+	r.BundleStart(BundleInfo{Name: "verify", Role: "supervisor"})
+	if got := buf.String(); got != "" {
+		t.Errorf("BundleStart should be silent; got %q", got)
 	}
 }
 

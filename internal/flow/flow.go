@@ -195,10 +195,14 @@ func Run(top Step, env RuntimeEnv, rc RunCtx) PipelineResult {
 //   - Flow{State: StateError}    → bundle ends with the error; no agent, no Post
 //
 // PostExec semantics:
-//   - All Post actions run, in order, regardless of each other's return.
-//   - The bundle's Result.Flow is upgraded to the first Error returned by a
-//     Post action IF the agent itself succeeded. If the agent already
-//     errored, the agent's error stays.
+//   - PostExec only runs when the agent (and all Pre actions) succeeded.
+//     If Pre returned Skip/Error or the agent reported IsError, Post is
+//     skipped entirely. Mirrors stage's FailOnExecError-gated behavior:
+//     "Verification report: ..." and similar pointers should not fire
+//     on a failed run.
+//   - When it does run, all Post actions execute in order, regardless of
+//     each other's return. The bundle's Result.Flow is upgraded to the
+//     first Error returned by a Post action.
 type Action interface {
 	Run(rc RunCtx, env RuntimeEnv, res *Result) Flow
 }
@@ -285,10 +289,12 @@ func (b PromptBundle) execute(rc RunCtx, env RuntimeEnv) []Result {
 	}
 	r := Result{Bundle: &b, Env: env, Flow: flow, Summary: &summary}
 
-	for _, a := range b.PostExec {
-		pf := a.Run(rc, env, &r)
-		if pf.State == StateError && r.Flow.State == StateContinue {
-			r.Flow = pf
+	if r.Flow.State == StateContinue {
+		for _, a := range b.PostExec {
+			pf := a.Run(rc, env, &r)
+			if pf.State == StateError && r.Flow.State == StateContinue {
+				r.Flow = pf
+			}
 		}
 	}
 

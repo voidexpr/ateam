@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/ateam/internal/display"
+	"github.com/ateam/internal/flow"
+	"github.com/ateam/internal/flow/actions"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
-	"github.com/ateam/internal/stage"
-	"github.com/ateam/internal/stage/actions"
 	"github.com/spf13/cobra"
 )
 
@@ -250,13 +250,14 @@ func runReview(opts ReviewOptions) error {
 	ctx, stop := cmdContext()
 	defer stop()
 
-	return stage.Run(stage.Stage{
+	bundle := flow.PromptBundle{
 		Name:   "review",
+		Role:   "supervisor",
 		Action: runner.ActionReview,
-		BuildPrompt: func(*stage.Ctx) (string, error) {
+		Render: func(flow.RuntimeEnv) (string, error) {
 			return prompt, nil
 		},
-		BuildRunOpts: func(*stage.Ctx) runner.RunOpts {
+		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
 			return runner.RunOpts{
 				RoleID:            "supervisor",
 				Action:            runner.ActionReview,
@@ -268,21 +269,27 @@ func runReview(opts ReviewOptions) error {
 				StartedAt:         startedAt,
 			}
 		},
-		Pre: []stage.Action{
+		PreExec: []flow.Action{
 			actions.CheckConcurrentRuns{If: !opts.Force, Action: runner.ActionReview},
 		},
-		Post: []stage.Action{
-			actions.FailOnExecError{Label: "review"},
-			actions.PrintDone{},
+		PostExec: []flow.Action{
 			actions.PrintArtifactPath{Label: "Review", Path: reviewFile},
 			actions.PrintArtifactBody{If: opts.Print, Path: reviewFile},
 		},
-	}, &stage.Ctx{
-		Context:  ctx,
-		Env:      env,
+	}
+	rtEnv := flow.RuntimeEnv{
 		Executor: cr,
+		WorkDir:  env.WorkDir,
+		Role:     "supervisor",
+		Action:   runner.ActionReview,
+	}
+	rc := flow.RunCtx{
+		Ctx:      ctx,
 		DB:       db,
-	})
+		Resolved: env,
+		Reporter: &flow.StdoutReporter{},
+	}
+	return flow.Run(bundle, rtEnv, rc).FirstError()
 }
 
 // formatReviewEmpty turns a ReviewFunnel into a stderr-friendly explanation

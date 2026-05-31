@@ -129,22 +129,22 @@ func TestPromptBundle_ExecutorError(t *testing.T) {
 	var postRan atomic.Bool
 	b := makeBundle("verify", nil)
 	b.PostExec = []Action{
-		funcAction(func(_ RunCtx, _ RuntimeEnv, res *Result) Flow {
+		funcAction(func(_ RunCtx, _ RuntimeEnv, _ *Result) Flow {
 			postRan.Store(true)
-			if res == nil || res.Summary == nil {
-				t.Error("Post should see Result + Summary on agent error")
-			}
 			return Flow{State: StateContinue}
 		}),
 	}
 	out := Run(b, env, rc)
 
-	if !postRan.Load() {
-		t.Error("Post should still run when agent errors")
+	if postRan.Load() {
+		t.Error("Post should NOT run when agent errored (parity with stage's FailOnExecError gate)")
 	}
 	r := out.Steps[0].Results[0]
 	if r.Flow.State != StateError {
 		t.Errorf("flow state: got %v want error", r.Flow.State)
+	}
+	if r.Summary == nil {
+		t.Error("Summary should still be populated on error")
 	}
 }
 

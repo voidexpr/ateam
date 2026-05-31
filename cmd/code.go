@@ -1,30 +1,21 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/ateam/internal/display"
+	"github.com/ateam/internal/flow"
+	"github.com/ateam/internal/flow/actions"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/ateam/internal/runtime"
-	"github.com/ateam/internal/stage"
-	"github.com/ateam/internal/stage/actions"
 	"github.com/spf13/cobra"
 )
-
-// tailAttachDelay gives the supervisor goroutine a head start before the
-// tailer begins polling, so the first stream/log files exist when AddSource
-// runs. 300ms is long enough for the runner to create the call-DB row and
-// open the stream file, and short enough that interactive output still feels
-// immediate.
-const tailAttachDelay = 300 * time.Millisecond
 
 var (
 	codeReview            string
@@ -42,7 +33,6 @@ var (
 	codeSupervisorAgent   string
 	codeVerbose           bool
 	codeForce             bool
-	codeTail              bool
 	codeDockerAutoSetup   bool
 	codeContainerName     string
 	codeModel             string
@@ -68,7 +58,6 @@ type CodeOptions struct {
 	SupervisorAgent   string
 	Verbose           bool
 	Force             bool
-	Tail              bool
 	DockerAutoSetup   bool
 	ContainerName     string
 	Model             string
@@ -109,7 +98,6 @@ Example:
 			SupervisorAgent:   codeSupervisorAgent,
 			Verbose:           codeVerbose,
 			Force:             codeForce,
-			Tail:              codeTail,
 			DockerAutoSetup:   codeDockerAutoSetup,
 			ContainerName:     codeContainerName,
 			Model:             codeModel,
@@ -152,7 +140,6 @@ func init() {
 	codeCmd.MarkFlagsMutuallyExclusive("supervisor-profile", "supervisor-agent")
 	addVerboseFlag(codeCmd, &codeVerbose)
 	addForceFlag(codeCmd, &codeForce)
-	codeCmd.Flags().BoolVar(&codeTail, "tail", false, "stream live output from supervisor and sub-runs")
 	addDockerAutoSetupFlag(codeCmd, &codeDockerAutoSetup)
 	addContainerNameFlag(codeCmd, &codeContainerName)
 }
@@ -282,67 +269,14 @@ func runCode(opts CodeOptions) error {
 	ctx, stop := cmdContext()
 	defer stop()
 
-	// Two execution modes through the same Stage:
-	//   - --tail: a custom RunAgent closure spawns Execute in a goroutine
-	//     and drives a DB tailer alongside it. No progress channel —
-	//     the tailer reads stream files from disk.
-	//   - default: Stage.Run does the standard Execute call. A progress
-	//     drain goroutine consumes the channel and prints lines.
-	var runAgent func(c *stage.Ctx, runOpts runner.RunOpts) runner.RunSummary
-	var ctxProgress func(runner.RunProgress)
-	if opts.Tail {
-		runAgent = func(c *stage.Ctx, runOpts runner.RunOpts) runner.RunSummary {
-			var result runner.RunSummary
-			runDone := make(chan struct{})
-			go func() {
-				result = c.Executor.Execute(c.Context, c.Prompt, runOpts, nil)
-				close(runDone)
-			}()
-			time.Sleep(tailAttachDelay)
-			tailer := runner.NewTailer(os.Stderr, db, isTerminal(), opts.Verbose)
-			tailer.ProjectDir = env.ProjectDir
-			tailer.OrgDir = env.OrgDir
-			tailer.Batch = batch
-			if rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir); err == nil {
-				tailer.Pricing, tailer.DefaultModel = mergedPricingFromConfig(rtCfg)
-			}
-			if rows, err := db.CallsByBatch(batch); err == nil {
-				for _, r := range rows {
-					if r.StreamFile != "" {
-						tailer.AddSource(r.ID, r.Role, r.Action, root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.StreamFile), r.Model)
-					}
-				}
-			}
-			tailCtx, tailCancel := context.WithCancel(c.Context)
-			go func() {
-				<-runDone
-				time.Sleep(time.Second)
-				tailCancel()
-			}()
-			_ = tailer.Run(tailCtx)
-			<-runDone
-			return result
-		}
-	} else {
-		progress := make(chan runner.RunProgress, 64)
-		var progressWg sync.WaitGroup
-		progressWg.Add(1)
-		go func() {
-			defer progressWg.Done()
-			printProgress(progress)
-		}()
-		defer progressWg.Wait()
-		defer close(progress)
-		ctxProgress = runner.ProgressChan(progress)
-	}
-
-	return stage.Run(stage.Stage{
+	bundle := flow.PromptBundle{
 		Name:   "code",
+		Role:   "supervisor",
 		Action: runner.ActionCode,
-		BuildPrompt: func(*stage.Ctx) (string, error) {
+		Render: func(flow.RuntimeEnv) (string, error) {
 			return prompt, nil
 		},
-		BuildRunOpts: func(*stage.Ctx) runner.RunOpts {
+		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
 			return runner.RunOpts{
 				RoleID:           "supervisor",
 				Action:           runner.ActionCode,
@@ -355,32 +289,37 @@ func runCode(opts CodeOptions) error {
 				StartedAt:        startedAt,
 			}
 		},
-		RunAgent: runAgent, // nil for default mode, custom for --tail
-		Pre: []stage.Action{
+		PreExec: []flow.Action{
 			actions.CheckConcurrentRuns{If: !opts.Force, Action: runner.ActionCode},
 		},
-		Post: []stage.Action{
-			actions.FailOnExecError{Label: "code execution"},
+		PostExec: []flow.Action{
 			printCodeSessionAction{
 				SharedDir:     env.SharedDir(),
 				SupervisorDir: supervisorDir,
 				Print:         opts.Print,
 			},
-			actions.PrintDone{},
 		},
-	}, &stage.Ctx{
-		Context:    ctx,
-		Env:        env,
-		Executor:   cr,
-		DB:         db,
-		OnProgress: ctxProgress,
-	})
+	}
+	rtEnv := flow.RuntimeEnv{
+		Executor: cr,
+		WorkDir:  env.WorkDir,
+		Role:     "supervisor",
+		Action:   runner.ActionCode,
+		Batch:    batch,
+	}
+	rc := flow.RunCtx{
+		Ctx:      ctx,
+		DB:       db,
+		Resolved: env,
+		Reporter: &flow.StdoutReporter{Stream: true},
+	}
+	return flow.Run(bundle, rtEnv, rc).FirstError()
 }
 
 // printCodeSessionAction is a code-specific Post action that emits the
 // per-session summary (execution_report.md contents, session dir, file
-// list). Lives here rather than in internal/stage/actions because it
-// only makes sense for `ateam code` — other stages have flat single-
+// list). Lives here rather than in internal/flow/actions because it
+// only makes sense for `ateam code` — other bundles have flat single-
 // file artifacts that PrintArtifactPath/PrintArtifactBody handle.
 type printCodeSessionAction struct {
 	SharedDir     string
@@ -388,9 +327,12 @@ type printCodeSessionAction struct {
 	Print         bool
 }
 
-func (a printCodeSessionAction) Run(c *stage.Ctx) error {
-	printCodeSessionSummary(a.SharedDir, a.SupervisorDir, c.Result.ExecID, a.Print, c.Result.Output)
-	return nil
+func (a printCodeSessionAction) Run(_ flow.RunCtx, _ flow.RuntimeEnv, res *flow.Result) flow.Flow {
+	if res == nil || res.Summary == nil {
+		return flow.Flow{State: flow.StateContinue}
+	}
+	printCodeSessionSummary(a.SharedDir, a.SupervisorDir, res.Summary.ExecID, a.Print, res.Summary.Output)
+	return flow.Flow{State: flow.StateContinue}
 }
 
 func printCodeSessionSummary(sharedDir, supervisorDir string, execID int64, printOutput bool, output string) {

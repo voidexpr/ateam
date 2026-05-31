@@ -2,12 +2,11 @@ package cmd
 
 import (
 	"fmt"
-	"sync"
 
+	"github.com/ateam/internal/flow"
+	"github.com/ateam/internal/flow/actions"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/runner"
-	"github.com/ateam/internal/stage"
-	"github.com/ateam/internal/stage/actions"
 	"github.com/spf13/cobra"
 )
 
@@ -97,16 +96,6 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 	cr.CallDB = db
 
-	progress := make(chan runner.RunProgress, 64)
-	var progressWg sync.WaitGroup
-	progressWg.Add(1)
-	go func() {
-		defer progressWg.Done()
-		printProgress(progress)
-	}()
-	defer progressWg.Wait()
-	defer close(progress)
-
 	ctx, stop := cmdContext()
 	defer stop()
 
@@ -115,13 +104,14 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 	// here. Writing the v1 path (rather than the pre-v1 setup_overview.md or
 	// the pre-flat shared/auto_setup/auto_setup.md) avoids re-triggering
 	// layout migration on the next ateam command.
-	return stage.Run(stage.Stage{
+	bundle := flow.PromptBundle{
 		Name:   "auto-setup",
+		Role:   "supervisor",
 		Action: runner.ActionExec,
-		BuildPrompt: func(*stage.Ctx) (string, error) {
+		Render: func(flow.RuntimeEnv) (string, error) {
 			return prompt, nil
 		},
-		BuildRunOpts: func(*stage.Ctx) runner.RunOpts {
+		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
 			return runner.RunOpts{
 				RoleID:     "supervisor",
 				Action:     runner.ActionExec,
@@ -130,20 +120,25 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 				Verbose:    autoSetupVerbose,
 			}
 		},
-		Post: []stage.Action{
-			actions.FailOnExecError{Label: "auto-setup"},
-			actions.PrintDone{},
+		PostExec: []flow.Action{
 			// No artifact file path — the agent's final message is the
 			// overview's source-of-truth here (unlike review/verify which
 			// rely on the file). Stream-only print mirrors the original
 			// "if result.Output != \"\", print it" branch.
 			actions.PrintArtifactBody{If: true, Path: ""},
 		},
-	}, &stage.Ctx{
-		Context:    ctx,
-		Env:        env,
-		Executor:   cr,
-		DB:         db,
-		OnProgress: runner.ProgressChan(progress),
-	})
+	}
+	rtEnv := flow.RuntimeEnv{
+		Executor: cr,
+		WorkDir:  env.WorkDir,
+		Role:     "supervisor",
+		Action:   runner.ActionExec,
+	}
+	rc := flow.RunCtx{
+		Ctx:      ctx,
+		DB:       db,
+		Resolved: env,
+		Reporter: &flow.StdoutReporter{Stream: true},
+	}
+	return flow.Run(bundle, rtEnv, rc).FirstError()
 }

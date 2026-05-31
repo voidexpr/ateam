@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ateam/internal/flow"
+	"github.com/ateam/internal/flow/actions"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/runner"
-	"github.com/ateam/internal/stage"
-	"github.com/ateam/internal/stage/actions"
 	"github.com/spf13/cobra"
 )
 
@@ -178,13 +178,14 @@ func runVerify(opts VerifyOptions) error {
 	defer stop()
 	startedAt := time.Now()
 
-	return stage.Run(stage.Stage{
+	bundle := flow.PromptBundle{
 		Name:   "verify",
+		Role:   "supervisor",
 		Action: runner.ActionVerify,
-		BuildPrompt: func(*stage.Ctx) (string, error) {
+		Render: func(flow.RuntimeEnv) (string, error) {
 			return prompt, nil
 		},
-		BuildRunOpts: func(*stage.Ctx) runner.RunOpts {
+		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
 			return runner.RunOpts{
 				RoleID:            "supervisor",
 				Action:            runner.ActionVerify,
@@ -196,19 +197,26 @@ func runVerify(opts VerifyOptions) error {
 				StartedAt:         startedAt,
 			}
 		},
-		Pre: []stage.Action{
+		PreExec: []flow.Action{
 			actions.CheckConcurrentRuns{If: !opts.Force, Action: runner.ActionVerify},
 		},
-		Post: []stage.Action{
-			actions.FailOnExecError{Label: "verify"},
-			actions.PrintDone{},
+		PostExec: []flow.Action{
 			actions.PrintArtifactPath{Label: "Verification report", Path: verifyFile},
 			actions.PrintArtifactBody{If: opts.Print, Path: verifyFile},
 		},
-	}, &stage.Ctx{
-		Context:  ctx,
-		Env:      env,
+	}
+
+	rtEnv := flow.RuntimeEnv{
 		Executor: cr,
+		WorkDir:  env.WorkDir,
+		Role:     "supervisor",
+		Action:   runner.ActionVerify,
+	}
+	rc := flow.RunCtx{
+		Ctx:      ctx,
 		DB:       db,
-	})
+		Resolved: env,
+		Reporter: &flow.StdoutReporter{},
+	}
+	return flow.Run(bundle, rtEnv, rc).FirstError()
 }

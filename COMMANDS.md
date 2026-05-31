@@ -203,10 +203,11 @@ ateam code --dry-run
 | `--container-name NAME` | Override container name (for docker-exec containers) |
 | `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
 | `--verbose` | Print agent and docker commands to stderr |
-| `--tail` | Stream live output from supervisor and sub-runs |
 | `--force` | Run even if the same action is already running |
 
 `ateam code` stops after the code phase. Run `ateam verify` afterward (or `ateam all` for the full pipeline) to inspect the commits and run the test suite.
+
+For live output from a running `code` session, run `ateam tail --coding` in a separate terminal; the previous `--tail` flag has been removed.
 
 ### `ateam verify`
 
