@@ -16,6 +16,8 @@ package flow
 
 import (
 	"context"
+	"fmt"
+	"runtime/debug"
 	"sync"
 
 	"github.com/ateam/internal/calldb"
@@ -370,11 +372,22 @@ func (p Pipeline) runDetailed(rc RunCtx, env RuntimeEnv) PipelineResult {
 // sequential execution. Parallel does NOT short-circuit on errors — every
 // step runs to completion; the parent (a Pipeline, if any) decides what
 // to do with the aggregate.
+//
+// PreDispatch, if set, fires once per step in dispatch order, BEFORE the
+// step's worker slot is acquired. Returning a non-nil error stops further
+// dispatching: the remaining steps are emitted as StateSkip results with
+// the error's message as the skip reason. In-flight steps run to
+// completion. Models runner.RunPoolWithOpts.PoolOpts.PreDispatch.
+//
+// Worker goroutines recover from panics and emit a synthetic Error Result
+// per panicking step (matching runner.RunPool's per-task panic safety
+// net). Without this, a panic in any step would tear down every sibling.
 type Parallel struct {
-	Name    string
-	Steps   []Step
-	Env     *RuntimeEnv
-	Workers int
+	Name        string
+	Steps       []Step
+	Env         *RuntimeEnv
+	Workers     int
+	PreDispatch func() error
 }
 
 func (p Parallel) name() string { return p.Name }
@@ -389,43 +402,107 @@ func (p Parallel) execute(rc RunCtx, env RuntimeEnv) []Result {
 	var results []Result
 	switch {
 	case env.DryRun, len(p.Steps) <= 1:
-		for _, s := range p.Steps {
-			results = append(results, s.execute(rc, env)...)
-		}
+		results = p.runSequential(rc, env)
 	default:
 		workers := p.Workers
 		if workers <= 0 {
 			workers = minInt(len(p.Steps), 5)
 		}
-		results = runConcurrently(rc, env, p.Steps, workers)
+		results = p.runConcurrently(rc, env, workers)
 	}
 
 	rc.Reporter.StageEnd(si, stageOutcomeFromResults(results))
 	return results
 }
 
-func runConcurrently(rc RunCtx, env RuntimeEnv, steps []Step, workers int) []Result {
+// runSequential dispatches steps one at a time. Used for DryRun and
+// single-step Parallels. PreDispatch is honored.
+func (p Parallel) runSequential(rc RunCtx, env RuntimeEnv) []Result {
+	var results []Result
+	for i, s := range p.Steps {
+		if p.PreDispatch != nil {
+			if err := p.PreDispatch(); err != nil {
+				for _, skip := range p.Steps[i:] {
+					results = append(results, skippedDispatchResult(skip, env, err))
+				}
+				return results
+			}
+		}
+		results = append(results, s.execute(rc, env)...)
+	}
+	return results
+}
+
+// runConcurrently fans the steps across `workers` goroutines with a
+// semaphore-bounded pool. PreDispatch errors short-circuit the dispatch
+// loop with skipped results for remaining steps. Each worker recovers
+// from panics so a panic in one step doesn't tear down its siblings.
+func (p Parallel) runConcurrently(rc RunCtx, env RuntimeEnv, workers int) []Result {
 	var (
 		mu      sync.Mutex
 		results []Result
 		wg      sync.WaitGroup
 	)
+	emit := func(rs ...Result) {
+		mu.Lock()
+		results = append(results, rs...)
+		mu.Unlock()
+	}
+
 	sem := make(chan struct{}, workers)
-	for _, s := range steps {
+	for i, s := range p.Steps {
+		if p.PreDispatch != nil {
+			if err := p.PreDispatch(); err != nil {
+				for _, skip := range p.Steps[i:] {
+					emit(skippedDispatchResult(skip, env, err))
+				}
+				break
+			}
+		}
 		s := s
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
 			defer func() { <-sem }()
-			rs := s.execute(rc, env)
-			mu.Lock()
-			results = append(results, rs...)
-			mu.Unlock()
+			defer func() {
+				if rv := recover(); rv != nil {
+					emit(panicResult(s, env, rv))
+				}
+			}()
+			emit(s.execute(rc, env)...)
 		}()
 	}
 	wg.Wait()
 	return results
+}
+
+// skippedDispatchResult builds a Skip Result for a Step that PreDispatch
+// refused to dispatch. The reason carries the PreDispatch error message
+// so cmd-layer reductions can surface "skipped: budget reached" etc.
+func skippedDispatchResult(s Step, env RuntimeEnv, cause error) Result {
+	return Result{
+		Env: env,
+		Flow: Flow{
+			State:  StateSkip,
+			Reason: fmt.Sprintf("not dispatched: %v", cause),
+		},
+	}
+}
+
+// panicResult builds an Error Result from a recovered panic. The stack
+// is captured into Reason so the panic stays diagnosable in the cmd
+// layer's failure summary. Mirrors runner.RunPool's panic recovery.
+func panicResult(s Step, env RuntimeEnv, rv any) Result {
+	err := fmt.Errorf("panic in step %q: %v", s.name(), rv)
+	return Result{
+		Env: env,
+		Flow: Flow{
+			State:  StateError,
+			Reason: fmt.Sprintf("panic: %v\n\n%s", rv, debug.Stack()),
+			Err:    err,
+		},
+	}
 }
 
 // ============================================================

@@ -373,6 +373,135 @@ func TestParallel_AllRunEvenIfOneErrors(t *testing.T) {
 	}
 }
 
+func TestParallel_PreDispatchSkipsRemaining(t *testing.T) {
+	exec := &fakeExecutor{}
+	rc := newCtx()
+	env := newEnv(exec)
+
+	// Allow the first 2 dispatches, then refuse.
+	calls := 0
+	preErr := errors.New("budget exhausted")
+	par := Parallel{
+		Name:    "fan",
+		Workers: 4,
+		Steps: []Step{
+			makeBundle("a", nil),
+			makeBundle("b", nil),
+			makeBundle("c", nil),
+			makeBundle("d", nil),
+			makeBundle("e", nil),
+		},
+		PreDispatch: func() error {
+			calls++
+			if calls > 2 {
+				return preErr
+			}
+			return nil
+		},
+	}
+	out := Run(par, env, rc)
+	if got := len(out.Steps[0].Results); got != 5 {
+		t.Fatalf("expected 5 results (2 ran + 3 skipped), got %d", got)
+	}
+
+	succeeded, skipped := 0, 0
+	for _, r := range out.Steps[0].Results {
+		switch r.Flow.State {
+		case StateContinue:
+			succeeded++
+		case StateSkip:
+			skipped++
+			if !strings.Contains(r.Flow.Reason, "budget exhausted") {
+				t.Errorf("expected skip reason to carry PreDispatch error; got %q", r.Flow.Reason)
+			}
+		}
+	}
+	if succeeded != 2 || skipped != 3 {
+		t.Errorf("got %d succeeded / %d skipped; want 2 / 3", succeeded, skipped)
+	}
+	if exec.Calls()[0].Prompt != "hello" {
+		t.Errorf("agent should have been invoked for the 2 dispatched bundles")
+	}
+}
+
+func TestParallel_PreDispatchHonoredSequentialPath(t *testing.T) {
+	// Sequential path (DryRun OR len(Steps)<=1) must also honor PreDispatch.
+	exec := &fakeExecutor{}
+	rc := newCtx()
+	env := newEnv(exec)
+	env.DryRun = true
+
+	calls := 0
+	par := Parallel{
+		Name: "fan",
+		Steps: []Step{
+			makeBundle("a", nil), makeBundle("b", nil), makeBundle("c", nil),
+		},
+		PreDispatch: func() error {
+			calls++
+			if calls > 1 {
+				return errors.New("stop")
+			}
+			return nil
+		},
+	}
+	out := Run(par, env, rc)
+	skipped := 0
+	for _, r := range out.Steps[0].Results {
+		if r.Flow.State == StateSkip && strings.Contains(r.Flow.Reason, "stop") {
+			skipped++
+		}
+	}
+	if skipped != 2 {
+		t.Errorf("sequential PreDispatch: got %d skipped, want 2", skipped)
+	}
+}
+
+func TestParallel_PanicRecovered(t *testing.T) {
+	exec := &fakeExecutor{}
+	rc := newCtx()
+	env := newEnv(exec)
+
+	panicking := PromptBundle{
+		Name: "boom",
+		Render: func(RuntimeEnv) (string, error) {
+			panic("synthetic panic")
+		},
+		RunOpts: func(RuntimeEnv) runner.RunOpts { return runner.RunOpts{} },
+	}
+	par := Parallel{
+		Name:    "fan",
+		Workers: 4,
+		Steps: []Step{
+			makeBundle("a", nil),
+			panicking,
+			makeBundle("c", nil),
+		},
+	}
+	out := Run(par, env, rc)
+	if got := len(out.Steps[0].Results); got != 3 {
+		t.Fatalf("expected 3 results despite panic, got %d", got)
+	}
+	sawPanic := false
+	succeeded := 0
+	for _, r := range out.Steps[0].Results {
+		switch r.Flow.State {
+		case StateError:
+			if strings.Contains(r.Flow.Reason, "panic") {
+				sawPanic = true
+			}
+		case StateContinue:
+			succeeded++
+		}
+	}
+	if !sawPanic {
+		t.Error("expected an Error result with 'panic' in reason")
+	}
+	if succeeded != 2 {
+		t.Errorf("siblings should still run after panic; got %d succeeded", succeeded)
+	}
+}
+
 func TestParallel_DryRun(t *testing.T) {
 	exec := &fakeExecutor{}
 	rc := newCtx()
