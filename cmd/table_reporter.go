@@ -120,41 +120,31 @@ func (r *tableReporter) BundleEnd(b flow.BundleInfo, res flow.Result) {
 	if !ok {
 		return
 	}
+	var summary runner.RunSummary
+	if res.Summary != nil {
+		summary = *res.Summary
+	}
 	switch res.Flow.State {
 	case flow.StateSkip:
-		summary := runner.RunSummary{ErrorCause: res.Flow.Reason}
-		if res.Summary != nil {
-			summary = *res.Summary
-			summary.ErrorCause = res.Flow.Reason
-		}
+		summary.ErrorCause = res.Flow.Reason
 		r.rows[idx] = skippedPoolStatusRow(r.rows[idx], summary)
 		r.skipped++
-		r.results = append(r.results, summary)
 	case flow.StateError:
-		summary := runner.RunSummary{}
-		if res.Summary != nil {
-			summary = *res.Summary
-		}
 		if summary.Err == nil && res.Flow.Err != nil {
 			summary.Err = res.Flow.Err
 			summary.IsError = true
 		}
 		r.rows[idx] = errorPoolStatusRow(r.rows[idx], summary, r.cwd)
 		r.failed++
-		r.results = append(r.results, summary)
 	default:
-		summary := runner.RunSummary{}
-		if res.Summary != nil {
-			summary = *res.Summary
-		}
 		displayPath := ""
 		if r.onDone != nil {
 			displayPath = r.onDone(summary, r.cwd)
 		}
 		r.rows[idx] = donePoolStatusRow(r.rows[idx], summary, displayPath)
 		r.succeeded++
-		r.results = append(r.results, summary)
 	}
+	r.results = append(r.results, summary)
 	r.render()
 }
 

@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"syscall"
 
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/flow"
@@ -83,6 +84,12 @@ func checkRunning(db *calldb.CallDB, projectID, action string, roles []string) f
 		if len(roles) > 0 && !roleSet[r.Role] {
 			continue
 		}
+		// Stale rows (process died without writing ended_at) must not block
+		// new runs. Match cmd/db.go::checkConcurrentRuns: only treat the
+		// row as live when the PID still exists.
+		if r.PID <= 0 || !processAlive(r.PID) {
+			continue
+		}
 		alive = append(alive, fmt.Sprintf("%s/%s (pid=%d, exec=%d)", r.Action, r.Role, r.PID, r.ID))
 	}
 	if len(alive) == 0 {
@@ -90,6 +97,17 @@ func checkRunning(db *calldb.CallDB, projectID, action string, roles []string) f
 	}
 	return errFlow(fmt.Errorf("already running:\n  %s\n(pass --force to override)",
 		strings.Join(alive, "\n  ")))
+}
+
+// processAlive checks whether the given PID has a live process. Mirrors
+// cmd/table.go::isProcessAlive; duplicated to avoid a cmd→internal/flow
+// reverse import.
+func processAlive(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 // PrintArtifactPath is a PostExec action that emits "<Label>: <Path>" so

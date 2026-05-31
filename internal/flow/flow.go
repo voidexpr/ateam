@@ -180,6 +180,21 @@ func Run(top Step, env RuntimeEnv, rc RunCtx) PipelineResult {
 	}
 }
 
+// RunBundle is the single-bundle shortcut. Callers that wrap one
+// PromptBundle in Run and then drill `result.Steps[0].Results[0]` to
+// retrieve the Summary should use this instead — it returns the leaf
+// Result directly. Equivalent to `Run(b, env, rc).Steps[0].Results[0]`.
+func RunBundle(b PromptBundle, env RuntimeEnv, rc RunCtx) Result {
+	if rc.Reporter == nil {
+		rc.Reporter = NoopReporter{}
+	}
+	results := b.execute(rc, env)
+	if len(results) == 0 {
+		return Result{Bundle: &b, Env: env}
+	}
+	return results[0]
+}
+
 // ============================================================
 // Action
 // ============================================================
@@ -406,7 +421,7 @@ func (p Parallel) execute(rc RunCtx, env RuntimeEnv) []Result {
 	default:
 		workers := p.Workers
 		if workers <= 0 {
-			workers = minInt(len(p.Steps), 5)
+			workers = min(len(p.Steps), 5)
 		}
 		results = p.runConcurrently(rc, env, workers)
 	}
@@ -518,29 +533,8 @@ func hasError(rs []Result) bool {
 	return false
 }
 
-func stageOutcomeFromPipeline(pr PipelineResult) StageOutcome {
-	so := StageOutcome{FirstErrorIndex: pr.FirstErrorIndex}
-	for _, s := range pr.Steps {
-		if s.Skipped {
-			so.Skipped++
-			continue
-		}
-		for _, r := range s.Results {
-			switch r.Flow.State {
-			case StateContinue:
-				so.Succeeded++
-			case StateSkip:
-				so.Skipped++
-			case StateError:
-				so.Failed++
-			}
-		}
-	}
-	return so
-}
-
-func stageOutcomeFromResults(rs []Result) StageOutcome {
-	so := StageOutcome{FirstErrorIndex: -1}
+// tallyResults walks rs, incrementing so's counters per Result.Flow.State.
+func (so *StageOutcome) tallyResults(rs []Result) {
 	for _, r := range rs {
 		switch r.Flow.State {
 		case StateContinue:
@@ -551,12 +545,22 @@ func stageOutcomeFromResults(rs []Result) StageOutcome {
 			so.Failed++
 		}
 	}
+}
+
+func stageOutcomeFromPipeline(pr PipelineResult) StageOutcome {
+	so := StageOutcome{FirstErrorIndex: pr.FirstErrorIndex}
+	for _, s := range pr.Steps {
+		if s.Skipped {
+			so.Skipped++
+			continue
+		}
+		so.tallyResults(s.Results)
+	}
 	return so
 }
 
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+func stageOutcomeFromResults(rs []Result) StageOutcome {
+	so := StageOutcome{FirstErrorIndex: -1}
+	so.tallyResults(rs)
+	return so
 }

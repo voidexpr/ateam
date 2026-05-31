@@ -411,16 +411,11 @@ func runReport(opts ReportOptions) error {
 		},
 	})
 
-	pipeline := flow.Pipeline{
-		Name: "report",
-		Steps: []flow.Step{
-			flow.Parallel{
-				Name:        "roles",
-				Steps:       steps,
-				Workers:     maxParallel,
-				PreDispatch: preDispatch,
-			},
-		},
+	roles := flow.Parallel{
+		Name:        "roles",
+		Steps:       steps,
+		Workers:     maxParallel,
+		PreDispatch: preDispatch,
 	}
 	rtEnv := flow.RuntimeEnv{
 		WorkDir: env.WorkDir,
@@ -433,7 +428,7 @@ func runReport(opts ReportOptions) error {
 		Resolved: env,
 		Reporter: tr,
 	}
-	flow.Run(pipeline, rtEnv, rc)
+	flow.Run(roles, rtEnv, rc)
 	runErr := tr.Close()
 
 	succeeded, failed, _ := tr.Counts()

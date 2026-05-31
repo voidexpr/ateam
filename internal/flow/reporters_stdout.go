@@ -85,18 +85,26 @@ func (r *StdoutReporter) BundleEnd(b BundleInfo, res Result) {
 }
 
 // AgentEvent emits a structured progress line per RunProgress event when
-// Stream is true. Line format matches the cmd-layer printProgress
-// drainer's output byte-for-byte so migrated cmds (auto_setup, code,
-// exec) keep the same on-screen behavior.
+// Stream is true. Delegates to PrintProgressLine so cmd-layer drainers
+// (e.g. cmd/exec.go::printProgress for the non-flow paths that still
+// exist in auto_roles / inspect) can share the exact format.
 func (r *StdoutReporter) AgentEvent(_ BundleInfo, p runner.RunProgress) {
 	if !r.Stream {
 		return
 	}
-	w := r.errWriter()
+	PrintProgressLine(r.errWriter(), p)
+}
+
+// PrintProgressLine writes one structured "[role] ..." progress line to
+// w for the given RunProgress event. Single source of truth for the
+// stream-mode progress format; the cmd-layer printProgress drainer still
+// in use by `ateam auto_roles` and `ateam inspect` calls into this
+// helper so the two paths cannot drift.
+func PrintProgressLine(w io.Writer, p runner.RunProgress) {
 	ts := display.FormatDuration(p.Elapsed)
 	switch p.Phase {
 	case runner.PhaseInit:
-		fmt.Fprintf(w, "[%s] %s\n", p.RoleID, formatInitLine(p))
+		fmt.Fprintf(w, "[%s] %s\n", p.RoleID, FormatInitLine(p))
 	case runner.PhaseThinking:
 		if p.Content != "" {
 			fmt.Fprintf(w, "[%s] %s (%s)\n", p.RoleID, runner.SingleLineText(p.Content), ts)
@@ -104,7 +112,7 @@ func (r *StdoutReporter) AgentEvent(_ BundleInfo, p runner.RunProgress) {
 			fmt.Fprintf(w, "[%s] thinking... (%s)\n", p.RoleID, ts)
 		}
 	case runner.PhaseTool:
-		ctxInfo := fmtContextProgress(p.ContextTokens, p.ContextWindow)
+		ctxInfo := FormatContextProgress(p.ContextTokens, p.ContextWindow)
 		if p.ToolInput != "" {
 			fmt.Fprintf(w, "[%s] tool: %s %s (%d total, %s%s)\n", p.RoleID, p.ToolName, runner.SingleLineText(p.ToolInput), p.ToolCount, ts, ctxInfo)
 		} else {
@@ -123,7 +131,10 @@ func (r *StdoutReporter) AgentEvent(_ BundleInfo, p runner.RunProgress) {
 	}
 }
 
-func formatInitLine(p runner.RunProgress) string {
+// FormatInitLine renders the body of an "[role] ..." line for a
+// PhaseInit event. Exported so cmd-layer drainers (auto_roles, inspect)
+// share the format.
+func FormatInitLine(p runner.RunProgress) string {
 	switch p.Subtype {
 	case "compact_boundary":
 		return "context compacted"
@@ -144,7 +155,9 @@ func formatInitLine(p runner.RunProgress) string {
 	}
 }
 
-func fmtContextProgress(contextTokens, contextWindow int) string {
+// FormatContextProgress renders the ", ctx: X/Y%" tail for PhaseTool
+// lines. Empty when contextTokens is unknown.
+func FormatContextProgress(contextTokens, contextWindow int) string {
 	if contextTokens <= 0 {
 		return ""
 	}

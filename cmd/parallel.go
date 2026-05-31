@@ -221,16 +221,11 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		quiet:     !isTerminal() || parallelNoProgress,
 	})
 
-	pipeline := flow.Pipeline{
-		Name: "parallel",
-		Steps: []flow.Step{
-			flow.Parallel{
-				Name:        "agents",
-				Steps:       steps,
-				Workers:     maxParallel,
-				PreDispatch: preDispatch,
-			},
-		},
+	agents := flow.Parallel{
+		Name:        "agents",
+		Steps:       steps,
+		Workers:     maxParallel,
+		PreDispatch: preDispatch,
 	}
 	rtEnv := flow.RuntimeEnv{
 		Executor: r,
@@ -244,7 +239,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		Resolved: env,
 		Reporter: tr,
 	}
-	flow.Run(pipeline, rtEnv, rc)
+	flow.Run(agents, rtEnv, rc)
 	runErr := tr.Close()
 
 	// Print outputs in submission order (labels[] is authoritative).

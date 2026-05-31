@@ -241,12 +241,9 @@ func runExec(cmd *cobra.Command, args []string) error {
 		Resolved: env,
 		Reporter: &execReporter{StdoutReporter: &flow.StdoutReporter{Stream: showStream}},
 	}
-	pr := flow.Run(bundle, rtEnv, rc)
-
-	// Single-bundle Pipeline → one step, one Result with the Summary.
-	res := pr.Steps[0].Results[0]
+	res := flow.RunBundle(bundle, rtEnv, rc)
 	if res.Summary == nil {
-		return fmt.Errorf("internal: flow.Run returned no Summary")
+		return fmt.Errorf("internal: flow.RunBundle returned no Summary")
 	}
 	result := *res.Summary
 
@@ -283,75 +280,23 @@ type execReporter struct {
 
 func (*execReporter) BundleEnd(flow.BundleInfo, flow.Result) {}
 
+// printProgress drains a runner.RunProgress chan, writing one
+// flow.PrintProgressLine per event to stderr. Used by the legacy
+// chan-progress paths in cmd/auto_roles and cmd/inspect — the
+// migrated flow cmds receive the same lines via flow.StdoutReporter's
+// Stream-mode AgentEvent. Single source of truth for the format lives
+// in flow.PrintProgressLine.
 func printProgress(ch <-chan runner.RunProgress) {
 	for p := range ch {
-		ts := display.FormatDuration(p.Elapsed)
-		switch p.Phase {
-		case runner.PhaseInit:
-			fmt.Fprintf(os.Stderr, "[%s] %s\n", p.RoleID, formatInitLine(p))
-		case runner.PhaseThinking:
-			if p.Content != "" {
-				fmt.Fprintf(os.Stderr, "[%s] %s (%s)\n", p.RoleID, singleLine(p.Content), ts)
-			} else {
-				fmt.Fprintf(os.Stderr, "[%s] thinking... (%s)\n", p.RoleID, ts)
-			}
-		case runner.PhaseTool:
-			ctxInfo := fmtContextProgress(p.ContextTokens, p.ContextWindow)
-			if p.ToolInput != "" {
-				fmt.Fprintf(os.Stderr, "[%s] tool: %s %s (%d total, %s%s)\n", p.RoleID, p.ToolName, singleLine(p.ToolInput), p.ToolCount, ts, ctxInfo)
-			} else {
-				fmt.Fprintf(os.Stderr, "[%s] tool: %s (%d total, %s%s)\n", p.RoleID, p.ToolName, p.ToolCount, ts, ctxInfo)
-			}
-		case runner.PhaseToolResult:
-			if p.Content != "" {
-				fmt.Fprintf(os.Stderr, "[%s] result: %s (%s)\n", p.RoleID, singleLine(p.Content), ts)
-			}
-		case runner.PhaseDone:
-			fmt.Fprintf(os.Stderr, "[%s] done (%s)\n", p.RoleID, ts)
-		case runner.PhaseError:
-			fmt.Fprintf(os.Stderr, "[%s] error (%s)\n", p.RoleID, ts)
-		case runner.PhaseStall:
-			fmt.Fprintf(os.Stderr, "[%s] stall: %s (%s)\n", p.RoleID, p.Content, ts)
-		}
+		flow.PrintProgressLine(os.Stderr, p)
 	}
 }
 
-func singleLine(s string) string {
-	return runner.SingleLineText(s)
-}
-
-func formatInitLine(p runner.RunProgress) string {
-	switch p.Subtype {
-	case "compact_boundary":
-		return "context compacted"
-	case "", "init":
-		parts := []string{}
-		if p.Model != "" {
-			parts = append(parts, "model="+p.Model)
-		}
-		if p.SessionID != "" {
-			parts = append(parts, "session="+p.SessionID)
-		}
-		if len(parts) == 0 {
-			return "initializing..."
-		}
-		return "init: " + strings.Join(parts, " ")
-	default:
-		return "init: " + p.Subtype
-	}
-}
-
-func fmtContextProgress(contextTokens, contextWindow int) string {
-	if contextTokens <= 0 {
-		return ""
-	}
-	ctxStr := display.FmtTokens(int64(contextTokens))
-	if contextWindow > 0 {
-		pct := contextTokens * 100 / contextWindow
-		return fmt.Sprintf(", ctx: %s/%d%%", ctxStr, pct)
-	}
-	return fmt.Sprintf(", ctx: %s", ctxStr)
-}
+// formatInitLine + singleLine + fmtContextProgress are exported from
+// internal/flow as FormatInitLine / runner.SingleLineText /
+// FormatContextProgress. The test below still hits the cmd-local name
+// for compatibility — alias so callers and tests work the same.
+var formatInitLine = flow.FormatInitLine
 
 func printExecDryRun(r *runner.AgentExecutor, env *root.ResolvedEnv, prompt, roleID, action, batch string) error {
 	fmt.Println("╔══ dry-run ══╗")
