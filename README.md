@@ -180,11 +180,10 @@ sudo ln -s "$(pwd)/ateam" /usr/local/bin/ateam
 
 ```bash
 git pull --rebase && make build-all
-ateam update --diff   # preview which embedded prompts changed
-ateam update          # sync on-disk prompts to the new embedded defaults
+ateam update          # prints the diff and syncs on-disk prompts to the new embedded defaults
 ```
 
-Run `ateam update` after rebuilding: on-disk org/project prompts shadow the binary's embedded defaults, so without it prompt changes shipped in the new version silently don't take effect. Use `ateam update --diff` first to preview the changes.
+Run `ateam update` after rebuilding: on-disk org/project prompts shadow the binary's embedded defaults, so without it prompt changes shipped in the new version silently don't take effect. `ateam update` prints the per-file diff before applying; pass `--quiet` to suppress it.
 
 ### Use agents to help with ateam itself
 
