@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -8,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/root"
+	"github.com/ateam/internal/runner"
 )
 
 func TestReportDryRun(t *testing.T) {
@@ -331,5 +334,123 @@ func TestRerunFailedMutuallyExclusiveWithRoles(t *testing.T) {
 	}
 	if !strings.Contains(runErr.Error(), "mutually exclusive") {
 		t.Errorf("expected 'mutually exclusive' error, got: %v", runErr)
+	}
+}
+
+// TestPrintReportBodiesFiltersFailedRoles guards the --print fix in 591474f:
+// when a role failed in the current run, printArtifact's on-disk fallback must
+// NOT surface the previous-run report under the failed role's header.
+//
+// The bug: iterating rbs unconditionally let printArtifact read the stale file
+// for a failed role (since outputByRole[failedRole] was an empty string, which
+// triggered the path fallback). The fix skips roles missing from the success
+// map.
+func TestPrintReportBodiesFiltersFailedRoles(t *testing.T) {
+	_, projPath, env := setupTestProject(t)
+
+	// Pre-populate role B's on-disk report with a sentinel from a "prior run".
+	// This is the staleness the fix must guard against — if the filter is
+	// reverted, printArtifact reads this file and surfaces it.
+	const sentinel = "PRIOR_RUN_REPORT_SENTINEL_DO_NOT_PRINT"
+	sentinelPath := env.RoleReportPath("role_b")
+	if err := os.MkdirAll(filepath.Dir(sentinelPath), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(sentinelPath, []byte(sentinel), 0644); err != nil {
+		t.Fatalf("WriteFile sentinel: %v", err)
+	}
+
+	// Simulate a finished run: role_a succeeded, role_b failed.
+	results := []runner.RunSummary{
+		{RoleID: "role_a", Output: "ROLE_A_FRESH_OUTPUT"},
+		{RoleID: "role_b", IsError: true, Err: errors.New("agent crashed")},
+	}
+
+	out := captureStdout(t, func() {
+		withChdir(t, projPath, func() {
+			printReportBodies([]string{"role_a", "role_b"}, results, env)
+		})
+	})
+
+	if strings.Contains(out, sentinel) {
+		t.Errorf("sentinel from prior run leaked under failed role's header:\n%s", out)
+	}
+	if !strings.Contains(out, "role_a") || !strings.Contains(out, "ROLE_A_FRESH_OUTPUT") {
+		t.Errorf("expected role_a body in output:\n%s", out)
+	}
+	// The failed role should not get a header at all — the current-run filter
+	// short-circuits before the banner prints.
+	if strings.Contains(out, "══════ role_b ══════") {
+		t.Errorf("failed role should be skipped, but its header appeared:\n%s", out)
+	}
+}
+
+// TestPrintReportBodiesFiltersSkippedRoles is the sibling of the failed case:
+// roles that PreDispatch refused to dispatch arrive as skipped summaries
+// (Err==nil, IsError==true) and must also be filtered out so the on-disk
+// fallback doesn't surface a stale report for them.
+func TestPrintReportBodiesFiltersSkippedRoles(t *testing.T) {
+	_, projPath, env := setupTestProject(t)
+
+	const sentinel = "STALE_FROM_PRIOR_BATCH"
+	sentinelPath := env.RoleReportPath("role_skipped")
+	if err := os.MkdirAll(filepath.Dir(sentinelPath), 0755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(sentinelPath, []byte(sentinel), 0644); err != nil {
+		t.Fatalf("WriteFile sentinel: %v", err)
+	}
+
+	// Skipped summaries mirror what runner/pool.go:skippedSummary produces:
+	// IsError==true, Err==nil, ErrorSource=="skipped".
+	results := []runner.RunSummary{
+		{RoleID: "role_ok", Output: "FRESH"},
+		{RoleID: "role_skipped", IsError: true, ErrorSource: agent.ErrorSourceSkipped},
+	}
+
+	out := captureStdout(t, func() {
+		withChdir(t, projPath, func() {
+			printReportBodies([]string{"role_ok", "role_skipped"}, results, env)
+		})
+	})
+
+	if strings.Contains(out, sentinel) {
+		t.Errorf("sentinel from prior batch leaked for skipped role:\n%s", out)
+	}
+}
+
+// TestShouldAutoReview locks in the gate from 591474f: --review must require
+// not only failed==0 but also skipped==0, otherwise a PreDispatch budget skip
+// would auto-trigger review over a partial report set.
+func TestShouldAutoReview(t *testing.T) {
+	cases := []struct {
+		name      string
+		reviewOpt bool
+		failed    int
+		skipped   int
+		succeeded int
+		want      bool
+	}{
+		{name: "review off",
+			reviewOpt: false, failed: 0, skipped: 0, succeeded: 3, want: false},
+		{name: "all succeeded → run review",
+			reviewOpt: true, failed: 0, skipped: 0, succeeded: 3, want: true},
+		{name: "any failed blocks review",
+			reviewOpt: true, failed: 1, skipped: 0, succeeded: 2, want: false},
+		{name: "any skipped blocks review (regression case for 591474f)",
+			reviewOpt: true, failed: 0, skipped: 1, succeeded: 2, want: false},
+		{name: "skipped + failed both block",
+			reviewOpt: true, failed: 1, skipped: 1, succeeded: 1, want: false},
+		{name: "succeeded == 0 blocks review even with no failure",
+			reviewOpt: true, failed: 0, skipped: 0, succeeded: 0, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := shouldAutoReview(tc.reviewOpt, tc.failed, tc.skipped, tc.succeeded)
+			if got != tc.want {
+				t.Errorf("shouldAutoReview(%v, failed=%d, skipped=%d, succeeded=%d) = %v, want %v",
+					tc.reviewOpt, tc.failed, tc.skipped, tc.succeeded, got, tc.want)
+			}
+		})
 	}
 }
