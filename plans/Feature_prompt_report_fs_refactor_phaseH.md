@@ -10,6 +10,72 @@ If you are picking this up: Phase G commits are `b057d96..d18efca`. Start by
 reading `plans/Feature_prompt_report_fs_refactor_phaseG.md` and the `internal/flow/`
 package docs.
 
+## Status (2026-06-01)
+
+Phase H is **shipped**. All four planned steps landed plus follow-up cleanup
+and one new surfacing pass. CI is green at every commit (0 issues, race-clean
+against the 100-bundle stress test).
+
+| Step | Commit  | Notes |
+|------|---------|-------|
+| H1   | `22cdc5e` | flow.MultiReporter; StdoutReporter.SuppressBundleEnd; dropped execReporter wrapper |
+| H2   | `4f53af1` | bundle.jsonl + cmd.md "## Bundle" section; runner Prepare/ExecutePrepared split (deviated from plan — see below); 4 new Reporter methods; wired into every flow-using cmd |
+| H3   | `af61dc2` | JSONReporter + `ateam exec --format jsonl --progress-fd`; `exec_id=N` stderr line |
+| H4   | `c777bac` | cmd/exec_bundle.go::buildRunner + staticBundle; applied to exec/parallel/report/verify/review/code/auto_setup |
+| —    | `c2acb86` | cleanup: stream.jsonl → agent.jsonl rename (Layer A+B); dropped `"v":1` field; simplified BundleLogReporter mutexes |
+| —    | `3211207` | `--format jsonl` defaults to stdout (revised plan open item #1) |
+| —    | `a119bfd` | serve UI surfaces bundle.jsonl, settings.json, runtime/<exec_id>/ |
+| —    | `e85abd7` | simplification pass: filename constants in runner package, shared bundle-event builders, lazy runtime walk for /runs, HasProject() on ResolvedEnv, failedSummary constructor, openProgressFD returns (Writer, Closer) |
+
+### Where reality diverged from the plan
+
+- **Runner split into Prepare + ExecutePrepared** (H2): the plan called for
+  `AgentExecStart` to fire before `Executor.Execute`, but `exec_id` is
+  allocated *inside* Execute via `InsertCall`. The clean fix was to split
+  the runner into `Prepare()` (allocates exec_id + paths) and
+  `ExecutePrepared(prepared, …)` (runs the agent). The legacy
+  `Execute(ctx, prompt, opts, onProgress)` remains as a thin shim for
+  non-flow callers (`auto_roles`, `inspect`, `RunPool`).
+- **Dropped `"v":1` envelope field** (`c2acb86`): speculative schema
+  versioning that paid no rent. If a breaking change becomes necessary,
+  the doc gets a section; we don't tax every line.
+- **Renamed `stream.jsonl` → `agent.jsonl`** (`c2acb86`): the plan deferred
+  this "to avoid churn"; user pushed back and we did it. The legacy
+  pre-rollout `_stream.jsonl` per-role layout (and its
+  `IsLegacyStreamFile` detection) is preserved.
+- **`--progress-fd` defaults to stdout** (`3211207`): plan open item #1
+  leaned "require fd." Revisited and chose the conventional `--format X`
+  shape (jq, kubectl -o json, gh --json) — defaults to stdout, takes
+  --progress-fd N to redirect.
+- **BundleInfo grew WorkDir + Batch** (H2): so reporters can populate the
+  bundle_start payload without plumbing RuntimeEnv. Captured in
+  `bundle_events.go::bundleStartPayload` after the simplification pass.
+
+### Still on the deferred list (not done in H)
+
+- `ateam tail / cat --source agent|bundle|both` (interleave bundle.jsonl in tail/cat)
+- `agent_execs` snapshot columns + `ateam ps --progress`
+- `ateam parallel --from-stdin` JSONL exec specs
+- DB column rename `stream_file` → `agent_file` (Layer C — requires migration)
+- Migrate non-flow callers (`auto_roles`, `inspect`, `RunPool`) off the
+  `Execute` shim and onto Prepare + ExecutePrepared
+- Runner-owns-cmd.md (today the BundleLogReporter's append-after-finalize
+  ordering is comment-asserted, not enforced)
+- Gate `exec_id=N` stderr emission on cmd (currently runner-side, fires for
+  every cmd that uses the runner)
+
+### Acceptance recap
+
+- ~~Every PromptBundle execution writes a complete bundle.jsonl~~ ✓
+- ~~A bundle with PreExec/PostExec produces pre_exec_start/end + post_exec_start/end pairs~~ ✓
+- ~~`bundle_end.duration_ms` is bundle wall-time~~ ✓
+- ~~cmd.md contains the bundle metadata section~~ ✓
+- ~~`ateam exec --format jsonl` emits a valid JSONL stream~~ ✓ (now on stdout by default)
+- ~~`exec_id=N` printed on stderr after row allocation~~ ✓
+- ~~100-bundle stress test race-clean with BundleLogReporter in the chain~~ ✓
+- ~~Net LoC reduction across exec.go + parallel.go + report.go from H4~~ ✓
+- **NEW**: serve UI surfaces bundle.jsonl + settings.json + runtime/<exec_id>/ — covered by `a119bfd`
+
 ## Pick-up notes
 
 - **Working dir**: `/Users/nicolas/SyncDatabox/nicmac/projects/ateam-small-fixes/`
