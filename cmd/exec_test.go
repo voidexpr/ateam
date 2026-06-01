@@ -387,32 +387,34 @@ func TestRunExecRecordsCustomAction(t *testing.T) {
 
 func TestOpenProgressFD(t *testing.T) {
 	cases := []struct {
-		name       string
-		format     string
-		fd         int
-		wantErr    string
-		wantOpenFD bool
+		name    string
+		format  string
+		fd      int
+		want    *os.File // expected wrapper identity, or nil when none
+		wantErr string
 	}{
-		{name: "no-format-no-fd-noop", format: "", fd: 0},
+		{name: "no-format-no-fd-noop", format: "", fd: 0, want: nil},
 		{name: "fd-without-format-rejected", format: "", fd: 3, wantErr: "--progress-fd requires --format"},
 		{name: "unknown-format-rejected", format: "csv", fd: 3, wantErr: "unknown --format"},
-		{name: "jsonl-without-fd-rejected", format: "jsonl", fd: 0, wantErr: "--progress-fd"},
-		{name: "jsonl-negative-fd-rejected", format: "jsonl", fd: -1, wantErr: "--progress-fd"},
+		{name: "jsonl-default-fd-is-stdout", format: "jsonl", fd: 0, want: os.Stdout},
+		{name: "jsonl-fd-1-is-stdout", format: "jsonl", fd: 1, want: os.Stdout},
+		{name: "jsonl-fd-2-is-stderr", format: "jsonl", fd: 2, want: os.Stderr},
+		{name: "jsonl-negative-fd-rejected", format: "jsonl", fd: -1, wantErr: "non-negative"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f, err := openProgressFD(tc.format, tc.fd)
-			if f != nil {
-				f.Close()
-			}
-			if tc.wantErr == "" {
-				if err != nil {
-					t.Fatalf("unexpected err: %v", err)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err %v missing %q", err, tc.wantErr)
 				}
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("err %v missing %q", err, tc.wantErr)
+			if err != nil {
+				t.Fatalf("unexpected err: %v", err)
+			}
+			if f != tc.want {
+				t.Errorf("openProgressFD returned %v, want %v", f, tc.want)
 			}
 		})
 	}

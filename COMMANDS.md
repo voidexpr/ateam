@@ -444,20 +444,32 @@ When used with `--agent codex-tmux` the prompt has an extra shape: the first lin
 | `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
 | `--force` | Run even if the same action+role is already running |
 | `--verbose` | Print agent and docker commands to stderr |
-| `--format jsonl` | Emit a structured JSONL event stream on `--progress-fd`. Implies `--no-stream --no-summary`. See [Structured event stream](#structured-event-stream-jsonl) below |
-| `--progress-fd N` | File descriptor to write `--format` output to. Required with `--format`; must be opened by the caller (e.g. via Popen's `pass_fds`) |
+| `--format jsonl` | Emit a structured JSONL event stream on stdout. Implies `--no-stream --no-summary` and suppresses the agent's text output on stdout (preserved in the event stream's `assistant` events). See [Structured event stream](#structured-event-stream-jsonl) below |
+| `--progress-fd N` | Redirect `--format` output to file descriptor `N` instead of stdout. Use when the orchestrator wants stdout for something else; pair with Popen's `pass_fds` |
 
 #### Structured event stream (jsonl)
 
-`ateam exec --format jsonl --progress-fd=N` emits one JSON object per line on file descriptor `N`, interleaving bundle-lifecycle and per-agent events with a `source` discriminator (`"bundle"` or `"agent"`). Use for external orchestrators (Python framework, shell scripts, CI) that drive `ateam exec` subprocesses and need structured progress per subprocess.
+`ateam exec --format jsonl` emits one JSON object per line on stdout, interleaving bundle-lifecycle and per-agent events with a `source` discriminator (`"bundle"` or `"agent"`). Use for external orchestrators (Python framework, shell scripts, CI) that drive `ateam exec` subprocesses and need structured progress per subprocess.
+
+```bash
+ateam exec --format jsonl "say hi" | jq .
+```
+
+```python
+proc = subprocess.Popen(
+    ["ateam", "exec", "--format", "jsonl", "say hi"],
+    stdout=subprocess.PIPE)
+for line in proc.stdout:
+    event = json.loads(line)
+    update_progress(event)
+```
+
+Pass `--progress-fd N` to redirect events to a different fd (e.g. when the caller wants stdout for the agent's text output):
 
 ```python
 proc = subprocess.Popen(
     ["ateam", "exec", "--format", "jsonl", "--progress-fd", "3", "say hi"],
     pass_fds=(3,))
-for line in os.fdopen(3):
-    event = json.loads(line)
-    update_progress(event)
 ```
 
 The runner also prints `exec_id=<id>` on stderr right after the row is allocated — orchestrators can `grep ^exec_id=` to correlate without parsing the JSONL stream.

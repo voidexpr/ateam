@@ -90,8 +90,8 @@ func init() {
 	addDockerAutoSetupFlag(execCmd, &execDockerAutoSetup)
 	addContainerNameFlag(execCmd, &execContainerName)
 	execCmd.Flags().BoolVar(&execDryRun, "dry-run", false, "print resolved command, secrets, and prompt without running")
-	execCmd.Flags().StringVar(&execFormat, "format", "", "structured output format: 'jsonl' for an interleaved bundle+agent event stream; requires --progress-fd. Implies --no-stream --no-summary so stdout/stderr stay clean for the orchestrator")
-	execCmd.Flags().IntVar(&execProgressFD, "progress-fd", 0, "file descriptor to write --format output to; must be opened by the caller (e.g. via Popen's pass_fds). Required with --format")
+	execCmd.Flags().StringVar(&execFormat, "format", "", "structured output format: 'jsonl' for an interleaved bundle+agent event stream on stdout. Implies --no-stream --no-summary and suppresses the agent's text output (which is preserved in the event stream's assistant events)")
+	execCmd.Flags().IntVar(&execProgressFD, "progress-fd", 0, "redirect --format output to this file descriptor instead of stdout (e.g. via Popen's pass_fds when the orchestrator wants stdout for something else)")
 }
 
 func runExec(cmd *cobra.Command, args []string) error {
@@ -210,12 +210,16 @@ func runExec(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if jsonOut != nil {
+	// Only close fds we own — std{out,err} stay open for the rest of
+	// the process.
+	if jsonOut != nil && jsonOut != os.Stdout && jsonOut != os.Stderr {
 		defer jsonOut.Close()
 	}
 
-	// --format jsonl owns stdout/stderr decoration: silence the human
-	// streaming + summary lines so the orchestrator's pipes stay clean.
+	// --format jsonl owns stdout for the event stream: silence the human
+	// streaming + summary + agent-text output so the orchestrator's pipe
+	// stays clean. The agent's final text is still recoverable from the
+	// stream's `assistant` events and `agent_exec_end` totals.
 	jsonMode := jsonOut != nil
 	showStream := !execNoStream && !execQuiet && !jsonMode
 	showSummary := !execNoSummary && !execQuiet && !jsonMode
@@ -247,15 +251,17 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 	result := *res.Summary
 
-	if f, err := os.Open(result.StderrFilePath); err == nil {
-		_, _ = io.Copy(os.Stderr, f)
-		f.Close()
-	}
+	if !jsonMode {
+		if f, err := os.Open(result.StderrFilePath); err == nil {
+			_, _ = io.Copy(os.Stderr, f)
+			f.Close()
+		}
 
-	if result.Output != "" {
-		fmt.Print(result.Output)
-		if result.Output[len(result.Output)-1] != '\n' {
-			fmt.Println()
+		if result.Output != "" {
+			fmt.Print(result.Output)
+			if result.Output[len(result.Output)-1] != '\n' {
+				fmt.Println()
+			}
 		}
 	}
 
@@ -342,9 +348,14 @@ func printExecSummary(r runner.RunSummary) {
 
 // openProgressFD validates --format / --progress-fd and returns the
 // destination *os.File for JSONReporter, or nil when --format is empty.
-// The returned file must be Closed by the caller. The fd is duplicated
-// inheritably so closing the *os.File doesn't yank the original fd from
-// under whoever set it up (typically Popen's pass_fds).
+// Defaults to os.Stdout when --format is set but --progress-fd is not —
+// matches the convention of `--format X` CLIs (jq, kubectl -o json, gh
+// --json). Caller passes --progress-fd N to redirect elsewhere (e.g.
+// Popen pass_fds when the orchestrator wants stdout for something else).
+//
+// The returned file is the process's std{out,err} when fd is 0, 1, or 2;
+// caller must NOT close those. For other fds the returned *os.File wraps
+// the raw fd and caller owns the close.
 func openProgressFD(format string, fd int) (*os.File, error) {
 	if format == "" {
 		if fd != 0 {
@@ -355,14 +366,20 @@ func openProgressFD(format string, fd int) (*os.File, error) {
 	if format != "jsonl" {
 		return nil, fmt.Errorf("unknown --format %q (supported: jsonl)", format)
 	}
-	if fd <= 0 {
-		return nil, fmt.Errorf("--format=jsonl requires --progress-fd=<n> (no default; caller must pass an open writable fd)")
+	switch {
+	case fd < 0:
+		return nil, fmt.Errorf("--progress-fd must be non-negative")
+	case fd == 0 || fd == 1:
+		return os.Stdout, nil
+	case fd == 2:
+		return os.Stderr, nil
+	default:
+		f := os.NewFile(uintptr(fd), fmt.Sprintf("progress-fd-%d", fd))
+		if f == nil {
+			return nil, fmt.Errorf("--progress-fd=%d is not a valid file descriptor", fd)
+		}
+		return f, nil
 	}
-	f := os.NewFile(uintptr(fd), fmt.Sprintf("progress-fd-%d", fd))
-	if f == nil {
-		return nil, fmt.Errorf("--progress-fd=%d is not a valid file descriptor", fd)
-	}
-	return f, nil
 }
 
 // jsonReporterOrNil returns a *flow.JSONReporter when w is non-nil, else
