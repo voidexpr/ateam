@@ -57,7 +57,7 @@ func TestFormatStreamOutput(t *testing.T) {
 func TestFormatStreamMissingFile(t *testing.T) {
 	var buf strings.Builder
 	sf := &StreamFormatter{Color: false}
-	err := sf.FormatFile("/nonexistent/path/stream.jsonl", &buf)
+	err := sf.FormatFile("/nonexistent/path/agent.jsonl", &buf)
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")
 	}
@@ -81,10 +81,10 @@ func TestFormatStreamSkipsUnknownTypes(t *testing.T) {
 	}
 }
 
-// TestScanStreamFileForResultFound verifies that result event fields are
+// TestScanAgentFileForResultFound verifies that result event fields are
 // correctly extracted from the sample fixture.
-func TestScanStreamFileForResultFound(t *testing.T) {
-	res := scanStreamFileForResult("testdata/sample_stream.jsonl")
+func TestScanAgentFileForResultFound(t *testing.T) {
+	res := scanAgentFileForResult("testdata/sample_stream.jsonl")
 	if res == nil {
 		t.Fatal("expected non-nil result event")
 		return
@@ -109,36 +109,36 @@ func TestScanStreamFileForResultFound(t *testing.T) {
 	}
 }
 
-// TestScanStreamFileForResultNone verifies that nil is returned when no
+// TestScanAgentFileForResultNone verifies that nil is returned when no
 // result event exists in the stream.
-func TestScanStreamFileForResultNone(t *testing.T) {
+func TestScanAgentFileForResultNone(t *testing.T) {
 	content := `{"type":"system","subtype":"init","session_id":"s1"}
 {"type":"assistant","message":{"content":[{"type":"text","text":"no result coming"}]}}
 `
 	path := writeTempStream(t, content)
-	res := scanStreamFileForResult(path)
+	res := scanAgentFileForResult(path)
 	if res != nil {
 		t.Errorf("expected nil for stream with no result event, got %+v", res)
 	}
 }
 
-// TestScanStreamFileForResultMissingFile verifies that nil is returned when
+// TestScanAgentFileForResultMissingFile verifies that nil is returned when
 // the file does not exist.
-func TestScanStreamFileForResultMissingFile(t *testing.T) {
-	res := scanStreamFileForResult("/nonexistent/path/stream.jsonl")
+func TestScanAgentFileForResultMissingFile(t *testing.T) {
+	res := scanAgentFileForResult("/nonexistent/path/agent.jsonl")
 	if res != nil {
 		t.Errorf("expected nil for missing file, got %+v", res)
 	}
 }
 
-// TestScanStreamFileForResultLastWins verifies that when multiple result
+// TestScanAgentFileForResultLastWins verifies that when multiple result
 // events appear, the last one is returned.
-func TestScanStreamFileForResultLastWins(t *testing.T) {
+func TestScanAgentFileForResultLastWins(t *testing.T) {
 	content := `{"type":"result","total_cost_usd":0.01,"duration_ms":1000,"num_turns":1,"is_error":false,"usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":0}}
 {"type":"result","total_cost_usd":0.05,"duration_ms":5000,"num_turns":3,"is_error":false,"usage":{"input_tokens":200,"output_tokens":80,"cache_read_input_tokens":0}}
 `
 	path := writeTempStream(t, content)
-	res := scanStreamFileForResult(path)
+	res := scanAgentFileForResult(path)
 	if res == nil {
 		t.Fatal("expected non-nil result event")
 		return
@@ -151,12 +151,12 @@ func TestScanStreamFileForResultLastWins(t *testing.T) {
 	}
 }
 
-func TestScanStreamFileForResultCacheWriteTokens(t *testing.T) {
+func TestScanAgentFileForResultCacheWriteTokens(t *testing.T) {
 	content := `{"type":"result","total_cost_usd":0.05,"duration_ms":5000,"num_turns":3,"is_error":false,"usage":{"input_tokens":200,"output_tokens":80,"cache_read_input_tokens":40,"cache_write_input_tokens":20}}
 `
 	path := writeTempStream(t, content)
 
-	res := scanStreamFileForResult(path)
+	res := scanAgentFileForResult(path)
 	if res == nil {
 		t.Fatal("expected non-nil result event")
 		return

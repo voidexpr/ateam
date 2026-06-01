@@ -12,7 +12,7 @@ import (
 
 // TailOnEvent is called by TailSessionLog for each translated line it
 // emits. Each line is a single codex-exec-stream-shape JSONL record
-// (ending in '\n'), suitable for writing straight into stream.jsonl —
+// (ending in '\n'), suitable for writing straight into agent.jsonl —
 // ateam tail / ateam cat / parse_stream.go already understand this shape.
 type TailOnEvent func(line []byte)
 

@@ -139,7 +139,7 @@ func TestResolveSessionIDCodexTmuxFromResultEvent(t *testing.T) {
 	// line: the synthetic result event carries the session id (new field)
 	// or, failing that, the rollout filename embeds the UUID.
 	dir := t.TempDir()
-	stream := filepath.Join(dir, "stream.jsonl")
+	stream := filepath.Join(dir, "agent.jsonl")
 
 	const sid = "019e51e6-fcb4-7053-a700-0bdf7662e1a5"
 	// Old-format result: no explicit session_id, must fall back to filename.

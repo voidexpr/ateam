@@ -114,7 +114,7 @@ Per-run artefacts are keyed by `agent_execs.id` (`<exec_id>`):
   config.toml, runtime.hcl, …                 # config
 
   logs/<exec_id>/                             # forensic, runner-owned
-    stream.jsonl                              # raw agent stream events
+    agent.jsonl                              # raw agent stream events
     stderr.out                                # captured stderr
     settings.json                             # rendered sandbox settings
     prompt.md                                 # rendered prompt
@@ -154,17 +154,17 @@ Key invariants:
 - On failure, no clone happens; `cmd.md` lists what landed in `runtime/<exec_id>/` with the note `SKIPPED (run failed; not promoted)` via `listRuntimeForReport` (`internal/runner/runner.go`).
 - Clones use `cp -pc` on Darwin (APFS clonefile) and `cp -p --reflink=auto` on Linux (btrfs/xfs/zfs reflink) to avoid double disk usage; falls back to a regular byte copy.
 - `cmd.md` is written twice: once before the run (Run details "(pending)"), once at finalize with the actual exit code, status, and `# Files Copy` log.
-- Per-action `*_error.md` files no longer exist — failure context lives in `logs/<exec_id>/{cmd.md, stderr.out, stream.jsonl}`.
+- Per-action `*_error.md` files no longer exist — failure context lives in `logs/<exec_id>/{cmd.md, stderr.out, agent.jsonl}`.
 
 ### Migration of legacy projects (`internal/root/migrate_logs.go`)
 
-Pre-`<exec_id>` projects used a flat layout: `logs/{roles/<id>,parallel,run,supervisor}/<TS>_<ACTION>_{stream.jsonl,stderr.log,settings.json,exec.md}` plus history-dir prompts and per-action `*_error.md` files. `MigrateLogsLayout` runs lazily on the first DB open (both `openProjectDB` and `requireProjectDB`), is sentinel-guarded by `logs/.layout-v2`, and is idempotent.
+Pre-`<exec_id>` projects used a flat layout: `logs/{roles/<id>,parallel,run,supervisor}/<TS>_<ACTION>_{agent.jsonl,stderr.log,settings.json,exec.md}` plus history-dir prompts and per-action `*_error.md` files. `MigrateLogsLayout` runs lazily on the first DB open (both `openProjectDB` and `requireProjectDB`), is sentinel-guarded by `logs/.layout-v2`, and is idempotent.
 
 For each `agent_execs` row whose `stream_file` ends in `_stream.jsonl`:
 
-1. `os.Rename` `<TS>_<ACTION>_stream.jsonl|_stderr.log|_settings.json|_exec.md` into `logs/<id>/{stream.jsonl,stderr.out,settings.json,cmd.md}` (cmd.md content untouched).
+1. `os.Rename` `<TS>_<ACTION>_stream.jsonl|_stderr.log|_settings.json|_exec.md` into `logs/<id>/{agent.jsonl,stderr.out,settings.json,cmd.md}` (cmd.md content untouched).
 2. Locate the matching `<TS>.<action>_prompt.md` in `roles/<role>/history/` or `supervisor/history/` via `findClosestHistoryFile` (within `legacyPromptMatchWindow = 60s` of `started_at`); rename to `logs/<id>/prompt.md`. Started_at is parsed as RFC3339 and used directly — **no `.Local()`** — so DST/TZ moves don't break matching.
-3. Set `agent_execs.stream_file = "logs/<id>/stream.jsonl"` and (when a matching `<TS>.<kind>.md` archive exists in history) `agent_execs.output_file = "<role>/history/<TS>.<kind>.md"` so the web run-page output link still resolves.
+3. Set `agent_execs.stream_file = "logs/<id>/agent.jsonl"` and (when a matching `<TS>.<kind>.md` archive exists in history) `agent_execs.output_file = "<role>/history/<TS>.<kind>.md"` so the web run-page output link still resolves.
 
 Then: delete canonical `report_error.md` / `review_error.md` / `verify_error.md` / `code_error.md` / `auto_setup_error.md`, remove `runner.log`, prune empty legacy log subdirs. Unmatched orphan files (no DB row, or skew >60s) are left in place — never destroyed.
 
@@ -224,8 +224,8 @@ User-facing usage is in [CONFIG.md → `codex-tmux`](CONFIG.md#codex-tmux-experi
 
 - **Host-only in v1.** Rejected with an actionable error at `cmd/table.go:140–142` when a profile binds it to a non-`none` container, and at `cmd/table.go:398–407` when invoked without project context. Container support would require tmux+codex inside the image plus host↔container path translation that isn't wired up.
 - **Per-`EXEC_ID` socket and session naming.** The tmux socket lives under `<ProjectDir>/cache/tmux/` and the session name embeds the `EXEC_ID`, so concurrent runs in the same workdir don't collide.
-- **Token/cost data is sourced from `$CODEX_HOME/sessions/...`** (the rollout JSONL Codex writes itself), not from a streamed JSON channel — the TUI doesn't emit one. The agent live-tails that rollout into `stream.jsonl` and archives it to `codex-session.jsonl.gz` on completion.
-- **`ateam resume` works** because the live-tailed rollout translates `session_meta` into a `thread.started` line in `stream.jsonl`, carrying the same session id the `codex` CLI uses. Resume runs `codex resume --include-non-interactive <id>`, identical to the regular `codex` agent.
+- **Token/cost data is sourced from `$CODEX_HOME/sessions/...`** (the rollout JSONL Codex writes itself), not from a streamed JSON channel — the TUI doesn't emit one. The agent live-tails that rollout into `agent.jsonl` and archives it to `codex-session.jsonl.gz` on completion.
+- **`ateam resume` works** because the live-tailed rollout translates `session_meta` into a `thread.started` line in `agent.jsonl`, carrying the same session id the `codex` CLI uses. Resume runs `codex resume --include-non-interactive <id>`, identical to the regular `codex` agent.
 - Original design rationale: [`plans/feature_codex_tmux_agent.md`](plans/feature_codex_tmux_agent.md) — historical, not normative.
 
 ### Container `extra_volumes` (HCL example)

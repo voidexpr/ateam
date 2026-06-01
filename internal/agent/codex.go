@@ -108,7 +108,7 @@ func (c *CodexAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent
 		return
 	}
 
-	stderrWriters, streamWriter, closers := setupStreamFiles(req)
+	stderrWriters, streamWriter, closers := setupAgentFiles(req)
 	for _, c := range closers {
 		defer c.Close()
 	}

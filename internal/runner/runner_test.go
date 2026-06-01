@@ -40,13 +40,13 @@ func TestRunnerWithMockAgent(t *testing.T) {
 	if summary.ExecID <= 0 {
 		t.Errorf("expected ExecID > 0, got %d", summary.ExecID)
 	}
-	if _, err := os.Stat(summary.StreamFilePath); err != nil {
+	if _, err := os.Stat(summary.AgentFilePath); err != nil {
 		t.Errorf("stream file not found: %v", err)
 	}
 	// Stream file must be inside logs/<exec_id>/
 	want := filepath.Join(dir, "logs")
-	if !strings.HasPrefix(summary.StreamFilePath, want) {
-		t.Errorf("stream file %q does not live under %s", summary.StreamFilePath, want)
+	if !strings.HasPrefix(summary.AgentFilePath, want) {
+		t.Errorf("stream file %q does not live under %s", summary.AgentFilePath, want)
 	}
 }
 
@@ -113,7 +113,7 @@ func TestRunnerPromotesRuntimeFiles(t *testing.T) {
 		t.Errorf("canonical report.md missing expected content, got: %s", got)
 	}
 	// Source still in runtime/<id>/.
-	src := filepath.Join(dir, "runtime", strings.TrimPrefix(filepath.Base(filepath.Dir(summary.StreamFilePath)), ""))
+	src := filepath.Join(dir, "runtime", strings.TrimPrefix(filepath.Base(filepath.Dir(summary.AgentFilePath)), ""))
 	srcReport := filepath.Join(src, "report.md")
 	if _, err := os.Stat(srcReport); err != nil {
 		t.Errorf("runtime/<id>/report.md missing: %v", err)
@@ -232,7 +232,7 @@ func TestRunnerSkipsPromptFilesDuringPromote(t *testing.T) {
 	}
 
 	// cmd.md must record the decisions.
-	cmdMD := filepath.Join(filepath.Dir(summary.StreamFilePath), "cmd.md")
+	cmdMD := filepath.Join(filepath.Dir(summary.AgentFilePath), "cmd.md")
 	body, err := os.ReadFile(cmdMD)
 	if err != nil {
 		t.Fatalf("read cmd.md: %v", err)
@@ -257,7 +257,7 @@ func TestRunnerWritesPromptFile(t *testing.T) {
 	if summary.Err != nil {
 		t.Fatalf("unexpected error: %v", summary.Err)
 	}
-	promptFile := filepath.Join(filepath.Dir(summary.StreamFilePath), "prompt.md")
+	promptFile := filepath.Join(filepath.Dir(summary.AgentFilePath), "prompt.md")
 	body, err := os.ReadFile(promptFile)
 	if err != nil {
 		t.Fatalf("prompt.md missing: %v", err)

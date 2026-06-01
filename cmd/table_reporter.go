@@ -227,7 +227,7 @@ func (r *tableReporter) Close() error {
 			if summary.Err == nil && !summary.IsError {
 				continue
 			}
-			tail := runner.StreamTailError(summary.StreamFilePath, r.agentName, 5)
+			tail := runner.StreamTailError(summary.AgentFilePath, r.agentName, 5)
 			if tail != "" {
 				fmt.Fprintf(r.out, "\n  %s:\n", summary.RoleID)
 				for _, line := range strings.Split(tail, "\n") {

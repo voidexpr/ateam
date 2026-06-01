@@ -15,7 +15,7 @@ import (
 
 func TestTailerStaticFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "stream.jsonl")
+	path := filepath.Join(dir, "agent.jsonl")
 
 	content := strings.Join([]string{
 		`{"type":"system","subtype":"init","session_id":"s1","model":"opus"}`,
@@ -60,7 +60,7 @@ func TestTailerWaitTimeout(t *testing.T) {
 
 func TestTailerGrowingFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "stream.jsonl")
+	path := filepath.Join(dir, "agent.jsonl")
 
 	// Start with partial content
 	f, _ := os.Create(path)
@@ -128,7 +128,7 @@ func TestTailerFinalMessageJSONL(t *testing.T) {
 	}
 	defer db.Close()
 
-	streamPath := filepath.Join(dir, "stream.jsonl")
+	streamPath := filepath.Join(dir, "agent.jsonl")
 	content := strings.Join([]string{
 		`{"type":"system","subtype":"init","session_id":"s1","model":"opus"}`,
 		`{"type":"user"}`,
@@ -140,13 +140,13 @@ func TestTailerFinalMessageJSONL(t *testing.T) {
 	}
 
 	id, err := db.InsertCall(&calldb.Call{
-		ProjectID:  "proj",
-		Agent:      "claude",
-		Action:     "exec",
-		Role:       "security",
-		Model:      "opus",
-		StartedAt:  time.Now(),
-		StreamFile: streamPath,
+		ProjectID: "proj",
+		Agent:     "claude",
+		Action:    "exec",
+		Role:      "security",
+		Model:     "opus",
+		StartedAt: time.Now(),
+		AgentFile: streamPath,
 	})
 	if err != nil {
 		t.Fatalf("insert: %v", err)
@@ -223,7 +223,7 @@ func TestTailerFinalMessagePropagatesError(t *testing.T) {
 	}
 	defer db.Close()
 
-	streamPath := filepath.Join(dir, "stream.jsonl")
+	streamPath := filepath.Join(dir, "agent.jsonl")
 	content := strings.Join([]string{
 		`{"type":"assistant","message":{"content":[{"type":"text","text":"FAILED: ran out of turns"}]}}`,
 		`{"type":"result","total_cost_usd":0.05,"is_error":true,"duration_ms":1000,"num_turns":1,"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":0}}`,
@@ -234,7 +234,7 @@ func TestTailerFinalMessagePropagatesError(t *testing.T) {
 
 	id, err := db.InsertCall(&calldb.Call{
 		ProjectID: "proj", Agent: "claude", Action: "exec", Role: "test",
-		StartedAt: time.Now(), StreamFile: streamPath,
+		StartedAt: time.Now(), AgentFile: streamPath,
 	})
 	if err != nil {
 		t.Fatalf("insert: %v", err)
@@ -324,7 +324,7 @@ func TestTailerFinalMessageStreamsPerSource(t *testing.T) {
 	}
 	idA, err := db.InsertCall(&calldb.Call{
 		ProjectID: "proj", Agent: "claude", Action: "exec", Role: "alpha",
-		StartedAt: time.Now(), StreamFile: streamA,
+		StartedAt: time.Now(), AgentFile: streamA,
 	})
 	if err != nil {
 		t.Fatalf("insert A: %v", err)
@@ -347,7 +347,7 @@ func TestTailerFinalMessageStreamsPerSource(t *testing.T) {
 	}
 	idB, err := db.InsertCall(&calldb.Call{
 		ProjectID: "proj", Agent: "claude", Action: "exec", Role: "beta",
-		StartedAt: time.Now(), StreamFile: streamB,
+		StartedAt: time.Now(), AgentFile: streamB,
 	})
 	if err != nil {
 		t.Fatalf("insert B: %v", err)

@@ -16,13 +16,13 @@ import (
 
 // TailSource tracks a single stream file being tailed.
 type TailSource struct {
-	ID         int64
-	StreamFile string
-	Formatter  *StreamFormatter
-	offset     int64
-	partial    []byte // incomplete last line
-	done       bool
-	emitted    bool // final-message JSONL line already written
+	ID        int64
+	AgentFile string
+	Formatter *StreamFormatter
+	offset    int64
+	partial   []byte // incomplete last line
+	done      bool
+	emitted   bool // final-message JSONL line already written
 }
 
 // Tailer multiplexes live streaming from one or more JSONL stream files.
@@ -67,7 +67,7 @@ func NewTailer(w io.Writer, db *calldb.CallDB, color, verbose bool) *Tailer {
 }
 
 // AddSource registers a stream file to tail.
-func (t *Tailer) AddSource(id int64, role, action, streamFile, model string) {
+func (t *Tailer) AddSource(id int64, role, action, agentFile, model string) {
 	if t.knownIDs[id] {
 		return
 	}
@@ -80,8 +80,8 @@ func (t *Tailer) AddSource(id int64, role, action, streamFile, model string) {
 		prefix = fmt.Sprintf("[%d:%s] ", id, label)
 	}
 	t.sources = append(t.sources, &TailSource{
-		ID:         id,
-		StreamFile: streamFile,
+		ID:        id,
+		AgentFile: agentFile,
 		Formatter: &StreamFormatter{
 			Verbose:      t.Verbose,
 			Color:        t.Color,
@@ -183,8 +183,8 @@ func (t *Tailer) discoverSources() {
 			return
 		}
 		for _, r := range rows {
-			if r.StreamFile != "" {
-				t.AddSource(r.ID, r.Role, r.Action, root.ResolveStreamPath(t.ProjectDir, t.OrgDir, r.StreamFile), r.Model)
+			if r.AgentFile != "" {
+				t.AddSource(r.ID, r.Role, r.Action, root.ResolveStreamPath(t.ProjectDir, t.OrgDir, r.AgentFile), r.Model)
 			}
 		}
 	}
@@ -213,7 +213,7 @@ func (t *Tailer) discoverSources() {
 			return
 		}
 		for _, c := range calls {
-			if c.StreamFile != "" {
+			if c.AgentFile != "" {
 				role := roleByID[c.ID]
 				if role == "" {
 					role = c.Role
@@ -222,7 +222,7 @@ func (t *Tailer) discoverSources() {
 				if action == "" {
 					action = c.Action
 				}
-				t.AddSource(c.ID, role, action, root.ResolveStreamPath(t.ProjectDir, t.OrgDir, c.StreamFile), c.Model)
+				t.AddSource(c.ID, role, action, root.ResolveStreamPath(t.ProjectDir, t.OrgDir, c.AgentFile), c.Model)
 			}
 		}
 	}
@@ -238,7 +238,7 @@ func (t *Tailer) pollFiles() {
 }
 
 func (t *Tailer) pollSource(src *TailSource) {
-	f, err := os.Open(src.StreamFile)
+	f, err := os.Open(src.AgentFile)
 	if err != nil {
 		return
 	}
@@ -368,7 +368,7 @@ func (t *Tailer) maybeEmitFinal(src *TailSource) {
 		"cache_read_tokens":  row.CacheReadTokens,
 		"cache_write_tokens": row.CacheWriteTokens,
 		"turns":              row.Turns,
-		"final_message":      scanStreamFileForFinalText(src.StreamFile),
+		"final_message":      scanAgentFileForFinalText(src.AgentFile),
 	}
 	line, err := json.Marshal(rec)
 	if err != nil {

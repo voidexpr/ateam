@@ -303,7 +303,7 @@ func TestPromptDir(t *testing.T) {
 	}
 }
 
-func TestResolveRunFilesRelativeStreamFile(t *testing.T) {
+func TestResolveRunFilesRelativeAgentFile(t *testing.T) {
 	projectDir := t.TempDir()
 	orgDir := t.TempDir()
 
@@ -329,9 +329,9 @@ func TestResolveRunFilesRelativeStreamFile(t *testing.T) {
 	}
 
 	row := calldb.RecentRow{
-		StreamFile: streamRel,
-		Action:     runner.ActionReport,
-		Role:       "security",
+		AgentFile: streamRel,
+		Action:    runner.ActionReport,
+		Role:      "security",
 	}
 
 	rf := resolveRunFiles(projectDir, orgDir, row)
@@ -348,7 +348,7 @@ func TestResolveRunFilesRelativeStreamFile(t *testing.T) {
 	// Empty stream file should return zero value.
 	rf2 := resolveRunFiles(projectDir, orgDir, calldb.RecentRow{})
 	if rf2.HasStream || rf2.ExecFile != "" || rf2.HasStderr {
-		t.Error("expected empty runFiles for empty StreamFile")
+		t.Error("expected empty runFiles for empty AgentFile")
 	}
 }
 

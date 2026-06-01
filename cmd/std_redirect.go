@@ -17,7 +17,7 @@ import (
 // catches every write that goes through Go's standard library
 // (`fmt.Println`, `log.Printf`, `print`, `panic`, …). Subprocess
 // stdout/stderr is unaffected because agents capture those via
-// cmd.StdoutPipe / setupStreamFiles before they reach the parent's
+// cmd.StdoutPipe / setupAgentFiles before they reach the parent's
 // fds. Direct syscall.Write(1, …) would also bypass this, but Go code
 // doesn't normally do that.
 //

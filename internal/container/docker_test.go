@@ -22,7 +22,7 @@ func TestTranslatePath(t *testing.T) {
 		{"source root", "/Users/nic/projects/myapp", "/workspace"},
 		{"file in source", "/Users/nic/projects/myapp/src/main.go", "/workspace/src/main.go"},
 		{"project dir", "/Users/nic/projects/myapp/.ateam", "/workspace/.ateam"},
-		{"file in project", "/Users/nic/projects/myapp/.ateam/logs/stream.jsonl", "/workspace/.ateam/logs/stream.jsonl"},
+		{"file in project", "/Users/nic/projects/myapp/.ateam/logs/agent.jsonl", "/workspace/.ateam/logs/agent.jsonl"},
 		{"org dir", "/Users/nic/.ateamorg", "/.ateamorg"},
 		{"file in org", "/Users/nic/.ateamorg/runtime.hcl", "/.ateamorg/runtime.hcl"},
 		{"unrelated path", "/tmp/something", "/tmp/something"},

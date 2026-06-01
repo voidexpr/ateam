@@ -116,13 +116,13 @@ func TestTailFinalMessageCLI(t *testing.T) {
 	insert := func(role string, rel string, isErr bool) int64 {
 		now := time.Now()
 		id, err := db.InsertCall(&calldb.Call{
-			ProjectID:  env.ProjectID(),
-			Agent:      "claude",
-			Action:     "exec",
-			Role:       role,
-			Model:      "opus",
-			StreamFile: rel,
-			StartedAt:  now.Add(-time.Minute),
+			ProjectID: env.ProjectID(),
+			Agent:     "claude",
+			Action:    "exec",
+			Role:      role,
+			Model:     "opus",
+			AgentFile: rel,
+			StartedAt: now.Add(-time.Minute),
 		})
 		if err != nil {
 			t.Fatalf("insert: %v", err)

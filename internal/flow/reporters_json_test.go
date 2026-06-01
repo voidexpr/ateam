@@ -87,8 +87,8 @@ func TestJSONReporter_BundleAndAgentInterleaved(t *testing.T) {
 	}
 }
 
-func TestJSONReporter_VFieldStable(t *testing.T) {
-	// Every event must carry v:1 and a numeric ts.
+func TestJSONReporter_TimestampOnEveryEvent(t *testing.T) {
+	// Every event carries a numeric ts (unix millis).
 	var buf bytes.Buffer
 	rep := &JSONReporter{W: &buf}
 	rep.BundleStart(BundleInfo{Name: "x"})
@@ -99,11 +99,11 @@ func TestJSONReporter_VFieldStable(t *testing.T) {
 		t.Fatalf("expected 2 events, got %d", len(events))
 	}
 	for i, e := range events {
-		if v, ok := e["v"].(float64); !ok || v != 1 {
-			t.Errorf("event %d v field: got %v want 1", i, e["v"])
-		}
 		if _, ok := e["ts"].(float64); !ok {
 			t.Errorf("event %d ts missing or non-numeric: %v", i, e["ts"])
+		}
+		if _, ok := e["v"]; ok {
+			t.Errorf("event %d unexpectedly carries a `v` field: %v", i, e["v"])
 		}
 	}
 }

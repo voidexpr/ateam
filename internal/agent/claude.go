@@ -114,7 +114,7 @@ func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEven
 		return
 	}
 
-	stderrWriters, streamWriter, closers := setupStreamFiles(req)
+	stderrWriters, streamWriter, closers := setupAgentFiles(req)
 	for _, c := range closers {
 		defer c.Close()
 	}

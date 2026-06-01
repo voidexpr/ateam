@@ -107,11 +107,11 @@ func runResume(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resume only supports %s (run %d used agent %q)",
 			strings.Join(resumableAgents, ", "), row.ID, row.Agent)
 	}
-	if row.StreamFile == "" {
+	if row.AgentFile == "" {
 		return fmt.Errorf("run %d has no stream file recorded", row.ID)
 	}
 
-	streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, row.StreamFile)
+	streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, row.AgentFile)
 	sessionID, err := resolveSessionID(streamPath, row.Agent)
 	if err != nil {
 		return fmt.Errorf("cannot read session id from %s: %w", streamPath, err)
@@ -304,7 +304,7 @@ func extractSessionID(path string) (string, error) {
 // resolveSessionID returns the session id for a run, trying agent-specific
 // fallbacks when the generic head-of-stream scan comes up empty. The codex-tmux
 // agent in particular may not have written a thread.started line into
-// stream.jsonl (older runs predating the rollout-tailer, or runs where the
+// agent.jsonl (older runs predating the rollout-tailer, or runs where the
 // tailer never located the rollout in time) — its synthetic result event
 // carries the id at the tail of the file instead.
 func resolveSessionID(streamPath, agentName string) (string, error) {
@@ -333,7 +333,7 @@ type codexTmuxResultMeta struct {
 	SessionLogGz string `json:"session_log_gz"`
 }
 
-// extractCodexTmuxSessionID scans a codex-tmux stream.jsonl end-to-end for
+// extractCodexTmuxSessionID scans a codex-tmux agent.jsonl end-to-end for
 // the synthetic result event and returns either its explicit session_id
 // field or the UUID parsed out of the rollout filename. Returns "" when no
 // recoverable id is present.
@@ -363,7 +363,7 @@ func extractCodexTmuxSessionID(path string) string {
 	return ""
 }
 
-// parseCodexTmuxResult decodes one stream.jsonl line and returns its session
+// parseCodexTmuxResult decodes one agent.jsonl line and returns its session
 // metadata if it's the codex-tmux synthetic result event. The tmux_session_name
 // field is what disambiguates it from claude/codex result events (which share
 // the same `type: "result"`).
@@ -407,8 +407,8 @@ func codexThreadID(line []byte) string {
 }
 
 // cmdMDPath returns the cmd.md path that pairs with a stream file, handling
-// both the new layout (logs/<exec_id>/{stream.jsonl, cmd.md}) and the legacy
-// prefix layout (<dir>/<TS>_<ACTION>_{stream.jsonl, exec.md}).
+// both the new layout (logs/<exec_id>/{agent.jsonl, cmd.md}) and the legacy
+// prefix layout (<dir>/<TS>_<ACTION>_{agent.jsonl, exec.md}).
 func cmdMDPath(streamPath string) string {
 	if root.IsLegacyStreamFile(streamPath) {
 		return strings.TrimSuffix(streamPath, "_stream.jsonl") + "_exec.md"

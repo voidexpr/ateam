@@ -101,7 +101,7 @@ func (e *ResolvedEnv) StateDir() string {
 	return e.OrgDir
 }
 
-// LogsDir returns the per-exec_id forensic log directory. Holds stream.jsonl,
+// LogsDir returns the per-exec_id forensic log directory. Holds agent.jsonl,
 // stderr.out, settings.json, prompt.md, cmd.md.
 func (e *ResolvedEnv) LogsDir(execID int64) string {
 	return filepath.Join(e.StateDir(), "logs", strconv.FormatInt(execID, 10))

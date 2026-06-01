@@ -32,7 +32,7 @@ const (
 type Agent interface {
 	Name() string
 	// Run starts the agent and returns a channel of normalized events.
-	// The agent writes raw output to req.StreamFile for archival.
+	// The agent writes raw output to req.AgentFile for archival.
 	Run(ctx context.Context, req Request) <-chan StreamEvent
 	// DebugCommandArgs returns the full command and args the agent would execute,
 	// including extraArgs. Used for verbose/diagnostic output.
@@ -98,7 +98,7 @@ func errorEvent(err error, source string, exitCode int) StreamEvent {
 type Request struct {
 	Prompt     string
 	WorkDir    string
-	StreamFile string // agent writes raw stream here (agent-native JSONL)
+	AgentFile  string // agent writes raw stream here (agent-native JSONL)
 	StderrFile string
 	ExtraArgs  []string             // from --agent-args
 	Env        map[string]string    // env vars to set/override

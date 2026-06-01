@@ -148,7 +148,7 @@ type RunProgress struct {
 	EventCount     int
 	Elapsed        time.Duration
 	StartedAt      time.Time
-	StreamFilePath string
+	AgentFilePath  string
 	StderrFilePath string
 	ContextTokens  int
 	ContextWindow  int
@@ -189,7 +189,7 @@ type RunSummary struct {
 	PeakContextTokens int
 	ContextWindow     int
 
-	StreamFilePath string
+	AgentFilePath  string
 	StderrFilePath string
 
 	// ErrorSource / ErrorCause classify why the run failed.
@@ -226,7 +226,7 @@ type PreparedRun struct {
 	StateDir     string
 	LogsDir      string
 	RuntimeDir   string
-	StreamFile   string
+	AgentFile    string
 	StderrFile   string
 	SettingsFile string
 	CmdFile      string
@@ -292,9 +292,9 @@ func (r *AgentExecutor) Prepare(opts RunOpts, prompt string) (*PreparedRun, erro
 
 	stateDir := r.StateDir()
 	logsDir := logsDirFor(stateDir, callID)
-	streamFile := filepath.Join(logsDir, "stream.jsonl")
+	agentFile := filepath.Join(logsDir, "agent.jsonl")
 
-	if relStream, relErr := filepath.Rel(stateDir, streamFile); relErr == nil {
+	if relStream, relErr := filepath.Rel(stateDir, agentFile); relErr == nil {
 		_ = r.CallDB.UpdateStreamFile(callID, relStream)
 	}
 
@@ -303,7 +303,7 @@ func (r *AgentExecutor) Prepare(opts RunOpts, prompt string) (*PreparedRun, erro
 		StateDir:     stateDir,
 		LogsDir:      logsDir,
 		RuntimeDir:   runtimeDirFor(stateDir, callID),
-		StreamFile:   streamFile,
+		AgentFile:    agentFile,
 		StderrFile:   filepath.Join(logsDir, "stderr.out"),
 		SettingsFile: filepath.Join(logsDir, "settings.json"),
 		CmdFile:      filepath.Join(logsDir, "cmd.md"),
@@ -359,7 +359,7 @@ func (r *AgentExecutor) ExecutePrepared(ctx context.Context, prepared *PreparedR
 	callID := prepared.ExecID
 	logsDir := prepared.LogsDir
 	runtimeDir := prepared.RuntimeDir
-	streamFile := prepared.StreamFile
+	agentFile := prepared.AgentFile
 	stderrFile := prepared.StderrFile
 	settingsFile := prepared.SettingsFile
 	cmdFile := prepared.CmdFile
@@ -381,7 +381,7 @@ func (r *AgentExecutor) ExecutePrepared(ctx context.Context, prepared *PreparedR
 			Err:            err,
 			ErrorSource:    agent.ErrorSourceAteamInternal,
 			ErrorCause:     err.Error(),
-			StreamFilePath: streamFile,
+			AgentFilePath:  agentFile,
 			StderrFilePath: stderrFile,
 		}
 		appendStderrSummary(stderrFile, s)
@@ -462,7 +462,7 @@ func (r *AgentExecutor) ExecutePrepared(ctx context.Context, prepared *PreparedR
 	opts.CanonicalDestFile = ResolveTemplateString(opts.CanonicalDestFile, tmplVars)
 
 	// Build agent request (no longer archives prompt — that's our job below).
-	req, err := r.buildRequest(prompt, tmplVars, cwd, streamFile, stderrFile, extraArgs, callID)
+	req, err := r.buildRequest(prompt, tmplVars, cwd, agentFile, stderrFile, extraArgs, callID)
 	if err != nil {
 		return failEarly(err)
 	}
@@ -541,7 +541,7 @@ func (r *AgentExecutor) ExecutePrepared(ctx context.Context, prepared *PreparedR
 			EventCount:             evCount,
 			StartedAt:              startedAt,
 			Elapsed:                time.Since(startedAt),
-			StreamFilePath:         streamFile,
+			AgentFilePath:          agentFile,
 			StderrFilePath:         stderrFile,
 			ContextTokens:          peakContextTokens,
 			ContextWindow:          contextWindow,
@@ -610,7 +610,7 @@ func (r *AgentExecutor) ExecutePrepared(ctx context.Context, prepared *PreparedR
 					EventCount:             eventCount,
 					StartedAt:              startedAt,
 					Elapsed:                time.Since(startedAt),
-					StreamFilePath:         streamFile,
+					AgentFilePath:          agentFile,
 					StderrFilePath:         stderrFile,
 					ContextTokens:          peakContextTokens,
 					ContextWindow:          contextWindow,
@@ -715,7 +715,7 @@ eventLoop:
 		ToolCounts:        toolCounts,
 		PeakContextTokens: peakContextTokens,
 		ContextWindow:     contextWindow,
-		StreamFilePath:    streamFile,
+		AgentFilePath:     agentFile,
 		StderrFilePath:    stderrFile,
 	}
 
@@ -731,11 +731,11 @@ eventLoop:
 		summary.OutputTokens = resultEv.OutputTokens
 		summary.CacheReadTokens = resultEv.CacheReadTokens
 		summary.CacheWriteTokens = resultEv.CacheWriteTokens
-	} else if streamFile != "" {
+	} else if agentFile != "" {
 		// No result event received (timeout, crash). Try to extract
 		// cost/usage from the stream file which may have been written
 		// before the process was killed.
-		if res := scanStreamFileForResult(streamFile); res != nil {
+		if res := scanAgentFileForResult(agentFile); res != nil {
 			summary.Cost = res.Cost
 			summary.DurationMS = res.DurationMS
 			summary.InputTokens = res.InputTokens
@@ -801,7 +801,7 @@ func reconcileErrorEvent(prev *agent.StreamEvent, ev agent.StreamEvent) *agent.S
 
 // buildRequest resolves CLAUDE_CONFIG_DIR and assembles the agent.Request.
 // The prompt is expected to already have its templates resolved.
-func (r *AgentExecutor) buildRequest(prompt string, tmplVars TemplateVars, cwd, streamFile, stderrFile string, extraArgs []string, execID int64) (agent.Request, error) {
+func (r *AgentExecutor) buildRequest(prompt string, tmplVars TemplateVars, cwd, agentFile, stderrFile string, extraArgs []string, execID int64) (agent.Request, error) {
 	// Resolve CLAUDE_CONFIG_DIR for isolated agents.
 	// Relative config_dir is resolved from ProjectDir (.ateam/); absolute is used as-is.
 	configDir := display.ExpandHome(ResolveTemplateString(r.ConfigDir, tmplVars))
@@ -823,7 +823,7 @@ func (r *AgentExecutor) buildRequest(prompt string, tmplVars TemplateVars, cwd, 
 	return agent.Request{
 		Prompt:     prompt,
 		WorkDir:    cwd,
-		StreamFile: streamFile,
+		AgentFile:  agentFile,
 		StderrFile: stderrFile,
 		ExtraArgs:  extraArgs,
 		Env:        reqEnv,
@@ -858,7 +858,7 @@ func setupContainer(ctx context.Context, c container.Container, req *agent.Reque
 	if factory := c.CmdFactory(); factory != nil {
 		req.CmdFactory = factory
 	}
-	// Note: StreamFile and StderrFile are NOT translated — they are
+	// Note: AgentFile and StderrFile are NOT translated — they are
 	// opened by the host process (os.Create) to capture piped output,
 	// not accessed inside the container.
 	req.WorkDir = c.TranslatePath(cwd)

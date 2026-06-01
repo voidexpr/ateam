@@ -8,10 +8,10 @@ import (
 	"os"
 )
 
-// setupStreamFiles creates the stderr and stream file writers for an agent run.
+// setupAgentFiles creates the stderr and stream file writers for an agent run.
 // The caller is responsible for closing all returned closers (typically via defer).
 // The stream file closer also flushes the bufio.Writer before closing.
-func setupStreamFiles(req Request) (stderrWriters []io.Writer, streamWriter *bufio.Writer, closers []io.Closer) {
+func setupAgentFiles(req Request) (stderrWriters []io.Writer, streamWriter *bufio.Writer, closers []io.Closer) {
 	var stderrBuf bytes.Buffer
 	stderrWriters = []io.Writer{&stderrBuf}
 	if req.StderrFile != "" {
@@ -22,13 +22,13 @@ func setupStreamFiles(req Request) (stderrWriters []io.Writer, streamWriter *buf
 			fmt.Fprintf(os.Stderr, "warning: cannot create stderr file %s: %v\n", req.StderrFile, err)
 		}
 	}
-	if req.StreamFile != "" {
-		if sf, err := os.Create(req.StreamFile); err == nil {
+	if req.AgentFile != "" {
+		if sf, err := os.Create(req.AgentFile); err == nil {
 			w := bufio.NewWriter(sf)
 			streamWriter = w
 			closers = append(closers, &flushCloser{w: w, c: sf})
 		} else {
-			fmt.Fprintf(os.Stderr, "warning: cannot create stream file %s: %v\n", req.StreamFile, err)
+			fmt.Fprintf(os.Stderr, "warning: cannot create stream file %s: %v\n", req.AgentFile, err)
 		}
 	}
 	return

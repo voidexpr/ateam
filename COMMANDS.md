@@ -462,7 +462,7 @@ for line in os.fdopen(3):
 
 The runner also prints `exec_id=<id>` on stderr right after the row is allocated — orchestrators can `grep ^exec_id=` to correlate without parsing the JSONL stream.
 
-Schema is v1; lifecycle vocabulary lives in `plans/Feature_prompt_report_fs_refactor_phaseH.md`. The same `bundle.jsonl` content is also written to `<state-dir>/logs/<exec_id>/bundle.jsonl` for post-mortem inspection.
+Lifecycle event vocabulary lives in `plans/Feature_prompt_report_fs_refactor_phaseH.md`. The same `bundle.jsonl` content is also written to `<state-dir>/logs/<exec_id>/bundle.jsonl` for post-mortem inspection.
 
 ### `ateam parallel`
 
@@ -684,7 +684,7 @@ Read and format stream logs for one or more completed runs. Arguments can be num
 ateam cat 42
 ateam cat 42 43 44 --verbose
 ateam cat --last
-ateam cat .ateam/logs/42/stream.jsonl
+ateam cat .ateam/logs/42/agent.jsonl
 ```
 
 | Flag | Description |
@@ -833,12 +833,12 @@ For actions with no canonical destination, view the output with `ateam cat <exec
 |---------------------------------------|--------------------------------------------------------------|
 | `.ateam/logs/<exec_id>/cmd.md`        | Run details, command, env, settings, `# Files Copy` log      |
 | `.ateam/logs/<exec_id>/stderr.out`    | Captured stderr                                              |
-| `.ateam/logs/<exec_id>/stream.jsonl`  | Raw agent stream events                                      |
+| `.ateam/logs/<exec_id>/agent.jsonl`  | Raw agent stream events                                      |
 | `.ateam/logs/<exec_id>/prompt.md`     | Rendered prompt (used by `ateam resume`)                     |
 | `.ateam/logs/<exec_id>/settings.json` | Rendered sandbox settings                                    |
 | `.ateam/runtime/<exec_id>/`           | Agent-written output (preserved on both success and failure) |
 
-On failure, error context lives in `cmd.md` / `stderr.out` / `stream.jsonl`; there are no per-action `*_error.md` files.
+On failure, error context lives in `cmd.md` / `stderr.out` / `agent.jsonl`; there are no per-action `*_error.md` files.
 
 ### History
 

@@ -97,8 +97,8 @@ func runTail(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("no calls found for given IDs")
 		}
 		for _, r := range rows {
-			if r.StreamFile != "" {
-				tailer.AddSource(r.ID, r.Role, r.Action, root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.StreamFile), r.Model)
+			if r.AgentFile != "" {
+				tailer.AddSource(r.ID, r.Role, r.Action, root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.AgentFile), r.Model)
 			}
 		}
 

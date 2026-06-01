@@ -157,8 +157,8 @@ func (m *MockAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent)
 	}
 
 	// Write valid claude-format JSONL to stream file for FormatStream compatibility
-	if req.StreamFile != "" {
-		m.writeStreamFile(req.StreamFile, response)
+	if req.AgentFile != "" {
+		m.writeAgentFile(req.AgentFile, response)
 	}
 
 	result := StreamEvent{
@@ -186,8 +186,8 @@ func (m *MockAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent)
 	}
 }
 
-// writeStreamFile writes claude-compatible JSONL so FormatStream can read it.
-func (m *MockAgent) writeStreamFile(path string, response string) {
+// writeAgentFile writes claude-compatible JSONL so FormatStream can read it.
+func (m *MockAgent) writeAgentFile(path string, response string) {
 	f, err := os.Create(path)
 	if err != nil {
 		return

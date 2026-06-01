@@ -96,7 +96,7 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\n=== [ID:%d] %s/%s %s ===\n\n", r.ID, r.Role, r.Action, started)
 
 		if isResumableAgent(r.Agent) {
-			streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.StreamFile)
+			streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.AgentFile)
 			if sid, err := resolveSessionID(streamPath, r.Agent); err == nil && sid != "" {
 				row := r // addressable copy for the shared printer
 				printResumeInfo(env, &row, streamPath, sid)
@@ -252,10 +252,10 @@ func recentRowsByIDs(db *calldb.CallDB, ids []int64) ([]calldb.RecentRow, error)
 }
 
 func logFilesForRun(env *root.ResolvedEnv, r calldb.RecentRow) []string {
-	if r.StreamFile == "" {
+	if r.AgentFile == "" {
 		return nil
 	}
-	streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.StreamFile)
+	streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.AgentFile)
 	var files []string
 	if root.IsLegacyStreamFile(streamPath) {
 		prefix := strings.TrimSuffix(streamPath, "_stream.jsonl")

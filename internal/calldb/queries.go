@@ -31,7 +31,7 @@ type RecentRow struct {
 	Turns             int
 	PID               int
 	ContainerID       string
-	StreamFile        string
+	AgentFile         string
 	OutputFile        string
 	PeakContextTokens int
 	ContextWindow     int
@@ -129,7 +129,7 @@ const recentCols = "id, project_id, profile, COALESCE(agent,''), COALESCE(contai
 func scanRecentRow(rows *sql.Rows) (RecentRow, error) {
 	var r RecentRow
 	var isErr int
-	err := rows.Scan(&r.ID, &r.ProjectID, &r.Profile, &r.Agent, &r.Container, &r.Action, &r.Role, &r.Batch, &r.Model, &r.StartedAt, &r.EndedAt, &r.DurationMS, &r.ExitCode, &isErr, &r.ErrorMessage, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens, &r.Turns, &r.PID, &r.ContainerID, &r.StreamFile, &r.OutputFile, &r.PeakContextTokens, &r.ContextWindow, &r.GitStartHash, &r.GitEndHash, &r.GitStartBranch, &r.GitEndBranch, &r.WorkDir)
+	err := rows.Scan(&r.ID, &r.ProjectID, &r.Profile, &r.Agent, &r.Container, &r.Action, &r.Role, &r.Batch, &r.Model, &r.StartedAt, &r.EndedAt, &r.DurationMS, &r.ExitCode, &isErr, &r.ErrorMessage, &r.CostUSD, &r.InputTokens, &r.OutputTokens, &r.CacheReadTokens, &r.CacheWriteTokens, &r.Turns, &r.PID, &r.ContainerID, &r.AgentFile, &r.OutputFile, &r.PeakContextTokens, &r.ContextWindow, &r.GitStartHash, &r.GitEndHash, &r.GitStartBranch, &r.GitEndBranch, &r.WorkDir)
 	r.IsError = isErr != 0
 	return r, err
 }
@@ -324,7 +324,7 @@ type CallRow struct {
 	Batch      string
 	StartedAt  string
 	EndedAt    string
-	StreamFile string
+	AgentFile  string
 	OutputFile string
 }
 
@@ -332,7 +332,7 @@ const callRowCols = `id, COALESCE(agent,''), COALESCE(model,''), role, action, b
 
 func scanCallRow(rows *sql.Rows) (CallRow, error) {
 	var r CallRow
-	err := rows.Scan(&r.ID, &r.Agent, &r.Model, &r.Role, &r.Action, &r.Batch, &r.StartedAt, &r.EndedAt, &r.StreamFile, &r.OutputFile)
+	err := rows.Scan(&r.ID, &r.Agent, &r.Model, &r.Role, &r.Action, &r.Batch, &r.StartedAt, &r.EndedAt, &r.AgentFile, &r.OutputFile)
 	return r, err
 }
 

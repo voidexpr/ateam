@@ -173,7 +173,7 @@ func TestResultLineShouldHaveCacheWriteTokens(t *testing.T) {
 `
 	path := writeTempStreamBugs(t, content)
 
-	res := scanStreamFileForResult(path)
+	res := scanAgentFileForResult(path)
 	if res == nil {
 		t.Fatal("expected non-nil result")
 		return

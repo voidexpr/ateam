@@ -33,7 +33,7 @@ Example:
   ateam cat 42 43 44 --verbose
   ateam cat 42 --no-color
   ateam cat --last
-  ateam cat .ateam/logs/roles/security/stream.jsonl`,
+  ateam cat .ateam/logs/roles/security/agent.jsonl`,
 	RunE: runCat,
 }
 
@@ -136,12 +136,12 @@ func runCatIDs(args []string) error {
 		header := fmt.Sprintf("═══ [ID:%d] %s/%s %s ═══", row.ID, row.Role, row.Action, row.StartedAt)
 		fmt.Println(header)
 
-		if row.StreamFile == "" {
+		if row.AgentFile == "" {
 			fmt.Println("  (no stream file recorded)")
 			continue
 		}
 
-		streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, row.StreamFile)
+		streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, row.AgentFile)
 
 		pricing, defaultModel := agentPricing(row.Agent)
 		var sessionStart time.Time
@@ -157,7 +157,7 @@ func runCatIDs(args []string) error {
 			SessionStart: sessionStart,
 		}
 		if err := f.FormatFile(streamPath, os.Stdout); err != nil {
-			fmt.Fprintf(os.Stderr, "  error reading %s: %v\n", row.StreamFile, err)
+			fmt.Fprintf(os.Stderr, "  error reading %s: %v\n", row.AgentFile, err)
 		}
 	}
 

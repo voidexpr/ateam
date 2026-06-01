@@ -66,10 +66,10 @@ func progressColumnsHelp(unit string) string {
   event still gives visibility into how much the %[1]s consumed.`, unit)
 }
 
-// streamFilePrefix returns a friendly identifier for the log location of a
+// agentFilePrefix returns a friendly identifier for the log location of a
 // run, relative to cwd. New layout: the per-exec_id dir. Legacy layout: the
 // timestamp+action prefix (with a "*" glob hint, since multiple files share it).
-func streamFilePrefix(streamPath, cwd string) string {
+func agentFilePrefix(streamPath, cwd string) string {
 	if root.IsLegacyStreamFile(streamPath) {
 		return relPath(cwd, strings.TrimSuffix(streamPath, "_stream.jsonl")) + "*"
 	}
@@ -158,7 +158,7 @@ func errorPoolStatusRow(row poolStatusRow, summary runner.RunSummary, cwd string
 		display.FormatDuration(summary.Duration),
 		poolStatusTokens(summary),
 		poolStatusContext(summary),
-		streamFilePrefix(summary.StreamFilePath, cwd),
+		agentFilePrefix(summary.AgentFilePath, cwd),
 	)), "")
 }
 

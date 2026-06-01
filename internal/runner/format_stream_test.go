@@ -116,7 +116,7 @@ func TestStreamFormatterPrefix(t *testing.T) {
 
 func TestStreamFormatterFormatFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "stream.jsonl")
+	path := filepath.Join(dir, "agent.jsonl")
 
 	content := strings.Join([]string{
 		`{"type":"system","subtype":"init","session_id":"s1","model":"opus"}`,

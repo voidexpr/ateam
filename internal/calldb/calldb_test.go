@@ -49,7 +49,7 @@ func TestInsertAndUpdate(t *testing.T) {
 		Model:          "opus",
 		PromptHash:     "abc123",
 		StartedAt:      now,
-		StreamFile:     "/tmp/stream.jsonl",
+		AgentFile:      "/tmp/agent.jsonl",
 		GitStartBranch: "feature-x",
 	})
 	if err != nil {
@@ -245,11 +245,11 @@ func seedCalls(t *testing.T, db *CallDB) {
 		result CallResult
 	}{
 		{
-			Call{ProjectID: "proj-a", Action: "report", Role: "security", Batch: "report-2026-03-13_09-00-00", StartedAt: now.Add(-3 * time.Hour), StreamFile: "/logs/report_security.jsonl"},
+			Call{ProjectID: "proj-a", Action: "report", Role: "security", Batch: "report-2026-03-13_09-00-00", StartedAt: now.Add(-3 * time.Hour), AgentFile: "/logs/report_security.jsonl"},
 			CallResult{EndedAt: now.Add(-3*time.Hour + 2*time.Minute), DurationMS: 120000, CostUSD: 0.10, InputTokens: 5000, OutputTokens: 1000, CacheReadTokens: 500},
 		},
 		{
-			Call{ProjectID: "proj-a", Action: "report", Role: "testing", Batch: "report-2026-03-13_09-00-00", StartedAt: now.Add(-3*time.Hour + time.Minute), StreamFile: "/logs/report_testing.jsonl"},
+			Call{ProjectID: "proj-a", Action: "report", Role: "testing", Batch: "report-2026-03-13_09-00-00", StartedAt: now.Add(-3*time.Hour + time.Minute), AgentFile: "/logs/report_testing.jsonl"},
 			CallResult{EndedAt: now.Add(-3*time.Hour + 3*time.Minute), DurationMS: 120000, CostUSD: 0.08, InputTokens: 4000, OutputTokens: 800, CacheReadTokens: 300},
 		},
 		{
@@ -257,15 +257,15 @@ func seedCalls(t *testing.T, db *CallDB) {
 			CallResult{EndedAt: now.Add(-2*time.Hour + 5*time.Minute), DurationMS: 300000, CostUSD: 0.20, InputTokens: 10000, OutputTokens: 2000, CacheReadTokens: 1000},
 		},
 		{
-			Call{ProjectID: "proj-a", Action: "code", Role: "supervisor", Batch: "code-2026-03-13_10-00-00", StartedAt: now.Add(-1 * time.Hour), StreamFile: "/logs/code_supervisor.jsonl"},
+			Call{ProjectID: "proj-a", Action: "code", Role: "supervisor", Batch: "code-2026-03-13_10-00-00", StartedAt: now.Add(-1 * time.Hour), AgentFile: "/logs/code_supervisor.jsonl"},
 			CallResult{EndedAt: now.Add(-1*time.Hour + 10*time.Minute), DurationMS: 600000, CostUSD: 0.50, InputTokens: 20000, OutputTokens: 5000, CacheReadTokens: 2000},
 		},
 		{
-			Call{ProjectID: "proj-a", Action: "exec", Role: "security", Batch: "code-2026-03-13_10-00-00", StartedAt: now.Add(-50 * time.Minute), StreamFile: "/logs/run_security.jsonl"},
+			Call{ProjectID: "proj-a", Action: "exec", Role: "security", Batch: "code-2026-03-13_10-00-00", StartedAt: now.Add(-50 * time.Minute), AgentFile: "/logs/run_security.jsonl"},
 			CallResult{EndedAt: now.Add(-45 * time.Minute), DurationMS: 300000, CostUSD: 0.15, InputTokens: 8000, OutputTokens: 1500, CacheReadTokens: 600},
 		},
 		{
-			Call{ProjectID: "proj-a", Action: "exec", Role: "testing", Batch: "code-2026-03-13_10-00-00", StartedAt: now.Add(-44 * time.Minute), StreamFile: "/logs/run_testing.jsonl"},
+			Call{ProjectID: "proj-a", Action: "exec", Role: "testing", Batch: "code-2026-03-13_10-00-00", StartedAt: now.Add(-44 * time.Minute), AgentFile: "/logs/run_testing.jsonl"},
 			CallResult{EndedAt: now.Add(-40 * time.Minute), DurationMS: 240000, CostUSD: 0.12, InputTokens: 6000, OutputTokens: 1200, CacheReadTokens: 400},
 		},
 		{
@@ -838,8 +838,8 @@ func TestCallsByIDs(t *testing.T) {
 	if rows[0].ID != 1 {
 		t.Errorf("expected first ID=1, got %d", rows[0].ID)
 	}
-	if rows[0].StreamFile != "/logs/report_security.jsonl" {
-		t.Errorf("expected stream file, got %q", rows[0].StreamFile)
+	if rows[0].AgentFile != "/logs/report_security.jsonl" {
+		t.Errorf("expected stream file, got %q", rows[0].AgentFile)
 	}
 
 	// Empty IDs returns nil
@@ -898,7 +898,7 @@ func TestLatestBatch(t *testing.T) {
 	}
 }
 
-func TestRecentRunsStreamFile(t *testing.T) {
+func TestRecentRunsAgentFile(t *testing.T) {
 	db := testDB(t)
 	seedCalls(t, db)
 
@@ -910,8 +910,8 @@ func TestRecentRunsStreamFile(t *testing.T) {
 		t.Fatalf("expected 3 rows, got %d", len(rows))
 	}
 	// DESC order: newest first — testing is most recent in this batch
-	if rows[0].StreamFile != "/logs/run_testing.jsonl" {
-		t.Errorf("expected stream file on testing (newest), got %q", rows[0].StreamFile)
+	if rows[0].AgentFile != "/logs/run_testing.jsonl" {
+		t.Errorf("expected stream file on testing (newest), got %q", rows[0].AgentFile)
 	}
 }
 
@@ -1082,9 +1082,9 @@ func TestRenameProject(t *testing.T) {
 
 	now := time.Now()
 	for _, c := range []Call{
-		{ProjectID: "services_api", Action: "report", Role: "security", StartedAt: now, StreamFile: "projects/services_api/roles/security/logs/stream.jsonl"},
-		{ProjectID: "services_api", Action: "exec", Role: "testing", StartedAt: now, StreamFile: "projects/services_api/roles/testing/logs/stream.jsonl"},
-		{ProjectID: "other_proj", Action: "exec", Role: "security", StartedAt: now, StreamFile: "projects/other_proj/roles/security/logs/stream.jsonl"},
+		{ProjectID: "services_api", Action: "report", Role: "security", StartedAt: now, AgentFile: "projects/services_api/roles/security/logs/agent.jsonl"},
+		{ProjectID: "services_api", Action: "exec", Role: "testing", StartedAt: now, AgentFile: "projects/services_api/roles/testing/logs/agent.jsonl"},
+		{ProjectID: "other_proj", Action: "exec", Role: "security", StartedAt: now, AgentFile: "projects/other_proj/roles/security/logs/agent.jsonl"},
 	} {
 		if _, err := db.InsertCall(&c); err != nil {
 			t.Fatalf("InsertCall: %v", err)
@@ -1123,7 +1123,7 @@ func TestRenameProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if sf != "projects/backends_api/roles/security/logs/stream.jsonl" {
+	if sf != "projects/backends_api/roles/security/logs/agent.jsonl" {
 		t.Errorf("expected updated stream_file, got %q", sf)
 	}
 
@@ -1132,7 +1132,7 @@ func TestRenameProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if sf != "projects/other_proj/roles/security/logs/stream.jsonl" {
+	if sf != "projects/other_proj/roles/security/logs/agent.jsonl" {
 		t.Errorf("expected other project stream_file unchanged, got %q", sf)
 	}
 }

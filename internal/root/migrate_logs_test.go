@@ -79,10 +79,10 @@ func TestMigrateLogsLayout_MovesLegacyFiles(t *testing.T) {
 	relStream, _ := filepath.Rel(projDir, prefix+"_stream.jsonl")
 	startedAt, _ := time.ParseInLocation("2006-01-02_15-04-05", ts, time.Local)
 	id, err := db.InsertCall(&calldb.Call{
-		Action:     "report",
-		Role:       "security",
-		StartedAt:  startedAt,
-		StreamFile: relStream,
+		Action:    "report",
+		Role:      "security",
+		StartedAt: startedAt,
+		AgentFile: relStream,
 	})
 	if err != nil {
 		t.Fatalf("InsertCall: %v", err)
@@ -94,7 +94,7 @@ func TestMigrateLogsLayout_MovesLegacyFiles(t *testing.T) {
 	}
 
 	newDir := filepath.Join(projDir, "logs", relativeIDDir(id))
-	for _, name := range []string{"stream.jsonl", "stderr.out", "settings.json", "cmd.md", "prompt.md"} {
+	for _, name := range []string{"agent.jsonl", "stderr.out", "settings.json", "cmd.md", "prompt.md"} {
 		if _, err := os.Stat(filepath.Join(newDir, name)); err != nil {
 			t.Errorf("expected %s in new layout dir: %v", name, err)
 		}
@@ -175,10 +175,10 @@ func TestMigrateLogsLayout_PromptSkewMatching(t *testing.T) {
 
 			relStream, _ := filepath.Rel(projDir, prefix+"_stream.jsonl")
 			id, err := db.InsertCall(&calldb.Call{
-				Action:     "report",
-				Role:       "security",
-				StartedAt:  rowTime,
-				StreamFile: relStream,
+				Action:    "report",
+				Role:      "security",
+				StartedAt: rowTime,
+				AgentFile: relStream,
 			})
 			if err != nil {
 				t.Fatalf("InsertCall: %v", err)

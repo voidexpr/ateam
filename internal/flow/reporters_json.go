@@ -19,7 +19,7 @@ import (
 // kinds, same payload shapes). Agent events wrap a runner.RunProgress
 // — wire format:
 //
-//	{"v":1,"ts":<ms>,"source":"agent","exec_id":<id>,"phase":"tool",
+//	{"ts":<ms>,"source":"agent","exec_id":<id>,"phase":"tool",
 //	 "tool_name":"Read","content":"...", ...}
 //
 // Concurrency: AgentEvent fires from runner goroutines; bundle
@@ -39,7 +39,6 @@ type JSONReporter struct {
 }
 
 func (r *JSONReporter) writeEvent(m map[string]any) {
-	m["v"] = 1
 	m["ts"] = nowMillis()
 	b, err := json.Marshal(m)
 	if err != nil {

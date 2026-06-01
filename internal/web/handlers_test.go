@@ -242,12 +242,12 @@ func seedRun(t *testing.T, projectDir string, action, role string) int64 {
 	}
 
 	callID, err := db.InsertCall(&calldb.Call{
-		ProjectID:  "test-proj",
-		Action:     action,
-		Role:       role,
-		Batch:      fmt.Sprintf("%s-%s", action, ts),
-		StartedAt:  now.Add(-2 * time.Minute),
-		StreamFile: streamRel,
+		ProjectID: "test-proj",
+		Action:    action,
+		Role:      role,
+		Batch:     fmt.Sprintf("%s-%s", action, ts),
+		StartedAt: now.Add(-2 * time.Minute),
+		AgentFile: streamRel,
 	})
 	if err != nil {
 		t.Fatalf("InsertCall: %v", err)
@@ -489,12 +489,12 @@ func TestHandleRunFilePathTraversal(t *testing.T) {
 	now := time.Now()
 	ts := now.Format(display.TimestampFormat)
 	callID, err := db.InsertCall(&calldb.Call{
-		ProjectID:  "test-proj",
-		Action:     runner.ActionReport,
-		Role:       "security",
-		Batch:      "report-" + ts,
-		StartedAt:  now.Add(-2 * time.Minute),
-		StreamFile: maliciousStream,
+		ProjectID: "test-proj",
+		Action:    runner.ActionReport,
+		Role:      "security",
+		Batch:     "report-" + ts,
+		StartedAt: now.Add(-2 * time.Minute),
+		AgentFile: maliciousStream,
 	})
 	if err != nil {
 		t.Fatalf("InsertCall: %v", err)
@@ -842,12 +842,12 @@ func TestHandleRunFileLogsShowsTimestamps(t *testing.T) {
 	}
 
 	callID, err := db.InsertCall(&calldb.Call{
-		ProjectID:  "test-proj",
-		Action:     runner.ActionReport,
-		Role:       "security",
-		Batch:      "report-" + ts,
-		StartedAt:  now.Add(-5 * time.Minute),
-		StreamFile: streamRel,
+		ProjectID: "test-proj",
+		Action:    runner.ActionReport,
+		Role:      "security",
+		Batch:     "report-" + ts,
+		StartedAt: now.Add(-5 * time.Minute),
+		AgentFile: streamRel,
 	})
 	if err != nil {
 		t.Fatalf("InsertCall: %v", err)

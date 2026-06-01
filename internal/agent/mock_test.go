@@ -21,11 +21,11 @@ func TestMockAgentEmitsEvents(t *testing.T) {
 	m := &MockAgent{Response: "hello world", Cost: 0.05}
 
 	dir := t.TempDir()
-	streamFile := filepath.Join(dir, "stream.jsonl")
+	agentFile := filepath.Join(dir, "agent.jsonl")
 
 	req := Request{
-		Prompt:     "test prompt",
-		StreamFile: streamFile,
+		Prompt:    "test prompt",
+		AgentFile: agentFile,
 	}
 
 	events := m.Run(context.Background(), req)
@@ -56,7 +56,7 @@ func TestMockAgentEmitsEvents(t *testing.T) {
 	}
 
 	// Verify stream file was written
-	data, err := os.ReadFile(streamFile)
+	data, err := os.ReadFile(agentFile)
 	if err != nil {
 		t.Fatalf("cannot read stream file: %v", err)
 	}

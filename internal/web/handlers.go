@@ -144,17 +144,17 @@ type runFiles struct {
 
 // resolveRunFiles resolves associated files for a single run row.
 //
-// New layout (logs/<exec_id>/{stream.jsonl,cmd.md,prompt.md,stderr.out}):
+// New layout (logs/<exec_id>/{agent.jsonl,cmd.md,prompt.md,stderr.out}):
 // every file lives in the same directory as the stream file. Legacy layout
 // (TS_ACTION_*) is detected by the "_stream.jsonl" suffix and falls back to
 // the old prefix-based discovery + ±5s prompt match.
 func resolveRunFiles(projectDir, orgDir string, row calldb.RecentRow) runFiles {
-	if row.StreamFile == "" {
+	if row.AgentFile == "" {
 		return runFiles{}
 	}
-	absStream := root.ResolveStreamPath(projectDir, orgDir, row.StreamFile)
+	absStream := root.ResolveStreamPath(projectDir, orgDir, row.AgentFile)
 	var rf runFiles
-	rf.LogsDir = filepath.Dir(row.StreamFile)
+	rf.LogsDir = filepath.Dir(row.AgentFile)
 	if _, err := os.Stat(absStream); err == nil {
 		rf.HasStream = true
 	}
@@ -167,10 +167,10 @@ func resolveRunFiles(projectDir, orgDir string, row calldb.RecentRow) runFiles {
 		if info, err := os.Stat(prefix + "_stderr.log"); err == nil && info.Size() > 0 {
 			rf.HasStderr = true
 		}
-		rf.PromptFile = resolvePromptFile(projectDir, row.Action, row.Role, row.StreamFile)
+		rf.PromptFile = resolvePromptFile(projectDir, row.Action, row.Role, row.AgentFile)
 		return rf
 	}
-	// New layout: everything in dir(streamFile).
+	// New layout: everything in dir(agentFile).
 	dir := filepath.Dir(absStream)
 	if _, err := os.Stat(filepath.Join(dir, "cmd.md")); err == nil {
 		rf.ExecFile = "cmd.md"
@@ -571,13 +571,13 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	run, err := db.GetRunByID(id)
-	if err != nil || run == nil || run.StreamFile == "" {
+	if err != nil || run == nil || run.AgentFile == "" {
 		http.NotFound(w, r)
 		return
 	}
 
 	fileType := r.PathValue("file")
-	absStream := root.ResolveStreamPath(pe.ProjectDir, pe.OrgDir, run.StreamFile)
+	absStream := root.ResolveStreamPath(pe.ProjectDir, pe.OrgDir, run.AgentFile)
 	legacy := root.IsLegacyStreamFile(absStream)
 	logDir := filepath.Dir(absStream)
 	var absPath, title string
@@ -592,7 +592,7 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 		title = fmt.Sprintf("Run #%d — Exec", id)
 	case "prompt":
 		if legacy {
-			promptFile := resolvePromptFile(pe.ProjectDir, run.Action, run.Role, run.StreamFile)
+			promptFile := resolvePromptFile(pe.ProjectDir, run.Action, run.Role, run.AgentFile)
 			if promptFile == "" {
 				http.NotFound(w, r)
 				return
@@ -609,7 +609,7 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 		if run.OutputFile != "" {
 			absPath = filepath.Join(pe.ProjectDir, run.OutputFile)
 		} else {
-			outputFile := resolveOutputFile(pe.ProjectDir, run.Action, run.Role, run.StreamFile)
+			outputFile := resolveOutputFile(pe.ProjectDir, run.Action, run.Role, run.AgentFile)
 			if outputFile == "" {
 				http.NotFound(w, r)
 				return
@@ -724,7 +724,7 @@ func promptDir(action, role string) string {
 }
 
 // resolvePromptFile finds the archived prompt file for a run by matching timestamps.
-func resolvePromptFile(projectDir, action, role, streamFile string) string {
+func resolvePromptFile(projectDir, action, role, agentFile string) string {
 	var promptName string
 	switch action {
 	case runner.ActionReport:
@@ -740,11 +740,11 @@ func resolvePromptFile(projectDir, action, role, streamFile string) string {
 	default:
 		return ""
 	}
-	return resolveHistoryFile(projectDir, action, role, streamFile, promptName)
+	return resolveHistoryFile(projectDir, action, role, agentFile, promptName)
 }
 
 // resolveOutputFile finds the archived output file (report.md, review.md, verify.md) for a run.
-func resolveOutputFile(projectDir, action, role, streamFile string) string {
+func resolveOutputFile(projectDir, action, role, agentFile string) string {
 	var outputName string
 	switch action {
 	case runner.ActionReport:
@@ -756,16 +756,16 @@ func resolveOutputFile(projectDir, action, role, streamFile string) string {
 	default:
 		return ""
 	}
-	return resolveHistoryFile(projectDir, action, role, streamFile, outputName)
+	return resolveHistoryFile(projectDir, action, role, agentFile, outputName)
 }
 
 // resolveHistoryFile finds an archived file by matching the stream file's timestamp.
 // Exact match is expected for new runs; fuzzy ±5s fallback handles older data.
 // Returns the filename (not full path), or empty if not found.
-func resolveHistoryFile(projectDir, action, role, streamFile, targetName string) string {
+func resolveHistoryFile(projectDir, action, role, agentFile, targetName string) string {
 	histDir := filepath.Join(projectDir, promptDir(action, role))
 
-	base := filepath.Base(streamFile)
+	base := filepath.Base(agentFile)
 	if len(base) < 19 {
 		return ""
 	}

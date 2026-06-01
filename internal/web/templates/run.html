@@ -41,7 +41,7 @@
       <tr><td style="color:var(--text-muted)">Cache Read</td><td>{{fmtTokensInt $r.CacheReadTokens}}</td></tr>
       {{if gt $r.PeakContextTokens 0}}<tr><td style="color:var(--text-muted)">Peak Context</td><td>{{fmtTokensInt $r.PeakContextTokens}}{{if gt $r.ContextWindow 0}} / {{fmtTokensInt $r.ContextWindow}} ({{fmtPercent $r.PeakContextTokens $r.ContextWindow}}){{end}}</td></tr>{{end}}
       {{if $r.ContainerID}}<tr><td style="color:var(--text-muted)">Container</td><td style="font-family:var(--font-mono);font-size:13px">{{$r.ContainerID}}</td></tr>{{end}}
-      {{if $r.StreamFile}}<tr><td style="color:var(--text-muted)">Stream File</td><td style="font-family:var(--font-mono);font-size:13px">{{$r.StreamFile}}</td></tr>{{end}}
+      {{if $r.AgentFile}}<tr><td style="color:var(--text-muted)">Agent File</td><td style="font-family:var(--font-mono);font-size:13px">{{$r.AgentFile}}</td></tr>{{end}}
     </tbody>
   </table>
 </div>
@@ -54,7 +54,7 @@
       {{if $d.ExecFile}}<tr><td style="width:160px;color:var(--text-muted)">Exec</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/exec">{{$d.ExecFile}}</a></td></tr>{{end}}
       {{if $d.PromptFile}}<tr><td style="color:var(--text-muted)">Prompt</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/prompt">{{$d.PromptFile}}</a></td></tr>{{end}}
       {{if $r.OutputFile}}<tr><td style="color:var(--text-muted)">Output</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/output">{{$r.OutputFile}}</a></td></tr>{{end}}
-      {{if $d.HasStream}}<tr><td style="color:var(--text-muted)">Stream Log</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/logs">stream.jsonl</a></td></tr>{{end}}
+      {{if $d.HasStream}}<tr><td style="color:var(--text-muted)">Stream Log</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/logs">agent.jsonl</a></td></tr>{{end}}
       {{if $d.HasStderr}}<tr><td style="color:var(--text-muted)">Stderr</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/stderr">stderr.log</a></td></tr>{{end}}
       {{if $d.LogsDir}}<tr><td style="color:var(--text-muted)">Logs Dir</td><td style="font-family:var(--font-mono);font-size:13px">{{$d.LogsDir}}/</td></tr>{{end}}
     </tbody>

@@ -88,7 +88,7 @@ func (c *CodexTmuxAgent) Run(ctx context.Context, req Request) <-chan StreamEven
 func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent) {
 	defer close(ch)
 
-	stderrWriters, streamWriter, closers := setupStreamFiles(req)
+	stderrWriters, streamWriter, closers := setupAgentFiles(req)
 	for _, c := range closers {
 		defer c.Close()
 	}
@@ -126,10 +126,10 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		SessionName:      sessionName,
 		SocketPath:       socketPath,
 		ExecID:           req.ExecID,
-		// tmux.log lands next to stream.jsonl / stderr.out under the
+		// tmux.log lands next to agent.jsonl / stderr.out under the
 		// per-EXEC_ID logs dir. Real-time diagnostic that survives stuck
-		// runs (where stream.jsonl is still empty).
-		TmuxLogPath: tmuxLogPathFor(req.StreamFile),
+		// runs (where agent.jsonl is still empty).
+		TmuxLogPath: tmuxLogPathFor(req.AgentFile),
 		OnPanePID: func(pid int) {
 			// Emit the codex pane PID so the runner records it in
 			// agent_execs.pid. The runner's processEvent handler
@@ -156,7 +156,7 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		"tmux_socket_path":  socketPath,
 	})
 
-	// Live-tail codex's rollout JSONL into stream.jsonl. Each translated
+	// Live-tail codex's rollout JSONL into agent.jsonl. Each translated
 	// line is a codex-exec-stream-shape event (turn.started, agent_message,
 	// turn.completed) that parse_stream.go renders for `ateam tail`/`cat`.
 	// Stops when this run's context is canceled or the function returns.
@@ -200,8 +200,8 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 	// wipe. Failures don't fail the run.
 	archivedPath := ""
 	archivedBytes := int64(0)
-	if result.SessionStats.SessionLogPath != "" && req.StreamFile != "" {
-		dst := filepath.Join(filepath.Dir(req.StreamFile), "codex-session.jsonl.gz")
+	if result.SessionStats.SessionLogPath != "" && req.AgentFile != "" {
+		dst := filepath.Join(filepath.Dir(req.AgentFile), "codex-session.jsonl.gz")
 		if n, aerr := codextui.GzipCopyFile(result.SessionStats.SessionLogPath, dst); aerr == nil {
 			archivedPath = dst
 			archivedBytes = n
@@ -212,7 +212,7 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 	// Best-effort: gzip-replace tmux.log with tmux.log.gz. Trace files
 	// for long /review runs reach ~1MB and compress ~15x; the .gz still
 	// streams cleanly under `gunzip -c | less`.
-	if tmuxLog := tmuxLogPathFor(req.StreamFile); tmuxLog != "" {
+	if tmuxLog := tmuxLogPathFor(req.AgentFile); tmuxLog != "" {
 		if _, statErr := os.Stat(tmuxLog); statErr == nil {
 			dst := tmuxLog + ".gz"
 			if _, aerr := codextui.GzipCopyFile(tmuxLog, dst); aerr == nil {
@@ -299,7 +299,7 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		"pane_pid":          result.PanePID,
 		// session_id is the codex rollout id (session_meta.id). Recorded
 		// here so `ateam resume` can recover it even when the live tailer
-		// never managed to translate the session_meta record into stream.jsonl.
+		// never managed to translate the session_meta record into agent.jsonl.
 		"session_id":        result.SessionStats.SessionID,
 		"session_log":       result.SessionStats.SessionLogPath,
 		"session_log_gz":    archivedPath,
@@ -320,11 +320,11 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 // tmuxLogPathFor returns the per-EXEC_ID tmux.log path derived from the
 // runner-supplied stream file. Empty if no stream file (early-failure or
 // test paths) — codex/RunTmux treats empty as "tracing disabled".
-func tmuxLogPathFor(streamFile string) string {
-	if streamFile == "" {
+func tmuxLogPathFor(agentFile string) string {
+	if agentFile == "" {
 		return ""
 	}
-	return filepath.Join(filepath.Dir(streamFile), "tmux.log")
+	return filepath.Join(filepath.Dir(agentFile), "tmux.log")
 }
 
 func explicitEnv(agentEnv, reqEnv map[string]string) map[string]string {

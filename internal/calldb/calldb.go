@@ -105,7 +105,7 @@ type Call struct {
 	Model          string
 	PromptHash     string
 	StartedAt      time.Time
-	StreamFile     string
+	AgentFile      string
 	OutputFile     string
 	GitStartHash   string
 	GitStartBranch string
@@ -496,7 +496,7 @@ func (c *CallDB) InsertCall(call *Call) (int64, error) {
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		call.ProjectID, call.Profile, call.Agent, call.Container,
 		call.Action, call.Role, call.Batch, call.Model,
-		call.PromptHash, call.StartedAt.Format(time.RFC3339), call.StreamFile,
+		call.PromptHash, call.StartedAt.Format(time.RFC3339), call.AgentFile,
 		call.OutputFile, call.GitStartHash, call.GitStartBranch, call.WorkDir,
 	)
 	if err != nil {
@@ -542,9 +542,9 @@ func (c *CallDB) SetPID(id int64, pid int, containerID string) error {
 
 // UpdateStreamFile sets the stream_file path for an exec row. Used after
 // InsertCall returns the new id so the path can be derived from the id (e.g.
-// logs/<id>/stream.jsonl).
-func (c *CallDB) UpdateStreamFile(id int64, streamFile string) error {
-	_, err := c.db.Exec("UPDATE agent_execs SET stream_file = ? WHERE id = ?", streamFile, id)
+// logs/<id>/agent.jsonl).
+func (c *CallDB) UpdateStreamFile(id int64, agentFile string) error {
+	_, err := c.db.Exec("UPDATE agent_execs SET stream_file = ? WHERE id = ?", agentFile, id)
 	return err
 }
 

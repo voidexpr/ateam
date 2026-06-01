@@ -20,13 +20,13 @@ const layoutSentinel = "logs/.layout-v2"
 // What it does, idempotently:
 //  1. For every agent_execs row whose stream_file ends in "_stream.jsonl"
 //     (the legacy <TS>_<ACTION>_ prefix layout), move stream/stderr/settings/
-//     exec.md into logs/<id>/ with the new filenames (stream.jsonl, stderr.out,
+//     exec.md into logs/<id>/ with the new filenames (agent.jsonl, stderr.out,
 //     settings.json, cmd.md). The cmd.md content is left untouched per design.
 //     Matching legacy `*_prompt.md` archives are moved into logs/<id>/prompt.md
 //     when a prompt within ±60s of the row's started_at can be located.
 //  2. Delete legacy canonical *_error.md files (report_error.md, review_error.md,
 //     verify_error.md, code_error.md, auto_setup_error.md). Failure context now
-//     lives in logs/<id>/{cmd.md,stderr.out,stream.jsonl}.
+//     lives in logs/<id>/{cmd.md,stderr.out,agent.jsonl}.
 //  3. Remove the runner.log entirely — agent_execs is the source of truth.
 //  4. Best-effort cleanup of now-empty legacy log subdirectories.
 //
@@ -80,7 +80,7 @@ func migrateRows(env *ResolvedEnv, db *calldb.CallDB) error {
 		id           int64
 		role, action string
 		startedAt    string
-		streamFile   string
+		agentFile    string
 	}
 
 	// Collect rows into a slice and close the cursor BEFORE issuing any
@@ -94,7 +94,7 @@ func migrateRows(env *ResolvedEnv, db *calldb.CallDB) error {
 	var legacy []legacyRow
 	for rows.Next() {
 		var r legacyRow
-		if err := rows.Scan(&r.id, &r.role, &r.action, &r.startedAt, &r.streamFile); err != nil {
+		if err := rows.Scan(&r.id, &r.role, &r.action, &r.startedAt, &r.agentFile); err != nil {
 			rows.Close()
 			return fmt.Errorf("scan legacy row: %w", err)
 		}
@@ -107,7 +107,7 @@ func migrateRows(env *ResolvedEnv, db *calldb.CallDB) error {
 	rows.Close()
 
 	for _, r := range legacy {
-		oldStream := ResolveStreamPath(env.ProjectDir, env.OrgDir, r.streamFile)
+		oldStream := ResolveStreamPath(env.ProjectDir, env.OrgDir, r.agentFile)
 		if _, err := os.Stat(oldStream); err != nil {
 			continue
 		}
@@ -118,7 +118,7 @@ func migrateRows(env *ResolvedEnv, db *calldb.CallDB) error {
 		}
 		prefix := strings.TrimSuffix(oldStream, "_stream.jsonl")
 		moves := []struct{ src, dst string }{
-			{oldStream, filepath.Join(newDir, "stream.jsonl")},
+			{oldStream, filepath.Join(newDir, "agent.jsonl")},
 			{prefix + "_stderr.log", filepath.Join(newDir, "stderr.out")},
 			{prefix + "_settings.json", filepath.Join(newDir, "settings.json")},
 			{prefix + "_exec.md", filepath.Join(newDir, "cmd.md")},
@@ -139,7 +139,7 @@ func migrateRows(env *ResolvedEnv, db *calldb.CallDB) error {
 			}
 		}
 		// Update stream_file to the new path.
-		newRel, err := filepath.Rel(env.ProjectDir, filepath.Join(newDir, "stream.jsonl"))
+		newRel, err := filepath.Rel(env.ProjectDir, filepath.Join(newDir, "agent.jsonl"))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: rel for %s: %v\n", newDir, err)
 			continue
@@ -302,7 +302,7 @@ func legacyPromptSuffix(action string) string {
 }
 
 // deleteLegacyErrorFiles drops the canonical-only *_error.md files. The new
-// model keeps failure context in logs/<exec_id>/{cmd.md,stderr.out,stream.jsonl}.
+// model keeps failure context in logs/<exec_id>/{cmd.md,stderr.out,agent.jsonl}.
 func deleteLegacyErrorFiles(projectDir string) {
 	supervisor := filepath.Join(projectDir, "supervisor")
 	for _, name := range []string{"review_error.md", "verify_error.md", "code_error.md", "auto_setup_error.md"} {

@@ -12,7 +12,7 @@ import (
 
 func TestRunCatFiles(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "stream.jsonl")
+	path := filepath.Join(dir, "agent.jsonl")
 
 	lines := strings.Join([]string{
 		`{"type":"system","subtype":"init","session_id":"abc42","model":"claude-opus","cwd":"/tmp"}`,
@@ -53,7 +53,7 @@ func TestRunCatIDs(t *testing.T) {
 	_, projPath, env := setupTestProject(t)
 
 	// Write a minimal JSONL stream file into the project dir.
-	streamRelPath := filepath.Join("logs", "roles", "testing_basic", "stream.jsonl")
+	streamRelPath := filepath.Join("logs", "roles", "testing_basic", "agent.jsonl")
 	streamAbsPath := filepath.Join(env.ProjectDir, streamRelPath)
 	if err := os.MkdirAll(filepath.Dir(streamAbsPath), 0755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -76,11 +76,11 @@ func TestRunCatIDs(t *testing.T) {
 	defer db.Close()
 	now := time.Now()
 	id, err := db.InsertCall(&calldb.Call{
-		ProjectID:  env.ProjectID(),
-		Action:     "exec",
-		Role:       "testing_basic",
-		StreamFile: streamRelPath,
-		StartedAt:  now.Add(-5 * time.Minute),
+		ProjectID: env.ProjectID(),
+		Action:    "exec",
+		Role:      "testing_basic",
+		AgentFile: streamRelPath,
+		StartedAt: now.Add(-5 * time.Minute),
 	})
 	if err != nil {
 		t.Fatalf("InsertCall: %v", err)

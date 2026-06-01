@@ -273,7 +273,7 @@ func TestV1LayoutIdempotentAfterArtifacts(t *testing.T) {
 		"shared/code/42/01_task_code_prompt.md": "first task body",
 		// Runtime artifacts too (per-exec scratch, untouched by migrator).
 		"runtime/42/execution_report.md": "report",
-		"logs/42/stream.jsonl":           `{"ts":"...","event":"..."}`,
+		"logs/42/agent.jsonl":            `{"ts":"...","event":"..."}`,
 	})
 
 	// Pass 2: must be a complete no-op.

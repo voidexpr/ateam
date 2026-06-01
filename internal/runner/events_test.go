@@ -227,9 +227,9 @@ func TestParseResultWithIsError(t *testing.T) {
 	}
 }
 
-func TestScanStreamFileForFinalText_Claude(t *testing.T) {
+func TestScanAgentFileForFinalText_Claude(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "stream.jsonl")
+	path := filepath.Join(dir, "agent.jsonl")
 	content := strings.Join([]string{
 		`{"type":"system","subtype":"init","session_id":"s1","model":"opus"}`,
 		`{"type":"user"}`,
@@ -241,28 +241,28 @@ func TestScanStreamFileForFinalText_Claude(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	got := scanStreamFileForFinalText(path)
+	got := scanAgentFileForFinalText(path)
 	want := "PASSED: all good"
 	if got != want {
 		t.Errorf("expected %q, got %q", want, got)
 	}
 }
 
-func TestScanStreamFileForFinalText_NoText(t *testing.T) {
+func TestScanAgentFileForFinalText_NoText(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "stream.jsonl")
+	path := filepath.Join(dir, "agent.jsonl")
 	content := `{"type":"result","total_cost_usd":0.01,"duration_ms":5000,"num_turns":0,"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0}}` + "\n"
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	got := scanStreamFileForFinalText(path)
+	got := scanAgentFileForFinalText(path)
 	if got != "" {
 		t.Errorf("expected empty, got %q", got)
 	}
 }
 
-func TestScanStreamFileForFinalText_MissingFile(t *testing.T) {
-	got := scanStreamFileForFinalText("/nonexistent/path/stream.jsonl")
+func TestScanAgentFileForFinalText_MissingFile(t *testing.T) {
+	got := scanAgentFileForFinalText("/nonexistent/path/agent.jsonl")
 	if got != "" {
 		t.Errorf("expected empty for missing file, got %q", got)
 	}
