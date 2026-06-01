@@ -1,8 +1,11 @@
 package flow
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	runtimepkg "runtime"
 	"sync"
@@ -69,7 +72,8 @@ func TestStress_NestedPipelineParallel(t *testing.T) {
 	}
 
 	rep := newCountingReporter()
-	rc := RunCtx{Ctx: context.Background(), DB: db, Reporter: rep}
+	bundleLog := &BundleLogReporter{}
+	rc := RunCtx{Ctx: context.Background(), DB: db, Reporter: MultiReporter{rep, bundleLog}}
 	env := RuntimeEnv{Executor: exec, WorkDir: dir, Role: "stress", Action: "exec"}
 
 	composition := buildStressComposition()
@@ -157,6 +161,54 @@ func TestStress_NestedPipelineParallel(t *testing.T) {
 		t.Errorf("AgentEvent count too low: got %d want ≥ 100", got)
 	}
 	t.Logf("agent events forwarded: %d", rep.agentEvents.Load())
+
+	// ── bundle.jsonl produced for every leaf ─────────────────────────
+	// The MultiReporter included a BundleLogReporter; every bundle that
+	// reached AgentExecStart should have a logs/<exec_id>/bundle.jsonl
+	// with at least bundle_start + agent_exec_start + agent_exec_end +
+	// bundle_end. Race conditions in the reporter would show up as
+	// missing files or truncated event sequences.
+	logsRoot := filepath.Join(dir, "logs")
+	entries, err := os.ReadDir(logsRoot)
+	if err != nil {
+		t.Fatalf("read logs dir: %v", err)
+	}
+	if len(entries) != 100 {
+		t.Errorf("logs/ entries: got %d want 100", len(entries))
+	}
+	wantKinds := map[string]bool{
+		"bundle_start":     true,
+		"agent_exec_start": true,
+		"agent_exec_end":   true,
+		"bundle_end":       true,
+	}
+	for _, e := range entries {
+		bundlePath := filepath.Join(logsRoot, e.Name(), "bundle.jsonl")
+		data, err := os.ReadFile(bundlePath)
+		if err != nil {
+			t.Errorf("missing bundle.jsonl for %s: %v", e.Name(), err)
+			continue
+		}
+		seen := map[string]bool{}
+		for _, line := range bytes.Split(data, []byte("\n")) {
+			if len(line) == 0 {
+				continue
+			}
+			var m map[string]any
+			if err := json.Unmarshal(line, &m); err != nil {
+				t.Errorf("%s: parse line %q: %v", e.Name(), line, err)
+				continue
+			}
+			if k, _ := m["kind"].(string); k != "" {
+				seen[k] = true
+			}
+		}
+		for k := range wantKinds {
+			if !seen[k] {
+				t.Errorf("%s/bundle.jsonl missing kind %q", e.Name(), k)
+			}
+		}
+	}
 }
 
 // ============================================================

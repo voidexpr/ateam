@@ -241,6 +241,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		Resolved: env,
 		Reporter: flow.MultiReporter{
 			&flow.StdoutReporter{Stream: showStream, SuppressBundleEnd: true},
+			&flow.BundleLogReporter{},
 		},
 	}
 	res := flow.RunBundle(bundle, rtEnv, rc)

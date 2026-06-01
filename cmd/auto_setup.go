@@ -138,7 +138,10 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 		Ctx:      ctx,
 		DB:       db,
 		Resolved: env,
-		Reporter: &flow.StdoutReporter{Stream: true},
+		Reporter: flow.MultiReporter{
+			&flow.StdoutReporter{Stream: true},
+			&flow.BundleLogReporter{},
+		},
 	}
 	return flow.Run(bundle, rtEnv, rc).FirstError()
 }

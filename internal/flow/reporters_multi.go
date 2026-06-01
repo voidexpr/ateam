@@ -1,6 +1,10 @@
 package flow
 
-import "github.com/ateam/internal/runner"
+import (
+	"time"
+
+	"github.com/ateam/internal/runner"
+)
 
 // MultiReporter fans every Reporter callback to its children in declaration
 // order. Nil children are silently skipped so callers can build a chain
@@ -56,6 +60,38 @@ func (m MultiReporter) AgentEvent(b BundleInfo, p runner.RunProgress) {
 	for _, r := range m {
 		if r != nil {
 			r.AgentEvent(b, p)
+		}
+	}
+}
+
+func (m MultiReporter) ActionStart(b BundleInfo, phase ActionPhase, actionType string, index int) {
+	for _, r := range m {
+		if r != nil {
+			r.ActionStart(b, phase, actionType, index)
+		}
+	}
+}
+
+func (m MultiReporter) ActionEnd(b BundleInfo, phase ActionPhase, actionType string, index int, flow Flow, duration time.Duration) {
+	for _, r := range m {
+		if r != nil {
+			r.ActionEnd(b, phase, actionType, index, flow, duration)
+		}
+	}
+}
+
+func (m MultiReporter) AgentExecStart(b BundleInfo, prepared *runner.PreparedRun) {
+	for _, r := range m {
+		if r != nil {
+			r.AgentExecStart(b, prepared)
+		}
+	}
+}
+
+func (m MultiReporter) AgentExecEnd(b BundleInfo, summary runner.RunSummary) {
+	for _, r := range m {
+		if r != nil {
+			r.AgentExecEnd(b, summary)
 		}
 	}
 }

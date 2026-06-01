@@ -237,7 +237,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		Ctx:      ctx,
 		DB:       db,
 		Resolved: env,
-		Reporter: tr,
+		Reporter: flow.MultiReporter{tr, &flow.BundleLogReporter{}},
 	}
 	flow.Run(agents, rtEnv, rc)
 	runErr := tr.Close()

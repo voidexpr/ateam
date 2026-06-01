@@ -14,13 +14,19 @@ import (
 
 // fakeExecutor implements Executor without needing a real *runner.AgentExecutor.
 // Configure Summary, Delay, or Events to drive happy/error/concurrency tests.
+//
+// PrepareErr, if non-nil, causes Prepare to fail — letting tests exercise
+// the PromptBundle.execute "prepare failed" Error branch.
 type fakeExecutor struct {
-	Summary runner.RunSummary
-	Delay   time.Duration
-	Events  []runner.RunProgress
+	Summary    runner.RunSummary
+	Delay      time.Duration
+	Events     []runner.RunProgress
+	PrepareErr error
 
-	mu    sync.Mutex
-	calls []fakeCall
+	mu      sync.Mutex
+	calls   []fakeCall
+	nextID  int64
+	prepped int64 // count of successful Prepare calls
 }
 
 type fakeCall struct {
@@ -28,9 +34,21 @@ type fakeCall struct {
 	Opts   runner.RunOpts
 }
 
-func (f *fakeExecutor) Execute(ctx context.Context, prompt string, opts runner.RunOpts, onProgress func(runner.RunProgress)) runner.RunSummary {
+func (f *fakeExecutor) Prepare(opts runner.RunOpts, _ string) (*runner.PreparedRun, error) {
+	if f.PrepareErr != nil {
+		return nil, f.PrepareErr
+	}
 	f.mu.Lock()
-	f.calls = append(f.calls, fakeCall{Prompt: prompt, Opts: opts})
+	f.nextID++
+	id := f.nextID
+	f.prepped++
+	f.mu.Unlock()
+	return &runner.PreparedRun{ExecID: id, Opts: opts}, nil
+}
+
+func (f *fakeExecutor) ExecutePrepared(ctx context.Context, prepared *runner.PreparedRun, prompt string, onProgress func(runner.RunProgress)) runner.RunSummary {
+	f.mu.Lock()
+	f.calls = append(f.calls, fakeCall{Prompt: prompt, Opts: prepared.Opts})
 	f.mu.Unlock()
 
 	for _, e := range f.Events {
@@ -45,7 +63,11 @@ func (f *fakeExecutor) Execute(ctx context.Context, prompt string, opts runner.R
 		case <-time.After(f.Delay):
 		}
 	}
-	return f.Summary
+	s := f.Summary
+	if s.ExecID == 0 {
+		s.ExecID = prepared.ExecID
+	}
+	return s
 }
 
 func (f *fakeExecutor) Calls() []fakeCall {
@@ -74,7 +96,12 @@ type reporterEvent struct {
 
 // recordingReporter implements Reporter by appending every call to Events
 // under a mutex. Safe for concurrent fan-in from Parallel children.
+//
+// Embeds BaseReporter so new Reporter methods automatically no-op
+// without breaking pre-existing tests; tests that need to assert
+// ActionStart / ActionEnd / AgentExec* must explicitly override.
 type recordingReporter struct {
+	BaseReporter
 	mu     sync.Mutex
 	Events []reporterEvent
 }

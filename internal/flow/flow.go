@@ -17,8 +17,10 @@ package flow
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/root"
@@ -71,11 +73,17 @@ func (e RuntimeEnv) withBundleOverrides(role, action string) RuntimeEnv {
 // as an interface here so flow tests can substitute a fake without
 // standing up the runner machinery.
 //
+// The split into Prepare + ExecutePrepared lets PromptBundle fire
+// AgentExecStart with a known exec_id BEFORE the agent process is
+// launched, so per-run observers (e.g. BundleLogReporter) can open
+// <LogsDir>/bundle.jsonl up front instead of buffering in memory.
+//
 // onProgress is invoked synchronously for each RunProgress event and may
 // fire from multiple internal goroutines; the callback owns its own
 // thread-safety. Nil disables progress reporting.
 type Executor interface {
-	Execute(ctx context.Context, prompt string, opts runner.RunOpts, onProgress func(runner.RunProgress)) runner.RunSummary
+	Prepare(opts runner.RunOpts, prompt string) (*runner.PreparedRun, error)
+	ExecutePrepared(ctx context.Context, prepared *runner.PreparedRun, prompt string, onProgress func(runner.RunProgress)) runner.RunSummary
 }
 
 // ============================================================
@@ -251,7 +259,7 @@ func (b PromptBundle) execute(rc RunCtx, env RuntimeEnv) (out []Result) {
 	}
 	env = env.withBundleOverrides(b.Role, b.Action)
 
-	bi := BundleInfo{Name: b.Name, Role: env.Role, Action: env.Action}
+	bi := BundleInfo{Name: b.Name, Role: env.Role, Action: env.Action, WorkDir: env.WorkDir, Batch: env.Batch}
 	rc.Reporter.BundleStart(bi)
 
 	emit := func(r Result) []Result {
@@ -270,8 +278,12 @@ func (b PromptBundle) execute(rc RunCtx, env RuntimeEnv) (out []Result) {
 		}
 	}()
 
-	for _, a := range b.PreExec {
+	for i, a := range b.PreExec {
+		at := actionTypeName(a)
+		rc.Reporter.ActionStart(bi, PreExec, at, i)
+		start := time.Now()
 		f := a.Run(rc, env, nil)
+		rc.Reporter.ActionEnd(bi, PreExec, at, i, f, time.Since(start))
 		if f.State != StateContinue {
 			return emit(Result{Bundle: &b, Env: env, Flow: f})
 		}
@@ -307,9 +319,17 @@ func (b PromptBundle) execute(rc RunCtx, env RuntimeEnv) (out []Result) {
 		}})
 	}
 
-	summary := env.Executor.Execute(rc.Ctx, prompt, opts, func(p runner.RunProgress) {
+	prepared, prepErr := env.Executor.Prepare(opts, prompt)
+	if prepErr != nil {
+		return emit(Result{Bundle: &b, Env: env, Flow: Flow{
+			State: StateError, Reason: "prepare failed", Err: prepErr,
+		}})
+	}
+	rc.Reporter.AgentExecStart(bi, prepared)
+	summary := env.Executor.ExecutePrepared(rc.Ctx, prepared, prompt, func(p runner.RunProgress) {
 		rc.Reporter.AgentEvent(bi, p)
 	})
+	rc.Reporter.AgentExecEnd(bi, summary)
 
 	flow := Flow{State: StateContinue}
 	if summary.IsError {
@@ -318,8 +338,12 @@ func (b PromptBundle) execute(rc RunCtx, env RuntimeEnv) (out []Result) {
 	r := Result{Bundle: &b, Env: env, Flow: flow, Summary: &summary}
 
 	if r.Flow.State == StateContinue {
-		for _, a := range b.PostExec {
+		for i, a := range b.PostExec {
+			at := actionTypeName(a)
+			rc.Reporter.ActionStart(bi, PostExec, at, i)
+			start := time.Now()
 			pf := a.Run(rc, env, &r)
+			rc.Reporter.ActionEnd(bi, PostExec, at, i, pf, time.Since(start))
 			if pf.State == StateError && r.Flow.State == StateContinue {
 				r.Flow = pf
 			}
@@ -588,4 +612,19 @@ func stageOutcomeFromResults(rs []Result) StageOutcome {
 	so := StageOutcome{FirstErrorIndex: -1}
 	so.tallyResults(rs)
 	return so
+}
+
+// actionTypeName returns the Go type name of an Action for the
+// `action_type` field in Reporter.ActionStart / ActionEnd callbacks.
+// Used by BundleLogReporter to emit `action_type: "CheckConcurrentRuns"`
+// etc. into bundle.jsonl. Pointer receivers are unwrapped.
+func actionTypeName(a Action) string {
+	t := reflect.TypeOf(a)
+	if t == nil {
+		return ""
+	}
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	return t.Name()
 }

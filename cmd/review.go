@@ -246,7 +246,10 @@ func runReview(opts ReviewOptions) error {
 		Ctx:      ctx,
 		DB:       db,
 		Resolved: env,
-		Reporter: &flow.StdoutReporter{},
+		Reporter: flow.MultiReporter{
+			&flow.StdoutReporter{},
+			&flow.BundleLogReporter{},
+		},
 	}
 	return flow.Run(bundle, rtEnv, rc).FirstError()
 }

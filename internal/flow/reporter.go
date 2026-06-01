@@ -1,6 +1,10 @@
 package flow
 
-import "github.com/ateam/internal/runner"
+import (
+	"time"
+
+	"github.com/ateam/internal/runner"
+)
 
 // ============================================================
 // Reporter types
@@ -43,9 +47,30 @@ type StageOutcome struct {
 
 // BundleInfo describes a PromptBundle to Reporter callbacks.
 type BundleInfo struct {
-	Name   string
-	Role   string
-	Action string
+	Name    string
+	Role    string
+	Action  string
+	WorkDir string
+	Batch   string
+}
+
+// ActionPhase distinguishes PreExec from PostExec actions in
+// ActionStart / ActionEnd Reporter callbacks.
+type ActionPhase int
+
+const (
+	PreExec ActionPhase = iota
+	PostExec
+)
+
+func (p ActionPhase) String() string {
+	switch p {
+	case PreExec:
+		return "pre_exec"
+	case PostExec:
+		return "post_exec"
+	}
+	return "unknown"
 }
 
 // ============================================================
@@ -87,18 +112,44 @@ type Reporter interface {
 	// agent during Execute. Forwarded from the bundle's internal progress
 	// channel. May fire from a goroutine distinct from BundleStart/End.
 	AgentEvent(BundleInfo, runner.RunProgress)
+
+	// ActionStart fires immediately before a PreExec or PostExec action's
+	// Run method is invoked. index is the action's 0-based position in
+	// the bundle's PreExec / PostExec slice.
+	ActionStart(b BundleInfo, phase ActionPhase, actionType string, index int)
+
+	// ActionEnd fires immediately after a PreExec or PostExec action
+	// returns. flow is the action's return; duration is its wall-time.
+	// Mirrors ActionStart's arguments.
+	ActionEnd(b BundleInfo, phase ActionPhase, actionType string, index int, flow Flow, duration time.Duration)
+
+	// AgentExecStart fires immediately before Executor.ExecutePrepared is
+	// called for this bundle. prepared.ExecID is the allocated exec_id;
+	// LogsDir / RuntimeDir etc. carry the per-run paths the runner will
+	// write into. Fires only when Prepare succeeded — Prepare-failure
+	// bundles produce neither AgentExecStart nor AgentExecEnd.
+	AgentExecStart(b BundleInfo, prepared *runner.PreparedRun)
+
+	// AgentExecEnd fires immediately after Executor.ExecutePrepared
+	// returns. summary is the full run summary including ExecID, totals,
+	// and error state. Paired with AgentExecStart.
+	AgentExecEnd(b BundleInfo, summary runner.RunSummary)
 }
 
 // BaseReporter is the no-op implementation. Embed it to override only
 // the callbacks you care about; the rest stay no-ops.
 type BaseReporter struct{}
 
-func (BaseReporter) StageStart(StageInfo)                      {}
-func (BaseReporter) StageEnd(StageInfo, StageOutcome)          {}
-func (BaseReporter) StepSkipped(StageInfo, string, string)     {}
-func (BaseReporter) BundleStart(BundleInfo)                    {}
-func (BaseReporter) BundleEnd(BundleInfo, Result)              {}
-func (BaseReporter) AgentEvent(BundleInfo, runner.RunProgress) {}
+func (BaseReporter) StageStart(StageInfo)                                                {}
+func (BaseReporter) StageEnd(StageInfo, StageOutcome)                                    {}
+func (BaseReporter) StepSkipped(StageInfo, string, string)                               {}
+func (BaseReporter) BundleStart(BundleInfo)                                              {}
+func (BaseReporter) BundleEnd(BundleInfo, Result)                                        {}
+func (BaseReporter) AgentEvent(BundleInfo, runner.RunProgress)                           {}
+func (BaseReporter) ActionStart(BundleInfo, ActionPhase, string, int)                    {}
+func (BaseReporter) ActionEnd(BundleInfo, ActionPhase, string, int, Flow, time.Duration) {}
+func (BaseReporter) AgentExecStart(BundleInfo, *runner.PreparedRun)                      {}
+func (BaseReporter) AgentExecEnd(BundleInfo, runner.RunSummary)                          {}
 
 // NoopReporter is the explicit "discard everything" Reporter. Used as
 // the default when RunCtx.Reporter is nil.

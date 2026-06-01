@@ -209,40 +209,55 @@ func (r *AgentExecutor) StateDir() string {
 	return r.OrgDir
 }
 
-// Execute runs the agent with the given prompt and options.
+// PreparedRun is the handle returned by Prepare(). It carries the
+// allocated exec_id and the per-run paths the runner derives from it.
+// Pass it to ExecutePrepared() to actually run the agent.
 //
-// onProgress, if non-nil, is invoked synchronously for each RunProgress
-// event. It may fire from multiple internal goroutines; implementations
-// own their own thread-safety. Pass nil to disable progress reporting.
-// For chan-based consumers, wrap a chan with ProgressChan.
-func (r *AgentExecutor) Execute(ctx context.Context, prompt string, opts RunOpts, onProgress func(RunProgress)) RunSummary {
+// The split exists so the flow framework can fire AgentExecStart with a
+// known exec_id BEFORE the agent process is launched — letting per-run
+// observers (e.g. BundleLogReporter) open <LogsDir>/bundle.jsonl up
+// front instead of buffering events in memory.
+//
+// Prepare does NOT create LogsDir / RuntimeDir; ExecutePrepared does so
+// idempotently. Observers that need to write into LogsDir before
+// ExecutePrepared starts must MkdirAll(LogsDir) themselves.
+type PreparedRun struct {
+	ExecID       int64
+	StateDir     string
+	LogsDir      string
+	RuntimeDir   string
+	StreamFile   string
+	StderrFile   string
+	SettingsFile string
+	CmdFile      string
+	PromptFile   string
+	StartedAt    time.Time
+	AgentName    string
+	Model        string
+	Cwd          string
+	PromptBytes  int
+	Opts         RunOpts
+}
+
+// Prepare allocates an exec_id and derives the per-run paths. Returns a
+// handle that must be passed to ExecutePrepared. On error, no DB row was
+// inserted and no filesystem state was touched.
+//
+// Side effects: InsertCall in the call DB (with the prompt hash) and an
+// UpdateStreamFile to persist the canonical stream path. Nothing else.
+//
+// The prompt is consumed for its hash only — template resolution and the
+// agent invocation happen inside ExecutePrepared.
+func (r *AgentExecutor) Prepare(opts RunOpts, prompt string) (*PreparedRun, error) {
 	startedAt := opts.StartedAt
 	if startedAt.IsZero() {
 		startedAt = time.Now()
 	}
 
-	failPreInsert := func(err error) RunSummary {
-		s := RunSummary{
-			RoleID:      opts.RoleID,
-			StartedAt:   startedAt,
-			EndedAt:     time.Now(),
-			Duration:    time.Since(startedAt),
-			ExitCode:    -1,
-			IsError:     true,
-			Err:         err,
-			ErrorSource: agent.ErrorSourceAteamInternal,
-			ErrorCause:  err.Error(),
-		}
-		return s
-	}
-
-	// Hard requirement: a state dir + DB must exist. StateDir is the project
-	// dir when inside one, else the org dir (scratch mode for exec/parallel).
 	if r.CallDB == nil || r.StateDir() == "" {
-		return failPreInsert(fmt.Errorf("ateam state directory required: no .ateam/ or .ateamorg/ found"))
+		return nil, fmt.Errorf("ateam state directory required: no .ateam/ or .ateamorg/ found")
 	}
 
-	// Insert FIRST so callID drives logs/<id>/ and runtime/<id>/.
 	agentName := r.Agent.Name()
 	model := agent.NormalizeModel(extractModel(r.Agent))
 	cwd := effectiveWorkDir(opts)
@@ -266,23 +281,87 @@ func (r *AgentExecutor) Execute(ctx context.Context, prompt string, opts RunOpts
 		WorkDir:        cwd,
 	})
 	if err != nil {
-		return failPreInsert(fmt.Errorf("call tracking insert failed: %w", err))
+		return nil, fmt.Errorf("call tracking insert failed: %w", err)
 	}
 
 	stateDir := r.StateDir()
 	logsDir := logsDirFor(stateDir, callID)
-	runtimeDir := runtimeDirFor(stateDir, callID)
 	streamFile := filepath.Join(logsDir, "stream.jsonl")
-	stderrFile := filepath.Join(logsDir, "stderr.out")
-	settingsFile := filepath.Join(logsDir, "settings.json")
-	cmdFile := filepath.Join(logsDir, "cmd.md")
-	promptFile := filepath.Join(logsDir, "prompt.md")
 
-	// Persist the canonical stream path on the row, relative to the state dir
-	// the DB lives in.
 	if relStream, relErr := filepath.Rel(stateDir, streamFile); relErr == nil {
 		_ = r.CallDB.UpdateStreamFile(callID, relStream)
 	}
+
+	return &PreparedRun{
+		ExecID:       callID,
+		StateDir:     stateDir,
+		LogsDir:      logsDir,
+		RuntimeDir:   runtimeDirFor(stateDir, callID),
+		StreamFile:   streamFile,
+		StderrFile:   filepath.Join(logsDir, "stderr.out"),
+		SettingsFile: filepath.Join(logsDir, "settings.json"),
+		CmdFile:      filepath.Join(logsDir, "cmd.md"),
+		PromptFile:   filepath.Join(logsDir, "prompt.md"),
+		StartedAt:    startedAt,
+		AgentName:    agentName,
+		Model:        model,
+		Cwd:          cwd,
+		PromptBytes:  len(prompt),
+		Opts:         opts,
+	}, nil
+}
+
+// Execute is the legacy single-call entry point that chains Prepare and
+// ExecutePrepared. Non-flow callers (auto_roles, inspect, runner.RunPool)
+// use this form; flow.PromptBundle uses the split form to fire
+// AgentExecStart with the known exec_id before the agent launches.
+//
+// onProgress, if non-nil, is invoked synchronously for each RunProgress
+// event. It may fire from multiple internal goroutines; implementations
+// own their own thread-safety. Pass nil to disable progress reporting.
+// For chan-based consumers, wrap a chan with ProgressChan.
+func (r *AgentExecutor) Execute(ctx context.Context, prompt string, opts RunOpts, onProgress func(RunProgress)) RunSummary {
+	prepared, err := r.Prepare(opts, prompt)
+	if err != nil {
+		startedAt := opts.StartedAt
+		if startedAt.IsZero() {
+			startedAt = time.Now()
+		}
+		return RunSummary{
+			RoleID:      opts.RoleID,
+			StartedAt:   startedAt,
+			EndedAt:     time.Now(),
+			Duration:    time.Since(startedAt),
+			ExitCode:    -1,
+			IsError:     true,
+			Err:         err,
+			ErrorSource: agent.ErrorSourceAteamInternal,
+			ErrorCause:  err.Error(),
+		}
+	}
+	return r.ExecutePrepared(ctx, prepared, prompt, onProgress)
+}
+
+// ExecutePrepared runs the agent with a previously-prepared handle. The
+// handle must come from r.Prepare(); passing one from a different
+// AgentExecutor or one already used produces undefined behavior.
+//
+// Same onProgress semantics as Execute. Updates the call DB's prompt
+// hash from the resolved prompt before launching the agent.
+func (r *AgentExecutor) ExecutePrepared(ctx context.Context, prepared *PreparedRun, prompt string, onProgress func(RunProgress)) RunSummary {
+	startedAt := prepared.StartedAt
+	callID := prepared.ExecID
+	logsDir := prepared.LogsDir
+	runtimeDir := prepared.RuntimeDir
+	streamFile := prepared.StreamFile
+	stderrFile := prepared.StderrFile
+	settingsFile := prepared.SettingsFile
+	cmdFile := prepared.CmdFile
+	promptFile := prepared.PromptFile
+	agentName := prepared.AgentName
+	model := prepared.Model
+	cwd := prepared.Cwd
+	opts := prepared.Opts
 
 	failEarly := func(err error) RunSummary {
 		s := RunSummary{

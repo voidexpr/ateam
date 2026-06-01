@@ -380,7 +380,7 @@ func runReport(opts ReportOptions) error {
 		Ctx:      ctx,
 		DB:       db,
 		Resolved: env,
-		Reporter: tr,
+		Reporter: flow.MultiReporter{tr, &flow.BundleLogReporter{}},
 	}
 	flow.Run(roles, rtEnv, rc)
 	runErr := tr.Close()

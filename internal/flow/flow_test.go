@@ -684,7 +684,11 @@ type errOnceExecutor struct {
 	mu    sync.Mutex
 }
 
-func (e *errOnceExecutor) Execute(ctx context.Context, prompt string, opts runner.RunOpts, onProgress func(runner.RunProgress)) runner.RunSummary {
+func (e *errOnceExecutor) Prepare(opts runner.RunOpts, _ string) (*runner.PreparedRun, error) {
+	return &runner.PreparedRun{Opts: opts}, nil
+}
+
+func (e *errOnceExecutor) ExecutePrepared(ctx context.Context, prepared *runner.PreparedRun, prompt string, onProgress func(runner.RunProgress)) runner.RunSummary {
 	e.mu.Lock()
 	idx := e.calls
 	e.calls++
@@ -708,7 +712,11 @@ type maxConcurrentExecutor struct {
 	peakN   int
 }
 
-func (e *maxConcurrentExecutor) Execute(ctx context.Context, prompt string, opts runner.RunOpts, onProgress func(runner.RunProgress)) runner.RunSummary {
+func (e *maxConcurrentExecutor) Prepare(opts runner.RunOpts, _ string) (*runner.PreparedRun, error) {
+	return &runner.PreparedRun{Opts: opts}, nil
+}
+
+func (e *maxConcurrentExecutor) ExecutePrepared(ctx context.Context, prepared *runner.PreparedRun, prompt string, onProgress func(runner.RunProgress)) runner.RunSummary {
 	e.mu.Lock()
 	e.current++
 	if e.current > e.peakN {

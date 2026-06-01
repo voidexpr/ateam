@@ -271,7 +271,10 @@ func runCode(opts CodeOptions) error {
 		Ctx:      ctx,
 		DB:       db,
 		Resolved: env,
-		Reporter: &flow.StdoutReporter{Stream: true},
+		Reporter: flow.MultiReporter{
+			&flow.StdoutReporter{Stream: true},
+			&flow.BundleLogReporter{},
+		},
 	}
 	return flow.Run(bundle, rtEnv, rc).FirstError()
 }
