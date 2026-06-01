@@ -1,5 +1,23 @@
+# Local-only state that should never enter a build context.
 .ateam/
+.ateamorg/
 .git/
-poc-shell/
+.cache/
+.claude/
+.vscode/
+.idea/
+
+# Local-only build outputs.
 build/
+ateam
+ateam-test-*
+.roles-docs.gen
+
+# Throwaway test scratch dirs (Makefile uses ./test_data/).
+test_data/
+
+# Local experiments / out-of-tree shells.
+poc-shell/
+
+# Docs aren't needed in the test image.
 *.md
