@@ -111,20 +111,22 @@ func runVerify(opts VerifyOptions) error {
 
 	fmt.Printf("Supervisor verifying recent code changes (%dm timeout)...\n", timeout)
 
-	cr, err := resolveRunner(env, opts.Profile, opts.Agent, runner.ActionVerify, "", opts.DockerAutoSetup)
+	cr, err := buildRunner(env, RunnerSpec{
+		Profile:         opts.Profile,
+		Agent:           opts.Agent,
+		Action:          runner.ActionVerify,
+		DockerAutoSetup: opts.DockerAutoSetup,
+		Overrides: RunnerOverrides{
+			ContainerName: opts.ContainerName,
+			CheaperModel:  opts.CheaperModel,
+			Model:         opts.Model,
+			Effort:        opts.Effort,
+			MaxBudgetUSD:  opts.MaxBudgetUSD,
+		},
+	})
 	if err != nil {
 		return err
 	}
-	if err := applyRunnerOverrides(cr, env, RunnerOverrides{
-		ContainerName: opts.ContainerName,
-		CheaperModel:  opts.CheaperModel,
-		Model:         opts.Model,
-		Effort:        opts.Effort,
-		MaxBudgetUSD:  opts.MaxBudgetUSD,
-	}, runner.ActionVerify); err != nil {
-		return err
-	}
-	setSourceWritable(cr)
 
 	db, err := openStateDB(env)
 	if err != nil {

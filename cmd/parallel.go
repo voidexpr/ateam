@@ -131,30 +131,22 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("cannot find .ateamorg/: %w", err)
 	}
-	hasProject := env.ProjectDir != "" && env.Config != nil
-	var r *runner.AgentExecutor
-	if hasProject {
-		r, err = resolveRunner(env, parallelProfile, parallelAgent, runner.ActionParallel, "", parallelDockerAutoSetup)
-	} else {
-		profile := parallelProfile
-		if profile == "" && parallelAgent == "" {
-			profile = "default"
-		}
-		r, err = resolveRunnerMinimal(env.OrgDir, profile, parallelAgent)
-	}
+	r, err := buildRunner(env, RunnerSpec{
+		Profile:         parallelProfile,
+		Agent:           parallelAgent,
+		Action:          runner.ActionParallel,
+		DockerAutoSetup: parallelDockerAutoSetup,
+		Overrides: RunnerOverrides{
+			ContainerName:     parallelContainerName,
+			Model:             parallelModel,
+			Effort:            parallelEffort,
+			MaxBudgetUSD:      parallelMaxBudgetUSD,
+			MaxBudgetUSDBatch: parallelMaxBudgetBatch,
+		},
+	})
 	if err != nil {
 		return err
 	}
-	if err := applyRunnerOverrides(r, env, RunnerOverrides{
-		ContainerName:     parallelContainerName,
-		Model:             parallelModel,
-		Effort:            parallelEffort,
-		MaxBudgetUSD:      parallelMaxBudgetUSD,
-		MaxBudgetUSDBatch: parallelMaxBudgetBatch,
-	}, runner.ActionParallel); err != nil {
-		return err
-	}
-	setSourceWritable(r)
 
 	db, err := openStateDB(env)
 	if err != nil {
@@ -192,25 +184,14 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	// One PromptBundle per submitted prompt; all share the same runner.
 	steps := make([]flow.Step, len(resolvedPrompts))
 	for i, prompt := range resolvedPrompts {
-		i, prompt := i, prompt
-		steps[i] = flow.PromptBundle{
-			Name:   labels[i],
-			Role:   labels[i],
-			Action: runner.ActionParallel,
-			Render: func(flow.RuntimeEnv) (string, error) {
-				return prompt, nil
-			},
-			RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
-				return runner.RunOpts{
-					RoleID:     labels[i],
-					Action:     runner.ActionParallel,
-					WorkDir:    env.WorkDir,
-					TimeoutMin: parallelTimeout,
-					Verbose:    parallelVerbose,
-					Batch:      batch,
-				}
-			},
-		}
+		steps[i] = staticBundle(labels[i], labels[i], runner.ActionParallel, prompt, runner.RunOpts{
+			RoleID:     labels[i],
+			Action:     runner.ActionParallel,
+			WorkDir:    env.WorkDir,
+			TimeoutMin: parallelTimeout,
+			Verbose:    parallelVerbose,
+			Batch:      batch,
+		})
 	}
 
 	tr := newTableReporter(tableReporterOpts{

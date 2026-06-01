@@ -141,36 +141,27 @@ func runExec(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-	var r *runner.AgentExecutor
-	if hasProject {
-		r, err = resolveRunner(env, execProfile, execAgent, execAction, execRole, execDockerAutoSetup)
-	} else {
-		profile := execProfile
-		if profile == "" && execAgent == "" {
-			profile = "default"
-		}
-		r, err = resolveRunnerMinimal(env.OrgDir, profile, execAgent)
-	}
+	r, err := buildRunner(env, RunnerSpec{
+		Profile:         execProfile,
+		Agent:           execAgent,
+		Action:          execAction,
+		Role:            execRole,
+		DockerAutoSetup: execDockerAutoSetup,
+		Overrides: RunnerOverrides{
+			ContainerName:     execContainerName,
+			Model:             execModel,
+			Effort:            execEffort,
+			MaxBudgetUSD:      execMaxBudgetUSD,
+			MaxBudgetUSDBatch: execMaxBudgetBatch,
+		},
+	})
 	if err != nil {
 		if !execDryRun {
 			return err
 		}
 		fmt.Fprintf(os.Stderr, "Warning: %v\n\n", err)
-		if r == nil {
-			return nil
-		}
+		return nil
 	}
-
-	if err := applyRunnerOverrides(r, env, RunnerOverrides{
-		ContainerName:     execContainerName,
-		Model:             execModel,
-		Effort:            execEffort,
-		MaxBudgetUSD:      execMaxBudgetUSD,
-		MaxBudgetUSDBatch: execMaxBudgetBatch,
-	}, execAction); err != nil {
-		return err
-	}
-	setSourceWritable(r)
 
 	if execAgentArgs != "" {
 		r.ExtraArgs = append(r.ExtraArgs, strings.Fields(execAgentArgs)...)
@@ -232,17 +223,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	ctx, stop := cmdContext()
 	defer stop()
 
-	bundle := flow.PromptBundle{
-		Name:   "exec",
-		Role:   execRole,
-		Action: execAction,
-		Render: func(flow.RuntimeEnv) (string, error) {
-			return promptText, nil
-		},
-		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
-			return opts
-		},
-	}
+	bundle := staticBundle("exec", execRole, execAction, promptText, opts)
 	rtEnv := flow.RuntimeEnv{
 		Executor: r,
 		WorkDir:  env.WorkDir,

@@ -203,21 +203,23 @@ func runCode(opts CodeOptions) error {
 		return err
 	}
 
-	cr, err := resolveRunner(env, supervisorProfileName, opts.SupervisorAgent, runner.ActionCode, "", opts.DockerAutoSetup)
+	cr, err := buildRunner(env, RunnerSpec{
+		Profile:         supervisorProfileName,
+		Agent:           opts.SupervisorAgent,
+		Action:          runner.ActionCode,
+		DockerAutoSetup: opts.DockerAutoSetup,
+		Overrides: RunnerOverrides{
+			ContainerName:     opts.ContainerName,
+			CheaperModel:      opts.CheaperModel,
+			Model:             opts.Model,
+			Effort:            opts.Effort,
+			MaxBudgetUSD:      opts.MaxBudgetUSD,
+			MaxBudgetUSDBatch: opts.MaxBudgetBatch,
+		},
+	})
 	if err != nil {
 		return err
 	}
-	if err := applyRunnerOverrides(cr, env, RunnerOverrides{
-		ContainerName:     opts.ContainerName,
-		CheaperModel:      opts.CheaperModel,
-		Model:             opts.Model,
-		Effort:            opts.Effort,
-		MaxBudgetUSD:      opts.MaxBudgetUSD,
-		MaxBudgetUSDBatch: opts.MaxBudgetBatch,
-	}, runner.ActionCode); err != nil {
-		return err
-	}
-	setSourceWritable(cr)
 
 	db, err := openStateDB(env)
 	if err != nil {

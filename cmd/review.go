@@ -185,17 +185,20 @@ func runReview(opts ReviewOptions) error {
 
 	fmt.Printf("Supervisor reviewing reports (%dm timeout)...\n", timeout)
 
-	cr, err := resolveRunner(env, opts.Profile, opts.Agent, runner.ActionReview, "", opts.DockerAutoSetup)
+	cr, err := buildRunner(env, RunnerSpec{
+		Profile:         opts.Profile,
+		Agent:           opts.Agent,
+		Action:          runner.ActionReview,
+		DockerAutoSetup: opts.DockerAutoSetup,
+		Overrides: RunnerOverrides{
+			ContainerName: opts.ContainerName,
+			CheaperModel:  opts.CheaperModel,
+			Model:         opts.Model,
+			Effort:        opts.Effort,
+			MaxBudgetUSD:  opts.MaxBudgetUSD,
+		},
+	})
 	if err != nil {
-		return err
-	}
-	if err := applyRunnerOverrides(cr, env, RunnerOverrides{
-		ContainerName: opts.ContainerName,
-		CheaperModel:  opts.CheaperModel,
-		Model:         opts.Model,
-		Effort:        opts.Effort,
-		MaxBudgetUSD:  opts.MaxBudgetUSD,
-	}, runner.ActionReview); err != nil {
 		return err
 	}
 

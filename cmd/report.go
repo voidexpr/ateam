@@ -197,25 +197,6 @@ func runReport(opts ReportOptions) error {
 
 	timeout := env.Config.Report.EffectiveTimeout(opts.Timeout)
 
-	cr, err := resolveRunner(env, opts.Profile, opts.Agent, runner.ActionReport, "", opts.DockerAutoSetup)
-	if err != nil {
-		return err
-	}
-	if err := applyRunnerOverrides(cr, env, RunnerOverrides{
-		ContainerName:     opts.ContainerName,
-		CheaperModel:      opts.CheaperModel,
-		Model:             opts.Model,
-		Effort:            opts.Effort,
-		MaxBudgetUSD:      opts.MaxBudgetUSD,
-		MaxBudgetUSDBatch: opts.MaxBudgetBatch,
-	}, runner.ActionReport); err != nil {
-		return err
-	}
-
-	batch := "report-" + time.Now().Format(display.TimestampFormat)
-	cliOverridesProfile := opts.Profile != "" || opts.Agent != ""
-	defaultProfile := env.Config.ResolveProfile(runner.ActionReport, "")
-
 	overrides := RunnerOverrides{
 		ContainerName:     opts.ContainerName,
 		CheaperModel:      opts.CheaperModel,
@@ -224,6 +205,20 @@ func runReport(opts ReportOptions) error {
 		MaxBudgetUSD:      opts.MaxBudgetUSD,
 		MaxBudgetUSDBatch: opts.MaxBudgetBatch,
 	}
+	cr, err := buildRunner(env, RunnerSpec{
+		Profile:         opts.Profile,
+		Agent:           opts.Agent,
+		Action:          runner.ActionReport,
+		DockerAutoSetup: opts.DockerAutoSetup,
+		Overrides:       overrides,
+	})
+	if err != nil {
+		return err
+	}
+
+	batch := "report-" + time.Now().Format(display.TimestampFormat)
+	cliOverridesProfile := opts.Profile != "" || opts.Agent != ""
+	defaultProfile := env.Config.ResolveProfile(runner.ActionReport, "")
 
 	// Build per-role bundles. Each bundle's Env carries a (possibly
 	// role-specific) Executor — the outer Parallel doesn't see roles or
@@ -247,11 +242,15 @@ func runReport(opts ReportOptions) error {
 		roleRunner := cr
 		if !cliOverridesProfile {
 			if roleProfile := env.Config.ResolveProfile(runner.ActionReport, roleID); roleProfile != defaultProfile {
-				rr, err := resolveRunner(env, roleProfile, "", runner.ActionReport, roleID, opts.DockerAutoSetup)
+				rr, err := buildRunner(env, RunnerSpec{
+					Profile:         roleProfile,
+					Action:          runner.ActionReport,
+					Role:            roleID,
+					DockerAutoSetup: opts.DockerAutoSetup,
+					Overrides:       overrides,
+				})
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: cannot resolve profile %q for %s, using default — %v\n", roleProfile, roleID, err)
-				} else if err := applyRunnerOverrides(rr, env, overrides, runner.ActionReport); err != nil {
-					return err
 				} else {
 					roleRunner = rr
 				}
@@ -270,17 +269,7 @@ func runReport(opts ReportOptions) error {
 			Batch:             batch,
 		}
 
-		bundle := flow.PromptBundle{
-			Name:   roleID,
-			Role:   roleID,
-			Action: runner.ActionReport,
-			Render: func(flow.RuntimeEnv) (string, error) {
-				return prompt, nil
-			},
-			RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
-				return runOpts
-			},
-		}
+		bundle := staticBundle(roleID, roleID, runner.ActionReport, prompt, runOpts)
 		rbs = append(rbs, roleBundle{roleID: roleID, bundle: bundle, runner: roleRunner})
 	}
 

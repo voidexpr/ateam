@@ -83,11 +83,14 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Auto-setup running (%dm timeout)...\n", timeout)
 
-	cr, err := resolveRunner(env, autoSetupProfile, autoSetupAgent, runner.ActionExec, "", false)
+	cr, err := buildRunner(env, RunnerSpec{
+		Profile: autoSetupProfile,
+		Agent:   autoSetupAgent,
+		Action:  runner.ActionExec,
+	})
 	if err != nil {
 		return err
 	}
-	setSourceWritable(cr)
 
 	db, err := openStateDB(env)
 	if err != nil {
