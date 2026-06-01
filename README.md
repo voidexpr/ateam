@@ -80,26 +80,18 @@ TODO:
 * transparent: capture all information about unattended agents, use markdown files as input/output of agents
 * stateful: get context from git change log, feed previous report when generating the new (saves a lot of tokens by persisting role specific context)
 
-## How is Ateam different than other agent framework
-
-Most agent frameworks try to recreate human team structure using an evocative terminology and focus on feature work. Ateam's approach is to see feature work as a task that benefits from interactive agents and fundamentally requires attention. The sweet spot for unattended agents is with software engineering quality tasks. So ateam's focus on getting the fundamental right: reliably and safely run unattended agents, re-execute and audit saved prompts.
-
-The basic primitive of running prompt against any agent/container environment while capturing costs and logs is suprisingly versatile. You can look at the scripts/ directory in the ateam git repo for example of common code review or testing workflows that are simple bash scripts when using ateam.
-
-This is a rapidly evolving field with new frameworks being born every day, time will tell which approach approaches work best. Ateam explores one of them.
-
 ## Why ATeam
 
 Coding agents prioritize feature completion over software quality which is a good short-term tradeoff that degrades over time. Tests fall behind, security issues accumulate, code becomes spaghetti, docs go stale, dependencies rot, ...
 
 ATeam addresses this by running quality-focused agents unattended, no interactive prompting needed, no functional changes. Just steady, incremental quality improvement that looks like the code was engineered well in the first place.
 
-Core principles:
+Core principles of the built-in roles and review process:
 
 * **No feature work**: focus on quality, don't change behavior
 * **Unattended**: your own coding agent works without approval or interaction
 * **Safe**: sandboxing and container isolation
-* **Pragmatic**: ateam agents are prompted to adapt to the project size and maturity, audits try to automate tools (linter, test automation, security vulnerability tools, ...) rather than constantly relying on agents
+* **Pragmatic**: ateam agents are prompted to adapt to the project size and maturity, audits try to automate tools (linter, test automation, security vulnerability tools, ...) rather than constantly relying on agent decision making, they are instructed to automate themselves out of their job
 * **Simple**: reuses existing coding agents, minimal orchestration
 * **Auditable**: every artifact is a readable markdown file
 * **Stateful**: old reports or reviews are read before generating a new one so no context is lost, only one file per role so there is no bloat over time
@@ -107,6 +99,15 @@ Core principles:
 * **Get out of your way**: ATeam is not a generic workflow system, it is a focused report + review + code + verify automation layer designed to preserve your attention for high-value work
 
 In any case there is no silver bullet, eventually documentation might need human direction to be better structure, a major code refactoring to better handle feature requirements is needed, etc ... But the goal is to reduce human involvement in day to day software engineering tasks.
+
+
+### How is Ateam different from other agent framework
+
+Most agent frameworks try to recreate human team structure using an evocative terminology and focus on feature work. Ateam's approach is to see feature work as a task that benefits from interactive agents and fundamentally requires attention. The sweet spot for unattended agents is with software engineering quality tasks. So ateam's focus on getting the fundamental right: reliably and safely run unattended agents, re-execute and audit saved prompts.
+
+The basic primitive of running prompt against any agent/container environment while capturing costs and logs is suprisingly versatile. You can look at the scripts/ directory in the ateam git repo for example of common code review or testing workflows that are simple bash scripts when using ateam.
+
+This is a rapidly evolving field with new frameworks being born every day, time will tell which approach approaches work best. Ateam explores one of them.
 
 ## Quick Start
 
