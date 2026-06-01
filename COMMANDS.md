@@ -444,6 +444,25 @@ When used with `--agent codex-tmux` the prompt has an extra shape: the first lin
 | `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
 | `--force` | Run even if the same action+role is already running |
 | `--verbose` | Print agent and docker commands to stderr |
+| `--format jsonl` | Emit a structured JSONL event stream on `--progress-fd`. Implies `--no-stream --no-summary`. See [Structured event stream](#structured-event-stream-jsonl) below |
+| `--progress-fd N` | File descriptor to write `--format` output to. Required with `--format`; must be opened by the caller (e.g. via Popen's `pass_fds`) |
+
+#### Structured event stream (jsonl)
+
+`ateam exec --format jsonl --progress-fd=N` emits one JSON object per line on file descriptor `N`, interleaving bundle-lifecycle and per-agent events with a `source` discriminator (`"bundle"` or `"agent"`). Use for external orchestrators (Python framework, shell scripts, CI) that drive `ateam exec` subprocesses and need structured progress per subprocess.
+
+```python
+proc = subprocess.Popen(
+    ["ateam", "exec", "--format", "jsonl", "--progress-fd", "3", "say hi"],
+    pass_fds=(3,))
+for line in os.fdopen(3):
+    event = json.loads(line)
+    update_progress(event)
+```
+
+The runner also prints `exec_id=<id>` on stderr right after the row is allocated — orchestrators can `grep ^exec_id=` to correlate without parsing the JSONL stream.
+
+Schema is v1; lifecycle vocabulary lives in `plans/Feature_prompt_report_fs_refactor_phaseH.md`. The same `bundle.jsonl` content is also written to `<state-dir>/logs/<exec_id>/bundle.jsonl` for post-mortem inspection.
 
 ### `ateam parallel`
 

@@ -35,6 +35,8 @@ var (
 	execDockerAutoSetup bool
 	execDryRun          bool
 	execContainerName   string
+	execFormat          string
+	execProgressFD      int
 )
 
 var execCmd = &cobra.Command{
@@ -88,6 +90,8 @@ func init() {
 	addDockerAutoSetupFlag(execCmd, &execDockerAutoSetup)
 	addContainerNameFlag(execCmd, &execContainerName)
 	execCmd.Flags().BoolVar(&execDryRun, "dry-run", false, "print resolved command, secrets, and prompt without running")
+	execCmd.Flags().StringVar(&execFormat, "format", "", "structured output format: 'jsonl' for an interleaved bundle+agent event stream; requires --progress-fd. Implies --no-stream --no-summary so stdout/stderr stay clean for the orchestrator")
+	execCmd.Flags().IntVar(&execProgressFD, "progress-fd", 0, "file descriptor to write --format output to; must be opened by the caller (e.g. via Popen's pass_fds). Required with --format")
 }
 
 func runExec(cmd *cobra.Command, args []string) error {
@@ -211,8 +215,19 @@ func runExec(cmd *cobra.Command, args []string) error {
 		TimeoutMin: timeout,
 	}
 
-	showStream := !execNoStream && !execQuiet
-	showSummary := !execNoSummary && !execQuiet
+	jsonOut, err := openProgressFD(execFormat, execProgressFD)
+	if err != nil {
+		return err
+	}
+	if jsonOut != nil {
+		defer jsonOut.Close()
+	}
+
+	// --format jsonl owns stdout/stderr decoration: silence the human
+	// streaming + summary lines so the orchestrator's pipes stay clean.
+	jsonMode := jsonOut != nil
+	showStream := !execNoStream && !execQuiet && !jsonMode
+	showSummary := !execNoSummary && !execQuiet && !jsonMode
 
 	ctx, stop := cmdContext()
 	defer stop()
@@ -242,6 +257,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		Reporter: flow.MultiReporter{
 			&flow.StdoutReporter{Stream: showStream, SuppressBundleEnd: true},
 			&flow.BundleLogReporter{},
+			jsonReporterOrNil(jsonOut),
 		},
 	}
 	res := flow.RunBundle(bundle, rtEnv, rc)
@@ -341,6 +357,41 @@ func printExecSummary(r runner.RunSummary) {
 	if r.Err != nil {
 		fmt.Fprintf(os.Stderr, "  Error:    %v\n", r.Err)
 	}
+}
+
+// openProgressFD validates --format / --progress-fd and returns the
+// destination *os.File for JSONReporter, or nil when --format is empty.
+// The returned file must be Closed by the caller. The fd is duplicated
+// inheritably so closing the *os.File doesn't yank the original fd from
+// under whoever set it up (typically Popen's pass_fds).
+func openProgressFD(format string, fd int) (*os.File, error) {
+	if format == "" {
+		if fd != 0 {
+			return nil, fmt.Errorf("--progress-fd requires --format")
+		}
+		return nil, nil
+	}
+	if format != "jsonl" {
+		return nil, fmt.Errorf("unknown --format %q (supported: jsonl)", format)
+	}
+	if fd <= 0 {
+		return nil, fmt.Errorf("--format=jsonl requires --progress-fd=<n> (no default; caller must pass an open writable fd)")
+	}
+	f := os.NewFile(uintptr(fd), fmt.Sprintf("progress-fd-%d", fd))
+	if f == nil {
+		return nil, fmt.Errorf("--progress-fd=%d is not a valid file descriptor", fd)
+	}
+	return f, nil
+}
+
+// jsonReporterOrNil returns a *flow.JSONReporter when w is non-nil, else
+// nil — which MultiReporter silently skips. Keeps the Reporter-chain
+// declaration site free of conditionals.
+func jsonReporterOrNil(w *os.File) flow.Reporter {
+	if w == nil {
+		return nil
+	}
+	return &flow.JSONReporter{W: w}
 }
 
 // promptArgOrStdin returns the prompt argument to feed prompts.ResolveValue:

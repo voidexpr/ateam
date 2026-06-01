@@ -384,3 +384,70 @@ func TestRunExecRecordsCustomAction(t *testing.T) {
 		t.Errorf("expected row.Action=audit, got %q", rows[0].Action)
 	}
 }
+
+func TestOpenProgressFD(t *testing.T) {
+	cases := []struct {
+		name       string
+		format     string
+		fd         int
+		wantErr    string
+		wantOpenFD bool
+	}{
+		{name: "no-format-no-fd-noop", format: "", fd: 0},
+		{name: "fd-without-format-rejected", format: "", fd: 3, wantErr: "--progress-fd requires --format"},
+		{name: "unknown-format-rejected", format: "csv", fd: 3, wantErr: "unknown --format"},
+		{name: "jsonl-without-fd-rejected", format: "jsonl", fd: 0, wantErr: "--progress-fd"},
+		{name: "jsonl-negative-fd-rejected", format: "jsonl", fd: -1, wantErr: "--progress-fd"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f, err := openProgressFD(tc.format, tc.fd)
+			if f != nil {
+				f.Close()
+			}
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected err: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err %v missing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestOpenProgressFD_RealPipe(t *testing.T) {
+	// Pipe one end into openProgressFD via its raw fd and verify a
+	// subsequent write reaches the other end. NewFile and pw share the
+	// same fd; closing both would double-close, so we close only pw.
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	defer pr.Close()
+	defer pw.Close()
+
+	f, err := openProgressFD("jsonl", int(pw.Fd()))
+	if err != nil {
+		t.Fatalf("openProgressFD: %v", err)
+	}
+	if _, err := f.Write([]byte("hi\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	buf := make([]byte, 8)
+	done := make(chan struct{})
+	var n int
+	go func() {
+		n, _ = pr.Read(buf)
+		close(done)
+	}()
+	// Trigger read by closing pw which signals EOF after the buffered "hi".
+	pw.Close()
+	<-done
+	if string(buf[:n]) != "hi\n" {
+		t.Errorf("read: got %q want hi\\n", buf[:n])
+	}
+}

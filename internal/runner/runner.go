@@ -284,6 +284,12 @@ func (r *AgentExecutor) Prepare(opts RunOpts, prompt string) (*PreparedRun, erro
 		return nil, fmt.Errorf("call tracking insert failed: %w", err)
 	}
 
+	// Print exec_id on stderr in a structured form so orchestrators
+	// driving `ateam exec` (or any agent-running cmd) can correlate the
+	// subprocess with the row, without parsing log output or the JSON
+	// progress stream. Single source of truth; always emitted.
+	fmt.Fprintf(os.Stderr, "exec_id=%d\n", callID)
+
 	stateDir := r.StateDir()
 	logsDir := logsDirFor(stateDir, callID)
 	streamFile := filepath.Join(logsDir, "stream.jsonl")
