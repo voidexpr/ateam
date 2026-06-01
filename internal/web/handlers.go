@@ -142,8 +142,9 @@ type runFiles struct {
 	HasStderr    bool
 	HasBundle    bool
 	HasSettings  bool
-	RuntimeDir   string   // project-relative path to runtime/<exec_id>/, "" if none
-	RuntimeFiles []string // files in runtime/<exec_id>/, relative to that dir
+	HasRuntime   bool     // a non-empty runtime/<exec_id>/ exists (cheap to compute)
+	RuntimeDir   string   // project-relative path to runtime/<exec_id>/, populated only when caller walks
+	RuntimeFiles []string // files in runtime/<exec_id>/, populated only when caller walks
 }
 
 // resolveRunFiles resolves associated files for a single run row.
@@ -176,35 +177,57 @@ func resolveRunFiles(projectDir, orgDir string, row calldb.RecentRow) runFiles {
 	}
 	// New layout: everything in dir(agentFile).
 	dir := filepath.Dir(absStream)
-	if _, err := os.Stat(filepath.Join(dir, "cmd.md")); err == nil {
-		rf.ExecFile = "cmd.md"
+	if _, err := os.Stat(filepath.Join(dir, runner.CmdFileName)); err == nil {
+		rf.ExecFile = runner.CmdFileName
 	}
-	if info, err := os.Stat(filepath.Join(dir, "stderr.out")); err == nil && info.Size() > 0 {
+	if info, err := os.Stat(filepath.Join(dir, runner.StderrFileName)); err == nil && info.Size() > 0 {
 		rf.HasStderr = true
 	}
-	if _, err := os.Stat(filepath.Join(dir, "prompt.md")); err == nil {
-		rf.PromptFile = "prompt.md"
+	if _, err := os.Stat(filepath.Join(dir, runner.PromptFileName)); err == nil {
+		rf.PromptFile = runner.PromptFileName
 	}
-	if _, err := os.Stat(filepath.Join(dir, "bundle.jsonl")); err == nil {
+	if _, err := os.Stat(filepath.Join(dir, runner.BundleFileName)); err == nil {
 		rf.HasBundle = true
 	}
-	if _, err := os.Stat(filepath.Join(dir, "settings.json")); err == nil {
+	if _, err := os.Stat(filepath.Join(dir, runner.SettingsFileName)); err == nil {
 		rf.HasSettings = true
 	}
-	// Discover runtime/<exec_id>/ siblings — the agent-writable output area
-	// is a sibling of logs/<exec_id>/ under the same state dir. Files here
-	// (report.md, sidecars, scratch artifacts) are not promoted to canonical
-	// destinations but live forever for inspection.
-	runtimeDir := strings.Replace(dir, string(filepath.Separator)+"logs"+string(filepath.Separator), string(filepath.Separator)+"runtime"+string(filepath.Separator), 1)
-	if files := walkRuntimeFiles(runtimeDir); len(files) > 0 {
-		rf.RuntimeFiles = files
-		if rel, err := filepath.Rel(projectDir, runtimeDir); err == nil {
-			rf.RuntimeDir = rel
-		} else {
-			rf.RuntimeDir = runtimeDir
-		}
+	// Cheap "does runtime/<exec_id>/ exist?" stat for list views. Full
+	// recursive walk is deferred to populateRuntimeFiles, only called
+	// by handleRun (single-run page).
+	if info, err := os.Stat(runtimeDirFromRow(projectDir, row.ID)); err == nil && info.IsDir() {
+		rf.HasRuntime = true
 	}
 	return rf
+}
+
+// runtimeDirFromRow derives the runtime/<exec_id>/ path from the project
+// dir + exec id, matching runner.RuntimeDirFor — used here so the web
+// package doesn't reach into "logs/" string surgery to find its sibling.
+func runtimeDirFromRow(projectDir string, execID int64) string {
+	return runner.RuntimeDirFor(projectDir, execID)
+}
+
+// populateRuntimeFiles walks runtime/<exec_id>/ and fills the
+// RuntimeFiles + RuntimeDir fields on rf. Called only when those fields
+// are about to be rendered (the single-run page); list views skip this
+// because they don't display per-row runtime file lists, and a recursive
+// walk per row would dominate page-load time on projects with many runs.
+func populateRuntimeFiles(rf *runFiles, projectDir string, execID int64) {
+	if !rf.HasRuntime {
+		return
+	}
+	runtimeDir := runtimeDirFromRow(projectDir, execID)
+	files := walkRuntimeFiles(runtimeDir)
+	if len(files) == 0 {
+		return
+	}
+	rf.RuntimeFiles = files
+	if rel, err := filepath.Rel(projectDir, runtimeDir); err == nil {
+		rf.RuntimeDir = rel
+	} else {
+		rf.RuntimeDir = runtimeDir
+	}
 }
 
 // walkRuntimeFiles returns runtime/<exec_id>/ contents as paths relative
@@ -584,6 +607,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		Run:      *run,
 		runFiles: resolveRunFiles(pe.ProjectDir, pe.OrgDir, *run),
 	}
+	populateRuntimeFiles(&data.runFiles, pe.ProjectDir, run.ID)
 
 	s.render(w, r, "run.html", pageData{
 		Title:       fmt.Sprintf("Run #%d", id),
@@ -634,7 +658,7 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 		if legacy {
 			absPath = strings.TrimSuffix(absStream, "_stream.jsonl") + "_exec.md"
 		} else {
-			absPath = filepath.Join(logDir, "cmd.md")
+			absPath = filepath.Join(logDir, runner.CmdFileName)
 		}
 		title = fmt.Sprintf("Run #%d — Exec", id)
 	case "prompt":
@@ -646,7 +670,7 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 			}
 			absPath = filepath.Join(pe.ProjectDir, promptDir(run.Action, run.Role), promptFile)
 		} else {
-			absPath = filepath.Join(logDir, "prompt.md")
+			absPath = filepath.Join(logDir, runner.PromptFileName)
 		}
 		title = fmt.Sprintf("Run #%d — Prompt", id)
 	case "output":
@@ -671,7 +695,7 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 		if legacy {
 			absPath = strings.TrimSuffix(absStream, "_stream.jsonl") + "_stderr.log"
 		} else {
-			absPath = filepath.Join(logDir, "stderr.out")
+			absPath = filepath.Join(logDir, runner.StderrFileName)
 		}
 		title = fmt.Sprintf("Run #%d — Stderr", id)
 	case "bundle":
@@ -679,14 +703,14 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		absPath = filepath.Join(logDir, "bundle.jsonl")
+		absPath = filepath.Join(logDir, runner.BundleFileName)
 		title = fmt.Sprintf("Run #%d — Bundle Events", id)
 	case "settings":
 		if legacy {
 			http.NotFound(w, r)
 			return
 		}
-		absPath = filepath.Join(logDir, "settings.json")
+		absPath = filepath.Join(logDir, runner.SettingsFileName)
 		title = fmt.Sprintf("Run #%d — Settings", id)
 	default:
 		http.NotFound(w, r)

@@ -130,7 +130,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot find .ateamorg/: %w", err)
 	}
 
-	hasProject := env.ProjectDir != "" && env.Config != nil
+	hasProject := env.HasProject()
 
 	if execRole != "" && !hasProject {
 		return fmt.Errorf("--role requires a project context (.ateam/ directory)")
@@ -206,15 +206,11 @@ func runExec(cmd *cobra.Command, args []string) error {
 		TimeoutMin: timeout,
 	}
 
-	jsonOut, err := openProgressFD(execFormat, execProgressFD)
+	jsonOut, jsonCloser, err := openProgressFD(execFormat, execProgressFD)
 	if err != nil {
 		return err
 	}
-	// Only close fds we own — std{out,err} stay open for the rest of
-	// the process.
-	if jsonOut != nil && jsonOut != os.Stdout && jsonOut != os.Stderr {
-		defer jsonOut.Close()
-	}
+	defer jsonCloser.Close()
 
 	// --format jsonl owns stdout for the event stream: silence the human
 	// streaming + summary + agent-text output so the orchestrator's pipe
@@ -347,45 +343,51 @@ func printExecSummary(r runner.RunSummary) {
 }
 
 // openProgressFD validates --format / --progress-fd and returns the
-// destination *os.File for JSONReporter, or nil when --format is empty.
+// destination writer for JSONReporter (or nil when --format is empty).
 // Defaults to os.Stdout when --format is set but --progress-fd is not —
 // matches the convention of `--format X` CLIs (jq, kubectl -o json, gh
 // --json). Caller passes --progress-fd N to redirect elsewhere (e.g.
 // Popen pass_fds when the orchestrator wants stdout for something else).
 //
-// The returned file is the process's std{out,err} when fd is 0, 1, or 2;
-// caller must NOT close those. For other fds the returned *os.File wraps
-// the raw fd and caller owns the close.
-func openProgressFD(format string, fd int) (*os.File, error) {
+// closer is always non-nil and safe to call from a defer; for the
+// process's std{out,err} it's a no-op, for caller-passed fds it closes
+// the underlying *os.File. Callers don't need to special-case stdio.
+func openProgressFD(format string, fd int) (w io.Writer, closer io.Closer, err error) {
 	if format == "" {
 		if fd != 0 {
-			return nil, fmt.Errorf("--progress-fd requires --format")
+			return nil, nopCloser{}, fmt.Errorf("--progress-fd requires --format")
 		}
-		return nil, nil
+		return nil, nopCloser{}, nil
 	}
 	if format != "jsonl" {
-		return nil, fmt.Errorf("unknown --format %q (supported: jsonl)", format)
+		return nil, nopCloser{}, fmt.Errorf("unknown --format %q (supported: jsonl)", format)
 	}
 	switch {
 	case fd < 0:
-		return nil, fmt.Errorf("--progress-fd must be non-negative")
+		return nil, nopCloser{}, fmt.Errorf("--progress-fd must be non-negative")
 	case fd == 0 || fd == 1:
-		return os.Stdout, nil
+		return os.Stdout, nopCloser{}, nil
 	case fd == 2:
-		return os.Stderr, nil
+		return os.Stderr, nopCloser{}, nil
 	default:
 		f := os.NewFile(uintptr(fd), fmt.Sprintf("progress-fd-%d", fd))
 		if f == nil {
-			return nil, fmt.Errorf("--progress-fd=%d is not a valid file descriptor", fd)
+			return nil, nopCloser{}, fmt.Errorf("--progress-fd=%d is not a valid file descriptor", fd)
 		}
-		return f, nil
+		return f, f, nil
 	}
 }
+
+// nopCloser is the std{out,err} closer — the process owns those fds for
+// its entire lifetime, so Close is intentionally a no-op.
+type nopCloser struct{}
+
+func (nopCloser) Close() error { return nil }
 
 // jsonReporterOrNil returns a *flow.JSONReporter when w is non-nil, else
 // nil — which MultiReporter silently skips. Keeps the Reporter-chain
 // declaration site free of conditionals.
-func jsonReporterOrNil(w *os.File) flow.Reporter {
+func jsonReporterOrNil(w io.Writer) flow.Reporter {
 	if w == nil {
 		return nil
 	}

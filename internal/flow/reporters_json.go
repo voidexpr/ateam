@@ -38,6 +38,8 @@ type JSONReporter struct {
 	mu sync.Mutex
 }
 
+// writeEvent marshals m + envelope keys (ts) outside the lock, then
+// serializes the line write under r.mu.
 func (r *JSONReporter) writeEvent(m map[string]any) {
 	m["ts"] = nowMillis()
 	b, err := json.Marshal(m)
@@ -49,78 +51,52 @@ func (r *JSONReporter) writeEvent(m map[string]any) {
 	_, _ = r.W.Write(append(b, '\n'))
 }
 
+// bundleEvent wraps a shared kind+payload pair with the source:"bundle"
+// envelope and the per-line `name` discriminator, so the orchestrator
+// can group events by bundle without parsing each kind separately.
+func (r *JSONReporter) bundleEvent(name, kind string, payload map[string]any) {
+	m := map[string]any{
+		"source": "bundle",
+		"kind":   kind,
+		"name":   name,
+	}
+	for k, v := range payload {
+		m[k] = v
+	}
+	r.writeEvent(m)
+}
+
 func (r *JSONReporter) BundleStart(b BundleInfo) {
-	r.writeEvent(map[string]any{
-		"source":   "bundle",
-		"kind":     "bundle_start",
-		"name":     b.Name,
-		"role":     b.Role,
-		"action":   b.Action,
-		"work_dir": b.WorkDir,
-		"batch":    b.Batch,
-	})
+	r.bundleEvent(b.Name, "bundle_start", bundleStartPayload(b))
 }
 
 func (r *JSONReporter) BundleEnd(b BundleInfo, res Result) {
-	r.writeEvent(map[string]any{
-		"source": "bundle",
-		"kind":   "bundle_end",
-		"name":   b.Name,
+	// duration_ms is intentionally omitted on the live stream — the
+	// orchestrator computes wall-time from ts(bundle_end)-ts(bundle_start)
+	// itself. BundleLogReporter includes it for post-mortem readers.
+	r.bundleEvent(b.Name, "bundle_end", map[string]any{
 		"state":  res.Flow.State.String(),
 		"reason": res.Flow.Reason,
 	})
 }
 
 func (r *JSONReporter) ActionStart(b BundleInfo, phase ActionPhase, actionType string, index int) {
-	r.writeEvent(map[string]any{
-		"source":      "bundle",
-		"kind":        phase.String() + "_start",
-		"name":        b.Name,
-		"action_type": actionType,
-		"index":       index,
-	})
+	r.bundleEvent(b.Name, phase.String()+"_start", actionStartPayload(actionType, index))
 }
 
 func (r *JSONReporter) ActionEnd(b BundleInfo, phase ActionPhase, actionType string, index int, fl Flow, duration time.Duration) {
-	r.writeEvent(map[string]any{
-		"source":      "bundle",
-		"kind":        phase.String() + "_end",
-		"name":        b.Name,
-		"action_type": actionType,
-		"index":       index,
-		"state":       fl.State.String(),
-		"reason":      fl.Reason,
-		"duration_ms": duration.Milliseconds(),
-	})
+	r.bundleEvent(b.Name, phase.String()+"_end", actionEndPayload(actionType, index, fl, duration))
 }
 
 func (r *JSONReporter) AgentExecStart(b BundleInfo, prepared *runner.PreparedRun) {
 	if prepared == nil {
 		return
 	}
-	r.writeEvent(map[string]any{
-		"source":       "bundle",
-		"kind":         "agent_exec_start",
-		"name":         b.Name,
-		"exec_id":      prepared.ExecID,
-		"model":        prepared.Model,
-		"prompt_bytes": prepared.PromptBytes,
-	})
+	r.bundleEvent(b.Name, "agent_exec_start", agentExecStartPayload(prepared))
 }
 
 func (r *JSONReporter) AgentExecEnd(b BundleInfo, summary runner.RunSummary) {
-	r.writeEvent(map[string]any{
-		"source":        "bundle",
-		"kind":          "agent_exec_end",
-		"name":          b.Name,
-		"exec_id":       summary.ExecID,
-		"duration_ms":   summary.Duration.Milliseconds(),
-		"is_error":      summary.IsError,
-		"exit_code":     summary.ExitCode,
-		"cost_usd":      summary.Cost,
-		"input_tokens":  summary.InputTokens,
-		"output_tokens": summary.OutputTokens,
-	})
+	r.bundleEvent(b.Name, "agent_exec_end", agentExecEndPayload(summary))
 }
 
 func (r *JSONReporter) AgentEvent(b BundleInfo, p runner.RunProgress) {

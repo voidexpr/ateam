@@ -176,17 +176,35 @@ func BuildTemplateVars(r *AgentExecutor, opts RunOpts, startedAt time.Time, call
 	return vars
 }
 
-// runtimeDirFor returns the per-exec_id agent-writable output directory.
-// Lives here (rather than only on root.ResolvedEnv) so the runner can build
-// paths from just ProjectDir without taking a dependency on the root package.
-func runtimeDirFor(projectDir string, execID int64) string {
-	return filepath.Join(projectDir, "runtime", strconv.FormatInt(execID, 10))
+// Per-exec_id forensic artifact filenames inside logs/<exec_id>/.
+// Centralized so renames touch one constant set instead of ~30 sites
+// across runner/web/flow; external orchestrators that grep for these
+// names should treat them as wire surface.
+const (
+	AgentFileName    = "agent.jsonl"   // raw agent stream events
+	BundleFileName   = "bundle.jsonl"  // flow lifecycle events
+	CmdFileName      = "cmd.md"        // run-context summary
+	PromptFileName   = "prompt.md"     // assembled prompt
+	SettingsFileName = "settings.json" // sandbox settings
+	StderrFileName   = "stderr.out"    // captured agent stderr
+)
+
+// RuntimeDirFor returns the per-exec_id agent-writable output directory.
+// Exported so consumers (web/serve, flow reporters) can build paths
+// without re-deriving from "/logs/" → "/runtime/" string surgery.
+func RuntimeDirFor(stateDir string, execID int64) string {
+	return filepath.Join(stateDir, "runtime", strconv.FormatInt(execID, 10))
 }
 
-// logsDirFor returns the per-exec_id forensic log directory.
-func logsDirFor(projectDir string, execID int64) string {
-	return filepath.Join(projectDir, "logs", strconv.FormatInt(execID, 10))
+// LogsDirFor returns the per-exec_id forensic log directory.
+func LogsDirFor(stateDir string, execID int64) string {
+	return filepath.Join(stateDir, "logs", strconv.FormatInt(execID, 10))
 }
+
+// internal shims preserved so the legacy local-camel-case call sites
+// inside the runner package keep compiling without churn.
+func runtimeDirFor(stateDir string, execID int64) string { return RuntimeDirFor(stateDir, execID) }
+func logsDirFor(stateDir string, execID int64) string    { return LogsDirFor(stateDir, execID) }
 
 // PrimaryOutputName maps an OutputKind to the canonical filename the agent
 // writes for that action via {{OUTPUT_FILE}}. Returns "" when the action has

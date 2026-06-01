@@ -88,6 +88,16 @@ func (e *ResolvedEnv) AutoSetupPath() string {
 	return filepath.Join(e.SharedDir(), "auto_setup.md")
 }
 
+// HasProject reports whether this env resolved an actual ateam project
+// (config-bearing .ateam/ dir), as opposed to scratch mode where only
+// an org is available. Centralizes the `ProjectDir != "" && Config != nil`
+// predicate cmds were duplicating: a non-empty ProjectDir without a
+// loaded Config means the project is broken or never initialized, which
+// callers must treat as "not a project."
+func (e *ResolvedEnv) HasProject() bool {
+	return e != nil && e.ProjectDir != "" && e.Config != nil
+}
+
 // StateDir returns the directory that owns state.sqlite, logs/, and runtime/
 // for the current invocation. Inside an ateam project this is ProjectDir
 // (.ateam/). Outside one — scratch mode — this is OrgDir (.ateamorg/), so

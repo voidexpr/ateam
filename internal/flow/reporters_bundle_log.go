@@ -16,7 +16,10 @@ import (
 // pre_exec_* / agent_exec_* / post_exec_* / bundle_end. Counterpart to
 // the runner's `agent.jsonl` (which carries per-agent progress).
 //
-// The schema is v1 and lives in plans/Feature_prompt_report_fs_refactor_phaseH.md.
+// Schema vocabulary is defined in bundle_events.go and shared with
+// JSONReporter so the wire format can't drift between the post-mortem
+// (this) and live-stream (JSONReporter) surfaces.
+//
 // One intentional redundancy with agent.jsonl: agent_exec_end carries
 // the wrap-totals (cost_usd, input_tokens, output_tokens) so consumers
 // can read bundle.jsonl alone for a per-bundle summary.
@@ -35,9 +38,8 @@ import (
 // Concurrency: callbacks may fire from N Parallel worker goroutines.
 // Per-bundle state is keyed by BundleInfo.Name — callers must ensure
 // bundle names are unique within a Run. One mutex serializes ALL state
-// access (map lookups + file writes); under heavy Parallel the brief
-// cross-bundle file-write contention is negligible against
-// agent-runtime in the seconds.
+// access (map lookups + file writes); event marshaling happens outside
+// the lock so multiple bundles can serialize their JSON in parallel.
 //
 // Failure mode: disk write errors are logged to stderr and never block
 // the run. A partially-written bundle.jsonl is preferable to a hung
@@ -63,7 +65,8 @@ type bundleLogState struct {
 var nowMillis = func() int64 { return time.Now().UnixMilli() }
 
 // marshalEvent renders one bundle.jsonl line. Returns the line with a
-// trailing newline, ready to write.
+// trailing newline, ready to write. Safe to call without holding the
+// reporter's mutex.
 func marshalEvent(kind string, payload map[string]any) []byte {
 	m := map[string]any{
 		"ts":     nowMillis(),
@@ -83,8 +86,18 @@ func marshalEvent(kind string, payload map[string]any) []byte {
 	return append(b, '\n')
 }
 
-// write appends one JSONL line for the named bundle, buffering until
-// AgentExecStart opens the file. Caller holds r.mu.
+// emit marshals `kind`+`payload` outside the lock, then writes the line
+// to the named bundle under r.mu. Single helper used by every public
+// callback so the lock-and-write boilerplate doesn't repeat.
+func (r *BundleLogReporter) emit(name, kind string, payload map[string]any) {
+	line := marshalEvent(kind, payload)
+	r.mu.Lock()
+	r.write(name, line)
+	r.mu.Unlock()
+}
+
+// write appends a pre-marshaled JSONL line for the named bundle,
+// buffering until AgentExecStart opens the file. Caller holds r.mu.
 func (r *BundleLogReporter) write(name string, line []byte) {
 	st := r.bundles[name]
 	if st == nil {
@@ -101,39 +114,20 @@ func (r *BundleLogReporter) write(name string, line []byte) {
 
 func (r *BundleLogReporter) BundleStart(b BundleInfo) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.bundles == nil {
 		r.bundles = map[string]*bundleLogState{}
 	}
 	r.bundles[b.Name] = &bundleLogState{startedAt: time.Now()}
-	r.write(b.Name, marshalEvent("bundle_start", map[string]any{
-		"name":     b.Name,
-		"role":     b.Role,
-		"action":   b.Action,
-		"work_dir": b.WorkDir,
-		"batch":    b.Batch,
-	}))
+	r.mu.Unlock()
+	r.emit(b.Name, "bundle_start", bundleStartPayload(b))
 }
 
 func (r *BundleLogReporter) ActionStart(b BundleInfo, phase ActionPhase, actionType string, index int) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.write(b.Name, marshalEvent(phase.String()+"_start", map[string]any{
-		"action_type": actionType,
-		"index":       index,
-	}))
+	r.emit(b.Name, phase.String()+"_start", actionStartPayload(actionType, index))
 }
 
 func (r *BundleLogReporter) ActionEnd(b BundleInfo, phase ActionPhase, actionType string, index int, fl Flow, duration time.Duration) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.write(b.Name, marshalEvent(phase.String()+"_end", map[string]any{
-		"action_type": actionType,
-		"index":       index,
-		"state":       fl.State.String(),
-		"reason":      fl.Reason,
-		"duration_ms": duration.Milliseconds(),
-	}))
+	r.emit(b.Name, phase.String()+"_end", actionEndPayload(actionType, index, fl, duration))
 }
 
 func (r *BundleLogReporter) AgentExecStart(b BundleInfo, prepared *runner.PreparedRun) {
@@ -141,20 +135,21 @@ func (r *BundleLogReporter) AgentExecStart(b BundleInfo, prepared *runner.Prepar
 		return
 	}
 
-	// Open <prepared.LogsDir>/bundle.jsonl outside the mutex — file I/O
-	// can be slow and we don't want to block other bundles' callbacks.
+	// Open <prepared.LogsDir>/bundle.jsonl outside the mutex so parallel
+	// bundles don't queue their opens through a single critical section.
 	// MkdirAll is idempotent with the runner's own MkdirAll that runs
 	// later inside ExecutePrepared.
 	if err := os.MkdirAll(prepared.LogsDir, 0700); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: bundle.jsonl mkdir %s: %v\n", prepared.LogsDir, err)
 		return
 	}
-	path := filepath.Join(prepared.LogsDir, "bundle.jsonl")
+	path := filepath.Join(prepared.LogsDir, runner.BundleFileName)
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: bundle.jsonl open %s: %v\n", path, err)
 		return
 	}
+	line := marshalEvent("agent_exec_start", agentExecStartPayload(prepared))
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -165,30 +160,15 @@ func (r *BundleLogReporter) AgentExecStart(b BundleInfo, prepared *runner.Prepar
 	}
 	st.prepared = prepared
 	st.file = f
-	for _, line := range st.buffer {
-		_, _ = f.Write(line)
+	for _, buffered := range st.buffer {
+		_, _ = f.Write(buffered)
 	}
 	st.buffer = nil
-
-	r.write(b.Name, marshalEvent("agent_exec_start", map[string]any{
-		"exec_id":      prepared.ExecID,
-		"model":        prepared.Model,
-		"prompt_bytes": prepared.PromptBytes,
-	}))
+	r.write(b.Name, line)
 }
 
 func (r *BundleLogReporter) AgentExecEnd(b BundleInfo, summary runner.RunSummary) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.write(b.Name, marshalEvent("agent_exec_end", map[string]any{
-		"exec_id":       summary.ExecID,
-		"duration_ms":   summary.Duration.Milliseconds(),
-		"is_error":      summary.IsError,
-		"exit_code":     summary.ExitCode,
-		"cost_usd":      summary.Cost,
-		"input_tokens":  summary.InputTokens,
-		"output_tokens": summary.OutputTokens,
-	}))
+	r.emit(b.Name, "agent_exec_end", agentExecEndPayload(summary))
 }
 
 func (r *BundleLogReporter) BundleEnd(b BundleInfo, res Result) {
@@ -199,17 +179,13 @@ func (r *BundleLogReporter) BundleEnd(b BundleInfo, res Result) {
 		return
 	}
 	delete(r.bundles, b.Name)
-
 	duration := time.Since(st.startedAt)
+	prepared := st.prepared
+	endLine := marshalEvent("bundle_end", bundleEndPayload(res, duration))
 	if st.file != nil {
-		_, _ = st.file.Write(marshalEvent("bundle_end", map[string]any{
-			"state":       res.Flow.State.String(),
-			"reason":      res.Flow.Reason,
-			"duration_ms": duration.Milliseconds(),
-		}))
+		_, _ = st.file.Write(endLine)
 		_ = st.file.Close()
 	}
-	prepared := st.prepared
 	r.mu.Unlock()
 
 	// cmd.md append happens outside the mutex — it's pure disk I/O and

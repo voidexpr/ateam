@@ -36,7 +36,7 @@ type RunnerSpec struct {
 // when neither --profile nor --agent was set; matches the historical
 // behavior of every cmd that supports scratch operation.
 func buildRunner(env *root.ResolvedEnv, spec RunnerSpec) (*runner.AgentExecutor, error) {
-	hasProject := env.ProjectDir != "" && env.Config != nil
+	hasProject := env.HasProject()
 
 	var (
 		r   *runner.AgentExecutor

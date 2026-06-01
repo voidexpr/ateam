@@ -292,7 +292,7 @@ func (r *AgentExecutor) Prepare(opts RunOpts, prompt string) (*PreparedRun, erro
 
 	stateDir := r.StateDir()
 	logsDir := logsDirFor(stateDir, callID)
-	agentFile := filepath.Join(logsDir, "agent.jsonl")
+	agentFile := filepath.Join(logsDir, AgentFileName)
 
 	if relStream, relErr := filepath.Rel(stateDir, agentFile); relErr == nil {
 		_ = r.CallDB.UpdateStreamFile(callID, relStream)
@@ -304,10 +304,10 @@ func (r *AgentExecutor) Prepare(opts RunOpts, prompt string) (*PreparedRun, erro
 		LogsDir:      logsDir,
 		RuntimeDir:   runtimeDirFor(stateDir, callID),
 		AgentFile:    agentFile,
-		StderrFile:   filepath.Join(logsDir, "stderr.out"),
-		SettingsFile: filepath.Join(logsDir, "settings.json"),
-		CmdFile:      filepath.Join(logsDir, "cmd.md"),
-		PromptFile:   filepath.Join(logsDir, "prompt.md"),
+		StderrFile:   filepath.Join(logsDir, StderrFileName),
+		SettingsFile: filepath.Join(logsDir, SettingsFileName),
+		CmdFile:      filepath.Join(logsDir, CmdFileName),
+		PromptFile:   filepath.Join(logsDir, PromptFileName),
 		StartedAt:    startedAt,
 		AgentName:    agentName,
 		Model:        model,
@@ -333,19 +333,30 @@ func (r *AgentExecutor) Execute(ctx context.Context, prompt string, opts RunOpts
 		if startedAt.IsZero() {
 			startedAt = time.Now()
 		}
-		return RunSummary{
-			RoleID:      opts.RoleID,
-			StartedAt:   startedAt,
-			EndedAt:     time.Now(),
-			Duration:    time.Since(startedAt),
-			ExitCode:    -1,
-			IsError:     true,
-			Err:         err,
-			ErrorSource: agent.ErrorSourceAteamInternal,
-			ErrorCause:  err.Error(),
-		}
+		return failedSummary(opts.RoleID, startedAt, err, 0, "", "")
 	}
 	return r.ExecutePrepared(ctx, prepared, prompt, onProgress)
+}
+
+// failedSummary builds the canonical internal-failure RunSummary shared
+// by Execute's Prepare error path and ExecutePrepared's failEarly path.
+// execID, agentFile, stderrFile are zero/empty when failure happened
+// before a row was allocated (Execute shim) or before logs were created.
+func failedSummary(roleID string, startedAt time.Time, err error, execID int64, agentFile, stderrFile string) RunSummary {
+	return RunSummary{
+		ExecID:         execID,
+		RoleID:         roleID,
+		StartedAt:      startedAt,
+		EndedAt:        time.Now(),
+		Duration:       time.Since(startedAt),
+		ExitCode:       -1,
+		IsError:        true,
+		Err:            err,
+		ErrorSource:    agent.ErrorSourceAteamInternal,
+		ErrorCause:     err.Error(),
+		AgentFilePath:  agentFile,
+		StderrFilePath: stderrFile,
+	}
 }
 
 // ExecutePrepared runs the agent with a previously-prepared handle. The
@@ -370,20 +381,7 @@ func (r *AgentExecutor) ExecutePrepared(ctx context.Context, prepared *PreparedR
 	opts := prepared.Opts
 
 	failEarly := func(err error) RunSummary {
-		s := RunSummary{
-			ExecID:         callID,
-			RoleID:         opts.RoleID,
-			StartedAt:      startedAt,
-			EndedAt:        time.Now(),
-			Duration:       time.Since(startedAt),
-			ExitCode:       -1,
-			IsError:        true,
-			Err:            err,
-			ErrorSource:    agent.ErrorSourceAteamInternal,
-			ErrorCause:     err.Error(),
-			AgentFilePath:  agentFile,
-			StderrFilePath: stderrFile,
-		}
+		s := failedSummary(opts.RoleID, startedAt, err, callID, agentFile, stderrFile)
 		appendStderrSummary(stderrFile, s)
 		return s
 	}

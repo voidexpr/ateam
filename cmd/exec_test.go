@@ -390,7 +390,7 @@ func TestOpenProgressFD(t *testing.T) {
 		name    string
 		format  string
 		fd      int
-		want    *os.File // expected wrapper identity, or nil when none
+		want    io.Writer // expected writer identity, or nil when none
 		wantErr string
 	}{
 		{name: "no-format-no-fd-noop", format: "", fd: 0, want: nil},
@@ -403,7 +403,10 @@ func TestOpenProgressFD(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f, err := openProgressFD(tc.format, tc.fd)
+			w, closer, err := openProgressFD(tc.format, tc.fd)
+			if closer != nil {
+				closer.Close()
+			}
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("err %v missing %q", err, tc.wantErr)
@@ -413,8 +416,8 @@ func TestOpenProgressFD(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected err: %v", err)
 			}
-			if f != tc.want {
-				t.Errorf("openProgressFD returned %v, want %v", f, tc.want)
+			if w != tc.want {
+				t.Errorf("openProgressFD returned %v, want %v", w, tc.want)
 			}
 		})
 	}
@@ -422,8 +425,9 @@ func TestOpenProgressFD(t *testing.T) {
 
 func TestOpenProgressFD_RealPipe(t *testing.T) {
 	// Pipe one end into openProgressFD via its raw fd and verify a
-	// subsequent write reaches the other end. NewFile and pw share the
-	// same fd; closing both would double-close, so we close only pw.
+	// subsequent write reaches the other end. The returned closer owns
+	// the raw fd; pw and the closer share the same fd, so closing both
+	// would double-close — close only pw via defer.
 	pr, pw, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
@@ -431,11 +435,11 @@ func TestOpenProgressFD_RealPipe(t *testing.T) {
 	defer pr.Close()
 	defer pw.Close()
 
-	f, err := openProgressFD("jsonl", int(pw.Fd()))
+	w, _, err := openProgressFD("jsonl", int(pw.Fd()))
 	if err != nil {
 		t.Fatalf("openProgressFD: %v", err)
 	}
-	if _, err := f.Write([]byte("hi\n")); err != nil {
+	if _, err := w.Write([]byte("hi\n")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
