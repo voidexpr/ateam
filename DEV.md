@@ -115,10 +115,11 @@ Per-run artefacts are keyed by `agent_execs.id` (`<exec_id>`):
 
   logs/<exec_id>/                             # forensic, runner-owned
     agent.jsonl                              # raw agent stream events
+    bundle.jsonl                             # per-bundle flow lifecycle events (bundle_start / pre_exec_* / agent_exec_* / post_exec_* / bundle_end); schema in internal/flow/bundle_events.go
     stderr.out                                # captured stderr
     settings.json                             # rendered sandbox settings
     prompt.md                                 # rendered prompt
-    cmd.md                                    # # Runtime / # Run details / # Command / # Env / # Settings / # Files Copy
+    cmd.md                                    # `#`-level (runner): # Runtime / # Run details / # Command / # Env / # Settings / # Files Copy; `##`-level (flow, appended): ## Bundle
   logs/.layout-v2                             # migration sentinel
 
   runtime/<exec_id>/                          # agent-writable output area
@@ -132,6 +133,8 @@ Per-run artefacts are keyed by `agent_execs.id` (`<exec_id>`):
     history/<TS>.review.md, …                 # archived outputs
     code/<exec_id>/<file>                     # `code` action canonical (per-exec_id)
 ```
+
+The user-facing `--format jsonl` event stream (same vocabulary as `bundle.jsonl`) is documented in **[COMMANDS.md → Structured event stream (jsonl)](COMMANDS.md#structured-event-stream-jsonl)**.
 
 Per-action canonical destinations (where `runtime/<exec_id>/` files are promoted to on success):
 
