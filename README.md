@@ -28,14 +28,42 @@ Ateam focus is on:
 
 The goal is to define asynchronous processes mixing agents and scripts to free up more time to focus where human attention is needed and not for tasks that can be prompted once and require little supervision/decision making once completed.
 
+Maybe:
+Ateam is a CLI tool to manage unattended coding agents so you can use your attention to high value tasks. The main focus is on software engineer quality. First because it can be prompted once, leveraging LLM training in what code reviews are, security audits, tests, etc ... And second because it is the best fit for unattended coding agents, leaving interactive sessions for feature work.
+The vision is for developers to focus on their attention on design and feature and let coding agents refactor their own code, add tests, manage dependencies, etc ...
+
+It focus on the core building blocks:
+* drive existing coding agents to leverage their tools and trusted ability to modify code
+    * make prompts and execution independent: swap codex/claude easily
+    * flexible isolation: sandbox, separate agent config, docker
+    * maintain a record of execution that can be used in real-time and after the fact
+        * keeps task details, logs, prompts used, etc ..
+    * analyze cost, easily see what prompt to optimize or the effect of a change
+* many pre-defined software engineering quality [roles](ROLES.md)
+* a pre-defined workflow of:
+    * parallel report: audit the code along selected dimensions (or let an LLM chose them based on your directions or recent changes)
+    * review changes to prioritize and be pragmatic
+    * code the changes
+    * verify that the changes made don't have obvious issues, tests were ran, nobody cheated
+* all artifacts are easy to audit and modify markdown files that can also be served as a web app for each browsing
+* built-in agent support:
+    * have agents configure ateam
+    * have agents decide which roles to run
+    * have agents debug failed runs
+    * have an agent manage a long run and possibly fix issues occuring in the middle to resume
+* reusable for custom script
+    * many example scripts provided: double code review (codex and claude) + code, codex review + claude codes, blackbox testing, multiple rounds reviews, etc ...
+    * you can trivially create your own shell scripts, no need to use a workflow API or tools
+
 See [APPROACH.md](APPROACH.md) for the rationale and design principles behind ATeam.
 
 ## Key Features
 
-* **use existing coding agents like claude code or codex**: leverages subscriptions instead of much more expensive APIs, benefit from the expertise of llm providers. Ateam focuses on automating them
-    * an experimental `codex-tmux` agent additionally drives codex's interactive TUI through `tmux`, so TUI-only slash commands like `/review` can run in unattended pipelines (see [CONFIG.md](CONFIG.md#codex-tmux-experimental))
+* **use existing coding agents** like Claude Code or Codex: leverage the expertise of lllm providers for coding tasks
+    * can leverage subscriptions pricing or can use API keys
+    * uses 'claude -p' streaming format, `codex exec` and `codex` via tmux (to use TUI-only commands like `/review` in unattended pipelines, see [CONFIG.md](CONFIG.md#codex-tmux-experimental))
 * **flexible isolation**: out of the box ateam uses your coding agents as-is for ease of configuration. But it also supports the following workflows:
-    * run in a sandbox on your base host: protects your files
+    * run with the agent's own sandbox on your base host: protects your files
     * use a separate config for your coding agent (`CLAUDE_CONFIG_DIR`)
     * run inside docker (built-in secret management for oauth or just use an already authenticated agent in the container)
     * run outside of docker but docker exec only the agents in docker
@@ -45,6 +73,20 @@ See [APPROACH.md](APPROACH.md) for the rationale and design principles behind AT
     * ad-hoc unattended agent runs (`exec` for a single agent execution, `parallel` for multiple simultaneous agents)
 * **convenient tooling**: `ps` to see current/past agent runs, `cat`, `tail`, `inspect` for logs and execution details, `serve` to browse reports and reviews
 * **cost transparency**: all agent execution track token usage and estimated cost (less relevant for subscription). Tokens are the new software engineering currency and help gauge if an error is worthwhile
+
+TODO:
+* screenshot of `ateam ps`, `ateam serve`, `ateam cost`
+* doesn't dictate a particular git workflow: just commits in the workspace it is given
+* transparent: capture all information about unattended agents, use markdown files as input/output of agents
+* stateful: get context from git change log, feed previous report when generating the new (saves a lot of tokens by persisting role specific context)
+
+## How is Ateam different than other agent framework
+
+Most agent frameworks try to recreate human team structure using an evocative terminology and focus on feature work. Ateam's approach is to see feature work as a task that benefits from interactive agents and fundamentally requires attention. The sweet spot for unattended agents is with software engineering quality tasks. So ateam's focus on getting the fundamental right: reliably and safely run unattended agents, re-execute and audit saved prompts.
+
+The basic primitive of running prompt against any agent/container environment while capturing costs and logs is suprisingly versatile. You can look at the scripts/ directory in the ateam git repo for example of common code review or testing workflows that are simple bash scripts when using ateam.
+
+This is a rapidly evolving field with new frameworks being born every day, time will tell which approach approaches work best. Ateam explores one of them.
 
 ## Why ATeam
 
