@@ -186,6 +186,16 @@ ateam update          # sync on-disk prompts to the new embedded defaults
 
 Run `ateam update` after rebuilding: on-disk org/project prompts shadow the binary's embedded defaults, so without it prompt changes shipped in the new version silently don't take effect. Use `ateam update --diff` first to preview the changes.
 
+### Use agents to help with ateam itself
+
+In the age of agents a lot of work can be offloaded and ateam being made to run agents make full use of it.
+
+Ateam makes many interesting use of agents to help its usage:
+* auto-config: let an LLM decide which roles to enable or not
+* report --auto-roles: dynamically decide based on the project and recent changes what roles to run
+* inspect --auto-debug: if an agent fails automate debugging to recommend local fixes and bugs to file against ateam
+* scripts/ateam-all-managed.sh: if a run fails use an agent to try to get it back on track
+
 ## How It Works
 
 By default coding agents will be ran in a sandbox providing a good balance of file system protection and ease of use out of the box. Read the [Isolation](#Isolation) section for more options on how to run your coding agents.
