@@ -49,6 +49,7 @@ func newTestMux(s *Server) *http.ServeMux {
 	mux.HandleFunc("GET /p/{project}/cost", s.handleCost)
 	mux.HandleFunc("GET /p/{project}/runs", s.handleRuns)
 	mux.HandleFunc("GET /p/{project}/runs/{id}", s.handleRun)
+	mux.HandleFunc("GET /p/{project}/runs/{id}/runtime/{name...}", s.handleRunRuntimeFile)
 	mux.HandleFunc("GET /p/{project}/runs/{id}/{file}", s.handleRunFile)
 	mux.HandleFunc("GET /p/{project}/reports/{role}", s.handleReport)
 	mux.Handle("GET /p/{project}/review", s.handleReview())
@@ -260,6 +261,190 @@ func seedRun(t *testing.T, projectDir string, action, role string) int64 {
 		t.Fatalf("UpdateCall: %v", err)
 	}
 	return callID
+}
+
+// seedRunNewLayout inserts a run row using the post-rollout
+// logs/<exec_id>/{agent.jsonl,cmd.md,bundle.jsonl,settings.json,prompt.md}
+// layout, with a runtime/<exec_id>/report.md sidecar. Used by tests
+// covering bundle/settings/runtime surfacing in serve.
+func seedRunNewLayout(t *testing.T, projectDir string) int64 {
+	t.Helper()
+
+	dbPath := filepath.Join(projectDir, "state.sqlite")
+	db, err := calldb.Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer db.Close()
+
+	callID, err := db.InsertCall(&calldb.Call{
+		ProjectID: "test-proj",
+		Action:    runner.ActionReport,
+		Role:      "security",
+		Batch:     "test-batch",
+		StartedAt: time.Now().Add(-2 * time.Minute),
+		// AgentFile filled in after we know the directory layout below.
+	})
+	if err != nil {
+		t.Fatalf("InsertCall: %v", err)
+	}
+
+	logsRel := filepath.Join("logs", fmt.Sprintf("%d", callID))
+	logsDir := filepath.Join(projectDir, logsRel)
+	if err := os.MkdirAll(logsDir, 0700); err != nil {
+		t.Fatalf("MkdirAll logs: %v", err)
+	}
+	for name, body := range map[string]string{
+		"agent.jsonl":   `{"type":"init"}` + "\n",
+		"cmd.md":        "# Runtime\n",
+		"bundle.jsonl":  `{"ts":1,"source":"bundle","kind":"bundle_start"}` + "\n",
+		"settings.json": `{"key":"value"}`,
+		"prompt.md":     "render me",
+		"stderr.out":    "warning",
+	} {
+		if err := os.WriteFile(filepath.Join(logsDir, name), []byte(body), 0600); err != nil {
+			t.Fatalf("WriteFile %s: %v", name, err)
+		}
+	}
+
+	runtimeDir := filepath.Join(projectDir, "runtime", fmt.Sprintf("%d", callID))
+	if err := os.MkdirAll(runtimeDir, 0700); err != nil {
+		t.Fatalf("MkdirAll runtime: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runtimeDir, "report.md"), []byte("# Report\nbody"), 0600); err != nil {
+		t.Fatalf("WriteFile runtime/report: %v", err)
+	}
+
+	if err := db.UpdateStreamFile(callID, filepath.Join(logsRel, "agent.jsonl")); err != nil {
+		t.Fatalf("UpdateStreamFile: %v", err)
+	}
+	if err := db.UpdateCall(callID, &calldb.CallResult{
+		EndedAt:    time.Now().Add(-1 * time.Minute),
+		DurationMS: 60000,
+	}); err != nil {
+		t.Fatalf("UpdateCall: %v", err)
+	}
+	return callID
+}
+
+func TestHandleRunFileBundleReturnsOK(t *testing.T) {
+	projectDir := t.TempDir()
+	callID := seedRunNewLayout(t, projectDir)
+
+	s := newTestServer(t, projectDir)
+	mux := newTestMux(s)
+	req := httptest.NewRequest("GET", fmt.Sprintf("/p/testproj/runs/%d/bundle", callID), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("bundle status = %d, want %d (body: %s)", w.Code, http.StatusOK, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "bundle_start") {
+		t.Error("expected bundle event content in response")
+	}
+}
+
+func TestHandleRunFileSettingsReturnsOK(t *testing.T) {
+	projectDir := t.TempDir()
+	callID := seedRunNewLayout(t, projectDir)
+
+	s := newTestServer(t, projectDir)
+	mux := newTestMux(s)
+	req := httptest.NewRequest("GET", fmt.Sprintf("/p/testproj/runs/%d/settings", callID), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("settings status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if !strings.Contains(w.Body.String(), "key") {
+		t.Error("expected settings content in response")
+	}
+}
+
+func TestHandleRunRuntimeFileReturnsOK(t *testing.T) {
+	projectDir := t.TempDir()
+	callID := seedRunNewLayout(t, projectDir)
+
+	s := newTestServer(t, projectDir)
+	mux := newTestMux(s)
+	req := httptest.NewRequest("GET", fmt.Sprintf("/p/testproj/runs/%d/runtime/report.md", callID), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("runtime status = %d, want %d (body: %s)", w.Code, http.StatusOK, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "Report") {
+		t.Error("expected runtime file content in response")
+	}
+}
+
+func TestHandleRunRuntimeFilePathTraversal(t *testing.T) {
+	// Two-layered guard: net/http's mux pre-normalizes "../" out of the
+	// URL (returning a 307 to the cleaned path), and the handler's
+	// isPathWithin check rejects anything that lands outside
+	// runtime/<exec_id>/. This test exercises both: a "../"-style URL is
+	// expected to never reach the underlying file, and a crafted name
+	// passed past the mux is rejected by the handler.
+	projectDir := t.TempDir()
+	callID := seedRunNewLayout(t, projectDir)
+	const canary = "TOPSECRETcanaryDEADBEEFdonotleak"
+	if err := os.WriteFile(filepath.Join(projectDir, "secret.md"), []byte(canary), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	s := newTestServer(t, projectDir)
+	mux := newTestMux(s)
+
+	// Mux-layer guard: ../-bearing URL is redirected and the canary never
+	// appears.
+	req := httptest.NewRequest("GET", fmt.Sprintf("/p/testproj/runs/%d/runtime/../../secret.md", callID), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if strings.Contains(w.Body.String(), canary) {
+		t.Errorf("traversal leaked outside-runtime file content: %s", w.Body.String())
+	}
+
+	// Handler-layer guard: bypass the mux and invoke the handler directly
+	// with a malicious name that *would* escape runtime/<id>/.
+	direct := httptest.NewRequest("GET", "/", nil)
+	direct.SetPathValue("project", "testproj")
+	direct.SetPathValue("id", fmt.Sprintf("%d", callID))
+	direct.SetPathValue("name", "../../secret.md")
+	dw := httptest.NewRecorder()
+	s.handleRunRuntimeFile(dw, direct)
+	if dw.Code != http.StatusNotFound {
+		t.Errorf("direct traversal not rejected; status %d body %s", dw.Code, dw.Body.String())
+	}
+	if strings.Contains(dw.Body.String(), canary) {
+		t.Error("direct traversal leaked canary")
+	}
+}
+
+func TestHandleRunListsNewFiles(t *testing.T) {
+	// The run detail page should link to bundle.jsonl, settings.json, and
+	// every file in runtime/<id>/ for a new-layout run.
+	projectDir := t.TempDir()
+	callID := seedRunNewLayout(t, projectDir)
+
+	s := newTestServer(t, projectDir)
+	mux := newTestMux(s)
+	req := httptest.NewRequest("GET", fmt.Sprintf("/p/testproj/runs/%d", callID), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	body := w.Body.String()
+	for _, want := range []string{
+		fmt.Sprintf(`/p/testproj/runs/%d/bundle`, callID),
+		fmt.Sprintf(`/p/testproj/runs/%d/settings`, callID),
+		fmt.Sprintf(`/p/testproj/runs/%d/runtime/report.md`, callID),
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("run page missing link %q", want)
+		}
+	}
 }
 
 func TestHandleCostWithDatabase(t *testing.T) {

@@ -135,11 +135,15 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 }
 
 type runFiles struct {
-	ExecFile   string
-	PromptFile string
-	LogsDir    string
-	HasStream  bool
-	HasStderr  bool
+	ExecFile     string
+	PromptFile   string
+	LogsDir      string
+	HasStream    bool
+	HasStderr    bool
+	HasBundle    bool
+	HasSettings  bool
+	RuntimeDir   string   // project-relative path to runtime/<exec_id>/, "" if none
+	RuntimeFiles []string // files in runtime/<exec_id>/, relative to that dir
 }
 
 // resolveRunFiles resolves associated files for a single run row.
@@ -181,7 +185,50 @@ func resolveRunFiles(projectDir, orgDir string, row calldb.RecentRow) runFiles {
 	if _, err := os.Stat(filepath.Join(dir, "prompt.md")); err == nil {
 		rf.PromptFile = "prompt.md"
 	}
+	if _, err := os.Stat(filepath.Join(dir, "bundle.jsonl")); err == nil {
+		rf.HasBundle = true
+	}
+	if _, err := os.Stat(filepath.Join(dir, "settings.json")); err == nil {
+		rf.HasSettings = true
+	}
+	// Discover runtime/<exec_id>/ siblings — the agent-writable output area
+	// is a sibling of logs/<exec_id>/ under the same state dir. Files here
+	// (report.md, sidecars, scratch artifacts) are not promoted to canonical
+	// destinations but live forever for inspection.
+	runtimeDir := strings.Replace(dir, string(filepath.Separator)+"logs"+string(filepath.Separator), string(filepath.Separator)+"runtime"+string(filepath.Separator), 1)
+	if files := walkRuntimeFiles(runtimeDir); len(files) > 0 {
+		rf.RuntimeFiles = files
+		if rel, err := filepath.Rel(projectDir, runtimeDir); err == nil {
+			rf.RuntimeDir = rel
+		} else {
+			rf.RuntimeDir = runtimeDir
+		}
+	}
 	return rf
+}
+
+// walkRuntimeFiles returns runtime/<exec_id>/ contents as paths relative
+// to that directory, sorted. Returns nil if the directory doesn't exist
+// or is empty. Walks recursively in case the agent writes sidecars in
+// subdirectories.
+func walkRuntimeFiles(runtimeDir string) []string {
+	var out []string
+	_ = filepath.WalkDir(runtimeDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(runtimeDir, path)
+		if err != nil {
+			return nil
+		}
+		out = append(out, rel)
+		return nil
+	})
+	sort.Strings(out)
+	return out
 }
 
 // enrichRuns resolves associated files for each run.
@@ -627,6 +674,20 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 			absPath = filepath.Join(logDir, "stderr.out")
 		}
 		title = fmt.Sprintf("Run #%d — Stderr", id)
+	case "bundle":
+		if legacy {
+			http.NotFound(w, r)
+			return
+		}
+		absPath = filepath.Join(logDir, "bundle.jsonl")
+		title = fmt.Sprintf("Run #%d — Bundle Events", id)
+	case "settings":
+		if legacy {
+			http.NotFound(w, r)
+			return
+		}
+		absPath = filepath.Join(logDir, "settings.json")
+		title = fmt.Sprintf("Run #%d — Settings", id)
 	default:
 		http.NotFound(w, r)
 		return
@@ -668,6 +729,8 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 		switch fileType {
 		case "stderr":
 			rendered = s.renderMarkdown("```\n" + string(content) + "\n```")
+		case "bundle", "settings":
+			rendered = s.renderMarkdown("```json\n" + string(content) + "\n```")
 		default:
 			rendered = s.renderMarkdown(string(content))
 		}
@@ -690,6 +753,65 @@ type runFileData struct {
 	RunID    int64
 	FileType string
 	HTML     template.HTML
+}
+
+// handleRunRuntimeFile serves a file from runtime/<exec_id>/. Paths can be
+// nested (e.g. runtime/<id>/subdir/sidecar.md) — the wildcard route
+// captures the full relative path. Path traversal is rejected via
+// isPathWithin against runtime/<exec_id>/ specifically (not the project
+// root) so the response is bounded to this run's runtime tree.
+func (s *Server) handleRunRuntimeFile(w http.ResponseWriter, r *http.Request) {
+	pe := s.requireProject(w, r)
+	if pe == nil {
+		return
+	}
+
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	name := r.PathValue("name")
+	if name == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	runtimeRoot := filepath.Join(pe.ProjectDir, "runtime", strconv.FormatInt(id, 10))
+	absPath := filepath.Clean(filepath.Join(runtimeRoot, name))
+	if !isPathWithin(absPath, runtimeRoot) {
+		http.NotFound(w, r)
+		return
+	}
+
+	content, err := os.ReadFile(absPath)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Render markdown directly; render other text as a code block. Image
+	// and binary content is left for future work (the runner doesn't
+	// produce binaries today).
+	var rendered string
+	if strings.HasSuffix(strings.ToLower(name), ".md") {
+		rendered = s.renderMarkdown(string(content))
+	} else {
+		rendered = s.renderMarkdown("```\n" + string(content) + "\n```")
+	}
+
+	s.render(w, r, "run_file.html", pageData{
+		Title:       fmt.Sprintf("Run #%d — runtime/%s", id, name),
+		Nav:         "runs",
+		ProjectName: pe.Name,
+		ProjectSlug: pe.Slug,
+		Data: runFileData{
+			RunID:    id,
+			FileType: "runtime/" + name,
+			HTML:     template.HTML(rendered),
+		},
+	})
 }
 
 // readFileWithModTime reads a file and returns its content and modification time.

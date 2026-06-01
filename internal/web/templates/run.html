@@ -46,17 +46,31 @@
   </table>
 </div>
 
-{{if or $d.ExecFile $d.PromptFile $r.OutputFile $d.HasStream $d.HasStderr $d.LogsDir}}
+{{if or $d.ExecFile $d.PromptFile $r.OutputFile $d.HasStream $d.HasStderr $d.HasBundle $d.HasSettings $d.LogsDir}}
 <div class="section">
-  <div class="section-title">Files</div>
+  <div class="section-title">Log Files</div>
   <table class="data-table">
     <tbody>
       {{if $d.ExecFile}}<tr><td style="width:160px;color:var(--text-muted)">Exec</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/exec">{{$d.ExecFile}}</a></td></tr>{{end}}
       {{if $d.PromptFile}}<tr><td style="color:var(--text-muted)">Prompt</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/prompt">{{$d.PromptFile}}</a></td></tr>{{end}}
-      {{if $r.OutputFile}}<tr><td style="color:var(--text-muted)">Output</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/output">{{$r.OutputFile}}</a></td></tr>{{end}}
-      {{if $d.HasStream}}<tr><td style="color:var(--text-muted)">Stream Log</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/logs">agent.jsonl</a></td></tr>{{end}}
-      {{if $d.HasStderr}}<tr><td style="color:var(--text-muted)">Stderr</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/stderr">stderr.log</a></td></tr>{{end}}
+      {{if $d.HasStream}}<tr><td style="color:var(--text-muted)">Agent Events</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/logs">agent.jsonl</a></td></tr>{{end}}
+      {{if $d.HasBundle}}<tr><td style="color:var(--text-muted)">Bundle Events</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/bundle">bundle.jsonl</a></td></tr>{{end}}
+      {{if $d.HasStderr}}<tr><td style="color:var(--text-muted)">Stderr</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/stderr">stderr.out</a></td></tr>{{end}}
+      {{if $d.HasSettings}}<tr><td style="color:var(--text-muted)">Settings</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/settings">settings.json</a></td></tr>{{end}}
       {{if $d.LogsDir}}<tr><td style="color:var(--text-muted)">Logs Dir</td><td style="font-family:var(--font-mono);font-size:13px">{{$d.LogsDir}}/</td></tr>{{end}}
+    </tbody>
+  </table>
+</div>
+{{end}}
+
+{{if or $r.OutputFile $d.RuntimeDir}}
+<div class="section">
+  <div class="section-title">Output Files</div>
+  <table class="data-table">
+    <tbody>
+      {{if $r.OutputFile}}<tr><td style="width:160px;color:var(--text-muted)">Canonical</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/output">{{$r.OutputFile}}</a></td></tr>{{end}}
+      {{range $d.RuntimeFiles}}<tr><td style="color:var(--text-muted)">Runtime</td><td><a href="/p/{{$.ProjectSlug}}/runs/{{$r.ID}}/runtime/{{.}}">{{.}}</a></td></tr>{{end}}
+      {{if $d.RuntimeDir}}<tr><td style="color:var(--text-muted)">Runtime Dir</td><td style="font-family:var(--font-mono);font-size:13px">{{$d.RuntimeDir}}/</td></tr>{{end}}
     </tbody>
   </table>
 </div>
