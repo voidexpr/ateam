@@ -86,9 +86,6 @@ Example:
 func init() {
 	reportCmd.Flags().StringSliceVar(&reportRoles, "roles", nil, prompts.RoleFlagUsage()+" (default: all enabled roles)")
 	registerCommonExecFlags(reportCmd, &reportFlags, commonFlagUsage{
-		ExtraPrompt:  "additional instructions (text or @filepath); appended after extras, before the outer --post-prompt wrap",
-		PrePrompt:    "text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or @filepath)",
-		PostPrompt:   "text wrapped at the very end of the assembled prompt, after every other section (text or @filepath)",
 		Timeout:      "timeout in minutes per role (overrides config)",
 		Model:        "model override; takes precedence over --cheaper-model",
 		Effort:       "reasoning effort override, passed verbatim to the agent CLI",

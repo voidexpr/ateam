@@ -37,6 +37,18 @@ ateam --project ~/work/myproj report              # → agent cwd = ~/work/mypro
 ateam report --work-dir ~/work/myproj/services/billing
 ```
 
+### Ad-hoc prompt wrap (`--pre-prompt` / `--post-prompt` / `--extra-prompt`)
+
+Every prompt-taking command (`exec`, `parallel`, `report`, `review`, `verify`, `code`, `auto-setup`, `all`, `inspect`, `prompt`) accepts the same trio of wrap flags with identical semantics:
+
+- `--pre-prompt TEXT` (or `@filepath`) — wrapped at the very front of the assembled prompt.
+- `--post-prompt TEXT` — wrapped at the very end.
+- `--extra-prompt TEXT` — appended after the main body under an `# Additional Instructions` heading, before `--post-prompt`.
+
+Wrap order, outermost first: `--pre-prompt` → anchors → dir-level `_pre`/`_post` fragments → role-level `pre`/`post` → main body → `--extra-prompt` → `--post-prompt`.
+
+[^wrap]: See [Ad-hoc prompt wrap](#ad-hoc-prompt-wrap---pre-prompt----post-prompt----extra-prompt) for the shared wrap-order contract.
+
 ## Commands
 
 ### `ateam install [PATH]`
@@ -109,8 +121,8 @@ ateam report --auto-roles --plan-only    # print the recommendation, don't run
 |------|-------------|
 | `--roles LIST` | Comma-separated role list, or `all` (default: all enabled roles) |
 | `--extra-prompt TEXT` | Additional instructions appended to every role's prompt (text or `@filepath`) |
-| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`) |
-| `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`) |
+| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
+| `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--profile NAME` | Runtime profile (overrides config resolution) |
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
 | `--cheaper-model` | Use a cheaper model (sonnet); ignored if `--model` is also set (`--model` wins) |
@@ -151,8 +163,8 @@ ateam review --dry-run
 | Flag | Description |
 |------|-------------|
 | `--extra-prompt TEXT` | Additional instructions appended to the supervisor prompt (text or `@filepath`) |
-| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt (text or `@filepath`) |
-| `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt (text or `@filepath`) |
+| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
+| `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--prompt TEXT` | Custom prompt replacing the default supervisor role entirely (text or `@filepath`) |
 | `--profile NAME` | Runtime profile (overrides config resolution) |
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
@@ -186,8 +198,8 @@ ateam code --dry-run
 | `--review TEXT` | Review content (text or `@filepath`; defaults to `.ateam/shared/review.md`) |
 | `--management TEXT` | Management prompt override (text or `@filepath`) |
 | `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
-| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt (text or `@filepath`) |
-| `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt (text or `@filepath`) |
+| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
+| `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--profile NAME` | Profile for sub-runs (passed to `ateam exec --profile`) |
 | `--agent NAME` | Agent for sub-runs (passed to `ateam exec --agent`) |
 | `--supervisor-profile NAME` | Profile for the supervisor itself |
@@ -224,8 +236,8 @@ ateam verify --dry-run
 | Flag | Description |
 |------|-------------|
 | `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
-| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt (text or `@filepath`) |
-| `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt (text or `@filepath`) |
+| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
+| `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--timeout MINUTES` | Timeout in minutes (overrides `config.toml`) |
 | `--print` | Print verification report to stdout after completion |
 | `--dry-run` | Print the computed prompt without running |
@@ -260,8 +272,8 @@ ateam all --auto-roles --plan-only               # print the recommendation, don
 | Flag | Description |
 |------|-------------|
 | `--extra-prompt TEXT` | Additional instructions passed to all phases (text or `@filepath`) |
-| `--pre-prompt TEXT` | Text wrapped at the very front of every phase's assembled prompt (text or `@filepath`) |
-| `--post-prompt TEXT` | Text wrapped at the very end of every phase's assembled prompt (text or `@filepath`) |
+| `--pre-prompt TEXT` | Text wrapped at the very front of every phase's assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
+| `--post-prompt TEXT` | Text wrapped at the very end of every phase's assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--cheaper-model` | Use a cheaper model (sonnet) |
 | `--model MODEL` | Model override applied to every phase; takes precedence over `--cheaper-model` |
 | `--effort VALUE` | Reasoning effort applied to every phase, passed verbatim to the agent CLI (see [Effort levels](CONFIG.md#effort-levels)) |
@@ -431,8 +443,8 @@ When used with `--agent codex-tmux` the prompt has an extra shape: the first lin
 | `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](CONFIG.md#effort-levels)) |
 | `--agent-args "ARGS"` | Extra args passed to the agent CLI |
 | `--extra-prompt TEXT` | Additional instructions appended after the main prompt under an "Additional Instructions" heading (text or `@filepath`) |
-| `--pre-prompt TEXT` | Text wrapped at the very front of the prompt, before the main body (text or `@filepath`) |
-| `--post-prompt TEXT` | Text wrapped at the very end of the prompt, after `--extra-prompt` (text or `@filepath`) |
+| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
+| `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--batch ID` | Group related agent_execs |
 | `--max-budget-usd USD` | Per-agent USD spend cap (claude-only; errors on codex) |
 | `--max-budget-usd-batch USD` | Abort if `--batch` already exceeds this USD before starting |
@@ -483,7 +495,7 @@ Run multiple agents in parallel, each with its own prompt. All execs share a sin
 ```bash
 ateam parallel "analyze auth module" "analyze payment module"
 ateam parallel @task1.md @task2.md @task3.md --labels auth,payment,users
-ateam parallel "task A" "task B" --max-parallel 1 --common-prompt-first @context.md
+ateam parallel "task A" "task B" --max-parallel 1 --pre-prompt @context.md
 ateam parallel "task A" "task B" --dry-run
 ```
 
@@ -493,8 +505,10 @@ Each positional argument is a prompt (text or `@filepath`). Agent execs run conc
 |------|-------------|
 | `--labels LIST` | Comma-separated names for each prompt (must match prompt count; default: `agent-1`, `agent-2`, ...) |
 | `--max-parallel N` | Maximum concurrent agent execs (default: 3) |
-| `--common-prompt-first TEXT` | Text or `@filepath` prepended to every prompt |
-| `--common-prompt-last TEXT` | Text or `@filepath` appended to every prompt |
+| `--pre-prompt TEXT` | Text wrapped at the very front of each task's prompt (text or `@filepath`). [^wrap] |
+| `--post-prompt TEXT` | Text wrapped at the very end of each task's prompt (text or `@filepath`). [^wrap] |
+| `--common-prompt-first TEXT` | Deprecated alias for `--pre-prompt`. |
+| `--common-prompt-last TEXT` | Deprecated alias for `--post-prompt`. |
 | `--batch ID` | Custom batch name (default: `parallel-TIMESTAMP`) |
 | `--profile NAME` | Runtime profile |
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
@@ -513,7 +527,7 @@ Each positional argument is a prompt (text or `@filepath`). Agent execs run conc
 
 **Batch**: All execs are grouped under a single batch (visible in `ateam cost`, `ateam ps`, and `ateam serve`). Use `--batch` to set a custom name or let it auto-generate as `parallel-TIMESTAMP`.
 
-**Common prompts**: Use `--common-prompt-first` and `--common-prompt-last` to inject shared context. The final prompt for each exec is: `common-first + "\n\n" + prompt + "\n\n" + common-last`.
+**Shared wrap**: Use `--pre-prompt` and `--post-prompt` to inject shared context. The final prompt for each exec is: `pre + "\n\n" + prompt + "\n\n" + post`. (`--common-prompt-first` / `--common-prompt-last` are deprecated aliases for the same vars.)
 
 **Output**: Progress and status go to stderr. With `--print`, exec outputs are printed to stdout in submission order, each preceded by a label header (omitted for single-exec runs). This makes it composable with downstream tools.
 
@@ -556,8 +570,8 @@ TOTAL                                                                           
 | `--supervisor` | Generate supervisor prompt instead of role prompt |
 | `--action ACTION` | Action type: `report` or `code` for roles; `review`, `code`, or `verify` for supervisor **(required)** |
 | `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
-| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt (text or `@filepath`) |
-| `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt (text or `@filepath`) |
+| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
+| `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--no-project-info` | Omit the ATeam Project Context section |
 | `--ignore-previous-report` | Do not include the role's previous report |
 | `--paths` | Show the per-section breakdown table (slot / anchor / path / last modified / est. tokens). No prompt body printed. |
@@ -612,8 +626,8 @@ ateam inspect --last --auto-debug --extra-prompt "focus on the timeout"
 | `--batch NAME` | Select all runs in a batch |
 | `--auto-debug` | Launch an agent in streaming mode to investigate the selected runs |
 | `--extra-prompt TEXT` | Additional instructions appended to the auto-debug prompt under an "Additional Debug Instructions" heading (text or `@filepath`) |
-| `--pre-prompt TEXT` | Text wrapped at the very front of the auto-debug prompt (text or `@filepath`) |
-| `--post-prompt TEXT` | Text wrapped at the very end of the auto-debug prompt, after `--extra-prompt` (text or `@filepath`) |
+| `--pre-prompt TEXT` | Text wrapped at the very front of the assembled auto-debug prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
+| `--post-prompt TEXT` | Text wrapped at the very end of the assembled auto-debug prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--profile NAME` | Profile for the auto-debug agent |
 | `--agent NAME` | Agent for the auto-debug run |
 

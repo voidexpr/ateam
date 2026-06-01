@@ -102,9 +102,6 @@ func parseMaxAge(s string) (time.Duration, error) {
 
 func init() {
 	registerCommonExecFlags(reviewCmd, &reviewFlags, commonFlagUsage{
-		ExtraPrompt:  "additional instructions (text or @filepath); appended after reports, before the outer --post-prompt wrap",
-		PrePrompt:    "text wrapped at the very front of the assembled prompt (text or @filepath)",
-		PostPrompt:   "text wrapped at the very end of the assembled prompt (text or @filepath)",
 		Timeout:      "timeout in minutes (overrides config)",
 		Model:        "model override; takes precedence over --cheaper-model",
 		Effort:       "reasoning effort override, passed verbatim to the agent CLI",

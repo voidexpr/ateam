@@ -57,8 +57,16 @@ func init() {
 	parallelCmd.Flags().StringVar(&parallelBatch, "batch", "", "group related agent_execs (default: parallel-TIMESTAMP)")
 	parallelCmd.Flags().IntVar(&parallelMaxParallel, "max-parallel", 3, "max parallel agents execution")
 	parallelCmd.Flags().BoolVar(&parallelNoProgress, "no-progress", false, "suppress ANSI progress table")
-	parallelCmd.Flags().StringVar(&parallelCommonPromptFirst, "common-prompt-first", "", "text or @filepath to prepend to each prompt")
-	parallelCmd.Flags().StringVar(&parallelCommonPromptLast, "common-prompt-last", "", "text or @filepath to append to each prompt")
+	// --pre-prompt / --post-prompt are the canonical names shared with
+	// every other prompt-taking cmd; --common-prompt-first / --common-prompt-last
+	// are kept as deprecated aliases backed by the same vars so existing
+	// invocations don't break.
+	parallelCmd.Flags().StringVar(&parallelCommonPromptFirst, "pre-prompt", "", UsagePrePrompt+" (applied to each task's prompt)")
+	parallelCmd.Flags().StringVar(&parallelCommonPromptLast, "post-prompt", "", UsagePostPrompt+" (applied to each task's prompt)")
+	parallelCmd.Flags().StringVar(&parallelCommonPromptFirst, "common-prompt-first", "", "deprecated alias for --pre-prompt")
+	parallelCmd.Flags().StringVar(&parallelCommonPromptLast, "common-prompt-last", "", "deprecated alias for --post-prompt")
+	_ = parallelCmd.Flags().MarkDeprecated("common-prompt-first", "use --pre-prompt instead")
+	_ = parallelCmd.Flags().MarkDeprecated("common-prompt-last", "use --post-prompt instead")
 	addProfileFlags(parallelCmd, &parallelProfile, &parallelAgent)
 	parallelCmd.Flags().StringVar(&parallelModel, "model", "", "model override")
 	parallelCmd.Flags().StringVar(&parallelEffort, "effort", "", "reasoning effort override, passed verbatim to the agent CLI")

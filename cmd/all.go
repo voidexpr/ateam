@@ -66,9 +66,7 @@ Example:
 }
 
 func init() {
-	allCmd.Flags().StringVar(&allExtraPrompt, "extra-prompt", "", "additional instructions passed to all phases (text or @filepath)")
-	allCmd.Flags().StringVar(&allPrePrompt, "pre-prompt", "", "text wrapped at the very front of every phase's assembled prompt (text or @filepath)")
-	allCmd.Flags().StringVar(&allPostPrompt, "post-prompt", "", "text wrapped at the very end of every phase's assembled prompt (text or @filepath)")
+	addPromptWrapFlags(allCmd, &allExtraPrompt, &allPrePrompt, &allPostPrompt)
 	allCmd.Flags().BoolVarP(&allQuiet, "quiet", "q", false, "suppress output printing")
 	allCmd.Flags().IntVar(&allTimeout, "timeout", 0, "per-phase timeout in minutes (overrides config)")
 	allCmd.Flags().IntVar(&allParallel, "parallel", 0, "max parallel report roles (overrides config max_parallel)")

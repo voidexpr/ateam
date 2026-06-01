@@ -82,9 +82,6 @@ func init() {
 	codeCmd.Flags().StringVar(&codeManagement, "management", "",
 		"management prompt override (text or @filepath)")
 	registerCommonExecFlags(codeCmd, &codeFlags, commonFlagUsage{
-		ExtraPrompt:   "additional instructions (text or @filepath); appended after Review, before Sub-Run Flags",
-		PrePrompt:     "text wrapped at the very front of the supervisor prompt (text or @filepath)",
-		PostPrompt:    "text wrapped at the very end of the supervisor prompt, after Sub-Run Flags (text or @filepath)",
 		Timeout:       "timeout in minutes (overrides config)",
 		Model:         "model override for the supervisor and every sub-run; takes precedence over --cheaper-model",
 		Effort:        "reasoning effort for the supervisor and every sub-run, passed verbatim to the agent CLI",

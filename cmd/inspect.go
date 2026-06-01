@@ -55,9 +55,7 @@ func init() {
 	inspectCmd.Flags().BoolVar(&inspectLastReview, "last-review", false, "select the last review run")
 	inspectCmd.Flags().BoolVar(&inspectLastCode, "last-code", false, "select all execs from the last code session")
 	inspectCmd.Flags().BoolVar(&inspectAutoDebug, "auto-debug", false, "launch an agent to investigate the selected runs")
-	inspectCmd.Flags().StringVar(&inspectExtraPrompt, "extra-prompt", "", "additional instructions for the auto-debug agent (text or @filepath)")
-	inspectCmd.Flags().StringVar(&inspectPrePrompt, "pre-prompt", "", "text wrapped at the very front of the auto-debug prompt (text or @filepath)")
-	inspectCmd.Flags().StringVar(&inspectPostPrompt, "post-prompt", "", "text wrapped at the very end of the auto-debug prompt (text or @filepath)")
+	addPromptWrapFlags(inspectCmd, &inspectExtraPrompt, &inspectPrePrompt, &inspectPostPrompt)
 	addProfileFlags(inspectCmd, &inspectProfile, &inspectAgent)
 }
 

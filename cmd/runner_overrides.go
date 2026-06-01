@@ -76,10 +76,11 @@ type CommonExecFlags struct {
 }
 
 // commonFlagUsage carries the per-command usage strings for the flags
-// registered by registerCommonExecFlags. Each command's help text differs
-// (e.g. report says "per-role", code says "for the supervisor and every
-// sub-run"), so the helper does not invent defaults — callers supply the
-// usage strings verbatim from the previously-duplicated init() sites.
+// registered by registerCommonExecFlags whose wording legitimately
+// varies between cmds (timeout scope, model scope, budget scope).
+// The three prompt-wrap flags (--extra-prompt, --pre-prompt,
+// --post-prompt) are NOT here — those use the shared constants from
+// prompt_wrap_flags.go so every cmd describes them identically.
 //
 // CustomProfile / CustomAgent: when both empty, --profile and --agent are
 // registered via the shared addProfileFlags helper (used by report, review,
@@ -87,9 +88,6 @@ type CommonExecFlags struct {
 // usage strings and marked mutually exclusive (the code command needs its
 // own sub-run-oriented help text).
 type commonFlagUsage struct {
-	ExtraPrompt   string
-	PrePrompt     string
-	PostPrompt    string
 	Timeout       string
 	Model         string
 	Effort        string
@@ -104,9 +102,7 @@ type commonFlagUsage struct {
 // MaxBudgetBatch is intentionally not part of CommonExecFlags because not
 // every command exposes it.
 func registerCommonExecFlags(cmd *cobra.Command, f *CommonExecFlags, usage commonFlagUsage) {
-	cmd.Flags().StringVar(&f.ExtraPrompt, "extra-prompt", "", usage.ExtraPrompt)
-	cmd.Flags().StringVar(&f.PrePrompt, "pre-prompt", "", usage.PrePrompt)
-	cmd.Flags().StringVar(&f.PostPrompt, "post-prompt", "", usage.PostPrompt)
+	addPromptWrapFlags(cmd, &f.ExtraPrompt, &f.PrePrompt, &f.PostPrompt)
 	cmd.Flags().IntVar(&f.Timeout, "timeout", 0, usage.Timeout)
 	addCheaperModelFlag(cmd, &f.CheaperModel)
 	if usage.CustomProfile != "" || usage.CustomAgent != "" {

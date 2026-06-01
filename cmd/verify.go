@@ -53,9 +53,6 @@ Example:
 
 func init() {
 	registerCommonExecFlags(verifyCmd, &verifyFlags, commonFlagUsage{
-		ExtraPrompt:  "additional instructions (text or @filepath)",
-		PrePrompt:    "text wrapped at the very front of the assembled prompt (text or @filepath)",
-		PostPrompt:   "text wrapped at the very end of the assembled prompt (text or @filepath)",
 		Timeout:      "timeout in minutes (overrides config)",
 		Model:        "model override; takes precedence over --cheaper-model",
 		Effort:       "reasoning effort override, passed verbatim to the agent CLI",

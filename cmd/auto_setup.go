@@ -42,9 +42,7 @@ func init() {
 	addVerboseFlag(autoSetupCmd, &autoSetupVerbose)
 	autoSetupCmd.Flags().BoolVar(&autoSetupDryRun, "dry-run", false, "print the prompt without running")
 	autoSetupCmd.Flags().IntVar(&autoSetupTimeout, "timeout", 0, "timeout in minutes (overrides config)")
-	autoSetupCmd.Flags().StringVar(&autoSetupExtraPrompt, "extra-prompt", "", "additional instructions (text or @filepath)")
-	autoSetupCmd.Flags().StringVar(&autoSetupPrePrompt, "pre-prompt", "", "text wrapped at the very front of the assembled prompt (text or @filepath)")
-	autoSetupCmd.Flags().StringVar(&autoSetupPostPrompt, "post-prompt", "", "text wrapped at the very end of the assembled prompt (text or @filepath)")
+	addPromptWrapFlags(autoSetupCmd, &autoSetupExtraPrompt, &autoSetupPrePrompt, &autoSetupPostPrompt)
 }
 
 func runAutoSetup(cmd *cobra.Command, args []string) error {

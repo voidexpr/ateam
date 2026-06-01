@@ -77,9 +77,7 @@ func init() {
 	addBudgetFlags(execCmd, &execMaxBudgetUSD, &execMaxBudgetBatch,
 		"per-agent USD spend cap (claude-only; errors on codex)",
 		"abort if --batch already exceeds this USD before starting")
-	execCmd.Flags().StringVar(&execExtraPrompt, "extra-prompt", "", "additional instructions appended after the main prompt (text or @filepath)")
-	execCmd.Flags().StringVar(&execPrePrompt, "pre-prompt", "", "text wrapped at the very front of the prompt, before the main body (text or @filepath)")
-	execCmd.Flags().StringVar(&execPostPrompt, "post-prompt", "", "text wrapped at the very end of the prompt, after --extra-prompt (text or @filepath)")
+	addPromptWrapFlags(execCmd, &execExtraPrompt, &execPrePrompt, &execPostPrompt)
 	addProfileFlags(execCmd, &execProfile, &execAgent)
 	execCmd.Flags().BoolVar(&execNoStream, "no-stream", false, "disable progress updates during execution")
 	execCmd.Flags().BoolVar(&execNoSummary, "no-summary", false, "disable run summary after completion")
