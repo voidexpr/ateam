@@ -239,7 +239,9 @@ func runExec(cmd *cobra.Command, args []string) error {
 		Ctx:      ctx,
 		DB:       db,
 		Resolved: env,
-		Reporter: &execReporter{StdoutReporter: &flow.StdoutReporter{Stream: showStream}},
+		Reporter: flow.MultiReporter{
+			&flow.StdoutReporter{Stream: showStream, SuppressBundleEnd: true},
+		},
 	}
 	res := flow.RunBundle(bundle, rtEnv, rc)
 	if res.Summary == nil {
@@ -269,16 +271,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 
 	return nil
 }
-
-// execReporter wraps a StdoutReporter for AgentEvent stream output but
-// suppresses the "Done (dur, cost)" BundleEnd line — exec emits its own
-// richer "--- Summary ---" block via printExecSummary, gated by
-// --no-summary / --quiet, so the flow line would be redundant.
-type execReporter struct {
-	*flow.StdoutReporter
-}
-
-func (*execReporter) BundleEnd(flow.BundleInfo, flow.Result) {}
 
 // printProgress drains a runner.RunProgress chan, writing one
 // flow.PrintProgressLine per event to stderr. Used by the legacy

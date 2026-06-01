@@ -32,9 +32,10 @@ import (
 // os.Stdout / os.Stderr writes are atomic. Use TableReporter for Parallel.
 type StdoutReporter struct {
 	BaseReporter
-	Out    io.Writer // stdout for BundleEnd lines (defaults to os.Stdout)
-	ErrOut io.Writer // stderr for streamed AgentEvent lines (defaults to os.Stderr)
-	Stream bool      // emit per-event progress lines on AgentEvent
+	Out               io.Writer // stdout for BundleEnd lines (defaults to os.Stdout)
+	ErrOut            io.Writer // stderr for streamed AgentEvent lines (defaults to os.Stderr)
+	Stream            bool      // emit per-event progress lines on AgentEvent
+	SuppressBundleEnd bool      // when true, BundleEnd is silent — cmds that print their own richer end-of-run output (e.g. exec's printExecSummary) set this to skip the generic "Done (...)" line
 }
 
 func (r *StdoutReporter) writer() io.Writer {
@@ -61,6 +62,9 @@ func (r *StdoutReporter) errWriter() io.Writer {
 // Replaces the old internal/stage/actions::PrintDone action — successful
 // bundles automatically get the "Done" line via the Reporter.
 func (r *StdoutReporter) BundleEnd(b BundleInfo, res Result) {
+	if r.SuppressBundleEnd {
+		return
+	}
 	w := r.writer()
 	switch res.Flow.State {
 	case StateSkip:

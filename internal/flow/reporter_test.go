@@ -75,6 +75,24 @@ func TestStdoutReporter_SkipAndError(t *testing.T) {
 	}
 }
 
+func TestStdoutReporter_SuppressBundleEnd(t *testing.T) {
+	// When set, BundleEnd is silent for every state — the cmd owns
+	// end-of-run output (e.g. exec's printExecSummary).
+	cases := []Result{
+		{Flow: Flow{State: StateContinue}, Summary: &runner.RunSummary{Duration: time.Second}},
+		{Flow: Flow{State: StateSkip, Reason: "nothing stale"}},
+		{Flow: Flow{State: StateError, Reason: "agent failed"}},
+	}
+	for _, res := range cases {
+		var buf bytes.Buffer
+		r := &StdoutReporter{Out: &buf, SuppressBundleEnd: true}
+		r.BundleEnd(BundleInfo{Name: "exec"}, res)
+		if got := buf.String(); got != "" {
+			t.Errorf("SuppressBundleEnd: expected no output for %v; got %q", res.Flow.State, got)
+		}
+	}
+}
+
 func TestStdoutReporter_AgentEventNoOp(t *testing.T) {
 	// StdoutReporter intentionally ignores AgentEvent — the runner already
 	// streams subprocess output. Verify nothing is written.
