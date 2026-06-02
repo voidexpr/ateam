@@ -8,45 +8,45 @@ It automates the parts you don't want to do to free up your attention for featur
 
 ## Why ATeam
 
-#### The Engineer night shift
+#### The engineering night shift
 
-Software engineering teams don't just ship features. Engineers refactor, write missing tests, debug, bump dependencies before they rot, and (ideally) keep docs honest. ATeam is designed to automate these tasks before your progress suffers from technical debt. Coding agents are perfectly capable of performing a baseline level of engineering work tirelessly. Ateam makes this a one-liner.
+Software engineering teams don't just ship features. Engineers refactor, write missing tests, debug, bump dependencies before they rot, and (ideally) keep docs honest. ATeam is designed to automate these tasks before your progress suffers from technical debt. Coding agents are perfectly capable of performing a baseline level of engineering work tirelessly.
 
-Agents are a great opportunity to delegate the parts of this work project owners don't want to focus on.
+ATeam makes that a one-liner you can run daily, schedule weekly to keep a code base healthy.
 
-#### Coding Agents do only some of the work
+#### Coding agents do only some of the work
 
-Coding agents prioritize feature completion over software quality which is a good short-term tradeoff that degrades over time. Tests fall behind, security issues accumulate, code becomes spaghetti, docs go stale, dependencies rot, ...
+Coding agents prioritize feature completion over software quality, which is a good short-term tradeoff that degrades over time. Tests fall behind, security issues accumulate, code becomes spaghetti, docs go stale, dependencies rot, ...
 
-At the same time coding agents are also very good at auditing and fixing. They can be prompted to be pragmatic: small wins are ok, look for automation opportunities so cost can go lower over time.
+At the same time, coding agents are good at auditing and fixing. They can be prompted to be pragmatic: small wins are ok, look for automation opportunities so cost goes down over time.
 
-So ateam provides pre-made prompts to continuously improve any code base.
+So ATeam ships pre-made prompts to continuously improve any codebase.
 
 #### Your attention is the bottleneck
 
-Developing new features or architecting a project requires a lot of thinking and concentration, interactive agents are great enabler and helping brainstorming, design and code extremely quickly. But then the bottleneck becomes our attention.
+Developing new features or architecting a project requires a lot of thinking and concentration; interactive agents are a great enabler, helping brainstorm, design, and code extremely quickly. But then the bottleneck becomes your attention.
 
-Get rid of repetitive prompts like `/write-tests /update-docs /update-architecture /simplify /code-review high --fix recent changes`, just run an ateam pipeline after your work day to do the same and also catch that security issue that new dependency just added.
+Get rid of repetitive prompts like `/write-tests /update-docs /update-architecture /simplify /code-review high --fix recent changes` — just run an ATeam pipeline after your work day to do the same, and also catch that security issue your new dependency just added.
 
-A growing share of code is written by coding agents. Humans should focus on high value tasks and delegate more of the code lifecycle that can actually be prompted once and ran repetitively.
+A growing share of code is written by coding agents. Humans should focus on high-value tasks and delegate more of the code lifecycle that can be prompted once and run repeatedly.
 
-Unattended agents are one solution to free up more attention to high level work: prompt once and re-run on a schedule, after a work day or perform deeper audits before releasing a project.
+Unattended agents are one way to free up attention for high-level work: prompt once and re-run on a schedule, after a work day, or as a deeper audit before releasing a project.
 
-#### Software engineer quality work is the sweet-spot for unattended agents
+#### Software engineering quality work is the sweet spot for unattended agents
 
-Feature work requires attention, iteration, experimentation and delegating it to a swarm of agents would require to perfectly understand it from the beginning. Then agents want to please whoever is prompted them so drift propagates between agents. So feature work doesn't seem a good candidate for unattended agents but quality tasks can be prompted once, reuse state from their previous run and re-evaluate the code along the criteria they are given.
+Feature work requires attention, iteration, and experimentation; delegating it to a swarm of agents would require perfectly understanding it from the start. Agents also tend to please whoever is prompting them, so drift propagates between agents. Feature work doesn't seem a good candidate for unattended agents — but quality tasks can be prompted once, reuse state from their previous run, and re-evaluate the code against the criteria they are given.
 
-This is the bet of ateam.
+This is the bet of ATeam.
 
 #### `claude -p` works until it doesn't
 
-Coding agents all provide flexible ways to run unattended but eventually when ran regularly a lot more tooling is required: make uniform between agents, convention for logs, execution profile, isolation parameters, tokens used, turns, costs, etc ...
+Coding agents all provide flexible ways to run unattended, but when run regularly a lot more tooling is required: a uniform interface across agents, conventions for logs, execution profiles, isolation parameters, token usage, turns, costs, etc.
 
-ateam gives you the `ps` command for unattended agents: clearly see how long they take and how much they cost so you can improve your prompt over time and not repetitively run this $20 one liner without realizing it.
+ATeam gives you the `ps` command for unattended agents: clearly see how long they take and how much they cost, so you can improve your prompts over time, decide what runs daily vs. weekly and not repeatedly run that $20 one-liner without realizing it.
 
-The more features are needed over time: run in parallel, dynamic prompt assembly, delegate some work done by prompts to scripts, ...
+More needs accumulate over time: running in parallel, dynamic prompt assembly, delegating some prompt work to scripts, ...
 
-ateam is not a workflow engine, it implements just one complex pipeline but it is a great building block to build more complex processes scaling from simple bash scripts mixing commands and prompts to true persistent workflow management can all be built using ateam.
+ATeam is not a workflow engine — it implements just one pipeline. But it's a useful building block: from simple bash scripts mixing commands and prompts up to persistent workflow management, anything can be built on top of `ateam exec` and `ateam parallel`.
 
 **In practice:** reuses your existing coding agents (no lock-in), every artifact is a markdown file, every change is a git commit you can read or revert, and the whole system fits in your head — no DAG, no graph framework, no colorful vocabulary. More on the rationale: [APPROACH.md](APPROACH_2.md).
 
@@ -72,11 +72,11 @@ ateam is not a workflow engine, it implements just one complex pipeline but it i
 - `ateam serve` — web UI for browsing all reports, reviews, runs, and costs; `ateam export` for a self-contained HTML snapshot
 - `ateam prompt --role NAME` shows the exact assembled prompt; `ateam env` summarizes config and environment
 
-**Agents helpers everywhere**
-- `init --auto-step`: don't read the docs, ask an agent to select ateam roles based on your project
-- `inspect --auto-debug`: have an agent investigate why past run(s) failed, recommend config changes and provide the bug to file against ateam if needed
-- `report --auto-roles`: dynamically select which roles to run based on recent commits
-- `scripts/ateam-runall-mangaged.sh`: run a full quality pipeline and in case of error have an agent try to fix and resume
+**Agent helpers everywhere**
+- `ateam auto-setup`: don't read the docs — ask an agent to select ATeam roles based on your project
+- `ateam inspect --auto-debug`: have an agent investigate why past runs failed, recommend config changes, and draft a bug to file against ATeam if needed
+- `ateam report --auto-roles`: dynamically select which roles to run based on recent commits
+- `scripts/ateam-runall-managed.sh`: run a full quality pipeline and, on error, have an agent try to fix it and resume
 
 ## Install
 
@@ -102,7 +102,7 @@ ateam init                # create .ateam/
 * A: Edit `.ateam/config.toml` to select which [role](ROLES.md) to enable in your project
 * B: Or let an agent decide: `ateam auto-setup` (detect stack, enable a reasonable role set)
 
-### 3. Run report → review → code → verify and get git commits performed locally
+### 3. Run report → review → code → verify; ATeam commits the changes locally
 ```bash
 ateam run-all                 # report → review → code → verify
 
@@ -132,30 +132,11 @@ Prompts resolve in order: **project → organization → embedded defaults.** Yo
 
 Full details: [CONFIG.md](CONFIG.md).
 
-> TODO: screenshot of `ateam serve` / `ateam ps` / `ateam cost`
+`ateam serve`:
+![ateam serve — browse reports, reviews, and cost in your browser](docs/ateam_serve_overview.jpg)
 
-```
- ateam ps
-ID   STARTED         PROFILE  ACTION  ROLE                  MODEL                      DURATION  COST   TOKENS  TURNS  STATUS  BATCH                       REASON
-94   06-01 12:50:37  default  exec                          claude-opus-4-7            2s        $0.24  12      1      ok
-95   06-01 13:23:46  default  exec                          claude-haiku-4-5-20251001  8s        $0.06  40.0K   7      error                               [user_canceled] run canceled (Ctrl-C, SIGTERM, or parent context canceled)
-96   06-01 13:24:00  default  exec                          claude-haiku-4-5-20251001  6s        $0.06  39.9K   4      ok
-97   06-01 13:37:45  default  exec                          claude-haiku-4-5-20251001  7s        $0.06  39.9K   6      ok
-98   06-01 16:25:46  default  report  code.structure        claude-opus-4-7            3m44s     $2.02  2.1M    35     ok      report-2026-06-01_16-25-46
-99   06-01 16:25:46  default  report  code.recent           claude-opus-4-7            7m42s     $4.58  6.0M    64     ok      report-2026-06-01_16-25-46
-100  06-01 16:25:46  default  report  code.bugs             claude-opus-4-7            6m37s     $3.67  4.0M    79     ok      report-2026-06-01_16-25-46
-101  06-01 16:29:32  default  report  docs.external         claude-opus-4-7            2m14s     $1.17  856.3K  14     ok      report-2026-06-01_16-25-46
-102  06-01 16:31:47  default  report  docs.followable       claude-opus-4-7            3m26s     $2.00  1.9M    22     ok      report-2026-06-01_16-25-46
-103  06-01 16:32:24  default  report  docs.internal         claude-opus-4-7            3m50s     $2.07  2.4M    35     ok      report-2026-06-01_16-25-46
-104  06-01 16:33:29  default  report  project.automation    claude-opus-4-7            1m19s     $0.74  505.6K  13     ok      report-2026-06-01_16-25-46
-105  06-01 16:34:48  default  report  project.dependencies  claude-opus-4-7            36s       $0.48  148.4K  5      ok      report-2026-06-01_16-25-46
-106  06-01 16:35:14  default  report  project.security      claude-opus-4-7            2m57s     $2.28  2.6M    30     ok      report-2026-06-01_16-25-46
-107  06-01 16:35:25  default  report  test.blackbox         claude-opus-4-7            4m5s      $1.88  1.4M    20     ok      report-2026-06-01_16-25-46
-108  06-01 16:36:15  default  report  test.gaps             claude-opus-4-7            2m42s     $1.10  751.9K  16     ok      report-2026-06-01_16-25-46
-109  06-01 16:38:11  default  report  test.quality          claude-opus-4-7            3m34s     $2.03  2.2M    28     ok      report-2026-06-01_16-25-46
-110  06-01 16:38:58  default  report  test.recent           claude-opus-4-7            5m42s     $2.91  3.1M    32     ok      report-2026-06-01_16-25-46
-111  06-01 16:44:41  default  review  supervisor            claude-opus-4-7            2m14s     $1.15  129.4K  2      ok
-```
+`ateam ps`:
+![ateam ps — recent runs with duration, cost, and tokens](docs/ateam_ps.jpg)
 
 ## Two ways to use it
 
@@ -214,9 +195,9 @@ By default ATeam uses the agent's built-in sandbox — fast, no setup, OS-level 
 | | |
 |---|---|
 | **Per project setup** | `init`, `auto-setup` |
-| **Pipeline** | `all` or: `report`, `review`, `code`, `verify` |
+| **Pipeline** | `run-all` or: `report`, `review`, `code`, `verify` |
 | **Ad-hoc** | `exec`, `parallel` |
-| **Process / cost** | `ps`, `tail`, `resume`, inspect`, `cat`, `cost` |
+| **Process / cost** | `ps`, `tail`, `resume`, `inspect`, `cat`, `cost` |
 | **Web Interface for Artifacts** | `serve`, `export` |
 | **Config / debug** | `env`, `prompt`, `roles`, `secret` |
 
