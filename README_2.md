@@ -78,6 +78,8 @@ ATeam is not a workflow engine — it implements just one pipeline. But it's a u
 - `ateam report --auto-roles`: dynamically select which roles to run based on recent commits
 - `scripts/ateam-runall-managed.sh`: run a full quality pipeline and, on error, have an agent try to fix it and resume
 
+Note about maturity and cost: ateam was started in Feb 2026 and has been used mostly on vibe coded project (including itself). The approach is validated: it improves code bases and saves attention. It is also not free, especially once the mid June 2026 Claude unattended agent price increase kicks in. It still seems well worth it. It's not like code agent produces will magically engineer itself as it is written. A pipeline like ateam is needed by agentic project and can still benefit more classical project with developers written a lot of the code by narrowing the roles ateam uses to audit the code base.
+
 ## Install
 
 ```bash
