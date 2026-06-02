@@ -13,3 +13,4 @@ ateam_candidate/
 .superpowers/
 .ci/
 .cache/
+__pycache__/
