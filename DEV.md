@@ -75,7 +75,8 @@ For developers building from source, cross-compilation happens automatically (st
 1. Create `defaults/prompts/report/<name>.prompt.md` (the role's main report body)
 2. Optionally add `defaults/prompts/code/<name>.prompt.md` for code-action support
 3. Run `make build` — the prompt tree is embedded via `defaults.FS`, so the role is discoverable from the embedded anchor
-4. Enable it in a project: `ateam init --role <name>` or edit `.ateam/config.toml`
+4. Run `make docs` to regenerate `ROLES.md` from the embedded role set — required for `make check` / `make run-ci` and the pre-commit hook (`make install-hooks`) to pass, since `check-docs` diffs against this file
+5. Enable it in a project: `ateam init --role <name>` or edit `.ateam/config.toml`
 
 The user-facing assembly model (anchor chain, filename patterns, `FirstMatch` vs `AllMatches`, template variables) is documented in **[CONFIG.md → Prompt Composition](CONFIG.md#prompt-composition)** and **[CONFIG.md → Template Variables](CONFIG.md#template-variables)**. The sections below cover the dev-only deltas.
 

@@ -18,7 +18,7 @@ Another clear scenario to use ateam is as more code is written by agents and onl
 Lastly you can use `ateam exec` and `ateam parallel` to create your own mini agent workflow through simple bash script chaining without having to deal with complex frameworks. For example:
 
 ```bash
-ateam exec @./my_saved_prompt_to_decide_what_todo.md && ateam parallel --prompt "take care of problem 1" --prompt "take care of problem 2" --prompt "take care of problem 3" && ateam exec "verify what the documents produced by the previous step describe and take further action"
+ateam exec @./my_saved_prompt_to_decide_what_todo.md && ateam parallel "take care of problem 1" "take care of problem 2" "take care of problem 3" && ateam exec "verify what the documents produced by the previous step describe and take further action"
 ```
 
 You can easily swap claude/codex
