@@ -246,6 +246,7 @@ func runCode(opts CodeOptions) error {
 				Verbose:          opts.Verbose,
 				Batch:            batch,
 				StartedAt:        startedAt,
+				QuietExecID:      true,
 			}
 		},
 		PreExec: []flow.Action{

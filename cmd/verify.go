@@ -153,6 +153,7 @@ func runVerify(opts VerifyOptions) error {
 				TimeoutMin:        timeout,
 				Verbose:           opts.Verbose,
 				StartedAt:         startedAt,
+				QuietExecID:       true,
 			}
 		},
 		PreExec: []flow.Action{

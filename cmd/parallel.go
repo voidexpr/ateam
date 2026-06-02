@@ -193,12 +193,13 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	steps := make([]flow.Step, len(resolvedPrompts))
 	for i, prompt := range resolvedPrompts {
 		steps[i] = staticBundle(labels[i], labels[i], runner.ActionParallel, prompt, runner.RunOpts{
-			RoleID:     labels[i],
-			Action:     runner.ActionParallel,
-			WorkDir:    env.WorkDir,
-			TimeoutMin: parallelTimeout,
-			Verbose:    parallelVerbose,
-			Batch:      batch,
+			RoleID:      labels[i],
+			Action:      runner.ActionParallel,
+			WorkDir:     env.WorkDir,
+			TimeoutMin:  parallelTimeout,
+			Verbose:     parallelVerbose,
+			Batch:       batch,
+			QuietExecID: true,
 		})
 	}
 

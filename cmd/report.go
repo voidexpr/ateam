@@ -264,6 +264,7 @@ func runReport(opts ReportOptions) error {
 			TimeoutMin:        timeout,
 			Verbose:           opts.Verbose,
 			Batch:             batch,
+			QuietExecID:       true,
 		}
 
 		bundle := staticBundle(roleID, roleID, runner.ActionReport, prompt, runOpts)

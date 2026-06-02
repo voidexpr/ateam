@@ -60,9 +60,9 @@ type tableReporterOpts struct {
 	quiet     bool
 }
 
-// newTableReporter prepares the live region. If quiet or stdout is not a
-// TTY, the reporter falls back to the printProgress-shape stderr stream
-// (matching today's runPool behavior).
+// newTableReporter prepares the live region. If quiet or stdout is not
+// a TTY, the reporter falls back to a single line per agent on start
+// and on completion — same columns as the live table, no tool spam.
 func newTableReporter(opts tableReporterOpts) *tableReporter {
 	out := opts.out
 	if out == nil {
@@ -92,6 +92,14 @@ func newTableReporter(opts tableReporterOpts) *tableReporter {
 		// of corrupting the cursor accounting. Subprocess output is
 		// captured separately and unaffected.
 		r.restoreStd = redirectStdStreams(r.renderer.Writer())
+	} else {
+		// Non-live fallback: announce the full queue up front so an
+		// operator watching the log file knows what to expect, then
+		// emit one line per start/finish via AgentExecStart / BundleEnd.
+		fmt.Fprintln(out, poolStatusHeader)
+		for _, row := range rows {
+			fmt.Fprintln(out, formatPoolRowSingleLine(row))
+		}
 	}
 	return r
 }
@@ -101,6 +109,25 @@ func newTableReporter(opts tableReporterOpts) *tableReporter {
 // today's report shape there's exactly one Parallel under the Pipeline.
 
 func (r *tableReporter) BundleStart(flow.BundleInfo) {}
+
+// AgentExecStart fires once per bundle when the runner has allocated an
+// exec_id but before the agent process starts. In non-live mode we
+// stamp the id onto the row and emit a one-line "running" notice so an
+// operator tailing the log sees execution kick off.
+func (r *tableReporter) AgentExecStart(b flow.BundleInfo, prepared *runner.PreparedRun) {
+	if r.useLive || prepared == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	idx, ok := r.labelIndex[b.Name]
+	if !ok {
+		return
+	}
+	r.rows[idx].ExecID = prepared.ExecID
+	r.rows[idx].State = poolStateRunning
+	fmt.Fprintln(r.out, formatPoolRowSingleLine(r.rows[idx]))
+}
 
 func (r *tableReporter) AgentEvent(b flow.BundleInfo, p runner.RunProgress) {
 	r.mu.Lock()
@@ -146,6 +173,9 @@ func (r *tableReporter) BundleEnd(b flow.BundleInfo, res flow.Result) {
 	}
 	r.results = append(r.results, summary)
 	r.render()
+	if !r.useLive {
+		fmt.Fprintln(r.out, formatPoolRowSingleLine(r.rows[idx]))
+	}
 }
 
 // StageEnd marks any queued-but-never-started rows as skipped. PreDispatch
@@ -162,6 +192,9 @@ func (r *tableReporter) StageEnd(_ flow.StageInfo, _ flow.StageOutcome) {
 			r.rows[i].State = poolStateSkipped
 			r.rows[i].Detail = "not dispatched"
 			r.skipped++
+			if !r.useLive {
+				fmt.Fprintln(r.out, formatPoolRowSingleLine(r.rows[i]))
+			}
 		}
 	}
 	r.render()

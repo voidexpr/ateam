@@ -226,6 +226,7 @@ func runReview(opts ReviewOptions) error {
 				TimeoutMin:        timeout,
 				Verbose:           opts.Verbose,
 				StartedAt:         startedAt,
+				QuietExecID:       true,
 			}
 		},
 		PreExec: []flow.Action{

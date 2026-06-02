@@ -132,6 +132,13 @@ type RunOpts struct {
 	// `{{ATEAM_AUTO_ROLES_COMMANDS_OUTPUT}}` for the --auto-roles planner agent.
 	// Only set by cmd/auto_roles.go; empty for every other action.
 	AutoRolesCommandsOutput string
+
+	// QuietExecID suppresses the `exec_id=N` stderr line that Prepare otherwise
+	// emits for orchestrators driving `ateam exec`. Table-rendering commands
+	// (report/code/review/verify/parallel) show the id in the rendered table,
+	// so the stderr line is pure noise — and worse, gets routed through the
+	// renderer's above-live-region writer where it lands mid-table.
+	QuietExecID bool
 }
 
 // RunProgress is a lightweight status sent on a channel during execution.
@@ -287,8 +294,11 @@ func (r *AgentExecutor) Prepare(opts RunOpts, prompt string) (*PreparedRun, erro
 	// Print exec_id on stderr in a structured form so orchestrators
 	// driving `ateam exec` (or any agent-running cmd) can correlate the
 	// subprocess with the row, without parsing log output or the JSON
-	// progress stream. Single source of truth; always emitted.
-	fmt.Fprintf(os.Stderr, "exec_id=%d\n", callID)
+	// progress stream. Suppressed when QuietExecID is set — table-mode
+	// commands already surface the id in the rendered row.
+	if !opts.QuietExecID {
+		fmt.Fprintf(os.Stderr, "exec_id=%d\n", callID)
+	}
 
 	stateDir := r.StateDir()
 	logsDir := logsDirFor(stateDir, callID)

@@ -78,6 +78,55 @@ func TestTableReporterPartialDispatch(t *testing.T) {
 	}
 }
 
+// TestTableReporterNonLiveEmitsPerAgentLines locks in the non-TTY
+// fallback: construction announces every queued row, AgentExecStart
+// prints a "running" line stamped with the exec_id, BundleEnd prints
+// the terminal-state line, and StageEnd prints a "not dispatched" line
+// for each row that never started. Without these, an operator watching
+// a log file (or `ateam-all-managed.sh`'s manager.log) sees only the
+// final Close() summary.
+func TestTableReporterNonLiveEmitsPerAgentLines(t *testing.T) {
+	labels := []string{"role-a", "role-b", "role-c"}
+	var buf bytes.Buffer
+	tr := newTableReporter(tableReporterOpts{
+		out:       &buf,
+		labels:    labels,
+		agentName: "test-agent",
+		itemLabel: "role(s)",
+		quiet:     true,
+	})
+
+	a := flow.BundleInfo{Name: "role-a"}
+	tr.AgentExecStart(a, &runner.PreparedRun{ExecID: 42})
+	tr.BundleEnd(a, flow.Result{
+		Flow:    flow.Flow{State: flow.StateContinue},
+		Summary: &runner.RunSummary{ExecID: 42, RoleID: "role-a"},
+	})
+
+	b := flow.BundleInfo{Name: "role-b"}
+	tr.AgentExecStart(b, &runner.PreparedRun{ExecID: 43})
+	tr.BundleEnd(b, flow.Result{
+		Flow:    flow.Flow{State: flow.StateError, Err: nil},
+		Summary: &runner.RunSummary{ExecID: 43, RoleID: "role-b", IsError: true},
+	})
+
+	tr.StageEnd(flow.StageInfo{}, flow.StageOutcome{})
+	_ = tr.Close()
+
+	out := buf.String()
+	for _, want := range []string{
+		"LABEL", "STATUS", // header printed up front
+		"role-a", "role-b", "role-c", // queued announce
+		"42", "43", // exec_ids stamped on the running lines
+		"ERROR",          // role-b terminal state
+		"not dispatched", // role-c late-skip
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("non-live output missing %q\n--- got ---\n%s", want, out)
+		}
+	}
+}
+
 // TestTableReporterAllDispatched is the clean happy path: every row
 // completes successfully. StageEnd has no queued rows to upgrade and
 // Close must return nil.
