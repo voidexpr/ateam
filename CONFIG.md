@@ -280,7 +280,11 @@ echo "For this project, treat any C extensions as untrusted." \
 
 ### Template Variables
 
-Prompts can reference `{{namespace.key}}` variables. The runner fills `{{exec.*}}` placeholders at execution time; the assembler fills `{{prompt.*}}`, `{{project.*}}`, `{{ateam.*}}`, `{{role.*}}`, and `{{env.NAME}}` at assembly time. Legacy ALL_CAPS forms (`{{OUTPUT_DIR}}`, `{{ROLE}}`, etc.) are auto-translated via a compat shim — existing user prompts keep working without rewrites.
+Prompts can reference `{{namespace.key}}` variables. The runner fills `{{exec.*}}` placeholders at execution time; the assembler fills `{{prompt.*}}`, `{{project.*}}`, `{{git.*}}`, `{{ateam.*}}`, `{{role.*}}`, and `{{env.NAME}}` at assembly time. Legacy ALL_CAPS forms (`{{OUTPUT_DIR}}`, `{{ROLE}}`, etc.) are auto-translated via a compat shim — existing user prompts keep working without rewrites.
+
+`{{git.*}}` exposes repository facts derived from the agent's work-dir: `git.repo` (basename of the repo root), `git.branch`, `git.commit` (full SHA), `git.head_short` (abbreviated SHA), `git.dirty` (`"true"` / `"false"`). All five render as the empty string (or `"false"` for `git.dirty`) when the work-dir isn't inside a git repo, so prompts using them keep rendering cleanly in scratch contexts.
+
+`{{env.NAME}}` reads from the agent process's environment at assembly time. References to an unset variable error loudly with the variable name in the message — preferable to silently substituting empty strings into prompts the agent can't recover from.
 
 ## Runtime Configuration
 

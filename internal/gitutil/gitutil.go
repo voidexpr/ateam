@@ -87,6 +87,43 @@ func CurrentBranch(dir string) string {
 	return b
 }
 
+// HeadShort returns the abbreviated HEAD commit hash (typically 7 chars
+// per git's default abbreviation length). Returns "" if git is unavailable,
+// dir is not in a repo, or the call fails. Distinct from
+// `HeadHash(dir)[:7]` because git's --short respects core.abbrev, which a
+// user or workflow may have tuned.
+func HeadShort(dir string) string {
+	cmd := exec.Command("git", "rev-parse", "--short", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// Dirty reports whether the working tree has uncommitted changes.
+// "false" when the tree is clean OR when dir is not in a repo OR when
+// git is unavailable — callers checking against "true" therefore err on
+// the side of treating non-repos as clean, which matches how
+// gitutil.HeadHash / CurrentBranch return empty on the same edge.
+//
+// Returns the literal strings "true" / "false" so the value can land
+// directly in a {{git.dirty}} template substitution without further
+// stringification.
+func Dirty(dir string) string {
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return "false"
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return "false"
+	}
+	return "true"
+}
+
 // TopLevel returns the absolute path of the git repo containing dir.
 // Returns "" if git CLI is missing, dir is not in a repo, or the call fails.
 // For a git worktree, this returns the worktree's own root (worktrees are

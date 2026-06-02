@@ -238,6 +238,23 @@ func (e *ResolvedEnv) BuildAssemblerVars(promptPath, roleLabel, action string) a
 	} else {
 		vars.Project["info"] = ""
 	}
+
+	// {{git.*}} surfaces repo facts to prompts. Queried in WorkDir for
+	// alignment with project.info (same agent-cwd convention; see
+	// NewProjectInfoParams). For non-git work-dirs every helper returns ""
+	// (or "false" for Dirty), so prompts render cleanly outside a repo.
+	repo := gitutil.TopLevel(e.WorkDir)
+	if repo != "" {
+		repo = filepath.Base(repo)
+	}
+	vars.Git = map[string]string{
+		"repo":       repo,
+		"branch":     gitutil.CurrentBranch(e.WorkDir),
+		"commit":     gitutil.HeadHash(e.WorkDir),
+		"head_short": gitutil.HeadShort(e.WorkDir),
+		"dirty":      gitutil.Dirty(e.WorkDir),
+	}
+
 	return vars
 }
 

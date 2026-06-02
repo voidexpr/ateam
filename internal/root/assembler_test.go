@@ -89,6 +89,26 @@ func TestBuildAssemblerVarsDefersOutputPaths(t *testing.T) {
 	}
 }
 
+// TestBuildAssemblerVarsPopulatesGit covers the {{git.*}} namespace. The
+// assembler exposes a Git map per spec; without BuildAssemblerVars
+// populating it, every {{git.X}} reference would error "unknown key in
+// git namespace." This test exercises the wiring + assembler dispatch.
+func TestBuildAssemblerVarsPopulatesGit(t *testing.T) {
+	// A non-git WorkDir produces empty strings for each field (matching
+	// gitutil's contract). The keys must still exist so resolution
+	// reports "" instead of an unknown-key error.
+	env := &ResolvedEnv{WorkDir: t.TempDir()}
+	vars := env.BuildAssemblerVars("report/security", "", "report")
+	for _, key := range []string{"repo", "branch", "commit", "head_short", "dirty"} {
+		if _, ok := vars.Git[key]; !ok {
+			t.Errorf("vars.Git missing key %q", key)
+		}
+	}
+	if vars.Git["dirty"] != "false" {
+		t.Errorf("vars.Git[\"dirty\"] = %q, want false for non-repo WorkDir", vars.Git["dirty"])
+	}
+}
+
 func TestEnvAssemblerProjectOverride(t *testing.T) {
 	tmp := resolvedTempDir(t)
 	projectDir := filepath.Join(tmp, ".ateam")
