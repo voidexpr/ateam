@@ -498,39 +498,6 @@ func TestBatchCostUSD(t *testing.T) {
 	}
 }
 
-// TestMigrateRunActionRename verifies that legacy rows with action='run' are
-// rewritten to action='exec' on Open, matching the renamed CLI command.
-func TestMigrateRunActionRename(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "state.sqlite")
-
-	db, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("first Open: %v", err)
-	}
-	if _, err := db.RawDB().Exec(
-		`INSERT INTO agent_execs (project_id, action, role, started_at) VALUES (?, ?, ?, ?)`,
-		"proj", "run", "security", time.Now().Format(time.RFC3339),
-	); err != nil {
-		t.Fatalf("seed legacy row: %v", err)
-	}
-	db.Close()
-
-	// Re-open: migrate() should rewrite action='run' → 'exec'.
-	db2, err := Open(dbPath)
-	if err != nil {
-		t.Fatalf("second Open: %v", err)
-	}
-	defer db2.Close()
-
-	var action string
-	if err := db2.RawDB().QueryRow(`SELECT action FROM agent_execs LIMIT 1`).Scan(&action); err != nil {
-		t.Fatalf("query: %v", err)
-	}
-	if action != "exec" {
-		t.Errorf("expected action='exec' after migration, got %q", action)
-	}
-}
-
 func TestMigrateIdempotent(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.sqlite")
 

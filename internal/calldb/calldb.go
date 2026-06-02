@@ -396,11 +396,6 @@ func migrate(db *sql.DB, dbPath string) error {
 		}
 	}
 
-	// Rename the legacy "run" action to "exec" to match the renamed CLI command.
-	if _, err := tx.Exec("UPDATE agent_execs SET action = ? WHERE action = ?", "exec", "run"); err != nil {
-		return err
-	}
-
 	if err := tx.Commit(); err != nil {
 		return err
 	}
