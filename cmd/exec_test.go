@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -419,6 +422,186 @@ func TestOpenProgressFD(t *testing.T) {
 			}
 			if w != tc.want {
 				t.Errorf("openProgressFD returned %v, want %v", w, tc.want)
+			}
+		})
+	}
+}
+
+// TestRunExecFormatJSONL_EndToEnd locks in the --format jsonl contract that
+// orchestrators rely on: stdout is newline-delimited JSON only (no agent-text
+// or summary leakage), both bundle and agent events appear, the documented
+// bundle lifecycle kinds are emitted, and the on-disk bundle.jsonl mirrors
+// the streamed bundle events. Composing these pieces happens only inside
+// runExec — neither JSONReporter, BundleLogReporter, nor openProgressFD
+// covers the wiring on their own.
+func TestRunExecFormatJSONL_EndToEnd(t *testing.T) {
+	orgParent, projPath, env := setupTestProject(t)
+
+	saved := saveExecGlobals()
+	defer saved.restore()
+	savedFormat, savedFD := execFormat, execProgressFD
+	defer func() { execFormat = savedFormat; execProgressFD = savedFD }()
+
+	orgFlag = orgParent
+	execProfile = "test" // mock agent
+	execFormat = "jsonl"
+
+	var (
+		runErr    error
+		stdoutBuf string
+	)
+	stderrBuf := captureStderr(t, func() {
+		stdoutBuf = captureStdout(t, func() {
+			withChdir(t, projPath, func() {
+				runErr = runExec(nil, []string{"hello mock"})
+			})
+		})
+	})
+	if runErr != nil {
+		t.Fatalf("runExec: %v", runErr)
+	}
+
+	// Every non-empty stdout line must parse as JSON, and the events must
+	// carry both bundle and agent sources.
+	sawBundle, sawAgent := false, false
+	bundleKinds := map[string]bool{}
+	lines := strings.Split(strings.TrimRight(stdoutBuf, "\n"), "\n")
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("stdout line %d not valid JSON: %q: %v", i, line, err)
+		}
+		switch event["source"] {
+		case "bundle":
+			sawBundle = true
+			if k, ok := event["kind"].(string); ok {
+				bundleKinds[k] = true
+			}
+		case "agent":
+			sawAgent = true
+		}
+	}
+	if !sawBundle {
+		t.Errorf("expected at least one source:bundle event on stdout")
+	}
+	if !sawAgent {
+		t.Errorf("expected at least one source:agent event on stdout")
+	}
+	for _, want := range []string{"bundle_start", "agent_exec_start", "agent_exec_end", "bundle_end"} {
+		if !bundleKinds[want] {
+			t.Errorf("missing bundle kind %q on stdout; got %v", want, bundleKinds)
+		}
+	}
+
+	// Agent response text must not leak as a bare plaintext line — that
+	// would be the symptom of fmt.Print(result.Output) firing under
+	// --format jsonl. (Inside JSON-encoded assistant `content` fields is
+	// expected and fine; only standalone lines are a contract bug.)
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "mock response" {
+			t.Errorf("bare plaintext mock response leaked to stdout: %q", line)
+		}
+	}
+
+	if strings.Contains(stderrBuf, "--- Summary ---") {
+		t.Errorf("--- Summary --- leaked to stderr under --format jsonl:\n%s", stderrBuf)
+	}
+	// PrintProgressLine emits "[role] ..." stream lines. None should fire
+	// under --format jsonl since it implies --no-stream.
+	if strings.Contains(stderrBuf, "thinking...") ||
+		strings.Contains(stderrBuf, "tool: ") ||
+		strings.Contains(stderrBuf, "init: ") {
+		t.Errorf("runner streaming output leaked to stderr under --format jsonl:\n%s", stderrBuf)
+	}
+
+	bundlePath := filepath.Join(env.ProjectDir, "logs", "1", "bundle.jsonl")
+	raw, err := os.ReadFile(bundlePath)
+	if err != nil {
+		t.Fatalf("read %s: %v", bundlePath, err)
+	}
+	diskKinds := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("bundle.jsonl line not valid JSON: %q: %v", line, err)
+		}
+		if k, ok := event["kind"].(string); ok {
+			diskKinds[k] = true
+		}
+	}
+	for _, want := range []string{"bundle_start", "agent_exec_start", "agent_exec_end", "bundle_end"} {
+		if !diskKinds[want] {
+			t.Errorf("bundle.jsonl on disk missing kind %q; got %v", want, diskKinds)
+		}
+	}
+}
+
+// TestRunExecPrintsExecIDOnStderr verifies that the runner's
+// `exec_id=<id>` correlation line lands on stderr in every output mode an
+// orchestrator might pick — default human, --quiet, and --format jsonl —
+// and that the printed id matches the inserted CallDB row.
+func TestRunExecPrintsExecIDOnStderr(t *testing.T) {
+	cases := []struct {
+		name      string
+		configure func()
+	}{
+		{name: "default", configure: func() {}},
+		{name: "quiet", configure: func() { execQuiet = true }},
+		{name: "jsonl", configure: func() { execFormat = "jsonl" }},
+	}
+	re := regexp.MustCompile(`(?m)^exec_id=(\d+)$`)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			orgParent, projPath, env := setupTestProject(t)
+
+			saved := saveExecGlobals()
+			defer saved.restore()
+			savedFormat, savedFD := execFormat, execProgressFD
+			defer func() { execFormat = savedFormat; execProgressFD = savedFD }()
+
+			orgFlag = orgParent
+			execProfile = "test"
+			tc.configure()
+
+			var runErr error
+			stderrBuf := captureStderr(t, func() {
+				captureStdout(t, func() {
+					withChdir(t, projPath, func() {
+						runErr = runExec(nil, []string{"hello mock"})
+					})
+				})
+			})
+			if runErr != nil {
+				t.Fatalf("runExec: %v", runErr)
+			}
+
+			m := re.FindStringSubmatch(stderrBuf)
+			if m == nil {
+				t.Fatalf("stderr missing exec_id=<digits> line:\n%s", stderrBuf)
+			}
+			printedID := m[1]
+
+			db, err := calldb.Open(env.ProjectDBPath())
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			defer db.Close()
+			rows, err := db.RecentRuns(calldb.RecentFilter{Limit: 10})
+			if err != nil {
+				t.Fatalf("RecentRuns: %v", err)
+			}
+			if len(rows) != 1 {
+				t.Fatalf("expected 1 DB row, got %d", len(rows))
+			}
+			wantID := strconv.FormatInt(rows[0].ID, 10)
+			if printedID != wantID {
+				t.Errorf("exec_id mismatch: stderr printed %q, DB row ID %q", printedID, wantID)
 			}
 		})
 	}
