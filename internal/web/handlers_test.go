@@ -1172,3 +1172,444 @@ func TestHandleCodeSessionFilePathTraversal(t *testing.T) {
 		t.Errorf("response leaked the contents of an out-of-project file")
 	}
 }
+
+// newTestMuxAll wires the second-tier routes that newTestMux omits — used by
+// the sessions / code-sessions / report-history smoke tests.
+func newTestMuxAll(s *Server) *http.ServeMux {
+	mux := newTestMux(s)
+	mux.HandleFunc("GET /", s.handleHome)
+	mux.HandleFunc("GET /p/{project}/reports", s.handleReports)
+	mux.HandleFunc("GET /p/{project}/reports/{role}/history/{file}", s.handleReportHistory)
+	mux.HandleFunc("GET /p/{project}/sessions", s.handleSessions)
+	mux.HandleFunc("GET /p/{project}/sessions/{batch}", s.handleSessionDetail)
+	mux.HandleFunc("GET /p/{project}/code", s.handleCodeSessions)
+	mux.HandleFunc("GET /p/{project}/code/{session}", s.handleCodeSessionDetail)
+	return mux
+}
+
+// --- handleSessions tests ---
+
+func TestHandleSessionsReturnsOK(t *testing.T) {
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+
+	req := httptest.NewRequest("GET", "/p/testproj/sessions", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("handleSessions status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+	// Empty-state anchor — no DB so buildSessions returns nothing.
+	if body := w.Body.String(); !strings.Contains(body, "No sessions") {
+		t.Errorf("expected empty-state 'No sessions' in sessions page body")
+	}
+}
+
+func TestHandleSessionsWithDatabase(t *testing.T) {
+	projectDir := t.TempDir()
+	seedRun(t, projectDir, runner.ActionReport, "security")
+
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+	req := httptest.NewRequest("GET", "/p/testproj/sessions", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Sessions") {
+		t.Error("expected page title 'Sessions' in body")
+	}
+	// seedRun uses Batch "report-<ts>" — confirm the seeded batch row reaches the page.
+	if !strings.Contains(body, "report-") {
+		t.Error("expected seeded batch (prefixed 'report-') in sessions body")
+	}
+}
+
+func TestHandleSessionsNotFoundBadProject(t *testing.T) {
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+
+	req := httptest.NewRequest("GET", "/p/nonexistent/sessions", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("handleSessions bad project status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+// --- handleSessionDetail tests ---
+
+func TestHandleSessionDetailReturnsOK(t *testing.T) {
+	projectDir := t.TempDir()
+	callID := seedRun(t, projectDir, runner.ActionReport, "security")
+
+	// seedRun uses Batch "report-<ts>" — pull the row back so the test does
+	// not have to reconstruct the exact format.
+	db, err := calldb.Open(filepath.Join(projectDir, "state.sqlite"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	row, err := db.GetRunByID(callID)
+	db.Close()
+	if err != nil || row == nil {
+		t.Fatalf("GetRunByID(%d): row=%v err=%v", callID, row, err)
+	}
+	batch := row.Batch
+
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+	req := httptest.NewRequest("GET", "/p/testproj/sessions/"+batch, nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("handleSessionDetail status = %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, batch) {
+		t.Errorf("expected batch %q in session detail body", batch)
+	}
+	if !strings.Contains(body, "security") {
+		t.Error("expected seeded role 'security' in session detail body")
+	}
+}
+
+func TestHandleSessionDetailUnknownBatch(t *testing.T) {
+	// handleSessionDetail does not 404 on an unknown batch — it renders an
+	// empty session_detail page with the requested batch as the title. Lock
+	// in that actual behavior so the test fails loudly if it changes.
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+
+	req := httptest.NewRequest("GET", "/p/testproj/sessions/no-such-batch", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("handleSessionDetail unknown-batch status = %d, want %d (renders empty page)", w.Code, http.StatusOK)
+	}
+	if !strings.Contains(w.Body.String(), "no-such-batch") {
+		t.Error("expected requested batch echoed in empty session detail page")
+	}
+}
+
+func TestHandleSessionDetailNotFoundBadProject(t *testing.T) {
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+
+	req := httptest.NewRequest("GET", "/p/nonexistent/sessions/anything", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("handleSessionDetail bad project status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+// --- handleCodeSessions tests ---
+
+func TestHandleCodeSessionsReturnsOK(t *testing.T) {
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+
+	req := httptest.NewRequest("GET", "/p/testproj/code", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("handleCodeSessions status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+	if !strings.Contains(w.Body.String(), "Code Sessions") {
+		t.Error("expected page heading 'Code Sessions' in body")
+	}
+}
+
+func TestHandleCodeSessionsWithSession(t *testing.T) {
+	projectDir := t.TempDir()
+
+	// Seed a legacy timestamp-named code session directory so scanCodeSessions
+	// picks it up without needing a DB row.
+	tsName := "2026-03-19_00-35-57"
+	codeDir := filepath.Join(projectDir, "shared", "code", tsName)
+	if err := os.MkdirAll(codeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codeDir, "execution_report.md"), []byte("# Report"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+	req := httptest.NewRequest("GET", "/p/testproj/code", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, tsName) {
+		t.Errorf("expected seeded session %q in code sessions body", tsName)
+	}
+}
+
+func TestHandleCodeSessionsNotFoundBadProject(t *testing.T) {
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+
+	req := httptest.NewRequest("GET", "/p/nonexistent/code", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("handleCodeSessions bad project status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+// --- handleCodeSessionDetail tests ---
+
+func TestHandleCodeSessionDetailReturnsOK(t *testing.T) {
+	projectDir := t.TempDir()
+
+	tsName := "2026-03-19_00-35-57"
+	codeDir := filepath.Join(projectDir, "shared", "code", tsName)
+	if err := os.MkdirAll(codeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codeDir, "execution_report.md"), []byte("# Report"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(codeDir, "task1_code_prompt.md"), []byte("# Task"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+	req := httptest.NewRequest("GET", "/p/testproj/code/"+tsName, nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("handleCodeSessionDetail status = %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, tsName) {
+		t.Errorf("expected session name %q in code session detail body", tsName)
+	}
+	if !strings.Contains(body, "execution_report.md") {
+		t.Error("expected execution_report.md listed in code session detail body")
+	}
+}
+
+func TestHandleCodeSessionDetailNotFoundUnknown(t *testing.T) {
+	// handleCodeSessionDetail explicitly 404s when the canonical dir does
+	// not exist (os.Stat fails) — this is the unknown-session case.
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+
+	req := httptest.NewRequest("GET", "/p/testproj/code/no-such-session", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("handleCodeSessionDetail unknown session status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandleCodeSessionDetailNotFoundBadProject(t *testing.T) {
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+
+	req := httptest.NewRequest("GET", "/p/nonexistent/code/anything", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("handleCodeSessionDetail bad project status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+// --- handleHome / handleReports / handleReportHistory smoke tests ---
+
+func TestHandleHomeSingleModeRedirects(t *testing.T) {
+	// newTestServer sets singleMode=true — handleHome 302-redirects to the
+	// sole project's overview in that case.
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Errorf("handleHome singleMode status = %d, want %d", w.Code, http.StatusFound)
+	}
+	if loc := w.Header().Get("Location"); loc != "/p/testproj/" {
+		t.Errorf("handleHome singleMode Location = %q, want /p/testproj/", loc)
+	}
+}
+
+func TestHandleHomeMultiProjectListsProjects(t *testing.T) {
+	// In multi-project mode handleHome renders home.html — assert 200 and
+	// the page heading anchor.
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	s.singleMode = false
+	mux := newTestMuxAll(s)
+
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("handleHome multi-project status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+	if !strings.Contains(w.Body.String(), "Projects") {
+		t.Error("expected 'Projects' heading anchor in home page body")
+	}
+}
+
+func TestHandleReportsReturnsOK(t *testing.T) {
+	projectDir := t.TempDir()
+
+	// Seed a single report so the page renders the populated branch in
+	// addition to its always-present heading.
+	reportDir := filepath.Join(projectDir, "shared", "report")
+	if err := os.MkdirAll(reportDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(reportDir, "security.md"), []byte("# Security"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+	req := httptest.NewRequest("GET", "/p/testproj/reports", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("handleReports status = %d, want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Role Reports") {
+		t.Error("expected 'Role Reports' heading in reports body")
+	}
+	if !strings.Contains(body, "security") {
+		t.Error("expected seeded role 'security' in reports body")
+	}
+}
+
+func TestHandleReportsEmpty(t *testing.T) {
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+
+	req := httptest.NewRequest("GET", "/p/testproj/reports", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("handleReports empty status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if !strings.Contains(w.Body.String(), "No reports") {
+		t.Error("expected empty-state 'No reports' in reports body")
+	}
+}
+
+func TestHandleReportsNotFoundBadProject(t *testing.T) {
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+
+	req := httptest.NewRequest("GET", "/p/nonexistent/reports", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("handleReports bad project status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandleReportHistoryReturnsOK(t *testing.T) {
+	projectDir := t.TempDir()
+
+	histDir := filepath.Join(projectDir, "roles", "security", "history")
+	if err := os.MkdirAll(histDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	histFile := "2026-03-14_00-20-28.report.md"
+	if err := os.WriteFile(filepath.Join(histDir, histFile), []byte("# Archived Security Report"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+	req := httptest.NewRequest("GET", "/p/testproj/reports/security/history/"+histFile, nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("handleReportHistory status = %d, want %d (body: %s)", w.Code, http.StatusOK, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Archived Security Report") {
+		t.Error("expected rendered archived markdown content in body")
+	}
+	if !strings.Contains(body, "security") {
+		t.Error("expected role 'security' in history detail body")
+	}
+}
+
+func TestHandleReportHistoryNotFoundUnknownRole(t *testing.T) {
+	// handleReportHistory 404s when the role does not appear in discoverRoles
+	// — unknown-role-shaped URLs must not reach serveHistoryFile.
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+
+	req := httptest.NewRequest("GET", "/p/testproj/reports/totally-not-a-role/history/some.md", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("handleReportHistory unknown role status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestHandleReportHistoryNotFoundBadProject(t *testing.T) {
+	projectDir := t.TempDir()
+	s := newTestServer(t, projectDir)
+	mux := newTestMuxAll(s)
+
+	req := httptest.NewRequest("GET", "/p/nonexistent/reports/security/history/some.md", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("handleReportHistory bad project status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
