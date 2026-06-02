@@ -94,6 +94,12 @@ timeout_minutes = 20
 [code]
 timeout_minutes = 120
 
+[verify]
+timeout_minutes = 30
+
+[exec]
+timeout_minutes = 60
+
 # [serve]
 # port = 8080  # fixed port for 'ateam serve' (default: random)
 

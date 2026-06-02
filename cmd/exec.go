@@ -178,11 +178,11 @@ func runExec(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Scratch mode (no project config) skips the run-timeout default; the
+	// Scratch mode (no project config) skips the exec-timeout default; the
 	// agent's own timeout still applies.
 	var timeout int
 	if hasProject {
-		timeout = env.Config.Run.EffectiveTimeout(0)
+		timeout = env.Config.Exec.EffectiveTimeout(0)
 	}
 
 	// Build opts. `exec` has no canonical destination — its deliverable is the

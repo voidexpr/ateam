@@ -5,19 +5,6 @@ name = ""
 repo = ""
 remote_origin_url = ""
 
-[report]
-max_parallel = 3
-report_timeout_minutes = 20
-
-[review]
-timeout_minutes = 20
-
-[code]
-timeout_minutes = 120
-
-[run]
-timeout_minutes = 60
-
 [roles]
 "code.bugs"                = "on"
 "code.recent"              = "on"
@@ -42,6 +29,22 @@ timeout_minutes = 60
 "test.gaps"                = "on"
 "test.quality"             = "off"
 "test.recent"              = "on"
+
+[report]
+max_parallel = 3
+report_timeout_minutes = 20
+
+[review]
+timeout_minutes = 20
+
+[code]
+timeout_minutes = 120
+
+[verify]
+timeout_minutes = 30
+
+[exec]
+timeout_minutes = 60
 
 # [serve]
 # port = 8080  # fixed port for 'ateam serve' (default: random)

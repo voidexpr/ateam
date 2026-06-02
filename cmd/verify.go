@@ -88,8 +88,7 @@ func runVerify(opts VerifyOptions) error {
 		return err
 	}
 
-	// Verify runs a supervisor pass like review; reuses the review timeout helper.
-	timeout := env.Config.Review.EffectiveTimeout(opts.Timeout)
+	timeout := env.Config.Verify.EffectiveTimeout(opts.Timeout)
 
 	// v1 flat layout: promotion writes to .ateam/shared/verify.md (the file,
 	// not a per-action subdir). Sidecars stay in runtime/<exec_id>/.
