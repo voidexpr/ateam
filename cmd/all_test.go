@@ -44,7 +44,6 @@ func TestAllRunsAllFourPhases(t *testing.T) {
 	savedSP, savedSA := allSupervisorProfile, allSupervisorAgent
 	savedCP, savedCA := allCodeProfile, allCodeAgent
 	savedDocker := allDockerAutoSetup
-	savedEP := allExtraPrompt
 	defer func() {
 		allQuiet, allTimeout, allParallel = savedQuiet, savedTimeout, savedParallel
 		allCheaperModel, allVerbose = savedCheaper, savedVerbose
@@ -53,7 +52,6 @@ func TestAllRunsAllFourPhases(t *testing.T) {
 		allSupervisorProfile, allSupervisorAgent = savedSP, savedSA
 		allCodeProfile, allCodeAgent = savedCP, savedCA
 		allDockerAutoSetup = savedDocker
-		allExtraPrompt = savedEP
 	}()
 
 	allQuiet = false

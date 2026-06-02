@@ -39,7 +39,7 @@ final phase.
 
 Example:
   ateam verify
-  ateam verify --extra-prompt "Pay extra attention to migrations"
+  ateam verify --post-prompt "Pay extra attention to migrations"
   ateam verify --dry-run`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runVerify(VerifyOptions{
@@ -72,10 +72,6 @@ func runVerify(opts VerifyOptions) error {
 		return err
 	}
 
-	extraPrompt, err := prompts.ResolveOptional(opts.ExtraPrompt)
-	if err != nil {
-		return err
-	}
 	prePrompt, err := prompts.ResolveOptional(opts.PrePrompt)
 	if err != nil {
 		return err
@@ -87,7 +83,7 @@ func runVerify(opts VerifyOptions) error {
 
 	// Assemble the prompt up front so --dry-run can print it without
 	// spinning up the executor + DB.
-	prompt, err := assembleSupervisor(env, "code_verify", "the supervisor", "verify", extraPrompt, prePrompt, postPrompt)
+	prompt, err := assembleSupervisor(env, "code_verify", "the supervisor", "verify", prePrompt, postPrompt)
 	if err != nil {
 		return err
 	}

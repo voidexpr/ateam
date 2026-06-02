@@ -63,8 +63,8 @@ Works from any project directory — discovers the .ateamorg/ and .ateam/ struct
 Example:
   ateam report
   ateam report --roles test.gaps,project.security
-  ateam report --roles code.structure --extra-prompt "Focus on the auth module"
-  ateam report --extra-prompt @notes.md`,
+  ateam report --roles code.structure --post-prompt "Focus on the auth module"
+  ateam report --post-prompt @notes.md`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runReport(ReportOptions{
 			CommonExecFlags:      reportFlags,
@@ -179,10 +179,6 @@ func runReport(opts ReportOptions) error {
 		return err
 	}
 
-	extraPrompt, err := prompts.ResolveOptional(opts.ExtraPrompt)
-	if err != nil {
-		return err
-	}
 	prePrompt, err := prompts.ResolveOptional(opts.PrePrompt)
 	if err != nil {
 		return err
@@ -230,7 +226,7 @@ func runReport(opts ReportOptions) error {
 	for _, roleID := range roleIDs {
 		roleID := roleID
 
-		prompt, err := assembleRoleReport(env, roleID, "role "+roleID, extraPrompt, prePrompt, postPrompt, opts.IgnorePreviousReport)
+		prompt, err := assembleRoleReport(env, roleID, "role "+roleID, prePrompt, postPrompt, opts.IgnorePreviousReport)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", roleID, err)
 			continue
@@ -438,7 +434,6 @@ func shouldAutoReview(reviewOpt bool, failed, skipped, succeeded int) bool {
 func reviewOptionsFromReport(opts ReportOptions) ReviewOptions {
 	return ReviewOptions{
 		CommonExecFlags: CommonExecFlags{
-			ExtraPrompt:     opts.ExtraPrompt,
 			Timeout:         opts.Timeout,
 			CheaperModel:    opts.CheaperModel,
 			Profile:         opts.Profile,

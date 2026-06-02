@@ -242,7 +242,6 @@ For `prompts/report/security`:
       report/security.post.<NAME>.md    (role-level post fragments)
     report/_post.<NAME>.md              (dir-level post — every report role)
   _post.<NAME>.md                       (root-level post)
-[--extra-prompt]                        (CLI, appended after the assembled body)
 [--post-prompt]                         (CLI, outermost tail)
 ```
 

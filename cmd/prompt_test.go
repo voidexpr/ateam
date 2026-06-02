@@ -14,14 +14,13 @@ import (
 // Tests must restore them on exit to avoid leaking state across subtests.
 func savePromptGlobals() func() {
 	role, sup, action := promptRole, promptSupervisor, promptAction
-	extra, noPI, ipr := promptExtraPrompt, promptNoProjectInfo, promptIgnorePreviousReport
+	noPI, ipr := promptNoProjectInfo, promptIgnorePreviousReport
 	paths, inline := promptPaths, promptInlinePaths
 	pre, post := promptPrePrompt, promptPostPrompt
 	return func() {
 		promptRole = role
 		promptSupervisor = sup
 		promptAction = action
-		promptExtraPrompt = extra
 		promptNoProjectInfo = noPI
 		promptIgnorePreviousReport = ipr
 		promptPaths = paths
@@ -84,8 +83,7 @@ func TestPromptRoleDryRun(t *testing.T) {
 
 // TestPromptPrePostWrap verifies that --pre-prompt and --post-prompt land at
 // the outermost positions of the assembled prompt — pre before any anchor
-// content, post after every other section (including --extra-prompt and any
-// live-synthesized blocks).
+// content, post after every other section.
 func TestPromptPrePostWrap(t *testing.T) {
 	defer savePromptGlobals()()
 	projPath := setupPromptProject(t)
@@ -93,7 +91,6 @@ func TestPromptPrePostWrap(t *testing.T) {
 	promptRole = "testing_basic"
 	promptAction = runner.ActionReport
 	promptSupervisor = false
-	promptExtraPrompt = "EXTRA-MARKER"
 	promptPrePrompt = "PRE-MARKER"
 	promptPostPrompt = "POST-MARKER"
 
@@ -107,14 +104,12 @@ func TestPromptPrePostWrap(t *testing.T) {
 		t.Fatalf("runPrompt: %v", runErr)
 	}
 	preIdx := strings.Index(out, "PRE-MARKER")
-	extraIdx := strings.Index(out, "EXTRA-MARKER")
 	postIdx := strings.Index(out, "POST-MARKER")
-	if preIdx < 0 || extraIdx < 0 || postIdx < 0 {
-		t.Fatalf("missing markers in output: pre=%d extra=%d post=%d\n%s", preIdx, extraIdx, postIdx, out)
+	if preIdx < 0 || postIdx < 0 {
+		t.Fatalf("missing markers in output: pre=%d post=%d\n%s", preIdx, postIdx, out)
 	}
-	// PRE first, EXTRA in the middle, POST last.
-	if preIdx >= extraIdx || extraIdx >= postIdx {
-		t.Errorf("expected order PRE < EXTRA < POST, got pre=%d extra=%d post=%d", preIdx, extraIdx, postIdx)
+	if preIdx >= postIdx {
+		t.Errorf("expected order PRE < POST, got pre=%d post=%d", preIdx, postIdx)
 	}
 	// PRE should land BEFORE the project-info header from _pre.context.md.
 	headerIdx := strings.Index(out, "# ATeam Project Context")

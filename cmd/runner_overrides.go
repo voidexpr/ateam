@@ -55,12 +55,12 @@ func applyRunnerOverrides(r *runner.AgentExecutor, env *root.ResolvedEnv, o Runn
 	return applyMaxBudgetUSD(r, o.MaxBudgetUSD, action)
 }
 
-// CommonExecFlags bundles the 13 flag fields shared by code/report/review/
-// verify. Embed anonymously in each command's Options struct so callers can
-// access fields directly (e.g. opts.Profile) and adding a new shared flag
-// means one struct change instead of editing every per-command Options.
+// CommonExecFlags bundles the flag fields shared by code/report/review/
+// verify. Embed anonymously in each command's Options struct so callers
+// can access fields directly (e.g. opts.Profile) and adding a new shared
+// flag means one struct change instead of editing every per-command
+// Options.
 type CommonExecFlags struct {
-	ExtraPrompt     string
 	PrePrompt       string
 	PostPrompt      string
 	Timeout         int
@@ -78,9 +78,9 @@ type CommonExecFlags struct {
 // commonFlagUsage carries the per-command usage strings for the flags
 // registered by registerCommonExecFlags whose wording legitimately
 // varies between cmds (timeout scope, model scope, budget scope).
-// The three prompt-wrap flags (--extra-prompt, --pre-prompt,
-// --post-prompt) are NOT here — those use the shared constants from
-// prompt_wrap_flags.go so every cmd describes them identically.
+// The two prompt-wrap flags (--pre-prompt, --post-prompt) are NOT here
+// — those use the shared constants from prompt_wrap_flags.go so every
+// cmd describes them identically.
 //
 // CustomProfile / CustomAgent: when both empty, --profile and --agent are
 // registered via the shared addProfileFlags helper (used by report, review,
@@ -102,7 +102,7 @@ type commonFlagUsage struct {
 // MaxBudgetBatch is intentionally not part of CommonExecFlags because not
 // every command exposes it.
 func registerCommonExecFlags(cmd *cobra.Command, f *CommonExecFlags, usage commonFlagUsage) {
-	addPromptWrapFlags(cmd, &f.ExtraPrompt, &f.PrePrompt, &f.PostPrompt)
+	addPromptWrapFlags(cmd, &f.PrePrompt, &f.PostPrompt)
 	cmd.Flags().IntVar(&f.Timeout, "timeout", 0, usage.Timeout)
 	addCheaperModelFlag(cmd, &f.CheaperModel)
 	if usage.CustomProfile != "" || usage.CustomAgent != "" {

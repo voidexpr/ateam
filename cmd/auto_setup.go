@@ -11,14 +11,13 @@ import (
 )
 
 var (
-	autoSetupProfile     string
-	autoSetupAgent       string
-	autoSetupVerbose     bool
-	autoSetupDryRun      bool
-	autoSetupTimeout     int
-	autoSetupExtraPrompt string
-	autoSetupPrePrompt   string
-	autoSetupPostPrompt  string
+	autoSetupProfile    string
+	autoSetupAgent      string
+	autoSetupVerbose    bool
+	autoSetupDryRun     bool
+	autoSetupTimeout    int
+	autoSetupPrePrompt  string
+	autoSetupPostPrompt string
 )
 
 var autoSetupCmd = &cobra.Command{
@@ -42,7 +41,7 @@ func init() {
 	addVerboseFlag(autoSetupCmd, &autoSetupVerbose)
 	autoSetupCmd.Flags().BoolVar(&autoSetupDryRun, "dry-run", false, "print the prompt without running")
 	autoSetupCmd.Flags().IntVar(&autoSetupTimeout, "timeout", 0, "timeout in minutes (overrides config)")
-	addPromptWrapFlags(autoSetupCmd, &autoSetupExtraPrompt, &autoSetupPrePrompt, &autoSetupPostPrompt)
+	addPromptWrapFlags(autoSetupCmd, &autoSetupPrePrompt, &autoSetupPostPrompt)
 }
 
 func runAutoSetup(cmd *cobra.Command, args []string) error {
@@ -51,10 +50,6 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	extraPrompt, err := prompts.ResolveOptional(autoSetupExtraPrompt)
-	if err != nil {
-		return err
-	}
 	prePrompt, err := prompts.ResolveOptional(autoSetupPrePrompt)
 	if err != nil {
 		return err
@@ -64,7 +59,7 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	prompt, err := assembleSupervisor(env, "auto_setup", "the supervisor", "auto-setup", extraPrompt, prePrompt, postPrompt)
+	prompt, err := assembleSupervisor(env, "auto_setup", "the supervisor", "auto-setup", prePrompt, postPrompt)
 	if err != nil {
 		return err
 	}

@@ -8,25 +8,23 @@ import (
 )
 
 // TestPromptWrapFlagHelpUniform asserts that every prompt-taking cmd
-// describes --pre-prompt / --post-prompt / --extra-prompt identically.
-// The expectation is the shared usage strings from prompt_wrap_flags.go;
-// any cmd that re-registers these inline would silently drift, and this
-// test catches it.
+// describes --pre-prompt / --post-prompt identically (modulo a
+// per-cmd suffix where the flag's scope legitimately differs, like
+// parallel's "applied to each task's prompt"). Future drift across
+// cmds fails this test.
 //
-// parallel is excluded from --extra-prompt because it never had an
-// equivalent flag (parallel's whole shape is "drive N prompts at once,"
-// not "append extras to one prompt"). The pre/post-prompt expectations
-// still apply to parallel.
+// --extra-prompt no longer exists — it was dropped; users compose its
+// effect via `--post-prompt "# Additional Instructions\n\n..."`. Its
+// absence from every cmd is asserted by TestNoExtraPromptFlag below.
 func TestPromptWrapFlagHelpUniform(t *testing.T) {
 	type wrapFlagCase struct {
 		cmd        *cobra.Command
-		skipExtra  bool
 		preSuffix  string // trailing per-cmd qualifier appended to UsagePrePrompt
 		postSuffix string // same for UsagePostPrompt
 	}
 	cases := []wrapFlagCase{
 		{cmd: execCmd},
-		{cmd: parallelCmd, skipExtra: true,
+		{cmd: parallelCmd,
 			preSuffix:  " (applied to each task's prompt)",
 			postSuffix: " (applied to each task's prompt)"},
 		{cmd: reportCmd},
@@ -58,19 +56,23 @@ func TestPromptWrapFlagHelpUniform(t *testing.T) {
 				t.Errorf("%s --post-prompt usage drift:\n  got:  %q\n  want: %q",
 					c.cmd.Name(), post.Usage, UsagePostPrompt+c.postSuffix)
 			}
-
-			if c.skipExtra {
-				return
-			}
-			extra := c.cmd.Flags().Lookup("extra-prompt")
-			if extra == nil {
-				t.Fatalf("%s: missing --extra-prompt flag", c.cmd.Name())
-			}
-			if extra.Usage != UsageExtraPrompt {
-				t.Errorf("%s --extra-prompt usage drift:\n  got:  %q\n  want: %q",
-					c.cmd.Name(), extra.Usage, UsageExtraPrompt)
-			}
 		})
+	}
+}
+
+// TestNoExtraPromptFlag asserts that --extra-prompt is gone from every
+// prompt-taking cmd. Backstop against accidental re-introduction; we
+// dropped the flag deliberately (the auto-heading + inner-of-post
+// position were the only thing it did differently from --post-prompt,
+// and users write `# Additional Instructions\n\n...` themselves now).
+func TestNoExtraPromptFlag(t *testing.T) {
+	for _, c := range []*cobra.Command{
+		execCmd, parallelCmd, reportCmd, reviewCmd, verifyCmd, codeCmd,
+		autoSetupCmd, allCmd, inspectCmd, promptCmd,
+	} {
+		if f := c.Flags().Lookup("extra-prompt"); f != nil {
+			t.Errorf("%s still registers --extra-prompt; flag was dropped", c.Name())
+		}
 	}
 }
 

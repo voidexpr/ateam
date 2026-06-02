@@ -140,10 +140,10 @@ func TestRunExecDryRunCodexTmuxCheapSettings(t *testing.T) {
 	}
 }
 
-// TestRunExecPrePostExtraWrap verifies the wrap order on the raw-prompt path:
-// --pre-prompt at the very front, then the body, then --extra-prompt under its
-// "Additional Instructions" heading, then --post-prompt as the outermost tail.
-func TestRunExecPrePostExtraWrap(t *testing.T) {
+// TestRunExecPrePostWrap verifies the wrap order on the raw-prompt path:
+// --pre-prompt at the very front, then the body, then --post-prompt as the
+// outermost tail.
+func TestRunExecPrePostWrap(t *testing.T) {
 	orgParent, projPath, _ := setupTestProject(t)
 
 	saved := saveExecGlobals()
@@ -155,7 +155,6 @@ func TestRunExecPrePostExtraWrap(t *testing.T) {
 	execProfile = ""
 	execPrePrompt = "PRE-MARKER"
 	execPostPrompt = "POST-MARKER"
-	execExtraPrompt = "EXTRA-MARKER"
 
 	const body = "BODY-MARKER"
 	var runErr error
@@ -170,16 +169,12 @@ func TestRunExecPrePostExtraWrap(t *testing.T) {
 
 	preIdx := strings.Index(out, "PRE-MARKER")
 	bodyIdx := strings.Index(out, body)
-	extraIdx := strings.Index(out, "EXTRA-MARKER")
 	postIdx := strings.Index(out, "POST-MARKER")
-	if preIdx < 0 || bodyIdx < 0 || extraIdx < 0 || postIdx < 0 {
-		t.Fatalf("missing marker(s); pre=%d body=%d extra=%d post=%d\n%s", preIdx, bodyIdx, extraIdx, postIdx, out)
+	if preIdx < 0 || bodyIdx < 0 || postIdx < 0 {
+		t.Fatalf("missing marker(s); pre=%d body=%d post=%d\n%s", preIdx, bodyIdx, postIdx, out)
 	}
-	if preIdx >= bodyIdx || bodyIdx >= extraIdx || extraIdx >= postIdx {
-		t.Errorf("expected order pre < body < extra < post; got %d, %d, %d, %d\n%s", preIdx, bodyIdx, extraIdx, postIdx, out)
-	}
-	if !strings.Contains(out, "# Additional Instructions") {
-		t.Errorf("expected 'Additional Instructions' heading in dry-run output:\n%s", out)
+	if preIdx >= bodyIdx || bodyIdx >= postIdx {
+		t.Errorf("expected order pre < body < post; got %d, %d, %d\n%s", preIdx, bodyIdx, postIdx, out)
 	}
 }
 

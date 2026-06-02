@@ -17,18 +17,17 @@ import (
 )
 
 var (
-	inspectBatch       string
-	inspectLast        bool
-	inspectLastRun     bool
-	inspectLastReport  bool
-	inspectLastReview  bool
-	inspectLastCode    bool
-	inspectAutoDebug   bool
-	inspectExtraPrompt string
-	inspectPrePrompt   string
-	inspectPostPrompt  string
-	inspectProfile     string
-	inspectAgent       string
+	inspectBatch      string
+	inspectLast       bool
+	inspectLastRun    bool
+	inspectLastReport bool
+	inspectLastReview bool
+	inspectLastCode   bool
+	inspectAutoDebug  bool
+	inspectPrePrompt  string
+	inspectPostPrompt string
+	inspectProfile    string
+	inspectAgent      string
 )
 
 var inspectCmd = &cobra.Command{
@@ -55,7 +54,7 @@ func init() {
 	inspectCmd.Flags().BoolVar(&inspectLastReview, "last-review", false, "select the last review run")
 	inspectCmd.Flags().BoolVar(&inspectLastCode, "last-code", false, "select all execs from the last code session")
 	inspectCmd.Flags().BoolVar(&inspectAutoDebug, "auto-debug", false, "launch an agent to investigate the selected runs")
-	addPromptWrapFlags(inspectCmd, &inspectExtraPrompt, &inspectPrePrompt, &inspectPostPrompt)
+	addPromptWrapFlags(inspectCmd, &inspectPrePrompt, &inspectPostPrompt)
 	addProfileFlags(inspectCmd, &inspectProfile, &inspectAgent)
 }
 
@@ -116,7 +115,7 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 	}
 
 	if inspectAutoDebug {
-		prompt, err := buildAutoDebugPrompt(env, rows, allFiles, inspectExtraPrompt, inspectPrePrompt, inspectPostPrompt)
+		prompt, err := buildAutoDebugPrompt(env, rows, allFiles, inspectPrePrompt, inspectPostPrompt)
 		if err != nil {
 			return err
 		}
@@ -128,11 +127,8 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 }
 
 // buildAutoDebugPrompt assembles the auto-debug prompt for a set of runs.
-// extraPrompt is resolved (text or @filepath) and appended under an
-// "Additional Debug Instructions" heading when non-empty. prePrompt /
-// postPrompt wrap at the outermost positions; extraPrompt sits between the
-// assembled body and post-prompt, matching the supervisor-helper convention.
-func buildAutoDebugPrompt(env *root.ResolvedEnv, rows []calldb.RecentRow, files []string, extraPrompt, prePrompt, postPrompt string) (string, error) {
+// prePrompt / postPrompt wrap at the outermost positions.
+func buildAutoDebugPrompt(env *root.ResolvedEnv, rows []calldb.RecentRow, files []string, prePrompt, postPrompt string) (string, error) {
 	debugContext := buildDebugContext(rows, files)
 	a := env.Assembler()
 	vars := env.BuildAssemblerVars("exec_debug", "exec debugger", "debug")
@@ -146,38 +142,13 @@ func buildAutoDebugPrompt(env *root.ResolvedEnv, rows []calldb.RecentRow, files 
 	if err != nil {
 		return "", fmt.Errorf("cannot resolve --post-prompt: %w", err)
 	}
-	extra := ""
-	if extraPrompt != "" {
-		extra, err = prompts.ResolveValue(extraPrompt)
-		if err != nil {
-			return "", err
-		}
-	}
 
 	opts := &assembler.AssembleOptions{PrePrompt: pre, PostPrompt: post}
-	if extra == "" {
-		res, err := a.Assemble("exec_debug", vars, nil, opts)
-		if err != nil {
-			return "", err
-		}
-		return res.Prompt, nil
-	}
-	// extra needs to land between the assembled body and post-prompt;
-	// hold post out of the assembler call and append it manually.
-	opts.PostPrompt = ""
 	res, err := a.Assemble("exec_debug", vars, nil, opts)
 	if err != nil {
 		return "", err
 	}
-	prompt := res.Prompt + "\n\n# Additional Debug Instructions\n\n" + extra
-	rendered, err := renderCLIWrapper(a, vars, post)
-	if err != nil {
-		return "", err
-	}
-	if rendered != "" {
-		prompt += "\n\n---\n\n" + rendered
-	}
-	return prompt, nil
+	return res.Prompt, nil
 }
 
 func resolveRunSelection(db *calldb.CallDB, env *root.ResolvedEnv, args []string) ([]calldb.RecentRow, error) {

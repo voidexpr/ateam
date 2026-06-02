@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,30 +10,28 @@ import (
 
 // inspectGlobals captures the package-level flags used by the inspect command.
 type inspectGlobals struct {
-	batch       string
-	lastRun     bool
-	lastReport  bool
-	lastReview  bool
-	lastCode    bool
-	autoDebug   bool
-	extraPrompt string
-	profile     string
-	agent       string
-	org         string
+	batch      string
+	lastRun    bool
+	lastReport bool
+	lastReview bool
+	lastCode   bool
+	autoDebug  bool
+	profile    string
+	agent      string
+	org        string
 }
 
 func saveInspectGlobals() inspectGlobals {
 	return inspectGlobals{
-		batch:       inspectBatch,
-		lastRun:     inspectLastRun,
-		lastReport:  inspectLastReport,
-		lastReview:  inspectLastReview,
-		lastCode:    inspectLastCode,
-		autoDebug:   inspectAutoDebug,
-		extraPrompt: inspectExtraPrompt,
-		profile:     inspectProfile,
-		agent:       inspectAgent,
-		org:         orgFlag,
+		batch:      inspectBatch,
+		lastRun:    inspectLastRun,
+		lastReport: inspectLastReport,
+		lastReview: inspectLastReview,
+		lastCode:   inspectLastCode,
+		autoDebug:  inspectAutoDebug,
+		profile:    inspectProfile,
+		agent:      inspectAgent,
+		org:        orgFlag,
 	}
 }
 
@@ -46,7 +42,6 @@ func (g inspectGlobals) restore() {
 	inspectLastReview = g.lastReview
 	inspectLastCode = g.lastCode
 	inspectAutoDebug = g.autoDebug
-	inspectExtraPrompt = g.extraPrompt
 	inspectProfile = g.profile
 	inspectAgent = g.agent
 	orgFlag = g.org
@@ -214,38 +209,8 @@ func TestInspectRunSelection(t *testing.T) {
 	})
 }
 
-// TestBuildAutoDebugPromptExtraFromFile verifies that --extra-prompt with a
-// @filepath reference loads the file's contents and includes them under an
-// "Additional Debug Instructions" heading in the assembled debug prompt.
-func TestBuildAutoDebugPromptExtraFromFile(t *testing.T) {
-	base, _, env := setupTestProject(t)
-
-	extraFile := filepath.Join(base, "extra_debug.txt")
-	const extraContent = "investigate the flaky test in suite alpha"
-	if err := os.WriteFile(extraFile, []byte(extraContent), 0600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-
-	rows := []calldb.RecentRow{{
-		ID: 42, Action: "exec", Role: "test.gaps",
-		StartedAt: time.Now().Add(-1 * time.Minute).Format(time.RFC3339),
-	}}
-
-	prompt, err := buildAutoDebugPrompt(env, rows, nil, "@"+extraFile, "", "")
-	if err != nil {
-		t.Fatalf("buildAutoDebugPrompt: %v", err)
-	}
-	if !strings.Contains(prompt, extraContent) {
-		t.Errorf("expected extra prompt content %q in assembled prompt:\n%s", extraContent, prompt)
-	}
-	if !strings.Contains(prompt, "Additional Debug Instructions") {
-		t.Errorf("expected 'Additional Debug Instructions' section in assembled prompt:\n%s", prompt)
-	}
-}
-
 // TestBuildAutoDebugPromptPrePostWrap verifies that --pre-prompt lands at the
-// very front and --post-prompt at the very end of the auto-debug prompt, with
-// --extra-prompt between the assembled body and --post-prompt.
+// very front and --post-prompt at the very end of the auto-debug prompt.
 func TestBuildAutoDebugPromptPrePostWrap(t *testing.T) {
 	_, _, env := setupTestProject(t)
 	rows := []calldb.RecentRow{{
@@ -255,21 +220,19 @@ func TestBuildAutoDebugPromptPrePostWrap(t *testing.T) {
 
 	const pre = "PRE-MARKER"
 	const post = "POST-MARKER"
-	const extra = "EXTRA-MARKER"
 
-	prompt, err := buildAutoDebugPrompt(env, rows, nil, extra, pre, post)
+	prompt, err := buildAutoDebugPrompt(env, rows, nil, pre, post)
 	if err != nil {
 		t.Fatalf("buildAutoDebugPrompt: %v", err)
 	}
 
 	preIdx := strings.Index(prompt, pre)
-	extraIdx := strings.Index(prompt, extra)
 	postIdx := strings.Index(prompt, post)
-	if preIdx < 0 || extraIdx < 0 || postIdx < 0 {
+	if preIdx < 0 || postIdx < 0 {
 		t.Fatalf("missing marker(s) in prompt:\n%s", prompt)
 	}
-	if preIdx >= extraIdx || extraIdx >= postIdx {
-		t.Errorf("expected order pre < extra < post (got %d, %d, %d):\n%s", preIdx, extraIdx, postIdx, prompt)
+	if preIdx >= postIdx {
+		t.Errorf("expected pre < post (got %d, %d):\n%s", preIdx, postIdx, prompt)
 	}
 	if preIdx != 0 {
 		t.Errorf("expected --pre-prompt at position 0, got %d", preIdx)

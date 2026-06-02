@@ -247,7 +247,6 @@ func TestReportRoleSelectionModes(t *testing.T) {
 func TestReviewOptionsFromReportPropagation(t *testing.T) {
 	in := ReportOptions{
 		CommonExecFlags: CommonExecFlags{
-			ExtraPrompt:     "focus on auth",
 			Timeout:         42,
 			CheaperModel:    true,
 			Profile:         "docker",
@@ -275,7 +274,6 @@ func TestReviewOptionsFromReportPropagation(t *testing.T) {
 	got := reviewOptionsFromReport(in)
 	want := ReviewOptions{
 		CommonExecFlags: CommonExecFlags{
-			ExtraPrompt:     "focus on auth",
 			Timeout:         42,
 			CheaperModel:    true,
 			Profile:         "docker",

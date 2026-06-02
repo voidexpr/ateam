@@ -18,14 +18,13 @@ import (
 //	review.prompt.md          supervisor body (or customPrompt via ReplaceRoleMain)
 //	review.post.*.md          user-authored extras
 //	<reports block>           manifest + bundled role reports (appended)
-//	<extraPrompt>             --extra-prompt CLI value (appended)
 //	[--post-prompt]           (outermost tail)
 //
 // Reports are appended manually (not via a fragment file) because the
 // assembler's per-slot composition is anchor-first (embedded → project),
 // which would put project-authored extras AFTER an embedded reports
 // fragment — the opposite of the legacy ordering. Appending keeps
-// extras → reports → extra-prompt, matching legacy bytes.
+// extras → reports, matching legacy bytes.
 //
 // roleLabel feeds {{project.info}} ("the supervisor" for live runs); pass
 // "" to suppress. customPrompt replaces the supervisor body wholesale via
@@ -34,7 +33,7 @@ import (
 //
 // Returns the same ReviewEmptyError as the assembler-only path when the
 // selector's filters eliminate every report.
-func assembleReview(env *root.ResolvedEnv, selector prompts.ReviewSelector, roleLabel, extraPrompt, customPrompt, prePrompt, postPrompt string) (string, error) {
+func assembleReview(env *root.ResolvedEnv, selector prompts.ReviewSelector, roleLabel, customPrompt, prePrompt, postPrompt string) (string, error) {
 	all, err := prompts.DiscoverReports(env.ProjectDir)
 	if err != nil {
 		return "", err
@@ -50,8 +49,8 @@ func assembleReview(env *root.ResolvedEnv, selector prompts.ReviewSelector, role
 	a := env.Assembler()
 	vars := env.BuildAssemblerVars("review", roleLabel, "review")
 	// Pre-prompt rides through the assembler (lands before _pre.context.md).
-	// Post-prompt is held until after the manually-appended reports block +
-	// extraPrompt so it stays as the outermost tail wrapper.
+	// Post-prompt is held until after the manually-appended reports block so
+	// it stays as the outermost tail wrapper.
 	opts := &assembler.AssembleOptions{
 		ReplaceRoleMain: customPrompt,
 		PrePrompt:       prePrompt,
@@ -65,9 +64,6 @@ func assembleReview(env *root.ResolvedEnv, selector prompts.ReviewSelector, role
 	if block := formatReportsBlock(reports); block != "" {
 		prompt += "\n\n---\n\n" + block
 	}
-	if extraPrompt != "" {
-		prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
-	}
 	post, err := renderCLIWrapper(a, vars, postPrompt)
 	if err != nil {
 		return "", err
@@ -79,48 +75,25 @@ func assembleReview(env *root.ResolvedEnv, selector prompts.ReviewSelector, role
 }
 
 // assembleSupervisor is the generic single-prompt supervisor assembler:
-// builds promptPath via env.Assembler() and appends the --extra-prompt CLI
-// value as a hardcoded "# Additional Instructions" suffix. Used by verify,
-// exec-debug, auto-roles — singletons that have no role reports / manifest
-// of their own. Review has its own assembleReview because it needs the
-// reports block woven into the legacy order.
+// builds promptPath via env.Assembler() and wraps with pre/post-prompt.
+// Used by verify, exec-debug, auto-roles, auto-setup — singletons that
+// have no role reports / manifest of their own. Review has its own
+// assembleReview because it needs the reports block woven in.
 //
 // roleLabel and action go into BuildAssemblerVars so {{project.info}}
-// renders identically to the legacy AssembleXxx path. prePrompt /
-// postPrompt wrap at the outermost positions; extraPrompt sits between
-// the assembled body and post-prompt.
-func assembleSupervisor(env *root.ResolvedEnv, promptPath, roleLabel, action, extraPrompt, prePrompt, postPrompt string) (string, error) {
+// renders identically across cmds.
+func assembleSupervisor(env *root.ResolvedEnv, promptPath, roleLabel, action, prePrompt, postPrompt string) (string, error) {
 	a := env.Assembler()
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, action)
 	opts := &assembler.AssembleOptions{
 		PrePrompt:  prePrompt,
 		PostPrompt: postPrompt,
 	}
-	if extraPrompt == "" {
-		// No extra-prompt → assembler can own the entire wrap.
-		res, err := a.Assemble(promptPath, vars, nil, opts)
-		if err != nil {
-			return "", err
-		}
-		return res.Prompt, nil
-	}
-	// extraPrompt needs to land between the assembled body and post-prompt,
-	// matching the legacy "extras live between body and outer wrap" shape.
-	// Pull post-prompt out of the assembler call and append it manually.
-	opts.PostPrompt = ""
 	res, err := a.Assemble(promptPath, vars, nil, opts)
 	if err != nil {
 		return "", err
 	}
-	prompt := res.Prompt + "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
-	post, err := renderCLIWrapper(a, vars, postPrompt)
-	if err != nil {
-		return "", err
-	}
-	if post != "" {
-		prompt += "\n\n---\n\n" + post
-	}
-	return prompt, nil
+	return res.Prompt, nil
 }
 
 // formatReportsBlock renders the manifest table + bundled report contents in

@@ -96,17 +96,17 @@ func renderCLIWrapper(a *assembler.Assembler, vars assembler.Vars, text string) 
 
 // assembleCodeManagementV1 builds the supervisor's code-management prompt:
 // the assembler's `code_management` composition (with optional CLI
-// overrides), then Review, then --extra-prompt, then Sub-Run Flags, then
-// --post-prompt. Shared by cmd/code.go's runCode (real SubRunFlags from
-// CodeOptions) and cmd/prompt.go's supervisor preview (placeholder
-// SubRunFlags via previewSubRunFlags).
+// overrides), then Review, then Sub-Run Flags, then --post-prompt.
+// Shared by cmd/code.go's runCode (real SubRunFlags from CodeOptions)
+// and cmd/prompt.go's supervisor preview (placeholder SubRunFlags via
+// previewSubRunFlags).
 //
 // roleLabel feeds {{project.info}}; pass "" to suppress. customPrompt
 // (--prompt) replaces the supervisor body via ReplaceRoleMain; framing
 // fragments still compose. prePrompt rides through the assembler;
 // postPrompt is held until after Sub-Run Flags so it stays the outermost
 // tail wrapper.
-func assembleCodeManagementV1(env *root.ResolvedEnv, roleLabel, reviewContent string, flags SubRunFlags, extraPrompt, customPrompt, prePrompt, postPrompt string) (string, error) {
+func assembleCodeManagementV1(env *root.ResolvedEnv, roleLabel, reviewContent string, flags SubRunFlags, customPrompt, prePrompt, postPrompt string) (string, error) {
 	a := env.Assembler()
 	vars := env.BuildAssemblerVars("code_management", roleLabel, "code")
 	opts := &assembler.AssembleOptions{
@@ -118,12 +118,6 @@ func assembleCodeManagementV1(env *root.ResolvedEnv, roleLabel, reviewContent st
 		return "", err
 	}
 	prompt := res.Prompt + "\n\n---\n\n# Review\n\n" + reviewContent
-	if extraPrompt != "" {
-		prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
-	}
-	// Sub-Run Flags appear AFTER extraPrompt so the supervisor reads the
-	// flag list near the end — same ordering the pre-refactor inline
-	// assembly used.
 	prompt += "\n\n" + flags.Render()
 	post, err := renderCLIWrapper(a, vars, postPrompt)
 	if err != nil {

@@ -130,10 +130,6 @@ func runCode(opts CodeOptions) error {
 		return err
 	}
 
-	extraPrompt, err := prompts.ResolveOptional(opts.ExtraPrompt)
-	if err != nil {
-		return err
-	}
 	prePrompt, err := prompts.ResolveOptional(opts.PrePrompt)
 	if err != nil {
 		return err
@@ -172,7 +168,7 @@ func runCode(opts CodeOptions) error {
 	// Both default and --prompt paths now go through assembleCodeManagementV1;
 	// the override (customManagement) flows into the assembler's
 	// ReplaceRoleMain option so framing fragments compose either way.
-	prompt, err := assembleCodeManagementV1(env, "the supervisor", reviewContent, subRunFlags, extraPrompt, customManagement, prePrompt, postPrompt)
+	prompt, err := assembleCodeManagementV1(env, "the supervisor", reviewContent, subRunFlags, customManagement, prePrompt, postPrompt)
 	if err != nil {
 		return err
 	}

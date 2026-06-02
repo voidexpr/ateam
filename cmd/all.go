@@ -7,7 +7,6 @@ import (
 )
 
 var (
-	allExtraPrompt     string
 	allPrePrompt       string
 	allPostPrompt      string
 	allQuiet           bool
@@ -59,14 +58,14 @@ Example:
   ateam all --roles security,deps              # report + review only those roles
   ateam all --all                              # include disabled roles
   ateam all --max-age 2h                       # review skips reports older than 2h
-  ateam all --extra-prompt "Focus on security"
+  ateam all --post-prompt "Focus on security"
   ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile docker
   ateam all --timeout 30`,
 	RunE: runAll,
 }
 
 func init() {
-	addPromptWrapFlags(allCmd, &allExtraPrompt, &allPrePrompt, &allPostPrompt)
+	addPromptWrapFlags(allCmd, &allPrePrompt, &allPostPrompt)
 	allCmd.Flags().BoolVarP(&allQuiet, "quiet", "q", false, "suppress output printing")
 	allCmd.Flags().IntVar(&allTimeout, "timeout", 0, "per-phase timeout in minutes (overrides config)")
 	allCmd.Flags().IntVar(&allParallel, "parallel", 0, "max parallel report roles (overrides config max_parallel)")
@@ -134,11 +133,10 @@ func runAll(cmd *cobra.Command, args []string) error {
 	codeSubRunProfile := coalesce(allCodeProfile, allProfile)
 	codeSubRunAgent := allCodeAgent
 
-	// commonBase carries the 13 ateam-all flag values that are identical
+	// commonBase carries the ateam-all flag values that are identical
 	// across every phase. Per-phase profile/agent (and MaxBudgetUSD edge
 	// cases) override the embedded copy below.
 	commonBase := CommonExecFlags{
-		ExtraPrompt:     allExtraPrompt,
 		PrePrompt:       allPrePrompt,
 		PostPrompt:      allPostPrompt,
 		Timeout:         allTimeout,

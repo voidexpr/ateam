@@ -23,7 +23,6 @@ var (
 	execEffort          string
 	execMaxBudgetUSD    string
 	execMaxBudgetBatch  string
-	execExtraPrompt     string
 	execPrePrompt       string
 	execPostPrompt      string
 	execNoStream        bool
@@ -60,7 +59,7 @@ Example:
   ateam exec "Analyze the auth module" --role project.security
   ateam exec "test" --profile cheap
   ateam exec @prompt_file.md
-  ateam exec @prompt_file.md --extra-prompt "focus on the auth module"
+  ateam exec @prompt_file.md --post-prompt "focus on the auth module"
   echo "explain this code" | ateam exec
   git diff | ateam exec --role critic.engineering
   ateam exec "say hi" --model sonnet
@@ -77,7 +76,7 @@ func init() {
 	addBudgetFlags(execCmd, &execMaxBudgetUSD, &execMaxBudgetBatch,
 		"per-agent USD spend cap (claude-only; errors on codex)",
 		"abort if --batch already exceeds this USD before starting")
-	addPromptWrapFlags(execCmd, &execExtraPrompt, &execPrePrompt, &execPostPrompt)
+	addPromptWrapFlags(execCmd, &execPrePrompt, &execPostPrompt)
 	addProfileFlags(execCmd, &execProfile, &execAgent)
 	execCmd.Flags().BoolVar(&execNoStream, "no-stream", false, "disable progress updates during execution")
 	execCmd.Flags().BoolVar(&execNoSummary, "no-summary", false, "disable run summary after completion")
@@ -101,10 +100,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("cannot resolve prompt: %w", err)
 	}
-	extraPrompt, err := prompts.ResolveOptional(execExtraPrompt)
-	if err != nil {
-		return fmt.Errorf("cannot resolve --extra-prompt: %w", err)
-	}
 	prePrompt, err := prompts.ResolveOptional(execPrePrompt)
 	if err != nil {
 		return fmt.Errorf("cannot resolve --pre-prompt: %w", err)
@@ -112,9 +107,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 	postPrompt, err := prompts.ResolveOptional(execPostPrompt)
 	if err != nil {
 		return fmt.Errorf("cannot resolve --post-prompt: %w", err)
-	}
-	if extraPrompt != "" {
-		promptText += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
 	}
 	if prePrompt != "" {
 		promptText = prePrompt + "\n\n---\n\n" + promptText

@@ -24,7 +24,6 @@ import (
 //	role_post       user-authored <roleID>.post.*.md fragments
 //	dir_post:report format / guidelines / output validation / write-to-OUTPUT_FILE
 //	(manual)        # Previous Report (if not skipped, when shared/report/<roleID>/report.md exists)
-//	(manual)        # Additional Instructions   (--extra-prompt CLI value)
 //
 // Previous report inclusion mirrors the legacy "no prior" sentinel so the
 // agent's "merge old report" workflow gets the same signal in either branch.
@@ -32,14 +31,14 @@ import (
 // roleLabel feeds the {{project.info}} block (typically "role <roleID>");
 // pass "" to suppress the project info section entirely — matches the
 // legacy `--no-project-info` flag's behavior.
-func assembleRoleReport(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt, prePrompt, postPrompt string, skipPreviousReport bool) (string, error) {
+func assembleRoleReport(env *root.ResolvedEnv, roleID, roleLabel, prePrompt, postPrompt string, skipPreviousReport bool) (string, error) {
 	promptPath := "report/" + roleID
 
 	a := env.Assembler()
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, "report")
 	// Pre-prompt rides through the assembler; post-prompt is held until
-	// after the manually-appended previous-report block + extraPrompt so
-	// it stays as the outermost tail wrapper.
+	// after the manually-appended previous-report block so it stays as
+	// the outermost tail wrapper.
 	opts := &assembler.AssembleOptions{PrePrompt: prePrompt}
 	res, err := a.Assemble(promptPath, vars, nil, opts)
 	if err != nil {
@@ -49,9 +48,6 @@ func assembleRoleReport(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt, p
 
 	if !skipPreviousReport {
 		prompt += "\n\n---\n\n" + previousReportBlock(env, roleID)
-	}
-	if extraPrompt != "" {
-		prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
 	}
 	post, err := renderCLIWrapper(a, vars, postPrompt)
 	if err != nil {
@@ -76,7 +72,7 @@ func assembleRoleReport(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt, p
 // to point users at the (small) set of code-capable roles — preview is
 // this function's only consumer, so the guidance is worth the extra
 // sentence.
-func assembleRoleCode(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt, prePrompt, postPrompt string) (string, error) {
+func assembleRoleCode(env *root.ResolvedEnv, roleID, roleLabel, prePrompt, postPrompt string) (string, error) {
 	promptPath := "code/" + roleID
 	a := env.Assembler()
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, "code")
@@ -89,9 +85,6 @@ func assembleRoleCode(env *root.ResolvedEnv, roleID, roleLabel, extraPrompt, pre
 		return "", err
 	}
 	prompt := res.Prompt
-	if extraPrompt != "" {
-		prompt += "\n\n---\n\n# Additional Instructions\n\n" + extraPrompt
-	}
 	post, err := renderCLIWrapper(a, vars, postPrompt)
 	if err != nil {
 		return "", err

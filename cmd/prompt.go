@@ -18,7 +18,6 @@ import (
 var (
 	promptRole                 string
 	promptAction               string
-	promptExtraPrompt          string
 	promptPrePrompt            string
 	promptPostPrompt           string
 	promptNoProjectInfo        bool
@@ -37,7 +36,7 @@ role or supervisor action, then print the assembled prompt to stdout.
 Example:
   ateam prompt --role security --action report
   ateam prompt --role refactor_small --action code
-  ateam prompt --role security --action report --extra-prompt "Focus on auth"
+  ateam prompt --role security --action report --post-prompt "Focus on auth"
   ateam prompt --supervisor --action review
   ateam prompt --supervisor --action code
   ateam prompt --supervisor --action verify
@@ -51,7 +50,7 @@ func init() {
 	promptCmd.Flags().StringVar(&promptRole, "role", "", "role name")
 	promptCmd.Flags().BoolVar(&promptSupervisor, "supervisor", false, "generate supervisor prompt instead of role prompt")
 	promptCmd.Flags().StringVar(&promptAction, "action", "", "action type: report, code, review, or verify (required)")
-	addPromptWrapFlags(promptCmd, &promptExtraPrompt, &promptPrePrompt, &promptPostPrompt)
+	addPromptWrapFlags(promptCmd, &promptPrePrompt, &promptPostPrompt)
 	promptCmd.Flags().BoolVar(&promptNoProjectInfo, "no-project-info", false, "omit ateam project context from the prompt")
 	promptCmd.Flags().BoolVar(&promptIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
 	promptCmd.Flags().BoolVar(&promptPaths, "paths", false, "show a per-section breakdown table (slot + anchor + path + mod time + tokens); no prompt body")
@@ -91,10 +90,6 @@ func runPromptRole() error {
 		return fmt.Errorf("unknown role: %s\nValid roles: %s", promptRole, strings.Join(prompts.AllKnownRoleIDs(env.Config.Roles, env.ProjectDir, env.OrgDir), ", "))
 	}
 
-	extraPrompt, err := prompts.ResolveOptional(promptExtraPrompt)
-	if err != nil {
-		return err
-	}
 	prePrompt, err := prompts.ResolveOptional(promptPrePrompt)
 	if err != nil {
 		return err
@@ -112,9 +107,9 @@ func runPromptRole() error {
 	var assembled string
 	switch promptAction {
 	case runner.ActionReport:
-		assembled, err = assembleRoleReport(env, promptRole, roleLabel, extraPrompt, prePrompt, postPrompt, promptIgnorePreviousReport)
+		assembled, err = assembleRoleReport(env, promptRole, roleLabel, prePrompt, postPrompt, promptIgnorePreviousReport)
 	case runner.ActionCode:
-		assembled, err = assembleRoleCode(env, promptRole, roleLabel, extraPrompt, prePrompt, postPrompt)
+		assembled, err = assembleRoleCode(env, promptRole, roleLabel, prePrompt, postPrompt)
 	}
 	if err != nil {
 		return err
@@ -133,10 +128,6 @@ func runPromptSupervisor() error {
 		return err
 	}
 
-	extraPrompt, err := prompts.ResolveOptional(promptExtraPrompt)
-	if err != nil {
-		return err
-	}
 	prePrompt, err := prompts.ResolveOptional(promptPrePrompt)
 	if err != nil {
 		return err
@@ -154,7 +145,7 @@ func runPromptSupervisor() error {
 	var assembled string
 	switch promptAction {
 	case runner.ActionReview:
-		assembled, err = assembleReview(env, prompts.ReviewSelector{}, roleLabel, extraPrompt, "", prePrompt, postPrompt)
+		assembled, err = assembleReview(env, prompts.ReviewSelector{}, roleLabel, "", prePrompt, postPrompt)
 	case runner.ActionCode:
 		reviewContent, readErr := os.ReadFile(env.ReviewPath())
 		if readErr != nil {
@@ -165,9 +156,9 @@ func runPromptSupervisor() error {
 		// values (batch, profile, model, ...) depend on the live `ateam code`
 		// invocation, so the preview uses placeholders that show the shape;
 		// the user sees "this becomes a real value at run time."
-		assembled, err = assembleCodeManagementV1(env, roleLabel, string(reviewContent), previewSubRunFlags(env.SourceDir), extraPrompt, "", prePrompt, postPrompt)
+		assembled, err = assembleCodeManagementV1(env, roleLabel, string(reviewContent), previewSubRunFlags(env.SourceDir), "", prePrompt, postPrompt)
 	case runner.ActionVerify:
-		assembled, err = assembleSupervisor(env, "code_verify", roleLabel, "verify", extraPrompt, prePrompt, postPrompt)
+		assembled, err = assembleSupervisor(env, "code_verify", roleLabel, "verify", prePrompt, postPrompt)
 	}
 	if err != nil {
 		return err
@@ -194,23 +185,20 @@ type sectionDigest struct {
 // modes is how they format these digests for output.
 //
 // Honors the same flag suite that runPromptRole / runPromptSupervisor do —
-// --no-project-info, --extra-prompt, --ignore-previous-report — so the
-// inspection output reflects what the corresponding `ateam report` /
-// `ateam review` / `ateam code` / `ateam verify` run would assemble.
+// --no-project-info, --pre-prompt, --post-prompt,
+// --ignore-previous-report — so the inspection output reflects what the
+// corresponding `ateam report` / `ateam review` / `ateam code` /
+// `ateam verify` run would assemble.
 //
 // Sections beyond the assembler's composition (previous-report, reports
-// manifest, review body, sub-run flags, --extra-prompt) are recorded with
-// Anchor="live" and a descriptive Path so the user can tell them from
-// fragment files on disk.
+// manifest, review body, sub-run flags) are recorded with Anchor="live"
+// and a descriptive Path so the user can tell them from fragment files
+// on disk.
 //
 // Orphan fragments are surfaced to stderr and turned into a hard error per
 // the spec's "errors loudly on orphan fragments".
 func assembleForInspection() (string, []sectionDigest, error) {
 	env, err := resolveEnv()
-	if err != nil {
-		return "", nil, err
-	}
-	extraPrompt, err := prompts.ResolveOptional(promptExtraPrompt)
 	if err != nil {
 		return "", nil, err
 	}
@@ -290,12 +278,6 @@ func assembleForInspection() (string, []sectionDigest, error) {
 			Content:  content,
 		})
 	}
-	addExtra := func() {
-		if extraPrompt != "" {
-			addLive("extra_prompt", "(--extra-prompt)", "# Additional Instructions\n\n"+extraPrompt)
-		}
-	}
-
 	if promptSupervisor {
 		switch promptAction {
 		case runner.ActionReview:
@@ -304,19 +286,13 @@ func assembleForInspection() (string, []sectionDigest, error) {
 				reports, _ := (prompts.ReviewSelector{}).Filter(all, env.Config.Roles)
 				addLive("reports", "(assembleReview: manifest + bundled role reports)", formatReportsBlock(reports))
 			}
-			addExtra()
 		case runner.ActionCode:
 			reviewContent, readErr := os.ReadFile(env.ReviewPath())
 			if readErr != nil {
 				return "", nil, errNoReview(env.ReviewPath())
 			}
 			addLive("review", env.ReviewPath(), "# Review\n\n"+string(reviewContent))
-			// extra_prompt goes BEFORE sub_run_flags to match assembleCodeManagementV1's
-			// ordering — the supervisor's last context is the flag list.
-			addExtra()
 			addLive("sub_run_flags", "(cmd/code.go: rendered from --batch / --profile / --agent / --model / --effort / --max-budget-*)", previewSubRunFlags(env.SourceDir).Render())
-		case runner.ActionVerify:
-			addExtra()
 		}
 	} else {
 		switch promptAction {
@@ -324,9 +300,6 @@ func assembleForInspection() (string, []sectionDigest, error) {
 			if !promptIgnorePreviousReport {
 				addLive("previous_report", env.RoleReportPath(promptRole), previousReportBlock(env, promptRole))
 			}
-			addExtra()
-		case runner.ActionCode:
-			addExtra()
 		}
 	}
 

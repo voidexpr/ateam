@@ -8,25 +8,24 @@ import "github.com/spf13/cobra"
 //
 // Wrap order (the durable contract):
 //
-//	anchors → dir-level _pre/_post fragments → role-level pre/post →
-//	--pre-prompt (outermost head) / --post-prompt (outermost tail).
+//	--pre-prompt (outermost head) → anchors → dir-level _pre/_post
+//	fragments → role-level pre/post → body → --post-prompt (outermost tail).
 //
-// --extra-prompt lands AFTER the assembled body under an
-// "# Additional Instructions" heading and BEFORE --post-prompt, matching
-// the historical exec shape; documented here so the placement isn't
-// surprise across cmds.
+// --extra-prompt is gone in this version. The auto-prepended
+// "# Additional Instructions" heading + inner-of-post position were the
+// only things it did differently from --post-prompt; users who want that
+// shape write `--post-prompt "# Additional Instructions\n\n…"`
+// themselves.
 const (
-	UsageExtraPrompt = "additional instructions appended after the main prompt under an \"Additional Instructions\" heading (text or @filepath)"
-	UsagePrePrompt   = "text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or @filepath)"
-	UsagePostPrompt  = "text wrapped at the very end of the assembled prompt, after every other section (text or @filepath)"
+	UsagePrePrompt  = "text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or @filepath)"
+	UsagePostPrompt = "text wrapped at the very end of the assembled prompt, after every other section (text or @filepath)"
 )
 
-// addPromptWrapFlags registers --extra-prompt / --pre-prompt /
-// --post-prompt on cmd with the shared usage strings. Use from any
-// cmd that takes a prompt; CommonExecFlags-backed cmds get this for
-// free through registerCommonExecFlags.
-func addPromptWrapFlags(cmd *cobra.Command, extra, pre, post *string) {
-	cmd.Flags().StringVar(extra, "extra-prompt", "", UsageExtraPrompt)
+// addPromptWrapFlags registers --pre-prompt / --post-prompt on cmd with
+// the shared usage strings. Use from any cmd that takes a prompt;
+// CommonExecFlags-backed cmds get this for free through
+// registerCommonExecFlags.
+func addPromptWrapFlags(cmd *cobra.Command, pre, post *string) {
 	cmd.Flags().StringVar(pre, "pre-prompt", "", UsagePrePrompt)
 	cmd.Flags().StringVar(post, "post-prompt", "", UsagePostPrompt)
 }

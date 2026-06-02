@@ -37,17 +37,18 @@ ateam --project ~/work/myproj report              # → agent cwd = ~/work/mypro
 ateam report --work-dir ~/work/myproj/services/billing
 ```
 
-### Ad-hoc prompt wrap (`--pre-prompt` / `--post-prompt` / `--extra-prompt`)
+### Ad-hoc prompt wrap (`--pre-prompt` / `--post-prompt`)
 
-Every prompt-taking command (`exec`, `parallel`, `report`, `review`, `verify`, `code`, `auto-setup`, `all`, `inspect`, `prompt`) accepts the same trio of wrap flags with identical semantics:
+Every prompt-taking command (`exec`, `parallel`, `report`, `review`, `verify`, `code`, `auto-setup`, `all`, `inspect`, `prompt`) accepts the same wrap flags with identical semantics:
 
 - `--pre-prompt TEXT` (or `@filepath`) — wrapped at the very front of the assembled prompt.
 - `--post-prompt TEXT` — wrapped at the very end.
-- `--extra-prompt TEXT` — appended after the main body under an `# Additional Instructions` heading, before `--post-prompt`.
 
-Wrap order, outermost first: `--pre-prompt` → anchors → dir-level `_pre`/`_post` fragments → role-level `pre`/`post` → main body → `--extra-prompt` → `--post-prompt`.
+Wrap order, outermost first: `--pre-prompt` → anchors → dir-level `_pre`/`_post` fragments → role-level `pre`/`post` → main body → `--post-prompt`.
 
-[^wrap]: See [Ad-hoc prompt wrap](#ad-hoc-prompt-wrap---pre-prompt----post-prompt----extra-prompt) for the shared wrap-order contract.
+To tack on "Additional Instructions" the way the older `--extra-prompt` flag did, write `--post-prompt "# Additional Instructions\n\nfocus on..."` — the heading is just a markdown convention, no magic.
+
+[^wrap]: See [Ad-hoc prompt wrap](#ad-hoc-prompt-wrap---pre-prompt----post-prompt) for the shared wrap-order contract.
 
 ## Commands
 
@@ -109,7 +110,7 @@ Run one or more roles in parallel to analyze the project and produce markdown re
 ```bash
 ateam report --roles all
 ateam report --roles project.security,test.gaps
-ateam report --roles all --extra-prompt "Focus on the API layer"
+ateam report --roles all --post-prompt "Focus on the API layer"
 ateam report --roles all --dry-run
 ateam report --rerun-failed              # re-run only roles that failed last time
 ateam report --rerun-failed --dry-run    # preview which roles would be rerun
@@ -120,7 +121,6 @@ ateam report --auto-roles --plan-only    # print the recommendation, don't run
 | Flag | Description |
 |------|-------------|
 | `--roles LIST` | Comma-separated role list, or `all` (default: all enabled roles) |
-| `--extra-prompt TEXT` | Additional instructions appended to every role's prompt (text or `@filepath`) |
 | `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--profile NAME` | Runtime profile (overrides config resolution) |
@@ -152,7 +152,7 @@ By default review only feeds reports from currently-enabled roles into the super
 
 ```bash
 ateam review
-ateam review --extra-prompt "This is a production financial app"
+ateam review --post-prompt "This is a production financial app"
 ateam review --prompt @custom_review.md
 ateam review --roles project.security,project.dependencies        # only these reports
 ateam review --all                         # include disabled roles' reports
@@ -162,7 +162,6 @@ ateam review --dry-run
 
 | Flag | Description |
 |------|-------------|
-| `--extra-prompt TEXT` | Additional instructions appended to the supervisor prompt (text or `@filepath`) |
 | `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--prompt TEXT` | Custom prompt replacing the default supervisor role entirely (text or `@filepath`) |
@@ -197,7 +196,6 @@ ateam code --dry-run
 |------|-------------|
 | `--review TEXT` | Review content (text or `@filepath`; defaults to `.ateam/shared/review.md`) |
 | `--management TEXT` | Management prompt override (text or `@filepath`) |
-| `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
 | `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--profile NAME` | Profile for sub-runs (passed to `ateam exec --profile`) |
@@ -229,13 +227,12 @@ Run it explicitly after `ateam code`, or rely on `ateam all` which always runs v
 
 ```bash
 ateam verify
-ateam verify --extra-prompt "Pay extra attention to migrations"
+ateam verify --post-prompt "Pay extra attention to migrations"
 ateam verify --dry-run
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
 | `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--timeout MINUTES` | Timeout in minutes (overrides `config.toml`) |
@@ -260,7 +257,7 @@ Run the full pipeline sequentially: report → review → code → verify. Verif
 
 ```bash
 ateam all
-ateam all --extra-prompt "Focus on security"
+ateam all --post-prompt "Focus on security"
 ateam all --roles code.structure,test.gaps   # report+review only those roles
 ateam all --all                                  # include disabled roles' stale reports in review
 ateam all --max-age 2h                           # review drops reports older than 2h
@@ -271,7 +268,6 @@ ateam all --auto-roles --plan-only               # print the recommendation, don
 
 | Flag | Description |
 |------|-------------|
-| `--extra-prompt TEXT` | Additional instructions passed to all phases (text or `@filepath`) |
 | `--pre-prompt TEXT` | Text wrapped at the very front of every phase's assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of every phase's assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--cheaper-model` | Use a cheaper model (sonnet) |
@@ -442,7 +438,6 @@ When used with `--agent codex-tmux` the prompt has an extra shape: the first lin
 | `--model MODEL` | Model override |
 | `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](CONFIG.md#effort-levels)) |
 | `--agent-args "ARGS"` | Extra args passed to the agent CLI |
-| `--extra-prompt TEXT` | Additional instructions appended after the main prompt under an "Additional Instructions" heading (text or `@filepath`) |
 | `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--batch ID` | Group related agent_execs |
@@ -542,7 +537,7 @@ Resolve and print the full prompt for a role or supervisor without running it. D
 ```bash
 ateam prompt --role project.security --action report                   # print the assembled prompt
 ateam prompt --supervisor --action review
-ateam prompt --role project.security --action report --extra-prompt "Focus on auth"
+ateam prompt --role project.security --action report --post-prompt "Focus on auth"
 
 ateam prompt --role project.security --action report --paths           # tabular per-section breakdown
 ateam prompt --role project.security --action report --inline-paths    # full prompt with per-section anchor/path headers
@@ -569,7 +564,6 @@ TOTAL                                                                           
 | `--role ROLE` | Role name (mutually exclusive with `--supervisor`) |
 | `--supervisor` | Generate supervisor prompt instead of role prompt |
 | `--action ACTION` | Action type: `report` or `code` for roles; `review`, `code`, or `verify` for supervisor **(required)** |
-| `--extra-prompt TEXT` | Additional instructions (text or `@filepath`) |
 | `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--no-project-info` | Omit the ATeam Project Context section |
@@ -613,7 +607,7 @@ ateam inspect 42 43
 ateam inspect --last
 ateam inspect --last-report
 ateam inspect --last-report --auto-debug
-ateam inspect --last --auto-debug --extra-prompt "focus on the timeout"
+ateam inspect --last --auto-debug --post-prompt "focus on the timeout"
 ```
 
 | Flag | Description |
@@ -625,7 +619,6 @@ ateam inspect --last --auto-debug --extra-prompt "focus on the timeout"
 | `--last-code` | Select all execs from the last code session |
 | `--batch NAME` | Select all runs in a batch |
 | `--auto-debug` | Launch an agent in streaming mode to investigate the selected runs |
-| `--extra-prompt TEXT` | Additional instructions appended to the auto-debug prompt under an "Additional Debug Instructions" heading (text or `@filepath`) |
 | `--pre-prompt TEXT` | Text wrapped at the very front of the assembled auto-debug prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of the assembled auto-debug prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--profile NAME` | Profile for the auto-debug agent |

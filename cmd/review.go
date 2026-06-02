@@ -51,7 +51,7 @@ Works from any project directory — discovers the .ateamorg/ and .ateam/ struct
 
 Example:
   ateam review
-  ateam review --extra-prompt "Focus on security findings"
+  ateam review --post-prompt "Focus on security findings"
   ateam review --prompt @custom_review.md`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		maxAge, err := parseMaxAge(reviewMaxAge)
@@ -125,11 +125,6 @@ func runReview(opts ReviewOptions) error {
 		return err
 	}
 
-	extraPrompt, err := prompts.ResolveOptional(opts.ExtraPrompt)
-	if err != nil {
-		return err
-	}
-
 	customPrompt, err := prompts.ResolveOptional(opts.CustomPrompt)
 	if err != nil {
 		return err
@@ -158,7 +153,7 @@ func runReview(opts ReviewOptions) error {
 	// Both default and --prompt paths now go through assembleReview; the
 	// override flows into the assembler's ReplaceRoleMain option so framing
 	// fragments compose either way.
-	prompt, err := assembleReview(env, selector, "the supervisor", extraPrompt, customPrompt, prePrompt, postPrompt)
+	prompt, err := assembleReview(env, selector, "the supervisor", customPrompt, prePrompt, postPrompt)
 	if err != nil {
 		var empty *prompts.ReviewEmptyError
 		if errors.As(err, &empty) {

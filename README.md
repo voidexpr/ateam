@@ -214,7 +214,7 @@ ateam report  →  ateam review  →  ateam code  →  ateam verify
 
 **Report**: Role-specific agents analyze your code and produce markdown reports. Each role focuses on one dimension (security, testing, etc.). Runs in parallel. A role is basically a markdown prompt, easy to modify or create new ones.
 
-**Review**: The supervisor reads all reports, applies judgment, and produces a prioritized list of coding tasks. You can edit the review before proceeding with this step or just add some extra instructions on the CLI with `--extra-prompt SOME TEXT`.
+**Review**: The supervisor reads all reports, applies judgment, and produces a prioritized list of coding tasks. You can edit the review before proceeding with this step or just add some extra instructions on the CLI with `--post-prompt SOME TEXT`.
 
 **Code**: The supervisor executes the top-priority tasks by delegating to coding agents, then records what was completed.
 
@@ -253,11 +253,10 @@ So the git workflow is up to you:
 ### Steering Ateam
 
 #### 1. Providing directions
-* for ad-hoc steering, every prompt-taking command accepts three text-or-`@file` flags:
-    * `--extra-prompt TEXT` — appended after the assembled body, inside the prompt
+* for ad-hoc steering, every prompt-taking command accepts two text-or-`@file` flags:
     * `--pre-prompt TEXT` — wrapped at the very front, outermost
     * `--post-prompt TEXT` — wrapped at the very end, outermost
-    * example: `ateam all --extra-prompt "focus on the changes related to the authentication model"`
+    * example: `ateam all --post-prompt "focus on the changes related to the authentication model"`
 * for persistent steering (like reject a type of findings ateam proposes) write them as composable fragments at the appropriate level:
     * project-level role override: `.ateam/prompts/report/NAME.post.extra.md` (composes with the embedded role)
     * project-level supervisor review override: `.ateam/prompts/review.post.extra.md`
