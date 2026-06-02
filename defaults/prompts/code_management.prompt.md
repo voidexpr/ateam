@@ -56,9 +56,8 @@ The goals are:
 
 1. Use the execution directory provided as `{{exec.output_dir}}`. Create it with `mkdir -p` if it does not already exist. Do NOT invent a different timestamped path — the harness has already allocated this one and reads files from it.
 2. Initialize the execution report at `{{exec.output_file}}` (which is `EXECUTION_DIR/execution_report.md`) using the format below
-3. Run `ateam roles` to discover available roles
-4. make sure there are no git dirty files (untracked files are fine), if there are any abort with a clear error message
-5. review recent commits
+3. make sure there are no git dirty files (untracked files are fine), if there are any abort with a clear error message
+4. review recent commits
 
 Do not run `git fetch`, `git pull`, or any other network-touching git command — keeping
 the branch up to date with its remote is the operator's responsibility, not yours. Work
@@ -70,13 +69,12 @@ Read the review and extract all Priority Actions in order (P0 first, then P1, th
 
 For each task:
 1. Assign a two-digit sequence number starting from 01
-2. Select the most appropriate role (use the Source Role from the review as default)
-3. Write the task description to a temp file: `EXECUTION_DIR/current_task.md`
+2. Write the task description to a temp file: `EXECUTION_DIR/current_task.md`
   * provide all the details from the review document to help understand why this task is required and why it was prioritized in addition to what needs to be done. Include all the details you have access to that are specific to this task
-4. Generate the code prompt:
+3. Generate the code prompt:
    ```
-   ateam prompt --role ROLE --action code \
-     --extra-prompt @EXECUTION_DIR/current_task.md \
+   ateam prompt --supervisor --action code \
+     --post-prompt @EXECUTION_DIR/current_task.md \
      > EXECUTION_DIR/SEQ_SLUG_code_prompt.md
    ```
    Where `SEQ` = zero-padded sequence number, `SLUG` = short snake_case summary
@@ -89,7 +87,7 @@ Execute tasks one at a time, in sequence order. For each task:
 1. **Pre-check**: Verify git working tree is clean, code builds, and tests pass
 2. **Execute**:
    ```
-   ateam exec @EXECUTION_DIR/SEQ_SLUG_code_prompt.md --role ROLE
+   ateam exec @EXECUTION_DIR/SEQ_SLUG_code_prompt.md --role code --action code
    ```
 3. **Post-check**: Verify code still builds and tests pass
 4. **Record**: Update `execution_report.md` with the outcome, only append to it during this phase. For each task include:
@@ -205,9 +203,8 @@ follow along. Print status lines as you go:
   ```
 - **Commands**: print every ateam CLI command before running it
   ```
-  Running: ateam roles
-  Running: ateam prompt --role security --action code --extra-prompt @EXECUTION_DIR/current_task.md
-  Running: ateam exec @EXECUTION_DIR/01_fix_sql_injection_code_prompt.md --role security
+  Running: ateam prompt --supervisor --action code --post-prompt @EXECUTION_DIR/current_task.md
+  Running: ateam exec @EXECUTION_DIR/01_fix_sql_injection_code_prompt.md --role code -action code
   ```
 - **Task outcomes**: print the result of each task immediately and include the git hash and branch used
   ```
