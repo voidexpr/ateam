@@ -21,7 +21,7 @@ own containers, or persist workflow state. Those responsibilities remain in
 - `verify`
 - `auto-setup`
 
-`ateam all` is not itself a single `flow.Pipeline`; it remains a cmd-layer
+`ateam run-all` is not itself a single `flow.Pipeline`; it remains a cmd-layer
 sequence that calls `runReport`, `runReview`, `runCode`, and `runVerify`.
 Each phase then uses `flow` internally.
 

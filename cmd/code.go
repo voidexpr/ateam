@@ -51,7 +51,7 @@ var codeCmd = &cobra.Command{
 	Short: "Execute review tasks as code changes",
 	Long: `Read the review document and execute prioritized tasks as code changes,
 delegating each coding task to the appropriate role via ateam exec. The
-command stops after the code phase — run ateam verify (or ateam all) to
+command stops after the code phase — run ateam verify (or ateam run-all) to
 inspect the resulting commits and run the test suite.
 
 Example:
@@ -60,7 +60,7 @@ Example:
   ateam code --management @custom_management.md
   ateam code --dry-run
   ateam code && ateam verify                     # explicit verify follow-up
-  ateam all                                      # full pipeline incl. verify`,
+  ateam run-all                                  # full pipeline incl. verify`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runCode(CodeOptions{
 			CommonExecFlags:   codeFlags,

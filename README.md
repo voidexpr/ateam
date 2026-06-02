@@ -145,7 +145,7 @@ ateam verify             # audits at the commits from previous phase
 ateam serve              # local web server to browse documents, processes, cost
 ```
 
-Once familiar with ateam just run the full pipeline: `ateam all` or `ateam all && ateam serve`.
+Once familiar with ateam just run the full pipeline: `ateam run-all` or `ateam run-all && ateam serve`.
 
 You can see all artifacts using web UI `ateam serve` or under `.ateam/`
 
@@ -201,7 +201,7 @@ By default coding agents will be ran in a sandbox providing a good balance of fi
 
 ### The Pipeline
 
-When running `ateam all` the following steps are executed (they are also available as individual commands):
+When running `ateam run-all` the following steps are executed (they are also available as individual commands):
 
 ```
 ateam report  →  ateam review  →  ateam code  →  ateam verify
@@ -218,7 +218,7 @@ ateam report  →  ateam review  →  ateam code  →  ateam verify
 
 **Code**: The supervisor executes the top-priority tasks by delegating to coding agents, then records what was completed.
 
-**Verify**: The supervisor inspects the commits made during the code phase, looks for logical bugs, broken or missing tests, and risky changes, then runs the project's test suite and records findings. `ateam code` stops after the code phase — run `ateam verify` explicitly, or use `ateam all` which always runs verify as the final phase.
+**Verify**: The supervisor inspects the commits made during the code phase, looks for logical bugs, broken or missing tests, and risky changes, then runs the project's test suite and records findings. `ateam code` stops after the code phase — run `ateam verify` explicitly, or use `ateam run-all` which always runs verify as the final phase.
 
 Each run archives its artifacts. The next cycle's reports incorporate previous findings, so quality improves incrementally with a memory of what has been done so far.
 
@@ -226,12 +226,12 @@ Each run archives its artifacts. The next cycle's reports incorporate previous f
 
 Daily (quick pass, focused on recent changes):
 ```bash
-ateam all --roles code.recent,test.recent
+ateam run-all --roles code.recent,test.recent
 ```
 
 Weekly (thorough):
 ```bash
-ateam all --roles code.bugs,test.gaps,project.security,project.dependencies,design.architecture
+ateam run-all --roles code.bugs,test.gaps,project.security,project.dependencies,design.architecture
 ```
 
 Step by step (with review):
@@ -256,7 +256,7 @@ So the git workflow is up to you:
 * for ad-hoc steering, every prompt-taking command accepts two text-or-`@file` flags:
     * `--pre-prompt TEXT` — wrapped at the very front, outermost
     * `--post-prompt TEXT` — wrapped at the very end, outermost
-    * example: `ateam all --post-prompt "focus on the changes related to the authentication model"`
+    * example: `ateam run-all --post-prompt "focus on the changes related to the authentication model"`
 * for persistent steering (like reject a type of findings ateam proposes) write them as composable fragments at the appropriate level:
     * project-level role override: `.ateam/prompts/report/NAME.post.extra.md` (composes with the embedded role)
     * project-level supervisor review override: `.ateam/prompts/review.post.extra.md`
@@ -397,8 +397,8 @@ There is a very long list of potentially very useful roles to add.
 | [`ateam auto-setup`](COMMANDS.md#ateam-auto-setup) | Auto-configure roles for the current project |
 | [`ateam report`](COMMANDS.md#ateam-report) | Run role analyses |
 | [`ateam review`](COMMANDS.md#ateam-review) | Supervisor reviews and prioritizes findings |
-| [`ateam code`](COMMANDS.md#ateam-code) | Execute prioritized coding tasks (run [`ateam verify`](COMMANDS.md#ateam-verify) after, or use `ateam all` for the full pipeline) |
-| [`ateam all`](COMMANDS.md#ateam-all) | Full pipeline: report → review → code → verify (verify always runs) |
+| [`ateam code`](COMMANDS.md#ateam-code) | Execute prioritized coding tasks (run [`ateam verify`](COMMANDS.md#ateam-verify) after, or use `ateam run-all` for the full pipeline) |
+| [`ateam run-all`](COMMANDS.md#ateam-run-all) | Full pipeline: report → review → code → verify (verify always runs) |
 | [`ateam verify`](COMMANDS.md#ateam-verify) | Supervisor verifies recent code changes from [`ateam code`](COMMANDS.md#ateam-code) |
 | [`ateam exec`](COMMANDS.md#ateam-exec) | Run an agent with a custom prompt |
 | [`ateam parallel`](COMMANDS.md#ateam-parallel) | Run multiple agents in parallel, each with its own prompt |

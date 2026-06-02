@@ -170,7 +170,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Printf("    ateam report    run role agents to analyze the project\n")
 	fmt.Printf("    ateam review    supervisor reviews and prioritizes findings\n")
 	fmt.Printf("    ateam code      execute prioritized tasks as code changes\n")
-	fmt.Printf("    ateam all       run the full pipeline: report + review + code\n")
+	fmt.Printf("    ateam run-all   run the full pipeline: report + review + code\n")
 	fmt.Printf("    ateam ps        show recent agent runs\n")
 	fmt.Printf("    ateam tail      live-stream agent output\n")
 	fmt.Printf("    ateam prompt    inspect assembled prompts\n")

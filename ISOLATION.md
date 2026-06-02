@@ -250,7 +250,7 @@ WORKDIR /workspace
 docker run -it -v $(pwd):/workspace \
   -e ANTHROPIC_API_KEY \
   my-project:latest \
-  bash -c "cd /workspace && ateam init && ateam all"
+  bash -c "cd /workspace && ateam init && ateam run-all"
 ```
 
 ## Agent behavior inside vs outside containers

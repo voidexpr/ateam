@@ -5,7 +5,7 @@ usage() {
   cat <<HELP
 Usage: $(basename "$0") [options]
 
-Wrap \`ateam all\` so a transient failure doesn't kill an overnight run.
+Wrap \`ateam run-all\` so a transient failure doesn't kill an overnight run.
 
 On failure, spawn a troubleshooter agent that:
   - finds the failed exec(s) via \`ateam ps\`
@@ -207,7 +207,7 @@ run_phase_chain() {
   local roles="${2:-}"
   case "$phase" in
     all)
-      ateam all
+      ateam run-all
       ;;
     report)
       if [ -z "$roles" ]; then
@@ -235,7 +235,7 @@ run_phase_chain() {
   esac
 }
 
-# First attempt is plain `ateam all`. Subsequent attempts come from the verdict.
+# First attempt is plain `ateam run-all`. Subsequent attempts come from the verdict.
 next_phase="all"
 next_roles=""
 
@@ -250,7 +250,7 @@ for attempt in $(seq 1 "$max_attempts"); do
     if [ "$next_phase" = "report" ] && [ -n "$next_roles" ]; then
       echo "[simulated] would run: ateam report --roles $next_roles && ateam review && ateam code && ateam verify"
     elif [ "$next_phase" = "all" ]; then
-      echo "[simulated] would run: ateam all"
+      echo "[simulated] would run: ateam run-all"
     elif [ "$next_phase" = "verify" ]; then
       echo "[simulated] would run: ateam verify"
     else

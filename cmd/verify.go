@@ -34,7 +34,7 @@ look for logical bugs, broken or missing tests, and risky changes, then run
 the project's test suite and record findings in a verification report.
 
 Run after ` + "`ateam code`" + ` to inspect the resulting commits, or use
-` + "`ateam all`" + ` for the full pipeline which always runs verify as the
+` + "`ateam run-all`" + ` for the full pipeline which always runs verify as the
 final phase.
 
 Example:

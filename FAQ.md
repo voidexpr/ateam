@@ -52,7 +52,7 @@ Use the `ateam prompt --role ROLENAME --action report` to show the exact prompt 
 It actually fits very well as a first step before a full ateam cycle:
 
 ```bash
-ateam exec "/code-review high for recent commits" && git commit . -m "/code-review" && ateam all
+ateam exec "/code-review high for recent commits" && git commit . -m "/code-review" && ateam run-all
 ```
 
 ## What if I only want to do some of the code changes or only run some of the reports ?

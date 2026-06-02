@@ -32,7 +32,7 @@ func TestPromptWrapFlagHelpUniform(t *testing.T) {
 		{cmd: verifyCmd},
 		{cmd: codeCmd},
 		{cmd: autoSetupCmd},
-		{cmd: allCmd},
+		{cmd: runAllCmd},
 		{cmd: inspectCmd},
 		{cmd: promptCmd},
 	}
@@ -68,7 +68,7 @@ func TestPromptWrapFlagHelpUniform(t *testing.T) {
 func TestNoExtraPromptFlag(t *testing.T) {
 	for _, c := range []*cobra.Command{
 		execCmd, parallelCmd, reportCmd, reviewCmd, verifyCmd, codeCmd,
-		autoSetupCmd, allCmd, inspectCmd, promptCmd,
+		autoSetupCmd, runAllCmd, inspectCmd, promptCmd,
 	} {
 		if f := c.Flags().Lookup("extra-prompt"); f != nil {
 			t.Errorf("%s still registers --extra-prompt; flag was dropped", c.Name())

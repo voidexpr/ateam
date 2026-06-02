@@ -75,4 +75,4 @@ After making changes, print a short summary of what was configured:
 - Which roles were enabled/disabled and why
 - Whether Docker is available
     - if so print commands to configure agents available to run isolated in docker (claude, codex, ...)
-- Suggested next command: `ateam report` or `ateam all`
+- Suggested next command: `ateam report` or `ateam run-all`

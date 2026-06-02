@@ -37,28 +37,28 @@ func TestAllRunsAllFourPhases(t *testing.T) {
 	orgFlag = filepath.Dir(orgDir)
 
 	// Save and restore all package-level flags that runAll reads.
-	savedQuiet, savedTimeout, savedParallel := allQuiet, allTimeout, allParallel
-	savedCheaper, savedVerbose := allCheaperModel, allVerbose
-	savedRoles, savedProfile := allRoles, allProfile
-	savedRP, savedRA := allReportProfile, allReportAgent
-	savedSP, savedSA := allSupervisorProfile, allSupervisorAgent
-	savedCP, savedCA := allCodeProfile, allCodeAgent
-	savedDocker := allDockerAutoSetup
+	savedQuiet, savedTimeout, savedParallel := runAllQuiet, runAllTimeout, runAllParallel
+	savedCheaper, savedVerbose := runAllCheaperModel, runAllVerbose
+	savedRoles, savedProfile := runAllRoles, runAllProfile
+	savedRP, savedRA := runAllReportProfile, runAllReportAgent
+	savedSP, savedSA := runAllSupervisorProfile, runAllSupervisorAgent
+	savedCP, savedCA := runAllCodeProfile, runAllCodeAgent
+	savedDocker := runAllDockerAutoSetup
 	defer func() {
-		allQuiet, allTimeout, allParallel = savedQuiet, savedTimeout, savedParallel
-		allCheaperModel, allVerbose = savedCheaper, savedVerbose
-		allRoles, allProfile = savedRoles, savedProfile
-		allReportProfile, allReportAgent = savedRP, savedRA
-		allSupervisorProfile, allSupervisorAgent = savedSP, savedSA
-		allCodeProfile, allCodeAgent = savedCP, savedCA
-		allDockerAutoSetup = savedDocker
+		runAllQuiet, runAllTimeout, runAllParallel = savedQuiet, savedTimeout, savedParallel
+		runAllCheaperModel, runAllVerbose = savedCheaper, savedVerbose
+		runAllRoles, runAllProfile = savedRoles, savedProfile
+		runAllReportProfile, runAllReportAgent = savedRP, savedRA
+		runAllSupervisorProfile, runAllSupervisorAgent = savedSP, savedSA
+		runAllCodeProfile, runAllCodeAgent = savedCP, savedCA
+		runAllDockerAutoSetup = savedDocker
 	}()
 
-	allQuiet = false
-	allRoles = []string{"testing_basic"}
-	allReportProfile = "test"
-	allSupervisorProfile = "test"
-	allCodeProfile = "test"
+	runAllQuiet = false
+	runAllRoles = []string{"testing_basic"}
+	runAllReportProfile = "test"
+	runAllSupervisorProfile = "test"
+	runAllCodeProfile = "test"
 
 	var runErr error
 	out := captureStdout(t, func() {
@@ -84,7 +84,7 @@ func TestAllRunsAllFourPhases(t *testing.T) {
 }
 
 func TestAllDefaultRoles(t *testing.T) {
-	// When allRoles is empty, runAll should default to []string{"all"}.
+	// When runAllRoles is empty, runAll should default to []string{"all"}.
 	base := t.TempDir()
 	orgDir, err := root.InstallOrg(base)
 	if err != nil {
@@ -106,17 +106,17 @@ func TestAllDefaultRoles(t *testing.T) {
 	defer func() { orgFlag = savedOrg }()
 	orgFlag = filepath.Dir(orgDir)
 
-	savedQuiet, savedRoles := allQuiet, allRoles
-	savedRP, savedSP, savedCP := allReportProfile, allSupervisorProfile, allCodeProfile
+	savedQuiet, savedRoles := runAllQuiet, runAllRoles
+	savedRP, savedSP, savedCP := runAllReportProfile, runAllSupervisorProfile, runAllCodeProfile
 	defer func() {
-		allQuiet, allRoles = savedQuiet, savedRoles
-		allReportProfile, allSupervisorProfile, allCodeProfile = savedRP, savedSP, savedCP
+		runAllQuiet, runAllRoles = savedQuiet, savedRoles
+		runAllReportProfile, runAllSupervisorProfile, runAllCodeProfile = savedRP, savedSP, savedCP
 	}()
-	allQuiet = false
-	allRoles = nil // should default to "all"
-	allReportProfile = "test"
-	allSupervisorProfile = "test"
-	allCodeProfile = "test"
+	runAllQuiet = false
+	runAllRoles = nil // should default to "all"
+	runAllReportProfile = "test"
+	runAllSupervisorProfile = "test"
+	runAllCodeProfile = "test"
 
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
@@ -131,7 +131,7 @@ func TestAllDefaultRoles(t *testing.T) {
 }
 
 // TestAllVerifyRunsExactlyOnce guards against the historical bug where
-// `ateam all` ran verify twice (once via runCode's auto-chain and once in
+// `ateam run-all` ran verify twice (once via runCode's auto-chain and once in
 // Phase 4). The auto-chain is gone now; the test asserts the single Phase 4
 // run remains. We count occurrences of the unique line that runVerify
 // prints on entry.
@@ -158,16 +158,16 @@ func TestAllVerifyRunsExactlyOnce(t *testing.T) {
 	t.Cleanup(func() { orgFlag = savedOrg })
 	orgFlag = filepath.Dir(orgDir)
 
-	savedRoles := allRoles
-	savedRP, savedSP, savedCP := allReportProfile, allSupervisorProfile, allCodeProfile
+	savedRoles := runAllRoles
+	savedRP, savedSP, savedCP := runAllReportProfile, runAllSupervisorProfile, runAllCodeProfile
 	defer func() {
-		allRoles = savedRoles
-		allReportProfile, allSupervisorProfile, allCodeProfile = savedRP, savedSP, savedCP
+		runAllRoles = savedRoles
+		runAllReportProfile, runAllSupervisorProfile, runAllCodeProfile = savedRP, savedSP, savedCP
 	}()
-	allRoles = []string{"testing_basic"}
-	allReportProfile = "test"
-	allSupervisorProfile = "test"
-	allCodeProfile = "test"
+	runAllRoles = []string{"testing_basic"}
+	runAllReportProfile = "test"
+	runAllSupervisorProfile = "test"
+	runAllCodeProfile = "test"
 
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
@@ -184,7 +184,7 @@ func TestAllVerifyRunsExactlyOnce(t *testing.T) {
 // TestCodeStopsAfterCodePhase verifies that `ateam code` no longer chains
 // verify automatically. The auto-chain was removed because users invoking
 // `ateam code` directly want to inspect the changes before verifying; the
-// chained pipeline lives in `ateam all`.
+// chained pipeline lives in `ateam run-all`.
 func TestCodeStopsAfterCodePhase(t *testing.T) {
 	base := t.TempDir()
 	orgDir, err := root.InstallOrg(base)
@@ -221,7 +221,7 @@ func TestCodeStopsAfterCodePhase(t *testing.T) {
 }
 
 // TestAllPropagatesModelAndBudgetFlags verifies that --model, --effort,
-// --max-budget-usd, and --max-budget-usd-batch flow from the `ateam all`
+// --max-budget-usd, and --max-budget-usd-batch flow from the `ateam run-all`
 // flags into every sub-command's *Options literal. We exercise the flag-
 // combination warning ("--cheaper-model and --model both set") that the
 // shared helper emits — its appearance once per phase in stderr proves
@@ -229,8 +229,8 @@ func TestCodeStopsAfterCodePhase(t *testing.T) {
 // are checked via the registered cobra flags on the command itself.
 func TestAllPropagatesModelAndBudgetFlags(t *testing.T) {
 	for _, name := range []string{"model", "effort", "max-budget-usd", "max-budget-usd-batch"} {
-		if allCmd.Flags().Lookup(name) == nil {
-			t.Errorf("expected --%s registered on `ateam all`", name)
+		if runAllCmd.Flags().Lookup(name) == nil {
+			t.Errorf("expected --%s registered on `ateam run-all`", name)
 		}
 	}
 
@@ -263,28 +263,28 @@ func TestAllPropagatesModelAndBudgetFlags(t *testing.T) {
 		budget, budgetBatch string
 		quiet               bool
 	}{
-		allRoles, allReportProfile, allSupervisorProfile, allCodeProfile,
-		allCheaperModel, allModel, allEffort, allMaxBudgetUSD, allMaxBudgetBatch,
-		allQuiet,
+		runAllRoles, runAllReportProfile, runAllSupervisorProfile, runAllCodeProfile,
+		runAllCheaperModel, runAllModel, runAllEffort, runAllMaxBudgetUSD, runAllMaxBudgetBatch,
+		runAllQuiet,
 	}
 	defer func() {
-		allRoles = saved.roles
-		allReportProfile, allSupervisorProfile, allCodeProfile = saved.rp, saved.sp, saved.cp
-		allCheaperModel = saved.cheaper
-		allModel, allEffort = saved.model, saved.effort
-		allMaxBudgetUSD, allMaxBudgetBatch = saved.budget, saved.budgetBatch
-		allQuiet = saved.quiet
+		runAllRoles = saved.roles
+		runAllReportProfile, runAllSupervisorProfile, runAllCodeProfile = saved.rp, saved.sp, saved.cp
+		runAllCheaperModel = saved.cheaper
+		runAllModel, runAllEffort = saved.model, saved.effort
+		runAllMaxBudgetUSD, runAllMaxBudgetBatch = saved.budget, saved.budgetBatch
+		runAllQuiet = saved.quiet
 	}()
-	allRoles = []string{"testing_basic"}
-	allReportProfile = "test"
-	allSupervisorProfile = "test"
-	allCodeProfile = "test"
-	allCheaperModel = true
-	allModel = "opus-4"
-	allEffort = "high"
-	allMaxBudgetUSD = "10"
-	allMaxBudgetBatch = "50"
-	allQuiet = true
+	runAllRoles = []string{"testing_basic"}
+	runAllReportProfile = "test"
+	runAllSupervisorProfile = "test"
+	runAllCodeProfile = "test"
+	runAllCheaperModel = true
+	runAllModel = "opus-4"
+	runAllEffort = "high"
+	runAllMaxBudgetUSD = "10"
+	runAllMaxBudgetBatch = "50"
+	runAllQuiet = true
 
 	var runErr error
 	stderr := captureStderr(t, func() {
@@ -342,13 +342,13 @@ func TestAllAutoRolesPlanOnlySkipsAllPhases(t *testing.T) {
 	defer func() { orgFlag = savedOrg }()
 	orgFlag = filepath.Dir(orgDir)
 
-	savedRoles, savedAuto, savedPlanOnly := allRoles, allAutoRoles, allPlanOnly
+	savedRoles, savedAuto, savedPlanOnly := runAllRoles, runAllAutoRoles, runAllPlanOnly
 	defer func() {
-		allRoles, allAutoRoles, allPlanOnly = savedRoles, savedAuto, savedPlanOnly
+		runAllRoles, runAllAutoRoles, runAllPlanOnly = savedRoles, savedAuto, savedPlanOnly
 	}()
-	allRoles = nil
-	allAutoRoles = true
-	allPlanOnly = true
+	runAllRoles = nil
+	runAllAutoRoles = true
+	runAllPlanOnly = true
 
 	var runErr error
 	out := captureStdout(t, func() {
@@ -381,13 +381,13 @@ func TestAllAutoRolesPlanOnlySkipsAllPhases(t *testing.T) {
 // TestAutoRolesAndRolesMutuallyExclusive verifies runAll rejects the
 // combination of --auto-roles with explicit --roles before doing any work.
 func TestAutoRolesAndRolesMutuallyExclusive(t *testing.T) {
-	savedRoles, savedAuto, savedPlanOnly := allRoles, allAutoRoles, allPlanOnly
+	savedRoles, savedAuto, savedPlanOnly := runAllRoles, runAllAutoRoles, runAllPlanOnly
 	defer func() {
-		allRoles, allAutoRoles, allPlanOnly = savedRoles, savedAuto, savedPlanOnly
+		runAllRoles, runAllAutoRoles, runAllPlanOnly = savedRoles, savedAuto, savedPlanOnly
 	}()
-	allRoles = []string{"testing_basic"}
-	allAutoRoles = true
-	allPlanOnly = false
+	runAllRoles = []string{"testing_basic"}
+	runAllAutoRoles = true
+	runAllPlanOnly = false
 
 	err := runAll(nil, nil)
 	if err == nil {

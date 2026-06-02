@@ -215,7 +215,7 @@ ateam code --dry-run
 | `--verbose` | Print agent and docker commands to stderr |
 | `--force` | Run even if the same action is already running |
 
-`ateam code` stops after the code phase. Run `ateam verify` afterward (or `ateam all` for the full pipeline) to inspect the commits and run the test suite.
+`ateam code` stops after the code phase. Run `ateam verify` afterward (or `ateam run-all` for the full pipeline) to inspect the commits and run the test suite.
 
 For live output from a running `code` session, run `ateam tail --coding` in a separate terminal; the previous `--tail` flag has been removed.
 
@@ -223,7 +223,7 @@ For live output from a running `code` session, run `ateam tail --coding` in a se
 
 Have the supervisor inspect commits made by the most recent `ateam code` run, look for logical bugs, broken or missing tests, and risky changes, then run the project's test suite and record findings in a verification report.
 
-Run it explicitly after `ateam code`, or rely on `ateam all` which always runs verify as the final pipeline phase.
+Run it explicitly after `ateam code`, or rely on `ateam run-all` which always runs verify as the final pipeline phase.
 
 ```bash
 ateam verify
@@ -249,21 +249,21 @@ ateam verify --dry-run
 | `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
 | `--container-name NAME` | Override container name (for docker-exec containers) |
 
-### `ateam all`
+### `ateam run-all`
 
 Run the full pipeline sequentially: report → review → code → verify. Verify always runs as the final phase — to stop earlier, run the individual commands instead (e.g. `ateam report && ateam review && ateam code`).
 
 `--roles` applies to both the report and review phases (and never to the code phase). `--all` and `--max-age` only affect review — report always runs only on enabled roles, since producing fresh reports for disabled roles defeats the purpose of disabling them.
 
 ```bash
-ateam all
-ateam all --post-prompt "Focus on security"
-ateam all --roles code.structure,test.gaps   # report+review only those roles
-ateam all --all                                  # include disabled roles' stale reports in review
-ateam all --max-age 2h                           # review drops reports older than 2h
-ateam all --report-agent claude-sonnet --supervisor-agent claude --code-profile docker
-ateam all --auto-roles                           # planner picks the role list before the pipeline runs
-ateam all --auto-roles --plan-only               # print the recommendation, don't execute the pipeline
+ateam run-all
+ateam run-all --post-prompt "Focus on security"
+ateam run-all --roles code.structure,test.gaps   # report+review only those roles
+ateam run-all --all                                  # include disabled roles' stale reports in review
+ateam run-all --max-age 2h                           # review drops reports older than 2h
+ateam run-all --report-agent claude-sonnet --supervisor-agent claude --code-profile docker
+ateam run-all --auto-roles                           # planner picks the role list before the pipeline runs
+ateam run-all --auto-roles --plan-only               # print the recommendation, don't execute the pipeline
 ```
 
 | Flag | Description |

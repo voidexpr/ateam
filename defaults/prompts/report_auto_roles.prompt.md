@@ -34,7 +34,7 @@ Bias toward short role lists. Two well-chosen roles produce a better review than
 
 - `ateam report --roles X,Y` — fresh reports only; lets you inspect before reviewing.
 - `ateam report --roles X,Y --review` — reports + review in one go.
-- `ateam all --roles X,Y` — report → review → code → verify, end-to-end.
+- `ateam run-all --roles X,Y` — report → review → code → verify, end-to-end.
 
 ## Output
 
@@ -51,7 +51,7 @@ The file must contain, in this order:
    ```
    ateam report --roles X,Y
    ateam report --roles X,Y --review
-   ateam all --roles X,Y
+   ateam run-all --roles X,Y
    ```
    Replace `X,Y` with your recommended comma-separated role list (no spaces around commas).
 3. **A final marker line on its own line, no markdown formatting:**

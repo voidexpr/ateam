@@ -12,7 +12,7 @@ set -euo pipefail
 #   3. Build + test (the agent figures out the right commands from CLAUDE.md /
 #      Makefile / etc.). If anything fails, the agent fixes it on the branch.
 #   4. ateam exec /simplify; re-test.
-#   5. ateam all --roles code.verify_recent,code.refactor_recent,test.add_recent;
+#   5. ateam run-all --roles code.verify_recent,code.refactor_recent,test.add_recent;
 #      re-test.
 #   6. Print the worktree's HEAD commit and where to run `ateam serve`.
 #
@@ -141,8 +141,8 @@ ateam exec --agent claude <<<"/code-review xhigh --fix for recent changes"
 step "Re-test after /code-review"
 ateam exec --agent claude <<<"$build_and_test_prompt"
 
-step "ateam all (verify / refactor / add tests on recent changes)"
-ateam all --roles code.verify_recent,code.refactor_recent,test.add_recent
+step "ateam run-all (verify / refactor / add tests on recent changes)"
+ateam run-all --roles code.verify_recent,code.refactor_recent,test.add_recent
 
 step "Final build + test"
 ateam exec --agent claude <<<"$build_and_test_prompt"

@@ -31,7 +31,7 @@ Recent changes touched the auth flow and added new test branches.
 ` + "```" + `
 ateam report --roles code.bugs,test.recent
 ateam report --roles code.bugs,test.recent --review
-ateam all --roles code.bugs,test.recent
+ateam run-all --roles code.bugs,test.recent
 ` + "```" + `
 
 RECOMMENDED_ROLES: code.bugs,test.recent
