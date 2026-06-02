@@ -29,6 +29,43 @@ func (s *Server) requireProject(w http.ResponseWriter, r *http.Request) *Project
 	return pe
 }
 
+// requireProjectDB resolves the project for r and opens its CallDB.
+// Writes 404 / 500 to w and returns nils on failure. The DB must exist —
+// when the file is absent, returns 404 (same as a missing project).
+func (s *Server) requireProjectDB(w http.ResponseWriter, r *http.Request) (*ProjectEntry, *calldb.CallDB) {
+	pe := s.requireProject(w, r)
+	if pe == nil {
+		return nil, nil
+	}
+	db := s.getDB(pe)
+	if db == nil {
+		if pe.dbErr != nil {
+			http.Error(w, fmt.Sprintf("failed to open database: %v", pe.dbErr), http.StatusInternalServerError)
+		} else {
+			http.NotFound(w, r)
+		}
+		return nil, nil
+	}
+	return pe, db
+}
+
+// requireProjectOptionalDB resolves the project for r and lazily opens its
+// CallDB. The DB may be absent (returned db is nil and pe.dbErr is nil) — a
+// real open failure still writes 500 and returns nils. Use this for handlers
+// that render a page with an empty-state branch when no DB exists yet.
+func (s *Server) requireProjectOptionalDB(w http.ResponseWriter, r *http.Request) (*ProjectEntry, *calldb.CallDB) {
+	pe := s.requireProject(w, r)
+	if pe == nil {
+		return nil, nil
+	}
+	db := s.getDB(pe)
+	if db == nil && pe.dbErr != nil {
+		http.Error(w, fmt.Sprintf("failed to open database: %v", pe.dbErr), http.StatusInternalServerError)
+		return nil, nil
+	}
+	return pe, db
+}
+
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -65,7 +102,7 @@ type overviewData struct {
 }
 
 func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
-	pe := s.requireProject(w, r)
+	pe, db := s.requireProjectOptionalDB(w, r)
 	if pe == nil {
 		return
 	}
@@ -83,7 +120,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		data.ReviewModTime = info.ModTime()
 	}
 
-	if latest := latestCodeSession(pe.ProjectDir, s.getDB(pe)); latest != "" {
+	if latest := latestCodeSession(pe.ProjectDir, db); latest != "" {
 		data.LatestCodeSession = latest
 		canonical, _ := codeSessionDirs(pe.ProjectDir, latest)
 		reportPath := filepath.Join(canonical, "execution_report.md")
@@ -102,11 +139,6 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	showAll := r.URL.Query().Get("all") == "1"
 	data.ShowAll = showAll
 
-	db := s.getDB(pe)
-	if db == nil && pe.dbErr != nil {
-		http.Error(w, fmt.Sprintf("failed to open database: %v", pe.dbErr), http.StatusInternalServerError)
-		return
-	}
 	if db != nil {
 		limit := 30
 		if showAll {
@@ -540,17 +572,12 @@ type runsPageData struct {
 }
 
 func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
-	pe := s.requireProject(w, r)
+	pe, db := s.requireProjectOptionalDB(w, r)
 	if pe == nil {
 		return
 	}
 
 	data := runsPageData{}
-	db := s.getDB(pe)
-	if db == nil && pe.dbErr != nil {
-		http.Error(w, fmt.Sprintf("failed to open database: %v", pe.dbErr), http.StatusInternalServerError)
-		return
-	}
 	if db != nil {
 		rows, err := db.RecentRuns(calldb.RecentFilter{Limit: -1})
 		if err != nil {
@@ -575,25 +602,14 @@ type runDetailData struct {
 }
 
 func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
-	pe := s.requireProject(w, r)
+	pe, db := s.requireProjectDB(w, r)
 	if pe == nil {
 		return
 	}
 
-	idStr := r.PathValue("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		http.NotFound(w, r)
-		return
-	}
-
-	db := s.getDB(pe)
-	if db == nil {
-		if pe.dbErr != nil {
-			http.Error(w, fmt.Sprintf("failed to open database: %v", pe.dbErr), http.StatusInternalServerError)
-		} else {
-			http.NotFound(w, r)
-		}
 		return
 	}
 
@@ -620,7 +636,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 
 // handleRunFile serves exec or prompt markdown files associated with a run.
 func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
-	pe := s.requireProject(w, r)
+	pe, db := s.requireProjectDB(w, r)
 	if pe == nil {
 		return
 	}
@@ -628,16 +644,6 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		http.NotFound(w, r)
-		return
-	}
-
-	db := s.getDB(pe)
-	if db == nil {
-		if pe.dbErr != nil {
-			http.Error(w, fmt.Sprintf("failed to open database: %v", pe.dbErr), http.StatusInternalServerError)
-		} else {
-			http.NotFound(w, r)
-		}
 		return
 	}
 
@@ -668,7 +674,7 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 				http.NotFound(w, r)
 				return
 			}
-			absPath = filepath.Join(pe.ProjectDir, promptDir(run.Action, run.Role), promptFile)
+			absPath = filepath.Join(pe.ProjectDir, runner.HistoryDirFor(run.Action, run.Role), promptFile)
 		} else {
 			absPath = filepath.Join(logDir, runner.PromptFileName)
 		}
@@ -685,7 +691,7 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 				http.NotFound(w, r)
 				return
 			}
-			absPath = filepath.Join(pe.ProjectDir, promptDir(run.Action, run.Role), outputFile)
+			absPath = filepath.Join(pe.ProjectDir, runner.HistoryDirFor(run.Action, run.Role), outputFile)
 		}
 		title = fmt.Sprintf("Run #%d — Output", id)
 	case "logs":
@@ -859,31 +865,10 @@ func isPathWithin(absPath, baseDir string) bool {
 	return strings.HasPrefix(filepath.Clean(absPath), filepath.Clean(baseDir)+string(filepath.Separator))
 }
 
-// promptDir returns the history directory path (relative to project dir) for an action/role.
-func promptDir(action, role string) string {
-	switch action {
-	case runner.ActionReport, runner.ActionExec:
-		return filepath.Join("roles", role, "history")
-	default:
-		return filepath.Join("supervisor", "history")
-	}
-}
-
 // resolvePromptFile finds the archived prompt file for a run by matching timestamps.
 func resolvePromptFile(projectDir, action, role, agentFile string) string {
-	var promptName string
-	switch action {
-	case runner.ActionReport:
-		promptName = "report_prompt.md"
-	case runner.ActionReview:
-		promptName = "review_prompt.md"
-	case runner.ActionCode:
-		promptName = "code_management_prompt.md"
-	case runner.ActionVerify:
-		promptName = prompts.CodeVerifyPromptFile
-	case runner.ActionExec:
-		promptName = "run_prompt.md"
-	default:
+	promptName := runner.PromptFilenameFor(action)
+	if promptName == "" {
 		return ""
 	}
 	return resolveHistoryFile(projectDir, action, role, agentFile, promptName)
@@ -891,15 +876,8 @@ func resolvePromptFile(projectDir, action, role, agentFile string) string {
 
 // resolveOutputFile finds the archived output file (report.md, review.md, verify.md) for a run.
 func resolveOutputFile(projectDir, action, role, agentFile string) string {
-	var outputName string
-	switch action {
-	case runner.ActionReport:
-		outputName = "report.md"
-	case runner.ActionReview:
-		outputName = "review.md"
-	case runner.ActionVerify:
-		outputName = "verify.md"
-	default:
+	outputName := runner.OutputFilenameFor(action)
+	if outputName == "" {
 		return ""
 	}
 	return resolveHistoryFile(projectDir, action, role, agentFile, outputName)
@@ -909,7 +887,7 @@ func resolveOutputFile(projectDir, action, role, agentFile string) string {
 // Exact match is expected for new runs; fuzzy ±5s fallback handles older data.
 // Returns the filename (not full path), or empty if not found.
 func resolveHistoryFile(projectDir, action, role, agentFile, targetName string) string {
-	histDir := filepath.Join(projectDir, promptDir(action, role))
+	histDir := filepath.Join(projectDir, runner.HistoryDirFor(action, role))
 
 	base := filepath.Base(agentFile)
 	if len(base) < 19 {
@@ -934,17 +912,12 @@ type costPageData struct {
 }
 
 func (s *Server) handleCost(w http.ResponseWriter, r *http.Request) {
-	pe := s.requireProject(w, r)
+	pe, db := s.requireProjectOptionalDB(w, r)
 	if pe == nil {
 		return
 	}
 
 	data := costPageData{}
-	db := s.getDB(pe)
-	if db == nil && pe.dbErr != nil {
-		http.Error(w, fmt.Sprintf("failed to open database: %v", pe.dbErr), http.StatusInternalServerError)
-		return
-	}
 	if db != nil {
 		var err error
 		data.Actions, err = db.CostByAction("")
@@ -1194,16 +1167,11 @@ func buildSessions(db *calldb.CallDB) []CodeSession {
 }
 
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	pe := s.requireProject(w, r)
+	pe, db := s.requireProjectOptionalDB(w, r)
 	if pe == nil {
 		return
 	}
 
-	db := s.getDB(pe)
-	if db == nil && pe.dbErr != nil {
-		http.Error(w, fmt.Sprintf("failed to open database: %v", pe.dbErr), http.StatusInternalServerError)
-		return
-	}
 	var sessions []CodeSession
 	if db != nil {
 		sessions = buildSessions(db)
@@ -1223,7 +1191,7 @@ type sessionsPageData struct {
 }
 
 func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
-	pe := s.requireProject(w, r)
+	pe, sessionDB := s.requireProjectOptionalDB(w, r)
 	if pe == nil {
 		return
 	}
@@ -1231,11 +1199,6 @@ func (s *Server) handleSessionDetail(w http.ResponseWriter, r *http.Request) {
 	batch := r.PathValue("batch")
 	data := sessionDetailData{Batch: batch}
 
-	sessionDB := s.getDB(pe)
-	if sessionDB == nil && pe.dbErr != nil {
-		http.Error(w, fmt.Sprintf("failed to open database: %v", pe.dbErr), http.StatusInternalServerError)
-		return
-	}
 	if sessionDB != nil {
 		var err error
 		data.Runs, err = sessionDB.RecentRuns(calldb.RecentFilter{Batch: batch, Limit: 200})

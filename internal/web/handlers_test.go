@@ -42,19 +42,10 @@ func newTestServer(t *testing.T, projectDir string) *Server {
 }
 
 // newTestMux wires up the server's handlers to a ServeMux with the same
-// route patterns used in ListenAndServe.
+// route patterns used in ListenAndServe (minus the embedded /static/ tree).
 func newTestMux(s *Server) *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /p/{project}/", s.handleOverview)
-	mux.HandleFunc("GET /p/{project}/cost", s.handleCost)
-	mux.HandleFunc("GET /p/{project}/runs", s.handleRuns)
-	mux.HandleFunc("GET /p/{project}/runs/{id}", s.handleRun)
-	mux.HandleFunc("GET /p/{project}/runs/{id}/runtime/{name...}", s.handleRunRuntimeFile)
-	mux.HandleFunc("GET /p/{project}/runs/{id}/{file}", s.handleRunFile)
-	mux.HandleFunc("GET /p/{project}/reports/{role}", s.handleReport)
-	mux.Handle("GET /p/{project}/review", s.handleReview())
-	mux.Handle("GET /p/{project}/verify", s.handleVerify())
-	mux.HandleFunc("GET /p/{project}/prompts", s.handlePrompts)
+	s.registerRoutes(mux)
 	return mux
 }
 
@@ -1173,26 +1164,12 @@ func TestHandleCodeSessionFilePathTraversal(t *testing.T) {
 	}
 }
 
-// newTestMuxAll wires the second-tier routes that newTestMux omits — used by
-// the sessions / code-sessions / report-history smoke tests.
-func newTestMuxAll(s *Server) *http.ServeMux {
-	mux := newTestMux(s)
-	mux.HandleFunc("GET /", s.handleHome)
-	mux.HandleFunc("GET /p/{project}/reports", s.handleReports)
-	mux.HandleFunc("GET /p/{project}/reports/{role}/history/{file}", s.handleReportHistory)
-	mux.HandleFunc("GET /p/{project}/sessions", s.handleSessions)
-	mux.HandleFunc("GET /p/{project}/sessions/{batch}", s.handleSessionDetail)
-	mux.HandleFunc("GET /p/{project}/code", s.handleCodeSessions)
-	mux.HandleFunc("GET /p/{project}/code/{session}", s.handleCodeSessionDetail)
-	return mux
-}
-
 // --- handleSessions tests ---
 
 func TestHandleSessionsReturnsOK(t *testing.T) {
 	projectDir := t.TempDir()
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 
 	req := httptest.NewRequest("GET", "/p/testproj/sessions", nil)
 	w := httptest.NewRecorder()
@@ -1215,7 +1192,7 @@ func TestHandleSessionsWithDatabase(t *testing.T) {
 	seedRun(t, projectDir, runner.ActionReport, "security")
 
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 	req := httptest.NewRequest("GET", "/p/testproj/sessions", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -1236,7 +1213,7 @@ func TestHandleSessionsWithDatabase(t *testing.T) {
 func TestHandleSessionsNotFoundBadProject(t *testing.T) {
 	projectDir := t.TempDir()
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 
 	req := httptest.NewRequest("GET", "/p/nonexistent/sessions", nil)
 	w := httptest.NewRecorder()
@@ -1267,7 +1244,7 @@ func TestHandleSessionDetailReturnsOK(t *testing.T) {
 	batch := row.Batch
 
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 	req := httptest.NewRequest("GET", "/p/testproj/sessions/"+batch, nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -1290,7 +1267,7 @@ func TestHandleSessionDetailUnknownBatch(t *testing.T) {
 	// in that actual behavior so the test fails loudly if it changes.
 	projectDir := t.TempDir()
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 
 	req := httptest.NewRequest("GET", "/p/testproj/sessions/no-such-batch", nil)
 	w := httptest.NewRecorder()
@@ -1307,7 +1284,7 @@ func TestHandleSessionDetailUnknownBatch(t *testing.T) {
 func TestHandleSessionDetailNotFoundBadProject(t *testing.T) {
 	projectDir := t.TempDir()
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 
 	req := httptest.NewRequest("GET", "/p/nonexistent/sessions/anything", nil)
 	w := httptest.NewRecorder()
@@ -1323,7 +1300,7 @@ func TestHandleSessionDetailNotFoundBadProject(t *testing.T) {
 func TestHandleCodeSessionsReturnsOK(t *testing.T) {
 	projectDir := t.TempDir()
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 
 	req := httptest.NewRequest("GET", "/p/testproj/code", nil)
 	w := httptest.NewRecorder()
@@ -1355,7 +1332,7 @@ func TestHandleCodeSessionsWithSession(t *testing.T) {
 	}
 
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 	req := httptest.NewRequest("GET", "/p/testproj/code", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -1372,7 +1349,7 @@ func TestHandleCodeSessionsWithSession(t *testing.T) {
 func TestHandleCodeSessionsNotFoundBadProject(t *testing.T) {
 	projectDir := t.TempDir()
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 
 	req := httptest.NewRequest("GET", "/p/nonexistent/code", nil)
 	w := httptest.NewRecorder()
@@ -1401,7 +1378,7 @@ func TestHandleCodeSessionDetailReturnsOK(t *testing.T) {
 	}
 
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 	req := httptest.NewRequest("GET", "/p/testproj/code/"+tsName, nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -1423,7 +1400,7 @@ func TestHandleCodeSessionDetailNotFoundUnknown(t *testing.T) {
 	// not exist (os.Stat fails) — this is the unknown-session case.
 	projectDir := t.TempDir()
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 
 	req := httptest.NewRequest("GET", "/p/testproj/code/no-such-session", nil)
 	w := httptest.NewRecorder()
@@ -1437,7 +1414,7 @@ func TestHandleCodeSessionDetailNotFoundUnknown(t *testing.T) {
 func TestHandleCodeSessionDetailNotFoundBadProject(t *testing.T) {
 	projectDir := t.TempDir()
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 
 	req := httptest.NewRequest("GET", "/p/nonexistent/code/anything", nil)
 	w := httptest.NewRecorder()
@@ -1455,7 +1432,7 @@ func TestHandleHomeSingleModeRedirects(t *testing.T) {
 	// sole project's overview in that case.
 	projectDir := t.TempDir()
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
@@ -1475,7 +1452,7 @@ func TestHandleHomeMultiProjectListsProjects(t *testing.T) {
 	projectDir := t.TempDir()
 	s := newTestServer(t, projectDir)
 	s.singleMode = false
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
@@ -1506,7 +1483,7 @@ func TestHandleReportsReturnsOK(t *testing.T) {
 	}
 
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 	req := httptest.NewRequest("GET", "/p/testproj/reports", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -1526,7 +1503,7 @@ func TestHandleReportsReturnsOK(t *testing.T) {
 func TestHandleReportsEmpty(t *testing.T) {
 	projectDir := t.TempDir()
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 
 	req := httptest.NewRequest("GET", "/p/testproj/reports", nil)
 	w := httptest.NewRecorder()
@@ -1543,7 +1520,7 @@ func TestHandleReportsEmpty(t *testing.T) {
 func TestHandleReportsNotFoundBadProject(t *testing.T) {
 	projectDir := t.TempDir()
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 
 	req := httptest.NewRequest("GET", "/p/nonexistent/reports", nil)
 	w := httptest.NewRecorder()
@@ -1567,7 +1544,7 @@ func TestHandleReportHistoryReturnsOK(t *testing.T) {
 	}
 
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 	req := httptest.NewRequest("GET", "/p/testproj/reports/security/history/"+histFile, nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -1589,7 +1566,7 @@ func TestHandleReportHistoryNotFoundUnknownRole(t *testing.T) {
 	// — unknown-role-shaped URLs must not reach serveHistoryFile.
 	projectDir := t.TempDir()
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 
 	req := httptest.NewRequest("GET", "/p/testproj/reports/totally-not-a-role/history/some.md", nil)
 	w := httptest.NewRecorder()
@@ -1603,7 +1580,7 @@ func TestHandleReportHistoryNotFoundUnknownRole(t *testing.T) {
 func TestHandleReportHistoryNotFoundBadProject(t *testing.T) {
 	projectDir := t.TempDir()
 	s := newTestServer(t, projectDir)
-	mux := newTestMuxAll(s)
+	mux := newTestMux(s)
 
 	req := httptest.NewRequest("GET", "/p/nonexistent/reports/security/history/some.md", nil)
 	w := httptest.NewRecorder()

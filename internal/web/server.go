@@ -268,18 +268,10 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, tmplName string,
 	}
 }
 
-// ListenAndServe starts the HTTP server. Port 0 means a random available port.
-// If openBrowser is true, opens the URL in the default browser before serving.
-func (s *Server) ListenAndServe(port int, openBrowser bool, host string) error {
-	mux := http.NewServeMux()
-
-	staticSub, err := fs.Sub(staticFS, "static")
-	if err != nil {
-		return fmt.Errorf("embedded static files: %w", err)
-	}
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
-
-	// Routes
+// registerRoutes wires every dynamic handler onto mux. Kept separate from
+// ListenAndServe so tests can build a ServeMux with the same route table the
+// production server uses instead of duplicating it.
+func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /", s.handleHome)
 	mux.HandleFunc("GET /p/{project}/", s.handleOverview)
 	mux.HandleFunc("GET /p/{project}/reports", s.handleReports)
@@ -300,6 +292,20 @@ func (s *Server) ListenAndServe(port int, openBrowser bool, host string) error {
 	mux.HandleFunc("GET /p/{project}/code", s.handleCodeSessions)
 	mux.HandleFunc("GET /p/{project}/code/{session}", s.handleCodeSessionDetail)
 	mux.HandleFunc("GET /p/{project}/code/{session}/{file}", s.handleCodeSessionFile)
+}
+
+// ListenAndServe starts the HTTP server. Port 0 means a random available port.
+// If openBrowser is true, opens the URL in the default browser before serving.
+func (s *Server) ListenAndServe(port int, openBrowser bool, host string) error {
+	mux := http.NewServeMux()
+
+	staticSub, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		return fmt.Errorf("embedded static files: %w", err)
+	}
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+
+	s.registerRoutes(mux)
 
 	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", host, port))
 	if err != nil {

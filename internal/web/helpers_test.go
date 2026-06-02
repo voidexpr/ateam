@@ -281,7 +281,7 @@ func TestEnrichHistoryCost(t *testing.T) {
 	enrichHistoryCost(entries, nil)
 }
 
-func TestPromptDir(t *testing.T) {
+func TestHistoryDirFor(t *testing.T) {
 	tests := []struct {
 		action string
 		role   string
@@ -295,9 +295,9 @@ func TestPromptDir(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.action+"/"+tt.role, func(t *testing.T) {
-			got := promptDir(tt.action, tt.role)
+			got := runner.HistoryDirFor(tt.action, tt.role)
 			if got != tt.want {
-				t.Errorf("promptDir(%q, %q) = %q, want %q", tt.action, tt.role, got, tt.want)
+				t.Errorf("HistoryDirFor(%q, %q) = %q, want %q", tt.action, tt.role, got, tt.want)
 			}
 		})
 	}
