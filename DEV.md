@@ -95,6 +95,15 @@ The user-facing assembly model (anchor chain, filename patterns, `FirstMatch` vs
 - `ReplaceRoleMain` — swaps in caller text as the role's main body; all surrounding framing (pre/post fragments, CLI wrappers) still composes. Used by `ateam review --prompt` and `ateam code --prompt`.
 - `PrePrompt` — wrapped at the very front, before any anchor content (`--pre-prompt`).
 - `PostPrompt` — wrapped at the very end, after every anchor section (`--post-prompt`).
+- `--extra-prompt` — *not* handled by the assembler; the cmd layer appends it after the assembled body under an `# Additional Instructions` heading (see `assembleRoleReport` in `cmd/report_assemble.go`).
+
+Canonical wrap order:
+
+```
+anchors → dir-level _pre/_post → role-level pre/post → --pre-prompt (head) / --post-prompt (tail)
+```
+
+`--extra-prompt` slots in after the assembled body and before `--post-prompt`. The standardized flag set and usage strings live in `cmd/prompt_wrap_flags.go` (single source of truth).
 
 ### Role code prompts vs. supervisor code phase
 

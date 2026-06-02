@@ -439,8 +439,6 @@ func TestRunExecFormatJSONL_EndToEnd(t *testing.T) {
 
 	saved := saveExecGlobals()
 	defer saved.restore()
-	savedFormat, savedFD := execFormat, execProgressFD
-	defer func() { execFormat = savedFormat; execProgressFD = savedFD }()
 
 	orgFlag = orgParent
 	execProfile = "test" // mock agent
@@ -463,44 +461,20 @@ func TestRunExecFormatJSONL_EndToEnd(t *testing.T) {
 
 	// Every non-empty stdout line must parse as JSON, and the events must
 	// carry both bundle and agent sources.
-	sawBundle, sawAgent := false, false
-	bundleKinds := map[string]bool{}
-	lines := strings.Split(strings.TrimRight(stdoutBuf, "\n"), "\n")
-	for i, line := range lines {
-		if line == "" {
-			continue
-		}
-		var event map[string]any
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			t.Fatalf("stdout line %d not valid JSON: %q: %v", i, line, err)
-		}
-		switch event["source"] {
-		case "bundle":
-			sawBundle = true
-			if k, ok := event["kind"].(string); ok {
-				bundleKinds[k] = true
-			}
-		case "agent":
-			sawAgent = true
-		}
-	}
-	if !sawBundle {
+	stdoutKinds, stdoutSources := parseBundleJSONL(t, stdoutBuf, "stdout")
+	if !stdoutSources["bundle"] {
 		t.Errorf("expected at least one source:bundle event on stdout")
 	}
-	if !sawAgent {
+	if !stdoutSources["agent"] {
 		t.Errorf("expected at least one source:agent event on stdout")
 	}
-	for _, want := range []string{"bundle_start", "agent_exec_start", "agent_exec_end", "bundle_end"} {
-		if !bundleKinds[want] {
-			t.Errorf("missing bundle kind %q on stdout; got %v", want, bundleKinds)
-		}
-	}
+	assertBundleLifecycleKinds(t, stdoutKinds, "stdout")
 
 	// Agent response text must not leak as a bare plaintext line — that
 	// would be the symptom of fmt.Print(result.Output) firing under
 	// --format jsonl. (Inside JSON-encoded assistant `content` fields is
 	// expected and fine; only standalone lines are a contract bug.)
-	for _, line := range lines {
+	for _, line := range strings.Split(strings.TrimRight(stdoutBuf, "\n"), "\n") {
 		if strings.TrimSpace(line) == "mock response" {
 			t.Errorf("bare plaintext mock response leaked to stdout: %q", line)
 		}
@@ -522,22 +496,41 @@ func TestRunExecFormatJSONL_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v", bundlePath, err)
 	}
-	diskKinds := map[string]bool{}
-	for _, line := range strings.Split(strings.TrimRight(string(raw), "\n"), "\n") {
+	diskKinds, _ := parseBundleJSONL(t, string(raw), "bundle.jsonl")
+	assertBundleLifecycleKinds(t, diskKinds, "bundle.jsonl on disk")
+}
+
+// parseBundleJSONL parses each non-empty newline-delimited JSON event in raw
+// and returns the set of "kind" and "source" string fields seen. It fatally
+// fails t with label and the offending line if any line is not valid JSON.
+func parseBundleJSONL(t *testing.T, raw, label string) (kinds, sources map[string]bool) {
+	t.Helper()
+	kinds, sources = map[string]bool{}, map[string]bool{}
+	for i, line := range strings.Split(strings.TrimRight(raw, "\n"), "\n") {
 		if line == "" {
 			continue
 		}
 		var event map[string]any
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			t.Fatalf("bundle.jsonl line not valid JSON: %q: %v", line, err)
+			t.Fatalf("%s line %d not valid JSON: %q: %v", label, i, line, err)
 		}
 		if k, ok := event["kind"].(string); ok {
-			diskKinds[k] = true
+			kinds[k] = true
+		}
+		if s, ok := event["source"].(string); ok {
+			sources[s] = true
 		}
 	}
+	return
+}
+
+// assertBundleLifecycleKinds fails t for any documented bundle lifecycle kind
+// missing from kinds. label is included in the failure message.
+func assertBundleLifecycleKinds(t *testing.T, kinds map[string]bool, label string) {
+	t.Helper()
 	for _, want := range []string{"bundle_start", "agent_exec_start", "agent_exec_end", "bundle_end"} {
-		if !diskKinds[want] {
-			t.Errorf("bundle.jsonl on disk missing kind %q; got %v", want, diskKinds)
+		if !kinds[want] {
+			t.Errorf("%s missing bundle kind %q; got %v", label, want, kinds)
 		}
 	}
 }
@@ -562,8 +555,6 @@ func TestRunExecPrintsExecIDOnStderr(t *testing.T) {
 
 			saved := saveExecGlobals()
 			defer saved.restore()
-			savedFormat, savedFD := execFormat, execProgressFD
-			defer func() { execFormat = savedFormat; execProgressFD = savedFD }()
 
 			orgFlag = orgParent
 			execProfile = "test"
