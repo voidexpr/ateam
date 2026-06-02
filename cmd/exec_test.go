@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/ateam/internal/agent"
@@ -425,9 +426,11 @@ func TestOpenProgressFD(t *testing.T) {
 
 func TestOpenProgressFD_RealPipe(t *testing.T) {
 	// Pipe one end into openProgressFD via its raw fd and verify a
-	// subsequent write reaches the other end. The returned closer owns
-	// the raw fd; pw and the closer share the same fd, so closing both
-	// would double-close — close only pw via defer.
+	// subsequent write reaches the other end. openProgressFD wraps the
+	// passed fd in an os.File with a GC finalizer that closes it; we
+	// dup pw's fd so the wrapper owns an independent fd. Otherwise the
+	// finalizer would later close a recycled fd belonging to a
+	// completely unrelated test (e.g. a stdout capture pipe).
 	pr, pw, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("os.Pipe: %v", err)
@@ -435,10 +438,17 @@ func TestOpenProgressFD_RealPipe(t *testing.T) {
 	defer pr.Close()
 	defer pw.Close()
 
-	w, _, err := openProgressFD("jsonl", int(pw.Fd()))
+	dupFd, err := syscall.Dup(int(pw.Fd()))
 	if err != nil {
+		t.Fatalf("dup: %v", err)
+	}
+	w, closer, err := openProgressFD("jsonl", dupFd)
+	if err != nil {
+		syscall.Close(dupFd)
 		t.Fatalf("openProgressFD: %v", err)
 	}
+	defer closer.Close()
+
 	if _, err := w.Write([]byte("hi\n")); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -450,7 +460,8 @@ func TestOpenProgressFD_RealPipe(t *testing.T) {
 		n, _ = pr.Read(buf)
 		close(done)
 	}()
-	// Trigger read by closing pw which signals EOF after the buffered "hi".
+	// Close both write ends so pr sees EOF after the buffered "hi".
+	closer.Close()
 	pw.Close()
 	<-done
 	if string(buf[:n]) != "hi\n" {
