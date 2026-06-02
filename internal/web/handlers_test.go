@@ -154,6 +154,9 @@ func TestHandleOverviewWithDatabase(t *testing.T) {
 	if !strings.Contains(body, "testproj") {
 		t.Error("expected project name in response body")
 	}
+	if !strings.Contains(body, "security") {
+		t.Error("expected seeded role 'security' in overview body")
+	}
 }
 
 func TestHandleOverviewShowAll(t *testing.T) {
@@ -494,6 +497,10 @@ func TestHandleCostWithDatabase(t *testing.T) {
 	if !strings.Contains(body, "testproj") {
 		t.Error("expected project name in cost page body")
 	}
+	// Two seeded calls at $0.10 each → total $0.20. fmtCost renders "$0.20".
+	if !strings.Contains(body, "0.20") {
+		t.Error("expected total cost '0.20' in cost page body")
+	}
 }
 
 // --- handleRuns tests ---
@@ -566,6 +573,9 @@ func TestHandleRunReturnsOK(t *testing.T) {
 	body := w.Body.String()
 	if !strings.Contains(body, "testproj") {
 		t.Error("expected project name in run detail body")
+	}
+	if !strings.Contains(body, "security") {
+		t.Error("expected seeded role 'security' in run detail body")
 	}
 }
 
