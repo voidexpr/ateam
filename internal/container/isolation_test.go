@@ -114,6 +114,10 @@ func TestSandboxLayerIsOffByDefault(t *testing.T) {
 
 func TestSandboxLayerFiresWhenEnabled(t *testing.T) {
 	withCleanIsolation(t, func() {
+		// Disable the docker layer so /.dockerenv (e.g. inside the
+		// docker-in-docker test environment) doesn't pre-empt the
+		// sandbox layer we want to exercise.
+		SetDockerDetection(false)
 		SetSandboxDetection(true)
 		t.Setenv("FENCE_SANDBOX", "1")
 		if got := IsolationSource(); got != "fence" {
@@ -124,6 +128,7 @@ func TestSandboxLayerFiresWhenEnabled(t *testing.T) {
 
 func TestFirejailEnvTriggersWhenEnabled(t *testing.T) {
 	withCleanIsolation(t, func() {
+		SetDockerDetection(false) // see TestSandboxLayerFiresWhenEnabled
 		SetSandboxDetection(true)
 		t.Setenv("FIREJAIL_NAME", "x")
 		if got := IsolationSource(); got != "firejail" {
@@ -134,6 +139,7 @@ func TestFirejailEnvTriggersWhenEnabled(t *testing.T) {
 
 func TestSystemdContainerEnvVar(t *testing.T) {
 	withCleanIsolation(t, func() {
+		SetDockerDetection(false) // see TestSandboxLayerFiresWhenEnabled
 		SetSandboxDetection(true)
 		t.Setenv("container", "docker")
 		if got := IsolationSource(); got != "container=docker" {

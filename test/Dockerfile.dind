@@ -11,6 +11,11 @@
 # Stage 1: download modules and warm build cache in a known-good environment.
 FROM golang:alpine AS modules
 RUN apk add --no-cache git
+# golang:alpine ships a frozen toolchain and sets GOTOOLCHAIN=local; when
+# go.mod requires a newer minor (e.g. 1.26.4 vs the image's 1.26.3) the
+# build fails. Flipping to "auto" lets Go fetch the required toolchain
+# on demand, so the Dockerfile doesn't need bumping every go.mod update.
+ENV GOTOOLCHAIN=auto
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
