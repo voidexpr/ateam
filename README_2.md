@@ -243,9 +243,9 @@ Full reference: [COMMANDS.md](COMMANDS.md).
 
 ## Note about maturity and cost
 
-ATeam was started in February 2026 and has been used mostly on vibe coded project (including itself). The approach is validated: it improves code bases and saves attention, projects shape up while spending a fraction of the effort it would take by direct prompting.
+ATeam was started in February 2026 and has been used mostly on projects where the code is owned by coding agents (including ateam itself). The approach is validated: it improves codebases and saves attention, projects shape up while spending a fraction of the effort it would take by direct prompting.
 
-But ateam runs are also not free, especially once the mid June 2026 Claude subscription price for unattended agent increases. It still seems well worth it, maybe it is ran less often than every day or with more targeted roles. Built-in prompts have already gone through a round of token usage reduction but more will be done in the future to reduce token usage. A core realization while working with coding agents is that the cost of building features might not even be half of the true cost of building quality software.
+But ateam runs are also not free, especially once the mid June 2026 Claude subscription price for unattended-use increases. It still seems well worth it, maybe it is ran less often than every day or with more targeted roles. Built-in prompts have already gone through a round of token usage reduction but more will be done in the future to reduce token usage. A core realization while working with coding agents is that the cost of building features might not even be half of the true cost of building quality software.
 
 ## Docs
 
