@@ -61,7 +61,7 @@ func runClaude(cmd *cobra.Command, args []string) error {
 	if !container.IsInDockerContainer() {
 		return fmt.Errorf("ateam claude must be run inside a Docker container " +
 			"(no /.dockerenv or /run/.containerenv found, and ATEAM_IN_CONTAINER not set); " +
-			"sandbox-layer detection is intentionally ignored here — set ATEAM_IN_CONTAINER=1 to override if you know what you're doing")
+			"sandbox-layer detection (Seatbelt/bwrap/fence/firejail/...) is intentionally ignored here — set ATEAM_IN_CONTAINER=1 to override if you know what you're doing")
 	}
 
 	configDir := claudeConfigDir

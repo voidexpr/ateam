@@ -11,7 +11,7 @@ All commands accept:
 | `--org PATH` | `-o` | Organization path override (skips auto-discovery) |
 | `--project PATH` | `-p` | Project path override (skips auto-discovery). |
 | `--work-dir PATH` |       | Agent working directory (overrides the project-aware default). |
-| `--sandbox-detection true\|false` |       | Toggle auto-detection of an outer non-container sandbox (fence, firejail, macOS Seatbelt, Linux bwrap). Built-in default `false` — opt in when running ateam under fence/firejail. Overrides `runtime.hcl` `sandbox_detection`. See [ISOLATION.md](ISOLATION.md#detection-of-an-outer-sandbox-or-container). |
+| `--sandbox-detection true\|false` |       | Toggle auto-detection of an outer non-container sandbox. Signal-driven: macOS Seatbelt (sandbox-exec probe), Linux user namespace / Seccomp / NoNewPrivs (/proc), cooperative env vars (`FENCE_SANDBOX`, `FIREJAIL_NAME`, `container=…`). Built-in default `false` — opt in when knowingly running ateam under any outer sandbox. Overrides `runtime.hcl` `sandbox_detection`. See [ISOLATION.md](ISOLATION.md#detection-of-an-outer-sandbox-or-container). |
 | `--docker-detection true\|false` |       | Toggle auto-detection of `/.dockerenv` / `/run/.containerenv`. Built-in default `true`. Overrides `runtime.hcl` `docker_detection`. |
 
 `report`, `code`, `review`, `verify`, and `all` require their work-dir to be inside a git repo or worktree; `exec` and `parallel` work in any directory.

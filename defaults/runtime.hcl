@@ -197,10 +197,20 @@ locals {
 // Always-on (cannot be disabled here): ATEAM_IN_CONTAINER=1.
 docker_detection = true
 
-// Detection of an outer NON-container sandbox — fence, firejail, macOS
-// Seatbelt, or a Linux bubblewrap-style namespace. When detected with
-// this toggle on, ateam treats the outer sandbox as a container, so
-// the agent skips its inner sandbox (same logic as docker_detection).
+// Detection of an outer NON-container sandbox — any process-level
+// isolation layer that wraps ateam itself. The implementation is
+// signal-driven, not tool-name-driven, so it picks up anything that
+//   - exports a known env var: FENCE_SANDBOX, FIREJAIL_NAME, container=…
+//   - applies macOS Seatbelt (caught by an ~46ms sandbox-exec probe —
+//     fires for fence, sandbox-exec wrappers, App Sandbox apps,
+//     Claude Code's own session, etc.)
+//   - puts the process in a divergent Linux user namespace, or sets a
+//     Seccomp filter / NoNewPrivs flag (caught by /proc reads — fires
+//     for bubblewrap, firejail, Docker, Podman, systemd hardening, …)
+//
+// When detected with this toggle on, ateam treats the outer sandbox
+// as a container, so the agent skips its inner sandbox (same logic as
+// docker_detection — nested sandboxes generally fail).
 //
 // Default false: the underlying signals can have false positives that
 // silently drop defense in depth. For example, systemd-hardened user
@@ -208,11 +218,12 @@ docker_detection = true
 // being inside an outer sandbox; a false positive there would tell
 // the agent to run with --dangerously-skip-permissions on a bare host.
 //
-// Opt in (true) when you knowingly run ateam under fence, firejail,
-// etc. — set it in .ateamorg/runtime.hcl so the choice is versioned.
-// When this is false and ateam detects probable outer isolation
-// anyway (via the toggleable signals), it prints a one-line warning
-// before each agent run pointing at this setting.
+// Opt in (true) when you knowingly run ateam under an outer sandbox
+// (e.g. fence on macOS or Linux, firejail, sandbox-exec wrapper,
+// bubblewrap, …) — set it in .ateamorg/runtime.hcl so the choice is
+// versioned. When this is false and ateam detects probable outer
+// isolation anyway, it prints a one-line warning before each agent run
+// pointing at this setting.
 //
 // Always-on (cannot be disabled here): ATEAM_IN_SANDBOX=1.
 //

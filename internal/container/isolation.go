@@ -192,10 +192,12 @@ func WarnIfInSandbox(action string) {
 	}
 	warnOnce.Do(func() {
 		fmt.Fprintf(os.Stderr,
-			"Warning: ateam appears to be inside an outer sandbox (source: %s) but is about to %s.\n"+
-				"  Nested isolation usually fails. If this fails, set sandbox_detection = true\n"+
-				"  in runtime.hcl (or pass --sandbox-detection=true) so ateam treats the outer\n"+
-				"  sandbox as a container and skips the agent's inner sandbox.\n",
+			"Warning: ateam appears to be inside an outer sandbox (source: %s — could be\n"+
+				"  macOS Seatbelt, Linux bubblewrap/firejail, fence, or anything else that\n"+
+				"  trips the same signals) but is about to %s. Nested isolation usually fails.\n"+
+				"  If it does, set sandbox_detection = true in runtime.hcl (or pass\n"+
+				"  --sandbox-detection=true) so ateam treats the outer sandbox as a container\n"+
+				"  and skips the agent's inner sandbox.\n",
 			src, action)
 	})
 }

@@ -500,19 +500,25 @@ ATeam auto-detects the binary and mounts it at `/usr/local/bin/ateam` inside the
 
 ## Detection of an outer sandbox or container
 
-When ateam runs inside an outer isolation layer (Docker, Podman, fence, firejail, macOS Seatbelt, Linux bubblewrap), it switches the agent into "container mode": `args_inside_container` kicks in (claude gets `--dangerously-skip-permissions`) and the agent's own inner sandbox is skipped, because nested sandboxes generally fail.
+When ateam runs inside an outer isolation layer, it switches the agent into "container mode": `args_inside_container` kicks in (claude gets `--dangerously-skip-permissions`) and the agent's own inner sandbox is skipped, because nested sandboxes generally fail.
 
-Detection has three layers:
+Detection is signal-driven, not tool-name-driven: anything that puts the process under one of the known signals is picked up the same way. Three layers:
 
 | Layer | Signals | Toggle | Default |
 |---|---|---|---|
 | Always-on | `ATEAM_IN_CONTAINER=1`, `ATEAM_IN_SANDBOX=1` | — | — |
-| Docker | `/.dockerenv`, `/run/.containerenv` | `docker_detection` / `--docker-detection` | `true` |
-| Sandbox | `FENCE_SANDBOX`, `FIREJAIL_NAME`, `container=…`, macOS `sandbox-exec` probe, Linux `/proc/self/ns/user` divergence / `Seccomp:` / `NoNewPrivs:` | `sandbox_detection` / `--sandbox-detection` | `false` |
+| Docker | `/.dockerenv` (Docker), `/run/.containerenv` (Podman) | `docker_detection` / `--docker-detection` | `true` |
+| Sandbox | macOS `sandbox-exec` probe (fires for any active Seatbelt); Linux `/proc/self/ns/user` divergence vs PID 1 + `Seccomp:` + `NoNewPrivs:`; cooperative env vars `FENCE_SANDBOX`, `FIREJAIL_NAME`, `container=…` | `sandbox_detection` / `--sandbox-detection` | `false` |
+
+What the sandbox layer catches in practice:
+
+- **macOS**: anything Seatbelt-wrapped — `sandbox-exec`-launched shells, fence, App Sandbox apps, Claude Code's own session. The probe (`sandbox-exec -p '(version 1)(allow default)' /usr/bin/true`) takes ~46ms once per process and is cached.
+- **Linux**: anything using user namespaces, seccomp, or no-new-privs — bubblewrap (which fence uses on Linux), firejail, Docker, Podman, systemd-hardened user services.
+- **Both**: any tool that announces itself via the cooperative env vars above.
 
 The sandbox layer is **off by default** because its signals can have false positives (e.g. systemd-hardened user services trip the Linux probe without being inside an outer sandbox). A false positive would silently drop the agent's inner sandbox on a bare host — fail-loud is better than silently unsandboxed.
 
-When you knowingly run ateam under fence / firejail / Seatbelt, enable it explicitly in `runtime.hcl`:
+When you knowingly run ateam under an outer sandbox, enable it explicitly in `runtime.hcl`:
 
 ```hcl
 sandbox_detection = true
@@ -524,17 +530,17 @@ sandbox_detection = true
 ateam --sandbox-detection=true exec "..."
 ```
 
-When sandbox detection is off but ateam still detects probable outer isolation (via the probes), `ateam env` shows it as `Sandbox detected: yes (fence) — sandbox_detection=false, NOT applied`, and the runner prints a one-time stderr warning before each agent run.
+When sandbox detection is off but ateam still detects probable outer isolation (via the probes), `ateam env` shows it as `Sandbox detected: yes (<source>) — sandbox_detection=false, NOT applied`, and the runner prints a one-time stderr warning before each agent run pointing at this setting.
 
-`ateam env` shows the full matrix:
+`ateam env` shows the full state:
 
 ```
 Agent in container mode: false
   Docker  detected: no — docker_detection=true
-  Sandbox detected: yes (fence) — sandbox_detection=false, NOT applied
+  Sandbox detected: yes (macos:seatbelt) — sandbox_detection=false, NOT applied
 ```
 
-The headline reads `true (via docker)` or `true (via sandbox)` when container mode is triggered.
+The headline reads `true (via docker)` or `true (via sandbox)` when container mode is triggered. The `<source>` in the matrix row is one of: `fence`, `firejail`, `container=<runtime>`, `macos:seatbelt`, `linux:userns-diverged`, `linux:seccomp`, `linux:nnp`, or the raw `env:ATEAM_IN_SANDBOX` / marker path when an always-on or docker signal fires.
 
 ## Troubleshooting
 
