@@ -136,7 +136,7 @@ Full details: [CONFIG.md](CONFIG.md).
 - **code**: coding agents implement the top tasks, commit small changes
 - **verify**: supervisor inspects the commits and runs tests
 
-Roles are single markdown prompt files. Built-in ones cover code bugs, recent-change review, structure, architecture, internal/external docs, automation, dependencies, security, test gaps, and recent-test coverage. Add your own by dropping a file in `.ateam/prompts/report/`.
+Roles are simple markdown prompt files, you can add your own by dropping a file in `.ateam/prompts/report/`, see [CONFIG.md](CONFIG.md)
 
 #### As a primitive
 
@@ -145,12 +145,15 @@ Roles are single markdown prompt files. Built-in ones cover code bugs, recent-ch
 ```bash
 ateam exec "audit recent changes for bugs" --agent codex
 ateam parallel "@prompts/security.md" "@prompts/tests.md"
-ateam exec "review findings in $REPORT and apply the fixes" --agent claude
+ateam exec --agent claude <<EOF
+review findings in $REPORT and apply the fixes
+EOF
+
+# observe the agent stream logs of all running processes
+ateam tail
 ```
 
 ## Examples
-
-A few flavors of how people use it:
 
 #### Daily pass on recent changes
 ```bash
@@ -161,14 +164,14 @@ Quick, focused, cheap. Good before a PR or as a recurring run.
 #### Adversarial review — Codex critiques, Claude implements
 ```bash
 ateam exec "critical review of recent changes into review.md" --agent codex-high
-ateam exec "review.md → apply fixes, commit each separately"  --agent claude-high
+ateam exec "review.md → apply fixes and push back on what you disagree with, commit each separately"  --agent claude-high
 ```
 Two agents, two viewpoints. The CLI primitive lets you compose any pattern in shell.
 
-A more complete version of this can be found in:
+More complete version of this can be found in:
 * `scripts/codex-reviews-claude-codes.sh`: basically what is above but leveraging codex-tmux to call /review which is only available in TUI mode
 * `scripts/critical-code-review.sh`: multiple rounds selecting any agent
-* `scripts/double-review.sh`: run both codex-tmux /review and claude /code-review in parallel, then use both reports to address the issues
+* `scripts/double-review.sh`: run both codex-tmux /review and claude /code-review in parallel, then merge reports and code the fixes as a 3rd agent run.
 
 #### Background quality on a fast-moving project
 ```bash
@@ -213,7 +216,7 @@ The exact isolation is configuration driven so highly customizable.
 │ │ └─────────────────────────────┘ │ │   │ │ └─────────────────────────────┘ │ │
 │ └─────────────────────────────────┘ │   │ └─────────────────────────────────┘ │
 └─────────────────────────────────────┘   └─────────────────────────────────────┘
-③ Docker exec — --profile docker-exec     ④ ATeam inside Docker — container-native
+③ Docker exec — --profile docker-exec     ④ ATeam inside Docker or a sandbox — container-native
 ```
 
 | Approach | How it works | Best for |
@@ -222,7 +225,7 @@ The exact isolation is configuration driven so highly customizable.
 | **Built-in sandbox** and **separate agent configuration** | Same as above but don't share the same configuration as interactive agents (different hooks, ...) | Useful when the default agent configuration is highly customized with notifications |
 | **Docker one-shot** | Fresh Linux container built and run per command | Strong isolation; need build/test tooling |
 | **Docker exec** | Exec into an existing user-managed container (docker-compose, devcontainer, …) | You already run a long-lived dev container |
-| **ATeam inside Docker** | Run ateam itself from inside a container; agents inherit container isolation and runs without any restriction | Docker-native projects |
+| **ATeam inside a container** | Run ateam itself from inside a container (Docker or an OS-native sandbox like [fence](https://github.com/fencesandbox/fence)); agents inherit container isolation and runs without any restriction | Docker-native projects or sandbox ateam itself if you don't trust it |
 | **None** | No isolation (agent runs directly on host) | Debugging only |
 
 By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for one-shot container isolation or `--profile docker-exec` to exec into an existing container. See `defaults/runtime.hcl` for all profiles.
