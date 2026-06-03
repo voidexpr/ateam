@@ -231,11 +231,13 @@ ateam exec "do something"
 ateam report
 ```
 
-The `claude` agent auto-detects `/.dockerenv` and:
+The `claude` agent auto-detects `/.dockerenv` (or `/run/.containerenv` for Podman) and:
 - skips the sandbox (container provides isolation)
 - adds `--dangerously-skip-permissions` (no interactive prompts)
 
 No `--profile` switch needed — the default profile works inside containers.
+
+See [Detection of an outer sandbox or container](#detection-of-an-outer-sandbox-or-container) below for the full layered detection scheme (including fence/firejail/Seatbelt/bwrap) and the `--sandbox-detection` / `--docker-detection` toggles.
 
 Alternatively, build a single Dockerfile that already includes ateam:
 
@@ -269,8 +271,8 @@ agent "claude" {
 
 | Context | Sandbox | Permissions |
 |---------|---------|-------------|
-| Host (no container) | Applied | Required |
-| Inside Docker (detected via `/.dockerenv`) | Skipped (container is the sandbox) | Skipped |
+| Host (no container, no outer sandbox detected/applied) | Applied | Required |
+| Container or outer sandbox detected (see [Detection](#detection-of-an-outer-sandbox-or-container)) | Skipped (outer layer is the sandbox) | Skipped |
 
 Override by writing a custom agent:
 
@@ -338,7 +340,7 @@ Use `ateam env` to see every configured credential (including shadowed ones) and
 |---------|-----------|-----------|
 | Host (no container) | Skipped — agents handle their own auth | Always runs |
 | Container (`--profile docker`) | Required — at least one credential must be resolvable | Always runs |
-| Inside container (`/.dockerenv`) | Required | Always runs |
+| Inside container (auto-detected — see [Detection](#detection-of-an-outer-sandbox-or-container)) | Required | Always runs |
 
 On the host, if no `ateam secret` is configured and no credential env vars are set, ateam does not error — the agent authenticates itself (e.g., interactive Claude Code login, macOS Keychain). Inside containers, where interactive login isn't available, at least one credential must be resolvable.
 
@@ -495,6 +497,44 @@ make companion    # produces build/ateam-linux-<arch>
 ```
 
 ATeam auto-detects the binary and mounts it at `/usr/local/bin/ateam` inside the container.
+
+## Detection of an outer sandbox or container
+
+When ateam runs inside an outer isolation layer (Docker, Podman, fence, firejail, macOS Seatbelt, Linux bubblewrap), it switches the agent into "container mode": `args_inside_container` kicks in (claude gets `--dangerously-skip-permissions`) and the agent's own inner sandbox is skipped, because nested sandboxes generally fail.
+
+Detection has three layers:
+
+| Layer | Signals | Toggle | Default |
+|---|---|---|---|
+| Always-on | `ATEAM_IN_CONTAINER=1`, `ATEAM_IN_SANDBOX=1` | — | — |
+| Docker | `/.dockerenv`, `/run/.containerenv` | `docker_detection` / `--docker-detection` | `true` |
+| Sandbox | `FENCE_SANDBOX`, `FIREJAIL_NAME`, `container=…`, macOS `sandbox-exec` probe, Linux `/proc/self/ns/user` divergence / `Seccomp:` / `NoNewPrivs:` | `sandbox_detection` / `--sandbox-detection` | `false` |
+
+The sandbox layer is **off by default** because its signals can have false positives (e.g. systemd-hardened user services trip the Linux probe without being inside an outer sandbox). A false positive would silently drop the agent's inner sandbox on a bare host — fail-loud is better than silently unsandboxed.
+
+When you knowingly run ateam under fence / firejail / Seatbelt, enable it explicitly in `runtime.hcl`:
+
+```hcl
+sandbox_detection = true
+```
+
+…or per-invocation:
+
+```bash
+ateam --sandbox-detection=true exec "..."
+```
+
+When sandbox detection is off but ateam still detects probable outer isolation (via the probes), `ateam env` shows it as `Sandbox detected: yes (fence) — sandbox_detection=false, NOT applied`, and the runner prints a one-time stderr warning before each agent run.
+
+`ateam env` shows the full matrix:
+
+```
+Agent in container mode: false
+  Docker  detected: no — docker_detection=true
+  Sandbox detected: yes (fence) — sandbox_detection=false, NOT applied
+```
+
+The headline reads `true (via docker)` or `true (via sandbox)` when container mode is triggered.
 
 ## Troubleshooting
 

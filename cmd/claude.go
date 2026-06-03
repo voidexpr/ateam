@@ -9,8 +9,8 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/root"
-	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
 )
 
@@ -58,8 +58,10 @@ func runClaude(cmd *cobra.Command, args []string) error {
 	if goruntime.GOOS != "linux" {
 		return fmt.Errorf("ateam claude is only supported on Linux (current: %s)", goruntime.GOOS)
 	}
-	if !runner.IsInContainer() {
-		return fmt.Errorf("ateam claude must be run inside a Docker container (no /.dockerenv found)")
+	if !container.IsInDockerContainer() {
+		return fmt.Errorf("ateam claude must be run inside a Docker container " +
+			"(no /.dockerenv or /run/.containerenv found, and ATEAM_IN_CONTAINER not set); " +
+			"sandbox-layer detection is intentionally ignored here — set ATEAM_IN_CONTAINER=1 to override if you know what you're doing")
 	}
 
 	configDir := claudeConfigDir

@@ -449,6 +449,21 @@ func (r *AgentExecutor) ExecutePrepared(ctx context.Context, prepared *PreparedR
 	// Skip when: already inside a container, OR launching into a container (r.Container != nil),
 	// unless sandbox_inside_container is explicitly true.
 	skipSandbox := (IsInContainer() || r.Container != nil) && !r.Sandbox.InsideContainer
+
+	// One central warning for all three agent types: if ateam itself
+	// appears to be inside an outer sandbox (fence / firejail /
+	// Seatbelt / bwrap) and we're about to apply isolation that
+	// usually fails to nest — either the agent's own inner sandbox or
+	// a container — point the user at sandbox_detection so they don't
+	// chase a confusing nested-isolation failure. Inner sandbox takes
+	// precedence as the action label when both apply.
+	switch {
+	case r.Sandbox.Settings != "" && !skipSandbox:
+		container.WarnIfInSandbox("apply the agent's inner sandbox")
+	case r.Container != nil && r.Container.Type() != "none":
+		container.WarnIfInSandbox("run the agent inside a container")
+	}
+
 	var settingsJSON []byte
 	if r.Sandbox.Settings != "" && !skipSandbox {
 		var serr error

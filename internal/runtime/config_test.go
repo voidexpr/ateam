@@ -1279,3 +1279,50 @@ func TestIsolatedProfile(t *testing.T) {
 		t.Errorf("expected agent 'claude-isolated', got %q", prof.Agent)
 	}
 }
+
+func TestSandboxDetectionTopLevel(t *testing.T) {
+	// Defaults set sandbox_detection = false and docker_detection = true
+	// explicitly. The values must be discoverable in `ateam env` and in
+	// the rendered defaults file.
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("Load defaults: %v", err)
+	}
+	if cfg.SandboxDetection == nil || *cfg.SandboxDetection != false {
+		t.Errorf("default Load: expected SandboxDetection=false, got %v", cfg.SandboxDetection)
+	}
+	if cfg.DockerDetection == nil || *cfg.DockerDetection != true {
+		t.Errorf("default Load: expected DockerDetection=true, got %v", cfg.DockerDetection)
+	}
+
+	// User org file sets it to false — must be picked up.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"),
+		[]byte("sandbox_detection = false\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load("", dir)
+	if err != nil {
+		t.Fatalf("Load with override: %v", err)
+	}
+	if cfg.SandboxDetection == nil {
+		t.Fatal("expected SandboxDetection non-nil after override")
+	}
+	if *cfg.SandboxDetection != false {
+		t.Errorf("expected false, got true")
+	}
+
+	// Project override wins over org override (last writer wins).
+	projDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projDir, "runtime.hcl"),
+		[]byte("sandbox_detection = true\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(projDir, dir)
+	if err != nil {
+		t.Fatalf("Load project+org: %v", err)
+	}
+	if cfg.SandboxDetection == nil || *cfg.SandboxDetection != true {
+		t.Errorf("expected project value true to win, got %v", cfg.SandboxDetection)
+	}
+}

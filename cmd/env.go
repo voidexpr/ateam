@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ateam/internal/config"
+	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runtime"
@@ -123,6 +124,7 @@ func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
 		}
 	}
 	fmt.Printf("  Config: %s\n", strings.Join(chain, " → "))
+	printContainerMode()
 	for _, bl := range brokenLinks {
 		fmt.Printf("  Warning: %s is a broken symlink (ignored, using built-in defaults)\n", bl)
 	}
@@ -358,4 +360,60 @@ func tildeHome(p string) string {
 		return "~" + p[len(home):]
 	}
 	return p
+}
+
+// printContainerMode prints the agent-in-container-mode summary line
+// plus a two-line matrix showing, per detection layer, whether the
+// toggle is on and what (if anything) was detected.
+//
+// The matrix resolves the historical ambiguity of "Isolation: none but
+// the probe found fence" — that state now reads as
+// "Agent in container mode: false / Sandbox detection: off, detected:
+// fence (set sandbox_detection=true to apply)".
+func printContainerMode() {
+	mode := container.IsInContainer()
+	via := ""
+	if cat := container.IsolationCategory(); cat != "" {
+		via = " (via " + cat + ")"
+	}
+	fmt.Printf("  Agent in container mode: %v%s\n", mode, via)
+
+	fmt.Println("    " + describeDetectionLayer(
+		"Docker ", container.DockerDetectionEnabled(), container.DockerMarker(), "docker_detection"))
+
+	sandboxSrc := ""
+	if yes, s := container.IsInSandbox(); yes {
+		sandboxSrc = s
+	}
+	fmt.Println("    " + describeDetectionLayer(
+		"Sandbox", container.SandboxDetectionEnabled(), sandboxSrc, "sandbox_detection"))
+}
+
+// describeDetectionLayer renders one row of the detection matrix:
+// fact (detected yes/no with source) first, then the rule (toggle
+// state and whether it applies) in a trailing clause. Avoids the
+// confusing "detection: off, detected: fence" framing where both
+// halves named "detection".
+func describeDetectionLayer(name string, enabled bool, source string, toggleName string) string {
+	var fact string
+	if source == "" {
+		fact = "no"
+	} else {
+		fact = fmt.Sprintf("yes (%s)", source)
+	}
+
+	var rule string
+	switch {
+	case source != "" && enabled:
+		rule = fmt.Sprintf("%s=true, applied", toggleName)
+	case source != "" && !enabled:
+		// No "set to true" hint here: the user may have explicitly
+		// disabled the toggle. The fact + the rule are enough; the
+		// reader can decide whether to flip it.
+		rule = fmt.Sprintf("%s=false, NOT applied", toggleName)
+	default:
+		// Nothing detected; just show the toggle for audit.
+		rule = fmt.Sprintf("%s=%v", toggleName, enabled)
+	}
+	return fmt.Sprintf("%s detected: %s — %s", name, fact, rule)
 }

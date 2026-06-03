@@ -9,19 +9,17 @@ import (
 	"strings"
 )
 
-// IsInContainer detects whether the current process is running inside a
-// container (Docker or Podman). It checks /.dockerenv (Docker),
-// /run/.containerenv (Podman), and the ATEAM_IN_CONTAINER env var override.
+// IsInContainer reports whether ateam is already inside an isolation
+// layer — a Docker/Podman container, or another sandbox (fence,
+// firejail, macOS Seatbelt, Linux bubblewrap-style). Agents spawned
+// from inside such an environment should skip their own inner sandbox
+// because nested sandboxing generally isn't supported.
+//
+// Detection sources are documented on IsolationSource. The name is
+// kept as "container" for historical reasons; the wider semantics are
+// described in ISOLATION.md.
 func IsInContainer() bool {
-	if os.Getenv("ATEAM_IN_CONTAINER") == "1" {
-		return true
-	}
-	for _, marker := range []string{"/.dockerenv", "/run/.containerenv"} {
-		if _, err := os.Stat(marker); err == nil {
-			return true
-		}
-	}
-	return false
+	return IsolationSource() != ""
 }
 
 // CmdFactory creates an *exec.Cmd. When set on an agent Request, agents use this

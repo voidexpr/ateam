@@ -183,6 +183,48 @@ locals {
   EOF
 }
 
+// Detection of an outer Docker/Podman container, via /.dockerenv and
+// /run/.containerenv. When detected, agents take the in-container code
+// path: args_inside_container kicks in, sandbox_inside_container is
+// applied, so claude/codex skip their own inner sandbox (nested
+// sandboxes generally fail).
+//
+// Default true — these markers are dead-reliable. The toggle exists
+// for symmetry with sandbox_detection and for edge cases (e.g. testing
+// the host-execution code path from inside a container). Override
+// per-invocation with --docker-detection.
+//
+// Always-on (cannot be disabled here): ATEAM_IN_CONTAINER=1.
+docker_detection = true
+
+// Detection of an outer NON-container sandbox — fence, firejail, macOS
+// Seatbelt, or a Linux bubblewrap-style namespace. When detected with
+// this toggle on, ateam treats the outer sandbox as a container, so
+// the agent skips its inner sandbox (same logic as docker_detection).
+//
+// Default false: the underlying signals can have false positives that
+// silently drop defense in depth. For example, systemd-hardened user
+// services trip the Linux NoNewPrivs / Seccomp probe without actually
+// being inside an outer sandbox; a false positive there would tell
+// the agent to run with --dangerously-skip-permissions on a bare host.
+//
+// Opt in (true) when you knowingly run ateam under fence, firejail,
+// etc. — set it in .ateamorg/runtime.hcl so the choice is versioned.
+// When this is false and ateam detects probable outer isolation
+// anyway (via the toggleable signals), it prints a one-line warning
+// before each agent run pointing at this setting.
+//
+// Always-on (cannot be disabled here): ATEAM_IN_SANDBOX=1.
+//
+// Detection layers gated by this setting:
+//   - Cooperative env vars: FENCE_SANDBOX, FIREJAIL_NAME, container=...
+//   - macOS sandbox-exec probe (~46ms once per startup, cached).
+//   - Linux /proc heuristics: user-namespace divergence, Seccomp
+//     filter active, NoNewPrivs flag.
+//
+// Run `ateam env` to see the detected source and current toggle state.
+sandbox_detection = false
+
 // share default local claude config and adds a sandbox
 agent "claude" {
   type    = "claude"

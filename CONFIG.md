@@ -302,6 +302,15 @@ Runtime behavior is configured via `runtime.hcl` files using HCL syntax, with a 
 
 Use `ateam env` to see the active resolution chain.
 
+### Top-level scalars
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `sandbox_detection` | bool | `false` | Auto-detect when ateam is inside an outer non-container sandbox (fence, firejail, macOS Seatbelt, Linux bwrap) and treat it as a container so the agent's inner sandbox is skipped. Default off because false positives silently drop defense in depth — opt in when actually running under fence/firejail. See [ISOLATION.md](ISOLATION.md#detection-of-an-outer-sandbox-or-container). |
+| `docker_detection` | bool | `true`  | Auto-detect `/.dockerenv` and `/run/.containerenv`. Default true (markers are reliable). Set false to exercise the host-execution code path from inside a container. |
+
+Both can be overridden per-invocation with `--sandbox-detection true|false` / `--docker-detection true|false`.
+
 ### Agents
 
 ```hcl

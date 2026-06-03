@@ -76,6 +76,7 @@ test:
 test-cli: build-binary
 	./test/cli/test-auth-combos.sh
 	./test/cli/test-codex-tmux-dryrun.sh
+	./test/cli/test-detection-flags.sh
 
 test-all: test test-cli test-docker test-docker-live
 

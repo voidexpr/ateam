@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ateam/defaults"
+	"github.com/ateam/internal/container"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclparse"
@@ -19,6 +20,19 @@ type Config struct {
 	Agents     map[string]AgentConfig
 	Containers map[string]ContainerConfig
 	Profiles   map[string]ProfileConfig
+
+	// SandboxDetection toggles auto-detection of an outer sandbox
+	// (fence, firejail, macOS Seatbelt, Linux bwrap-style). nil = use
+	// the embedded default. Set via top-level scalar in runtime.hcl
+	// (`sandbox_detection = true|false`). The last file in the load
+	// order to set it explicitly wins. See
+	// container.SandboxDetectionEnabled for the default and rationale.
+	SandboxDetection *bool
+
+	// DockerDetection toggles auto-detection of /.dockerenv and
+	// /run/.containerenv. Same shape as SandboxDetection. See
+	// container.DockerDetectionEnabled for the default and rationale.
+	DockerDetection *bool
 }
 
 type AgentConfig struct {
@@ -83,10 +97,12 @@ type ProfileConfig struct {
 
 // hclFile is the HCL schema for runtime.hcl.
 type hclFile struct {
-	Agents     []hclAgent     `hcl:"agent,block"`
-	Containers []hclContainer `hcl:"container,block"`
-	Profiles   []hclProfile   `hcl:"profile,block"`
-	Remain     hcl.Body       `hcl:",remain"`
+	SandboxDetection *bool          `hcl:"sandbox_detection,optional"`
+	DockerDetection  *bool          `hcl:"docker_detection,optional"`
+	Agents           []hclAgent     `hcl:"agent,block"`
+	Containers       []hclContainer `hcl:"container,block"`
+	Profiles         []hclProfile   `hcl:"profile,block"`
+	Remain           hcl.Body       `hcl:",remain"`
 }
 
 type hclAgent struct {
@@ -190,6 +206,15 @@ func Load(projectDir, orgDir string) (*Config, error) {
 	// Resolve agent inheritance (base references)
 	if err := cfg.resolveInheritance(); err != nil {
 		return nil, err
+	}
+
+	// Apply detection settings to the container package — but only if
+	// a CLI flag (or earlier caller) hasn't already locked them.
+	if cfg.SandboxDetection != nil {
+		container.SetSandboxDetectionIfUnset(*cfg.SandboxDetection)
+	}
+	if cfg.DockerDetection != nil {
+		container.SetDockerDetectionIfUnset(*cfg.DockerDetection)
 	}
 
 	return cfg, nil
@@ -345,6 +370,15 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 	diags = gohcl.DecodeBody(file.Body, evalCtx, &hf)
 	if diags.HasErrors() {
 		return diags
+	}
+
+	if hf.SandboxDetection != nil {
+		v := *hf.SandboxDetection
+		cfg.SandboxDetection = &v
+	}
+	if hf.DockerDetection != nil {
+		v := *hf.DockerDetection
+		cfg.DockerDetection = &v
 	}
 
 	for _, a := range hf.Agents {
