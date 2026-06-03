@@ -8,47 +8,33 @@ It automates the parts you don't want to do to free up your attention for featur
 
 ## Why ATeam
 
-#### The engineering night shift
-
-Software engineering teams don't just ship features. Engineers refactor, write missing tests, debug, bump dependencies before they rot, and (ideally) keep docs honest. ATeam is designed to automate these tasks before your progress suffers from technical debt. Coding agents are perfectly capable of performing a baseline level of engineering work tirelessly.
-
-ATeam makes that a one-liner you can run daily, schedule weekly to keep a code base healthy.
-
-#### Coding agents do only some of the work
+### The missing quality pipeline
 
 Coding agents prioritize feature completion over software quality, which is a good short-term tradeoff that degrades over time. Tests fall behind, security issues accumulate, code becomes spaghetti, docs go stale, dependencies rot, ...
 
-At the same time, coding agents are good at auditing and fixing. They can be prompted to be pragmatic: small wins are ok, look for automation opportunities so cost goes down over time.
+At the same time, coding agents are good at auditing and fixing quality issues. They can be prompted to be pragmatic: adapt to the project size, small wins are ok, avoid busy work, look for automation opportunities so cost goes down over time, ...
 
-So ATeam ships pre-made prompts to continuously improve any codebase.
+ATeam makes quality oriented work a one-liner you can run on demand, daily, schedule weekly to keep a code base healthy. It is useful whether the code is authored by agents, humans or both, to be perfectly fair it's not like humans don't need to refactor their code, forget to add tests, neglect security, ... So being able to get a consistent baseline of quality work automated is clear win.
 
-#### Your attention is the bottleneck
+### Attention is the new bottleneck
 
-Developing new features or architecting a project requires a lot of thinking and concentration; interactive agents are a great enabler, helping brainstorm, design, and code extremely quickly. But then the bottleneck becomes your attention.
+Developing new features or the architecture of a project requires a lot of thinking and concentration, interactive agents are a great enabler, helping brainstorm, design, and code extremely quickly. But then the bottleneck becomes your attention.
 
-Get rid of repetitive prompts like `/write-tests /update-docs /update-architecture /simplify /code-review high --fix recent changes` — just run an ATeam pipeline after your work day to do the same, and also catch that security issue your new dependency just added.
+A growing share of code is written by coding agents. So instead of making humans full time reviewer, having to create an ever growing set of skills (for example: `/write-tests /update-docs /update-architecture /simplify /code-review high --fix recent changes`), be the first line quality enforcer we can free up time by automating at least a baseline of it.
 
-A growing share of code is written by coding agents. Humans should focus on high-value tasks and delegate more of the code lifecycle that can be prompted once and run repeatedly.
+Software engineering quality work is the true sweet spot for unattended agents because it can be prompted once unlike features that benefit more from an interactive model. `ateam resume` is provided to take an unattended session and make it interactive, so you can talk to your agent that did that refactor last Tuesday night to find out more.
 
-Unattended agents are one way to free up attention for high-level work: prompt once and re-run on a schedule, after a work day, or as a deeper audit before releasing a project.
+### `claude -p` works until it doesn't
 
-#### Software engineering quality work is the sweet spot for unattended agents
-
-Feature work requires attention, iteration, and experimentation; delegating it to a swarm of agents would require perfectly understanding it from the start. Agents also tend to please whoever is prompting them, so drift propagates between agents. Feature work doesn't seem a good candidate for unattended agents — but quality tasks can be prompted once, reuse state from their previous run, and re-evaluate the code against the criteria they are given.
-
-This is the bet of ATeam.
-
-#### `claude -p` works until it doesn't
-
-Coding agents all provide flexible ways to run unattended, but when run regularly a lot more tooling is required: a uniform interface across agents, conventions for logs, execution profiles, isolation parameters, token usage, turns, costs, etc.
+Coding agents all provide flexible ways to run unattended, but a lot more tooling is required: a uniform interface across agents, conventions for logs, execution profiles, isolation parameters, tracking cost (tokens, turns, context), dynamic prompt assembly, move prompt logic to scripts to reduce costs, ...
 
 ATeam gives you the `ps` command for unattended agents: clearly see how long they take and how much they cost, so you can improve your prompts over time, decide what runs daily vs. weekly and not repeatedly run that $20 one-liner without realizing it.
 
-More needs accumulate over time: running in parallel, dynamic prompt assembly, delegating some prompt work to scripts, ...
+It also gives the 'exec' and 'parallel' command to build your own scripts as a simple bash script or you can wrap it in something more complex.
 
-ATeam is not a workflow engine — it implements just one pipeline. But it's a useful building block: from simple bash scripts mixing commands and prompts up to persistent workflow management, anything can be built on top of `ateam exec` and `ateam parallel`.
+Having this type of harness makes it possible to invest more heavily on unattended work without being too dependent of a specific coding agent, given flexibility to choose the best pricing or the ones providing the most interesting features.
 
-**In practice:** reuses your existing coding agents (no lock-in), every artifact is a markdown file, every change is a git commit you can read or revert, and the whole system fits in your head — no DAG, no graph framework, no colorful vocabulary. More on the rationale: [APPROACH.md](APPROACH_2.md).
+see more at [APPROACH.md](APPROACH_2.md).
 
 ## Key Features
 
