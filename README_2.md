@@ -10,19 +10,19 @@ It automates the parts you don't want to do to free up your attention for featur
 
 ### The missing quality pipeline
 
-Coding agents prioritize feature completion over software quality, which is a good short-term tradeoff that degrades over time. Tests fall behind, security issues accumulate, code becomes spaghetti, docs go stale, dependencies rot, ...
+Coding agents prioritize feature completion over long-term software quality, which is a good short-term tradeoff that degrades over time. Tests fall behind, security issues accumulate, code becomes spaghetti, docs go stale, dependencies rot, ...
 
 At the same time, coding agents are good at auditing and fixing quality issues. They can be prompted to be pragmatic: adapt to the project size, small wins are ok, avoid busy work, look for automation opportunities so cost goes down over time, ...
 
-ATeam makes quality oriented work a one-liner you can run on demand, daily, schedule weekly to keep a code base healthy. It is useful whether the code is authored by agents, humans or both, to be perfectly fair it's not like humans don't need to refactor their code, forget to add tests, neglect security, ... So being able to get a consistent baseline of quality work automated is clear win.
+ATeam makes quality-oriented work a one-liner you can run on demand, daily, or on a weekly schedule to keep your codebase healthy. It's useful whether the code is written by agents, humans, or both — humans also forget to add tests, postpone refactors, and neglect security. A consistent automated baseline is a clear win either way.
 
 ### Attention is the new bottleneck
 
 Developing new features or the architecture of a project requires a lot of thinking and concentration, interactive agents are a great enabler, helping brainstorm, design, and code extremely quickly. But then the bottleneck becomes your attention.
 
-A growing share of code is written by coding agents. So instead of making humans full time reviewer, having to create an ever growing set of skills (for example: `/write-tests /update-docs /update-architecture /simplify /code-review high --fix recent changes`), be the first line quality enforcer we can free up time by automating at least a baseline of it.
+A growing share of code is written by coding agents. Without automation, humans become full-time reviewers, juggling an ever-growing set of slash commands like `/write-tests /update-docs /update-architecture /simplify /code-review high --fix recent changes` to keep up. Automating this kind of work as a CLI gives some attention back.
 
-Software engineering quality work is the true sweet spot for unattended agents because it can be prompted once unlike features that benefit more from an interactive model. `ateam resume` is provided to take an unattended session and make it interactive, so you can talk to your agent that did that refactor last Tuesday night to find out more.
+Quality work is the sweet spot for unattended agents because it can be prompted once, unlike features that benefit from an interactive session. `ateam resume` turns any past unattended session into an interactive one, so you can talk to the agent that did that refactor last Tuesday night and ask what it did and why.
 
 ### `claude -p` works until it doesn't
 
@@ -30,9 +30,9 @@ Coding agents all provide flexible ways to run unattended, but a lot more toolin
 
 ATeam gives you the `ps` command for unattended agents: clearly see how long they take and how much they cost, so you can improve your prompts over time, decide what runs daily vs. weekly and not repeatedly run that $20 one-liner without realizing it.
 
-It also gives the 'exec' and 'parallel' command to build your own scripts as a simple bash script or you can wrap it in something more complex.
+It also gives you `ateam exec` and `ateam parallel` as primitives — drop them into a bash script for simple workflows, or wrap them in something more involved.
 
-Having this type of harness makes it possible to invest more heavily on unattended work without being too dependent of a specific coding agent, given flexibility to choose the best pricing or the ones providing the most interesting features.
+This kind of harness lets you invest more heavily in unattended work without becoming dependent on any single coding agent — you keep the flexibility to pick the best pricing or the most interesting features as the landscape shifts.
 
 see more at [APPROACH.md](APPROACH_2.md).
 
@@ -90,15 +90,15 @@ ateam init                # create .ateam/
 * A: Edit `.ateam/config.toml` to select which [role](ROLES.md) to enable in your project
 * B: Or let an agent decide: `ateam auto-setup` (detect stack, enable a reasonable role set)
 
-### 3. Run report → review → code → verify; ATeam commits the changes locally
+### 3. Run the quality pipeline, ATeam commits the changes locally
 ```bash
 ateam run-all                 # report → review → code → verify
 
 # or run one by one:
-ateam report
-ateam review
-ateam code
-ateam verify
+ateam report         # parallel audit along multiple 'role' dimensions
+ateam review         # prioritize the most important findings only
+ateam code           # implement the fixes, git commit to the local branch
+ateam verify         # verify the commits for bugs, re-run tests
 ```
 
 ### 4. Browse all artifacts in a web browser
@@ -130,12 +130,12 @@ Full details: [CONFIG.md](CONFIG.md).
 
 #### As a quality pipeline
 
-`ateam run-all` runs the four-stage loop across the roles enabled in `.ateam/config.toml`:
+`ateam run-all` runs the four-stage loop across the [roles](ROLES.md) enabled in `.ateam/config.toml`.
 
-- **report** — role agents audit the codebase in parallel
-- **review** — supervisor prioritizes findings into coding tasks
-- **code** — coding agents implement the top tasks, commit small changes
-- **verify** — supervisor inspects the commits and runs tests
+- **report**: role agents audit the codebase in parallel
+- **review**: supervisor prioritizes findings into coding tasks
+- **code**: coding agents implement the top tasks, commit small changes
+- **verify**: supervisor inspects the commits and runs tests
 
 Roles are single markdown prompt files. Built-in ones cover code bugs, recent-change review, structure, architecture, internal/external docs, automation, dependencies, security, test gaps, and recent-test coverage. Add your own by dropping a file in `.ateam/prompts/report/`.
 
@@ -166,6 +166,11 @@ ateam exec "review.md → apply fixes, commit each separately"  --agent claude-h
 ```
 Two agents, two viewpoints. The CLI primitive lets you compose any pattern in shell.
 
+A more complete version of this can be found in:
+* `scripts/codex-reviews-claude-codes.sh`: basically what is above but leveraging codex-tmux to call /review which is only available in TUI mode
+* `scripts/critical-code-review.sh`: multiple rounds selecting any agent
+* `scripts/double-review.sh`: run both codex-tmux /review and claude /code-review in parallel, then use both reports to address the issues
+
 #### Background quality on a fast-moving project
 ```bash
 ateam run-all                # end-of-day, in cron, or before commits
@@ -176,7 +181,52 @@ More recipes (lunch-pass / weekly audit / step-by-step / mixed-agent scripts): [
 
 ## Isolation
 
-By default ATeam uses the agent's built-in sandbox — fast, no setup, OS-level syscall restrictions. You can also use a one-shot Docker container per command, exec into an existing container (devcontainer / compose), or run ateam itself from inside a container. Switch with `--profile docker` or `--profile docker-exec`. See [ISOLATION.md](ISOLATION.md).
+ATeam runs unattended agents that must operate safely without constant permission approval requests. The field is evolving, ATeam supports multiple approaches and will adapt as best practices emerge.
+
+**Why isolation matters:**
+- **Filesystem**: prevent accidental or malicious writes outside the project, protect access to sensitive files, avoid time-wasting configuration breakages
+- **Network**: prevent data exfiltration (especially combined with filesystem access), prevent remote control
+
+**The tradeoff**: stricter restrictions increase safety but can break tools that rely on directories outside the project, Unix sockets (Docker), pipes (tsx), nested sandboxes (Playwright on macOS), or shared `/tmp` directories. Also more isolation environments like Docker require more configuration, there are also extra steps to configure coding agents within containers.
+
+The exact isolation is configuration driven so highly customizable.
+
+### Execution modes
+
+```
+┌─ Host ──────────────────────────────┐   ┌─ Host ──────────────────────────────┐
+│ ┌─ ateam ─────────────────────────┐ │   │ ┌─ ateam ─────────────────────────┐ │
+│ │ ┌─ agent ─────────────────────┐ │ │   │ │ ┌─ container ─────────────────┐ │ │
+│ │ │ ┌─ sandbox ───────────────┐ │ │ │   │ │ │ ┌─ agent ─────────────────┐ │ │ │
+│ │ │ │    tools / commands     │ │ │ │   │ │ │ │    tools / commands     │ │ │ │
+│ │ │ └─────────────────────────┘ │ │ │   │ │ │ └─────────────────────────┘ │ │ │
+│ │ └─────────────────────────────┘ │ │   │ │ └─────────────────────────────┘ │ │
+│ └─────────────────────────────────┘ │   │ └─────────────────────────────────┘ │
+└─────────────────────────────────────┘   └─────────────────────────────────────┘
+① Built-in sandbox — default profile      ② Docker one-shot — --profile docker
+
+┌─ Host ──────────────────────────────┐   ┌─ Host ──────────────────────────────┐
+│ ┌─ ateam ─────────────────────────┐ │   │ ┌─ container ─────────────────────┐ │
+│ │ ┌─ running container ─────────┐ │ │   │ │ ┌─ ateam ─────────────────────┐ │ │
+│ │ │ ┌─ agent ─────────────────┐ │ │ │   │ │ │ ┌─ agent ─────────────────┐ │ │ │
+│ │ │ │    tools / commands     │ │ │ │   │ │ │ │    tools / commands     │ │ │ │
+│ │ │ └─────────────────────────┘ │ │ │   │ │ │ └─────────────────────────┘ │ │ │
+│ │ └─────────────────────────────┘ │ │   │ │ └─────────────────────────────┘ │ │
+│ └─────────────────────────────────┘ │   │ └─────────────────────────────────┘ │
+└─────────────────────────────────────┘   └─────────────────────────────────────┘
+③ Docker exec — --profile docker-exec     ④ ATeam inside Docker — container-native
+```
+
+| Approach | How it works | Best for |
+|----------|-------------|----------|
+| **Built-in sandbox** (default) | OS-level syscall restrictions (Seatbelt/bubblewrap) per command | Most projects — fast, no setup |
+| **Built-in sandbox** and **separate agent configuration** | Same as above but don't share the same configuration as interactive agents (different hooks, ...) | Useful when the default agent configuration is highly customized with notifications |
+| **Docker one-shot** | Fresh Linux container built and run per command | Strong isolation; need build/test tooling |
+| **Docker exec** | Exec into an existing user-managed container (docker-compose, devcontainer, …) | You already run a long-lived dev container |
+| **ATeam inside Docker** | Run ateam itself from inside a container; agents inherit container isolation and runs without any restriction | Docker-native projects |
+| **None** | No isolation (agent runs directly on host) | Debugging only |
+
+By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for one-shot container isolation or `--profile docker-exec` to exec into an existing container. See `defaults/runtime.hcl` for all profiles.
 
 ## Commands
 
