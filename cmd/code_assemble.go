@@ -29,6 +29,31 @@ func renderCLIWrapper(a *assembler.Assembler, vars assembler.Vars, text string) 
 	return rendered, nil
 }
 
+// assembleAction renders a top-level singleton prompt by action name —
+// `ateam prompt --action <action>` resolves <action>.prompt.md across the
+// anchor chain (project / org / embedded). Wraps with --pre-prompt and
+// --post-prompt the same way as role / supervisor paths.
+//
+// roleLabel feeds {{project.info}}; pass "" to suppress.
+func assembleAction(env *root.ResolvedEnv, action, roleLabel, prePrompt, postPrompt string) (string, error) {
+	a := env.Assembler()
+	vars := env.BuildAssemblerVars(action, roleLabel, action)
+	opts := &assembler.AssembleOptions{PrePrompt: prePrompt}
+	res, err := a.Assemble(action, vars, nil, opts)
+	if err != nil {
+		return "", err
+	}
+	prompt := res.Prompt
+	post, err := renderCLIWrapper(a, vars, postPrompt)
+	if err != nil {
+		return "", err
+	}
+	if post != "" {
+		prompt += "\n\n---\n\n" + post
+	}
+	return prompt, nil
+}
+
 // assembleCodeManagementV1 builds the supervisor's code-management prompt:
 // the assembler's `code_management` composition (with optional CLI
 // overrides), then Review, then --post-prompt.

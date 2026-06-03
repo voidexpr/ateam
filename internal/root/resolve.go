@@ -201,7 +201,7 @@ func (e *ResolvedEnv) BuildAssemblerVars(promptPath, roleLabel, action string) a
 			"effort":               "{{EFFORT}}",
 			"max_budget_usd":       "{{MAX_BUDGET_USD}}",
 			"max_budget_usd_batch": "{{MAX_BUDGET_USD_BATCH}}",
-			"profile_args":         "{{PROFILE_ARGS}}",
+			"subrun_args":          "{{SUBRUN_ARGS}}",
 			"output_dir":           "{{OUTPUT_DIR}}",
 			"output_file":          "{{OUTPUT_FILE}}",
 			// Assembly-time keys: filled by the caller before Assemble. Empty

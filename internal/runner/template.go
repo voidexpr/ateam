@@ -31,7 +31,7 @@ type TemplateVars struct {
 	Effort            string // reasoning effort (e.g. "low", "high"); empty if unset
 	MaxBudgetUSD      string // per-exec USD spend cap; empty if unset
 	MaxBudgetUSDBatch string // batch-wide USD spend cap; empty if unset
-	ProfileArgs       string // opaque CLI args fragment; surfaced as {{PROFILE_ARGS}}
+	SubRunArgs        string // opaque CLI args fragment; surfaced as {{SUBRUN_ARGS}}
 	ContainerType     string // container type ("none", "docker", "docker-exec", etc.)
 	ContainerName     string // docker container name (e.g. "ateam-myapp-security")
 	OutputDir         string // absolute path to <projectDir>/runtime/<exec_id>/ (where the agent should write files)
@@ -65,7 +65,7 @@ func (v TemplateVars) Replacer() *strings.Replacer {
 		"{{EFFORT}}", v.Effort,
 		"{{MAX_BUDGET_USD}}", v.MaxBudgetUSD,
 		"{{MAX_BUDGET_USD_BATCH}}", v.MaxBudgetUSDBatch,
-		"{{PROFILE_ARGS}}", v.ProfileArgs,
+		"{{SUBRUN_ARGS}}", v.SubRunArgs,
 		"{{CONTAINER_TYPE}}", v.ContainerType,
 		"{{CONTAINER_NAME}}", v.ContainerName,
 		"{{OUTPUT_DIR}}", v.OutputDir,
@@ -171,7 +171,7 @@ func BuildTemplateVars(r *AgentExecutor, opts RunOpts, startedAt time.Time, call
 		Effort:                  r.Effort,
 		MaxBudgetUSD:            r.MaxBudgetUSD,
 		MaxBudgetUSDBatch:       r.MaxBudgetUSDBatch,
-		ProfileArgs:             r.ProfileArgs,
+		SubRunArgs:              r.SubRunArgs,
 		ContainerType:           r.ContainerType,
 		ContainerName:           r.ContainerName,
 		AutoRolesCommandsOutput: opts.AutoRolesCommandsOutput,

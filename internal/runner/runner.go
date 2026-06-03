@@ -92,10 +92,10 @@ type AgentExecutor struct {
 	Effort            string
 	MaxBudgetUSD      string
 	MaxBudgetUSDBatch string
-	// ProfileArgs is an opaque, pre-rendered CLI args fragment surfaced as
-	// {{PROFILE_ARGS}} in prompt bodies. The runner doesn't interpret it —
+	// SubRunArgs is an opaque, pre-rendered CLI args fragment surfaced as
+	// {{SUBRUN_ARGS}} in prompt bodies. The runner doesn't interpret it —
 	// callers (today only `ateam code`) decide what goes in.
-	ProfileArgs         string
+	SubRunArgs          string
 	ContainerType       string // "none" or "docker" for DB
 	ContainerName       string // docker container name for liveness checks
 	ContainerNameSource string // where ContainerName came from (ContainerNameSource* constants)

@@ -53,7 +53,7 @@ func TestPrintCodeSessionSummaryPicksByExecID(t *testing.T) {
 }
 
 // TestCodeDryRunAgentInjection locks in that --agent on `ateam code` lands
-// in the supervisor prompt via {{exec.profile_args}}. Dry-run pre-resolves
+// in the supervisor prompt via {{exec.subrun_args}}. Dry-run pre-resolves
 // the placeholder so the operator sees the sub-run flags in the printed
 // prompt body.
 func TestCodeDryRunAgentInjection(t *testing.T) {
@@ -93,7 +93,7 @@ func TestCodeDryRunAgentInjection(t *testing.T) {
 		t.Fatalf("runCode dry-run with agent override: %v", runErr)
 	}
 	if !strings.Contains(out, "--agent mock") {
-		t.Errorf("expected '--agent mock' in code management output (via {{exec.profile_args}}):\n%s", out)
+		t.Errorf("expected '--agent mock' in code management output (via {{exec.subrun_args}}):\n%s", out)
 	}
 }
 

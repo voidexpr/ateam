@@ -534,16 +534,20 @@ Each positional argument is a prompt (text or `@filepath`). Agent execs run conc
 
 ### `ateam prompt`
 
-Resolve and print the full prompt for a role or supervisor without running it. Default mode prints the assembled prompt body. Two inspection modes (`--paths`, `--inline-paths`) trace where each part of the prompt came from — useful when debugging an override or wondering whether a project-level fragment is taking effect.
+Resolve and print the full prompt for a role, supervisor, or top-level action without running it. Default mode prints the assembled prompt body. Two inspection modes (`--paths`, `--inline-paths`) trace where each part of the prompt came from — useful when debugging an override or wondering whether a project-level fragment is taking effect.
 
 ```bash
-ateam prompt --role project.security --action report                   # print the assembled prompt
-ateam prompt --supervisor --action review
+ateam prompt --role project.security --action report                   # role-bound (existing)
+ateam prompt --action code --post-prompt @task.md                      # top-level singleton: implementer body + task
+ateam prompt --action code_management                                   # top-level singleton: supervisor body
+ateam prompt --supervisor --action review                              # legacy form, still supported
 ateam prompt --role project.security --action report --post-prompt "Focus on auth"
 
 ateam prompt --role project.security --action report --paths           # tabular per-section breakdown
 ateam prompt --role project.security --action report --inline-paths    # full prompt with per-section anchor/path headers
 ```
+
+When `--role` and `--supervisor` are both omitted, `--action <NAME>` resolves the top-level singleton at `<NAME>.prompt.md`. This is how the code-management supervisor produces per-task implementer prompts: `ateam prompt --action code --post-prompt @task.md | ateam exec --action code ...`.
 
 `--paths` example output:
 
@@ -564,8 +568,9 @@ TOTAL                                                                           
 | Flag | Description |
 |------|-------------|
 | `--role ROLE` | Role name (mutually exclusive with `--supervisor`) |
-| `--supervisor` | Generate supervisor prompt instead of role prompt |
-| `--action ACTION` | Action type: `report` or `code` for roles; `review`, `code`, or `verify` for supervisor **(required)** |
+| `--supervisor` | Generate supervisor prompt instead of role prompt (legacy alias for top-level singleton resolution) |
+| `--action ACTION` | Action name **(required)**. With `--role`: `report` or `code`. With `--supervisor`: `review`, `code`, or `verify`. With neither: any top-level `<ACTION>.prompt.md` (e.g. `code`, `code_management`, `review`, `code_verify`). |
+| `--batch ID` | Bake a literal batch ID into `{{exec.batch}}` placeholders in the rendered output (otherwise left as the deferred `{{BATCH}}` marker for the runner to fill at exec time). |
 | `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--no-project-info` | Omit the ATeam Project Context section |

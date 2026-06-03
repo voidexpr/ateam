@@ -72,10 +72,13 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	if promptSupervisor {
 		return runPromptSupervisor()
 	}
-	if promptRole == "" {
-		return fmt.Errorf("either --role or --supervisor is required")
+	if promptRole != "" {
+		return runPromptRole()
 	}
-	return runPromptRole()
+	// No --role / --supervisor: resolve --action as a top-level singleton
+	// prompt (e.g. `ateam prompt --action code` → code.prompt.md, the
+	// implementer body the code-management supervisor pipes per task).
+	return runPromptAction()
 }
 
 func runPromptRole() error {
@@ -113,6 +116,50 @@ func runPromptRole() error {
 	case runner.ActionCode:
 		assembled, err = assembleRoleCode(env, promptRole, roleLabel, prePrompt, postPrompt)
 	}
+	if err != nil {
+		return err
+	}
+	fmt.Println(applyPromptBatchOverride(assembled))
+	return nil
+}
+
+// runPromptAction renders a top-level singleton prompt by action name, e.g.
+// `ateam prompt --action code` → code.prompt.md. Used by the code-management
+// supervisor to assemble per-task implementer prompts:
+//
+//	ateam prompt --action code --post-prompt @task.md
+//	  | ateam exec --action code ...
+//
+// Symmetric with --role / --supervisor: --role X assembles role bodies under
+// a directory namespace (report/X), --supervisor X assembles the supervisor
+// body for action X, and bare --action X assembles a top-level <X>.prompt.md
+// singleton. Unknown action names error via the assembler's "no role main"
+// lookup.
+func runPromptAction() error {
+	if promptAction == "" {
+		return fmt.Errorf("either --role, --supervisor, or --action is required")
+	}
+
+	env, err := resolveEnv()
+	if err != nil {
+		return err
+	}
+
+	prePrompt, err := prompts.ResolveOptional(promptPrePrompt)
+	if err != nil {
+		return err
+	}
+	postPrompt, err := prompts.ResolveOptional(promptPostPrompt)
+	if err != nil {
+		return err
+	}
+
+	roleLabel := promptAction
+	if promptNoProjectInfo {
+		roleLabel = ""
+	}
+
+	assembled, err := assembleAction(env, promptAction, roleLabel, prePrompt, postPrompt)
 	if err != nil {
 		return err
 	}
@@ -470,7 +517,12 @@ func promptPathForCurrentFlags() (path, label string, err error) {
 		return "", "", fmt.Errorf("invalid action %q for supervisor: must be 'review', 'code', or 'verify'", promptAction)
 	}
 	if promptRole == "" {
-		return "", "", fmt.Errorf("either --role or --supervisor is required")
+		// Action-only mode: top-level singleton prompt like `code` or
+		// `code_management`. The action name doubles as the promptPath.
+		if promptAction == "" {
+			return "", "", fmt.Errorf("either --role, --supervisor, or --action is required")
+		}
+		return promptAction, promptAction, nil
 	}
 	switch promptAction {
 	case runner.ActionReport:

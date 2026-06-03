@@ -105,12 +105,17 @@ anchors → dir-level _pre/_post → role-level pre/post → --pre-prompt (head)
 
 `--extra-prompt` slots in after the assembled body and before `--post-prompt`. The standardized flag set and usage strings live in `cmd/prompt_wrap_flags.go` (single source of truth).
 
-### Role code prompts vs. supervisor code phase
+### Code action prompts vs. supervisor code phase
 
-A per-role `code/<name>.prompt.md` is independent from the supervisor's code-management phase:
+Three top-level prompts cover the code workflow; each addresses a different layer:
 
-- **Role level** — when `code/<name>.prompt.md` exists (project, org, or embedded), `ateam code --role <name>` and `ateam prompt --role <name> --action code` assemble the `code/<name>` path with no previous-report block (the source of truth for "what changed" is the patch's git history). See `assembleRoleCode` in `cmd/report_assemble.go`.
-- **Supervisor level** — `ateam code` (no role) drives the supervisor via the `code_management.prompt.md` body, assembled by `assembleCodeManagementV1` (`cmd/code_assemble.go`). The supervisor splits the review into individual tasks and writes per-task code prompts into `{{OUTPUT_DIR}}` (the prompt still ships the legacy `{{EXECUTION_DIR}}` alias for the same directory), then invokes `ateam exec @... --role <name>` for each. A role's own `code/<name>.prompt.md` is what lets those per-task `exec` invocations target it.
+- **Implementer body** — `code.prompt.md` (top-level singleton) carries the generic instructions every per-task sub-run needs: minimal blast radius, baseline tests, commit format, clean failure. Reachable via `ateam prompt --action code --post-prompt @task.md`, which composes `code.prompt.md` with the per-task description and emits the prompt the implementing agent will read.
+- **Supervisor body** — `code_management.prompt.md` (top-level singleton) drives the orchestrator that splits the review into tasks. Reachable via `ateam prompt --action code_management` (canonical) or `ateam prompt --supervisor --action code` (legacy alias). Assembled by `assembleCodeManagementV1` (`cmd/code_assemble.go`).
+- **Per-task wiring** — Phase 3 of `code_management.prompt.md` pipes the implementer body into `ateam exec`: `ateam prompt --action code --post-prompt @SEQ_SLUG_task.md | ateam exec --action code --batch {{exec.batch}} {{exec.subrun_args}}`. The supervisor never generates a per-task prompt by hand; the framing comes from `code.prompt.md` and the task body is the per-task file the supervisor wrote during Phase 2.
+
+Sub-run flag propagation (profile, agent, project, org, work-dir, model, effort, budgets) flows through `{{exec.subrun_args}}`, rendered by `buildSubRunArgs` in `cmd/code.go`. Excluded by design: manager-only flags (`--supervisor-*`, `--management`, `--review`, `--timeout`), mode controls (`--dry-run`, `--force`, `--print`), and supervisor I/O flags (`--verbose`, `--quiet`, `--format`, `--progress-fd`, `--agent-args`, `--docker-auto-setup`). Each new `ateam code` flag added later must be classified explicitly there.
+
+Role-specific code bodies (`code/<role>.prompt.md`) are no longer shipped — the `code/` namespace was retired in favor of the single top-level `code.prompt.md`. User-installed overrides at `.ateam/prompts/code/<role>.prompt.md` are still loaded by `assembleRoleCode` for backward compat, but operate without dir-level framing; new projects should put customizations in `.ateam/prompts/code.post.extra.md` instead.
 
 ## Project on-disk layout (runner contract)
 

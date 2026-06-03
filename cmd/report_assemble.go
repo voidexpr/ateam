@@ -80,7 +80,7 @@ func assembleRoleCode(env *root.ResolvedEnv, roleID, roleLabel, prePrompt, postP
 	res, err := a.Assemble(promptPath, vars, nil, opts)
 	if err != nil {
 		if strings.Contains(err.Error(), "no role main") {
-			return "", fmt.Errorf("no code prompt defined for role %q. Code prompts are role-specific; only roles that ship code/<role>.prompt.md (project, org, or embedded) can preview a code action", roleID)
+			return "", fmt.Errorf("no code prompt defined for role %q. Role-specific code prompts (code/<role>.prompt.md) are no longer shipped in defaults; use `ateam prompt --action code` to render the generic implementer body, or place a code/%s.prompt.md override under .ateam/prompts/", roleID, roleID)
 		}
 		return "", err
 	}

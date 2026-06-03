@@ -23,19 +23,18 @@ Created by `ateam install`. Holds shared defaults and org-level overrides.
       auto_setup.prompt.md                     # auto-setup body
       exec_debug.prompt.md                     # inspect --auto-debug body
       report_auto_roles.prompt.md              # --auto-roles planner body
+      code.prompt.md                           # implementer body piped into per-task `ateam exec`
       report/
         _pre.intro.md                          # dir-level pre — applied to every role/<R>.prompt.md
         _post.format.md                        # dir-level post — output format / validation
         <NAME>.prompt.md                       # per-role report bodies
-      code/
-        _post.format.md                        # dir-level post for the (small) set of code-capable roles
-        <NAME>.prompt.md                       # per-role code bodies (only ships for a few roles)
   runtime.hcl                                  # org-level runtime config override (optional)
   Dockerfile                                   # org-level Dockerfile override (optional)
   prompts/                                     # org-level prompt overrides (any filename from defaults/prompts/)
     _pre.<NAME>.md                             # add an org-wide pre fragment to every prompt
     report/<NAME>.prompt.md                    # override a role's body
     report/<NAME>.post.<NAME>.md               # add a composable post fragment to a role
+    code.post.extra.md                         # add a composable extra to the implementer body
     review.post.extra.md                       # add a composable extra to the supervisor review
     # … any other file matching the filename patterns defaults/prompts/ ships with
 ```
@@ -56,6 +55,7 @@ Versioned files are at the top level. Runtime artifacts (`logs/`, `runtime/`, `s
 
   prompts/                                     # project-level prompt overrides
     _pre.<NAME>.md                             # project-wide pre fragment
+    code.post.<NAME>.md                        # project-wide implementer post fragment
     review.post.<NAME>.md                      # project-wide review post fragment
     report/<NAME>.prompt.md                    # role body override
     report/<NAME>.post.<NAME>.md               # composable role post fragment

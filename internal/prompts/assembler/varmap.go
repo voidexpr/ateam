@@ -31,7 +31,7 @@ var VarRenameMap = map[string]string{
 	"MAX_BUDGET_USD_BATCH": "exec.max_budget_usd_batch",
 	"OUTPUT_DIR":           "exec.output_dir",
 	"OUTPUT_FILE":          "exec.output_file",
-	"PROFILE_ARGS":         "exec.profile_args",
+	"SUBRUN_ARGS":          "exec.subrun_args",
 	"EXECUTION_DIR":        "exec.output_dir", // legacy alias for code_management_prompt.md
 
 	// Container

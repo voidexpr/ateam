@@ -21,13 +21,12 @@ func TestDefaultsReachableViaAssembler(t *testing.T) {
 		"report/_pre.intro.md",
 		"report/_post.format.md",
 		"review.prompt.md",
+		"code.prompt.md",
 		"code_management.prompt.md",
 		"code_verify.prompt.md",
 		"auto_setup.prompt.md",
 		"exec_debug.prompt.md",
 		"report_auto_roles.prompt.md",
-		"report/_post.format.md",
-		"code/_post.format.md",
 	} {
 		m, ok, err := a.FirstMatch(p)
 		if err != nil {

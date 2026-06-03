@@ -14,10 +14,17 @@ without requesting input from humans unless absolutely necessary.
 
 ## Tools
 
-Use the `ateam` CLI for all operations. The standard per-task invocation is:
+Use the `ateam` CLI for all operations. The standard per-task invocation pipes
+the implementer body (from `ateam prompt --action code`) into `ateam exec`:
 
-    ateam exec @{{exec.output_dir}}/SEQ_SLUG_task.md \
-      --action code --batch {{exec.batch}} {{exec.profile_args}}
+    ateam prompt --action code \
+        --post-prompt @{{exec.output_dir}}/SEQ_SLUG_task.md \
+      | ateam exec --action code --batch {{exec.batch}} {{exec.subrun_args}}
+
+`ateam prompt --action code` produces the generic implementer body
+(minimal blast radius, commit format, baseline tests, …); `--post-prompt`
+appends the per-task description at the very end. The supervisor never
+generates a per-task prompt by hand.
 
 Run `ateam --help` and `ateam COMMAND --help` for full details.
 
@@ -73,7 +80,9 @@ Execute tasks one at a time, in sequence order. For each task:
 1. **Pre-check**: Verify git working tree is clean, code builds, and tests pass
 2. **Execute**:
    ```
-   ateam exec @{{exec.output_dir}}/SEQ_SLUG_task.md --action code --batch {{exec.batch}} {{exec.profile_args}}
+   ateam prompt --action code \
+       --post-prompt @{{exec.output_dir}}/SEQ_SLUG_task.md \
+     | ateam exec --action code --batch {{exec.batch}} {{exec.subrun_args}}
    ```
 3. **Post-check**: Verify code still builds and tests pass
 4. **Record**: Update `execution_report.md` with the outcome, only append to it during this phase. For each task include:
@@ -97,7 +106,7 @@ After all tasks have been attempted:
      Failing tests: [list each failing test name/file].
      Investigate each failure, fix it, and commit. Do not change test assertions
      unless the behavioral change was intentional — fix the code instead." \
-       --role fix_regression --action code --batch {{exec.batch}} {{exec.profile_args}}
+       --role fix_regression --action code --batch {{exec.batch}} {{exec.subrun_args}}
      ```
      Record the fix run outcome in the execution report.
    - If tests were already failing before the cycle (pre-existing failures): note them but do not attempt to fix them — that's a separate task for the next review cycle.
@@ -191,7 +200,7 @@ follow along. Print status lines as you go:
   ```
 - **Commands**: print every ateam CLI command before running it
   ```
-  Running: ateam exec @{{exec.output_dir}}/01_fix_sql_injection_task.md --action code --batch {{exec.batch}} {{exec.profile_args}}
+  Running: ateam prompt --action code --post-prompt @{{exec.output_dir}}/01_fix_sql_injection_task.md | ateam exec --action code --batch {{exec.batch}} {{exec.subrun_args}}
   ```
 - **Task outcomes**: print the result of each task immediately and include the git hash and branch used
   ```

@@ -49,10 +49,14 @@ func (r Result) Changed() bool {
 	return len(r.Moved) > 0 || len(r.RemovedDirs) > 0
 }
 
-// NeedsMigration returns true if root contains any pre-v1 layout indicators.
-// Cheap check — does not read file contents.
+// NeedsMigration returns true if root contains any layout indicators that
+// the static-migration pass knows how to rewrite (legacy v0 entries plus
+// the v1 dir-level code framing files relocated to top-level singletons in
+// the post-`code.prompt.md` reshuffle). Cheap check — does not read file
+// contents.
 func NeedsMigration(root string) bool {
 	indicators := []string{
+		// Pre-v1 layout (v0 → v1 first pass).
 		"roles",
 		"supervisor",
 		"report_base_prompt.md",
@@ -60,6 +64,10 @@ func NeedsMigration(root string) bool {
 		"report_extra_prompt.md",
 		"code_extra_prompt.md",
 		"setup_overview.md",
+		// v1 → v1+: code framing moved from a dir-level fragment to a
+		// top-level singleton. Detect either user-installed override.
+		"prompts/code/_post.format.md",
+		"prompts/code/_post.extra.md",
 	}
 	for _, ind := range indicators {
 		if _, err := os.Lstat(filepath.Join(root, ind)); err == nil {
@@ -277,9 +285,16 @@ var staticMigrations = []Move{
 	// lives in defaults' shipped _pre.intro.md and isn't user-overridable
 	// from the base prompt.
 	{From: "report_base_prompt.md", To: "prompts/report/_post.format.md"},
-	{From: "code_base_prompt.md", To: "prompts/code/_post.format.md"},
+	{From: "code_base_prompt.md", To: "prompts/code.prompt.md"},
 	{From: "report_extra_prompt.md", To: "prompts/report/_post.extra.md"},
-	{From: "code_extra_prompt.md", To: "prompts/code/_post.extra.md"},
+	{From: "code_extra_prompt.md", To: "prompts/code.post.extra.md"},
+	// v1 → v1+: code's dir-level framing moved to a top-level singleton so
+	// `ateam prompt --action code` can address it without a role. The
+	// matching dir-level role bodies (code/refactor_small.prompt.md etc.)
+	// no longer ship — user-installed ones become orphans the assembler
+	// will warn about, but they stay on disk for manual reconciliation.
+	{From: "prompts/code/_post.format.md", To: "prompts/code.prompt.md"},
+	{From: "prompts/code/_post.extra.md", To: "prompts/code.post.extra.md"},
 
 	{From: "supervisor/review_prompt.md", To: "prompts/review.prompt.md"},
 	{From: "supervisor/review_extra_prompt.md", To: "prompts/review.post.extra.md"},

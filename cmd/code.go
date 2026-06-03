@@ -142,19 +142,19 @@ func runCode(opts CodeOptions) error {
 	batch := resolveBatch("", "code")
 
 	// Resolve sub-run profile/agent once — used here for the DinD check and
-	// included in subRunProfileArgs so the supervisor can paste --profile /
-	// --agent verbatim into each `ateam exec`. --agent and --profile are
-	// mutually exclusive on ateam exec.
+	// folded into subRunArgs so the supervisor pastes the full --profile /
+	// --agent / --project / --org / etc. fragment into each `ateam exec`.
+	// --agent and --profile are mutually exclusive on ateam exec.
 	subRunProfile := opts.Profile
 	if subRunProfile == "" && opts.Agent == "" {
 		subRunProfile = env.Config.ResolveProfile(runner.ActionExec, "")
 	}
-	subRunProfileArgs := buildSubRunProfileArgs(opts, subRunProfile)
+	subRunArgs := buildSubRunArgs(opts, subRunProfile, env.SourceDir, orgFlag, workDirFlag)
 
 	// Both default and --prompt paths now go through assembleCodeManagementV1;
 	// the override (customManagement) flows into the assembler's
 	// ReplaceRoleMain option so framing fragments compose either way. Per-run
-	// values are inlined as {{exec.batch}} / {{exec.profile_args}} and get
+	// values are inlined as {{exec.batch}} / {{exec.subrun_args}} and get
 	// resolved by the runner at exec time (live path) or — equivalently — by
 	// the same TemplateVarsFor + ResolveTemplateString call below when
 	// previewing via --dry-run.
@@ -199,7 +199,7 @@ func runCode(opts CodeOptions) error {
 	if err != nil {
 		return err
 	}
-	cr.ProfileArgs = subRunProfileArgs
+	cr.SubRunArgs = subRunArgs
 
 	if opts.DryRun {
 		previewOpts := runner.RunOpts{
@@ -365,12 +365,27 @@ func checkDockerInDocker(env *root.ResolvedEnv, supervisorProfile, subRunProfile
 	return nil
 }
 
-// buildSubRunProfileArgs renders the {{exec.profile_args}} fragment that
-// supervisor prompts paste verbatim into each `ateam exec`. Agent/profile
-// are mutually exclusive (--agent wins when both are set, matching the CLI).
-// No shell-quoting: every covered field is a CLI token without spaces in
-// practice; if that changes, the supervisor needs to quote on its end.
-func buildSubRunProfileArgs(opts CodeOptions, subRunProfile string) string {
+// buildSubRunArgs renders the {{exec.subrun_args}} fragment supervisor prompts
+// paste verbatim into each `ateam exec`. Positive list — propagate every
+// `ateam code` flag that's meaningful for an exec sub-run. The classified
+// exclusions (supervisor-only flags, mode controls, output controls) are
+// intentionally absent; keep them off this list when adding new options:
+//
+//	NEVER propagate:
+//	  --supervisor-profile / --supervisor-agent (definitionally supervisor-only)
+//	  --management / --review                   (supervisor inputs)
+//	  --timeout                                 (supervisor's own clock)
+//	  --dry-run / --force / --print             (mode controls)
+//	  --verbose / --no-stream / --no-summary    (supervisor I/O)
+//	  --quiet / --format / --progress-fd        (supervisor I/O)
+//	  --agent-args                              (supervisor-specific extras)
+//	  --docker-auto-setup                       (already ran for the parent;
+//	                                             sub-runs reuse those containers)
+//
+// Agent/profile are mutually exclusive (--agent wins, matching the CLI).
+// Project path is shell-quoted because it can contain spaces or shell-
+// significant chars; other fields are CLI tokens without spaces in practice.
+func buildSubRunArgs(opts CodeOptions, subRunProfile, sourceDir, orgPath, workDir string) string {
 	var parts []string
 	switch {
 	case opts.Agent != "":
@@ -392,6 +407,18 @@ func buildSubRunProfileArgs(opts CodeOptions, subRunProfile string) string {
 	}
 	if opts.MaxBudgetUSD != "" {
 		parts = append(parts, "--max-budget-usd", opts.MaxBudgetUSD)
+	}
+	if opts.MaxBudgetBatch != "" {
+		parts = append(parts, "--max-budget-usd-batch", opts.MaxBudgetBatch)
+	}
+	if sourceDir != "" {
+		parts = append(parts, "--project", shellQuoteSingle(sourceDir))
+	}
+	if orgPath != "" {
+		parts = append(parts, "--org", shellQuoteSingle(orgPath))
+	}
+	if workDir != "" {
+		parts = append(parts, "--work-dir", shellQuoteSingle(workDir))
 	}
 	return strings.Join(parts, " ")
 }
