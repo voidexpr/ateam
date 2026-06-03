@@ -26,7 +26,7 @@ Quality work is the sweet spot for unattended agents because it can be prompted 
 
 ### `claude -p` works until it doesn't
 
-Coding agents all provide flexible ways to run unattended, but a lot more tooling is required: a uniform interface across agents, conventions for logs, execution profiles, isolation parameters, tracking cost (tokens, turns, context), dynamic prompt assembly, move prompt logic to scripts to reduce costs, ... It doesn't need to be complicated: a few config files, markdown prompts, some log files one CLI.
+Coding agents all provide flexible ways to run unattended, but a lot more tooling is required: a uniform interface across agents, conventions for logs, execution profiles, isolation parameters, tracking cost (tokens, turns, context), dynamic prompt assembly, moving prompt logic into scripts to reduce costs, ... It doesn't need to be complicated: a few config files, markdown prompts, some log files, one CLI.
 
 ATeam gives you the `ateam ps` command for unattended agents: clearly see how long they take and how much they cost, so you can improve your prompts over time, decide what runs daily vs. weekly and not repeatedly run that $20 one-liner without realizing it.
 
@@ -34,7 +34,7 @@ It also gives you `ateam exec` and `ateam parallel` as primitives — drop them 
 
 This kind of harness lets you invest more heavily in unattended work without becoming dependent on any single coding agent — you keep the flexibility to pick the best pricing or the most interesting features as the landscape shifts.
 
-see more at [APPROACH.md](APPROACH_2.md).
+See more at [APPROACH.md](APPROACH_2.md).
 
 ## Key Features
 
@@ -42,7 +42,7 @@ see more at [APPROACH.md](APPROACH_2.md).
 - Drives Claude Code (`claude -p` with `stream-json`) and Codex (`exec`); experimental `codex-tmux` lets TUI-only commands like `/review` run unattended
 - Multiple isolation modes: built-in agent sandbox (default), one-shot Docker, exec into a long-lived container (Docker / devcontainer / compose), or run ateam itself inside Docker (removes all permission checks). This is required to balance permissions vs. safety.
 - Config files to manage agent and container invocation, for example profiles select agent + container + custom arguments combos (`--profile docker`, `--profile codex-high`)
-- Dynamic prompt assembly with ad-hoc pre/post instruction on top of named prompts, macros in prompts
+- Dynamic prompt assembly: ad-hoc pre/post instructions on top of named prompts, with macro support inside prompts
 - Can use the default subscription, oauth, API keys using secret management in OS keychain, prioritizing the cheapest mode if multiple keys are available
 
 **Quality pipeline**
@@ -183,15 +183,15 @@ More recipes (lunch-pass / weekly audit / step-by-step / mixed-agent scripts): [
 
 ## Isolation
 
-ATeam runs unattended agents that must operate safely without constant permission approval requests. The field is evolving, ATeam supports multiple approaches and will adapt as best practices emerge.
+ATeam runs unattended agents that must operate safely without constant permission approval requests. The field is evolving; ATeam supports multiple approaches and will adapt as best practices emerge.
 
 **Why isolation matters:**
 - **Filesystem**: prevent accidental or malicious writes outside the project, protect access to sensitive files, avoid time-wasting configuration breakages
 - **Network**: prevent data exfiltration (especially combined with filesystem access), prevent remote control
 
-**The tradeoff**: stricter restrictions increase safety but can break tools that rely on directories outside the project, Unix sockets (Docker), pipes (tsx), nested sandboxes (Playwright on macOS), or shared `/tmp` directories. Also more isolation environments like Docker require more configuration, there are also extra steps to configure coding agents within containers.
+**The tradeoff**: stricter restrictions increase safety but can break tools that rely on directories outside the project, Unix sockets (Docker), pipes (tsx), nested sandboxes (Playwright on macOS), or shared `/tmp` directories. Heavier isolation environments (Docker especially) require more configuration, plus extra steps to authenticate coding agents inside containers.
 
-The exact isolation is configuration driven so highly customizable.
+Isolation is configuration-driven, so any of the above can be tuned per project.
 
 ### Execution modes
 
@@ -225,7 +225,7 @@ The exact isolation is configuration driven so highly customizable.
 | **Built-in sandbox** and **separate agent configuration** | Same as above but don't share the same configuration as interactive agents (different hooks, ...) | Useful when the default agent configuration is highly customized with notifications |
 | **Docker one-shot** | Fresh Linux container built and run per command | Strong isolation; need build/test tooling |
 | **Docker exec** | Exec into an existing user-managed container (docker-compose, devcontainer, …) | You already run a long-lived dev container |
-| **ATeam inside a container** | Run ateam itself from inside a container (Docker or an OS-native sandbox like [fence](https://github.com/fencesandbox/fence)); agents inherit container isolation and runs without any restriction | Docker-native projects or sandbox ateam itself if you don't trust it |
+| **ATeam inside a container** | Run ateam itself from inside a container (Docker or an OS-native sandbox like [fence](https://github.com/fencesandbox/fence)); agents inherit the container's isolation and run without per-command restrictions | Docker-native projects, or sandboxing ateam itself if you don't trust it |
 | **None** | No isolation (agent runs directly on host) | Debugging only |
 
 By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for one-shot container isolation or `--profile docker-exec` to exec into an existing container. See `defaults/runtime.hcl` for all profiles.
@@ -248,7 +248,7 @@ Full reference: [COMMANDS.md](COMMANDS.md).
 
 ATeam was started in February 2026 and has been used mostly on projects where the code is owned by coding agents (including ateam itself). The approach is validated: it improves codebases and saves attention, projects shape up while spending a fraction of the effort it would take by direct prompting.
 
-But ateam runs are also not free, especially once the mid June 2026 Claude subscription price for unattended-use increases. It still seems well worth it, maybe it is ran less often than every day or with more targeted roles. Built-in prompts have already gone through a round of token usage reduction but more will be done in the future to reduce token usage. A core realization while working with coding agents is that the cost of building features might not even be half of the true cost of building quality software.
+But ateam runs are not free, especially once the mid-June 2026 Claude subscription price increase for unattended use kicks in. It still seems well worth it; perhaps run less often than every day, or with more targeted roles. Built-in prompts have already gone through a round of token-usage tuning, with more to come. A realization that comes from working with coding agents: the cost of building features may be less than half the true cost of building quality software.
 
 ## Docs
 
