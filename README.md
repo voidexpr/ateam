@@ -4,56 +4,7 @@ ATeam is designed for developers who want to focus on feature work and key archi
 
 ATeam is a CLI that runs role-specific coding agents against your codebase. Each agent audits code across selected dimensions like code refactoring, testing, security, dependencies, documentation, etc. Then a supervisor prioritizes the findings and runs coding agents to implement fixes. It works unattended, out of the box, for any tech stack. It is solely focused on project quality and doesn't make any feature change.
 
-Think of it as a team of expert colleagues for software quality: they audit while you sleep, commit small focused fixes, and the next run builds on the last.
-
-If you want to work on complex tasks then keep using interactive agents, if you want to run pre-built prompts to perform a task then `ateam` helps manage them.
-
-At its core ateam is a CLI to run one-shot unattended agents with saved prompts. It layers a small workflow of parallel reports, supervisor review and supervised coding of selected tasks. But can also be used in shell commands for sequences of steps (single agent or parallel agents). The focus is on software engineering quality improvement tasks and not feature development. Feature development (or also some software engineering quality tasks) benefit from interactive agents. Ateam solves the problem of having background agent improve the code base quality behind the scene to reduce the need to explicitly do it.
-
-Maybe:
-Ateam focus is on:
-* flexible agent execution
-    * safe isolated execution
-    * no request approval interrupting execution, pure unattended agent
-    * prompt once and run with any agent, no lock-in
-    * tracks cost, logs for easy troubleshooting
-* pre-built pipeline for entire code enhancement
-    * flexible full execution or step by step audit
-    * pre-built prompts along many dimensions
-    * web tool to review artifacts produced by ateam
-* a simple command line that can be used in more complex workflow
-    * want to perform adversarial reviews ? see scripts/ for examples
-    * want something simple chaining sequential and parallel agents ? a simple bash script typical suffices
-    * want complex prompt assembly and pre/post execution script ? just wrap the ateam CLI and build the framework you need. An example is available in python/ateam.py
-
-The goal is to define asynchronous processes mixing agents and scripts to free up more time to focus where human attention is needed and not for tasks that can be prompted once and require little supervision/decision making once completed.
-
-Maybe:
-Ateam is a CLI tool to manage unattended coding agents so you can use your attention to high value tasks. The main focus is on software engineer quality. First because it can be prompted once, leveraging LLM training in what code reviews are, security audits, tests, etc ... And second because it is the best fit for unattended coding agents, leaving interactive sessions for feature work.
-The vision is for developers to focus on their attention on design and feature and let coding agents refactor their own code, add tests, manage dependencies, etc ...
-
-It focus on the core building blocks:
-* drive existing coding agents to leverage their tools and trusted ability to modify code
-    * make prompts and execution independent: swap codex/claude easily
-    * flexible isolation: sandbox, separate agent config, docker
-    * maintain a record of execution that can be used in real-time and after the fact
-        * keeps task details, logs, prompts used, etc ..
-    * analyze cost, easily see what prompt to optimize or the effect of a change
-* many pre-defined software engineering quality [roles](ROLES.md)
-* a pre-defined workflow of:
-    * parallel report: audit the code along selected dimensions (or let an LLM chose them based on your directions or recent changes)
-    * review changes to prioritize and be pragmatic
-    * code the changes
-    * verify that the changes made don't have obvious issues, tests were ran, nobody cheated
-* all artifacts are easy to audit and modify markdown files that can also be served as a web app for each browsing
-* built-in agent support:
-    * have agents configure ateam
-    * have agents decide which roles to run
-    * have agents debug failed runs
-    * have an agent manage a long run and possibly fix issues occuring in the middle to resume
-* reusable for custom script
-    * many example scripts provided: double code review (codex and claude) + code, codex review + claude codes, blackbox testing, multiple rounds reviews, etc ...
-    * you can trivially create your own shell scripts, no need to use a workflow API or tools
+Ateam also provides simple primitives to run and audit unattended agents: run sequentially, in parallel, see token usage of past runs, saves logs and prompts, resume unattended session as an interactive session, etc ... It makes it easy to build simple shell scripts involving coding agents or build something more complicated leveraging ateam's core agent management features.
 
 See [APPROACH.md](APPROACH.md) for the rationale and design principles behind ATeam.
 
