@@ -4,7 +4,7 @@
 
 ATeam is a CLI to run existing coding agents (Claude Code, Codex) unattended. It also provides a four-stage software engineering quality pipeline (**report → review → code → verify**) and a library of role prompts covering bugs, tests, security, dependencies, docs, architecture, and more.
 
-It automates the parts you don't want to do to free up your attention for feature work, architecture and any task you choose.
+It automates the parts you don't want to do to free up your attention for features, architecture or any task you choose to focus on.
 
 ## Why ATeam
 
@@ -26,9 +26,9 @@ Quality work is the sweet spot for unattended agents because it can be prompted 
 
 ### `claude -p` works until it doesn't
 
-Coding agents all provide flexible ways to run unattended, but a lot more tooling is required: a uniform interface across agents, conventions for logs, execution profiles, isolation parameters, tracking cost (tokens, turns, context), dynamic prompt assembly, move prompt logic to scripts to reduce costs, ...
+Coding agents all provide flexible ways to run unattended, but a lot more tooling is required: a uniform interface across agents, conventions for logs, execution profiles, isolation parameters, tracking cost (tokens, turns, context), dynamic prompt assembly, move prompt logic to scripts to reduce costs, ... It doesn't need to be complicated: a few config files, markdown prompts, some log files one CLI.
 
-ATeam gives you the `ps` command for unattended agents: clearly see how long they take and how much they cost, so you can improve your prompts over time, decide what runs daily vs. weekly and not repeatedly run that $20 one-liner without realizing it.
+ATeam gives you the `ateam ps` command for unattended agents: clearly see how long they take and how much they cost, so you can improve your prompts over time, decide what runs daily vs. weekly and not repeatedly run that $20 one-liner without realizing it.
 
 It also gives you `ateam exec` and `ateam parallel` as primitives — drop them into a bash script for simple workflows, or wrap them in something more involved.
 
@@ -42,6 +42,7 @@ see more at [APPROACH.md](APPROACH_2.md).
 - Drives Claude Code (`claude -p` with `stream-json`) and Codex (`exec`); experimental `codex-tmux` lets TUI-only commands like `/review` run unattended
 - Multiple isolation modes: built-in agent sandbox (default), one-shot Docker, exec into a long-lived container (Docker / devcontainer / compose), or run ateam itself inside Docker (removes all permission checks). This is required to balance permissions vs. safety.
 - Config files to manage agent and container invocation, for example profiles select agent + container + custom arguments combos (`--profile docker`, `--profile codex-high`)
+- Dynamic prompt assembly with ad-hoc pre/post instruction on top of named prompts, macros in prompts
 - Can use the default subscription, oauth, API keys using secret management in OS keychain, prioritizing the cheapest mode if multiple keys are available
 
 **Quality pipeline**
@@ -63,8 +64,6 @@ see more at [APPROACH.md](APPROACH_2.md).
 - `ateam inspect --auto-debug`: have an agent investigate why past runs failed, recommend config changes, and draft a bug to file against ATeam if needed
 - `ateam report --auto-roles`: dynamically select which roles to run based on recent commits
 - `scripts/ateam-runall-managed.sh`: run a full quality pipeline and, on error, have an agent try to fix it and resume
-
-Note about maturity and cost: ateam was started in Feb 2026 and has been used mostly on vibe coded project (including itself). The approach is validated: it improves code bases and saves attention. It is also not free, especially once the mid June 2026 Claude unattended agent price increase kicks in. It still seems well worth it. It's not like code agent produces will magically engineer itself as it is written. A pipeline like ateam is needed by agentic project and can still benefit more classical project with developers written a lot of the code by narrowing the roles ateam uses to audit the code base.
 
 ## Install
 
@@ -240,6 +239,13 @@ By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for o
 | **Config / debug** | `env`, `prompt`, `roles`, `secret` |
 
 Full reference: [COMMANDS.md](COMMANDS.md).
+
+
+## Note about maturity and cost
+
+ATeam was started in February 2026 and has been used mostly on vibe coded project (including itself). The approach is validated: it improves code bases and saves attention, projects shape up while spending a fraction of the effort it would take by direct prompting.
+
+But ateam runs are also not free, especially once the mid June 2026 Claude subscription price for unattended agent increases. It still seems well worth it, maybe it is ran less often than every day or with more targeted roles. Built-in prompts have already gone through a round of token usage reduction but more will be done in the future to reduce token usage. A core realization while working with coding agents is that the cost of building features might not even be half of the true cost of building quality software.
 
 ## Docs
 
