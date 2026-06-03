@@ -20,15 +20,19 @@ var VarRenameMap = map[string]string{
 	"PROJECT_DIR":       "project.dir",
 
 	// Per-execution
-	"BATCH":         "exec.batch",
-	"TIMESTAMP":     "exec.timestamp",
-	"PROFILE":       "exec.profile",
-	"EXEC_ID":       "exec.id",
-	"AGENT":         "exec.agent",
-	"MODEL":         "exec.model",
-	"OUTPUT_DIR":    "exec.output_dir",
-	"OUTPUT_FILE":   "exec.output_file",
-	"EXECUTION_DIR": "exec.output_dir", // legacy alias for code_management_prompt.md
+	"BATCH":                "exec.batch",
+	"TIMESTAMP":            "exec.timestamp",
+	"PROFILE":              "exec.profile",
+	"EXEC_ID":              "exec.id",
+	"AGENT":                "exec.agent",
+	"MODEL":                "exec.model",
+	"EFFORT":               "exec.effort",
+	"MAX_BUDGET_USD":       "exec.max_budget_usd",
+	"MAX_BUDGET_USD_BATCH": "exec.max_budget_usd_batch",
+	"OUTPUT_DIR":           "exec.output_dir",
+	"OUTPUT_FILE":          "exec.output_file",
+	"PROFILE_ARGS":         "exec.profile_args",
+	"EXECUTION_DIR":        "exec.output_dir", // legacy alias for code_management_prompt.md
 
 	// Container
 	"CONTAINER_TYPE": "container.type",

@@ -91,10 +91,21 @@ type AgentExecutor struct {
 	Profile              string              // profile name for DB
 	ProfileDef           string              // verbatim profile definition (HCL) for cmd.md
 	AgentDef             string              // verbatim agent definition (HCL) for cmd.md
-	ContainerType        string              // "none" or "docker" for DB
-	ContainerName        string              // docker container name for liveness checks
-	ContainerNameSource  string              // where ContainerName came from (ContainerNameSource* constants)
-	ProjectID            string              // project ID for DB
+	// Effort / MaxBudgetUSD / MaxBudgetUSDBatch mirror the CLI-flag values the
+	// runner was built with. Stored here so BuildTemplateVars can surface them
+	// as {{EFFORT}} / {{MAX_BUDGET_USD}} / {{MAX_BUDGET_USD_BATCH}} placeholders
+	// (used by supervisor prompts to propagate the same caps into sub-execs).
+	Effort            string
+	MaxBudgetUSD      string
+	MaxBudgetUSDBatch string
+	// ProfileArgs is an opaque, pre-rendered CLI args fragment surfaced as
+	// {{PROFILE_ARGS}} in prompt bodies. The runner doesn't interpret it —
+	// callers (today only `ateam code`) decide what goes in.
+	ProfileArgs         string
+	ContainerType       string // "none" or "docker" for DB
+	ContainerName       string // docker container name for liveness checks
+	ContainerNameSource string // where ContainerName came from (ContainerNameSource* constants)
+	ProjectID           string // project ID for DB
 
 	// StallWarnAfter is the idle duration after which Run logs a stall
 	// warning and emits a PhaseStall progress event. Re-armed after each

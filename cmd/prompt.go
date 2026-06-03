@@ -25,6 +25,7 @@ var (
 	promptSupervisor           bool
 	promptPaths                bool
 	promptInlinePaths          bool
+	promptBatch                string
 )
 
 var promptCmd = &cobra.Command{
@@ -55,6 +56,7 @@ func init() {
 	promptCmd.Flags().BoolVar(&promptIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
 	promptCmd.Flags().BoolVar(&promptPaths, "paths", false, "show a per-section breakdown table (slot + anchor + path + mod time + tokens); no prompt body")
 	promptCmd.Flags().BoolVar(&promptInlinePaths, "inline-paths", false, "print the full prompt with each section preceded by an anchor/path/mod-time/tokens header; troubleshooting view, not for agent consumption")
+	promptCmd.Flags().StringVar(&promptBatch, "batch", "", "bake a literal batch ID into {{exec.batch}} placeholders (otherwise rendered as the deferred {{BATCH}} marker for the runner to fill at exec time)")
 	promptCmd.MarkFlagsMutuallyExclusive("role", "supervisor")
 	promptCmd.MarkFlagsMutuallyExclusive("paths", "inline-paths")
 	_ = promptCmd.MarkFlagRequired("action")
@@ -114,8 +116,22 @@ func runPromptRole() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(assembled)
+	fmt.Println(applyPromptBatchOverride(assembled))
 	return nil
+}
+
+// applyPromptBatchOverride bakes the --batch flag value into the assembled
+// prompt by replacing the deferred {{BATCH}} placeholder with the literal.
+// Without --batch the prompt keeps the placeholder, which the runner fills
+// at exec time. This lets users preview or hand-feed an assembled prompt
+// with the batch already resolved (e.g. piping `ateam prompt --batch X` into
+// `ateam exec --batch X` keeps the two in sync without the LLM having to
+// copy a value).
+func applyPromptBatchOverride(assembled string) string {
+	if promptBatch == "" {
+		return assembled
+	}
+	return strings.ReplaceAll(assembled, "{{BATCH}}", promptBatch)
 }
 
 func runPromptSupervisor() error {
@@ -152,18 +168,17 @@ func runPromptSupervisor() error {
 			return errNoReview(env.ReviewPath())
 		}
 		// Use the same helper cmd/code.go invokes so the preview matches what
-		// the real run sends — including the Sub-Run Flags block. Exact flag
-		// values (batch, profile, model, ...) depend on the live `ateam code`
-		// invocation, so the preview uses placeholders that show the shape;
-		// the user sees "this becomes a real value at run time."
-		assembled, err = assembleCodeManagementV1(env, roleLabel, string(reviewContent), previewSubRunFlags(env.SourceDir), "", prePrompt, postPrompt)
+		// the real run sends. Per-exec values like {{exec.batch}} stay as
+		// {{BATCH}} placeholders in the output unless --batch overrides them
+		// via applyPromptBatchOverride.
+		assembled, err = assembleCodeManagementV1(env, roleLabel, string(reviewContent), "", prePrompt, postPrompt)
 	case runner.ActionVerify:
 		assembled, err = assembleSupervisor(env, "code_verify", roleLabel, "verify", prePrompt, postPrompt)
 	}
 	if err != nil {
 		return err
 	}
-	fmt.Println(assembled)
+	fmt.Println(applyPromptBatchOverride(assembled))
 	return nil
 }
 
@@ -292,7 +307,6 @@ func assembleForInspection() (string, []sectionDigest, error) {
 				return "", nil, errNoReview(env.ReviewPath())
 			}
 			addLive("review", env.ReviewPath(), "# Review\n\n"+string(reviewContent))
-			addLive("sub_run_flags", "(cmd/code.go: rendered from --batch / --profile / --agent / --model / --effort / --max-budget-*)", previewSubRunFlags(env.SourceDir).Render())
 		}
 	} else {
 		switch promptAction {
@@ -416,7 +430,7 @@ func runPromptInlinePaths() error {
 			d.Slot, d.Modified, display.FmtTokens(int64(d.Tokens)))
 		fmt.Println(rule)
 		fmt.Println()
-		fmt.Println(d.Content)
+		fmt.Println(applyPromptBatchOverride(d.Content))
 	}
 	return nil
 }

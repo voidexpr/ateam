@@ -52,6 +52,10 @@ func TestPrintCodeSessionSummaryPicksByExecID(t *testing.T) {
 	}
 }
 
+// TestCodeDryRunAgentInjection locks in that --agent on `ateam code` lands
+// in the supervisor prompt via {{exec.profile_args}}. Dry-run pre-resolves
+// the placeholder so the operator sees the sub-run flags in the printed
+// prompt body.
 func TestCodeDryRunAgentInjection(t *testing.T) {
 	base := t.TempDir()
 	orgDir, err := root.InstallOrg(base)
@@ -72,9 +76,8 @@ func TestCodeDryRunAgentInjection(t *testing.T) {
 
 	savedOrg := orgFlag
 	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir) // --org takes the parent of .ateamorg/
+	orgFlag = filepath.Dir(orgDir)
 
-	// Passing review content directly avoids needing a review.md on disk.
 	var runErr error
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
@@ -89,9 +92,8 @@ func TestCodeDryRunAgentInjection(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("runCode dry-run with agent override: %v", runErr)
 	}
-	// The agent override must be injected into the sub-run flags section.
 	if !strings.Contains(out, "--agent mock") {
-		t.Errorf("expected '--agent mock' in code management output:\n%s", out)
+		t.Errorf("expected '--agent mock' in code management output (via {{exec.profile_args}}):\n%s", out)
 	}
 }
 

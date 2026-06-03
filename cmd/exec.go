@@ -126,11 +126,11 @@ func runExec(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--role requires a project context (.ateam/ directory)")
 	}
 
-	if execRole != "" {
-		if err := root.EnsureRoles(env.ProjectDir, []string{execRole}); err != nil {
-			return err
-		}
-	}
+	// --role is intentionally free-form here: exec accepts any label so the
+	// supervisor can tag sub-runs with task-specific names (e.g.
+	// "fix_regression") without having to pre-register them in config.toml.
+	// The role logs directory is created lazily by the runner the first time
+	// it writes output.
 	r, err := buildRunner(env, RunnerSpec{
 		Profile:         execProfile,
 		Agent:           execAgent,

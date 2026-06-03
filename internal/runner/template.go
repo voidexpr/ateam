@@ -17,21 +17,25 @@ import (
 // TemplateVars holds the variables available for {{VAR}} substitution
 // in agent args and extra args from runtime.hcl.
 type TemplateVars struct {
-	ProjectName     string // from config.toml project.name
-	ProjectFullPath string // absolute path to project source dir
-	ProjectDir      string // last component of ProjectFullPath
-	Role            string // role ID (e.g. "security", "supervisor")
-	Action          string // action type (e.g. "report", "exec", "code")
-	Batch           string // batch ID (e.g. "code-2026-03-31_06-09-39")
-	Timestamp       string // run start time (TimestampFormat)
-	Profile         string // active profile name
-	ExecID          int64  // call tracking ID (from ateam ps)
-	Agent           string // agent config name (e.g. "claude", "claude-docker")
-	Model           string // resolved model name
-	ContainerType   string // container type ("none", "docker", "docker-exec", etc.)
-	ContainerName   string // docker container name (e.g. "ateam-myapp-security")
-	OutputDir       string // absolute path to <projectDir>/runtime/<exec_id>/ (where the agent should write files)
-	OutputFile      string // absolute path to OutputDir/<primary_kind> (e.g. report.md); empty when the action has no primary output
+	ProjectName       string // from config.toml project.name
+	ProjectFullPath   string // absolute path to project source dir
+	ProjectDir        string // last component of ProjectFullPath
+	Role              string // role ID (e.g. "security", "supervisor")
+	Action            string // action type (e.g. "report", "exec", "code")
+	Batch             string // batch ID (e.g. "code-2026-03-31_06-09-39")
+	Timestamp         string // run start time (TimestampFormat)
+	Profile           string // active profile name
+	ExecID            int64  // call tracking ID (from ateam ps)
+	Agent             string // agent config name (e.g. "claude", "claude-docker")
+	Model             string // resolved model name
+	Effort            string // reasoning effort (e.g. "low", "high"); empty if unset
+	MaxBudgetUSD      string // per-exec USD spend cap; empty if unset
+	MaxBudgetUSDBatch string // batch-wide USD spend cap; empty if unset
+	ProfileArgs       string // opaque CLI args fragment; surfaced as {{PROFILE_ARGS}}
+	ContainerType     string // container type ("none", "docker", "docker-exec", etc.)
+	ContainerName     string // docker container name (e.g. "ateam-myapp-security")
+	OutputDir         string // absolute path to <projectDir>/runtime/<exec_id>/ (where the agent should write files)
+	OutputFile        string // absolute path to OutputDir/<primary_kind> (e.g. report.md); empty when the action has no primary output
 
 	// AutoRolesCommandsOutput is the pre-baked context bundle injected into
 	// `{{ATEAM_AUTO_ROLES_COMMANDS_OUTPUT}}` for the --auto-roles planner agent.
@@ -58,6 +62,10 @@ func (v TemplateVars) Replacer() *strings.Replacer {
 		"{{EXEC_ID}}", execID,
 		"{{AGENT}}", v.Agent,
 		"{{MODEL}}", v.Model,
+		"{{EFFORT}}", v.Effort,
+		"{{MAX_BUDGET_USD}}", v.MaxBudgetUSD,
+		"{{MAX_BUDGET_USD_BATCH}}", v.MaxBudgetUSDBatch,
+		"{{PROFILE_ARGS}}", v.ProfileArgs,
 		"{{CONTAINER_TYPE}}", v.ContainerType,
 		"{{CONTAINER_NAME}}", v.ContainerName,
 		"{{OUTPUT_DIR}}", v.OutputDir,
@@ -136,6 +144,18 @@ func resolveContainerTemplates(c container.Container, vars TemplateVars) {
 	c.ResolveTemplates(vars.Replacer())
 }
 
+// TemplateVarsFor is the convenience entry point: derives agentName/model
+// from r.Agent and delegates to BuildTemplateVars. Use this from dry-run /
+// preview paths so the substitution they print matches what Run() would
+// produce — single source of truth for which {{VARS}} resolve and how.
+// callID == 0 is the sentinel for "no DB row yet" (preview mode), in which
+// case {{EXEC_ID}} renders empty and {{OUTPUT_DIR}} stays empty.
+func (r *AgentExecutor) TemplateVarsFor(opts RunOpts, startedAt time.Time, callID int64) TemplateVars {
+	agentName := r.Agent.Name()
+	model := agent.NormalizeModel(extractModel(r.Agent))
+	return BuildTemplateVars(r, opts, startedAt, callID, agentName, model)
+}
+
 // BuildTemplateVars constructs a fully populated TemplateVars.
 func BuildTemplateVars(r *AgentExecutor, opts RunOpts, startedAt time.Time, callID int64, agentName, model string) TemplateVars {
 	vars := TemplateVars{
@@ -148,6 +168,10 @@ func BuildTemplateVars(r *AgentExecutor, opts RunOpts, startedAt time.Time, call
 		ExecID:                  callID,
 		Agent:                   agentName,
 		Model:                   model,
+		Effort:                  r.Effort,
+		MaxBudgetUSD:            r.MaxBudgetUSD,
+		MaxBudgetUSDBatch:       r.MaxBudgetUSDBatch,
+		ProfileArgs:             r.ProfileArgs,
 		ContainerType:           r.ContainerType,
 		ContainerName:           r.ContainerName,
 		AutoRolesCommandsOutput: opts.AutoRolesCommandsOutput,

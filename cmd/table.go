@@ -856,11 +856,27 @@ func addCheaperModelFlag(cmd *cobra.Command, dst *bool) {
 		"use a cheaper model ("+cheaperModelName+"); ignored if --model is also set (--model wins)")
 }
 
+// resolveBatch picks the batch ID for a supervisor-driven run. When override
+// is non-empty (the user passed --batch), it wins; otherwise the helper mints
+// "<prefix>-<timestamp>" using the same TimestampFormat all the renderers
+// agree on. Centralized so every supervisor entry point (code, parallel,
+// report, run-all, ...) produces the same shape — and so prefix typos stay
+// out of LatestBatch lookups downstream.
+func resolveBatch(override, prefix string) string {
+	if override != "" {
+		return override
+	}
+	return prefix + "-" + time.Now().Format(display.TimestampFormat)
+}
+
 // applyEffort sets the agent's reasoning effort if value is non-empty.
 // Empty string is a no-op so callers can pass through unconditionally.
+// The value is also stashed on the executor so BuildTemplateVars can
+// surface it as {{EFFORT}} for supervisor prompts.
 func applyEffort(r *runner.AgentExecutor, value string) {
 	if value != "" {
 		r.Agent.SetEffort(value)
+		r.Effort = value
 	}
 }
 
@@ -926,6 +942,7 @@ func applyMaxBudgetUSD(r *runner.AgentExecutor, value, action string) error {
 		return nil
 	}
 	r.Agent.SetMaxBudgetUSD(value)
+	r.MaxBudgetUSD = value
 	if r.Agent.Name() != agent.NameCodex && r.Agent.Name() != agent.NameCodexTmux {
 		return nil
 	}

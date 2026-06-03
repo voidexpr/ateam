@@ -192,14 +192,18 @@ func (e *ResolvedEnv) BuildAssemblerVars(promptPath, roleLabel, action string) a
 			// leaving the agent with a blank value. On a preview call (no
 			// runner) they render as the placeholder text, which honestly
 			// signals "resolved at run time."
-			"id":          "{{EXEC_ID}}",
-			"batch":       "{{BATCH}}",
-			"timestamp":   "{{TIMESTAMP}}",
-			"profile":     "{{PROFILE}}",
-			"agent":       "{{AGENT}}",
-			"model":       "{{MODEL}}",
-			"output_dir":  "{{OUTPUT_DIR}}",
-			"output_file": "{{OUTPUT_FILE}}",
+			"id":                   "{{EXEC_ID}}",
+			"batch":                "{{BATCH}}",
+			"timestamp":            "{{TIMESTAMP}}",
+			"profile":              "{{PROFILE}}",
+			"agent":                "{{AGENT}}",
+			"model":                "{{MODEL}}",
+			"effort":               "{{EFFORT}}",
+			"max_budget_usd":       "{{MAX_BUDGET_USD}}",
+			"max_budget_usd_batch": "{{MAX_BUDGET_USD_BATCH}}",
+			"profile_args":         "{{PROFILE_ARGS}}",
+			"output_dir":           "{{OUTPUT_DIR}}",
+			"output_file":          "{{OUTPUT_FILE}}",
 			// Assembly-time keys: filled by the caller before Assemble. Empty
 			// default lets the engine render `{{exec.debug_context}}` to ""
 			// for prompts that don't use it instead of hard-erroring.

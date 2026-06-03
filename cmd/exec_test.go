@@ -214,11 +214,13 @@ func TestFormatInitLine(t *testing.T) {
 	}
 }
 
-// TestRunExecAcceptsUnknownRoleAndCreatesDir locks in the behavior introduced
-// by fd99869 ("exec: accept any --role name without validation"): runExec must
-// accept arbitrary role names without checking them against a known list, and
-// must create the role's logs directory as a side effect.
-func TestRunExecAcceptsUnknownRoleAndCreatesDir(t *testing.T) {
+// TestRunExecAcceptsUnknownRole locks in that runExec accepts arbitrary
+// --role names without validating against a known list. The runner creates
+// the per-exec_id logs dir lazily — the per-role parent dir is NOT
+// pre-created any more (EnsureRoles was removed so the supervisor can tag
+// sub-runs with task-specific labels like `fix_regression` without
+// registering them up front).
+func TestRunExecAcceptsUnknownRole(t *testing.T) {
 	cases := []struct {
 		name string
 		role string
@@ -250,9 +252,11 @@ func TestRunExecAcceptsUnknownRoleAndCreatesDir(t *testing.T) {
 				t.Fatalf("runExec with role %q: %v", tc.role, runErr)
 			}
 
+			// Sanity check that we did NOT pre-create logs/roles/<role>/ —
+			// that dir was an EnsureRoles side-effect we explicitly dropped.
 			roleDir := filepath.Join(env.ProjectDir, "logs", "roles", tc.role)
-			if _, err := os.Stat(roleDir); err != nil {
-				t.Errorf("role logs dir %s not created: %v", roleDir, err)
+			if _, err := os.Stat(roleDir); !os.IsNotExist(err) {
+				t.Errorf("expected logs/roles/%s to NOT be pre-created (got err=%v); EnsureRoles regression?", tc.role, err)
 			}
 
 			if !strings.Contains(out, tc.role) {

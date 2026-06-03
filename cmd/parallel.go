@@ -3,9 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"time"
 
-	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/runner"
@@ -169,10 +167,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	batch := parallelBatch
-	if batch == "" {
-		batch = "parallel-" + time.Now().Format(display.TimestampFormat)
-	}
+	batch := resolveBatch(parallelBatch, "parallel")
 
 	maxParallel := parallelMaxParallel
 	if maxParallel <= 0 {
@@ -190,6 +185,9 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	defer stop()
 
 	// One PromptBundle per submitted prompt; all share the same runner.
+	// Labels become RoleID, free-form by design — no root.EnsureRoles call
+	// here, same as cmd/exec.go. The runner creates per-exec_id log dirs
+	// lazily, so role labels can be ad-hoc ("agent-1", task slugs, etc.).
 	steps := make([]flow.Step, len(resolvedPrompts))
 	for i, prompt := range resolvedPrompts {
 		steps[i] = staticBundle(labels[i], labels[i], runner.ActionParallel, prompt, runner.RunOpts{

@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/flow/actions"
 	"github.com/ateam/internal/prompts"
@@ -139,36 +139,26 @@ func runCode(opts CodeOptions) error {
 		return err
 	}
 
-	batch := "code-" + time.Now().Format(display.TimestampFormat)
+	batch := resolveBatch("", "code")
 
-	// Resolve sub-run profile/agent once — used for both prompt injection and DinD check.
-	// --agent and --profile are mutually exclusive on ateam exec.
+	// Resolve sub-run profile/agent once — used here for the DinD check and
+	// included in subRunProfileArgs so the supervisor can paste --profile /
+	// --agent verbatim into each `ateam exec`. --agent and --profile are
+	// mutually exclusive on ateam exec.
 	subRunProfile := opts.Profile
 	if subRunProfile == "" && opts.Agent == "" {
 		subRunProfile = env.Config.ResolveProfile(runner.ActionExec, "")
 	}
-
-	// --project is required so sub-execs resolve the right .ateam directory
-	// even when the supervisor's cwd is outside the project tree (remote-mode
-	// `ateam code --project /elsewhere`). In project-local mode the value is
-	// redundant but harmless. shellQuoteSingle keeps paths with spaces or
-	// shell-significant chars intact when the supervisor templates them into
-	// `ateam exec` commands.
-	subRunFlags := SubRunFlags{
-		Batch:          batch,
-		ProjectDir:     shellQuoteSingle(env.SourceDir),
-		Agent:          opts.Agent,
-		Profile:        subRunProfile,
-		Model:          opts.Model,
-		Effort:         opts.Effort,
-		MaxBudgetUSD:   opts.MaxBudgetUSD,
-		MaxBudgetBatch: opts.MaxBudgetBatch,
-	}
+	subRunProfileArgs := buildSubRunProfileArgs(opts, subRunProfile)
 
 	// Both default and --prompt paths now go through assembleCodeManagementV1;
 	// the override (customManagement) flows into the assembler's
-	// ReplaceRoleMain option so framing fragments compose either way.
-	prompt, err := assembleCodeManagementV1(env, "the supervisor", reviewContent, subRunFlags, customManagement, prePrompt, postPrompt)
+	// ReplaceRoleMain option so framing fragments compose either way. Per-run
+	// values are inlined as {{exec.batch}} / {{exec.profile_args}} and get
+	// resolved by the runner at exec time (live path) or — equivalently — by
+	// the same TemplateVarsFor + ResolveTemplateString call below when
+	// previewing via --dry-run.
+	prompt, err := assembleCodeManagementV1(env, "the supervisor", reviewContent, customManagement, prePrompt, postPrompt)
 	if err != nil {
 		return err
 	}
@@ -177,15 +167,6 @@ func runCode(opts CodeOptions) error {
 	supervisorDir := env.SupervisorDir()
 
 	startedAt := time.Now()
-
-	if opts.DryRun {
-		fmt.Printf("╔══ code management ══╗\n\n")
-		fmt.Println(prompt)
-		fmt.Printf("\n╚══ code management ══╝\n")
-		return nil
-	}
-
-	fmt.Printf("Code management supervisor running (%dm timeout)...\n", timeout)
 
 	supervisorProfileName := opts.SupervisorProfile
 	if supervisorProfileName == "" && opts.SupervisorAgent == "" {
@@ -196,6 +177,11 @@ func runCode(opts CodeOptions) error {
 		return err
 	}
 
+	// Build the supervisor runner even in dry-run so the preview goes through
+	// the same TemplateVars + ResolveTemplateString machinery the live exec
+	// would use. buildRunner doesn't execute anything; it just constructs an
+	// AgentExecutor. Side benefit: dry-run now surfaces profile/agent
+	// resolution errors early.
 	cr, err := buildRunner(env, RunnerSpec{
 		Profile:         supervisorProfileName,
 		Agent:           opts.SupervisorAgent,
@@ -213,6 +199,22 @@ func runCode(opts CodeOptions) error {
 	if err != nil {
 		return err
 	}
+	cr.ProfileArgs = subRunProfileArgs
+
+	if opts.DryRun {
+		previewOpts := runner.RunOpts{
+			RoleID: "supervisor",
+			Action: runner.ActionCode,
+			Batch:  batch,
+		}
+		previewVars := cr.TemplateVarsFor(previewOpts, startedAt, 0)
+		fmt.Printf("╔══ code management ══╗\n\n")
+		fmt.Println(runner.ResolveTemplateString(prompt, previewVars))
+		fmt.Printf("\n╚══ code management ══╝\n")
+		return nil
+	}
+
+	fmt.Printf("Code management supervisor running (%dm timeout)...\n", timeout)
 
 	db, err := openStateDB(env)
 	if err != nil {
@@ -361,4 +363,35 @@ func checkDockerInDocker(env *root.ResolvedEnv, supervisorProfile, subRunProfile
 		return fmt.Errorf("docker-in-docker is not supported: both --supervisor-profile %q and --profile %q use docker containers", supervisorProfile, subRunProfile)
 	}
 	return nil
+}
+
+// buildSubRunProfileArgs renders the {{exec.profile_args}} fragment that
+// supervisor prompts paste verbatim into each `ateam exec`. Agent/profile
+// are mutually exclusive (--agent wins when both are set, matching the CLI).
+// No shell-quoting: every covered field is a CLI token without spaces in
+// practice; if that changes, the supervisor needs to quote on its end.
+func buildSubRunProfileArgs(opts CodeOptions, subRunProfile string) string {
+	var parts []string
+	switch {
+	case opts.Agent != "":
+		parts = append(parts, "--agent", opts.Agent)
+	case subRunProfile != "":
+		parts = append(parts, "--profile", subRunProfile)
+	}
+	if opts.CheaperModel {
+		parts = append(parts, "--cheaper-model")
+	}
+	if opts.ContainerName != "" {
+		parts = append(parts, "--container-name", opts.ContainerName)
+	}
+	if opts.Effort != "" {
+		parts = append(parts, "--effort", opts.Effort)
+	}
+	if opts.Model != "" {
+		parts = append(parts, "--model", opts.Model)
+	}
+	if opts.MaxBudgetUSD != "" {
+		parts = append(parts, "--max-budget-usd", opts.MaxBudgetUSD)
+	}
+	return strings.Join(parts, " ")
 }

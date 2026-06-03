@@ -52,6 +52,10 @@ func applyRunnerOverrides(r *runner.AgentExecutor, env *root.ResolvedEnv, o Runn
 	}
 	applyModelOverrides(r, o.CheaperModel, o.Model)
 	applyEffort(r, o.Effort)
+	// MaxBudgetUSDBatch is enforced via batch precheck (not pushed into the
+	// agent), but we stash it here so BuildTemplateVars can surface it as
+	// {{MAX_BUDGET_USD_BATCH}} for supervisor prompts that propagate the cap.
+	r.MaxBudgetUSDBatch = o.MaxBudgetUSDBatch
 	return applyMaxBudgetUSD(r, o.MaxBudgetUSD, action)
 }
 

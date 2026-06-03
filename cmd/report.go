@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/ateam/internal/calldb"
-	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
@@ -209,7 +207,7 @@ func runReport(opts ReportOptions) error {
 		return err
 	}
 
-	batch := "report-" + time.Now().Format(display.TimestampFormat)
+	batch := resolveBatch("", "report")
 	cliOverridesProfile := opts.Profile != "" || opts.Agent != ""
 	defaultProfile := env.Config.ResolveProfile(runner.ActionReport, "")
 

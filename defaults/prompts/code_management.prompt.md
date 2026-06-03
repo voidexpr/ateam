@@ -8,27 +8,20 @@ without requesting input from humans unless absolutely necessary.
 
 - **review**: The prioritized list of tasks provided as input (see end of this prompt)
 - **task**: A single priority action from the review, with priority, description, and source role
-- **execution directory** (EXECUTION_DIR): the pre-allocated folder `{{exec.output_dir}}`
-  storing all artifacts for this run
-- **code prompt**: The full prompt file given to a role, generated via `ateam prompt`
-- **execution report**: `{{exec.output_file}}` (i.e. `EXECUTION_DIR/execution_report.md`), tracking outcomes
+- **execution directory**: the pre-allocated folder for this run, `{{exec.output_dir}}`, storing all artifacts
+- **execution report**: `{{exec.output_file}}` (i.e. `{{exec.output_dir}}/execution_report.md`), tracking outcomes
+- **batch ID**: `{{exec.batch}}` — every `ateam exec` you spawn MUST be tagged with `--batch {{exec.batch}}` so cost tracking ties all sub-execs back to this run
 
 ## Tools
 
-Use the `ateam` CLI for all role operations:
+Use the `ateam` CLI for all operations. The standard per-task invocation is:
 
-    ateam roles                           # list available roles
-    ateam prompt --role ROLE --action code --extra-prompt @FILE
-                                          # generate a full code prompt to stdout
-    ateam exec @PROMPT_FILE --role ROLE    # execute a role with a prompt file
-
-If a **Sub-Run Flags** section is provided at the end of this prompt, you MUST pass
-ALL listed flags to every `ateam exec` command. These flags control cost tracking
-(`--batch`) and runtime profile (`--profile`) for sub-execs.
+    ateam exec @{{exec.output_dir}}/SEQ_SLUG_task.md \
+      --action code --batch {{exec.batch}} {{exec.profile_args}}
 
 Run `ateam --help` and `ateam COMMAND --help` for full details.
 
-All temporary files (task descriptions, scratch) go in the execution directory.
+All temporary files (task descriptions, scratch) go in `{{exec.output_dir}}`.
 
 You can't perform your duties if you can't run ateam commands, so the following are fatal errors to properly report:
 * If you can't resolve `which ateam`
@@ -55,7 +48,7 @@ The goals are:
 ### Phase 1: Setup
 
 1. Use the execution directory provided as `{{exec.output_dir}}`. Create it with `mkdir -p` if it does not already exist. Do NOT invent a different timestamped path — the harness has already allocated this one and reads files from it.
-2. Initialize the execution report at `{{exec.output_file}}` (which is `EXECUTION_DIR/execution_report.md`) using the format below
+2. Initialize the execution report at `{{exec.output_file}}` using the format below
 3. make sure there are no git dirty files (untracked files are fine), if there are any abort with a clear error message
 4. review recent commits
 
@@ -69,16 +62,9 @@ Read the review and extract all Priority Actions in order (P0 first, then P1, th
 
 For each task:
 1. Assign a two-digit sequence number starting from 01
-2. Write the task description to a temp file: `EXECUTION_DIR/current_task.md`
-  * provide all the details from the review document to help understand why this task is required and why it was prioritized in addition to what needs to be done. Include all the details you have access to that are specific to this task
-3. Generate the code prompt:
-   ```
-   ateam prompt --supervisor --action code \
-     --post-prompt @EXECUTION_DIR/current_task.md \
-     > EXECUTION_DIR/SEQ_SLUG_code_prompt.md
-   ```
-   Where `SEQ` = zero-padded sequence number, `SLUG` = short snake_case summary
-   (e.g., `01_fix_sql_injection_code_prompt.md`)
+2. Pick a short snake_case slug summarizing the task (e.g. `fix_sql_injection`)
+3. Write the task description to `{{exec.output_dir}}/SEQ_SLUG_task.md`
+   * include all the relevant details from the review (why the task was prioritized, what to change, expected outcome). The file is what the implementing agent reads, so it must be self-contained — don't assume the agent has access to the review
 
 ### Phase 3: Sequential Execution
 
@@ -87,7 +73,7 @@ Execute tasks one at a time, in sequence order. For each task:
 1. **Pre-check**: Verify git working tree is clean, code builds, and tests pass
 2. **Execute**:
    ```
-   ateam exec @EXECUTION_DIR/SEQ_SLUG_code_prompt.md --role code --action code
+   ateam exec @{{exec.output_dir}}/SEQ_SLUG_task.md --action code --batch {{exec.batch}} {{exec.profile_args}}
    ```
 3. **Post-check**: Verify code still builds and tests pass
 4. **Record**: Update `execution_report.md` with the outcome, only append to it during this phase. For each task include:
@@ -110,7 +96,8 @@ After all tasks have been attempted:
      coding cycle. The tests were passing before the cycle started.
      Failing tests: [list each failing test name/file].
      Investigate each failure, fix it, and commit. Do not change test assertions
-     unless the behavioral change was intentional — fix the code instead." --role test.gaps
+     unless the behavioral change was intentional — fix the code instead." \
+       --role fix_regression --action code --batch {{exec.batch}} {{exec.profile_args}}
      ```
      Record the fix run outcome in the execution report.
    - If tests were already failing before the cycle (pre-existing failures): note them but do not attempt to fix them — that's a separate task for the next review cycle.
@@ -127,15 +114,15 @@ After all tasks have been attempted:
 
     **Started**: YYYY-MM-DD_HH-MM-SS
     **Execution Directory**: .ateam/shared/code/YYYY-MM-DD_HH-MM-SS/
+    **Batch**: {{exec.batch}}
 
     ## Tasks
 
     ### Task 01: [short description]
-    - **Role**: [role name]
     - **Status**: completed | failed | skipped
     - **Details**: [what was done or why it failed]
     - **Tests**: [command(s) ran, X passed / Y failed / Z skipped]
-    - **Prompt**: [path to code prompt file]
+    - **Task file**: [path to task description]
 
     ### Task 02: ...
 
@@ -171,9 +158,10 @@ succeed on a future retry. But do not modify approval lists directly.
 ### Clarifying question failures
 
 If a role fails because it had a clarifying question instead of completing the work,
-attempt to answer the question yourself by updating the code prompt with the additional
-context and retry the task once. If you cannot answer the question confidently, do not
-retry — record the question in the execution report for human follow-up.
+attempt to answer the question yourself by updating the task description with the
+additional context and retry the task once. If you cannot answer the question
+confidently, do not retry — record the question in the execution report for human
+follow-up.
 
 ### Tool errors
 
@@ -198,13 +186,12 @@ follow along. Print status lines as you go:
 - **File operations**: print every file you create or update
   ```
   Created: {{exec.output_file}}
-  Generated: EXECUTION_DIR/01_fix_sql_injection_code_prompt.md
+  Generated: {{exec.output_dir}}/01_fix_sql_injection_task.md
   Updated: {{exec.output_file}}
   ```
 - **Commands**: print every ateam CLI command before running it
   ```
-  Running: ateam prompt --supervisor --action code --post-prompt @EXECUTION_DIR/current_task.md
-  Running: ateam exec @EXECUTION_DIR/01_fix_sql_injection_code_prompt.md --role code -action code
+  Running: ateam exec @{{exec.output_dir}}/01_fix_sql_injection_task.md --action code --batch {{exec.batch}} {{exec.profile_args}}
   ```
 - **Task outcomes**: print the result of each task immediately and include the git hash and branch used
   ```
