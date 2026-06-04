@@ -369,6 +369,49 @@ func TestPromptExternalPromptFileFraming(t *testing.T) {
 	}
 }
 
+// TestPromptPathsSurfacesReviewReports verifies that `ateam prompt
+// --action review --paths` lists the reports manifest as a live section
+// — without requiring the deprecated --supervisor flag. The factory map
+// routes --action review through previewReview/assembleReview which
+// bundles the manifest into the body, so the inspection table must
+// surface the same live section regardless of which form (--supervisor
+// or canonical --action) the operator typed.
+func TestPromptPathsSurfacesReviewReports(t *testing.T) {
+	defer savePromptGlobals()()
+	projPath := setupPromptProject(t)
+
+	// Seed a role report so DiscoverReports has something to surface.
+	reportDir := filepath.Join(projPath, ".ateam", "shared", "report")
+	if err := os.MkdirAll(reportDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(reportDir, "testing_basic.md"), []byte("# Findings\n\nok"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	promptAction = runner.ActionReview
+	promptPaths = true
+	promptSupervisor = false // canonical form, no --supervisor
+
+	out := captureStdout(t, func() {
+		withChdir(t, projPath, func() {
+			if err := runPromptPaths(); err != nil {
+				t.Fatalf("runPromptPaths: %v", err)
+			}
+		})
+	})
+
+	// The "reports" live section is the review-side equivalent of the
+	// previous_report section that --action report surfaces. Verify both
+	// the slot name and the [live] anchor land in the table.
+	if !strings.Contains(out, "reports") {
+		t.Errorf("expected 'reports' live section, got:\n%s", out)
+	}
+	if !strings.Contains(out, "[live]") {
+		t.Errorf("expected [live] anchor for reports section, got:\n%s", out)
+	}
+}
+
 // TestPromptFactoryDispatch covers the factory-map dispatch in
 // runPromptAction: known actions go through the curated factories; unknown
 // actions fall back to assembleAction's anchor-walk so any custom

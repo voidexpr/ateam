@@ -521,27 +521,47 @@ func assembleForInspection() (string, []sectionDigest, error) {
 			Content:  content,
 		})
 	}
-	if promptSupervisor {
-		switch promptAction {
-		case runner.ActionReview:
-			all, derr := prompts.DiscoverReports(env.ProjectDir)
-			if derr == nil {
-				reports, _ := (prompts.ReviewSelector{}).Filter(all, env.Config.Roles)
-				addLive("reports", "(assembleReview: manifest + bundled role reports)", formatReportsBlock(reports))
-			}
-		case runner.ActionCode:
-			reviewContent, readErr := os.ReadFile(env.ReviewPath())
-			if readErr != nil {
-				return "", nil, errNoReview(env.ReviewPath())
-			}
+	// Live-section dispatch is keyed on the canonical action name, not on
+	// the deprecated `--supervisor` flag. After the factory-map refactor,
+	// `ateam prompt --action review` and `ateam prompt --supervisor
+	// --action review` share the same body (both route through
+	// previewReview → assembleReview), so the inspection table must
+	// surface the same live sections regardless of which form the
+	// operator typed.
+	//
+	// The legacy `--supervisor --action code` form maps to the canonical
+	// `code_management` action — same mapping `runPromptSupervisor`
+	// performs before delegating to `runPromptAction`.
+	canonicalAction := promptAction
+	if promptSupervisor && promptAction == runner.ActionCode {
+		canonicalAction = "code_management"
+	}
+	switch canonicalAction {
+	case runner.ActionReview:
+		// Review bundles a manifest of role reports plus their full
+		// bodies (formatReportsBlock from assembleReview). There is NO
+		// "previous_review" equivalent — the supervisor reads the prior
+		// review.md via its path at run time (see defaults/prompts/
+		// review.prompt.md), it isn't inlined into the prompt at
+		// assembly time.
+		all, derr := prompts.DiscoverReports(env.ProjectDir)
+		if derr == nil {
+			reports, _ := (prompts.ReviewSelector{}).Filter(all, env.Config.Roles)
+			addLive("reports", "(assembleReview: manifest + bundled role reports)", formatReportsBlock(reports))
+		}
+	case "code_management":
+		// Code-management bundles the current review.md as the
+		// supervisor's input. Missing review.md is non-fatal during
+		// inspection — the same best-effort load the factory uses.
+		if reviewContent, readErr := os.ReadFile(env.ReviewPath()); readErr == nil {
 			addLive("review", env.ReviewPath(), "# Review\n\n"+string(reviewContent))
 		}
-	} else {
-		switch promptAction {
-		case runner.ActionReport:
-			if !promptIgnorePreviousReport {
-				addLive("previous_report", env.RoleReportPath(promptRole), previousReportBlock(env, promptRole))
-			}
+	case runner.ActionReport:
+		// Per-role report bundles the role's previous report inline.
+		// Requires --role to know which role's prior report to read;
+		// --action report on its own has nothing to preview.
+		if promptRole != "" && !promptIgnorePreviousReport {
+			addLive("previous_report", env.RoleReportPath(promptRole), previousReportBlock(env, promptRole))
 		}
 	}
 
