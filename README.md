@@ -4,7 +4,7 @@
 
 ATeam is a CLI to run existing coding agents (Claude Code, Codex) unattended. It also provides a four-stage software engineering quality pipeline (**report → review → code → verify**) and a library of role prompts covering bugs, tests, security, dependencies, docs, architecture, and more.
 
-It automates the parts you don't want to do to free up your attention for features, architecture or any task you choose to focus on.
+It automates the parts you don't want to do to free up your attention for features, architecture, or any task you choose to focus on.
 
 ## Why ATeam
 
@@ -18,7 +18,7 @@ ATeam makes quality-oriented work a one-liner you can run on demand, daily, or o
 
 ### Attention is the new bottleneck
 
-Developing new features or the architecture of a project requires a lot of thinking and concentration, interactive agents are a great enabler, helping brainstorm, design, and code extremely quickly. But then the bottleneck becomes your attention.
+Developing new features or evolving a project's architecture requires a lot of thinking and concentration. Interactive agents are a great enabler, helping brainstorm, design, and code extremely quickly. But then the bottleneck becomes your attention.
 
 A growing share of code is written by coding agents. Without automation, humans become full-time reviewers, juggling an ever-growing set of slash commands like `/write-tests /update-docs /update-architecture /simplify /code-review high --fix recent changes` to keep up. Automating this kind of work as a CLI gives some attention back.
 
@@ -28,7 +28,7 @@ Quality work is the sweet spot for unattended agents because it can be prompted 
 
 Coding agents all provide flexible ways to run unattended, but a lot more tooling is required: a uniform interface across agents, conventions for logs, execution profiles, isolation parameters, tracking cost (tokens, turns, context), dynamic prompt assembly, moving prompt logic into scripts to reduce costs, ... It doesn't need to be complicated: a few config files, markdown prompts, some log files, one CLI.
 
-ATeam gives you the `ateam ps` command for unattended agents: clearly see how long they take and how much they cost, so you can improve your prompts over time, decide what runs daily vs. weekly and not repeatedly run that $20 one-liner without realizing it.
+ATeam gives you the `ateam ps` command for unattended agents: clearly see how long they take and how much they cost, so you can improve your prompts over time, decide what runs daily vs. weekly, and avoid repeatedly running that $20 one-liner without realizing it.
 
 It also gives you `ateam exec` and `ateam parallel` as primitives — drop them into a bash script for simple workflows, or wrap them in something more involved.
 
@@ -40,28 +40,28 @@ See more at [APPROACH.md](APPROACH.md).
 
 **Agents and isolation**
 - Drives Claude Code (`claude -p` with `stream-json`) and Codex (`exec`); experimental `codex-tmux` lets TUI-only commands like `/review` run unattended
-- Multiple isolation modes: built-in agent sandbox (default), one-shot Docker, exec into a long-lived container (Docker / devcontainer / compose), or run ateam itself inside Docker (removes all permission checks). This is required to balance permissions vs. safety.
-- Config files to manage agent and container invocation, for example profiles select agent + container + custom arguments combos (`--profile docker`, `--profile codex-high`)
+- Multiple isolation modes: built-in agent sandbox (default), one-shot Docker, exec into a long-lived container (Docker / devcontainer / compose), or run ateam itself inside Docker (removes all permission checks). These modes let you balance permissions vs. safety.
+- Config files to manage agent and container invocation, for example, profiles select combinations of agent + container + custom arguments (`--profile docker`, `--profile codex-high`)
 - Dynamic prompt assembly: ad-hoc pre/post instructions on top of named prompts, with macro support inside prompts
-- Can use the default subscription, oauth, API keys using secret management in OS keychain, prioritizing the cheapest mode if multiple keys are available
+- Can use the default subscription, OAuth, or API keys, with secrets stored in the OS keychain, prioritizing the cheapest mode if multiple keys are available
 
 **Quality pipeline**
 - Four stages: `report` (parallel role audits) → `review` (supervisor prioritizes) → `code` (delegated fixes, small commits) → `verify` (commit inspection + tests). Run as `ateam run-all` or stage-by-stage.
 - 11 built-in roles: code bugs, recent-change review, structural quality, system architecture, internal/external docs, project automation, dependencies, security, test gaps, recent-test coverage (see [ROLES.md](ROLES.md))
-- Stateful markdown artifacts: each cycle reads the previous reports and review; quality compounds, no context is lost
+- Stateful markdown artifacts: each cycle reads the previous reports and review; quality compounds, and no context is lost
 - 3-level prompt fallback (project `.ateam/` → org `.ateamorg/` → embedded defaults) with composable pre/post extensions; new roles are a single markdown file
 
 **Observability and troubleshooting**
 - `ateam ps` — recent runs and their status; `ateam tail` — live agent output
 - `ateam inspect EXEC_ID` — full execution details, prompts, and logs; `--auto-debug` runs an agent that reads the failure and proposes a fix
-- `ateam resume EXEC_ID`: create an interactive session from an unattended one, ask questions to any past agent
+- `ateam resume EXEC_ID`: create an interactive session from an unattended one and ask questions to any past agent
 - `ateam cost` — token usage and dollars per run, role, and agent
 - `ateam serve` — web UI for browsing all reports, reviews, runs, and costs; `ateam export` for a self-contained HTML snapshot
 - `ateam prompt --role NAME` shows the exact assembled prompt; `ateam env` summarizes config and environment
 
 ## Use agents to help with ateam itself
 
-In the age of agents a lot of work can be offloaded, and ateam, built to run agents, makes full use of that on its own machinery:
+A lot of work can now be offloaded, and ateam uses its own machinery to help maintain itself:
 
 - **`ateam auto-setup`**: an agent reads your project and decides which roles to enable, so you don't have to read the docs
 - **`ateam report --auto-roles`**: dynamically picks which roles to run based on recent commits
@@ -77,7 +77,7 @@ cd ateam && ./install.sh
 
 Authenticate Claude Code or Codex if you haven't already (`claude` / `codex`). For unattended use in cron or containers, see [CONFIG.md](CONFIG.md) for credential storage.
 
-Requires Go 1.26+ (installed automatically by `install.sh`) and one coding agent CLI. Docker optional.
+Requires Go 1.26+ (installed automatically by `install.sh`) and one coding agent CLI. Docker is optional.
 
 ## Quick Start
 
@@ -89,10 +89,10 @@ ateam init                # create .ateam/
 
 ### 2. Select which roles to enable for your project
 
-* A: Edit `.ateam/config.toml` to select which [role](ROLES.md) to enable in your project
+* A: Edit `.ateam/config.toml` to select which [roles](ROLES.md) to enable in your project
 * B: Or let an agent decide: `ateam auto-setup` (detect stack, enable a reasonable role set)
 
-### 3. Run the quality pipeline, ATeam commits the changes locally
+### 3. Run the quality pipeline; ATeam commits changes locally
 ```bash
 ateam run-all                 # report → review → code → verify
 
@@ -110,11 +110,11 @@ ateam serve               # browse artifacts in your browser
 
 That's the whole flow. You can also run `ateam exec` and `ateam parallel` from there for your own scripts.
 
-Once familiar with ateam read [ISOLATION.md](ISOLATION.md) to choose the best balance for your project.
+Once you are familiar with ateam, read [ISOLATION.md](ISOLATION.md) to choose the best balance for your project.
 
 ## How it works
 
-`ateam init` creates a `.ateam/` directory in your repo. It holds a small SQLite database tracking agent executions and cost, all logs, and the markdown artifacts produced by roles. You can run `ateam init` anywhere — the CLI walks up parent directories to find it, like `git`.
+`ateam init` creates a `.ateam/` directory in your repo. It holds a small SQLite database tracking agent executions and cost, plus all logs and the markdown artifacts produced by roles. You can run `ateam init` anywhere — the CLI walks up parent directories to find it, like `git`.
 
 A second directory, `.ateamorg/` (default: `$HOME/.ateamorg`), holds prompts and configuration you want shared across projects.
 
@@ -178,7 +178,7 @@ ateam parallel "@prompts/security.md" "@prompts/tests.md"
 # run any number of prompts by at most 4 at a time
 ateam parallel "@prompts/mystuff/*.md" --max-parallel 4
 
-# easy to read multi-line prompts fits well in scrupts
+# easy-to-read multi-line prompts fit well in scripts
 ateam exec --agent claude <<EOF
 review findings in $REPORT and apply the fixes
 If you disagree then clearly document why
@@ -190,7 +190,7 @@ ateam ps
 # observe the agent stream logs of all running processes
 ateam tail
 
-# see the log files for agent run 12, have another agent analyzed why it failed
+# see the log files for agent run 12, have another agent analyze why it failed
 ateam inspect 12 --auto-debug
 
 # Start an interactive session in claude or codex (based on how it was run)
@@ -209,14 +209,14 @@ Quick, focused, cheap. Good before a PR or as a recurring run.
 ### Adversarial review — Codex critiques, Claude implements
 ```bash
 ateam exec "critical review of recent changes into review.md" --agent codex-high
-ateam exec "review.md → apply fixes and push back on what you disagree with, commit each separately"  --agent claude-high
+ateam exec "review.md → apply fixes and push back on what you disagree with, commit each separately" --agent claude-high
 ```
 Two agents, two viewpoints. The CLI primitive lets you compose any pattern in shell.
 
-More complete version of this can be found in:
-* `scripts/codex-reviews-claude-codes.sh`: basically what is above but leveraging codex-tmux to call /review which is only available in TUI mode
+More complete versions of this can be found in:
+* `scripts/codex-reviews-claude-codes.sh`: the example above, but using codex-tmux to call `/review`, which is only available in TUI mode
 * `scripts/critical-code-review.sh`: multiple rounds selecting any agent
-* `scripts/double-review.sh`: run both codex-tmux /review and claude /code-review in parallel, then merge reports and code the fixes as a 3rd agent run.
+* `scripts/double-review.sh`: run both codex-tmux `/review` and claude `/code-review` in parallel, then merge reports and code the fixes as a third agent run.
 
 ### Background quality on a fast-moving project
 ```bash
@@ -267,7 +267,7 @@ Isolation is configuration-driven, so any of the above can be tuned per project.
 | Approach | How it works | Best for |
 |----------|-------------|----------|
 | **Built-in sandbox** (default) | OS-level syscall restrictions (Seatbelt/bubblewrap) per command | Most projects — fast, no setup |
-| **Built-in sandbox** and **separate agent configuration** | Same as above but don't share the same configuration as interactive agents (different hooks, ...) | Useful when the default agent configuration is highly customized with notifications |
+| **Built-in sandbox** and **separate agent configuration** | Same as above, but does not share the same configuration as interactive agents (different hooks, ...) | Useful when the default agent configuration is highly customized with notifications |
 | **Docker one-shot** | Fresh Linux container built and run per command | Strong isolation; need build/test tooling |
 | **Docker exec** | Exec into an existing user-managed container (docker-compose, devcontainer, …) | You already run a long-lived dev container |
 | **ATeam inside a container** | Run ateam itself from inside a container (Docker or an OS-native sandbox like [fence](https://github.com/fencesandbox/fence)); agents inherit the container's isolation and run without per-command restrictions | Docker-native projects, or sandboxing ateam itself if you don't trust it |
@@ -291,7 +291,7 @@ Full reference: [COMMANDS.md](COMMANDS.md).
 
 ## Note about maturity and cost
 
-ATeam was started in February 2026 and has been used mostly on projects where the code is owned by coding agents (including ateam itself). The approach is validated: it improves codebases and saves attention, projects shape up while spending a fraction of the effort it would take by direct prompting.
+ATeam was started in February 2026 and has been used mostly on projects where the code is owned by coding agents (including ateam itself). The approach is validated: it improves codebases and saves attention. Projects shape up while spending a fraction of the effort it would take by direct prompting.
 
 But ateam runs are not free, especially once the mid-June 2026 Claude subscription price increase for unattended use kicks in. It still seems well worth it; perhaps run less often than every day, or with more targeted roles. Built-in prompts have already gone through a round of token-usage tuning, with more to come. A realization that comes from working with coding agents: the cost of building features may be less than half the true cost of building quality software.
 
