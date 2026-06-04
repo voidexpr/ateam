@@ -2,11 +2,12 @@
 
 ## Implementation status
 
-**Next round complete (except step 9 — explicitly deferred by user
-decision).** The construction phase shipped: single substitution pass,
-factory-only verb composition, `Prompt.Resolve` is load-bearing in
-both preview and execution, all the legacy `assemble*` helpers are
-gone.
+**Next round complete (all 10 steps shipped).** The construction
+phase shipped: single substitution pass, factory-only verb
+composition, `Prompt.Resolve` is load-bearing in both preview and
+execution, all the legacy `assemble*` helpers are gone, and the
+`root → prompts` import cycle is broken with `ResolveContext.Env()`
+in place.
 
 Commits on `small-fixes`:
 
@@ -25,15 +26,14 @@ Commits on `small-fixes`:
 | Next-round step 6 | `NewReviewBundle` / `NewCodeBundle` / `NewVerifyBundle` / `NewSingleSupervisorBundle` / `NewReportBundle` are the only composition path. `assembleReview` / `assembleSupervisor` / `assembleAction` / `assembleCodeManagementV1` / `assembleRoleReport` all deleted. `ateam prompt --action X` and `ateam <action>` share one factory. |
 | Next-round step 7 | `assembleForInspection` → `inspectionDigestsForCurrentFlags`, body composition fully delegated to `inspectBundleForCurrentAction`. No parallel preview composition path. |
 | Next-round step 8 | `(b *PromptBundle).ResolvePreview` / `InspectPreview` auto-load `BaseVars` + `Dynamics` + `ModePreview`. Boilerplate at every cmd-layer preview call site collapsed. |
-| Next-round step 9 | **Deferred by user decision** — substantial restructure (extract `AllRoleIDs`, `WriteOrgDefaults`, `FormatProjectInfo`, `ResolveContext`, etc. from `internal/prompts`) with no current consumer. Tracked as outstanding follow-up below. |
+| Next-round step 9 | Extracted `internal/promptdata` (AllRoleIDs / AutoRolesMarker / ProjectInfoParams / FormatProjectInfo / WriteOrgDefaults / RoleMeta / IsValidRole / ResolveRoleList / AllKnownRoleIDs / ParsePromptFrontmatter / embedded-defaults FS). Both `internal/root` and `internal/prompts` import promptdata; `prompts` now imports `root`. Bridge functions (`BuildEngine`, `ProjectInfoDynamic`, `NewInspectionContext`, `liveCtx`) moved from `root/engine.go` into `internal/prompts/env_bridge.go` as free functions. `ResolveContext.Env() *root.ResolvedEnv` is now part of the contract. Net -940 lines. |
 | Next-round step 10 | `ateam exec` defaults to `prompts.PromptText` (variable + dynamic expansion); `--raw` opts into `RawTextPrompt`. `parallel` follows the same default. Load-bearing test `TestStaticBundle_PromptTextExpandsExecVars` pins the invariant. |
 
 ### What the spec set out to achieve that did NOT land
 
-Original list of ten gaps recorded before the Next round. **Nine of
-ten now landed; step 9 deferred by explicit user decision.** Left
-in place for historical context and as the baseline against which the
-Next round's punt budget was set to zero.
+Original list of ten gaps recorded before the Next round. **All ten
+now landed.** Left in place for historical context and as the
+baseline against which the Next round's punt budget was set to zero.
 
 1. **One substitution pass for the prompt body.** `runner.go:494` still
    does `prompt = ResolveTemplateString(prompt, tmplVars)` after
