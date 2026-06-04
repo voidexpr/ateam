@@ -10,25 +10,61 @@ or a new resource used under the pool — read this first.
 ## Goroutine map
 
 ```
-                      cmd/table.go:runPool (main)
+                      cmd/parallel|report|code|run_all (main)
                       │
-                      ├─ spawns: display goroutine   (statusMu-guarded rendering)
-                      ├─ spawns: progress consumer   (statusMu-guarded updates)
-                      └─ spawns: runner.RunPool goroutine
+                      └─ flow.Run(step, env, rc) — dispatches steps
                                   │
-                                  ├─ acquires semaphore (maxParallel)
-                                  └─ spawns N worker goroutines
-                                      │
-                                      └─ each: AgentExecutor.Execute → Agent.Run →
-                                               its own exec.Cmd + JSON scanner
+                                  └─ flow.Parallel.runConcurrently
+                                              │
+                                              ├─ acquires semaphore (Workers)
+                                              └─ spawns N worker goroutines
+                                                  │
+                                                  └─ each: PromptBundle.execute →
+                                                           AgentExecutor.Execute →
+                                                           Agent.Run + exec.Cmd + JSON scanner
+                                                       (reporter callbacks fire here)
 ```
 
-Channels carry data between these goroutines:
+The production path (cmd → flow) is callback-based:
+
+- `onProgress func(RunProgress)` — synchronous callback invoked from
+  inside each worker for every progress event. Implementations must be
+  thread-safe.
+- Step results are returned synchronously from `Step.execute` and
+  accumulated under a `flow.Parallel` mutex.
+
+The `runner.RunPool` channel interface still exists for tests and direct
+callers (`cmd/parallel_test.go`, `internal/runner/race_test.go`):
 
 - `progress chan<- RunProgress` — lossy, non-blocking send from workers.
-- `completed chan<- RunSummary` — blocking, one per agent exec + close. Caller
-  MUST provide `cap(completed) ≥ len(execs)` OR drain concurrently with
-  `RunPool`; otherwise `RunPool` refuses to dispatch (see pool.go guard).
+- `completed chan<- RunSummary` — blocking, one per agent exec + close.
+  Caller MUST provide `cap(completed) ≥ len(execs)` OR drain concurrently
+  with `RunPool`; otherwise `RunPool` refuses to dispatch (see pool.go
+  guard).
+
+## Flow-level concurrency
+
+`flow.Parallel.runConcurrently` (`internal/flow/flow.go`) is the
+orchestration-layer pool used by `cmd/parallel`, `cmd/report`, `cmd/code`,
+and `cmd/run_all`. It mirrors `runner.RunPool`'s guarantees:
+
+- Semaphore-bounded fan-out (`Workers`, default `min(len(steps), 5)`).
+- Per-worker panic recovery — a panicking step becomes a synthetic Error
+  `Result` instead of tearing down its siblings.
+- `PreDispatch` hook fires once per step before its slot is acquired;
+  returning an error short-circuits dispatch and remaining steps become
+  Skip results.
+- No short-circuit on regular errors — every step runs to completion.
+
+Reporter callbacks (`StageStart`, `BundleStart`, `AgentExecStart`,
+`AgentEvent`, `BundleEnd`, `StageEnd`) are invoked **synchronously from
+worker goroutines**. Any reporter (`MultiReporter`, `BundleLogReporter`,
+`JSONReporter`, `tableReporter`) must guard its own internal state — the
+shipped ones use `sync.Mutex`. If you add a new reporter, assume
+concurrent calls.
+
+`flow.Parallel` eventually calls `AgentExecutor.Execute` per step, so the
+7-rule contract below still applies end-to-end.
 
 ## The 7-rule contract
 
@@ -118,7 +154,8 @@ them via `c.Env` on their per-agent exec clone; containers receive them via
 | `AgentExecutor.CallDB` | `*sql.DB` stdlib-concurrent, `SetMaxOpenConns(1)` serializes. |
 | `AgentExecutor.Container.prepareGuard` | `sync.Once` (or `sync.Mutex`-guarded per-key `sync.Once`). Shared on purpose so `Prepare` runs once per pool. |
 | `progress` / `completed` channels | Go channels. Payloads are value types or owned-once maps. |
-| `cmd/table.go` display `statusRows` / `renderedRows` | `statusMu`-protected. All reads and writes hold the mutex. |
+| `cmd/table_reporter.go:tableReporter` internal state | `tableReporter.mu sync.Mutex`. Reporter callbacks fire from worker goroutines. |
+| Flow reporters (`BundleLogReporter`, `JSONReporter`, ...) | Each carries its own `sync.Mutex`. Mandatory: callbacks are invoked concurrently. |
 | `AgentExecutor.LogFile` | Append-only. Best-effort; may interleave on long lines. |
 | `os.Stderr` verbose/warn writes | Kernel-serialized per `write(2)`; long multi-write messages may interleave cosmetically. |
 
