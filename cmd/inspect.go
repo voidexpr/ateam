@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/ateam/internal/calldb"
+	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
@@ -308,15 +309,43 @@ func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
 	ctx, stop := cmdContext()
 	defer stop()
 
-	summary := r.Execute(ctx, prompt, runner.RunOpts{
-		RoleID:  "supervisor",
-		Action:  runner.ActionDebug,
-		WorkDir: env.WorkDir,
-		Verbose: true,
-	}, runner.ProgressChan(progress))
-
+	// Route through flow.RunBundle so Prompt.Resolve substitutes the
+	// prompt's exec.* tokens via rt.Vars() at Resolve time. The runner
+	// no longer substitutes the prompt body (spec Next-round step 3).
+	bundle := flow.PromptBundle{
+		Name:   "auto-debug",
+		Role:   "supervisor",
+		Action: runner.ActionDebug,
+		Prompt: prompts.PromptText{Text: prompt},
+		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
+			return runner.RunOpts{
+				RoleID:  "supervisor",
+				Action:  runner.ActionDebug,
+				WorkDir: env.WorkDir,
+				Verbose: true,
+			}
+		},
+	}
+	rtEnv := flow.RuntimeEnv{
+		Executor: r,
+		WorkDir:  env.WorkDir,
+		Role:     "supervisor",
+		Action:   runner.ActionDebug,
+	}
+	rc := flow.RunCtx{
+		Ctx:      ctx,
+		DB:       dbForRun,
+		Resolved: env,
+		Reporter: &channelProgressReporter{ch: progress},
+	}
+	result := flow.RunBundle(bundle, rtEnv, rc)
 	close(progress)
 	progressWg.Wait()
+
+	summary := runner.RunSummary{}
+	if result.Summary != nil {
+		summary = *result.Summary
+	}
 
 	if f, err := os.Open(summary.StderrFilePath); err == nil {
 		_, _ = io.Copy(os.Stderr, f)
@@ -334,6 +363,9 @@ func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
 
 	if summary.Err != nil {
 		return fmt.Errorf("auto-debug failed: %w", summary.Err)
+	}
+	if result.Flow.State == flow.StateError && result.Flow.Err != nil {
+		return fmt.Errorf("auto-debug failed: %w", result.Flow.Err)
 	}
 
 	return nil

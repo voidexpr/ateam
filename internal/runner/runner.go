@@ -484,14 +484,16 @@ func (r *AgentExecutor) ExecutePrepared(ctx context.Context, prepared *PreparedR
 	}
 	containerName := r.ContainerName
 
-	// Resolve {{VAR}} templates in agent args, extra args, container fields,
-	// and the prompt itself (so {{OUTPUT_DIR}} / {{OUTPUT_FILE}} expand using
-	// the now-known callID).
+	// SPEC INVARIANT (plans/feature_prompt_cmd_bundle_aware.md Next-round
+	// step 3): the runner does NOT substitute the prompt body. exec.*
+	// substitution lives in flow.Runtime.Vars() and runs during
+	// Prompt.Resolve before the prompt reaches us. The Replacer below
+	// still handles agent args, extra args, container fields, and the
+	// canonical-dest paths — those don't pass through Prompt.Resolve.
 	tmplVars := BuildTemplateVars(r, opts, startedAt, callID, agentName, model)
 	extraArgs = resolveArgs(extraArgs, tmplVars.Replacer())
 	runAgent := ResolveAgentTemplateArgs(r.Agent, tmplVars)
 	resolveContainerTemplates(runContainer, tmplVars)
-	prompt = ResolveTemplateString(prompt, tmplVars)
 	// Resolve {{EXEC_ID}} (and friends) inside the canonical-dest paths so
 	// callers can build per-exec_id paths without knowing the id ahead of time.
 	opts.CanonicalDestDir = ResolveTemplateString(opts.CanonicalDestDir, tmplVars)

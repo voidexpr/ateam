@@ -17,6 +17,7 @@ package flow
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"runtime/debug"
 	"sync"
@@ -361,11 +362,18 @@ type PromptBundle struct {
 // resolvePrompt runs the bundle's Prompt against a freshly built runtime.
 // A nil Prompt is a programmer error — the factory must set one (callers
 // that just want literal text use prompts.RawTextPrompt).
-func (b PromptBundle) resolvePrompt(rc RunCtx, env RuntimeEnv) (string, error) {
+//
+// SPEC INVARIANT: when prepared != nil, this is the live-execution path
+// and rt's exec.* fields are populated from prepared + opts so the
+// resolver substitutes real values inline (Next round step 2). When
+// prepared == nil, the call is preview / dry-run / verify, mode is
+// ModePreview, and exec.* renders to {{AT RUNTIME:exec.<key>}} sentinels.
+// The runner does NOT substitute the prompt body afterward.
+func (b PromptBundle) resolvePrompt(rc RunCtx, env RuntimeEnv, opts runner.RunOpts, prepared *runner.PreparedRun) (string, error) {
 	if b.Prompt == nil {
 		return "", errBundleHasNoPrompt
 	}
-	rt := newBundleRuntime(rc, env)
+	rt := newBundleRuntime(rc, env, opts, prepared)
 	if b.Dynamics != nil {
 		rt.SetDynamics(b.Dynamics)
 	}
@@ -375,14 +383,67 @@ func (b PromptBundle) resolvePrompt(rc RunCtx, env RuntimeEnv) (string, error) {
 var errBundleHasNoPrompt = fmt.Errorf("PromptBundle has no Prompt set")
 
 // newBundleRuntime constructs the per-bundle prompt resolution context.
-// Step 4 keeps this minimal — review's PromptFile carries its own
-// assembler+vars, so the rt only needs to expose Mode + Dynamics. Later
-// steps fill in vars/dynamics from the bundle and the resolved env.
-func newBundleRuntime(rc RunCtx, env RuntimeEnv) *Runtime {
-	workDir := env.WorkDir
-	rt := NewRuntime(rc.DB, rc.Resolved, workDir)
+//
+// Mode + field population are paired:
+//
+//   - prepared == nil (dry-run, verify, ateam prompt --action X): rt.Mode
+//     = ModePreview. Per-bundle scalars stay zero — the runtime-aware
+//     Vars dispatches exec.* to the AT RUNTIME sentinel pattern.
+//   - prepared != nil (live exec after runner.Prepare): rt.Mode = ModeReal
+//     and the prepared-by-Prepare fields (ExecID, Batch, OutputDir,
+//     OutputFile, PromptFile) plus the run-config fields (Timestamp,
+//     Profile, Agent, Model, Effort, MaxBudgetUSD, MaxBudgetUSDBatch,
+//     SubRunArgs) are populated. The resolver substitutes real values
+//     during Prompt.Resolve; the runner's ResolveTemplateString pass on
+//     the prompt body is deleted (Next round step 3).
+//
+// AutoRolesCommandsOutput / DebugContext are verb-supplied and propagate
+// via RunOpts so the auto-roles planner and inspect --auto-debug verbs
+// can carry their pre-baked context without touching the runner.
+func newBundleRuntime(rc RunCtx, env RuntimeEnv, opts runner.RunOpts, prepared *runner.PreparedRun) *Runtime {
+	rt := NewRuntime(rc.DB, rc.Resolved, env.WorkDir)
+	if prepared == nil {
+		rt.SetMode(ModePreview)
+		return rt
+	}
 	rt.SetMode(ModeReal)
+	rt.ExecID = prepared.ExecID
+	rt.Batch = opts.Batch
+	rt.OutputDir = prepared.RuntimeDir
+	rt.OutputFile = primaryOutputFile(prepared, opts)
+	rt.PromptFile = prepared.PromptFile
+	rt.Timestamp = prepared.StartedAt.Format(time.RFC3339)
+	rt.Agent = prepared.AgentName
+	rt.Model = prepared.Model
+	rt.AutoRolesCommandsOutput = opts.AutoRolesCommandsOutput
+	// Profile / Effort / MaxBudgetUSD* / SubRunArgs / DebugContext are
+	// recognized in the resolver but populated by the verb migration in a
+	// later step — they live on AgentExecutor or in verb-specific paths
+	// today and would need RunOpts to grow to carry them. No shipped
+	// default prompt references those keys; user prompts that do render
+	// to "" instead of erroring, which surfaces the gap without breaking
+	// runs.
 	return rt
+}
+
+// primaryOutputFile derives the canonical OutputFile path the runner
+// would substitute as `{{OUTPUT_FILE}}`/`{{exec.output_file}}`. Live
+// runs use prepared.RuntimeDir + the primary output name (e.g.
+// report.md). For actions with no primary output, returns "" — callers
+// that reference {{exec.output_file}} for such actions will hit the
+// resolver's "not populated" error, which is the correct signal.
+func primaryOutputFile(prepared *runner.PreparedRun, opts runner.RunOpts) string {
+	if prepared == nil {
+		return ""
+	}
+	primary := runner.PrimaryOutputName(opts.OutputKind, opts.PromptName)
+	if primary == "" {
+		return ""
+	}
+	if prepared.RuntimeDir == "" {
+		return ""
+	}
+	return filepath.Join(prepared.RuntimeDir, primary)
 }
 
 func (b PromptBundle) name() string { return b.Name }
@@ -450,8 +511,10 @@ func (b PromptBundle) execute(rc RunCtx, env RuntimeEnv) (out []Result) {
 	if env.DryRun {
 		// Resolve in dry-run so verbs can surface resolution-time errors
 		// and --plan-only style previews still see the resolved prompt.
-		// Skip the allocate/execute path entirely.
-		if _, err := b.resolvePrompt(rc, env); err != nil {
+		// Skip the allocate/execute path entirely. Pass nil prepared so
+		// rt enters ModePreview and exec.* renders to the AT RUNTIME
+		// sentinel pattern (per Next-round step 1's resolver).
+		if _, err := b.resolvePrompt(rc, env, opts, nil); err != nil {
 			return emit(Result{Bundle: &b, Env: env, Flow: Flow{
 				State: StateError, Reason: "render failed", Err: err,
 			}})
@@ -470,10 +533,13 @@ func (b PromptBundle) execute(rc RunCtx, env RuntimeEnv) (out []Result) {
 
 	// Prompt resolution happens between Prepare and ExecutePrepared so the
 	// resolver can reference runtime-dependent values (exec.id, etc.).
-	// resolvePrompt picks the new Prompt path or the legacy Render shim;
-	// failures here happen after the exec row was allocated, so we close
-	// the row as failed before propagating the error.
-	prompt, err := b.resolvePrompt(rc, env)
+	// SPEC INVARIANT (Next-round step 2): the prepared run is wired into
+	// rt by newBundleRuntime here, so rt.{ExecID, Batch, OutputDir,
+	// OutputFile, PromptFile} drive Prompt.Resolve's substitution
+	// directly. The runner does NOT substitute the prompt body afterward
+	// (step 3 deleted that pass). A failure here happens after the exec
+	// row was allocated, so we close the row as failed before propagating.
+	prompt, err := b.resolvePrompt(rc, env, opts, prepared)
 	if err != nil {
 		if rc.DB != nil {
 			_ = rc.DB.MarkExecFailed(prepared.ExecID, "render failed: "+err.Error(), time.Now())

@@ -87,19 +87,31 @@ func TestRunnerPromotesRuntimeFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Mock writes report.md to OUTPUT_FILE inside runtime/<id>/.
+	// Mock writes report.md to the OUTPUT_FILE path embedded in the
+	// prompt. Per the spec's single-substitution-pass invariant
+	// (plans/feature_prompt_cmd_bundle_aware.md Next-round step 3) the
+	// runner does NOT substitute exec.* into the prompt body — callers
+	// resolve it upstream (flow.Runtime's Vars dispatcher in production).
+	// This test mirrors that contract: Prepare first, build the prompt
+	// with the real runtime path, then ExecutePrepared.
 	mock := &agent.MockAgent{
-		Response:          "report written to {{OUTPUT_FILE}}",
+		Response:          "report written",
 		WriteAtOutputFile: []byte("# Security Report\n\nTotal issues: 3"),
 	}
 	r := newTestRunner(t, dir, mock)
 
-	summary := r.Execute(context.Background(), "scan {{OUTPUT_FILE}}", RunOpts{
+	opts := RunOpts{
 		RoleID:           "security",
 		Action:           ActionReport,
 		OutputKind:       OutputKindReport,
 		CanonicalDestDir: dest,
-	}, nil)
+	}
+	prepared, err := r.Prepare(opts)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	prompt := "scan " + filepath.Join(prepared.RuntimeDir, "report.md")
+	summary := r.ExecutePrepared(context.Background(), prepared, prompt, nil)
 
 	if summary.Err != nil {
 		t.Fatalf("unexpected error: %v", summary.Err)
@@ -211,12 +223,21 @@ func TestRunnerSkipsPromptFilesDuringPromote(t *testing.T) {
 	}
 	r := newTestRunner(t, dir, mock)
 
-	summary := r.Execute(context.Background(), "write to {{OUTPUT_FILE}}", RunOpts{
+	// See TestRunnerPromotesRuntimeFiles for the Prepare+ExecutePrepared
+	// contract — the runner no longer substitutes exec.* in the prompt
+	// body (spec Next-round step 3).
+	opts := RunOpts{
 		RoleID:           "security",
 		Action:           ActionReport,
 		OutputKind:       OutputKindReport,
 		CanonicalDestDir: dest,
-	}, nil)
+	}
+	prepared, err := r.Prepare(opts)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	prompt := "write to " + filepath.Join(prepared.RuntimeDir, "report.md")
+	summary := r.ExecutePrepared(context.Background(), prepared, prompt, nil)
 
 	if summary.Err != nil {
 		t.Fatalf("unexpected error: %v", summary.Err)

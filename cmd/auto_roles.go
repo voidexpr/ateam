@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -62,10 +63,14 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 	}
 
 	a := env.Assembler()
-	engine := env.BuildEngine("the supervisor", "auto-roles")
+	// Per the spec's single-substitution-pass invariant (Next-round
+	// step 3), the assembled body keeps exec.* tokens in their dotted
+	// form — they get resolved by flow.Runtime's Vars dispatcher during
+	// Prompt.Resolve, NOT by the cmd-layer assembly. Dynamics (notably
+	// project_info) still run at assembly time via the engine bound to
+	// the bundle below.
 	vars := env.BuildAssemblerVars("report_auto_roles", "the supervisor", "auto-roles")
-	vars.Exec["auto_roles_commands_output"] = commandsOutput
-	res, err := a.Assemble("report_auto_roles", vars, engine, nil)
+	res, err := a.Assemble("report_auto_roles", vars, env.BuildEngine("the supervisor", "auto-roles"), nil)
 	if err != nil {
 		return "", nil, fmt.Errorf("assemble auto-roles prompt: %w", err)
 	}
@@ -97,25 +102,49 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 	ctx, stop := cmdContext()
 	defer stop()
 
-	summary := cr.Execute(ctx, prompt, runner.RunOpts{
-		RoleID:                  "supervisor",
-		Action:                  runner.ActionExec,
-		OutputKind:              runner.OutputKindAutoRoles,
-		WorkDir:                 env.WorkDir,
-		TimeoutMin:              timeout,
-		Verbose:                 verbose,
-		AutoRolesCommandsOutput: commandsOutput,
-	}, runner.ProgressChan(progress))
-
+	bundle := flow.PromptBundle{
+		Name:   "auto-roles",
+		Role:   "supervisor",
+		Action: runner.ActionExec,
+		Prompt: prompts.PromptText{Text: prompt},
+		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
+			return runner.RunOpts{
+				RoleID:                  "supervisor",
+				Action:                  runner.ActionExec,
+				OutputKind:              runner.OutputKindAutoRoles,
+				WorkDir:                 env.WorkDir,
+				TimeoutMin:              timeout,
+				Verbose:                 verbose,
+				AutoRolesCommandsOutput: commandsOutput,
+			}
+		},
+	}
+	rtEnv := flow.RuntimeEnv{
+		Executor: cr,
+		WorkDir:  env.WorkDir,
+		Role:     "supervisor",
+		Action:   runner.ActionExec,
+	}
+	rc := flow.RunCtx{
+		Ctx:      ctx,
+		DB:       db,
+		Resolved: env,
+		Reporter: &channelProgressReporter{ch: progress},
+	}
+	result := flow.RunBundle(bundle, rtEnv, rc)
 	close(progress)
 	progressWg.Wait()
 
-	if summary.Err != nil {
-		return "", nil, fmt.Errorf("auto-roles agent failed: %w", summary.Err)
+	if result.Flow.State == flow.StateError {
+		if result.Summary != nil && result.Summary.Err != nil {
+			return "", nil, fmt.Errorf("auto-roles agent failed: %w", result.Summary.Err)
+		}
+		return "", nil, fmt.Errorf("auto-roles agent failed: %s", result.Flow.Reason)
 	}
-	if summary.ExecID == 0 {
+	if result.Summary == nil || result.Summary.ExecID == 0 {
 		return "", nil, fmt.Errorf("auto-roles agent returned no exec ID; cannot locate output file")
 	}
+	summary := result.Summary
 
 	outputPath := filepath.Join(env.RuntimeDir(summary.ExecID), runner.PrimaryOutputName(runner.OutputKindAutoRoles, ""))
 	content, err := os.ReadFile(outputPath)
