@@ -233,7 +233,30 @@ func runPromptRole() error {
 	var assembled string
 	switch promptAction {
 	case runner.ActionReport:
-		assembled, err = assembleRoleReport(env, promptRole, roleLabel, prePrompt, postPrompt, promptIgnorePreviousReport)
+		// Spec Next-round step 6: per-role report renders through the
+		// same factory the live verb uses. roleLabel="" (via
+		// --no-project-info) suppresses project_info — the dynamic
+		// closure in NewReportBundle uses "role <id>" by default; an
+		// empty roleLabel here means we strip the dynamic from the map
+		// before resolution.
+		bundle := NewReportBundle(ReportBundleInput{
+			Env:                env,
+			RoleID:             promptRole,
+			PrePrompt:          prePrompt,
+			PostPrompt:         postPrompt,
+			SkipPreviousReport: promptIgnorePreviousReport,
+		})
+		if roleLabel == "" {
+			delete(bundle.Dynamics, "project_info")
+		}
+		rt := flow.NewRuntime(nil, env, env.WorkDir)
+		if bundle.BaseVars != nil {
+			rt.SetVars(bundle.BaseVars)
+		}
+		if bundle.Dynamics != nil {
+			rt.SetDynamics(bundle.Dynamics)
+		}
+		assembled, err = bundle.Prompt.Resolve(rt)
 	case runner.ActionCode:
 		assembled, err = assembleRoleCode(env, promptRole, roleLabel, prePrompt, postPrompt)
 	}
@@ -284,24 +307,44 @@ func previewReview(env *root.ResolvedEnv, prePrompt, postPrompt string) (string,
 }
 
 func previewCodeManagement(env *root.ResolvedEnv, prePrompt, postPrompt string) (string, error) {
-	roleLabel := "the supervisor"
-	if promptNoProjectInfo {
-		roleLabel = ""
+	// Single-factory dispatch per spec line 552-557. Mode==ModePreview
+	// makes code_mgmt_review emit its sentinel — preview never touches
+	// disk for the review.
+	bundle := NewCodeBundle(CodeBundleInput{
+		Env:           env,
+		PrePrompt:     prePrompt,
+		PostPrompt:    postPrompt,
+		SharedDir:     env.SharedDir(),
+		SupervisorDir: env.SupervisorDir(),
+		CanonicalDest: "{{exec.output_dir}}",
+	})
+	rt := flow.NewRuntime(nil, env, env.WorkDir)
+	if bundle.BaseVars != nil {
+		rt.SetVars(bundle.BaseVars)
 	}
-	// review content sourced from disk so previews mirror what
-	// `ateam code` will pipe in. Missing review is non-fatal during
-	// preview (matches the spec's "preview never requires runtime
-	// artifacts" stance).
-	reviewContent, _ := os.ReadFile(env.ReviewPath())
-	return assembleCodeManagementV1(env, roleLabel, string(reviewContent), prePrompt, postPrompt)
+	if bundle.Dynamics != nil {
+		rt.SetDynamics(bundle.Dynamics)
+	}
+	return bundle.Prompt.Resolve(rt)
 }
 
 func previewVerify(env *root.ResolvedEnv, prePrompt, postPrompt string) (string, error) {
-	roleLabel := "the supervisor"
-	if promptNoProjectInfo {
-		roleLabel = ""
+	// Single-factory dispatch per spec line 552-557. Mode==ModePreview
+	// renders exec.* as the AT RUNTIME sentinel; project_info still
+	// renders against the real env.
+	bundle := NewVerifyBundle(VerifyBundleInput{
+		Env:        env,
+		PrePrompt:  prePrompt,
+		PostPrompt: postPrompt,
+	})
+	rt := flow.NewRuntime(nil, env, env.WorkDir)
+	if bundle.BaseVars != nil {
+		rt.SetVars(bundle.BaseVars)
 	}
-	return assembleSupervisor(env, "code_verify", roleLabel, "verify", prePrompt, postPrompt)
+	if bundle.Dynamics != nil {
+		rt.SetDynamics(bundle.Dynamics)
+	}
+	return bundle.Prompt.Resolve(rt)
 }
 
 // runPromptAction renders a top-level prompt by action name. The factory
@@ -338,11 +381,30 @@ func runPromptAction() error {
 	if factory, ok := promptFactories[promptAction]; ok {
 		assembled, err = factory(env, prePrompt, postPrompt)
 	} else {
+		// Anchor-walk fallback per spec line 552-557: any action with a
+		// matching `<action>.prompt.md` resolves through the same
+		// PromptFile pipeline factory actions use. No parallel
+		// assembler call.
 		roleLabel := promptAction
 		if promptNoProjectInfo {
 			roleLabel = ""
 		}
-		assembled, err = assembleAction(env, promptAction, roleLabel, prePrompt, postPrompt)
+		bundle := NewSingleSupervisorBundle(SingleSupervisorBundleInput{
+			Env:        env,
+			Path:       promptAction,
+			RoleLabel:  roleLabel,
+			Action:     promptAction,
+			PrePrompt:  prePrompt,
+			PostPrompt: postPrompt,
+		})
+		rt := flow.NewRuntime(nil, env, env.WorkDir)
+		if bundle.BaseVars != nil {
+			rt.SetVars(bundle.BaseVars)
+		}
+		if bundle.Dynamics != nil {
+			rt.SetDynamics(bundle.Dynamics)
+		}
+		assembled, err = bundle.Prompt.Resolve(rt)
 	}
 	if err != nil {
 		return err
@@ -367,7 +429,7 @@ func runPromptAction() error {
 // chain (the spec's `PromptFile{Path: action}` default).
 //
 // SPEC INVARIANT (Next-round step 7): no parallel composition path.
-// Anything assembleForInspection used to compose by hand (live sections)
+// Anything inspectionDigestsForCurrentFlags used to compose by hand (live sections)
 // either flows through Prompt.Inspect or rides the existing addLive
 // surface; the bundle's body is never re-derived here.
 func inspectBundleForCurrentAction(env *root.ResolvedEnv, promptPath, prePrompt, postPrompt, roleLabel string) ([]prompts.Section, error) {
@@ -404,16 +466,45 @@ func inspectBundleForCurrentAction(env *root.ResolvedEnv, promptPath, prePrompt,
 
 // bundleForInspection returns the verb factory's bundle for the current
 // promptAction, or nil if the action has no factory entry. Role-scoped
-// actions (`--role X --action report`) intentionally fall back to the
-// plain-PromptFile path because the per-role factories haven't migrated
-// yet — they will in a later step.
+// `--role X --action report` routes through NewReportBundle so the
+// previous_report dynamic is registered — without it the
+// _post.previous_report.md fragment's {{dynamic.previous_report}} would
+// fail to resolve during paths/inline-paths.
 func bundleForInspection(env *root.ResolvedEnv, prePrompt, postPrompt string) *flow.PromptBundle {
 	if promptRole != "" {
+		if promptAction == runner.ActionReport {
+			bundle := NewReportBundle(ReportBundleInput{
+				Env:                env,
+				RoleID:             promptRole,
+				PrePrompt:          prePrompt,
+				PostPrompt:         postPrompt,
+				SkipPreviousReport: promptIgnorePreviousReport,
+			})
+			if promptNoProjectInfo {
+				delete(bundle.Dynamics, "project_info")
+			}
+			return bundle
+		}
 		return nil
 	}
 	switch promptAction {
 	case runner.ActionReview:
 		return NewReviewBundle(ReviewBundleInput{
+			Env:        env,
+			PrePrompt:  prePrompt,
+			PostPrompt: postPrompt,
+		})
+	case "code_management":
+		return NewCodeBundle(CodeBundleInput{
+			Env:           env,
+			PrePrompt:     prePrompt,
+			PostPrompt:    postPrompt,
+			SharedDir:     env.SharedDir(),
+			SupervisorDir: env.SupervisorDir(),
+			CanonicalDest: "{{exec.output_dir}}",
+		})
+	case runner.ActionVerify:
+		return NewVerifyBundle(VerifyBundleInput{
 			Env:        env,
 			PrePrompt:  prePrompt,
 			PostPrompt: postPrompt,
@@ -441,25 +532,25 @@ type sectionDigest struct {
 	Content  string // rendered, post-template-expansion
 }
 
-// assembleForInspection runs the v1 assembler for the current flag set and
-// returns the assembled result plus per-section digests in one call. Both
-// --paths and --inline-paths use it; the only difference between the two
-// modes is how they format these digests for output.
+// inspectionDigestsForCurrentFlags orchestrates the --paths / --inline-paths views.
 //
-// Honors the same flag suite that runPromptRole / runPromptSupervisor do —
-// --no-project-info, --pre-prompt, --post-prompt,
-// --ignore-previous-report — so the inspection output reflects what the
-// corresponding `ateam report` / `ateam review` / `ateam code` /
-// `ateam verify` run would assemble.
+// SPEC INVARIANT (Next-round step 7): this function does NOT compose
+// the prompt body. The body comes entirely from
+// inspectBundleForCurrentAction → bundle.Prompt.Inspect — the same
+// pipeline the live verb uses. inspectionDigestsForCurrentFlags only:
 //
-// Sections beyond the assembler's composition (previous-report, reports
-// manifest, review body, sub-run flags) are recorded with Anchor="live"
-// and a descriptive Path so the user can tell them from fragment files
-// on disk.
+//  1. Runs the orphan scan (--paths is the only place orphans surface
+//     to the operator).
+//  2. Delegates body composition to inspectBundleForCurrentAction.
+//  3. Records the operator-supplied --post-prompt as a "live"
+//     pseudo-section so the table shows it alongside fragment files.
 //
-// Orphan fragments are surfaced to stderr and turned into a hard error per
-// the spec's "errors loudly on orphan fragments".
-func assembleForInspection() (string, []sectionDigest, error) {
+// Honors --no-project-info, --pre-prompt, --post-prompt,
+// --ignore-previous-report — the same flag suite the live verbs honor,
+// piped through the bundle factories. There is no longer a parallel
+// composition path: the spec's "1 CODE PATH FOR PREVIEW AND EXECUTION"
+// invariant is satisfied here.
+func inspectionDigestsForCurrentFlags() (string, []sectionDigest, error) {
 	env, err := resolveEnv()
 	if err != nil {
 		return "", nil, err
@@ -544,26 +635,10 @@ func assembleForInspection() (string, []sectionDigest, error) {
 			Content:  content,
 		})
 	}
-	// Live-section dispatch for actions that DON'T yet flow their
-	// generated-artifact content through a dynamic. Once code_management
-	// migrates to dynamic.code_mgmt_review (step 6) and report grows a
-	// previous_report dynamic, this switch dies entirely.
-	switch promptAction {
-	case "code_management":
-		// Code-management bundles the current review.md as the
-		// supervisor's input. Missing review.md is non-fatal during
-		// inspection — the same best-effort load the factory uses.
-		if reviewContent, readErr := os.ReadFile(env.ReviewPath()); readErr == nil {
-			addLive("review", env.ReviewPath(), "# Review\n\n"+string(reviewContent))
-		}
-	case runner.ActionReport:
-		// Per-role report bundles the role's previous report inline.
-		// Requires --role to know which role's prior report to read;
-		// --action report on its own has nothing to preview.
-		if promptRole != "" && !promptIgnorePreviousReport {
-			addLive("previous_report", env.RoleReportPath(promptRole), previousReportBlock(env, promptRole))
-		}
-	}
+	// SPEC INVARIANT (Next-round step 6): the previous_report live
+	// section is gone. {{dynamic.previous_report}} (registered by
+	// NewReportBundle, wired into report/_post.previous_report.md)
+	// handles it inline.
 
 	// CLI post-prompt is the outermost tail wrapper, after every synthesized
 	// live section — matching where the real run appends it.
@@ -592,7 +667,7 @@ func splitPromptPath(promptPath string) (dir, role string) {
 // No prompt body is printed — use --inline-paths if you want the rendered
 // content alongside the metadata.
 func runPromptPaths() error {
-	promptPath, digests, err := assembleForInspection()
+	promptPath, digests, err := inspectionDigestsForCurrentFlags()
 	if err != nil {
 		return err
 	}
@@ -663,7 +738,7 @@ func sectionModTime(anchorFS map[string]fs.FS, anchor, path string) string {
 // The headers are not markdown, so the output is for a human only — feed
 // the agent the body from a regular run instead.
 func runPromptInlinePaths() error {
-	_, digests, err := assembleForInspection()
+	_, digests, err := inspectionDigestsForCurrentFlags()
 	if err != nil {
 		return err
 	}

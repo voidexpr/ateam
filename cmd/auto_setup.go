@@ -59,12 +59,27 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	prompt, err := assembleSupervisor(env, "auto_setup", "the supervisor", "auto-setup", prePrompt, postPrompt)
-	if err != nil {
-		return err
-	}
+	bundle := NewSingleSupervisorBundle(SingleSupervisorBundleInput{
+		Env:        env,
+		Path:       "auto_setup",
+		RoleLabel:  "the supervisor",
+		Action:     "auto-setup",
+		PrePrompt:  prePrompt,
+		PostPrompt: postPrompt,
+	})
 
 	if autoSetupDryRun {
+		rt := flow.NewRuntime(nil, env, env.WorkDir)
+		if bundle.BaseVars != nil {
+			rt.SetVars(bundle.BaseVars)
+		}
+		if bundle.Dynamics != nil {
+			rt.SetDynamics(bundle.Dynamics)
+		}
+		prompt, err := bundle.Prompt.Resolve(rt)
+		if err != nil {
+			return err
+		}
 		fmt.Printf("╔══ auto-setup ══╗\n\n")
 		fmt.Println(prompt)
 		fmt.Printf("\n╚══ auto-setup ══╝\n")
@@ -100,27 +115,23 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 	// here. Writing the v1 path (rather than the pre-v1 setup_overview.md or
 	// the pre-flat shared/auto_setup/auto_setup.md) avoids re-triggering
 	// layout migration on the next ateam command.
-	bundle := flow.PromptBundle{
-		Name:   "auto-setup",
-		Role:   "supervisor",
-		Action: runner.ActionExec,
-		Prompt: prompts.RawTextPrompt{Text: prompt},
-		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
-			return runner.RunOpts{
-				RoleID:     "supervisor",
-				Action:     runner.ActionExec,
-				WorkDir:    env.WorkDir,
-				TimeoutMin: timeout,
-				Verbose:    autoSetupVerbose,
-			}
-		},
-		PostExec: []flow.Action{
-			// No artifact file path — the agent's final message is the
-			// overview's source-of-truth here (unlike review/verify which
-			// rely on the file). Stream-only print mirrors the original
-			// "if result.Output != \"\", print it" branch.
-			actions.PrintArtifactBody{If: true, Path: ""},
-		},
+	bundle.Action = runner.ActionExec
+	bundle.Name = "auto-setup"
+	bundle.RunOpts = func(flow.RuntimeEnv) runner.RunOpts {
+		return runner.RunOpts{
+			RoleID:     "supervisor",
+			Action:     runner.ActionExec,
+			WorkDir:    env.WorkDir,
+			TimeoutMin: timeout,
+			Verbose:    autoSetupVerbose,
+		}
+	}
+	bundle.PostExec = []flow.Action{
+		// No artifact file path — the agent's final message is the
+		// overview's source-of-truth here (unlike review/verify which
+		// rely on the file). Stream-only print mirrors the original
+		// "if result.Output != \"\", print it" branch.
+		actions.PrintArtifactBody{If: true, Path: ""},
 	}
 	rtEnv := flow.RuntimeEnv{
 		Executor: cr,
@@ -137,5 +148,5 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 			&flow.BundleLogReporter{},
 		},
 	}
-	return flow.Run(bundle, rtEnv, rc).FirstError()
+	return flow.Run(*bundle, rtEnv, rc).FirstError()
 }

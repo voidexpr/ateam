@@ -241,3 +241,7 @@ Maintain it incrementally per Phase 1-4: initialize it with `Write` during Phase
 After the run is fully done (all phases complete and the report is fully written to disk), your FINAL assistant message must be a single short line confirming completion, e.g. `Execution report written to {{exec.output_file}}`. Do not include the report body in the final message; do not include any other commentary.
 
 If `{{exec.output_file}}` cannot be written for any reason, emit the execution report as your final message so the harness can recover it from the stream.
+
+---
+
+{{dynamic.code_mgmt_review}}

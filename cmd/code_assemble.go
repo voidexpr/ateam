@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/ateam/internal/prompts/assembler"
-	"github.com/ateam/internal/root"
 )
 
 // renderCLIWrapper renders a CLI-supplied wrapper string (the held-back
@@ -33,67 +32,11 @@ func renderCLIWrapper(engine *assembler.Engine, vars assembler.Vars, text string
 	return rendered, nil
 }
 
-// assembleAction renders a top-level singleton prompt by action name —
-// `ateam prompt --action <action>` resolves <action>.prompt.md across the
-// anchor chain (project / org / embedded). Wraps with --pre-prompt and
-// --post-prompt the same way as role / supervisor paths.
-//
-// roleLabel feeds {{dynamic.project_info}}; pass "" to suppress.
-func assembleAction(env *root.ResolvedEnv, action, roleLabel, prePrompt, postPrompt string) (string, error) {
-	a := env.Assembler()
-	engine := env.BuildEngine(roleLabel, action)
-	vars := env.BuildAssemblerVars(action, roleLabel, action)
-	opts := &assembler.AssembleOptions{PrePrompt: prePrompt}
-	res, err := a.Assemble(action, vars, engine, opts)
-	if err != nil {
-		return "", err
-	}
-	prompt := res.Prompt
-	post, err := renderCLIWrapper(engine, vars, postPrompt)
-	if err != nil {
-		return "", err
-	}
-	if post != "" {
-		prompt += "\n\n---\n\n" + post
-	}
-	return prompt, nil
-}
+// SPEC INVARIANT (Next-round step 6): assembleAction is gone.
+// `ateam prompt --action <action>` for unknown actions routes through
+// NewSingleSupervisorBundle.
 
-// assembleCodeManagementV1 builds the supervisor's code-management prompt:
-// the assembler's `code_management` composition (with optional CLI
-// overrides), then Review, then --post-prompt.
-// Shared by cmd/code.go's runCode and cmd/prompt.go's supervisor preview.
-//
-// Sub-run flag propagation (batch, profile, model, ...) used to live in a
-// trailing "# Sub-Run Flags" block this function appended; v1 inlines those
-// values via {{exec.batch}} / {{exec.profile}} / {{exec.model}} placeholders
-// directly in the prompt body, so each `ateam exec` example renders with the
-// values already baked in. The runner fills the placeholders at exec time;
-// `ateam prompt --batch X` bakes them in for previews.
-//
-// roleLabel feeds {{project.info}}; pass "" to suppress. prePrompt rides
-// through the assembler; postPrompt is held until after the review block
-// so it stays the outermost tail wrapper. Operators that need to override
-// the supervisor body drop a code_management.prompt.md under the project
-// or org anchor — the standard framing still composes around it.
-func assembleCodeManagementV1(env *root.ResolvedEnv, roleLabel, reviewContent, prePrompt, postPrompt string) (string, error) {
-	a := env.Assembler()
-	engine := env.BuildEngine(roleLabel, "code")
-	vars := env.BuildAssemblerVars("code_management", roleLabel, "code")
-	opts := &assembler.AssembleOptions{
-		PrePrompt: prePrompt,
-	}
-	res, err := a.Assemble("code_management", vars, engine, opts)
-	if err != nil {
-		return "", err
-	}
-	prompt := res.Prompt + "\n\n---\n\n# Review\n\n" + reviewContent
-	post, err := renderCLIWrapper(engine, vars, postPrompt)
-	if err != nil {
-		return "", err
-	}
-	if post != "" {
-		prompt += "\n\n---\n\n" + post
-	}
-	return prompt, nil
-}
+// SPEC INVARIANT (Next-round step 6): assembleCodeManagementV1 is
+// gone. The code-management body composes via NewCodeBundle's
+// PromptFile with {{dynamic.code_mgmt_review}} weaving the review
+// content in.

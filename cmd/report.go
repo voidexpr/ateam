@@ -224,8 +224,28 @@ func runReport(opts ReportOptions) error {
 	for _, roleID := range roleIDs {
 		roleID := roleID
 
-		prompt, err := assembleRoleReport(env, roleID, "role "+roleID, prePrompt, postPrompt, opts.IgnorePreviousReport)
-		if err != nil {
+		// Validate the role's prompt exists by attempting to resolve in
+		// ModePreview against a throwaway runtime — surfaces "no role
+		// main" errors as the legacy assembleRoleReport did, before we
+		// spin up an executor.
+		bundle := NewReportBundle(ReportBundleInput{
+			Env:                env,
+			RoleID:             roleID,
+			PrePrompt:          prePrompt,
+			PostPrompt:         postPrompt,
+			SkipPreviousReport: opts.IgnorePreviousReport,
+			TimeoutMin:         timeout,
+			Verbose:            opts.Verbose,
+			Batch:              batch,
+		})
+		validateRT := flow.NewRuntime(nil, env, env.WorkDir)
+		if bundle.BaseVars != nil {
+			validateRT.SetVars(bundle.BaseVars)
+		}
+		if bundle.Dynamics != nil {
+			validateRT.SetDynamics(bundle.Dynamics)
+		}
+		if _, err := bundle.Prompt.Resolve(validateRT); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", roleID, err)
 			continue
 		}
@@ -248,21 +268,7 @@ func runReport(opts ReportOptions) error {
 			}
 		}
 
-		runOpts := runner.RunOpts{
-			RoleID:            roleID,
-			Action:            runner.ActionReport,
-			OutputKind:        runner.OutputKindReport,
-			PromptName:        roleID, // → primary output `<roleID>.md`
-			CanonicalDestFile: env.RoleReportPath(roleID),
-			WorkDir:           env.WorkDir,
-			TimeoutMin:        timeout,
-			Verbose:           opts.Verbose,
-			Batch:             batch,
-			QuietExecID:       true,
-		}
-
-		bundle := staticBundle(roleID, roleID, runner.ActionReport, prompt, runOpts)
-		rbs = append(rbs, roleBundle{roleID: roleID, bundle: bundle, runner: roleRunner})
+		rbs = append(rbs, roleBundle{roleID: roleID, bundle: *bundle, runner: roleRunner})
 	}
 
 	if len(rbs) == 0 {

@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/ateam/internal/flow"
-	"github.com/ateam/internal/flow/actions"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
@@ -81,20 +80,31 @@ func runVerify(opts VerifyOptions) error {
 		return err
 	}
 
-	// Assemble the prompt up front so --dry-run can print it without
-	// spinning up the executor + DB.
-	prompt, err := assembleSupervisor(env, "code_verify", "the supervisor", "verify", prePrompt, postPrompt)
-	if err != nil {
-		return err
-	}
-
 	timeout := env.Config.Verify.EffectiveTimeout(opts.Timeout)
-
-	// v1 flat layout: promotion writes to .ateam/shared/verify.md (the file,
-	// not a per-action subdir). Sidecars stay in runtime/<exec_id>/.
-	verifyFile := env.VerifyPath()
+	startedAt := time.Now()
+	bundle := NewVerifyBundle(VerifyBundleInput{
+		Env:        env,
+		PrePrompt:  prePrompt,
+		PostPrompt: postPrompt,
+		TimeoutMin: timeout,
+		Verbose:    opts.Verbose,
+		Force:      opts.Force,
+		Print:      opts.Print,
+		StartedAt:  startedAt,
+	})
 
 	if opts.DryRun {
+		rt := flow.NewRuntime(nil, env, env.WorkDir)
+		if bundle.BaseVars != nil {
+			rt.SetVars(bundle.BaseVars)
+		}
+		if bundle.Dynamics != nil {
+			rt.SetDynamics(bundle.Dynamics)
+		}
+		prompt, err := bundle.Prompt.Resolve(rt)
+		if err != nil {
+			return err
+		}
 		fmt.Printf("╔══ verify ══╗\n\n")
 		fmt.Println(prompt)
 		fmt.Printf("\n╚══ verify ══╝\n")
@@ -129,34 +139,6 @@ func runVerify(opts VerifyOptions) error {
 
 	ctx, stop := cmdContext()
 	defer stop()
-	startedAt := time.Now()
-
-	bundle := flow.PromptBundle{
-		Name:   "verify",
-		Role:   "supervisor",
-		Action: runner.ActionVerify,
-		Prompt: prompts.RawTextPrompt{Text: prompt},
-		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
-			return runner.RunOpts{
-				RoleID:            "supervisor",
-				Action:            runner.ActionVerify,
-				OutputKind:        runner.OutputKindVerify,
-				CanonicalDestFile: verifyFile,
-				WorkDir:           env.WorkDir,
-				TimeoutMin:        timeout,
-				Verbose:           opts.Verbose,
-				StartedAt:         startedAt,
-				QuietExecID:       true,
-			}
-		},
-		PreExec: []flow.Action{
-			actions.CheckConcurrentRuns{If: !opts.Force, Action: runner.ActionVerify},
-		},
-		PostExec: []flow.Action{
-			actions.PrintArtifactPath{Label: "Verification report", Path: verifyFile},
-			actions.PrintArtifactBody{If: opts.Print, Path: verifyFile},
-		},
-	}
 
 	rtEnv := flow.RuntimeEnv{
 		Executor: cr,
@@ -173,5 +155,5 @@ func runVerify(opts VerifyOptions) error {
 			&flow.BundleLogReporter{},
 		},
 	}
-	return flow.Run(bundle, rtEnv, rc).FirstError()
+	return flow.Run(*bundle, rtEnv, rc).FirstError()
 }

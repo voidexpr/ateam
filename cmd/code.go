@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/ateam/internal/flow"
-	"github.com/ateam/internal/flow/actions"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -109,14 +108,16 @@ func runCode(opts CodeOptions) error {
 		return err
 	}
 
+	// Validate review.md exists (or operator override resolves) up-front so
+	// errNoReview surfaces before flow setup. The dynamic
+	// (code_mgmt_review) loads the content again at Resolve time — single
+	// substitution pass per spec — but the verb owes the operator a
+	// fast-fail before any prompt assembly.
 	var reviewContent string
 	if opts.Review == "" {
-		reviewPath := env.ReviewPath()
-		data, err := os.ReadFile(reviewPath)
-		if err != nil {
-			return errNoReview(reviewPath)
+		if _, err := os.Stat(env.ReviewPath()); err != nil {
+			return errNoReview(env.ReviewPath())
 		}
-		reviewContent = string(data)
 	} else {
 		reviewContent, err = prompts.ResolveValue(opts.Review)
 		if err != nil {
@@ -144,18 +145,6 @@ func runCode(opts CodeOptions) error {
 		subRunProfile = env.Config.ResolveProfile(runner.ActionExec, "")
 	}
 	subRunArgs := buildSubRunArgs(opts, subRunProfile, env.SourceDir, orgFlag, workDirFlag)
-
-	// assembleCodeManagementV1 composes the supervisor body via the
-	// assembler's anchor chain — operators that want to override the body
-	// drop a code_management.prompt.md under .ateam/prompts/ or
-	// .ateamorg/prompts/ and the project anchor takes precedence over the
-	// embedded default. Per-run values inline as {{exec.batch}} /
-	// {{exec.subrun_args}}; the runner resolves them at exec time (live
-	// path) or via TemplateVarsFor + ResolveTemplateString during --dry-run.
-	prompt, err := assembleCodeManagementV1(env, "the supervisor", reviewContent, prePrompt, postPrompt)
-	if err != nil {
-		return err
-	}
 
 	timeout := env.Config.Code.EffectiveTimeout(opts.Timeout)
 	supervisorDir := env.SupervisorDir()
@@ -195,15 +184,45 @@ func runCode(opts CodeOptions) error {
 	}
 	cr.SubRunArgs = subRunArgs
 
+	bundle := NewCodeBundle(CodeBundleInput{
+		Env:           env,
+		ReviewContent: reviewContent,
+		PrePrompt:     prePrompt,
+		PostPrompt:    postPrompt,
+		Batch:         batch,
+		TimeoutMin:    timeout,
+		Verbose:       opts.Verbose,
+		Force:         opts.Force,
+		Print:         opts.Print,
+		StartedAt:     startedAt,
+		SharedDir:     env.SharedDir(),
+		SupervisorDir: supervisorDir,
+		// Per-exec_id canonical dest. The runner's Replacer still
+		// expands {{EXEC_ID}} inside opts.CanonicalDestDir at
+		// ExecutePrepared time (that's args/path territory, not prompt
+		// body), so the literal template stays here.
+		CanonicalDest: filepath.Join(env.SharedDir(), "code", "{{EXEC_ID}}"),
+	})
+
 	if opts.DryRun {
-		previewOpts := runner.RunOpts{
-			RoleID: "supervisor",
-			Action: runner.ActionCode,
-			Batch:  batch,
+		// Dry-run resolves the prompt body inline so operators see the
+		// final composition before any allocation. Mode=ModePreview
+		// means exec.* keys render as the AT RUNTIME sentinel pattern
+		// and code_mgmt_review renders its sentinel — matching the spec
+		// (line 552-557).
+		rt := flow.NewRuntime(nil, env, env.WorkDir)
+		if bundle.BaseVars != nil {
+			rt.SetVars(bundle.BaseVars)
 		}
-		previewVars := cr.TemplateVarsFor(previewOpts, startedAt, 0)
+		if bundle.Dynamics != nil {
+			rt.SetDynamics(bundle.Dynamics)
+		}
+		text, err := bundle.Prompt.Resolve(rt)
+		if err != nil {
+			return err
+		}
 		fmt.Printf("╔══ code management ══╗\n\n")
-		fmt.Println(runner.ResolveTemplateString(prompt, previewVars))
+		fmt.Println(text)
 		fmt.Printf("\n╚══ code management ══╝\n")
 		return nil
 	}
@@ -220,36 +239,6 @@ func runCode(opts CodeOptions) error {
 	ctx, stop := cmdContext()
 	defer stop()
 
-	bundle := flow.PromptBundle{
-		Name:   "code",
-		Role:   "supervisor",
-		Action: runner.ActionCode,
-		Prompt: prompts.RawTextPrompt{Text: prompt},
-		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
-			return runner.RunOpts{
-				RoleID:           "supervisor",
-				Action:           runner.ActionCode,
-				OutputKind:       runner.OutputKindExecutionReport,
-				CanonicalDestDir: filepath.Join(env.SharedDir(), "code", "{{EXEC_ID}}"),
-				WorkDir:          env.WorkDir,
-				TimeoutMin:       timeout,
-				Verbose:          opts.Verbose,
-				Batch:            batch,
-				StartedAt:        startedAt,
-				QuietExecID:      true,
-			}
-		},
-		PreExec: []flow.Action{
-			actions.CheckConcurrentRuns{If: !opts.Force, Action: runner.ActionCode},
-		},
-		PostExec: []flow.Action{
-			printCodeSessionAction{
-				SharedDir:     env.SharedDir(),
-				SupervisorDir: supervisorDir,
-				Print:         opts.Print,
-			},
-		},
-	}
 	rtEnv := flow.RuntimeEnv{
 		Executor: cr,
 		WorkDir:  env.WorkDir,
@@ -266,7 +255,7 @@ func runCode(opts CodeOptions) error {
 			&flow.BundleLogReporter{},
 		},
 	}
-	return flow.Run(bundle, rtEnv, rc).FirstError()
+	return flow.Run(*bundle, rtEnv, rc).FirstError()
 }
 
 // printCodeSessionAction is a code-specific Post action that emits the

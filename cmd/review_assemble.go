@@ -6,8 +6,6 @@ import (
 
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
-	"github.com/ateam/internal/prompts/assembler"
-	"github.com/ateam/internal/root"
 )
 
 // SPEC INVARIANT (plans/feature_prompt_cmd_bundle_aware.md Next-round
@@ -18,28 +16,10 @@ import (
 // the manifest woven in by dynamic.review_reports inside
 // defaults/prompts/review.prompt.md.
 
-// assembleSupervisor is the generic single-prompt supervisor assembler:
-// builds promptPath via env.Assembler() and wraps with pre/post-prompt.
-// Used by verify, exec-debug, auto-roles, auto-setup — singletons that
-// have no role reports / manifest of their own. Review has its own
-// assembleReview because it needs the reports block woven in.
-//
-// roleLabel and action go into BuildAssemblerVars so {{project.info}}
-// renders identically across cmds.
-func assembleSupervisor(env *root.ResolvedEnv, promptPath, roleLabel, action, prePrompt, postPrompt string) (string, error) {
-	a := env.Assembler()
-	engine := env.BuildEngine(roleLabel, action)
-	vars := env.BuildAssemblerVars(promptPath, roleLabel, action)
-	opts := &assembler.AssembleOptions{
-		PrePrompt:  prePrompt,
-		PostPrompt: postPrompt,
-	}
-	res, err := a.Assemble(promptPath, vars, engine, opts)
-	if err != nil {
-		return "", err
-	}
-	return res.Prompt, nil
-}
+// SPEC INVARIANT (Next-round step 6): assembleSupervisor is gone.
+// Verify rides NewVerifyBundle; auto-setup + the unknown-action
+// fallback ride NewSingleSupervisorBundle. Both compose through the
+// same PromptFile pipeline as review / code_management.
 
 // formatReportsBlock renders the manifest table + bundled report contents in
 // the same shape AssembleReviewPrompt produced. Lives here so the new

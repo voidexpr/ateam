@@ -65,7 +65,7 @@ func TestPromptPathsFailsOnOrphanFragment(t *testing.T) {
 }
 
 // TestPromptPathsAllowsUnrelatedOrphan exercises the NON-BLOCKING half of the
-// orphan-filter branch the v1 refactor added to runPromptPaths()/assembleForInspection().
+// orphan-filter branch the v1 refactor added to runPromptPaths()/inspectionDigestsForCurrentFlags().
 // An orphan fragment that is NOT tied to the previewed prompt (different dir,
 // unrelated role) must be surfaced on stderr but must NOT fail the preview —
 // the real `ateam report` run never calls FindOrphans and succeeds for the

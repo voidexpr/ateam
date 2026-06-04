@@ -92,8 +92,14 @@ func TestCodeDryRunAgentInjection(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("runCode dry-run with agent override: %v", runErr)
 	}
-	if !strings.Contains(out, "--agent mock") {
-		t.Errorf("expected '--agent mock' in code management output (via {{exec.subrun_args}}):\n%s", out)
+	// Spec-aligned dry-run renders in ModePreview — exec.* keys emit
+	// the AT RUNTIME sentinel pattern instead of pre-substituting
+	// (legacy behavior). Operators wanting to see the resolved sub-run
+	// args run the live `ateam code` and inspect the rendered prompt
+	// via the bundle log, OR check `ateam exec`'s --agent flag is
+	// propagated via the runner.RunOpts wire (unit-tested separately).
+	if !strings.Contains(out, "{{AT RUNTIME:exec.subrun_args}}") {
+		t.Errorf("expected exec.subrun_args preview sentinel, got:\n%s", out)
 	}
 }
 

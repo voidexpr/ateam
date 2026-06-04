@@ -11,54 +11,11 @@ import (
 	"github.com/ateam/internal/root"
 )
 
-// assembleRoleReport builds a single role's report prompt via the
-// assembler. Mirrors prompts.AssembleRolePrompt but composes through the
-// new pipeline (anchor walk + Vars + Assemble) instead of the hardcoded
-// 4-level fallback in internal/prompts.
-//
-// Composition produced for "report/<roleID>":
-//
-//	root_pre        {{project.info}}
-//	dir_pre:report  intro / source location / maturity / merging-old / role-id
-//	role_main       <roleID>.prompt.md         (the role body)
-//	role_post       user-authored <roleID>.post.*.md fragments
-//	dir_post:report format / guidelines / output validation / write-to-OUTPUT_FILE
-//	(manual)        # Previous Report (if not skipped, when shared/report/<roleID>/report.md exists)
-//
-// Previous report inclusion mirrors the legacy "no prior" sentinel so the
-// agent's "merge old report" workflow gets the same signal in either branch.
-//
-// roleLabel feeds the {{project.info}} block (typically "role <roleID>");
-// pass "" to suppress the project info section entirely — matches the
-// legacy `--no-project-info` flag's behavior.
-func assembleRoleReport(env *root.ResolvedEnv, roleID, roleLabel, prePrompt, postPrompt string, skipPreviousReport bool) (string, error) {
-	promptPath := "report/" + roleID
-
-	a := env.Assembler()
-	engine := env.BuildEngine(roleLabel, "report")
-	vars := env.BuildAssemblerVars(promptPath, roleLabel, "report")
-	// Pre-prompt rides through the assembler; post-prompt is held until
-	// after the manually-appended previous-report block so it stays as
-	// the outermost tail wrapper.
-	opts := &assembler.AssembleOptions{PrePrompt: prePrompt}
-	res, err := a.Assemble(promptPath, vars, engine, opts)
-	if err != nil {
-		return "", err
-	}
-	prompt := res.Prompt
-
-	if !skipPreviousReport {
-		prompt += "\n\n---\n\n" + previousReportBlock(env, roleID)
-	}
-	post, err := renderCLIWrapper(engine, vars, postPrompt)
-	if err != nil {
-		return "", err
-	}
-	if post != "" {
-		prompt += "\n\n---\n\n" + post
-	}
-	return prompt, nil
-}
+// SPEC INVARIANT (Next-round step 6): assembleRoleReport is gone. Both
+// the live `ateam report` verb and `ateam prompt --role X --action
+// report` route through NewReportBundle → bundle.Prompt.Resolve, with
+// the prior-cycle report woven in by {{dynamic.previous_report}} via
+// defaults/prompts/report/_post.previous_report.md.
 
 // assembleRoleCode is the role-templated counterpart for "code" actions —
 // `ateam prompt --role X --action code` (and any future per-role code
