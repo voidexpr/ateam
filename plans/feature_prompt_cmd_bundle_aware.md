@@ -2,11 +2,11 @@
 
 ## Implementation status
 
-**Foundations landed; the design's load-bearing wiring did NOT.** The
-demolition phase (delete legacy paths, change contracts, migrate column
-names) is done. The construction phase (make `Prompt.Resolve` the single
-substitution pass, collapse preview into the live factory) is the next
-round of work, scoped in the "Next round" section below.
+**Next round complete (except step 9 — explicitly deferred by user
+decision).** The construction phase shipped: single substitution pass,
+factory-only verb composition, `Prompt.Resolve` is load-bearing in
+both preview and execution, all the legacy `assemble*` helpers are
+gone.
 
 Commits on `small-fixes`:
 
@@ -20,13 +20,20 @@ Commits on `small-fixes`:
 | `f1312c3` | `test/Dockerfile.dind` pinned; runtime.hcl ALL_CAPS docs swept; `docker_exec` accepts dotted forms. |
 | `6222bad` | `--paths` surfaces review's reports manifest without `--supervisor` (bug fix in a parallel path). |
 | `10bb528` | `--supervisor` flag deleted; `BuildAssemblerVars` exec.* placeholders switched to dotted form. |
+| Next-round step 1-3 | `runtimeVars` owns `exec.*` substitution against `ctx.Mode()` + Runtime fields. `flow.execute` populates `rt.{ExecID, Batch, OutputDir, OutputFile, PromptFile}` from `prepared` + RunOpts. `runner.go:494`'s prompt-substitution pass deleted. Load-bearing test `TestRunnerExecutePreparedDoesNotSubstitutePromptBody` pins the invariant. |
+| Next-round step 4-5 | `dynamic.review_reports`, `dynamic.code_mgmt_review`, `dynamic.previous_report` shipped; `defaults/prompts/review.prompt.md`, `defaults/prompts/code_management.prompt.md`, `defaults/prompts/report/_post.previous_report.md` reference them. `reviewPrompt` wrapper struct deleted. |
+| Next-round step 6 | `NewReviewBundle` / `NewCodeBundle` / `NewVerifyBundle` / `NewSingleSupervisorBundle` / `NewReportBundle` are the only composition path. `assembleReview` / `assembleSupervisor` / `assembleAction` / `assembleCodeManagementV1` / `assembleRoleReport` all deleted. `ateam prompt --action X` and `ateam <action>` share one factory. |
+| Next-round step 7 | `assembleForInspection` → `inspectionDigestsForCurrentFlags`, body composition fully delegated to `inspectBundleForCurrentAction`. No parallel preview composition path. |
+| Next-round step 8 | `(b *PromptBundle).ResolvePreview` / `InspectPreview` auto-load `BaseVars` + `Dynamics` + `ModePreview`. Boilerplate at every cmd-layer preview call site collapsed. |
+| Next-round step 9 | **Deferred by user decision** — substantial restructure (extract `AllRoleIDs`, `WriteOrgDefaults`, `FormatProjectInfo`, `ResolveContext`, etc. from `internal/prompts`) with no current consumer. Tracked as outstanding follow-up below. |
+| Next-round step 10 | `ateam exec` defaults to `prompts.PromptText` (variable + dynamic expansion); `--raw` opts into `RawTextPrompt`. `parallel` follows the same default. Load-bearing test `TestStaticBundle_PromptTextExpandsExecVars` pins the invariant. |
 
 ### What the spec set out to achieve that did NOT land
 
-These are the load-bearing design goals. They survive in this PR as
-declared abstractions only — the wiring underneath them is the legacy
-two-pass mechanism, with parallel preview/live paths kept in sync by
-hand.
+Original list of ten gaps recorded before the Next round. **Nine of
+ten now landed; step 9 deferred by explicit user decision.** Left
+in place for historical context and as the baseline against which the
+Next round's punt budget was set to zero.
 
 1. **One substitution pass for the prompt body.** `runner.go:494` still
    does `prompt = ResolveTemplateString(prompt, tmplVars)` after
