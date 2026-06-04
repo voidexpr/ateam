@@ -1,158 +1,140 @@
-# ATeam — AI Role Team for Code Analysis
+# ATeam
 
-ATeam is designed for developers who want to focus on feature work and key architectural design aspects, while delegating more of the quality software engineering to agents. The goal is to produce a healthy codebase with minimal human effort.
+**Run coding agents unattended. Keep your codebase healthy in the background.**
 
-ATeam is a CLI that runs role-specific coding agents against your codebase. Each agent audits code across selected dimensions like code refactoring, testing, security, dependencies, documentation, etc. Then a supervisor prioritizes the findings and runs coding agents to implement fixes. It works unattended, out of the box, for any tech stack. It is solely focused on project quality and doesn't make any feature change.
+ATeam is a CLI to run existing coding agents (Claude Code, Codex) unattended. It also provides a four-stage software engineering quality pipeline (**report → review → code → verify**) and a library of role prompts covering bugs, tests, security, dependencies, docs, architecture, and more.
 
-Ateam also provides simple primitives to run and audit unattended agents: run sequentially, in parallel, see token usage of past runs, saves logs and prompts, resume unattended session as an interactive session, etc ... It makes it easy to build simple shell scripts involving coding agents or build something more complicated leveraging ateam's core agent management features.
-
-See [APPROACH.md](APPROACH.md) for the rationale and design principles behind ATeam.
-
-## Key Features
-
-* **use existing coding agents** like Claude Code or Codex: leverage the expertise of lllm providers for coding tasks
-    * can leverage subscriptions pricing or can use API keys
-    * uses 'claude -p' streaming format, `codex exec` and `codex` via tmux (to use TUI-only commands like `/review` in unattended pipelines, see [CONFIG.md](CONFIG.md#codex-tmux-experimental))
-* **flexible isolation**: out of the box ateam uses your coding agents as-is for ease of configuration. But it also supports the following workflows:
-    * run with the agent's own sandbox on your base host: protects your files
-    * use a separate config for your coding agent (`CLAUDE_CONFIG_DIR`)
-    * run inside docker (built-in secret management for oauth or just use an already authenticated agent in the container)
-    * run outside of docker but docker exec only the agents in docker
-* a set of **roles** covering all core aspects of a project: code quality, testing, documentation, dependencies, security, etc ... out of the box. Adding a new role is just a single Markdown prompt file to add
-* **just a CLI**:
-    * can run the built-in ateam workflow of parallel report, review, code, verify
-    * ad-hoc unattended agent runs (`exec` for a single agent execution, `parallel` for multiple simultaneous agents)
-* **convenient tooling**: `ps` to see current/past agent runs, `cat`, `tail`, `inspect` for logs and execution details, `serve` to browse reports and reviews
-* **cost transparency**: all agent execution track token usage and estimated cost (less relevant for subscription). Tokens are the new software engineering currency and help gauge if an error is worthwhile
-
-TODO:
-* screenshot of `ateam ps`, `ateam serve`, `ateam cost`
-* doesn't dictate a particular git workflow: just commits in the workspace it is given
-* transparent: capture all information about unattended agents, use markdown files as input/output of agents
-* stateful: get context from git change log, feed previous report when generating the new (saves a lot of tokens by persisting role specific context)
+It automates the parts you don't want to do to free up your attention for features, architecture or any task you choose to focus on.
 
 ## Why ATeam
 
-Coding agents prioritize feature completion over software quality which is a good short-term tradeoff that degrades over time. Tests fall behind, security issues accumulate, code becomes spaghetti, docs go stale, dependencies rot, ...
+### The missing quality pipeline
 
-ATeam addresses this by running quality-focused agents unattended, no interactive prompting needed, no functional changes. Just steady, incremental quality improvement that looks like the code was engineered well in the first place.
+Coding agents prioritize feature completion over long-term software quality, which is a good short-term tradeoff that degrades over time. Tests fall behind, security issues accumulate, code becomes spaghetti, docs go stale, dependencies rot, ...
 
-Core principles of the built-in roles and review process:
+At the same time, coding agents are good at auditing and fixing quality issues. They can be prompted to be pragmatic: adapt to the project size, skip any change that would alter how a feature works, small wins are ok, avoid busy work, look for automation opportunities so cost goes down over time, ...
 
-* **No feature work**: focus on quality, don't change behavior
-* **Unattended**: your own coding agent works without approval or interaction
-* **Safe**: sandboxing and container isolation
-* **Pragmatic**: ateam agents are prompted to adapt to the project size and maturity, audits try to automate tools (linter, test automation, security vulnerability tools, ...) rather than constantly relying on agent decision making, they are instructed to automate themselves out of their job
-* **Simple**: reuses existing coding agents, minimal orchestration
-* **Auditable**: every artifact is a readable markdown file
-* **Stateful**: old reports or reviews are read before generating a new one so no context is lost, only one file per role so there is no bloat over time
-* **Complement interactive agents**: interactive agents remain best for difficult, iterative tasks and feature development but ateam can be used for its set of roles and improvement pipeline or for reusable scripts.
-* **Get out of your way**: ATeam is not a generic workflow system, it is a focused report + review + code + verify automation layer designed to preserve your attention for high-value work
+ATeam makes quality-oriented work a one-liner you can run on demand, daily, or on a weekly schedule to keep your codebase healthy. It's useful whether the code is written by agents, humans, or both — humans also forget to add tests, postpone refactors, and neglect security. A consistent automated baseline is a clear win either way.
 
-In any case there is no silver bullet, eventually documentation might need human direction to be better structure, a major code refactoring to better handle feature requirements is needed, etc ... But the goal is to reduce human involvement in day to day software engineering tasks.
+### Attention is the new bottleneck
 
+Developing new features or the architecture of a project requires a lot of thinking and concentration, interactive agents are a great enabler, helping brainstorm, design, and code extremely quickly. But then the bottleneck becomes your attention.
 
-### How is Ateam different from other agent framework
+A growing share of code is written by coding agents. Without automation, humans become full-time reviewers, juggling an ever-growing set of slash commands like `/write-tests /update-docs /update-architecture /simplify /code-review high --fix recent changes` to keep up. Automating this kind of work as a CLI gives some attention back.
 
-Most agent frameworks try to recreate human team structure using an evocative terminology and focus on feature work. Ateam's approach is to see feature work as a task that benefits from interactive agents and fundamentally requires attention. The sweet spot for unattended agents is with software engineering quality tasks. So ateam's focus on getting the fundamental right: reliably and safely run unattended agents, re-execute and audit saved prompts.
+Quality work is the sweet spot for unattended agents because it can be prompted once, unlike features that benefit from an interactive session. `ateam resume` turns any past unattended session into an interactive one, so you can talk to the agent that did that refactor last Tuesday night and ask what it did and why.
 
-The basic primitive of running prompt against any agent/container environment while capturing costs and logs is suprisingly versatile. You can look at the scripts/ directory in the ateam git repo for example of common code review or testing workflows that are simple bash scripts when using ateam.
+### `claude -p` works until it doesn't
 
-This is a rapidly evolving field with new frameworks being born every day, time will tell which approach approaches work best. Ateam explores one of them.
+Coding agents all provide flexible ways to run unattended, but a lot more tooling is required: a uniform interface across agents, conventions for logs, execution profiles, isolation parameters, tracking cost (tokens, turns, context), dynamic prompt assembly, moving prompt logic into scripts to reduce costs, ... It doesn't need to be complicated: a few config files, markdown prompts, some log files, one CLI.
 
-## Quick Start
+ATeam gives you the `ateam ps` command for unattended agents: clearly see how long they take and how much they cost, so you can improve your prompts over time, decide what runs daily vs. weekly and not repeatedly run that $20 one-liner without realizing it.
+
+It also gives you `ateam exec` and `ateam parallel` as primitives — drop them into a bash script for simple workflows, or wrap them in something more involved.
+
+This kind of harness lets you invest more heavily in unattended work without becoming dependent on any single coding agent — you keep the flexibility to pick the best pricing or the most interesting features as the landscape shifts.
+
+See more at [APPROACH.md](APPROACH.md).
+
+## Key Features
+
+**Agents and isolation**
+- Drives Claude Code (`claude -p` with `stream-json`) and Codex (`exec`); experimental `codex-tmux` lets TUI-only commands like `/review` run unattended
+- Multiple isolation modes: built-in agent sandbox (default), one-shot Docker, exec into a long-lived container (Docker / devcontainer / compose), or run ateam itself inside Docker (removes all permission checks). This is required to balance permissions vs. safety.
+- Config files to manage agent and container invocation, for example profiles select agent + container + custom arguments combos (`--profile docker`, `--profile codex-high`)
+- Dynamic prompt assembly: ad-hoc pre/post instructions on top of named prompts, with macro support inside prompts
+- Can use the default subscription, oauth, API keys using secret management in OS keychain, prioritizing the cheapest mode if multiple keys are available
+
+**Quality pipeline**
+- Four stages: `report` (parallel role audits) → `review` (supervisor prioritizes) → `code` (delegated fixes, small commits) → `verify` (commit inspection + tests). Run as `ateam run-all` or stage-by-stage.
+- 11 built-in roles: code bugs, recent-change review, structural quality, system architecture, internal/external docs, project automation, dependencies, security, test gaps, recent-test coverage (see [ROLES.md](ROLES.md))
+- Stateful markdown artifacts: each cycle reads the previous reports and review; quality compounds, no context is lost
+- 3-level prompt fallback (project `.ateam/` → org `.ateamorg/` → embedded defaults) with composable pre/post extensions; new roles are a single markdown file
+
+**Observability and troubleshooting**
+- `ateam ps` — recent runs and their status; `ateam tail` — live agent output
+- `ateam inspect EXEC_ID` — full execution details, prompts, and logs; `--auto-debug` runs an agent that reads the failure and proposes a fix
+- `ateam resume EXEC_ID`: create an interactive session from an unattended one, ask questions to any past agent
+- `ateam cost` — token usage and dollars per run, role, and agent
+- `ateam serve` — web UI for browsing all reports, reviews, runs, and costs; `ateam export` for a self-contained HTML snapshot
+- `ateam prompt --role NAME` shows the exact assembled prompt; `ateam env` summarizes config and environment
+
+## Use agents to help with ateam itself
+
+In the age of agents a lot of work can be offloaded, and ateam, built to run agents, makes full use of that on its own machinery:
+
+- **`ateam auto-setup`**: an agent reads your project and decides which roles to enable, so you don't have to read the docs
+- **`ateam report --auto-roles`**: dynamically picks which roles to run based on recent commits
+- **`ateam inspect --auto-debug`**: when an agent fails, another agent investigates the failure, proposes local fixes, and drafts a bug to file against ateam
+- **`scripts/ateam-runall-managed.sh`**: runs a full quality pipeline and, on error, has an agent try to get it back on track
+
+## Install
 
 ```bash
 git clone https://github.com/voidexpr/ateam.git
 cd ateam && ./install.sh
 ```
 
-The install script checks for Go (installs it if missing), builds the binary, and symlinks it into `~/.local/bin/`.
+Authenticate Claude Code or Codex if you haven't already (`claude` / `codex`). For unattended use in cron or containers, see [CONFIG.md](CONFIG.md) for credential storage.
 
+Requires Go 1.26+ (installed automatically by `install.sh`) and one coding agent CLI. Docker optional.
+
+## Quick Start
+
+### 1. Configure ateam for a git workspace
 ```bash
-# 0. Use your own workspace, a git worktree or a separate workspace for ateam
 cd /path/to/your/project
-
-# 1. Initialize, it will create .ateam/ directory in your folder
-ateam init
-
-# 2. Authenticate your coding agent (pick what you use — without this `ateam report` will fail)
-claude                                            # interactive Claude Code login, then exit
-# or store credentials with ateam:
-claude setup-token                                # produces a long-lived OAuth token to paste below
-ateam secret CLAUDE_CODE_OAUTH_TOKEN --set        # paste the token from setup-token (reads from stdin)
-ateam secret ANTHROPIC_API_KEY --set              # or an API key
-
-# 3. Auto-configure roles for your project (optional)
-ateam auto-setup
-
-# 4. Run
-ateam report             # run all enabled role analyses
-ateam review             # supervisor prioritizes findings
-ateam code               # implement top-priority fixes
-ateam verify             # audits at the commits from previous phase
-
-# 5. Look (at any step)
-ateam serve              # local web server to browse documents, processes, cost
+ateam init                # create .ateam/
 ```
 
-Once familiar with ateam just run the full pipeline: `ateam run-all` or `ateam run-all && ateam serve`.
+### 2. Select which roles to enable for your project
 
-You can see all artifacts using web UI `ateam serve` or under `.ateam/`
+* A: Edit `.ateam/config.toml` to select which [role](ROLES.md) to enable in your project
+* B: Or let an agent decide: `ateam auto-setup` (detect stack, enable a reasonable role set)
 
-Other very useful commands:
+### 3. Run the quality pipeline, ATeam commits the changes locally
 ```bash
-# See current and past agent runs
-ateam ps
+ateam run-all                 # report → review → code → verify
 
-# See logs of running agents
-ateam tail
-
-# Auto-debug issues using an agent
-ateam inspect EXEC_ID --auto-debug
+# or run one by one:
+ateam report         # parallel audit along multiple 'role' dimensions
+ateam review         # prioritize the most important findings only
+ateam code           # implement the fixes, git commit to the local branch
+ateam verify         # verify the commits for bugs, re-run tests
 ```
 
-### Prerequisites
-
-- **Go 1.26+** — installed automatically by `install.sh`
-- **[Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)** or **[Codex](https://developers.openai.com/codex/cli)** — install and authenticate before running agents (one or the other or both)
-- **Docker** (optional) — enables isolated execution via `--profile docker`
-
-### Manual Install
-
+### 4. Browse all artifacts in a web browser
 ```bash
-go version          # ensure Go 1.26+
-git clone https://github.com/voidexpr/ateam.git
-cd ateam && make build
-sudo ln -s "$(pwd)/ateam" /usr/local/bin/ateam
+ateam serve               # browse artifacts in your browser
 ```
 
-### Upgrade
+That's the whole flow. You can also run `ateam exec` and `ateam parallel` from there for your own scripts.
 
-```bash
-git pull --rebase && make build-all
-ateam update          # prints the diff and syncs on-disk prompts to the new embedded defaults
-```
+Once familiar with ateam read [ISOLATION.md](ISOLATION.md) to choose the best balance for your project.
 
-Run `ateam update` after rebuilding: on-disk org/project prompts shadow the binary's embedded defaults, so without it prompt changes shipped in the new version silently don't take effect. `ateam update` prints the per-file diff before applying; pass `--quiet` to suppress it.
+## How it works
 
-### Use agents to help with ateam itself
+`ateam init` creates a `.ateam/` directory in your repo. It holds a small SQLite database tracking agent executions and cost, all logs, and the markdown artifacts produced by roles. You can run `ateam init` anywhere — the CLI walks up parent directories to find it, like `git`.
 
-In the age of agents a lot of work can be offloaded and ateam being made to run agents make full use of it.
+A second directory, `.ateamorg/` (default: `$HOME/.ateamorg`), holds prompts and configuration you want shared across projects.
 
-Ateam makes many interesting use of agents to help its usage:
-* auto-config: let an LLM decide which roles to enable or not
-* report --auto-roles: dynamically decide based on the project and recent changes what roles to run
-* inspect --auto-debug: if an agent fails automate debugging to recommend local fixes and bugs to file against ateam
-* scripts/ateam-all-managed.sh: if a run fails use an agent to try to get it back on track
+Prompts resolve in order: **project → organization → embedded defaults.** You can fully override a prompt at any level, or — more commonly — extend it with a post-prompt fragment. Example: drop `*.post.extra.md` into `.ateam/prompts/report/project.security/` with *"do not flag GitHub Actions secrets, we use a separate vault"* and that instruction is appended every time the role runs.
 
-## How It Works
+For per-run steering, every prompt-taking command also accepts `--pre-prompt TEXT` (wrapped at the front) and `--post-prompt TEXT` (wrapped at the end), each taking text or `@file`.
 
-By default coding agents will be ran in a sandbox providing a good balance of file system protection and ease of use out of the box. Read the [Isolation](#Isolation) section for more options on how to run your coding agents.
+Full details: [CONFIG.md](CONFIG.md).
 
-### The Pipeline
+`ateam serve`:
+![ateam serve — browse reports, reviews, and cost in your browser](docs/ateam_serve_overview.jpg)
 
-When running `ateam run-all` the following steps are executed (they are also available as individual commands):
+`ateam ps`:
+![ateam ps — recent runs with duration, cost, and tokens](docs/ateam_ps.jpg)
+
+## Two ways to use it
+
+### As a quality pipeline
+
+`ateam run-all` runs the four-stage loop across the [roles](ROLES.md) enabled in `.ateam/config.toml` (also runnable stage-by-stage).
 
 ```
 ateam report  →  ateam review  →  ateam code  →  ateam verify
@@ -163,76 +145,98 @@ ateam report  →  ateam review  →  ateam code  →  ateam verify
  (parallel)        findings         coding tasks     and runs tests
 ```
 
-**Report**: Role-specific agents analyze your code and produce markdown reports. Each role focuses on one dimension (security, testing, etc.). Runs in parallel. A role is basically a markdown prompt, easy to modify or create new ones.
+**Report**: role-specific agents analyze your code and produce markdown reports. Each role focuses on one dimension (security, testing, etc.). Runs in parallel.
 
-**Review**: The supervisor reads all reports, applies judgment, and produces a prioritized list of coding tasks. You can edit the review before proceeding with this step or just add some extra instructions on the CLI with `--post-prompt SOME TEXT`.
+**Review**: the supervisor reads all reports, applies judgment, and produces a prioritized list of coding tasks. You can edit `.ateam/shared/review.md` before `ateam code`, or steer with `--post-prompt`.
 
-**Code**: The supervisor executes the top-priority tasks by delegating to coding agents, then records what was completed.
+**Code**: the supervisor executes the top-priority tasks by delegating to coding agents and records what was completed.
 
-**Verify**: The supervisor inspects the commits made during the code phase, looks for logical bugs, broken or missing tests, and risky changes, then runs the project's test suite and records findings. `ateam code` stops after the code phase — run `ateam verify` explicitly, or use `ateam run-all` which always runs verify as the final phase.
+**Verify**: the supervisor inspects the commits for logical bugs, broken or missing tests, and risky changes, then runs the project's test suite and records findings.
 
-Each run archives its artifacts. The next cycle's reports incorporate previous findings, so quality improves incrementally with a memory of what has been done so far.
+Each run archives its artifacts. The next cycle's reports incorporate previous findings, so quality improves incrementally with memory of what's been done.
 
-### Workflow Examples
+Roles are simple markdown prompt files; add your own by dropping a file in `.ateam/prompts/report/`. See [CONFIG.md](CONFIG.md).
 
-Daily (quick pass, focused on recent changes):
+#### Git
+
+During the `code` and `verify` phases, ateam commits its changes to whatever branch you ran it on. There's no built-in branch management or worktree handling — pick whatever git workflow fits your project:
+
+- **Simplest**: run ateam in your working directory, review its commits, push
+- **Worktree**: run ateam in a separate `git worktree`, review, merge/cherry-pick
+- **Branch**: same as worktree but on a dedicated branch
+
+### As a primitive
+
+`ateam exec` and `ateam parallel` run unattended coding agents with your own prompts. Drop them into shell scripts to build any workflow.
+
+```bash
+ateam exec "audit recent changes for bugs" --agent codex
+
+# run multiple agents at the same time
+ateam parallel "@prompts/security.md" "@prompts/tests.md"
+
+# run any number of prompts by at most 4 at a time
+ateam parallel "@prompts/mystuff/*.md" --max-parallel 4
+
+# easy to read multi-line prompts fits well in scrupts
+ateam exec --agent claude <<EOF
+review findings in $REPORT and apply the fixes
+If you disagree then clearly document why
+EOF
+
+# look at cost of previous runs or what failed
+ateam ps
+
+# observe the agent stream logs of all running processes
+ateam tail
+
+# see the log files for agent run 12, have another agent analyzed why it failed
+ateam inspect 12 --auto-debug
+
+# Start an interactive session in claude or codex (based on how it was run)
+# with the exact context at the end of agent run 12
+ateam resume 12 --launch
+```
+
+## Examples
+
+### Daily pass on recent changes
 ```bash
 ateam run-all --roles code.recent,test.recent
 ```
+Quick, focused, cheap. Good before a PR or as a recurring run.
 
-Weekly (thorough):
+### Adversarial review — Codex critiques, Claude implements
 ```bash
-ateam run-all --roles code.bugs,test.gaps,project.security,project.dependencies,design.architecture
+ateam exec "critical review of recent changes into review.md" --agent codex-high
+ateam exec "review.md → apply fixes and push back on what you disagree with, commit each separately"  --agent claude-high
 ```
+Two agents, two viewpoints. The CLI primitive lets you compose any pattern in shell.
 
-Step by step (with review):
+More complete version of this can be found in:
+* `scripts/codex-reviews-claude-codes.sh`: basically what is above but leveraging codex-tmux to call /review which is only available in TUI mode
+* `scripts/critical-code-review.sh`: multiple rounds selecting any agent
+* `scripts/double-review.sh`: run both codex-tmux /review and claude /code-review in parallel, then merge reports and code the fixes as a 3rd agent run.
+
+### Background quality on a fast-moving project
 ```bash
-ateam report && ateam review --print    # inspect findings
-# optionally edit .ateam/shared/review.md
-ateam code && ateam verify && ateam serve # fix, verify and serve all artifacts produced
+ateam run-all                # end-of-day, in cron, or before commits
 ```
+Roles from `.ateam/config.toml` run unattended. You wake up to small commits to review or merge.
 
-### Git
-
-The current version of ateam doesn't perform any git actions except `git commit` during the `code` or `verify` phases.
-
-So the git workflow is up to you:
-- **Simplest**: run ateam in your or a dedicated work area, review its commits, push.
-- **Worktree**: run ateam in a separate git worktree, review, merge/cherry-pick
-- **Branch**: same as worktree but with a dedicated work area
-
-### Steering Ateam
-
-#### 1. Providing directions
-* for ad-hoc steering, every prompt-taking command accepts two text-or-`@file` flags:
-    * `--pre-prompt TEXT` — wrapped at the very front, outermost
-    * `--post-prompt TEXT` — wrapped at the very end, outermost
-    * example: `ateam run-all --post-prompt "focus on the changes related to the authentication model"`
-* for persistent steering (like reject a type of findings ateam proposes) write them as composable fragments at the appropriate level:
-    * project-level role override: `.ateam/prompts/report/NAME.post.extra.md` (composes with the embedded role)
-    * project-level supervisor review override: `.ateam/prompts/review.post.extra.md`
-    * org-level (shared across projects): same paths under `.ateamorg/prompts/`
-
-see more options in [CONFIG.md](CONFIG.md)
-
-#### 2. Specify selected roles
-
-It doesn't make sense to run the same roles all the time, for example:
-* during lunch run code review and test roles only
-* after a day of work do the same but add security update, documentation roles
-* once or twice a week also review dependencies and more advanced testing
+More recipes (lunch-pass / weekly audit / step-by-step / mixed-agent scripts): [GUIDE.md](GUIDE.md).
 
 ## Isolation
 
-ATeam runs unattended agents that must operate safely without constant permission approval requests. The field is evolving, ATeam supports multiple approaches and will adapt as best practices emerge.
+ATeam runs unattended agents that must operate safely without constant permission approval requests. The field is evolving; ATeam supports multiple approaches and will adapt as best practices emerge.
 
 **Why isolation matters:**
 - **Filesystem**: prevent accidental or malicious writes outside the project, protect access to sensitive files, avoid time-wasting configuration breakages
 - **Network**: prevent data exfiltration (especially combined with filesystem access), prevent remote control
 
-**The tradeoff**: stricter restrictions increase safety but can break tools that rely on directories outside the project, Unix sockets (Docker), pipes (tsx), nested sandboxes (Playwright on macOS), or shared `/tmp` directories. Also more isolation environments like Docker require more configuration, there are also extra steps to configure coding agents within containers.
+**The tradeoff**: stricter restrictions increase safety but can break tools that rely on directories outside the project, Unix sockets (Docker), pipes (tsx), nested sandboxes (Playwright on macOS), or shared `/tmp` directories. Heavier isolation environments (Docker especially) require more configuration, plus extra steps to authenticate coding agents inside containers.
 
-The exact isolation is configuration driven so highly customizable.
+Isolation is configuration-driven, so any of the above can be tuned per project.
 
 ### Execution modes
 
@@ -257,7 +261,7 @@ The exact isolation is configuration driven so highly customizable.
 │ │ └─────────────────────────────┘ │ │   │ │ └─────────────────────────────┘ │ │
 │ └─────────────────────────────────┘ │   │ └─────────────────────────────────┘ │
 └─────────────────────────────────────┘   └─────────────────────────────────────┘
-③ Docker exec — --profile docker-exec     ④ ATeam inside Docker — container-native
+③ Docker exec — --profile docker-exec     ④ ATeam inside Docker or a sandbox — container-native
 ```
 
 | Approach | How it works | Best for |
@@ -266,169 +270,37 @@ The exact isolation is configuration driven so highly customizable.
 | **Built-in sandbox** and **separate agent configuration** | Same as above but don't share the same configuration as interactive agents (different hooks, ...) | Useful when the default agent configuration is highly customized with notifications |
 | **Docker one-shot** | Fresh Linux container built and run per command | Strong isolation; need build/test tooling |
 | **Docker exec** | Exec into an existing user-managed container (docker-compose, devcontainer, …) | You already run a long-lived dev container |
-| **ATeam inside Docker** | Run ateam itself from inside a container; agents inherit container isolation and runs without any restriction | Docker-native projects |
+| **ATeam inside a container** | Run ateam itself from inside a container (Docker or an OS-native sandbox like [fence](https://github.com/fencesandbox/fence)); agents inherit the container's isolation and run without per-command restrictions | Docker-native projects, or sandboxing ateam itself if you don't trust it |
 | **None** | No isolation (agent runs directly on host) | Debugging only |
 
 By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for one-shot container isolation or `--profile docker-exec` to exec into an existing container. See `defaults/runtime.hcl` for all profiles.
 
-## Key Configuration Concepts
-
-- **3-level prompt fallback**: project → org → embedded defaults. Customize at any level.
-- **Multi-project support**: share org-wide defaults across projects via `.ateamorg/` (by default created in `$HOME`)
-- **Runtime profiles**: switch agent/container combos with `--profile docker` or `--profile cheap`
-- **Cost tracking**: `ateam cost` for aggregated reports, `ateam ps` for run history
-- **Secret management**: `ateam secret` stores API keys in OS keychain or `.env` files. For a given key the store beats the environment; when an agent accepts alternatives (e.g. `CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY`), OAUTH wins any same-level tie. Competing credentials are stripped from agent processes
-
-An ateam project is a `.ateam` folder in your code base, a parent directory ($HOME by default) contains `.ateamorg`.
-* **Project**:
-    * configuration
-        * `config.toml` configured roles and general persisted settings
-        * optional: overloaded or extended prompts
-        * optional: extended coding agent or container config (`runtime.hcl`, `Dockerfile`)
-    * produced artifacts
-        * reports (and their history)
-        * last review (and their history)
-        * coding tasks and their execution report
-    * runtime logs
-        * state.sqlite: track running agent execs and statistics about them for live monitoring and cost reporting
-        * log files from agent execution, exact prompt used
-* **Organization**:
-    * optional: overload runtime.hcl or prompts to reuse between projects
-    * defaults for all roles and all config
-
-## Roles
-
-Many built-in roles covering security, testing, documentation, dependencies, refactoring, and more. See [ROLES.md](ROLES.md) for full descriptions.
-
-Roles are organized into collections using a `collection.role` naming convention (e.g. `code.bugs`, `test.recent`). Older single-name roles like `security` or `refactor_small` are kept on disk for backward compatibility but hidden from listings — see [ROLES.md](ROLES.md) for the canonical list.
-
-**Enabled by default** (11 roles):
-
-| Role | Description |
-|------|-------------|
-| `code.bugs` | Hunts for logic bugs across the codebase — wrong conditions, broken contracts, silent failures, lifecycle and concurrency issues — with strict false-positive filtering. |
-| `code.recent` | Reviews recent changes (uncommitted + last few commits) for bugs, regressions, duplication, and structural slips before they harden into debt. |
-| `code.structure` | Project-wide structural quality — duplication, anti-patterns, naming, layering, missing/unnecessary abstractions — tagged by scope (local \| module \| architecture). |
-| `design.architecture` | System-design review — where logic should live across layers, API/contract design quality, service boundary decisions, and cross-component operational contracts. |
-| `docs.external` | Maintains user-facing docs — README, install, usage examples, public API reference. Drives both presence and accuracy with README-size discipline. |
-| `docs.internal` | Maintains engineer-facing technical depth — architecture, internal protocols/formats, build/test setup rationale, per-area design principles, and agent-facing instructions. |
-| `project.automation` | Project foundations and automation — strict priority order: build/verification first, multi-tier test commands, then lint/format, then hooks, with CI/CD as the lowest priority. |
-| `project.dependencies` | Conservative dependency health review — flags abandoned/EOL packages, deprecated APIs in use, exploitable CVEs, and major-version-gap blockers. |
-| `project.security` | First-line security review — focuses on confirmed exploitable bugs and data exposure with realistic triggers. |
-| `test.gaps` | Project-wide missing-test discovery — untested CLI commands, untested user-visible workflows, 0%-coverage functions on reachable paths, and integration boundaries with no end-to-end test. |
-| `test.recent` | Checks that recent changes have appropriate test coverage — new branches exercised, modified contracts re-tested, bug fixes locked in by regression tests. |
-
-Role enablement is opt-in: only roles explicitly listed as `on` in `config.toml` are included when running `ateam report --roles all`. Edit `.ateam/config.toml` to enable additional roles, or let `ateam auto-setup` configure them based on your project. Any role can still be run by name (`ateam report --roles code.bugs,test.quality`) regardless of its default status.
-
-### Creating Custom Roles
-
-Create `prompts/report/YOUR_NEW_ROLE_NAME.prompt.md` (in `.ateam/` for project-scoped or `.ateamorg/` for org-shared). You can then run a report with `ateam report --roles YOUR_NEW_ROLE_NAME`. To have it run by default, enable it in `config.toml`.
-
-Ideas:
-- GDPR/PII privacy
-- Cloud deployment safety
-- Observability
-- Framework, language, company infra specific best practices
-- UI Accessibility
-
-There is a very long list of potentially very useful roles to add.
-
 ## Commands
 
-* Main pipeline: [`all`](COMMANDS.md#ateam-all), [`report`](COMMANDS.md#ateam-report), [`review`](COMMANDS.md#ateam-review), [`code`](COMMANDS.md#ateam-code), [`verify`](COMMANDS.md#ateam-verify)
-* Review documents: [`serve`](COMMANDS.md#ateam-serve), [`export`](COMMANDS.md#ateam-export)
-* Process management: [`ps`](COMMANDS.md#ateam-ps), [`inspect`](COMMANDS.md#ateam-inspect-id), [`tail`](COMMANDS.md#ateam-tail), [`cat`](COMMANDS.md#ateam-cat), [`resume`](COMMANDS.md#ateam-resume-exec_id)
-* Troubleshooting: [`env`](COMMANDS.md#ateam-env), [`prompt`](COMMANDS.md#ateam-prompt), [`roles`](COMMANDS.md#ateam-roles), [`version`](COMMANDS.md#ateam-version)
-* Ad-hoc agents: [`exec`](COMMANDS.md#ateam-exec), [`parallel`](COMMANDS.md#ateam-parallel)
-* Installation and update: [`init`](COMMANDS.md#ateam-init-path), [`auto-setup`](COMMANDS.md#ateam-auto-setup), [`install`](COMMANDS.md#ateam-install-path), [`update`](COMMANDS.md#ateam-update)
+| | |
+|---|---|
+| **Per project setup** | `init`, `auto-setup` |
+| **Pipeline** | `run-all` or: `report`, `review`, `code`, `verify` |
+| **Ad-hoc** | `exec`, `parallel` |
+| **Process / cost** | `ps`, `tail`, `resume`, `inspect`, `cat`, `cost` |
+| **Web Interface for Artifacts** | `serve`, `export` |
+| **Config / debug** | `env`, `prompt`, `roles`, `secret` |
 
-| Command | Description |
-|---------|-------------|
-| [`ateam init`](COMMANDS.md#ateam-init-path) | Initialize a project (`.ateam/` directory) |
-| [`ateam auto-setup`](COMMANDS.md#ateam-auto-setup) | Auto-configure roles for the current project |
-| [`ateam report`](COMMANDS.md#ateam-report) | Run role analyses |
-| [`ateam review`](COMMANDS.md#ateam-review) | Supervisor reviews and prioritizes findings |
-| [`ateam code`](COMMANDS.md#ateam-code) | Execute prioritized coding tasks (run [`ateam verify`](COMMANDS.md#ateam-verify) after, or use `ateam run-all` for the full pipeline) |
-| [`ateam run-all`](COMMANDS.md#ateam-run-all) | Full pipeline: report → review → code → verify (verify always runs) |
-| [`ateam verify`](COMMANDS.md#ateam-verify) | Supervisor verifies recent code changes from [`ateam code`](COMMANDS.md#ateam-code) |
-| [`ateam exec`](COMMANDS.md#ateam-exec) | Run an agent with a custom prompt |
-| [`ateam parallel`](COMMANDS.md#ateam-parallel) | Run multiple agents in parallel, each with its own prompt |
-| [`ateam env`](COMMANDS.md#ateam-env) | Show environment and configuration status |
-| [`ateam project-info`](COMMANDS.md#ateam-project-info-path) | Emit generic, language-agnostic orientation about a git repository |
-| [`ateam serve`](COMMANDS.md#ateam-serve) | Web UI for browsing reports and sessions |
-| [`ateam export`](COMMANDS.md#ateam-export) | Export reports as a self-contained HTML file |
-| [`ateam ps`](COMMANDS.md#ateam-ps) | Recent run history |
-| [`ateam inspect`](COMMANDS.md#ateam-inspect-id) | Show details and logs for agent runs |
-| [`ateam resume`](COMMANDS.md#ateam-resume-exec_id) | Resume a previous claude, codex, or codex-tmux run as an interactive session |
-| [`ateam prompt`](COMMANDS.md#ateam-prompt) | Debug prompt assembly |
-| [`ateam cat`](COMMANDS.md#ateam-cat) | Pretty-print stream logs |
-| [`ateam tail`](COMMANDS.md#ateam-tail) | Live-stream agent output |
-| [`ateam roles`](COMMANDS.md#ateam-roles) | List available roles |
-| [`ateam cost`](COMMANDS.md#ateam-cost) | Aggregated token-usage and cost reports across runs |
-| [`ateam secret`](COMMANDS.md#ateam-secret) | View, set, or delete agent secrets (keychain or `.env`) |
-| [`ateam version`](COMMANDS.md#ateam-version) | Print version, build, and system information |
+Full reference: [COMMANDS.md](COMMANDS.md).
 
-See [COMMANDS.md](COMMANDS.md) for all `ateam` commands and flags, and [CONFIG.md](CONFIG.md) for directory layout, prompt configuration, and runtime configuration.
 
-## How to best use ateam
+## Note about maturity and cost
 
-See [GUIDE.md](GUIDE.md)
+ATeam was started in February 2026 and has been used mostly on projects where the code is owned by coding agents (including ateam itself). The approach is validated: it improves codebases and saves attention, projects shape up while spending a fraction of the effort it would take by direct prompting.
 
-## FAQ
+But ateam runs are not free, especially once the mid-June 2026 Claude subscription price increase for unattended use kicks in. It still seems well worth it; perhaps run less often than every day, or with more targeted roles. Built-in prompts have already gone through a round of token-usage tuning, with more to come. A realization that comes from working with coding agents: the cost of building features may be less than half the true cost of building quality software.
 
-See [FAQ.md](FAQ.md) for frequently asked questions.
+## Docs
 
-## Future
-
-Ateam was born from the frustration of dealing with constant permission approval notices and having to constantly prompt coding agents to refactor code, add tests, audit security, review code when agents themselves are very good at finding issues. This is mostly achieved via the flexible isolation options and running one-shot unattended agents in multiple stages. Coding agents have been surprisingly brittle so stability has been an issue but it has improved to be able to get more stable runs. Cost is definitely going up and maxing the use of subscriptions price subsidy is already gone for Claude Code (June 15th 2026 pricing model change). But it is just a reality that coding a long term project is a lot more than getting a feature to work and cost expectations need to be adjusted.
-
-The vision moving forward is to improve ateam along the following paths:
-* reduce token usage
-    * tokens are the currency of AI and the metric to optimize for: cheaper, runs faster, want to use the right amount of tokens to get the best possible results to avoid having to redo work or deal with issues that could have been preventing by being a bit more thorough
-    * this means introducing a task system to have a granularity of work that is finer grain than an entire file and track review/code status on it, do evals to improve prompts
-* improve the quality engineering component
-    * allow humans to focus on features and do barely any code review, testing and other similar tasks because they know ateam will keep improving this area automatically
-    * this means improving prompts, adding more workflows (see the scripts doing adversarial reviews/testing, lunch time runs vs. daily vs. weekly), maybe ways to hint ateam to steer it toward the current needs (or have ateam surface these priorities as questions)
-* autonomy and safety
-    * add more agent support, add more isolation options (built-in consistent sandbox independent of the agent, MacOS native containers, ...)
-    * gracefully handle LLM provider outages (failover from one another to the other, pause/resume), usage restrictions (short term windows, long term windows / budget) so that ateam pipelines complete no matter what
-* improve ateam as an orchestration layer (in addition to currently available exec/parallel)
-    * orchestration of multiple stages into resumable, observable workflows
-    * manage prompts by providing easy ways to add pre/post instructions and code so that the coding agents waste less tokens and time discovering information that can be algorithmically discovered and to verify the work produced deterministically. It is how ateam itself is evolving: start with prompts doing most of the heavy lifting and as the process matures move more to code before/after LLMs
-    * better context reuse: try to avoid running from scratch every time by reusing discovery of a codebase
-
-- 0.9.0 Refactor roles and do some eval to use less tokens and improve accuracy
-- 1.0.0 Cleanup in CLI options, file layout and database structure for future work
-
-Then the focus becomes
-- add an internal task system instead of relying on files to make the unit of report/review/code a finding and not have to deal with entire files. It will reduce token consumption and make the underlying plumbing strong for find/review/edit flows. Files are still great for many workflows
-- Focus on reducing token consumption
-    - Use an internal task system and move coding to algorithmic instead of relying on on agent prompt to consume less tokens and make the system more deterministic
-    - More formal prompt evals to tune prompt
-    - Research code indexing tools to reduce code discovery cost of each report
-    - Auto-discovery of testing tools and run them outside of agents as gates
-- More flexible and generic core
-    - full prompt templating: variable expansion, inclusion, run sandboxed shell commands (integrate with Fence to have a native sandbox inside of ateam)
-    - custom resumable workflow using the task system for state tracking
-    - ad-hoc execution based on tasks with automatic life cycle management and dependencies management
-- other
-    - more agents: Pi, Gemini
-    - more containers: MacOS Containers, Fence sandbox as a lightweight consistent sandbox around any agent
-    - memory system: persist preferences and knowledge acquired per project and per org on tech stack
-- more flexible workflow
-    - make report/review/code/verify an instance of a resumable workflow system leveraging the future task system
-- maybe: Built-in scheduling
-
-## Development
-
-See [DEV.md](DEV.md) for development setup, testing, and architecture details.
-
-## More docs
-
-- [APPROACH.md](APPROACH.md) — rationale and design principles
-- [COMMANDS.md](COMMANDS.md) — full `ateam` command reference
-- [CONFIG.md](CONFIG.md) — directory layout, `config.toml`, `runtime.hcl`
-- [ISOLATION.md](ISOLATION.md) — sandbox and container guide (modes, secrets, auth)
-- [ROLES.md](ROLES.md) — built-in roles
-- [GUIDE.md](GUIDE.md) - how to, best practices, tips and tricks
-- [FAQ.md](FAQ.md) — frequently asked questions
+- [GUIDE.md](GUIDE.md) — recipes, role tuning, when (not) to use ateam
+- [APPROACH.md](APPROACH.md) — rationale, positioning, how ateam compares to other frameworks
+- [CONFIG.md](CONFIG.md) — directory layout, prompt overrides, runtime profiles
+- [ISOLATION.md](ISOLATION.md) — sandbox and container modes
+- [ROLES.md](ROLES.md) — built-in role catalog
+- [FAQ.md](FAQ.md)
+- [DEV.md](DEV.md) — development setup, testing, internals
