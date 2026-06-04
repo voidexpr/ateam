@@ -36,6 +36,7 @@ type TemplateVars struct {
 	ContainerName     string // docker container name (e.g. "ateam-myapp-security")
 	OutputDir         string // absolute path to <projectDir>/runtime/<exec_id>/ (where the agent should write files)
 	OutputFile        string // absolute path to OutputDir/<primary_kind> (e.g. report.md); empty when the action has no primary output
+	PromptFile        string // absolute path to the archived prompt (logs/<exec_id>/prompt.md); set after Prepare allocates the logs dir
 
 	// AutoRolesCommandsOutput is the pre-baked context bundle injected into
 	// `{{ATEAM_AUTO_ROLES_COMMANDS_OUTPUT}}` for the --auto-roles planner agent.
@@ -79,6 +80,7 @@ func (v TemplateVars) Replacer() *strings.Replacer {
 		"{{exec.subrun_args}}", v.SubRunArgs, "{{SUBRUN_ARGS}}", v.SubRunArgs,
 		"{{exec.output_dir}}", v.OutputDir, "{{OUTPUT_DIR}}", v.OutputDir,
 		"{{exec.output_file}}", v.OutputFile, "{{OUTPUT_FILE}}", v.OutputFile,
+		"{{exec.prompt_file}}", v.PromptFile,
 		"{{exec.auto_roles_commands_output}}", v.AutoRolesCommandsOutput, "{{ATEAM_AUTO_ROLES_COMMANDS_OUTPUT}}", v.AutoRolesCommandsOutput,
 		// Legacy alias for code_management_prompt.md; same dir as OUTPUT_DIR.
 		"{{EXECUTION_DIR}}", v.OutputDir,
@@ -202,6 +204,11 @@ func BuildTemplateVars(r *AgentExecutor, opts RunOpts, startedAt time.Time, call
 		if primary := PrimaryOutputName(opts.OutputKind, opts.PromptName); primary != "" {
 			vars.OutputFile = filepath.Join(vars.OutputDir, primary)
 		}
+		// {{exec.prompt_file}} = absolute path to the archived prompt the
+		// runner writes during ExecutePrepared. Codex et al. accept a
+		// file path as the last positional arg, so this lets runtime.hcl
+		// args be authored without the agent having to read stdin.
+		vars.PromptFile = filepath.Join(logsDirFor(r.StateDir(), callID), PromptFileName)
 	}
 	return vars
 }

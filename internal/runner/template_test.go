@@ -186,6 +186,12 @@ func TestResolveTemplateStringDottedAndLegacyForms(t *testing.T) {
 		{"{{container.type}}", "{{CONTAINER_TYPE}}", "docker-exec"},
 		{"{{container.name}}", "{{CONTAINER_NAME}}", "my-container"},
 	}
+	// {{exec.prompt_file}} is dotted-only (no ALL_CAPS legacy) — keep the
+	// pair-test loop above clean and assert it standalone.
+	vars.PromptFile = "/tmp/logs/42/prompt.md"
+	if got := ResolveTemplateString("{{exec.prompt_file}}", vars); got != "/tmp/logs/42/prompt.md" {
+		t.Errorf("exec.prompt_file: got %q want /tmp/logs/42/prompt.md", got)
+	}
 	for _, p := range pairs {
 		t.Run(p.dotted, func(t *testing.T) {
 			gotDotted := ResolveTemplateString(p.dotted, vars)

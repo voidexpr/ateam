@@ -15,7 +15,7 @@ import (
 // An optional precheck script runs before each exec.
 type DockerExecContainer struct {
 	ContainerName string            // required: name of the running container
-	ExecTemplate  string            // exec command template (default: "docker exec {{CONTAINER}} {{CMD}}")
+	ExecTemplate  string            // exec command template (default: "docker exec {{container.name}} {{cmd}}"); {{CONTAINER}} / {{CMD}} kept as legacy aliases
 	ForwardEnv    []string          // env var names to forward via -e
 	Env           map[string]string // explicit env overrides; empty values suppress ForwardEnv
 	WorkDir       string            // working directory inside the container
@@ -25,8 +25,9 @@ type DockerExecContainer struct {
 	HostCLIPath string
 
 	// PrecheckCmd runs on the HOST before each exec.
-	// {{CONTAINER_NAME}} in args is replaced with the resolved container name.
-	// Examples: ["sh", "precheck.sh", "{{CONTAINER_NAME}}"], ["make", "docker-restart"]
+	// {{container.name}} (canonical) or {{CONTAINER_NAME}} (legacy alias)
+	// in args is replaced with the resolved container name.
+	// Examples: ["sh", "precheck.sh", "{{container.name}}"], ["make", "docker-restart"]
 	PrecheckCmd []string
 
 	// prepareGuard dedupes Prepare side effects (docker cp + precheck) across
@@ -82,20 +83,35 @@ func (d *DockerExecContainer) CmdFactory() CmdFactory {
 	return func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		tmpl := d.ExecTemplate
 		if tmpl == "" {
-			tmpl = "docker exec {{CONTAINER}} {{CMD}}"
+			tmpl = "docker exec {{container.name}} {{cmd}}"
 		}
 
-		// Expand container name in template
-		expanded := strings.ReplaceAll(tmpl, "{{CONTAINER}}", d.ContainerName)
+		// Expand container name in template. Both the dotted form
+		// ({{container.name}}) and the legacy ALL_CAPS alias
+		// ({{CONTAINER}}) are accepted so pre-refactor user configs
+		// keep working — the dotted form is the canonical surface
+		// going forward.
+		expanded := strings.ReplaceAll(tmpl, "{{container.name}}", d.ContainerName)
+		expanded = strings.ReplaceAll(expanded, "{{CONTAINER}}", d.ContainerName)
 
-		// Split template around {{CMD}} to preserve argument boundaries.
-		// Joining args into a string and re-splitting with Fields would
-		// destroy boundaries for args containing whitespace.
+		// Split template around the command placeholder to preserve
+		// argument boundaries. Joining args into a string and
+		// re-splitting with Fields would destroy boundaries for args
+		// containing whitespace. Both `{{cmd}}` (dotted-style) and
+		// the legacy `{{CMD}}` are recognized.
+		cmdPlaceholder := ""
+		switch {
+		case strings.Contains(expanded, "{{cmd}}"):
+			cmdPlaceholder = "{{cmd}}"
+		case strings.Contains(expanded, "{{CMD}}"):
+			cmdPlaceholder = "{{CMD}}"
+		}
 		cmdArgs := append([]string{name}, args...)
 		var allArgs []string
-		if idx := strings.Index(expanded, "{{CMD}}"); idx >= 0 {
+		if cmdPlaceholder != "" {
+			idx := strings.Index(expanded, cmdPlaceholder)
 			prefix := strings.TrimSpace(expanded[:idx])
-			suffix := strings.TrimSpace(expanded[idx+len("{{CMD}}"):])
+			suffix := strings.TrimSpace(expanded[idx+len(cmdPlaceholder):])
 			if prefix != "" {
 				allArgs = append(allArgs, strings.Fields(prefix)...)
 			}
@@ -163,14 +179,16 @@ func (d *DockerExecContainer) EnsureBinary(ctx context.Context) error {
 }
 
 // RunPrecheck runs the precheck command on the host before agent execution.
-// {{CONTAINER_NAME}} placeholders in args are replaced with d.ContainerName.
+// Both {{container.name}} and the legacy {{CONTAINER_NAME}} alias are
+// replaced with d.ContainerName.
 func (d *DockerExecContainer) RunPrecheck(ctx context.Context) error {
 	if len(d.PrecheckCmd) == 0 {
 		return nil
 	}
 	args := make([]string, len(d.PrecheckCmd))
 	for i, a := range d.PrecheckCmd {
-		args[i] = strings.ReplaceAll(a, "{{CONTAINER_NAME}}", d.ContainerName)
+		args[i] = strings.ReplaceAll(a, "{{container.name}}", d.ContainerName)
+		args[i] = strings.ReplaceAll(args[i], "{{CONTAINER_NAME}}", d.ContainerName)
 	}
 	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Stdout = os.Stdout
@@ -185,13 +203,15 @@ func (d *DockerExecContainer) RunPrecheck(ctx context.Context) error {
 func (d *DockerExecContainer) DebugCommand(opts RunOpts) string {
 	tmpl := d.ExecTemplate
 	if tmpl == "" {
-		tmpl = "docker exec {{CONTAINER}} {{CMD}}"
+		tmpl = "docker exec {{container.name}} {{cmd}}"
 	}
 
 	cmdParts := append([]string{opts.Command}, opts.Args...)
 	cmdStr := strings.Join(cmdParts, " ")
 
-	expanded := strings.ReplaceAll(tmpl, "{{CONTAINER}}", d.ContainerName)
+	expanded := strings.ReplaceAll(tmpl, "{{container.name}}", d.ContainerName)
+	expanded = strings.ReplaceAll(expanded, "{{CONTAINER}}", d.ContainerName)
+	expanded = strings.ReplaceAll(expanded, "{{cmd}}", cmdStr)
 	expanded = strings.ReplaceAll(expanded, "{{CMD}}", cmdStr)
 
 	// Add env forwarding info

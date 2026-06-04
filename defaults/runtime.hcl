@@ -324,8 +324,12 @@ agent "codex" {
   // All codex args are passed to `codex exec --json` as subcommand flags
   // (see internal/agent/codex.go). --ask-for-approval is a top-level-only
   // flag with no effect on non-interactive exec, so it's not configured.
-  // TODO: fix this once it's possible to write:
-  //         args = ["--json", "--ask-for-approval", "never", "exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "{{exec.prompt_file}}"]
+  // The runner now substitutes {{exec.prompt_file}} to the archived
+  // prompt path; finishing the migration to a fully declarative args
+  // list requires updating internal/agent/codex.go to pass the file
+  // path instead of the resolved prompt text. Until then this stays
+  // empty and the agent appends `req.Prompt` itself.
+  //   args = ["--json", "--ask-for-approval", "never", "exec", "--sandbox", "workspace-write", "--skip-git-repo-check", "{{exec.prompt_file}}"]
   args    = []
   required_env = ["OPENAI_API_KEY"]
 
@@ -603,8 +607,11 @@ profile "docker-exec" {
 //     docker_container = "my-app-dev"
 //     precheck         = ["sh", "docker-precheck.sh"]
 //     forward_env      = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
-//     # Custom exec template (default: "docker exec {{CONTAINER}} {{CMD}}")
-//     # exec = "podman exec {{CONTAINER}} {{CMD}}"
+//     # Custom exec template (default: "docker exec {{container.name}} {{cmd}}").
+//     # {{container.name}} expands to the resolved container; {{cmd}} expands
+//     # to the agent command + args at exec time. Legacy ALL_CAPS spellings
+//     # {{CONTAINER}} / {{CMD}} are still accepted but deprecated.
+//     # exec = "podman exec {{container.name}} {{cmd}}"
 //   }
 //   profile "my-app" {
 //     agent     = "claude"

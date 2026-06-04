@@ -9,7 +9,10 @@
 # Usage: make test-docker
 
 # Stage 1: download modules and warm build cache in a known-good environment.
-FROM golang:alpine AS modules
+# Pin to the 1.26.x series — the floating `golang:alpine` tag drifted to
+# 1.26.3 while go.mod requires 1.26.4. `1.26-alpine` rides the latest
+# patch in the series so future point-release bumps don't break the build.
+FROM golang:1.26-alpine AS modules
 RUN apk add --no-cache git
 # golang:alpine ships a frozen toolchain and sets GOTOOLCHAIN=local; when
 # go.mod requires a newer minor (e.g. 1.26.4 vs the image's 1.26.3) the
