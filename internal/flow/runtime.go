@@ -10,25 +10,6 @@ import (
 	"github.com/ateam/internal/root"
 )
 
-// Re-exports so callers that build PromptBundles and Prompts only have to
-// import flow. Aliases (not new types) so prompts.Prompt and flow.Prompt are
-// the same interface — a flow.Runtime built here satisfies any prompts.Prompt
-// implemented anywhere.
-type (
-	Prompt                = prompts.Prompt
-	ResolveContext        = prompts.ResolveContext
-	ResolveMode           = prompts.ResolveMode
-	Section               = prompts.Section
-	Vars                  = prompts.Vars
-	PromptDynamic         = prompts.PromptDynamic
-	PromptDynamicFunction = prompts.PromptDynamicFunction
-)
-
-const (
-	ModeReal    = prompts.ModeReal
-	ModePreview = prompts.ModePreview
-)
-
 // Runtime is the per-invocation context that prompts and dynamics consume.
 // Built by the flow framework around each bundle execution; satisfies
 // prompts.ResolveContext.
@@ -63,9 +44,9 @@ type Runtime struct {
 	env     *root.ResolvedEnv
 	WorkDir string
 
-	vars     Vars
-	mode     ResolveMode
-	dynamics PromptDynamic
+	vars     prompts.Vars
+	mode     prompts.ResolveMode
+	dynamics prompts.PromptDynamic
 
 	// Prepared by runner.Prepare.
 	ExecID     int64
@@ -98,21 +79,21 @@ func NewRuntime(db *calldb.CallDB, env *root.ResolvedEnv, workDir string) *Runti
 		DB:      db,
 		env:     env,
 		WorkDir: workDir,
-		mode:    ModePreview,
+		mode:    prompts.ModePreview,
 	}
 }
 
 // SetVars rebinds the variable resolver. Mutates the receiver — flow merges
 // bundle.Vars on top of a base map per pipeline step, so callers reuse one
 // Runtime across the walk.
-func (r *Runtime) SetVars(v Vars) { r.vars = v }
+func (r *Runtime) SetVars(v prompts.Vars) { r.vars = v }
 
 // SetMode rebinds the resolve mode. Verification flips to ModePreview;
 // real execution flips to ModeReal between Prepare and ExecutePrepared.
-func (r *Runtime) SetMode(m ResolveMode) { r.mode = m }
+func (r *Runtime) SetMode(m prompts.ResolveMode) { r.mode = m }
 
 // SetDynamics rebinds the dynamics map. Typically set once at top-of-run.
-func (r *Runtime) SetDynamics(d PromptDynamic) { r.dynamics = d }
+func (r *Runtime) SetDynamics(d prompts.PromptDynamic) { r.dynamics = d }
 
 // Env satisfies prompts.ResolveContext. Returns the env this Runtime
 // was built around. Set by NewRuntime / SetEnv; never mutated by
@@ -129,16 +110,16 @@ func (r *Runtime) SetEnv(env *root.ResolvedEnv) { r.env = env }
 // every other namespace falls through to the base Vars set via SetVars.
 // Spec: this is the single resolver for the prompt body's substitution
 // pass (Next round steps 1-3).
-func (r *Runtime) Vars() Vars { return &runtimeVars{rt: r} }
+func (r *Runtime) Vars() prompts.Vars { return &runtimeVars{rt: r} }
 
 // Mode satisfies prompts.ResolveContext.
-func (r *Runtime) Mode() ResolveMode { return r.mode }
+func (r *Runtime) Mode() prompts.ResolveMode { return r.mode }
 
 // Dynamics satisfies prompts.ResolveContext.
-func (r *Runtime) Dynamics() PromptDynamic { return r.dynamics }
+func (r *Runtime) Dynamics() prompts.PromptDynamic { return r.dynamics }
 
 // compile-time check: Runtime satisfies prompts.ResolveContext.
-var _ ResolveContext = (*Runtime)(nil)
+var _ prompts.ResolveContext = (*Runtime)(nil)
 
 // runtimeVars is the assembler.Vars implementation returned by
 // rt.Vars(). It owns the exec.* namespace; other namespaces fall through
@@ -176,7 +157,7 @@ func (v *runtimeVars) Resolve(ns, key string) (string, bool, error) {
 //   - Unknown key in known namespace: error (matches the spec's
 //     "typos in known namespaces → engine errors" rule).
 func (v *runtimeVars) resolveExec(key string) (string, bool, error) {
-	if v.rt.mode == ModePreview {
+	if v.rt.mode == prompts.ModePreview {
 		return "{{AT RUNTIME:exec." + key + "}}", true, nil
 	}
 	switch key {

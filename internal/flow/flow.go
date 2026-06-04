@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/ateam/internal/calldb"
+	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 )
@@ -236,7 +237,7 @@ func verifyBundle(b *PromptBundle, rc RunCtx) (err error) {
 		}
 	}()
 	rt := NewRuntime(rc.DB, rc.Resolved, "")
-	rt.SetMode(ModePreview)
+	rt.SetMode(prompts.ModePreview)
 	if b.BaseVars != nil {
 		rt.SetVars(b.BaseVars)
 	}
@@ -354,7 +355,7 @@ type PromptBundle struct {
 	Action string      // optional override of env.Action
 	Env    *RuntimeEnv // optional override of parent's env (used for per-role profile)
 
-	Prompt Prompt
+	Prompt prompts.Prompt
 	// BaseVars is the factory-supplied resolver for non-exec.* namespaces
 	// (project.*, prompt.*, git.*, container.*, ateam.*, role.*). exec.*
 	// always dispatches to rt's fields via runtimeVars regardless of
@@ -363,11 +364,11 @@ type PromptBundle struct {
 	// runtime-aware view. Spec: this is "the framework builds an impl
 	// per-invocation and stores it on Runtime.Vars" (line 310-311) made
 	// concrete.
-	BaseVars Vars
+	BaseVars prompts.Vars
 	// Vars is the factory-curated args.* / roles.* / action.* map. Spec
 	// line 287; the merge into rt.Vars happens in step 8.
 	Vars     map[string]string
-	Dynamics PromptDynamic
+	Dynamics prompts.PromptDynamic
 	RunOpts  func(env RuntimeEnv) runner.RunOpts
 	PreExec  []Action
 	PostExec []Action
@@ -381,7 +382,7 @@ type PromptBundle struct {
 // and rt's exec.* fields are populated from prepared + opts so the
 // resolver substitutes real values inline (Next round step 2). When
 // prepared == nil, the call is preview / dry-run / verify, mode is
-// ModePreview, and exec.* renders to {{AT RUNTIME:exec.<key>}} sentinels.
+// prompts.ModePreview, and exec.* renders to {{AT RUNTIME:exec.<key>}} sentinels.
 // The runner does NOT substitute the prompt body afterward.
 func (b PromptBundle) resolvePrompt(rc RunCtx, env RuntimeEnv, opts runner.RunOpts, prepared *runner.PreparedRun) (string, error) {
 	if b.Prompt == nil {
@@ -399,7 +400,7 @@ func (b PromptBundle) resolvePrompt(rc RunCtx, env RuntimeEnv, opts runner.RunOp
 
 var errBundleHasNoPrompt = fmt.Errorf("PromptBundle has no Prompt set")
 
-// ResolvePreview renders the bundle's Prompt in ModePreview against a
+// ResolvePreview renders the bundle's Prompt in prompts.ModePreview against a
 // freshly built runtime that auto-loads bundle.BaseVars + bundle.Dynamics.
 // The single entry point for `ateam prompt --action X`, dry-run preview,
 // and other operator-facing inspection — every caller used to repeat
@@ -414,7 +415,7 @@ func (b *PromptBundle) ResolvePreview(env *root.ResolvedEnv, workDir string) (st
 
 // InspectPreview is ResolvePreview's section-level counterpart used by
 // --paths / --inline-paths. Same auto-loading contract.
-func (b *PromptBundle) InspectPreview(env *root.ResolvedEnv, workDir string) ([]Section, error) {
+func (b *PromptBundle) InspectPreview(env *root.ResolvedEnv, workDir string) ([]prompts.Section, error) {
 	if b.Prompt == nil {
 		return nil, errBundleHasNoPrompt
 	}
@@ -424,7 +425,7 @@ func (b *PromptBundle) InspectPreview(env *root.ResolvedEnv, workDir string) ([]
 
 func (b *PromptBundle) previewRuntime(env *root.ResolvedEnv, workDir string) *Runtime {
 	rt := NewRuntime(nil, env, workDir)
-	rt.SetMode(ModePreview)
+	rt.SetMode(prompts.ModePreview)
 	if b.BaseVars != nil {
 		rt.SetVars(b.BaseVars)
 	}
@@ -439,9 +440,9 @@ func (b *PromptBundle) previewRuntime(env *root.ResolvedEnv, workDir string) *Ru
 // Mode + field population are paired:
 //
 //   - prepared == nil (dry-run, verify, ateam prompt --action X): rt.Mode
-//     = ModePreview. Per-bundle scalars stay zero — the runtime-aware
+//     = prompts.ModePreview. Per-bundle scalars stay zero — the runtime-aware
 //     Vars dispatches exec.* to the AT RUNTIME sentinel pattern.
-//   - prepared != nil (live exec after runner.Prepare): rt.Mode = ModeReal
+//   - prepared != nil (live exec after runner.Prepare): rt.Mode = prompts.ModeReal
 //     and the prepared-by-Prepare fields (ExecID, Batch, OutputDir,
 //     OutputFile, PromptFile) plus the run-config fields (Timestamp,
 //     Profile, Agent, Model, Effort, MaxBudgetUSD, MaxBudgetUSDBatch,
@@ -455,10 +456,10 @@ func (b *PromptBundle) previewRuntime(env *root.ResolvedEnv, workDir string) *Ru
 func newBundleRuntime(rc RunCtx, env RuntimeEnv, opts runner.RunOpts, prepared *runner.PreparedRun) *Runtime {
 	rt := NewRuntime(rc.DB, rc.Resolved, env.WorkDir)
 	if prepared == nil {
-		rt.SetMode(ModePreview)
+		rt.SetMode(prompts.ModePreview)
 		return rt
 	}
-	rt.SetMode(ModeReal)
+	rt.SetMode(prompts.ModeReal)
 	rt.ExecID = prepared.ExecID
 	rt.Batch = opts.Batch
 	rt.OutputDir = prepared.RuntimeDir
@@ -564,7 +565,7 @@ func (b PromptBundle) execute(rc RunCtx, env RuntimeEnv) (out []Result) {
 		// Resolve in dry-run so verbs can surface resolution-time errors
 		// and --plan-only style previews still see the resolved prompt.
 		// Skip the allocate/execute path entirely. Pass nil prepared so
-		// rt enters ModePreview and exec.* renders to the AT RUNTIME
+		// rt enters prompts.ModePreview and exec.* renders to the AT RUNTIME
 		// sentinel pattern (per Next-round step 1's resolver).
 		if _, err := b.resolvePrompt(rc, env, opts, nil); err != nil {
 			return emit(Result{Bundle: &b, Env: env, Flow: Flow{

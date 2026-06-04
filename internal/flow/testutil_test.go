@@ -198,7 +198,7 @@ func newEnv(exec Executor) RuntimeEnv {
 	return RuntimeEnv{Executor: exec, Role: "tester", Action: "test"}
 }
 
-func makeBundle(name string, prompt Prompt) PromptBundle {
+func makeBundle(name string, prompt prompts.Prompt) PromptBundle {
 	if prompt == nil {
 		prompt = prompts.RawTextPrompt{Text: "hello"}
 	}

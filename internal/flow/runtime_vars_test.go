@@ -21,7 +21,7 @@ import (
 // output without forking git or allocating exec_ids.
 func TestRuntimeVarsModePreviewSentinels(t *testing.T) {
 	rt := NewRuntime(nil, nil, "")
-	rt.SetMode(ModePreview)
+	rt.SetMode(prompts.ModePreview)
 	// Even with rt fields populated, preview mode wins.
 	rt.ExecID = 42
 	rt.OutputFile = "/tmp/runtime/42/report.md"
@@ -44,13 +44,13 @@ func TestRuntimeVarsModePreviewSentinels(t *testing.T) {
 }
 
 // TestRuntimeVarsModeRealUsesRuntimeFields — spec line 158-163: per-bundle
-// runtime values populated by Prepare flow through rt fields. ModeReal +
+// runtime values populated by Prepare flow through rt fields. prompts.ModeReal +
 // non-zero rt.ExecID means the engine substitutes the actual value during
 // Prompt.Resolve — the runner-side ResolveTemplateString pass becomes
 // redundant (step 3 deletes it).
 func TestRuntimeVarsModeRealUsesRuntimeFields(t *testing.T) {
 	rt := NewRuntime(nil, nil, "")
-	rt.SetMode(ModeReal)
+	rt.SetMode(prompts.ModeReal)
 	rt.ExecID = 42
 	rt.Batch = "code-2026-06-04_13-25-23"
 	rt.OutputDir = "/tmp/runtime/42"
@@ -77,17 +77,17 @@ func TestRuntimeVarsModeRealUsesRuntimeFields(t *testing.T) {
 	}
 }
 
-// TestRuntimeVarsModeRealPrePrepareErrors — spec invariant: in ModeReal,
+// TestRuntimeVarsModeRealPrePrepareErrors — spec invariant: in prompts.ModeReal,
 // reading exec.id before Prepare populated it is a bug. The resolver
 // surfaces it loudly so flow.execute (step 2) is forced to wire prepared
 // → rt before Prompt.Resolve runs.
 func TestRuntimeVarsModeRealPrePrepareErrors(t *testing.T) {
 	rt := NewRuntime(nil, nil, "")
-	rt.SetMode(ModeReal)
+	rt.SetMode(prompts.ModeReal)
 	// rt.ExecID stays zero.
 	_, _, err := rt.Vars().Resolve("exec", "id")
 	if err == nil {
-		t.Fatal("expected error when reading exec.id with zero ExecID in ModeReal")
+		t.Fatal("expected error when reading exec.id with zero ExecID in prompts.ModeReal")
 	}
 	if !strings.Contains(err.Error(), "exec.id") || !strings.Contains(err.Error(), "flow.execute") {
 		t.Errorf("error message should reference exec.id and the flow.execute wire, got: %v", err)
@@ -100,7 +100,7 @@ func TestRuntimeVarsModeRealPrePrepareErrors(t *testing.T) {
 // args.*, etc. without re-implementing them in flow.
 func TestRuntimeVarsFallsThroughForNonExecKeys(t *testing.T) {
 	rt := NewRuntime(nil, nil, "")
-	rt.SetMode(ModeReal)
+	rt.SetMode(prompts.ModeReal)
 	rt.SetVars(assembler.MapVars{
 		Project: map[string]string{"name": "myproj"},
 		Prompt:  map[string]string{"name": "supervisor"},
@@ -117,14 +117,14 @@ func TestRuntimeVarsFallsThroughForNonExecKeys(t *testing.T) {
 
 // TestRuntimeVarsEngineEndToEnd exercises the full path: a prompt body
 // containing {{exec.output_file}} resolved through the assembler engine
-// using rt.Vars() as its resolver. ModePreview produces the sentinel;
-// ModeReal produces the rt field. The runner Replacer is not consulted.
+// using rt.Vars() as its resolver. prompts.ModePreview produces the sentinel;
+// prompts.ModeReal produces the rt field. The runner Replacer is not consulted.
 func TestRuntimeVarsEngineEndToEnd(t *testing.T) {
 	prompt := "Write report to {{exec.output_file}}"
 
 	t.Run("preview", func(t *testing.T) {
 		rt := NewRuntime(nil, nil, "")
-		rt.SetMode(ModePreview)
+		rt.SetMode(prompts.ModePreview)
 		out, err := assembler.NewEngine(nil, 0).Render(prompt, rt.Vars())
 		if err != nil {
 			t.Fatal(err)
@@ -137,7 +137,7 @@ func TestRuntimeVarsEngineEndToEnd(t *testing.T) {
 
 	t.Run("real", func(t *testing.T) {
 		rt := NewRuntime(nil, nil, "")
-		rt.SetMode(ModeReal)
+		rt.SetMode(prompts.ModeReal)
 		rt.OutputFile = "/tmp/runtime/42/report.md"
 		out, err := assembler.NewEngine(nil, 0).Render(prompt, rt.Vars())
 		if err != nil {
@@ -233,7 +233,7 @@ func TestRunnerDoesNotSubstitutePromptBody(t *testing.T) {
 // TestExecutePopulatesRuntimeFromPrepared — spec Next-round step 2.
 // flow.execute MUST populate rt.{ExecID, Batch, OutputDir, OutputFile,
 // PromptFile} from prepared + RunOpts before calling Prompt.Resolve.
-// Without this, ModeReal Resolve calls error out (per step 1's
+// Without this, prompts.ModeReal Resolve calls error out (per step 1's
 // resolver), so the system as a whole is unusable until step 2 lands.
 // This test fails until that wire exists.
 func TestExecutePopulatesRuntimeFromPrepared(t *testing.T) {
@@ -260,7 +260,7 @@ func TestExecutePopulatesRuntimeFromPrepared(t *testing.T) {
 	if rt.Batch != "B7" {
 		t.Errorf("rt.Batch = %q, want B7", rt.Batch)
 	}
-	if rt.Mode() != ModeReal {
-		t.Errorf("rt.Mode = %v, want ModeReal post-Prepare", rt.Mode())
+	if rt.Mode() != prompts.ModeReal {
+		t.Errorf("rt.Mode = %v, want prompts.ModeReal post-Prepare", rt.Mode())
 	}
 }
