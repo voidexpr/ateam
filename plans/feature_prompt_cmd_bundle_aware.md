@@ -69,21 +69,36 @@ its API talks about; the prompts package doesn't import flow.
 
 ## Types
 
-### `flow.Prompt`
+### `prompts.Prompt` (the interface)
+
+The `Prompt` interface and everything it touches lives in the prompts
+package — flow consumes it but does not own the type. This avoids the
+import-cycle that would arise if `prompts` had to import `flow` to talk
+about Runtime / ResolveMode.
 
 ```go
-package flow
+package prompts
+
+// ResolveContext is what Prompt.Resolve and dynamics receive. Flow's
+// Runtime implements it; tests can construct stubs. Lives in prompts so
+// the package never imports flow.
+type ResolveContext interface {
+    Env() *root.ResolvedEnv
+    Vars() Vars
+    Mode() ResolveMode
+    Dynamics() PromptDynamic
+}
 
 type Prompt interface {
-    // Resolve produces the final prompt text. Mode controls whether
+    // Resolve produces the final prompt text. ctx.Mode() controls whether
     // runtime-only values (exec.*) substitute real data or sentinels.
-    Resolve(rt *Runtime, mode ResolveMode) (string, error)
+    Resolve(ctx ResolveContext) (string, error)
 
     // Inspect returns per-section provenance for --paths / --inline-paths.
-    // Returns (nil, nil) when the Prompt has no section structure (e.g.
-    // literal text). Always preview-style — Inspect is for human display,
-    // not live execution.
-    Inspect(rt *Runtime) ([]Section, error)
+    // Returns (nil, nil) when the Prompt has no section structure (literal
+    // text). Always preview-style — Inspect is for human display, not live
+    // execution. Callers pass a preview-mode ctx by convention.
+    Inspect(ctx ResolveContext) ([]Section, error)
 }
 
 type ResolveMode int
@@ -91,19 +106,39 @@ const (
     ModeReal    ResolveMode = iota  // real exec.* values; missing required key errors
     ModePreview                      // sentinels for runtime-only keys
 )
+```
 
-// Section is re-exported from internal/prompts for use in API signatures.
-type Section = prompts.Section
+Flow re-exports the types its API surface mentions so callers don't have
+to import both:
+
+```go
+package flow
+
+type (
+    Prompt         = prompts.Prompt
+    ResolveContext = prompts.ResolveContext
+    ResolveMode    = prompts.ResolveMode
+    Section        = prompts.Section
+    Vars           = prompts.Vars
+    PromptDynamic  = prompts.PromptDynamic
+)
+
+const (
+    ModeReal    = prompts.ModeReal
+    ModePreview = prompts.ModePreview
+)
 ```
 
 `ModeVerify` is **not** a third mode — verification is a caller pattern:
-"call `Resolve(rt, ModePreview)` on every bundle and accumulate errors."
-The impl's behavior is identical in verify and preview contexts.
+"call `Resolve(ctx, where ctx.Mode()==ModePreview)` on every bundle and
+accumulate errors." The impl's behavior is identical in verify and preview
+contexts.
 
 ### `flow.Runtime`
 
-The per-invocation context. Holds everything a `Prompt` impl might need to
-resolve. `Vars` lives here alongside the DB handle and paths:
+The per-invocation context. Holds everything needed across the lifecycle,
+including the per-bundle data Prompt impls consume. Implements
+`prompts.ResolveContext`:
 
 ```go
 type Runtime struct {
@@ -111,20 +146,27 @@ type Runtime struct {
     Env      *root.ResolvedEnv
     WorkDir  string
     Vars     Vars            // built by flow, opaque to flow
-    Dynamics PromptDynamic   // registered dynamic functions
+    Dynamics PromptDynamic
+    Mode     ResolveMode
 
-    // Per-bundle runtime values populated by Prepare. Zero values in
-    // ModePreview / verify contexts (sentinels filled by Vars instead).
+    // Per-bundle runtime values populated by Prepare. Zero values when
+    // Mode == ModePreview (sentinels filled by Vars instead).
     ExecID     int64
     Batch      string
     OutputDir  string
     OutputFile string
 }
 
-// Re-exports so flow callers don't need to import prompts directly.
-type Vars = prompts.Vars
-type PromptDynamic = prompts.PromptDynamic
+// Satisfy prompts.ResolveContext.
+func (r *Runtime) Env() *root.ResolvedEnv      { return r.Env }
+func (r *Runtime) Vars() Vars                  { return r.Vars }
+func (r *Runtime) Mode() ResolveMode           { return r.Mode }
+func (r *Runtime) Dynamics() PromptDynamic     { return r.Dynamics }
 ```
+
+(In practice the methods need different names from the fields to avoid Go
+shadowing — e.g. `vars`, `mode` etc. fields with `Vars()`, `Mode()`
+methods. Sketch above is for clarity.)
 
 ### Concrete Prompt impls (in `internal/prompts`)
 
@@ -257,11 +299,14 @@ naturally when passed unquoted.
 package prompts
 
 type PromptDynamicFunction func(
-    rt *flow.Runtime, mode flow.ResolveMode, args ...string,
+    ctx ResolveContext, args ...string,
 ) (string, error)
 
 type PromptDynamic map[string]PromptDynamicFunction
 ```
+
+`ctx` carries everything dynamics need (Vars, Mode, Env). The interface is
+defined in the prompts package; flow.Runtime satisfies it. No import cycle.
 
 No global registry. The CLI layer constructs the `PromptDynamic` map at
 executor creation and passes it on `Runtime.Dynamics`. Tests build
@@ -282,6 +327,15 @@ Per-dynamic documentation includes:
 
 Internal dynamics used only by ateam-shipped prompts can use a `_` prefix
 (`_internal_X`) to mark them off-API and skip the stability commitment.
+
+**Dynamics that depend on generated artifacts** (e.g., `dynamic.review_reports`
+reading `shared/report/*.md` produced by an earlier `ateam report` run, or
+`dynamic.code_mgmt_review` reading `shared/review.md` produced by
+`ateam review`) **return preview sentinels in `ModePreview` rather than
+proving runtime availability.** Verification is best-effort for these —
+the engine catches authoring errors but cannot validate that an upstream
+phase will have produced its output by the time the dependent bundle runs.
+Each such dynamic's docs make the dependency explicit.
 
 ## Resolver surface (three layers)
 
@@ -480,19 +534,27 @@ stream format, per-action canonical destinations).
 
 ## Implementation sequence
 
+**Reading the table:** steps 1-2 add types but nothing uses them yet.
+Step 3 reshapes the runner contract — required before verbs can migrate to
+`Prompt.Resolve` because the new contract is what allows resolution to see
+the real `exec.id`. Steps 4-5 port verbs to the new flow one at a time;
+during this period `PromptBundle.Render` is gone for migrated verbs and
+still present for the rest. Step 6 (ALL_CAPS drop) waits until every verb
+is on the new contract because ALL_CAPS substitution depends on the old
+two-pass mechanism.
+
 | # | Commit | Behavior change | Risk |
 |---|---|---|---|
-| 1 | Engine extensions: `PromptDynamic`, `{{ns.key ? default}}`, `{{include path ? TEXT}}`, quoted-arg parser | None | Low |
-| 2 | Add `flow.Prompt`, `flow.Runtime`, `prompts.{RawTextPrompt, PromptText, PromptFile}` (coexists with today's `Render`) | None | Low |
-| 3 | Migrate one verb end-to-end (suggest `review`) — factory + PromptFile + Render still wraps for compat | None observable | Medium |
-| 4 | Migrate remaining verbs (`code`, `verify`, `auto_setup`, `code_management` supervisor, `report` per-role, `inspect --auto-debug`, `exec`, `parallel`) | None observable | Medium |
-| 5 | Drop ALL_CAPS legacy + sweep `defaults/prompts/` + `{{project.info}}` → `{{dynamic.project_info}}` migration + ALL_CAPS detection-error in `runtime.hcl` | Changes #4, #6 | **High** (test sweep) |
-| 6 | Replace `prompt_hash` with `prompt_file`; reshape `Executor` interface (Prepare → Resolve → ExecutePrepared) | Change #10 | Medium |
-| 7 | Wire verification into `flow.Run` (`Walk` callback, batched VerifyResult) | Change #7 | Medium |
+| 1 | Engine extensions: `PromptDynamic`, `{{ns.key ? default}}`, `{{include path ? TEXT}}`, quoted-arg parser, `ResolveContext` interface | None | Low |
+| 2 | Add `flow.Runtime`, `prompts.{Prompt, RawTextPrompt, PromptText, PromptFile}` types. Coexists with today's `Render` (nothing uses the new types yet) | None | Low |
+| 3 | Reshape `Executor` interface: `Prepare(opts)` → `ResolvePrompt(prepared, bundle)` → `ExecutePrepared(prepared, text)`. Replace `prompt_hash` DB column with `prompt_file`. Old `Render` path still works through a compat shim that calls the new `ResolvePrompt` under the hood | Change #10 | **High** (runner contract change) |
+| 4 | Migrate one verb end-to-end (suggest `review`) — factory + PromptFile + new Executor flow. `PromptBundle.Render` deleted for this verb | None observable | Medium |
+| 5 | Migrate remaining verbs (`code`, `verify`, `auto_setup`, `code_management` supervisor, `report` per-role, `inspect --auto-debug`, `exec`, `parallel`). Render compat shim deleted once all verbs migrated | None observable | Medium |
+| 6 | Drop ALL_CAPS legacy + sweep `defaults/prompts/` + `{{project.info}}` → `{{dynamic.project_info}}` migration + ALL_CAPS detection-error in `runtime.hcl` | Changes #4, #6 | **High** (test sweep) |
+| 7 | Wire verification into `flow.Run` (`Walk` callback, batched `VerifyResult`) | Change #7 | Medium |
 | 8 | Rewrite `cmd/prompt.go` against factory dispatch; `--supervisor` deprecation warning; `--paths` / `--inline-paths` rewire to `Prompt.Inspect()`; `--raw` flag on `exec` / `parallel` / `prompt` | Changes #1, #2, #6, #8, #11 land here | Medium |
-| 9 | Kill `PromptBundle.Render`; framework calls `bundle.Prompt.Resolve` directly | None observable (cleanup) | Low |
-| 10 | `@PATH/foo.prompt.md` outside-anchor framing | Change #3 | Low |
-| 11 | Remove `ateam review --prompt` and `ateam code --management` flags | Change #9 | Low |
+| 9 | `@PATH/foo.prompt.md` outside-anchor framing | Change #3 | Low |
+| 10 | Remove `ateam review --prompt` and `ateam code --management` flags | Change #9 | Low |
 
 ## Rules digest (for `ateam prompt --help` and `CONFIG.md`)
 
