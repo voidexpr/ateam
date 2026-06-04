@@ -184,26 +184,31 @@ func (e *ResolvedEnv) BuildAssemblerVars(promptPath, roleLabel, action string) a
 			"dir":       filepath.Base(e.SourceDir),
 		},
 		Exec: map[string]string{
-			// AgentExecutor-deferred keys: each renders to the runner's own ALL_CAPS
-			// placeholder so the assembled prompt still carries `{{EXEC_ID}}`
-			// etc. for runner.TemplateVars.Replacer to fill at exec time (see
-			// internal/runner/template.go). Resolving them to "" here would
-			// consume the placeholder before the runner can populate it,
-			// leaving the agent with a blank value. On a preview call (no
-			// runner) they render as the placeholder text, which honestly
+			// AgentExecutor-deferred keys: each renders to itself (the
+			// dotted-form placeholder) so the assembled prompt still
+			// carries `{{exec.id}}` etc. for runner.TemplateVars.Replacer
+			// to fill at exec time (see internal/runner/template.go).
+			// Resolving them to "" here would consume the placeholder
+			// before the runner can populate it, leaving the agent with
+			// a blank value. The engine writes substitution values
+			// verbatim and advances past the closing brace (no re-scan),
+			// so substituting the directive with the same string is
+			// safe — it doesn't loop. On a preview call (no runner) the
+			// placeholder shape mirrors the source, which honestly
 			// signals "resolved at run time."
-			"id":                   "{{EXEC_ID}}",
-			"batch":                "{{BATCH}}",
-			"timestamp":            "{{TIMESTAMP}}",
-			"profile":              "{{PROFILE}}",
-			"agent":                "{{AGENT}}",
-			"model":                "{{MODEL}}",
-			"effort":               "{{EFFORT}}",
-			"max_budget_usd":       "{{MAX_BUDGET_USD}}",
-			"max_budget_usd_batch": "{{MAX_BUDGET_USD_BATCH}}",
-			"subrun_args":          "{{SUBRUN_ARGS}}",
-			"output_dir":           "{{OUTPUT_DIR}}",
-			"output_file":          "{{OUTPUT_FILE}}",
+			"id":                   "{{exec.id}}",
+			"batch":                "{{exec.batch}}",
+			"timestamp":            "{{exec.timestamp}}",
+			"profile":              "{{exec.profile}}",
+			"agent":                "{{exec.agent}}",
+			"model":                "{{exec.model}}",
+			"effort":               "{{exec.effort}}",
+			"max_budget_usd":       "{{exec.max_budget_usd}}",
+			"max_budget_usd_batch": "{{exec.max_budget_usd_batch}}",
+			"subrun_args":          "{{exec.subrun_args}}",
+			"output_dir":           "{{exec.output_dir}}",
+			"output_file":          "{{exec.output_file}}",
+			"prompt_file":          "{{exec.prompt_file}}",
 			// Assembly-time keys: filled by the caller before Assemble. Empty
 			// default lets the engine render `{{exec.debug_context}}` to ""
 			// for prompts that don't use it instead of hard-erroring.
@@ -211,8 +216,8 @@ func (e *ResolvedEnv) BuildAssemblerVars(promptPath, roleLabel, action string) a
 			"auto_roles_commands_output": "",
 		},
 		Container: map[string]string{
-			"type": "{{CONTAINER_TYPE}}",
-			"name": "{{CONTAINER_NAME}}",
+			"type": "{{container.type}}",
+			"name": "{{container.name}}",
 		},
 		// Role-set computations. `reports` is currently produced by the
 		// assemble helpers (formatReportsBlock in cmd/review_assemble.go) and appended after

@@ -23,7 +23,6 @@ var (
 	promptPostPrompt           string
 	promptNoProjectInfo        bool
 	promptIgnorePreviousReport bool
-	promptSupervisor           bool
 	promptPaths                bool
 	promptInlinePaths          bool
 	promptBatch                string
@@ -32,9 +31,9 @@ var (
 
 var promptCmd = &cobra.Command{
 	Use:   "prompt [@PATH|@-]",
-	Short: "Resolve and print the full prompt for a role, supervisor, or top-level action",
+	Short: "Resolve and print the full prompt for a role or top-level action",
 	Long: `Perform 3-level prompt resolution (project → org → defaults) for a given
-role or supervisor action, then print the assembled prompt to stdout.
+role or top-level action, then print the assembled prompt to stdout.
 
 A positional ` + "`@PATH`" + ` argument switches to literal-file mode: read the file's
 contents verbatim and print (with --batch baked in if set). No assembler
@@ -44,8 +43,9 @@ agent. Use ` + "`@-`" + ` to read from stdin.
 Example:
   ateam prompt --role security --action report
   ateam prompt --action code --post-prompt @task.md
+  ateam prompt --action review
   ateam prompt --action code_management
-  ateam prompt --supervisor --action review                  # legacy form
+  ateam prompt --action verify
   ateam prompt --role security --action report --post-prompt "Focus on auth"
   ateam prompt --role security --action report --paths
   ateam prompt --role security --action report --inline-paths
@@ -57,31 +57,21 @@ Example:
 
 func init() {
 	promptCmd.Flags().StringVar(&promptRole, "role", "", "role name")
-	promptCmd.Flags().BoolVar(&promptSupervisor, "supervisor", false, "generate supervisor prompt instead of role prompt")
-	promptCmd.Flags().StringVar(&promptAction, "action", "", "action type: report, code, review, or verify (required when no @PATH is given)")
+	promptCmd.Flags().StringVar(&promptAction, "action", "", "action type: report, code, review, code_management, or verify (required when no @PATH is given)")
 	addPromptWrapFlags(promptCmd, &promptPrePrompt, &promptPostPrompt)
 	promptCmd.Flags().BoolVar(&promptNoProjectInfo, "no-project-info", false, "omit ateam project context from the prompt")
 	promptCmd.Flags().BoolVar(&promptIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
 	promptCmd.Flags().BoolVar(&promptPaths, "paths", false, "show a per-section breakdown table (slot + anchor + path + mod time + tokens); no prompt body")
 	promptCmd.Flags().BoolVar(&promptInlinePaths, "inline-paths", false, "print the full prompt with each section preceded by an anchor/path/mod-time/tokens header; troubleshooting view, not for agent consumption")
-	promptCmd.Flags().StringVar(&promptBatch, "batch", "", "bake a literal batch ID into {{exec.batch}} placeholders (otherwise rendered as the deferred {{BATCH}} marker for the runner to fill at exec time)")
+	promptCmd.Flags().StringVar(&promptBatch, "batch", "", "bake a literal batch ID into {{exec.batch}} placeholders (otherwise rendered as the deferred {{exec.batch}} marker for the runner to fill at exec time)")
 	promptCmd.Flags().BoolVar(&promptRaw, "raw", false, "literal-file mode only: print the file verbatim (no template engine, no --batch substitution)")
-	promptCmd.MarkFlagsMutuallyExclusive("role", "supervisor")
 	promptCmd.MarkFlagsMutuallyExclusive("paths", "inline-paths")
-	// --action is conditionally required: it's needed for role/supervisor/
-	// action-singleton resolution, but ignored when a positional @PATH selects
+	// --action is conditionally required: it's needed for role / action-
+	// singleton resolution, but ignored when a positional @PATH selects
 	// literal-file mode. Enforced in runPrompt instead of via MarkFlagRequired.
 }
 
 func runPrompt(cmd *cobra.Command, args []string) error {
-	if promptSupervisor {
-		// Deprecation warning per the prompt-lifecycle refactor: the bare
-		// `--action <X>` form covers every shape `--supervisor --action X`
-		// used to produce (review / code / verify all live as top-level
-		// action factories now). Kept working through the next release
-		// for orchestrators that hard-code the flag.
-		fmt.Fprintln(os.Stderr, "warning: --supervisor is deprecated; use --action <X> directly (will be removed in a future release)")
-	}
 	if promptInlinePaths {
 		return runPromptInlinePaths()
 	}
@@ -97,15 +87,13 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	if promptAction == "" {
 		return fmt.Errorf("--action is required (or pass a positional @PATH to print a file verbatim)")
 	}
-	if promptSupervisor {
-		return runPromptSupervisor()
-	}
 	if promptRole != "" {
 		return runPromptRole()
 	}
-	// No --role / --supervisor / @PATH: resolve --action as a top-level singleton
-	// prompt (e.g. `ateam prompt --action code` → code.prompt.md, the
-	// implementer body the code-management supervisor pipes per task).
+	// No --role / @PATH: resolve --action through the factory map
+	// (review / code_management / verify) or fall through to
+	// assembleAction for any other action that has a corresponding
+	// <action>.prompt.md in the anchor chain.
 	return runPromptAction()
 }
 
@@ -362,41 +350,6 @@ func applyPromptBatchOverride(assembled string) string {
 	return strings.ReplaceAll(assembled, "{{BATCH}}", promptBatch)
 }
 
-// runPromptSupervisor handles the deprecated `--supervisor --action X`
-// form. Maps the supervisor's action vocabulary onto the canonical action
-// names the factory map uses, then dispatches through runPromptAction's
-// machinery. New code should drop --supervisor and pass the canonical
-// name directly (`--action review`, `--action code_management`,
-// `--action verify`).
-func runPromptSupervisor() error {
-	switch promptAction {
-	case runner.ActionReview, runner.ActionVerify:
-		// canonical names — fall through.
-	case runner.ActionCode:
-		// `--supervisor --action code` was the legacy name for the
-		// supervisor's code-management view. Map it onto the canonical
-		// `code_management` action.
-		promptAction = "code_management"
-	default:
-		return fmt.Errorf("invalid action %q for supervisor: must be 'review', 'code', or 'verify'", promptAction)
-	}
-
-	// `--supervisor --action code` historically required the review file
-	// to exist; preserve that pre-flight check before the factory's
-	// best-effort load swallows the missing-file case during preview.
-	if promptAction == "code_management" {
-		env, err := resolveEnv()
-		if err != nil {
-			return err
-		}
-		if _, readErr := os.ReadFile(env.ReviewPath()); readErr != nil {
-			return errNoReview(env.ReviewPath())
-		}
-	}
-
-	return runPromptAction()
-}
-
 // sectionDigest is one row of per-section metadata both --paths and
 // --inline-paths emit. Centralizes the path-prefix / mod-time / token-count
 // computation so the two modes share one shape.
@@ -521,22 +474,11 @@ func assembleForInspection() (string, []sectionDigest, error) {
 			Content:  content,
 		})
 	}
-	// Live-section dispatch is keyed on the canonical action name, not on
-	// the deprecated `--supervisor` flag. After the factory-map refactor,
-	// `ateam prompt --action review` and `ateam prompt --supervisor
-	// --action review` share the same body (both route through
-	// previewReview → assembleReview), so the inspection table must
-	// surface the same live sections regardless of which form the
-	// operator typed.
-	//
-	// The legacy `--supervisor --action code` form maps to the canonical
-	// `code_management` action — same mapping `runPromptSupervisor`
-	// performs before delegating to `runPromptAction`.
-	canonicalAction := promptAction
-	if promptSupervisor && promptAction == runner.ActionCode {
-		canonicalAction = "code_management"
-	}
-	switch canonicalAction {
+	// Live-section dispatch is keyed on the canonical action name. The
+	// factory map (review / code_management / verify) shapes the body;
+	// the matching live sections (reports manifest, review.md body,
+	// previous_report) get appended here.
+	switch promptAction {
 	case runner.ActionReview:
 		// Review bundles a manifest of role reports plus their full
 		// bodies (formatReportsBlock from assembleReview). There is NO
@@ -700,28 +642,30 @@ func displayAnchorPath(env *root.ResolvedEnv, anchor, relPath string) string {
 	return relPath
 }
 
-// promptPathForCurrentFlags maps the existing --role/--supervisor/--action
-// flag combo to the v1 promptPath (e.g. "report/security", "review") plus a
-// roleLabel for the project info block. The mapping intentionally mirrors
-// the old runPromptRole / runPromptSupervisor branches so preview output
-// matches what `ateam report` etc. would actually assemble.
+// promptPathForCurrentFlags maps the --role/--action flag combo to the v1
+// promptPath (e.g. "report/security", "review") plus a roleLabel for the
+// project-info block. Mirrors runPromptRole / runPromptAction so preview
+// output matches what `ateam report` / `ateam review` / etc. would
+// actually assemble.
+//
+// Supervisor-style actions ("review", "code_management", "verify") use
+// "the supervisor" as the role label; "verify" rides the code_verify
+// anchor since that's the supervisor's verify body. Per-role actions
+// ("report"/"code" with --role) use "role <X>".
 func promptPathForCurrentFlags() (path, label string, err error) {
-	if promptSupervisor {
+	if promptRole == "" {
+		// Action-only mode: top-level singleton prompt. Supervisor-style
+		// actions get the supervisor's role label so {{project.info}}
+		// reads "you are the supervisor performing the review …".
 		switch promptAction {
+		case "":
+			return "", "", fmt.Errorf("either --role or --action is required")
 		case runner.ActionReview:
 			return "review", "the supervisor", nil
-		case runner.ActionCode:
+		case "code_management":
 			return "code_management", "the supervisor", nil
 		case runner.ActionVerify:
 			return "code_verify", "the supervisor", nil
-		}
-		return "", "", fmt.Errorf("invalid action %q for supervisor: must be 'review', 'code', or 'verify'", promptAction)
-	}
-	if promptRole == "" {
-		// Action-only mode: top-level singleton prompt like `code` or
-		// `code_management`. The action name doubles as the promptPath.
-		if promptAction == "" {
-			return "", "", fmt.Errorf("either --role, --supervisor, or --action is required")
 		}
 		return promptAction, promptAction, nil
 	}

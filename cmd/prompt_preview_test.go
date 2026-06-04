@@ -16,7 +16,6 @@ func TestPromptPathsSupervisorReview(t *testing.T) {
 	}
 
 	t.Cleanup(resetPromptFlags)
-	promptSupervisor = true
 	promptAction = "review"
 	promptPaths = true
 
@@ -125,7 +124,6 @@ func TestPromptInlinePathsInterleavesHeaders(t *testing.T) {
 	}
 
 	t.Cleanup(resetPromptFlags)
-	promptSupervisor = true
 	promptAction = "review"
 	promptInlinePaths = true
 
@@ -170,21 +168,19 @@ func TestPromptPathForCurrentFlags(t *testing.T) {
 	cases := []struct {
 		name              string
 		role, action      string
-		supervisor        bool
 		wantPath, wantLbl string
 	}{
-		{"role report", "security", "report", false, "report/security", "role security"},
-		{"role code", "auth.refactor", "code", false, "code/auth.refactor", "role auth.refactor"},
-		{"sup review", "", "review", true, "review", "the supervisor"},
-		{"sup code", "", "code", true, "code_management", "the supervisor"},
-		{"sup verify", "", "verify", true, "code_verify", "the supervisor"},
+		{"role report", "security", "report", "report/security", "role security"},
+		{"role code", "auth.refactor", "code", "code/auth.refactor", "role auth.refactor"},
+		{"supervisor review", "", "review", "review", "the supervisor"},
+		{"supervisor code_management", "", "code_management", "code_management", "the supervisor"},
+		{"supervisor verify", "", "verify", "code_verify", "the supervisor"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Cleanup(resetPromptFlags)
 			promptRole = tc.role
 			promptAction = tc.action
-			promptSupervisor = tc.supervisor
 			got, lbl, err := promptPathForCurrentFlags()
 			if err != nil {
 				t.Fatal(err)
@@ -199,7 +195,6 @@ func TestPromptPathForCurrentFlags(t *testing.T) {
 func resetPromptFlags() {
 	promptRole = ""
 	promptAction = ""
-	promptSupervisor = false
 	promptPaths = false
 	promptInlinePaths = false
 	promptPrePrompt = ""
@@ -237,7 +232,6 @@ func TestPromptInlinePathsRendersPrePostPrompt(t *testing.T) {
 	}
 
 	t.Cleanup(resetPromptFlags)
-	promptSupervisor = true
 	promptAction = "review"
 	promptInlinePaths = true
 	promptPrePrompt = "PRE for {{project.name}}"

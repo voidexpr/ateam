@@ -13,14 +13,13 @@ import (
 // resetPromptGlobals zeroes the package-level flag vars that runPrompt reads.
 // Tests must restore them on exit to avoid leaking state across subtests.
 func savePromptGlobals() func() {
-	role, sup, action := promptRole, promptSupervisor, promptAction
+	role, action := promptRole, promptAction
 	noPI, ipr := promptNoProjectInfo, promptIgnorePreviousReport
 	paths, inline := promptPaths, promptInlinePaths
 	pre, post := promptPrePrompt, promptPostPrompt
 	raw := promptRaw
 	return func() {
 		promptRole = role
-		promptSupervisor = sup
 		promptAction = action
 		promptNoProjectInfo = noPI
 		promptIgnorePreviousReport = ipr
@@ -67,7 +66,6 @@ func TestPromptRoleDryRun(t *testing.T) {
 
 	promptRole = "testing_basic"
 	promptAction = runner.ActionReport
-	promptSupervisor = false
 
 	var runErr error
 	out := captureStdout(t, func() {
@@ -230,7 +228,6 @@ func TestPromptPrePostWrap(t *testing.T) {
 
 	promptRole = "testing_basic"
 	promptAction = runner.ActionReport
-	promptSupervisor = false
 	promptPrePrompt = "PRE-MARKER"
 	promptPostPrompt = "POST-MARKER"
 
@@ -267,7 +264,6 @@ func TestPromptPathsListsAllSources(t *testing.T) {
 
 	promptRole = "testing_basic"
 	promptAction = runner.ActionReport
-	promptSupervisor = false
 	promptPaths = true
 
 	var runErr error
@@ -391,7 +387,6 @@ func TestPromptPathsSurfacesReviewReports(t *testing.T) {
 
 	promptAction = runner.ActionReview
 	promptPaths = true
-	promptSupervisor = false // canonical form, no --supervisor
 
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
@@ -433,7 +428,6 @@ func TestPromptFactoryDispatch(t *testing.T) {
 		defer savePromptGlobals()()
 		promptAction = runner.ActionReview
 		promptRole = ""
-		promptSupervisor = false
 
 		var runErr error
 		out := captureStdout(t, func() {
@@ -469,7 +463,6 @@ func TestPromptFactoryDispatch(t *testing.T) {
 
 		promptAction = "myaction"
 		promptRole = ""
-		promptSupervisor = false
 
 		var runErr error
 		out := captureStdout(t, func() {
@@ -484,35 +477,4 @@ func TestPromptFactoryDispatch(t *testing.T) {
 			t.Errorf("expected fallback to find myaction.prompt.md, got:\n%s", out)
 		}
 	})
-}
-
-// TestPromptSupervisorDeprecationWarning verifies that --supervisor still
-// runs (back-compat) but emits a stderr deprecation warning.
-func TestPromptSupervisorDeprecationWarning(t *testing.T) {
-	defer savePromptGlobals()()
-	projPath := setupPromptProject(t)
-
-	// Seed the supervisor's review reports so the assemble path doesn't
-	// error before the deprecation branch can fire.
-	reportDir := filepath.Join(projPath, ".ateam", "shared", "report")
-	if err := os.MkdirAll(reportDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(reportDir, "testing_basic.md"), []byte("# Findings\n\nok"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	promptSupervisor = true
-	promptAction = runner.ActionReview
-
-	stderr := captureStderr(t, func() {
-		captureStdout(t, func() {
-			withChdir(t, projPath, func() {
-				_ = runPrompt(nil, nil)
-			})
-		})
-	})
-	if !strings.Contains(stderr, "--supervisor is deprecated") {
-		t.Errorf("expected deprecation warning on stderr, got:\n%s", stderr)
-	}
 }

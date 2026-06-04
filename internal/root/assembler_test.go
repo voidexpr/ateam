@@ -63,29 +63,33 @@ func TestEnvAssemblerResolvesDefaults(t *testing.T) {
 }
 
 // TestBuildAssemblerVarsDefersOutputPaths locks in the contract that the
-// assembler must not resolve {{OUTPUT_DIR}} / {{OUTPUT_FILE}} — those depend on
-// the exec ID and are filled later by the runner. Resolving them to "" at
-// assembly time would strip the placeholders and leave agents with a blank
-// destination block.
+// assembler must not resolve the exec.* keys whose real value comes from
+// Prepare — they depend on the exec ID and are filled later by the runner.
+// Resolving them to "" at assembly time would strip the placeholders and
+// leave agents with a blank destination block.
+//
+// The placeholders are stored in dotted form (`{{exec.output_file}}`) so
+// the rendered output mirrors the prompt source instead of leaking the
+// legacy ALL_CAPS shape into preview output. The runner's Replacer
+// handles both forms (commit 6d8e821).
 func TestBuildAssemblerVarsDefersOutputPaths(t *testing.T) {
 	env := &ResolvedEnv{}
 	vars := env.BuildAssemblerVars("report/security", "", "report")
-	if got := vars.Exec["output_dir"]; got != "{{OUTPUT_DIR}}" {
-		t.Errorf("exec.output_dir = %q, want {{OUTPUT_DIR}}", got)
+	if got := vars.Exec["output_dir"]; got != "{{exec.output_dir}}" {
+		t.Errorf("exec.output_dir = %q, want {{exec.output_dir}}", got)
 	}
-	if got := vars.Exec["output_file"]; got != "{{OUTPUT_FILE}}" {
-		t.Errorf("exec.output_file = %q, want {{OUTPUT_FILE}}", got)
+	if got := vars.Exec["output_file"]; got != "{{exec.output_file}}" {
+		t.Errorf("exec.output_file = %q, want {{exec.output_file}}", got)
 	}
 
-	// End-to-end: assembling the shipped default report prompt must keep the
-	// placeholder intact so runner.ResolveTemplateString can fill it.
-	vars.Project["info"] = "INFO" // avoid forking git for project info
+	// End-to-end: assembling the shipped default report prompt must keep
+	// the placeholder intact so runner.ResolveTemplateString can fill it.
 	res, err := env.Assembler().Assemble("report/security", vars, nil, nil)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
-	if !strings.Contains(res.Prompt, "{{OUTPUT_FILE}}") {
-		t.Error("assembled report prompt dropped {{OUTPUT_FILE}} placeholder")
+	if !strings.Contains(res.Prompt, "{{exec.output_file}}") {
+		t.Error("assembled report prompt dropped {{exec.output_file}} placeholder")
 	}
 }
 
