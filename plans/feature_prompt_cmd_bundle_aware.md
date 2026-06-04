@@ -1,5 +1,21 @@
 # Feature: bundle-aware `ateam prompt` (prompt lifecycle redesign)
 
+## Implementation status
+
+All 10 spec steps plus the documented follow-ups landed on the
+`small-fixes` branch as four commits:
+
+| Commit | Scope |
+|---|---|
+| `85365a5` | Steps 1-7 (engine extensions → Verify wired into Run) |
+| `207cc0f` | Steps 8-10 (cmd/prompt.go minimum scope, `@PATH` framing, `--prompt` / `--management` flag removal) |
+| `9856593` | Follow-ups (factory map, `--paths`/`--inline-paths` via `Prompt.Inspect`, `--raw` on exec/parallel, ALL_CAPS guardrail) |
+| `6d8e821` | runner template Replacer accepts dotted forms alongside ALL_CAPS; `defaults/runtime.hcl` swept |
+
+Per-step notes — what landed vs what's deferred — sit inline in the
+implementation-sequence table below. The Followups section at the bottom
+is now the authoritative "out of scope for this PR" list.
+
 ## Problem
 
 - `ateam prompt --action X` and `ateam X` build their prompts through parallel
@@ -94,6 +110,14 @@ type ResolveContext interface {
     Mode() ResolveMode
     Dynamics() PromptDynamic
 }
+
+// _Implementation note (commit `85365a5`):_ `Env()` is intentionally
+// deferred — `internal/root` already imports `internal/prompts` for
+// `prompts.FormatProjectInfo`, `AllRoleIDs`, etc., so the reverse
+// dependency would cycle. The shipped `ResolveContext` exposes
+// `Vars()`, `Mode()`, `Dynamics()`. No shipped dynamic needs Env access
+// today; the method will be added once the helpers in `internal/prompts`
+// that root depends on are extracted to a lower package.
 
 type Prompt interface {
     // Resolve produces the final prompt text. ctx.Mode() controls whether
@@ -222,6 +246,14 @@ type PromptFile struct {
 }
 ```
 
+_Implementation note (commit `85365a5`):_ the shipped `PromptFile` also
+carries `Assembler *assembler.Assembler` and `Vars assembler.Vars` —
+factory-injected at bundle construction. The spec's eventual shape lifts
+both to the `ResolveContext` so the bundle's Prompt is just `{Path, Pre,
+Post, CustomBody}`. They live on the struct today so the Step-4 migration
+could land without first restructuring `flow.Runtime`'s vars builder; a
+future cleanup moves them to `ResolveContext`.
+
 All three implement `flow.Prompt`. Each holds whatever state it needs in
 its own fields. New impls (Jinja, remote-fetched, etc.) just satisfy the
 interface — no registration, no plugin system.
@@ -247,8 +279,9 @@ compose. Standard anchors still apply for inherited framing.
 type PromptBundle struct {
     Name, Role, Action string  // reporting metadata only; no logic reads these
 
-    Prompt Prompt          // built by the factory; self-contained
-    Vars   map[string]string // factory-curated args.* / roles.* / action.* values
+    Prompt   Prompt          // built by the factory; self-contained
+    Vars     map[string]string // factory-curated args.* / roles.* / action.* values
+    Dynamics PromptDynamic    // factory-supplied dynamics, copied into rt at resolve time
 
     RunOpts  func(RuntimeEnv) runner.RunOpts
     PreExec, PostExec []Action
@@ -256,8 +289,15 @@ type PromptBundle struct {
 ```
 
 `Render` is gone. Framework builds a Runtime, merges `bundle.Vars` into
-`rt.Vars`, then calls `bundle.Prompt.Resolve(rt)` at the moment it needs
-the text.
+`rt.Vars`, sets `rt.Dynamics` from `bundle.Dynamics`, then calls
+`bundle.Prompt.Resolve(rt)` at the moment it needs the text.
+
+_Implementation note (commit `85365a5`):_ `Dynamics` was added to the
+struct alongside `Prompt`/`Vars` so each factory can declare exactly
+which dynamic functions its prompt expects (e.g. the review factory
+registers `project_info`). Without per-bundle Dynamics, the rt would
+need a global registry — which the spec explicitly avoids (see
+"Dynamic functions" above).
 
 **`Vars` is the canonical home for factory-curated values.** Prompt impls
 (`PromptFile`, `PromptText`, etc.) stay focused on prompt source/framing.
@@ -577,18 +617,18 @@ still present for the rest. Step 6 (ALL_CAPS drop) waits until every verb
 is on the new contract because ALL_CAPS substitution depends on the old
 two-pass mechanism.
 
-| # | Commit | Behavior change | Risk |
-|---|---|---|---|
-| 1 | Engine extensions: `PromptDynamic`, `{{ns.key ? default}}`, `{{include path ? TEXT}}`, quoted-arg parser, `ResolveContext` interface | None | Low |
-| 2 | Add `flow.Runtime`, `prompts.{Prompt, RawTextPrompt, PromptText, PromptFile}` types. Coexists with today's `Render` (nothing uses the new types yet) | None | Low |
-| 3 | Reshape `Executor` interface to `Prepare(opts)` + `ExecutePrepared(prepared, text)` — drop the prompt arg from Prepare. Prompt resolution happens in flow between the two calls, via `bundle.Prompt.Resolve(rt)`. Replace `prompt_hash` DB column with `prompt_file`. Old `Render` path keeps working through a compat shim in flow that does the in-between resolve step internally | Change #10 | **High** (runner contract change) |
-| 4 | Migrate one verb end-to-end (suggest `review`) — factory + PromptFile + new Executor flow. `PromptBundle.Render` deleted for this verb | None observable | Medium |
-| 5 | Migrate remaining verbs (`code`, `verify`, `auto_setup`, `code_management` supervisor, `report` per-role, `inspect --auto-debug`, `exec`, `parallel`). Render compat shim deleted once all verbs migrated | None observable | Medium |
-| 6 | Drop ALL_CAPS legacy + sweep `defaults/prompts/` + `{{project.info}}` → `{{dynamic.project_info}}` migration + ALL_CAPS detection-error in `runtime.hcl` | Changes #4, #6 | **High** (test sweep) |
-| 7 | Wire verification into `flow.Run` (`Walk` callback, batched `VerifyResult`) | Change #7 | Medium |
-| 8 | Rewrite `cmd/prompt.go` against factory dispatch; `--supervisor` deprecation warning; `--paths` / `--inline-paths` rewire to `Prompt.Inspect()`; `--raw` flag on `exec` / `parallel` / `prompt` | Changes #1, #2, #6, #8, #11 land here | Medium |
-| 9 | `@PATH/foo.prompt.md` outside-anchor framing | Change #3 | Low |
-| 10 | Remove `ateam review --prompt` and `ateam code --management` flags | Change #9 | Low |
+| # | Status | Commit | Behavior change | Risk |
+|---|---|---|---|---|
+| 1 | ✅ | `85365a5` | Engine extensions: `PromptDynamic`, `{{ns.key ? default}}`, `{{include path ? TEXT}}`, quoted-arg parser, `ResolveContext` interface | None | Low |
+| 2 | ✅ | `85365a5` | Add `flow.Runtime`, `prompts.{Prompt, RawTextPrompt, PromptText, PromptFile}` types. Coexists with today's `Render` (nothing uses the new types yet) | None | Low |
+| 3 | ✅ | `85365a5` | Reshape `Executor` interface to `Prepare(opts)` + `ExecutePrepared(prepared, text)` — drop the prompt arg from Prepare. Prompt resolution happens in flow between the two calls, via `bundle.Prompt.Resolve(rt)`. Replace `prompt_hash` DB column with `prompt_file`. Old `Render` path keeps working through a compat shim in flow that does the in-between resolve step internally. _Render-time failure after Prepare allocates an exec_id now closes the orphan row via `calldb.MarkExecFailed`._ | Change #10 | **High** (runner contract change) |
+| 4 | ✅ | `85365a5` | Migrate one verb end-to-end (suggest `review`) — factory + PromptFile + new Executor flow. `PromptBundle.Render` deleted for this verb. _The reports manifest + bundled bodies + `--post-prompt` tail live in a `reviewPrompt` wrapper around PromptFile so framing order stays byte-identical._ | None observable | Medium |
+| 5 | ✅ | `85365a5` | Migrate remaining verbs (`code`, `verify`, `auto_setup`, `code_management` supervisor, `report` per-role, `inspect --auto-debug`, `exec`, `parallel`). Render compat shim deleted once all verbs migrated. _`staticBundle` now uses `prompts.RawTextPrompt`; `inspect --auto-debug` continues to use `runner.Execute` directly (it never went through PromptBundle)._ | None observable | Medium |
+| 6 | ✅ | `85365a5`, `9856593`, `6d8e821` | Drop ALL_CAPS legacy + sweep `defaults/prompts/` + `{{project.info}}` → `{{dynamic.project_info}}` migration + ALL_CAPS detection-error in `runtime.hcl`. _Engine-side: `varmap.go` deleted, undotted tokens pass through verbatim. `defaults/runtime.hcl`'s lone runner-side template (`docker_container`) flipped to `{{container.name}}`; the runner Replacer now accepts every dotted form alongside its ALL_CAPS alias, so back-compat is preserved. The "detection error" landed as `internal/runtime/allcaps_check.go` which warns on user-level files referencing unknown ALL_CAPS tokens (embedded defaults skip the check). `env.BuildEngine` and `env.ProjectInfoDynamic` are the new canonical surfaces every cmd-layer assembly site uses._ | Changes #4, #6 | **High** (test sweep) |
+| 7 | ✅ | `85365a5` | Wire verification into `flow.Run` (`Walk` callback, batched `VerifyResult`). _`Step` interface gained `Walk`; `Verify` runs `Prompt.Resolve` in `ModePreview` with panic recovery; `Run` short-circuits via `failedWithVerifyErrors` when the pass returns errors._ | Change #7 | Medium |
+| 8 | ✅ | `207cc0f`, `9856593` | Rewrite `cmd/prompt.go` against factory dispatch; `--supervisor` deprecation warning; `--paths` / `--inline-paths` rewire to `Prompt.Inspect()`; `--raw` flag on `exec` / `parallel` / `prompt`. _Landed in two passes: the deprecation warning + `--raw` on `prompt` shipped in `207cc0f`; the factory map (`promptFactories`), `--raw` on `exec`/`parallel`, and the `PromptFile.Inspect` rewire via `env.NewInspectionContext` shipped in `9856593`. `--raw` on exec/parallel is forward-compat plumbing — both verbs already feed prompts byte-for-byte to the agent via `RawTextPrompt`, so the flag is a no-op until a future change moves expansion to the default._ | Changes #1, #2, #6, #8, #11 land here | Medium |
+| 9 | ✅ | `207cc0f` | `@PATH/foo.prompt.md` outside-anchor framing. _Implemented in `cmd/prompt.go::runPromptExternalFile`: parent dir injected as the front anchor, base name as the role; standard anchors still contribute inherited framing. `--raw` short-circuits before any framing._ | Change #3 | Low |
+| 10 | ✅ | `207cc0f` | Remove `ateam review --prompt` and `ateam code --management` flags. _`reviewCustomPrompt` / `codeManagement` vars gone; `COMMANDS.md` updated; operators override the supervisor body by placing `review.prompt.md` / `code_management.prompt.md` under `.ateam/prompts/` or `.ateamorg/prompts/`._ | Change #9 | Low |
 
 ## Rules digest (for `ateam prompt --help` and `CONFIG.md`)
 
@@ -624,9 +664,31 @@ passed unquoted to a dynamic.
 
 ## Followups (not in scope)
 
-- **`--supervisor` removal** after the deprecation period.
+Cleanups deferred past the steps-1-10 landing — none block shipping, but
+they're worth queueing:
+
+- **`--supervisor` removal** after the deprecation period. The flag emits
+  a stderr warning today (commit `207cc0f`); pull it once enough release
+  windows have passed.
+- **ALL_CAPS template alias removal** once `defaults/runtime.hcl` and
+  every shipped prompt have been settled on the dotted form. The
+  runner's Replacer carries dotted-form entries side-by-side with the
+  ALL_CAPS ones (commit `6d8e821`); once nothing depends on the ALL_CAPS
+  aliases, prune them and tighten the `allcaps_check` warning into an
+  error.
+- **Engine→runner exec.* single-pass substitution.** Today the engine
+  substitutes `{{exec.id}}` to the placeholder `{{EXEC_ID}}`
+  (BuildAssemblerVars seeds the exec namespace with runner-side
+  placeholders), then the runner's Replacer fills the real value. The
+  end-state collapses this into one pass — flow.Runtime carries the
+  real `ExecID` / `Batch` / `OutputDir` / `OutputFile` from Prepare
+  through Resolve, so engine renders directly to the actual value. The
+  groundwork (per-bundle scalars on `flow.Runtime`, runner.Prepare not
+  needing the prompt) is already in place; the remaining work is
+  rewiring `BuildAssemblerVars` to take a Runtime and let `exec.*`
+  flow through it.
 - **`{{shell CMD}}`** — defer until we have a read-only sandbox.
-- **Executable prompts (`#!/usr/bin/env python` + `.prompt.py`)** — defer; the
-  three-mechanism model handles every current use case.
+- **Executable prompts (`#!/usr/bin/env python` + `.prompt.py`)** —
+  defer; the three-mechanism model handles every current use case.
 - **`ateam migrate prompts` command** — re-evaluate if user prompts ever
   proliferate enough that manual migration becomes painful.
