@@ -59,11 +59,14 @@ See more at [APPROACH.md](APPROACH_2.md).
 - `ateam serve` — web UI for browsing all reports, reviews, runs, and costs; `ateam export` for a self-contained HTML snapshot
 - `ateam prompt --role NAME` shows the exact assembled prompt; `ateam env` summarizes config and environment
 
-**Agent helpers everywhere**
-- `ateam auto-setup`: don't read the docs — ask an agent to select ATeam roles based on your project
-- `ateam inspect --auto-debug`: have an agent investigate why past runs failed, recommend config changes, and draft a bug to file against ATeam if needed
-- `ateam report --auto-roles`: dynamically select which roles to run based on recent commits
-- `scripts/ateam-runall-managed.sh`: run a full quality pipeline and, on error, have an agent try to fix it and resume
+## Use agents to help with ateam itself
+
+In the age of agents a lot of work can be offloaded, and ateam, built to run agents, makes full use of that on its own machinery:
+
+- **`ateam auto-setup`**: an agent reads your project and decides which roles to enable, so you don't have to read the docs
+- **`ateam report --auto-roles`**: dynamically picks which roles to run based on recent commits
+- **`ateam inspect --auto-debug`**: when an agent fails, another agent investigates the failure, proposes local fixes, and drafts a bug to file against ateam
+- **`scripts/ateam-runall-managed.sh`**: runs a full quality pipeline and, on error, has an agent try to get it back on track
 
 ## Install
 
@@ -117,6 +120,8 @@ A second directory, `.ateamorg/` (default: `$HOME/.ateamorg`), holds prompts and
 
 Prompts resolve in order: **project → organization → embedded defaults.** You can fully override a prompt at any level, or — more commonly — extend it with a post-prompt fragment. Example: drop `*.post.extra.md` into `.ateam/prompts/report/project.security/` with *"do not flag GitHub Actions secrets, we use a separate vault"* and that instruction is appended every time the role runs.
 
+For per-run steering, every prompt-taking command also accepts `--pre-prompt TEXT` (wrapped at the front) and `--post-prompt TEXT` (wrapped at the end), each taking text or `@file`.
+
 Full details: [CONFIG.md](CONFIG.md).
 
 `ateam serve`:
@@ -127,41 +132,81 @@ Full details: [CONFIG.md](CONFIG.md).
 
 ## Two ways to use it
 
-#### As a quality pipeline
+### As a quality pipeline
 
-`ateam run-all` runs the four-stage loop across the [roles](ROLES.md) enabled in `.ateam/config.toml`.
+`ateam run-all` runs the four-stage loop across the [roles](ROLES.md) enabled in `.ateam/config.toml` (also runnable stage-by-stage).
 
-- **report**: role agents audit the codebase in parallel
-- **review**: supervisor prioritizes findings into coding tasks
-- **code**: coding agents implement the top tasks, commit small changes
-- **verify**: supervisor inspects the commits and runs tests
+```
+ateam report  →  ateam review  →  ateam code  →  ateam verify
+   │                  │                │                │
+   ▼                  ▼                ▼                ▼
+ Role agents       Supervisor       Supervisor       Supervisor
+ audit code        prioritizes      delegates        inspects commits
+ (parallel)        findings         coding tasks     and runs tests
+```
 
-Roles are simple markdown prompt files, you can add your own by dropping a file in `.ateam/prompts/report/`, see [CONFIG.md](CONFIG.md)
+**Report**: role-specific agents analyze your code and produce markdown reports. Each role focuses on one dimension (security, testing, etc.). Runs in parallel.
 
-#### As a primitive
+**Review**: the supervisor reads all reports, applies judgment, and produces a prioritized list of coding tasks. You can edit `.ateam/shared/review.md` before `ateam code`, or steer with `--post-prompt`.
+
+**Code**: the supervisor executes the top-priority tasks by delegating to coding agents and records what was completed.
+
+**Verify**: the supervisor inspects the commits for logical bugs, broken or missing tests, and risky changes, then runs the project's test suite and records findings.
+
+Each run archives its artifacts. The next cycle's reports incorporate previous findings, so quality improves incrementally with memory of what's been done.
+
+Roles are simple markdown prompt files; add your own by dropping a file in `.ateam/prompts/report/`. See [CONFIG.md](CONFIG.md).
+
+#### Git
+
+During the `code` and `verify` phases, ateam commits its changes to whatever branch you ran it on. There's no built-in branch management or worktree handling — pick whatever git workflow fits your project:
+
+- **Simplest**: run ateam in your working directory, review its commits, push
+- **Worktree**: run ateam in a separate `git worktree`, review, merge/cherry-pick
+- **Branch**: same as worktree but on a dedicated branch
+
+### As a primitive
 
 `ateam exec` and `ateam parallel` run unattended coding agents with your own prompts. Drop them into shell scripts to build any workflow.
 
 ```bash
 ateam exec "audit recent changes for bugs" --agent codex
+
+# run multiple agents at the same time
 ateam parallel "@prompts/security.md" "@prompts/tests.md"
+
+# run any number of prompts by at most 4 at a time
+ateam parallel "@prompts/mystuff/*.md" --max-parallel 4
+
+# easy to read multi-line prompts fits well in scrupts
 ateam exec --agent claude <<EOF
 review findings in $REPORT and apply the fixes
+If you disagree then clearly document why
 EOF
+
+# look at cost of previous runs or what failed
+ateam ps
 
 # observe the agent stream logs of all running processes
 ateam tail
+
+# see the log files for agent run 12, have another agent analyzed why it failed
+ateam inspect 12 --auto-debug
+
+# Start an interactive session in claude or codex (based on how it was run)
+# with the exact context at the end of agent run 12
+ateam resume 12 --launch
 ```
 
 ## Examples
 
-#### Daily pass on recent changes
+### Daily pass on recent changes
 ```bash
 ateam run-all --roles code.recent,test.recent
 ```
 Quick, focused, cheap. Good before a PR or as a recurring run.
 
-#### Adversarial review — Codex critiques, Claude implements
+### Adversarial review — Codex critiques, Claude implements
 ```bash
 ateam exec "critical review of recent changes into review.md" --agent codex-high
 ateam exec "review.md → apply fixes and push back on what you disagree with, commit each separately"  --agent claude-high
@@ -173,7 +218,7 @@ More complete version of this can be found in:
 * `scripts/critical-code-review.sh`: multiple rounds selecting any agent
 * `scripts/double-review.sh`: run both codex-tmux /review and claude /code-review in parallel, then merge reports and code the fixes as a 3rd agent run.
 
-#### Background quality on a fast-moving project
+### Background quality on a fast-moving project
 ```bash
 ateam run-all                # end-of-day, in cron, or before commits
 ```
