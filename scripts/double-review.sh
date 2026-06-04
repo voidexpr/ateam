@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-base_dir=".ateam/shared/codex_claude_merged_review"
+base_dir=".ateam/shared/double_review"
 codex_file="$base_dir/codex_code_review.md"
 claude_file="$base_dir/claude_code_review.md"
 final_file="$base_dir/coding_report.md"
