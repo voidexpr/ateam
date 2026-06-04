@@ -2,19 +2,227 @@
 
 ## Implementation status
 
-All 10 spec steps plus the documented follow-ups landed on the
-`small-fixes` branch as four commits:
+**Foundations landed; the design's load-bearing wiring did NOT.** The
+demolition phase (delete legacy paths, change contracts, migrate column
+names) is done. The construction phase (make `Prompt.Resolve` the single
+substitution pass, collapse preview into the live factory) is the next
+round of work, scoped in the "Next round" section below.
+
+Commits on `small-fixes`:
 
 | Commit | Scope |
 |---|---|
-| `85365a5` | Steps 1-7 (engine extensions → Verify wired into Run) |
-| `207cc0f` | Steps 8-10 (cmd/prompt.go minimum scope, `@PATH` framing, `--prompt` / `--management` flag removal) |
-| `9856593` | Follow-ups (factory map, `--paths`/`--inline-paths` via `Prompt.Inspect`, `--raw` on exec/parallel, ALL_CAPS guardrail) |
-| `6d8e821` | runner template Replacer accepts dotted forms alongside ALL_CAPS; `defaults/runtime.hcl` swept |
+| `85365a5` | Steps 1-7 land as types + contract changes. Render closure deleted, varmap engine shim deleted, Prepare drops the prompt arg, `prompt_hash` → `prompt_file`, Verify+Walk wired into Run. Most spec-described mechanisms exist as abstractions but are not yet load-bearing. |
+| `207cc0f` | `@PATH` framing for `.prompt.md`; `--prompt` / `--management` flags removed. |
+| `9856593` | Factory map for `--action X` in cmd/prompt.go; `--paths` routed through `PromptFile.Inspect`; `--raw` on exec/parallel; ALL_CAPS guardrail in `internal/runtime`. |
+| `6d8e821` | Runner Replacer accepts dotted forms alongside ALL_CAPS; `defaults/runtime.hcl` swept. |
+| `c2ea502` | Earlier (incorrect) version of this section claiming the spec landed. Superseded. |
+| `f1312c3` | `test/Dockerfile.dind` pinned; runtime.hcl ALL_CAPS docs swept; `docker_exec` accepts dotted forms. |
+| `6222bad` | `--paths` surfaces review's reports manifest without `--supervisor` (bug fix in a parallel path). |
+| `10bb528` | `--supervisor` flag deleted; `BuildAssemblerVars` exec.* placeholders switched to dotted form. |
 
-Per-step notes — what landed vs what's deferred — sit inline in the
-implementation-sequence table below. The Followups section at the bottom
-is now the authoritative "out of scope for this PR" list.
+### What the spec set out to achieve that did NOT land
+
+These are the load-bearing design goals. They survive in this PR as
+declared abstractions only — the wiring underneath them is the legacy
+two-pass mechanism, with parallel preview/live paths kept in sync by
+hand.
+
+1. **One substitution pass for the prompt body.** `runner.go:494` still
+   does `prompt = ResolveTemplateString(prompt, tmplVars)` after
+   `bundle.Prompt.Resolve` already produced the text. The two-pass
+   mechanism the Problem section explicitly indicts is intact.
+2. **One code path for preview and execution.** Review has THREE: live
+   (`NewReviewBundle` → `bundle.Prompt.Resolve` → `reviewPrompt.Resolve`),
+   body-only preview (`previewReview` → `assembleReview`), and
+   `--paths` preview (`assembleForInspection` → `PromptFile.Inspect` +
+   hand-added `addLive("reports", …)`). Each implements the
+   reports-manifest composition independently.
+3. **`{{AT RUNTIME:exec.<key>}}` sentinel pattern for `exec.*` in
+   preview/verify modes.** Only `dynamic.project_info` uses the AT
+   RUNTIME pattern. `exec.*` substitution doesn't consult `ctx.Mode()`
+   at all.
+4. **`flow.Runtime.{ExecID, Batch, OutputDir, OutputFile}`** declared on
+   the struct, never read by any code path. Dead fields that make the
+   design *look* implemented.
+5. **`dynamic.review_reports` / `dynamic.code_mgmt_review`** — the
+   spec's canonical mechanism for the reports manifest and review-content
+   blocks. Neither exists. The reports manifest lives in a hand-written
+   `reviewPrompt` wrapper struct, three times (live, preview, paths).
+6. **`bundle.Vars` merge into `rt.Vars`** — field declared on
+   `PromptBundle`, never read. Factory-curated args.* / roles.* values
+   have no path to reach the engine.
+7. **`assembleReview` / `assembleCodeManagementV1` / `assembleSupervisor`
+   / `assembleRoleReport`** still exist. The factory pattern was
+   supposed to make them disappear.
+8. **`assembleForInspection`** still exists as a parallel composition
+   path to `Prompt.Inspect`.
+9. **`ResolveContext.Env() *root.ResolvedEnv`** spec-required method
+   deferred citing the `root → prompts` import cycle. The cycle is
+   real, the fix (extract helpers from `internal/prompts`) was punted.
+10. **`ateam exec "..."` / `ateam parallel`** default semantics
+    unchanged — still `RawTextPrompt`. Spec called for `PromptText` with
+    engine expansion as the non-`--raw` default.
+
+The next round of work is concentrated on these ten gaps. Per-step
+notes in the implementation-sequence table further down record what
+each commit actually shipped vs the spec text; those notes are honest
+where this section's earlier wording was not.
+
+## Next round: guardrails for finishing the design
+
+Whoever picks this up — me again or anyone else — operates under the
+following rules. They exist because the previous round normalized
+punting and arrived at "abstractions exist; nothing is load-bearing."
+
+### Authority
+
+**The spec text in this file is authoritative.** Where the spec text
+disagrees with the shipped code, the code is wrong unless an explicit
+diff to the spec was negotiated in writing first.
+
+If a step seems unimplementable as written:
+1. Stop.
+2. Quote the specific spec sentence that won't land cleanly.
+3. Propose the smallest concrete divergence.
+4. Wait for an explicit "ok, depart" from the user.
+5. Update this spec to reflect the new contract in the same change.
+
+Never quietly add a parallel path "to be consolidated later." Never
+quietly skip a sentence. Never declare a step done with a comment that
+calls itself a follow-up. **Each of those is what the previous round
+called a "punt."** Ten of them, compounded, are why nothing in this
+spec is actually load-bearing today.
+
+### Punt budget
+
+**Zero.** Every parallel path that survives a step is the step not
+completing. Every helper added to wire around a spec mechanism that
+doesn't yet work means fix the spec mechanism instead.
+
+Concretely, in the next round:
+
+- `previewReview` / `previewCodeManagement` / `previewVerify` get
+  deleted, not extended.
+- `env.BuildEngine` / `env.NewInspectionContext` / `env.ProjectInfoDynamic`
+  get deleted (or moved into the spec's canonical dispatcher). They
+  exist because `ctx.Vars()` / `ctx.Dynamics()` aren't load-bearing —
+  fix that, not the symptom.
+- `assembleForInspection` gets deleted, not refactored.
+- `assembleReview` / `assembleCodeManagementV1` / `assembleSupervisor`
+  / `assembleRoleReport` get deleted.
+- The `reviewPrompt` wrapper struct gets deleted; its reports-manifest
+  composition becomes `dynamic.review_reports` per spec.
+- `runner.go::ExecutePrepared` stops calling `ResolveTemplateString`
+  on the prompt body (it still resolves args / container fields,
+  which don't pass through `Prompt.Resolve`).
+
+If a deletion above looks impossible, that's the prompt to ask before
+departing — not the prompt to ship a third parallel path.
+
+### Tasks defined as deletions
+
+For each remaining work item, write the task as a deletion of an
+existing parallel path, not as an addition of a new helper. Example
+shapes:
+
+- ❌ "Migrate review's reports manifest to a dynamic."
+- ✅ "Delete `reviewPrompt`. The factory's `bundle.Prompt` is
+  `prompts.PromptFile{Path: 'review'}` with `dynamic.review_reports`
+  registered. Tests assert byte-identity with the legacy
+  `assembleReview` output."
+
+- ❌ "Wire `flow.Runtime.ExecID` into substitution."
+- ✅ "Delete `runner.go:494`'s prompt-substitution line. The runner
+  Replacer no longer sees the prompt body. Tests assert that
+  `bundle.Prompt.Resolve(rt)` with `rt.ExecID=42` renders
+  `{{exec.id}}` to `42` directly."
+
+The deletion target is what proves the spec mechanism is load-bearing.
+Anything that grows without a deletion is a punt.
+
+### Acceptance tests, written before the code
+
+Each remaining step lands with a test that fails until the spec
+mechanism *itself* works. The test must NOT be satisfiable by a
+parallel path producing the same output. Concrete required tests:
+
+| Step | Test invariant |
+|---|---|
+| One substitution pass | `grep -n 'ResolveTemplateString.*prompt' internal/runner/runner.go` produces zero hits inside `ExecutePrepared`. The runner Replacer only sees args / container fields. |
+| Single preview/live code path | `cmd/prompt.go::runPromptAction` calls the same factory (e.g. `NewReviewBundle`) the live verb calls, and produces a body byte-identical to `ateam review --dry-run`'s resolved prompt. A test diffs the two. |
+| `exec.*` sentinel in preview | A bundle whose prompt contains `{{exec.id}}` resolved against `rt` with `Mode == ModePreview` produces `{{AT RUNTIME:exec.id}}` in the output. |
+| `exec.*` real value in live | The same bundle, resolved against `rt` with `Mode == ModeReal` and `rt.ExecID = 42`, produces `42`. The runner Replacer does NOT touch the prompt. |
+| `Runtime.ExecID` etc. load-bearing | A test reads `rt.ExecID` / `rt.Batch` / `rt.OutputDir` / `rt.OutputFile` somewhere on the production code path. `grep` shows non-test consumers. |
+| `bundle.Vars` merge | A bundle with `Vars: map[string]string{"args.x": "y"}` resolved against a prompt containing `{{args.x}}` produces `y`. |
+| `dynamic.review_reports` | A bundle whose prompt body contains `{{dynamic.review_reports}}` and whose dynamics registers `review_reports` produces the same manifest the legacy `formatReportsBlock` would. `reviewPrompt` is deleted. |
+| `dynamic.code_mgmt_review` | Same shape for code-management. `assembleCodeManagementV1` is deleted. |
+| `ResolveContext.Env()` | `ctx.Env()` returns the resolved env. The `root → prompts` cycle is broken by extracting helpers (or by an explicitly negotiated divergence). |
+| `ateam exec "..."` default expansion | A prompt containing `{{prompt.name}}` passed to `ateam exec` (no `--raw`) expands. With `--raw`, it doesn't. |
+
+Each row is one or two assertions, not a full test file. They
+collectively prevent the next round from drifting into the punt
+pattern that produced this one.
+
+### Mid-step check-ins
+
+Whenever the phrase "I'll defer this to a follow-up" forms in your
+head, that's the stop signal. Surface the specific deferral, quote the
+spec sentence, and ask. Three of the previous ten punts compounded
+because the call was made alone.
+
+### Spec invariants pinned to the code
+
+Where a load-bearing rule lands (e.g. "the runner does not substitute
+the prompt body"), pin it as a comment adjacent to the code that
+honors it — not just in this file. The next maintainer touching the
+line should have to read the invariant.
+
+### Order of operations for the next round
+
+Driven by the deletion-first rule, the natural sequence:
+
+1. Make `Vars.Resolve("exec", key)` consult `ctx.Mode()` and the
+   `*flow.Runtime` fields. The substitution decision lives in a single
+   resolver, not in `BuildAssemblerVars`'s hardcoded map.
+2. Wire `flow.execute` to populate `rt.{ExecID, Batch, OutputDir,
+   OutputFile}` from `prepared` before calling `Prompt.Resolve`. The
+   four Runtime fields become load-bearing.
+3. Delete `runner.go:494`'s prompt-substitution line. Args / container
+   fields still go through `ResolveTemplateString`. Tests for shipped
+   prompts run.
+4. Implement `dynamic.review_reports` (and `dynamic.code_mgmt_review`).
+   Update `defaults/prompts/review.prompt.md` (and code_management) to
+   reference them.
+5. Delete `reviewPrompt`. The review factory becomes
+   `bundle.Prompt = prompts.PromptFile{Path: "review", PrePrompt:…,
+   PostPrompt:…}` with `bundle.Dynamics["review_reports"] = …`.
+6. Make `cmd/prompt.go::runPromptAction` call the same factory the
+   live verb calls. Delete `previewReview` / `previewCodeManagement`
+   / `previewVerify`. Delete `assembleReview` / `assembleSupervisor`
+   / `assembleCodeManagementV1` / `assembleRoleReport`.
+7. Make `--paths` / `--inline-paths` call `bundle.Prompt.Inspect(rt)`
+   against the same factory. Delete `assembleForInspection`. Live
+   sections (reports manifest, previous_report) flow through
+   `Prompt.Inspect` via the same dynamics or via per-bundle wrappers
+   the factory installs.
+8. Merge `bundle.Vars` into `rt.Vars` in `flow.execute`. Test with a
+   factory-exposed `args.*` value.
+9. Extract the helpers from `internal/prompts` that `internal/root`
+   needs (or break the dependency another way), then add
+   `ResolveContext.Env()`.
+10. Change `ateam exec` default to `PromptText`; `--raw` opts back into
+    `RawTextPrompt`.
+
+Each step ends with at least one parallel-path deletion. If a step
+finishes with the new mechanism added but the legacy one still alive,
+the step is not done.
+
+### Estimate
+
+300-500 LOC of consolidation, mostly deletions. The risk is not
+technical — the abstractions are sound. The risk is discipline. The
+guardrails above are how that risk is paid.
 
 ## Problem
 
@@ -664,29 +872,14 @@ passed unquoted to a dynamic.
 
 ## Followups (not in scope)
 
-Cleanups deferred past the steps-1-10 landing — none block shipping, but
-they're worth queueing:
+This list is the **post-spec-completion** queue: ideas worth considering
+once the design above is actually load-bearing. The "Next round"
+section is where the in-flight gaps live; do not duplicate them here.
 
-- **`--supervisor` removal** after the deprecation period. The flag emits
-  a stderr warning today (commit `207cc0f`); pull it once enough release
-  windows have passed.
-- **ALL_CAPS template alias removal** once `defaults/runtime.hcl` and
-  every shipped prompt have been settled on the dotted form. The
-  runner's Replacer carries dotted-form entries side-by-side with the
-  ALL_CAPS ones (commit `6d8e821`); once nothing depends on the ALL_CAPS
-  aliases, prune them and tighten the `allcaps_check` warning into an
-  error.
-- **Engine→runner exec.* single-pass substitution.** Today the engine
-  substitutes `{{exec.id}}` to the placeholder `{{EXEC_ID}}`
-  (BuildAssemblerVars seeds the exec namespace with runner-side
-  placeholders), then the runner's Replacer fills the real value. The
-  end-state collapses this into one pass — flow.Runtime carries the
-  real `ExecID` / `Batch` / `OutputDir` / `OutputFile` from Prepare
-  through Resolve, so engine renders directly to the actual value. The
-  groundwork (per-bundle scalars on `flow.Runtime`, runner.Prepare not
-  needing the prompt) is already in place; the remaining work is
-  rewiring `BuildAssemblerVars` to take a Runtime and let `exec.*`
-  flow through it.
+- **ALL_CAPS template alias removal** from the runner Replacer (commit
+  `6d8e821` left them in as back-compat aliases). Prune once nothing
+  depends on the ALL_CAPS aliases and tighten the `allcaps_check`
+  warning into an error.
 - **`{{shell CMD}}`** — defer until we have a read-only sandbox.
 - **Executable prompts (`#!/usr/bin/env python` + `.prompt.py`)** —
   defer; the three-mechanism model handles every current use case.
