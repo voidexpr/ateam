@@ -22,22 +22,14 @@ func (e *ResolvedEnv) BuildEngine(roleLabel, action string) *assembler.Engine {
 		WithDispatcher(prompts.NewDispatcher(dyn, ctx))
 }
 
-// ProjectInfoDynamic returns the dynamic that emits the project-info block
-// for the given (roleLabel, action). Each verb factory builds its own
-// instance — the dynamic captures role + action via the closure.
-//
-//   - ModeReal: invokes prompts.FormatProjectInfo with
-//     e.NewProjectInfoParams.
-//   - ModePreview: returns a sentinel so verification / --paths renders are
-//     deterministic and don't fork git on every walk.
-//   - Empty roleLabel: returns "" (matches the legacy --no-project-info
-//     contract — the assembler's whitespace-only filter drops the
-//     fragment).
+// ProjectInfoDynamic returns the dynamic that emits the project-info
+// block for the given (roleLabel, action). Mode-agnostic — project info
+// reads git + config which are always available, so operators see real
+// project context in any inspection (`ateam prompt --action X` runs in
+// ModePreview but still wants this dynamic to produce real data). Empty
+// roleLabel returns "" (matches the legacy --no-project-info contract).
 func (e *ResolvedEnv) ProjectInfoDynamic(roleLabel, action string) prompts.PromptDynamicFunction {
-	return func(ctx prompts.ResolveContext, args ...string) (string, error) {
-		if ctx != nil && ctx.Mode() == prompts.ModePreview {
-			return "{{AT RUNTIME: project info}}", nil
-		}
+	return func(_ prompts.ResolveContext, args ...string) (string, error) {
 		if roleLabel == "" {
 			return "", nil
 		}
@@ -46,14 +38,14 @@ func (e *ResolvedEnv) ProjectInfoDynamic(roleLabel, action string) prompts.Promp
 }
 
 // NewInspectionContext returns a ResolveContext for the
-// --paths / --inline-paths inspection path. Mode is ModeReal because
-// inspection previews what the live run will actually render — including
-// {{dynamic.project_info}} expanded against the current repo state.
-// flow.Verify uses ModePreview separately for its safer "would this even
-// resolve" pass.
+// --paths / --inline-paths inspection path. Spec line 552-557:
+// ModePreview so exec.* renders to the AT RUNTIME sentinel (no exec_id
+// allocated yet) and dynamics that depend on generated artifacts emit
+// preview sentinels. project_info is mode-agnostic (always returns real
+// data) so inspection still shows the project context.
 func (e *ResolvedEnv) NewInspectionContext(roleLabel, action string) prompts.ResolveContext {
 	return &liveCtx{
-		mode: prompts.ModeReal,
+		mode: prompts.ModePreview,
 		dynamics: prompts.PromptDynamic{
 			"project_info": e.ProjectInfoDynamic(roleLabel, action),
 		},

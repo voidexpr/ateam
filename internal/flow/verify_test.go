@@ -57,9 +57,9 @@ func TestVerify_TyposInKnownNamespaceError(t *testing.T) {
 		Prompt: prompts.PromptFile{
 			Path:      "x",
 			Assembler: a,
-			Vars: assembler.MapVars{
-				Prompt: map[string]string{"name": "x", "path": "x", "action": "x"},
-			},
+		},
+		BaseVars: assembler.MapVars{
+			Prompt: map[string]string{"name": "x", "path": "x", "action": "x"},
 		},
 	}
 	vr := Verify(b, makeRC())
@@ -80,9 +80,9 @@ func TestVerify_StrictIncludeMissingErrors(t *testing.T) {
 		Prompt: prompts.PromptFile{
 			Path:      "x",
 			Assembler: a,
-			Vars: assembler.MapVars{
-				Prompt: map[string]string{"name": "x", "path": "x", "action": "x"},
-			},
+		},
+		BaseVars: assembler.MapVars{
+			Prompt: map[string]string{"name": "x", "path": "x", "action": "x"},
 		},
 	}
 	vr := Verify(b, makeRC())
@@ -100,9 +100,9 @@ func TestVerify_OptionalIncludeMissingIsClean(t *testing.T) {
 		Prompt: prompts.PromptFile{
 			Path:      "x",
 			Assembler: a,
-			Vars: assembler.MapVars{
-				Prompt: map[string]string{"name": "x", "path": "x", "action": "x"},
-			},
+		},
+		BaseVars: assembler.MapVars{
+			Prompt: map[string]string{"name": "x", "path": "x", "action": "x"},
 		},
 	}
 	if vr := Verify(b, makeRC()); vr != nil {
@@ -131,9 +131,9 @@ func TestVerify_DynamicsRunInPreviewMode(t *testing.T) {
 		Prompt: prompts.PromptFile{
 			Path:      "x",
 			Assembler: a,
-			Vars: assembler.MapVars{
-				Prompt: map[string]string{"name": "x", "path": "x", "action": "x"},
-			},
+		},
+		BaseVars: assembler.MapVars{
+			Prompt: map[string]string{"name": "x", "path": "x", "action": "x"},
 		},
 		Dynamics: dyn,
 	}

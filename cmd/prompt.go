@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/ateam/internal/display"
+	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
@@ -261,11 +262,25 @@ var promptFactories = map[string]promptPreviewFn{
 }
 
 func previewReview(env *root.ResolvedEnv, prePrompt, postPrompt string) (string, error) {
-	roleLabel := "the supervisor"
-	if promptNoProjectInfo {
-		roleLabel = ""
+	// Spec Next-round steps 4-7: `ateam prompt --action review` calls
+	// the SAME factory the live verb uses. Mode==ModePreview lets the
+	// review_reports dynamic emit its sentinel (so unrun report state
+	// doesn't break preview) while every other resolver entry — exec.*
+	// sentinels, dotted vars, project_info — runs exactly like the
+	// live path.
+	bundle := NewReviewBundle(ReviewBundleInput{
+		Env:        env,
+		PrePrompt:  prePrompt,
+		PostPrompt: postPrompt,
+	})
+	rt := flow.NewRuntime(nil, env, env.WorkDir)
+	if bundle.BaseVars != nil {
+		rt.SetVars(bundle.BaseVars)
 	}
-	return assembleReview(env, prompts.ReviewSelector{}, roleLabel, "", prePrompt, postPrompt)
+	if bundle.Dynamics != nil {
+		rt.SetDynamics(bundle.Dynamics)
+	}
+	return bundle.Prompt.Resolve(rt)
 }
 
 func previewCodeManagement(env *root.ResolvedEnv, prePrompt, postPrompt string) (string, error) {
@@ -343,6 +358,70 @@ func runPromptAction() error {
 // with the batch already resolved (e.g. piping `ateam prompt --batch X` into
 // `ateam exec --batch X` keeps the two in sync without the LLM having to
 // copy a value).
+// inspectBundleForCurrentAction returns the per-section breakdown the
+// --paths / --inline-paths views consume. For factory-registered actions
+// (review, code_management, verify) it builds the same bundle the live
+// verb produces and calls bundle.Prompt.Inspect — so dynamics like
+// review_reports run against the same env they would at run time. For
+// unknown actions it falls back to a plain PromptFile against the anchor
+// chain (the spec's `PromptFile{Path: action}` default).
+//
+// SPEC INVARIANT (Next-round step 7): no parallel composition path.
+// Anything assembleForInspection used to compose by hand (live sections)
+// either flows through Prompt.Inspect or rides the existing addLive
+// surface; the bundle's body is never re-derived here.
+func inspectBundleForCurrentAction(env *root.ResolvedEnv, promptPath, prePrompt, postPrompt, roleLabel string) ([]prompts.Section, error) {
+	bundle := bundleForInspection(env, prePrompt, postPrompt)
+	if bundle != nil {
+		rt := flow.NewRuntime(nil, env, env.WorkDir)
+		// Spec line 552-557: `ateam prompt --action X` runs in
+		// ModePreview so exec.* renders to {{AT RUNTIME:exec.<key>}}
+		// (no exec_id has been allocated yet) and dynamics that depend
+		// on generated artifacts (review_reports, code_mgmt_review)
+		// return their preview sentinel. project_info is mode-agnostic
+		// (returns real data in any mode) so the inspection still
+		// shows the project context block.
+		rt.SetMode(flow.ModePreview)
+		if bundle.BaseVars != nil {
+			rt.SetVars(bundle.BaseVars)
+		}
+		if bundle.Dynamics != nil {
+			rt.SetDynamics(bundle.Dynamics)
+		}
+		return bundle.Prompt.Inspect(rt)
+	}
+	// Fallback: unknown action or role-scoped path. The PromptFile is
+	// the canonical anchored-prompt impl; env.NewInspectionContext wires
+	// the default dynamics (currently project_info).
+	pf := prompts.PromptFile{
+		Path:      promptPath,
+		PrePrompt: prePrompt,
+		Assembler: env.Assembler(),
+		Vars:      env.BuildAssemblerVars(promptPath, roleLabel, promptAction),
+	}
+	return pf.Inspect(env.NewInspectionContext(roleLabel, promptAction))
+}
+
+// bundleForInspection returns the verb factory's bundle for the current
+// promptAction, or nil if the action has no factory entry. Role-scoped
+// actions (`--role X --action report`) intentionally fall back to the
+// plain-PromptFile path because the per-role factories haven't migrated
+// yet — they will in a later step.
+func bundleForInspection(env *root.ResolvedEnv, prePrompt, postPrompt string) *flow.PromptBundle {
+	if promptRole != "" {
+		return nil
+	}
+	switch promptAction {
+	case runner.ActionReview:
+		return NewReviewBundle(ReviewBundleInput{
+			Env:        env,
+			PrePrompt:  prePrompt,
+			PostPrompt: postPrompt,
+		})
+	}
+	return nil
+}
+
 func applyPromptBatchOverride(assembled string) string {
 	if promptBatch == "" {
 		return assembled
@@ -429,21 +508,12 @@ func assembleForInspection() (string, []sectionDigest, error) {
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, promptAction)
 	engine := env.BuildEngine(roleLabel, promptAction)
 
-	// Per the spec, --paths / --inline-paths surface their section
-	// provenance through prompts.Prompt.Inspect. We wrap the current
-	// preview state in a PromptFile (the canonical anchored-prompt
-	// impl) and call Inspect via the dispatcher-wired ctx so dynamics
-	// — most notably {{dynamic.project_info}} — render in preview mode
-	// just like they would during flow.Verify. The cmd-layer "live"
-	// sections (reports manifest, review body, etc.) are appended
-	// below; the spec leaves their orchestration at the verb layer.
-	pf := prompts.PromptFile{
-		Path:      promptPath,
-		PrePrompt: prePrompt,
-		Assembler: a,
-		Vars:      vars,
-	}
-	sections, err := pf.Inspect(env.NewInspectionContext(roleLabel, promptAction))
+	// Per spec Next-round step 7, --paths / --inline-paths inspect the
+	// SAME bundle the live verb produces. Known factory actions go
+	// through the verb factory (so dynamics like review_reports resolve
+	// against the same env/selector the live run uses); unknown actions
+	// fall back to a plain PromptFile against the anchor chain.
+	sections, err := inspectBundleForCurrentAction(env, promptPath, prePrompt, postPrompt, roleLabel)
 	if err != nil {
 		return "", nil, err
 	}
@@ -474,23 +544,11 @@ func assembleForInspection() (string, []sectionDigest, error) {
 			Content:  content,
 		})
 	}
-	// Live-section dispatch is keyed on the canonical action name. The
-	// factory map (review / code_management / verify) shapes the body;
-	// the matching live sections (reports manifest, review.md body,
-	// previous_report) get appended here.
+	// Live-section dispatch for actions that DON'T yet flow their
+	// generated-artifact content through a dynamic. Once code_management
+	// migrates to dynamic.code_mgmt_review (step 6) and report grows a
+	// previous_report dynamic, this switch dies entirely.
 	switch promptAction {
-	case runner.ActionReview:
-		// Review bundles a manifest of role reports plus their full
-		// bodies (formatReportsBlock from assembleReview). There is NO
-		// "previous_review" equivalent — the supervisor reads the prior
-		// review.md via its path at run time (see defaults/prompts/
-		// review.prompt.md), it isn't inlined into the prompt at
-		// assembly time.
-		all, derr := prompts.DiscoverReports(env.ProjectDir)
-		if derr == nil {
-			reports, _ := (prompts.ReviewSelector{}).Filter(all, env.Config.Roles)
-			addLive("reports", "(assembleReview: manifest + bundled role reports)", formatReportsBlock(reports))
-		}
 	case "code_management":
 		// Code-management bundles the current review.md as the
 		// supervisor's input. Missing review.md is non-fatal during

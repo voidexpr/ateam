@@ -237,6 +237,9 @@ func verifyBundle(b *PromptBundle, rc RunCtx) (err error) {
 	}()
 	rt := NewRuntime(rc.DB, rc.Resolved, "")
 	rt.SetMode(ModePreview)
+	if b.BaseVars != nil {
+		rt.SetVars(b.BaseVars)
+	}
 	if b.Dynamics != nil {
 		rt.SetDynamics(b.Dynamics)
 	}
@@ -351,7 +354,18 @@ type PromptBundle struct {
 	Action string      // optional override of env.Action
 	Env    *RuntimeEnv // optional override of parent's env (used for per-role profile)
 
-	Prompt   Prompt
+	Prompt Prompt
+	// BaseVars is the factory-supplied resolver for non-exec.* namespaces
+	// (project.*, prompt.*, git.*, container.*, ateam.*, role.*). exec.*
+	// always dispatches to rt's fields via runtimeVars regardless of
+	// what's in BaseVars. flow.execute calls rt.SetVars(b.BaseVars)
+	// before Prompt.Resolve runs, so any consumer of ctx.Vars() sees the
+	// runtime-aware view. Spec: this is "the framework builds an impl
+	// per-invocation and stores it on Runtime.Vars" (line 310-311) made
+	// concrete.
+	BaseVars Vars
+	// Vars is the factory-curated args.* / roles.* / action.* map. Spec
+	// line 287; the merge into rt.Vars happens in step 8.
 	Vars     map[string]string
 	Dynamics PromptDynamic
 	RunOpts  func(env RuntimeEnv) runner.RunOpts
@@ -374,6 +388,9 @@ func (b PromptBundle) resolvePrompt(rc RunCtx, env RuntimeEnv, opts runner.RunOp
 		return "", errBundleHasNoPrompt
 	}
 	rt := newBundleRuntime(rc, env, opts, prepared)
+	if b.BaseVars != nil {
+		rt.SetVars(b.BaseVars)
+	}
 	if b.Dynamics != nil {
 		rt.SetDynamics(b.Dynamics)
 	}

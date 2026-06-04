@@ -6,7 +6,6 @@ import (
 	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/flow/actions"
 	"github.com/ateam/internal/prompts"
-	"github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 )
@@ -28,76 +27,53 @@ type ReviewBundleInput struct {
 	ReviewFile string
 }
 
-// reviewPrompt wraps the standard PromptFile composition with the reports
-// manifest + bundled role reports block, then the outermost --post-prompt
-// tail. Matches the legacy assembleReview ordering byte-for-byte:
+// reviewReportsDynamic returns the dynamic that renders the reports
+// manifest + bundled bodies block. The closure captures env + selector
+// so live invocations rediscover the latest reports each Resolve; tests
+// inject the report list directly via reviewReportsDynamicForTest.
 //
-//	[pre-prompt] / pre fragments / role main / post fragments
-//	---
-//	reports manifest + bundled bodies
-//	---
-//	rendered --post-prompt
-//
-// PostPrompt sits OUTSIDE the assembler (and outside the reports block) on
-// purpose — operators expect it to be the absolute outermost tail.
-type reviewPrompt struct {
-	file       *prompts.PromptFile
-	reports    []prompts.RoleReport
-	postPrompt string
-	engine     *assembler.Engine
-	vars       assembler.Vars
-}
-
-func (r *reviewPrompt) Resolve(ctx prompts.ResolveContext) (string, error) {
-	body, err := r.file.Resolve(ctx)
-	if err != nil {
-		return "", err
+// SPEC INVARIANT (plans/feature_prompt_cmd_bundle_aware.md line 388-399):
+// dynamics that depend on generated artifacts return preview sentinels
+// in ModePreview rather than reading disk. Verify pass + `ateam prompt
+// --action review` see the sentinel; live `ateam review` runs the real
+// branch.
+func reviewReportsDynamic(env *root.ResolvedEnv, selector prompts.ReviewSelector) prompts.PromptDynamicFunction {
+	return func(ctx prompts.ResolveContext, _ ...string) (string, error) {
+		if ctx.Mode() == prompts.ModePreview {
+			return "{{AT RUNTIME: review reports manifest}}", nil
+		}
+		all, err := prompts.DiscoverReports(env.ProjectDir)
+		if err != nil {
+			return "", err
+		}
+		reports, _ := selector.Filter(all, env.Config.Roles)
+		return formatReportsBlock(reports), nil
 	}
-	out := body
-	if block := formatReportsBlock(r.reports); block != "" {
-		out += "\n\n---\n\n" + block
-	}
-	rendered, err := renderCLIWrapper(r.engine, r.vars, r.postPrompt)
-	if err != nil {
-		return "", err
-	}
-	if rendered != "" {
-		out += "\n\n---\n\n" + rendered
-	}
-	return out, nil
-}
-
-func (r *reviewPrompt) Inspect(ctx prompts.ResolveContext) ([]prompts.Section, error) {
-	return r.file.Inspect(ctx)
 }
 
 // NewReviewBundle constructs the PromptBundle for `ateam review`. The
-// returned bundle uses the new Prompt-based resolution path (no Render
-// closure); flow walks Prepare → Prompt.Resolve → ExecutePrepared.
+// review prompt body lives entirely in defaults/prompts/review.prompt.md;
+// the reports manifest is woven in via `{{dynamic.review_reports}}` so
+// the live path and preview path share the exact same composition (per
+// spec Next-round step 4-5).
 func NewReviewBundle(in ReviewBundleInput) *flow.PromptBundle {
 	a := in.Env.Assembler()
-	engine := in.Env.BuildEngine("the supervisor", "review")
 	vars := in.Env.BuildAssemblerVars("review", "the supervisor", "review")
-	pf := &prompts.PromptFile{
-		Path:      "review",
-		PrePrompt: in.PrePrompt,
-		Assembler: a,
-		Vars:      vars,
-	}
-	rp := &reviewPrompt{
-		file:       pf,
-		reports:    in.Reports,
-		postPrompt: in.PostPrompt,
-		engine:     engine,
-		vars:       vars,
-	}
+	selector := prompts.ReviewSelector{} // ateam review always renders the manifest the verb pre-filtered.
 	return &flow.PromptBundle{
 		Name:   "review",
 		Role:   "supervisor",
 		Action: runner.ActionReview,
-		Prompt: rp,
+		Prompt: prompts.PromptFile{
+			Path:       "review",
+			PrePrompt:  in.PrePrompt,
+			PostPrompt: in.PostPrompt,
+			Assembler:  a,
+		},
+		BaseVars: vars,
 		Dynamics: prompts.PromptDynamic{
-			"project_info": in.Env.ProjectInfoDynamic("the supervisor", "review"),
+			"project_info":   in.Env.ProjectInfoDynamic("the supervisor", "review"),
+			"review_reports": reviewReportsDynamicForReports(in.Reports, in.Env, selector),
 		},
 		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
 			return runner.RunOpts{
@@ -119,5 +95,36 @@ func NewReviewBundle(in ReviewBundleInput) *flow.PromptBundle {
 			actions.PrintArtifactPath{Label: "Review", Path: in.ReviewFile},
 			actions.PrintArtifactBody{If: in.Print, Path: in.ReviewFile},
 		},
+	}
+}
+
+// reviewReportsDynamicForReports returns a dynamic that yields the
+// supplied reports verbatim in ModeReal — the verb layer has already
+// discovered and filtered (ReviewEmptyError surfaces there), so the
+// dynamic must NOT rediscover. ModePreview still gates on the spec
+// sentinel.
+//
+// env + selector are accepted so an unpopulated Reports input
+// (`ateam prompt --action review` from the factory map, no verb-layer
+// discovery) can fall back to a live discovery against env. In ModeReal
+// with empty Reports + non-nil env, this performs the discovery; in
+// ModeReal with populated Reports, returns them as-is.
+func reviewReportsDynamicForReports(reports []prompts.RoleReport, env *root.ResolvedEnv, selector prompts.ReviewSelector) prompts.PromptDynamicFunction {
+	return func(ctx prompts.ResolveContext, _ ...string) (string, error) {
+		if ctx.Mode() == prompts.ModePreview {
+			return "{{AT RUNTIME: review reports manifest}}", nil
+		}
+		if len(reports) > 0 {
+			return formatReportsBlock(reports), nil
+		}
+		if env == nil {
+			return formatReportsBlock(nil), nil
+		}
+		all, err := prompts.DiscoverReports(env.ProjectDir)
+		if err != nil {
+			return "", err
+		}
+		filtered, _ := selector.Filter(all, env.Config.Roles)
+		return formatReportsBlock(filtered), nil
 	}
 }

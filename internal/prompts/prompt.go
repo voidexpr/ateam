@@ -150,9 +150,17 @@ func (p PromptFile) assemble(ctx ResolveContext) (assembler.AssembleResult, erro
 	if p.Path == "" {
 		return assembler.AssembleResult{}, errors.New("prompts.PromptFile: empty Path")
 	}
+	// SPEC INVARIANT (plans/feature_prompt_cmd_bundle_aware.md Next-round
+	// step 4-5): when ctx is non-nil, ctx.Vars() is the single resolver.
+	// It dispatches exec.* against flow.Runtime fields and falls through
+	// to the bundle's BaseVars for other namespaces. p.Vars survives only
+	// as a fallback for ctx-less callers (unit tests that exercise
+	// PromptFile in isolation).
 	vars := p.Vars
-	if vars == nil && ctx != nil {
-		vars = ctx.Vars()
+	if ctx != nil {
+		if v := ctx.Vars(); v != nil {
+			vars = v
+		}
 	}
 	engine := assembler.NewEngine(p.Assembler, 0)
 	if ctx != nil {

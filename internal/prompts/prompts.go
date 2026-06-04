@@ -258,18 +258,6 @@ func isRoleEnabled(roles map[string]string, id string) bool {
 	return v != roleStatusOff
 }
 
-// ReviewEmptyError is returned by the review assembly path (cmd's
-// assembleReview) when ReviewSelector's filters eliminate every report. The
-// funnel lets cmd/review.go format a breakdown so the user knows which step
-// zeroed things out.
-type ReviewEmptyError struct {
-	Funnel ReviewFunnel
-}
-
-func (e *ReviewEmptyError) Error() string {
-	return "no reports left after filters"
-}
-
 // ProjectInfoParams holds the values needed to build the project info section.
 type ProjectInfoParams struct {
 	OrgDir      string // absolute path to .ateamorg/

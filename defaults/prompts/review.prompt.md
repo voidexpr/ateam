@@ -94,3 +94,7 @@ The full review — every section listed under Output Validation Gate, with full
 After the `Write` call returns successfully, your FINAL assistant message must be a single short line confirming the write, e.g. `Review written to {{exec.output_file}}`. Do not include the review body in the final message; do not include any other commentary. The on-disk file is the source of truth — the harness reads it directly, so anything you stream as text is discarded.
 
 If the `Write` call fails, retry it once. If it still fails, then (and only then) emit the review as your final message so the harness can recover it from the stream.
+
+---
+
+{{dynamic.review_reports}}

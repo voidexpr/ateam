@@ -365,18 +365,19 @@ func TestPromptExternalPromptFileFraming(t *testing.T) {
 	}
 }
 
-// TestPromptPathsSurfacesReviewReports verifies that `ateam prompt
-// --action review --paths` lists the reports manifest as a live section
-// — without requiring the deprecated --supervisor flag. The factory map
-// routes --action review through previewReview/assembleReview which
-// bundles the manifest into the body, so the inspection table must
-// surface the same live section regardless of which form (--supervisor
-// or canonical --action) the operator typed.
-func TestPromptPathsSurfacesReviewReports(t *testing.T) {
+// TestPromptInlinePathsSurfacesReviewReportsSentinel verifies the spec
+// invariant (line 388-399) that `dynamic.review_reports` returns its
+// preview sentinel under `ateam prompt --action review`. After the
+// step-4-5 migration the manifest is woven into role_main via the
+// dynamic, not appended as a separate live section — preview output
+// shows the sentinel + structural breakdown, not the actual reports.
+//
+// Operators who want to see actual reports content run `ateam review
+// --dry-run` instead, which runs ModeReal and feeds the real manifest.
+func TestPromptInlinePathsSurfacesReviewReportsSentinel(t *testing.T) {
 	defer savePromptGlobals()()
 	projPath := setupPromptProject(t)
 
-	// Seed a role report so DiscoverReports has something to surface.
 	reportDir := filepath.Join(projPath, ".ateam", "shared", "report")
 	if err := os.MkdirAll(reportDir, 0755); err != nil {
 		t.Fatal(err)
@@ -386,24 +387,18 @@ func TestPromptPathsSurfacesReviewReports(t *testing.T) {
 	}
 
 	promptAction = runner.ActionReview
-	promptPaths = true
+	promptInlinePaths = true
 
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
-			if err := runPromptPaths(); err != nil {
-				t.Fatalf("runPromptPaths: %v", err)
+			if err := runPromptInlinePaths(); err != nil {
+				t.Fatalf("runPromptInlinePaths: %v", err)
 			}
 		})
 	})
 
-	// The "reports" live section is the review-side equivalent of the
-	// previous_report section that --action report surfaces. Verify both
-	// the slot name and the [live] anchor land in the table.
-	if !strings.Contains(out, "reports") {
-		t.Errorf("expected 'reports' live section, got:\n%s", out)
-	}
-	if !strings.Contains(out, "[live]") {
-		t.Errorf("expected [live] anchor for reports section, got:\n%s", out)
+	if !strings.Contains(out, "{{AT RUNTIME: review reports manifest}}") {
+		t.Errorf("expected review_reports preview sentinel in role_main, got:\n%s", out)
 	}
 }
 

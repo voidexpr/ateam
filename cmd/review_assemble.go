@@ -10,70 +10,13 @@ import (
 	"github.com/ateam/internal/root"
 )
 
-// assembleReview builds the supervisor review prompt via the assembler.
-// Composition order:
-//
-//	[--pre-prompt]            (outermost head)
-//	_pre.context.md           {{project.info}}
-//	review.prompt.md          supervisor body (or customPrompt via ReplaceRoleMain)
-//	review.post.*.md          user-authored extras
-//	<reports block>           manifest + bundled role reports (appended)
-//	[--post-prompt]           (outermost tail)
-//
-// Reports are appended manually (not via a fragment file) because the
-// assembler's per-slot composition is anchor-first (embedded → project),
-// which would put project-authored extras AFTER an embedded reports
-// fragment — the opposite of the legacy ordering. Appending keeps
-// extras → reports, matching legacy bytes.
-//
-// roleLabel feeds {{project.info}} ("the supervisor" for live runs); pass
-// "" to suppress. customPrompt replaces the supervisor body wholesale via
-// the assembler's ReplaceRoleMain option. prePrompt / postPrompt wrap the
-// assembled output at the outermost positions.
-//
-// Returns the same ReviewEmptyError as the assembler-only path when the
-// selector's filters eliminate every report.
-func assembleReview(env *root.ResolvedEnv, selector prompts.ReviewSelector, roleLabel, customPrompt, prePrompt, postPrompt string) (string, error) {
-	all, err := prompts.DiscoverReports(env.ProjectDir)
-	if err != nil {
-		return "", err
-	}
-	if len(all) == 0 {
-		return "", fmt.Errorf("no report files found under %s — run 'ateam report' first", env.SharedDir())
-	}
-	reports, funnel := selector.Filter(all, env.Config.Roles)
-	if len(reports) == 0 {
-		return "", &prompts.ReviewEmptyError{Funnel: funnel}
-	}
-
-	a := env.Assembler()
-	engine := env.BuildEngine(roleLabel, "review")
-	vars := env.BuildAssemblerVars("review", roleLabel, "review")
-	// Pre-prompt rides through the assembler (lands before _pre.context.md).
-	// Post-prompt is held until after the manually-appended reports block so
-	// it stays as the outermost tail wrapper.
-	opts := &assembler.AssembleOptions{
-		ReplaceRoleMain: customPrompt,
-		PrePrompt:       prePrompt,
-	}
-	res, err := a.Assemble("review", vars, engine, opts)
-	if err != nil {
-		return "", err
-	}
-
-	prompt := res.Prompt
-	if block := formatReportsBlock(reports); block != "" {
-		prompt += "\n\n---\n\n" + block
-	}
-	post, err := renderCLIWrapper(engine, vars, postPrompt)
-	if err != nil {
-		return "", err
-	}
-	if post != "" {
-		prompt += "\n\n---\n\n" + post
-	}
-	return prompt, nil
-}
+// SPEC INVARIANT (plans/feature_prompt_cmd_bundle_aware.md Next-round
+// step 5): the old assembleReview function used to compose the review
+// prompt via a parallel path that hand-appended the reports manifest.
+// It is gone. Both live `ateam review` and `ateam prompt --action
+// review` now go through NewReviewBundle → bundle.Prompt.Resolve, with
+// the manifest woven in by dynamic.review_reports inside
+// defaults/prompts/review.prompt.md.
 
 // assembleSupervisor is the generic single-prompt supervisor assembler:
 // builds promptPath via env.Assembler() and wraps with pre/post-prompt.
