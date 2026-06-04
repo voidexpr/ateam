@@ -31,14 +31,15 @@ verification ─── resolution ─── execution
 ```
 
 - **Verification.** Walks every `PromptBundle` in the pipeline before any
-  bundle executes. Calls each bundle's `Prompt.Resolve(rt, ModePreview)`.
+  bundle executes. Builds a Runtime with `Mode == ModePreview` and calls
+  each bundle's `Prompt.Resolve(rt)`.
   Surfaces authoring errors as a batched `VerifyResult`.
 - **Resolution.** Per bundle, in this order:
   1. `Executor.Prepare(opts)` allocates `exec_id`, log/runtime paths, and
      inserts the DB row with `prompt_file = .ateam/logs/<exec_id>/prompt.md`.
   2. Flow builds `Runtime` (Vars populated with real `exec.*` values,
      `prompt.*` from bundle metadata, dynamics map).
-  3. `bundle.Prompt.Resolve(rt, ModeReal)` produces the final text.
+  3. `bundle.Prompt.Resolve(rt)` produces the final text. `rt.Mode()` is `ModeReal`. **This is a flow step, not an Executor method.**
   4. Flow writes the text to `prepared.PromptFile`.
   5. `Executor.ExecutePrepared(ctx, prepared, text)` invokes the agent.
 
@@ -57,15 +58,20 @@ impl.
 
 | Lives in `flow` | Lives in `internal/prompts/` |
 |---|---|
-| `Prompt` interface | `RawTextPrompt`, `PromptText`, `PromptFile` impls |
-| `Runtime` struct | Resolver engine (`Expand`, anchor walk, `Assemble`) |
-| `PromptBundle` | `Vars` type and `MapVars` impl |
-| `ResolveMode`, `Section` (re-exported) | `PromptDynamic`, `PromptDynamicFunction` |
-| Lifecycle (`Run`, `Verify`, `Walk`) | `Vars` constructor (combines runtime + static) |
+| `Runtime` struct (implements `prompts.ResolveContext`) | `Prompt` interface, `ResolveContext` interface |
+| `PromptBundle` | `RawTextPrompt`, `PromptText`, `PromptFile` impls |
+| Lifecycle: `Run`, `Verify`, `Walk` | Resolver engine (`Expand`, anchor walk, `Assemble`) |
+| `Executor` interface (`Prepare`, `ExecutePrepared`) | `Vars` type and `MapVars` impl |
+| Re-exported type aliases (`Prompt`, `Vars`, `ResolveMode`, `Section`, …) so callers don't import both | `PromptDynamic`, `PromptDynamicFunction`, `Section` |
 
-Flow defines *when* prompts resolve and *what shape* they have. The prompts
-package owns *how* they resolve. Flow imports prompts to expose the types
-its API talks about; the prompts package doesn't import flow.
+Flow defines *when* prompts resolve. The prompts package owns *how* they
+resolve and *what types* describe them. Flow imports prompts and re-exports
+the types its API mentions; the prompts package never imports flow.
+
+The runner (`Executor`) does **not** participate in prompt resolution.
+Its surface is `Prepare(opts)` + `ExecutePrepared(prepared, text)`. Flow
+calls `bundle.Prompt.Resolve(rt)` between those two — resolution is a
+flow step, not a runner method.
 
 ## Types
 
@@ -187,7 +193,27 @@ type PromptText struct {
 // role_main, role_post, dir_post fragments per the assembler's rules; then
 // expands the assembled body.
 type PromptFile struct {
-    Path       string  // "code", "review", "report/security"
+    // Path is interpreted in one of two ways depending on its shape:
+    //
+    //   1. Logical name — no path separator, no ".prompt.md" suffix.
+    //      Examples: "review", "code", "report/security".
+    //      Resolved via the standard anchor walk (project → org → embedded).
+    //      The framing fragments compose around the role main found in that
+    //      chain.
+    //
+    //   2. Filesystem path — ends in ".prompt.md", contains a path separator
+    //      or is absolute. Examples: "/tmp/foo.prompt.md",
+    //      ".ateam/prompts/foo.prompt.md".
+    //      Resolved by injecting the file's parent dir as a temporary
+    //      anchor at the front of the chain. Sibling fragments
+    //      (<basename>.pre.*.md, dir-level _pre.*.md in that dir) compose;
+    //      standard anchors still apply for inherited framing.
+    //
+    // Detection rule: filesystem path ⇔ Path ends in ".prompt.md" AND
+    // contains either a "/" or starts with ".". Everything else is a
+    // logical name.
+    Path string
+
     PrePrompt  string  // optional --pre-prompt content
     PostPrompt string  // optional --post-prompt content
     CustomBody string  // optional override of the role main
@@ -221,15 +247,23 @@ compose. Standard anchors still apply for inherited framing.
 type PromptBundle struct {
     Name, Role, Action string  // reporting metadata only; no logic reads these
 
-    Prompt Prompt  // built by the factory; self-contained
+    Prompt Prompt          // built by the factory; self-contained
+    Vars   map[string]string // factory-curated args.* / roles.* / action.* values
 
     RunOpts  func(RuntimeEnv) runner.RunOpts
     PreExec, PostExec []Action
 }
 ```
 
-`Render` is gone. Framework calls `bundle.Prompt.Resolve(rt, mode)` at the
-moment it needs the text.
+`Render` is gone. Framework builds a Runtime, merges `bundle.Vars` into
+`rt.Vars`, then calls `bundle.Prompt.Resolve(rt)` at the moment it needs
+the text.
+
+**`Vars` is the canonical home for factory-curated values.** Prompt impls
+(`PromptFile`, `PromptText`, etc.) stay focused on prompt source/framing.
+They don't carry CLI-derived state — that belongs at the bundle level so
+the same Prompt type can be reused across factories with different
+exposed values.
 
 ## Vars
 
@@ -426,7 +460,8 @@ func Run(top Step, env RuntimeEnv, rc RunCtx) PipelineResult {
 ```
 
 Tree traversal: `flow.Step` interface gains `Walk(func(*PromptBundle))`.
-Verify calls each `bundle.Prompt.Resolve(rt, ModePreview)`. Errors batched
+For each bundle, Verify builds a Runtime with `Mode == ModePreview`,
+merges `bundle.Vars`, and calls `bundle.Prompt.Resolve(rt)`. Errors batched
 per decision.
 
 Verification's behavior decomposes from primitives — no special-case rules:
@@ -448,18 +483,17 @@ option struct and returns a `*flow.PromptBundle`. Factory exposes only the
 
 ```go
 func NewReviewBundle(env *root.ResolvedEnv, opts ReviewFactoryOpts) (*flow.PromptBundle, error) {
-    staticVars := map[string]string{
-        "args.no_project_info": boolStr(opts.NoProjectInfo),
-        "roles.selected":       strings.Join(opts.SelectedRoles, " "),
-        // ...positive-listed; nothing else from opts leaks into args.*
-    }
     return &flow.PromptBundle{
         Name: "review", Role: "supervisor", Action: runner.ActionReview,
         Prompt: &prompts.PromptFile{
             Path:       "review",
             PrePrompt:  opts.PrePrompt,
             PostPrompt: opts.PostPrompt,
-            StaticVars: staticVars,
+        },
+        Vars: map[string]string{
+            "args.no_project_info": boolStr(opts.NoProjectInfo),
+            "roles.selected":       strings.Join(opts.SelectedRoles, " "),
+            // ...positive-listed; nothing else from opts leaks into args.*
         },
         RunOpts: ..., PreExec: ..., PostExec: ...,
     }, nil
@@ -478,8 +512,8 @@ Same machinery as live runs with `mode = ModePreview`:
 ```go
 factory := promptFactories[promptAction]
 bundle, err := factory(env, opts)
-rt := buildRuntime(env, ModePreview)  // sentinel exec.*
-text, err := bundle.Prompt.Resolve(rt, ModePreview)
+rt := buildRuntime(env, ModePreview)  // sentinel exec.*; merges bundle.Vars
+text, err := bundle.Prompt.Resolve(rt)
 fmt.Println(text)
 ```
 
@@ -547,7 +581,7 @@ two-pass mechanism.
 |---|---|---|---|
 | 1 | Engine extensions: `PromptDynamic`, `{{ns.key ? default}}`, `{{include path ? TEXT}}`, quoted-arg parser, `ResolveContext` interface | None | Low |
 | 2 | Add `flow.Runtime`, `prompts.{Prompt, RawTextPrompt, PromptText, PromptFile}` types. Coexists with today's `Render` (nothing uses the new types yet) | None | Low |
-| 3 | Reshape `Executor` interface: `Prepare(opts)` → `ResolvePrompt(prepared, bundle)` → `ExecutePrepared(prepared, text)`. Replace `prompt_hash` DB column with `prompt_file`. Old `Render` path still works through a compat shim that calls the new `ResolvePrompt` under the hood | Change #10 | **High** (runner contract change) |
+| 3 | Reshape `Executor` interface to `Prepare(opts)` + `ExecutePrepared(prepared, text)` — drop the prompt arg from Prepare. Prompt resolution happens in flow between the two calls, via `bundle.Prompt.Resolve(rt)`. Replace `prompt_hash` DB column with `prompt_file`. Old `Render` path keeps working through a compat shim in flow that does the in-between resolve step internally | Change #10 | **High** (runner contract change) |
 | 4 | Migrate one verb end-to-end (suggest `review`) — factory + PromptFile + new Executor flow. `PromptBundle.Render` deleted for this verb | None observable | Medium |
 | 5 | Migrate remaining verbs (`code`, `verify`, `auto_setup`, `code_management` supervisor, `report` per-role, `inspect --auto-debug`, `exec`, `parallel`). Render compat shim deleted once all verbs migrated | None observable | Medium |
 | 6 | Drop ALL_CAPS legacy + sweep `defaults/prompts/` + `{{project.info}}` → `{{dynamic.project_info}}` migration + ALL_CAPS detection-error in `runtime.hcl` | Changes #4, #6 | **High** (test sweep) |
