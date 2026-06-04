@@ -18,20 +18,18 @@ import (
 )
 
 var (
-	reviewFlags        CommonExecFlags
-	reviewCustomPrompt string
-	reviewPrint        bool
-	reviewDryRun       bool
-	reviewForce        bool
-	reviewRoles        []string
-	reviewAll          bool
-	reviewMaxAge       string
+	reviewFlags  CommonExecFlags
+	reviewPrint  bool
+	reviewDryRun bool
+	reviewForce  bool
+	reviewRoles  []string
+	reviewAll    bool
+	reviewMaxAge string
 )
 
 // ReviewOptions holds configuration for a review run.
 type ReviewOptions struct {
 	CommonExecFlags
-	CustomPrompt    string
 	Print           bool
 	DryRun          bool
 	Force           bool
@@ -48,10 +46,14 @@ decisions document.
 
 Works from any project directory — discovers the .ateamorg/ and .ateam/ structure.
 
+Operators who want to override the supervisor body place a custom
+review.prompt.md under .ateam/prompts/ (project anchor) or
+.ateamorg/prompts/ (org anchor); the standard framing still composes
+around it.
+
 Example:
   ateam review
-  ateam review --post-prompt "Focus on security findings"
-  ateam review --prompt @custom_review.md`,
+  ateam review --post-prompt "Focus on security findings"`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		maxAge, err := parseMaxAge(reviewMaxAge)
 		if err != nil {
@@ -59,7 +61,6 @@ Example:
 		}
 		return runReview(ReviewOptions{
 			CommonExecFlags: reviewFlags,
-			CustomPrompt:    reviewCustomPrompt,
 			Print:           reviewPrint,
 			DryRun:          reviewDryRun,
 			Force:           reviewForce,
@@ -106,7 +107,6 @@ func init() {
 		Effort:       "reasoning effort override, passed verbatim to the agent CLI",
 		MaxBudgetUSD: "USD spend cap for the supervisor (claude-only; errors on codex)",
 	})
-	reviewCmd.Flags().StringVar(&reviewCustomPrompt, "prompt", "", "custom prompt replacing default supervisor role (text or @filepath)")
 	reviewCmd.Flags().BoolVar(&reviewPrint, "print", false, "print review to stdout after completion")
 	reviewCmd.Flags().BoolVar(&reviewDryRun, "dry-run", false, "print the computed prompt and list reports without running")
 	reviewCmd.Flags().StringSliceVar(&reviewRoles, "roles", nil, "limit review to these roles' reports (default: all enabled roles)")
@@ -124,10 +124,6 @@ func runReview(opts ReviewOptions) error {
 		return err
 	}
 
-	customPrompt, err := prompts.ResolveOptional(opts.CustomPrompt)
-	if err != nil {
-		return err
-	}
 	prePrompt, err := prompts.ResolveOptional(opts.PrePrompt)
 	if err != nil {
 		return err
@@ -174,17 +170,16 @@ func runReview(opts ReviewOptions) error {
 	startedAt := time.Now()
 
 	bundle := NewReviewBundle(ReviewBundleInput{
-		Env:          env,
-		Reports:      reports,
-		CustomPrompt: customPrompt,
-		PrePrompt:    prePrompt,
-		PostPrompt:   postPrompt,
-		TimeoutMin:   timeout,
-		Verbose:      opts.Verbose,
-		Force:        opts.Force,
-		Print:        opts.Print,
-		StartedAt:    startedAt,
-		ReviewFile:   reviewFile,
+		Env:        env,
+		Reports:    reports,
+		PrePrompt:  prePrompt,
+		PostPrompt: postPrompt,
+		TimeoutMin: timeout,
+		Verbose:    opts.Verbose,
+		Force:      opts.Force,
+		Print:      opts.Print,
+		StartedAt:  startedAt,
+		ReviewFile: reviewFile,
 	})
 
 	if opts.DryRun {

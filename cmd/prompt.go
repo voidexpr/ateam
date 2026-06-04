@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
@@ -26,6 +27,7 @@ var (
 	promptPaths                bool
 	promptInlinePaths          bool
 	promptBatch                string
+	promptRaw                  bool
 )
 
 var promptCmd = &cobra.Command{
@@ -63,6 +65,7 @@ func init() {
 	promptCmd.Flags().BoolVar(&promptPaths, "paths", false, "show a per-section breakdown table (slot + anchor + path + mod time + tokens); no prompt body")
 	promptCmd.Flags().BoolVar(&promptInlinePaths, "inline-paths", false, "print the full prompt with each section preceded by an anchor/path/mod-time/tokens header; troubleshooting view, not for agent consumption")
 	promptCmd.Flags().StringVar(&promptBatch, "batch", "", "bake a literal batch ID into {{exec.batch}} placeholders (otherwise rendered as the deferred {{BATCH}} marker for the runner to fill at exec time)")
+	promptCmd.Flags().BoolVar(&promptRaw, "raw", false, "literal-file mode only: print the file verbatim (no template engine, no --batch substitution)")
 	promptCmd.MarkFlagsMutuallyExclusive("role", "supervisor")
 	promptCmd.MarkFlagsMutuallyExclusive("paths", "inline-paths")
 	// --action is conditionally required: it's needed for role/supervisor/
@@ -71,6 +74,14 @@ func init() {
 }
 
 func runPrompt(cmd *cobra.Command, args []string) error {
+	if promptSupervisor {
+		// Deprecation warning per the prompt-lifecycle refactor: the bare
+		// `--action <X>` form covers every shape `--supervisor --action X`
+		// used to produce (review / code / verify all live as top-level
+		// action factories now). Kept working through the next release
+		// for orchestrators that hard-code the flag.
+		fmt.Fprintln(os.Stderr, "warning: --supervisor is deprecated; use --action <X> directly (will be removed in a future release)")
+	}
 	if promptInlinePaths {
 		return runPromptInlinePaths()
 	}
@@ -116,21 +127,89 @@ func runPromptLiteralFile(pathArg string) error {
 	if err != nil {
 		return err
 	}
+	// --raw short-circuits before any engine work: the contents go to
+	// stdout byte-for-byte (no template expansion, no --batch baking).
+	// Used when an operator wants to confirm what the agent will see for
+	// `ateam exec --raw @PATH` without the assembler in the way.
+	if promptRaw {
+		fmt.Println(content)
+		return nil
+	}
 	env, err := resolveEnv()
 	if err != nil {
 		return err
 	}
+
+	// Spec dispatch rule: @PATH ending in ".prompt.md" composes through
+	// the standard framing (root pre, dir pre, role main, role post,
+	// dir post). When PATH sits outside every standard anchor, its parent
+	// dir is injected as a temporary anchor at the front of the chain so
+	// sibling <basename>.pre.*.md and dir-level _pre.*.md fragments next
+	// to the file compose alongside the inherited framing.
+	cleanPath := strings.TrimPrefix(pathArg, "@")
+	if isFilesystemPromptPath(cleanPath) {
+		return runPromptExternalFile(env, cleanPath)
+	}
+
+	// Inline-text path: read the file as opaque text, expand directives
+	// against the standard vars + dynamics. No anchor walk, no framing.
+	// promptPath has no meaningful value here — the file isn't routed
+	// through an action/role namespace. Pass the resolved @<path> as a
+	// label so {{prompt.path}} renders to something traceable if the
+	// user references it; {{prompt.name}} gets the basename.
 	_ = env.Assembler() // ensure assembler is initialized for env.BuildEngine
-	// promptPath has no meaningful value in literal-file mode — the file
-	// isn't routed through an action/role namespace. Pass the resolved
-	// @<path> as a label so {{prompt.path}} renders to something traceable
-	// if the user references it; {{prompt.name}} gets the basename.
-	vars := env.BuildAssemblerVars(strings.TrimPrefix(pathArg, "@"), "", "")
+	vars := env.BuildAssemblerVars(cleanPath, "", "")
 	rendered, err := env.BuildEngine("", "").Render(content, vars)
 	if err != nil {
 		return fmt.Errorf("rendering %s: %w", pathArg, err)
 	}
 	fmt.Println(applyPromptBatchOverride(rendered))
+	return nil
+}
+
+// isFilesystemPromptPath reports whether path triggers the .prompt.md
+// framing path: ends in ".prompt.md" AND looks like a filesystem reference
+// (contains a path separator or starts with "."). A bare logical name like
+// "review" goes through the factory layer instead.
+func isFilesystemPromptPath(path string) bool {
+	if !strings.HasSuffix(path, ".prompt.md") {
+		return false
+	}
+	return strings.ContainsRune(path, '/') || strings.HasPrefix(path, ".")
+}
+
+// runPromptExternalFile assembles a `.prompt.md` file located anywhere on
+// disk by injecting its parent directory as a temporary anchor at the
+// front of the standard anchor chain, then composing as if the file were
+// a role under that injected anchor. Sibling <basename>.pre.*.md and
+// dir-level _pre.*.md / _post.*.md in the parent dir wrap the body the
+// same way they would for an anchored role.
+func runPromptExternalFile(env *root.ResolvedEnv, cleanPath string) error {
+	parentDir := filepath.Dir(cleanPath)
+	if parentDir == "" || parentDir == "." {
+		// No directory component (e.g. "foo.prompt.md") — assume the
+		// caller meant ./, so the temp anchor scopes to the cwd.
+		parentDir = "."
+	}
+	role := strings.TrimSuffix(filepath.Base(cleanPath), ".prompt.md")
+	if role == "" {
+		return fmt.Errorf("invalid prompt path %q: empty role basename", cleanPath)
+	}
+
+	base := env.Assembler()
+	anchors := append(
+		[]assembler.Anchor{{Name: "external", FS: os.DirFS(parentDir)}},
+		base.Anchors()...,
+	)
+	augmented := assembler.New(anchors)
+
+	engine := env.BuildEngine(role, "")
+	vars := env.BuildAssemblerVars(role, "", "")
+	res, err := augmented.Assemble(role, vars, engine, nil)
+	if err != nil {
+		return fmt.Errorf("assembling %s: %w", cleanPath, err)
+	}
+	fmt.Println(applyPromptBatchOverride(res.Prompt))
 	return nil
 }
 

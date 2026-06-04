@@ -155,18 +155,20 @@ By default review only feeds reports from currently-enabled roles into the super
 ```bash
 ateam review
 ateam review --post-prompt "This is a production financial app"
-ateam review --prompt @custom_review.md
 ateam review --roles project.security,project.dependencies        # only these reports
 ateam review --all                         # include disabled roles' reports
 ateam review --max-age 2h                  # drop reports older than 2h
 ateam review --dry-run
 ```
 
+Override the supervisor body by dropping a `review.prompt.md` under
+`.ateam/prompts/` (project anchor) or `.ateamorg/prompts/` (org anchor) —
+the standard framing still composes around it.
+
 | Flag | Description |
 |------|-------------|
 | `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
-| `--prompt TEXT` | Custom prompt replacing the default supervisor role entirely (text or `@filepath`) |
 | `--profile NAME` | Runtime profile (overrides config resolution) |
 | `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
 | `--cheaper-model` | Use a cheaper model (sonnet); ignored if `--model` is also set (`--model` wins) |
@@ -197,7 +199,6 @@ ateam code --dry-run
 | Flag | Description |
 |------|-------------|
 | `--review TEXT` | Review content (text or `@filepath`; defaults to `.ateam/shared/review.md`) |
-| `--management TEXT` | Management prompt override (text or `@filepath`) |
 | `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--profile NAME` | Profile for sub-runs (passed to `ateam exec --profile`) |

@@ -20,7 +20,6 @@ import (
 var (
 	codeFlags             CommonExecFlags
 	codeReview            string
-	codeManagement        string
 	codePrint             bool
 	codeDryRun            bool
 	codeSupervisorProfile string
@@ -37,7 +36,6 @@ var (
 type CodeOptions struct {
 	CommonExecFlags
 	Review            string
-	Management        string
 	Print             bool
 	DryRun            bool
 	SupervisorProfile string
@@ -54,10 +52,14 @@ delegating each coding task to the appropriate role via ateam exec. The
 command stops after the code phase — run ateam verify (or ateam run-all) to
 inspect the resulting commits and run the test suite.
 
+Operators who want to override the management body place a custom
+code_management.prompt.md under .ateam/prompts/ (project anchor) or
+.ateamorg/prompts/ (org anchor); the standard framing still composes
+around it.
+
 Example:
   ateam code
   ateam code --review @custom_review.md
-  ateam code --management @custom_management.md
   ateam code --dry-run
   ateam code && ateam verify                     # explicit verify follow-up
   ateam run-all                                  # full pipeline incl. verify`,
@@ -65,7 +67,6 @@ Example:
 		return runCode(CodeOptions{
 			CommonExecFlags:   codeFlags,
 			Review:            codeReview,
-			Management:        codeManagement,
 			Print:             codePrint,
 			DryRun:            codeDryRun,
 			SupervisorProfile: codeSupervisorProfile,
@@ -79,8 +80,6 @@ Example:
 func init() {
 	codeCmd.Flags().StringVar(&codeReview, "review", "",
 		"review content (text or @filepath; defaults to .ateam/supervisor/review.md)")
-	codeCmd.Flags().StringVar(&codeManagement, "management", "",
-		"management prompt override (text or @filepath)")
 	registerCommonExecFlags(codeCmd, &codeFlags, commonFlagUsage{
 		Timeout:       "timeout in minutes (overrides config)",
 		Model:         "model override for the supervisor and every sub-run; takes precedence over --cheaper-model",
@@ -125,11 +124,6 @@ func runCode(opts CodeOptions) error {
 		}
 	}
 
-	customManagement, err := prompts.ResolveOptional(opts.Management)
-	if err != nil {
-		return err
-	}
-
 	prePrompt, err := prompts.ResolveOptional(opts.PrePrompt)
 	if err != nil {
 		return err
@@ -151,14 +145,14 @@ func runCode(opts CodeOptions) error {
 	}
 	subRunArgs := buildSubRunArgs(opts, subRunProfile, env.SourceDir, orgFlag, workDirFlag)
 
-	// Both default and --prompt paths now go through assembleCodeManagementV1;
-	// the override (customManagement) flows into the assembler's
-	// ReplaceRoleMain option so framing fragments compose either way. Per-run
-	// values are inlined as {{exec.batch}} / {{exec.subrun_args}} and get
-	// resolved by the runner at exec time (live path) or — equivalently — by
-	// the same TemplateVarsFor + ResolveTemplateString call below when
-	// previewing via --dry-run.
-	prompt, err := assembleCodeManagementV1(env, "the supervisor", reviewContent, customManagement, prePrompt, postPrompt)
+	// assembleCodeManagementV1 composes the supervisor body via the
+	// assembler's anchor chain — operators that want to override the body
+	// drop a code_management.prompt.md under .ateam/prompts/ or
+	// .ateamorg/prompts/ and the project anchor takes precedence over the
+	// embedded default. Per-run values inline as {{exec.batch}} /
+	// {{exec.subrun_args}}; the runner resolves them at exec time (live
+	// path) or via TemplateVarsFor + ResolveTemplateString during --dry-run.
+	prompt, err := assembleCodeManagementV1(env, "the supervisor", reviewContent, "", prePrompt, postPrompt)
 	if err != nil {
 		return err
 	}

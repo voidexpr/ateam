@@ -16,17 +16,16 @@ import (
 // ReviewEmptyError can surface before any flow setup); this struct is the
 // post-selection handoff.
 type ReviewBundleInput struct {
-	Env          *root.ResolvedEnv
-	Reports      []prompts.RoleReport
-	CustomPrompt string
-	PrePrompt    string
-	PostPrompt   string
-	TimeoutMin   int
-	Verbose      bool
-	Force        bool
-	Print        bool
-	StartedAt    time.Time
-	ReviewFile   string
+	Env        *root.ResolvedEnv
+	Reports    []prompts.RoleReport
+	PrePrompt  string
+	PostPrompt string
+	TimeoutMin int
+	Verbose    bool
+	Force      bool
+	Print      bool
+	StartedAt  time.Time
+	ReviewFile string
 }
 
 // reviewPrompt wraps the standard PromptFile composition with the reports
@@ -80,11 +79,10 @@ func NewReviewBundle(in ReviewBundleInput) *flow.PromptBundle {
 	engine := in.Env.BuildEngine("the supervisor", "review")
 	vars := in.Env.BuildAssemblerVars("review", "the supervisor", "review")
 	pf := &prompts.PromptFile{
-		Path:       "review",
-		PrePrompt:  in.PrePrompt,
-		CustomBody: in.CustomPrompt,
-		Assembler:  a,
-		Vars:       vars,
+		Path:      "review",
+		PrePrompt: in.PrePrompt,
+		Assembler: a,
+		Vars:      vars,
 	}
 	rp := &reviewPrompt{
 		file:       pf,

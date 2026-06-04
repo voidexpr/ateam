@@ -17,6 +17,7 @@ func savePromptGlobals() func() {
 	noPI, ipr := promptNoProjectInfo, promptIgnorePreviousReport
 	paths, inline := promptPaths, promptInlinePaths
 	pre, post := promptPrePrompt, promptPostPrompt
+	raw := promptRaw
 	return func() {
 		promptRole = role
 		promptSupervisor = sup
@@ -27,6 +28,7 @@ func savePromptGlobals() func() {
 		promptInlinePaths = inline
 		promptPrePrompt = pre
 		promptPostPrompt = post
+		promptRaw = raw
 	}
 }
 
@@ -81,11 +83,10 @@ func TestPromptRoleDryRun(t *testing.T) {
 	}
 }
 
-// TestPromptLiteralFileMode verifies the positional @PATH form: the file's
-// content is printed verbatim with the --batch override applied. No
-// assembler composition — mirrors `ateam exec @PATH` semantics. Covers both
-// absolute and project-relative path forms (the docs imply the relative form
-// is the common path-from-project-root case).
+// TestPromptLiteralFileMode verifies the positional @PATH inline-text
+// form: for a file that does NOT end in .prompt.md, the body runs through
+// the engine (vars + dynamics) but no anchor walk or framing. Mirrors
+// `ateam exec @PATH` semantics for non-prompt-file inputs.
 func TestPromptLiteralFileMode(t *testing.T) {
 	defer savePromptGlobals()()
 	projPath := setupPromptProject(t)
@@ -95,7 +96,9 @@ func TestPromptLiteralFileMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	const body = "literal {{BATCH}} body, no framing"
-	filePath := filepath.Join(promptsDir, "foobar.prompt.md")
+	// Non-.prompt.md extension: keeps the file on the inline-text path
+	// (Step 9 routes .prompt.md files through the framing path instead).
+	filePath := filepath.Join(promptsDir, "foobar.md")
 	if err := os.WriteFile(filePath, []byte(body), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +113,7 @@ func TestPromptLiteralFileMode(t *testing.T) {
 		var runErr error
 		out := captureStdout(t, func() {
 			withChdir(t, projPath, func() {
-				runErr = runPrompt(nil, []string{"@.ateam/prompts/foobar.prompt.md"})
+				runErr = runPrompt(nil, []string{"@.ateam/prompts/foobar.md"})
 			})
 		})
 		if runErr != nil {
@@ -123,7 +126,7 @@ func TestPromptLiteralFileMode(t *testing.T) {
 			t.Errorf("expected {{BATCH}} to be substituted, still present:\n%s", out)
 		}
 		if strings.Contains(out, "# ATeam Project Context") {
-			t.Errorf("literal-file mode should not run the assembler; project context should NOT appear:\n%s", out)
+			t.Errorf("inline-text mode should not run the assembler; project context should NOT appear:\n%s", out)
 		}
 	})
 
@@ -150,7 +153,7 @@ func TestPromptLiteralFileMode(t *testing.T) {
 	t.Run("invalid-var-errors", func(t *testing.T) {
 		defer savePromptGlobals()()
 
-		typoPath := filepath.Join(promptsDir, "typo.prompt.md")
+		typoPath := filepath.Join(promptsDir, "typo.md")
 		if err := os.WriteFile(typoPath, []byte("{{exec.work_dir}} is not a real key"), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -175,7 +178,7 @@ func TestPromptLiteralFileMode(t *testing.T) {
 		defer savePromptGlobals()()
 
 		raw := "leave alone: {{foo.bar}} {{some_user_token}}"
-		passPath := filepath.Join(promptsDir, "pass.prompt.md")
+		passPath := filepath.Join(promptsDir, "pass.md")
 		if err := os.WriteFile(passPath, []byte(raw), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -280,5 +283,119 @@ func TestPromptPathsListsAllSources(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in --paths output:\n%s", want, out)
 		}
+	}
+}
+
+// TestPromptRawSkipsEngine verifies that --raw on the literal-file path
+// prints the file verbatim — no engine expansion, no --batch substitution,
+// no project-info injection, no anchor-framing composition even when the
+// file ends in .prompt.md.
+func TestPromptRawSkipsEngine(t *testing.T) {
+	defer savePromptGlobals()()
+	projPath := setupPromptProject(t)
+
+	promptsDir := filepath.Join(projPath, ".ateam", "prompts")
+	if err := os.MkdirAll(promptsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Body uses a known-namespace + unknown-key directive that would
+	// normally error during engine.Render — proves the engine never runs.
+	body := "raw: {{prompt.name}} {{exec.work_dir}} {{BATCH}}"
+	filePath := filepath.Join(promptsDir, "raw.prompt.md")
+	if err := os.WriteFile(filePath, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	batchSaved := promptBatch
+	t.Cleanup(func() { promptBatch = batchSaved })
+	promptBatch = "batch-xyz"
+	promptRaw = true
+
+	var runErr error
+	out := captureStdout(t, func() {
+		withChdir(t, projPath, func() {
+			runErr = runPrompt(nil, []string{"@.ateam/prompts/raw.prompt.md"})
+		})
+	})
+	if runErr != nil {
+		t.Fatalf("runPrompt --raw: %v", runErr)
+	}
+	if !strings.Contains(out, body) {
+		t.Errorf("expected file body verbatim, got:\n%s", out)
+	}
+	if strings.Contains(out, "batch-xyz") {
+		t.Errorf("--raw must NOT apply --batch override, got:\n%s", out)
+	}
+	if strings.Contains(out, "# ATeam Project Context") {
+		t.Errorf("--raw must NOT compose framing, got:\n%s", out)
+	}
+}
+
+// TestPromptExternalPromptFileFraming verifies the Step 9 dispatch rule:
+// when @PATH ends in .prompt.md, the file's parent dir is injected as a
+// temporary anchor at the front of the chain and the standard framing
+// composes around the file's body — root pre-fragments, dir pre/post,
+// project context, etc.
+func TestPromptExternalPromptFileFraming(t *testing.T) {
+	defer savePromptGlobals()()
+	projPath := setupPromptProject(t)
+
+	// Drop a free-standing prompt outside any anchor — into the project
+	// dir itself, not .ateam/prompts/ (project anchor) — so Step 9's
+	// temp-anchor injection is doing the work.
+	externalPath := filepath.Join(projPath, "myrole.prompt.md")
+	body := "ROLE BODY for {{prompt.name}}"
+	if err := os.WriteFile(externalPath, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var runErr error
+	out := captureStdout(t, func() {
+		withChdir(t, projPath, func() {
+			runErr = runPrompt(nil, []string{"@" + externalPath})
+		})
+	})
+	if runErr != nil {
+		t.Fatalf("runPrompt @prompt.md: %v", runErr)
+	}
+	if !strings.Contains(out, "ROLE BODY for myrole") {
+		t.Errorf("expected role body with {{prompt.name}} expanded, got:\n%s", out)
+	}
+	// Framing landed: the embedded _pre.context.md (project info) feeds
+	// into the composition through the standard anchor chain even though
+	// the role file lives outside it.
+	if !strings.Contains(out, "# ATeam Project Context") {
+		t.Errorf("expected framing (project context block) from inherited anchors, got:\n%s", out)
+	}
+}
+
+// TestPromptSupervisorDeprecationWarning verifies that --supervisor still
+// runs (back-compat) but emits a stderr deprecation warning.
+func TestPromptSupervisorDeprecationWarning(t *testing.T) {
+	defer savePromptGlobals()()
+	projPath := setupPromptProject(t)
+
+	// Seed the supervisor's review reports so the assemble path doesn't
+	// error before the deprecation branch can fire.
+	reportDir := filepath.Join(projPath, ".ateam", "shared", "report")
+	if err := os.MkdirAll(reportDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(reportDir, "testing_basic.md"), []byte("# Findings\n\nok"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	promptSupervisor = true
+	promptAction = runner.ActionReview
+
+	stderr := captureStderr(t, func() {
+		captureStdout(t, func() {
+			withChdir(t, projPath, func() {
+				_ = runPrompt(nil, nil)
+			})
+		})
+	})
+	if !strings.Contains(stderr, "--supervisor is deprecated") {
+		t.Errorf("expected deprecation warning on stderr, got:\n%s", stderr)
 	}
 }
