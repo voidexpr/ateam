@@ -84,7 +84,7 @@ func init() {
 	execCmd.Flags().BoolVar(&execQuiet, "quiet", false, "disable both streaming and summary (same as --no-stream --no-summary)")
 	execCmd.Flags().StringVar(&execAgentArgs, "agent-args", "", "extra args passed to the agent CLI (appended after configured args)")
 	execCmd.Flags().StringVar(&execBatch, "batch", "", "group related agent_execs (e.g. all execs in one ateam code run)")
-	execCmd.Flags().BoolVar(&execRaw, "raw", false, "feed the prompt to the agent byte-for-byte: no template-engine expansion (today the engine isn't run on the exec prompt either, so this is forward-compatible plumbing)")
+	execCmd.Flags().BoolVar(&execRaw, "raw", false, "feed the prompt to the agent byte-for-byte: skip template-engine expansion (no {{var}} substitution, no dynamics). Default expands {{exec.*}}, {{prompt.*}}, and other vars in the supplied prompt.")
 	addVerboseFlag(execCmd, &execVerbose)
 	addDockerAutoSetupFlag(execCmd, &execDockerAutoSetup)
 	addContainerNameFlag(execCmd, &execContainerName)
@@ -215,7 +215,15 @@ func runExec(cmd *cobra.Command, args []string) error {
 	ctx, stop := cmdContext()
 	defer stop()
 
-	bundle := staticBundle("exec", execRole, execAction, promptText, opts)
+	// Spec step 10: `ateam exec` defaults to PromptText (variable +
+	// dynamic expansion against rt.Vars()); --raw opts back into
+	// RawTextPrompt (bytes-through). Operators piping a fully-baked
+	// prompt that already includes literal `{{` escapes use --raw.
+	var promptImpl prompts.Prompt = prompts.PromptText{Text: promptText}
+	if execRaw {
+		promptImpl = prompts.RawTextPrompt{Text: promptText}
+	}
+	bundle := staticBundle("exec", execRole, execAction, promptImpl, opts)
 	rtEnv := flow.RuntimeEnv{
 		Executor: r,
 		WorkDir:  env.WorkDir,

@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"github.com/ateam/internal/flow"
+	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 )
 
 func TestStaticBundle_Shape(t *testing.T) {
 	opts := runner.RunOpts{RoleID: "tester", Action: runner.ActionExec, WorkDir: "/wd"}
-	b := staticBundle("exec", "tester", runner.ActionExec, "hello", opts)
+	b := staticBundle("exec", "tester", runner.ActionExec, prompts.RawTextPrompt{Text: "hello"}, opts)
 
 	if b.Name != "exec" || b.Role != "tester" || b.Action != runner.ActionExec {
 		t.Errorf("identity fields wrong: %+v", b)
@@ -33,10 +34,35 @@ func TestStaticBundle_Shape(t *testing.T) {
 	}
 }
 
-func TestStaticBundle_PromptIsRawText(t *testing.T) {
-	// Demonstrates the helper's "static" semantics: Prompt.Resolve returns
-	// the captured prompt with no further expansion or env dependence.
-	b := staticBundle("x", "r", "exec", "captured", runner.RunOpts{})
+// TestStaticBundle_PromptTextExpandsExecVars asserts spec step 10's
+// load-bearing invariant: `ateam exec` (no --raw) wraps the body in a
+// PromptText so {{exec.*}} resolves against rt.Vars() instead of being
+// passed verbatim to the agent. The runner DOES NOT re-substitute the
+// prompt body (step 3 invariant), so the only thing standing between
+// `{{exec.id}}` and the agent's stdin is PromptText.Resolve.
+func TestStaticBundle_PromptTextExpandsExecVars(t *testing.T) {
+	b := staticBundle("x", "r", "exec",
+		prompts.PromptText{Text: "exec={{exec.id}}"},
+		runner.RunOpts{})
+	// Build a preview runtime so exec.id renders as the AT RUNTIME sentinel —
+	// confirms PromptText routes through the engine. The expansion shape is
+	// covered byte-for-byte by internal/flow's runtimeVars tests; here we
+	// just need to prove the engine ran at all (raw text would have
+	// passed `{{exec.id}}` through verbatim).
+	got, err := b.ResolvePreview(nil, "")
+	if err != nil {
+		t.Fatalf("ResolvePreview: %v", err)
+	}
+	if !strings.Contains(got, "AT RUNTIME:exec.id") {
+		t.Errorf("expected exec.id preview sentinel in output, got %q", got)
+	}
+}
+
+func TestStaticBundle_RawPromptIsLiteral(t *testing.T) {
+	// RawTextPrompt: Resolve returns the captured prompt verbatim, no
+	// engine expansion. Spec step 10: this is what `ateam exec --raw`
+	// wraps the body in.
+	b := staticBundle("x", "r", "exec", prompts.RawTextPrompt{Text: "captured"}, runner.RunOpts{})
 	got, err := b.Prompt.Resolve(nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)

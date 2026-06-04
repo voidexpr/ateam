@@ -192,7 +192,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	// lazily, so role labels can be ad-hoc ("agent-1", task slugs, etc.).
 	steps := make([]flow.Step, len(resolvedPrompts))
 	for i, prompt := range resolvedPrompts {
-		steps[i] = staticBundle(labels[i], labels[i], runner.ActionParallel, prompt, runner.RunOpts{
+		steps[i] = staticBundle(labels[i], labels[i], runner.ActionParallel, prompts.PromptText{Text: prompt}, runner.RunOpts{
 			RoleID:      labels[i],
 			Action:      runner.ActionParallel,
 			WorkDir:     env.WorkDir,

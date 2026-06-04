@@ -61,22 +61,26 @@ func buildRunner(env *root.ResolvedEnv, spec RunnerSpec) (*runner.AgentExecutor,
 	return r, nil
 }
 
-// staticBundle constructs a PromptBundle for a fully-pre-assembled prompt.
-// Used by exec, parallel, report, code — verbs whose cmd layer expands
-// templates and composes framing before constructing the bundle, so the
-// runtime resolver has nothing further to do.
+// staticBundle constructs a PromptBundle around an already-composed
+// prompt body. The caller picks the Prompt implementation:
 //
-// The prompt is held by a RawTextPrompt: the engine treats it as opaque
-// bytes, no variable substitution or include directives. Runner-level
-// substitution (the ALL_CAPS legacy pass that fills {{EXEC_ID}} /
-// {{OUTPUT_DIR}}) still applies because it lives inside ExecutePrepared,
-// outside the resolver.
-func staticBundle(name, role, action, prompt string, opts runner.RunOpts) flow.PromptBundle {
+//   - prompts.PromptText{Text: …}: variable substitution and dynamics
+//     run against rt.Vars()/rt.Dynamics(). Spec step 10 makes this the
+//     default for `ateam exec` — operators piping pre-assembled prompts
+//     can still reference {{exec.output_dir}} / {{prompt.name}} etc.
+//   - prompts.RawTextPrompt{Text: …}: bytes-through, no engine. Used by
+//     `ateam exec --raw` and by sub-step bundles that already finished
+//     their own expansion.
+//
+// Runner-level substitution (args / container fields / canonical-dest
+// path) still applies — that lives inside ExecutePrepared and runs
+// against runner.TemplateVars, not against ctx.Vars().
+func staticBundle(name, role, action string, prompt prompts.Prompt, opts runner.RunOpts) flow.PromptBundle {
 	return flow.PromptBundle{
 		Name:   name,
 		Role:   role,
 		Action: action,
-		Prompt: prompts.RawTextPrompt{Text: prompt},
+		Prompt: prompt,
 		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
 			return opts
 		},
