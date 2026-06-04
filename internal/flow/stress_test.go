@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ateam/internal/prompts"
+
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/runner"
@@ -218,10 +220,8 @@ func TestStress_NestedPipelineParallel(t *testing.T) {
 func buildStressComposition() Step {
 	mkBundle := func(name string) PromptBundle {
 		return PromptBundle{
-			Name: name,
-			Render: func(env RuntimeEnv) (string, error) {
-				return "stress: " + name, nil
-			},
+			Name:   name,
+			Prompt: prompts.RawTextPrompt{Text: "stress: " + name},
 			RunOpts: func(env RuntimeEnv) runner.RunOpts {
 				return runner.RunOpts{
 					RoleID: name,

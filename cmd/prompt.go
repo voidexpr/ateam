@@ -120,13 +120,13 @@ func runPromptLiteralFile(pathArg string) error {
 	if err != nil {
 		return err
 	}
-	a := env.Assembler()
+	_ = env.Assembler() // ensure assembler is initialized for env.BuildEngine
 	// promptPath has no meaningful value in literal-file mode — the file
 	// isn't routed through an action/role namespace. Pass the resolved
 	// @<path> as a label so {{prompt.path}} renders to something traceable
 	// if the user references it; {{prompt.name}} gets the basename.
 	vars := env.BuildAssemblerVars(strings.TrimPrefix(pathArg, "@"), "", "")
-	rendered, err := assembler.NewEngine(a, 0).Render(content, vars)
+	rendered, err := env.BuildEngine("", "").Render(content, vars)
 	if err != nil {
 		return fmt.Errorf("rendering %s: %w", pathArg, err)
 	}
@@ -359,10 +359,11 @@ func assembleForInspection() (string, []sectionDigest, error) {
 	}
 
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, promptAction)
+	engine := env.BuildEngine(roleLabel, promptAction)
 	// Pre-prompt rides through the assembler (lands as the front cli_pre_prompt
 	// section); post-prompt is appended after the synthesized live sections
 	// below so the preview mirrors the real run's outermost-tail ordering.
-	res, err := a.Assemble(promptPath, vars, nil, &assembler.AssembleOptions{PrePrompt: prePrompt})
+	res, err := a.Assemble(promptPath, vars, engine, &assembler.AssembleOptions{PrePrompt: prePrompt})
 	if err != nil {
 		return "", nil, err
 	}
@@ -419,7 +420,7 @@ func assembleForInspection() (string, []sectionDigest, error) {
 
 	// CLI post-prompt is the outermost tail wrapper, after every synthesized
 	// live section — matching where the real run appends it.
-	post, perr := renderCLIWrapper(a, vars, postPrompt)
+	post, perr := renderCLIWrapper(engine, vars, postPrompt)
 	if perr != nil {
 		return "", nil, perr
 	}

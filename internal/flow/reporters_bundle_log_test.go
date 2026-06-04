@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/runner"
 )
 
@@ -55,16 +56,15 @@ type preparingExec struct {
 	id       int64
 }
 
-func (p *preparingExec) Prepare(opts runner.RunOpts, prompt string) (*runner.PreparedRun, error) {
+func (p *preparingExec) Prepare(opts runner.RunOpts) (*runner.PreparedRun, error) {
 	p.id++
 	logsDir := filepath.Join(p.logsRoot, "logs", fmt.Sprintf("%s-%d", opts.RoleID, p.id))
 	return &runner.PreparedRun{
-		ExecID:      p.id,
-		LogsDir:     logsDir,
-		CmdFile:     filepath.Join(logsDir, "cmd.md"),
-		Model:       "test-model",
-		PromptBytes: len(prompt),
-		Opts:        opts,
+		ExecID:  p.id,
+		LogsDir: logsDir,
+		CmdFile: filepath.Join(logsDir, "cmd.md"),
+		Model:   "test-model",
+		Opts:    opts,
 	}, nil
 }
 
@@ -94,7 +94,7 @@ func TestBundleLogReporter_FullSequence(t *testing.T) {
 
 	bundle := PromptBundle{
 		Name:    "exec",
-		Render:  func(RuntimeEnv) (string, error) { return "hello prompt", nil },
+		Prompt:  prompts.RawTextPrompt{Text: "hello prompt"},
 		RunOpts: func(RuntimeEnv) runner.RunOpts { return runner.RunOpts{RoleID: "tester"} },
 	}
 	env := RuntimeEnv{Executor: exec, Role: "tester", Action: "exec", WorkDir: "/tmp/wd", Batch: "b1"}
@@ -147,7 +147,7 @@ func TestBundleLogReporter_PreExecAndPostExecActions(t *testing.T) {
 	post := &recordingAction{name: "post", state: StateContinue}
 	bundle := PromptBundle{
 		Name:     "exec",
-		Render:   func(RuntimeEnv) (string, error) { return "x", nil },
+		Prompt:   prompts.RawTextPrompt{Text: "x"},
 		RunOpts:  func(RuntimeEnv) runner.RunOpts { return runner.RunOpts{RoleID: "r"} },
 		PreExec:  []Action{pre},
 		PostExec: []Action{post},
@@ -188,7 +188,7 @@ func TestBundleLogReporter_PreExecSkipsDropsBundle(t *testing.T) {
 	skipper := &recordingAction{name: "skip", state: StateSkip, reason: "no work"}
 	bundle := PromptBundle{
 		Name:    "exec",
-		Render:  func(RuntimeEnv) (string, error) { return "x", nil },
+		Prompt:  prompts.RawTextPrompt{Text: "x"},
 		RunOpts: func(RuntimeEnv) runner.RunOpts { return runner.RunOpts{RoleID: "r"} },
 		PreExec: []Action{skipper},
 	}
@@ -213,7 +213,7 @@ func TestBundleLogReporter_AppendsCmdMD(t *testing.T) {
 
 	bundle := PromptBundle{
 		Name:    "exec",
-		Render:  func(RuntimeEnv) (string, error) { return "x", nil },
+		Prompt:  prompts.RawTextPrompt{Text: "x"},
 		RunOpts: func(RuntimeEnv) runner.RunOpts { return runner.RunOpts{RoleID: "r", WorkDir: "/wd", Batch: "b9"} },
 	}
 	env := RuntimeEnv{Executor: exec, Role: "r", Action: "exec", WorkDir: "/wd", Batch: "b9"}
@@ -244,7 +244,7 @@ func TestBundleLogReporter_PrepareErrorNoFile(t *testing.T) {
 
 	bundle := PromptBundle{
 		Name:    "exec",
-		Render:  func(RuntimeEnv) (string, error) { return "x", nil },
+		Prompt:  prompts.RawTextPrompt{Text: "x"},
 		RunOpts: func(RuntimeEnv) runner.RunOpts { return runner.RunOpts{RoleID: "r"} },
 	}
 	env := RuntimeEnv{Executor: exec, Role: "r", Action: "exec"}
@@ -276,7 +276,7 @@ func (a *recordingAction) Run(RunCtx, RuntimeEnv, *Result) Flow {
 // errPrepExec returns a fixed error from Prepare without touching disk.
 type errPrepExec struct{ err error }
 
-func (e *errPrepExec) Prepare(runner.RunOpts, string) (*runner.PreparedRun, error) {
+func (e *errPrepExec) Prepare(runner.RunOpts) (*runner.PreparedRun, error) {
 	return nil, e.err
 }
 func (e *errPrepExec) ExecutePrepared(context.Context, *runner.PreparedRun, string, func(runner.RunProgress)) runner.RunSummary {

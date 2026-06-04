@@ -1,10 +1,10 @@
 package cmd
 
 import (
+	"github.com/ateam/internal/flow"
+	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
-
-	"github.com/ateam/internal/flow"
 )
 
 // RunnerSpec is the cmd-layer adapter from a command's flag set to the
@@ -61,19 +61,22 @@ func buildRunner(env *root.ResolvedEnv, spec RunnerSpec) (*runner.AgentExecutor,
 	return r, nil
 }
 
-// staticBundle constructs a PromptBundle whose Render and RunOpts
-// closures return fixed values. Replaces the per-cmd ad-hoc closure
-// pairs that every agent-running cmd writes for a one-shot run.
+// staticBundle constructs a PromptBundle for a fully-pre-assembled prompt.
+// Used by exec, parallel, report, code — verbs whose cmd layer expands
+// templates and composes framing before constructing the bundle, so the
+// runtime resolver has nothing further to do.
 //
-// Use when the prompt and RunOpts are fully determined at cmd-layer
-// composition time. Bundles that need per-env overrides (e.g. a Pre
-// hook that mutates RuntimeEnv) should declare PromptBundle inline.
+// The prompt is held by a RawTextPrompt: the engine treats it as opaque
+// bytes, no variable substitution or include directives. Runner-level
+// substitution (the ALL_CAPS legacy pass that fills {{EXEC_ID}} /
+// {{OUTPUT_DIR}}) still applies because it lives inside ExecutePrepared,
+// outside the resolver.
 func staticBundle(name, role, action, prompt string, opts runner.RunOpts) flow.PromptBundle {
 	return flow.PromptBundle{
 		Name:   name,
 		Role:   role,
 		Action: action,
-		Render: func(flow.RuntimeEnv) (string, error) { return prompt, nil },
+		Prompt: prompts.RawTextPrompt{Text: prompt},
 		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
 			return opts
 		},

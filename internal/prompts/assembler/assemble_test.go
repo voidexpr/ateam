@@ -160,13 +160,14 @@ func TestAssembleVarSubstitution(t *testing.T) {
 	}
 }
 
-func TestAssembleAllCapsCompatViaEngine(t *testing.T) {
-	// Defaults still use {{ROLE}} / {{PROJECT_NAME}}; engine compat shim
-	// must resolve them during assembly.
+func TestAssembleAllCapsPassesThrough(t *testing.T) {
+	// Engine-level ALL_CAPS handling was removed; the assembler emits the
+	// tokens verbatim and the runner-side substitution fills them at
+	// execution time.
 	anchors := mkAnchors(
 		nil, nil,
 		map[string]string{
-			"report/security.prompt.md": "ROLE={{ROLE}} PROJECT={{PROJECT_NAME}}",
+			"report/security.prompt.md": "ROLE={{ROLE}}",
 		},
 	)
 	a := New(anchors)
@@ -174,9 +175,8 @@ func TestAssembleAllCapsCompatViaEngine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "ROLE=security PROJECT=ateam"
-	if res.Prompt != want {
-		t.Fatalf("Prompt = %q, want %q", res.Prompt, want)
+	if !strings.Contains(res.Prompt, "{{ROLE}}") {
+		t.Fatalf("expected literal {{ROLE}} in output, got %q", res.Prompt)
 	}
 }
 

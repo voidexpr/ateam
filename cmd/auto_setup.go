@@ -104,9 +104,7 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 		Name:   "auto-setup",
 		Role:   "supervisor",
 		Action: runner.ActionExec,
-		Render: func(flow.RuntimeEnv) (string, error) {
-			return prompt, nil
-		},
+		Prompt: prompts.RawTextPrompt{Text: prompt},
 		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
 			return runner.RunOpts{
 				RoleID:     "supervisor",

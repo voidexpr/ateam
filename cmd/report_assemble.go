@@ -35,12 +35,13 @@ func assembleRoleReport(env *root.ResolvedEnv, roleID, roleLabel, prePrompt, pos
 	promptPath := "report/" + roleID
 
 	a := env.Assembler()
+	engine := env.BuildEngine(roleLabel, "report")
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, "report")
 	// Pre-prompt rides through the assembler; post-prompt is held until
 	// after the manually-appended previous-report block so it stays as
 	// the outermost tail wrapper.
 	opts := &assembler.AssembleOptions{PrePrompt: prePrompt}
-	res, err := a.Assemble(promptPath, vars, nil, opts)
+	res, err := a.Assemble(promptPath, vars, engine, opts)
 	if err != nil {
 		return "", err
 	}
@@ -49,7 +50,7 @@ func assembleRoleReport(env *root.ResolvedEnv, roleID, roleLabel, prePrompt, pos
 	if !skipPreviousReport {
 		prompt += "\n\n---\n\n" + previousReportBlock(env, roleID)
 	}
-	post, err := renderCLIWrapper(a, vars, postPrompt)
+	post, err := renderCLIWrapper(engine, vars, postPrompt)
 	if err != nil {
 		return "", err
 	}
@@ -75,9 +76,10 @@ func assembleRoleReport(env *root.ResolvedEnv, roleID, roleLabel, prePrompt, pos
 func assembleRoleCode(env *root.ResolvedEnv, roleID, roleLabel, prePrompt, postPrompt string) (string, error) {
 	promptPath := "code/" + roleID
 	a := env.Assembler()
+	engine := env.BuildEngine(roleLabel, "code")
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, "code")
 	opts := &assembler.AssembleOptions{PrePrompt: prePrompt}
-	res, err := a.Assemble(promptPath, vars, nil, opts)
+	res, err := a.Assemble(promptPath, vars, engine, opts)
 	if err != nil {
 		if strings.Contains(err.Error(), "no role main") {
 			return "", fmt.Errorf("no code prompt defined for role %q. Role-specific code prompts (code/<role>.prompt.md) are no longer shipped in defaults; use `ateam prompt --action code` to render the generic implementer body, or place a code/%s.prompt.md override under .ateam/prompts/", roleID, roleID)
@@ -85,7 +87,7 @@ func assembleRoleCode(env *root.ResolvedEnv, roleID, roleLabel, prePrompt, postP
 		return "", err
 	}
 	prompt := res.Prompt
-	post, err := renderCLIWrapper(a, vars, postPrompt)
+	post, err := renderCLIWrapper(engine, vars, postPrompt)
 	if err != nil {
 		return "", err
 	}

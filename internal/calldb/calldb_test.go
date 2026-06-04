@@ -47,7 +47,7 @@ func TestInsertAndUpdate(t *testing.T) {
 		Role:           "security",
 		Batch:          "code-2026-03-13",
 		Model:          "opus",
-		PromptHash:     "abc123",
+		PromptFile:     "logs/1/prompt.md",
 		StartedAt:      now,
 		AgentFile:      "/tmp/agent.jsonl",
 		GitStartBranch: "feature-x",

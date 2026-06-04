@@ -135,9 +135,7 @@ func runVerify(opts VerifyOptions) error {
 		Name:   "verify",
 		Role:   "supervisor",
 		Action: runner.ActionVerify,
-		Render: func(flow.RuntimeEnv) (string, error) {
-			return prompt, nil
-		},
+		Prompt: prompts.RawTextPrompt{Text: prompt},
 		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
 			return runner.RunOpts{
 				RoleID:            "supervisor",

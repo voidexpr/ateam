@@ -9,17 +9,21 @@ import (
 )
 
 // renderCLIWrapper renders a CLI-supplied wrapper string (the held-back
-// --post-prompt) through the same template engine the assembler uses for
-// anchor content, so `{{project.name}}` etc. resolve exactly as they do when
-// the assembler owns the wrap. Returns "" for whitespace-only input (matching
-// the assembler's empty-section drop). Callers that append --post-prompt
-// manually (because it must land after report/review blocks) use this so the
-// held wrapper isn't emitted as an unresolved raw string.
-func renderCLIWrapper(a *assembler.Assembler, vars assembler.Vars, text string) (string, error) {
+// --post-prompt) through the assembler engine — `{{project.name}}` and
+// other directives resolve exactly as they do when the assembler owns the
+// wrap. Returns "" for whitespace-only input (matching the assembler's
+// empty-section drop). Callers that append --post-prompt manually (because
+// it must land after report/review blocks) use this so the held wrapper
+// isn't emitted as an unresolved raw string.
+//
+// Pass the same engine the caller used for its main Assemble call so
+// dynamics + dispatcher state stay consistent across the body and the
+// trailing wrapper.
+func renderCLIWrapper(engine *assembler.Engine, vars assembler.Vars, text string) (string, error) {
 	if strings.TrimSpace(text) == "" {
 		return "", nil
 	}
-	rendered, err := assembler.NewEngine(a, 0).Render(text, vars)
+	rendered, err := engine.Render(text, vars)
 	if err != nil {
 		return "", fmt.Errorf("rendering --post-prompt: %w", err)
 	}
@@ -34,17 +38,18 @@ func renderCLIWrapper(a *assembler.Assembler, vars assembler.Vars, text string) 
 // anchor chain (project / org / embedded). Wraps with --pre-prompt and
 // --post-prompt the same way as role / supervisor paths.
 //
-// roleLabel feeds {{project.info}}; pass "" to suppress.
+// roleLabel feeds {{dynamic.project_info}}; pass "" to suppress.
 func assembleAction(env *root.ResolvedEnv, action, roleLabel, prePrompt, postPrompt string) (string, error) {
 	a := env.Assembler()
+	engine := env.BuildEngine(roleLabel, action)
 	vars := env.BuildAssemblerVars(action, roleLabel, action)
 	opts := &assembler.AssembleOptions{PrePrompt: prePrompt}
-	res, err := a.Assemble(action, vars, nil, opts)
+	res, err := a.Assemble(action, vars, engine, opts)
 	if err != nil {
 		return "", err
 	}
 	prompt := res.Prompt
-	post, err := renderCLIWrapper(a, vars, postPrompt)
+	post, err := renderCLIWrapper(engine, vars, postPrompt)
 	if err != nil {
 		return "", err
 	}
@@ -73,17 +78,18 @@ func assembleAction(env *root.ResolvedEnv, action, roleLabel, prePrompt, postPro
 // tail wrapper.
 func assembleCodeManagementV1(env *root.ResolvedEnv, roleLabel, reviewContent, customPrompt, prePrompt, postPrompt string) (string, error) {
 	a := env.Assembler()
+	engine := env.BuildEngine(roleLabel, "code")
 	vars := env.BuildAssemblerVars("code_management", roleLabel, "code")
 	opts := &assembler.AssembleOptions{
 		ReplaceRoleMain: customPrompt,
 		PrePrompt:       prePrompt,
 	}
-	res, err := a.Assemble("code_management", vars, nil, opts)
+	res, err := a.Assemble("code_management", vars, engine, opts)
 	if err != nil {
 		return "", err
 	}
 	prompt := res.Prompt + "\n\n---\n\n# Review\n\n" + reviewContent
-	post, err := renderCLIWrapper(a, vars, postPrompt)
+	post, err := renderCLIWrapper(engine, vars, postPrompt)
 	if err != nil {
 		return "", err
 	}

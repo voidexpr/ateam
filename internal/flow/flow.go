@@ -78,11 +78,15 @@ func (e RuntimeEnv) withBundleOverrides(role, action string) RuntimeEnv {
 // launched, so per-run observers (e.g. BundleLogReporter) can open
 // <LogsDir>/bundle.jsonl up front instead of buffering in memory.
 //
+// Prepare does NOT receive the prompt: prompt resolution happens in flow
+// between Prepare and ExecutePrepared, so the resolver can reference the
+// allocated exec_id and other runtime-dependent values.
+//
 // onProgress is invoked synchronously for each RunProgress event and may
 // fire from multiple internal goroutines; the callback owns its own
 // thread-safety. Nil disables progress reporting.
 type Executor interface {
-	Prepare(opts runner.RunOpts, prompt string) (*runner.PreparedRun, error)
+	Prepare(opts runner.RunOpts) (*runner.PreparedRun, error)
 	ExecutePrepared(ctx context.Context, prepared *runner.PreparedRun, prompt string, onProgress func(runner.RunProgress)) runner.RunSummary
 }
 
@@ -166,13 +170,108 @@ func (r PipelineResult) FirstError() error {
 type Step interface {
 	execute(rc RunCtx, env RuntimeEnv) []Result
 	name() string
+	// Walk visits every PromptBundle reachable from this Step exactly
+	// once. Order isn't part of the contract (Pipeline visits left-to-
+	// right, Parallel in slice order — but consumers must not depend on
+	// either). Used by Verify to fan out preview-mode resolution.
+	Walk(fn func(*PromptBundle))
+}
+
+// VerifyError records a single bundle's resolve-time failure during the
+// pre-execution verification pass.
+type VerifyError struct {
+	BundleName string
+	Err        error
+}
+
+func (e VerifyError) Error() string {
+	if e.BundleName == "" {
+		return e.Err.Error()
+	}
+	return e.BundleName + ": " + e.Err.Error()
+}
+
+// Unwrap so errors.Is / errors.As reach the underlying resolve error —
+// callers that pattern-match on a sentinel returned from Prompt.Resolve
+// keep working when the failure happens during the verify pass.
+func (e VerifyError) Unwrap() error { return e.Err }
+
+// VerifyResult batches every bundle's verification outcome. nil or empty
+// Errors means the pipeline is clean to execute.
+type VerifyResult struct {
+	Errors []VerifyError
+}
+
+// Verify walks every bundle reachable from top and runs Prompt.Resolve
+// against a preview-mode runtime — exec.* keys substitute their sentinels,
+// dynamics return their preview branches, and the engine surfaces typos in
+// known namespaces, missing strict includes, and other authoring errors
+// before any agent process is launched. Bundles with a nil Prompt are
+// skipped (e.g. composition placeholders).
+func Verify(top Step, rc RunCtx) *VerifyResult {
+	var errs []VerifyError
+	top.Walk(func(b *PromptBundle) {
+		if b == nil || b.Prompt == nil {
+			return
+		}
+		err := verifyBundle(b, rc)
+		if err != nil {
+			errs = append(errs, VerifyError{BundleName: b.Name, Err: err})
+		}
+	})
+	if len(errs) == 0 {
+		return nil
+	}
+	return &VerifyResult{Errors: errs}
+}
+
+// verifyBundle runs the bundle's Prompt.Resolve in preview mode, catching
+// panics so a single broken bundle can't crash the whole verification
+// pass.
+func verifyBundle(b *PromptBundle, rc RunCtx) (err error) {
+	defer func() {
+		if rv := recover(); rv != nil {
+			err = fmt.Errorf("panic during verify: %v", rv)
+		}
+	}()
+	rt := NewRuntime(rc.DB, rc.Resolved, "")
+	rt.SetMode(ModePreview)
+	if b.Dynamics != nil {
+		rt.SetDynamics(b.Dynamics)
+	}
+	_, err = b.Prompt.Resolve(rt)
+	return err
+}
+
+func failedWithVerifyErrors(vr *VerifyResult) PipelineResult {
+	results := make([]Result, 0, len(vr.Errors))
+	for _, e := range vr.Errors {
+		bundle := &PromptBundle{Name: e.BundleName}
+		results = append(results, Result{
+			Bundle: bundle,
+			Flow:   Flow{State: StateError, Reason: "verify failed", Err: e},
+		})
+	}
+	return PipelineResult{
+		Steps:           []StepOutcome{{Name: "verify", Results: results}},
+		FirstErrorIndex: 0,
+	}
 }
 
 // Run is the top-level entry. Always returns PipelineResult — a top-level
 // PromptBundle or Parallel produces a one-step result.
+//
+// Verification runs first: every bundle's Prompt.Resolve is called against
+// a preview-mode runtime so authoring errors (typos in known namespaces,
+// missing strict includes, format errors in included files) surface
+// before any Prepare touches the call DB. A non-empty VerifyResult
+// short-circuits with a synthesized failure step.
 func Run(top Step, env RuntimeEnv, rc RunCtx) PipelineResult {
 	if rc.Reporter == nil {
 		rc.Reporter = NoopReporter{}
+	}
+	if vr := Verify(top, rc); vr != nil && len(vr.Errors) > 0 {
+		return failedWithVerifyErrors(vr)
 	}
 	if p, ok := top.(Pipeline); ok {
 		return p.runDetailed(rc, env)
@@ -237,21 +336,63 @@ type Action interface {
 // ============================================================
 
 // PromptBundle is a single agent-invocation envelope. The cmd-layer
-// constructs one per call; closures capture cmd-layer state for Render
-// and RunOpts.
+// constructs one per call; the bundle's Prompt produces the agent input
+// text, RunOpts shapes the runner invocation, and the action hooks fire
+// around the agent call.
+//
+// Vars holds factory-curated args.* / roles.* / action.* values. Forward-
+// looking field — defaults don't reference these keys yet (Step 6's sweep
+// activates them). Carried on the bundle so the same Prompt impl can be
+// reused across verbs with different exposed values.
 type PromptBundle struct {
 	Name   string
 	Role   string      // optional override of env.Role
 	Action string      // optional override of env.Action
 	Env    *RuntimeEnv // optional override of parent's env (used for per-role profile)
 
-	Render   func(env RuntimeEnv) (string, error)
+	Prompt   Prompt
+	Vars     map[string]string
+	Dynamics PromptDynamic
 	RunOpts  func(env RuntimeEnv) runner.RunOpts
 	PreExec  []Action
 	PostExec []Action
 }
 
+// resolvePrompt runs the bundle's Prompt against a freshly built runtime.
+// A nil Prompt is a programmer error — the factory must set one (callers
+// that just want literal text use prompts.RawTextPrompt).
+func (b PromptBundle) resolvePrompt(rc RunCtx, env RuntimeEnv) (string, error) {
+	if b.Prompt == nil {
+		return "", errBundleHasNoPrompt
+	}
+	rt := newBundleRuntime(rc, env)
+	if b.Dynamics != nil {
+		rt.SetDynamics(b.Dynamics)
+	}
+	return b.Prompt.Resolve(rt)
+}
+
+var errBundleHasNoPrompt = fmt.Errorf("PromptBundle has no Prompt set")
+
+// newBundleRuntime constructs the per-bundle prompt resolution context.
+// Step 4 keeps this minimal — review's PromptFile carries its own
+// assembler+vars, so the rt only needs to expose Mode + Dynamics. Later
+// steps fill in vars/dynamics from the bundle and the resolved env.
+func newBundleRuntime(rc RunCtx, env RuntimeEnv) *Runtime {
+	workDir := env.WorkDir
+	rt := NewRuntime(rc.DB, rc.Resolved, workDir)
+	rt.SetMode(ModeReal)
+	return rt
+}
+
 func (b PromptBundle) name() string { return b.Name }
+
+func (b PromptBundle) Walk(fn func(*PromptBundle)) {
+	// Capture b in a fresh local so the pointer survives across recursive
+	// walks (the parameter b is value-copied per call).
+	bb := b
+	fn(&bb)
+}
 
 func (b PromptBundle) execute(rc RunCtx, env RuntimeEnv) (out []Result) {
 	if b.Env != nil {
@@ -289,13 +430,6 @@ func (b PromptBundle) execute(rc RunCtx, env RuntimeEnv) (out []Result) {
 		}
 	}
 
-	prompt, err := b.Render(env)
-	if err != nil {
-		return emit(Result{Bundle: &b, Env: env, Flow: Flow{
-			State: StateError, Reason: "render failed", Err: err,
-		}})
-	}
-
 	var opts runner.RunOpts
 	if b.RunOpts != nil {
 		opts = b.RunOpts(env)
@@ -314,17 +448,41 @@ func (b PromptBundle) execute(rc RunCtx, env RuntimeEnv) (out []Result) {
 	}
 
 	if env.DryRun {
+		// Resolve in dry-run so verbs can surface resolution-time errors
+		// and --plan-only style previews still see the resolved prompt.
+		// Skip the allocate/execute path entirely.
+		if _, err := b.resolvePrompt(rc, env); err != nil {
+			return emit(Result{Bundle: &b, Env: env, Flow: Flow{
+				State: StateError, Reason: "render failed", Err: err,
+			}})
+		}
 		return emit(Result{Bundle: &b, Env: env, Flow: Flow{
 			State: StateContinue, Reason: "dry-run",
 		}})
 	}
 
-	prepared, prepErr := env.Executor.Prepare(opts, prompt)
+	prepared, prepErr := env.Executor.Prepare(opts)
 	if prepErr != nil {
 		return emit(Result{Bundle: &b, Env: env, Flow: Flow{
 			State: StateError, Reason: "prepare failed", Err: prepErr,
 		}})
 	}
+
+	// Prompt resolution happens between Prepare and ExecutePrepared so the
+	// resolver can reference runtime-dependent values (exec.id, etc.).
+	// resolvePrompt picks the new Prompt path or the legacy Render shim;
+	// failures here happen after the exec row was allocated, so we close
+	// the row as failed before propagating the error.
+	prompt, err := b.resolvePrompt(rc, env)
+	if err != nil {
+		if rc.DB != nil {
+			_ = rc.DB.MarkExecFailed(prepared.ExecID, "render failed: "+err.Error(), time.Now())
+		}
+		return emit(Result{Bundle: &b, Env: env, Flow: Flow{
+			State: StateError, Reason: "render failed", Err: err,
+		}})
+	}
+	prepared.PromptBytes = len(prompt)
 	rc.Reporter.AgentExecStart(bi, prepared)
 	summary := env.Executor.ExecutePrepared(rc.Ctx, prepared, prompt, func(p runner.RunProgress) {
 		rc.Reporter.AgentEvent(bi, p)
@@ -367,6 +525,12 @@ type Pipeline struct {
 }
 
 func (p Pipeline) name() string { return p.Name }
+
+func (p Pipeline) Walk(fn func(*PromptBundle)) {
+	for _, s := range p.Steps {
+		s.Walk(fn)
+	}
+}
 
 // execute exposes Pipeline as a Step inside a parent composition. Inner
 // step boundaries collapse to flat []Result for the parent; structured
@@ -441,6 +605,12 @@ type Parallel struct {
 }
 
 func (p Parallel) name() string { return p.Name }
+
+func (p Parallel) Walk(fn func(*PromptBundle)) {
+	for _, s := range p.Steps {
+		s.Walk(fn)
+	}
+}
 
 func (p Parallel) execute(rc RunCtx, env RuntimeEnv) []Result {
 	if p.Env != nil {

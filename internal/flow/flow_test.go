@@ -106,7 +106,7 @@ func TestPromptBundle_RenderError(t *testing.T) {
 	env := newEnv(exec)
 	renderErr := errors.New("template failed")
 
-	b := makeBundle("verify", func(RuntimeEnv) (string, error) { return "", renderErr })
+	b := makeBundle("verify", errPrompt{err: renderErr})
 	out := Run(b, env, rc)
 
 	r := out.Steps[0].Results[0]
@@ -175,14 +175,21 @@ func TestPromptBundle_EnvOverride(t *testing.T) {
 	override := newEnv(exec)
 	override.Role = "override-role"
 
-	b := makeBundle("verify", func(env RuntimeEnv) (string, error) {
-		if env.Role != "override-role" {
-			t.Errorf("Render saw env.Role = %q, expected override-role", env.Role)
-		}
-		return "ok", nil
-	})
+	b := makeBundle("verify", nil)
 	b.Env = &override
 	Run(b, parent, rc)
+	// The override propagates to opts.RoleID via flow.execute's env →
+	// RunOpts plumbing — fakeExecutor records the opts each ExecutePrepared
+	// sees, so an "override-role" landing there proves the override
+	// actually reshaped the runner-side env.
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+	if len(exec.calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(exec.calls))
+	}
+	if got := exec.calls[0].Opts.RoleID; got != "override-role" {
+		t.Errorf("opts.RoleID = %q, want override-role", got)
+	}
 }
 
 // ============================================================
@@ -474,10 +481,8 @@ func TestParallel_PanicRecovered(t *testing.T) {
 	env := newEnv(exec)
 
 	panicking := PromptBundle{
-		Name: "boom",
-		Render: func(RuntimeEnv) (string, error) {
-			panic("synthetic panic")
-		},
+		Name:    "boom",
+		Prompt:  &panicPrompt{msg: "synthetic panic"},
 		RunOpts: func(RuntimeEnv) runner.RunOpts { return runner.RunOpts{} },
 	}
 	par := Parallel{
@@ -527,7 +532,7 @@ func TestParallel_PanicEmitsBundleEnd(t *testing.T) {
 
 	panicking := PromptBundle{
 		Name:    "boom",
-		Render:  func(RuntimeEnv) (string, error) { panic("synthetic panic") },
+		Prompt:  &panicPrompt{msg: "synthetic panic"},
 		RunOpts: func(RuntimeEnv) runner.RunOpts { return runner.RunOpts{} },
 	}
 	par := Parallel{
@@ -684,7 +689,7 @@ type errOnceExecutor struct {
 	mu    sync.Mutex
 }
 
-func (e *errOnceExecutor) Prepare(opts runner.RunOpts, _ string) (*runner.PreparedRun, error) {
+func (e *errOnceExecutor) Prepare(opts runner.RunOpts) (*runner.PreparedRun, error) {
 	return &runner.PreparedRun{Opts: opts}, nil
 }
 
@@ -712,7 +717,7 @@ type maxConcurrentExecutor struct {
 	peakN   int
 }
 
-func (e *maxConcurrentExecutor) Prepare(opts runner.RunOpts, _ string) (*runner.PreparedRun, error) {
+func (e *maxConcurrentExecutor) Prepare(opts runner.RunOpts) (*runner.PreparedRun, error) {
 	return &runner.PreparedRun{Opts: opts}, nil
 }
 

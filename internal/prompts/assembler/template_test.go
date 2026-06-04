@@ -36,7 +36,7 @@ func TestRenderVariables(t *testing.T) {
 		{"multiple", "{{project.name}}/{{prompt.action}}/{{prompt.name}}", "ateam/report/security"},
 		{"empty value", "X={{env.EMPTY}}Y", "X=Y"},
 		{"unknown namespace passes through", "{{foo.bar}} stays", "{{foo.bar}} stays"},
-		{"non-dotted token passes through", "{{LEGACY}} too", "{{LEGACY}} too"},
+		{"unknown non-ALL_CAPS token passes through", "{{legacy}} too", "{{legacy}} too"},
 		{"no directives", "no braces here", "no braces here"},
 		{"unterminated {{ kept literal", "open {{ never closed", "open {{ never closed"},
 		{"adjacent", "{{prompt.name}}{{prompt.action}}", "securityreport"},
@@ -214,33 +214,22 @@ func TestRenderNestedDirective(t *testing.T) {
 	}
 }
 
-func TestRenderLegacyAllCapsCompat(t *testing.T) {
-	// {{ROLE}} should resolve as {{prompt.name}} via the v1 compat shim, so
-	// defaults and user prompts can ship with ALL_CAPS during the
-	// transitional release without first being mechanically rewritten.
+func TestRenderAllCapsPassesThrough(t *testing.T) {
+	// Engine-side ALL_CAPS compat was removed; the engine no longer maps
+	// {{ROLE}} → {{prompt.name}} etc. Tokens pass through verbatim so the
+	// runner-side substitution layer can fill {{BATCH}} / {{EXEC_ID}} /
+	// etc. at execution time.
 	e := NewEngine(nil, 0)
 	v := mkVars()
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"ROLE → prompt.name", "role={{ROLE}}", "role=security"},
-		{"PROJECT_NAME → project.name", "{{PROJECT_NAME}}", "ateam"},
-		{"OUTPUT_DIR → exec.output_dir", "to {{OUTPUT_DIR}}/x", "to /tmp/runtime/42/x"},
-		{"EXECUTION_DIR alias also works", "cd {{EXECUTION_DIR}}", "cd /tmp/runtime/42"},
-		{"SOURCE_DIR → literal '.'", "wd: {{SOURCE_DIR}}", "wd: ."},
-		{"unknown ALL_CAPS still passes through", "{{MY_USER_TOKEN}}", "{{MY_USER_TOKEN}}"},
-		{"mixed legacy + dotted", "{{ROLE}} and {{prompt.action}}", "security and report"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := e.Render(tc.in, v)
+	for _, tok := range []string{"ROLE", "BATCH", "EXEC_ID", "OUTPUT_DIR"} {
+		t.Run(tok, func(t *testing.T) {
+			got, err := e.Render("x={{"+tok+"}}y", v)
 			if err != nil {
-				t.Fatalf("Render err: %v", err)
+				t.Fatalf("{{%s}}: unexpected error %v", tok, err)
 			}
-			if got != tc.want {
-				t.Fatalf("got %q, want %q", got, tc.want)
+			want := "x={{" + tok + "}}y"
+			if got != want {
+				t.Fatalf("{{%s}}: got %q want %q", tok, got, want)
 			}
 		})
 	}

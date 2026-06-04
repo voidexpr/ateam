@@ -51,6 +51,10 @@ import (
 //     without the field; consumers should check for file existence before reading.
 //   - work_dir         – host filesystem path; may differ from the container-internal path when running in docker.
 //   - container_id     – empty string for non-containerized runs.
+//   - prompt_file      – relative path (against the DB's parent dir) of the archived prompt for this run, set after the
+//     runner allocates logsDir. Replaces the legacy prompt_hash column — the post-substitution prompt isn't reproducible
+//     from the source, so a path to the on-disk archive is the durable reference. Legacy databases retain prompt_hash as
+//     a dead column; new inserts no longer populate it.
 const schema = `
 CREATE TABLE IF NOT EXISTS agent_execs (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,7 +66,7 @@ CREATE TABLE IF NOT EXISTS agent_execs (
   role              TEXT NOT NULL DEFAULT '',
   batch             TEXT NOT NULL DEFAULT '',
   model             TEXT NOT NULL DEFAULT '',
-  prompt_hash       TEXT NOT NULL DEFAULT '',
+  prompt_file       TEXT NOT NULL DEFAULT '',
   started_at        TEXT NOT NULL,
   stream_file       TEXT NOT NULL DEFAULT '',
   output_file       TEXT NOT NULL DEFAULT '',
@@ -103,7 +107,7 @@ type Call struct {
 	Role           string
 	Batch          string
 	Model          string
-	PromptHash     string
+	PromptFile     string // archived prompt path; set after Prepare via UpdatePromptFile
 	StartedAt      time.Time
 	AgentFile      string
 	OutputFile     string
@@ -283,6 +287,7 @@ func migrate(db *sql.DB, dbPath string) error {
 	hasGitStartBranch := false
 	hasGitEndBranch := false
 	hasWorkDir := false
+	hasPromptFile := false
 	for tRows.Next() {
 		var cid int
 		var name, typ string
@@ -320,6 +325,8 @@ func migrate(db *sql.DB, dbPath string) error {
 			hasGitEndBranch = true
 		case "work_dir":
 			hasWorkDir = true
+		case "prompt_file":
+			hasPromptFile = true
 		}
 	}
 	tRows.Close()
@@ -392,6 +399,15 @@ func migrate(db *sql.DB, dbPath string) error {
 			return err
 		}
 		if _, err := tx.Exec("CREATE INDEX IF NOT EXISTS idx_execs_work_dir ON agent_execs(work_dir)"); err != nil {
+			return err
+		}
+	}
+	// Pre-spec-step3 databases have prompt_hash (now deprecated) and no
+	// prompt_file. Add the new column non-destructively — the dead
+	// prompt_hash column stays in place for old rows, and new inserts
+	// populate prompt_file instead.
+	if !hasPromptFile {
+		if _, err := tx.Exec("ALTER TABLE agent_execs ADD COLUMN prompt_file TEXT NOT NULL DEFAULT ''"); err != nil {
 			return err
 		}
 	}
@@ -486,12 +502,12 @@ func (c *CallDB) InsertCall(call *Call) (int64, error) {
 	res, err := c.db.Exec(`
 		INSERT INTO agent_execs (
 			project_id, profile, agent, container, action, role,
-			batch, model, prompt_hash, started_at, stream_file, output_file,
+			batch, model, prompt_file, started_at, stream_file, output_file,
 			git_start_hash, git_start_branch, work_dir
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		call.ProjectID, call.Profile, call.Agent, call.Container,
 		call.Action, call.Role, call.Batch, call.Model,
-		call.PromptHash, call.StartedAt.Format(time.RFC3339), call.AgentFile,
+		call.PromptFile, call.StartedAt.Format(time.RFC3339), call.AgentFile,
 		call.OutputFile, call.GitStartHash, call.GitStartBranch, call.WorkDir,
 	)
 	if err != nil {
@@ -547,6 +563,34 @@ func (c *CallDB) UpdateStreamFile(id int64, agentFile string) error {
 // canonical output path is known. Display-only; not unique across rows.
 func (c *CallDB) UpdateOutputFile(id int64, outputFile string) error {
 	_, err := c.db.Exec("UPDATE agent_execs SET output_file = ? WHERE id = ?", outputFile, id)
+	return err
+}
+
+// UpdatePromptFile sets the prompt_file path. Called from Prepare after the
+// runner derives the per-exec logs directory; mirrors UpdateStreamFile's
+// pattern. The path is stored verbatim — callers pass the relative form they
+// want recorded.
+func (c *CallDB) UpdatePromptFile(id int64, promptFile string) error {
+	_, err := c.db.Exec("UPDATE agent_execs SET prompt_file = ? WHERE id = ?", promptFile, id)
+	return err
+}
+
+// MarkExecFailed closes an exec row as failed without running the full
+// UpdateCall path. Used when prompt resolution fails AFTER Prepare allocated
+// an exec_id — the row already exists, the agent never launched, and the
+// only fields that matter are ended_at + is_error + error_message. Timing
+// columns get the elapsed-since-start interval so listings still surface a
+// non-NULL ended_at.
+func (c *CallDB) MarkExecFailed(id int64, errMsg string, endedAt time.Time) error {
+	_, err := c.db.Exec(`
+		UPDATE agent_execs SET
+			ended_at = ?,
+			duration_ms = CAST((julianday(?) - julianday(started_at)) * 86400000 AS INTEGER),
+			is_error = 1,
+			error_message = ?
+		WHERE id = ?`,
+		endedAt.Format(time.RFC3339), endedAt.Format(time.RFC3339), errMsg, id,
+	)
 	return err
 }
 

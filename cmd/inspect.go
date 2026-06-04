@@ -131,6 +131,7 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 func buildAutoDebugPrompt(env *root.ResolvedEnv, rows []calldb.RecentRow, files []string, prePrompt, postPrompt string) (string, error) {
 	debugContext := buildDebugContext(rows, files)
 	a := env.Assembler()
+	engine := env.BuildEngine("exec debugger", "debug")
 	vars := env.BuildAssemblerVars("exec_debug", "exec debugger", "debug")
 	vars.Exec["debug_context"] = debugContext
 
@@ -144,7 +145,7 @@ func buildAutoDebugPrompt(env *root.ResolvedEnv, rows []calldb.RecentRow, files 
 	}
 
 	opts := &assembler.AssembleOptions{PrePrompt: pre, PostPrompt: post}
-	res, err := a.Assemble("exec_debug", vars, nil, opts)
+	res, err := a.Assemble("exec_debug", vars, engine, opts)
 	if err != nil {
 		return "", err
 	}

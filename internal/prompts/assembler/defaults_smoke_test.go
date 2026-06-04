@@ -57,11 +57,24 @@ func TestDefaultsReachableViaAssembler(t *testing.T) {
 	if len(matches) < 1 {
 		t.Errorf("report _pre.*.md AllMatches: got %d, want >=1", len(matches))
 	}
-	// Verify _pre.context.md uses the new dotted variable.
+	// Verify _pre.context.md uses the dynamic that supersedes the old
+	// {{project.info}} static variable.
 	root, ok, _ := a.FirstMatch("_pre.context.md")
-	if !ok || !strings.Contains(string(root.Content), "{{project.info}}") {
-		t.Errorf("_pre.context.md should reference {{project.info}}, got %q", string(root.Content))
+	if !ok || !strings.Contains(string(root.Content), "{{dynamic.project_info}}") {
+		t.Errorf("_pre.context.md should reference {{dynamic.project_info}}, got %q", string(root.Content))
 	}
+}
+
+// stubDynamicDispatcher returns canned content for every dynamic name,
+// keyed by name. Used by defaults smoke tests to stand in for the verb
+// factories' real dispatcher.
+type stubDynamicDispatcher map[string]string
+
+func (s stubDynamicDispatcher) Dispatch(name string, _ []string) (string, error) {
+	if v, ok := s[name]; ok {
+		return v, nil
+	}
+	return "", nil
 }
 
 // TestAssembleAgainstRealDefaults exercises the full assembly pipeline
@@ -72,16 +85,21 @@ func TestAssembleAgainstRealDefaults(t *testing.T) {
 	vars := assembler.MapVars{
 		Prompt:  map[string]string{"name": "security", "path": "report/security", "action": "report"},
 		Exec:    map[string]string{"output_file": "/tmp/report.md", "output_dir": "/tmp"},
-		Project: map[string]string{"info": "# Test project info", "name": "ateam"},
+		Project: map[string]string{"name": "ateam"},
 	}
+	// project_info moved from a static vars entry to a dynamic; supply a
+	// stub dispatcher so the smoke test can assert the expanded output.
+	engine := assembler.NewEngine(a, 0).WithDispatcher(stubDynamicDispatcher{
+		"project_info": "# Test project info",
+	})
 
-	res, err := a.Assemble("report/security", vars, nil, nil)
+	res, err := a.Assemble("report/security", vars, engine, nil)
 	if err != nil {
 		t.Fatalf("Assemble failed: %v", err)
 	}
 
 	if !strings.Contains(res.Prompt, "# Test project info") {
-		t.Error("expected {{project.info}} expansion in output")
+		t.Error("expected {{dynamic.project_info}} expansion in output")
 	}
 	if !strings.Contains(res.Prompt, "performing the security report") {
 		t.Error("expected report/_pre.intro.md expansion with role name")

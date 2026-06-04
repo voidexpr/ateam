@@ -1,1 +1,1 @@
-{{project.info}}
+{{dynamic.project_info}}

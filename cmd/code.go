@@ -230,9 +230,7 @@ func runCode(opts CodeOptions) error {
 		Name:   "code",
 		Role:   "supervisor",
 		Action: runner.ActionCode,
-		Render: func(flow.RuntimeEnv) (string, error) {
-			return prompt, nil
-		},
+		Prompt: prompts.RawTextPrompt{Text: prompt},
 		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
 			return runner.RunOpts{
 				RoleID:           "supervisor",

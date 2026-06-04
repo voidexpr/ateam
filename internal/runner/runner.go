@@ -3,7 +3,6 @@ package runner
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -255,12 +254,15 @@ type PreparedRun struct {
 // handle that must be passed to ExecutePrepared. On error, no DB row was
 // inserted and no filesystem state was touched.
 //
-// Side effects: InsertCall in the call DB (with the prompt hash) and an
-// UpdateStreamFile to persist the canonical stream path. Nothing else.
+// Side effects: InsertCall in the call DB (the row's prompt_file path is set
+// once the per-exec logs dir is known), plus UpdateStreamFile to persist the
+// canonical stream path. Nothing else.
 //
-// The prompt is consumed for its hash only — template resolution and the
-// agent invocation happen inside ExecutePrepared.
-func (r *AgentExecutor) Prepare(opts RunOpts, prompt string) (*PreparedRun, error) {
+// The prompt is intentionally absent from this surface — prompt resolution
+// happens in flow between Prepare and ExecutePrepared, so Prepare can
+// allocate the exec_id before the prompt's runtime-dependent values (e.g.
+// {{exec.id}}) are known.
+func (r *AgentExecutor) Prepare(opts RunOpts) (*PreparedRun, error) {
 	startedAt := opts.StartedAt
 	if startedAt.IsZero() {
 		startedAt = time.Now()
@@ -274,16 +276,15 @@ func (r *AgentExecutor) Prepare(opts RunOpts, prompt string) (*PreparedRun, erro
 	model := agent.NormalizeModel(extractModel(r.Agent))
 	cwd := effectiveWorkDir(opts)
 	callID, err := r.CallDB.InsertCall(&calldb.Call{
-		ProjectID:  r.ProjectID,
-		Profile:    r.Profile,
-		Agent:      agentName,
-		Container:  r.ContainerType,
-		Action:     opts.Action,
-		Role:       opts.RoleID,
-		Batch:      opts.Batch,
-		Model:      model,
-		PromptHash: hashPrompt(prompt),
-		StartedAt:  startedAt,
+		ProjectID: r.ProjectID,
+		Profile:   r.Profile,
+		Agent:     agentName,
+		Container: r.ContainerType,
+		Action:    opts.Action,
+		Role:      opts.RoleID,
+		Batch:     opts.Batch,
+		Model:     model,
+		StartedAt: startedAt,
 		// note: resolve from work-dir, not GitRepoDir or AteamDir. The recorded
 		// HEAD must reflect the code the agent actually operated on; centralizing
 		// this via GitRepoDir would record a misleading hash for worktree runs or
@@ -308,9 +309,13 @@ func (r *AgentExecutor) Prepare(opts RunOpts, prompt string) (*PreparedRun, erro
 	stateDir := r.StateDir()
 	logsDir := logsDirFor(stateDir, callID)
 	agentFile := filepath.Join(logsDir, AgentFileName)
+	promptFile := filepath.Join(logsDir, PromptFileName)
 
 	if relStream, relErr := filepath.Rel(stateDir, agentFile); relErr == nil {
 		_ = r.CallDB.UpdateStreamFile(callID, relStream)
+	}
+	if relPrompt, relErr := filepath.Rel(stateDir, promptFile); relErr == nil {
+		_ = r.CallDB.UpdatePromptFile(callID, relPrompt)
 	}
 
 	return &PreparedRun{
@@ -322,12 +327,11 @@ func (r *AgentExecutor) Prepare(opts RunOpts, prompt string) (*PreparedRun, erro
 		StderrFile:   filepath.Join(logsDir, StderrFileName),
 		SettingsFile: filepath.Join(logsDir, SettingsFileName),
 		CmdFile:      filepath.Join(logsDir, CmdFileName),
-		PromptFile:   filepath.Join(logsDir, PromptFileName),
+		PromptFile:   promptFile,
 		StartedAt:    startedAt,
 		AgentName:    agentName,
 		Model:        model,
 		Cwd:          cwd,
-		PromptBytes:  len(prompt),
 		Opts:         opts,
 	}, nil
 }
@@ -342,7 +346,7 @@ func (r *AgentExecutor) Prepare(opts RunOpts, prompt string) (*PreparedRun, erro
 // own their own thread-safety. Pass nil to disable progress reporting.
 // For chan-based consumers, wrap a chan with ProgressChan.
 func (r *AgentExecutor) Execute(ctx context.Context, prompt string, opts RunOpts, onProgress func(RunProgress)) RunSummary {
-	prepared, err := r.Prepare(opts, prompt)
+	prepared, err := r.Prepare(opts)
 	if err != nil {
 		startedAt := opts.StartedAt
 		if startedAt.IsZero() {
@@ -350,6 +354,10 @@ func (r *AgentExecutor) Execute(ctx context.Context, prompt string, opts RunOpts
 		}
 		return failedSummary(opts.RoleID, startedAt, err, 0, "", "")
 	}
+	// PromptBytes used to land in Prepare; with the prompt no longer
+	// reaching Prepare, set it here so per-run observers reading the value
+	// off prepared (bundle_events emits prompt_bytes) keep getting it.
+	prepared.PromptBytes = len(prompt)
 	return r.ExecutePrepared(ctx, prepared, prompt, onProgress)
 }
 
@@ -1482,11 +1490,6 @@ func resolveExecModel(resultEv *agent.StreamEvent, a agent.Agent) string {
 		return agent.NormalizeModel(resultEv.Model)
 	}
 	return agent.NormalizeModel(extractModel(a))
-}
-
-func hashPrompt(prompt string) string {
-	h := sha256.Sum256([]byte(prompt))
-	return fmt.Sprintf("%x", h[:8])
 }
 
 func looksLikeSecret(name string) bool {

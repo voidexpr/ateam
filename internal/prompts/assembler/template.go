@@ -73,12 +73,26 @@ func (v MapVars) Resolve(ns, key string) (string, bool, error) {
 	return val, true, nil
 }
 
+// Dispatcher resolves `{{dynamic.NAME args...}}` directives. The engine
+// expands variables inside the arg list, tokenizes the result with shell-like
+// quoting rules, then calls Dispatch. The prompts package supplies a
+// concrete adapter that wraps a PromptDynamic map plus a ResolveContext —
+// keeping the engine free of any reference to dynamics-side types.
+//
+// When the engine has no dispatcher configured, `{{dynamic.NAME ...}}`
+// passes through verbatim (same shape as any other unknown namespace) so
+// callers that don't supply one keep their existing behavior.
+type Dispatcher interface {
+	Dispatch(name string, args []string) (string, error)
+}
+
 // Engine renders prompt templates: variable substitution plus the include
 // directive family. Construct one per assembly run; safe to reuse across
 // renders against the same anchor list.
 type Engine struct {
-	asm      *Assembler
-	maxDepth int
+	asm        *Assembler
+	maxDepth   int
+	dispatcher Dispatcher
 }
 
 // NewEngine builds a renderer using a's anchors for include resolution.
@@ -88,6 +102,13 @@ func NewEngine(a *Assembler, maxDepth int) *Engine {
 		maxDepth = DefaultMaxIncludeDepth
 	}
 	return &Engine{asm: a, maxDepth: maxDepth}
+}
+
+// WithDispatcher attaches a dynamic-function dispatcher and returns the
+// engine for chaining. Passing nil clears the dispatcher.
+func (e *Engine) WithDispatcher(d Dispatcher) *Engine {
+	e.dispatcher = d
+	return e
 }
 
 // Render expands `{{...}}` directives in content using vars for substitution
@@ -153,32 +174,48 @@ func findClosingBrace(content string, start int) int {
 }
 
 func (e *Engine) resolve(directive string, vars Vars, depth int) (string, error) {
-	if space := strings.IndexAny(directive, " \t"); space > 0 {
-		cmd := directive[:space]
-		arg := strings.TrimSpace(directive[space+1:])
-		switch cmd {
-		case "include":
-			return e.include(arg, vars, depth, false)
-		case "include?":
-			return e.include(arg, vars, depth, true)
-		case "include_glob":
-			return e.includeGlob(arg, vars, depth)
-		}
-		// Unknown directive — pass through verbatim.
-		return "{{" + directive + "}}", nil
+	head, rest := splitHead(directive)
+
+	switch head {
+	case "include":
+		return e.include(rest, vars, depth, false)
+	case "include?":
+		return e.include(rest, vars, depth, true)
+	case "include_glob":
+		return e.includeGlob(rest, vars, depth)
 	}
 
-	// No-space token. Variable lookup requires a `.` (the new dotted form).
-	// Tokens without a dot are routed through the legacy ALL_CAPS compat
-	// shim: {{ROLE}} resolves the same as {{prompt.name}}, {{SOURCE_DIR}}
-	// expands to ".", etc. This lets v1 defaults and user prompts keep
-	// shipping with ALL_CAPS until a follow-up commit does the mechanical
-	// rename — the structural refactor stays independent from the rename.
-	dot := strings.IndexByte(directive, '.')
-	if dot <= 0 || dot == len(directive)-1 {
-		return e.resolveLegacy(directive, vars, depth)
+	// Variable substitution / dynamic dispatch — both require dotted form.
+	dot := strings.IndexByte(head, '.')
+	if dot <= 0 || dot == len(head)-1 {
+		// No dot: the engine no longer recognizes legacy ALL_CAPS
+		// (varmap.go is gone). Tokens pass through verbatim so the
+		// runner-side substitution layer (runner/template.go's
+		// ResolveTemplateString) can still fill {{BATCH}}, {{EXEC_ID}},
+		// etc. at execution time. Authoring tools and runtime.hcl
+		// validation surface the migration error separately.
+		return "{{" + directive + "}}", nil
 	}
-	ns, key := directive[:dot], directive[dot+1:]
+	ns := head[:dot]
+	key := head[dot+1:]
+
+	if ns == "dynamic" {
+		return e.dynamic(key, rest, vars, depth)
+	}
+
+	// `{{ns.key ? default}}` — when rest begins with `?`, treat what
+	// follows as the default to render when the resolved value is empty.
+	// Anything else after `ns.key` is an unknown shape that passes through.
+	var defaultText string
+	haveDefault := false
+	if rest != "" {
+		if strings.HasPrefix(rest, "?") {
+			defaultText = strings.TrimLeft(rest[1:], " \t")
+			haveDefault = true
+		} else {
+			return "{{" + directive + "}}", nil
+		}
+	}
 	val, known, err := vars.Resolve(ns, key)
 	if err != nil {
 		return "", err
@@ -186,43 +223,85 @@ func (e *Engine) resolve(directive string, vars Vars, depth int) (string, error)
 	if !known {
 		return "{{" + directive + "}}", nil
 	}
+	if haveDefault && val == "" {
+		return e.render(defaultText, vars, depth+1)
+	}
 	return val, nil
 }
 
-// resolveLegacy handles a dotless `{{NAME}}` token. If NAME is a known
-// ALL_CAPS variable, it routes through the v1 mapping (recursing once via
-// the dotted form). Otherwise the token passes through verbatim — keeps
-// agent-emitted braces and unknown identifiers alone.
-func (e *Engine) resolveLegacy(name string, vars Vars, depth int) (string, error) {
-	if dotted, ok := VarRenameMap[name]; ok {
-		return e.resolve(dotted, vars, depth)
+// splitHead splits a directive's content into the leading token and the
+// rest. The leading token runs to the first ASCII whitespace; rest is the
+// remainder with one leading run of whitespace consumed.
+func splitHead(directive string) (head, rest string) {
+	space := strings.IndexAny(directive, " \t\n")
+	if space < 0 {
+		return directive, ""
 	}
-	if literal, ok := VarLiteralRewrites[name]; ok {
-		return literal, nil
-	}
-	return "{{" + name + "}}", nil
+	return directive[:space], strings.TrimLeft(directive[space+1:], " \t\n")
 }
 
 func (e *Engine) include(arg string, vars Vars, depth int, optional bool) (string, error) {
 	if e.asm == nil {
 		return "", fmt.Errorf("{{include %s}}: no assembler configured", arg)
 	}
+	// `{{include path ? TEXT}}` — split off the fallback before any
+	// variable expansion so a literal `?` in an expanded path can't be
+	// mistaken for a separator.
+	pathArg, fallback, hasFallback := splitFallback(arg)
+
 	// Two-pass: substitute vars in the path first, then resolve.
-	path, err := e.render(arg, vars, depth+1)
+	expanded, err := e.render(pathArg, vars, depth+1)
 	if err != nil {
 		return "", err
 	}
+	// Spec: tokenize after var expansion. Includes take exactly one arg —
+	// authors quote paths that contain whitespace.
+	args, err := tokenize(expanded)
+	if err != nil {
+		return "", fmt.Errorf("{{include %s}}: %w", arg, err)
+	}
+	if len(args) == 0 {
+		return "", fmt.Errorf("{{include}}: empty path")
+	}
+	if len(args) > 1 {
+		return "", fmt.Errorf("{{include %s}}: expected one path arg, got %d (quote paths containing whitespace)", arg, len(args))
+	}
+	path := args[0]
 	m, ok, err := e.asm.FirstMatch(path)
 	if err != nil {
 		return "", fmt.Errorf("{{include %s}}: %w", path, err)
 	}
 	if !ok {
+		if hasFallback {
+			return e.render(fallback, vars, depth+1)
+		}
 		if optional {
 			return "", nil
 		}
 		return "", fmt.Errorf("{{include %s}}: not found in any anchor", path)
 	}
 	return e.render(string(m.Content), vars, depth+1)
+}
+
+// dynamic dispatches `{{dynamic.NAME args...}}`. With no dispatcher set,
+// the directive passes through verbatim so callers that don't wire dynamics
+// keep their behavior.
+func (e *Engine) dynamic(name, rest string, vars Vars, depth int) (string, error) {
+	if e.dispatcher == nil {
+		if rest == "" {
+			return "{{dynamic." + name + "}}", nil
+		}
+		return "{{dynamic." + name + " " + rest + "}}", nil
+	}
+	expanded, err := e.render(rest, vars, depth+1)
+	if err != nil {
+		return "", err
+	}
+	args, err := tokenize(expanded)
+	if err != nil {
+		return "", fmt.Errorf("{{dynamic.%s ...}}: %w", name, err)
+	}
+	return e.dispatcher.Dispatch(name, args)
 }
 
 func (e *Engine) includeGlob(arg string, vars Vars, depth int) (string, error) {
@@ -249,4 +328,109 @@ func (e *Engine) includeGlob(arg string, vars Vars, depth int) (string, error) {
 		parts = append(parts, rendered)
 	}
 	return strings.Join(parts, "\n\n"), nil
+}
+
+// splitFallback splits "head ? tail" on the first ` ? ` separator that
+// appears at the top level — outside balanced `{{...}}` and outside quoted
+// strings. Returns (s, "", false) when no top-level separator is present.
+func splitFallback(s string) (head, tail string, ok bool) {
+	var inSingle, inDouble bool
+	braceDepth := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !inSingle && !inDouble && i+1 < len(s) {
+			if c == '{' && s[i+1] == '{' {
+				braceDepth++
+				i++
+				continue
+			}
+			if c == '}' && s[i+1] == '}' && braceDepth > 0 {
+				braceDepth--
+				i++
+				continue
+			}
+		}
+		if braceDepth > 0 {
+			continue
+		}
+		if !inDouble && c == '\'' {
+			inSingle = !inSingle
+			continue
+		}
+		if !inSingle && c == '"' {
+			inDouble = !inDouble
+			continue
+		}
+		if inSingle || inDouble {
+			continue
+		}
+		if c == '?' && i > 0 && isASCIISpace(s[i-1]) && i+1 < len(s) && isASCIISpace(s[i+1]) {
+			return strings.TrimRight(s[:i-1], " \t"), strings.TrimLeft(s[i+2:], " \t"), true
+		}
+	}
+	return s, "", false
+}
+
+func isASCIISpace(b byte) bool {
+	switch b {
+	case ' ', '\t', '\n':
+		return true
+	}
+	return false
+}
+
+// tokenize splits s into whitespace-separated tokens with shell-like quoting:
+//   - whitespace splits tokens outside quotes
+//   - single or double quotes preserve internal whitespace
+//   - inside a quoted run, `\\`, `\"`, `\'` are escape sequences; other
+//     backslashes are emitted literally
+//   - outside quotes, backslashes have no special meaning
+//
+// Returns an error on an unterminated quoted run.
+func tokenize(s string) ([]string, error) {
+	var args []string
+	var cur strings.Builder
+	inQuote := byte(0)
+	inToken := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inQuote != 0 {
+			if c == '\\' && i+1 < len(s) {
+				next := s[i+1]
+				if next == '\\' || next == inQuote {
+					cur.WriteByte(next)
+					i++
+					continue
+				}
+			}
+			if c == inQuote {
+				inQuote = 0
+				continue
+			}
+			cur.WriteByte(c)
+			continue
+		}
+		if c == ' ' || c == '\t' || c == '\n' {
+			if inToken {
+				args = append(args, cur.String())
+				cur.Reset()
+				inToken = false
+			}
+			continue
+		}
+		if c == '"' || c == '\'' {
+			inQuote = c
+			inToken = true
+			continue
+		}
+		cur.WriteByte(c)
+		inToken = true
+	}
+	if inQuote != 0 {
+		return nil, fmt.Errorf("unterminated quote (%c)", inQuote)
+	}
+	if inToken {
+		args = append(args, cur.String())
+	}
+	return args, nil
 }

@@ -11,7 +11,6 @@ import (
 
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/flow"
-	"github.com/ateam/internal/flow/actions"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -150,16 +149,19 @@ func runReview(opts ReviewOptions) error {
 		MaxAge:          opts.MaxAge,
 	}
 
-	// Both default and --prompt paths now go through assembleReview; the
-	// override flows into the assembler's ReplaceRoleMain option so framing
-	// fragments compose either way.
-	prompt, err := assembleReview(env, selector, "the supervisor", customPrompt, prePrompt, postPrompt)
+	// Discover + filter reports up-front so ReviewEmptyError surfaces
+	// before any flow setup. Discovery used to live inside assembleReview;
+	// the bundle factory now consumes the resulting RoleReport list.
+	all, err := prompts.DiscoverReports(env.ProjectDir)
 	if err != nil {
-		var empty *prompts.ReviewEmptyError
-		if errors.As(err, &empty) {
-			return formatReviewEmpty(empty.Funnel)
-		}
 		return err
+	}
+	if len(all) == 0 {
+		return fmt.Errorf("no report files found under %s — run 'ateam report' first", env.SharedDir())
+	}
+	reports, funnel := selector.Filter(all, env.Config.Roles)
+	if len(reports) == 0 {
+		return formatReviewEmpty(funnel)
 	}
 
 	timeout := env.Config.Review.EffectiveTimeout(opts.Timeout)
@@ -171,8 +173,32 @@ func runReview(opts ReviewOptions) error {
 
 	startedAt := time.Now()
 
+	bundle := NewReviewBundle(ReviewBundleInput{
+		Env:          env,
+		Reports:      reports,
+		CustomPrompt: customPrompt,
+		PrePrompt:    prePrompt,
+		PostPrompt:   postPrompt,
+		TimeoutMin:   timeout,
+		Verbose:      opts.Verbose,
+		Force:        opts.Force,
+		Print:        opts.Print,
+		StartedAt:    startedAt,
+		ReviewFile:   reviewFile,
+	})
+
 	if opts.DryRun {
-		return printReviewDryRun(env, prompt)
+		// Dry-run resolves the prompt at the cmd layer (skipping flow's
+		// Prepare-then-execute path) so the listing precedes the body.
+		// The runtime needs the bundle's dynamics so {{dynamic.project_info}}
+		// renders the same way it would at exec time.
+		rt := flow.NewRuntime(nil, env, env.WorkDir)
+		rt.SetDynamics(bundle.Dynamics)
+		text, err := bundle.Prompt.Resolve(rt)
+		if err != nil {
+			return err
+		}
+		return printReviewDryRun(env, text)
 	}
 
 	fmt.Printf("Supervisor reviewing reports (%dm timeout)...\n", timeout)
@@ -204,34 +230,6 @@ func runReview(opts ReviewOptions) error {
 	ctx, stop := cmdContext()
 	defer stop()
 
-	bundle := flow.PromptBundle{
-		Name:   "review",
-		Role:   "supervisor",
-		Action: runner.ActionReview,
-		Render: func(flow.RuntimeEnv) (string, error) {
-			return prompt, nil
-		},
-		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
-			return runner.RunOpts{
-				RoleID:            "supervisor",
-				Action:            runner.ActionReview,
-				OutputKind:        runner.OutputKindReview,
-				CanonicalDestFile: reviewFile,
-				WorkDir:           env.WorkDir,
-				TimeoutMin:        timeout,
-				Verbose:           opts.Verbose,
-				StartedAt:         startedAt,
-				QuietExecID:       true,
-			}
-		},
-		PreExec: []flow.Action{
-			actions.CheckConcurrentRuns{If: !opts.Force, Action: runner.ActionReview},
-		},
-		PostExec: []flow.Action{
-			actions.PrintArtifactPath{Label: "Review", Path: reviewFile},
-			actions.PrintArtifactBody{If: opts.Print, Path: reviewFile},
-		},
-	}
 	rtEnv := flow.RuntimeEnv{
 		Executor: cr,
 		WorkDir:  env.WorkDir,
@@ -247,7 +245,7 @@ func runReview(opts ReviewOptions) error {
 			&flow.BundleLogReporter{},
 		},
 	}
-	return flow.Run(bundle, rtEnv, rc).FirstError()
+	return flow.Run(*bundle, rtEnv, rc).FirstError()
 }
 
 // formatReviewEmpty turns a ReviewFunnel into a stderr-friendly explanation

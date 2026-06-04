@@ -232,16 +232,9 @@ func (e *ResolvedEnv) BuildAssemblerVars(promptPath, roleLabel, action string) a
 		},
 		EnvLookup: os.LookupEnv,
 	}
-	// Always seed project.info so prompts that reference {{project.info}} (notably
-	// the embedded `_pre.context.md`) render to a string instead of erroring with
-	// "unknown key in project namespace". An empty value is what --no-project-info
-	// expects: the assembler's whitespace-only filter then drops the fragment.
-	if roleLabel != "" {
-		pinfo := e.NewProjectInfoParams(roleLabel, action)
-		vars.Project["info"] = prompts.FormatProjectInfo(pinfo)
-	} else {
-		vars.Project["info"] = ""
-	}
+	// project.info used to live here as a static var; it's now produced by
+	// {{dynamic.project_info}} (registered on the bundle's Dynamics map)
+	// so the role/action context can shape the output at resolve time.
 
 	// {{git.*}} surfaces repo facts to prompts. Queried in WorkDir for
 	// alignment with project.info (same agent-cwd convention; see

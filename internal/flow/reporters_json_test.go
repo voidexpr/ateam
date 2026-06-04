@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/runner"
 )
 
@@ -36,7 +37,7 @@ func TestJSONReporter_BundleAndAgentInterleaved(t *testing.T) {
 	exec := &preparingExec{logsRoot: dir}
 	bundle := PromptBundle{
 		Name:    "exec",
-		Render:  func(RuntimeEnv) (string, error) { return "hi", nil },
+		Prompt:  prompts.RawTextPrompt{Text: "hi"},
 		RunOpts: func(RuntimeEnv) runner.RunOpts { return runner.RunOpts{RoleID: "tester"} },
 	}
 	env := RuntimeEnv{Executor: exec, Role: "tester", Action: "exec", WorkDir: "/wd", Batch: "b"}

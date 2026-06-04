@@ -19,12 +19,12 @@ func TestStaticBundle_Shape(t *testing.T) {
 		t.Errorf("identity fields wrong: %+v", b)
 	}
 
-	got, err := b.Render(flow.RuntimeEnv{})
+	got, err := b.Prompt.Resolve(nil)
 	if err != nil {
-		t.Fatalf("Render: %v", err)
+		t.Fatalf("Prompt.Resolve: %v", err)
 	}
 	if got != "hello" {
-		t.Errorf("Render: got %q want hello", got)
+		t.Errorf("Prompt.Resolve: got %q want hello", got)
 	}
 
 	gotOpts := b.RunOpts(flow.RuntimeEnv{})
@@ -33,19 +33,16 @@ func TestStaticBundle_Shape(t *testing.T) {
 	}
 }
 
-func TestStaticBundle_RenderIgnoresEnv(t *testing.T) {
-	// Demonstrates the helper's "static" semantics: the closure returns
-	// its captured prompt regardless of the RuntimeEnv passed in.
+func TestStaticBundle_PromptIsRawText(t *testing.T) {
+	// Demonstrates the helper's "static" semantics: Prompt.Resolve returns
+	// the captured prompt with no further expansion or env dependence.
 	b := staticBundle("x", "r", "exec", "captured", runner.RunOpts{})
-	for _, env := range []flow.RuntimeEnv{
-		{},
-		{Role: "other"},
-		{WorkDir: "/elsewhere"},
-	} {
-		got, _ := b.Render(env)
-		if got != "captured" {
-			t.Errorf("env %+v: got %q", env, got)
-		}
+	got, err := b.Prompt.Resolve(nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got != "captured" {
+		t.Errorf("got %q want captured", got)
 	}
 }
 

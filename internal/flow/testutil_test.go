@@ -5,8 +5,46 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/runner"
 )
+
+// errPrompt returns a fixed error from Resolve — used by tests that exercise
+// the bundle's "render failed" branch.
+type errPrompt struct{ err error }
+
+func (e errPrompt) Resolve(prompts.ResolveContext) (string, error) {
+	return "", e.err
+}
+func (e errPrompt) Inspect(prompts.ResolveContext) ([]prompts.Section, error) {
+	return nil, nil
+}
+
+// panicPrompt panics on its SECOND Resolve call — the first call (during
+// flow.Verify's preview-mode walk) returns cleanly so the bundle is allowed
+// to proceed to execute; the second call (during the real bundle execute)
+// panics so the recover-panic tests still exercise PromptBundle.execute's
+// defer-recover path. Lives in a struct rather than a plain func so the
+// call counter survives across Resolve invocations.
+type panicPrompt struct {
+	msg string
+	mu  sync.Mutex
+	n   int
+}
+
+func (p *panicPrompt) Resolve(prompts.ResolveContext) (string, error) {
+	p.mu.Lock()
+	p.n++
+	n := p.n
+	p.mu.Unlock()
+	if n <= 1 {
+		return "ok", nil
+	}
+	panic(p.msg)
+}
+func (p *panicPrompt) Inspect(prompts.ResolveContext) ([]prompts.Section, error) {
+	return nil, nil
+}
 
 // ============================================================
 // fakeExecutor
@@ -34,7 +72,7 @@ type fakeCall struct {
 	Opts   runner.RunOpts
 }
 
-func (f *fakeExecutor) Prepare(opts runner.RunOpts, _ string) (*runner.PreparedRun, error) {
+func (f *fakeExecutor) Prepare(opts runner.RunOpts) (*runner.PreparedRun, error) {
 	if f.PrepareErr != nil {
 		return nil, f.PrepareErr
 	}
@@ -160,13 +198,13 @@ func newEnv(exec Executor) RuntimeEnv {
 	return RuntimeEnv{Executor: exec, Role: "tester", Action: "test"}
 }
 
-func makeBundle(name string, render func(RuntimeEnv) (string, error)) PromptBundle {
-	if render == nil {
-		render = func(RuntimeEnv) (string, error) { return "hello", nil }
+func makeBundle(name string, prompt Prompt) PromptBundle {
+	if prompt == nil {
+		prompt = prompts.RawTextPrompt{Text: "hello"}
 	}
 	return PromptBundle{
 		Name:   name,
-		Render: render,
+		Prompt: prompt,
 		RunOpts: func(RuntimeEnv) runner.RunOpts {
 			return runner.RunOpts{}
 		},

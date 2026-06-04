@@ -47,6 +47,7 @@ func assembleReview(env *root.ResolvedEnv, selector prompts.ReviewSelector, role
 	}
 
 	a := env.Assembler()
+	engine := env.BuildEngine(roleLabel, "review")
 	vars := env.BuildAssemblerVars("review", roleLabel, "review")
 	// Pre-prompt rides through the assembler (lands before _pre.context.md).
 	// Post-prompt is held until after the manually-appended reports block so
@@ -55,7 +56,7 @@ func assembleReview(env *root.ResolvedEnv, selector prompts.ReviewSelector, role
 		ReplaceRoleMain: customPrompt,
 		PrePrompt:       prePrompt,
 	}
-	res, err := a.Assemble("review", vars, nil, opts)
+	res, err := a.Assemble("review", vars, engine, opts)
 	if err != nil {
 		return "", err
 	}
@@ -64,7 +65,7 @@ func assembleReview(env *root.ResolvedEnv, selector prompts.ReviewSelector, role
 	if block := formatReportsBlock(reports); block != "" {
 		prompt += "\n\n---\n\n" + block
 	}
-	post, err := renderCLIWrapper(a, vars, postPrompt)
+	post, err := renderCLIWrapper(engine, vars, postPrompt)
 	if err != nil {
 		return "", err
 	}
@@ -84,12 +85,13 @@ func assembleReview(env *root.ResolvedEnv, selector prompts.ReviewSelector, role
 // renders identically across cmds.
 func assembleSupervisor(env *root.ResolvedEnv, promptPath, roleLabel, action, prePrompt, postPrompt string) (string, error) {
 	a := env.Assembler()
+	engine := env.BuildEngine(roleLabel, action)
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, action)
 	opts := &assembler.AssembleOptions{
 		PrePrompt:  prePrompt,
 		PostPrompt: postPrompt,
 	}
-	res, err := a.Assemble(promptPath, vars, nil, opts)
+	res, err := a.Assemble(promptPath, vars, engine, opts)
 	if err != nil {
 		return "", err
 	}
