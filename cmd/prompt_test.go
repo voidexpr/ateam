@@ -81,6 +81,143 @@ func TestPromptRoleDryRun(t *testing.T) {
 	}
 }
 
+// TestPromptLiteralFileMode verifies the positional @PATH form: the file's
+// content is printed verbatim with the --batch override applied. No
+// assembler composition — mirrors `ateam exec @PATH` semantics. Covers both
+// absolute and project-relative path forms (the docs imply the relative form
+// is the common path-from-project-root case).
+func TestPromptLiteralFileMode(t *testing.T) {
+	defer savePromptGlobals()()
+	projPath := setupPromptProject(t)
+
+	promptsDir := filepath.Join(projPath, ".ateam", "prompts")
+	if err := os.MkdirAll(promptsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	const body = "literal {{BATCH}} body, no framing"
+	filePath := filepath.Join(promptsDir, "foobar.prompt.md")
+	if err := os.WriteFile(filePath, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Relative path from project root works (common case).
+	t.Run("relative-path", func(t *testing.T) {
+		defer savePromptGlobals()()
+		promptBatchSaved := promptBatch
+		t.Cleanup(func() { promptBatch = promptBatchSaved })
+		promptBatch = "batch-xyz"
+
+		var runErr error
+		out := captureStdout(t, func() {
+			withChdir(t, projPath, func() {
+				runErr = runPrompt(nil, []string{"@.ateam/prompts/foobar.prompt.md"})
+			})
+		})
+		if runErr != nil {
+			t.Fatalf("runPrompt: %v", runErr)
+		}
+		if !strings.Contains(out, "batch-xyz") {
+			t.Errorf("expected --batch to replace {{BATCH}}, got:\n%s", out)
+		}
+		if strings.Contains(out, "{{BATCH}}") {
+			t.Errorf("expected {{BATCH}} to be substituted, still present:\n%s", out)
+		}
+		if strings.Contains(out, "# ATeam Project Context") {
+			t.Errorf("literal-file mode should not run the assembler; project context should NOT appear:\n%s", out)
+		}
+	})
+
+	// Absolute path also works.
+	t.Run("absolute-path", func(t *testing.T) {
+		defer savePromptGlobals()()
+
+		var runErr error
+		out := captureStdout(t, func() {
+			withChdir(t, projPath, func() {
+				runErr = runPrompt(nil, []string{"@" + filePath})
+			})
+		})
+		if runErr != nil {
+			t.Fatalf("runPrompt: %v", runErr)
+		}
+		if !strings.Contains(out, "literal {{BATCH}} body") {
+			t.Errorf("expected file contents (with placeholder), got:\n%s", out)
+		}
+	})
+
+	// Known namespace + unknown key errors loudly. The user gets a typo-
+	// catching message before the prompt reaches an agent.
+	t.Run("invalid-var-errors", func(t *testing.T) {
+		defer savePromptGlobals()()
+
+		typoPath := filepath.Join(promptsDir, "typo.prompt.md")
+		if err := os.WriteFile(typoPath, []byte("{{exec.work_dir}} is not a real key"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		var runErr error
+		captureStdout(t, func() {
+			withChdir(t, projPath, func() {
+				runErr = runPrompt(nil, []string{"@" + typoPath})
+			})
+		})
+		if runErr == nil {
+			t.Fatal("expected error for unknown key in exec namespace, got nil")
+		}
+		if !strings.Contains(runErr.Error(), "unknown key in exec namespace") {
+			t.Errorf("expected 'unknown key in exec namespace' in error, got: %v", runErr)
+		}
+	})
+
+	// Unknown namespace passes through verbatim — leaves agent-emitted
+	// braces and arbitrary user identifiers alone.
+	t.Run("unknown-namespace-passes-through", func(t *testing.T) {
+		defer savePromptGlobals()()
+
+		raw := "leave alone: {{foo.bar}} {{some_user_token}}"
+		passPath := filepath.Join(promptsDir, "pass.prompt.md")
+		if err := os.WriteFile(passPath, []byte(raw), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		var runErr error
+		out := captureStdout(t, func() {
+			withChdir(t, projPath, func() {
+				runErr = runPrompt(nil, []string{"@" + passPath})
+			})
+		})
+		if runErr != nil {
+			t.Fatalf("runPrompt: %v", runErr)
+		}
+		if !strings.Contains(out, "{{foo.bar}}") || !strings.Contains(out, "{{some_user_token}}") {
+			t.Errorf("expected unknown-namespace and unknown-ALL_CAPS to pass through, got:\n%s", out)
+		}
+	})
+
+	// Valid project-namespace vars expand against the resolved env.
+	t.Run("project-vars-expand", func(t *testing.T) {
+		defer savePromptGlobals()()
+
+		varsPath := filepath.Join(promptsDir, "projvars.prompt.md")
+		if err := os.WriteFile(varsPath, []byte("dir={{project.dir}}"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		var runErr error
+		out := captureStdout(t, func() {
+			withChdir(t, projPath, func() {
+				runErr = runPrompt(nil, []string{"@" + varsPath})
+			})
+		})
+		if runErr != nil {
+			t.Fatalf("runPrompt: %v", runErr)
+		}
+		if !strings.Contains(out, "dir=myproj") {
+			t.Errorf("expected {{project.dir}} to expand to 'myproj', got:\n%s", out)
+		}
+	})
+}
+
 // TestPromptPrePostWrap verifies that --pre-prompt and --post-prompt land at
 // the outermost positions of the assembled prompt — pre before any anchor
 // content, post after every other section.

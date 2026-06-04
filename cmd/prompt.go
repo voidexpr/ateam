@@ -29,28 +29,34 @@ var (
 )
 
 var promptCmd = &cobra.Command{
-	Use:   "prompt",
-	Short: "Resolve and print the full prompt for a role or supervisor",
+	Use:   "prompt [@PATH|@-]",
+	Short: "Resolve and print the full prompt for a role, supervisor, or top-level action",
 	Long: `Perform 3-level prompt resolution (project → org → defaults) for a given
 role or supervisor action, then print the assembled prompt to stdout.
 
+A positional ` + "`@PATH`" + ` argument switches to literal-file mode: read the file's
+contents verbatim and print (with --batch baked in if set). No assembler
+composition or framing — mirrors what ` + "`ateam exec @PATH`" + ` would feed to the
+agent. Use ` + "`@-`" + ` to read from stdin.
+
 Example:
   ateam prompt --role security --action report
-  ateam prompt --role refactor_small --action code
+  ateam prompt --action code --post-prompt @task.md
+  ateam prompt --action code_management
+  ateam prompt --supervisor --action review                  # legacy form
   ateam prompt --role security --action report --post-prompt "Focus on auth"
-  ateam prompt --supervisor --action review
-  ateam prompt --supervisor --action code
-  ateam prompt --supervisor --action verify
   ateam prompt --role security --action report --paths
-  ateam prompt --role security --action report --inline-paths`,
-	Args: cobra.NoArgs,
+  ateam prompt --role security --action report --inline-paths
+  ateam prompt @.ateam/prompts/foobar.prompt.md              # literal-file mode
+  cat foobar.md | ateam prompt @-                            # stdin`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runPrompt,
 }
 
 func init() {
 	promptCmd.Flags().StringVar(&promptRole, "role", "", "role name")
 	promptCmd.Flags().BoolVar(&promptSupervisor, "supervisor", false, "generate supervisor prompt instead of role prompt")
-	promptCmd.Flags().StringVar(&promptAction, "action", "", "action type: report, code, review, or verify (required)")
+	promptCmd.Flags().StringVar(&promptAction, "action", "", "action type: report, code, review, or verify (required when no @PATH is given)")
 	addPromptWrapFlags(promptCmd, &promptPrePrompt, &promptPostPrompt)
 	promptCmd.Flags().BoolVar(&promptNoProjectInfo, "no-project-info", false, "omit ateam project context from the prompt")
 	promptCmd.Flags().BoolVar(&promptIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
@@ -59,7 +65,9 @@ func init() {
 	promptCmd.Flags().StringVar(&promptBatch, "batch", "", "bake a literal batch ID into {{exec.batch}} placeholders (otherwise rendered as the deferred {{BATCH}} marker for the runner to fill at exec time)")
 	promptCmd.MarkFlagsMutuallyExclusive("role", "supervisor")
 	promptCmd.MarkFlagsMutuallyExclusive("paths", "inline-paths")
-	_ = promptCmd.MarkFlagRequired("action")
+	// --action is conditionally required: it's needed for role/supervisor/
+	// action-singleton resolution, but ignored when a positional @PATH selects
+	// literal-file mode. Enforced in runPrompt instead of via MarkFlagRequired.
 }
 
 func runPrompt(cmd *cobra.Command, args []string) error {
@@ -69,16 +77,61 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 	if promptPaths {
 		return runPromptPaths()
 	}
+	// Literal-file mode: positional @PATH or @- arg. Reads verbatim,
+	// applies --batch override, prints. No assembler composition — matches
+	// what `ateam exec @PATH` would feed to the agent.
+	if len(args) == 1 {
+		return runPromptLiteralFile(args[0])
+	}
+	if promptAction == "" {
+		return fmt.Errorf("--action is required (or pass a positional @PATH to print a file verbatim)")
+	}
 	if promptSupervisor {
 		return runPromptSupervisor()
 	}
 	if promptRole != "" {
 		return runPromptRole()
 	}
-	// No --role / --supervisor: resolve --action as a top-level singleton
+	// No --role / --supervisor / @PATH: resolve --action as a top-level singleton
 	// prompt (e.g. `ateam prompt --action code` → code.prompt.md, the
 	// implementer body the code-management supervisor pipes per task).
 	return runPromptAction()
+}
+
+// runPromptLiteralFile reads a literal prompt file (or stdin via @-),
+// runs the file content through the assembler's template engine, applies
+// the --batch override, and prints.
+//
+// No anchor walk, no framing fragments compose — this is "show what the
+// agent would see for `ateam exec @PATH`" plus runner-time substitution
+// the user is previewing. Known-namespace + unknown-key directives
+// (e.g. `{{exec.work_dir}}` — exec is a real namespace, work_dir is not
+// a real key) error loudly with the engine's own message, surfacing typos
+// before the prompt reaches the agent.
+//
+// Mutually exclusive with the flag-driven assembly paths — when a
+// positional @PATH is given, --role/--supervisor/--action are ignored.
+func runPromptLiteralFile(pathArg string) error {
+	content, err := prompts.ResolveValue(pathArg)
+	if err != nil {
+		return err
+	}
+	env, err := resolveEnv()
+	if err != nil {
+		return err
+	}
+	a := env.Assembler()
+	// promptPath has no meaningful value in literal-file mode — the file
+	// isn't routed through an action/role namespace. Pass the resolved
+	// @<path> as a label so {{prompt.path}} renders to something traceable
+	// if the user references it; {{prompt.name}} gets the basename.
+	vars := env.BuildAssemblerVars(strings.TrimPrefix(pathArg, "@"), "", "")
+	rendered, err := assembler.NewEngine(a, 0).Render(content, vars)
+	if err != nil {
+		return fmt.Errorf("rendering %s: %w", pathArg, err)
+	}
+	fmt.Println(applyPromptBatchOverride(rendered))
+	return nil
 }
 
 func runPromptRole() error {
