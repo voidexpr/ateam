@@ -7,16 +7,19 @@
   not bundle `.ateam/shared/review.md`; `--supervisor --action code` does).
 - `flow.PromptBundle.Render` is a degenerate `func(RuntimeEnv) (string, error)`
   whose every implementation captures a pre-computed string and ignores its
-  argument — the framework's "function" abstraction earns nothing today.
-- There is no mapping from action name (or prompt file on disk) to bundle
-  constructor in code. Adding a new action means coordinating edits across
-  `cmd/prompt.go` and the new verb.
-- The current two-pass expansion (dotted-form in assembler, ALL_CAPS in runner)
-  is an implementation artifact of layered call sites, not a model anyone
-  needs to reason about.
+  argument.
+- No mapping from action name to bundle constructor; adding a new action
+  means coordinating edits across `cmd/prompt.go` and the new verb.
+- Two-pass expansion (dotted-form in assembler, ALL_CAPS in runner) is an
+  implementation artifact of layered call sites, not a model anyone needs to
+  reason about.
+- A subtle circularity: today's runner hashes the pre-substitution prompt
+  during `InsertCall`, then substitutes `{{EXEC_ID}}` etc. *after* the hash
+  is taken. The recorded hash doesn't match what the agent receives.
 
-The goal: one lifecycle, one expansion pass, one place each piece of behavior
-lives.
+Goals: one lifecycle, one expansion pass, a clean split between flow (the
+agent-and-prompt orchestration framework) and the prompts subsystem (anchor
+walks, framing, expansion, dynamics, inspection).
 
 ## Lifecycle (3 phases)
 
@@ -28,256 +31,265 @@ verification ─── resolution ─── execution
 ```
 
 - **Verification.** Walks every `PromptBundle` in the pipeline before any
-  bundle executes. Calls each bundle's `Prompt.Resolve(env, verifyVars,
-  ModeVerify)`. Surfaces authoring errors as a batched `VerifyResult`.
-- **Resolution.** Per bundle, just before execution: build per-bundle Vars,
-  call `bundle.Prompt.Resolve(env, vars, ModeReal)`, produce the final prompt
-  text.
+  bundle executes. Calls each bundle's `Prompt.Resolve(rt, ModePreview)`.
+  Surfaces authoring errors as a batched `VerifyResult`.
+- **Resolution.** Per bundle, in this order:
+  1. `Executor.Prepare(opts)` allocates `exec_id`, log/runtime paths, and
+     inserts the DB row with `prompt_file = .ateam/logs/<exec_id>/prompt.md`.
+  2. Flow builds `Runtime` (Vars populated with real `exec.*` values,
+     `prompt.*` from bundle metadata, dynamics map).
+  3. `bundle.Prompt.Resolve(rt, ModeReal)` produces the final text.
+  4. Flow writes the text to `prepared.PromptFile`.
+  5. `Executor.ExecutePrepared(ctx, prepared, text)` invokes the agent.
+
+  If step 3 errors after Prepare succeeds: the row exists; `prompt_file`
+  points at a non-existent path. `inspect` / `web` / `tail` handle missing
+  files gracefully — same shape they already need for in-flight runs.
+
 - **Execution.** Runner hands the resolved text to the agent.
 
-Assembly and expansion are entangled within resolution (`{{include
-{{prompt.name}}.prompt.md}}` requires expansion of the path arg before the
-include can resolve), so they're not separate phases — they fuse into
-"resolution."
+Assembly and expansion entangle within resolution (`{{include
+{{prompt.name}}.prompt.md}}` requires expanding the path arg before include
+resolves), so they're not separate phases — they fuse inside the Prompt
+impl.
+
+## Architecture: flow vs prompts subsystem
+
+| Lives in `flow` | Lives in `internal/prompts/` |
+|---|---|
+| `Prompt` interface | `RawTextPrompt`, `PromptText`, `PromptFile` impls |
+| `Runtime` struct | Resolver engine (`Expand`, anchor walk, `Assemble`) |
+| `PromptBundle` | `Vars` type and `MapVars` impl |
+| `ResolveMode`, `Section` (re-exported) | `PromptDynamic`, `PromptDynamicFunction` |
+| Lifecycle (`Run`, `Verify`, `Walk`) | `Vars` constructor (combines runtime + static) |
+
+Flow defines *when* prompts resolve and *what shape* they have. The prompts
+package owns *how* they resolve. Flow imports prompts to expose the types
+its API talks about; the prompts package doesn't import flow.
 
 ## Types
 
 ### `flow.Prompt`
 
 ```go
+package flow
+
 type Prompt interface {
-    Resolve(env *root.ResolvedEnv, vars Vars, mode ResolveMode) (string, error)
+    // Resolve produces the final prompt text. Mode controls whether
+    // runtime-only values (exec.*) substitute real data or sentinels.
+    Resolve(rt *Runtime, mode ResolveMode) (string, error)
+
+    // Inspect returns per-section provenance for --paths / --inline-paths.
+    // Returns (nil, nil) when the Prompt has no section structure (e.g.
+    // literal text). Always preview-style — Inspect is for human display,
+    // not live execution.
+    Inspect(rt *Runtime) ([]Section, error)
 }
 
 type ResolveMode int
 const (
-    ModeReal    ResolveMode = iota  // real values; missing required key = error
-    ModeVerify                       // sentinels for runtime-only keys; lenient include?
-    ModePreview                      // same as Verify; named distinctly for `ateam prompt` UX
+    ModeReal    ResolveMode = iota  // real exec.* values; missing required key errors
+    ModePreview                      // sentinels for runtime-only keys
 )
+
+// Section is re-exported from internal/prompts for use in API signatures.
+type Section = prompts.Section
 ```
 
-Three concrete impls:
+`ModeVerify` is **not** a third mode — verification is a caller pattern:
+"call `Resolve(rt, ModePreview)` on every bundle and accumulate errors."
+The impl's behavior is identical in verify and preview contexts.
 
-#### `flow.PromptFile`
+### `flow.Runtime`
 
-Ateam-flavored prompt file. Anchor walk (project → org → embedded), framing
-fragments compose (root_pre, dir_pre, role_pre, role_main, role_post,
-dir_post, root_post), then the resolver engine runs over the assembled body.
+The per-invocation context. Holds everything a `Prompt` impl might need to
+resolve. `Vars` lives here alongside the DB handle and paths:
 
 ```go
+type Runtime struct {
+    DB       *calldb.CallDB
+    Env      *root.ResolvedEnv
+    WorkDir  string
+    Vars     Vars            // built by flow, opaque to flow
+    Dynamics PromptDynamic   // registered dynamic functions
+
+    // Per-bundle runtime values populated by Prepare. Zero values in
+    // ModePreview / verify contexts (sentinels filled by Vars instead).
+    ExecID     int64
+    Batch      string
+    OutputDir  string
+    OutputFile string
+}
+
+// Re-exports so flow callers don't need to import prompts directly.
+type Vars = prompts.Vars
+type PromptDynamic = prompts.PromptDynamic
+```
+
+### Concrete Prompt impls (in `internal/prompts`)
+
+```go
+// RawTextPrompt: literal text, no expansion, no anchor walk.
+// Used by `ateam exec --raw "..."` and `ateam exec --raw @file`.
+type RawTextPrompt struct {
+    Text string
+}
+
+// PromptText: literal text WITH expansion. Used by `ateam exec "..."`,
+// `ateam exec @file` (without --raw), and `ateam prompt @file`.
+type PromptText struct {
+    Text string
+}
+
+// PromptFile: anchored .prompt.md with framing. Composes root_pre, dir_pre,
+// role_main, role_post, dir_post fragments per the assembler's rules; then
+// expands the assembled body.
 type PromptFile struct {
     Path       string  // "code", "review", "report/security"
     PrePrompt  string  // optional --pre-prompt content
     PostPrompt string  // optional --post-prompt content
-    CustomBody string  // optional override of the role main (--prompt / --management)
+    CustomBody string  // optional override of the role main
+    // Future impls (JinjaPrompt, RemotePrompt, …) hold their own state in
+    // their struct fields the same way.
 }
 ```
 
-#### `flow.PromptText`
+All three implement `flow.Prompt`. Each holds whatever state it needs in
+its own fields. New impls (Jinja, remote-fetched, etc.) just satisfy the
+interface — no registration, no plugin system.
 
-Literal-content prompt. Runs the resolver engine on `Text`. No anchor walk,
-no framing.
-
-```go
-type PromptText struct {
-    Text string
-}
-```
-
-#### Dispatch rule for the CLI
+### Dispatch rule for `@PATH`
 
 `ateam exec @PATH`, `ateam parallel @PATH`, `ateam prompt @PATH`:
 
 ```
-PATH ends in ".prompt.md" → flow.PromptFile (with anchor extension below)
-otherwise                  → flow.PromptText (file content as-is)
+--raw set                                                  → RawTextPrompt
+PATH ends in ".prompt.md"                                  → PromptFile
+otherwise                                                  → PromptText
 ```
 
-If a `.prompt.md` file is **outside** every standard anchor (project/org/
-embedded), its parent directory is injected as a **temporary anchor at the
-front of the chain** for that single resolution. Sibling `<basename>.pre.*.md`
-and dir-level `_pre.*.md` in that directory compose; the standard anchors
-still apply for inherited framing.
+When PATH is `.prompt.md` but **outside** every standard anchor, its
+parent dir is injected as a temporary anchor at the front of the chain so
+sibling `<basename>.pre.*.md` and dir-level `_pre.*.md` in that dir
+compose. Standard anchors still apply for inherited framing.
 
 ### `flow.PromptBundle`
 
 ```go
 type PromptBundle struct {
-    // Reporting metadata only. No prompt-resolution logic reads these.
-    Name   string  // freeform display name, e.g. "review", "code:fix_sql"
-    Role   string  // recorded in agent_execs.role
-    Action string  // recorded in agent_execs.action
+    Name, Role, Action string  // reporting metadata only; no logic reads these
 
     Prompt Prompt  // built by the factory; self-contained
 
     RunOpts  func(RuntimeEnv) runner.RunOpts
-    PreExec  []Action
-    PostExec []Action
+    PreExec, PostExec []Action
 }
 ```
 
-`Render` is gone. The framework calls `bundle.Prompt.Resolve(...)` at the
-moment it needs the text. No `Vars` field on the bundle.
-
-### Factories (action names live here, nowhere else)
-
-One factory function per action in `cmd/`. Each takes the verb's option struct
-and returns a `*flow.PromptBundle`. Typed per-action options + a small shim
-for the CLI dispatch map; type safety beats less boilerplate.
-
-```go
-func NewReviewBundle(env *root.ResolvedEnv, opts ReviewFactoryOpts) (*flow.PromptBundle, error) {
-    return &flow.PromptBundle{
-        Name: "review", Role: "supervisor", Action: runner.ActionReview,
-        Prompt: &flow.PromptFile{
-            Path: "review",
-            PrePrompt: opts.PrePrompt, PostPrompt: opts.PostPrompt,
-            CustomBody: opts.CustomPrompt,
-        },
-        RunOpts:  ..., PreExec: ..., PostExec: ...,
-    }, nil
-}
-```
-
-No live work in factories; no map writes; no closures over CLI state. The
-review prompt template references `{{dynamic.review_reports {{args.roles}}}}`
-to inject the formatted reports manifest at resolution time.
-
-### CLI dispatch map
-
-Small lookup in `cmd/`, the **only** place all action names appear in one
-list:
-
-```go
-var promptFactories = map[string]func(env *root.ResolvedEnv, opts PromptLookupOpts) (*flow.PromptBundle, error){
-    "review":          newReviewBundleFromPromptOpts,
-    "code":            newCodeBundleFromPromptOpts,
-    "code_management": newCodeMgmtBundleFromPromptOpts,
-    "code_verify":     newCodeVerifyBundleFromPromptOpts,
-    "report":          newReportBundleFromPromptOpts,
-    "auto_setup":      newAutoSetupBundleFromPromptOpts,
-}
-```
-
-Unknown action → fallback to `PromptFile{Path: action}` so any user-installed
-`<name>.prompt.md` works without a factory entry.
-
-`ateam prompt --action X` and `ateam X` both go through the same factory, by
-construction. Drift is structurally impossible.
+`Render` is gone. Framework calls `bundle.Prompt.Resolve(rt, mode)` at the
+moment it needs the text.
 
 ## Vars
 
-Vars is set **once when the flow Executor is created** and held for the
-invocation's lifetime. Per-bundle `prompt.*` derivation is the only thing
-the framework adds during resolution.
+Lives in the prompts package. Single interface; the framework builds an
+impl per-invocation and stores it on `Runtime.Vars`.
 
 | Namespace | Source | When |
 |---|---|---|
-| `args.*` | CLI flags, every one mapped as `args.<snake_case>` | executor creation |
-| `project.*` | `ResolvedEnv` (paths and name only — see `dynamic.project_info` for the rendered context block) | executor creation |
+| `args.*` | CLI flags, **positive-listed by the factory** | factory time (per-bundle merge into `rt.Vars`) |
+| `project.*` | `ResolvedEnv` (paths and name only) | executor creation |
 | `env.*` | `os.LookupEnv` (lazy) | executor creation |
 | `container.*` | `runtime.hcl` | executor creation |
-| `roles.*` | Derived role lists (see below) | per-bundle by factory |
-| `prompt.*` | the Prompt being resolved | per-bundle by framework |
-| `exec.*` | runner state (sentinels in verify/preview) | per-bundle by framework |
+| `roles.*` | derived role lists | factory time |
+| `prompt.*` | the Prompt being resolved (name, path, action) | per-bundle by framework |
+| `exec.*` | runner state (sentinels in `ModePreview`) | per-bundle by framework |
 
-**No `Vars` field on `PromptBundle`.** Anything dynamic flows through
-dynamics (next section).
+### `args.*` is curated, not mechanical
 
-### `args.*` convention
+Factories explicitly populate the `args.*` keys their prompt consumes.
+Adding to `args.*` is **adding to a stable public prompt API**: prompt
+files reference these keys; renaming or removing one is a breaking change
+for any prompt that uses it.
 
-Every CLI flag maps mechanically to `args.<snake_case>`: `--no-project-info`
-→ `args.no_project_info`, `--max-age 2h` → `args.max_age`, `--rerun-failed`
-→ `args.rerun_failed`. Factories never invent ad-hoc Vars keys; the rule is
-uniform and predictable. Operators reading a prompt can `grep args.` and
-know what flags drive it.
+Rule: factory code reads CLI flags, decides what to expose, populates
+specific `args.<snake_case>` keys. The CLI flag set is not the prompt API.
+The exposed `args.*` set is.
 
 ### `roles.*` namespace
 
-`args.roles` carries the raw CLI value ("what the user typed"). `roles.*`
-holds derived lists ("what we're operating on"):
+For prompts that operate on role lists, dedicated keys disambiguate
+"what we're acting on" from "what the user typed":
 
 | Var | Meaning |
 |---|---|
 | `roles.all` | Every known role across config.toml + anchors |
 | `roles.enabled` | Roles marked `"on"` in `config.toml` |
 | `roles.disabled` | Roles marked `"off"` in `config.toml` |
-| `roles.selected` | The operative list after factory filtering — `--roles` ∩ enabled + `--all` / `--max-age` / `--rerun-failed` applied as relevant |
+| `roles.selected` | The operative list after factory filtering |
 | `roles.failed` | Roles that failed in the last cycle (for `--rerun-failed`) |
 | `roles.aged_out` | Roles dropped by `--max-age` (review only) |
 
-Each is a space-separated list per the list convention. Factories populate
-only the keys their action uses (review populates `aged_out`; report
-populates `failed`; both populate `selected`).
+Each value is a space-separated string per the list convention. Factories
+populate only the keys their action uses.
 
-### Sentinels (`exec.*` in verify/preview modes)
+### Sentinels (`ModePreview`)
 
-| Var | Real | Verify / Preview |
+| Var | `ModeReal` | `ModePreview` |
 |---|---|---|
 | `exec.id` | `<callID>` | `{{AT RUNTIME:exec.id}}` |
-| `exec.batch` | real | real if set, else `{{AT RUNTIME:exec.batch}}` |
+| `exec.batch` | real | real if known, else `{{AT RUNTIME:exec.batch}}` |
 | `exec.output_dir` | real path | `.ateam/runtime/{{AT RUNTIME:exec.id}}/` |
 | `exec.output_file` | real path | `.ateam/runtime/{{AT RUNTIME:exec.id}}/<filename>` |
 | every other namespace | real | real |
 
-Sentinels render as `{{AT RUNTIME:ns.key}}` — human-readable; preview output
-makes "this gets filled later" visually obvious.
+Sentinels render as `{{AT RUNTIME:ns.key}}` — human-readable; preview
+output makes "this gets filled later" obvious.
 
 ### Lists in Vars
 
-Lists are **space-separated strings**: `args.roles = "security dependencies
-code.bugs"`. With the dynamic arg parser's whitespace split (next section),
-they fan out naturally when passed unquoted.
+Lists are space-separated strings: `args.roles = "security dependencies
+code.bugs"`. The dynamic arg parser splits on whitespace, so lists fan out
+naturally when passed unquoted.
 
 ## Dynamic functions
 
 ```go
-package flow
+package prompts
 
 type PromptDynamicFunction func(
-    env *root.ResolvedEnv,
-    vars Vars,
-    mode ResolveMode,
-    args ...string,
+    rt *flow.Runtime, mode flow.ResolveMode, args ...string,
 ) (string, error)
 
 type PromptDynamic map[string]PromptDynamicFunction
 ```
 
-No global registry. The CLI layer constructs the `PromptDynamic` and passes
-it into Executor creation:
+No global registry. The CLI layer constructs the `PromptDynamic` map at
+executor creation and passes it on `Runtime.Dynamics`. Tests build
+executors with whatever dynamics they need.
 
-```go
-func buildPromptDynamics() flow.PromptDynamic {
-    return flow.PromptDynamic{
-        "review_reports":   dynReviewReports,
-        "code_mgmt_review": dynCodeMgmtReview,
-        // ...
-    }
-}
+Invoked from templates as `{{dynamic.NAME arg1 arg2 ...}}`.
 
-func newExecutor(env *root.ResolvedEnv, args flow.Vars) flow.Executor {
-    return flow.NewExecutor(env, args, buildPromptDynamics())
-}
-```
+### Dynamics are prompt API
 
-Tests construct executors with whatever `PromptDynamic` they need — clean
-isolation; no init-order dependencies.
+Each registered dynamic is a stability commitment to prompt authors.
+Per-dynamic documentation includes:
 
-In prompt templates:
+- **Args contract**: positional types; required vs optional.
+- **Output shape**: text format; structured block if applicable.
+- **Side effects**: what the dynamic reads (files, DB, git, env).
+- **Mode behavior**: what `ModeReal` returns vs `ModePreview` (typically a
+  sentinel block for preview, real data for real).
 
-```
-{{dynamic.review_reports {{args.roles}}}}
-```
+Internal dynamics used only by ateam-shipped prompts can use a `_` prefix
+(`_internal_X`) to mark them off-API and skip the stability commitment.
 
 ## Resolver surface (three layers)
 
 | Layer | Syntax | Resolution |
 |---|---|---|
-| Directives (engine-baked) | `{{include path}}`, `{{include? path}}`, `{{include path ? TEXT}}`, `{{include_glob pattern}}` | resolver |
-| Variable substitution | `{{ns.key}}`, `{{ns.key ? default}}` | resolver, against `Vars` |
-| Dynamic functions | `{{dynamic.NAME arg1 arg2 …}}` | resolver, against `PromptDynamic` |
+| Directives | `{{include path}}`, `{{include? path}}`, `{{include path ? TEXT}}`, `{{include_glob pattern}}` | engine-baked |
+| Variable substitution | `{{ns.key}}`, `{{ns.key ? default}}` | engine, against `Vars` |
+| Dynamic functions | `{{dynamic.NAME arg1 arg2 ...}}` | engine, against `PromptDynamic` |
 
 ### Include directives
 
@@ -287,52 +299,57 @@ In prompt templates:
 | `{{include? path}}` | Empty string. Optional. |
 | `{{include path ? TEXT}}` | Substitute `TEXT`. Required-with-fallback. |
 
-The first and third share the same underlying code; `include?` is sugar for
-`include path ? ""`.
-
 ### Variable substitution
 
 | Form | Behavior |
 |---|---|
-| `{{ns.key}}` | Returns the value. Errors on unknown key in a known namespace (typo guard). Passes through verbatim when the namespace itself is unknown. |
-| `{{ns.key ? default}}` | Same as above, except renders `default` when the value is the empty string. Does NOT fire on typos — unknown key in known namespace still errors. |
+| `{{ns.key}}` | Returns the value. Errors on unknown key in a known namespace. Passes through verbatim when the namespace itself is unknown. |
+| `{{ns.key ? default}}` | Same as above, except renders `default` when the value is empty. Typos in known namespaces still error. |
 
 ### Arg parsing (dynamics and include directives)
 
 - Whitespace splits args outside quotes.
-- Double or single quotes preserve internal whitespace: `"hello world"` or
-  `'hello world'` → one arg.
+- Double or single quotes preserve internal whitespace: `"hello world"` → one arg.
 - Escapes inside quotes: `\"`, `\'`, `\\`. No escapes outside quotes.
 - **Order:** variable expansion first, then tokenization.
 
-This means quoting wraps the **value placeholder**, not the **template**:
+Quoting wraps the value placeholder, not the template:
 
 ```
 {{dynamic.foo "{{args.title}}"}}        → 1 arg = "Hello World"
 {{dynamic.review_reports {{args.roles}}}} → 3 args = ["security", "dependencies", "code.bugs"]
 ```
 
-Same convention shell users already know.
-
-**Includes apply the same rule.** `{{include EXPR}}` requires EXPR to be
-properly quoted by the prompt author when the expanded value can contain
-whitespace. The engine does not attempt to be clever about it — same
-discipline as a shell command. `{{include? "{{args.review_path}}"}}` for a
-value that might have spaces; `{{include? {{prompt.name}}.md}}` when the
-expanded value is a known no-space identifier.
+**Includes follow the same rule.** Authors quote when the expanded value
+can contain whitespace: `{{include? "{{args.report_path}}"}}`. Same
+discipline as a shell command. The engine doesn't try to be clever.
 
 ### Legacy ALL_CAPS dropped
 
 `{{ROLE}}`, `{{BATCH}}`, `{{EXEC_ID}}`, `{{OUTPUT_DIR}}`, `{{SOURCE_DIR}}`,
-and the rest of `varmap.go`'s `VarRenameMap` — gone. Dotted form only. A
-migrator rewrites `runtime.hcl` agent args on first read so existing installs
-don't break on upgrade.
+and the rest of `varmap.go`'s `VarRenameMap` — gone. Dotted form only.
+
+## How CLI flags shape prompts
+
+No conditional directives in the engine. Three mechanisms cover every flag:
+
+1. **Static `args.*` value** — the factory exposes a specific `args.*`
+   value the prompt is documented to consume. `--no-project-info` →
+   factory sets `args.no_project_info = "true"`; the relevant dynamic
+   checks it. Positive-listed by the factory, not mechanical.
+2. **Factory pre-filtering into `roles.*`** — `--max-age`, `--all`,
+   `--rerun-failed` funnel into `roles.selected`. Prompts iterate over
+   `roles.selected` without knowing which flags shaped it.
+3. **Dynamic functions** — `--ignore-previous-report` becomes
+   `{{dynamic.previous_report {{prompt.name}}}}`; the dynamic reads
+   `args.ignore_previous_report` and decides whether to include.
+
+Inspection flags (`--paths`, `--inline-paths`) call `bundle.Prompt.Inspect()`
+at the verb layer. Execution-mode flags (`--plan-only`, `--dry-run`)
+short-circuit at the verb layer — resolve the bundle, print, skip
+`flow.Run`. Neither needs engine extensions.
 
 ## Verification
-
-Built into `flow.Run` by default. Walks every `PromptBundle` reachable from
-the top step (single bundle, `Pipeline`, or `Parallel`) and calls each
-`bundle.Prompt.Resolve` in `ModeVerify`. Accumulates errors per bundle.
 
 ```go
 type VerifyResult struct {
@@ -354,72 +371,135 @@ func Run(top Step, env RuntimeEnv, rc RunCtx) PipelineResult {
 }
 ```
 
-Tree traversal: `flow.Step` interface gains `Walk(func(*PromptBundle))` —
-callback-based, no slice allocation. Composites recurse.
-
-Verification scope is **medium**: assemble each bundle, walk anchors, resolve
-`{{include}}`, run the engine end-to-end against verify-mode Vars with
-sentinels for runtime-only keys.
+Tree traversal: `flow.Step` interface gains `Walk(func(*PromptBundle))`.
+Verify calls each `bundle.Prompt.Resolve(rt, ModePreview)`. Errors batched
+per decision.
 
 Verification's behavior decomposes from primitives — no special-case rules:
 
-- **Typos in known namespaces** → engine errors (caught).
-- **Strict `{{include path}}` of missing file** → engine errors (caught).
-- **Optional `{{include? path}}` or `{{include path ? TEXT}}` of missing file**
-  → engine substitutes empty / fallback text (not an error; same as exec time).
-- **Runtime-only `exec.*` keys** → sentinel renders (not an error).
-- **Format errors inside present-but-included files** → engine errors when
-  expanding the included content (caught).
+- **Typos in known namespaces** → engine errors.
+- **Strict `{{include path}}` of missing file** → engine errors.
+- **`{{include? path}}` or `{{include path ? TEXT}}` of missing file** →
+  engine renders empty or fallback (same as exec time).
+- **Runtime-only `exec.*` keys** → sentinel renders.
+- **Format errors inside included files** → engine errors when expanding.
 
-Errors are batched, not first-fail. Dedup by `(file, line, message)` before
-printing to mitigate cascading errors.
+Errors batched. Dedup by `(file, line, message)` before printing.
+
+## Factories (action names live here, nowhere else)
+
+One factory function per action in `cmd/`. Each takes the verb's typed
+option struct and returns a `*flow.PromptBundle`. Factory exposes only the
+`args.*` keys its prompt is documented to consume:
+
+```go
+func NewReviewBundle(env *root.ResolvedEnv, opts ReviewFactoryOpts) (*flow.PromptBundle, error) {
+    staticVars := map[string]string{
+        "args.no_project_info": boolStr(opts.NoProjectInfo),
+        "roles.selected":       strings.Join(opts.SelectedRoles, " "),
+        // ...positive-listed; nothing else from opts leaks into args.*
+    }
+    return &flow.PromptBundle{
+        Name: "review", Role: "supervisor", Action: runner.ActionReview,
+        Prompt: &prompts.PromptFile{
+            Path:       "review",
+            PrePrompt:  opts.PrePrompt,
+            PostPrompt: opts.PostPrompt,
+            StaticVars: staticVars,
+        },
+        RunOpts: ..., PreExec: ..., PostExec: ...,
+    }, nil
+}
+```
+
+CLI dispatch for `ateam prompt --action X`: a small map in `cmd/` is the
+only place all action names appear together. Unknown action → fallback to
+`PromptFile{Path: action}` so any `.ateam/prompts/<name>.prompt.md` works
+without a factory entry.
 
 ## `ateam prompt` behavior
 
-Same machinery as live runs, just `mode = ModePreview`:
+Same machinery as live runs with `mode = ModePreview`:
 
 ```go
 factory := promptFactories[promptAction]
 bundle, err := factory(env, opts)
-vars := newVarsForMode(rc, bundle, ModePreview)
-text, err := bundle.Prompt.Resolve(env, vars, ModePreview)
+rt := buildRuntime(env, ModePreview)  // sentinel exec.*
+text, err := bundle.Prompt.Resolve(rt, ModePreview)
 fmt.Println(text)
 ```
 
-A typo in any prompt's `{{ns.key}}` surfaces the same engine error verify
-would. `ateam prompt --action X` doubles as a single-bundle verify check.
+A typo surfaces the same engine error verify would. `--paths` /
+`--inline-paths` call `bundle.Prompt.Inspect(rt)` instead.
 
-The positional `@PATH` form (already shipped) continues to work — dispatched
-to `PromptFile` or `PromptText` per the `.prompt.md` suffix rule.
+## Accepted breaking changes
 
-## Migration plan
+- **`ateam review --prompt @file` removed.** Operators put custom content at
+  `.ateam/prompts/review.prompt.md` (project anchor) or
+  `.ateamorg/prompts/review.prompt.md` (org anchor).
+- **`ateam code --management @file` removed.** Same pattern with
+  `code_management.prompt.md`.
+- **`ateam exec @PATH` where `PATH` ends in `.prompt.md` and is outside every
+  standard anchor** composes framing from PATH's parent dir.
+- **`{{project.info}}` → `{{dynamic.project_info}}`.** Defaults sweep;
+  `--no-project-info` becomes `args.no_project_info = "true"` and the
+  dynamic returns empty when set.
+- **ALL_CAPS legacy syntax removed.** Forms like `{{ROLE}}`, `{{BATCH}}`,
+  `{{EXEC_ID}}`, `{{SOURCE_DIR}}` no longer resolve.
 
-The refactor is large but mechanical. Suggested commit shape:
+## Migration policy
 
-1. **Add `PromptDynamic` infrastructure** (resolver + parser + executor
-   plumbing). No behavior change; nothing calls dynamics yet.
-2. **Drop ALL_CAPS legacy** (engine, varmap, defaults sweep, runtime.hcl
-   migrator). Independent and tractable in one pass.
-3. **Introduce `flow.Prompt` interface, `PromptFile`, `PromptText`.** Port
-   one verb (review or code) end-to-end as a proof.
-4. **Migrate remaining verbs** to factories. Delete `cmd/code_assemble.go`,
-   `cmd/report_assemble.go`, `cmd/review_assemble.go`'s old helpers.
-5. **Rewrite `cmd/prompt.go`** against the factory dispatch map. Delete the
-   old `runPromptRole` / `runPromptSupervisor` / `runPromptAction` branches.
-6. **Wire verification into `flow.Run`** with the new `Walk` traversal.
-   Update tests for the batched-error UX.
-7. **`--supervisor` deprecation** — emit a warning when the flag is used,
-   pointing at the canonical `--action <X>` form. Removal in a follow-up
-   release.
+**Detection-not-destruction.** On first read after upgrade, detect
+incompatible syntax in user prompts and `runtime.hcl` agent args. If
+detected: emit a structured error pointing at file/line/what-to-change.
+Refuse to run. **No automated rewrite.** Operators fix files manually —
+the affected population is small.
+
+No `ateam migrate prompts` command in scope. Defaults shipped with the
+binary are pre-migrated; user prompts are the operator's responsibility.
+
+## Behavior changes intentional in this refactor
+
+| # | Change |
+|---|---|
+| 1 | `ateam prompt --action code_management` bundles `.ateam/shared/review.md` (today doesn't; legacy `--supervisor --action code` does) |
+| 2 | `ateam prompt --action review` bundles reports manifest (same drift fix) |
+| 3 | `ateam exec @PATH` outside anchors with `.prompt.md` suffix composes framing |
+| 4 | ALL_CAPS forms in user prompts and runtime.hcl error with file/line guidance |
+| 5 | New syntax: `{{ns.key ? default}}`, `{{include path ? TEXT}}`, `{{dynamic.NAME args}}` |
+| 6 | Preview/dry-run output shows `{{AT RUNTIME:exec.id}}` instead of `{{EXEC_ID}}` |
+| 7 | Pipeline verification runs before any bundle executes; failures are batched |
+| 8 | `--supervisor` emits a deprecation warning |
+| 9 | `ateam review --prompt` and `ateam code --management` removed |
+| 10 | `agent_execs` schema: `prompt_hash` column replaced with `prompt_file` (path) |
+| 11 | `--raw` flag on `exec`/`parallel`/`prompt` selects literal-text mode without expansion |
+
+Everything else stays byte-equivalent (DB schema apart from #10, ps/cost/serve
+columns, forensic artifacts, runtime.hcl semantics after migration, JSONL
+stream format, per-action canonical destinations).
+
+## Implementation sequence
+
+| # | Commit | Behavior change | Risk |
+|---|---|---|---|
+| 1 | Engine extensions: `PromptDynamic`, `{{ns.key ? default}}`, `{{include path ? TEXT}}`, quoted-arg parser | None | Low |
+| 2 | Add `flow.Prompt`, `flow.Runtime`, `prompts.{RawTextPrompt, PromptText, PromptFile}` (coexists with today's `Render`) | None | Low |
+| 3 | Migrate one verb end-to-end (suggest `review`) — factory + PromptFile + Render still wraps for compat | None observable | Medium |
+| 4 | Migrate remaining verbs (`code`, `verify`, `auto_setup`, `code_management` supervisor, `report` per-role, `inspect --auto-debug`, `exec`, `parallel`) | None observable | Medium |
+| 5 | Drop ALL_CAPS legacy + sweep `defaults/prompts/` + `{{project.info}}` → `{{dynamic.project_info}}` migration + ALL_CAPS detection-error in `runtime.hcl` | Changes #4, #6 | **High** (test sweep) |
+| 6 | Replace `prompt_hash` with `prompt_file`; reshape `Executor` interface (Prepare → Resolve → ExecutePrepared) | Change #10 | Medium |
+| 7 | Wire verification into `flow.Run` (`Walk` callback, batched VerifyResult) | Change #7 | Medium |
+| 8 | Rewrite `cmd/prompt.go` against factory dispatch; `--supervisor` deprecation warning; `--paths` / `--inline-paths` rewire to `Prompt.Inspect()`; `--raw` flag on `exec` / `parallel` / `prompt` | Changes #1, #2, #6, #8, #11 land here | Medium |
+| 9 | Kill `PromptBundle.Render`; framework calls `bundle.Prompt.Resolve` directly | None observable (cleanup) | Low |
+| 10 | `@PATH/foo.prompt.md` outside-anchor framing | Change #3 | Low |
+| 11 | Remove `ateam review --prompt` and `ateam code --management` flags | Change #9 | Low |
 
 ## Rules digest (for `ateam prompt --help` and `CONFIG.md`)
-
-Short, copy-pasteable for documentation:
 
 ```
 Prompt directives:
   {{ns.key}}                 Substitute a Vars value. Errors on typos in known namespaces.
-  {{ns.key ? default}}       Substitute, falling back to `default` if the value is empty.
+  {{ns.key ? default}}       Substitute, falling back to default if the value is empty.
   {{include path}}           Required include. Missing file → error.
   {{include? path}}          Optional include. Missing file → empty.
   {{include path ? TEXT}}    Required include with fallback. Missing file → TEXT.
@@ -427,123 +507,30 @@ Prompt directives:
   {{dynamic.NAME args...}}   Call a registered dynamic function.
 
 Namespaces:
-  args.*       User CLI flags (per-invocation).
+  args.*       Factory-exposed CLI values (positive-listed; stable prompt API).
   project.*    Project paths and name.
   env.*        Environment variables.
   container.*  Container type and name (from runtime.hcl).
+  roles.*      Derived role lists (all, enabled, selected, failed, aged_out).
   prompt.*     The current prompt's name/path/action.
-  exec.*       Execution-time values (id, batch, output_dir, output_file, …).
+  exec.*       Execution-time values (id, batch, output_dir, output_file).
                Renders as {{AT RUNTIME:exec.<key>}} in preview/verify modes.
 
 Argument parsing for include directives and dynamics:
-  - Tokens are whitespace-separated.
+  - Tokens are whitespace-separated outside quotes.
   - Single or double quotes preserve whitespace: "hello world" → one arg.
-  - Variables expand BEFORE tokenization. Quote a placeholder if its value
+  - Variables expand BEFORE tokenization. Quote a placeholder when its value
     must stay a single arg.
 
 Lists in Vars are space-separated strings; they fan out naturally when
 passed unquoted to a dynamic.
 ```
 
-## Accepted breaking changes
-
-- **`ateam review --prompt @file` removed.** Operators who want to override
-  the supervisor body for review put their custom content at
-  `.ateam/prompts/review.prompt.md` (project anchor) or
-  `.ateamorg/prompts/review.prompt.md` (org anchor). Same precedence chain as
-  every other prompt override. No special CLI flag for "one-shot custom prompt"
-  — anchor overrides are the documented mechanism.
-- **`ateam code --management @file` removed.** Same story:
-  `.ateam/prompts/code_management.prompt.md` to override.
-- **`ateam exec @PATH` where `PATH` ends in `.prompt.md` and is outside every
-  standard anchor** composes framing from PATH's parent dir (decision 11/B
-  above). Files at `.ateam/prompts/...` keep working as today.
-- **`{{project.info}}` → `{{dynamic.project_info}}`.** The project-context
-  block (the long "You are part of the ateam software…" preamble) moves from
-  a static Vars value to a dynamic function. Defaults sweep; user customs
-  under `.ateam/prompts/` get wiped as part of the pre-v1 one-time upgrade.
-  Side benefit: `--no-project-info` becomes `args.no_project_info = "true"`
-  and the dynamic returns empty when set — no special-casing in the engine.
-
-## How CLI flags shape prompts
-
-Resolved: no conditional directives needed in the engine. Three mechanisms,
-applied per flag:
-
-1. **Static `args.*` value** — for flags that gate already-static content.
-   `--no-project-info` → `args.no_project_info = "true"`; the relevant
-   dynamic (`{{dynamic.project_info}}`) checks the flag and returns empty.
-2. **Factory pre-filtering into `roles.*`** — for flags that narrow a
-   dataset. `--max-age`, `--all`, `--rerun-failed` all funnel into
-   `roles.selected`. Prompts iterate over `roles.selected` without knowing
-   which flags shaped it.
-3. **Dynamic functions** — for per-bundle conditional content tied to
-   `prompt.*`. `--ignore-previous-report` becomes
-   `{{dynamic.previous_report {{prompt.name}}}}` — the dynamic reads
-   `args.ignore_previous_report` and decides whether to include.
-
-Inspection flags (`--paths`, `--inline-paths`) are verb-level orchestration:
-they call `PromptFile.Inspect()` (a separate method from `Resolve`) and
-print the per-section table. No engine extension needed.
-
-Execution-mode flags (`--plan-only`, `--dry-run`) are also verb-level: the
-verb resolves the bundle, prints, and skips `flow.Run`. No engine
-extension needed.
-
-**The engine stays small.** No `{{if}}` / `{{range}}` / sub-templates added.
-The cost is paid once at factory time (filtering, args population), at
-dynamic-invocation time (per-bundle conditional content), and at the verb
-layer (mode flags).
-
-## Behavior changes intentional in this refactor
-
-| # | Change | Notes |
-|---|---|---|
-| 1 | `ateam prompt --action code_management` bundles `.ateam/shared/review.md` content | Today it doesn't; legacy `--supervisor --action code` does. Drift fix. |
-| 2 | `ateam prompt --action review` bundles reports manifest | Same drift fix. |
-| 3 | `ateam exec @PATH` outside anchors with `.prompt.md` suffix composes framing | Per decision 11/B. |
-| 4 | ALL_CAPS forms in user prompts and runtime.hcl require migration | Auto-migrator on first read with loud stderr warning. |
-| 5 | New syntax: `{{ns.key ? default}}`, `{{include path ? TEXT}}`, `{{dynamic.NAME args}}` | Pure additions. |
-| 6 | Preview/dry-run output shows `{{AT RUNTIME:exec.id}}` instead of `{{EXEC_ID}}` placeholders | Cosmetic but user-visible. |
-| 7 | Pipeline verification runs before any bundle executes | New failure mode: batched errors at startup. |
-| 8 | `--supervisor` emits a deprecation warning | Flag still works for one release. |
-| 9 | `ateam review --prompt` and `ateam code --management` removed | See Accepted breaking changes above. |
-
-Everything else MUST stay byte- or behavior-equivalent (database schema,
-`ps`/`cost`/`serve` columns, forensic artifacts, runtime.hcl template
-substitution after migration, stream JSONL format, `--paths`/`--inline-paths`
-output format, per-action canonical destinations, etc.).
-
-## Implementation sequence
-
-| # | Commit | Behavior change | Risk |
-|---|---|---|---|
-| 1 | Engine extensions: `PromptDynamic`, `{{ns.key ? default}}`, `{{include path ? TEXT}}`, quoted-arg parser | None | Low |
-| 2 | Add `flow.Prompt`, `PromptFile`, `PromptText`, `PromptDynamicFunction` types + factory scaffolding (coexists with Render) | None | Low |
-| 3 | Migrate one verb end-to-end (suggest `review`) — factory + PromptFile + Render still wraps | None observable | Medium |
-| 4 | Migrate remaining verbs (`code`, `verify`, `auto_setup`, `code_management`'s supervisor, `report` per-role, `inspect --auto-debug`, `exec`, `parallel`) | None observable | Medium |
-| 5 | Drop ALL_CAPS legacy + sweep `defaults/prompts/` + runtime.hcl auto-migrator + `{{project.info}}` → `{{dynamic.project_info}}` migration | Change #4 above; project_info dynamic | **High** (test sweep) |
-| 6 | Wire verification into `flow.Run` (`Walk` callback, batched VerifyResult) | Change #7 above | Medium |
-| 7 | Rewrite `cmd/prompt.go` against factory dispatch; `--supervisor` deprecation warning; `--paths`/`--inline-paths` rewire | Changes #1, #2, #6, #8 land here | Medium |
-| 8 | Kill `PromptBundle.Render`; framework calls `bundle.Prompt.Resolve` directly | None observable (cleanup) | Low |
-| 9 | `@PATH/foo.prompt.md` outside-anchor framing | Change #3 | Low |
-
-Bisectable across the whole sequence: regressions between #3 and #8 can be
-localized to a specific verb's port.
-
-## Followups (not in scope for the initial implementation)
+## Followups (not in scope)
 
 - **`--supervisor` removal** after the deprecation period.
-- **`PromptBundle.Render` is gone** in this design; if a future use case
-  needs per-attempt re-resolution (retry with re-read of live data), the
-  framework can call `bundle.Prompt.Resolve` again on retry — no Render
-  change needed.
-- **`{{shell CMD}}`** — defer until we have a read-only sandbox to enforce
-  bounded output and no side effects.
-- **`exec` / `parallel` arbitrary-prompt path** stays outside the factory
-  registry — they construct `PromptText` directly from user input.
-- **Single-process pipelines** (one process executes report → review → code
-  sequentially). Today's design already supports this: each verb's factory
-  runs at its bundle's turn, not at pipeline construction. The migration to
-  a single-process pipeline command (`ateam run-all` collapsing to one
-  process) is a separate effort.
+- **`{{shell CMD}}`** — defer until we have a read-only sandbox.
+- **Executable prompts (`#!/usr/bin/env python` + `.prompt.py`)** — defer; the
+  three-mechanism model handles every current use case.
+- **`ateam migrate prompts` command** — re-evaluate if user prompts ever
+  proliferate enough that manual migration becomes painful.
