@@ -580,7 +580,7 @@ profile "test" {
 // Set per-project: ateam secret CONTAINER_NAME=my-container --scope project
 container "docker-exec" {
   type             = "docker-exec"
-  docker_container = "{{CONTAINER_NAME}}"
+  docker_container = "{{container.name}}"
   forward_env = [
     "CLAUDE_CODE_OAUTH_TOKEN",
     "ANTHROPIC_API_KEY",
@@ -592,7 +592,12 @@ profile "docker-exec" {
   container = "docker-exec"
 }
 
-// Example custom docker-exec with explicit container name and precheck:
+// Example custom docker-exec with explicit container name and precheck.
+// docker_container also accepts `{{container.name}}` (or the legacy
+// `{{CONTAINER_NAME}}` alias, deprecated) to defer the resolution to the
+// runner-side substitution layer — handy when one container block is
+// shared across profiles that bind different container names via
+// `ateam secret CONTAINER_NAME=...`.
 //   container "my-app" {
 //     type             = "docker-exec"
 //     docker_container = "my-app-dev"

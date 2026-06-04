@@ -148,6 +148,55 @@ func TestResolveTemplateStringEmpty(t *testing.T) {
 	}
 }
 
+// TestResolveTemplateStringDottedAndLegacyForms ensures the runner's
+// Replacer treats `{{exec.id}}` and `{{EXEC_ID}}` (and analogous pairs)
+// as equivalent. Defaults/runtime.hcl uses the dotted form as the
+// canonical surface — back-compat for the ALL_CAPS aliases keeps
+// hand-authored prompts and runtime.hcl files that pre-date the
+// lifecycle refactor working unchanged.
+func TestResolveTemplateStringDottedAndLegacyForms(t *testing.T) {
+	vars := TemplateVars{
+		ProjectName:   "ateam",
+		ProjectDir:    "myapp",
+		Role:          "security",
+		Action:        "report",
+		Batch:         "B1",
+		ExecID:        42,
+		Agent:         "claude",
+		Model:         "opus",
+		ContainerType: "docker-exec",
+		ContainerName: "my-container",
+		OutputDir:     "/tmp/runtime/42",
+		OutputFile:    "/tmp/report.md",
+	}
+	pairs := []struct {
+		dotted, legacy string
+		want           string
+	}{
+		{"{{project.name}}", "{{PROJECT_NAME}}", "ateam"},
+		{"{{project.dir}}", "{{PROJECT_DIR}}", "myapp"},
+		{"{{prompt.name}}", "{{ROLE}}", "security"},
+		{"{{prompt.action}}", "{{ACTION}}", "report"},
+		{"{{exec.batch}}", "{{BATCH}}", "B1"},
+		{"{{exec.id}}", "{{EXEC_ID}}", "42"},
+		{"{{exec.agent}}", "{{AGENT}}", "claude"},
+		{"{{exec.model}}", "{{MODEL}}", "opus"},
+		{"{{exec.output_dir}}", "{{OUTPUT_DIR}}", "/tmp/runtime/42"},
+		{"{{exec.output_file}}", "{{OUTPUT_FILE}}", "/tmp/report.md"},
+		{"{{container.type}}", "{{CONTAINER_TYPE}}", "docker-exec"},
+		{"{{container.name}}", "{{CONTAINER_NAME}}", "my-container"},
+	}
+	for _, p := range pairs {
+		t.Run(p.dotted, func(t *testing.T) {
+			gotDotted := ResolveTemplateString(p.dotted, vars)
+			gotLegacy := ResolveTemplateString(p.legacy, vars)
+			if gotDotted != p.want || gotLegacy != p.want {
+				t.Errorf("dotted=%q legacy=%q want=%q", gotDotted, gotLegacy, p.want)
+			}
+		})
+	}
+}
+
 // --- ResolveTemplateMap ---
 
 func TestResolveTemplateMap(t *testing.T) {

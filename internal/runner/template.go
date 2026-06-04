@@ -45,47 +45,53 @@ type TemplateVars struct {
 
 // Replacer builds a strings.Replacer for the current template vars.
 // Call once per Run() and reuse across all resolution calls.
+//
+// Each runner var is registered under both its legacy ALL_CAPS form and
+// the dotted form (`{{exec.id}}`, `{{container.name}}`, etc.). Defaults
+// ship the dotted form as the canonical surface — the ALL_CAPS aliases
+// stay for back-compat with hand-authored prompts and runtime.hcl files
+// that pre-date the lifecycle refactor. ALL_CAPS aliases are slated for
+// removal once the deprecation window closes (see Step 6's allcaps
+// guardrail in internal/runtime/allcaps_check.go).
 func (v TemplateVars) Replacer() *strings.Replacer {
 	execID := ""
 	if v.ExecID > 0 {
 		execID = fmt.Sprintf("%d", v.ExecID)
 	}
 	return strings.NewReplacer(
-		"{{PROJECT_NAME}}", v.ProjectName,
-		"{{PROJECT_FULL_PATH}}", v.ProjectFullPath,
-		"{{PROJECT_DIR}}", v.ProjectDir,
-		"{{ROLE}}", v.Role,
-		"{{ACTION}}", v.Action,
-		"{{BATCH}}", v.Batch,
-		"{{TIMESTAMP}}", v.Timestamp,
-		"{{PROFILE}}", v.Profile,
-		"{{EXEC_ID}}", execID,
-		"{{AGENT}}", v.Agent,
-		"{{MODEL}}", v.Model,
-		"{{EFFORT}}", v.Effort,
-		"{{MAX_BUDGET_USD}}", v.MaxBudgetUSD,
-		"{{MAX_BUDGET_USD_BATCH}}", v.MaxBudgetUSDBatch,
-		"{{SUBRUN_ARGS}}", v.SubRunArgs,
-		"{{CONTAINER_TYPE}}", v.ContainerType,
-		"{{CONTAINER_NAME}}", v.ContainerName,
-		"{{OUTPUT_DIR}}", v.OutputDir,
-		"{{OUTPUT_FILE}}", v.OutputFile,
+		// project.*
+		"{{project.name}}", v.ProjectName, "{{PROJECT_NAME}}", v.ProjectName,
+		"{{project.full_path}}", v.ProjectFullPath, "{{PROJECT_FULL_PATH}}", v.ProjectFullPath,
+		"{{project.dir}}", v.ProjectDir, "{{PROJECT_DIR}}", v.ProjectDir,
+		// prompt.* (role/action are prompt-scoped identity)
+		"{{prompt.name}}", v.Role, "{{ROLE}}", v.Role,
+		"{{prompt.action}}", v.Action, "{{ACTION}}", v.Action,
+		// exec.*
+		"{{exec.batch}}", v.Batch, "{{BATCH}}", v.Batch,
+		"{{exec.timestamp}}", v.Timestamp, "{{TIMESTAMP}}", v.Timestamp,
+		"{{exec.profile}}", v.Profile, "{{PROFILE}}", v.Profile,
+		"{{exec.id}}", execID, "{{EXEC_ID}}", execID,
+		"{{exec.agent}}", v.Agent, "{{AGENT}}", v.Agent,
+		"{{exec.model}}", v.Model, "{{MODEL}}", v.Model,
+		"{{exec.effort}}", v.Effort, "{{EFFORT}}", v.Effort,
+		"{{exec.max_budget_usd}}", v.MaxBudgetUSD, "{{MAX_BUDGET_USD}}", v.MaxBudgetUSD,
+		"{{exec.max_budget_usd_batch}}", v.MaxBudgetUSDBatch, "{{MAX_BUDGET_USD_BATCH}}", v.MaxBudgetUSDBatch,
+		"{{exec.subrun_args}}", v.SubRunArgs, "{{SUBRUN_ARGS}}", v.SubRunArgs,
+		"{{exec.output_dir}}", v.OutputDir, "{{OUTPUT_DIR}}", v.OutputDir,
+		"{{exec.output_file}}", v.OutputFile, "{{OUTPUT_FILE}}", v.OutputFile,
+		"{{exec.auto_roles_commands_output}}", v.AutoRolesCommandsOutput, "{{ATEAM_AUTO_ROLES_COMMANDS_OUTPUT}}", v.AutoRolesCommandsOutput,
 		// Legacy alias for code_management_prompt.md; same dir as OUTPUT_DIR.
 		"{{EXECUTION_DIR}}", v.OutputDir,
-		// ateam's own docs, embedded in the binary. Prompts that need
-		// ateam-specific knowledge (commands, config, isolation, roles) can
-		// inline these instead of asking the agent to grep the host project.
-		"{{ATEAM_OWN_README}}", defaults.SelfDocs["README"],
-		"{{ATEAM_OWN_COMMANDS}}", defaults.SelfDocs["COMMANDS"],
-		"{{ATEAM_OWN_CONFIG}}", defaults.SelfDocs["CONFIG"],
-		"{{ATEAM_OWN_ISOLATION}}", defaults.SelfDocs["ISOLATION"],
-		"{{ATEAM_OWN_ROLES}}", defaults.SelfDocs["ROLES"],
-		// Contract marker for the --auto-roles planner output; same constant
-		// is read back by cmd/auto_roles.go::parseAutoRolesOutput.
-		"{{AUTO_ROLES_MARKER}}", prompts.AutoRolesMarker,
-		// Pre-baked context bundle for the --auto-roles planner agent. Computed
-		// by cmd/auto_roles.go before the run; empty for every other action.
-		"{{ATEAM_AUTO_ROLES_COMMANDS_OUTPUT}}", v.AutoRolesCommandsOutput,
+		// container.*
+		"{{container.type}}", v.ContainerType, "{{CONTAINER_TYPE}}", v.ContainerType,
+		"{{container.name}}", v.ContainerName, "{{CONTAINER_NAME}}", v.ContainerName,
+		// ateam.* — ateam's own embedded docs.
+		"{{ateam.own_readme}}", defaults.SelfDocs["README"], "{{ATEAM_OWN_README}}", defaults.SelfDocs["README"],
+		"{{ateam.own_commands}}", defaults.SelfDocs["COMMANDS"], "{{ATEAM_OWN_COMMANDS}}", defaults.SelfDocs["COMMANDS"],
+		"{{ateam.own_config}}", defaults.SelfDocs["CONFIG"], "{{ATEAM_OWN_CONFIG}}", defaults.SelfDocs["CONFIG"],
+		"{{ateam.own_isolation}}", defaults.SelfDocs["ISOLATION"], "{{ATEAM_OWN_ISOLATION}}", defaults.SelfDocs["ISOLATION"],
+		"{{ateam.own_roles}}", defaults.SelfDocs["ROLES"], "{{ATEAM_OWN_ROLES}}", defaults.SelfDocs["ROLES"],
+		"{{ateam.auto_roles_marker}}", prompts.AutoRolesMarker, "{{AUTO_ROLES_MARKER}}", prompts.AutoRolesMarker,
 	)
 }
 
