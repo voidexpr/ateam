@@ -206,18 +206,10 @@ func runCode(opts CodeOptions) error {
 
 	if opts.DryRun {
 		// Dry-run resolves the prompt body inline so operators see the
-		// final composition before any allocation. Mode=ModePreview
-		// means exec.* keys render as the AT RUNTIME sentinel pattern
-		// and code_mgmt_review renders its sentinel — matching the spec
-		// (line 552-557).
-		rt := flow.NewRuntime(nil, env, env.WorkDir)
-		if bundle.BaseVars != nil {
-			rt.SetVars(bundle.BaseVars)
-		}
-		if bundle.Dynamics != nil {
-			rt.SetDynamics(bundle.Dynamics)
-		}
-		text, err := bundle.Prompt.Resolve(rt)
+		// final composition before any allocation. ResolvePreview wires
+		// ModePreview + BaseVars + Dynamics — exec.* keys render as the
+		// AT RUNTIME sentinel, code_mgmt_review renders its sentinel.
+		text, err := bundle.ResolvePreview(env, env.WorkDir)
 		if err != nil {
 			return err
 		}

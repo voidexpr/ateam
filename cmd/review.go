@@ -185,11 +185,8 @@ func runReview(opts ReviewOptions) error {
 	if opts.DryRun {
 		// Dry-run resolves the prompt at the cmd layer (skipping flow's
 		// Prepare-then-execute path) so the listing precedes the body.
-		// The runtime needs the bundle's dynamics so {{dynamic.project_info}}
-		// renders the same way it would at exec time.
-		rt := flow.NewRuntime(nil, env, env.WorkDir)
-		rt.SetDynamics(bundle.Dynamics)
-		text, err := bundle.Prompt.Resolve(rt)
+		// ResolvePreview auto-wires BaseVars + Dynamics + ModePreview.
+		text, err := bundle.ResolvePreview(env, env.WorkDir)
 		if err != nil {
 			return err
 		}

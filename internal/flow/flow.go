@@ -399,6 +399,41 @@ func (b PromptBundle) resolvePrompt(rc RunCtx, env RuntimeEnv, opts runner.RunOp
 
 var errBundleHasNoPrompt = fmt.Errorf("PromptBundle has no Prompt set")
 
+// ResolvePreview renders the bundle's Prompt in ModePreview against a
+// freshly built runtime that auto-loads bundle.BaseVars + bundle.Dynamics.
+// The single entry point for `ateam prompt --action X`, dry-run preview,
+// and other operator-facing inspection — every caller used to repeat
+// the rt.SetVars / rt.SetDynamics wiring inline. Spec Next-round step 8.
+func (b *PromptBundle) ResolvePreview(env *root.ResolvedEnv, workDir string) (string, error) {
+	if b.Prompt == nil {
+		return "", errBundleHasNoPrompt
+	}
+	rt := b.previewRuntime(env, workDir)
+	return b.Prompt.Resolve(rt)
+}
+
+// InspectPreview is ResolvePreview's section-level counterpart used by
+// --paths / --inline-paths. Same auto-loading contract.
+func (b *PromptBundle) InspectPreview(env *root.ResolvedEnv, workDir string) ([]Section, error) {
+	if b.Prompt == nil {
+		return nil, errBundleHasNoPrompt
+	}
+	rt := b.previewRuntime(env, workDir)
+	return b.Prompt.Inspect(rt)
+}
+
+func (b *PromptBundle) previewRuntime(env *root.ResolvedEnv, workDir string) *Runtime {
+	rt := NewRuntime(nil, env, workDir)
+	rt.SetMode(ModePreview)
+	if b.BaseVars != nil {
+		rt.SetVars(b.BaseVars)
+	}
+	if b.Dynamics != nil {
+		rt.SetDynamics(b.Dynamics)
+	}
+	return rt
+}
+
 // newBundleRuntime constructs the per-bundle prompt resolution context.
 //
 // Mode + field population are paired:

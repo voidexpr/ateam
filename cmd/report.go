@@ -224,10 +224,9 @@ func runReport(opts ReportOptions) error {
 	for _, roleID := range roleIDs {
 		roleID := roleID
 
-		// Validate the role's prompt exists by attempting to resolve in
-		// ModePreview against a throwaway runtime — surfaces "no role
-		// main" errors as the legacy assembleRoleReport did, before we
-		// spin up an executor.
+		// Validate the role's prompt exists by attempting a preview
+		// resolve — surfaces "no role main" errors before we spin up
+		// an executor (matches legacy assembleRoleReport behavior).
 		bundle := NewReportBundle(ReportBundleInput{
 			Env:                env,
 			RoleID:             roleID,
@@ -238,14 +237,7 @@ func runReport(opts ReportOptions) error {
 			Verbose:            opts.Verbose,
 			Batch:              batch,
 		})
-		validateRT := flow.NewRuntime(nil, env, env.WorkDir)
-		if bundle.BaseVars != nil {
-			validateRT.SetVars(bundle.BaseVars)
-		}
-		if bundle.Dynamics != nil {
-			validateRT.SetDynamics(bundle.Dynamics)
-		}
-		if _, err := bundle.Prompt.Resolve(validateRT); err != nil {
+		if _, err := bundle.ResolvePreview(env, env.WorkDir); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: skipping %s — %v\n", roleID, err)
 			continue
 		}

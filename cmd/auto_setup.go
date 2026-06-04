@@ -69,14 +69,7 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 	})
 
 	if autoSetupDryRun {
-		rt := flow.NewRuntime(nil, env, env.WorkDir)
-		if bundle.BaseVars != nil {
-			rt.SetVars(bundle.BaseVars)
-		}
-		if bundle.Dynamics != nil {
-			rt.SetDynamics(bundle.Dynamics)
-		}
-		prompt, err := bundle.Prompt.Resolve(rt)
+		prompt, err := bundle.ResolvePreview(env, env.WorkDir)
 		if err != nil {
 			return err
 		}

@@ -235,10 +235,8 @@ func runPromptRole() error {
 	case runner.ActionReport:
 		// Spec Next-round step 6: per-role report renders through the
 		// same factory the live verb uses. roleLabel="" (via
-		// --no-project-info) suppresses project_info — the dynamic
-		// closure in NewReportBundle uses "role <id>" by default; an
-		// empty roleLabel here means we strip the dynamic from the map
-		// before resolution.
+		// --no-project-info) suppresses project_info — strip the
+		// dynamic before ResolvePreview auto-loads dynamics.
 		bundle := NewReportBundle(ReportBundleInput{
 			Env:                env,
 			RoleID:             promptRole,
@@ -249,14 +247,7 @@ func runPromptRole() error {
 		if roleLabel == "" {
 			delete(bundle.Dynamics, "project_info")
 		}
-		rt := flow.NewRuntime(nil, env, env.WorkDir)
-		if bundle.BaseVars != nil {
-			rt.SetVars(bundle.BaseVars)
-		}
-		if bundle.Dynamics != nil {
-			rt.SetDynamics(bundle.Dynamics)
-		}
-		assembled, err = bundle.Prompt.Resolve(rt)
+		assembled, err = bundle.ResolvePreview(env, env.WorkDir)
 	case runner.ActionCode:
 		assembled, err = assembleRoleCode(env, promptRole, roleLabel, prePrompt, postPrompt)
 	}
@@ -286,30 +277,20 @@ var promptFactories = map[string]promptPreviewFn{
 
 func previewReview(env *root.ResolvedEnv, prePrompt, postPrompt string) (string, error) {
 	// Spec Next-round steps 4-7: `ateam prompt --action review` calls
-	// the SAME factory the live verb uses. Mode==ModePreview lets the
-	// review_reports dynamic emit its sentinel (so unrun report state
-	// doesn't break preview) while every other resolver entry — exec.*
-	// sentinels, dotted vars, project_info — runs exactly like the
-	// live path.
+	// the SAME factory the live verb uses. ResolvePreview wires
+	// BaseVars + Dynamics + ModePreview automatically (step 8).
 	bundle := NewReviewBundle(ReviewBundleInput{
 		Env:        env,
 		PrePrompt:  prePrompt,
 		PostPrompt: postPrompt,
 	})
-	rt := flow.NewRuntime(nil, env, env.WorkDir)
-	if bundle.BaseVars != nil {
-		rt.SetVars(bundle.BaseVars)
-	}
-	if bundle.Dynamics != nil {
-		rt.SetDynamics(bundle.Dynamics)
-	}
-	return bundle.Prompt.Resolve(rt)
+	return bundle.ResolvePreview(env, env.WorkDir)
 }
 
 func previewCodeManagement(env *root.ResolvedEnv, prePrompt, postPrompt string) (string, error) {
 	// Single-factory dispatch per spec line 552-557. Mode==ModePreview
 	// makes code_mgmt_review emit its sentinel — preview never touches
-	// disk for the review.
+	// disk for the review. ResolvePreview auto-wires BaseVars/Dynamics.
 	bundle := NewCodeBundle(CodeBundleInput{
 		Env:           env,
 		PrePrompt:     prePrompt,
@@ -318,33 +299,18 @@ func previewCodeManagement(env *root.ResolvedEnv, prePrompt, postPrompt string) 
 		SupervisorDir: env.SupervisorDir(),
 		CanonicalDest: "{{exec.output_dir}}",
 	})
-	rt := flow.NewRuntime(nil, env, env.WorkDir)
-	if bundle.BaseVars != nil {
-		rt.SetVars(bundle.BaseVars)
-	}
-	if bundle.Dynamics != nil {
-		rt.SetDynamics(bundle.Dynamics)
-	}
-	return bundle.Prompt.Resolve(rt)
+	return bundle.ResolvePreview(env, env.WorkDir)
 }
 
 func previewVerify(env *root.ResolvedEnv, prePrompt, postPrompt string) (string, error) {
-	// Single-factory dispatch per spec line 552-557. Mode==ModePreview
-	// renders exec.* as the AT RUNTIME sentinel; project_info still
-	// renders against the real env.
+	// Single-factory dispatch per spec line 552-557. ResolvePreview
+	// wires BaseVars + Dynamics + ModePreview automatically.
 	bundle := NewVerifyBundle(VerifyBundleInput{
 		Env:        env,
 		PrePrompt:  prePrompt,
 		PostPrompt: postPrompt,
 	})
-	rt := flow.NewRuntime(nil, env, env.WorkDir)
-	if bundle.BaseVars != nil {
-		rt.SetVars(bundle.BaseVars)
-	}
-	if bundle.Dynamics != nil {
-		rt.SetDynamics(bundle.Dynamics)
-	}
-	return bundle.Prompt.Resolve(rt)
+	return bundle.ResolvePreview(env, env.WorkDir)
 }
 
 // runPromptAction renders a top-level prompt by action name. The factory
@@ -397,14 +363,7 @@ func runPromptAction() error {
 			PrePrompt:  prePrompt,
 			PostPrompt: postPrompt,
 		})
-		rt := flow.NewRuntime(nil, env, env.WorkDir)
-		if bundle.BaseVars != nil {
-			rt.SetVars(bundle.BaseVars)
-		}
-		if bundle.Dynamics != nil {
-			rt.SetDynamics(bundle.Dynamics)
-		}
-		assembled, err = bundle.Prompt.Resolve(rt)
+		assembled, err = bundle.ResolvePreview(env, env.WorkDir)
 	}
 	if err != nil {
 		return err
@@ -435,22 +394,11 @@ func runPromptAction() error {
 func inspectBundleForCurrentAction(env *root.ResolvedEnv, promptPath, prePrompt, postPrompt, roleLabel string) ([]prompts.Section, error) {
 	bundle := bundleForInspection(env, prePrompt, postPrompt)
 	if bundle != nil {
-		rt := flow.NewRuntime(nil, env, env.WorkDir)
-		// Spec line 552-557: `ateam prompt --action X` runs in
-		// ModePreview so exec.* renders to {{AT RUNTIME:exec.<key>}}
-		// (no exec_id has been allocated yet) and dynamics that depend
-		// on generated artifacts (review_reports, code_mgmt_review)
-		// return their preview sentinel. project_info is mode-agnostic
-		// (returns real data in any mode) so the inspection still
-		// shows the project context block.
-		rt.SetMode(flow.ModePreview)
-		if bundle.BaseVars != nil {
-			rt.SetVars(bundle.BaseVars)
-		}
-		if bundle.Dynamics != nil {
-			rt.SetDynamics(bundle.Dynamics)
-		}
-		return bundle.Prompt.Inspect(rt)
+		// InspectPreview auto-wires BaseVars/Dynamics/ModePreview per
+		// spec line 552-557 (step 8): exec.* renders as the AT RUNTIME
+		// sentinel; generated-artifact dynamics return their preview
+		// sentinel; project_info still renders against the real env.
+		return bundle.InspectPreview(env, env.WorkDir)
 	}
 	// Fallback: unknown action or role-scoped path. The PromptFile is
 	// the canonical anchored-prompt impl; env.NewInspectionContext wires
