@@ -1,4 +1,22 @@
-package prompts
+// Package promptdata holds the data accessors and embedded-defaults
+// machinery that internal/root needs without pulling in the
+// Prompt-resolution machinery in internal/prompts. This package sits
+// below both internal/prompts and internal/root in the import graph,
+// breaking what would otherwise be a root→prompts→root cycle once
+// internal/prompts grows ResolveContext.Env() returning *root.ResolvedEnv.
+//
+// What lives here:
+//   - Role discovery / metadata (AllRoleIDs, RoleMeta, IsValidRole,
+//     ResolveRoleList, AllKnownRoleIDs, RoleFlagUsage)
+//   - Frontmatter parsing (ParsePromptFrontmatter)
+//   - Embedded-defaults installation (WriteOrgDefaults, DiffOrgDefaults)
+//   - Project-info formatting (ProjectInfoParams, FormatProjectInfo)
+//   - Auto-roles marker (AutoRolesMarker)
+//
+// What stays in internal/prompts: Prompt / PromptFile / PromptText /
+// RawTextPrompt / ResolveContext / PromptDynamic / NewDispatcher etc. —
+// the composition pipeline itself.
+package promptdata
 
 import (
 	"fmt"

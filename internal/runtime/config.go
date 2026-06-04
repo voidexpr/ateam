@@ -598,7 +598,7 @@ type RuntimeDiff struct {
 
 // DiffOrgDefaults compares on-disk defaults files (runtime.hcl, Dockerfile)
 // against the embedded defaults and returns the files that differ.
-// Whitespace-only differences are ignored to match prompts.DiffOrgDefaults.
+// Whitespace-only differences are ignored to match promptdata.DiffOrgDefaults.
 func DiffOrgDefaults(orgDir string) []RuntimeDiff {
 	var diffs []RuntimeDiff
 	for _, name := range []string{"runtime.hcl", "Dockerfile"} {

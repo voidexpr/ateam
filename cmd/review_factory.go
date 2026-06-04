@@ -72,7 +72,7 @@ func NewReviewBundle(in ReviewBundleInput) *flow.PromptBundle {
 		},
 		BaseVars: vars,
 		Dynamics: prompts.PromptDynamic{
-			"project_info":   in.Env.ProjectInfoDynamic("the supervisor", "review"),
+			"project_info":   prompts.ProjectInfoDynamic(in.Env, "the supervisor", "review"),
 			"review_reports": reviewReportsDynamicForReports(in.Reports, in.Env, selector),
 		},
 		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {

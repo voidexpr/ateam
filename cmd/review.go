@@ -11,6 +11,7 @@ import (
 
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/flow"
+	"github.com/ateam/internal/promptdata"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -134,7 +135,7 @@ func runReview(opts ReviewOptions) error {
 	}
 
 	if len(opts.Roles) > 0 {
-		if _, err := prompts.ResolveRoleList(opts.Roles, env.Config.Roles, env.ProjectDir, env.OrgDir); err != nil {
+		if _, err := promptdata.ResolveRoleList(opts.Roles, env.Config.Roles, env.ProjectDir, env.OrgDir); err != nil {
 			return err
 		}
 	}

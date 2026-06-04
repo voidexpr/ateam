@@ -81,7 +81,7 @@ func NewCodeBundle(in CodeBundleInput) *flow.PromptBundle {
 		},
 		BaseVars: vars,
 		Dynamics: prompts.PromptDynamic{
-			"project_info":     in.Env.ProjectInfoDynamic("the supervisor", "code"),
+			"project_info":     prompts.ProjectInfoDynamic(in.Env, "the supervisor", "code"),
 			"code_mgmt_review": codeMgmtReviewDynamic(in.Env, in.ReviewContent),
 		},
 		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {

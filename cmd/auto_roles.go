@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/ateam/internal/flow"
+	"github.com/ateam/internal/promptdata"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -70,7 +71,7 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 	// project_info) still run at assembly time via the engine bound to
 	// the bundle below.
 	vars := env.BuildAssemblerVars("report_auto_roles", "the supervisor", "auto-roles")
-	res, err := a.Assemble("report_auto_roles", vars, env.BuildEngine("the supervisor", "auto-roles"), nil)
+	res, err := a.Assemble("report_auto_roles", vars, prompts.BuildEngine(env, "the supervisor", "auto-roles"), nil)
 	if err != nil {
 		return "", nil, fmt.Errorf("assemble auto-roles prompt: %w", err)
 	}
@@ -160,7 +161,7 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 	// Validate every recommended role exists. Unknown role = hard error so the
 	// user catches a misfiring planner instead of silently running nothing.
 	for _, name := range roles {
-		if !prompts.IsValidRole(name, env.Config.Roles, env.ProjectDir, env.OrgDir) {
+		if !promptdata.IsValidRole(name, env.Config.Roles, env.ProjectDir, env.OrgDir) {
 			return rationale, nil, fmt.Errorf("auto-roles recommended unknown role %q (see %s)", name, outputPath)
 		}
 	}
@@ -181,13 +182,13 @@ func parseAutoRolesOutput(content string) (rationale string, roles []string, err
 	var markerValue string
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if rest, ok := strings.CutPrefix(trimmed, prompts.AutoRolesMarker); ok {
+		if rest, ok := strings.CutPrefix(trimmed, promptdata.AutoRolesMarker); ok {
 			markerIdx = i
 			markerValue = strings.TrimSpace(rest)
 		}
 	}
 	if markerIdx < 0 {
-		return "", nil, fmt.Errorf("missing %q marker line", prompts.AutoRolesMarker)
+		return "", nil, fmt.Errorf("missing %q marker line", promptdata.AutoRolesMarker)
 	}
 
 	rationale = strings.TrimRight(strings.Join(lines[:markerIdx], "\n"), "\n")

@@ -48,7 +48,7 @@ func NewVerifyBundle(in VerifyBundleInput) *flow.PromptBundle {
 		},
 		BaseVars: vars,
 		Dynamics: prompts.PromptDynamic{
-			"project_info": in.Env.ProjectInfoDynamic("the supervisor", "verify"),
+			"project_info": prompts.ProjectInfoDynamic(in.Env, "the supervisor", "verify"),
 		},
 		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
 			return runner.RunOpts{

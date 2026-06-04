@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/promptdata"
 	"github.com/ateam/internal/root"
 )
 
@@ -39,10 +39,10 @@ func TestRunInstallCreatesOrgFixture(t *testing.T) {
 	}
 
 	// Embedded role prompts must be present for every known role.
-	if len(prompts.AllRoleIDs) == 0 {
-		t.Fatal("prompts.AllRoleIDs is empty; embedded defaults missing")
+	if len(promptdata.AllRoleIDs) == 0 {
+		t.Fatal("promptdata.AllRoleIDs is empty; embedded defaults missing")
 	}
-	for _, id := range prompts.AllRoleIDs {
+	for _, id := range promptdata.AllRoleIDs {
 		rolePrompt := filepath.Join(orgDir, "defaults", "prompts", "report", id+".prompt.md")
 		if _, err := os.Stat(rolePrompt); err != nil {
 			t.Errorf("expected role prompt %s to exist: %v", rolePrompt, err)

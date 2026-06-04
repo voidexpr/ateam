@@ -28,7 +28,7 @@ func NewSingleSupervisorBundle(in SingleSupervisorBundleInput) *flow.PromptBundl
 	vars := in.Env.BuildAssemblerVars(in.Path, in.RoleLabel, in.Action)
 	dyn := prompts.PromptDynamic{}
 	if in.RoleLabel != "" {
-		dyn["project_info"] = in.Env.ProjectInfoDynamic(in.RoleLabel, in.Action)
+		dyn["project_info"] = prompts.ProjectInfoDynamic(in.Env, in.RoleLabel, in.Action)
 	}
 	return &flow.PromptBundle{
 		Name:   in.Path,

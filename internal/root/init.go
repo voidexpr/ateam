@@ -10,7 +10,7 @@ import (
 
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/config"
-	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/promptdata"
 	"github.com/ateam/internal/runtime"
 )
 
@@ -32,7 +32,7 @@ func InstallOrg(parentDir string) (string, error) {
 		return "", fmt.Errorf("%s/ already exists at %s", OrgDirName, parentDir)
 	}
 
-	allRoles := prompts.AllRoleIDs
+	allRoles := promptdata.AllRoleIDs
 	for _, id := range allRoles {
 		dir := filepath.Join(orgDir, "roles", id)
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -45,7 +45,7 @@ func InstallOrg(parentDir string) (string, error) {
 		return "", fmt.Errorf("cannot create supervisor directory: %w", err)
 	}
 
-	if err := prompts.WriteOrgDefaults(orgDir, false); err != nil {
+	if err := promptdata.WriteOrgDefaults(orgDir, false); err != nil {
 		return "", err
 	}
 
@@ -90,7 +90,7 @@ func InitProject(path, orgDir string, opts InitProjectOpts) (string, error) {
 
 	roleIDs := opts.AllRoles
 	if len(roleIDs) == 0 {
-		roleIDs = prompts.AllRoleIDs
+		roleIDs = promptdata.AllRoleIDs
 	}
 
 	supervisorHistory := filepath.Join(projDir, "supervisor", "history")

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/ateam/internal/config"
-	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/promptdata"
 )
 
 // resolvedTempDir returns a t.TempDir() with symlinks resolved,
@@ -43,7 +43,7 @@ func TestIntegration_BasicProject(t *testing.T) {
 		Name:            "level1/myproj",
 		GitRepo:         ".",
 		GitRemoteOrigin: "https://foobar/myproj.git",
-		EnabledRoles:    prompts.AllRoleIDs,
+		EnabledRoles:    promptdata.AllRoleIDs,
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestIntegration_BasicProject(t *testing.T) {
 	}
 
 	// Verify logs directories were created under .ateam/.
-	for _, roleID := range prompts.AllRoleIDs {
+	for _, roleID := range promptdata.AllRoleIDs {
 		logsDir := filepath.Join(projDir, "logs", "roles", roleID)
 		if _, err := os.Stat(logsDir); err != nil {
 			t.Errorf("logs dir missing for role %s: %v", roleID, err)
@@ -215,7 +215,7 @@ func TestIntegration_DuplicateProjectName(t *testing.T) {
 	}
 	opts1 := InitProjectOpts{
 		Name:         "duplicate-name",
-		EnabledRoles: prompts.AllRoleIDs,
+		EnabledRoles: promptdata.AllRoleIDs,
 	}
 	if _, err := InitProject(proj1Path, orgDir, opts1); err != nil {
 		t.Fatalf("first InitProject: %v", err)
@@ -227,7 +227,7 @@ func TestIntegration_DuplicateProjectName(t *testing.T) {
 	}
 	opts2 := InitProjectOpts{
 		Name:         "duplicate-name",
-		EnabledRoles: prompts.AllRoleIDs,
+		EnabledRoles: promptdata.AllRoleIDs,
 	}
 	_, err = InitProject(proj2Path, orgDir, opts2)
 	if err == nil {
@@ -258,7 +258,7 @@ func TestIntegration_MultipleProjects(t *testing.T) {
 		}
 		opts := InitProjectOpts{
 			Name:         name,
-			EnabledRoles: prompts.AllRoleIDs,
+			EnabledRoles: promptdata.AllRoleIDs,
 		}
 		projDir, err := InitProject(p, orgDir, opts)
 		if err != nil {
@@ -304,7 +304,7 @@ func TestIntegration_RelPathHelper(t *testing.T) {
 	opts := InitProjectOpts{
 		Name:         "services/api",
 		GitRepo:      ".",
-		EnabledRoles: prompts.AllRoleIDs,
+		EnabledRoles: promptdata.AllRoleIDs,
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
 	if err != nil {
@@ -345,7 +345,7 @@ func TestIntegration_StatePathMethods(t *testing.T) {
 
 	opts := InitProjectOpts{
 		Name:         "myproj",
-		EnabledRoles: prompts.AllRoleIDs,
+		EnabledRoles: promptdata.AllRoleIDs,
 	}
 	projDir, err := InitProject(projPath, orgDir, opts)
 	if err != nil {
@@ -489,7 +489,7 @@ func TestIntegration_WalkProjectsDiscovery(t *testing.T) {
 		}
 		opts := InitProjectOpts{
 			Name:         name,
-			EnabledRoles: prompts.AllRoleIDs,
+			EnabledRoles: promptdata.AllRoleIDs,
 		}
 		if _, err := InitProject(p, orgDir, opts); err != nil {
 			t.Fatalf("InitProject(%s): %v", name, err)

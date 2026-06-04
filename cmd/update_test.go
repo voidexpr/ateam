@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/ateam/defaults"
-	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/promptdata"
 	"github.com/ateam/internal/root"
 )
 
@@ -17,10 +17,10 @@ func TestUpdateDiffShowsChangedFile(t *testing.T) {
 		t.Fatalf("runInstall: %v", err)
 	}
 
-	if len(prompts.AllRoleIDs) == 0 {
-		t.Fatal("prompts.AllRoleIDs is empty; embedded defaults missing")
+	if len(promptdata.AllRoleIDs) == 0 {
+		t.Fatal("promptdata.AllRoleIDs is empty; embedded defaults missing")
 	}
-	roleID := prompts.AllRoleIDs[0]
+	roleID := promptdata.AllRoleIDs[0]
 	rel := filepath.Join("defaults", "prompts", "report", roleID+".prompt.md")
 	rolePrompt := filepath.Join(tmp, root.OrgDirName, rel)
 	if err := os.WriteFile(rolePrompt, []byte("mutated content\n"), 0644); err != nil {
@@ -44,10 +44,10 @@ func TestUpdateOverwritesStaleDefault(t *testing.T) {
 		t.Fatalf("runInstall: %v", err)
 	}
 
-	if len(prompts.AllRoleIDs) == 0 {
-		t.Fatal("prompts.AllRoleIDs is empty; embedded defaults missing")
+	if len(promptdata.AllRoleIDs) == 0 {
+		t.Fatal("promptdata.AllRoleIDs is empty; embedded defaults missing")
 	}
-	roleID := prompts.AllRoleIDs[0]
+	roleID := promptdata.AllRoleIDs[0]
 	embeddedPath := filepath.Join("prompts", "report", roleID+".prompt.md")
 	want, err := defaults.FS.ReadFile(embeddedPath)
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/flow"
+	"github.com/ateam/internal/promptdata"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
@@ -148,7 +149,7 @@ func runPromptLiteralFile(pathArg string) error {
 	// user references it; {{prompt.name}} gets the basename.
 	_ = env.Assembler() // ensure assembler is initialized for env.BuildEngine
 	vars := env.BuildAssemblerVars(cleanPath, "", "")
-	rendered, err := env.BuildEngine("", "").Render(content, vars)
+	rendered, err := prompts.BuildEngine(env, "", "").Render(content, vars)
 	if err != nil {
 		return fmt.Errorf("rendering %s: %w", pathArg, err)
 	}
@@ -192,7 +193,7 @@ func runPromptExternalFile(env *root.ResolvedEnv, cleanPath string) error {
 	)
 	augmented := assembler.New(anchors)
 
-	engine := env.BuildEngine(role, "")
+	engine := prompts.BuildEngine(env, role, "")
 	vars := env.BuildAssemblerVars(role, "", "")
 	res, err := augmented.Assemble(role, vars, engine, nil)
 	if err != nil {
@@ -212,8 +213,8 @@ func runPromptRole() error {
 		return err
 	}
 
-	if !prompts.IsValidRole(promptRole, env.Config.Roles, env.ProjectDir, env.OrgDir) {
-		return fmt.Errorf("unknown role: %s\nValid roles: %s", promptRole, strings.Join(prompts.AllKnownRoleIDs(env.Config.Roles, env.ProjectDir, env.OrgDir), ", "))
+	if !promptdata.IsValidRole(promptRole, env.Config.Roles, env.ProjectDir, env.OrgDir) {
+		return fmt.Errorf("unknown role: %s\nValid roles: %s", promptRole, strings.Join(promptdata.AllKnownRoleIDs(env.Config.Roles, env.ProjectDir, env.OrgDir), ", "))
 	}
 
 	prePrompt, err := prompts.ResolveOptional(promptPrePrompt)
@@ -409,7 +410,7 @@ func inspectBundleForCurrentAction(env *root.ResolvedEnv, promptPath, prePrompt,
 		Assembler: env.Assembler(),
 		Vars:      env.BuildAssemblerVars(promptPath, roleLabel, promptAction),
 	}
-	return pf.Inspect(env.NewInspectionContext(roleLabel, promptAction))
+	return pf.Inspect(prompts.NewInspectionContext(env, roleLabel, promptAction))
 }
 
 // bundleForInspection returns the verb factory's bundle for the current
@@ -545,7 +546,7 @@ func inspectionDigestsForCurrentFlags() (string, []sectionDigest, error) {
 	}
 
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, promptAction)
-	engine := env.BuildEngine(roleLabel, promptAction)
+	engine := prompts.BuildEngine(env, roleLabel, promptAction)
 
 	// Per spec Next-round step 7, --paths / --inline-paths inspect the
 	// SAME bundle the live verb produces. Known factory actions go

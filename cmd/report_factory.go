@@ -68,7 +68,7 @@ func NewReportBundle(in ReportBundleInput) *flow.PromptBundle {
 		},
 		BaseVars: vars,
 		Dynamics: prompts.PromptDynamic{
-			"project_info":    in.Env.ProjectInfoDynamic(roleLabel, "report"),
+			"project_info":    prompts.ProjectInfoDynamic(in.Env, roleLabel, "report"),
 			"previous_report": previousReportDynamic(in.Env, in.RoleID, in.SkipPreviousReport),
 		},
 		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {

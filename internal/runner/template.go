@@ -11,7 +11,7 @@ import (
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/display"
-	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/promptdata"
 )
 
 // TemplateVars holds the variables available for {{VAR}} substitution
@@ -93,7 +93,7 @@ func (v TemplateVars) Replacer() *strings.Replacer {
 		"{{ateam.own_config}}", defaults.SelfDocs["CONFIG"], "{{ATEAM_OWN_CONFIG}}", defaults.SelfDocs["CONFIG"],
 		"{{ateam.own_isolation}}", defaults.SelfDocs["ISOLATION"], "{{ATEAM_OWN_ISOLATION}}", defaults.SelfDocs["ISOLATION"],
 		"{{ateam.own_roles}}", defaults.SelfDocs["ROLES"], "{{ATEAM_OWN_ROLES}}", defaults.SelfDocs["ROLES"],
-		"{{ateam.auto_roles_marker}}", prompts.AutoRolesMarker, "{{AUTO_ROLES_MARKER}}", prompts.AutoRolesMarker,
+		"{{ateam.auto_roles_marker}}", promptdata.AutoRolesMarker, "{{AUTO_ROLES_MARKER}}", promptdata.AutoRolesMarker,
 	)
 }
 

@@ -22,6 +22,7 @@ import (
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/display"
+	"github.com/ateam/internal/promptdata"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runtime"
@@ -468,7 +469,7 @@ func slugify(name string) string {
 func discoverRoles(pe *ProjectEntry) []string {
 	cfg, err := config.Load(pe.ProjectDir)
 	if err != nil {
-		return prompts.AllRoleIDs
+		return promptdata.AllRoleIDs
 	}
-	return prompts.AllKnownRoleIDs(cfg.Roles, pe.ProjectDir, pe.OrgDir)
+	return promptdata.AllKnownRoleIDs(cfg.Roles, pe.ProjectDir, pe.OrgDir)
 }

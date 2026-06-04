@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ateam/internal/display"
+	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
 )
@@ -33,7 +34,7 @@ import (
 func assembleRoleCode(env *root.ResolvedEnv, roleID, roleLabel, prePrompt, postPrompt string) (string, error) {
 	promptPath := "code/" + roleID
 	a := env.Assembler()
-	engine := env.BuildEngine(roleLabel, "code")
+	engine := prompts.BuildEngine(env, roleLabel, "code")
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, "code")
 	opts := &assembler.AssembleOptions{PrePrompt: prePrompt}
 	res, err := a.Assemble(promptPath, vars, engine, opts)

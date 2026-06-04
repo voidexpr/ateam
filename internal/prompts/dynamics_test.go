@@ -4,14 +4,18 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/ateam/internal/root"
 )
 
 type stubCtx struct {
+	env  *root.ResolvedEnv
 	vars Vars
 	mode ResolveMode
 	dyn  PromptDynamic
 }
 
+func (s *stubCtx) Env() *root.ResolvedEnv  { return s.env }
 func (s *stubCtx) Vars() Vars              { return s.vars }
 func (s *stubCtx) Mode() ResolveMode       { return s.mode }
 func (s *stubCtx) Dynamics() PromptDynamic { return s.dyn }

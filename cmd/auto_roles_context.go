@@ -12,6 +12,7 @@ import (
 
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/display"
+	"github.com/ateam/internal/promptdata"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -51,7 +52,7 @@ func buildAutoRolesContext(env *root.ResolvedEnv) (string, error) {
 	if env.Config != nil {
 		configRoles = env.Config.Roles
 	}
-	allKnown := prompts.AllKnownRoleIDs(configRoles, env.ProjectDir, env.OrgDir)
+	allKnown := promptdata.AllKnownRoleIDs(configRoles, env.ProjectDir, env.OrgDir)
 	writeRoleListing(&b, configRoles, allKnown)
 	fmt.Fprintln(&b, "```")
 	fmt.Fprintln(&b)

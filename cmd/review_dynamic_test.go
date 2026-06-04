@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/root"
 )
 
 // TestReviewReportsDynamicPreviewSentinel — spec line 388-399: dynamics
@@ -51,6 +52,7 @@ type stubReviewCtx struct {
 	mode prompts.ResolveMode
 }
 
+func (s *stubReviewCtx) Env() *root.ResolvedEnv          { return nil }
 func (s *stubReviewCtx) Vars() prompts.Vars              { return nil }
 func (s *stubReviewCtx) Mode() prompts.ResolveMode       { return s.mode }
 func (s *stubReviewCtx) Dynamics() prompts.PromptDynamic { return nil }

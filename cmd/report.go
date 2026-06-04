@@ -7,6 +7,7 @@ import (
 
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/flow"
+	"github.com/ateam/internal/promptdata"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -82,7 +83,7 @@ Example:
 }
 
 func init() {
-	reportCmd.Flags().StringSliceVar(&reportRoles, "roles", nil, prompts.RoleFlagUsage()+" (default: all enabled roles)")
+	reportCmd.Flags().StringSliceVar(&reportRoles, "roles", nil, promptdata.RoleFlagUsage()+" (default: all enabled roles)")
 	registerCommonExecFlags(reportCmd, &reportFlags, commonFlagUsage{
 		Timeout:      "timeout in minutes per role (overrides config)",
 		Model:        "model override; takes precedence over --cheaper-model",
@@ -167,7 +168,7 @@ func runReport(opts ReportOptions) error {
 		if len(roles) == 0 {
 			roles = []string{"all"}
 		}
-		roleIDs, err = prompts.ResolveRoleList(roles, env.Config.Roles, env.ProjectDir, env.OrgDir)
+		roleIDs, err = promptdata.ResolveRoleList(roles, env.Config.Roles, env.ProjectDir, env.OrgDir)
 		if err != nil {
 			return err
 		}

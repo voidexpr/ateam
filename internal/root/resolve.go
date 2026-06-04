@@ -13,7 +13,7 @@ import (
 	"github.com/ateam/internal/gitutil"
 	"github.com/ateam/internal/migrate"
 	"github.com/ateam/internal/projectinfo"
-	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/promptdata"
 	"github.com/ateam/internal/prompts/assembler"
 )
 
@@ -233,7 +233,7 @@ func (e *ResolvedEnv) BuildAssemblerVars(promptPath, roleLabel, action string) a
 			"own_config":        defaults.SelfDocs["CONFIG"],
 			"own_isolation":     defaults.SelfDocs["ISOLATION"],
 			"own_roles":         defaults.SelfDocs["ROLES"],
-			"auto_roles_marker": prompts.AutoRolesMarker,
+			"auto_roles_marker": promptdata.AutoRolesMarker,
 		},
 		EnvLookup: os.LookupEnv,
 	}
@@ -272,7 +272,7 @@ func (e *ResolvedEnv) BuildAssemblerVars(promptPath, roleLabel, action string) a
 // The pre-rendered Markdown from projectinfo.Info.Markdown() is always
 // attached to QuickOrientation (Phase 0.5 — see plans/Feature_TokenReduction.md).
 // Collection failures degrade gracefully to an empty string.
-func (e *ResolvedEnv) NewProjectInfoParams(role, action string) prompts.ProjectInfoParams {
+func (e *ResolvedEnv) NewProjectInfoParams(role, action string) promptdata.ProjectInfoParams {
 	if e.projectMeta == nil {
 		e.projectMeta, _ = gitutil.GetProjectMeta(e.WorkDir)
 		if e.projectMeta == nil {
@@ -287,7 +287,7 @@ func (e *ResolvedEnv) NewProjectInfoParams(role, action string) prompts.ProjectI
 	if e.quickOrientation == nil {
 		e.quickOrientation = collectQuickOrientation(e.WorkDir, meta)
 	}
-	return prompts.ProjectInfoParams{
+	return promptdata.ProjectInfoParams{
 		OrgDir:           e.OrgDir,
 		ProjectDir:       e.ProjectDir,
 		ProjectName:      e.ProjectName,

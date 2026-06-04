@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/ateam/internal/prompts/assembler"
+	"github.com/ateam/internal/root"
 )
 
 // Vars is the variable resolver consumed by the assembler engine and surfaced
@@ -31,26 +32,31 @@ const (
 	ModePreview
 )
 
-// ResolveContext is the surface Prompt.Resolve and every dynamic function
-// receive. flow.Runtime satisfies it; tests construct ad-hoc impls. Keeping
-// the interface in the prompts package keeps prompt authors out of the flow
-// import (no cycle).
+// ResolveContext is the surface Prompt.Resolve and every dynamic
+// function receive. flow.Runtime satisfies it; tests construct ad-hoc
+// impls. Keeping the interface in the prompts package keeps prompt
+// authors out of the flow import (no cycle).
 //
-// The spec also calls for `Env() *root.ResolvedEnv`. That method is
-// intentionally deferred — root already imports prompts, so adding the
-// reverse dependency requires extracting the helpers in prompts.go (roles,
-// project-info, defaults installer) into a lower package first. No
-// shipped dynamic needs Env access today; the method will be added once
-// the cycle is broken.
+// Spec step 9: Env() is now part of the contract. The root→prompts
+// cycle that previously blocked it was broken by extracting the
+// data/helper code (AllRoleIDs, ProjectInfoParams, FormatProjectInfo,
+// WriteOrgDefaults, AutoRolesMarker) into internal/promptdata. Both
+// internal/root and internal/prompts now import promptdata; prompts
+// safely imports root for ResolvedEnv.
 type ResolveContext interface {
+	// Env returns the resolved env at the time the context was built.
+	// Dynamics that need project paths / config call ctx.Env() instead
+	// of closing over env at factory construction time.
+	Env() *root.ResolvedEnv
 	// Vars returns the variable resolver dynamics consult for namespaced
 	// values. Same shape as the engine consumes during {{ns.key}}.
 	Vars() Vars
 	// Mode returns the current resolve mode.
 	Mode() ResolveMode
 	// Dynamics returns the registered dynamics available at this render.
-	// Surfaced so dynamics can compose by invoking each other through the
-	// same engine machinery without smuggling a dispatcher reference.
+	// Surfaced so dynamics can compose by invoking each other through
+	// the same engine machinery without smuggling a dispatcher
+	// reference.
 	Dynamics() PromptDynamic
 }
 

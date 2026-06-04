@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/ateam/internal/config"
-	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/promptdata"
 )
 
 func TestInstallOrg(t *testing.T) {
@@ -23,7 +23,7 @@ func TestInstallOrg(t *testing.T) {
 	}
 
 	// Verify role dirs exist for all known roles.
-	for _, id := range prompts.AllRoleIDs {
+	for _, id := range promptdata.AllRoleIDs {
 		dir := filepath.Join(orgDir, "roles", id)
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			t.Errorf("expected role dir %s to exist", dir)
@@ -37,8 +37,8 @@ func TestInstallOrg(t *testing.T) {
 	}
 
 	// Verify at least one default prompt file exists (v1 path).
-	if len(prompts.AllRoleIDs) > 0 {
-		promptFile := filepath.Join(orgDir, "defaults", "prompts", "report", prompts.AllRoleIDs[0]+".prompt.md")
+	if len(promptdata.AllRoleIDs) > 0 {
+		promptFile := filepath.Join(orgDir, "defaults", "prompts", "report", promptdata.AllRoleIDs[0]+".prompt.md")
 		if _, err := os.Stat(promptFile); err != nil {
 			t.Errorf("expected prompt file %s to exist: %v", promptFile, err)
 		}
@@ -77,10 +77,10 @@ func TestInitProject(t *testing.T) {
 	}
 
 	enabled := []string{}
-	if len(prompts.AllRoleIDs) >= 2 {
-		enabled = prompts.AllRoleIDs[:2]
-	} else if len(prompts.AllRoleIDs) >= 1 {
-		enabled = prompts.AllRoleIDs[:1]
+	if len(promptdata.AllRoleIDs) >= 2 {
+		enabled = promptdata.AllRoleIDs[:2]
+	} else if len(promptdata.AllRoleIDs) >= 1 {
+		enabled = promptdata.AllRoleIDs[:1]
 	}
 
 	opts := InitProjectOpts{
@@ -142,7 +142,7 @@ func TestInitProject(t *testing.T) {
 	for _, id := range enabled {
 		enabledSet[id] = true
 	}
-	for _, id := range prompts.AllRoleIDs {
+	for _, id := range promptdata.AllRoleIDs {
 		if !enabledSet[id] && cfg.Roles[id] != config.RoleDisabled {
 			t.Errorf("role %s = %q, want %q", id, cfg.Roles[id], config.RoleDisabled)
 		}
@@ -177,7 +177,7 @@ func TestInitProjectDuplicateName(t *testing.T) {
 	}
 	opts := InitProjectOpts{
 		Name:         "shared-name",
-		EnabledRoles: prompts.AllRoleIDs,
+		EnabledRoles: promptdata.AllRoleIDs,
 	}
 	if _, err := InitProject(proj1, orgDir, opts); err != nil {
 		t.Fatalf("first InitProject failed: %v", err)
@@ -190,7 +190,7 @@ func TestInitProjectDuplicateName(t *testing.T) {
 	}
 	opts2 := InitProjectOpts{
 		Name:         "shared-name",
-		EnabledRoles: prompts.AllRoleIDs,
+		EnabledRoles: promptdata.AllRoleIDs,
 	}
 	_, err = InitProject(proj2, orgDir, opts2)
 	if err == nil {

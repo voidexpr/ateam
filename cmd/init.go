@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/promptdata"
 	"github.com/ateam/internal/root"
 	"github.com/spf13/cobra"
 )
@@ -124,7 +124,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	var enabledRoles []string
 	if len(initRoles) > 0 {
 		dbg("resolving roles...")
-		resolved, resolveErr := prompts.ResolveRoleList(initRoles, nil, "", orgDir)
+		resolved, resolveErr := promptdata.ResolveRoleList(initRoles, nil, "", orgDir)
 		if resolveErr != nil {
 			return resolveErr
 		}
@@ -136,7 +136,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		GitRepo:         gitRepo,
 		GitRemoteOrigin: gitRemote,
 		EnabledRoles:    enabledRoles,
-		AllRoles:        prompts.AllRoleIDs,
+		AllRoles:        promptdata.AllRoleIDs,
 	}
 
 	dbg("InitProject...")

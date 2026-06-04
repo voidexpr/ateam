@@ -60,7 +60,7 @@ const (
 // field/method-name collision that the spec called out.
 type Runtime struct {
 	DB      *calldb.CallDB
-	Env     *root.ResolvedEnv
+	env     *root.ResolvedEnv
 	WorkDir string
 
 	vars     Vars
@@ -96,7 +96,7 @@ type Runtime struct {
 func NewRuntime(db *calldb.CallDB, env *root.ResolvedEnv, workDir string) *Runtime {
 	return &Runtime{
 		DB:      db,
-		Env:     env,
+		env:     env,
 		WorkDir: workDir,
 		mode:    ModePreview,
 	}
@@ -113,6 +113,16 @@ func (r *Runtime) SetMode(m ResolveMode) { r.mode = m }
 
 // SetDynamics rebinds the dynamics map. Typically set once at top-of-run.
 func (r *Runtime) SetDynamics(d PromptDynamic) { r.dynamics = d }
+
+// Env satisfies prompts.ResolveContext. Returns the env this Runtime
+// was built around. Set by NewRuntime / SetEnv; never mutated by
+// flow.execute.
+func (r *Runtime) Env() *root.ResolvedEnv { return r.env }
+
+// SetEnv rebinds the runtime's env carrier. Used by tests that need to
+// inject a synthetic env after NewRuntime; production code passes env
+// in at NewRuntime time.
+func (r *Runtime) SetEnv(env *root.ResolvedEnv) { r.env = env }
 
 // Vars satisfies prompts.ResolveContext. The returned Vars is the
 // runtime-aware resolver: exec.* dispatches against rt fields + Mode;

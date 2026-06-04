@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/promptdata"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runtime"
 	"github.com/spf13/cobra"
@@ -53,7 +53,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Binary built: %s\n\n", FormatBuildTime(BuildTime, time.Now()))
 
-	promptDiffs := prompts.DiffOrgDefaults(orgDir)
+	promptDiffs := promptdata.DiffOrgDefaults(orgDir)
 	runtimeDiffs := runtime.DiffOrgDefaults(orgDir)
 	total := len(promptDiffs) + len(runtimeDiffs)
 	if total == 0 {
@@ -73,7 +73,7 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
-	if err := prompts.WriteOrgDefaults(orgDir, true); err != nil {
+	if err := promptdata.WriteOrgDefaults(orgDir, true); err != nil {
 		return err
 	}
 	if err := runtime.WriteOrgDefaults(orgDir, true); err != nil {
