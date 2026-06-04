@@ -34,16 +34,13 @@ import (
 //     runtime.hcl (or pass --sandbox-detection=true) when running
 //     ateam under fence, firejail, or similar.
 //
-// Result is computed once per process and cached.
+// Recomputed on every call: env vars and marker stats are sub-microsecond
+// and recomputation lets late Set*Detection writes take effect. The only
+// expensive piece — the macOS sandbox-exec subprocess — has its own cache
+// (cachedDetectOSSandbox).
 func IsolationSource() string {
-	isoOnce.Do(func() { isoSource = detectIsolation() })
-	return isoSource
+	return detectIsolation()
 }
-
-var (
-	isoOnce   sync.Once
-	isoSource string
-)
 
 func detectIsolation() string {
 	if s := detectAlwaysOn(); s != "" {
@@ -114,15 +111,22 @@ func detectSandboxLayer() string {
 	return cachedDetectOSSandbox()
 }
 
+// cachedDetectOSSandbox runs the per-OS probe at most once per process.
+// Uses an atomic.Pointer rather than sync.Once so ResetDetectionForTest
+// can clear the cache without copying a mutex (go vet -copylocks).
 func cachedDetectOSSandbox() string {
-	osSandboxOnce.Do(func() { osSandboxResult = detectOSSandbox() })
-	return osSandboxResult
+	if p := osSandboxResult.Load(); p != nil {
+		return *p
+	}
+	v := detectOSSandbox()
+	osSandboxResult.CompareAndSwap(nil, &v)
+	if p := osSandboxResult.Load(); p != nil {
+		return *p
+	}
+	return v
 }
 
-var (
-	osSandboxOnce   sync.Once
-	osSandboxResult string
-)
+var osSandboxResult atomic.Pointer[string]
 
 // IsInDockerContainer returns true when ateam can prove it is inside a
 // Docker / Podman container — either by a marker file or an explicit
@@ -175,34 +179,35 @@ func IsInSandbox() (bool, string) {
 	return false, ""
 }
 
-// WarnIfInSandbox prints a one-time stderr warning when ateam appears
-// to be inside an outer sandbox and is about to apply isolation that
-// usually doesn't nest cleanly (the agent's inner sandbox, or a
-// container). The action string is a short verb phrase describing what
-// ateam is about to do.
+// WarnIfInSandbox prints a one-time-per-action stderr warning when
+// ateam appears to be inside an outer sandbox and is about to apply
+// isolation that usually doesn't nest cleanly (the agent's inner
+// sandbox, or a container). The action string is a short verb phrase
+// describing what ateam is about to do.
 //
-// Suppressed when nothing is detected. Suppressed after the first call
-// in this process (the failure mode the warning describes is
-// process-global, not per-action — repeating it on every agent exec
-// would just be noise).
+// Suppressed when nothing is detected. Per action, suppressed after
+// the first emission in this process — different action labels
+// (e.g. "apply the agent's inner sandbox" vs. "run the agent inside
+// a container") each get one warning, because the guidance differs.
 func WarnIfInSandbox(action string) {
 	yes, src := IsInSandbox()
 	if !yes {
 		return
 	}
-	warnOnce.Do(func() {
-		fmt.Fprintf(os.Stderr,
-			"Warning: ateam appears to be inside an outer sandbox (source: %s — could be\n"+
-				"  macOS Seatbelt, Linux bubblewrap/firejail, fence, or anything else that\n"+
-				"  trips the same signals) but is about to %s. Nested isolation usually fails.\n"+
-				"  If it does, set sandbox_detection = true in runtime.hcl (or pass\n"+
-				"  --sandbox-detection=true) so ateam treats the outer sandbox as a container\n"+
-				"  and skips the agent's inner sandbox.\n",
-			src, action)
-	})
+	if _, loaded := warnFired.LoadOrStore(action, true); loaded {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"Warning: ateam appears to be inside an outer sandbox (source: %s — could be\n"+
+			"  macOS Seatbelt, Linux bubblewrap/firejail, fence, or anything else that\n"+
+			"  trips the same signals) but is about to %s. Nested isolation usually fails.\n"+
+			"  If it does, set sandbox_detection = true in runtime.hcl (or pass\n"+
+			"  --sandbox-detection=true) so ateam treats the outer sandbox as a container\n"+
+			"  and skips the agent's inner sandbox.\n",
+		src, action)
 }
 
-var warnOnce sync.Once
+var warnFired sync.Map
 
 // SandboxDetectionEnabled reports whether ateam should let the
 // sandbox-layer detection (cooperative env vars + per-OS probes)
@@ -263,16 +268,16 @@ func SetDockerDetectionIfUnset(enabled bool) {
 }
 
 // ResetDetectionForTest clears every override (sandbox and docker),
-// the cached IsolationSource result, the cached OS-probe result, and
-// the WarnIfInSandbox once-guard. Intended for tests only.
+// the cached OS-probe result, and the per-action WarnIfInSandbox
+// guards. Intended for tests only.
 func ResetDetectionForTest() {
 	sandboxDetectionOverride.Store(nil)
 	dockerDetectionOverride.Store(nil)
-	isoOnce = sync.Once{}
-	isoSource = ""
-	warnOnce = sync.Once{}
-	osSandboxOnce = sync.Once{}
-	osSandboxResult = ""
+	osSandboxResult.Store(nil)
+	warnFired.Range(func(k, _ any) bool {
+		warnFired.Delete(k)
+		return true
+	})
 }
 
 var (

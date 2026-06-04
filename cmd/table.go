@@ -119,7 +119,7 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 	// IsolateCredentials always runs to strip competing alternatives from the
 	// agent env — this is safe even when no secrets are configured.
 	resolver := secretResolver(env, secret.DefaultBackend())
-	if (cc != nil && cc.Type != "none") || runner.IsInContainer() {
+	if (cc != nil && cc.Type != "none") || container.IsInContainer() {
 		if err := secret.ValidateSecrets(ac, resolver); err != nil {
 			return nil, err
 		}
@@ -216,7 +216,7 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.AgentE
 	// No container — skip hard validation (agent handles its own auth on host).
 	// IsolateCredentials still runs to strip competing env vars.
 	resolver := secretResolver(env, secret.DefaultBackend())
-	if runner.IsInContainer() {
+	if container.IsInContainer() {
 		if err := secret.ValidateSecrets(&ac, resolver); err != nil {
 			return nil, err
 		}
@@ -1075,13 +1075,13 @@ func printDryRunInfo(r *runner.AgentExecutor, env *root.ResolvedEnv, opts dryRun
 	// Build the full low-level args with container-aware additions
 	fullArgs := make([]string, len(resolvedExtraArgs))
 	copy(fullArgs, resolvedExtraArgs)
-	if runner.IsInContainer() || r.Container != nil {
+	if container.IsInContainer() || r.Container != nil {
 		fullArgs = append(fullArgs, runner.ResolveTemplateArgs(r.ArgsInsideContainer, tmplVars)...)
 	} else {
 		fullArgs = append(fullArgs, runner.ResolveTemplateArgs(r.ArgsOutsideContainer, tmplVars)...)
 	}
 
-	skipSandbox := (runner.IsInContainer() || r.Container != nil) && !r.Sandbox.InsideContainer
+	skipSandbox := (container.IsInContainer() || r.Container != nil) && !r.Sandbox.InsideContainer
 	if r.Sandbox.Settings != "" && !skipSandbox {
 		fullArgs = append(fullArgs, "--settings", "<logs>/<exec_id>/settings.json")
 	}

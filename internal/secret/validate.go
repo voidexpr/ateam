@@ -47,8 +47,10 @@ func ValidateSecrets(ac *runtime.AgentConfig, resolver *Resolver) error {
 	first := strings.SplitN(missing[0], "|", 2)[0]
 	fmt.Fprintf(&b, "\n\nSet it with: ateam secret %s", first)
 
-	// Add container-specific guidance when inside a container.
-	if container.IsInContainer() {
+	// Add Docker-specific guidance only for real Docker/Podman — the
+	// "docker run -e ..." line is meaningless under fence/firejail/
+	// Seatbelt/bwrap, which IsInContainer also fires on now.
+	if container.IsInDockerContainer() {
 		fmt.Fprintf(&b, "\n\nInside Docker container:")
 		fmt.Fprintf(&b, "\n  On the host: ateam secret %s --set", first)
 		fmt.Fprintf(&b, "\n  Then: ateam secret --save-project-scope")

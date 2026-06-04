@@ -31,12 +31,6 @@ const (
 	ActionDebug    = "debug"
 )
 
-// IsInContainer detects whether the current process is running inside a container.
-// Delegates to container.IsInContainer.
-func IsInContainer() bool {
-	return container.IsInContainer()
-}
-
 // SandboxConfig groups all sandbox-related settings for agent execution.
 type SandboxConfig struct {
 	Settings         string   // inline JSON settings template (from runtime.hcl)
@@ -419,14 +413,14 @@ func (r *AgentExecutor) ExecutePrepared(ctx context.Context, prepared *PreparedR
 
 	// Append environment-aware args.
 	// Use container args when: already inside a container, OR launching into one.
-	if IsInContainer() || r.Container != nil {
+	if container.IsInContainer() || r.Container != nil {
 		extraArgs = append(extraArgs, r.ArgsInsideContainer...)
 	} else {
 		extraArgs = append(extraArgs, r.ArgsOutsideContainer...)
 	}
 
 	// Safety warning: --dangerously-skip-permissions outside a container.
-	if !IsInContainer() && r.Container == nil {
+	if !container.IsInContainer() && r.Container == nil {
 		for _, a := range extraArgs {
 			if a == "--dangerously-skip-permissions" {
 				fmt.Fprintf(os.Stderr, "Warning: --dangerously-skip-permissions used outside a Docker container. This skips all safety checks.\n")
@@ -448,7 +442,7 @@ func (r *AgentExecutor) ExecutePrepared(ctx context.Context, prepared *PreparedR
 	// Write sandbox settings if configured.
 	// Skip when: already inside a container, OR launching into a container (r.Container != nil),
 	// unless sandbox_inside_container is explicitly true.
-	skipSandbox := (IsInContainer() || r.Container != nil) && !r.Sandbox.InsideContainer
+	skipSandbox := (container.IsInContainer() || r.Container != nil) && !r.Sandbox.InsideContainer
 
 	// One central warning for all three agent types: if ateam itself
 	// appears to be inside an outer sandbox (fence / firejail /
