@@ -30,6 +30,7 @@ var (
 	parallelPrint             bool
 	parallelDockerAutoSetup   bool
 	parallelContainerName     string
+	parallelRaw               bool
 )
 
 var parallelCmd = &cobra.Command{
@@ -78,6 +79,7 @@ func init() {
 	parallelCmd.Flags().BoolVar(&parallelPrint, "print", false, "print task outputs to stdout after completion")
 	addDockerAutoSetupFlag(parallelCmd, &parallelDockerAutoSetup)
 	addContainerNameFlag(parallelCmd, &parallelContainerName)
+	parallelCmd.Flags().BoolVar(&parallelRaw, "raw", false, "feed each prompt to the agent byte-for-byte: no template-engine expansion (today the engine isn't run on parallel prompts either, so this is forward-compatible plumbing)")
 }
 
 func runParallel(cmd *cobra.Command, args []string) error {

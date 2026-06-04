@@ -369,6 +369,80 @@ func TestPromptExternalPromptFileFraming(t *testing.T) {
 	}
 }
 
+// TestPromptFactoryDispatch covers the factory-map dispatch in
+// runPromptAction: known actions go through the curated factories; unknown
+// actions fall back to assembleAction's anchor-walk so any custom
+// `.ateam/prompts/<name>.prompt.md` works without a factory registration.
+func TestPromptFactoryDispatch(t *testing.T) {
+	defer savePromptGlobals()()
+	projPath := setupPromptProject(t)
+
+	// Seed a report so the review factory's prompt assembles cleanly.
+	reportDir := filepath.Join(projPath, ".ateam", "shared", "report")
+	if err := os.MkdirAll(reportDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(reportDir, "testing_basic.md"), []byte("# Findings\n\nok"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("known-action-review", func(t *testing.T) {
+		defer savePromptGlobals()()
+		promptAction = runner.ActionReview
+		promptRole = ""
+		promptSupervisor = false
+
+		var runErr error
+		out := captureStdout(t, func() {
+			withChdir(t, projPath, func() {
+				runErr = runPrompt(nil, nil)
+			})
+		})
+		if runErr != nil {
+			t.Fatalf("runPrompt --action review: %v", runErr)
+		}
+		// The review factory composes the reports block; confirm it
+		// landed (proves we hit the factory, not assembleAction's bare
+		// review.prompt.md path).
+		if !strings.Contains(out, "Reports Under Review") {
+			t.Errorf("expected reports manifest from review factory, got:\n%s", out)
+		}
+	})
+
+	t.Run("unknown-action-falls-back-to-anchor-walk", func(t *testing.T) {
+		defer savePromptGlobals()()
+		// Drop a custom action prompt — assembleAction's fallback should
+		// find it.
+		promptsDir := filepath.Join(projPath, ".ateam", "prompts")
+		if err := os.MkdirAll(promptsDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(
+			filepath.Join(promptsDir, "myaction.prompt.md"),
+			[]byte("CUSTOM ACTION: {{prompt.action}}"), 0644,
+		); err != nil {
+			t.Fatal(err)
+		}
+
+		promptAction = "myaction"
+		promptRole = ""
+		promptSupervisor = false
+
+		var runErr error
+		out := captureStdout(t, func() {
+			withChdir(t, projPath, func() {
+				runErr = runPrompt(nil, nil)
+			})
+		})
+		if runErr != nil {
+			t.Fatalf("runPrompt --action myaction: %v", runErr)
+		}
+		if !strings.Contains(out, "CUSTOM ACTION: myaction") {
+			t.Errorf("expected fallback to find myaction.prompt.md, got:\n%s", out)
+		}
+	})
+}
+
 // TestPromptSupervisorDeprecationWarning verifies that --supervisor still
 // runs (back-compat) but emits a stderr deprecation warning.
 func TestPromptSupervisorDeprecationWarning(t *testing.T) {

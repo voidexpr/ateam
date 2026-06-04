@@ -255,18 +255,63 @@ func runPromptRole() error {
 	return nil
 }
 
-// runPromptAction renders a top-level singleton prompt by action name, e.g.
-// `ateam prompt --action code` → code.prompt.md. Used by the code-management
-// supervisor to assemble per-task implementer prompts:
+// promptPreviewFn is the contract for an action-specific preview builder
+// in promptFactories. Each factory owns its own roleLabel / pre / post
+// handling — the dispatcher just forwards the CLI inputs.
+type promptPreviewFn func(env *root.ResolvedEnv, prePrompt, postPrompt string) (string, error)
+
+// promptFactories is THE map of action name → preview builder for the
+// `ateam prompt --action X` form. Per spec it's the only place every
+// action name appears together; unknown actions fall back to
+// assembleAction which looks up `<action>.prompt.md` in the standard
+// anchor chain (project → org → embedded). That fallback is the
+// `PromptFile{Path: action}` equivalent the spec calls out.
+var promptFactories = map[string]promptPreviewFn{
+	runner.ActionReview: previewReview,
+	"code_management":   previewCodeManagement,
+	runner.ActionVerify: previewVerify,
+}
+
+func previewReview(env *root.ResolvedEnv, prePrompt, postPrompt string) (string, error) {
+	roleLabel := "the supervisor"
+	if promptNoProjectInfo {
+		roleLabel = ""
+	}
+	return assembleReview(env, prompts.ReviewSelector{}, roleLabel, "", prePrompt, postPrompt)
+}
+
+func previewCodeManagement(env *root.ResolvedEnv, prePrompt, postPrompt string) (string, error) {
+	roleLabel := "the supervisor"
+	if promptNoProjectInfo {
+		roleLabel = ""
+	}
+	// review content sourced from disk so previews mirror what
+	// `ateam code` will pipe in. Missing review is non-fatal during
+	// preview (matches the spec's "preview never requires runtime
+	// artifacts" stance).
+	reviewContent, _ := os.ReadFile(env.ReviewPath())
+	return assembleCodeManagementV1(env, roleLabel, string(reviewContent), prePrompt, postPrompt)
+}
+
+func previewVerify(env *root.ResolvedEnv, prePrompt, postPrompt string) (string, error) {
+	roleLabel := "the supervisor"
+	if promptNoProjectInfo {
+		roleLabel = ""
+	}
+	return assembleSupervisor(env, "code_verify", roleLabel, "verify", prePrompt, postPrompt)
+}
+
+// runPromptAction renders a top-level prompt by action name. The factory
+// map handles known actions (review / code_management / verify); unknown
+// actions fall back to assembleAction's anchor-walk, so any
+// `.ateam/prompts/<name>.prompt.md` works without a factory entry —
+// matching the spec's `PromptFile{Path: action}` fallback rule.
+//
+// Used by the code-management supervisor to assemble per-task implementer
+// prompts:
 //
 //	ateam prompt --action code --post-prompt @task.md
 //	  | ateam exec --action code ...
-//
-// Symmetric with --role / --supervisor: --role X assembles role bodies under
-// a directory namespace (report/X), --supervisor X assembles the supervisor
-// body for action X, and bare --action X assembles a top-level <X>.prompt.md
-// singleton. Unknown action names error via the assembler's "no role main"
-// lookup.
 func runPromptAction() error {
 	if promptAction == "" {
 		return fmt.Errorf("either --role, --supervisor, or --action is required")
@@ -286,12 +331,16 @@ func runPromptAction() error {
 		return err
 	}
 
-	roleLabel := promptAction
-	if promptNoProjectInfo {
-		roleLabel = ""
+	var assembled string
+	if factory, ok := promptFactories[promptAction]; ok {
+		assembled, err = factory(env, prePrompt, postPrompt)
+	} else {
+		roleLabel := promptAction
+		if promptNoProjectInfo {
+			roleLabel = ""
+		}
+		assembled, err = assembleAction(env, promptAction, roleLabel, prePrompt, postPrompt)
 	}
-
-	assembled, err := assembleAction(env, promptAction, roleLabel, prePrompt, postPrompt)
 	if err != nil {
 		return err
 	}
@@ -313,52 +362,39 @@ func applyPromptBatchOverride(assembled string) string {
 	return strings.ReplaceAll(assembled, "{{BATCH}}", promptBatch)
 }
 
+// runPromptSupervisor handles the deprecated `--supervisor --action X`
+// form. Maps the supervisor's action vocabulary onto the canonical action
+// names the factory map uses, then dispatches through runPromptAction's
+// machinery. New code should drop --supervisor and pass the canonical
+// name directly (`--action review`, `--action code_management`,
+// `--action verify`).
 func runPromptSupervisor() error {
-	if promptAction != runner.ActionReview && promptAction != runner.ActionCode && promptAction != runner.ActionVerify {
+	switch promptAction {
+	case runner.ActionReview, runner.ActionVerify:
+		// canonical names — fall through.
+	case runner.ActionCode:
+		// `--supervisor --action code` was the legacy name for the
+		// supervisor's code-management view. Map it onto the canonical
+		// `code_management` action.
+		promptAction = "code_management"
+	default:
 		return fmt.Errorf("invalid action %q for supervisor: must be 'review', 'code', or 'verify'", promptAction)
 	}
 
-	env, err := resolveEnv()
-	if err != nil {
-		return err
-	}
-
-	prePrompt, err := prompts.ResolveOptional(promptPrePrompt)
-	if err != nil {
-		return err
-	}
-	postPrompt, err := prompts.ResolveOptional(promptPostPrompt)
-	if err != nil {
-		return err
-	}
-
-	roleLabel := "the supervisor"
-	if promptNoProjectInfo {
-		roleLabel = ""
-	}
-
-	var assembled string
-	switch promptAction {
-	case runner.ActionReview:
-		assembled, err = assembleReview(env, prompts.ReviewSelector{}, roleLabel, "", prePrompt, postPrompt)
-	case runner.ActionCode:
-		reviewContent, readErr := os.ReadFile(env.ReviewPath())
-		if readErr != nil {
+	// `--supervisor --action code` historically required the review file
+	// to exist; preserve that pre-flight check before the factory's
+	// best-effort load swallows the missing-file case during preview.
+	if promptAction == "code_management" {
+		env, err := resolveEnv()
+		if err != nil {
+			return err
+		}
+		if _, readErr := os.ReadFile(env.ReviewPath()); readErr != nil {
 			return errNoReview(env.ReviewPath())
 		}
-		// Use the same helper cmd/code.go invokes so the preview matches what
-		// the real run sends. Per-exec values like {{exec.batch}} stay as
-		// {{BATCH}} placeholders in the output unless --batch overrides them
-		// via applyPromptBatchOverride.
-		assembled, err = assembleCodeManagementV1(env, roleLabel, string(reviewContent), "", prePrompt, postPrompt)
-	case runner.ActionVerify:
-		assembled, err = assembleSupervisor(env, "code_verify", roleLabel, "verify", prePrompt, postPrompt)
 	}
-	if err != nil {
-		return err
-	}
-	fmt.Println(applyPromptBatchOverride(assembled))
-	return nil
+
+	return runPromptAction()
 }
 
 // sectionDigest is one row of per-section metadata both --paths and
@@ -439,17 +475,29 @@ func assembleForInspection() (string, []sectionDigest, error) {
 
 	vars := env.BuildAssemblerVars(promptPath, roleLabel, promptAction)
 	engine := env.BuildEngine(roleLabel, promptAction)
-	// Pre-prompt rides through the assembler (lands as the front cli_pre_prompt
-	// section); post-prompt is appended after the synthesized live sections
-	// below so the preview mirrors the real run's outermost-tail ordering.
-	res, err := a.Assemble(promptPath, vars, engine, &assembler.AssembleOptions{PrePrompt: prePrompt})
+
+	// Per the spec, --paths / --inline-paths surface their section
+	// provenance through prompts.Prompt.Inspect. We wrap the current
+	// preview state in a PromptFile (the canonical anchored-prompt
+	// impl) and call Inspect via the dispatcher-wired ctx so dynamics
+	// — most notably {{dynamic.project_info}} — render in preview mode
+	// just like they would during flow.Verify. The cmd-layer "live"
+	// sections (reports manifest, review body, etc.) are appended
+	// below; the spec leaves their orchestration at the verb layer.
+	pf := prompts.PromptFile{
+		Path:      promptPath,
+		PrePrompt: prePrompt,
+		Assembler: a,
+		Vars:      vars,
+	}
+	sections, err := pf.Inspect(env.NewInspectionContext(roleLabel, promptAction))
 	if err != nil {
 		return "", nil, err
 	}
 
 	anchorFS := anchorFSMap(a)
-	digests := make([]sectionDigest, 0, len(res.Sections)+3)
-	for _, s := range res.Sections {
+	digests := make([]sectionDigest, 0, len(sections)+3)
+	for _, s := range sections {
 		digests = append(digests, sectionDigest{
 			Slot:     s.Slot,
 			Anchor:   s.Anchor,

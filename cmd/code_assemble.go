@@ -71,18 +71,17 @@ func assembleAction(env *root.ResolvedEnv, action, roleLabel, prePrompt, postPro
 // values already baked in. The runner fills the placeholders at exec time;
 // `ateam prompt --batch X` bakes them in for previews.
 //
-// roleLabel feeds {{project.info}}; pass "" to suppress. customPrompt
-// (--prompt) replaces the supervisor body via ReplaceRoleMain; framing
-// fragments still compose. prePrompt rides through the assembler;
-// postPrompt is held until after the review block so it stays the outermost
-// tail wrapper.
-func assembleCodeManagementV1(env *root.ResolvedEnv, roleLabel, reviewContent, customPrompt, prePrompt, postPrompt string) (string, error) {
+// roleLabel feeds {{project.info}}; pass "" to suppress. prePrompt rides
+// through the assembler; postPrompt is held until after the review block
+// so it stays the outermost tail wrapper. Operators that need to override
+// the supervisor body drop a code_management.prompt.md under the project
+// or org anchor — the standard framing still composes around it.
+func assembleCodeManagementV1(env *root.ResolvedEnv, roleLabel, reviewContent, prePrompt, postPrompt string) (string, error) {
 	a := env.Assembler()
 	engine := env.BuildEngine(roleLabel, "code")
 	vars := env.BuildAssemblerVars("code_management", roleLabel, "code")
 	opts := &assembler.AssembleOptions{
-		ReplaceRoleMain: customPrompt,
-		PrePrompt:       prePrompt,
+		PrePrompt: prePrompt,
 	}
 	res, err := a.Assemble("code_management", vars, engine, opts)
 	if err != nil {

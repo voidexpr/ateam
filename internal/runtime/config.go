@@ -337,7 +337,13 @@ func (c *Config) resolveInheritance() error {
 }
 
 // mergeHCLFile reads a file (following symlinks) and merges it into cfg.
-// Returns nil if the file doesn't exist.
+// Returns nil if the file doesn't exist. Emits a stderr warning when the
+// file references ALL_CAPS template tokens the runner doesn't recognize
+// — the prompt lifecycle refactor (Step 6) removed the engine-side
+// compat shim so unknown ALL_CAPS pass through literally instead of
+// being mapped to the dotted form; the warning catches typos early.
+// Embedded defaults skip this check (they're shipped with the binary
+// and trusted to be correct).
 func mergeHCLFile(cfg *Config, path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -346,6 +352,7 @@ func mergeHCLFile(cfg *Config, path string) error {
 		}
 		return fmt.Errorf("cannot read %s: %w", path, err)
 	}
+	warnStrayAllCaps(path, data)
 	if err := mergeHCL(cfg, data, path); err != nil {
 		return fmt.Errorf("cannot parse %s: %w", path, err)
 	}

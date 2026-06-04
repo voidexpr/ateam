@@ -45,6 +45,21 @@ func (e *ResolvedEnv) ProjectInfoDynamic(roleLabel, action string) prompts.Promp
 	}
 }
 
+// NewInspectionContext returns a ResolveContext for the
+// --paths / --inline-paths inspection path. Mode is ModeReal because
+// inspection previews what the live run will actually render — including
+// {{dynamic.project_info}} expanded against the current repo state.
+// flow.Verify uses ModePreview separately for its safer "would this even
+// resolve" pass.
+func (e *ResolvedEnv) NewInspectionContext(roleLabel, action string) prompts.ResolveContext {
+	return &liveCtx{
+		mode: prompts.ModeReal,
+		dynamics: prompts.PromptDynamic{
+			"project_info": e.ProjectInfoDynamic(roleLabel, action),
+		},
+	}
+}
+
 // liveCtx is a tiny ResolveContext used at cmd-layer assembly time, where
 // there's no flow.Runtime yet. Carries just the mode + dynamics the
 // dispatcher needs; Vars stays nil (the engine reads vars from the

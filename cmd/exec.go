@@ -36,6 +36,7 @@ var (
 	execContainerName   string
 	execFormat          string
 	execProgressFD      int
+	execRaw             bool
 )
 
 var execCmd = &cobra.Command{
@@ -83,6 +84,7 @@ func init() {
 	execCmd.Flags().BoolVar(&execQuiet, "quiet", false, "disable both streaming and summary (same as --no-stream --no-summary)")
 	execCmd.Flags().StringVar(&execAgentArgs, "agent-args", "", "extra args passed to the agent CLI (appended after configured args)")
 	execCmd.Flags().StringVar(&execBatch, "batch", "", "group related agent_execs (e.g. all execs in one ateam code run)")
+	execCmd.Flags().BoolVar(&execRaw, "raw", false, "feed the prompt to the agent byte-for-byte: no template-engine expansion (today the engine isn't run on the exec prompt either, so this is forward-compatible plumbing)")
 	addVerboseFlag(execCmd, &execVerbose)
 	addDockerAutoSetupFlag(execCmd, &execDockerAutoSetup)
 	addContainerNameFlag(execCmd, &execContainerName)

@@ -152,7 +152,7 @@ func runCode(opts CodeOptions) error {
 	// embedded default. Per-run values inline as {{exec.batch}} /
 	// {{exec.subrun_args}}; the runner resolves them at exec time (live
 	// path) or via TemplateVarsFor + ResolveTemplateString during --dry-run.
-	prompt, err := assembleCodeManagementV1(env, "the supervisor", reviewContent, "", prePrompt, postPrompt)
+	prompt, err := assembleCodeManagementV1(env, "the supervisor", reviewContent, prePrompt, postPrompt)
 	if err != nil {
 		return err
 	}
