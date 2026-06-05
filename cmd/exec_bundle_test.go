@@ -12,6 +12,73 @@ import (
 	"github.com/ateam/internal/runner"
 )
 
+// TestBuildArgPrompt_DispatchRule asserts the spec's three-way
+// dispatch for `ateam exec`-style CLI arguments (spec lines 471-478):
+//
+//   - --raw set → RawTextPrompt
+//   - `@PATH` where PATH ends in `.prompt.md` → PromptFile
+//   - otherwise (literal, `@PATH` not ending in `.prompt.md`, `@-`
+//     stdin) → PromptText
+func TestBuildArgPrompt_DispatchRule(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "foo.prompt.md")
+	if err := os.WriteFile(promptFile, []byte("body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	plainFile := filepath.Join(dir, "plain.md")
+	if err := os.WriteFile(plainFile, []byte("plain body"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name      string
+		arg       string
+		raw       bool
+		wantType  string
+		wantField string // expected Path (for PromptFile) or Text prefix (for others)
+	}{
+		{"raw literal", "hello", true, "RawText", "hello"},
+		{"raw @path", "@" + promptFile, true, "RawText", "body"},
+		{"@PATH.prompt.md → PromptFile", "@" + promptFile, false, "File", promptFile},
+		{"@PATH.md → PromptText", "@" + plainFile, false, "Text", "plain body"},
+		{"literal text → PromptText", "hello", false, "Text", "hello"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := buildArgPrompt(tc.arg, "", "", tc.raw)
+			if err != nil {
+				t.Fatalf("buildArgPrompt: %v", err)
+			}
+			switch tc.wantType {
+			case "RawText":
+				r, ok := got.(prompts.RawTextPrompt)
+				if !ok {
+					t.Fatalf("got %T, want RawTextPrompt", got)
+				}
+				if r.Text != tc.wantField {
+					t.Errorf("Text=%q want %q", r.Text, tc.wantField)
+				}
+			case "Text":
+				p, ok := got.(prompts.PromptText)
+				if !ok {
+					t.Fatalf("got %T, want PromptText", got)
+				}
+				if p.Text != tc.wantField {
+					t.Errorf("Text=%q want %q", p.Text, tc.wantField)
+				}
+			case "File":
+				f, ok := got.(prompts.PromptFile)
+				if !ok {
+					t.Fatalf("got %T, want PromptFile", got)
+				}
+				if f.Path != tc.wantField {
+					t.Errorf("Path=%q want %q", f.Path, tc.wantField)
+				}
+			}
+		})
+	}
+}
+
 func TestStaticBundle_Shape(t *testing.T) {
 	opts := runner.RunOpts{RoleID: "tester", Action: runner.ActionExec, WorkDir: "/wd"}
 	b := staticBundle("exec", "tester", runner.ActionExec, prompts.RawTextPrompt{Text: "hello"}, opts)

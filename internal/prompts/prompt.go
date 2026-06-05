@@ -2,6 +2,9 @@ package prompts
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
@@ -156,6 +159,28 @@ func (p PromptFile) assemble(ctx ResolveContext) (assembler.AssembleResult, erro
 		return assembler.AssembleResult{}, errors.New("prompts.PromptFile: empty Path")
 	}
 	a := env.Assembler()
+	pathArg := p.Path
+	if isFilesystemPromptPath(p.Path) {
+		// Filesystem-path mode: inject the file's parent dir as a
+		// temporary anchor at the front of the standard chain so
+		// sibling <basename>.pre.*.md and dir-level _pre.*.md
+		// fragments next to the file compose alongside the inherited
+		// framing. Spec lines 437-443.
+		parentDir := filepath.Dir(p.Path)
+		if parentDir == "" {
+			parentDir = "."
+		}
+		role := strings.TrimSuffix(filepath.Base(p.Path), ".prompt.md")
+		if role == "" {
+			return assembler.AssembleResult{}, errors.New("prompts.PromptFile: filesystem-path with empty role basename")
+		}
+		anchors := append(
+			[]assembler.Anchor{{Name: "external", FS: os.DirFS(parentDir)}},
+			a.Anchors()...,
+		)
+		a = assembler.New(anchors)
+		pathArg = role
+	}
 	vars := ctx.Vars()
 	engine := assembler.NewEngine(a, 0)
 	if dyn := ctx.Dynamics(); dyn != nil {
@@ -166,7 +191,25 @@ func (p PromptFile) assemble(ctx ResolveContext) (assembler.AssembleResult, erro
 		PrePrompt:       p.PrePrompt,
 		PostPrompt:      p.PostPrompt,
 	}
-	return a.Assemble(p.Path, vars, engine, opts)
+	return a.Assemble(pathArg, vars, engine, opts)
+}
+
+// IsFilesystemPromptPath reports whether path triggers the .prompt.md
+// filesystem-path mode (mode 2 in PromptFile.Path's docstring): ends
+// in ".prompt.md" AND looks like a filesystem reference (contains a
+// path separator or starts with "."). A bare logical name like
+// "review" goes through the standard anchor walk instead.
+//
+// Exported so cmd-layer dispatch (`ateam exec @PATH` etc.) can pick
+// PromptFile vs PromptText based on the same predicate PromptFile
+// uses internally.
+func IsFilesystemPromptPath(path string) bool { return isFilesystemPromptPath(path) }
+
+func isFilesystemPromptPath(path string) bool {
+	if !strings.HasSuffix(path, ".prompt.md") {
+		return false
+	}
+	return strings.ContainsRune(path, '/') || strings.HasPrefix(path, ".")
 }
 
 // renderWithCtx runs the assembler engine against ctx — vars + dynamics

@@ -169,37 +169,27 @@ func isFilesystemPromptPath(path string) bool {
 }
 
 // runPromptExternalFile assembles a `.prompt.md` file located anywhere on
-// disk by injecting its parent directory as a temporary anchor at the
-// front of the standard anchor chain, then composing as if the file were
-// a role under that injected anchor. Sibling <basename>.pre.*.md and
-// dir-level _pre.*.md / _post.*.md in the parent dir wrap the body the
-// same way they would for an anchored role.
+// disk by routing it through prompts.PromptFile — which detects
+// filesystem-path mode and injects the file's parent directory as a
+// temporary anchor at the front of the standard chain. Sibling
+// <basename>.pre.*.md and dir-level _pre.*.md / _post.*.md in the
+// parent dir wrap the body the same way they would for an anchored
+// role.
 func runPromptExternalFile(env *root.ResolvedEnv, cleanPath string) error {
-	parentDir := filepath.Dir(cleanPath)
-	if parentDir == "" || parentDir == "." {
-		// No directory component (e.g. "foo.prompt.md") — assume the
-		// caller meant ./, so the temp anchor scopes to the cwd.
-		parentDir = "."
-	}
 	role := strings.TrimSuffix(filepath.Base(cleanPath), ".prompt.md")
-	if role == "" {
-		return fmt.Errorf("invalid prompt path %q: empty role basename", cleanPath)
-	}
-
-	base := env.Assembler()
-	anchors := append(
-		[]assembler.Anchor{{Name: "external", FS: os.DirFS(parentDir)}},
-		base.Anchors()...,
-	)
-	augmented := assembler.New(anchors)
-
-	engine := prompts.BuildEngine(env, role, "")
-	vars := env.BuildAssemblerVars(role, "", "")
-	res, err := augmented.Assemble(role, vars, engine, nil)
+	pf := prompts.PromptFile{Path: cleanPath}
+	rt := flow.NewRuntime(nil, env, env.WorkDir)
+	rt.SetVars(env.BuildAssemblerVars(role, "", ""))
+	// roleLabel = role basename so the project_info dynamic emits its
+	// block (the legacy path passed the same value to BuildEngine).
+	rt.SetDynamics(prompts.PromptDynamic{
+		"project_info": prompts.ProjectInfoDynamic(env, role, ""),
+	})
+	out, err := pf.Resolve(rt)
 	if err != nil {
 		return fmt.Errorf("assembling %s: %w", cleanPath, err)
 	}
-	fmt.Println(res.Prompt)
+	fmt.Println(out)
 	return nil
 }
 

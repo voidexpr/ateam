@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
@@ -61,16 +64,52 @@ func buildRunner(env *root.ResolvedEnv, spec RunnerSpec) (*runner.AgentExecutor,
 	return r, nil
 }
 
-// promptImpl picks the Prompt implementation based on the operator's
-// --raw choice. Centralized here so every verb that wraps a CLI- or
-// pipe-supplied prompt body (exec, parallel) shares one dispatch
-// rule. Spec step 10: PromptText is the default (variable + dynamic
-// expansion); --raw opts back into RawTextPrompt (bytes-through).
-func promptImpl(text string, raw bool) prompts.Prompt {
-	if raw {
-		return prompts.RawTextPrompt{Text: text}
+// buildArgPrompt picks the Prompt implementation for an
+// `ateam exec`-style CLI argument and applies the operator-supplied
+// `--pre-prompt` / `--post-prompt` wrappers. Single dispatch rule
+// (spec lines 471-478):
+//
+//   - --raw set                                → RawTextPrompt
+//     (pre/post concatenated as raw bytes)
+//   - `@PATH` where PATH ends in `.prompt.md`  → PromptFile{Path: PATH}
+//     (PromptFile detects filesystem-path mode and injects the parent
+//     dir as a temp anchor so sibling fragments compose around the
+//     body; pre/post flow through the assembler's
+//     AssembleOptions and frame the composed result)
+//   - otherwise (literal text, `@PATH` not ending in `.prompt.md`,
+//     `@-` stdin)                              → PromptText
+//     (pre/post concatenated; the engine expands the result)
+//
+// The PromptFile branch does NOT pre-read the file — PromptFile reads
+// it through the assembler at Resolve time, so sibling framing
+// fragments (`<basename>.pre.*.md`, `_pre.*.md`) get picked up. The
+// other branches pre-read via prompts.ResolveValue so the body is
+// known up front.
+func buildArgPrompt(arg, prePrompt, postPrompt string, raw bool) (prompts.Prompt, error) {
+	if !raw && strings.HasPrefix(arg, "@") && !strings.HasPrefix(arg, "@-") {
+		cleanPath := strings.TrimPrefix(arg, "@")
+		if prompts.IsFilesystemPromptPath(cleanPath) {
+			return prompts.PromptFile{
+				Path:       cleanPath,
+				PrePrompt:  prePrompt,
+				PostPrompt: postPrompt,
+			}, nil
+		}
 	}
-	return prompts.PromptText{Text: text}
+	body, err := prompts.ResolveValue(arg)
+	if err != nil {
+		return nil, fmt.Errorf("cannot resolve prompt: %w", err)
+	}
+	if prePrompt != "" {
+		body = prePrompt + "\n\n---\n\n" + body
+	}
+	if postPrompt != "" {
+		body = body + "\n\n---\n\n" + postPrompt
+	}
+	if raw {
+		return prompts.RawTextPrompt{Text: body}, nil
+	}
+	return prompts.PromptText{Text: body}, nil
 }
 
 // staticBundle constructs a PromptBundle around an already-composed

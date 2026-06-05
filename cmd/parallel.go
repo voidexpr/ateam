@@ -83,15 +83,6 @@ func init() {
 }
 
 func runParallel(cmd *cobra.Command, args []string) error {
-	resolvedPrompts := make([]string, len(args))
-	for i, arg := range args {
-		p, err := prompts.ResolveValue(arg)
-		if err != nil {
-			return fmt.Errorf("cannot resolve prompt %d: %w", i+1, err)
-		}
-		resolvedPrompts[i] = p
-	}
-
 	commonFirst, err := prompts.ResolveOptional(parallelCommonPromptFirst)
 	if err != nil {
 		return fmt.Errorf("cannot resolve common-prompt-first: %w", err)
@@ -101,23 +92,26 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cannot resolve common-prompt-last: %w", err)
 	}
 
-	for i, p := range resolvedPrompts {
-		if commonFirst != "" {
-			p = commonFirst + "\n\n" + p
+	// Each arg gets its own dispatch: `@foo.prompt.md` becomes a
+	// PromptFile (sibling fragments compose around it), other forms
+	// become PromptText (or RawTextPrompt with --raw). commonFirst /
+	// commonLast act as parallel's per-step --pre-prompt / --post-prompt.
+	promptInsts := make([]prompts.Prompt, len(args))
+	for i, arg := range args {
+		inst, err := buildArgPrompt(arg, commonFirst, commonLast, parallelRaw)
+		if err != nil {
+			return fmt.Errorf("prompt %d: %w", i+1, err)
 		}
-		if commonLast != "" {
-			p = p + "\n\n" + commonLast
-		}
-		resolvedPrompts[i] = p
+		promptInsts[i] = inst
 	}
 
 	labels := parallelLabels
 	if len(labels) > 0 {
-		if len(labels) != len(resolvedPrompts) {
-			return fmt.Errorf("--labels count (%d) must match prompt count (%d)", len(labels), len(resolvedPrompts))
+		if len(labels) != len(promptInsts) {
+			return fmt.Errorf("--labels count (%d) must match prompt count (%d)", len(labels), len(promptInsts))
 		}
 	} else {
-		labels = make([]string, len(resolvedPrompts))
+		labels = make([]string, len(promptInsts))
 		for i := range labels {
 			labels[i] = fmt.Sprintf("agent-%d", i+1)
 		}
@@ -133,8 +127,8 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		// {{prompt.name}}, exec.* sentinels, and dynamics expand the
 		// same way they would at exec time — no separate composition
 		// path for dry-run.
-		for i, p := range resolvedPrompts {
-			b := staticBundle(labels[i], labels[i], runner.ActionParallel, promptImpl(p, parallelRaw), runner.RunOpts{})
+		for i, p := range promptInsts {
+			b := staticBundle(labels[i], labels[i], runner.ActionParallel, p, runner.RunOpts{})
 			resolved, err := b.ResolvePreview(env, env.WorkDir)
 			if err != nil {
 				return fmt.Errorf("dry-run resolve %s: %w", labels[i], err)
@@ -185,7 +179,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		maxParallel = 3
 	}
 
-	fmt.Fprintf(os.Stderr, "Running %d agent(s) in batch %s (max %d parallel)...\n\n", len(resolvedPrompts), batch, maxParallel)
+	fmt.Fprintf(os.Stderr, "Running %d agent(s) in batch %s (max %d parallel)...\n\n", len(promptInsts), batch, maxParallel)
 
 	preDispatch, err := batchBudgetPrecheck(db, env.ProjectID(), batch, parallelMaxBudgetBatch)
 	if err != nil {
@@ -199,9 +193,9 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	// Labels become RoleID, free-form by design — no root.EnsureRoles call
 	// here, same as cmd/exec.go. The runner creates per-exec_id log dirs
 	// lazily, so role labels can be ad-hoc ("agent-1", task slugs, etc.).
-	steps := make([]flow.Step, len(resolvedPrompts))
-	for i, prompt := range resolvedPrompts {
-		steps[i] = staticBundle(labels[i], labels[i], runner.ActionParallel, promptImpl(prompt, parallelRaw), runner.RunOpts{
+	steps := make([]flow.Step, len(promptInsts))
+	for i, prompt := range promptInsts {
+		steps[i] = staticBundle(labels[i], labels[i], runner.ActionParallel, prompt, runner.RunOpts{
 			RoleID:      labels[i],
 			Action:      runner.ActionParallel,
 			WorkDir:     env.WorkDir,
@@ -249,7 +243,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 				outputByLabel[summary.RoleID] = summary.Output
 			}
 		}
-		multiTask := len(resolvedPrompts) > 1
+		multiTask := len(promptInsts) > 1
 		for _, label := range labels {
 			output, ok := outputByLabel[label]
 			if !ok {

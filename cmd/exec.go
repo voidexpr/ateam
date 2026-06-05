@@ -98,10 +98,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	promptText, err := prompts.ResolveValue(promptArg)
-	if err != nil {
-		return fmt.Errorf("cannot resolve prompt: %w", err)
-	}
 	prePrompt, err := prompts.ResolveOptional(execPrePrompt)
 	if err != nil {
 		return fmt.Errorf("cannot resolve --pre-prompt: %w", err)
@@ -110,11 +106,9 @@ func runExec(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("cannot resolve --post-prompt: %w", err)
 	}
-	if prePrompt != "" {
-		promptText = prePrompt + "\n\n---\n\n" + promptText
-	}
-	if postPrompt != "" {
-		promptText += "\n\n---\n\n" + postPrompt
+	promptInst, err := buildArgPrompt(promptArg, prePrompt, postPrompt, execRaw)
+	if err != nil {
+		return err
 	}
 
 	env, err := lookupEnv()
@@ -181,7 +175,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	// composition path. ResolvePreview runs the same Prompt.Resolve the
 	// live execute path runs, just in ModePreview — operators see the
 	// engine-expanded body (sentinels for runtime-only exec.*).
-	bundle := staticBundle("exec", execRole, execAction, promptImpl(promptText, execRaw), opts)
+	bundle := staticBundle("exec", execRole, execAction, promptInst, opts)
 
 	if execDryRun {
 		resolved, err := bundle.ResolvePreview(env, env.WorkDir)
