@@ -14,7 +14,7 @@ All commands accept:
 | `--sandbox-detection true\|false` |       | Toggle auto-detection of an outer non-container sandbox. Signal-driven: macOS Seatbelt (sandbox-exec probe), Linux user namespace / Seccomp / NoNewPrivs (/proc), cooperative env vars (`FENCE_SANDBOX`, `FIREJAIL_NAME`, `container=…`). Built-in default `false` — opt in when knowingly running ateam under any outer sandbox. Overrides `runtime.hcl` `sandbox_detection`. See [ISOLATION.md](ISOLATION.md#detection-of-an-outer-sandbox-or-container). |
 | `--docker-detection true\|false` |       | Toggle auto-detection of `/.dockerenv` / `/run/.containerenv`. Built-in default `true`. Overrides `runtime.hcl` `docker_detection`. |
 
-`report`, `code`, `review`, `verify`, and `all` require their work-dir to be inside a git repo or worktree; `exec` and `parallel` work in any directory.
+`report`, `code`, `review`, `verify`, and `run-all` require their work-dir to be inside a git repo or worktree; `exec` and `parallel` work in any directory.
 
 ### `--project` and `--work-dir` together
 
@@ -41,7 +41,7 @@ ateam report --work-dir ~/work/myproj/services/billing
 
 ### Ad-hoc prompt wrap (`--pre-prompt` / `--post-prompt`)
 
-Every prompt-taking command (`exec`, `parallel`, `report`, `review`, `verify`, `code`, `auto-setup`, `all`, `inspect`, `prompt`) accepts the same wrap flags with identical semantics:
+Every prompt-taking command (`exec`, `parallel`, `report`, `review`, `verify`, `code`, `auto-setup`, `run-all`, `inspect`, `prompt`) accepts the same wrap flags with identical semantics:
 
 - `--pre-prompt TEXT` (or `@filepath`) — wrapped at the very front of the assembled prompt.
 - `--post-prompt TEXT` — wrapped at the very end.

@@ -23,24 +23,24 @@ Pick by how often it should run and how much you want it to do.
 
 #### Lunch-break (15–30 min, focused)
 ```bash
-ateam all --roles code.recent,test.recent
+ateam run-all --roles code.recent,test.recent
 ```
 Pass on what changed this morning. Cheap, low-risk.
 
 #### End of day (adds doc drift)
 ```bash
-ateam all --roles code.recent,test.recent,docs.external
+ateam run-all --roles code.recent,test.recent,docs.external
 ```
 
 #### Mid-week (slower roles)
 ```bash
-ateam all --roles project.dependencies,project.security
+ateam run-all --roles project.dependencies,project.security
 ```
 Dependency rot and security smells — heavier, more findings.
 
 #### Weekly thorough
 ```bash
-ateam all --roles code.bugs,test.gaps,project.security,project.dependencies,design.architecture
+ateam run-all --roles code.bugs,test.gaps,project.security,project.dependencies,design.architecture
 ```
 
 ## Recipes by control level
@@ -56,7 +56,7 @@ ateam serve                       # browse all artifacts
 
 #### Reuse reports, run another round of coding
 ```bash
-ateam review --extra-prompt "same reports, another round of improvements"
+ateam review --post-prompt "same reports, another round of improvements"
 ateam code && ateam verify
 ```
 Cheaper than re-running the reports.
@@ -90,13 +90,12 @@ ateam exec "summarize info/*.md into info.md"
 
 #### Ad-hoc (this run only)
 
-Every prompt-taking command accepts three text-or-`@file` flags:
-- `--extra-prompt TEXT` — appended inside the assembled prompt
+Every prompt-taking command accepts two text-or-`@file` flags:
 - `--pre-prompt TEXT` — wrapped at the front, outermost
 - `--post-prompt TEXT` — wrapped at the end, outermost
 
 ```bash
-ateam all --extra-prompt "focus on changes to the auth model"
+ateam run-all --post-prompt "focus on changes to the auth model"
 ```
 
 #### Persistent (across runs)
