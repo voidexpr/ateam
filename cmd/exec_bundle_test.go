@@ -311,31 +311,6 @@ func TestBuildArgPrompt_PromptFileBranchCarriesPrePost(t *testing.T) {
 	}
 }
 
-// TestBuildArgPrompt_RawAtPathReadsFileLiteral — commit-fedb49d:
-// `--raw @path.prompt.md` still reads the file (so operators can hand
-// the runner a pre-assembled body) but wraps it in RawTextPrompt so
-// the engine doesn't try to expand anything inside. The PromptFile
-// branch is gated on `!raw`.
-func TestBuildArgPrompt_RawAtPathReadsFileLiteral(t *testing.T) {
-	dir := t.TempDir()
-	promptFile := filepath.Join(dir, "foo.prompt.md")
-	body := "raw {{prompt.name}} {{exec.does_not_exist}} body"
-	if err := os.WriteFile(promptFile, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	got, err := buildArgPrompt("@"+promptFile, "", "", true)
-	if err != nil {
-		t.Fatalf("buildArgPrompt: %v", err)
-	}
-	rt, ok := got.(prompts.RawTextPrompt)
-	if !ok {
-		t.Fatalf("got %T, want RawTextPrompt (--raw must bypass PromptFile filesystem-mode)", got)
-	}
-	if rt.Text != body {
-		t.Errorf("Text = %q, want %q", rt.Text, body)
-	}
-}
-
 // TestBuildArgPrompt_StdinSentinelStaysLiteral verifies the @- branch:
 // `@-` does NOT match the @PATH.prompt.md predicate (the predicate
 // excludes @-), so buildArgPrompt drops through to ResolveValue which

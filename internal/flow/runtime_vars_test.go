@@ -255,89 +255,65 @@ func (p *capturePromptForKeys) Inspect(prompts.ResolveContext) ([]prompts.Sectio
 	return nil, nil
 }
 
-// TestExecuteWiresSubRunArgsFromOpts — commit 9e96d4d closed the
-// deferred-wire TODO for SubRunArgs. flow.newBundleRuntime must read
-// opts.SubRunArgs and write it onto rt.SubRunArgs so the supervisor
-// prompt's {{exec.subrun_args}} resolves with the real CLI fragment
-// passed via runner.RunOpts (today: cmd/code.go threads its
-// --profile / --agent / --project fragment through here). Without the
-// wire, the placeholder would render to "" in ModeReal and `ateam code`
-// supervisor agents would emit broken sub-invocations.
-func TestExecuteWiresSubRunArgsFromOpts(t *testing.T) {
-	exec := &fakeExecutor{}
-	rc := newCtx()
-	env := newEnv(exec)
-	capture := &capturePromptForKeys{keys: []string{"subrun_args"}}
-	bundle := PromptBundle{
-		Name:   "x",
-		Prompt: capture,
-		RunOpts: func(RuntimeEnv) runner.RunOpts {
-			return runner.RunOpts{SubRunArgs: "--profile foo --agent bar"}
+// TestExecuteWiresOptsToRuntime locks the opts→rt wiring for the
+// "verb-supplied" exec.* keys — values that flow.newBundleRuntime
+// must read from RunOpts and write onto rt before Prompt.Resolve so
+// the corresponding {{exec.<key>}} placeholders resolve in ModeReal.
+//
+// Each row exists because of a specific regression we hit:
+//   - subrun_args / debug_context: commit 9e96d4d closed the
+//     deferred-wire TODO after `ateam code` shipped broken
+//     sub-invocations and `inspect --auto-debug` pre-resolved its
+//     debug bundle with the sentinel inlined.
+//   - auto_roles_commands_output: predates 9e96d4d but is structurally
+//     identical (`cmd/auto_roles.go` sets opts; supervisor prompt
+//     references the placeholder); pinning it here prevents the same
+//     pre-resolve-in-ModePreview regression from re-landing.
+func TestExecuteWiresOptsToRuntime(t *testing.T) {
+	cases := []struct {
+		key  string // exec.* key the prompt asks for
+		set  func(*runner.RunOpts)
+		want string
+	}{
+		{
+			key:  "subrun_args",
+			set:  func(o *runner.RunOpts) { o.SubRunArgs = "--profile foo --agent bar" },
+			want: "--profile foo --agent bar",
+		},
+		{
+			key:  "debug_context",
+			set:  func(o *runner.RunOpts) { o.DebugContext = "## Recent runs\n- exec 42 failed\n" },
+			want: "## Recent runs\n- exec 42 failed\n",
+		},
+		{
+			key:  "auto_roles_commands_output",
+			set:  func(o *runner.RunOpts) { o.AutoRolesCommandsOutput = "discovered roles: a, b, c" },
+			want: "discovered roles: a, b, c",
 		},
 	}
-	res := Run(bundle, env, rc).Steps[0].Results[0]
-	if res.Flow.State != StateContinue {
-		t.Fatalf("Run: %v", res.Flow)
-	}
-	if got := capture.got["subrun_args"]; got != "--profile foo --agent bar" {
-		t.Errorf("rt.SubRunArgs not threaded through opts: exec.subrun_args = %q, want '--profile foo --agent bar'", got)
-	}
-}
-
-// TestExecuteWiresDebugContextFromOpts — commit 9e96d4d added the
-// DebugContext field to RunOpts so the inspect --auto-debug command
-// could route its pre-built debug bundle through flow.RunBundle in
-// ModeReal. Before the fix, buildAutoDebugPrompt pre-resolved the
-// prompt with the debug context inlined, which made {{exec.debug_context}}
-// render to the AT RUNTIME sentinel and ship that sentinel to the agent.
-// With the wire, opts.DebugContext lands on rt.DebugContext and the
-// placeholder substitutes against the real bundle.
-func TestExecuteWiresDebugContextFromOpts(t *testing.T) {
-	exec := &fakeExecutor{}
-	rc := newCtx()
-	env := newEnv(exec)
-	capture := &capturePromptForKeys{keys: []string{"debug_context"}}
-	bundle := PromptBundle{
-		Name:   "x",
-		Prompt: capture,
-		RunOpts: func(RuntimeEnv) runner.RunOpts {
-			return runner.RunOpts{DebugContext: "## Recent runs\n- exec 42 failed\n"}
-		},
-	}
-	res := Run(bundle, env, rc).Steps[0].Results[0]
-	if res.Flow.State != StateContinue {
-		t.Fatalf("Run: %v", res.Flow)
-	}
-	want := "## Recent runs\n- exec 42 failed\n"
-	if got := capture.got["debug_context"]; got != want {
-		t.Errorf("rt.DebugContext not threaded through opts: exec.debug_context = %q, want %q", got, want)
-	}
-}
-
-// TestExecuteWiresAutoRolesCommandsOutputFromOpts — sibling assertion
-// for the auto-roles supervisor: cmd/auto_roles.go sets
-// opts.AutoRolesCommandsOutput, and the supervisor prompt references
-// {{exec.auto_roles_commands_output}}. The wire predates commit
-// 9e96d4d but the same regression vector (pre-resolve in ModePreview)
-// applied there; this test locks the contract.
-func TestExecuteWiresAutoRolesCommandsOutputFromOpts(t *testing.T) {
-	exec := &fakeExecutor{}
-	rc := newCtx()
-	env := newEnv(exec)
-	capture := &capturePromptForKeys{keys: []string{"auto_roles_commands_output"}}
-	bundle := PromptBundle{
-		Name:   "x",
-		Prompt: capture,
-		RunOpts: func(RuntimeEnv) runner.RunOpts {
-			return runner.RunOpts{AutoRolesCommandsOutput: "discovered roles: a, b, c"}
-		},
-	}
-	res := Run(bundle, env, rc).Steps[0].Results[0]
-	if res.Flow.State != StateContinue {
-		t.Fatalf("Run: %v", res.Flow)
-	}
-	if got := capture.got["auto_roles_commands_output"]; got != "discovered roles: a, b, c" {
-		t.Errorf("rt.AutoRolesCommandsOutput not threaded through opts: exec.auto_roles_commands_output = %q", got)
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			exec := &fakeExecutor{}
+			rc := newCtx()
+			env := newEnv(exec)
+			capture := &capturePromptForKeys{keys: []string{tc.key}}
+			bundle := PromptBundle{
+				Name:   "x",
+				Prompt: capture,
+				RunOpts: func(RuntimeEnv) runner.RunOpts {
+					opts := runner.RunOpts{}
+					tc.set(&opts)
+					return opts
+				},
+			}
+			res := Run(bundle, env, rc).Steps[0].Results[0]
+			if res.Flow.State != StateContinue {
+				t.Fatalf("Run: %v", res.Flow)
+			}
+			if got := capture.got[tc.key]; got != tc.want {
+				t.Errorf("exec.%s = %q, want %q (opts→rt wire broken)", tc.key, got, tc.want)
+			}
+		})
 	}
 }
 
