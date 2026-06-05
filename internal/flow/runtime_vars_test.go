@@ -230,6 +230,117 @@ func TestRunnerDoesNotSubstitutePromptBody(t *testing.T) {
 	}
 }
 
+// capturePromptForKeys captures the resolved exec.* values for a set
+// of keys when its Resolve runs. Used by the tests below to prove
+// flow.newBundleRuntime threads the verb-supplied RunOpts fields
+// through onto rt before Prompt.Resolve sees the context.
+type capturePromptForKeys struct {
+	keys []string
+	got  map[string]string
+}
+
+func (p *capturePromptForKeys) Resolve(ctx prompts.ResolveContext) (string, error) {
+	p.got = make(map[string]string, len(p.keys))
+	for _, k := range p.keys {
+		val, _, err := ctx.Vars().Resolve("exec", k)
+		if err != nil {
+			return "", err
+		}
+		p.got[k] = val
+	}
+	return "ok", nil
+}
+
+func (p *capturePromptForKeys) Inspect(prompts.ResolveContext) ([]prompts.Section, error) {
+	return nil, nil
+}
+
+// TestExecuteWiresSubRunArgsFromOpts — commit 9e96d4d closed the
+// deferred-wire TODO for SubRunArgs. flow.newBundleRuntime must read
+// opts.SubRunArgs and write it onto rt.SubRunArgs so the supervisor
+// prompt's {{exec.subrun_args}} resolves with the real CLI fragment
+// passed via runner.RunOpts (today: cmd/code.go threads its
+// --profile / --agent / --project fragment through here). Without the
+// wire, the placeholder would render to "" in ModeReal and `ateam code`
+// supervisor agents would emit broken sub-invocations.
+func TestExecuteWiresSubRunArgsFromOpts(t *testing.T) {
+	exec := &fakeExecutor{}
+	rc := newCtx()
+	env := newEnv(exec)
+	capture := &capturePromptForKeys{keys: []string{"subrun_args"}}
+	bundle := PromptBundle{
+		Name:   "x",
+		Prompt: capture,
+		RunOpts: func(RuntimeEnv) runner.RunOpts {
+			return runner.RunOpts{SubRunArgs: "--profile foo --agent bar"}
+		},
+	}
+	res := Run(bundle, env, rc).Steps[0].Results[0]
+	if res.Flow.State != StateContinue {
+		t.Fatalf("Run: %v", res.Flow)
+	}
+	if got := capture.got["subrun_args"]; got != "--profile foo --agent bar" {
+		t.Errorf("rt.SubRunArgs not threaded through opts: exec.subrun_args = %q, want '--profile foo --agent bar'", got)
+	}
+}
+
+// TestExecuteWiresDebugContextFromOpts — commit 9e96d4d added the
+// DebugContext field to RunOpts so the inspect --auto-debug command
+// could route its pre-built debug bundle through flow.RunBundle in
+// ModeReal. Before the fix, buildAutoDebugPrompt pre-resolved the
+// prompt with the debug context inlined, which made {{exec.debug_context}}
+// render to the AT RUNTIME sentinel and ship that sentinel to the agent.
+// With the wire, opts.DebugContext lands on rt.DebugContext and the
+// placeholder substitutes against the real bundle.
+func TestExecuteWiresDebugContextFromOpts(t *testing.T) {
+	exec := &fakeExecutor{}
+	rc := newCtx()
+	env := newEnv(exec)
+	capture := &capturePromptForKeys{keys: []string{"debug_context"}}
+	bundle := PromptBundle{
+		Name:   "x",
+		Prompt: capture,
+		RunOpts: func(RuntimeEnv) runner.RunOpts {
+			return runner.RunOpts{DebugContext: "## Recent runs\n- exec 42 failed\n"}
+		},
+	}
+	res := Run(bundle, env, rc).Steps[0].Results[0]
+	if res.Flow.State != StateContinue {
+		t.Fatalf("Run: %v", res.Flow)
+	}
+	want := "## Recent runs\n- exec 42 failed\n"
+	if got := capture.got["debug_context"]; got != want {
+		t.Errorf("rt.DebugContext not threaded through opts: exec.debug_context = %q, want %q", got, want)
+	}
+}
+
+// TestExecuteWiresAutoRolesCommandsOutputFromOpts — sibling assertion
+// for the auto-roles supervisor: cmd/auto_roles.go sets
+// opts.AutoRolesCommandsOutput, and the supervisor prompt references
+// {{exec.auto_roles_commands_output}}. The wire predates commit
+// 9e96d4d but the same regression vector (pre-resolve in ModePreview)
+// applied there; this test locks the contract.
+func TestExecuteWiresAutoRolesCommandsOutputFromOpts(t *testing.T) {
+	exec := &fakeExecutor{}
+	rc := newCtx()
+	env := newEnv(exec)
+	capture := &capturePromptForKeys{keys: []string{"auto_roles_commands_output"}}
+	bundle := PromptBundle{
+		Name:   "x",
+		Prompt: capture,
+		RunOpts: func(RuntimeEnv) runner.RunOpts {
+			return runner.RunOpts{AutoRolesCommandsOutput: "discovered roles: a, b, c"}
+		},
+	}
+	res := Run(bundle, env, rc).Steps[0].Results[0]
+	if res.Flow.State != StateContinue {
+		t.Fatalf("Run: %v", res.Flow)
+	}
+	if got := capture.got["auto_roles_commands_output"]; got != "discovered roles: a, b, c" {
+		t.Errorf("rt.AutoRolesCommandsOutput not threaded through opts: exec.auto_roles_commands_output = %q", got)
+	}
+}
+
 // TestExecutePopulatesRuntimeFromPrepared — spec Next-round step 2.
 // flow.execute MUST populate rt.{ExecID, Batch, OutputDir, OutputFile,
 // PromptFile} from prepared + RunOpts before calling Prompt.Resolve.

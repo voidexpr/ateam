@@ -459,3 +459,56 @@ func TestPromptFactoryDispatch(t *testing.T) {
 		}
 	})
 }
+
+// TestPromptInlinePathsDoesNotDuplicateCliPostPrompt locks in the
+// commit-9e96d4d fix: `ateam prompt --inline-paths --action review
+// --post-prompt X` must emit exactly one `cli_post_prompt` section.
+// Pre-fix, inspectionDigestsForCurrentFlags appended its own
+// addLive("cli_post_prompt") on top of the assembler-emitted slot,
+// double-counting the user-supplied wrapper. Symptom would be the
+// POST text appearing twice in the digest stream and one extra
+// section row at the bottom of --paths.
+func TestPromptInlinePathsDoesNotDuplicateCliPostPrompt(t *testing.T) {
+	defer savePromptGlobals()()
+	projPath := setupPromptProject(t)
+
+	// Seed a report so the review factory composes cleanly (the review
+	// bundle reaches for shared/report/<role>.md).
+	reportDir := filepath.Join(projPath, ".ateam", "shared", "report")
+	if err := os.MkdirAll(reportDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(reportDir, "testing_basic.md"), []byte("# Findings\n\nok"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	promptAction = runner.ActionReview
+	promptInlinePaths = true
+	promptPostPrompt = "MY-CLI-POST-PROMPT-MARKER"
+
+	out := captureStdout(t, func() {
+		withChdir(t, projPath, func() {
+			if err := runPromptInlinePaths(); err != nil {
+				t.Fatalf("runPromptInlinePaths: %v", err)
+			}
+		})
+	})
+
+	postMarkerCount := strings.Count(out, "MY-CLI-POST-PROMPT-MARKER")
+	// The marker appears in (a) the slot header line that names the
+	// section ("slot: cli_post_prompt") — NO, that line only names the
+	// slot, not the content; and (b) the rendered body of the section.
+	// So we expect the literal marker exactly once across all bodies.
+	if postMarkerCount != 1 {
+		t.Errorf("expected --post-prompt body to appear exactly once in --inline-paths output, got %d occurrences:\n%s",
+			postMarkerCount, out)
+	}
+	// Sanity: the cli_post_prompt slot header should also appear exactly
+	// once. Two slot headers means inspectionDigestsForCurrentFlags is
+	// double-appending the synthesized live section on top of the
+	// assembler-emitted one.
+	slotCount := strings.Count(out, "slot: cli_post_prompt")
+	if slotCount != 1 {
+		t.Errorf("expected one 'slot: cli_post_prompt' header, got %d:\n%s", slotCount, out)
+	}
+}

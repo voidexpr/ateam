@@ -209,6 +209,35 @@ func TestInspectRunSelection(t *testing.T) {
 	})
 }
 
+// TestBuildAutoDebugBundleDefersDebugContextToRuntime locks in the
+// commit-9e96d4d fix: buildAutoDebugBundle must NOT pre-resolve the
+// auto-debug body. The previous implementation called pf.Resolve()
+// during build time (ModePreview), which substituted
+// {{exec.debug_context}} with the AT-RUNTIME sentinel and then shipped
+// that sentinel string to the agent. With the fix the bundle's Prompt
+// is a PromptFile that defers resolution to flow.RunBundle's ModeReal
+// pass, so this preview render must still show the sentinel — proving
+// the substitution is happening at the runtime layer, not at build time.
+func TestBuildAutoDebugBundleDefersDebugContextToRuntime(t *testing.T) {
+	_, _, env := setupTestProject(t)
+	rows := []calldb.RecentRow{{
+		ID: 7, Action: "exec", Role: "test.gaps",
+		StartedAt: time.Now().Add(-1 * time.Minute).Format(time.RFC3339),
+	}}
+
+	bundle, err := buildAutoDebugBundle(env, rows, nil, "", "")
+	if err != nil {
+		t.Fatalf("buildAutoDebugBundle: %v", err)
+	}
+	prompt, err := bundle.ResolvePreview(env, env.WorkDir)
+	if err != nil {
+		t.Fatalf("ResolvePreview: %v", err)
+	}
+	if !strings.Contains(prompt, "{{AT RUNTIME:exec.debug_context}}") {
+		t.Errorf("expected ModePreview sentinel for exec.debug_context — bundle is pre-resolving the body instead of deferring to flow.RunBundle:\n%s", prompt)
+	}
+}
+
 // TestBuildAutoDebugPromptPrePostWrap verifies that --pre-prompt lands at the
 // very front and --post-prompt at the very end of the auto-debug prompt.
 func TestBuildAutoDebugPromptPrePostWrap(t *testing.T) {

@@ -1,6 +1,8 @@
 package prompts
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -162,5 +164,149 @@ func TestPromptFileInspectReturnsSections(t *testing.T) {
 	}
 	if len(secs) == 0 {
 		t.Fatal("expected at least one section")
+	}
+}
+
+// TestIsFilesystemPromptPath asserts the predicate's closed truth-table.
+// Commit fedb49d exported this so cmd-layer dispatch (`ateam exec @PATH`)
+// and PromptFile.assemble share one rule for "this is a filesystem
+// reference, inject a temp anchor" — divergence between caller and
+// callee would silently route some paths through the wrong branch.
+func TestIsFilesystemPromptPath(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		// Filesystem-mode: ends in .prompt.md AND has separator or
+		// leading dot.
+		{"./foo.prompt.md", true},
+		{"../foo.prompt.md", true},
+		{".prompt.md", true}, // pathological — starts with "." even though basename is empty
+		{"dir/foo.prompt.md", true},
+		{"/abs/path/foo.prompt.md", true},
+		{"sub/dir/foo.prompt.md", true},
+		// Logical-mode (no separator, no leading dot): caller resolves
+		// via the anchor walk.
+		{"foo.prompt.md", false},
+		{"review", false},
+		// Wrong suffix: never filesystem-mode.
+		{"./foo.md", false},
+		{"./foo", false},
+		{"./foo.prompt", false},
+		// Empty is conservatively false.
+		{"", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			if got := IsFilesystemPromptPath(tc.path); got != tc.want {
+				t.Errorf("IsFilesystemPromptPath(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPromptFileFilesystemModeComposesSiblings verifies the load-bearing
+// commit-fedb49d behavior: a .prompt.md path with a directory component
+// causes PromptFile.assemble to inject the file's parent directory as a
+// temporary anchor at the front of the chain so sibling
+// <basename>.pre.*.md fragments wrap the body — the same composition
+// rule an in-anchor role would get.
+func TestPromptFileFilesystemModeComposesSiblings(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("widget.prompt.md", "WIDGET BODY")
+	write("widget.pre.intro.md", "WIDGET INTRO")
+	write("widget.post.outro.md", "WIDGET OUTRO")
+
+	// Pass an *inherited* anchor base via env.Assembler() to confirm the
+	// injection adds to (rather than replaces) the standard chain.
+	innerFS := fstest.MapFS{
+		"prompts/widget.pre.fromchain.md": &fstest.MapFile{Data: []byte("FROM CHAIN")},
+	}
+	base := assembler.New(assembler.BuildAnchors("", "", innerFS))
+	env := envWithAssembler(base)
+
+	ctx := &stubCtx{
+		env:  env,
+		vars: assembler.MapVars{Prompt: map[string]string{"name": "widget"}},
+		mode: ModeReal,
+	}
+
+	pathArg := filepath.Join(dir, "widget.prompt.md")
+	out, err := (PromptFile{Path: pathArg}).Resolve(ctx)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	for _, want := range []string{"WIDGET INTRO", "WIDGET BODY", "WIDGET OUTRO", "FROM CHAIN"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+	// Ordering invariant from the assembler: pre fragments come before
+	// role main which comes before post fragments.
+	bodyIdx := strings.Index(out, "WIDGET BODY")
+	preIdx := strings.Index(out, "WIDGET INTRO")
+	postIdx := strings.Index(out, "WIDGET OUTRO")
+	if preIdx >= bodyIdx || bodyIdx >= postIdx {
+		t.Errorf("expected pre<body<post, got pre=%d body=%d post=%d", preIdx, bodyIdx, postIdx)
+	}
+}
+
+// TestPromptFileFilesystemModeEmptyRoleErrors verifies the
+// commit-fedb49d guard: a path whose basename is just ".prompt.md"
+// (no role stem) errors clearly rather than silently looking up an
+// empty role name in the anchor chain.
+func TestPromptFileFilesystemModeEmptyRoleErrors(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".prompt.md"), []byte("ignored"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := assembler.New(nil)
+	env := envWithAssembler(base)
+	ctx := &stubCtx{env: env, mode: ModeReal}
+
+	_, err := (PromptFile{Path: filepath.Join(dir, ".prompt.md")}).Resolve(ctx)
+	if err == nil {
+		t.Fatal("expected error for empty role basename, got nil")
+	}
+	if !strings.Contains(err.Error(), "empty role basename") {
+		t.Errorf("error should mention 'empty role basename', got: %v", err)
+	}
+}
+
+// TestPromptFileFilesystemModeWithPrePost verifies that PromptFile's
+// PrePrompt / PostPrompt knobs flow into the assembler's AssembleOptions
+// in filesystem-path mode — so cmd-layer wrappers (`--pre-prompt`,
+// `--post-prompt`) end up as the outermost framing.
+func TestPromptFileFilesystemModeWithPrePost(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "foo.prompt.md"), []byte("BODY"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := assembler.New(nil)
+	env := envWithAssembler(base)
+	ctx := &stubCtx{env: env, mode: ModeReal}
+
+	out, err := (PromptFile{
+		Path:       filepath.Join(dir, "foo.prompt.md"),
+		PrePrompt:  "CLI-PRE",
+		PostPrompt: "CLI-POST",
+	}).Resolve(ctx)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	preIdx := strings.Index(out, "CLI-PRE")
+	bodyIdx := strings.Index(out, "BODY")
+	postIdx := strings.Index(out, "CLI-POST")
+	if preIdx < 0 || bodyIdx < 0 || postIdx < 0 {
+		t.Fatalf("missing marker(s):\n%s", out)
+	}
+	if preIdx >= bodyIdx || bodyIdx >= postIdx {
+		t.Errorf("expected pre<body<post, got pre=%d body=%d post=%d", preIdx, bodyIdx, postIdx)
 	}
 }
