@@ -408,7 +408,7 @@ func codexThreadID(line []byte) string {
 
 // cmdMDPath returns the cmd.md path that pairs with a stream file, handling
 // both the new layout (logs/<exec_id>/{agent.jsonl, cmd.md}) and the legacy
-// prefix layout (<dir>/<TS>_<ACTION>_{agent.jsonl, exec.md}).
+// prefix layout (<dir>/<TS>_<ACTION>_{stream.jsonl, exec.md}).
 func cmdMDPath(streamPath string) string {
 	if root.IsLegacyStreamFile(streamPath) {
 		return strings.TrimSuffix(streamPath, "_stream.jsonl") + "_exec.md"

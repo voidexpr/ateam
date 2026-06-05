@@ -25,7 +25,7 @@
 //   - Dynamics: PromptDynamicFunction = func(ctx, args...) (string,
 //     error). Mode-aware — branch on ctx.Mode() to return a sentinel
 //     in ModePreview and a real value in ModeReal.
-//   - Env-shaped bridge helpers: BuildEngine, ProjectInfoDynamic —
+//   - Env-shaped bridge helpers: ProjectInfoDynamic —
 //     take *root.ResolvedEnv as a parameter, not as a closure capture.
 //
 // # Does not know about

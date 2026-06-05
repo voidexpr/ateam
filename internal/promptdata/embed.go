@@ -25,7 +25,7 @@
 // # What stays in internal/prompts
 //
 // Prompt / PromptFile / PromptText / RawTextPrompt / ResolveContext /
-// PromptDynamic / NewDispatcher / BuildEngine / ProjectInfoDynamic —
+// PromptDynamic / NewDispatcher / ProjectInfoDynamic —
 // the composition pipeline itself.
 package promptdata
 

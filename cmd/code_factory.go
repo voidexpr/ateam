@@ -40,8 +40,8 @@ type CodeBundleInput struct {
 // returns the spec sentinel in ModePreview rather than reading disk.
 //
 //   - ReviewContent != "": operator override wins in ModeReal (the
-//     content is wrapped as `# Review\n\n<content>` to match the legacy
-//     assembleCodeManagementV1 output byte-for-byte).
+//     content is wrapped as `# Review\n\n<content>` to match the
+//     legacy code-management body byte-for-byte).
 //   - ReviewContent == "" + ModeReal: read env.ReviewPath. If missing,
 //     return errNoReview's message via a real error — surfaces as a
 //     resolution failure that flow.execute marks the row failed for.
