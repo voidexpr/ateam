@@ -407,6 +407,47 @@ type PromptBundle struct {
 	PostExec []Action
 }
 
+// preparedScalars is the closed set of values newBundleRuntime needs
+// to populate the live-execution Runtime. Flow extracts these from
+// the runner's PreparedRun at the execute callsite — so
+// newBundleRuntime and resolvePrompt do NOT type against
+// runner.PreparedRun directly. The decoupling matters when:
+//
+//   - A runner-internal field gets renamed (the failure surfaces in
+//     one place — the extractor — not throughout flow).
+//   - An alternate Executor wants to drive flow without producing a
+//     runner.PreparedRun (it builds a preparedScalars directly).
+//
+// Other flow code (BundleLogReporter, bundle_events, AgentExecStart)
+// keeps consuming *runner.PreparedRun directly because those
+// observers are intentionally runner-aware. The boundary that
+// matters for prompt resolution is here.
+type preparedScalars struct {
+	ExecID     int64
+	RuntimeDir string
+	PromptFile string
+	StartedAt  time.Time
+	AgentName  string
+	Model      string
+}
+
+// scalarsFromPrepared lifts the prompt-resolver-relevant fields out
+// of *runner.PreparedRun into a flow-internal value. Returns nil
+// when prepared is nil (the preview / dry-run path).
+func scalarsFromPrepared(p *runner.PreparedRun) *preparedScalars {
+	if p == nil {
+		return nil
+	}
+	return &preparedScalars{
+		ExecID:     p.ExecID,
+		RuntimeDir: p.RuntimeDir,
+		PromptFile: p.PromptFile,
+		StartedAt:  p.StartedAt,
+		AgentName:  p.AgentName,
+		Model:      p.Model,
+	}
+}
+
 // resolvePrompt runs the bundle's Prompt against a freshly built runtime.
 // A nil Prompt is a programmer error — the factory must set one (callers
 // that just want literal text use prompts.RawTextPrompt).
@@ -417,7 +458,7 @@ type PromptBundle struct {
 // prepared == nil, the call is preview / dry-run / verify, mode is
 // prompts.ModePreview, and exec.* renders to {{AT RUNTIME:exec.<key>}} sentinels.
 // The runner does NOT substitute the prompt body afterward.
-func (b PromptBundle) resolvePrompt(rc RunCtx, env RuntimeEnv, opts runner.RunOpts, prepared *runner.PreparedRun) (string, error) {
+func (b PromptBundle) resolvePrompt(rc RunCtx, env RuntimeEnv, opts runner.RunOpts, prepared *preparedScalars) (string, error) {
 	if b.Prompt == nil {
 		return "", errBundleHasNoPrompt
 	}
@@ -514,7 +555,7 @@ func (b *PromptBundle) previewRuntime(env *root.ResolvedEnv, workDir string, opt
 // AutoRolesCommandsOutput / DebugContext are verb-supplied and propagate
 // via RunOpts so the auto-roles planner and inspect --auto-debug verbs
 // can carry their pre-baked context without touching the runner.
-func newBundleRuntime(rc RunCtx, env RuntimeEnv, opts runner.RunOpts, prepared *runner.PreparedRun) *Runtime {
+func newBundleRuntime(rc RunCtx, env RuntimeEnv, opts runner.RunOpts, prepared *preparedScalars) *Runtime {
 	rt := NewRuntime(rc.DB, rc.Resolved, env.WorkDir)
 	if prepared == nil {
 		rt.SetMode(prompts.ModePreview)
@@ -544,7 +585,7 @@ func newBundleRuntime(rc RunCtx, env RuntimeEnv, opts runner.RunOpts, prepared *
 // report.md). For actions with no primary output, returns "" — callers
 // that reference {{exec.output_file}} for such actions will hit the
 // resolver's "not populated" error, which is the correct signal.
-func primaryOutputFile(prepared *runner.PreparedRun, opts runner.RunOpts) string {
+func primaryOutputFile(prepared *preparedScalars, opts runner.RunOpts) string {
 	if prepared == nil {
 		return ""
 	}
@@ -651,7 +692,11 @@ func (b PromptBundle) execute(rc RunCtx, env RuntimeEnv) (out []Result) {
 	// directly. The runner does NOT substitute the prompt body afterward
 	// (step 3 deleted that pass). A failure here happens after the exec
 	// row was allocated, so we close the row as failed before propagating.
-	prompt, err := b.resolvePrompt(rc, env, opts, prepared)
+	//
+	// Lift the prompt-resolver-relevant fields out of *runner.PreparedRun
+	// here so resolvePrompt / newBundleRuntime can be decoupled from the
+	// runner's concrete struct shape — see preparedScalars.
+	prompt, err := b.resolvePrompt(rc, env, opts, scalarsFromPrepared(prepared))
 	if err != nil {
 		if rc.DB != nil {
 			_ = rc.DB.MarkExecFailed(prepared.ExecID, "render failed: "+err.Error(), time.Now())
