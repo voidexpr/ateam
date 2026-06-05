@@ -991,6 +991,107 @@ func buildArgPrompt(arg, pre, post string, raw bool) (prompts.Prompt, error) {
 - `PromptFile` orchestrator: pin that a synthetic two-file Assembler (one `dir_pre`, one `role_main`) renders correctly with a fake Factory that returns a literal-string Prompt for `role_main`.
 - All existing `internal/prompts/prompt_test.go` and `cmd/prompt_test.go` cases keep passing with default behavior.
 
+### Notes for the implementer
+
+Pin these before writing code — each is one paragraph but each is a
+"someone will guess wrong" hazard.
+
+**1. Name collision in the `assembler` package.** The interface stays
+`Assembler` (good package-local name). The existing concrete type
+renames to `MultiAnchorAssembler`. `env.Assembler()` returns
+`assembler.Assembler` (the interface) instead of
+`*assembler.Assembler` (the old concrete) — every existing caller
+keeps working because the methods they use (`Resolve`, `Anchors`,
+`FindOrphans`) are on the interface.
+
+**2. `PrePrompt` / `PostPrompt` are pure text, no expansion.** This
+is a deliberate behavior change from today. The current code routes
+operator-supplied `--pre-prompt` / `--post-prompt` for
+`.prompt.md` paths through the assembler engine (so
+`{{prompt.name}}` inside the wrapper expands); for `@foo.md` paths
+the cmd layer concatenates raw bytes. The new rule: **always raw**,
+on every Prompt impl, regardless of file shape or future impl
+(`.prompt.py`, `.prompt.jinja`). Rationale: when a new Prompt impl
+ships with a different template syntax, "what does pre/post support"
+becomes ambiguous; pinning "raw" up front means it stays simple,
+consistent, and predictable for every impl. The fields stay on
+`PromptFile` and remain raw inside the orchestrator. Update
+`assembler.AssembleOptions` so `PrePrompt` / `PostPrompt` skip
+`engine.Render`. Any existing user prompt that relied on
+`{{ns.key}}` expansion inside `--pre-prompt` / `--post-prompt` is
+broken by this change — surfaces loudly as a literal `{{ns.key}}` in
+the agent-facing text, not a silent empty substitution.
+
+**3. Engine ownership during the file loop.** Two kinds of body need
+to be rendered:
+
+- *Framing fragments* (`*.pre.*.md`, `_pre.*.md`, etc.) — always
+  markdown, need the engine + dispatcher.
+- *Role main* — file shape varies (`.prompt.md` today, `.prompt.py`
+  later, etc.).
+
+The split: `PromptFile.Resolve` constructs ONE engine instance
+configured from ctx (vars + dynamics dispatcher) and uses it for the
+framing slots. For the `role_main` slot it delegates entirely to
+`factory.For(path).Resolve(ctx)` — the returned impl handles its own
+rendering (the default `PromptText` uses ctx's engine internally;
+`PythonPrompt` later runs a script; `JinjaPrompt` later uses a Jinja
+engine). `PromptFile` never tries to render the role_main file
+itself, even when the factory returns `PromptText`. Rule: framing is
+markdown-engine; main is impl-defined.
+
+**4. `CustomBody` handling.** When `PromptFile.CustomBody != ""`,
+the orchestrator skips the `role_main` file read and the factory
+entirely. Render `CustomBody` through the engine (same way today's
+`assembler.AssembleOptions.ReplaceRoleMain` does) and use that as
+the role_main section. The factory is for file-backed mains; inline
+operator text is a different shape.
+
+**5. Slot constants.** The five slot strings — `root_pre`, `dir_pre`,
+`role_main`, `role_post`, `dir_post` — become exported `const` in the
+`assembler` package. `ResolvedFile.Slot` consumes them; existing
+`Section.Slot` consumers (cmd-layer `--paths` formatting) keep
+working because the values are identical.
+
+**6. `PromptFactory` policy.** `DefaultPromptFactory().For(path)`
+returns `PromptText{Text: <body of file>}` for every path. A future
+extension-mapping factory must return a non-nil `Prompt` for any
+input — falls through to `DefaultPromptFactory` for unknown
+extensions rather than panicking or erroring. Don't pre-spec named
+prompts (`:report`), URL-fetched prompts, search-path resolution, or
+any other lookup strategy — they're what the abstraction unlocks,
+but adding them now is design debt nobody asked for. Land the
+abstraction with one trivial factory; let real consumers shape the
+next iteration.
+
+**7. `TempAnchorAssembler.FindOrphans` scans both sides.** Maximize
+warning surface — fragment files in the external dir AND orphans
+reported by the wrapped inner Assembler both surface to the
+operator. Shape:
+
+```go
+func (t *TempAnchorAssembler) FindOrphans() ([]Orphan, error) {
+    external, err := scanDirOrphans(t.ExternalDir)
+    if err != nil { return nil, err }
+    inner, err := t.Inner.FindOrphans()
+    if err != nil { return nil, err }
+    return append(external, inner...), nil
+}
+```
+
+`scanDirOrphans` reuses today's anchor-walk orphan logic against a
+single FS rooted at `ExternalDir`. Easy to miss; doing only one half
+silently drops half the warnings.
+
+**8. Test invariant.** Every existing test in
+`internal/prompts/prompt_test.go`, `cmd/prompt_test.go`, and
+`internal/prompts/assembler/*_test.go` must pass without
+modification EXCEPT for the documented pre/post behavior change in
+note 2. Concretely: any test asserting `{{prompt.name}}` expansion
+inside a wrapper string flips to asserting the literal token. Every
+other test passes through the `nil`-Assembler / `nil`-Factory
+fall-through and behaves identically.
+
 ### Out of scope
 
 - No new Prompt impls. `DefaultPromptFactory` is the only factory shipped with the split.
@@ -1011,6 +1112,14 @@ func buildArgPrompt(arg, pre, post string, raw bool) (prompts.Prompt, error) {
   dynamic returns empty when set.
 - **ALL_CAPS legacy syntax removed.** Forms like `{{ROLE}}`, `{{BATCH}}`,
   `{{EXEC_ID}}`, `{{SOURCE_DIR}}` no longer resolve.
+- **`--pre-prompt` / `--post-prompt` are pure text, no expansion.**
+  Today the assembler engine-renders these wrappers when the body is
+  a `.prompt.md`; the cmd layer raw-concats them when the body is
+  any other shape. The new rule is "always raw" — operator-supplied
+  wrappers are framing text, not templates. `{{ns.key}}` inside a
+  pre/post wrapper reaches the agent as a literal token. Lands as
+  part of the Assembler / PromptFactory split (see implementer
+  note 2 in that section).
 
 ## Future
 
