@@ -185,6 +185,14 @@ review findings in $REPORT and apply the fixes
 If you disagree then clearly document why
 EOF
 
+# @foo.prompt.md auto-composes with sibling fragments — drop
+# audit.pre.context.md / audit.post.format.md next to audit.prompt.md
+# and they wrap the body the same way the built-in roles do
+ateam exec @prompts/audit.prompt.md --agent claude
+
+# --raw skips the template engine entirely for pre-baked prompts
+ateam exec --raw @prompts/baked.md --agent codex
+
 # look at cost of previous runs or what failed, see current running processes
 ateam ps
 
@@ -198,6 +206,8 @@ ateam inspect 12 --auto-debug
 # with the exact context at the end of agent run 12
 ateam resume 12 --launch
 ```
+
+The full `@PATH` dispatch rules and template variable namespaces (`{{exec.*}}`, `{{prompt.*}}`, `{{args.*}}`, `{{roles.*}}`, etc.) are in [CONFIG.md → `@PATH` dispatch](CONFIG.md#path-dispatch-exec--parallel--prompt) and [CONFIG.md → Template Variables](CONFIG.md#template-variables).
 
 ## Examples
 
