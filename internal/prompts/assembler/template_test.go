@@ -26,6 +26,47 @@ func mkVars() MapVars {
 	}
 }
 
+// TestMapVarsEnumerate covers the snapshot pattern: every populated
+// namespace map is cloned into the result; empty namespaces are
+// omitted; env.* is intentionally excluded (lookup-only).
+//
+// Each enumerated map is independent of the source — mutating the
+// returned map must not propagate back. Pins the "snapshot" semantics
+// the future script-Prompt impls (JSON-stdin) depend on.
+func TestMapVarsEnumerate(t *testing.T) {
+	v := mkVars()
+	snap := v.Enumerate()
+
+	// Populated namespaces present.
+	for _, ns := range []string{"prompt", "exec", "project", "container", "ateam", "args", "roles"} {
+		if _, ok := snap[ns]; !ok {
+			t.Errorf("Enumerate(): missing namespace %q", ns)
+		}
+	}
+	// Unpopulated namespaces (git, role) omitted — they were nil in mkVars.
+	for _, ns := range []string{"git", "role"} {
+		if _, ok := snap[ns]; ok {
+			t.Errorf("Enumerate(): expected nil-map namespace %q to be omitted, got %v", ns, snap[ns])
+		}
+	}
+	// env.* is callback-based and intentionally not in the snapshot.
+	if _, ok := snap["env"]; ok {
+		t.Errorf("Enumerate(): env namespace must be excluded (callback-based)")
+	}
+
+	// Spot-check a value.
+	if got := snap["args"]["ignore_previous_report"]; got != "true" {
+		t.Errorf("args.ignore_previous_report = %q, want true", got)
+	}
+
+	// Mutation isolation: caller-side change must not leak back.
+	snap["args"]["ignore_previous_report"] = "tampered"
+	again := v.Enumerate()
+	if again["args"]["ignore_previous_report"] != "true" {
+		t.Errorf("MapVars.Enumerate must return a clone; saw tampered value: %v", again["args"])
+	}
+}
+
 func TestRenderVariables(t *testing.T) {
 	e := NewEngine(nil, 0)
 	v := mkVars()

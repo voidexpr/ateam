@@ -15,6 +15,97 @@ import (
 // single resolver for exec.* — they MUST NOT be satisfied by a parallel
 // substitution path producing the same output.
 
+// TestRuntimeVarsEnumerate exercises the snapshot pattern on the live
+// resolver — exec.* is sourced from rt's typed fields (mode-aware);
+// every other namespace falls through to the base BaseVars. The
+// returned map is the spec's `CreateVars` snapshot.
+//
+// In ModePreview, exec.* keys render their AT RUNTIME sentinels in
+// the snapshot (matching what Resolve would produce). In ModeReal,
+// they render the rt field values directly. Pins both branches.
+func TestRuntimeVarsEnumerate(t *testing.T) {
+	t.Run("ModePreview snapshot", func(t *testing.T) {
+		rt := NewRuntime(nil, nil, "")
+		rt.SetMode(prompts.ModePreview)
+		rt.SetVars(assembler.MapVars{
+			Project: map[string]string{"name": "myproj"},
+			Args:    map[string]string{"verbose": "true"},
+		})
+		snap := rt.Vars().Enumerate()
+
+		// Base namespaces flow through from BaseVars.
+		if snap["project"]["name"] != "myproj" {
+			t.Errorf("project.name = %q, want myproj", snap["project"]["name"])
+		}
+		if snap["args"]["verbose"] != "true" {
+			t.Errorf("args.verbose = %q, want true", snap["args"]["verbose"])
+		}
+
+		// exec.* renders the AT RUNTIME sentinel in ModePreview for
+		// every key in the closed set.
+		exec := snap["exec"]
+		if len(exec) == 0 {
+			t.Fatal("Enumerate(): exec namespace missing")
+		}
+		for _, key := range []string{"id", "output_dir", "output_file", "prompt_file"} {
+			want := "{{AT RUNTIME:exec." + key + "}}"
+			if exec[key] != want {
+				t.Errorf("exec.%s = %q, want %q", key, exec[key], want)
+			}
+		}
+		// Closed-set membership: dropped keys absent.
+		for _, key := range []string{"profile", "effort", "max_budget_usd"} {
+			if _, ok := exec[key]; ok {
+				t.Errorf("exec.%s should NOT appear in snapshot (dropped from closed set)", key)
+			}
+		}
+	})
+
+	t.Run("ModeReal snapshot uses rt fields", func(t *testing.T) {
+		rt := NewRuntime(nil, nil, "")
+		rt.SetMode(prompts.ModeReal)
+		rt.ExecID = 7
+		rt.Batch = "batch-77"
+		rt.OutputDir = "/tmp/runtime/7"
+		rt.OutputFile = "/tmp/runtime/7/report.md"
+		rt.PromptFile = "/tmp/logs/7/prompt.md"
+		rt.Agent = "claude"
+		rt.Model = "opus"
+		snap := rt.Vars().Enumerate()
+		exec := snap["exec"]
+		cases := map[string]string{
+			"id":          "7",
+			"batch":       "batch-77",
+			"output_dir":  "/tmp/runtime/7",
+			"output_file": "/tmp/runtime/7/report.md",
+			"prompt_file": "/tmp/logs/7/prompt.md",
+			"agent":       "claude",
+			"model":       "opus",
+		}
+		for key, want := range cases {
+			if exec[key] != want {
+				t.Errorf("exec.%s = %q, want %q", key, exec[key], want)
+			}
+		}
+	})
+
+	t.Run("exec namespace from BaseVars is ignored", func(t *testing.T) {
+		// runtimeVars owns exec.* — even if BaseVars carries an Exec
+		// map (legacy seed in BuildAssemblerVars), the snapshot
+		// reflects the rt fields, not the BaseVars values.
+		rt := NewRuntime(nil, nil, "")
+		rt.SetMode(prompts.ModeReal)
+		rt.ExecID = 99
+		rt.SetVars(assembler.MapVars{
+			Exec: map[string]string{"id": "should-not-appear"},
+		})
+		snap := rt.Vars().Enumerate()
+		if snap["exec"]["id"] != "99" {
+			t.Errorf("exec.id = %q; BaseVars.Exec must NOT shadow rt fields", snap["exec"]["id"])
+		}
+	})
+}
+
 // TestRuntimeVarsExecKeyClosedSet locks the set of exec.* keys the
 // prompt-body resolver recognizes. Keys outside this set error as
 // "unknown key in exec namespace" — they are not silently substituted

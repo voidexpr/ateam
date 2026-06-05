@@ -18,6 +18,22 @@ type Vars interface {
 	//   ("",    true, err)  — known namespace but missing key (or env miss); engine surfaces err
 	//   ("",    false, nil) — namespace not recognized; engine emits the directive verbatim
 	Resolve(ns, key string) (value string, known bool, err error)
+
+	// Enumerate returns a snapshot of every namespaced key/value
+	// currently visible. The shape is ns → key → value; namespaces
+	// with no keys are omitted. Implementations clone internal state
+	// so callers can't mutate the returned maps.
+	//
+	// The env.* namespace is intentionally excluded — it's
+	// callback-based with no closed set, so enumeration would be
+	// either misleading (a partial answer) or expensive (every
+	// possible env var). Consumers that need env values use Resolve.
+	//
+	// Used for diagnostics (--paths metadata, verify error
+	// suggestions naming sibling keys in the same namespace) and as
+	// the spec's `CreateVars` foundation for future script-Prompt
+	// impls that need to enumerate every available value.
+	Enumerate() map[string]map[string]string
 }
 
 // MapVars is a Vars built from per-namespace maps. The closed set of recognized
@@ -40,6 +56,32 @@ type MapVars struct {
 	// EnvLookup resolves {{env.NAME}}. If nil, env lookups error (callers that
 	// don't want env access should leave it nil so missing envs are loud).
 	EnvLookup func(name string) (string, bool)
+}
+
+// Enumerate implements Vars. Returns a clone of every populated
+// per-namespace map; the env.* namespace is excluded (lookup-only).
+func (v MapVars) Enumerate() map[string]map[string]string {
+	out := map[string]map[string]string{}
+	add := func(name string, m map[string]string) {
+		if len(m) == 0 {
+			return
+		}
+		clone := make(map[string]string, len(m))
+		for k, val := range m {
+			clone[k] = val
+		}
+		out[name] = clone
+	}
+	add("prompt", v.Prompt)
+	add("exec", v.Exec)
+	add("project", v.Project)
+	add("git", v.Git)
+	add("container", v.Container)
+	add("ateam", v.Ateam)
+	add("role", v.Role)
+	add("args", v.Args)
+	add("roles", v.Roles)
+	return out
 }
 
 // Resolve implements Vars.

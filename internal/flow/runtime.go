@@ -152,6 +152,34 @@ func (v *runtimeVars) Resolve(ns, key string) (string, bool, error) {
 	return v.rt.vars.Resolve(ns, key)
 }
 
+// Enumerate implements assembler.Vars. Combines exec.* (sourced from
+// rt's typed fields + mode) with whatever the base Vars (BaseVars from
+// the bundle) provides for every other namespace. Errors from the
+// per-key resolver are squashed to empty strings — Enumerate is the
+// snapshot surface, not the validation surface, so a load-bearing
+// ModeReal field that wasn't wired surfaces as "" here. Callers that
+// need the wiring-bug error stick with Resolve(ns, key).
+func (v *runtimeVars) Enumerate() map[string]map[string]string {
+	out := map[string]map[string]string{}
+	if v.rt.vars != nil {
+		for ns, m := range v.rt.vars.Enumerate() {
+			if ns == "exec" {
+				// exec is owned by runtimeVars — the bundle's BaseVars
+				// should not be shadowing it. Skip whatever it has.
+				continue
+			}
+			out[ns] = m
+		}
+	}
+	execMap := make(map[string]string, len(execClosedSet))
+	for key := range execClosedSet {
+		val, _, _ := v.resolveExec(key)
+		execMap[key] = val
+	}
+	out["exec"] = execMap
+	return out
+}
+
 // resolveExec handles the closed set of exec.* keys.
 //
 //   - ModePreview: every key renders to {{AT RUNTIME:exec.<key>}}. This
@@ -218,11 +246,10 @@ func (v *runtimeVars) resolveExec(key string) (string, bool, error) {
 	return "", true, fmt.Errorf("{{exec.%s}}: unknown key in exec namespace", key)
 }
 
-// validExecKey is the single source of truth for the closed set of
+// execClosedSet is the single source of truth for the closed set of
 // exec.* keys recognized by the prompt-body resolver. Used by
-// resolveExec to validate the key in both ModePreview (sentinel emit)
-// and ModeReal (typed field dispatch) so typos error loudly in either
-// mode.
+// validExecKey (Resolve path) and by runtimeVars.Enumerate (snapshot
+// path) so the two surfaces can't drift.
 //
 // exec.{profile, effort, max_budget_usd, max_budget_usd_batch} are
 // deliberately NOT in this set — no verb wires them from RunOpts → rt
@@ -231,14 +258,23 @@ func (v *runtimeVars) resolveExec(key string) (string, bool, error) {
 // args / container fields against rt fields) but the prompt-body
 // resolver errors on them. See plans/feature_prompt_cmd_bundle_aware.md
 // "Future" section for the wire-on-demand pattern.
+var execClosedSet = map[string]struct{}{
+	"id":                         {},
+	"batch":                      {},
+	"output_dir":                 {},
+	"output_file":                {},
+	"prompt_file":                {},
+	"timestamp":                  {},
+	"agent":                      {},
+	"model":                      {},
+	"subrun_args":                {},
+	"debug_context":              {},
+	"auto_roles_commands_output": {},
+}
+
 func validExecKey(key string) bool {
-	switch key {
-	case "id", "batch", "output_dir", "output_file", "prompt_file",
-		"timestamp", "agent", "model",
-		"subrun_args", "debug_context", "auto_roles_commands_output":
-		return true
-	}
-	return false
+	_, ok := execClosedSet[key]
+	return ok
 }
 
 // requireExec returns the value if populated, or an error pointing at

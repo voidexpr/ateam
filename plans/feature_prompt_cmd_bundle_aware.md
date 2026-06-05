@@ -1151,42 +1151,39 @@ opt-out via runtime.hcl. Until that lands, **scripts are not enabled**
 
 ### Vars lifecycle: explicit phases vs. snapshot
 
-The current `Vars` interface is ASK-only (`Resolve(ns, key)`); the
-framework dispatches across multiple sources (`runtimeVars` for
-`exec.*`, `BaseVars` for everything else, `Dynamics` for late-binding
-strings) and the lifecycle is implicit. This works as long as
-consumers ask for one key at a time.
+The current `Vars` interface gained `Enumerate() map[ns]map[key]string`
+(shipped). Every `Vars` impl returns a frozen snapshot of every
+namespaced key/value visible at the moment `Vars()` is consulted:
 
-Scripts break the asymmetry — they need to enumerate. The design
-question that surfaces: WHEN is "the moment of enumeration"?
+- `MapVars.Enumerate` clones its per-namespace maps.
+- `runtimeVars.Enumerate` combines `exec.*` (sourced from rt's typed
+  fields + mode) with whatever `BaseVars` provides for every other
+  namespace.
+- `env.*` is intentionally excluded — callback-based, no closed set.
 
-Two proposals worth evaluating when the data is in:
+This is the spec's `CreateVars` foundation. Today it's used for
+diagnostic legibility (verify can suggest sibling keys when a
+typo errors). Future script-Prompt impls receive the snapshot as a
+JSON document on stdin.
 
-1. **Earlier ID allocation.** `exec.id` is genuinely runtime-only
-   because the runner allocates it from the DB at Prepare time. If
-   we shift allocation earlier (e.g. at bundle-build time, with a
-   reservation that gets either committed or released at Prepare),
-   then `exec.id` joins `project.name` / `args.batch` in the
-   bundle-build snapshot. Most other "late" values are computable
-   the same way. Only `agent_start_time` (set by the agent process
-   itself when it begins emitting) is genuinely irreducibly late.
+**Still open** — proposals that would extend the design but don't
+ship today:
 
-2. **Snapshot-on-resolve.** Add `CreateVars(ctx) → map[ns]map[key]string`
-   called once right before `Prompt.Resolve` runs. The result is a
-   frozen map; `Prompt.Resolve` consumes it as the single source of
-   truth. This is what scripts would receive as JSON.
+1. **Earlier ID allocation.** `exec.id` is runtime-only because the
+   runner allocates it from the DB at Prepare time. Shifting
+   allocation earlier (reserve at bundle-build, commit-or-release at
+   Prepare) would let `exec.id` join `project.name` / `args.batch`
+   in the bundle-build snapshot. Most other "late" values are
+   reducible the same way. Only `agent_start_time` is genuinely
+   irreducibly late. Cost: substantial — touches runner, DB schema,
+   reservation lifecycle. Defer until a consumer demands it.
 
-The two proposals compose. (1) shrinks the set of values that
-need late binding; (2) makes the boundary between "available" and
-"not yet" explicit. With both, only `agent_start_time` and any
-agent-output-derived values remain as sentinels / post-exec inputs.
-
-Cost: substantial. The current implicit-timing model works because
-only `exec.*` is late and only the resolver path consults it. Adding
-a snapshot moment + an ID-allocation refactor touches the runner, the
-DB schema, every factory, every consumer. Worth doing ONLY when
-scripts (or a similar consumer demanding enumeration) make the
-ask-only model insufficient.
+2. **Dynamics snapshot.** `Enumerate` covers `Vars` only. Dynamics
+   stay lazy by necessity (a snapshot of every possible
+   `{{dynamic.X args...}}` is impossible). Scripts asking "what's
+   available" need a separate "registered dynamic names" listing.
+   Trivial to add when scripts arrive (`ctx.Dynamics()` already
+   returns the registry).
 
 ### Verb-supplied exec.* fields
 
