@@ -2,7 +2,7 @@
 
 **Run coding agents unattended. Keep your codebase healthy in the background.**
 
-ATeam is a CLI to run existing coding agents (Claude Code, Codex) unattended. It also provides a four-stage software engineering quality pipeline (**report → review → code → verify**) and a library of role prompts covering bugs, tests, security, dependencies, docs, architecture, and more.
+ATeam is a CLI to run existing coding agents (Claude Code, Codex) unattended. It uses this ability to provide a four-stage software engineering quality pipeline (**report → review → code → verify**) and a library of role prompts covering bugs, tests, security, dependencies, docs, architecture, and more.
 
 It automates the parts you don't want to do to free up your attention for features, architecture, or any task you choose to focus on.
 
@@ -52,12 +52,13 @@ See more at [APPROACH.md](APPROACH.md).
 - 3-level prompt fallback (project `.ateam/` → org `.ateamorg/` → embedded defaults) with composable pre/post extensions; new roles are a single markdown file
 
 **Observability and troubleshooting**
-- `ateam ps` — recent runs and their status; `ateam tail` — live agent output
-- `ateam inspect EXEC_ID` — full execution details, prompts, and logs; `--auto-debug` runs an agent that reads the failure and proposes a fix
+- `ateam ps`: show status of current run and all stats of past runs (turns, tokens, cost, timestamps, ...)
+- `ateam tail`: live agent output
+- `ateam inspect EXEC_ID`: full execution details, prompts, and logs; `--auto-debug` runs an agent that reads the failure and proposes a fix
 - `ateam resume EXEC_ID`: create an interactive session from an unattended one and ask questions to any past agent
-- `ateam cost` — token usage and dollars per run, role, and agent
-- `ateam serve` — web UI for browsing all reports, reviews, runs, and costs; `ateam export` for a self-contained HTML snapshot
-- `ateam prompt --role NAME` shows the exact assembled prompt; `ateam env` summarizes config and environment
+- `ateam cost`: token usage and dollars per run, role, and agent
+- `ateam serve`: web UI for browsing all reports, reviews, runs, and costs
+- `ateam prompt` shows the exact assembled prompt
 
 ## Use agents to help with ateam itself
 
@@ -184,7 +185,7 @@ review findings in $REPORT and apply the fixes
 If you disagree then clearly document why
 EOF
 
-# look at cost of previous runs or what failed
+# look at cost of previous runs or what failed, see current running processes
 ateam ps
 
 # observe the agent stream logs of all running processes
