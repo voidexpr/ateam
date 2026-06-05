@@ -32,10 +32,12 @@ import (
 //     Reading them in ModeReal with zero values surfaces an error
 //     pointing at the missing wire — the resolver refuses to silently
 //     emit empty strings into the agent's prompt.
-//   - Per-bundle run-config (Timestamp, Profile, Agent, Model, Effort,
-//     MaxBudgetUSD, MaxBudgetUSDBatch, SubRunArgs, DebugContext,
-//     AutoRolesCommandsOutput): same population contract; some of these
-//     are RunOpts-sourced, some assembled by the verb factory.
+//   - Per-bundle run-config (Timestamp, Agent, Model, SubRunArgs,
+//     DebugContext, AutoRolesCommandsOutput): same population
+//     contract; some of these are RunOpts-sourced, some assembled by
+//     the verb factory. Profile / Effort / MaxBudgetUSD* are
+//     intentionally not represented — see the wire-on-demand pattern
+//     in plans/feature_prompt_cmd_bundle_aware.md "Future".
 //
 // Methods (Vars, Mode, Dynamics) carry trailing parens to dodge the Go
 // field/method-name collision that the spec called out.
@@ -56,18 +58,24 @@ type Runtime struct {
 	PromptFile string
 
 	// Run-config carried in from RunOpts / AgentExecutor.
-	Timestamp         string
-	Profile           string
-	Agent             string
-	Model             string
-	Effort            string
-	MaxBudgetUSD      string
-	MaxBudgetUSDBatch string
-	SubRunArgs        string
+	Timestamp  string
+	Agent      string
+	Model      string
+	SubRunArgs string
 
 	// Verb-assembled.
 	DebugContext            string
 	AutoRolesCommandsOutput string
+
+	// Profile / Effort / MaxBudgetUSD / MaxBudgetUSDBatch are
+	// deliberately NOT fields on Runtime today — no verb wires them
+	// from RunOpts → rt, and no shipped default prompt references
+	// them via {{exec.<key>}}. The runner-side TemplateVars
+	// (internal/runner/template.go) still substitutes them in
+	// runtime.hcl args / container fields; that pass is separate
+	// from the prompt-body resolver. See
+	// plans/feature_prompt_cmd_bundle_aware.md "Future" section for
+	// the wire-on-demand pattern when a real consumer shows up.
 }
 
 // NewRuntime builds a Runtime in preview mode with the supplied carriers.
@@ -161,6 +169,14 @@ func (v *runtimeVars) resolveExec(key string) (string, bool, error) {
 		return "", true, fmt.Errorf("{{exec.%s}}: unknown key in exec namespace", key)
 	}
 	if v.rt.mode == prompts.ModePreview {
+		// Spec line 559: exec.batch renders the real value in
+		// ModePreview when known (operator pinned it via e.g.
+		// `ateam prompt --batch X` → flow.WithBatch). Every other
+		// exec.* key always falls back to the AT RUNTIME sentinel —
+		// they are runner-allocated and never known at preview time.
+		if key == "batch" && v.rt.Batch != "" {
+			return v.rt.Batch, true, nil
+		}
 		return "{{AT RUNTIME:exec." + key + "}}", true, nil
 	}
 	switch key {
@@ -178,26 +194,20 @@ func (v *runtimeVars) resolveExec(key string) (string, bool, error) {
 		return requireExec("exec.output_file", v.rt.OutputFile, v.rt.OutputFile != "")
 	case "prompt_file":
 		return requireExec("exec.prompt_file", v.rt.PromptFile, v.rt.PromptFile != "")
-	// The remaining exec.* keys are recognized but empty-OK in ModeReal
-	// for step 2. Verbs that source these values (Profile from the
-	// runner, SubRunArgs from cmd/code.go, etc.) migrate to populate
-	// them in a later step; until then a prompt that references
-	// {{exec.profile}} renders to "". No shipped default prompt uses
-	// these keys, so no regression.
+	// Verb-supplied exec.* keys — empty-OK in ModeReal because the
+	// verb chose not to wire them for this run, but the resolver
+	// still substitutes whatever rt holds. Each is in the closed
+	// set because at least one shipped default prompt references it
+	// (timestamp / agent / model from project context blocks;
+	// subrun_args from code_management.prompt.md; debug_context from
+	// exec_debug.prompt.md; auto_roles_commands_output from
+	// report_auto_roles.prompt.md).
 	case "timestamp":
 		return v.rt.Timestamp, true, nil
-	case "profile":
-		return v.rt.Profile, true, nil
 	case "agent":
 		return v.rt.Agent, true, nil
 	case "model":
 		return v.rt.Model, true, nil
-	case "effort":
-		return v.rt.Effort, true, nil
-	case "max_budget_usd":
-		return v.rt.MaxBudgetUSD, true, nil
-	case "max_budget_usd_batch":
-		return v.rt.MaxBudgetUSDBatch, true, nil
 	case "subrun_args":
 		return v.rt.SubRunArgs, true, nil
 	case "debug_context":
@@ -209,15 +219,23 @@ func (v *runtimeVars) resolveExec(key string) (string, bool, error) {
 }
 
 // validExecKey is the single source of truth for the closed set of
-// exec.* keys. Used by resolveExec to validate the key in both
-// ModePreview (sentinel emit) and ModeReal (typed field dispatch) so
-// typos error loudly in either mode.
+// exec.* keys recognized by the prompt-body resolver. Used by
+// resolveExec to validate the key in both ModePreview (sentinel emit)
+// and ModeReal (typed field dispatch) so typos error loudly in either
+// mode.
+//
+// exec.{profile, effort, max_budget_usd, max_budget_usd_batch} are
+// deliberately NOT in this set — no verb wires them from RunOpts → rt
+// today, and no shipped default prompt references them. They are kept
+// recognized in runner.TemplateVars (which substitutes runtime.hcl
+// args / container fields against rt fields) but the prompt-body
+// resolver errors on them. See plans/feature_prompt_cmd_bundle_aware.md
+// "Future" section for the wire-on-demand pattern.
 func validExecKey(key string) bool {
 	switch key {
 	case "id", "batch", "output_dir", "output_file", "prompt_file",
-		"timestamp", "profile", "agent", "model", "effort",
-		"max_budget_usd", "max_budget_usd_batch", "subrun_args",
-		"debug_context", "auto_roles_commands_output":
+		"timestamp", "agent", "model",
+		"subrun_args", "debug_context", "auto_roles_commands_output":
 		return true
 	}
 	return false

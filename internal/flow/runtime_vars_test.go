@@ -15,6 +15,58 @@ import (
 // single resolver for exec.* — they MUST NOT be satisfied by a parallel
 // substitution path producing the same output.
 
+// TestRuntimeVarsExecKeyClosedSet locks the set of exec.* keys the
+// prompt-body resolver recognizes. Keys outside this set error as
+// "unknown key in exec namespace" — they are not silently substituted
+// to empty strings. Spec Future section lists exec.{profile, effort,
+// max_budget_usd, max_budget_usd_batch} as the wire-on-demand
+// candidates; this test pins their absence today.
+func TestRuntimeVarsExecKeyClosedSet(t *testing.T) {
+	cases := []struct {
+		key  string
+		want bool // true = recognized; false = unknown-key error
+	}{
+		// Load-bearing: required in ModeReal, sentinel in ModePreview.
+		{"id", true},
+		{"batch", true},
+		{"output_dir", true},
+		{"output_file", true},
+		{"prompt_file", true},
+		// Verb-supplied, empty-OK in ModeReal: shipped prompts reference them.
+		{"timestamp", true},
+		{"agent", true},
+		{"model", true},
+		{"subrun_args", true},
+		{"debug_context", true},
+		{"auto_roles_commands_output", true},
+		// Dropped: no verb wires them, no shipped prompt references them.
+		// Referencing in a user prompt errors as unknown-key.
+		{"profile", false},
+		{"effort", false},
+		{"max_budget_usd", false},
+		{"max_budget_usd_batch", false},
+		// Typos always error.
+		{"id_typo", false},
+		{"output_filee", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.key, func(t *testing.T) {
+			rt := NewRuntime(nil, nil, "")
+			rt.SetMode(prompts.ModePreview)
+			_, _, err := rt.Vars().Resolve("exec", tc.key)
+			if tc.want && err != nil {
+				t.Errorf("exec.%s should be recognized, got error: %v", tc.key, err)
+			}
+			if !tc.want && err == nil {
+				t.Errorf("exec.%s should error as unknown-key, got nil", tc.key)
+			}
+			if !tc.want && err != nil && !strings.Contains(err.Error(), "unknown key") {
+				t.Errorf("expected 'unknown key' error for exec.%s, got: %v", tc.key, err)
+			}
+		})
+	}
+}
+
 // TestRuntimeVarsModePreviewSentinels — spec line 612-613: "exec.* renders
 // as {{AT RUNTIME:exec.<key>}} in preview/verify modes." This is the
 // gate for the verification pass (flow.Verify) producing deterministic

@@ -433,30 +433,55 @@ func (b PromptBundle) resolvePrompt(rc RunCtx, env RuntimeEnv, opts runner.RunOp
 
 var errBundleHasNoPrompt = fmt.Errorf("PromptBundle has no Prompt set")
 
+// PreviewOption mutates the per-call preview Runtime built by
+// ResolvePreview / InspectPreview. Used by the cmd layer to pin
+// otherwise-deferred exec.* values when operators ask for them at
+// preview time — e.g. `ateam prompt --batch X` populates rt.Batch so
+// {{exec.batch}} substitutes the literal instead of the AT RUNTIME
+// sentinel (spec line 559: "real if known, else sentinel").
+//
+// Production verbs don't pass options — preview defers all exec.*
+// keys to ModeReal by default. Options are for operator-facing
+// scenarios where a value is genuinely knowable at preview time.
+type PreviewOption func(*Runtime)
+
+// WithBatch pins rt.Batch on the preview Runtime so {{exec.batch}}
+// renders the literal in ModePreview. Empty string is a no-op
+// (caller can pass an unconditional flag value).
+func WithBatch(batch string) PreviewOption {
+	return func(rt *Runtime) {
+		if batch != "" {
+			rt.Batch = batch
+		}
+	}
+}
+
 // ResolvePreview renders the bundle's Prompt in prompts.ModePreview against a
 // freshly built runtime that auto-loads bundle.BaseVars + bundle.Dynamics.
 // The single entry point for `ateam prompt --action X`, dry-run preview,
 // and other operator-facing inspection — every caller used to repeat
 // the rt.SetVars / rt.SetDynamics wiring inline. Spec Next-round step 8.
-func (b *PromptBundle) ResolvePreview(env *root.ResolvedEnv, workDir string) (string, error) {
+//
+// Optional PreviewOptions tune the preview Runtime — see WithBatch.
+func (b *PromptBundle) ResolvePreview(env *root.ResolvedEnv, workDir string, opts ...PreviewOption) (string, error) {
 	if b.Prompt == nil {
 		return "", errBundleHasNoPrompt
 	}
-	rt := b.previewRuntime(env, workDir)
+	rt := b.previewRuntime(env, workDir, opts...)
 	return b.Prompt.Resolve(rt)
 }
 
 // InspectPreview is ResolvePreview's section-level counterpart used by
 // --paths / --inline-paths. Same auto-loading contract.
-func (b *PromptBundle) InspectPreview(env *root.ResolvedEnv, workDir string) ([]prompts.Section, error) {
+func (b *PromptBundle) InspectPreview(env *root.ResolvedEnv, workDir string, opts ...PreviewOption) ([]prompts.Section, error) {
 	if b.Prompt == nil {
 		return nil, errBundleHasNoPrompt
 	}
-	rt := b.previewRuntime(env, workDir)
+	rt := b.previewRuntime(env, workDir, opts...)
 	return b.Prompt.Inspect(rt)
 }
 
-func (b *PromptBundle) previewRuntime(env *root.ResolvedEnv, workDir string) *Runtime {
+func (b *PromptBundle) previewRuntime(env *root.ResolvedEnv, workDir string, opts ...PreviewOption) *Runtime {
 	rt := NewRuntime(nil, env, workDir)
 	rt.SetMode(prompts.ModePreview)
 	if b.BaseVars != nil {
@@ -464,6 +489,9 @@ func (b *PromptBundle) previewRuntime(env *root.ResolvedEnv, workDir string) *Ru
 	}
 	if b.Dynamics != nil {
 		rt.SetDynamics(b.Dynamics)
+	}
+	for _, opt := range opts {
+		opt(rt)
 	}
 	return rt
 }

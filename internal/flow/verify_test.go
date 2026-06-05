@@ -175,6 +175,46 @@ func TestVerify_WalksPipelineAndParallel(t *testing.T) {
 	}
 }
 
+// TestVerify_DoesNotDedupIdenticalErrorsAcrossBundles locks the current
+// behavior: Verify batches per-bundle, no dedup. Two distinct bundles
+// (different Name) each emit their own VerifyError even when the
+// underlying Err and the error message are identical.
+//
+// Spec line 719 promises "Errors batched. Dedup by (file, line,
+// message) before printing." The dedup is NOT implemented today —
+// shipped behavior is "one VerifyError per failing bundle". This test
+// pins that shipped behavior; promoting the spec's dedup later means
+// flipping this test's expectation and adding the dedup logic in
+// flow.Verify.
+func TestVerify_DoesNotDedupIdenticalErrorsAcrossBundles(t *testing.T) {
+	identical := errors.New("hi {{prompt.nope}}: unknown key in prompt namespace")
+	pipe := Pipeline{
+		Name: "pipe",
+		Steps: []Step{
+			PromptBundle{Name: "a", Prompt: errPrompt{err: identical}},
+			PromptBundle{Name: "b", Prompt: errPrompt{err: identical}},
+			PromptBundle{Name: "c", Prompt: errPrompt{err: identical}},
+		},
+	}
+	vr := Verify(pipe, makeRC())
+	if vr == nil || len(vr.Errors) != 3 {
+		t.Fatalf("expected 3 verify errors (no dedup today), got %+v", vr)
+	}
+	// Each bundle name surfaces once — the dedup-by-(file,line,message)
+	// promised by the spec would collapse these to 1. When that lands,
+	// flip the expectation to 1 and assert the surviving error
+	// records all three BundleNames in its message.
+	got := map[string]int{}
+	for _, e := range vr.Errors {
+		got[e.BundleName]++
+	}
+	for _, name := range []string{"a", "b", "c"} {
+		if got[name] != 1 {
+			t.Errorf("bundle %q: want exactly 1 VerifyError today, got %d", name, got[name])
+		}
+	}
+}
+
 func TestRun_ShortCircuitsOnVerifyError(t *testing.T) {
 	exec := &fakeExecutor{}
 	rc := newCtx()

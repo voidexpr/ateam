@@ -28,6 +28,7 @@ var (
 	promptPaths                bool
 	promptInlinePaths          bool
 	promptRaw                  bool
+	promptBatch                string
 )
 
 var promptCmd = &cobra.Command{
@@ -68,10 +69,19 @@ func init() {
 	promptCmd.Flags().BoolVar(&promptPaths, "paths", false, "show a per-section breakdown table (slot + anchor + path + mod time + tokens); no prompt body")
 	promptCmd.Flags().BoolVar(&promptInlinePaths, "inline-paths", false, "print the full prompt with each section preceded by an anchor/path/mod-time/tokens header; troubleshooting view, not for agent consumption")
 	promptCmd.Flags().BoolVar(&promptRaw, "raw", false, "literal-file mode only: print the file verbatim (no template engine)")
+	promptCmd.Flags().StringVar(&promptBatch, "batch", "", "pin a batch ID so {{exec.batch}} substitutes the literal in preview (spec line 559: 'real if known, else sentinel'). Useful when piping `ateam prompt --batch X | ateam exec --batch X` so the preview matches the run.")
 	promptCmd.MarkFlagsMutuallyExclusive("paths", "inline-paths")
 	// --action is conditionally required: it's needed for role / action-
 	// singleton resolution, but ignored when a positional @PATH selects
 	// literal-file mode. Enforced in runPrompt instead of via MarkFlagRequired.
+}
+
+// promptPreviewOptions returns the PreviewOption list shared by every
+// `ateam prompt` preview/inspection callsite. Today only --batch
+// surfaces here; future operator-pinnable exec.* values (the spec's
+// "real if known, else sentinel" rule) land in this helper.
+func promptPreviewOptions() []flow.PreviewOption {
+	return []flow.PreviewOption{flow.WithBatch(promptBatch)}
 }
 
 func runPrompt(cmd *cobra.Command, args []string) error {
@@ -172,6 +182,9 @@ func runPromptLiteralFile(pathArg string) error {
 	rt.SetDynamics(prompts.PromptDynamic{
 		"project_info": prompts.ProjectInfoDynamic(env, "", ""),
 	})
+	if promptBatch != "" {
+		rt.Batch = promptBatch
+	}
 	rendered, err := prompts.PromptText{Text: content}.Resolve(rt)
 	if err != nil {
 		return fmt.Errorf("rendering %s: %w", pathArg, err)
@@ -196,6 +209,9 @@ func runPromptExternalFile(env *root.ResolvedEnv, cleanPath, prePrompt, postProm
 	}
 	rt := flow.NewRuntime(nil, env, env.WorkDir)
 	rt.SetVars(env.BuildAssemblerVars(role, "", ""))
+	if promptBatch != "" {
+		rt.Batch = promptBatch
+	}
 	// roleLabel = role basename so the project_info dynamic emits its
 	// block (the legacy path passed the same value to BuildEngine).
 	rt.SetDynamics(prompts.PromptDynamic{
@@ -250,7 +266,7 @@ func runPromptRole() error {
 		if roleLabel == "" {
 			delete(bundle.Dynamics, "project_info")
 		}
-		assembled, err = bundle.ResolvePreview(env, env.WorkDir)
+		assembled, err = bundle.ResolvePreview(env, env.WorkDir, promptPreviewOptions()...)
 	case runner.ActionCode:
 		assembled, err = assembleRoleCode(env, promptRole, roleLabel, prePrompt, postPrompt)
 	}
@@ -287,7 +303,7 @@ func previewReview(env *root.ResolvedEnv, prePrompt, postPrompt string) (string,
 		PrePrompt:  prePrompt,
 		PostPrompt: postPrompt,
 	})
-	return bundle.ResolvePreview(env, env.WorkDir)
+	return bundle.ResolvePreview(env, env.WorkDir, promptPreviewOptions()...)
 }
 
 func previewCodeManagement(env *root.ResolvedEnv, prePrompt, postPrompt string) (string, error) {
@@ -302,7 +318,7 @@ func previewCodeManagement(env *root.ResolvedEnv, prePrompt, postPrompt string) 
 		SupervisorDir: env.SupervisorDir(),
 		CanonicalDest: "{{exec.output_dir}}",
 	})
-	return bundle.ResolvePreview(env, env.WorkDir)
+	return bundle.ResolvePreview(env, env.WorkDir, promptPreviewOptions()...)
 }
 
 func previewVerify(env *root.ResolvedEnv, prePrompt, postPrompt string) (string, error) {
@@ -313,7 +329,7 @@ func previewVerify(env *root.ResolvedEnv, prePrompt, postPrompt string) (string,
 		PrePrompt:  prePrompt,
 		PostPrompt: postPrompt,
 	})
-	return bundle.ResolvePreview(env, env.WorkDir)
+	return bundle.ResolvePreview(env, env.WorkDir, promptPreviewOptions()...)
 }
 
 // runPromptAction renders a top-level prompt by action name. The factory
@@ -362,7 +378,7 @@ func runPromptAction() error {
 			PrePrompt:  prePrompt,
 			PostPrompt: postPrompt,
 		})
-		assembled, err = bundle.ResolvePreview(env, env.WorkDir)
+		assembled, err = bundle.ResolvePreview(env, env.WorkDir, promptPreviewOptions()...)
 	}
 	if err != nil {
 		return err
@@ -390,7 +406,7 @@ func inspectBundleForCurrentAction(env *root.ResolvedEnv, promptPath, prePrompt,
 		// spec line 552-557 (step 8): exec.* renders as the AT RUNTIME
 		// sentinel; generated-artifact dynamics return their preview
 		// sentinel; project_info still renders against the real env.
-		return bundle.InspectPreview(env, env.WorkDir)
+		return bundle.InspectPreview(env, env.WorkDir, promptPreviewOptions()...)
 	}
 	// Fallback: unknown action or role-scoped path. The PromptFile is
 	// the canonical anchored-prompt impl; flow.Runtime is the
@@ -405,6 +421,9 @@ func inspectBundleForCurrentAction(env *root.ResolvedEnv, promptPath, prePrompt,
 	rt.SetDynamics(prompts.PromptDynamic{
 		"project_info": prompts.ProjectInfoDynamic(env, roleLabel, promptAction),
 	})
+	if promptBatch != "" {
+		rt.Batch = promptBatch
+	}
 	return pf.Inspect(rt)
 }
 

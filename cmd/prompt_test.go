@@ -18,6 +18,7 @@ func savePromptGlobals() func() {
 	paths, inline := promptPaths, promptInlinePaths
 	pre, post := promptPrePrompt, promptPostPrompt
 	raw := promptRaw
+	batch := promptBatch
 	return func() {
 		promptRole = role
 		promptAction = action
@@ -28,6 +29,7 @@ func savePromptGlobals() func() {
 		promptPrePrompt = pre
 		promptPostPrompt = post
 		promptRaw = raw
+		promptBatch = batch
 	}
 }
 
@@ -79,6 +81,65 @@ func TestPromptRoleDryRun(t *testing.T) {
 	if strings.TrimSpace(out) == "" {
 		t.Errorf("expected assembled prompt on stdout, got empty output")
 	}
+}
+
+// TestPromptBatchBakesIntoExecBatch verifies the spec line 559 rule
+// ("exec.batch renders the real value in ModePreview when known") via
+// the `--batch NAME` flag. Operators pipe `ateam prompt --batch X |
+// ateam exec --batch X` and expect the preview's `{{exec.batch}}` to
+// substitute the literal X, not the AT RUNTIME sentinel.
+//
+// Without --batch: `{{exec.batch}}` renders as the sentinel
+// `{{AT RUNTIME:exec.batch}}` (every other exec.* key continues to do
+// the same — they are runner-allocated and unknown at preview time).
+//
+// With --batch: only `{{exec.batch}}` substitutes the literal;
+// {{exec.id}}, {{exec.output_dir}}, etc. still render the sentinel.
+func TestPromptBatchBakesIntoExecBatch(t *testing.T) {
+	defer savePromptGlobals()()
+	projPath := setupPromptProject(t)
+
+	// Drop an inline-text prompt file (no anchor walk; engine runs)
+	// that references both exec.batch (operator-pinnable) and exec.id
+	// (always deferred). Tests both behaviors in one shot.
+	external := filepath.Join(projPath, "ref.md")
+	body := "batch={{exec.batch}} id={{exec.id}}"
+	if err := os.WriteFile(external, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("without-batch-renders-sentinel", func(t *testing.T) {
+		defer savePromptGlobals()()
+		out := captureStdout(t, func() {
+			withChdir(t, projPath, func() {
+				if err := runPrompt(nil, []string{"@" + external}); err != nil {
+					t.Fatalf("runPrompt: %v", err)
+				}
+			})
+		})
+		if !strings.Contains(out, "batch={{AT RUNTIME:exec.batch}}") {
+			t.Errorf("expected exec.batch sentinel without --batch, got:\n%s", out)
+		}
+	})
+
+	t.Run("with-batch-substitutes-literal", func(t *testing.T) {
+		defer savePromptGlobals()()
+		promptBatch = "batch-xyz"
+		out := captureStdout(t, func() {
+			withChdir(t, projPath, func() {
+				if err := runPrompt(nil, []string{"@" + external}); err != nil {
+					t.Fatalf("runPrompt: %v", err)
+				}
+			})
+		})
+		if !strings.Contains(out, "batch=batch-xyz") {
+			t.Errorf("expected --batch literal substituted, got:\n%s", out)
+		}
+		// exec.id still renders as sentinel — only batch is pinnable today.
+		if !strings.Contains(out, "id={{AT RUNTIME:exec.id}}") {
+			t.Errorf("expected exec.id sentinel even with --batch, got:\n%s", out)
+		}
+	})
 }
 
 // TestPromptLiteralFileMode verifies the positional @PATH inline-text

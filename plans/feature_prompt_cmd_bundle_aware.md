@@ -405,6 +405,16 @@ The exec.* namespace is the typed half of the resolver: a closed key
 set with `requireExec` validation in ModeReal. Other namespaces are a
 plain map carrier (`BaseVars`) — no typed access needed at runtime.
 
+**Decision recorded:** the typed fields stay on the Runtime struct
+itself (currently ~18 scalars including the verb-supplied
+empty-OK ones). A previous review proposed factoring them into a
+`RunContext` substruct so the top-level shape is smaller. That was
+considered and declined — every field is on a hot read path during
+`Prompt.Resolve`, and the substruct only renames the indirection
+without removing a layer. Promoting it would also force every
+factory test fixture to grow a level. The 18-field struct is the
+accepted shape; new verb-supplied keys land here.
+
 ### Concrete Prompt impls (in `internal/prompts`)
 
 ```go
@@ -648,17 +658,50 @@ Quoting wraps the value placeholder, not the template:
 
 ```
 {{dynamic.foo "{{args.title}}"}}        → 1 arg = "Hello World"
-{{dynamic.review_reports {{args.roles}}}} → 3 args = ["security", "dependencies", "code.bugs"]
+{{dynamic.bar a b c}}                    → 3 args = ["a", "b", "c"]
 ```
 
 **Includes follow the same rule.** Authors quote when the expanded value
 can contain whitespace: `{{include? "{{args.report_path}}"}}`. Same
 discipline as a shell command. The engine doesn't try to be clever.
 
-### Legacy ALL_CAPS dropped
+Note: shipped dynamics (`project_info`, `review_reports`,
+`code_mgmt_review`, `previous_report`) currently ignore positional
+args — the filtering / lookup state they need lives in the factory
+closure, not the prompt body. Authors who want positional-arg
+dispatch should see the Future section.
 
-`{{ROLE}}`, `{{BATCH}}`, `{{EXEC_ID}}`, `{{OUTPUT_DIR}}`, `{{SOURCE_DIR}}`,
-and the rest of `varmap.go`'s `VarRenameMap` — gone. Dotted form only.
+### Legacy ALL_CAPS — dropped from the prompt-body engine
+
+The prompt-body resolver supports the dotted form only. ALL_CAPS
+tokens — `{{ROLE}}`, `{{BATCH}}`, `{{EXEC_ID}}`, `{{OUTPUT_DIR}}`,
+`{{SOURCE_DIR}}`, etc., the full `varmap.go::VarRenameMap` set — are
+not recognized. They will:
+
+1. **Fail at render time** with the engine's unknown-namespace
+   passthrough or known-namespace unknown-key error, depending on
+   whether the legacy token happens to match a current namespace
+   prefix. Either way the operator sees a loud error, not a silent
+   empty substitution.
+2. **Be surfaced as warnings by the migrator** when it moves a file
+   into `prompts/`. `internal/migrate/legacy_tokens.go` scans
+   migrated bodies for the closed legacy set and appends a per-token
+   warning naming the dotted replacement.
+
+There is **no automated rewrite** and **no compat shim**. The
+migrator does not edit prompt bodies, and the engine does not
+forgive the legacy form. Operators see the warning, edit by hand,
+and move on. The affected population is small (only existing user
+prompts predating the bundle-aware refactor); built-in defaults are
+clean.
+
+**Separate, unchanged: runtime.hcl ALL_CAPS.** Agent CLI args and
+container fields in `runtime.hcl` still substitute ALL_CAPS
+placeholders (`{{EXEC_ID}}`, `{{OUTPUT_DIR}}`, …) via
+`runner.TemplateVars.Replacer()`. That is a separate substitution
+pass on a separate config surface — it is not part of the
+prompt-body engine and is not affected by this policy. Do not
+conflate the two.
 
 ## How CLI flags shape prompts
 
@@ -782,6 +825,108 @@ the same engine error verify would. `--paths` / `--inline-paths` use
   dynamic returns empty when set.
 - **ALL_CAPS legacy syntax removed.** Forms like `{{ROLE}}`, `{{BATCH}}`,
   `{{EXEC_ID}}`, `{{SOURCE_DIR}}` no longer resolve.
+
+## Future
+
+Items the design accommodates but ships without — each is well-scoped
+enough that future work can land it without re-litigating the
+architecture. Until they ship, prompts referencing the listed keys /
+forms error at render time (closed-set resolver). Operators see a
+loud message; nothing renders empty.
+
+### Positional-arg dispatch for dynamics
+
+Spec line 580 + arg-parsing rules (line 640) describe a contract where
+each dynamic accepts a positional arg list:
+
+```
+{{dynamic.review_reports {{roles.selected}}}}
+  → reviewReportsDynamic(ctx, "security", "dependencies", "code.bugs")
+```
+
+Today every shipped dynamic ignores its args — the filtering /
+lookup state lives in the closure the factory captures (e.g. the
+review selector on `reviewReportsDynamic`). Promoting the args
+contract requires:
+
+1. Each dynamic that filters / looks up state moves the state from
+   closure capture to args.
+2. Factories stop pre-filtering; the prompt body controls scope by
+   passing `{{roles.selected}}` (or equivalent) as an arg.
+3. New tests pin the arg-driven behavior per dynamic.
+
+The canonical first consumer is `review_reports` — operators with a
+multi-bundle review pipeline want to render different role subsets
+inline without per-bundle factory variants.
+
+### `roles.*` namespace coverage
+
+Resolver ships `roles.enabled` (one key). The spec also lists
+`roles.all`, `roles.disabled`, `roles.selected`, `roles.failed`,
+`roles.aged_out` (line 544-549). Referencing any of these today
+errors as unknown-key in the `roles` namespace. Wiring them is
+straightforward — each is a `[]string` already available somewhere
+(config, calldb, ReviewSelector) — but every key adds a stability
+commitment to prompt authors, so they should land only when a real
+prompt asks for them.
+
+### `args.*` namespace coverage
+
+Resolver ships `args.ignore_previous_report` (one key, wired into
+the report factory). The spec calls for the verb's CLI surface to
+expose specific scalars: `args.no_project_info`, `args.roles`,
+`args.batch`, etc. Same rule as above — closed set, unknown keys
+error, factories add entries on demand. The path is one line per
+factory; the gate is "does any shipped prompt reference it".
+
+### `{{ns.key ? default}}` default-substitution form
+
+Spec table line 638 promises `{{ns.key ? default}}` renders `default`
+when the value is empty (typos still error). The engine doesn't
+implement this today. Authors needing it use `{{include? path ?
+TEXT}}` for files; for variables there is no fallback shorthand. The
+implementation slots into the existing engine token parser; the
+test surface is small.
+
+### Verify error dedup
+
+Spec line 719: "Errors batched. Dedup by `(file, line, message)`
+before printing." Shipped `flow.Verify` batches per-bundle but does
+NOT dedup — three bundles failing with byte-identical messages emit
+three `VerifyError` entries. Pinned by
+`TestVerify_DoesNotDedupIdenticalErrorsAcrossBundles`. Promoting the
+dedup means adding a dedup map keyed on the error string (or the
+underlying `engine.Error`'s file/line) in `flow.Verify` and flipping
+that test's expectation; ~10 lines.
+
+### Verb-supplied exec.* fields
+
+`runtimeVars` ships the closed set
+`exec.{id, batch, output_dir, output_file, prompt_file, timestamp,
+agent, model, subrun_args, debug_context,
+auto_roles_commands_output}`. The first five are load-bearing
+(required in ModeReal); the rest are verb-supplied and empty-OK
+because at least one shipped default prompt references each.
+
+**Dropped:** `exec.{profile, effort, max_budget_usd,
+max_budget_usd_batch}` were previously recognized as empty-OK but
+nothing wired them from `RunOpts → rt` and no shipped prompt
+references them. Today they error as unknown-key — referencing one
+in a user prompt surfaces a loud typo signal rather than a silent
+empty substitution. Pinned by `TestRuntimeVarsExecKeyClosedSet`.
+
+To wire one back when a real consumer shows up, add it to
+`validExecKey` + the `resolveExec` switch, populate `rt.<Field>` in
+`newBundleRuntime` from `opts`, and add a test row to
+`TestExecuteWiresOptsToRuntime`. The factory then sets the RunOpts
+field. Each field is the same three-step pattern as `SubRunArgs` /
+`DebugContext` (commit 9e96d4d) — no design work required, just an
+explicit yes from the verb that owns the value.
+
+(Separately: `runner.TemplateVars` keeps substituting all these keys
+in `runtime.hcl` args / container fields. That is a different
+substitution surface and is not affected — see
+`internal/runner/template.go::Replacer`.)
 
 ## Migration policy
 

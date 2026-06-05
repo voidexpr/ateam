@@ -72,6 +72,47 @@ func TestRenderUnknownKeyErrors(t *testing.T) {
 	}
 }
 
+// TestRenderUnknownKeyInClosedNamespaceErrors pins the spec invariant
+// (line 638): a known namespace + unknown key is always an error, not
+// a silent empty substitution or passthrough. Covers args.* and
+// roles.* — namespaces that ship with a small populated key set today
+// and explicitly promise unknown-key-errors in the Future section's
+// "wire on demand" pattern.
+func TestRenderUnknownKeyInClosedNamespaceErrors(t *testing.T) {
+	e := NewEngine(nil, 0)
+	v := mkVars()
+	cases := []struct {
+		name string
+		body string
+	}{
+		// roles.* — only roles.enabled is wired today; future keys
+		// (roles.all, roles.disabled, roles.selected, roles.failed,
+		// roles.aged_out) must error, not render empty.
+		{"roles.all unknown", "{{roles.all}}"},
+		{"roles.disabled unknown", "{{roles.disabled}}"},
+		{"roles.selected unknown", "{{roles.selected}}"},
+		{"roles.failed unknown", "{{roles.failed}}"},
+		{"roles.aged_out unknown", "{{roles.aged_out}}"},
+		// args.* — only args.ignore_previous_report is wired today;
+		// other keys (args.no_project_info, args.roles, args.batch,
+		// args.verbose, args.force, args.print) must error.
+		{"args.no_project_info unknown", "{{args.no_project_info}}"},
+		{"args.roles unknown", "{{args.roles}}"},
+		{"args.batch unknown", "{{args.batch}}"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := e.Render(tc.body, v)
+			if err == nil {
+				t.Fatalf("expected unknown-key error for %s", tc.body)
+			}
+			if !strings.Contains(err.Error(), "unknown key") {
+				t.Errorf("error should say 'unknown key', got: %v", err)
+			}
+		})
+	}
+}
+
 func TestRenderEnvMissing(t *testing.T) {
 	e := NewEngine(nil, 0)
 	v := mkVars()
