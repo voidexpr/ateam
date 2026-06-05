@@ -227,6 +227,14 @@ func TestV1LayoutLeavesContentUnchanged(t *testing.T) {
 			t.Errorf("legacy-token warning missing %s; got: %q", tok, found)
 		}
 	}
+	// SOURCE_DIR maps to a literal ".", not a template token — the hint
+	// must not advertise the nonsense replacement "{{.}}".
+	if strings.Contains(found, "{{.}}") {
+		t.Errorf("SOURCE_DIR hint should render the literal \".\", not the template token {{.}}; got: %q", found)
+	}
+	if !strings.Contains(found, `{{SOURCE_DIR}} → "."`) {
+		t.Errorf("SOURCE_DIR hint should read `{{SOURCE_DIR}} → \".\"`; got: %q", found)
+	}
 }
 
 func TestV1LayoutIdempotent(t *testing.T) {

@@ -8,6 +8,15 @@ import (
 	"strings"
 )
 
+// tokenMapping describes the replacement for a legacy ALL_CAPS prompt
+// token. Replacement is normally a dotted template name (rendered as
+// {{X}}); when Literal is true it's a verbatim string to substitute in
+// place of the token (rendered as "X").
+type tokenMapping struct {
+	Replacement string
+	Literal     bool
+}
+
 // legacyPromptTokens is the closed mapping from pre-refactor ALL_CAPS
 // prompt-body tokens to their dotted equivalents. It mirrors the deleted
 // internal/prompts/assembler/varmap.go (commit a834701) so the migrator
@@ -15,52 +24,52 @@ import (
 // migrated prompt body. Anything not in this set is either still
 // resolved by runner/template.go (runtime.hcl side) or was never a
 // substituted variable, so the migrator stays quiet about it.
-var legacyPromptTokens = map[string]string{
+var legacyPromptTokens = map[string]tokenMapping{
 	// Identity
-	"ROLE":   "prompt.name",
-	"ACTION": "prompt.action",
+	"ROLE":   {Replacement: "prompt.name"},
+	"ACTION": {Replacement: "prompt.action"},
 
 	// Project
-	"PROJECT_NAME":      "project.name",
-	"PROJECT_FULL_PATH": "project.full_path",
-	"PROJECT_DIR":       "project.dir",
+	"PROJECT_NAME":      {Replacement: "project.name"},
+	"PROJECT_FULL_PATH": {Replacement: "project.full_path"},
+	"PROJECT_DIR":       {Replacement: "project.dir"},
 
 	// Per-execution
-	"BATCH":                "exec.batch",
-	"TIMESTAMP":            "exec.timestamp",
-	"PROFILE":              "exec.profile",
-	"EXEC_ID":              "exec.id",
-	"AGENT":                "exec.agent",
-	"MODEL":                "exec.model",
-	"EFFORT":               "exec.effort",
-	"MAX_BUDGET_USD":       "exec.max_budget_usd",
-	"MAX_BUDGET_USD_BATCH": "exec.max_budget_usd_batch",
-	"OUTPUT_DIR":           "exec.output_dir",
-	"OUTPUT_FILE":          "exec.output_file",
-	"SUBRUN_ARGS":          "exec.subrun_args",
-	"EXECUTION_DIR":        "exec.output_dir",
+	"BATCH":                {Replacement: "exec.batch"},
+	"TIMESTAMP":            {Replacement: "exec.timestamp"},
+	"PROFILE":              {Replacement: "exec.profile"},
+	"EXEC_ID":              {Replacement: "exec.id"},
+	"AGENT":                {Replacement: "exec.agent"},
+	"MODEL":                {Replacement: "exec.model"},
+	"EFFORT":               {Replacement: "exec.effort"},
+	"MAX_BUDGET_USD":       {Replacement: "exec.max_budget_usd"},
+	"MAX_BUDGET_USD_BATCH": {Replacement: "exec.max_budget_usd_batch"},
+	"OUTPUT_DIR":           {Replacement: "exec.output_dir"},
+	"OUTPUT_FILE":          {Replacement: "exec.output_file"},
+	"SUBRUN_ARGS":          {Replacement: "exec.subrun_args"},
+	"EXECUTION_DIR":        {Replacement: "exec.output_dir"},
 
 	// Container
-	"CONTAINER_TYPE": "container.type",
-	"CONTAINER_NAME": "container.name",
+	"CONTAINER_TYPE": {Replacement: "container.type"},
+	"CONTAINER_NAME": {Replacement: "container.name"},
 
 	// Role-set computations
-	"ROLE_REPORTS": "role.reports",
+	"ROLE_REPORTS": {Replacement: "role.reports"},
 
 	// ateam self-docs
-	"ATEAM_OWN_README":    "ateam.own_readme",
-	"ATEAM_OWN_COMMANDS":  "ateam.own_commands",
-	"ATEAM_OWN_CONFIG":    "ateam.own_config",
-	"ATEAM_OWN_ISOLATION": "ateam.own_isolation",
-	"ATEAM_OWN_ROLES":     "ateam.own_roles",
+	"ATEAM_OWN_README":    {Replacement: "ateam.own_readme"},
+	"ATEAM_OWN_COMMANDS":  {Replacement: "ateam.own_commands"},
+	"ATEAM_OWN_CONFIG":    {Replacement: "ateam.own_config"},
+	"ATEAM_OWN_ISOLATION": {Replacement: "ateam.own_isolation"},
+	"ATEAM_OWN_ROLES":     {Replacement: "ateam.own_roles"},
 
 	// Action-specific context bundles
-	"AUTO_ROLES_MARKER":                "ateam.auto_roles_marker",
-	"ATEAM_AUTO_ROLES_COMMANDS_OUTPUT": "exec.auto_roles_commands_output",
-	"EXEC_DEBUG_CONTEXT":               "exec.debug_context",
+	"AUTO_ROLES_MARKER":                {Replacement: "ateam.auto_roles_marker"},
+	"ATEAM_AUTO_ROLES_COMMANDS_OUTPUT": {Replacement: "exec.auto_roles_commands_output"},
+	"EXEC_DEBUG_CONTEXT":               {Replacement: "exec.debug_context"},
 
 	// Pre-v1 literal alias — the old runner always rewrote SOURCE_DIR to ".".
-	"SOURCE_DIR": ".",
+	"SOURCE_DIR": {Replacement: ".", Literal: true},
 }
 
 var legacyTokenRE = regexp.MustCompile(`{{([A-Z][A-Z0-9_]*)}}`)
@@ -118,7 +127,12 @@ func warnLegacyPromptTokens(fullPath, relTo string, r *Result) {
 	}
 	hints := make([]string, 0, len(tokens))
 	for _, t := range tokens {
-		hints = append(hints, fmt.Sprintf("{{%s}} → {{%s}}", t, legacyPromptTokens[t]))
+		m := legacyPromptTokens[t]
+		if m.Literal {
+			hints = append(hints, fmt.Sprintf("{{%s}} → %q", t, m.Replacement))
+		} else {
+			hints = append(hints, fmt.Sprintf("{{%s}} → {{%s}}", t, m.Replacement))
+		}
 	}
 	r.Warnings = append(r.Warnings,
 		fmt.Sprintf("%s still references legacy ALL_CAPS prompt tokens that the engine no longer rewrites; replace with dotted form before next run: %s",
