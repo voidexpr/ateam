@@ -811,6 +811,192 @@ ModePreview`, and calls `bundle.Prompt.Resolve(rt)`. A typo surfaces
 the same engine error verify would. `--paths` / `--inline-paths` use
 `bundle.InspectPreview(env, env.WorkDir)` instead.
 
+## Assembler / PromptFactory split
+
+This section is a buildable design — an agent picking this up should be
+able to implement it without further conversation. Status: not yet
+implemented. Lands independent of any script-Prompt support; cleans up
+existing code on its own merits.
+
+### Why split
+
+`prompts.PromptFile` today fuses three concerns:
+
+1. **Look up by name** — given `"review"`, walk project → org → embedded anchors and find `review.prompt.md` plus any `*.pre.*.md` / `_pre.*.md` / `*.post.*.md` / `_post.*.md` framing fragments.
+2. **Compose framing slots** — order the discovered files into `root_pre` → `dir_pre` → `role_main` → `role_post` → `dir_post` per the assembly rules.
+3. **Render bodies** — for each file, run its content through the template engine (variable expansion, dynamics dispatch, include directives) and concatenate.
+
+These three responsibilities are independent. Today they're hardcoded inside `assembler.Assemble`. Splitting them buys:
+
+- **Clean Prompt-impl plug-in.** A future `PythonPrompt` / `JinjaPrompt` / `RemotePrompt` needs to swap (3) without touching (1) or (2). The current `PromptFile` doesn't let it.
+- **Multiple lookup strategies.** The existing `IsFilesystemPromptPath` predicate inside `PromptFile` (which toggles temp-anchor injection when `Path` ends in `.prompt.md` and contains a `/`) is a one-off special case. With the split, it becomes a separate `TempAnchorAssembler` and the special case dies.
+- **Single-file rendering.** Operators who want "this one file, no framing, but with engine expansion" today get `PromptText` — which can't reference includes against the standard anchor chain. A `BasicAssembler` covers this without expanding `PromptText`'s contract.
+
+### Types
+
+Two new interfaces live in `internal/prompts/assembler` (alongside the existing `Assembler` struct, which gets demoted to an impl):
+
+```go
+// ResolvedFile is one entry in an Assembler's ordered output. It carries
+// what the renderer needs to read and the metadata --paths / Inspect
+// consume.
+type ResolvedFile struct {
+    Slot   string  // root_pre | dir_pre | role_main | role_post | dir_post
+    Anchor string  // project | org | embedded | external | impl-defined
+    Path   string  // anchor-relative
+    FS     fs.FS   // FS to read content from
+}
+
+// Assembler resolves a logical name (or filesystem path) into the
+// ordered file list that composes the assembled prompt. It owns the
+// lookup strategy; it does NOT own rendering.
+//
+// FindOrphans is unchanged from today — the inspection path consumes
+// it directly.
+type Assembler interface {
+    Resolve(name string) ([]ResolvedFile, error)
+    FindOrphans() ([]Orphan, error)
+    Anchors() []Anchor  // exposed for callers that need to inspect the chain
+}
+```
+
+A new interface lives in `internal/prompts`:
+
+```go
+// PromptFactory picks the Prompt implementation for a role-main file.
+// Framing fragments (slots != "role_main") are always rendered by the
+// engine — they're documented to be markdown. Only the role main can
+// vary.
+//
+// Today: DefaultPromptFactory returns prompts.PromptText{Text: <body>}
+// for every file (which is what the current assembler does inline).
+// Future: a registry maps `.prompt.py` → PythonPrompt, etc.
+type PromptFactory interface {
+    For(path string) Prompt
+}
+```
+
+### Concrete impls
+
+Three Assembler implementations cover every shape today's code uses, plus the temp-anchor edge case:
+
+| Impl | What it does | Replaces |
+|---|---|---|
+| `MultiAnchorAssembler` (today's `*Assembler`, renamed) | Walks project → org → embedded for `<name>.prompt.md` + slot composition. | Current `(*Assembler).Assemble` lookup path. |
+| `TempAnchorAssembler{Inner, ExternalDir}` | Wraps another Assembler. Injects `ExternalDir` as a "external" anchor at the front of `Inner`'s chain, then delegates. | `IsFilesystemPromptPath`-driven branch inside `PromptFile.assemble`. |
+| `BasicAssembler{FS, Path}` | Returns exactly one `ResolvedFile` with `Slot: "role_main"`. No framing, no anchor walk. | The cmd-layer one-off where an operator wants a literal file rendered with engine expansion but no framing. |
+
+`DefaultPromptFactory()` is a single function in `internal/prompts`. It returns the same `Prompt` impl for every path (today: `PromptText`). New impls register as needed; until they do, the default covers every shipped use.
+
+### Updated `PromptFile`
+
+`PromptFile` becomes the thin orchestrator:
+
+```go
+type PromptFile struct {
+    Path       string
+    PrePrompt  string
+    PostPrompt string
+    CustomBody string
+
+    // Optional. nil means "use ctx.Env().Assembler() and
+    // DefaultPromptFactory" — the current default behavior.
+    Assembler PromptAssembler  // see naming note below
+    Factory   PromptFactory
+}
+
+func (p PromptFile) Resolve(ctx ResolveContext) (string, error) {
+    a := p.Assembler
+    if a == nil {
+        a = ctx.Env().Assembler()  // backward-compat fall-through
+    }
+    files, err := a.Resolve(p.Path)
+    if err != nil { return "", err }
+
+    fac := p.Factory
+    if fac == nil {
+        fac = DefaultPromptFactory()
+    }
+
+    out := make([]string, 0, len(files))
+    for _, f := range files {
+        body, err := readFile(f.FS, f.Path)
+        if err != nil { return "", err }
+
+        var text string
+        if f.Slot == "role_main" {
+            // Per-file Prompt impl owns role-main rendering.
+            text, err = fac.For(f.Path).Resolve(ctx)
+        } else {
+            // Framing fragments always go through the engine — they're
+            // markdown by convention.
+            text, err = renderEngine(body, ctx)
+        }
+        if err != nil { return "", err }
+        out = append(out, text)
+    }
+    return wrap(p.PrePrompt, join(out), p.PostPrompt), nil
+}
+```
+
+Naming note: keep the `Assembler` name in the prompts package; rename the existing concrete type in `assembler/` to `MultiAnchorAssembler` (or `ChainAssembler`). The interface and the concrete impl shouldn't share the bare name.
+
+### CLI dispatch update
+
+`cmd/exec_bundle.go::buildArgPrompt` currently uses `prompts.IsFilesystemPromptPath` to toggle the temp-anchor case inside `PromptFile`. With the split, the cmd-layer picks the Assembler explicitly:
+
+```go
+func buildArgPrompt(arg, pre, post string, raw bool) (prompts.Prompt, error) {
+    if !raw && strings.HasPrefix(arg, "@") && !strings.HasPrefix(arg, "@-") {
+        cleanPath := strings.TrimPrefix(arg, "@")
+        if strings.HasSuffix(cleanPath, ".prompt.md") && (strings.ContainsRune(cleanPath, '/') || strings.HasPrefix(cleanPath, ".")) {
+            // Filesystem-path .prompt.md: temp-anchor injection on
+            // top of the standard chain.
+            return prompts.PromptFile{
+                Path:       cleanPath,
+                PrePrompt:  pre,
+                PostPrompt: post,
+                Assembler:  assembler.TempAnchor(parentOf(cleanPath)),  // wraps ctx.Env().Assembler() at resolve time
+            }, nil
+        }
+    }
+    // body + concat path stays as-is for non-.prompt.md
+    ...
+}
+```
+
+`prompts.IsFilesystemPromptPath` is deleted. The predicate moves into a single conditional at the cmd layer; the prompts package stops exporting a predicate that's really a cmd-layer dispatch rule.
+
+### Inspection / `--paths`
+
+`PromptFile.Inspect` follows the same shape — walks `a.Resolve(p.Path)`, returns one `Section` per `ResolvedFile`. The existing `Section` struct already matches `ResolvedFile`'s data.
+
+### Migration plan
+
+1. Define `assembler.PromptAssembler` interface + `ResolvedFile`.
+2. Rename today's concrete `assembler.Assembler` to `assembler.MultiAnchorAssembler`; keep `Anchors() []Anchor` and `FindOrphans()`. The renamed type satisfies the new interface trivially.
+3. Add `TempAnchorAssembler{Inner, ExternalDir}` — a wrapper that prepends an `external` anchor and delegates `Resolve` / `FindOrphans`.
+4. Add `BasicAssembler{FS, Path}` — single-file Resolve.
+5. Define `prompts.PromptFactory` + `DefaultPromptFactory()`.
+6. Add optional `Assembler` + `Factory` fields to `PromptFile`. Implement the orchestrator loop with nil-fall-through to the existing behavior.
+7. Update `cmd/exec_bundle.go::buildArgPrompt` to inject `TempAnchorAssembler` explicitly; remove `prompts.IsFilesystemPromptPath`.
+8. Sweep callers that construct `assembler.New(...)` → produce a `MultiAnchorAssembler` instance. `env.Assembler()` returns one.
+
+### Tests
+
+- `MultiAnchorAssembler`: existing `assembler.Assemble` tests retarget here (they already cover anchor walk + slot ordering).
+- `TempAnchorAssembler`: pin that `Resolve("./foo.prompt.md")` returns the `foo.prompt.md` from `ExternalDir` as `role_main` plus the inherited `dir_pre` / `dir_post` from the wrapped chain.
+- `BasicAssembler`: pin that `Resolve(path)` returns exactly one `role_main` entry.
+- `DefaultPromptFactory`: pin that it returns `PromptText` regardless of path.
+- `PromptFile` orchestrator: pin that a synthetic two-file Assembler (one `dir_pre`, one `role_main`) renders correctly with a fake Factory that returns a literal-string Prompt for `role_main`.
+- All existing `internal/prompts/prompt_test.go` and `cmd/prompt_test.go` cases keep passing with default behavior.
+
+### Out of scope
+
+- No new Prompt impls. `DefaultPromptFactory` is the only factory shipped with the split.
+- No URL-fetched or git-ref Assemblers. They're future work; the split makes them possible without further architecture.
+- No changes to `flow.PromptBundle`, `ResolvePreview`, or the runtime resolver.
+
 ## Accepted breaking changes
 
 - **`ateam review --prompt @file` removed.** Operators put custom content at
@@ -898,6 +1084,109 @@ three `VerifyError` entries. Pinned by
 dedup means adding a dedup map keyed on the error string (or the
 underlying `engine.Error`'s file/line) in `flow.Verify` and flipping
 that test's expectation; ~10 lines.
+
+### Script-Prompt impls (`.prompt.py`, `.prompt.sh`, `.prompt.jinja`, …)
+
+The Assembler / PromptFactory split (see main spec) is the
+prerequisite that makes this future-friendly. Once it lands, adding
+a Prompt impl for an additional file type is "register an entry in
+the factory + ship the impl"; this section pins the data-access and
+mode-behavior contract every script impl will share.
+
+**No template substitution on script bodies.** The script body is
+fed verbatim to its interpreter. The framework does NOT pre-expand
+`{{namespace.key}}` directives inside `.prompt.py` (etc.). If the
+script wants a value, it asks for it (see "Data access" below). This
+sidesteps the metadata problem entirely — no need to declare per-file
+whether the body should be expanded.
+
+Operators who want the engine to expand a value AROUND a script's
+output route via `{{include path}}` against the script's pre-computed
+output file:
+
+```
+{{include ./out/script_result.md}}
+```
+
+The script runs in a `PreExec` action (or out-of-band before
+`ateam run-all`) and writes to disk; the prompt body includes the
+result. This composes cleanly without a per-file expansion-policy
+flag.
+
+**Data access.** Two ways to read vars from inside a script:
+
+1. **JSON on stdin.** When the framework invokes the script, it
+   passes a JSON document on stdin containing every var the
+   framework can enumerate, plus `mode` (`"preview"` or `"real"`)
+   and a `phase` discriminator (see lifecycle note below). The
+   script reads and parses; no API surface to learn.
+
+2. **`ateam vars` CLI.** A subprocess of the script can shell out to
+   `ateam vars` (filtered by namespace / key) to read individual
+   values without pulling the whole JSON. Useful for sh scripts that
+   don't want to parse JSON inline. The CLI consults the same
+   underlying source as the JSON dump — one snapshot, two access
+   paths.
+
+The framework's responsibility is producing the enumerable snapshot
+at the moment the script runs. The script's responsibility is asking
+the right questions of the snapshot. There is no late-binding contract
+inside script bodies (no `{{exec.id}}` substitution); the script
+reads the value at the moment it cares.
+
+**Preview behavior.** Scripts always run, even in `ModePreview`. The
+JSON stdin carries `mode: "preview"` so cheap scripts can branch and
+short-circuit (e.g. return a stub manifest instead of hitting the
+network). For genuinely expensive scripts that can't be made
+cheap-in-preview, the operator routes them through a `PreExec` action
++ `{{include}}` (above) instead of the script-Prompt path. Verify
+will invoke every script; a per-script `timeout_seconds` knob lives
+on the Prompt impl to bound how long a bad script can stall verify.
+
+**Security.** Sandboxing for script-Prompt impls is deferred until
+the planned container-sandbox infrastructure lands. The shipped
+defaults will be RO filesystem + work-dir local read + no network;
+opt-out via runtime.hcl. Until that lands, **scripts are not enabled**
+— the design above is the spec for when they are.
+
+### Vars lifecycle: explicit phases vs. snapshot
+
+The current `Vars` interface is ASK-only (`Resolve(ns, key)`); the
+framework dispatches across multiple sources (`runtimeVars` for
+`exec.*`, `BaseVars` for everything else, `Dynamics` for late-binding
+strings) and the lifecycle is implicit. This works as long as
+consumers ask for one key at a time.
+
+Scripts break the asymmetry — they need to enumerate. The design
+question that surfaces: WHEN is "the moment of enumeration"?
+
+Two proposals worth evaluating when the data is in:
+
+1. **Earlier ID allocation.** `exec.id` is genuinely runtime-only
+   because the runner allocates it from the DB at Prepare time. If
+   we shift allocation earlier (e.g. at bundle-build time, with a
+   reservation that gets either committed or released at Prepare),
+   then `exec.id` joins `project.name` / `args.batch` in the
+   bundle-build snapshot. Most other "late" values are computable
+   the same way. Only `agent_start_time` (set by the agent process
+   itself when it begins emitting) is genuinely irreducibly late.
+
+2. **Snapshot-on-resolve.** Add `CreateVars(ctx) → map[ns]map[key]string`
+   called once right before `Prompt.Resolve` runs. The result is a
+   frozen map; `Prompt.Resolve` consumes it as the single source of
+   truth. This is what scripts would receive as JSON.
+
+The two proposals compose. (1) shrinks the set of values that
+need late binding; (2) makes the boundary between "available" and
+"not yet" explicit. With both, only `agent_start_time` and any
+agent-output-derived values remain as sentinels / post-exec inputs.
+
+Cost: substantial. The current implicit-timing model works because
+only `exec.*` is late and only the resolver path consults it. Adding
+a snapshot moment + an ID-allocation refactor touches the runner, the
+DB schema, every factory, every consumer. Worth doing ONLY when
+scripts (or a similar consumer demanding enumeration) make the
+ask-only model insufficient.
 
 ### Verb-supplied exec.* fields
 
