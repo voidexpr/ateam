@@ -541,9 +541,6 @@ func inspectionDigestsForCurrentFlags() (string, []sectionDigest, error) {
 		return "", nil, fmt.Errorf("found %d orphan fragment(s) for the previewed prompt %q; fix or remove them before assembling", blocking, promptPath)
 	}
 
-	vars := env.BuildAssemblerVars(promptPath, roleLabel, promptAction)
-	engine := prompts.BuildEngine(env, roleLabel, promptAction)
-
 	// Per spec Next-round step 7, --paths / --inline-paths inspect the
 	// SAME bundle the live verb produces. Known factory actions go
 	// through the verb factory (so dynamics like review_reports resolve
@@ -586,12 +583,24 @@ func inspectionDigestsForCurrentFlags() (string, []sectionDigest, error) {
 	// handles it inline.
 
 	// CLI post-prompt is the outermost tail wrapper, after every synthesized
-	// live section — matching where the real run appends it.
-	post, perr := renderCLIWrapper(engine, vars, postPrompt)
-	if perr != nil {
-		return "", nil, perr
+	// live section — matching where the real run appends it. Render via
+	// PromptText against a flow.Runtime so engine expansion of the
+	// wrapper goes through the same single resolver path as the bundle
+	// body (no second `BuildEngine`-style engine constructed here).
+	if strings.TrimSpace(postPrompt) != "" {
+		rt := flow.NewRuntime(nil, env, env.WorkDir)
+		rt.SetVars(env.BuildAssemblerVars(promptPath, roleLabel, promptAction))
+		rt.SetDynamics(prompts.PromptDynamic{
+			"project_info": prompts.ProjectInfoDynamic(env, roleLabel, promptAction),
+		})
+		post, perr := prompts.PromptText{Text: postPrompt}.Resolve(rt)
+		if perr != nil {
+			return "", nil, fmt.Errorf("rendering --post-prompt: %w", perr)
+		}
+		if strings.TrimSpace(post) != "" {
+			addLive("cli_post_prompt", "(--post-prompt)", post)
+		}
 	}
-	addLive("cli_post_prompt", "(--post-prompt)", post)
 
 	return promptPath, digests, nil
 }

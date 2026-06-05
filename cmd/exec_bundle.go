@@ -61,6 +61,18 @@ func buildRunner(env *root.ResolvedEnv, spec RunnerSpec) (*runner.AgentExecutor,
 	return r, nil
 }
 
+// promptImpl picks the Prompt implementation based on the operator's
+// --raw choice. Centralized here so every verb that wraps a CLI- or
+// pipe-supplied prompt body (exec, parallel) shares one dispatch
+// rule. Spec step 10: PromptText is the default (variable + dynamic
+// expansion); --raw opts back into RawTextPrompt (bytes-through).
+func promptImpl(text string, raw bool) prompts.Prompt {
+	if raw {
+		return prompts.RawTextPrompt{Text: text}
+	}
+	return prompts.PromptText{Text: text}
+}
+
 // staticBundle constructs a PromptBundle around an already-composed
 // prompt body. The caller picks the Prompt implementation:
 //

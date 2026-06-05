@@ -11,7 +11,6 @@ import (
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/prompts"
-	"github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/spf13/cobra"
@@ -131,11 +130,6 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 // prePrompt / postPrompt wrap at the outermost positions.
 func buildAutoDebugPrompt(env *root.ResolvedEnv, rows []calldb.RecentRow, files []string, prePrompt, postPrompt string) (string, error) {
 	debugContext := buildDebugContext(rows, files)
-	a := env.Assembler()
-	engine := prompts.BuildEngine(env, "exec debugger", "debug")
-	vars := env.BuildAssemblerVars("exec_debug", "exec debugger", "debug")
-	vars.Exec["debug_context"] = debugContext
-
 	pre, err := prompts.ResolveOptional(prePrompt)
 	if err != nil {
 		return "", fmt.Errorf("cannot resolve --pre-prompt: %w", err)
@@ -145,12 +139,19 @@ func buildAutoDebugPrompt(env *root.ResolvedEnv, rows []calldb.RecentRow, files 
 		return "", fmt.Errorf("cannot resolve --post-prompt: %w", err)
 	}
 
-	opts := &assembler.AssembleOptions{PrePrompt: pre, PostPrompt: post}
-	res, err := a.Assemble("exec_debug", vars, engine, opts)
-	if err != nil {
-		return "", err
+	pf := prompts.PromptFile{
+		Path:       "exec_debug",
+		PrePrompt:  pre,
+		PostPrompt: post,
 	}
-	return res.Prompt, nil
+	vars := env.BuildAssemblerVars("exec_debug", "exec debugger", "debug")
+	vars.Exec["debug_context"] = debugContext
+	rt := flow.NewRuntime(nil, env, env.WorkDir)
+	rt.SetVars(vars)
+	rt.SetDynamics(prompts.PromptDynamic{
+		"project_info": prompts.ProjectInfoDynamic(env, "exec debugger", "debug"),
+	})
+	return pf.Resolve(rt)
 }
 
 func resolveRunSelection(db *calldb.CallDB, env *root.ResolvedEnv, args []string) ([]calldb.RecentRow, error) {

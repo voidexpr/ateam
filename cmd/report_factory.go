@@ -13,6 +13,17 @@ import (
 // per-role report prompt composes via NewReportBundle's PromptFile +
 // {{dynamic.previous_report}} weaving the prior cycle's report block in.
 
+// boolStr renders a boolean as the canonical "true" / "false" string
+// for the args.* namespace. Used by factories to seed CLI-flag values
+// into the bundle's BaseVars so prompts can reference them via
+// {{args.<flag>}}.
+func boolStr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
 // ReportBundleInput parameterizes a single role's report bundle. Each
 // role gets its own bundle (and its own previous_report dynamic
 // closure capturing the role ID), so the dispatcher can resolve N
@@ -54,6 +65,13 @@ func previousReportDynamic(env *root.ResolvedEnv, roleID string, skip bool) prom
 func NewReportBundle(in ReportBundleInput) *flow.PromptBundle {
 	promptPath := "report/" + in.RoleID
 	roleLabel := "role " + in.RoleID
+	baseVars := in.Env.BuildAssemblerVars(promptPath, roleLabel, "report")
+	// args.* — factory-curated CLI surface. Today: a single boolean
+	// signaling whether the operator passed --ignore-previous-report.
+	// Prompts that want to surface the choice to the agent read
+	// {{args.ignore_previous_report}}; absence of the value
+	// (the empty default) reads as "false".
+	baseVars.Args["ignore_previous_report"] = boolStr(in.SkipPreviousReport)
 	return &flow.PromptBundle{
 		Name:   in.RoleID,
 		Role:   in.RoleID,
@@ -63,7 +81,7 @@ func NewReportBundle(in ReportBundleInput) *flow.PromptBundle {
 			PrePrompt:  in.PrePrompt,
 			PostPrompt: in.PostPrompt,
 		},
-		BaseVars: in.Env.BuildAssemblerVars(promptPath, roleLabel, "report"),
+		BaseVars: baseVars,
 		Dynamics: prompts.PromptDynamic{
 			"project_info":    prompts.ProjectInfoDynamic(in.Env, roleLabel, "report"),
 			"previous_report": previousReportDynamic(in.Env, in.RoleID, in.SkipPreviousReport),

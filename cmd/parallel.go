@@ -79,7 +79,7 @@ func init() {
 	parallelCmd.Flags().BoolVar(&parallelPrint, "print", false, "print task outputs to stdout after completion")
 	addDockerAutoSetupFlag(parallelCmd, &parallelDockerAutoSetup)
 	addContainerNameFlag(parallelCmd, &parallelContainerName)
-	parallelCmd.Flags().BoolVar(&parallelRaw, "raw", false, "feed each prompt to the agent byte-for-byte: no template-engine expansion (today the engine isn't run on parallel prompts either, so this is forward-compatible plumbing)")
+	parallelCmd.Flags().BoolVar(&parallelRaw, "raw", false, "feed each prompt to the agent byte-for-byte: skip template-engine expansion (no {{var}} substitution, no dynamics). Default expands {{exec.*}}, {{prompt.*}}, and other vars.")
 }
 
 func runParallel(cmd *cobra.Command, args []string) error {
@@ -123,21 +123,30 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	env, err := lookupEnv()
+	if err != nil {
+		return fmt.Errorf("cannot find .ateamorg/: %w", err)
+	}
+
 	if parallelDryRun {
+		// Route every dry-run prompt through ResolvePreview so
+		// {{prompt.name}}, exec.* sentinels, and dynamics expand the
+		// same way they would at exec time — no separate composition
+		// path for dry-run.
 		for i, p := range resolvedPrompts {
+			b := staticBundle(labels[i], labels[i], runner.ActionParallel, promptImpl(p, parallelRaw), runner.RunOpts{})
+			resolved, err := b.ResolvePreview(env, env.WorkDir)
+			if err != nil {
+				return fmt.Errorf("dry-run resolve %s: %w", labels[i], err)
+			}
 			if i > 0 {
 				fmt.Println()
 			}
 			fmt.Printf("╔══ %s ══╗\n\n", labels[i])
-			fmt.Println(p)
+			fmt.Println(resolved)
 			fmt.Printf("\n╚══ %s ══╝\n", labels[i])
 		}
 		return nil
-	}
-
-	env, err := lookupEnv()
-	if err != nil {
-		return fmt.Errorf("cannot find .ateamorg/: %w", err)
 	}
 	r, err := buildRunner(env, RunnerSpec{
 		Profile:         parallelProfile,
@@ -192,7 +201,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	// lazily, so role labels can be ad-hoc ("agent-1", task slugs, etc.).
 	steps := make([]flow.Step, len(resolvedPrompts))
 	for i, prompt := range resolvedPrompts {
-		steps[i] = staticBundle(labels[i], labels[i], runner.ActionParallel, prompts.PromptText{Text: prompt}, runner.RunOpts{
+		steps[i] = staticBundle(labels[i], labels[i], runner.ActionParallel, promptImpl(prompt, parallelRaw), runner.RunOpts{
 			RoleID:      labels[i],
 			Action:      runner.ActionParallel,
 			WorkDir:     env.WorkDir,

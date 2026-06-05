@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/ateam/internal/display"
+	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/prompts"
-	"github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
 )
 
@@ -33,26 +33,24 @@ import (
 // sentence.
 func assembleRoleCode(env *root.ResolvedEnv, roleID, roleLabel, prePrompt, postPrompt string) (string, error) {
 	promptPath := "code/" + roleID
-	a := env.Assembler()
-	engine := prompts.BuildEngine(env, roleLabel, "code")
-	vars := env.BuildAssemblerVars(promptPath, roleLabel, "code")
-	opts := &assembler.AssembleOptions{PrePrompt: prePrompt}
-	res, err := a.Assemble(promptPath, vars, engine, opts)
+	pf := prompts.PromptFile{
+		Path:       promptPath,
+		PrePrompt:  prePrompt,
+		PostPrompt: postPrompt,
+	}
+	rt := flow.NewRuntime(nil, env, env.WorkDir)
+	rt.SetVars(env.BuildAssemblerVars(promptPath, roleLabel, "code"))
+	rt.SetDynamics(prompts.PromptDynamic{
+		"project_info": prompts.ProjectInfoDynamic(env, roleLabel, "code"),
+	})
+	out, err := pf.Resolve(rt)
 	if err != nil {
 		if strings.Contains(err.Error(), "no role main") {
 			return "", fmt.Errorf("no code prompt defined for role %q. Role-specific code prompts (code/<role>.prompt.md) are no longer shipped in defaults; use `ateam prompt --action code` to render the generic implementer body, or place a code/%s.prompt.md override under .ateam/prompts/", roleID, roleID)
 		}
 		return "", err
 	}
-	prompt := res.Prompt
-	post, err := renderCLIWrapper(engine, vars, postPrompt)
-	if err != nil {
-		return "", err
-	}
-	if post != "" {
-		prompt += "\n\n---\n\n" + post
-	}
-	return prompt, nil
+	return out, nil
 }
 
 // previousReportBlock returns the inline "# Previous Report" section (or

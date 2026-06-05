@@ -63,19 +63,21 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 		return "", nil, fmt.Errorf("build auto-roles context: %w", err)
 	}
 
-	a := env.Assembler()
-	// Per the spec's single-substitution-pass invariant (Next-round
-	// step 3), the assembled body keeps exec.* tokens in their dotted
-	// form — they get resolved by flow.Runtime's Vars dispatcher during
-	// Prompt.Resolve, NOT by the cmd-layer assembly. Dynamics (notably
-	// project_info) still run at assembly time via the engine bound to
-	// the bundle below.
-	vars := env.BuildAssemblerVars("report_auto_roles", "the supervisor", "auto-roles")
-	res, err := a.Assemble("report_auto_roles", vars, prompts.BuildEngine(env, "the supervisor", "auto-roles"), nil)
+	// Route the auto-roles supervisor body through PromptFile +
+	// flow.Runtime — same single composition path every other verb
+	// uses. exec.* keeps its dotted form (resolved later when the
+	// bundle is executed); project_info renders here against the real
+	// env.
+	pf := prompts.PromptFile{Path: "report_auto_roles"}
+	rt := flow.NewRuntime(nil, env, env.WorkDir)
+	rt.SetVars(env.BuildAssemblerVars("report_auto_roles", "the supervisor", "auto-roles"))
+	rt.SetDynamics(prompts.PromptDynamic{
+		"project_info": prompts.ProjectInfoDynamic(env, "the supervisor", "auto-roles"),
+	})
+	prompt, err := pf.Resolve(rt)
 	if err != nil {
 		return "", nil, fmt.Errorf("assemble auto-roles prompt: %w", err)
 	}
-	prompt := res.Prompt
 
 	cr, err := resolveRunner(env, profile, agentName, runner.ActionReview, "", dockerAutoSetup)
 	if err != nil {

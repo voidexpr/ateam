@@ -22,6 +22,11 @@ type Vars interface {
 
 // MapVars is a Vars built from per-namespace maps. The closed set of recognized
 // namespaces is fixed by this type and matches the spec.
+//
+// args.* and roles.* are the factory-curated namespaces: the verb's
+// CLI surface exposes specific values into the prompt without leaking
+// the whole option struct. `args.batch`, `roles.enabled`, etc. are
+// rendered the same way as the env-derived namespaces.
 type MapVars struct {
 	Prompt    map[string]string
 	Exec      map[string]string
@@ -30,6 +35,8 @@ type MapVars struct {
 	Container map[string]string
 	Ateam     map[string]string
 	Role      map[string]string
+	Args      map[string]string
+	Roles     map[string]string
 	// EnvLookup resolves {{env.NAME}}. If nil, env lookups error (callers that
 	// don't want env access should leave it nil so missing envs are loud).
 	EnvLookup func(name string) (string, bool)
@@ -63,6 +70,10 @@ func (v MapVars) Resolve(ns, key string) (string, bool, error) {
 		m = v.Ateam
 	case "role":
 		m = v.Role
+	case "args":
+		m = v.Args
+	case "roles":
+		m = v.Roles
 	default:
 		return "", false, nil
 	}

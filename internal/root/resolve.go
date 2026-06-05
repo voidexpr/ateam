@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -241,6 +242,12 @@ func (e *ResolvedEnv) BuildAssemblerVars(promptPath, roleLabel, action string) a
 		Role: map[string]string{
 			"reports": "",
 		},
+		// roles.* — project-wide role-set state. The factory-curated
+		// args.* namespace is seeded empty here so verb factories can
+		// mutate it without re-allocating (BaseVars is a value but the
+		// inner maps are references).
+		Args:  map[string]string{},
+		Roles: e.rolesEnabledMap(),
 		Ateam: map[string]string{
 			"own_readme":        defaults.SelfDocs["README"],
 			"own_commands":      defaults.SelfDocs["COMMANDS"],
@@ -334,6 +341,27 @@ func (e *ResolvedEnv) ProjectID() string {
 		return ""
 	}
 	return config.PathToProjectID(e.RelPath(e.SourceDir))
+}
+
+// rolesEnabledMap seeds the {{roles.*}} namespace. Currently exposes
+// `roles.enabled` — the comma-separated list of enabled role IDs from
+// the project config (e.g. "code.bugs,security,test.gaps"). Empty
+// string in org-less / unconfigured mode so prompts that reference
+// {{roles.enabled}} render cleanly there too.
+func (e *ResolvedEnv) rolesEnabledMap() map[string]string {
+	out := map[string]string{"enabled": ""}
+	if e == nil || e.Config == nil || len(e.Config.Roles) == 0 {
+		return out
+	}
+	ids := make([]string, 0, len(e.Config.Roles))
+	for id, status := range e.Config.Roles {
+		if config.IsRoleEnabled(status) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	out["enabled"] = strings.Join(ids, ",")
+	return out
 }
 
 // OrgRoot returns the parent directory of .ateamorg.

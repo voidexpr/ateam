@@ -12,6 +12,8 @@ func mkVars() MapVars {
 		Project:   map[string]string{"name": "ateam", "info": "ATeam project context block"},
 		Container: map[string]string{"type": "docker"},
 		Ateam:     map[string]string{"own_bin": "/usr/local/bin/ateam"},
+		Args:      map[string]string{"ignore_previous_report": "true"},
+		Roles:     map[string]string{"enabled": "code.bugs,security,test.gaps"},
 		EnvLookup: func(name string) (string, bool) {
 			switch name {
 			case "HOME":
@@ -41,6 +43,12 @@ func TestRenderVariables(t *testing.T) {
 		{"unterminated {{ kept literal", "open {{ never closed", "open {{ never closed"},
 		{"adjacent", "{{prompt.name}}{{prompt.action}}", "securityreport"},
 		{"deep nesting in literal", "{{prompt.name}} and {{ateam.own_bin}}", "security and /usr/local/bin/ateam"},
+		// args.* / roles.* — factory-curated namespaces. Wired here
+		// to prove the resolver covers them; consumers live in
+		// cmd/report_factory.go (args.ignore_previous_report) and
+		// internal/root/resolve.go (roles.enabled).
+		{"args namespace resolves", "skip={{args.ignore_previous_report}}", "skip=true"},
+		{"roles namespace resolves", "enabled={{roles.enabled}}", "enabled=code.bugs,security,test.gaps"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

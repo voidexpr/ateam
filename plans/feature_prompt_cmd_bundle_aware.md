@@ -162,7 +162,7 @@ parallel path producing the same output. Concrete required tests:
 | `exec.*` sentinel in preview | A bundle whose prompt contains `{{exec.id}}` resolved against `rt` with `Mode == ModePreview` produces `{{AT RUNTIME:exec.id}}` in the output. |
 | `exec.*` real value in live | The same bundle, resolved against `rt` with `Mode == ModeReal` and `rt.ExecID = 42`, produces `42`. The runner Replacer does NOT touch the prompt. |
 | `Runtime.ExecID` etc. load-bearing | A test reads `rt.ExecID` / `rt.Batch` / `rt.OutputDir` / `rt.OutputFile` somewhere on the production code path. `grep` shows non-test consumers. |
-| `bundle.Vars` merge | A bundle with `Vars: map[string]string{"args.x": "y"}` resolved against a prompt containing `{{args.x}}` produces `y`. |
+| `args.*` / `roles.*` namespaces | A bundle whose BaseVars carries `args.batch: "abc"` resolved against a prompt containing `{{args.batch}}` produces `abc`. Same for `roles.*` — see `internal/prompts/assembler/varmap.go` for the namespace allow-list. |
 | `dynamic.review_reports` | A bundle whose prompt body contains `{{dynamic.review_reports}}` and whose dynamics registers `review_reports` produces the same manifest the legacy `formatReportsBlock` would. `reviewPrompt` is deleted. |
 | `dynamic.code_mgmt_review` | Same shape for code-management. `assembleCodeManagementV1` is deleted. |
 | `ResolveContext.Env()` | `ctx.Env()` returns the resolved env. The `root → prompts` cycle is broken by extracting helpers (or by an explicitly negotiated divergence). |
@@ -214,8 +214,10 @@ Driven by the deletion-first rule, the natural sequence:
    sections (reports manifest, previous_report) flow through
    `Prompt.Inspect` via the same dynamics or via per-bundle wrappers
    the factory installs.
-8. Merge `bundle.Vars` into `rt.Vars` in `flow.execute`. Test with a
-   factory-exposed `args.*` value.
+8. Provide `bundle.ResolvePreview(env, workDir)` and
+   `bundle.InspectPreview(env, workDir)` helpers so every preview /
+   `--paths` callsite auto-loads `BaseVars + Dynamics + ModePreview`
+   without per-caller boilerplate.
 9. Extract the helpers from `internal/prompts` that `internal/root`
    needs (or break the dependency another way), then add
    `ResolveContext.Env()`.
@@ -347,26 +349,12 @@ const (
 )
 ```
 
-Flow re-exports the types its API surface mentions so callers don't have
-to import both:
-
-```go
-package flow
-
-type (
-    Prompt         = prompts.Prompt
-    ResolveContext = prompts.ResolveContext
-    ResolveMode    = prompts.ResolveMode
-    Section        = prompts.Section
-    Vars           = prompts.Vars
-    PromptDynamic  = prompts.PromptDynamic
-)
-
-const (
-    ModeReal    = prompts.ModeReal
-    ModePreview = prompts.ModePreview
-)
-```
+Flow does NOT re-export the prompts types — callers reference
+`prompts.Prompt`, `prompts.ResolveContext`, `prompts.ModePreview`, etc.
+directly. flow's public API mentions them by fully-qualified name. (An
+earlier draft used type aliases; the indirection bought nothing and
+made flow's surface a passthrough that drifted whenever the prompts
+package changed.)
 
 `ModeVerify` is **not** a third mode — verification is a caller pattern:
 "call `Resolve(ctx, where ctx.Mode()==ModePreview)` on every bundle and
@@ -381,31 +369,41 @@ including the per-bundle data Prompt impls consume. Implements
 
 ```go
 type Runtime struct {
-    DB       *calldb.CallDB
-    Env      *root.ResolvedEnv
-    WorkDir  string
-    Vars     Vars            // built by flow, opaque to flow
-    Dynamics PromptDynamic
-    Mode     ResolveMode
+    DB      *calldb.CallDB
+    env     *root.ResolvedEnv  // private; access via Env()
+    WorkDir string
 
-    // Per-bundle runtime values populated by Prepare. Zero values when
-    // Mode == ModePreview (sentinels filled by Vars instead).
+    vars     prompts.Vars
+    mode     prompts.ResolveMode
+    dynamics prompts.PromptDynamic
+
+    // Per-bundle runtime values populated by Prepare. In ModePreview
+    // these stay zero — runtimeVars renders the AT RUNTIME sentinel
+    // instead. In ModeReal, a zero load-bearing field is a wiring bug
+    // and surfaces as an error.
     ExecID     int64
     Batch      string
     OutputDir  string
     OutputFile string
+    PromptFile string
+    // (plus Timestamp / Profile / Agent / Model / Effort /
+    // MaxBudgetUSD / SubRunArgs / DebugContext /
+    // AutoRolesCommandsOutput — empty-OK in ModeReal until a verb
+    // wires them.)
 }
 
-// Satisfy prompts.ResolveContext.
-func (r *Runtime) Env() *root.ResolvedEnv      { return r.Env }
-func (r *Runtime) Vars() Vars                  { return r.Vars }
-func (r *Runtime) Mode() ResolveMode           { return r.Mode }
-func (r *Runtime) Dynamics() PromptDynamic     { return r.Dynamics }
+// Satisfy prompts.ResolveContext. Vars() returns &runtimeVars{rt},
+// which dispatches exec.* against the typed fields above and falls
+// through to rt.vars for every other namespace.
+func (r *Runtime) Env() *root.ResolvedEnv         { return r.env }
+func (r *Runtime) Vars() prompts.Vars             { return &runtimeVars{rt: r} }
+func (r *Runtime) Mode() prompts.ResolveMode      { return r.mode }
+func (r *Runtime) Dynamics() prompts.PromptDynamic { return r.dynamics }
 ```
 
-(In practice the methods need different names from the fields to avoid Go
-shadowing — e.g. `vars`, `mode` etc. fields with `Vars()`, `Mode()`
-methods. Sketch above is for clarity.)
+The exec.* namespace is the typed half of the resolver: a closed key
+set with `requireExec` validation in ModeReal. Other namespaces are a
+plain map carrier (`BaseVars`) — no typed access needed at runtime.
 
 ### Concrete Prompt impls (in `internal/prompts`)
 
@@ -455,17 +453,14 @@ type PromptFile struct {
 }
 ```
 
-_Implementation note (commit `85365a5`):_ the shipped `PromptFile` also
-carries `Assembler *assembler.Assembler` and `Vars assembler.Vars` —
-factory-injected at bundle construction. The spec's eventual shape lifts
-both to the `ResolveContext` so the bundle's Prompt is just `{Path, Pre,
-Post, CustomBody}`. They live on the struct today so the Step-4 migration
-could land without first restructuring `flow.Runtime`'s vars builder; a
-future cleanup moves them to `ResolveContext`.
+`PromptFile` is the spec-clean shape: just `{Path, PrePrompt,
+PostPrompt, CustomBody}`. The assembler and the variable resolver come
+from `ctx.Env().Assembler()` and `ctx.Vars()` at resolve time — no
+factory injection.
 
-All three implement `flow.Prompt`. Each holds whatever state it needs in
-its own fields. New impls (Jinja, remote-fetched, etc.) just satisfy the
-interface — no registration, no plugin system.
+All three implement `prompts.Prompt`. Each holds whatever state it needs
+in its own fields. New impls (Jinja, remote-fetched, etc.) just satisfy
+the interface — no registration, no plugin system.
 
 ### Dispatch rule for `@PATH`
 
@@ -488,31 +483,30 @@ compose. Standard anchors still apply for inherited framing.
 type PromptBundle struct {
     Name, Role, Action string  // reporting metadata only; no logic reads these
 
-    Prompt   Prompt          // built by the factory; self-contained
-    Vars     map[string]string // factory-curated args.* / roles.* / action.* values
-    Dynamics PromptDynamic    // factory-supplied dynamics, copied into rt at resolve time
+    Prompt   prompts.Prompt        // built by the factory; self-contained
+    BaseVars prompts.Vars          // env-derived resolver for non-exec.* namespaces
+    Dynamics prompts.PromptDynamic // factory-supplied dynamics, copied into rt at resolve time
 
     RunOpts  func(RuntimeEnv) runner.RunOpts
     PreExec, PostExec []Action
 }
 ```
 
-`Render` is gone. Framework builds a Runtime, merges `bundle.Vars` into
-`rt.Vars`, sets `rt.Dynamics` from `bundle.Dynamics`, then calls
-`bundle.Prompt.Resolve(rt)` at the moment it needs the text.
+`Render` is gone. flow.execute builds a Runtime, sets `rt.SetVars(b.BaseVars)`
+and `rt.SetDynamics(b.Dynamics)`, then calls `bundle.Prompt.Resolve(rt)`
+at the moment it needs the text.
 
-_Implementation note (commit `85365a5`):_ `Dynamics` was added to the
-struct alongside `Prompt`/`Vars` so each factory can declare exactly
-which dynamic functions its prompt expects (e.g. the review factory
-registers `project_info`). Without per-bundle Dynamics, the rt would
-need a global registry — which the spec explicitly avoids (see
+`BaseVars` is built by the factory from `env.BuildAssemblerVars(...)` and
+carries `prompt.*`, `project.*`, `git.*`, `container.*`, `ateam.*`,
+`role.*`, `args.*`, `roles.*`. The `exec.*` namespace is handled by
+`runtimeVars` against typed fields on Runtime — never goes through
+BaseVars.
+
+`Dynamics` lives on the bundle so each factory can declare exactly which
+dynamic functions its prompt expects (e.g. the review factory registers
+`project_info` + `review_reports`). Without per-bundle Dynamics, the rt
+would need a global registry — which the spec explicitly avoids (see
 "Dynamic functions" above).
-
-**`Vars` is the canonical home for factory-curated values.** Prompt impls
-(`PromptFile`, `PromptText`, etc.) stay focused on prompt source/framing.
-They don't carry CLI-derived state — that belongs at the bundle level so
-the same Prompt type can be reused across factories with different
-exposed values.
 
 ## Vars
 
@@ -710,8 +704,8 @@ func Run(top Step, env RuntimeEnv, rc RunCtx) PipelineResult {
 
 Tree traversal: `flow.Step` interface gains `Walk(func(*PromptBundle))`.
 For each bundle, Verify builds a Runtime with `Mode == ModePreview`,
-merges `bundle.Vars`, and calls `bundle.Prompt.Resolve(rt)`. Errors batched
-per decision.
+sets `rt.SetVars(b.BaseVars)` and `rt.SetDynamics(b.Dynamics)`, and calls
+`bundle.Prompt.Resolve(rt)`. Errors batched per decision.
 
 Verification's behavior decomposes from primitives — no special-case rules:
 
@@ -731,23 +725,28 @@ option struct and returns a `*flow.PromptBundle`. Factory exposes only the
 `args.*` keys its prompt is documented to consume:
 
 ```go
-func NewReviewBundle(env *root.ResolvedEnv, opts ReviewFactoryOpts) (*flow.PromptBundle, error) {
+func NewReviewBundle(in ReviewBundleInput) *flow.PromptBundle {
     return &flow.PromptBundle{
         Name: "review", Role: "supervisor", Action: runner.ActionReview,
-        Prompt: &prompts.PromptFile{
+        Prompt: prompts.PromptFile{
             Path:       "review",
-            PrePrompt:  opts.PrePrompt,
-            PostPrompt: opts.PostPrompt,
+            PrePrompt:  in.PrePrompt,
+            PostPrompt: in.PostPrompt,
         },
-        Vars: map[string]string{
-            "args.no_project_info": boolStr(opts.NoProjectInfo),
-            "roles.selected":       strings.Join(opts.SelectedRoles, " "),
-            // ...positive-listed; nothing else from opts leaks into args.*
+        BaseVars: in.Env.BuildAssemblerVars("review", "the supervisor", "review"),
+        Dynamics: prompts.PromptDynamic{
+            "project_info":   prompts.ProjectInfoDynamic(in.Env, "the supervisor", "review"),
+            "review_reports": reviewReportsDynamic(in.Env, ...),
         },
         RunOpts: ..., PreExec: ..., PostExec: ...,
-    }, nil
+    }
 }
 ```
+
+`BuildAssemblerVars` populates `prompt.*` / `project.*` / `git.*` /
+`ateam.*` / `args.*` / `roles.*`. Factories that need to expose
+operator-supplied scalars (`args.batch`, `roles.enabled`, etc.) merge
+them into the map before handing it to the bundle.
 
 CLI dispatch for `ateam prompt --action X`: a small map in `cmd/` is the
 only place all action names appear together. Unknown action → fallback to
@@ -756,18 +755,18 @@ without a factory entry.
 
 ## `ateam prompt` behavior
 
-Same machinery as live runs with `mode = ModePreview`:
+Same machinery as live runs with `Mode == ModePreview`:
 
 ```go
-factory := promptFactories[promptAction]
-bundle, err := factory(env, opts)
-rt := buildRuntime(env, ModePreview)  // sentinel exec.*; merges bundle.Vars
-text, err := bundle.Prompt.Resolve(rt)
+bundle := promptFactories[promptAction](env, ...)
+text, err := bundle.ResolvePreview(env, env.WorkDir)
 fmt.Println(text)
 ```
 
-A typo surfaces the same engine error verify would. `--paths` /
-`--inline-paths` call `bundle.Prompt.Inspect(rt)` instead.
+`ResolvePreview` builds the Runtime, auto-loads `BaseVars + Dynamics +
+ModePreview`, and calls `bundle.Prompt.Resolve(rt)`. A typo surfaces
+the same engine error verify would. `--paths` / `--inline-paths` use
+`bundle.InspectPreview(env, env.WorkDir)` instead.
 
 ## Accepted breaking changes
 

@@ -159,8 +159,36 @@ func runExec(cmd *cobra.Command, args []string) error {
 		r.ExtraArgs = append(r.ExtraArgs, strings.Fields(execAgentArgs)...)
 	}
 
+	// Scratch mode (no project config) skips the exec-timeout default; the
+	// agent's own timeout still applies.
+	var timeout int
+	if hasProject {
+		timeout = env.Config.Exec.EffectiveTimeout(0)
+	}
+
+	// Build opts. `exec` has no canonical destination — its deliverable is the
+	// stream, viewable via `ateam cat <exec_id>`.
+	opts := runner.RunOpts{
+		RoleID:     execRole,
+		Action:     execAction,
+		WorkDir:    env.WorkDir,
+		Verbose:    execVerbose,
+		Batch:      execBatch,
+		TimeoutMin: timeout,
+	}
+
+	// Build the bundle up front so dry-run and live share one
+	// composition path. ResolvePreview runs the same Prompt.Resolve the
+	// live execute path runs, just in ModePreview — operators see the
+	// engine-expanded body (sentinels for runtime-only exec.*).
+	bundle := staticBundle("exec", execRole, execAction, promptImpl(promptText, execRaw), opts)
+
 	if execDryRun {
-		return printExecDryRun(r, env, promptText, execRole, execAction, execBatch)
+		resolved, err := bundle.ResolvePreview(env, env.WorkDir)
+		if err != nil {
+			return err
+		}
+		return printExecDryRun(r, env, resolved, execRole, execAction, execBatch)
 	}
 
 	db, err := openStateDB(env)
@@ -180,24 +208,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Scratch mode (no project config) skips the exec-timeout default; the
-	// agent's own timeout still applies.
-	var timeout int
-	if hasProject {
-		timeout = env.Config.Exec.EffectiveTimeout(0)
-	}
-
-	// Build opts. `exec` has no canonical destination — its deliverable is the
-	// stream, viewable via `ateam cat <exec_id>`.
-	opts := runner.RunOpts{
-		RoleID:     execRole,
-		Action:     execAction,
-		WorkDir:    env.WorkDir,
-		Verbose:    execVerbose,
-		Batch:      execBatch,
-		TimeoutMin: timeout,
-	}
-
 	jsonOut, jsonCloser, err := openProgressFD(execFormat, execProgressFD)
 	if err != nil {
 		return err
@@ -215,15 +225,6 @@ func runExec(cmd *cobra.Command, args []string) error {
 	ctx, stop := cmdContext()
 	defer stop()
 
-	// Spec step 10: `ateam exec` defaults to PromptText (variable +
-	// dynamic expansion against rt.Vars()); --raw opts back into
-	// RawTextPrompt (bytes-through). Operators piping a fully-baked
-	// prompt that already includes literal `{{` escapes use --raw.
-	var promptImpl prompts.Prompt = prompts.PromptText{Text: promptText}
-	if execRaw {
-		promptImpl = prompts.RawTextPrompt{Text: promptText}
-	}
-	bundle := staticBundle("exec", execRole, execAction, promptImpl, opts)
 	rtEnv := flow.RuntimeEnv{
 		Executor: r,
 		WorkDir:  env.WorkDir,

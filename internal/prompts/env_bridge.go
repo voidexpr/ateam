@@ -6,20 +6,17 @@ import (
 	"github.com/ateam/internal/root"
 )
 
-// BuildEngine returns an assembler engine wired with the default prompt
-// dynamics — currently just dynamic.project_info, the replacement for
-// the retired {{project.info}} static variable. The dispatch context
-// renders in ModeReal: cmd-layer assembly happens during a live
-// invocation, so dynamics evaluate against actual data (not preview
-// sentinels).
+// BuildEngine returns an assembler engine wired with the default
+// prompt dynamics — currently just dynamic.project_info. Renders in
+// ModeReal.
 //
-// roleLabel + action seed the project_info dynamic; pass "" for
-// roleLabel to suppress the block (matching the old --no-project-info
-// contract).
-//
-// Spec step 9: moved out of *root.ResolvedEnv so internal/root no
-// longer imports internal/prompts. The prompts package owns the
-// dispatch wiring; root owns the env it operates on.
+// Use case: a caller that needs to drive the assembler directly
+// (e.g. against a custom anchor chain) but can't go through
+// `PromptFile.Resolve` + `flow.Runtime`. The one such call site is
+// `cmd/prompt.go::runPromptExternalFile`, which augments the standard
+// anchor chain with a temporary anchor for an out-of-tree .prompt.md
+// file. Every other caller uses PromptFile via flow.Runtime — the
+// preferred path. New code should reach for that, not BuildEngine.
 func BuildEngine(env *root.ResolvedEnv, roleLabel, action string) *assembler.Engine {
 	dyn := PromptDynamic{
 		"project_info": ProjectInfoDynamic(env, roleLabel, action),
