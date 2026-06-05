@@ -102,14 +102,14 @@ func runExec(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	promptInst, err := buildArgPrompt(promptArg, prePrompt, postPrompt, execRaw)
-	if err != nil {
-		return err
-	}
-
 	env, err := lookupEnv()
 	if err != nil {
 		return fmt.Errorf("cannot find .ateamorg/: %w", err)
+	}
+
+	promptInst, err := buildArgPrompt(env, promptArg, prePrompt, postPrompt, execRaw)
+	if err != nil {
+		return err
 	}
 
 	hasProject := env.HasProject()

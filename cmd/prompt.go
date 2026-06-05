@@ -162,7 +162,7 @@ func runPromptLiteralFile(pathArg string) error {
 	// sibling <basename>.pre.*.md and dir-level _pre.*.md fragments next
 	// to the file compose alongside the inherited framing.
 	cleanPath := strings.TrimPrefix(pathArg, "@")
-	if prompts.IsFilesystemPromptPath(cleanPath) {
+	if isFilesystemPromptPath(cleanPath) {
 		return runPromptExternalFile(env, cleanPath, prePrompt, postPrompt)
 	}
 
@@ -620,7 +620,7 @@ func runPromptPaths() error {
 // stat each section's source file via the FS that owns it (project's
 // os.DirFS gives real mod times; the embedded anchor's fs.Sub gives a
 // zero time, which sectionModTime renders as "embedded").
-func anchorFSMap(a *assembler.Assembler) map[string]fs.FS {
+func anchorFSMap(a *assembler.MultiAnchorAssembler) map[string]fs.FS {
 	anchors := a.Anchors()
 	out := make(map[string]fs.FS, len(anchors))
 	for _, anc := range anchors {

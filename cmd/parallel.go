@@ -96,9 +96,14 @@ func runParallel(cmd *cobra.Command, args []string) error {
 	// PromptFile (sibling fragments compose around it), other forms
 	// become PromptText (or RawTextPrompt with --raw). commonFirst /
 	// commonLast act as parallel's per-step --pre-prompt / --post-prompt.
+	env, err := lookupEnv()
+	if err != nil {
+		return fmt.Errorf("cannot find .ateamorg/: %w", err)
+	}
+
 	promptInsts := make([]prompts.Prompt, len(args))
 	for i, arg := range args {
-		inst, err := buildArgPrompt(arg, commonFirst, commonLast, parallelRaw)
+		inst, err := buildArgPrompt(env, arg, commonFirst, commonLast, parallelRaw)
 		if err != nil {
 			return fmt.Errorf("prompt %d: %w", i+1, err)
 		}
@@ -115,11 +120,6 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		for i := range labels {
 			labels[i] = fmt.Sprintf("agent-%d", i+1)
 		}
-	}
-
-	env, err := lookupEnv()
-	if err != nil {
-		return fmt.Errorf("cannot find .ateamorg/: %w", err)
 	}
 
 	if parallelDryRun {

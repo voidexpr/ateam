@@ -17,7 +17,7 @@ func makeRC() RunCtx { return RunCtx{} }
 // rcWithAssembler returns a RunCtx whose Resolved env carries the
 // supplied assembler — PromptFile.assemble pulls Assembler via
 // ctx.Env().Assembler(), so tests need an env with the override set.
-func rcWithAssembler(a *assembler.Assembler) RunCtx {
+func rcWithAssembler(a *assembler.MultiAnchorAssembler) RunCtx {
 	env := &root.ResolvedEnv{}
 	env.SetAssemblerOverride(a)
 	return RunCtx{Resolved: env}
@@ -235,7 +235,7 @@ func TestRun_ShortCircuitsOnVerifyError(t *testing.T) {
 // mkVerifyAssembler builds a tiny in-memory assembler for verify tests.
 // Defined here (not reused from prompts package) so flow tests stay
 // self-contained against the assembler subpackage.
-func mkVerifyAssembler(files map[string]string) *assembler.Assembler {
+func mkVerifyAssembler(files map[string]string) *assembler.MultiAnchorAssembler {
 	mf := fstest.MapFS{}
 	for path, body := range files {
 		mf["prompts/"+path] = &fstest.MapFile{Data: []byte(body)}

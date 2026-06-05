@@ -2,13 +2,29 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 )
+
+// isFilesystemPromptPath reports whether `path` triggers the
+// .prompt.md filesystem-path dispatch: ends in ".prompt.md" AND looks
+// like a filesystem reference (contains a path separator or starts
+// with "."). A bare logical name like "review" goes through the
+// standard anchor walk instead. Used at the cmd-layer dispatch sites
+// (`ateam exec @PATH`, `ateam prompt @PATH`) to pick PromptFile vs
+// PromptText.
+func isFilesystemPromptPath(path string) bool {
+	if !strings.HasSuffix(path, ".prompt.md") {
+		return false
+	}
+	return strings.ContainsRune(path, '/') || strings.HasPrefix(path, ".")
+}
 
 // RunnerSpec is the cmd-layer adapter from a command's flag set to the
 // runner resolution chain. Each agent-running cmd (exec, parallel,
@@ -85,15 +101,23 @@ func buildRunner(env *root.ResolvedEnv, spec RunnerSpec) (*runner.AgentExecutor,
 // fragments (`<basename>.pre.*.md`, `_pre.*.md`) get picked up. The
 // other branches pre-read via prompts.ResolveValue so the body is
 // known up front.
-func buildArgPrompt(arg, prePrompt, postPrompt string, raw bool) (prompts.Prompt, error) {
+func buildArgPrompt(env *root.ResolvedEnv, arg, prePrompt, postPrompt string, raw bool) (prompts.Prompt, error) {
 	if !raw && strings.HasPrefix(arg, "@") && !strings.HasPrefix(arg, "@-") {
 		cleanPath := strings.TrimPrefix(arg, "@")
-		if prompts.IsFilesystemPromptPath(cleanPath) {
-			return prompts.PromptFile{
+		if isFilesystemPromptPath(cleanPath) {
+			parentDir := filepath.Dir(cleanPath)
+			if parentDir == "" {
+				parentDir = "."
+			}
+			pf := prompts.PromptFile{
 				Path:       cleanPath,
 				PrePrompt:  prePrompt,
 				PostPrompt: postPrompt,
-			}, nil
+			}
+			if env != nil {
+				pf.Assembler = assembler.NewTempAnchor(parentDir, env.Assembler())
+			}
+			return pf, nil
 		}
 	}
 	body, err := prompts.ResolveValue(arg)

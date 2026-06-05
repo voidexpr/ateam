@@ -40,7 +40,7 @@ func (e *OrphanError) Error() string {
 //
 // Files classified as Unknown (arbitrary includes) and dir-level
 // `_pre.*.md` / `_post.*.md` are never orphans.
-func (a *Assembler) FindOrphans() ([]*OrphanError, error) {
+func (a *MultiAnchorAssembler) FindOrphans() ([]*OrphanError, error) {
 	knownByDir := make(map[string]map[string]bool)
 
 	type fragmentEntry struct {

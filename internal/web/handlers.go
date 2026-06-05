@@ -527,7 +527,7 @@ func (s *Server) handlePrompts(w http.ResponseWriter, r *http.Request) {
 // env + a are the shared per-request env and assembler; pe is only used for
 // the display-path conversion. Passing roleLabel="" suppresses the
 // {{project.info}} section (matching the legacy trace path's shape).
-func assemblerSourcesForRole(env *root.ResolvedEnv, a *assembler.Assembler, pe *ProjectEntry, roleID, action string) []prompts.PromptSource {
+func assemblerSourcesForRole(env *root.ResolvedEnv, a *assembler.MultiAnchorAssembler, pe *ProjectEntry, roleID, action string) []prompts.PromptSource {
 	promptPath := action + "/" + roleID
 
 	// Skip role+action combos that don't ship a main prompt — common for

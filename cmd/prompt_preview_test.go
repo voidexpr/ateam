@@ -219,11 +219,15 @@ func setupMinimalAteamProject(t *testing.T) string {
 	return tmp
 }
 
-// TestPromptInlinePathsRendersPrePostPrompt verifies the inspection modes
-// include --pre-prompt / --post-prompt and render template variables in them
-// (the post-prompt is appended manually in the real run, so it must go through
-// the same engine rather than being emitted as a raw string).
-func TestPromptInlinePathsRendersPrePostPrompt(t *testing.T) {
+// TestPromptInlinePathsRendersPrePostPromptRaw verifies the inspection
+// modes include --pre-prompt / --post-prompt and leave template tokens
+// inside them VERBATIM. Per the Assembler/PromptFactory split
+// (implementer note 2): operator-supplied wrappers are pure text, no
+// engine expansion. A `{{ns.key}}` inside a wrapper reaches the agent
+// as a literal — rationale: when future Prompt impls ship with
+// different template syntaxes, "what does pre/post support" stays
+// simple and consistent across every impl.
+func TestPromptInlinePathsRendersPrePostPromptRaw(t *testing.T) {
 	projectDir := setupMinimalAteamProject(t)
 	prev, _ := os.Getwd()
 	t.Cleanup(func() { _ = os.Chdir(prev) })
@@ -242,13 +246,10 @@ func TestPromptInlinePathsRendersPrePostPrompt(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	if !strings.Contains(out, "cli_pre_prompt") || !strings.Contains(out, "PRE for testproj") {
-		t.Errorf("pre-prompt missing or unrendered, got:\n%s", out)
+	if !strings.Contains(out, "cli_pre_prompt") || !strings.Contains(out, "PRE for {{project.name}}") {
+		t.Errorf("pre-prompt section missing or unexpectedly rendered, got:\n%s", out)
 	}
-	if !strings.Contains(out, "cli_post_prompt") || !strings.Contains(out, "POST for testproj") {
-		t.Errorf("post-prompt missing or unrendered, got:\n%s", out)
-	}
-	if strings.Contains(out, "{{project.name}}") {
-		t.Errorf("template var left unresolved in CLI wrappers, got:\n%s", out)
+	if !strings.Contains(out, "cli_post_prompt") || !strings.Contains(out, "POST for {{project.name}}") {
+		t.Errorf("post-prompt section missing or unexpectedly rendered, got:\n%s", out)
 	}
 }

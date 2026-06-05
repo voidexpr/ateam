@@ -814,9 +814,56 @@ the same engine error verify would. `--paths` / `--inline-paths` use
 ## Assembler / PromptFactory split
 
 This section is a buildable design — an agent picking this up should be
-able to implement it without further conversation. Status: not yet
-implemented. Lands independent of any script-Prompt support; cleans up
-existing code on its own merits.
+able to implement it without further conversation. Status: SHIPPED.
+Lands independent of any script-Prompt support; cleans up existing
+code on its own merits.
+
+What landed:
+- `assembler.Assembler` interface (`Resolve`, `ResolveFramingOnly`,
+  `FindOrphans`, `Anchors`).
+- Concrete `MultiAnchorAssembler` (renamed from the old `Assembler`
+  struct), with chain-walk `Resolve` + `ResolveFramingOnly` extracted
+  to `internal/prompts/assembler/resolve.go`.
+- `TempAnchorAssembler{Inner, ExternalDir}` —
+  `internal/prompts/assembler/temp_anchor.go`. `FindOrphans` scans
+  both external dir AND inner (implementer note 7).
+- `BasicAssembler{FS, Path}` — `internal/prompts/assembler/basic.go`.
+- `prompts.PromptFactory` + `DefaultPromptFactory()` —
+  `internal/prompts/factory.go`. Default returns `PromptText` for
+  every path.
+- `prompts.PromptFile` refactored to orchestrator: optional
+  `Assembler` + `Factory` fields with nil-fall-through (auto-wraps
+  filesystem-shaped `.prompt.md` paths in a TempAnchor when
+  `Assembler` is nil — backward-compat shim for direct callers).
+  Framing slots render via the orchestrator engine; role_main
+  delegates to factory (implementer note 3).
+- Pre/post are now RAW text on every code path —
+  `assembler.AssembleOptions.PrePrompt`/`PostPrompt` skip
+  `engine.Render`; `PromptFile.wrapRaw` joins pre/body/post verbatim
+  with the same `\n\n---\n\n` separator. Test
+  `TestPromptInlinePathsRendersPrePostPromptRaw` (renamed from
+  `…RendersPrePostPrompt`) flips to assert literal `{{ns.key}}` survives.
+- `cmd/exec_bundle.go::buildArgPrompt` takes `env`; injects
+  `TempAnchorAssembler` explicitly when the `@PATH` is a filesystem
+  `.prompt.md` reference. `prompts.IsFilesystemPromptPath` removed
+  from the prompts package; the predicate inlined in cmd as
+  `isFilesystemPromptPath`. `TestIsFilesystemPromptPath` moved to
+  `cmd/exec_bundle_test.go`.
+
+New tests pin the surface:
+`TestTempAnchorAssembler_ResolveExternalDir`,
+`TestTempAnchorAssembler_ResolveFramingOnly`,
+`TestTempAnchorAssembler_FindOrphansScansBothSides`,
+`TestBasicAssembler_*`, `TestDefaultPromptFactory_ReturnsPromptText`,
+`TestPromptFile_OrchestratorRendersFramingAndDelegatesRoleMain`,
+`TestPromptFile_NilFactoryRendersThroughOrchestratorEngine`,
+`TestPromptFile_PrePostAreRaw`,
+`TestPromptFile_BasicAssemblerSingleFileNoFraming`,
+`TestPromptFile_CustomBodySkipsFactoryAndFile`,
+`TestPromptFile_FactoryErrorPropagates`.
+
+The design content below is preserved as the historical spec — it
+matches what was built.
 
 ### Why split
 

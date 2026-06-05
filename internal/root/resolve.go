@@ -54,7 +54,7 @@ type ResolvedEnv struct {
 	quickOrientation *string
 
 	// assemblerOverride is test-only — see SetAssemblerOverride.
-	assemblerOverride *assembler.Assembler
+	assemblerOverride *assembler.MultiAnchorAssembler
 }
 
 func (e *ResolvedEnv) SupervisorDir() string {
@@ -150,7 +150,7 @@ func (e *ResolvedEnv) SharedDir() string {
 //
 // Tests can install an in-memory assembler via SetAssemblerOverride
 // (avoids needing on-disk fixtures for the embedded-defaults FS).
-func (e *ResolvedEnv) Assembler() *assembler.Assembler {
+func (e *ResolvedEnv) Assembler() *assembler.MultiAnchorAssembler {
 	if e.assemblerOverride != nil {
 		return e.assemblerOverride
 	}
@@ -160,7 +160,9 @@ func (e *ResolvedEnv) Assembler() *assembler.Assembler {
 // SetAssemblerOverride installs a test-only assembler that bypasses the
 // project → org → embedded anchor chain. Production code never calls
 // this; tests use it to feed an fstest.MapFS-backed assembler.
-func (e *ResolvedEnv) SetAssemblerOverride(a *assembler.Assembler) { e.assemblerOverride = a }
+func (e *ResolvedEnv) SetAssemblerOverride(a *assembler.MultiAnchorAssembler) {
+	e.assemblerOverride = a
+}
 
 // BuildAssemblerVars produces the per-namespace variable map the new
 // template engine resolves against. `promptPath` is the full v1 path

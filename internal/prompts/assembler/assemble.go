@@ -33,12 +33,18 @@ type AssembleResult struct {
 //     still runs so {{project.info}} etc. resolve.
 //   - PrePrompt is wrapped at the very front of the assembled output,
 //     before any anchor-discovered content. Used by `--pre-prompt TEXT` on
-//     every prompt-taking command.
+//     every prompt-taking command. RAW text — no engine expansion.
 //   - PostPrompt is wrapped at the very end, after every anchor-discovered
-//     section. Used by `--post-prompt TEXT`.
+//     section. Used by `--post-prompt TEXT`. RAW text — no engine expansion.
 //
-// Each field is rendered through the same template engine as anchor
-// content (so `{{project.name}}` etc. work inside CLI-provided text).
+// ReplaceRoleMain still flows through the template engine — it stands
+// in for a `<role>.prompt.md` body, so its rendering contract matches
+// what a file at that path would get. PrePrompt/PostPrompt are
+// operator-supplied wrappers — by design they reach the agent
+// verbatim, identical across every Prompt impl. A `{{ns.key}}` token
+// inside a wrapper surfaces as a literal `{{ns.key}}` (loud failure,
+// not silent empty substitution).
+//
 // Whitespace-only values are dropped — they don't add an empty section to
 // the result.
 type AssembleOptions struct {
@@ -76,7 +82,7 @@ type AssembleOptions struct {
 //
 // opts may be nil for the default "no overrides" path. See AssembleOptions
 // for the override surfaces.
-func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine, opts *AssembleOptions) (AssembleResult, error) {
+func (a *MultiAnchorAssembler) Assemble(promptPath string, vars Vars, engine *Engine, opts *AssembleOptions) (AssembleResult, error) {
 	if opts == nil {
 		opts = &AssembleOptions{}
 	}
@@ -129,7 +135,7 @@ func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine, opts 
 		}
 		return nil
 	}
-	// addCLI is for caller-supplied overrides (pre/post/replace-main). Goes
+	// addCLI is for caller-supplied overrides (ReplaceRoleMain). Goes
 	// through the same render+whitespace-filter path as anchor content so
 	// `{{project.info}}` etc. work inside CLI text, and an empty value
 	// silently drops.
@@ -153,10 +159,23 @@ func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine, opts 
 		return nil
 	}
 
-	// 0. CLI pre-prompt — outermost wrapper at the front.
-	if err := addCLI("cli_pre_prompt", "(--pre-prompt)", opts.PrePrompt); err != nil {
-		return AssembleResult{}, err
+	// addCLIRaw handles PrePrompt / PostPrompt — operator wrappers
+	// reach the agent verbatim, no engine pass. Empty / whitespace-only
+	// values still drop silently.
+	addCLIRaw := func(slot, source, body string) {
+		if strings.TrimSpace(body) == "" {
+			return
+		}
+		sections = append(sections, Section{
+			Anchor:  "cli",
+			Path:    source,
+			Slot:    slot,
+			Content: body,
+		})
 	}
+
+	// 0. CLI pre-prompt — outermost wrapper at the front, RAW.
+	addCLIRaw("cli_pre_prompt", "(--pre-prompt)", opts.PrePrompt)
 
 	// 1. Dir-level pres, root → leaf.
 	for i := 0; i <= len(dirs); i++ {
@@ -241,10 +260,8 @@ func (a *Assembler) Assemble(promptPath string, vars Vars, engine *Engine, opts 
 		}
 	}
 
-	// 6. CLI post-prompt — outermost wrapper at the end.
-	if err := addCLI("cli_post_prompt", "(--post-prompt)", opts.PostPrompt); err != nil {
-		return AssembleResult{}, err
-	}
+	// 6. CLI post-prompt — outermost wrapper at the end, RAW.
+	addCLIRaw("cli_post_prompt", "(--post-prompt)", opts.PostPrompt)
 
 	parts2 := make([]string, len(sections))
 	for i, s := range sections {

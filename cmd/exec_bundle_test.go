@@ -45,7 +45,7 @@ func TestBuildArgPrompt_DispatchRule(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := buildArgPrompt(tc.arg, "", "", tc.raw)
+			got, err := buildArgPrompt(nil, tc.arg, "", "", tc.raw)
 			if err != nil {
 				t.Fatalf("buildArgPrompt: %v", err)
 			}
@@ -245,7 +245,7 @@ func TestBuildRunner_ConflictingProfileAndAgent(t *testing.T) {
 // branch selection; this asserts the wrapping shape that was previously
 // inlined in cmd/exec.go and is now centralized in buildArgPrompt.
 func TestBuildArgPrompt_LiteralPrePostWrap(t *testing.T) {
-	got, err := buildArgPrompt("BODY", "PRE", "POST", false)
+	got, err := buildArgPrompt(nil, "BODY", "PRE", "POST", false)
 	if err != nil {
 		t.Fatalf("buildArgPrompt: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestBuildArgPrompt_LiteralPrePostWrap(t *testing.T) {
 // --raw branch: pre/post still wrap, but the result is a RawTextPrompt
 // (no engine expansion at Resolve time).
 func TestBuildArgPrompt_RawPrePostWrap(t *testing.T) {
-	got, err := buildArgPrompt("BODY", "PRE", "POST", true)
+	got, err := buildArgPrompt(nil, "BODY", "PRE", "POST", true)
 	if err != nil {
 		t.Fatalf("buildArgPrompt: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestBuildArgPrompt_PromptFileBranchCarriesPrePost(t *testing.T) {
 	if err := os.WriteFile(promptFile, []byte("body"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, err := buildArgPrompt("@"+promptFile, "PRE", "POST", false)
+	got, err := buildArgPrompt(nil, "@"+promptFile, "PRE", "POST", false)
 	if err != nil {
 		t.Fatalf("buildArgPrompt: %v", err)
 	}
@@ -327,8 +327,40 @@ func TestBuildArgPrompt_StdinSentinelExcludedFromPromptFileBranch(t *testing.T) 
 	// `!strings.HasPrefix(arg, "@-")` guard isn't strictly necessary
 	// today, but it locks in the user-visible promise that `@-` always
 	// reads stdin even if the predicate is later expanded.
-	if prompts.IsFilesystemPromptPath("-") {
-		t.Error("IsFilesystemPromptPath(\"-\") should be false — `@-` is the stdin sentinel, not a path")
+	if isFilesystemPromptPath("-") {
+		t.Error("isFilesystemPromptPath(\"-\") should be false — `@-` is the stdin sentinel, not a path")
+	}
+}
+
+// TestIsFilesystemPromptPath asserts the predicate's closed truth-table.
+// The cmd-layer dispatch (`ateam exec @PATH`, `ateam prompt @PATH`)
+// uses this rule to pick between the temp-anchor PromptFile branch and
+// the inline-text branch; divergence between dispatch sites would route
+// some paths through the wrong branch.
+func TestIsFilesystemPromptPath(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"./foo.prompt.md", true},
+		{"../foo.prompt.md", true},
+		{".prompt.md", true},
+		{"dir/foo.prompt.md", true},
+		{"/abs/path/foo.prompt.md", true},
+		{"sub/dir/foo.prompt.md", true},
+		{"foo.prompt.md", false},
+		{"review", false},
+		{"./foo.md", false},
+		{"./foo", false},
+		{"./foo.prompt", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			if got := isFilesystemPromptPath(tc.path); got != tc.want {
+				t.Errorf("isFilesystemPromptPath(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
 	}
 }
 

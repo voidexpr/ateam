@@ -143,14 +143,14 @@ type Dispatcher interface {
 // directive family. Construct one per assembly run; safe to reuse across
 // renders against the same anchor list.
 type Engine struct {
-	asm        *Assembler
+	asm        *MultiAnchorAssembler
 	maxDepth   int
 	dispatcher Dispatcher
 }
 
 // NewEngine builds a renderer using a's anchors for include resolution.
 // maxDepth=0 picks DefaultMaxIncludeDepth.
-func NewEngine(a *Assembler, maxDepth int) *Engine {
+func NewEngine(a *MultiAnchorAssembler, maxDepth int) *Engine {
 	if maxDepth <= 0 {
 		maxDepth = DefaultMaxIncludeDepth
 	}

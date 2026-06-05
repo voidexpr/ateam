@@ -11,7 +11,7 @@ import (
 	"github.com/ateam/internal/root"
 )
 
-func mkTestAssembler(files map[string]string) *assembler.Assembler {
+func mkTestAssembler(files map[string]string) *assembler.MultiAnchorAssembler {
 	mf := fstest.MapFS{}
 	for path, body := range files {
 		mf["prompts/"+path] = &fstest.MapFile{Data: []byte(body)}
@@ -24,7 +24,7 @@ func mkTestAssembler(files map[string]string) *assembler.Assembler {
 // test-supplied assembler via env.Assembler(). Production code never
 // calls SetAssemblerOverride; tests use it to avoid needing on-disk
 // anchor fixtures.
-func envWithAssembler(a *assembler.Assembler) *root.ResolvedEnv {
+func envWithAssembler(a *assembler.MultiAnchorAssembler) *root.ResolvedEnv {
 	env := &root.ResolvedEnv{}
 	env.SetAssemblerOverride(a)
 	return env
@@ -40,7 +40,7 @@ func newCtx(prompt map[string]string, dyn PromptDynamic) *stubCtx {
 
 // newPromptFileCtx returns a stubCtx wired with an env carrying the
 // test assembler, plus the test's prompt vars + dynamics.
-func newPromptFileCtx(a *assembler.Assembler, prompt map[string]string, dyn PromptDynamic) *stubCtx {
+func newPromptFileCtx(a *assembler.MultiAnchorAssembler, prompt map[string]string, dyn PromptDynamic) *stubCtx {
 	return &stubCtx{
 		env:  envWithAssembler(a),
 		vars: assembler.MapVars{Prompt: prompt},
@@ -164,44 +164,6 @@ func TestPromptFileInspectReturnsSections(t *testing.T) {
 	}
 	if len(secs) == 0 {
 		t.Fatal("expected at least one section")
-	}
-}
-
-// TestIsFilesystemPromptPath asserts the predicate's closed truth-table.
-// Commit fedb49d exported this so cmd-layer dispatch (`ateam exec @PATH`)
-// and PromptFile.assemble share one rule for "this is a filesystem
-// reference, inject a temp anchor" — divergence between caller and
-// callee would silently route some paths through the wrong branch.
-func TestIsFilesystemPromptPath(t *testing.T) {
-	cases := []struct {
-		path string
-		want bool
-	}{
-		// Filesystem-mode: ends in .prompt.md AND has separator or
-		// leading dot.
-		{"./foo.prompt.md", true},
-		{"../foo.prompt.md", true},
-		{".prompt.md", true}, // pathological — starts with "." even though basename is empty
-		{"dir/foo.prompt.md", true},
-		{"/abs/path/foo.prompt.md", true},
-		{"sub/dir/foo.prompt.md", true},
-		// Logical-mode (no separator, no leading dot): caller resolves
-		// via the anchor walk.
-		{"foo.prompt.md", false},
-		{"review", false},
-		// Wrong suffix: never filesystem-mode.
-		{"./foo.md", false},
-		{"./foo", false},
-		{"./foo.prompt", false},
-		// Empty is conservatively false.
-		{"", false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.path, func(t *testing.T) {
-			if got := IsFilesystemPromptPath(tc.path); got != tc.want {
-				t.Errorf("IsFilesystemPromptPath(%q) = %v, want %v", tc.path, got, tc.want)
-			}
-		})
 	}
 }
 

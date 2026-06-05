@@ -23,7 +23,55 @@ type Match struct {
 	Content []byte
 }
 
-// Assembler resolves prompt files across an ordered list of anchors.
+// Slot names for ResolvedFile.Slot. These are the same string values the
+// composition machinery has always emitted into Section.Slot, exported so
+// new Assembler impls can build ResolvedFile values without re-typing
+// magic strings. Per-dir slots are constructed as
+// `SlotDirPre + ":" + dir` (and similar for post) by Assemble; impls that
+// only emit role_main use SlotRoleMain directly.
+const (
+	SlotRootPre  = "root_pre"
+	SlotDirPre   = "dir_pre"
+	SlotRoleMain = "role_main"
+	SlotRolePost = "role_post"
+	SlotDirPost  = "dir_post"
+)
+
+// ResolvedFile is one entry in an Assembler.Resolve result. It carries
+// what the orchestrator needs to read and the metadata --paths / Inspect
+// consume.
+type ResolvedFile struct {
+	Slot   string // root_pre | dir_pre:<dir> | role_main | role_post | dir_post:<dir>
+	Anchor string // project | org | embedded | external | impl-defined
+	Path   string // anchor-relative
+	FS     fs.FS  // FS to read content from
+}
+
+// Assembler resolves a logical name (or filesystem path) into the ordered
+// file list that composes the assembled prompt. It owns the lookup
+// strategy; it does NOT own rendering — that's the orchestrator's job
+// (prompts.PromptFile).
+//
+// FindOrphans is unchanged from the historical contract — the inspection
+// path consumes it directly.
+//
+// Anchors returns the underlying chain for impls that walk anchors;
+// single-file impls return nil.
+type Assembler interface {
+	Resolve(name string) ([]ResolvedFile, error)
+	// ResolveFramingOnly returns the pre/post framing fragments for
+	// `name` WITHOUT requiring a `<role>.prompt.md` file to exist. Used
+	// by orchestrators when an operator supplies CustomBody (the
+	// role_main file is replaced inline and need not exist on disk).
+	// Impls without a fragment universe (BasicAssembler) return nil.
+	ResolveFramingOnly(name string) ([]ResolvedFile, error)
+	FindOrphans() ([]*OrphanError, error)
+	Anchors() []Anchor
+}
+
+// MultiAnchorAssembler resolves prompt files across an ordered list of
+// anchors. It is the chain-walking concrete impl that powers the standard
+// project → org → embedded lookup.
 //
 // Two resolution modes:
 //   - FirstMatch: most-specific anchor wins (used for `<role>.prompt.md` and
@@ -37,20 +85,21 @@ type Match struct {
 // "embedded → org → project across anchors" rule. A file whose path appears
 // in multiple anchors occupies the slot of the most-specific anchor that has
 // it.
-type Assembler struct {
+type MultiAnchorAssembler struct {
 	anchors []Anchor
 }
 
-// New builds an Assembler. Anchors must be non-nil and listed most-specific first.
-func New(anchors []Anchor) *Assembler {
+// New builds a MultiAnchorAssembler. Anchors must be non-nil and listed
+// most-specific first.
+func New(anchors []Anchor) *MultiAnchorAssembler {
 	dup := make([]Anchor, len(anchors))
 	copy(dup, anchors)
-	return &Assembler{anchors: dup}
+	return &MultiAnchorAssembler{anchors: dup}
 }
 
 // Anchors returns the anchor list in construction order (most-specific first).
 // Useful for tracing / preview.
-func (a *Assembler) Anchors() []Anchor {
+func (a *MultiAnchorAssembler) Anchors() []Anchor {
 	dup := make([]Anchor, len(a.anchors))
 	copy(dup, a.anchors)
 	return dup
@@ -59,7 +108,7 @@ func (a *Assembler) Anchors() []Anchor {
 // FirstMatch returns the most-specific anchor's version of `path`. ok=false
 // when no anchor contains the file. fs.ErrNotExist is the only non-fatal
 // error swallowed; other read errors propagate.
-func (a *Assembler) FirstMatch(path string) (Match, bool, error) {
+func (a *MultiAnchorAssembler) FirstMatch(path string) (Match, bool, error) {
 	for _, anc := range a.anchors {
 		data, err := fs.ReadFile(anc.FS, path)
 		if err == nil {
@@ -83,7 +132,7 @@ func (a *Assembler) FirstMatch(path string) (Match, bool, error) {
 // get them composed together in lexical order.
 //
 // Empty result on no matches is not an error.
-func (a *Assembler) AllMatches(patterns ...string) ([]Match, error) {
+func (a *MultiAnchorAssembler) AllMatches(patterns ...string) ([]Match, error) {
 	// First pass: for each path, identify the most-specific anchor that has it
 	// (content source).
 	contentSrc := make(map[string]int)
