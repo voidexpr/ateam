@@ -157,6 +157,9 @@ func (v *runtimeVars) Resolve(ns, key string) (string, bool, error) {
 //   - Unknown key in known namespace: error (matches the spec's
 //     "typos in known namespaces → engine errors" rule).
 func (v *runtimeVars) resolveExec(key string) (string, bool, error) {
+	if !validExecKey(key) {
+		return "", true, fmt.Errorf("{{exec.%s}}: unknown key in exec namespace", key)
+	}
 	if v.rt.mode == prompts.ModePreview {
 		return "{{AT RUNTIME:exec." + key + "}}", true, nil
 	}
@@ -203,6 +206,21 @@ func (v *runtimeVars) resolveExec(key string) (string, bool, error) {
 		return v.rt.AutoRolesCommandsOutput, true, nil
 	}
 	return "", true, fmt.Errorf("{{exec.%s}}: unknown key in exec namespace", key)
+}
+
+// validExecKey is the single source of truth for the closed set of
+// exec.* keys. Used by resolveExec to validate the key in both
+// ModePreview (sentinel emit) and ModeReal (typed field dispatch) so
+// typos error loudly in either mode.
+func validExecKey(key string) bool {
+	switch key {
+	case "id", "batch", "output_dir", "output_file", "prompt_file",
+		"timestamp", "profile", "agent", "model", "effort",
+		"max_budget_usd", "max_budget_usd_batch", "subrun_args",
+		"debug_context", "auto_roles_commands_output":
+		return true
+	}
+	return false
 }
 
 // requireExec returns the value if populated, or an error pointing at

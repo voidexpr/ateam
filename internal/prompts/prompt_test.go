@@ -6,6 +6,7 @@ import (
 	"testing/fstest"
 
 	"github.com/ateam/internal/prompts/assembler"
+	"github.com/ateam/internal/root"
 )
 
 func mkTestAssembler(files map[string]string) *assembler.Assembler {
@@ -17,8 +18,29 @@ func mkTestAssembler(files map[string]string) *assembler.Assembler {
 	return assembler.New(anchors)
 }
 
+// envWithAssembler returns a minimal ResolvedEnv that surfaces a
+// test-supplied assembler via env.Assembler(). Production code never
+// calls SetAssemblerOverride; tests use it to avoid needing on-disk
+// anchor fixtures.
+func envWithAssembler(a *assembler.Assembler) *root.ResolvedEnv {
+	env := &root.ResolvedEnv{}
+	env.SetAssemblerOverride(a)
+	return env
+}
+
 func newCtx(prompt map[string]string, dyn PromptDynamic) *stubCtx {
 	return &stubCtx{
+		vars: assembler.MapVars{Prompt: prompt},
+		mode: ModeReal,
+		dyn:  dyn,
+	}
+}
+
+// newPromptFileCtx returns a stubCtx wired with an env carrying the
+// test assembler, plus the test's prompt vars + dynamics.
+func newPromptFileCtx(a *assembler.Assembler, prompt map[string]string, dyn PromptDynamic) *stubCtx {
+	return &stubCtx{
+		env:  envWithAssembler(a),
 		vars: assembler.MapVars{Prompt: prompt},
 		mode: ModeReal,
 		dyn:  dyn,
@@ -90,15 +112,15 @@ func TestPromptTextIncludeErrors(t *testing.T) {
 	}
 }
 
-func TestPromptFileErrorsWithoutAssembler(t *testing.T) {
-	// PromptFile needs an Assembler injected by the factory. Resolving
-	// without one is a programmer error — surface it clearly.
+func TestPromptFileErrorsWithoutCtx(t *testing.T) {
+	// PromptFile sources Assembler/Vars from ctx. nil ctx — or a ctx
+	// whose Env() returns nil — is a programmer error: surface it.
 	p := PromptFile{Path: "review"}
-	if _, err := p.Resolve(&stubCtx{}); err == nil {
-		t.Fatal("expected missing-assembler error")
+	if _, err := p.Resolve(nil); err == nil {
+		t.Fatal("expected nil-ctx error")
 	}
 	if _, err := p.Inspect(&stubCtx{}); err == nil {
-		t.Fatal("expected missing-assembler error")
+		t.Fatal("expected nil-env error (stubCtx has no env)")
 	}
 }
 
@@ -111,18 +133,13 @@ func TestPromptFileResolveComposesFraming(t *testing.T) {
 		"review.post.outro.md": "OUTRO",
 	})
 
-	p := PromptFile{
-		Path:      "review",
-		Assembler: a,
-		Vars: assembler.MapVars{
-			Prompt: map[string]string{
-				"name":   "supervisor",
-				"action": "review",
-				"path":   "review",
-			},
-		},
-	}
-	got, err := p.Resolve(&stubCtx{})
+	p := PromptFile{Path: "review"}
+	ctx := newPromptFileCtx(a, map[string]string{
+		"name":   "supervisor",
+		"action": "review",
+		"path":   "review",
+	}, nil)
+	got, err := p.Resolve(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,10 +154,9 @@ func TestPromptFileInspectReturnsSections(t *testing.T) {
 	a := mkTestAssembler(map[string]string{
 		"review.prompt.md": "BODY",
 	})
-	p := PromptFile{Path: "review", Assembler: a, Vars: assembler.MapVars{
-		Prompt: map[string]string{"name": "supervisor", "action": "review", "path": "review"},
-	}}
-	secs, err := p.Inspect(&stubCtx{})
+	p := PromptFile{Path: "review"}
+	ctx := newPromptFileCtx(a, map[string]string{"name": "supervisor", "action": "review", "path": "review"}, nil)
+	secs, err := p.Inspect(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

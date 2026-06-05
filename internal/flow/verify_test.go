@@ -8,10 +8,20 @@ import (
 
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/prompts/assembler"
+	"github.com/ateam/internal/root"
 )
 
 // minimal Pipe used to test Walk's recursion through nested compositions.
 func makeRC() RunCtx { return RunCtx{} }
+
+// rcWithAssembler returns a RunCtx whose Resolved env carries the
+// supplied assembler — PromptFile.assemble pulls Assembler via
+// ctx.Env().Assembler(), so tests need an env with the override set.
+func rcWithAssembler(a *assembler.Assembler) RunCtx {
+	env := &root.ResolvedEnv{}
+	env.SetAssemblerOverride(a)
+	return RunCtx{Resolved: env}
+}
 
 func TestVerify_Clean(t *testing.T) {
 	b := PromptBundle{Name: "x", Prompt: prompts.RawTextPrompt{Text: "ok"}}
@@ -53,16 +63,13 @@ func TestVerify_TyposInKnownNamespaceError(t *testing.T) {
 		"x.prompt.md": "hi {{prompt.nope}}",
 	})
 	b := PromptBundle{
-		Name: "x",
-		Prompt: prompts.PromptFile{
-			Path:      "x",
-			Assembler: a,
-		},
+		Name:   "x",
+		Prompt: prompts.PromptFile{Path: "x"},
 		BaseVars: assembler.MapVars{
 			Prompt: map[string]string{"name": "x", "path": "x", "action": "x"},
 		},
 	}
-	vr := Verify(b, makeRC())
+	vr := Verify(b, rcWithAssembler(a))
 	if vr == nil || len(vr.Errors) != 1 {
 		t.Fatalf("expected one verify error, got %+v", vr)
 	}
@@ -76,16 +83,13 @@ func TestVerify_StrictIncludeMissingErrors(t *testing.T) {
 		"x.prompt.md": "{{include nope.md}}",
 	})
 	b := PromptBundle{
-		Name: "x",
-		Prompt: prompts.PromptFile{
-			Path:      "x",
-			Assembler: a,
-		},
+		Name:   "x",
+		Prompt: prompts.PromptFile{Path: "x"},
 		BaseVars: assembler.MapVars{
 			Prompt: map[string]string{"name": "x", "path": "x", "action": "x"},
 		},
 	}
-	vr := Verify(b, makeRC())
+	vr := Verify(b, rcWithAssembler(a))
 	if vr == nil || !strings.Contains(vr.Errors[0].Err.Error(), "nope.md") {
 		t.Fatalf("expected include-missing error, got %+v", vr)
 	}
@@ -96,16 +100,13 @@ func TestVerify_OptionalIncludeMissingIsClean(t *testing.T) {
 		"x.prompt.md": "before{{include? nope.md}}after",
 	})
 	b := PromptBundle{
-		Name: "x",
-		Prompt: prompts.PromptFile{
-			Path:      "x",
-			Assembler: a,
-		},
+		Name:   "x",
+		Prompt: prompts.PromptFile{Path: "x"},
 		BaseVars: assembler.MapVars{
 			Prompt: map[string]string{"name": "x", "path": "x", "action": "x"},
 		},
 	}
-	if vr := Verify(b, makeRC()); vr != nil {
+	if vr := Verify(b, rcWithAssembler(a)); vr != nil {
 		t.Fatalf("optional include should not error during verify, got %+v", vr)
 	}
 }
@@ -127,17 +128,14 @@ func TestVerify_DynamicsRunInPreviewMode(t *testing.T) {
 		"x.prompt.md": "{{dynamic.check}}",
 	})
 	b := PromptBundle{
-		Name: "x",
-		Prompt: prompts.PromptFile{
-			Path:      "x",
-			Assembler: a,
-		},
+		Name:   "x",
+		Prompt: prompts.PromptFile{Path: "x"},
 		BaseVars: assembler.MapVars{
 			Prompt: map[string]string{"name": "x", "path": "x", "action": "x"},
 		},
 		Dynamics: dyn,
 	}
-	if vr := Verify(b, makeRC()); vr != nil {
+	if vr := Verify(b, rcWithAssembler(a)); vr != nil {
 		t.Fatalf("verify error: %+v", vr)
 	}
 	if len(modes) != 1 || modes[0] != prompts.ModePreview {

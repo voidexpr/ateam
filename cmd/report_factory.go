@@ -54,8 +54,6 @@ func previousReportDynamic(env *root.ResolvedEnv, roleID string, skip bool) prom
 func NewReportBundle(in ReportBundleInput) *flow.PromptBundle {
 	promptPath := "report/" + in.RoleID
 	roleLabel := "role " + in.RoleID
-	a := in.Env.Assembler()
-	vars := in.Env.BuildAssemblerVars(promptPath, roleLabel, "report")
 	return &flow.PromptBundle{
 		Name:   in.RoleID,
 		Role:   in.RoleID,
@@ -64,9 +62,8 @@ func NewReportBundle(in ReportBundleInput) *flow.PromptBundle {
 			Path:       promptPath,
 			PrePrompt:  in.PrePrompt,
 			PostPrompt: in.PostPrompt,
-			Assembler:  a,
 		},
-		BaseVars: vars,
+		BaseVars: in.Env.BuildAssemblerVars(promptPath, roleLabel, "report"),
 		Dynamics: prompts.PromptDynamic{
 			"project_info":    prompts.ProjectInfoDynamic(in.Env, roleLabel, "report"),
 			"previous_report": previousReportDynamic(in.Env, in.RoleID, in.SkipPreviousReport),

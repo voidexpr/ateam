@@ -28,6 +28,7 @@ Commits on `small-fixes`:
 | Next-round step 8 | `(b *PromptBundle).ResolvePreview` / `InspectPreview` auto-load `BaseVars` + `Dynamics` + `ModePreview`. Boilerplate at every cmd-layer preview call site collapsed. |
 | Next-round step 9 | Extracted `internal/promptdata` (AllRoleIDs / AutoRolesMarker / ProjectInfoParams / FormatProjectInfo / WriteOrgDefaults / RoleMeta / IsValidRole / ResolveRoleList / AllKnownRoleIDs / ParsePromptFrontmatter / embedded-defaults FS). Both `internal/root` and `internal/prompts` import promptdata; `prompts` now imports `root`. Bridge functions (`BuildEngine`, `ProjectInfoDynamic`, `NewInspectionContext`, `liveCtx`) moved from `root/engine.go` into `internal/prompts/env_bridge.go` as free functions. `ResolveContext.Env() *root.ResolvedEnv` is now part of the contract. Net -940 lines. |
 | Next-round step 10 | `ateam exec` defaults to `prompts.PromptText` (variable + dynamic expansion); `--raw` opts into `RawTextPrompt`. `parallel` follows the same default. Load-bearing test `TestStaticBundle_PromptTextExpandsExecVars` pins the invariant. |
+| Post-step-10 cleanups | (1) `PromptBundle.Vars` field deleted (dead — never read). (2) `ateam prompt @PATH` now routes through `prompts.PromptText` instead of calling `prompts.BuildEngine().Render()` directly. (3) `applyPromptBatchOverride` + `--batch` flag on `ateam prompt` deleted; `{{exec.batch}}` is a runtime value like `exec.id`, filled at exec time by the runner. (4) `PromptFile.Assembler` / `PromptFile.Vars` fields removed; both sourced from `ctx.Env().Assembler()` and `ctx.Vars()`. (5) flow's `prompts.X` type re-exports dropped. |
 
 ### What the spec set out to achieve that did NOT land
 
@@ -292,12 +293,13 @@ impl.
 | `Runtime` struct (implements `prompts.ResolveContext`) | `Prompt` interface, `ResolveContext` interface |
 | `PromptBundle` | `RawTextPrompt`, `PromptText`, `PromptFile` impls |
 | Lifecycle: `Run`, `Verify`, `Walk` | Resolver engine (`Expand`, anchor walk, `Assemble`) |
-| `Executor` interface (`Prepare`, `ExecutePrepared`) | `Vars` type and `MapVars` impl |
-| Re-exported type aliases (`Prompt`, `Vars`, `ResolveMode`, `Section`, …) so callers don't import both | `PromptDynamic`, `PromptDynamicFunction`, `Section` |
+| `Executor` interface (`Prepare`, `ExecutePrepared`) | `Vars` type, `PromptDynamic`, `PromptDynamicFunction`, `Section` |
 
 Flow defines *when* prompts resolve. The prompts package owns *how* they
-resolve and *what types* describe them. Flow imports prompts and re-exports
-the types its API mentions; the prompts package never imports flow.
+resolve and *what types* describe them. Flow imports prompts; callers
+reference `prompts.X` directly (no re-exports). The prompts package
+imports `root` for `ResolvedEnv` (cycle broken in step 9 by extracting
+data helpers into `internal/promptdata`).
 
 The runner (`Executor`) does **not** participate in prompt resolution.
 Its surface is `Prepare(opts)` + `ExecutePrepared(prepared, text)`. Flow
@@ -325,14 +327,6 @@ type ResolveContext interface {
     Mode() ResolveMode
     Dynamics() PromptDynamic
 }
-
-// _Implementation note (commit `85365a5`):_ `Env()` is intentionally
-// deferred — `internal/root` already imports `internal/prompts` for
-// `prompts.FormatProjectInfo`, `AllRoleIDs`, etc., so the reverse
-// dependency would cycle. The shipped `ResolveContext` exposes
-// `Vars()`, `Mode()`, `Dynamics()`. No shipped dynamic needs Env access
-// today; the method will be added once the helpers in `internal/prompts`
-// that root depends on are extracted to a lower package.
 
 type Prompt interface {
     // Resolve produces the final prompt text. ctx.Mode() controls whether

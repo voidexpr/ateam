@@ -44,26 +44,9 @@ func ProjectInfoDynamic(env *root.ResolvedEnv, roleLabel, action string) PromptD
 	}
 }
 
-// NewInspectionContext returns a ResolveContext for the
-// --paths / --inline-paths inspection path. Spec line 552-557:
-// ModePreview so exec.* renders to the AT RUNTIME sentinel (no exec_id
-// allocated yet) and dynamics that depend on generated artifacts emit
-// preview sentinels. project_info is mode-agnostic (always returns
-// real data) so inspection still shows the project context.
-func NewInspectionContext(env *root.ResolvedEnv, roleLabel, action string) ResolveContext {
-	return &liveCtx{
-		env:  env,
-		mode: ModePreview,
-		dynamics: PromptDynamic{
-			"project_info": ProjectInfoDynamic(env, roleLabel, action),
-		},
-	}
-}
-
-// liveCtx is a tiny ResolveContext used at cmd-layer assembly time,
-// where there's no flow.Runtime yet. Carries just env + mode +
-// dynamics; Vars stays nil (the engine reads vars from the Render()
-// argument, not from ctx).
+// liveCtx is a tiny ResolveContext used internally by BuildEngine.
+// Carries just env + mode + dynamics; Vars stays nil (the engine reads
+// vars from the Render() argument, not from ctx).
 type liveCtx struct {
 	env      *root.ResolvedEnv
 	mode     ResolveMode

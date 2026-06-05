@@ -57,8 +57,6 @@ func reviewReportsDynamic(env *root.ResolvedEnv, selector prompts.ReviewSelector
 // the live path and preview path share the exact same composition (per
 // spec Next-round step 4-5).
 func NewReviewBundle(in ReviewBundleInput) *flow.PromptBundle {
-	a := in.Env.Assembler()
-	vars := in.Env.BuildAssemblerVars("review", "the supervisor", "review")
 	selector := prompts.ReviewSelector{} // ateam review always renders the manifest the verb pre-filtered.
 	return &flow.PromptBundle{
 		Name:   "review",
@@ -68,9 +66,8 @@ func NewReviewBundle(in ReviewBundleInput) *flow.PromptBundle {
 			Path:       "review",
 			PrePrompt:  in.PrePrompt,
 			PostPrompt: in.PostPrompt,
-			Assembler:  a,
 		},
-		BaseVars: vars,
+		BaseVars: in.Env.BuildAssemblerVars("review", "the supervisor", "review"),
 		Dynamics: prompts.PromptDynamic{
 			"project_info":   prompts.ProjectInfoDynamic(in.Env, "the supervisor", "review"),
 			"review_reports": reviewReportsDynamicForReports(in.Reports, in.Env, selector),

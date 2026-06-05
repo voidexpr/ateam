@@ -24,8 +24,6 @@ type SingleSupervisorBundleInput struct {
 // auto-setup + the unknown-action fallback both use this so there is no
 // parallel assembler path.
 func NewSingleSupervisorBundle(in SingleSupervisorBundleInput) *flow.PromptBundle {
-	a := in.Env.Assembler()
-	vars := in.Env.BuildAssemblerVars(in.Path, in.RoleLabel, in.Action)
 	dyn := prompts.PromptDynamic{}
 	if in.RoleLabel != "" {
 		dyn["project_info"] = prompts.ProjectInfoDynamic(in.Env, in.RoleLabel, in.Action)
@@ -38,9 +36,8 @@ func NewSingleSupervisorBundle(in SingleSupervisorBundleInput) *flow.PromptBundl
 			Path:       in.Path,
 			PrePrompt:  in.PrePrompt,
 			PostPrompt: in.PostPrompt,
-			Assembler:  a,
 		},
-		BaseVars: vars,
+		BaseVars: in.Env.BuildAssemblerVars(in.Path, in.RoleLabel, in.Action),
 		Dynamics: dyn,
 	}
 }

@@ -67,8 +67,6 @@ func codeMgmtReviewDynamic(env *root.ResolvedEnv, reviewContent string) prompts.
 // the review content is woven in via {{dynamic.code_mgmt_review}}
 // (spec Next-round step 4-5).
 func NewCodeBundle(in CodeBundleInput) *flow.PromptBundle {
-	a := in.Env.Assembler()
-	vars := in.Env.BuildAssemblerVars("code_management", "the supervisor", "code")
 	return &flow.PromptBundle{
 		Name:   "code",
 		Role:   "supervisor",
@@ -77,9 +75,8 @@ func NewCodeBundle(in CodeBundleInput) *flow.PromptBundle {
 			Path:       "code_management",
 			PrePrompt:  in.PrePrompt,
 			PostPrompt: in.PostPrompt,
-			Assembler:  a,
 		},
-		BaseVars: vars,
+		BaseVars: in.Env.BuildAssemblerVars("code_management", "the supervisor", "code"),
 		Dynamics: prompts.PromptDynamic{
 			"project_info":     prompts.ProjectInfoDynamic(in.Env, "the supervisor", "code"),
 			"code_mgmt_review": codeMgmtReviewDynamic(in.Env, in.ReviewContent),

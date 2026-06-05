@@ -344,11 +344,6 @@ type Action interface {
 // constructs one per call; the bundle's Prompt produces the agent input
 // text, RunOpts shapes the runner invocation, and the action hooks fire
 // around the agent call.
-//
-// Vars holds factory-curated args.* / roles.* / action.* values. Forward-
-// looking field — defaults don't reference these keys yet (Step 6's sweep
-// activates them). Carried on the bundle so the same Prompt impl can be
-// reused across verbs with different exposed values.
 type PromptBundle struct {
 	Name   string
 	Role   string      // optional override of env.Role
@@ -361,13 +356,8 @@ type PromptBundle struct {
 	// always dispatches to rt's fields via runtimeVars regardless of
 	// what's in BaseVars. flow.execute calls rt.SetVars(b.BaseVars)
 	// before Prompt.Resolve runs, so any consumer of ctx.Vars() sees the
-	// runtime-aware view. Spec: this is "the framework builds an impl
-	// per-invocation and stores it on Runtime.Vars" (line 310-311) made
-	// concrete.
+	// runtime-aware view.
 	BaseVars prompts.Vars
-	// Vars is the factory-curated args.* / roles.* / action.* map. Spec
-	// line 287; the merge into rt.Vars happens in step 8.
-	Vars     map[string]string
 	Dynamics prompts.PromptDynamic
 	RunOpts  func(env RuntimeEnv) runner.RunOpts
 	PreExec  []Action

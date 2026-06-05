@@ -30,8 +30,6 @@ type VerifyBundleInput struct {
 // code_management — body comes from code_verify.prompt.md, no special
 // dynamics besides project_info.
 func NewVerifyBundle(in VerifyBundleInput) *flow.PromptBundle {
-	a := in.Env.Assembler()
-	vars := in.Env.BuildAssemblerVars("code_verify", "the supervisor", "verify")
 	dest := in.CanonicalDest
 	if dest == "" {
 		dest = in.Env.VerifyPath()
@@ -44,9 +42,8 @@ func NewVerifyBundle(in VerifyBundleInput) *flow.PromptBundle {
 			Path:       "code_verify",
 			PrePrompt:  in.PrePrompt,
 			PostPrompt: in.PostPrompt,
-			Assembler:  a,
 		},
-		BaseVars: vars,
+		BaseVars: in.Env.BuildAssemblerVars("code_verify", "the supervisor", "verify"),
 		Dynamics: prompts.PromptDynamic{
 			"project_info": prompts.ProjectInfoDynamic(in.Env, "the supervisor", "verify"),
 		},

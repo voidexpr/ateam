@@ -111,21 +111,16 @@ func (p PromptText) Inspect(ResolveContext) ([]Section, error) {
 //     starts with ".". Resolved by injecting the file's parent dir as a
 //     temporary anchor at the front of the chain so sibling
 //     <basename>.pre.*.md and dir-level _pre.*.md in that dir compose.
-//     Step 9 wires the temporary-anchor injection.
 //
-// Assembler and Vars are factory-injected. The spec's eventual shape lifts
-// both to ctx (so the bundle's Prompt is just `{Path, Pre, Post,
-// CustomBody}` per spec lines 195-222). Step 4 keeps them on PromptFile so
-// the migration can land without first restructuring flow.Runtime's vars
-// builder; a follow-up step moves them to ResolveContext.
+// Assembler and Vars come from ctx — `ctx.Env().Assembler()` builds the
+// anchored Assembler and `ctx.Vars()` is the single variable resolver.
+// PromptFile carries only the per-prompt knobs (Path, Pre/Post, custom
+// body); env-shaped state stays on ctx. Spec lines 195-222.
 type PromptFile struct {
 	Path       string
 	PrePrompt  string
 	PostPrompt string
 	CustomBody string
-
-	Assembler *assembler.Assembler
-	Vars      Vars
 }
 
 // Resolve composes the standard framing for p.Path via Assembler and
@@ -150,36 +145,28 @@ func (p PromptFile) Inspect(ctx ResolveContext) ([]Section, error) {
 }
 
 func (p PromptFile) assemble(ctx ResolveContext) (assembler.AssembleResult, error) {
-	if p.Assembler == nil {
-		return assembler.AssembleResult{}, errors.New("prompts.PromptFile: missing Assembler (factory must inject env.Assembler())")
+	if ctx == nil {
+		return assembler.AssembleResult{}, errors.New("prompts.PromptFile: nil ctx (need ResolveContext for Env and Vars)")
+	}
+	env := ctx.Env()
+	if env == nil {
+		return assembler.AssembleResult{}, errors.New("prompts.PromptFile: ctx.Env() returned nil")
 	}
 	if p.Path == "" {
 		return assembler.AssembleResult{}, errors.New("prompts.PromptFile: empty Path")
 	}
-	// SPEC INVARIANT (plans/feature_prompt_cmd_bundle_aware.md Next-round
-	// step 4-5): when ctx is non-nil, ctx.Vars() is the single resolver.
-	// It dispatches exec.* against flow.Runtime fields and falls through
-	// to the bundle's BaseVars for other namespaces. p.Vars survives only
-	// as a fallback for ctx-less callers (unit tests that exercise
-	// PromptFile in isolation).
-	vars := p.Vars
-	if ctx != nil {
-		if v := ctx.Vars(); v != nil {
-			vars = v
-		}
-	}
-	engine := assembler.NewEngine(p.Assembler, 0)
-	if ctx != nil {
-		if dyn := ctx.Dynamics(); dyn != nil {
-			engine = engine.WithDispatcher(NewDispatcher(dyn, ctx))
-		}
+	a := env.Assembler()
+	vars := ctx.Vars()
+	engine := assembler.NewEngine(a, 0)
+	if dyn := ctx.Dynamics(); dyn != nil {
+		engine = engine.WithDispatcher(NewDispatcher(dyn, ctx))
 	}
 	opts := &assembler.AssembleOptions{
 		ReplaceRoleMain: p.CustomBody,
 		PrePrompt:       p.PrePrompt,
 		PostPrompt:      p.PostPrompt,
 	}
-	return p.Assembler.Assemble(p.Path, vars, engine, opts)
+	return a.Assemble(p.Path, vars, engine, opts)
 }
 
 // renderWithCtx runs the assembler engine against ctx — vars + dynamics

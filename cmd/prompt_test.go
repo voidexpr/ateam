@@ -93,20 +93,16 @@ func TestPromptLiteralFileMode(t *testing.T) {
 	if err := os.MkdirAll(promptsDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	const body = "literal {{BATCH}} body, no framing"
+	const body = "literal {{prompt.name}} body, no framing"
 	// Non-.prompt.md extension: keeps the file on the inline-text path
-	// (Step 9 routes .prompt.md files through the framing path instead).
+	// (.prompt.md files route through the framing path instead).
 	filePath := filepath.Join(promptsDir, "foobar.md")
 	if err := os.WriteFile(filePath, []byte(body), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Relative path from project root works (common case).
 	t.Run("relative-path", func(t *testing.T) {
 		defer savePromptGlobals()()
-		promptBatchSaved := promptBatch
-		t.Cleanup(func() { promptBatch = promptBatchSaved })
-		promptBatch = "batch-xyz"
 
 		var runErr error
 		out := captureStdout(t, func() {
@@ -117,18 +113,14 @@ func TestPromptLiteralFileMode(t *testing.T) {
 		if runErr != nil {
 			t.Fatalf("runPrompt: %v", runErr)
 		}
-		if !strings.Contains(out, "batch-xyz") {
-			t.Errorf("expected --batch to replace {{BATCH}}, got:\n%s", out)
-		}
-		if strings.Contains(out, "{{BATCH}}") {
-			t.Errorf("expected {{BATCH}} to be substituted, still present:\n%s", out)
+		if !strings.Contains(out, "literal foobar.md body") {
+			t.Errorf("expected {{prompt.name}} expanded to foobar.md, got:\n%s", out)
 		}
 		if strings.Contains(out, "# ATeam Project Context") {
 			t.Errorf("inline-text mode should not run the assembler; project context should NOT appear:\n%s", out)
 		}
 	})
 
-	// Absolute path also works.
 	t.Run("absolute-path", func(t *testing.T) {
 		defer savePromptGlobals()()
 
@@ -141,8 +133,8 @@ func TestPromptLiteralFileMode(t *testing.T) {
 		if runErr != nil {
 			t.Fatalf("runPrompt: %v", runErr)
 		}
-		if !strings.Contains(out, "literal {{BATCH}} body") {
-			t.Errorf("expected file contents (with placeholder), got:\n%s", out)
+		if !strings.Contains(out, "literal foobar.md body") {
+			t.Errorf("expected {{prompt.name}} expanded, got:\n%s", out)
 		}
 	})
 
@@ -296,15 +288,12 @@ func TestPromptRawSkipsEngine(t *testing.T) {
 	}
 	// Body uses a known-namespace + unknown-key directive that would
 	// normally error during engine.Render — proves the engine never runs.
-	body := "raw: {{prompt.name}} {{exec.work_dir}} {{BATCH}}"
+	body := "raw: {{prompt.name}} {{exec.work_dir}}"
 	filePath := filepath.Join(promptsDir, "raw.prompt.md")
 	if err := os.WriteFile(filePath, []byte(body), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	batchSaved := promptBatch
-	t.Cleanup(func() { promptBatch = batchSaved })
-	promptBatch = "batch-xyz"
 	promptRaw = true
 
 	var runErr error
@@ -318,9 +307,6 @@ func TestPromptRawSkipsEngine(t *testing.T) {
 	}
 	if !strings.Contains(out, body) {
 		t.Errorf("expected file body verbatim, got:\n%s", out)
-	}
-	if strings.Contains(out, "batch-xyz") {
-		t.Errorf("--raw must NOT apply --batch override, got:\n%s", out)
 	}
 	if strings.Contains(out, "# ATeam Project Context") {
 		t.Errorf("--raw must NOT compose framing, got:\n%s", out)

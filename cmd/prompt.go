@@ -27,7 +27,6 @@ var (
 	promptIgnorePreviousReport bool
 	promptPaths                bool
 	promptInlinePaths          bool
-	promptBatch                string
 	promptRaw                  bool
 )
 
@@ -38,9 +37,8 @@ var promptCmd = &cobra.Command{
 role or top-level action, then print the assembled prompt to stdout.
 
 A positional ` + "`@PATH`" + ` argument switches to literal-file mode: read the file's
-contents verbatim and print (with --batch baked in if set). No assembler
-composition or framing — mirrors what ` + "`ateam exec @PATH`" + ` would feed to the
-agent. Use ` + "`@-`" + ` to read from stdin.
+contents and print. No assembler composition or framing — mirrors what
+` + "`ateam exec @PATH`" + ` would feed to the agent. Use ` + "`@-`" + ` to read from stdin.
 
 Example:
   ateam prompt --role security --action report
@@ -65,8 +63,7 @@ func init() {
 	promptCmd.Flags().BoolVar(&promptIgnorePreviousReport, "ignore-previous-report", false, "do not include the role's previous report in the prompt")
 	promptCmd.Flags().BoolVar(&promptPaths, "paths", false, "show a per-section breakdown table (slot + anchor + path + mod time + tokens); no prompt body")
 	promptCmd.Flags().BoolVar(&promptInlinePaths, "inline-paths", false, "print the full prompt with each section preceded by an anchor/path/mod-time/tokens header; troubleshooting view, not for agent consumption")
-	promptCmd.Flags().StringVar(&promptBatch, "batch", "", "bake a literal batch ID into {{exec.batch}} placeholders (otherwise rendered as the deferred {{exec.batch}} marker for the runner to fill at exec time)")
-	promptCmd.Flags().BoolVar(&promptRaw, "raw", false, "literal-file mode only: print the file verbatim (no template engine, no --batch substitution)")
+	promptCmd.Flags().BoolVar(&promptRaw, "raw", false, "literal-file mode only: print the file verbatim (no template engine)")
 	promptCmd.MarkFlagsMutuallyExclusive("paths", "inline-paths")
 	// --action is conditionally required: it's needed for role / action-
 	// singleton resolution, but ignored when a positional @PATH selects
@@ -81,8 +78,9 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		return runPromptPaths()
 	}
 	// Literal-file mode: positional @PATH or @- arg. Reads verbatim,
-	// applies --batch override, prints. No assembler composition — matches
-	// what `ateam exec @PATH` would feed to the agent.
+	// runs through the engine (vars + dynamics) unless --raw is set. No
+	// assembler composition — matches what `ateam exec @PATH` would feed
+	// to the agent.
 	if len(args) == 1 {
 		return runPromptLiteralFile(args[0])
 	}
@@ -141,19 +139,21 @@ func runPromptLiteralFile(pathArg string) error {
 		return runPromptExternalFile(env, cleanPath)
 	}
 
-	// Inline-text path: read the file as opaque text, expand directives
-	// against the standard vars + dynamics. No anchor walk, no framing.
-	// promptPath has no meaningful value here — the file isn't routed
-	// through an action/role namespace. Pass the resolved @<path> as a
-	// label so {{prompt.path}} renders to something traceable if the
-	// user references it; {{prompt.name}} gets the basename.
-	_ = env.Assembler() // ensure assembler is initialized for env.BuildEngine
-	vars := env.BuildAssemblerVars(cleanPath, "", "")
-	rendered, err := prompts.BuildEngine(env, "", "").Render(content, vars)
+	// Inline-text path: wrap content in PromptText and resolve against a
+	// ModePreview runtime carrying the standard vars + project_info
+	// dynamic. {{prompt.name}} renders to the basename; exec.* renders as
+	// the AT RUNTIME sentinel; {{dynamic.project_info}} returns "" because
+	// roleLabel is empty (matches --no-project-info semantics).
+	rt := flow.NewRuntime(nil, env, env.WorkDir)
+	rt.SetVars(env.BuildAssemblerVars(cleanPath, "", ""))
+	rt.SetDynamics(prompts.PromptDynamic{
+		"project_info": prompts.ProjectInfoDynamic(env, "", ""),
+	})
+	rendered, err := prompts.PromptText{Text: content}.Resolve(rt)
 	if err != nil {
 		return fmt.Errorf("rendering %s: %w", pathArg, err)
 	}
-	fmt.Println(applyPromptBatchOverride(rendered))
+	fmt.Println(rendered)
 	return nil
 }
 
@@ -199,7 +199,7 @@ func runPromptExternalFile(env *root.ResolvedEnv, cleanPath string) error {
 	if err != nil {
 		return fmt.Errorf("assembling %s: %w", cleanPath, err)
 	}
-	fmt.Println(applyPromptBatchOverride(res.Prompt))
+	fmt.Println(res.Prompt)
 	return nil
 }
 
@@ -255,7 +255,7 @@ func runPromptRole() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(applyPromptBatchOverride(assembled))
+	fmt.Println(assembled)
 	return nil
 }
 
@@ -369,7 +369,7 @@ func runPromptAction() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(applyPromptBatchOverride(assembled))
+	fmt.Println(assembled)
 	return nil
 }
 
@@ -402,15 +402,18 @@ func inspectBundleForCurrentAction(env *root.ResolvedEnv, promptPath, prePrompt,
 		return bundle.InspectPreview(env, env.WorkDir)
 	}
 	// Fallback: unknown action or role-scoped path. The PromptFile is
-	// the canonical anchored-prompt impl; env.NewInspectionContext wires
-	// the default dynamics (currently project_info).
+	// the canonical anchored-prompt impl; flow.Runtime is the
+	// ResolveContext (carries env + vars + dynamics).
 	pf := prompts.PromptFile{
 		Path:      promptPath,
 		PrePrompt: prePrompt,
-		Assembler: env.Assembler(),
-		Vars:      env.BuildAssemblerVars(promptPath, roleLabel, promptAction),
 	}
-	return pf.Inspect(prompts.NewInspectionContext(env, roleLabel, promptAction))
+	rt := flow.NewRuntime(nil, env, env.WorkDir)
+	rt.SetVars(env.BuildAssemblerVars(promptPath, roleLabel, promptAction))
+	rt.SetDynamics(prompts.PromptDynamic{
+		"project_info": prompts.ProjectInfoDynamic(env, roleLabel, promptAction),
+	})
+	return pf.Inspect(rt)
 }
 
 // bundleForInspection returns the verb factory's bundle for the current
@@ -460,13 +463,6 @@ func bundleForInspection(env *root.ResolvedEnv, prePrompt, postPrompt string) *f
 		})
 	}
 	return nil
-}
-
-func applyPromptBatchOverride(assembled string) string {
-	if promptBatch == "" {
-		return assembled
-	}
-	return strings.ReplaceAll(assembled, "{{BATCH}}", promptBatch)
 }
 
 // sectionDigest is one row of per-section metadata both --paths and
@@ -702,7 +698,7 @@ func runPromptInlinePaths() error {
 			d.Slot, d.Modified, display.FmtTokens(int64(d.Tokens)))
 		fmt.Println(rule)
 		fmt.Println()
-		fmt.Println(applyPromptBatchOverride(d.Content))
+		fmt.Println(d.Content)
 	}
 	return nil
 }
