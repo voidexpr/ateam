@@ -63,22 +63,6 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 		return "", nil, fmt.Errorf("build auto-roles context: %w", err)
 	}
 
-	// Route the auto-roles supervisor body through PromptFile +
-	// flow.Runtime — same single composition path every other verb
-	// uses. exec.* keeps its dotted form (resolved later when the
-	// bundle is executed); project_info renders here against the real
-	// env.
-	pf := prompts.PromptFile{Path: "report_auto_roles"}
-	rt := flow.NewRuntime(nil, env, env.WorkDir)
-	rt.SetVars(env.BuildAssemblerVars("report_auto_roles", "the supervisor", "auto-roles"))
-	rt.SetDynamics(prompts.PromptDynamic{
-		"project_info": prompts.ProjectInfoDynamic(env, "the supervisor", "auto-roles"),
-	})
-	prompt, err := pf.Resolve(rt)
-	if err != nil {
-		return "", nil, fmt.Errorf("assemble auto-roles prompt: %w", err)
-	}
-
 	cr, err := resolveRunner(env, profile, agentName, runner.ActionReview, "", dockerAutoSetup)
 	if err != nil {
 		return "", nil, fmt.Errorf("resolve auto-roles runner: %w", err)
@@ -105,11 +89,20 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 	ctx, stop := cmdContext()
 	defer stop()
 
+	// Route the auto-roles supervisor body through PromptFile +
+	// flow.Runtime — same single composition path every other verb uses.
+	// Resolution happens inside flow.RunBundle's ModeReal pass so
+	// {{exec.auto_roles_commands_output}} and {{exec.output_file}} reach
+	// the agent with their real values.
 	bundle := flow.PromptBundle{
-		Name:   "auto-roles",
-		Role:   "supervisor",
-		Action: runner.ActionExec,
-		Prompt: prompts.PromptText{Text: prompt},
+		Name:     "auto-roles",
+		Role:     "supervisor",
+		Action:   runner.ActionExec,
+		Prompt:   prompts.PromptFile{Path: "report_auto_roles"},
+		BaseVars: env.BuildAssemblerVars("report_auto_roles", "the supervisor", "auto-roles"),
+		Dynamics: prompts.PromptDynamic{
+			"project_info": prompts.ProjectInfoDynamic(env, "the supervisor", "auto-roles"),
+		},
 		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
 			return runner.RunOpts{
 				RoleID:                  "supervisor",

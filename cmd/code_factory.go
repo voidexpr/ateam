@@ -30,6 +30,7 @@ type CodeBundleInput struct {
 	SharedDir     string
 	SupervisorDir string
 	CanonicalDest string // "{{shared}}/code/{{exec.id}}" template — resolved at run time via rt.OutputDir
+	SubRunArgs    string // {{exec.subrun_args}} fragment supervisor prompts paste into each sub-run
 }
 
 // codeMgmtReviewDynamic returns the dynamic that emits the review block
@@ -93,6 +94,7 @@ func NewCodeBundle(in CodeBundleInput) *flow.PromptBundle {
 				Batch:            in.Batch,
 				StartedAt:        in.StartedAt,
 				QuietExecID:      true,
+				SubRunArgs:       in.SubRunArgs,
 			}
 		},
 		PreExec: []flow.Action{

@@ -115,43 +115,57 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 	}
 
 	if inspectAutoDebug {
-		prompt, err := buildAutoDebugPrompt(env, rows, allFiles, inspectPrePrompt, inspectPostPrompt)
+		bundle, err := buildAutoDebugBundle(env, rows, allFiles, inspectPrePrompt, inspectPostPrompt)
 		if err != nil {
 			return err
 		}
 		fmt.Printf("\n--- Auto-debug ---\n")
-		return launchAutoDebug(env, prompt)
+		return launchAutoDebug(env, bundle)
 	}
 
 	return nil
 }
 
-// buildAutoDebugPrompt assembles the auto-debug prompt for a set of runs.
-// prePrompt / postPrompt wrap at the outermost positions.
-func buildAutoDebugPrompt(env *root.ResolvedEnv, rows []calldb.RecentRow, files []string, prePrompt, postPrompt string) (string, error) {
+// buildAutoDebugBundle assembles the auto-debug PromptBundle for a set of
+// runs. Resolution defers to flow.RunBundle (ModeReal), so
+// {{exec.debug_context}} is wired via RunOpts.DebugContext and reaches the
+// agent with its actual value — pre-resolving here in ModePreview would
+// shadow the runtime resolver and bake the AT RUNTIME sentinel into the
+// prompt. PrePrompt / PostPrompt wrap at the outermost positions via
+// PromptFile's AssembleOptions surface.
+func buildAutoDebugBundle(env *root.ResolvedEnv, rows []calldb.RecentRow, files []string, prePrompt, postPrompt string) (flow.PromptBundle, error) {
 	debugContext := buildDebugContext(rows, files)
 	pre, err := prompts.ResolveOptional(prePrompt)
 	if err != nil {
-		return "", fmt.Errorf("cannot resolve --pre-prompt: %w", err)
+		return flow.PromptBundle{}, fmt.Errorf("cannot resolve --pre-prompt: %w", err)
 	}
 	post, err := prompts.ResolveOptional(postPrompt)
 	if err != nil {
-		return "", fmt.Errorf("cannot resolve --post-prompt: %w", err)
+		return flow.PromptBundle{}, fmt.Errorf("cannot resolve --post-prompt: %w", err)
 	}
-
-	pf := prompts.PromptFile{
-		Path:       "exec_debug",
-		PrePrompt:  pre,
-		PostPrompt: post,
-	}
-	vars := env.BuildAssemblerVars("exec_debug", "exec debugger", "debug")
-	vars.Exec["debug_context"] = debugContext
-	rt := flow.NewRuntime(nil, env, env.WorkDir)
-	rt.SetVars(vars)
-	rt.SetDynamics(prompts.PromptDynamic{
-		"project_info": prompts.ProjectInfoDynamic(env, "exec debugger", "debug"),
-	})
-	return pf.Resolve(rt)
+	return flow.PromptBundle{
+		Name:   "auto-debug",
+		Role:   "supervisor",
+		Action: runner.ActionDebug,
+		Prompt: prompts.PromptFile{
+			Path:       "exec_debug",
+			PrePrompt:  pre,
+			PostPrompt: post,
+		},
+		BaseVars: env.BuildAssemblerVars("exec_debug", "exec debugger", "debug"),
+		Dynamics: prompts.PromptDynamic{
+			"project_info": prompts.ProjectInfoDynamic(env, "exec debugger", "debug"),
+		},
+		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
+			return runner.RunOpts{
+				RoleID:       "supervisor",
+				Action:       runner.ActionDebug,
+				WorkDir:      env.WorkDir,
+				Verbose:      true,
+				DebugContext: debugContext,
+			}
+		},
+	}, nil
 }
 
 func resolveRunSelection(db *calldb.CallDB, env *root.ResolvedEnv, args []string) ([]calldb.RecentRow, error) {
@@ -284,7 +298,7 @@ func buildDebugContext(rows []calldb.RecentRow, filePaths []string) string {
 	return b.String()
 }
 
-func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
+func launchAutoDebug(env *root.ResolvedEnv, bundle flow.PromptBundle) error {
 	r, err := resolveRunner(env, inspectProfile, inspectAgent, runner.ActionDebug, "", false)
 	if err != nil {
 		return err
@@ -310,23 +324,10 @@ func launchAutoDebug(env *root.ResolvedEnv, prompt string) error {
 	ctx, stop := cmdContext()
 	defer stop()
 
-	// Route through flow.RunBundle so Prompt.Resolve substitutes the
-	// prompt's exec.* tokens via rt.Vars() at Resolve time. The runner
-	// no longer substitutes the prompt body (spec Next-round step 3).
-	bundle := flow.PromptBundle{
-		Name:   "auto-debug",
-		Role:   "supervisor",
-		Action: runner.ActionDebug,
-		Prompt: prompts.PromptText{Text: prompt},
-		RunOpts: func(flow.RuntimeEnv) runner.RunOpts {
-			return runner.RunOpts{
-				RoleID:  "supervisor",
-				Action:  runner.ActionDebug,
-				WorkDir: env.WorkDir,
-				Verbose: true,
-			}
-		},
-	}
+	// flow.RunBundle resolves the prompt body in ModeReal so
+	// {{exec.debug_context}} substitutes against rt.DebugContext (sourced
+	// from RunOpts.DebugContext). The runner does not substitute the prompt
+	// body (spec Next-round step 3).
 	rtEnv := flow.RuntimeEnv{
 		Executor: r,
 		WorkDir:  env.WorkDir,

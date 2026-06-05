@@ -175,7 +175,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	// composition path. ResolvePreview runs the same Prompt.Resolve the
 	// live execute path runs, just in ModePreview — operators see the
 	// engine-expanded body (sentinels for runtime-only exec.*).
-	bundle := staticBundle("exec", execRole, execAction, promptInst, opts)
+	bundle := staticBundle("exec", execRole, execAction, promptInst, opts, env)
 
 	if execDryRun {
 		resolved, err := bundle.ResolvePreview(env, env.WorkDir)

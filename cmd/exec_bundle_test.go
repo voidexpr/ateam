@@ -81,7 +81,7 @@ func TestBuildArgPrompt_DispatchRule(t *testing.T) {
 
 func TestStaticBundle_Shape(t *testing.T) {
 	opts := runner.RunOpts{RoleID: "tester", Action: runner.ActionExec, WorkDir: "/wd"}
-	b := staticBundle("exec", "tester", runner.ActionExec, prompts.RawTextPrompt{Text: "hello"}, opts)
+	b := staticBundle("exec", "tester", runner.ActionExec, prompts.RawTextPrompt{Text: "hello"}, opts, nil)
 
 	if b.Name != "exec" || b.Role != "tester" || b.Action != runner.ActionExec {
 		t.Errorf("identity fields wrong: %+v", b)
@@ -110,7 +110,7 @@ func TestStaticBundle_Shape(t *testing.T) {
 func TestStaticBundle_PromptTextExpandsExecVars(t *testing.T) {
 	b := staticBundle("x", "r", "exec",
 		prompts.PromptText{Text: "exec={{exec.id}}"},
-		runner.RunOpts{})
+		runner.RunOpts{}, nil)
 	// Build a preview runtime so exec.id renders as the AT RUNTIME sentinel —
 	// confirms PromptText routes through the engine. The expansion shape is
 	// covered byte-for-byte by internal/flow's runtimeVars tests; here we
@@ -129,7 +129,7 @@ func TestStaticBundle_RawPromptIsLiteral(t *testing.T) {
 	// RawTextPrompt: Resolve returns the captured prompt verbatim, no
 	// engine expansion. Spec step 10: this is what `ateam exec --raw`
 	// wraps the body in.
-	b := staticBundle("x", "r", "exec", prompts.RawTextPrompt{Text: "captured"}, runner.RunOpts{})
+	b := staticBundle("x", "r", "exec", prompts.RawTextPrompt{Text: "captured"}, runner.RunOpts{}, nil)
 	got, err := b.Prompt.Resolve(nil)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)

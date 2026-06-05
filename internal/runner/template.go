@@ -80,7 +80,7 @@ func (v TemplateVars) Replacer() *strings.Replacer {
 		"{{exec.subrun_args}}", v.SubRunArgs, "{{SUBRUN_ARGS}}", v.SubRunArgs,
 		"{{exec.output_dir}}", v.OutputDir, "{{OUTPUT_DIR}}", v.OutputDir,
 		"{{exec.output_file}}", v.OutputFile, "{{OUTPUT_FILE}}", v.OutputFile,
-		"{{exec.prompt_file}}", v.PromptFile,
+		"{{exec.prompt_file}}", v.PromptFile, "{{PROMPT_FILE}}", v.PromptFile,
 		"{{exec.auto_roles_commands_output}}", v.AutoRolesCommandsOutput, "{{ATEAM_AUTO_ROLES_COMMANDS_OUTPUT}}", v.AutoRolesCommandsOutput,
 		// Legacy alias for code_management_prompt.md; same dir as OUTPUT_DIR.
 		"{{EXECUTION_DIR}}", v.OutputDir,

@@ -38,6 +38,7 @@ var knownRunnerTemplates = map[string]struct{}{
 	"CONTAINER_NAME":                   {},
 	"OUTPUT_DIR":                       {},
 	"OUTPUT_FILE":                      {},
+	"PROMPT_FILE":                      {},
 	"EXECUTION_DIR":                    {},
 	"ATEAM_OWN_README":                 {},
 	"ATEAM_OWN_COMMANDS":               {},

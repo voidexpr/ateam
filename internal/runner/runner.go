@@ -137,6 +137,18 @@ type RunOpts struct {
 	// Only set by cmd/auto_roles.go; empty for every other action.
 	AutoRolesCommandsOutput string
 
+	// SubRunArgs is the pre-rendered CLI args fragment surfaced as
+	// `{{exec.subrun_args}}` to supervisor prompts (today only `ateam code`).
+	// Carried on RunOpts so flow.newBundleRuntime can wire it onto the
+	// per-run Runtime ahead of Prompt.Resolve; the runner does not
+	// substitute the prompt body.
+	SubRunArgs string
+
+	// DebugContext is the pre-built debug bundle injected into
+	// `{{exec.debug_context}}` for the inspect --auto-debug agent.
+	// Only set by cmd/inspect.go; empty for every other action.
+	DebugContext string
+
 	// QuietExecID suppresses the `exec_id=N` stderr line that Prepare otherwise
 	// emits for orchestrators driving `ateam exec`. Table-rendering commands
 	// (report/code/review/verify/parallel) show the id in the rendered table,

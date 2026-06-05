@@ -135,7 +135,7 @@ func runPromptLiteralFile(pathArg string) error {
 	// sibling <basename>.pre.*.md and dir-level _pre.*.md fragments next
 	// to the file compose alongside the inherited framing.
 	cleanPath := strings.TrimPrefix(pathArg, "@")
-	if isFilesystemPromptPath(cleanPath) {
+	if prompts.IsFilesystemPromptPath(cleanPath) {
 		return runPromptExternalFile(env, cleanPath)
 	}
 
@@ -155,17 +155,6 @@ func runPromptLiteralFile(pathArg string) error {
 	}
 	fmt.Println(rendered)
 	return nil
-}
-
-// isFilesystemPromptPath reports whether path triggers the .prompt.md
-// framing path: ends in ".prompt.md" AND looks like a filesystem reference
-// (contains a path separator or starts with "."). A bare logical name like
-// "review" goes through the factory layer instead.
-func isFilesystemPromptPath(path string) bool {
-	if !strings.HasSuffix(path, ".prompt.md") {
-		return false
-	}
-	return strings.ContainsRune(path, '/') || strings.HasPrefix(path, ".")
 }
 
 // runPromptExternalFile assembles a `.prompt.md` file located anywhere on
@@ -363,13 +352,6 @@ func runPromptAction() error {
 	return nil
 }
 
-// applyPromptBatchOverride bakes the --batch flag value into the assembled
-// prompt by replacing the deferred {{BATCH}} placeholder with the literal.
-// Without --batch the prompt keeps the placeholder, which the runner fills
-// at exec time. This lets users preview or hand-feed an assembled prompt
-// with the batch already resolved (e.g. piping `ateam prompt --batch X` into
-// `ateam exec --batch X` keeps the two in sync without the LLM having to
-// copy a value).
 // inspectBundleForCurrentAction returns the per-section breakdown the
 // --paths / --inline-paths views consume. For factory-registered actions
 // (review, code_management, verify) it builds the same bundle the live
@@ -395,8 +377,9 @@ func inspectBundleForCurrentAction(env *root.ResolvedEnv, promptPath, prePrompt,
 	// the canonical anchored-prompt impl; flow.Runtime is the
 	// ResolveContext (carries env + vars + dynamics).
 	pf := prompts.PromptFile{
-		Path:      promptPath,
-		PrePrompt: prePrompt,
+		Path:       promptPath,
+		PrePrompt:  prePrompt,
+		PostPrompt: postPrompt,
 	}
 	rt := flow.NewRuntime(nil, env, env.WorkDir)
 	rt.SetVars(env.BuildAssemblerVars(promptPath, roleLabel, promptAction))
@@ -554,43 +537,13 @@ func inspectionDigestsForCurrentFlags() (string, []sectionDigest, error) {
 		})
 	}
 
-	addLive := func(slot, source, content string) {
-		if content == "" {
-			return
-		}
-		digests = append(digests, sectionDigest{
-			Slot:     slot,
-			Anchor:   "live",
-			Path:     source,
-			Modified: "-",
-			Tokens:   prompts.EstimateTokens(content),
-			Content:  content,
-		})
-	}
 	// SPEC INVARIANT (Next-round step 6): the previous_report live
 	// section is gone. {{dynamic.previous_report}} (registered by
 	// NewReportBundle, wired into report/_post.previous_report.md)
-	// handles it inline.
-
-	// CLI post-prompt is the outermost tail wrapper, after every synthesized
-	// live section — matching where the real run appends it. Render via
-	// PromptText against a flow.Runtime so engine expansion of the
-	// wrapper goes through the same single resolver path as the bundle
-	// body (no second `BuildEngine`-style engine constructed here).
-	if strings.TrimSpace(postPrompt) != "" {
-		rt := flow.NewRuntime(nil, env, env.WorkDir)
-		rt.SetVars(env.BuildAssemblerVars(promptPath, roleLabel, promptAction))
-		rt.SetDynamics(prompts.PromptDynamic{
-			"project_info": prompts.ProjectInfoDynamic(env, roleLabel, promptAction),
-		})
-		post, perr := prompts.PromptText{Text: postPrompt}.Resolve(rt)
-		if perr != nil {
-			return "", nil, fmt.Errorf("rendering --post-prompt: %w", perr)
-		}
-		if strings.TrimSpace(post) != "" {
-			addLive("cli_post_prompt", "(--post-prompt)", post)
-		}
-	}
+	// handles it inline. CLI --post-prompt is emitted as a cli_post_prompt
+	// section by the assembler itself (via PromptFile's AssembleOptions
+	// surface), so no additional addLive append is needed here — adding
+	// one would double-count the section.
 
 	return promptPath, digests, nil
 }

@@ -376,7 +376,7 @@ func splitFallback(s string) (head, tail string, ok bool) {
 			continue
 		}
 		if c == '?' && i > 0 && isASCIISpace(s[i-1]) && i+1 < len(s) && isASCIISpace(s[i+1]) {
-			return strings.TrimRight(s[:i-1], " \t"), strings.TrimLeft(s[i+2:], " \t"), true
+			return strings.TrimRight(s[:i-1], " \t\n"), strings.TrimLeft(s[i+2:], " \t\n"), true
 		}
 	}
 	return s, "", false

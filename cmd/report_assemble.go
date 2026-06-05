@@ -73,10 +73,7 @@ func previousReportBlock(env *root.ResolvedEnv, roleID string) string {
 	return header + string(data)
 }
 
-// formatAgeShort condenses a Duration to "Xd" / "Xh" / "Xm" / "just now" —
-// mirrors the legacy internal/prompts.formatAge function (which is
-// unexported there) so this package doesn't take a new dependency on the
-// internal helper.
+// formatAgeShort condenses a Duration to "Xd" / "Xh" / "Xm" / "just now".
 func formatAgeShort(d time.Duration) string {
 	switch {
 	case d < time.Minute:

@@ -221,9 +221,13 @@ func TestBuildAutoDebugPromptPrePostWrap(t *testing.T) {
 	const pre = "PRE-MARKER"
 	const post = "POST-MARKER"
 
-	prompt, err := buildAutoDebugPrompt(env, rows, nil, pre, post)
+	bundle, err := buildAutoDebugBundle(env, rows, nil, pre, post)
 	if err != nil {
-		t.Fatalf("buildAutoDebugPrompt: %v", err)
+		t.Fatalf("buildAutoDebugBundle: %v", err)
+	}
+	prompt, err := bundle.ResolvePreview(env, env.WorkDir)
+	if err != nil {
+		t.Fatalf("ResolvePreview: %v", err)
 	}
 
 	preIdx := strings.Index(prompt, pre)

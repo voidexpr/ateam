@@ -123,11 +123,16 @@ func buildArgPrompt(arg, prePrompt, postPrompt string, raw bool) (prompts.Prompt
 //     `ateam exec --raw` and by sub-step bundles that already finished
 //     their own expansion.
 //
+// env seeds BaseVars/Dynamics so non-exec namespaces ({{prompt.name}},
+// {{project.name}}, {{git.branch}}, {{env.X}}, {{dynamic.project_info}})
+// resolve for non-raw bodies — same substitution surface factory bundles
+// expose. RawTextPrompt bypasses expansion regardless.
+//
 // Runner-level substitution (args / container fields / canonical-dest
 // path) still applies — that lives inside ExecutePrepared and runs
 // against runner.TemplateVars, not against ctx.Vars().
-func staticBundle(name, role, action string, prompt prompts.Prompt, opts runner.RunOpts) flow.PromptBundle {
-	return flow.PromptBundle{
+func staticBundle(name, role, action string, prompt prompts.Prompt, opts runner.RunOpts, env *root.ResolvedEnv) flow.PromptBundle {
+	b := flow.PromptBundle{
 		Name:   name,
 		Role:   role,
 		Action: action,
@@ -136,4 +141,11 @@ func staticBundle(name, role, action string, prompt prompts.Prompt, opts runner.
 			return opts
 		},
 	}
+	if env != nil {
+		b.BaseVars = env.BuildAssemblerVars(name, role, action)
+		b.Dynamics = prompts.PromptDynamic{
+			"project_info": prompts.ProjectInfoDynamic(env, role, action),
+		}
+	}
+	return b
 }

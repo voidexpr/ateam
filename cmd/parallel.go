@@ -128,7 +128,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		// same way they would at exec time — no separate composition
 		// path for dry-run.
 		for i, p := range promptInsts {
-			b := staticBundle(labels[i], labels[i], runner.ActionParallel, p, runner.RunOpts{})
+			b := staticBundle(labels[i], labels[i], runner.ActionParallel, p, runner.RunOpts{}, env)
 			resolved, err := b.ResolvePreview(env, env.WorkDir)
 			if err != nil {
 				return fmt.Errorf("dry-run resolve %s: %w", labels[i], err)
@@ -203,7 +203,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 			Verbose:     parallelVerbose,
 			Batch:       batch,
 			QuietExecID: true,
-		})
+		}, env)
 	}
 
 	tr := newTableReporter(tableReporterOpts{

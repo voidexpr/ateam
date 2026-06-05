@@ -202,6 +202,7 @@ func runCode(opts CodeOptions) error {
 		// ExecutePrepared time (that's args/path territory, not prompt
 		// body), so the literal template stays here.
 		CanonicalDest: filepath.Join(env.SharedDir(), "code", "{{EXEC_ID}}"),
+		SubRunArgs:    subRunArgs,
 	})
 
 	if opts.DryRun {

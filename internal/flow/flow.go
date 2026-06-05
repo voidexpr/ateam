@@ -502,13 +502,11 @@ func newBundleRuntime(rc RunCtx, env RuntimeEnv, opts runner.RunOpts, prepared *
 	rt.Agent = prepared.AgentName
 	rt.Model = prepared.Model
 	rt.AutoRolesCommandsOutput = opts.AutoRolesCommandsOutput
-	// Profile / Effort / MaxBudgetUSD* / SubRunArgs / DebugContext are
-	// recognized in the resolver but populated by the verb migration in a
-	// later step — they live on AgentExecutor or in verb-specific paths
-	// today and would need RunOpts to grow to carry them. No shipped
-	// default prompt references those keys; user prompts that do render
-	// to "" instead of erroring, which surfaces the gap without breaking
-	// runs.
+	rt.SubRunArgs = opts.SubRunArgs
+	rt.DebugContext = opts.DebugContext
+	// Profile / Effort / MaxBudgetUSD* live on AgentExecutor today; no
+	// shipped default prompt references those keys, so they render to "" in
+	// ModeReal — that surfaces a future gap without breaking runs.
 	return rt
 }
 
