@@ -113,6 +113,28 @@ func TestCheckConcurrentRuns(t *testing.T) {
 			t.Errorf("scratch mode should continue; got %v (%v)", f.State, f.Err)
 		}
 	})
+
+	t.Run("stale PID for same action → continue", func(t *testing.T) {
+		rc, db := setup(t)
+		stalePID := os.Getpid() + 10_000_000
+		if processAlive(stalePID) {
+			t.Skipf("chosen stale PID %d happens to be alive", stalePID)
+		}
+		seedWithPID(t, db, rc.Resolved.ProjectID(), "verify", "supervisor", stalePID)
+		f := CheckConcurrentRuns{If: true, Action: "verify"}.Run(rc, flow.RuntimeEnv{}, nil)
+		if f.State != flow.StateContinue {
+			t.Errorf("expected continue with stale PID, got %v (%v)", f.State, f.Err)
+		}
+	})
+
+	t.Run("PID == 0 → continue", func(t *testing.T) {
+		rc, db := setup(t)
+		seedNoPID(t, db, rc.Resolved.ProjectID(), "verify", "supervisor")
+		f := CheckConcurrentRuns{If: true, Action: "verify"}.Run(rc, flow.RuntimeEnv{}, nil)
+		if f.State != flow.StateContinue {
+			t.Errorf("expected continue with unset PID, got %v (%v)", f.State, f.Err)
+		}
+	})
 }
 
 // ============================================================
@@ -275,5 +297,39 @@ func seedLive(t *testing.T, db *calldb.CallDB, projectID, action, role string) {
 	}
 	if err := db.SetPID(id, os.Getpid(), ""); err != nil {
 		t.Fatalf("SetPID: %v", err)
+	}
+}
+
+// seedWithPID inserts an open agent_execs row and sets an arbitrary PID,
+// for testing the liveness branch with a non-self process.
+func seedWithPID(t *testing.T, db *calldb.CallDB, projectID, action, role string, pid int) {
+	t.Helper()
+	id, err := db.InsertCall(&calldb.Call{
+		ProjectID: projectID,
+		Action:    action,
+		Role:      role,
+		Batch:     fmt.Sprintf("%s-test", action),
+		StartedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("InsertCall: %v", err)
+	}
+	if err := db.SetPID(id, pid, ""); err != nil {
+		t.Fatalf("SetPID: %v", err)
+	}
+}
+
+// seedNoPID inserts an open agent_execs row without calling SetPID, so the
+// row's PID stays at its zero value.
+func seedNoPID(t *testing.T, db *calldb.CallDB, projectID, action, role string) {
+	t.Helper()
+	if _, err := db.InsertCall(&calldb.Call{
+		ProjectID: projectID,
+		Action:    action,
+		Role:      role,
+		Batch:     fmt.Sprintf("%s-test", action),
+		StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("InsertCall: %v", err)
 	}
 }
