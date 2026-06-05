@@ -257,8 +257,22 @@ For `prompts/report/security`:
 ateam prompt --role ROLE --action report                  # print the assembled prompt
 ateam prompt --role ROLE --action report --paths          # tabular per-section breakdown
 ateam prompt --role ROLE --action report --inline-paths   # full prompt with per-section headers
-ateam prompt --supervisor --action review --paths
+ateam prompt --action review --paths                      # supervisor singletons take just --action
 ```
+
+### `@PATH` dispatch (exec / parallel / prompt)
+
+`ateam exec @PATH`, `ateam parallel @PATH`, and `ateam prompt @PATH` route the input through one of three Prompt implementations based on the file's suffix and `--raw`:
+
+| Input | Implementation | What it does |
+|---|---|---|
+| `--raw` + anything | `RawTextPrompt` | Bytes-through: no template engine, no anchor walk. The agent sees the file verbatim. |
+| `@foo.prompt.md` (path separator or leading `.`) | `PromptFile` (filesystem mode) | The file's parent dir is injected as a temporary anchor at the front of the standard chain. Sibling `foo.pre.*.md` / `foo.post.*.md` / dir-level `_pre.*.md` / `_post.*.md` compose around the body. Engine expands `{{namespace.key}}` directives. |
+| `@foo.md` (any non-`.prompt.md` file) | `PromptText` | The file body runs through the template engine (vars + dynamics) but does NOT compose with any anchor framing. |
+| `@-` (stdin) | `PromptText` | Same as `@foo.md`: engine-expand only, no framing. |
+| Bare literal text (`ateam exec "hello"`) | `PromptText` | Same: engine-expand only. |
+
+For role-scoped prompts (`ateam prompt --role X --action Y`) and supervisor singletons (`ateam prompt --action review`) the dispatch is implicit — those always go through `PromptFile` against the standard anchor chain (no temp injection).
 
 ### Common Override Patterns
 
@@ -285,11 +299,29 @@ echo "For this project, treat any C extensions as untrusted." \
 
 ### Template Variables
 
-Prompts can reference `{{namespace.key}}` variables. The runner fills `{{exec.*}}` placeholders at execution time; the assembler fills `{{prompt.*}}`, `{{project.*}}`, `{{git.*}}`, `{{ateam.*}}`, `{{role.*}}`, and `{{env.NAME}}` at assembly time. Legacy ALL_CAPS forms (`{{OUTPUT_DIR}}`, `{{ROLE}}`, etc.) are auto-translated via a compat shim — existing user prompts keep working without rewrites.
+Prompts reference `{{namespace.key}}` directives. The resolver is **closed-set**: an unknown namespace passes through verbatim (so `{{foo.bar}}` in a code block survives unchanged), but a known namespace with an unknown key is a hard error (catches typos before the prompt reaches the agent). Legacy ALL_CAPS forms (`{{OUTPUT_DIR}}`, `{{ROLE}}`, etc.) are auto-translated via a compat shim — existing user prompts keep working without rewrites.
 
-`{{git.*}}` exposes repository facts derived from the agent's work-dir: `git.repo` (basename of the repo root), `git.branch`, `git.commit` (full SHA), `git.head_short` (abbreviated SHA), `git.dirty` (`"true"` / `"false"`). All five render as the empty string (or `"false"` for `git.dirty`) when the work-dir isn't inside a git repo, so prompts using them keep rendering cleanly in scratch contexts.
+| Namespace | Resolved by | Keys |
+|---|---|---|
+| `prompt.*` | assembler (per-prompt) | `name`, `path`, `action` |
+| `project.*` | assembler | `name`, `root`, `full_path`, `dir` |
+| `git.*` | assembler | `repo`, `branch`, `commit`, `head_short`, `dirty` |
+| `container.*` | assembler | `type`, `name` |
+| `ateam.*` | assembler | `own_readme`, `own_commands`, `own_config`, `own_isolation`, `own_roles`, `auto_roles_marker` |
+| `role.*` | assembler | `reports` |
+| `args.*` | factory | factory-curated CLI-flag values, e.g. `args.ignore_previous_report` for `ateam report --ignore-previous-report` |
+| `roles.*` | env | `enabled` — comma-separated list of enabled role IDs from project config |
+| `exec.*` | runtime (`flow.Runtime`) | `id`, `batch`, `output_dir`, `output_file`, `prompt_file`, `timestamp`, `profile`, `agent`, `model`, `effort`, `max_budget_usd`, `max_budget_usd_batch`, `subrun_args`, `debug_context`, `auto_roles_commands_output` |
+| `env.NAME` | OS environment | Reads from the agent process's environment at assembly time. Unset variables error loudly. |
+| `dynamic.NAME [args...]` | factory dynamics | Resolved by a registered function on the bundle. Shipped: `project_info`, `review_reports`, `code_mgmt_review`, `previous_report`. |
 
-`{{env.NAME}}` reads from the agent process's environment at assembly time. References to an unset variable error loudly with the variable name in the message — preferable to silently substituting empty strings into prompts the agent can't recover from.
+`{{git.*}}` returns the empty string (or `"false"` for `git.dirty`) when the work-dir isn't inside a git repo, so prompts using them keep rendering cleanly in scratch contexts.
+
+`{{exec.*}}` is the **runtime namespace** — values are allocated by the runner's `Prepare` step (exec ID, output paths) or sourced from the verb factory (batch, profile, model, …). In live runs they render as their real values; in preview / verify / `ateam prompt --action X`, they render as the literal sentinel `{{AT RUNTIME:exec.<key>}}` so operators can see the structure without an exec actually allocated.
+
+`{{args.*}}` and `{{roles.*}}` are the **factory-curated namespaces** — the verb's CLI surface exposes specific values into the prompt without leaking the whole option struct. Today only `args.ignore_previous_report` and `roles.enabled` are populated; verb factories add more on demand. See `internal/prompts/assembler/template.go::MapVars` for the resolver and `internal/root/resolve.go::BuildAssemblerVars` for where the env-shaped namespaces are seeded.
+
+`{{dynamic.NAME}}` is the **late-binding namespace** — a registered function on the bundle returns a string when the directive expands. Dynamics that depend on artifacts generated by a previous step (e.g. `review_reports` reads the role reports written by `ateam report`) return a preview sentinel in `ModePreview` rather than reading disk, so `ateam prompt --action review` is deterministic before any reports exist.
 
 ## Runtime Configuration
 
