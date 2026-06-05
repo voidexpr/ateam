@@ -86,16 +86,15 @@ The user-facing assembly model (anchor chain, filename patterns, `FirstMatch` vs
 - `assembler.BuildAnchors(projectDir, orgDir, embedded)` (`internal/prompts/assembler/anchors.go`) builds the project → org → embedded chain, wired up by `(*ResolvedEnv).Assembler()` (`internal/root/resolve.go`).
 - Prompt-file `{{namespace.key}}` directives are resolved by `internal/prompts/assembler/template.go` and `MapVars`. The canonical variable names plus the legacy ALL_CAPS → dotted compatibility mapping live in `internal/prompts/assembler/varmap.go` (`VarRenameMap`, `VarLiteralRewrites`) — add new prompt variables there.
 - `runtime.hcl` ALL_CAPS `{{VAR}}` placeholders (agent CLI args, container fields) are a *separate* substitution pass handled by `TemplateVars.Replacer()` in `internal/runner/template.go`. Add new placeholders there. Do not conflate the two systems.
-- The `ATeam Project Context` header, the previous-report block, and the `# Additional Instructions` block are appended around the assembled body by the cmd layer (see `assembleRoleReport` in `cmd/report_assemble.go`), not by the assembler itself.
+- The `ATeam Project Context` header, the previous-report block, and the reports-manifest block are NOT appended by hand — they are wired in as dynamics (`{{dynamic.project_info}}`, `{{dynamic.previous_report}}`, `{{dynamic.review_reports}}`, `{{dynamic.code_mgmt_review}}`) and resolved during `Prompt.Resolve` against `ctx.Dynamics()`. See "Architecture: prompt resolution" below.
 
 ### CLI override surface (`AssembleOptions`)
 
 `Assemble` takes an `*AssembleOptions` (`internal/prompts/assembler/assemble.go`) carrying caller-supplied overrides; `nil` means no overrides. Each field is rendered through the same template engine as anchor content; whitespace-only values are dropped.
 
-- `ReplaceRoleMain` — swaps in caller text as the role's main body; all surrounding framing (pre/post fragments, CLI wrappers) still composes. Used by `ateam review --prompt` and `ateam code --prompt`.
+- `ReplaceRoleMain` — swaps in caller text as the role's main body; all surrounding framing (pre/post fragments, CLI wrappers) still composes.
 - `PrePrompt` — wrapped at the very front, before any anchor content (`--pre-prompt`).
 - `PostPrompt` — wrapped at the very end, after every anchor section (`--post-prompt`).
-- `--extra-prompt` — *not* handled by the assembler; the cmd layer appends it after the assembled body under an `# Additional Instructions` heading (see `assembleRoleReport` in `cmd/report_assemble.go`).
 
 Canonical wrap order:
 
@@ -103,17 +102,17 @@ Canonical wrap order:
 anchors → dir-level _pre/_post → role-level pre/post → --pre-prompt (head) / --post-prompt (tail)
 ```
 
-`--extra-prompt` slots in after the assembled body and before `--post-prompt`. The standardized flag set and usage strings live in `cmd/prompt_wrap_flags.go` (single source of truth).
+The standardized flag set and usage strings live in `cmd/prompt_wrap_flags.go` (single source of truth).
 
 ### Code action prompts vs. supervisor code phase
 
 Three top-level prompts cover the code workflow; each addresses a different layer:
 
 - **Implementer body** — `code.prompt.md` (top-level singleton) carries the generic instructions every per-task sub-run needs: minimal blast radius, baseline tests, commit format, clean failure. Reachable via `ateam prompt --action code --post-prompt @task.md`, which composes `code.prompt.md` with the per-task description and emits the prompt the implementing agent will read.
-- **Supervisor body** — `code_management.prompt.md` (top-level singleton) drives the orchestrator that splits the review into tasks. Reachable via `ateam prompt --action code_management` (canonical) or `ateam prompt --supervisor --action code` (legacy alias). Assembled by `assembleCodeManagementV1` (`cmd/code_assemble.go`).
+- **Supervisor body** — `code_management.prompt.md` (top-level singleton) drives the orchestrator that splits the review into tasks. Reachable via `ateam prompt --action code_management`. Both the live `ateam code` verb and the preview path build through `NewCodeBundle` (`cmd/code_factory.go`); the review block is woven in by `{{dynamic.code_mgmt_review}}` (no separate `assemble*` helper).
 - **Per-task wiring** — Phase 3 of `code_management.prompt.md` pipes the implementer body into `ateam exec`: `ateam prompt --action code --post-prompt @SEQ_SLUG_task.md | ateam exec --action code --batch {{exec.batch}} {{exec.subrun_args}}`. The supervisor never generates a per-task prompt by hand; the framing comes from `code.prompt.md` and the task body is the per-task file the supervisor wrote during Phase 2.
 
-Sub-run flag propagation (profile, agent, project, org, work-dir, model, effort, budgets) flows through `{{exec.subrun_args}}`, rendered by `buildSubRunArgs` in `cmd/code.go`. Excluded by design: manager-only flags (`--supervisor-*`, `--management`, `--review`, `--timeout`), mode controls (`--dry-run`, `--force`, `--print`), and supervisor I/O flags (`--verbose`, `--quiet`, `--format`, `--progress-fd`, `--agent-args`, `--docker-auto-setup`). Each new `ateam code` flag added later must be classified explicitly there.
+Sub-run flag propagation (profile, agent, project, org, work-dir, model, effort, budgets) flows through `{{exec.subrun_args}}`, rendered by `buildSubRunArgs` in `cmd/code.go`. Excluded by design: manager-only flags (`--management`, `--review`, `--timeout`), mode controls (`--dry-run`, `--force`, `--print`), and supervisor I/O flags (`--verbose`, `--quiet`, `--format`, `--progress-fd`, `--agent-args`, `--docker-auto-setup`). Each new `ateam code` flag added later must be classified explicitly there.
 
 Role-specific code bodies (`code/<role>.prompt.md`) are no longer shipped — the `code/` namespace was retired in favor of the single top-level `code.prompt.md`. User-installed overrides at `.ateam/prompts/code/<role>.prompt.md` are still loaded by `assembleRoleCode` for backward compat, but operate without dir-level framing; new projects should put customizations in `.ateam/prompts/code.post.extra.md` instead.
 
@@ -216,11 +215,76 @@ The remainder of this section covers contributor-only details — the Go-side su
 
 The spine of every agent-running cmd (`exec`, `parallel`, `verify`, `review`, `auto_setup`, `code`, `report`). A `Step` is one of three types: `PromptBundle` (leaf — one agent invocation, with `PreExec` / `PostExec` `Action` hooks), `Pipeline` (sequence; stops on first errored step, skip results don't stop the chain), `Parallel` (fan-out with bounded workers and per-step panic recovery; does not short-circuit on errors). Cmds enter through `flow.Run`, which always returns `PipelineResult`; single-bundle callers use `flow.RunBundle`.
 
+**Responsibilities:**
+
+- The lifecycle: `Run` (Verify → Prepare → Resolve → Execute → PostExec), `Walk`, `Verify`.
+- The carriers: `Runtime` (satisfies `prompts.ResolveContext`), `PromptBundle` (Prompt + RunOpts + hooks), `Pipeline` / `Parallel`.
+- The `exec.*` namespace dispatch — `runtimeVars` resolves `exec.id` / `exec.batch` / `exec.output_dir` / `exec.output_file` / `exec.prompt_file` etc. against typed `Runtime` fields populated by `Prepare`. Unknown keys error in both modes; in `ModePreview` known keys render as the `{{AT RUNTIME:exec.<key>}}` sentinel.
+
+**Does not know about:**
+
+- How a prompt body is composed — delegates to `prompts.Prompt.Resolve(rt)`.
+- Verb semantics (review vs verify vs code) — every verb is a `PromptBundle`; the factory in `cmd/<action>_factory.go` is the only verb-specific code flow runs.
+- Agent execution mechanics — talks to `runner.Executor` via `Prepare(opts) → PreparedRun` then `ExecutePrepared(prepared, text)`. The runner does NOT re-substitute the prompt body.
+
+**Boundary interfaces:** `prompts.Prompt`, `prompts.ResolveContext`, `runner.Executor`.
+
+Carriers worth knowing:
+
 - `RunCtx` carries the per-execution session: `context.Context`, `*calldb.CallDB`, `*root.ResolvedEnv`, and the `Reporter`. Threaded unchanged through every Step.
 - `RuntimeEnv` is the "where & how to invoke the agent" config (executor, workdir, role, action, dry-run, batch, prompt-dir) and is freely rebound at composition boundaries via `Pipeline.Env` / `Parallel.Env` / `PromptBundle.Env`.
 - `Reporter` is the single observability seam — bundle/stage lifecycle, agent progress events, skipped-step notifications. Cmd-layer TUIs and JSON reporters implement it; `NoopReporter` is the default.
 
-Design rationale and the Phase F→G migration: [`plans/Feature_prompt_report_fs_refactor_phaseG.md`](plans/Feature_prompt_report_fs_refactor_phaseG.md). The pre-Phase-G `internal/stage` package has been removed; do not reference it.
+### `internal/prompts` (resolver)
+
+Owns the `Prompt` interface and three impls:
+
+- `RawTextPrompt` — bytes-through, no engine. `ateam exec --raw` wraps the body in this.
+- `PromptText` — engine-expanded inline text (vars + dynamics, no anchor walk). Default for `ateam exec` and `ateam parallel`.
+- `PromptFile` — anchored composition: walks `project → org → embedded` and joins pre/main/post slots. The factory just sets `{Path, PrePrompt, PostPrompt, CustomBody}` — the assembler and vars are sourced from `ctx.Env().Assembler()` and `ctx.Vars()`.
+
+**Responsibilities:**
+
+- The resolver contract: `ResolveContext.{Env, Vars, Mode, Dynamics}`. `Vars()` returns a resolver that dispatches by namespace (`exec.*` from flow's `Runtime`, everything else from `BaseVars`).
+- Dynamics: `PromptDynamicFunction = func(ctx, args...) (string, error)`. Mode-aware: branch on `ctx.Mode()` to return a sentinel in `ModePreview` and a real value in `ModeReal`.
+- Env-shaped bridge helpers: `BuildEngine`, `ProjectInfoDynamic` — take `*root.ResolvedEnv` as a parameter, not as a closure capture.
+
+**Does not know about:**
+
+- When or how often a prompt resolves — flow's job.
+- Agent execution — runner's job.
+- Data / role metadata (`AllRoleIDs`, `WriteOrgDefaults`, `FormatProjectInfo`, etc.) — those live in `internal/promptdata` so that `internal/root` can import them without creating a cycle.
+
+**Boundary interfaces:** consumes `*root.ResolvedEnv` (project paths, config) and `assembler.Assembler` (anchor walk).
+
+Package layering: `cmd → flow → prompts → root → promptdata`. The arrow is one-way; the cycle that previously blocked `ResolveContext.Env()` was broken by extracting data helpers into `internal/promptdata`.
+
+### Architecture: prompt resolution
+
+`PromptBundle.Prompt.Resolve(rt)` is the **single substitution pass** on the prompt body. The runner does NOT re-substitute — `runner.ExecutePrepared` runs after `Resolve` and only fills `TemplateVars`-shaped placeholders in `RunOpts` args / container fields / canonical-dest paths.
+
+Two modes:
+
+- `ModePreview` (verify, `ateam prompt --action X`, dry-run): generated-artifact dynamics return preview sentinels (`{{AT RUNTIME: review-reports block}}` etc.). `exec.*` renders as the `{{AT RUNTIME:exec.<key>}}` sentinel.
+- `ModeReal` (live `flow.Run` between Prepare and Execute): everything resolves to real values; an unpopulated load-bearing `exec.*` field is a wiring bug (`flow.execute` forgot to set it) and surfaces as an error.
+
+### Adding a new action
+
+1. **Prompt file** in `defaults/prompts/<action>.prompt.md` (or `report/<role>.prompt.md` for per-role). Reference dynamics with `{{dynamic.X}}`.
+2. **Factory** in `cmd/<action>_factory.go`: `New<Action>Bundle(in <Action>BundleInput) *flow.PromptBundle` returning `{Prompt: PromptFile{Path}, BaseVars, Dynamics, RunOpts, PreExec, PostExec}`.
+3. **Dynamics** (if needed): closures of `prompts.PromptDynamicFunction` that branch on `ctx.Mode()` — sentinel in `ModePreview`, real value in `ModeReal`.
+4. **Verb cmd** in `cmd/<action>.go`: build the bundle, call `flow.Run(*bundle, rtEnv, rc)`. Dry-run calls `bundle.ResolvePreview(env, workDir)`.
+5. **`ateam prompt --action <action>`** wiring: add to `promptFactories` map and `bundleForInspection` switch in `cmd/prompt.go` — preview and live share the same factory.
+
+### Executing a prompt with `exec` / `parallel`
+
+1. **Build bundle** — wrap operator-supplied text in `prompts.PromptText` (default — expansion on) or `prompts.RawTextPrompt` (`--raw`). `staticBundle(name, role, action, prompt, opts)` returns `flow.PromptBundle`.
+2. **Verify** — `flow.Run` calls `bundle.Prompt.Resolve(rt)` in `ModePreview`. Catches typos and broken dynamics before any agent runs.
+3. **Prepare** — `runner.Prepare(opts)` allocates `exec_id`, runtime dir, output paths → returns `PreparedRun`. `flow.execute` populates `rt.{ExecID, Batch, OutputDir, OutputFile, PromptFile}` from it.
+4. **Resolve** — `bundle.Prompt.Resolve(rt)` in `ModeReal` produces the final text. Single substitution pass; the runner does not touch the prompt body afterward.
+5. **Execute** — `runner.ExecutePrepared(prepared, text)` runs the agent; `PostExec` hooks fire (artifact promotion, print, etc.).
+
+Design rationale: [`plans/feature_prompt_cmd_bundle_aware.md`](plans/feature_prompt_cmd_bundle_aware.md). The pre-Phase-G `internal/stage` package has been removed; do not reference it.
 
 ### Agent and container Go surface
 
