@@ -191,26 +191,46 @@ func TestParseAssistantToolInput(t *testing.T) {
 }
 
 func TestLooksLikeSecret(t *testing.T) {
-	secrets := []string{
-		"API_KEY", "aws_secret_access_key", "GITHUB_TOKEN",
-		"DB_PASSWORD", "PRIVATE_KEY", "AUTH_HEADER",
-		"MY_CREDENTIALS", "passwd",
-		"DATABASE_URL", "REDIS_URL", "MONGO_URL",
-		"PGURI", "DSN", "CONN_STRING",
+	cases := []struct {
+		name   string
+		secret bool
+	}{
+		// Suffix matches.
+		{"API_KEY", true},
+		{"GITHUB_TOKEN", true},
+		{"DATABASE_PASSWORD", true},
+		{"MY_APP_SECRET", true},
+		{"PRIVATE_KEY", true},
+		{"aws_secret_access_key", true},
+		// Bare names.
+		{"TOKEN", true},
+		{"KEY", true},
+		{"SECRET", true},
+		{"PASSWORD", true},
+		// URL/URI/DSN/CONN/PASS substrings must not match.
+		{"STATUS_URL", false},
+		{"HOMEBREW_API_URL", false},
+		{"BUILD_CONNECTION_TIMEOUT", false},
+		{"BYPASS", false},
+		{"TLS_PASSTHROUGH", false},
+		{"DATABASE_URL", false},
+		{"PGURI", false},
+		{"DSN", false},
+		{"CONN_STRING", false},
+		// Generic env vars stay unredacted.
+		{"HOME", false},
+		{"PATH", false},
+		{"GOPATH", false},
+		{"SHELL", false},
+		{"USER", false},
+		{"LANG", false},
+		{"TERM", false},
+		{"EDITOR", false},
+		{"PWD", false},
 	}
-	for _, name := range secrets {
-		if !looksLikeSecret(name) {
-			t.Errorf("expected %q to be detected as secret", name)
-		}
-	}
-
-	safe := []string{
-		"HOME", "PATH", "GOPATH", "SHELL", "USER", "LANG",
-		"TERM", "EDITOR", "PWD",
-	}
-	for _, name := range safe {
-		if looksLikeSecret(name) {
-			t.Errorf("expected %q to NOT be detected as secret", name)
+	for _, tc := range cases {
+		if got := looksLikeSecret(tc.name); got != tc.secret {
+			t.Errorf("looksLikeSecret(%q) = %v, want %v", tc.name, got, tc.secret)
 		}
 	}
 }

@@ -1508,13 +1508,12 @@ func resolveExecModel(resultEv *agent.StreamEvent, a agent.Agent) string {
 
 func looksLikeSecret(name string) bool {
 	up := strings.ToUpper(name)
-	for _, substr := range []string{
-		"KEY", "SECRET", "TOKEN", "PASSWORD", "PASSWD",
-		"CREDENTIAL", "AUTH", "PRIVATE",
-		"URL", "URI", "DSN", "CONN",
-		"PASS", "CERT", "PEM",
-	} {
-		if strings.Contains(up, substr) {
+	switch up {
+	case "TOKEN", "KEY", "SECRET", "PASSWORD":
+		return true
+	}
+	for _, suffix := range []string{"_TOKEN", "_KEY", "_SECRET", "_PASSWORD"} {
+		if strings.HasSuffix(up, suffix) {
 			return true
 		}
 	}
