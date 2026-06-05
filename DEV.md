@@ -185,6 +185,19 @@ For each `agent_execs` row whose `stream_file` ends in `_stream.jsonl`:
 
 Then: delete canonical `report_error.md` / `review_error.md` / `verify_error.md` / `code_error.md` / `auto_setup_error.md`, remove `runner.log`, prune empty legacy log subdirs. Unmatched orphan files (no DB row, or skew >60s) are left in place — never destroyed.
 
+### v1 prompts layout migration (`internal/migrate/`)
+
+A separate, lazy in-place migrator upgrades pre-v1 `.ateam/` and `.ateamorg/` *prompt and shared-artifact* layouts to the v1 filename-driven layout. Invoked from `internal/root/resolve.go::applyV1LayoutMigration` on first env materialization for both project and org dirs; suppressible via `ATEAM_NO_MIGRATE=1`.
+
+- `migrate.NeedsMigration(root)` — cheap stat-only probe keyed on indicator paths (`roles/`, `supervisor/`, the v0 base/extra prompt files, `setup_overview.md`, and the v1+ dir-level code framing files relocated to top-level singletons). No file contents are read.
+- `migrate.V1Layout(root)` — runs the structural pass (`moveStatic` + `moveStaticDirs` + `moveRoles` + `cleanup`) when `NeedsMigration` is true, then always runs `flattenSharedLayout` so a pre-flat v1 tree still collapses to the current flat shape. Idempotent: a partial run that errored mid-way leaves moved files in place and re-running picks up where it left off.
+- `migrate.Result` shape — `Moved []Move` (from→to renames, paths relative to the migration root), `RemovedDirs []string` (dirs cleaned up after migration), `Warnings []string` (target-exists conflicts and similar non-fatal issues). `Result.Changed()` reports whether anything actually moved or got removed; the caller logs a one-line summary on success and forwards every warning verbatim to stderr.
+- **Structural moves only, no content rewrites** (v1_layout.go:24-32). Legacy ALL_CAPS variable references inside migrated prompt bodies (`{{ROLE}}`, `{{OUTPUT_FILE}}`, …) are NOT rewritten because the engine no longer substitutes them either (the `varmap.go` compat shim was removed in the bundle-aware refactor). Instead, `migrate.warnLegacyPromptTokens` (in `legacy_tokens.go`) is called after every successful move into `prompts/`: it scans the migrated file with a closed `legacyPromptTokens` map of pre-refactor ALL_CAPS → dotted form (e.g. `ROLE → prompt.name`, `OUTPUT_DIR → exec.output_dir`, `EXEC_ID → exec.id`) and appends a `Result.Warning` naming each surviving token with its dotted replacement so the operator can convert by hand.
+
+### ALL_CAPS template warner (`internal/runtime/allcaps_check.go`)
+
+Companion stderr warner for runtime.hcl, separate from the migrator's prompt-body scan. Called from `mergeHCLFile` (`internal/runtime/config.go`) for every HCL source it loads; the call site lives after the file read so embedded `defaults` and org-level defaults — which never go through `mergeHCLFile` directly when shipped — stay quiet, and only operator-edited `runtime.hcl` layers can trip the warning. `detectStrayAllCaps` matches the bare `{{NAME}}` shape against a closed `knownRunnerTemplates` set mirroring `runner.TemplateVars.Replacer()`; anything outside that set is reported with a one-line "engine no longer rewrites ALL_CAPS; switch to dotted form" hint.
+
 ### Compatibility shims (remove after legacy data ages out)
 
 These exist so users with pre-migration databases keep working. Each has a clear marker for future removal:
@@ -202,6 +215,8 @@ These exist so users with pre-migration databases keep working. Each has a clear
 | `legacyOutputSuffix` / `legacyPromptSuffix` / `legacyHistoryDir` (action → kind/path mapping) | `internal/root/migrate_logs.go` | With the migration. |
 | `internal/runner/template.go::EXECUTION_DIR` template alias (legacy alias for `OUTPUT_DIR` used by older `code_management_prompt.md`) | `internal/runner/template.go` | When all in-tree and user-overloaded prompts use `{{OUTPUT_DIR}}`. |
 | Streamed-text fallback that seeds `runtime/<id>/<primary>.md` when the agent didn't `Write` | `internal/runner/runner.go` (after the event loop) | When all default prompts reliably use the `Write` tool and we sandbox-deny stray writes. |
+| `internal/migrate/` whole package (v1 prompts/shared-artifact layout migrator + `warnLegacyPromptTokens` ALL_CAPS hint) and the `applyV1LayoutMigration` call in `internal/root/resolve.go` | `internal/migrate/v1_layout.go`, `internal/migrate/legacy_tokens.go` | When pre-v1 `.ateam` / `.ateamorg` layouts are no longer expected in any deployed project. Drop the `ATEAM_NO_MIGRATE` escape hatch too. |
+| `internal/runtime/allcaps_check.go` stray-`{{ALL_CAPS}}` warner (`detectStrayAllCaps` + `warnStrayAllCaps`) and the `mergeHCLFile` call site | `internal/runtime/allcaps_check.go`, `internal/runtime/config.go` | When operator-authored `runtime.hcl` files in deployed projects no longer reference legacy ALL_CAPS variable names. |
 
 Search for `legacy` in those files to find the relevant blocks.
 
@@ -241,7 +256,11 @@ Owns the `Prompt` interface and three impls:
 
 - `RawTextPrompt` — bytes-through, no engine. `ateam exec --raw` wraps the body in this.
 - `PromptText` — engine-expanded inline text (vars + dynamics, no anchor walk). Default for `ateam exec` and `ateam parallel`.
-- `PromptFile` — anchored composition: walks `project → org → embedded` and joins pre/main/post slots. The factory just sets `{Path, PrePrompt, PostPrompt, CustomBody}` — the assembler and vars are sourced from `ctx.Env().Assembler()` and `ctx.Vars()`.
+- `PromptFile` — anchored composition. Two `Path` shapes, detected by the shared `prompts.IsFilesystemPromptPath` predicate (also used by cmd-layer dispatch):
+  - **Logical-name mode** — bare name like `review`, `report/security`, or any path *not* ending in `.prompt.md`. Resolved by the standard anchor walk through the configured `project → org → embedded` chain.
+  - **Filesystem-path mode** — ends in `.prompt.md` AND contains a `/` or starts with `.`. The file's parent dir is injected as a temporary `external` anchor at the front of the chain; the role is `basename(Path)` minus `.prompt.md`, so sibling `<basename>.pre.*.md` and dir-level `_pre.*.md` fragments next to the file compose alongside the inherited framing.
+
+  The factory just sets `{Path, PrePrompt, PostPrompt, CustomBody}` — the assembler and vars are sourced from `ctx.Env().Assembler()` and `ctx.Vars()`.
 
 **Responsibilities:**
 
@@ -278,7 +297,12 @@ Two modes:
 
 ### Executing a prompt with `exec` / `parallel`
 
-1. **Build bundle** — wrap operator-supplied text in `prompts.PromptText` (default — expansion on) or `prompts.RawTextPrompt` (`--raw`). `staticBundle(name, role, action, prompt, opts)` returns `flow.PromptBundle`.
+1. **Build bundle** — `cmd/exec_bundle.go::buildArgPrompt` is the single source of truth for the three-way Prompt dispatch:
+   - `--raw` set → `prompts.RawTextPrompt` (bytes-through, no engine).
+   - `@PATH` where PATH ends in `.prompt.md` → `prompts.PromptFile{Path: PATH}` (filesystem-path mode; sibling framing fragments compose around the body).
+   - Otherwise (literal text, `@PATH` not ending in `.prompt.md`, `@-` stdin) → `prompts.PromptText` (engine-expanded inline text).
+
+   `staticBundle(name, role, action, prompt, opts)` then returns `flow.PromptBundle`.
 2. **Verify** — `flow.Run` calls `bundle.Prompt.Resolve(rt)` in `ModePreview`. Catches typos and broken dynamics before any agent runs.
 3. **Prepare** — `runner.Prepare(opts)` allocates `exec_id`, runtime dir, output paths → returns `PreparedRun`. `flow.execute` populates `rt.{ExecID, Batch, OutputDir, OutputFile, PromptFile}` from it.
 4. **Resolve** — `bundle.Prompt.Resolve(rt)` in `ModeReal` produces the final text. Single substitution pass; the runner does not touch the prompt body afterward.
