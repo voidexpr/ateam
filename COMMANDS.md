@@ -420,11 +420,19 @@ Prompt sources, in order of precedence:
 - the positional argument: literal prompt text, `@PATH` to read a file, or `-` / `@-` to read stdin until EOF
 - if no argument is given **and** stdin is piped/redirected, stdin is read automatically
 
+The positional argument routes through one of three Prompt impls based on its shape and `--raw` (see [CONFIG.md → `@PATH` dispatch](CONFIG.md#path-dispatch-exec--parallel--prompt) for the full table):
+
+- `--raw` + anything → byte-through, no template engine.
+- `@foo.prompt.md` (path separator or leading `.`) → anchored composition: the file's parent dir is injected as a temporary anchor, so sibling `foo.pre.*.md` / `foo.post.*.md` / dir-level `_pre.*.md` fragments compose around the body.
+- Anything else (`@foo.md`, `@-` stdin, literal text) → engine-expanded inline text. `{{namespace.key}}` directives resolve; no anchor walk.
+
 ```bash
 ateam exec "say hello"
 ateam exec "Analyze the auth module" --role project.security
 ateam exec "test" --profile docker
-ateam exec @prompt_file.md
+ateam exec @./team_prompt.prompt.md              # anchored: sibling .pre.*.md compose
+ateam exec @notes.md                             # engine expansion only, no framing
+ateam exec --raw @baked.md                       # verbatim, no engine
 echo "explain this code" | ateam exec            # auto-detected
 git diff | ateam exec --role critic.engineering  # auto-detected
 echo "still works" | ateam exec -                # explicit "-"
@@ -443,6 +451,7 @@ When used with `--agent codex-tmux` the prompt has an extra shape: the first lin
 | `--agent-args "ARGS"` | Extra args passed to the agent CLI |
 | `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
+| `--raw` | Feed the prompt to the agent byte-for-byte: skip template-engine expansion (no `{{var}}` substitution, no dynamics, no anchor walk). Default expands `{{exec.*}}`, `{{prompt.*}}`, and other vars. |
 | `--batch ID` | Group related agent_execs |
 | `--max-budget-usd USD` | Per-agent USD spend cap (claude-only; errors on codex) |
 | `--max-budget-usd-batch USD` | Abort if `--batch` already exceeds this USD before starting |
@@ -497,7 +506,7 @@ ateam parallel "task A" "task B" --max-parallel 1 --pre-prompt @context.md
 ateam parallel "task A" "task B" --dry-run
 ```
 
-Each positional argument is a prompt (text or `@filepath`). Agent execs run concurrently up to `--max-parallel`, with a live ANSI progress table showing status, tool calls, and elapsed time per exec.
+Each positional argument is a prompt (text or `@filepath`). Each arg dispatches independently using the same rules as `ateam exec` — see [CONFIG.md → `@PATH` dispatch](CONFIG.md#path-dispatch-exec--parallel--prompt). `@foo.prompt.md` args pick up sibling framing fragments; other args run through the engine as inline text; `--raw` skips the engine entirely for every arg. Agent execs run concurrently up to `--max-parallel`, with a live ANSI progress table showing status, tool calls, and elapsed time per exec.
 
 | Flag | Description |
 |------|-------------|
@@ -505,6 +514,7 @@ Each positional argument is a prompt (text or `@filepath`). Agent execs run conc
 | `--max-parallel N` | Maximum concurrent agent execs (default: 3) |
 | `--pre-prompt TEXT` | Text wrapped at the very front of each task's prompt (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of each task's prompt (text or `@filepath`). [^wrap] |
+| `--raw` | Feed each prompt to the agent byte-for-byte: skip template-engine expansion. Applies to every arg. |
 | `--common-prompt-first TEXT` | Deprecated alias for `--pre-prompt`. |
 | `--common-prompt-last TEXT` | Deprecated alias for `--post-prompt`. |
 | `--batch ID` | Custom batch name (default: `parallel-TIMESTAMP`) |
@@ -525,7 +535,7 @@ Each positional argument is a prompt (text or `@filepath`). Agent execs run conc
 
 **Batch**: All execs are grouped under a single batch (visible in `ateam cost`, `ateam ps`, and `ateam serve`). Use `--batch` to set a custom name or let it auto-generate as `parallel-TIMESTAMP`.
 
-**Shared wrap**: Use `--pre-prompt` and `--post-prompt` to inject shared context. The final prompt for each exec is: `pre + "\n\n" + prompt + "\n\n" + post`. (`--common-prompt-first` / `--common-prompt-last` are deprecated aliases for the same vars.)
+**Shared wrap**: Use `--pre-prompt` and `--post-prompt` to inject shared context. For inline-text args the wrap is concatenated (`pre + "\n\n---\n\n" + prompt + "\n\n---\n\n" + post`); for `@foo.prompt.md` args the wrap flows through the assembler's `AssembleOptions` and frames the composed result. (`--common-prompt-first` / `--common-prompt-last` are deprecated aliases for the same vars.)
 
 **Output**: Progress and status go to stderr. With `--print`, exec outputs are printed to stdout in submission order, each preceded by a label header (omitted for single-exec runs). This makes it composable with downstream tools.
 
@@ -535,20 +545,27 @@ Each positional argument is a prompt (text or `@filepath`). Agent execs run conc
 
 ### `ateam prompt`
 
-Resolve and print the full prompt for a role, supervisor, or top-level action without running it. Default mode prints the assembled prompt body. Two inspection modes (`--paths`, `--inline-paths`) trace where each part of the prompt came from — useful when debugging an override or wondering whether a project-level fragment is taking effect.
+Resolve and print the full prompt for a role or top-level action without running it. Default mode prints the assembled prompt body. Two inspection modes (`--paths`, `--inline-paths`) trace where each part of the prompt came from — useful when debugging an override or wondering whether a project-level fragment is taking effect.
 
 ```bash
-ateam prompt --role project.security --action report                   # role-bound (existing)
+ateam prompt --role project.security --action report                   # role-bound
 ateam prompt --action code --post-prompt @task.md                      # top-level singleton: implementer body + task
 ateam prompt --action code_management                                   # top-level singleton: supervisor body
-ateam prompt --supervisor --action review                              # legacy form, still supported
+ateam prompt --action review
+ateam prompt --action verify
 ateam prompt --role project.security --action report --post-prompt "Focus on auth"
 
 ateam prompt --role project.security --action report --paths           # tabular per-section breakdown
 ateam prompt --role project.security --action report --inline-paths    # full prompt with per-section anchor/path headers
+
+ateam prompt @./mine.prompt.md                                          # @PATH: anchored, sibling .pre.*.md compose
+ateam prompt @notes.md                                                  # @PATH non-.prompt.md: engine expansion only
+ateam prompt @./mine.prompt.md --raw                                    # verbatim, no engine
 ```
 
-When `--role` and `--supervisor` are both omitted, `--action <NAME>` resolves the top-level singleton at `<NAME>.prompt.md`. This is how the code-management supervisor produces per-task implementer prompts: `ateam prompt --action code --post-prompt @task.md | ateam exec --action code ...`.
+When `--role` is omitted, `--action <NAME>` resolves the top-level singleton at `<NAME>.prompt.md`. This is how the code-management supervisor produces per-task implementer prompts: `ateam prompt --action code --post-prompt @task.md | ateam exec --action code ...`.
+
+Positional `@PATH` follows the same three-way dispatch as `ateam exec` (see [CONFIG.md → `@PATH` dispatch](CONFIG.md#path-dispatch-exec--parallel--prompt)).
 
 `--paths` example output:
 
@@ -568,14 +585,13 @@ TOTAL                                                                           
 
 | Flag | Description |
 |------|-------------|
-| `--role ROLE` | Role name (mutually exclusive with `--supervisor`) |
-| `--supervisor` | Generate supervisor prompt instead of role prompt (legacy alias for top-level singleton resolution) |
-| `--action ACTION` | Action name **(required)**. With `--role`: `report` or `code`. With `--supervisor`: `review`, `code`, or `verify`. With neither: any top-level `<ACTION>.prompt.md` (e.g. `code`, `code_management`, `review`, `code_verify`). |
-| `--batch ID` | Bake a literal batch ID into `{{exec.batch}}` placeholders in the rendered output (otherwise left as the deferred `{{BATCH}}` marker for the runner to fill at exec time). |
+| `--role ROLE` | Role name (omit for top-level singletons) |
+| `--action ACTION` | Action name. Required when no positional `@PATH` is given. With `--role`: `report` or `code`. Without `--role`: any top-level `<ACTION>.prompt.md` (e.g. `code`, `code_management`, `review`, `code_verify`). |
 | `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--no-project-info` | Omit the ATeam Project Context section |
 | `--ignore-previous-report` | Do not include the role's previous report |
+| `--raw` | Literal-file mode only: print `@PATH` verbatim (no template engine, no framing). Has no effect on `--role` / `--action` resolution. |
 | `--paths` | Show the per-section breakdown table (slot / anchor / path / last modified / est. tokens). No prompt body printed. |
 | `--inline-paths` | Print the full prompt with each section preceded by an anchor/path/mod-time/tokens header. Troubleshooting view, not for agent consumption. |
 
