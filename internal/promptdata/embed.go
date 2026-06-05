@@ -1,20 +1,31 @@
 // Package promptdata holds the data accessors and embedded-defaults
-// machinery that internal/root needs without pulling in the
-// Prompt-resolution machinery in internal/prompts. This package sits
-// below both internal/prompts and internal/root in the import graph,
-// breaking what would otherwise be a root→prompts→root cycle once
-// internal/prompts grows ResolveContext.Env() returning *root.ResolvedEnv.
+// machinery that internal/root needs, without pulling in the
+// Prompt-resolution machinery in internal/prompts.
 //
-// What lives here:
+// # Why this exists
+//
+// Package layering is one-way: cmd → flow → prompts → root →
+// promptdata. internal/prompts imports internal/root for
+// *root.ResolvedEnv (so ResolveContext.Env() can return it). For
+// that arrow to be one-way, internal/root must NOT import
+// internal/prompts. promptdata holds everything root previously
+// reached into prompts for — pure data and formatting helpers with
+// no dependency on the resolver.
+//
+// # What lives here
+//
 //   - Role discovery / metadata (AllRoleIDs, RoleMeta, IsValidRole,
 //     ResolveRoleList, AllKnownRoleIDs, RoleFlagUsage)
 //   - Frontmatter parsing (ParsePromptFrontmatter)
 //   - Embedded-defaults installation (WriteOrgDefaults, DiffOrgDefaults)
 //   - Project-info formatting (ProjectInfoParams, FormatProjectInfo)
 //   - Auto-roles marker (AutoRolesMarker)
+//   - SandboxSettingsFile constant + DefaultSandboxSettings reader
 //
-// What stays in internal/prompts: Prompt / PromptFile / PromptText /
-// RawTextPrompt / ResolveContext / PromptDynamic / NewDispatcher etc. —
+// # What stays in internal/prompts
+//
+// Prompt / PromptFile / PromptText / RawTextPrompt / ResolveContext /
+// PromptDynamic / NewDispatcher / BuildEngine / ProjectInfoDynamic —
 // the composition pipeline itself.
 package promptdata
 

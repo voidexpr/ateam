@@ -1,16 +1,68 @@
-// Package prompts hosts the supporting types and helpers around prompt
-// assembly. The v1 composition pipeline lives in internal/prompts/assembler
-// (anchor-based filename-driven composition); this package keeps the
-// runtime-side surfaces that aren't part of that pipeline:
+// Package prompts is ateam's prompt resolver — the "how" half of the
+// composition story. Flow owns "when" prompts resolve; this package
+// owns the Prompt interface, its three impls, and the resolver
+// contract.
+//
+// # The Prompt interface
+//
+// Three implementations cover every shape of prompt body:
+//
+//   - RawTextPrompt — bytes-through, no engine. `ateam exec --raw`
+//     wraps the body in this.
+//   - PromptText — engine-expanded inline text (vars + dynamics, no
+//     anchor walk). Default for `ateam exec` and `ateam parallel`.
+//   - PromptFile — anchored composition: walks project → org →
+//     embedded and joins pre/main/post slots. The factory just sets
+//     {Path, PrePrompt, PostPrompt, CustomBody}; the assembler and
+//     vars are sourced from ctx.Env().Assembler() and ctx.Vars().
+//
+// # Responsibilities
+//
+//   - The resolver contract: ResolveContext.{Env, Vars, Mode,
+//     Dynamics}. Vars() returns a resolver that dispatches by
+//     namespace (exec.* from flow's Runtime, everything else from the
+//     bundle's BaseVars).
+//   - Dynamics: PromptDynamicFunction = func(ctx, args...) (string,
+//     error). Mode-aware — branch on ctx.Mode() to return a sentinel
+//     in ModePreview and a real value in ModeReal.
+//   - Env-shaped bridge helpers: BuildEngine, ProjectInfoDynamic —
+//     take *root.ResolvedEnv as a parameter, not as a closure capture.
+//
+// # Does not know about
+//
+//   - When or how often a prompt resolves — flow's job.
+//   - Agent execution — runner's job.
+//   - Data / role metadata (AllRoleIDs, WriteOrgDefaults,
+//     FormatProjectInfo, etc.) — those live in internal/promptdata so
+//     that internal/root can import them without creating a cycle.
+//
+// # Boundary interfaces
+//
+// Consumes *root.ResolvedEnv (project paths, config) and
+// assembler.Assembler (anchor walk).
+//
+// # Two modes
+//
+//   - ModePreview (verify, `ateam prompt --action X`, dry-run):
+//     generated-artifact dynamics return preview sentinels (e.g.
+//     `{{AT RUNTIME: review-reports block}}`). exec.* renders as the
+//     `{{AT RUNTIME:exec.<key>}}` sentinel.
+//   - ModeReal (live flow.Run between Prepare and Execute):
+//     everything resolves to real values; an unpopulated load-bearing
+//     exec.* field is a wiring bug and surfaces as an error.
+//
+// # Package layering
+//
+// cmd → flow → prompts → root → promptdata. The arrow is one-way; the
+// cycle that previously blocked ResolveContext.Env() was broken by
+// extracting data helpers into internal/promptdata.
+//
+// # What also lives here (not part of the resolver)
 //
 //   - Report discovery (DiscoverReports, ReviewSelector, RoleReport)
-//   - Project-info formatting (FormatProjectInfo, ProjectInfoParams)
-//   - Frontmatter + role metadata (ParsePromptFrontmatter, RoleMeta, AllRoleIDs,
-//     IsValidRole, AllKnownRoleIDs) — see embed.go
 //   - Token estimation + display helpers (EstimateTokens, PromptSource)
-//   - Embedded-defaults installation (DiffOrgDefaults, WriteOrgDefaults)
-//   - Report-set selection for review (ReviewSelector, ReviewFunnel,
-//     ReviewEmptyError), consumed by the v1 assembly helpers in cmd/*_v1.go.
+//
+// Design rationale: plans/feature_prompt_cmd_bundle_aware.md.
 package prompts
 
 import (

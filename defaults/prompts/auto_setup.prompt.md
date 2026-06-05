@@ -6,14 +6,15 @@ You are configuring ateam for a software project. Ateam runs specialized backgro
 
 ### 1. Understand the project
 
-Read README.md and scan the top-level directory structure. Identify:
-- Language(s) and framework(s)
-- Build system (Makefile, package.json, Cargo.toml, go.mod, etc.)
-- Test runner and how to run tests (quick vs full)
-- Main source directories
-- Whether a database is involved
-- Whether other services or middleware are involed
-- Project maturity (prototype vs production)
+- Read CLAUDE.md and any top level document like README.md
+- From the top-level directory files and immediate children folders identify:
+    - Language(s) and framework(s)
+    - Build system (Makefile, package.json, Cargo.toml, go.mod, etc.)
+    - Test runner and how to run tests (quick vs full)
+    - Main source directories
+    - Whether a database is involved
+    - Whether other services or middleware are involed
+    - Project maturity (prototype vs production)
 
 ### 2. Write the setup overview
 

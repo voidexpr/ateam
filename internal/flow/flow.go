@@ -1,17 +1,60 @@
-// Package flow is ateam's composition framework for agent-running commands.
+// Package flow is ateam's composition framework for agent-running
+// commands (exec, parallel, verify, review, auto_setup, code, report).
 //
-// Replaces internal/stage. A Step is one of PromptBundle (leaf), Pipeline
-// (sequence, stops on first errored step), or Parallel (fan-out). Top-level
-// callers invoke Run(); per-step lifecycle observability flows through the
-// Reporter interface.
+// # Responsibilities
 //
-// Scope: every built-in cmd that drives an agent (exec, parallel, verify,
-// review, auto_setup, code, report). The package is internal on purpose;
-// the supported external integration surface is `ateam exec` as a
-// subprocess (see plans/python_framework_examples/).
+//   - The lifecycle: Run (Verify → Prepare → Resolve → Execute →
+//     PostExec), Walk, Verify.
+//   - The carriers: Runtime (satisfies prompts.ResolveContext),
+//     PromptBundle (Prompt + RunOpts + hooks), Pipeline / Parallel.
+//   - The exec.* namespace dispatch — runtimeVars resolves exec.id,
+//     exec.batch, exec.output_dir, exec.output_file, exec.prompt_file
+//     against typed Runtime fields populated by Prepare. Unknown keys
+//     error in both modes; in ModePreview known keys render as the
+//     {{AT RUNTIME:exec.<key>}} sentinel.
 //
-// Design rationale and the Phase F→G migration are documented in
-// plans/Feature_prompt_report_fs_refactor_phaseG.md.
+// # Does not know about
+//
+//   - How a prompt body is composed — delegates to
+//     prompts.Prompt.Resolve(rt).
+//   - Verb semantics (review vs verify vs code) — every verb is a
+//     PromptBundle; the factory in cmd/<action>_factory.go is the only
+//     verb-specific code flow runs.
+//   - Agent execution mechanics — talks to runner.Executor via
+//     Prepare(opts) → PreparedRun then ExecutePrepared(prepared, text).
+//     The runner does NOT re-substitute the prompt body.
+//
+// # Boundary interfaces
+//
+// prompts.Prompt, prompts.ResolveContext, runner.Executor.
+//
+// # Step types
+//
+// A Step is one of PromptBundle (leaf), Pipeline (sequence; stops on
+// first errored step), or Parallel (fan-out with bounded workers;
+// does not short-circuit on errors). Top-level callers invoke Run();
+// per-step lifecycle observability flows through the Reporter
+// interface.
+//
+// # Scope
+//
+// The package is internal on purpose; the supported external
+// integration surface is `ateam exec` as a subprocess (see
+// plans/python_framework_examples/).
+//
+// # Lifecycle of one PromptBundle
+//
+//  1. Verify: Prompt.Resolve(rt) runs in ModePreview to catch typos
+//     and broken dynamics before any agent runs.
+//  2. Prepare: runner.Prepare(opts) → PreparedRun allocates exec_id,
+//     runtime dir, output paths.
+//  3. Resolve: Prompt.Resolve(rt) runs in ModeReal. Single
+//     substitution pass; the runner does not touch the prompt body
+//     afterward.
+//  4. Execute: runner.ExecutePrepared(prepared, text) runs the agent;
+//     PostExec hooks fire.
+//
+// Design rationale: plans/feature_prompt_cmd_bundle_aware.md.
 package flow
 
 import (
