@@ -21,11 +21,15 @@ import (
 // Result summarizes a migration pass. Empty Result with nil error means no
 // migration was needed.
 //
-// v1 migrations are structural only — file moves + history cleanup. Variable
-// renames ({{ROLE}} → {{prompt.name}} etc.) are handled at render time by the
-// engine's ALL_CAPS compat shim. A separate mechanical pass can run
-// assembler.RewriteContent over user prompts in a follow-up; the data type
-// here doesn't track rewrites since this migrator doesn't perform them.
+// v1 migrations are structural only — file moves + history cleanup. Legacy
+// ALL_CAPS variable references in migrated prompt bodies ({{ROLE}},
+// {{OUTPUT_FILE}}, …) are NOT rewritten because the engine no longer
+// substitutes them either (the varmap.go compat shim was removed in the
+// bundle-aware refactor; see internal/prompts/assembler/template.go).
+// Instead, warnLegacyPromptTokens scans every file moved under prompts/
+// and appends a Result.Warning naming each surviving legacy token along
+// with its dotted replacement, so the operator can convert by hand
+// before the next run sends the literal token to the agent.
 type Result struct {
 	// Moved is the list of (old → new) renames performed, with paths relative
 	// to the migration root.
@@ -253,6 +257,7 @@ func move(root, from, to string, r *Result) (bool, error) {
 		}
 	}
 	r.Moved = append(r.Moved, Move{From: from, To: to})
+	warnLegacyPromptTokens(dst, to, r)
 	return true, nil
 }
 

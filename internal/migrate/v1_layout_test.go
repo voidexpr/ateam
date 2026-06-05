@@ -191,21 +191,41 @@ func TestV1LayoutRoleMoves(t *testing.T) {
 	}
 }
 
-// V1 migration is structural only — ALL_CAPS variables stay in place and are
-// handled by the engine's compat shim at render time. Content rewriting is a
-// separate mechanical pass that will run later via assembler.RewriteContent.
+// V1 migration is structural only — ALL_CAPS variables stay in place
+// because the engine no longer rewrites them either. The migrator emits
+// a Warning per migrated prompt file naming each surviving legacy token
+// so the operator can convert by hand before the next run.
 func TestV1LayoutLeavesContentUnchanged(t *testing.T) {
 	root := t.TempDir()
 	original := "Review {{ROLE}} for {{PROJECT_NAME}}\nOutput to {{OUTPUT_DIR}}\nSource: {{SOURCE_DIR}}"
 	writeTree(t, root, map[string]string{
 		"supervisor/review_prompt.md": original,
 	})
-	if _, err := V1Layout(root); err != nil {
+	r, err := V1Layout(root)
+	if err != nil {
 		t.Fatal(err)
 	}
 	got := read(t, root, "prompts/review.prompt.md")
 	if got != original {
 		t.Fatalf("content should be unchanged after structural migration:\n got:  %q\n want: %q", got, original)
+	}
+	// Migrator warns about the four legacy tokens still in the body so
+	// the operator knows the agent would otherwise see them literally.
+	wantTokens := []string{"OUTPUT_DIR", "PROJECT_NAME", "ROLE", "SOURCE_DIR"}
+	var found string
+	for _, w := range r.Warnings {
+		if strings.Contains(w, "prompts/review.prompt.md") && strings.Contains(w, "legacy ALL_CAPS") {
+			found = w
+			break
+		}
+	}
+	if found == "" {
+		t.Fatalf("expected a legacy-token warning for prompts/review.prompt.md, got warnings: %v", r.Warnings)
+	}
+	for _, tok := range wantTokens {
+		if !strings.Contains(found, "{{"+tok+"}}") {
+			t.Errorf("legacy-token warning missing %s; got: %q", tok, found)
+		}
 	}
 }
 

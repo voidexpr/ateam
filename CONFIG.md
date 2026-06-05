@@ -299,7 +299,7 @@ echo "For this project, treat any C extensions as untrusted." \
 
 ### Template Variables
 
-Prompts reference `{{namespace.key}}` directives. The resolver is **closed-set**: an unknown namespace passes through verbatim (so `{{foo.bar}}` in a code block survives unchanged), but a known namespace with an unknown key is a hard error (catches typos before the prompt reaches the agent). Legacy ALL_CAPS forms (`{{OUTPUT_DIR}}`, `{{ROLE}}`, etc.) are auto-translated via a compat shim — existing user prompts keep working without rewrites.
+Prompts reference `{{namespace.key}}` directives. The resolver is **closed-set**: an unknown namespace passes through verbatim (so `{{foo.bar}}` in a code block survives unchanged), but a known namespace with an unknown key is a hard error (catches typos before the prompt reaches the agent). Only the dotted form is recognized in prompt bodies — legacy ALL_CAPS tokens (`{{OUTPUT_DIR}}`, `{{ROLE}}`, etc.) are no longer auto-translated and will reach the agent verbatim if left in a prompt file; rewrite project / org prompt overrides to the dotted form below. The ALL_CAPS aliases still work in `runtime.hcl` (agent args, container fields) — see the [runtime template variables](#available-variables) section.
 
 | Namespace | Resolved by | Keys |
 |---|---|---|
@@ -494,7 +494,7 @@ Unknown variables are left as-is (e.g. `{{UNKNOWN}}` passes through unchanged). 
 | docker-exec `WorkDir` | Computed from project paths | Yes |
 
 Templates are **not** resolved in:
-- Prompt files (use `{{SOURCE_DIR}}` which has its own separate substitution)
+- Prompt files — these use the prompt engine's dotted `{{namespace.key}}` form documented in [Template Variables](#template-variables); the runtime.hcl ALL_CAPS aliases described in this section do not apply
 - Sandbox settings JSON (has its own merge mechanism)
 - Dockerfile paths (use the role-based resolution chain instead)
 - Precheck command args — `{{CONTAINER_NAME}}` is expanded at execution time by `RunPrecheck`, not by the general template system
