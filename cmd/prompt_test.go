@@ -351,6 +351,85 @@ func TestPromptExternalPromptFileFraming(t *testing.T) {
 	}
 }
 
+// TestPromptExternalPromptFilePrePostWrap verifies that the positional
+// @PATH.prompt.md preview honors --pre-prompt / --post-prompt — matching
+// what `ateam exec @PATH.prompt.md --pre-prompt X --post-prompt Y` would
+// feed to the agent. Earlier code routed wrappers through buildArgPrompt
+// for exec but dropped them on the prompt-preview side, so operators
+// inspecting a run saw a body without the wrappers exec actually sends.
+func TestPromptExternalPromptFilePrePostWrap(t *testing.T) {
+	defer savePromptGlobals()()
+	projPath := setupPromptProject(t)
+
+	externalPath := filepath.Join(projPath, "myrole.prompt.md")
+	body := "ROLE BODY"
+	if err := os.WriteFile(externalPath, []byte(body), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	promptPrePrompt = "PRE-MARKER"
+	promptPostPrompt = "POST-MARKER"
+
+	var runErr error
+	out := captureStdout(t, func() {
+		withChdir(t, projPath, func() {
+			runErr = runPrompt(nil, []string{"@" + externalPath})
+		})
+	})
+	if runErr != nil {
+		t.Fatalf("runPrompt @prompt.md --pre/--post: %v", runErr)
+	}
+	preIdx := strings.Index(out, "PRE-MARKER")
+	bodyIdx := strings.Index(out, "ROLE BODY")
+	postIdx := strings.Index(out, "POST-MARKER")
+	if preIdx < 0 || bodyIdx < 0 || postIdx < 0 {
+		t.Fatalf("missing markers: pre=%d body=%d post=%d\n%s",
+			preIdx, bodyIdx, postIdx, out)
+	}
+	if preIdx >= bodyIdx || bodyIdx >= postIdx {
+		t.Errorf("expected order PRE < BODY < POST, got pre=%d body=%d post=%d",
+			preIdx, bodyIdx, postIdx)
+	}
+}
+
+// TestPromptInlineTextPrePostWrap verifies the non-.prompt.md positional
+// branch also honors --pre-prompt / --post-prompt — buildArgPrompt's
+// inline-text branch concatenates the wrappers around the body before
+// feeding PromptText, and `ateam prompt @PATH` must mirror that.
+func TestPromptInlineTextPrePostWrap(t *testing.T) {
+	defer savePromptGlobals()()
+	projPath := setupPromptProject(t)
+
+	externalPath := filepath.Join(projPath, "note.md")
+	if err := os.WriteFile(externalPath, []byte("INLINE BODY"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	promptPrePrompt = "PRE-MARKER"
+	promptPostPrompt = "POST-MARKER"
+
+	var runErr error
+	out := captureStdout(t, func() {
+		withChdir(t, projPath, func() {
+			runErr = runPrompt(nil, []string{"@" + externalPath})
+		})
+	})
+	if runErr != nil {
+		t.Fatalf("runPrompt @file --pre/--post: %v", runErr)
+	}
+	preIdx := strings.Index(out, "PRE-MARKER")
+	bodyIdx := strings.Index(out, "INLINE BODY")
+	postIdx := strings.Index(out, "POST-MARKER")
+	if preIdx < 0 || bodyIdx < 0 || postIdx < 0 {
+		t.Fatalf("missing markers: pre=%d body=%d post=%d\n%s",
+			preIdx, bodyIdx, postIdx, out)
+	}
+	if preIdx >= bodyIdx || bodyIdx >= postIdx {
+		t.Errorf("expected order PRE < BODY < POST, got pre=%d body=%d post=%d",
+			preIdx, bodyIdx, postIdx)
+	}
+}
+
 // TestPromptInlinePathsSurfacesReviewReportsSentinel verifies the spec
 // invariant (line 388-399) that `dynamic.review_reports` returns its
 // preview sentinel under `ateam prompt --action review`. After the

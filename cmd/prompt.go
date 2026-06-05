@@ -37,8 +37,12 @@ var promptCmd = &cobra.Command{
 role or top-level action, then print the assembled prompt to stdout.
 
 A positional ` + "`@PATH`" + ` argument switches to literal-file mode: read the file's
-contents and print. No assembler composition or framing — mirrors what
-` + "`ateam exec @PATH`" + ` would feed to the agent. Use ` + "`@-`" + ` to read from stdin.
+contents and print. Paths ending in ` + "`.prompt.md`" + ` compose through the standard
+framing (the file's parent dir is injected as a temporary anchor so sibling
+` + "`*.pre.*.md` / `_pre.*.md`" + ` fragments still wrap the body); other paths render
+inline through the template engine with no assembler walk. Either way the
+output mirrors what ` + "`ateam exec @PATH`" + ` would feed to the agent, including
+` + "`--pre-prompt` / `--post-prompt`" + ` wrappers. Use ` + "`@-`" + ` to read from stdin.
 
 Example:
   ateam prompt --role security --action report
@@ -78,9 +82,12 @@ func runPrompt(cmd *cobra.Command, args []string) error {
 		return runPromptPaths()
 	}
 	// Literal-file mode: positional @PATH or @- arg. Reads verbatim,
-	// runs through the engine (vars + dynamics) unless --raw is set. No
-	// assembler composition — matches what `ateam exec @PATH` would feed
-	// to the agent.
+	// runs through the engine (vars + dynamics) unless --raw is set.
+	// A path ending in .prompt.md dispatches through runPromptExternalFile
+	// so the standard framing fragments around the file still compose;
+	// other paths render inline with no assembler walk. Either way the
+	// output mirrors what `ateam exec @PATH` would feed to the agent,
+	// including --pre-prompt / --post-prompt wrappers.
 	if len(args) == 1 {
 		return runPromptLiteralFile(args[0])
 	}
@@ -128,6 +135,20 @@ func runPromptLiteralFile(pathArg string) error {
 		return err
 	}
 
+	// Mirror exec's buildArgPrompt: --pre-prompt / --post-prompt frame
+	// the prompt the agent would see for `ateam exec @PATH`. The
+	// .prompt.md branch passes them into PromptFile (assembler-level
+	// framing). The inline-text branch concatenates them around the
+	// body the same way buildArgPrompt does.
+	prePrompt, err := prompts.ResolveOptional(promptPrePrompt)
+	if err != nil {
+		return fmt.Errorf("cannot resolve --pre-prompt: %w", err)
+	}
+	postPrompt, err := prompts.ResolveOptional(promptPostPrompt)
+	if err != nil {
+		return fmt.Errorf("cannot resolve --post-prompt: %w", err)
+	}
+
 	// Spec dispatch rule: @PATH ending in ".prompt.md" composes through
 	// the standard framing (root pre, dir pre, role main, role post,
 	// dir post). When PATH sits outside every standard anchor, its parent
@@ -136,7 +157,7 @@ func runPromptLiteralFile(pathArg string) error {
 	// to the file compose alongside the inherited framing.
 	cleanPath := strings.TrimPrefix(pathArg, "@")
 	if prompts.IsFilesystemPromptPath(cleanPath) {
-		return runPromptExternalFile(env, cleanPath)
+		return runPromptExternalFile(env, cleanPath, prePrompt, postPrompt)
 	}
 
 	// Inline-text path: wrap content in PromptText and resolve against a
@@ -144,6 +165,12 @@ func runPromptLiteralFile(pathArg string) error {
 	// dynamic. {{prompt.name}} renders to the basename; exec.* renders as
 	// the AT RUNTIME sentinel; {{dynamic.project_info}} returns "" because
 	// roleLabel is empty (matches --no-project-info semantics).
+	if prePrompt != "" {
+		content = prePrompt + "\n\n---\n\n" + content
+	}
+	if postPrompt != "" {
+		content = content + "\n\n---\n\n" + postPrompt
+	}
 	rt := flow.NewRuntime(nil, env, env.WorkDir)
 	rt.SetVars(env.BuildAssemblerVars(cleanPath, "", ""))
 	rt.SetDynamics(prompts.PromptDynamic{
@@ -164,9 +191,13 @@ func runPromptLiteralFile(pathArg string) error {
 // <basename>.pre.*.md and dir-level _pre.*.md / _post.*.md in the
 // parent dir wrap the body the same way they would for an anchored
 // role.
-func runPromptExternalFile(env *root.ResolvedEnv, cleanPath string) error {
+func runPromptExternalFile(env *root.ResolvedEnv, cleanPath, prePrompt, postPrompt string) error {
 	role := strings.TrimSuffix(filepath.Base(cleanPath), ".prompt.md")
-	pf := prompts.PromptFile{Path: cleanPath}
+	pf := prompts.PromptFile{
+		Path:       cleanPath,
+		PrePrompt:  prePrompt,
+		PostPrompt: postPrompt,
+	}
 	rt := flow.NewRuntime(nil, env, env.WorkDir)
 	rt.SetVars(env.BuildAssemblerVars(role, "", ""))
 	// roleLabel = role basename so the project_info dynamic emits its
