@@ -118,6 +118,32 @@ func TestPromptBundle_RenderError(t *testing.T) {
 	}
 }
 
+// TestRunBundle_RenderErrorReturnsErrWithoutSummary locks the contract
+// the cmd-layer exec handler depends on: when Prompt.Resolve fails
+// after Prepare allocated the exec row, RunBundle must return a
+// Result with Summary==nil, Flow.State==StateError, and Flow.Err set
+// to the resolver error. cmd/exec.go reads Flow.Err in that case
+// instead of masking it as an internal nil-summary invariant failure.
+func TestRunBundle_RenderErrorReturnsErrWithoutSummary(t *testing.T) {
+	exec := &fakeExecutor{}
+	rc := newCtx()
+	env := newEnv(exec)
+	renderErr := errors.New("{{exec.work_dir}}: unknown key in exec namespace")
+
+	b := makeBundle("verify", errPrompt{err: renderErr})
+	res := RunBundle(b, env, rc)
+
+	if res.Summary != nil {
+		t.Errorf("expected nil Summary on render failure, got %+v", res.Summary)
+	}
+	if res.Flow.State != StateError {
+		t.Errorf("Flow.State: got %v want StateError", res.Flow.State)
+	}
+	if !errors.Is(res.Flow.Err, renderErr) {
+		t.Errorf("Flow.Err: got %v want %v", res.Flow.Err, renderErr)
+	}
+}
+
 func TestPromptBundle_ExecutorError(t *testing.T) {
 	execErr := errors.New("agent crashed")
 	exec := &fakeExecutor{Summary: runner.RunSummary{

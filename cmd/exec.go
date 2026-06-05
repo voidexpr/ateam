@@ -237,7 +237,14 @@ func runExec(cmd *cobra.Command, args []string) error {
 		},
 	}
 	res := flow.RunBundle(bundle, rtEnv, rc)
+	// Pre-execute failures (e.g. Prompt.Resolve errors after Prepare
+	// allocated the exec row) return a StateError Result with no Summary.
+	// Surface the resolver error directly instead of masking it as an
+	// internal invariant failure.
 	if res.Summary == nil {
+		if res.Flow.State == flow.StateError && res.Flow.Err != nil {
+			return res.Flow.Err
+		}
 		return fmt.Errorf("internal: flow.RunBundle returned no Summary")
 	}
 	result := *res.Summary
