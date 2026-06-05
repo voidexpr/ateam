@@ -135,13 +135,9 @@ func runPsFiles(cmd *cobra.Command, args []string) error {
 // PromptFile's AssembleOptions surface.
 func buildAutoDebugBundle(env *root.ResolvedEnv, rows []calldb.RecentRow, files []string, prePrompt, postPrompt string) (flow.PromptBundle, error) {
 	debugContext := buildDebugContext(rows, files)
-	pre, err := prompts.ResolveOptional(prePrompt)
+	pre, post, err := prompts.ResolveWrap(prePrompt, postPrompt)
 	if err != nil {
-		return flow.PromptBundle{}, fmt.Errorf("cannot resolve --pre-prompt: %w", err)
-	}
-	post, err := prompts.ResolveOptional(postPrompt)
-	if err != nil {
-		return flow.PromptBundle{}, fmt.Errorf("cannot resolve --post-prompt: %w", err)
+		return flow.PromptBundle{}, err
 	}
 	return flow.PromptBundle{
 		Name:   "auto-debug",

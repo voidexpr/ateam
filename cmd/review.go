@@ -125,11 +125,7 @@ func runReview(opts ReviewOptions) error {
 		return err
 	}
 
-	prePrompt, err := prompts.ResolveOptional(opts.PrePrompt)
-	if err != nil {
-		return err
-	}
-	postPrompt, err := prompts.ResolveOptional(opts.PostPrompt)
+	prePrompt, postPrompt, err := prompts.ResolveWrap(opts.PrePrompt, opts.PostPrompt)
 	if err != nil {
 		return err
 	}

@@ -50,11 +50,7 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	prePrompt, err := prompts.ResolveOptional(autoSetupPrePrompt)
-	if err != nil {
-		return err
-	}
-	postPrompt, err := prompts.ResolveOptional(autoSetupPostPrompt)
+	prePrompt, postPrompt, err := prompts.ResolveWrap(autoSetupPrePrompt, autoSetupPostPrompt)
 	if err != nil {
 		return err
 	}

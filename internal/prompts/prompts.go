@@ -116,6 +116,21 @@ func ResolveOptional(value string) (string, error) {
 	return ResolveValue(value)
 }
 
+// ResolveWrap resolves both --pre-prompt and --post-prompt values, returning
+// the resolved pre and post prompts. Errors are wrapped to indicate which
+// flag failed.
+func ResolveWrap(prePromptVar, postPromptVar string) (pre, post string, err error) {
+	pre, err = ResolveOptional(prePromptVar)
+	if err != nil {
+		return "", "", fmt.Errorf("cannot resolve --pre-prompt: %w", err)
+	}
+	post, err = ResolveOptional(postPromptVar)
+	if err != nil {
+		return "", "", fmt.Errorf("cannot resolve --post-prompt: %w", err)
+	}
+	return pre, post, nil
+}
+
 // RoleReport holds metadata about a discovered role report file.
 type RoleReport struct {
 	RoleID  string

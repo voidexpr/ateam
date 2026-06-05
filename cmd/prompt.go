@@ -140,13 +140,9 @@ func runPromptLiteralFile(pathArg string) error {
 	// .prompt.md branch passes them into PromptFile (assembler-level
 	// framing). The inline-text branch concatenates them around the
 	// body the same way buildArgPrompt does.
-	prePrompt, err := prompts.ResolveOptional(promptPrePrompt)
+	prePrompt, postPrompt, err := prompts.ResolveWrap(promptPrePrompt, promptPostPrompt)
 	if err != nil {
-		return fmt.Errorf("cannot resolve --pre-prompt: %w", err)
-	}
-	postPrompt, err := prompts.ResolveOptional(promptPostPrompt)
-	if err != nil {
-		return fmt.Errorf("cannot resolve --post-prompt: %w", err)
+		return err
 	}
 
 	// Spec dispatch rule: @PATH ending in ".prompt.md" composes through
@@ -227,11 +223,7 @@ func runPromptRole() error {
 		return fmt.Errorf("unknown role: %s\nValid roles: %s", promptRole, strings.Join(promptdata.AllKnownRoleIDs(env.Config.Roles, env.ProjectDir, env.OrgDir), ", "))
 	}
 
-	prePrompt, err := prompts.ResolveOptional(promptPrePrompt)
-	if err != nil {
-		return err
-	}
-	postPrompt, err := prompts.ResolveOptional(promptPostPrompt)
+	prePrompt, postPrompt, err := prompts.ResolveWrap(promptPrePrompt, promptPostPrompt)
 	if err != nil {
 		return err
 	}
@@ -345,11 +337,7 @@ func runPromptAction() error {
 		return err
 	}
 
-	prePrompt, err := prompts.ResolveOptional(promptPrePrompt)
-	if err != nil {
-		return err
-	}
-	postPrompt, err := prompts.ResolveOptional(promptPostPrompt)
+	prePrompt, postPrompt, err := prompts.ResolveWrap(promptPrePrompt, promptPostPrompt)
 	if err != nil {
 		return err
 	}
@@ -504,11 +492,7 @@ func inspectionDigestsForCurrentFlags() (string, []sectionDigest, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	prePrompt, err := prompts.ResolveOptional(promptPrePrompt)
-	if err != nil {
-		return "", nil, err
-	}
-	postPrompt, err := prompts.ResolveOptional(promptPostPrompt)
+	prePrompt, postPrompt, err := prompts.ResolveWrap(promptPrePrompt, promptPostPrompt)
 	if err != nil {
 		return "", nil, err
 	}

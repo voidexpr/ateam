@@ -98,13 +98,9 @@ func runExec(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	prePrompt, err := prompts.ResolveOptional(execPrePrompt)
+	prePrompt, postPrompt, err := prompts.ResolveWrap(execPrePrompt, execPostPrompt)
 	if err != nil {
-		return fmt.Errorf("cannot resolve --pre-prompt: %w", err)
-	}
-	postPrompt, err := prompts.ResolveOptional(execPostPrompt)
-	if err != nil {
-		return fmt.Errorf("cannot resolve --post-prompt: %w", err)
+		return err
 	}
 	promptInst, err := buildArgPrompt(promptArg, prePrompt, postPrompt, execRaw)
 	if err != nil {
