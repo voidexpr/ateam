@@ -23,6 +23,14 @@ type Match struct {
 	Content []byte
 }
 
+// SectionSeparator is the literal joining adjacent composed sections
+// in the final prompt text. Lives here so the assembler, the
+// orchestrator's wrapRaw / joinSections helpers, and ad-hoc
+// section-joining callers (cmd/review_assemble.go) share one source of
+// truth — drifting separator semantics across paths would silently
+// reshape agent-facing output.
+const SectionSeparator = "\n\n---\n\n"
+
 // Slot names for ResolvedFile.Slot. These are the same string values the
 // composition machinery has always emitted into Section.Slot, exported so
 // new Assembler impls can build ResolvedFile values without re-typing
@@ -32,9 +40,11 @@ type Match struct {
 const (
 	SlotRootPre  = "root_pre"
 	SlotDirPre   = "dir_pre"
+	SlotRolePre  = "role_pre"
 	SlotRoleMain = "role_main"
 	SlotRolePost = "role_post"
 	SlotDirPost  = "dir_post"
+	SlotRootPost = "root_post"
 )
 
 // ResolvedFile is one entry in an Assembler.Resolve result. It carries
@@ -63,7 +73,6 @@ type Assembler interface {
 	// `name` WITHOUT requiring a `<role>.prompt.md` file to exist. Used
 	// by orchestrators when an operator supplies CustomBody (the
 	// role_main file is replaced inline and need not exist on disk).
-	// Impls without a fragment universe (BasicAssembler) return nil.
 	ResolveFramingOnly(name string) ([]ResolvedFile, error)
 	FindOrphans() ([]*OrphanError, error)
 	Anchors() []Anchor

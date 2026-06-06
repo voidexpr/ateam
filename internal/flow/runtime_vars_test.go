@@ -89,6 +89,29 @@ func TestRuntimeVarsEnumerate(t *testing.T) {
 		}
 	})
 
+	t.Run("ModeReal unwired load-bearing keys are omitted from snapshot", func(t *testing.T) {
+		// Load-bearing keys (id/batch/output_dir/output_file/prompt_file)
+		// surface a wire-bug error via Resolve when rt isn't populated.
+		// Enumerate is the snapshot surface; squashing the error to ""
+		// would mask the wiring bug for diagnostic consumers reading
+		// the snapshot. The key is OMITTED instead, signaling "ask
+		// Resolve" to anything that genuinely needs the value.
+		rt := NewRuntime(nil, nil, "")
+		rt.SetMode(prompts.ModeReal)
+		rt.ExecID = 5
+		// Batch / OutputDir / OutputFile / PromptFile deliberately unset.
+		snap := rt.Vars().Enumerate()
+		exec := snap["exec"]
+		if exec["id"] != "5" {
+			t.Errorf("exec.id = %q, want 5", exec["id"])
+		}
+		for _, key := range []string{"batch", "output_dir", "output_file", "prompt_file"} {
+			if _, ok := exec[key]; ok {
+				t.Errorf("exec.%s should be omitted when unwired (got %q) — empty-string masking the wiring bug", key, exec[key])
+			}
+		}
+	})
+
 	t.Run("exec namespace from BaseVars is ignored", func(t *testing.T) {
 		// runtimeVars owns exec.* — even if BaseVars carries an Exec
 		// map (legacy seed in BuildAssemblerVars), the snapshot

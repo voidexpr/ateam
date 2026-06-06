@@ -12,20 +12,6 @@ import (
 	"github.com/ateam/internal/runner"
 )
 
-// isFilesystemPromptPath reports whether `path` triggers the
-// .prompt.md filesystem-path dispatch: ends in ".prompt.md" AND looks
-// like a filesystem reference (contains a path separator or starts
-// with "."). A bare logical name like "review" goes through the
-// standard anchor walk instead. Used at the cmd-layer dispatch sites
-// (`ateam exec @PATH`, `ateam prompt @PATH`) to pick PromptFile vs
-// PromptText.
-func isFilesystemPromptPath(path string) bool {
-	if !strings.HasSuffix(path, ".prompt.md") {
-		return false
-	}
-	return strings.ContainsRune(path, '/') || strings.HasPrefix(path, ".")
-}
-
 // RunnerSpec is the cmd-layer adapter from a command's flag set to the
 // runner resolution chain. Each agent-running cmd (exec, parallel,
 // report, etc.) bundles its per-flag values into this shape and calls
@@ -81,30 +67,27 @@ func buildRunner(env *root.ResolvedEnv, spec RunnerSpec) (*runner.AgentExecutor,
 }
 
 // buildArgPrompt picks the Prompt implementation for an
-// `ateam exec`-style CLI argument and applies the operator-supplied
-// `--pre-prompt` / `--post-prompt` wrappers. Single dispatch rule
-// (spec lines 471-478):
+// `ateam exec`-style CLI argument. --pre-prompt / --post-prompt are
+// stamped onto the resulting Prompt's PrePrompt/PostPrompt fields and
+// reach the agent as RAW text on every impl (spec implementer note 2).
+// Single dispatch rule (spec lines 471-478):
 //
 //   - --raw set                                → RawTextPrompt
-//     (pre/post concatenated as raw bytes)
-//   - `@PATH` where PATH ends in `.prompt.md`  → PromptFile{Path: PATH}
-//     (PromptFile detects filesystem-path mode and injects the parent
-//     dir as a temp anchor so sibling fragments compose around the
-//     body; pre/post flow through the assembler's
-//     AssembleOptions and frame the composed result)
+//   - `@PATH` where PATH is a filesystem-shape
+//     .prompt.md reference                     → PromptFile with an
+//     explicit TempAnchor rooted at PATH's parent dir; sibling
+//     `<basename>.pre.*.md` and dir-level `_pre.*.md` fragments
+//     compose around the body
 //   - otherwise (literal text, `@PATH` not ending in `.prompt.md`,
 //     `@-` stdin)                              → PromptText
-//     (pre/post concatenated; the engine expands the result)
 //
 // The PromptFile branch does NOT pre-read the file — PromptFile reads
-// it through the assembler at Resolve time, so sibling framing
-// fragments (`<basename>.pre.*.md`, `_pre.*.md`) get picked up. The
-// other branches pre-read via prompts.ResolveValue so the body is
-// known up front.
+// it through the assembler at Resolve time. The other branches
+// pre-read via prompts.ResolveValue so the body is known up front.
 func buildArgPrompt(env *root.ResolvedEnv, arg, prePrompt, postPrompt string, raw bool) (prompts.Prompt, error) {
 	if !raw && strings.HasPrefix(arg, "@") && !strings.HasPrefix(arg, "@-") {
 		cleanPath := strings.TrimPrefix(arg, "@")
-		if isFilesystemPromptPath(cleanPath) {
+		if assembler.IsFilesystemPath(cleanPath) {
 			parentDir := filepath.Dir(cleanPath)
 			if parentDir == "" {
 				parentDir = "."
@@ -124,16 +107,10 @@ func buildArgPrompt(env *root.ResolvedEnv, arg, prePrompt, postPrompt string, ra
 	if err != nil {
 		return nil, fmt.Errorf("cannot resolve prompt: %w", err)
 	}
-	if prePrompt != "" {
-		body = prePrompt + "\n\n---\n\n" + body
-	}
-	if postPrompt != "" {
-		body = body + "\n\n---\n\n" + postPrompt
-	}
 	if raw {
-		return prompts.RawTextPrompt{Text: body}, nil
+		return prompts.RawTextPrompt{Text: body, PrePrompt: prePrompt, PostPrompt: postPrompt}, nil
 	}
-	return prompts.PromptText{Text: body}, nil
+	return prompts.PromptText{Text: body, PrePrompt: prePrompt, PostPrompt: postPrompt}, nil
 }
 
 // staticBundle constructs a PromptBundle around an already-composed

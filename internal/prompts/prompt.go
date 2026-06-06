@@ -11,18 +11,6 @@ import (
 	"github.com/ateam/internal/root"
 )
 
-// filesystemPromptPath reports whether `path` looks like a filesystem
-// reference (ends in .prompt.md AND contains a separator or starts with
-// "."). PromptFile auto-wraps such paths in a TempAnchorAssembler for
-// backward compatibility with direct callers; cmd-layer dispatch
-// detects the same shape inline and injects the wrapper explicitly.
-func filesystemPromptPath(path string) bool {
-	if !strings.HasSuffix(path, ".prompt.md") {
-		return false
-	}
-	return strings.ContainsRune(path, '/') || strings.HasPrefix(path, ".")
-}
-
 // Vars is the variable resolver consumed by the assembler engine and surfaced
 // to dynamics via ResolveContext.Vars(). Aliased so prompt-authoring code
 // doesn't have to reach into the assembler subpackage.
@@ -89,24 +77,44 @@ type Prompt interface {
 // `ateam exec --raw` (and similar) where authors want byte-for-byte fidelity
 // with the source string. No variable substitution, no includes, no
 // dynamics.
+//
+// PrePrompt / PostPrompt are RAW wrappers concatenated around Text with
+// the standard assembler.SectionSeparator. Whitespace-only values drop.
+// Matches PromptFile's pre/post contract — every Prompt impl treats
+// operator-supplied wrappers identically.
 type RawTextPrompt struct {
-	Text string
+	Text       string
+	PrePrompt  string
+	PostPrompt string
 }
 
-func (p RawTextPrompt) Resolve(ResolveContext) (string, error) { return p.Text, nil }
+func (p RawTextPrompt) Resolve(ResolveContext) (string, error) {
+	return wrapRaw(p.PrePrompt, p.Text, p.PostPrompt), nil
+}
 func (p RawTextPrompt) Inspect(ResolveContext) ([]Section, error) {
 	return nil, nil
 }
 
 // PromptText holds literal text WITH expansion. Variable substitution and
-// dynamics apply. Include directives error because PromptText has no
-// anchor list — authors who need includes use PromptFile instead.
+// dynamics apply to Text. Include directives error because PromptText has
+// no anchor list — authors who need includes use PromptFile instead.
+//
+// PrePrompt / PostPrompt are RAW wrappers — they do NOT flow through the
+// engine. A `{{ns.key}}` token inside a wrapper reaches the agent
+// verbatim. Matches PromptFile's pre/post contract; rationale documented
+// in PromptFile's doc.
 type PromptText struct {
-	Text string
+	Text       string
+	PrePrompt  string
+	PostPrompt string
 }
 
 func (p PromptText) Resolve(ctx ResolveContext) (string, error) {
-	return renderWithCtx(nil, p.Text, ctx)
+	rendered, err := renderWithCtx(nil, p.Text, ctx)
+	if err != nil {
+		return "", err
+	}
+	return wrapRaw(p.PrePrompt, rendered, p.PostPrompt), nil
 }
 
 func (p PromptText) Inspect(ResolveContext) ([]Section, error) {
@@ -144,7 +152,7 @@ type PromptFile struct {
 	// Assembler picks the lookup strategy. nil falls through to
 	// ctx.Env().Assembler() — the standard chain. Set for special
 	// dispatch (TempAnchorAssembler for filesystem-path .prompt.md
-	// files; BasicAssembler for single-file rendering with no framing).
+	// files outside the standard anchor chain).
 	Assembler assembler.Assembler
 
 	// Factory selects the Prompt impl that renders the role_main file.
@@ -159,25 +167,39 @@ type PromptFile struct {
 // returns the rendered body. PrePrompt / PostPrompt wrap the result as
 // raw text; CustomBody replaces the role_main file body.
 func (p PromptFile) Resolve(ctx ResolveContext) (string, error) {
-	sections, err := p.composeSections(ctx)
+	sections, err := p.allSections(ctx)
 	if err != nil {
 		return "", err
 	}
-	body := joinSections(sections)
-	return wrapRaw(p.PrePrompt, body, p.PostPrompt), nil
+	return joinSections(sections), nil
 }
 
 // Inspect returns the section breakdown so --paths / --inline-paths can
 // display each composed fragment's anchor + path provenance. CLI
 // wrappers (PrePrompt / PostPrompt) appear as their own sections so
-// inspection callers see exactly what the agent receives.
+// inspection callers see exactly what the agent receives — same shape
+// Resolve joins.
 func (p PromptFile) Inspect(ctx ResolveContext) ([]Section, error) {
-	sections, err := p.composeSections(ctx)
+	return p.allSections(ctx)
+}
+
+// allSections composes the body sections via composeSections and frames
+// them with cli_pre_prompt / cli_post_prompt wrappers when the operator
+// supplied them. Single source of truth for the wrap shape: Resolve
+// joins this list; Inspect returns it verbatim — guaranteeing they
+// can't drift.
+func (p PromptFile) allSections(ctx ResolveContext) ([]Section, error) {
+	body, err := p.composeSections(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var out []Section
-	if strings.TrimSpace(p.PrePrompt) != "" {
+	hasPre := strings.TrimSpace(p.PrePrompt) != ""
+	hasPost := strings.TrimSpace(p.PostPrompt) != ""
+	if !hasPre && !hasPost {
+		return body, nil
+	}
+	out := make([]Section, 0, len(body)+2)
+	if hasPre {
 		out = append(out, Section{
 			Anchor:  "cli",
 			Path:    "(--pre-prompt)",
@@ -185,8 +207,8 @@ func (p PromptFile) Inspect(ctx ResolveContext) ([]Section, error) {
 			Content: p.PrePrompt,
 		})
 	}
-	out = append(out, sections...)
-	if strings.TrimSpace(p.PostPrompt) != "" {
+	out = append(out, body...)
+	if hasPost {
 		out = append(out, Section{
 			Anchor:  "cli",
 			Path:    "(--post-prompt)",
@@ -223,7 +245,7 @@ func (p PromptFile) composeSections(ctx ResolveContext) ([]Section, error) {
 		// the shim covers direct callers (tests, embedded use) that
 		// construct a bare PromptFile. TempAnchor.Resolve handles the
 		// `.prompt.md` → role basename conversion itself.
-		if filesystemPromptPath(p.Path) {
+		if assembler.IsFilesystemPath(p.Path) {
 			parentDir := filepath.Dir(p.Path)
 			if parentDir == "" {
 				parentDir = "."
@@ -352,7 +374,7 @@ func renderFraming(files []assembler.ResolvedFile, engine *assembler.Engine, var
 }
 
 func isPostSlot(slot string) bool {
-	return slot == "role_post" || slot == "root_post" || strings.HasPrefix(slot, assembler.SlotDirPost+":")
+	return slot == assembler.SlotRolePost || slot == assembler.SlotRootPost || strings.HasPrefix(slot, assembler.SlotDirPost+":")
 }
 
 // renderRoleMain delegates to the Factory when set; otherwise renders
@@ -419,17 +441,24 @@ func joinSections(sections []Section) string {
 	for i, s := range sections {
 		parts[i] = s.Content
 	}
-	return strings.Join(parts, "\n\n---\n\n")
+	return strings.Join(parts, assembler.SectionSeparator)
 }
 
 // wrapRaw appends pre and post around body as RAW text (no engine). The
-// `\n\n---\n\n` separator matches the assembler's join — keeping the
-// shape consistent with the framing sections inside. Whitespace-only
-// values drop silently so an empty --pre-prompt doesn't add a blank
-// separator.
+// SectionSeparator matches the assembler's join — keeping the shape
+// consistent with the framing sections inside. Whitespace-only values
+// drop silently so an empty --pre-prompt doesn't add a blank separator.
+// Fast path returns body untouched when both wrappers are empty — the
+// vast majority of Prompt.Resolve calls don't carry pre/post.
 func wrapRaw(pre, body, post string) string {
+	if pre == "" && post == "" {
+		return body
+	}
 	prePart := strings.TrimSpace(pre)
 	postPart := strings.TrimSpace(post)
+	if prePart == "" && postPart == "" {
+		return body
+	}
 	parts := make([]string, 0, 3)
 	if prePart != "" {
 		parts = append(parts, pre)
@@ -440,7 +469,7 @@ func wrapRaw(pre, body, post string) string {
 	if postPart != "" {
 		parts = append(parts, post)
 	}
-	return strings.Join(parts, "\n\n---\n\n")
+	return strings.Join(parts, assembler.SectionSeparator)
 }
 
 // renderWithCtx runs the assembler engine against ctx — vars + dynamics

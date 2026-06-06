@@ -137,27 +137,6 @@ func TestPromptFile_PrePostAreRaw(t *testing.T) {
 	}
 }
 
-// TestPromptFile_BasicAssemblerSingleFileNoFraming pins the
-// BasicAssembler integration: when wired explicitly, the orchestrator
-// renders exactly one file with no framing fragments.
-func TestPromptFile_BasicAssemblerSingleFileNoFraming(t *testing.T) {
-	fs := fstest.MapFS{
-		"my.md": &fstest.MapFile{Data: []byte("ONLY {{prompt.name}}")},
-	}
-	ctx := newPromptFileCtx(mkTestAssembler(nil), map[string]string{"name": "x"}, nil)
-	pf := PromptFile{
-		Path:      "my.md",
-		Assembler: &assembler.BasicAssembler{FS: fs, Path: "my.md"},
-	}
-	out, err := pf.Resolve(ctx)
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
-	if out != "ONLY x" {
-		t.Errorf("Resolve = %q, want %q", out, "ONLY x")
-	}
-}
-
 // TestPromptFile_CustomBodySkipsFactoryAndFile pins implementer note 4:
 // CustomBody bypasses the role_main file read AND the factory. The
 // orchestrator engine-renders the body inline.

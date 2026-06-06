@@ -268,7 +268,7 @@ func (a *MultiAnchorAssembler) Assemble(promptPath string, vars Vars, engine *En
 		parts2[i] = s.Content
 	}
 	return AssembleResult{
-		Prompt:   strings.Join(parts2, "\n\n---\n\n"),
+		Prompt:   strings.Join(parts2, SectionSeparator),
 		Sections: sections,
 	}, nil
 }

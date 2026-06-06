@@ -162,7 +162,7 @@ func runPromptLiteralFile(pathArg string) error {
 	// sibling <basename>.pre.*.md and dir-level _pre.*.md fragments next
 	// to the file compose alongside the inherited framing.
 	cleanPath := strings.TrimPrefix(pathArg, "@")
-	if isFilesystemPromptPath(cleanPath) {
+	if assembler.IsFilesystemPath(cleanPath) {
 		return runPromptExternalFile(env, cleanPath, prePrompt, postPrompt)
 	}
 
@@ -171,12 +171,8 @@ func runPromptLiteralFile(pathArg string) error {
 	// dynamic. {{prompt.name}} renders to the basename; exec.* renders as
 	// the AT RUNTIME sentinel; {{dynamic.project_info}} returns "" because
 	// roleLabel is empty (matches --no-project-info semantics).
-	if prePrompt != "" {
-		content = prePrompt + "\n\n---\n\n" + content
-	}
-	if postPrompt != "" {
-		content = content + "\n\n---\n\n" + postPrompt
-	}
+	// PrePrompt/PostPrompt are RAW per the spec — same rule as the
+	// .prompt.md filesystem path above and PromptFile internally.
 	rt := flow.NewRuntime(nil, env, env.WorkDir)
 	rt.SetVars(env.BuildAssemblerVars(cleanPath, "", ""))
 	rt.SetDynamics(prompts.PromptDynamic{
@@ -185,7 +181,7 @@ func runPromptLiteralFile(pathArg string) error {
 	if promptBatch != "" {
 		rt.Batch = promptBatch
 	}
-	rendered, err := prompts.PromptText{Text: content}.Resolve(rt)
+	rendered, err := prompts.PromptText{Text: content, PrePrompt: prePrompt, PostPrompt: postPrompt}.Resolve(rt)
 	if err != nil {
 		return fmt.Errorf("rendering %s: %w", pathArg, err)
 	}
@@ -558,7 +554,7 @@ func inspectionDigestsForCurrentFlags() (string, []sectionDigest, error) {
 		return "", nil, err
 	}
 
-	anchorFS := anchorFSMap(a)
+	anchorFS := a.FSByAnchor()
 	digests := make([]sectionDigest, 0, len(sections)+3)
 	for _, s := range sections {
 		digests = append(digests, sectionDigest{
@@ -614,19 +610,6 @@ func runPromptPaths() error {
 	fmt.Fprintf(w, "TOTAL\t\t\t\t%s\n", display.FmtTokens(int64(totalTokens)))
 	w.Flush()
 	return nil
-}
-
-// anchorFSMap indexes an Assembler's anchors by name so the preview can
-// stat each section's source file via the FS that owns it (project's
-// os.DirFS gives real mod times; the embedded anchor's fs.Sub gives a
-// zero time, which sectionModTime renders as "embedded").
-func anchorFSMap(a *assembler.MultiAnchorAssembler) map[string]fs.FS {
-	anchors := a.Anchors()
-	out := make(map[string]fs.FS, len(anchors))
-	for _, anc := range anchors {
-		out[anc.Name] = anc.FS
-	}
-	return out
 }
 
 // sectionModTime stats path against the anchor's FS and returns a

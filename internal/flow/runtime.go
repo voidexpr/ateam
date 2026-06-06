@@ -154,11 +154,12 @@ func (v *runtimeVars) Resolve(ns, key string) (string, bool, error) {
 
 // Enumerate implements assembler.Vars. Combines exec.* (sourced from
 // rt's typed fields + mode) with whatever the base Vars (BaseVars from
-// the bundle) provides for every other namespace. Errors from the
-// per-key resolver are squashed to empty strings — Enumerate is the
-// snapshot surface, not the validation surface, so a load-bearing
-// ModeReal field that wasn't wired surfaces as "" here. Callers that
-// need the wiring-bug error stick with Resolve(ns, key).
+// the bundle) provides for every other namespace. A key whose resolver
+// errors (typically a ModeReal field that wasn't wired) is OMITTED
+// from the snapshot — squashing to "" would mask the wiring bug for
+// diagnostic consumers reading the snapshot. The authoritative
+// validation surface remains Resolve(ns, key); Enumerate is the
+// best-effort snapshot and a missing key signals "ask Resolve".
 func (v *runtimeVars) Enumerate() map[string]map[string]string {
 	out := map[string]map[string]string{}
 	if v.rt.vars != nil {
@@ -173,7 +174,10 @@ func (v *runtimeVars) Enumerate() map[string]map[string]string {
 	}
 	execMap := make(map[string]string, len(execClosedSet))
 	for key := range execClosedSet {
-		val, _, _ := v.resolveExec(key)
+		val, _, err := v.resolveExec(key)
+		if err != nil {
+			continue
+		}
 		execMap[key] = val
 	}
 	out["exec"] = execMap

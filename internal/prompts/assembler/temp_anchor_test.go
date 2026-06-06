@@ -116,6 +116,68 @@ func TestTempAnchorAssembler_FindOrphansScansBothSides(t *testing.T) {
 	}
 }
 
+// TestTempAnchorAssembler_LogicalMultiSegmentName pins that a logical
+// multi-segment name (no .prompt.md suffix) passes through with its
+// directory intact. Without this, a caller wrapping a logical name in
+// a TempAnchorAssembler would silently lose the dir component and the
+// inner chain would walk for the bare role at every anchor root.
+func TestTempAnchorAssembler_LogicalMultiSegmentName(t *testing.T) {
+	innerFS := fstest.MapFS{
+		"prompts/report/security.prompt.md": &fstest.MapFile{Data: []byte("REPORT-SEC BODY")},
+		"prompts/security.prompt.md":        &fstest.MapFile{Data: []byte("ROOT-SEC BODY (wrong)")},
+	}
+	inner := New(BuildAnchors("", "", innerFS))
+
+	extDir := t.TempDir()
+	ta := NewTempAnchor(extDir, inner)
+	files, err := ta.Resolve("report/security")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	var mainPath string
+	for _, f := range files {
+		if f.Slot == SlotRoleMain {
+			mainPath = f.Path
+		}
+	}
+	if mainPath != "report/security.prompt.md" {
+		t.Errorf("role_main resolved to %q; expected report/security.prompt.md (dir component must NOT be dropped)", mainPath)
+	}
+}
+
+// TestIsFilesystemPath pins the predicate's closed truth-table — the
+// canonical home for dispatch sites that decide TempAnchor injection
+// from path shape (cmd/exec_bundle.go::buildArgPrompt, cmd/prompt.go::
+// runPromptLiteralFile, PromptFile's backward-compat shim). Divergence
+// between dispatch sites would route some paths through the wrong
+// branch, so the rule lives once here.
+func TestIsFilesystemPath(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"./foo.prompt.md", true},
+		{"../foo.prompt.md", true},
+		{".prompt.md", true},
+		{"dir/foo.prompt.md", true},
+		{"/abs/path/foo.prompt.md", true},
+		{"sub/dir/foo.prompt.md", true},
+		{"foo.prompt.md", false},
+		{"review", false},
+		{"./foo.md", false},
+		{"./foo", false},
+		{"./foo.prompt", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			if got := IsFilesystemPath(tc.path); got != tc.want {
+				t.Errorf("IsFilesystemPath(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 func mustWrite(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {

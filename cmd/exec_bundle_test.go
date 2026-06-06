@@ -8,6 +8,7 @@ import (
 
 	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/prompts"
+	assemblerpkg "github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 )
@@ -239,11 +240,13 @@ func TestBuildRunner_ConflictingProfileAndAgent(t *testing.T) {
 }
 
 // TestBuildArgPrompt_LiteralPrePostWrap verifies that for the literal /
-// PromptText branch buildArgPrompt concatenates --pre-prompt before and
-// --post-prompt after the body, separated by the documented `\n\n---\n\n`
-// rule. Existing TestBuildArgPrompt_DispatchRule covered only the
-// branch selection; this asserts the wrapping shape that was previously
-// inlined in cmd/exec.go and is now centralized in buildArgPrompt.
+// PromptText branch buildArgPrompt populates PrePrompt/PostPrompt on the
+// resulting PromptText (NOT pre-concatenated into Text). The wrappers
+// are RAW per the spec — engine expansion runs on Text only, then
+// PromptText.Resolve wraps the rendered result with the raw pre/post.
+// Keeping wrappers out of Text means {{ns.key}} inside --pre-prompt
+// reaches the agent verbatim, matching PromptFile semantics for the
+// @PATH.prompt.md branch.
 func TestBuildArgPrompt_LiteralPrePostWrap(t *testing.T) {
 	got, err := buildArgPrompt(nil, "BODY", "PRE", "POST", false)
 	if err != nil {
@@ -253,15 +256,22 @@ func TestBuildArgPrompt_LiteralPrePostWrap(t *testing.T) {
 	if !ok {
 		t.Fatalf("got %T, want PromptText", got)
 	}
-	const want = "PRE\n\n---\n\nBODY\n\n---\n\nPOST"
-	if pt.Text != want {
-		t.Errorf("Text = %q\nwant      %q", pt.Text, want)
+	if pt.Text != "BODY" {
+		t.Errorf("Text = %q, want BODY (pre/post must NOT be concatenated into Text)", pt.Text)
+	}
+	if pt.PrePrompt != "PRE" {
+		t.Errorf("PrePrompt = %q, want PRE", pt.PrePrompt)
+	}
+	if pt.PostPrompt != "POST" {
+		t.Errorf("PostPrompt = %q, want POST", pt.PostPrompt)
 	}
 }
 
 // TestBuildArgPrompt_RawPrePostWrap mirrors the previous test for the
-// --raw branch: pre/post still wrap, but the result is a RawTextPrompt
-// (no engine expansion at Resolve time).
+// --raw branch: pre/post wrap as RAW around Text via RawTextPrompt's
+// PrePrompt/PostPrompt fields. Same shape as the PromptText case;
+// RawTextPrompt skips engine entirely so the distinction is mainly
+// about the inner body.
 func TestBuildArgPrompt_RawPrePostWrap(t *testing.T) {
 	got, err := buildArgPrompt(nil, "BODY", "PRE", "POST", true)
 	if err != nil {
@@ -271,9 +281,48 @@ func TestBuildArgPrompt_RawPrePostWrap(t *testing.T) {
 	if !ok {
 		t.Fatalf("got %T, want RawTextPrompt", got)
 	}
-	const want = "PRE\n\n---\n\nBODY\n\n---\n\nPOST"
-	if rt.Text != want {
-		t.Errorf("Text = %q\nwant      %q", rt.Text, want)
+	if rt.Text != "BODY" {
+		t.Errorf("Text = %q, want BODY", rt.Text)
+	}
+	if rt.PrePrompt != "PRE" {
+		t.Errorf("PrePrompt = %q, want PRE", rt.PrePrompt)
+	}
+	if rt.PostPrompt != "POST" {
+		t.Errorf("PostPrompt = %q, want POST", rt.PostPrompt)
+	}
+}
+
+// TestBuildArgPrompt_PromptTextPrePostStayRaw pins the cross-impl
+// invariant called out in the Assembler/PromptFactory spec (implementer
+// note 2): operator-supplied --pre-prompt / --post-prompt are RAW on
+// every Prompt impl, regardless of arg shape. A `{{ns.key}}` inside a
+// wrapper reaches the agent verbatim for inline-text prompts (this
+// test) AND for @./file.prompt.md prompts (PromptFile's behavior,
+// covered separately).
+func TestBuildArgPrompt_PromptTextPrePostStayRaw(t *testing.T) {
+	got, err := buildArgPrompt(nil, "{{prompt.name}}", "PRE {{prompt.name}}", "POST {{prompt.name}}", false)
+	if err != nil {
+		t.Fatalf("buildArgPrompt: %v", err)
+	}
+	pt, ok := got.(prompts.PromptText)
+	if !ok {
+		t.Fatalf("got %T, want PromptText", got)
+	}
+	rt := flow.NewRuntime(nil, &root.ResolvedEnv{}, "")
+	rt.SetVars(assemblerpkg.MapVars{Prompt: map[string]string{"name": "demo"}})
+	out, err := pt.Resolve(rt)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if !strings.Contains(out, "PRE {{prompt.name}}") {
+		t.Errorf("PrePrompt should stay literal, got:\n%s", out)
+	}
+	if !strings.Contains(out, "POST {{prompt.name}}") {
+		t.Errorf("PostPrompt should stay literal, got:\n%s", out)
+	}
+	// Body itself still expands — only wrappers are raw.
+	if !strings.Contains(out, "demo") || strings.Count(out, "demo") != 1 {
+		t.Errorf("body expansion missing or wrappers expanded, got:\n%s", out)
 	}
 }
 
@@ -327,40 +376,8 @@ func TestBuildArgPrompt_StdinSentinelExcludedFromPromptFileBranch(t *testing.T) 
 	// `!strings.HasPrefix(arg, "@-")` guard isn't strictly necessary
 	// today, but it locks in the user-visible promise that `@-` always
 	// reads stdin even if the predicate is later expanded.
-	if isFilesystemPromptPath("-") {
-		t.Error("isFilesystemPromptPath(\"-\") should be false — `@-` is the stdin sentinel, not a path")
-	}
-}
-
-// TestIsFilesystemPromptPath asserts the predicate's closed truth-table.
-// The cmd-layer dispatch (`ateam exec @PATH`, `ateam prompt @PATH`)
-// uses this rule to pick between the temp-anchor PromptFile branch and
-// the inline-text branch; divergence between dispatch sites would route
-// some paths through the wrong branch.
-func TestIsFilesystemPromptPath(t *testing.T) {
-	cases := []struct {
-		path string
-		want bool
-	}{
-		{"./foo.prompt.md", true},
-		{"../foo.prompt.md", true},
-		{".prompt.md", true},
-		{"dir/foo.prompt.md", true},
-		{"/abs/path/foo.prompt.md", true},
-		{"sub/dir/foo.prompt.md", true},
-		{"foo.prompt.md", false},
-		{"review", false},
-		{"./foo.md", false},
-		{"./foo", false},
-		{"./foo.prompt", false},
-		{"", false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.path, func(t *testing.T) {
-			if got := isFilesystemPromptPath(tc.path); got != tc.want {
-				t.Errorf("isFilesystemPromptPath(%q) = %v, want %v", tc.path, got, tc.want)
-			}
-		})
+	if assemblerpkg.IsFilesystemPath("-") {
+		t.Error("IsFilesystemPath(\"-\") should be false — `@-` is the stdin sentinel, not a path")
 	}
 }
 

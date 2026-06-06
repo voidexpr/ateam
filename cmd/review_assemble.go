@@ -6,6 +6,7 @@ import (
 
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/prompts"
+	"github.com/ateam/internal/prompts/assembler"
 )
 
 // SPEC INVARIANT (plans/feature_prompt_cmd_bundle_aware.md Next-round
@@ -39,5 +40,5 @@ func formatReportsBlock(reports []prompts.RoleReport) string {
 	}
 	manifest := "# Reports Under Review\n\n| Role | Generated |\n|------|----------|\n" +
 		strings.Join(manifestLines, "\n")
-	return manifest + "\n\n---\n\n# Role Reports\n\n" + strings.Join(contents, "\n\n---\n\n")
+	return manifest + assembler.SectionSeparator + "# Role Reports\n\n" + strings.Join(contents, assembler.SectionSeparator)
 }

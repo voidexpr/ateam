@@ -1,17 +1,10 @@
 package assembler
 
 import (
-	"errors"
 	"fmt"
 	"io/fs"
 	"strings"
 )
-
-// ErrMissingRoleMain wraps the "no <role>.prompt.md in any anchor" error
-// MultiAnchorAssembler.Resolve returns. Orchestrators that supply
-// CustomBody can detect and skip; other callers surface the wrapped
-// message as-is.
-var ErrMissingRoleMain = errors.New("role main missing")
 
 // Resolve walks the anchor chain and returns the ordered ResolvedFile
 // list — pre framing, role main, post framing — that composes the
@@ -23,15 +16,16 @@ func (a *MultiAnchorAssembler) Resolve(name string) ([]ResolvedFile, error) {
 	if err != nil {
 		return nil, err
 	}
-	pre, err := a.framingPre(parsed)
+	fsByAnchor := a.FSByAnchor()
+	pre, err := a.framingPre(parsed, fsByAnchor)
 	if err != nil {
 		return nil, err
 	}
-	main, err := a.resolveRoleMain(parsed)
+	main, err := a.resolveRoleMain(parsed, fsByAnchor)
 	if err != nil {
 		return nil, err
 	}
-	post, err := a.framingPost(parsed)
+	post, err := a.framingPost(parsed, fsByAnchor)
 	if err != nil {
 		return nil, err
 	}
@@ -50,11 +44,12 @@ func (a *MultiAnchorAssembler) ResolveFramingOnly(name string) ([]ResolvedFile, 
 	if err != nil {
 		return nil, err
 	}
-	pre, err := a.framingPre(parsed)
+	fsByAnchor := a.FSByAnchor()
+	pre, err := a.framingPre(parsed, fsByAnchor)
 	if err != nil {
 		return nil, err
 	}
-	post, err := a.framingPost(parsed)
+	post, err := a.framingPost(parsed, fsByAnchor)
 	if err != nil {
 		return nil, err
 	}
@@ -79,8 +74,7 @@ func parseAssemblyName(name string) (assemblyName, error) {
 	}, nil
 }
 
-func (a *MultiAnchorAssembler) framingPre(n assemblyName) ([]ResolvedFile, error) {
-	fsByAnchor := a.fsByAnchor()
+func (a *MultiAnchorAssembler) framingPre(n assemblyName, fsByAnchor map[string]fs.FS) ([]ResolvedFile, error) {
 	var out []ResolvedFile
 	// 1. Dir-level pres, root → leaf.
 	for i := 0; i <= len(n.dirs); i++ {
@@ -101,12 +95,11 @@ func (a *MultiAnchorAssembler) framingPre(n assemblyName) ([]ResolvedFile, error
 	if err != nil {
 		return nil, fmt.Errorf("glob role pre %q: %w", joinName(dir, n.role), err)
 	}
-	out = append(out, matchesToFiles("role_pre", rolePres, fsByAnchor)...)
+	out = append(out, matchesToFiles(SlotRolePre, rolePres, fsByAnchor)...)
 	return out, nil
 }
 
-func (a *MultiAnchorAssembler) framingPost(n assemblyName) ([]ResolvedFile, error) {
-	fsByAnchor := a.fsByAnchor()
+func (a *MultiAnchorAssembler) framingPost(n assemblyName, fsByAnchor map[string]fs.FS) ([]ResolvedFile, error) {
 	var out []ResolvedFile
 	// 4. Role-level posts.
 	dir := strings.Join(n.dirs, "/")
@@ -114,7 +107,7 @@ func (a *MultiAnchorAssembler) framingPost(n assemblyName) ([]ResolvedFile, erro
 	if err != nil {
 		return nil, fmt.Errorf("glob role post %q: %w", joinName(dir, n.role), err)
 	}
-	out = append(out, matchesToFiles("role_post", rolePosts, fsByAnchor)...)
+	out = append(out, matchesToFiles(SlotRolePost, rolePosts, fsByAnchor)...)
 	// 5. Dir-level posts, leaf → root.
 	for i := len(n.dirs); i >= 0; i-- {
 		d := strings.Join(n.dirs[:i], "/")
@@ -122,7 +115,7 @@ func (a *MultiAnchorAssembler) framingPost(n assemblyName) ([]ResolvedFile, erro
 		if err != nil {
 			return nil, fmt.Errorf("glob dir post %q: %w", d, err)
 		}
-		slot := "root_post"
+		slot := SlotRootPost
 		if d != "" {
 			slot = SlotDirPost + ":" + d
 		}
@@ -131,7 +124,7 @@ func (a *MultiAnchorAssembler) framingPost(n assemblyName) ([]ResolvedFile, erro
 	return out, nil
 }
 
-func (a *MultiAnchorAssembler) resolveRoleMain(n assemblyName) (ResolvedFile, error) {
+func (a *MultiAnchorAssembler) resolveRoleMain(n assemblyName, fsByAnchor map[string]fs.FS) (ResolvedFile, error) {
 	dir := strings.Join(n.dirs, "/")
 	mainPath := joinName(dir, n.role+".prompt.md")
 	main, ok, err := a.FirstMatch(mainPath)
@@ -139,19 +132,22 @@ func (a *MultiAnchorAssembler) resolveRoleMain(n assemblyName) (ResolvedFile, er
 		return ResolvedFile{}, fmt.Errorf("lookup %q: %w", mainPath, err)
 	}
 	if !ok {
-		return ResolvedFile{}, fmt.Errorf("no role main at %s in any anchor: %w", mainPath, ErrMissingRoleMain)
+		return ResolvedFile{}, fmt.Errorf("no role main at %s in any anchor", mainPath)
 	}
 	return ResolvedFile{
 		Slot:   SlotRoleMain,
 		Anchor: main.Anchor,
 		Path:   main.Path,
-		FS:     a.fsByAnchor()[main.Anchor],
+		FS:     fsByAnchor[main.Anchor],
 	}, nil
 }
 
-// fsByAnchor maps Anchor.Name to its FS so ResolvedFile carries the
-// right FS handle for content reads.
-func (a *MultiAnchorAssembler) fsByAnchor() map[string]fs.FS {
+// FSByAnchor maps Anchor.Name to its FS — used by Resolve /
+// ResolveFramingOnly to stamp ResolvedFile.FS, and by inspection
+// callers (cmd preview --paths) that need to stat sections against
+// the FS that owns them. Built fresh on each call; callers needing
+// repeated lookups within one operation should cache the result.
+func (a *MultiAnchorAssembler) FSByAnchor() map[string]fs.FS {
 	out := make(map[string]fs.FS, len(a.anchors))
 	for _, anc := range a.anchors {
 		out[anc.Name] = anc.FS
