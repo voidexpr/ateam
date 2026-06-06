@@ -296,7 +296,6 @@ By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for o
 
 Full reference: [COMMANDS.md](COMMANDS.md).
 
-
 ## Note about maturity and cost
 
 ATeam was started in February 2026 and has been used mostly on projects where the code is owned by coding agents (including ateam itself). The approach is validated: it improves codebases and saves attention. Projects shape up while spending a fraction of the effort it would take by direct prompting.
