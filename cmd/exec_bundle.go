@@ -63,6 +63,7 @@ func buildRunner(env *root.ResolvedEnv, spec RunnerSpec) (*runner.AgentExecutor,
 		return nil, err
 	}
 	setSourceWritable(r)
+	r.ShimDir = root.EnsureCLIShim(env)
 	return r, nil
 }
 

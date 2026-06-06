@@ -104,6 +104,15 @@ type AgentExecutor struct {
 	// warning and emits a PhaseStall progress event. Re-armed after each
 	// warning. 0 = 5m default. Negative = disable the watchdog.
 	StallWarnAfter time.Duration
+
+	// ShimDir is the directory containing an `ateam` symlink resolving
+	// to the running ateam binary. When non-empty and Container is nil,
+	// buildRequest prepends ShimDir to the agent subprocess PATH so child
+	// `ateam` invocations from prompts find the same binary the parent
+	// is using. Container modes already mount the binary explicitly via
+	// container.DockerContainer.HostCLIPath and don't need the shim.
+	// Set once during construction (root.EnsureCLIShim); never mutated.
+	ShimDir string
 }
 
 // defaultStallWarn is the idle threshold before Run logs a stall warning.
@@ -868,6 +877,21 @@ func (r *AgentExecutor) buildRequest(prompt string, tmplVars TemplateVars, cwd, 
 			configPath = filepath.Join(stateDir, configDir)
 		}
 		reqEnv = map[string]string{"CLAUDE_CONFIG_DIR": configPath}
+	}
+
+	// On host execution (no container), prepend the per-project ateam
+	// shim dir to PATH so child `ateam` invocations from agent prompts
+	// resolve to the same binary the parent is using. Container modes
+	// mount the binary explicitly via HostCLIPath and don't need this.
+	if r.ShimDir != "" && r.Container == nil {
+		if reqEnv == nil {
+			reqEnv = map[string]string{}
+		}
+		if parentPath := os.Getenv("PATH"); parentPath != "" {
+			reqEnv["PATH"] = r.ShimDir + string(os.PathListSeparator) + parentPath
+		} else {
+			reqEnv["PATH"] = r.ShimDir
+		}
 	}
 
 	return agent.Request{
