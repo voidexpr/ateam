@@ -173,7 +173,7 @@ During the `code` and `verify` phases, ateam commits its changes to whatever bra
 ```bash
 ateam exec "audit recent changes for bugs" --agent codex
 
-# run multiple agents at the same time
+# run multiple agents at the same time, use @ to distinguish files vs. text prompts
 ateam parallel "@prompts/security.md" "@prompts/tests.md"
 
 # run any number of prompts by at most 4 at a time
@@ -190,9 +190,6 @@ EOF
 # and they wrap the body the same way the built-in roles do
 ateam exec @prompts/audit.prompt.md --agent claude
 
-# --raw skips the template engine entirely for pre-baked prompts
-ateam exec --raw @prompts/baked.md --agent codex
-
 # look at cost of previous runs or what failed, see current running processes
 ateam ps
 
@@ -207,7 +204,7 @@ ateam inspect 12 --auto-debug
 ateam resume 12 --launch
 ```
 
-The full `@PATH` dispatch rules and template variable namespaces (`{{exec.*}}`, `{{prompt.*}}`, `{{args.*}}`, `{{roles.*}}`, etc.) are in [CONFIG.md → `@PATH` dispatch](CONFIG.md#path-dispatch-exec--parallel--prompt) and [CONFIG.md → Template Variables](CONFIG.md#template-variables).
+more at [COMMANDS.md](COMMANDS.md) and [CONFIG.md](CONFIG.md)
 
 ## Examples
 
