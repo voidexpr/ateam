@@ -54,6 +54,7 @@ See more at [APPROACH.md](APPROACH.md).
 **Observability and troubleshooting**
 - `ateam ps`: show status of current run and all stats of past runs (turns, tokens, cost, timestamps, ...)
 - `ateam tail`: live agent output
+- `ateam top`: live status table of running agents (turns, tokens, context size, current tool)
 - `ateam inspect EXEC_ID`: full execution details, prompts, and logs; `--auto-debug` runs an agent that reads the failure and proposes a fix
 - `ateam resume EXEC_ID`: create an interactive session from an unattended one and ask questions to any past agent
 - `ateam cost`: token usage and dollars per run, role, and agent

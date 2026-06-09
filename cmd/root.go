@@ -80,6 +80,7 @@ func init() {
 	rootCmd.AddCommand(codeCmd)
 	rootCmd.AddCommand(catCmd)
 	rootCmd.AddCommand(tailCmd)
+	rootCmd.AddCommand(topCmd)
 	rootCmd.AddCommand(runAllCmd)
 	rootCmd.AddCommand(psCmd)
 	rootCmd.AddCommand(costCmd)

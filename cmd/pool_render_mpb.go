@@ -38,7 +38,7 @@ type mpbPoolRenderer struct {
 
 	mu     sync.Mutex
 	rows   []poolStatusRow
-	bars   []*mpb.Bar // by row index; nil until first Render
+	bars   []*mpb.Bar // by row index; grown to match rows on each Render
 	closed bool
 }
 
@@ -78,11 +78,9 @@ func (r *mpbPoolRenderer) Render(rows []poolStatusRow) {
 		return
 	}
 	r.rows = clonePoolStatusRows(rows)
-	if r.bars == nil {
-		r.bars = make([]*mpb.Bar, len(r.rows))
-		for i := range r.rows {
-			r.bars[i] = r.makeBar(i)
-		}
+	// Bars grow lazily to match rows; callers may append rows between Renders.
+	for i := len(r.bars); i < len(r.rows); i++ {
+		r.bars = append(r.bars, r.makeBar(i))
 	}
 	// Collect terminal bars under the lock; call SetTotal AFTER unlocking.
 	// SetTotal is a blocking send to the bar's serve goroutine, which can
@@ -94,7 +92,7 @@ func (r *mpbPoolRenderer) Render(rows []poolStatusRow) {
 		if r.bars[i] == nil {
 			continue
 		}
-		if row.State == poolStateDone || row.State == poolStateError {
+		if poolStatusTerminal(row.State) {
 			done = append(done, r.bars[i])
 		}
 	}

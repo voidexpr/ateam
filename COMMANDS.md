@@ -768,6 +768,14 @@ ateam tail 42 43 --final-message | jq .    # wait for finish, JSONL per run
 | `--no-color` | Disable color output |
 | `--final-message` | Suppress the formatted stream and instead emit one JSONL line per run on stdout as each one finishes. Each line carries the call metadata (`exec_id`, `agent`, `model`, `role`, `action`, `batch`, `started_at`, `ended_at`, `duration_ms`, `is_error`, `exit_code`, `error_message`, `cost_usd`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `turns`) plus `final_message` (the last assistant message text). Exits non-zero if any run reported `is_error=true`. Works with any selector (IDs, `--last`, `--reports`, `--coding`, or none for all running). Designed for pipelining parallel runs: spawn N agents, then `ateam tail --final-message \| jq -r .final_message` to act on each as it completes. |
 
+### `ateam top`
+
+Live, top-like status table of running agents. Takes no flags.
+
+Runs are discovered from the call database (any exec without an end time) and progress — turns, tokens, context size, current tool — is read from each run's stream log on disk, so `top` can attach to runs started from other terminals at any point in their lifetime. New runs appear as they start; finished rows keep their final status (`done` / `ERROR` / `canceled`, classified like `ateam ps`). Press Ctrl-C to quit.
+
+Renders the same live table as `ateam parallel` / `ateam report` (`ID, LABEL, STATUS, EstTOKENS, TURNS, DETAILS`) and requires a terminal; use `ateam ps` for a one-shot snapshot.
+
 ### `ateam cost`
 
 Display aggregated cost and token usage. When run inside a project, results are filtered to that project.

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"github.com/ateam/internal/agent"
@@ -238,44 +237,7 @@ func (t *Tailer) pollFiles() {
 }
 
 func (t *Tailer) pollSource(src *TailSource) {
-	f, err := os.Open(src.AgentFile)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-
-	info, err := f.Stat()
-	if err != nil || info.Size() <= src.offset {
-		return
-	}
-
-	if src.offset > 0 {
-		if _, err := f.Seek(src.offset, io.SeekStart); err != nil {
-			return
-		}
-	}
-
-	buf := make([]byte, info.Size()-src.offset)
-	n, _ := f.Read(buf)
-	if n == 0 {
-		return
-	}
-	buf = buf[:n]
-	src.offset += int64(n)
-
-	// Prepend any partial line from last read
-	if len(src.partial) > 0 {
-		buf = append(src.partial, buf...)
-		src.partial = nil
-	}
-
-	// Split into lines, saving incomplete trailing data
-	lines, remainder := splitLines(buf)
-	if len(remainder) > 0 {
-		src.partial = make([]byte, len(remainder))
-		copy(src.partial, remainder)
-	}
-	for _, line := range lines {
+	for _, line := range readNewLines(src.AgentFile, &src.offset, &src.partial) {
 		out := src.Formatter.FormatLine(line)
 		if out != "" && !t.FinalMessageOnly {
 			fmt.Fprint(t.Writer, out)

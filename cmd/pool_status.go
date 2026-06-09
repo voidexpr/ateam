@@ -11,11 +11,12 @@ import (
 )
 
 const (
-	poolStateQueued  = "queued"
-	poolStateRunning = "running"
-	poolStateDone    = "done"
-	poolStateError   = "ERROR"
-	poolStateSkipped = "SKIPPED"
+	poolStateQueued   = "queued"
+	poolStateRunning  = "running"
+	poolStateDone     = "done"
+	poolStateError    = "ERROR"
+	poolStateSkipped  = "SKIPPED"
+	poolStateCanceled = "canceled" // process died without writing an end row (ateam top)
 
 	// poolStatusRowFmt is the shared template used for both the header
 	// and each data row, so column widths can't drift between them.
@@ -85,7 +86,7 @@ func formatRunningToolDetail(elapsed, toolName string, toolCount int) string {
 }
 
 func poolStatusTerminal(state string) bool {
-	return state == poolStateDone || state == poolStateError
+	return state == poolStateDone || state == poolStateError || state == poolStateCanceled
 }
 
 func nextPoolStatusRow(row poolStatusRow, p runner.RunProgress) poolStatusRow {
