@@ -19,18 +19,26 @@ import (
 // should print each computed prompt (with common prefix/suffix and label
 // banner) to stdout and exit without touching the runner or DB.
 func TestParallelDryRun(t *testing.T) {
+	// runParallel resolves prompts against a project env (even on the
+	// dry-run path, via ResolvePreview), so set one up and run from inside
+	// it like the exec dry-run smoke tests do.
+	orgParent, projPath, _ := setupTestProject(t)
+
 	saved := struct {
 		labels                  []string
 		commonFirst, commonLast string
 		dryRun                  bool
 	}{parallelLabels, parallelCommonPromptFirst, parallelCommonPromptLast, parallelDryRun}
+	savedExec := saveExecGlobals()
 	defer func() {
 		parallelLabels = saved.labels
 		parallelCommonPromptFirst = saved.commonFirst
 		parallelCommonPromptLast = saved.commonLast
 		parallelDryRun = saved.dryRun
+		savedExec.restore()
 	}()
 
+	orgFlag = orgParent
 	parallelLabels = []string{"alpha", "beta"}
 	parallelCommonPromptFirst = "PREFIX"
 	parallelCommonPromptLast = "SUFFIX"
@@ -38,7 +46,9 @@ func TestParallelDryRun(t *testing.T) {
 
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runParallel(nil, []string{"task one", "task two"})
+		withChdir(t, projPath, func() {
+			runErr = runParallel(nil, []string{"task one", "task two"})
+		})
 	})
 	if runErr != nil {
 		t.Fatalf("runParallel dry-run: %v", runErr)
