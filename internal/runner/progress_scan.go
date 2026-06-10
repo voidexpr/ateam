@@ -3,6 +3,7 @@ package runner
 import (
 	"io"
 	"os"
+	"time"
 )
 
 // ProgressScanner incrementally reads an agent stream JSONL file and
@@ -16,13 +17,13 @@ type ProgressScanner struct {
 	partial []byte
 	format  streamFormat
 
-	Turns           int         // one per usage-bearing assistant message
-	ToolCount       int         // total tool_use blocks seen
-	LastTool        string      // name of the most recent tool call
-	ContextTokens   int         // context size of the latest assistant message (input + cache)
-	CumInputTokens  int         // cumulative input tokens across messages
-	CumOutputTokens int         // cumulative output tokens across messages
-	Result          *ResultLine // non-nil once the terminal result event was seen
+	turns           int         // one per usage-bearing assistant message
+	toolCount       int         // total tool_use blocks seen
+	lastTool        string      // name of the most recent tool call
+	contextTokens   int         // context size of the latest assistant message (input + cache)
+	cumInputTokens  int         // cumulative input tokens across messages
+	cumOutputTokens int         // cumulative output tokens across messages
+	result          *ResultLine // non-nil once the terminal result event was seen
 }
 
 func NewProgressScanner(path string) *ProgressScanner {
@@ -33,7 +34,7 @@ func NewProgressScanner(path string) *ProgressScanner {
 // folds complete lines into the counters. A missing or unchanged file is
 // a no-op, so it is safe to poll before the agent has created the file.
 func (s *ProgressScanner) Poll() {
-	if s.Path == "" || s.Result != nil {
+	if s.Path == "" || s.result != nil {
 		return
 	}
 	for _, line := range readNewLines(s.Path, &s.offset, &s.partial) {
@@ -58,26 +59,47 @@ func (s *ProgressScanner) consume(line []byte) {
 		var usage *MessageUsage
 		switch e := ev.(type) {
 		case *ToolCallLine:
-			s.ToolCount++
-			s.LastTool = e.Name
+			s.toolCount++
+			s.lastTool = e.Name
 			usage = e.Usage
 		case *TextLine:
 			usage = e.Usage
 		case *ThinkingLine:
 			usage = e.Usage
 		case *ResultLine:
-			s.Result = e
-			if e.Turns > s.Turns {
-				s.Turns = e.Turns
+			s.result = e
+			if e.Turns > s.turns {
+				s.turns = e.Turns
 			}
 		}
 		if usage != nil && !counted {
 			counted = true
-			s.Turns++
-			s.CumInputTokens += usage.InputTokens
-			s.CumOutputTokens += usage.OutputTokens
-			s.ContextTokens = usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
+			s.turns++
+			s.cumInputTokens += usage.InputTokens
+			s.cumOutputTokens += usage.OutputTokens
+			s.contextTokens = usage.InputTokens + usage.CacheCreationInputTokens + usage.CacheReadInputTokens
 		}
+	}
+}
+
+// Progress adapts the accumulated counters into the RunProgress shape the
+// pool row formatters consume. execID and elapsed belong to the caller; the
+// scanner only knows what the stream told it.
+func (s *ProgressScanner) Progress(execID int64, elapsed time.Duration) RunProgress {
+	phase := PhaseInit
+	if s.lastTool != "" {
+		phase = PhaseTool
+	}
+	return RunProgress{
+		ExecID:                 execID,
+		Phase:                  phase,
+		ToolName:               s.lastTool,
+		ToolCount:              s.toolCount,
+		TurnCount:              s.turns,
+		Elapsed:                elapsed,
+		ContextTokens:          s.contextTokens,
+		CumulativeInputTokens:  s.cumInputTokens,
+		CumulativeOutputTokens: s.cumOutputTokens,
 	}
 }
 

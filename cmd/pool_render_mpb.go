@@ -89,9 +89,6 @@ func (r *mpbPoolRenderer) Render(rows []poolStatusRow) {
 	// Render is harmless.
 	var done []*mpb.Bar
 	for i, row := range r.rows {
-		if r.bars[i] == nil {
-			continue
-		}
 		if poolStatusTerminal(row.State) {
 			done = append(done, r.bars[i])
 		}

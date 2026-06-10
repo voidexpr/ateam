@@ -172,41 +172,22 @@ func (t *topView) pollStreams() {
 			continue
 		}
 		e.scanner.Poll()
-		t.rows[i] = nextPoolStatusRow(t.rows[i], t.progressFor(e, now))
-	}
-}
-
-func (t *topView) progressFor(e *topEntry, now time.Time) runner.RunProgress {
-	sc := e.scanner
-	phase := runner.PhaseInit
-	if sc.LastTool != "" {
-		phase = runner.PhaseTool
-	}
-	var elapsed time.Duration
-	if !e.startedAt.IsZero() {
-		elapsed = now.Sub(e.startedAt)
-	}
-	return runner.RunProgress{
-		ExecID:                 e.id,
-		Phase:                  phase,
-		ToolName:               sc.LastTool,
-		ToolCount:              sc.ToolCount,
-		TurnCount:              sc.Turns,
-		Elapsed:                elapsed,
-		ContextTokens:          sc.ContextTokens,
-		CumulativeInputTokens:  sc.CumInputTokens,
-		CumulativeOutputTokens: sc.CumOutputTokens,
+		var elapsed time.Duration
+		if !e.startedAt.IsZero() {
+			elapsed = now.Sub(e.startedAt)
+		}
+		t.rows[i] = nextPoolStatusRow(t.rows[i], e.scanner.Progress(e.id, elapsed))
 	}
 }
 
 // finalize marks row i terminal using the authoritative DB row.
 func (t *topView) finalize(i int) {
 	e := t.entries[i]
-	e.finalized = true
 	row, err := t.db.GetRunByID(e.id)
 	if err != nil || row == nil {
-		return
+		return // not finalized; retried on the next DB poll
 	}
+	e.finalized = true
 	e.scanner.Poll() // drain the stream tail so tool/turn counts are final
 	summary := summaryFromRecentRow(*row, e.scanner.Path)
 	if row.IsError {
