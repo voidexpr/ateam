@@ -1016,7 +1016,7 @@ func actionTypeName(a Action) string {
 	if t == nil {
 		return ""
 	}
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	return t.Name()
