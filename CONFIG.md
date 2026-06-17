@@ -376,6 +376,8 @@ agent "claude-sonnet" {
 
 Agents support inheritance via `base`, sandbox settings, environment variables, isolated config dirs, and `required_env` for secret validation. When alternatives are declared (e.g., `required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]`), the first alternative in declaration order wins at each tier (store first, then env). Competing alternatives are stripped from the agent's process environment to avoid credential confusion. See [`ateam secret`](COMMANDS.md#ateam-secret) for the full resolution order.
 
+`required_env` is enforced as a hard error only when ateam **launches a fresh container** for the agent (any `container != none`), since that container starts with no credentials. When ateam itself runs **inside** a container with `container = none` (the agent runs in-place), a missing `required_env` is a warning rather than an error — the container may be pre-configured with regular auth (e.g. `~/.claude/.credentials.json` from an interactive login), in which case the env vars aren't needed. On the host with no container, `required_env` is not validated at all. See [ISOLATION.md → Host vs container behavior](ISOLATION.md#host-vs-container-behavior).
+
 `max_budget_usd = "<USD>"` can be set on an agent block as a default spend cap (claude only; codex ignores it). The CLI `--max-budget-usd` flag overrides the per-agent default for a single invocation.
 
 #### `codex-tmux` (experimental)

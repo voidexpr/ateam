@@ -339,10 +339,14 @@ Use `ateam env` to see every configured credential (including shadowed ones) and
 | Context | Validation | Isolation |
 |---------|-----------|-----------|
 | Host (no container) | Skipped — agents handle their own auth | Always runs |
-| Container (`--profile docker`) | Required — at least one credential must be resolvable | Always runs |
-| Inside container (auto-detected — see [Detection](#detection-of-an-outer-sandbox-or-container)) | Required | Always runs |
+| Launching a container (`--profile docker`, any `container != none`) | Required — at least one credential must be resolvable, hard error otherwise | Always runs |
+| Inside container, agent runs in-place (`container = none`, auto-detected — see [Detection](#detection-of-an-outer-sandbox-or-container)) | Warning only — proceeds if a credential is missing | Always runs |
 
-On the host, if no `ateam secret` is configured and no credential env vars are set, ateam does not error — the agent authenticates itself (e.g., interactive Claude Code login, macOS Keychain). Inside containers, where interactive login isn't available, at least one credential must be resolvable.
+On the host, if no `ateam secret` is configured and no credential env vars are set, ateam does not error — the agent authenticates itself (e.g., interactive Claude Code login, macOS Keychain).
+
+When ateam **launches a fresh container** for the agent, that container starts empty, so at least one credential must be resolvable up front — a missing one is a hard error.
+
+When **ateam itself runs inside a container** with `container = none` (the agent runs in-place in that same container), the container may have been pre-configured with regular auth — e.g. an interactive `claude` login that wrote `~/.claude/.credentials.json`. In that setup `CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_API_KEY` need not be present, so a missing `required_env` is only a warning: ateam proceeds and the pre-configured auth is used. If the agent genuinely has no usable auth it fails loudly on its own.
 
 ### Secrets and Docker
 

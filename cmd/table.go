@@ -113,16 +113,24 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 		return nil, fmt.Errorf("codex-tmux is host-only in v1; profile %q binds it to container type %q. Use a container=none profile or `--agent codex-tmux`", profileName, cc.Type)
 	}
 
-	// Validate secrets: require credentials for container runs and inside containers
-	// (where agents can't use interactive login). On host without containers,
-	// agents handle their own auth (macOS Keychain, interactive login).
-	// IsolateCredentials always runs to strip competing alternatives from the
-	// agent env — this is safe even when no secrets are configured.
+	// Validate secrets. IsolateCredentials always runs to strip competing
+	// alternatives from the agent env — this is safe even when no secrets
+	// are configured.
 	resolver := secretResolver(env, secret.DefaultBackend())
-	if (cc != nil && cc.Type != "none") || container.IsInContainer() {
+	if cc != nil && cc.Type != "none" {
+		// Launching the agent into a fresh container: it can't do interactive
+		// login, so required creds must be present up front. Hard failure.
 		if err := secret.ValidateSecrets(ac, resolver); err != nil {
 			return nil, err
 		}
+	} else if container.IsInContainer() {
+		// ateam itself is running inside a container with container=none, so
+		// the agent runs in-place. The container may have been pre-configured
+		// with interactive/regular auth (e.g. ~/.claude/.credentials.json), in
+		// which case missing required_env is fine. Warn instead of failing so
+		// the pre-configured-agent workflow keeps working; the agent will
+		// error loudly itself if it truly has no usable auth.
+		warnMissingSecretsInContainer(secret.ValidateSecrets(ac, resolver))
 	}
 	logIsolationResults(os.Stderr, secret.IsolateCredentials(ac, resolver))
 
@@ -213,13 +221,14 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.AgentE
 		return nil, fmt.Errorf("unknown agent %q", agentName)
 	}
 
-	// No container — skip hard validation (agent handles its own auth on host).
-	// IsolateCredentials still runs to strip competing env vars.
+	// No container launch — the agent runs in-place. On the host it handles
+	// its own auth; inside a pre-configured container it may rely on regular
+	// auth (~/.claude/.credentials.json), so a missing required_env is only a
+	// warning, not a hard failure. IsolateCredentials still runs to strip
+	// competing env vars.
 	resolver := secretResolver(env, secret.DefaultBackend())
 	if container.IsInContainer() {
-		if err := secret.ValidateSecrets(&ac, resolver); err != nil {
-			return nil, err
-		}
+		warnMissingSecretsInContainer(secret.ValidateSecrets(&ac, resolver))
 	}
 	logIsolationResults(os.Stderr, secret.IsolateCredentials(&ac, resolver))
 
@@ -1140,6 +1149,20 @@ func printDryRunInfo(r *runner.AgentExecutor, env *root.ResolvedEnv, opts dryRun
 }
 
 // logIsolationResults prints a clear message when ateam secret overrides env vars.
+// warnMissingSecretsInContainer downgrades a ValidateSecrets failure to a
+// stderr warning. Used only when ateam runs inside a container with no fresh
+// container launch: the container may already be authenticated via regular
+// auth (~/.claude/.credentials.json), so a missing required_env shouldn't be
+// fatal. If the agent genuinely has no usable auth it will fail loudly itself.
+func warnMissingSecretsInContainer(err error) {
+	if err == nil {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "Warning: %v\n\n"+
+		"Continuing anyway — if the agent is pre-configured inside this container "+
+		"(e.g. ~/.claude/.credentials.json) it will use that auth.\n", err)
+}
+
 func logIsolationResults(w io.Writer, results []secret.IsolationResult) {
 	for _, ir := range results {
 		if len(ir.Stripped) == 0 {
