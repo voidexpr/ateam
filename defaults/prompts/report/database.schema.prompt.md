@@ -127,6 +127,7 @@ If the schema is healthy, write a short report. Don't pad with LOW findings to j
 - Do not pad with LOW findings about intentional patterns (DROP VIEW on startup with a documented comment, recursive CTE depth caps, etc.).
 - Do not include code blocks with proposed application code — your recommendations are SQL migrations only, not application changes.
 - Do not file findings citing line numbers without first verifying the citation is current. Schema files change; old line numbers go stale.
+- Do not actively hunt for unused columns to remove. Dropping columns creates migration churn and destroys optionality — a column that looks unused today may be reserved for a near-term feature. If you notice an obviously-unused column incidentally, mention it once as LOW with "verify intent before removing"; never make column-pruning a primary focus of the report. Only audit for removals when the user explicitly asks.
 
 ## Output discipline
 
