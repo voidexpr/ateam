@@ -75,6 +75,22 @@ func ClaudeConfigDir() string {
 	return filepath.Join(home, ".claude")
 }
 
+// HasLocalClaudeAuth reports whether Claude Code has usable auth configured
+// on this machine independent of the process env — i.e. a populated
+// .credentials.json under CLAUDE_CONFIG_DIR (or $HOME/.claude), or a macOS
+// Keychain entry. Used to suppress required_env warnings when running inside
+// a pre-configured container.
+func HasLocalClaudeAuth() bool {
+	configDir := ClaudeConfigDir()
+	if configDir != "" && credFileHasTokens(filepath.Join(configDir, ".credentials.json")) {
+		return true
+	}
+	if goruntime.GOOS == "darwin" && hasKeychainEntry() {
+		return true
+	}
+	return false
+}
+
 // DetectAuth scans env vars, ateam secret store, and config dir for all auth sources.
 // projectDir and orgDir may be empty (detection works with global scope only).
 func DetectAuth(projectDir, orgDir string) AuthStatus {

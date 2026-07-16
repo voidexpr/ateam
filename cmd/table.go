@@ -130,7 +130,7 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 		// which case missing required_env is fine. Warn instead of failing so
 		// the pre-configured-agent workflow keeps working; the agent will
 		// error loudly itself if it truly has no usable auth.
-		warnMissingSecretsInContainer(secret.ValidateSecrets(ac, resolver))
+		warnMissingSecretsInContainer(secret.ValidateSecrets(ac, resolver), ac)
 	}
 	logIsolationResults(os.Stderr, secret.IsolateCredentials(ac, resolver))
 
@@ -228,7 +228,7 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.AgentE
 	// competing env vars.
 	resolver := secretResolver(env, secret.DefaultBackend())
 	if container.IsInContainer() {
-		warnMissingSecretsInContainer(secret.ValidateSecrets(&ac, resolver))
+		warnMissingSecretsInContainer(secret.ValidateSecrets(&ac, resolver), &ac)
 	}
 	logIsolationResults(os.Stderr, secret.IsolateCredentials(&ac, resolver))
 
@@ -1152,15 +1152,20 @@ func printDryRunInfo(r *runner.AgentExecutor, env *root.ResolvedEnv, opts dryRun
 // warnMissingSecretsInContainer downgrades a ValidateSecrets failure to a
 // stderr warning. Used only when ateam runs inside a container with no fresh
 // container launch: the container may already be authenticated via regular
-// auth (~/.claude/.credentials.json), so a missing required_env shouldn't be
-// fatal. If the agent genuinely has no usable auth it will fail loudly itself.
-func warnMissingSecretsInContainer(err error) {
+// auth (~/.claude/.credentials.json, ~/.codex/auth.json), so a missing
+// required_env shouldn't be fatal. If we can already see a locally configured
+// agent of the right type, suppress the warning entirely — the auth is there.
+// If the agent genuinely has no usable auth it will fail loudly itself.
+func warnMissingSecretsInContainer(err error, ac *runtime.AgentConfig) {
 	if err == nil {
+		return
+	}
+	if ac != nil && agent.HasLocalAgentAuth(ac.Type) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "Warning: %v\n\n"+
 		"Continuing anyway — if the agent is pre-configured inside this container "+
-		"(e.g. ~/.claude/.credentials.json) it will use that auth.\n", err)
+		"(e.g. ~/.claude/.credentials.json, ~/.codex/auth.json) it will use that auth.\n", err)
 }
 
 func logIsolationResults(w io.Writer, results []secret.IsolationResult) {
