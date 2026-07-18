@@ -2,9 +2,9 @@
 
 **Run coding agents unattended. Keep your codebase healthy in the background.**
 
-ATeam is a CLI to run existing coding agents (Claude Code, Codex) unattended. It uses this ability to provide a four-stage software engineering quality pipeline (**report → review → code → verify**) and a library of role prompts covering bugs, tests, security, dependencies, docs, architecture, and more.
+ATeam is a CLI to run existing coding agents (currently Claude Code and Codex) unattended. It uses this ability to provide a four-stage software engineering quality pipeline (**report → review → code → verify**) and a library of role prompts covering bugs, tests, security, dependencies, docs, architecture, and more.
 
-It automates the parts you don't want to do to free up your attention for features, architecture, or any task you choose to focus on.
+It can be used to automate that benefits from reusable prompts to focus on the parts you don't want to do to free up your attention for features, architecture, or any other task better suited in interactive agent sessions.
 
 ## Why ATeam
 
@@ -24,17 +24,13 @@ A growing share of code is written by coding agents. Without automation, humans 
 
 Quality work is the sweet spot for unattended agents because it can be prompted once, unlike features that benefit from an interactive session. `ateam resume` turns any past unattended session into an interactive one, so you can talk to the agent that did that refactor last Tuesday night and ask what it did and why.
 
-### `claude -p` works until it doesn't
+### The CLI for unattended agents
 
-Coding agents all provide flexible ways to run unattended, but a lot more tooling is required: a uniform interface across agents, conventions for logs, execution profiles, isolation parameters, tracking cost (tokens, turns, context), dynamic prompt assembly, moving prompt logic into scripts to reduce costs, ... It doesn't need to be complicated: a few config files, markdown prompts, some log files, one CLI.
-
-ATeam gives you the `ateam ps` command for unattended agents: clearly see how long they take and how much they cost, so you can improve your prompts over time, decide what runs daily vs. weekly, and avoid repeatedly running that $20 one-liner without realizing it.
-
-It also gives you `ateam exec` and `ateam parallel` as primitives — drop them into a bash script for simple workflows, or wrap them in something more involved.
-
-This kind of harness lets you invest more heavily in unattended work without becoming dependent on any single coding agent — you keep the flexibility to pick the best pricing or the most interesting features as the landscape shifts.
-
-See more at [APPROACH.md](APPROACH.md).
+Ateam handles the boring bits:
+* tracks prompts, logs and cost
+    * cost is essential to improve prompts over time or avoid running a $20 one-liner without realizing it
+* single spot to track all running unattended agents
+* configurable isolation (sandbox, containers, none of already executed within a container) on the CLI or in a reusable config file
 
 ## Key Features
 
@@ -44,6 +40,7 @@ See more at [APPROACH.md](APPROACH.md).
 - Config files to manage agent and container invocation, for example, profiles select combinations of agent + container + custom arguments (`--profile docker`, `--profile codex-high`)
 - Dynamic prompt assembly: ad-hoc pre/post instructions on top of named prompts, with macro support inside prompts
 - Can use the default subscription, OAuth, or API keys, with secrets stored in the OS keychain, prioritizing the cheapest mode if multiple keys are available
+- Single configuration file `runtime.hcl` to combine agent CLI args and isolation (container, sandbox)
 
 **Quality pipeline**
 - Four stages: `report` (parallel role audits) → `review` (supervisor prioritizes) → `code` (delegated fixes, small commits) → `verify` (commit inspection + tests). Run as `ateam run-all` or stage-by-stage.
