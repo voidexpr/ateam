@@ -99,3 +99,16 @@ If you cannot complete the recommendation, output a brief report instead of comm
 **Reason**: (why it couldn't be done)
 **Attempted**: (what you tried)
 ```
+
+## Final Message
+
+Your final assistant message is the ONLY thing the calling supervisor sees on
+its stdout — everything else you produce (thinking, tool calls, intermediate
+narration) is not forwarded. Keep the final message tight:
+
+- On success: a single short line — the commit hash and the tests summary,
+  e.g. `Committed 48c4dd9 — go test ./... 42 passed / 0 failed / 3 skipped`.
+- On failure: the `# Apply Failed` block above, and nothing else.
+
+Do not restate the recommendation, do not narrate what you did, do not include
+file lists or diffs. The commit body already carries all of that.

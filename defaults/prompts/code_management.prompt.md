@@ -19,12 +19,18 @@ the implementer body (from `ateam prompt --action code`) into `ateam exec`:
 
     ateam prompt --action code \
         --post-prompt @{{exec.output_dir}}/SEQ_SLUG_task.md \
-      | ateam exec --action code --batch {{exec.batch}} {{exec.subrun_args}}
+      | ateam exec --action code --quiet --batch {{exec.batch}} {{exec.subrun_args}}
 
 `ateam prompt --action code` produces the generic implementer body
 (minimal blast radius, commit format, baseline tests, …); `--post-prompt`
 appends the per-task description at the very end. The supervisor never
 generates a per-task prompt by hand.
+
+`--quiet` suppresses the sub-run's progress stream and end-of-run summary so
+only the sub-agent's final outcome message reaches you. The full stream is
+still persisted to the run's log dir (path printed on the summary shown below
+when `--quiet` is not set, or on failure via the `Exit`/`Error` lines) so you
+can bounded-read it if a task fails and needs deeper diagnosis.
 
 Run `ateam --help` and `ateam COMMAND --help` for full details.
 
@@ -78,12 +84,19 @@ For each task:
 Execute tasks one at a time, in sequence order. For each task:
 
 1. **Pre-check**: Verify git working tree is clean, code builds, and tests pass
-2. **Execute**:
+2. **Execute** — run the pipeline in the FOREGROUND. Do NOT background it (do
+   not set `run_in_background: true`, do not append `&`, do not spawn a
+   watcher). `ateam exec` self-terminates via its configured timeout, and a
+   foreground call guarantees your turn cannot end while the sub-run is still
+   working:
    ```
    ateam prompt --action code \
        --post-prompt @{{exec.output_dir}}/SEQ_SLUG_task.md \
-     | ateam exec --action code --batch {{exec.batch}} {{exec.subrun_args}}
+     | ateam exec --action code --quiet --batch {{exec.batch}} {{exec.subrun_args}}
    ```
+   Set the Bash tool's timeout for this call to a value large enough to cover
+   the sub-run's own timeout with headroom (e.g. 130 minutes if the code
+   timeout is 120 minutes).
 3. **Post-check**: Verify code still builds and tests pass
 4. **Record**: Update `execution_report.md` with the outcome, only append to it during this phase. For each task include:
    - Test command(s) ran (e.g., `go test ./...`, `npm test`)
@@ -200,7 +213,7 @@ follow along. Print status lines as you go:
   ```
 - **Commands**: print every ateam CLI command before running it
   ```
-  Running: ateam prompt --action code --post-prompt @{{exec.output_dir}}/01_fix_sql_injection_task.md | ateam exec --action code --batch {{exec.batch}} {{exec.subrun_args}}
+  Running: ateam prompt --action code --post-prompt @{{exec.output_dir}}/01_fix_sql_injection_task.md | ateam exec --action code --quiet --batch {{exec.batch}} {{exec.subrun_args}}
   ```
 - **Task outcomes**: print the result of each task immediately and include the git hash and branch used
   ```
@@ -212,16 +225,23 @@ follow along. Print status lines as you go:
   Updated execution_report.md: Task 01 completed
   ```
 
-### Monitoring long-running tasks
+### Sub-run execution model
 
-Never use `tail -f` (or any other follow-style command that does not exit on its own)
-to watch a backgrounded task's output. `tail -f` keeps running forever, so even after
-the supervisor finishes all work the run stays alive until the wall-clock timeout
-fires — wasting up to 2 hours of API time per run.
+Run every `ateam exec` in the FOREGROUND — never background it. Backgrounding
+these calls is unsafe: if your turn ends (plain text reply, no pending tool
+call) while a self-started background task is still running, the headless
+process exits and SIGTERMs the still-running sub-run, discarding all its
+coding-phase progress.
 
-If you need to check on a backgrounded task, use the `TaskOutput` tool on the task
-itself, or read the output file with a bounded command (e.g. `tail -n 200 FILE`) and
-re-read it later. Before ending your run, stop any background tasks you started.
+`ateam exec` self-limits its own runtime via its configured timeout and stall
+detection, so a foreground call cannot hang indefinitely on API errors or
+sub-agent stalls — it returns a normal non-zero exit that you handle via the
+Error Handling section. Do not spawn watchers, pollers, or backgrounded tail
+commands to work around this — the CLI already handles it.
+
+If you want to diagnose a failed sub-run, its stream is on disk at the log
+path reported in the failure's stderr; bounded-read it (e.g. `tail -n 500`)
+rather than reading the whole thing.
 
 ## Git Workflow
 
@@ -230,7 +250,6 @@ re-read it later. Before ending your run, stop any background tasks you started.
 - After each successful task: verify build + tests, then commit
 - Do not force-push, rebase, or perform destructive git operations
 - If a task leaves the tree dirty after failure, revert changes before proceeding
-- if a task takes more than 5min to run provide some status about it if you have some context
 
 ## Critical Output Rule
 

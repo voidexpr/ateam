@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ateam/internal/display"
@@ -264,6 +265,11 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 
 	if result.Err != nil {
+		// Ensure the caller can locate the run's log dir for diagnosis
+		// even when --quiet suppressed the summary block.
+		if !showSummary && !jsonMode && result.AgentFilePath != "" {
+			fmt.Fprintf(os.Stderr, "ateam exec: run failed — LogDir: %s\n", filepath.Dir(result.AgentFilePath))
+		}
 		return &ExitError{Code: result.ExitCode}
 	}
 
@@ -337,6 +343,9 @@ func printExecSummary(r runner.RunSummary) {
 	}
 	if r.Err != nil {
 		fmt.Fprintf(os.Stderr, "  Error:    %v\n", r.Err)
+	}
+	if r.AgentFilePath != "" {
+		fmt.Fprintf(os.Stderr, "  LogDir:   %s\n", filepath.Dir(r.AgentFilePath))
 	}
 }
 
