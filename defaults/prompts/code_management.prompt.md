@@ -28,9 +28,11 @@ generates a per-task prompt by hand.
 
 `--quiet` suppresses the sub-run's progress stream and end-of-run summary so
 only the sub-agent's final outcome message reaches you. The full stream is
-still persisted to the run's log dir (path printed on the summary shown below
-when `--quiet` is not set, or on failure via the `Exit`/`Error` lines) so you
-can bounded-read it if a task fails and needs deeper diagnosis.
+still persisted to the run's log dir; on failure `ateam exec` prints a
+`LogDir:` line to stderr. You can also introspect any run in the current
+batch via `ateam ps --batch {{exec.batch}}` (lists ExecID, status, duration,
+termination reason) and `ateam cat <exec_id>` (streams the full log — always
+pipe through `tail -n 500` or similar; never dump unbounded).
 
 Run `ateam --help` and `ateam COMMAND --help` for full details.
 
@@ -55,6 +57,24 @@ The goals are:
 * manage the git workflow
 * update the review and reports with what has been completed
   * IMPORTANT: make sure to not truncate these reports unnecessarily
+
+## Report on exit — non-negotiable
+
+Every time your turn ends, for ANY reason (all tasks completed, task failure,
+budget exhausted, own decision to stop, unrecoverable error), BOTH of the
+following MUST be true:
+
+1. **On disk**: `{{exec.output_file}}` reflects the current state — every task
+   listed with a termination class + reason (including `not_attempted` for
+   tasks you never got to), plus the Test Health + Summary sections.
+2. **Final stdout message**: a short summary (1–3 lines) that names the
+   outcome and, if you gave up early, states WHY plainly (e.g. "Stopped
+   after task 05: coding sub-run kept dying with `user_canceled` on 2
+   attempts — see execution_report.md §Task 05").
+
+Ending your turn with a bare "done" and an incomplete report is itself a
+bug. If something goes so wrong that you can't finalize the report on disk,
+emit the report body as your final message so the harness can recover it.
 
 ## Workflow
 
@@ -84,48 +104,92 @@ For each task:
 Execute tasks one at a time, in sequence order. For each task:
 
 1. **Pre-check**: Verify git working tree is clean, code builds, and tests pass
-2. **Execute** — run the pipeline in the FOREGROUND. Do NOT background it (do
-   not set `run_in_background: true`, do not append `&`, do not spawn a
-   watcher). `ateam exec` self-terminates via its configured timeout, and a
-   foreground call guarantees your turn cannot end while the sub-run is still
-   working:
+2. **Execute** — launch the pipeline as a BACKGROUND Bash call and immediately
+   enter a polling loop. Coding sub-runs regularly exceed 10 minutes and the
+   Bash tool caps individual calls at 10 minutes; a foreground call would be
+   auto-backgrounded by the harness at the 10-min mark, so we background
+   intentionally from the start:
    ```
    ateam prompt --action code \
        --post-prompt @{{exec.output_dir}}/SEQ_SLUG_task.md \
      | ateam exec --action code --quiet --batch {{exec.batch}} {{exec.subrun_args}}
    ```
-   Set the Bash tool's timeout for this call to a value large enough to cover
-   the sub-run's own timeout with headroom (e.g. 130 minutes if the code
-   timeout is 120 minutes).
+   Launch via `Bash({command: "...the pipeline above...", run_in_background: true})`,
+   note the returned `bash_id`, then poll with `BashOutput({bash_id})`
+   interleaved with `Bash({command: "sleep 30"})` between polls to pace. The
+   sub-run is done when `BashOutput` reports `status: completed` with an exit
+   code — inspect the exit code and the accumulated output to determine the
+   termination class (see the **Termination Taxonomy** section).
+
+   **CRITICAL**: never emit a plain-text reply while a launched sub-run is
+   still `running`. If your turn ends with a live background task, the
+   headless session tears down and SIGTERMs the child — the sub-run's
+   in-progress work is lost. Every turn must end either with the sub-run
+   already terminated, or with the next tool call (`BashOutput` or `sleep`)
+   pending.
 3. **Post-check**: Verify code still builds and tests pass
 4. **Record**: Update `execution_report.md` with the outcome, only append to it during this phase. For each task include:
+   - Termination class + reason (see Termination Taxonomy)
    - Test command(s) ran (e.g., `go test ./...`, `npm test`)
    - Test results: X passed, Y failed, Z skipped
    - If tests failed after the task: what failed and whether the coding agent fixed them
-5. **Verify git commit**: the coding agent is supposed to commit its own changes so if the git working tree has tracked files that are modified and not committed it means git commit is likely broken so abort with a clear error message
+5. **Diagnose + recover on abnormal termination**: if the sub-run ended
+   abnormally (non-zero exit, or the tree is dirty even on exit 0), don't
+   abort the whole run. Follow this sequence:
+
+   a. **Diagnose** first. Gather: exit code from `BashOutput`, `ateam ps
+      --batch {{exec.batch}}` for the row (ExecID, status, REASON column),
+      bounded `ateam cat <exec_id> | tail -n 500` for the sub-run's stream.
+      Classify the termination per the Termination Taxonomy.
+   b. **If the tree is dirty and the death looks recoverable** (SIGTERM/
+      user_canceled/timeout mid-work — not a broken commit path or code
+      defect), spawn a **continuation sub-run** that finishes the started
+      work rather than stashing. Write a continuation task file listing
+      files already committed (from `git log --since=<pre-check-hash>
+      --name-only`) and files still dirty (from `git status --porcelain`),
+      and instruct the coding agent to complete and commit the remainder.
+      Launch it the same way as step 2.
+   c. **If the continuation also dies the same way** (2 attempts total for
+      this task), stop retrying: `git stash push -u -m "abandoned:<SEQ>_<SLUG>:<ExecID>"`
+      so the tree returns clean, mark the task `incomplete_after_retry`,
+      and record BOTH attempts' diagnoses AND the stash marker (the exact
+      `stash@{N}` ref and message) in the execution report. Then continue
+      to the next task.
+   d. **If the failure is structural** (build broken, tests won't run,
+      commit path visibly broken in the child's stream), don't attempt
+      continuation. Stash any dirty state with the same marker convention,
+      record the diagnosis, mark `failed_structural`, and continue.
 6. **On failure**: See Error Handling. Clean up, then continue to the next task.
 
 ### Phase 4: Finalize
 
-After all tasks have been attempted:
+Phase 4 must run whenever the coding cycle ends — including when it ends
+early. If you're stopping without attempting some tasks, list them in the
+report with class `not_attempted` and the reason. See the "Report on exit"
+rule near the top.
+
+After all tasks have been attempted (or you've decided to stop early):
 
 1. **Test health assessment**: Run the full test suite one final time and compare to the baseline recorded during Phase 1 setup.
    - Record: command(s) run, exit codes, pass/fail/skip counts
    - If all tests pass: note "test suite clean" in the execution report
-   - If tests are failing that were passing before this coding cycle: spawn a dedicated fix run:
+   - If tests are failing that were passing before this coding cycle: spawn a dedicated fix run (same background+poll pattern as Phase 3 step 2):
      ```
      ateam exec "Fix the following test failures that were introduced during this
      coding cycle. The tests were passing before the cycle started.
      Failing tests: [list each failing test name/file].
      Investigate each failure, fix it, and commit. Do not change test assertions
      unless the behavioral change was intentional — fix the code instead." \
-       --role fix_regression --action code --batch {{exec.batch}} {{exec.subrun_args}}
+       --role fix_regression --action code --quiet --batch {{exec.batch}} {{exec.subrun_args}}
      ```
      Record the fix run outcome in the execution report.
    - If tests were already failing before the cycle (pre-existing failures): note them but do not attempt to fix them — that's a separate task for the next review cycle.
-2. Complete `execution_report.md` with a summary section, only append to it
+2. Complete `execution_report.md` with a summary section, only append to it. The summary MUST include:
+   - Per-task termination class and reason
+   - Every `stash@{N}` marker created during recovery (with its message and the ExecID it corresponds to) so the operator can inspect / drop / re-apply
+   - If the run stopped early: which tasks are `not_attempted` and why the supervisor gave up
 3. Update `.ateam/shared/review.md`:
-  - Annotate each task with its outcome (completed / failed / skipped) and a brief note
+  - Annotate each task with its outcome (completed / failed / skipped / incomplete_after_retry / not_attempted) and a brief note
   - do not delete any content in the review, just add information
 4. Update the source role report referenced in the review (`.ateam/shared/report/<role>.md`) to note what was addressed
   - do not delete any content in the report file, just add information
@@ -141,8 +205,11 @@ After all tasks have been attempted:
     ## Tasks
 
     ### Task 01: [short description]
-    - **Status**: completed | failed | skipped
+    - **Status**: completed | failed | incomplete_after_retry | failed_structural | skipped | not_attempted
+    - **Termination**: [class from Termination Taxonomy], exit=[N]
+    - **Attempts**: [N] (list ExecIDs)
     - **Details**: [what was done or why it failed]
+    - **Recovery**: [continuation spawned? stash marker? none]
     - **Tests**: [command(s) ran, X passed / Y failed / Z skipped]
     - **Task file**: [path to task description]
 
@@ -154,20 +221,50 @@ After all tasks have been attempted:
     - **New failures**: [list] or none
     - **Fix run**: [completed/failed/not needed]
 
+    ## Stash Markers
+    - `stash@{0}` — `abandoned:05_convert_waits:18` (Task 05, first attempt SIGTERMed)
+    - `stash@{1}` — ...
+
+    (Empty section if no stashes were created. This list is authoritative for the
+    operator; they use it to inspect / drop / re-apply.)
+
     ## Summary
     - **Total**: N tasks
     - **Completed**: X
     - **Failed**: Y
-    - **Skipped**: Z
+    - **Incomplete after retry**: Z
+    - **Not attempted**: W
+    - **Give-up reason** (if the run stopped early): [plain-English explanation]
+
+## Termination Taxonomy
+
+Every coding sub-run ends in exactly one of these classes. You MUST attribute
+each ended sub-run to one before continuing:
+
+| Class                | Detection                                                                   | Recover?                                       |
+| -------------------- | --------------------------------------------------------------------------- | ---------------------------------------------- |
+| `normal_completed`   | exit 0; child final message is a commit summary; tree clean                 | no recovery needed                             |
+| `normal_apply_failed`| exit non-zero; child final message is `# Apply Failed` block; tree clean    | no recovery; task failed cleanly               |
+| `exec_timeout`       | exit non-zero; child stderr contains `ateam timed out the run after N minutes` | continuation may help if partial commits exist |
+| `sigterm_mid_work`   | exit 143; `ateam ps` REASON shows `[user_canceled] ... SIGTERM ...`; tree dirty | continuation (see Phase 3 step 5b)         |
+| `supervisor_killed`  | you called kill on the background bash yourself (documented decision)       | continuation only if the reason is transient   |
+| `external_kill`      | exit 143 with no supervisor-side kill and no `ateam ps` timeout evidence (OS OOM, operator Ctrl-C on parent) | report and stop; don't blindly retry     |
+| `internal_error`     | exit non-zero; child stderr shows an `ateam` panic/internal error, not an agent-level `Apply Failed` | report and stop; this is an ateam bug |
+
+To gather evidence for classification, use in this order:
+1. Exit code from `BashOutput`
+2. Accumulated stderr snippet from `BashOutput`
+3. `ateam ps --batch {{exec.batch}}` — REASON column and STATUS
+4. `ateam cat <exec_id> | tail -n 500` — for the child's stream
 
 ## Error Handling
 
 When a task fails:
 
-1. **Diagnose**: Check the role output for root cause
-2. **If clearly fixable**: Attempt a fix (revert partial changes, adjust prompt, retry once)
-3. **If ambiguous or risky**: Do not retry. Record your assessment and move on
-4. **Always**: Ensure the working tree is clean before the next task (revert partial changes)
+1. **Diagnose**: Classify per the Termination Taxonomy first — never proceed without a class
+2. **Recover per Phase 3 step 5**: continuation for `sigterm_mid_work` / `exec_timeout` with partial commits; skip continuation for `normal_apply_failed` / `internal_error` / `external_kill`
+3. **Retry cap**: at most 2 attempts per task (original + one continuation). Beyond that, mark `incomplete_after_retry` and move on
+4. **Always**: leave the working tree clean before the next task (commit / continuation-commit / stash-with-marker — never leave uncommitted tracked changes)
 
 ### Approval failures
 
@@ -215,10 +312,11 @@ follow along. Print status lines as you go:
   ```
   Running: ateam prompt --action code --post-prompt @{{exec.output_dir}}/01_fix_sql_injection_task.md | ateam exec --action code --quiet --batch {{exec.batch}} {{exec.subrun_args}}
   ```
-- **Task outcomes**: print the result of each task immediately and include the git hash and branch used
+- **Task outcomes**: print the result of each task immediately, include the git hash + branch used, and always include the termination class
   ```
-  Task 01 (fix_sql_injection): COMPLETED in commit 48c4dd9bfd on branch main
-  Task 02 (add_input_validation): FAILED — build error after role changes
+  Task 01 (fix_sql_injection): COMPLETED [normal_completed] in commit 48c4dd9bfd on branch main
+  Task 02 (add_input_validation): FAILED [normal_apply_failed] — build error after role changes
+  Task 05 (convert_waits): INCOMPLETE_AFTER_RETRY [sigterm_mid_work x2] — stashed as stash@{0}
   ```
 - **Execution report updates**: note when the report is updated
   ```
@@ -227,21 +325,24 @@ follow along. Print status lines as you go:
 
 ### Sub-run execution model
 
-Run every `ateam exec` in the FOREGROUND — never background it. Backgrounding
-these calls is unsafe: if your turn ends (plain text reply, no pending tool
-call) while a self-started background task is still running, the headless
-process exits and SIGTERMs the still-running sub-run, discarding all its
-coding-phase progress.
+Coding sub-runs frequently exceed the Bash tool's 10-minute per-call cap, so
+every `ateam exec` in Phase 3 (and any similar spawn in Phase 4) launches as
+a background Bash call and you drive it via a `BashOutput` polling loop
+(see Phase 3 step 2 for the exact shape).
 
-`ateam exec` self-limits its own runtime via its configured timeout and stall
-detection, so a foreground call cannot hang indefinitely on API errors or
-sub-agent stalls — it returns a normal non-zero exit that you handle via the
-Error Handling section. Do not spawn watchers, pollers, or backgrounded tail
-commands to work around this — the CLI already handles it.
+The one absolute rule: **never end your turn while a launched background
+Bash task is still `running`**. If the headless session exits with a live
+child, the session tears down and SIGTERMs the child — losing all its
+in-progress work. Every turn boundary must either (a) fall after the child
+has terminated and you've handled the outcome, or (b) hand off to the next
+tool call (typically another `BashOutput` or a paced `sleep`).
 
-If you want to diagnose a failed sub-run, its stream is on disk at the log
-path reported in the failure's stderr; bounded-read it (e.g. `tail -n 500`)
-rather than reading the whole thing.
+`ateam exec` self-limits its own runtime via its configured `Exec.TimeoutMinutes`
+timeout (stall detection only warns — it does not kill), so a well-behaved
+sub-run will terminate on its own even if the API stalls or the sub-agent
+hangs. If you observe a sub-run that seems stuck well past its expected
+duration, you may `KillBash` the background task deliberately; classify the
+termination as `supervisor_killed` and record why.
 
 ## Git Workflow
 
@@ -257,9 +358,20 @@ The on-disk file at `{{exec.output_file}}` is the source of truth — the harnes
 
 Maintain it incrementally per Phase 1-4: initialize it with `Write` during Phase 1, update it with `Edit` (append per task) during Phase 3, and finalize it with the summary section during Phase 4. Its final on-disk content is what the harness reads.
 
-After the run is fully done (all phases complete and the report is fully written to disk), your FINAL assistant message must be a single short line confirming completion, e.g. `Execution report written to {{exec.output_file}}`. Do not include the report body in the final message; do not include any other commentary.
+Your FINAL assistant message is one of two shapes, per the "Report on exit" rule:
 
-If `{{exec.output_file}}` cannot be written for any reason, emit the execution report as your final message so the harness can recover it from the stream.
+- **Clean finish** (all tasks attempted, Phase 4 complete): one short line
+  naming the outcome, e.g. `Execution report written to {{exec.output_file}} — 10 completed, 0 failed`
+  or `... — 8 completed, 1 incomplete_after_retry (Task 05), 1 not_attempted (Task 10)`.
+- **Early stop** (you gave up before attempting all tasks): 2–3 lines that
+  state the outcome AND explain WHY you stopped in plain English, e.g.
+  `Stopped after task 05. Sub-run for Task 05 died with sigterm_mid_work on
+  2 attempts; continuation kept getting killed at the same file. See
+  execution_report.md §Task 05 and §Stash Markers.`
+
+Never end with a bare "done" or just a file path — the operator must be able to see from the final line WHY the run ended.
+
+If `{{exec.output_file}}` cannot be written for any reason, emit the execution report body as your final message so the harness can recover it from the stream, prefixed by the same one/three-line outcome summary.
 
 ---
 

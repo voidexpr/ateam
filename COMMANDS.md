@@ -458,6 +458,7 @@ When used with `--agent codex-tmux` the prompt has an extra shape: the first lin
 | `--no-stream` | Disable progress updates on stderr |
 | `--no-summary` | Disable cost/duration/tokens summary |
 | `--quiet` | Disable both streaming and summary |
+| `--timeout DUR` | Override the run's wall-clock timeout (Go duration, e.g. `30s`, `8m`, `1h30m`; overrides `Exec.TimeoutMinutes` from `config.toml`) |
 | `--dry-run` | Print resolved command, secrets, container config, and prompt without running |
 | `--container-name NAME` | Override container name (for docker-exec containers) |
 | `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |

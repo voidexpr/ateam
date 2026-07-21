@@ -3,9 +3,11 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/flow"
@@ -38,6 +40,7 @@ var (
 	execFormat          string
 	execProgressFD      int
 	execRaw             bool
+	execTimeout         string
 )
 
 var execCmd = &cobra.Command{
@@ -86,6 +89,7 @@ func init() {
 	execCmd.Flags().StringVar(&execAgentArgs, "agent-args", "", "extra args passed to the agent CLI (appended after configured args)")
 	execCmd.Flags().StringVar(&execBatch, "batch", "", "group related agent_execs (e.g. all execs in one ateam code run)")
 	execCmd.Flags().BoolVar(&execRaw, "raw", false, "feed the prompt to the agent byte-for-byte: skip template-engine expansion (no {{var}} substitution, no dynamics). Default expands {{exec.*}}, {{prompt.*}}, and other vars in the supplied prompt.")
+	execCmd.Flags().StringVar(&execTimeout, "timeout", "", "override the run's wall-clock timeout (Go duration, e.g. 30s, 8m, 1h30m). Defaults to Exec.TimeoutMinutes from project config.")
 	addVerboseFlag(execCmd, &execVerbose)
 	addDockerAutoSetupFlag(execCmd, &execDockerAutoSetup)
 	addContainerNameFlag(execCmd, &execContainerName)
@@ -151,10 +155,16 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 
 	// Scratch mode (no project config) skips the exec-timeout default; the
-	// agent's own timeout still applies.
+	// agent's own timeout still applies. --timeout overrides both.
+	override, err := parseTimeoutFlag(execTimeout)
+	if err != nil {
+		return err
+	}
 	var timeout int
 	if hasProject {
-		timeout = env.Config.Exec.EffectiveTimeout(0)
+		timeout = env.Config.Exec.EffectiveTimeout(override)
+	} else {
+		timeout = override
 	}
 
 	// Build opts. `exec` has no canonical destination — its deliverable is the
@@ -306,6 +316,27 @@ func printExecDryRun(r *runner.AgentExecutor, env *root.ResolvedEnv, prompt, rol
 	fmt.Println()
 	fmt.Println("╚══ dry-run ══╝")
 	return nil
+}
+
+// parseTimeoutFlag parses --timeout as a Go duration and returns whole
+// minutes (rounded up, minimum 1). Returns 0 for an empty string so
+// EffectiveTimeout falls back to the configured value.
+func parseTimeoutFlag(s string) (int, error) {
+	if s == "" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid --timeout %q: %w", s, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("invalid --timeout %q: must be positive", s)
+	}
+	m := int(math.Ceil(d.Minutes()))
+	if m < 1 {
+		m = 1
+	}
+	return m, nil
 }
 
 func printExecSummary(r runner.RunSummary) {

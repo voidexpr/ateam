@@ -96,9 +96,15 @@ If you cannot complete the recommendation, output a brief report instead of comm
 
 **Recommendation**: (what you were asked to do)
 **Status**: FAILED
+**Category**: unfixable | ambiguous_spec | dependency_missing | test_regression_unclear | out_of_scope | other
 **Reason**: (why it couldn't be done)
 **Attempted**: (what you tried)
 ```
+
+The `Category` field lets the calling supervisor decide whether a continuation
+attempt is warranted (`ambiguous_spec`, `dependency_missing` — probably not;
+`test_regression_unclear` — maybe with more context) or hopeless (`unfixable`,
+`out_of_scope`).
 
 ## Final Message
 
