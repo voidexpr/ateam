@@ -220,6 +220,8 @@ ateam code --dry-run
 
 `ateam code` stops after the code phase. Run `ateam verify` afterward (or `ateam run-all` for the full pipeline) to inspect the commits and run the test suite.
 
+`ateam code` refuses to launch when the working tree has uncommitted tracked changes (untracked files are OK): the coding phase makes commits and its recovery paths inspect git state, so starting dirty is unsafe. Commit or stash your changes first. In `ateam run-all` this short-circuits the pipeline before the verify phase runs.
+
 For live output from a running `code` session, run `ateam tail --coding` in a separate terminal; the previous `--tail` flag has been removed.
 
 ### `ateam verify`

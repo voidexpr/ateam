@@ -56,6 +56,59 @@ func TestDirty_NonRepo(t *testing.T) {
 	}
 }
 
+func TestUncommittedTrackedChanges_Clean(t *testing.T) {
+	repo := testRepo(t)
+	got, err := UncommittedTrackedChanges(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("clean repo: got %d entries, want 0: %v", len(got), got)
+	}
+}
+
+func TestUncommittedTrackedChanges_UntrackedIgnored(t *testing.T) {
+	repo := testRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, "new.txt"), []byte("x"), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	got, err := UncommittedTrackedChanges(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("untracked-only: got %d entries, want 0 (untracked is not tracked): %v", len(got), got)
+	}
+}
+
+func TestUncommittedTrackedChanges_ModifiedTracked(t *testing.T) {
+	repo := testRepo(t)
+	path := filepath.Join(repo, "tracked.txt")
+	if err := os.WriteFile(path, []byte("v1"), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	for _, args := range [][]string{{"add", "tracked.txt"}, {"commit", "-q", "-m", "add tracked"}} {
+		c := exec.Command("git", args...)
+		c.Dir = repo
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	if err := os.WriteFile(path, []byte("v2"), 0600); err != nil {
+		t.Fatalf("WriteFile v2: %v", err)
+	}
+	got, err := UncommittedTrackedChanges(repo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("modified tracked: got %d entries, want 1: %v", len(got), got)
+	}
+	if want := " M tracked.txt"; got[0] != want {
+		t.Errorf("modified tracked line: got %q want %q", got[0], want)
+	}
+}
+
 func TestHeadShort_NonEmpty(t *testing.T) {
 	repo := testRepo(t)
 	short := HeadShort(repo)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ateam/internal/flow"
+	"github.com/ateam/internal/gitutil"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -106,6 +107,27 @@ func runCode(opts CodeOptions) error {
 	}
 	if err := requireGitRepo(env, runner.ActionCode); err != nil {
 		return err
+	}
+
+	// Refuse to start if the working tree has uncommitted tracked changes.
+	// The coding phase makes commits and its recovery paths inspect git state;
+	// starting dirty makes both operations unsafe. Untracked files are fine
+	// (matches the supervisor's own historical rule). Skipped for --dry-run
+	// since dry-run only prints the prompt without executing anything.
+	// Failing here (rather than deferring to the supervisor prompt to abort)
+	// gives a hard non-zero exit that `ateam run-all` sees, short-circuiting
+	// the verify phase — see cmd/all.go:runAll.
+	if !opts.DryRun {
+		changes, err := gitutil.UncommittedTrackedChanges(env.GitRepoDir)
+		if err != nil {
+			return fmt.Errorf("code: git status check failed: %w", err)
+		}
+		if len(changes) > 0 {
+			return fmt.Errorf(
+				"code: working tree has %d uncommitted tracked change(s); commit or stash them first (untracked files are OK):\n  %s",
+				len(changes), strings.Join(changes, "\n  "),
+			)
+		}
 	}
 
 	// Validate review.md exists (or operator override resolves) up-front so

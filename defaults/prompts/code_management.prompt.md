@@ -82,8 +82,12 @@ emit the report body as your final message so the harness can recover it.
 
 1. Use the execution directory provided as `{{exec.output_dir}}`. Create it with `mkdir -p` if it does not already exist. Do NOT invent a different timestamped path — the harness has already allocated this one and reads files from it.
 2. Initialize the execution report at `{{exec.output_file}}` using the format below
-3. make sure there are no git dirty files (untracked files are fine), if there are any abort with a clear error message
-4. review recent commits
+3. review recent commits
+
+The harness guarantees a clean working tree before you start (untracked files
+aside): `ateam code` refuses to launch you when tracked files are uncommitted.
+You can therefore assume `git status --porcelain --untracked-files=no` is
+empty at Phase 1.
 
 Do not run `git fetch`, `git pull`, or any other network-touching git command — keeping
 the branch up to date with its remote is the operator's responsibility, not yours. Work

@@ -102,6 +102,32 @@ func HeadShort(dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// UncommittedTrackedChanges returns the porcelain status lines for tracked
+// files with uncommitted modifications, ignoring untracked files. Returns a
+// nil slice when the tree is clean. Callers should ensure dir is inside a
+// git repo (e.g. via requireGitRepo / TopLevel) — this function surfaces
+// the underlying git error if the command fails so the caller can decide
+// whether that's fatal.
+func UncommittedTrackedChanges(dir string) ([]string, error) {
+	cmd := exec.Command("git", "status", "--porcelain", "--untracked-files=no")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git status failed: %w", err)
+	}
+	// Preserve the porcelain two-column status prefix — column 1 is the index
+	// status, column 2 is the worktree status, so " M foo" (unstaged mod) and
+	// "M  foo" (staged mod) mean different things and TrimSpace would erase
+	// the distinction. Only trim trailing whitespace / drop empty lines.
+	var lines []string
+	for _, l := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if l = strings.TrimRight(l, "\r"); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	return lines, nil
+}
+
 // Dirty reports whether the working tree has uncommitted changes.
 // "false" when the tree is clean OR when dir is not in a repo OR when
 // git is unavailable — callers checking against "true" therefore err on
