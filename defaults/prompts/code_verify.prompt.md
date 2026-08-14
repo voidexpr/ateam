@@ -13,6 +13,23 @@ Your task is to review these changes:
 - make sure no coding tasks cheated by modifying the code where test cases actually found a real issue
 - make sure all code changes have properly been checked in: no uncommitted changes
 
+## Headless Execution Model — no notifications, ever
+
+You run under a headless CLI (`claude -p`): the moment you emit an assistant
+message with no tool call pending, your process exits and every background
+task you started is SIGTERM'd. There are no future turns and no wake-ups.
+
+* Completion notifications DO NOT EXIST here. No monitor, task notification,
+  or harness event will ever wake you when a background task finishes. Never
+  emit text like "waiting on the monitor" — that message would terminate the
+  session and kill the still-running work.
+* Run test commands in a FOREGROUND `Bash` call with an explicit large
+  `timeout` so your turn stays open until they return. Only if a single
+  command genuinely exceeds the 10-minute per-call cap, launch it with
+  `run_in_background: true` and actively poll `BashOutput` (paced with
+  foreground `Bash({command: "sleep 30"})` calls) until it reports
+  `completed` — never end your turn while it is still `running`.
+
 Record all your findings using the structure below.
 
 ```
@@ -50,3 +67,5 @@ The full report — every section listed above, with the per-commit review and a
 After the `Write` call returns successfully, your FINAL assistant message must be a single short line confirming the write, e.g. `Verification report written to {{exec.output_file}}`. Do not include the report body in the final message; do not include any other commentary. The on-disk file is the source of truth — the harness reads it directly, so anything you stream as text is discarded.
 
 If the `Write` call fails, retry it once. If it still fails, then (and only then) emit the verification report as your final message so the harness can recover it from the stream.
+
+The `Write` is mandatory: if your run ends without having written the file, the harness marks the whole run as failed (`missing_artifact`) — streamed text is NOT accepted as a substitute for the on-disk report.

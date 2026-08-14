@@ -607,5 +607,84 @@ func TestResolveExecModel(t *testing.T) {
 	}
 }
 
+// TestRunnerRequireOutputFileMissingIsError pins the missing_artifact
+// classification: with RequireOutputFile set (verify), a clean agent exit
+// without the mandatory Write must fail the run instead of promoting the
+// last streamed text (e.g. "Waiting on the monitor.") as the report.
+func TestRunnerRequireOutputFileMissingIsError(t *testing.T) {
+	dir := t.TempDir()
+	canonical := filepath.Join(dir, "verify.md")
+
+	// No WriteAtOutputFile / WriteResponseToOutputFile — the agent went
+	// off-script and never wrote the report.
+	mock := &agent.MockAgent{Response: "Waiting on the monitor."}
+	r := newTestRunner(t, dir, mock)
+
+	summary := r.Execute(context.Background(), "verify to {{OUTPUT_FILE}}", RunOpts{
+		RoleID:            "supervisor",
+		Action:            ActionVerify,
+		OutputKind:        OutputKindVerify,
+		RequireOutputFile: true,
+		CanonicalDestFile: canonical,
+	}, nil)
+
+	if !summary.IsError {
+		t.Fatal("run without the mandatory output file must be an error")
+	}
+	if summary.ErrorSource != agent.ErrorSourceMissingArtifact {
+		t.Errorf("ErrorSource = %q, want %q", summary.ErrorSource, agent.ErrorSourceMissingArtifact)
+	}
+	if !strings.Contains(summary.ErrorCause, "verify.md") {
+		t.Errorf("ErrorCause = %q, want mention of verify.md", summary.ErrorCause)
+	}
+
+	// The streamed-text fallback must not have fabricated the artifact.
+	runtimeFile := filepath.Join(dir, "runtime", strconv.FormatInt(summary.ExecID, 10), "verify.md")
+	if _, err := os.Stat(runtimeFile); !os.IsNotExist(err) {
+		t.Errorf("runtime verify.md should not exist (fallback must be skipped); stat err = %v", err)
+	}
+	if _, err := os.Stat(canonical); !os.IsNotExist(err) {
+		t.Errorf("canonical verify.md should not exist; stat err = %v", err)
+	}
+}
+
+func TestRunnerRequireOutputFileWrittenSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	canonical := filepath.Join(dir, "verify.md")
+
+	mock := &agent.MockAgent{
+		Response:          "Verification report written",
+		WriteAtOutputFile: []byte("# Code verification report\n\nall commits fine"),
+	}
+	r := newTestRunner(t, dir, mock)
+
+	// The runner no longer substitutes exec.* in the prompt body, so the
+	// mock needs the resolved runtime path in the prompt to simulate the
+	// Write (see TestRunnerSkipsPromptFilesDuringPromote).
+	prepared, err := r.Prepare(RunOpts{
+		RoleID:            "supervisor",
+		Action:            ActionVerify,
+		OutputKind:        OutputKindVerify,
+		RequireOutputFile: true,
+		CanonicalDestFile: canonical,
+	})
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	prompt := "write to " + filepath.Join(prepared.RuntimeDir, "verify.md")
+	summary := r.ExecutePrepared(context.Background(), prepared, prompt, nil)
+
+	if summary.IsError {
+		t.Fatalf("unexpected run error: %v", summary.Err)
+	}
+	got, err := os.ReadFile(canonical)
+	if err != nil {
+		t.Fatalf("canonical verify.md missing: %v", err)
+	}
+	if !strings.Contains(string(got), "Code verification report") {
+		t.Errorf("canonical verify.md content = %q", got)
+	}
+}
+
 // avoid unused-import error if calldb is not referenced directly above.
 var _ = calldb.Open

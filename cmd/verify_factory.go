@@ -52,6 +52,7 @@ func NewVerifyBundle(in VerifyBundleInput) *flow.PromptBundle {
 				RoleID:            "supervisor",
 				Action:            runner.ActionVerify,
 				OutputKind:        runner.OutputKindVerify,
+				RequireOutputFile: true,
 				CanonicalDestFile: dest,
 				WorkDir:           in.Env.WorkDir,
 				TimeoutMin:        in.TimeoutMin,

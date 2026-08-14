@@ -96,6 +96,44 @@ func TestClassifyFailureUserCanceled(t *testing.T) {
 	}
 }
 
+// TestClassifyFailureParentTerminated: a SIGTERM (recorded as the cancel
+// cause by cmdContext) means the parent process tore the run down — e.g. a
+// supervisor's headless claude session exiting with the child still running.
+// That must not read as "user_canceled": no operator did anything.
+func TestClassifyFailureParentTerminated(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(agent.ErrSignalTerminate)
+	<-ctx.Done()
+
+	source, cause := classifyFailure(ctx, nil, 5)
+	if source != agent.ErrorSourceParentTerminated {
+		t.Errorf("source = %q, want %q", source, agent.ErrorSourceParentTerminated)
+	}
+	if !strings.Contains(cause, "SIGTERM") {
+		t.Errorf("cause = %q, want mention of SIGTERM", cause)
+	}
+
+	// The runner wraps the signal ctx with a timeout; the cause must
+	// propagate through derived contexts.
+	child, cancelChild := context.WithTimeout(ctx, time.Hour)
+	defer cancelChild()
+	source, _ = classifyFailure(child, nil, 5)
+	if source != agent.ErrorSourceParentTerminated {
+		t.Errorf("derived ctx source = %q, want %q", source, agent.ErrorSourceParentTerminated)
+	}
+}
+
+func TestClassifyFailureSigintStaysUserCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(agent.ErrSignalInterrupt)
+	<-ctx.Done()
+
+	source, _ := classifyFailure(ctx, nil, 5)
+	if source != agent.ErrorSourceUserCanceled {
+		t.Errorf("source = %q, want %q", source, agent.ErrorSourceUserCanceled)
+	}
+}
+
 func TestAppendStderrSummaryWritesExpectedFields(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "stderr.log")

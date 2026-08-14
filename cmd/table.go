@@ -28,8 +28,31 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// cmdContext returns the root context for long-running commands. Like
+// signal.NotifyContext it cancels on SIGINT/SIGTERM, but it records which
+// signal arrived as the cancel cause (agent.ErrSignalInterrupt /
+// agent.ErrSignalTerminate) so failure classification can distinguish an
+// interactive Ctrl-C from a parent process tearing the run down.
 func cmdContext() (context.Context, context.CancelFunc) {
-	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		select {
+		case sig := <-sigCh:
+			if sig == syscall.SIGTERM {
+				cancel(agent.ErrSignalTerminate)
+			} else {
+				cancel(agent.ErrSignalInterrupt)
+			}
+		case <-ctx.Done():
+		}
+	}()
+	stop := func() {
+		signal.Stop(sigCh)
+		cancel(nil)
+	}
+	return ctx, stop
 }
 
 // errNoReview is the canonical error for commands that need the supervisor
@@ -455,7 +478,8 @@ func buildAgent(ac *runtime.AgentConfig) agent.Agent {
 	switch ac.Type {
 	case "builtin":
 		return &agent.MockAgent{
-			DefaultModel: defaultModel,
+			DefaultModel:              defaultModel,
+			WriteResponseToOutputFile: true,
 		}
 	case "codex":
 		cmd := ac.Command

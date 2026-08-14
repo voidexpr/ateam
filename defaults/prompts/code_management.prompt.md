@@ -50,6 +50,27 @@ If you get an error for any of these commands report the exact command, stderr a
 
 * work from your assigned directory and any sub directory, avoid making code changes in any parent directory
 
+## Headless Execution Model — no notifications, ever
+
+You run under a headless CLI (`claude -p`): the moment you emit an assistant
+message with no tool call pending, your process exits and every background
+task you started is SIGTERM'd. There are no future turns and no wake-ups.
+
+Rules that follow from this — violating any of them kills your own child runs:
+
+* Completion notifications DO NOT EXIST here. No monitor, task notification,
+  or harness event will ever wake you when a background task finishes. If you
+  catch yourself about to write "waiting for the notification" or "it'll
+  notify me when done", STOP — that message would terminate the session and
+  SIGTERM the still-running child.
+* The ONLY way to observe a background task is to actively poll it with
+  `BashOutput`, paced with foreground `Bash({command: "sleep 30"})` calls.
+  Do not spawn `until`/`sleep` shell watcher loops in the background — they
+  die with the session just like the child does.
+* Never end your turn (a text-only reply) while any spawned work is still
+  running. A child killed this way is recorded as `parent_terminated` and its
+  in-progress work is lost.
+
 ## Overview
 
 The goals are:
@@ -69,7 +90,7 @@ following MUST be true:
    tasks you never got to), plus the Test Health + Summary sections.
 2. **Final stdout message**: a short summary (1–3 lines) that names the
    outcome and, if you gave up early, states WHY plainly (e.g. "Stopped
-   after task 05: coding sub-run kept dying with `user_canceled` on 2
+   after task 05: coding sub-run kept dying with `sigterm_mid_work` on 2
    attempts — see execution_report.md §Task 05").
 
 Ending your turn with a bare "done" and an incomplete report is itself a
@@ -126,11 +147,12 @@ Execute tasks one at a time, in sequence order. For each task:
    termination class (see the **Termination Taxonomy** section).
 
    **CRITICAL**: never emit a plain-text reply while a launched sub-run is
-   still `running`. If your turn ends with a live background task, the
-   headless session tears down and SIGTERMs the child — the sub-run's
-   in-progress work is lost. Every turn must end either with the sub-run
-   already terminated, or with the next tool call (`BashOutput` or `sleep`)
-   pending.
+   still `running` (see the Headless Execution Model section — there are no
+   completion notifications; polling is the only mechanism). If your turn
+   ends with a live background task, the headless session tears down and
+   SIGTERMs the child — the sub-run's in-progress work is lost. Every turn
+   must end either with the sub-run already terminated, or with the next
+   tool call (`BashOutput` or `sleep`) pending.
 3. **Post-check**: Verify code still builds and tests pass
 4. **Record**: Update `execution_report.md` with the outcome, only append to it during this phase. For each task include:
    - Termination class + reason (see Termination Taxonomy)
@@ -146,7 +168,7 @@ Execute tasks one at a time, in sequence order. For each task:
       bounded `ateam cat <exec_id> | tail -n 500` for the sub-run's stream.
       Classify the termination per the Termination Taxonomy.
    b. **If the tree is dirty and the death looks recoverable** (SIGTERM/
-      user_canceled/timeout mid-work — not a broken commit path or code
+      parent_terminated/timeout mid-work — not a broken commit path or code
       defect), spawn a **continuation sub-run** that finishes the started
       work rather than stashing. Write a continuation task file listing
       files already committed (from `git log --since=<pre-check-hash>
@@ -250,7 +272,7 @@ each ended sub-run to one before continuing:
 | `normal_completed`   | exit 0; child final message is a commit summary; tree clean                 | no recovery needed                             |
 | `normal_apply_failed`| exit non-zero; child final message is `# Apply Failed` block; tree clean    | no recovery; task failed cleanly               |
 | `exec_timeout`       | exit non-zero; child stderr contains `ateam timed out the run after N minutes` | continuation may help if partial commits exist |
-| `sigterm_mid_work`   | exit 143; `ateam ps` REASON shows `[user_canceled] ... SIGTERM ...`; tree dirty | continuation (see Phase 3 step 5b)         |
+| `sigterm_mid_work`   | exit 143; `ateam ps` REASON shows `[parent_terminated] ... SIGTERM ...`; tree dirty | continuation (see Phase 3 step 5b)     |
 | `supervisor_killed`  | you called kill on the background bash yourself (documented decision)       | continuation only if the reason is transient   |
 | `external_kill`      | exit 143 with no supervisor-side kill and no `ateam ps` timeout evidence (OS OOM, operator Ctrl-C on parent) | report and stop; don't blindly retry     |
 | `internal_error`     | exit non-zero; child stderr shows an `ateam` panic/internal error, not an agent-level `Apply Failed` | report and stop; this is an ateam bug |

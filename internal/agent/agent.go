@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -73,12 +74,23 @@ type EnvProvider interface {
 // Error source values for StreamEvent.ErrorSource / RunSummary.ErrorSource.
 // Kept as exported constants so callers don't duplicate string literals.
 const (
-	ErrorSourceAgentAPI      = "agent_api"      // agent CLI reported is_error=true (e.g. Anthropic/OpenAI API error)
-	ErrorSourceAgentProcess  = "agent_process"  // agent subprocess exited non-zero without a result event (crash, OOM, ...)
-	ErrorSourceAteamTimeout  = "ateam_timeout"  // ateam killed the run via context deadline
-	ErrorSourceAteamInternal = "ateam_internal" // ateam side failure (no result event, not a timeout)
-	ErrorSourceUserCanceled  = "user_canceled"  // operator aborted the run (Ctrl-C, SIGTERM, parent ctx canceled)
-	ErrorSourceSkipped       = "skipped"        // task was never dispatched (e.g. --max-budget-usd-batch cap reached mid-batch)
+	ErrorSourceAgentAPI         = "agent_api"         // agent CLI reported is_error=true (e.g. Anthropic/OpenAI API error)
+	ErrorSourceAgentProcess     = "agent_process"     // agent subprocess exited non-zero without a result event (crash, OOM, ...)
+	ErrorSourceAteamTimeout     = "ateam_timeout"     // ateam killed the run via context deadline
+	ErrorSourceAteamInternal    = "ateam_internal"    // ateam side failure (no result event, not a timeout)
+	ErrorSourceUserCanceled     = "user_canceled"     // operator aborted the run interactively (Ctrl-C / SIGINT)
+	ErrorSourceParentTerminated = "parent_terminated" // run received SIGTERM — parent process exited or external kill, not a user Ctrl-C
+	ErrorSourceMissingArtifact  = "missing_artifact"  // run ended cleanly but never wrote its mandatory output file
+	ErrorSourceSkipped          = "skipped"           // task was never dispatched (e.g. --max-budget-usd-batch cap reached mid-batch)
+)
+
+// Cancel-cause sentinels. Commands cancel their root context with one of
+// these (via context.WithCancelCause) when a termination signal arrives, so
+// downstream classification can tell an interactive Ctrl-C apart from a
+// SIGTERM sent by a dying parent process or an external kill.
+var (
+	ErrSignalInterrupt = errors.New("SIGINT received")
+	ErrSignalTerminate = errors.New("SIGTERM received")
 )
 
 // errorEvent builds a populated StreamEvent of type "error" carrying err.

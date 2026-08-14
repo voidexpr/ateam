@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -280,7 +281,11 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		resultEvent.Err = err
 		resultEvent.ErrorSource = ErrorSourceAgentProcess
 		if ctx.Err() != nil {
-			resultEvent.ErrorSource = ErrorSourceUserCanceled
+			if errors.Is(context.Cause(ctx), ErrSignalTerminate) {
+				resultEvent.ErrorSource = ErrorSourceParentTerminated
+			} else {
+				resultEvent.ErrorSource = ErrorSourceUserCanceled
+			}
 		}
 		resultEvent.ErrorCause = err.Error()
 	} else {

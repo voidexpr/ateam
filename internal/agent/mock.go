@@ -20,13 +20,17 @@ import (
 var runtimeFileRe = regexp.MustCompile(`(/[^\s"]*?/runtime/\d+/[A-Za-z0-9._-]+\.md)`)
 var runtimeDirRe = regexp.MustCompile(`(/[^\s"]*?/runtime/\d+/?)(?:[\s"]|$)`)
 
+// dummyMarkerName is the placeholder filename extractOutputFile appends when
+// the prompt only contains an OUTPUT_DIR pattern (no primary file).
+const dummyMarkerName = "_dummy_marker.md"
+
 func extractOutputFile(prompt string) string {
 	if m := runtimeFileRe.FindString(prompt); m != "" {
 		return m
 	}
 	if m := runtimeDirRe.FindStringSubmatch(prompt); len(m) >= 2 {
 		// Append a placeholder filename so callers can use filepath.Dir().
-		return filepath.Join(strings.TrimRight(m[1], "/"), "_dummy_marker.md")
+		return filepath.Join(strings.TrimRight(m[1], "/"), dummyMarkerName)
 	}
 	return ""
 }
@@ -73,6 +77,12 @@ type MockAgent struct {
 	// WriteAtOutputFile (i.e. runtime/<exec_id>/). Used to test multi-file
 	// promotion and the *_prompt.md exclusion.
 	ExtraRuntimeFiles map[string][]byte
+
+	// WriteResponseToOutputFile makes Run write Response to the OUTPUT_FILE
+	// path found in the prompt when WriteAtOutputFile is nil — simulating a
+	// well-behaved agent that always performs the mandatory Write. Set for
+	// the builtin profile so actions with RequireOutputFile succeed.
+	WriteResponseToOutputFile bool
 
 	mu       sync.Mutex
 	Requests []Request
@@ -143,9 +153,13 @@ func (m *MockAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent)
 	// supporting files in the same directory. We extract the path from the
 	// runtime/<exec_id>/ pattern in the prompt — see runner template.go.
 	if outputFile := extractOutputFile(req.Prompt); outputFile != "" {
-		if len(m.WriteAtOutputFile) > 0 {
+		body := m.WriteAtOutputFile
+		if body == nil && m.WriteResponseToOutputFile && filepath.Base(outputFile) != dummyMarkerName {
+			body = []byte(response)
+		}
+		if len(body) > 0 {
 			_ = os.MkdirAll(filepathDir(outputFile), 0700)
-			_ = os.WriteFile(outputFile, m.WriteAtOutputFile, 0600)
+			_ = os.WriteFile(outputFile, body, 0600)
 		}
 		if len(m.ExtraRuntimeFiles) > 0 {
 			dir := filepathDir(outputFile)

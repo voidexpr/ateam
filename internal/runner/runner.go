@@ -4,6 +4,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -164,6 +165,14 @@ type RunOpts struct {
 	// so the stderr line is pure noise — and worse, gets routed through the
 	// renderer's above-live-region writer where it lands mid-table.
 	QuietExecID bool
+
+	// RequireOutputFile makes the primary output file mandatory: if the agent
+	// ends cleanly without having written runtime/<exec_id>/<primary>, the run
+	// is classified as an error (missing_artifact) instead of falling back to
+	// the last streamed text. Set for actions where the on-disk artifact is
+	// the contract (verify) — a stray final message like "waiting on the
+	// monitor" must not be promoted as the report.
+	RequireOutputFile bool
 }
 
 // RunProgress is a lightweight status sent on a channel during execution.
@@ -817,8 +826,9 @@ eventLoop:
 	// but produced text, seed it into runtime/<exec_id>/<primary>.md so the
 	// promote step still copies a non-empty canonical file. Real agents
 	// (claude with the Write tool) populate the file directly; this catches
-	// mocks and prompts that go off-script.
-	if !summary.IsError && opts.OutputKind != "" && output != "" {
+	// mocks and prompts that go off-script. Skipped when RequireOutputFile —
+	// there a missing write is an error, not something to paper over.
+	if !summary.IsError && opts.OutputKind != "" && output != "" && !opts.RequireOutputFile {
 		primary := PrimaryOutputName(opts.OutputKind, opts.PromptName)
 		if primary != "" {
 			target := filepath.Join(runtimeDir, primary)
@@ -952,6 +962,19 @@ func setupContainer(ctx context.Context, c container.Container, req *agent.Reque
 func (r *AgentExecutor) finalizeCall(ctx context.Context, callID int64, summary *RunSummary, resultEv *agent.StreamEvent, opts RunOpts, runtimeDir, cmdFile string, cmdInfo cmdFileInfo) {
 	success := resultEv != nil && resultEv.Type == "result" && resultEv.ExitCode == 0 && !resultEv.IsError
 
+	// A clean exit without the mandatory artifact is still a failure: the
+	// agent went off-script (e.g. ended its turn "waiting on a monitor")
+	// and there is nothing worth promoting.
+	var missingArtifact string
+	if success && opts.RequireOutputFile {
+		if primary := PrimaryOutputName(opts.OutputKind, opts.PromptName); primary != "" {
+			if _, err := os.Stat(filepath.Join(runtimeDir, primary)); err != nil {
+				success = false
+				missingArtifact = primary
+			}
+		}
+	}
+
 	var copyEntries []fileCopyEntry
 	var primaryRuntime string
 
@@ -959,7 +982,13 @@ func (r *AgentExecutor) finalizeCall(ctx context.Context, callID int64, summary 
 		copyEntries, primaryRuntime = r.promoteRuntimeFiles(runtimeDir, opts.CanonicalDestDir, opts.CanonicalDestFile, opts.OutputKind, opts.PromptName)
 	} else {
 		summary.IsError = true
-		source, cause := classifyFailure(ctx, resultEv, opts.TimeoutMin)
+		var source, cause string
+		if missingArtifact != "" {
+			source = agent.ErrorSourceMissingArtifact
+			cause = fmt.Sprintf("agent ended cleanly but never wrote the required output file %s", missingArtifact)
+		} else {
+			source, cause = classifyFailure(ctx, resultEv, opts.TimeoutMin)
+		}
 		summary.ErrorSource = source
 		summary.ErrorCause = cause
 		summary.Err = fmt.Errorf("[%s] %s", source, cause)
@@ -1152,11 +1181,16 @@ func classifyFailure(ctx context.Context, resultEv *agent.StreamEvent, timeoutMi
 		return agent.ErrorSourceAteamTimeout,
 			fmt.Sprintf("ateam timed out the run after %d minutes", timeoutMin)
 	case ctx.Err() == context.Canceled:
-		// Long-running commands wrap ctx with signal.NotifyContext, so SIGINT /
-		// SIGTERM surface here as context.Canceled. Distinguish operator-
-		// initiated cancellation from genuine agent failure so the persisted
-		// row and stderr summary don't read as "agent_process" / "ateam_internal".
-		return agent.ErrorSourceUserCanceled, "run canceled (Ctrl-C, SIGTERM, or parent context canceled)"
+		// Long-running commands cancel ctx on SIGINT/SIGTERM (see cmdContext),
+		// so both surface here as context.Canceled with the signal recorded as
+		// the cancel cause. Distinguish an interactive Ctrl-C from a SIGTERM —
+		// the latter typically means the parent process (e.g. a supervisor's
+		// headless claude session) exited and tore down its subtree, which is
+		// not an operator decision and must not read as "user_canceled".
+		if errors.Is(context.Cause(ctx), agent.ErrSignalTerminate) {
+			return agent.ErrorSourceParentTerminated, "run received SIGTERM (parent process exited or external kill — not a user Ctrl-C)"
+		}
+		return agent.ErrorSourceUserCanceled, "run canceled (Ctrl-C or parent context canceled)"
 	case resultEv != nil && resultEv.ErrorCause != "":
 		src := resultEv.ErrorSource
 		if src == "" {
