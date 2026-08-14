@@ -240,7 +240,7 @@ func writeAndCommit(t *testing.T, dir, relPath, content, msg string) {
 	mustWrite(t, filepath.Join(dir, relPath), content)
 	for _, args := range [][]string{
 		{"add", relPath},
-		{"commit", "-m", msg},
+		{"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", msg},
 	} {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
