@@ -13,22 +13,10 @@ Your task is to review these changes:
 - make sure no coding tasks cheated by modifying the code where test cases actually found a real issue
 - make sure all code changes have properly been checked in: no uncommitted changes
 
-## Headless Execution Model — no notifications, ever
-
-You run under a headless CLI (`claude -p`): the moment you emit an assistant
-message with no tool call pending, your process exits and every background
-task you started is SIGTERM'd. There are no future turns and no wake-ups.
-
-* Completion notifications DO NOT EXIST here. No monitor, task notification,
-  or harness event will ever wake you when a background task finishes. Never
-  emit text like "waiting on the monitor" — that message would terminate the
-  session and kill the still-running work.
-* Run test commands in a FOREGROUND `Bash` call with an explicit large
-  `timeout` so your turn stays open until they return. Only if a single
-  command genuinely exceeds the 10-minute per-call cap, launch it with
-  `run_in_background: true` and actively poll `BashOutput` (paced with
-  foreground `Bash({command: "sleep 30"})` calls) until it reports
-  `completed` — never end your turn while it is still `running`.
+Run test commands per the Headless Execution Model rules at the top of this
+prompt: foreground `Bash` with a large explicit `timeout` by default;
+background + `BashOutput` polling only when a single command exceeds the
+10-minute cap.
 
 Record all your findings using the structure below.
 

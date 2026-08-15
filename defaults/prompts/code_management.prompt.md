@@ -50,27 +50,6 @@ If you get an error for any of these commands report the exact command, stderr a
 
 * work from your assigned directory and any sub directory, avoid making code changes in any parent directory
 
-## Headless Execution Model — no notifications, ever
-
-You run under a headless CLI (`claude -p`): the moment you emit an assistant
-message with no tool call pending, your process exits and every background
-task you started is SIGTERM'd. There are no future turns and no wake-ups.
-
-Rules that follow from this — violating any of them kills your own child runs:
-
-* Completion notifications DO NOT EXIST here. No monitor, task notification,
-  or harness event will ever wake you when a background task finishes. If you
-  catch yourself about to write "waiting for the notification" or "it'll
-  notify me when done", STOP — that message would terminate the session and
-  SIGTERM the still-running child.
-* The ONLY way to observe a background task is to actively poll it with
-  `BashOutput`, paced with foreground `Bash({command: "sleep 30"})` calls.
-  Do not spawn `until`/`sleep` shell watcher loops in the background — they
-  die with the session just like the child does.
-* Never end your turn (a text-only reply) while any spawned work is still
-  running. A child killed this way is recorded as `parent_terminated` and its
-  in-progress work is lost.
-
 ## Overview
 
 The goals are:
