@@ -106,6 +106,7 @@ func NewCodeBundle(in CodeBundleInput) *flow.PromptBundle {
 				SupervisorDir: in.SupervisorDir,
 				Print:         in.Print,
 			},
+			checkBatchOutcomeAction{Batch: in.Batch, SharedDir: in.SharedDir},
 		},
 	}
 }

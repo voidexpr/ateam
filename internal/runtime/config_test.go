@@ -31,6 +31,35 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
+// TestDefaultClaudeAgentsShareHeadlessEnv pins the env that keeps headless
+// claude sessions from backgrounding long commands (see local.claude_env in
+// defaults/runtime.hcl) on every claude agent, whether it inherits via
+// base = "claude" or references the local directly.
+func TestDefaultClaudeAgentsShareHeadlessEnv(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error loading defaults: %v", err)
+	}
+	want := map[string]string{
+		"CLAUDECODE":                           "",
+		"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
+		"BASH_DEFAULT_TIMEOUT_MS":              "21600000",
+		"BASH_MAX_TIMEOUT_MS":                  "21600000",
+	}
+	for _, name := range []string{"claude", "claude-sonnet", "claude-haiku", "claude-auto", "claude-no-sandbox"} {
+		ac, ok := cfg.Agents[name]
+		if !ok {
+			t.Errorf("expected %q agent in defaults", name)
+			continue
+		}
+		for k, v := range want {
+			if got, ok := ac.Env[k]; !ok || got != v {
+				t.Errorf("agent %q env[%s] = %q (present=%v), want %q", name, k, got, ok, v)
+			}
+		}
+	}
+}
+
 func TestLoadDefaultProfile(t *testing.T) {
 	cfg, err := Load("", "")
 	if err != nil {

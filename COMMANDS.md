@@ -222,6 +222,8 @@ ateam code --dry-run
 
 `ateam code` refuses to launch when the working tree has uncommitted tracked changes (untracked files are OK): the coding phase makes commits and its recovery paths inspect git state, so starting dirty is unsafe. Commit or stash your changes first. In `ateam run-all` this short-circuits the pipeline before the verify phase runs.
 
+`ateam code` also exits non-zero when the supervisor itself finished cleanly but its delegated work did not: any sub-run in the code batch that is still running or ended in error (e.g. `parent_terminated`, timeout), or an execution report whose Summary counts a `Failed`, `Incomplete after retry` or `Not attempted` task. A report without those counters only prints a warning. In `ateam run-all` this too short-circuits before verify.
+
 For live output from a running `code` session, run `ateam tail --coding` in a separate terminal; the previous `--tail` flag has been removed.
 
 ### `ateam verify`

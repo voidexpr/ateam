@@ -316,23 +316,28 @@ func (c *CallDB) CostByBatch(projectID string) ([]BatchRow, error) {
 }
 
 type CallRow struct {
-	ID         int64
-	Agent      string
-	Model      string
-	Role       string
-	Action     string
-	Batch      string
-	StartedAt  string
-	EndedAt    string
-	AgentFile  string
-	OutputFile string
+	ID           int64
+	Agent        string
+	Model        string
+	Role         string
+	Action       string
+	Batch        string
+	StartedAt    string
+	EndedAt      string // empty while the run is still in flight
+	AgentFile    string
+	OutputFile   string
+	ExitCode     int
+	IsError      bool
+	ErrorMessage string
 }
 
-const callRowCols = `id, COALESCE(agent,''), COALESCE(model,''), role, action, batch, started_at, COALESCE(ended_at,''), COALESCE(stream_file,''), COALESCE(output_file,'')`
+const callRowCols = `id, COALESCE(agent,''), COALESCE(model,''), role, action, batch, started_at, COALESCE(ended_at,''), COALESCE(stream_file,''), COALESCE(output_file,''), COALESCE(exit_code,0), is_error, COALESCE(error_message,'')`
 
 func scanCallRow(rows *sql.Rows) (CallRow, error) {
 	var r CallRow
-	err := rows.Scan(&r.ID, &r.Agent, &r.Model, &r.Role, &r.Action, &r.Batch, &r.StartedAt, &r.EndedAt, &r.AgentFile, &r.OutputFile)
+	var isError int
+	err := rows.Scan(&r.ID, &r.Agent, &r.Model, &r.Role, &r.Action, &r.Batch, &r.StartedAt, &r.EndedAt, &r.AgentFile, &r.OutputFile, &r.ExitCode, &isError, &r.ErrorMessage)
+	r.IsError = isError != 0
 	return r, err
 }
 

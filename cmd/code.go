@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -288,20 +289,94 @@ func (a printCodeSessionAction) Run(_ flow.RunCtx, _ flow.RuntimeEnv, res *flow.
 	return flow.Flow{State: flow.StateContinue}
 }
 
+// codeSessionDir returns shared/code/<exec_id>/ when it exists, else "".
+// New runs write there; auto-migration moves any pre-Step-4
+// supervisor/code/<id>/ trees ahead of this read.
+func codeSessionDir(sharedDir string, execID int64) string {
+	if execID <= 0 {
+		return ""
+	}
+	candidate := filepath.Join(sharedDir, "code", strconv.FormatInt(execID, 10))
+	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+		return candidate
+	}
+	return ""
+}
+
+// checkBatchOutcomeAction is a code-specific PostExec action that refuses
+// to let a supervisor run read as ok when its delegated work did not
+// succeed. Two sources of evidence, both required to be clean:
+//
+//   - the call DB: every other exec in the batch (the coding sub-runs) must
+//     have ended without is_error — a child still running here means the
+//     supervisor ended its turn with work in flight, a child in error
+//     (parent_terminated, timeout, …) means that work was lost;
+//   - the execution report's Summary counters: Failed, Incomplete after
+//     retry and Not attempted must all be zero. A report without those
+//     counters only warns — the DB check above still covers hard failures.
+type checkBatchOutcomeAction struct {
+	Batch     string
+	SharedDir string
+}
+
+func (a checkBatchOutcomeAction) Run(rc flow.RunCtx, _ flow.RuntimeEnv, res *flow.Result) flow.Flow {
+	if res == nil || res.Summary == nil || rc.DB == nil {
+		return flow.Flow{State: flow.StateContinue}
+	}
+	rows, err := rc.DB.CallsByBatch(a.Batch)
+	if err != nil {
+		return flow.Flow{State: flow.StateError, Reason: "batch lookup failed", Err: err}
+	}
+	var problems []string
+	for _, r := range rows {
+		switch {
+		case r.ID == res.Summary.ExecID:
+		case r.EndedAt == "":
+			problems = append(problems, fmt.Sprintf("exec %d still running", r.ID))
+		case r.IsError:
+			problems = append(problems, fmt.Sprintf("exec %d failed: %s", r.ID, r.ErrorMessage))
+		}
+	}
+
+	report := filepath.Join(codeSessionDir(a.SharedDir, res.Summary.ExecID), "execution_report.md")
+	if data, err := os.ReadFile(report); err == nil {
+		counts, found := reportFailureCounts(string(data))
+		if !found {
+			fmt.Fprintf(os.Stderr, "warning: %s has no Summary counters; task outcomes not verified\n", report)
+		}
+		problems = append(problems, counts...)
+	}
+
+	if len(problems) == 0 {
+		return flow.Flow{State: flow.StateContinue}
+	}
+	return flow.Flow{
+		State:  flow.StateError,
+		Reason: "coding tasks did not all succeed",
+		Err:    fmt.Errorf("code: coding tasks did not all succeed: %s", strings.Join(problems, "; ")),
+	}
+}
+
+// reportFailureCounts scans the execution report's Summary section for the
+// non-success counters (`- **Failed**: N` etc.) and returns one entry per
+// counter above zero. found is false when none of the counters is present.
+func reportFailureCounts(report string) (problems []string, found bool) {
+	for _, m := range summaryCounterRe.FindAllStringSubmatch(report, -1) {
+		found = true
+		if n, _ := strconv.Atoi(m[2]); n > 0 {
+			problems = append(problems, fmt.Sprintf("execution report: %s=%d", m[1], n))
+		}
+	}
+	return problems, found
+}
+
+var summaryCounterRe = regexp.MustCompile(`(?m)^\s*-\s*\*\*(Failed|Incomplete after retry|Not attempted)\*\*:\s*(\d+)`)
+
 func printCodeSessionSummary(sharedDir, supervisorDir string, execID int64, printOutput bool, output string) {
 	cwd, _ := os.Getwd()
 	lastMsg := relPath(cwd, filepath.Join(supervisorDir, "code_output.md"))
 
-	// New runs write to shared/code/<id>/; auto-migration moves any
-	// pre-Step-4 supervisor/code/<id>/ trees ahead of this read.
-	var sessionDir string
-	if execID > 0 {
-		candidate := filepath.Join(sharedDir, "code", strconv.FormatInt(execID, 10))
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			sessionDir = candidate
-		}
-	}
-
+	sessionDir := codeSessionDir(sharedDir, execID)
 	if sessionDir == "" {
 		fmt.Printf("Last message: %s\n", lastMsg)
 		if printOutput {

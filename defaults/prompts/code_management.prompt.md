@@ -108,30 +108,18 @@ For each task:
 Execute tasks one at a time, in sequence order. For each task:
 
 1. **Pre-check**: Verify git working tree is clean, code builds, and tests pass
-2. **Execute** — launch the pipeline as a BACKGROUND Bash call and immediately
-   enter a polling loop. Coding sub-runs regularly exceed 10 minutes and the
-   Bash tool caps individual calls at 10 minutes; a foreground call would be
-   auto-backgrounded by the harness at the 10-min mark, so we background
-   intentionally from the start:
+2. **Execute** — run the pipeline as ONE plain foreground `Bash` call and let
+   it block until the sub-run exits (see the Headless Execution Model
+   section: no `timeout` argument, no backgrounding, no polling — the
+   harness's Bash timeout is raised above the sub-run's own limit):
    ```
    ateam prompt --action code \
        --post-prompt @{{exec.output_dir}}/SEQ_SLUG_task.md \
      | ateam exec --action code --quiet --batch {{exec.batch}} {{exec.subrun_args}}
    ```
-   Launch via `Bash({command: "...the pipeline above...", run_in_background: true})`,
-   note the returned `bash_id`, then poll with `BashOutput({bash_id})`
-   interleaved with `Bash({command: "sleep 30"})` between polls to pace. The
-   sub-run is done when `BashOutput` reports `status: completed` with an exit
-   code — inspect the exit code and the accumulated output to determine the
-   termination class (see the **Termination Taxonomy** section).
-
-   **CRITICAL**: never emit a plain-text reply while a launched sub-run is
-   still `running` (see the Headless Execution Model section — there are no
-   completion notifications; polling is the only mechanism). If your turn
-   ends with a live background task, the headless session tears down and
-   SIGTERMs the child — the sub-run's in-progress work is lost. Every turn
-   must end either with the sub-run already terminated, or with the next
-   tool call (`BashOutput` or `sleep`) pending.
+   The tool result carries the sub-run's exit code and its final output —
+   inspect both to determine the termination class (see the **Termination
+   Taxonomy** section).
 3. **Post-check**: Verify code still builds and tests pass
 4. **Record**: Update `execution_report.md` with the outcome, only append to it during this phase. For each task include:
    - Termination class + reason (see Termination Taxonomy)
@@ -142,7 +130,7 @@ Execute tasks one at a time, in sequence order. For each task:
    abnormally (non-zero exit, or the tree is dirty even on exit 0), don't
    abort the whole run. Follow this sequence:
 
-   a. **Diagnose** first. Gather: exit code from `BashOutput`, `ateam ps
+   a. **Diagnose** first. Gather: exit code from the `Bash` result, `ateam ps
       --batch {{exec.batch}}` for the row (ExecID, status, REASON column),
       bounded `ateam cat <exec_id> | tail -n 500` for the sub-run's stream.
       Classify the termination per the Termination Taxonomy.
@@ -178,7 +166,7 @@ After all tasks have been attempted (or you've decided to stop early):
 1. **Test health assessment**: Run the full test suite one final time and compare to the baseline recorded during Phase 1 setup.
    - Record: command(s) run, exit codes, pass/fail/skip counts
    - If all tests pass: note "test suite clean" in the execution report
-   - If tests are failing that were passing before this coding cycle: spawn a dedicated fix run (same background+poll pattern as Phase 3 step 2):
+   - If tests are failing that were passing before this coding cycle: spawn a dedicated fix run (same foreground call as Phase 3 step 2):
      ```
      ateam exec "Fix the following test failures that were introduced during this
      coding cycle. The tests were passing before the cycle started.
@@ -252,13 +240,12 @@ each ended sub-run to one before continuing:
 | `normal_apply_failed`| exit non-zero; child final message is `# Apply Failed` block; tree clean    | no recovery; task failed cleanly               |
 | `exec_timeout`       | exit non-zero; child stderr contains `ateam timed out the run after N minutes` | continuation may help if partial commits exist |
 | `sigterm_mid_work`   | exit 143; `ateam ps` REASON shows `[parent_terminated] ... SIGTERM ...`; tree dirty | continuation (see Phase 3 step 5b)     |
-| `supervisor_killed`  | you called kill on the background bash yourself (documented decision)       | continuation only if the reason is transient   |
-| `external_kill`      | exit 143 with no supervisor-side kill and no `ateam ps` timeout evidence (OS OOM, operator Ctrl-C on parent) | report and stop; don't blindly retry     |
+| `external_kill`      | exit 143 with no `ateam ps` timeout evidence (OS OOM, operator Ctrl-C on parent) | report and stop; don't blindly retry     |
 | `internal_error`     | exit non-zero; child stderr shows an `ateam` panic/internal error, not an agent-level `Apply Failed` | report and stop; this is an ateam bug |
 
 To gather evidence for classification, use in this order:
-1. Exit code from `BashOutput`
-2. Accumulated stderr snippet from `BashOutput`
+1. Exit code from the `Bash` result
+2. stderr snippet from the `Bash` result
 3. `ateam ps --batch {{exec.batch}}` — REASON column and STATUS
 4. `ateam cat <exec_id> | tail -n 500` — for the child's stream
 
@@ -330,24 +317,15 @@ follow along. Print status lines as you go:
 
 ### Sub-run execution model
 
-Coding sub-runs frequently exceed the Bash tool's 10-minute per-call cap, so
-every `ateam exec` in Phase 3 (and any similar spawn in Phase 4) launches as
-a background Bash call and you drive it via a `BashOutput` polling loop
-(see Phase 3 step 2 for the exact shape).
-
-The one absolute rule: **never end your turn while a launched background
-Bash task is still `running`**. If the headless session exits with a live
-child, the session tears down and SIGTERMs the child — losing all its
-in-progress work. Every turn boundary must either (a) fall after the child
-has terminated and you've handled the outcome, or (b) hand off to the next
-tool call (typically another `BashOutput` or a paced `sleep`).
+Every `ateam exec` in Phase 3 (and any similar spawn in Phase 4) is one
+foreground `Bash` call that blocks until the child exits (see Phase 3 step
+2). Coding sub-runs routinely take longer than 10 minutes; that is expected
+and needs no special handling.
 
 `ateam exec` self-limits its own runtime via its configured `Exec.TimeoutMinutes`
 timeout (stall detection only warns — it does not kill), so a well-behaved
-sub-run will terminate on its own even if the API stalls or the sub-agent
-hangs. If you observe a sub-run that seems stuck well past its expected
-duration, you may `KillBash` the background task deliberately; classify the
-termination as `supervisor_killed` and record why.
+sub-run terminates on its own even if the API stalls or the sub-agent hangs,
+and the `Bash` call returns with its exit code.
 
 ## Git Workflow
 

@@ -5,6 +5,31 @@
 //   - .ateamorg/ organization directory (if present)
 //   - agent rw_paths / ro_paths / denied_paths from agent config blocks
 locals {
+  // Process env shared by every claude agent (agents with `base = "claude"`
+  // inherit it; the other claude blocks below reference it explicitly).
+  //
+  // CLAUDECODE is unset so claude does not think it is nested in itself.
+  //
+  // The BASH_* / DISABLE_BACKGROUND_TASKS trio keeps long-running children
+  // (coding sub-runs, full test suites) inside ONE foreground Bash call:
+  // the harness's Bash tool caps a call at 10 minutes by default and offers
+  // run_in_background as the escape hatch — but a headless (`claude -p`)
+  // session kills every background task the moment the model ends its
+  // turn, and the way to wait on one changes between releases. With
+  // background tasks disabled the Bash tool has no run_in_background
+  // parameter at all, and with both timeouts raised a call may block for
+  // hours — ateam's own timeout_minutes still bounds the whole run. Keep
+  // the value above the largest [exec] / [verify] timeout_minutes.
+  claude_env = {
+    CLAUDECODE = ""
+    # EXPERIMENTAL: experiencing fork bombs with claude code (inside or outside of ateam)
+    #               so trying to force usage of zsh to confirm/rule out bash config
+    CLAUDE_CODE_SHELL = "/bin/zsh"
+    CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1"
+    BASH_DEFAULT_TIMEOUT_MS = "21600000"
+    BASH_MAX_TIMEOUT_MS = "21600000"
+  }
+
   claude_sandbox = <<-EOF
   {
     "permissions": {
@@ -242,12 +267,7 @@ agent "claude" {
   command = "claude"
   args    = ["-p", "--output-format", "stream-json", "--verbose"]
   sandbox = local.claude_sandbox
-  env = {
-    CLAUDECODE = "",
-    # EXPERIMENTAL: experiencing fork bombs with claude code (inside or outside of ateam)
-    #               so trying to force usage of zsh to confirm/rule out bash config
-    CLAUDE_CODE_SHELL = "/bin/zsh"
-  }
+  env     = local.claude_env
   required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]
 
   // Inside containers: skip permissions (container provides isolation).
@@ -261,9 +281,7 @@ agent "claude-auto" {
   command = "claude"
   args    = ["-p", "--output-format", "stream-json", "--verbose", "--permission-mode" , "auto"]
   sandbox = local.claude_sandbox
-  env = {
-    CLAUDECODE = ""
-  }
+  env     = local.claude_env
   required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]
 }
 
@@ -272,9 +290,7 @@ agent "claude-no-sandbox" {
   type    = "claude"
   command = "claude"
   args    = ["-p", "--output-format", "stream-json", "--verbose"]
-  env = {
-    CLAUDECODE = ""
-  }
+  env     = local.claude_env
   required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]
 }
 

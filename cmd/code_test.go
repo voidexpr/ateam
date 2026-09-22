@@ -6,8 +6,12 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/ateam/internal/calldb"
+	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/root"
+	"github.com/ateam/internal/runner"
 )
 
 // TestPrintCodeSessionSummaryPicksByExecID verifies that printCodeSessionSummary
@@ -187,6 +191,86 @@ func TestCodeStageHappyPath(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in output:\n%s", want, out)
+		}
+	}
+}
+
+func TestCheckBatchOutcomeAction(t *testing.T) {
+	const batch = "code-test"
+	base := t.TempDir()
+	db, err := calldb.Open(filepath.Join(base, "state.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Now()
+	insert := func(role string) int64 {
+		id, err := db.InsertCall(&calldb.Call{Action: "code", Role: role, Batch: batch, StartedAt: now})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	end := func(id int64, isError bool, msg string) {
+		if err := db.UpdateCall(id, &calldb.CallResult{EndedAt: now, IsError: isError, ErrorMessage: msg}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	supervisor := insert("supervisor")
+	end(supervisor, false, "")
+	okChild := insert("")
+	end(okChild, false, "")
+
+	sharedDir := filepath.Join(base, "shared")
+	sessionDir := filepath.Join(sharedDir, "code", strconv.FormatInt(supervisor, 10))
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeReport := func(body string) {
+		if err := os.WriteFile(filepath.Join(sessionDir, "execution_report.md"), []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func() flow.Flow {
+		action := checkBatchOutcomeAction{Batch: batch, SharedDir: sharedDir}
+		res := &flow.Result{Summary: &runner.RunSummary{ExecID: supervisor}}
+		return action.Run(flow.RunCtx{DB: db}, flow.RuntimeEnv{}, res)
+	}
+
+	writeReport("## Summary\n- **Total**: 1\n- **Completed**: 1\n- **Failed**: 0\n- **Incomplete after retry**: 0\n- **Not attempted**: 0\n")
+	if f := run(); f.State != flow.StateContinue {
+		t.Fatalf("clean batch: state=%v err=%v", f.State, f.Err)
+	}
+
+	writeReport("## Summary\n- **Total**: 3\n- **Completed**: 1\n- **Failed**: 1\n- **Incomplete after retry**: 0\n- **Not attempted**: 1\n")
+	f := run()
+	if f.State != flow.StateError || f.Err == nil {
+		t.Fatalf("report failures: state=%v err=%v", f.State, f.Err)
+	}
+	for _, want := range []string{"Failed=1", "Not attempted=1"} {
+		if !strings.Contains(f.Err.Error(), want) {
+			t.Errorf("missing %q in %v", want, f.Err)
+		}
+	}
+	if strings.Contains(f.Err.Error(), "Incomplete") {
+		t.Errorf("zero counter reported: %v", f.Err)
+	}
+
+	writeReport("mock response")
+	killed := insert("")
+	end(killed, true, "[parent_terminated] run received SIGTERM")
+	running := insert("")
+	f = run()
+	if f.State != flow.StateError || f.Err == nil {
+		t.Fatalf("db failures: state=%v err=%v", f.State, f.Err)
+	}
+	for _, want := range []string{
+		"exec " + strconv.FormatInt(killed, 10) + " failed: [parent_terminated]",
+		"exec " + strconv.FormatInt(running, 10) + " still running",
+	} {
+		if !strings.Contains(f.Err.Error(), want) {
+			t.Errorf("missing %q in %v", want, f.Err)
 		}
 	}
 }
