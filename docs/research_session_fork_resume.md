@@ -9,8 +9,9 @@ Since ATeam started, Claude Code gained `--fork-session`, headless `--resume`, `
 - **A. Overview-then-fork.** Run one "project overview" agent that discovers the repo, then fork each report role out of that session so roles skip discovery and start faster.
 - **B. Checkpoint-and-resume.** Save that point (or the end of a report run) and resume it in later cycles with "check what changed in git since `<sha>`".
 - **C. Report-discovery-first.** Same as A but the discovery step is the first half of a report run rather than a separate overview role.
+- **D. Crash recovery.** When a run dies (persistent API errors, killed after a tool call, timeout), resume the same session instead of restarting from scratch. If the failure was a bad tool call, fork from a few turns earlier and add a warning about what went wrong.
 
-The short answer: **A is technically sound but only as a same-run, same-cwd, within-cache-TTL optimisation, and it competes with a cheaper mechanism ATeam already has. B is a bad idea and the field agrees. C is A with worse cache economics.** Details and a concrete recommendation follow.
+The short answer: **D is the strongest case and should be built first. A is technically sound but only as a same-run, same-cwd, within-cache-TTL optimisation, and it competes with a cheaper mechanism ATeam already has. B is a bad idea and the field agrees. C is A with worse cache economics.** Details and a concrete recommendation follow.
 
 ## 1. What the CLIs offer today
 
@@ -22,7 +23,8 @@ The short answer: **A is technically sound but only as a same-run, same-cwd, wit
 | `--continue` | Works. `-p --continue` picks up `-p`-created sessions too. |
 | `--fork-session` (with `--resume`/`--continue`) | Works. New session id, history copied, original untouched. The `system/init` stream event already carries the fork's id. Combine with `--session-id <uuid>` to pick the id. |
 | `--no-session-persistence` | Print mode only. No transcript written, not resumable. |
-| `--resume-session-at <msg-uuid>` | Not in `cli-reference`; accepted by the 2.1.278 binary and documented as the SDK option `resumeSessionAt`. Resume from a point in the transcript rather than the end. |
+| `--resume-session-at <msg-uuid>` | Not in `cli-reference`; accepted by the 2.1.278 binary and documented as the SDK option `resumeSessionAt`. Resume from a point in the transcript rather than the end. `--resume-drops-turn <uuid>` drops one turn. |
+| `CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1` (env) | On the next `-p --resume <id>`, auto-continues a turn that was cut short by SIGTERM (exit 143), bounded by `..._MAX_AGE_MS`. Anthropic's own headless crash-recovery hook. |
 | `--system-prompt-snapshot on` (default) | Not in `cli-reference`; from the 2.1.267 changelog. The system prompt is recorded on the first request and reused verbatim on every resume until compaction. |
 | `--bare` | Skips hooks, plugins, auto-memory, CLAUDE.md. Docs say it "will become the default for `-p`". |
 | `--autocompact <auto\|100k..1M>` | Per-launch auto-compact window. |
@@ -166,6 +168,39 @@ Verdict: do not build. Every project that tried cross-run session reuse either a
 
 Same as A, but the fork point is inside a role's run rather than a dedicated overview. `--resume-session-at <msg-uuid>` makes it technically possible on Claude, and Codex `thread/fork` takes `lastTurnId`. It is worse than A: the discovery prefix is contaminated with one role's framing, the fork point has to be chosen by parsing the transcript, and the parent role has been running for minutes so the TTL clock is already ticking for siblings. Skip.
 
+### D. Crash recovery: resume the failed session instead of restarting
+
+This is the strongest use of resume in the whole document, because it has every property §2 and §3 say a resume needs and none of the ones that sink B:
+
+- Same cwd, same process config, same model, same tools. The prefix is cache-exact.
+- The failure just happened, so the cache is warm. A restart pays the whole prefix uncached; a resume pays cache-read (0.1×, 0.025× on Fable 5.1) for everything already done.
+- The transcript carries state no artifact can: which files were read, what was concluded, and for `code` runs which edits were already applied. A fresh agent facing half-applied edits is worse than the crash. A resumed one knows what it did.
+- It runs once, immediately, so TTL drift and transcript growth across cycles do not apply.
+- Anthropic built the plain case in: `CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1` auto-continues a SIGTERM-cut turn on the next `-p --resume`. The rewind case is `--resume <id> --fork-session --resume-session-at <msg-uuid>`, which leaves the failed transcript intact for `ateam inspect`. Codex `exec resume <id> "<prompt>"` covers resume-in-place; rewind-to-turn exists only in the app-server `thread/fork lastTurnId` (not confirmed for the `exec fork` CLI).
+
+Concrete illustration: while producing this document, an exploration agent died twice on HTTP 529 overload and was restarted from zero both times.
+
+Design shape, by failure class:
+
+| Failure | Action | Prompt on resume |
+|---|---|---|
+| API error (429/529/5xx), network, process killed mid-turn, timeout | `--resume <id>` in place, after a back-off | Nothing, or "continue where you left off". With the interrupted-turn env var, Claude continues the cut turn itself. |
+| Bad tool call (ateam-classified: sandbox denial, command not found, wrote outside the runtime dir) | First retry: resume in place with a note naming the failed call and why. Second identical failure: `--fork-session --resume-session-at` a few turns earlier, same note. | "Your call `X` failed because Y. Do not repeat it; do Z instead." |
+| Repeated identical call (loop) | Fork earlier immediately; the poisoned turns are the problem. | Same note plus the loop count. |
+| Auth, permission, "Prompt is too long" (#14472), budget exhausted | Not resumable. Fail the run. | |
+
+Caveats that shape the implementation:
+
+- **Docker one-shot cannot do it.** The transcript dies with the container. Sandbox, docker-exec and ateam-inside-docker can. Either accept the gap or mount a transcript volume (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`) for that profile.
+- **Re-pass what resume does not restore.** `--settings` for Claude (the runner already builds it, `internal/runner/runner.go:506`), `-c sandbox_mode=...` for Codex because `exec resume` has no `-s` (#40149). Same `--model`; a resumed session restores it from the transcript, but passing it keeps the cache prefix identical.
+- **Budget resets per process.** `--max-budget-usd` starts fresh on the resumed process. The retry needs an ateam-side cumulative cap per logical run, a retry limit (2 or 3), and a decay: in place, then rewind, then give up.
+- **Classification is the real work.** The resumable/not decision belongs next to the existing failure classification in `internal/runner` (`classify_test.go`, the supervisor SIGTERM handling). Exit 143 and `result.is_error` with `error_during_execution` are the Claude signals; `turn.failed` and `error` events are Codex's.
+- **Rewind needs message uuids.** Claude's stream-json events carry them, but whether ateam's parsed stream keeps the field was not checked. A first version can skip rewind entirely: resume at the end with the warning note. The model sees its own failed call in context, and that is usually enough. Rewind earns its keep for loops.
+- **Session id must be stored.** `ateam resume` today scans the stream file (`cmd/resume.go:283`). A calldb column, already listed as hygiene, becomes a prerequisite. The retry should be a new exec row linked to the parent so cost roll-ups and `ateam ps` show the chain.
+- **After auto-compact** the first resumed request lands in the 5 min cache bucket. Minor.
+
+Verdict: build it. It is the one shape where resume is strictly better than restart on cost, speed and correctness, and it needs no experiment to justify.
+
 ### Other ideas in this area that hold up better
 
 - **Read-only "seance" for review and verify.** Fork the *report* agent's finished session with `--fork-session --resume <id>` and ask it questions: "which files did you actually read for finding 3?", "was X verified or inferred?" The parent is untouched, the fork has all the evidence in context, and it runs once so TTL is irrelevant (it pays the cold re-read once). This is what Gas Town's `seance` does and what `ateam resume` already does interactively. An unattended `review --interrogate` step that forks the reporter and asks a fixed question list would directly attack the "re-verification claims have no audit" gap listed in `Feature_TokenReduction.md`. This is the one place where a fork beats an artifact: the artifact is what is being audited.
@@ -176,11 +211,12 @@ Same as A, but the fork point is inside a role's run rather than a dedicated ove
 
 ## 6. Recommendation
 
-1. **Keep the artifact path as the source of truth.** It works in every isolation mode, across models, survives crashes and prompt edits, is auditable in git, and the measured −69% already exists. Finish the `Feature_TokenReduction.md` Phase 0.5 / Phase 2 work (deterministic orientation, structured Project Context with base SHA and provenance) before adding any session mechanics.
-2. **Do not build B.**
-3. **Run one cheap A/B on A** before deciding: sandbox mode, Claude, subscription auth within plan usage (1 h main-conversation TTL; `subagentPromptCacheTtl` is irrelevant because forked roles are separate processes), `max_parallel` at least the role count, forks staggered by a few seconds. First measure the overview transcript size and per-role turn counts, since §2 shows break-even depends on both. Then compare three arms on the same commit with `ateam_base`: (i) warm roles with `previous_report` + `project_info` as today, (ii) overview agent then `--fork-session` roles with `--ignore-previous-report`, (iii) both. Read `cost_usd`, `cache_read_tokens`, `cache_creation_tokens`, tool calls, and finding counts from `state.sqlite` as in `plans/debug_cold_warm_report.md`. Decision rule: adopt A only if arm (ii) or (iii) beats (i) on cost with no findings lost *and* the wrong-fact inheritance risk is judged acceptable. Cost alone may well favour (ii) for short roles; the experiment is there to put a number on it.
-4. **Prototype the read-only interrogation fork** for review or verify. It is the one shape where a transcript carries information an artifact cannot, it needs no TTL luck, and it reuses `resolveSessionID` and the `resume` command line from `cmd/resume.go`. Sandbox and docker-exec only; skip in docker one-shot.
-5. **Cheap hygiene regardless:** store `session_id` in calldb. Do **not** add `--bare` blindly: bare mode "never reads OAuth credentials or the system keychain" and needs `ANTHROPIC_API_KEY` or an `apiKeyHelper`, so it breaks the default subscription auth and moves runs to the 5 min TTL bucket. It is only an option for the `docker-api` profile.
+1. **Build D, crash recovery by resume.** Store `session_id` in calldb, classify failures as resumable or not in the runner, and on a resumable failure relaunch with `--resume <id>` plus the same `--settings` and `--model`, with a cumulative budget and a retry cap. Start with resume-in-place and a warning note; add the `--fork-session --resume-session-at` rewind for loops later. Sandbox and docker-exec profiles first; docker one-shot needs a transcript mount. Set `CLAUDE_CODE_RESUME_INTERRUPTED_TURN=1` for Claude runs.
+2. **Keep the artifact path as the source of truth** for cross-run context. It works in every isolation mode, across models, survives crashes and prompt edits, is auditable in git, and the measured −69% already exists. Finish the `Feature_TokenReduction.md` Phase 0.5 / Phase 2 work (deterministic orientation, structured Project Context with base SHA and provenance) before adding any other session mechanics.
+3. **Do not build B.**
+4. **Run one cheap A/B on A** before deciding: sandbox mode, Claude, subscription auth within plan usage (1 h main-conversation TTL; `subagentPromptCacheTtl` is irrelevant because forked roles are separate processes), `max_parallel` at least the role count, forks staggered by a few seconds. First measure the overview transcript size and per-role turn counts, since §2 shows break-even depends on both. Then compare three arms on the same commit with `ateam_base`: (i) warm roles with `previous_report` + `project_info` as today, (ii) overview agent then `--fork-session` roles with `--ignore-previous-report`, (iii) both. Read `cost_usd`, `cache_read_tokens`, `cache_creation_tokens`, tool calls, and finding counts from `state.sqlite` as in `plans/debug_cold_warm_report.md`. Decision rule: adopt A only if arm (ii) or (iii) beats (i) on cost with no findings lost *and* the wrong-fact inheritance risk is judged acceptable. Cost alone may well favour (ii) for short roles; the experiment is there to put a number on it.
+5. **Prototype the read-only interrogation fork** for review or verify. It shares the session-id plumbing with D, needs no TTL luck, and reuses `resolveSessionID` and the `resume` command line from `cmd/resume.go`. Sandbox and docker-exec only; skip in docker one-shot.
+6. **Do not add `--bare` blindly:** bare mode "never reads OAuth credentials or the system keychain" and needs `ANTHROPIC_API_KEY` or an `apiKeyHelper`, so it breaks the default subscription auth and moves runs to the 5 min TTL bucket. It is only an option for the `docker-api` profile.
 
 ## Sources
 
