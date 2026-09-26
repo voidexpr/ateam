@@ -109,9 +109,10 @@ Execute tasks one at a time, in sequence order. For each task:
 
 1. **Pre-check**: Verify git working tree is clean, code builds, and tests pass
 2. **Execute** — run the pipeline as ONE plain foreground `Bash` call and let
-   it block until the sub-run exits (see the Headless Execution Model
-   section: no `timeout` argument, no backgrounding, no polling — the
-   harness's Bash timeout is raised above the sub-run's own limit):
+   it block until the sub-run exits. Do not pass a `timeout`: ateam sets
+   this session's Bash default and cap above the sub-run's own timeout, so
+   the call simply returns when the child does (see the Headless Execution
+   Model section — no backgrounding, no polling):
    ```
    ateam prompt --action code \
        --post-prompt @{{exec.output_dir}}/SEQ_SLUG_task.md \
@@ -318,9 +319,10 @@ follow along. Print status lines as you go:
 ### Sub-run execution model
 
 Every `ateam exec` in Phase 3 (and any similar spawn in Phase 4) is one
-foreground `Bash` call that blocks until the child exits (see Phase 3 step
-2). Coding sub-runs routinely take longer than 10 minutes; that is expected
-and needs no special handling.
+foreground `Bash` call, without a `timeout` argument, that blocks until the
+child exits (see Phase 3 step 2). Coding sub-runs routinely take longer
+than 10 minutes; ateam raised this session's Bash cap above the sub-run
+timeout precisely for that, so it needs no special handling.
 
 `ateam exec` self-limits its own runtime via its configured `Exec.TimeoutMinutes`
 timeout (stall detection only warns — it does not kill), so a well-behaved

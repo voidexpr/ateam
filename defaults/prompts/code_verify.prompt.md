@@ -14,8 +14,8 @@ Your task is to review these changes:
 - make sure all code changes have properly been checked in: no uncommitted changes
 
 Run test commands per the Headless Execution Model rules at the top of this
-prompt: plain foreground `Bash` calls, no `timeout` argument, however long
-the suite takes.
+prompt: plain foreground `Bash` calls with an explicit `timeout` sized for
+the suite, up to the harness cap.
 
 Record all your findings using the structure below.
 

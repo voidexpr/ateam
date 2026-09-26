@@ -195,6 +195,31 @@ func TestCodeStageHappyPath(t *testing.T) {
 	}
 }
 
+func TestSupervisorAgentEnv(t *testing.T) {
+	cases := []struct {
+		subRun, supervisor int
+		want               string // "" = nil env
+	}{
+		{60, 120, "4200000"},
+		{0, 120, "7800000"},
+		{0, 0, ""},
+	}
+	for _, c := range cases {
+		got := supervisorAgentEnv(c.subRun, c.supervisor)
+		if c.want == "" {
+			if got != nil {
+				t.Errorf("(%d,%d): want nil env, got %v", c.subRun, c.supervisor, got)
+			}
+			continue
+		}
+		for _, k := range []string{"BASH_DEFAULT_TIMEOUT_MS", "BASH_MAX_TIMEOUT_MS"} {
+			if got[k] != c.want {
+				t.Errorf("(%d,%d): %s = %q, want %q", c.subRun, c.supervisor, k, got[k], c.want)
+			}
+		}
+	}
+}
+
 func TestCheckBatchOutcomeAction(t *testing.T) {
 	const batch = "code-test"
 	base := t.TempDir()

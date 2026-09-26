@@ -7,12 +7,12 @@ your process exits and anything still running underneath it is killed.
 
 Rules that follow from this:
 
-* Run every command — including long ones such as full test suites or
-  `ateam exec` sub-runs — as a plain foreground `Bash` call and let it
-  block. ateam raises the harness's Bash timeout far above the command's
-  own limit, so do not pass a `timeout` and do not split, background,
-  or poll a long command to "keep the session alive". A tool call in
-  flight IS what keeps the session alive.
+* Run every command as a plain foreground `Bash` call and let it block.
+  When a command may run longer than the harness default of 2 minutes (a
+  full test suite, a build), pass an explicit `timeout` in milliseconds
+  sized for it, up to the harness cap. A tool call in flight IS what keeps
+  the session alive — never split or poll a long command to "keep the
+  session alive".
 * Background execution is disabled in this harness: the `Bash` tool has
   no `run_in_background` parameter, and no monitor, task notification, or
   harness event will ever wake you. If you catch yourself about to write

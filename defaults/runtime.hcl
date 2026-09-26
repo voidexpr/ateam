@@ -10,24 +10,20 @@ locals {
   //
   // CLAUDECODE is unset so claude does not think it is nested in itself.
   //
-  // The BASH_* / DISABLE_BACKGROUND_TASKS trio keeps long-running children
-  // (coding sub-runs, full test suites) inside ONE foreground Bash call:
-  // the harness's Bash tool caps a call at 10 minutes by default and offers
-  // run_in_background as the escape hatch — but a headless (`claude -p`)
-  // session kills every background task the moment the model ends its
-  // turn, and the way to wait on one changes between releases. With
-  // background tasks disabled the Bash tool has no run_in_background
-  // parameter at all, and with both timeouts raised a call may block for
-  // hours — ateam's own timeout_minutes still bounds the whole run. Keep
-  // the value above the largest [exec] / [verify] timeout_minutes.
+  // CLAUDE_CODE_DISABLE_BACKGROUND_TASKS removes the Bash tool's
+  // run_in_background parameter: a headless (`claude -p`) session kills
+  // every background task the moment the model ends its turn, and the way
+  // to wait on one changes between releases, so long commands must block
+  // in one foreground call instead. Bash timeouts stay at the harness
+  // defaults here; `ateam code` raises BASH_DEFAULT_TIMEOUT_MS /
+  // BASH_MAX_TIMEOUT_MS for the supervisor only, above the sub-run
+  // timeout, so a whole sub-run fits in one call — see cmd/code.go.
   claude_env = {
     CLAUDECODE = ""
     # EXPERIMENTAL: experiencing fork bombs with claude code (inside or outside of ateam)
     #               so trying to force usage of zsh to confirm/rule out bash config
     CLAUDE_CODE_SHELL = "/bin/zsh"
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1"
-    BASH_DEFAULT_TIMEOUT_MS = "21600000"
-    BASH_MAX_TIMEOUT_MS = "21600000"
   }
 
   claude_sandbox = <<-EOF

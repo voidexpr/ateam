@@ -166,6 +166,12 @@ type RunOpts struct {
 	// renderer's above-live-region writer where it lands mid-table.
 	QuietExecID bool
 
+	// AgentEnv is extra process env for this run's agent, layered over the
+	// agent config's env block. Used by supervisors to raise the harness's
+	// Bash timeout above their sub-runs' timeout (see cmd/code.go) without
+	// giving every agent the same cap.
+	AgentEnv map[string]string
+
 	// RequireOutputFile makes the primary output file mandatory: if the agent
 	// ends cleanly without having written runtime/<exec_id>/<primary>, the run
 	// is classified as an error (missing_artifact) instead of falling back to
@@ -530,7 +536,7 @@ func (r *AgentExecutor) ExecutePrepared(ctx context.Context, prepared *PreparedR
 	opts.CanonicalDestFile = ResolveTemplateString(opts.CanonicalDestFile, tmplVars)
 
 	// Build agent request (no longer archives prompt — that's our job below).
-	req, err := r.buildRequest(prompt, tmplVars, cwd, agentFile, stderrFile, extraArgs, callID)
+	req, err := r.buildRequest(prompt, tmplVars, cwd, agentFile, stderrFile, extraArgs, callID, opts.AgentEnv)
 	if err != nil {
 		return failEarly(err)
 	}
@@ -870,11 +876,18 @@ func reconcileErrorEvent(prev *agent.StreamEvent, ev agent.StreamEvent) *agent.S
 
 // buildRequest resolves CLAUDE_CONFIG_DIR and assembles the agent.Request.
 // The prompt is expected to already have its templates resolved.
-func (r *AgentExecutor) buildRequest(prompt string, tmplVars TemplateVars, cwd, agentFile, stderrFile string, extraArgs []string, execID int64) (agent.Request, error) {
+func (r *AgentExecutor) buildRequest(prompt string, tmplVars TemplateVars, cwd, agentFile, stderrFile string, extraArgs []string, execID int64, extraEnv map[string]string) (agent.Request, error) {
+	var reqEnv map[string]string
+	if len(extraEnv) > 0 {
+		reqEnv = make(map[string]string, len(extraEnv))
+		for k, v := range extraEnv {
+			reqEnv[k] = v
+		}
+	}
+
 	// Resolve CLAUDE_CONFIG_DIR for isolated agents.
 	// Relative config_dir is resolved from ProjectDir (.ateam/); absolute is used as-is.
 	configDir := display.ExpandHome(ResolveTemplateString(r.ConfigDir, tmplVars))
-	var reqEnv map[string]string
 	if configDir != "" {
 		var configPath string
 		if filepath.IsAbs(configDir) {
@@ -886,7 +899,10 @@ func (r *AgentExecutor) buildRequest(prompt string, tmplVars TemplateVars, cwd, 
 			}
 			configPath = filepath.Join(stateDir, configDir)
 		}
-		reqEnv = map[string]string{"CLAUDE_CONFIG_DIR": configPath}
+		if reqEnv == nil {
+			reqEnv = map[string]string{}
+		}
+		reqEnv["CLAUDE_CONFIG_DIR"] = configPath
 	}
 
 	// On host execution (no container), prepend the per-project ateam

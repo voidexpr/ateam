@@ -166,6 +166,7 @@ func runCode(opts CodeOptions) error {
 	subRunArgs := buildSubRunArgs(opts, subRunProfile, env.SourceDir, orgFlag, workDirFlag)
 
 	timeout := env.Config.Code.EffectiveTimeout(opts.Timeout)
+	supervisorEnv := supervisorAgentEnv(env.Config.Exec.EffectiveTimeout(0), timeout)
 	supervisorDir := env.SupervisorDir()
 
 	startedAt := time.Now()
@@ -222,6 +223,7 @@ func runCode(opts CodeOptions) error {
 		// body), so the literal template stays here.
 		CanonicalDest: filepath.Join(env.SharedDir(), "code", "{{EXEC_ID}}"),
 		SubRunArgs:    subRunArgs,
+		AgentEnv:      supervisorEnv,
 	})
 
 	if opts.DryRun {
@@ -431,6 +433,35 @@ func checkDockerInDocker(env *root.ResolvedEnv, supervisorProfile, subRunProfile
 	}
 	return nil
 }
+
+// supervisorAgentEnv returns the env that lets the code supervisor wait on
+// a whole sub-run inside ONE foreground Bash call. The harness caps a Bash
+// call at 10 minutes by default and a headless session kills backgrounded
+// work when the turn ends, so the supervisor's cap (and its default, for
+// calls made without a timeout) is set to the sub-run timeout plus slack
+// for ateam's own startup and finalize. Only the supervisor gets this —
+// sub-runs keep the stock limits for their own commands. A missing
+// sub-run timeout falls back to the supervisor's, and nil means "leave
+// the harness defaults".
+func supervisorAgentEnv(subRunTimeoutMin, supervisorTimeoutMin int) map[string]string {
+	minutes := subRunTimeoutMin
+	if minutes <= 0 {
+		minutes = supervisorTimeoutMin
+	}
+	if minutes <= 0 {
+		return nil
+	}
+	ms := strconv.Itoa((minutes + supervisorBashSlackMin) * 60 * 1000)
+	return map[string]string{
+		"BASH_DEFAULT_TIMEOUT_MS": ms,
+		"BASH_MAX_TIMEOUT_MS":     ms,
+	}
+}
+
+// supervisorBashSlackMin is added on top of the sub-run timeout so the
+// supervisor's Bash call outlives ateam's own startup, stall grace and
+// finalize around the child agent.
+const supervisorBashSlackMin = 10
 
 // buildSubRunArgs renders the {{exec.subrun_args}} fragment supervisor prompts
 // paste verbatim into each `ateam exec`. Positive list — propagate every

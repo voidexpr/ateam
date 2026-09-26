@@ -43,8 +43,6 @@ func TestDefaultClaudeAgentsShareHeadlessEnv(t *testing.T) {
 	want := map[string]string{
 		"CLAUDECODE":                           "",
 		"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
-		"BASH_DEFAULT_TIMEOUT_MS":              "21600000",
-		"BASH_MAX_TIMEOUT_MS":                  "21600000",
 	}
 	for _, name := range []string{"claude", "claude-sonnet", "claude-haiku", "claude-auto", "claude-no-sandbox"} {
 		ac, ok := cfg.Agents[name]
