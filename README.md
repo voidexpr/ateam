@@ -2,9 +2,14 @@
 
 **Run coding agents unattended. Keep your codebase healthy in the background.**
 
-ATeam is a CLI to run existing coding agents (currently Claude Code and Codex) unattended. It uses this ability to provide a four-stage software engineering quality pipeline (**report → review → code → verify**) and a library of role prompts covering bugs, tests, security, dependencies, docs, architecture, and more.
+ATeam is a CLI to run existing coding agents unattended (currently Claude Code and Codex).
 
-It can be used to automate that benefits from reusable prompts to focus on the parts you don't want to do to free up your attention for features, architecture, or any other task better suited in interactive agent sessions.
+It uses this ability to provide a four-stage software engineering quality pipeline (**report → review → code → verify**) and a library of role prompts covering bugs, tests, security, dependencies, docs, architecture, and more.
+
+It can be used to automate repeated work that benefits from reusable prompts to focus your attention on features, architecture, or any other task better suited in interactive agent sessions.
+
+* Unlike skills it can run in the background and can chain multiple sessions sequentially or in parallel
+* It has similarities with Claude Code Workflows but can mix Claude and Codex and composition is done via shell scripts instead of code, inputs/output and observability (cost, runtime) are persisted for real-time or later inspection
 
 ## Why ATeam
 
