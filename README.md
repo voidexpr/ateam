@@ -8,8 +8,8 @@ It uses this ability to provide a four-stage software engineering quality pipeli
 
 It can be used to automate repeated work that benefits from reusable prompts to focus your attention on features, architecture, or any other task better suited in interactive agent sessions.
 
-* Unlike skills it can run in the background and can chain multiple sessions sequentially or in parallel
-* It has similarities with Claude Code Workflows but can mix Claude and Codex and composition is done via shell scripts instead of code, inputs/output and observability (cost, runtime) are persisted and available in real-time.
+* Unlike skills it can run in the background and chain multiple sessions sequentially or in parallel
+* It has similarities with Claude Code Workflows but can mix Claude and Codex, composition is done via shell scripts instead of code, inputs/output and observability (cost, runtime) are persisted and available both for real-time tracking and later review.
 
 ## Why ATeam
 
