@@ -9,7 +9,7 @@ It uses this ability to provide a four-stage software engineering quality pipeli
 It can be used to automate repeated work that benefits from reusable prompts to focus your attention on features, architecture, or any other task better suited in interactive agent sessions.
 
 * Unlike skills it can run in the background and can chain multiple sessions sequentially or in parallel
-* It has similarities with Claude Code Workflows but can mix Claude and Codex and composition is done via shell scripts instead of code, inputs/output and observability (cost, runtime) are persisted for real-time or later inspection
+* It has similarities with Claude Code Workflows but can mix Claude and Codex and composition is done via shell scripts instead of code, inputs/output and observability (cost, runtime) are persisted and available in real-time.
 
 ## Why ATeam
 
@@ -17,9 +17,9 @@ It can be used to automate repeated work that benefits from reusable prompts to 
 
 Coding agents prioritize feature completion over long-term software quality, which is a good short-term tradeoff that degrades over time. Tests fall behind, security issues accumulate, code becomes spaghetti, docs go stale, dependencies rot, ...
 
-At the same time, coding agents are good at auditing and fixing quality issues. They can be prompted to be pragmatic: adapt to the project size, skip any change that would alter how a feature works, small wins are ok, avoid busy work, look for automation opportunities so cost goes down over time, ...
+At the same time, coding agents are good at auditing and fixing quality issues. They can be prompted to avoid feature changes and be pragmatic: adapt to the project size, skip any change that would alter how a feature works, small wins are ok, avoid busy work, look for automation opportunities so cost goes down over time, ...
 
-ATeam makes quality-oriented work a one-liner you can run on demand, daily, or on a weekly schedule to keep your codebase healthy. It's useful whether the code is written by agents, humans, or both — humans also forget to add tests, postpone refactors, and neglect security. A consistent automated baseline is a clear win either way.
+ATeam makes quality-oriented work a one-liner you can run on demand, daily, or on a weekly schedule to keep your codebase healthy. It's useful whether the code is written by agents, humans, or both: humans also forget to add tests, postpone refactors, and neglect security. A consistent automated baseline is a clear win either way.
 
 ### Attention is the new bottleneck
 
@@ -27,7 +27,7 @@ Developing new features or evolving a project's architecture requires a lot of t
 
 A growing share of code is written by coding agents. Without automation, humans become full-time reviewers, juggling an ever-growing set of slash commands like `/write-tests /update-docs /update-architecture /simplify /code-review high --fix recent changes` to keep up. Automating this kind of work as a CLI gives some attention back.
 
-Quality work is the sweet spot for unattended agents because it can be prompted once, unlike features that benefit from an interactive session. `ateam resume` turns any past unattended session into an interactive one, so you can talk to the agent that did that refactor last Tuesday night and ask what it did and why.
+Quality-oriented work is the sweet spot for unattended agents because it can be prompted once, unlike features that benefit from an interactive session. `ateam resume` turns any past unattended session into an interactive one, so you can talk to the agent that did that refactor last Tuesday night and ask what it did and why.
 
 ### The CLI for unattended agents
 
