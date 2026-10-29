@@ -6,8 +6,8 @@
 
 This feature integrates findings from three sources:
 
-- **[Research_InvestigateReportLogsForTokenUsage.md](./Research_InvestigateReportLogsForTokenUsage.md)** — empirical analysis of real ATeam stream.jsonl traces (cold run + 2nd run + appendix from a role-expert agent). All quantitative claims below come from this dataset.
-- **[ResearchCodebaseDiscoveryTokenReduction.md](./ResearchCodebaseDiscoveryTokenReduction.md)** — outside-research survey of repository maps, code graphs, RAG, prompt caching, and analyzer integration. Useful framing; does **not** account for ATeam-specific mechanisms.
+- **[Research_InvestigateReportLogsForTokenUsage.md](../research/Research_InvestigateReportLogsForTokenUsage.md)** — empirical analysis of real ATeam stream.jsonl traces (cold run + 2nd run + appendix from a role-expert agent). All quantitative claims below come from this dataset.
+- **[ResearchCodebaseDiscoveryTokenReduction.md](../research/ResearchCodebaseDiscoveryTokenReduction.md)** — outside-research survey of repository maps, code graphs, RAG, prompt caching, and analyzer integration. Useful framing; does **not** account for ATeam-specific mechanisms.
 - **`defaults/new_report_base_prompt.md`** — the live base prompt every report role inherits. Critically, it mandates a `Project Context` section in every report (line 52–54).
 
 The two research files are deliberately complementary: the first is ATeam-specific and grounded in measurement; the second is general-purpose and surveys the literature. **For anything ATeam-specific, prefer the first.**
