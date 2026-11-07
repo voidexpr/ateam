@@ -642,17 +642,13 @@ func mergeHCLFile(cfg *Config, path string) error {
 // mergeHCL merges one layer into cfg. filename names the source in parse
 // diagnostics; label is the layer name recorded in cfg.Sources.
 func mergeHCL(cfg *Config, data []byte, filename, label string) error {
-	// Pass 1: extract locals for expression evaluation
-	evalCtx, err := parseLocals(data, filename)
-	if err != nil {
-		return err
-	}
-
-	// Pass 2: decode config with locals context
-	parser := hclparse.NewParser()
-	file, diags := parser.ParseHCL(data, filename)
+	file, diags := hclparse.NewParser().ParseHCL(data, filename)
 	if diags.HasErrors() {
 		return diags
+	}
+	evalCtx, err := localsContext(file.Body, filename)
+	if err != nil {
+		return err
 	}
 
 	var hf hclFile
@@ -873,15 +869,9 @@ func (c *Config) mergeProfile(h hclProfile, label string) {
 	c.Profiles[h.Name] = p
 }
 
-// parseLocals extracts locals blocks from HCL data and builds an eval context.
-// Locals are scoped to the file they're defined in.
-func parseLocals(data []byte, filename string) (*hcl.EvalContext, error) {
-	parser := hclparse.NewParser()
-	file, diags := parser.ParseHCL(data, filename)
-	if diags.HasErrors() {
-		return nil, diags
-	}
-
+// localsContext evaluates the locals blocks of a parsed file into an eval
+// context for its other blocks. Locals are scoped to their file.
+func localsContext(body hcl.Body, filename string) (*hcl.EvalContext, error) {
 	type localsFile struct {
 		Locals []struct {
 			Remain hcl.Body `hcl:",remain"`
@@ -890,8 +880,7 @@ func parseLocals(data []byte, filename string) (*hcl.EvalContext, error) {
 	}
 
 	var lf localsFile
-	diags = gohcl.DecodeBody(file.Body, nil, &lf)
-	if diags.HasErrors() {
+	if diags := gohcl.DecodeBody(body, nil, &lf); diags.HasErrors() {
 		return nil, diags
 	}
 
