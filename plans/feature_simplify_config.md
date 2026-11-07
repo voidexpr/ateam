@@ -51,19 +51,20 @@ causes account for most of the pain:
 Small, independent steps first. Each removes a reported pain without a
 migration. One larger migration at the end.
 
-### 1. Fail closed on model
+### 1. Model warnings
 
-- Refuse to launch when no model is resolved from config or `--model`.
-  Error names the file and block to edit.
-- `allow_agent_default_model = true` (top-level scalar) opts out
-  explicitly.
+Running with no model pinned stays allowed. The agent CLI's own default
+is a valid choice. ateam only makes the situation visible.
+
+- `ateam env` (and any config audit command) warns when the resolved
+  profile has no model pinned, and names the file and block to edit.
 - Warn at launch when the resolved model is on an "expensive" list
   (initially a hard-coded list in `defaults/runtime.hcl`, overridable).
 - Lint: `--model` / `-m` / `model_reasoning_effort` inside `agent.args`
   produces a warning pointing at the `model` / `effort` attributes.
   Move the embedded defaults to the attributes.
-- Directly fixes the weekly-limit problem. Traceable-config's audit
-  shows the mistake after the fact; this prevents it.
+- Warnings need provenance from step 2 to say which file to edit, so
+  step 2 lands first.
 
 ### 2. Per-field merge across layers
 
@@ -109,7 +110,7 @@ migration. One larger migration at the end.
 
 ### 6. Single `ateam.hcl`, one directory name, config/state split
 
-One migration, done once, after steps 1 and 2 (per-field merge and
+One migration, done once, after steps 2 and 1 (per-field merge and
 provenance are what make a single file worth having).
 
 - Fold `config.toml` into HCL. New blocks: `project {}` (name, git,
@@ -141,12 +142,37 @@ provenance are what make a single file worth having).
   worth it if it deletes code. Not a user-facing problem; not checked
   how much `report` and `parallel` share. Revisit after step 6.
 - **One Claude install for interactive and unattended.** Keep a
-  separate `config_dir` for unattended agents. Once ateam pins the
-  model (step 1), the "default install has the latest model" worry is
-  gone. Re-login is covered by step 4.
+  separate `config_dir` for unattended agents. Once `ateam env` warns
+  about an unpinned model (step 1), the "default install has the latest
+  model" worry is visible before a run. Re-login is covered by step 4.
+- **Refusing to run without a pinned model.** Rejected. The agent CLI's
+  default is a legitimate choice; ateam warns, it does not block.
 
-## Order of value
+## Order of work, in lockstep with traceable-config
 
-Steps 1 to 5 are each small and independent. Together they remove the
-limit-burning, login and "what will run" issues. Step 6 is the only
-large one.
+Simplification leads. Tracing is built on the new layering, not on
+today's, so nothing is written twice.
+
+1. **Per-field merge with provenance built in** (step 2 above +
+   traceable-config step 1). The merge rewrite is where "which file set
+   this field" is recorded. One change, both specs served.
+2. **Model warnings** (step 1 above). Uses the provenance from the
+   previous item to say which file to edit.
+3. **Home org fallback and `ateam login`** (steps 3 and 4 above).
+   Independent of tracing.
+4. **`ateam env` and `--dry-run` rendering** (step 5 above +
+   traceable-config steps 3 to 5). First visible tracing deliverable.
+   Uses the current layer names.
+5. **Single `ateam.hcl`, `.ateam` layering, state split** (step 6
+   above). Renames the layer vocabulary in one place. The chain
+   rendering from the previous item keeps working.
+6. **Native config reader** (traceable-config step 2). Last and
+   optional. It explains what the agent CLI defaults to when nothing is
+   pinned.
+
+Only one real ordering constraint: doing item 4 before item 5 means the
+layer names change once. Accepted, to get the first visible payoff
+early.
+
+Items 1 to 4 are each small. Together they remove the limit-burning,
+login and "what will run" issues. Item 5 is the only large one.
