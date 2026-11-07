@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,12 +30,15 @@ func (c *Config) Trace(prefix string) []TraceEntry {
 	return out
 }
 
-// Where renders where a contribution was written: "<file>:<line>" with the
-// home directory shortened to "~", "built-in:<line>" for the embedded
-// defaults, and for an inherited value the base agent followed by the
-// location that set it on the base.
-func (c *Config) Where(con Contribution) string {
-	loc := c.displayLayer(con.File)
+// Where renders where a contribution was written: "<file>:<line>",
+// "built-in:<line>" for the embedded defaults, and for an inherited value
+// the base agent followed by the location that set it on the base. A file
+// path goes through display when it is not nil.
+func (c *Config) Where(con Contribution, display func(string) string) string {
+	loc := con.File
+	if display != nil && filepath.IsAbs(loc) {
+		loc = display(loc)
+	}
 	if con.Line > 0 {
 		loc += ":" + strconv.Itoa(con.Line)
 	}

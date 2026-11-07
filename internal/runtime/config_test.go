@@ -1711,10 +1711,10 @@ func TestTraceFiltersByPrefix(t *testing.T) {
 	if len(entries) != 1 || entries[0].Key != "agent.claude.model" || len(entries[0].Chain) != 2 {
 		t.Fatalf("exact key: %+v", entries)
 	}
-	if w := cfg.Where(entries[0].Chain[1]); w != filepath.Join(projDir, ConfigFile)+":1" {
+	if w := cfg.Where(entries[0].Chain[1], nil); w != filepath.Join(projDir, ConfigFile)+":1" {
 		t.Errorf("where: %q", w)
 	}
-	if w := cfg.Where(entries[0].Chain[0]); w != filepath.Join(homeDir, ConfigFile)+":1" {
+	if w := cfg.Where(entries[0].Chain[0], nil); w != filepath.Join(homeDir, ConfigFile)+":1" {
 		t.Errorf("where (home): %q", w)
 	}
 	for _, prefix := range []string{"agent.claude", "agent.claude.", "agent.claude.*"} {
@@ -1734,10 +1734,18 @@ func TestTraceFiltersByPrefix(t *testing.T) {
 	if entries = cfg.Trace("agent.claud"); len(entries) != 0 {
 		t.Errorf("partial block name must not match: %+v", entries)
 	}
+	upper := func(p string) string { return strings.ToUpper(p) }
+	model, _ := cfg.Source("agent.claude.model")
+	if w := cfg.Where(model, upper); w != strings.ToUpper(filepath.Join(projDir, ConfigFile))+":1" {
+		t.Errorf("where with display: %q", w)
+	}
+	if got, _ := cfg.Source("agent.claude.command"); cfg.Where(got, upper) != BuiltinLayer+":"+strconv.Itoa(got.Line) {
+		t.Errorf("display must not touch the built-in label: %q", cfg.Where(got, upper))
+	}
 	if all := cfg.Trace(""); len(all) != len(cfg.Sources) {
 		t.Errorf("empty prefix: %d entries, %d keys", len(all), len(cfg.Sources))
 	}
-	if got, _ := cfg.Source("agent.claude.command"); cfg.Where(got) != BuiltinLayer+":"+strconv.Itoa(got.Line) {
-		t.Errorf("built-in where: %q", cfg.Where(got))
+	if got, _ := cfg.Source("agent.claude.command"); cfg.Where(got, nil) != BuiltinLayer+":"+strconv.Itoa(got.Line) {
+		t.Errorf("built-in where: %q", cfg.Where(got, nil))
 	}
 }

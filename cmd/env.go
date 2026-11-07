@@ -24,6 +24,7 @@ var (
 	envModels        bool
 	envRoles         bool
 	envTrace         bool
+	envAbs           bool
 )
 
 var envCmd = &cobra.Command{
@@ -39,10 +40,13 @@ the ateam.hcl layers, container detection, credentials, and the project.
 --trace prints the merged configuration instead, one attribute per line
 with the file and line that set it and, indented, the lower layers it
 overrides. KEY narrows it to one block or attribute: "agent.claude",
-"role", "profile.default.agent".
+"role", "profile.default.agent". Files under the current directory are
+printed relative to it and the home directory as ~; --abs prints every
+path in full.
 
   ateam env --trace
   ateam env --trace agent.claude
+  ateam env --trace --abs
 
 This command is read-only — it never creates or modifies anything.`,
 	Args: cobra.MaximumNArgs(1),
@@ -55,11 +59,15 @@ func init() {
 	envCmd.Flags().BoolVar(&envModels, "models", false, "print the full per-layer model/effort chain for each profile in use")
 	envCmd.Flags().BoolVar(&envRoles, "roles", false, "print the role table with the last report time per role")
 	envCmd.Flags().BoolVar(&envTrace, "trace", false, "print every merged attribute with the file:line that set it; KEY narrows to a block")
+	envCmd.Flags().BoolVar(&envAbs, "abs", false, "with --trace: print absolute file paths instead of paths relative to the current directory")
 }
 
 func runEnv(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 && !envTrace {
 		return fmt.Errorf("a KEY argument needs --trace")
+	}
+	if envAbs && !envTrace {
+		return fmt.Errorf("--abs needs --trace")
 	}
 	env, err := lookupEnv()
 	if err != nil {
@@ -80,7 +88,7 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
 			prefix = args[0]
 		}
-		return printTrace(env, prefix)
+		return printTrace(env, prefix, envAbs)
 	}
 
 	return printEnv(env)
@@ -88,7 +96,9 @@ func runEnv(cmd *cobra.Command, args []string) error {
 
 // printTrace prints the merged configuration, one attribute per line with
 // the location that set it, and the lower layers it overrides indented.
-func printTrace(env *root.ResolvedEnv, prefix string) error {
+// abs prints file paths in full; otherwise they are relative to the
+// current directory when under it, ~-shortened otherwise.
+func printTrace(env *root.ResolvedEnv, prefix string, abs bool) error {
 	rtCfg, err := loadRuntime(env)
 	if err != nil {
 		return err
@@ -97,14 +107,31 @@ func printTrace(env *root.ResolvedEnv, prefix string) error {
 	if len(entries) == 0 {
 		return fmt.Errorf("no attribute matches %q", prefix)
 	}
+	display := func(p string) string { return p }
+	if !abs {
+		cwd, err := resolvedCwd()
+		if err != nil {
+			return err
+		}
+		display = func(p string) string { return relativeOrTilde(cwd, p) }
+	}
 	for _, e := range entries {
 		last := e.Chain[len(e.Chain)-1]
-		fmt.Printf("%s = %s  (%s)\n", e.Key, traceValue(last.Value), rtCfg.Where(last))
+		fmt.Printf("%s = %s  (%s)\n", e.Key, traceValue(last.Value), rtCfg.Where(last, display))
 		for _, con := range e.Chain[:len(e.Chain)-1] {
-			fmt.Printf("    overrides %s = %s\n", rtCfg.Where(con), traceValue(con.Value))
+			fmt.Printf("    overrides %s = %s\n", rtCfg.Where(con, display), traceValue(con.Value))
 		}
 	}
 	return nil
+}
+
+// relativeOrTilde renders p relative to cwd when it is under cwd, else
+// with the home directory shortened to ~.
+func relativeOrTilde(cwd, p string) string {
+	if rel, err := filepath.Rel(cwd, p); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return rel
+	}
+	return tildeHome(p)
 }
 
 // traceValue keeps a trace line single-line: an empty value shows as "",

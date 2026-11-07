@@ -24,18 +24,31 @@ func TestEnvTracePrintsFileAndLine(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := captureStdout(t, func() {
-		if err := printTrace(env, "agent.claude.model"); err != nil {
-			t.Fatal(err)
+	// Run from the project: its file is relative, the home file ~-shortened
+	// (or absolute when the temp dir is outside the home).
+	withChdir(t, projPath, func() {
+		out := captureStdout(t, func() {
+			if err := printTrace(env, "agent.claude.model", false); err != nil {
+				t.Fatal(err)
+			}
+		})
+		want := "agent.claude.model = opus  (" + filepath.Join(".ateam", root.ConfigFile) + ":6)\n    overrides " + tildeHome(homeFile) + ":2 = sonnet\n"
+		if out != want {
+			t.Errorf("relative trace:\n got %q\nwant %q", out, want)
+		}
+		out = captureStdout(t, func() {
+			if err := printTrace(env, "agent.claude.model", true); err != nil {
+				t.Fatal(err)
+			}
+		})
+		want = "agent.claude.model = opus  (" + projFile + ":6)\n    overrides " + homeFile + ":2 = sonnet\n"
+		if out != want {
+			t.Errorf("absolute trace:\n got %q\nwant %q", out, want)
 		}
 	})
-	want := "agent.claude.model = opus  (" + tildeHome(projFile) + ":6)\n    overrides " + tildeHome(homeFile) + ":2 = sonnet\n"
-	if out != want {
-		t.Errorf("trace:\n got %q\nwant %q", out, want)
-	}
 
-	out = captureStdout(t, func() {
-		if err := printTrace(env, "agent.claude"); err != nil {
+	out := captureStdout(t, func() {
+		if err := printTrace(env, "agent.claude", false); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -48,7 +61,7 @@ func TestEnvTracePrintsFileAndLine(t *testing.T) {
 		t.Errorf("prefix must limit the trace to the agent block:\n%s", out)
 	}
 
-	if err := printTrace(env, "agent.nope"); err == nil || !strings.Contains(err.Error(), "no attribute matches") {
+	if err := printTrace(env, "agent.nope", false); err == nil || !strings.Contains(err.Error(), "no attribute matches") {
 		t.Errorf("unknown prefix: got %v", err)
 	}
 }

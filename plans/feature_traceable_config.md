@@ -190,7 +190,9 @@ Two renderings of the same `ModelReport`:
    the HCL attribute and block ranges at merge time; `env` map keys get
    their own line) and the lower layers it overrides. Values inherited
    through `base` point at the base agent's own location; built-in
-   values point at a line of the embedded `defaults/ateam.hcl`.
+   values point at a line of the embedded `defaults/ateam.hcl`. Paths
+   print relative to the current directory (`~` for the home), `--abs`
+   in full.
 
 ## Later (out of scope for the audit step)
 
