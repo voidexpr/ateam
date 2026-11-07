@@ -388,7 +388,7 @@ func TestRunPoolRunnerFieldsUnchanged(t *testing.T) {
 	r := newTestRunner(t, dir, mock)
 	r.ProjectName = "proj"
 	r.SourceDir = dir
-	r.OrgDir = dir
+	r.HomeDir = dir
 	r.Profile = "default"
 	r.ProjectID = "proj-id"
 	r.ContainerType = "none"

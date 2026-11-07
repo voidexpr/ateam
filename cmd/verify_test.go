@@ -16,9 +16,9 @@ func TestVerifyStageHappyPath(t *testing.T) {
 	orgParent, projPath, _ := setupTestProject(t)
 	initTestGitRepo(t, projPath)
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = orgParent
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = filepath.Join(orgParent, ".ateam")
 
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
@@ -56,9 +56,9 @@ func TestVerifyStageDryRunSkipsExecutor(t *testing.T) {
 	orgParent, projPath, _ := setupTestProject(t)
 	initTestGitRepo(t, projPath)
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = orgParent
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = filepath.Join(orgParent, ".ateam")
 
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {

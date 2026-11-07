@@ -7,7 +7,7 @@ import (
 )
 
 func TestModelReportBuiltinAgents(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -77,12 +77,12 @@ agent "pinned" {
   effort = "xhigh"
 }
 `)
-	cfg, err := Load(projDir, orgDir)
+	cfg, err := Load([]string{orgDir, projDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	orgFile := filepath.Join(orgDir, "runtime.hcl")
-	projFile := filepath.Join(projDir, "runtime.hcl")
+	orgFile := filepath.Join(orgDir, ConfigFile)
+	projFile := filepath.Join(projDir, ConfigFile)
 
 	// legacy: args carry the model, the profile's extra args outrank them.
 	prof, ac, _, _ := cfg.ResolveProfile("legacy")
@@ -122,7 +122,7 @@ agent "child" {
 }
 `)
 	projDir := t.TempDir()
-	cfg, err := Load(projDir, orgDir)
+	cfg, err := Load([]string{orgDir, projDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -135,7 +135,7 @@ agent "child" {
 		t.Errorf("base pseudo-layer must come first: %+v", rep.Chain)
 	}
 	lines := strings.Join(rep.ChainLines(), "\n")
-	if !strings.Contains(lines, filepath.Join(projDir, "runtime.hcl")+": (nothing) — no file") {
+	if !strings.Contains(lines, filepath.Join(projDir, ConfigFile)+": (nothing) — no file") {
 		t.Errorf("missing project layer must be listed:\n%s", lines)
 	}
 }

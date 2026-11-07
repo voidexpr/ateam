@@ -149,7 +149,7 @@ func (t *topView) addRun(c calldb.CallRow) {
 	started, _ := time.Parse(time.RFC3339, c.StartedAt)
 	var streamPath string
 	if c.AgentFile != "" {
-		streamPath = root.ResolveStreamPath(t.env.ProjectDir, t.env.OrgDir, c.AgentFile)
+		streamPath = root.ResolveStreamPath(t.env.StateDir(), c.AgentFile)
 	}
 	t.rows = append(t.rows, poolStatusRow{
 		ExecID: c.ID,

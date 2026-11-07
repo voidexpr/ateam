@@ -34,7 +34,7 @@ func newTestServer(t *testing.T, projectDir string) *Server {
 			Name:       "testproj",
 			Slug:       "testproj",
 			ProjectDir: projectDir,
-			OrgDir:     "",
+			HomeDir:    "",
 			SourceDir:  projectDir,
 		}},
 	}

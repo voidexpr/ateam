@@ -105,7 +105,7 @@ if $host_path_mode; then
         args+=(-v "$volume/.claude.json:/home/agent/.claude.json")
     fi
     if [[ -f "$volume/secrets.env" ]]; then
-        args+=(-v "$volume/secrets.env:/home/agent/.ateamorg/secrets.env")
+        args+=(-v "$volume/secrets.env:/home/agent/.ateam/secrets.env")
     fi
 else
     # Named volume: single mount for .claude/
@@ -119,18 +119,18 @@ args+=(-v "$data_dir:/home/agent/data")
 args+=(-v "$workspace:/workspace")
 args+=(-v "$ateam_build_dir:/opt/ateam:ro")
 
-ateamorg_dir="$(ateam env --print-org)"
+ateam_home_dir="$(ateam env --print-home)"
 
-args+=(-v "$ateamorg_dir:/.ateamorg:ro")
+args+=(-v "$ateam_home_dir:/.ateam-home:ro" -e ATEAM_HOME=/.ateam-home)
 
-claude_shared_dir="claude_linux_shared"
-ateamorg_claude_shared_dir="$ateamorg_dir/$claude_shared_dir"
-if [[ -d "$ateamorg_claude_shared_dir" ]]; then
-    args+=(-v "$ateamorg_claude_shared_dir:/.ateamorg/$claude_shared_dir:ro")
+claude_shared_dir="state/agents/claude-linux"
+ateam_home_claude_shared_dir="$ateam_home_dir/$claude_shared_dir"
+if [[ -d "$ateam_home_claude_shared_dir" ]]; then
+    args+=(-v "$ateam_home_claude_shared_dir:/.ateam-home/$claude_shared_dir:ro")
 fi
 
-if [[ -e "$ateamorg_claude_shared_dir/secrets.env" ]]; then
-    args+=(-v "$ateamorg_claude_shared_dir/secrets.env:/home/agent/.config/ateam/secrets.env:ro")
+if [[ -e "$ateam_home_claude_shared_dir/secrets.env" ]]; then
+    args+=(-v "$ateam_home_claude_shared_dir/secrets.env:/home/agent/.ateam/secrets.env:ro")
 fi
 
 if [[ -n "$shared_claude" ]]; then

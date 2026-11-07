@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -62,9 +61,9 @@ func TestCostOutputContainsActionTotals(t *testing.T) {
 	seedCostDB(t, db, env.ProjectID())
 	db.Close()
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(env.OrgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = env.HomeDir
 
 	_ = base // suppress unused warning; base holds the org parent
 	var costErr error
@@ -110,9 +109,9 @@ func TestCostBatchBreakdown(t *testing.T) {
 	seedCostDB(t, db, env.ProjectID())
 	db.Close()
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(env.OrgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = env.HomeDir
 
 	var costErr error
 	out := captureStdout(t, func() {
@@ -146,9 +145,9 @@ func TestCostBatchBreakdown(t *testing.T) {
 func TestCostEmptyDB(t *testing.T) {
 	_, projPath, env := setupTestProject(t)
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(env.OrgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = env.HomeDir
 
 	var costErr error
 	out := captureStdout(t, func() {
@@ -208,9 +207,9 @@ func TestCostTotalTokensAggregation(t *testing.T) {
 	}
 	db.Close()
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(env.OrgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = env.HomeDir
 
 	var costErr error
 	out := captureStdout(t, func() {
@@ -237,9 +236,9 @@ func TestCostProjectNameDisplayed(t *testing.T) {
 		t.Fatalf("LookupFrom: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(env.OrgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = env.HomeDir
 
 	var costErr error
 	out := captureStdout(t, func() {

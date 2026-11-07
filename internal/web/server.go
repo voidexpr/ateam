@@ -20,7 +20,6 @@ import (
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/calldb"
-	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/promptdata"
 	"github.com/ateam/internal/prompts"
@@ -40,7 +39,8 @@ type ProjectEntry struct {
 	Name       string // display name from config
 	Slug       string // URL-safe identifier
 	ProjectDir string
-	OrgDir     string
+	HomeDir    string   // the user's .ateam/
+	Layers     []string // config layers of this project, lowest precedence first
 	SourceDir  string
 
 	// dbOnce guards lazy CallDB initialization so concurrent HTTP handlers
@@ -60,18 +60,10 @@ type ProjectEntry struct {
 	defaultModel map[string]string
 }
 
-// ProjectID returns the project identifier for scoping DB queries.
-// Returns "" in org-less mode or when source/org dirs are unavailable.
+// ProjectID returns the project identifier for scoping DB queries: the
+// project name.
 func (pe *ProjectEntry) ProjectID() string {
-	if pe.SourceDir == "" || pe.OrgDir == "" {
-		return ""
-	}
-	orgRoot := filepath.Dir(pe.OrgDir)
-	relPath, err := filepath.Rel(orgRoot, pe.SourceDir)
-	if err != nil {
-		return ""
-	}
-	return config.PathToProjectID(relPath)
+	return pe.Name
 }
 
 // SupervisorPath returns ProjectDir/supervisor/<name>.
@@ -88,7 +80,7 @@ func (pe *ProjectEntry) SupervisorHistoryDir() string {
 type Server struct {
 	URL        string // set after ListenAndServe binds
 	PortSource string // optional human-readable origin of the port (e.g. ".ateam/cache/serve.port"), shown in the startup banner
-	orgDir     string
+	homeDir    string
 	projects   []ProjectEntry
 	singleMode bool
 	templates  *template.Template
@@ -160,7 +152,7 @@ func funcMap() template.FuncMap {
 }
 
 // New creates a Server. If env has a ProjectDir, runs in single-project mode.
-// Otherwise discovers projects from orgDir.
+// Otherwise lists the projects registered under the user's .ateam/.
 func New(env *root.ResolvedEnv) (*Server, error) {
 	tmpl, err := template.New("").Funcs(funcMap()).ParseFS(templateFS, "templates/*.html")
 	if err != nil {
@@ -168,7 +160,7 @@ func New(env *root.ResolvedEnv) (*Server, error) {
 	}
 
 	s := &Server{
-		orgDir:    env.OrgDir,
+		homeDir:   env.HomeDir,
 		templates: tmpl,
 		md:        newMarkdown(),
 	}
@@ -179,19 +171,21 @@ func New(env *root.ResolvedEnv) (*Server, error) {
 			Name:       env.ProjectName,
 			Slug:       slugify(env.ProjectName),
 			ProjectDir: env.ProjectDir,
-			OrgDir:     env.OrgDir,
+			HomeDir:    env.HomeDir,
+			Layers:     env.Layers,
 			SourceDir:  env.SourceDir,
 		}}
-	} else if env.OrgDir != "" {
+	} else if env.HomeDir != "" {
 		usedSlugs := make(map[string]bool)
-		if err := root.WalkProjects(env.OrgDir, func(pi root.ProjectInfo) error {
-			slug := uniqueSlug(slugify(pi.Config.Project.Name), usedSlugs)
+		if err := root.WalkProjects(env.HomeDir, func(pi root.ProjectInfo) error {
+			slug := uniqueSlug(slugify(pi.Name), usedSlugs)
 			usedSlugs[slug] = true
 			s.projects = append(s.projects, ProjectEntry{
-				Name:       pi.Config.Project.Name,
+				Name:       pi.Name,
 				Slug:       slug,
 				ProjectDir: pi.Dir,
-				OrgDir:     env.OrgDir,
+				HomeDir:    env.HomeDir,
+				Layers:     pi.Layers,
 				SourceDir:  filepath.Dir(pi.Dir),
 			})
 			return nil
@@ -229,7 +223,7 @@ func (s *Server) loadPricing(pe *ProjectEntry) (map[string]agent.PricingTable, m
 	pe.pricingOnce.Do(func() {
 		pe.pricing = make(map[string]agent.PricingTable)
 		pe.defaultModel = make(map[string]string)
-		rtCfg, _ := runtime.Load(pe.ProjectDir, pe.OrgDir)
+		rtCfg, _ := runtime.Load(pe.Layers)
 		if rtCfg == nil {
 			return
 		}
@@ -467,9 +461,9 @@ func slugify(name string) string {
 
 // discoverRoles returns all known role IDs for a project.
 func discoverRoles(pe *ProjectEntry) []string {
-	cfg, err := config.Load(pe.ProjectDir)
+	rtCfg, err := runtime.Load(pe.Layers)
 	if err != nil {
 		return promptdata.AllRoleIDs
 	}
-	return promptdata.AllKnownRoleIDs(cfg.Roles, pe.ProjectDir, pe.OrgDir)
+	return promptdata.AllKnownRoleIDs(rtCfg.Settings.Roles, pe.Layers)
 }

@@ -12,35 +12,45 @@ import (
 	"github.com/ateam/defaults"
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/gitutil"
-	"github.com/ateam/internal/migrate"
 	"github.com/ateam/internal/projectinfo"
 	"github.com/ateam/internal/promptdata"
 	"github.com/ateam/internal/prompts/assembler"
+	"github.com/ateam/internal/runtime"
 )
 
 const (
-	OrgDirName     = ".ateamorg"
-	ProjectDirName = ".ateam"
+	// DirName is the per-project and per-user ateam directory.
+	DirName = runtime.DirName
+	// ConfigFile is the configuration file inside every DirName layer.
+	ConfigFile = runtime.ConfigFile
+
+	legacyOrgDirName = ".ateamorg"
+	legacyConfigFile = "config.toml"
 )
 
-// ResolvedEnv holds all resolved paths for the org + project environment.
+// ResolvedEnv holds all resolved paths for the current invocation.
 //
-// Three orthogonal base dirs drive everything:
-//   - OrgDir:    where the .ateamorg/ lives (org config + project registry)
-//   - ProjectDir: the .ateam/ directory (state, config, prompts, artifacts)
-//   - WorkDir:   the agent's cwd (what code it reads/edits)
+// Three base dirs drive everything:
+//   - HomeDir:    the user's .ateam/ (~/.ateam or $ATEAM_HOME): lowest
+//     user-controlled config layer, and user state under state/
+//   - ProjectDir: the project's .ateam/ (state, config, prompts, artifacts);
+//     empty in scratch mode
+//   - WorkDir:    the agent's cwd (what code it reads/edits)
 //
-// SourceDir (parent of .ateam/) is kept for legacy callers but should be
-// treated as informational; WorkDir is what the agent actually runs in.
-// GitRepoDir is derived from WorkDir at resolution time (never from config).
+// Layers lists every config directory consulted, lowest precedence first:
+// HomeDir, the .ateam/ of each ancestor of the project (outermost first),
+// then ProjectDir. GitRepoDir is derived from WorkDir at resolution time.
 type ResolvedEnv struct {
-	OrgDir      string // absolute path to .ateamorg/ (empty in org-less mode)
-	ProjectDir  string // absolute path to .ateam/
-	ProjectName string // from config.toml
-	SourceDir   string // absolute path to project root (parent of .ateam/) — informational
-	WorkDir     string // absolute path to the agent's working directory
-	GitRepoDir  string // `git rev-parse --show-toplevel` from WorkDir; "" if not a repo
-	Config      *config.Config
+	HomeDir     string
+	Layers      []string
+	ProjectDir  string
+	ProjectName string          // project { name } of the project layer; the project's id
+	KeychainKey string          // from the registry: stable id for project-scoped keychain secrets
+	SourceDir   string          // absolute path to project root (parent of .ateam/) — informational
+	WorkDir     string          // absolute path to the agent's working directory
+	GitRepoDir  string          // `git rev-parse --show-toplevel` from WorkDir; "" if not a repo
+	Config      *config.Config  // merged settings of every layer
+	Runtime     *runtime.Config // the loaded configuration (agents, profiles, settings, provenance)
 
 	// projectMeta caches the `git log -1` + `git status --porcelain` result so
 	// multi-role commands fork git at most once. nil = uncached; a sentinel
@@ -61,58 +71,62 @@ func (e *ResolvedEnv) SupervisorDir() string {
 	return filepath.Join(e.ProjectDir, "supervisor")
 }
 
-// RoleReportPath returns the canonical v1 path for the role's report file
-// (shared/report/<role>.md). Auto-migration (default-on) collapses the
-// legacy roles/<role>/report.md and the pre-flat shared/report/<role>/<role>.md
-// before this is consulted; ATEAM_NO_MIGRATE=1 users must place files at
-// the v1 path themselves.
+// RoleReportPath returns the path of the role's report file (shared/report/<role>.md).
 func (e *ResolvedEnv) RoleReportPath(roleID string) string {
 	return filepath.Join(e.SharedDir(), "report", roleID+".md")
 }
 
-// ReviewPath returns the canonical v1 path for the supervisor review file.
-// Auto-migration handles the legacy supervisor/review.md and the pre-flat
-// shared/review/review.md locations.
+// ReviewPath returns the path of the supervisor review file.
 func (e *ResolvedEnv) ReviewPath() string {
 	return filepath.Join(e.SharedDir(), "review.md")
 }
 
-// VerifyPath returns the canonical v1 path for the supervisor verification
-// file. Auto-migration handles the legacy supervisor/verify.md and the
-// pre-flat shared/verify/verify.md locations.
+// VerifyPath returns the path of the supervisor verification file.
 func (e *ResolvedEnv) VerifyPath() string {
 	return filepath.Join(e.SharedDir(), "verify.md")
 }
 
-// AutoSetupPath returns the canonical v1 path for the supervisor's
-// auto-setup overview file. Auto-migration handles the legacy
-// setup_overview.md and the pre-flat shared/auto_setup/auto_setup.md
-// locations.
+// AutoSetupPath returns the path of the supervisor's auto-setup overview file.
 func (e *ResolvedEnv) AutoSetupPath() string {
 	return filepath.Join(e.SharedDir(), "auto_setup.md")
 }
 
 // HasProject reports whether this env resolved an actual ateam project
-// (config-bearing .ateam/ dir), as opposed to scratch mode where only
-// an org is available. Centralizes the `ProjectDir != "" && Config != nil`
-// predicate cmds were duplicating: a non-empty ProjectDir without a
-// loaded Config means the project is broken or never initialized, which
-// callers must treat as "not a project."
+// (a .ateam/ whose ateam.hcl names a project), as opposed to scratch mode.
 func (e *ResolvedEnv) HasProject() bool {
 	return e != nil && e.ProjectDir != "" && e.Config != nil
 }
 
+// ConfigLayers returns the config-only layers (every layer but the
+// project), lowest precedence first: HomeDir, then the ancestors.
+func (e *ResolvedEnv) ConfigLayers() []string {
+	var out []string
+	for _, l := range e.Layers {
+		if l != e.ProjectDir {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// HomeStateDir returns <HomeDir>/state: scratch-mode state, registry,
+// caches and agent config dirs.
+func (e *ResolvedEnv) HomeStateDir() string {
+	if e.HomeDir == "" {
+		return ""
+	}
+	return filepath.Join(e.HomeDir, runtime.StateSubdir)
+}
+
 // StateDir returns the directory that owns state.sqlite, logs/, and runtime/
-// for the current invocation. Inside an ateam project this is ProjectDir
-// (.ateam/). Outside one — scratch mode — this is OrgDir (.ateamorg/), so
-// `ateam exec` / `ateam parallel` from arbitrary cwds still record into a
-// stable, user-owned location instead of littering throwaway dirs.
-// Returns "" only when neither is set (treat as a hard error at the caller).
+// for the current invocation: the project's .ateam/ inside a project, else
+// <HomeDir>/state/ (scratch mode, so `ateam exec` / `ateam parallel` from
+// arbitrary cwds still record into a stable, user-owned location).
 func (e *ResolvedEnv) StateDir() string {
 	if e.ProjectDir != "" {
 		return e.ProjectDir
 	}
-	return e.OrgDir
+	return e.HomeStateDir()
 }
 
 // LogsDir returns the per-exec_id forensic log directory. Holds agent.jsonl,
@@ -127,13 +141,12 @@ func (e *ResolvedEnv) RuntimeDir(execID int64) string {
 	return filepath.Join(e.StateDir(), "runtime", strconv.FormatInt(execID, 10))
 }
 
-// ProjectDBPath returns the path to the state.sqlite database. Anchored at
-// StateDir so scratch-mode invocations resolve to <OrgDir>/state.sqlite.
+// ProjectDBPath returns the path to the state.sqlite database, under StateDir.
 func (e *ResolvedEnv) ProjectDBPath() string {
 	return filepath.Join(e.StateDir(), "state.sqlite")
 }
 
-// SharedDir returns the v1 cross-agent artifact directory: .ateam/shared/.
+// SharedDir returns the cross-agent artifact directory: .ateam/shared/.
 // Promoted role reports and supervisor outputs land as flat files under this
 // path (shared/report/<role>.md, shared/review.md, shared/verify.md,
 // shared/auto_setup.md). Code sessions are the exception — they keep a
@@ -143,10 +156,9 @@ func (e *ResolvedEnv) SharedDir() string {
 	return filepath.Join(e.ProjectDir, "shared")
 }
 
-// Assembler returns a v1 prompt Assembler with the standard project →
-// org → embedded anchor chain. New on each call (cheap — just an FS handle
-// per anchor); callers should cache if they need multiple lookups within
-// one operation.
+// Assembler returns a prompt Assembler with the project → layers → embedded
+// anchor chain. New on each call (cheap — just an FS handle per anchor);
+// callers should cache if they need multiple lookups within one operation.
 //
 // Tests can install an in-memory assembler via SetAssemblerOverride
 // (avoids needing on-disk fixtures for the embedded-defaults FS).
@@ -154,12 +166,12 @@ func (e *ResolvedEnv) Assembler() *assembler.MultiAnchorAssembler {
 	if e.assemblerOverride != nil {
 		return e.assemblerOverride
 	}
-	return assembler.New(assembler.BuildAnchors(e.ProjectDir, e.OrgDir, defaults.FS))
+	return assembler.New(assembler.BuildAnchors(e.ProjectDir, e.ConfigLayers(), defaults.FS))
 }
 
 // SetAssemblerOverride installs a test-only assembler that bypasses the
-// project → org → embedded anchor chain. Production code never calls
-// this; tests use it to feed an fstest.MapFS-backed assembler.
+// anchor chain. Production code never calls this; tests use it to feed an
+// fstest.MapFS-backed assembler.
 func (e *ResolvedEnv) SetAssemblerOverride(a *assembler.MultiAnchorAssembler) {
 	e.assemblerOverride = a
 }
@@ -311,7 +323,7 @@ func (e *ResolvedEnv) NewProjectInfoParams(role, action string) promptdata.Proje
 		e.quickOrientation = collectQuickOrientation(e.WorkDir, meta)
 	}
 	return promptdata.ProjectInfoParams{
-		OrgDir:           e.OrgDir,
+		HomeDir:          e.HomeDir,
 		ProjectDir:       e.ProjectDir,
 		ProjectName:      e.ProjectName,
 		WorkDir:          e.WorkDir,
@@ -337,18 +349,16 @@ func collectQuickOrientation(workDir string, meta *gitutil.ProjectMeta) *string 
 	return &md
 }
 
-// ProjectID returns the project identifier derived from the source directory path.
+// ProjectID returns the project's identifier in the state db: its name.
+// Empty in scratch mode.
 func (e *ResolvedEnv) ProjectID() string {
-	if e.SourceDir == "" || e.OrgDir == "" {
-		return ""
-	}
-	return config.PathToProjectID(e.RelPath(e.SourceDir))
+	return e.ProjectName
 }
 
 // rolesEnabledMap seeds the {{roles.*}} namespace. Currently exposes
 // `roles.enabled` — the comma-separated list of enabled role IDs from
 // the project config (e.g. "code.bugs,security,test.gaps"). Empty
-// string in org-less / unconfigured mode so prompts that reference
+// string in scratch / unconfigured mode so prompts that reference
 // {{roles.enabled}} render cleanly there too.
 func (e *ResolvedEnv) rolesEnabledMap() map[string]string {
 	out := map[string]string{"enabled": ""}
@@ -364,38 +374,6 @@ func (e *ResolvedEnv) rolesEnabledMap() map[string]string {
 	sort.Strings(ids)
 	out["enabled"] = strings.Join(ids, ",")
 	return out
-}
-
-// OrgRoot returns the parent directory of .ateamorg.
-// Returns "" in org-less mode.
-func (e *ResolvedEnv) OrgRoot() string {
-	if e.OrgDir == "" {
-		return ""
-	}
-	return filepath.Dir(e.OrgDir)
-}
-
-// RelPath returns absPath relative to the org root.
-// Returns absPath as-is if the computation fails, absPath is empty, or org-less mode.
-func (e *ResolvedEnv) RelPath(absPath string) string {
-	if absPath == "" || e.OrgDir == "" {
-		return absPath
-	}
-	rel, err := filepath.Rel(e.OrgRoot(), absPath)
-	if err != nil {
-		return absPath
-	}
-	return rel
-}
-
-func (e *ResolvedEnv) populateFromConfig(projectDir string, cfg *config.Config) {
-	e.Config = cfg
-	e.ProjectName = cfg.Project.Name
-	e.SourceDir = filepath.Dir(projectDir) // project root = parent of .ateam/
-	// note: GitRepoDir is NOT derived from config.Git.Repo here. It is set later
-	// from WorkDir via gitutil.TopLevel — git is properly a function of "where
-	// the agent operates," not "where state lives." config.Git.Repo is kept in
-	// config.toml for informational/forensic use but never read at runtime.
 }
 
 // resolveWorkDir populates WorkDir and GitRepoDir from an explicit override or
@@ -433,28 +411,143 @@ func (e *ResolvedEnv) OverrideWorkDir(workDirOverride string) error {
 	return e.resolveWorkDir(workDirOverride)
 }
 
-// FindOrg walks up from cwd looking for a .ateamorg directory.
-func FindOrg(cwd string) (string, error) {
-	return findDirUp(cwd, OrgDirName, "run 'ateam install' first")
+// Resolve discovers the user's home layer and the project around the
+// current directory and loads the configuration.
+//
+//   - homeOverride: path of the per-user .ateam/ to use instead of
+//     $ATEAM_HOME / ~/.ateam (any directory; it need not be named .ateam)
+//   - projectOverride: a project root, its .ateam/, or any path inside the
+//     project; discovery walks up from there instead of from cwd
+//
+// Scratch mode (no project found) returns a project-less env with the
+// home layer only; callers that strictly require a project check
+// env.ProjectDir. A project override that finds no project is an error.
+func Resolve(homeOverride, projectOverride string) (*ResolvedEnv, error) {
+	start := realPath(mustGetwd())
+	if projectOverride != "" {
+		abs, err := filepath.Abs(projectOverride)
+		if err != nil {
+			return nil, fmt.Errorf("--project %q: cannot resolve absolute path: %w", projectOverride, err)
+		}
+		start = realPath(abs)
+	}
+	env, err := resolveFrom(homeOverride, start)
+	if err != nil {
+		return nil, err
+	}
+	if projectOverride != "" && env.ProjectDir == "" {
+		return nil, fmt.Errorf("--project %q: no %s/ with a project block found at or above this path", projectOverride, DirName)
+	}
+	return env, nil
 }
 
-// FindProject walks up from cwd looking for a .ateam directory.
-func FindProject(cwd string) (string, error) {
-	return findDirUp(cwd, ProjectDirName, "not inside an ateam project")
+// Lookup is Resolve for commands where a project is optional. Kept as a
+// separate name so call sites read as intended.
+func Lookup(homeOverride, projectOverride string) (*ResolvedEnv, error) {
+	return Resolve(homeOverride, projectOverride)
 }
 
-// findDirUp walks up from cwd looking for a directory named target.
-// If cwd is already inside the target directory, returns it directly.
-func findDirUp(cwd, target, errHint string) (string, error) {
-	if dir, ok := findInPath(cwd, target); ok {
-		return dir, nil
+// LookupFrom discovers the project from the given starting path (instead
+// of cwd) with the default home layer. WorkDir is seeded from start.
+func LookupFrom(start string) (*ResolvedEnv, error) {
+	env, err := resolveFrom("", realPath(start))
+	if err != nil {
+		return nil, err
+	}
+	if err := env.resolveWorkDir(start); err != nil {
+		return nil, err
+	}
+	return env, nil
+}
+
+func resolveFrom(homeOverride, start string) (*ResolvedEnv, error) {
+	home, err := resolveHome(homeOverride)
+	if err != nil {
+		return nil, err
+	}
+	projectDir, ancestors, err := discover(start, home)
+	if err != nil {
+		return nil, err
 	}
 
-	dir := filepath.Clean(cwd)
+	env := &ResolvedEnv{HomeDir: home, ProjectDir: projectDir}
+	env.Layers = append([]string{home}, ancestors...)
+	if projectDir != "" {
+		env.Layers = append(env.Layers, projectDir)
+	}
+	rt, err := runtime.Load(env.Layers)
+	if err != nil {
+		return nil, err
+	}
+	env.Runtime = rt
+	env.Config = &rt.Settings
+
+	if projectDir != "" {
+		env.ProjectName = rt.Settings.Project.Name
+		env.SourceDir = filepath.Dir(projectDir)
+		if entry, ok := LookupRegistry(home, env.ProjectName); ok {
+			env.KeychainKey = entry.KeychainKey
+		}
+		// Best-effort: keep .ateam/.gitignore in sync with required entries so
+		// projects created by an older binary self-heal. Never block ateam
+		// on a gitignore update.
+		if err := EnsureProjectGitignore(projectDir); err != nil {
+			fmt.Fprintf(os.Stderr, "ateam: warning: cannot update %s/.gitignore: %v\n", DirName, err)
+		}
+	}
+	if err := env.resolveWorkDir(""); err != nil {
+		return nil, err
+	}
+	return env, nil
+}
+
+// resolveHome returns the absolute per-user ateam directory.
+func resolveHome(override string) (string, error) {
+	if override != "" {
+		abs, err := filepath.Abs(override)
+		if err != nil {
+			return "", fmt.Errorf("--home %q: cannot resolve absolute path: %w", override, err)
+		}
+		return realPath(abs), nil
+	}
+	home := runtime.HomeDir()
+	if home == "" {
+		return "", fmt.Errorf("cannot determine the user's ateam directory: set %s or HOME", runtime.HomeEnv)
+	}
+	return realPath(home), nil
+}
+
+// discover walks up from start collecting every .ateam/ directory other
+// than home. The nearest one whose ateam.hcl names a project is the
+// project; every other one is a config layer, returned outermost first.
+// A legacy layout (.ateamorg/, or a config.toml inside .ateam/) is an
+// error that explains the move.
+func discover(start, home string) (projectDir string, ancestors []string, err error) {
+	dir := filepath.Clean(start)
+	seen := map[string]bool{}
 	for {
-		candidate := filepath.Join(dir, target)
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return realPath(candidate), nil
+		candidate := ""
+		if filepath.Base(dir) == DirName {
+			candidate = dir
+		} else if info, statErr := os.Stat(filepath.Join(dir, DirName)); statErr == nil && info.IsDir() {
+			candidate = filepath.Join(dir, DirName)
+		}
+		if _, statErr := os.Stat(filepath.Join(dir, legacyOrgDirName)); statErr == nil {
+			return "", nil, legacyLayoutError(filepath.Join(dir, legacyOrgDirName))
+		}
+		if candidate != "" {
+			candidate = realPath(candidate)
+			if candidate != home && !seen[candidate] {
+				seen[candidate] = true
+				if _, statErr := os.Stat(filepath.Join(candidate, legacyConfigFile)); statErr == nil {
+					return "", nil, legacyLayoutError(filepath.Join(candidate, legacyConfigFile))
+				}
+				if projectDir == "" && runtime.ProjectName(candidate) != "" {
+					projectDir = candidate
+				} else {
+					ancestors = append([]string{candidate}, ancestors...)
+				}
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -462,326 +555,37 @@ func findDirUp(cwd, target, errHint string) (string, error) {
 		}
 		dir = parent
 	}
-
-	return "", fmt.Errorf("no %s/ found (%s)", target, errHint)
-}
-
-// findInPath checks if cwd is inside a directory named target.
-// Returns the absolute path up to and including the target component.
-func findInPath(cwd, target string) (string, bool) {
-	parts := strings.Split(filepath.Clean(cwd), string(filepath.Separator))
-	for i, part := range parts {
-		if part == target {
-			root := string(filepath.Separator) + filepath.Join(parts[:i+1]...)
-			return root, true
-		}
-	}
-	return "", false
-}
-
-// Resolve discovers org and project directories and loads config.
-// If no .ateamorg/ is found but .ateam/ exists, operates in org-less mode.
-//
-// The overrides are location overrides (not name lookups):
-//   - orgOverride: path to .ateamorg/ itself or its parent
-//   - projectOverride: path to .ateam/ itself or its parent (project root)
-//
-// Either may be set independently; with --project alone, the org is
-// auto-discovered by walking up from the project root.
-func Resolve(orgOverride, projectOverride string) (*ResolvedEnv, error) {
-	cwd := realPath(mustGetwd())
-
-	var projectDir, orgDir string
-	var err error
-
-	if projectOverride != "" {
-		projectDir, err = resolveProjectPath(projectOverride)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if orgOverride != "" {
-		orgDir, err = resolveOrgPath(orgOverride)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if orgDir == "" {
-		if projectDir != "" {
-			orgDir, _ = FindOrg(filepath.Dir(projectDir))
-		} else {
-			orgDir, _ = FindOrg(cwd)
-		}
-	}
-
-	if projectDir == "" {
-		projectDir, _ = discoverProject(orgDir, cwd)
-	}
-
-	// Scratch mode: org resolved but no .ateam/ above cwd. Return a
-	// project-less env. Callers that strictly require a project
-	// (report/code/review/verify/…) still check env.ProjectDir.
-	if projectDir == "" {
-		if orgDir == "" {
-			return nil, fmt.Errorf("no .ateamorg/ or .ateam/ found")
-		}
-		env := &ResolvedEnv{OrgDir: orgDir}
-		if err := env.resolveWorkDir(""); err != nil {
-			return nil, err
-		}
-		return env, nil
-	}
-
-	if err := applyV1LayoutMigration(projectDir, orgDir); err != nil {
-		return nil, err
-	}
-	// Best-effort: keep .ateam/.gitignore in sync with required entries so
-	// projects created by an older binary self-heal (notably for `runtime/`,
-	// added after the original gitignore template). Failure here is non-fatal
-	// — never block ateam on a gitignore update.
-	if err := EnsureProjectGitignore(projectDir); err != nil {
-		fmt.Fprintf(os.Stderr, "ateam: warning: cannot update .ateam/.gitignore: %v\n", err)
-	}
-
-	cfg, err := config.Load(projectDir)
-	if err != nil {
-		return nil, err
-	}
-
-	env := &ResolvedEnv{
-		OrgDir:     orgDir,
-		ProjectDir: projectDir,
-	}
-	env.populateFromConfig(projectDir, cfg)
-	if err := env.resolveWorkDir(""); err != nil {
-		return nil, err
-	}
-
-	return env, nil
-}
-
-// applyV1LayoutMigration upgrades pre-v1 .ateam / .ateamorg layouts in place.
-// Idempotent: a stat-only check skips quickly when nothing to do. On the
-// first material change to a directory, a one-line notice is written to
-// stderr. Migration failures stop further work; re-running picks up where
-// the failed run left off.
-//
-// Default-on as of the cmd/* rewires that read from shared/ paths. Set
-// ATEAM_NO_MIGRATE=1 to suppress (one-off recovery, debugging an old
-// layout, or tests that build legacy fixtures).
-func applyV1LayoutMigration(projectDir, orgDir string) error {
-	if os.Getenv("ATEAM_NO_MIGRATE") == "1" {
-		return nil
-	}
-	for _, dir := range []string{projectDir, orgDir} {
-		if dir == "" {
-			continue
-		}
-		res, err := migrate.V1Layout(dir)
-		if err != nil {
-			return fmt.Errorf("migrate %s: %w", dir, err)
-		}
-		if res.Changed() {
-			fmt.Fprintf(os.Stderr, "ateam: migrated %s to v1 prompts layout (%d moves, %d cleanups)\n",
-				dir, len(res.Moved), len(res.RemovedDirs))
-		}
-		// Warnings are surfaced even when nothing moved — a conflict-only pass
-		// (target already exists, a directory blocks a file target, …) records
-		// a warning but leaves Changed() false, and the user still needs to
-		// reconcile by hand.
-		for _, w := range res.Warnings {
-			fmt.Fprintf(os.Stderr, "ateam: migration warning: %s\n", w)
-		}
-	}
-	return nil
-}
-
-// LookupFrom discovers org and project from the given starting path without creating anything.
-// Returns partial ResolvedEnv if project is not found.
-// Works in org-less mode: if no .ateamorg/ but .ateam/ exists, OrgDir is "".
-func LookupFrom(start string) (*ResolvedEnv, error) {
-	cwd := realPath(start)
-
-	orgDir, _ := FindOrg(cwd)
-
-	env := &ResolvedEnv{
-		OrgDir: orgDir,
-	}
-	// Seed WorkDir from `start`, not the process cwd — callers like
-	// eval --dirs pass an explicit base/candidate path and would
-	// otherwise attach the wrong execution directory.
-	_ = env.resolveWorkDir(cwd)
-
-	projectDir, err := discoverProject(orgDir, cwd)
-	if err != nil {
-		if orgDir != "" {
-			return env, nil
-		}
-		return nil, fmt.Errorf("no .ateamorg/ or .ateam/ found")
-	}
-
-	env.ProjectDir = projectDir
-
-	// Migration and config-load failures are real errors, not the "project not
-	// found" case handled above — surface them (matching Resolve) instead of
-	// returning a config-less env with a nil error, which would leave callers
-	// like cmd/init.go printing a blank project section with no failure shown.
-	if err := applyV1LayoutMigration(projectDir, orgDir); err != nil {
-		return env, err
-	}
-	if err := EnsureProjectGitignore(projectDir); err != nil {
-		fmt.Fprintf(os.Stderr, "ateam: warning: cannot update .ateam/.gitignore: %v\n", err)
-	}
-
-	cfg, err := config.Load(projectDir)
-	if err != nil {
-		return env, err
-	}
-
-	env.populateFromConfig(projectDir, cfg)
-
-	return env, nil
-}
-
-// Lookup discovers org and project from the current working directory without creating anything.
-// When orgOverride or projectOverride are non-empty, delegates to Resolve for explicit resolution.
-func Lookup(orgOverride, projectOverride string) (*ResolvedEnv, error) {
-	if orgOverride != "" || projectOverride != "" {
-		return Resolve(orgOverride, projectOverride)
-	}
-	return LookupFrom(mustGetwd())
-}
-
-// ProjectInfo holds metadata about a discovered project.
-type ProjectInfo struct {
-	Dir    string
-	Config *config.Config
-}
-
-// WalkProjects enumerates registered projects from .ateamorg/projects/.
-// Each subdirectory is a project ID that maps back to a project path.
-// The callback receives each discovered project. Return filepath.SkipAll to stop early.
-func WalkProjects(orgDir string, fn func(ProjectInfo) error) error {
-	projectsDir := filepath.Join(orgDir, "projects")
-	entries, err := os.ReadDir(projectsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("cannot read projects directory: %w", err)
-	}
-
-	orgRoot := filepath.Dir(orgDir)
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		relPath := config.ProjectIDToPath(e.Name())
-		projDir := filepath.Join(orgRoot, relPath, ProjectDirName)
-		cfg, loadErr := config.Load(projDir)
-		if loadErr != nil {
-			continue
-		}
-		if err := fn(ProjectInfo{Dir: projDir, Config: cfg}); err != nil {
-			if err == filepath.SkipAll {
-				return nil
+	// A ~/.ateamorg from a previous version is only an error when the home
+	// layer is the default one (an explicit ATEAM_HOME / --home means the
+	// user already chose a location, and tests and containers do that).
+	if os.Getenv(runtime.HomeEnv) == "" && home == realPath(runtime.HomeDir()) {
+		if userHome, herr := os.UserHomeDir(); herr == nil && userHome != "" {
+			if _, statErr := os.Stat(filepath.Join(userHome, legacyOrgDirName)); statErr == nil {
+				return "", nil, legacyLayoutError(filepath.Join(userHome, legacyOrgDirName))
 			}
-			return err
 		}
 	}
-	return nil
+	return projectDir, ancestors, nil
 }
 
-// discoverProject finds a project directory: when orgDir is set, prefer the
-// state-dir mapping (cwd inside .ateamorg/projects/<id>/), then fall back to
-// walking up from cwd. Without an org, just walks up from cwd.
-func discoverProject(orgDir, cwd string) (string, error) {
-	if orgDir != "" {
-		if p, err := resolveProjectFromStateDir(orgDir, cwd); err == nil {
-			return p, nil
-		}
-	}
-	return FindProject(cwd)
+func legacyLayoutError(path string) error {
+	return fmt.Errorf("legacy layout found at %s.\n"+
+		"This version uses one .ateam/ directory per project and ~/.ateam for user-wide config,\n"+
+		"with a single ateam.hcl replacing config.toml and runtime.hcl. To migrate:\n"+
+		"  1. move ~/.ateamorg/runtime.hcl to ~/.ateam/ateam.hcl and ~/.ateamorg/prompts to ~/.ateam/prompts\n"+
+		"  2. in each project, replace .ateam/config.toml with project/role/supervisor blocks in .ateam/ateam.hcl\n"+
+		"     (ateam init --name NAME in a copy shows the shape) and rename runtime.hcl to ateam.hcl\n"+
+		"  3. delete the .ateamorg/ directory and config.toml files\n"+
+		"See CONFIG.md for the layout", path)
 }
 
-// resolveProjectFromStateDir checks if cwd is inside .ateamorg/projects/<id>/
-// and resolves the project directory by reversing the project ID to a path.
-func resolveProjectFromStateDir(orgDir, cwd string) (string, error) {
-	projectsDir := filepath.Join(orgDir, "projects")
-	prefix := projectsDir + string(filepath.Separator)
-	if !strings.HasPrefix(cwd+string(filepath.Separator), prefix) {
-		return "", fmt.Errorf("not inside a state directory")
-	}
-
-	// Extract the project ID: first path component after "projects/"
-	rest := cwd[len(projectsDir):]
-	rest = strings.TrimPrefix(rest, string(filepath.Separator))
-	if rest == "" {
-		return "", fmt.Errorf("not inside a specific project state directory")
-	}
-	projectID := strings.SplitN(rest, string(filepath.Separator), 2)[0]
-
-	relPath := config.ProjectIDToPath(projectID)
-	orgRoot := filepath.Dir(orgDir)
-	candidate := filepath.Join(orgRoot, relPath, ProjectDirName)
-
-	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-		return realPath(candidate), nil
-	}
-	return "", fmt.Errorf("project directory not found for state %q", projectID)
-}
-
-// resolveOrgPath accepts a path to .ateamorg/ itself, a parent directory
-// containing .ateamorg/, or any descendant of one — discovery walks up
-// from the given path, matching flag-less discovery semantics.
-func resolveOrgPath(path string) (string, error) {
-	return resolveSpecialDir(path, OrgDirName, "--org")
-}
-
-// resolveProjectPath accepts a path to .ateam/ itself, a project root
-// containing .ateam/, or any subdirectory of one — discovery walks up
-// so `ateam --project . ...` from `defaults/roles` finds the project,
-// just like running with no flag would.
-func resolveProjectPath(path string) (string, error) {
-	return resolveSpecialDir(path, ProjectDirName, "--project")
-}
-
-func resolveSpecialDir(path, target, flag string) (string, error) {
-	if filepath.Base(path) == target {
-		if info, err := os.Stat(path); err == nil && info.IsDir() {
-			return realPath(path), nil
-		}
-	}
-	// Absolutise before walking — findDirUp stops at the relative "." root
-	// otherwise, breaking `--project .` from a subdir of the project.
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", fmt.Errorf("%s %q: cannot resolve absolute path: %w", flag, path, err)
-	}
-	if found, err := findDirUp(abs, target, ""); err == nil {
-		return found, nil
-	}
-	return "", fmt.Errorf("%s %q: no %s/ found at or above this path", flag, path, target)
-}
-
-// ResolveStreamPath resolves a relative stream_file path to absolute.
-// New layout: relative to projectDir. Legacy: relative to orgDir (paths starting with "projects/").
-func ResolveStreamPath(projectDir, orgDir, sf string) string {
-	if sf == "" || filepath.IsAbs(sf) {
+// ResolveStreamPath resolves a relative stream_file path recorded in the
+// state db to an absolute path under stateDir. Absolute paths pass through.
+func ResolveStreamPath(stateDir, sf string) string {
+	if sf == "" || filepath.IsAbs(sf) || stateDir == "" {
 		return sf
 	}
-	if strings.HasPrefix(sf, "projects/") && orgDir != "" {
-		return filepath.Join(orgDir, sf)
-	}
-	if projectDir != "" {
-		return filepath.Join(projectDir, sf)
-	}
-	if orgDir != "" {
-		return filepath.Join(orgDir, sf)
-	}
-	return sf
+	return filepath.Join(stateDir, sf)
 }
 
 // IsLegacyStreamFile reports whether streamPath uses the pre-exec_id layout

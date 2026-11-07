@@ -38,7 +38,7 @@ func TestParallelDryRun(t *testing.T) {
 		savedExec.restore()
 	}()
 
-	orgFlag = orgParent
+	homeFlag = filepath.Join(orgParent, ".ateam")
 	parallelLabels = []string{"alpha", "beta"}
 	parallelCommonPromptFirst = "PREFIX"
 	parallelCommonPromptLast = "SUFFIX"

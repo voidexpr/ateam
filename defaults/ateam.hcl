@@ -718,3 +718,70 @@ profile "docker-exec" {
 //     agent     = "claude"
 //     container = "my-app"
 //   }
+
+// ---------------------------------------------------------------------
+// Project settings. The same file holds them, so one layer can set a
+// default (e.g. timeouts or a default_profile in ~/.ateam/ateam.hcl) and
+// the project overrides single attributes. `ateam init` writes the
+// project block with the name, which is what makes a .ateam/ directory a
+// project (~/.ateam never is).
+// ---------------------------------------------------------------------
+
+project {
+  // name = "myproject"       // set by ateam init; the project's identity
+  // default_profile = ""     // profile for every run unless overridden below
+  report_max_parallel    = 3
+  report_timeout_minutes = 20
+  review_timeout_minutes = 20
+  code_timeout_minutes   = 120
+  verify_timeout_minutes = 30
+  exec_timeout_minutes   = 60
+  // serve_port = 8080        // fixed port for `ateam serve` (default: random)
+}
+
+// Which roles `ateam report` runs by default. A role block can also pin
+// a profile for that role: role "project.security" { profile = "docker" }.
+role "code.bugs" { status = "on" }
+role "code.recent" { status = "on" }
+role "code.structure" { status = "on" }
+role "critic.engineering" { status = "off" }
+role "critic.features" { status = "off" }
+role "critic.project" { status = "off" }
+role "database.schema" { status = "off" }
+role "design.architecture" { status = "on" }
+role "docs.external" { status = "on" }
+role "docs.followable" { status = "off" }
+role "docs.internal" { status = "on" }
+role "perf.benchmarks" { status = "off" }
+role "perf.optimization" { status = "off" }
+role "project.automation" { status = "on" }
+role "project.dependencies" { status = "on" }
+role "project.discover_cmd" { status = "off" }
+role "project.maintenance" { status = "off" }
+role "project.production_ready" { status = "off" }
+role "project.security" { status = "on" }
+role "test.blackbox" { status = "off" }
+role "test.gaps" { status = "on" }
+role "test.quality" { status = "off" }
+role "test.recent" { status = "on" }
+
+// Supervisor profiles (review, code, the code supervisor itself). Empty
+// means the project default_profile, else the "default" profile.
+//   supervisor {
+//     review_profile          = "claude-high"
+//     code_profile            = "cheap"
+//     code_supervisor_profile = "claude-high"
+//   }
+
+// Extra sandbox grants and container settings for this project.
+//   sandbox_extra {
+//     allow_write          = ["/path/to/extra/writable/dir"]
+//     allow_read           = ["/path/to/extra/readable/dir"]
+//     allow_domains        = ["api.example.com"]
+//     unsandboxed_commands = ["make:*"]
+//   }
+//   container_extra {
+//     extra_args  = ["--network", "host"]
+//     forward_env = ["MY_TOKEN"]
+//     env         = { FOO = "bar" }
+//   }

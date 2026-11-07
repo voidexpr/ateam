@@ -240,5 +240,5 @@ func mkVerifyAssembler(files map[string]string) *assembler.MultiAnchorAssembler 
 	for path, body := range files {
 		mf["prompts/"+path] = &fstest.MapFile{Data: []byte(body)}
 	}
-	return assembler.New(assembler.BuildAnchors("", "", mf))
+	return assembler.New(assembler.BuildAnchors("", nil, mf))
 }

@@ -224,7 +224,7 @@ instead of `exec.CommandContext` when present.
 The execution stack is layered like this:
 
 ```text
-cmd resolves runtime.hcl/profile
+cmd resolves ateam.hcl/profile
   -> runner.AgentExecutor
        Agent:     internal/agent.Agent
        Container: internal/container.Container or nil
@@ -260,7 +260,7 @@ There is one current execution table: `agent_execs` in `state.sqlite`.
 The DB location is:
 
 - project mode: `.ateam/state.sqlite`
-- scratch `exec` / `parallel` mode: `.ateamorg/state.sqlite`
+- scratch `exec` / `parallel` mode: `~/.ateam/state/state.sqlite`
 
 `flow` has no table of its own and no persistent workflow record. The only
 persistence relation is through the runner-created `agent_execs` rows.

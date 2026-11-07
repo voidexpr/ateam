@@ -14,7 +14,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultSharedClaudePath = "claude_linux_shared"
+// defaultSharedClaudePath is the agent config dir under the user's .ateam/
+// shared with Linux containers (see ISOLATION.md). Relative to the home dir.
+const defaultSharedClaudePath = "state/agents/claude-linux"
 const ateamContainerBinPath = "/usr/local/bin/ateam"
 
 // claudeEssentials lists the files and directories inside .claude/ that are
@@ -74,7 +76,7 @@ func init() {
 	agentConfigCmd.Flags().BoolVar(&agentCfgCopyOut, "copy-out", false, "copy agent config from a container to a local directory")
 	agentConfigCmd.Flags().BoolVar(&agentCfgCopyIn, "copy-in", false, "copy agent config into a container from a local directory")
 	agentConfigCmd.Flags().StringVar(&agentCfgContainer, "container", "", "target container name (for --copy-out, --copy-in, --audit)")
-	agentConfigCmd.Flags().StringVar(&agentCfgPath, "path", "", "local directory for agent config (default: <ateamorg>/"+defaultSharedClaudePath+")")
+	agentConfigCmd.Flags().StringVar(&agentCfgPath, "path", "", "local directory for agent config (default: <~/.ateam>/"+defaultSharedClaudePath+")")
 	agentConfigCmd.Flags().StringVar(&agentCfgHome, "home", "", "override container home directory (auto-detected by default)")
 	agentConfigCmd.Flags().BoolVar(&agentCfgForce, "force", false, "overwrite existing config in container (for --copy-in)")
 	agentConfigCmd.Flags().BoolVar(&agentCfgCopyAteam, "copy-ateam", false, "also copy ateam linux binary into the container (for --copy-in)")
@@ -83,10 +85,10 @@ func init() {
 }
 
 func runAgentConfig(cmd *cobra.Command, args []string) error {
-	var projectDir, orgDir string
+	var projectDir, homeDir string
 	if env, err := lookupEnvOptional(); err == nil {
 		projectDir = env.ProjectDir
-		orgDir = env.OrgDir
+		homeDir = env.HomeDir
 	}
 
 	// Resolve partial container names before any subcommand uses them.
@@ -100,10 +102,10 @@ func runAgentConfig(cmd *cobra.Command, args []string) error {
 
 	// --copy-out / --copy-in require --container
 	if agentCfgCopyOut {
-		return runCopyOut(agentCfgContainer, agentCfgPath, agentCfgHome, orgDir, agentCfgDryRun, agentCfgEssentialsOnly)
+		return runCopyOut(agentCfgContainer, agentCfgPath, agentCfgHome, homeDir, agentCfgDryRun, agentCfgEssentialsOnly)
 	}
 	if agentCfgCopyIn {
-		return runCopyIn(agentCfgContainer, agentCfgPath, agentCfgHome, agentCfgForce, agentCfgCopyAteam, orgDir, agentCfgDryRun, agentCfgEssentialsOnly)
+		return runCopyIn(agentCfgContainer, agentCfgPath, agentCfgHome, agentCfgForce, agentCfgCopyAteam, homeDir, agentCfgDryRun, agentCfgEssentialsOnly)
 	}
 
 	// --audit works everywhere, no container-only check.
@@ -112,21 +114,21 @@ func runAgentConfig(cmd *cobra.Command, args []string) error {
 		if agentCfgContainer != "" {
 			return runRemoteAudit(agentCfgContainer, agentCfgHome)
 		}
-		return runAgentConfigAudit(projectDir, orgDir)
+		return runAgentConfigAudit(projectDir, homeDir)
 	}
 
 	// No action flags → default to audit.
 	if agentCfgContainer != "" {
 		return runRemoteAudit(agentCfgContainer, agentCfgHome)
 	}
-	return runAgentConfigAudit(projectDir, orgDir)
+	return runAgentConfigAudit(projectDir, homeDir)
 }
 
-func runAgentConfigAudit(projectDir, orgDir string) error {
+func runAgentConfigAudit(projectDir, homeDir string) error {
 	fmt.Println("[experimental] Claude Code Agent Configuration Audit")
 	fmt.Println()
 
-	status := agent.DetectAuth(projectDir, orgDir)
+	status := agent.DetectAuth(projectDir)
 
 	fmt.Printf("Config dir:       %s\n", status.ConfigDir)
 	fmt.Printf("Active auth:      %s\n", status.Active)
@@ -168,8 +170,8 @@ func runAgentConfigAudit(projectDir, orgDir string) error {
 	}
 
 	// Check shared config dir (for container use with CLAUDE_CONFIG_DIR).
-	if orgDir != "" {
-		printSharedConfigStatus(orgDir)
+	if homeDir != "" {
+		printSharedConfigStatus(homeDir)
 	}
 
 	return nil
@@ -256,8 +258,8 @@ func printAuthSources(s agent.AuthStatus) {
 	fmt.Println()
 }
 
-func printSharedConfigStatus(orgDir string) {
-	sharedDir := filepath.Join(orgDir, defaultSharedClaudePath)
+func printSharedConfigStatus(homeDir string) {
+	sharedDir := filepath.Join(homeDir, defaultSharedClaudePath)
 	info, err := os.Stat(sharedDir)
 	if err != nil || !info.IsDir() {
 		fmt.Printf("Shared config:    %s (not found)\n", sharedDir)
@@ -361,8 +363,8 @@ func detectContainer(container, homeOverride string) (containerInfo, error) {
 }
 
 // copyAteamBinary copies the ateam linux binary into a container.
-func copyAteamBinary(containerName, orgDir string) error {
-	binary := findLinuxBinary(orgDir)
+func copyAteamBinary(containerName, homeDir string) error {
+	binary := findLinuxBinary(homeDir)
 	if binary == "" {
 		return fmt.Errorf("no linux ateam binary found (run 'make companion' to build one)")
 	}
@@ -375,13 +377,13 @@ func copyAteamBinary(containerName, orgDir string) error {
 	return nil
 }
 
-func resolveLocalPath(flagPath, orgDir string) (string, error) {
+func resolveLocalPath(flagPath, homeDir string) (string, error) {
 	path := flagPath
 	if path == "" {
-		if orgDir == "" {
+		if homeDir == "" {
 			return "", nil
 		}
-		path = filepath.Join(orgDir, defaultSharedClaudePath)
+		path = filepath.Join(homeDir, defaultSharedClaudePath)
 	}
 	if err := validateLocalPath(path); err != nil {
 		return "", err
@@ -457,17 +459,17 @@ func containerDirEmpty(container, path string) bool {
 // --copy-out: container → host
 // ---------------------------------------------------------------------------
 
-func runCopyOut(containerName, flagPath, homeOverride, orgDir string, dryRun, essentialsOnly bool) error {
+func runCopyOut(containerName, flagPath, homeOverride, homeDir string, dryRun, essentialsOnly bool) error {
 	if containerName == "" {
 		return fmt.Errorf("--container is required with --copy-out")
 	}
 
-	localPath, err := resolveLocalPath(flagPath, orgDir)
+	localPath, err := resolveLocalPath(flagPath, homeDir)
 	if err != nil {
 		return err
 	}
 	if localPath == "" {
-		return fmt.Errorf("--path is required (no .ateamorg found for default)")
+		return fmt.Errorf("--path is required (no user ateam directory found for the default)")
 	}
 
 	ci, err := detectContainer(containerName, homeOverride)
@@ -565,17 +567,17 @@ func runCopyOut(containerName, flagPath, homeOverride, orgDir string, dryRun, es
 // --copy-in: host → container
 // ---------------------------------------------------------------------------
 
-func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bool, orgDir string, dryRun, essentialsOnly bool) error {
+func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bool, homeDir string, dryRun, essentialsOnly bool) error {
 	if containerName == "" {
 		return fmt.Errorf("--container is required with --copy-in")
 	}
 
-	localPath, err := resolveLocalPath(flagPath, orgDir)
+	localPath, err := resolveLocalPath(flagPath, homeDir)
 	if err != nil {
 		return err
 	}
 	if localPath == "" {
-		return fmt.Errorf("--path is required (no .ateamorg found for default)")
+		return fmt.Errorf("--path is required (no user ateam directory found for the default)")
 	}
 
 	localClaudeDir := filepath.Join(localPath, ".claude")
@@ -637,12 +639,12 @@ func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bo
 
 	localSecrets := filepath.Join(localPath, "secrets.env")
 	if _, err := os.Stat(localSecrets); err == nil {
-		ateamOrgDir := ci.home + "/.ateamorg"
-		fmt.Printf("  %s%s → %s/secrets.env\n", prefix, localSecrets, ateamOrgDir)
+		ateamHomeDir := ci.home + "/.ateam"
+		fmt.Printf("  %s%s → %s/secrets.env\n", prefix, localSecrets, ateamHomeDir)
 	}
 
 	if copyAteam {
-		binary := findLinuxBinary(orgDir)
+		binary := findLinuxBinary(homeDir)
 		if binary != "" {
 			fmt.Printf("  %s%s → %s:%s\n", prefix, binary, containerName, ateamContainerBinPath)
 		} else {
@@ -690,21 +692,21 @@ func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bo
 	}
 
 	if _, err := os.Stat(localSecrets); err == nil {
-		ateamOrgDir := ci.home + "/.ateamorg"
-		if _, err := dockerExecOutput(containerName, "mkdir", "-p", ateamOrgDir); err != nil {
-			return fmt.Errorf("creating %s in container: %w", ateamOrgDir, err)
+		ateamHomeDir := ci.home + "/.ateam"
+		if _, err := dockerExecOutput(containerName, "mkdir", "-p", ateamHomeDir); err != nil {
+			return fmt.Errorf("creating %s in container: %w", ateamHomeDir, err)
 		}
-		if err := dockerCp(localSecrets, containerName+":"+ateamOrgDir+"/secrets.env"); err != nil {
+		if err := dockerCp(localSecrets, containerName+":"+ateamHomeDir+"/secrets.env"); err != nil {
 			return err
 		}
-		chownPaths = append(chownPaths, ateamOrgDir)
+		chownPaths = append(chownPaths, ateamHomeDir)
 	}
 
 	chownArgs := append([]string{"sh", "-c", `u=$1; shift; chown -R "$u":"$u" "$@" 2>/dev/null || true`, "_", ci.user}, chownPaths...)
 	_, _ = dockerExecOutput(containerName, chownArgs...)
 
 	if copyAteam {
-		if err := copyAteamBinary(containerName, orgDir); err != nil {
+		if err := copyAteamBinary(containerName, homeDir); err != nil {
 			return err
 		}
 	}

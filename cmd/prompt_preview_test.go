@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/ateam/internal/root"
 	"os"
 	"strings"
 	"testing"
@@ -203,17 +204,18 @@ func resetPromptFlags() {
 	promptIgnorePreviousReport = false
 }
 
-// setupMinimalAteamProject creates a tempdir with a minimal .ateam/config.toml
+// setupMinimalAteamProject creates a tempdir with a minimal .ateam/ateam.hcl
 // so root.Resolve() succeeds without needing a real project tree.
 func setupMinimalAteamProject(t *testing.T) string {
 	t.Helper()
+	isolateHome(t)
 	tmp := t.TempDir()
 	ateam := tmp + "/.ateam"
 	if err := os.MkdirAll(ateam, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := "[project]\nname = \"testproj\"\n"
-	if err := os.WriteFile(ateam+"/config.toml", []byte(cfg), 0o644); err != nil {
+	cfg := "project {\n  name = \"testproj\"\n}\n"
+	if err := os.WriteFile(ateam+"/"+root.ConfigFile, []byte(cfg), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return tmp

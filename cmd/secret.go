@@ -49,7 +49,7 @@ Examples:
 }
 
 func init() {
-	secretCmd.Flags().StringVar(&secretScope, "scope", secret.ScopeGlobal, "secret scope: global, org, or project")
+	secretCmd.Flags().StringVar(&secretScope, "scope", secret.ScopeGlobal, "secret scope: global (~/.ateam/secrets.env) or project (.ateam/secrets.env)")
 	secretCmd.Flags().StringVar(&secretStorage, "storage", "", "storage backend: keychain or file (default: keychain on macOS, file otherwise)")
 	secretCmd.Flags().BoolVar(&secretSet, "set", false, "set the secret (reads value from stdin)")
 	secretCmd.Flags().BoolVar(&secretGet, "get", false, "print raw value to stdout (for scripting)")
@@ -65,22 +65,22 @@ func runSecret(cmd *cobra.Command, args []string) error {
 	env, _ := root.Lookup("", "")
 	resolver := secretResolver(env, backend)
 
-	var projectDir, orgDir string
+	var projectDir string
 	if env != nil {
 		projectDir = env.ProjectDir
-		orgDir = env.OrgDir
 	}
+	layers := envLayers(env)
 
 	if secretPrint {
-		return printSecrets(resolver, projectDir, orgDir, args)
+		return printSecrets(resolver, layers, args)
 	}
 
 	if secretSaveProjectScope {
-		return saveProjectScope(resolver, projectDir, orgDir, args)
+		return saveProjectScope(resolver, projectDir, layers, args)
 	}
 
 	if len(args) == 0 {
-		return listSecrets(resolver, backend, projectDir, orgDir)
+		return listSecrets(resolver, backend, layers)
 	}
 
 	if len(args) > 1 {
@@ -112,10 +112,10 @@ func resolveBackend() secret.Backend {
 	return secret.DefaultBackend()
 }
 
-func listSecrets(resolver *secret.Resolver, backend secret.Backend, projectDir, orgDir string) error {
+func listSecrets(resolver *secret.Resolver, backend secret.Backend, layers []string) error {
 	fmt.Printf("Storage: %s\n\n", backendLabel(backend))
 
-	rtCfg, err := runtime.Load(projectDir, orgDir)
+	rtCfg, err := runtime.Load(layers)
 	if err != nil {
 		rtCfg = &runtime.Config{}
 	}
@@ -247,11 +247,11 @@ func readLine() (string, error) {
 	return "", nil
 }
 
-func collectSecretNames(resolver *secret.Resolver, projectDir, orgDir string, args []string) []string {
+func collectSecretNames(layers []string, args []string) []string {
 	if len(args) > 0 {
 		return args
 	}
-	rtCfg, err := runtime.Load(projectDir, orgDir)
+	rtCfg, err := runtime.Load(layers)
 	if err != nil {
 		return nil
 	}
@@ -260,8 +260,8 @@ func collectSecretNames(resolver *secret.Resolver, projectDir, orgDir string, ar
 	return names
 }
 
-func printSecrets(resolver *secret.Resolver, projectDir, orgDir string, args []string) error {
-	names := collectSecretNames(resolver, projectDir, orgDir, args)
+func printSecrets(resolver *secret.Resolver, layers []string, args []string) error {
+	names := collectSecretNames(layers, args)
 	for _, name := range names {
 		result := resolver.Resolve(name)
 		if result.Found {
@@ -271,12 +271,12 @@ func printSecrets(resolver *secret.Resolver, projectDir, orgDir string, args []s
 	return nil
 }
 
-func saveProjectScope(resolver *secret.Resolver, projectDir, orgDir string, args []string) error {
+func saveProjectScope(resolver *secret.Resolver, projectDir string, layers []string, args []string) error {
 	if projectDir == "" {
 		return fmt.Errorf("--save-project-scope requires a project context (.ateam/ directory)")
 	}
 
-	names := collectSecretNames(resolver, projectDir, orgDir, args)
+	names := collectSecretNames(layers, args)
 	if len(names) == 0 {
 		fmt.Println("No secrets to save.")
 		return nil

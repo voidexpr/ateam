@@ -34,14 +34,14 @@ func (c *Config) ModelWarnings(prof *ProfileConfig, ac *AgentConfig, cliModel st
 
 	if tok := embeddedModelFlag(ac.Args); tok != "" {
 		src, _ := c.Source("agent." + ac.Name + ".args")
-		out = append(out, fmt.Sprintf("%s: args embed %s (%s); use the %s attribute instead so layers can override it%s",
-			label, tok, c.displayLayer(src.Layer), attrForFlag(tok), staleDefaultsAdvice(src.Layer)))
+		out = append(out, fmt.Sprintf("%s: args embed %s (%s); use the %s attribute instead so layers can override it",
+			label, tok, c.displayLayer(src.Layer), attrForFlag(tok)))
 	}
 	if prof != nil {
 		if tok := embeddedModelFlag(prof.AgentExtraArgs); tok != "" {
 			src, _ := c.Source("profile." + prof.Name + ".agent_extra_args")
-			out = append(out, fmt.Sprintf("profile %q: agent_extra_args embed %s (%s); define an agent with a %s attribute instead%s",
-				prof.Name, tok, c.displayLayer(src.Layer), attrForFlag(tok), staleDefaultsAdvice(src.Layer)))
+			out = append(out, fmt.Sprintf("profile %q: agent_extra_args embed %s (%s); define an agent with a %s attribute instead",
+				prof.Name, tok, c.displayLayer(src.Layer), attrForFlag(tok)))
 		}
 	}
 
@@ -112,16 +112,6 @@ func (c *Config) editHint(agentName string) string {
 		return fmt.Sprintf("%s in an %s block", c.displayLayer(last.Label), block)
 	}
 	return fmt.Sprintf("%s in the %s block", c.displayLayer(c.Layers[best].Label), block)
-}
-
-// staleDefaultsAdvice points at `ateam update` when the offending layer is
-// the on-disk copy of the built-in defaults (orgDir/defaults/runtime.hcl),
-// which is refreshed by that command rather than edited by hand.
-func staleDefaultsAdvice(label string) string {
-	if filepath.Base(filepath.Dir(label)) == "defaults" && filepath.Base(label) == "runtime.hcl" {
-		return "; this file is a copy of the built-in defaults, run 'ateam update' to refresh it"
-	}
-	return ""
 }
 
 // displayLayer shortens a layer label for messages: paths under $HOME

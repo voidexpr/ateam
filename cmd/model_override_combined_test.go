@@ -25,11 +25,8 @@ const combinedWarning = "--cheaper-model"
 func setupMiniProject(t *testing.T, enabled []string) (orgDir, projPath, projDir string) {
 	t.Helper()
 	base := t.TempDir()
+	orgDir = testHome(t, base)
 	var err error
-	orgDir, err = root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
 	projPath = filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -48,9 +45,9 @@ func setupMiniProject(t *testing.T, enabled []string) (orgDir, projPath, projDir
 func TestReportWarnsWhenCheaperAndModelBothSet(t *testing.T) {
 	orgDir, projPath, _ := setupMiniProject(t, []string{"testing_basic"})
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	var runErr error
 	stderr := captureStderr(t, func() {
@@ -79,7 +76,7 @@ func TestReportWarnsWhenCheaperAndModelBothSet(t *testing.T) {
 func TestReviewWarnsWhenCheaperAndModelBothSet(t *testing.T) {
 	orgDir, projPath, projDir := setupMiniProject(t, []string{"testing_basic"})
 	// runReview needs at least one non-empty report on disk.
-	reportPath := filepath.Join(projDir, "roles", "testing_basic", "report.md")
+	reportPath := filepath.Join(projDir, "shared", "report", "testing_basic.md")
 	if err := os.MkdirAll(filepath.Dir(reportPath), 0755); err != nil {
 		t.Fatalf("MkdirAll role dir: %v", err)
 	}
@@ -87,9 +84,9 @@ func TestReviewWarnsWhenCheaperAndModelBothSet(t *testing.T) {
 		t.Fatalf("WriteFile report: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	var runErr error
 	stderr := captureStderr(t, func() {
@@ -116,9 +113,9 @@ func TestReviewWarnsWhenCheaperAndModelBothSet(t *testing.T) {
 func TestCodeWarnsWhenCheaperAndModelBothSet(t *testing.T) {
 	orgDir, projPath, _ := setupMiniProject(t, []string{"testing_basic"})
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	var runErr error
 	stderr := captureStderr(t, func() {
@@ -147,9 +144,9 @@ func TestCodeWarnsWhenCheaperAndModelBothSet(t *testing.T) {
 func TestVerifyWarnsWhenCheaperAndModelBothSet(t *testing.T) {
 	orgDir, projPath, _ := setupMiniProject(t, []string{"testing_basic"})
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	var runErr error
 	stderr := captureStderr(t, func() {

@@ -16,10 +16,7 @@ func TestAllRunsAllFourPhases(t *testing.T) {
 	// in the output — confirming that report, review, code, and verify
 	// are all invoked. Verify always runs as the final phase.
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -32,9 +29,9 @@ func TestAllRunsAllFourPhases(t *testing.T) {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	// Save and restore all package-level flags that runAll reads.
 	savedQuiet, savedTimeout, savedParallel := runAllQuiet, runAllTimeout, runAllParallel
@@ -86,10 +83,7 @@ func TestAllRunsAllFourPhases(t *testing.T) {
 func TestAllDefaultRoles(t *testing.T) {
 	// When runAllRoles is empty, runAll should default to []string{"all"}.
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -102,9 +96,9 @@ func TestAllDefaultRoles(t *testing.T) {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	savedQuiet, savedRoles := runAllQuiet, runAllRoles
 	savedRP, savedSP, savedCP := runAllReportProfile, runAllSupervisorProfile, runAllCodeProfile
@@ -139,10 +133,7 @@ func TestAllVerifyRunsExactlyOnce(t *testing.T) {
 	const verifyMarker = "Supervisor verifying recent code changes"
 
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -154,9 +145,9 @@ func TestAllVerifyRunsExactlyOnce(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("InitProject: %v", err)
 	}
-	savedOrg := orgFlag
-	t.Cleanup(func() { orgFlag = savedOrg })
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	t.Cleanup(func() { homeFlag = savedOrg })
+	homeFlag = orgDir
 
 	savedRoles := runAllRoles
 	savedRP, savedSP, savedCP := runAllReportProfile, runAllSupervisorProfile, runAllCodeProfile
@@ -187,10 +178,7 @@ func TestAllVerifyRunsExactlyOnce(t *testing.T) {
 // chained pipeline lives in `ateam run-all`.
 func TestCodeStopsAfterCodePhase(t *testing.T) {
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -202,9 +190,9 @@ func TestCodeStopsAfterCodePhase(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("InitProject: %v", err)
 	}
-	savedOrg := orgFlag
-	t.Cleanup(func() { orgFlag = savedOrg })
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	t.Cleanup(func() { homeFlag = savedOrg })
+	homeFlag = orgDir
 
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {
@@ -235,10 +223,7 @@ func TestAllPropagatesModelAndBudgetFlags(t *testing.T) {
 	}
 
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -251,9 +236,9 @@ func TestAllPropagatesModelAndBudgetFlags(t *testing.T) {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	saved := struct {
 		roles               []string
@@ -322,10 +307,7 @@ func TestAllAutoRolesPlanOnlySkipsAllPhases(t *testing.T) {
 	}
 
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -338,9 +320,9 @@ func TestAllAutoRolesPlanOnlySkipsAllPhases(t *testing.T) {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	savedRoles, savedAuto, savedPlanOnly := runAllRoles, runAllAutoRoles, runAllPlanOnly
 	defer func() {

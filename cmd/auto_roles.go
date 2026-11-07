@@ -156,7 +156,7 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 	// Validate every recommended role exists. Unknown role = hard error so the
 	// user catches a misfiring planner instead of silently running nothing.
 	for _, name := range roles {
-		if !promptdata.IsValidRole(name, env.Config.Roles, env.ProjectDir, env.OrgDir) {
+		if !promptdata.IsValidRole(name, env.Config.Roles, env.Layers) {
 			return rationale, nil, fmt.Errorf("auto-roles recommended unknown role %q (see %s)", name, outputPath)
 		}
 	}

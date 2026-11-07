@@ -26,7 +26,8 @@ mkdir -p "$PROJ"
 
 # Initialize a real project + org (the same way users do); reuses the
 # embedded defaults so `ateam env` has everything it needs to render.
-(cd "$PROJ" && "$ATEAM" init --org-create "$TMPROOT/work" >/dev/null 2>&1)
+export ATEAM_HOME="$TMPROOT/ateam-home"
+(cd "$PROJ" && "$ATEAM" init >/dev/null 2>&1)
 
 ATEAM_ENV=(--project "$PROJ")
 

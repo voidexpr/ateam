@@ -8,39 +8,39 @@ import (
 // Scope name constants.
 const (
 	ScopeGlobal  = "global"
-	ScopeOrg     = "org"
 	ScopeProject = "project"
 )
 
 // Scope represents a secret storage scope.
 type Scope struct {
-	Name        string // ScopeGlobal, ScopeOrg, or ScopeProject
+	Name        string // ScopeGlobal or ScopeProject
 	EnvFile     string // path to secrets.env
 	KeychainKey string // stable ID for keychain account prefix (empty for global)
 }
 
 // Resolver walks the secret storage chain to find a value.
 type Resolver struct {
-	Scopes  []Scope // ordered: project, org, global (narrowest first)
+	Scopes  []Scope // ordered: project, global (narrowest first)
 	Backend Backend
 }
 
 // ResolveResult describes where a secret was found.
 type ResolveResult struct {
 	Value   string
-	Source  string // "env", "project", "org", "global"
+	Source  string // "env", "project", "global"
 	Backend string // "env", "file", "keychain"
 	Found   bool
 }
 
 // ResolverOpts holds optional configuration for building a Resolver.
 type ResolverOpts struct {
-	ProjectKeychainKey string // stable ID from config.toml for project-scoped keychain lookups
+	ProjectKeychainKey string // stable ID from the project registry for project-scoped keychain lookups
 }
 
-// NewResolver builds a Resolver from project/org directories.
-// Scopes are ordered narrowest-first: project → org → global.
-func NewResolver(projectDir, orgDir string, backend Backend, opts *ResolverOpts) *Resolver {
+// NewResolver builds a Resolver for a project directory (may be empty in
+// scratch mode). Scopes are ordered narrowest-first: project
+// (<projectDir>/secrets.env) → global (<~/.ateam>/secrets.env).
+func NewResolver(projectDir string, backend Backend, opts *ResolverOpts) *Resolver {
 	var scopes []Scope
 
 	if projectDir != "" {
@@ -52,12 +52,6 @@ func NewResolver(projectDir, orgDir string, backend Backend, opts *ResolverOpts)
 			s.KeychainKey = opts.ProjectKeychainKey
 		}
 		scopes = append(scopes, s)
-	}
-	if orgDir != "" {
-		scopes = append(scopes, Scope{
-			Name:    ScopeOrg,
-			EnvFile: filepath.Join(orgDir, "secrets.env"),
-		})
 	}
 
 	globalDir := GlobalDir()

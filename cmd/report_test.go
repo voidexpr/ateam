@@ -17,10 +17,7 @@ import (
 
 func TestReportDryRun(t *testing.T) {
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -34,9 +31,9 @@ func TestReportDryRun(t *testing.T) {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir) // --org takes the parent of .ateamorg/
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	var runErr error
 	out := captureStdout(t, func() {
@@ -65,10 +62,8 @@ func TestReportDryRun(t *testing.T) {
 
 func TestRerunFailedDryRunSelectsOnlyFailed(t *testing.T) {
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
+	var err error
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -124,9 +119,9 @@ func TestRerunFailedDryRunSelectsOnlyFailed(t *testing.T) {
 	}
 	db.Close()
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	var runErr error
 	out := captureStdout(t, func() {
@@ -158,10 +153,7 @@ func TestRerunFailedDryRunSelectsOnlyFailed(t *testing.T) {
 //   - explicit --roles A,B     → those exact roles regardless of enabled state
 func TestReportRoleSelectionModes(t *testing.T) {
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -176,9 +168,9 @@ func TestReportRoleSelectionModes(t *testing.T) {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	cases := []struct {
 		name     string
@@ -300,10 +292,7 @@ func TestReviewOptionsFromReportPropagation(t *testing.T) {
 
 func TestRerunFailedMutuallyExclusiveWithRoles(t *testing.T) {
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -316,9 +305,9 @@ func TestRerunFailedMutuallyExclusiveWithRoles(t *testing.T) {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	var runErr error
 	captureStdout(t, func() {

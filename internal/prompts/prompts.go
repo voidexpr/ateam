@@ -309,7 +309,7 @@ func isRoleEnabled(roles map[string]string, id string) bool {
 	return v != roleStatusOff
 }
 
-// ProjectInfoParams, FormatProjectInfo, shortRelPath, WriteIfNotExists,
+// ProjectInfoParams, FormatProjectInfo, shortRelPath,
 // AutoRolesMarker moved to internal/promptdata in spec step 9 to break
 // the root→prompts import cycle. Callers that previously used
 // prompts.ProjectInfoParams etc. now use promptdata.ProjectInfoParams.

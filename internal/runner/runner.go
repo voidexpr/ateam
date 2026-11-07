@@ -73,7 +73,7 @@ type AgentExecutor struct {
 	Agent                agent.Agent
 	Container            container.Container // nil means run on host
 	ProjectDir           string              // .ateam/ dir
-	OrgDir               string              // .ateamorg/ dir
+	HomeDir              string              // the user's .ateam/ dir; scratch-mode state lives under its state/
 	SourceDir            string              // project root (parent of .ateam/)
 	ProjectName          string              // from config.toml
 	ExtraArgs            []string            // extra args passed to the agent
@@ -250,12 +250,15 @@ type RunSummary struct {
 // StateDir returns the directory that anchors logs/<id>/, runtime/<id>/, and
 // the relative stream/output paths recorded in agent_execs. Mirrors
 // root.ResolvedEnv.StateDir so callers driving the runner from a scratch
-// context (no .ateam/) land logs in <OrgDir>/ instead.
+// context (no .ateam/) land logs in <HomeDir>/state/ instead.
 func (r *AgentExecutor) StateDir() string {
 	if r.ProjectDir != "" {
 		return r.ProjectDir
 	}
-	return r.OrgDir
+	if r.HomeDir == "" {
+		return ""
+	}
+	return filepath.Join(r.HomeDir, "state")
 }
 
 // PreparedRun is the handle returned by Prepare(). It carries the
@@ -307,7 +310,7 @@ func (r *AgentExecutor) Prepare(opts RunOpts) (*PreparedRun, error) {
 	}
 
 	if r.CallDB == nil || r.StateDir() == "" {
-		return nil, fmt.Errorf("ateam state directory required: no .ateam/ or .ateamorg/ found")
+		return nil, fmt.Errorf("ateam state directory required: no project .ateam/ and no user ateam directory found")
 	}
 
 	agentName := r.Agent.Name()
@@ -890,7 +893,7 @@ func (r *AgentExecutor) buildRequest(prompt string, tmplVars TemplateVars, cwd, 
 
 	// Resolve config_dir for isolated agents into the env var the agent CLI
 	// reads (CLAUDE_CONFIG_DIR, CODEX_HOME). Relative config_dir is resolved
-	// from the state dir (.ateam/, else .ateamorg/); absolute is used as-is.
+	// from the state dir (the project .ateam/, else ~/.ateam/state); absolute is used as-is.
 	configDir := display.ExpandHome(ResolveTemplateString(r.ConfigDir, tmplVars))
 	agentType := ""
 	if r.Agent != nil {
@@ -903,7 +906,7 @@ func (r *AgentExecutor) buildRequest(prompt string, tmplVars TemplateVars, cwd, 
 		} else {
 			stateDir := r.StateDir()
 			if stateDir == "" {
-				return agent.Request{}, fmt.Errorf("relative config_dir requires a project (.ateam/) or org (.ateamorg/) directory")
+				return agent.Request{}, fmt.Errorf("relative config_dir requires a project .ateam/ or the user ateam directory")
 			}
 			configPath = filepath.Join(stateDir, configDir)
 		}
@@ -1119,15 +1122,15 @@ func (r *AgentExecutor) mergeSandboxPaths(settings map[string]any, workDir strin
 	runtimeWriteDirs = append(runtimeWriteDirs, r.Sandbox.ExtraWrite...)
 
 	var runtimeReadDirs []string
-	if r.OrgDir != "" {
-		runtimeReadDirs = append(runtimeReadDirs, r.OrgDir)
+	if r.HomeDir != "" {
+		runtimeReadDirs = append(runtimeReadDirs, r.HomeDir)
 	}
 	runtimeReadDirs = append(runtimeReadDirs, r.Sandbox.ExtraRead...)
 
-	// additionalDirectories: project root, .ateamorg/, agent ro_paths
+	// additionalDirectories: project root, the user's .ateam/, agent ro_paths
 	runtimeAdditionalDirs := []string{workDir}
-	if r.OrgDir != "" {
-		runtimeAdditionalDirs = append(runtimeAdditionalDirs, r.OrgDir)
+	if r.HomeDir != "" {
+		runtimeAdditionalDirs = append(runtimeAdditionalDirs, r.HomeDir)
 	}
 	runtimeAdditionalDirs = append(runtimeAdditionalDirs, r.Sandbox.ROPaths...)
 

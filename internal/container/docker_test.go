@@ -10,7 +10,7 @@ func TestTranslatePath(t *testing.T) {
 	dc := &DockerContainer{
 		SourceDir:  "/Users/nic/projects/myapp",
 		ProjectDir: "/Users/nic/projects/myapp/.ateam",
-		OrgDir:     "/Users/nic/.ateamorg",
+		HomeDir:    "/Users/nic/.ateam-home",
 	}
 
 	tests := []struct {
@@ -23,8 +23,8 @@ func TestTranslatePath(t *testing.T) {
 		{"file in source", "/Users/nic/projects/myapp/src/main.go", "/workspace/src/main.go"},
 		{"project dir", "/Users/nic/projects/myapp/.ateam", "/workspace/.ateam"},
 		{"file in project", "/Users/nic/projects/myapp/.ateam/logs/agent.jsonl", "/workspace/.ateam/logs/agent.jsonl"},
-		{"org dir", "/Users/nic/.ateamorg", "/.ateamorg"},
-		{"file in org", "/Users/nic/.ateamorg/runtime.hcl", "/.ateamorg/runtime.hcl"},
+		{"org dir", "/Users/nic/.ateam-home", "/.ateam-home"},
+		{"file in org", "/Users/nic/.ateam-home/runtime.hcl", "/.ateam-home/runtime.hcl"},
 		{"unrelated path", "/tmp/something", "/tmp/something"},
 	}
 
@@ -43,7 +43,7 @@ func TestTranslatePathWithGitRoot(t *testing.T) {
 		MountDir:   "/Users/nic/projects/repo",
 		SourceDir:  "/Users/nic/projects/repo/myapp",
 		ProjectDir: "/Users/nic/projects/repo/myapp/.ateam",
-		OrgDir:     "/Users/nic/.ateamorg",
+		HomeDir:    "/Users/nic/.ateam-home",
 	}
 
 	tests := []struct {
@@ -55,8 +55,8 @@ func TestTranslatePathWithGitRoot(t *testing.T) {
 		{"source dir (subdir of git root)", "/Users/nic/projects/repo/myapp", "/workspace/myapp"},
 		{"file in source", "/Users/nic/projects/repo/myapp/main.go", "/workspace/myapp/main.go"},
 		{"file in git root outside source", "/Users/nic/projects/repo/README.md", "/workspace/README.md"},
-		{"org dir", "/Users/nic/.ateamorg", "/.ateamorg"},
-		{"file in org", "/Users/nic/.ateamorg/defaults/runtime.hcl", "/.ateamorg/defaults/runtime.hcl"},
+		{"org dir", "/Users/nic/.ateam-home", "/.ateam-home"},
+		{"file in org", "/Users/nic/.ateam-home/defaults/runtime.hcl", "/.ateam-home/defaults/runtime.hcl"},
 	}
 
 	for _, tt := range tests {
@@ -74,7 +74,7 @@ func TestCmdFactoryProducesDockerArgs(t *testing.T) {
 		Image:      "ateam-test:latest",
 		SourceDir:  "/Users/nic/projects/myapp",
 		ProjectDir: "/Users/nic/projects/myapp/.ateam",
-		OrgDir:     "/Users/nic/.ateamorg",
+		HomeDir:    "/Users/nic/.ateam-home",
 		ForwardEnv: []string{"ANTHROPIC_API_KEY"},
 	}
 
@@ -115,7 +115,7 @@ func TestCmdFactoryProducesDockerArgs(t *testing.T) {
 	if !hasMount("/Users/nic/projects/myapp:/workspace:ro") {
 		t.Errorf("missing source mount, args: %v", args)
 	}
-	if !hasMount("/Users/nic/.ateamorg:/.ateamorg:rw") {
+	if !hasMount("/Users/nic/.ateam-home:/.ateam-home:rw") {
 		t.Errorf("missing org mount, args: %v", args)
 	}
 }
@@ -126,7 +126,7 @@ func TestCmdFactoryWithGitRoot(t *testing.T) {
 		MountDir:   "/Users/nic/projects/repo",
 		SourceDir:  "/Users/nic/projects/repo/myapp",
 		ProjectDir: "/Users/nic/projects/repo/myapp/.ateam",
-		OrgDir:     "/Users/nic/.ateamorg",
+		HomeDir:    "/Users/nic/.ateam-home",
 	}
 
 	factory := dc.CmdFactory()
@@ -156,7 +156,7 @@ func TestDebugCommand(t *testing.T) {
 	dc := &DockerContainer{
 		Image:      "ateam-test:latest",
 		SourceDir:  "/src",
-		OrgDir:     "/org",
+		HomeDir:    "/org",
 		ForwardEnv: []string{"ANTHROPIC_API_KEY"},
 	}
 
@@ -170,7 +170,7 @@ func TestDebugCommand(t *testing.T) {
 	for _, substr := range []string{
 		"docker run --rm -i",
 		"-v /src:/workspace:ro",
-		"-v /org:/.ateamorg:rw",
+		"-v /org:/.ateam-home:rw",
 		"-w /workspace",
 		"-e ANTHROPIC_API_KEY",
 		"ateam-test:latest claude -p --verbose",
@@ -185,7 +185,7 @@ func TestContainerPathsSimple(t *testing.T) {
 	dc := &DockerContainer{
 		SourceDir:  "/Users/nic/projects/myapp",
 		ProjectDir: "/Users/nic/projects/myapp/.ateam",
-		OrgDir:     "/Users/nic/.ateamorg",
+		HomeDir:    "/Users/nic/.ateam-home",
 	}
 
 	codePath, workDir, orgPath := dc.containerPaths()
@@ -196,8 +196,8 @@ func TestContainerPathsSimple(t *testing.T) {
 	if workDir != "/workspace" {
 		t.Errorf("workDir = %q, want /workspace", workDir)
 	}
-	if orgPath != "/.ateamorg" {
-		t.Errorf("orgPath = %q, want /.ateamorg", orgPath)
+	if orgPath != "/.ateam-home" {
+		t.Errorf("orgPath = %q, want /.ateam-home", orgPath)
 	}
 }
 
@@ -206,7 +206,7 @@ func TestContainerPathsWithGitRoot(t *testing.T) {
 		MountDir:   "/home/user/repo",
 		SourceDir:  "/home/user/repo/myapp",
 		ProjectDir: "/home/user/repo/myapp/.ateam",
-		OrgDir:     "/home/user/.ateamorg",
+		HomeDir:    "/home/user/.ateam-home",
 	}
 
 	codePath, workDir, orgPath := dc.containerPaths()
@@ -217,8 +217,8 @@ func TestContainerPathsWithGitRoot(t *testing.T) {
 	if workDir != "/workspace/myapp" {
 		t.Errorf("workDir = %q, want /workspace/myapp", workDir)
 	}
-	if orgPath != "/.ateamorg" {
-		t.Errorf("orgPath = %q, want /.ateamorg", orgPath)
+	if orgPath != "/.ateam-home" {
+		t.Errorf("orgPath = %q, want /.ateam-home", orgPath)
 	}
 }
 
@@ -226,7 +226,7 @@ func TestEnvArgsInOneshotCmdFactory(t *testing.T) {
 	dc := &DockerContainer{
 		Image:     "ateam-test:latest",
 		SourceDir: "/src",
-		OrgDir:    "/org",
+		HomeDir:   "/org",
 		Env: map[string]string{
 			"DB_HOST": "localhost",
 			"DB_PORT": "5432",
@@ -282,7 +282,7 @@ func TestApplyAgentEnvOverridesForwardEnv(t *testing.T) {
 	dc := &DockerContainer{
 		Image:      "ateam-test:latest",
 		SourceDir:  "/src",
-		OrgDir:     "/org",
+		HomeDir:    "/org",
 		ForwardEnv: []string{"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"},
 	}
 
@@ -355,7 +355,7 @@ func TestApplyAgentEnvMergesWithExistingEnv(t *testing.T) {
 	dc := &DockerContainer{
 		Image:     "ateam-test:latest",
 		SourceDir: "/src",
-		OrgDir:    "/org",
+		HomeDir:   "/org",
 		Env:       map[string]string{"DB_HOST": "localhost"},
 	}
 
@@ -388,7 +388,7 @@ func TestEnvArgsInDebugCommand(t *testing.T) {
 	dc := &DockerContainer{
 		Image:     "ateam-test:latest",
 		SourceDir: "/src",
-		OrgDir:    "/org",
+		HomeDir:   "/org",
 		Env: map[string]string{
 			"B_VAR": "two",
 			"A_VAR": "one",
@@ -424,7 +424,7 @@ func TestDockerRunNoSecretInArgv(t *testing.T) {
 	dc := &DockerContainer{
 		Image:     "ateam-test:latest",
 		SourceDir: "/src",
-		OrgDir:    "/org",
+		HomeDir:   "/org",
 		Env:       map[string]string{"ANTHROPIC_API_KEY": secret},
 	}
 

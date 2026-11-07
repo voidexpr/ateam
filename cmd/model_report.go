@@ -11,12 +11,12 @@ import (
 // printModelResolution prints which model and effort the runner will use
 // and the layer chain that decided it. Used by every --dry-run.
 func printModelResolution(r *runner.AgentExecutor, env *root.ResolvedEnv) {
-	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
+	rtCfg, err := runtime.Load(env.Layers)
 	if err != nil {
 		return
 	}
 	prof, ac := resolveProfileAgent(rtCfg, r.Profile)
-	if ac == nil {
+	if ac == nil || ac.Type == "builtin" {
 		return
 	}
 	printModelReport(rtCfg.ModelReport(prof, ac, runtime.CLIOverrides{Model: r.ModelOverride, Effort: r.Effort}))

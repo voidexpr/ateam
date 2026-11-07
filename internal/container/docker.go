@@ -26,7 +26,7 @@ type DockerContainer struct {
 	MountDir   string // volume mount source: git root, or SourceDir as fallback
 	SourceDir  string // project root (parent of .ateam/) — determines -w
 	ProjectDir string // .ateam/ dir
-	OrgDir     string // .ateamorg/ dir
+	HomeDir    string // the user's .ateam/ dir, mounted at containerHomeRoot with ATEAM_HOME pointing at it
 
 	// HostCLIPath is the path to a Linux-compatible ateam binary on the host.
 	// When set, it is bind-mounted to /usr/local/bin/ateam inside the container.
@@ -57,7 +57,7 @@ type DockerContainer struct {
 
 const (
 	containerCodeRoot = "/workspace"
-	containerOrgRoot  = "/.ateamorg"
+	containerHomeRoot = "/.ateam-home"
 )
 
 func (d *DockerContainer) Type() string { return "docker" }
@@ -163,7 +163,7 @@ func (d *DockerContainer) EnsureImage(ctx context.Context) error {
 		return fmt.Errorf("no Dockerfile configured for docker container")
 	}
 	// Resolve symlinks so Docker can read the actual file.
-	// Symlinked Dockerfiles (e.g. .ateamorg/Dockerfile → .../defaults/Dockerfile)
+	// Symlinked Dockerfiles (e.g. ~/.ateam/Dockerfile → elsewhere)
 	// point outside the build context, which BuildKit can't follow.
 	dockerfilePath, err := filepath.EvalSymlinks(d.Dockerfile)
 	if err != nil {
@@ -203,7 +203,7 @@ func (d *DockerContainer) cleanupDockerfileTmpDir() {
 // When forExec is true, environment variables are forwarded as KEY=VALUE (resolving host values);
 // when false (for display/logging), they are passed as bare KEY names.
 func (d *DockerContainer) baseRunArgs(forExec bool) []string {
-	containerCodePath, containerWorkDir, containerOrgPath := d.containerPaths()
+	containerCodePath, containerWorkDir, containerHomePath := d.containerPaths()
 	mount := d.mountDir()
 
 	args := []string{"run", "--rm", "-i"}
@@ -211,8 +211,8 @@ func (d *DockerContainer) baseRunArgs(forExec bool) []string {
 	if mount != "" {
 		args = append(args, "-v", mount+":"+containerCodePath+":"+d.sourceMountMode())
 	}
-	if d.OrgDir != "" {
-		args = append(args, "-v", d.OrgDir+":"+containerOrgPath+":rw")
+	if d.HomeDir != "" {
+		args = append(args, "-v", d.HomeDir+":"+containerHomePath+":rw", "-e", "ATEAM_HOME="+containerHomePath)
 	}
 	args = append(args, d.projectDirArgs()...)
 	if d.HostCLIPath != "" {
@@ -270,10 +270,10 @@ func (d *DockerContainer) TranslatePath(hostPath string) string {
 		return ""
 	}
 
-	// Check OrgDir first (most specific non-code path)
-	if d.OrgDir != "" {
-		if rel, ok := relativeUnder(hostPath, d.OrgDir); ok {
-			return filepath.Join(containerOrgRoot, rel)
+	// Check HomeDir first (most specific non-code path)
+	if d.HomeDir != "" {
+		if rel, ok := relativeUnder(hostPath, d.HomeDir); ok {
+			return filepath.Join(containerHomeRoot, rel)
 		}
 	}
 
@@ -335,10 +335,10 @@ func (d *DockerContainer) mountDir() string {
 }
 
 // containerPaths computes the container paths for code, workdir, and orgdir.
-// Code is mounted at /workspace, org at /.ateamorg.
-func (d *DockerContainer) containerPaths() (codePath, workDir, orgPath string) {
+// Code is mounted at /workspace, the user's .ateam/ at /.ateam-home.
+func (d *DockerContainer) containerPaths() (codePath, workDir, homePath string) {
 	codePath = containerCodeRoot
-	orgPath = containerOrgRoot
+	homePath = containerHomeRoot
 
 	// If sourceDir is a subdirectory of mountDir (git root), workdir is /workspace/<rel>
 	mount := d.mountDir()

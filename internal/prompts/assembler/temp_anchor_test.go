@@ -22,7 +22,7 @@ func TestTempAnchorAssembler_ResolveExternalDir(t *testing.T) {
 	innerFS := fstest.MapFS{
 		"prompts/_pre.shared.md": &fstest.MapFile{Data: []byte("FROM CHAIN")},
 	}
-	inner := New(BuildAnchors("", "", innerFS))
+	inner := New(BuildAnchors("", nil, innerFS))
 
 	ta := NewTempAnchor(extDir, inner)
 	files, err := ta.Resolve("widget.prompt.md")
@@ -67,7 +67,7 @@ func TestTempAnchorAssembler_ResolveFramingOnly(t *testing.T) {
 	mustWrite(t, filepath.Join(extDir, "widget.pre.only.md"), "PRE ONLY")
 	// No widget.prompt.md — that's the point.
 
-	inner := New(BuildAnchors("", "", fstest.MapFS{}))
+	inner := New(BuildAnchors("", nil, fstest.MapFS{}))
 	ta := NewTempAnchor(extDir, inner)
 	files, err := ta.ResolveFramingOnly("widget.prompt.md")
 	if err != nil {
@@ -92,7 +92,7 @@ func TestTempAnchorAssembler_FindOrphansScansBothSides(t *testing.T) {
 	innerFS := fstest.MapFS{
 		"prompts/other.pre.foo.md": &fstest.MapFile{Data: []byte("INNER ORPHAN")},
 	}
-	inner := New(BuildAnchors("", "", innerFS))
+	inner := New(BuildAnchors("", nil, innerFS))
 
 	ta := NewTempAnchor(extDir, inner)
 	orphans, err := ta.FindOrphans()
@@ -126,7 +126,7 @@ func TestTempAnchorAssembler_LogicalMultiSegmentName(t *testing.T) {
 		"prompts/report/security.prompt.md": &fstest.MapFile{Data: []byte("REPORT-SEC BODY")},
 		"prompts/security.prompt.md":        &fstest.MapFile{Data: []byte("ROOT-SEC BODY (wrong)")},
 	}
-	inner := New(BuildAnchors("", "", innerFS))
+	inner := New(BuildAnchors("", nil, innerFS))
 
 	extDir := t.TempDir()
 	ta := NewTempAnchor(extDir, inner)

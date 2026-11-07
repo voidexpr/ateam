@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ateam/defaults"
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
@@ -15,9 +16,10 @@ import (
 )
 
 var (
-	catVerbose bool
-	catNoColor bool
-	catLast    bool
+	catVerbose  bool
+	catNoColor  bool
+	catLast     bool
+	catDefaults bool
 )
 
 var catCmd = &cobra.Command{
@@ -28,12 +30,18 @@ var catCmd = &cobra.Command{
 Arguments can be numeric call IDs or file paths to JSONL stream files.
 Pass --last instead of an ID to format the most recent run.
 
+With --defaults, print the built-in defaults instead: the embedded
+ateam.hcl (no argument), the Dockerfile, or a prompt by its path.
+
 Example:
   ateam cat 42
   ateam cat 42 43 44 --verbose
   ateam cat 42 --no-color
   ateam cat --last
-  ateam cat .ateam/logs/roles/security/agent.jsonl`,
+  ateam cat .ateam/logs/roles/security/agent.jsonl
+  ateam cat --defaults
+  ateam cat --defaults Dockerfile
+  ateam cat --defaults prompts/report/project.security.prompt.md`,
 	RunE: runCat,
 }
 
@@ -41,9 +49,13 @@ func init() {
 	catCmd.Flags().BoolVar(&catVerbose, "verbose", false, "show full tool inputs and text content")
 	catCmd.Flags().BoolVar(&catNoColor, "no-color", false, "disable color output")
 	catCmd.Flags().BoolVar(&catLast, "last", false, "format the most recent run (when no ID is given)")
+	catCmd.Flags().BoolVar(&catDefaults, "defaults", false, "print the built-in defaults: ateam.hcl, Dockerfile, or an embedded prompt path")
 }
 
 func runCat(cmd *cobra.Command, args []string) error {
+	if catDefaults {
+		return runCatDefaults(args)
+	}
 	if len(args) == 0 && !catLast {
 		return fmt.Errorf("specify an ID, file path, or --last")
 	}
@@ -51,6 +63,28 @@ func runCat(cmd *cobra.Command, args []string) error {
 		return runCatFiles(args)
 	}
 	return runCatIDs(args)
+}
+
+// runCatDefaults prints embedded default files: ateam.hcl when no path is
+// given. Paths are relative to the embedded defaults tree.
+func runCatDefaults(paths []string) error {
+	if len(paths) == 0 {
+		paths = []string{runtime.ConfigFile}
+	}
+	for i, p := range paths {
+		data, err := defaults.FS.ReadFile(p)
+		if err != nil {
+			return fmt.Errorf("no built-in default %q (try ateam.hcl, Dockerfile, or prompts/...)", p)
+		}
+		if i > 0 {
+			fmt.Println()
+		}
+		if len(paths) > 1 {
+			fmt.Printf("═══ %s ═══\n", p)
+		}
+		os.Stdout.Write(data)
+	}
+	return nil
 }
 
 func looksLikeFiles(args []string) bool {
@@ -114,7 +148,7 @@ func runCatIDs(args []string) error {
 	}
 
 	// Load runtime config for agent pricing lookup.
-	rtCfg, _ := runtime.Load(env.ProjectDir, env.OrgDir)
+	rtCfg, _ := runtime.Load(env.Layers)
 	agentPricing := func(agentName string) (agent.PricingTable, string) {
 		if rtCfg == nil {
 			return nil, ""
@@ -141,7 +175,7 @@ func runCatIDs(args []string) error {
 			continue
 		}
 
-		streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, row.AgentFile)
+		streamPath := root.ResolveStreamPath(env.StateDir(), row.AgentFile)
 
 		pricing, defaultModel := agentPricing(row.Agent)
 		var sessionStart time.Time

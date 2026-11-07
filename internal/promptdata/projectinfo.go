@@ -11,10 +11,6 @@ import (
 	"github.com/ateam/internal/gitutil"
 )
 
-// SandboxSettingsFile is the standalone sandbox-settings JSON shipped
-// alongside the embedded prompts (see DefaultSandboxSettings).
-const SandboxSettingsFile = "ateam_claude_sandbox_extra_settings.json"
-
 // AutoRolesMarker is the contract line the `--auto-roles` planner agent
 // writes at the end of its output file. The substring after the colon is
 // comma-separated role IDs (no spaces); an empty value means "no roles need
@@ -25,7 +21,7 @@ const AutoRolesMarker = "RECOMMENDED_ROLES:"
 
 // ProjectInfoParams holds the values needed to build the project info section.
 type ProjectInfoParams struct {
-	OrgDir      string // absolute path to .ateamorg/
+	HomeDir     string // absolute path to the user's .ateam/
 	ProjectDir  string // absolute path to .ateam/
 	ProjectName string
 	WorkDir     string // absolute path of the agent's working directory
@@ -110,18 +106,4 @@ func shortRelPath(base, target string) string {
 		}
 	}
 	return target
-}
-
-// WriteIfNotExists writes content to path only if the file does not already exist.
-func WriteIfNotExists(path, content string) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
-	if err != nil {
-		if os.IsExist(err) {
-			return nil
-		}
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(content)
-	return err
 }

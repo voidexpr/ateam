@@ -32,14 +32,6 @@ func TestDisplayPathNonFile(t *testing.T) {
 	}
 }
 
-func TestDisplayPathAteamorg(t *testing.T) {
-	s := PromptSource{Path: "/home/user/.ateamorg/defaults/report_base_prompt.md"}
-	want := ".ateamorg/defaults/report_base_prompt.md"
-	if got := s.DisplayPath(); got != want {
-		t.Errorf("DisplayPath() = %q, want %q", got, want)
-	}
-}
-
 func TestDisplayPathAteam(t *testing.T) {
 	s := PromptSource{Path: "/projects/myapp/.ateam/roles/security/report.md"}
 	want := ".ateam/roles/security/report.md"

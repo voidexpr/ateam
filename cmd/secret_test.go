@@ -13,11 +13,8 @@ import (
 func setupSecretFixture(t *testing.T) (projectDir, orgDir string, resolver *secret.Resolver) {
 	t.Helper()
 	base := t.TempDir()
+	orgDir = testHome(t, base)
 	var err error
-	orgDir, err = root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -33,7 +30,7 @@ func setupSecretFixture(t *testing.T) (projectDir, orgDir string, resolver *secr
 	resolver = &secret.Resolver{
 		Scopes: []secret.Scope{
 			{Name: secret.ScopeProject, EnvFile: filepath.Join(projectDir, "secrets.env")},
-			{Name: secret.ScopeOrg, EnvFile: filepath.Join(orgDir, "secrets.env")},
+			{Name: secret.ScopeGlobal, EnvFile: filepath.Join(orgDir, "secrets.env")},
 		},
 		Backend: secret.BackendFile,
 	}
@@ -44,7 +41,7 @@ func TestListSecretsEmpty(t *testing.T) {
 	projectDir, orgDir, resolver := setupSecretFixture(t)
 
 	out := captureStdout(t, func() {
-		if err := listSecrets(resolver, secret.BackendFile, projectDir, orgDir); err != nil {
+		if err := listSecrets(resolver, secret.BackendFile, []string{orgDir, projectDir}); err != nil {
 			t.Fatalf("listSecrets: %v", err)
 		}
 	})
@@ -66,7 +63,7 @@ func TestListSecretsWithValues(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := listSecrets(resolver, secret.BackendFile, projectDir, orgDir); err != nil {
+		if err := listSecrets(resolver, secret.BackendFile, []string{orgDir, projectDir}); err != nil {
 			t.Fatalf("listSecrets: %v", err)
 		}
 	})

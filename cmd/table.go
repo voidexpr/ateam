@@ -113,7 +113,7 @@ func printArtifact(path, streamFallback string) {
 // newRunner creates a AgentExecutor using the resolved profile from runtime.hcl.
 // roleID is optional — used for role-specific Dockerfile resolution.
 func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetup bool) (*runner.AgentExecutor, error) {
-	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
+	rtCfg, err := runtime.Load(env.Layers)
 	if err != nil {
 		return nil, fmt.Errorf("cannot load runtime.hcl: %w", err)
 	}
@@ -165,7 +165,7 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 	if err := preflightContainerSupportsWorkDir(cc, env); err != nil {
 		return nil, err
 	}
-	ct, err := buildContainer(cc, prof, env.WorkDir, env.ProjectDir, env.OrgDir, env.GitRepoDir, roleID, dockerAutoSetup)
+	ct, err := buildContainer(cc, prof, env, roleID, dockerAutoSetup)
 	if err != nil {
 		return nil, err
 	}
@@ -235,7 +235,7 @@ func applyContainerName(r *runner.AgentExecutor, env *root.ResolvedEnv, cliFlag 
 
 // newRunnerFromAgent creates a AgentExecutor using a named agent directly (no profile).
 func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.AgentExecutor, error) {
-	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
+	rtCfg, err := runtime.Load(env.Layers)
 	if err != nil {
 		return nil, fmt.Errorf("cannot load runtime.hcl: %w", err)
 	}
@@ -264,10 +264,10 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.AgentE
 	return r, nil
 }
 
-func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runner.AgentExecutor {
+func minimalRunnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runner.AgentExecutor {
 	r := &runner.AgentExecutor{
-		Agent:  buildAgent(ac),
-		OrgDir: orgDir,
+		Agent:   buildAgent(ac),
+		HomeDir: env.HomeDir,
 		Sandbox: runner.SandboxConfig{
 			Settings:        ac.Sandbox,
 			RWPaths:         ac.RWPaths,
@@ -279,8 +279,8 @@ func minimalRunnerFromAgentConfig(orgDir string, ac *runtime.AgentConfig) *runne
 		ArgsInsideContainer:  ac.ArgsInsideContainer,
 		ArgsOutsideContainer: ac.ArgsOutsideContainer,
 	}
-	// Scratch mode: codex-tmux roots its socket at <OrgDir>/cache/tmux/.
-	setCodexTmuxProjectDir(r.Agent, orgDir)
+	// Scratch mode: codex-tmux roots its socket at <HomeDir>/state/cache/tmux/.
+	setCodexTmuxProjectDir(r.Agent, env.StateDir())
 	return r
 }
 
@@ -329,7 +329,7 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 	r := &runner.AgentExecutor{
 		Agent:       buildAgent(ac),
 		ProjectDir:  env.ProjectDir,
-		OrgDir:      env.OrgDir,
+		HomeDir:     env.HomeDir,
 		SourceDir:   env.WorkDir,
 		ProjectName: env.ProjectName,
 		Sandbox: runner.SandboxConfig{
@@ -377,8 +377,8 @@ func newRunnerFromChoice(env *root.ResolvedEnv, choice config.ProfileChoice, rol
 
 // resolveRunnerMinimal builds a AgentExecutor without project context (just org dir).
 // Docker containers are not supported without project context.
-func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.AgentExecutor, error) {
-	rtCfg, err := runtime.Load("", orgDir)
+func resolveRunnerMinimal(env *root.ResolvedEnv, profileFlag, agentFlag string) (*runner.AgentExecutor, error) {
+	rtCfg, err := runtime.Load(env.Layers)
 	if err != nil {
 		return nil, fmt.Errorf("cannot load runtime.hcl: %w", err)
 	}
@@ -391,10 +391,10 @@ func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.AgentE
 		if !ok {
 			return nil, fmt.Errorf("unknown agent %q", agentFlag)
 		}
-		if err := rejectCodexTmuxWithoutStateDir(&ac, orgDir); err != nil {
+		if err := rejectCodexTmuxWithoutStateDir(&ac, env.StateDir()); err != nil {
 			return nil, err
 		}
-		r := minimalRunnerFromAgentConfig(orgDir, &ac)
+		r := minimalRunnerFromAgentConfig(env, &ac)
 		r.Profile = "a:" + agentFlag
 		r.ProfileSource = config.ProfileSourceAgent
 		return r, nil
@@ -407,10 +407,10 @@ func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.AgentE
 		if err != nil {
 			return nil, err
 		}
-		if err := rejectCodexTmuxWithoutStateDir(ac, orgDir); err != nil {
+		if err := rejectCodexTmuxWithoutStateDir(ac, env.StateDir()); err != nil {
 			return nil, err
 		}
-		r := minimalRunnerFromAgentConfig(orgDir, ac)
+		r := minimalRunnerFromAgentConfig(env, ac)
 		r.Profile = choice.Name
 		r.ProfileSource = choice.Source
 		r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
@@ -420,7 +420,7 @@ func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.AgentE
 
 // rejectCodexTmuxWithoutStateDir errors out when codex-tmux has no anchor for
 // its tmux socket. The agent writes to `<StateDir>/cache/tmux/`, where
-// StateDir is the project's .ateam/ if present else the org's .ateamorg/.
+// StateDir is the project's .ateam/ if present else ~/.ateam/state.
 // With neither resolved we'd fail inside the agent with a cryptic "requires
 // project context" message; catch it here so the operator gets actionable
 // guidance instead.
@@ -431,7 +431,7 @@ func rejectCodexTmuxWithoutStateDir(ac *runtime.AgentConfig, stateDir string) er
 	if stateDir != "" {
 		return nil
 	}
-	return fmt.Errorf("codex-tmux requires a state directory (a .ateam/ or .ateamorg/); run from inside one or use a different agent")
+	return fmt.Errorf("codex-tmux requires a state directory (a project .ateam/ or the user ateam directory); run from inside a project or use a different agent")
 }
 
 // resolveRunner builds a AgentExecutor from --profile/--agent flags, falling back to config resolution.
@@ -565,7 +565,7 @@ func parseRuntimeDuration(value, field string) time.Duration {
 }
 
 // deriveDockerImageName builds the per-project Docker image name. It assumes
-// the standard ateam layout where projectDir is `<orgDir>/<project>/.ateam`,
+// the standard ateam layout where projectDir is `<project root>/.ateam`,
 // so filepath.Dir(projectDir) is the project root and its basename is the
 // project name (used to scope the image and avoid clashes between projects).
 func deriveDockerImageName(projectDir string) string {
@@ -575,28 +575,29 @@ func deriveDockerImageName(projectDir string) string {
 // buildContainer creates a Container implementation from config.
 // Returns nil for "none" type (runner treats nil as host execution).
 // roleID is used for Dockerfile resolution (role-specific Dockerfiles).
-func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, sourceDir, projectDir, orgDir, gitRepoDir, roleID string, dockerAutoSetup bool) (container.Container, error) {
+func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, env *root.ResolvedEnv, roleID string, dockerAutoSetup bool) (container.Container, error) {
 	if cc == nil || cc.Type == "none" {
 		return nil, nil
 	}
+	sourceDir, projectDir, homeDir, gitRepoDir := env.WorkDir, env.ProjectDir, env.HomeDir, env.GitRepoDir
 	switch cc.Type {
 	case "docker":
 		image := deriveDockerImageName(projectDir)
 		if dockerAutoSetup {
-			if generated, names, err := runtime.AutoSetupDockerfile(sourceDir, projectDir, orgDir); err != nil {
+			if generated, names, err := runtime.AutoSetupDockerfile(sourceDir, projectDir, env.Layers); err != nil {
 				fmt.Fprintf(os.Stderr, "[docker] auto-setup warning: %v\n", err)
 			} else if generated {
 				fmt.Fprintf(os.Stderr, "[docker] auto-generated .ateam/Dockerfile (%s)\n", strings.Join(names, ", "))
 			}
 		}
-		dockerfile, dockerfileTmpDir, err := runtime.ResolveDockerfile(cc, projectDir, orgDir, roleID)
+		dockerfile, dockerfileTmpDir, err := runtime.ResolveDockerfile(cc, env.Layers, roleID)
 		if err != nil {
 			return nil, err
 		}
 		// Resolve relative paths in extra_volumes from project dir
 		volumes := make([]string, len(cc.ExtraVolumes))
 		for i, vol := range cc.ExtraVolumes {
-			resolved, err := resolveVolumePath(vol, sourceDir, sourceDir, orgDir)
+			resolved, err := resolveVolumePath(vol, sourceDir, sourceDir, homeDir)
 			if err != nil {
 				return nil, err
 			}
@@ -629,8 +630,8 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 			MountDir:              mountDir,
 			SourceDir:             sourceDir,
 			ProjectDir:            projectDir,
-			OrgDir:                orgDir,
-			HostCLIPath:           findLinuxBinary(orgDir),
+			HomeDir:               homeDir,
+			HostCLIPath:           findLinuxBinary(homeDir),
 			ClaudeCredentialsFile: claudeCredentialsFile,
 		}
 		dc.UseSharedPrepareGuard()
@@ -639,7 +640,7 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 		if cc.DockerContainer == "" {
 			cc.DockerContainer = "{{CONTAINER_NAME}}"
 		}
-		precheckCmd := runtime.ResolvePrecheckCmd(cc, projectDir, orgDir, roleID)
+		precheckCmd := runtime.ResolvePrecheckCmd(cc, env.Layers, roleID)
 		containerWorkDir := "/workspace"
 		if sourceDir != "" && gitRepoDir != "" && gitRepoDir != sourceDir {
 			if rel, err := filepath.Rel(gitRepoDir, sourceDir); err == nil {
@@ -648,7 +649,7 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, so
 		}
 		var hostCLIPath string
 		if cc.CopyAteam {
-			hostCLIPath = findLinuxBinary(orgDir)
+			hostCLIPath = findLinuxBinary(homeDir)
 		}
 		de := &container.DockerExecContainer{
 			ContainerName: cc.DockerContainer,
@@ -677,8 +678,9 @@ func linuxCompanionName() string {
 
 // findLinuxBinary locates or builds a linux ateam binary for the host's
 // arch, suitable for pushing into a same-arch Docker container.
-// Search order: self (if linux), companion binary, org cache, cross-compile.
-func findLinuxBinary(orgDir string) string {
+// Search order: self (if linux), companion binary, the user cache under
+// ~/.ateam/state/cache, cross-compile.
+func findLinuxBinary(homeDir string) string {
 	name := linuxCompanionName()
 
 	// 1. Already on linux — the running binary is linux/<host arch> by
@@ -708,17 +710,17 @@ func findLinuxBinary(orgDir string) string {
 		return companion
 	}
 
-	// 4. Cached in orgDir from a prior auto cross-compilation.
-	if orgDir != "" {
-		cached := filepath.Join(orgDir, "cache", name)
+	// 4. Cached under the user state dir from a prior auto cross-compilation.
+	if homeDir != "" {
+		cached := filepath.Join(binaryCacheDir(homeDir), name)
 		if info, err := os.Stat(cached); err == nil && !info.IsDir() {
 			return cached
 		}
 	}
 
 	// 5. Cross-compile if Go toolchain is available.
-	if orgDir != "" {
-		if built := crossBuildIfPossible(exe, orgDir); built != "" {
+	if homeDir != "" {
+		if built := crossBuildIfPossible(exe, homeDir); built != "" {
 			return built
 		}
 	}
@@ -728,10 +730,15 @@ func findLinuxBinary(orgDir string) string {
 	return ""
 }
 
+// binaryCacheDir is where cross-compiled companion binaries are cached.
+func binaryCacheDir(homeDir string) string {
+	return filepath.Join(homeDir, runtime.StateSubdir, "cache")
+}
+
 // crossBuildIfPossible cross-compiles ateam for linux/<host arch> if go.mod
-// exists next to hostExe and `go` is in PATH. The result is cached in
-// orgDir/cache/ and reused if the host binary hasn't changed.
-func crossBuildIfPossible(hostExe, orgDir string) string {
+// exists next to hostExe and `go` is in PATH. The result is cached under
+// ~/.ateam/state/cache/ and reused if the host binary hasn't changed.
+func crossBuildIfPossible(hostExe, homeDir string) string {
 	modDir := filepath.Dir(hostExe)
 	if _, err := os.Stat(filepath.Join(modDir, "go.mod")); err != nil {
 		return ""
@@ -740,7 +747,7 @@ func crossBuildIfPossible(hostExe, orgDir string) string {
 		return ""
 	}
 
-	cacheDir := filepath.Join(orgDir, "cache")
+	cacheDir := binaryCacheDir(homeDir)
 	if err := os.MkdirAll(cacheDir, 0700); err != nil {
 		return ""
 	}
@@ -1064,13 +1071,13 @@ func stdinIsPiped() bool {
 
 func secretResolver(env *root.ResolvedEnv, backend secret.Backend) *secret.Resolver {
 	if env == nil {
-		return secret.NewResolver("", "", backend, nil)
+		return secret.NewResolver("", backend, nil)
 	}
 	var opts *secret.ResolverOpts
-	if env.Config != nil && env.Config.Project.KeychainKey != "" {
-		opts = &secret.ResolverOpts{ProjectKeychainKey: env.Config.Project.KeychainKey}
+	if env.KeychainKey != "" {
+		opts = &secret.ResolverOpts{ProjectKeychainKey: env.KeychainKey}
 	}
-	return secret.NewResolver(env.ProjectDir, env.OrgDir, backend, opts)
+	return secret.NewResolver(env.ProjectDir, backend, opts)
 }
 
 // dryRunOpts configures what printDryRunInfo displays.
@@ -1224,7 +1231,7 @@ func logIsolationResults(w io.Writer, results []secret.IsolationResult) {
 }
 
 func printDryRunSecrets(r *runner.AgentExecutor, env *root.ResolvedEnv) {
-	rtCfg, _ := runtime.Load(env.ProjectDir, env.OrgDir)
+	rtCfg, _ := runtime.Load(env.Layers)
 	if rtCfg == nil {
 		return
 	}

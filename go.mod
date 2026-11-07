@@ -5,7 +5,6 @@ go 1.26.5
 toolchain go1.26.6
 
 require (
-	github.com/BurntSushi/toml v1.6.0
 	github.com/alecthomas/chroma/v2 v2.2.0
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/mattn/go-isatty v0.0.20

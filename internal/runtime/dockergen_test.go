@@ -126,7 +126,7 @@ func TestAutoSetupDockerfile_Idempotent(t *testing.T) {
 	os.WriteFile(filepath.Join(sourceDir, "go.mod"), []byte("module test\n\ngo 1.25.0\n"), 0644)
 
 	// First call generates
-	generated, names, err := AutoSetupDockerfile(sourceDir, projectDir, "")
+	generated, names, err := AutoSetupDockerfile(sourceDir, projectDir, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestAutoSetupDockerfile_Idempotent(t *testing.T) {
 	}
 
 	// Second call skips
-	generated, _, err = AutoSetupDockerfile(sourceDir, projectDir, "")
+	generated, _, err = AutoSetupDockerfile(sourceDir, projectDir, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestAutoSetupDockerfile_NoToolchains(t *testing.T) {
 	sourceDir := t.TempDir() // empty dir
 	projectDir := filepath.Join(t.TempDir(), ".ateam")
 
-	generated, _, err := AutoSetupDockerfile(sourceDir, projectDir, "")
+	generated, _, err := AutoSetupDockerfile(sourceDir, projectDir, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestAutoSetupDockerfile_NoToolchains(t *testing.T) {
 }
 
 func TestReadBaseDockerfile_Embedded(t *testing.T) {
-	data, err := ReadBaseDockerfile("")
+	data, err := ReadBaseDockerfile(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestReadBaseDockerfile_OrgDir(t *testing.T) {
 	content := []byte("FROM custom:latest\nRUN echo custom\n")
 	os.WriteFile(filepath.Join(orgDir, "Dockerfile"), content, 0644)
 
-	data, err := ReadBaseDockerfile(orgDir)
+	data, err := ReadBaseDockerfile([]string{orgDir, "project-layer"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

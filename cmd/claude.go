@@ -63,11 +63,7 @@ func runClaude(cmd *cobra.Command, args []string) error {
 	}
 
 	env, _ := lookupEnvOptional()
-	projectDir, orgDir := "", ""
-	if env != nil {
-		projectDir, orgDir = env.ProjectDir, env.OrgDir
-	}
-	rtCfg, err := runtime.Load(projectDir, orgDir)
+	rtCfg, err := runtime.Load(envLayers(env))
 	if err != nil {
 		return err
 	}

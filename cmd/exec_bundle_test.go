@@ -145,11 +145,8 @@ func TestBuildRunner_ScratchModeDefaultProfile(t *testing.T) {
 	// scratch mode falls back to profile="default". The Agent ends up
 	// being the agent the "default" profile resolves to.
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
-	env := &root.ResolvedEnv{OrgDir: orgDir}
+	orgDir := testHome(t, base)
+	env := &root.ResolvedEnv{HomeDir: orgDir, Layers: []string{orgDir}}
 
 	r, err := buildRunner(env, RunnerSpec{Action: runner.ActionExec})
 	if err != nil {
@@ -162,11 +159,8 @@ func TestBuildRunner_ScratchModeDefaultProfile(t *testing.T) {
 
 func TestBuildRunner_ScratchModeExplicitAgent(t *testing.T) {
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
-	env := &root.ResolvedEnv{OrgDir: orgDir}
+	orgDir := testHome(t, base)
+	env := &root.ResolvedEnv{HomeDir: orgDir, Layers: []string{orgDir}}
 
 	r, err := buildRunner(env, RunnerSpec{
 		Agent:  "mock",
@@ -185,10 +179,7 @@ func TestBuildRunner_ScratchModeExplicitAgent(t *testing.T) {
 
 func TestBuildRunner_ProjectModeWithProfile(t *testing.T) {
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0o755); err != nil {
 		t.Fatal(err)
@@ -219,11 +210,9 @@ func TestBuildRunner_ProjectModeWithProfile(t *testing.T) {
 
 func TestBuildRunner_ConflictingProfileAndAgent(t *testing.T) {
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
-	env := &root.ResolvedEnv{OrgDir: orgDir}
+	orgDir := testHome(t, base)
+	var err error
+	env := &root.ResolvedEnv{HomeDir: orgDir, Layers: []string{orgDir}}
 
 	// --profile + --agent is a user-facing error.
 	_, err = buildRunner(env, RunnerSpec{

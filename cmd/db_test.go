@@ -37,14 +37,11 @@ func TestOpenProjectDBCreatesProjectDB(t *testing.T) {
 }
 
 func TestOpenProjectDBErrorsWithoutProjectDir(t *testing.T) {
-	env := &root.ResolvedEnv{
-		ProjectDir: "",
-		OrgDir:     "/tmp/some-org",
-	}
+	env := &root.ResolvedEnv{ProjectDir: "", HomeDir: ""}
 
 	_, err := openStateDB(env)
 	if err == nil {
-		t.Fatal("expected error when ProjectDir is empty")
+		t.Fatal("expected error when neither a project nor a home dir is resolved")
 	}
 }
 
@@ -116,55 +113,19 @@ func TestRequireProjectDBSucceedsWhenExists(t *testing.T) {
 }
 
 func TestCheckConcurrentRunsEnv(t *testing.T) {
-	// (a) scratch mode: org resolved, no project dir → no error (guard skipped).
-	// This is the `ateam exec` from arbitrary cwd case: there's no per-project
-	// namespace to enforce against.
-	t.Run("ScratchModeOrgOnly", func(t *testing.T) {
-		env := &root.ResolvedEnv{
-			OrgDir:    "/some/org/.ateamorg",
-			SourceDir: "", // causes ProjectID() == ""
-		}
-		err := checkConcurrentRunsEnv(nil, env, "code", nil)
-		if err != nil {
-			t.Fatalf("expected no error in scratch mode (no ProjectDir), got: %v", err)
+	// Scratch mode (no project, hence no name) skips the guard.
+	t.Run("ScratchMode", func(t *testing.T) {
+		env := &root.ResolvedEnv{HomeDir: "/some/home/.ateam"}
+		if err := checkConcurrentRunsEnv(nil, env, "code", nil); err != nil {
+			t.Fatalf("expected no error in scratch mode, got: %v", err)
 		}
 	})
 
-	// (b) project resolved but ProjectID() returns "" → real error (path mapping broken).
-	t.Run("ProjectModeEmptyProjectID", func(t *testing.T) {
-		env := &root.ResolvedEnv{
-			OrgDir:     "/some/org/.ateamorg",
-			ProjectDir: "/some/org/myproject/.ateam",
-			SourceDir:  "", // ProjectID() returns "" because SourceDir is empty
-		}
-		err := checkConcurrentRunsEnv(nil, env, "code", nil)
-		if err == nil {
-			t.Fatal("expected error when ProjectDir is set but ProjectID is empty")
-		}
-	})
-
-	// (c) org-less mode with empty ProjectID → no error
-	t.Run("NoOrgEmptyProjectID", func(t *testing.T) {
-		env := &root.ResolvedEnv{
-			OrgDir:    "",
-			SourceDir: "",
-		}
-		err := checkConcurrentRunsEnv(nil, env, "code", nil)
-		if err != nil {
-			t.Fatalf("expected no error when OrgDir is empty, got: %v", err)
-		}
-	})
-
-	// (d) org mode with valid ProjectID → delegates to checkConcurrentRuns (nil db returns nil)
-	t.Run("OrgModeValidProjectID", func(t *testing.T) {
-		orgDir := "/some/org/.ateamorg"
-		env := &root.ResolvedEnv{
-			OrgDir:    orgDir,
-			SourceDir: "/some/org/myproject",
-		}
-		err := checkConcurrentRunsEnv(nil, env, "code", nil)
-		if err != nil {
-			t.Fatalf("expected no error when ProjectID is valid, got: %v", err)
+	// A named project delegates to checkConcurrentRuns (nil db returns nil).
+	t.Run("ProjectWithName", func(t *testing.T) {
+		env := &root.ResolvedEnv{HomeDir: "/some/home/.ateam", ProjectDir: "/some/myproject/.ateam", ProjectName: "myproject"}
+		if err := checkConcurrentRunsEnv(nil, env, "code", nil); err != nil {
+			t.Fatalf("expected no error with a named project, got: %v", err)
 		}
 	})
 }

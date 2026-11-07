@@ -1,14 +1,13 @@
-// Package config handles loading, validating, and managing project configuration including roles and settings.
+// Package config holds the project settings read from the `project`,
+// `role`, `supervisor`, `sandbox_extra` and `container_extra` blocks of
+// ateam.hcl, and the profile selection rules built on them. Parsing and
+// per-layer merging live in internal/runtime, next to the agent blocks.
 package config
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
+	"regexp"
 	"sort"
-
-	"github.com/BurntSushi/toml"
-	"github.com/ateam/defaults"
 )
 
 const (
@@ -16,78 +15,58 @@ const (
 	RoleDisabled = "off"
 )
 
-// DefaultConfig returns a Config populated from the embedded config.toml.
-func DefaultConfig() Config {
-	data, err := defaults.FS.ReadFile("config.toml")
-	if err != nil {
-		panic(fmt.Sprintf("cannot read embedded config.toml: %v", err))
-	}
-	var cfg Config
-	if err := toml.Unmarshal(data, &cfg); err != nil {
-		panic(fmt.Sprintf("cannot parse embedded config.toml: %v", err))
-	}
-	return cfg
-}
-
-// Config represents the project's config.toml.
+// Config is the merged settings of every ateam.hcl layer.
 type Config struct {
-	Project        ProjectConfig        `toml:"project"`
-	Git            GitConfig            `toml:"git"`
-	Report         ReportConfig         `toml:"report"`
-	Review         ReviewConfig         `toml:"review"`
-	Code           CodeConfig           `toml:"code"`
-	Exec           ExecConfig           `toml:"exec"`
-	Verify         VerifyConfig         `toml:"verify"`
-	Serve          ServeConfig          `toml:"serve"`
-	Roles          map[string]string    `toml:"roles"`
-	Supervisor     SupervisorConfig     `toml:"supervisor"`
-	Profiles       ProfilesConfig       `toml:"profiles"`
-	SandboxExtra   SandboxExtraConfig   `toml:"sandbox-extra"`
-	ContainerExtra ContainerExtraConfig `toml:"container-extra"`
+	Project        ProjectConfig
+	Report         ReportConfig
+	Review         ReviewConfig
+	Code           CodeConfig
+	Exec           ExecConfig
+	Verify         VerifyConfig
+	Serve          ServeConfig
+	Roles          map[string]string // role id → "on" / "off"
+	Supervisor     SupervisorConfig
+	Profiles       ProfilesConfig
+	SandboxExtra   SandboxExtraConfig
+	ContainerExtra ContainerExtraConfig
 }
 
 type ServeConfig struct {
-	Port int `toml:"port,omitempty"`
+	Port int
 }
 
 type ProjectConfig struct {
-	Name           string `toml:"name"`
-	DefaultProfile string `toml:"default_profile"`
-	KeychainKey    string `toml:"keychain_key,omitempty"`
+	Name           string
+	DefaultProfile string
 }
 
 type SupervisorConfig struct {
-	DefaultProfile        string `toml:"default_profile"`
-	ReviewProfile         string `toml:"review_profile"`
-	CodeProfile           string `toml:"code_profile"`
-	CodeSupervisorProfile string `toml:"code_supervisor_profile"`
+	DefaultProfile        string
+	ReviewProfile         string
+	CodeProfile           string
+	CodeSupervisorProfile string
 }
 
 type ProfilesConfig struct {
-	Roles map[string]string `toml:"roles"` // role -> profile name
+	Roles map[string]string // role → profile name
 }
 
 type SandboxExtraConfig struct {
-	AllowWrite          []string `toml:"allow_write"`
-	AllowRead           []string `toml:"allow_read"`
-	AllowDomains        []string `toml:"allow_domains"`
-	UnsandboxedCommands []string `toml:"unsandboxed_commands"`
+	AllowWrite          []string
+	AllowRead           []string
+	AllowDomains        []string
+	UnsandboxedCommands []string
 }
 
 type ContainerExtraConfig struct {
-	ExtraArgs  []string          `toml:"extra_args"`
-	ForwardEnv []string          `toml:"forward_env"`
-	Env        map[string]string `toml:"env"`
-}
-
-type GitConfig struct {
-	Repo            string `toml:"repo"`
-	RemoteOriginURL string `toml:"remote_origin_url"`
+	ExtraArgs  []string
+	ForwardEnv []string
+	Env        map[string]string
 }
 
 type ReportConfig struct {
-	MaxParallel          int `toml:"max_parallel"`
-	ReportTimeoutMinutes int `toml:"report_timeout_minutes"`
+	MaxParallel          int
+	ReportTimeoutMinutes int
 }
 
 func effectiveInt(override, configured int) int {
@@ -98,7 +77,7 @@ func effectiveInt(override, configured int) int {
 }
 
 type ReviewConfig struct {
-	TimeoutMinutes int `toml:"timeout_minutes"`
+	TimeoutMinutes int
 }
 
 func (r ReviewConfig) EffectiveTimeout(override int) int {
@@ -106,7 +85,7 @@ func (r ReviewConfig) EffectiveTimeout(override int) int {
 }
 
 type CodeConfig struct {
-	TimeoutMinutes int `toml:"timeout_minutes"`
+	TimeoutMinutes int
 }
 
 func (c CodeConfig) EffectiveTimeout(override int) int {
@@ -114,7 +93,7 @@ func (c CodeConfig) EffectiveTimeout(override int) int {
 }
 
 type ExecConfig struct {
-	TimeoutMinutes int `toml:"timeout_minutes"`
+	TimeoutMinutes int
 }
 
 func (e ExecConfig) EffectiveTimeout(override int) int {
@@ -122,7 +101,7 @@ func (e ExecConfig) EffectiveTimeout(override int) int {
 }
 
 type VerifyConfig struct {
-	TimeoutMinutes int `toml:"timeout_minutes"`
+	TimeoutMinutes int
 }
 
 func (v VerifyConfig) EffectiveTimeout(override int) int {
@@ -156,41 +135,37 @@ func (c Config) EnabledRoles() []string {
 	return enabled
 }
 
-// ProfileChoice is a resolved profile name plus the config.toml setting
+// ProfileChoice is a resolved profile name plus the ateam.hcl setting
 // that chose it, so audits can explain why a role or action runs on a
 // given profile.
 type ProfileChoice struct {
 	Name   string
-	Source string // e.g. `config.toml [profiles.roles] "project.security"`, "config.toml supervisor.code_profile", "built-in default"
+	Source string // e.g. `role "project.security" profile`, "supervisor.code_profile", "built-in default"
 }
 
-// Sources for profile choices made outside config.toml.
+// Sources for profile choices made outside ateam.hcl.
 const (
 	ProfileSourceFlag    = "--profile"
 	ProfileSourceAgent   = "--agent"
 	ProfileSourceBuiltin = "built-in default"
 )
 
-func configSource(setting string) string {
-	return "config.toml " + setting
-}
-
 // ResolveProfile determines the profile for a given action and role.
 // Priority: role-specific profile > action-specific supervisor profile > supervisor default > project default > "default".
 func (c Config) ResolveProfile(action, roleID string) ProfileChoice {
 	if roleID != "" && c.Profiles.Roles != nil {
 		if p, ok := c.Profiles.Roles[roleID]; ok && p != "" {
-			return ProfileChoice{p, configSource(fmt.Sprintf("[profiles.roles] %q", roleID))}
+			return ProfileChoice{p, fmt.Sprintf("role %q profile", roleID)}
 		}
 	}
 	switch action {
 	case "review":
 		if c.Supervisor.ReviewProfile != "" {
-			return ProfileChoice{c.Supervisor.ReviewProfile, configSource("supervisor.review_profile")}
+			return ProfileChoice{c.Supervisor.ReviewProfile, "supervisor.review_profile"}
 		}
 	case "code":
 		if c.Supervisor.CodeProfile != "" {
-			return ProfileChoice{c.Supervisor.CodeProfile, configSource("supervisor.code_profile")}
+			return ProfileChoice{c.Supervisor.CodeProfile, "supervisor.code_profile"}
 		}
 	}
 	return c.defaultProfile()
@@ -202,7 +177,7 @@ func (c Config) ResolveSupervisorProfile(action string) ProfileChoice {
 	switch action {
 	case "code":
 		if c.Supervisor.CodeSupervisorProfile != "" {
-			return ProfileChoice{c.Supervisor.CodeSupervisorProfile, configSource("supervisor.code_supervisor_profile")}
+			return ProfileChoice{c.Supervisor.CodeSupervisorProfile, "supervisor.code_supervisor_profile"}
 		}
 	}
 	return c.defaultProfile()
@@ -210,40 +185,29 @@ func (c Config) ResolveSupervisorProfile(action string) ProfileChoice {
 
 func (c Config) defaultProfile() ProfileChoice {
 	if c.Supervisor.DefaultProfile != "" {
-		return ProfileChoice{c.Supervisor.DefaultProfile, configSource("supervisor.default_profile")}
+		return ProfileChoice{c.Supervisor.DefaultProfile, "supervisor.default_profile"}
 	}
 	if c.Project.DefaultProfile != "" {
-		return ProfileChoice{c.Project.DefaultProfile, configSource("project.default_profile")}
+		return ProfileChoice{c.Project.DefaultProfile, "project.default_profile"}
 	}
 	return ProfileChoice{"default", ProfileSourceBuiltin}
 }
 
-// Load reads config.toml from the given directory.
-// Missing fields are filled from the embedded default_config.toml.
-func Load(dir string) (*Config, error) {
-	path := filepath.Join(dir, "config.toml")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("cannot read config.toml: %w (are you in an ateam project directory?)", err)
-	}
-	cfg := DefaultConfig()
-	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("cannot parse config.toml: %w", err)
-	}
-	if cfg.Roles == nil {
-		cfg.Roles = make(map[string]string)
-	}
-	return &cfg, nil
-}
+var projectNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
-// Save writes config.toml to the given directory.
-func Save(dir string, cfg Config) error {
-	path := filepath.Join(dir, "config.toml")
-	f, err := os.Create(path)
-	if err != nil {
-		return fmt.Errorf("cannot create config.toml: %w", err)
+// ValidateProjectName enforces the project identity rules: lowercase
+// letters, digits, dot, underscore and dash, starting with a letter or
+// digit. The name is the project's id in the state db and the registry,
+// so it must be safe as a path component and a slug.
+func ValidateProjectName(name string) error {
+	if name == "" {
+		return fmt.Errorf("project name is empty")
 	}
-	defer f.Close()
-	enc := toml.NewEncoder(f)
-	return enc.Encode(cfg)
+	if len(name) > 64 {
+		return fmt.Errorf("project name %q is longer than 64 characters", name)
+	}
+	if !projectNameRE.MatchString(name) {
+		return fmt.Errorf("project name %q must match %s", name, projectNameRE)
+	}
+	return nil
 }

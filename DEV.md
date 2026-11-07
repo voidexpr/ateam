@@ -11,7 +11,7 @@ Requires Go 1.26+. Optional runtime dependency: `tmux` (needed by the `codex-tmu
 Tests run inside Docker-in-Docker so nothing touches your host Docker daemon. They verify:
 
 - Image building and caching (`EnsureImage`)
-- Mount layout: source → `/workspace` (rw), org → `/.ateamorg` (ro)
+- Mount layout: source → `/workspace` (rw), `~/.ateam` → `/.ateam-home` (rw, with `ATEAM_HOME` pointing at it)
 - File permission matrix: rw read/write, ro read/write-denied, unmounted inaccessible
 - Env var forwarding into containers
 - `CmdFactory` produces correct `docker run` commands
@@ -64,7 +64,7 @@ Docker containers need a linux ateam binary (matching the host's CPU arch — `a
 1. **Host is linux** — uses the running binary directly (it is already linux/`<host arch>`)
 2. **Build directory** — `build/ateam-linux-<arch>` from `make companion`
 3. **Companion binary** — `ateam-linux-<arch>` next to the host `ateam` binary (e.g. from a release archive)
-4. **Org cache** — `.ateamorg/cache/ateam-linux-<arch>` from a prior auto cross-compilation
+4. **User cache** — `~/.ateam/state/cache/ateam-linux-<arch>` from a prior auto cross-compilation
 5. **Cross-compile** — builds automatically if `go` and `go.mod` are available
 6. **Warning** — prints a message and returns empty (Docker mount is skipped)
 
@@ -76,7 +76,7 @@ For developers building from source, cross-compilation happens automatically (st
 2. Optionally add `defaults/prompts/code/<name>.prompt.md` for code-action support
 3. Run `make build` — the prompt tree is embedded via `defaults.FS`, so the role is discoverable from the embedded anchor
 4. Run `make docs` to regenerate `ROLES.md` from the embedded role set — required for `make check` / `make run-ci` and the pre-commit hook (`make install-hooks`) to pass, since `check-docs` diffs against this file
-5. Enable it in a project: `ateam init --role <name>` or edit `.ateam/config.toml`
+5. Enable it in a project: `ateam init --role <name>` or add `role "<name>" { status = "on" }` to `.ateam/ateam.hcl`
 
 The user-facing assembly model (anchor chain, filename patterns, `FirstMatch` vs `AllMatches`, template variables) is documented in **[CONFIG.md → Prompt Composition](CONFIG.md#prompt-composition)** and **[CONFIG.md → Template Variables](CONFIG.md#template-variables)**. The sections below cover the dev-only deltas.
 
@@ -85,7 +85,7 @@ The user-facing assembly model (anchor chain, filename patterns, `FirstMatch` vs
 - `(*Assembler).Assemble` (`internal/prompts/assembler/assemble.go`) walks the anchor chain and joins the slots described in CONFIG.md.
 - `assembler.BuildAnchors(projectDir, orgDir, embedded)` (`internal/prompts/assembler/anchors.go`) builds the project → org → embedded chain, wired up by `(*ResolvedEnv).Assembler()` (`internal/root/resolve.go`).
 - Prompt-file `{{namespace.key}}` directives are resolved by `internal/prompts/assembler/template.go` (the engine) and the `Vars` resolver supplied by the caller — `internal/flow/runtime.go::runtimeVars` for live execution, `internal/prompts/assembler::MapVars` for tests. Only the dotted form is recognized in prompt bodies; ALL_CAPS legacy tokens pass through verbatim (the prior `varmap.go` compat shim was removed in the bundle-aware refactor). New prompt-side variables are added in the relevant `Vars` implementation (start at `runtimeVars.Resolve`).
-- `runtime.hcl` ALL_CAPS `{{VAR}}` placeholders (agent CLI args, container fields) are a *separate* substitution pass handled by `TemplateVars.Replacer()` in `internal/runner/template.go`. Add new placeholders there. Do not conflate the two systems.
+- `ateam.hcl` ALL_CAPS `{{VAR}}` placeholders (agent CLI args, container fields) are a *separate* substitution pass handled by `TemplateVars.Replacer()` in `internal/runner/template.go`. Add new placeholders there. Do not conflate the two systems.
 - The `ATeam Project Context` header, the previous-report block, and the reports-manifest block are NOT appended by hand — they are wired in as dynamics (`{{dynamic.project_info}}`, `{{dynamic.previous_report}}`, `{{dynamic.review_reports}}`, `{{dynamic.code_mgmt_review}}`) and resolved during `Prompt.Resolve` against `ctx.Dynamics()`. See "Architecture: prompt resolution" below.
 
 ### CLI override surface (`AssembleOptions`)
@@ -125,7 +125,7 @@ Per-run artefacts are keyed by `agent_execs.id` (`<exec_id>`):
 ```
 .ateam/
   state.sqlite                                # per-project agent_execs DB
-  config.toml, runtime.hcl, …                 # config
+  ateam.hcl, prompts/, …                      # config
 
   logs/<exec_id>/                             # forensic, runner-owned
     agent.jsonl                              # raw agent stream events
@@ -185,18 +185,9 @@ For each `agent_execs` row whose `stream_file` ends in `_stream.jsonl`:
 
 Then: delete canonical `report_error.md` / `review_error.md` / `verify_error.md` / `code_error.md` / `auto_setup_error.md`, remove `runner.log`, prune empty legacy log subdirs. Unmatched orphan files (no DB row, or skew >60s) are left in place — never destroyed.
 
-### v1 prompts layout migration (`internal/migrate/`)
-
-A separate, lazy in-place migrator upgrades pre-v1 `.ateam/` and `.ateamorg/` *prompt and shared-artifact* layouts to the v1 filename-driven layout. Invoked from `internal/root/resolve.go::applyV1LayoutMigration` on first env materialization for both project and org dirs; suppressible via `ATEAM_NO_MIGRATE=1`.
-
-- `migrate.NeedsMigration(root)` — cheap stat-only probe keyed on indicator paths (`roles/`, `supervisor/`, the v0 base/extra prompt files, `setup_overview.md`, and the v1+ dir-level code framing files relocated to top-level singletons). No file contents are read.
-- `migrate.V1Layout(root)` — runs the structural pass (`moveStatic` + `moveStaticDirs` + `moveRoles` + `cleanup`) when `NeedsMigration` is true, then always runs `flattenSharedLayout` so a pre-flat v1 tree still collapses to the current flat shape. Idempotent: a partial run that errored mid-way leaves moved files in place and re-running picks up where it left off.
-- `migrate.Result` shape — `Moved []Move` (from→to renames, paths relative to the migration root), `RemovedDirs []string` (dirs cleaned up after migration), `Warnings []string` (target-exists conflicts and similar non-fatal issues). `Result.Changed()` reports whether anything actually moved or got removed; the caller logs a one-line summary on success and forwards every warning verbatim to stderr.
-- **Structural moves only, no content rewrites** (v1_layout.go:24-32). Legacy ALL_CAPS variable references inside migrated prompt bodies (`{{ROLE}}`, `{{OUTPUT_FILE}}`, …) are NOT rewritten because the engine no longer substitutes them either (the `varmap.go` compat shim was removed in the bundle-aware refactor). Instead, `migrate.warnLegacyPromptTokens` (in `legacy_tokens.go`) is called after every successful move into `prompts/`: it scans the migrated file with a closed `legacyPromptTokens` map of pre-refactor ALL_CAPS → dotted form (e.g. `ROLE → prompt.name`, `OUTPUT_DIR → exec.output_dir`, `EXEC_ID → exec.id`) and appends a `Result.Warning` naming each surviving token with its dotted replacement so the operator can convert by hand.
-
 ### ALL_CAPS template warner (`internal/runtime/allcaps_check.go`)
 
-Companion stderr warner for runtime.hcl, separate from the migrator's prompt-body scan. Called from `mergeHCLFile` (`internal/runtime/config.go`) for every HCL source it loads; the call site lives after the file read so embedded `defaults` and org-level defaults — which never go through `mergeHCLFile` directly when shipped — stay quiet, and only operator-edited `runtime.hcl` layers can trip the warning. `detectStrayAllCaps` matches the bare `{{NAME}}` shape against a closed `knownRunnerTemplates` set mirroring `runner.TemplateVars.Replacer()`; anything outside that set is reported with a one-line "engine no longer rewrites ALL_CAPS; switch to dotted form" hint.
+Companion stderr warner for ateam.hcl, separate from the migrator's prompt-body scan. Called from `mergeHCLFile` (`internal/runtime/config.go`) for every HCL source it loads; the call site lives after the file read so the embedded defaults — which never go through `mergeHCLFile` — stay quiet, and only operator-edited `ateam.hcl` layers can trip the warning. `detectStrayAllCaps` matches the bare `{{NAME}}` shape against a closed `knownRunnerTemplates` set mirroring `runner.TemplateVars.Replacer()`; anything outside that set is reported with a one-line "engine no longer rewrites ALL_CAPS; switch to dotted form" hint.
 
 ### Compatibility shims (remove after legacy data ages out)
 
@@ -211,12 +202,9 @@ These exist so users with pre-migration databases keep working. Each has a clear
 | Legacy branch in `internal/web/handlers.go::resolveRunFiles` and `handleRunFile` | `internal/web/handlers.go` | Same. |
 | `internal/web/handlers.go::resolveHistoryFile` + `resolvePromptFile` + `resolveOutputFile` (±5s fuzzy match against `<role>/history/<TS>.<kind>.md` for runs with empty `output_file`) | `internal/web/handlers.go` | When all runs have a populated `agent_execs.output_file`. |
 | `internal/web/history.go::discoverHistory` + `mergeHistory` (filename-scan fallback merged into the DB-driven view) | `internal/web/history.go` | When `<role>/history/<TS>.<kind>.md` is no longer present in any deployed project. |
-| `internal/root/migrate_logs.go` whole file + the migration call in `cmd/table.go` | — | When legacy projects are no longer expected. Drop the sentinel constant too. |
-| `legacyOutputSuffix` / `legacyPromptSuffix` / `legacyHistoryDir` (action → kind/path mapping) | `internal/root/migrate_logs.go` | With the migration. |
 | `internal/runner/template.go::EXECUTION_DIR` template alias (legacy alias for `OUTPUT_DIR` used by older `code_management_prompt.md`) | `internal/runner/template.go` | When all in-tree and user-overloaded prompts use `{{OUTPUT_DIR}}`. |
 | Streamed-text fallback that seeds `runtime/<id>/<primary>.md` when the agent didn't `Write` | `internal/runner/runner.go` (after the event loop) | When all default prompts reliably use the `Write` tool and we sandbox-deny stray writes. |
-| `internal/migrate/` whole package (v1 prompts/shared-artifact layout migrator + `warnLegacyPromptTokens` ALL_CAPS hint) and the `applyV1LayoutMigration` call in `internal/root/resolve.go` | `internal/migrate/v1_layout.go`, `internal/migrate/legacy_tokens.go` | When pre-v1 `.ateam` / `.ateamorg` layouts are no longer expected in any deployed project. Drop the `ATEAM_NO_MIGRATE` escape hatch too. |
-| `internal/runtime/allcaps_check.go` stray-`{{ALL_CAPS}}` warner (`detectStrayAllCaps` + `warnStrayAllCaps`) and the `mergeHCLFile` call site | `internal/runtime/allcaps_check.go`, `internal/runtime/config.go` | When operator-authored `runtime.hcl` files in deployed projects no longer reference legacy ALL_CAPS variable names. |
+| `internal/runtime/allcaps_check.go` stray-`{{ALL_CAPS}}` warner (`detectStrayAllCaps` + `warnStrayAllCaps`) and the `mergeHCLFile` call site | `internal/runtime/allcaps_check.go`, `internal/runtime/config.go` | When operator-authored `ateam.hcl` files in deployed projects no longer reference legacy ALL_CAPS variable names. |
 
 Search for `legacy` in those files to find the relevant blocks.
 
@@ -321,7 +309,7 @@ Design rationale: [`plans/feature_prompt_cmd_bundle_aware.md`](plans/feature_pro
 The codex agent matches claude on cost accounting, cache-token tracking, context utilization, verbose tool detail, and `ateam resume`. A few items are intentionally claude-only — a future contributor shouldn't try to "fix" them:
 
 - **OAuth login** (`claude setup-token`). OpenAI ships no equivalent; auth uses `OPENAI_API_KEY` or `~/.codex/auth.json` directly.
-- **Sandbox `--settings` JSON.** Codex CLI ships its own sandbox model (`workspace-write` / `read-only` plus approval policies). Codex sandbox flags belong in `agent "codex" { args = [...] }` in runtime.hcl, not in a settings JSON.
+- **Sandbox `--settings` JSON.** Codex CLI ships its own sandbox model (`workspace-write` / `read-only` plus approval policies). Codex sandbox flags belong in `agent "codex" { args = [...] }` in ateam.hcl, not in a settings JSON.
 - **Multi-turn turn count.** ateam invokes codex via `exec --json`, which is one-shot, so `Turns: 1` is hardcoded. There is no `turns` field to read.
 
 ### codex-tmux design notes
@@ -339,7 +327,7 @@ User-facing usage is in [CONFIG.md → `codex-tmux`](CONFIG.md#codex-tmux-experi
 CONFIG.md lists `ExtraVolumes` in the template-vars table but doesn't show the HCL example. To give the agent access to directories outside the standard mounts, use `extra_volumes` on a container definition (paths can be relative to the project source dir for portability) and/or `container_extra_args` on a profile.
 
 ```hcl
-// .ateam/runtime.hcl — extend the default docker container with custom mounts
+// .ateam/ateam.hcl — extend the default docker container with custom mounts
 container "docker-with-data" {
   type        = "docker"
   dockerfile  = "Dockerfile"
@@ -363,10 +351,11 @@ Relative host paths in `extra_volumes` are resolved from the project source dire
 
 ### `ateam project-rename`
 
-Update state after moving a project directory within the org. Since `state.sqlite` is per-project (inside `.ateam/`), no DB updates are needed. This command only renames the legacy state directory under `.ateamorg/projects/` if one exists.
+Re-register the current project in `~/.ateam/state/projects.hcl` after a directory move, or rename it with `--name` (rewrites the project block, the `project_id` of its state db rows, and the registry entry).
 
 ```bash
-ateam project-rename --old services/api --new backends/api
+ateam project-rename
+ateam project-rename --name backend
 ```
 
 | Flag | Description |

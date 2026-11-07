@@ -52,7 +52,7 @@ func buildAutoRolesContext(env *root.ResolvedEnv) (string, error) {
 	if env.Config != nil {
 		configRoles = env.Config.Roles
 	}
-	allKnown := promptdata.AllKnownRoleIDs(configRoles, env.ProjectDir, env.OrgDir)
+	allKnown := promptdata.AllKnownRoleIDs(configRoles, env.Layers)
 	writeRoleListing(&b, configRoles, allKnown)
 	fmt.Fprintln(&b, "```")
 	fmt.Fprintln(&b)

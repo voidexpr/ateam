@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -11,35 +12,28 @@ import (
 )
 
 // openStateDB opens state.sqlite under env.StateDir() (the project's .ateam/
-// when inside one, else the org's .ateamorg/ for scratch-mode exec/parallel).
-// Creates the file if missing. Returns an error if neither dir is resolved.
-//
-// On first open after upgrading to the logs/<exec_id>/ layout this also runs
-// MigrateLogsLayout — sentinel-guarded, so subsequent calls are no-ops.
+// when inside one, else ~/.ateam/state/ for scratch-mode exec/parallel).
+// Creates the file and its directory if missing.
 func openStateDB(env *root.ResolvedEnv) (*calldb.CallDB, error) {
 	if env.StateDir() == "" {
-		return nil, fmt.Errorf("no project (.ateam/) or org (.ateamorg/) directory found — run 'ateam install' or 'ateam init' first")
+		return nil, fmt.Errorf("no project .ateam/ and no user ateam directory found — run 'ateam init' first")
 	}
 	dbPath := env.ProjectDBPath()
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		return nil, fmt.Errorf("cannot create state directory %s: %w", filepath.Dir(dbPath), err)
+	}
 	db, err := calldb.Open(dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open state database %s: %w", dbPath, err)
-	}
-	if err := root.MigrateLogsLayout(env, db); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: log layout migration: %v\n", err)
 	}
 	return db, nil
 }
 
 // requireStateDB opens an existing state.sqlite from env.StateDir().
 // Returns an error if the database does not exist.
-//
-// Like openStateDB, this also runs MigrateLogsLayout so read-only commands
-// (ateam ps, cat, inspect, resume, tail, cost) trigger the migration when
-// they touch the DB.
 func requireStateDB(env *root.ResolvedEnv) (*calldb.CallDB, error) {
 	if env.StateDir() == "" {
-		return nil, fmt.Errorf("no project (.ateam/) or org (.ateamorg/) directory found")
+		return nil, fmt.Errorf("no project .ateam/ and no user ateam directory found")
 	}
 	dbPath := env.ProjectDBPath()
 	db, err := calldb.OpenIfExists(dbPath)
@@ -49,21 +43,14 @@ func requireStateDB(env *root.ResolvedEnv) (*calldb.CallDB, error) {
 	if db == nil {
 		return nil, fmt.Errorf("state database not found at %s — run a command like 'ateam exec' or 'ateam report' first", dbPath)
 	}
-	if err := root.MigrateLogsLayout(env, db); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: log layout migration: %v\n", err)
-	}
 	return db, nil
 }
 
 func checkConcurrentRunsEnv(db *calldb.CallDB, env *root.ResolvedEnv, action string, roles []string) error {
 	projectID := env.ProjectID()
 	// Scratch mode (no project) has no per-project namespace; skip the guard.
-	if projectID == "" && env.ProjectDir == "" {
+	if projectID == "" {
 		return nil
-	}
-	// Project resolved but path mapping yielded empty ID — real error.
-	if projectID == "" && env.OrgDir != "" {
-		return fmt.Errorf("cannot determine project ID for concurrency guard")
 	}
 	return checkConcurrentRuns(db, projectID, action, roles)
 }

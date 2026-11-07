@@ -88,10 +88,7 @@ func skipIfListenDenied(t *testing.T, err error) {
 func setupServeProject(t *testing.T) string {
 	t.Helper()
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -104,12 +101,12 @@ func setupServeProject(t *testing.T) string {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg, savedProj := orgFlag, projectFlag
+	savedOrg, savedProj := homeFlag, projectFlag
 	t.Cleanup(func() {
-		orgFlag = savedOrg
+		homeFlag = savedOrg
 		projectFlag = savedProj
 	})
-	orgFlag = filepath.Dir(orgDir)
+	homeFlag = orgDir
 	projectFlag = projPath
 	return projPath
 }

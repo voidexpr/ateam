@@ -9,7 +9,7 @@ import (
 )
 
 func TestLoadDefaults(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error loading defaults: %v", err)
 	}
@@ -33,10 +33,10 @@ func TestLoadDefaults(t *testing.T) {
 
 // TestDefaultClaudeAgentsShareHeadlessEnv pins the env that keeps headless
 // claude sessions from backgrounding long commands (see local.claude_env in
-// defaults/runtime.hcl) on every claude agent, whether it inherits via
+// defaults/ateam.hcl) on every claude agent, whether it inherits via
 // base = "claude" or references the local directly.
 func TestDefaultClaudeAgentsShareHeadlessEnv(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error loading defaults: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestDefaultClaudeAgentsShareHeadlessEnv(t *testing.T) {
 }
 
 func TestLoadDefaultProfile(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestLoadDefaultProfile(t *testing.T) {
 }
 
 func TestLoadTestProfile(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestLoadTestProfile(t *testing.T) {
 }
 
 func TestResolveProfile(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestResolveProfile(t *testing.T) {
 }
 
 func TestResolveUnknownProfile(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -128,11 +128,11 @@ agent "claude" {
   model   = "opus"
 }
 `
-	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte(hcl), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load("", dir)
+	cfg, err := Load([]string{dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -149,114 +149,15 @@ agent "claude" {
 	}
 }
 
-func TestOrgDefaultsOverride(t *testing.T) {
-	orgDir := t.TempDir()
-	defaultsDir := filepath.Join(orgDir, "defaults")
-	if err := os.MkdirAll(defaultsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
+// org/defaults/runtime.hcl overrides embedded defaults
 
-	// org/defaults/runtime.hcl overrides embedded defaults
-	defaultsHCL := `
-agent "claude" {
-  command = "claude"
-  args    = ["-p", "--output-format", "stream-json"]
-  model   = "sonnet"
-}
-`
-	if err := os.WriteFile(filepath.Join(defaultsDir, "runtime.hcl"), []byte(defaultsHCL), 0644); err != nil {
-		t.Fatal(err)
-	}
+// org/defaults sets model to sonnet
 
-	cfg, err := Load("", orgDir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+// org root overrides model to opus
 
-	ac := cfg.Agents["claude"]
-	if ac.Model != "sonnet" {
-		t.Errorf("expected model 'sonnet' from org defaults, got %q", ac.Model)
-	}
-}
+// Create the actual file elsewhere
 
-func TestOrgDefaultsThenOrgOverride(t *testing.T) {
-	orgDir := t.TempDir()
-	defaultsDir := filepath.Join(orgDir, "defaults")
-	if err := os.MkdirAll(defaultsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	// org/defaults sets model to sonnet
-	defaultsHCL := `
-agent "claude" {
-  command = "claude"
-  args    = ["-p"]
-  model   = "sonnet"
-}
-`
-	// org root overrides model to opus
-	orgHCL := `
-agent "claude" {
-  command = "claude"
-  args    = ["-p"]
-  model   = "opus"
-}
-`
-	if err := os.WriteFile(filepath.Join(defaultsDir, "runtime.hcl"), []byte(defaultsHCL), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(orgDir, "runtime.hcl"), []byte(orgHCL), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := Load("", orgDir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	ac := cfg.Agents["claude"]
-	if ac.Model != "opus" {
-		t.Errorf("expected org override model 'opus', got %q", ac.Model)
-	}
-}
-
-func TestOrgDefaultsSymlink(t *testing.T) {
-	orgDir := t.TempDir()
-	defaultsDir := filepath.Join(orgDir, "defaults")
-	if err := os.MkdirAll(defaultsDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Create the actual file elsewhere
-	srcDir := t.TempDir()
-	srcHCL := `
-agent "claude" {
-  command = "claude"
-  args    = ["-p"]
-  model   = "haiku"
-}
-`
-	srcPath := filepath.Join(srcDir, "runtime.hcl")
-	if err := os.WriteFile(srcPath, []byte(srcHCL), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Symlink from org/defaults/runtime.hcl -> srcPath
-	linkPath := filepath.Join(defaultsDir, "runtime.hcl")
-	if err := os.Symlink(srcPath, linkPath); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := Load("", orgDir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	ac := cfg.Agents["claude"]
-	if ac.Model != "haiku" {
-		t.Errorf("expected model 'haiku' from symlinked defaults, got %q", ac.Model)
-	}
-}
+// Symlink from org/defaults/runtime.hcl -> srcPath
 
 func TestProjectOverride(t *testing.T) {
 	orgDir := t.TempDir()
@@ -274,14 +175,14 @@ profile "custom" {
   container = "none"
 }
 `
-	if err := os.WriteFile(filepath.Join(orgDir, "runtime.hcl"), []byte(orgHCL), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(orgDir, ConfigFile), []byte(orgHCL), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(projDir, "runtime.hcl"), []byte(projHCL), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projDir, ConfigFile), []byte(projHCL), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(projDir, orgDir)
+	cfg, err := Load([]string{orgDir, projDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -294,7 +195,7 @@ profile "custom" {
 }
 
 func TestClaudeAgentConfig(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -309,7 +210,7 @@ func TestClaudeAgentConfig(t *testing.T) {
 }
 
 func TestMockAgentConfig(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -321,7 +222,7 @@ func TestMockAgentConfig(t *testing.T) {
 }
 
 func TestCodexAgentConfig(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -336,7 +237,7 @@ func TestCodexAgentConfig(t *testing.T) {
 }
 
 func TestCodexTmuxAgentConfig(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -376,7 +277,7 @@ func TestCodexTmuxAgentConfig(t *testing.T) {
 }
 
 func TestClaudeAgentEnv(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -395,7 +296,7 @@ func TestClaudeAgentEnv(t *testing.T) {
 }
 
 func TestCheapProfiles(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -426,7 +327,7 @@ func TestCheapProfiles(t *testing.T) {
 }
 
 func TestBuiltinAgentsHaveNoModelInArgs(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -446,7 +347,7 @@ func TestBuiltinAgentsHaveNoModelInArgs(t *testing.T) {
 }
 
 func TestModelWarnings(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -510,11 +411,11 @@ profile "legacy" {
 }
 `)
 	projDir := t.TempDir()
-	cfg, err := Load(projDir, orgDir)
+	cfg, err := Load([]string{orgDir, projDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	orgFile := filepath.Join(orgDir, "runtime.hcl")
+	orgFile := filepath.Join(orgDir, ConfigFile)
 
 	prof, ac, _, _ := cfg.ResolveProfile("pinned")
 	ws := cfg.ModelWarnings(prof, ac, "")
@@ -550,7 +451,7 @@ profile "unpinned" {
   container = "none"
 }
 `)
-	cfg, err = Load(projDir, orgDir)
+	cfg, err = Load([]string{orgDir, projDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -560,19 +461,19 @@ profile "unpinned" {
 	}
 	prof, ac, _, _ = cfg.ResolveProfile("unpinned")
 	ws = cfg.ModelWarnings(prof, ac, "")
-	if len(ws) != 1 || !strings.Contains(ws[0], "no model pinned") || !strings.Contains(ws[0], filepath.Join(projDir, "runtime.hcl")) {
+	if len(ws) != 1 || !strings.Contains(ws[0], "no model pinned") || !strings.Contains(ws[0], filepath.Join(projDir, ConfigFile)) {
 		t.Errorf("unpinned: got %q", strings.Join(ws, "\n"))
 	}
 }
 
 func TestEditHintPointsAtNearestLayer(t *testing.T) {
 	projDir := t.TempDir()
-	cfg, err := Load(projDir, "")
+	cfg, err := Load([]string{projDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	hint := cfg.editHint("claude")
-	if !strings.Contains(hint, filepath.Join(projDir, "runtime.hcl")) || !strings.Contains(hint, "create it") {
+	if !strings.Contains(hint, filepath.Join(projDir, ConfigFile)) || !strings.Contains(hint, "create it") {
 		t.Errorf("hint with no user layers should point at the missing project file: %q", hint)
 	}
 }
@@ -590,11 +491,11 @@ agent "claude" {
   }
 }
 `
-	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte(hcl), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load("", dir)
+	cfg, err := Load([]string{dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -609,7 +510,7 @@ agent "claude" {
 }
 
 func TestBaseInheritance(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -651,11 +552,11 @@ agent "child-agent" {
   model = "child-model"
 }
 `
-	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte(hcl), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load("", dir)
+	cfg, err := Load([]string{dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -693,11 +594,11 @@ agent "child-override" {
   effort = "low"
 }
 `
-	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte(hcl), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load("", dir)
+	cfg, err := Load([]string{dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -724,18 +625,18 @@ agent "b" {
   base = "a"
 }
 `
-	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte(hcl), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err := Load("", dir)
+	_, err := Load([]string{dir})
 	if err == nil {
 		t.Error("expected error for circular base reference")
 	}
 }
 
 func TestSandboxAttribute(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -773,11 +674,11 @@ agent "test-agent" {
   denied_paths = ["/etc/secrets"]
 }
 `
-	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte(hcl), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load("", dir)
+	cfg, err := Load([]string{dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -814,11 +715,11 @@ agent "child-override" {
   rw_paths = ["/override/rw"]
 }
 `
-	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte(hcl), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load("", dir)
+	cfg, err := Load([]string{dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -869,11 +770,11 @@ profile "test" {
   container = "none"
 }
 `
-	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte(hcl), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load("", dir)
+	cfg, err := Load([]string{dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -885,7 +786,7 @@ profile "test" {
 }
 
 func TestLocalsDefaultsSandbox(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -923,11 +824,11 @@ profile "no-extras" {
   container = "none"
 }
 `
-	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte(hcl), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load("", dir)
+	cfg, err := Load([]string{dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -964,11 +865,11 @@ profile "docker-profile" {
   container_extra_args = ["--cpus", "2"]
 }
 `
-	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte(hcl), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load("", dir)
+	cfg, err := Load([]string{dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -980,7 +881,7 @@ profile "docker-profile" {
 }
 
 func TestConfigDir(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1016,11 +917,11 @@ agent "child-override" {
   config_dir = ".other"
 }
 `
-	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte(hcl), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load("", dir)
+	cfg, err := Load([]string{dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1037,7 +938,7 @@ agent "child-override" {
 }
 
 func TestDockerContainerConfig(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1067,7 +968,7 @@ func TestDockerContainerConfig(t *testing.T) {
 }
 
 func TestPricingBlockParsed(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1106,7 +1007,7 @@ func TestPricingBlockParsed(t *testing.T) {
 }
 
 func TestPricingInheritance(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1159,11 +1060,11 @@ agent "child-override" {
   }
 }
 `
-	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte(hcl), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := Load("", dir)
+	cfg, err := Load([]string{dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1191,7 +1092,7 @@ agent "child-override" {
 }
 
 func TestMockPricingBlock(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1216,7 +1117,7 @@ func TestMockPricingBlock(t *testing.T) {
 }
 
 func TestDockerProfile(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1244,7 +1145,7 @@ func TestDockerProfile(t *testing.T) {
 func TestContainerPrecheckField(t *testing.T) {
 	dir := t.TempDir()
 
-	_ = os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(`
+	_ = os.WriteFile(filepath.Join(dir, ConfigFile), []byte(`
 agent "mock" {
   type    = "builtin"
   command = "mock"
@@ -1260,7 +1161,7 @@ profile "docker" {
 }
 `), 0644)
 
-	cfg, err := Load(dir, "")
+	cfg, err := Load([]string{dir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1280,7 +1181,7 @@ func TestContainerPrecheckOverride(t *testing.T) {
 	_ = os.MkdirAll(projectDir, 0755)
 
 	// Org defines precheck
-	_ = os.WriteFile(filepath.Join(orgDir, "runtime.hcl"), []byte(`
+	_ = os.WriteFile(filepath.Join(orgDir, ConfigFile), []byte(`
 container "docker" {
   type     = "docker"
   precheck = ["sh", "org-precheck.sh"]
@@ -1288,14 +1189,14 @@ container "docker" {
 `), 0644)
 
 	// Project overrides it
-	_ = os.WriteFile(filepath.Join(projectDir, "runtime.hcl"), []byte(`
+	_ = os.WriteFile(filepath.Join(projectDir, ConfigFile), []byte(`
 container "docker" {
   type     = "docker"
   precheck = ["sh", "project-precheck.sh"]
 }
 `), 0644)
 
-	cfg, err := Load(projectDir, orgDir)
+	cfg, err := Load(layersOf(projectDir, orgDir))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1314,7 +1215,7 @@ func TestResolvePrecheckCmdExplicit(t *testing.T) {
 
 	// Bare command names like "sh" are not resolved relative to projectDir
 	cc := &ContainerConfig{Precheck: []string{"sh", "custom-precheck.sh"}}
-	got := ResolvePrecheckCmd(cc, projectDir, "", "")
+	got := ResolvePrecheckCmd(cc, layersOf(projectDir, ""), "")
 	want := []string{"sh", "custom-precheck.sh"}
 	if !slices.Equal(got, want) {
 		t.Errorf("expected %v, got %v", want, got)
@@ -1328,7 +1229,7 @@ func TestResolvePrecheckCmdExplicitRelativePath(t *testing.T) {
 
 	// Paths with separators are resolved relative to projectDir
 	cc := &ContainerConfig{Precheck: []string{"scripts/precheck.sh", "--verbose"}}
-	got := ResolvePrecheckCmd(cc, projectDir, "", "")
+	got := ResolvePrecheckCmd(cc, layersOf(projectDir, ""), "")
 	want := []string{filepath.Join(projectDir, "scripts/precheck.sh"), "--verbose"}
 	if !slices.Equal(got, want) {
 		t.Errorf("expected %v, got %v", want, got)
@@ -1337,7 +1238,7 @@ func TestResolvePrecheckCmdExplicitRelativePath(t *testing.T) {
 
 func TestResolvePrecheckCmdExplicitAbsolute(t *testing.T) {
 	cc := &ContainerConfig{Precheck: []string{"/usr/local/bin/check", "--verify"}}
-	got := ResolvePrecheckCmd(cc, "/some/project", "", "")
+	got := ResolvePrecheckCmd(cc, layersOf("/some/project", ""), "")
 	want := []string{"/usr/local/bin/check", "--verify"}
 	if !slices.Equal(got, want) {
 		t.Errorf("expected %v, got %v", want, got)
@@ -1346,7 +1247,7 @@ func TestResolvePrecheckCmdExplicitAbsolute(t *testing.T) {
 
 func TestResolvePrecheckCmdMakeCommand(t *testing.T) {
 	cc := &ContainerConfig{Precheck: []string{"make", "docker-restart"}}
-	got := ResolvePrecheckCmd(cc, "/some/project", "", "")
+	got := ResolvePrecheckCmd(cc, layersOf("/some/project", ""), "")
 	want := []string{"make", "docker-restart"}
 	if !slices.Equal(got, want) {
 		t.Errorf("expected %v, got %v", want, got)
@@ -1355,7 +1256,7 @@ func TestResolvePrecheckCmdMakeCommand(t *testing.T) {
 
 func TestResolvePrecheckCmdWithContainerNameTemplate(t *testing.T) {
 	cc := &ContainerConfig{Precheck: []string{"sh", "precheck.sh", "{{CONTAINER_NAME}}"}}
-	got := ResolvePrecheckCmd(cc, "/some/project", "", "")
+	got := ResolvePrecheckCmd(cc, layersOf("/some/project", ""), "")
 	want := []string{"sh", "precheck.sh", "{{CONTAINER_NAME}}"}
 	if !slices.Equal(got, want) {
 		t.Errorf("expected %v, got %v", want, got)
@@ -1371,7 +1272,7 @@ func TestResolvePrecheckCmdConvention(t *testing.T) {
 	_ = os.WriteFile(scriptPath, []byte("#!/bin/sh\nexit 0\n"), 0755)
 
 	cc := &ContainerConfig{}
-	got := ResolvePrecheckCmd(cc, projectDir, "", "")
+	got := ResolvePrecheckCmd(cc, layersOf(projectDir, ""), "")
 	want := []string{"sh", scriptPath, "{{CONTAINER_NAME}}"}
 	if !slices.Equal(got, want) {
 		t.Errorf("expected %v, got %v", want, got)
@@ -1390,7 +1291,7 @@ func TestResolvePrecheckCmdRoleOverride(t *testing.T) {
 	_ = os.WriteFile(projectScript, []byte("#!/bin/sh\nexit 0\n"), 0755)
 
 	cc := &ContainerConfig{}
-	got := ResolvePrecheckCmd(cc, projectDir, "", "security")
+	got := ResolvePrecheckCmd(cc, layersOf(projectDir, ""), "security")
 	want := []string{"sh", roleScript, "{{CONTAINER_NAME}}"}
 	if !slices.Equal(got, want) {
 		t.Errorf("expected role-level %v, got %v", want, got)
@@ -1408,43 +1309,24 @@ func TestResolvePrecheckCmdOrgFallback(t *testing.T) {
 	_ = os.WriteFile(orgScript, []byte("#!/bin/sh\nexit 0\n"), 0755)
 
 	cc := &ContainerConfig{}
-	got := ResolvePrecheckCmd(cc, projectDir, orgDir, "")
+	got := ResolvePrecheckCmd(cc, layersOf(projectDir, orgDir), "")
 	want := []string{"sh", orgScript, "{{CONTAINER_NAME}}"}
 	if !slices.Equal(got, want) {
 		t.Errorf("expected org-level %v, got %v", want, got)
 	}
 }
 
-func TestResolvePrecheckCmdOrgDefaultsFallback(t *testing.T) {
-	dir := t.TempDir()
-	projectDir := filepath.Join(dir, "project")
-	orgDir := filepath.Join(dir, "org")
-	orgDefaultsDir := filepath.Join(orgDir, "defaults")
-	_ = os.MkdirAll(projectDir, 0755)
-	_ = os.MkdirAll(orgDefaultsDir, 0755)
-
-	script := filepath.Join(orgDefaultsDir, "docker-agent-precheck.sh")
-	_ = os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0755)
-
-	cc := &ContainerConfig{}
-	got := ResolvePrecheckCmd(cc, projectDir, orgDir, "")
-	want := []string{"sh", script, "{{CONTAINER_NAME}}"}
-	if !slices.Equal(got, want) {
-		t.Errorf("expected org defaults %v, got %v", want, got)
-	}
-}
-
 func TestResolvePrecheckCmdNone(t *testing.T) {
 	dir := t.TempDir()
 	cc := &ContainerConfig{}
-	got := ResolvePrecheckCmd(cc, dir, "", "")
+	got := ResolvePrecheckCmd(cc, layersOf(dir, ""), "")
 	if got != nil {
 		t.Errorf("expected nil when no script exists, got %v", got)
 	}
 }
 
 func TestIsolatedProfile(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1462,7 +1344,7 @@ func TestSandboxDetectionTopLevel(t *testing.T) {
 	// Defaults set sandbox_detection = false and docker_detection = true
 	// explicitly. The values must be discoverable in `ateam env` and in
 	// the rendered defaults file.
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("Load defaults: %v", err)
 	}
@@ -1475,11 +1357,11 @@ func TestSandboxDetectionTopLevel(t *testing.T) {
 
 	// User org file sets it to false — must be picked up.
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"),
+	if err := os.WriteFile(filepath.Join(dir, ConfigFile),
 		[]byte("sandbox_detection = false\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err = Load("", dir)
+	cfg, err = Load([]string{dir})
 	if err != nil {
 		t.Fatalf("Load with override: %v", err)
 	}
@@ -1492,11 +1374,11 @@ func TestSandboxDetectionTopLevel(t *testing.T) {
 
 	// Project override wins over org override (last writer wins).
 	projDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(projDir, "runtime.hcl"),
+	if err := os.WriteFile(filepath.Join(projDir, ConfigFile),
 		[]byte("sandbox_detection = true\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err = Load(projDir, dir)
+	cfg, err = Load(layersOf(projDir, dir))
 	if err != nil {
 		t.Fatalf("Load project+org: %v", err)
 	}
@@ -1508,7 +1390,7 @@ func TestSandboxDetectionTopLevel(t *testing.T) {
 // writeLayer writes a runtime.hcl into dir and returns dir.
 func writeLayer(t *testing.T, dir, hcl string) string {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ConfigFile), []byte(hcl), 0644); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -1520,7 +1402,7 @@ agent "claude" {
   model = "opus"
 }
 `)
-	cfg, err := Load("", orgDir)
+	cfg, err := Load([]string{orgDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1531,7 +1413,7 @@ agent "claude" {
 	if ac.Command != "claude" || len(ac.Args) == 0 || ac.Sandbox == "" {
 		t.Errorf("built-in command/args/sandbox must survive a partial override: cmd=%q args=%v sandbox=%d bytes", ac.Command, ac.Args, len(ac.Sandbox))
 	}
-	if src, ok := cfg.Source("agent.claude.model"); !ok || src.Layer != filepath.Join(orgDir, "runtime.hcl") || src.Value != "opus" {
+	if src, ok := cfg.Source("agent.claude.model"); !ok || src.Layer != filepath.Join(orgDir, ConfigFile) || src.Value != "opus" {
 		t.Errorf("model source: got %+v (ok=%v)", src, ok)
 	}
 	if src, ok := cfg.Source("agent.claude.command"); !ok || src.Layer != BuiltinLayer {
@@ -1548,7 +1430,7 @@ agent "claude" {
   }
 }
 `)
-	cfg, err := Load("", orgDir)
+	cfg, err := Load([]string{orgDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1572,50 +1454,9 @@ agent "claude" {
 	}
 }
 
-func TestPerFieldMergeAcrossThreeLayers(t *testing.T) {
-	orgDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(orgDir, "defaults"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	writeLayer(t, filepath.Join(orgDir, "defaults"), `agent "claude" { model = "sonnet" }`)
-	writeLayer(t, orgDir, `agent "claude" { effort = "high" }`)
-	projDir := writeLayer(t, t.TempDir(), `agent "claude" { model = "opus" }`)
-
-	cfg, err := Load(projDir, orgDir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	ac := cfg.Agents["claude"]
-	if ac.Model != "opus" || ac.Effort != "high" {
-		t.Errorf("got model=%q effort=%q, want opus/high", ac.Model, ac.Effort)
-	}
-	chain := cfg.Sources["agent.claude.model"]
-	if len(chain) != 2 || chain[0].Value != "sonnet" || chain[1].Value != "opus" {
-		t.Errorf("model chain: %+v", chain)
-	}
-	if len(cfg.Layers) != 4 || cfg.Layers[0].Label != BuiltinLayer || !cfg.Layers[3].Found {
-		t.Errorf("layers: %+v", cfg.Layers)
-	}
-}
-
-func TestLayersListMissingFiles(t *testing.T) {
-	cfg, err := Load(t.TempDir(), t.TempDir())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(cfg.Layers) != 4 {
-		t.Fatalf("expected 4 layers, got %+v", cfg.Layers)
-	}
-	for _, l := range cfg.Layers[1:] {
-		if l.Found {
-			t.Errorf("layer %q should be reported missing", l.Label)
-		}
-	}
-}
-
 func TestProfilePartialOverride(t *testing.T) {
 	projDir := writeLayer(t, t.TempDir(), `profile "default" { agent = "mock" }`)
-	cfg, err := Load(projDir, "")
+	cfg, err := Load([]string{projDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1630,7 +1471,7 @@ func TestProfilePartialOverride(t *testing.T) {
 
 func TestProfileMissingContainerRejected(t *testing.T) {
 	projDir := writeLayer(t, t.TempDir(), `profile "half" { agent = "mock" }`)
-	_, err := Load(projDir, "")
+	_, err := Load([]string{projDir})
 	if err == nil || !strings.Contains(err.Error(), `profile "half"`) {
 		t.Fatalf("expected error naming the profile, got %v", err)
 	}
@@ -1638,7 +1479,7 @@ func TestProfileMissingContainerRejected(t *testing.T) {
 
 func TestContainerPartialOverride(t *testing.T) {
 	projDir := writeLayer(t, t.TempDir(), `container "docker" { forward_env = ["ONLY_THIS"] }`)
-	cfg, err := Load(projDir, "")
+	cfg, err := Load([]string{projDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1669,7 +1510,7 @@ agent "child" {
   }
 }
 `)
-	cfg, err := Load("", orgDir)
+	cfg, err := Load([]string{orgDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1709,7 +1550,7 @@ agent "child" {
   tmux_width               = 0
 }
 `)
-	cfg, err := Load("", orgDir)
+	cfg, err := Load([]string{orgDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1723,7 +1564,7 @@ agent "child" {
 }
 
 func TestBaseInheritsPricingWhenChildHasNone(t *testing.T) {
-	cfg, err := Load("", "")
+	cfg, err := Load(nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1735,24 +1576,51 @@ func TestBaseInheritsPricingWhenChildHasNone(t *testing.T) {
 	}
 }
 
-func TestModelWarningsPointAtUpdateForStaleOrgDefaults(t *testing.T) {
-	orgDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(orgDir, "defaults"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	writeLayer(t, filepath.Join(orgDir, "defaults"), `
-agent "claude-sonnet" {
-  base = "claude"
-  args = ["-p", "--model", "sonnet"]
-}
-`)
-	cfg, err := Load("", orgDir)
+func TestPerFieldMergeAcrossThreeLayers(t *testing.T) {
+	homeDir := writeLayer(t, t.TempDir(), `agent "claude" { model = "sonnet" }`)
+	parentDir := writeLayer(t, t.TempDir(), `agent "claude" { effort = "high" }`)
+	projDir := writeLayer(t, t.TempDir(), `agent "claude" { model = "opus" }`)
+
+	cfg, err := Load([]string{homeDir, parentDir, projDir})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	prof, ac, _, _ := cfg.ResolveProfile("cheap")
-	ws := cfg.ModelWarnings(prof, ac, "")
-	if len(ws) != 1 || !strings.Contains(ws[0], "ateam update") {
-		t.Errorf("expected one warning pointing at ateam update, got %q", strings.Join(ws, "\n"))
+	ac := cfg.Agents["claude"]
+	if ac.Model != "opus" || ac.Effort != "high" {
+		t.Errorf("got model=%q effort=%q, want opus/high", ac.Model, ac.Effort)
 	}
+	chain := cfg.Sources["agent.claude.model"]
+	if len(chain) != 2 || chain[0].Value != "sonnet" || chain[1].Value != "opus" {
+		t.Errorf("model chain: %+v", chain)
+	}
+	if len(cfg.Layers) != 4 || cfg.Layers[0].Label != BuiltinLayer || !cfg.Layers[3].Found {
+		t.Errorf("layers: %+v", cfg.Layers)
+	}
+}
+
+func TestLayersListMissingFiles(t *testing.T) {
+	cfg, err := Load([]string{t.TempDir(), t.TempDir(), t.TempDir()})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Layers) != 4 {
+		t.Fatalf("expected 4 layers, got %+v", cfg.Layers)
+	}
+	for _, l := range cfg.Layers[1:] {
+		if l.Found {
+			t.Errorf("layer %q should be reported missing", l.Label)
+		}
+	}
+}
+
+// layersOf builds a layer list from the old (projectDir, orgDir) test shape:
+// the org dir is the lower layer, the project dir the higher one.
+func layersOf(projectDir, orgDir string) []string {
+	var out []string
+	for _, d := range []string{orgDir, projectDir} {
+		if d != "" {
+			out = append(out, d)
+		}
+	}
+	return out
 }

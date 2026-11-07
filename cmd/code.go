@@ -163,7 +163,7 @@ func runCode(opts CodeOptions) error {
 	if subRunProfile == "" && opts.Agent == "" {
 		subRunProfile = env.Config.ResolveProfile(runner.ActionExec, "").Name
 	}
-	subRunArgs := buildSubRunArgs(opts, subRunProfile, env.SourceDir, orgFlag, workDirFlag)
+	subRunArgs := buildSubRunArgs(opts, subRunProfile, env.SourceDir, homeFlag, workDirFlag)
 
 	timeout := env.Config.Code.EffectiveTimeout(opts.Timeout)
 	supervisorEnv := supervisorAgentEnv(env.Config.Exec.EffectiveTimeout(0), timeout)
@@ -418,7 +418,7 @@ func checkDockerInDocker(env *root.ResolvedEnv, supervisorProfile, subRunProfile
 	if supervisorProfile == "" && subRunProfile == "" {
 		return nil
 	}
-	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
+	rtCfg, err := runtime.Load(env.Layers)
 	if err != nil {
 		return nil // let the runner resolution surface this error later
 	}
@@ -517,7 +517,7 @@ func buildSubRunArgs(opts CodeOptions, subRunProfile, sourceDir, orgPath, workDi
 		parts = append(parts, "--project", shellQuoteSingle(sourceDir))
 	}
 	if orgPath != "" {
-		parts = append(parts, "--org", shellQuoteSingle(orgPath))
+		parts = append(parts, "--home", shellQuoteSingle(orgPath))
 	}
 	if workDir != "" {
 		parts = append(parts, "--work-dir", shellQuoteSingle(workDir))

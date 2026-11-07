@@ -111,7 +111,7 @@ func runResume(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("run %d has no stream file recorded", row.ID)
 	}
 
-	streamPath := root.ResolveStreamPath(env.ProjectDir, env.OrgDir, row.AgentFile)
+	streamPath := root.ResolveStreamPath(env.StateDir(), row.AgentFile)
 	sessionID, err := resolveSessionID(streamPath, row.Agent)
 	if err != nil {
 		return fmt.Errorf("cannot read session id from %s: %w", streamPath, err)
@@ -470,7 +470,7 @@ func configDirFromRuntime(env *root.ResolvedEnv, row *calldb.RecentRow) string {
 	if env == nil || row == nil {
 		return ""
 	}
-	cfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
+	cfg, err := runtime.Load(env.Layers)
 	if err != nil || cfg == nil {
 		return ""
 	}

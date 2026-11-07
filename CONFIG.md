@@ -4,128 +4,120 @@ Configuration files and runtime config for ATeam. For command-line invocations, 
 
 ## Directory Layout
 
-Prompts compose via a 3-anchor chain: **project (`.ateam/`) → org (`.ateamorg/`) → embedded** (built into the ateam binary). The same filename at a more-specific anchor overrides; different filenames at any anchor compose additively (see [Prompt Composition](#prompt-composition) below).
+One directory name, `.ateam/`, and one file, `ateam.hcl`, at every level:
 
-### Organization: `.ateamorg/`
+- **`~/.ateam/`** (or `$ATEAM_HOME`, or `--home DIR`) is the user-wide layer: config you want in every project, plus your state. It is never a project.
+- **`<project>/.ateam/`** is the project: its `ateam.hcl` has a `project { name = "..." }` block. `ateam init` creates it and registers the project under `~/.ateam/state/projects.hcl`.
+- Any **`.ateam/` in an ancestor directory** of the project (a monorepo root, a team folder) is a config-only layer.
 
-Created by `ateam install`. Holds shared defaults and org-level overrides.
+Discovery walks up from the current directory. The nearest `.ateam/` whose `ateam.hcl` names a project is the project; every other `.ateam/` found is a layer. Config layers, lowest precedence first: **built-in defaults → `~/.ateam` → ancestors (outermost first) → project**. Prompts and Dockerfiles resolve the same way, nearest first. Without a project, `exec` and `parallel` run in scratch mode with state under `~/.ateam/state/`.
+
+A `.ateamorg/` directory or a `.ateam/config.toml` from an earlier version stops ateam with an error that spells out the move (see [Migrating from `.ateamorg`](#migrating-from-ateamorg)).
+
+### User layer: `~/.ateam/`
+
+Created on first use (`ateam init`, or the first scratch run). Configuration at the top level, state under `state/`:
 
 ```
-.ateamorg/
-  defaults/                                    # embedded defaults written to disk (kept in sync via `ateam update`)
-    runtime.hcl                                # runtime config (agents, containers, profiles)
-    Dockerfile                                 # default Dockerfile for container builds
-    prompts/                                   # the v1 prompt tree (mirrors what the binary ships)
-      _pre.context.md                          # root-level pre — applied to every prompt
-      review.prompt.md                         # supervisor review body
-      code_management.prompt.md                # supervisor code-management body
-      code_verify.prompt.md                    # supervisor verify body
-      auto_setup.prompt.md                     # auto-setup body
-      exec_debug.prompt.md                     # inspect --auto-debug body
-      report_auto_roles.prompt.md              # --auto-roles planner body
-      code.prompt.md                           # implementer body piped into per-task `ateam exec`
-      report/
-        _pre.intro.md                          # dir-level pre — applied to every role/<R>.prompt.md
-        _post.format.md                        # dir-level post — output format / validation
-        <NAME>.prompt.md                       # per-role report bodies
-  runtime.hcl                                  # org-level runtime config override (optional)
-  Dockerfile                                   # org-level Dockerfile override (optional)
-  prompts/                                     # org-level prompt overrides (any filename from defaults/prompts/)
-    _pre.<NAME>.md                             # add an org-wide pre fragment to every prompt
-    report/<NAME>.prompt.md                    # override a role's body
-    report/<NAME>.post.<NAME>.md               # add a composable post fragment to a role
-    code.post.extra.md                         # add a composable extra to the implementer body
-    review.post.extra.md                       # add a composable extra to the supervisor review
-    # … any other file matching the filename patterns defaults/prompts/ ships with
+~/.ateam/
+  ateam.hcl                                    # user-wide overrides: agents, profiles, default_profile, timeouts, role defaults
+  prompts/                                     # user-wide prompt overrides (same filename patterns as a project)
+  Dockerfile                                   # user-wide Dockerfile override (optional)
+  secrets.env                                  # global secret scope (file backend)
+  state/                                       # everything that is not configuration
+    projects.hcl                               # registry: project name → path
+    state.sqlite, logs/, runtime/              # scratch-mode runs (exec/parallel outside a project)
+    cache/                                     # cross-compiled companion binaries, tmux sockets, …
+    agents/<name>/                             # agent config dirs (CLAUDE_CONFIG_DIR / CODEX_HOME) for unattended runs
 ```
 
-### Project: `.ateam/`
+`ateam cat` prints the built-in defaults (`ateam cat --defaults`); there is no on-disk copy to keep in sync.
 
-Created by `ateam init`. Self-contained: config, prompts, generated artifacts, and runtime state.
+### Project: `<project>/.ateam/`
 
-Versioned files are at the top level. Runtime artifacts (`logs/`, `runtime/`, `state.sqlite`, `secrets.env`) are gitignored.
+Created by `ateam init`. Versioned files at the top level, runtime artifacts gitignored.
 
 ```
 .ateam/
-  .gitignore                                   # excludes state.sqlite*, logs/, runtime/, secrets.env
-  config.toml                                  # project configuration
-  state.sqlite                                 # call database [gitignored]
-  secrets.env                                  # project-scoped secrets [gitignored]
-  runtime.hcl                                  # project-level runtime override (optional)
-
+  .gitignore                                   # excludes state.sqlite*, logs/, runtime/, cache/, secrets.env
+  ateam.hcl                                    # project block, roles, supervisor profiles, agent/profile overrides
+  secrets.env                                  # project secret scope [gitignored]
   prompts/                                     # project-level prompt overrides
     _pre.<NAME>.md                             # project-wide pre fragment
     code.post.<NAME>.md                        # project-wide implementer post fragment
     review.post.<NAME>.md                      # project-wide review post fragment
     report/<NAME>.prompt.md                    # role body override
     report/<NAME>.post.<NAME>.md               # composable role post fragment
-    # … same filename patterns as .ateamorg/prompts/
+  Dockerfile                                   # project Dockerfile (optional, or generated by --docker-auto-setup)
 
   shared/                                      # cross-agent artifacts (gitignored or versioned per project policy)
-    report/<NAME>/<NAME>.md                    # latest successful report per role
-    review/review.md                           # latest successful supervisor review
-    verify/verify.md                           # latest successful verification report
-    auto_setup/auto_setup.md                   # auto-setup output
+    report/<NAME>.md                           # latest successful report per role
+    review.md                                  # latest successful supervisor review
+    verify.md                                  # latest successful verification report
+    auto_setup.md                              # auto-setup output
     code/<exec_id>/                            # per-exec code-session artifacts
 
+  state.sqlite                                 # call database [gitignored]
   runtime/<exec_id>/                           # per-execution scratch [gitignored]
   logs/<exec_id>/                              # forensic logs (stream, stderr, cmd.md) [gitignored]
 ```
 
-The auto-migrator upgrades pre-v1 layouts (`roles/`, `supervisor/`, `*_base_prompt.md`) to this shape on first contact. `ATEAM_NO_MIGRATE=1` opts out — not recommended unless you know why.
+## `ateam.hcl`
 
-## `config.toml`
+One file holds everything, and any block may appear in any layer; a nearer layer overrides only the attributes it sets (see [Layers](#layers)). `ateam init` writes the project block and the role list:
 
-```toml
-[project]
-name = "myproject"
+```hcl
+project {
+  name = "myproject"           // the project's identity: unique, [a-z0-9._-]
+  // default_profile = "cheap" // profile for every run unless overridden
+  // report_max_parallel    = 3
+  // report_timeout_minutes = 20
+  // review_timeout_minutes = 20
+  // code_timeout_minutes   = 120
+  // verify_timeout_minutes = 30
+  // exec_timeout_minutes   = 60
+  // serve_port = 8080         // fixed port for `ateam serve` (default: random)
+}
 
-[git]
-repo = "."
-remote_origin_url = "git@github.com:org/repo.git"
+role "project.security" { status = "on" }
+role "test.gaps"        { status = "on" }
+role "code.structure"   { status = "off" }
+role "project.security" { profile = "docker" }   // run this role elsewhere (merges with the status above)
 
-[report]
-max_parallel = 3
-report_timeout_minutes = 20
+supervisor {
+  code_profile = "cheap"     // use a cheaper model for coding sub-runs
+}
 
-[review]
-timeout_minutes = 20
-
-[code]
-timeout_minutes = 120
-
-[verify]
-timeout_minutes = 30
-
-[exec]
-timeout_minutes = 60
-
-# [serve]
-# port = 8080  # fixed port for 'ateam serve' (default: random)
-
-[roles]
-"project.security" = "on"
-"test.gaps" = "on"
-"code.structure" = "off"
-
-# [supervisor]
-# code_profile = "cheap"          # use a cheaper model for coding sub-runs
-
-# [profiles]
-# [profiles.roles]
-# "project.security" = "docker"    # run security reports in Docker
-# critical_code_reviewer = "codex" # use codex agent for this role
-
-# [sandbox-extra]
-# allow_write = ["/path/to/extra/writable/dir"]
-# allow_read = ["/path/to/extra/readable/dir"]
-# allow_domains = ["api.example.com"]
-# unsandboxed_commands = ["make:*"]
+sandbox_extra {
+  allow_write = ["/path/to/extra/writable/dir"]
+  allow_read  = ["/path/to/extra/readable/dir"]
+  allow_domains = ["api.example.com"]
+  unsandboxed_commands = ["make:*"]
+}
 ```
 
-### `[sandbox-extra]`
+`ateam env` shows the merged result per profile and which file set each value.
 
-Grant additional sandbox permissions to agents running in this project. These paths and domains are merged into the Claude sandbox settings alongside the defaults from `runtime.hcl`.
+### `project`
+
+| Key | Description |
+|-----|-------------|
+| `name` | The project's identity: its id in the state db and the registry. Only the project layer sets it; `~/.ateam` is never a project. |
+| `default_profile` | Profile for every run unless a role or supervisor setting overrides it |
+| `report_max_parallel`, `report_timeout_minutes` | Report fan-out and per-role timeout |
+| `review_timeout_minutes`, `code_timeout_minutes`, `verify_timeout_minutes`, `exec_timeout_minutes` | Per-action timeouts |
+| `serve_port` | Fixed port for `ateam serve` |
+
+### `role "<id>"`
+
+| Key | Description |
+|-----|-------------|
+| `status` | `"on"` or `"off"`: whether `ateam report` (and `--roles all`) runs the role. Unlisted roles keep the built-in default. |
+| `profile` | Profile or agent name to run this role with, instead of the default |
+
+### `sandbox_extra`
+
+Grant additional sandbox permissions to agents running in this project. These paths and domains are merged into the Claude sandbox settings alongside the agent's `sandbox` template.
 
 | Key | Description |
 |-----|-------------|
@@ -136,15 +128,7 @@ Grant additional sandbox permissions to agents running in this project. These pa
 
 All paths are absolute. Use `ateam env --claude-sandbox` to inspect the final merged sandbox settings.
 
-```toml
-[sandbox-extra]
-allow_write = ["/data/output", "/tmp/scratch"]
-allow_read = ["/opt/shared-tools"]
-allow_domains = ["api.internal.example.com", "registry.npmjs.org"]
-unsandboxed_commands = ["make:*", "docker:build"]
-```
-
-### `[supervisor]`
+### `supervisor`
 
 Configure which profiles the supervisor and code phases use.
 
@@ -155,55 +139,29 @@ Configure which profiles the supervisor and code phases use.
 | `code_profile` | Profile for code sub-runs (passed to `ateam exec --profile`) |
 | `code_supervisor_profile` | Profile for the code management supervisor itself |
 
-```toml
-[supervisor]
-code_profile = "cheap"              # use sonnet for coding sub-runs
-code_supervisor_profile = "default" # use default for the supervisor
-```
-
-### `[profiles]`
-
-Map individual roles to specific profiles or agents. This lets you run different roles with different agents or runtime configurations.
-
-```toml
-[profiles]
-[profiles.roles]
-"project.security" = "docker"     # run security reports in Docker
-critical_code_reviewer = "codex"  # use codex agent for this role
-"test.gaps" = "docker"            # if test discovery needs Docker for the project's runner
-```
-
-Values can be either a **profile name** (defined in `runtime.hcl`) or an **agent name** (also defined in `runtime.hcl`). When the value matches a known agent but not a profile, it's treated as an agent shorthand — equivalent to `--agent NAME` on the CLI.
-
 **Profile resolution order** (first match wins):
 1. CLI flag (`--profile` or `--agent`) — overrides everything
-2. `[profiles.roles]` — per-role override from config.toml
-3. `[supervisor]` action-specific profile (for review/code actions)
-4. `[supervisor]` default_profile
-5. `[project]` default_profile
+2. `role "<id>" { profile = ... }` — per-role override
+3. `supervisor` action-specific profile (for review/code actions)
+4. `supervisor.default_profile`
+5. `project.default_profile`
 6. Built-in `"default"` profile
 
-See [Profiles](#profiles) under Runtime Configuration for `runtime.hcl` profile definitions.
+A `profile` value can be either a **profile name** or an **agent name** (both defined by `agent` / `profile` blocks). When the value matches a known agent but not a profile, it's treated as an agent shorthand — equivalent to `--agent NAME` on the CLI. `ateam env` and every `--dry-run` print which setting chose the profile.
 
-### `[container-extra]`
+### `container_extra`
 
-Add extra Docker arguments, environment forwarding, or environment variables to container runs. Merged with the container definition from `runtime.hcl`.
+Add extra Docker arguments, environment forwarding, or environment variables to container runs. Merged with the `container` block.
 
 | Key | Description |
 |-----|-------------|
 | `extra_args` | Additional `docker run` flags (e.g., `["--cpus=2", "--memory=4g"]`) |
 | `forward_env` | Additional env var names to forward into containers |
-| `env` | Static env vars to set inside containers (key-value map) |
-
-```toml
-[container-extra]
-extra_args = ["--cpus=2"]
-forward_env = ["MY_CUSTOM_TOKEN"]
-```
+| `env` | Static env vars to set inside containers (key-value map, merged per key across layers) |
 
 ### Custom Roles
 
-Create a custom role by adding a `<NAME>.prompt.md` file under `prompts/report/` — no config.toml registration needed:
+Create a custom role by adding a `<NAME>.prompt.md` file under `prompts/report/` in any layer — no registration needed:
 
 ```bash
 mkdir -p .ateam/prompts/report
@@ -215,15 +173,24 @@ ateam report --roles my_custom_role
 
 Roles are discovered from the union of:
 - Built-in defaults (embedded in the binary, under `defaults/prompts/report/`)
-- `config.toml` `[roles]` entries
-- `.ateamorg/prompts/report/<NAME>.prompt.md` (org-level, shared across projects)
-- `.ateam/prompts/report/<NAME>.prompt.md` (project-level)
+- `role` blocks in any layer
+- `prompts/report/<NAME>.prompt.md` in any layer (`~/.ateam` for roles shared across projects, the project's `.ateam/` for project-only ones)
 
-Roles are opt-in: only roles explicitly listed in `config.toml` with status `on` (or the legacy `enabled`) are included in `--roles all`. Unlisted roles — built-in or custom — and roles set to `off` are excluded from the `all` expansion. They can still be run by naming them directly: `ateam report --roles my_custom_role` works without any `config.toml` entry as long as the role's `.prompt.md` file exists.
+Roles are opt-in: only roles with `status = "on"` are included in `--roles all`. Unlisted roles — built-in or custom — and roles set to `off` are excluded from the `all` expansion. They can still be run by naming them directly: `ateam report --roles my_custom_role` works without any `role` block as long as the role's `.prompt.md` file exists.
+
+### Migrating from `.ateamorg`
+
+Earlier versions used `~/.ateamorg/` (with `runtime.hcl` and an on-disk `defaults/` copy) plus `.ateam/config.toml` per project. ateam refuses to run when it finds either and prints the steps:
+
+1. Move `~/.ateamorg/runtime.hcl` to `~/.ateam/ateam.hcl` and `~/.ateamorg/prompts/` to `~/.ateam/prompts/`. Drop the `defaults/` copy (the binary serves the defaults).
+2. In each project, replace `.ateam/config.toml` with `project`, `role`, `supervisor`, `sandbox_extra` and `container_extra` blocks in `.ateam/ateam.hcl` (run `ateam init` in an empty directory to see the shape), and rename `.ateam/runtime.hcl` to `ateam.hcl`.
+3. Delete `.ateamorg/` and the `config.toml` files, then run `ateam project-rename` in each project to register it.
+
+Secrets: the `org` scope is gone. `~/.ateamorg/secrets.env` and `~/.config/ateam/secrets.env` both become `~/.ateam/secrets.env` (the `global` scope). Agent config dirs under `~/.ateamorg/` move to `~/.ateam/state/agents/`, and `config_dir` paths in agent blocks should follow.
 
 ## Prompt Composition
 
-Prompts are assembled by walking the **project → org → embedded** anchor chain and composing files by filename pattern. There is no template file to author — the assembly order is encoded in the names.
+Prompts are assembled by walking the **project → layers → embedded** anchor chain and composing files by filename pattern. There is no template file to author — the assembly order is encoded in the names.
 
 ### Filename Patterns
 
@@ -299,7 +266,7 @@ echo "For this project, treat any C extensions as untrusted." \
 
 ### Template Variables
 
-Prompts reference `{{namespace.key}}` directives. The resolver is **closed-set**: an unknown namespace passes through verbatim (so `{{foo.bar}}` in a code block survives unchanged), but a known namespace with an unknown key is a hard error (catches typos before the prompt reaches the agent). Only the dotted form is recognized in prompt bodies — legacy ALL_CAPS tokens (`{{OUTPUT_DIR}}`, `{{ROLE}}`, etc.) are no longer auto-translated and will reach the agent verbatim if left in a prompt file; rewrite project / org prompt overrides to the dotted form below. The ALL_CAPS aliases still work in `runtime.hcl` (agent args, container fields) — see the [runtime template variables](#available-variables) section.
+Prompts reference `{{namespace.key}}` directives. The resolver is **closed-set**: an unknown namespace passes through verbatim (so `{{foo.bar}}` in a code block survives unchanged), but a known namespace with an unknown key is a hard error (catches typos before the prompt reaches the agent). Only the dotted form is recognized in prompt bodies — legacy ALL_CAPS tokens (`{{OUTPUT_DIR}}`, `{{ROLE}}`, etc.) are no longer auto-translated and will reach the agent verbatim if left in a prompt file; rewrite project / user prompt overrides to the dotted form below. The ALL_CAPS aliases still work in `ateam.hcl` (agent args, container fields) — see the [runtime template variables](#available-variables) section.
 
 | Namespace | Resolved by | Keys |
 |---|---|---|
@@ -340,17 +307,17 @@ Positional argument dispatch (e.g. `{{dynamic.review_reports security code.bugs}
 
 ## Runtime Configuration
 
-Runtime behavior is configured via `runtime.hcl` files using HCL syntax, with a 4-level resolution:
+Agents, containers and profiles are `agent`, `container` and `profile` blocks in the same `ateam.hcl`, merged across the layers in order:
 
-1. **Built-in defaults** — compiled into the binary
-2. **Org defaults** — `.ateamorg/defaults/runtime.hcl`
-3. **Org override** — `.ateamorg/runtime.hcl`
-4. **Project override** — `.ateam/runtime.hcl`
+1. **Built-in defaults** — compiled into the binary (`ateam cat --defaults`)
+2. **User layer** — `~/.ateam/ateam.hcl`
+3. **Ancestor layers** — the `.ateam/ateam.hcl` of each ancestor directory of the project, outermost first
+4. **Project** — `.ateam/ateam.hcl`
 
 One rule: the nearer layer wins per attribute. A later file that redeclares an `agent`, `container` or `profile` block overrides only the attributes it writes; everything else keeps the value from the earlier layers. `env` maps merge per key (set a key to `""` to unset it), lists such as `args` replace the whole list. So pinning a model is one attribute, not a copy of the whole block:
 
 ```hcl
-# .ateam/runtime.hcl — the built-in command, args, sandbox and env are kept
+# .ateam/ateam.hcl — the built-in command, args, sandbox and env are kept
 agent "claude" {
   model = "claude-sonnet-5-5"
 }
@@ -460,7 +427,7 @@ Empty lines in the multi-line prompt are ignored. Option A is preferred when the
 
 **Constraints**:
 - **Host-only** — pairing with `container != "none"` is rejected at runner construction. `codex-tmux` needs a project (`.ateam/` directory) for its tmux socket; running outside a project errors with actionable guidance.
-- **Auth** — reuses your existing `~/.codex/auth.json` natively unless the agent block sets `config_dir`, which becomes `CODEX_HOME` for the run (log into it with `ateam login --agent codex-tmux`). The first run in a new workdir auto-accepts codex's trust dialog and persists one `[projects."<workdir>"]` entry in the active `config.toml` — same outcome as a hand-typed `codex` session.
+- **Auth** — reuses your existing `~/.codex/auth.json` natively unless the agent block sets `config_dir`, which becomes `CODEX_HOME` for the run (log into it with `ateam login --agent codex-tmux`). The first run in a new workdir auto-accepts codex's trust dialog and persists one `[projects."<workdir>"]` entry in the active `ateam.hcl` — same outcome as a hand-typed `codex` session.
 - **Token tracking** — costs and token usage are mined from `<CODEX_HOME>/sessions/<date>/rollout-*.jsonl` after the run.
 - **Concurrency** — multiple `codex-tmux` runs in different projects are isolated by EXEC_ID-based sockets and session names; concurrent runs in the same workdir use an EXEC_ID-tagged marker in the prompt body to keep their token stats from swapping. For slash-command prompts (where no marker can be injected), concurrent runs in the same workdir may misattribute token stats — open the issue if you hit it.
 
@@ -494,7 +461,7 @@ Agent args, profile extra args, container config fields, and agent env values su
 
 | Variable | Description | Example value |
 |---|---|---|
-| `{{PROJECT_NAME}}` | Project name from `config.toml` | `myproject` |
+| `{{PROJECT_NAME}}` | Project name from `ateam.hcl` | `myproject` |
 | `{{PROJECT_FULL_PATH}}` | Absolute path to project root | `/home/user/projects/myproject` |
 | `{{PROJECT_DIR}}` | Last component of the project path | `myproject` |
 | `{{ROLE}}` | Role ID | `security`, `supervisor` |
@@ -516,21 +483,21 @@ Unknown variables are left as-is (e.g. `{{UNKNOWN}}` passes through unchanged). 
 
 | Config field | Location | Templates supported |
 |---|---|---|
-| `agent.args` | `runtime.hcl` | Yes |
-| `agent.env` values | `runtime.hcl` | Yes |
-| `agent.config_dir` | `runtime.hcl` | Yes |
-| `profile.agent_extra_args` | `runtime.hcl` | Yes |
-| `profile.container_extra_args` | `runtime.hcl` | Yes (via Docker ExtraArgs) |
+| `agent.args` | `ateam.hcl` | Yes |
+| `agent.env` values | `ateam.hcl` | Yes |
+| `agent.config_dir` | `ateam.hcl` | Yes |
+| `profile.agent_extra_args` | `ateam.hcl` | Yes |
+| `profile.container_extra_args` | `ateam.hcl` | Yes (via Docker ExtraArgs) |
 | Docker `ContainerName` | Computed at build time | Yes |
-| Docker `ExtraVolumes` | `runtime.hcl` container config | Yes |
-| Docker `Env` values | `config.toml` `[container-extra]` | Yes |
-| `agent.args_inside_container` | `runtime.hcl` | Yes |
-| `agent.args_outside_container` | `runtime.hcl` | Yes |
-| docker-exec `docker_container` | `runtime.hcl` | Yes |
+| Docker `ExtraVolumes` | `ateam.hcl` container config | Yes |
+| Docker `Env` values | `ateam.hcl` `[container-extra]` | Yes |
+| `agent.args_inside_container` | `ateam.hcl` | Yes |
+| `agent.args_outside_container` | `ateam.hcl` | Yes |
+| docker-exec `docker_container` | `ateam.hcl` | Yes |
 | docker-exec `WorkDir` | Computed from project paths | Yes |
 
 Templates are **not** resolved in:
-- Prompt files — these use the prompt engine's dotted `{{namespace.key}}` form documented in [Template Variables](#template-variables); the runtime.hcl ALL_CAPS aliases described in this section do not apply
+- Prompt files — these use the prompt engine's dotted `{{namespace.key}}` form documented in [Template Variables](#template-variables); the ateam.hcl ALL_CAPS aliases described in this section do not apply
 - Sandbox settings JSON (has its own merge mechanism)
 - Dockerfile paths (use the role-based resolution chain instead)
 - Precheck command args — `{{CONTAINER_NAME}}` is expanded at execution time by `RunPrecheck`, not by the general template system
@@ -554,7 +521,7 @@ Per-role Claude config directory:
 ```hcl
 agent "claude-isolated" {
   base       = "claude"
-  config_dir = ".claude-{{ROLE}}"
+  config_dir = "state/agents/claude-{{ROLE}}"
 }
 ```
 
@@ -582,7 +549,7 @@ agent "claude" {
 ### Cost Estimation & Pricing
 
 - **Claude** reports actual cost directly in its stream output. Its built-in `pricing` block serves the expensive-model warning and cost estimates for runs that died before a result event; it deliberately has no `default_model`, so an unpinned model never looks pinned.
-- **Codex** (and other agents) rely on a `pricing` block in `runtime.hcl` to estimate cost from token counts.
+- **Codex** (and other agents) rely on a `pricing` block in `ateam.hcl` to estimate cost from token counts.
 
 ```hcl
 agent "codex" {
@@ -601,7 +568,7 @@ agent "codex" {
 }
 ```
 
-Pricing can go stale. Override at any level by redefining the agent's `pricing` block in the appropriate `runtime.hcl`.
+Pricing can go stale. Override at any level by redefining the agent's `pricing` block in the appropriate `ateam.hcl`.
 
 ### Containers
 
@@ -663,9 +630,9 @@ profile "cheap" {
 }
 ```
 
-Use `--profile docker` to run in a fresh ateam-managed container, `--profile docker-exec` to exec into a user-managed long-lived container, or `--profile cheap` for cheaper runs. See `defaults/runtime.hcl` for the full list of built-in profiles.
+Use `--profile docker` to run in a fresh ateam-managed container, `--profile docker-exec` to exec into a user-managed long-lived container, or `--profile cheap` for cheaper runs. See `defaults/ateam.hcl` for the full list of built-in profiles.
 
-For the resolution order when multiple profile selectors apply, see [Profile resolution order](#profiles-1) in the `[profiles]` config.toml section.
+For the resolution order when multiple profile selectors apply, see [Profile resolution order](#profiles-1) in the `[profiles]` ateam.hcl section.
 
 #### Running the supervisor inside Docker
 

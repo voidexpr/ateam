@@ -10,7 +10,7 @@ Wrap \`ateam run-all\` so a transient failure doesn't kill an overnight run.
 On failure, spawn a troubleshooter agent that:
   - finds the failed exec(s) via \`ateam ps\`
   - debugs them via \`ateam inspect EXEC_ID --auto-debug\`
-  - optionally fixes a small in-scope problem (.ateam/, .ateamorg/, cwd)
+  - optionally fixes a small in-scope problem (.ateam/, ~/.ateam/, cwd)
   - writes a JSON verdict to a known path
 
 The script reads the verdict, optionally sleeps (API_ERROR / OS_RESOURCES),
@@ -141,11 +141,11 @@ the issue is out of scope and the run should abort.
 Editable directories:
   - cwd and its subdirectories
   - .ateam/
-  - .ateamorg/
+  - ~/.ateam/
 
 Allowed git: local commands only — no push/pull/fetch.
 
-NOT allowed: Claude or Codex config outside .ateamorg/ (e.g. \$HOME/.claude,
+NOT allowed: Claude or Codex config outside ~/.ateam/ (e.g. \$HOME/.claude,
 \$HOME/.codex). Host-level config is out of scope — classify UNFIXABLE.
 
 Prefer renaming over deletion. Audit any delete carefully.

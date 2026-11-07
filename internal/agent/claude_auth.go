@@ -91,8 +91,8 @@ func HasLocalClaudeAuth() bool {
 }
 
 // DetectAuth scans env vars, ateam secret store, and config dir for all auth sources.
-// projectDir and orgDir may be empty (detection works with global scope only).
-func DetectAuth(projectDir, orgDir string) AuthStatus {
+// projectDir may be empty (detection works with global scope only).
+func DetectAuth(projectDir string) AuthStatus {
 	configDir := ClaudeConfigDir()
 	s := AuthStatus{ConfigDir: configDir}
 
@@ -111,7 +111,7 @@ func DetectAuth(projectDir, orgDir string) AuthStatus {
 	}
 
 	// Check ateam secret store (skips env, which we already checked above).
-	resolver := secret.NewResolver(projectDir, orgDir, secret.DefaultBackend(), nil)
+	resolver := secret.NewResolver(projectDir, secret.DefaultBackend(), nil)
 	if !s.HasAPIKey {
 		if r := resolver.Resolve("ANTHROPIC_API_KEY"); r.Found && r.Source != "env" {
 			s.HasSecretAPI = true

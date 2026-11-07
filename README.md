@@ -45,13 +45,13 @@ Ateam handles the boring bits:
 - Config files to manage agent and container invocation, for example, profiles select combinations of agent + container + custom arguments (`--profile docker`, `--profile codex-high`)
 - Dynamic prompt assembly: ad-hoc pre/post instructions on top of named prompts, with macro support inside prompts
 - Can use the default subscription, OAuth, or API keys, with secrets stored in the OS keychain, prioritizing the cheapest mode if multiple keys are available
-- Single configuration file `runtime.hcl` to combine agent CLI args and isolation (container, sandbox)
+- Single configuration file `ateam.hcl` for project settings, roles, agent CLI args and isolation (container, sandbox), layered from `~/.ateam` down to the project
 
 **Quality pipeline**
 - Four stages: `report` (parallel role audits) → `review` (supervisor prioritizes) → `code` (delegated fixes, small commits) → `verify` (commit inspection + tests). Run as `ateam run-all` or stage-by-stage.
 - 11 built-in roles: code bugs, recent-change review, structural quality, system architecture, internal/external docs, project automation, dependencies, security, test gaps, recent-test coverage (see [ROLES.md](ROLES.md))
 - Stateful markdown artifacts: each cycle reads the previous reports and review; quality compounds, and no context is lost
-- 3-level prompt fallback (project `.ateam/` → org `.ateamorg/` → embedded defaults) with composable pre/post extensions; new roles are a single markdown file
+- Layered prompt fallback (project `.ateam/` → ancestor layers → `~/.ateam/` → embedded defaults) with composable pre/post extensions; new roles are a single markdown file
 
 **Observability and troubleshooting**
 - `ateam ps`: show status of current run and all stats of past runs (turns, tokens, cost, timestamps, ...)
@@ -93,7 +93,7 @@ ateam init                # create .ateam/
 
 ### 2. Select which roles to enable for your project
 
-* A: Edit `.ateam/config.toml` to select which [roles](ROLES.md) to enable in your project
+* A: Edit `.ateam/ateam.hcl` to select which [roles](ROLES.md) to enable in your project
 * B: Or let an agent decide: `ateam auto-setup` (detect stack, enable a reasonable role set)
 
 ### 3. Run the quality pipeline; ATeam commits changes locally
@@ -120,9 +120,9 @@ Once you are familiar with ateam, read [ISOLATION.md](ISOLATION.md) to choose th
 
 `ateam init` creates a `.ateam/` directory in your repo. It holds a small SQLite database tracking agent executions and cost, plus all logs and the markdown artifacts produced by roles. You can run `ateam init` anywhere — the CLI walks up parent directories to find it, like `git`.
 
-A second directory, `.ateamorg/` (default: `$HOME/.ateamorg`), holds prompts and configuration you want shared across projects.
+Your own `~/.ateam/` (or `$ATEAM_HOME`) holds the prompts and configuration you want in every project, plus your state (scratch runs, the project registry, agent config dirs). Any `.ateam/` in a parent directory of the project is a further config layer.
 
-Prompts resolve in order: **project → organization → embedded defaults.** You can fully override a prompt at any level, or — more commonly — extend it with a post-prompt fragment. Example: drop `*.post.extra.md` into `.ateam/prompts/report/project.security/` with *"do not flag GitHub Actions secrets, we use a separate vault"* and that instruction is appended every time the role runs.
+Prompts and configuration resolve in order: **project → ancestor layers → `~/.ateam` → embedded defaults.** You can fully override a prompt at any level, or — more commonly — extend it with a post-prompt fragment. Example: drop `*.post.extra.md` into `.ateam/prompts/report/project.security/` with *"do not flag GitHub Actions secrets, we use a separate vault"* and that instruction is appended every time the role runs.
 
 For per-run steering, every prompt-taking command also accepts `--pre-prompt TEXT` (wrapped at the front) and `--post-prompt TEXT` (wrapped at the end), each taking text or `@file`.
 
@@ -138,7 +138,7 @@ Full details: [CONFIG.md](CONFIG.md).
 
 ### As a quality pipeline
 
-`ateam run-all` runs the four-stage loop across the [roles](ROLES.md) enabled in `.ateam/config.toml` (also runnable stage-by-stage).
+`ateam run-all` runs the four-stage loop across the [roles](ROLES.md) enabled in `.ateam/ateam.hcl` (also runnable stage-by-stage).
 
 ```
 ateam report  →  ateam review  →  ateam code  →  ateam verify
@@ -233,7 +233,7 @@ More complete versions of this can be found in:
 ```bash
 ateam run-all                # end-of-day, in cron, or before commits
 ```
-Roles from `.ateam/config.toml` run unattended. You wake up to small commits to review or merge.
+Roles from `.ateam/ateam.hcl` run unattended. You wake up to small commits to review or merge.
 
 More recipes (lunch-pass / weekly audit / step-by-step / mixed-agent scripts): [GUIDE.md](GUIDE.md).
 
@@ -284,7 +284,7 @@ Isolation is configuration-driven, so any of the above can be tuned per project.
 | **ATeam inside a container** | Run ateam itself from inside a container (Docker or an OS-native sandbox like [fence](https://github.com/fencesandbox/fence)); agents inherit the container's isolation and run without per-command restrictions | Docker-native projects, or sandboxing ateam itself if you don't trust it |
 | **None** | No isolation (agent runs directly on host) | Debugging only |
 
-By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for one-shot container isolation or `--profile docker-exec` to exec into an existing container. See `defaults/runtime.hcl` for all profiles.
+By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for one-shot container isolation or `--profile docker-exec` to exec into an existing container. See `ateam cat --defaults` (the built-in `ateam.hcl`) for all profiles.
 
 ## Commands
 

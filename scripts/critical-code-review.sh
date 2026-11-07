@@ -11,7 +11,7 @@ set -euo pipefail
 # `ateam exec --agent` primitive. Reports land as agent_*_r{1,2}.md in
 # the working directory; prior runs are timestamp-backed up.
 
-# see .ateam/runtime.hcl or ~/.ateamorg/runtime.hcl for agent definitions
+# see .ateam/ateam.hcl or ~/.ateam/ateam.hcl for agent definitions
 reviewer="codex-high"
 coder="claude-high"
 

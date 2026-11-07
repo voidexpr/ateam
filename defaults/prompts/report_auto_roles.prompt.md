@@ -26,7 +26,7 @@ Apply in order, stop at the first match:
  - Auth / secrets / input handling → `project.security`
 3. **Role's territory was untouched** → skip it, even if `on` by default. The prior report is still accurate.
 4. **Prior review rejected or deferred every finding from a role AND that role's territory hasn't changed since** → skip.
-5. **A disabled role's territory was heavily touched** → recommend it anyway. `--roles NAME` runs the role regardless of `config.toml` status.
+5. **A disabled role's territory was heavily touched** → recommend it anyway. `--roles NAME` runs the role regardless of its `ateam.hcl` status.
 
 Bias toward short role lists. Two well-chosen roles produce a better review than ten that mostly repeat last cycle.
 

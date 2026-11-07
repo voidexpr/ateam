@@ -32,10 +32,7 @@ func TestTailNoRunningExits(t *testing.T) {
 	defer saveTailGlobals()()
 
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -48,9 +45,9 @@ func TestTailNoRunningExits(t *testing.T) {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	tailCoding = true
 	tailReports = false
@@ -143,9 +140,9 @@ func TestTailFinalMessageCLI(t *testing.T) {
 	idA := insert("testing_basic", relA, false)
 	idB := insert("testing_basic", relB, true)
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(env.OrgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = env.HomeDir
 
 	tailReports = false
 	tailCoding = false

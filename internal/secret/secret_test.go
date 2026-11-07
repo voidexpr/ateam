@@ -263,7 +263,7 @@ func TestResolverScopePrecedence(t *testing.T) {
 	r := &Resolver{
 		Scopes: []Scope{
 			{Name: ScopeProject, EnvFile: filepath.Join(projectDir, "secrets.env")},
-			{Name: ScopeOrg, EnvFile: filepath.Join(orgDir, "secrets.env")},
+			{Name: ScopeGlobal, EnvFile: filepath.Join(orgDir, "secrets.env")},
 		},
 		Backend: BackendFile,
 	}
@@ -286,8 +286,8 @@ func TestResolverScopePrecedence(t *testing.T) {
 	if result.Value != "org-only-value" {
 		t.Fatalf("expected 'org-only-value', got %q", result.Value)
 	}
-	if result.Source != ScopeOrg {
-		t.Fatalf("expected source 'org', got %q", result.Source)
+	if result.Source != ScopeGlobal {
+		t.Fatalf("expected source 'global', got %q", result.Source)
 	}
 }
 
@@ -421,18 +421,12 @@ func TestScopeForName(t *testing.T) {
 	r := &Resolver{
 		Scopes: []Scope{
 			{Name: ScopeProject, EnvFile: "/p/secrets.env"},
-			{Name: ScopeOrg, EnvFile: "/o/secrets.env"},
 			{Name: ScopeGlobal, EnvFile: "/g/secrets.env"},
 		},
 		Backend: BackendFile,
 	}
 
-	s := r.ScopeForName(ScopeOrg)
-	if s.Name != ScopeOrg {
-		t.Fatalf("expected org scope, got %q", s.Name)
-	}
-
-	s = r.ScopeForName(ScopeProject)
+	s := r.ScopeForName(ScopeProject)
 	if s.Name != ScopeProject {
 		t.Fatalf("expected project scope, got %q", s.Name)
 	}
@@ -447,14 +441,14 @@ func TestScopeForNameFallback(t *testing.T) {
 	r := &Resolver{
 		Scopes: []Scope{
 			{Name: ScopeProject, EnvFile: "/p/secrets.env"},
-			{Name: ScopeOrg, EnvFile: "/o/secrets.env"},
+			{Name: ScopeGlobal, EnvFile: "/g/secrets.env"},
 		},
 		Backend: BackendFile,
 	}
 
 	s := r.ScopeForName("nonexistent")
-	if s.Name != ScopeOrg {
-		t.Fatalf("expected fallback to last scope (org), got %q", s.Name)
+	if s.Name != ScopeGlobal {
+		t.Fatalf("expected fallback to last scope (global), got %q", s.Name)
 	}
 }
 

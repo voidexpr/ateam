@@ -14,10 +14,10 @@ import (
 func loadRuntimeWithOrg(t *testing.T, hcl string) (*runtime.Config, string) {
 	t.Helper()
 	orgDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(orgDir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(orgDir, root.ConfigFile), []byte(hcl), 0644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := runtime.Load("", orgDir)
+	cfg, err := runtime.Load([]string{orgDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ profile "shared" {
   container = "none"
 }
 `)
-	env := &root.ResolvedEnv{OrgDir: orgDir, Config: &config.Config{
+	env := &root.ResolvedEnv{HomeDir: orgDir, Layers: []string{orgDir}, Config: &config.Config{
 		Project: config.ProjectConfig{DefaultProfile: "shared"},
 	}}
 
@@ -50,7 +50,7 @@ profile "shared" {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Agent.Name != "shared" || got.Type != "claude" || got.ConfigDir != filepath.Join(orgDir, "agents", "claude") {
+	if got.Agent.Name != "shared" || got.Type != "claude" || got.ConfigDir != filepath.Join(orgDir, "state", "agents", "claude") {
 		t.Errorf("default: got %+v", got)
 	}
 	if !strings.Contains(got.Source, "project.default_profile") {

@@ -103,13 +103,13 @@ ateam run-all --post-prompt "focus on changes to the auth model"
 Composable fragments at project or org level:
 - `.ateam/prompts/report/NAME.post.extra.md` — appends to a role prompt
 - `.ateam/prompts/review.post.extra.md` — appends to the supervisor's review prompt
-- Org-level: same paths under `.ateamorg/`
+- User-wide: same paths under `~/.ateam/`
 
 See [CONFIG.md](CONFIG.md) for the full override system.
 
 ## Picking roles
 
-Roles are opt-in via `.ateam/config.toml`. `ateam auto-setup` detects your stack and enables a reasonable default set.
+Roles are opt-in via `role` blocks in `.ateam/ateam.hcl`. `ateam auto-setup` detects your stack and enables a reasonable default set.
 
 Not every role makes sense every run:
 
@@ -161,7 +161,7 @@ If you're on a subscription the dollar figure is illustrative, but still useful:
 
 ## Tips
 
-- **Roles are just markdown files.** Edit them. Copy them. Add your own under `.ateam/prompts/report/` (or `.ateamorg/` for org-shared).
+- **Roles are just markdown files.** Edit them. Copy them. Add your own under `.ateam/prompts/report/` (or `~/.ateam/prompts/report/` to share them across projects).
 - **Reports are markdown files.** Edit them between `report` and `review` to nudge prioritization.
 - **Edit the review** between `review` and `code` to drop tasks you don't want or add ones you do.
 - **Use `--profile docker`** if your tooling fights with the default sandbox.

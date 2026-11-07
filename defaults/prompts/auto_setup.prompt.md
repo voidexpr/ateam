@@ -40,9 +40,9 @@ Create a concise project overview at `{{project.full_path}}/.ateam/shared/auto_s
 - <anything relevant for code quality agents>
 ```
 
-### 3. Configure roles in .ateam/config.toml
+### 3. Configure roles in .ateam/ateam.hcl
 
-Read the current `.ateam/config.toml` and update the `[roles]` section. Turn roles on/off based on what makes sense:
+Read the current `.ateam/ateam.hcl` and update the `role "<id>" { status = "on" }` blocks (one per role; a missing block keeps the built-in default). Turn roles on/off based on what makes sense:
 
 Prefer the dotted `collection.role` set (legacy single-name roles like `security` or `refactor_small` are kept on disk but deprecated — don't enable them).
 
@@ -62,8 +62,8 @@ Prefer the dotted `collection.role` set (legacy single-name roles like `security
 Example:
 ```bash
 # Read current config
-cat .ateam/config.toml
-# Edit it directly to enable/disable roles
+cat .ateam/ateam.hcl
+# Edit it directly: role "test.gaps" { status = "on" } / { status = "off" }
 ```
 
 ### 4. Check Docker availability

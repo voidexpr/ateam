@@ -28,10 +28,7 @@ func TestAutoSetupDryRun(t *testing.T) {
 	defer saveAutoSetupGlobals()()
 
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -44,9 +41,9 @@ func TestAutoSetupDryRun(t *testing.T) {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	autoSetupDryRun = true
 
@@ -73,10 +70,7 @@ func TestAutoSetupStageHappyPath(t *testing.T) {
 	defer saveAutoSetupGlobals()()
 
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -89,9 +83,9 @@ func TestAutoSetupStageHappyPath(t *testing.T) {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	autoSetupProfile = "test" // mock agent
 

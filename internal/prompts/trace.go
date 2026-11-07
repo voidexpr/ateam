@@ -14,14 +14,11 @@ type PromptSource struct {
 }
 
 // DisplayPath returns a shortened path for display.
-// Paths under .ateamorg/ or .ateam/ are made relative starting at that directory.
+// Paths under a .ateam/ directory are made relative starting at that directory.
 // Non-file sources return their Label.
 func (s PromptSource) DisplayPath() string {
 	if s.Path == "" {
 		return s.Label
-	}
-	if i := strings.Index(s.Path, "/.ateamorg/"); i >= 0 {
-		return s.Path[i+1:]
 	}
 	if i := strings.Index(s.Path, "/.ateam/"); i >= 0 {
 		return s.Path[i+1:]

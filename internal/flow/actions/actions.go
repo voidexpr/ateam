@@ -50,12 +50,9 @@ func (a CheckConcurrentRuns) Run(rc flow.RunCtx, env flow.RuntimeEnv, _ *flow.Re
 		return errFlow(fmt.Errorf("CheckConcurrentRuns: rc.Resolved is nil"))
 	}
 	projectID := rc.Resolved.ProjectID()
-	if projectID == "" && rc.Resolved.ProjectDir == "" {
+	if projectID == "" {
 		// Scratch mode (no project) — concurrency guard doesn't apply.
 		return flow.Flow{State: flow.StateContinue}
-	}
-	if projectID == "" && rc.Resolved.OrgDir != "" {
-		return errFlow(fmt.Errorf("cannot determine project ID for concurrency guard"))
 	}
 	action := a.Action
 	if action == "" {

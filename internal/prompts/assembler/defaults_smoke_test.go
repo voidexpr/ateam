@@ -13,7 +13,7 @@ import (
 // standard anchor chain. Catches embed-glob drift early, before the cmd/*
 // rewires arrive.
 func TestDefaultsReachableViaAssembler(t *testing.T) {
-	a := assembler.New(assembler.BuildAnchors("", "", defaults.FS))
+	a := assembler.New(assembler.BuildAnchors("", nil, defaults.FS))
 
 	// Root-level framing.
 	for _, p := range []string{
@@ -81,7 +81,7 @@ func (s stubDynamicDispatcher) Dispatch(name string, _ []string) (string, error)
 // against the shipped defaults — proves the engine + anchors + Assemble +
 // embedded prompts hang together end-to-end before any cmd/ rewires arrive.
 func TestAssembleAgainstRealDefaults(t *testing.T) {
-	a := assembler.New(assembler.BuildAnchors("", "", defaults.FS))
+	a := assembler.New(assembler.BuildAnchors("", nil, defaults.FS))
 	vars := assembler.MapVars{
 		Prompt:  map[string]string{"name": "security", "path": "report/security", "action": "report"},
 		Exec:    map[string]string{"output_file": "/tmp/report.md", "output_dir": "/tmp"},

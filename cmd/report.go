@@ -168,7 +168,7 @@ func runReport(opts ReportOptions) error {
 		if len(roles) == 0 {
 			roles = []string{"all"}
 		}
-		roleIDs, err = promptdata.ResolveRoleList(roles, env.Config.Roles, env.ProjectDir, env.OrgDir)
+		roleIDs, err = promptdata.ResolveRoleList(roles, env.Config.Roles, env.Layers)
 		if err != nil {
 			return err
 		}

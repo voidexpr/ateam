@@ -2,7 +2,7 @@
 
 ATeam runs unattended coding agents — they must operate safely without per-tool permission prompts. This guide covers the four execution modes, from the simplest to the most isolated, plus secret management and credential handling.
 
-See [README.md](README.md) for the project overview and the *why* of isolation, [COMMANDS.md](COMMANDS.md) for command reference, and [CONFIG.md](CONFIG.md) for `runtime.hcl` / `config.toml` details.
+See [README.md](README.md) for the project overview and the *why* of isolation, [COMMANDS.md](COMMANDS.md) for command reference, and [CONFIG.md](CONFIG.md) for `ateam.hcl` details.
 
 ## Execution modes at a glance
 
@@ -29,7 +29,7 @@ No config needed. ATeam's default profile runs each agent through its built-in O
 
 ### Customizing the sandbox
 
-Edit `.ateam/config.toml`:
+Edit `.ateam/ateam.hcl`:
 
 ```toml
 [sandbox-extra]
@@ -60,10 +60,9 @@ Why:
 How (Claude example):
 
 ```hcl
-# .ateamorg/runtime.hcl
+# ~/.ateam/ateam.hcl
 agent "claude" {
-  base       = "claude"
-  config_dir = "~/.ateamorg/claude"   # instead of ~/.claude
+  config_dir = "state/agents/claude"   # relative to ~/.ateam; instead of ~/.claude
 }
 ```
 
@@ -82,15 +81,14 @@ ateam report --profile docker
 ateam exec "analyze the auth module" --profile docker
 ```
 
-ATeam builds the image from `.ateam/Dockerfile` (or `.ateamorg/Dockerfile`, or the embedded default), mounts your project, and runs the agent inside.
+ATeam builds the image from `.ateam/Dockerfile` (or a layer's `Dockerfile`, or the embedded default), mounts your project, and runs the agent inside.
 
 ### Dockerfile resolution
 
 First match wins:
 
 1. `.ateam/Dockerfile` — project-specific
-2. `.ateamorg/Dockerfile` — org-wide
-3. `.ateamorg/defaults/Dockerfile` — org defaults (written by `ateam update`)
+2. `<layer>/Dockerfile` — each config layer, nearest first (an ancestor `.ateam/`, then `~/.ateam/`)
 4. Embedded default — `node:20-bookworm-slim` based image with git, curl, python3, ripgrep, jq, make, and Claude Code CLI
 
 The default image creates an `agent` user matching your host UID so bind-mount file ownership is correct.
@@ -101,7 +99,7 @@ The default image creates an `agent` user matching your host UID so bind-mount f
 |-----------|----------------|------|---------|
 | Git root (or project source) | `/workspace` | `ro` for report/review, `rw` for code/run | Source code |
 | `.ateam/` | `/workspace/.ateam/` | `rw` | Agent state, logs, artifacts |
-| `.ateamorg/` | `/.ateamorg/` | `rw` | Organization config |
+| `~/.ateam/` | `/.ateam-home/` | `rw` | User config and state (`ATEAM_HOME` is set to it inside the container) |
 | `~/.claude/.credentials.json` | `/home/agent/.claude/.credentials.json` | `ro` | OAuth credentials (only with `mount_claude_config = true`) |
 | `/etc/localtime` | `/etc/localtime` | `ro` | Host timezone |
 
@@ -121,7 +119,7 @@ If you have an existing long-lived container (e.g. a docker-compose service or d
 
 ### Per-project customization
 
-Add raw `docker run` flags, env forwarding, or static env via `config.toml`:
+Add raw `docker run` flags, env forwarding, or static env via the `container_extra` block of `ateam.hcl`:
 
 ```toml
 [container-extra]
@@ -190,7 +188,7 @@ profile "my-app" {
 
 ### Devcontainer
 
-Devcontainers are supported via `docker-exec` plus a precheck script that brings the container up. Define a custom container in your `runtime.hcl`:
+Devcontainers are supported via `docker-exec` plus a precheck script that brings the container up. Define a custom container in your `ateam.hcl`:
 
 ```hcl
 container "my-devcontainer" {
@@ -219,8 +217,8 @@ Setup: mount the ateam linux binary and the shared agent config:
 ```bash
 docker run \
   -v ./build:/opt/ateam:ro \
-  -v "$(ateam env --print-org)/claude_linux_shared:/home/agent/shared_claude" \
-  -v "$(ateam env --print-org)/claude_linux_shared/secrets.env:/home/agent/.config/ateam/secrets.env:ro" \
+  -v "$(ateam env --print-home)/state/agents/claude-linux:/home/agent/shared_claude" \
+  -v "$(ateam env --print-home)/state/agents/claude-linux/secrets.env:/home/agent/.ateam/secrets.env:ro" \
   ...
 ```
 
@@ -313,8 +311,7 @@ Secrets are stored in the OS keychain (macOS Keychain, Linux Secret Service, Win
 Per-key (the secret store beats the environment for the same key):
 
 1. Project `.ateam/secrets.env` / keychain
-2. Org `.ateamorg/secrets.env` / keychain
-3. Global `~/.config/ateam/secrets.env` / keychain
+2. Global `~/.ateam/secrets.env` / keychain
 4. Process environment
 
 **Alternatives (`A|B` in `required_env`)** — the winner is picked in two steps:
@@ -358,7 +355,7 @@ OS keychains don't cross into containers. ATeam handles this per mode:
 |------|---------------------------------|
 | Docker one-shot (`--profile docker`) | Resolved on host, passed via `docker run -e` |
 | Docker exec (`docker-exec`) | Resolved on host, passed via `docker exec -e` |
-| ATeam inside Docker | Mount `secrets.env` at `~/.config/ateam/secrets.env` (global scope) — see [Shared Linux agent config](#shared-linux-agent-config) |
+| ATeam inside Docker | Mount `secrets.env` at `~/.ateam/secrets.env` (global scope) — see [Shared Linux agent config](#shared-linux-agent-config) |
 
 ### Printing secrets
 
@@ -416,7 +413,7 @@ For running the same Claude identity across multiple Linux containers (typical w
 ### Layout
 
 ```
-~/.ateamorg/claude_linux_shared/
+~/.ateam/state/agents/claude-linux/
   .credentials.json  # OAuth tokens for interactive sessions (access + refresh)
   .claude.json       # Account state, onboarding flags
   settings.json      # Claude settings
@@ -427,11 +424,11 @@ For running the same Claude identity across multiple Linux containers (typical w
 
 ```bash
 # 1. Create the shared config directory
-mkdir -p ~/.ateamorg/claude_linux_shared
+mkdir -p ~/.ateam/state/agents/claude-linux
 
 # 2. Start a container with the shared dir mounted
 docker run -it \
-  -v ~/.ateamorg/claude_linux_shared:/home/agent/shared_claude \
+  -v ~/.ateam/state/agents/claude-linux:/home/agent/shared_claude \
   your-image bash
 
 # 3. Inside the container: login interactively
@@ -447,7 +444,7 @@ echo "CLAUDE_CODE_OAUTH_TOKEN=<token>" >> ~/shared_claude/secrets.env
 Or bootstrap from a container that already has credentials:
 
 ```bash
-ateam agent-config --copy-out --container my-app --path ~/.ateamorg/claude_linux_shared
+ateam agent-config --copy-out --container my-app --path ~/.ateam/state/agents/claude-linux
 ```
 
 ### Mounting into containers
@@ -456,8 +453,8 @@ Two mounts — the shared dir (for interactive claude) and `secrets.env` at the 
 
 ```bash
 docker run \
-  -v "$(ateam env --print-org)/claude_linux_shared:/home/agent/shared_claude" \
-  -v "$(ateam env --print-org)/claude_linux_shared/secrets.env:/home/agent/.config/ateam/secrets.env:ro" \
+  -v "$(ateam env --print-home)/state/agents/claude-linux:/home/agent/shared_claude" \
+  -v "$(ateam env --print-home)/state/agents/claude-linux/secrets.env:/home/agent/.ateam/secrets.env:ro" \
   ...
 ```
 
@@ -525,7 +522,7 @@ What the sandbox layer catches in practice:
 
 The sandbox layer is **off by default** because its signals can have false positives (e.g. systemd-hardened user services trip the Linux probe without being inside an outer sandbox). A false positive would silently drop the agent's inner sandbox on a bare host — fail-loud is better than silently unsandboxed.
 
-When you knowingly run ateam under an outer sandbox, enable it explicitly in `runtime.hcl`:
+When you knowingly run ateam under an outer sandbox, enable it explicitly in `ateam.hcl`:
 
 ```hcl
 sandbox_detection = true

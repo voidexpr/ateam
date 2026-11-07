@@ -93,15 +93,16 @@ func DetectToolchains(sourceDir string) []Toolchain {
 	return result
 }
 
-// ReadBaseDockerfile reads the base Dockerfile content, skipping .ateam/Dockerfile.
-// Fallback: .ateamorg/Dockerfile → .ateamorg/defaults/Dockerfile → embedded.
-func ReadBaseDockerfile(orgDir string) ([]byte, error) {
-	if orgDir != "" {
-		for _, rel := range []string{"Dockerfile", "defaults/Dockerfile"} {
-			path := filepath.Join(orgDir, rel)
-			if data, err := os.ReadFile(path); err == nil {
-				return data, nil
-			}
+// ReadBaseDockerfile reads the base Dockerfile content, skipping the
+// project's own .ateam/Dockerfile (the last layer): each config layer's
+// Dockerfile nearest first, then the embedded default.
+func ReadBaseDockerfile(layerDirs []string) ([]byte, error) {
+	for i := len(layerDirs) - 2; i >= 0; i-- {
+		if layerDirs[i] == "" {
+			continue
+		}
+		if data, err := os.ReadFile(filepath.Join(layerDirs[i], "Dockerfile")); err == nil {
+			return data, nil
 		}
 	}
 	data, err := defaults.FS.ReadFile("Dockerfile")
@@ -168,7 +169,7 @@ func GenerateDockerfile(base []byte, toolchains []Toolchain) []byte {
 // AutoSetupDockerfile generates .ateam/Dockerfile if it doesn't exist and
 // project toolchains are detected. Returns whether a file was generated and
 // the names of detected toolchains.
-func AutoSetupDockerfile(sourceDir, projectDir, orgDir string) (bool, []string, error) {
+func AutoSetupDockerfile(sourceDir, projectDir string, layerDirs []string) (bool, []string, error) {
 	target := filepath.Join(projectDir, "Dockerfile")
 	if _, err := os.Stat(target); err == nil {
 		return false, nil, nil // already exists
@@ -179,7 +180,7 @@ func AutoSetupDockerfile(sourceDir, projectDir, orgDir string) (bool, []string, 
 		return false, nil, nil
 	}
 
-	base, err := ReadBaseDockerfile(orgDir)
+	base, err := ReadBaseDockerfile(layerDirs)
 	if err != nil {
 		return false, nil, err
 	}

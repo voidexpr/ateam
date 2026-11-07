@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/ateam/defaults"
+	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/container"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
@@ -17,11 +18,13 @@ import (
 	"github.com/zclconf/go-cty/cty"
 )
 
-// Config is the top-level runtime configuration parsed from runtime.hcl files.
+// Config is the configuration merged from every ateam.hcl layer: the
+// agent, container and profile blocks plus the project settings.
 type Config struct {
 	Agents     map[string]AgentConfig
 	Containers map[string]ContainerConfig
 	Profiles   map[string]ProfileConfig
+	Settings   config.Config
 
 	// SandboxDetection toggles auto-detection of an outer sandbox
 	// (fence, firejail, macOS Seatbelt, Linux bwrap-style). nil = use
@@ -138,15 +141,20 @@ type ProfileConfig struct {
 	ContainerExtraArgs []string // reserved for container launch args
 }
 
-// hclFile is the HCL schema for runtime.hcl.
+// hclFile is the HCL schema for ateam.hcl.
 type hclFile struct {
-	SandboxDetection *bool          `hcl:"sandbox_detection,optional"`
-	DockerDetection  *bool          `hcl:"docker_detection,optional"`
-	ExpensiveOutput  *float64       `hcl:"expensive_output_per_mtok,optional"`
-	Agents           []hclAgent     `hcl:"agent,block"`
-	Containers       []hclContainer `hcl:"container,block"`
-	Profiles         []hclProfile   `hcl:"profile,block"`
-	Remain           hcl.Body       `hcl:",remain"`
+	SandboxDetection *bool               `hcl:"sandbox_detection,optional"`
+	DockerDetection  *bool               `hcl:"docker_detection,optional"`
+	ExpensiveOutput  *float64            `hcl:"expensive_output_per_mtok,optional"`
+	Agents           []hclAgent          `hcl:"agent,block"`
+	Containers       []hclContainer      `hcl:"container,block"`
+	Profiles         []hclProfile        `hcl:"profile,block"`
+	Projects         []hclProject        `hcl:"project,block"`
+	Roles            []hclRole           `hcl:"role,block"`
+	Supervisors      []hclSupervisor     `hcl:"supervisor,block"`
+	SandboxExtras    []hclSandboxExtra   `hcl:"sandbox_extra,block"`
+	ContainerExtras  []hclContainerExtra `hcl:"container_extra,block"`
+	Remain           hcl.Body            `hcl:",remain"`
 }
 
 type hclAgent struct {
@@ -221,12 +229,13 @@ var (
 	profileSchema, _   = gohcl.ImpliedBodySchema(hclProfile{})
 )
 
-// Load reads runtime.hcl with 4-level resolution:
-// embedded defaults -> orgDir/defaults/runtime.hcl -> orgDir/runtime.hcl -> projectDir/runtime.hcl
-// A later level overrides only the attributes it sets on a same-name
-// block; `env` maps merge per key, lists replace. Every value is recorded
-// in Sources with the layer that set it.
-func Load(projectDir, orgDir string) (*Config, error) {
+// Load reads the embedded defaults, then the ateam.hcl of every layer
+// directory in order (lowest precedence first: the user's ~/.ateam, any
+// ancestor .ateam/ of the project, the project's .ateam/). A later layer
+// overrides only the attributes it sets on a same-name block; `env` maps
+// merge per key, lists replace. Every value is recorded in Sources with
+// the layer that set it. Missing files are listed in Layers and skipped.
+func Load(layerDirs []string) (*Config, error) {
 	cfg := &Config{
 		Agents:     make(map[string]AgentConfig),
 		Containers: make(map[string]ContainerConfig),
@@ -234,30 +243,20 @@ func Load(projectDir, orgDir string) (*Config, error) {
 		Sources:    make(map[string][]Contribution),
 	}
 
-	// Level 1: embedded defaults
-	defaultData, err := defaults.FS.ReadFile("runtime.hcl")
+	defaultData, err := defaults.FS.ReadFile(ConfigFile)
 	if err != nil {
 		return nil, fmt.Errorf("cannot read embedded defaults: %w", err)
 	}
 	cfg.Layers = append(cfg.Layers, Layer{Label: BuiltinLayer, Found: true})
-	if err := mergeHCL(cfg, defaultData, "defaults/runtime.hcl", BuiltinLayer); err != nil {
+	if err := mergeHCL(cfg, defaultData, "defaults/"+ConfigFile, BuiltinLayer); err != nil {
 		return nil, fmt.Errorf("cannot parse embedded defaults: %w", err)
 	}
 
-	var files []string
-	if orgDir != "" {
-		// Level 2: org defaults (e.g. .ateamorg/defaults/runtime.hcl)
-		// Level 3: org override (e.g. .ateamorg/runtime.hcl)
-		files = append(files,
-			filepath.Join(orgDir, "defaults", "runtime.hcl"),
-			filepath.Join(orgDir, "runtime.hcl"))
-	}
-	if projectDir != "" {
-		// Level 4: project override (e.g. .ateam/runtime.hcl)
-		files = append(files, filepath.Join(projectDir, "runtime.hcl"))
-	}
-	for _, path := range files {
-		if err := mergeHCLFile(cfg, path); err != nil {
+	for _, dir := range layerDirs {
+		if dir == "" {
+			continue
+		}
+		if err := mergeHCLFile(cfg, filepath.Join(dir, ConfigFile)); err != nil {
 			return nil, err
 		}
 	}
@@ -563,6 +562,21 @@ func mergeHCL(cfg *Config, data []byte, filename, label string) error {
 	for _, p := range hf.Profiles {
 		cfg.mergeProfile(p, label)
 	}
+	for _, p := range hf.Projects {
+		cfg.mergeProject(p, label)
+	}
+	for _, r := range hf.Roles {
+		cfg.mergeRole(r, label)
+	}
+	for _, s := range hf.Supervisors {
+		cfg.mergeSupervisor(s, label)
+	}
+	for _, s := range hf.SandboxExtras {
+		cfg.mergeSandboxExtra(s, label)
+	}
+	for _, s := range hf.ContainerExtras {
+		cfg.mergeContainerExtra(s, label)
+	}
 	return nil
 }
 
@@ -756,35 +770,33 @@ func parseLocals(data []byte, filename string) (*hcl.EvalContext, error) {
 	}, nil
 }
 
-// ResolveDockerfile finds the Dockerfile using a fallback chain:
-//  1. .ateam/roles/<role>/Dockerfile (if roleID is set)
-//  2. .ateam/Dockerfile
-//  3. .ateamorg/Dockerfile
-//  4. .ateamorg/defaults/Dockerfile
-//  5. embedded default Dockerfile (written to a temp file)
-//
-// The filename searched for comes from the container config (cc.Dockerfile,
-// typically just "Dockerfile"). Returns the absolute path to the first match.
-func ResolveDockerfile(cc *ContainerConfig, projectDir, orgDir, roleID string) (dockerfilePath string, tmpDir string, err error) {
+// layerFileCandidates lists <layer>/<name> for every layer, highest
+// precedence first (project, then its ancestors, then ~/.ateam), with
+// <project>/roles/<role>/<name> in front when a role is given.
+func layerFileCandidates(layerDirs []string, roleID, name string) []string {
+	var candidates []string
+	for i := len(layerDirs) - 1; i >= 0; i-- {
+		if layerDirs[i] == "" {
+			continue
+		}
+		if i == len(layerDirs)-1 && roleID != "" {
+			candidates = append(candidates, filepath.Join(layerDirs[i], "roles", roleID, name))
+		}
+		candidates = append(candidates, filepath.Join(layerDirs[i], name))
+	}
+	return candidates
+}
+
+// ResolveDockerfile finds the Dockerfile named by the container config
+// (cc.Dockerfile, typically "Dockerfile"): <project>/roles/<role>/ first
+// when a role is given, then each layer nearest first, then the embedded
+// default (written to a temp file). Returns the absolute path.
+func ResolveDockerfile(cc *ContainerConfig, layerDirs []string, roleID string) (dockerfilePath string, tmpDir string, err error) {
 	name := cc.Dockerfile
 	if name == "" {
 		name = "Dockerfile"
 	}
-
-	// Build the search path
-	var candidates []string
-	if projectDir != "" {
-		if roleID != "" {
-			candidates = append(candidates, filepath.Join(projectDir, "roles", roleID, name))
-		}
-		candidates = append(candidates, filepath.Join(projectDir, name))
-	}
-	if orgDir != "" {
-		candidates = append(candidates, filepath.Join(orgDir, name))
-		candidates = append(candidates, filepath.Join(orgDir, "defaults", name))
-	}
-
-	for _, path := range candidates {
+	for _, path := range layerFileCandidates(layerDirs, roleID, name) {
 		if _, err := os.Stat(path); err == nil {
 			return path, "", nil
 		}
@@ -810,103 +822,35 @@ func ResolveDockerfile(cc *ContainerConfig, projectDir, orgDir, roleID string) (
 // ResolvePrecheckCmd resolves the precheck command for a container config.
 //
 // When cc.Precheck is set (explicit), the first element is resolved relative
-// to projectDir and the slice is returned as-is.
+// to the project dir (the last layer) and the slice is returned as-is.
 //
-// When cc.Precheck is empty, the convention fallback chain is searched:
-//  1. .ateam/roles/<role>/docker-agent-precheck.sh (if roleID is set)
-//  2. .ateam/docker-agent-precheck.sh
-//  3. .ateamorg/docker-agent-precheck.sh
-//  4. .ateamorg/defaults/docker-agent-precheck.sh
-//
-// Convention-discovered scripts are wrapped as ["sh", "<path>", "{{CONTAINER_NAME}}"]
-// so the container name is passed as $1 at execution time (after docker ps resolution).
+// When cc.Precheck is empty, docker-agent-precheck.sh is searched in
+// <project>/roles/<role>/ (if a role is given), then each layer nearest
+// first. Convention-discovered scripts are wrapped as
+// ["sh", "<path>", "{{CONTAINER_NAME}}"] so the container name is passed
+// as $1 at execution time (after docker ps resolution).
 //
 // Returns nil if no precheck is configured or found.
-func ResolvePrecheckCmd(cc *ContainerConfig, projectDir, orgDir, roleID string) []string {
+func ResolvePrecheckCmd(cc *ContainerConfig, layerDirs []string, roleID string) []string {
 	if len(cc.Precheck) > 0 {
 		resolved := make([]string, len(cc.Precheck))
 		copy(resolved, cc.Precheck)
-		// Resolve the first element relative to projectDir when it looks like
-		// a file path (contains a separator). Bare command names like "make"
-		// or "sh" are left for PATH resolution.
+		// Resolve the first element relative to the project dir when it
+		// looks like a file path (contains a separator). Bare command names
+		// like "make" or "sh" are left for PATH resolution.
+		projectDir := ""
+		if n := len(layerDirs); n > 0 {
+			projectDir = layerDirs[n-1]
+		}
 		if strings.Contains(resolved[0], string(filepath.Separator)) && !filepath.IsAbs(resolved[0]) && projectDir != "" {
 			resolved[0] = filepath.Join(projectDir, resolved[0])
 		}
 		return resolved
 	}
 
-	const name = "docker-agent-precheck.sh"
-	var candidates []string
-	if projectDir != "" {
-		if roleID != "" {
-			candidates = append(candidates, filepath.Join(projectDir, "roles", roleID, name))
-		}
-		candidates = append(candidates, filepath.Join(projectDir, name))
-	}
-	if orgDir != "" {
-		candidates = append(candidates, filepath.Join(orgDir, name))
-		candidates = append(candidates, filepath.Join(orgDir, "defaults", name))
-	}
-
-	for _, path := range candidates {
+	for _, path := range layerFileCandidates(layerDirs, roleID, "docker-agent-precheck.sh") {
 		if _, err := os.Stat(path); err == nil {
 			return []string{"sh", path, "{{CONTAINER_NAME}}"}
-		}
-	}
-	return nil
-}
-
-// RuntimeDiff describes a single embedded default file (runtime.hcl, Dockerfile)
-// that differs from the on-disk copy under orgDir/defaults/.
-type RuntimeDiff struct {
-	RelPath string // path relative to orgDir, e.g. "defaults/runtime.hcl"
-	Status  string // "missing" (no on-disk copy) or "changed" (content differs)
-}
-
-// DiffOrgDefaults compares on-disk defaults files (runtime.hcl, Dockerfile)
-// against the embedded defaults and returns the files that differ.
-// Whitespace-only differences are ignored to match promptdata.DiffOrgDefaults.
-func DiffOrgDefaults(orgDir string) []RuntimeDiff {
-	var diffs []RuntimeDiff
-	for _, name := range []string{"runtime.hcl", "Dockerfile"} {
-		rel := filepath.Join("defaults", name)
-		diskPath := filepath.Join(orgDir, rel)
-		data, err := os.ReadFile(diskPath)
-		if err != nil {
-			diffs = append(diffs, RuntimeDiff{RelPath: rel, Status: "missing"})
-			continue
-		}
-		embedded, err := defaults.FS.ReadFile(name)
-		if err != nil {
-			continue
-		}
-		if strings.TrimSpace(string(data)) != strings.TrimSpace(string(embedded)) {
-			diffs = append(diffs, RuntimeDiff{RelPath: rel, Status: "changed"})
-		}
-	}
-	return diffs
-}
-
-// WriteOrgDefaults writes the embedded runtime.hcl and Dockerfile to orgDir/defaults/.
-// When overwrite is false, existing files are not overwritten.
-func WriteOrgDefaults(orgDir string, overwrite bool) error {
-	defaultsDir := filepath.Join(orgDir, "defaults")
-	if err := os.MkdirAll(defaultsDir, 0755); err != nil {
-		return fmt.Errorf("cannot create defaults directory: %w", err)
-	}
-	for _, name := range []string{"runtime.hcl", "Dockerfile"} {
-		dst := filepath.Join(defaultsDir, name)
-		if !overwrite {
-			if _, err := os.Stat(dst); err == nil {
-				continue
-			}
-		}
-		data, err := defaults.FS.ReadFile(name)
-		if err != nil {
-			return fmt.Errorf("cannot read embedded %s: %w", name, err)
-		}
-		if err := os.WriteFile(dst, data, 0644); err != nil {
-			return fmt.Errorf("cannot write %s: %w", dst, err)
 		}
 	}
 	return nil

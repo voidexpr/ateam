@@ -15,10 +15,8 @@ import (
 func setupTestProject(t *testing.T) (orgParent, projPath string, env *root.ResolvedEnv) {
 	t.Helper()
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
+	var err error
 	projPath = filepath.Join(base, "testproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -76,7 +74,7 @@ func TestRunWithMockAgent(t *testing.T) {
 
 	saved := saveExecGlobals()
 	defer saved.restore()
-	orgFlag = orgParent
+	homeFlag = filepath.Join(orgParent, ".ateam")
 	execProfile = "test" // uses mock agent
 	execQuiet = true
 	execNoStream = true
@@ -94,7 +92,7 @@ func TestRunWithMockAgent(t *testing.T) {
 	// ps should show the run
 	savedPS := savePSGlobals()
 	defer savedPS.restore()
-	orgFlag = orgParent
+	homeFlag = filepath.Join(orgParent, ".ateam")
 
 	var psErr error
 	psOut := captureStdout(t, func() {
@@ -130,10 +128,8 @@ func TestRunWithMockAgent(t *testing.T) {
 // TestPSFailsWithoutDB verifies that ps fails when no state.sqlite exists.
 func TestPSFailsWithoutDB(t *testing.T) {
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
+	var err error
 	projPath := filepath.Join(base, "nodb")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -152,7 +148,7 @@ func TestPSFailsWithoutDB(t *testing.T) {
 
 	savedPS := savePSGlobals()
 	defer savedPS.restore()
-	orgFlag = base
+	homeFlag = filepath.Join(base, ".ateam")
 
 	var psErr error
 	captureStdout(t, func() {
@@ -171,10 +167,8 @@ func TestPSFailsWithoutDB(t *testing.T) {
 // TestCostFailsWithoutDB verifies that cost fails when no state.sqlite exists.
 func TestCostFailsWithoutDB(t *testing.T) {
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
+	var err error
 	projPath := filepath.Join(base, "nodb")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -189,7 +183,7 @@ func TestCostFailsWithoutDB(t *testing.T) {
 
 	savedPS := savePSGlobals()
 	defer savedPS.restore()
-	orgFlag = base
+	homeFlag = filepath.Join(base, ".ateam")
 
 	var costErr error
 	captureStdout(t, func() {
@@ -205,10 +199,8 @@ func TestCostFailsWithoutDB(t *testing.T) {
 // TestEnvShowsNotFoundForMissingPaths verifies env flags missing DB and logs.
 func TestEnvShowsNotFoundForMissingPaths(t *testing.T) {
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
+	var err error
 	projPath := filepath.Join(base, "testproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -247,7 +239,7 @@ type execGlobals struct {
 
 func saveExecGlobals() execGlobals {
 	return execGlobals{
-		org: orgFlag, profile: execProfile, agent: execAgent, role: execRole, action: execAction, model: execModel, effort: execEffort,
+		org: homeFlag, profile: execProfile, agent: execAgent, role: execRole, action: execAction, model: execModel, effort: execEffort,
 		workDir: workDirFlag, agentArgs: execAgentArgs, batch: execBatch, containerName: execContainerName,
 		maxBudgetUSD: execMaxBudgetUSD, maxBudgetBatch: execMaxBudgetBatch,
 		prePrompt: execPrePrompt, postPrompt: execPostPrompt, format: execFormat,
@@ -257,7 +249,7 @@ func saveExecGlobals() execGlobals {
 }
 
 func (g execGlobals) restore() {
-	orgFlag = g.org
+	homeFlag = g.org
 	execProfile = g.profile
 	execAgent = g.agent
 	execRole = g.role
@@ -290,13 +282,13 @@ type psGlobals struct {
 
 func savePSGlobals() psGlobals {
 	return psGlobals{
-		org: orgFlag, role: psRole, action: psAction,
+		org: homeFlag, role: psRole, action: psAction,
 		batch: psBatch, workDir: psWorkDir, pwd: psPwd, limit: psLimit,
 	}
 }
 
 func (g psGlobals) restore() {
-	orgFlag = g.org
+	homeFlag = g.org
 	psRole = g.role
 	psAction = g.action
 	psBatch = g.batch

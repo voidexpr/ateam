@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ateam/internal/runtime"
 	"github.com/zalando/go-keyring"
 )
 
@@ -45,13 +46,10 @@ func keyringAvailable() bool {
 	return keyringAvail
 }
 
-// GlobalDir returns the global secrets directory (~/.config/ateam/).
+// GlobalDir returns the directory of the global secrets.env: the user's
+// ateam directory (~/.ateam, or $ATEAM_HOME).
 func GlobalDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".config", "ateam")
+	return runtime.HomeDir()
 }
 
 // --- File backend (.env) ---

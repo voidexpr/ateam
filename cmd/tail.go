@@ -72,12 +72,11 @@ func runTail(cmd *cobra.Command, args []string) error {
 		color = false
 	}
 	tailer := runner.NewTailer(writer, db, color, tailVerbose)
-	tailer.ProjectDir = env.ProjectDir
-	tailer.OrgDir = env.OrgDir
+	tailer.StateDir = env.StateDir()
 	tailer.FinalMessageOnly = tailFinalMessage
 
 	// Load runtime config to provide pricing for cost estimation.
-	if rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir); err == nil {
+	if rtCfg, err := runtime.Load(env.Layers); err == nil {
 		tailer.Pricing, tailer.DefaultModel = mergedPricingFromConfig(rtCfg)
 	}
 
@@ -98,7 +97,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 		}
 		for _, r := range rows {
 			if r.AgentFile != "" {
-				tailer.AddSource(r.ID, r.Role, r.Action, root.ResolveStreamPath(env.ProjectDir, env.OrgDir, r.AgentFile), r.Model)
+				tailer.AddSource(r.ID, r.Role, r.Action, root.ResolveStreamPath(env.StateDir(), r.AgentFile), r.Model)
 			}
 		}
 

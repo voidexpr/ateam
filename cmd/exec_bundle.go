@@ -57,7 +57,7 @@ func buildRunner(env *root.ResolvedEnv, spec RunnerSpec) (*runner.AgentExecutor,
 		if profile == "" && spec.Agent == "" {
 			profile = "default"
 		}
-		r, err = resolveRunnerMinimal(env.OrgDir, profile, spec.Agent)
+		r, err = resolveRunnerMinimal(env, profile, spec.Agent)
 	}
 	if err != nil {
 		return nil, err
@@ -79,7 +79,7 @@ func buildRunner(env *root.ResolvedEnv, spec RunnerSpec) (*runner.AgentExecutor,
 // stderr. Best-effort: a config that fails to load here already failed
 // louder in resolveRunner.
 func warnModelConfig(env *root.ResolvedEnv, r *runner.AgentExecutor, o RunnerOverrides) {
-	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
+	rtCfg, err := runtime.Load(env.Layers)
 	if err != nil {
 		return
 	}

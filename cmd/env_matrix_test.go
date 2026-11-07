@@ -25,9 +25,9 @@ import (
 // us to think about the new semantics deliberately.
 func TestLookupEnvMatrix(t *testing.T) {
 	// Save and restore package-level flags.
-	savedOrg, savedProj, savedWD := orgFlag, projectFlag, workDirFlag
-	t.Cleanup(func() { orgFlag, projectFlag, workDirFlag = savedOrg, savedProj, savedWD })
-	orgFlag = "" // always rely on discovery
+	savedOrg, savedProj, savedWD := homeFlag, projectFlag, workDirFlag
+	t.Cleanup(func() { homeFlag, projectFlag, workDirFlag = savedOrg, savedProj, savedWD })
+	homeFlag = "" // always rely on discovery
 
 	// Fixture:
 	//   base/
@@ -40,10 +40,7 @@ func TestLookupEnvMatrix(t *testing.T) {
 	//     explicitWD/           (--work-dir target)
 	base := resolvedTestDir(t)
 
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 
 	projectRoot := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projectRoot, 0755); err != nil {
@@ -154,7 +151,7 @@ func TestLookupEnvMatrix(t *testing.T) {
 					if wantErr {
 						if err == nil {
 							t.Fatalf("want error, got env={ProjectDir=%q WorkDir=%q OrgDir=%q}",
-								env.ProjectDir, env.WorkDir, env.OrgDir)
+								env.ProjectDir, env.WorkDir, env.HomeDir)
 						}
 						return
 					}
@@ -167,8 +164,8 @@ func TestLookupEnvMatrix(t *testing.T) {
 					if env.WorkDir != wantWork {
 						t.Errorf("WorkDir = %q, want %q", env.WorkDir, wantWork)
 					}
-					if env.OrgDir != wantOrg {
-						t.Errorf("OrgDir = %q, want %q", env.OrgDir, wantOrg)
+					if env.HomeDir != wantOrg {
+						t.Errorf("OrgDir = %q, want %q", env.HomeDir, wantOrg)
 					}
 				})
 			}

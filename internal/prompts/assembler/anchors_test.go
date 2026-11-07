@@ -29,11 +29,11 @@ func TestBuildAnchorsAllPresent(t *testing.T) {
 		"prompts/z.md": &fstest.MapFile{Data: []byte("E")},
 	}
 
-	anchors := BuildAnchors(projectDir, orgDir, embedded)
+	anchors := BuildAnchors(projectDir, []string{orgDir}, embedded)
 	if len(anchors) != 3 {
 		t.Fatalf("len = %d, want 3", len(anchors))
 	}
-	if anchors[0].Name != "project" || anchors[1].Name != "org" || anchors[2].Name != "embedded" {
+	if anchors[0].Name != "project" || anchors[1].Name != "home" || anchors[2].Name != "embedded" {
 		t.Fatalf("anchor order: %s, %s, %s", anchors[0].Name, anchors[1].Name, anchors[2].Name)
 	}
 
@@ -61,7 +61,7 @@ func TestBuildAnchorsMissingPromptsSubdirsAreOK(t *testing.T) {
 	if err := os.MkdirAll(orgDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	anchors := BuildAnchors(projectDir, orgDir, nil)
+	anchors := BuildAnchors(projectDir, []string{orgDir}, nil)
 	if len(anchors) != 2 {
 		t.Fatalf("len = %d, want 2", len(anchors))
 	}
@@ -79,14 +79,14 @@ func TestBuildAnchorsOmitsEmptyOrg(t *testing.T) {
 	tmp := t.TempDir()
 	projectDir := filepath.Join(tmp, "proj")
 	os.MkdirAll(projectDir, 0o755)
-	anchors := BuildAnchors(projectDir, "", nil)
+	anchors := BuildAnchors(projectDir, nil, nil)
 	if len(anchors) != 1 || anchors[0].Name != "project" {
 		t.Fatalf("got %+v, want one project anchor", anchors)
 	}
 }
 
 func TestBuildAnchorsAllEmpty(t *testing.T) {
-	anchors := BuildAnchors("", "", nil)
+	anchors := BuildAnchors("", nil, nil)
 	if len(anchors) != 0 {
 		t.Fatalf("expected zero anchors, got %d", len(anchors))
 	}
@@ -96,7 +96,7 @@ func TestBuildAnchorsEmbeddedOnly(t *testing.T) {
 	embedded := fstest.MapFS{
 		"prompts/_pre.context.md": &fstest.MapFile{Data: []byte("ctx")},
 	}
-	anchors := BuildAnchors("", "", embedded)
+	anchors := BuildAnchors("", nil, embedded)
 	if len(anchors) != 1 || anchors[0].Name != "embedded" {
 		t.Fatalf("got %+v, want embedded-only", anchors)
 	}

@@ -61,11 +61,11 @@ func TestDotNamespacedRole(t *testing.T) {
 		"security":   "on",
 	}
 
-	if !IsValidRole(roleID, configRoles, projectDir, orgDir) {
+	if !IsValidRole(roleID, configRoles, []string{projectDir, orgDir}) {
 		t.Errorf("IsValidRole(%q): want true, got false", roleID)
 	}
 
-	all := AllKnownRoleIDs(configRoles, projectDir, orgDir)
+	all := AllKnownRoleIDs(configRoles, []string{projectDir, orgDir})
 	found := false
 	for _, id := range all {
 		if id == roleID {
@@ -77,7 +77,7 @@ func TestDotNamespacedRole(t *testing.T) {
 		t.Errorf("AllKnownRoleIDs missing %q, got %v", roleID, all)
 	}
 
-	resolved, err := ResolveRoleList([]string{"code.small", "security"}, configRoles, projectDir, orgDir)
+	resolved, err := ResolveRoleList([]string{"code.small", "security"}, configRoles, []string{projectDir, orgDir})
 	if err != nil {
 		t.Fatalf("ResolveRoleList: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestResolveRoleListAllExpansionUsesAllowlist(t *testing.T) {
 	// "all" expands only to roles explicitly listed as "on" or "enabled".
 	// Built-in roles not present in configRoles (e.g. "code.bugs") and roles
 	// listed as "off" are both excluded.
-	roles, err := ResolveRoleList([]string{"all"}, configRoles, "", "")
+	roles, err := ResolveRoleList([]string{"all"}, configRoles, nil)
 	if err != nil {
 		t.Fatalf("ResolveRoleList: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestFormatProjectInfo(t *testing.T) {
 
 	t.Run("basic fields use relative paths", func(t *testing.T) {
 		p := ProjectInfoParams{
-			OrgDir:      "/home/user/.ateamorg",
+			HomeDir:     "/home/user/.ateamorg",
 			ProjectDir:  "/projects/myapp/.ateam",
 			ProjectName: "myapp",
 			WorkDir:     "/projects/myapp",
@@ -149,7 +149,7 @@ func TestFormatProjectInfo(t *testing.T) {
 
 	t.Run("git repo dir differs uses relative path", func(t *testing.T) {
 		p := ProjectInfoParams{
-			OrgDir:      "/home/user/.ateamorg",
+			HomeDir:     "/home/user/.ateamorg",
 			ProjectDir:  "/projects/mono/apps/myapp/.ateam",
 			ProjectName: "myapp",
 			WorkDir:     "/projects/mono/apps/myapp",
@@ -174,7 +174,7 @@ func TestFormatProjectInfo(t *testing.T) {
 
 	t.Run("git repo dir same as source dir", func(t *testing.T) {
 		p := ProjectInfoParams{
-			OrgDir:      "/home/user/.ateamorg",
+			HomeDir:     "/home/user/.ateamorg",
 			ProjectDir:  "/projects/myapp/.ateam",
 			ProjectName: "myapp",
 			WorkDir:     "/projects/myapp",
@@ -189,7 +189,7 @@ func TestFormatProjectInfo(t *testing.T) {
 
 	t.Run("with meta clean tree", func(t *testing.T) {
 		p := ProjectInfoParams{
-			OrgDir:      "/home/user/.ateamorg",
+			HomeDir:     "/home/user/.ateamorg",
 			ProjectDir:  "/projects/myapp/.ateam",
 			ProjectName: "myapp",
 			WorkDir:     "/projects/myapp",
@@ -219,7 +219,7 @@ func TestFormatProjectInfo(t *testing.T) {
 
 	t.Run("with meta uncommitted changes", func(t *testing.T) {
 		p := ProjectInfoParams{
-			OrgDir:      "/home/user/.ateamorg",
+			HomeDir:     "/home/user/.ateamorg",
 			ProjectDir:  "/projects/myapp/.ateam",
 			ProjectName: "myapp",
 			WorkDir:     "/projects/myapp",
@@ -253,7 +253,7 @@ func TestFormatProjectInfo(t *testing.T) {
 
 	t.Run("quick orientation appended when non-empty", func(t *testing.T) {
 		p := ProjectInfoParams{
-			OrgDir:           "/home/user/.ateamorg",
+			HomeDir:          "/home/user/.ateamorg",
 			ProjectDir:       "/projects/myapp/.ateam",
 			ProjectName:      "myapp",
 			WorkDir:          "/projects/myapp",
@@ -391,7 +391,7 @@ func TestRoleMetaLegacyFlag(t *testing.T) {
 func TestFormatProjectInfoShowsRelativeAteamPath(t *testing.T) {
 	t.Run("ateam under cwd renders as .ateam", func(t *testing.T) {
 		p := ProjectInfoParams{
-			OrgDir:      "/home/user/.ateamorg",
+			HomeDir:     "/home/user/.ateamorg",
 			ProjectDir:  "/projects/myapp/.ateam",
 			WorkDir:     "/projects/myapp",
 			ProjectName: "myapp",
@@ -405,7 +405,7 @@ func TestFormatProjectInfoShowsRelativeAteamPath(t *testing.T) {
 
 	t.Run("ateam in sibling tree renders as ../path", func(t *testing.T) {
 		p := ProjectInfoParams{
-			OrgDir:      "/home/user/.ateamorg",
+			HomeDir:     "/home/user/.ateamorg",
 			ProjectDir:  "/projects/main/.ateam",
 			WorkDir:     "/projects/worktree-feat",
 			ProjectName: "myapp",

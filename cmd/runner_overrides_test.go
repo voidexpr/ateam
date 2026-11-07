@@ -143,19 +143,20 @@ func TestResolveEnvAppliesWorkDirFlag(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git CLI required")
 	}
-	savedOrg, savedProj, savedWD := orgFlag, projectFlag, workDirFlag
+	savedOrg, savedProj, savedWD := homeFlag, projectFlag, workDirFlag
 	t.Cleanup(func() {
-		orgFlag, projectFlag, workDirFlag = savedOrg, savedProj, savedWD
+		homeFlag, projectFlag, workDirFlag = savedOrg, savedProj, savedWD
 	})
 
 	// Layout: tmp/project/.ateam + tmp/worktree (a real git repo)
+	isolateHome(t)
 	tmp := t.TempDir()
 	projectRoot := filepath.Join(tmp, "project")
 	ateam := filepath.Join(projectRoot, ".ateam")
 	if err := os.MkdirAll(ateam, 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(ateam, "config.toml"), []byte("[project]\nname=\"p\"\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(ateam, root.ConfigFile), []byte("project {\n  name = \"p\"\n}\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	worktree := filepath.Join(tmp, "worktree")
@@ -173,7 +174,7 @@ func TestResolveEnvAppliesWorkDirFlag(t *testing.T) {
 		}
 	}
 
-	orgFlag = ""
+	homeFlag = ""
 	projectFlag = projectRoot
 	workDirFlag = worktree
 

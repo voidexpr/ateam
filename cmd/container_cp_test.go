@@ -18,7 +18,7 @@ type savedContainerCpGlobals struct {
 	container string
 	dryRun    bool
 	resolver  func(string) (string, error)
-	orgFlag   string
+	homeFlag  string
 }
 
 func saveContainerCpGlobals() savedContainerCpGlobals {
@@ -27,7 +27,7 @@ func saveContainerCpGlobals() savedContainerCpGlobals {
 		container: containerCpContainer,
 		dryRun:    containerCpDryRun,
 		resolver:  resolveContainerName,
-		orgFlag:   orgFlag,
+		homeFlag:  homeFlag,
 	}
 }
 
@@ -36,7 +36,7 @@ func (s savedContainerCpGlobals) restore() {
 	containerCpContainer = s.container
 	containerCpDryRun = s.dryRun
 	resolveContainerName = s.resolver
-	orgFlag = s.orgFlag
+	homeFlag = s.homeFlag
 }
 
 // setupContainerCpProject creates an org + project fixture with a runtime.hcl
@@ -45,11 +45,7 @@ func (s savedContainerCpGlobals) restore() {
 func setupContainerCpProject(t *testing.T, profileName, dockerContainer string) (projPath, orgDir string) {
 	t.Helper()
 	base := t.TempDir()
-	var err error
-	orgDir, err = root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir = testHome(t, base)
 	projPath = filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -72,7 +68,7 @@ profile %q {
   container = "myct"
 }
 `, dockerContainer, profileName)
-	if err := os.WriteFile(filepath.Join(projPath, ".ateam", "runtime.hcl"), []byte(hcl), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(projPath, ".ateam", root.ConfigFile), []byte(hcl), 0644); err != nil {
 		t.Fatal(err)
 	}
 	return projPath, orgDir
@@ -104,7 +100,7 @@ func TestContainerCPDryRunPrintsPlan(t *testing.T) {
 	containerCpProfile = "p"
 	containerCpContainer = ""
 	containerCpDryRun = true
-	orgFlag = ""
+	homeFlag = ""
 
 	var resolverCalls int
 	var resolverArg string
@@ -178,7 +174,7 @@ func TestContainerCPProfileMissingDockerContainerFails(t *testing.T) {
 	containerCpProfile = "p"
 	containerCpContainer = ""
 	containerCpDryRun = true
-	orgFlag = ""
+	homeFlag = ""
 
 	var resolverCalls int
 	resolveContainerName = func(name string) (string, error) {
@@ -219,7 +215,7 @@ func TestContainerCPMissingBinaryFailsClearly(t *testing.T) {
 	containerCpProfile = "p"
 	containerCpContainer = ""
 	containerCpDryRun = true
-	orgFlag = ""
+	homeFlag = ""
 
 	resolveContainerName = func(name string) (string, error) {
 		return name, nil

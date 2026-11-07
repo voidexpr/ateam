@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	orgFlag              string
+	homeFlag             string
 	projectFlag          string
 	workDirFlag          string
 	sandboxDetectionFlag string
@@ -60,19 +60,17 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&orgFlag, "org", "o", "", "path to org folder (.ateamorg/) or its parent — overrides cwd-based discovery")
-	rootCmd.PersistentFlags().StringVarP(&projectFlag, "project", "p", "", "path to project folder (.ateam/) or its parent. Agent runs at the project root when cwd is inside it (git-like) or in cwd when --project points elsewhere.")
+	rootCmd.PersistentFlags().StringVar(&homeFlag, "home", "", "the user-wide ateam directory (default: $ATEAM_HOME, else ~/.ateam) — config layer and user state")
+	rootCmd.PersistentFlags().StringVarP(&projectFlag, "project", "p", "", "path to the project folder (.ateam/), its parent, or any path inside the project. Agent runs at the project root when cwd is inside it (git-like) or in cwd when --project points elsewhere.")
 	rootCmd.PersistentFlags().StringVar(&workDirFlag, "work-dir", "", "agent working directory (overrides the project-aware default)")
-	rootCmd.PersistentFlags().StringVar(&sandboxDetectionFlag, "sandbox-detection", "", "true|false: auto-detect when ateam is running inside any outer non-container sandbox (signal-driven: macOS Seatbelt probe, Linux /proc heuristics, cooperative env vars FENCE_SANDBOX/FIREJAIL_NAME/container=…) and treat it as a container so the agent's inner sandbox is skipped. Built-in default false because the signals can have false positives that silently drop defense in depth — opt in when knowingly running under an outer sandbox. Empty = use runtime.hcl or built-in default.")
-	rootCmd.PersistentFlags().StringVar(&dockerDetectionFlag, "docker-detection", "", "true|false: auto-detect /.dockerenv and /run/.containerenv and treat ateam as already inside a container. Built-in default true (markers are dead-reliable). Empty = use runtime.hcl or built-in default.")
+	rootCmd.PersistentFlags().StringVar(&sandboxDetectionFlag, "sandbox-detection", "", "true|false: auto-detect when ateam is running inside any outer non-container sandbox (signal-driven: macOS Seatbelt probe, Linux /proc heuristics, cooperative env vars FENCE_SANDBOX/FIREJAIL_NAME/container=…) and treat it as a container so the agent's inner sandbox is skipped. Built-in default false because the signals can have false positives that silently drop defense in depth — opt in when knowingly running under an outer sandbox. Empty = use ateam.hcl or built-in default.")
+	rootCmd.PersistentFlags().StringVar(&dockerDetectionFlag, "docker-detection", "", "true|false: auto-detect /.dockerenv and /run/.containerenv and treat ateam as already inside a container. Built-in default true (markers are dead-reliable). Empty = use ateam.hcl or built-in default.")
 
 	rootCmd.AddCommand(envCmd)
-	rootCmd.AddCommand(installCmd)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(reportCmd)
 	rootCmd.AddCommand(reviewCmd)
 	rootCmd.AddCommand(verifyCmd)
-	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(projectsCmd)
 	rootCmd.AddCommand(rolesCmd)
 	rootCmd.AddCommand(execCmd)

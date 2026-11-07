@@ -8,6 +8,16 @@ capture belongs in whatever loader comes out of step 6 below, and the
 `ateam env` rework in step 5 is where the traceable-config rendering
 lands.
 
+## Status
+
+Items 1 to 5 of the order of work are implemented (per-field merge with
+provenance, model warnings, `ateam login`, `ateam env` / `--dry-run`
+chains, and the single `ateam.hcl` with `.ateam`-only layering, the
+config/state split and name-based project identity). The single central
+state db stays an open choice; per-project `state.sqlite` is kept.
+Containers see the home and project layers only; ancestor layers are not
+mounted (known limitation). Items 6 to 8 are open.
+
 ## Decisions
 
 - **Breaking upgrade, no backward compatibility.** One release renames

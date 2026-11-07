@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ateam/internal/root"
+	"github.com/ateam/internal/runtime"
 )
 
 // resolveEnv calls root.Resolve and finalises env.WorkDir according to the
@@ -14,16 +15,16 @@ import (
 // consumers (sandbox grants, container mounts, prompt context, git metadata)
 // read coherent values from env.
 func resolveEnv() (*root.ResolvedEnv, error) {
-	env, err := root.Resolve(orgFlag, projectFlag)
+	env, err := root.Resolve(homeFlag, projectFlag)
 	if err != nil {
 		return nil, err
 	}
-	// root.Resolve returns a project-less env when only --org resolves
+	// root.Resolve returns a project-less env when no project is found
 	// (scratch mode for exec/parallel). Commands using resolveEnv strictly
 	// require a project — surface the missing .ateam/ here so callers can
 	// rely on env.ProjectDir / env.Config being populated.
 	if env.ProjectDir == "" {
-		return nil, fmt.Errorf("no .ateam/ found — this command requires a project context; run 'ateam init' first")
+		return nil, fmt.Errorf("no project found (a .ateam/ whose ateam.hcl names a project) — this command requires one; run 'ateam init' first")
 	}
 	return applyWorkDirFlag(env)
 }
@@ -31,11 +32,20 @@ func resolveEnv() (*root.ResolvedEnv, error) {
 // lookupEnv calls root.Lookup and applies the work-dir policy. Use this when
 // a project is optional (exec/parallel can run org-less).
 func lookupEnv() (*root.ResolvedEnv, error) {
-	env, err := root.Lookup(orgFlag, projectFlag)
+	env, err := root.Lookup(homeFlag, projectFlag)
 	if err != nil {
 		return nil, err
 	}
 	return applyWorkDirFlag(env)
+}
+
+// envLayers returns the config layers of env, or the user home layer alone
+// when no environment could be resolved.
+func envLayers(env *root.ResolvedEnv) []string {
+	if env != nil {
+		return env.Layers
+	}
+	return []string{runtime.HomeDir()}
 }
 
 // applyWorkDirFlag finalises env.WorkDir using this precedence:

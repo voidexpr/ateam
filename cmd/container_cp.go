@@ -37,12 +37,7 @@ func runContainerCp(cmd *cobra.Command, args []string) error {
 
 	if containerName == "" && containerCpProfile != "" {
 		env, _ := root.Lookup("", "")
-		var projectDir, orgDir string
-		if env != nil {
-			projectDir = env.ProjectDir
-			orgDir = env.OrgDir
-		}
-		rtCfg, err := runtime.Load(projectDir, orgDir)
+		rtCfg, err := runtime.Load(envLayers(env))
 		if err != nil {
 			return fmt.Errorf("cannot load runtime.hcl: %w", err)
 		}
@@ -66,13 +61,13 @@ func runContainerCp(cmd *cobra.Command, args []string) error {
 	}
 
 	env, _ := root.Lookup("", "")
-	orgDir := ""
+	homeDir := ""
 	if env != nil {
-		orgDir = env.OrgDir
+		homeDir = env.HomeDir
 	}
 
 	if containerCpDryRun {
-		binary := findLinuxBinary(orgDir)
+		binary := findLinuxBinary(homeDir)
 		if binary == "" {
 			return fmt.Errorf("no linux ateam binary found (run 'make companion' to build one)")
 		}
@@ -80,5 +75,5 @@ func runContainerCp(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return copyAteamBinary(containerName, orgDir)
+	return copyAteamBinary(containerName, homeDir)
 }

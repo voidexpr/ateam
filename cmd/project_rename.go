@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/root"
@@ -11,201 +12,116 @@ import (
 )
 
 var projectRenameCmd = &cobra.Command{
-	Use:   "project-rename",
-	Short: "Re-register or rename a project in the org",
-	Long: `Re-register a project with its org, or rename its state after a directory move.
+	Use:   "project-rename [--name NEW_NAME]",
+	Short: "Re-register the current project, or rename it",
+	Long: `Without --name, re-registers the current project at its current location
+in the user's registry (~/.ateam/state/projects.hcl). Use this after moving
+a project directory.
 
-Without --old/--new flags, re-registers the current project at its current
-location. Use this after moving a project directory to update the org link.
-
-With --old and --new flags, renames the legacy state directory under
-.ateamorg/projects/.
+With --name, renames the project: updates the project block in
+.ateam/ateam.hcl, the rows in the project's state database (project_id is
+the name), and the registry entry.
 
 Examples:
-  ateam project-rename                                  # re-register current project
-  ateam project-rename --old services/api --new backends/api  # rename after move`,
+  ateam project-rename                  # re-register after a move
+  ateam project-rename --name backend   # rename`,
 	Args: cobra.NoArgs,
 	RunE: runProjectRename,
 }
 
 var (
-	renameOldPath string
-	renameNewPath string
+	renameNewName string
 	renameDryRun  bool
 )
 
 func init() {
-	projectRenameCmd.Flags().StringVar(&renameOldPath, "old", "", "old project path (relative to org root)")
-	projectRenameCmd.Flags().StringVar(&renameNewPath, "new", "", "new project path (relative to org root)")
+	projectRenameCmd.Flags().StringVar(&renameNewName, "name", "", "new project name")
 	projectRenameCmd.Flags().BoolVar(&renameDryRun, "dry-run", false, "show what would be done without executing")
 }
 
 func runProjectRename(cmd *cobra.Command, args []string) error {
-	// No flags: re-register current project at its current location.
-	if renameOldPath == "" && renameNewPath == "" {
-		return runProjectReregister()
-	}
-
-	if renameOldPath == "" || renameNewPath == "" {
-		return fmt.Errorf("both --old and --new are required for explicit rename")
-	}
-
-	return runProjectExplicitRename()
-}
-
-// runProjectReregister re-registers the current project with its org.
-func runProjectReregister() error {
-	env, err := lookupEnv()
+	env, err := resolveEnv()
 	if err != nil {
 		return err
 	}
-	if env.OrgDir == "" {
-		return fmt.Errorf("no .ateamorg/ found — cannot register project")
-	}
-	if env.SourceDir == "" {
-		return fmt.Errorf("no project found in current directory")
-	}
-
-	projectID := env.ProjectID()
-	if projectID == "" {
-		return fmt.Errorf("cannot compute project ID")
-	}
-
 	prefix := ""
 	if renameDryRun {
 		prefix = "[dry-run] "
 	}
 
-	fmt.Printf("  Project:  %s\n", env.ProjectName)
-	fmt.Printf("  Path:     %s\n", env.RelPath(env.SourceDir))
-	fmt.Printf("  Org:      %s\n", env.OrgDir)
-	fmt.Printf("  ID:       %s\n", projectID)
-	fmt.Println()
-
-	stateDir := filepath.Join(env.OrgDir, "projects", projectID)
-	if _, err := os.Stat(stateDir); err == nil {
-		fmt.Printf("%sProject %q is already registered at %s\n", prefix, env.ProjectName, env.RelPath(env.SourceDir))
-		return nil
+	if renameNewName == "" {
+		return reregisterProject(env, prefix)
 	}
-
-	fmt.Printf("%sCreate %s\n", prefix, stateDir)
-
-	// Show stale registrations that would be cleaned up
-	stale := findStaleRegistrations(env)
-	for _, s := range stale {
-		fmt.Printf("%sRemove stale registration: %s\n", prefix, s)
-	}
-
-	if renameDryRun {
-		return nil
-	}
-
-	if err := os.MkdirAll(stateDir, 0755); err != nil {
-		return fmt.Errorf("creating state directory: %w", err)
-	}
-
-	fmt.Printf("Registered project %q at %s\n", env.ProjectName, env.RelPath(env.SourceDir))
-
-	for _, s := range stale {
-		staleDir := filepath.Join(env.OrgDir, "projects", config.PathToProjectID(s))
-		if err := os.RemoveAll(staleDir); err == nil {
-			fmt.Printf("  Removed stale registration: %s\n", s)
-		}
-	}
-
-	return nil
+	return renameProject(env, renameNewName, prefix)
 }
 
-// findStaleRegistrations returns relative paths of org registrations whose
-// project directories no longer exist.
-func findStaleRegistrations(env *root.ResolvedEnv) []string {
-	projectsDir := filepath.Join(env.OrgDir, "projects")
-	entries, err := os.ReadDir(projectsDir)
-	if err != nil {
+func reregisterProject(env *root.ResolvedEnv, prefix string) error {
+	entry, ok := root.LookupRegistry(env.HomeDir, env.ProjectName)
+	fmt.Printf("  Project: %s\n  Path:    %s\n", env.ProjectName, tildeHome(env.SourceDir))
+	if ok && entry.Path == env.SourceDir {
+		fmt.Printf("%sAlready registered at this path.\n", prefix)
 		return nil
 	}
-	orgRoot := env.OrgRoot()
-	var stale []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		relPath := config.ProjectIDToPath(e.Name())
-		projDir := filepath.Join(orgRoot, relPath, root.ProjectDirName)
-		if _, err := os.Stat(projDir); os.IsNotExist(err) {
-			stale = append(stale, relPath)
-		}
-	}
-	return stale
-}
-
-func runProjectExplicitRename() error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("cannot get working directory: %w", err)
-	}
-
-	var orgDir string
-	if orgFlag != "" {
-		orgDir, err = root.FindOrg(orgFlag)
-		if err != nil {
-			return err
-		}
+	if ok {
+		fmt.Printf("%sUpdate registry entry: %s → %s\n", prefix, tildeHome(entry.Path), tildeHome(env.SourceDir))
 	} else {
-		orgDir, _ = root.FindOrg(cwd)
+		fmt.Printf("%sRegister project %q\n", prefix, env.ProjectName)
 	}
-
-	oldID := config.PathToProjectID(renameOldPath)
-	newID := config.PathToProjectID(renameNewPath)
-
-	prefix := ""
 	if renameDryRun {
-		prefix = "[dry-run] "
+		return nil
+	}
+	entry.Name = env.ProjectName
+	entry.Path = env.SourceDir
+	if entry.KeychainKey == "" {
+		entry.KeychainKey = env.KeychainKey
+	}
+	return root.Register(env.HomeDir, entry)
+}
+
+func renameProject(env *root.ResolvedEnv, newName, prefix string) error {
+	if err := config.ValidateProjectName(newName); err != nil {
+		return err
+	}
+	if newName == env.ProjectName {
+		fmt.Println("The project already has that name; nothing to do.")
+		return nil
+	}
+	if other, ok := root.LookupRegistry(env.HomeDir, newName); ok && other.Path != env.SourceDir {
+		return fmt.Errorf("project %q already exists at %s", newName, other.Path)
 	}
 
-	fmt.Printf("  Old path: %s (ID: %s)\n", renameOldPath, oldID)
-	fmt.Printf("  New path: %s (ID: %s)\n", renameNewPath, newID)
-	if orgDir != "" {
-		fmt.Printf("  Org:      %s\n", orgDir)
+	configPath := filepath.Join(env.ProjectDir, root.ConfigFile)
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return err
 	}
-	fmt.Println()
+	oldLine := fmt.Sprintf("name = %q", env.ProjectName)
+	if !strings.Contains(string(data), oldLine) {
+		return fmt.Errorf("cannot find `%s` in %s; edit the project block by hand", oldLine, configPath)
+	}
 
-	if oldID == newID {
-		fmt.Println("Old and new paths map to the same project ID; nothing to do.")
+	fmt.Printf("  %s: %s → %s\n", tildeHome(configPath), env.ProjectName, newName)
+	fmt.Printf("  state.sqlite: project_id %q → %q\n", env.ProjectName, newName)
+	fmt.Printf("  registry: %q → %q\n", env.ProjectName, newName)
+	if renameDryRun {
 		return nil
 	}
 
-	// Warn if new path doesn't have .ateam/
-	if orgDir != "" {
-		orgRoot := filepath.Dir(orgDir)
-		newAteamDir := filepath.Join(orgRoot, renameNewPath, root.ProjectDirName)
-		if info, err := os.Stat(newAteamDir); err != nil || !info.IsDir() {
-			fmt.Fprintf(os.Stderr, "Warning: %s does not exist; metadata will be updated anyway\n", newAteamDir)
+	updated := strings.Replace(string(data), oldLine, fmt.Sprintf("name = %q", newName), 1)
+	if err := os.WriteFile(configPath, []byte(updated), 0644); err != nil {
+		return err
+	}
+	if db, err := requireStateDB(env); err == nil {
+		defer db.Close()
+		if _, err := db.RenameProject(env.ProjectName, newName); err != nil {
+			return fmt.Errorf("renaming project rows: %w", err)
 		}
 	}
-
-	// Clean up legacy state dir if present
-	if orgDir != "" {
-		oldStateDir := filepath.Join(orgDir, "projects", oldID)
-		if _, err := os.Stat(oldStateDir); err == nil {
-			newStateDir := filepath.Join(orgDir, "projects", newID)
-			if _, err := os.Stat(newStateDir); err == nil {
-				fmt.Printf("%sSkip rename: %s already exists\n", prefix, newStateDir)
-			} else {
-				fmt.Printf("%sRename %s → %s\n", prefix, oldStateDir, newStateDir)
-				if !renameDryRun {
-					if err := os.Rename(oldStateDir, newStateDir); err != nil {
-						return fmt.Errorf("renaming legacy state dir: %w", err)
-					}
-				}
-			}
-		} else {
-			fmt.Printf("  No existing state dir at %s\n", oldStateDir)
-		}
+	entry, _ := root.LookupRegistry(env.HomeDir, env.ProjectName)
+	if err := root.Unregister(env.HomeDir, env.ProjectName); err != nil {
+		return err
 	}
-
-	if !renameDryRun {
-		fmt.Println("Per-project state.sqlite requires no path updates.")
-	}
-	return nil
+	entry.Name = newName
+	entry.Path = env.SourceDir
+	return root.Register(env.HomeDir, entry)
 }

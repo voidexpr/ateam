@@ -25,10 +25,7 @@ func TestRunRolesDefaultListing(t *testing.T) {
 	defer saveRolesGlobals()()
 
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -41,9 +38,9 @@ func TestRunRolesDefaultListing(t *testing.T) {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	rolesEnabled = false
 	rolesAvailable = false

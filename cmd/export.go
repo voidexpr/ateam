@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/root"
+	"github.com/ateam/internal/runtime"
 	"github.com/ateam/internal/web"
 	"github.com/spf13/cobra"
 )
@@ -51,10 +51,9 @@ func runExport(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("resolving --ateam-project path: %w", err)
 		}
-		cfg, _ := config.Load(absPath)
 		name := filepath.Base(filepath.Dir(absPath))
-		if cfg != nil && cfg.Project.Name != "" {
-			name = cfg.Project.Name
+		if n := runtime.ProjectName(absPath); n != "" {
+			name = n
 		}
 		env = &root.ResolvedEnv{
 			ProjectDir:  absPath,

@@ -67,10 +67,7 @@ func TestPrintExecDryRun(t *testing.T) {
 
 func TestRunExecDryRunNoExec(t *testing.T) {
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -84,7 +81,7 @@ func TestRunExecDryRunNoExec(t *testing.T) {
 
 	saved := saveExecGlobals()
 	defer saved.restore()
-	orgFlag = filepath.Dir(orgDir) // --org takes the parent of .ateamorg/
+	homeFlag = orgDir
 	execDryRun = true
 	execQuiet = true
 	execAgent = "mock"
@@ -108,7 +105,7 @@ func TestRunExecDryRunCodexTmuxCheapSettings(t *testing.T) {
 
 	saved := saveExecGlobals()
 	defer saved.restore()
-	orgFlag = orgParent
+	homeFlag = filepath.Join(orgParent, ".ateam")
 	execDryRun = true
 	execQuiet = true
 	execProfile = ""
@@ -148,7 +145,7 @@ func TestRunExecPrePostWrap(t *testing.T) {
 
 	saved := saveExecGlobals()
 	defer saved.restore()
-	orgFlag = orgParent
+	homeFlag = filepath.Join(orgParent, ".ateam")
 	execDryRun = true
 	execQuiet = true
 	execAgent = "mock"
@@ -234,7 +231,7 @@ func TestRunExecAcceptsUnknownRole(t *testing.T) {
 
 			saved := saveExecGlobals()
 			defer saved.restore()
-			orgFlag = orgParent
+			homeFlag = filepath.Join(orgParent, ".ateam")
 			execDryRun = true
 			execQuiet = true
 			execAgent = "mock"
@@ -267,15 +264,12 @@ func TestRunExecAcceptsUnknownRole(t *testing.T) {
 }
 
 // TestRunExecScratchModeWritesToOrgDB verifies that `ateam exec` from a cwd
-// with no .ateam/ but a discoverable .ateamorg/ records a row in
-// <OrgDir>/state.sqlite, writes logs under <OrgDir>/logs/<id>/, and captures
+// with no project records a row in <HomeDir>/state/state.sqlite, writes
+// logs under <HomeDir>/state/logs/<id>/, and captures
 // the absolute cwd in agent_execs.work_dir.
 func TestRunExecScratchModeWritesToOrgDB(t *testing.T) {
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 
 	// Scratch cwd: any dir under base that is NOT a project.
 	scratchDir := filepath.Join(base, "scratch_workspace")
@@ -285,7 +279,7 @@ func TestRunExecScratchModeWritesToOrgDB(t *testing.T) {
 
 	saved := saveExecGlobals()
 	defer saved.restore()
-	orgFlag = base
+	homeFlag = filepath.Join(base, ".ateam")
 	execProfile = "test" // mock agent
 	execAction = "audit"
 	execQuiet = true
@@ -302,7 +296,7 @@ func TestRunExecScratchModeWritesToOrgDB(t *testing.T) {
 	}
 
 	// state.sqlite must land in the org dir, not a project dir.
-	orgDBPath := filepath.Join(orgDir, "state.sqlite")
+	orgDBPath := filepath.Join(orgDir, "state", "state.sqlite")
 	if _, err := os.Stat(orgDBPath); err != nil {
 		t.Fatalf("org state.sqlite missing: %v", err)
 	}
@@ -330,7 +324,7 @@ func TestRunExecScratchModeWritesToOrgDB(t *testing.T) {
 	}
 
 	// Logs should land under the org dir.
-	logsDir := filepath.Join(orgDir, "logs", "1")
+	logsDir := filepath.Join(orgDir, "state", "logs", "1")
 	if _, err := os.Stat(filepath.Join(logsDir, "cmd.md")); err != nil {
 		t.Errorf("expected cmd.md at %s: %v", logsDir, err)
 	}
@@ -354,7 +348,7 @@ func TestRunExecRecordsCustomAction(t *testing.T) {
 
 	saved := saveExecGlobals()
 	defer saved.restore()
-	orgFlag = orgParent
+	homeFlag = filepath.Join(orgParent, ".ateam")
 	execProfile = "test" // uses mock agent
 	execAction = "audit" // custom action label
 	execQuiet = true
@@ -439,7 +433,7 @@ func TestRunExecFormatJSONL_EndToEnd(t *testing.T) {
 	saved := saveExecGlobals()
 	defer saved.restore()
 
-	orgFlag = orgParent
+	homeFlag = filepath.Join(orgParent, ".ateam")
 	execProfile = "test" // mock agent
 	execFormat = "jsonl"
 
@@ -555,7 +549,7 @@ func TestRunExecPrintsExecIDOnStderr(t *testing.T) {
 			saved := saveExecGlobals()
 			defer saved.restore()
 
-			orgFlag = orgParent
+			homeFlag = filepath.Join(orgParent, ".ateam")
 			execProfile = "test"
 			tc.configure()
 

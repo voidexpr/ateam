@@ -131,7 +131,7 @@ func runReview(opts ReviewOptions) error {
 	}
 
 	if len(opts.Roles) > 0 {
-		if _, err := promptdata.ResolveRoleList(opts.Roles, env.Config.Roles, env.ProjectDir, env.OrgDir); err != nil {
+		if _, err := promptdata.ResolveRoleList(opts.Roles, env.Config.Roles, env.Layers); err != nil {
 			return err
 		}
 	}
@@ -291,7 +291,7 @@ func printReviewDryRun(cr *runner.AgentExecutor, env *root.ResolvedEnv, prompt s
 		fmt.Println("  (none)")
 	}
 	for _, r := range reports {
-		relPath, _ := filepath.Rel(filepath.Dir(env.OrgDir), r.Path)
+		relPath, _ := filepath.Rel(env.SourceDir, r.Path)
 		if relPath == "" {
 			relPath = r.Path
 		}

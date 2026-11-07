@@ -18,6 +18,12 @@ var versionCmd = &cobra.Command{
 	RunE:  runVersion,
 }
 
+var (
+	BuildTime = "unknown"
+	Version   = "dev"
+	GitCommit = "unknown"
+)
+
 func runVersion(cmd *cobra.Command, args []string) error {
 	fmt.Printf("ateam:  %s\n", Version)
 	fmt.Printf("commit: %s\n", GitCommit)

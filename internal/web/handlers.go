@@ -148,7 +148,7 @@ func (s *Server) handleOverview(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("warning: RecentRuns: %v", err)
 		}
-		data.Runs = enrichRuns(rows, pe.ProjectDir, pe.OrgDir)
+		data.Runs = enrichRuns(rows, pe.ProjectDir)
 		data.TotalRuns = len(rows)
 		if aggs, err := db.CostByAction(""); err == nil {
 			for _, a := range aggs {
@@ -185,11 +185,11 @@ type runFiles struct {
 // every file lives in the same directory as the stream file. Legacy layout
 // (TS_ACTION_*) is detected by the "_stream.jsonl" suffix and falls back to
 // the old prefix-based discovery + ±5s prompt match.
-func resolveRunFiles(projectDir, orgDir string, row calldb.RecentRow) runFiles {
+func resolveRunFiles(projectDir string, row calldb.RecentRow) runFiles {
 	if row.AgentFile == "" {
 		return runFiles{}
 	}
-	absStream := root.ResolveStreamPath(projectDir, orgDir, row.AgentFile)
+	absStream := root.ResolveStreamPath(projectDir, row.AgentFile)
 	var rf runFiles
 	rf.LogsDir = filepath.Dir(row.AgentFile)
 	if _, err := os.Stat(absStream); err == nil {
@@ -288,12 +288,12 @@ func walkRuntimeFiles(runtimeDir string) []string {
 
 // enrichRuns resolves associated files for each run.
 // Rows are expected in descending start order (newest first) from calldb.
-func enrichRuns(rows []calldb.RecentRow, projectDir, orgDir string) []overviewRun {
+func enrichRuns(rows []calldb.RecentRow, projectDir string) []overviewRun {
 	result := make([]overviewRun, len(rows))
 	for i, row := range rows {
 		result[i] = overviewRun{
 			RecentRow: row,
-			runFiles:  resolveRunFiles(projectDir, orgDir, row),
+			runFiles:  resolveRunFiles(projectDir, row),
 		}
 	}
 	return result
@@ -484,7 +484,8 @@ func (s *Server) handlePrompts(w http.ResponseWriter, r *http.Request) {
 	// chain is identical for every role, so building it 2N times is waste.
 	env := &root.ResolvedEnv{
 		ProjectDir:  pe.ProjectDir,
-		OrgDir:      pe.OrgDir,
+		HomeDir:     pe.HomeDir,
+		Layers:      pe.Layers,
 		ProjectName: pe.Name,
 		SourceDir:   pe.SourceDir,
 	}
@@ -558,10 +559,13 @@ func webDisplayPath(pe *ProjectEntry, anchor, relPath string) string {
 	switch anchor {
 	case "project":
 		return filepath.Join(pe.ProjectDir, "prompts", relPath)
-	case "org":
-		return filepath.Join(pe.OrgDir, "prompts", relPath)
+	case "home":
+		return filepath.Join(pe.HomeDir, "prompts", relPath)
 	case "embedded":
 		return filepath.Join("defaults", "prompts", relPath)
+	}
+	if dir, ok := strings.CutPrefix(anchor, "layer "); ok {
+		return filepath.Join(dir, "prompts", relPath)
 	}
 	return relPath
 }
@@ -583,7 +587,7 @@ func (s *Server) handleRuns(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("warning: RecentRuns: %v", err)
 		}
-		data.Runs = enrichRuns(rows, pe.ProjectDir, pe.OrgDir)
+		data.Runs = enrichRuns(rows, pe.ProjectDir)
 		data.TotalRuns = len(rows)
 	}
 
@@ -621,7 +625,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 
 	data := runDetailData{
 		Run:      *run,
-		runFiles: resolveRunFiles(pe.ProjectDir, pe.OrgDir, *run),
+		runFiles: resolveRunFiles(pe.ProjectDir, *run),
 	}
 	populateRuntimeFiles(&data.runFiles, pe.ProjectDir, run.ID)
 
@@ -654,7 +658,7 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fileType := r.PathValue("file")
-	absStream := root.ResolveStreamPath(pe.ProjectDir, pe.OrgDir, run.AgentFile)
+	absStream := root.ResolveStreamPath(pe.ProjectDir, run.AgentFile)
 	legacy := root.IsLegacyStreamFile(absStream)
 	logDir := filepath.Dir(absStream)
 	var absPath, title string
@@ -724,7 +728,7 @@ func (s *Server) handleRunFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	absPath = filepath.Clean(absPath)
-	if !isPathWithin(absPath, pe.ProjectDir) && !isPathWithin(absPath, pe.OrgDir) {
+	if !isPathWithin(absPath, pe.ProjectDir) && !isPathWithin(absPath, pe.HomeDir) {
 		http.NotFound(w, r)
 		return
 	}

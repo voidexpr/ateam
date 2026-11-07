@@ -62,10 +62,7 @@ func TestPrintCodeSessionSummaryPicksByExecID(t *testing.T) {
 // prompt body.
 func TestCodeDryRunAgentInjection(t *testing.T) {
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -78,9 +75,9 @@ func TestCodeDryRunAgentInjection(t *testing.T) {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	var runErr error
 	out := captureStdout(t, func() {
@@ -109,10 +106,7 @@ func TestCodeDryRunAgentInjection(t *testing.T) {
 
 func TestCodeDryRunSupervisorAgentOverride(t *testing.T) {
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -125,9 +119,9 @@ func TestCodeDryRunSupervisorAgentOverride(t *testing.T) {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir) // --org takes the parent of .ateamorg/
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	// With both supervisor-agent and agent overrides, dry-run should succeed
 	// and return before invoking the supervisor runner.
@@ -153,10 +147,7 @@ func TestCodeDryRunSupervisorAgentOverride(t *testing.T) {
 // session summary (via printCodeSessionAction).
 func TestCodeStageHappyPath(t *testing.T) {
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -169,9 +160,9 @@ func TestCodeStageHappyPath(t *testing.T) {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {

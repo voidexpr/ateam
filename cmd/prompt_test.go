@@ -36,10 +36,7 @@ func savePromptGlobals() func() {
 func setupPromptProject(t *testing.T) string {
 	t.Helper()
 	base := t.TempDir()
-	orgDir, err := root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
+	orgDir := testHome(t, base)
 	projPath := filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -52,9 +49,9 @@ func setupPromptProject(t *testing.T) string {
 		t.Fatalf("InitProject: %v", err)
 	}
 
-	savedOrg := orgFlag
-	t.Cleanup(func() { orgFlag = savedOrg })
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	t.Cleanup(func() { homeFlag = savedOrg })
+	homeFlag = orgDir
 	return projPath
 }
 

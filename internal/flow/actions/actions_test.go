@@ -29,7 +29,7 @@ func TestCheckConcurrentRuns(t *testing.T) {
 			t.Fatalf("Open: %v", err)
 		}
 		t.Cleanup(func() { db.Close() })
-		env := &root.ResolvedEnv{ProjectDir: filepath.Join(t.TempDir(), "proj-x")}
+		env := &root.ResolvedEnv{ProjectDir: filepath.Join(t.TempDir(), "proj-x"), ProjectName: "proj-x"}
 		rc := flow.RunCtx{
 			Ctx:      context.Background(),
 			DB:       db,

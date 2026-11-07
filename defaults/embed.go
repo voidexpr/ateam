@@ -8,6 +8,5 @@ import "embed"
 // web, internal/prompts/embed.go) switched to read from prompts/.
 //
 //go:embed prompts/*.md prompts/report/*.md
-//go:embed ateam_claude_sandbox_extra_settings.json
-//go:embed runtime.hcl Dockerfile config.toml
+//go:embed ateam.hcl Dockerfile
 var FS embed.FS

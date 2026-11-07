@@ -16,7 +16,7 @@ func mkTestAssembler(files map[string]string) *assembler.MultiAnchorAssembler {
 	for path, body := range files {
 		mf["prompts/"+path] = &fstest.MapFile{Data: []byte(body)}
 	}
-	anchors := assembler.BuildAnchors("", "", mf)
+	anchors := assembler.BuildAnchors("", nil, mf)
 	return assembler.New(anchors)
 }
 
@@ -190,7 +190,7 @@ func TestPromptFileFilesystemModeComposesSiblings(t *testing.T) {
 	innerFS := fstest.MapFS{
 		"prompts/widget.pre.fromchain.md": &fstest.MapFile{Data: []byte("FROM CHAIN")},
 	}
-	base := assembler.New(assembler.BuildAnchors("", "", innerFS))
+	base := assembler.New(assembler.BuildAnchors("", nil, innerFS))
 	env := envWithAssembler(base)
 
 	ctx := &stubCtx{

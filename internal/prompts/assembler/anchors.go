@@ -11,31 +11,41 @@ import (
 // etc. — never with a leading `prompts/` segment.
 const PromptsSubdir = "prompts"
 
-// BuildAnchors returns the standard three-anchor resolution chain in the
-// order Assembler expects (most-specific first):
+// BuildAnchors returns the resolution chain in the order Assembler expects
+// (most-specific first):
 //
-//  1. project — <projectDir>/prompts/
-//  2. org     — <orgDir>/prompts/ (omitted when orgDir is empty)
+//  1. project — <projectDir>/prompts/ (omitted when projectDir is empty)
+//  2. one anchor per config layer, nearest first: the ancestors' .ateam/
+//     prompts/ then the user's ~/.ateam/prompts/ (layerDirs is given
+//     lowest precedence first, so it is walked backwards; the first entry
+//     is the home layer and is named "home")
 //  3. embedded — the prompts/ subtree of `embedded` (the embed.FS for
 //     built-in defaults)
 //
-// Either filesystem anchor (project / org) gracefully handles a missing
-// `prompts/` subdir: reads simply return fs.ErrNotExist, which the
-// Assembler treats as "anchor doesn't have this file" rather than an error.
-// This lets the function be called against any project — even one whose
-// prompt tree hasn't been populated yet.
-func BuildAnchors(projectDir, orgDir string, embedded fs.FS) []Anchor {
-	anchors := make([]Anchor, 0, 3)
+// Every filesystem anchor gracefully handles a missing `prompts/` subdir:
+// reads simply return fs.ErrNotExist, which the Assembler treats as
+// "anchor doesn't have this file" rather than an error. This lets the
+// function be called against any project — even one whose prompt tree
+// hasn't been populated yet.
+func BuildAnchors(projectDir string, layerDirs []string, embedded fs.FS) []Anchor {
+	anchors := make([]Anchor, 0, len(layerDirs)+2)
 	if projectDir != "" {
 		anchors = append(anchors, Anchor{
 			Name: "project",
 			FS:   os.DirFS(joinPrompts(projectDir)),
 		})
 	}
-	if orgDir != "" {
+	for i := len(layerDirs) - 1; i >= 0; i-- {
+		if layerDirs[i] == "" {
+			continue
+		}
+		name := "home"
+		if i > 0 {
+			name = "layer " + layerDirs[i]
+		}
 		anchors = append(anchors, Anchor{
-			Name: "org",
-			FS:   os.DirFS(joinPrompts(orgDir)),
+			Name: name,
+			FS:   os.DirFS(joinPrompts(layerDirs[i])),
 		})
 	}
 	if embedded != nil {

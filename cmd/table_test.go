@@ -323,7 +323,7 @@ profile "` + profileName + `" {
   container = "ct-test"
 }
 `
-			if err := os.WriteFile(filepath.Join(projectDir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+			if err := os.WriteFile(filepath.Join(projectDir, root.ConfigFile), []byte(hcl), 0644); err != nil {
 				t.Fatal(err)
 			}
 

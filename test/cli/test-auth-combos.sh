@@ -30,7 +30,8 @@ trap 'rm -rf "$TMPROOT"' EXIT
 PROJ="$TMPROOT/work/proj"
 export HOME="$TMPROOT/home"
 mkdir -p "$PROJ" "$HOME"
-(cd "$PROJ" && "$ATEAM" init --org-create "$TMPROOT/work" >/dev/null 2>&1)
+export ATEAM_HOME="$TMPROOT/ateam-home"
+(cd "$PROJ" && "$ATEAM" init >/dev/null 2>&1)
 
 SECRETS_FILE="$PROJ/.ateam/secrets.env"
 

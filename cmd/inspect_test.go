@@ -31,7 +31,7 @@ func saveInspectGlobals() inspectGlobals {
 		autoDebug:  inspectAutoDebug,
 		profile:    inspectProfile,
 		agent:      inspectAgent,
-		org:        orgFlag,
+		org:        homeFlag,
 	}
 }
 
@@ -44,7 +44,7 @@ func (g inspectGlobals) restore() {
 	inspectAutoDebug = g.autoDebug
 	inspectProfile = g.profile
 	inspectAgent = g.agent
-	orgFlag = g.org
+	homeFlag = g.org
 }
 
 // seedInspectDB seeds the given calldb with a set of runs for testing run selection:

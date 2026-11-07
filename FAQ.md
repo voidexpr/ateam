@@ -39,7 +39,7 @@ You can also resume sessions from role agents via `ateam resume <id>` (or `ateam
 
 Both Claude and Codex use their built-in sandbox mode. For Claude this means OS-level restrictions (Seatbelt/bubblewrap) limiting filesystem and network access.
 
-It can easily be changed in `.ateam/config.toml` to select specific profiles and how to run agents is fully customizable in `.ateamorg/runtime.hcl`.
+It can easily be changed in `.ateam/ateam.hcl` to select specific profiles, and how agents run is fully customizable in the same file or user-wide in `~/.ateam/ateam.hcl`.
 
 ## How to look at the exact prompts used by ateam
 

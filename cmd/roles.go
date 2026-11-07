@@ -9,6 +9,7 @@ import (
 
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/promptdata"
+	"github.com/ateam/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -55,7 +56,7 @@ func runRoles(cmd *cobra.Command, args []string) error {
 	if env.Config != nil {
 		configRoles = env.Config.Roles
 	}
-	allKnown := promptdata.AllKnownRoleIDs(configRoles, env.ProjectDir, env.OrgDir)
+	allKnown := promptdata.AllKnownRoleIDs(configRoles, env.Layers)
 	if len(allKnown) == 0 {
 		fmt.Println("No roles available.")
 		return nil
@@ -121,7 +122,7 @@ func roleStatus(configRoles map[string]string, name string) string {
 }
 
 func printRolesDocs() error {
-	defaultCfg := config.DefaultConfig()
+	defaultCfg := runtime.DefaultSettings()
 
 	var b strings.Builder
 	b.WriteString("# ATeam Built-in Roles\n\n")

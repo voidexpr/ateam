@@ -46,11 +46,8 @@ func TestParseMaxAge(t *testing.T) {
 func setupReviewFixture(t *testing.T) (orgDir, projPath, projDir string) {
 	t.Helper()
 	base := t.TempDir()
+	orgDir = testHome(t, base)
 	var err error
-	orgDir, err = root.InstallOrg(base)
-	if err != nil {
-		t.Fatalf("InstallOrg: %v", err)
-	}
 	projPath = filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
 		t.Fatal(err)
@@ -70,7 +67,7 @@ func TestReviewDryRun(t *testing.T) {
 	orgDir, projPath, projDir := setupReviewFixture(t)
 
 	// Create a non-empty report so AssembleReviewPrompt succeeds.
-	reportPath := filepath.Join(projDir, "roles", "testing_basic", "report.md")
+	reportPath := filepath.Join(projDir, "shared", "report", "testing_basic.md")
 	if err := os.MkdirAll(filepath.Dir(reportPath), 0755); err != nil {
 		t.Fatalf("MkdirAll role dir: %v", err)
 	}
@@ -78,9 +75,9 @@ func TestReviewDryRun(t *testing.T) {
 		t.Fatalf("WriteFile report: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir) // --org takes the parent of .ateamorg/
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	var runErr error
 	out := captureStdout(t, func() {
@@ -105,7 +102,7 @@ func TestReviewDryRunEmptyReport(t *testing.T) {
 
 	// An empty report.md is discovered by DiscoverReports but has empty content.
 	// AssembleReviewPrompt should handle it without panic.
-	reportPath := filepath.Join(projDir, "roles", "testing_basic", "report.md")
+	reportPath := filepath.Join(projDir, "shared", "report", "testing_basic.md")
 	if err := os.MkdirAll(filepath.Dir(reportPath), 0755); err != nil {
 		t.Fatalf("MkdirAll role dir: %v", err)
 	}
@@ -113,9 +110,9 @@ func TestReviewDryRunEmptyReport(t *testing.T) {
 		t.Fatalf("WriteFile empty report: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir) // --org takes the parent of .ateamorg/
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	var runErr error
 	captureStdout(t, func() {
@@ -144,9 +141,9 @@ func TestReviewStageHappyPath(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	savedOrg := orgFlag
-	defer func() { orgFlag = savedOrg }()
-	orgFlag = filepath.Dir(orgDir)
+	savedOrg := homeFlag
+	defer func() { homeFlag = savedOrg }()
+	homeFlag = orgDir
 
 	out := captureStdout(t, func() {
 		withChdir(t, projPath, func() {

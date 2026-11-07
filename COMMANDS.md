@@ -8,11 +8,11 @@ All commands accept:
 
 | Flag | Short | Description |
 |------|-------|-------------|
-| `--org PATH` | `-o` | Organization path override (skips auto-discovery) |
-| `--project PATH` | `-p` | Project path override (skips auto-discovery). |
+| `--home DIR` |      | The user-wide ateam directory (default `$ATEAM_HOME`, else `~/.ateam`): lowest config layer and user state |
+| `--project PATH` | `-p` | Project path override: the project root, its `.ateam/`, or any path inside it (walks up from there instead of cwd) |
 | `--work-dir PATH` |       | Agent working directory (overrides the project-aware default). |
-| `--sandbox-detection true\|false` |       | Toggle auto-detection of an outer non-container sandbox. Signal-driven: macOS Seatbelt (sandbox-exec probe), Linux user namespace / Seccomp / NoNewPrivs (/proc), cooperative env vars (`FENCE_SANDBOX`, `FIREJAIL_NAME`, `container=…`). Built-in default `false` — opt in when knowingly running ateam under any outer sandbox. Overrides `runtime.hcl` `sandbox_detection`. See [ISOLATION.md](ISOLATION.md#detection-of-an-outer-sandbox-or-container). |
-| `--docker-detection true\|false` |       | Toggle auto-detection of `/.dockerenv` / `/run/.containerenv`. Built-in default `true`. Overrides `runtime.hcl` `docker_detection`. |
+| `--sandbox-detection true\|false` |       | Toggle auto-detection of an outer non-container sandbox. Signal-driven: macOS Seatbelt (sandbox-exec probe), Linux user namespace / Seccomp / NoNewPrivs (/proc), cooperative env vars (`FENCE_SANDBOX`, `FIREJAIL_NAME`, `container=…`). Built-in default `false` — opt in when knowingly running ateam under any outer sandbox. Overrides `ateam.hcl` `sandbox_detection`. See [ISOLATION.md](ISOLATION.md#detection-of-an-outer-sandbox-or-container). |
+| `--docker-detection true\|false` |       | Toggle auto-detection of `/.dockerenv` / `/run/.containerenv`. Built-in default `true`. Overrides `ateam.hcl` `docker_detection`. |
 
 `report`, `code`, `review`, `verify`, and `run-all` require their work-dir to be inside a git repo or worktree; `exec` and `parallel` work in any directory.
 
@@ -54,42 +54,26 @@ To tack on "Additional Instructions" the way the older `--extra-prompt` flag did
 
 ## Commands
 
-### `ateam install [PATH]`
-
-Create a `.ateamorg/` directory with default prompts, runtime config, and Dockerfile.
-
-```bash
-ateam install              # creates .ateamorg/ in current directory
-ateam install ~/projects   # creates .ateamorg/ at the given path
-```
-
 ### `ateam init [PATH]`
 
-Initialize a project by creating a `.ateam/` directory at PATH (defaults to `.`).
-
-If no `.ateamorg/` is found, one is created in `$HOME` by default. Use `--org-create-prompt` for an interactive choice, or `--org-create PATH`.
+Create a `.ateam/` project directory at PATH (default `.`) with an `ateam.hcl` naming the project and listing every role with its status, then register the project under `~/.ateam/state/projects.hcl`. The user directory (`~/.ateam`, or `$ATEAM_HOME` / `--home`) is created on first use with a starter `ateam.hcl`.
 
 ```bash
-ateam init
+ateam init                                             # name defaults to the directory name
 ateam init --name myproject --role test.gaps,project.security
-ateam init --auto-setup                        # initialize and auto-configure
-ateam init --org-home                          # auto-create .ateamorg/ in $HOME
+ateam init --auto-setup                                # then let an agent pick the roles
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--name NAME` | Project name (defaults to relative path from org root) |
-| `--role LIST` | Roles to enable (comma-separated; if omitted, defaults are used) |
-| `--git-remote URL` | Git remote origin URL (auto-detected if omitted) |
-| `--org-create PATH` | Create `.ateamorg/` at PATH if none exists |
-| `--org-home` | Create `.ateamorg/` in `$HOME` if none exists |
-| `--org-create-prompt` | Interactively choose where to create `.ateamorg/` |
-| `--auto-setup` | Run `ateam auto-setup` after initialization |
-| `--debug` | Print step-by-step progress to stderr |
+| `--name NAME` | Project name: unique across your projects, `[a-z0-9._-]`. Defaults to the directory name |
+| `--role LIST` | Roles to enable (comma-separated); others are set to `off` |
+| `--auto-setup` | Run `ateam auto-setup` right after |
+| `--debug` | Print step-by-step progress |
 
 ### `ateam auto-setup`
 
-Run the supervisor to analyze the project and auto-configure roles in `config.toml` and recommend settings. Creates `.ateam/setup_overview.md` as a setup reference (not included in agent prompts).
+Run the supervisor to analyze the project and auto-configure roles in `ateam.hcl` and recommend settings. Creates `.ateam/setup_overview.md` as a setup reference (not included in agent prompts).
 
 ```bash
 ateam auto-setup
@@ -100,7 +84,7 @@ ateam auto-setup --profile docker
 | Flag | Description |
 |------|-------------|
 | `--profile NAME` | Runtime profile |
-| `--agent NAME` | Agent name from runtime.hcl |
+| `--agent NAME` | Agent name from ateam.hcl |
 | `--timeout MINUTES` | Timeout in minutes |
 | `--dry-run` | Print the prompt without running |
 | `--verbose` | Print agent and docker commands to stderr |
@@ -126,12 +110,12 @@ ateam report --auto-roles --plan-only    # print the recommendation, don't run
 | `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--profile NAME` | Runtime profile (overrides config resolution) |
-| `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
+| `--agent NAME` | Agent name from ateam.hcl (shortcut, uses 'none' container) |
 | `--cheaper-model` | Use a cheaper model (sonnet); ignored if `--model` is also set (`--model` wins) |
 | `--model MODEL` | Model override; takes precedence over `--cheaper-model` |
 | `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](CONFIG.md#effort-levels)) |
-| `--timeout MINUTES` | Timeout per role (overrides `config.toml`) |
-| `--parallel N` | Max number of roles to run in parallel (overrides `config.toml`) |
+| `--timeout MINUTES` | Timeout per role (overrides `ateam.hcl`) |
+| `--parallel N` | Max number of roles to run in parallel (overrides `ateam.hcl`) |
 | `--max-budget-usd USD` | Per-role USD spend cap (claude-only; warns on codex) |
 | `--max-budget-usd-batch USD` | Stop dispatching new roles once batch cost crosses this USD |
 | `--print` | Print reports to stdout after completion |
@@ -162,7 +146,7 @@ ateam review --dry-run
 ```
 
 Override the supervisor body by dropping a `review.prompt.md` under
-`.ateam/prompts/` (project anchor) or `.ateamorg/prompts/` (org anchor) —
+`.ateam/prompts/` (project anchor) or `~/.ateam/prompts/` (home anchor) —
 the standard framing still composes around it.
 
 | Flag | Description |
@@ -170,13 +154,13 @@ the standard framing still composes around it.
 | `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
 | `--profile NAME` | Runtime profile (overrides config resolution) |
-| `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
+| `--agent NAME` | Agent name from ateam.hcl (shortcut, uses 'none' container) |
 | `--cheaper-model` | Use a cheaper model (sonnet); ignored if `--model` is also set (`--model` wins) |
 | `--model MODEL` | Model override; takes precedence over `--cheaper-model` |
 | `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](CONFIG.md#effort-levels)) |
-| `--timeout MINUTES` | Timeout (overrides `config.toml`) |
+| `--timeout MINUTES` | Timeout (overrides `ateam.hcl`) |
 | `--roles ROLE,...` | Limit review to these roles' reports (default: all enabled roles) |
-| `--all` | Include reports from roles disabled in `config.toml` |
+| `--all` | Include reports from roles disabled in `ateam.hcl` |
 | `--max-age DURATION` | Drop reports older than this. Accepts stdlib durations (`30m`, `2h30m`, `90s`) and plain `Nd` (e.g. `1d`, `7d`) |
 | `--max-budget-usd USD` | USD spend cap for the supervisor (claude-only; errors on codex) |
 | `--print` | Print review to stdout after completion |
@@ -208,7 +192,7 @@ ateam code --dry-run
 | `--cheaper-model` | Use a cheaper model (sonnet); ignored if `--model` is also set (`--model` wins) |
 | `--model MODEL` | Model override for the supervisor and every sub-run; takes precedence over `--cheaper-model` |
 | `--effort VALUE` | Reasoning effort for the supervisor and every sub-run, passed verbatim to the agent CLI (see [Effort levels](CONFIG.md#effort-levels)) |
-| `--timeout MINUTES` | Timeout in minutes (overrides `config.toml`; default 120) |
+| `--timeout MINUTES` | Timeout in minutes (overrides `ateam.hcl`; default 120) |
 | `--max-budget-usd USD` | USD spend cap for the supervisor and every sub-run (claude-only) |
 | `--max-budget-usd-batch USD` | Stop spawning new sub-runs once the code batch crosses this USD |
 | `--print` | Print output to stdout after completion |
@@ -242,14 +226,14 @@ ateam verify --dry-run
 |------|-------------|
 | `--pre-prompt TEXT` | Text wrapped at the very front of the assembled prompt, before anchor-discovered content (text or `@filepath`). [^wrap] |
 | `--post-prompt TEXT` | Text wrapped at the very end of the assembled prompt, after every other section (text or `@filepath`). [^wrap] |
-| `--timeout MINUTES` | Timeout in minutes (overrides `config.toml`) |
+| `--timeout MINUTES` | Timeout in minutes (overrides `ateam.hcl`) |
 | `--print` | Print verification report to stdout after completion |
 | `--dry-run` | Print the computed prompt without running |
 | `--cheaper-model` | Use a cheaper model (sonnet); ignored if `--model` is also set (`--model` wins) |
 | `--model MODEL` | Model override; takes precedence over `--cheaper-model` |
 | `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](CONFIG.md#effort-levels)) |
 | `--profile NAME` | Runtime profile (overrides config resolution) |
-| `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
+| `--agent NAME` | Agent name from ateam.hcl (shortcut, uses 'none' container) |
 | `--max-budget-usd USD` | USD spend cap for the supervisor (claude-only; errors on codex) |
 | `--verbose` | Print agent and docker commands to stderr |
 | `--force` | Run even if the same action is already running |
@@ -284,7 +268,7 @@ ateam run-all --auto-roles --plan-only               # print the recommendation,
 | `--timeout MINUTES` | Per-phase timeout (overrides config) |
 | `--parallel N` | Max parallel report roles (overrides config `max_parallel`) |
 | `--roles ROLE,...` | Limit report and review to these roles (default: all enabled roles). Does not affect the code phase. |
-| `--all` | Include reports from roles disabled in `config.toml` (review phase only). |
+| `--all` | Include reports from roles disabled in `ateam.hcl` (review phase only). |
 | `--max-age DURATION` | Drop reports older than this in the review phase (e.g. `2h`, `30m`, `1d`). |
 | `--profile NAME` | Profile for code sub-runs (passed to `ateam code --profile`) |
 | `--report-profile NAME` | Override profile for the report phase |
@@ -322,7 +306,7 @@ ateam secret --save-project-scope             # write all to .ateam/secrets.env
 
 | Flag | Description |
 |------|-------------|
-| `--scope SCOPE` | Secret scope: `global` (default), `org`, or `project` |
+| `--scope SCOPE` | Secret scope: `global` (default, `~/.ateam/secrets.env`) or `project` (`.ateam/secrets.env`) |
 | `--storage BACKEND` | Storage backend: `keychain` (default if available) or `file` |
 | `--set` | Set the secret (reads value from stdin) |
 | `--get` | Print raw value to stdout (for scripting) |
@@ -331,7 +315,7 @@ ateam secret --save-project-scope             # write all to .ateam/secrets.env
 | `--print` | Print all (or named) secrets as raw `KEY=VALUE` to stdout |
 | `--save-project-scope` | Resolve from any source and write to `.ateam/secrets.env` |
 
-Agents declare required secrets via `required_env` in `runtime.hcl`. Scopes (`global`, `org`, `project`) match the three storage tiers; the store always beats the process environment for the same key.
+Agents declare required secrets via `required_env` in `ateam.hcl`. Scopes (`global`, `project`) match the two storage tiers; the store always beats the process environment for the same key.
 
 Use `ateam env` to see every configured credential (including shadowed ones) and which the default agent will use. Use `ateam exec --dry-run` for the per-invocation view.
 
@@ -354,7 +338,7 @@ ateam agent-config --copy-in --container my-app --force   # copy config into con
 | `--copy-out` | Copy `.claude/` and `.claude.json` from a container to a local directory |
 | `--copy-in` | Copy `.claude/`, `.claude.json`, and `secrets.env` into a container |
 | `--container NAME` | Target container (for `--copy-out`, `--copy-in`, `--audit`) |
-| `--path PATH` | Local directory for agent config (default: `<ateamorg>/claude_linux_shared`) |
+| `--path PATH` | Local directory for agent config (default: `~/.ateam/state/agents/claude-linux`) |
 | `--home PATH` | Override container home directory (auto-detected by default) |
 | `--force` | Overwrite existing config in container (for `--copy-in`) |
 | `--copy-ateam` | Also copy ateam linux binary into the container (for `--copy-in`) |
@@ -363,7 +347,7 @@ ateam agent-config --copy-in --container my-app --force   # copy config into con
 
 **`--audit`** detects all auth sources (env vars, ateam secrets, credential files, keychain), runs `claude auth status` for ground truth, and warns on mismatches. With `--container`, runs audit remotely via `docker exec`.
 
-**`--copy-out`** copies `.claude/` and `.claude.json` from the container. Useful for bootstrapping `<ateamorg>/claude_linux_shared` from a container where you've already logged in. Does not copy `secrets.env` (manually maintained).
+**`--copy-out`** copies `.claude/` and `.claude.json` from the container. Useful for bootstrapping `~/.ateam/state/agents/claude-linux` from a container where you've already logged in. Does not copy `secrets.env` (manually maintained).
 
 **`--copy-in`** copies `.claude/`, `.claude.json`, and `secrets.env` (if present) into the container. **Not recommended for production use** — copying credentials breaks OAuth refresh token rotation. When one container refreshes its token, the other's copy is revoked. Use the shared mount approach instead (see [ISOLATION.md](ISOLATION.md)). Can be useful for one-time experimentation.
 
@@ -404,7 +388,7 @@ ateam login -- --help              # pass args to the CLI's login command
 | `--agent NAME` | Pick an agent block directly |
 | `--dry-run` | Show what would be executed without running |
 
-The agent is chosen the way a run chooses it (`--agent`, else `--profile`, else `config.toml`). Its `config_dir` is resolved like the runner does (`~` expanded, relative paths under `.ateam/` or `.ateamorg/`) and exported as `CLAUDE_CONFIG_DIR` (claude) or `CODEX_HOME` (codex); with no `config_dir`, the CLI's own default directory is used. The agent's `env` map is applied and the credential env vars that would shadow a stored login (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) are removed, then `claude auth login` or `codex login` runs, followed by the CLI's auth status. The first line of output names the agent and what selected it, so re-login after an expiry needs no guessing.
+The agent is chosen the way a run chooses it (`--agent`, else `--profile`, else `ateam.hcl`). Its `config_dir` is resolved like the runner does (`~` expanded, relative paths under `.ateam/` or `~/.ateam/`) and exported as `CLAUDE_CONFIG_DIR` (claude) or `CODEX_HOME` (codex); with no `config_dir`, the CLI's own default directory is used. The agent's `env` map is applied and the credential env vars that would shadow a stored login (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) are removed, then `claude auth login` or `codex login` runs, followed by the CLI's auth status. The first line of output names the agent and what selected it, so re-login after an expiry needs no guessing.
 
 ### `ateam claude`
 
@@ -430,13 +414,13 @@ Sets `CLAUDE_CONFIG_DIR` so all Claude state (`.credentials.json`, `.claude.json
 **Recommended mount setup** (from the host):
 ```bash
 docker run \
-  -v "$(ateam env --print-org)/claude_linux_shared:/home/agent/shared_claude" \
+  -v "$(ateam env --print-home)/state/agents/claude-linux:/home/agent/shared_claude" \
   ...
 ```
 
 ### `ateam exec`
 
-Run an agent with a prompt. Can run standalone (just needs `.ateamorg/`) or within a project.
+Run an agent with a prompt. Can run standalone (just needs `~/.ateam/`) or within a project.
 
 Prompt sources, in order of precedence:
 - the positional argument: literal prompt text, `@PATH` to read a file, or `-` / `@-` to read stdin until EOF
@@ -467,7 +451,7 @@ When used with `--agent codex-tmux` the prompt has an extra shape: the first lin
 | `--role ROLE` | Role to run (optional — requires project context) |
 | `--action NAME` | Action label recorded for this run (default `exec`). Free-form; affects `ps`/template vars/labels, not output promotion |
 | `--profile NAME` | Runtime profile to use |
-| `--agent NAME` | Agent name from runtime.hcl (mutually exclusive with --profile) |
+| `--agent NAME` | Agent name from ateam.hcl (mutually exclusive with --profile) |
 | `--model MODEL` | Model override |
 | `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](CONFIG.md#effort-levels)) |
 | `--agent-args "ARGS"` | Extra args passed to the agent CLI |
@@ -480,7 +464,7 @@ When used with `--agent codex-tmux` the prompt has an extra shape: the first lin
 | `--no-stream` | Disable progress updates on stderr |
 | `--no-summary` | Disable cost/duration/tokens summary |
 | `--quiet` | Disable both streaming and summary |
-| `--timeout DUR` | Override the run's wall-clock timeout (Go duration, e.g. `30s`, `8m`, `1h30m`; overrides `Exec.TimeoutMinutes` from `config.toml`) |
+| `--timeout DUR` | Override the run's wall-clock timeout (Go duration, e.g. `30s`, `8m`, `1h30m`; overrides `Exec.TimeoutMinutes` from `ateam.hcl`) |
 | `--dry-run` | Print resolved command, secrets, container config, and prompt without running |
 | `--container-name NAME` | Override container name (for docker-exec containers) |
 | `--docker-auto-setup` | Auto-generate `.ateam/Dockerfile` when using a docker profile (default true) |
@@ -542,7 +526,7 @@ Each positional argument is a prompt (text or `@filepath`). Each arg dispatches 
 | `--common-prompt-last TEXT` | Deprecated alias for `--post-prompt`. |
 | `--batch ID` | Custom batch name (default: `parallel-TIMESTAMP`) |
 | `--profile NAME` | Runtime profile |
-| `--agent NAME` | Agent name from runtime.hcl (shortcut, uses 'none' container) |
+| `--agent NAME` | Agent name from ateam.hcl (shortcut, uses 'none' container) |
 | `--model MODEL` | Model override |
 | `--effort VALUE` | Reasoning effort override, passed verbatim to the agent CLI (see [Effort levels](CONFIG.md#effort-levels)) |
 | `--timeout MINUTES` | Timeout per agent exec |
@@ -562,7 +546,7 @@ Each positional argument is a prompt (text or `@filepath`). Each arg dispatches 
 
 **Output**: Progress and status go to stderr. With `--print`, exec outputs are printed to stdout in submission order, each preceded by a label header (omitted for single-exec runs). This makes it composable with downstream tools.
 
-**Logs**: Each exec's logs are stored under `logs/parallel/{label}/` in the project or org directory.
+**Logs**: Each exec's logs are stored under `logs/parallel/{label}/` in the project `.ateam/` or, outside a project, under `~/.ateam/state/`.
 
 **Progress table columns**: `ID, LABEL, STATUS, EstTOKENS, TURNS, DETAILS`. `EstTOKENS` is the running input+output token count for each task. While a task is live it is an *estimate* built from the per-turn usage reported in the stream (the final total only arrives on the agent's terminal result event); once the task finishes it reflects the authoritative total from that event. The column exists so a crash or timeout before the terminal event still gives visibility into how much the task consumed. The same table is also rendered by `ateam report`.
 
@@ -628,20 +612,20 @@ ateam env --models   # plus the per-layer model/effort chain for each profile
 ateam env --roles    # plus the role table with the last report time per role
 ```
 
-The Runtime section opens with one block per profile a flag-less run can pick (the default, the supervisor's review/code choices, every role override from `config.toml`), each naming what chose it:
+The Runtime section opens with one block per profile a flag-less run can pick (the default, the supervisor's review/code choices, every role override from `ateam.hcl`), each naming what chose it:
 
 ```
-Profile default (config.toml project.default_profile)
+Profile default (ateam.hcl project.default_profile)
   agent:      claude-high (type claude, container none)
   model:      opus (built-in)
   effort:     high (built-in)
-  config dir: ~/.ateamorg/claude_shared (~/.ateamorg/runtime.hcl)
+  config dir: ~/~/.ateam/claude_shared (~/~/.ateam/ateam.hcl)
   auth:       CLAUDE_CODE_OAUTH_TOKEN (ateam secret, global scope)
 ```
 
-Model and effort show the file that set them, or that nothing pinned them and the agent CLI will pick its own default. Warnings from the model audit (see [CONFIG.md → Agents](CONFIG.md#agents)) follow each profile. `--models` adds the resolution chain, lowest precedence first: flags hidden in `args`, each `runtime.hcl` layer (a value inherited through `base` shows the base agent), then CLI flags, then a profile's `agent_extra_args`. The same chain is printed by every `--dry-run` (`exec`, `report` per role, `review`, `code`, `verify`), there including `--model` / `--cheaper-model` / `--effort`.
+Model and effort show the file that set them, or that nothing pinned them and the agent CLI will pick its own default. Warnings from the model audit (see [CONFIG.md → Agents](CONFIG.md#agents)) follow each profile. `--models` adds the resolution chain, lowest precedence first: flags hidden in `args`, each `ateam.hcl` layer (a value inherited through `base` shows the base agent), then CLI flags, then a profile's `agent_extra_args`. The same chain is printed by every `--dry-run` (`exec`, `report` per role, `review`, `code`, `verify`), there including `--model` / `--cheaper-model` / `--effort`.
 
-Then `Layers:` lists the `runtime.hcl` files consulted, marking the ones that do not exist. The Runtime section also includes an "Agent in container mode" line plus a 2×2 detection matrix (docker layer + sandbox layer × toggle on/off × source detected), e.g.:
+Then `Layers:` lists the `ateam.hcl` files consulted, marking the ones that do not exist. The Runtime section also includes an "Agent in container mode" line plus a 2×2 detection matrix (docker layer + sandbox layer × toggle on/off × source detected), e.g.:
 
 ```
 Agent in container mode: false
@@ -658,7 +642,7 @@ The model warnings under each profile cover: no model pinned (the agent CLI then
 | `--models` | Print the full per-layer model/effort chain for each profile in use |
 | `--roles` | Print the role table with the last report time per role |
 | `--claude-sandbox` | Print the generated Claude sandbox settings JSON for the default profile |
-| `--print-org` | Print the absolute path to the org directory |
+| `--print-home` | Print the absolute path to the user ateam directory |
 
 ### `ateam project-info [PATH]`
 
@@ -743,7 +727,7 @@ Each may include extra leading arguments — the value is parsed with `strings.F
 
 `CLAUDE_CONFIG_DIR` resolution order:
 1. The value recorded under `## Specified` in the run's `*_exec.md` (canonical — what was actually used).
-2. Re-resolved from the agent's `config_dir` in the current `runtime.hcl` (best-effort fallback; the definition may have drifted since the run).
+2. Re-resolved from the agent's `config_dir` in the current `ateam.hcl` (best-effort fallback; the definition may have drifted since the run).
 
 Container support:
 
@@ -770,7 +754,7 @@ Start a localhost web UI for browsing reports, reviews, sessions, and cost data.
 
 | Flag | Description |
 |------|-------------|
-| `--port N` | Listen on a fixed port (default: remembered in `.ateam/cache/serve.port`, regenerated if the cached port is busy; also configurable in `config.toml`) |
+| `--port N` | Listen on a fixed port (default: remembered in `.ateam/cache/serve.port`, regenerated if the cached port is busy; also configurable in `ateam.hcl`) |
 | `--no-open` | Do not open the browser automatically |
 | `--public` | Bind to `0.0.0.0` instead of `127.0.0.1` (allow access from other machines) |
 | `--bind IP` | Bind to a specific IP address (e.g. `192.168.1.50`) |
@@ -784,11 +768,14 @@ ateam cat 42
 ateam cat 42 43 44 --verbose
 ateam cat --last
 ateam cat .ateam/logs/42/agent.jsonl
+ateam cat --defaults                                   # the built-in ateam.hcl
+ateam cat --defaults prompts/report/project.security.prompt.md
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--last` | Format the most recent run (when no ID is given) |
+| `--defaults [PATH...]` | Print the built-in defaults instead: `ateam.hcl` (no path), `Dockerfile`, or an embedded prompt path |
 | `--verbose` | Show full tool inputs and text content |
 | `--no-color` | Disable color output |
 
@@ -855,23 +842,20 @@ List roles configured for the current project.
 
 ### `ateam projects`
 
-List all projects discovered under the current organization.
+List the projects registered under the user's ateam directory (`~/.ateam/state/projects.hcl`) with their path and whether their `.ateam/` is still there.
 
 ### `ateam project-rename`
 
-Re-register a project with its org after a directory move, or rename its state directory.
+Re-register the current project after a directory move, or rename it.
 
 ```bash
-ateam project-rename                                    # re-register current project
-ateam project-rename --old services/api --new backends/api  # rename after move
+ateam project-rename                  # re-register at the current path
+ateam project-rename --name backend   # rename: ateam.hcl project block, state db rows, registry
 ```
-
-Without flags, re-registers the current project at its current location and cleans up stale registrations. With `--old` and `--new`, renames the legacy state directory under `.ateamorg/projects/`.
 
 | Flag | Description |
 |------|-------------|
-| `--old PATH` | Old project path (relative to org root) |
-| `--new PATH` | New project path (relative to org root) |
+| `--name NAME` | New project name |
 | `--dry-run` | Show what would be done without executing |
 
 ### `ateam export`
@@ -888,17 +872,8 @@ ateam export --ateam-project /path/to/.ateam  # export a specific project
 | Flag | Description |
 |------|-------------|
 | `--output PATH` | Output file path (default: `.ateam/ateam.html`) |
-| `--project NAME` | Display name override (instead of config.toml name) |
+| `--project NAME` | Display name override (instead of ateam.hcl name) |
 | `--ateam-project PATH` | Path to a `.ateam/` directory to export |
-
-### `ateam update`
-
-Update on-disk default prompts and runtime config to match the current binary.
-
-| Flag | Description |
-|------|-------------|
-| `--diff` | Show diffs between on-disk and embedded prompts |
-| `--quiet`, `-q` | Suppress diff output |
 
 ## Troubleshooting
 

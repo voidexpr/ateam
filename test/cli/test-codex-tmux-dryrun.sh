@@ -27,7 +27,8 @@ trap 'rm -rf "$TMPROOT"' EXIT
 PROJ="$TMPROOT/work/proj"
 export HOME="$TMPROOT/home"
 mkdir -p "$PROJ" "$HOME"
-(cd "$PROJ" && "$ATEAM" init --org-create "$TMPROOT/work" >/dev/null 2>&1)
+export ATEAM_HOME="$TMPROOT/ateam-home"
+(cd "$PROJ" && "$ATEAM" init >/dev/null 2>&1)
 
 pass=0
 fail=0
@@ -66,12 +67,11 @@ run_dryrun_inside_project() {
     ok "$label"
 }
 
-# Case 2: org-only (no .ateam/) is the scratch-mode path. codex-tmux must
-# resolve to an actionable dry-run that roots its tmux socket under the org
-# dir's cache/. Previously this case was rejected up-front; the rejection now
-# only triggers when neither .ateam/ nor .ateamorg/ is found.
+# Case 2: no project (scratch mode). codex-tmux must resolve to an actionable
+# dry-run that roots its tmux socket under ~/.ateam/state/cache/. The rejection
+# only triggers when no state directory can be determined at all.
 run_codex_tmux_in_scratch_mode() {
-    local label="02  org-only (no project): codex-tmux dry-run uses org cache dir"
+    local label="02  no project (scratch mode): codex-tmux dry-run uses the home state dir"
     local stray="$TMPROOT/work/no-project"
     mkdir -p "$stray"
     local out rc
@@ -88,27 +88,27 @@ run_codex_tmux_in_scratch_mode() {
     ok "$label"
 }
 
-# Case 2b: with neither an org nor a project resolvable, rejection still
-# fires and points at the missing state directory.
+# Case 2b: with no home directory resolvable at all (no ATEAM_HOME, no HOME),
+# resolution fails and points at the missing ateam directory.
 run_reject_without_any_state_dir() {
-    local label="02b no .ateam/ or .ateamorg/: codex-tmux rejected with state-dir guidance"
+    local label="02b no home dir: codex-tmux rejected with ateam-directory guidance"
     local stray="$TMPROOT/orphan"
     mkdir -p "$stray"
     local out rc
-    out=$(cd "$stray" && HOME="$stray" "$ATEAM" exec --agent codex-tmux "/help" 2>&1)
+    out=$(cd "$stray" && env -u ATEAM_HOME HOME= "$ATEAM" exec --agent codex-tmux "/help" 2>&1)
     rc=$?
     if [ "$rc" -eq 0 ]; then
         fail "$label" "expected non-zero exit, got 0; output:\n$out"
         return
     fi
-    if ! grep -qE "state directory|\.ateamorg|\.ateam" <<<"$out"; then
-        fail "$label" "missing state-dir / .ateam(org) guidance; output:\n$out"
+    if ! grep -qE "state directory|ateam directory" <<<"$out"; then
+        fail "$label" "missing state-dir / ateam-directory guidance; output:\n$out"
         return
     fi
     ok "$label"
 }
 
-# Case 3: the codex-tmux profile (`--profile codex-tmux` from runtime.hcl)
+# Case 3: the codex-tmux profile (`--profile codex-tmux` from ateam.hcl)
 # resolves to the same agent. Catches accidental profile-table breakage.
 run_profile_resolves() {
     local label="03  --profile codex-tmux resolves to codex-tmux agent"

@@ -29,8 +29,7 @@ type Tailer struct {
 	Writer       io.Writer
 	PollInterval time.Duration // default 500ms
 	DB           *calldb.CallDB
-	ProjectDir   string // .ateam/ dir, used to resolve relative stream_file paths (new layout)
-	OrgDir       string // .ateamorg/ dir, used to resolve legacy relative stream_file paths
+	StateDir     string // directory relative stream_file paths are recorded against (project .ateam/, or ~/.ateam/state)
 	Batch        string // discover new agent_execs joining this batch
 	ProjectID    string // for finding running calls (legacy, empty for per-project DB)
 	DiscoverAll  bool   // discover all running calls in the DB (per-project mode)
@@ -183,7 +182,7 @@ func (t *Tailer) discoverSources() {
 		}
 		for _, r := range rows {
 			if r.AgentFile != "" {
-				t.AddSource(r.ID, r.Role, r.Action, root.ResolveStreamPath(t.ProjectDir, t.OrgDir, r.AgentFile), r.Model)
+				t.AddSource(r.ID, r.Role, r.Action, root.ResolveStreamPath(t.StateDir, r.AgentFile), r.Model)
 			}
 		}
 	}
@@ -221,7 +220,7 @@ func (t *Tailer) discoverSources() {
 				if action == "" {
 					action = c.Action
 				}
-				t.AddSource(c.ID, role, action, root.ResolveStreamPath(t.ProjectDir, t.OrgDir, c.AgentFile), c.Model)
+				t.AddSource(c.ID, role, action, root.ResolveStreamPath(t.StateDir, c.AgentFile), c.Model)
 			}
 		}
 	}

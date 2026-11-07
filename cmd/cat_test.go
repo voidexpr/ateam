@@ -92,13 +92,13 @@ func TestRunCatIDs(t *testing.T) {
 	}
 
 	// Point the global org flag at the org parent so root.Resolve finds the project.
-	savedOrg := orgFlag
+	savedOrg := homeFlag
 	savedNoColor := catNoColor
 	defer func() {
-		orgFlag = savedOrg
+		homeFlag = savedOrg
 		catNoColor = savedNoColor
 	}()
-	orgFlag = filepath.Dir(env.OrgDir)
+	homeFlag = env.HomeDir
 	catNoColor = true
 
 	out := captureStdout(t, func() {

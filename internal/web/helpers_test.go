@@ -305,7 +305,6 @@ func TestHistoryDirFor(t *testing.T) {
 
 func TestResolveRunFilesRelativeAgentFile(t *testing.T) {
 	projectDir := t.TempDir()
-	orgDir := t.TempDir()
 
 	// Create a stream file under projectDir at a relative path.
 	logsDir := filepath.Join(projectDir, "logs", "roles", "security")
@@ -334,7 +333,7 @@ func TestResolveRunFilesRelativeAgentFile(t *testing.T) {
 		Role:      "security",
 	}
 
-	rf := resolveRunFiles(projectDir, orgDir, row)
+	rf := resolveRunFiles(projectDir, row)
 	if !rf.HasStream {
 		t.Error("expected HasStream=true for relative stream_file")
 	}
@@ -346,7 +345,7 @@ func TestResolveRunFilesRelativeAgentFile(t *testing.T) {
 	}
 
 	// Empty stream file should return zero value.
-	rf2 := resolveRunFiles(projectDir, orgDir, calldb.RecentRow{})
+	rf2 := resolveRunFiles(projectDir, calldb.RecentRow{})
 	if rf2.HasStream || rf2.ExecFile != "" || rf2.HasStderr {
 		t.Error("expected empty runFiles for empty AgentFile")
 	}

@@ -8,193 +8,141 @@ import (
 
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/promptdata"
+	"github.com/ateam/internal/runtime"
 )
 
-func TestInstallOrg(t *testing.T) {
-	tmp := t.TempDir()
-	orgDir, err := InstallOrg(tmp)
-	if err != nil {
-		t.Fatalf("InstallOrg failed: %v", err)
-	}
-
-	wantOrg := filepath.Join(tmp, OrgDirName)
-	if orgDir != wantOrg {
-		t.Errorf("orgDir = %q, want %q", orgDir, wantOrg)
-	}
-
-	// Verify role dirs exist for all known roles.
-	for _, id := range promptdata.AllRoleIDs {
-		dir := filepath.Join(orgDir, "roles", id)
-		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-			t.Errorf("expected role dir %s to exist", dir)
-		}
-	}
-
-	// Verify supervisor dir exists.
-	supervisorDir := filepath.Join(orgDir, "roles", "supervisor")
-	if info, err := os.Stat(supervisorDir); err != nil || !info.IsDir() {
-		t.Errorf("expected supervisor dir %s to exist", supervisorDir)
-	}
-
-	// Verify at least one default prompt file exists (v1 path).
-	if len(promptdata.AllRoleIDs) > 0 {
-		promptFile := filepath.Join(orgDir, "defaults", "prompts", "report", promptdata.AllRoleIDs[0]+".prompt.md")
-		if _, err := os.Stat(promptFile); err != nil {
-			t.Errorf("expected prompt file %s to exist: %v", promptFile, err)
-		}
-	}
-
-	// Verify supervisor review prompt exists (v1 path).
-	reviewPrompt := filepath.Join(orgDir, "defaults", "prompts", "review.prompt.md")
-	if _, err := os.Stat(reviewPrompt); err != nil {
-		t.Errorf("expected supervisor prompt %s to exist: %v", reviewPrompt, err)
-	}
-}
-
-func TestInstallOrgAlreadyExists(t *testing.T) {
-	tmp := t.TempDir()
-	orgDir := filepath.Join(tmp, OrgDirName)
-	if err := os.MkdirAll(orgDir, 0755); err != nil {
+func TestEnsureHome(t *testing.T) {
+	home := filepath.Join(t.TempDir(), ".ateam")
+	if err := EnsureHome(home); err != nil {
 		t.Fatal(err)
 	}
-
-	_, err := InstallOrg(tmp)
-	if err == nil {
-		t.Fatal("expected error when org dir already exists, got nil")
+	for _, p := range []string{home, filepath.Join(home, runtime.StateSubdir), filepath.Join(home, "prompts"), filepath.Join(home, ConfigFile)} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("expected %s to exist: %v", p, err)
+		}
+	}
+	if runtime.ProjectName(home) != "" {
+		t.Error("the starter home ateam.hcl must not name a project")
+	}
+	if err := os.WriteFile(filepath.Join(home, ConfigFile), []byte("// mine\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureHome(home); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(home, ConfigFile)); string(data) != "// mine\n" {
+		t.Error("EnsureHome must keep an existing ateam.hcl")
+	}
+	if err := EnsureHome(""); err == nil {
+		t.Error("empty home must error")
 	}
 }
 
 func TestInitProject(t *testing.T) {
-	tmp := t.TempDir()
-	orgDir, err := InstallOrg(tmp)
-	if err != nil {
-		t.Fatalf("InstallOrg failed: %v", err)
-	}
-
-	projectPath := filepath.Join(tmp, "myproject")
+	home := makeHome(t)
+	projectPath := filepath.Join(resolvedTempDir(t), "myproject")
 	if err := os.MkdirAll(projectPath, 0755); err != nil {
 		t.Fatal(err)
 	}
+	enabled := promptdata.AllRoleIDs[:2]
 
-	enabled := []string{}
-	if len(promptdata.AllRoleIDs) >= 2 {
-		enabled = promptdata.AllRoleIDs[:2]
-	} else if len(promptdata.AllRoleIDs) >= 1 {
-		enabled = promptdata.AllRoleIDs[:1]
-	}
-
-	opts := InitProjectOpts{
-		Name:            "test-project",
-		GitRepo:         ".",
-		GitRemoteOrigin: "git@github.com:example/repo.git",
-		EnabledRoles:    enabled,
-	}
-
-	projDir, err := InitProject(projectPath, orgDir, opts)
+	projDir, err := InitProject(projectPath, home, InitProjectOpts{Name: "test-project", EnabledRoles: enabled})
 	if err != nil {
 		t.Fatalf("InitProject failed: %v", err)
 	}
-
-	wantProj := filepath.Join(projectPath, ProjectDirName)
-	if projDir != wantProj {
-		t.Errorf("projDir = %q, want %q", projDir, wantProj)
+	if projDir != filepath.Join(projectPath, DirName) {
+		t.Errorf("projDir = %q", projDir)
 	}
-
-	// Per-role history dirs are NOT pre-created at init — they only appear
-	// when the legacy log-migration path writes archived files.
-
-	// Verify supervisor history dir.
-	supHist := filepath.Join(projDir, "supervisor", "history")
-	if info, err := os.Stat(supHist); err != nil || !info.IsDir() {
-		t.Errorf("expected supervisor history dir %s to exist", supHist)
-	}
-
-	// Load config and verify fields.
-	cfg, err := config.Load(projDir)
-	if err != nil {
-		t.Fatalf("config.Load failed: %v", err)
-	}
-
-	if cfg.Project.Name != "test-project" {
-		t.Errorf("project name = %q, want %q", cfg.Project.Name, "test-project")
-	}
-	if cfg.Git.Repo != "." {
-		t.Errorf("git repo = %q, want %q", cfg.Git.Repo, ".")
-	}
-	if cfg.Git.RemoteOriginURL != "git@github.com:example/repo.git" {
-		t.Errorf("git remote = %q, want %q", cfg.Git.RemoteOriginURL, "git@github.com:example/repo.git")
-	}
-	defaults := config.DefaultConfig()
-	if cfg.Report.MaxParallel != defaults.Report.MaxParallel {
-		t.Errorf("max_parallel = %d, want %d", cfg.Report.MaxParallel, defaults.Report.MaxParallel)
-	}
-	if cfg.Report.ReportTimeoutMinutes != defaults.Report.ReportTimeoutMinutes {
-		t.Errorf("timeout = %d, want %d", cfg.Report.ReportTimeoutMinutes, defaults.Report.ReportTimeoutMinutes)
-	}
-
-	// Verify enabled/disabled role states.
-	for _, id := range enabled {
-		if cfg.Roles[id] != config.RoleEnabled {
-			t.Errorf("role %s = %q, want %q", id, cfg.Roles[id], config.RoleEnabled)
+	for _, p := range []string{"state.sqlite", ".gitignore", ConfigFile, "logs"} {
+		if _, err := os.Stat(filepath.Join(projDir, p)); err != nil {
+			t.Errorf("expected %s: %v", p, err)
 		}
 	}
-	enabledSet := make(map[string]bool, len(enabled))
+
+	t.Chdir(projectPath)
+	env, err := Resolve("", "")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	cfg := env.Config
+	if cfg.Project.Name != "test-project" || env.ProjectName != "test-project" {
+		t.Errorf("project name = %q", cfg.Project.Name)
+	}
+	defaults := runtime.DefaultSettings()
+	if cfg.Report.MaxParallel != defaults.Report.MaxParallel || cfg.Report.ReportTimeoutMinutes != defaults.Report.ReportTimeoutMinutes {
+		t.Errorf("timeouts must come from the built-in defaults: %+v", cfg.Report)
+	}
+	enabledSet := map[string]bool{}
 	for _, id := range enabled {
 		enabledSet[id] = true
 	}
 	for _, id := range promptdata.AllRoleIDs {
-		if !enabledSet[id] && cfg.Roles[id] != config.RoleDisabled {
-			t.Errorf("role %s = %q, want %q", id, cfg.Roles[id], config.RoleDisabled)
+		want := config.RoleDisabled
+		if enabledSet[id] {
+			want = config.RoleEnabled
+		}
+		if cfg.Roles[id] != want {
+			t.Errorf("role %s = %q, want %q", id, cfg.Roles[id], want)
 		}
 	}
-}
 
-func TestInitProjectAlreadyExists(t *testing.T) {
-	tmp := t.TempDir()
-	projectPath := filepath.Join(tmp, "myproject")
-	projDir := filepath.Join(projectPath, ProjectDirName)
-	if err := os.MkdirAll(projDir, 0755); err != nil {
-		t.Fatal(err)
+	entry, ok := LookupRegistry(home, "test-project")
+	if !ok || entry.Path != projectPath || entry.KeychainKey == "" {
+		t.Errorf("registry entry: %+v (ok=%v)", entry, ok)
 	}
-
-	_, err := InitProject(projectPath, filepath.Join(tmp, OrgDirName), InitProjectOpts{Name: "p"})
-	if err == nil {
-		t.Fatal("expected error when project dir already exists, got nil")
+	if env.KeychainKey != entry.KeychainKey {
+		t.Errorf("env.KeychainKey = %q, want %q", env.KeychainKey, entry.KeychainKey)
 	}
 }
 
-func TestInitProjectDuplicateName(t *testing.T) {
-	tmp := t.TempDir()
-	orgDir, err := InstallOrg(tmp)
-	if err != nil {
-		t.Fatalf("InstallOrg failed: %v", err)
-	}
-
-	// Create first project.
-	proj1 := filepath.Join(tmp, "proj1")
-	if err := os.MkdirAll(proj1, 0755); err != nil {
+func TestInitProjectDefaultsNameAndRoles(t *testing.T) {
+	home := makeHome(t)
+	projectPath := filepath.Join(resolvedTempDir(t), "svc-api")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
 		t.Fatal(err)
 	}
-	opts := InitProjectOpts{
-		Name:         "shared-name",
-		EnabledRoles: promptdata.AllRoleIDs,
-	}
-	if _, err := InitProject(proj1, orgDir, opts); err != nil {
-		t.Fatalf("first InitProject failed: %v", err)
-	}
-
-	// Second project with same name should fail.
-	proj2 := filepath.Join(tmp, "proj2")
-	if err := os.MkdirAll(proj2, 0755); err != nil {
+	if _, err := InitProject(projectPath, home, InitProjectOpts{}); err != nil {
 		t.Fatal(err)
 	}
-	opts2 := InitProjectOpts{
-		Name:         "shared-name",
-		EnabledRoles: promptdata.AllRoleIDs,
+	if runtime.ProjectName(filepath.Join(projectPath, DirName)) != "svc-api" {
+		t.Error("name must default to the directory name")
 	}
-	_, err = InitProject(proj2, orgDir, opts2)
-	if err == nil {
-		t.Fatal("expected error for duplicate project name, got nil")
+	data, _ := os.ReadFile(filepath.Join(projectPath, DirName, ConfigFile))
+	if !strings.Contains(string(data), `role "code.bugs"`) || !strings.Contains(string(data), `status = "on"`) {
+		t.Errorf("roles must be listed with their default status:\n%s", data)
+	}
+}
+
+func TestInitProjectErrors(t *testing.T) {
+	home := makeHome(t)
+	base := resolvedTempDir(t)
+
+	bad := filepath.Join(base, "Bad Name")
+	if err := os.MkdirAll(bad, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InitProject(bad, home, InitProjectOpts{}); err == nil {
+		t.Error("invalid default name must error")
+	}
+
+	first := filepath.Join(base, "first")
+	if _, err := InitProject(first, home, InitProjectOpts{Name: "dup"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InitProject(first, home, InitProjectOpts{Name: "dup"}); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("re-init of an existing project: %v", err)
+	}
+	second := filepath.Join(base, "second")
+	if _, err := InitProject(second, home, InitProjectOpts{Name: "dup"}); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("duplicate name in another dir: %v", err)
+	}
+
+	// A registry entry whose directory is gone no longer blocks the name.
+	if err := os.RemoveAll(first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InitProject(second, home, InitProjectOpts{Name: "dup"}); err != nil {
+		t.Errorf("stale registry entry must not block: %v", err)
 	}
 }
 
@@ -218,8 +166,6 @@ func TestEnsureProjectGitignore(t *testing.T) {
 	t.Run("appends missing entries, preserves user content", func(t *testing.T) {
 		dir := t.TempDir()
 		const userContent = "# my notes\nlocal_scratch/\n"
-		// Stale .gitignore — missing runtime/ (the historical gap that motivated
-		// this helper) plus state.sqlite-shm.
 		stale := userContent + "state.sqlite\nstate.sqlite-wal\nlogs/\ncache/\nsecrets.env\n"
 		path := filepath.Join(dir, ".gitignore")
 		if err := os.WriteFile(path, []byte(stale), 0644); err != nil {
@@ -233,14 +179,10 @@ func TestEnsureProjectGitignore(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := string(data)
-		if !strings.Contains(got, "runtime/") {
-			t.Errorf("runtime/ should have been appended:\n%s", got)
-		}
-		if !strings.Contains(got, "state.sqlite-shm") {
-			t.Errorf("state.sqlite-shm should have been appended:\n%s", got)
-		}
-		if !strings.Contains(got, "# my notes") || !strings.Contains(got, "local_scratch/") {
-			t.Errorf("user content not preserved:\n%s", got)
+		for _, want := range []string{"runtime/", "state.sqlite-shm", "# my notes", "local_scratch/"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("missing %q:\n%s", want, got)
+			}
 		}
 	})
 
@@ -250,17 +192,11 @@ func TestEnsureProjectGitignore(t *testing.T) {
 			t.Fatal(err)
 		}
 		path := filepath.Join(dir, ".gitignore")
-		before, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
+		before, _ := os.ReadFile(path)
 		if err := EnsureProjectGitignore(dir); err != nil {
 			t.Fatal(err)
 		}
-		after, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
+		after, _ := os.ReadFile(path)
 		if string(before) != string(after) {
 			t.Errorf("file changed when all entries already present:\nbefore: %q\nafter: %q", before, after)
 		}

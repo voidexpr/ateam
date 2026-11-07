@@ -19,7 +19,7 @@ import (
 
 var (
 	envClaudeSandbox bool
-	envPrintOrg      bool
+	envPrintHome     bool
 	envModels        bool
 	envRoles         bool
 )
@@ -41,7 +41,7 @@ This command is read-only — it never creates or modifies anything.`,
 
 func init() {
 	envCmd.Flags().BoolVar(&envClaudeSandbox, "claude-sandbox", false, "print the generated Claude sandbox settings JSON")
-	envCmd.Flags().BoolVar(&envPrintOrg, "print-org", false, "print the absolute path to the org directory")
+	envCmd.Flags().BoolVar(&envPrintHome, "print-home", false, "print the absolute path to the user ateam directory")
 	envCmd.Flags().BoolVar(&envModels, "models", false, "print the full per-layer model/effort chain for each profile in use")
 	envCmd.Flags().BoolVar(&envRoles, "roles", false, "print the role table with the last report time per role")
 }
@@ -49,18 +49,11 @@ func init() {
 func runEnv(cmd *cobra.Command, args []string) error {
 	env, err := lookupEnv()
 	if err != nil {
-		// Differentiate "no org/project anywhere" (the bootstrap case) from
-		// explicit-flag failures, which carry their own actionable message.
-		if orgFlag != "" || projectFlag != "" {
-			fmt.Printf("Resolve failed: %s\n", err)
-		} else {
-			fmt.Printf("Org: (not found — run 'ateam install' to set up)\n")
-		}
-		return nil
+		return err
 	}
 
-	if envPrintOrg {
-		fmt.Println(env.OrgDir)
+	if envPrintHome {
+		fmt.Println(env.HomeDir)
 		return nil
 	}
 
@@ -94,9 +87,7 @@ func printEnv(env *root.ResolvedEnv) error {
 		return err
 	}
 
-	orgRoot := env.OrgRoot()
-	relOrg, _ := filepath.Rel(cwd, orgRoot)
-	fmt.Printf("Org: %s (%s)\n", relOrg, tildeHome(orgRoot))
+	fmt.Printf("Home: %s\n", tildeHome(env.HomeDir))
 
 	printRuntimeSection(env, cwd)
 
@@ -112,7 +103,7 @@ func printEnv(env *root.ResolvedEnv) error {
 func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
 	fmt.Println("\nRuntime")
 
-	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
+	rtCfg, err := runtime.Load(env.Layers)
 	if err != nil {
 		fmt.Printf("  Warning: cannot load runtime.hcl: %v\n", err)
 	}
@@ -120,7 +111,7 @@ func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
 		printProfilesInUse(env, rtCfg)
 		printLayers(rtCfg)
 	}
-	printLayerWarnings(env, cwd)
+	printLayerWarnings(env)
 	printContainerMode()
 	printAuthLines(env, rtCfg)
 
@@ -235,36 +226,13 @@ func printLayers(rtCfg *runtime.Config) {
 	fmt.Printf("  Layers: %s\n", strings.Join(parts, " → "))
 }
 
-// printLayerWarnings reports broken symlinks and an empty org defaults
-// directory, which Load silently treats as missing.
-func printLayerWarnings(env *root.ResolvedEnv, cwd string) {
-	var candidates []string
-	if env.OrgDir != "" {
-		candidates = append(candidates,
-			filepath.Join(env.OrgDir, "defaults", "runtime.hcl"),
-			filepath.Join(env.OrgDir, "runtime.hcl"),
-		)
-	}
-	if env.ProjectDir != "" {
-		candidates = append(candidates, filepath.Join(env.ProjectDir, "runtime.hcl"))
-	}
-	for _, p := range candidates {
+// printLayerWarnings reports layer config files that are broken symlinks,
+// which Load silently treats as missing.
+func printLayerWarnings(env *root.ResolvedEnv) {
+	for _, dir := range env.Layers {
+		p := filepath.Join(dir, root.ConfigFile)
 		if isBrokenSymlink(p) {
-			fmt.Printf("  Warning: %s is a broken symlink (ignored)\n", relPath(cwd, p))
-		}
-	}
-	if env.OrgDir == "" {
-		return
-	}
-	defaultsDir := filepath.Join(env.OrgDir, "defaults")
-	if isBrokenSymlink(defaultsDir) {
-		fmt.Printf("  Warning: %s is a broken symlink\n", relPath(cwd, defaultsDir))
-	} else if info, err := os.Stat(defaultsDir); err == nil && info.IsDir() {
-		entries, err := os.ReadDir(defaultsDir)
-		if err != nil {
-			fmt.Printf("  Warning: %s exists but cannot be read: %v\n", relPath(cwd, defaultsDir), err)
-		} else if len(entries) == 0 {
-			fmt.Printf("  Warning: %s is empty\n", relPath(cwd, defaultsDir))
+			fmt.Printf("  Warning: %s is a broken symlink (ignored)\n", tildeHome(p))
 		}
 	}
 }
@@ -352,9 +320,8 @@ func printDockerfileLine(env *root.ResolvedEnv, cwd string) {
 	if env.ProjectDir != "" {
 		candidates = append(candidates, filepath.Join(env.ProjectDir, "Dockerfile"))
 	}
-	if env.OrgDir != "" {
-		candidates = append(candidates, filepath.Join(env.OrgDir, "Dockerfile"))
-		candidates = append(candidates, filepath.Join(env.OrgDir, "defaults", "Dockerfile"))
+	for i := len(env.ConfigLayers()) - 1; i >= 0; i-- {
+		candidates = append(candidates, filepath.Join(env.ConfigLayers()[i], "Dockerfile"))
 	}
 
 	for _, path := range candidates {
@@ -369,16 +336,11 @@ func printDockerfileLine(env *root.ResolvedEnv, cwd string) {
 func printProjectSection(env *root.ResolvedEnv, cwd string) {
 	fmt.Printf("\nProject: %s\n", env.ProjectName)
 
-	// Bidi check: verify org knows about this project at the correct path
-	if env.OrgDir != "" && env.SourceDir != "" {
-		projectID := env.ProjectID()
-		if projectID != "" {
-			stateDir := filepath.Join(env.OrgDir, "projects", projectID)
-			if _, err := os.Stat(stateDir); os.IsNotExist(err) {
-				fmt.Printf("  Warning: project not registered in org (no %s/projects/%s)\n", filepath.Base(env.OrgDir), projectID)
-				fmt.Println("  Run 'ateam project-rename' to register this project")
-			}
-		}
+	// Registry check: the project should be registered under its name at this path.
+	if entry, ok := root.LookupRegistry(env.HomeDir, env.ProjectName); !ok {
+		fmt.Printf("  Warning: not registered in %s; run 'ateam project-rename' to register it\n", tildeHome(filepath.Join(env.HomeStateDir(), root.RegistryFile)))
+	} else if entry.Path != env.SourceDir {
+		fmt.Printf("  Warning: registered at %s, found at %s; run 'ateam project-rename' after a move\n", tildeHome(entry.Path), tildeHome(env.SourceDir))
 	}
 
 	dbPath := env.ProjectDBPath()
@@ -395,16 +357,13 @@ func printProjectSection(env *root.ResolvedEnv, cwd string) {
 	}
 	if env.GitRepoDir != "" {
 		if fileOrSymlinkExists(env.GitRepoDir) {
-			fmt.Printf("  Git: %s (%s)\n", env.RelPath(env.GitRepoDir), tildeHome(env.GitRepoDir))
+			fmt.Printf("  Git: %s\n", tildeHome(env.GitRepoDir))
 		} else {
-			fmt.Printf("  Git: %s (%s) (NOT FOUND)\n", env.RelPath(env.GitRepoDir), tildeHome(env.GitRepoDir))
+			fmt.Printf("  Git: %s (NOT FOUND)\n", tildeHome(env.GitRepoDir))
 		}
 	}
-	if env.Config != nil && env.Config.Git.RemoteOriginURL != "" {
-		fmt.Printf("  Remote: %s\n", env.Config.Git.RemoteOriginURL)
-	}
 	if env.WorkDir != "" {
-		fmt.Printf("  Agent Work Dir: %s (%s)\n", env.RelPath(env.WorkDir), tildeHome(env.WorkDir))
+		fmt.Printf("  Agent Work Dir: %s\n", tildeHome(env.WorkDir))
 	}
 
 	if env.Config == nil || len(env.Config.Roles) == 0 {
