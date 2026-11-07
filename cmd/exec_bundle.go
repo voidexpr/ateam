@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
+	"github.com/ateam/internal/runtime"
 )
 
 // RunnerSpec is the cmd-layer adapter from a command's flag set to the
@@ -24,6 +26,7 @@ import (
 // model/effort/container/budget overrides.
 type RunnerSpec struct {
 	Profile         string
+	ProfileSource   string // what chose Profile when it did not come from a flag (e.g. a config.toml role mapping); empty = inferred by resolveRunner
 	Agent           string
 	Action          string
 	Role            string // forwarded to project-mode resolveRunner for per-role profile resolution; empty for parallel
@@ -59,12 +62,55 @@ func buildRunner(env *root.ResolvedEnv, spec RunnerSpec) (*runner.AgentExecutor,
 	if err != nil {
 		return nil, err
 	}
+	if spec.ProfileSource != "" {
+		r.ProfileSource = spec.ProfileSource
+	}
 	if err := applyRunnerOverrides(r, env, spec.Overrides, spec.Action); err != nil {
 		return nil, err
 	}
+	warnModelConfig(env, r, spec.Overrides)
 	setSourceWritable(r)
 	r.ShimDir = root.EnsureCLIShim(env)
 	return r, nil
+}
+
+// warnModelConfig prints the model warnings for the runner's profile or
+// agent (unpinned model, expensive model, --model hidden in args) to
+// stderr. Best-effort: a config that fails to load here already failed
+// louder in resolveRunner.
+func warnModelConfig(env *root.ResolvedEnv, r *runner.AgentExecutor, o RunnerOverrides) {
+	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
+	if err != nil {
+		return
+	}
+	cliModel := o.Model
+	if cliModel == "" && o.CheaperModel {
+		cliModel = cheaperModelName
+	}
+	prof, ac := resolveProfileAgent(rtCfg, r.Profile)
+	printWarnings(rtCfg.ModelWarnings(prof, ac, cliModel))
+}
+
+func printWarnings(ws []string) {
+	for _, w := range ws {
+		fmt.Fprintf(os.Stderr, "Warning: %s\n", w)
+	}
+}
+
+// resolveProfileAgent maps a runner's Profile ("<profile>" or "a:<agent>")
+// back to its profile and agent blocks. A profile name that is really an
+// agent shorthand (see newRunner) resolves to that agent with no profile.
+func resolveProfileAgent(rtCfg *runtime.Config, profile string) (*runtime.ProfileConfig, *runtime.AgentConfig) {
+	name := strings.TrimPrefix(profile, "a:")
+	if !strings.HasPrefix(profile, "a:") {
+		if prof, ac, _, err := rtCfg.ResolveProfile(name); err == nil {
+			return prof, ac
+		}
+	}
+	if ac, ok := rtCfg.Agents[name]; ok {
+		return nil, &ac
+	}
+	return nil, nil
 }
 
 // buildArgPrompt picks the Prompt implementation for an

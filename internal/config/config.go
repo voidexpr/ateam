@@ -156,49 +156,66 @@ func (c Config) EnabledRoles() []string {
 	return enabled
 }
 
-// ResolveProfile determines the profile name for a given action and role.
-// Priority: role-specific profile > action-specific supervisor profile > project default > "default".
-func (c Config) ResolveProfile(action, roleID string) string {
+// ProfileChoice is a resolved profile name plus the config.toml setting
+// that chose it, so audits can explain why a role or action runs on a
+// given profile.
+type ProfileChoice struct {
+	Name   string
+	Source string // e.g. `config.toml [profiles.roles] "project.security"`, "config.toml supervisor.code_profile", "built-in default"
+}
+
+// Sources for profile choices made outside config.toml.
+const (
+	ProfileSourceFlag    = "--profile"
+	ProfileSourceAgent   = "--agent"
+	ProfileSourceBuiltin = "built-in default"
+)
+
+func configSource(setting string) string {
+	return "config.toml " + setting
+}
+
+// ResolveProfile determines the profile for a given action and role.
+// Priority: role-specific profile > action-specific supervisor profile > supervisor default > project default > "default".
+func (c Config) ResolveProfile(action, roleID string) ProfileChoice {
 	if roleID != "" && c.Profiles.Roles != nil {
 		if p, ok := c.Profiles.Roles[roleID]; ok && p != "" {
-			return p
+			return ProfileChoice{p, configSource(fmt.Sprintf("[profiles.roles] %q", roleID))}
 		}
 	}
 	switch action {
 	case "review":
 		if c.Supervisor.ReviewProfile != "" {
-			return c.Supervisor.ReviewProfile
+			return ProfileChoice{c.Supervisor.ReviewProfile, configSource("supervisor.review_profile")}
 		}
 	case "code":
 		if c.Supervisor.CodeProfile != "" {
-			return c.Supervisor.CodeProfile
+			return ProfileChoice{c.Supervisor.CodeProfile, configSource("supervisor.code_profile")}
 		}
 	}
-	if c.Supervisor.DefaultProfile != "" {
-		return c.Supervisor.DefaultProfile
-	}
-	if c.Project.DefaultProfile != "" {
-		return c.Project.DefaultProfile
-	}
-	return "default"
+	return c.defaultProfile()
 }
 
 // ResolveSupervisorProfile determines the profile for the supervisor itself.
 // Priority: action-specific supervisor profile > supervisor default > project default > "default".
-func (c Config) ResolveSupervisorProfile(action string) string {
+func (c Config) ResolveSupervisorProfile(action string) ProfileChoice {
 	switch action {
 	case "code":
 		if c.Supervisor.CodeSupervisorProfile != "" {
-			return c.Supervisor.CodeSupervisorProfile
+			return ProfileChoice{c.Supervisor.CodeSupervisorProfile, configSource("supervisor.code_supervisor_profile")}
 		}
 	}
+	return c.defaultProfile()
+}
+
+func (c Config) defaultProfile() ProfileChoice {
 	if c.Supervisor.DefaultProfile != "" {
-		return c.Supervisor.DefaultProfile
+		return ProfileChoice{c.Supervisor.DefaultProfile, configSource("supervisor.default_profile")}
 	}
 	if c.Project.DefaultProfile != "" {
-		return c.Project.DefaultProfile
+		return ProfileChoice{c.Project.DefaultProfile, configSource("project.default_profile")}
 	}
-	return "default"
+	return ProfileChoice{"default", ProfileSourceBuiltin}
 }
 
 // Load reads config.toml from the given directory.

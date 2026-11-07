@@ -170,6 +170,12 @@ Two renderings of the same `ModelReport`:
 ## Plan (small steps)
 
 1. Provenance capture in `internal/runtime` merge (no behavior change) + tests.
+   Same step: `config.ResolveProfile` / `ResolveSupervisorProfile` return
+   the winning branch (`ProfileSource`) alongside the profile name, and
+   `--profile` is recorded as a source by the callers. Decided with
+   [feature_simplify_config.md](feature_simplify_config.md): provenance
+   covers every decision from the start, so the resolver signature is
+   set once.
 2. `NativeConfigReader` + claude/codex implementations + tests
    (fixture config dirs under `test_data/`).
 3. `ModelReport` resolver + precedence tests (including the args-embedded

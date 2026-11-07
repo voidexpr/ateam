@@ -401,11 +401,10 @@ func TestCheapProfiles(t *testing.T) {
 	}
 
 	tests := []struct {
-		profile       string
-		wantExtraArgs []string
+		profile, agent, model, budget string
 	}{
-		{"cheap", []string{"--model", "sonnet", "--max-budget-usd", "0.50"}},
-		{"cheapest", []string{"--model", "haiku", "--max-budget-usd", "0.10"}},
+		{"cheap", "claude-sonnet", "sonnet", "0.50"},
+		{"cheapest", "claude-haiku", "haiku", "0.10"},
 	}
 
 	for _, tt := range tests {
@@ -414,20 +413,167 @@ func TestCheapProfiles(t *testing.T) {
 			t.Errorf("ResolveProfile(%q): %v", tt.profile, err)
 			continue
 		}
-		if prof.Agent != "claude" {
-			t.Errorf("profile %q: expected agent 'claude', got %q", tt.profile, prof.Agent)
+		if prof.Agent != tt.agent || len(prof.AgentExtraArgs) != 0 {
+			t.Errorf("profile %q: got agent %q extra args %v, want agent %q and no extra args", tt.profile, prof.Agent, prof.AgentExtraArgs, tt.agent)
 		}
-		if ac.Command != "claude" {
-			t.Errorf("profile %q agent: expected command 'claude', got %q", tt.profile, ac.Command)
+		if ac.Command != "claude" || ac.Model != tt.model || ac.MaxBudgetUSD != tt.budget {
+			t.Errorf("profile %q agent: got command=%q model=%q budget=%q", tt.profile, ac.Command, ac.Model, ac.MaxBudgetUSD)
 		}
-		if len(prof.AgentExtraArgs) != len(tt.wantExtraArgs) {
-			t.Errorf("profile %q: expected %d agent_extra_args, got %d: %v", tt.profile, len(tt.wantExtraArgs), len(prof.AgentExtraArgs), prof.AgentExtraArgs)
+		if embeddedModelFlag(ac.Args) != "" {
+			t.Errorf("profile %q agent: built-in args must not embed a model flag: %v", tt.profile, ac.Args)
 		}
-		for i, arg := range prof.AgentExtraArgs {
-			if i < len(tt.wantExtraArgs) && arg != tt.wantExtraArgs[i] {
-				t.Errorf("profile %q: extra arg %d: expected %q, got %q", tt.profile, i, tt.wantExtraArgs[i], arg)
-			}
+	}
+}
+
+func TestBuiltinAgentsHaveNoModelInArgs(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for name, ac := range cfg.Agents {
+		if tok := embeddedModelFlag(ac.Args); tok != "" {
+			t.Errorf("agent %q embeds %s in args", name, tok)
 		}
+	}
+	for name, p := range cfg.Profiles {
+		if tok := embeddedModelFlag(p.AgentExtraArgs); tok != "" {
+			t.Errorf("profile %q embeds %s in agent_extra_args", name, tok)
+		}
+	}
+	if cfg.ExpensiveOutputPerMTok == nil || *cfg.ExpensiveOutputPerMTok <= 0 {
+		t.Errorf("expected a positive built-in expensive_output_per_mtok, got %v", cfg.ExpensiveOutputPerMTok)
+	}
+}
+
+func TestModelWarnings(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	warningsFor := func(profile, cliModel string) []string {
+		t.Helper()
+		prof, ac, _, err := cfg.ResolveProfile(profile)
+		if err != nil {
+			t.Fatalf("ResolveProfile(%q): %v", profile, err)
+		}
+		return cfg.ModelWarnings(prof, ac, cliModel)
+	}
+	joined := func(ws []string) string { return strings.Join(ws, "\n") }
+
+	// default profile: claude with nothing pinned
+	ws := warningsFor("default", "")
+	if len(ws) != 1 || !strings.Contains(ws[0], "no model pinned") || !strings.Contains(ws[0], `agent "claude"`) {
+		t.Errorf("default profile: got %q", joined(ws))
+	}
+	// --model on the CLI silences the unpinned warning; haiku is cheap
+	if ws := warningsFor("default", "haiku"); len(ws) != 0 {
+		t.Errorf("default + --model haiku: got %q", joined(ws))
+	}
+	// --model fable is above the threshold
+	ws = warningsFor("default", "claude-fable-5-1")
+	if len(ws) != 1 || !strings.Contains(ws[0], "$50.00") || !strings.Contains(ws[0], "--model") {
+		t.Errorf("default + --model fable: got %q", joined(ws))
+	}
+	// cheap: sonnet pinned in the built-in layer, under the threshold
+	if ws := warningsFor("cheap", ""); len(ws) != 0 {
+		t.Errorf("cheap: got %q", joined(ws))
+	}
+	// mock agent: nothing to say
+	if ws := warningsFor("test", ""); len(ws) != 0 {
+		t.Errorf("test: got %q", joined(ws))
+	}
+}
+
+func TestModelWarningsFromLayers(t *testing.T) {
+	orgDir := writeLayer(t, t.TempDir(), `
+expensive_output_per_mtok = 15
+
+agent "pinned" {
+  base  = "claude"
+  model = "claude-opus-5-5"
+}
+
+profile "pinned" {
+  agent     = "pinned"
+  container = "none"
+}
+
+agent "legacy" {
+  base = "claude"
+  args = ["-p", "--model", "opus"]
+}
+
+profile "legacy" {
+  agent            = "legacy"
+  container        = "none"
+  agent_extra_args = ["--effort", "high"]
+}
+`)
+	projDir := t.TempDir()
+	cfg, err := Load(projDir, orgDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	orgFile := filepath.Join(orgDir, "runtime.hcl")
+
+	prof, ac, _, _ := cfg.ResolveProfile("pinned")
+	ws := cfg.ModelWarnings(prof, ac, "")
+	if len(ws) != 1 || !strings.Contains(ws[0], "$20.00") || !strings.Contains(ws[0], "expensive_output_per_mtok = 15") || !strings.Contains(ws[0], orgFile) {
+		t.Errorf("pinned: got %q", strings.Join(ws, "\n"))
+	}
+
+	prof, ac, _, _ = cfg.ResolveProfile("legacy")
+	ws = cfg.ModelWarnings(prof, ac, "")
+	if len(ws) != 3 {
+		t.Fatalf("legacy: expected args, extra_args and price warnings, got %q", strings.Join(ws, "\n"))
+	}
+	if !strings.Contains(ws[0], "args embed --model") || !strings.Contains(ws[0], "model attribute") {
+		t.Errorf("legacy args warning: %q", ws[0])
+	}
+	if !strings.Contains(ws[1], "agent_extra_args embed --effort") || !strings.Contains(ws[1], "effort attribute") {
+		t.Errorf("legacy extra args warning: %q", ws[1])
+	}
+	if !strings.Contains(ws[2], `"opus"`) {
+		t.Errorf("legacy price warning should name the args model: %q", ws[2])
+	}
+
+	// Disabled threshold: no price warning, unpinned still warns.
+	writeLayer(t, projDir, `
+expensive_output_per_mtok = 0
+
+agent "unpinned" {
+  base = "claude-no-sandbox"
+}
+
+profile "unpinned" {
+  agent     = "unpinned"
+  container = "none"
+}
+`)
+	cfg, err = Load(projDir, orgDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	prof, ac, _, _ = cfg.ResolveProfile("pinned")
+	if ws := cfg.ModelWarnings(prof, ac, ""); len(ws) != 0 {
+		t.Errorf("threshold 0: got %q", strings.Join(ws, "\n"))
+	}
+	prof, ac, _, _ = cfg.ResolveProfile("unpinned")
+	ws = cfg.ModelWarnings(prof, ac, "")
+	if len(ws) != 1 || !strings.Contains(ws[0], "no model pinned") || !strings.Contains(ws[0], filepath.Join(projDir, "runtime.hcl")) {
+		t.Errorf("unpinned: got %q", strings.Join(ws, "\n"))
+	}
+}
+
+func TestEditHintPointsAtNearestLayer(t *testing.T) {
+	projDir := t.TempDir()
+	cfg, err := Load(projDir, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	hint := cfg.editHint("claude")
+	if !strings.Contains(hint, filepath.Join(projDir, "runtime.hcl")) || !strings.Contains(hint, "create it") {
+		t.Errorf("hint with no user layers should point at the missing project file: %q", hint)
 	}
 }
 
@@ -948,10 +1094,14 @@ func TestPricingBlockParsed(t *testing.T) {
 		t.Errorf("expected gpt-5.4 output_per_mtok 14.00, got %v", cm.OutputPerMTok)
 	}
 
-	// Claude has no pricing block — it reports native cost via total_cost_usd
+	// Claude reports native cost via total_cost_usd; its pricing block
+	// serves the expensive-model warning and must not assume a default model.
 	claude := cfg.Agents["claude"]
-	if claude.Pricing != nil {
-		t.Errorf("expected nil pricing on claude agent (uses native cost), got %+v", claude.Pricing)
+	if claude.Pricing == nil || claude.Pricing.DefaultModel != "" {
+		t.Errorf("expected claude pricing without default_model, got %+v", claude.Pricing)
+	}
+	if claude.Pricing.Models["opus"].OutputPerMTok != claude.Pricing.Models["claude-opus-5-5"].OutputPerMTok {
+		t.Errorf("alias opus must price like the current opus generation")
 	}
 }
 
@@ -961,16 +1111,17 @@ func TestPricingInheritance(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// claude-sonnet inherits nil pricing from claude (Claude has no pricing block)
+	// claude-sonnet inherits the claude pricing table; claude has no
+	// default_model on purpose (an unpinned model must not look pinned).
 	cs := cfg.Agents["claude-sonnet"]
-	if cs.Pricing != nil {
-		t.Errorf("expected nil pricing inherited from claude, got %+v", cs.Pricing)
+	if cs.Pricing == nil || cs.Pricing.DefaultModel != "" || cs.Pricing.Models["sonnet"].OutputPerMTok == 0 {
+		t.Errorf("expected inherited claude pricing without default_model, got %+v", cs.Pricing)
 	}
 
-	// claude-docker has no base and no pricing block
-	cd := cfg.Agents["claude-docker"]
+	// claude-no-sandbox has no base and no pricing block
+	cd := cfg.Agents["claude-no-sandbox"]
 	if cd.Pricing != nil {
-		t.Errorf("expected nil pricing on claude-docker, got %+v", cd.Pricing)
+		t.Errorf("expected nil pricing on claude-no-sandbox, got %+v", cd.Pricing)
 	}
 }
 
@@ -1351,5 +1502,257 @@ func TestSandboxDetectionTopLevel(t *testing.T) {
 	}
 	if cfg.SandboxDetection == nil || *cfg.SandboxDetection != true {
 		t.Errorf("expected project value true to win, got %v", cfg.SandboxDetection)
+	}
+}
+
+// writeLayer writes a runtime.hcl into dir and returns dir.
+func writeLayer(t *testing.T, dir, hcl string) string {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "runtime.hcl"), []byte(hcl), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestPerFieldMergeKeepsUnsetAttributes(t *testing.T) {
+	orgDir := writeLayer(t, t.TempDir(), `
+agent "claude" {
+  model = "opus"
+}
+`)
+	cfg, err := Load("", orgDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ac := cfg.Agents["claude"]
+	if ac.Model != "opus" {
+		t.Errorf("model: got %q, want opus", ac.Model)
+	}
+	if ac.Command != "claude" || len(ac.Args) == 0 || ac.Sandbox == "" {
+		t.Errorf("built-in command/args/sandbox must survive a partial override: cmd=%q args=%v sandbox=%d bytes", ac.Command, ac.Args, len(ac.Sandbox))
+	}
+	if src, ok := cfg.Source("agent.claude.model"); !ok || src.Layer != filepath.Join(orgDir, "runtime.hcl") || src.Value != "opus" {
+		t.Errorf("model source: got %+v (ok=%v)", src, ok)
+	}
+	if src, ok := cfg.Source("agent.claude.command"); !ok || src.Layer != BuiltinLayer {
+		t.Errorf("command source: got %+v (ok=%v), want built-in", src, ok)
+	}
+}
+
+func TestPerFieldMergeEnvPerKeyListsReplace(t *testing.T) {
+	orgDir := writeLayer(t, t.TempDir(), `
+agent "claude" {
+  args = ["-p"]
+  env = {
+    CUSTOM_VAR = "hello"
+  }
+}
+`)
+	cfg, err := Load("", orgDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ac := cfg.Agents["claude"]
+	if ac.Env["CUSTOM_VAR"] != "hello" {
+		t.Errorf("CUSTOM_VAR: got %q", ac.Env["CUSTOM_VAR"])
+	}
+	if v, ok := ac.Env["CLAUDECODE"]; !ok || v != "" {
+		t.Errorf("built-in env key CLAUDECODE must survive per-key merge, got %q (present=%v)", v, ok)
+	}
+	if len(ac.Args) != 1 || ac.Args[0] != "-p" {
+		t.Errorf("args must be replaced, not appended: %v", ac.Args)
+	}
+	chain := cfg.Sources["agent.claude.env.CLAUDECODE"]
+	if len(chain) != 1 || chain[0].Layer != BuiltinLayer {
+		t.Errorf("CLAUDECODE chain: %+v", chain)
+	}
+	chain = cfg.Sources["agent.claude.args"]
+	if len(chain) != 2 || chain[0].Layer != BuiltinLayer || chain[1].Value != `["-p"]` {
+		t.Errorf("args chain: %+v", chain)
+	}
+}
+
+func TestPerFieldMergeAcrossThreeLayers(t *testing.T) {
+	orgDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(orgDir, "defaults"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeLayer(t, filepath.Join(orgDir, "defaults"), `agent "claude" { model = "sonnet" }`)
+	writeLayer(t, orgDir, `agent "claude" { effort = "high" }`)
+	projDir := writeLayer(t, t.TempDir(), `agent "claude" { model = "opus" }`)
+
+	cfg, err := Load(projDir, orgDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ac := cfg.Agents["claude"]
+	if ac.Model != "opus" || ac.Effort != "high" {
+		t.Errorf("got model=%q effort=%q, want opus/high", ac.Model, ac.Effort)
+	}
+	chain := cfg.Sources["agent.claude.model"]
+	if len(chain) != 2 || chain[0].Value != "sonnet" || chain[1].Value != "opus" {
+		t.Errorf("model chain: %+v", chain)
+	}
+	if len(cfg.Layers) != 4 || cfg.Layers[0].Label != BuiltinLayer || !cfg.Layers[3].Found {
+		t.Errorf("layers: %+v", cfg.Layers)
+	}
+}
+
+func TestLayersListMissingFiles(t *testing.T) {
+	cfg, err := Load(t.TempDir(), t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.Layers) != 4 {
+		t.Fatalf("expected 4 layers, got %+v", cfg.Layers)
+	}
+	for _, l := range cfg.Layers[1:] {
+		if l.Found {
+			t.Errorf("layer %q should be reported missing", l.Label)
+		}
+	}
+}
+
+func TestProfilePartialOverride(t *testing.T) {
+	projDir := writeLayer(t, t.TempDir(), `profile "default" { agent = "mock" }`)
+	cfg, err := Load(projDir, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	p := cfg.Profiles["default"]
+	if p.Agent != "mock" || p.Container != "none" {
+		t.Errorf("got agent=%q container=%q, want mock/none", p.Agent, p.Container)
+	}
+	if src, _ := cfg.Source("profile.default.container"); src.Layer != BuiltinLayer {
+		t.Errorf("container source: %+v", src)
+	}
+}
+
+func TestProfileMissingContainerRejected(t *testing.T) {
+	projDir := writeLayer(t, t.TempDir(), `profile "half" { agent = "mock" }`)
+	_, err := Load(projDir, "")
+	if err == nil || !strings.Contains(err.Error(), `profile "half"`) {
+		t.Fatalf("expected error naming the profile, got %v", err)
+	}
+}
+
+func TestContainerPartialOverride(t *testing.T) {
+	projDir := writeLayer(t, t.TempDir(), `container "docker" { forward_env = ["ONLY_THIS"] }`)
+	cfg, err := Load(projDir, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cc := cfg.Containers["docker"]
+	if cc.Type != "docker" || cc.Dockerfile != "Dockerfile" || !cc.MountClaudeConfig {
+		t.Errorf("built-in container attributes lost: %+v", cc)
+	}
+	if len(cc.ForwardEnv) != 1 || cc.ForwardEnv[0] != "ONLY_THIS" {
+		t.Errorf("forward_env: %v", cc.ForwardEnv)
+	}
+}
+
+func TestBaseInheritanceProvenance(t *testing.T) {
+	orgDir := writeLayer(t, t.TempDir(), `
+agent "parent" {
+  command = "parent-cmd"
+  model   = "parent-model"
+  env = {
+    FROM_PARENT = "1"
+  }
+}
+
+agent "child" {
+  base  = "parent"
+  model = "child-model"
+  env = {
+    FROM_CHILD = "1"
+  }
+}
+`)
+	cfg, err := Load("", orgDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	child := cfg.Agents["child"]
+	if child.Command != "parent-cmd" || child.Model != "child-model" {
+		t.Errorf("got command=%q model=%q", child.Command, child.Model)
+	}
+	if child.Env["FROM_PARENT"] != "1" || child.Env["FROM_CHILD"] != "1" {
+		t.Errorf("env must merge base keys under child keys: %v", child.Env)
+	}
+	if src, _ := cfg.Source("agent.child.command"); src.Layer != `agent "parent" (base)` || src.Value != "parent-cmd" {
+		t.Errorf("command source: %+v", src)
+	}
+	if src, _ := cfg.Source("agent.child.model"); src.Layer == `agent "parent" (base)` {
+		t.Errorf("child's own model must not be attributed to the base: %+v", src)
+	}
+	if src, _ := cfg.Source("agent.child.env.FROM_PARENT"); src.Layer != `agent "parent" (base)` {
+		t.Errorf("inherited env key source: %+v", src)
+	}
+	// The parent's own env map must not have been mutated by the merge.
+	if _, leaked := cfg.Agents["parent"].Env["FROM_CHILD"]; leaked {
+		t.Error("child env key leaked into the parent's map")
+	}
+}
+
+func TestExplicitZeroValueIsNotInherited(t *testing.T) {
+	orgDir := writeLayer(t, t.TempDir(), `
+agent "parent" {
+  command                  = "parent-cmd"
+  sandbox_inside_container = true
+  tmux_width               = 300
+}
+
+agent "child" {
+  base                     = "parent"
+  sandbox_inside_container = false
+  tmux_width               = 0
+}
+`)
+	cfg, err := Load("", orgDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	child := cfg.Agents["child"]
+	if child.SandboxInsideContainer {
+		t.Error("explicit sandbox_inside_container = false must stick")
+	}
+	if child.TmuxWidth != 0 {
+		t.Errorf("explicit tmux_width = 0 must stick, got %d", child.TmuxWidth)
+	}
+}
+
+func TestBaseInheritsPricingWhenChildHasNone(t *testing.T) {
+	cfg, err := Load("", "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Agents["codex-high"].Pricing == nil {
+		t.Fatal("codex-high must inherit codex pricing")
+	}
+	if src, _ := cfg.Source("agent.codex-high.pricing"); src.Layer != `agent "codex" (base)` {
+		t.Errorf("pricing source: %+v", src)
+	}
+}
+
+func TestModelWarningsPointAtUpdateForStaleOrgDefaults(t *testing.T) {
+	orgDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(orgDir, "defaults"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeLayer(t, filepath.Join(orgDir, "defaults"), `
+agent "claude-sonnet" {
+  base = "claude"
+  args = ["-p", "--model", "sonnet"]
+}
+`)
+	cfg, err := Load("", orgDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	prof, ac, _, _ := cfg.ResolveProfile("cheap")
+	ws := cfg.ModelWarnings(prof, ac, "")
+	if len(ws) != 1 || !strings.Contains(ws[0], "ateam update") {
+		t.Errorf("expected one warning pointing at ateam update, got %q", strings.Join(ws, "\n"))
 	}
 }

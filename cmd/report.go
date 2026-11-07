@@ -206,7 +206,7 @@ func runReport(opts ReportOptions) error {
 
 	batch := resolveBatch("", "report")
 	cliOverridesProfile := opts.Profile != "" || opts.Agent != ""
-	defaultProfile := env.Config.ResolveProfile(runner.ActionReport, "")
+	defaultProfile := env.Config.ResolveProfile(runner.ActionReport, "").Name
 
 	// Build per-role bundles. Each bundle's Env carries a (possibly
 	// role-specific) Executor — the outer Parallel doesn't see roles or
@@ -241,9 +241,10 @@ func runReport(opts ReportOptions) error {
 
 		roleRunner := cr
 		if !cliOverridesProfile {
-			if roleProfile := env.Config.ResolveProfile(runner.ActionReport, roleID); roleProfile != defaultProfile {
+			if roleProfile := env.Config.ResolveProfile(runner.ActionReport, roleID); roleProfile.Name != defaultProfile {
 				rr, err := buildRunner(env, RunnerSpec{
-					Profile:         roleProfile,
+					Profile:         roleProfile.Name,
+					ProfileSource:   roleProfile.Source,
 					Action:          runner.ActionReport,
 					Role:            roleID,
 					DockerAutoSetup: opts.DockerAutoSetup,

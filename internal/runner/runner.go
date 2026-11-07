@@ -83,6 +83,7 @@ type AgentExecutor struct {
 	ArgsOutsideContainer []string            // extra args when on the host
 	CallDB               *calldb.CallDB      // required: every Run inserts an exec row
 	Profile              string              // profile name for DB
+	ProfileSource        string              // what chose Profile: a config.toml setting, --profile, --agent, or the built-in default
 	ProfileDef           string              // verbatim profile definition (HCL) for cmd.md
 	AgentDef             string              // verbatim agent definition (HCL) for cmd.md
 	// Effort / MaxBudgetUSD / MaxBudgetUSDBatch mirror the CLI-flag values the
@@ -569,6 +570,7 @@ func (r *AgentExecutor) ExecutePrepared(ctx context.Context, prepared *PreparedR
 		StartedAt:     startedAt,
 		ExecID:        callID,
 		Profile:       r.Profile,
+		ProfileSource: r.ProfileSource,
 		ProfileDef:    r.ProfileDef,
 		Agent:         agentName,
 		AgentDef:      r.AgentDef,
@@ -1288,6 +1290,7 @@ type cmdFileInfo struct {
 	Role          string
 	Batch         string
 	Profile       string
+	ProfileSource string
 	ProfileDef    string
 	Agent         string
 	AgentDef      string
@@ -1312,7 +1315,11 @@ func writeCmdFile(path string, info cmdFileInfo) {
 	// # Runtime — what configured the agent (profile/agent/model)
 	fmt.Fprintf(&b, "# Runtime\n")
 	if info.Profile != "" {
-		fmt.Fprintf(&b, "* profile: %s\n", info.Profile)
+		fmt.Fprintf(&b, "* profile: %s", info.Profile)
+		if info.ProfileSource != "" {
+			fmt.Fprintf(&b, " (chosen by %s)", info.ProfileSource)
+		}
+		b.WriteString("\n")
 	}
 	fmt.Fprintf(&b, "* agent: %s\n", info.Agent)
 	if info.Model != "" {

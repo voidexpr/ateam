@@ -11,6 +11,7 @@ import (
 	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
+	"github.com/ateam/internal/runner"
 	"github.com/ateam/internal/runtime"
 	"github.com/ateam/internal/secret"
 	"github.com/spf13/cobra"
@@ -151,6 +152,16 @@ func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
 	if prof, _, _, err := rtCfg.ResolveProfile("default"); err == nil {
 		fmt.Printf("  Default profile: agent=%s, container=%s\n", prof.Agent, prof.Container)
 	}
+	for _, choice := range relevantProfiles(env) {
+		prof, ac := resolveProfileAgent(rtCfg, choice.Name)
+		if ac == nil {
+			fmt.Printf("  Warning: profile %q (%s) is not defined in runtime.hcl\n", choice.Name, choice.Source)
+			continue
+		}
+		for _, w := range rtCfg.ModelWarnings(prof, ac, "") {
+			fmt.Printf("  Warning: %s\n", w)
+		}
+	}
 
 	var names []string
 	for name := range rtCfg.Profiles {
@@ -162,6 +173,40 @@ func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
 	}
 
 	printDockerfileLine(env, cwd)
+}
+
+// relevantProfiles lists the profiles a run in this project can pick
+// without flags, each once: the default, the supervisor's per-action
+// choices, and every role override from config.toml. In scratch mode
+// (no project) only the built-in default applies.
+func relevantProfiles(env *root.ResolvedEnv) []config.ProfileChoice {
+	if env.Config == nil {
+		return []config.ProfileChoice{{Name: "default", Source: config.ProfileSourceBuiltin}}
+	}
+	cfg := env.Config
+	choices := []config.ProfileChoice{
+		cfg.ResolveProfile("", ""),
+		cfg.ResolveProfile(runner.ActionReview, ""),
+		cfg.ResolveProfile(runner.ActionCode, ""),
+		cfg.ResolveSupervisorProfile(runner.ActionCode),
+	}
+	var roles []string
+	for roleID := range cfg.Profiles.Roles {
+		roles = append(roles, roleID)
+	}
+	sort.Strings(roles)
+	for _, roleID := range roles {
+		choices = append(choices, cfg.ResolveProfile(runner.ActionReport, roleID))
+	}
+	seen := make(map[string]bool, len(choices))
+	var out []config.ProfileChoice
+	for _, c := range choices {
+		if !seen[c.Name] {
+			seen[c.Name] = true
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func printAuthLines(env *root.ResolvedEnv, rtCfg *runtime.Config) {

@@ -614,6 +614,8 @@ Agent in container mode: false
 
 See [ISOLATION.md](ISOLATION.md#detection-of-an-outer-sandbox-or-container) for what each row means.
 
+After the default profile line, model warnings are listed for every profile a flag-less run in this project can pick (default, supervisor review/code, role overrides from `config.toml`): no model pinned (the agent CLI then picks its own default), a pinned model priced above `expensive_output_per_mtok`, or a `--model` / `--effort` hidden inside `args`. Each names the file and block to edit. The same warnings print to stderr when a run starts, including `--dry-run`. See [CONFIG.md → Agents](CONFIG.md#agents).
+
 | Flag | Description |
 |------|-------------|
 | `--claude-sandbox` | Print the generated Claude sandbox settings JSON for the default profile |

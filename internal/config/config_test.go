@@ -315,7 +315,7 @@ name = "no-sandbox"
 
 func TestResolveProfileDefault(t *testing.T) {
 	cfg := Config{}
-	if got := cfg.ResolveProfile("", ""); got != "default" {
+	if got := cfg.ResolveProfile("", "").Name; got != "default" {
 		t.Errorf("ResolveProfile empty = %q, want 'default'", got)
 	}
 }
@@ -324,7 +324,7 @@ func TestResolveProfileProjectDefault(t *testing.T) {
 	cfg := Config{
 		Project: ProjectConfig{DefaultProfile: "custom"},
 	}
-	if got := cfg.ResolveProfile("", ""); got != "custom" {
+	if got := cfg.ResolveProfile("", "").Name; got != "custom" {
 		t.Errorf("ResolveProfile = %q, want 'custom'", got)
 	}
 }
@@ -336,10 +336,10 @@ func TestResolveProfileSupervisor(t *testing.T) {
 			CodeProfile:   "code-prof",
 		},
 	}
-	if got := cfg.ResolveProfile("review", ""); got != "review-prof" {
+	if got := cfg.ResolveProfile("review", "").Name; got != "review-prof" {
 		t.Errorf("ResolveProfile(review) = %q, want 'review-prof'", got)
 	}
-	if got := cfg.ResolveProfile("code", ""); got != "code-prof" {
+	if got := cfg.ResolveProfile("code", "").Name; got != "code-prof" {
 		t.Errorf("ResolveProfile(code) = %q, want 'code-prof'", got)
 	}
 }
@@ -353,10 +353,10 @@ func TestResolveProfileRoleSpecific(t *testing.T) {
 			},
 		},
 	}
-	if got := cfg.ResolveProfile("report", "security"); got != "security-prof" {
+	if got := cfg.ResolveProfile("report", "security").Name; got != "security-prof" {
 		t.Errorf("ResolveProfile(report, security) = %q, want 'security-prof'", got)
 	}
-	if got := cfg.ResolveProfile("report", "other"); got != "proj-default" {
+	if got := cfg.ResolveProfile("report", "other").Name; got != "proj-default" {
 		t.Errorf("ResolveProfile(report, other) = %q, want 'proj-default'", got)
 	}
 }
@@ -375,15 +375,41 @@ func TestResolveProfilePriority(t *testing.T) {
 		},
 	}
 	// Role-specific wins over everything
-	if got := cfg.ResolveProfile("review", "security"); got != "sec-prof" {
+	if got := cfg.ResolveProfile("review", "security").Name; got != "sec-prof" {
 		t.Errorf("role-specific should win, got %q", got)
 	}
 	// Action-specific supervisor wins over defaults
-	if got := cfg.ResolveProfile("review", "other"); got != "review-sup" {
+	if got := cfg.ResolveProfile("review", "other").Name; got != "review-sup" {
 		t.Errorf("review supervisor should win, got %q", got)
 	}
 	// Supervisor default wins over project default
-	if got := cfg.ResolveProfile("exec", ""); got != "sup" {
+	if got := cfg.ResolveProfile("exec", "").Name; got != "sup" {
 		t.Errorf("supervisor default should win, got %q", got)
+	}
+}
+
+func TestResolveProfileSource(t *testing.T) {
+	cfg := Config{
+		Project: ProjectConfig{DefaultProfile: "proj"},
+		Supervisor: SupervisorConfig{
+			CodeProfile:           "code-prof",
+			CodeSupervisorProfile: "code-sup",
+		},
+		Profiles: ProfilesConfig{Roles: map[string]string{"security": "sec-prof"}},
+	}
+	cases := []struct {
+		got        ProfileChoice
+		name, from string
+	}{
+		{cfg.ResolveProfile("report", "security"), "sec-prof", `config.toml [profiles.roles] "security"`},
+		{cfg.ResolveProfile("code", ""), "code-prof", "config.toml supervisor.code_profile"},
+		{cfg.ResolveProfile("report", ""), "proj", "config.toml project.default_profile"},
+		{cfg.ResolveSupervisorProfile("code"), "code-sup", "config.toml supervisor.code_supervisor_profile"},
+		{Config{}.ResolveProfile("", ""), "default", ProfileSourceBuiltin},
+	}
+	for _, c := range cases {
+		if c.got.Name != c.name || c.got.Source != c.from {
+			t.Errorf("got %+v, want name=%q source=%q", c.got, c.name, c.from)
+		}
 	}
 }

@@ -161,7 +161,7 @@ func runCode(opts CodeOptions) error {
 	// --agent and --profile are mutually exclusive on ateam exec.
 	subRunProfile := opts.Profile
 	if subRunProfile == "" && opts.Agent == "" {
-		subRunProfile = env.Config.ResolveProfile(runner.ActionExec, "")
+		subRunProfile = env.Config.ResolveProfile(runner.ActionExec, "").Name
 	}
 	subRunArgs := buildSubRunArgs(opts, subRunProfile, env.SourceDir, orgFlag, workDirFlag)
 
@@ -172,8 +172,10 @@ func runCode(opts CodeOptions) error {
 	startedAt := time.Now()
 
 	supervisorProfileName := opts.SupervisorProfile
+	supervisorProfileSource := ""
 	if supervisorProfileName == "" && opts.SupervisorAgent == "" {
-		supervisorProfileName = env.Config.ResolveSupervisorProfile(runner.ActionCode)
+		choice := env.Config.ResolveSupervisorProfile(runner.ActionCode)
+		supervisorProfileName, supervisorProfileSource = choice.Name, choice.Source
 	}
 
 	if err := checkDockerInDocker(env, supervisorProfileName, subRunProfile); err != nil {
@@ -187,6 +189,7 @@ func runCode(opts CodeOptions) error {
 	// resolution errors early.
 	cr, err := buildRunner(env, RunnerSpec{
 		Profile:         supervisorProfileName,
+		ProfileSource:   supervisorProfileSource,
 		Agent:           opts.SupervisorAgent,
 		Action:          runner.ActionCode,
 		DockerAutoSetup: opts.DockerAutoSetup,

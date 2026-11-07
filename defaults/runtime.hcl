@@ -257,6 +257,13 @@ docker_detection = true
 // Run `ateam env` to see the detected source and current toggle state.
 sandbox_detection = false
 
+// A pinned model whose output price (USD per million output tokens, from
+// the agent's pricing block) is above this value triggers a one-line
+// warning at launch and in `ateam env`. The run still happens. Set to 0
+// to disable the warning. An unpinned model always warns, since the
+// agent CLI then picks its own default.
+expensive_output_per_mtok = 20
+
 // share default local claude config and adds a sandbox
 agent "claude" {
   type    = "claude"
@@ -270,6 +277,85 @@ agent "claude" {
   // Outside containers: sandbox settings are applied automatically.
   args_inside_container    = ["--dangerously-skip-permissions"]
   sandbox_inside_container = false
+
+  // Claude reports its own cost in the stream; this table serves the
+  // expensive-model warning and cost estimates for runs that crashed
+  // before a result event. No default_model on purpose: with no model
+  // pinned, ateam must not pretend to know what the CLI will pick.
+  // The bare aliases (opus, sonnet, haiku) are what the claude CLI
+  // accepts in --model and resolve to the current generation.
+  pricing {
+    model "claude-fable-5-1" {
+      input_per_mtok        = 10.00
+      cached_input_per_mtok = 0.25
+      output_per_mtok       = 50.00
+    }
+    model "claude-opus-5-5" {
+      input_per_mtok        = 4.00
+      cached_input_per_mtok = 0.20
+      output_per_mtok       = 20.00
+    }
+    model "opus" {
+      input_per_mtok        = 4.00
+      cached_input_per_mtok = 0.20
+      output_per_mtok       = 20.00
+    }
+    model "claude-opus-5" {
+      input_per_mtok        = 5.00
+      cached_input_per_mtok = 0.50
+      output_per_mtok       = 25.00
+    }
+    model "claude-opus-4-8" {
+      input_per_mtok        = 5.00
+      cached_input_per_mtok = 0.50
+      output_per_mtok       = 25.00
+    }
+    model "claude-opus-4-7" {
+      input_per_mtok        = 5.00
+      cached_input_per_mtok = 0.50
+      output_per_mtok       = 25.00
+    }
+    model "claude-opus-4-6" {
+      input_per_mtok        = 5.00
+      cached_input_per_mtok = 0.50
+      output_per_mtok       = 25.00
+    }
+    model "claude-sonnet-5-5" {
+      input_per_mtok        = 2.00
+      cached_input_per_mtok = 0.20
+      output_per_mtok       = 10.00
+    }
+    model "sonnet" {
+      input_per_mtok        = 2.00
+      cached_input_per_mtok = 0.20
+      output_per_mtok       = 10.00
+    }
+    model "claude-sonnet-5" {
+      input_per_mtok        = 2.00
+      cached_input_per_mtok = 0.20
+      output_per_mtok       = 10.00
+    }
+    model "claude-sonnet-4-6" {
+      input_per_mtok        = 3.00
+      cached_input_per_mtok = 0.30
+      output_per_mtok       = 15.00
+    }
+    model "claude-haiku-5-5" {
+      input_per_mtok        = 0.10
+      cached_input_per_mtok = 0.01
+      output_per_mtok       = 0.50
+    }
+    model "haiku" {
+      input_per_mtok        = 0.10
+      cached_input_per_mtok = 0.01
+      output_per_mtok       = 0.50
+    }
+    model "claude-haiku-4-5" {
+      input_per_mtok        = 1.00
+      cached_input_per_mtok = 0.10
+      output_per_mtok       = 5.00
+    }
+  }
 }
 
 agent "claude-auto" {
@@ -290,20 +376,25 @@ agent "claude-no-sandbox" {
   required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]
 }
 
+// Model and effort are attributes, never `--model` inside args: layers can
+// then override one without copying the whole list, and `ateam env` can
+// say which file pinned the model. A `--model` in args draws a warning.
 agent "claude-sonnet" {
-  base = "claude"
-  args = ["-p", "--output-format", "stream-json", "--verbose", "--model", "sonnet", "--max-budget-usd", "0.50"]
+  base           = "claude"
+  model          = "sonnet"
+  max_budget_usd = "0.50"
 }
 
 agent "claude-haiku" {
-  base = "claude"
-  args = ["-p", "--output-format", "stream-json", "--verbose", "--model", "haiku", "--max-budget-usd", "0.10"]
+  base           = "claude"
+  model          = "haiku"
+  max_budget_usd = "0.10"
 }
 
 // claude-high: opus model with high reasoning effort, for the hardest tasks.
 agent "claude-high" {
   base   = "claude"
-  args   = ["-p", "--output-format", "stream-json", "--verbose", "--model", "opus"]
+  model  = "opus"
   effort = "high"
 }
 
@@ -311,7 +402,7 @@ agent "claude-high" {
 // for the few prompts that genuinely need deeper reasoning than --high.
 agent "claude-xhigh" {
   base   = "claude"
-  args   = ["-p", "--output-format", "stream-json", "--verbose", "--model", "opus"]
+  model  = "opus"
   effort = "xhigh"
 }
 
@@ -544,15 +635,13 @@ profile "default" {
 }
 
 profile "cheap" {
-  agent            = "claude"
-  container        = "none"
-  agent_extra_args = ["--model", "sonnet", "--max-budget-usd", "0.50"]
+  agent     = "claude-sonnet"
+  container = "none"
 }
 
 profile "cheapest" {
-  agent            = "claude"
-  container        = "none"
-  agent_extra_args = ["--model", "haiku", "--max-budget-usd", "0.10"]
+  agent     = "claude-haiku"
+  container = "none"
 }
 
 profile "isolated" {

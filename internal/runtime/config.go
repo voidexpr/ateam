@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/ateam/defaults"
@@ -33,7 +35,48 @@ type Config struct {
 	// /run/.containerenv. Same shape as SandboxDetection. See
 	// container.DockerDetectionEnabled for the default and rationale.
 	DockerDetection *bool
+
+	// ExpensiveOutputPerMTok is the output price (USD per million tokens)
+	// above which a pinned model draws a warning. nil = not set anywhere;
+	// 0 or negative disables the warning. Top-level scalar
+	// `expensive_output_per_mtok`, last file to set it wins.
+	ExpensiveOutputPerMTok *float64
+
+	// Layers lists every runtime.hcl source consulted by Load, lowest
+	// precedence first, including files that did not exist.
+	Layers []Layer
+
+	// Sources records, per block attribute, every layer that set it, in
+	// load order. Keys are "<block>.<name>.<attr>", e.g. "agent.claude.model",
+	// "agent.claude.env.CLAUDECODE", "profile.default.agent". The last
+	// contribution is the effective value. Values inherited through
+	// `base` are recorded with the base agent as the layer.
+	Sources map[string][]Contribution
 }
+
+// Layer is one runtime.hcl source in load order.
+type Layer struct {
+	Label string // "built-in" or the file path
+	Found bool   // false when the file does not exist
+}
+
+// Contribution is what one layer set for one block attribute.
+type Contribution struct {
+	Layer string // Layer.Label, or `agent "<name>" (base)` for inherited values
+	Value string // attribute value rendered for display
+}
+
+// Source returns the effective contribution for a Sources key.
+func (c *Config) Source(key string) (Contribution, bool) {
+	chain := c.Sources[key]
+	if len(chain) == 0 {
+		return Contribution{}, false
+	}
+	return chain[len(chain)-1], true
+}
+
+// BuiltinLayer is the label of the embedded defaults layer.
+const BuiltinLayer = "built-in"
 
 type AgentConfig struct {
 	Name             string
@@ -99,6 +142,7 @@ type ProfileConfig struct {
 type hclFile struct {
 	SandboxDetection *bool          `hcl:"sandbox_detection,optional"`
 	DockerDetection  *bool          `hcl:"docker_detection,optional"`
+	ExpensiveOutput  *float64       `hcl:"expensive_output_per_mtok,optional"`
 	Agents           []hclAgent     `hcl:"agent,block"`
 	Containers       []hclContainer `hcl:"container,block"`
 	Profiles         []hclProfile   `hcl:"profile,block"`
@@ -107,6 +151,7 @@ type hclFile struct {
 
 type hclAgent struct {
 	Name                   string            `hcl:"name,label"`
+	Body                   hcl.Body          `hcl:",body"`
 	Base                   string            `hcl:"base,optional"`
 	Command                string            `hcl:"command,optional"`
 	Args                   []string          `hcl:"args,optional"`
@@ -133,7 +178,7 @@ type hclAgent struct {
 }
 
 type hclPricing struct {
-	DefaultModel string     `hcl:"default_model"`
+	DefaultModel string     `hcl:"default_model,optional"`
 	Models       []hclModel `hcl:"model,block"`
 }
 
@@ -146,6 +191,7 @@ type hclModel struct {
 
 type hclContainer struct {
 	Name              string   `hcl:"name,label"`
+	Body              hcl.Body `hcl:",body"`
 	Type              string   `hcl:"type,optional"`
 	Dockerfile        string   `hcl:"dockerfile,optional"`
 	DockerContainer   string   `hcl:"docker_container,optional"`
@@ -159,20 +205,33 @@ type hclContainer struct {
 
 type hclProfile struct {
 	Name               string   `hcl:"name,label"`
-	Agent              string   `hcl:"agent"`
-	Container          string   `hcl:"container"`
+	Body               hcl.Body `hcl:",body"`
+	Agent              string   `hcl:"agent,optional"`
+	Container          string   `hcl:"container,optional"`
 	AgentExtraArgs     []string `hcl:"agent_extra_args,optional"`
 	ContainerExtraArgs []string `hcl:"container_extra_args,optional"`
 }
 
+// Body schemas used to detect which attributes a block actually wrote.
+// gohcl decoding cannot tell an absent attribute from one set to its zero
+// value, and per-field layering needs to.
+var (
+	agentSchema, _     = gohcl.ImpliedBodySchema(hclAgent{})
+	containerSchema, _ = gohcl.ImpliedBodySchema(hclContainer{})
+	profileSchema, _   = gohcl.ImpliedBodySchema(hclProfile{})
+)
+
 // Load reads runtime.hcl with 4-level resolution:
 // embedded defaults -> orgDir/defaults/runtime.hcl -> orgDir/runtime.hcl -> projectDir/runtime.hcl
-// Each level's blocks override (by name) those from the previous level.
+// A later level overrides only the attributes it sets on a same-name
+// block; `env` maps merge per key, lists replace. Every value is recorded
+// in Sources with the layer that set it.
 func Load(projectDir, orgDir string) (*Config, error) {
 	cfg := &Config{
 		Agents:     make(map[string]AgentConfig),
 		Containers: make(map[string]ContainerConfig),
 		Profiles:   make(map[string]ProfileConfig),
+		Sources:    make(map[string][]Contribution),
 	}
 
 	// Level 1: embedded defaults
@@ -180,31 +239,34 @@ func Load(projectDir, orgDir string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot read embedded defaults: %w", err)
 	}
-	if err := mergeHCL(cfg, defaultData, "defaults/runtime.hcl"); err != nil {
+	cfg.Layers = append(cfg.Layers, Layer{Label: BuiltinLayer, Found: true})
+	if err := mergeHCL(cfg, defaultData, "defaults/runtime.hcl", BuiltinLayer); err != nil {
 		return nil, fmt.Errorf("cannot parse embedded defaults: %w", err)
 	}
 
+	var files []string
 	if orgDir != "" {
 		// Level 2: org defaults (e.g. .ateamorg/defaults/runtime.hcl)
-		if err := mergeHCLFile(cfg, filepath.Join(orgDir, "defaults", "runtime.hcl")); err != nil {
-			return nil, err
-		}
-
 		// Level 3: org override (e.g. .ateamorg/runtime.hcl)
-		if err := mergeHCLFile(cfg, filepath.Join(orgDir, "runtime.hcl")); err != nil {
-			return nil, err
-		}
+		files = append(files,
+			filepath.Join(orgDir, "defaults", "runtime.hcl"),
+			filepath.Join(orgDir, "runtime.hcl"))
 	}
-
-	// Level 4: project override (e.g. .ateam/runtime.hcl)
 	if projectDir != "" {
-		if err := mergeHCLFile(cfg, filepath.Join(projectDir, "runtime.hcl")); err != nil {
+		// Level 4: project override (e.g. .ateam/runtime.hcl)
+		files = append(files, filepath.Join(projectDir, "runtime.hcl"))
+	}
+	for _, path := range files {
+		if err := mergeHCLFile(cfg, path); err != nil {
 			return nil, err
 		}
 	}
 
 	// Resolve agent inheritance (base references)
 	if err := cfg.resolveInheritance(); err != nil {
+		return nil, err
+	}
+	if err := cfg.validateProfiles(); err != nil {
 		return nil, err
 	}
 
@@ -220,8 +282,10 @@ func Load(projectDir, orgDir string) (*Config, error) {
 	return cfg, nil
 }
 
-// resolveInheritance resolves base references in agent configs.
-// Fields that are zero-valued in the child are inherited from the base.
+// resolveInheritance resolves base references in agent configs. An
+// attribute no layer set on the child is inherited from the (already
+// resolved) base, and recorded in Sources with the base as its layer.
+// `env` inherits per key.
 func (c *Config) resolveInheritance() error {
 	resolved := make(map[string]bool)
 	var resolve func(name string, visited map[string]bool) error
@@ -253,74 +317,26 @@ func (c *Config) resolveInheritance() error {
 			return fmt.Errorf("agent %q references unknown base %q", name, ac.Base)
 		}
 
-		// Inherit zero-valued fields from base
-		if ac.Command == "" {
-			ac.Command = base.Command
+		childKey := "agent." + name + "."
+		baseKey := "agent." + ac.Base + "."
+		baseLabel := fmt.Sprintf("agent %q (base)", ac.Base)
+		for _, attr := range agentAttrNames(agentSchema) {
+			if attr == "base" || attr == "env" {
+				continue
+			}
+			if _, set := c.Sources[childKey+attr]; set {
+				continue
+			}
+			if _, inBase := c.Sources[baseKey+attr]; !inBase {
+				continue
+			}
+			c.record(childKey+attr, baseLabel, copyAgentAttr(&ac, &base, attr))
 		}
-		if ac.Args == nil {
-			ac.Args = base.Args
-		}
-		if ac.Model == "" {
-			ac.Model = base.Model
-		}
-		if ac.Effort == "" {
-			ac.Effort = base.Effort
-		}
-		if ac.MaxBudgetUSD == "" {
-			ac.MaxBudgetUSD = base.MaxBudgetUSD
-		}
-		if ac.Type == "" {
-			ac.Type = base.Type
-		}
-		if ac.StartTimeout == "" {
-			ac.StartTimeout = base.StartTimeout
-		}
-		if ac.BusyTimeout == "" {
-			ac.BusyTimeout = base.BusyTimeout
-		}
-		if ac.QuiescenceWindow == "" {
-			ac.QuiescenceWindow = base.QuiescenceWindow
-		}
-		if ac.TmuxWidth == 0 {
-			ac.TmuxWidth = base.TmuxWidth
-		}
-		if ac.TmuxHeight == 0 {
-			ac.TmuxHeight = base.TmuxHeight
-		}
-		if ac.Env == nil {
-			ac.Env = base.Env
-		}
-		if ac.Sandbox == "" {
-			ac.Sandbox = base.Sandbox
-		}
-		if ac.RWPaths == nil {
-			ac.RWPaths = base.RWPaths
-		}
-		if ac.ROPaths == nil {
-			ac.ROPaths = base.ROPaths
-		}
-		if ac.DeniedPaths == nil {
-			ac.DeniedPaths = base.DeniedPaths
-		}
-		if ac.ConfigDir == "" {
-			ac.ConfigDir = base.ConfigDir
-		}
-		if ac.Pricing == nil {
-			ac.Pricing = base.Pricing
-		}
-		if ac.RequiredEnv == nil {
-			ac.RequiredEnv = base.RequiredEnv
-		}
-		if ac.ArgsInsideContainer == nil {
-			ac.ArgsInsideContainer = base.ArgsInsideContainer
-		}
-		if ac.ArgsOutsideContainer == nil {
-			ac.ArgsOutsideContainer = base.ArgsOutsideContainer
-		}
-		// SandboxInsideContainer: bool defaults to false, only inherit if base is true and child hasn't explicitly set it.
-		// Since we can't distinguish "not set" from "set to false" for bools, we inherit if base is true.
-		if !ac.SandboxInsideContainer && base.SandboxInsideContainer {
-			ac.SandboxInsideContainer = base.SandboxInsideContainer
+		for k, v := range base.Env {
+			if _, set := c.Sources[childKey+"env."+k]; set {
+				continue
+			}
+			c.setEnvKey(&ac, k, v, childKey, baseLabel)
 		}
 
 		c.Agents[name] = ac
@@ -336,6 +352,147 @@ func (c *Config) resolveInheritance() error {
 	return nil
 }
 
+// validateProfiles rejects profiles left without an agent or container
+// after merging. The attributes are optional per layer so a project file
+// can override just one of them on an existing profile.
+func (c *Config) validateProfiles() error {
+	for name, p := range c.Profiles {
+		if p.Agent == "" || p.Container == "" {
+			src, _ := c.Source("profile." + name + ".name")
+			return fmt.Errorf("profile %q (%s) must set both agent and container", name, src.Layer)
+		}
+	}
+	return nil
+}
+
+// agentAttrNames returns the attribute and nested-block names of a body
+// schema in a stable order, so provenance is recorded deterministically.
+func agentAttrNames(schema *hcl.BodySchema) []string {
+	names := make([]string, 0, len(schema.Attributes)+len(schema.Blocks))
+	for _, a := range schema.Attributes {
+		names = append(names, a.Name)
+	}
+	for _, b := range schema.Blocks {
+		names = append(names, b.Type)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// presentAttrs returns the attribute and nested-block names written in body.
+func presentAttrs(body hcl.Body, schema *hcl.BodySchema) map[string]bool {
+	present := make(map[string]bool)
+	if body == nil {
+		return present
+	}
+	content, _, _ := body.PartialContent(schema)
+	for name := range content.Attributes {
+		present[name] = true
+	}
+	for _, b := range content.Blocks {
+		present[b.Type] = true
+	}
+	return present
+}
+
+func (c *Config) record(key, layer, value string) {
+	c.Sources[key] = append(c.Sources[key], Contribution{Layer: layer, Value: value})
+}
+
+// setEnvKey sets one env key on ac (cloning the map so the base agent's
+// map is never shared) and records it.
+func (c *Config) setEnvKey(ac *AgentConfig, k, v, keyPrefix, label string) {
+	env := make(map[string]string, len(ac.Env)+1)
+	for ek, ev := range ac.Env {
+		env[ek] = ev
+	}
+	env[k] = v
+	ac.Env = env
+	c.record(keyPrefix+"env."+k, label, v)
+}
+
+// copyAgentAttr copies one attribute from src to dst and returns its
+// rendered value. "env" and "base" are handled by the callers.
+func copyAgentAttr(dst, src *AgentConfig, attr string) string {
+	switch attr {
+	case "command":
+		dst.Command = src.Command
+		return src.Command
+	case "args":
+		dst.Args = src.Args
+		return renderList(src.Args)
+	case "model":
+		dst.Model = src.Model
+		return src.Model
+	case "effort":
+		dst.Effort = src.Effort
+		return src.Effort
+	case "max_budget_usd":
+		dst.MaxBudgetUSD = src.MaxBudgetUSD
+		return src.MaxBudgetUSD
+	case "type":
+		dst.Type = src.Type
+		return src.Type
+	case "start_timeout":
+		dst.StartTimeout = src.StartTimeout
+		return src.StartTimeout
+	case "busy_timeout":
+		dst.BusyTimeout = src.BusyTimeout
+		return src.BusyTimeout
+	case "quiescence_window":
+		dst.QuiescenceWindow = src.QuiescenceWindow
+		return src.QuiescenceWindow
+	case "tmux_width":
+		dst.TmuxWidth = src.TmuxWidth
+		return strconv.Itoa(src.TmuxWidth)
+	case "tmux_height":
+		dst.TmuxHeight = src.TmuxHeight
+		return strconv.Itoa(src.TmuxHeight)
+	case "sandbox":
+		dst.Sandbox = src.Sandbox
+		return src.Sandbox
+	case "rw_paths":
+		dst.RWPaths = src.RWPaths
+		return renderList(src.RWPaths)
+	case "ro_paths":
+		dst.ROPaths = src.ROPaths
+		return renderList(src.ROPaths)
+	case "denied_paths":
+		dst.DeniedPaths = src.DeniedPaths
+		return renderList(src.DeniedPaths)
+	case "config_dir":
+		dst.ConfigDir = src.ConfigDir
+		return src.ConfigDir
+	case "required_env":
+		dst.RequiredEnv = src.RequiredEnv
+		return renderList(src.RequiredEnv)
+	case "args_inside_container":
+		dst.ArgsInsideContainer = src.ArgsInsideContainer
+		return renderList(src.ArgsInsideContainer)
+	case "args_outside_container":
+		dst.ArgsOutsideContainer = src.ArgsOutsideContainer
+		return renderList(src.ArgsOutsideContainer)
+	case "sandbox_inside_container":
+		dst.SandboxInsideContainer = src.SandboxInsideContainer
+		return strconv.FormatBool(src.SandboxInsideContainer)
+	case "pricing":
+		dst.Pricing = src.Pricing
+		if src.Pricing == nil {
+			return ""
+		}
+		return "default_model = " + src.Pricing.DefaultModel
+	}
+	return ""
+}
+
+func renderList(items []string) string {
+	quoted := make([]string, len(items))
+	for i, s := range items {
+		quoted[i] = strconv.Quote(s)
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
 // mergeHCLFile reads a file (following symlinks) and merges it into cfg.
 // Returns nil if the file doesn't exist. Emits a stderr warning when the
 // file references ALL_CAPS template tokens the runner doesn't recognize
@@ -348,18 +505,22 @@ func mergeHCLFile(cfg *Config, path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			cfg.Layers = append(cfg.Layers, Layer{Label: path})
 			return nil
 		}
 		return fmt.Errorf("cannot read %s: %w", path, err)
 	}
+	cfg.Layers = append(cfg.Layers, Layer{Label: path, Found: true})
 	warnStrayAllCaps(path, data)
-	if err := mergeHCL(cfg, data, path); err != nil {
+	if err := mergeHCL(cfg, data, path, path); err != nil {
 		return fmt.Errorf("cannot parse %s: %w", path, err)
 	}
 	return nil
 }
 
-func mergeHCL(cfg *Config, data []byte, filename string) error {
+// mergeHCL merges one layer into cfg. filename names the source in parse
+// diagnostics; label is the layer name recorded in cfg.Sources.
+func mergeHCL(cfg *Config, data []byte, filename, label string) error {
 	// Pass 1: extract locals for expression evaluation
 	evalCtx, err := parseLocals(data, filename)
 	if err != nil {
@@ -387,58 +548,164 @@ func mergeHCL(cfg *Config, data []byte, filename string) error {
 		v := *hf.DockerDetection
 		cfg.DockerDetection = &v
 	}
+	if hf.ExpensiveOutput != nil {
+		v := *hf.ExpensiveOutput
+		cfg.ExpensiveOutputPerMTok = &v
+		cfg.record("expensive_output_per_mtok", label, strconv.FormatFloat(v, 'f', -1, 64))
+	}
 
 	for _, a := range hf.Agents {
-		var pricing *AgentPricing
-		if len(a.Pricing) > 0 {
-			hp := a.Pricing[0]
-			models := make(map[string]ModelPricing, len(hp.Models))
-			for _, m := range hp.Models {
-				models[m.Name] = ModelPricing{
-					InputPerMTok:       m.InputPerMTok,
-					CachedInputPerMTok: m.CachedInputPerMTok,
-					OutputPerMTok:      m.OutputPerMTok,
-				}
-			}
-			pricing = &AgentPricing{
-				DefaultModel: hp.DefaultModel,
-				Models:       models,
-			}
-		}
-		cfg.Agents[a.Name] = AgentConfig{
-			Name:                   a.Name,
-			Base:                   a.Base,
-			Command:                a.Command,
-			Args:                   a.Args,
-			Model:                  a.Model,
-			Effort:                 a.Effort,
-			MaxBudgetUSD:           a.MaxBudgetUSD,
-			Type:                   a.Type,
-			StartTimeout:           a.StartTimeout,
-			BusyTimeout:            a.BusyTimeout,
-			QuiescenceWindow:       a.QuiescenceWindow,
-			TmuxWidth:              a.TmuxWidth,
-			TmuxHeight:             a.TmuxHeight,
-			Env:                    a.Env,
-			Sandbox:                a.Sandbox,
-			RWPaths:                a.RWPaths,
-			ROPaths:                a.ROPaths,
-			DeniedPaths:            a.DeniedPaths,
-			ConfigDir:              a.ConfigDir,
-			Pricing:                pricing,
-			RequiredEnv:            a.RequiredEnv,
-			ArgsInsideContainer:    a.ArgsInsideContainer,
-			ArgsOutsideContainer:   a.ArgsOutsideContainer,
-			SandboxInsideContainer: a.SandboxInsideContainer,
-		}
+		cfg.mergeAgent(a, label)
 	}
 	for _, c := range hf.Containers {
-		cfg.Containers[c.Name] = ContainerConfig(c)
+		cfg.mergeContainer(c, label)
 	}
 	for _, p := range hf.Profiles {
-		cfg.Profiles[p.Name] = ProfileConfig(p)
+		cfg.mergeProfile(p, label)
 	}
 	return nil
+}
+
+func agentFromHCL(a hclAgent) AgentConfig {
+	var pricing *AgentPricing
+	if len(a.Pricing) > 0 {
+		hp := a.Pricing[0]
+		models := make(map[string]ModelPricing, len(hp.Models))
+		for _, m := range hp.Models {
+			models[m.Name] = ModelPricing{
+				InputPerMTok:       m.InputPerMTok,
+				CachedInputPerMTok: m.CachedInputPerMTok,
+				OutputPerMTok:      m.OutputPerMTok,
+			}
+		}
+		pricing = &AgentPricing{
+			DefaultModel: hp.DefaultModel,
+			Models:       models,
+		}
+	}
+	return AgentConfig{
+		Name:                   a.Name,
+		Base:                   a.Base,
+		Command:                a.Command,
+		Args:                   a.Args,
+		Model:                  a.Model,
+		Effort:                 a.Effort,
+		MaxBudgetUSD:           a.MaxBudgetUSD,
+		Type:                   a.Type,
+		StartTimeout:           a.StartTimeout,
+		BusyTimeout:            a.BusyTimeout,
+		QuiescenceWindow:       a.QuiescenceWindow,
+		TmuxWidth:              a.TmuxWidth,
+		TmuxHeight:             a.TmuxHeight,
+		Env:                    a.Env,
+		Sandbox:                a.Sandbox,
+		RWPaths:                a.RWPaths,
+		ROPaths:                a.ROPaths,
+		DeniedPaths:            a.DeniedPaths,
+		ConfigDir:              a.ConfigDir,
+		Pricing:                pricing,
+		RequiredEnv:            a.RequiredEnv,
+		ArgsInsideContainer:    a.ArgsInsideContainer,
+		ArgsOutsideContainer:   a.ArgsOutsideContainer,
+		SandboxInsideContainer: a.SandboxInsideContainer,
+	}
+}
+
+// mergeAgent applies the attributes block a wrote onto the agent of the
+// same name from earlier layers (or a new one).
+func (c *Config) mergeAgent(a hclAgent, label string) {
+	src := agentFromHCL(a)
+	ac := c.Agents[a.Name]
+	ac.Name = a.Name
+	key := "agent." + a.Name + "."
+	if _, seen := c.Agents[a.Name]; !seen {
+		c.record(key+"name", label, a.Name)
+	}
+	for attr := range presentAttrs(a.Body, agentSchema) {
+		switch attr {
+		case "base":
+			ac.Base = src.Base
+			c.record(key+"base", label, src.Base)
+		case "env":
+			for k, v := range src.Env {
+				c.setEnvKey(&ac, k, v, key, label)
+			}
+		default:
+			c.record(key+attr, label, copyAgentAttr(&ac, &src, attr))
+		}
+	}
+	c.Agents[a.Name] = ac
+}
+
+func (c *Config) mergeContainer(h hclContainer, label string) {
+	cc := c.Containers[h.Name]
+	cc.Name = h.Name
+	key := "container." + h.Name + "."
+	if _, seen := c.Containers[h.Name]; !seen {
+		c.record(key+"name", label, h.Name)
+	}
+	for attr := range presentAttrs(h.Body, containerSchema) {
+		var value string
+		switch attr {
+		case "type":
+			cc.Type = h.Type
+			value = h.Type
+		case "dockerfile":
+			cc.Dockerfile = h.Dockerfile
+			value = h.Dockerfile
+		case "docker_container":
+			cc.DockerContainer = h.DockerContainer
+			value = h.DockerContainer
+		case "exec":
+			cc.ExecTemplate = h.ExecTemplate
+			value = h.ExecTemplate
+		case "forward_env":
+			cc.ForwardEnv = h.ForwardEnv
+			value = renderList(h.ForwardEnv)
+		case "extra_volumes":
+			cc.ExtraVolumes = h.ExtraVolumes
+			value = renderList(h.ExtraVolumes)
+		case "precheck":
+			cc.Precheck = h.Precheck
+			value = renderList(h.Precheck)
+		case "copy_ateam":
+			cc.CopyAteam = h.CopyAteam
+			value = strconv.FormatBool(h.CopyAteam)
+		case "mount_claude_config":
+			cc.MountClaudeConfig = h.MountClaudeConfig
+			value = strconv.FormatBool(h.MountClaudeConfig)
+		}
+		c.record(key+attr, label, value)
+	}
+	c.Containers[h.Name] = cc
+}
+
+func (c *Config) mergeProfile(h hclProfile, label string) {
+	p := c.Profiles[h.Name]
+	p.Name = h.Name
+	key := "profile." + h.Name + "."
+	if _, seen := c.Profiles[h.Name]; !seen {
+		c.record(key+"name", label, h.Name)
+	}
+	for attr := range presentAttrs(h.Body, profileSchema) {
+		var value string
+		switch attr {
+		case "agent":
+			p.Agent = h.Agent
+			value = h.Agent
+		case "container":
+			p.Container = h.Container
+			value = h.Container
+		case "agent_extra_args":
+			p.AgentExtraArgs = h.AgentExtraArgs
+			value = renderList(h.AgentExtraArgs)
+		case "container_extra_args":
+			p.ContainerExtraArgs = h.ContainerExtraArgs
+			value = renderList(h.ContainerExtraArgs)
+		}
+		c.record(key+attr, label, value)
+	}
+	c.Profiles[h.Name] = p
 }
 
 // parseLocals extracts locals blocks from HCL data and builds an eval context.

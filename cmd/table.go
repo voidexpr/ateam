@@ -18,6 +18,7 @@ import (
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/calldb"
+	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
@@ -257,6 +258,7 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.AgentE
 
 	r := runnerFromAgentConfig(env, &ac)
 	r.Profile = "a:" + agentName
+	r.ProfileSource = config.ProfileSourceAgent
 	r.ProjectID = env.ProjectID()
 	r.ContainerType = "none"
 	return r, nil
@@ -359,8 +361,18 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 
 // newRunnerDefault creates a AgentExecutor using the default profile.
 func newRunnerDefault(env *root.ResolvedEnv) (*runner.AgentExecutor, error) {
-	profileName := env.Config.ResolveProfile("", "")
-	return newRunner(env, profileName, "", false)
+	return newRunnerFromChoice(env, env.Config.ResolveProfile("", ""), "", false)
+}
+
+// newRunnerFromChoice is newRunner for a profile picked by config.toml,
+// stamping the setting that picked it onto the runner.
+func newRunnerFromChoice(env *root.ResolvedEnv, choice config.ProfileChoice, roleID string, dockerAutoSetup bool) (*runner.AgentExecutor, error) {
+	r, err := newRunner(env, choice.Name, roleID, dockerAutoSetup)
+	if err != nil {
+		return nil, err
+	}
+	r.ProfileSource = choice.Source
+	return r, nil
 }
 
 // resolveRunnerMinimal builds a AgentExecutor without project context (just org dir).
@@ -384,12 +396,14 @@ func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.AgentE
 		}
 		r := minimalRunnerFromAgentConfig(orgDir, &ac)
 		r.Profile = "a:" + agentFlag
+		r.ProfileSource = config.ProfileSourceAgent
 		return r, nil
 	default:
+		choice := config.ProfileChoice{Name: profileFlag, Source: config.ProfileSourceFlag}
 		if profileFlag == "" {
-			profileFlag = "default"
+			choice = config.ProfileChoice{Name: "default", Source: config.ProfileSourceBuiltin}
 		}
-		prof, ac, _, err := rtCfg.ResolveProfile(profileFlag)
+		prof, ac, _, err := rtCfg.ResolveProfile(choice.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -397,6 +411,8 @@ func resolveRunnerMinimal(orgDir, profileFlag, agentFlag string) (*runner.AgentE
 			return nil, err
 		}
 		r := minimalRunnerFromAgentConfig(orgDir, ac)
+		r.Profile = choice.Name
+		r.ProfileSource = choice.Source
 		r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
 		return r, nil
 	}
@@ -426,10 +442,9 @@ func resolveRunner(env *root.ResolvedEnv, profileFlag, agentFlag, action, roleID
 	case agentFlag != "":
 		return newRunnerFromAgent(env, agentFlag)
 	case profileFlag != "":
-		return newRunner(env, profileFlag, roleID, dockerAutoSetup)
+		return newRunnerFromChoice(env, config.ProfileChoice{Name: profileFlag, Source: config.ProfileSourceFlag}, roleID, dockerAutoSetup)
 	default:
-		profileName := env.Config.ResolveProfile(action, roleID)
-		return newRunner(env, profileName, roleID, dockerAutoSetup)
+		return newRunnerFromChoice(env, env.Config.ResolveProfile(action, roleID), roleID, dockerAutoSetup)
 	}
 }
 

@@ -347,7 +347,18 @@ Runtime behavior is configured via `runtime.hcl` files using HCL syntax, with a 
 3. **Org override** — `.ateamorg/runtime.hcl`
 4. **Project override** — `.ateam/runtime.hcl`
 
-Use `ateam env` to see the active resolution chain.
+One rule: the nearer layer wins per attribute. A later file that redeclares an `agent`, `container` or `profile` block overrides only the attributes it writes; everything else keeps the value from the earlier layers. `env` maps merge per key (set a key to `""` to unset it), lists such as `args` replace the whole list. So pinning a model is one attribute, not a copy of the whole block:
+
+```hcl
+# .ateam/runtime.hcl — the built-in command, args, sandbox and env are kept
+agent "claude" {
+  model = "claude-sonnet-5-5"
+}
+```
+
+`base` is for defining a *new* agent from an existing one: attributes the child never sets, in any layer, are inherited from the (already merged) base. An attribute explicitly set to its zero value (`sandbox_inside_container = false`, `tmux_width = 0`) is kept, not inherited.
+
+Every value is recorded with the layer that set it (`Config.Sources`, keyed `agent.<name>.<attr>`), so audits can say which file to edit. Use `ateam env` to see the active resolution chain.
 
 ### Top-level scalars
 
@@ -355,6 +366,7 @@ Use `ateam env` to see the active resolution chain.
 |---|---|---|---|
 | `sandbox_detection` | bool | `false` | Auto-detect when ateam is inside an outer non-container sandbox and treat it as a container so the agent's inner sandbox is skipped. Signal-driven: macOS Seatbelt probe, Linux `/proc` heuristics (user-namespace divergence, Seccomp, NoNewPrivs), cooperative env vars (`FENCE_SANDBOX`, `FIREJAIL_NAME`, `container=…`). Default off because the signals can have false positives that would silently drop defense in depth — opt in when knowingly running under any outer sandbox. See [ISOLATION.md](ISOLATION.md#detection-of-an-outer-sandbox-or-container). |
 | `docker_detection` | bool | `true`  | Auto-detect `/.dockerenv` and `/run/.containerenv`. Default true (markers are reliable). Set false to exercise the host-execution code path from inside a container. |
+| `expensive_output_per_mtok` | number | `20` | Output price (USD per million tokens, looked up in the agent's `pricing` block) above which a pinned model draws a warning at launch and in `ateam env`. `0` disables the warning. |
 
 Both can be overridden per-invocation with `--sandbox-detection true|false` / `--docker-detection true|false`.
 
@@ -369,10 +381,15 @@ agent "claude" {
 }
 
 agent "claude-sonnet" {
-  base = "claude"
-  args = ["-p", "--output-format", "stream-json", "--verbose", "--model", "sonnet"]
+  base           = "claude"
+  model          = "sonnet"
+  max_budget_usd = "0.50"
 }
 ```
+
+Pin the model and effort with the `model` and `effort` attributes, never with `--model` inside `args`: attributes can be overridden one at a time by a nearer layer, and `ateam env` can report which file set them. A `--model`, `-m`, `--effort` or `model_reasoning_effort` token inside `args` or a profile's `agent_extra_args` draws a warning.
+
+With no model pinned anywhere, the agent CLI picks its own default, often the most expensive model. ateam allows it but warns at launch and in `ateam env`, naming the file and block to edit. A pinned model whose output price (from the agent's `pricing` block) is above the top-level `expensive_output_per_mtok` also draws a one-line warning; set the scalar to `0` to turn that off.
 
 The default `claude` agents share `env = local.claude_env`, which besides unsetting `CLAUDECODE` sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`. Headless (`claude -p`) sessions kill every background task the moment the model ends its turn, so ateam removes the Bash tool's `run_in_background` option: long commands block in one foreground call instead. Bash timeouts are left at the harness defaults for every agent except the `ateam code` supervisor, which gets `BASH_DEFAULT_TIMEOUT_MS` / `BASH_MAX_TIMEOUT_MS` set per run to the `[exec]` `timeout_minutes` plus 10 minutes, so one call can wait for a whole coding sub-run while the sub-run's own commands keep the stock limits. An agent block with its own `env` map replaces the local entirely, so copy the `CLAUDECODE` and background-tasks entries along.
 
@@ -564,7 +581,7 @@ agent "claude" {
 
 ### Cost Estimation & Pricing
 
-- **Claude** reports actual cost directly in its stream output. No configuration needed.
+- **Claude** reports actual cost directly in its stream output. Its built-in `pricing` block serves the expensive-model warning and cost estimates for runs that died before a result event; it deliberately has no `default_model`, so an unpinned model never looks pinned.
 - **Codex** (and other agents) rely on a `pricing` block in `runtime.hcl` to estimate cost from token counts.
 
 ```hcl
@@ -641,9 +658,8 @@ profile "docker-exec" {
 }
 
 profile "cheap" {
-  agent            = "claude"
-  container        = "none"
-  agent_extra_args = ["--model", "sonnet", "--max-budget-usd", "0.50"]
+  agent     = "claude-sonnet"   # model and budget live on the agent block
+  container = "none"
 }
 ```
 
