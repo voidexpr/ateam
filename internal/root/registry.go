@@ -105,13 +105,7 @@ func Register(homeDir string, e RegistryEntry) error {
 	if err != nil {
 		return err
 	}
-	kept := entries[:0]
-	for _, x := range entries {
-		if x.Name != e.Name {
-			kept = append(kept, x)
-		}
-	}
-	return SaveRegistry(homeDir, append(kept, e))
+	return SaveRegistry(homeDir, append(without(entries, e.Name), e))
 }
 
 // Unregister removes the entry for name; a missing entry is not an error.
@@ -120,13 +114,17 @@ func Unregister(homeDir, name string) error {
 	if err != nil {
 		return err
 	}
+	return SaveRegistry(homeDir, without(entries, name))
+}
+
+func without(entries []RegistryEntry, name string) []RegistryEntry {
 	kept := entries[:0]
 	for _, x := range entries {
 		if x.Name != name {
 			kept = append(kept, x)
 		}
 	}
-	return SaveRegistry(homeDir, kept)
+	return kept
 }
 
 // ProjectInfo holds a registered project whose .ateam/ still exists.

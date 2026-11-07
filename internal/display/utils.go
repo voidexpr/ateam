@@ -55,6 +55,22 @@ func ExpandHome(path string) string {
 	return filepath.Join(home, path[2:])
 }
 
+// TildeHome is the inverse of ExpandHome for display: a path at or under
+// the user's home directory is shown with a leading ~.
+func TildeHome(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if path == home {
+		return "~"
+	}
+	if strings.HasPrefix(path, home+string(filepath.Separator)) {
+		return "~" + path[len(home):]
+	}
+	return path
+}
+
 // Truncate shortens s to at most max bytes on a rune boundary, appending "…"
 // when it had to cut. Returns "" for max<=0 and the original s when it fits.
 func Truncate(s string, max int) string {

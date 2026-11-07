@@ -127,6 +127,14 @@ type AgentConfig struct {
 	SandboxInsideContainer bool     // if false (default), skip sandbox settings inside containers
 }
 
+// TypeName is the agent type with the claude default applied.
+func (ac *AgentConfig) TypeName() string {
+	if ac.Type == "" {
+		return "claude"
+	}
+	return ac.Type
+}
+
 type AgentPricing struct {
 	DefaultModel   string
 	SuggestedModel string // the model `ateam setup --model` proposes: the tier below the top, current generation
@@ -259,11 +267,7 @@ var (
 	containerSchema, _ = gohcl.ImpliedBodySchema(hclContainer{})
 	profileSchema, _   = gohcl.ImpliedBodySchema(hclProfile{})
 
-	// topLevelSchema lists the scalar attributes of a file, for provenance.
-	topLevelSchema = &hcl.BodySchema{Attributes: []hcl.AttributeSchema{
-		{Name: "sandbox_detection"}, {Name: "docker_detection"},
-		{Name: "expensive_output_per_mtok"}, {Name: "pricing_as_of"},
-	}}
+	fileSchema, _ = gohcl.ImpliedBodySchema(hclFile{})
 )
 
 // Load reads the embedded defaults, then the ateam.hcl of every layer
@@ -273,12 +277,7 @@ var (
 // merge per key, lists replace. Every value is recorded in Sources with
 // the layer that set it. Missing files are listed in Layers and skipped.
 func Load(layerDirs []string) (*Config, error) {
-	cfg := &Config{
-		Agents:     make(map[string]AgentConfig),
-		Containers: make(map[string]ContainerConfig),
-		Profiles:   make(map[string]ProfileConfig),
-		Sources:    make(map[string][]Contribution),
-	}
+	cfg := newConfig()
 
 	defaultData, err := defaults.FS.ReadFile(ConfigFile)
 	if err != nil {
@@ -325,6 +324,15 @@ func Load(layerDirs []string) (*Config, error) {
 	return cfg, nil
 }
 
+func newConfig() *Config {
+	return &Config{
+		Agents:     make(map[string]AgentConfig),
+		Containers: make(map[string]ContainerConfig),
+		Profiles:   make(map[string]ProfileConfig),
+		Sources:    make(map[string][]Contribution),
+	}
+}
+
 // resolveInheritance resolves base references in agent configs. An
 // attribute no layer set on the child is inherited from the (already
 // resolved) base, and recorded in Sources with the base as its layer.
@@ -346,48 +354,40 @@ func (c *Config) resolveInheritance() error {
 		if !ok {
 			return fmt.Errorf("unknown agent %q", name)
 		}
-		if ac.Base == "" {
-			ac.Args = c.withAdditions("agent."+name+".args", ac.Args)
-			c.Agents[name] = ac
-			resolved[name] = true
-			return nil
-		}
-
-		// Resolve the base first
-		if err := resolve(ac.Base, visited); err != nil {
-			return err
-		}
-		base, ok := c.Agents[ac.Base]
-		if !ok {
-			return fmt.Errorf("agent %q references unknown base %q", name, ac.Base)
-		}
-
 		childKey := "agent." + name + "."
-		baseKey := "agent." + ac.Base + "."
-		baseLabel := fmt.Sprintf("agent %q (base)", ac.Base)
-		for _, attr := range agentAttrNames(agentSchema) {
-			if attr == "base" || attr == "env" || IsListAddition(attr) {
-				continue
+		if ac.Base != "" {
+			if err := resolve(ac.Base, visited); err != nil {
+				return err
 			}
-			if _, set := c.Sources[childKey+attr]; set {
-				continue
+			base, ok := c.Agents[ac.Base]
+			if !ok {
+				return fmt.Errorf("agent %q references unknown base %q", name, ac.Base)
 			}
-			from, inBase := c.Source(baseKey + attr)
-			if !inBase {
-				continue
+			baseKey := "agent." + ac.Base + "."
+			baseLabel := fmt.Sprintf("agent %q (base)", ac.Base)
+			for _, attr := range agentAttrNames(agentSchema) {
+				if attr == "base" || attr == "env" || IsListAddition(attr) {
+					continue
+				}
+				if _, set := c.Sources[childKey+attr]; set {
+					continue
+				}
+				from, inBase := c.Source(baseKey + attr)
+				if !inBase {
+					continue
+				}
+				c.inherit(childKey+attr, baseLabel, copyAgentAttr(&ac, &base, attr), from)
 			}
-			c.inherit(childKey+attr, baseLabel, copyAgentAttr(&ac, &base, attr), from)
+			for k, v := range base.Env {
+				if _, set := c.Sources[childKey+"env."+k]; set {
+					continue
+				}
+				from, _ := c.Source(baseKey + "env." + k)
+				c.setEnvKey(&ac, k, v)
+				c.inherit(childKey+"env."+k, baseLabel, v, from)
+			}
 		}
-		for k, v := range base.Env {
-			if _, set := c.Sources[childKey+"env."+k]; set {
-				continue
-			}
-			from, _ := c.Source(baseKey + "env." + k)
-			c.setEnvKey(&ac, k, v)
-			c.inherit(childKey+"env."+k, baseLabel, v, from)
-		}
-
-		// The child's own additions wrap the list it ended up with, its
+		// The agent's own additions wrap the list it ended up with, its
 		// own or the base's (already folded) one.
 		ac.Args = c.withAdditions(childKey+"args", ac.Args)
 		c.Agents[name] = ac
@@ -661,7 +661,7 @@ func mergeHCL(cfg *Config, data []byte, filename, label string) error {
 		return diags
 	}
 
-	lines, _ := presentAttrs(file.Body, topLevelSchema)
+	lines, _ := presentAttrs(file.Body, fileSchema)
 	if hf.SandboxDetection != nil {
 		v := *hf.SandboxDetection
 		cfg.SandboxDetection = &v

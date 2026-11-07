@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runtime"
 )
@@ -85,7 +86,7 @@ func setupModelPins(env *root.ResolvedEnv, choice, layer string, agents []string
 		if err := applyModelPin(file, agentType, pick); err != nil {
 			return err
 		}
-		fmt.Printf("  %s: model = %q written to %s\n", agentType, pick, tildeHome(file))
+		fmt.Printf("  %s: model = %q written to %s\n", agentType, pick, display.TildeHome(file))
 	}
 	return nil
 }
@@ -188,7 +189,7 @@ func refreshPricing(env *root.ResolvedEnv) error {
 	if err := os.WriteFile(file, []byte(runtime.ReplacePricingSection(string(current), section)), 0644); err != nil {
 		return err
 	}
-	fmt.Printf("pricing as of %s written to %s\n", fetched.PricingAsOf, tildeHome(file))
+	fmt.Printf("pricing as of %s written to %s\n", fetched.PricingAsOf, display.TildeHome(file))
 	for name, ac := range fetched.Agents {
 		if ac.Pricing != nil && len(ac.Pricing.Models) > 0 {
 			fmt.Printf("  %s: %d models, suggested %s\n", name, len(ac.Pricing.Models), ac.Pricing.SuggestedModel)

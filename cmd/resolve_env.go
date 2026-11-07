@@ -39,6 +39,15 @@ func lookupEnv() (*root.ResolvedEnv, error) {
 	return applyWorkDirFlag(env)
 }
 
+// homeDirFlag returns the user ateam directory --home names, else the
+// default one, without resolving a project.
+func homeDirFlag() string {
+	if homeFlag != "" {
+		return homeFlag
+	}
+	return runtime.HomeDir()
+}
+
 // envLayers returns the config layers of env, or the user home layer alone
 // when no environment could be resolved.
 func envLayers(env *root.ResolvedEnv) []string {

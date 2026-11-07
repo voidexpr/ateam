@@ -29,12 +29,7 @@ const PricingMaxAge = 90 * 24 * time.Hour
 // ParseDefaults parses a standalone ateam.hcl (e.g. a freshly fetched copy
 // of the embedded defaults) without the built-in layer underneath.
 func ParseDefaults(data []byte, label string) (*Config, error) {
-	cfg := &Config{
-		Agents:     make(map[string]AgentConfig),
-		Containers: make(map[string]ContainerConfig),
-		Profiles:   make(map[string]ProfileConfig),
-		Sources:    make(map[string][]Contribution),
-	}
+	cfg := newConfig()
 	if err := mergeHCL(cfg, data, label, label); err != nil {
 		return nil, err
 	}

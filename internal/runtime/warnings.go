@@ -2,10 +2,10 @@ package runtime
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/ateam/internal/display"
 )
 
 // modelDateSuffix matches the -YYYY-MM-DD suffix of dated model ids. Same
@@ -120,18 +120,7 @@ func (c *Config) displayLayer(label string) string {
 	if label == "" {
 		return BuiltinLayer
 	}
-	if !filepath.IsAbs(label) {
-		return label
-	}
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		if label == home {
-			return "~"
-		}
-		if strings.HasPrefix(label, home+string(filepath.Separator)) {
-			return "~" + label[len(home):]
-		}
-	}
-	return label
+	return display.TildeHome(label)
 }
 
 // embeddedModelFlag returns the first model/effort flag token found in

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ateam/internal/agent"
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
 	"github.com/spf13/cobra"
 )
@@ -135,7 +136,7 @@ func setupAgentConfigDirs(env *root.ResolvedEnv, choice string, agents []string,
 		if ac.ConfigDir != "" {
 			src, _ := env.Runtime.Source("agent." + agentType + ".config_dir")
 			fmt.Printf("%s: config_dir already set to %s (%s); log into it with 'ateam login --agent %s'\n",
-				agentType, ac.ConfigDir, tildeHome(src.Layer), agentType)
+				agentType, ac.ConfigDir, display.TildeHome(src.Layer), agentType)
 			continue
 		}
 		pick := choice
@@ -157,7 +158,7 @@ func setupAgentConfigDirs(env *root.ResolvedEnv, choice string, agents []string,
 		if err := applyAgentConfig(file, agentType, value); err != nil {
 			return err
 		}
-		fmt.Printf("%s: config_dir = %q written to %s (%s)\n", agentType, value, tildeHome(file), tildeHome(dir))
+		fmt.Printf("%s: config_dir = %q written to %s (%s)\n", agentType, value, display.TildeHome(file), display.TildeHome(dir))
 		fmt.Printf("  next: ateam login --agent %s\n", agentType)
 	}
 	return nil
@@ -182,7 +183,7 @@ func agentConfigPlan(env *root.ResolvedEnv, agentType, choice string) (file, val
 	switch choice {
 	case agentConfigHome:
 		dir = filepath.Join(env.HomeStateDir(), "agents", agentType)
-		return filepath.Join(env.HomeDir, root.ConfigFile), tildeHome(dir), dir, nil
+		return filepath.Join(env.HomeDir, root.ConfigFile), display.TildeHome(dir), dir, nil
 	case agentConfigProject:
 		if env.ProjectDir == "" {
 			return "", "", "", fmt.Errorf("--agent-config project needs a project; run from one or use --agent-config home")
@@ -207,12 +208,12 @@ func applyAgentConfig(file, agentType, value string) error {
 }
 
 func promptAgentConfig(env *root.ResolvedEnv, agentType string) string {
-	home := tildeHome(filepath.Join(env.HomeStateDir(), "agents", agentType))
+	home := display.TildeHome(filepath.Join(env.HomeStateDir(), "agents", agentType))
 	fmt.Fprintf(os.Stderr, "\nWhere should unattended %s runs keep their config and credentials?\n", agentType)
 	fmt.Fprintf(os.Stderr, "A separate directory keeps your interactive hooks, plugins, MCP servers and notifications\nout of unattended runs, and their sessions out of your history. Advised, not required.\n")
 	fmt.Fprintf(os.Stderr, "  1) %s  — one identity for every project [default]\n", home)
 	if env.ProjectDir != "" {
-		fmt.Fprintf(os.Stderr, "  2) %s  — this project only\n", tildeHome(filepath.Join(env.ProjectDir, "agents", agentType)))
+		fmt.Fprintf(os.Stderr, "  2) %s  — this project only\n", display.TildeHome(filepath.Join(env.ProjectDir, "agents", agentType)))
 	}
 	fmt.Fprintf(os.Stderr, "  3) none  — inherit the interactive install\n> ")
 	scanner := bufio.NewScanner(os.Stdin)

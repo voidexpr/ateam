@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runtime"
 	"github.com/spf13/cobra"
@@ -23,10 +24,7 @@ Example:
 }
 
 func runProjects(cmd *cobra.Command, args []string) error {
-	homeDir := homeFlag
-	if homeDir == "" {
-		homeDir = runtime.HomeDir()
-	}
+	homeDir := homeDirFlag()
 	entries, err := root.LoadRegistry(homeDir)
 	if err != nil {
 		return err
@@ -48,7 +46,7 @@ func runProjects(cmd *cobra.Command, args []string) error {
 		} else if n != e.Name {
 			status = fmt.Sprintf("named %q in %s", n, root.ConfigFile)
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\n", e.Name, tildeHome(e.Path), status)
+		fmt.Fprintf(w, "%s\t%s\t%s\n", e.Name, display.TildeHome(e.Path), status)
 	}
 	w.Flush()
 	return nil

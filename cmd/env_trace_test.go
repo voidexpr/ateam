@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
 )
 
@@ -32,7 +33,7 @@ func TestEnvTracePrintsFileAndLine(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
-		want := "agent.claude.model = opus  (" + filepath.Join(".ateam", root.ConfigFile) + ":6)\n    overrides " + tildeHome(homeFile) + ":2 = sonnet\n"
+		want := "agent.claude.model = opus  (" + filepath.Join(".ateam", root.ConfigFile) + ":6)\n    overrides " + display.TildeHome(homeFile) + ":2 = sonnet\n"
 		if out != want {
 			t.Errorf("relative trace:\n got %q\nwant %q", out, want)
 		}

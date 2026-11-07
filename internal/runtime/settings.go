@@ -111,14 +111,14 @@ func (c *Config) mergeProject(h hclProject, label string) {
 
 func (c *Config) mergeRole(h hclRole, label string) {
 	s := &c.Settings
+	if s.Roles == nil {
+		s.Roles = map[string]string{}
+	}
 	key := "role." + h.Name + "."
 	present, _ := presentAttrs(h.Body, roleSchema)
 	for attr, line := range present {
 		switch attr {
 		case "status":
-			if s.Roles == nil {
-				s.Roles = map[string]string{}
-			}
 			s.Roles[h.Name] = h.Status
 			c.record(key+"status", label, h.Status, line)
 		case "profile":
@@ -131,9 +131,6 @@ func (c *Config) mergeRole(h hclRole, label string) {
 	}
 	if _, known := s.Roles[h.Name]; !known {
 		// A role block that only sets a profile still declares the role.
-		if s.Roles == nil {
-			s.Roles = map[string]string{}
-		}
 		s.Roles[h.Name] = config.RoleDisabled
 	}
 }

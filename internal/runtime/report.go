@@ -62,7 +62,7 @@ const (
 // lowest entry of the chain (an empty Source omits it). Pure computation
 // over the loaded config.
 func (c *Config) ModelReport(prof *ProfileConfig, ac *AgentConfig, cli CLIOverrides, native NativeConfig) ModelReport {
-	r := ModelReport{Agent: ac.Name, AgentType: agentType(ac)}
+	r := ModelReport{Agent: ac.Name, AgentType: ac.TypeName()}
 	key := "agent." + ac.Name + "."
 
 	if native.Source != "" {
@@ -151,13 +151,6 @@ func (c *Config) attributeLayers(chains ...[]Contribution) []layerRef {
 		out = append(out, layerRef{name: l.Label, found: l.Found})
 	}
 	return out
-}
-
-func agentType(ac *AgentConfig) string {
-	if ac.Type == "" {
-		return "claude"
-	}
-	return ac.Type
 }
 
 // Describe renders an attribution as "value (source, note)" or the unset

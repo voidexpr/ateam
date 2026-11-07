@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ateam/internal/config"
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
 	"github.com/spf13/cobra"
 )
@@ -57,13 +58,13 @@ func runProjectRename(cmd *cobra.Command, args []string) error {
 
 func reregisterProject(env *root.ResolvedEnv, prefix string) error {
 	entry, ok := root.LookupRegistry(env.HomeDir, env.ProjectName)
-	fmt.Printf("  Project: %s\n  Path:    %s\n", env.ProjectName, tildeHome(env.SourceDir))
+	fmt.Printf("  Project: %s\n  Path:    %s\n", env.ProjectName, display.TildeHome(env.SourceDir))
 	if ok && entry.Path == env.SourceDir {
 		fmt.Printf("%sAlready registered at this path.\n", prefix)
 		return nil
 	}
 	if ok {
-		fmt.Printf("%sUpdate registry entry: %s → %s\n", prefix, tildeHome(entry.Path), tildeHome(env.SourceDir))
+		fmt.Printf("%sUpdate registry entry: %s → %s\n", prefix, display.TildeHome(entry.Path), display.TildeHome(env.SourceDir))
 	} else {
 		fmt.Printf("%sRegister project %q\n", prefix, env.ProjectName)
 	}
@@ -105,7 +106,7 @@ func renameProject(env *root.ResolvedEnv, newName, prefix string) error {
 		return fmt.Errorf("cannot find `%s` in %s; edit the project block by hand", oldLine, configPath)
 	}
 
-	fmt.Printf("  %s: %s → %s\n", tildeHome(configPath), env.ProjectName, newName)
+	fmt.Printf("  %s: %s → %s\n", display.TildeHome(configPath), env.ProjectName, newName)
 	fmt.Printf("  state.sqlite: project_id %q → %q\n", env.ProjectName, newName)
 	fmt.Printf("  registry: %q → %q\n", env.ProjectName, newName)
 	if renameDryRun {

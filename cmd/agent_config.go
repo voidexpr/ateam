@@ -638,8 +638,8 @@ func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bo
 	}
 
 	localSecrets := filepath.Join(localPath, "secrets.env")
+	ateamHomeDir := ci.home + "/.ateam"
 	if _, err := os.Stat(localSecrets); err == nil {
-		ateamHomeDir := ci.home + "/.ateam"
 		fmt.Printf("  %s%s → %s/secrets.env\n", prefix, localSecrets, ateamHomeDir)
 	}
 
@@ -692,7 +692,6 @@ func runCopyIn(containerName, flagPath, homeOverride string, force, copyAteam bo
 	}
 
 	if _, err := os.Stat(localSecrets); err == nil {
-		ateamHomeDir := ci.home + "/.ateam"
 		if _, err := dockerExecOutput(containerName, "mkdir", "-p", ateamHomeDir); err != nil {
 			return fmt.Errorf("creating %s in container: %w", ateamHomeDir, err)
 		}

@@ -43,7 +43,7 @@ func nativeConfigFor(env *root.ResolvedEnv, rtCfg *runtime.Config, prof *runtime
 	if ac == nil || ac.Type == "builtin" {
 		return runtime.NativeConfig{}
 	}
-	agentType := agentTypeName(ac)
+	agentType := ac.TypeName()
 	if prof != nil {
 		if cc, ok := rtCfg.Containers[prof.Container]; ok && cc.Type != "" && cc.Type != "none" {
 			return runtime.NativeConfig{Source: agentType + " native config", Note: "not inspected: the run happens in a container"}

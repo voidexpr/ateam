@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/runtime"
 )
 
@@ -27,15 +28,7 @@ func ReadNativeConfig(agentType, configDir string, lookupEnv func(string) string
 	}
 	switch agentType {
 	case NameClaude, "":
-		dir := configDir
-		if dir == "" {
-			dir = lookupEnv("CLAUDE_CONFIG_DIR")
-		}
-		if dir == "" {
-			if home, err := os.UserHomeDir(); err == nil {
-				dir = filepath.Join(home, ".claude")
-			}
-		}
+		dir := nativeConfigDir(configDir, agentType, ".claude", lookupEnv)
 		n := readClaudeSettings(filepath.Join(dir, "settings.json"))
 		if m := lookupEnv("ANTHROPIC_MODEL"); m != "" {
 			n.Model = m
@@ -44,22 +37,30 @@ func ReadNativeConfig(agentType, configDir string, lookupEnv func(string) string
 		}
 		return n
 	case NameCodex, NameCodexTmux:
-		dir := configDir
-		if dir == "" {
-			dir = lookupEnv("CODEX_HOME")
-		}
-		if dir == "" {
-			if home, err := os.UserHomeDir(); err == nil {
-				dir = filepath.Join(home, ".codex")
-			}
-		}
+		dir := nativeConfigDir(configDir, agentType, ".codex", lookupEnv)
 		return readCodexConfig(filepath.Join(dir, "config.toml"))
 	}
 	return runtime.NativeConfig{Source: agentType + " native config", Note: "not inspectable"}
 }
 
+// nativeConfigDir resolves the CLI's config dir the way the CLI does: the
+// run's config_dir, else the CLI's env var, else <home>/<dotDir>.
+func nativeConfigDir(configDir, agentType, dotDir string, lookupEnv func(string) string) string {
+	if configDir != "" {
+		return configDir
+	}
+	if dir := lookupEnv(ConfigDirEnv(agentType)); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return dotDir
+	}
+	return filepath.Join(home, dotDir)
+}
+
 func readClaudeSettings(path string) runtime.NativeConfig {
-	n := runtime.NativeConfig{Source: tildeHome(path)}
+	n := runtime.NativeConfig{Source: display.TildeHome(path)}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		n.Note = "no settings.json; the CLI falls back to its account default"
@@ -83,7 +84,7 @@ func readClaudeSettings(path string) runtime.NativeConfig {
 // keys of a codex config.toml with a line scan (the keys are plain
 // strings and sit above any [table]).
 func readCodexConfig(path string) runtime.NativeConfig {
-	n := runtime.NativeConfig{Source: tildeHome(path)}
+	n := runtime.NativeConfig{Source: display.TildeHome(path)}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		n.Note = "no config.toml; the CLI falls back to its default model"
@@ -115,15 +116,4 @@ func readCodexConfig(path string) runtime.NativeConfig {
 		n.Note = "config.toml sets no model; the CLI falls back to its default model"
 	}
 	return n
-}
-
-func tildeHome(p string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return p
-	}
-	if strings.HasPrefix(p, home+string(filepath.Separator)) {
-		return "~" + p[len(home):]
-	}
-	return p
 }

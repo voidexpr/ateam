@@ -102,11 +102,7 @@ func resolveLoginTarget(env *root.ResolvedEnv, rtCfg *runtime.Config, profileFla
 	if err != nil {
 		return loginTarget{}, err
 	}
-	agentType := ac.Type
-	if agentType == "" {
-		agentType = agent.NameClaude
-	}
-	return loginTarget{Agent: ac, Type: agentType, Source: source, ConfigDir: dir}, nil
+	return loginTarget{Agent: ac, Type: ac.TypeName(), Source: source, ConfigDir: dir}, nil
 }
 
 // agentConfigDirPath resolves an agent's config_dir the way the runner does:

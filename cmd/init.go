@@ -9,7 +9,6 @@ import (
 
 	"github.com/ateam/internal/promptdata"
 	"github.com/ateam/internal/root"
-	"github.com/ateam/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -68,10 +67,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	absPath = evalSymlinks(absPath)
 	dbg("resolved to: " + absPath)
 
-	homeDir := homeFlag
-	if homeDir == "" {
-		homeDir = runtime.HomeDir()
-	}
+	homeDir := homeDirFlag()
 	dbg("home: " + homeDir)
 	_, statErr := os.Stat(filepath.Join(homeDir, root.ConfigFile))
 	firstUse := statErr != nil

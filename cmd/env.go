@@ -136,7 +136,7 @@ func relativeOrTilde(cwd, p string) string {
 	if rel, err := filepath.Rel(cwd, p); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return rel
 	}
-	return tildeHome(p)
+	return display.TildeHome(p)
 }
 
 // traceValue keeps a trace line single-line: an empty value shows as "",
@@ -174,7 +174,7 @@ func printEnv(env *root.ResolvedEnv) error {
 		return err
 	}
 
-	fmt.Printf("Home: %s\n", tildeHome(env.HomeDir))
+	fmt.Printf("Home: %s\n", display.TildeHome(env.HomeDir))
 
 	printRuntimeSection(env, cwd)
 
@@ -259,17 +259,10 @@ func describeConfigDir(rtCfg *runtime.Config, ac *runtime.AgentConfig, env *root
 	case err != nil:
 		return ac.ConfigDir + " (" + err.Error() + ")"
 	case dir == "":
-		return "(" + agentTypeName(ac) + " CLI default)"
+		return "(" + ac.TypeName() + " CLI default)"
 	}
 	src, _ := rtCfg.Source("agent." + ac.Name + ".config_dir")
-	return fmt.Sprintf("%s (%s)", tildeHome(dir), tildeHome(src.Layer))
-}
-
-func agentTypeName(ac *runtime.AgentConfig) string {
-	if ac.Type == "" {
-		return "claude"
-	}
-	return ac.Type
+	return fmt.Sprintf("%s (%s)", display.TildeHome(dir), display.TildeHome(src.Layer))
 }
 
 // describeAgentAuth names the credential the agent would run with and its
@@ -307,7 +300,7 @@ func agentAuthStatus(ac *runtime.AgentConfig, resolver *secret.Resolver) (key, s
 func printLayers(rtCfg *runtime.Config) {
 	parts := make([]string, 0, len(rtCfg.Layers))
 	for _, l := range rtCfg.Layers {
-		label := tildeHome(l.Label)
+		label := display.TildeHome(l.Label)
 		if !l.Found {
 			label += " (no file)"
 		}
@@ -322,7 +315,7 @@ func printLayerWarnings(env *root.ResolvedEnv) {
 	for _, dir := range env.Layers {
 		p := filepath.Join(dir, root.ConfigFile)
 		if isBrokenSymlink(p) {
-			fmt.Printf("  Warning: %s is a broken symlink (ignored)\n", tildeHome(p))
+			fmt.Printf("  Warning: %s is a broken symlink (ignored)\n", display.TildeHome(p))
 		}
 	}
 }
@@ -410,8 +403,9 @@ func printDockerfileLine(env *root.ResolvedEnv, cwd string) {
 	if env.ProjectDir != "" {
 		candidates = append(candidates, filepath.Join(env.ProjectDir, "Dockerfile"))
 	}
-	for i := len(env.ConfigLayers()) - 1; i >= 0; i-- {
-		candidates = append(candidates, filepath.Join(env.ConfigLayers()[i], "Dockerfile"))
+	layers := env.ConfigLayers()
+	for i := len(layers) - 1; i >= 0; i-- {
+		candidates = append(candidates, filepath.Join(layers[i], "Dockerfile"))
 	}
 
 	for _, path := range candidates {
@@ -428,9 +422,9 @@ func printProjectSection(env *root.ResolvedEnv, cwd string) {
 
 	// Registry check: the project should be registered under its name at this path.
 	if entry, ok := root.LookupRegistry(env.HomeDir, env.ProjectName); !ok {
-		fmt.Printf("  Warning: not registered in %s; run 'ateam project-rename' to register it\n", tildeHome(filepath.Join(env.HomeStateDir(), root.RegistryFile)))
+		fmt.Printf("  Warning: not registered in %s; run 'ateam project-rename' to register it\n", display.TildeHome(filepath.Join(env.HomeStateDir(), root.RegistryFile)))
 	} else if entry.Path != env.SourceDir {
-		fmt.Printf("  Warning: registered at %s, found at %s; run 'ateam project-rename' after a move\n", tildeHome(entry.Path), tildeHome(env.SourceDir))
+		fmt.Printf("  Warning: registered at %s, found at %s; run 'ateam project-rename' after a move\n", display.TildeHome(entry.Path), display.TildeHome(env.SourceDir))
 	}
 
 	dbPath := env.ProjectDBPath()
@@ -447,13 +441,13 @@ func printProjectSection(env *root.ResolvedEnv, cwd string) {
 	}
 	if env.GitRepoDir != "" {
 		if fileOrSymlinkExists(env.GitRepoDir) {
-			fmt.Printf("  Git: %s\n", tildeHome(env.GitRepoDir))
+			fmt.Printf("  Git: %s\n", display.TildeHome(env.GitRepoDir))
 		} else {
-			fmt.Printf("  Git: %s (NOT FOUND)\n", tildeHome(env.GitRepoDir))
+			fmt.Printf("  Git: %s (NOT FOUND)\n", display.TildeHome(env.GitRepoDir))
 		}
 	}
 	if env.WorkDir != "" {
-		fmt.Printf("  Agent Work Dir: %s\n", tildeHome(env.WorkDir))
+		fmt.Printf("  Agent Work Dir: %s\n", display.TildeHome(env.WorkDir))
 	}
 
 	if env.Config == nil || len(env.Config.Roles) == 0 {
@@ -529,20 +523,6 @@ func fileOrSymlinkExists(path string) bool {
 	}
 	_, err = os.Lstat(path)
 	return err == nil
-}
-
-func tildeHome(p string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return p
-	}
-	if p == home {
-		return "~"
-	}
-	if strings.HasPrefix(p, home+string(filepath.Separator)) {
-		return "~" + p[len(home):]
-	}
-	return p
 }
 
 // printContainerMode prints the agent-in-container-mode summary line

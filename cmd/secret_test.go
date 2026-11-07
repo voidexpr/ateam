@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ateam/internal/root"
+	"github.com/ateam/internal/runtime"
 	"github.com/ateam/internal/secret"
 )
 
@@ -37,11 +38,20 @@ func setupSecretFixture(t *testing.T) (projectDir, orgDir string, resolver *secr
 	return
 }
 
+func loadLayers(t *testing.T, dirs ...string) *runtime.Config {
+	t.Helper()
+	cfg, err := runtime.Load(dirs)
+	if err != nil {
+		t.Fatalf("runtime.Load: %v", err)
+	}
+	return cfg
+}
+
 func TestListSecretsEmpty(t *testing.T) {
 	projectDir, orgDir, resolver := setupSecretFixture(t)
 
 	out := captureStdout(t, func() {
-		if err := listSecrets(resolver, secret.BackendFile, []string{orgDir, projectDir}); err != nil {
+		if err := listSecrets(resolver, secret.BackendFile, loadLayers(t, orgDir, projectDir)); err != nil {
 			t.Fatalf("listSecrets: %v", err)
 		}
 	})
@@ -63,7 +73,7 @@ func TestListSecretsWithValues(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := listSecrets(resolver, secret.BackendFile, []string{orgDir, projectDir}); err != nil {
+		if err := listSecrets(resolver, secret.BackendFile, loadLayers(t, orgDir, projectDir)); err != nil {
 			t.Fatalf("listSecrets: %v", err)
 		}
 	})
