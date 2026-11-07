@@ -22,15 +22,22 @@ const (
 )
 
 var (
-	setupAgentConfig string
-	setupAgents      []string
+	setupAgentConfig  string
+	setupAgents       []string
+	setupModel        bool
+	setupModelChoice  string
+	setupLayer        string
+	setupRefreshModel bool
 )
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
-	Short: "Give unattended agents their own config directory (advised, optional)",
-	Long: `Choose where the agents ateam runs unattended keep their configuration
-and credentials. Advised, not required.
+	Short: "Set up unattended agents: config directory, model pin, price tables",
+	Long: `Two optional steps for the agents ateam runs unattended, per agent CLI
+found on PATH (claude, codex). With no flags both run; a flag selects one.
+
+Config directory (--agent-config): choose where unattended runs keep
+their configuration and credentials. Advised, not required.
 
 Why a separate directory: your interactive Claude or Codex install carries
 hooks, plugins, MCP servers and notifications that are noise or interfere
@@ -46,10 +53,24 @@ Choices, per agent CLI found on PATH:
 The choice is written as config_dir on the agent block of the chosen
 layer's ateam.hcl. Without a terminal, pass --agent-config.
 
+Model pin (--model): propose a model for unattended runs. With nothing
+pinned the agent CLI picks its own default, often the top model; the
+pricing table's suggested_model is the tier below it, shown with its
+price next to the alternatives. The pick is written as model on the
+agent block of --layer (home, every project; or project).
+
+--refresh-models fetches the current pricing tables and suggested models
+from the ateam repository (ATEAM_DEFAULTS_URL overrides the source) into
+a managed section of ~/.ateam/ateam.hcl. 'ateam env' warns when the
+tables are older than 90 days.
+
 Examples:
   ateam setup
   ateam setup --agent-config home
-  ateam setup --agent-config project --agent codex`,
+  ateam setup --agent-config project --agent codex
+  ateam setup --model
+  ateam setup --model-choice suggested --layer project
+  ateam setup --refresh-models`,
 	Args: cobra.NoArgs,
 	RunE: runSetup,
 }
@@ -57,6 +78,10 @@ Examples:
 func init() {
 	setupCmd.Flags().StringVar(&setupAgentConfig, "agent-config", "", "where unattended agents keep their config: home, project, or none (default: ask)")
 	setupCmd.Flags().StringSliceVar(&setupAgents, "agent", nil, "agent CLIs to configure: claude, codex (default: every one found on PATH)")
+	setupCmd.Flags().BoolVar(&setupModel, "model", false, "propose a model pin for unattended runs (asks)")
+	setupCmd.Flags().StringVar(&setupModelChoice, "model-choice", "", "model pin without asking: suggested, none, or a model id")
+	setupCmd.Flags().StringVar(&setupLayer, "layer", agentConfigHome, "where --model writes the pin: home or project")
+	setupCmd.Flags().BoolVar(&setupRefreshModel, "refresh-models", false, "fetch the current pricing tables and suggested models into ~/.ateam/ateam.hcl")
 }
 
 func runSetup(cmd *cobra.Command, args []string) error {
@@ -64,7 +89,25 @@ func runSetup(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return setupAgentConfigDirs(env, setupAgentConfig, setupAgents, false)
+	if setupRefreshModel {
+		return refreshPricing(env)
+	}
+	configStep := setupAgentConfig != "" || (!setupModel && setupModelChoice == "")
+	modelStep := setupModel || setupModelChoice != "" || setupAgentConfig == ""
+	if configStep {
+		if err := setupAgentConfigDirs(env, setupAgentConfig, setupAgents, false); err != nil {
+			return err
+		}
+	}
+	if modelStep {
+		if configStep {
+			fmt.Println()
+		}
+		if err := setupModelPins(env, setupModelChoice, setupLayer, setupAgents); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // setupAgentConfigDirs runs the setup for each agent type: skips the ones

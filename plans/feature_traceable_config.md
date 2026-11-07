@@ -192,9 +192,9 @@ Two renderings of the same `ModelReport`:
   fan-out) resolves to a model above a configurable $/MTok threshold —
   precedence data makes the warning actionable ("set X in project
   runtime.hcl to override").
-- **Guided config**: `ateam configure-model` writing an org- or
-  project-level runtime.hcl override per action/role, using the same
-  resolver to show before/after.
+- **Guided config**: done as `ateam setup --model` (per agent type, home
+  or project layer, shows the chain's current answer and the suggested
+  model with prices). Per action/role pins stay manual.
 
 ## Non-goals
 

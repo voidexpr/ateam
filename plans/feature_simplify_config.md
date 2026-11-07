@@ -16,8 +16,9 @@ chains, and the single `ateam.hcl` with `.ateam`-only layering, the
 config/state split and name-based project identity). The single central
 state db stays an open choice; per-project `state.sqlite` is kept.
 Containers see the home and project layers only; ancestor layers are not
-mounted (known limitation). Items 6 (`ateam setup`, the config-dir part of step 7) and 7 (native
-config reader) are implemented; item 8 (suggested default model) is open.
+mounted (known limitation). Items 6 (`ateam setup`, the config-dir part of step 7), 7 (native config
+reader) and 8 (suggested default model) are implemented. Every item of
+the order of work is done; what remains is the local migration below.
 
 Cleanup pending on the author's machine (the sandbox cannot write
 `~/.ateam`): run `ATEAM=./ateam scripts/migrate-ateamorg.sh`, then tidy
@@ -276,8 +277,13 @@ demand as `ateam setup`. Non-interactive form: `ateam init
   the chosen layer's `ateam.hcl` on confirmation. Also refreshes the
   `pricing` blocks so `ateam cost` and the expensive-model warning
   use current numbers.
-- Needs a decision on where the fetched list comes from and how
-  stale it may be before `ateam env` warns. Not needed for v1.
+- Decided and implemented: the embedded pricing tables are the price
+  list, with a `pricing_as_of` date and a `suggested_model` per agent
+  type, refreshed at release time. `ateam setup --refresh-models` fetches
+  the repository's current `defaults/ateam.hcl` (no API key, no new
+  layer) into a managed section of `~/.ateam/ateam.hcl`; `ateam env`
+  warns past 90 days. `ateam setup --model` proposes the suggested model
+  with prices and writes the pin to the home or project layer.
 
 ## Considered and not planned
 

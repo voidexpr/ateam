@@ -264,6 +264,11 @@ sandbox_detection = false
 // agent CLI then picks its own default.
 expensive_output_per_mtok = 20
 
+// When the pricing tables below were last checked against the providers.
+// `ateam env` warns once this is older than 90 days; `ateam setup
+// --refresh-models` fetches the current tables from the ateam repository.
+pricing_as_of = "2026-11-07"
+
 // share default local claude config and adds a sandbox
 agent "claude" {
   type    = "claude"
@@ -285,6 +290,10 @@ agent "claude" {
   // The bare aliases (opus, sonnet, haiku) are what the claude CLI
   // accepts in --model and resolve to the current generation.
   pricing {
+    // What `ateam setup --model` proposes: the tier below the top model, in
+    // the current generation. Opus is the default of the CLI itself.
+    suggested_model = "claude-sonnet-5-5"
+
     model "claude-fable-5-1" {
       input_per_mtok        = 10.00
       cached_input_per_mtok = 0.25
@@ -440,6 +449,8 @@ agent "codex" {
 
   pricing {
     default_model = "gpt-5.4"
+    // No cheaper current-generation codex model: the top one is proposed.
+    suggested_model = "gpt-5.5"
 
     // cached_input_per_mtok matches OpenAI's prompt-cache pricing (typically
     // 1/10 of input_per_mtok). Set on every model so cost estimates aren't

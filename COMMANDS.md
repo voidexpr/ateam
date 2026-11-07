@@ -373,19 +373,31 @@ Requires a pre-built linux binary (`make companion` produces `build/ateam-linux-
 
 ### `ateam setup`
 
-Give unattended agents their own config directory. Advised, not required.
+Two optional steps for unattended agents, per agent CLI found on PATH. With no flags both run; a flag selects one.
 
 ```bash
-ateam setup                                   # asks per agent CLI found on PATH
+ateam setup                                   # asks: config dir, then model pin
 ateam setup --agent-config home               # ~/.ateam/state/agents/<agent>, every project
 ateam setup --agent-config project --agent codex   # <project>/.ateam/agents/codex, this project only
 ateam setup --agent-config none               # keep inheriting ~/.claude / ~/.codex
+ateam setup --model                           # propose a model pin (asks)
+ateam setup --model-choice suggested          # pin the suggested model without asking
+ateam setup --model-choice claude-haiku-5-5 --layer project
+ateam setup --refresh-models                  # fetch current prices and suggested models
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--agent-config CHOICE` | `home`, `project` or `none`; without it and with a terminal, `ateam setup` asks |
+| `--agent-config CHOICE` | Config dir: `home`, `project` or `none`; without it and with a terminal, `ateam setup` asks |
 | `--agent LIST` | Agent CLIs to configure (`claude`, `codex`); default: every one on PATH |
+| `--model` | Propose a model pin for unattended runs (asks) |
+| `--model-choice CHOICE` | Pin without asking: `suggested`, `none`, or a model id |
+| `--layer LAYER` | Where `--model` writes the pin: `home` (default, every project) or `project` |
+| `--refresh-models` | Fetch the current pricing tables and suggested models into `~/.ateam/ateam.hcl` |
+
+**Model pin.** With nothing pinned the agent CLI picks its own default, often the top model, and burns the weekly limit. The pricing table's `suggested_model` is the tier below the top in the current generation (`claude-sonnet-5-5` for claude); `ateam setup --model` shows it with its price next to the alternatives and what runs today, and writes `model = "..."` on the agent block of the chosen layer. An agent already pinned by an `ateam.hcl` layer is left alone unless `--model-choice` says otherwise.
+
+**Price tables.** Prices and suggested models are embedded in the binary with a `pricing_as_of` date, refreshed at release time. `--refresh-models` fetches the current `defaults/ateam.hcl` from the ateam repository (`ATEAM_DEFAULTS_URL` overrides the source) and writes its pricing blocks into a marked section of `~/.ateam/ateam.hcl`, replaced in place on the next refresh. `ateam env` warns when the tables are older than 90 days.
 
 Why: the interactive Claude or Codex install carries hooks, plugins, MCP servers and notifications that are noise or interfere in an unattended run, and a separate directory keeps unattended sessions and history out of the interactive one. The choice is written as `config_dir` on the agent block of the chosen layer's `ateam.hcl` (derived agents inherit it through `base`); nothing is copied, `ateam login` creates the credentials. `ateam init` asks the same question the first time it creates `~/.ateam`, and takes `--agent-config` for scripts. An agent that already has a `config_dir` is reported and left alone.
 

@@ -568,7 +568,7 @@ agent "codex" {
 }
 ```
 
-Pricing can go stale. Override at any level by redefining the agent's `pricing` block in the appropriate `ateam.hcl`.
+Pricing can go stale. The top-level `pricing_as_of` date says when the tables were last checked; `ateam env` warns once it is older than 90 days, and `ateam setup --refresh-models` fetches the current tables from the ateam repository into a managed section of `~/.ateam/ateam.hcl`. Override at any level by redefining the agent's `pricing` block in the appropriate `ateam.hcl` (a `pricing` block replaces the inherited one as a whole). `suggested_model` in a pricing block is what `ateam setup --model` proposes: the tier below the top model, current generation.
 
 ### Containers
 

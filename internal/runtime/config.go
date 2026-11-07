@@ -45,6 +45,10 @@ type Config struct {
 	// `expensive_output_per_mtok`, last file to set it wins.
 	ExpensiveOutputPerMTok *float64
 
+	// PricingAsOf is the date (YYYY-MM-DD) the pricing tables were last
+	// refreshed; top-level scalar `pricing_as_of`, last file to set it wins.
+	PricingAsOf string
+
 	// Layers lists every runtime.hcl source consulted by Load, lowest
 	// precedence first, including files that did not exist.
 	Layers []Layer
@@ -110,8 +114,9 @@ type AgentConfig struct {
 }
 
 type AgentPricing struct {
-	DefaultModel string
-	Models       map[string]ModelPricing
+	DefaultModel   string
+	SuggestedModel string // the model `ateam setup --model` proposes: the tier below the top, current generation
+	Models         map[string]ModelPricing
 }
 
 type ModelPricing struct {
@@ -146,6 +151,7 @@ type hclFile struct {
 	SandboxDetection *bool               `hcl:"sandbox_detection,optional"`
 	DockerDetection  *bool               `hcl:"docker_detection,optional"`
 	ExpensiveOutput  *float64            `hcl:"expensive_output_per_mtok,optional"`
+	PricingAsOf      string              `hcl:"pricing_as_of,optional"`
 	Agents           []hclAgent          `hcl:"agent,block"`
 	Containers       []hclContainer      `hcl:"container,block"`
 	Profiles         []hclProfile        `hcl:"profile,block"`
@@ -186,8 +192,9 @@ type hclAgent struct {
 }
 
 type hclPricing struct {
-	DefaultModel string     `hcl:"default_model,optional"`
-	Models       []hclModel `hcl:"model,block"`
+	DefaultModel   string     `hcl:"default_model,optional"`
+	SuggestedModel string     `hcl:"suggested_model,optional"`
+	Models         []hclModel `hcl:"model,block"`
 }
 
 type hclModel struct {
@@ -479,7 +486,7 @@ func copyAgentAttr(dst, src *AgentConfig, attr string) string {
 		if src.Pricing == nil {
 			return ""
 		}
-		return "default_model = " + src.Pricing.DefaultModel
+		return fmt.Sprintf("%d models, default_model = %q, suggested_model = %q", len(src.Pricing.Models), src.Pricing.DefaultModel, src.Pricing.SuggestedModel)
 	}
 	return ""
 }
@@ -547,6 +554,10 @@ func mergeHCL(cfg *Config, data []byte, filename, label string) error {
 		v := *hf.DockerDetection
 		cfg.DockerDetection = &v
 	}
+	if hf.PricingAsOf != "" {
+		cfg.PricingAsOf = hf.PricingAsOf
+		cfg.record("pricing_as_of", label, hf.PricingAsOf)
+	}
 	if hf.ExpensiveOutput != nil {
 		v := *hf.ExpensiveOutput
 		cfg.ExpensiveOutputPerMTok = &v
@@ -593,8 +604,9 @@ func agentFromHCL(a hclAgent) AgentConfig {
 			}
 		}
 		pricing = &AgentPricing{
-			DefaultModel: hp.DefaultModel,
-			Models:       models,
+			DefaultModel:   hp.DefaultModel,
+			SuggestedModel: hp.SuggestedModel,
+			Models:         models,
 		}
 	}
 	return AgentConfig{

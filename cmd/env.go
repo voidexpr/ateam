@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/container"
@@ -110,6 +111,9 @@ func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
 	if rtCfg != nil {
 		printProfilesInUse(env, rtCfg)
 		printLayers(rtCfg)
+		if w := pricingStaleWarning(rtCfg, time.Now()); w != "" {
+			fmt.Printf("  Warning: %s\n", w)
+		}
 	}
 	printLayerWarnings(env)
 	printContainerMode()
