@@ -180,7 +180,7 @@ Roles are opt-in: only roles with `status = "on"` are included in `--roles all`.
 
 ### Migrating from `.ateamorg`
 
-Earlier versions used `~/.ateamorg/` (with `runtime.hcl` and an on-disk `defaults/` copy) plus `.ateam/config.toml` per project. ateam refuses to run when it finds either and prints the steps:
+Earlier versions used `~/.ateamorg/` (with `runtime.hcl` and an on-disk `defaults/` copy) plus `.ateam/config.toml` per project. ateam refuses to run when it finds either and prints the steps. `scripts/migrate-ateamorg.sh` performs them (it renames `~/.ateamorg` to `~/.ateamorg.migrated` instead of deleting it, and converts every project registered there plus any directory passed as an argument); by hand:
 
 1. Move `~/.ateamorg/runtime.hcl` to `~/.ateam/ateam.hcl` and `~/.ateamorg/prompts/` to `~/.ateam/prompts/`. Drop the `defaults/` copy (the binary serves the defaults).
 2. In each project, replace `.ateam/config.toml` with `project`, `role`, `supervisor`, `sandbox_extra` and `container_extra` blocks in `.ateam/ateam.hcl` (run `ateam init` in an empty directory to see the shape), and rename `.ateam/runtime.hcl` to `ateam.hcl`.
