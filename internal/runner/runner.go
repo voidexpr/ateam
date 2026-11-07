@@ -91,6 +91,7 @@ type AgentExecutor struct {
 	// as {{EFFORT}} / {{MAX_BUDGET_USD}} / {{MAX_BUDGET_USD_BATCH}} placeholders
 	// (used by supervisor prompts to propagate the same caps into sub-execs).
 	Effort            string
+	ModelOverride     string // the --model / --cheaper-model value applied to the agent, for audits
 	MaxBudgetUSD      string
 	MaxBudgetUSDBatch string
 	// SubRunArgs is an opaque, pre-rendered CLI args fragment surfaced as

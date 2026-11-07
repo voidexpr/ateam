@@ -17,13 +17,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var envClaudeSandbox bool
-var envPrintOrg bool
+var (
+	envClaudeSandbox bool
+	envPrintOrg      bool
+	envModels        bool
+	envRoles         bool
+)
 
 var envCmd = &cobra.Command{
 	Use:   "env",
 	Short: "Show the current ATeam environment",
-	Long: `Print organization, project status, and latest report/review timestamps.
+	Long: `Print what a run in this project will use, profile by profile: agent,
+model, effort, config dir, auth, and the file that set each value. Then
+the runtime.hcl layers, container detection, credentials, and the project.
+
+  ateam env --models   # also print the per-layer model/effort chain
+  ateam env --roles    # also print the role table with last report times
 
 This command is read-only — it never creates or modifies anything.`,
 	Args: cobra.NoArgs,
@@ -33,6 +42,8 @@ This command is read-only — it never creates or modifies anything.`,
 func init() {
 	envCmd.Flags().BoolVar(&envClaudeSandbox, "claude-sandbox", false, "print the generated Claude sandbox settings JSON")
 	envCmd.Flags().BoolVar(&envPrintOrg, "print-org", false, "print the absolute path to the org directory")
+	envCmd.Flags().BoolVar(&envModels, "models", false, "print the full per-layer model/effort chain for each profile in use")
+	envCmd.Flags().BoolVar(&envRoles, "roles", false, "print the role table with the last report time per role")
 }
 
 func runEnv(cmd *cobra.Command, args []string) error {
@@ -101,12 +112,132 @@ func printEnv(env *root.ResolvedEnv) error {
 func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
 	fmt.Println("\nRuntime")
 
-	rtCfg, _ := runtime.Load(env.ProjectDir, env.OrgDir)
+	rtCfg, err := runtime.Load(env.ProjectDir, env.OrgDir)
+	if err != nil {
+		fmt.Printf("  Warning: cannot load runtime.hcl: %v\n", err)
+	}
+	if rtCfg != nil {
+		printProfilesInUse(env, rtCfg)
+		printLayers(rtCfg)
+	}
+	printLayerWarnings(env, cwd)
+	printContainerMode()
 	printAuthLines(env, rtCfg)
 
-	// Config resolution chain
-	chain := []string{"built-in"}
-	var brokenLinks []string
+	if rtCfg == nil {
+		return
+	}
+	var names []string
+	for name := range rtCfg.Profiles {
+		names = append(names, name)
+	}
+	if len(names) > 0 {
+		sort.Strings(names)
+		fmt.Printf("  All profiles: %s\n", strings.Join(names, ", "))
+	}
+
+	printDockerfileLine(env, cwd)
+}
+
+// printProfilesInUse answers, for every profile a flag-less run in this
+// project can pick, what will run and which file decided it.
+func printProfilesInUse(env *root.ResolvedEnv, rtCfg *runtime.Config) {
+	resolver := secretResolver(env, secret.DefaultBackend())
+	for _, choice := range relevantProfiles(env) {
+		fmt.Printf("  Profile %s (%s)\n", choice.Name, choice.Source)
+		prof, ac := resolveProfileAgent(rtCfg, choice.Name)
+		if ac == nil {
+			fmt.Printf("    Warning: not defined in runtime.hcl\n")
+			continue
+		}
+		rep := rtCfg.ModelReport(prof, ac, runtime.CLIOverrides{})
+		containerName := "none"
+		if prof != nil {
+			containerName = prof.Container
+		}
+		fmt.Printf("    agent:      %s (type %s, container %s)\n", ac.Name, rep.AgentType, containerName)
+		fmt.Printf("    model:      %s\n", rep.ModelText())
+		fmt.Printf("    effort:     %s\n", rep.EffortText())
+		fmt.Printf("    config dir: %s\n", describeConfigDir(rtCfg, ac, env))
+		fmt.Printf("    auth:       %s\n", describeAgentAuth(ac, resolver))
+		for _, w := range rtCfg.ModelWarnings(prof, ac, "") {
+			fmt.Printf("    Warning: %s\n", w)
+		}
+		if envModels {
+			fmt.Println("    resolved from (lowest to highest precedence):")
+			for _, line := range rep.ChainLines() {
+				fmt.Printf("      %s\n", line)
+			}
+		}
+	}
+}
+
+func describeConfigDir(rtCfg *runtime.Config, ac *runtime.AgentConfig, env *root.ResolvedEnv) string {
+	dir, err := agentConfigDirPath(ac, env.StateDir())
+	switch {
+	case err != nil:
+		return ac.ConfigDir + " (" + err.Error() + ")"
+	case dir == "":
+		return "(" + agentTypeName(ac) + " CLI default)"
+	}
+	src, _ := rtCfg.Source("agent." + ac.Name + ".config_dir")
+	return fmt.Sprintf("%s (%s)", tildeHome(dir), tildeHome(src.Layer))
+}
+
+func agentTypeName(ac *runtime.AgentConfig) string {
+	if ac.Type == "" {
+		return "claude"
+	}
+	return ac.Type
+}
+
+// describeAgentAuth names the credential the agent would run with and its
+// scope, by running IsolateCredentials on a copy of the agent config.
+func describeAgentAuth(ac *runtime.AgentConfig, resolver *secret.Resolver) string {
+	key, source := agentAuthStatus(ac, resolver)
+	if key == "" {
+		if len(ac.RequiredEnv) == 0 {
+			return "(none required)"
+		}
+		return "(none found) — run 'ateam login' or 'ateam secret " + strings.Split(ac.RequiredEnv[0], "|")[0] + "'"
+	}
+	if source == "env" {
+		return key + " (environment)"
+	}
+	return key + " (ateam secret, " + source + " scope)"
+}
+
+// agentAuthStatus returns the credential key and scope an agent would use.
+func agentAuthStatus(ac *runtime.AgentConfig, resolver *secret.Resolver) (key, source string) {
+	// Copy so IsolateCredentials can't mutate the cached config.
+	acCopy := *ac
+	acCopy.Env = nil
+	for _, ir := range secret.IsolateCredentials(&acCopy, resolver) {
+		if ir.ActiveKey != "" {
+			return ir.ActiveKey, ir.ActiveSource
+		}
+	}
+	return "", ""
+}
+
+// printLayers lists the runtime.hcl sources in precedence order, marking
+// the files that do not exist. Paths use the ~ form, like the model
+// lines and warnings above them.
+func printLayers(rtCfg *runtime.Config) {
+	parts := make([]string, 0, len(rtCfg.Layers))
+	for _, l := range rtCfg.Layers {
+		label := tildeHome(l.Label)
+		if !l.Found {
+			label += " (no file)"
+		}
+		parts = append(parts, label)
+	}
+	fmt.Printf("  Layers: %s\n", strings.Join(parts, " → "))
+}
+
+// printLayerWarnings reports broken symlinks and an empty org defaults
+// directory, which Load silently treats as missing.
+func printLayerWarnings(env *root.ResolvedEnv, cwd string) {
 	var candidates []string
 	if env.OrgDir != "" {
 		candidates = append(candidates,
@@ -118,61 +249,24 @@ func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
 		candidates = append(candidates, filepath.Join(env.ProjectDir, "runtime.hcl"))
 	}
 	for _, p := range candidates {
-		if _, err := os.Stat(p); err == nil {
-			chain = append(chain, relPath(cwd, p))
-		} else if isBrokenSymlink(p) {
-			brokenLinks = append(brokenLinks, relPath(cwd, p))
+		if isBrokenSymlink(p) {
+			fmt.Printf("  Warning: %s is a broken symlink (ignored)\n", relPath(cwd, p))
 		}
 	}
-	fmt.Printf("  Config: %s\n", strings.Join(chain, " → "))
-	printContainerMode()
-	for _, bl := range brokenLinks {
-		fmt.Printf("  Warning: %s is a broken symlink (ignored, using built-in defaults)\n", bl)
-	}
-
-	// Check org defaults directory itself
-	if env.OrgDir != "" {
-		defaultsDir := filepath.Join(env.OrgDir, "defaults")
-		if isBrokenSymlink(defaultsDir) {
-			fmt.Printf("  Warning: %s is a broken symlink\n", relPath(cwd, defaultsDir))
-		} else if info, err := os.Stat(defaultsDir); err == nil && info.IsDir() {
-			entries, err := os.ReadDir(defaultsDir)
-			if err != nil {
-				fmt.Printf("  Warning: %s exists but cannot be read: %v\n", relPath(cwd, defaultsDir), err)
-			} else if len(entries) == 0 {
-				fmt.Printf("  Warning: %s is empty\n", relPath(cwd, defaultsDir))
-			}
-		}
-	}
-
-	if rtCfg == nil {
+	if env.OrgDir == "" {
 		return
 	}
-
-	if prof, _, _, err := rtCfg.ResolveProfile("default"); err == nil {
-		fmt.Printf("  Default profile: agent=%s, container=%s\n", prof.Agent, prof.Container)
-	}
-	for _, choice := range relevantProfiles(env) {
-		prof, ac := resolveProfileAgent(rtCfg, choice.Name)
-		if ac == nil {
-			fmt.Printf("  Warning: profile %q (%s) is not defined in runtime.hcl\n", choice.Name, choice.Source)
-			continue
-		}
-		for _, w := range rtCfg.ModelWarnings(prof, ac, "") {
-			fmt.Printf("  Warning: %s\n", w)
+	defaultsDir := filepath.Join(env.OrgDir, "defaults")
+	if isBrokenSymlink(defaultsDir) {
+		fmt.Printf("  Warning: %s is a broken symlink\n", relPath(cwd, defaultsDir))
+	} else if info, err := os.Stat(defaultsDir); err == nil && info.IsDir() {
+		entries, err := os.ReadDir(defaultsDir)
+		if err != nil {
+			fmt.Printf("  Warning: %s exists but cannot be read: %v\n", relPath(cwd, defaultsDir), err)
+		} else if len(entries) == 0 {
+			fmt.Printf("  Warning: %s is empty\n", relPath(cwd, defaultsDir))
 		}
 	}
-
-	var names []string
-	for name := range rtCfg.Profiles {
-		names = append(names, name)
-	}
-	if len(names) > 0 {
-		sort.Strings(names)
-		fmt.Printf("  Profiles: %s\n", strings.Join(names, ", "))
-	}
-
-	printDockerfileLine(env, cwd)
 }
 
 // relevantProfiles lists the profiles a run in this project can pick
@@ -209,9 +303,17 @@ func relevantProfiles(env *root.ResolvedEnv) []config.ProfileChoice {
 	return out
 }
 
+// printAuthLines lists every configured credential, including the
+// shadowed ones, and marks the one the default agent will use.
 func printAuthLines(env *root.ResolvedEnv, rtCfg *runtime.Config) {
 	resolver := secretResolver(env, secret.DefaultBackend())
-	activeKey, defaultAgent := defaultAgentAuthStatus(rtCfg, resolver)
+	activeKey, defaultAgent := "", ""
+	if rtCfg != nil {
+		if _, ac, _, err := rtCfg.ResolveProfile("default"); err == nil && ac != nil {
+			activeKey, _ = agentAuthStatus(ac, resolver)
+			defaultAgent = ac.Name
+		}
+	}
 
 	authVars := []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}
 	any := false
@@ -241,31 +343,8 @@ func printAuthLines(env *root.ResolvedEnv, rtCfg *runtime.Config) {
 	}
 
 	if !any {
-		fmt.Println("  Auth: (none) — run 'ateam secret ANTHROPIC_API_KEY' to configure")
+		fmt.Println("  Auth: (none) — run 'ateam login' or 'ateam secret ANTHROPIC_API_KEY' to configure")
 	}
-}
-
-// defaultAgentAuthStatus returns the active auth key and the default agent
-// name by running IsolateCredentials on a copy of the default profile's
-// agent config. Returns empty strings if rtCfg is nil or the default
-// profile is absent.
-func defaultAgentAuthStatus(rtCfg *runtime.Config, resolver *secret.Resolver) (active, agentName string) {
-	if rtCfg == nil {
-		return "", ""
-	}
-	_, ac, _, err := rtCfg.ResolveProfile("default")
-	if err != nil || ac == nil {
-		return "", ""
-	}
-	// Copy so IsolateCredentials can't mutate the cached config.
-	acCopy := *ac
-	acCopy.Env = nil
-	for _, ir := range secret.IsolateCredentials(&acCopy, resolver) {
-		if ir.ActiveKey != "" {
-			return ir.ActiveKey, ac.Name
-		}
-	}
-	return "", ac.Name
 }
 
 func printDockerfileLine(env *root.ResolvedEnv, cwd string) {
@@ -331,8 +410,18 @@ func printProjectSection(env *root.ResolvedEnv, cwd string) {
 	if env.Config == nil || len(env.Config.Roles) == 0 {
 		return
 	}
+	enabled := env.Config.EnabledRoles()
+	fmt.Printf("  Roles: %d enabled", len(enabled))
+	if !envRoles {
+		fmt.Print(" (ateam env --roles for the table)")
+	}
+	fmt.Println()
+	if envRoles {
+		printRoleTable(env, cwd)
+	}
+}
 
-	// Collect all role names, sorted
+func printRoleTable(env *root.ResolvedEnv, cwd string) {
 	var allRoles []string
 	for name := range env.Config.Roles {
 		allRoles = append(allRoles, name)

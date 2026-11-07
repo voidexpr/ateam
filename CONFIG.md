@@ -358,7 +358,7 @@ agent "claude" {
 
 `base` is for defining a *new* agent from an existing one: attributes the child never sets, in any layer, are inherited from the (already merged) base. An attribute explicitly set to its zero value (`sandbox_inside_container = false`, `tmux_width = 0`) is kept, not inherited.
 
-Every value is recorded with the layer that set it (`Config.Sources`, keyed `agent.<name>.<attr>`), so audits can say which file to edit. Use `ateam env` to see the active resolution chain.
+Every value is recorded with the layer that set it (`Config.Sources`, keyed `agent.<name>.<attr>`), so audits can say which file to edit. `ateam env` shows, per profile in use, the model and effort with the file that set them; `ateam env --models` and every `--dry-run` print the full chain, lowest precedence first: flags hidden in `args`, each layer (values inherited through `base` show the base agent), CLI flags, then a profile's `agent_extra_args`, which land last on the command line.
 
 ### Top-level scalars
 

@@ -180,3 +180,20 @@ func argsModel(args []string) string {
 	}
 	return model
 }
+
+// argsEffort returns the value of the last --effort flag (claude) or
+// model_reasoning_effort= setting (codex, after -c) in args.
+func argsEffort(args []string) string {
+	effort := ""
+	for i, a := range args {
+		switch {
+		case a == "--effort" && i+1 < len(args):
+			effort = args[i+1]
+		case strings.HasPrefix(a, "--effort="):
+			effort = strings.TrimPrefix(a, "--effort=")
+		case strings.HasPrefix(a, "model_reasoning_effort="):
+			effort = strings.TrimPrefix(a, "model_reasoning_effort=")
+		}
+	}
+	return effort
+}

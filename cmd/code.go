@@ -238,7 +238,8 @@ func runCode(opts CodeOptions) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("╔══ code management ══╗\n\n")
+		printModelResolution(cr, env)
+		fmt.Printf("\n╔══ code management ══╗\n\n")
 		fmt.Println(text)
 		fmt.Printf("\n╚══ code management ══╝\n")
 		return nil

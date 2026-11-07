@@ -89,19 +89,8 @@ func runVerify(opts VerifyOptions) error {
 		StartedAt:  startedAt,
 	})
 
-	if opts.DryRun {
-		prompt, err := bundle.ResolvePreview(env, env.WorkDir)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("╔══ verify ══╗\n\n")
-		fmt.Println(prompt)
-		fmt.Printf("\n╚══ verify ══╝\n")
-		return nil
-	}
-
-	fmt.Printf("Supervisor verifying recent code changes (%dm timeout)...\n", timeout)
-
+	// The runner is built before the dry-run branch so a dry run shows the
+	// resolved model chain and surfaces profile/agent errors early.
 	cr, err := buildRunner(env, RunnerSpec{
 		Profile:         opts.Profile,
 		Agent:           opts.Agent,
@@ -118,6 +107,20 @@ func runVerify(opts VerifyOptions) error {
 	if err != nil {
 		return err
 	}
+
+	if opts.DryRun {
+		prompt, err := bundle.ResolvePreview(env, env.WorkDir)
+		if err != nil {
+			return err
+		}
+		printModelResolution(cr, env)
+		fmt.Printf("\n╔══ verify ══╗\n\n")
+		fmt.Println(prompt)
+		fmt.Printf("\n╚══ verify ══╝\n")
+		return nil
+	}
+
+	fmt.Printf("Supervisor verifying recent code changes (%dm timeout)...\n", timeout)
 
 	db, err := openStateDB(env)
 	if err != nil {

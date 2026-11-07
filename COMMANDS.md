@@ -620,9 +620,28 @@ TOTAL                                                                           
 
 ### `ateam env`
 
-Show the current environment: organization, runtime config, project, and role status.
+Show what a run in this project will use, then the environment around it.
 
-The Runtime section includes an "Agent in container mode" line plus a 2×2 detection matrix (docker layer + sandbox layer × toggle on/off × source detected), e.g.:
+```bash
+ateam env            # profiles in use, layers, container mode, credentials, project
+ateam env --models   # plus the per-layer model/effort chain for each profile
+ateam env --roles    # plus the role table with the last report time per role
+```
+
+The Runtime section opens with one block per profile a flag-less run can pick (the default, the supervisor's review/code choices, every role override from `config.toml`), each naming what chose it:
+
+```
+Profile default (config.toml project.default_profile)
+  agent:      claude-high (type claude, container none)
+  model:      opus (built-in)
+  effort:     high (built-in)
+  config dir: ~/.ateamorg/claude_shared (~/.ateamorg/runtime.hcl)
+  auth:       CLAUDE_CODE_OAUTH_TOKEN (ateam secret, global scope)
+```
+
+Model and effort show the file that set them, or that nothing pinned them and the agent CLI will pick its own default. Warnings from the model audit (see [CONFIG.md → Agents](CONFIG.md#agents)) follow each profile. `--models` adds the resolution chain, lowest precedence first: flags hidden in `args`, each `runtime.hcl` layer (a value inherited through `base` shows the base agent), then CLI flags, then a profile's `agent_extra_args`. The same chain is printed by every `--dry-run` (`exec`, `report` per role, `review`, `code`, `verify`), there including `--model` / `--cheaper-model` / `--effort`.
+
+Then `Layers:` lists the `runtime.hcl` files consulted, marking the ones that do not exist. The Runtime section also includes an "Agent in container mode" line plus a 2×2 detection matrix (docker layer + sandbox layer × toggle on/off × source detected), e.g.:
 
 ```
 Agent in container mode: false
@@ -632,10 +651,12 @@ Agent in container mode: false
 
 See [ISOLATION.md](ISOLATION.md#detection-of-an-outer-sandbox-or-container) for what each row means.
 
-After the default profile line, model warnings are listed for every profile a flag-less run in this project can pick (default, supervisor review/code, role overrides from `config.toml`): no model pinned (the agent CLI then picks its own default), a pinned model priced above `expensive_output_per_mtok`, or a `--model` / `--effort` hidden inside `args`. Each names the file and block to edit. The same warnings print to stderr when a run starts, including `--dry-run`. See [CONFIG.md → Agents](CONFIG.md#agents).
+The model warnings under each profile cover: no model pinned (the agent CLI then picks its own default), a pinned model priced above `expensive_output_per_mtok`, or a `--model` / `--effort` hidden inside `args`. Each names the file and block to edit. The same warnings print to stderr when a run starts, including `--dry-run`.
 
 | Flag | Description |
 |------|-------------|
+| `--models` | Print the full per-layer model/effort chain for each profile in use |
+| `--roles` | Print the role table with the last report time per role |
 | `--claude-sandbox` | Print the generated Claude sandbox settings JSON for the default profile |
 | `--print-org` | Print the absolute path to the org directory |
 

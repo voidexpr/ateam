@@ -1022,6 +1022,7 @@ func applyModelOverrides(r *runner.AgentExecutor, cheaper bool, model string) {
 	}
 	if chosen != "" {
 		r.Agent.SetModel(chosen)
+		r.ModelOverride = chosen
 	}
 }
 
@@ -1118,6 +1119,7 @@ func printDryRunInfo(r *runner.AgentExecutor, env *root.ResolvedEnv, opts dryRun
 		}
 		fmt.Printf("Container: %s\n", name)
 	}
+	printModelResolution(r, env)
 	fmt.Println()
 
 	// Build the full low-level args with container-aware additions

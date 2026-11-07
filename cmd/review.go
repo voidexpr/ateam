@@ -179,19 +179,8 @@ func runReview(opts ReviewOptions) error {
 		ReviewFile: reviewFile,
 	})
 
-	if opts.DryRun {
-		// Dry-run resolves the prompt at the cmd layer (skipping flow's
-		// Prepare-then-execute path) so the listing precedes the body.
-		// ResolvePreview auto-wires BaseVars + Dynamics + ModePreview.
-		text, err := bundle.ResolvePreview(env, env.WorkDir)
-		if err != nil {
-			return err
-		}
-		return printReviewDryRun(env, text)
-	}
-
-	fmt.Printf("Supervisor reviewing reports (%dm timeout)...\n", timeout)
-
+	// The runner is built before the dry-run branch so a dry run shows the
+	// resolved model chain and surfaces profile/agent errors early.
 	cr, err := buildRunner(env, RunnerSpec{
 		Profile:         opts.Profile,
 		Agent:           opts.Agent,
@@ -208,6 +197,19 @@ func runReview(opts ReviewOptions) error {
 	if err != nil {
 		return err
 	}
+
+	if opts.DryRun {
+		// Dry-run resolves the prompt at the cmd layer (skipping flow's
+		// Prepare-then-execute path) so the listing precedes the body.
+		// ResolvePreview auto-wires BaseVars + Dynamics + ModePreview.
+		text, err := bundle.ResolvePreview(env, env.WorkDir)
+		if err != nil {
+			return err
+		}
+		return printReviewDryRun(cr, env, text)
+	}
+
+	fmt.Printf("Supervisor reviewing reports (%dm timeout)...\n", timeout)
 
 	db, err := openStateDB(env)
 	if err != nil {
@@ -275,7 +277,9 @@ func formatReviewEmpty(f prompts.ReviewFunnel) error {
 	return errors.New(b.String())
 }
 
-func printReviewDryRun(env *root.ResolvedEnv, prompt string) error {
+func printReviewDryRun(cr *runner.AgentExecutor, env *root.ResolvedEnv, prompt string) error {
+	printModelResolution(cr, env)
+	fmt.Println()
 	reports, _ := prompts.DiscoverReports(env.ProjectDir)
 
 	sort.Slice(reports, func(i, j int) bool {
