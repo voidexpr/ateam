@@ -70,7 +70,8 @@ var (
 
 func (c *Config) mergeProject(h hclProject, label string) {
 	s := &c.Settings
-	for attr := range presentAttrs(h.Body, projectSchema) {
+	present, _ := presentAttrs(h.Body, projectSchema)
+	for attr, line := range present {
 		var value string
 		switch attr {
 		case "name":
@@ -101,27 +102,28 @@ func (c *Config) mergeProject(h hclProject, label string) {
 			s.Serve.Port = h.ServePort
 			value = strconv.Itoa(h.ServePort)
 		}
-		c.record("project."+attr, label, value)
+		c.record("project."+attr, label, value, line)
 	}
 }
 
 func (c *Config) mergeRole(h hclRole, label string) {
 	s := &c.Settings
 	key := "role." + h.Name + "."
-	for attr := range presentAttrs(h.Body, roleSchema) {
+	present, _ := presentAttrs(h.Body, roleSchema)
+	for attr, line := range present {
 		switch attr {
 		case "status":
 			if s.Roles == nil {
 				s.Roles = map[string]string{}
 			}
 			s.Roles[h.Name] = h.Status
-			c.record(key+"status", label, h.Status)
+			c.record(key+"status", label, h.Status, line)
 		case "profile":
 			if s.Profiles.Roles == nil {
 				s.Profiles.Roles = map[string]string{}
 			}
 			s.Profiles.Roles[h.Name] = h.Profile
-			c.record(key+"profile", label, h.Profile)
+			c.record(key+"profile", label, h.Profile, line)
 		}
 	}
 	if _, known := s.Roles[h.Name]; !known {
@@ -135,7 +137,8 @@ func (c *Config) mergeRole(h hclRole, label string) {
 
 func (c *Config) mergeSupervisor(h hclSupervisor, label string) {
 	s := &c.Settings.Supervisor
-	for attr := range presentAttrs(h.Body, supervisorSchema) {
+	present, _ := presentAttrs(h.Body, supervisorSchema)
+	for attr, line := range present {
 		var value string
 		switch attr {
 		case "default_profile":
@@ -151,13 +154,14 @@ func (c *Config) mergeSupervisor(h hclSupervisor, label string) {
 			s.CodeSupervisorProfile = h.CodeSupervisorProfile
 			value = h.CodeSupervisorProfile
 		}
-		c.record("supervisor."+attr, label, value)
+		c.record("supervisor."+attr, label, value, line)
 	}
 }
 
 func (c *Config) mergeSandboxExtra(h hclSandboxExtra, label string) {
 	s := &c.Settings.SandboxExtra
-	for attr := range presentAttrs(h.Body, sandboxExtraSchema) {
+	present, _ := presentAttrs(h.Body, sandboxExtraSchema)
+	for attr, line := range present {
 		var value []string
 		switch attr {
 		case "allow_write":
@@ -173,28 +177,30 @@ func (c *Config) mergeSandboxExtra(h hclSandboxExtra, label string) {
 			s.UnsandboxedCommands = h.UnsandboxedCommands
 			value = h.UnsandboxedCommands
 		}
-		c.record("sandbox_extra."+attr, label, renderList(value))
+		c.record("sandbox_extra."+attr, label, renderList(value), line)
 	}
 }
 
 func (c *Config) mergeContainerExtra(h hclContainerExtra, label string) {
 	s := &c.Settings.ContainerExtra
-	for attr := range presentAttrs(h.Body, containerExtraSchema) {
+	present, attrs := presentAttrs(h.Body, containerExtraSchema)
+	for attr, line := range present {
 		switch attr {
 		case "extra_args":
 			s.ExtraArgs = h.ExtraArgs
-			c.record("container_extra.extra_args", label, renderList(h.ExtraArgs))
+			c.record("container_extra.extra_args", label, renderList(h.ExtraArgs), line)
 		case "forward_env":
 			s.ForwardEnv = h.ForwardEnv
-			c.record("container_extra.forward_env", label, renderList(h.ForwardEnv))
+			c.record("container_extra.forward_env", label, renderList(h.ForwardEnv), line)
 		case "env":
 			env := make(map[string]string, len(s.Env)+len(h.Env))
 			for k, v := range s.Env {
 				env[k] = v
 			}
+			keyLines := mapKeyLines(attrs["env"], h.Env)
 			for k, v := range h.Env {
 				env[k] = v
-				c.record("container_extra.env."+k, label, v)
+				c.record("container_extra.env."+k, label, v, keyLines[k])
 			}
 			s.Env = env
 		}

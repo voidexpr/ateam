@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclparse"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
 )
 
@@ -71,6 +72,8 @@ type Layer struct {
 type Contribution struct {
 	Layer string // Layer.Label, or `agent "<name>" (base)` for inherited values
 	Value string // attribute value rendered for display
+	File  string // Layer.Label of the file holding the attribute; for inherited values, the base agent's file
+	Line  int    // 1-based line of the attribute (or block header) in File; 0 when unknown
 }
 
 // Source returns the effective contribution for a Sources key.
@@ -164,6 +167,7 @@ type hclFile struct {
 }
 
 type hclAgent struct {
+	DefRange               hcl.Range         `hcl:",def_range"`
 	Name                   string            `hcl:"name,label"`
 	Body                   hcl.Body          `hcl:",body"`
 	Base                   string            `hcl:"base,optional"`
@@ -205,26 +209,28 @@ type hclModel struct {
 }
 
 type hclContainer struct {
-	Name              string   `hcl:"name,label"`
-	Body              hcl.Body `hcl:",body"`
-	Type              string   `hcl:"type,optional"`
-	Dockerfile        string   `hcl:"dockerfile,optional"`
-	DockerContainer   string   `hcl:"docker_container,optional"`
-	ExecTemplate      string   `hcl:"exec,optional"`
-	ForwardEnv        []string `hcl:"forward_env,optional"`
-	ExtraVolumes      []string `hcl:"extra_volumes,optional"`
-	Precheck          []string `hcl:"precheck,optional"`
-	CopyAteam         bool     `hcl:"copy_ateam,optional"`
-	MountClaudeConfig bool     `hcl:"mount_claude_config,optional"`
+	DefRange          hcl.Range `hcl:",def_range"`
+	Name              string    `hcl:"name,label"`
+	Body              hcl.Body  `hcl:",body"`
+	Type              string    `hcl:"type,optional"`
+	Dockerfile        string    `hcl:"dockerfile,optional"`
+	DockerContainer   string    `hcl:"docker_container,optional"`
+	ExecTemplate      string    `hcl:"exec,optional"`
+	ForwardEnv        []string  `hcl:"forward_env,optional"`
+	ExtraVolumes      []string  `hcl:"extra_volumes,optional"`
+	Precheck          []string  `hcl:"precheck,optional"`
+	CopyAteam         bool      `hcl:"copy_ateam,optional"`
+	MountClaudeConfig bool      `hcl:"mount_claude_config,optional"`
 }
 
 type hclProfile struct {
-	Name               string   `hcl:"name,label"`
-	Body               hcl.Body `hcl:",body"`
-	Agent              string   `hcl:"agent,optional"`
-	Container          string   `hcl:"container,optional"`
-	AgentExtraArgs     []string `hcl:"agent_extra_args,optional"`
-	ContainerExtraArgs []string `hcl:"container_extra_args,optional"`
+	DefRange           hcl.Range `hcl:",def_range"`
+	Name               string    `hcl:"name,label"`
+	Body               hcl.Body  `hcl:",body"`
+	Agent              string    `hcl:"agent,optional"`
+	Container          string    `hcl:"container,optional"`
+	AgentExtraArgs     []string  `hcl:"agent_extra_args,optional"`
+	ContainerExtraArgs []string  `hcl:"container_extra_args,optional"`
 }
 
 // Body schemas used to detect which attributes a block actually wrote.
@@ -234,6 +240,12 @@ var (
 	agentSchema, _     = gohcl.ImpliedBodySchema(hclAgent{})
 	containerSchema, _ = gohcl.ImpliedBodySchema(hclContainer{})
 	profileSchema, _   = gohcl.ImpliedBodySchema(hclProfile{})
+
+	// topLevelSchema lists the scalar attributes of a file, for provenance.
+	topLevelSchema = &hcl.BodySchema{Attributes: []hcl.AttributeSchema{
+		{Name: "sandbox_detection"}, {Name: "docker_detection"},
+		{Name: "expensive_output_per_mtok"}, {Name: "pricing_as_of"},
+	}}
 )
 
 // Load reads the embedded defaults, then the ateam.hcl of every layer
@@ -333,16 +345,19 @@ func (c *Config) resolveInheritance() error {
 			if _, set := c.Sources[childKey+attr]; set {
 				continue
 			}
-			if _, inBase := c.Sources[baseKey+attr]; !inBase {
+			from, inBase := c.Source(baseKey + attr)
+			if !inBase {
 				continue
 			}
-			c.record(childKey+attr, baseLabel, copyAgentAttr(&ac, &base, attr))
+			c.inherit(childKey+attr, baseLabel, copyAgentAttr(&ac, &base, attr), from)
 		}
 		for k, v := range base.Env {
 			if _, set := c.Sources[childKey+"env."+k]; set {
 				continue
 			}
-			c.setEnvKey(&ac, k, v, childKey, baseLabel)
+			from, _ := c.Source(baseKey + "env." + k)
+			c.setEnvKey(&ac, k, v)
+			c.inherit(childKey+"env."+k, baseLabel, v, from)
 		}
 
 		c.Agents[name] = ac
@@ -385,36 +400,67 @@ func agentAttrNames(schema *hcl.BodySchema) []string {
 	return names
 }
 
-// presentAttrs returns the attribute and nested-block names written in body.
-func presentAttrs(body hcl.Body, schema *hcl.BodySchema) map[string]bool {
-	present := make(map[string]bool)
+// presentAttrs returns the attribute and nested-block names written in
+// body with the line each starts on, plus the attributes themselves.
+func presentAttrs(body hcl.Body, schema *hcl.BodySchema) (map[string]int, hcl.Attributes) {
+	present := make(map[string]int)
 	if body == nil {
-		return present
+		return present, nil
 	}
 	content, _, _ := body.PartialContent(schema)
-	for name := range content.Attributes {
-		present[name] = true
+	for name, a := range content.Attributes {
+		present[name] = a.Range.Start.Line
 	}
 	for _, b := range content.Blocks {
-		present[b.Type] = true
+		present[b.Type] = b.DefRange.Start.Line
 	}
-	return present
+	return present, content.Attributes
 }
 
-func (c *Config) record(key, layer, value string) {
-	c.Sources[key] = append(c.Sources[key], Contribution{Layer: layer, Value: value})
+// mapKeyLines returns the line of each key of a map attribute written as
+// an object literal (`env = { KEY = "v" }`). Keys set through an
+// expression that is not a literal get the attribute's own line.
+func mapKeyLines(attr *hcl.Attribute, keys map[string]string) map[string]int {
+	lines := make(map[string]int, len(keys))
+	if attr == nil {
+		return lines
+	}
+	for k := range keys {
+		lines[k] = attr.Range.Start.Line
+	}
+	obj, ok := attr.Expr.(*hclsyntax.ObjectConsExpr)
+	if !ok {
+		return lines
+	}
+	for _, item := range obj.Items {
+		v, diags := item.KeyExpr.Value(nil)
+		if diags.HasErrors() || v.Type() != cty.String || v.IsNull() {
+			continue
+		}
+		lines[v.AsString()] = item.KeyExpr.Range().Start.Line
+	}
+	return lines
 }
 
-// setEnvKey sets one env key on ac (cloning the map so the base agent's
-// map is never shared) and records it.
-func (c *Config) setEnvKey(ac *AgentConfig, k, v, keyPrefix, label string) {
+func (c *Config) record(key, layer, value string, line int) {
+	c.Sources[key] = append(c.Sources[key], Contribution{Layer: layer, Value: value, File: layer, Line: line})
+}
+
+// inherit records a value copied from a base agent: the layer is the base
+// label, the file and line are where the base agent set it.
+func (c *Config) inherit(key, baseLabel, value string, from Contribution) {
+	c.Sources[key] = append(c.Sources[key], Contribution{Layer: baseLabel, Value: value, File: from.File, Line: from.Line})
+}
+
+// setEnvKey sets one env key on ac, cloning the map so a base agent's map
+// is never shared.
+func (c *Config) setEnvKey(ac *AgentConfig, k, v string) {
 	env := make(map[string]string, len(ac.Env)+1)
 	for ek, ev := range ac.Env {
 		env[ek] = ev
 	}
 	env[k] = v
 	ac.Env = env
-	c.record(keyPrefix+"env."+k, label, v)
 }
 
 // copyAgentAttr copies one attribute from src to dst and returns its
@@ -546,22 +592,25 @@ func mergeHCL(cfg *Config, data []byte, filename, label string) error {
 		return diags
 	}
 
+	lines, _ := presentAttrs(file.Body, topLevelSchema)
 	if hf.SandboxDetection != nil {
 		v := *hf.SandboxDetection
 		cfg.SandboxDetection = &v
+		cfg.record("sandbox_detection", label, strconv.FormatBool(v), lines["sandbox_detection"])
 	}
 	if hf.DockerDetection != nil {
 		v := *hf.DockerDetection
 		cfg.DockerDetection = &v
+		cfg.record("docker_detection", label, strconv.FormatBool(v), lines["docker_detection"])
 	}
 	if hf.PricingAsOf != "" {
 		cfg.PricingAsOf = hf.PricingAsOf
-		cfg.record("pricing_as_of", label, hf.PricingAsOf)
+		cfg.record("pricing_as_of", label, hf.PricingAsOf, lines["pricing_as_of"])
 	}
 	if hf.ExpensiveOutput != nil {
 		v := *hf.ExpensiveOutput
 		cfg.ExpensiveOutputPerMTok = &v
-		cfg.record("expensive_output_per_mtok", label, strconv.FormatFloat(v, 'f', -1, 64))
+		cfg.record("expensive_output_per_mtok", label, strconv.FormatFloat(v, 'f', -1, 64), lines["expensive_output_per_mtok"])
 	}
 
 	for _, a := range hf.Agents {
@@ -645,19 +694,22 @@ func (c *Config) mergeAgent(a hclAgent, label string) {
 	ac.Name = a.Name
 	key := "agent." + a.Name + "."
 	if _, seen := c.Agents[a.Name]; !seen {
-		c.record(key+"name", label, a.Name)
+		c.record(key+"name", label, a.Name, a.DefRange.Start.Line)
 	}
-	for attr := range presentAttrs(a.Body, agentSchema) {
+	present, attrs := presentAttrs(a.Body, agentSchema)
+	for attr, line := range present {
 		switch attr {
 		case "base":
 			ac.Base = src.Base
-			c.record(key+"base", label, src.Base)
+			c.record(key+"base", label, src.Base, line)
 		case "env":
+			keyLines := mapKeyLines(attrs["env"], src.Env)
 			for k, v := range src.Env {
-				c.setEnvKey(&ac, k, v, key, label)
+				c.setEnvKey(&ac, k, v)
+				c.record(key+"env."+k, label, v, keyLines[k])
 			}
 		default:
-			c.record(key+attr, label, copyAgentAttr(&ac, &src, attr))
+			c.record(key+attr, label, copyAgentAttr(&ac, &src, attr), line)
 		}
 	}
 	c.Agents[a.Name] = ac
@@ -668,9 +720,10 @@ func (c *Config) mergeContainer(h hclContainer, label string) {
 	cc.Name = h.Name
 	key := "container." + h.Name + "."
 	if _, seen := c.Containers[h.Name]; !seen {
-		c.record(key+"name", label, h.Name)
+		c.record(key+"name", label, h.Name, h.DefRange.Start.Line)
 	}
-	for attr := range presentAttrs(h.Body, containerSchema) {
+	present, _ := presentAttrs(h.Body, containerSchema)
+	for attr, line := range present {
 		var value string
 		switch attr {
 		case "type":
@@ -701,7 +754,7 @@ func (c *Config) mergeContainer(h hclContainer, label string) {
 			cc.MountClaudeConfig = h.MountClaudeConfig
 			value = strconv.FormatBool(h.MountClaudeConfig)
 		}
-		c.record(key+attr, label, value)
+		c.record(key+attr, label, value, line)
 	}
 	c.Containers[h.Name] = cc
 }
@@ -711,9 +764,10 @@ func (c *Config) mergeProfile(h hclProfile, label string) {
 	p.Name = h.Name
 	key := "profile." + h.Name + "."
 	if _, seen := c.Profiles[h.Name]; !seen {
-		c.record(key+"name", label, h.Name)
+		c.record(key+"name", label, h.Name, h.DefRange.Start.Line)
 	}
-	for attr := range presentAttrs(h.Body, profileSchema) {
+	present, _ := presentAttrs(h.Body, profileSchema)
+	for attr, line := range present {
 		var value string
 		switch attr {
 		case "agent":
@@ -729,7 +783,7 @@ func (c *Config) mergeProfile(h hclProfile, label string) {
 			p.ContainerExtraArgs = h.ContainerExtraArgs
 			value = renderList(h.ContainerExtraArgs)
 		}
-		c.record(key+attr, label, value)
+		c.record(key+attr, label, value, line)
 	}
 	c.Profiles[h.Name] = p
 }

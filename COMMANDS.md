@@ -638,9 +638,11 @@ TOTAL                                                                           
 Show what a run in this project will use, then the environment around it.
 
 ```bash
-ateam env            # profiles in use, layers, container mode, credentials, project
-ateam env --models   # plus the per-layer model/effort chain for each profile
-ateam env --roles    # plus the role table with the last report time per role
+ateam env                      # profiles in use, layers, container mode, credentials, project
+ateam env --models             # plus the per-layer model/effort chain for each profile
+ateam env --roles              # plus the role table with the last report time per role
+ateam env --trace              # every merged attribute with the file:line that set it
+ateam env --trace agent.claude # one block (or one attribute: agent.claude.model)
 ```
 
 The Runtime section opens with one block per profile a flag-less run can pick (the default, the supervisor's review/code choices, every role override from `ateam.hcl`), each naming what chose it:
@@ -668,10 +670,22 @@ See [ISOLATION.md](ISOLATION.md#detection-of-an-outer-sandbox-or-container) for 
 
 The model warnings under each profile cover: no model pinned (the agent CLI then picks its own default), a pinned model priced above `expensive_output_per_mtok`, or a `--model` / `--effort` hidden inside `args`. Each names the file and block to edit. The same warnings print to stderr when a run starts, including `--dry-run`.
 
+`--trace` replaces the report with the merged configuration itself: every attribute of every `agent`, `container`, `profile`, `project`, `role`, `supervisor`, `sandbox_extra` and `container_extra` block plus the top-level scalars, sorted by key, each with the file and line that set it. Lower layers the value overrides follow, indented. A value inherited through `base` names the base agent and where the base set it; `built-in:N` is a line of the embedded defaults (`ateam cat --defaults`). The optional `KEY` keeps the keys equal to it or under it: a block (`agent.claude`, `role`), one attribute (`agent.claude.model`), or an `env` key (`agent.claude.env.FOO`).
+
+```
+agent.claude.env.CLAUDECODE = ""  (built-in:278)
+agent.claude.model = opus  (~/proj/.ateam/ateam.hcl:5)
+    overrides ~/.ateam/ateam.hcl:2 = sonnet
+agent.claude.sandbox = { ... (180 lines)  (built-in:277)
+agent.kid.model = opus  (agent "claude" (base) at ~/proj/.ateam/ateam.hcl:5)
+role.security.status = on  (~/proj/.ateam/ateam.hcl:8)
+```
+
 | Flag | Description |
 |------|-------------|
 | `--models` | Print the full per-layer model/effort chain for each profile in use |
 | `--roles` | Print the role table with the last report time per role |
+| `--trace [KEY]` | Print every merged attribute with the file and line that set it, and the layers it overrides; `KEY` limits it to a block or attribute |
 | `--claude-sandbox` | Print the generated Claude sandbox settings JSON for the default profile |
 | `--print-home` | Print the absolute path to the user ateam directory |
 

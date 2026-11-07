@@ -23,20 +23,29 @@ var (
 	envPrintHome     bool
 	envModels        bool
 	envRoles         bool
+	envTrace         bool
 )
 
 var envCmd = &cobra.Command{
-	Use:   "env",
+	Use:   "env [--trace [KEY]]",
 	Short: "Show the current ATeam environment",
 	Long: `Print what a run in this project will use, profile by profile: agent,
 model, effort, config dir, auth, and the file that set each value. Then
-the runtime.hcl layers, container detection, credentials, and the project.
+the ateam.hcl layers, container detection, credentials, and the project.
 
   ateam env --models   # also print the per-layer model/effort chain
   ateam env --roles    # also print the role table with last report times
 
+--trace prints the merged configuration instead, one attribute per line
+with the file and line that set it and, indented, the lower layers it
+overrides. KEY narrows it to one block or attribute: "agent.claude",
+"role", "profile.default.agent".
+
+  ateam env --trace
+  ateam env --trace agent.claude
+
 This command is read-only — it never creates or modifies anything.`,
-	Args: cobra.NoArgs,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runEnv,
 }
 
@@ -45,9 +54,13 @@ func init() {
 	envCmd.Flags().BoolVar(&envPrintHome, "print-home", false, "print the absolute path to the user ateam directory")
 	envCmd.Flags().BoolVar(&envModels, "models", false, "print the full per-layer model/effort chain for each profile in use")
 	envCmd.Flags().BoolVar(&envRoles, "roles", false, "print the role table with the last report time per role")
+	envCmd.Flags().BoolVar(&envTrace, "trace", false, "print every merged attribute with the file:line that set it; KEY narrows to a block")
 }
 
 func runEnv(cmd *cobra.Command, args []string) error {
+	if len(args) > 0 && !envTrace {
+		return fmt.Errorf("a KEY argument needs --trace")
+	}
 	env, err := lookupEnv()
 	if err != nil {
 		return err
@@ -62,7 +75,48 @@ func runEnv(cmd *cobra.Command, args []string) error {
 		return printClaudeSandbox(env)
 	}
 
+	if envTrace {
+		prefix := ""
+		if len(args) > 0 {
+			prefix = args[0]
+		}
+		return printTrace(env, prefix)
+	}
+
 	return printEnv(env)
+}
+
+// printTrace prints the merged configuration, one attribute per line with
+// the location that set it, and the lower layers it overrides indented.
+func printTrace(env *root.ResolvedEnv, prefix string) error {
+	rtCfg, err := loadRuntime(env)
+	if err != nil {
+		return err
+	}
+	entries := rtCfg.Trace(prefix)
+	if len(entries) == 0 {
+		return fmt.Errorf("no attribute matches %q", prefix)
+	}
+	for _, e := range entries {
+		last := e.Chain[len(e.Chain)-1]
+		fmt.Printf("%s = %s  (%s)\n", e.Key, traceValue(last.Value), rtCfg.Where(last))
+		for _, con := range e.Chain[:len(e.Chain)-1] {
+			fmt.Printf("    overrides %s = %s\n", rtCfg.Where(con), traceValue(con.Value))
+		}
+	}
+	return nil
+}
+
+// traceValue keeps a trace line single-line: an empty value shows as "",
+// a multi-line one (the sandbox JSON) as its first line and a line count.
+func traceValue(v string) string {
+	if v == "" {
+		return `""`
+	}
+	if i := strings.IndexByte(v, '\n'); i >= 0 {
+		return fmt.Sprintf("%s ... (%d lines)", strings.TrimSpace(v[:i]), strings.Count(v, "\n")+1)
+	}
+	return v
 }
 
 func printClaudeSandbox(env *root.ResolvedEnv) error {

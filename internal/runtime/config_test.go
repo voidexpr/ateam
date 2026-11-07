@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -1623,4 +1624,120 @@ func layersOf(projectDir, orgDir string) []string {
 		}
 	}
 	return out
+}
+
+func TestProvenanceFileAndLine(t *testing.T) {
+	homeDir := writeLayer(t, t.TempDir(), `
+agent "claude" {
+  model = "sonnet"
+  env = {
+    FOO   = "1"
+    "BAR" = "2"
+  }
+}
+
+agent "kid" {
+  base   = "claude"
+  effort = "low"
+}
+
+container "docker" {
+  forward_env = ["X"]
+}
+
+profile "p" {
+  agent     = "kid"
+  container = "none"
+}
+
+role "security" {
+  status = "on"
+}
+
+container_extra {
+  env = {
+    K = "v"
+  }
+}
+
+expensive_output_per_mtok = 5
+sandbox_detection         = false
+`)
+	cfg, err := Load([]string{homeDir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	file := filepath.Join(homeDir, ConfigFile)
+	cases := map[string]Contribution{
+		"agent.claude.model":           {Layer: file, Value: "sonnet", File: file, Line: 3},
+		"agent.claude.env.FOO":         {Layer: file, Value: "1", File: file, Line: 5},
+		"agent.claude.env.BAR":         {Layer: file, Value: "2", File: file, Line: 6},
+		"agent.kid.name":               {Layer: file, Value: "kid", File: file, Line: 10},
+		"agent.kid.base":               {Layer: file, Value: "claude", File: file, Line: 11},
+		"agent.kid.model":              {Layer: `agent "claude" (base)`, Value: "sonnet", File: file, Line: 3},
+		"agent.kid.env.BAR":            {Layer: `agent "claude" (base)`, Value: "2", File: file, Line: 6},
+		"container.docker.forward_env": {Layer: file, Value: `["X"]`, File: file, Line: 16},
+		"profile.p.name":               {Layer: file, Value: "p", File: file, Line: 19},
+		"profile.p.container":          {Layer: file, Value: "none", File: file, Line: 21},
+		"role.security.status":         {Layer: file, Value: "on", File: file, Line: 25},
+		"container_extra.env.K":        {Layer: file, Value: "v", File: file, Line: 30},
+		"expensive_output_per_mtok":    {Layer: file, Value: "5", File: file, Line: 34},
+		"sandbox_detection":            {Layer: file, Value: "false", File: file, Line: 35},
+	}
+	for key, want := range cases {
+		got, ok := cfg.Source(key)
+		if !ok || got != want {
+			t.Errorf("%s: got %+v (ok=%v), want %+v", key, got, ok, want)
+		}
+	}
+	// Built-in values point into the embedded defaults; the base label
+	// carries the base's own location.
+	if got, _ := cfg.Source("agent.claude.command"); got.Layer != BuiltinLayer || got.File != BuiltinLayer || got.Line == 0 {
+		t.Errorf("built-in command: %+v", got)
+	}
+	if got, _ := cfg.Source("agent.kid.command"); got.Layer != `agent "claude" (base)` || got.File != BuiltinLayer || got.Line == 0 {
+		t.Errorf("inherited built-in command: %+v", got)
+	}
+}
+
+func TestTraceFiltersByPrefix(t *testing.T) {
+	homeDir := writeLayer(t, t.TempDir(), `agent "claude" { model = "sonnet" }`)
+	projDir := writeLayer(t, t.TempDir(), `agent "claude" { model = "opus" }`)
+	cfg, err := Load([]string{homeDir, projDir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	entries := cfg.Trace("agent.claude.model")
+	if len(entries) != 1 || entries[0].Key != "agent.claude.model" || len(entries[0].Chain) != 2 {
+		t.Fatalf("exact key: %+v", entries)
+	}
+	if w := cfg.Where(entries[0].Chain[1]); w != filepath.Join(projDir, ConfigFile)+":1" {
+		t.Errorf("where: %q", w)
+	}
+	if w := cfg.Where(entries[0].Chain[0]); w != filepath.Join(homeDir, ConfigFile)+":1" {
+		t.Errorf("where (home): %q", w)
+	}
+	for _, prefix := range []string{"agent.claude", "agent.claude.", "agent.claude.*"} {
+		entries = cfg.Trace(prefix)
+		if len(entries) < 5 {
+			t.Errorf("%q: expected the whole block, got %d entries", prefix, len(entries))
+		}
+		for i, e := range entries {
+			if !strings.HasPrefix(e.Key, "agent.claude.") {
+				t.Errorf("%q: stray key %s", prefix, e.Key)
+			}
+			if i > 0 && entries[i-1].Key > e.Key {
+				t.Errorf("%q: not sorted at %s", prefix, e.Key)
+			}
+		}
+	}
+	if entries = cfg.Trace("agent.claud"); len(entries) != 0 {
+		t.Errorf("partial block name must not match: %+v", entries)
+	}
+	if all := cfg.Trace(""); len(all) != len(cfg.Sources) {
+		t.Errorf("empty prefix: %d entries, %d keys", len(all), len(cfg.Sources))
+	}
+	if got, _ := cfg.Source("agent.claude.command"); cfg.Where(got) != BuiltinLayer+":"+strconv.Itoa(got.Line) {
+		t.Errorf("built-in where: %q", cfg.Where(got))
+	}
 }

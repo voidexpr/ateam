@@ -184,6 +184,13 @@ Two renderings of the same `ModelReport`:
    `--model` vs attr case, base-agent inheritance, cheaper-model).
 4. Wire into `--dry-run` outputs; `make test-cli` coverage.
 5. Wire into `ateam env`; update COMMANDS.md.
+6. Full configuration trace. Done as `ateam env --trace [KEY]`: every
+   merged attribute of every block and the top-level scalars, with the
+   file and line that set it (`Contribution.File` / `Line`, captured from
+   the HCL attribute and block ranges at merge time; `env` map keys get
+   their own line) and the lower layers it overrides. Values inherited
+   through `base` point at the base agent's own location; built-in
+   values point at a line of the embedded `defaults/ateam.hcl`.
 
 ## Later (out of scope for the audit step)
 
