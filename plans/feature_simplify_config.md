@@ -16,8 +16,8 @@ chains, and the single `ateam.hcl` with `.ateam`-only layering, the
 config/state split and name-based project identity). The single central
 state db stays an open choice; per-project `state.sqlite` is kept.
 Containers see the home and project layers only; ancestor layers are not
-mounted (known limitation). Item 6 (`ateam setup`, the config-dir part of step 7) is implemented;
-items 7 and 8 are open.
+mounted (known limitation). Items 6 (`ateam setup`, the config-dir part of step 7) and 7 (native
+config reader) are implemented; item 8 (suggested default model) is open.
 
 Cleanup pending on the author's machine (the sandbox cannot write
 `~/.ateam`): run `ATEAM=./ateam scripts/migrate-ateamorg.sh`, then tidy

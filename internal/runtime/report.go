@@ -34,12 +34,14 @@ type CLIOverrides struct {
 // (last non-empty wins per slot). The precedence lives only in the order
 // of Chain:
 //
-//  1. --model / --effort tokens inside the agent's args (the model and
+//  1. the agent CLI's own configuration (settings.json, config.toml, env),
+//     used only when nothing ateam passes sets the slot
+//  2. --model / --effort tokens inside the agent's args (the model and
 //     effort attributes are appended after them on the command line)
-//  2. the model / effort attributes, per layer in load order, with a
+//  3. the model / effort attributes, per layer in load order, with a
 //     value inherited through `base` shown as the base agent
-//  3. CLI overrides
-//  4. tokens inside the profile's agent_extra_args, appended last
+//  4. CLI overrides
+//  5. tokens inside the profile's agent_extra_args, appended last
 type ModelReport struct {
 	Agent     string
 	AgentType string
@@ -56,10 +58,20 @@ const (
 )
 
 // ModelReport builds the report for an agent and the profile that selected
-// it (prof may be nil). Pure computation over the loaded config.
-func (c *Config) ModelReport(prof *ProfileConfig, ac *AgentConfig, cli CLIOverrides) ModelReport {
+// it (prof may be nil). native is the agent CLI's own configuration, the
+// lowest entry of the chain (an empty Source omits it). Pure computation
+// over the loaded config.
+func (c *Config) ModelReport(prof *ProfileConfig, ac *AgentConfig, cli CLIOverrides, native NativeConfig) ModelReport {
 	r := ModelReport{Agent: ac.Name, AgentType: agentType(ac)}
 	key := "agent." + ac.Name + "."
+
+	if native.Source != "" {
+		note := "agent-native default, used when nothing above sets the slot"
+		if native.Note != "" {
+			note = native.Note
+		}
+		r.Chain = append(r.Chain, ChainEntry{Layer: native.Source, Model: native.Model, Effort: native.Effort, Note: note})
+	}
 
 	if m, e := argsModel(ac.Args), argsEffort(ac.Args); m != "" || e != "" {
 		src, _ := c.Source(key + "args")

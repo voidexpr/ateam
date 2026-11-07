@@ -642,7 +642,7 @@ Profile default (ateam.hcl project.default_profile)
   auth:       CLAUDE_CODE_OAUTH_TOKEN (ateam secret, global scope)
 ```
 
-Model and effort show the file that set them, or that nothing pinned them and the agent CLI will pick its own default. Warnings from the model audit (see [CONFIG.md → Agents](CONFIG.md#agents)) follow each profile. `--models` adds the resolution chain, lowest precedence first: flags hidden in `args`, each `ateam.hcl` layer (a value inherited through `base` shows the base agent), then CLI flags, then a profile's `agent_extra_args`. The same chain is printed by every `--dry-run` (`exec`, `report` per role, `review`, `code`, `verify`), there including `--model` / `--cheaper-model` / `--effort`.
+Model and effort show the file that set them, or that nothing pinned them and the agent CLI will pick its own default. Warnings from the model audit (see [CONFIG.md → Agents](CONFIG.md#agents)) follow each profile. `--models` adds the resolution chain, lowest precedence first: the agent CLI's own configuration (claude's `settings.json` and `ANTHROPIC_MODEL`, codex's `config.toml`, read from the config dir the run would use; not inspected for container profiles), flags hidden in `args`, each `ateam.hcl` layer (a value inherited through `base` shows the base agent), then CLI flags, then a profile's `agent_extra_args`. The same chain is printed by every `--dry-run` (`exec`, `report` per role, `review`, `code`, `verify`), there including `--model` / `--cheaper-model` / `--effort`.
 
 Then `Layers:` lists the `ateam.hcl` files consulted, marking the ones that do not exist. The Runtime section also includes an "Agent in container mode" line plus a 2×2 detection matrix (docker layer + sandbox layer × toggle on/off × source detected), e.g.:
 

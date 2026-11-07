@@ -177,7 +177,9 @@ Two renderings of the same `ModelReport`:
    covers every decision from the start, so the resolver signature is
    set once.
 2. `NativeConfigReader` + claude/codex implementations + tests
-   (fixture config dirs under `test_data/`).
+   (fixture config dirs under `test_data/`). Done as `agent.ReadNativeConfig`
+   (temp-dir fixtures); shown as the lowest chain entry by `ateam env --models`
+   and every `--dry-run`, not inspected for container profiles.
 3. `ModelReport` resolver + precedence tests (including the args-embedded
    `--model` vs attr case, base-agent inheritance, cheaper-model).
 4. Wire into `--dry-run` outputs; `make test-cli` coverage.

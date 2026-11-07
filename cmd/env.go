@@ -141,7 +141,7 @@ func printProfilesInUse(env *root.ResolvedEnv, rtCfg *runtime.Config) {
 			fmt.Printf("    Warning: not defined in runtime.hcl\n")
 			continue
 		}
-		rep := rtCfg.ModelReport(prof, ac, runtime.CLIOverrides{})
+		rep := rtCfg.ModelReport(prof, ac, runtime.CLIOverrides{}, nativeConfigFor(env, rtCfg, prof, ac))
 		containerName := "none"
 		if prof != nil {
 			containerName = prof.Container
