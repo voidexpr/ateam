@@ -346,7 +346,6 @@ ateam agent-config                                        # audit (default)
 ateam agent-config --audit --container my-app             # remote audit inside a container
 ateam agent-config --copy-out --container my-app          # copy config from container to host
 ateam agent-config --copy-in --container my-app --force   # copy config into container
-ateam agent-config --setup-interactive                    # bootstrap interactive session
 ```
 
 | Flag | Description |
@@ -361,7 +360,6 @@ ateam agent-config --setup-interactive                    # bootstrap interactiv
 | `--copy-ateam` | Also copy ateam linux binary into the container (for `--copy-in`) |
 | `--dry-run` | Show what would be copied without executing |
 | `--essentials-only` | Copy only essential files (credentials, settings, plugins, skills, hooks, backups) |
-| `--setup-interactive` | Bootstrap an interactive Claude session from a saved refresh token |
 
 **`--audit`** detects all auth sources (env vars, ateam secrets, credential files, keychain), runs `claude auth status` for ground truth, and warns on mismatches. With `--container`, runs audit remotely via `docker exec`.
 
@@ -369,9 +367,7 @@ ateam agent-config --setup-interactive                    # bootstrap interactiv
 
 **`--copy-in`** copies `.claude/`, `.claude.json`, and `secrets.env` (if present) into the container. **Not recommended for production use** — copying credentials breaks OAuth refresh token rotation. When one container refreshes its token, the other's copy is revoked. Use the shared mount approach instead (see [ISOLATION.md](ISOLATION.md)). Can be useful for one-time experimentation.
 
-**`--setup-interactive`** bootstraps interactive Claude from a saved refresh token:
-1. First time: do a browser login (`claude` → login → `/exit`), then save the refresh token with `ateam secret CLAUDE_CODE_OAUTH_REFRESH_TOKEN --set`
-2. Any new container: `--setup-interactive` exchanges the refresh token for full credentials
+To log into the config directory an unattended agent uses, run [`ateam login`](#ateam-login).
 
 ### `ateam container-cp`
 
@@ -390,24 +386,46 @@ ateam container-cp --profile my-app
 
 Requires a pre-built linux binary (`make companion` produces `build/ateam-linux-<arch>`).
 
-### `ateam claude`
+### `ateam login`
 
-Run interactive claude inside a Docker container with a shared config directory. Only works on Linux inside a container.
+Log into the agent CLI that unattended runs use, in the config directory they use. Works on any OS.
 
 ```bash
-ateam claude                                       # uses <orgDir>/claude_linux_shared
-ateam claude --config-dir ~/shared_claude           # explicit path
+ateam login                        # the default profile's agent
+ateam login --profile codex
+ateam login --agent claude-high
+ateam login --dry-run              # show the command and env, run nothing
+ateam login -- --help              # pass args to the CLI's login command
+```
+
+| Flag | Description |
+|------|-------------|
+| `--profile NAME` | Pick the agent through a profile (default: the project's default profile) |
+| `--agent NAME` | Pick an agent block directly |
+| `--dry-run` | Show what would be executed without running |
+
+The agent is chosen the way a run chooses it (`--agent`, else `--profile`, else `config.toml`). Its `config_dir` is resolved like the runner does (`~` expanded, relative paths under `.ateam/` or `.ateamorg/`) and exported as `CLAUDE_CONFIG_DIR` (claude) or `CODEX_HOME` (codex); with no `config_dir`, the CLI's own default directory is used. The agent's `env` map is applied and the credential env vars that would shadow a stored login (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) are removed, then `claude auth login` or `codex login` runs, followed by the CLI's auth status. The first line of output names the agent and what selected it, so re-login after an expiry needs no guessing.
+
+### `ateam claude`
+
+Run interactive claude inside a Docker container with the unattended agent's config directory. Only works on Linux inside a container; on the host use `ateam login`.
+
+```bash
+ateam claude                                       # default profile's agent config_dir
+ateam claude --config-dir ~/shared_claude           # explicit path (e.g. a mounted dir)
+ateam claude --profile codex                        # error: not a claude agent
 ateam claude --raw                                  # no default flags
 ateam claude -- --name "my-session"                 # pass args to claude
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--config-dir PATH` | Shared config directory (default: `<orgDir>/claude_linux_shared`) |
+| `--config-dir PATH` | Config directory (default: the resolved agent's `config_dir`; none → claude's own default) |
+| `--profile NAME` / `--agent NAME` | Pick the agent, as for `ateam login` |
 | `--raw` | Run claude without `--dangerously-skip-permissions` and `--remote-control` |
 | `--dry-run` | Show what would be executed without running |
 
-Sets `CLAUDE_CONFIG_DIR` so all Claude state (`.credentials.json`, `.claude.json`, `settings.json`) lives in a single mounted directory. Unsets `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` to avoid auth conflicts.
+Sets `CLAUDE_CONFIG_DIR` so all Claude state (`.credentials.json`, `.claude.json`, `settings.json`) lives in one directory. Unsets `CLAUDE_CODE_OAUTH_TOKEN` and `ANTHROPIC_API_KEY` to avoid auth conflicts.
 
 **Recommended mount setup** (from the host):
 ```bash

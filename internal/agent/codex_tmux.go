@@ -20,11 +20,13 @@ import (
 // CodexTmuxAgent drives the interactive Codex TUI through tmux so TUI-only
 // input such as /review can be used from normal ATeam runs.
 //
-// Auth and config: this agent does NOT manipulate `$CODEX_HOME`. Codex reads
-// `~/.codex/` natively. The first trust dialog in a new workdir is
-// auto-accepted (Enter) which causes Codex to write one
-// `[projects."<workdir>"] trust_level = "trusted"` entry to the user's
-// `~/.codex/config.toml` — identical to running codex by hand. See
+// Auth and config: by default this agent does NOT manipulate `$CODEX_HOME`
+// and Codex reads `~/.codex/` natively. An agent block with `config_dir`
+// sets CODEX_HOME for the TUI (via req.Env), and the session-log tail
+// follows it. The first trust dialog in a new workdir is auto-accepted
+// (Enter) which causes Codex to write one
+// `[projects."<workdir>"] trust_level = "trusted"` entry to the active
+// `config.toml` — identical to running codex by hand. See
 // `plans/feature_codex_tmux_agent.md` for the full rationale.
 type CodexTmuxAgent struct {
 	Command          string
@@ -177,7 +179,7 @@ func (c *CodexTmuxAgent) run(ctx context.Context, req Request, ch chan<- StreamE
 		tailWg.Add(1)
 		go func() {
 			defer tailWg.Done()
-			codextui.TailSessionLog(tailCtx, "", req.WorkDir, start, marker, func(line []byte) {
+			codextui.TailSessionLog(tailCtx, env["CODEX_HOME"], req.WorkDir, start, marker, func(line []byte) {
 				_, _ = streamWriter.Write(line)
 				_ = streamWriter.Flush()
 			})

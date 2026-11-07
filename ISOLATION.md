@@ -67,7 +67,9 @@ agent "claude" {
 }
 ```
 
-The agent reads/writes `.credentials.json`, `.claude.json`, `settings.json` from that directory. See `agent.config_dir` in [CONFIG.md → Agents](CONFIG.md#agents) and [Template Variables](CONFIG.md#template-variables) (you can also use `{{ROLE}}` for per-role isolation).
+The agent reads/writes `.credentials.json`, `.claude.json`, `settings.json` from that directory. For codex agents `config_dir` sets `CODEX_HOME` instead. See `agent.config_dir` in [CONFIG.md → Agents](CONFIG.md#agents) and [Template Variables](CONFIG.md#template-variables) (you can also use `{{ROLE}}` for per-role isolation).
+
+To authenticate that directory, run `ateam login` (optionally `--profile` / `--agent`): it resolves the agent's `config_dir`, strips the credential env vars that would shadow a stored login, and runs the CLI's own login command, then prints its auth status. Repeat it when the login expires; no need to remember which directory the unattended agent uses.
 
 For *containerized* shared agent configuration across multiple containers, see [Shared Linux agent config](#shared-linux-agent-config) below.
 
@@ -435,6 +437,7 @@ docker run -it \
 # 3. Inside the container: login interactively
 ateam claude --config-dir ~/shared_claude
 # Complete the login flow, then /exit
+# (or, with config_dir = "~/shared_claude" on the agent: ateam login)
 
 # 4. Generate a headless token for ateam exec
 claude setup-token

@@ -460,8 +460,8 @@ Empty lines in the multi-line prompt are ignored. Option A is preferred when the
 
 **Constraints**:
 - **Host-only** — pairing with `container != "none"` is rejected at runner construction. `codex-tmux` needs a project (`.ateam/` directory) for its tmux socket; running outside a project errors with actionable guidance.
-- **Auth** — reuses your existing `~/.codex/auth.json` natively. ateam does not stage a custom `CODEX_HOME`. The first run in a new workdir auto-accepts codex's trust dialog and persists one `[projects."<workdir>"]` entry in your `~/.codex/config.toml` — same outcome as a hand-typed `codex` session.
-- **Token tracking** — costs and token usage are mined from `~/.codex/sessions/<date>/rollout-*.jsonl` after the run.
+- **Auth** — reuses your existing `~/.codex/auth.json` natively unless the agent block sets `config_dir`, which becomes `CODEX_HOME` for the run (log into it with `ateam login --agent codex-tmux`). The first run in a new workdir auto-accepts codex's trust dialog and persists one `[projects."<workdir>"]` entry in the active `config.toml` — same outcome as a hand-typed `codex` session.
+- **Token tracking** — costs and token usage are mined from `<CODEX_HOME>/sessions/<date>/rollout-*.jsonl` after the run.
 - **Concurrency** — multiple `codex-tmux` runs in different projects are isolated by EXEC_ID-based sockets and session names; concurrent runs in the same workdir use an EXEC_ID-tagged marker in the prompt body to keep their token stats from swapping. For slash-command prompts (where no marker can be injected), concurrent runs in the same workdir may misattribute token stats — open the issue if you hit it.
 
 See `plans/feature_codex_tmux_agent.md` for the design rationale.

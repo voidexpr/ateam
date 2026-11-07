@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
-	"time"
 
 	"github.com/ateam/internal/secret"
 )
@@ -195,123 +194,6 @@ func ValidateTarget(target AuthMethod, status AuthStatus) string {
 	return ""
 }
 
-// CleanupResult describes one cleanup action taken or skipped.
-type CleanupResult struct {
-	Description string
-	Action      string // "done", "skip", "would"
-}
-
-// EnsureClaudeState creates configDir/.claude.json if it doesn't exist.
-// Without this file Claude Code treats the install as fresh and prompts
-// for auth method selection even when a token is in the environment.
-func EnsureClaudeState(configDir string, dryRun bool) CleanupResult {
-	statePath := filepath.Join(configDir, ".claude.json")
-	if _, err := os.Stat(statePath); err == nil {
-		return CleanupResult{".claude.json", "skip"}
-	}
-	if dryRun {
-		return CleanupResult{".claude.json (create with firstStartTime)", "would"}
-	}
-	if err := os.MkdirAll(configDir, 0700); err != nil {
-		return CleanupResult{".claude.json (mkdir failed: " + err.Error() + ")", "skip"}
-	}
-	content := `{"firstStartTime":"` + time.Now().UTC().Format(time.RFC3339Nano) + `"}` + "\n"
-	if err := os.WriteFile(statePath, []byte(content), 0600); err != nil {
-		return CleanupResult{".claude.json (create failed: " + err.Error() + ")", "skip"}
-	}
-	return CleanupResult{".claude.json (created)", "done"}
-}
-
-// preserveEntries lists files/dirs in configDir to keep during cleanup.
-// Everything else is removed to ensure a clean auth state.
-var preserveEntries = map[string]bool{
-	".claude.json":      true,
-	".credentials.json": true,
-	"settings.json":     true,
-	"plugins":           true,
-	"skills":            true,
-}
-
-// Cleanup removes everything from configDir except preserveEntries.
-// If wipeAll is true, only settings.json is preserved.
-// If dryRun is true, reports what would happen without making changes.
-func Cleanup(configDir string, wipeAll, dryRun bool) []CleanupResult {
-	var results []CleanupResult
-
-	entries, err := os.ReadDir(configDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return results
-		}
-		results = append(results, CleanupResult{"read " + configDir + ": " + err.Error(), "skip"})
-		return results
-	}
-
-	for _, e := range entries {
-		name := e.Name()
-		if !wipeAll && preserveEntries[name] {
-			continue
-		}
-		// Always keep settings.json even with --wipe-config-clean.
-		if name == "settings.json" {
-			continue
-		}
-		path := filepath.Join(configDir, name)
-		if e.IsDir() {
-			results = append(results, removeDirAction(path, name+"/", dryRun))
-		} else {
-			results = append(results, removeFileAction(path, name, dryRun))
-		}
-	}
-
-	if goruntime.GOOS == "darwin" {
-		if hasKeychainEntry() {
-			if dryRun {
-				results = append(results, CleanupResult{"macOS Keychain (Claude Code-credentials)", "would"})
-			} else {
-				_ = exec.Command("security", "delete-generic-password", "-s", "Claude Code-credentials").Run()
-				results = append(results, CleanupResult{"macOS Keychain (Claude Code-credentials)", "done"})
-			}
-		}
-	}
-
-	return results
-}
-
-// BuildCleanEnv returns os.Environ() filtered to remove env vars
-// that conflict with the target method. If refreshToken is non-empty,
-// it's added as CLAUDE_CODE_OAUTH_REFRESH_TOKEN with the required scopes.
-func BuildCleanEnv(target AuthMethod, refreshToken string) []string {
-	exclude := map[string]bool{}
-	switch target {
-	case AuthOAuth:
-		exclude["ANTHROPIC_API_KEY"] = true
-	case AuthAPI:
-		exclude["CLAUDE_CODE_OAUTH_TOKEN"] = true
-	case AuthRegular:
-		exclude["ANTHROPIC_API_KEY"] = true
-		exclude["CLAUDE_CODE_OAUTH_TOKEN"] = true
-	}
-
-	env := os.Environ()
-	filtered := make([]string, 0, len(env))
-	for _, e := range env {
-		key, _, _ := strings.Cut(e, "=")
-		if !exclude[key] {
-			filtered = append(filtered, e)
-		}
-	}
-
-	if refreshToken != "" {
-		filtered = append(filtered,
-			"CLAUDE_CODE_OAUTH_REFRESH_TOKEN="+refreshToken,
-			"CLAUDE_CODE_OAUTH_SCOPES=user:profile user:inference",
-		)
-	}
-
-	return filtered
-}
-
 // HasRefreshToken returns true if a refresh token is available from any source.
 func (s *AuthStatus) HasRefreshToken() bool {
 	return s.HasRefreshTokenEnv || s.HasRefreshTokenSecret || s.HasRefreshTokenCred
@@ -335,19 +217,6 @@ func ExtractRefreshToken(configDir string) string {
 	return creds.ClaudeAiOauth.RefreshToken
 }
 
-// ResolveRefreshToken returns the refresh token from the best available source:
-// env var > ateam secret > .credentials.json.
-func ResolveRefreshToken(configDir, projectDir, orgDir string) string {
-	if val := os.Getenv("CLAUDE_CODE_OAUTH_REFRESH_TOKEN"); val != "" {
-		return val
-	}
-	resolver := secret.NewResolver(projectDir, orgDir, secret.DefaultBackend(), nil)
-	if r := resolver.Resolve("CLAUDE_CODE_OAUTH_REFRESH_TOKEN"); r.Found && r.Source != "env" {
-		return r.Value
-	}
-	return ExtractRefreshToken(configDir)
-}
-
 func credFileHasTokens(path string) bool {
 	data, err := os.ReadFile(path)
 	if err != nil || len(data) == 0 {
@@ -362,34 +231,6 @@ func credFileHasTokens(path string) bool {
 
 func hasKeychainEntry() bool {
 	return exec.Command("security", "find-generic-password", "-s", "Claude Code-credentials").Run() == nil
-}
-
-func removeFileAction(path, desc string, dryRun bool) CleanupResult {
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
-		return CleanupResult{desc, "skip"}
-	}
-	if dryRun {
-		return CleanupResult{desc, "would"}
-	}
-	if err := os.Remove(path); err != nil {
-		return CleanupResult{desc + " (remove failed: " + err.Error() + ")", "skip"}
-	}
-	return CleanupResult{desc, "done"}
-}
-
-func removeDirAction(path, desc string, dryRun bool) CleanupResult {
-	info, err := os.Stat(path)
-	if err != nil || !info.IsDir() {
-		return CleanupResult{desc, "skip"}
-	}
-	if dryRun {
-		return CleanupResult{desc, "would"}
-	}
-	if err := os.RemoveAll(path); err != nil {
-		return CleanupResult{desc + " (remove failed: " + err.Error() + ")", "skip"}
-	}
-	return CleanupResult{desc, "done"}
 }
 
 func itoa(n int) string {

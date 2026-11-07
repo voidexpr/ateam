@@ -887,10 +887,15 @@ func (r *AgentExecutor) buildRequest(prompt string, tmplVars TemplateVars, cwd, 
 		}
 	}
 
-	// Resolve CLAUDE_CONFIG_DIR for isolated agents.
-	// Relative config_dir is resolved from ProjectDir (.ateam/); absolute is used as-is.
+	// Resolve config_dir for isolated agents into the env var the agent CLI
+	// reads (CLAUDE_CONFIG_DIR, CODEX_HOME). Relative config_dir is resolved
+	// from the state dir (.ateam/, else .ateamorg/); absolute is used as-is.
 	configDir := display.ExpandHome(ResolveTemplateString(r.ConfigDir, tmplVars))
-	if configDir != "" {
+	agentType := ""
+	if r.Agent != nil {
+		agentType = r.Agent.Name()
+	}
+	if envVar := agent.ConfigDirEnv(agentType); configDir != "" && envVar != "" {
 		var configPath string
 		if filepath.IsAbs(configDir) {
 			configPath = configDir
@@ -904,7 +909,7 @@ func (r *AgentExecutor) buildRequest(prompt string, tmplVars TemplateVars, cwd, 
 		if reqEnv == nil {
 			reqEnv = map[string]string{}
 		}
-		reqEnv["CLAUDE_CONFIG_DIR"] = configPath
+		reqEnv[envVar] = configPath
 	}
 
 	// On host execution (no container), prepend the per-project ateam

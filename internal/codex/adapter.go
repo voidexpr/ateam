@@ -425,7 +425,7 @@ func RunTmux(ctx context.Context, cfg TmuxConfig) (TmuxResult, error) {
 	if !delivery.IsSlashCommand {
 		marker = SessionLogMarker(cfg.ExecID)
 	}
-	if logPath, ferr := FindSessionLog("", cfg.WorkDir, started, marker); ferr == nil && logPath != "" {
+	if logPath, ferr := FindSessionLog(cfg.Env["CODEX_HOME"], cfg.WorkDir, started, marker); ferr == nil && logPath != "" {
 		if stats, rerr := ReadSessionStats(logPath); rerr == nil {
 			result.SessionStats = stats
 		}

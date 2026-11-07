@@ -59,8 +59,10 @@ exit
 
 Inside the container:
 ```bash
-ateam agent-config --setup-interactive
-# Prints "Login successful." → starts interactive claude session
+ateam login
+# Runs `claude auth login` against the agent's config_dir, then prints
+# `claude auth status`. The refresh-token bootstrap this step used to
+# exercise (`agent-config --setup-interactive`) was removed.
 ```
 
 ### 5. Test: shared volume persistence
@@ -89,7 +91,7 @@ The refresh token bootstrap flow:
 2. Stopped that container
 3. Started a fresh container (no volume sharing)
 4. Set the refresh token: `export CLAUDE_CODE_OAUTH_REFRESH_TOKEN=<token>`
-5. Ran `ateam agent-config --setup-interactive`
+5. Ran `ateam agent-config --setup-interactive` (since removed; `ateam login` is the replacement)
 6. Got "Login successful." → interactive Claude session worked
 
 Key finding: the token shown in the browser during OAuth is NOT the refresh token. The refresh token must be extracted from `~/.claude/.credentials.json` after a successful login.

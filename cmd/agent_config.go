@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/root"
@@ -31,8 +30,7 @@ var claudeEssentials = []string{
 }
 
 var (
-	agentCfgAudit            bool
-	agentCfgSetupInteractive bool
+	agentCfgAudit bool
 
 	agentCfgCopyOut        bool
 	agentCfgCopyIn         bool
@@ -66,16 +64,13 @@ COPY CONFIG INTO A CONTAINER:
   ateam agent-config --copy-in --container my-app
   ateam agent-config --copy-in --container my-app --force --copy-ateam
 
-SETUP INTERACTIVE (in a container):
-  ateam agent-config --setup-interactive
-  # Bootstraps credentials from refresh token, then starts claude`,
+To log into the config dir an unattended agent uses, run 'ateam login'.`,
 	Args: cobra.ArbitraryArgs,
 	RunE: runAgentConfig,
 }
 
 func init() {
 	agentConfigCmd.Flags().BoolVar(&agentCfgAudit, "audit", false, "show auth state, tokens, and export instructions")
-	agentConfigCmd.Flags().BoolVar(&agentCfgSetupInteractive, "setup-interactive", false, "bootstrap interactive session from refresh token")
 	agentConfigCmd.Flags().BoolVar(&agentCfgCopyOut, "copy-out", false, "copy agent config from a container to a local directory")
 	agentConfigCmd.Flags().BoolVar(&agentCfgCopyIn, "copy-in", false, "copy agent config into a container from a local directory")
 	agentConfigCmd.Flags().StringVar(&agentCfgContainer, "container", "", "target container name (for --copy-out, --copy-in, --audit)")
@@ -118,13 +113,6 @@ func runAgentConfig(cmd *cobra.Command, args []string) error {
 			return runRemoteAudit(agentCfgContainer, agentCfgHome)
 		}
 		return runAgentConfigAudit(projectDir, orgDir)
-	}
-
-	if agentCfgSetupInteractive {
-		if agentCfgContainer != "" {
-			return fmt.Errorf("--setup-interactive runs locally, not in a container (--container is not supported)")
-		}
-		return runSetupInteractive(projectDir, orgDir, args)
 	}
 
 	// No action flags → default to audit.
@@ -228,24 +216,6 @@ func runClaudeAuthStatus(configDir string) claudeAuthResult {
 	}
 }
 
-func runSetupInteractive(projectDir, orgDir string, args []string) error {
-	fmt.Println("[experimental] Setting up interactive Claude Code session...")
-	fmt.Println()
-
-	status := agent.DetectAuth(projectDir, orgDir)
-
-	// Clean stale state
-	results := agent.Cleanup(status.ConfigDir, false, false)
-	results = append(results, agent.EnsureClaudeState(status.ConfigDir, false))
-	for _, r := range results {
-		if r.Action != "skip" {
-			fmt.Printf("  [%s] %s\n", r.Action, r.Description)
-		}
-	}
-
-	return execClaude(agent.AuthRegular, status, projectDir, orgDir, args)
-}
-
 func printAuthSources(s agent.AuthStatus) {
 	if val := os.Getenv("ANTHROPIC_API_KEY"); val != "" {
 		fmt.Printf("  ANTHROPIC_API_KEY:            %s\n", secret.MaskValue(val))
@@ -338,33 +308,6 @@ func printSharedConfigStatus(orgDir string) {
 
 func lookupEnvOptional() (*root.ResolvedEnv, error) {
 	return root.Lookup("", "")
-}
-
-func execClaude(target agent.AuthMethod, status agent.AuthStatus, projectDir, orgDir string, extraArgs []string) error {
-	binary, err := exec.LookPath("claude")
-	if err != nil {
-		return fmt.Errorf("claude not found in PATH: %w", err)
-	}
-
-	refreshToken := agent.ResolveRefreshToken(status.ConfigDir, projectDir, orgDir)
-
-	if refreshToken != "" {
-		fmt.Println("\nBootstrapping credentials from refresh token...")
-		loginEnv := agent.BuildCleanEnv(target, refreshToken)
-		loginCmd := exec.Command(binary, "auth", "login")
-		loginCmd.Env = loginEnv
-		loginCmd.Stdout = os.Stdout
-		loginCmd.Stderr = os.Stderr
-		if err := loginCmd.Run(); err != nil {
-			return fmt.Errorf("refresh token login failed: %w", err)
-		}
-	}
-
-	argv := append([]string{"claude"}, extraArgs...)
-	env := agent.BuildCleanEnv(target, "")
-
-	fmt.Printf("Exec: %s %v\n", binary, extraArgs)
-	return syscall.Exec(binary, argv, env)
 }
 
 // ---------------------------------------------------------------------------
