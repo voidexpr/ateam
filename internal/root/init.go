@@ -109,7 +109,7 @@ func InitProject(path, homeDir string, opts InitProjectOpts) (string, error) {
 	}
 	db.Close()
 
-	if err := Register(homeDir, RegistryEntry{Name: name, Path: path, KeychainKey: generateKeychainKey(name, projDir)}); err != nil {
+	if err := Register(homeDir, RegistryEntry{Name: name, Path: path, KeychainKey: NewKeychainKey(name, projDir)}); err != nil {
 		return "", err
 	}
 	return projDir, nil
@@ -225,9 +225,9 @@ func EnsureProjectGitignore(projDir string) error {
 	return os.WriteFile(path, []byte(out), 0644)
 }
 
-// generateKeychainKey creates a stable identifier for keychain lookups.
-// Format: <name>-<first 6 hex of SHA-256(absPath)>.
-func generateKeychainKey(name, absPath string) string {
+// NewKeychainKey creates a stable identifier for project-scoped keychain
+// lookups. Format: <name>-<first 6 hex of SHA-256(absPath)>.
+func NewKeychainKey(name, absPath string) string {
 	h := sha256.Sum256([]byte(absPath))
 	return fmt.Sprintf("%s-%x", name, h[:3])
 }

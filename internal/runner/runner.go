@@ -19,6 +19,7 @@ import (
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/fsclone"
 	"github.com/ateam/internal/gitutil"
+	"github.com/ateam/internal/runtime"
 )
 
 const (
@@ -258,7 +259,7 @@ func (r *AgentExecutor) StateDir() string {
 	if r.HomeDir == "" {
 		return ""
 	}
-	return filepath.Join(r.HomeDir, "state")
+	return filepath.Join(r.HomeDir, runtime.StateSubdir)
 }
 
 // PreparedRun is the handle returned by Prepare(). It carries the

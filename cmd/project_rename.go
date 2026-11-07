@@ -75,6 +75,11 @@ func reregisterProject(env *root.ResolvedEnv, prefix string) error {
 	if entry.KeychainKey == "" {
 		entry.KeychainKey = env.KeychainKey
 	}
+	if entry.KeychainKey == "" {
+		// Never registered (e.g. migrated by hand): give project-scoped
+		// keychain secrets a stable account prefix.
+		entry.KeychainKey = root.NewKeychainKey(env.ProjectName, env.ProjectDir)
+	}
 	return root.Register(env.HomeDir, entry)
 }
 

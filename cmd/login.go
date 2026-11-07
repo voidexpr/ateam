@@ -111,7 +111,7 @@ func resolveLoginTarget(env *root.ResolvedEnv, rtCfg *runtime.Config, profileFla
 
 // agentConfigDirPath resolves an agent's config_dir the way the runner does:
 // ~ expanded, relative paths anchored at the state dir (.ateam/, else
-// .ateamorg/). Template variables cannot be resolved outside a run.
+// ~/.ateam/state). Template variables cannot be resolved outside a run.
 func agentConfigDirPath(ac *runtime.AgentConfig, stateDir string) (string, error) {
 	dir := display.ExpandHome(ac.ConfigDir)
 	switch {
@@ -122,7 +122,7 @@ func agentConfigDirPath(ac *runtime.AgentConfig, stateDir string) (string, error
 	case filepath.IsAbs(dir):
 		return dir, nil
 	case stateDir == "":
-		return "", fmt.Errorf("agent %q has a relative config_dir %q but no .ateam/ or .ateamorg/ directory was found to anchor it", ac.Name, ac.ConfigDir)
+		return "", fmt.Errorf("agent %q has a relative config_dir %q but no project .ateam/ or user ateam directory was found to anchor it", ac.Name, ac.ConfigDir)
 	}
 	return filepath.Join(stateDir, dir), nil
 }
@@ -169,7 +169,7 @@ func agentBinary(t loginTarget) (string, error) {
 
 func runLogin(cmd *cobra.Command, args []string) error {
 	env, _ := lookupEnvOptional()
-	rtCfg, err := runtime.Load(envLayers(env))
+	rtCfg, err := loadRuntime(env)
 	if err != nil {
 		return err
 	}

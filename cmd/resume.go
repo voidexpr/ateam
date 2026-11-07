@@ -15,7 +15,6 @@ import (
 	"github.com/ateam/internal/calldb"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
-	"github.com/ateam/internal/runtime"
 	"github.com/ateam/internal/streamutil"
 	"github.com/spf13/cobra"
 )
@@ -470,7 +469,7 @@ func configDirFromRuntime(env *root.ResolvedEnv, row *calldb.RecentRow) string {
 	if env == nil || row == nil {
 		return ""
 	}
-	cfg, err := runtime.Load(env.Layers)
+	cfg, err := loadRuntime(env)
 	if err != nil || cfg == nil {
 		return ""
 	}

@@ -438,6 +438,9 @@ func Resolve(homeOverride, projectOverride string) (*ResolvedEnv, error) {
 	if projectOverride != "" && env.ProjectDir == "" {
 		return nil, fmt.Errorf("--project %q: no %s/ with a project block found at or above this path", projectOverride, DirName)
 	}
+	if err := env.resolveWorkDir(""); err != nil {
+		return nil, err
+	}
 	return env, nil
 }
 
@@ -495,9 +498,6 @@ func resolveFrom(homeOverride, start string) (*ResolvedEnv, error) {
 			fmt.Fprintf(os.Stderr, "ateam: warning: cannot update %s/.gitignore: %v\n", DirName, err)
 		}
 	}
-	if err := env.resolveWorkDir(""); err != nil {
-		return nil, err
-	}
 	return env, nil
 }
 
@@ -523,6 +523,20 @@ func resolveHome(override string) (string, error) {
 // A legacy layout (.ateamorg/, or a config.toml inside .ateam/) is an
 // error that explains the move.
 func discover(start, home string) (projectDir string, ancestors []string, err error) {
+	// A ~/.ateamorg from a previous version is only an error when the home
+	// layer is the default one (an explicit ATEAM_HOME / --home means the
+	// user already chose a location, and tests and containers do that).
+	// The walk below applies the same exemption when it passes through $HOME.
+	defaultHome := os.Getenv(runtime.HomeEnv) == "" && home == realPath(runtime.HomeDir())
+	userHome := ""
+	if h, herr := os.UserHomeDir(); herr == nil && h != "" {
+		userHome = realPath(h)
+	}
+	legacyOrgAt := func(dir string) bool {
+		_, statErr := os.Stat(filepath.Join(dir, legacyOrgDirName))
+		return statErr == nil
+	}
+
 	dir := filepath.Clean(start)
 	seen := map[string]bool{}
 	for {
@@ -532,7 +546,7 @@ func discover(start, home string) (projectDir string, ancestors []string, err er
 		} else if info, statErr := os.Stat(filepath.Join(dir, DirName)); statErr == nil && info.IsDir() {
 			candidate = filepath.Join(dir, DirName)
 		}
-		if _, statErr := os.Stat(filepath.Join(dir, legacyOrgDirName)); statErr == nil {
+		if (defaultHome || dir != userHome) && legacyOrgAt(dir) {
 			return "", nil, legacyLayoutError(filepath.Join(dir, legacyOrgDirName))
 		}
 		if candidate != "" {
@@ -555,15 +569,8 @@ func discover(start, home string) (projectDir string, ancestors []string, err er
 		}
 		dir = parent
 	}
-	// A ~/.ateamorg from a previous version is only an error when the home
-	// layer is the default one (an explicit ATEAM_HOME / --home means the
-	// user already chose a location, and tests and containers do that).
-	if os.Getenv(runtime.HomeEnv) == "" && home == realPath(runtime.HomeDir()) {
-		if userHome, herr := os.UserHomeDir(); herr == nil && userHome != "" {
-			if _, statErr := os.Stat(filepath.Join(userHome, legacyOrgDirName)); statErr == nil {
-				return "", nil, legacyLayoutError(filepath.Join(userHome, legacyOrgDirName))
-			}
-		}
+	if defaultHome && userHome != "" && legacyOrgAt(userHome) {
+		return "", nil, legacyLayoutError(filepath.Join(userHome, legacyOrgDirName))
 	}
 	return projectDir, ancestors, nil
 }
@@ -576,7 +583,7 @@ func legacyLayoutError(path string) error {
 		"  2. in each project, replace .ateam/config.toml with project/role/supervisor blocks in .ateam/ateam.hcl\n"+
 		"     (ateam init --name NAME in a copy shows the shape) and rename runtime.hcl to ateam.hcl\n"+
 		"  3. delete the .ateamorg/ directory and config.toml files\n"+
-		"See CONFIG.md for the layout", path)
+		"scripts/migrate-ateamorg.sh in the ateam repository does these steps. See CONFIG.md for the layout", path)
 }
 
 // ResolveStreamPath resolves a relative stream_file path recorded in the

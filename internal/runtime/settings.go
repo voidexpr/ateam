@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/ateam/internal/config"
@@ -205,7 +206,7 @@ func (c *Config) mergeContainerExtra(h hclContainerExtra, label string) {
 // Used by discovery to tell a project layer from a config-only layer
 // without loading the whole configuration.
 func ProjectName(dir string) string {
-	data, err := os.ReadFile(dir + string(os.PathSeparator) + ConfigFile)
+	data, err := os.ReadFile(filepath.Join(dir, ConfigFile))
 	if err != nil {
 		return ""
 	}

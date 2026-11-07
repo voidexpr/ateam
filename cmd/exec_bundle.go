@@ -79,7 +79,7 @@ func buildRunner(env *root.ResolvedEnv, spec RunnerSpec) (*runner.AgentExecutor,
 // stderr. Best-effort: a config that fails to load here already failed
 // louder in resolveRunner.
 func warnModelConfig(env *root.ResolvedEnv, r *runner.AgentExecutor, o RunnerOverrides) {
-	rtCfg, err := runtime.Load(env.Layers)
+	rtCfg, err := loadRuntime(env)
 	if err != nil {
 		return
 	}

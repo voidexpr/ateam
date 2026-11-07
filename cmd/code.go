@@ -14,7 +14,6 @@ import (
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
-	"github.com/ateam/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -418,7 +417,7 @@ func checkDockerInDocker(env *root.ResolvedEnv, supervisorProfile, subRunProfile
 	if supervisorProfile == "" && subRunProfile == "" {
 		return nil
 	}
-	rtCfg, err := runtime.Load(env.Layers)
+	rtCfg, err := loadRuntime(env)
 	if err != nil {
 		return nil // let the runner resolution surface this error later
 	}

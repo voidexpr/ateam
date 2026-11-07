@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/ateam/internal/root"
-	"github.com/ateam/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -37,7 +36,7 @@ func runContainerCp(cmd *cobra.Command, args []string) error {
 
 	if containerName == "" && containerCpProfile != "" {
 		env, _ := root.Lookup("", "")
-		rtCfg, err := runtime.Load(envLayers(env))
+		rtCfg, err := loadRuntime(env)
 		if err != nil {
 			return fmt.Errorf("cannot load runtime.hcl: %w", err)
 		}

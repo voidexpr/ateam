@@ -13,7 +13,7 @@ import (
 // printModelResolution prints which model and effort the runner will use
 // and the layer chain that decided it. Used by every --dry-run.
 func printModelResolution(r *runner.AgentExecutor, env *root.ResolvedEnv) {
-	rtCfg, err := runtime.Load(env.Layers)
+	rtCfg, err := loadRuntime(env)
 	if err != nil {
 		return
 	}

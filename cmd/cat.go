@@ -148,7 +148,7 @@ func runCatIDs(args []string) error {
 	}
 
 	// Load runtime config for agent pricing lookup.
-	rtCfg, _ := runtime.Load(env.Layers)
+	rtCfg, _ := loadRuntime(env)
 	agentPricing := func(agentName string) (agent.PricingTable, string) {
 		if rtCfg == nil {
 			return nil, ""

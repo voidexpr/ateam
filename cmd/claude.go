@@ -9,7 +9,6 @@ import (
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/container"
-	"github.com/ateam/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -63,7 +62,7 @@ func runClaude(cmd *cobra.Command, args []string) error {
 	}
 
 	env, _ := lookupEnvOptional()
-	rtCfg, err := runtime.Load(envLayers(env))
+	rtCfg, err := loadRuntime(env)
 	if err != nil {
 		return err
 	}

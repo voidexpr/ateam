@@ -103,7 +103,7 @@ func printEnv(env *root.ResolvedEnv) error {
 func printRuntimeSection(env *root.ResolvedEnv, cwd string) {
 	fmt.Println("\nRuntime")
 
-	rtCfg, err := runtime.Load(env.Layers)
+	rtCfg, err := loadRuntime(env)
 	if err != nil {
 		fmt.Printf("  Warning: cannot load runtime.hcl: %v\n", err)
 	}

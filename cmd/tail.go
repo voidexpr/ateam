@@ -7,7 +7,6 @@ import (
 
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
-	"github.com/ateam/internal/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -76,7 +75,7 @@ func runTail(cmd *cobra.Command, args []string) error {
 	tailer.FinalMessageOnly = tailFinalMessage
 
 	// Load runtime config to provide pricing for cost estimation.
-	if rtCfg, err := runtime.Load(env.Layers); err == nil {
+	if rtCfg, err := loadRuntime(env); err == nil {
 		tailer.Pricing, tailer.DefaultModel = mergedPricingFromConfig(rtCfg)
 	}
 

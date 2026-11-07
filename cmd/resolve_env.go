@@ -48,6 +48,17 @@ func envLayers(env *root.ResolvedEnv) []string {
 	return []string{runtime.HomeDir()}
 }
 
+// loadRuntime returns the configuration env already carries (root.Resolve
+// loads it), parsing the layers only for an env built without one or when
+// no environment could be resolved. For read-only uses; callers that
+// mutate agent blocks (credential isolation) load their own copy.
+func loadRuntime(env *root.ResolvedEnv) (*runtime.Config, error) {
+	if env != nil && env.Runtime != nil {
+		return env.Runtime, nil
+	}
+	return runtime.Load(envLayers(env))
+}
+
 // applyWorkDirFlag finalises env.WorkDir using this precedence:
 //
 //  1. Explicit --work-dir wins.
