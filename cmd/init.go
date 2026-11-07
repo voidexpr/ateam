@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	initName      string
-	initRoles     []string
-	initAutoSetup bool
-	initDebug     bool
+	initName        string
+	initRoles       []string
+	initAutoSetup   bool
+	initDebug       bool
+	initAgentConfig string
 )
 
 var initCmd = &cobra.Command{
@@ -43,6 +44,7 @@ func init() {
 	initCmd.Flags().StringSliceVar(&initRoles, "role", nil, "roles to enable (if omitted, uses defaults)")
 	initCmd.Flags().BoolVar(&initAutoSetup, "auto-setup", false, "run auto-setup after initialization")
 	initCmd.Flags().BoolVar(&initDebug, "debug", false, "print step-by-step progress to stderr")
+	initCmd.Flags().StringVar(&initAgentConfig, "agent-config", "", "where unattended agents keep their config: home, project, or none (asked on first use; see ateam setup)")
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
@@ -71,6 +73,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 		homeDir = runtime.HomeDir()
 	}
 	dbg("home: " + homeDir)
+	_, statErr := os.Stat(filepath.Join(homeDir, root.ConfigFile))
+	firstUse := statErr != nil
 
 	// Roles: if --role provided, those are enabled, rest disabled; otherwise use the defaults
 	var enabledRoles []string
@@ -106,9 +110,18 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 	dbg("printEnv done")
 
+	// First use of the user directory, or an explicit choice: offer the
+	// separate agent config dir now rather than leaving it to be discovered.
+	if firstUse || initAgentConfig != "" {
+		fmt.Println()
+		if err := setupAgentConfigDirs(env, initAgentConfig, nil, firstUse); err != nil {
+			return err
+		}
+	}
+
 	fmt.Printf("\nNext steps:\n")
 	fmt.Printf("\n  1. Edit %s/%s to enable/disable roles and pick a default profile\n", root.DirName, root.ConfigFile)
-	fmt.Printf("\n  2. Log the unattended agent in: ateam login (see 'ateam env' for the config dir it uses)\n")
+	fmt.Printf("\n  2. Give unattended agents their own config dir (ateam setup), then log in: ateam login\n")
 	fmt.Printf("\n  Main commands:\n")
 	fmt.Printf("    ateam env       show current environment and configuration\n")
 	fmt.Printf("    ateam report    run role agents to analyze the project\n")

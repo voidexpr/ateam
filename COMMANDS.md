@@ -69,6 +69,7 @@ ateam init --auto-setup                                # then let an agent pick 
 | `--name NAME` | Project name: unique across your projects, `[a-z0-9._-]`. Defaults to the directory name |
 | `--role LIST` | Roles to enable (comma-separated); others are set to `off` |
 | `--auto-setup` | Run `ateam auto-setup` right after |
+| `--agent-config CHOICE` | Where unattended agents keep their config: `home`, `project` or `none`; asked on first use of `~/.ateam` when run from a terminal (see `ateam setup`) |
 | `--debug` | Print step-by-step progress |
 
 ### `ateam auto-setup`
@@ -369,6 +370,24 @@ ateam container-cp --profile my-app
 | `--dry-run` | Show what would be copied without executing |
 
 Requires a pre-built linux binary (`make companion` produces `build/ateam-linux-<arch>`).
+
+### `ateam setup`
+
+Give unattended agents their own config directory. Advised, not required.
+
+```bash
+ateam setup                                   # asks per agent CLI found on PATH
+ateam setup --agent-config home               # ~/.ateam/state/agents/<agent>, every project
+ateam setup --agent-config project --agent codex   # <project>/.ateam/agents/codex, this project only
+ateam setup --agent-config none               # keep inheriting ~/.claude / ~/.codex
+```
+
+| Flag | Description |
+|------|-------------|
+| `--agent-config CHOICE` | `home`, `project` or `none`; without it and with a terminal, `ateam setup` asks |
+| `--agent LIST` | Agent CLIs to configure (`claude`, `codex`); default: every one on PATH |
+
+Why: the interactive Claude or Codex install carries hooks, plugins, MCP servers and notifications that are noise or interfere in an unattended run, and a separate directory keeps unattended sessions and history out of the interactive one. The choice is written as `config_dir` on the agent block of the chosen layer's `ateam.hcl` (derived agents inherit it through `base`); nothing is copied, `ateam login` creates the credentials. `ateam init` asks the same question the first time it creates `~/.ateam`, and takes `--agent-config` for scripts. An agent that already has a `config_dir` is reported and left alone.
 
 ### `ateam login`
 

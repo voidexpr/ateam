@@ -52,7 +52,7 @@ const homeConfigTemplate = `// User-wide ateam configuration. Layers, lowest pre
 //
 //   agent "claude" {
 //     model      = "claude-sonnet-5-5"
-//     config_dir = "state/agents/claude"   // relative to this directory
+//     config_dir = "~/.ateam/state/agents/claude"   // or: ateam setup
 //   }
 //
 //   project {
@@ -176,6 +176,7 @@ var projectGitignoreEntries = []string{
 	"logs/",
 	"runtime/",
 	"cache/",
+	"agents/",
 	"secrets.env",
 }
 

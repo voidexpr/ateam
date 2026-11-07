@@ -57,7 +57,7 @@ Why:
 - Your interactive Claude likely has skills, plugins, custom logging, notifications. Some are helpful for unattended runs; many are noise or actively interfere.
 - Keeps interactive state (sessions, history, settings) separate from unattended state.
 
-How (Claude example):
+`ateam setup` makes the choice for you (home-wide, per project, or none) and writes it; `ateam init` asks the same on first use. By hand (Claude example):
 
 ```hcl
 # ~/.ateam/ateam.hcl

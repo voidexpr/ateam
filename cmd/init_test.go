@@ -102,4 +102,5 @@ func resetInitGlobals() {
 	initName = ""
 	initRoles = nil
 	initAutoSetup = false
+	initAgentConfig = ""
 }

@@ -96,6 +96,12 @@ ateam init                # create .ateam/
 * A: Edit `.ateam/ateam.hcl` to select which [roles](ROLES.md) to enable in your project
 * B: Or let an agent decide: `ateam auto-setup` (detect stack, enable a reasonable role set)
 
+### 2b. Optional: give unattended agents their own config dir, then log in
+```bash
+ateam setup     # keep your interactive hooks, plugins and sessions out of unattended runs
+ateam login     # log the unattended agent into that directory
+```
+
 ### 3. Run the quality pipeline; ATeam commits changes locally
 ```bash
 ateam run-all                 # report → review → code → verify

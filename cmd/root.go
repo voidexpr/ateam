@@ -86,6 +86,7 @@ func init() {
 	rootCmd.AddCommand(agentConfigCmd)
 	rootCmd.AddCommand(claudeCmd)
 	rootCmd.AddCommand(loginCmd)
+	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(containerCpCmd)
 	rootCmd.AddCommand(parallelCmd)
 	rootCmd.AddCommand(serveCmd)
