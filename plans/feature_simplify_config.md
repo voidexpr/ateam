@@ -19,6 +19,11 @@ Containers see the home and project layers only; ancestor layers are not
 mounted (known limitation). Items 6 (`ateam setup`, the config-dir part of step 7), 7 (native config
 reader) and 8 (suggested default model) are implemented. Every item of
 the order of work is done; what remains is the local migration below.
+Added afterwards: `_prepend` / `_append` companions for the lists that
+carry CLI flags (`agent.args`, a profile's `agent_extra_args` and
+`container_extra_args`, `container_extra.extra_args`), so a layer adds a
+flag without re-listing the inherited list; see CONFIG.md → Runtime
+Configuration.
 
 Cleanup pending on the author's machine (the sandbox cannot write
 `~/.ateam`); to do by hand, in this order:

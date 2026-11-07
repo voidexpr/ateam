@@ -60,6 +60,17 @@ type Config struct {
 	// contribution is the effective value. Values inherited through
 	// `base` are recorded with the base agent as the layer.
 	Sources map[string][]Contribution
+
+	// adds accumulates the *_prepend / *_append written for a list
+	// attribute across layers, keyed like Sources ("agent.claude.args"),
+	// until Load folds them into the list.
+	adds map[string]*listAdditions
+}
+
+// listAdditions is what the layers added around one list attribute.
+type listAdditions struct {
+	prepend []string // nearest layer first
+	append  []string // in layer order
 }
 
 // Layer is one runtime.hcl source in load order.
@@ -192,6 +203,8 @@ type hclAgent struct {
 	ArgsInsideContainer    []string          `hcl:"args_inside_container,optional"`
 	ArgsOutsideContainer   []string          `hcl:"args_outside_container,optional"`
 	SandboxInsideContainer bool              `hcl:"sandbox_inside_container,optional"`
+	ArgsPrepend            []string          `hcl:"args_prepend,optional"`
+	ArgsAppend             []string          `hcl:"args_append,optional"`
 	Pricing                []hclPricing      `hcl:"pricing,block"`
 }
 
@@ -231,6 +244,11 @@ type hclProfile struct {
 	Container          string    `hcl:"container,optional"`
 	AgentExtraArgs     []string  `hcl:"agent_extra_args,optional"`
 	ContainerExtraArgs []string  `hcl:"container_extra_args,optional"`
+
+	AgentExtraArgsPrepend     []string `hcl:"agent_extra_args_prepend,optional"`
+	AgentExtraArgsAppend      []string `hcl:"agent_extra_args_append,optional"`
+	ContainerExtraArgsPrepend []string `hcl:"container_extra_args_prepend,optional"`
+	ContainerExtraArgsAppend  []string `hcl:"container_extra_args_append,optional"`
 }
 
 // Body schemas used to detect which attributes a block actually wrote.
@@ -287,6 +305,13 @@ func Load(layerDirs []string) (*Config, error) {
 	if err := cfg.validateProfiles(); err != nil {
 		return nil, err
 	}
+	for name, p := range cfg.Profiles {
+		key := "profile." + name + "."
+		p.AgentExtraArgs = cfg.withAdditions(key+"agent_extra_args", p.AgentExtraArgs)
+		p.ContainerExtraArgs = cfg.withAdditions(key+"container_extra_args", p.ContainerExtraArgs)
+		cfg.Profiles[name] = p
+	}
+	cfg.Settings.ContainerExtra.ExtraArgs = cfg.withAdditions("container_extra.extra_args", cfg.Settings.ContainerExtra.ExtraArgs)
 
 	// Apply detection settings to the container package — but only if
 	// a CLI flag (or earlier caller) hasn't already locked them.
@@ -322,6 +347,8 @@ func (c *Config) resolveInheritance() error {
 			return fmt.Errorf("unknown agent %q", name)
 		}
 		if ac.Base == "" {
+			ac.Args = c.withAdditions("agent."+name+".args", ac.Args)
+			c.Agents[name] = ac
 			resolved[name] = true
 			return nil
 		}
@@ -339,7 +366,7 @@ func (c *Config) resolveInheritance() error {
 		baseKey := "agent." + ac.Base + "."
 		baseLabel := fmt.Sprintf("agent %q (base)", ac.Base)
 		for _, attr := range agentAttrNames(agentSchema) {
-			if attr == "base" || attr == "env" {
+			if attr == "base" || attr == "env" || IsListAddition(attr) {
 				continue
 			}
 			if _, set := c.Sources[childKey+attr]; set {
@@ -360,6 +387,9 @@ func (c *Config) resolveInheritance() error {
 			c.inherit(childKey+"env."+k, baseLabel, v, from)
 		}
 
+		// The child's own additions wrap the list it ended up with, its
+		// own or the base's (already folded) one.
+		ac.Args = c.withAdditions(childKey+"args", ac.Args)
 		c.Agents[name] = ac
 		resolved[name] = true
 		return nil
@@ -440,6 +470,45 @@ func mapKeyLines(attr *hcl.Attribute, keys map[string]string) map[string]int {
 		lines[v.AsString()] = item.KeyExpr.Range().Start.Line
 	}
 	return lines
+}
+
+// IsListAddition reports whether attr (or a Sources key) is a *_prepend /
+// *_append of a list.
+func IsListAddition(attr string) bool {
+	return strings.HasSuffix(attr, "_prepend") || strings.HasSuffix(attr, "_append")
+}
+
+// addList records one layer's *_prepend or *_append for a list attribute
+// and accumulates it: prepends of nearer layers come first, appends keep
+// layer order. attr is the full attribute name, e.g. "args_append".
+func (c *Config) addList(key, attr, label string, items []string, line int) {
+	if c.adds == nil {
+		c.adds = make(map[string]*listAdditions)
+	}
+	listKey := key + strings.TrimSuffix(strings.TrimSuffix(attr, "_prepend"), "_append")
+	a := c.adds[listKey]
+	if a == nil {
+		a = &listAdditions{}
+		c.adds[listKey] = a
+	}
+	if strings.HasSuffix(attr, "_prepend") {
+		a.prepend = append(append([]string(nil), items...), a.prepend...)
+	} else {
+		a.append = append(a.append, items...)
+	}
+	c.record(key+attr, label, renderList(items), line)
+}
+
+// withAdditions returns list wrapped in the additions recorded for key.
+func (c *Config) withAdditions(key string, list []string) []string {
+	a := c.adds[key]
+	if a == nil {
+		return list
+	}
+	out := make([]string, 0, len(a.prepend)+len(list)+len(a.append))
+	out = append(out, a.prepend...)
+	out = append(out, list...)
+	return append(out, a.append...)
 }
 
 func (c *Config) record(key, layer, value string, line int) {
@@ -708,6 +777,10 @@ func (c *Config) mergeAgent(a hclAgent, label string) {
 				c.setEnvKey(&ac, k, v)
 				c.record(key+"env."+k, label, v, keyLines[k])
 			}
+		case "args_prepend":
+			c.addList(key, attr, label, a.ArgsPrepend, line)
+		case "args_append":
+			c.addList(key, attr, label, a.ArgsAppend, line)
 		default:
 			c.record(key+attr, label, copyAgentAttr(&ac, &src, attr), line)
 		}
@@ -782,6 +855,18 @@ func (c *Config) mergeProfile(h hclProfile, label string) {
 		case "container_extra_args":
 			p.ContainerExtraArgs = h.ContainerExtraArgs
 			value = renderList(h.ContainerExtraArgs)
+		case "agent_extra_args_prepend":
+			c.addList(key, attr, label, h.AgentExtraArgsPrepend, line)
+			continue
+		case "agent_extra_args_append":
+			c.addList(key, attr, label, h.AgentExtraArgsAppend, line)
+			continue
+		case "container_extra_args_prepend":
+			c.addList(key, attr, label, h.ContainerExtraArgsPrepend, line)
+			continue
+		case "container_extra_args_append":
+			c.addList(key, attr, label, h.ContainerExtraArgsAppend, line)
+			continue
 		}
 		c.record(key+attr, label, value, line)
 	}

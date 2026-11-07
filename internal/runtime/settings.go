@@ -58,6 +58,9 @@ type hclContainerExtra struct {
 	ExtraArgs  []string          `hcl:"extra_args,optional"`
 	ForwardEnv []string          `hcl:"forward_env,optional"`
 	Env        map[string]string `hcl:"env,optional"`
+
+	ExtraArgsPrepend []string `hcl:"extra_args_prepend,optional"`
+	ExtraArgsAppend  []string `hcl:"extra_args_append,optional"`
 }
 
 var (
@@ -189,6 +192,10 @@ func (c *Config) mergeContainerExtra(h hclContainerExtra, label string) {
 		case "extra_args":
 			s.ExtraArgs = h.ExtraArgs
 			c.record("container_extra.extra_args", label, renderList(h.ExtraArgs), line)
+		case "extra_args_prepend":
+			c.addList("container_extra.", attr, label, h.ExtraArgsPrepend, line)
+		case "extra_args_append":
+			c.addList("container_extra.", attr, label, h.ExtraArgsAppend, line)
 		case "forward_env":
 			s.ForwardEnv = h.ForwardEnv
 			c.record("container_extra.forward_env", label, renderList(h.ForwardEnv), line)

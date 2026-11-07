@@ -118,8 +118,13 @@ func printTrace(env *root.ResolvedEnv, prefix string, abs bool) error {
 	for _, e := range entries {
 		last := e.Chain[len(e.Chain)-1]
 		fmt.Printf("%s = %s  (%s)\n", e.Key, traceValue(last.Value), rtCfg.Where(last, display))
+		// Additions accumulate across layers; other attributes override.
+		verb := "overrides"
+		if runtime.IsListAddition(e.Key) {
+			verb = "plus"
+		}
 		for _, con := range e.Chain[:len(e.Chain)-1] {
-			fmt.Printf("    overrides %s = %s\n", rtCfg.Where(con, display), traceValue(con.Value))
+			fmt.Printf("    %s %s = %s\n", verb, rtCfg.Where(con, display), traceValue(con.Value))
 		}
 	}
 	return nil

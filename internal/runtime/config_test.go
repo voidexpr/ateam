@@ -1749,3 +1749,105 @@ func TestTraceFiltersByPrefix(t *testing.T) {
 		t.Errorf("built-in where: %q", cfg.Where(got, nil))
 	}
 }
+
+func TestListPrependAppendAcrossLayers(t *testing.T) {
+	homeDir := writeLayer(t, t.TempDir(), `
+agent "claude" {
+  args_prepend = ["--home-first"]
+  args_append  = ["--home-last"]
+}
+
+agent "kid" {
+  base        = "claude"
+  args_append = ["--kid"]
+}
+
+agent "own" {
+  base         = "claude"
+  args         = ["own"]
+  args_prepend = ["--own-first"]
+}
+
+profile "default" {
+  agent_extra_args_append      = ["--extra"]
+  container_extra_args_prepend = ["--cpus=1"]
+}
+
+container_extra {
+  extra_args = ["--memory=1g"]
+}
+`)
+	projDir := writeLayer(t, t.TempDir(), `
+agent "claude" {
+  args_prepend = ["--proj-first"]
+  args_append  = ["--proj-last"]
+}
+
+profile "default" {
+  agent_extra_args_prepend = ["--first"]
+}
+
+container_extra {
+  extra_args_append = ["--pids-limit=100"]
+}
+`)
+	cfg, err := Load([]string{homeDir, projDir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	builtin := Must(Load(nil)).Agents["claude"].Args
+	want := append(append([]string{"--proj-first", "--home-first"}, builtin...), "--home-last", "--proj-last")
+	if got := cfg.Agents["claude"].Args; strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("claude args:\n got %v\nwant %v", got, want)
+	}
+	if got := cfg.Agents["kid"].Args; strings.Join(got, " ") != strings.Join(append(append([]string{}, want...), "--kid"), " ") {
+		t.Errorf("kid must wrap the inherited (folded) list: %v", got)
+	}
+	if got := cfg.Agents["own"].Args; strings.Join(got, " ") != "--own-first own" {
+		t.Errorf("own args must not take the base's additions: %v", got)
+	}
+	p := cfg.Profiles["default"]
+	if strings.Join(p.AgentExtraArgs, " ") != "--first --extra" || strings.Join(p.ContainerExtraArgs, " ") != "--cpus=1" {
+		t.Errorf("profile additions: agent=%v container=%v", p.AgentExtraArgs, p.ContainerExtraArgs)
+	}
+	if got := cfg.Settings.ContainerExtra.ExtraArgs; strings.Join(got, " ") != "--memory=1g --pids-limit=100" {
+		t.Errorf("container_extra.extra_args: %v", got)
+	}
+	// Provenance: each addition is its own key, the base list keeps its own.
+	chain := cfg.Sources["agent.claude.args_append"]
+	if len(chain) != 2 || chain[0].Value != `["--home-last"]` || chain[1].Value != `["--proj-last"]` || chain[1].Line != 4 {
+		t.Errorf("args_append chain: %+v", chain)
+	}
+	if src, _ := cfg.Source("agent.claude.args"); src.Layer != BuiltinLayer {
+		t.Errorf("args base must stay attributed to the built-in layer: %+v", src)
+	}
+	if src, ok := cfg.Source("agent.kid.args_append"); !ok || src.Layer != filepath.Join(homeDir, ConfigFile) {
+		t.Errorf("kid args_append: %+v (ok=%v)", src, ok)
+	}
+	if _, ok := cfg.Source("agent.kid.args_prepend"); ok {
+		t.Error("additions must not be inherited from the base as attributes")
+	}
+}
+
+// Must unwraps a (value, error) pair in test fixtures.
+func Must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+func TestTraceOfListIncludesAdditions(t *testing.T) {
+	projDir := writeLayer(t, t.TempDir(), `agent "claude" { args_append = ["--x"] }`)
+	cfg, err := Load([]string{projDir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var keys []string
+	for _, e := range cfg.Trace("agent.claude.args") {
+		keys = append(keys, e.Key)
+	}
+	if strings.Join(keys, " ") != "agent.claude.args agent.claude.args_append" {
+		t.Errorf("keys: %v", keys)
+	}
+}

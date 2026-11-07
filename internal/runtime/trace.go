@@ -15,13 +15,15 @@ type TraceEntry struct {
 }
 
 // Trace returns the recorded attributes whose key is prefix or starts with
-// prefix followed by a dot, sorted by key. "" returns every attribute; a
+// prefix followed by a dot, sorted by key, plus the _prepend / _append
+// companions of a list named exactly. "" returns every attribute; a
 // trailing ".*" or "." on prefix is ignored.
 func (c *Config) Trace(prefix string) []TraceEntry {
 	prefix = strings.TrimSuffix(strings.TrimSuffix(prefix, "*"), ".")
 	var out []TraceEntry
 	for key, chain := range c.Sources {
-		if prefix != "" && key != prefix && !strings.HasPrefix(key, prefix+".") {
+		if prefix != "" && key != prefix && !strings.HasPrefix(key, prefix+".") &&
+			key != prefix+"_prepend" && key != prefix+"_append" {
 			continue
 		}
 		out = append(out, TraceEntry{Key: key, Chain: chain})

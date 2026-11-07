@@ -156,6 +156,7 @@ Add extra Docker arguments, environment forwarding, or environment variables to 
 | Key | Description |
 |-----|-------------|
 | `extra_args` | Additional `docker run` flags (e.g., `["--cpus=2", "--memory=4g"]`) |
+| `extra_args_prepend`, `extra_args_append` | Flags added around `extra_args` without re-listing it (see [Runtime Configuration](#runtime-configuration)) |
 | `forward_env` | Additional env var names to forward into containers |
 | `env` | Static env vars to set inside containers (key-value map, merged per key across layers) |
 
@@ -320,6 +321,15 @@ One rule: the nearer layer wins per attribute. A later file that redeclares an `
 # .ateam/ateam.hcl — the built-in command, args, sandbox and env are kept
 agent "claude" {
   model = "claude-sonnet-5-5"
+}
+```
+
+To add to a command line instead of re-listing it, the lists that carry CLI flags take `_prepend` / `_append` companions: `args_prepend` / `args_append` on an `agent`, `agent_extra_args_prepend` / `_append` and `container_extra_args_prepend` / `_append` on a `profile`, `extra_args_prepend` / `_append` in `container_extra`. The effective list is every prepend (nearest layer first), then the list itself from the nearest layer that set it, then every append in layer order. Additions survive a nearer layer redefining the list, and a child agent's additions wrap the list it inherits from `base`. `ateam env --trace agent.claude` shows the list and each addition with the file that wrote it.
+
+```hcl
+# .ateam/ateam.hcl — the built-in args are kept, one flag is added
+agent "claude" {
+  args_append = ["--verbose"]
 }
 ```
 
@@ -631,6 +641,8 @@ profile "cheap" {
 ```
 
 Use `--profile docker` to run in a fresh ateam-managed container, `--profile docker-exec` to exec into a user-managed long-lived container, or `--profile cheap` for cheaper runs. See `defaults/ateam.hcl` for the full list of built-in profiles.
+
+`agent_extra_args` lands last on the agent command line and `container_extra_args` on `docker run`. A nearer layer adds to either without re-listing it with `agent_extra_args_prepend` / `agent_extra_args_append` and `container_extra_args_prepend` / `container_extra_args_append`.
 
 For the resolution order when multiple profile selectors apply, see [Profile resolution order](#profiles-1) in the `[profiles]` ateam.hcl section.
 
