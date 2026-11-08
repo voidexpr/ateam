@@ -217,22 +217,22 @@ func TestLiveClaudeOrgReadOnly(t *testing.T) {
 
 	dir := t.TempDir()
 	sourceDir := filepath.Join(dir, "project")
-	orgDir := filepath.Join(dir, "org")
+	homeDir := filepath.Join(dir, "home")
 	mkdirWritable(t, sourceDir)
-	mkdirWritable(t, orgDir)
+	mkdirWritable(t, homeDir)
 
-	os.WriteFile(filepath.Join(orgDir, "config.txt"), []byte("org-config-value"), 0644)
+	os.WriteFile(filepath.Join(homeDir, "config.txt"), []byte("org-config-value"), 0644)
 
 	dc := &DockerContainer{
 		Image:      liveImage,
 		SourceDir:  sourceDir,
-		OrgDir:     orgDir,
+		HomeDir:    homeDir,
 		ForwardEnv: authEnvVars(),
 	}
 
-	_, _, orgPath := dc.containerPaths()
+	_, _, homePath := dc.containerPaths()
 	stdout, _ := runClaude(t, ctx, dc, claudeArgs("2",
-		"Read "+orgPath+"/config.txt and reply with ONLY its exact contents.",
+		"Read "+homePath+"/config.txt and reply with ONLY its exact contents.",
 	))
 
 	if !strings.Contains(stdout, "org-config-value") {

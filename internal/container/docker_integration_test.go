@@ -69,8 +69,8 @@ func TestDockerMountsAndWorkdir(t *testing.T) {
 
 	sourceDir := filepath.Join(dir, "project")
 	projectDir := filepath.Join(sourceDir, ".ateam")
-	orgDir := filepath.Join(dir, "org")
-	for _, d := range []string{sourceDir, projectDir, orgDir} {
+	homeDir := filepath.Join(dir, "home")
+	for _, d := range []string{sourceDir, projectDir, homeDir} {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -79,7 +79,7 @@ func TestDockerMountsAndWorkdir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sourceDir, "hello.txt"), []byte("source-file"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(orgDir, "org.txt"), []byte("org-file"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(homeDir, "org.txt"), []byte("org-file"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -93,7 +93,7 @@ func TestDockerMountsAndWorkdir(t *testing.T) {
 		Dockerfile: dockerfile,
 		SourceDir:  sourceDir,
 		ProjectDir: projectDir,
-		OrgDir:     orgDir,
+		HomeDir:    homeDir,
 	}
 	t.Cleanup(func() { cleanupImage(dc.Image) })
 
@@ -101,7 +101,7 @@ func TestDockerMountsAndWorkdir(t *testing.T) {
 		t.Fatalf("EnsureImage: %v", err)
 	}
 
-	codePath, _, orgPath := dc.containerPaths()
+	codePath, _, homePath := dc.containerPaths()
 
 	t.Run("source mount readable", func(t *testing.T) {
 		var stdout bytes.Buffer
@@ -118,11 +118,11 @@ func TestDockerMountsAndWorkdir(t *testing.T) {
 		}
 	})
 
-	t.Run("org mount readable", func(t *testing.T) {
+	t.Run("home mount readable", func(t *testing.T) {
 		var stdout bytes.Buffer
 		err := dc.Run(ctx, RunOpts{
 			Command: "cat",
-			Args:    []string{orgPath + "/org.txt"},
+			Args:    []string{homePath + "/org.txt"},
 			Stdout:  &stdout,
 		})
 		if err != nil {
@@ -166,7 +166,7 @@ func TestDockerMountsAndWorkdir(t *testing.T) {
 			Dockerfile:     dockerfile,
 			SourceDir:      sourceDir,
 			ProjectDir:     projectDir,
-			OrgDir:         orgDir,
+			HomeDir:        homeDir,
 			SourceWritable: true,
 		}
 		err := dcRW.Run(ctx, RunOpts{
@@ -185,15 +185,15 @@ func TestDockerMountsAndWorkdir(t *testing.T) {
 		}
 	})
 
-	t.Run("org mount writable", func(t *testing.T) {
+	t.Run("home mount writable", func(t *testing.T) {
 		err := dc.Run(ctx, RunOpts{
 			Command: "sh",
-			Args:    []string{"-c", "echo org-write > " + orgPath + "/written.txt"},
+			Args:    []string{"-c", "echo org-write > " + homePath + "/written.txt"},
 		})
 		if err != nil {
 			t.Fatalf("expected write to org mount to succeed: %v", err)
 		}
-		data, err := os.ReadFile(filepath.Join(orgDir, "written.txt"))
+		data, err := os.ReadFile(filepath.Join(homeDir, "written.txt"))
 		if err != nil {
 			t.Fatalf("host ReadFile: %v", err)
 		}
@@ -257,9 +257,9 @@ func TestDockerFilePermissions(t *testing.T) {
 
 	sourceDir := filepath.Join(dir, "project")
 	projectDir := filepath.Join(sourceDir, ".ateam")
-	orgDir := filepath.Join(dir, "org")
+	homeDir := filepath.Join(dir, "home")
 	secretDir := filepath.Join(dir, "secret")
-	for _, d := range []string{sourceDir, projectDir, orgDir, secretDir} {
+	for _, d := range []string{sourceDir, projectDir, homeDir, secretDir} {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			t.Fatal(err)
 		}
@@ -267,7 +267,7 @@ func TestDockerFilePermissions(t *testing.T) {
 
 	// Seed files
 	os.WriteFile(filepath.Join(sourceDir, "src.txt"), []byte("source"), 0644)
-	os.WriteFile(filepath.Join(orgDir, "org.txt"), []byte("org"), 0644)
+	os.WriteFile(filepath.Join(homeDir, "org.txt"), []byte("org"), 0644)
 	os.WriteFile(filepath.Join(secretDir, "secret.txt"), []byte("secret"), 0644)
 
 	dockerfile := filepath.Join(projectDir, "Dockerfile")
@@ -278,7 +278,7 @@ func TestDockerFilePermissions(t *testing.T) {
 		Dockerfile: dockerfile,
 		SourceDir:  sourceDir,
 		ProjectDir: projectDir,
-		OrgDir:     orgDir,
+		HomeDir:    homeDir,
 		// secretDir is NOT mounted — should be inaccessible
 	}
 	t.Cleanup(func() { cleanupImage(dc.Image) })
@@ -299,7 +299,7 @@ func TestDockerFilePermissions(t *testing.T) {
 		return outBuf.String(), errBuf.String(), err
 	}
 
-	codePath, _, orgPath := dc.containerPaths()
+	codePath, _, homePath := dc.containerPaths()
 
 	// --- RO mount (source → codePath) ---
 	t.Run("ro-source/read", func(t *testing.T) {
@@ -321,9 +321,9 @@ func TestDockerFilePermissions(t *testing.T) {
 		}
 	})
 
-	// --- RW mount (org → orgPath) ---
-	t.Run("rw-org/read", func(t *testing.T) {
-		out, _, err := runViaFactory("cat", orgPath+"/org.txt")
+	// --- RW mount (home → homePath) ---
+	t.Run("rw-home/read", func(t *testing.T) {
+		out, _, err := runViaFactory("cat", homePath+"/org.txt")
 		if err != nil {
 			t.Fatalf("expected read to succeed: %v", err)
 		}
@@ -331,12 +331,12 @@ func TestDockerFilePermissions(t *testing.T) {
 			t.Errorf("expected 'org', got %q", out)
 		}
 	})
-	t.Run("rw-org/write", func(t *testing.T) {
-		_, _, err := runViaFactory("sh", "-c", "echo org-ok > "+orgPath+"/org-write.txt")
+	t.Run("rw-home/write", func(t *testing.T) {
+		_, _, err := runViaFactory("sh", "-c", "echo org-ok > "+homePath+"/org-write.txt")
 		if err != nil {
 			t.Fatalf("expected write to org mount to succeed: %v", err)
 		}
-		data, err := os.ReadFile(filepath.Join(orgDir, "org-write.txt"))
+		data, err := os.ReadFile(filepath.Join(homeDir, "org-write.txt"))
 		if err != nil {
 			t.Fatalf("host ReadFile: %v", err)
 		}
