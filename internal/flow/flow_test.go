@@ -336,7 +336,7 @@ func TestPipeline_StepSkippedReporterFires(t *testing.T) {
 // ============================================================
 
 func TestParallel_RunsConcurrently(t *testing.T) {
-	exec := &fakeExecutor{Delay: 50 * time.Millisecond}
+	exec := newMaxConcurrentExecutor(4, 0)
 	rc := newCtx()
 	env := newEnv(exec)
 
@@ -350,12 +350,10 @@ func TestParallel_RunsConcurrently(t *testing.T) {
 			makeBundle("d", nil),
 		},
 	}
-	start := time.Now()
 	out := Run(par, env, rc)
-	elapsed := time.Since(start)
 
-	if elapsed > 200*time.Millisecond {
-		t.Errorf("4 parallel runs of 50ms took %v; expected ~50ms, not serialised", elapsed)
+	if got := exec.peak(); got != 4 {
+		t.Errorf("peak concurrency: got %d, want 4 (runs were serialised)", got)
 	}
 	if got := len(out.Steps[0].Results); got != 4 {
 		t.Errorf("expected 4 leaf results, got %d", got)
@@ -363,7 +361,7 @@ func TestParallel_RunsConcurrently(t *testing.T) {
 }
 
 func TestParallel_WorkersBound(t *testing.T) {
-	concurrent := &maxConcurrentExecutor{Delay: 20 * time.Millisecond}
+	concurrent := newMaxConcurrentExecutor(2, 20*time.Millisecond)
 	rc := newCtx()
 	env := newEnv(concurrent)
 
@@ -378,9 +376,12 @@ func TestParallel_WorkersBound(t *testing.T) {
 			makeBundle("e", nil),
 		},
 	}
-	Run(par, env, rc)
-	if got := concurrent.peak(); got > 2 {
-		t.Errorf("peak concurrency: got %d, want <= 2", got)
+	out := Run(par, env, rc)
+	if got := concurrent.peak(); got != 2 {
+		t.Errorf("peak concurrency: got %d, want 2", got)
+	}
+	if got := len(out.Steps[0].Results); got != 5 {
+		t.Errorf("expected 5 leaf results, got %d", got)
 	}
 }
 
@@ -736,11 +737,21 @@ func (e *errOnceExecutor) ExecutePrepared(ctx context.Context, prepared *runner.
 
 // maxConcurrentExecutor tracks the peak number of concurrent Execute calls.
 // Used to verify Parallel respects its Workers cap.
+//
+// When Target > 0, calls block until Target calls are in flight at once
+// (or a generous timeout fires), so reaching the expected peak does not
+// depend on scheduler timing. Once reached, later calls don't block.
 type maxConcurrentExecutor struct {
 	Delay   time.Duration
+	Target  int
 	mu      sync.Mutex
 	current int
 	peakN   int
+	reached chan struct{}
+}
+
+func newMaxConcurrentExecutor(target int, delay time.Duration) *maxConcurrentExecutor {
+	return &maxConcurrentExecutor{Delay: delay, Target: target, reached: make(chan struct{})}
 }
 
 func (e *maxConcurrentExecutor) Prepare(opts runner.RunOpts) (*runner.PreparedRun, error) {
@@ -752,8 +763,17 @@ func (e *maxConcurrentExecutor) ExecutePrepared(ctx context.Context, prepared *r
 	e.current++
 	if e.current > e.peakN {
 		e.peakN = e.current
+		if e.Target > 0 && e.peakN == e.Target {
+			close(e.reached)
+		}
 	}
 	e.mu.Unlock()
+	if e.Target > 0 {
+		select {
+		case <-e.reached:
+		case <-time.After(5 * time.Second):
+		}
+	}
 	if e.Delay > 0 {
 		time.Sleep(e.Delay)
 	}

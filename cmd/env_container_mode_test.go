@@ -106,12 +106,14 @@ func TestPrintContainerModeMatrix(t *testing.T) {
 			// don't bleed across cases.
 			container.ResetDetectionForTest()
 
-			// Clear every env var the detector reads, then set just
-			// the ones this case wants.
+			// Clear every env var the detector reads (t.Setenv first so
+			// the original values are restored on cleanup), then set
+			// just the ones this case wants.
 			for _, k := range []string{
 				"ATEAM_IN_CONTAINER", "ATEAM_IN_SANDBOX",
 				"FENCE_SANDBOX", "FIREJAIL_NAME", "container",
 			} {
+				t.Setenv(k, "")
 				_ = os.Unsetenv(k)
 			}
 			for k, v := range tc.envVars {
