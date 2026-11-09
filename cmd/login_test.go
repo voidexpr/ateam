@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ateam/internal/config"
+	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runtime"
 )
@@ -90,6 +91,30 @@ profile "shared" {
 	}
 	if _, err := resolveLoginTarget(env, rtCfg, "shared", "shared"); err == nil {
 		t.Error("--profile with --agent must error")
+	}
+}
+
+func TestResolveLoginTargetAgentAppliesContextBlock(t *testing.T) {
+	if container.IsInContainer() {
+		t.Skip("asserts the outside_container block; running inside a container")
+	}
+	rtCfg, orgDir := loadRuntimeWithOrg(t, `
+agent "ctx" {
+  base = "claude"
+  outside_container {
+    config_dir = "agents/ctx-host"
+  }
+}
+`)
+	env := &root.ResolvedEnv{HomeDir: orgDir, Layers: []string{orgDir}}
+
+	got, err := resolveLoginTarget(env, rtCfg, "", "ctx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(orgDir, "state", "agents", "ctx-host")
+	if got.ConfigDir != want || got.Agent.Context != "outside_container" {
+		t.Errorf("--agent: got ConfigDir %q context %q, want %q outside_container", got.ConfigDir, got.Agent.Context, want)
 	}
 }
 

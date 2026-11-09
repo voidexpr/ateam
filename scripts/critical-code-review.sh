@@ -8,12 +8,12 @@ set -euo pipefail
 #             coder finalizes.
 #
 # Demonstrates how to compose a short multi-agent resumable workflow with the
-# `ateam exec --agent` primitive. Reports land as agent_*_r{1,2}.md in
+# `ateam exec --profile` primitive. Reports land as profile_*_r{1,2}.md in
 # the working directory; prior runs are timestamp-backed up.
 
-# see .ateam/ateam.hcl or ~/.ateam/ateam.hcl for agent definitions
+# see .ateam/ateam.hcl or ~/.ateam/ateam.hcl for profile definitions
 reviewer="codex-high"
-coder="claude-high"
+coder="high"
 
 usage() {
   cat <<HELP
@@ -36,7 +36,7 @@ Options:
                  suffix even if the previous run did not complete.
   -h, --help     Show this message and exit.
 
-Resume behaviour: each step writes one report file (agent_*_r{1,2}.md). On
+Resume behaviour: each step writes one report file (profile_*_r{1,2}.md). On
 re-run, any step whose file is already non-empty is skipped. The final step
 writes ${coder}'s round-2 report, so when that file exists the previous run
 is treated as complete: the four reports are renamed with a timestamp suffix
@@ -61,10 +61,10 @@ scope="$focus"
 
 base_dir=".ateam/shared/critical_code_review"
 mkdir -p "$base_dir"
-reviewer_r1="$base_dir/agent_${reviewer}_r1.md"
-coder_r1="$base_dir/agent_${coder}_r1.md"
-reviewer_r2="$base_dir/agent_${reviewer}_r2.md"
-coder_r2="$base_dir/agent_${coder}_r2.md"
+reviewer_r1="$base_dir/profile_${reviewer}_r1.md"
+coder_r1="$base_dir/profile_${coder}_r1.md"
+reviewer_r2="$base_dir/profile_${reviewer}_r2.md"
+coder_r2="$base_dir/profile_${coder}_r2.md"
 
 backup() {
   [ -f "$1" ] || return 0
@@ -77,13 +77,13 @@ step() {
 }
 
 maybe_run() {
-  local out="$1" agent="$2" label="$3"
+  local out="$1" profile="$2" label="$3"
   if [ -s "$out" ]; then
-    step "$label by $agent — cached ($out), skipping"
+    step "$label by $profile — cached ($out), skipping"
     return 0
   fi
-  step "$label by $agent"
-  ateam exec --agent "$agent"
+  step "$label by $profile"
+  ateam exec --profile "$profile"
 }
 
 if [ "$restart" = true ] || [ -s "$coder_r2" ]; then

@@ -13,6 +13,7 @@ import (
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/calldb"
+	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/streamutil"
@@ -478,7 +479,7 @@ func configDirFromRuntime(env *root.ResolvedEnv, row *calldb.RecentRow) string {
 	case strings.HasPrefix(row.Profile, "a:"):
 		// Synthetic profile created by --agent runs (cmd/table.go), where
 		// the suffix names the actual agent definition (claude-isolated,
-		// claude-sonnet, …). row.Agent only stores the kind ("claude").
+		// claude-auto, …). row.Agent only stores the kind ("claude").
 		agentName = strings.TrimPrefix(row.Profile, "a:")
 	case row.Profile != "":
 		if prof, ok := cfg.Profiles[row.Profile]; ok && prof.Agent != "" {
@@ -486,7 +487,12 @@ func configDirFromRuntime(env *root.ResolvedEnv, row *calldb.RecentRow) string {
 		}
 	}
 	ac, ok := cfg.Agents[agentName]
-	if !ok || ac.ConfigDir == "" {
+	if !ok {
+		return ""
+	}
+	// Resume runs where ateam runs, so the block for that context applies.
+	ac = cfg.ForContext(ac, container.IsInContainer())
+	if ac.ConfigDir == "" {
 		return ""
 	}
 	dir := display.ExpandHome(ac.ConfigDir)

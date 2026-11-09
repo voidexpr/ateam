@@ -59,7 +59,7 @@ Example:
   ateam run-all --all                              # include disabled roles
   ateam run-all --max-age 2h                       # review skips reports older than 2h
   ateam run-all --post-prompt "Focus on security"
-  ateam run-all --report-agent claude-sonnet --supervisor-agent claude --code-profile docker
+  ateam run-all --report-profile cheap --supervisor-agent claude --code-profile docker
   ateam run-all --timeout 30`,
 	RunE: runAll,
 }

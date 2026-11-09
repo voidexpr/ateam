@@ -38,7 +38,7 @@ removed from the login process. Works on any OS. Inside a container,
 Examples:
   ateam login                       # the default profile's agent
   ateam login --profile codex
-  ateam login --agent claude-high
+  ateam login --profile high
   ateam login --dry-run             # show the command and env, run nothing
   ateam login -- --help             # pass args to the CLI's login command`,
 	Args: cobra.ArbitraryArgs,
@@ -92,10 +92,12 @@ func resolveLoginTarget(env *root.ResolvedEnv, rtCfg *runtime.Config, profileFla
 			}
 			a = &shorthand
 		}
-		// Login happens where ateam runs, so the host-side block applies.
-		host := rtCfg.ForContext(*a, container.IsInContainer())
-		ac, source = &host, fmt.Sprintf("profile %q, chosen by %s", choice.Name, choice.Source)
+		ac, source = a, fmt.Sprintf("profile %q, chosen by %s", choice.Name, choice.Source)
 	}
+	// Login happens where ateam runs, so the block for the context ateam
+	// itself runs in applies.
+	resolved := rtCfg.ForContext(*ac, container.IsInContainer())
+	ac = &resolved
 
 	stateDir := ""
 	if env != nil {
