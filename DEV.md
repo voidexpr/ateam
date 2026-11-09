@@ -24,7 +24,7 @@ Runs real Claude (haiku) inside Docker containers to verify end-to-end agent beh
 
 - Agent reads a mounted file
 - Agent writes a file visible on host
-- Agent reads org config from read-only mount
+- Agent reads home config from the `~/.ateam` mount
 - Agent cannot access unmounted host paths
 
 Build tag: `docker_live`. Requires one of these auth methods (`CLAUDE_CODE_OAUTH_TOKEN` takes precedence if both are set):
@@ -83,7 +83,7 @@ The user-facing assembly model (anchor chain, filename patterns, `FirstMatch` vs
 ### Assembly internals — code pointers
 
 - `(*Assembler).Assemble` (`internal/prompts/assembler/assemble.go`) walks the anchor chain and joins the slots described in CONFIG.md.
-- `assembler.BuildAnchors(projectDir, orgDir, embedded)` (`internal/prompts/assembler/anchors.go`) builds the project → org → embedded chain, wired up by `(*ResolvedEnv).Assembler()` (`internal/root/resolve.go`).
+- `assembler.BuildAnchors(projectDir, layerDirs, embedded)` (`internal/prompts/assembler/anchors.go`) builds the project → ancestor layers (nearest first) → home → embedded chain, wired up by `(*ResolvedEnv).Assembler()` (`internal/root/resolve.go`), which passes `ConfigLayers()` (every config layer except the project, lowest precedence first). Anchor names, as reported in `Match.Anchor` and in assembler errors: `project`, `layer <dir>` for each ancestor `.ateam/`, `home` for `~/.ateam`, `embedded`.
 - Prompt-file `{{namespace.key}}` directives are resolved by `internal/prompts/assembler/template.go` (the engine) and the `Vars` resolver supplied by the caller — `internal/flow/runtime.go::runtimeVars` for live execution, `internal/prompts/assembler::MapVars` for tests. Only the dotted form is recognized in prompt bodies; ALL_CAPS legacy tokens pass through verbatim (the prior `varmap.go` compat shim was removed in the bundle-aware refactor). New prompt-side variables are added in the relevant `Vars` implementation (start at `runtimeVars.Resolve`).
 - `ateam.hcl` ALL_CAPS `{{VAR}}` placeholders (agent CLI args, container fields) are a *separate* substitution pass handled by `TemplateVars.Replacer()` in `internal/runner/template.go`. Add new placeholders there. Do not conflate the two systems.
 - The `ATeam Project Context` header, the previous-report block, and the reports-manifest block are NOT appended by hand — they are wired in as dynamics (`{{dynamic.project_info}}`, `{{dynamic.previous_report}}`, `{{dynamic.review_reports}}`, `{{dynamic.code_mgmt_review}}`) and resolved during `Prompt.Resolve` against `ctx.Dynamics()`. See "Architecture: prompt resolution" below.
@@ -112,7 +112,7 @@ Three top-level prompts cover the code workflow; each addresses a different laye
 - **Supervisor body** — `code_management.prompt.md` (top-level singleton) drives the orchestrator that splits the review into tasks. Reachable via `ateam prompt --action code_management`. Both the live `ateam code` verb and the preview path build through `NewCodeBundle` (`cmd/code_factory.go`); the review block is woven in by `{{dynamic.code_mgmt_review}}` (no separate `assemble*` helper).
 - **Per-task wiring** — Phase 3 of `code_management.prompt.md` pipes the implementer body into `ateam exec`: `ateam prompt --action code --post-prompt @SEQ_SLUG_task.md | ateam exec --action code --batch {{exec.batch}} {{exec.subrun_args}}`. The supervisor never generates a per-task prompt by hand; the framing comes from `code.prompt.md` and the task body is the per-task file the supervisor wrote during Phase 2.
 
-Sub-run flag propagation (profile, agent, project, org, work-dir, model, effort, budgets) flows through `{{exec.subrun_args}}`, rendered by `buildSubRunArgs` in `cmd/code.go`. Excluded by design: manager-only flags (`--management`, `--review`, `--timeout`), mode controls (`--dry-run`, `--force`, `--print`), and supervisor I/O flags (`--verbose`, `--quiet`, `--format`, `--progress-fd`, `--agent-args`, `--docker-auto-setup`). Each new `ateam code` flag added later must be classified explicitly there.
+Sub-run flag propagation (profile, agent, project, home, work-dir, model, effort, budgets) flows through `{{exec.subrun_args}}`, rendered by `buildSubRunArgs` in `cmd/code.go`. Excluded by design: manager-only flags (`--management`, `--review`, `--timeout`), mode controls (`--dry-run`, `--force`, `--print`), and supervisor I/O flags (`--verbose`, `--quiet`, `--format`, `--progress-fd`, `--agent-args`, `--docker-auto-setup`). Each new `ateam code` flag added later must be classified explicitly there.
 
 Role-specific code bodies (`code/<role>.prompt.md`) are no longer shipped — the `code/` namespace was retired in favor of the single top-level `code.prompt.md`. User-installed overrides at `.ateam/prompts/code/<role>.prompt.md` are still loaded by `assembleRoleCode` for backward compat, but operate without dir-level framing; new projects should put customizations in `.ateam/prompts/code.post.extra.md` instead.
 
@@ -245,7 +245,7 @@ Owns the `Prompt` interface and three impls:
 - `RawTextPrompt` — bytes-through, no engine. `ateam exec --raw` wraps the body in this.
 - `PromptText` — engine-expanded inline text (vars + dynamics, no anchor walk). Default for `ateam exec` and `ateam parallel`.
 - `PromptFile` — anchored composition. Two `Path` shapes, detected by the shared `prompts.IsFilesystemPromptPath` predicate (also used by cmd-layer dispatch):
-  - **Logical-name mode** — bare name like `review`, `report/security`, or any path *not* ending in `.prompt.md`. Resolved by the standard anchor walk through the configured `project → org → embedded` chain.
+  - **Logical-name mode** — bare name like `review`, `report/security`, or any path *not* ending in `.prompt.md`. Resolved by the standard anchor walk through the configured `project → ancestor layers → home → embedded` chain (see `BuildAnchors` above).
   - **Filesystem-path mode** — ends in `.prompt.md` AND contains a `/` or starts with `.`. The file's parent dir is injected as a temporary `external` anchor at the front of the chain; the role is `basename(Path)` minus `.prompt.md`, so sibling `<basename>.pre.*.md` and dir-level `_pre.*.md` fragments next to the file compose alongside the inherited framing.
 
   The factory just sets `{Path, PrePrompt, PostPrompt, CustomBody}` — the assembler and vars are sourced from `ctx.Env().Assembler()` and `ctx.Vars()`.
@@ -304,6 +304,18 @@ Design rationale: [`plans/feature_prompt_cmd_bundle_aware.md`](plans/feature_pro
 - Each container under `internal/container/` implements the `Container` interface. Built-ins: `none`, `docker`, `docker-exec`.
 - Agents receive a `CmdFactory` from the container layer. When set, they use it to spawn subprocesses instead of `exec.CommandContext` directly. This is how Docker execution works transparently — the agent code is unaware.
 
+### `internal/runtime` config engine
+
+Checklist for changes to `internal/runtime/config.go`, `context.go`, `settings.go` and their callers in `cmd/`.
+
+- **Layer order.** `Load(layerDirs)` merges the embedded `defaults/ateam.hcl` (layer `built-in`), then `<dir>/ateam.hcl` for each layer dir, lowest precedence first: `~/.ateam`, ancestor `.ateam/` dirs (outermost first), the project's `.ateam/` (`root.Resolve` builds `env.Layers`). A later layer overrides only the attributes it writes on a same-name block; `env` maps merge per key; lists replace, and `*_prepend` / `*_append` wrap the final list (prepends nearest layer first, appends in layer order). Inheritance, model-pattern / profile / container-type validation and the profile list additions run once after the last layer.
+- **Parse once.** `root.Resolve` loads the layers into `env.Runtime`; read-only callers go through `loadRuntime(env)` (`cmd/resolve_env.go`), which returns it. Callers that mutate agent blocks (the runner constructors in `cmd/table.go`, whose credential isolation edits `Env`) call `runtime.Load` for their own copy. Do not add other re-parses.
+- **Inheritance.** `resolveInheritance` copies every attribute no layer set on the child from the already-resolved `base` (`env` per key), recording it in `Sources` with layer `agent "<base>" (base)`. The child's own `args_prepend` / `args_append` wrap whichever list it ended with. Context blocks inherit attribute by attribute (`inheritOverlay`); the base's block `args_prepend` / `args_append` are taken only when the child sets no `args` of its own.
+- **Context-block overlay.** `ForContext(ac, inside)` applies `inside_container` or `outside_container`: block attributes replace the agent's, the block's `args_prepend` / `args_append` wrap `Args`, `env` merges per key, and `Context` names the block applied. `AgentForRun(prof, ac, inside)` is `ForContext` plus the profile pins (`model`, `effort`, `max_budget_usd`), which win over the agent's. `inside` comes from `runInsideContainer(cc)` (`cmd/exec_bundle.go`), or `container.IsInContainer()` where no profile container applies.
+- **Apply once, in cmd.** Context blocks are applied once in cmd; the runner must not re-derive container args (`internal/runner` never calls `ForContext`). `ForContext` is not idempotent: calling it twice doubles `args_prepend` / `args_append`. Every path that turns an `AgentConfig` into a runner, login target, resume command or report calls `AgentForRun` / `ForContext` exactly once — today `cmd/table.go` (runner constructors, `printDryRunSecrets`), `cmd/exec_bundle.go::resolveProfileAgent` (dry-run and `ateam env` model reports), `cmd/login.go`, `cmd/resume.go`. One exception today: `cmd/setup_model.go::setupModelPins` builds its `ModelReport` from the unapplied `rt.Agents` entry.
+- **Provenance key grammar** (`Config.Sources`, `ateam env --trace`): `<block>.<name>.<attr>` for `agent` / `container` / `profile` (`<block>.<name>.name` records the block header); `agent.<name>.env.<KEY>`; `agent.<name>.<inside_container|outside_container>.<attr>` and `.env.<KEY>` inside it; list additions under `<list>_prepend` / `<list>_append` next to the list key (`agent.claude.args_append`); singleton settings blocks as `<block>.<attr>` (`project.`, `supervisor.`, `sandbox_extra.`, `container_extra.`, with `container_extra.env.<KEY>`); `role.<id>.<attr>`; top-level scalars bare (`pricing_as_of`, `sandbox_detection`, `docker_detection`, `expensive_output_per_mtok`). The last `Contribution` in a chain is the effective value; `AttrSource` resolves through the applied context block first.
+- **Adding or retiring an agent attribute** — touch, in `internal/runtime/config.go`: `hclAgent`, `AgentConfig`, `agentFromHCL`, `copyAgentAttr` (inheritance and provenance rendering). If a context block may override it, also `hclOverlay`, `AgentOverlay`, `overlayFromHCL`, `overlayAttrNames`, `copyOverlayAttr` and the switch in `ForContext` (`context.go`). If a profile may pin it, `hclProfile`, `ProfileConfig`, `mergeProfile` and `AgentForRun`. For pricing attributes, `hclPricing` / `hclModel` and `RenderPricingSection` (`pricing.go`). Then the consumers (runner construction in `cmd/table.go`, `ModelReport` in `report.go` for model / effort), `CONFIG.md`, and the attribute list in the header comment of `defaults/ateam.hcl`. Blocks other than the top level reject unknown attributes, so retiring one breaks every user `ateam.hcl` that still sets it, and adding one to `defaults/ateam.hcl` breaks `--refresh-models` on older binaries — see [Embedded defaults and the pricing refresh contract](#embedded-defaults-and-the-pricing-refresh-contract).
+
 ### Codex parity caveats
 
 The codex agent matches claude on cost accounting, cache-token tracking, context utilization, verbose tool detail, and `ateam resume`. A few items are intentionally claude-only — a future contributor shouldn't try to "fix" them:
@@ -346,6 +358,26 @@ profile "docker-data" {
 ```
 
 Relative host paths in `extra_volumes` are resolved from the project source directory, making the config portable across machines. `container_extra_args` passes raw flags to `docker run` for resource limits, network modes, or capabilities that don't have dedicated config fields.
+
+## Embedded defaults and the pricing refresh contract
+
+`defaults/ateam.hcl` is embedded in the binary (`defaults/embed.go`) as the `built-in` layer, and it is also read over the network by binaries already released: `ateam setup --refresh-models` (`cmd/setup_model.go::refreshPricing`) fetches the copy on `main` from `DefaultsURL` (`https://raw.githubusercontent.com/voidexpr/ateam/main/defaults/ateam.hcl`), parses the whole file with that binary's decoder (`runtime.ParseDefaults`), refuses it when `pricing_as_of` is missing, and writes `pricing_as_of` plus every agent `pricing` block into the managed section of `~/.ateam/ateam.hcl` (`RenderPricingSection` / `ReplacePricingSection`, between the `// >>> ateam pricing` markers).
+
+What this means for edits to `defaults/ateam.hcl` on `main`:
+
+- **It must stay parseable by older decoders.** Unknown top-level attributes and blocks are ignored, but `agent`, `container`, `profile`, `pricing`, `model` and the context blocks reject unknown attributes and blocks ("Unsupported argument"), so a new attribute anywhere in those blocks makes `--refresh-models` fail on every binary released before it. Renaming an attribute or changing its type has the same effect; removing one is safe. A field that only matters to newer binaries can wait to land in `defaults/ateam.hcl` until older releases have aged out, or go in a user layer meanwhile.
+- **The project has not decided the support window.** There is no schema version in the file and no test that parses `main`'s defaults with a released decoder; how many releases back the file must stay parseable is an open question.
+- **The refreshed section outranks the embedded tables.** It lives in the home layer, so after an upgrade the binary's newer built-in pricing blocks stay shadowed until the next `--refresh-models` (a `pricing` block replaces the inherited one as a whole).
+
+### Price / model update checklist
+
+1. Check prices against the providers: the claude agent's `model_docs` page (`https://platform.claude.com/docs/en/models/overview`) and, for codex, `https://developers.openai.com/api/docs/pricing` (cited above the codex `pricing` block).
+2. Edit the `model` entries in the agent's `pricing` block; keep `cached_input_per_mtok` set on codex models (`EstimateCost` is the only cost source for codex).
+3. Update `suggested_model` (the tier below the top model, current generation) and, for codex, `default_model` (the codex CLI's own default).
+4. Check `model_pattern`: ids in the pricing table are accepted as is, the pattern is what a pinned id *not* in the table must match. When a provider introduces a new id shape (a new family name, say), widen the pattern and its comment so pins of the next models are not refused; `validateModelPatterns` only checks at `Load` that it compiles.
+5. Bump the top-level `pricing_as_of` to the date checked (`YYYY-MM-DD`). `ateam env` warns once it is older than `runtime.PricingMaxAge` (90 days, `internal/runtime/pricing.go`); change that constant only together with the "90 days" wording in `defaults/ateam.hcl`, `CONFIG.md` and `COMMANDS.md`.
+6. Keep the edit within the schema older binaries know (previous section).
+7. Test the refresh path against the local file instead of `main` by serving it and pointing `ATEAM_DEFAULTS_URL` at it, e.g. `python3 -m http.server -d defaults 8000` then `ATEAM_DEFAULTS_URL=http://localhost:8000/ateam.hcl ATEAM_HOME=./test_data/home ./ateam setup --refresh-models` (`make build` writes `./ateam`), and check `ateam env` and the written section. `cmd/setup_model_test.go` covers the same path with an `httptest` server.
 
 ## Maintenance Commands
 

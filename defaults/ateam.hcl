@@ -4,6 +4,11 @@
 // container, model, effort, max_budget_usd. An agent may still pin model /
 // effort / max_budget_usd; the profile's values win, the --model flag wins
 // over both, and `ateam env` shows the chain.
+//
+// Released binaries fetch and parse this file from main (`ateam setup
+// --refresh-models`), so it must stay parseable by older versions. Read
+// DEV.md "Embedded defaults and the pricing refresh contract" before
+// changing its schema, prices or models.
 
 // Sandbox template for Claude agents.
 // At runtime, the runner also grants access to (see writeSettings in runner.go):

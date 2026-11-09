@@ -320,7 +320,7 @@ Per-key (the secret store beats the environment for the same key):
 
 **Alternatives (`A|B` in `required_env`)** — the winner is picked in two steps:
 
-1. Walk alternatives at the **store tier** (project → org → global). The first alternative in declaration order that resolves wins.
+1. Walk alternatives at the **store tier** (project → global). The first alternative in declaration order that resolves wins.
 2. Otherwise walk alternatives at the **env tier**. The first alternative in declaration order wins.
 
 The default claude agents declare `CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY` (OAUTH first), so:
