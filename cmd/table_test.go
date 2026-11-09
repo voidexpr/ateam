@@ -492,3 +492,98 @@ func TestPrintArtifact(t *testing.T) {
 		})
 	}
 }
+
+// TestRequiredEnvPolicyMatrix covers how newRunner treats a missing
+// required_env: ignored on the host with container "none", a warning when
+// ateam itself runs in a container with "none", a hard error when the
+// profile launches a container.
+func TestRequiredEnvPolicyMatrix(t *testing.T) {
+	const hcl = `
+project {
+  name = "myproj"
+}
+
+agent "envtest" {
+  base         = "claude"
+  required_env = ["ATEAM_TEST_REQ_A|ATEAM_TEST_REQ_B"]
+}
+
+container "ct-docker" {
+  type = "docker"
+}
+
+profile "envtest-none" {
+  agent     = "envtest"
+  container = "none"
+}
+
+profile "envtest-docker" {
+  agent     = "envtest"
+  container = "ct-docker"
+}
+`
+	cases := []struct {
+		name        string
+		profile     string
+		inContainer bool
+		wantErr     bool
+		wantWarning bool
+	}{
+		{"host with none container", "envtest-none", false, false, false},
+		{"in container with none container", "envtest-none", true, false, true},
+		{"docker container", "envtest-docker", false, true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, k := range []string{"ATEAM_TEST_REQ_A", "ATEAM_TEST_REQ_B"} {
+				t.Setenv(k, "")
+				os.Unsetenv(k) // a set-but-empty var counts as present
+			}
+			t.Setenv("ATEAM_IN_SANDBOX", "")
+			t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+			if tc.inContainer {
+				t.Setenv("ATEAM_IN_CONTAINER", "1")
+				if agent.HasLocalAgentAuth(agent.NameClaude) {
+					t.Skip("local claude auth found: the in-container warning is suppressed")
+				}
+			} else {
+				t.Setenv("ATEAM_IN_CONTAINER", "")
+				if container.IsInContainer() {
+					t.Skip("running inside a container: the host case does not apply")
+				}
+			}
+
+			_, projPath, _ := setupFixture(t)
+			projFile := filepath.Join(projPath, ".ateam", root.ConfigFile)
+			if err := os.WriteFile(projFile, []byte(hcl), 0644); err != nil {
+				t.Fatal(err)
+			}
+			env, err := root.LookupFrom(projPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			stderr := captureStderr(t, func() { _, err = newRunner(env, tc.profile, "", false) })
+
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("want missing-secret error, got nil")
+				}
+				if !strings.Contains(err.Error(), "ATEAM_TEST_REQ_A or ATEAM_TEST_REQ_B") {
+					t.Errorf("error does not name both alternatives: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("newRunner: %v", err)
+			}
+			hasWarning := strings.Contains(stderr, "Warning: Missing required secret: ATEAM_TEST_REQ_A or ATEAM_TEST_REQ_B")
+			if hasWarning != tc.wantWarning {
+				t.Errorf("warning emitted=%v want=%v (stderr=%q)", hasWarning, tc.wantWarning, stderr)
+			}
+			if !tc.wantWarning && strings.Contains(stderr, "Warning:") {
+				t.Errorf("unexpected warning: %q", stderr)
+			}
+		})
+	}
+}

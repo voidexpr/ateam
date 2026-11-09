@@ -688,3 +688,76 @@ func TestRunnerRequireOutputFileWrittenSucceeds(t *testing.T) {
 
 // avoid unused-import error if calldb is not referenced directly above.
 var _ = calldb.Open
+
+// TestExecutePreparedSandboxSettingsArg covers the inner-sandbox gate: a
+// non-empty Sandbox.Settings writes a 0600 settings file that denies writes
+// to itself and passes it as --settings; empty Settings passes no --settings.
+func TestExecutePreparedSandboxSettingsArg(t *testing.T) {
+	run := func(t *testing.T, settings string) []string {
+		t.Helper()
+		mock := &agent.MockAgent{Response: "ok"}
+		r := newTestRunner(t, t.TempDir(), mock)
+		r.Sandbox.Settings = settings
+		prepared, err := r.Prepare(RunOpts{RoleID: "test-role", Action: ActionExec})
+		if err != nil {
+			t.Fatalf("Prepare: %v", err)
+		}
+		summary := r.ExecutePrepared(context.Background(), prepared, "prompt", nil)
+		if summary.Err != nil {
+			t.Fatalf("ExecutePrepared: %v", summary.Err)
+		}
+		if len(mock.Requests) != 1 {
+			t.Fatalf("MockAgent received %d requests, want 1", len(mock.Requests))
+		}
+		return mock.Requests[0].ExtraArgs
+	}
+
+	t.Run("settings", func(t *testing.T) {
+		args := run(t, `{"sandbox": {"enabled": true}}`)
+		var path string
+		for i, a := range args {
+			if a == "--settings" && i+1 < len(args) {
+				path = args[i+1]
+			}
+		}
+		if path == "" {
+			t.Fatalf("no --settings <file> in %v", args)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("settings file: %v", err)
+		}
+		if perm := info.Mode().Perm(); perm != 0600 {
+			t.Errorf("settings file mode = %o, want 600", perm)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			Sandbox struct {
+				Filesystem struct {
+					DenyWrite []string `json:"denyWrite"`
+				} `json:"filesystem"`
+			} `json:"sandbox"`
+		}
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatalf("settings file is not JSON: %v", err)
+		}
+		found := false
+		for _, p := range got.Sandbox.Filesystem.DenyWrite {
+			found = found || p == path
+		}
+		if !found {
+			t.Errorf("denyWrite %v does not list the settings file %s", got.Sandbox.Filesystem.DenyWrite, path)
+		}
+	})
+
+	t.Run("no settings", func(t *testing.T) {
+		for _, a := range run(t, "") {
+			if a == "--settings" {
+				t.Fatal("empty Sandbox.Settings passed --settings")
+			}
+		}
+	})
+}
