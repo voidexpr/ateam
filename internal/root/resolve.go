@@ -578,12 +578,19 @@ func discover(start, home string) (projectDir string, ancestors []string, err er
 func legacyLayoutError(path string) error {
 	return fmt.Errorf("legacy layout found at %s.\n"+
 		"This version uses one .ateam/ directory per project and ~/.ateam for user-wide config,\n"+
-		"with a single ateam.hcl replacing config.toml and runtime.hcl. To migrate:\n"+
-		"  1. move ~/.ateamorg/runtime.hcl to ~/.ateam/ateam.hcl and ~/.ateamorg/prompts to ~/.ateam/prompts\n"+
-		"  2. in each project, replace .ateam/config.toml with project/role/supervisor blocks in .ateam/ateam.hcl\n"+
-		"     (ateam init --name NAME in a copy shows the shape) and rename runtime.hcl to ateam.hcl\n"+
-		"  3. delete the .ateamorg/ directory and config.toml files\n"+
-		"scripts/migrate-ateamorg.sh in the ateam repository does these steps. See CONFIG.md for the layout", path)
+		"with a single ateam.hcl replacing config.toml and runtime.hcl.\n"+
+		"Run scripts/migrate-ateamorg.sh from the ateam repository BEFORE any other ateam command\n"+
+		"(ateam init creates ~/.ateam/ateam.hcl, which makes the script refuse to run). If the script\n"+
+		"stops because ~/.ateam/ateam.hcl exists and it holds only the starter template, delete it and rerun.\n"+
+		"By hand, the script:\n"+
+		"  1. moves ~/.ateamorg/runtime.hcl to ~/.ateam/ateam.hcl, copies prompts/ and Dockerfile to ~/.ateam/\n"+
+		"  2. moves agent config dirs under ~/.ateamorg/ to ~/.ateam/state/agents/ (update config_dir paths)\n"+
+		"  3. moves ~/.config/ateam/secrets.env and ~/.ateamorg/secrets.env to ~/.ateam/secrets.env\n"+
+		"  4. moves ~/.ateamorg/state.sqlite, logs/ and cache/ to ~/.ateam/state/\n"+
+		"  5. in each project, replaces .ateam/config.toml with project/role/supervisor blocks in .ateam/ateam.hcl\n"+
+		"     ('ateam cat --defaults' shows the syntax), appends runtime.hcl to it, and moves both old files away\n"+
+		"  6. renames ~/.ateamorg to ~/.ateamorg.migrated, then runs 'ateam project-rename' in each project\n"+
+		"See CONFIG.md, \"Migrating from .ateamorg\"", path)
 }
 
 // ResolveStreamPath resolves a relative stream_file path recorded in the

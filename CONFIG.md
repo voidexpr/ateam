@@ -181,13 +181,18 @@ Roles are opt-in: only roles with `status = "on"` are included in `--roles all`.
 
 ### Migrating from `.ateamorg`
 
-Earlier versions used `~/.ateamorg/` (with `runtime.hcl` and an on-disk `defaults/` copy) plus `.ateam/config.toml` per project. ateam refuses to run when it finds either and prints the steps. `scripts/migrate-ateamorg.sh` performs them (it renames `~/.ateamorg` to `~/.ateamorg.migrated` instead of deleting it, and converts every project registered there plus any directory passed as an argument); by hand:
+Earlier versions used `~/.ateamorg/` (with `runtime.hcl` and an on-disk `defaults/` copy) plus `.ateam/config.toml` per project. ateam refuses to run when it finds either and prints the steps.
 
-1. Move `~/.ateamorg/runtime.hcl` to `~/.ateam/ateam.hcl` and `~/.ateamorg/prompts/` to `~/.ateam/prompts/`. Drop the `defaults/` copy (the binary serves the defaults).
-2. In each project, replace `.ateam/config.toml` with `project`, `role`, `supervisor`, `sandbox_extra` and `container_extra` blocks in `.ateam/ateam.hcl` (run `ateam init` in an empty directory to see the shape), and rename `.ateam/runtime.hcl` to `ateam.hcl`.
-3. Delete `.ateamorg/` and the `config.toml` files, then run `ateam project-rename` in each project to register it.
+Run `scripts/migrate-ateamorg.sh` **before any other ateam command** (`ateam init` in particular creates `~/.ateam/ateam.hcl`, and the script refuses to overwrite that file). It converts every project registered under `~/.ateamorg/projects/` plus any directory passed as an argument, and renames `~/.ateamorg` to `~/.ateamorg.migrated` instead of deleting it. If the script stops because `~/.ateam/ateam.hcl` already exists and that file holds only the starter template, delete it and rerun the script.
 
-Secrets: the `org` scope is gone. `~/.ateamorg/secrets.env` and `~/.config/ateam/secrets.env` both become `~/.ateam/secrets.env` (the `global` scope). Agent config dirs under `~/.ateamorg/` move to `~/.ateam/state/agents/`, and `config_dir` paths in agent blocks should follow.
+By hand, the script's steps are:
+
+1. Move `~/.ateamorg/runtime.hcl` to `~/.ateam/ateam.hcl` and copy `~/.ateamorg/prompts/` to `~/.ateam/prompts/` and `~/.ateamorg/Dockerfile` to `~/.ateam/Dockerfile`. Drop the `defaults/` copy (the binary serves the defaults).
+2. Move each agent config dir under `~/.ateamorg/` (one holding `.claude.json`, `.credentials.json`, `settings.json`, `auth.json` or `secrets.env`) to `~/.ateam/state/agents/`, and update the `config_dir` paths in `~/.ateam/ateam.hcl` to match.
+3. Move `~/.config/ateam/secrets.env` and `~/.ateamorg/secrets.env` to `~/.ateam/secrets.env` (append the second if both exist). The `org` scope is gone; this is the `global` scope.
+4. Move `~/.ateamorg/state.sqlite`, `logs/` and `cache/` to `~/.ateam/state/`.
+5. In each project, replace `.ateam/config.toml` with `project`, `role`, `supervisor`, `sandbox_extra` and `container_extra` blocks in `.ateam/ateam.hcl` (`ateam cat --defaults` shows the block syntax), append the contents of `.ateam/runtime.hcl` to it, and move the old `config.toml` and `runtime.hcl` out of `.ateam/` (the script keeps them under `.ateam/cache/migrated/`).
+6. Rename `~/.ateamorg` to `~/.ateamorg.migrated` (delete it once the migration works), then run `ateam project-rename` in each project to register it.
 
 ## Prompt Composition
 
