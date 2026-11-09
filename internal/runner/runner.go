@@ -58,7 +58,7 @@ const (
 // Concurrency contract (see CONCURRENCY.md):
 //
 //   - All AgentExecutor fields are WRITTEN only during construction in the main
-//     goroutine (cmd/table.go:newRunner and friends, plus applyContainerName
+//     goroutine (cmd/runner_setup.go:newRunner and friends, plus applyContainerName
 //     and the cmd-layer overrides). After a AgentExecutor is handed to RunPool —
 //     including PoolExec.AgentExecutor overrides — its fields become READ-ONLY.
 //   - Agent and Container fields look mutable but are cloned per agent exec at the

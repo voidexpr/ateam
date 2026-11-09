@@ -37,63 +37,60 @@ type RunnerSpec struct {
 
 // buildRunner resolves an *AgentExecutor for the given env+spec. On
 // success it returns a ready-to-use runner with overrides applied and
-// the source dir marked writable. On error returns (nil, err) — the
+// the source dir marked writable, plus the blocks it was built from. On
+// error returns (nil, nil, err) — the
 // caller decides whether to short-circuit (parallel/report) or surface
 // the error as a warning while continuing (exec --dry-run).
 //
 // Scratch mode (no project context) falls back to profile="default"
 // when neither --profile nor --agent was set; matches the historical
 // behavior of every cmd that supports scratch operation.
-func buildRunner(env *root.ResolvedEnv, spec RunnerSpec) (*runner.AgentExecutor, error) {
+func buildRunner(env *root.ResolvedEnv, spec RunnerSpec) (*runner.AgentExecutor, *resolvedRun, error) {
 	hasProject := env.HasProject()
 
 	var (
-		r   *runner.AgentExecutor
-		err error
+		r        *runner.AgentExecutor
+		resolved *resolvedRun
+		err      error
 	)
 	if hasProject {
-		r, err = resolveRunner(env, spec.Profile, spec.Agent, spec.Action, spec.Role, spec.DockerAutoSetup)
+		r, resolved, err = resolveRunner(env, spec.Profile, spec.Agent, spec.Action, spec.Role, spec.DockerAutoSetup)
 	} else {
 		profile := spec.Profile
 		if profile == "" && spec.Agent == "" {
 			profile = "default"
 		}
-		r, err = resolveRunnerMinimal(env, profile, spec.Agent)
+		r, resolved, err = resolveRunnerMinimal(env, profile, spec.Agent)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if spec.ProfileSource != "" {
 		r.ProfileSource = spec.ProfileSource
 	}
 	if err := applyRunnerOverrides(r, env, spec.Overrides, spec.Action); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := checkModelConfig(env, r, spec.Overrides); err != nil {
-		return nil, err
+	if err := checkModelConfig(resolved, spec.Overrides); err != nil {
+		return nil, nil, err
 	}
 	setSourceWritable(r)
 	r.ShimDir = root.EnsureCLIShim(env)
-	return r, nil
+	return r, resolved, nil
 }
 
-// checkModelConfig prints the model warnings for the runner's profile or
-// agent (unpinned model, expensive model, --model hidden in args) to
-// stderr and refuses a model id that fails the agent's model_pattern
-// check; --skip-model-name-check demotes that refusal to a warning. A
-// config that fails to load here already failed louder in resolveRunner.
-func checkModelConfig(env *root.ResolvedEnv, r *runner.AgentExecutor, o RunnerOverrides) error {
-	rtCfg, err := loadRuntime(env)
-	if err != nil {
-		return nil
-	}
+// checkModelConfig prints the model warnings for the profile and agent
+// blocks the runner was built from (unpinned model, expensive model,
+// --model hidden in args) to stderr and refuses a model id that fails the
+// agent's model_pattern check; --skip-model-name-check demotes that
+// refusal to a warning.
+func checkModelConfig(rr *resolvedRun, o RunnerOverrides) error {
 	cliModel := o.Model
 	if cliModel == "" && o.CheaperModel {
 		cliModel = cheaperModelName
 	}
-	prof, ac := resolveProfileAgent(rtCfg, r.Profile)
-	printWarnings(rtCfg.ModelWarnings(prof, ac, cliModel))
-	err = rtCfg.ModelNameError(prof, ac, cliModel)
+	printWarnings(rr.rtCfg.ModelWarnings(rr.prof, rr.ac, cliModel))
+	err := rr.rtCfg.ModelNameError(rr.prof, rr.ac, cliModel)
 	if err != nil && skipModelNameCheck {
 		printWarnings([]string{err.Error()})
 		return nil

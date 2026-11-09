@@ -10,7 +10,7 @@ import (
 )
 
 // The four commands below all expose --cheaper-model and --model. They route
-// both flags through applyModelOverrides (table.go), which the unit test
+// both flags through applyModelOverrides (flags.go), which the unit test
 // TestApplyModelOverrides already covers in detail. These per-command tests
 // guard the *wiring*: they confirm each command's runXxx function actually
 // invokes the helper when both flags are set, so a future refactor that drops

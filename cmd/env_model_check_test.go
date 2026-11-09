@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/ateam/internal/root"
-	"github.com/ateam/internal/runner"
 )
 
 func TestEnvReportsModelNameError(t *testing.T) {
@@ -56,10 +55,17 @@ func TestCheckModelConfigRefusesAndSkipFlagDemotes(t *testing.T) {
 		}
 		return env
 	}
-	r := &runner.AgentExecutor{Profile: "a:claude"}
+	checkModelConfigFor := func(env *root.ResolvedEnv, o RunnerOverrides) error {
+		t.Helper()
+		_, rr, err := newRunnerFromAgent(env, "claude")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return checkModelConfig(rr, o)
+	}
 
 	env := writeConfig("  model = \"claude-ops-5-5\"\n")
-	err := checkModelConfig(env, r, RunnerOverrides{})
+	err := checkModelConfigFor(env, RunnerOverrides{})
 	if err == nil {
 		t.Fatal("bad pinned model: want refusal, got nil")
 	}
@@ -72,7 +78,7 @@ func TestCheckModelConfigRefusesAndSkipFlagDemotes(t *testing.T) {
 	old := skipModelNameCheck
 	skipModelNameCheck = true
 	t.Cleanup(func() { skipModelNameCheck = old })
-	stderr := captureStderr(t, func() { err = checkModelConfig(env, r, RunnerOverrides{}) })
+	stderr := captureStderr(t, func() { err = checkModelConfigFor(env, RunnerOverrides{}) })
 	if err != nil {
 		t.Errorf("--skip-model-name-check: want nil, got %v", err)
 	}
@@ -82,13 +88,13 @@ func TestCheckModelConfigRefusesAndSkipFlagDemotes(t *testing.T) {
 	skipModelNameCheck = false
 
 	env = writeConfig("")
-	err = checkModelConfig(env, r, RunnerOverrides{Model: "claude-bogus"})
+	err = checkModelConfigFor(env, RunnerOverrides{Model: "claude-bogus"})
 	if err == nil || !strings.Contains(err.Error(), `model "claude-bogus"`) || !strings.Contains(err.Error(), "(set by --model)") {
 		t.Errorf("unknown --model: want refusal naming it and --model, got %v", err)
 	}
 
 	env = writeConfig("  model_pattern = \"\"\n  model = \"claude-ops-5-5\"\n")
-	if err := checkModelConfig(env, r, RunnerOverrides{}); err != nil {
+	if err := checkModelConfigFor(env, RunnerOverrides{}); err != nil {
 		t.Errorf("model_pattern = \"\": want nil, got %v", err)
 	}
 }

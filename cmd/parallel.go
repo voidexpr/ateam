@@ -142,7 +142,7 @@ func runParallel(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	}
-	r, err := buildRunner(env, RunnerSpec{
+	r, _, err := buildRunner(env, RunnerSpec{
 		Profile:         parallelProfile,
 		Agent:           parallelAgent,
 		Action:          runner.ActionParallel,

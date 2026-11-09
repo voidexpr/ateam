@@ -151,7 +151,7 @@ func TestBuildRunner_ScratchModeDefaultProfile(t *testing.T) {
 	orgDir := testHome(t, base)
 	env := &root.ResolvedEnv{HomeDir: orgDir, Layers: []string{orgDir}}
 
-	r, err := buildRunner(env, RunnerSpec{Action: runner.ActionExec})
+	r, _, err := buildRunner(env, RunnerSpec{Action: runner.ActionExec})
 	if err != nil {
 		t.Fatalf("buildRunner: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestBuildRunner_ScratchModeExplicitAgent(t *testing.T) {
 	orgDir := testHome(t, base)
 	env := &root.ResolvedEnv{HomeDir: orgDir, Layers: []string{orgDir}}
 
-	r, err := buildRunner(env, RunnerSpec{
+	r, _, err := buildRunner(env, RunnerSpec{
 		Agent:  "mock",
 		Action: runner.ActionExec,
 	})
@@ -199,7 +199,7 @@ func TestBuildRunner_ProjectModeWithProfile(t *testing.T) {
 		t.Fatalf("Resolve: %v", err)
 	}
 
-	r, err := buildRunner(env, RunnerSpec{
+	r, _, err := buildRunner(env, RunnerSpec{
 		Profile: "default",
 		Action:  runner.ActionExec,
 	})
@@ -218,7 +218,7 @@ func TestBuildRunner_ConflictingProfileAndAgent(t *testing.T) {
 	env := &root.ResolvedEnv{HomeDir: orgDir, Layers: []string{orgDir}}
 
 	// --profile + --agent is a user-facing error.
-	_, err = buildRunner(env, RunnerSpec{
+	_, _, err = buildRunner(env, RunnerSpec{
 		Profile: "default",
 		Agent:   "mock",
 		Action:  runner.ActionExec,

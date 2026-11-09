@@ -295,7 +295,7 @@ func buildDebugContext(rows []calldb.RecentRow, filePaths []string) string {
 }
 
 func launchAutoDebug(env *root.ResolvedEnv, bundle flow.PromptBundle) error {
-	r, err := resolveRunner(env, inspectProfile, inspectAgent, runner.ActionDebug, "", false)
+	r, _, err := resolveRunner(env, inspectProfile, inspectAgent, runner.ActionDebug, "", false)
 	if err != nil {
 		return err
 	}

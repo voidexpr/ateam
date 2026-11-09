@@ -181,7 +181,7 @@ func runReview(opts ReviewOptions) error {
 
 	// The runner is built before the dry-run branch so a dry run shows the
 	// resolved model chain and surfaces profile/agent errors early.
-	cr, err := buildRunner(env, RunnerSpec{
+	cr, _, err := buildRunner(env, RunnerSpec{
 		Profile:         opts.Profile,
 		Agent:           opts.Agent,
 		Action:          runner.ActionReview,

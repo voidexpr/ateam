@@ -477,7 +477,7 @@ func configDirFromRuntime(env *root.ResolvedEnv, row *calldb.RecentRow) string {
 	agentName := row.Agent
 	switch {
 	case strings.HasPrefix(row.Profile, "a:"):
-		// Synthetic profile created by --agent runs (cmd/table.go), where
+		// Synthetic profile created by --agent runs (cmd/runner_setup.go), where
 		// the suffix names the actual agent definition (claude-isolated,
 		// claude-auto, …). row.Agent only stores the kind ("claude").
 		agentName = strings.TrimPrefix(row.Profile, "a:")

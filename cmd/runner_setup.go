@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,87 +16,6 @@ import (
 	"github.com/ateam/internal/runtime"
 	"github.com/ateam/internal/secret"
 )
-
-// newRunner creates a AgentExecutor using the resolved profile from runtime.hcl.
-// roleID is optional — used for role-specific Dockerfile resolution.
-func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetup bool) (*runner.AgentExecutor, error) {
-	rtCfg, err := runtime.Load(env.Layers)
-	if err != nil {
-		return nil, fmt.Errorf("cannot load runtime.hcl: %w", err)
-	}
-
-	prof, ac, cc, err := rtCfg.ResolveProfile(profileName)
-	if err != nil {
-		// If the profile name matches a known agent, treat it as an agent
-		// shorthand (like --agent). This allows config.toml [profiles.roles]
-		// to reference agent names directly: critical_code_reviewer = "codex"
-		if _, ok := rtCfg.Agents[profileName]; ok {
-			return newRunnerFromAgent(env, profileName)
-		}
-		return nil, err
-	}
-
-	// codex-tmux is host-only in v1: container support requires tmux+codex
-	// inside the image plus host↔container path translation that isn't
-	// wired up. Reject loudly here instead of silently mis-staging things
-	// inside a container that can't run tmux.
-	if ac.Type == agent.NameCodexTmux && cc != nil && cc.Type != "none" {
-		return nil, fmt.Errorf("codex-tmux is host-only in v1; profile %q binds it to container type %q. Use a container=none profile or `--agent codex-tmux`", profileName, cc.Type)
-	}
-	run := rtCfg.AgentForRun(prof, ac, runInsideContainer(cc))
-	ac = &run
-
-	// Validate secrets. IsolateCredentials always runs to strip competing
-	// alternatives from the agent env — this is safe even when no secrets
-	// are configured.
-	resolver := secretResolver(env, secret.DefaultBackend())
-	if cc != nil && cc.Type != "none" {
-		// Launching the agent into a fresh container: it can't do interactive
-		// login, so required creds must be present up front. Hard failure.
-		if err := secret.ValidateSecrets(ac, resolver); err != nil {
-			return nil, err
-		}
-	} else if container.IsInContainer() {
-		// ateam itself is running inside a container with container=none, so
-		// the agent runs in-place. The container may have been pre-configured
-		// with interactive/regular auth (e.g. ~/.claude/.credentials.json), in
-		// which case missing required_env is fine. Warn instead of failing so
-		// the pre-configured-agent workflow keeps working; the agent will
-		// error loudly itself if it truly has no usable auth.
-		warnMissingSecretsInContainer(secret.ValidateSecrets(ac, resolver), ac)
-	}
-	logIsolationResults(os.Stderr, secret.IsolateCredentials(ac, resolver))
-
-	r := runnerFromAgentConfig(env, ac)
-	r.Profile = profileName
-	r.ProjectID = env.ProjectID()
-	r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
-	if err := preflightContainerSupportsWorkDir(cc, env); err != nil {
-		return nil, err
-	}
-	ct, err := buildContainer(cc, prof, env, roleID, dockerAutoSetup)
-	if err != nil {
-		return nil, err
-	}
-	// Merge per-project container extras from config.toml [container-extra]
-	if ct != nil && env.Config != nil {
-		ce := env.Config.ContainerExtra
-		ct.ApplyContainerExtra(ce.ExtraArgs, ce.ForwardEnv, ce.Env)
-	}
-	// Apply agent env (credential isolation + agent-configured env) to the
-	// container so that ForwardEnv respects IsolateCredentials decisions.
-	if ct != nil {
-		ct.ApplyAgentEnv(ac.Env)
-	}
-	r.Container = ct
-	if cc != nil && cc.Type != "none" {
-		r.ContainerType = cc.Type
-		r.ContainerName = ct.GetContainerName()
-	} else {
-		r.ContainerType = "none"
-	}
-	return r, nil
-}
 
 // applyContainerNameOverride replaces the container name on a runner's container
 // if a --container-name flag was provided. Only effective for container types that support it.
@@ -141,36 +61,160 @@ func applyContainerName(r *runner.AgentExecutor, env *root.ResolvedEnv, cliFlag 
 	return fmt.Errorf("container name not set — use --container-name, ateam secret CONTAINER_NAME=<name> --scope project, or set docker_container in runtime.hcl")
 }
 
-// newRunnerFromAgent creates a AgentExecutor using a named agent directly (no profile).
-func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.AgentExecutor, error) {
+// resolvedRun is what the shared runner-build path resolved a runner from:
+// the fresh runtime.Config, the profile (nil for an agent shorthand), the
+// agent block after AgentForRun and before credential isolation (its Env is
+// a copy), and the profile's container block (nil for an agent shorthand).
+type resolvedRun struct {
+	rtCfg *runtime.Config
+	prof  *runtime.ProfileConfig
+	ac    *runtime.AgentConfig
+	cc    *runtime.ContainerConfig
+}
+
+// loadRunnerConfig loads a fresh runtime.Config instead of sharing
+// env.Runtime (loadRuntime): credential isolation mutates the agent
+// block's Env, which would otherwise leak into every other reader.
+func loadRunnerConfig(env *root.ResolvedEnv) (*runtime.Config, error) {
 	rtCfg, err := runtime.Load(env.Layers)
 	if err != nil {
 		return nil, fmt.Errorf("cannot load runtime.hcl: %w", err)
 	}
+	return rtCfg, nil
+}
 
+// checkProfileAgentExclusive rejects --profile and --agent set together.
+func checkProfileAgentExclusive(profileFlag, agentFlag string) error {
+	if profileFlag != "" && agentFlag != "" {
+		return fmt.Errorf("--profile and --agent are mutually exclusive")
+	}
+	return nil
+}
+
+// buildRunnerFromBlocks is the one path that turns resolved profile, agent
+// and container blocks into an AgentExecutor: agent-type guards,
+// AgentForRun, secrets policy, credential isolation, construction and
+// stamping. label is stamped as the runner's Profile ("<profile>" or
+// "a:<agent>"), source as its ProfileSource.
+//
+// minimal builds a runner without project context (scratch mode): no
+// container is launched, so cc does not pick the agent's context side,
+// and the secrets policy and credential isolation are skipped.
+func buildRunnerFromBlocks(env *root.ResolvedEnv, rtCfg *runtime.Config, prof *runtime.ProfileConfig, ac *runtime.AgentConfig, cc *runtime.ContainerConfig, label, source string, minimal bool, roleID string, dockerAutoSetup bool) (*runner.AgentExecutor, *resolvedRun, error) {
+	launch := cc
+	if minimal {
+		launch = nil
+		if err := rejectCodexTmuxWithoutStateDir(ac, env.StateDir()); err != nil {
+			return nil, nil, err
+		}
+	} else if ac.Type == agent.NameCodexTmux && launch != nil && launch.Type != "none" {
+		// codex-tmux is host-only in v1: container support requires tmux+codex
+		// inside the image plus host↔container path translation that isn't
+		// wired up. Reject loudly here instead of silently mis-staging things
+		// inside a container that can't run tmux.
+		return nil, nil, fmt.Errorf("codex-tmux is host-only in v1; profile %q binds it to container type %q. Use a container=none profile or `--agent codex-tmux`", label, launch.Type)
+	}
+	run := rtCfg.AgentForRun(prof, ac, runInsideContainer(launch))
+	ac = &run
+	pre := run
+	pre.Env = maps.Clone(run.Env)
+	resolved := &resolvedRun{rtCfg: rtCfg, prof: prof, ac: &pre, cc: cc}
+
+	var r *runner.AgentExecutor
+	if minimal {
+		r = minimalRunnerFromAgentConfig(env, ac)
+	} else {
+		// Validate secrets. IsolateCredentials always runs to strip competing
+		// alternatives from the agent env — this is safe even when no secrets
+		// are configured.
+		resolver := secretResolver(env, secret.DefaultBackend())
+		if launch != nil && launch.Type != "none" {
+			// Launching the agent into a fresh container: it can't do interactive
+			// login, so required creds must be present up front. Hard failure.
+			if err := secret.ValidateSecrets(ac, resolver); err != nil {
+				return nil, nil, err
+			}
+		} else if container.IsInContainer() {
+			// ateam itself is running inside a container with container=none, so
+			// the agent runs in-place. The container may have been pre-configured
+			// with interactive/regular auth (e.g. ~/.claude/.credentials.json), in
+			// which case missing required_env is fine. Warn instead of failing so
+			// the pre-configured-agent workflow keeps working; the agent will
+			// error loudly itself if it truly has no usable auth.
+			warnMissingSecretsInContainer(secret.ValidateSecrets(ac, resolver), ac)
+		}
+		logIsolationResults(os.Stderr, secret.IsolateCredentials(ac, resolver))
+
+		r = runnerFromAgentConfig(env, ac)
+		r.ProjectID = env.ProjectID()
+	}
+	r.Profile = label
+	r.ProfileSource = source
+	if prof != nil {
+		r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
+	}
+	if minimal {
+		return r, resolved, nil
+	}
+
+	if err := preflightContainerSupportsWorkDir(launch, env); err != nil {
+		return nil, nil, err
+	}
+	ct, err := buildContainer(launch, prof, env, roleID, dockerAutoSetup)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Merge per-project container extras from config.toml [container-extra]
+	if ct != nil && env.Config != nil {
+		ce := env.Config.ContainerExtra
+		ct.ApplyContainerExtra(ce.ExtraArgs, ce.ForwardEnv, ce.Env)
+	}
+	// Apply agent env (credential isolation + agent-configured env) to the
+	// container so that ForwardEnv respects IsolateCredentials decisions.
+	if ct != nil {
+		ct.ApplyAgentEnv(ac.Env)
+	}
+	r.Container = ct
+	if launch != nil && launch.Type != "none" {
+		r.ContainerType = launch.Type
+		r.ContainerName = ct.GetContainerName()
+	} else {
+		r.ContainerType = "none"
+	}
+	return r, resolved, nil
+}
+
+// newRunner creates a AgentExecutor using the resolved profile from runtime.hcl.
+// roleID is optional — used for role-specific Dockerfile resolution.
+func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetup bool) (*runner.AgentExecutor, *resolvedRun, error) {
+	rtCfg, err := loadRunnerConfig(env)
+	if err != nil {
+		return nil, nil, err
+	}
+	prof, ac, cc, err := rtCfg.ResolveProfile(profileName)
+	if err != nil {
+		// If the profile name matches a known agent, treat it as an agent
+		// shorthand (like --agent). This allows config.toml [profiles.roles]
+		// to reference agent names directly: critical_code_reviewer = "codex"
+		if a, ok := rtCfg.Agents[profileName]; ok {
+			return buildRunnerFromBlocks(env, rtCfg, nil, &a, nil, "a:"+profileName, config.ProfileSourceAgent, false, "", false)
+		}
+		return nil, nil, err
+	}
+	return buildRunnerFromBlocks(env, rtCfg, prof, ac, cc, profileName, "", false, roleID, dockerAutoSetup)
+}
+
+// newRunnerFromAgent creates a AgentExecutor using a named agent directly (no profile).
+func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.AgentExecutor, *resolvedRun, error) {
+	rtCfg, err := loadRunnerConfig(env)
+	if err != nil {
+		return nil, nil, err
+	}
 	ac, ok := rtCfg.Agents[agentName]
 	if !ok {
-		return nil, fmt.Errorf("unknown agent %q", agentName)
+		return nil, nil, fmt.Errorf("unknown agent %q", agentName)
 	}
-	ac = rtCfg.AgentForRun(nil, &ac, runInsideContainer(nil))
-
-	// No container launch — the agent runs in-place. On the host it handles
-	// its own auth; inside a pre-configured container it may rely on regular
-	// auth (~/.claude/.credentials.json), so a missing required_env is only a
-	// warning, not a hard failure. IsolateCredentials still runs to strip
-	// competing env vars.
-	resolver := secretResolver(env, secret.DefaultBackend())
-	if container.IsInContainer() {
-		warnMissingSecretsInContainer(secret.ValidateSecrets(&ac, resolver), &ac)
-	}
-	logIsolationResults(os.Stderr, secret.IsolateCredentials(&ac, resolver))
-
-	r := runnerFromAgentConfig(env, &ac)
-	r.Profile = "a:" + agentName
-	r.ProfileSource = config.ProfileSourceAgent
-	r.ProjectID = env.ProjectID()
-	r.ContainerType = "none"
-	return r, nil
+	return buildRunnerFromBlocks(env, rtCfg, nil, &ac, nil, "a:"+agentName, config.ProfileSourceAgent, false, "", false)
 }
 
 func minimalRunnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runner.AgentExecutor {
@@ -264,65 +308,47 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 
 // newRunnerDefault creates a AgentExecutor using the default profile.
 func newRunnerDefault(env *root.ResolvedEnv) (*runner.AgentExecutor, error) {
-	return newRunnerFromChoice(env, env.Config.ResolveProfile("", ""), "", false)
+	r, _, err := newRunnerFromChoice(env, env.Config.ResolveProfile("", ""), "", false)
+	return r, err
 }
 
 // newRunnerFromChoice is newRunner for a profile picked by config.toml,
 // stamping the setting that picked it onto the runner.
-func newRunnerFromChoice(env *root.ResolvedEnv, choice config.ProfileChoice, roleID string, dockerAutoSetup bool) (*runner.AgentExecutor, error) {
-	r, err := newRunner(env, choice.Name, roleID, dockerAutoSetup)
+func newRunnerFromChoice(env *root.ResolvedEnv, choice config.ProfileChoice, roleID string, dockerAutoSetup bool) (*runner.AgentExecutor, *resolvedRun, error) {
+	r, resolved, err := newRunner(env, choice.Name, roleID, dockerAutoSetup)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	r.ProfileSource = choice.Source
-	return r, nil
+	return r, resolved, nil
 }
 
 // resolveRunnerMinimal builds a AgentExecutor without project context (just org dir).
 // Docker containers are not supported without project context.
-func resolveRunnerMinimal(env *root.ResolvedEnv, profileFlag, agentFlag string) (*runner.AgentExecutor, error) {
-	rtCfg, err := runtime.Load(env.Layers)
-	if err != nil {
-		return nil, fmt.Errorf("cannot load runtime.hcl: %w", err)
+func resolveRunnerMinimal(env *root.ResolvedEnv, profileFlag, agentFlag string) (*runner.AgentExecutor, *resolvedRun, error) {
+	if err := checkProfileAgentExclusive(profileFlag, agentFlag); err != nil {
+		return nil, nil, err
 	}
-
-	switch {
-	case profileFlag != "" && agentFlag != "":
-		return nil, fmt.Errorf("--profile and --agent are mutually exclusive")
-	case agentFlag != "":
+	rtCfg, err := loadRunnerConfig(env)
+	if err != nil {
+		return nil, nil, err
+	}
+	if agentFlag != "" {
 		ac, ok := rtCfg.Agents[agentFlag]
 		if !ok {
-			return nil, fmt.Errorf("unknown agent %q", agentFlag)
+			return nil, nil, fmt.Errorf("unknown agent %q", agentFlag)
 		}
-		if err := rejectCodexTmuxWithoutStateDir(&ac, env.StateDir()); err != nil {
-			return nil, err
-		}
-		ac = rtCfg.AgentForRun(nil, &ac, runInsideContainer(nil))
-		r := minimalRunnerFromAgentConfig(env, &ac)
-		r.Profile = "a:" + agentFlag
-		r.ProfileSource = config.ProfileSourceAgent
-		return r, nil
-	default:
-		choice := config.ProfileChoice{Name: profileFlag, Source: config.ProfileSourceFlag}
-		if profileFlag == "" {
-			choice = config.ProfileChoice{Name: "default", Source: config.ProfileSourceBuiltin}
-		}
-		prof, ac, _, err := rtCfg.ResolveProfile(choice.Name)
-		if err != nil {
-			return nil, err
-		}
-		if err := rejectCodexTmuxWithoutStateDir(ac, env.StateDir()); err != nil {
-			return nil, err
-		}
-		// Docker is not supported without project context: the agent runs
-		// in-place, so the container block does not pick the context side.
-		run := rtCfg.AgentForRun(prof, ac, runInsideContainer(nil))
-		r := minimalRunnerFromAgentConfig(env, &run)
-		r.Profile = choice.Name
-		r.ProfileSource = choice.Source
-		r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)
-		return r, nil
+		return buildRunnerFromBlocks(env, rtCfg, nil, &ac, nil, "a:"+agentFlag, config.ProfileSourceAgent, true, "", false)
 	}
+	choice := config.ProfileChoice{Name: profileFlag, Source: config.ProfileSourceFlag}
+	if profileFlag == "" {
+		choice = config.ProfileChoice{Name: "default", Source: config.ProfileSourceBuiltin}
+	}
+	prof, ac, cc, err := rtCfg.ResolveProfile(choice.Name)
+	if err != nil {
+		return nil, nil, err
+	}
+	return buildRunnerFromBlocks(env, rtCfg, prof, ac, cc, choice.Name, choice.Source, true, "", false)
 }
 
 // rejectCodexTmuxWithoutStateDir errors out when codex-tmux has no anchor for
@@ -342,10 +368,11 @@ func rejectCodexTmuxWithoutStateDir(ac *runtime.AgentConfig, stateDir string) er
 }
 
 // resolveRunner builds a AgentExecutor from --profile/--agent flags, falling back to config resolution.
-func resolveRunner(env *root.ResolvedEnv, profileFlag, agentFlag, action, roleID string, dockerAutoSetup bool) (*runner.AgentExecutor, error) {
+func resolveRunner(env *root.ResolvedEnv, profileFlag, agentFlag, action, roleID string, dockerAutoSetup bool) (*runner.AgentExecutor, *resolvedRun, error) {
+	if err := checkProfileAgentExclusive(profileFlag, agentFlag); err != nil {
+		return nil, nil, err
+	}
 	switch {
-	case profileFlag != "" && agentFlag != "":
-		return nil, fmt.Errorf("--profile and --agent are mutually exclusive")
 	case agentFlag != "":
 		return newRunnerFromAgent(env, agentFlag)
 	case profileFlag != "":

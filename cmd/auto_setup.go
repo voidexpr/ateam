@@ -80,7 +80,7 @@ func runAutoSetup(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Auto-setup running (%dm timeout)...\n", timeout)
 
-	cr, err := buildRunner(env, RunnerSpec{
+	cr, _, err := buildRunner(env, RunnerSpec{
 		Profile: autoSetupProfile,
 		Agent:   autoSetupAgent,
 		Action:  runner.ActionExec,

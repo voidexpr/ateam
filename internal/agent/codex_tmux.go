@@ -44,7 +44,7 @@ type CodexTmuxAgent struct {
 	TmuxHeight       int
 	// ProjectDir is the absolute path to the ateam project (the dir that
 	// contains `.ateam/`). Used to root the tmux socket and any future
-	// per-run scratch state. Set by cmd/table.go from ResolvedEnv at
+	// per-run scratch state. Set by cmd/runner_setup.go from ResolvedEnv at
 	// agent construction time so it survives clone-for-pool dispatch.
 	ProjectDir string
 }

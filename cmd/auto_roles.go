@@ -63,7 +63,7 @@ func autoRolesRecommend(env *root.ResolvedEnv, profile, agentName string, verbos
 		return "", nil, fmt.Errorf("build auto-roles context: %w", err)
 	}
 
-	cr, err := resolveRunner(env, profile, agentName, runner.ActionReview, "", dockerAutoSetup)
+	cr, _, err := resolveRunner(env, profile, agentName, runner.ActionReview, "", dockerAutoSetup)
 	if err != nil {
 		return "", nil, fmt.Errorf("resolve auto-roles runner: %w", err)
 	}

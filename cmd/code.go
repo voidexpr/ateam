@@ -186,7 +186,7 @@ func runCode(opts CodeOptions) error {
 	// would use. buildRunner doesn't execute anything; it just constructs an
 	// AgentExecutor. Side benefit: dry-run now surfaces profile/agent
 	// resolution errors early.
-	cr, err := buildRunner(env, RunnerSpec{
+	cr, _, err := buildRunner(env, RunnerSpec{
 		Profile:         supervisorProfileName,
 		ProfileSource:   supervisorProfileSource,
 		Agent:           opts.SupervisorAgent,

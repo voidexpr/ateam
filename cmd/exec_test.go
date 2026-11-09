@@ -53,7 +53,7 @@ func TestPrintExecDryRun(t *testing.T) {
 	env := &root.ResolvedEnv{}
 
 	out := captureStdout(t, func() {
-		if err := printExecDryRun(r, env, "hello world", "security", runner.ActionExec, ""); err != nil {
+		if err := printExecDryRun(r, env, nil, "hello world", "security", runner.ActionExec, ""); err != nil {
 			t.Errorf("printExecDryRun: %v", err)
 		}
 	})

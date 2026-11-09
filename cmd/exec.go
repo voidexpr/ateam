@@ -128,7 +128,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	// "fix_regression") without having to pre-register them in config.toml.
 	// The role logs directory is created lazily by the runner the first time
 	// it writes output.
-	r, err := buildRunner(env, RunnerSpec{
+	r, blocks, err := buildRunner(env, RunnerSpec{
 		Profile:         execProfile,
 		Agent:           execAgent,
 		Action:          execAction,
@@ -189,7 +189,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return err
 		}
-		return printExecDryRun(r, env, resolved, execRole, execAction, execBatch)
+		return printExecDryRun(r, env, blocks, resolved, execRole, execAction, execBatch)
 	}
 
 	db, err := openStateDB(env)
@@ -304,10 +304,10 @@ func printProgress(ch <-chan runner.RunProgress) {
 // for compatibility — alias so callers and tests work the same.
 var formatInitLine = flow.FormatInitLine
 
-func printExecDryRun(r *runner.AgentExecutor, env *root.ResolvedEnv, prompt, roleID, action, batch string) error {
+func printExecDryRun(r *runner.AgentExecutor, env *root.ResolvedEnv, blocks *resolvedRun, prompt, roleID, action, batch string) error {
 	fmt.Println("╔══ dry-run ══╗")
 	fmt.Println()
-	printDryRunInfo(r, env, dryRunOpts{
+	printDryRunInfo(r, env, blocks, dryRunOpts{
 		RoleID: roleID,
 		Action: action,
 		Batch:  batch,

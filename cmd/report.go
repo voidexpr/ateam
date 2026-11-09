@@ -193,7 +193,7 @@ func runReport(opts ReportOptions) error {
 		MaxBudgetUSD:      opts.MaxBudgetUSD,
 		MaxBudgetUSDBatch: opts.MaxBudgetBatch,
 	}
-	cr, err := buildRunner(env, RunnerSpec{
+	cr, crBlocks, err := buildRunner(env, RunnerSpec{
 		Profile:         opts.Profile,
 		Agent:           opts.Agent,
 		Action:          runner.ActionReport,
@@ -216,6 +216,7 @@ func runReport(opts ReportOptions) error {
 		roleID string
 		bundle flow.PromptBundle
 		runner *runner.AgentExecutor
+		blocks *resolvedRun
 	}
 	var rbs []roleBundle
 	for _, roleID := range roleIDs {
@@ -239,10 +240,10 @@ func runReport(opts ReportOptions) error {
 			continue
 		}
 
-		roleRunner := cr
+		roleRunner, roleBlocks := cr, crBlocks
 		if !cliOverridesProfile {
 			if roleProfile := env.Config.ResolveProfile(runner.ActionReport, roleID); roleProfile.Name != defaultProfile {
-				rr, err := buildRunner(env, RunnerSpec{
+				rr, rrBlocks, err := buildRunner(env, RunnerSpec{
 					Profile:         roleProfile.Name,
 					ProfileSource:   roleProfile.Source,
 					Action:          runner.ActionReport,
@@ -253,12 +254,12 @@ func runReport(opts ReportOptions) error {
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: cannot resolve profile %q for %s, using default — %v\n", roleProfile, roleID, err)
 				} else {
-					roleRunner = rr
+					roleRunner, roleBlocks = rr, rrBlocks
 				}
 			}
 		}
 
-		rbs = append(rbs, roleBundle{roleID: roleID, bundle: *bundle, runner: roleRunner})
+		rbs = append(rbs, roleBundle{roleID: roleID, bundle: *bundle, runner: roleRunner, blocks: roleBlocks})
 	}
 
 	if len(rbs) == 0 {
@@ -272,7 +273,7 @@ func runReport(opts ReportOptions) error {
 				fmt.Println()
 			}
 			fmt.Printf("╔══ %s ══╗\n\n", rb.roleID)
-			printDryRunInfo(rb.runner, env, dryRunOpts{
+			printDryRunInfo(rb.runner, env, rb.blocks, dryRunOpts{
 				RoleID: rb.roleID,
 				Action: runner.ActionReport,
 				Batch:  batch,

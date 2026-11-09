@@ -97,7 +97,7 @@ func checkRunning(db *calldb.CallDB, projectID, action string, roles []string) f
 }
 
 // processAlive checks whether the given PID has a live process. Mirrors
-// cmd/table.go::isProcessAlive; duplicated to avoid a cmd→internal/flow
+// cmd/common.go::isProcessAlive; duplicated to avoid a cmd→internal/flow
 // reverse import.
 func processAlive(pid int) bool {
 	proc, err := os.FindProcess(pid)

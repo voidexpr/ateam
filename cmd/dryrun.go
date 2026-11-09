@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,7 +29,9 @@ type dryRunOpts struct {
 
 // printDryRunInfo prints resolved execution details for a dry run.
 // This is the shared core used by both `exec --dry-run` and `report --dry-run`.
-func printDryRunInfo(r *runner.AgentExecutor, env *root.ResolvedEnv, opts dryRunOpts) {
+// blocks are the profile/agent/container blocks r was built from (see
+// buildRunner); nil skips the secrets section.
+func printDryRunInfo(r *runner.AgentExecutor, env *root.ResolvedEnv, blocks *resolvedRun, opts dryRunOpts) {
 	agentName := r.Agent.Name()
 	var model string
 	if mp, ok := r.Agent.(agent.ModelProvider); ok {
@@ -110,7 +113,7 @@ func printDryRunInfo(r *runner.AgentExecutor, env *root.ResolvedEnv, opts dryRun
 	}
 
 	// Secrets
-	printDryRunSecrets(r, env)
+	printDryRunSecrets(env, blocks)
 
 	// Sandbox
 	if r.Sandbox.Settings != "" {
@@ -164,32 +167,17 @@ func logIsolationResults(w io.Writer, results []secret.IsolationResult) {
 	}
 }
 
-func printDryRunSecrets(r *runner.AgentExecutor, env *root.ResolvedEnv) {
-	rtCfg, _ := runtime.Load(env.Layers)
-	if rtCfg == nil {
+func printDryRunSecrets(env *root.ResolvedEnv, blocks *resolvedRun) {
+	if blocks == nil {
 		return
 	}
-	var ac *runtime.AgentConfig
 	var forwardEnv []string
-	profileName := r.Profile
-	if strings.HasPrefix(profileName, "a:") {
-		an := profileName[2:]
-		if a, ok := rtCfg.Agents[an]; ok {
-			ac = &a
-		}
-	} else if profileName != "" {
-		if _, a, cc, err := rtCfg.ResolveProfile(profileName); err == nil {
-			ac = a
-			if cc != nil {
-				forwardEnv = cc.ForwardEnv
-			}
-		}
+	if blocks.cc != nil {
+		forwardEnv = blocks.cc.ForwardEnv
 	}
-	if ac == nil {
-		return
-	}
-	run := rtCfg.ForContext(*ac, r.Container != nil || container.IsInContainer())
-	ac = &run
+	run := *blocks.ac
+	run.Env = maps.Clone(blocks.ac.Env)
+	ac := &run
 	resolver := secretResolver(env, secret.DefaultBackend())
 
 	// Run isolation on this copy so details reflect active/stripped status.

@@ -44,7 +44,7 @@ func TestRejectCodexTmuxWithoutStateDir(t *testing.T) {
 }
 
 // TestCodexTmuxRejectedWithNonNoneContainer covers the host-only constraint
-// at cmd/table.go:140-142: codex-tmux must not be bound to a container type
+// in buildRunnerFromBlocks: codex-tmux must not be bound to a container type
 // other than "none". This is a different code path and a different error
 // message than TestRejectCodexTmuxWithoutProject (which guards the
 // no-project-context case).
@@ -85,7 +85,7 @@ profile "` + profileName + `" {
 				WorkDir:    filepath.Dir(projectDir),
 			}
 
-			_, err := newRunner(env, profileName, "", false)
+			_, _, err := newRunner(env, profileName, "", false)
 			if err == nil {
 				t.Fatalf("expected host-only rejection error, got nil")
 			}
@@ -102,7 +102,7 @@ profile "` + profileName + `" {
 
 // TestCodexTmuxAllowedWithNoneContainer is the happy-path companion to
 // TestCodexTmuxRejectedWithNonNoneContainer: codex-tmux bound to a "none"
-// container must pass the host-only gate at cmd/table.go:140-142.
+// container must pass the host-only gate in buildRunnerFromBlocks.
 func TestCodexTmuxAllowedWithNoneContainer(t *testing.T) {
 	dir := t.TempDir()
 	projectDir := filepath.Join(dir, "project", ".ateam")
@@ -117,7 +117,7 @@ func TestCodexTmuxAllowedWithNoneContainer(t *testing.T) {
 	}
 
 	// The embedded defaults define profile "codex-tmux" with container "none".
-	r, err := newRunner(env, "codex-tmux", "", false)
+	r, _, err := newRunner(env, "codex-tmux", "", false)
 	if err != nil {
 		t.Fatalf("newRunner: unexpected error: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestCodexTmuxAllowedWithNoneContainer(t *testing.T) {
 // project): the profile's model/budget pins reach the agent.
 func TestScratchRunnerAppliesProfilePins(t *testing.T) {
 	env := &root.ResolvedEnv{HomeDir: t.TempDir()}
-	r, err := resolveRunnerMinimal(env, "cheap", "")
+	r, _, err := resolveRunnerMinimal(env, "cheap", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestScratchRunnerAppliesContextBlock(t *testing.T) {
 	}
 	env := &root.ResolvedEnv{HomeDir: t.TempDir()}
 	for _, tc := range []struct{ profile, agentName string }{{"codex", ""}, {"", "codex"}} {
-		r, err := resolveRunnerMinimal(env, tc.profile, tc.agentName)
+		r, _, err := resolveRunnerMinimal(env, tc.profile, tc.agentName)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -246,7 +246,7 @@ profile "envtest-docker" {
 				t.Fatal(err)
 			}
 
-			stderr := captureStderr(t, func() { _, err = newRunner(env, tc.profile, "", false) })
+			stderr := captureStderr(t, func() { _, _, err = newRunner(env, tc.profile, "", false) })
 
 			if tc.wantErr {
 				if err == nil {
