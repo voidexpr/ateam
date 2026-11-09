@@ -76,14 +76,17 @@ install_go() {
     ok "Go installed: $(go version)"
 }
 
-# --- Claude CLI ---
+# --- Agent CLI ---
 
-check_claude() {
-    if command -v claude &>/dev/null; then
-        ok "Claude Code CLI found"
-        return 0
-    fi
-    return 1
+check_agent_cli() {
+    local found=1 cli
+    for cli in claude codex; do
+        if command -v "$cli" &>/dev/null; then
+            ok "$cli CLI found"
+            found=0
+        fi
+    done
+    return $found
 }
 
 # --- Build ---
@@ -133,11 +136,12 @@ main() {
         install_go
     fi
 
-    # Claude CLI
-    if ! check_claude; then
-        warn "Claude Code CLI not found (optional — needed to run agents)"
-        echo "  Install: https://docs.anthropic.com/en/docs/claude-code"
-        echo "  Then authenticate: claude login"
+    # Agent CLI
+    if ! check_agent_cli; then
+        warn "No coding agent CLI found (claude or codex — needed to run agents)"
+        echo "  Claude Code: https://docs.anthropic.com/en/docs/claude-code"
+        echo "  Codex: https://github.com/openai/codex"
+        echo "  Then authenticate by running the CLI once (claude / codex)"
         echo
     fi
 
@@ -151,11 +155,10 @@ main() {
 
     info "Done! Quick start:"
     echo "  cd /path/to/your/project"
-    echo "  ateam init"
-    echo "  ateam auto-setup"
-    echo "  ateam report"
-    echo "  ateam review"
-    echo "  ateam code"
+    echo "  ateam init          # create .ateam/"
+    echo "  ateam login         # if init set a separate agent config dir"
+    echo "  ateam auto-setup    # let an agent pick the roles"
+    echo "  ateam run-all       # report -> review -> code -> verify"
 }
 
 main "$@"

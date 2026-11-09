@@ -64,7 +64,7 @@ Created by `ateam init`. Versioned files at the top level, runtime artifacts git
 
 ## `ateam.hcl`
 
-One file holds everything, and any block may appear in any layer; a nearer layer overrides only the attributes it sets (see [Layers](#layers)). `ateam init` writes the project block and the role list:
+One file holds everything, and any block may appear in any layer; a nearer layer overrides only the attributes it sets (see [Runtime Configuration](#runtime-configuration)). `ateam init` writes the project block and the role list:
 
 ```hcl
 project {
@@ -391,7 +391,7 @@ With no model pinned anywhere, the agent CLI picks its own default, often the mo
 
 A pinned model is also checked against the agent's `pricing` table and, failing that, its `model_pattern`, a regexp: the built-in `claude` agent requires `claude-<family>-<version>`, `codex` requires `gpt-<version>[-variant]` or `o<n>[-variant]`, and a dated `-YYYY-MM-DD` suffix is ignored. An id that matches neither, such as `opus-5.5` for `claude`, is refused at launch and reported by `ateam env`, together with the known ids, the provider's model page (`model_docs`) and the file and line that set it. An unknown version of a known family passes, so a new model works before the pricing table lists it. `--skip-model-name-check` demotes the refusal to a warning; `model_pattern = ""` on an agent turns the check off.
 
-The default `claude` agents share `env = local.claude_env`, which besides unsetting `CLAUDECODE` sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`. Headless (`claude -p`) sessions kill every background task the moment the model ends its turn, so ateam removes the Bash tool's `run_in_background` option: long commands block in one foreground call instead. Bash timeouts are left at the harness defaults for every agent except the `ateam code` supervisor, which gets `BASH_DEFAULT_TIMEOUT_MS` / `BASH_MAX_TIMEOUT_MS` set per run to the `[exec]` `timeout_minutes` plus 10 minutes, so one call can wait for a whole coding sub-run while the sub-run's own commands keep the stock limits. An agent block with its own `env` map replaces the local entirely, so copy the `CLAUDECODE` and background-tasks entries along.
+The default `claude` agents share `env = local.claude_env`, which besides unsetting `CLAUDECODE` sets `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`. Headless (`claude -p`) sessions kill every background task the moment the model ends its turn, so ateam removes the Bash tool's `run_in_background` option: long commands block in one foreground call instead. Bash timeouts are left at the harness defaults for every agent except the `ateam code` supervisor, which gets `BASH_DEFAULT_TIMEOUT_MS` / `BASH_MAX_TIMEOUT_MS` set per run to `project.exec_timeout_minutes` plus 10 minutes, so one call can wait for a whole coding sub-run while the sub-run's own commands keep the stock limits. An agent block with its own `env` map replaces the local entirely, so copy the `CLAUDECODE` and background-tasks entries along.
 
 Agents support inheritance via `base`, sandbox settings, environment variables, isolated config dirs, and `required_env` for secret validation. When alternatives are declared (e.g., `required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]`), the first alternative in declaration order wins at each tier (store first, then env). Competing alternatives are stripped from the agent's process environment to avoid credential confusion. See [`ateam secret`](COMMANDS.md#ateam-secret) for the full resolution order.
 
@@ -666,11 +666,11 @@ profile "cheap" {
 }
 ```
 
-Use `--profile docker` to run in a fresh ateam-managed container, `--profile docker-exec` to exec into a user-managed long-lived container, or `--profile cheap` for cheaper runs. See `defaults/ateam.hcl` for the full list of built-in profiles.
+Use `--profile docker` to run in a fresh ateam-managed container, `--profile docker-exec` to exec into a user-managed long-lived container, or `--profile cheap` for cheaper runs. See `ateam cat --defaults` for the full list of built-in profiles.
 
 `agent_extra_args` lands last on the agent command line and `container_extra_args` on `docker run`. A nearer layer adds to either without re-listing it with `agent_extra_args_prepend` / `agent_extra_args_append` and `container_extra_args_prepend` / `container_extra_args_append`.
 
-For the resolution order when multiple profile selectors apply, see [Profile resolution order](#profiles-1) in the `[profiles]` ateam.hcl section.
+For the resolution order when multiple profile selectors apply, see [Profile resolution order](#supervisor).
 
 #### Running the supervisor inside Docker
 

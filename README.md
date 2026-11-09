@@ -49,7 +49,7 @@ Ateam handles the boring bits:
 
 **Quality pipeline**
 - Four stages: `report` (parallel role audits) → `review` (supervisor prioritizes) → `code` (delegated fixes, small commits) → `verify` (commit inspection + tests). Run as `ateam run-all` or stage-by-stage.
-- 11 built-in roles: code bugs, recent-change review, structural quality, system architecture, internal/external docs, project automation, dependencies, security, test gaps, recent-test coverage (see [ROLES.md](ROLES.md))
+- 23 built-in roles, 11 enabled by default: code bugs, recent-change review, structural quality, system architecture, internal/external docs, project automation, dependencies, security, test gaps, recent-test coverage (see [ROLES.md](ROLES.md))
 - Stateful markdown artifacts: each cycle reads the previous reports and review; quality compounds, and no context is lost
 - Layered prompt fallback (project `.ateam/` → ancestor layers → `~/.ateam/` → embedded defaults) with composable pre/post extensions; new roles are a single markdown file
 
@@ -70,7 +70,7 @@ A lot of work can now be offloaded, and ateam uses its own machinery to help mai
 - **`ateam auto-setup`**: an agent reads your project and decides which roles to enable, so you don't have to read the docs
 - **`ateam report --auto-roles`**: dynamically picks which roles to run based on recent commits
 - **`ateam inspect --auto-debug`**: when an agent fails, another agent investigates the failure, proposes local fixes, and drafts a bug to file against ateam
-- **`scripts/ateam-runall-managed.sh`**: runs a full quality pipeline and, on error, has an agent try to get it back on track
+- **`scripts/ateam-run-all-managed.sh`**: runs a full quality pipeline and, on error, has an agent try to get it back on track
 
 ## Install
 
@@ -79,9 +79,21 @@ git clone https://github.com/voidexpr/ateam.git
 cd ateam && ./install.sh
 ```
 
-Authenticate Claude Code or Codex if you haven't already (`claude` / `codex`). For unattended use in cron or containers, see [CONFIG.md](CONFIG.md) for credential storage.
+`install.sh` builds `./ateam` in the clone and symlinks it into `$INSTALL_DIR` (default `~/.local/bin`).
 
-Requires Go 1.26+ (installed automatically by `install.sh`) and one coding agent CLI. Docker is optional.
+Authenticate Claude Code or Codex if you haven't already (`claude` / `codex`). For unattended use in cron or containers, store a token with `ateam secret CLAUDE_CODE_OAUTH_TOKEN --set` (see [ISOLATION.md](ISOLATION.md#secrets) and [`ateam secret`](COMMANDS.md#ateam-secret)).
+
+Requires Go 1.26+ (installed automatically by `install.sh`) and one coding agent CLI. On Linux the default sandbox needs bubblewrap (`bwrap`). Docker is optional.
+
+### Upgrading
+
+```bash
+cd /path/to/ateam-clone && git pull --rebase && make build
+```
+
+The symlink created by `install.sh` points at the rebuilt binary. Run `make build-all` instead if you use the Docker modes that copy ateam into containers (`docker`, `docker-exec`). Re-running `./install.sh` also works (set `INSTALL_DIR` again if you used a non-default one).
+
+Coming from a version that used `.ateamorg/` or `.ateam/config.toml`: run `scripts/migrate-ateamorg.sh` before any other ateam command (see [Migrating from `.ateamorg`](CONFIG.md#migrating-from-ateamorg)).
 
 ## Quick Start
 
@@ -96,11 +108,13 @@ ateam init                # create .ateam/
 * A: Edit `.ateam/ateam.hcl` to select which [roles](ROLES.md) to enable in your project
 * B: Or let an agent decide: `ateam auto-setup` (detect stack, enable a reasonable role set)
 
-### 2b. Optional: give unattended agents their own config dir, then log in
+### 2b. Give unattended agents their own config dir, then log in
+The first `ateam init` asks where unattended agents keep their config; the default is a separate directory under `~/.ateam`. If a config dir is set, `ateam login` is required before running agents:
 ```bash
-ateam setup     # keep your interactive hooks, plugins and sessions out of unattended runs
+ateam setup     # set or change the config dir (keeps your interactive hooks, plugins and sessions out of unattended runs)
 ateam login     # log the unattended agent into that directory
 ```
+For scripted use, `ateam init --agent-config none` skips the question and keeps unattended runs on the interactive install (no extra login).
 
 ### 3. Run the quality pipeline; ATeam commits changes locally
 ```bash
@@ -296,10 +310,10 @@ By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for o
 
 | | |
 |---|---|
-| **Per project setup** | `init`, `auto-setup` |
+| **Per project setup** | `init`, `auto-setup`, `setup`, `login` |
 | **Pipeline** | `run-all` or: `report`, `review`, `code`, `verify` |
 | **Ad-hoc** | `exec`, `parallel` |
-| **Process / cost** | `ps`, `tail`, `resume`, `inspect`, `cat`, `cost` |
+| **Process / cost** | `ps`, `tail`, `top`, `resume`, `inspect`, `cat`, `cost` |
 | **Web Interface for Artifacts** | `serve`, `export` |
 | **Config / debug** | `env`, `prompt`, `roles`, `secret` |
 

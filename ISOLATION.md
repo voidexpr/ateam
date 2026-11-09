@@ -39,7 +39,7 @@ allow_domains = ["my-internal-registry.dev"]
 unsandboxed_commands = ["playwright"]    # commands that can't run inside a sandbox
 ```
 
-Use `ateam env --claude-sandbox` to see the merged sandbox settings. See [CONFIG.md `[sandbox-extra]`](CONFIG.md#sandbox-extra) for the full field reference.
+Use `ateam env --claude-sandbox` to see the merged sandbox settings. See [CONFIG.md `sandbox_extra`](CONFIG.md#sandbox_extra) for the full field reference.
 
 ### Known limitations
 
