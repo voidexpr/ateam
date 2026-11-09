@@ -3,14 +3,17 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/prompts"
 	assemblerpkg "github.com/ateam/internal/prompts/assembler"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
+	"github.com/ateam/internal/runtime"
 )
 
 // TestBuildArgPrompt_DispatchRule asserts the spec's three-way
@@ -497,5 +500,61 @@ func TestNewCodeBundle_ThreadsSubRunArgsToRunOpts(t *testing.T) {
 	opts := bundle.RunOpts(flow.RuntimeEnv{})
 	if opts.SubRunArgs != "--profile alpha --agent beta" {
 		t.Errorf("RunOpts.SubRunArgs = %q, want '--profile alpha --agent beta' — supervisor sub-run args would render to empty in {{exec.subrun_args}}", opts.SubRunArgs)
+	}
+}
+
+// TestRunInsideContainer: only container types buildContainer launches
+// count as "inside".
+func TestRunInsideContainer(t *testing.T) {
+	if container.IsInContainer() {
+		t.Skip("running inside a container: always inside")
+	}
+	cases := []struct {
+		cc   *runtime.ContainerConfig
+		want bool
+	}{
+		{nil, false},
+		{&runtime.ContainerConfig{Type: ""}, false},
+		{&runtime.ContainerConfig{Type: "none"}, false},
+		{&runtime.ContainerConfig{Type: "docker"}, true},
+		{&runtime.ContainerConfig{Type: "docker-exec"}, true},
+		{&runtime.ContainerConfig{Type: "dokcer"}, false},
+	}
+	for _, tc := range cases {
+		name := "nil"
+		if tc.cc != nil {
+			name = tc.cc.Type
+		}
+		if got := runInsideContainer(tc.cc); got != tc.want {
+			t.Errorf("runInsideContainer(%s) = %v, want %v", name, got, tc.want)
+		}
+	}
+}
+
+// TestResolveProfileAgentPicksContextBlock: a docker profile gets claude's
+// inside_container block, the default (container none) profile the
+// outside_container one.
+func TestResolveProfileAgentPicksContextBlock(t *testing.T) {
+	rtCfg, err := runtime.Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, ac := resolveProfileAgent(rtCfg, "docker")
+	if ac == nil {
+		t.Fatal("docker profile not resolved")
+	}
+	if ac.Sandbox != "" || !slices.Contains(ac.Args, "--dangerously-skip-permissions") {
+		t.Errorf("docker: sandbox=%q args=%v, want empty sandbox and --dangerously-skip-permissions", ac.Sandbox, ac.Args)
+	}
+
+	if container.IsInContainer() {
+		t.Skip("running inside a container: the default profile is inside too")
+	}
+	_, ac = resolveProfileAgent(rtCfg, "default")
+	if ac == nil {
+		t.Fatal("default profile not resolved")
+	}
+	if ac.Sandbox == "" || slices.Contains(ac.Args, "--dangerously-skip-permissions") {
+		t.Errorf("default: sandbox=%q args=%v, want a sandbox and no --dangerously-skip-permissions", ac.Sandbox, ac.Args)
 	}
 }

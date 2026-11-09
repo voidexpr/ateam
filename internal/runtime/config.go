@@ -12,6 +12,7 @@ import (
 	"github.com/ateam/defaults"
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/container"
+	"github.com/ateam/internal/display"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclparse"
@@ -350,6 +351,9 @@ func Load(layerDirs []string) (*Config, error) {
 	if err := cfg.validateProfiles(); err != nil {
 		return nil, err
 	}
+	if err := cfg.validateContainerTypes(); err != nil {
+		return nil, err
+	}
 	for name, p := range cfg.Profiles {
 		key := "profile." + name + "."
 		p.AgentExtraArgs = cfg.withAdditions(key+"agent_extra_args", p.AgentExtraArgs)
@@ -466,6 +470,20 @@ func (c *Config) validateProfiles() error {
 			src, _ := c.Source("profile." + name + ".name")
 			return fmt.Errorf("profile %q (%s) must set both agent and container", name, src.Layer)
 		}
+	}
+	return nil
+}
+
+// validateContainerTypes rejects a container type the runner cannot launch,
+// so a typo never degrades into an unsandboxed run on the host.
+func (c *Config) validateContainerTypes() error {
+	for name, cc := range c.Containers {
+		switch cc.Type {
+		case "", "none", "docker", "docker-exec":
+			continue
+		}
+		src, _ := c.Source("container." + name + ".type")
+		return fmt.Errorf("container %q: unknown type %q (%s); want none, docker or docker-exec", name, cc.Type, c.Where(src, display.TildeHome))
 	}
 	return nil
 }

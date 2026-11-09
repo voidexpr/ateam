@@ -391,6 +391,7 @@ func resolveRunnerMinimal(env *root.ResolvedEnv, profileFlag, agentFlag string) 
 		if err := rejectCodexTmuxWithoutStateDir(&ac, env.StateDir()); err != nil {
 			return nil, err
 		}
+		ac = rtCfg.AgentForRun(nil, &ac, runInsideContainer(nil))
 		r := minimalRunnerFromAgentConfig(env, &ac)
 		r.Profile = "a:" + agentFlag
 		r.ProfileSource = config.ProfileSourceAgent
@@ -407,7 +408,10 @@ func resolveRunnerMinimal(env *root.ResolvedEnv, profileFlag, agentFlag string) 
 		if err := rejectCodexTmuxWithoutStateDir(ac, env.StateDir()); err != nil {
 			return nil, err
 		}
-		r := minimalRunnerFromAgentConfig(env, ac)
+		// Docker is not supported without project context: the agent runs
+		// in-place, so the container block does not pick the context side.
+		run := rtCfg.AgentForRun(prof, ac, runInsideContainer(nil))
+		r := minimalRunnerFromAgentConfig(env, &run)
 		r.Profile = choice.Name
 		r.ProfileSource = choice.Source
 		r.ExtraArgs = append(r.ExtraArgs, prof.AgentExtraArgs...)

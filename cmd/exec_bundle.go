@@ -128,9 +128,20 @@ func resolveProfileAgent(rtCfg *runtime.Config, profile string) (*runtime.Profil
 // runInsideContainer reports whether a run with container cc (nil for
 // none) executes its agent inside a container: ateam itself runs in one,
 // or the profile launches one. This picks the agent's inside_container or
-// outside_container block.
+// outside_container block. The container types match buildContainer's, so
+// "inside" is never true for a container that is not launched.
 func runInsideContainer(cc *runtime.ContainerConfig) bool {
-	return container.IsInContainer() || (cc != nil && cc.Type != "" && cc.Type != "none")
+	if container.IsInContainer() {
+		return true
+	}
+	if cc == nil {
+		return false
+	}
+	switch cc.Type {
+	case "docker", "docker-exec":
+		return true
+	}
+	return false
 }
 
 // buildArgPrompt picks the Prompt implementation for an

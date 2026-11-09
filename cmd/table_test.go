@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ateam/internal/agent"
+	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/ateam/internal/runtime"
@@ -377,6 +378,50 @@ func TestCodexTmuxAllowedWithNoneContainer(t *testing.T) {
 	}
 	if r.ContainerType != "none" {
 		t.Errorf("ContainerType = %q, want %q", r.ContainerType, "none")
+	}
+	if a, ok := r.Agent.(*agent.CodexTmuxAgent); !ok || a.Model != "gpt-6.1-sol" || a.Effort != "xhigh" {
+		t.Errorf("profile pins not applied: got %+v, want model gpt-6.1-sol effort xhigh", r.Agent)
+	}
+}
+
+// TestScratchRunnerAppliesProfilePins covers resolveRunnerMinimal (no
+// project): the profile's model/budget pins reach the agent.
+func TestScratchRunnerAppliesProfilePins(t *testing.T) {
+	env := &root.ResolvedEnv{HomeDir: t.TempDir()}
+	r, err := resolveRunnerMinimal(env, "cheap", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, ok := r.Agent.(*agent.ClaudeAgent)
+	if !ok {
+		t.Fatalf("agent = %T, want *agent.ClaudeAgent", r.Agent)
+	}
+	if a.Model != "sonnet" || a.MaxBudgetUSD != "0.50" {
+		t.Errorf("model=%q budget=%q, want sonnet / 0.50", a.Model, a.MaxBudgetUSD)
+	}
+}
+
+// TestScratchRunnerAppliesContextBlock covers resolveRunnerMinimal (no
+// project): codex on the host gets its outside_container sandbox args,
+// through both --profile and --agent.
+func TestScratchRunnerAppliesContextBlock(t *testing.T) {
+	if container.IsInContainer() {
+		t.Skip("running inside a container: the inside_container block applies")
+	}
+	env := &root.ResolvedEnv{HomeDir: t.TempDir()}
+	for _, tc := range []struct{ profile, agentName string }{{"codex", ""}, {"", "codex"}} {
+		r, err := resolveRunnerMinimal(env, tc.profile, tc.agentName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, ok := r.Agent.(*agent.CodexAgent)
+		if !ok {
+			t.Fatalf("agent = %T, want *agent.CodexAgent", r.Agent)
+		}
+		args := strings.Join(a.Args, " ")
+		if !strings.Contains(args, "--sandbox workspace-write --skip-git-repo-check") {
+			t.Errorf("profile=%q agent=%q: args %q missing outside_container args", tc.profile, tc.agentName, args)
+		}
 	}
 }
 

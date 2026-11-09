@@ -482,6 +482,15 @@ func TestModelPatternMustCompile(t *testing.T) {
 	}
 }
 
+func TestUnknownContainerTypeRejected(t *testing.T) {
+	dir := t.TempDir()
+	writeLayer(t, dir, "container \"box\" {\n  type = \"dokcer\"\n}\n")
+	_, err := Load([]string{dir})
+	if err == nil || !strings.Contains(err.Error(), "dokcer") || !strings.Contains(err.Error(), ":2") {
+		t.Errorf("want a load error naming the bad type and its line, got %v", err)
+	}
+}
+
 func TestModelWarningsFromLayers(t *testing.T) {
 	orgDir := writeLayer(t, t.TempDir(), `
 expensive_output_per_mtok = 15
