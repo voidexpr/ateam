@@ -231,16 +231,7 @@ func (s *Server) loadPricing(pe *ProjectEntry) (map[string]agent.PricingTable, m
 			if ac.Pricing == nil {
 				continue
 			}
-			table := make(agent.PricingTable, len(ac.Pricing.Models))
-			for mname, mp := range ac.Pricing.Models {
-				table[mname] = agent.ModelPrice{
-					InputPerToken:       mp.InputPerMTok / 1e6,
-					CachedInputPerToken: mp.CachedInputPerMTok / 1e6,
-					OutputPerToken:      mp.OutputPerMTok / 1e6,
-				}
-			}
-			pe.pricing[name] = table
-			pe.defaultModel[name] = ac.Pricing.DefaultModel
+			pe.pricing[name], pe.defaultModel[name] = agent.PricingFromConfig(ac.Pricing)
 		}
 	})
 	return pe.pricing, pe.defaultModel

@@ -157,7 +157,7 @@ func runCatIDs(args []string) error {
 		if !ok {
 			return nil, ""
 		}
-		return buildPricingFromConfig(ac.Pricing)
+		return agent.PricingFromConfig(ac.Pricing)
 	}
 
 	color := !catNoColor && isTerminal()

@@ -361,7 +361,7 @@ func mergedPricingFromConfig(cfg *runtime.Config) (agent.PricingTable, string) {
 	merged := make(agent.PricingTable)
 	var defaultModel string
 	for _, ac := range cfg.Agents {
-		t, dm := buildPricingFromConfig(ac.Pricing)
+		t, dm := agent.PricingFromConfig(ac.Pricing)
 		if t == nil {
 			continue
 		}
@@ -378,25 +378,9 @@ func mergedPricingFromConfig(cfg *runtime.Config) (agent.PricingTable, string) {
 	return merged, defaultModel
 }
 
-// buildPricingFromConfig converts config pricing to an agent PricingTable.
-func buildPricingFromConfig(ap *runtime.AgentPricing) (agent.PricingTable, string) {
-	if ap == nil {
-		return nil, ""
-	}
-	table := make(agent.PricingTable, len(ap.Models))
-	for name, mp := range ap.Models {
-		table[name] = agent.ModelPrice{
-			InputPerToken:       mp.InputPerMTok / 1e6,
-			CachedInputPerToken: mp.CachedInputPerMTok / 1e6,
-			OutputPerToken:      mp.OutputPerMTok / 1e6,
-		}
-	}
-	return table, ap.DefaultModel
-}
-
 // buildAgent constructs an agent.Agent from config.
 func buildAgent(ac *runtime.AgentConfig) agent.Agent {
-	pricing, defaultModel := buildPricingFromConfig(ac.Pricing)
+	pricing, defaultModel := agent.PricingFromConfig(ac.Pricing)
 	switch ac.Type {
 	case "builtin":
 		return &agent.MockAgent{

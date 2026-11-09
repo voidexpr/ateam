@@ -2,6 +2,8 @@ package agent
 
 import (
 	"regexp"
+
+	"github.com/ateam/internal/runtime"
 )
 
 // ModelPrice holds per-token pricing for a model.
@@ -32,6 +34,23 @@ func (t PricingTable) Clone() PricingTable {
 		cp[k] = v
 	}
 	return cp
+}
+
+// PricingFromConfig converts runtime.hcl pricing (USD per million tokens)
+// to a PricingTable (USD per token) and returns the configured default model.
+func PricingFromConfig(ap *runtime.AgentPricing) (PricingTable, string) {
+	if ap == nil {
+		return nil, ""
+	}
+	table := make(PricingTable, len(ap.Models))
+	for name, mp := range ap.Models {
+		table[name] = ModelPrice{
+			InputPerToken:       mp.InputPerMTok / 1e6,
+			CachedInputPerToken: mp.CachedInputPerMTok / 1e6,
+			OutputPerToken:      mp.OutputPerMTok / 1e6,
+		}
+	}
+	return table, ap.DefaultModel
 }
 
 var dateSuffix = regexp.MustCompile(`-\d{4}-\d{2}-\d{2}$`)
