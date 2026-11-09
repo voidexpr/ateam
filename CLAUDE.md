@@ -40,7 +40,7 @@ A Go CLI to manage unattended agent + software engineering quality oriented prom
 * `make test-cli`: slightly slower, run on most changes related to ateam's dealing with its environment or CLI interface
 
 ### Dock Related
-* `make test-docker`: any time you change agent, container, runner related code or dependencies, they run slower — when modifying `internal/runner/`, `internal/container/`, or `cmd/table.go`, read `CONCURRENCY.md` first; violations cause SIGSEGVs under parallel workloads
+* `make test-docker`: any time you change agent, container, runner related code or dependencies, they run slower — when modifying `internal/runner/`, `internal/container/`, `cmd/runner_setup.go`, or `cmd/docker.go`, read `CONCURRENCY.md` first; violations cause SIGSEGVs under parallel workloads
 * `make test-docker-live`: runs test-docker plus uses Anthropic API to do more end to end testing, run to be even more thorough
 
 ### Full regression run
