@@ -24,6 +24,9 @@ set -euo pipefail
 old="${ATEAM_LEGACY_ORG:-$HOME/.ateamorg}"
 new="${ATEAM_HOME:-$HOME/.ateam}"
 ateam="${ATEAM:-ateam}"
+case "$ateam" in
+    */*) ateam="$(cd "$(dirname "$ateam")" && pwd)/$(basename "$ateam")" ;;  # registration runs from each project dir
+esac
 
 say() { printf '%s\n' "$*"; }
 

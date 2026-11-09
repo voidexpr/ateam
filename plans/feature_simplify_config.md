@@ -25,23 +25,21 @@ carry CLI flags (`agent.args`, a profile's `agent_extra_args` and
 flag without re-listing the inherited list; see CONFIG.md → Runtime
 Configuration.
 
-Cleanup pending on the author's machine (the sandbox cannot write
-`~/.ateam`); to do by hand, in this order:
+The author's machine was migrated on 2026-11-08 (`scripts/migrate-ateamorg.sh`,
+Go upgraded to 1.26.10 so the `vuln` step of `make run-ci` passes). Two
+things the first run taught the script: root-owned leftovers from Docker
+bind mounts (`<agent dir>/secrets.env` as an empty directory) make its
+`mv` fail and must be removed first, and a relative `ATEAM=./ateam` broke
+the per-project `project-rename` step, which runs from each project dir
+(the script now makes the path absolute). Still to do by hand:
 
-1. Run `ATEAM=./ateam scripts/migrate-ateamorg.sh`. Until then every
-   `ateam` command on this machine stops with the legacy-layout error.
-   This repo's own `.ateam/` is already converted (old files kept under
-   `.ateam/cache/migrated/`); the script converts the five other
-   registered projects and registers all six.
-2. Tidy `~/.ateam/ateam.hcl` into the per-field form: the org file pins
-   `--model claude-opus-5-5` inside `args` on three agents, which
-   `ateam env` flags; one `model` attribute on `claude-high` replaces
-   them. `ateam setup --model-choice suggested` pins `claude-sonnet-5-5`
-   for the base `claude` agent if wanted.
-3. Bump `toolchain` in go.mod to go1.26.9 (or newer) on a machine with
-   network access: the `vuln` step of `make run-ci` fails on
-   standard-library advisories fixed there; the sandbox could not
-   download the toolchain.
+1. `ateam project-rename` in each converted project that the first run
+   left unregistered (`ateam projects` lists only `ateam`).
+2. Tidy `~/.ateam/ateam.hcl` into the per-field form: the migrated file
+   pins `--model claude-opus-5-5` inside `args` on three agents, which
+   `ateam env` flags. The built-in `claude-high` already is opus + high
+   effort, so the home layer only needs its `config_dir` and the default
+   profile pointing at it.
 
 ## Decisions
 
