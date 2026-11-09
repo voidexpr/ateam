@@ -310,6 +310,11 @@ agent "claude" {
     // the current generation. Opus is the default of the CLI itself.
     suggested_model = "claude-sonnet-5-5"
 
+    model "claude-fable-5-2" {
+      input_per_mtok        = 8.00
+      cached_input_per_mtok = 0.20
+      output_per_mtok       = 40.00
+    }
     model "claude-fable-5-1" {
       input_per_mtok        = 10.00
       cached_input_per_mtok = 0.25
