@@ -395,8 +395,6 @@ func TestRunPoolRunnerFieldsUnchanged(t *testing.T) {
 	r.ContainerName = "initial-name"
 	r.ContainerNameSource = ContainerNameSourceConfig
 	r.ExtraArgs = []string{"-p", "--output-format", "stream-json"}
-	r.ArgsInsideContainer = []string{"--inside"}
-	r.ArgsOutsideContainer = []string{"--outside"}
 	r.Sandbox.RWPaths = []string{"/rw"}
 	r.Sandbox.ROPaths = []string{"/ro"}
 	r.Sandbox.Denied = []string{"/no"}

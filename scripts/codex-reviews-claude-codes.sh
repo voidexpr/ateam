@@ -2,7 +2,7 @@
 set -euo pipefail
 
 reviewer="codex-tmux"
-coder="claude-high"
+coder="high"
 
 usage() {
   cat <<HELP
@@ -65,13 +65,13 @@ step() {
 }
 
 maybe_run() {
-  local out="$1" agent="$2" label="$3"
+  local out="$1" profile="$2" label="$3"
   if [ -s "$out" ]; then
-    step "$label by $agent — cached ($out), skipping"
+    step "$label by $profile — cached ($out), skipping"
     return 0
   fi
-  step "$label by $agent"
-  ateam exec --agent "$agent"
+  step "$label by $profile"
+  ateam exec --profile "$profile"
 }
 
 if [ "$restart" = true ] || [ -s "$coder_out" ]; then

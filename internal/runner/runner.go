@@ -43,7 +43,6 @@ type SandboxConfig struct {
 	ExtraDomains     []string // from config.toml [sandbox-extra]
 	ExtraExcludedCmd []string // from config.toml [sandbox-extra]
 	ExtraWriteDirs   []string // additional dirs granted sandbox write access
-	InsideContainer  bool     // if false, skip sandbox inside containers
 }
 
 // ContainerNameSource values for AgentExecutor.ContainerNameSource.
@@ -67,26 +66,24 @@ const (
 //     are never mutated inside Run.
 //   - CallDB is a *sql.DB — safe for concurrent use by stdlib guarantee,
 //     further serialized to one writer via SetMaxOpenConns(1).
-//   - Sandbox, ExtraArgs, ArgsInsideContainer, ArgsOutsideContainer: slice
-//     backing memory is read-only once construction finishes; Run copies
-//     r.ExtraArgs into a local before appending.
+//   - Sandbox, ExtraArgs: slice backing memory is read-only once
+//     construction finishes; Run copies r.ExtraArgs into a local before
+//     appending.
 type AgentExecutor struct {
-	Agent                agent.Agent
-	Container            container.Container // nil means run on host
-	ProjectDir           string              // .ateam/ dir
-	HomeDir              string              // the user's .ateam/ dir; scratch-mode state lives under its state/
-	SourceDir            string              // project root (parent of .ateam/)
-	ProjectName          string              // from config.toml
-	ExtraArgs            []string            // extra args passed to the agent
-	Sandbox              SandboxConfig       // sandbox filesystem/network restrictions
-	ConfigDir            string              // CLAUDE_CONFIG_DIR; relative resolves from ProjectDir
-	ArgsInsideContainer  []string            // extra args when inside a container
-	ArgsOutsideContainer []string            // extra args when on the host
-	CallDB               *calldb.CallDB      // required: every Run inserts an exec row
-	Profile              string              // profile name for DB
-	ProfileSource        string              // what chose Profile: a config.toml setting, --profile, --agent, or the built-in default
-	ProfileDef           string              // verbatim profile definition (HCL) for cmd.md
-	AgentDef             string              // verbatim agent definition (HCL) for cmd.md
+	Agent         agent.Agent
+	Container     container.Container // nil means run on host
+	ProjectDir    string              // .ateam/ dir
+	HomeDir       string              // the user's .ateam/ dir; scratch-mode state lives under its state/
+	SourceDir     string              // project root (parent of .ateam/)
+	ProjectName   string              // from config.toml
+	ExtraArgs     []string            // extra args passed to the agent
+	Sandbox       SandboxConfig       // sandbox filesystem/network restrictions
+	ConfigDir     string              // CLAUDE_CONFIG_DIR; relative resolves from ProjectDir
+	CallDB        *calldb.CallDB      // required: every Run inserts an exec row
+	Profile       string              // profile name for DB
+	ProfileSource string              // what chose Profile: a config.toml setting, --profile, --agent, or the built-in default
+	ProfileDef    string              // verbatim profile definition (HCL) for cmd.md
+	AgentDef      string              // verbatim agent definition (HCL) for cmd.md
 	// Effort / MaxBudgetUSD / MaxBudgetUSDBatch mirror the CLI-flag values the
 	// runner was built with. Stored here so BuildTemplateVars can surface them
 	// as {{EFFORT}} / {{MAX_BUDGET_USD}} / {{MAX_BUDGET_USD_BATCH}} placeholders
@@ -457,21 +454,17 @@ func (r *AgentExecutor) ExecutePrepared(ctx context.Context, prepared *PreparedR
 		defer cancel()
 	}
 
-	// Build extra args (settings for claude agents, model overrides, etc.)
+	// Build extra args (settings for claude agents, model overrides, etc.).
+	// The agent's own args already reflect the run's context: its
+	// inside_container / outside_container block was applied when the
+	// runner was built.
 	extraArgs := make([]string, len(r.ExtraArgs))
 	copy(extraArgs, r.ExtraArgs)
 
-	// Append environment-aware args.
-	// Use container args when: already inside a container, OR launching into one.
-	if container.IsInContainer() || r.Container != nil {
-		extraArgs = append(extraArgs, r.ArgsInsideContainer...)
-	} else {
-		extraArgs = append(extraArgs, r.ArgsOutsideContainer...)
-	}
-
 	// Safety warning: --dangerously-skip-permissions outside a container.
 	if !container.IsInContainer() && r.Container == nil {
-		for _, a := range extraArgs {
+		_, agentArgs := r.Agent.DebugCommandArgs(extraArgs)
+		for _, a := range agentArgs {
 			if a == "--dangerously-skip-permissions" {
 				fmt.Fprintf(os.Stderr, "Warning: --dangerously-skip-permissions used outside a Docker container. This skips all safety checks.\n")
 				break
@@ -489,10 +482,9 @@ func (r *AgentExecutor) ExecutePrepared(ctx context.Context, prepared *PreparedR
 		}
 	}
 
-	// Write sandbox settings if configured.
-	// Skip when: already inside a container, OR launching into a container (r.Container != nil),
-	// unless sandbox_inside_container is explicitly true.
-	skipSandbox := (container.IsInContainer() || r.Container != nil) && !r.Sandbox.InsideContainer
+	// Write sandbox settings if configured for this context (the built-in
+	// agents clear the sandbox in their inside_container block).
+	skipSandbox := r.Sandbox.Settings == ""
 
 	// One central warning for all three agent types: if ateam itself
 	// appears to be inside an outer sandbox (fence / firejail /

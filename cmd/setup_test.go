@@ -76,9 +76,9 @@ func TestSetupWritesConfigDirAndLoginResolvesIt(t *testing.T) {
 	if target.ConfigDir != filepath.Join(home, "state", "agents", "claude") {
 		t.Errorf("login resolves config dir %q", target.ConfigDir)
 	}
-	// Derived agents inherit it.
-	if env2.Runtime.Agents["claude-high"].ConfigDir == "" {
-		t.Error("claude-high should inherit config_dir through base")
+	// Profiles that run claude see it too.
+	if prof, ac, _, err := env2.Runtime.ResolveProfile("high"); err != nil || env2.Runtime.AgentForRun(prof, ac, false).ConfigDir == "" {
+		t.Errorf("the high profile should run claude with the config_dir (%v)", err)
 	}
 
 	// A second run reports the existing setting instead of appending again.

@@ -15,9 +15,14 @@ func TestLoadDefaults(t *testing.T) {
 		t.Fatalf("unexpected error loading defaults: %v", err)
 	}
 
-	for _, name := range []string{"claude", "claude-sonnet", "claude-haiku", "codex", "codex-tmux", "mock"} {
+	for _, name := range []string{"claude", "claude-isolated", "codex", "codex-tmux", "mock"} {
 		if _, ok := cfg.Agents[name]; !ok {
 			t.Errorf("expected %q agent in defaults", name)
+		}
+	}
+	for _, name := range []string{"claude-sonnet", "claude-haiku", "claude-high", "claude-xhigh", "codex-high", "codex-xhigh", "claude-docker"} {
+		if _, ok := cfg.Agents[name]; ok {
+			t.Errorf("model variants are profiles now; agent %q must be gone", name)
 		}
 	}
 	for _, name := range []string{"none", "docker"} {
@@ -25,7 +30,7 @@ func TestLoadDefaults(t *testing.T) {
 			t.Errorf("expected %q container in defaults", name)
 		}
 	}
-	for _, name := range []string{"default", "cheap", "cheapest", "docker", "codex", "codex-tmux", "test"} {
+	for _, name := range []string{"default", "cheap", "cheapest", "high", "xhigh", "docker", "codex", "codex-high", "codex-xhigh", "codex-tmux", "test"} {
 		if _, ok := cfg.Profiles[name]; !ok {
 			t.Errorf("expected %q profile in defaults", name)
 		}
@@ -45,7 +50,7 @@ func TestDefaultClaudeAgentsShareHeadlessEnv(t *testing.T) {
 		"CLAUDECODE":                           "",
 		"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
 	}
-	for _, name := range []string{"claude", "claude-sonnet", "claude-haiku", "claude-auto", "claude-no-sandbox"} {
+	for _, name := range []string{"claude", "claude-isolated", "claude-auto", "claude-no-sandbox"} {
 		ac, ok := cfg.Agents[name]
 		if !ok {
 			t.Errorf("expected %q agent in defaults", name)
@@ -250,11 +255,11 @@ func TestCodexTmuxAgentConfig(t *testing.T) {
 	if ac.Command != "codex" {
 		t.Errorf("expected command 'codex', got %q", ac.Command)
 	}
-	if ac.Model != "gpt-6.1-sol" {
-		t.Errorf("expected model 'gpt-6.1-sol', got %q", ac.Model)
+	if ac.Model != "" || ac.Effort != "" {
+		t.Errorf("codex-tmux pins model and effort through its profile, not the agent; got %q / %q", ac.Model, ac.Effort)
 	}
-	if ac.Effort != "xhigh" {
-		t.Errorf("expected effort 'xhigh', got %q", ac.Effort)
+	if prof, _, _, err := cfg.ResolveProfile("codex-tmux"); err != nil || prof.Model != "gpt-6.1-sol" || prof.Effort != "xhigh" {
+		t.Errorf("codex-tmux profile: %+v, %v", prof, err)
 	}
 	wantArgs := []string{"--no-alt-screen", "-s", "workspace-write", "-a", "never", "-c", "check_for_update_on_startup=false", "--disable", "apps", "--disable", "plugins"}
 	if !slices.Equal(ac.Args, wantArgs) {
@@ -269,8 +274,8 @@ func TestCodexTmuxAgentConfig(t *testing.T) {
 	if len(ac.RequiredEnv) != 0 {
 		t.Errorf("expected codex-tmux not to require env by default, got %v", ac.RequiredEnv)
 	}
-	if len(ac.ArgsOutsideContainer) != 0 {
-		t.Errorf("expected codex-tmux not to inherit exec-only outside args, got %v", ac.ArgsOutsideContainer)
+	if host := cfg.ForContext(ac, false); !slices.Equal(host.Args, wantArgs) {
+		t.Errorf("codex-tmux has its own args, so codex's outside_container additions must not apply; got %v", host.Args)
 	}
 	if ac.Pricing == nil || ac.Pricing.DefaultModel != "gpt-6.1-sol" {
 		t.Errorf("expected codex-tmux to inherit codex pricing, got %+v", ac.Pricing)
@@ -305,8 +310,8 @@ func TestCheapProfiles(t *testing.T) {
 	tests := []struct {
 		profile, agent, model, budget string
 	}{
-		{"cheap", "claude-sonnet", "sonnet", "0.50"},
-		{"cheapest", "claude-haiku", "haiku", "0.10"},
+		{"cheap", "claude", "sonnet", "0.50"},
+		{"cheapest", "claude", "haiku", "0.10"},
 	}
 
 	for _, tt := range tests {
@@ -318,8 +323,9 @@ func TestCheapProfiles(t *testing.T) {
 		if prof.Agent != tt.agent || len(prof.AgentExtraArgs) != 0 {
 			t.Errorf("profile %q: got agent %q extra args %v, want agent %q and no extra args", tt.profile, prof.Agent, prof.AgentExtraArgs, tt.agent)
 		}
-		if ac.Command != "claude" || ac.Model != tt.model || ac.MaxBudgetUSD != tt.budget {
-			t.Errorf("profile %q agent: got command=%q model=%q budget=%q", tt.profile, ac.Command, ac.Model, ac.MaxBudgetUSD)
+		run := cfg.AgentForRun(prof, ac, false)
+		if run.Command != "claude" || run.Model != tt.model || run.MaxBudgetUSD != tt.budget {
+			t.Errorf("profile %q agent: got command=%q model=%q budget=%q", tt.profile, run.Command, run.Model, run.MaxBudgetUSD)
 		}
 		if embeddedModelFlag(ac.Args) != "" {
 			t.Errorf("profile %q agent: built-in args must not embed a model flag: %v", tt.profile, ac.Args)
@@ -606,8 +612,8 @@ func TestBaseInheritance(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// claude-sonnet inherits from claude via base
-	ac := cfg.Agents["claude-sonnet"]
+	// claude-isolated inherits from claude via base
+	ac := cfg.Agents["claude-isolated"]
 	if ac.Command != "claude" {
 		t.Errorf("expected inherited command 'claude', got %q", ac.Command)
 	}
@@ -618,10 +624,9 @@ func TestBaseInheritance(t *testing.T) {
 		t.Errorf("expected inherited sandbox JSON content, got empty or wrong content")
 	}
 
-	// claude-haiku also inherits sandbox
-	ac2 := cfg.Agents["claude-haiku"]
-	if ac2.Sandbox == "" {
-		t.Error("expected inherited sandbox for haiku, got empty")
+	// the inside_container block is inherited too
+	if in := cfg.ForContext(ac, true); in.Sandbox != "" || !slices.Contains(in.Args, "--dangerously-skip-permissions") {
+		t.Errorf("claude-isolated inside a container: sandbox %q args %v", in.Sandbox, in.Args)
 	}
 }
 
@@ -1103,9 +1108,9 @@ func TestPricingInheritance(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// claude-sonnet inherits the claude pricing table; claude has no
+	// claude-isolated inherits the claude pricing table; claude has no
 	// default_model on purpose (an unpinned model must not look pinned).
-	cs := cfg.Agents["claude-sonnet"]
+	cs := cfg.Agents["claude-isolated"]
 	if cs.Pricing == nil || cs.Pricing.DefaultModel != "" || cs.Pricing.Models["sonnet"].OutputPerMTok == 0 {
 		t.Errorf("expected inherited claude pricing without default_model, got %+v", cs.Pricing)
 	}
@@ -1630,15 +1635,15 @@ agent "child" {
 func TestExplicitZeroValueIsNotInherited(t *testing.T) {
 	orgDir := writeLayer(t, t.TempDir(), `
 agent "parent" {
-  command                  = "parent-cmd"
-  sandbox_inside_container = true
-  tmux_width               = 300
+  command    = "parent-cmd"
+  effort     = "high"
+  tmux_width = 300
 }
 
 agent "child" {
-  base                     = "parent"
-  sandbox_inside_container = false
-  tmux_width               = 0
+  base       = "parent"
+  effort     = ""
+  tmux_width = 0
 }
 `)
 	cfg, err := Load([]string{orgDir})
@@ -1646,8 +1651,8 @@ agent "child" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	child := cfg.Agents["child"]
-	if child.SandboxInsideContainer {
-		t.Error("explicit sandbox_inside_container = false must stick")
+	if child.Effort != "" {
+		t.Errorf("explicit effort = \"\" must stick, got %q", child.Effort)
 	}
 	if child.TmuxWidth != 0 {
 		t.Errorf("explicit tmux_width = 0 must stick, got %d", child.TmuxWidth)
@@ -1659,10 +1664,10 @@ func TestBaseInheritsPricingWhenChildHasNone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Agents["codex-high"].Pricing == nil {
-		t.Fatal("codex-high must inherit codex pricing")
+	if cfg.Agents["codex-tmux"].Pricing == nil {
+		t.Fatal("codex-tmux must inherit codex pricing")
 	}
-	if src, _ := cfg.Source("agent.codex-high.pricing"); src.Layer != `agent "codex" (base)` {
+	if src, _ := cfg.Source("agent.codex-tmux.pricing"); src.Layer != `agent "codex" (base)` {
 		t.Errorf("pricing source: %+v", src)
 	}
 }

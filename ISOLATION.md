@@ -257,15 +257,17 @@ docker run -it -v $(pwd):/workspace \
 
 ## Agent behavior inside vs outside containers
 
-Agents auto-adapt to their environment. The `claude` agent definition includes:
+Agents adapt to their environment through an `inside_container` block (and its host-side twin `outside_container`). The `claude` agent definition includes:
 
 ```hcl
 agent "claude" {
   args    = ["-p", "--output-format", "stream-json", "--verbose"]
   sandbox = local.claude_sandbox
 
-  args_inside_container    = ["--dangerously-skip-permissions"]
-  sandbox_inside_container = false  # skip sandbox settings file
+  inside_container {
+    args_append = ["--dangerously-skip-permissions"]
+    sandbox     = ""  # no settings file: the container is the isolation
+  }
 }
 ```
 
@@ -278,13 +280,15 @@ Override by writing a custom agent:
 
 ```hcl
 agent "claude-with-sandbox" {
-  base                     = "claude"
-  sandbox_inside_container = true
-  args_inside_container    = []  # don't skip permissions
+  base = "claude"
+  inside_container {
+    args    = ["-p", "--output-format", "stream-json", "--verbose"]  # own args: the base's --dangerously-skip-permissions is not added
+    sandbox = "{ ... }"                                               # your settings JSON
+  }
 }
 ```
 
-The `codex` agent similarly adapts: `--sandbox workspace-write` is in `args_outside_container` and omitted inside containers.
+The `codex` agent similarly adapts: `--sandbox workspace-write` sits in its `outside_container` block and is omitted inside containers. See [CONFIG.md → Agents](CONFIG.md#agents) for what the blocks accept.
 
 ## Secrets
 
@@ -504,7 +508,7 @@ ATeam auto-detects the binary and mounts it at `/usr/local/bin/ateam` inside the
 
 ## Detection of an outer sandbox or container
 
-When ateam runs inside an outer isolation layer, it switches the agent into "container mode": `args_inside_container` kicks in (claude gets `--dangerously-skip-permissions`) and the agent's own inner sandbox is skipped, because nested sandboxes generally fail.
+When ateam runs inside an outer isolation layer, it switches the agent into "container mode": the agent's `inside_container` block applies (claude gets `--dangerously-skip-permissions` and drops its own inner sandbox), because nested sandboxes generally fail.
 
 Detection is signal-driven, not tool-name-driven: anything that puts the process under one of the known signals is picked up the same way. Three layers:
 

@@ -7,8 +7,8 @@ claude_file="$base_dir/claude_code_review.md"
 final_file="$base_dir/coding_report.md"
 
 codex_agent="codex-tmux"
-claude_agent="claude-high"
-coding_agent="claude-high"
+claude_profile="high"
+coding_profile="high"
 mode="high"
 focus="recent changes"
 
@@ -28,8 +28,8 @@ Options:
                                      Substituted into both review prompts.
   --force                            Re-run reviews even if cached.
   --codex-agent NAME                 Override codex review agent (default: $codex_agent).
-  --claude-agent NAME                Override claude review agent (default: $claude_agent).
-  --coding-agent NAME                Override merge/coding agent     (default: $coding_agent).
+  --claude-profile NAME              Override claude review profile (default: $claude_profile).
+  --coding-profile NAME              Override merge/coding profile   (default: $coding_profile).
   --claude-review-effort EFFORT      low | medium | high | xhigh | max (default: $mode).
   -h, --help                         Show this message.
 HELP
@@ -41,8 +41,8 @@ while [ $# -gt 0 ]; do
     --focus)                 focus="${2:?--focus needs a value}"; shift 2 ;;
     --force)                 force=true; shift ;;
     --codex-agent)           codex_agent="${2:?--codex-agent needs a value}"; shift 2 ;;
-    --claude-agent)          claude_agent="${2:?--claude-agent needs a value}"; shift 2 ;;
-    --coding-agent)          coding_agent="${2:?--coding-agent needs a value}"; shift 2 ;;
+    --claude-profile)        claude_profile="${2:?--claude-profile needs a value}"; shift 2 ;;
+    --coding-profile)        coding_profile="${2:?--coding-profile needs a value}"; shift 2 ;;
     --claude-review-effort)  mode="${2:?--claude-review-effort needs a value}"; shift 2 ;;
     -h|--help)               usage; exit 0 ;;
     *)                       echo "Unknown arg: $1" >&2; usage >&2; exit 2 ;;
@@ -82,8 +82,8 @@ fi
 
 claude_pid=""
 if [ ! -s "$claude_file" ]; then
-  step "claude review ($claude_agent, $mode) → $claude_file"
-  ateam exec --agent "$claude_agent" --action "code-review" --role claude <<EOF &
+  step "claude review ($claude_profile, $mode) → $claude_file"
+  ateam exec --profile "$claude_profile" --action "code-review" --role claude <<EOF &
 /code-review $mode --fix $focus, write results to $claude_file
 EOF
   claude_pid=$!
@@ -94,8 +94,8 @@ fi
 [ -n "$codex_pid" ]  && wait "$codex_pid"
 [ -n "$claude_pid" ] && wait "$claude_pid"
 
-step "merge + implement ($coding_agent) → $final_file"
-ateam exec --agent "$coding_agent" --action "code-review" --role code <<EOF
+step "merge + implement ($coding_profile) → $final_file"
+ateam exec --profile "$coding_profile" --action "code-review" --role code <<EOF
 Review $codex_file and $claude_file.
 
 Consolidate findings and:

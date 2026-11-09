@@ -136,6 +136,8 @@ func newRunner(env *root.ResolvedEnv, profileName, roleID string, dockerAutoSetu
 	if ac.Type == agent.NameCodexTmux && cc != nil && cc.Type != "none" {
 		return nil, fmt.Errorf("codex-tmux is host-only in v1; profile %q binds it to container type %q. Use a container=none profile or `--agent codex-tmux`", profileName, cc.Type)
 	}
+	run := rtCfg.AgentForRun(prof, ac, runInsideContainer(cc))
+	ac = &run
 
 	// Validate secrets. IsolateCredentials always runs to strip competing
 	// alternatives from the agent env — this is safe even when no secrets
@@ -244,6 +246,7 @@ func newRunnerFromAgent(env *root.ResolvedEnv, agentName string) (*runner.AgentE
 	if !ok {
 		return nil, fmt.Errorf("unknown agent %q", agentName)
 	}
+	ac = rtCfg.AgentForRun(nil, &ac, runInsideContainer(nil))
 
 	// No container launch — the agent runs in-place. On the host it handles
 	// its own auth; inside a pre-configured container it may rely on regular
@@ -269,15 +272,12 @@ func minimalRunnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig
 		Agent:   buildAgent(ac),
 		HomeDir: env.HomeDir,
 		Sandbox: runner.SandboxConfig{
-			Settings:        ac.Sandbox,
-			RWPaths:         ac.RWPaths,
-			ROPaths:         ac.ROPaths,
-			Denied:          ac.DeniedPaths,
-			InsideContainer: ac.SandboxInsideContainer,
+			Settings: ac.Sandbox,
+			RWPaths:  ac.RWPaths,
+			ROPaths:  ac.ROPaths,
+			Denied:   ac.DeniedPaths,
 		},
-		ConfigDir:            ac.ConfigDir,
-		ArgsInsideContainer:  ac.ArgsInsideContainer,
-		ArgsOutsideContainer: ac.ArgsOutsideContainer,
+		ConfigDir: ac.ConfigDir,
 	}
 	// Scratch mode: codex-tmux roots its socket at <HomeDir>/state/cache/tmux/.
 	setCodexTmuxProjectDir(r.Agent, env.StateDir())
@@ -333,16 +333,13 @@ func runnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig) *runn
 		SourceDir:   env.WorkDir,
 		ProjectName: env.ProjectName,
 		Sandbox: runner.SandboxConfig{
-			Settings:        ac.Sandbox,
-			RWPaths:         ac.RWPaths,
-			ROPaths:         ac.ROPaths,
-			Denied:          ac.DeniedPaths,
-			ExtraWriteDirs:  extraWriteDirs,
-			InsideContainer: ac.SandboxInsideContainer,
+			Settings:       ac.Sandbox,
+			RWPaths:        ac.RWPaths,
+			ROPaths:        ac.ROPaths,
+			Denied:         ac.DeniedPaths,
+			ExtraWriteDirs: extraWriteDirs,
 		},
-		ConfigDir:            ac.ConfigDir,
-		ArgsInsideContainer:  ac.ArgsInsideContainer,
-		ArgsOutsideContainer: ac.ArgsOutsideContainer,
+		ConfigDir: ac.ConfigDir,
 	}
 	if env.Config != nil {
 		r.Sandbox.ExtraWrite = env.Config.SandboxExtra.AllowWrite
@@ -1129,17 +1126,13 @@ func printDryRunInfo(r *runner.AgentExecutor, env *root.ResolvedEnv, opts dryRun
 	printModelResolution(r, env)
 	fmt.Println()
 
-	// Build the full low-level args with container-aware additions
+	// The agent's args already reflect the run's context (its
+	// inside_container / outside_container block was applied when the
+	// runner was built); the sandbox settings file is passed when one is
+	// configured for that context.
 	fullArgs := make([]string, len(resolvedExtraArgs))
 	copy(fullArgs, resolvedExtraArgs)
-	if container.IsInContainer() || r.Container != nil {
-		fullArgs = append(fullArgs, runner.ResolveTemplateArgs(r.ArgsInsideContainer, tmplVars)...)
-	} else {
-		fullArgs = append(fullArgs, runner.ResolveTemplateArgs(r.ArgsOutsideContainer, tmplVars)...)
-	}
-
-	skipSandbox := (container.IsInContainer() || r.Container != nil) && !r.Sandbox.InsideContainer
-	if r.Sandbox.Settings != "" && !skipSandbox {
+	if r.Sandbox.Settings != "" {
 		fullArgs = append(fullArgs, "--settings", "<logs>/<exec_id>/settings.json")
 	}
 
@@ -1179,10 +1172,10 @@ func printDryRunInfo(r *runner.AgentExecutor, env *root.ResolvedEnv, opts dryRun
 	printDryRunSecrets(r, env)
 
 	// Sandbox
-	if r.Sandbox.Settings != "" && !skipSandbox {
+	if r.Sandbox.Settings != "" {
 		fmt.Println("Sandbox: configured (use --verbose for full JSON)")
-	} else if r.Sandbox.Settings != "" && skipSandbox {
-		fmt.Println("Sandbox: skipped (inside container)")
+	} else if r.Container != nil || container.IsInContainer() {
+		fmt.Println("Sandbox: none (inside container)")
 	}
 
 	// Prompt (optional)
@@ -1254,6 +1247,8 @@ func printDryRunSecrets(r *runner.AgentExecutor, env *root.ResolvedEnv) {
 	if ac == nil {
 		return
 	}
+	run := rtCfg.ForContext(*ac, r.Container != nil || container.IsInContainer())
+	ac = &run
 	resolver := secretResolver(env, secret.DefaultBackend())
 
 	// Run isolation on this copy so details reflect active/stripped status.

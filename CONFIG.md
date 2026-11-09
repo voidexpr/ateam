@@ -333,7 +333,7 @@ agent "claude" {
 }
 ```
 
-`base` is for defining a *new* agent from an existing one: attributes the child never sets, in any layer, are inherited from the (already merged) base. An attribute explicitly set to its zero value (`sandbox_inside_container = false`, `tmux_width = 0`) is kept, not inherited.
+`base` is for defining a *new* agent from an existing one: attributes the child never sets, in any layer, are inherited from the (already merged) base. An attribute explicitly set to its zero value (`effort = ""`, `tmux_width = 0`) is kept, not inherited.
 
 Every value is recorded with the file and line that set it (`Config.Sources`, keyed `agent.<name>.<attr>`), so audits can say which file to edit. `ateam env --trace [KEY]` prints the whole merged configuration that way, one attribute per line with the lower layers it overrides. `ateam env` shows, per profile in use, the model and effort with the file that set them; `ateam env --models` and every `--dry-run` print the full chain, lowest precedence first: the agent CLI's own configuration (what it would use if nothing were pinned), flags hidden in `args`, each layer (values inherited through `base` show the base agent), CLI flags, then a profile's `agent_extra_args`, which land last on the command line.
 
@@ -349,22 +349,38 @@ Both can be overridden per-invocation with `--sandbox-detection true|false` / `-
 
 ### Agents
 
+An agent block says how to run a CLI; a profile says what to run it with (agent, container, model, effort, budget). The built-in agents are `claude`, `claude-isolated`, `claude-auto`, `claude-no-sandbox`, `codex`, `codex-tmux` and `mock`; the model variants (`cheap`, `high`, `codex-high`, …) are profiles.
+
 ```hcl
 agent "claude" {
   command = "claude"
   args    = ["-p", "--output-format", "stream-json", "--verbose"]
   sandbox = local.claude_sandbox
   required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]
+
+  inside_container {
+    args_append = ["--dangerously-skip-permissions"]
+    sandbox     = ""
+  }
 }
 
-agent "claude-sonnet" {
-  base           = "claude"
-  model          = "sonnet"
-  max_budget_usd = "0.50"
+agent "claude-isolated" {
+  base       = "claude"
+  config_dir = ".claude"
 }
 ```
 
-Pin the model and effort with the `model` and `effort` attributes, never with `--model` inside `args`: attributes can be overridden one at a time by a nearer layer, and `ateam env` can report which file set them. A `--model`, `-m`, `--effort` or `model_reasoning_effort` token inside `args` or a profile's `agent_extra_args` draws a warning.
+An `inside_container` block holds the attributes that replace the agent's when the run is inside a container, because ateam itself runs in one or because the profile launches one; `outside_container` is its host-side twin. Both accept `args`, `args_prepend` / `args_append`, `env`, `sandbox`, `config_dir`, `model`, `effort` and `max_budget_usd`. A block's `args_append` adds to the agent's args, so the built-in `claude` runs with `--dangerously-skip-permissions` and no sandbox inside a container, and with its sandbox on the host. Derived agents inherit the blocks attribute by attribute (an agent with its own `args` does not take the base's block additions), layers add to them, and `ateam env --trace agent.claude.inside_container` lists them. A home layer that wants a shared login directory on the host only writes:
+
+```hcl
+agent "claude" {
+  outside_container {
+    config_dir = "~/.ateam/state/agents/claude_shared"
+  }
+}
+```
+
+Pin the model and effort with the `model` and `effort` attributes, on a profile or on an agent, never with `--model` inside `args`: attributes can be overridden one at a time by a nearer layer, and `ateam env` can report which file set them. A profile's pins win over the agent's. A `--model`, `-m`, `--effort` or `model_reasoning_effort` token inside `args` or a profile's `agent_extra_args` draws a warning.
 
 With no model pinned anywhere, the agent CLI picks its own default, often the most expensive model. ateam allows it but warns at launch and in `ateam env`, naming the file and block to edit. A pinned model whose output price (from the agent's `pricing` block) is above the top-level `expensive_output_per_mtok` also draws a one-line warning; set the scalar to `0` to turn that off.
 
@@ -376,7 +392,7 @@ Agents support inheritance via `base`, sandbox settings, environment variables, 
 
 `required_env` is enforced as a hard error only when ateam **launches a fresh container** for the agent (any `container != none`), since that container starts with no credentials. When ateam itself runs **inside** a container with `container = none` (the agent runs in-place), a missing `required_env` is a warning rather than an error — the container may be pre-configured with regular auth (e.g. `~/.claude/.credentials.json` from an interactive login), in which case the env vars aren't needed. On the host with no container, `required_env` is not validated at all. See [ISOLATION.md → Host vs container behavior](ISOLATION.md#host-vs-container-behavior).
 
-`max_budget_usd = "<USD>"` can be set on an agent block as a default spend cap (claude only; codex ignores it). The CLI `--max-budget-usd` flag overrides the per-agent default for a single invocation.
+`max_budget_usd = "<USD>"` can be set on a profile or an agent block as a default spend cap (claude only; codex ignores it). The CLI `--max-budget-usd` flag overrides the per-agent default for a single invocation.
 
 #### `codex-tmux` (experimental)
 
@@ -447,12 +463,14 @@ See `plans/feature_codex_tmux_agent.md` for the design rationale.
 
 ### Effort levels
 
-Each agent block accepts an optional `effort = "..."` field that controls the underlying CLI's reasoning depth. The string is passed through verbatim, so `ateam` does not need to be updated when agents add new levels. CLI flags (`--effort` on `exec`, `code`, `report`, `parallel`) override the per-agent default for a single invocation.
+Profile and agent blocks accept an optional `effort = "..."` field that controls the underlying CLI's reasoning depth. The string is passed through verbatim, so `ateam` does not need to be updated when agents add new levels. CLI flags (`--effort` on `exec`, `code`, `report`, `parallel`) override the configured value for a single invocation.
 
 ```hcl
-agent "claude-sonnet" {
-  base   = "claude"
-  effort = "high"
+profile "high" {
+  agent     = "claude"
+  container = "none"
+  model     = "opus"
+  effort    = "high"
 }
 ```
 
@@ -482,7 +500,7 @@ Agent args, profile extra args, container config fields, and agent env values su
 | `{{TIMESTAMP}}` | Run start time | `2026-03-31_06-09-39` |
 | `{{PROFILE}}` | Active profile name | `docker`, `default` |
 | `{{EXEC_ID}}` | Call tracking ID (visible in `ateam ps`) | `42` |
-| `{{AGENT}}` | Agent config name | `claude`, `claude-docker` |
+| `{{AGENT}}` | Agent config name | `claude`, `codex` |
 | `{{MODEL}}` | Resolved model name | `sonnet`, `haiku` |
 | `{{CONTAINER_TYPE}}` | Container type | `none`, `docker`, `docker-exec` |
 | `{{CONTAINER_NAME}}` | Docker container name | `ateam-myapp-security` |
@@ -503,8 +521,7 @@ Unknown variables are left as-is (e.g. `{{UNKNOWN}}` passes through unchanged). 
 | Docker `ContainerName` | Computed at build time | Yes |
 | Docker `ExtraVolumes` | `ateam.hcl` container config | Yes |
 | Docker `Env` values | `ateam.hcl` `[container-extra]` | Yes |
-| `agent.args_inside_container` | `ateam.hcl` | Yes |
-| `agent.args_outside_container` | `ateam.hcl` | Yes |
+| `agent.inside_container` / `outside_container` args and `config_dir` | `ateam.hcl` | Yes |
 | docker-exec `docker_container` | `ateam.hcl` | Yes |
 | docker-exec `WorkDir` | Computed from project paths | Yes |
 
@@ -541,7 +558,7 @@ Custom Docker hostname per role:
 
 ```hcl
 profile "docker" {
-  agent              = "claude-docker"
+  agent              = "claude"
   container          = "docker"
   container_extra_args = ["--hostname", "ateam-{{PROJECT_DIR}}-{{ROLE}}"]
 }
@@ -618,7 +635,7 @@ For authentication setup inside containers, see [ISOLATION.md](ISOLATION.md).
 
 ### Profiles
 
-Profiles combine an agent and a container:
+Profiles combine an agent and a container, and may pin `model`, `effort` and `max_budget_usd` for the run; a profile's pins win over the agent's own, and the `--model` / `--effort` / `--max-budget-usd` flags win over both:
 
 ```hcl
 profile "default" {
@@ -637,8 +654,10 @@ profile "docker-exec" {
 }
 
 profile "cheap" {
-  agent     = "claude-sonnet"   # model and budget live on the agent block
-  container = "none"
+  agent          = "claude"
+  container      = "none"
+  model          = "sonnet"
+  max_budget_usd = "0.50"
 }
 ```
 

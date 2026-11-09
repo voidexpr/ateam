@@ -254,7 +254,7 @@ ateam run-all --post-prompt "Focus on security"
 ateam run-all --roles code.structure,test.gaps   # report+review only those roles
 ateam run-all --all                                  # include disabled roles' stale reports in review
 ateam run-all --max-age 2h                           # review drops reports older than 2h
-ateam run-all --report-agent claude-sonnet --supervisor-agent claude --code-profile docker
+ateam run-all --report-profile cheap --supervisor-agent claude --code-profile docker
 ateam run-all --auto-roles                           # planner picks the role list before the pipeline runs
 ateam run-all --auto-roles --plan-only               # print the recommendation, don't execute the pipeline
 ```
@@ -409,7 +409,7 @@ Log into the agent CLI that unattended runs use, in the config directory they us
 ```bash
 ateam login                        # the default profile's agent
 ateam login --profile codex
-ateam login --agent claude-high
+ateam login --agent claude-isolated
 ateam login --dry-run              # show the command and env, run nothing
 ateam login -- --help              # pass args to the CLI's login command
 ```
@@ -651,10 +651,10 @@ The Runtime section opens with one block per profile a flag-less run can pick (t
 
 ```
 Profile default (ateam.hcl project.default_profile)
-  agent:      claude-high (type claude, container none)
-  model:      opus (built-in)
-  effort:     high (built-in)
-  config dir: ~/~/.ateam/claude_shared (~/~/.ateam/ateam.hcl)
+  agent:      claude (type claude, container none)
+  model:      opus (~/.ateam/ateam.hcl)
+  effort:     medium (~/.ateam/ateam.hcl)
+  config dir: ~/.ateam/state/agents/claude_shared (~/.ateam/ateam.hcl)
   auth:       CLAUDE_CODE_OAUTH_TOKEN (ateam secret, global scope)
 ```
 

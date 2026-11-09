@@ -40,8 +40,11 @@ type CLIOverrides struct {
 //     effort attributes are appended after them on the command line)
 //  3. the model / effort attributes, per layer in load order, with a
 //     value inherited through `base` shown as the base agent
-//  4. CLI overrides
-//  5. tokens inside the profile's agent_extra_args, appended last
+//  4. the agent's inside_container / outside_container block for this
+//     run's context (ac.Context names it)
+//  5. the profile's model / effort pins
+//  6. CLI overrides
+//  7. tokens inside the profile's agent_extra_args, appended last
 type ModelReport struct {
 	Agent     string
 	AgentType string
@@ -96,6 +99,33 @@ func (c *Config) ModelReport(prof *ProfileConfig, ac *AgentConfig, cli CLIOverri
 			}
 		}
 		r.Chain = append(r.Chain, entry)
+	}
+
+	if ac.Context != "" {
+		mSrc, mOK := c.Source(key + ac.Context + ".model")
+		eSrc, eOK := c.Source(key + ac.Context + ".effort")
+		if mOK || eOK {
+			src := mSrc
+			if !mOK {
+				src = eSrc
+			}
+			entry := ChainEntry{Layer: ac.Context + " (" + c.displayLayer(src.Layer) + ")", Note: "block for this run's context"}
+			if mOK {
+				entry.Model = mSrc.Value
+			}
+			if eOK {
+				entry.Effort = eSrc.Value
+			}
+			r.Chain = append(r.Chain, entry)
+		}
+	}
+
+	if prof != nil && (prof.Model != "" || prof.Effort != "") {
+		src, _ := c.Source("profile." + prof.Name + ".model")
+		if prof.Model == "" {
+			src, _ = c.Source("profile." + prof.Name + ".effort")
+		}
+		r.Chain = append(r.Chain, ChainEntry{Layer: fmt.Sprintf("profile %q (%s)", prof.Name, c.displayLayer(src.Layer)), Model: prof.Model, Effort: prof.Effort})
 	}
 
 	if cli.Model != "" || cli.Effort != "" {

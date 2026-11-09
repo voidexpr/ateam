@@ -264,7 +264,7 @@ func describeConfigDir(rtCfg *runtime.Config, ac *runtime.AgentConfig, env *root
 	case dir == "":
 		return "(" + ac.TypeName() + " CLI default)"
 	}
-	src, _ := rtCfg.Source("agent." + ac.Name + ".config_dir")
+	src, _ := rtCfg.AttrSource(ac, "config_dir")
 	return fmt.Sprintf("%s (%s)", display.TildeHome(dir), display.TildeHome(src.Layer))
 }
 

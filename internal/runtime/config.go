@@ -124,9 +124,28 @@ type AgentConfig struct {
 	ModelPattern     string            // regexp a model id must match when it is not in the pricing table; empty = no check
 	ModelDocs        string            // URL of the provider's model list, shown when a model fails the check
 
-	ArgsInsideContainer    []string // extra args when running inside a container (detected via /.dockerenv)
-	ArgsOutsideContainer   []string // extra args when running on the host
-	SandboxInsideContainer bool     // if false (default), skip sandbox settings inside containers
+	// InsideContainer / OutsideContainer hold the attributes that replace
+	// the ones above when the run is inside a container (ateam itself runs
+	// in one, or the profile launches one) or on the host. ForContext
+	// applies the right one and records which in Context.
+	InsideContainer  AgentOverlay
+	OutsideContainer AgentOverlay
+	Context          string // "inside_container" or "outside_container" once ForContext applied a block; "" before
+}
+
+// AgentOverlay is the body of an inside_container / outside_container
+// block: the agent attributes that may differ by context. Which fields a
+// block sets is known from Config.Sources.
+type AgentOverlay struct {
+	Args         []string
+	ArgsPrepend  []string // folded *_prepend / *_append, wrapped around the agent's args
+	ArgsAppend   []string
+	Env          map[string]string
+	Sandbox      string
+	ConfigDir    string
+	Model        string
+	Effort       string
+	MaxBudgetUSD string
 }
 
 // TypeName is the agent type with the claude default applied.
@@ -168,6 +187,9 @@ type ProfileConfig struct {
 	Container          string   // references ContainerConfig name
 	AgentExtraArgs     []string // appended to AgentExecutor.ExtraArgs
 	ContainerExtraArgs []string // reserved for container launch args
+	Model              string   // pins for the run; they win over the agent's own
+	Effort             string
+	MaxBudgetUSD       string
 }
 
 // hclFile is the HCL schema for ateam.hcl.
@@ -188,36 +210,49 @@ type hclFile struct {
 }
 
 type hclAgent struct {
-	DefRange               hcl.Range         `hcl:",def_range"`
-	Name                   string            `hcl:"name,label"`
-	Body                   hcl.Body          `hcl:",body"`
-	Base                   string            `hcl:"base,optional"`
-	Command                string            `hcl:"command,optional"`
-	Args                   []string          `hcl:"args,optional"`
-	Model                  string            `hcl:"model,optional"`
-	Effort                 string            `hcl:"effort,optional"`
-	MaxBudgetUSD           string            `hcl:"max_budget_usd,optional"`
-	Type                   string            `hcl:"type,optional"`
-	StartTimeout           string            `hcl:"start_timeout,optional"`
-	BusyTimeout            string            `hcl:"busy_timeout,optional"`
-	QuiescenceWindow       string            `hcl:"quiescence_window,optional"`
-	TmuxWidth              int               `hcl:"tmux_width,optional"`
-	TmuxHeight             int               `hcl:"tmux_height,optional"`
-	Env                    map[string]string `hcl:"env,optional"`
-	Sandbox                string            `hcl:"sandbox,optional"`
-	RWPaths                []string          `hcl:"rw_paths,optional"`
-	ROPaths                []string          `hcl:"ro_paths,optional"`
-	DeniedPaths            []string          `hcl:"denied_paths,optional"`
-	ConfigDir              string            `hcl:"config_dir,optional"`
-	RequiredEnv            []string          `hcl:"required_env,optional"`
-	ModelPattern           string            `hcl:"model_pattern,optional"`
-	ModelDocs              string            `hcl:"model_docs,optional"`
-	ArgsInsideContainer    []string          `hcl:"args_inside_container,optional"`
-	ArgsOutsideContainer   []string          `hcl:"args_outside_container,optional"`
-	SandboxInsideContainer bool              `hcl:"sandbox_inside_container,optional"`
-	ArgsPrepend            []string          `hcl:"args_prepend,optional"`
-	ArgsAppend             []string          `hcl:"args_append,optional"`
-	Pricing                []hclPricing      `hcl:"pricing,block"`
+	DefRange         hcl.Range         `hcl:",def_range"`
+	Name             string            `hcl:"name,label"`
+	Body             hcl.Body          `hcl:",body"`
+	Base             string            `hcl:"base,optional"`
+	Command          string            `hcl:"command,optional"`
+	Args             []string          `hcl:"args,optional"`
+	Model            string            `hcl:"model,optional"`
+	Effort           string            `hcl:"effort,optional"`
+	MaxBudgetUSD     string            `hcl:"max_budget_usd,optional"`
+	Type             string            `hcl:"type,optional"`
+	StartTimeout     string            `hcl:"start_timeout,optional"`
+	BusyTimeout      string            `hcl:"busy_timeout,optional"`
+	QuiescenceWindow string            `hcl:"quiescence_window,optional"`
+	TmuxWidth        int               `hcl:"tmux_width,optional"`
+	TmuxHeight       int               `hcl:"tmux_height,optional"`
+	Env              map[string]string `hcl:"env,optional"`
+	Sandbox          string            `hcl:"sandbox,optional"`
+	RWPaths          []string          `hcl:"rw_paths,optional"`
+	ROPaths          []string          `hcl:"ro_paths,optional"`
+	DeniedPaths      []string          `hcl:"denied_paths,optional"`
+	ConfigDir        string            `hcl:"config_dir,optional"`
+	RequiredEnv      []string          `hcl:"required_env,optional"`
+	ModelPattern     string            `hcl:"model_pattern,optional"`
+	ModelDocs        string            `hcl:"model_docs,optional"`
+	ArgsPrepend      []string          `hcl:"args_prepend,optional"`
+	ArgsAppend       []string          `hcl:"args_append,optional"`
+	Pricing          []hclPricing      `hcl:"pricing,block"`
+	InsideContainer  []hclOverlay      `hcl:"inside_container,block"`
+	OutsideContainer []hclOverlay      `hcl:"outside_container,block"`
+}
+
+// hclOverlay is an inside_container / outside_container block.
+type hclOverlay struct {
+	Body         hcl.Body          `hcl:",body"`
+	Args         []string          `hcl:"args,optional"`
+	ArgsPrepend  []string          `hcl:"args_prepend,optional"`
+	ArgsAppend   []string          `hcl:"args_append,optional"`
+	Env          map[string]string `hcl:"env,optional"`
+	Sandbox      string            `hcl:"sandbox,optional"`
+	ConfigDir    string            `hcl:"config_dir,optional"`
+	Model        string            `hcl:"model,optional"`
+	Effort       string            `hcl:"effort,optional"`
+	MaxBudgetUSD string            `hcl:"max_budget_usd,optional"`
 }
 
 type hclPricing struct {
@@ -256,6 +291,9 @@ type hclProfile struct {
 	Container          string    `hcl:"container,optional"`
 	AgentExtraArgs     []string  `hcl:"agent_extra_args,optional"`
 	ContainerExtraArgs []string  `hcl:"container_extra_args,optional"`
+	Model              string    `hcl:"model,optional"`
+	Effort             string    `hcl:"effort,optional"`
+	MaxBudgetUSD       string    `hcl:"max_budget_usd,optional"`
 
 	AgentExtraArgsPrepend     []string `hcl:"agent_extra_args_prepend,optional"`
 	AgentExtraArgsAppend      []string `hcl:"agent_extra_args_append,optional"`
@@ -270,6 +308,7 @@ var (
 	agentSchema, _     = gohcl.ImpliedBodySchema(hclAgent{})
 	containerSchema, _ = gohcl.ImpliedBodySchema(hclContainer{})
 	profileSchema, _   = gohcl.ImpliedBodySchema(hclProfile{})
+	overlaySchema, _   = gohcl.ImpliedBodySchema(hclOverlay{})
 
 	fileSchema, _ = gohcl.ImpliedBodySchema(hclFile{})
 )
@@ -362,6 +401,11 @@ func (c *Config) resolveInheritance() error {
 			return fmt.Errorf("unknown agent %q", name)
 		}
 		childKey := "agent." + name + "."
+		_, childSetArgs := c.Sources[childKey+"args"]
+		for _, side := range contextSides {
+			o := overlayOf(&ac, side)
+			o.ArgsPrepend, o.ArgsAppend = c.additions(childKey + side + "args")
+		}
 		if ac.Base != "" {
 			if err := resolve(ac.Base, visited); err != nil {
 				return err
@@ -373,7 +417,7 @@ func (c *Config) resolveInheritance() error {
 			baseKey := "agent." + ac.Base + "."
 			baseLabel := fmt.Sprintf("agent %q (base)", ac.Base)
 			for _, attr := range agentAttrNames(agentSchema) {
-				if attr == "base" || attr == "env" || IsListAddition(attr) {
+				if attr == "base" || attr == "env" || IsListAddition(attr) || isContextSide(attr) {
 					continue
 				}
 				if _, set := c.Sources[childKey+attr]; set {
@@ -392,6 +436,9 @@ func (c *Config) resolveInheritance() error {
 				from, _ := c.Source(baseKey + "env." + k)
 				c.setEnvKey(&ac, k, v)
 				c.inherit(childKey+"env."+k, baseLabel, v, from)
+			}
+			for _, side := range contextSides {
+				c.inheritOverlay(childKey+side, baseKey+side, baseLabel, overlayOf(&ac, side), overlayOf(&base, side), childSetArgs)
 			}
 		}
 		// The agent's own additions wrap the list it ended up with, its
@@ -531,12 +578,17 @@ func (c *Config) inherit(key, baseLabel, value string, from Contribution) {
 // setEnvKey sets one env key on ac, cloning the map so a base agent's map
 // is never shared.
 func (c *Config) setEnvKey(ac *AgentConfig, k, v string) {
-	env := make(map[string]string, len(ac.Env)+1)
-	for ek, ev := range ac.Env {
-		env[ek] = ev
+	ac.Env = setMapKey(ac.Env, k, v)
+}
+
+// setMapKey returns a copy of m with k set to v.
+func setMapKey(m map[string]string, k, v string) map[string]string {
+	out := make(map[string]string, len(m)+1)
+	for ek, ev := range m {
+		out[ek] = ev
 	}
-	env[k] = v
-	ac.Env = env
+	out[k] = v
+	return out
 }
 
 // copyAgentAttr copies one attribute from src to dst and returns its
@@ -600,15 +652,6 @@ func copyAgentAttr(dst, src *AgentConfig, attr string) string {
 	case "model_docs":
 		dst.ModelDocs = src.ModelDocs
 		return src.ModelDocs
-	case "args_inside_container":
-		dst.ArgsInsideContainer = src.ArgsInsideContainer
-		return renderList(src.ArgsInsideContainer)
-	case "args_outside_container":
-		dst.ArgsOutsideContainer = src.ArgsOutsideContainer
-		return renderList(src.ArgsOutsideContainer)
-	case "sandbox_inside_container":
-		dst.SandboxInsideContainer = src.SandboxInsideContainer
-		return strconv.FormatBool(src.SandboxInsideContainer)
 	case "pricing":
 		dst.Pricing = src.Pricing
 		if src.Pricing == nil {
@@ -737,32 +780,29 @@ func agentFromHCL(a hclAgent) AgentConfig {
 		}
 	}
 	return AgentConfig{
-		Name:                   a.Name,
-		Base:                   a.Base,
-		Command:                a.Command,
-		Args:                   a.Args,
-		Model:                  a.Model,
-		Effort:                 a.Effort,
-		MaxBudgetUSD:           a.MaxBudgetUSD,
-		Type:                   a.Type,
-		StartTimeout:           a.StartTimeout,
-		BusyTimeout:            a.BusyTimeout,
-		QuiescenceWindow:       a.QuiescenceWindow,
-		TmuxWidth:              a.TmuxWidth,
-		TmuxHeight:             a.TmuxHeight,
-		Env:                    a.Env,
-		Sandbox:                a.Sandbox,
-		RWPaths:                a.RWPaths,
-		ROPaths:                a.ROPaths,
-		DeniedPaths:            a.DeniedPaths,
-		ConfigDir:              a.ConfigDir,
-		Pricing:                pricing,
-		RequiredEnv:            a.RequiredEnv,
-		ModelPattern:           a.ModelPattern,
-		ModelDocs:              a.ModelDocs,
-		ArgsInsideContainer:    a.ArgsInsideContainer,
-		ArgsOutsideContainer:   a.ArgsOutsideContainer,
-		SandboxInsideContainer: a.SandboxInsideContainer,
+		Name:             a.Name,
+		Base:             a.Base,
+		Command:          a.Command,
+		Args:             a.Args,
+		Model:            a.Model,
+		Effort:           a.Effort,
+		MaxBudgetUSD:     a.MaxBudgetUSD,
+		Type:             a.Type,
+		StartTimeout:     a.StartTimeout,
+		BusyTimeout:      a.BusyTimeout,
+		QuiescenceWindow: a.QuiescenceWindow,
+		TmuxWidth:        a.TmuxWidth,
+		TmuxHeight:       a.TmuxHeight,
+		Env:              a.Env,
+		Sandbox:          a.Sandbox,
+		RWPaths:          a.RWPaths,
+		ROPaths:          a.ROPaths,
+		DeniedPaths:      a.DeniedPaths,
+		ConfigDir:        a.ConfigDir,
+		Pricing:          pricing,
+		RequiredEnv:      a.RequiredEnv,
+		ModelPattern:     a.ModelPattern,
+		ModelDocs:        a.ModelDocs,
 	}
 }
 
@@ -792,6 +832,14 @@ func (c *Config) mergeAgent(a hclAgent, label string) {
 			c.addList(key, attr, label, a.ArgsPrepend, line)
 		case "args_append":
 			c.addList(key, attr, label, a.ArgsAppend, line)
+		case "inside_container":
+			for _, b := range a.InsideContainer {
+				c.mergeOverlay(key+"inside_container.", label, &ac.InsideContainer, b)
+			}
+		case "outside_container":
+			for _, b := range a.OutsideContainer {
+				c.mergeOverlay(key+"outside_container.", label, &ac.OutsideContainer, b)
+			}
 		default:
 			c.record(key+attr, label, copyAgentAttr(&ac, &src, attr), line)
 		}
@@ -866,6 +914,15 @@ func (c *Config) mergeProfile(h hclProfile, label string) {
 		case "container_extra_args":
 			p.ContainerExtraArgs = h.ContainerExtraArgs
 			value = renderList(h.ContainerExtraArgs)
+		case "model":
+			p.Model = h.Model
+			value = h.Model
+		case "effort":
+			p.Effort = h.Effort
+			value = h.Effort
+		case "max_budget_usd":
+			p.MaxBudgetUSD = h.MaxBudgetUSD
+			value = h.MaxBudgetUSD
 		case "agent_extra_args_prepend":
 			c.addList(key, attr, label, h.AgentExtraArgsPrepend, line)
 			continue

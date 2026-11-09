@@ -39,8 +39,8 @@ Safe — read-only after construction (Runner fields)
 ProjectID, ContainerType, ContainerNameSource, ConfigDir,
 LogFile, ContainerName (no longer written during Run — the write at
 the old runner.go:495 was removed in 1842bbf).
-- Slices/maps never mutated during Run: ExtraArgs, ArgsInsideContainer,
-ArgsOutsideContainer, and all Sandbox sub-slices (RWPaths,
+- Slices/maps never mutated during Run: ExtraArgs and all Sandbox
+sub-slices (RWPaths,
 ROPaths, Denied, ExtraWrite, ExtraRead, ExtraDomains,
 ExtraExcludedCmd, ExtraWriteDirs). Run copies r.ExtraArgs into a
 local before appending (runner.go:199–208); Sandbox slices are read only.

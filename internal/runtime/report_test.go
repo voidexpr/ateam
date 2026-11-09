@@ -25,22 +25,23 @@ func TestModelReportBuiltinAgents(t *testing.T) {
 		t.Errorf("default: chain %+v", rep.Chain)
 	}
 
-	// claude-high: model and effort attributes in the built-in layer
-	ac2 := cfg.Agents["claude-high"]
-	rep = cfg.ModelReport(nil, &ac2, CLIOverrides{}, NativeConfig{})
-	if rep.Model.Value != "opus" || rep.Model.Source != BuiltinLayer || rep.Effort.Value != "high" {
-		t.Errorf("claude-high: %+v / %+v", rep.Model, rep.Effort)
+	// high: model and effort pinned by the built-in profile
+	highProf, highAC, _, _ := cfg.ResolveProfile("high")
+	rep = cfg.ModelReport(highProf, highAC, CLIOverrides{}, NativeConfig{})
+	wantSource := `profile "high" (` + BuiltinLayer + `)`
+	if rep.Model.Value != "opus" || rep.Model.Source != wantSource || rep.Effort.Value != "high" || rep.Effort.Source != wantSource {
+		t.Errorf("high: %+v / %+v", rep.Model, rep.Effort)
 	}
 
-	// cheap: sonnet via the claude-sonnet agent, no extra args
+	// cheap: sonnet pinned by the profile on the plain claude agent
 	prof, ac, _, _ = cfg.ResolveProfile("cheap")
 	rep = cfg.ModelReport(prof, ac, CLIOverrides{}, NativeConfig{})
-	if rep.Model.Value != "sonnet" || rep.Model.Note != "" {
-		t.Errorf("cheap: %+v", rep.Model)
+	if rep.Model.Value != "sonnet" || rep.Model.Note != "" || ac.Name != "claude" {
+		t.Errorf("cheap: %+v (agent %s)", rep.Model, ac.Name)
 	}
 
-	// CLI override outranks the attribute.
-	rep = cfg.ModelReport(nil, &ac2, CLIOverrides{Model: "haiku", Effort: "low"}, NativeConfig{})
+	// CLI override outranks the profile.
+	rep = cfg.ModelReport(highProf, highAC, CLIOverrides{Model: "haiku", Effort: "low"}, NativeConfig{})
 	if rep.Model.Value != "haiku" || rep.Model.Source != LayerCLI || rep.Effort.Value != "low" || rep.Effort.Source != LayerCLI {
 		t.Errorf("cli override: %+v / %+v", rep.Model, rep.Effort)
 	}
@@ -117,8 +118,14 @@ agent "pinned" {
 
 func TestModelReportShowsBaseAndMissingLayers(t *testing.T) {
 	orgDir := writeLayer(t, t.TempDir(), `
+agent "opus-high" {
+  base   = "claude"
+  model  = "opus"
+  effort = "high"
+}
+
 agent "child" {
-  base = "claude-high"
+  base = "opus-high"
 }
 `)
 	projDir := t.TempDir()
@@ -128,10 +135,10 @@ agent "child" {
 	}
 	ac := cfg.Agents["child"]
 	rep := cfg.ModelReport(nil, &ac, CLIOverrides{}, NativeConfig{})
-	if rep.Model.Value != "opus" || rep.Model.Source != `agent "claude-high" (base)` {
+	if rep.Model.Value != "opus" || rep.Model.Source != `agent "opus-high" (base)` {
 		t.Errorf("inherited model: %+v", rep.Model)
 	}
-	if rep.Chain[0].Layer != `agent "claude-high" (base)` {
+	if rep.Chain[0].Layer != `agent "opus-high" (base)` {
 		t.Errorf("base pseudo-layer must come first: %+v", rep.Chain)
 	}
 	lines := strings.Join(rep.ChainLines(), "\n")
@@ -154,10 +161,10 @@ func TestModelReportNativeConfigIsLowest(t *testing.T) {
 		t.Errorf("unpinned: %+v chain %+v", rep.Model, rep.Chain[0])
 	}
 
-	// Pinned agent: native stays at the bottom and loses.
-	high := cfg.Agents["claude-high"]
-	rep = cfg.ModelReport(nil, &high, CLIOverrides{}, native)
-	if rep.Model.Value != "opus" || rep.Model.Source != BuiltinLayer || rep.Chain[0].Layer != native.Source {
+	// Pinned profile: native stays at the bottom and loses.
+	highProf, highAC, _, _ := cfg.ResolveProfile("high")
+	rep = cfg.ModelReport(highProf, highAC, CLIOverrides{}, native)
+	if rep.Model.Value != "opus" || !strings.HasPrefix(rep.Model.Source, `profile "high"`) || rep.Chain[0].Layer != native.Source {
 		t.Errorf("pinned: %+v chain %+v", rep.Model, rep.Chain[0])
 	}
 

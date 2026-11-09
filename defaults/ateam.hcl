@@ -1,3 +1,10 @@
+// An agent says how to run a CLI (command, args, env, sandbox, config_dir,
+// pricing, required_env, model_pattern, the inside_container /
+// outside_container blocks). A profile says what to run it with: agent,
+// container, model, effort, max_budget_usd. An agent may still pin model /
+// effort / max_budget_usd; the profile's values win, the --model flag wins
+// over both, and `ateam env` shows the chain.
+
 // Sandbox template for Claude agents.
 // At runtime, the runner also grants access to (see writeSettings in runner.go):
 //   - working directory (project source dir)
@@ -206,9 +213,9 @@ locals {
 
 // Detection of an outer Docker/Podman container, via /.dockerenv and
 // /run/.containerenv. When detected, agents take the in-container code
-// path: args_inside_container kicks in, sandbox_inside_container is
-// applied, so claude/codex skip their own inner sandbox (nested
-// sandboxes generally fail).
+// path: their inside_container block applies and outside_container does
+// not, so claude/codex skip their own inner sandbox (nested sandboxes
+// generally fail).
 //
 // Default true — these markers are dead-reliable. The toggle exists
 // for symmetry with sandbox_detection and for edge cases (e.g. testing
@@ -284,10 +291,13 @@ agent "claude" {
   model_pattern = "^claude-(fable|opus|sonnet|haiku)-[0-9][0-9.-]*$"
   model_docs    = "https://platform.claude.com/docs/en/models/overview"
 
-  // Inside containers: skip permissions (container provides isolation).
-  // Outside containers: sandbox settings are applied automatically.
-  args_inside_container    = ["--dangerously-skip-permissions"]
-  sandbox_inside_container = false
+  // Inside a container the container is the isolation: skip the
+  // permission prompts and drop the sandbox settings file. Outside, the
+  // sandbox above applies. Derived agents inherit the block.
+  inside_container {
+    args_append = ["--dangerously-skip-permissions"]
+    sandbox     = ""
+  }
 
   // Claude reports its own cost in the stream; this table serves the
   // expensive-model warning and cost estimates for runs that crashed
@@ -391,42 +401,10 @@ agent "claude-no-sandbox" {
   required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]
 }
 
-// Model and effort are attributes, never `--model` inside args: layers can
-// then override one without copying the whole list, and `ateam env` can
-// say which file pinned the model. A `--model` in args draws a warning.
-agent "claude-sonnet" {
-  base           = "claude"
-  model          = "sonnet"
-  max_budget_usd = "0.50"
-}
-
-agent "claude-haiku" {
-  base           = "claude"
-  model          = "haiku"
-  max_budget_usd = "0.10"
-}
-
-// claude-high: opus model with high reasoning effort, for the hardest tasks.
-agent "claude-high" {
-  base   = "claude"
-  model  = "opus"
-  effort = "high"
-}
-
-// claude-xhigh: opus model with xhigh effort. Slow + expensive — reserve
-// for the few prompts that genuinely need deeper reasoning than --high.
-agent "claude-xhigh" {
-  base   = "claude"
-  model  = "opus"
-  effort = "xhigh"
-}
-
-// claude-docker: backward compatibility alias. The base claude agent now
-// auto-detects containers and skips permissions/sandbox. Prefer using "claude" directly.
-agent "claude-docker" {
-  base = "claude"
-  args = ["-p", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions"]
-}
+// Model, effort and budget variants are profiles (cheap, cheapest, high,
+// xhigh below), not agents. An agent may still pin them, never with
+// `--model` inside args: attributes can be overridden one at a time and
+// `ateam env` can say which file set them.
 
 // claude-isolated uses a project-local config dir (.ateam/.claude) instead of ~/.claude,
 // providing full isolation for ateam-specific agent settings and auth tokens.
@@ -456,7 +434,10 @@ agent "codex" {
   model_pattern = "^(gpt-[0-9][0-9a-z.-]*|o[0-9]+(-[a-z]+)*)$"
   model_docs    = "https://platform.openai.com/docs/models"
 
-  args_outside_container = ["--sandbox", "workspace-write", "--skip-git-repo-check"]
+  // On the host codex sandboxes itself; inside a container it must not.
+  outside_container {
+    args_append = ["--sandbox", "workspace-write", "--skip-git-repo-check"]
+  }
 
   pricing {
     // The codex CLI's own default (first entry of its model list).
@@ -613,21 +594,7 @@ agent "codex" {
   }
 }
 
-// codex-high: the current codex model (gpt-6.1-sol, the CLI's own default;
-// `codex` lists the models it knows in ~/.codex/models_cache.json) with
-// high reasoning effort. Codex has no `latest`-style alias, so pin the
-// version explicitly.
-agent "codex-high" {
-  base   = "codex"
-  model  = "gpt-6.1-sol"
-  effort = "high"
-}
-
-agent "codex-xhigh" {
-  base   = "codex"
-  model  = "gpt-6.1-sol"
-  effort = "xhigh"
-}
+// Codex model variants: see the codex-high / codex-xhigh profiles.
 
 // codex-tmux: drives the interactive Codex TUI through tmux so slash commands
 // unavailable to `codex exec` can run unattended. Example:
@@ -637,8 +604,7 @@ agent "codex-tmux" {
   type    = "codex-tmux"
   command = "codex"
   args    = ["--no-alt-screen", "-s", "workspace-write", "-a", "never", "-c", "check_for_update_on_startup=false", "--disable", "apps", "--disable", "plugins"]
-  model   = "gpt-6.1-sol"
-  effort  = "xhigh"
+  // model and effort: see the codex-tmux profile.
 
   start_timeout     = "15s"
   busy_timeout      = "20m"
@@ -652,9 +618,9 @@ agent "codex-tmux" {
   // OPENAI_API_KEY inherited from the headless codex agent.
   required_env = []
 
-  // Avoid inheriting exec-only codex args such as --skip-git-repo-check.
-  args_outside_container = []
-  args_inside_container  = []
+  // The base's outside_container { args_append } adds to the base's args;
+  // this agent has its own args, so it does not apply here (same rule as
+  // a plain args_append on a base), and nothing needs resetting.
 }
 
 agent "mock" {
@@ -708,19 +674,44 @@ container "docker" {
   ]
 }
 
+// Codex has no `latest`-style alias, so its profiles pin the version
+// (gpt-6.1-sol is the CLI's own default; `codex` lists the models it
+// knows in ~/.codex/models_cache.json). Claude profiles use the bare
+// aliases the CLI resolves to the current generation.
 profile "default" {
   agent     = "claude"
   container = "none"
 }
 
 profile "cheap" {
-  agent     = "claude-sonnet"
-  container = "none"
+  agent          = "claude"
+  container      = "none"
+  model          = "sonnet"
+  max_budget_usd = "0.50"
 }
 
 profile "cheapest" {
-  agent     = "claude-haiku"
+  agent          = "claude"
+  container      = "none"
+  model          = "haiku"
+  max_budget_usd = "0.10"
+}
+
+// high: opus with high reasoning effort, for the hardest tasks.
+profile "high" {
+  agent     = "claude"
   container = "none"
+  model     = "opus"
+  effort    = "high"
+}
+
+// xhigh: opus with xhigh effort. Slow + expensive; reserve for the few
+// prompts that need deeper reasoning than high.
+profile "xhigh" {
+  agent     = "claude"
+  container = "none"
+  model     = "opus"
+  effort    = "xhigh"
 }
 
 profile "isolated" {
@@ -733,9 +724,25 @@ profile "codex" {
   container = "none"
 }
 
+profile "codex-high" {
+  agent     = "codex"
+  container = "none"
+  model     = "gpt-6.1-sol"
+  effort    = "high"
+}
+
+profile "codex-xhigh" {
+  agent     = "codex"
+  container = "none"
+  model     = "gpt-6.1-sol"
+  effort    = "xhigh"
+}
+
 profile "codex-tmux" {
   agent     = "codex-tmux"
   container = "none"
+  model     = "gpt-6.1-sol"
+  effort    = "xhigh"
 }
 
 profile "docker" {
@@ -847,9 +854,9 @@ role "test.recent" { status = "on" }
 // Supervisor profiles (review, code, the code supervisor itself). Empty
 // means the project default_profile, else the "default" profile.
 //   supervisor {
-//     review_profile          = "claude-high"
+//     review_profile          = "high"
 //     code_profile            = "cheap"
-//     code_supervisor_profile = "claude-high"
+//     code_supervisor_profile = "high"
 //   }
 
 // Extra sandbox grants and container settings for this project.

@@ -300,7 +300,7 @@ Design rationale: [`plans/feature_prompt_cmd_bundle_aware.md`](plans/feature_pro
 
 ### Agent and container Go surface
 
-- Each agent under `internal/agent/` implements the `Agent` interface (`Run`, `ParseStreamFile`). Built-ins: `claude`, `claude-docker`, `claude-sonnet`, `claude-haiku`, `claude-isolated`, `codex`, `codex-tmux`, `mock`.
+- Each agent under `internal/agent/` implements the `Agent` interface (`Run`, `ParseStreamFile`). Built-in agent blocks: `claude`, `claude-auto`, `claude-no-sandbox`, `claude-isolated`, `codex`, `codex-tmux`, `mock`; model variants are profiles (`cheap`, `high`, `codex-high`, …).
 - Each container under `internal/container/` implements the `Container` interface. Built-ins: `none`, `docker`, `docker-exec`.
 - Agents receive a `CmdFactory` from the container layer. When set, they use it to spawn subprocesses instead of `exec.CommandContext` directly. This is how Docker execution works transparently — the agent code is unaware.
 
@@ -339,7 +339,7 @@ container "docker-with-data" {
 }
 
 profile "docker-data" {
-  agent     = "claude-docker"
+  agent     = "claude"
   container = "docker-with-data"
   container_extra_args = ["--cpus=2", "--memory=4g"]
 }

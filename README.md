@@ -225,8 +225,8 @@ Quick, focused, cheap. Good before a PR or as a recurring run.
 
 ### Adversarial review — Codex critiques, Claude implements
 ```bash
-ateam exec "critical review of recent changes into review.md" --agent codex-high
-ateam exec "review.md → apply fixes and push back on what you disagree with, commit each separately" --agent claude-high
+ateam exec "critical review of recent changes into review.md" --profile codex-high
+ateam exec "review.md → apply fixes and push back on what you disagree with, commit each separately" --profile high
 ```
 Two agents, two viewpoints. The CLI primitive lets you compose any pattern in shell.
 

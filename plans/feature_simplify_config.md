@@ -23,7 +23,16 @@ Added afterwards: `_prepend` / `_append` companions for the lists that
 carry CLI flags (`agent.args`, a profile's `agent_extra_args` and
 `container_extra_args`, `container_extra.extra_args`), so a layer adds a
 flag without re-listing the inherited list; see CONFIG.md → Runtime
-Configuration.
+Configuration. Then (2026-11-09) the agent / profile split: an agent says
+how to run a CLI, a profile what to run it with. `inside_container` /
+`outside_container` blocks on agents replaced `args_inside_container`,
+`args_outside_container` and `sandbox_inside_container` and accept any
+context-dependent attribute (`config_dir` for a host-only login dir was
+the motivating case); profiles gained `model`, `effort` and
+`max_budget_usd`, and the model-variant agents (`claude-sonnet`,
+`claude-high`, `codex-high`, …) became profiles (`cheap`, `high`,
+`codex-high`, …). Breaking for configs that used the removed attributes
+or `--agent claude-sonnet`; HCL rejects the old attributes by name.
 
 The author's machine was migrated on 2026-11-08 (`scripts/migrate-ateamorg.sh`,
 Go upgraded to 1.26.10 so the `vuln` step of `make run-ci` passes). Two

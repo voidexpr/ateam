@@ -67,8 +67,8 @@ Cheaper than re-running the reports.
 
 #### Adversarial review (Codex critiques, Claude implements)
 ```bash
-ateam exec "critical review of recent changes into review.md" --agent codex-high
-ateam exec "review.md → apply fixes, commit each separately"  --agent claude-high
+ateam exec "critical review of recent changes into review.md" --profile codex-high
+ateam exec "review.md → apply fixes, commit each separately"  --profile high
 ateam exec "look at the recent commits for regressions"        --agent codex
 ```
 

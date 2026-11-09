@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/flow"
 	"github.com/ateam/internal/prompts"
 	"github.com/ateam/internal/prompts/assembler"
@@ -112,14 +113,24 @@ func printWarnings(ws []string) {
 func resolveProfileAgent(rtCfg *runtime.Config, profile string) (*runtime.ProfileConfig, *runtime.AgentConfig) {
 	name := strings.TrimPrefix(profile, "a:")
 	if !strings.HasPrefix(profile, "a:") {
-		if prof, ac, _, err := rtCfg.ResolveProfile(name); err == nil {
-			return prof, ac
+		if prof, ac, cc, err := rtCfg.ResolveProfile(name); err == nil {
+			run := rtCfg.AgentForRun(prof, ac, runInsideContainer(cc))
+			return prof, &run
 		}
 	}
 	if ac, ok := rtCfg.Agents[name]; ok {
-		return nil, &ac
+		run := rtCfg.AgentForRun(nil, &ac, runInsideContainer(nil))
+		return nil, &run
 	}
 	return nil, nil
+}
+
+// runInsideContainer reports whether a run with container cc (nil for
+// none) executes its agent inside a container: ateam itself runs in one,
+// or the profile launches one. This picks the agent's inside_container or
+// outside_container block.
+func runInsideContainer(cc *runtime.ContainerConfig) bool {
+	return container.IsInContainer() || (cc != nil && cc.Type != "" && cc.Type != "none")
 }
 
 // buildArgPrompt picks the Prompt implementation for an

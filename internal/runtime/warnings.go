@@ -57,7 +57,7 @@ func (c *Config) ModelWarnings(prof *ProfileConfig, ac *AgentConfig, cliModel st
 		if mp, ok := c.modelPrice(ac, model); ok && mp.OutputPerMTok > *c.ExpensiveOutputPerMTok {
 			by := "--model"
 			if cliModel == "" {
-				src, _ := c.Source("agent." + ac.Name + ".model")
+				src, _ := c.modelPin(prof, ac)
 				by = c.displayLayer(src.Layer)
 			}
 			out = append(out, fmt.Sprintf("%s: model %q costs $%.2f per million output tokens, above expensive_output_per_mtok = %g (pinned by %s)",
@@ -68,9 +68,13 @@ func (c *Config) ModelWarnings(prof *ProfileConfig, ac *AgentConfig, cliModel st
 }
 
 // effectiveModel is the model a run of ac uses: the CLI override, else the
-// model attribute, else one hidden in args or the profile's agent_extra_args.
+// profile's pin, else the model attribute, else one hidden in args or the
+// profile's agent_extra_args.
 func effectiveModel(prof *ProfileConfig, ac *AgentConfig, cliModel string) string {
 	model := cliModel
+	if model == "" && prof != nil {
+		model = prof.Model
+	}
 	if model == "" {
 		model = ac.Model
 	}
@@ -109,11 +113,7 @@ func (c *Config) ModelNameError(prof *ProfileConfig, ac *AgentConfig, cliModel s
 	}
 	by := "--model"
 	if cliModel == "" {
-		key := "agent." + ac.Name + "."
-		src, ok := c.Source(key + "model")
-		if !ok {
-			src, _ = c.Source(key + "args")
-		}
+		src, _ := c.modelPin(prof, ac)
 		by = c.Where(src, display.TildeHome)
 	}
 	lines := []string{fmt.Sprintf("agent %q: model %q does not look like a %s model id (set by %s)", ac.Name, model, ac.TypeName(), by)}
@@ -125,6 +125,19 @@ func (c *Config) ModelNameError(prof *ProfileConfig, ac *AgentConfig, cliModel s
 	}
 	lines = append(lines, "--skip-model-name-check runs it anyway")
 	return errors.New(strings.Join(lines, "\n  "))
+}
+
+// modelPin returns where the pinned model of a run comes from, by
+// precedence: the profile's model, the agent's context block, the model
+// attribute, else the args that embed it.
+func (c *Config) modelPin(prof *ProfileConfig, ac *AgentConfig) (Contribution, bool) {
+	if prof != nil && prof.Model != "" {
+		return c.Source("profile." + prof.Name + ".model")
+	}
+	if src, ok := c.AttrSource(ac, "model"); ok {
+		return src, true
+	}
+	return c.Source("agent." + ac.Name + ".args")
 }
 
 // validateModelPatterns compiles every agent's model_pattern once so a

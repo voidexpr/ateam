@@ -9,6 +9,7 @@ import (
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/config"
+	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runtime"
@@ -91,7 +92,9 @@ func resolveLoginTarget(env *root.ResolvedEnv, rtCfg *runtime.Config, profileFla
 			}
 			a = &shorthand
 		}
-		ac, source = a, fmt.Sprintf("profile %q, chosen by %s", choice.Name, choice.Source)
+		// Login happens where ateam runs, so the host-side block applies.
+		host := rtCfg.ForContext(*a, container.IsInContainer())
+		ac, source = &host, fmt.Sprintf("profile %q, chosen by %s", choice.Name, choice.Source)
 	}
 
 	stateDir := ""
