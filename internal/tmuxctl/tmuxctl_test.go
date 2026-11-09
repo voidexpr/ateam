@@ -89,3 +89,61 @@ func TestSessionSendLiteralCapture(t *testing.T) {
 	}
 	t.Fatalf("capture missing sent text: %q", got)
 }
+
+// TestNewFactoryNoSecretInArgv verifies that in container mode (CmdFactory
+// set) env values never reach the tmux / docker exec argv, where they would
+// leak through `ps aux`. They must travel to the container on stdin instead.
+func TestNewFactoryNoSecretInArgv(t *testing.T) {
+	const secret = "sk-supersecret-tmux-value-DO-NOT-LEAK"
+	// Run the script-writing `sh` for real (on the host, standing in for the
+	// container) and stub out every tmux call.
+	var cmds []*exec.Cmd
+	factory := func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		c := exec.CommandContext(ctx, name, args...)
+		if name == "tmux" {
+			c = exec.CommandContext(ctx, "true")
+			c.Args = append([]string{name}, args...)
+		}
+		cmds = append(cmds, c)
+		return c
+	}
+
+	socketPath := filepath.Join(t.TempDir(), "s.sock")
+	_, err := New(context.Background(), socketPath, "sess", 80, 20,
+		[]string{"OPENAI_API_KEY=" + secret}, "/work", []string{"codex", "--yolo"}, factory)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	for _, c := range cmds {
+		for _, a := range c.Args {
+			if strings.Contains(a, secret) {
+				t.Fatalf("secret value leaked into argv: %q (args: %v)", a, c.Args)
+			}
+		}
+	}
+	scriptPath := filepath.Join(filepath.Dir(socketPath), "cmd-sess.sh")
+	info, err := os.Stat(scriptPath)
+	if err != nil {
+		t.Fatalf("stat command script: %v", err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Errorf("command script mode = %v, want 0600", info.Mode().Perm())
+	}
+	b, _ := os.ReadFile(scriptPath)
+	script := string(b)
+	if !strings.Contains(script, "export OPENAI_API_KEY='"+secret+"'") {
+		t.Errorf("expected secret staged via stdin script, got: %q", script)
+	}
+	if !strings.Contains(script, "exec 'codex' '--yolo'") {
+		t.Errorf("expected script to exec the session command, got: %q", script)
+	}
+}
+
+func TestRedactArgs(t *testing.T) {
+	got := strings.Join(redactArgs([]string{"new-session", "-e", "KEY=secret", "-e", "BARE", "-c", "/w"}), " ")
+	want := "new-session -e KEY=<redacted> -e BARE -c /w"
+	if got != want {
+		t.Errorf("redactArgs = %q, want %q", got, want)
+	}
+}

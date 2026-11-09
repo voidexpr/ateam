@@ -88,23 +88,24 @@ func New(ctx context.Context, socketPath, name string, width, height int, env []
 		env:        scrubbedEnv,
 	}
 	sessionCommand := shellCommand(cmd)
+	scriptPath := filepath.Join(filepath.Dir(socketPath), "cmd-"+safeSocketName(name)+".sh")
 	if factory == nil {
-		scriptPath := filepath.Join(filepath.Dir(socketPath), "cmd-"+safeSocketName(name)+".sh")
 		if err := writeCommandScript(scriptPath, env, workdir, cmd); err != nil {
 			return nil, err
 		}
 		s.scriptPath = scriptPath
 		sessionCommand = shellCommand([]string{"sh", "-i"})
+	} else if len(env) > 0 {
+		// Env values may be secrets: stage them in a 0600 script inside the
+		// container (written via stdin) instead of `new-session -e KEY=VALUE`,
+		// which would expose them on the tmux / docker exec argv.
+		if err := s.writeContainerScript(ctx, scriptPath, env, cmd); err != nil {
+			return nil, err
+		}
+		sessionCommand = shellCommand([]string{"sh", scriptPath})
 	}
 
 	args := []string{"new-session", "-d", "-s", name, "-x", strconv.Itoa(width), "-y", strconv.Itoa(height)}
-	if factory != nil {
-		for _, kv := range env {
-			if kv != "" {
-				args = append(args, "-e", kv)
-			}
-		}
-	}
 	if workdir != "" && factory != nil {
 		args = append(args, "-c", workdir)
 	}
@@ -321,7 +322,7 @@ func (s *Session) command(ctx context.Context, stdin *strings.Reader, args ...st
 			if detail == "" {
 				detail = strings.TrimSpace(s.serverOutput.String())
 			}
-			return out, fmt.Errorf("tmux %s: %w: %s", strings.Join(tmuxArgs, " "), err, detail)
+			return out, fmt.Errorf("tmux %s: %w: %s", strings.Join(redactArgs(tmuxArgs), " "), err, detail)
 		}
 		select {
 		case <-ctx.Done():
@@ -391,6 +392,41 @@ func writeCommandScript(path string, env []string, workdir string, cmd []string)
 		b.WriteString(shellQuote(workdir))
 		b.WriteString(" || exit $?\n")
 	}
+	writeEnvExports(&b, env)
+	body := b.String() +
+		shellJoin(cmd) + "\n" +
+		"status=$?\n" +
+		"printf '\\n[ateam tmux command exited %s]\\n' \"$status\"\n" +
+		"sleep 86400\n"
+	return os.WriteFile(path, []byte(body), 0600)
+}
+
+// writeContainerScript writes, through the command factory, a 0600 script
+// at path inside the container that exports env and execs cmd. The script
+// content travels on stdin so env values never appear on any argv; the
+// script removes itself on start so the values don't linger on disk.
+func (s *Session) writeContainerScript(ctx context.Context, path string, env []string, cmd []string) error {
+	var b strings.Builder
+	b.WriteString("#!/bin/sh\nrm -f \"$0\"\n")
+	writeEnvExports(&b, env)
+	b.WriteString("exec ")
+	b.WriteString(shellJoin(cmd))
+	b.WriteByte('\n')
+
+	args := []string{"-c", `umask 077 && cat > "$1"`, "sh", path}
+	c := s.cmdFactory(ctx, "sh", args...)
+	if c.Env == nil {
+		c.Env = s.env
+	}
+	c.Stdin = strings.NewReader(b.String())
+	out, err := c.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("write tmux command script %s: %w: %s", path, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func writeEnvExports(b *strings.Builder, env []string) {
 	for _, kv := range env {
 		key, value, ok := strings.Cut(kv, "=")
 		if !ok || !validShellName(key) {
@@ -402,12 +438,22 @@ func writeCommandScript(path string, env []string, workdir string, cmd []string)
 		b.WriteString(shellQuote(value))
 		b.WriteByte('\n')
 	}
-	body := b.String() +
-		shellJoin(cmd) + "\n" +
-		"status=$?\n" +
-		"printf '\\n[ateam tmux command exited %s]\\n' \"$status\"\n" +
-		"sleep 86400\n"
-	return os.WriteFile(path, []byte(body), 0600)
+}
+
+// redactArgs returns args with the value part of every `-e KEY=VALUE` pair
+// replaced, so error messages never echo env values.
+func redactArgs(args []string) []string {
+	out := make([]string, len(args))
+	copy(out, args)
+	for i := 1; i < len(out); i++ {
+		if out[i-1] != "-e" {
+			continue
+		}
+		if key, _, ok := strings.Cut(out[i], "="); ok {
+			out[i] = key + "=<redacted>"
+		}
+	}
+	return out
 }
 
 func validShellName(s string) bool {
