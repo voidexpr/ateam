@@ -267,7 +267,7 @@ expensive_output_per_mtok = 20
 // When the pricing tables below were last checked against the providers.
 // `ateam env` warns once this is older than 90 days; `ateam setup
 // --refresh-models` fetches the current tables from the ateam repository.
-pricing_as_of = "2026-11-07"
+pricing_as_of = "2026-11-09"
 
 // share default local claude config and adds a sandbox
 agent "claude" {
@@ -277,6 +277,12 @@ agent "claude" {
   sandbox = local.claude_sandbox
   env     = local.claude_env
   required_env = ["CLAUDE_CODE_OAUTH_TOKEN|ANTHROPIC_API_KEY"]
+
+  // A model that is not in the pricing table below must still look like
+  // a claude id (claude-<family>-<version>, any version), else the run is
+  // refused with the list of known ids and this page.
+  model_pattern = "^claude-(fable|opus|sonnet|haiku)-[0-9][0-9.-]*$"
+  model_docs    = "https://platform.claude.com/docs/en/models/overview"
 
   // Inside containers: skip permissions (container provides isolation).
   // Outside containers: sandbox settings are applied automatically.
@@ -331,12 +337,12 @@ agent "claude" {
     }
     model "claude-sonnet-5-5" {
       input_per_mtok        = 2.00
-      cached_input_per_mtok = 0.20
+      cached_input_per_mtok = 0.10
       output_per_mtok       = 10.00
     }
     model "sonnet" {
       input_per_mtok        = 2.00
-      cached_input_per_mtok = 0.20
+      cached_input_per_mtok = 0.10
       output_per_mtok       = 10.00
     }
     model "claude-sonnet-5" {
@@ -445,33 +451,101 @@ agent "codex" {
   args    = []
   required_env = ["OPENAI_API_KEY"]
 
+  // gpt-<version>[-variant] or o<n>[-variant]; see model_pattern on the
+  // claude agent for what the check does.
+  model_pattern = "^(gpt-[0-9][0-9a-z.-]*|o[0-9]+(-[a-z]+)*)$"
+  model_docs    = "https://platform.openai.com/docs/models"
+
   args_outside_container = ["--sandbox", "workspace-write", "--skip-git-repo-check"]
 
   pricing {
-    default_model = "gpt-5.4"
-    // No cheaper current-generation codex model: the top one is proposed.
-    suggested_model = "gpt-5.5"
+    // The codex CLI's own default (first entry of its model list).
+    default_model = "gpt-6.1-sol"
+    // The tier below gpt-6-astra in the current generation.
+    suggested_model = "gpt-6.1-sol"
 
-    // cached_input_per_mtok matches OpenAI's prompt-cache pricing (typically
-    // 1/10 of input_per_mtok). Set on every model so cost estimates aren't
-    // inflated when the cache is warm — codex sessions hit cache aggressively
-    // and EstimateCost is the only cost source for codex (no result-event cost).
-    // gpt-5.4 = the new name for what was gpt-5.4-codex (codex dropped the
-    // -codex suffix). Both names are kept so streams that report either
-    // resolve cleanly.
+    // Prices from https://developers.openai.com/api/docs/pricing, standard
+    // tier, prompts up to 272K tokens. cached_input_per_mtok is set on every
+    // model so cost estimates aren't inflated when the cache is warm — codex
+    // sessions hit cache aggressively and EstimateCost is the only cost
+    // source for codex (no result-event cost).
+    //
+    // GPT-6 generation: astra (top), sol, terra, luna (cheapest). The 5.6
+    // sol/terra/luna line stays selectable in the CLI during the rollout.
+    model "gpt-6-astra" {
+      input_per_mtok        = 10.00
+      cached_input_per_mtok = 1.00
+      output_per_mtok       = 50.00
+    }
+
+    model "gpt-6.1-sol" {
+      input_per_mtok        = 2.00
+      cached_input_per_mtok = 0.10
+      output_per_mtok       = 10.00
+    }
+
+    model "gpt-6-sol" {
+      input_per_mtok        = 2.00
+      cached_input_per_mtok = 0.20
+      output_per_mtok       = 10.00
+    }
+
+    model "gpt-6.1-terra" {
+      input_per_mtok        = 1.00
+      cached_input_per_mtok = 0.05
+      output_per_mtok       = 5.00
+    }
+
+    model "gpt-6-luna" {
+      input_per_mtok        = 0.10
+      cached_input_per_mtok = 0.01
+      output_per_mtok       = 0.50
+    }
+
+    model "gpt-5.6-sol" {
+      input_per_mtok        = 4.00
+      cached_input_per_mtok = 0.40
+      output_per_mtok       = 20.00
+    }
+
+    model "gpt-5.6-terra" {
+      input_per_mtok        = 2.00
+      cached_input_per_mtok = 0.20
+      output_per_mtok       = 12.00
+    }
+
+    model "gpt-5.6-luna" {
+      input_per_mtok        = 0.20
+      cached_input_per_mtok = 0.02
+      output_per_mtok       = 1.20
+    }
+
+    // Earlier generations still served by the API.
     model "gpt-5.5" {
-      input_per_mtok        = 1.75
-      cached_input_per_mtok = 0.175
-      output_per_mtok       = 14.00
+      input_per_mtok        = 5.00
+      cached_input_per_mtok = 0.50
+      output_per_mtok       = 30.00
     }
 
     model "gpt-5.4" {
-      input_per_mtok        = 1.75
-      cached_input_per_mtok = 0.175
-      output_per_mtok       = 14.00
+      input_per_mtok        = 2.50
+      cached_input_per_mtok = 0.25
+      output_per_mtok       = 15.00
     }
 
-    model "gpt-5.3" {
+    model "gpt-5.4-mini" {
+      input_per_mtok        = 0.75
+      cached_input_per_mtok = 0.075
+      output_per_mtok       = 4.50
+    }
+
+    model "gpt-5.4-nano" {
+      input_per_mtok        = 0.20
+      cached_input_per_mtok = 0.02
+      output_per_mtok       = 1.25
+    }
+
+    model "gpt-5.3-codex" {
       input_per_mtok        = 1.75
       cached_input_per_mtok = 0.175
       output_per_mtok       = 14.00
@@ -507,18 +581,6 @@ agent "codex" {
       output_per_mtok       = 0.40
     }
 
-    model "gpt-4o" {
-      input_per_mtok        = 2.50
-      cached_input_per_mtok = 1.25
-      output_per_mtok       = 10.00
-    }
-
-    model "gpt-4o-mini" {
-      input_per_mtok        = 0.15
-      cached_input_per_mtok = 0.075
-      output_per_mtok       = 0.60
-    }
-
     model "gpt-4.1" {
       input_per_mtok        = 2.00
       cached_input_per_mtok = 0.50
@@ -531,33 +593,39 @@ agent "codex" {
       output_per_mtok       = 1.60
     }
 
+    model "gpt-4o" {
+      input_per_mtok        = 2.50
+      cached_input_per_mtok = 1.25
+      output_per_mtok       = 10.00
+    }
+
+    model "gpt-4o-mini" {
+      input_per_mtok        = 0.15
+      cached_input_per_mtok = 0.075
+      output_per_mtok       = 0.60
+    }
+
     model "o3" {
       input_per_mtok        = 2.00
       cached_input_per_mtok = 0.50
       output_per_mtok       = 8.00
     }
-
-    model "o4-mini" {
-      input_per_mtok        = 1.10
-      cached_input_per_mtok = 0.275
-      output_per_mtok       = 4.40
-    }
   }
 }
 
-// codex-high: latest codex model (gpt-5.4 — codex dropped the -codex
-// suffix; `~/.codex/config.toml` shows `gpt-5.3-codex` → `gpt-5.4` in the
-// model_migrations table) with high reasoning effort. Codex has no
-// `latest`-style alias, so pin the version explicitly.
+// codex-high: the current codex model (gpt-6.1-sol, the CLI's own default;
+// `codex` lists the models it knows in ~/.codex/models_cache.json) with
+// high reasoning effort. Codex has no `latest`-style alias, so pin the
+// version explicitly.
 agent "codex-high" {
   base   = "codex"
-  model  = "gpt-5.5"
+  model  = "gpt-6.1-sol"
   effort = "high"
 }
 
 agent "codex-xhigh" {
   base   = "codex"
-  model  = "gpt-5.5"
+  model  = "gpt-6.1-sol"
   effort = "xhigh"
 }
 
@@ -569,7 +637,7 @@ agent "codex-tmux" {
   type    = "codex-tmux"
   command = "codex"
   args    = ["--no-alt-screen", "-s", "workspace-write", "-a", "never", "-c", "check_for_update_on_startup=false", "--disable", "apps", "--disable", "plugins"]
-  model   = "gpt-5.5"
+  model   = "gpt-6.1-sol"
   effort  = "xhigh"
 
   start_timeout     = "15s"

@@ -121,6 +121,8 @@ type AgentConfig struct {
 	ConfigDir        string            // sets CLAUDE_CONFIG_DIR; relative paths resolve from .ateam/, absolute used as-is
 	Pricing          *AgentPricing     // cost estimation config (nil = no pricing)
 	RequiredEnv      []string          // env var names that must be set; "A|B" means at least one of A or B
+	ModelPattern     string            // regexp a model id must match when it is not in the pricing table; empty = no check
+	ModelDocs        string            // URL of the provider's model list, shown when a model fails the check
 
 	ArgsInsideContainer    []string // extra args when running inside a container (detected via /.dockerenv)
 	ArgsOutsideContainer   []string // extra args when running on the host
@@ -208,6 +210,8 @@ type hclAgent struct {
 	DeniedPaths            []string          `hcl:"denied_paths,optional"`
 	ConfigDir              string            `hcl:"config_dir,optional"`
 	RequiredEnv            []string          `hcl:"required_env,optional"`
+	ModelPattern           string            `hcl:"model_pattern,optional"`
+	ModelDocs              string            `hcl:"model_docs,optional"`
 	ArgsInsideContainer    []string          `hcl:"args_inside_container,optional"`
 	ArgsOutsideContainer   []string          `hcl:"args_outside_container,optional"`
 	SandboxInsideContainer bool              `hcl:"sandbox_inside_container,optional"`
@@ -299,6 +303,9 @@ func Load(layerDirs []string) (*Config, error) {
 
 	// Resolve agent inheritance (base references)
 	if err := cfg.resolveInheritance(); err != nil {
+		return nil, err
+	}
+	if err := cfg.validateModelPatterns(); err != nil {
 		return nil, err
 	}
 	if err := cfg.validateProfiles(); err != nil {
@@ -587,6 +594,12 @@ func copyAgentAttr(dst, src *AgentConfig, attr string) string {
 	case "required_env":
 		dst.RequiredEnv = src.RequiredEnv
 		return renderList(src.RequiredEnv)
+	case "model_pattern":
+		dst.ModelPattern = src.ModelPattern
+		return src.ModelPattern
+	case "model_docs":
+		dst.ModelDocs = src.ModelDocs
+		return src.ModelDocs
 	case "args_inside_container":
 		dst.ArgsInsideContainer = src.ArgsInsideContainer
 		return renderList(src.ArgsInsideContainer)
@@ -745,6 +758,8 @@ func agentFromHCL(a hclAgent) AgentConfig {
 		ConfigDir:              a.ConfigDir,
 		Pricing:                pricing,
 		RequiredEnv:            a.RequiredEnv,
+		ModelPattern:           a.ModelPattern,
+		ModelDocs:              a.ModelDocs,
 		ArgsInsideContainer:    a.ArgsInsideContainer,
 		ArgsOutsideContainer:   a.ArgsOutsideContainer,
 		SandboxInsideContainer: a.SandboxInsideContainer,

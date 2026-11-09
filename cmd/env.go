@@ -244,6 +244,9 @@ func printProfilesInUse(env *root.ResolvedEnv, rtCfg *runtime.Config) {
 		for _, w := range rtCfg.ModelWarnings(prof, ac, "") {
 			fmt.Printf("    Warning: %s\n", w)
 		}
+		if err := rtCfg.ModelNameError(prof, ac, ""); err != nil {
+			fmt.Printf("    Error: %s\n", strings.ReplaceAll(err.Error(), "\n", "\n    "))
+		}
 		if envModels {
 			fmt.Println("    resolved from (lowest to highest precedence):")
 			for _, line := range rep.ChainLines() {

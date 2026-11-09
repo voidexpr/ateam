@@ -13,6 +13,7 @@ All commands accept:
 | `--work-dir PATH` |       | Agent working directory (overrides the project-aware default). |
 | `--sandbox-detection true\|false` |       | Toggle auto-detection of an outer non-container sandbox. Signal-driven: macOS Seatbelt (sandbox-exec probe), Linux user namespace / Seccomp / NoNewPrivs (/proc), cooperative env vars (`FENCE_SANDBOX`, `FIREJAIL_NAME`, `container=…`). Built-in default `false` — opt in when knowingly running ateam under any outer sandbox. Overrides `ateam.hcl` `sandbox_detection`. See [ISOLATION.md](ISOLATION.md#detection-of-an-outer-sandbox-or-container). |
 | `--docker-detection true\|false` |       | Toggle auto-detection of `/.dockerenv` / `/run/.containerenv`. Built-in default `true`. Overrides `ateam.hcl` `docker_detection`. |
+| `--skip-model-name-check` |       | Run even when the model id is neither in the agent's `pricing` table nor matches its `model_pattern`; the refusal becomes a warning. See [CONFIG.md → Agents](CONFIG.md#agents). |
 
 `report`, `code`, `review`, `verify`, and `run-all` require their work-dir to be inside a git repo or worktree; `exec` and `parallel` work in any directory.
 

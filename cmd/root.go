@@ -13,6 +13,7 @@ var (
 	workDirFlag          string
 	sandboxDetectionFlag string
 	dockerDetectionFlag  string
+	skipModelNameCheck   bool
 )
 
 var rootCmd = &cobra.Command{
@@ -65,6 +66,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&workDirFlag, "work-dir", "", "agent working directory (overrides the project-aware default)")
 	rootCmd.PersistentFlags().StringVar(&sandboxDetectionFlag, "sandbox-detection", "", "true|false: auto-detect when ateam is running inside any outer non-container sandbox (signal-driven: macOS Seatbelt probe, Linux /proc heuristics, cooperative env vars FENCE_SANDBOX/FIREJAIL_NAME/container=…) and treat it as a container so the agent's inner sandbox is skipped. Built-in default false because the signals can have false positives that silently drop defense in depth — opt in when knowingly running under an outer sandbox. Empty = use ateam.hcl or built-in default.")
 	rootCmd.PersistentFlags().StringVar(&dockerDetectionFlag, "docker-detection", "", "true|false: auto-detect /.dockerenv and /run/.containerenv and treat ateam as already inside a container. Built-in default true (markers are dead-reliable). Empty = use ateam.hcl or built-in default.")
+	rootCmd.PersistentFlags().BoolVar(&skipModelNameCheck, "skip-model-name-check", false, "run even when the model id is neither in the agent's pricing table nor matches its model_pattern (the refusal becomes a warning)")
 
 	rootCmd.AddCommand(envCmd)
 	rootCmd.AddCommand(initCmd)

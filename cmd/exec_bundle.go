@@ -68,20 +68,23 @@ func buildRunner(env *root.ResolvedEnv, spec RunnerSpec) (*runner.AgentExecutor,
 	if err := applyRunnerOverrides(r, env, spec.Overrides, spec.Action); err != nil {
 		return nil, err
 	}
-	warnModelConfig(env, r, spec.Overrides)
+	if err := checkModelConfig(env, r, spec.Overrides); err != nil {
+		return nil, err
+	}
 	setSourceWritable(r)
 	r.ShimDir = root.EnsureCLIShim(env)
 	return r, nil
 }
 
-// warnModelConfig prints the model warnings for the runner's profile or
+// checkModelConfig prints the model warnings for the runner's profile or
 // agent (unpinned model, expensive model, --model hidden in args) to
-// stderr. Best-effort: a config that fails to load here already failed
-// louder in resolveRunner.
-func warnModelConfig(env *root.ResolvedEnv, r *runner.AgentExecutor, o RunnerOverrides) {
+// stderr and refuses a model id that fails the agent's model_pattern
+// check; --skip-model-name-check demotes that refusal to a warning. A
+// config that fails to load here already failed louder in resolveRunner.
+func checkModelConfig(env *root.ResolvedEnv, r *runner.AgentExecutor, o RunnerOverrides) error {
 	rtCfg, err := loadRuntime(env)
 	if err != nil {
-		return
+		return nil
 	}
 	cliModel := o.Model
 	if cliModel == "" && o.CheaperModel {
@@ -89,6 +92,12 @@ func warnModelConfig(env *root.ResolvedEnv, r *runner.AgentExecutor, o RunnerOve
 	}
 	prof, ac := resolveProfileAgent(rtCfg, r.Profile)
 	printWarnings(rtCfg.ModelWarnings(prof, ac, cliModel))
+	err = rtCfg.ModelNameError(prof, ac, cliModel)
+	if err != nil && skipModelNameCheck {
+		printWarnings([]string{err.Error()})
+		return nil
+	}
+	return err
 }
 
 func printWarnings(ws []string) {

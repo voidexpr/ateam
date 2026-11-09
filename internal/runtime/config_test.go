@@ -250,8 +250,8 @@ func TestCodexTmuxAgentConfig(t *testing.T) {
 	if ac.Command != "codex" {
 		t.Errorf("expected command 'codex', got %q", ac.Command)
 	}
-	if ac.Model != "gpt-5.5" {
-		t.Errorf("expected model 'gpt-5.5', got %q", ac.Model)
+	if ac.Model != "gpt-6.1-sol" {
+		t.Errorf("expected model 'gpt-6.1-sol', got %q", ac.Model)
 	}
 	if ac.Effort != "xhigh" {
 		t.Errorf("expected effort 'xhigh', got %q", ac.Effort)
@@ -272,7 +272,7 @@ func TestCodexTmuxAgentConfig(t *testing.T) {
 	if len(ac.ArgsOutsideContainer) != 0 {
 		t.Errorf("expected codex-tmux not to inherit exec-only outside args, got %v", ac.ArgsOutsideContainer)
 	}
-	if ac.Pricing == nil || ac.Pricing.DefaultModel != "gpt-5.4" {
+	if ac.Pricing == nil || ac.Pricing.DefaultModel != "gpt-6.1-sol" {
 		t.Errorf("expected codex-tmux to inherit codex pricing, got %+v", ac.Pricing)
 	}
 }
@@ -383,6 +383,96 @@ func TestModelWarnings(t *testing.T) {
 	// mock agent: nothing to say
 	if ws := warningsFor("test", ""); len(ws) != 0 {
 		t.Errorf("test: got %q", joined(ws))
+	}
+}
+
+func TestModelNameError(t *testing.T) {
+	dir := t.TempDir()
+	writeLayer(t, dir, `
+agent "typo" {
+  base  = "claude"
+  model = "opus-5.5"
+}
+agent "future" {
+  base  = "claude"
+  model = "claude-opus-12.0"
+}
+agent "dated" {
+  base  = "claude"
+  model = "claude-opus-5-5-2026-03-01"
+}
+agent "hidden" {
+  base = "claude"
+  args = ["-p", "--model", "claud-opus"]
+}
+agent "free" {
+  base          = "claude"
+  model_pattern = ""
+  model         = "whatever"
+}
+agent "codex-next" {
+  base  = "codex"
+  model = "gpt-6.2-nova"
+}
+agent "codex-typo" {
+  base  = "codex"
+  model = "sol-6.1"
+}
+`)
+	cfg := Must(Load([]string{dir}))
+	check := func(agent, cliModel string) error {
+		t.Helper()
+		ac, ok := cfg.Agents[agent]
+		if !ok {
+			t.Fatalf("no agent %q", agent)
+		}
+		return cfg.ModelNameError(nil, &ac, cliModel)
+	}
+	file := filepath.Join(dir, ConfigFile)
+
+	err := check("typo", "")
+	if err == nil {
+		t.Fatal("typo: expected an error")
+	}
+	for _, want := range []string{`model "opus-5.5"`, "claude model id", file + ":4", "known models: ", "claude-opus-5-5", "https://platform.claude.com/docs/en/models/overview", "--skip-model-name-check"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("typo: error lacks %q:\n%v", want, err)
+		}
+	}
+	// a model hidden in args is checked too, and reported at the args line
+	if err := check("hidden", ""); err == nil || !strings.Contains(err.Error(), file+":16") {
+		t.Errorf("hidden: want an error at the args line, got %v", err)
+	}
+	// codex: gpt-<version>-<variant> passes, a bare variant does not
+	if err := check("codex-typo", ""); err == nil || !strings.Contains(err.Error(), "codex model id") || !strings.Contains(err.Error(), "gpt-6.1-sol") || !strings.Contains(err.Error(), "platform.openai.com") {
+		t.Errorf("codex-typo: got %v", err)
+	}
+	// unknown version of a known family, dated id, pattern turned off
+	for _, agent := range []string{"future", "dated", "free", "codex-next"} {
+		if err := check(agent, ""); err != nil {
+			t.Errorf("%s: unexpected error: %v", agent, err)
+		}
+	}
+	// --model replaces the attribute for the check
+	if err := check("typo", "sonnet"); err != nil {
+		t.Errorf("typo + --model sonnet: %v", err)
+	}
+	if err := check("future", "sonet"); err == nil || !strings.Contains(err.Error(), "set by --model") {
+		t.Errorf("future + --model sonet: got %v", err)
+	}
+	// agents without a pattern (mock) accept anything
+	mock := cfg.Agents["mock"]
+	if err := cfg.ModelNameError(nil, &mock, "anything"); err != nil {
+		t.Errorf("mock: %v", err)
+	}
+}
+
+func TestModelPatternMustCompile(t *testing.T) {
+	dir := t.TempDir()
+	writeLayer(t, dir, "agent \"claude\" {\n  model_pattern = \"(\"\n}\n")
+	_, err := Load([]string{dir})
+	if err == nil || !strings.Contains(err.Error(), "model_pattern") || !strings.Contains(err.Error(), ":2") {
+		t.Errorf("want a load error naming model_pattern and its line, got %v", err)
 	}
 }
 
@@ -979,21 +1069,21 @@ func TestPricingBlockParsed(t *testing.T) {
 	if codex.Pricing == nil {
 		t.Fatal("expected non-nil pricing on codex agent")
 	}
-	if codex.Pricing.DefaultModel != "gpt-5.4" {
-		t.Errorf("expected default_model 'gpt-5.4', got %q", codex.Pricing.DefaultModel)
+	if codex.Pricing.DefaultModel != "gpt-6.1-sol" {
+		t.Errorf("expected default_model 'gpt-6.1-sol', got %q", codex.Pricing.DefaultModel)
 	}
 	if len(codex.Pricing.Models) == 0 {
 		t.Fatal("expected non-empty pricing models on codex")
 	}
-	cm, ok := codex.Pricing.Models["gpt-5.4"]
+	cm, ok := codex.Pricing.Models["gpt-6.1-sol"]
 	if !ok {
-		t.Fatal("expected 'gpt-5.4' in codex pricing models")
+		t.Fatal("expected 'gpt-6.1-sol' in codex pricing models")
 	}
-	if cm.InputPerMTok != 1.75 {
-		t.Errorf("expected gpt-5.4 input_per_mtok 1.75, got %v", cm.InputPerMTok)
+	if cm.InputPerMTok != 2.00 {
+		t.Errorf("expected gpt-6.1-sol input_per_mtok 2.00, got %v", cm.InputPerMTok)
 	}
-	if cm.OutputPerMTok != 14.00 {
-		t.Errorf("expected gpt-5.4 output_per_mtok 14.00, got %v", cm.OutputPerMTok)
+	if cm.OutputPerMTok != 10.00 {
+		t.Errorf("expected gpt-6.1-sol output_per_mtok 10.00, got %v", cm.OutputPerMTok)
 	}
 
 	// Claude reports native cost via total_cost_usd; its pricing block

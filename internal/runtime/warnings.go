@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -45,16 +46,7 @@ func (c *Config) ModelWarnings(prof *ProfileConfig, ac *AgentConfig, cliModel st
 		}
 	}
 
-	model := cliModel
-	if model == "" {
-		model = ac.Model
-	}
-	if model == "" {
-		model = argsModel(ac.Args)
-	}
-	if model == "" && prof != nil {
-		model = argsModel(prof.AgentExtraArgs)
-	}
+	model := effectiveModel(prof, ac, cliModel)
 	if model == "" {
 		out = append(out, fmt.Sprintf("%s: no model pinned; the %s CLI will pick its own default (often the most expensive). Set model = \"...\" in %s",
 			label, ac.Command, c.editHint(ac.Name)))
@@ -73,6 +65,81 @@ func (c *Config) ModelWarnings(prof *ProfileConfig, ac *AgentConfig, cliModel st
 		}
 	}
 	return out
+}
+
+// effectiveModel is the model a run of ac uses: the CLI override, else the
+// model attribute, else one hidden in args or the profile's agent_extra_args.
+func effectiveModel(prof *ProfileConfig, ac *AgentConfig, cliModel string) string {
+	model := cliModel
+	if model == "" {
+		model = ac.Model
+	}
+	if model == "" {
+		model = argsModel(ac.Args)
+	}
+	if model == "" && prof != nil {
+		model = argsModel(prof.AgentExtraArgs)
+	}
+	return model
+}
+
+// ModelNameError rejects a model id that is neither in the agent's pricing
+// table (dated suffix ignored) nor matches its model_pattern. Agents
+// without a pattern accept any id. The message lists the known ids and
+// the provider's model page (model_docs) when the agent names one.
+func (c *Config) ModelNameError(prof *ProfileConfig, ac *AgentConfig, cliModel string) error {
+	if ac == nil || ac.ModelPattern == "" {
+		return nil
+	}
+	model := effectiveModel(prof, ac, cliModel)
+	if model == "" {
+		return nil
+	}
+	if ac.Pricing != nil {
+		if _, ok := c.modelPrice(ac, model); ok {
+			return nil
+		}
+	}
+	re, err := regexp.Compile(ac.ModelPattern)
+	if err != nil {
+		return err
+	}
+	if re.MatchString(model) {
+		return nil
+	}
+	by := "--model"
+	if cliModel == "" {
+		key := "agent." + ac.Name + "."
+		src, ok := c.Source(key + "model")
+		if !ok {
+			src, _ = c.Source(key + "args")
+		}
+		by = c.Where(src, display.TildeHome)
+	}
+	lines := []string{fmt.Sprintf("agent %q: model %q does not look like a %s model id (set by %s)", ac.Name, model, ac.TypeName(), by)}
+	if names := SortedModels(ac.Pricing); len(names) > 0 {
+		lines = append(lines, "known models: "+strings.Join(names, ", "))
+	}
+	if ac.ModelDocs != "" {
+		lines = append(lines, "reference: "+ac.ModelDocs)
+	}
+	lines = append(lines, "--skip-model-name-check runs it anyway")
+	return errors.New(strings.Join(lines, "\n  "))
+}
+
+// validateModelPatterns compiles every agent's model_pattern once so a
+// bad regexp is reported at load with its source, not at run start.
+func (c *Config) validateModelPatterns() error {
+	for name, ac := range c.Agents {
+		if ac.ModelPattern == "" {
+			continue
+		}
+		if _, err := regexp.Compile(ac.ModelPattern); err != nil {
+			src, _ := c.Source("agent." + name + ".model_pattern")
+			return fmt.Errorf("agent %q: model_pattern (%s): %v", name, c.Where(src, display.TildeHome), err)
+		}
+	}
+	return nil
 }
 
 func (c *Config) modelPrice(ac *AgentConfig, model string) (ModelPricing, bool) {
