@@ -44,7 +44,7 @@ func (s savedContainerCpGlobals) restore() {
 // project root path and the .ateamorg/ directory.
 func setupContainerCpProject(t *testing.T, profileName, dockerContainer string) (projPath, orgDir string) {
 	t.Helper()
-	base := t.TempDir()
+	base := resolvedTestDir(t)
 	orgDir = testHome(t, base)
 	projPath = filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
@@ -85,8 +85,8 @@ func TestContainerCPDryRunPrintsPlan(t *testing.T) {
 	// findLinuxBinary searches a fixed set of paths. On non-linux/amd64
 	// hosts none of them exist under `go test` (the test exe lives in a
 	// temp dir with no go.mod for cross-compile fallback), so seed the
-	// orgDir cache slot with a placeholder so the dry-run can resolve it.
-	cacheDir := filepath.Join(orgDir, "cache")
+	// home cache slot with a placeholder so the dry-run can resolve it.
+	cacheDir := binaryCacheDir(orgDir)
 	if err := os.MkdirAll(cacheDir, 0700); err != nil {
 		t.Fatalf("mkdir cache: %v", err)
 	}

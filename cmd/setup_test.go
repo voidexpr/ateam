@@ -11,7 +11,7 @@ import (
 
 func setupFixture(t *testing.T) (home, projPath string, env *root.ResolvedEnv) {
 	t.Helper()
-	base := t.TempDir()
+	base := resolvedTestDir(t)
 	home = testHome(t, base)
 	projPath = filepath.Join(base, "myproj")
 	if err := os.MkdirAll(projPath, 0755); err != nil {
