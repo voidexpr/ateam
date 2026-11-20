@@ -517,11 +517,22 @@ func resolveHome(override string) (string, error) {
 	return realPath(home), nil
 }
 
+// discoveryCeiling is a directory discover never walks into; empty means
+// the walk goes up to the filesystem root.
+var discoveryCeiling string
+
+// SetDiscoveryCeiling stops discover's upward walk below dir. Tests set it
+// to the temp root so a developer's ~/.ateam never becomes a config layer
+// when $TMPDIR lives under their home directory.
+func SetDiscoveryCeiling(dir string) {
+	discoveryCeiling = realPath(dir)
+}
+
 // discover walks up from start collecting every .ateam/ directory other
-// than home. The nearest one whose ateam.hcl names a project is the
-// project; every other one is a config layer, returned outermost first.
-// A legacy layout (.ateamorg/, or a config.toml inside .ateam/) is an
-// error that explains the move.
+// than home, stopping below discoveryCeiling when set. The nearest one
+// whose ateam.hcl names a project is the project; every other one is a
+// config layer, returned outermost first. A legacy layout (.ateamorg/, or
+// a config.toml inside .ateam/) is an error that explains the move.
 func discover(start, home string) (projectDir string, ancestors []string, err error) {
 	// A ~/.ateamorg from a previous version is only an error when the home
 	// layer is the default one (an explicit ATEAM_HOME / --home means the
@@ -564,7 +575,7 @@ func discover(start, home string) (projectDir string, ancestors []string, err er
 			}
 		}
 		parent := filepath.Dir(dir)
-		if parent == dir {
+		if parent == dir || parent == discoveryCeiling {
 			break
 		}
 		dir = parent

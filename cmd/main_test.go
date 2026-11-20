@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/ateam/internal/container"
+	"github.com/ateam/internal/root"
+	"github.com/ateam/internal/testenv"
 )
 
 // TestMain disables both toggleable detection layers during cmd tests.
@@ -15,8 +17,12 @@ import (
 // (make test-docker) where /.dockerenv is present. Disable both
 // toggled layers; the always-on env-var overrides (ATEAM_IN_CONTAINER=1,
 // ATEAM_IN_SANDBOX=1) still trigger for tests that need them.
+//
+// It also isolates the run from the developer's home: discovery stops at
+// the temp root and HOME points at an empty directory.
 func TestMain(m *testing.M) {
 	container.SetSandboxDetection(false)
 	container.SetDockerDetection(false)
-	os.Exit(m.Run())
+	root.SetDiscoveryCeiling(os.TempDir())
+	os.Exit(testenv.RunWithTempHome(m))
 }
