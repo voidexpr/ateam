@@ -2,7 +2,7 @@ module github.com/ateam
 
 go 1.26.5
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/alecthomas/chroma/v2 v2.2.0
