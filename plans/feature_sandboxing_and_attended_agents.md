@@ -1,24 +1,39 @@
 # Sandboxing and attended agents in ateam
 
-Status, 2026-11-21: proposal. Nothing built.
+Status, 2026-11-21: design decided in outline (see "Decisions"). Nothing built.
 
 ## Summary
 
 - Move sandbox configuration and launching from targy + `nono-sandbox` into ateam.
-- Extend `profile` to carry the sandbox policy. A profile can `use` other profiles.
-- Add an attended entry point (`ateam chat`) and arbitrary commands under a sandbox.
-- Add sandbox backends as container types, nono first.
+- A `profile` becomes a set of saved properties that compose. Agent and container are optional.
+- New entities referenced from profiles: `filter` (file access) and `network` (network access). Later: ports, Playwright, build containers, remote computers.
+- New verbs: `chat` (attended agent), `run` (arbitrary command), `shell`, `profile save/show/list`.
+- Sandbox backends are container types, nono first.
+- Rules are written in a tool-agnostic way and mapped to the backend. Anything that cannot be enforced is an error.
 - Order: filesystem and commands, then network, then secrets.
 
 ## Scope statement
 
 ateam is automation around coding agents. Unattended quality workflows are one use; attended sessions are another.
 
-What ateam adds for attended sessions:
+What matters in this work:
 
-- Sandboxing beyond what `claude` and `codex` ship: one boundary set from outside the agent, the same for every agent and every command.
+- Sandboxing inside ateam itself: one boundary set from outside the agent, the same for every agent and every command, stronger than and independent of each agent's own sandbox.
+- Saving exactly how to run an agent or a command for a project, inside or outside the project.
 - Arbitrary commands in a sandbox: test a policy (`make test` under it), or open a secure shell to work in as an agent would.
-- A saved, auditable policy per project, shared by attended and unattended runs.
+
+Shared between attended and unattended runs:
+
+- Profiles, filters, network rules, secrets.
+- The metrics database: attended sessions record usage and cost too.
+- Not logs: an attended agent already keeps its own session history.
+
+Not in scope for now:
+
+- Generating the agents' own settings (Claude permissions, managed settings). That stays in targy. ateam invests in outside sandboxes. An HCL syntax to configure an agent could come later.
+- Project-level profile trust. Project profiles already exist in `ateam.hcl` and are not the focus.
+
+Note: `exec` and `prompt` are probably misnamed given this direction. To revisit later.
 
 ## Background
 
@@ -39,17 +54,32 @@ Why this pushes toward ateam:
 
 Related research: `research/ResearchSandboxing.md`, sections F.1.2 (review-time hazards), F.3 (nono), G (network and secret injection).
 
+## Decisions (2026-11-21)
+
+| # | Topic | Decision |
+|---|---|---|
+| 1 | Composable unit | `profile`. No separate `sandbox`, `policy` or `capability` entity. Agent and container are optional. Complex things (filters, network, ports, Playwright, ...) are their own entities, referenced from profiles. Revisit if profile stops fitting. |
+| 2 | Composition | Profiles compose with `use`. The default is to add. Any inconsistency, mistake, or rule that cannot be enforced is an error: fail closed. |
+| 3 | List changes | First phase: plain lists add only. Second phase: `_remove` and `_replace` suffixes. |
+| 4 | Verbs | `chat`, `run`, `shell`, `profile save/show/list`. `--profile` selects; no `--policy`, no `--resume`. |
+| 5 | Saved command | A profile can hold a `command`. `run` uses it; `--command` replaces it for one launch. |
+| 6 | `.ateam` access | Readable by default: `.ateam/runtime/EXEC_ID`, `.ateam/shared/`, `.ateam/prompts`. Everything else in `.ateam` is unreadable by default. Customizable per profile. |
+| 7 | Project-supplied profiles | Trust on first use, second phase. Widening must stay possible. |
+| 8 | Network | A `network` entity, tool-agnostic, mapped to the backend or an error. Default: deny, with LLM provider hosts and localhost allowed. |
+| 9 | Filters | A `filter` entity in the unified syntax (autoversion). Defined by file or inline. Profile lists accept filter names and literal paths together. |
+| 10 | Agent settings generation | Stays in targy for now. |
+
 ## Design
 
-### Profiles carry the policy
+### Profiles
 
-No new `sandbox` block. `profile` gains policy fields and composition.
+A profile is a set of saved properties. Every field is optional.
 
 ```hcl
-# a fragment: policy only, no agent or container
 profile "go" {
-  write = ["~/go/pkg", "~/Library/Caches/go-build", "~/.cache/go-build"]
-  read  = ["~/Library/Application Support/go"]
+  write = ["go-write"]            # a filter name
+  read  = ["go-read"]
+  network = ["go-registry"]
 }
 
 profile "dev" {
@@ -59,135 +89,243 @@ profile "dev" {
 profile "nono" {
   agent     = "claude"
   container = "nono"
-  use       = ["base-read", "net-default"]
+  read      = ["agent-read"]
+  network   = ["base", "llm"]
 }
 
-# a project's saved policy
+# how to run this project, saved
 profile "myproject" {
   use     = ["nono", "go"]
-  write   = ["~/SyncDatabox/dotfiles"]
-  read    = ["~/.ssh/config"]          # opens a path base-read keeps unreadable; reported at launch
+  write   = ["~/SyncDatabox/dotfiles"]    # a literal path
+  read    = ["~/.ssh/config"]             # opens a path agent-read keeps unreadable; reported at launch
   exclude = ["~/SyncDatabox/nicmac/projects/other"]
-  domains = ["example.com"]
+}
+
+profile "build" {
+  use     = ["myproject"]
+  command = ["make", "test"]
 }
 ```
 
-New profile fields:
+Fields:
 
-| Field | Meaning |
-|---|---|
-| `use` | Profiles merged into this one, in order |
-| `read` | Paths readable, including ones an inherited `exclude` closes |
-| `write` | Paths writable, besides the working folder |
-| `exclude` | Paths unreadable |
-| `domains` | Hosts reachable through the backend's proxy |
-| `open_net` | No domain filtering |
-| `filters` | Filter files or inline filters in the targy/autoversion syntax, for rules too long for lists |
-| `command` | Default command, for saved policies |
+| Field | Kind | Meaning |
+|---|---|---|
+| `use` | list | Profiles merged into this one, in order |
+| `agent`, `container` | scalar | As today; now optional |
+| `model`, `effort`, `max_budget_usd` | scalar | Pins, as today |
+| `command` | scalar | Saved command for `run` |
+| `read` | list | Filter names or paths readable, including ones an inherited `exclude` closes |
+| `write` | list | Filter names or paths writable, besides the working folder |
+| `exclude` | list | Filter names or paths unreadable |
+| `network` | list | `network` entity names |
+| `exposes`, `resources` | list | Later: what the profile exposes (ports) and uses (Playwright, containers, remote computers). Working names. |
 
-Merge rules for `use`:
+In `read`, `write` and `exclude`, an entry starting with `~` or `/` is a path; anything else is a filter name. An unknown name is an error.
 
-- Lists (`read`, `write`, `exclude`, `domains`, `filters`): union, in `use` order, then the profile's own.
-- Scalars (`agent`, `container`, `model`, `effort`, `max_budget_usd`, `open_net`, `command`): last `use` wins, then the profile's own.
-- A `read` in a nearer profile reopens a path an inherited `exclude` closes. The launch reports it.
-- Cycles are an error. `ateam env` shows the resolved profile and where each entry came from.
+Composition:
+
+- Lists add up across `use`, in order, then the profile's own entries.
+- Scalars: the profile's own value wins over its `use` list; a later `use` entry wins over an earlier one.
+- Cycles are an error.
+- `ateam profile show` prints the resolved profile and where each entry came from.
+
+Resolution at launch:
+
+- No agent: fine for `run` and `shell`. `chat` falls back to the default agent.
+- No container: fall back to a configured default sandbox backend (for example a top-level `default_container = "nono"`).
+- If the resolved container cannot enforce every rule of the profile, the launch is refused. A policy is never dropped silently.
+- `--profile` can be given several times; they compose in order. `--NAME` (`--go`) is shorthand for adding the profile `NAME`. `--read`, `--write`, `--exclude` add entries for one launch.
+
+Second phase, `_remove` and `_replace`:
+
+- `write_remove = [...]` takes inherited entries out. Removing something that is not there is an error.
+- `domains_replace`-style fields discard what was inherited. Used with the plain name in the same profile: an error.
+- Security note: both can widen access. `_remove` on `exclude` reopens a path; `_replace` can drop an inherited restriction. They need the same trust rules as any other widening, and the launch should report them.
 
 Existing pieces to reconcile:
 
 - `sandbox_extra` in project config (`allow_write`, `allow_read`, `allow_domains`, `unsandboxed_commands`) overlaps with the new fields. Keep it as an alias that feeds the same lists, then deprecate.
-- The agent's `sandbox` template (Claude's own sandbox settings) becomes one rendering of the policy, used by the built-in sandbox backend.
+- The agent's `sandbox` template (Claude's own sandbox settings) stays as it is for the existing built-in mode.
+- Role and supervisor blocks already select profiles. Composition must not change their resolution order.
 
 ### Filters
 
-- `agents.targy` content moves to `~/.ateam/`: base profiles in HCL, long rule sets as filter files.
-- ateam parses filters with `github.com/nicad/autoversion/filterrules`.
-- Gap: `filterrules` resolves `use NAME` against built-in groups only. targy resolves named filters. Add a caller-supplied resolver to `filterrules`, or express named sets as profiles and keep filter files flat.
-- To check: sugar and list parity between targy's Python filters and `filterrules` (shared conformance tests exist in autoversion).
+```hcl
+filter "agent-read" {
+  file = "filters/agent-read.filter"
+}
+
+filter "go-write" {
+  rules = <<-EOF
+    version 1
+    root ~
+    /go/pkg
+    /{Library/Caches,.cache}/go-build
+  EOF
+}
+```
+
+- The unified filter syntax, parsed with `github.com/nicad/autoversion/filterrules`.
+- A `use NAME` line inside a filter resolves against the other `filter` blocks, through `filterrules`' caller-supplied resolver (implemented in autoversion, 2026-11-21):
+  - `Resolver` interface (`Lookup`, `Names`); `ParseFileWith`, `File.UseWith`, `NewWith`.
+  - Caller names shadow built-in groups; nested `use`; a cycle is `use-cycle` naming the chain; prefixed names (`dev/go`) work.
+  - A used filter with `root`, `types` or `max-file-size` is refused, never dropped.
+  - Resolution is lazy: ateam calls `NewWith` when it loads its config, so errors surface at load, named by filter.
+  - `Rules.List()` returns the flattened rules with kind, text and the filter each came from: what the nono renderer and `profile show` need.
+  - No tags in autoversion: ateam pins a commit hash. `filterrules` imports `golang.org/x/sys`, which ateam already has as an indirect dependency.
+- While this is being developed, the shared filters live in ateam: filter files embedded in `defaults/`, under folder prefixes (`dev/go`, `dev/node`, `agent/secrets`, `system/read-macos`; labels are examples). A filter change is then an ateam change only, with no autoversion release.
+- Machine-specific rules (`/SyncDatabox/nicmac/.ssh`) stay in the user's own config, as `filter` blocks or files under `~/.ateam/`.
+- Resolution order for a name: the profile's HCL `filter` blocks, then the user layer, then ateam's embedded defaults, then autoversion's built-ins.
+- Cost of keeping them in ateam: targy keeps its own copy of the rules it needs for Claude's settings (`agent-read`, in `agents.targy`), so that one filter exists twice and can drift. The `dev/*` and `system/*` filters are only used for sandboxing, so they have one copy.
+- To limit the drift: `ateam filter show NAME` prints a resolved filter in the shared syntax, which targy can read or a test can compare.
+- Later, once the set is stable: move the shared filters to autoversion's built-ins. targy already copies those (`make groups-sync`). That needs prefixed built-in names and built-in groups that include.
+- To check: sugar and list parity between targy's Python filters and `filterrules` (autoversion has conformance tests).
+
+### Network
+
+```hcl
+network "base" {
+  default = "deny"                        # or "allow"
+  allow   = ["localhost"]
+}
+
+network "llm" {
+  allow = ["api.anthropic.com", "claude.ai"]
+}
+
+network "webapp-dev" {
+  use   = ["base", "llm"]
+  allow = ["registry.npmjs.org", "localhost:3000"]
+  deny  = ["telemetry.example.com"]
+}
+```
+
+- Tool-agnostic. Each backend maps the rules to its own semantics, or returns an error. No confusion between fail open and fail closed.
+- Default when a profile names no network: deny, with LLM provider hosts and localhost allowed.
+- The LLM hosts are their own named set. A profile that routes through a proxy leaves it out, so direct connections are closed.
+- Ports: `host:port`. A dynamically allocated port is edited into the profile by hand in the first version. A proper mechanism (`exposes`) comes later.
+- `default = "allow"` with `deny` rules is the open mode; a backend that cannot deny inside an open network returns an error.
+- The single `DOMAINS` list of `agents.targy` is split per group (`go-registry`, `npm`, ...).
+- Note: nono leaves the network open unless a domain list or a block flag is given. The nono backend must always pass one.
 
 ### Backends as container types
 
-| Container type | Policy rendered as | State |
+| Container type | Rules rendered as | State |
 |---|---|---|
 | `none` + agent sandbox | Claude sandbox settings, Codex flags | exists |
-| `nono` | nono profile JSON + matching Claude settings (its own sandbox off) | new, first |
+| `nono` | nono profile JSON; for Claude, settings with its own sandbox off | new, first |
 | `fence` or an embedded Go sandbox | that tool's config | later |
-| `docker`, `docker-exec` | mounts from `read`/`write`; domains need a gateway (research G) | later |
+| `docker`, `docker-exec` | mounts from `read`/`write`; network needs a gateway (research G) | later |
 
 nono backend, ported from targy:
 
 - macOS: one grant of the home, `exclude` paths denied inside it. Linux: the home listed around unreadable paths.
-- nono's required deny groups lifted for paths the policy keeps readable.
+- nono's required deny groups lifted for paths the profile keeps readable.
 - Profile written beside its final path, validated by `nono profile validate`, then renamed.
 - `suppress_save_prompt` set, so nono keeps no second source of rules.
 - A verify mode for after a nono upgrade.
 
-A backend that cannot express a rule refuses the launch. It never weakens the rule silently.
+### Claude settings under a sandbox backend
+
+ateam generates no Claude settings for this. What exists is enough:
+
+- The agent's `inside_container` block already drops the sandbox settings file and adds `--dangerously-skip-permissions`. A nono container counts as "inside a container", so unattended runs need nothing new.
+- For `chat`, the user wants their own interactive setup (hooks, plugins). targy generates one settings file per machine for "Claude under an outside sandbox": the base parts, Claude's sandbox off, the command deny list. ateam passes it through the agent's arguments (`--setting-sources project,local --settings FILE`), which HCL can already express.
+
+What is dropped compared to targy's per-launch file:
+
+- `Read` denies mirroring the unreadable paths: nono refuses those reads anyway. Only the error message differs.
+- `Edit` allows for the writable paths: not needed when permissions are skipped or in auto mode.
+
+To verify: that Claude's command deny rules (`Bash(sudo *)`, ...) still apply with `--dangerously-skip-permissions`; that `--settings` plus `--setting-sources project,local` behaves the same in `-p` mode.
+
+### Standalone sandbox config
+
+A profile can be exported as the backend's own config plus a command line, usable without ateam.
+
+```bash
+ateam profile export myproject --backend nono --out ~/sandboxes/myproject/
+# writes: profile.json, run.sh (the nono command line), RULES.md (what each rule is for)
+# prints: the command line that uses the exported profile, ready to paste
+```
+
+Uses:
+
+- Troubleshooting, or working around an ateam bug.
+- A backend feature ateam does not expose yet.
+- Portability: run the project on a machine without ateam.
+- Not trusting ateam: edit the exported profile, then run ateam itself inside it (`nono run --profile profile.json -- ateam chat ...`). ateam's outer-sandbox detection already makes it skip its own sandbox there.
+
+Requirements:
+
+- Self-contained: every rule resolved, no reference back to ateam's config.
+- Portable paths where the backend allows (`$HOME`, `$WORKDIR` in a nono profile).
+- ateam's implicit rules (protection of `.ateam`, `state.sqlite`, its config) are listed separately in `RULES.md`, so they can be relaxed or tightened by hand.
+- The same code path as a real launch: `chat`/`run --dry-run` prints what `export` writes. No second renderer.
+- The reverse: a profile can name a hand-edited backend config to use as is (`container_config = "path"`), and `container_extra_args` passes raw backend flags.
 
 ### Commands
 
 ```bash
-# attended agent, policy from flags, saved for next time
-ateam chat --go --write ~/something --read ~/other/path --save myproject.hcl
+# attended agent
+ateam chat --profile myproject
+ateam chat --profile myproject --go --write ~/tmp/scratch -- --continue
 
-# the same launch again
-ateam chat --policy ./myproject.hcl
+# a command under a profile
+ateam run --profile myproject -- make test      # no saved command: command after --
+ateam run --profile build                        # saved command
+ateam run --profile build -- -run TestFoo        # saved command, extra arguments appended
+ateam run --profile build --command "make lint"  # replace the saved command for this launch
 
-# extra arguments go to the agent
-ateam chat --policy ./myproject.hcl -- --continue
+# a shell under a profile
+ateam shell --profile myproject
 
-# any command or a shell under the same policy
-ateam sandbox --policy ./myproject.hcl -- make test
-ateam sandbox --go -- zsh
-
-# audit: resolved policy and the backend command, run nothing
-ateam chat --policy ./myproject.hcl --dry-run
+# profiles
+ateam profile save myproject --go --write ~/SyncDatabox/dotfiles
+ateam profile show myproject
+ateam profile list
 ```
 
-- `--GROUP` is shorthand for `use GROUP`, as in `nono-sandbox --go`.
-- `--save FILE` writes a profile from the flags. Hand-written files work the same.
-- `--policy FILE`, not `--resume`: `ateam resume EXEC_ID` and `claude --resume` already mean something else.
-- Unattended runs (`ateam exec`, `report`, `code`) take the same profiles through `--profile`.
-- Names `chat` and `sandbox` are placeholders.
+- `chat`: launches the agent, from the profile or else the default agent. Ignores `command`. Arguments after `--` go to the agent. Adds the agent-specific wiring: its settings, its inner sandbox off, usage and cost recorded in the metrics database.
+- `run`: runs the profile's `command` with arguments after `--` appended, or the command given after `--` when the profile has none. Neither: an error.
+- `shell`: the user's shell under the profile. Ignores `command` and `agent`.
+- `profile save NAME`: writes a profile from the flags and the profiles they reference. Launches nothing, so a quick test launch never replaces a reviewed profile.
+- `profile show NAME`: the resolved profile, where each entry came from, and the backend command.
+- `--profile` takes a name or a file path.
+- `ateam claude` (interactive Claude inside a container) becomes a special case of `chat`; fold it in later.
+- Unattended runs (`exec`, `report`, `code`) take the same profiles through `--profile`, as today.
 
-### Where saved policies live
+### Where profiles live, and protection of ateam's files
 
-- A session must not be able to widen its own next launch.
-- The project's `.ateam/` is inside the working folder, so it is writable by the agent.
-- Proposed: saved policies go in the user layer (`~/.ateam/projects/<id>/`) or beside the project (`../myproject.hcl`), both outside the write grant.
-- Policy fields in a project-layer `ateam.hcl` can only tighten (add `exclude`, remove nothing). Widening fields there are ignored with a warning. Same rule as flar and Byre (research F.3).
-- Every backend also protects `.git/hooks`, `.git/config`, agent settings, and ateam's own config inside writable folders, as Porta does (research E.13.13).
-
-## Sandbox merged into profile: assessment
-
-I agree with merging. Reasons:
-
-- One concept fewer. A saved policy is a profile; `--profile` and the profile resolution order already exist.
-- Composition (`use`) is needed anyway for groups such as `go` and `dev`.
-- Model, effort and budget pins compose with policy for free (`use = ["cheap", "go"]`).
-
-Points to settle, none blocking:
-
-1. **Fragments.** A profile with policy only (`go`) has no agent or container. Selecting it directly must fall back to the default agent and container, or be an error.
-2. **Two kinds of content in one block.** "What runs" (agent, container, model) and "what it may touch" (paths, domains). The merge rules differ per field kind and must be documented in one table.
-3. **Trust per layer.** The tighten-only rule applies to policy fields, not to model or budget pins. The config loader needs to know which fields are policy.
-4. **Supervisor profile selection.** Role and supervisor blocks already pick profiles. Check that composition does not change their resolution order.
+- `ateam profile save` writes to the user layer by default (`~/.ateam/profiles/NAME.hcl`). A flag writes to the project's `.ateam/` instead.
+- A hand-written file anywhere works with `--profile PATH`.
+- Every launch protects ateam's own files. This is implicit:
+  - No write to the user ateam directory, the project's `.ateam/` config, or a profile file given by path.
+  - In the project's `.ateam/`, only `runtime/EXEC_ID`, `shared/` and `prompts` are readable; `runtime/EXEC_ID` and `shared/` are writable. Agents use `shared/` to read each other's work.
+  - A profile can open more (a debug agent gets full read).
+- To check against `DEV.md`: the on-disk layout, so that existing unattended roles keep the inputs they read today (prompts, earlier reports).
+- Every backend also protects `.git/hooks`, `.git/config` and agent settings inside writable folders, as Porta does (research E.13.13, F.1.2).
+- Second phase: trust on first use for project-supplied profiles. A profile shipped in a repository runs only after the user approves it, and again when its content changes; the approved hash is kept in the user layer.
 
 ## Phases
 
 | Phase | Content |
 |---|---|
-| 0 | Wrapper container type: ateam prefixes the agent command with `nono-sandbox ... --`. No port. Unattended runs get nono now. |
-| 1 | Profile `use` and policy fields; `filterrules` resolver; nono backend port with targy's test fixtures; `ateam chat`, `ateam sandbox`, `--save`, `--policy`. Retire `nono-sandbox`. |
-| 2 | Network: `domains` per group; audit log of decisions; Docker modes behind a gateway (research G.3). |
+| 0 | Optional: a wrapper container type, ateam prefixes the agent command with `nono-sandbox ... --`. No port. Unattended runs get nono now. |
+| 1 | Profiles: optional agent and container, `use`, `read`/`write`/`exclude`, `command`. `filter` entity and the `filterrules` resolver. nono backend port with targy's test fixtures. `chat`, `run`, `shell`, `profile save/show/list`. Protection of ateam's files. Attended sessions in the metrics database. Retire `nono-sandbox`. |
+| 2 | `network` entity mapped to nono's proxy; per-group domains. `_remove` and `_replace`. Trust on first use for project-supplied profiles. |
 | 3 | Secrets: `ateam secret` values as placeholders, injected outside the sandbox (research G.4, F.1.1 Tier A first). |
-| 4 | Other backends: fence or an embedded Go sandbox; Enclave or OpenShell for container modes. |
+| 4 | `exposes` and `resources`: ports, Playwright, build containers, remote computers. Other backends: fence or an embedded Go sandbox; Enclave or OpenShell for container modes. |
 
 Phase 1 should wait for the Linux run of the current targy implementation (K4 on meerdog), so the port copies settled behavior.
 
 ## What stays in targy and dotfiles
 
-- targy keeps its targets, backups and filters. Its `nono_profile`, `claude_permissions` and `json_merge` steps are removed after phase 1.
-- Settings for plain `claude` (no launcher): today generated from `agents.targy`. Either ateam generates them from the same profiles (`ateam env --claude-settings`), or targy keeps that one target and reads the filter files ateam uses. One source of rules either way.
+- targy keeps its targets, backups and filters.
+- targy keeps generating the agents' own settings (plain `claude`, managed settings). It can configure agent-level policies.
+- Its `nono_profile` step is removed after phase 1. `claude_permissions` and `json_merge` stay.
+- Both tools read the same filter syntax. The shared filters live in ateam for now; targy keeps its own `agent-read` until they move to autoversion.
 
 ## Pros and cons
 
@@ -195,11 +333,11 @@ Moving to ateam:
 
 | Pros | Cons |
 |---|---|
-| One Go binary; no Python or `uv` at launch; a project resumes on any machine | Port of about 700 lines of tested Python plus two test suites |
+| One Go binary; no Python or `uv` at launch; a project resumes on any machine | Port of the nono rendering and the home listing walk, plus its test suite |
 | The terminal problem goes away: ateam execs the agent | Linux behavior is not settled yet |
-| Attended and unattended runs share one policy | `filterrules` needs a named-filter resolver; parity to check |
+| Attended and unattended runs share profiles, secrets and metrics | `filterrules` needs a named-filter resolver; parity to check |
 | Layered HCL, profiles, secrets, dry-run, call database already exist | Work before v1 that is not release polish |
-| Network and secret phases have a natural home | Plain-`claude` settings need a new owner or a shared source |
+| Network and secret phases have a natural home | Agent settings stay in targy: two tools read the same filters |
 
 Staying with targy + `nono-sandbox`:
 
@@ -211,11 +349,12 @@ Staying with targy + `nono-sandbox`:
 
 ## Open questions
 
-1. Command names: `chat` and `sandbox`, or `agent` and `run`.
-2. Named filters: a `filterrules` resolver, or profiles only with flat filter files.
-3. Saved policy location: user layer keyed by project, or `../myproject.hcl`.
-4. Save only with `--save`, or at every launch.
-5. Selecting a fragment profile directly: default agent and container, or an error.
-6. Plain-`claude` settings: generated by ateam, or kept in targy.
-7. nono's network is allow-by-default without a domain list (research F.3). Should a profile with no `domains` mean closed or open?
+1. Claude under `--dangerously-skip-permissions`: do command deny rules still apply (see "Claude settings under a sandbox backend").
+2. Folder labels for the shared filters (`dev/`, `agent/`, `system/`), and when to move them to autoversion.
+3. Phase 0: worth doing, or go straight to phase 1.
+4. Names for `exposes` and `resources`, and the shape of port and Playwright blocks.
+5. A dynamic port: how a profile learns the port that was chosen.
+6. `default_container`: a new top-level setting, or the `default` profile's container.
+7. Whether `run` and `chat` should also accept a `--save NAME` shortcut. Current answer: no, `profile save` then launch.
 8. Go version: ateam is on 1.26.5, autoversion on 1.25.0. Fine for importing; confirm `make run-ci` (vuln, deadcode) with the new dependency.
+9. Renaming `exec` and `prompt` to fit the wider scope.
