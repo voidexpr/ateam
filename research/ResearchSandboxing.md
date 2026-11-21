@@ -671,6 +671,10 @@ The community is already converging on devcontainers as the standard way to sand
 | **Anthropic Devcontainer** | Bind mount workspace | Bind mount workspace | iptables ipset (IP-based, resolved at start) | All (in container) | Passed in | None | Low-Medium | Any Docker host |
 | **Docker Sandboxes (Docker Inc.)** | VM + bidirectional sync | VM + bidirectional sync | Proxy with domain allow/deny; private nets blocked | All (in VM + private Docker) | Injected by proxy (on host) | None | Medium | macOS, Windows (exp.) |
 | **VibeBox** | VM isolation (explicit mounts) | VM isolation (explicit mounts) | Full (no filtering) | All (in VM) | Not mounted | None | Low–Medium | macOS (Apple Silicon) |
+| **Eclipse Enclave** | Explicit mounts; home/dotfiles/app data refused | Project RW (or RO) + explicit mounts; Git config RO | Gateway sidecar: DNS + ipset + SNI proxy allowlist, JSONL audit | All (in container), no DinD | Host-side auth store; env tokens as placeholders | HomeShell UI (preview) | Medium | Linux, macOS, WSL2 |
+| **Porta** | All but credential stores; strict mode: mounts only | `-v` mounts + `/tmp`; `.git/hooks`, agent settings protected | Open by default; TCP port rules or CONNECT proxy allowlist; placeholders | Most (clients must honor `HTTPS_PROXY`) | Mount via `porta init` | None | Near-zero | macOS, Linux |
+| **NVIDIA OpenShell** | Landlock policy in container/VM | Landlock policy | Workload has no network; supervisor enforces per-binary + L7 rules; placeholders | All (in container/VM) | Image + providers | Gateway sessions | Medium–High | Linux, macOS (Apple Silicon), K8s |
+| **exe.dev** | VM isolation | VM isolation | `all` or integrations-only; credentials at the edge | All (in VM) | LLM integration | Built-in HTTPS/SSH | High (remote) | Cloud |
 
 ### E.10 Network Tier Implementation
 
@@ -1223,6 +1227,341 @@ The current best-in-class macOS-Seatbelt-only wrapper. Pure `sandbox-exec`, no D
 
 **Best fit:** macOS users who want pure Seatbelt sandboxing, no Docker, no VM, and don't want to hand-roll a `.sb` profile. The deny-first composable model is the closest match to the user's stated requirements (macOS Seatbelt + no Docker + ease of use + flexible config + momentum) of anything seen in this research. Likely the recommended starting point for any new ATeam-adjacent macOS sandbox work.
 
+#### E.13.12 Eclipse Enclave
+
+**GitHub:** [eclipse-enclave/enclave](https://github.com/eclipse-enclave/enclave)
+**Language:** Go
+**Platform:** Linux, macOS (via Docker Desktop), Windows (WSL2 launcher only)
+**License:** MIT. Eclipse Foundation project. v1.0.0 released 2026-10-30, v1.0.1 on 2026-10-31; a `rolling` channel tracks `main`. ~94⭐ (2026-11-20 snapshot).
+**Reviewed:** 2026-11-20, commit `689c6db`, from the repo docs (`docs/security/`, `networking.md`, `runtime/network-request-flow.md`, `auth.md`, `mounts.md`, `git.md`, `backends.md`, `integration.md`). Not run locally.
+
+A Go CLI that runs one coding agent per container in YOLO mode, with a privileged gateway sidecar that enforces a domain allowlist and logs every network decision. Built-in tools: Claude Code, Codex, Copilot, OpenCode, Pi, and the Theia IDE; more ship in [enclave-extensions](https://github.com/eclipse-enclave/enclave-extensions). It is the most complete "container + egress allowlist + audit log + placeholder secrets" package in this survey. First noted in §F.3 (August 2026, pre-1.0); this entry is the v1.0 review.
+
+Its own security doc is explicit about scope: "Enclave reduces an agent's access to the host and the network; it is not a hardened container-escape boundary."
+
+**Architecture:**
+
+```
+enclave (host Go CLI)
+  ├─ writes gateway bundle: dnsmasq.conf, domains.txt, secret mapping, CA
+  ├─ creates a per-session bridge network
+  ├─ gateway container (NET_ADMIN, NET_RAW)
+  │    ├─ dnsmasq: answers only allowlisted names, adds their IPs to an ipset
+  │    ├─ iptables: INPUT/OUTPUT DROP; redirect tcp/80,443 → proxy on loopback
+  │    └─ enclave-gateway-proxy: SNI/Host re-check, optional TLS MITM,
+  │         secret release, JSONL audit log
+  └─ tool container (non-root, shares the gateway's network namespace)
+       └─ claude / codex / … in YOLO mode (--no-yolo to disable)
+```
+
+**Filesystem model:**
+
+- Project (or linked worktree) is a writable bind mount by default. Agent edits are real host edits. `--project-mount readonly` makes it read-only.
+- Additional directories only via explicit `--add-dir` / `--add-readonly-dir` or config.
+- **Sensitive-mount refusal**, read-only mounts included: home and its parents, any hidden home entry (`~/.ssh`, `~/.aws`, `~/.config`, …), XDG / `~/Library` app data, Enclave's own config/state/cache roots, and the directory holding `SSH_AUTH_SOCK`. Per-path exceptions exist, but the hard-protected set (home, Enclave roots, SSH socket) can only be unlocked by the CLI-only `--allow-sensitive-mounts`, never by a config file. Rationale for protecting its own roots: the agent could otherwise widen its next run's policy or add a host command.
+- **Git config protection**: existing `.git/config`, `config.worktree`, included files, and global config are mounted read-only even when the project is writable. Parent directories are anchored so a rename can't bypass it. Side effects: `git remote add`, `git push -u` upstream tracking, and `git branch -m` can fail or partly succeed.
+- **Does not cover `.git/hooks`**. The docs warn that an agent can install hooks or create `.git/commondir` to redirect Git to an unprotected config, which then runs on the host. This is the review-time hazard from §F.1.2. The only fix offered is `--project-mount readonly`, which also makes every Git write fail.
+- Project config lives host-side at `~/.config/enclave/projects/<hash>/config.json`, outside the worktree, so neither the repo nor a session can rewrite its own isolation policy. The project's `.env` and `devcontainer.json` are still read and are documented as executable input.
+- Refuses to run as root unless `--allow-root` (CLI or env only).
+
+**Network model:**
+
+- **Restricted by default.** Three independent checks, all fail-closed on startup or reload failure:
+  1. dnsmasq returns NXDOMAIN for non-allowlisted names.
+  2. iptables only reaches IPs that dnsmasq added to the `enclave_allowed` ipset at query time. This avoids the resolve-at-startup IP rot of the Anthropic devcontainer firewall (§E.13.5, §F.1.3).
+  3. The proxy re-checks TLS SNI or HTTP `Host` against the allowlist.
+- **Layered allowlist**: built-in per-tool `gateway-allowlist.conf` → global `allow_domains` → project `allow_domains` → per-run `--allow-domain` (with `+x` / `-x` list syntax). Features declare their own domains. Deny rules win over allows. User entries are bare DNS names only, no wildcards. A project policy can set `inherit_global_policy: false`.
+- **Policy tooling**: `enclave network print|diff|status` previews the effective policy; `network add-domain` and `network apply` push domain changes into running gateways without a restart. Mode changes need a restart.
+- **Audit log**: JSONL per project and tool, readable after the session exits (`enclave network log --json|--summary|--verdict deny|--follow`). Three levels:
+  - `coarse` (default): one event per TLS connection, plus DNS denials.
+  - `requests`: MITM every allowlisted HTTPS host, one event per request. Breaks cert-pinning clients.
+  - `full`: also stores headers, bodies, and WebSocket messages. Captures replace released secrets with placeholders but store prompts and file contents as sent.
+- **Inbound**: restricted gateways drop unsolicited inbound traffic. Each session gets its own bridge network, so sessions can't reach each other.
+- **Host services**: `--bridge-port 9800` forwards a host port into the container (DNAT in the gateway). On Linux Docker Engine the host service must bind to the default bridge gateway IP and needs a per-session firewall rule, because the session subnet changes every run. Docker Desktop doesn't need this. `-p 0:3000` publishes container → host with an engine-assigned port, readable from `enclave ps --json`.
+- **Documented limits**:
+  - An allowed IP is reachable on any port. Only 80/443 go through the proxy, so SSH on 22 is never logged.
+  - Destination policy, not content policy: paths, methods, and bodies are not constrained (same gap as §F.1.1).
+  - The gateway is privileged and shares the tool's network namespace, so a gateway bug weakens policy. Byre's run-to-completion helper (§F.3) avoids a long-lived privileged container.
+  - Unrestricted mode (`--allow-all-network`) still logs 80/443 but enforces nothing and disables secret release.
+
+**Credentials:**
+
+- **Placeholder release** for env credentials with a declared HTTP release rule. The tool container sees a per-session placeholder. The gateway terminates TLS only for the declared hosts, swaps the placeholder in the declared header only, and returns HTTP 403 for a placeholder in any other header or plaintext HTTP. If a placeholder can't be generated, startup fails instead of falling back to the real value. This is the header-only, host-bound design recommended in §F.1.1.
+- Out-of-the-box coverage:
+
+  | Tool | Variable | Release hosts |
+  |---|---|---|
+  | Claude | `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`) | `api.anthropic.com` |
+  | Codex | `CODEX_API_KEY` / `OPENAI_API_KEY` | `api.openai.com`, `*.openai.com` |
+  | Codex | `CODEX_ACCESS_TOKEN` (`at-` PATs only) | `auth.openai.com`, `chatgpt.com` |
+  | Pi | `ANTHROPIC_OAUTH_TOKEN` | `api.anthropic.com` |
+
+- **Not protected**: file-backed and refreshable logins, such as an interactive Claude OAuth login stored in `.credentials.json`. Those hold real values in the auth store and the container. Secrets without a release rule are real values too.
+- **Auth stores** are host directories under `~/.local/state/enclave/`, bind-mounted, shared per tool by default. `--auth-name` selects one of several identities. `--ephemeral` uses no store. For Claude, the shared store points `CLAUDE_SECURESTORAGE_CONFIG_DIR` at one directory so parallel sessions coordinate OAuth refresh. That is the parallel-agent token-rotation problem ATeam also has.
+- **Layered secrets files** (`global.env` → `global/<tool>.env` → `projects/<hash>/<tool>.env`) feed declared secrets. They are never copied into the container as files. Host env vars pass only when an extension declares them or `--pass-env` names them.
+- **SSH push keys** are discouraged. `enclave ssh-init` mounts one read-only key into every session of every project. Commit signing is disabled in the container. The docs recommend committing in the container and pushing from the host, which matches §F.1.1 Tier C.
+
+**Gateway implementation and interception tradeoffs:**
+
+- The proxy is Enclave's own Go code (`enclave-gateway-proxy`, `internal/gateway/mitm/`), not Envoy, Squid, or mitmproxy. DNS filtering is dnsmasq; enforcement is iptables + ipset.
+- **Interception is transparent.** The agent keeps calling the real hostname (`api.anthropic.com`), so clients need no base-URL changes. The container trusts an Enclave CA through `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, and `NODE_EXTRA_CA_CERTS`. This is the main advantage over explicit integration endpoints (§E.13.15, §G.4).
+- **TLS is decrypted only where needed**: hosts with a credential release rule, or every allowlisted host under `--network-log=requests|full`. Everything else is SNI-checked and tunneled unread.
+- **Credential placement is header-only.** Each `serviceAuth` entry names one `headerName`. APIs that take the key in the query string (Google Maps `?key=`), in the body, or inside a request signature (AWS SigV4) are not covered without extending the gateway. Clients that verify a token's format locally can't use a placeholder; Enclave refuses Codex Agent Identity JWTs at startup for that reason.
+- **UDP to allowlisted IPs is not proxied.** The ipset rule accepts any protocol to a resolved allowed IP. HTTP/3 (QUIC) and other non-80/443 traffic reach those hosts without passing the proxy or the log. A placeholder sent that way stays a placeholder, since release needs the proxy.
+- Cert-pinning clients and clients with their own trust store fail on intercepted hosts.
+- The gateway is a trusted component that sees plaintext for every host it intercepts. In `full` log mode it stores that plaintext on the host.
+
+**Backends:**
+
+| Backend | Status | Notes |
+|---|---|---|
+| Docker (rootful) | Default | userns-remap recommended in the hardening doc |
+| Podman (rootless) | Supported | Gateway keeps `NET_ADMIN` inside its own user namespace |
+| Docker (rootless) | Not supported | Gateway needs host netfilter; Enclave won't fall back to unrestricted |
+| QEMU | Experimental | x86-64 Alpine microVM, foreground only, no gateway, unrestricted network, no secret release; TCG emulation (slow) on macOS and arm64 |
+
+**Sessions and automation:**
+
+- `enclave` starts a foreground session. `--background`, `attach`, `ps --json`, `stop`, `continue`, `resume`, and `--name` manage concurrent sessions. Concurrent starts for the same tool and project serialize until the container runs.
+- Arguments after `--` go to the agent: `enclave --tool codex -- -p "…"` appears in the Windows doc. So one-shot headless runs look possible. **Not verified**: behavior without a TTY, and whether the agent's exit code propagates for a one-shot run. Signals are forwarded and "the session exits with its status".
+- Versioned JSON contracts: `ps --json`, `config --json`, `network print --json`, `network log --json`. [HomeShell](https://github.com/eclipse-enclave/homeshell) (web UI and desktop app, preview) drives Enclave only through these. It is a working example of an orchestrator on top, and also the only remote/GUI session story in the Enclave ecosystem.
+- Tool images build on first use. Agent CLIs auto-update in the image. `--no-rebuild` / `ENCLAVE_NO_REBUILD=1` pins them.
+- Extensions (tools, features, commands) can ship `commands/host/*` scripts that run **on the host** with the user's privileges. That is a supply-chain surface; `add` lists them before install.
+- `enclave devcontainer run` derives the base image from `devcontainer.json`.
+
+**Comparison with existing entries:**
+
+- vs **ATeam Docker one-shot** (ISOLATION.md mode ②): same shape — container per run, bind-mounted project, agent in YOLO. Enclave adds what ATeam's Docker modes lack today: egress allowlist, audit log, placeholder secrets, sensitive-mount refusal, and Git config protection. ATeam currently passes the real `CLAUDE_CODE_OAUTH_TOKEN` or API key into the container and has no egress control there.
+- vs **Docker Sandboxes** (§E.13.6, §F.5): both have host-side credential release and a network log. Docker Sandboxes isolates with a microVM and a private Docker daemon (safe DinD). Enclave uses a shared-kernel container with no DinD story. Enclave needs no `sbx login`, is MIT, and works on Linux without KVM.
+- vs **tsk** (§D.3): both are container + proxy allowlist. tsk copies the repo in; Enclave bind-mounts it. Enclave has placeholder secrets; tsk does not.
+- vs **code-on-incus** (§F.3): coi makes `.git/hooks` immutable with `chattr +i`. Enclave protects Git config files but leaves hooks writable.
+- vs **Matchlock** (§E.13.9): same secret-release idea. Matchlock is VM-level with an overlay workspace. Enclave is container-level with a bind mount, and has much richer policy and audit tooling.
+- vs **Porta** (§E.13.13): Porta is a native process sandbox with no container. It protects `.git/hooks` inside writable mounts, and its placeholders also work in query strings. Its network is open by default and its adoption is near zero.
+- vs **OpenShell** (§E.13.14): OpenShell keeps its trusted supervisor outside the workload, which has no network of its own. Enclave's privileged gateway shares the agent's network namespace. OpenShell adds per-binary and L7 rules, and more credential placements, at the cost of a persistent control plane.
+
+**Assessment for ATeam:**
+
+| Dimension | Rating | Notes |
+|---|---|---|
+| Filesystem isolation | Good | Explicit mounts, sensitive-path refusal, Git config read-only. `.git/hooks` stays writable unless the project is read-only. |
+| Network control | Excellent | Default-deny DNS + ipset + SNI proxy, fail closed, layered allowlists, hot apply. Non-80/443 ports to allowed IPs skip the proxy. |
+| Secret safety | Good | Header-only, host-bound placeholder release for env tokens. Interactive OAuth file logins are not protected. |
+| Audit | Excellent | JSONL decision log with per-request and full-capture modes. The most complete in this survey. |
+| Tool compatibility | Good | Full Linux container. `requests`/`full` modes break cert-pinning clients. No DinD. |
+| Host services | Fair | `--bridge-port` works. Linux Docker Engine needs a per-session bind address and firewall rule. |
+| Platform | Linux, macOS, WSL2 | Rootful Docker or rootless Podman. macOS binaries are unsigned. |
+| Unattended use | Promising, unverified | `-- <agent args>`, `--background`, JSON contracts. No documented exit-code contract for one-shot runs. |
+| Maturity | Early 1.0 | Released Oct 2026, Eclipse governance, thorough docs. Low star count. |
+
+**For ATeam:** two ways to use it.
+
+1. **As a container backend.** ATeam could shell out to `enclave --tool claude -- -p "<prompt>"` as a new container mode. That brings egress allowlisting, the audit log, and placeholder secrets with no new ATeam code. Costs:
+   - rootful Docker or rootless Podman, plus a per-tool image build;
+   - Enclave's config tree and auth stores become a second source of truth next to `ateam secret`;
+   - `.ateam/Dockerfile` customization would have to map onto `--base-image`, devcontainer mode, or features;
+   - the bind-mount model keeps the `.git/hooks` hazard.
+2. **As a design reference.** The gateway sidecar is an MIT-licensed Go implementation of what §F.6 items 2 and 4 recommend: DNS-filled ipset, SNI proxy, fail-closed iptables, header-only secret release. Files to read: `gateway-entrypoint.sh`, `internal/gateway/mitm/proxy.go`, `internal/runtime/network_manager.go`, `internal/runtime/auth_manager.go`.
+
+Suggested next step: a small experiment running a one-shot Claude Code prompt through `enclave` with `CLAUDE_CODE_OAUTH_TOKEN` and no TTY. Check exit codes, the placeholder release, and the network log. If integration is awkward, borrow the gateway design for ATeam's Docker mode instead.
+
+#### E.13.13 Porta
+
+**GitHub:** [almide/porta](https://github.com/almide/porta)
+**Language:** Almide (policy, CLI) + Rust (enforcement, proxy, Wasmtime)
+**Platform:** macOS (Apple Silicon prebuilt; Intel builds from source), Linux x86-64 / arm64 (glibc 2.31+). Also a GitHub Action.
+**License:** Apache-2.0. Latest release v0.6.17 (2026-10-03); `main` is at 0.7.0. **3⭐** (2026-11-20). Releases are Sigstore-signed with build provenance.
+**Reviewed:** 2026-11-20, commit `3c79e54`, from the README, `docs/enforcement.md`, `docs/threat-model.md`, `docs/benchmarks/competitors.md`. Not run locally.
+
+A native process sandbox in the same family as Anthropic SRT (E.2), nono (F.3), Fence (E.13.2), and Agent Safehouse (E.13.11). It wraps one command and everything it starts, using Seatbelt on macOS and Landlock + seccomp + namespaces on Linux. No container, no daemon. Unusually for this category, it also ships a per-run credential placeholder proxy.
+
+**Usage:**
+
+```bash
+cd my-project
+porta init claude                      # writes a commented porta.toml sized to the agent
+porta up -- -p "Fix the failing test"  # runs the agent under that policy
+porta run ./tool -v ./work --allow-net '*:443' --timeout 120 --max-procs 500
+porta explain ./tool -v ./work         # prints the resolved policy; runs nothing
+porta run ./tool -v ./work --why       # after a run: each denial and the flag it needed
+```
+
+- Policy comes from `porta.toml` or flags. The closed-path list is a data preset (`sandbox/native/presets/default.toml`), extendable with `--deny-read`, `--protect`, `--deny-unix`.
+- **A rule the kernel can't express refuses the run** (exit 125) instead of silently weakening it.
+- `--why` reads the kernel denial log on macOS and traces with `strace` on Linux.
+
+**Filesystem:**
+
+- Writes only to `-v` mounts, `/tmp`, and `/dev`. Nothing is mounted implicitly.
+- Reads everything except a preset of credential stores: `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.config/gcloud`, `~/.docker`, `~/.kube`, `~/.netrc`, Keychains, browser profiles. `--read-policy strict` limits reads to the mounts plus system directories.
+- **Protected names inside writable mounts**: the repository's `.git/hooks` and `.git/config`, shell rc files, `.gitconfig`, `.envrc`, `.mcp.json`, `.claude/commands`, `.vscode`, `porta.toml`. They stay unwritable and can't be renamed away. This closes the review-time hazard from §F.1.2 that Enclave leaves open. On Linux it needs unprivileged user namespaces; Ubuntu 23.10+ needs `sudo porta setup` or the `.deb` to load an AppArmor profile. Without namespaces porta still runs and reports what is left open.
+- `--snapshot` copies the mounts first (an APFS clone on macOS) and `porta rollback` restores them. Snapshots live outside every mount.
+- Credential sockets (SSH agent, gpg-agent, `docker.sock`) are refused unless `--allow-unix` names them.
+- The environment starts empty. Only `PATH`, `HOME`, locale, terminal, and vars named with `-e` / `--env-pass` cross.
+- Resource caps: `--timeout`, `--max-cpu`, `--max-procs`, `--max-file-size`, `--max-memory-mb` (cgroup v2 on Linux; polling on macOS).
+
+**Network:**
+
+- **Open by default.** Close it with `--no-net`, `--allow-net '<host>:<port>'` (TCP by port; UDP closed), or `--proxy-allow <hosts>` (by hostname).
+- `--proxy-allow` starts a loopback CONNECT proxy and denies all direct TCP, UDP, and Unix-socket egress. On Linux, seccomp also refuses `io_uring`, which could open a socket without a syscall porta sees. Clients must honor `HTTPS_PROXY`; those that don't fail closed. Only HTTPS CONNECT on port 443 is supported.
+- `HTTPS_PROXY` carries a per-run credential, so other local processes can't use the proxy as a relay.
+- An allowed name that resolves to loopback, link-local, cloud metadata, or multicast is refused. Private ranges stay reachable.
+- Every decision is synced to a JSONL audit file (`--proxy-audit`) before the connection proceeds.
+
+**Credentials:**
+
+```toml
+[[credentials]]
+name  = "ANTHROPIC_API_KEY"            # the variable the command sees
+from  = { env = "ANTHROPIC_API_KEY" }  # where porta reads the real value
+hosts = ["api.anthropic.com/v1"]       # host[:443][/path], *.wildcard allowed
+```
+
+- The command sees `porta-cred-ANTHROPIC_API_KEY-<random>`, minted per run. The real value stays in porta.
+- For bound hosts only, porta terminates TLS with a per-run CA (in memory, removed at exit) and replaces the placeholder **anywhere in the request line, query, or headers**. A placeholder on an unbound path of a bound host gets HTTP 403. Other hosts are tunneled unread.
+- The CA reaches clients via `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, and `NODE_EXTRA_CA_CERTS`. Go on macOS reads the Keychain instead and fails closed.
+- Limits: intercepted connections speak HTTP/1.1, one request per connection. Bodies are passed through, not inspected. Values come only from porta's environment for now; file, Keychain, and command sources are planned.
+- For Claude Code, `porta init claude` passes `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`) by name, since the macOS Keychain is closed inside the sandbox.
+
+**Escape benchmark (project-maintained):** porta publishes an escape corpus (`scripts/escapes.py`) run under five tools, each with its policy translated to the other tool's nearest setting:
+
+| | porta | srt | Fence | nono | landrun |
+|---|---|---|---|---|---|
+| macOS: tried / escaped | 22 / 0 | 17 / 5 | 14 / 5 | 13 / 5 | — |
+| Linux: tried / escaped | 28 / 0 | 23 / 2 | 21 / 3 | 24 / 5 | 22 / 7 |
+
+Run on 2026-09-24 with porta 0.6.11, srt 0.0.77, nono 0.78.0. The corpus, the runners, and the policy translations are written by porta's authors, and the project says there has been no third-party audit. Treat the numbers as a claim, not an independent result. The corpus itself is useful: it is a ready-made regression suite ATeam could run against its own Seatbelt / bubblewrap profile.
+
+Out of scope for ATeam: a WASM runtime with capability grants, a WASM agent runtime, and a job API (`porta job-serve`).
+
+**Assessment for ATeam:**
+
+| Dimension | Rating | Notes |
+|---|---|---|
+| Filesystem isolation | Excellent | Write-confined, credential stores closed, `.git/hooks` and agent settings protected inside mounts. |
+| Network control | Good | Port rules, or a hostname CONNECT proxy with direct egress denied. Open by default. |
+| Secret safety | Good | Per-run placeholders bound to host + path, in headers, query, and request line. HTTP/1.1 only. |
+| Audit | Fair | Proxy decision log; kernel-denial explanations per run. |
+| Tool compatibility | Good | Same process model as the host. Clients must honor `HTTPS_PROXY` and the CA env vars. |
+| Platform | macOS, Linux | Same CLI on both, with documented differences. |
+| Unattended use | Good | `porta up -- -p "…"`, documented exit codes, GitHub Action. |
+| Maturity | Very early | 3⭐, self-tested, single project. |
+
+**For ATeam:** Porta is the closest match to ATeam's default mode ① (OS sandbox on the host) that also does credential placeholders and `.git/hooks` protection. Its adoption is near zero, so use it as a design reference rather than a dependency. Worth borrowing: protected names inside writable mounts, refuse-if-unexpressible, `--why` denial explanations, and the escape corpus as a regression test.
+
+#### E.13.14 NVIDIA OpenShell
+
+**GitHub:** [ai-openshell/openshell](https://github.com/ai-openshell/openshell) (moved from `NVIDIA/OpenShell` when it joined the CNCF)
+**Language:** Rust; SDKs for Python, TypeScript, Go, Rust
+**Platform:** Linux amd64 / arm64, macOS Apple Silicon (Docker Desktop, or the MicroVM driver on Apple Hypervisor), WSL2 (experimental), Kubernetes via Helm
+**License:** Apache-2.0. Latest stable v0.1.9 (2026-11-17). Weekly stable releases with a published compatibility policy (RFC 0014). ~21.8k⭐ (2026-11-20).
+**Reviewed:** 2026-11-20, commit `a1c1e42`, from `docs/about/architecture.mdx`, `docs/about/support-matrix.mdx`, `docs/how-it-works/providers/`, `docs/how-it-works/policies/network-rules.mdx`, `docs/security/best-practices.mdx`. Not run locally.
+
+This replaces the August note in §F.3, which described an alpha with env-var credentials. Both points are out of date.
+
+A runtime for fleets of agents, with a control plane. The core idea: the agent's workload has **no network of its own**. Every TCP open and DNS lookup is intercepted inside the sandbox and handed to a trusted supervisor outside the boundary. The supervisor decides, adds credentials, and opens the real connection.
+
+**Architecture:**
+
+```
+openshell CLI / SDK
+  └─ gateway (control plane: identity, policy, providers, sandbox records)
+       └─ compute driver (Docker | Podman | MicroVM | Kubernetes)
+            ├─ supervisor (trusted: own container, host process, or pod)
+            │    ├─ policy engine: per-binary destinations + L7 request rules
+            │    ├─ credential resolution: placeholder → real value, or signing
+            │    └─ DNS resolution, upstream connections, logs
+            └─ workload (untrusted: networking off / no NIC / NetworkPolicy)
+                 ├─ sandbox runtime: Landlock for files, seccomp user-notify on TCP + DNS
+                 └─ agent (one non-root identity, no Linux capabilities)
+```
+
+- Supervisor ↔ sandbox is one HTTP/2 connection with TLS and a per-sandbox JWT, over a Unix socket (Docker/Podman), vsock (MicroVM), or TCP (Kubernetes).
+- How each runtime blocks direct egress: the Docker/Podman workload container has networking turned off; the MicroVM guest has no network device; Kubernetes uses a NetworkPolicy that only allows the supervisor.
+- Fail closed: the agent doesn't start until the supervisor confirms the boundary, and is frozen if the supervisor disconnects.
+- The sandbox identifies the calling program from trusted `/proc` data, so network rules can name binaries.
+- Unlike Enclave, nothing privileged shares the agent's network namespace.
+
+**Network policy:**
+
+- **Deny by default.** Each rule lists endpoints and the binaries allowed to reach them, by real path. Children of a listed binary inherit the rule. If the file at that path changes, later connections are denied.
+- **L7 inspection** per endpoint via `protocol`:
+
+  | `protocol` | Checked per request |
+  |---|---|
+  | `rest` | HTTP method, path, query parameters |
+  | `websocket` | upgrade request and each client text message |
+  | `graphql` | operation type, operation name, top-level fields |
+  | `mcp` | MCP method and tool name |
+  | `json-rpc` | method name |
+  | `tcp` | nothing (databases and other non-HTTP protocols) |
+
+  An `access: read-only` preset, explicit `rules`, and `deny_rules` are available. `enforcement: audit` logs violations without blocking.
+- **TLS is terminated by default** with a per-sandbox ephemeral CA injected through `NODE_EXTRA_CA_CERTS`, `DENO_CERT`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`. `tls: skip` per endpoint covers mTLS and non-HTTP protocols.
+- `openshell policy update` changes network rules on a running sandbox. Connections opened under the old rules keep them until the client reconnects.
+- **Policy prover**: formal verification flags changes that add credentialed reach, new HTTP methods, or cloud-metadata access. Any finding blocks auto-approval. It also ships as a standalone `openshell-prover` command for CI. An **advisor** handles agent-proposed rules waiting for human review.
+
+**Credentials (providers):**
+
+- A provider profile declares credentials, where they go in a request, which endpoints may receive them, and which binaries may use them. The provider instance stores the values in the gateway.
+- The sandbox gets opaque placeholders. The supervisor resolves one only if policy allows the binary and destination, host/port/path match the binding, and the placeholder sits in its declared location. Otherwise it returns HTTP 403 `credential_endpoint_mismatch`.
+- **Supported placements**: headers (Bearer, Basic, custom), query parameters, URL path slots, opted-in request bodies, opted-in WebSocket text, and **proxy-side AWS SigV4 signing**. A JWT-shaped placeholder alias covers clients that parse token claims. This is the widest coverage in this survey.
+- **Gateway-managed refresh** (OAuth2, Google service accounts, AWS STS AssumeRole) mints new credentials without putting refresh secrets in the sandbox.
+- Attaching a provider is refused if a current rule lets uninspected traffic reach a credentialed endpoint, unless `allow_uninspected_credentials: true` is set.
+- The bundled Anthropic profile uses `ANTHROPIC_API_KEY`; the docs say subscription users need a separate Console API key. Whether `CLAUDE_CODE_OAUTH_TOKEN` works through a custom profile was not verified.
+
+**Running an agent:** `openshell sandbox create --from <image> -- claude`. The default image is minimal Ubuntu with no agent installed, so ATeam would ship its own image. Anonymous telemetry is on by default (`OPENSHELL_TELEMETRY_ENABLED=false` disables it).
+
+**Assessment for ATeam:**
+
+| Dimension | Rating | Notes |
+|---|---|---|
+| Filesystem isolation | Good | Landlock inside a container or VM, non-root, no capabilities. |
+| Network control | Excellent | No NIC in the workload; per-binary + L7 rules; live updates; formal checks on changes. |
+| Secret safety | Excellent | Placeholders in header/query/path/body, SigV4 signing, gateway-side refresh. |
+| Audit | Good | Gateway-mediated logs, audit-mode rules, OpenTelemetry trace relay. |
+| Tool compatibility | Good | Default TLS termination breaks pinning clients unless the endpoint sets `tls: skip`. |
+| Operational weight | High | Persistent gateway, a supervisor per sandbox, a profile catalog to maintain. |
+| Platform | Linux, macOS (Apple Silicon), K8s | Needs Docker/Podman or host virtualization. |
+| Maturity | Pre-1.0, moving fast | 0.1.x stable line, weekly releases, CNCF, large community. |
+
+**For ATeam:** OpenShell is the most complete answer to "which external requests can the agent make, and with which credentials". It is also a platform with its own control plane, heavier than ATeam's per-run model and overlapping with ATeam's orchestration. Two realistic uses:
+
+1. **A backend for teams already running OpenShell.** ATeam creates one sandbox per run with `openshell sandbox create … -- claude -p …` and leaves network and credential policy to OpenShell.
+2. **A design reference.** Worth borrowing: the supervisor outside the workload (no privileged sidecar in the agent's network namespace), per-binary rules, credential placement metadata, and refusing to attach a credential to an uninspected endpoint.
+
+#### E.13.15 exe.dev (cloud VMs with integration endpoints)
+
+**Site:** [exe.dev](https://exe.dev) — docs: [integrations](https://exe.dev/docs/integrations), [HTTP proxy integration](https://exe.dev/docs/integrations-http-proxy), [egress policy](https://exe.dev/docs/internet-access), [architecture](https://exe.dev/docs/architecture)
+**Type:** Commercial cloud. Flat monthly plan for individuals; hourly compute pools for teams; single-tenant and BYOC for larger customers.
+**Isolation:** One VM per workload on bare metal. The docs say "We happen to use Cloud Hypervisor, but that's a bit of an implementation detail (and may change!)."
+**Reviewed:** 2026-11-20, public docs only.
+
+Cloud VMs are not a local-first fit for ATeam (§E.16). exe.dev is here for its credential model, which is the clearest example of **explicit integration endpoints** instead of transparent TLS interception.
+
+**Integrations:**
+
+- An integration is a named server-side credential plus a target, attached to VMs directly, by tag, or with `auto:all`. Per the docs, the secret is "stored server-side and injected at the network edge when your VM calls the integration hostname."
+- The VM calls a dedicated hostname, not the real API:
+
+  ```
+  exe.dev ▶ integrations add http-proxy --name myapi --target https://api.example.com --bearer sk-... --attach vm:my-vm
+  # inside the VM:
+  curl https://myapi.int.exe.xyz/users
+  ```
+
+  `--header name:value`, `--bearer`, basic auth, and `--strip-prefix` are supported. The target URL can't include a path.
+- Built-in types include HTTP proxy, GitHub, LLM (managed Anthropic, OpenAI, Fireworks), S3 object storage (exe.dev signs each request with SigV4), Slack, Discord, remote MCP servers, VM-to-VM, and identity federation for AWS, GCP, Anthropic, OpenAI, and Tailscale. The catalog covers "well over a hundred services."
+- `execonnect` is a process you run inside a private network. It dials out to exe.dev, so VMs can reach endpoints you publish there through an HTTP proxy integration. VMs reach only what you publish.
+- Peer (VM-to-VM) integrations deliver a signed attestation of the source VM in `X-Exedev-Source-Vm`.
+
+**Egress:** two modes per VM. `all` is the default. `integrations` blocks the public internet but keeps exe.dev metadata and attached integration endpoints reachable, so the agent can't bypass an integration by calling the real API directly. No per-domain allowlist is documented.
+
+**Not found in the public docs (unverified):** query-parameter credential injection (e.g. Google Maps `?key=`), how a VM is authenticated for non-peer integrations, and internals named in some secondary summaries (`exepipe`, a userspace WireGuard transport, the implementation language).
+
+**Tradeoff vs transparent interception (Enclave, Porta, OpenShell):** no CA inside the VM and no TLS interception, so certificate pinning and custom trust stores don't matter. In exchange, every client must be pointed at the integration hostname, which only works for tools with a configurable base URL. See §G.4.
+
+**For ATeam:** not a backend candidate (cloud, VM per workload, source must be synced). The integration-endpoint pattern is the same as ATeam's planned `ANTHROPIC_BASE_URL` reverse proxy (§F.1.1 Tier A), generalized to any HTTP API.
+
 ### E.14 Network Companion Tools
 
 **OpenSnitch** (Linux) and **Little Snitch** (macOS) provide per-app/domain outbound firewalling as a standalone layer. They don't provide filesystem sandboxing but can be paired with any of the above tools:
@@ -1245,6 +1584,10 @@ The March 2026 landscape adds Greywall, Fence, and clampdown as meaningful optio
 - **Network-only companion:** Pair Linux hosts with OpenSnitch, macOS with Little Snitch, for domain-level outbound filtering alongside any filesystem sandbox.
 - **Cross-platform agent VM with network allowlist + secret injection:** Matchlock (E.13.9) — same CLI on Linux and macOS, default-deny egress, real credentials never enter the sandbox. Worth tracking as it matures.
 - **macOS Seatbelt with no Docker, no VM, no user-account tricks:** Agent Safehouse (E.13.11) — deny-first, agent-agnostic profiles, Homebrew install. Highest-momentum option in this exact slot (1.7K⭐).
+- **Container mode with egress allowlist, audit log, and placeholder secrets already built:** Eclipse Enclave (E.13.12) — v1.0 since Oct 2026, MIT, Go. Candidate backend for ATeam's Docker mode, or a reference design for adding the same gateway to it.
+- **Native process sandbox with placeholder credentials and `.git/hooks` protection:** Porta (E.13.13) — design reference for ATeam's mode ①, not a dependency (3⭐).
+- **Full network and credential policy (per-binary, L7, many credential placements, gateway-side refresh):** NVIDIA OpenShell (E.13.14) — heavyweight platform; reference design or backend for teams already running it.
+- **Explicit integration endpoints instead of TLS interception:** exe.dev (E.13.15) — cloud only; the pattern generalizes ATeam's planned `ANTHROPIC_BASE_URL` proxy. See §G for the networking tradeoffs.
 - **Layer policy on top of sandbox:** prefer nah (D.10.2) over hand-rolled hooks for command classification; reach for Cupcake (D.10.1) when rules grow complex enough to need Rego.
 - **Don't double-sandbox:** when running Codex CLI, lean on its built-in modes (E.17); for Claude Code, use SRT (E.2 / E.17) rather than wrapping Claude Code in yet another Seatbelt layer.
 
@@ -1263,7 +1606,7 @@ Categories from the list as of May 2026 already covered above: Anthropic Sandbox
 
 Categories worth periodic re-check:
 
-- **MicroVMs (cloud):** E2B, Sprites, Vercel Sandbox, Modal, Daytona, Runloop, exe.dev — all cloud, not a local-first fit for ATeam, but watch for self-hosted modes.
+- **MicroVMs (cloud):** E2B, Sprites, Vercel Sandbox, Modal, Daytona, Runloop, exe.dev — all cloud, not a local-first fit for ATeam, but watch for self-hosted modes. exe.dev's integration-endpoint credential model is reviewed in E.13.15.
 - **Local microVMs (non-macOS):** ERA (krunvm), Gondolin (QEMU), Arrakis, Netclode (Kata) — Linux-side equivalents to Apple Container; relevant if ATeam ever runs on Linux laptops.
 - **Process / filesystem / WASM:** AgentFS (CoW filesystem isolation), Leash (Cedar policy enforcement), Wassette / Capsule / Eryx (WASM sandboxes) — orthogonal isolation models. Likely not primary backends but interesting building blocks.
 - **Container wrappers with worktree support:** packnplay — closest to ATeam's worktree model, worth a look if/when ATeam revisits the worktree story.
@@ -1391,7 +1734,9 @@ The bind-mount hazard is sharper for ATeam than it first appears, because ATeam'
 
 **nono** — [`nolabs-ai/nono`](https://github.com/nolabs-ai/nono) · Rust / Apache-2.0 · ~3.6k★, by the Sigstore team. **The strongest credential story of any tool surveyed and the only one that makes "real keys never enter the sandbox" work on macOS *and* Linux with no container.** Kernel primitives on the process itself (Landlock on Linux, Seatbelt on macOS), deny-by-default filesystem (`--allow .`), local reverse proxy injecting the real key with a phantom `NONO_PROXY_TOKEN` and `--allow-endpoint` L7 method+path policy, plus a separate tool-sandbox layer where delegated `git`/`gh` run in their own child sandboxes. It is effectively **a strict superset of ATeam's current default mode** — same Seatbelt/Landlock primitives, but with policy ATeam controls plus key injection ATeam lacks. Its own docs are honest that it's not containment for hostile RCE ("run nono inside a container/microVM for that") — which fits ATeam's layered model. Watch-outs: pre-1.0 API churn; **network is allow-by-default** unless a profile or `--block-net`/`--allow-domain` is active (the marketing implies otherwise); and the unattended auto-deny-vs-prompt behavior of the supervisor's policy engine needs empirical verification before trusting it in a loop.
 
-**Eclipse Enclave** — [`eclipse-enclave/enclave`](https://github.com/eclipse-enclave/enclave) · Go / MIT · incubating Eclipse project (star count understates it — deb/rpm packaging, QEMU backend, a real security-boundaries doc). Essentially **"ATeam's Docker mode with the network and secret layers already built"**: rootful Docker + a privileged gateway sidecar (dnsmasq + iptables/ipset + transparent HTTP/TLS proxy) enforcing a **layered global/project/per-run domain allowlist where project config can only *tighten*, never widen**; **gateway-side placeholder-release secrets** (`ENCLAVE_SECRET_*`, real value never enters the tool container, plaintext-HTTP requests carrying placeholders denied); and **`--bridge-port` DNAT that properly solves host-service access** (host Postgres at container localhost). YOLO on by default (`--no-yolo` to disable), `--background`, `--json` state. Adopting it wholesale is redundant with ATeam's Docker mode, but its two differentiators (placeholder-release secrets, tighten-only allowlist) are portable designs and precisely ATeam's current gaps. Frictions: rootful Docker, deb/rpm x86-64 only (macOS/arm64 builds from source), image build on first use.
+**Eclipse Enclave** — [`eclipse-enclave/enclave`](https://github.com/eclipse-enclave/enclave) · Go / MIT · Eclipse project. **Superseded by the v1.0 review in §E.13.12 (2026-11-20).** Essentially **"ATeam's Docker mode with the network and secret layers already built"**: rootful Docker (or rootless Podman) + a privileged gateway sidecar (dnsmasq + iptables/ipset + transparent HTTP/TLS proxy) enforcing a layered global/project/per-run domain allowlist; **gateway-side placeholder-release secrets** (real value never enters the tool container, plaintext-HTTP requests carrying placeholders denied); and **`--bridge-port` DNAT for host-service access**. YOLO on by default (`--no-yolo` to disable), `--background`, `--json` state.
+
+*Corrections from the 2026-11-20 review:* (1) project config is **not** tighten-only. It is stored host-side, outside the worktree, so the repository can't rewrite its own policy, but it may set nearly every option, including adding allowed domains. (2) Standalone binaries now ship for Linux and macOS on amd64 and arm64; the macOS builds are unsigned. (3) Secret release covers env tokens with a declared release rule only (e.g. `CLAUDE_CODE_OAUTH_TOKEN`), not file-backed OAuth logins. (4) `--bridge-port` on Linux Docker Engine needs the host service bound to the bridge gateway IP plus a per-session firewall rule.
 
 **runclaude** — [`hanwen/runclaude`](https://github.com/hanwen/runclaude) · Go / Apache-2.0 · Linux only (macOS is a design doc). As a whole sandbox it's redundant with ATeam's bubblewrap path and severs host loopback (fresh netns kills host-Postgres integration tests). **But its `runproxy` component is the single highest-value, lowest-disruption artifact in this survey** — a standalone Apache-2.0 credential-injecting MITM (stub `.credentials.json` inside, real token only in the host proxy which rewrites `Authorization`/`x-api-key`; SigV4 re-sign for Bedrock; git credential-helpers stripped), already documented for use from Docker via a two-network recipe. It would give ATeam's *existing* container modes the "real keys never enter the sandbox" property with no jail adoption. Unusually good test quality for a 3-month project.
 
@@ -1405,7 +1750,9 @@ The bind-mount hazard is sharper for ATeam than it first appears, because ATeam'
 
 **coder/boundary** ("Agent Firewall") — [`coder/boundary`](https://github.com/coder/boundary) · Go / MIT · Linux only. The standalone, Coder-independent piece. **Network-only, no filesystem/credential handling** — but the cleanest single-purpose egress allowlist here: `boundary --allow "domain=github.com path=/api/issues/*" --allow "method=GET,HEAD domain=github.com" -- <cmd>`, deny-by-default, L7 method/domain/path rules, config file mergeable with flags, structured audit log. A drop-in candidate for ATeam's **Linux** network-allowlist tier that wraps the agent process inside an existing container. Its `landjail` backend is the only Landlock-based *network* enforcement surveyed that needs no privileges. Hard limit: Linux only, so it can't serve ATeam's macOS path.
 
-**NVIDIA OpenShell** — [`NVIDIA/OpenShell`](https://github.com/NVIDIA/OpenShell) · Rust / Apache-2.0 · ~8k★ but self-declared **alpha, "do not use in production"**. The largest, best-resourced project, with one genuinely differentiated feature: **L7 method/path egress policy that hot-reloads on a running sandbox** (`openshell policy set`), over a **swappable compute driver** (Docker/Podman/MicroVM/K8s). But it introduces a persistent gateway control plane (heavier than ATeam's per-run model), its non-LLM credential story is ordinary env-var injection (real keys in the sandbox process), and it's aimed at platform/k8s teams. Track rather than adopt; the hot-reloadable L7 policy is a capability nothing else here has.
+**NVIDIA OpenShell** — [`NVIDIA/OpenShell`](https://github.com/NVIDIA/OpenShell) (now [`ai-openshell/openshell`](https://github.com/ai-openshell/openshell)) · Rust / Apache-2.0. **Superseded by the full review in §E.13.14 (2026-11-20).** The August snapshot: ~8k★, self-declared alpha, L7 method/path egress policy that hot-reloads on a running sandbox, a swappable compute driver (Docker/Podman/MicroVM/K8s), and a persistent gateway control plane aimed at platform/k8s teams.
+
+*Corrections from the 2026-11-20 review:* (1) It is no longer "do not use in production". It joined the CNCF, has a stable 0.1.x line with weekly releases and a compatibility policy, and ~21.8k★. (2) Credentials are **no longer plain env vars**. Providers hand the sandbox placeholders; the supervisor resolves them only for the bound binary, host, port, and path, in headers, query parameters, path slots, opted-in bodies, or via proxy-side AWS SigV4 signing.
 
 **agent-images / agent-box** — [`nothingnesses/agent-images`](https://github.com/nothingnesses/agent-images) (Nix OCI image factory, **no isolation of its own** — the runtime confines) and the *separate* [`0xferrous/agent-box`](https://github.com/0xferrous/agent-box) (podman/docker wrapper; ships `-it` hardcoded so piped/CI use fails as-is). Two ideas worth stealing from agent-box regardless: **worktree mode** where the agent sees only committed/tracked files (untracked + gitignored content structurally invisible), and **Portal** — a host daemon brokering selected host operations (`gh`, git) over a Unix socket with per-method allow/ask/deny policy, so the credential never enters the container.
 
@@ -1434,4 +1781,134 @@ The E.13.6 snapshot is now partly stale:
 5. **Two enforcement patterns to borrow into the Docker mode:** Byre's deny-by-default egress applied **from outside the box** by a netns-joining helper (agent container needs no `NET_ADMIN`, can't alter rules, fail-closed launch gate), and code-on-incus's `chattr +i` protection of `.git/hooks` + `.claude/settings*.json`. Both defend the same "agent rewrites its own next launch / poisons the host review" threat.
 6. **On the default OS-sandbox path, nono is the one tool that's a strict superset of what ATeam already does** (Seatbelt/Landlock + policy ATeam controls + proxy-side key injection, macOS *and* Linux, no container) — worth a close look as either a backend or a design template, with the allow-by-default-network caveat noted.
 7. **Track pleasedonotescape.com's YAML monthly; submit ATeam as an entry.**
-8. **`config.toml` schema references worth mirroring:** amika's `.amika/config.toml` (per-repo lifecycle/services/sandbox/credentials tables) and the tighten-only project-config rule shared by Enclave/flar/Byre (repo-supplied config can only *narrow* isolation, never widen).
+8. **`config.toml` schema references worth mirroring:** amika's `.amika/config.toml` (per-repo lifecycle/services/sandbox/credentials tables) and the rule that a repository can't widen its own isolation. flar and Byre make repo-supplied config tighten-only. Enclave reaches the same goal differently: project config lives host-side, outside the worktree, where the agent can't edit it (see E.13.12).
+
+---
+
+## G. Networking: egress enforcement and secret injection
+
+A running collection of network-layer approaches, their tradeoffs, and their known restrictions. Add to it as tools are reviewed. Related sections: §E.1 and §E.10 (network tiers), §F.1.1 (credential-injection consensus from the HN thread, and ATeam's Tier A/B/C plan), §F.1.3 (allowlist breakage). Facts below were checked against each project's own docs on 2026-11-20 unless marked otherwise.
+
+### G.1 Three independently enforced layers
+
+A useful way to split the problem. The layers don't need to come from the same project, and each one should be enforced outside the agent's writable filesystem.
+
+1. **Execution sandbox** — what the agent can touch locally: files, processes, sockets, and which addresses it can reach at all. Examples: Anthropic SRT, Porta, nono, Fence, containers, VMs.
+2. **Network gateway** — which external requests it can make, and with which credentials: destinations, HTTP methods and paths, credential release, audit, ideally quotas. Examples: Enclave's gateway, OpenShell's supervisor, Porta's proxy, exe.dev's edge, Docker Sandboxes' proxy.
+3. **Privileged operation gateway** — actual operations, not possession of a credential: git push, deploy, production SSH, the Docker API. Examples: agent-box's Portal (§F.3), nono's delegated `git`/`gh` sandboxes, an SSH bastion, a restricted Docker API proxy. ATeam's "agent commits, user pushes" (§F.1.1 Tier C) is the simplest form.
+
+| Tool | 1. Execution sandbox | 2. Network gateway | 3. Privileged operations |
+|---|---|---|---|
+| Anthropic SRT | Seatbelt / bubblewrap | Domain-allowlist proxy, no credential handling | — |
+| Porta | Seatbelt / Landlock + seccomp | CONNECT proxy, placeholders for bound hosts | — |
+| nono | Seatbelt / Landlock | Reverse proxy, L7 endpoint rules, key injection | Delegated `git`/`gh` child sandboxes |
+| Eclipse Enclave | Container | Gateway sidecar, header placeholders, audit log | SSH key discouraged; push from host |
+| NVIDIA OpenShell | Container / VM + Landlock | Supervisor: per-binary + L7 rules, providers | — |
+| exe.dev | VM | Edge integrations, integrations-only egress | Integrations scope what each credential can reach |
+| Docker Sandboxes | microVM | Host proxy, header injection | Private Docker daemon per sandbox |
+| ATeam today | Seatbelt / bubblewrap (mode ①) or Docker | Domain allowlist in mode ① only; none in Docker modes; real tokens in env | User pushes from host |
+
+### G.2 Four reference designs compared
+
+| | Eclipse Enclave | exe.dev | Porta | NVIDIA OpenShell |
+|---|---|---|---|---|
+| Isolation | Docker/Podman container (QEMU experimental) | VM per workload (Cloud Hypervisor) | Native process sandbox | Container, MicroVM, or K8s pod, plus Landlock + seccomp |
+| macOS | Docker Desktop or Podman | Remote VMs only | Native | Docker Desktop or MicroVM (Apple Hypervisor) |
+| Where enforcement runs | Privileged sidecar sharing the agent's netns | Network edge, outside the VM | Kernel rules + loopback proxy in the host process tree | Supervisor outside the workload; workload has no network |
+| Default egress | Restricted allowlist | Open (`all`) | Open | Deny |
+| Domain allowlist | Yes | No; integrations-only mode instead | Yes (`--proxy-allow`) | Yes, per binary |
+| L7 rules (method/path) | No | Per integration target only | Path binding for credentials only | Yes: REST, GraphQL, MCP, JSON-RPC, WebSocket |
+| HTTPS interception | TLS MITM for credential hosts, or all hosts in `requests`/`full` log modes | None: explicit endpoints | TLS MITM for credential-bound hosts only | TLS termination by default; `tls: skip` per endpoint |
+| Credential injection | Placeholder in one declared header | Edge adds header, bearer, or basic auth; signs S3 | Placeholder in request line, query, or headers | Placeholder in header, query, path, or body; SigV4 signing; gateway refresh |
+| Agent sees the real secret | No, for env tokens with a release rule | No, for integrations | No, for `--credential` values | No, for provider credentials |
+| Audit | JSONL decisions; per-request and full capture | Not documented | JSONL proxy decisions | Gateway logs, audit-mode rules, OTel relay |
+| Implementation | Go | Closed service | Almide + Rust | Rust |
+| License / maturity | MIT, v1.0 (Oct 2026), 94⭐ | Commercial | Apache-2.0, v0.6, 3⭐ | Apache-2.0, v0.1.9, ~21.8k⭐, CNCF |
+
+**Corrections to a secondary summary we received (2026-11):**
+
+- *"Porta has no comparable credential injection and no HTTPS interception."* Wrong on credentials: `--credential` / `[[credentials]]` mint per-run placeholders, and porta terminates TLS for bound hosts with a per-run CA. Right that interception isn't transparent: clients reach the proxy through `HTTPS_PROXY`, and direct egress is denied.
+- *"OpenShell uses a credential-aware proxy rather than TLS interception."* It terminates TLS by default with a per-sandbox CA; credential resolution requires HTTP inspection.
+- *"Enclave on macOS via Docker or Lima."* The docs name Docker Desktop and Podman; Lima isn't mentioned.
+- *"exe.dev: exepipe, userspace WireGuard, written in Go."* Not found in exe.dev's public docs; unverified.
+
+### G.3 Egress enforcement mechanisms
+
+Where the "no" is actually enforced, and what a bypass would need.
+
+| Mechanism | Examples | Bypass needs | Notes |
+|---|---|---|---|
+| Proxy env vars only (`HTTPS_PROXY`) | Many "set a proxy" wrappers | Any client that ignores the env var | Not a boundary on its own. |
+| Proxy env vars + kernel denies direct egress | Anthropic SRT, Porta `--proxy-allow` | A sandbox or kernel bug | Non-compliant clients fail closed rather than leak. |
+| Transparent redirect inside a netns | Enclave (iptables REDIRECT + dnsmasq/ipset), Docker Sandboxes | Traffic on ports or protocols that aren't redirected | Enclave proxies only TCP 80/443; other ports and UDP to allowed IPs pass unproxied and unlogged. |
+| IP allowlist resolved at startup | Anthropic devcontainer `init-firewall.sh`, Byre | — | Rots mid-run when CDN IPs change (§F.1.3). |
+| DNS-filled ipset | Enclave | — | IPs are added at query time, so no startup rot; stale IPs stay allowed. |
+| Syscall mediation to an external supervisor | OpenShell (seccomp user-notify on connect and DNS) | Breaking the sandbox runtime | Enables per-binary identity. The workload has no network of its own. |
+| No network device; explicit endpoints only | exe.dev `integrations` egress, OpenShell MicroVM (vsock) | — | Every API needs a rule or integration. |
+
+### G.4 Secret injection approaches
+
+1. **Real secret in the sandbox** (env var or mounted file). ATeam's Docker modes today and most container wrappers. Protection comes only from scoping and rotation.
+2. **Explicit endpoint / base URL.** The agent calls a gateway hostname; the gateway adds the credential and forwards over real TLS. Examples: exe.dev integrations, ATeam's planned `ANTHROPIC_BASE_URL` proxy (§F.1.1 Tier A), nono's local reverse proxy. No CA and no interception, but each client needs a configurable base URL.
+3. **Transparent TLS interception with placeholders.** The agent calls the real hostname with a placeholder; the gateway terminates TLS with its own CA and swaps the placeholder. Examples: Enclave, Porta, OpenShell, Docker Sandboxes, Matchlock, runclaude's `runproxy`. No URL changes, but every runtime must trust the CA, and pinning breaks.
+4. **Gateway-side signing or minting.** For auth a placeholder can't satisfy: request signatures and short-lived tokens from refresh flows. Examples: OpenShell (SigV4 signing; OAuth2, Google, STS refresh), exe.dev (S3 SigV4), runclaude (Bedrock SigV4 re-sign).
+5. **Operation broker.** The agent never holds or uses the credential. It asks a trusted service to perform a named operation (push a branch, open a PR, deploy). Examples: agent-box Portal, nono's delegated tools, an SSH bastion.
+
+**Transparent interception vs explicit endpoint:**
+
+| | Transparent interception (placeholder) | Explicit integration endpoint |
+|---|---|---|
+| Examples | Enclave, Porta, OpenShell, Docker Sandboxes | exe.dev, `ANTHROPIC_BASE_URL` proxy |
+| API hostname in the client | Unchanged | Replaced by a gateway hostname |
+| Client changes | Usually none, but the client must trust the CA | Base-URL config per client |
+| Custom CA | Required, via per-runtime env vars | Not needed |
+| Certificate pinning / own trust store | Fails (closed) | Unaffected |
+| Credential placement | Gateway must know where each key goes | Gateway builds the outbound request itself |
+| Gateway sees plaintext | Yes | Yes |
+| Debugging | Less visible: the client thinks it talks to the real API | Explicit in config |
+| Preventing bypass | Needs egress policy that denies direct access | Needs egress policy (exe.dev `integrations` mode) |
+
+Neither approach stops misuse of an authorized credential. An agent can still make expensive or destructive calls through the gateway unless it also enforces methods, paths, or quotas (§G.6).
+
+### G.5 Credential placement support
+
+Verified from each project's docs on 2026-11-20. "—" means not supported or not documented.
+
+| | Header | Query param | URL path | Body | SigV4 signing | Refresh in gateway | Binding scope |
+|---|---|---|---|---|---|---|---|
+| Eclipse Enclave | One declared header | — | — | — | — | — (file-backed logins unprotected) | Host |
+| Porta | Any header | Yes | Yes (request line) | — (passed through) | — | — | Host + path prefix |
+| NVIDIA OpenShell | Yes (Bearer, Basic, custom) | Yes | Yes (path slots) | Opt-in | Yes | OAuth2, Google SA, AWS STS | Binary + host + port + path |
+| exe.dev | Yes (`--header`, `--bearer`, basic) | Not documented | Via target + `--strip-prefix` | — | S3 only | Identity federation | Per integration, per VM |
+| Docker Sandboxes | Yes ("only setting the header", §F.1.1) | Not reviewed | Not reviewed | — | Not reviewed | Not reviewed | Host |
+| ATeam Tier A plan (§F.1.1) | Yes (`x-api-key`) | — | — | — | — | — | LLM endpoint only |
+
+### G.6 Known restrictions and failure modes
+
+- **Query-string and body credentials.** Google Maps `?key=` and some webhook APIs put the key outside headers. Header-only gateways (Enclave, Docker Sandboxes) can't serve them; Porta and OpenShell can. Query strings also tend to leak into logs; Enclave and OpenShell strip them from logged paths.
+- **Signed requests.** AWS SigV4 and similar schemes sign the request with the secret, so a placeholder yields a bad signature. They need gateway-side signing (OpenShell, exe.dev for S3, runclaude for Bedrock).
+- **Client-side token checks.** Clients that parse or verify a token locally reject random placeholders. Workarounds: a custom placeholder shape (Enclave), a JWT-shaped alias (OpenShell), or leaving that credential unprotected (Enclave refuses Codex Agent Identity JWTs).
+- **Refreshable and file-backed logins.** An interactive OAuth login writes access and refresh tokens to a file and rotates them. A placeholder saved to a file breaks the next session. Enclave leaves these logins unprotected (its issue #133); OpenShell moves refresh into the gateway. For Claude Code, the env-only `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` works with Enclave and Porta placeholders. OpenShell's bundled Anthropic profile documents only `ANTHROPIC_API_KEY`.
+- **TLS trust.** Each runtime reads a different variable: `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`, `DENO_CERT`. Go on macOS reads the Keychain and ignores them. Pinned clients fail. Explicit endpoints avoid all of this.
+- **Protocols.** Porta intercepts HTTP/1.1 only, one request per connection. Gondolin is HTTP/1.x only (§F.2). No surveyed gateway intercepts QUIC: Porta and OpenShell block UDP, while Enclave passes UDP to allowed IPs without the proxy. Non-HTTP protocols (SSH, databases) can be allowed by destination but carry no injected credentials.
+- **Non-proxied ports.** Enclave proxies only 80/443. Other ports to allowed IPs pass unlogged, so an SSH push never appears in its network log.
+- **Authorized misuse.** A brokered credential still allows anything that credential can do on an allowed endpoint: deleting a repo, running up costs, or exfiltrating through a user-content endpoint (§F.1.1). Mitigations: L7 rules (OpenShell `rest`/`mcp`/`graphql`, nono `--allow-endpoint`, coder/boundary, Porta path binding), least-privilege tokens (read-only GitHub), and quotas. No reviewed tool documents per-credential rate or cost limits.
+- **The gateway is a trusted component.** It sees the plaintext of intercepted traffic and holds every secret. Enclave runs it privileged inside the agent's netns; OpenShell keeps the supervisor outside the workload; Byre uses a run-to-completion helper (§F.3). Full-capture logs (Enclave `full`) store prompts and file contents.
+- **Address checks.** An allowed name can resolve to loopback, link-local, or a metadata address. Porta refuses those; OpenShell's prover flags metadata access; flar rejects RFC1918 too (§F.3). Porta still allows private ranges.
+- **Policy location.** The agent must not be able to edit its own policy. Enclave keeps project config host-side; Porta protects `porta.toml` inside mounts; OpenShell keeps policy in the gateway.
+
+### G.7 Design direction for the macOS / Claude Code workflow (notes, 2026-11)
+
+- Keep interactive Claude Code native on macOS. Containers bring terminal, OAuth refresh, and session-lifecycle problems.
+- Use an OS-level sandbox to close secret stores and unrestricted network access.
+- Put API credentials in an independently trusted gateway rather than env vars inside the sandbox.
+- Route production SSH and Docker operations through separately enforced services.
+- Keep the sandbox policy outside the agent's writable filesystem.
+
+### G.8 Implications for ATeam
+
+1. **Mode ① (OS sandbox) covers layer 1 and part of layer 2** through SRT's domain allowlist. The gap is credentials: the agent's token sits in its environment. The planned Tier A base-URL proxy (§F.1.1) is the explicit-endpoint approach and needs no CA. Porta and nono show that native placeholders also work on macOS.
+2. **Docker modes ②–④ have no layer 2.** Options: shell out to Enclave or OpenShell as the backend, or add an Enclave-style gateway. If ATeam needs placements beyond headers (query keys, SigV4), OpenShell's model is the reference.
+3. **For APIs other than the LLM**, prefer explicit endpoints when the client has a configurable base URL, and fall back to interception with placeholders otherwise. Track the required placement per API using the table in §G.5.
+4. **Keep layer 3 minimal**: no push credentials in any sandbox; the host pushes.
+5. **Borrow Porta's protected names** (`.git/hooks`, `.git/config`, agent settings) inside writable mounts for every mode. It closes the review-time hazard from §F.1.2 without making the whole project read-only.
