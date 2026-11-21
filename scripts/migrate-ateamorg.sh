@@ -19,6 +19,10 @@
 #
 # Usage: scripts/migrate-ateamorg.sh [PROJECT_DIR...]
 # Needs python3 (3.11+ for TOML) and the new ateam binary on PATH.
+# Once ~/.ateamorg is gone the user layer is skipped, so the script can be
+# rerun later with PROJECT_DIR arguments to convert projects it did not see.
+# A project is registered under its directory name; an existing entry with
+# that name is replaced, so rename a copy first ('ateam project-rename --name').
 set -euo pipefail
 
 old="${ATEAM_LEGACY_ORG:-$HOME/.ateamorg}"
@@ -30,12 +34,13 @@ esac
 
 say() { printf '%s\n' "$*"; }
 
-if [ ! -d "$old" ]; then
-    say "no legacy org at $old; nothing to migrate for the user layer"
-fi
-if [ -e "$new/ateam.hcl" ]; then
-    say "error: $new/ateam.hcl already exists; refusing to overwrite" >&2
-    exit 1
+if [ -d "$old" ]; then
+    if [ -e "$new/ateam.hcl" ]; then
+        say "error: $new/ateam.hcl already exists; refusing to overwrite" >&2
+        exit 1
+    fi
+else
+    say "no legacy org at $old; user layer already migrated, converting projects only"
 fi
 
 mkdir -p "$new/state/agents" "$new/prompts"

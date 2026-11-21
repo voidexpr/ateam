@@ -183,7 +183,7 @@ Roles are opt-in: only roles with `status = "on"` are included in `--roles all`.
 
 Earlier versions used `~/.ateamorg/` (with `runtime.hcl` and an on-disk `defaults/` copy) plus `.ateam/config.toml` per project. ateam refuses to run when it finds either and prints the steps.
 
-Run `scripts/migrate-ateamorg.sh` **before any other ateam command** (`ateam init` in particular creates `~/.ateam/ateam.hcl`, and the script refuses to overwrite that file). It converts every project registered under `~/.ateamorg/projects/` plus any directory passed as an argument, and renames `~/.ateamorg` to `~/.ateamorg.migrated` instead of deleting it. If the script stops because `~/.ateam/ateam.hcl` already exists and that file holds only the starter template, delete it and rerun the script.
+Run `scripts/migrate-ateamorg.sh` **before any other ateam command** (`ateam init` in particular creates `~/.ateam/ateam.hcl`, and the script refuses to overwrite that file). It converts every project registered under `~/.ateamorg/projects/` plus any directory passed as an argument, and renames `~/.ateamorg` to `~/.ateamorg.migrated` instead of deleting it. If the script stops because `~/.ateam/ateam.hcl` already exists and that file holds only the starter template, delete it and rerun the script. Once `~/.ateamorg` is gone the script skips the user layer, so it can be rerun with project directories as arguments to convert projects it did not see the first time. A project is registered under its directory name and replaces any entry with that name; rename a copy of a registered project right after (`ateam project-rename --name NAME`), then re-register the original with `ateam project-rename` there.
 
 By hand, the script's steps are:
 
