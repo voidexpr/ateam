@@ -101,6 +101,9 @@ func checkProfileAgentExclusive(profileFlag, agentFlag string) error {
 // container is launched, so cc does not pick the agent's context side,
 // and the secrets policy and credential isolation are skipped.
 func buildRunnerFromBlocks(env *root.ResolvedEnv, rtCfg *runtime.Config, prof *runtime.ProfileConfig, ac *runtime.AgentConfig, cc *runtime.ContainerConfig, label, source string, minimal bool, roleID string, dockerAutoSetup bool) (*runner.AgentExecutor, *resolvedRun, error) {
+	if err := rejectUnenforcedPolicy(prof, cc, label); err != nil {
+		return nil, nil, err
+	}
 	launch := cc
 	if minimal {
 		launch = nil
@@ -504,4 +507,18 @@ func gitWriteDirs(sourceDir string) []string {
 		}
 	}
 	return dirs
+}
+
+// rejectUnenforcedPolicy refuses an unattended run whose profile carries
+// file rules or names a sandbox backend: the unattended runner applies
+// neither yet, and a rule that is not enforced must not be dropped
+// silently. `ateam chat`, `run` and `shell` enforce them.
+func rejectUnenforcedPolicy(prof *runtime.ProfileConfig, cc *runtime.ContainerConfig, label string) error {
+	if cc != nil && cc.Type == runtime.ContainerTypeNono {
+		return fmt.Errorf("profile %q: container type %q is not available for unattended runs yet; use `ateam chat`, `ateam run` or `ateam shell`", label, cc.Type)
+	}
+	if prof != nil && prof.HasPolicy() {
+		return fmt.Errorf("profile %q sets read, write or exclude, which unattended runs cannot enforce yet; use `ateam chat`, `ateam run` or `ateam shell` with a nono container", label)
+	}
+	return nil
 }

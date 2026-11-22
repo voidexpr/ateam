@@ -606,7 +606,7 @@ Pricing can go stale. The top-level `pricing_as_of` date says when the tables we
 
 ### Containers
 
-Three container types are supported: `none`, `docker` (one-shot), and `docker-exec` (exec into a user-managed container).
+Four container types are supported: `none`, `docker` (one-shot), `docker-exec` (exec into a user-managed container), and `nono` (an OS-level sandbox for `ateam chat`, `run` and `shell`; see [Composable profiles](#composable-profiles)).
 
 ```hcl
 container "docker" {
@@ -671,6 +671,41 @@ Use `--profile docker` to run in a fresh ateam-managed container, `--profile doc
 `agent_extra_args` lands last on the agent command line and `container_extra_args` on `docker run`. A nearer layer adds to either without re-listing it with `agent_extra_args_prepend` / `agent_extra_args_append` and `container_extra_args_prepend` / `container_extra_args_append`.
 
 For the resolution order when multiple profile selectors apply, see [Profile resolution order](#supervisor).
+
+#### Composable profiles
+
+A profile is a set of saved properties. Every attribute is optional, and `use` merges other profiles in:
+
+```hcl
+profile "myproject" {
+  use     = ["sandbox/nono", "dev/go"]
+  write   = ["~/SyncDatabox/dotfiles"]
+  read    = ["~/.ssh/config"]          # reopens a path an inherited exclude closes
+  exclude = ["~/SyncDatabox/nicmac/projects/other"]
+  domains = ["example.com"]
+  command = ["make", "test"]           # for `ateam run --profile myproject`
+}
+```
+
+| Attribute | Meaning |
+|-----------|---------|
+| `use` | Profiles merged into this one, in order. |
+| `read` | Paths readable. An entry equal to an inherited `exclude` reopens it. |
+| `write` | Paths writable, beside the working folder. |
+| `exclude` | Paths neither readable nor writable. |
+| `domains` | Hosts reachable. With none, a sandbox backend closes the network. |
+| `command` | Saved command for `ateam run`. |
+
+- Lists add up across `use`, in order, then the profile's own entries. For `agent`, `container`, `model`, `effort`, `max_budget_usd` and `command`, the profile's own value wins, then the later `use` entry.
+- A profile without an agent or a container runs with the `default` profile's.
+- An unknown name or a cycle in `use` is a load error.
+- Paths start with `~` or `/`. Reading is open below the home, except what is excluded.
+- The rules need a sandbox backend. A launch on a container that cannot enforce them is refused; so is an unattended run (`exec`, `report`, `code`, ...) with such a profile, until the unattended runner applies them.
+- Each layer also loads `profiles/*.hcl` after its `ateam.hcl`: where `ateam profile save` writes.
+
+Built-in composable profiles (`ateam profile list`): `sandbox/nono` (the nono container plus `agent/secrets`), `agent/secrets` (keys, credentials, app data and personal folders unreadable), `agent/claude` and `agent/codex` (the agent's own files and API hosts), `dev/go`, `dev/rust`, `dev/python`, `dev/node`, `dev/deno`, `dev/github`, `dev/all`.
+
+Every sandboxed launch also closes ateam's own files: the user's ateam directory, and in the project's `.ateam/` everything but `runtime/`, `shared/`, `prompts/`, `cache/` and `.gitignore`. An explicit `read` or `write` of one of them reopens it.
 
 #### Running the supervisor inside Docker
 

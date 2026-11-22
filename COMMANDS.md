@@ -450,6 +450,58 @@ docker run \
   ...
 ```
 
+### `ateam chat`, `ateam run`, `ateam shell`
+
+Run an attended agent, a command or your shell with the access of a composed profile. See [CONFIG.md → Composable profiles](CONFIG.md#composable-profiles) for the profile fields and [ISOLATION.md → nono](ISOLATION.md#nono-sandbox-attended-runs) for the sandbox.
+
+```bash
+ateam chat  [flags] [-- AGENT_ARG...]        # the profile's agent, in this terminal
+ateam run   [flags] [-- COMMAND [ARG]...]    # a command
+ateam shell [flags]                          # $SHELL
+```
+
+| Flag | Description |
+|------|-------------|
+| `--profile NAME\|FILE` | Profile to compose, in order. Repeatable, comma-separated. A value ending in `.hcl` is a profile file. |
+| `--read PATH`, `--write PATH`, `--exclude PATH` | A path for this launch. Repeatable. |
+| `--domain HOST` | A reachable host for this launch. Repeatable. |
+| `--command "CMD"` | `run` only: replaces the profile's saved command (split on spaces). |
+| `--dry-run` | Print the rules and the full command line, run nothing. |
+
+- `run`: the profile's `command` with the arguments after `--` appended. Without a saved command, the command is what follows `--`.
+- `chat`: starts the profile's agent, or the default agent, with your own agent configuration. Under a sandbox backend it adds the `agent/<type>` profile and turns Claude's own sandbox off for the launch.
+- `shell`: ignores the profile's `command` and agent.
+- The working folder is writable: the project root inside a project, else the current folder. Running in the home or `/` is refused.
+- A profile whose rules its container cannot enforce is refused. `none` enforces nothing, `nono` enforces all of them; `docker` and `docker-exec` are not supported by these commands yet.
+- Flags come before the command: everything after the first argument belongs to it.
+
+```bash
+ateam run --profile sandbox/nono,dev/go -- make test
+ateam chat --profile sandbox/nono,dev/go --write ~/SyncDatabox/dotfiles
+ateam shell --profile myproject
+```
+
+### `ateam profile`
+
+```bash
+ateam profile list
+ateam profile show [NAME|FILE]... [launch flags]
+ateam profile save NAME [launch flags] [--command "CMD"] [--in-project] [--force]
+ateam profile export [NAME|FILE]... --out DIR
+```
+
+- `list`: every profile with its agent, container, `use` and rule count.
+- `show`: the composed result, each value with the profile it comes from, then the rules as the sandbox backend gets them. Takes the same flags as a launch.
+- `save`: writes `profiles/NAME.hcl` in the user's ateam directory, which a sandboxed command cannot reach (`--in-project`: the project's `.ateam/profiles/`). The profile uses the `--profile` names and adds the paths, domains and command given. Nothing is launched; an existing file needs `--force`.
+- `export`: writes the backend's own config (`profile.json` for nono), `run.sh` with the command line, and `RULES.md` listing every rule and its origin, and prints the command line. The files do not reference ateam: use them to troubleshoot, to reach a backend feature ateam does not expose, or to run ateam itself under rules you edited.
+
+```bash
+ateam profile save myproject --profile sandbox/nono,dev/go --write ~/SyncDatabox/dotfiles
+ateam chat --profile myproject
+ateam profile export myproject --out ~/sandboxes/myproject
+~/sandboxes/myproject/run.sh make test
+```
+
 ### `ateam exec`
 
 Run an agent with a prompt. Can run standalone (just needs `~/.ateam/`) or within a project.

@@ -1574,11 +1574,20 @@ func TestProfilePartialOverride(t *testing.T) {
 	}
 }
 
-func TestProfileMissingContainerRejected(t *testing.T) {
+// A profile may leave its agent or container unset: it then runs with the
+// default profile's (plans/feature_sandboxing_and_attended_agents.md).
+func TestProfileMissingContainerTakesDefault(t *testing.T) {
 	projDir := writeLayer(t, t.TempDir(), `profile "half" { agent = "mock" }`)
-	_, err := Load([]string{projDir})
-	if err == nil || !strings.Contains(err.Error(), `profile "half"`) {
-		t.Fatalf("expected error naming the profile, got %v", err)
+	cfg, err := Load([]string{projDir})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, ac, cc, err := cfg.ResolveProfile("half")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ac.Name != "mock" || cc.Name != cfg.Profiles[DefaultProfile].Container {
+		t.Errorf("got agent %q container %q", ac.Name, cc.Name)
 	}
 }
 

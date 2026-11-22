@@ -861,6 +861,113 @@ role "test.gaps" { status = "on" }
 role "test.quality" { status = "off" }
 role "test.recent" { status = "on" }
 
+// ---------------------------------------------------------------------
+// Sandbox backends and composable profiles, for `ateam chat`, `ateam run`
+// and `ateam shell`. A profile is a set of saved properties: every
+// attribute is optional, `use` merges other profiles in (lists add up, a
+// scalar set nearer wins). read/write/exclude/domains are enforced by a
+// sandbox backend; a launch that cannot enforce them is refused.
+//   read    = paths readable, reopening what an inherited exclude closes
+//   write   = paths writable, beside the working folder
+//   exclude = paths neither readable nor writable
+//   domains = hosts reachable; none closes the network
+//   command = saved command for `ateam run`
+// Paths start with ~ or /. Reading is open below the home, except what is
+// excluded; a path that does not exist is harmless.
+// ---------------------------------------------------------------------
+
+// nono (https://nono.sh): an OS-level sandbox, no container. macOS only
+// for now. Its required deny groups (credentials, keychains, browsers,
+// shell configs and history) always apply; an explicit read or write of
+// one of their paths lifts it.
+container "nono" {
+  type = "nono"
+}
+
+profile "sandbox/nono" {
+  container = "nono"
+  use       = ["agent/secrets"]
+}
+
+// Keys, credentials, app data and personal folders: unreadable.
+profile "agent/secrets" {
+  exclude = [
+    "~/.ssh", "~/.gnupg", "~/.aws", "~/.azure", "~/.kube", "~/.netrc",
+    "~/.git-credentials", "~/.pypirc", "~/.gem/credentials",
+    "~/.cargo/credentials.toml", "~/.appstoreconnect", "~/.minisign",
+    "~/.config/gh", "~/.config/gcloud", "~/.config/op", "~/.config/agebox",
+    "~/.config/anthropic", "~/.config/borg", "~/.config/plakar",
+    "~/.config/configstore", "~/.config/rclone/rclone.conf",
+    "~/.claude/.credentials.json", "~/.codex/auth.json", "~/.gemini",
+    "~/.copilot", "~/.local/share/keyrings",
+    "~/Library/Application Support", "~/Library/Containers",
+    "~/Library/Group Containers", "~/Library/Preferences",
+    "~/Library/Keychains", "~/Library/Cookies", "~/Library/Safari",
+    "~/Library/Messages", "~/Library/Mail", "~/Library/Calendars",
+    "~/Library/Accounts", "~/Library/CloudStorage",
+    "~/Library/Mobile Documents", "~/Library/Thunderbird",
+    "~/.mozilla", "~/.thunderbird", "~/.config/google-chrome",
+    "~/.config/chromium", "~/.config/BraveSoftware", "~/.config/1Password",
+    "~/Dropbox", "~/.dropbox", "~/Downloads", "~/Documents", "~/Desktop",
+    "~/.bash_history", "~/.zsh_history", "~/.psql_history",
+    "/Volumes", "/media", "/mnt",
+  ]
+}
+
+// Claude Code: its own files (it edits them) and the login keychain, which
+// it needs to sign in. `ateam chat` adds agent/<type> for the agent it runs.
+profile "agent/claude" {
+  write = [
+    "~/.claude", "~/.claude.json", "~/.claude.json.lock", "~/.cache/claude",
+    "~/.local/state/claude", "~/Library/Caches/claude-cli-nodejs",
+    "~/Library/Keychains",
+  ]
+  // mcp-proxy: the claude.ai connectors. Telemetry hosts are left closed.
+  domains = ["api.anthropic.com", "claude.ai", "mcp-proxy.anthropic.com"]
+}
+
+profile "agent/codex" {
+  write   = ["~/.codex"]
+  domains = ["api.openai.com", "chatgpt.com", "auth.openai.com"]
+}
+
+profile "dev/github" {
+  domains = ["github.com", "*.github.com", "*.githubusercontent.com"]
+}
+
+profile "dev/go" {
+  use     = ["dev/github"]
+  write   = ["~/go/pkg", "~/Library/Caches/go-build", "~/.cache/go-build"]
+  read    = ["~/Library/Application Support/go"]
+  domains = ["proxy.golang.org", "sum.golang.org", "vuln.go.dev", "golang.org", "storage.googleapis.com"]
+}
+
+profile "dev/rust" {
+  use     = ["dev/github"]
+  write   = ["~/.cargo/registry", "~/.cargo/git"]
+  domains = ["crates.io", "index.crates.io", "static.crates.io"]
+}
+
+profile "dev/python" {
+  write   = ["~/Library/Caches/pip", "~/.cache/pip", "~/.cache/uv"]
+  domains = ["pypi.org", "files.pythonhosted.org"]
+}
+
+profile "dev/node" {
+  use     = ["dev/github"]
+  write   = ["~/.npm", "~/Library/pnpm/store", "~/.local/share/pnpm/store", "~/.pnpm-store", "~/.bun/install/cache"]
+  domains = ["registry.npmjs.org"]
+}
+
+profile "dev/deno" {
+  write   = ["~/Library/Caches/deno", "~/.cache/deno"]
+  domains = ["deno.land", "jsr.io"]
+}
+
+profile "dev/all" {
+  use = ["dev/go", "dev/rust", "dev/python", "dev/node", "dev/deno"]
+}
+
 // Supervisor profiles (review, code, the code supervisor itself). Empty
 // means the project default_profile, else the "default" profile.
 //   supervisor {

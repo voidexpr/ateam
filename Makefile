@@ -5,7 +5,7 @@ GO_CMD ?= go
 GO := GOCACHE=$(GO_CACHE_DIR) $(GO_CMD)
 GO_INSTALL := GOBIN=$(GO_TOOL_BIN) $(GO)
 
-.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy check-tidy check-docs check test test-all test-cli test-docker test-docker-live claude-in-docker vuln deadcode docs lint fmt fmt-check install-hooks run-ci
+.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy update-autoversion check-tidy check-docs check test test-all test-cli test-docker test-docker-live claude-in-docker vuln deadcode docs lint fmt fmt-check install-hooks run-ci
 
 BUILD_TIME := $(shell python3 -c 'import time; print(f"{time.time():.6f}")' 2>/dev/null || date +%s)
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
@@ -52,6 +52,11 @@ companion-race:
 build-all-race: build-binary-race companion-race
 
 tidy:
+	$(GO) mod tidy
+
+# autoversion is a private repo with no tags: this pins the latest commit of main.
+update-autoversion:
+	$(GO) get github.com/nicad/autoversion@main
 	$(GO) mod tidy
 
 check-tidy:

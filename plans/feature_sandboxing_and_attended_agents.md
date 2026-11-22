@@ -304,7 +304,13 @@ ateam profile list
   - No write to the user ateam directory, the project's `.ateam/` config, or a profile file given by path.
   - In the project's `.ateam/`, only `runtime/EXEC_ID`, `shared/` and `prompts` are readable; `runtime/EXEC_ID` and `shared/` are writable. Agents use `shared/` to read each other's work.
   - A profile can open more (a debug agent gets full read).
-- To check against `DEV.md`: the on-disk layout, so that existing unattended roles keep the inputs they read today (prompts, earlier reports).
+- Checked against the default prompts (2026-11-21). Agents themselves touch only these under `.ateam/`:
+  - `runtime/<exec_id>/`: write (their output).
+  - `shared/`: read (`shared/report/<ROLE>.md`, `shared/review.md`) and write (the code-management supervisor updates `shared/review.md` and the role reports; `auto_setup` writes `shared/auto_setup.md`).
+  - `cache/`: the `project.discover_cmd` role writes `cache/test_quick.sh` and `cache/tests_all.sh`, which later runs execute. So `cache/` is readable, and writable for that role.
+  - Prompts are assembled by ateam on the host and passed to the agent; agents do not read `.ateam/prompts` themselves. Keeping it readable is harmless.
+  - `state.sqlite`, `logs/`, `ateam.hcl`, `secrets.env`: never needed by an agent. Unreadable by default.
+- `DEV.md` (runner contract) still describes `roles/<role>/` and `supervisor/` as promotion targets, while `CONFIG.md` and the prompts use `shared/`. One of the two is stale; to settle before the protection rules are coded.
 - Every backend also protects `.git/hooks`, `.git/config` and agent settings inside writable folders, as Porta does (research E.13.13, F.1.2).
 - Second phase: trust on first use for project-supplied profiles. A profile shipped in a repository runs only after the user approves it, and again when its content changes; the approved hash is kept in the user layer.
 

@@ -49,6 +49,32 @@ These will change as agents evolve:
 - Sandboxes cannot be nested (e.g., Playwright CLI inside a sandbox).
 - All files are readable by default; sensitive paths must be explicitly excluded.
 
+## nono sandbox (attended runs)
+
+`ateam chat`, `ateam run` and `ateam shell` can run an agent, a command or a shell under [nono](https://nono.sh), an OS-level sandbox set from outside the process: Seatbelt on macOS, no container. ateam renders the composed profile into a nono profile and starts `nono run` around the command.
+
+```bash
+ateam chat --profile sandbox/nono,dev/go          # Claude, sandboxed
+ateam run --profile sandbox/nono,dev/go -- make test
+ateam run --profile sandbox/nono --dry-run -- true   # the rules and the nono command line
+```
+
+What a launch gets:
+
+- Writing: the working folder and the profile's `write` paths. Nothing else.
+- Reading: the home, except the profile's `exclude` paths (`agent/secrets`: keys, credentials, app data, personal folders).
+- Network: the profile's `domains` and localhost. Without a domain, the network is closed.
+- ateam's own files are closed (see [CONFIG.md → Composable profiles](CONFIG.md#composable-profiles)).
+- nono's required deny groups always apply: credentials, keychains, browser data, shell configs and history. An explicit `read` or `write` of one of their paths lifts it (`read = ["~/.zshrc"]`).
+
+Limits:
+
+- macOS only. On Linux nono refuses a deny inside a grant; the launch is refused until ateam lists the home around the excluded paths.
+- `.git/hooks` and `.git/config` in the working folder stay writable: nono has no read-only rule inside a writable folder. A command can plant a hook that runs outside the sandbox later. Each launch says so.
+- Unattended runs (`exec`, `report`, `code`) do not use the nono container yet, and refuse a profile that needs it.
+- Under nono, Claude's own sandbox is turned off for the launch (it cannot nest). Its permission prompts follow your own settings; add `-- --dangerously-skip-permissions` to skip them, since nono is the boundary.
+- `ateam profile export` writes the nono profile and its command line for use without ateam.
+
 ## Separate config directory for the coding agent
 
 This is a *form of isolation* that's independent of sandbox/Docker: instead of letting the unattended agent inherit your interactive Claude/Codex configuration (`~/.claude`, plugins, MCP servers, custom hooks, settings), point it at a different directory.

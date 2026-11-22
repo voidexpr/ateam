@@ -169,9 +169,13 @@ type ModelPricing struct {
 	OutputPerMTok      float64
 }
 
+// ContainerTypeNono runs the command under nono (https://nono.sh), an
+// OS-level sandbox, with a profile rendered from the ateam profile.
+const ContainerTypeNono = "nono"
+
 type ContainerConfig struct {
 	Name              string
-	Type              string   // "none", "docker", "docker-exec"
+	Type              string   // "none", "docker", "docker-exec", "nono"
 	Dockerfile        string   // docker: relative to .ateam/ dir
 	DockerContainer   string   // docker-exec: name of user-managed container
 	ExecTemplate      string   // docker-exec: custom exec command (default: "docker exec {{CONTAINER}} {{CMD}}")
@@ -191,6 +195,25 @@ type ProfileConfig struct {
 	Model              string   // pins for the run; they win over the agent's own
 	Effort             string
 	MaxBudgetUSD       string
+
+	// Use names the profiles merged into this one, in order. After Load,
+	// every other field already holds the composed result (see compose).
+	Use     []string
+	Read    []string // paths readable, reopening what an inherited exclude closes
+	Write   []string // paths writable, beside the working folder
+	Exclude []string // paths unreadable
+	Domains []string // hosts reachable; none closes the network under a sandbox backend
+	Command []string // saved command for `ateam run`
+
+	// From records which profile each composed value came from: the
+	// attribute name for scalars ("agent"), originKey for list entries.
+	From map[string]string
+}
+
+// HasPolicy reports whether the profile restricts or grants file or
+// network access, which only a sandbox backend can enforce.
+func (p *ProfileConfig) HasPolicy() bool {
+	return len(p.Read)+len(p.Write)+len(p.Exclude)+len(p.Domains) > 0
 }
 
 // hclFile is the HCL schema for ateam.hcl.
@@ -295,6 +318,12 @@ type hclProfile struct {
 	Model              string    `hcl:"model,optional"`
 	Effort             string    `hcl:"effort,optional"`
 	MaxBudgetUSD       string    `hcl:"max_budget_usd,optional"`
+	Use                []string  `hcl:"use,optional"`
+	Read               []string  `hcl:"read,optional"`
+	Write              []string  `hcl:"write,optional"`
+	Exclude            []string  `hcl:"exclude,optional"`
+	Domains            []string  `hcl:"domains,optional"`
+	Command            []string  `hcl:"command,optional"`
 
 	AgentExtraArgsPrepend     []string `hcl:"agent_extra_args_prepend,optional"`
 	AgentExtraArgsAppend      []string `hcl:"agent_extra_args_append,optional"`
@@ -321,6 +350,17 @@ var (
 // merge per key, lists replace. Every value is recorded in Sources with
 // the layer that set it. Missing files are listed in Layers and skipped.
 func Load(layerDirs []string) (*Config, error) {
+	return LoadWithFiles(layerDirs, nil)
+}
+
+// ProfilesSubdir holds one profile per file in a layer directory, read
+// after its ateam.hcl: where `ateam profile save` writes.
+const ProfilesSubdir = "profiles"
+
+// LoadWithFiles is Load plus extra HCL files merged last, highest
+// precedence: profile files a launch names by path. A missing extra file
+// is an error.
+func LoadWithFiles(layerDirs, files []string) (*Config, error) {
 	cfg := newConfig()
 
 	defaultData, err := defaults.FS.ReadFile(ConfigFile)
@@ -339,6 +379,23 @@ func Load(layerDirs []string) (*Config, error) {
 		if err := mergeHCLFile(cfg, filepath.Join(dir, ConfigFile)); err != nil {
 			return nil, err
 		}
+		saved, err := filepath.Glob(filepath.Join(dir, ProfilesSubdir, "*.hcl"))
+		if err != nil {
+			return nil, err
+		}
+		for _, file := range saved {
+			if err := mergeHCLFile(cfg, file); err != nil {
+				return nil, err
+			}
+		}
+	}
+	for _, file := range files {
+		if _, err := os.Stat(file); err != nil {
+			return nil, fmt.Errorf("profile file: %w", err)
+		}
+		if err := mergeHCLFile(cfg, file); err != nil {
+			return nil, err
+		}
 	}
 
 	// Resolve agent inheritance (base references)
@@ -346,9 +403,6 @@ func Load(layerDirs []string) (*Config, error) {
 		return nil, err
 	}
 	if err := cfg.validateModelPatterns(); err != nil {
-		return nil, err
-	}
-	if err := cfg.validateProfiles(); err != nil {
 		return nil, err
 	}
 	if err := cfg.validateContainerTypes(); err != nil {
@@ -359,6 +413,9 @@ func Load(layerDirs []string) (*Config, error) {
 		p.AgentExtraArgs = cfg.withAdditions(key+"agent_extra_args", p.AgentExtraArgs)
 		p.ContainerExtraArgs = cfg.withAdditions(key+"container_extra_args", p.ContainerExtraArgs)
 		cfg.Profiles[name] = p
+	}
+	if err := cfg.composeProfiles(); err != nil {
+		return nil, err
 	}
 	cfg.Settings.ContainerExtra.ExtraArgs = cfg.withAdditions("container_extra.extra_args", cfg.Settings.ContainerExtra.ExtraArgs)
 
@@ -461,29 +518,16 @@ func (c *Config) resolveInheritance() error {
 	return nil
 }
 
-// validateProfiles rejects profiles left without an agent or container
-// after merging. The attributes are optional per layer so a project file
-// can override just one of them on an existing profile.
-func (c *Config) validateProfiles() error {
-	for name, p := range c.Profiles {
-		if p.Agent == "" || p.Container == "" {
-			src, _ := c.Source("profile." + name + ".name")
-			return fmt.Errorf("profile %q (%s) must set both agent and container", name, src.Layer)
-		}
-	}
-	return nil
-}
-
 // validateContainerTypes rejects a container type the runner cannot launch,
 // so a typo never degrades into an unsandboxed run on the host.
 func (c *Config) validateContainerTypes() error {
 	for name, cc := range c.Containers {
 		switch cc.Type {
-		case "", "none", "docker", "docker-exec":
+		case "", "none", "docker", "docker-exec", ContainerTypeNono:
 			continue
 		}
 		src, _ := c.Source("container." + name + ".type")
-		return fmt.Errorf("container %q: unknown type %q (%s); want none, docker or docker-exec", name, cc.Type, c.Where(src, display.TildeHome))
+		return fmt.Errorf("container %q: unknown type %q (%s); want none, docker, docker-exec or nono", name, cc.Type, c.Where(src, display.TildeHome))
 	}
 	return nil
 }
@@ -941,6 +985,24 @@ func (c *Config) mergeProfile(h hclProfile, label string) {
 		case "max_budget_usd":
 			p.MaxBudgetUSD = h.MaxBudgetUSD
 			value = h.MaxBudgetUSD
+		case "use":
+			p.Use = h.Use
+			value = renderList(h.Use)
+		case "read":
+			p.Read = h.Read
+			value = renderList(h.Read)
+		case "write":
+			p.Write = h.Write
+			value = renderList(h.Write)
+		case "exclude":
+			p.Exclude = h.Exclude
+			value = renderList(h.Exclude)
+		case "domains":
+			p.Domains = h.Domains
+			value = renderList(h.Domains)
+		case "command":
+			p.Command = h.Command
+			value = renderList(h.Command)
 		case "agent_extra_args_prepend":
 			c.addList(key, attr, label, h.AgentExtraArgsPrepend, line)
 			continue
@@ -1086,19 +1148,13 @@ func ResolvePrecheckCmd(cc *ContainerConfig, layerDirs []string, roleID string) 
 	return nil
 }
 
-// ResolveProfile looks up a profile by name and validates agent/container refs.
+// ResolveProfile looks up a composed profile by name and validates its
+// agent and container references. A profile that sets neither, after
+// composition, takes them from the "default" profile.
 func (c *Config) ResolveProfile(name string) (*ProfileConfig, *AgentConfig, *ContainerConfig, error) {
 	prof, ok := c.Profiles[name]
 	if !ok {
 		return nil, nil, nil, fmt.Errorf("unknown profile %q", name)
 	}
-	ac, ok := c.Agents[prof.Agent]
-	if !ok {
-		return nil, nil, nil, fmt.Errorf("profile %q references unknown agent %q", name, prof.Agent)
-	}
-	cc, ok := c.Containers[prof.Container]
-	if !ok {
-		return nil, nil, nil, fmt.Errorf("profile %q references unknown container %q", name, prof.Container)
-	}
-	return &prof, &ac, &cc, nil
+	return c.resolveBlocks(prof)
 }
