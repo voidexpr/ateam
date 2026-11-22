@@ -25,24 +25,34 @@ Checked how:
 - Seen in those runs, not fixed: `~/.claude.json.lock` is not writable (it does not exist at launch and nono skips a grant of a missing file; Claude worked anyway); nono reports a blocked macOS preference read for Claude.
 - Not tried: an interactive `ateam chat` or `ateam shell` in a terminal, and `ateam run` itself doing the exec (only the command line it prints was run).
 
+Decided and built on 2026-11-22:
+
+- **Git hooks**: compared after the run. Attended launches under a sandbox wait for the command, then compare `.git/config` and `.git/hooks` with a snapshot. A change is listed, the earlier versions are kept under `~/.ateam/state/sandbox/git.<pid>/`, exit code 3.
+- **nono's default blocks**: targy's behavior. Every path nono's required groups block that the profile does not exclude is lifted (`.bashrc`, `.npmrc`, ...). The excludes decide alone. Checked with nono: a lifted file and a lifted link are readable; an excluded path stays closed; a grant inside an excluded folder works.
+- **Unattended runs under nono**: built. `internal/container/nono.go` is a `Container` the runner uses like the Docker ones; the policy code is the one `chat` uses (`buildSandboxPolicy`, `writeNonoProfile`). `exec --profile sandbox/nono --dry-run` shows the wrapped command; the same command run through nono starts Claude, which reaches the API (the unattended config directory's login had expired, so no full agent turn was seen: `ateam login`, then try `ateam exec "..." --profile sandbox/nono`).
+
 Different from the steps below:
 
 - `domains` is a profile list already (phase 2 planned a `network` entity). Without it a sandboxed build could reach no registry. The `network` entity replaces it later.
 - The built-in profiles are named with a folder prefix (`dev/go`, `agent/claude`). A profile named `claude` would shadow the agent shorthand `--profile claude` of unattended runs.
 - No `--NAME` shorthand: `--profile a,b` instead. cobra rejects unknown flags.
-- `chat`, `run` and `shell` refuse `docker` and `docker-exec` containers for now, instead of going through the `Container` interface.
-- nono keeps its own default groups (`extends: default`, nothing excluded) and its required denies are lifted only for explicit grants. targy excluded the optional groups and lifted every blocked path its filters kept readable. So shell configs, `.npmrc` and the like are unreadable until a profile reads them. To revisit with filters (step 6).
-- `.git/hooks` and `.git/config` are **not** protected under nono: it has no read-only rule inside a writable folder. Each launch prints it. The design asked every backend to protect them: to decide (deny them and break git, snapshot and compare after the run, or accept).
+- `chat`, `run` and `shell` refuse `docker` and `docker-exec` containers for now.
+- nono keeps its own optional groups (`extends: default`, nothing excluded): the system paths are nono's, not a copy in ateam.
+
+Consequences of nono for unattended runs (the container is the same; what runs in it is not):
+
+1. **A role that calls `ateam` from inside the agent cannot run under nono.** The `code` supervisor pipes prompts into `ateam exec` for each sub-run. Under Claude's own sandbox this works because `ateam:*` is an excluded command that runs outside it. nono wraps the whole process and has no such exit: the inner `ateam` cannot read ateam's files (closed by the policy) and cannot start a second nono. Options: keep the supervisor on a profile without nono and give nono to the sub-runs it starts (works today, the supervisor only orchestrates); or open ateam's files to the supervisor and let inner runs share the outer sandbox through `sandbox_detection`; or a broker outside the sandbox that starts sub-runs on request.
+2. **One profile per runner, written once.** Every run of a runner shares the working folder of the launch. A per-run folder (a worktree per role) would need a profile per run.
+3. **No hooks comparison yet**: the runner has no step after the agent ends where `runGuarded`'s check fits. To add in `finalizeCall`.
+4. **`container_extra` is ignored**, and `forward_env` has no meaning: the agent has the host environment, as with no container.
+5. **Login**: the agent uses its host login (keychain or `config_dir`). Unlike Docker, no secret is required up front.
 
 Not built:
 
-- Unattended runs under nono (a `Container` implementation for the runner), and applying profile rules there. They are refused with a clear message. Check D found that agent `rw_paths` / `ro_paths` / `denied_paths` feed Claude's own sandbox settings; `denied_paths` is a write deny only, so `exclude` cannot map onto it.
-- Attended sessions in the metrics database. `chat` replaces the ateam process with the agent, so nothing is recorded yet.
+- Attended sessions in the metrics database (task, later). `chat` now waits for the agent under a sandbox, so the row can be written there.
+- The hooks comparison for unattended runs (consequence 3).
+- `chat`, `run`, `shell` on Docker containers.
 - Linux; filters (step 6); retiring `nono-sandbox` (step 7).
-
-Each step ends with `make build-all` and `make test`; steps touching `internal/container/`, `internal/runner/`, `cmd/runner_setup.go` also need `CONCURRENCY.md` read first and `make test-docker`.
-
-Steps 1 to 4 need neither autoversion nor nono. Step 5 needs nono installed. Step 6 needs the autoversion commit.
 
 ## Before coding
 

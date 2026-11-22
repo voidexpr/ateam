@@ -187,3 +187,21 @@ func (c *Config) ProfilesDefinedIn(file string) []string {
 	slices.Sort(names)
 	return names
 }
+
+// AgentProfilePrefix names the profiles holding what an agent type needs
+// under a sandbox backend: its own files and API hosts ("agent/claude").
+const AgentProfilePrefix = "agent/"
+
+// WithAgentProfile returns prof with the agent/<type> profile merged in
+// beneath it, when one exists: a sandboxed agent must reach its own files
+// whatever profile launched it.
+func (c *Config) WithAgentProfile(prof ProfileConfig, agentType string) ProfileConfig {
+	own, ok := c.Profiles[AgentProfilePrefix+agentType]
+	if !ok {
+		return prof
+	}
+	out := ProfileConfig{Name: prof.Name, Use: prof.Use, From: map[string]string{}}
+	mergeComposed(&out, &own, func(key string) string { return own.From[key] })
+	mergeComposed(&out, &prof, func(key string) string { return prof.From[key] })
+	return out
+}

@@ -135,7 +135,7 @@ func runInsideContainer(cc *runtime.ContainerConfig) bool {
 		return false
 	}
 	switch cc.Type {
-	case "docker", "docker-exec":
+	case "docker", "docker-exec", runtime.ContainerTypeNono:
 		return true
 	}
 	return false

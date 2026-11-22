@@ -49,14 +49,15 @@ These will change as agents evolve:
 - Sandboxes cannot be nested (e.g., Playwright CLI inside a sandbox).
 - All files are readable by default; sensitive paths must be explicitly excluded.
 
-## nono sandbox (attended runs)
+## nono sandbox
 
-`ateam chat`, `ateam run` and `ateam shell` can run an agent, a command or a shell under [nono](https://nono.sh), an OS-level sandbox set from outside the process: Seatbelt on macOS, no container. ateam renders the composed profile into a nono profile and starts `nono run` around the command.
+Any command can run under [nono](https://nono.sh), an OS-level sandbox set from outside the process: Seatbelt on macOS, no container. ateam renders the composed profile into a nono profile and starts `nono run` around the command. The rules are the same for attended and unattended runs.
 
 ```bash
-ateam chat --profile sandbox/nono,dev/go          # Claude, sandboxed
-ateam run --profile sandbox/nono,dev/go -- make test
-ateam run --profile sandbox/nono --dry-run -- true   # the rules and the nono command line
+ateam chat --profile sandbox/nono,dev/go                # Claude, attended
+ateam run --profile sandbox/nono,dev/go -- make test    # a command
+ateam exec "review the diff" --profile sandbox/nono     # an unattended agent
+ateam run --profile sandbox/nono --dry-run -- true      # the rules and the nono command line
 ```
 
 What a launch gets:
@@ -65,14 +66,26 @@ What a launch gets:
 - Reading: the home, except the profile's `exclude` paths (`agent/secrets`: keys, credentials, app data, personal folders).
 - Network: the profile's `domains` and localhost. Without a domain, the network is closed.
 - ateam's own files are closed (see [CONFIG.md → Composable profiles](CONFIG.md#composable-profiles)).
-- nono's required deny groups always apply: credentials, keychains, browser data, shell configs and history. An explicit `read` or `write` of one of their paths lifts it (`read = ["~/.zshrc"]`).
+- The profile's excludes decide alone what is unreadable. nono's own required deny groups (credentials, keychains, browser data, shell configs and history) cannot be removed from a profile, so ateam lifts every path of theirs that the profile does not exclude: your `~/.bashrc` and `~/.npmrc` stay readable, `~/.aws` stays closed because `agent/secrets` excludes it.
+
+Attended launches (`chat`, `run`, `shell`):
+
+- `.git/config` and `.git/hooks` stay writable: no sandbox can make them read-only inside a writable folder, and a hook planted there runs outside the sandbox later. ateam compares them after the command ends. A change is listed, the versions from before the run are kept, and the launch exits with code 3.
+- Claude's own sandbox is turned off for the launch (it cannot nest). Its permission prompts follow your own settings; add `-- --dangerously-skip-permissions` to skip them, since nono is the boundary.
+
+Unattended runs (`exec`, `report`, `review`, `code`, ...) with a profile whose container is `nono`:
+
+- The agent runs as in any container: the `inside_container` block applies (no agent sandbox, permission prompts skipped).
+- The `agent/<type>` profile is added, plus what the run writes: the agent's `config_dir`, `runtime/`, the agent's `rw_paths` / `ro_paths` and the project's `sandbox_extra`.
+- The agent logs in as on the host (`ateam login`): no secret has to be configured up front.
 
 Limits:
 
 - macOS only. On Linux nono refuses a deny inside a grant; the launch is refused until ateam lists the home around the excluded paths.
-- `.git/hooks` and `.git/config` in the working folder stay writable: nono has no read-only rule inside a writable folder. A command can plant a hook that runs outside the sandbox later. Each launch says so.
-- Unattended runs (`exec`, `report`, `code`) do not use the nono container yet, and refuse a profile that needs it.
-- Under nono, Claude's own sandbox is turned off for the launch (it cannot nest). Its permission prompts follow your own settings; add `-- --dangerously-skip-permissions` to skip them, since nono is the boundary.
+- An agent that calls `ateam` itself (the `code` supervisor starts its sub-runs this way) cannot do so under nono: ateam's files are closed to it and a sandbox cannot start another one. Keep such a role on a profile without nono and give nono to the roles it starts.
+- Unattended runs do not compare `.git/config` and `.git/hooks` after the run yet.
+- `container_extra` and `--work-dir` per run do not apply: the command runs on the host, in the folder the profile makes writable.
+- `ateam chat`, `run` and `shell` do not support `docker` and `docker-exec` containers yet.
 - `ateam profile export` writes the nono profile and its command line for use without ateam.
 
 ## Separate config directory for the coding agent

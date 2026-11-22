@@ -1,19 +1,23 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ateam/internal/agent"
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/container"
+	"github.com/ateam/internal/display"
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/ateam/internal/runtime"
+	"github.com/ateam/internal/sandboxpolicy"
 	"github.com/ateam/internal/secret"
 )
 
@@ -131,7 +135,7 @@ func buildRunnerFromBlocks(env *root.ResolvedEnv, rtCfg *runtime.Config, prof *r
 		// alternatives from the agent env — this is safe even when no secrets
 		// are configured.
 		resolver := secretResolver(env, secret.DefaultBackend())
-		if launch != nil && launch.Type != "none" {
+		if launch != nil && launch.Type != "none" && launch.Type != runtime.ContainerTypeNono {
 			// Launching the agent into a fresh container: it can't do interactive
 			// login, so required creds must be present up front. Hard failure.
 			if err := secret.ValidateSecrets(ac, resolver); err != nil {
@@ -163,7 +167,13 @@ func buildRunnerFromBlocks(env *root.ResolvedEnv, rtCfg *runtime.Config, prof *r
 	if err := preflightContainerSupportsWorkDir(launch, env); err != nil {
 		return nil, nil, err
 	}
-	ct, err := buildContainer(launch, prof, env, roleID, dockerAutoSetup)
+	var ct container.Container
+	var err error
+	if launch != nil && launch.Type == runtime.ContainerTypeNono {
+		ct, err = buildNonoContainer(env, rtCfg, prof, ac, launch.Name)
+	} else {
+		ct, err = buildContainer(launch, prof, env, roleID, dockerAutoSetup)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -244,8 +254,8 @@ func minimalRunnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig
 // paths in the rendered prompt — neither lands cleanly in this refactor.
 // Host mode handles remote WorkDir fine.
 func preflightContainerSupportsWorkDir(cc *runtime.ContainerConfig, env *root.ResolvedEnv) error {
-	if cc == nil || cc.Type == "" || cc.Type == "none" {
-		return nil
+	if cc == nil || cc.Type == "" || cc.Type == "none" || cc.Type == runtime.ContainerTypeNono {
+		return nil // nono runs on the host: any working folder works
 	}
 	if env.ProjectDir == "" || env.WorkDir == "" {
 		return nil
@@ -509,16 +519,75 @@ func gitWriteDirs(sourceDir string) []string {
 	return dirs
 }
 
-// rejectUnenforcedPolicy refuses an unattended run whose profile carries
-// file rules or names a sandbox backend: the unattended runner applies
-// neither yet, and a rule that is not enforced must not be dropped
-// silently. `ateam chat`, `run` and `shell` enforce them.
+// rejectUnenforcedPolicy refuses a run whose profile carries file or
+// network rules on a container that enforces none of them: a rule that is
+// not enforced must not be dropped silently.
 func rejectUnenforcedPolicy(prof *runtime.ProfileConfig, cc *runtime.ContainerConfig, label string) error {
+	if prof == nil || !prof.HasPolicy() {
+		return nil
+	}
 	if cc != nil && cc.Type == runtime.ContainerTypeNono {
-		return fmt.Errorf("profile %q: container type %q is not available for unattended runs yet; use `ateam chat`, `ateam run` or `ateam shell`", label, cc.Type)
+		return nil
 	}
-	if prof != nil && prof.HasPolicy() {
-		return fmt.Errorf("profile %q sets read, write or exclude, which unattended runs cannot enforce yet; use `ateam chat`, `ateam run` or `ateam shell` with a nono container", label)
+	return fmt.Errorf("profile %q sets read, write, exclude or domains, which its container enforces none of; add a sandbox backend (use = [\"sandbox/nono\"])", label)
+}
+
+// nonoProfileSeq numbers the nono profiles one process writes: a command
+// can build several runners.
+var nonoProfileSeq atomic.Int64
+
+// buildNonoContainer renders the profile of an unattended run into a nono
+// profile and returns the container that runs the agent under it. The
+// rules are the ones `ateam chat` applies, plus what an unattended agent
+// needs: its config directory, its output folder, the agent's rw_paths
+// and ro_paths, and the project's sandbox_extra.
+func buildNonoContainer(env *root.ResolvedEnv, rtCfg *runtime.Config, prof *runtime.ProfileConfig, ac *runtime.AgentConfig, containerName string) (container.Container, error) {
+	composed := rtCfg.WithAgentProfile(*prof, ac.TypeName())
+	composed.Write = append(composed.Write, ac.RWPaths...)
+	composed.Read = append(composed.Read, ac.ROPaths...)
+	if stateDir := env.StateDir(); stateDir != "" {
+		composed.Write = append(composed.Write, filepath.Join(stateDir, "runtime"))
+		if dir := configDirGrant(ac.ConfigDir, stateDir); dir != "" {
+			composed.Write = append(composed.Write, dir)
+		}
 	}
-	return nil
+	if env.Config != nil {
+		extra := env.Config.SandboxExtra
+		composed.Write = append(composed.Write, extra.AllowWrite...)
+		composed.Read = append(composed.Read, extra.AllowRead...)
+		composed.Domains = append(composed.Domains, extra.AllowDomains...)
+	}
+	policy, err := buildSandboxPolicy(&composed, env.WorkDir, env.ProjectDir, env.HomeDir, nil)
+	if err != nil {
+		return nil, err
+	}
+	dir := sandboxStateDir(env.HomeDir)
+	pruneSandboxProfiles(dir)
+	profileFile := filepath.Join(dir, fmt.Sprintf("profile.%d.%d.json", os.Getpid(), nonoProfileSeq.Add(1)))
+	nono, err := writeNonoProfile(context.Background(), policy, containerName, profileFile)
+	if err != nil {
+		return nil, err
+	}
+	return &container.NonoContainer{
+		Prefix:  sandboxpolicy.NonoPrefix(nono, profileFile, policy.WorkDir, true),
+		WorkDir: policy.WorkDir,
+	}, nil
+}
+
+// configDirGrant returns the folder to make writable for an agent's
+// config_dir: the directory itself, or for a templated one
+// ("agents/{{ROLE}}") the folder above the first template. "" without a
+// config_dir: the agent/<type> profile then covers the agent's own files.
+func configDirGrant(configDir, stateDir string) string {
+	if configDir == "" {
+		return ""
+	}
+	if i := strings.Index(configDir, "{{"); i >= 0 {
+		configDir = filepath.Dir(configDir[:i] + "x")
+	}
+	dir := display.ExpandHome(configDir)
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(stateDir, dir)
+	}
+	return dir
 }

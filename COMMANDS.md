@@ -452,7 +452,7 @@ docker run \
 
 ### `ateam chat`, `ateam run`, `ateam shell`
 
-Run an attended agent, a command or your shell with the access of a composed profile. See [CONFIG.md → Composable profiles](CONFIG.md#composable-profiles) for the profile fields and [ISOLATION.md → nono](ISOLATION.md#nono-sandbox-attended-runs) for the sandbox.
+Run an attended agent, a command or your shell with the access of a composed profile. See [CONFIG.md → Composable profiles](CONFIG.md#composable-profiles) for the profile fields and [ISOLATION.md → nono](ISOLATION.md#nono-sandbox) for the sandbox.
 
 ```bash
 ateam chat  [flags] [-- AGENT_ARG...]        # the profile's agent, in this terminal
@@ -472,6 +472,7 @@ ateam shell [flags]                          # $SHELL
 - `chat`: starts the profile's agent, or the default agent, with your own agent configuration. Under a sandbox backend it adds the `agent/<type>` profile and turns Claude's own sandbox off for the launch.
 - `shell`: ignores the profile's `command` and agent.
 - The working folder is writable: the project root inside a project, else the current folder. Running in the home or `/` is refused.
+- Under a sandbox backend, ateam waits for the command and compares `.git/config` and `.git/hooks` afterwards: a change is listed and the launch exits with code 3.
 - A profile whose rules its container cannot enforce is refused. `none` enforces nothing, `nono` enforces all of them; `docker` and `docker-exec` are not supported by these commands yet.
 - Flags come before the command: everything after the first argument belongs to it.
 

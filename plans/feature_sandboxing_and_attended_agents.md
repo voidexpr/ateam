@@ -68,6 +68,9 @@ Related research: `research/ResearchSandboxing.md`, sections F.1.2 (review-time 
 | 8 | Network | A `network` entity, tool-agnostic, mapped to the backend or an error. Default: deny, with LLM provider hosts and localhost allowed. |
 | 9 | Filters | A `filter` entity in the unified syntax (autoversion). Defined by file or inline. Profile lists accept filter names and literal paths together. |
 | 10 | Agent settings generation | Stays in targy for now. |
+| 11 | Git hooks (2026-11-22) | `.git/config` and `.git/hooks` cannot be read-only under nono: compared after the run, a change is reported. |
+| 12 | Backend default blocks (2026-11-22) | The profile's excludes decide alone. What nono blocks on its own and the profile does not exclude is lifted, as targy did. |
+| 13 | Unattended runs (2026-11-22) | Same container and same rules as attended ones. Recording attended sessions in the metrics database: a task for later, after the sandbox work. |
 
 ## Design
 

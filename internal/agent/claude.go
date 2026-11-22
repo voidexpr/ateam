@@ -70,13 +70,16 @@ func (c *ClaudeAgent) Run(ctx context.Context, req Request) <-chan StreamEvent {
 func (c *ClaudeAgent) run(ctx context.Context, req Request, ch chan<- StreamEvent) {
 	defer close(ch)
 
-	// If CLAUDE_CONFIG_DIR is set (isolated mode), create the dir and require sandbox settings.
+	// If CLAUDE_CONFIG_DIR is set (isolated mode), create the dir and require
+	// sandbox settings: on the host they are the only boundary. A run a
+	// container wraps (docker, nono) has its boundary outside the agent and
+	// carries no settings file.
 	if configDir := resolveConfigDir(c.Env, req.Env); configDir != "" {
 		if err := os.MkdirAll(configDir, 0755); err != nil {
 			ch <- errorEvent(fmt.Errorf("cannot create config dir %s: %w", configDir, err), ErrorSourceAteamInternal, -1)
 			return
 		}
-		if !hasSettingsArg(req.ExtraArgs) {
+		if req.CmdFactory == nil && !hasSettingsArg(req.ExtraArgs) {
 			ch <- errorEvent(fmt.Errorf("CLAUDE_CONFIG_DIR is set (%s) but no --settings specified; isolated claude requires sandbox settings", configDir), ErrorSourceAteamInternal, -1)
 			return
 		}

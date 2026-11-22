@@ -606,7 +606,7 @@ Pricing can go stale. The top-level `pricing_as_of` date says when the tables we
 
 ### Containers
 
-Four container types are supported: `none`, `docker` (one-shot), `docker-exec` (exec into a user-managed container), and `nono` (an OS-level sandbox for `ateam chat`, `run` and `shell`; see [Composable profiles](#composable-profiles)).
+Four container types are supported: `none`, `docker` (one-shot), `docker-exec` (exec into a user-managed container), and `nono` (an OS-level sandbox on the host; see [Composable profiles](#composable-profiles) and [ISOLATION.md → nono](ISOLATION.md#nono-sandbox)).
 
 ```hcl
 container "docker" {
@@ -700,7 +700,7 @@ profile "myproject" {
 - A profile without an agent or a container runs with the `default` profile's.
 - An unknown name or a cycle in `use` is a load error.
 - Paths start with `~` or `/`. Reading is open below the home, except what is excluded.
-- The rules need a sandbox backend. A launch on a container that cannot enforce them is refused; so is an unattended run (`exec`, `report`, `code`, ...) with such a profile, until the unattended runner applies them.
+- The rules need a sandbox backend. Any run, attended or not, on a container that cannot enforce them is refused. `nono` enforces all of them.
 - Each layer also loads `profiles/*.hcl` after its `ateam.hcl`: where `ateam profile save` writes.
 
 Built-in composable profiles (`ateam profile list`): `sandbox/nono` (the nono container plus `agent/secrets`), `agent/secrets` (keys, credentials, app data and personal folders unreadable), `agent/claude` and `agent/codex` (the agent's own files and API hosts), `dev/go`, `dev/rust`, `dev/python`, `dev/node`, `dev/deno`, `dev/github`, `dev/all`.

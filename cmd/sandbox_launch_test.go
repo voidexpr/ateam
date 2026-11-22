@@ -2,11 +2,15 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/ateam/internal/container"
+	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runtime"
 )
 
@@ -147,5 +151,116 @@ func TestSaveProfileRoundTrip(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(os.Getenv(runtime.HomeEnv), "profiles", "bad.hcl")); err == nil {
 		t.Error("the refused profile was left on disk")
+	}
+}
+
+func TestRunGuardedReportsHookChanges(t *testing.T) {
+	work := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(work, ".git", "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, ".git", "config"), []byte("[core]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	backup := filepath.Join(t.TempDir(), "git.1")
+	if code := runGuarded([]string{"/bin/sh", "-c", "exit 0"}, work, backup); code != 0 {
+		t.Errorf("a clean run returns the command's code, got %d", code)
+	}
+	if _, err := os.Stat(backup); err == nil {
+		t.Error("the backup of an unchanged repository must be removed")
+	}
+	if code := runGuarded([]string{"/bin/sh", "-c", "exit 7"}, work, backup); code != 7 {
+		t.Errorf("exit code = %d, want 7", code)
+	}
+	plant := "echo evil > " + filepath.Join(work, ".git", "hooks", "post-checkout")
+	if code := runGuarded([]string{"/bin/sh", "-c", plant}, work, backup); code != 3 {
+		t.Errorf("a planted hook must fail the launch with 3, got %d", code)
+	}
+	if data, err := os.ReadFile(filepath.Join(backup, ".git", "config")); err != nil || string(data) != "[core]\n" {
+		t.Errorf("the backup must be kept after a change: %q, %v", data, err)
+	}
+}
+
+func TestConfigDirGrant(t *testing.T) {
+	for _, tc := range []struct{ dir, want string }{
+		{"", ""},
+		{"/abs/claude", "/abs/claude"},
+		{"agents/claude", "/state/agents/claude"},
+		{"agents/{{ROLE}}", "/state/agents"},
+		{"agents/claude-{{ROLE}}/cfg", "/state/agents"},
+	} {
+		if got := configDirGrant(tc.dir, "/state"); got != tc.want {
+			t.Errorf("configDirGrant(%q) = %q, want %q", tc.dir, got, tc.want)
+		}
+	}
+}
+
+func TestRejectUnenforcedPolicy(t *testing.T) {
+	rules := &runtime.ProfileConfig{Name: "p", Write: []string{"/x"}}
+	none := &runtime.ContainerConfig{Name: "none", Type: "none"}
+	nono := &runtime.ContainerConfig{Name: "nono", Type: runtime.ContainerTypeNono}
+	if err := rejectUnenforcedPolicy(rules, none, "p"); err == nil {
+		t.Error("rules on a none container must be refused")
+	}
+	if err := rejectUnenforcedPolicy(rules, nono, "p"); err != nil {
+		t.Errorf("nono enforces the rules: %v", err)
+	}
+	if err := rejectUnenforcedPolicy(&runtime.ProfileConfig{Name: "plain"}, none, "plain"); err != nil {
+		t.Errorf("no rule, nothing to refuse: %v", err)
+	}
+}
+
+// An unattended run on a nono container wraps the agent in `nono run` with
+// a profile holding the chat rules plus what the run itself writes.
+func TestBuildNonoContainerForUnattendedRun(t *testing.T) {
+	if _, err := exec.LookPath("nono"); err != nil {
+		t.Skip("nono not installed")
+	}
+	if goruntime.GOOS != "darwin" {
+		t.Skip("the nono backend is macOS only for now")
+	}
+	work := launchFixture(t)
+	cfg, err := runtime.Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	composed, err := cfg.ComposeProfiles([]string{"sandbox/nono", "dev/go"}, runtime.ProfileConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prof, ac, cc, err := cfg.ResolveComposed(composed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ac.ConfigDir = "agents/claude"
+	env := &root.ResolvedEnv{HomeDir: os.Getenv(runtime.HomeEnv), WorkDir: work}
+	ct, err := buildNonoContainer(env, cfg, prof, ac, cc.Name)
+	if err != nil {
+		t.Skipf("nono cannot be queried here: %v", err)
+	}
+	nc, ok := ct.(*container.NonoContainer)
+	if !ok || nc.WorkDir != work {
+		t.Fatalf("container = %#v", ct)
+	}
+	cmd := nc.CmdFactory()(t.Context(), "claude", "-p")
+	if !slices.Contains(cmd.Args, "--silent") || cmd.Args[len(cmd.Args)-2] != "claude" || cmd.Dir != work {
+		t.Errorf("command = %v in %q", cmd.Args, cmd.Dir)
+	}
+	i := slices.Index(cmd.Args, "--profile")
+	data, err := os.ReadFile(cmd.Args[i+1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := os.Getenv("HOME")
+	for _, want := range []string{
+		filepath.Join(home, ".claude"),                          // agent/claude
+		filepath.Join(home, "go/pkg"),                           // dev/go
+		filepath.Join(env.HomeDir, "state", "agents", "claude"), // the agent's config dir
+		filepath.Join(env.HomeDir, "state", "runtime"),          // the run's output
+		"api.anthropic.com",
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("the nono profile lacks %s", want)
+		}
 	}
 }

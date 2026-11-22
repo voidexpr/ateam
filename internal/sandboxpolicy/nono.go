@@ -71,30 +71,30 @@ func nonoName(name string) string {
 // the home around the excluded paths is not ported yet, so it is refused.
 //
 // nono's required deny groups (credentials, keychains, browsers, shell
-// configs and history) stay in force; a path the policy grants explicitly
-// inside one of them is lifted.
+// configs and history) cannot be removed from a profile, so each path they
+// block that the policy does not exclude is lifted: the policy's excludes
+// decide alone what is unreadable.
 func RenderNono(p *Policy, info NonoInfo, goos string) (*NonoProfile, error) {
 	if goos != "darwin" {
 		return nil, fmt.Errorf("the nono backend supports macOS only for now (this is %s): on Linux nono refuses a deny inside a grant", goos)
 	}
-	explicit := slices.Concat(p.Read, p.Write)
-	// A grant inside an excluded path keeps the exclude and reopens the
-	// grant; one inside a path nono blocks needs lifting too.
+	excluded := func(path string) bool {
+		return slices.ContainsFunc(p.Exclude, func(ex Rule) bool { return Within(path, ex.Path) })
+	}
+	// The profile decides what is unreadable, not nono's required groups:
+	// every path they block that the policy leaves readable is lifted (the
+	// home grant covers it). What the policy excludes stays blocked.
 	var bypass []string
-	for _, g := range explicit {
-		inside := slices.ContainsFunc(p.Exclude, func(ex Rule) bool { return Within(g.Path, ex.Path) }) ||
-			slices.ContainsFunc(info.Blocked, func(b string) bool { return Within(g.Path, b) || Within(b, g.Path) })
-		if inside {
-			bypass = append(bypass, g.Path)
+	for _, b := range info.Blocked {
+		if Within(b, p.Home) && !excluded(b) {
+			bypass = append(bypass, b)
 		}
 	}
-	// A write grant holding a blocked path lifts nothing below it by
-	// itself: name the blocked paths it holds, so the grant means what it says.
-	for _, w := range p.Write {
-		for _, b := range info.Blocked {
-			if Within(b, w.Path) && b != w.Path && !slices.ContainsFunc(p.Exclude, func(ex Rule) bool { return Within(b, ex.Path) }) {
-				bypass = append(bypass, b)
-			}
+	// A grant inside an excluded path keeps the exclude and reopens the
+	// grant; one outside the home that nono blocks is lifted too.
+	for _, g := range slices.Concat(p.Read, p.Write) {
+		if excluded(g.Path) || slices.ContainsFunc(info.Blocked, func(b string) bool { return Within(g.Path, b) || Within(b, g.Path) }) {
+			bypass = append(bypass, g.Path)
 		}
 	}
 	prof := &NonoProfile{
@@ -148,7 +148,17 @@ func (n *NonoProfile) JSON() ([]byte, error) {
 
 // NonoCommand is the command line that runs argv under a profile file.
 func NonoCommand(nono, profileFile, workDir string, argv []string) []string {
-	return append([]string{nono, "run", "--profile", profileFile, "--workdir", workDir, "--allow-cwd", "--"}, argv...)
+	return append(NonoPrefix(nono, profileFile, workDir, false), argv...)
+}
+
+// NonoPrefix is the nono command line up to and including "--". silent
+// keeps nono's banner and summary off the terminal: for unattended runs.
+func NonoPrefix(nono, profileFile, workDir string, silent bool) []string {
+	args := []string{nono, "run"}
+	if silent {
+		args = append(args, "--silent")
+	}
+	return append(args, "--profile", profileFile, "--workdir", workDir, "--allow-cwd", "--")
 }
 
 // QueryNono asks the installed nono for the paths its required groups
@@ -184,9 +194,18 @@ func QueryNono(ctx context.Context, nono string) (NonoInfo, error) {
 	return info, nil
 }
 
+// inspect builds a nono command that only reads or checks profiles. Its
+// update check is turned off: it costs seconds per call and a launch makes
+// several.
+func inspect(ctx context.Context, nono string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, nono, args...)
+	cmd.Env = append(os.Environ(), "NONO_NO_UPDATE_CHECK=1")
+	return cmd
+}
+
 func nonoJSON(ctx context.Context, nono string, out any, args ...string) error {
 	args = append(args, "--json")
-	data, err := exec.CommandContext(ctx, nono, args...).Output()
+	data, err := inspect(ctx, nono, args...).Output()
 	if err != nil {
 		return fmt.Errorf("nono %s: %w", strings.Join(args, " "), err)
 	}
@@ -210,7 +229,7 @@ func WriteNonoProfile(ctx context.Context, nono string, prof *NonoProfile, dest 
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-	if out, err := exec.CommandContext(ctx, nono, "profile", "validate", tmp).CombinedOutput(); err != nil {
+	if out, err := inspect(ctx, nono, "profile", "validate", tmp).CombinedOutput(); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("nono refuses the profile: %s", strings.TrimSpace(string(out)))
 	}

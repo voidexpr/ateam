@@ -113,12 +113,16 @@ func Build(in Input) (*Policy, error) {
 		return false
 	}
 	for _, ex := range excluded {
-		if !granted(ex.Path) && !containsPath(p.Exclude, ex.Path) {
-			p.Exclude = append(p.Exclude, ex)
+		if granted(ex.Path) {
+			continue
 		}
-	}
-	if isGitRepo(workDir) {
-		p.Gaps = append(p.Gaps, ".git/hooks and .git/config in the working folder stay writable: a command can plant a hook that runs outside the sandbox later")
+		// An excluded path reached through a link is excluded where the
+		// link leads too.
+		for _, path := range withRealPath(ex.Path) {
+			if !containsPath(p.Exclude, path) {
+				p.Exclude = append(p.Exclude, Rule{Path: path, Source: ex.Source, Reason: ex.Reason})
+			}
+		}
 	}
 	return p, nil
 }
@@ -176,11 +180,15 @@ func Within(path, base string) bool {
 	return strings.HasPrefix(path, base+string(filepath.Separator))
 }
 
-func containsPath(rules []Rule, path string) bool {
-	return slices.ContainsFunc(rules, func(r Rule) bool { return r.Path == path })
+// withRealPath returns path and, when it goes through a link, where it
+// really is.
+func withRealPath(path string) []string {
+	if real, err := filepath.EvalSymlinks(path); err == nil && real != path {
+		return []string{path, real}
+	}
+	return []string{path}
 }
 
-func isGitRepo(dir string) bool {
-	_, err := os.Stat(filepath.Join(dir, ".git"))
-	return err == nil
+func containsPath(rules []Rule, path string) bool {
+	return slices.ContainsFunc(rules, func(r Rule) bool { return r.Path == path })
 }

@@ -876,10 +876,10 @@ role "test.recent" { status = "on" }
 // excluded; a path that does not exist is harmless.
 // ---------------------------------------------------------------------
 
-// nono (https://nono.sh): an OS-level sandbox, no container. macOS only
-// for now. Its required deny groups (credentials, keychains, browsers,
-// shell configs and history) always apply; an explicit read or write of
-// one of their paths lifts it.
+// nono (https://nono.sh): an OS-level sandbox on the host, no container,
+// for attended and unattended runs. macOS only for now. The excludes of
+// the profile decide what is unreadable: what nono's own required deny
+// groups block and the profile does not exclude is lifted.
 container "nono" {
   type = "nono"
 }

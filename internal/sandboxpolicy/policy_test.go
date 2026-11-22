@@ -121,9 +121,15 @@ func TestRenderNono(t *testing.T) {
 	if !slices.Contains(fs.Deny, filepath.Join(in.Home, ".ssh")) || !slices.Contains(fs.Deny, in.AteamHome) {
 		t.Errorf("deny = %v", fs.Deny)
 	}
-	want := []string{filepath.Join(in.Home, ".ssh/config"), filepath.Join(in.Home, ".zshrc")}
+	// What nono blocks and the policy does not exclude is lifted (.aws,
+	// .zshrc); a grant inside an excluded folder is reopened (.ssh/config).
+	want := []string{filepath.Join(in.Home, ".aws"), filepath.Join(in.Home, ".ssh/config"), filepath.Join(in.Home, ".zshrc")}
 	if !slices.Equal(fs.BypassProtection, want) {
 		t.Errorf("bypass = %v, want %v", fs.BypassProtection, want)
+	}
+	p.Exclude = append(p.Exclude, Rule{Path: filepath.Join(in.Home, ".aws")})
+	if again, _ := RenderNono(p, info, "darwin"); slices.Contains(again.Filesystem.BypassProtection, filepath.Join(in.Home, ".aws")) {
+		t.Error("an excluded path must stay blocked")
 	}
 	if prof.Network.Block || !slices.Equal(prof.Network.AllowDomain, []string{"api.anthropic.com", "proxy.golang.org"}) {
 		t.Errorf("network = %+v", prof.Network)
@@ -175,5 +181,67 @@ func TestNonoAcceptsRenderedProfile(t *testing.T) {
 		if err := WriteNonoProfile(ctx, nono, prof, dest); err != nil {
 			t.Errorf("domains %v: %v", domains, err)
 		}
+	}
+}
+
+func TestExcludeCoversLinkTarget(t *testing.T) {
+	in := testInput(t)
+	real := filepath.Join(in.Home, "synced", ".ssh")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(in.Home, ".ssh")); err != nil {
+		t.Fatal(err)
+	}
+	in.Exclude = []string{"~/.ssh"}
+	p, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, _ := filepath.EvalSymlinks(real)
+	if ex := paths(p.Exclude); !slices.Contains(ex, filepath.Join(in.Home, ".ssh")) || !slices.Contains(ex, resolved) {
+		t.Errorf("exclude must hold the link and its target: %v", ex)
+	}
+}
+
+func TestGitGuard(t *testing.T) {
+	dir := t.TempDir()
+	if _, ok := SnapshotGit(dir); ok {
+		t.Error("no .git folder: nothing to guard")
+	}
+	hooks := filepath.Join(dir, ".git", "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(rel, text string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(text), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".git/config", "[core]\n")
+	write(".git/hooks/pre-commit.sample", "#!/bin/sh\n")
+	g, ok := SnapshotGit(dir)
+	if !ok {
+		t.Fatal("a .git folder must be guarded")
+	}
+	if changed := g.Changed(); len(changed) != 0 {
+		t.Errorf("nothing changed yet: %v", changed)
+	}
+	backup := t.TempDir()
+	if err := g.Backup(backup); err != nil {
+		t.Fatal(err)
+	}
+	write(".git/config", "[core]\n\tpager = evil\n")
+	write(".git/hooks/post-checkout", "#!/bin/sh\nevil\n")
+	if err := os.Remove(filepath.Join(hooks, "pre-commit.sample")); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{".git/config (modified)", ".git/hooks/post-checkout (added)", ".git/hooks/pre-commit.sample (removed)"}
+	if got := g.Changed(); !slices.Equal(got, want) {
+		t.Errorf("changed = %v, want %v", got, want)
+	}
+	if data, err := os.ReadFile(filepath.Join(backup, ".git", "config")); err != nil || string(data) != "[core]\n" {
+		t.Errorf("backup of .git/config = %q, %v", data, err)
 	}
 }

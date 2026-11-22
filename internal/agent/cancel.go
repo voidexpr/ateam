@@ -2,8 +2,9 @@ package agent
 
 import (
 	"os/exec"
-	"syscall"
 	"time"
+
+	"github.com/ateam/internal/container"
 )
 
 // processGraceDelay is the grace period given to an agent subprocess between
@@ -17,35 +18,10 @@ import (
 // allowing a hung run to drag on indefinitely.
 const processGraceDelay = 30 * time.Second
 
-// configureProcessLifecycle wires up two behaviors on cmd that exec.CommandContext
-// does not provide by default:
-//
-//  1. The subprocess becomes its own process-group leader (Setpgid), and
-//     the Cancel hook sends SIGTERM to the entire group on context
-//     cancellation. This kills any subagent or shell descendants the agent
-//     CLI forked, not just the agent itself — necessary to free the OS
-//     resources (file descriptors, API quota) that a stuck subagent would
-//     otherwise hold.
-//
-//  2. WaitDelay is set so cmd.Wait does not block indefinitely on stdout
-//     or stderr pipes inherited by descendants that survive the SIGTERM
-//     (or escape the process group). After the delay, the runtime sends
-//     SIGKILL and force-closes the pipes.
-//
-// Only applicable when the cmd was created via exec.CommandContext (host
-// execution). Container-backed runs go through CmdFactory and have their
-// own lifecycle.
+// configureProcessLifecycle makes cmd the leader of its own process group,
+// signalled as a whole on cancellation, with processGraceDelay before the
+// kill: see container.ConfigureProcessLifecycle. Only for a cmd created
+// here (host execution); a CmdFactory configures its own.
 func configureProcessLifecycle(cmd *exec.Cmd) {
-	if cmd.SysProcAttr == nil {
-		cmd.SysProcAttr = &syscall.SysProcAttr{}
-	}
-	cmd.SysProcAttr.Setpgid = true
-
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-	}
-	cmd.WaitDelay = processGraceDelay
+	container.ConfigureProcessLifecycle(cmd, processGraceDelay)
 }
