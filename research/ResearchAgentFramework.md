@@ -620,6 +620,7 @@ Interactive only, no scheduled operation. macOS-only. Not a fit as a coordinator
 | **AutoGen** | [github.com/microsoft/autogen](https://github.com/microsoft/autogen) | 58.7k⭐, last release Sep 2025. **In maintenance mode** — Microsoft Agent Framework is the successor. Magentic-One still inside autogen but uncertain future. | Project is sunsetting; not a future-relevant target. Magentic-One's stuck-counter+reflection pattern still worth reading (see Articles Review). |
 | **Beads** | [github.com/steveyegge/beads](https://github.com/steveyegge/beads) | 24.3k⭐, v1.0.4 (May 9, 2026), Dolt-backed not pure-git, agent-centric workflows. | Standalone issue tracker, already covered via Gas Town + metaswarm. Worth its own future look if ATeam adopts structured work tracking. |
 | **SWE-agent** | [github.com/princeton-nlp/SWE-agent](https://github.com/princeton-nlp/SWE-agent) | 19.4k⭐, v1.1.0 (May 2025), team now recommends **Mini-SWE-agent** as the successor. | Single-agent solver, not orchestrator. Agent-computer interface design philosophy worth comparing against ATeam's role prompts. |
+| **Strands Agents** | [strandsagents.com](https://strandsagents.com/) | ~9.3k⭐ (`strands-agents/harness-sdk`), Python v1.65.0 (Nov 13, 2026), AWS, Apache-2.0. | SDK for building agents, not an orchestrator of coding-agent CLIs. Its sandbox projects (Strands Box, Strands Shell) are reviewed in ResearchSandboxing.md §E.13.16. |
 
 ## Build or Adopt?
 

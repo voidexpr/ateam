@@ -675,6 +675,7 @@ The community is already converging on devcontainers as the standard way to sand
 | **Porta** | All but credential stores; strict mode: mounts only | `-v` mounts + `/tmp`; `.git/hooks`, agent settings protected | Open by default; TCP port rules or CONNECT proxy allowlist; placeholders | Most (clients must honor `HTTPS_PROXY`) | Mount via `porta init` | None | Near-zero | macOS, Linux |
 | **NVIDIA OpenShell** | Landlock policy in container/VM | Landlock policy | Workload has no network; supervisor enforces per-binary + L7 rules; placeholders | All (in container/VM) | Image + providers | Gateway sessions | Medium–High | Linux, macOS (Apple Silicon), K8s |
 | **exe.dev** | VM isolation | VM isolation | `all` or integrations-only; credentials at the edge | All (in VM) | LLM integration | Built-in HTTPS/SSH | High (remote) | Cloud |
+| **Strands Box** | Deny-default; profile grants only | Project (`write`/`read`/`none`) + grants; `.git/hooks` not protected | No direct egress; gateway terminates all TLS; policy on host + method + path; placeholders, SigV4 | Most; shell and Python are replaced by policy-checked interpreters; HTTP(S) only | Per-profile copy; API key or Bedrock only | None | Near-zero | macOS (Apple Silicon), Linux |
 
 ### E.10 Network Tier Implementation
 
@@ -1562,6 +1563,209 @@ Cloud VMs are not a local-first fit for ATeam (§E.16). exe.dev is here for its 
 
 **For ATeam:** not a backend candidate (cloud, VM per workload, source must be synced). The integration-endpoint pattern is the same as ATeam's planned `ANTHROPIC_BASE_URL` reverse proxy (§F.1.1 Tier A), generalized to any HTTP API.
 
+#### E.13.16 Strands Agents (Strands Box, Strands Shell, SDK sandboxes)
+
+**Site:** [strandsagents.com](https://strandsagents.com/)
+**GitHub:** [strands-agents](https://github.com/strands-agents) org — [box](https://github.com/strands-agents/box), [shell](https://github.com/strands-agents/shell), [harness-sdk](https://github.com/strands-agents/harness-sdk) (the SDK monorepo; `sdk-python` now redirects to it)
+**Maintainer:** AWS (`NOTICE`: "Copyright Amazon.com, Inc."; PyPI author "AWS"). All Apache-2.0.
+**Reviewed:** 2026-11-21, read only. Sources: the three repos at the commits below, and the site docs (which live in `harness-sdk/site/`). Nothing was run locally.
+
+| Component | What it is | Language | Version / commit reviewed | Stars (2026-11-21) |
+|---|---|---|---|---|
+| **Strands Box** | Local sandbox engine + `box` CLI for coding agents | Rust | Core v0.2.4 (2026-11-19); `box` CLI v0.3.0-preview.1 (2026-11-21, its first release); commit `7ef82c1` | 563 |
+| **Strands Shell** | In-process Bourne-compatible shell with a virtual filesystem | Rust; Python, Node, WASM bindings | v0.6.0 (2026-11-04); commit `dbb6189` | 302 |
+| **Harness SDK** | The agent framework (Python + TypeScript) | Python, TypeScript | `python/v1.65.0` (2026-11-13), `typescript/v1.26.0`; commit `d6c5fae` | ~9.3k |
+
+Strands is an agent framework, and the framework itself isolates very little (see "SDK" below). The part that matters here is **Strands Box**, a separate project in the same org. Box is a native process sandbox for existing coding agents (Claude Code, Codex, Kiro CLI, pi), announced as a developer preview on 2026-10-07; Linux support followed on 2026-11-05. It is in the same slot as Porta (§E.13.13), nono, and Anthropic SRT, with a policy engine and a credential gateway on top. The README marks it **Preview**.
+
+##### Strands Box
+
+**Usage:**
+
+```bash
+cd ~/src/my-app
+box run claude                      # first run asks questions and writes a profile
+box run claude -- -p "Fix the test" # arguments after -- go to the agent
+box profile show --full claude      # merged configuration and policy for a run
+box runs history                    # every policy decision of a run (--format json)
+```
+
+**Architecture:**
+
+```
+box run / strands-box run            (trusted process, outside every sandbox)
+  ├─ Dogwood policy engine + event history (persists per box ID)
+  ├─ Strands Shell   ← agent's sh/bash/zsh are aliases that forward here
+  ├─ Monty (Python)  ← agent's python/python3 aliases forward here
+  ├─ egress gateway  ← terminates TLS, asks policy, adds credentials
+  ├─ MCP broker      ← one decision per MCP call
+  ├─ vault (real secrets, in memory) and per-box CA
+  └─ collector (decision records, OTLP JSON)
+agent sandbox                        (Seatbelt on macOS; namespaces + seccomp on Linux)
+  └─ claude / codex / …  — only its `exec` list, its file grants, and the aliases
+tool sandbox, one per spawned program (git, npm, cargo, stdio MCP server)
+  └─ own file grants; no access to the broker socket; network via the gateway
+```
+
+- Two enforcement tiers, and the split is the main thing to understand:
+  1. **OS tier** (`box.toml`): the file paths the agent's own process can open. Fixed before the agent starts. Produces no policy decision and no log entry.
+  2. **Policy tier** (`policy.dw`): each request that goes through the trusted process — shell command, file operation done by the box's shell or Python, network connection, HTTP request, MCP call. Denied unless a `permit` matches; `forbid` wins.
+- The agent has no real shell. `bash -c '…'` reaches an alias that sends the command text over a Unix socket to Strands Shell in the trusted process. Shell built-ins (`cat`, `cp`, redirects) get an `fs:*` decision per file. An external program (`git`, `node`) gets one `shell:spawn` decision and then runs in its own sandbox, where its file operations are not checked individually.
+- Policy language is [Dogwood](https://github.com/dogwood-policy/dogwood) (Apache-2.0, Rust, 525⭐): Cedar plus temporal conditions over the event history. Example uses from the docs: at most 60 calls to a server per hour; refuse an outbound request after a private file was read through the shell.
+- Policy edits can be applied to a running box (`Ctrl+Alt+R` in the activity banner, or `strands_box::reload` from the Rust library). An invalid policy is refused and the current one stays.
+- Fail closed: if the sandbox can't be applied, the workload does not start. Rules the engine can prove will never match are refused at load.
+- The box's own state, the loaded `box.toml` and `policy.dw`, and `~/.strands/box` are unreachable whatever the policy says.
+- Stated design choice: OS sandboxing, not a VM, so the agent uses the host's existing toolchain and paths. A kernel escape defeats it; the tenets list kernel-exploit resistance and cross-tenant isolation as non-goals.
+
+**Platform enforcement:**
+
+| | macOS | Linux |
+|---|---|---|
+| Requirement | Apple Silicon, macOS 15+; signed and notarized `Box.app` | arm64 or x86-64, glibc 2.34+; unprivileged user + mount + PID + IPC + UTS + network namespaces |
+| Mechanism | Generated Seatbelt profile, `(deny default)`, applied by a trampoline through `sandbox_init()` | Namespaces + bind-mount filesystem view + capability drop + `no_new_privs` + seccomp. The docs say explicitly: namespaces, not Landlock |
+| Direct network | Only the local gateway and telemetry ports | Private network namespace with no external route; a relay reaches the gateway |
+| Known friction | File timestamps are not preserved in write folders unless `file-attributes` is on, which also allows set-ID bits and ACLs via `setattrlist` | Ubuntu 24.04 AppArmor blocks the namespace setup by default; a write grant also grants read; IPv6 sockets are refused |
+
+Intel Macs are not supported. Linux x86-64 release archives exist from v0.2.4 (one CLI doc page still says to build from source).
+
+**Filesystem (`box` CLI profiles):**
+
+- A profile (`~/.strands/box/profiles/<name>/profile.toml`) names packs and policy files. Packs ship per agent (`@box/claude`, `@box/codex`, `@box/kiro`, `@box/pi`), per provider (`@box/anthropic`, `@box/openai`, `@box/bedrock`), and per tool (`git`, `gh`, `npm`, `pnpm`, `yarn`, `cargo`, `go`, `uv`, …). A pack declares how to start a program, its file grants, and its hosts.
+- The project is the directory `box` is started from. `[project] access` is `write`, `read`, or `none`. `box` refuses to start in the home directory.
+- Three starter policies: **Open** (any command, any host except loopback and link-local), **Scoped** (any command, only hosts declared by packs and routes), **Locked** (project read-only, the shell runs none of its own commands, declared hosts only).
+- The agent's settings, sessions, and memory live in per-profile storage, not in the user's `~/.claude`. On first run, selected parts of `~/.claude` are copied in (CLAUDE.md, skills, commands, permission rules). Hooks and MCP servers are imported only on request. `box` never writes back to `~/.claude`.
+- That storage is shared by every project using the profile. The docs call a profile "one zone of trust" and recommend a separate profile for untrusted repositories.
+- **`.git/hooks` and `.git/config` are not protected** when the project is writable. The limitations page lists the files an agent can plant to run code outside the box later (`.git/hooks`, `.git/config`, `.claude/settings.json`, `.mcp.json`, `package.json` scripts, `.envrc`, `.vscode/`) and gives a manual post-run review procedure. This is the §F.1.2 hazard; Porta closes it, Box documents it.
+- File rules in policy apply only to the box's shell and Python. The agent's own file tools and spawned tools reach whatever the profile grants, unlogged. The Claude Code example closes that gap by granting the agent no project files, so every read and write goes through Bash and gets a decision.
+- Strands Shell and Monty run in the trusted process, outside every sandbox. A broad `fs:read` permit therefore reaches `~/.ssh` and `~/.aws`; the docs say "no credential floor sits beneath the interpreters". Every file rule needs a path condition.
+- No resource limits (CPU, processes, disk). No snapshot or rollback.
+
+**Network:**
+
+- Sandboxed processes get `HTTPS_PROXY` and friends pointing at the gateway, and the OS sandbox blocks every other connection. A client that ignores the proxy can't connect at all.
+- **The gateway terminates every TLS connection** with a per-box CA, so policy sees method and path for all HTTPS traffic. Six variables carry the CA: `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `CODEX_CA_CERTIFICATE`, `AWS_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, and `GIT_SSL_CAINFO`. The CA key stays in memory in the trusted process.
+- Two decisions per request: `net:connect` (host and port before DNS, then again on the resolved address, which is pinned) and `http:request` (host, method, path). The gateway has no allowlist of its own; policy is the allowlist.
+- HTTP and HTTPS only. `git` over SSH and other protocols can't leave a contained process.
+- Cloud metadata addresses are blocked only if the policy has the two documented `forbid` rules. Open blocks link-local; Scoped ships no metadata rule.
+- `host.box.internal:<port>` reaches a service on the host's loopback, if policy permits.
+- `[gateway] upgrade_http` lets a client that can't trust the CA (rustup on macOS, which uses the platform verifier) send plain HTTP to the gateway, which makes the HTTPS call. No credential is ever added to such a request.
+- Per tool or MCP server, `contain_egress = false` bypasses the gateway and its policy. The agent itself can't be given that exception.
+- Response bodies are not policy-checked. The response status is recorded so later rules can read it.
+
+**Credentials:**
+
+```toml
+[egress.anthropic]
+destinations = ["api.anthropic.com"]
+secret.ref = "env://ANTHROPIC_API_KEY"
+secret.header = "x-api-key"
+secret.phantom_prefix = "sk-ant-"
+
+[egress.bedrock]
+destinations = ["bedrock-runtime.us-west-2.amazonaws.com"]
+secret.ref   = "aws://agent-model"     # gateway re-signs with SigV4
+```
+
+- The workload gets a placeholder ("phantom"): a prefix plus 64 random hex characters. The gateway swaps it for the real value only on a request to the route's destinations, only over TLS, and only after policy permits the request.
+- Placements: a named header (default `Authorization: Bearer`), HTTP basic auth, or a query parameter. Destinations can bind host, port, and path prefix. Two routes can't match the same destination.
+- `aws://PROFILE` and bare `aws://`: the workload gets placeholder AWS keys, signs its own request, and the gateway strips that signature and re-signs with SigV4. Credentials are resolved through the AWS SDK and refreshed in the gateway. AWS SSO profiles are not supported in this build.
+- `inject = "phantom"` (default) refuses a request to a bound host without the placeholder. `inject = "always"` adds the secret to every request to the destination; needed for challenge-based clients such as `git` over HTTPS.
+- Copies of an `env://` secret in the response headers and body are replaced with `[REDACTED]`. A compressed response to a credentialed request is refused.
+- **Backends**: a route can re-route a destination to another gateway (the example is an AgentCore Gateway with SigV4 auth). Policy and the audit record still name the original destination.
+- Secret sources (experimental): a `[secret-source.<scheme>]` table runs a host program (plugins ship for 1Password and AWS Secrets Manager) once at startup, outside every sandbox.
+- Documented limits:
+  - Every process in a box can use every route. The gateway can't tell processes apart, so per-binary scoping (OpenShell) is not available. A tool that must not use a credential goes in a separate box.
+  - Write access to `~/.aws` together with any `aws://` route is a code-execution path in the trusted process, through `credential_process`.
+  - A credential file exposed by a file grant, or a secret written into an `env` table, is a real secret in the box.
+- **Claude Code auth:** the `@box/claude` README says "Signing in with a claude.ai subscription doesn't work in a box. Use an Anthropic API key (`@box/anthropic`) or Amazon Bedrock (`@box/bedrock`)." `CLAUDE_CODE_OAUTH_TOKEN` is not mentioned in the pack. Whether a custom route with that token works was **not verified**. ATeam users on a subscription login are blocked by this today.
+
+**Approvals and agent permission prompts:**
+
+- Box does not prompt. It allows or denies, and returns the rule's reason to the agent.
+- The agent's own permission mode is separate. `agent.skip-permissions = true` in a profile turns Claude Code's prompts off; then "what the box allows is what the agent does".
+- An organization's managed Claude Code settings still apply inside the box.
+
+**Audit:**
+
+- One record per effective decision, OTLP JSON lines, written to a file the workload can't reach (`~/.strands/box/r/<box ID>/` for the CLI). Fields: action, resource, verdict, cause, deciding rule. Full URLs and full command lines are omitted; non-flag shell arguments are redacted.
+- The collector also accepts the agent's own OpenTelemetry export, so one file can hold both. MCP tool-call arguments are recorded only for a target that opts in.
+- Gaps the docs state: OS-tier file access is not logged; a `cat` and an `ls` of one file look the same; records are not signed or chained and can be lost on a crash.
+
+**Unattended use:**
+
+- `box run <profile> -- <agent args>` and "`box run` exits with the agent's status" are documented. `--no-banner` removes the TUI banner. `--format json` exists on `runs history` and profile listings.
+- `box profile create` is interactive by default; `--option k=v` and `--policy` answer ahead of time.
+- Each run gets its own box ID, and one profile can run in several terminals at once.
+- Embedding: a Rust library (`strands_box::run`, `reload`, in-memory decision callbacks). One box per host process.
+- **Not verified:** behavior with no TTY, and concurrent runs sharing one profile's Claude storage.
+- **Usage telemetry is on by default** in the CLI (`box telemetry off`, `BOX_TELEMETRY=0`, or `DO_NOT_TRACK=1`). It sends an installation ID, a profile hash, shipped pack names, and per-action decision counts; no paths, commands, or prompts. Retention is 13 months.
+- Cloud profiles are documented for AgentCore Runtime and Lambda MicroVM (arm64), where the platform microVM is the outer boundary and Box adds policy inside it.
+
+##### Strands Shell (standalone)
+
+- The same shell Box embeds, usable alone as a Python or Node library or as an MCP server (`uvx strands-shell --mcp` gives `shell`, `read_file`, `write_file`, `list_dir`).
+- An in-process interpreter: 25 builtins and 37 reimplemented commands (`grep`, `sed`, `jq`, `curl`, `find`, …) plus Lua 5.4, with no `fork` or `exec`. Files come from an in-memory VFS with explicit binds (`copy` mode shown). Network is a URL allowlist with an SSRF guard. Credentials are injected per URL prefix and stripped on redirects.
+- Its `SECURITY.md` says it is "an in-process mediation layer for AI agents, not a hardened sandbox."
+- It can't run real binaries (`go test`, `npm`), so it doesn't fit coding agents on its own. It is the piece that lets Box see individual file operations of shell commands.
+
+##### SDK (the framework itself)
+
+- **Tools run in the agent's process.** Python `@tool` functions and the vended `shell`, `python_repl`, `read`, `write`, `edit` tools have no isolation by default. The default execution environment is a class named `NotASandboxLocalEnvironment`; the docs say "The default is not a sandbox".
+- **`Sandbox` abstraction** (docs added 2026-06-17): six operations (execute a command, execute code, read, write, remove, list files). The agent loop, model calls, and hooks stay on the host; only execution crosses over. Built-in backends:
+  - `DockerSandbox`: `docker exec` into a container that already runs. Strands doesn't create it or set mounts, network, or user.
+  - `SshSandbox`: one `ssh` process per command, `BatchMode`, and an allowlist of SSH options so a model can't pass `ProxyCommand`.
+  - Custom backends implement one streaming method on `PosixShellSandbox`.
+  - The isolation is whatever the container or remote host gives. The SDK adds no network or credential control here.
+- **AgentCore Code Interpreter:** the old `strands-agents-tools` repo is archived. The migration guide maps its `code_interpreter` (AgentCore) tool to `python_repl` on a sandbox. A current AgentCore-backed sandbox class was not found in the SDK (**not verified** beyond the two built-in backends).
+- **MCP tools** run in the MCP server's process (stdio subprocess or remote). No confinement from the SDK.
+- **Interventions** gate tool calls in the agent process: `HumanInTheLoop` (approve every call, or only those a model classifier rates risky; pauses with an interrupt and resumes on a response), Cedar authorization (both SDKs), Dogwood authorization (TypeScript, experimental, added 2026-11-16), and steering. Hooks expose before/after tool-call events. These are advisory relative to a compromised agent process; Box's docs make the same point about harness-side checks.
+- **Guardrails** are model-boundary content filters (Bedrock Guardrails), not execution controls.
+- **Deployment:** the docs describe AgentCore Runtime as giving each user session its own microVM, with AgentCore Identity brokering OAuth tokens and API keys. This is the AWS platform's property, read from the Strands docs only; **not verified** against AWS documentation.
+- **Observability:** OpenTelemetry traces and metrics for model and tool calls.
+
+**Comparison with existing entries (Box):**
+
+- vs **Porta** (§E.13.13): same shape — native sandbox, no container, placeholders on macOS and Linux. Box adds a history-aware policy engine, method/path rules on every HTTPS request, SigV4 signing, an MCP broker, and agent packs. Porta protects `.git/hooks` and agent settings inside writable mounts, has resource caps and snapshots, and leaves non-credential TLS unread; Box has none of the first three and intercepts everything.
+- vs **Anthropic SRT** (§E.2) and ATeam mode ①: SRT is a domain allowlist with no credential handling and the agent keeps a real shell. Box replaces the shell, which gives per-file decisions but changes shell behavior (no state between calls, reimplemented built-ins).
+- vs **OpenShell** (§E.13.14): both run a trusted supervisor outside the workload with L7 rules and SigV4. OpenShell has per-binary credential scoping, more placements (path, body), a policy prover, and a control plane. Box is one local process per run with no daemon, and its policy can depend on history.
+- vs **Enclave** (§E.13.12): Enclave is a container with a domain allowlist, header-only placeholders, and transparent redirection. Box needs no Docker, sees paths and methods, and covers query and basic-auth placements. Enclave supports the Claude OAuth token from `claude setup-token`; Box documents API key or Bedrock only.
+- vs **nah / Cupcake** (§D.10): those classify tool calls inside the agent's hook system. Box decides the resulting operations outside the agent, which the agent can't edit.
+
+**Assessment for ATeam (Strands Box):**
+
+| Dimension | Rating | Notes |
+|---|---|---|
+| Filesystem isolation | Good | Deny-default Seatbelt / namespace view, per-tool sandboxes, per-profile agent storage. `.git/hooks` and build files stay writable with the project. Interpreter permits can reach credential stores if written broadly. |
+| Network control | Excellent | No direct egress; every HTTPS request terminated and decided on host, method, path; DNS pinned. HTTP(S) only. Metadata blocking needs explicit rules. |
+| Secret safety | Good | Placeholders in header, basic auth, query; SigV4 re-signing; response redaction. Not scoped per process. No Claude subscription login. |
+| Policy | Excellent | Cedar-based permit/forbid with temporal rules across shell, Python, network, MCP. Live reload. A second language to learn; three presets ship. |
+| Audit | Good | OTLP decision records with rule IDs, plus the agent's own telemetry. OS-tier access unlogged; records unsigned. |
+| Tool compatibility | Fair | Replaced shell and Python, full TLS interception, HTTP-only egress, macOS timestamp issue. Each toolchain needs a pack. |
+| Platform | macOS (Apple Silicon, 15+), Linux | No Docker or VM. Intel Macs unsupported. |
+| Unattended use | Promising, unverified | Agent args pass through, exit status propagates, JSON history. No-TTY behavior not verified. CLI telemetry on by default. |
+| Maturity | Preview | First release 2026-10-07; CLI first pre-release 2026-11-21; about one release per week. AWS-maintained, 563⭐, 145 open issues and PRs. |
+
+**For ATeam:**
+
+- **The SDK and Strands Shell are not applicable.** The SDK is a framework for building agents; its `Sandbox` interface delegates isolation to a container or host you provide. Strands Shell can't run real toolchains.
+- **Strands Box is a backend candidate** for the planned sandbox-backend slot, next to nono. It fits the constraints in §G.7: native on macOS, policy outside the agent's writable filesystem, credentials in a trusted gateway. `box run <profile> -- -p "<prompt>"` maps onto an ATeam run the same way `nono` or `porta up` would.
+- Blockers and costs to weigh first:
+  1. No claude.ai subscription auth. API key or Bedrock only, as documented.
+  2. Per-profile agent storage replaces `~/.claude`. ATeam's own handling of Claude config, sessions, and stream output would need to map onto it.
+  3. The replaced shell changes agent behavior (stateless calls, built-in reimplementations). Role prompts that rely on shell state or less common commands may break.
+  4. Preview status, about one release per week, and default-on usage telemetry.
+  5. `.git/hooks` is still open; ATeam would keep its own protection or review step.
+- **Ideas worth borrowing even without adopting it:**
+  - The two-tier split, with a startup report listing every direct grant that produces no decision.
+  - Packs: one unit per program holding its start command, file grants, and hosts. This is close to the composable profiles in ATeam's sandboxing plan.
+  - Open / Scoped / Locked as named starting points.
+  - Placeholder prefix (`sk-ant-`) for clients that check key format; `inject = always` for challenge-based clients such as `git`.
+  - Response redaction of injected secrets.
+  - History-aware rules (budgets, "no egress after reading X") as a later policy feature.
+  - The "plant code that runs later" table as a checklist for ATeam's protected-paths list.
+
+Suggested next step: a small experiment running one ATeam role prompt through `box run` with the Scoped policy and an API key, without a TTY. Check exit code, stream-json output, what the replaced shell breaks, and the decision log.
+
 ### E.14 Network Companion Tools
 
 **OpenSnitch** (Linux) and **Little Snitch** (macOS) provide per-app/domain outbound firewalling as a standalone layer. They don't provide filesystem sandboxing but can be paired with any of the above tools:
@@ -1588,6 +1792,7 @@ The March 2026 landscape adds Greywall, Fence, and clampdown as meaningful optio
 - **Native process sandbox with placeholder credentials and `.git/hooks` protection:** Porta (E.13.13) — design reference for ATeam's mode ①, not a dependency (3⭐).
 - **Full network and credential policy (per-binary, L7, many credential placements, gateway-side refresh):** NVIDIA OpenShell (E.13.14) — heavyweight platform; reference design or backend for teams already running it.
 - **Explicit integration endpoints instead of TLS interception:** exe.dev (E.13.15) — cloud only; the pattern generalizes ATeam's planned `ANTHROPIC_BASE_URL` proxy. See §G for the networking tradeoffs.
+- **Native sandbox with a policy engine, L7 egress rules, and placeholder credentials, no Docker:** Strands Box (E.13.16) — AWS, Apache-2.0, preview since Oct 2026. Backend candidate next to nono for macOS and Linux; no claude.ai subscription auth and `.git/hooks` stays writable. The Strands SDK itself is not a sandbox.
 - **Layer policy on top of sandbox:** prefer nah (D.10.2) over hand-rolled hooks for command classification; reach for Cupcake (D.10.1) when rules grow complex enough to need Rego.
 - **Don't double-sandbox:** when running Codex CLI, lean on its built-in modes (E.17); for Claude Code, use SRT (E.2 / E.17) rather than wrapping Claude Code in yet another Seatbelt layer.
 
@@ -1805,6 +2010,7 @@ A useful way to split the problem. The layers don't need to come from the same p
 | Eclipse Enclave | Container | Gateway sidecar, header placeholders, audit log | SSH key discouraged; push from host |
 | NVIDIA OpenShell | Container / VM + Landlock | Supervisor: per-binary + L7 rules, providers | — |
 | exe.dev | VM | Edge integrations, integrations-only egress | Integrations scope what each credential can reach |
+| Strands Box | Seatbelt / namespaces + seccomp; one sandbox per spawned tool | In-process gateway: policy on connect and on each HTTP request, placeholders, SigV4 | — (`shell:spawn` rules can restrict `git` subcommands) |
 | Docker Sandboxes | microVM | Host proxy, header injection | Private Docker daemon per sandbox |
 | ATeam today | Seatbelt / bubblewrap (mode ①) or Docker | Domain allowlist in mode ① only; none in Docker modes; real tokens in env | User pushes from host |
 
@@ -1825,6 +2031,23 @@ A useful way to split the problem. The layers don't need to come from the same p
 | Implementation | Go | Closed service | Almide + Rust | Rust |
 | License / maturity | MIT, v1.0 (Oct 2026), 94⭐ | Commercial | Apache-2.0, v0.6, 3⭐ | Apache-2.0, v0.1.9, ~21.8k⭐, CNCF |
 
+**A fifth design, added 2026-11-21: Strands Box** (§E.13.16). Same rows as above.
+
+| | Strands Box |
+|---|---|
+| Isolation | Native process sandbox (Seatbelt; Linux namespaces + seccomp), one per agent and per spawned tool |
+| macOS | Native, Apple Silicon, macOS 15+ |
+| Where enforcement runs | Kernel rules + a trusted parent process holding the gateway, shell, and policy engine |
+| Default egress | Deny (policy must permit); the Open starter policy permits any public host |
+| Domain allowlist | Yes, as policy rules; no separate list |
+| L7 rules (method/path) | Yes, on every HTTP request; MCP calls and tool arguments too; rules can depend on history |
+| HTTPS interception | TLS terminated for every connection, per-box CA |
+| Credential injection | Placeholder in a header, basic auth, or query parameter; SigV4 re-signing; response redaction |
+| Agent sees the real secret | No, for `env://`, `aws://`, and secret-source routes |
+| Audit | OTLP JSON decision records with rule IDs; unsigned |
+| Implementation | Rust |
+| License / maturity | Apache-2.0, v0.2.4 core / v0.3.0-preview.1 CLI, 563⭐, AWS |
+
 **Corrections to a secondary summary we received (2026-11):**
 
 - *"Porta has no comparable credential injection and no HTTPS interception."* Wrong on credentials: `--credential` / `[[credentials]]` mint per-run placeholders, and porta terminates TLS for bound hosts with a per-run CA. Right that interception isn't transparent: clients reach the proxy through `HTTPS_PROXY`, and direct egress is denied.
@@ -1839,7 +2062,7 @@ Where the "no" is actually enforced, and what a bypass would need.
 | Mechanism | Examples | Bypass needs | Notes |
 |---|---|---|---|
 | Proxy env vars only (`HTTPS_PROXY`) | Many "set a proxy" wrappers | Any client that ignores the env var | Not a boundary on its own. |
-| Proxy env vars + kernel denies direct egress | Anthropic SRT, Porta `--proxy-allow` | A sandbox or kernel bug | Non-compliant clients fail closed rather than leak. |
+| Proxy env vars + kernel denies direct egress | Anthropic SRT, Porta `--proxy-allow`, Strands Box | A sandbox or kernel bug | Non-compliant clients fail closed rather than leak. Box also lets one tool opt out with `contain_egress = false`. |
 | Transparent redirect inside a netns | Enclave (iptables REDIRECT + dnsmasq/ipset), Docker Sandboxes | Traffic on ports or protocols that aren't redirected | Enclave proxies only TCP 80/443; other ports and UDP to allowed IPs pass unproxied and unlogged. |
 | IP allowlist resolved at startup | Anthropic devcontainer `init-firewall.sh`, Byre | — | Rots mid-run when CDN IPs change (§F.1.3). |
 | DNS-filled ipset | Enclave | — | IPs are added at query time, so no startup rot; stale IPs stay allowed. |
@@ -1850,15 +2073,15 @@ Where the "no" is actually enforced, and what a bypass would need.
 
 1. **Real secret in the sandbox** (env var or mounted file). ATeam's Docker modes today and most container wrappers. Protection comes only from scoping and rotation.
 2. **Explicit endpoint / base URL.** The agent calls a gateway hostname; the gateway adds the credential and forwards over real TLS. Examples: exe.dev integrations, ATeam's planned `ANTHROPIC_BASE_URL` proxy (§F.1.1 Tier A), nono's local reverse proxy. No CA and no interception, but each client needs a configurable base URL.
-3. **Transparent TLS interception with placeholders.** The agent calls the real hostname with a placeholder; the gateway terminates TLS with its own CA and swaps the placeholder. Examples: Enclave, Porta, OpenShell, Docker Sandboxes, Matchlock, runclaude's `runproxy`. No URL changes, but every runtime must trust the CA, and pinning breaks.
-4. **Gateway-side signing or minting.** For auth a placeholder can't satisfy: request signatures and short-lived tokens from refresh flows. Examples: OpenShell (SigV4 signing; OAuth2, Google, STS refresh), exe.dev (S3 SigV4), runclaude (Bedrock SigV4 re-sign).
+3. **Transparent TLS interception with placeholders.** The agent calls the real hostname with a placeholder; the gateway terminates TLS with its own CA and swaps the placeholder. Examples: Enclave, Porta, OpenShell, Docker Sandboxes, Matchlock, runclaude's `runproxy`, Strands Box. No URL changes, but every runtime must trust the CA, and pinning breaks.
+4. **Gateway-side signing or minting.** For auth a placeholder can't satisfy: request signatures and short-lived tokens from refresh flows. Examples: OpenShell (SigV4 signing; OAuth2, Google, STS refresh), exe.dev (S3 SigV4), runclaude (Bedrock SigV4 re-sign), Strands Box (SigV4 re-sign for any AWS host, credentials refreshed through the AWS SDK).
 5. **Operation broker.** The agent never holds or uses the credential. It asks a trusted service to perform a named operation (push a branch, open a PR, deploy). Examples: agent-box Portal, nono's delegated tools, an SSH bastion.
 
 **Transparent interception vs explicit endpoint:**
 
 | | Transparent interception (placeholder) | Explicit integration endpoint |
 |---|---|---|
-| Examples | Enclave, Porta, OpenShell, Docker Sandboxes | exe.dev, `ANTHROPIC_BASE_URL` proxy |
+| Examples | Enclave, Porta, OpenShell, Docker Sandboxes, Strands Box | exe.dev, `ANTHROPIC_BASE_URL` proxy |
 | API hostname in the client | Unchanged | Replaced by a gateway hostname |
 | Client changes | Usually none, but the client must trust the CA | Base-URL config per client |
 | Custom CA | Required, via per-runtime env vars | Not needed |
@@ -1872,7 +2095,7 @@ Neither approach stops misuse of an authorized credential. An agent can still ma
 
 ### G.5 Credential placement support
 
-Verified from each project's docs on 2026-11-20. "—" means not supported or not documented.
+Verified from each project's docs on 2026-11-20 (Strands Box on 2026-11-21). "—" means not supported or not documented.
 
 | | Header | Query param | URL path | Body | SigV4 signing | Refresh in gateway | Binding scope |
 |---|---|---|---|---|---|---|---|
@@ -1880,22 +2103,23 @@ Verified from each project's docs on 2026-11-20. "—" means not supported or no
 | Porta | Any header | Yes | Yes (request line) | — (passed through) | — | — | Host + path prefix |
 | NVIDIA OpenShell | Yes (Bearer, Basic, custom) | Yes | Yes (path slots) | Opt-in | Yes | OAuth2, Google SA, AWS STS | Binary + host + port + path |
 | exe.dev | Yes (`--header`, `--bearer`, basic) | Not documented | Via target + `--strip-prefix` | — | S3 only | Identity federation | Per integration, per VM |
+| Strands Box | One declared header, or basic auth | Yes | — | — | Yes (`.amazonaws.com`, `.api.aws`) | AWS SDK chain only (no SSO, no OAuth2) | Host + port + path prefix; every process in the box |
 | Docker Sandboxes | Yes ("only setting the header", §F.1.1) | Not reviewed | Not reviewed | — | Not reviewed | Not reviewed | Host |
 | ATeam Tier A plan (§F.1.1) | Yes (`x-api-key`) | — | — | — | — | — | LLM endpoint only |
 
 ### G.6 Known restrictions and failure modes
 
-- **Query-string and body credentials.** Google Maps `?key=` and some webhook APIs put the key outside headers. Header-only gateways (Enclave, Docker Sandboxes) can't serve them; Porta and OpenShell can. Query strings also tend to leak into logs; Enclave and OpenShell strip them from logged paths.
-- **Signed requests.** AWS SigV4 and similar schemes sign the request with the secret, so a placeholder yields a bad signature. They need gateway-side signing (OpenShell, exe.dev for S3, runclaude for Bedrock).
-- **Client-side token checks.** Clients that parse or verify a token locally reject random placeholders. Workarounds: a custom placeholder shape (Enclave), a JWT-shaped alias (OpenShell), or leaving that credential unprotected (Enclave refuses Codex Agent Identity JWTs).
-- **Refreshable and file-backed logins.** An interactive OAuth login writes access and refresh tokens to a file and rotates them. A placeholder saved to a file breaks the next session. Enclave leaves these logins unprotected (its issue #133); OpenShell moves refresh into the gateway. For Claude Code, the env-only `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` works with Enclave and Porta placeholders. OpenShell's bundled Anthropic profile documents only `ANTHROPIC_API_KEY`.
+- **Query-string and body credentials.** Google Maps `?key=` and some webhook APIs put the key outside headers. Header-only gateways (Enclave, Docker Sandboxes) can't serve them; Porta, OpenShell, and Strands Box (query only) can. Query strings also tend to leak into logs; Enclave and OpenShell strip them from logged paths.
+- **Signed requests.** AWS SigV4 and similar schemes sign the request with the secret, so a placeholder yields a bad signature. They need gateway-side signing (OpenShell, Strands Box, exe.dev for S3, runclaude for Bedrock).
+- **Client-side token checks.** Clients that parse or verify a token locally reject random placeholders. Workarounds: a custom placeholder shape (Enclave), a configurable placeholder prefix such as `sk-ant-` (Strands Box), a JWT-shaped alias (OpenShell), or leaving that credential unprotected (Enclave refuses Codex Agent Identity JWTs).
+- **Refreshable and file-backed logins.** An interactive OAuth login writes access and refresh tokens to a file and rotates them. A placeholder saved to a file breaks the next session. Enclave leaves these logins unprotected (its issue #133); OpenShell moves refresh into the gateway. For Claude Code, the env-only `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` works with Enclave and Porta placeholders. OpenShell's bundled Anthropic profile documents only `ANTHROPIC_API_KEY`. Strands Box documents that a claude.ai subscription sign-in doesn't work in a box (API key or Bedrock only).
 - **TLS trust.** Each runtime reads a different variable: `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`, `GIT_SSL_CAINFO`, `NODE_EXTRA_CA_CERTS`, `DENO_CERT`. Go on macOS reads the Keychain and ignores them. Pinned clients fail. Explicit endpoints avoid all of this.
 - **Protocols.** Porta intercepts HTTP/1.1 only, one request per connection. Gondolin is HTTP/1.x only (§F.2). No surveyed gateway intercepts QUIC: Porta and OpenShell block UDP, while Enclave passes UDP to allowed IPs without the proxy. Non-HTTP protocols (SSH, databases) can be allowed by destination but carry no injected credentials.
 - **Non-proxied ports.** Enclave proxies only 80/443. Other ports to allowed IPs pass unlogged, so an SSH push never appears in its network log.
-- **Authorized misuse.** A brokered credential still allows anything that credential can do on an allowed endpoint: deleting a repo, running up costs, or exfiltrating through a user-content endpoint (§F.1.1). Mitigations: L7 rules (OpenShell `rest`/`mcp`/`graphql`, nono `--allow-endpoint`, coder/boundary, Porta path binding), least-privilege tokens (read-only GitHub), and quotas. No reviewed tool documents per-credential rate or cost limits.
-- **The gateway is a trusted component.** It sees the plaintext of intercepted traffic and holds every secret. Enclave runs it privileged inside the agent's netns; OpenShell keeps the supervisor outside the workload; Byre uses a run-to-completion helper (§F.3). Full-capture logs (Enclave `full`) store prompts and file contents.
-- **Address checks.** An allowed name can resolve to loopback, link-local, or a metadata address. Porta refuses those; OpenShell's prover flags metadata access; flar rejects RFC1918 too (§F.3). Porta still allows private ranges.
-- **Policy location.** The agent must not be able to edit its own policy. Enclave keeps project config host-side; Porta protects `porta.toml` inside mounts; OpenShell keeps policy in the gateway.
+- **Authorized misuse.** A brokered credential still allows anything that credential can do on an allowed endpoint: deleting a repo, running up costs, or exfiltrating through a user-content endpoint (§F.1.1). Mitigations: L7 rules (OpenShell `rest`/`mcp`/`graphql`, nono `--allow-endpoint`, coder/boundary, Porta path binding), least-privilege tokens (read-only GitHub), and quotas. No reviewed tool documents per-credential cost limits. Strands Box's temporal rules can cap request counts per host over a time window (§E.13.16).
+- **The gateway is a trusted component.** It sees the plaintext of intercepted traffic and holds every secret. Enclave runs it privileged inside the agent's netns; OpenShell keeps the supervisor outside the workload; Strands Box puts the gateway, the shell and Python interpreters, the secrets, and the CA key in one unsandboxed parent process; Byre uses a run-to-completion helper (§F.3). Full-capture logs (Enclave `full`) store prompts and file contents.
+- **Address checks.** An allowed name can resolve to loopback, link-local, or a metadata address. Porta refuses those; OpenShell's prover flags metadata access; Strands Box re-checks the resolved address against policy but blocks metadata addresses only if the policy has `forbid` rules for them; flar rejects RFC1918 too (§F.3). Porta still allows private ranges.
+- **Policy location.** The agent must not be able to edit its own policy. Enclave keeps project config host-side; Porta protects `porta.toml` inside mounts; OpenShell keeps policy in the gateway. Strands Box keeps profiles under `~/.strands/box` and makes the loaded config and policy unreachable whatever the policy permits.
 
 ### G.7 Design direction for the macOS / Claude Code workflow (notes, 2026-11)
 
