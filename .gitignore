@@ -14,3 +14,4 @@ ateam_candidate/
 .ci/
 .cache/
 __pycache__/
+archives/
