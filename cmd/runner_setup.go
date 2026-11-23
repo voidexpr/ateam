@@ -17,7 +17,6 @@ import (
 	"github.com/ateam/internal/root"
 	"github.com/ateam/internal/runner"
 	"github.com/ateam/internal/runtime"
-	"github.com/ateam/internal/sandboxpolicy"
 	"github.com/ateam/internal/secret"
 )
 
@@ -138,7 +137,7 @@ func buildRunnerFromBlocks(env *root.ResolvedEnv, rtCfg *runtime.Config, prof *r
 		// alternatives from the agent env — this is safe even when no secrets
 		// are configured.
 		resolver := secretResolver(env, secret.DefaultBackend())
-		if launch != nil && launch.Type != "none" && launch.Type != runtime.ContainerTypeNono {
+		if launch != nil && launch.Type != "none" && !runtime.IsSandboxBackend(launch.Type) {
 			// Launching the agent into a fresh container: it can't do interactive
 			// login, so required creds must be present up front. Hard failure.
 			if err := secret.ValidateSecrets(ac, resolver); err != nil {
@@ -172,8 +171,8 @@ func buildRunnerFromBlocks(env *root.ResolvedEnv, rtCfg *runtime.Config, prof *r
 	}
 	var ct container.Container
 	var err error
-	if launch != nil && launch.Type == runtime.ContainerTypeNono {
-		ct, err = buildNonoContainer(env, rtCfg, prof, ac, launch.Name)
+	if launch != nil && runtime.IsSandboxBackend(launch.Type) {
+		ct, err = buildSandboxContainer(env, rtCfg, prof, ac, launch)
 	} else {
 		ct, err = buildContainer(launch, prof, env, roleID, dockerAutoSetup)
 	}
@@ -257,8 +256,8 @@ func minimalRunnerFromAgentConfig(env *root.ResolvedEnv, ac *runtime.AgentConfig
 // paths in the rendered prompt — neither lands cleanly in this refactor.
 // Host mode handles remote WorkDir fine.
 func preflightContainerSupportsWorkDir(cc *runtime.ContainerConfig, env *root.ResolvedEnv) error {
-	if cc == nil || cc.Type == "" || cc.Type == "none" || cc.Type == runtime.ContainerTypeNono {
-		return nil // nono runs on the host: any working folder works
+	if cc == nil || cc.Type == "" || cc.Type == "none" || runtime.IsSandboxBackend(cc.Type) {
+		return nil // a sandbox backend runs on the host: any working folder works
 	}
 	if env.ProjectDir == "" || env.WorkDir == "" {
 		return nil
@@ -529,22 +528,23 @@ func rejectUnenforcedPolicy(prof *runtime.ProfileConfig, cc *runtime.ContainerCo
 	if prof == nil || !prof.HasPolicy() {
 		return nil
 	}
-	if cc != nil && cc.Type == runtime.ContainerTypeNono {
+	if cc != nil && runtime.IsSandboxBackend(cc.Type) {
 		return nil
 	}
-	return fmt.Errorf("profile %q sets read, write, exclude or domains, which its container enforces none of; add a sandbox backend (use = [\"sandbox/nono\"])", label)
+	return fmt.Errorf("profile %q sets read, write, exclude or domains, which its container enforces none of; add a sandbox backend (use = [\"sandbox/nono\"] or [\"sandbox/fence\"])", label)
 }
 
-// nonoProfileSeq numbers the nono profiles one process writes: a command
-// can build several runners.
-var nonoProfileSeq atomic.Int64
+// sandboxProfileSeq numbers the backend profiles one process writes: a
+// command can build several runners.
+var sandboxProfileSeq atomic.Int64
 
-// buildNonoContainer renders the profile of an unattended run into a nono
-// profile and returns the container that runs the agent under it. The
+// buildSandboxContainer renders the profile of an unattended run into the
+// profile of its sandbox backend (nono or fence) and returns the container
+// that runs the agent under it. The
 // rules are the ones `ateam chat` applies, plus what an unattended agent
 // needs: its config directory, its output folder, the agent's rw_paths
 // and ro_paths, and the project's sandbox_extra.
-func buildNonoContainer(env *root.ResolvedEnv, rtCfg *runtime.Config, prof *runtime.ProfileConfig, ac *runtime.AgentConfig, containerName string) (container.Container, error) {
+func buildSandboxContainer(env *root.ResolvedEnv, rtCfg *runtime.Config, prof *runtime.ProfileConfig, ac *runtime.AgentConfig, cc *runtime.ContainerConfig) (container.Container, error) {
 	composed := rtCfg.WithAgentProfile(*prof, ac.TypeName())
 	composed.Write = append(composed.Write, ac.RWPaths...)
 	composed.Read = append(composed.Read, ac.ROPaths...)
@@ -566,15 +566,12 @@ func buildNonoContainer(env *root.ResolvedEnv, rtCfg *runtime.Config, prof *runt
 	}
 	dir := sandboxStateDir(env.HomeDir)
 	pruneSandboxProfiles(dir)
-	profileFile := filepath.Join(dir, fmt.Sprintf("profile.%d.%d.json", os.Getpid(), nonoProfileSeq.Add(1)))
-	nono, err := writeNonoProfile(context.Background(), policy, containerName, profileFile)
+	profileFile := filepath.Join(dir, fmt.Sprintf("profile.%d.%d.json", os.Getpid(), sandboxProfileSeq.Add(1)))
+	prefix, err := sandboxPrefix(context.Background(), policy, cc, profileFile, true)
 	if err != nil {
 		return nil, err
 	}
-	return &container.NonoContainer{
-		Prefix:  sandboxpolicy.NonoPrefix(nono, profileFile, policy.WorkDir, true),
-		WorkDir: policy.WorkDir,
-	}, nil
+	return &container.SandboxContainer{Kind: cc.Type, Prefix: prefix, WorkDir: policy.WorkDir}, nil
 }
 
 // configDirGrant returns the folder to make writable for an agent's

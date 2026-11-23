@@ -5,7 +5,7 @@ GO_CMD ?= go
 GO := GOCACHE=$(GO_CACHE_DIR) $(GO_CMD)
 GO_INSTALL := GOBIN=$(GO_TOOL_BIN) $(GO)
 
-.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy update-autoversion check-tidy check-docs check test test-all test-cli test-docker test-docker-live claude-in-docker vuln deadcode docs lint fmt fmt-check install-hooks run-ci
+.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy update-autoversion check-tidy check-docs check test test-all test-cli test-sandbox test-sandbox-nono test-sandbox-fence test-docker test-docker-live claude-in-docker vuln deadcode docs lint fmt fmt-check install-hooks run-ci
 
 BUILD_TIME := $(shell python3 -c 'import time; print(f"{time.time():.6f}")' 2>/dev/null || date +%s)
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
@@ -82,6 +82,22 @@ test-cli: build-binary
 	./test/cli/test-auth-combos.sh
 	./test/cli/test-codex-tmux-dryrun.sh
 	./test/cli/test-detection-flags.sh
+
+# Real-run checks of the sandbox backends (nono, fence): starts a probe
+# under `ateam run --profile sandbox/BACKEND` in a scratch project below
+# ~/.cache/ateam-sandbox-probe and reports what was allowed and refused.
+# Same targets on macOS and Linux. Run from a plain terminal: a sandbox
+# cannot start inside another one (an agent's shell). Not part of test-all.
+# SANDBOX_PROBE_NET=0 skips the host checks; SANDBOX_PROBE_DRY_RUN=1 only
+# prints each launch.
+test-sandbox: build-binary
+	./test/sandbox/run-probes.sh nono fence
+
+test-sandbox-nono: build-binary
+	./test/sandbox/run-probes.sh nono
+
+test-sandbox-fence: build-binary
+	./test/sandbox/run-probes.sh fence
 
 test-all: test test-cli test-docker test-docker-live
 

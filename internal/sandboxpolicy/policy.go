@@ -104,7 +104,7 @@ func Build(in Input) (*Policy, error) {
 			return fmt.Errorf("%s entry %q (%s): %w", attr, entry, origin(attr, entry), err)
 		}
 		if list != &excluded {
-			abs = realPath(abs)
+			abs = RealPath(abs)
 		}
 		*list = append(*list, Rule{Path: abs, Source: source})
 		return nil
@@ -152,7 +152,7 @@ func Build(in Input) (*Policy, error) {
 	if in.OpenAteam {
 		for _, dir := range []string{in.AteamHome, in.ProjectDir} {
 			if dir != "" {
-				p.Write = append(p.Write, Rule{Path: realPath(dir), Source: "ateam", Reason: "ateam_files is open: a command that runs ateam"})
+				p.Write = append(p.Write, Rule{Path: RealPath(dir), Source: "ateam", Reason: "ateam_files is open: a command that runs ateam"})
 			}
 		}
 	} else {
@@ -168,7 +168,7 @@ func Build(in Input) (*Policy, error) {
 			return slices.ContainsFunc(ateamDirs, func(dir string) bool { return Within(path, dir) })
 		}
 		opensAteam = func(grant, path string) bool {
-			return inAteam(grant) && Within(realPath(path), grant)
+			return inAteam(grant) && Within(RealPath(path), grant)
 		}
 		excluded = append(excluded, implicitExcludes(in)...)
 	}
@@ -224,14 +224,19 @@ func Build(in Input) (*Policy, error) {
 // folder or a write grant), "" when path is not inside one. A path that is
 // itself a writable folder has no root: it is writable on purpose.
 func (p *Policy) WritableRoot(path string) string {
-	roots := append([]string{p.WorkDir}, pathsOf(p.Write)...)
 	best := ""
-	for _, root := range roots {
+	for _, root := range pathsOf(p.Writable()) {
 		if path != root && Within(path, root) && len(root) > len(best) {
 			best = root
 		}
 	}
 	return best
+}
+
+// Writable returns every writable folder: the working folder, then the
+// write grants.
+func (p *Policy) Writable() []Rule {
+	return append([]Rule{{Path: p.WorkDir, Source: "the working folder"}}, p.Write...)
 }
 
 func pathsOf(rules []Rule) []string {
@@ -295,9 +300,9 @@ func Within(path, base string) bool {
 	return strings.HasPrefix(path, base+string(filepath.Separator))
 }
 
-// realPath returns where path really is, following links. For a path
+// RealPath returns where path really is, following links. For a path
 // that does not exist yet, the links of the part that exists are followed.
-func realPath(path string) string {
+func RealPath(path string) string {
 	rest := ""
 	for dir := path; ; dir = filepath.Dir(dir) {
 		if real, err := filepath.EvalSymlinks(dir); err == nil {
@@ -313,7 +318,7 @@ func realPath(path string) string {
 // withRealPath returns path and, when it goes through a link, where it
 // really is.
 func withRealPath(path string) []string {
-	if real := realPath(path); real != path {
+	if real := RealPath(path); real != path {
 		return []string{path, real}
 	}
 	return []string{path}

@@ -79,7 +79,7 @@ Related research: `research/ResearchSandboxing.md`, sections F.1.2 (review-time 
 | 16 | Supervised coding (2026-11-22/23) | Two supported setups: supervisor without nono and sub-runs with a nono profile; or supervisor under nono with `agent/ateam`, all in one sandbox. |
 | 17 | Names (2026-11-21) | Built-in composable profiles carry a folder prefix (`sandbox/nono`, `agent/claude`, `dev/go`): a profile named `claude` would shadow the agent shorthand of unattended runs. No `--go` shorthand: `--profile a,b`. |
 | 18 | `domains` (2026-11-21) | A plain profile list for now, so a sandboxed build can reach its registries. The `network` entity (decision 8) replaces it. |
-| 20 | Embedded sandbox (2026-11-23) | fence is added as a second backend, used as a Go library so ateam carries its own sandbox. It also tests that the policy model is not shaped by nono. |
+| 20 | Embedded sandbox (2026-11-23) | fence is added as a second backend, used as a Go library so ateam carries its own sandbox. It also tests that the policy model is not shaped by nono. Built 2026-11-22 on macOS, not yet run for real. Result of the test: one nono shape in the model, a grant inside an excluded folder, which fence refuses (the steps file lists where it is used). |
 | 19 | Default container (2026-11-21) | A profile without agent or container takes the `default` profile's. No new top-level setting. No wrapper phase. |
 
 ## Design
@@ -218,6 +218,7 @@ network "webapp-dev" {
 - Default when a profile names no network: deny, with LLM provider hosts and localhost allowed.
 - The LLM hosts are their own named set. A profile that routes through a proxy leaves it out, so direct connections are closed.
 - Ports: `host:port`. A dynamically allocated port is edited into the profile by hand in the first version. A proper mechanism (`exposes`) comes later.
+- Localhost needs three forms (found with fence, 2026-11-23): all of localhost, `localhost:PORT` for a server on the host, and a port the sandboxed command listens on. nono and fence on macOS only open localhost as a whole; fence on Linux only opens listed ports. Each backend maps what it can and refuses the rest. Details: steps file, "Next steps", 5.
 - `default = "allow"` with `deny` rules is the open mode; a backend that cannot deny inside an open network returns an error.
 - The single `DOMAINS` list of `agents.targy` is split per group (`go-registry`, `npm`, ...).
 - Note: nono leaves the network open unless a domain list or a block flag is given. The nono backend must always pass one.
@@ -228,7 +229,7 @@ network "webapp-dev" {
 |---|---|---|
 | `none` + agent sandbox | Claude sandbox settings, Codex flags | exists |
 | `nono` | nono profile JSON; for Claude, settings with its own sandbox off | new, first |
-| `fence` or an embedded Go sandbox | that tool's config | later |
+| `fence`, embedded as a Go library | a fence configuration, run by `ateam fence-exec` | built on macOS, not yet run for real |
 | `docker`, `docker-exec` | mounts from `read`/`write`; network needs a gateway (research G) | later |
 
 nono backend, ported from targy:
@@ -337,7 +338,7 @@ ateam profile export myproject --out DIR
 | 2 | `network` entity mapped to nono's proxy, with ports. `_remove` and `_replace`. Trust on first use for project-supplied profiles | Not started. `domains` stands in for the network entity |
 | 3 | Secrets: `ateam secret` values as placeholders, injected outside the sandbox (research G.4, F.1.1 Tier A first) | Not started |
 | 4 | `exposes` and `resources`: ports, Playwright, build containers, remote computers. Other backends for comparison: Enclave, OpenShell, Strands Box | Not started |
-| — | fence as an embedded backend (Go library, no external binary): a second consumer of the policy model, and a path to Linux | Next (decided 2026-11-23); see the steps file |
+| — | fence as an embedded backend (Go library, no external binary on macOS): a second consumer of the policy model | Built on macOS, not yet run for real. Not a path to Linux as it stands: there fence needs `bwrap` and `socat`, and opens localhost one port at a time. See the steps file |
 
 Later, outside the phases: attended sessions in the metrics database; `chat`, `run`, `shell` on Docker containers.
 
@@ -378,4 +379,5 @@ Staying with targy + `nono-sandbox`:
 6. Names for `exposes` and `resources`, and the shape of port and Playwright blocks. A dynamic port: how a profile learns the port that was chosen.
 7. Whether `run` and `chat` should also accept a `--save NAME` shortcut. Current answer: no, `profile save` then launch.
 8. Renaming `exec` and `prompt` to fit the wider scope.
+10. fence: a grant inside an excluded folder cannot be expressed (`dev/go`, unattended runs without a project). Keep it refused, split the exclude around the grant at launch, or ask for it upstream. See the steps file.
 9. `DEV.md` describes `roles/` and `supervisor/` as promotion targets while `CONFIG.md` and the prompts use `shared/`: which is current.

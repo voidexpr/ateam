@@ -39,6 +39,9 @@ A Go CLI to manage unattended agent + software engineering quality oriented prom
 ### CLI Related / end-to-end testing
 * `make test-cli`: slightly slower, run on most changes related to ateam's dealing with its environment or CLI interface
 
+### Sandbox backends (nono, fence)
+* `make test-sandbox` (or `test-sandbox-nono`, `test-sandbox-fence`): real launches of a probe under each sandbox backend, in a scratch project. Cannot run from an agent's sandbox (a sandbox does not nest): ask the owner after changes to `internal/sandboxpolicy/`, `cmd/sandbox_launch.go` or `cmd/sandbox_fence.go`. `SANDBOX_PROBE_DRY_RUN=1` only plans the launches and does run from an agent's sandbox
+
 ### Dock Related
 * `make test-docker`: any time you change agent, container, runner related code or dependencies, they run slower — when modifying `internal/runner/`, `internal/container/`, `cmd/runner_setup.go`, or `cmd/docker.go`, read `CONCURRENCY.md` first; violations cause SIGSEGVs under parallel workloads
 * `make test-docker-live`: runs test-docker plus uses Anthropic API to do more end to end testing, run to be even more thorough

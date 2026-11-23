@@ -606,7 +606,7 @@ Pricing can go stale. The top-level `pricing_as_of` date says when the tables we
 
 ### Containers
 
-Four container types are supported: `none`, `docker` (one-shot), `docker-exec` (exec into a user-managed container), and `nono` (an OS-level sandbox on the host; see [Composable profiles](#composable-profiles) and [ISOLATION.md → nono](ISOLATION.md#-nono-sandbox)).
+Five container types are supported: `none`, `docker` (one-shot), `docker-exec` (exec into a user-managed container), `nono` (an OS-level sandbox on the host; see [Composable profiles](#composable-profiles) and [ISOLATION.md → nono](ISOLATION.md#-nono-sandbox)) and `fence` (the same kind of sandbox, built into ateam; see [ISOLATION.md → fence](ISOLATION.md#fence-the-built-in-backend)).
 
 ```hcl
 container "docker" {
@@ -701,7 +701,7 @@ profile "myproject" {
 - A profile without an agent or a container runs with the `default` profile's.
 - An unknown name or a cycle in `use` is a load error.
 - Paths start with `~` or `/`. Reading is open below the home, except what is excluded.
-- The rules need a sandbox backend. Any run, attended or not, on a container that cannot enforce them is refused. `nono` enforces all of them.
+- The rules need a sandbox backend. Any run, attended or not, on a container that cannot enforce them is refused. `nono` enforces all of them. `fence` enforces them too, except a `read` or `write` inside a folder that stays excluded, which it refuses.
 - Each layer also loads `profiles/*.hcl` after its `ateam.hcl`: where `ateam profile save` writes.
 
 ##### Filters
@@ -738,7 +738,7 @@ profile "myproject" {
 
 The path lists of the built-in profiles are filters (`agent/secrets`, `dev/go-write`, ...): to change what a built-in profile grants, put a filter file of the same name in `~/.ateam/filters/`.
 
-Built-in composable profiles (`ateam profile list`): `sandbox/nono` (the nono container plus `agent/secrets`), `agent/secrets` (keys, credentials, app data and personal folders unreadable), `agent/claude` and `agent/codex` (the agent's own files and API hosts), `agent/ateam` (ateam's own files open, to run ateam inside the sandbox), `dev/go`, `dev/rust`, `dev/python`, `dev/node`, `dev/deno`, `dev/github`, `dev/all`.
+Built-in composable profiles (`ateam profile list`): `sandbox/nono` (the nono container plus `agent/secrets`), `sandbox/fence` (the same with the built-in fence container), `agent/secrets` (keys, credentials, app data and personal folders unreadable), `agent/claude` and `agent/codex` (the agent's own files and API hosts), `agent/ateam` (ateam's own files open, to run ateam inside the sandbox), `dev/go`, `dev/rust`, `dev/python`, `dev/node`, `dev/deno`, `dev/github`, `dev/all`.
 
 Every sandboxed launch also closes ateam's own files: the user's ateam directory, and in the project's `.ateam/` everything but `runtime/`, `shared/`, `prompts/`, `cache/` and `.gitignore`. An explicit `read` or `write` of one of them, or of the `.ateam/` directory itself, reopens it; `ateam_files = "open"` opens all of them.
 

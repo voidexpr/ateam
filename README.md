@@ -41,7 +41,7 @@ Ateam handles the boring bits:
 
 **Agents and isolation**
 - Drives Claude Code (`claude -p` with `stream-json`) and Codex (`exec`); experimental `codex-tmux` lets TUI-only commands like `/review` run unattended
-- Multiple isolation modes: built-in agent sandbox (default), one-shot Docker, exec into a long-lived container (Docker / devcontainer / compose), run ateam itself inside Docker (removes all permission checks), or the [nono](https://nono.sh) OS sandbox set from outside the agent. These modes let you balance permissions vs. safety.
+- Multiple isolation modes: built-in agent sandbox (default), one-shot Docker, exec into a long-lived container (Docker / devcontainer / compose), run ateam itself inside Docker (removes all permission checks), or an OS sandbox set from outside the agent: [nono](https://nono.sh), or [fence](https://github.com/fencesandbox/fence), which is built into ateam (experimental). These modes let you balance permissions vs. safety.
 - Sandboxed attended sessions and commands: `ateam chat`, `ateam run` and `ateam shell` start an agent, a command or a shell under composable profiles (files, network), saved per project with `ateam profile save` — see [ISOLATION.md](ISOLATION.md#-nono-sandbox)
 - Config files to manage agent and container invocation, for example, profiles select combinations of agent + container + custom arguments (`--profile docker`, `--profile codex-high`)
 - Dynamic prompt assembly: ad-hoc pre/post instructions on top of named prompts, with macro support inside prompts
@@ -229,7 +229,8 @@ ateam resume 12 --launch
 ```
 
 ```bash
-# an attended agent, a command or a shell under a sandbox profile (macOS, needs nono)
+# an attended agent, a command or a shell under a sandbox profile (macOS, needs nono;
+# sandbox/fence instead of sandbox/nono uses the built-in sandbox, experimental)
 ateam chat --profile sandbox/nono,dev/go
 ateam run --profile sandbox/nono,dev/go -- make test
 ateam shell --profile sandbox/nono,dev/go
@@ -317,7 +318,7 @@ Isolation is configuration-driven, so any of the above can be tuned per project.
 | **nono sandbox** | The whole agent process, or any command or shell, under an OS sandbox set from outside it ([nono](https://nono.sh)); file and network rules come from composable profiles | A boundary the agent cannot edit; the same rules for attended and unattended work. macOS for now |
 | **None** | No isolation (agent runs directly on host) | Debugging only |
 
-By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for one-shot container isolation, `--profile docker-exec` to exec into an existing container, or `--profile sandbox/nono` for the nono sandbox. See `ateam cat --defaults` (the built-in `ateam.hcl`) for all profiles.
+By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for one-shot container isolation, `--profile docker-exec` to exec into an existing container, `--profile sandbox/nono` for the nono sandbox, or `--profile sandbox/fence` for the built-in fence sandbox (experimental). See `ateam cat --defaults` (the built-in `ateam.hcl`) for all profiles.
 
 ## Commands
 

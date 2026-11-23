@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	goruntime "runtime"
 	"slices"
 	"strings"
@@ -210,6 +211,155 @@ func TestRejectUnenforcedPolicy(t *testing.T) {
 	}
 }
 
+// A fence launch needs no other program: the command line is ateam itself
+// with the configuration file, and the policy is the one nono gets.
+func TestPlanLaunchFence(t *testing.T) {
+	if goruntime.GOOS != "darwin" {
+		t.Skip("the fence backend is macOS only for now")
+	}
+	work := launchFixture(t)
+	home := os.Getenv("HOME")
+	f := &launchFlags{profiles: []string{"sandbox/fence", "dev/rust"}}
+	plan, err := planLaunch(f, modeRun, []string{"true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nono, err := planLaunch(&launchFlags{profiles: []string{"sandbox/nono", "dev/rust"}}, modeRun, []string{"true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nono.policy.Name = plan.policy.Name
+	if plan.container.Type != runtime.ContainerTypeFence || !reflect.DeepEqual(plan.policy, nono.policy) {
+		t.Fatalf("fence and nono must share one policy:\n%+v\n%+v", plan.policy, nono.policy)
+	}
+	configFile := filepath.Join(t.TempDir(), "fence.json")
+	argv, err := plan.wrapped(t.Context(), modeRun, configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	self, _ := os.Executable()
+	trueBin, _ := exec.LookPath("true")
+	if want := []string{self, "fence-exec", "--settings", configFile, "--workdir", work, "--", trueBin}; !slices.Equal(argv, want) {
+		t.Errorf("argv = %v, want %v", argv, want)
+	}
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{filepath.Join(home, ".ssh"), filepath.Join(home, ".cargo"), "crates.io"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("the configuration lacks %s:\n%s", want, data)
+		}
+	}
+
+	// A grant inside a folder that stays excluded: refused, the file not
+	// left behind. dev/go is one: it reads the Go settings inside the
+	// excluded ~/Library/Application Support.
+	plan, err = planLaunch(&launchFlags{profiles: []string{"sandbox/fence", "dev/go"}}, modeRun, []string{"true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := filepath.Join(t.TempDir(), "refused.json")
+	if _, err := plan.wrapped(t.Context(), modeRun, refused); err == nil || !strings.Contains(err.Error(), "Application Support/go") || !strings.Contains(err.Error(), "dev/go-read") {
+		t.Errorf("a read inside an excluded folder must be refused, naming the path and its filter, got %v", err)
+	}
+	if fileExists(refused) {
+		t.Error("a refused launch leaves no configuration")
+	}
+}
+
+// fence has paths it never lets be written: a write grant of one is an
+// error naming the rule, found by asking fence about the rendered file.
+func TestCheckFenceConfigRefusesWhatFenceNeverWrites(t *testing.T) {
+	if goruntime.GOOS != "darwin" {
+		t.Skip("the fence backend is macOS only for now")
+	}
+	launchFixture(t)
+	home := os.Getenv("HOME")
+	f := &launchFlags{profiles: []string{"sandbox/fence"}, write: []string{"~/.gitconfig"}}
+	plan, err := planLaunch(f, modeRun, []string{"true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = plan.wrapped(t.Context(), modeRun, filepath.Join(t.TempDir(), "fence.json"))
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(home, ".gitconfig")) || !strings.Contains(err.Error(), "command line") {
+		t.Errorf("a write of ~/.gitconfig must be refused, naming the path and where it was asked: %v", err)
+	}
+}
+
+func TestFenceExecRefusesToNest(t *testing.T) {
+	t.Setenv("ATEAM_IN_SANDBOX", "1")
+	if _, err := runFenceExec("fence.json", t.TempDir(), []string{"true"}); err == nil || !strings.Contains(err.Error(), "inside a sandbox") {
+		t.Errorf("a sandbox inside a sandbox must be refused, got %v", err)
+	}
+	if got := fenceEnv([]string{"PATH=/bin", "DYLD_INSERT_LIBRARIES=x", "LD_PRELOAD=y", "LDFLAGS=-s"}); !slices.Equal(got, []string{"PATH=/bin", "LDFLAGS=-s"}) {
+		t.Errorf("fenceEnv = %v", got)
+	}
+}
+
+// An unattended run on a fence container wraps the agent in ateam's own
+// fence-exec, with the chat rules plus what the run itself writes.
+func TestBuildFenceContainerForUnattendedRun(t *testing.T) {
+	if goruntime.GOOS != "darwin" {
+		t.Skip("the fence backend is macOS only for now")
+	}
+	work := launchFixture(t)
+	cfg, err := runtime.Load(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	composed, err := cfg.ComposeProfiles([]string{"sandbox/fence", "dev/rust"}, runtime.ProfileConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prof, ac, cc, err := cfg.ResolveComposed(composed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ac.ConfigDir = "agents/claude"
+	// Without a project the run's output lies in ateam's own folder, which
+	// stays excluded as a whole: fence cannot open a path inside it.
+	env := &root.ResolvedEnv{HomeDir: os.Getenv(runtime.HomeEnv), WorkDir: work}
+	if _, err := buildSandboxContainer(env, cfg, prof, ac, cc); err == nil || !strings.Contains(err.Error(), filepath.Join(env.HomeDir, "state", "runtime")) {
+		t.Errorf("a run without a project must be refused, naming its output folder: %v", err)
+	}
+	env.ProjectDir = filepath.Join(work, ".ateam")
+	if err := os.MkdirAll(env.ProjectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ct, err := buildSandboxContainer(env, cfg, prof, ac, cc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc, ok := ct.(*container.SandboxContainer)
+	if !ok || sc.WorkDir != work || sc.Type() != runtime.ContainerTypeFence {
+		t.Fatalf("container = %#v", ct)
+	}
+	cmd := sc.CmdFactory()(t.Context(), "claude", "-p")
+	if cmd.Args[1] != "fence-exec" || !slices.Equal(cmd.Args[len(cmd.Args)-3:], []string{"--", "claude", "-p"}) || cmd.Dir != work {
+		t.Errorf("command = %v in %q", cmd.Args, cmd.Dir)
+	}
+	data, err := os.ReadFile(cmd.Args[slices.Index(cmd.Args, "--settings")+1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := os.Getenv("HOME")
+	for _, want := range []string{
+		filepath.Join(home, ".claude"),                    // agent/claude
+		filepath.Join(home, ".cargo"),                     // dev/rust
+		filepath.Join(env.ProjectDir, "agents", "claude"), // the agent's config dir
+		filepath.Join(env.ProjectDir, "runtime"),          // the run's output
+		"api.anthropic.com",
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("the configuration lacks %s", want)
+		}
+	}
+	if clone, ok := sc.Clone().(*container.SandboxContainer); !ok || clone.Kind != sc.Kind {
+		t.Errorf("a clone keeps its kind: %#v", sc.Clone())
+	}
+}
+
 // An unattended run on a nono container wraps the agent in `nono run` with
 // a profile holding the chat rules plus what the run itself writes.
 func TestBuildNonoContainerForUnattendedRun(t *testing.T) {
@@ -234,11 +384,11 @@ func TestBuildNonoContainerForUnattendedRun(t *testing.T) {
 	}
 	ac.ConfigDir = "agents/claude"
 	env := &root.ResolvedEnv{HomeDir: os.Getenv(runtime.HomeEnv), WorkDir: work}
-	ct, err := buildNonoContainer(env, cfg, prof, ac, cc.Name)
+	ct, err := buildSandboxContainer(env, cfg, prof, ac, cc)
 	if err != nil {
 		t.Skipf("nono cannot be queried here: %v", err)
 	}
-	nc, ok := ct.(*container.NonoContainer)
+	nc, ok := ct.(*container.SandboxContainer)
 	if !ok || nc.WorkDir != work {
 		t.Fatalf("container = %#v", ct)
 	}

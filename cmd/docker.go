@@ -112,8 +112,8 @@ func buildContainer(cc *runtime.ContainerConfig, prof *runtime.ProfileConfig, en
 		}
 		de.UseSharedPrepareGuard()
 		return de, nil
-	case runtime.ContainerTypeNono:
-		// Built by buildNonoContainer, which needs the agent and the
+	case runtime.ContainerTypeNono, runtime.ContainerTypeFence:
+		// Built by buildSandboxContainer, which needs the agent and the
 		// composed profile. Falling through to "no container" here would
 		// run the agent on the host without its rules.
 		return nil, fmt.Errorf("container type %q is built from a profile, not here", cc.Type)

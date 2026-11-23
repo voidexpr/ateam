@@ -178,9 +178,20 @@ type ModelPricing struct {
 // OS-level sandbox, with a profile rendered from the ateam profile.
 const ContainerTypeNono = "nono"
 
+// ContainerTypeFence runs the command under fence
+// (https://github.com/fencesandbox/fence), an OS-level sandbox embedded in
+// ateam as a library, with a configuration rendered from the ateam profile.
+const ContainerTypeFence = "fence"
+
+// IsSandboxBackend reports whether a container type is an OS-level sandbox
+// on this host, which enforces the file and network rules of a profile.
+func IsSandboxBackend(containerType string) bool {
+	return containerType == ContainerTypeNono || containerType == ContainerTypeFence
+}
+
 type ContainerConfig struct {
 	Name              string
-	Type              string   // "none", "docker", "docker-exec", "nono"
+	Type              string   // "none", "docker", "docker-exec", "nono", "fence"
 	Dockerfile        string   // docker: relative to .ateam/ dir
 	DockerContainer   string   // docker-exec: name of user-managed container
 	ExecTemplate      string   // docker-exec: custom exec command (default: "docker exec {{CONTAINER}} {{CMD}}")
@@ -558,11 +569,11 @@ func (c *Config) resolveInheritance() error {
 func (c *Config) validateContainerTypes() error {
 	for name, cc := range c.Containers {
 		switch cc.Type {
-		case "", "none", "docker", "docker-exec", ContainerTypeNono:
+		case "", "none", "docker", "docker-exec", ContainerTypeNono, ContainerTypeFence:
 			continue
 		}
 		src, _ := c.Source("container." + name + ".type")
-		return fmt.Errorf("container %q: unknown type %q (%s); want none, docker, docker-exec or nono", name, cc.Type, c.Where(src, display.TildeHome))
+		return fmt.Errorf("container %q: unknown type %q (%s); want none, docker, docker-exec, nono or fence", name, cc.Type, c.Where(src, display.TildeHome))
 	}
 	return nil
 }

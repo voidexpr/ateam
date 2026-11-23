@@ -162,20 +162,6 @@ func sortedStrings(in []string) []string {
 	return slices.Compact(out)
 }
 
-// JSON returns the profile as an indented JSON document.
-func (n *NonoProfile) JSON() ([]byte, error) {
-	data, err := json.MarshalIndent(n, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	return append(data, '\n'), nil
-}
-
-// NonoCommand is the command line that runs argv under a profile file.
-func NonoCommand(nono, profileFile, workDir string, argv []string) []string {
-	return append(NonoPrefix(nono, profileFile, workDir, false), argv...)
-}
-
 // NonoPrefix is the nono command line up to the command to run. silent
 // keeps nono's banner and summary off the terminal: for unattended runs.
 func NonoPrefix(nono, profileFile, workDir string, silent bool) []string {
@@ -252,7 +238,19 @@ func nonoJSON(ctx context.Context, nono string, out any, args ...string) error {
 // WriteNonoProfile writes the profile beside dest, has nono validate it,
 // then renames it: an invalid profile never replaces a good one.
 func WriteNonoProfile(ctx context.Context, nono string, prof *NonoProfile, dest string) error {
-	data, err := prof.JSON()
+	return writeValidated(prof, dest, func(tmp string) error {
+		if out, err := inspect(ctx, nono, "profile", "validate", tmp).CombinedOutput(); err != nil {
+			return fmt.Errorf("nono refuses the profile: %s", strings.TrimSpace(string(out)))
+		}
+		return nil
+	})
+}
+
+// writeValidated writes a backend profile as indented JSON beside dest,
+// has validate accept that file, then renames it: a refused profile never
+// replaces a good one, and a launch never reads half a file.
+func writeValidated(profile any, dest string, validate func(tmp string) error) error {
+	data, err := json.MarshalIndent(profile, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -260,12 +258,12 @@ func WriteNonoProfile(ctx context.Context, nono string, prof *NonoProfile, dest 
 		return err
 	}
 	tmp := dest + ".part.json"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
 		return err
 	}
-	if out, err := inspect(ctx, nono, "profile", "validate", tmp).CombinedOutput(); err != nil {
+	if err := validate(tmp); err != nil {
 		_ = os.Remove(tmp)
-		return fmt.Errorf("nono refuses the profile: %s", strings.TrimSpace(string(out)))
+		return err
 	}
 	return os.Rename(tmp, dest)
 }

@@ -473,7 +473,7 @@ ateam shell [flags]                          # $SHELL
 - `shell`: ignores the profile's `command` and agent.
 - The working folder is writable: the project root inside a project, else the current folder. Running in the home or `/` is refused.
 - Under a sandbox backend, ateam waits for the command and compares `.git/config` and `.git/hooks` afterwards: a change is listed and the launch exits with code 3.
-- A profile whose rules its container cannot enforce is refused. `none` enforces nothing, `nono` enforces all of them; `docker` and `docker-exec` are not supported by these commands yet.
+- A profile whose rules its container cannot enforce is refused. `none` enforces nothing, `nono` enforces all of them, `fence` refuses a `read` or `write` inside a folder that stays excluded; `docker` and `docker-exec` are not supported by these commands yet.
 - Flags come before the command: everything after the first argument belongs to it.
 
 ```bash
@@ -488,13 +488,13 @@ ateam shell --profile myproject
 ateam profile list
 ateam profile show [NAME|FILE]... [launch flags]
 ateam profile save NAME [launch flags] [--command "CMD"] [--in-project] [--force]
-ateam profile export [NAME|FILE]... --out DIR
+ateam profile export [NAME|FILE]... --out DIR [--backend nono|fence]
 ```
 
 - `list`: every profile with its agent, container, `use` and rule count.
 - `show`: the composed result, each value with the profile it comes from, then the rules as the sandbox backend gets them. Takes the same flags as a launch.
 - `save`: writes `profiles/NAME.hcl` in the user's ateam directory, which a sandboxed command cannot reach (`--in-project`: the project's `.ateam/profiles/`). The profile uses the `--profile` names and adds the paths, domains and command given. Nothing is launched; an existing file needs `--force`.
-- `export`: writes the backend's own config (`profile.json` for nono), `run.sh` with the command line, and `RULES.md` listing every rule and its origin, and prints the command line. The files do not reference ateam: use them to troubleshoot, to reach a backend feature ateam does not expose, or to run ateam itself under rules you edited.
+- `export`: writes the backend's own config (`profile.json` for nono, `fence.json` for fence; `--backend` picks another backend than the profile's), `run.sh` with the command line, and `RULES.md` listing every rule and its origin, and prints the command line. The files do not reference ateam: use them to troubleshoot, to reach a backend feature ateam does not expose, or to run ateam itself under rules you edited.
 
 ```bash
 ateam profile save myproject --profile sandbox/nono,dev/go --write ~/SyncDatabox/dotfiles

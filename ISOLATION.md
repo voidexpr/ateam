@@ -14,7 +14,7 @@ See the [Execution modes diagram in README.md](README.md#execution-modes) for a 
 | ② Docker one-shot | Strong isolation; clean env every time; need build/test tooling | `.ateam/Dockerfile` + `ateam secret` |
 | ③ Docker exec | You already have a long-lived dev container (docker-compose, devcontainer, …) | One config block |
 | ④ ATeam inside Docker | The whole project is Docker-native; you already shell into a container to work | Mount the linux binary |
-| ⑤ nono sandbox | A boundary set from outside the agent, the same for agents, commands and shells; rules saved per project. macOS for now | Install [nono](https://nono.sh); `--profile sandbox/nono` |
+| ⑤ nono sandbox | A boundary set from outside the agent, the same for agents, commands and shells; rules saved per project. macOS for now | Install [nono](https://nono.sh); `--profile sandbox/nono`. Or nothing to install: `--profile sandbox/fence` ([fence](#fence-the-built-in-backend), experimental) |
 
 A "no isolation" option also exists (run the agent directly against the host with no sandbox) — covered briefly below; rarely the right choice.
 
@@ -63,7 +63,7 @@ ateam shell --profile sandbox/nono,dev/go                # your shell
 ateam exec "review the diff" --profile sandbox/nono      # an unattended agent
 ```
 
-Requires `nono` in `PATH` (tested with 0.82). macOS only for now.
+Requires `nono` in `PATH` (tested with 0.82). macOS only for now. A second backend, fence, is built into ateam and needs nothing installed: see [fence, the built-in backend](#fence-the-built-in-backend).
 
 ### What a launch may touch
 
@@ -161,8 +161,61 @@ The inner runs share the outer sandbox: **the outer profile's rules apply to the
 
 For supervised coding (`ateam code`), either run the supervisor without nono and give its sub-runs a nono profile (each sub-run gets its own sandbox), or run the supervisor under `sandbox/nono,agent/ateam` (all of it shares one sandbox).
 
+### fence, the built-in backend
+
+[fence](https://github.com/fencesandbox/fence) is a second sandbox backend, compiled into ateam as a library (v0.1.67): `sandbox/fence` needs no other program. It takes the same profiles and applies the same rules as `sandbox/nono`.
+
+```bash
+ateam run   --profile sandbox/fence,dev/rust -- cargo test
+ateam chat  --profile sandbox/fence
+ateam shell --profile sandbox/fence
+ateam exec "review the diff" --profile sandbox/fence     # inside a project
+```
+
+Experimental: the rules are checked by tests on the configuration and on the Seatbelt profile fence generates from it, not yet by real launches.
+
+How it runs:
+
+- ateam renders the profile into a fence configuration and starts itself again as `ateam fence-exec --settings FILE --workdir DIR -- COMMAND`, which applies the sandbox (Seatbelt, through the system's `sandbox-exec`) and runs the command. `--dry-run` prints that command line.
+- Network rules are enforced by a filtering proxy inside that ateam process, one per run. The command gets `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY`; direct connections are refused by the sandbox. A program that ignores these variables reaches nothing.
+- `TMPDIR` is `/tmp/fence` inside the sandbox.
+- Before a launch, ateam asks fence about every rule of the profile on the file it wrote. A rule fence would not apply as written is an error that names it.
+
+Differences from nono:
+
+| | nono | fence |
+|---|---|---|
+| Install | `nono` in `PATH` | Nothing |
+| A `read` or `write` inside a folder that stays excluded (`--read ~/.ssh/config`) | Opened | Refused: in fence a denied folder stays denied as a whole |
+| `dev/go` | Works | Refused: it reads `~/Library/Application Support/go`, inside a folder `agent/secrets` excludes |
+| Unattended run without a project | Works | Refused: the run's output is in the user's ateam directory, which is excluded as a whole |
+| The backend's own blocked reads | Lifted where the profile does not exclude | None: fence blocks no read on its own |
+| Writes the backend refuses on its own | None left | In the working folder, at any depth: `.gitmodules`, `.mcp.json`, `.ripgreprc`, `.vscode/`, `.idea/`, shell startup files. In the home: shell startup files and `.gitconfig`. No setting lifts this; a `write` of one of them is an error |
+| Writable besides the profile | nono's defaults | `/tmp/fence`, the per-user temporary folder, `~/.npm/_logs` |
+| Readable besides the home | nono's defaults | The system folders, `/tmp`, `/opt` |
+| Read-only paths | Raw Seatbelt rules added by ateam | fence's own write-deny rule, which also refuses the rename of the folders above |
+| `profile export` | `profile.json`, run by `nono` | `fence.json`, run by the `fence` command (`run.sh`) or by `ateam fence-exec` |
+
+`ateam profile export NAME --backend fence` (or `nono`) writes a profile for the other backend than its own.
+
+### Where a sandbox backend can start
+
+Both backends use the operating system's own sandbox. Where that is not available, the launch fails; ateam does not fall back to running without it.
+
+| Where | nono | fence |
+|---|---|---|
+| macOS, plain terminal | Works (Seatbelt). Needs `nono` installed | Works (Seatbelt). Nothing to install |
+| macOS, inside another Seatbelt sandbox (an agent's own sandbox, another nono or fence) | Cannot start: Seatbelt does not nest | Cannot start: same reason (`sandbox_apply: Operation not permitted`) |
+| Linux | Not enabled in ateam yet. nono uses Landlock, which needs a kernel that has it (5.13 or later) | Not enabled in ateam yet. Needs `bwrap` (package `bubblewrap`) and `socat` installed, and unprivileged user namespaces |
+| Linux, Ubuntu 24.04 or later | Not checked | fence's documentation: AppArmor restricts user namespaces by default; `bwrap` needs a profile that allows them |
+| Inside a Docker container (Docker on macOS included: it is a Linux machine) | Not checked. Landlock depends on the host's kernel and on the container's seccomp profile | fence's documentation: `bwrap` needs `--cap-add=NET_ADMIN` or `--privileged` to isolate the network; user namespaces must be allowed |
+| CI runners (GitHub Actions) | Not checked | fence's documentation: no network isolation without elevated permissions |
+
+The Linux rows come from each tool's documentation, not from runs by ateam. Inside a container, the container is usually the boundary: use modes ②, ③ or ④.
+
 ### Limits
 
+- fence: macOS only for now. Linux is planned, with `bwrap` and `socat` as requirements checked before a launch. It waits for network rules with ports: on Linux fence reaches the host's localhost one listed port at a time, which a profile cannot say yet.
 - macOS only. On Linux nono refuses a deny inside a grant; the launch is refused until ateam lists the home around the excluded paths.
 - The read-only rules use a nono profile key (`unsafe_macos_seatbelt_rules`) that nono's profile guide does not document.
 - Same kernel as the host: a process sandbox, not a container or a VM.

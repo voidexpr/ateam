@@ -31,6 +31,9 @@ type launchFlags struct {
 	domains  []string
 	command  string
 	dryRun   bool
+	// backend replaces the profile's container with a sandbox backend, by
+	// its container name: `ateam profile export --backend`.
+	backend string
 }
 
 func addLaunchFlags(cmd *cobra.Command, f *launchFlags) {
@@ -150,13 +153,19 @@ func planLaunch(f *launchFlags, mode launchMode, args []string) (*launchPlan, er
 	if err != nil {
 		return nil, err
 	}
+	if f.backend != "" {
+		if !runtime.IsSandboxBackend(f.backend) {
+			return nil, fmt.Errorf("--backend %q: want %s or %s", f.backend, runtime.ContainerTypeNono, runtime.ContainerTypeFence)
+		}
+		composed.Container = f.backend
+	}
 	prof, ac, cc, err := cfg.ResolveComposed(composed)
 	if err != nil {
 		return nil, err
 	}
 	// Under a sandbox backend, an attended agent also needs its own files
 	// and API hosts: the agent/<type> profile.
-	if mode == modeChat && cc.Type == runtime.ContainerTypeNono {
+	if mode == modeChat && runtime.IsSandboxBackend(cc.Type) {
 		if prof, ac, cc, err = cfg.ResolveComposed(cfg.WithAgentProfile(composed, ac.TypeName())); err != nil {
 			return nil, err
 		}
@@ -166,17 +175,17 @@ func planLaunch(f *launchFlags, mode launchMode, args []string) (*launchPlan, er
 		return nil, err
 	}
 	switch sandboxType(cc) {
-	case runtime.ContainerTypeNono:
+	case runtime.ContainerTypeNono, runtime.ContainerTypeFence:
 		if plan.policy, err = buildSandboxPolicy(cfg, prof, grantDir, projectDir, plan.ateamHome, files); err != nil {
 			return nil, err
 		}
 	case "inside":
 	case "", "none":
 		if prof.HasPolicy() {
-			return nil, fmt.Errorf("profile %q sets read, write, exclude or domains, but its container %q enforces none of them; add a sandbox backend (--profile sandbox/nono)", prof.Name, cc.Name)
+			return nil, fmt.Errorf("profile %q sets read, write, exclude or domains, but its container %q enforces none of them; add a sandbox backend (--profile sandbox/nono or sandbox/fence)", prof.Name, cc.Name)
 		}
 	default:
-		return nil, fmt.Errorf("container type %q (container %q) is not supported by chat, run and shell yet; use a nono or none container", cc.Type, cc.Name)
+		return nil, fmt.Errorf("container type %q (container %q) is not supported by chat, run and shell yet; use a nono, fence or none container", cc.Type, cc.Name)
 	}
 	return plan, nil
 }
@@ -214,7 +223,7 @@ func launchCommand(mode launchMode, prof *runtime.ProfileConfig, ac *runtime.Age
 // again (it cannot nest): the outer one is the boundary, and its rules
 // apply, not the profile's.
 func sandboxType(cc *runtime.ContainerConfig) string {
-	if cc.Type == runtime.ContainerTypeNono && container.IsInContainer() {
+	if runtime.IsSandboxBackend(cc.Type) && container.IsInContainer() {
 		fmt.Fprintf(os.Stderr, "ateam: already inside a sandbox (%s): container %q is not started again, the outer rules apply\n", container.IsolationSource(), cc.Name)
 		return "inside"
 	}
@@ -290,11 +299,30 @@ func (p *launchPlan) wrapped(ctx context.Context, mode launchMode, profileFile s
 	if mode == modeChat && p.agentCfg.TypeName() == agent.NameClaude && !slices.Contains(argv, "--settings") {
 		argv = append([]string{argv[0], "--settings", claudeSandboxOff}, argv[1:]...)
 	}
-	nono, err := writeNonoProfile(ctx, p.policy, p.container.Name, profileFile)
+	prefix, err := sandboxPrefix(ctx, p.policy, p.container, profileFile, false)
 	if err != nil {
 		return nil, err
 	}
-	return sandboxpolicy.NonoCommand(nono, profileFile, p.grantDir, argv), nil
+	return append(prefix, argv...), nil
+}
+
+// sandboxPrefix writes the backend's profile of a policy to profileFile
+// and returns the command line that runs a command under it, up to the
+// command. silent keeps nono's own messages off the terminal; fence prints
+// none.
+func sandboxPrefix(ctx context.Context, policy *sandboxpolicy.Policy, cc *runtime.ContainerConfig, profileFile string, silent bool) ([]string, error) {
+	if cc.Type == runtime.ContainerTypeFence {
+		ateam, err := writeFenceConfig(policy, profileFile)
+		if err != nil {
+			return nil, err
+		}
+		return sandboxpolicy.FencePrefix(ateam, profileFile, policy.WorkDir), nil
+	}
+	nono, err := writeNonoProfile(ctx, policy, cc.Name, profileFile)
+	if err != nil {
+		return nil, err
+	}
+	return sandboxpolicy.NonoPrefix(nono, profileFile, policy.WorkDir, silent), nil
 }
 
 // describe prints the plan: the profile, its rules and what they leave open.
@@ -315,6 +343,11 @@ func (p *launchPlan) describe(w io.Writer) {
 		fmt.Fprintf(w, "network    %s, localhost\n", strings.Join(p.policy.Domains, ", "))
 	}
 	printRules(w, "read-only ", p.policy.ReadOnly)
+	if p.container.Type == runtime.ContainerTypeFence {
+		for _, note := range sandboxpolicy.FenceNotes {
+			fmt.Fprintf(w, "note       %s\n", note)
+		}
+	}
 }
 
 func printRules(w io.Writer, label string, rules []sandboxpolicy.Rule) {
@@ -387,30 +420,7 @@ func runGuarded(argv []string, workDir, backupDir string) int {
 			return 1
 		}
 	}
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	// The command shares the terminal: an interrupt reaches it directly.
-	// Signals sent to ateam alone are passed on.
-	signal.Ignore(syscall.SIGINT, syscall.SIGQUIT)
-	forwarded := make(chan os.Signal, 1)
-	signal.Notify(forwarded, syscall.SIGTERM, syscall.SIGHUP)
-	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "ateam: %v\n", err)
-		return 127
-	}
-	go func() {
-		for sig := range forwarded {
-			_ = cmd.Process.Signal(sig)
-		}
-	}()
-	code := 0
-	if err := cmd.Wait(); err != nil {
-		code = 1
-		if exit, ok := err.(*exec.ExitError); ok {
-			code = exit.ExitCode()
-		}
-	}
-	signal.Stop(forwarded)
+	code := runAttached(exec.Command(argv[0], argv[1:]...))
 	if !guarded {
 		return code
 	}
@@ -428,4 +438,32 @@ func runGuarded(argv []string, workDir, backupDir string) int {
 		code = 3
 	}
 	return code
+}
+
+// runAttached runs cmd on this process's input and outputs and returns
+// its exit code.
+func runAttached(cmd *exec.Cmd) int {
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	// The command shares the terminal: an interrupt reaches it directly.
+	// Signals sent to ateam alone are passed on.
+	signal.Ignore(syscall.SIGINT, syscall.SIGQUIT)
+	forwarded := make(chan os.Signal, 1)
+	signal.Notify(forwarded, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(forwarded)
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "ateam: %v\n", err)
+		return 127
+	}
+	go func() {
+		for sig := range forwarded {
+			_ = cmd.Process.Signal(sig)
+		}
+	}()
+	if err := cmd.Wait(); err != nil {
+		if exit, ok := err.(*exec.ExitError); ok {
+			return exit.ExitCode()
+		}
+		return 1
+	}
+	return 0
 }

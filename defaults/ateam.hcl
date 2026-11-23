@@ -891,6 +891,20 @@ profile "sandbox/nono" {
   use       = ["agent/secrets"]
 }
 
+// fence (https://github.com/fencesandbox/fence): the same kind of sandbox,
+// built into ateam as a library: no other program to install. macOS only
+// for now. The same profiles apply. A read or write inside a folder that
+// stays excluded cannot be expressed and is refused; fence keeps a few
+// write refusals of its own (see ISOLATION.md).
+container "fence" {
+  type = "fence"
+}
+
+profile "sandbox/fence" {
+  container = "fence"
+  use       = ["agent/secrets"]
+}
+
 // The path lists live in filter files, embedded in the binary: see
 // `ateam filter list` and `ateam filter show NAME`. A file of the same
 // name under filters/ in ~/.ateam or a project's .ateam replaces one.
