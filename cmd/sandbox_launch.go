@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ateam/internal/agent"
+	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/runtime"
 	"github.com/ateam/internal/sandboxpolicy"
 	"github.com/spf13/cobra"
@@ -164,11 +165,12 @@ func planLaunch(f *launchFlags, mode launchMode, args []string) (*launchPlan, er
 	if plan.argv, err = launchCommand(mode, prof, ac, args); err != nil {
 		return nil, err
 	}
-	switch cc.Type {
+	switch sandboxType(cc) {
 	case runtime.ContainerTypeNono:
-		if plan.policy, err = buildSandboxPolicy(prof, grantDir, projectDir, plan.ateamHome, files); err != nil {
+		if plan.policy, err = buildSandboxPolicy(cfg, prof, grantDir, projectDir, plan.ateamHome, files); err != nil {
 			return nil, err
 		}
+	case "inside":
 	case "", "none":
 		if prof.HasPolicy() {
 			return nil, fmt.Errorf("profile %q sets read, write, exclude or domains, but its container %q enforces none of them; add a sandbox backend (--profile sandbox/nono)", prof.Name, cc.Name)
@@ -207,9 +209,21 @@ func launchCommand(mode launchMode, prof *runtime.ProfileConfig, ac *runtime.Age
 	return args, nil
 }
 
+// sandboxType returns the container type a launch applies. Inside a
+// sandbox or container already in place, a sandbox backend is not started
+// again (it cannot nest): the outer one is the boundary, and its rules
+// apply, not the profile's.
+func sandboxType(cc *runtime.ContainerConfig) string {
+	if cc.Type == runtime.ContainerTypeNono && container.IsInContainer() {
+		fmt.Fprintf(os.Stderr, "ateam: already inside a sandbox (%s): container %q is not started again, the outer rules apply\n", container.IsolationSource(), cc.Name)
+		return "inside"
+	}
+	return cc.Type
+}
+
 // buildSandboxPolicy turns a composed profile into the policy of one
 // launch, attended or not: the same rules either way.
-func buildSandboxPolicy(prof *runtime.ProfileConfig, grantDir, projectDir, ateamHome string, files []string) (*sandboxpolicy.Policy, error) {
+func buildSandboxPolicy(cfg *runtime.Config, prof *runtime.ProfileConfig, grantDir, projectDir, ateamHome string, files []string) (*sandboxpolicy.Policy, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
@@ -217,7 +231,7 @@ func buildSandboxPolicy(prof *runtime.ProfileConfig, grantDir, projectDir, ateam
 	return sandboxpolicy.Build(sandboxpolicy.Input{
 		Name: prof.Name, Home: home, WorkDir: grantDir,
 		Read: prof.Read, Write: prof.Write, Exclude: prof.Exclude, Domains: prof.Domains,
-		Origin:    prof.EntryOrigin,
+		Origin: prof.EntryOrigin, Filters: cfg.Filters, OpenAteam: prof.AteamFiles == "open",
 		AteamHome: ateamHome, ProjectDir: projectDir, ProfileFiles: files,
 	})
 }
@@ -300,9 +314,7 @@ func (p *launchPlan) describe(w io.Writer) {
 	} else {
 		fmt.Fprintf(w, "network    %s, localhost\n", strings.Join(p.policy.Domains, ", "))
 	}
-	if _, ok := sandboxpolicy.SnapshotGit(p.policy.WorkDir); ok {
-		fmt.Fprintln(w, "checked    .git/config and .git/hooks, compared after the run (they stay writable)")
-	}
+	printRules(w, "read-only ", p.policy.ReadOnly)
 }
 
 func printRules(w io.Writer, label string, rules []sandboxpolicy.Rule) {
@@ -363,9 +375,9 @@ func runLaunch(f *launchFlags, mode launchMode, args []string) error {
 }
 
 // runGuarded runs argv attached to this terminal and returns its exit
-// code. No sandbox can keep .git/config and .git/hooks read-only inside a
-// writable working folder, and what a command plants there runs outside
-// the sandbox later: they are compared after the run, and a change is
+// code. What a command plants in .git/config or .git/hooks runs outside
+// the sandbox later. The policy keeps them read-only; they are also
+// compared after the run, in case a backend could not, and a change is
 // reported with the copy to restore from.
 func runGuarded(argv []string, workDir, backupDir string) int {
 	guard, guarded := sandboxpolicy.SnapshotGit(workDir)

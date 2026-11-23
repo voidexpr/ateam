@@ -31,6 +31,18 @@ Decided and built on 2026-11-22:
 - **nono's default blocks**: targy's behavior. Every path nono's required groups block that the profile does not exclude is lifted (`.bashrc`, `.npmrc`, ...). The excludes decide alone. Checked with nono: a lifted file and a lifted link are readable; an excluded path stays closed; a grant inside an excluded folder works.
 - **Unattended runs under nono**: built. `internal/container/nono.go` is a `Container` the runner uses like the Docker ones; the policy code is the one `chat` uses (`buildSandboxPolicy`, `writeNonoProfile`). `exec --profile sandbox/nono --dry-run` shows the wrapped command; the same command run through nono starts Claude, which reaches the API (the unattended config directory's login had expired, so no full agent turn was seen: `ateam login`, then try `ateam exec "..." --profile sandbox/nono`).
 
+Built on 2026-11-23:
+
+- **Filters, first part** (step 6): `filter` blocks (`file` or `rules`), resolved through autoversion's `filterrules` resolver (`internal/sandboxpolicy/filters.go`); filter names in a profile's `read`, `write`, `exclude`. Checked at load. Checked with nono: a filter's exclude is refused, its write grant works. Left of step 6: the built-in profiles still list literal paths; `ateam filter show`; the home listing walk for Linux.
+- A grant written through a link (`~/projects/x`) now matches a rule on the real path.
+- **Read-only inside a writable folder works on macOS.** nono has no such rule, but a profile accepts raw Seatbelt rules (`unsafe_macos_seatbelt_rules`, top level). ateam writes a write deny for each read-only path and pins the folders above it against rename. Used for: a `read` that reopens an excluded path inside a writable folder, and `.git/hooks` and `.git/config` of the working folder, for attended and unattended runs alike. Checked with nono: both are readable and not writable, `.git` and `.ateam` cannot be renamed away, `git status` and `git add` work. This closes the hooks gap (decision 11): the comparison after an attended run stays as a second check. Linux will need its own mechanism.
+- nono no longer warns about lifted paths that do not exist.
+
+- **ateam inside the sandbox.** `ateam_files = "open"` (built-in profile `agent/ateam`) opens ateam's own files. Every command under a sandbox backend gets `ATEAM_IN_SANDBOX=1`; an ateam that sees it does not start nono again and runs its agents in place, sharing the outer sandbox. Checked with nono: `ateam exec` inside a `sandbox/nono,agent/ateam,agent/claude` launch completes a turn. This is option 2 of consequence 1 below: a supervisor can now run under nono, its sub-runs under the same rules. Not tried with `ateam code`.
+- A grant that names the project's `.ateam` (or the user's ateam directory) opens ateam's own rules below it.
+
+Seen in the owner's `ateam shell` session, not handled: the shell's own startup writes (`~/.pyenv/shims`, a history log) are refused; they belong in a personal profile.
+
 Different from the steps below:
 
 - `domains` is a profile list already (phase 2 planned a `network` entity). Without it a sandboxed build could reach no registry. The `network` entity replaces it later.

@@ -109,6 +109,9 @@ func buildRunnerFromBlocks(env *root.ResolvedEnv, rtCfg *runtime.Config, prof *r
 		return nil, nil, err
 	}
 	launch := cc
+	if cc != nil && sandboxType(cc) == "inside" {
+		launch = nil
+	}
 	if minimal {
 		launch = nil
 		if err := rejectCodexTmuxWithoutStateDir(ac, env.StateDir()); err != nil {
@@ -557,7 +560,7 @@ func buildNonoContainer(env *root.ResolvedEnv, rtCfg *runtime.Config, prof *runt
 		composed.Read = append(composed.Read, extra.AllowRead...)
 		composed.Domains = append(composed.Domains, extra.AllowDomains...)
 	}
-	policy, err := buildSandboxPolicy(&composed, env.WorkDir, env.ProjectDir, env.HomeDir, nil)
+	policy, err := buildSandboxPolicy(rtCfg, &composed, env.WorkDir, env.ProjectDir, env.HomeDir, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -120,6 +120,7 @@ func printComposedProfile(w io.Writer, p *runtime.ProfileConfig) {
 	scalar("model", p.Model)
 	scalar("effort", p.Effort)
 	scalar("max_budget_usd", p.MaxBudgetUSD)
+	scalar("ateam_files", p.AteamFiles)
 	if len(p.Command) > 0 {
 		fmt.Fprintf(w, "  %-10s %s  (%s)\n", "command", shellJoin(p.Command), p.Origin("command"))
 	}

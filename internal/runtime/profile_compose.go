@@ -53,6 +53,9 @@ func composeProfile(raw, done map[string]ProfileConfig, name string, stack []str
 		return ProfileConfig{}, fmt.Errorf("profile %q uses itself: %s", name, strings.Join(append(stack, name), " -> "))
 	}
 	own, ok := raw[name]
+	if ok && own.AteamFiles != "" && own.AteamFiles != "open" && own.AteamFiles != "closed" {
+		return ProfileConfig{}, fmt.Errorf("profile %q: ateam_files = %q; want \"open\" or \"closed\"", name, own.AteamFiles)
+	}
 	if !ok {
 		if len(stack) == 0 {
 			return ProfileConfig{}, fmt.Errorf("unknown profile %q", name)
@@ -86,6 +89,7 @@ func mergeComposed(dst, src *ProfileConfig, origin func(key string) string) {
 	scalar("model", &dst.Model, src.Model)
 	scalar("effort", &dst.Effort, src.Effort)
 	scalar("max_budget_usd", &dst.MaxBudgetUSD, src.MaxBudgetUSD)
+	scalar("ateam_files", &dst.AteamFiles, src.AteamFiles)
 	if len(src.Command) > 0 {
 		dst.Command = slices.Clone(src.Command)
 		dst.From["command"] = origin("command")

@@ -1,6 +1,8 @@
 package runtime
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -166,5 +168,48 @@ func TestBuiltinSandboxProfilesCompose(t *testing.T) {
 	}
 	if got := prof.EntryOrigin("exclude", "~/.ssh"); got != "agent/secrets" {
 		t.Errorf("origin of ~/.ssh = %q", got)
+	}
+}
+
+func TestFilterBlocks(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "secrets.filter"), []byte("version 1\nroot ~\nexclude /.ssh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeLayer(t, dir, `
+filter "my/secrets" {
+  file = "secrets.filter"
+}
+filter "my/go-write" {
+  rules = <<-EOF
+    version 1
+    /go/pkg
+  EOF
+}
+profile "p" {
+  read  = ["my/secrets"]
+  write = ["my/go-write", "~/x"]
+}
+`)
+	cfg, err := Load([]string{dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cfg.Filters["my/secrets"], "exclude /.ssh") || !strings.Contains(cfg.Filters["my/go-write"], "/go/pkg") {
+		t.Errorf("filters = %v", cfg.Filters)
+	}
+
+	for name, tc := range map[string]struct{ hcl, want string }{
+		"both":     {"filter \"f\" {\n  file = \"a\"\n  rules = \"version 1\"\n}", "one of file or rules"},
+		"neither":  {`filter "f" {}`, "one of file or rules"},
+		"missing":  {`filter "f" { file = "nope.filter" }`, "nope.filter"},
+		"wildcard": {`filter "f" { rules = "version 1\nexclude /**/*.pem\n" }`, "not one path"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := loadLayer(t, tc.hcl)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("want a load error containing %q, got %v", tc.want, err)
+			}
+		})
 	}
 }

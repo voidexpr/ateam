@@ -18,6 +18,8 @@ type Rule struct {
 	Path   string // absolute, cleaned
 	Source string // the profile that set it, "command line", or "ateam" for an implicit rule
 	Reason string // why ateam added it; "" for a rule the user wrote
+	// Reopens is set on a read that opens a path an exclude closed.
+	Reopens bool
 }
 
 // Policy is what a sandboxed command may touch. Reading is open below
@@ -29,7 +31,12 @@ type Policy struct {
 	Read    []Rule // readable, beside the home
 	Write   []Rule // writable, beside the working folder
 	Exclude []Rule // neither readable nor writable
-	Domains []string
+	// ReadOnly lists paths inside a writable folder that stay readable
+	// but must not be written, renamed or removed: a read that reopens an
+	// excluded path there, and the files of the working folder's
+	// repository that git runs or reads outside the sandbox later.
+	ReadOnly []Rule
+	Domains  []string
 	// Gaps lists what the policy means to protect and no backend rule
 	// below does; a renderer adds its own. Shown at launch and in exports.
 	Gaps []string
@@ -46,7 +53,12 @@ type Input struct {
 	Domains []string
 	// Origin names the profile an entry of a list attribute came from.
 	Origin func(attr, entry string) string
+	// Filters resolves the entries that are filter names.
+	Filters FilterSet
 
+	// OpenAteam leaves ateam's own files reachable and writable: for a
+	// command that runs ateam itself.
+	OpenAteam    bool
 	AteamHome    string   // the user's ateam directory (~/.ateam); "" to skip
 	ProjectDir   string   // the project's .ateam directory; "" without a project
 	ProfileFiles []string // profile files given by path for this launch
@@ -63,8 +75,8 @@ var ateamOpen = []string{"runtime", "shared", "prompts", "cache", ".gitignore"}
 var ateamClosed = []string{"ateam.hcl", "profiles", "secrets.env", "state.sqlite", "state.sqlite-wal", "state.sqlite-shm", "logs", "Dockerfile"}
 
 // Build resolves the entries of a profile into absolute rules and adds
-// ateam's own. An entry that is not a path is an error: filter names are
-// not resolved yet, and an unknown entry must not grant nothing silently.
+// ateam's own. An entry is a path (~ or / first) or the name of a filter;
+// an unknown name is an error: it must not grant nothing silently.
 func Build(in Input) (*Policy, error) {
 	if !filepath.IsAbs(in.Home) || !filepath.IsAbs(in.WorkDir) {
 		return nil, fmt.Errorf("sandbox policy: home %q and working folder %q must be absolute", in.Home, in.WorkDir)
@@ -78,29 +90,88 @@ func Build(in Input) (*Policy, error) {
 	if origin == nil {
 		origin = func(string, string) string { return "" }
 	}
-	expand := func(attr string, entries []string) ([]Rule, error) {
-		var rules []Rule
-		for _, entry := range entries {
-			path, err := ExpandPath(entry, home)
-			if err != nil {
-				return nil, fmt.Errorf("%s entry %q (%s): %w", attr, entry, origin(attr, entry), err)
-			}
-			rules = append(rules, Rule{Path: path, Source: origin(attr, entry)})
+	var excluded []Rule
+	// add resolves one path of an entry. A grant is compared with excludes
+	// by where it really is: ~/projects/x and the folder that link leads
+	// to are one path.
+	add := func(list *[]Rule, attr, entry, path string) error {
+		source := origin(attr, entry)
+		if !isPathEntry(entry) {
+			source += ", filter " + entry
 		}
-		return rules, nil
+		abs, err := ExpandPath(path, home)
+		if err != nil {
+			return fmt.Errorf("%s entry %q (%s): %w", attr, entry, origin(attr, entry), err)
+		}
+		if list != &excluded {
+			abs = realPath(abs)
+		}
+		*list = append(*list, Rule{Path: abs, Source: source})
+		return nil
 	}
-	var err error
-	if p.Read, err = expand("read", in.Read); err != nil {
+	// expand resolves the entries of one attribute. A path goes to grants
+	// (the exclude attribute: to excluded). A filter name gives its
+	// included paths to grants and its excluded paths to excluded; for
+	// the exclude attribute every path it names is excluded.
+	expand := func(attr string, entries []string, grants *[]Rule) error {
+		for _, entry := range entries {
+			if isPathEntry(entry) {
+				if err := add(grants, attr, entry, entry); err != nil {
+					return err
+				}
+				continue
+			}
+			include, exclude, err := in.Filters.Paths(entry, home)
+			if err != nil {
+				return fmt.Errorf("%s entry %q (%s): %w", attr, entry, origin(attr, entry), err)
+			}
+			for _, path := range include {
+				if err := add(grants, attr, entry, path); err != nil {
+					return err
+				}
+			}
+			for _, path := range exclude {
+				if err := add(&excluded, attr, entry, path); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := expand("read", in.Read, &p.Read); err != nil {
 		return nil, err
 	}
-	if p.Write, err = expand("write", in.Write); err != nil {
+	if err := expand("write", in.Write, &p.Write); err != nil {
 		return nil, err
 	}
-	excluded, err := expand("exclude", in.Exclude)
-	if err != nil {
+	if err := expand("exclude", in.Exclude, &excluded); err != nil {
 		return nil, err
 	}
-	excluded = append(excluded, implicitExcludes(in)...)
+	// opensAteam reports whether a grant opens one of ateam's own rules.
+	opensAteam := func(grant, path string) bool { return false }
+	if in.OpenAteam {
+		for _, dir := range []string{in.AteamHome, in.ProjectDir} {
+			if dir != "" {
+				p.Write = append(p.Write, Rule{Path: realPath(dir), Source: "ateam", Reason: "ateam_files is open: a command that runs ateam"})
+			}
+		}
+	} else {
+		// A grant that names a place of ateam's opens ateam's own rules
+		// below it: `write = ["<project>/.ateam"]` means all of it.
+		ateamDirs := []string{}
+		for _, dir := range []string{in.AteamHome, in.ProjectDir} {
+			if dir != "" {
+				ateamDirs = append(ateamDirs, withRealPath(filepath.Clean(dir))...)
+			}
+		}
+		inAteam := func(path string) bool {
+			return slices.ContainsFunc(ateamDirs, func(dir string) bool { return Within(path, dir) })
+		}
+		opensAteam = func(grant, path string) bool {
+			return inAteam(grant) && Within(realPath(path), grant)
+		}
+		excluded = append(excluded, implicitExcludes(in)...)
+	}
 
 	// A read or write of exactly an excluded path reopens it: the nearer
 	// profile decides. A wider grant does not: it keeps the narrower exclude.
@@ -113,18 +184,62 @@ func Build(in Input) (*Policy, error) {
 		return false
 	}
 	for _, ex := range excluded {
-		if granted(ex.Path) {
+		// An excluded path reached through a link is excluded where the
+		// link leads too, and reopened by a grant of either.
+		both := withRealPath(ex.Path)
+		own := ex.Source == "ateam"
+		for i := range p.Read {
+			read := p.Read[i].Path
+			if slices.ContainsFunc(both, func(path string) bool { return Within(read, path) }) || own && opensAteam(read, ex.Path) {
+				p.Read[i].Reopens = true
+			}
+		}
+		if slices.ContainsFunc(both, granted) {
 			continue
 		}
-		// An excluded path reached through a link is excluded where the
-		// link leads too.
-		for _, path := range withRealPath(ex.Path) {
+		if own && slices.ContainsFunc(slices.Concat(p.Read, p.Write), func(g Rule) bool { return opensAteam(g.Path, ex.Path) }) {
+			continue
+		}
+		for _, path := range both {
 			if !containsPath(p.Exclude, path) {
 				p.Exclude = append(p.Exclude, Rule{Path: path, Source: ex.Source, Reason: ex.Reason})
 			}
 		}
 	}
+	for _, r := range p.Read {
+		if r.Reopens && !containsPath(p.Write, r.Path) && p.WritableRoot(r.Path) != "" {
+			p.ReadOnly = append(p.ReadOnly, r)
+		}
+	}
+	if info, err := os.Stat(filepath.Join(workDir, ".git")); err == nil && info.IsDir() {
+		for _, name := range guarded {
+			p.ReadOnly = append(p.ReadOnly, Rule{Path: filepath.Join(workDir, name), Source: "ateam",
+				Reason: "git runs or reads it outside the sandbox later"})
+		}
+	}
 	return p, nil
+}
+
+// WritableRoot returns the writable folder holding path (the working
+// folder or a write grant), "" when path is not inside one. A path that is
+// itself a writable folder has no root: it is writable on purpose.
+func (p *Policy) WritableRoot(path string) string {
+	roots := append([]string{p.WorkDir}, pathsOf(p.Write)...)
+	best := ""
+	for _, root := range roots {
+		if path != root && Within(path, root) && len(root) > len(best) {
+			best = root
+		}
+	}
+	return best
+}
+
+func pathsOf(rules []Rule) []string {
+	out := make([]string, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, r.Path)
+	}
+	return out
 }
 
 func implicitExcludes(in Input) []Rule {
@@ -166,7 +281,7 @@ func ExpandPath(entry, home string) (string, error) {
 	case filepath.IsAbs(entry):
 		return filepath.Clean(entry), nil
 	}
-	return "", fmt.Errorf("not a path starting with ~ or /; filter names are not supported yet")
+	return "", fmt.Errorf("not a path starting with ~ or /")
 }
 
 // Within reports whether path is base or lies below it.
@@ -180,10 +295,25 @@ func Within(path, base string) bool {
 	return strings.HasPrefix(path, base+string(filepath.Separator))
 }
 
+// realPath returns where path really is, following links. For a path
+// that does not exist yet, the links of the part that exists are followed.
+func realPath(path string) string {
+	rest := ""
+	for dir := path; ; dir = filepath.Dir(dir) {
+		if real, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(real, rest)
+		}
+		if dir == filepath.Dir(dir) {
+			return path
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+	}
+}
+
 // withRealPath returns path and, when it goes through a link, where it
 // really is.
 func withRealPath(path string) []string {
-	if real, err := filepath.EvalSymlinks(path); err == nil && real != path {
+	if real := realPath(path); real != path {
 		return []string{path, real}
 	}
 	return []string{path}

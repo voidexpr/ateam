@@ -872,6 +872,7 @@ role "test.recent" { status = "on" }
 //   exclude = paths neither readable nor writable
 //   domains = hosts reachable; none closes the network
 //   command = saved command for `ateam run`
+//   ateam_files = "open" lets the command reach ateam's own files
 // Paths start with ~ or /. Reading is open below the home, except what is
 // excluded; a path that does not exist is harmless.
 // ---------------------------------------------------------------------
@@ -924,6 +925,14 @@ profile "agent/claude" {
   ]
   // mcp-proxy: the claude.ai connectors. Telemetry hosts are left closed.
   domains = ["api.anthropic.com", "claude.ai", "mcp-proxy.anthropic.com"]
+}
+
+// For a command that runs ateam itself inside the sandbox (a shell you
+// work in, a supervisor that starts sub-runs): ateam's own files are open
+// and writable. The inner ateam sees it is sandboxed and starts no second
+// sandbox, so its runs share this one.
+profile "agent/ateam" {
+  ateam_files = "open"
 }
 
 profile "agent/codex" {

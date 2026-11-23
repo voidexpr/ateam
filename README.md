@@ -41,7 +41,8 @@ Ateam handles the boring bits:
 
 **Agents and isolation**
 - Drives Claude Code (`claude -p` with `stream-json`) and Codex (`exec`); experimental `codex-tmux` lets TUI-only commands like `/review` run unattended
-- Multiple isolation modes: built-in agent sandbox (default), one-shot Docker, exec into a long-lived container (Docker / devcontainer / compose), or run ateam itself inside Docker (removes all permission checks). These modes let you balance permissions vs. safety.
+- Multiple isolation modes: built-in agent sandbox (default), one-shot Docker, exec into a long-lived container (Docker / devcontainer / compose), run ateam itself inside Docker (removes all permission checks), or the [nono](https://nono.sh) OS sandbox set from outside the agent. These modes let you balance permissions vs. safety.
+- Sandboxed attended sessions and commands: `ateam chat`, `ateam run` and `ateam shell` start an agent, a command or a shell under composable profiles (files, network), saved per project with `ateam profile save` — see [ISOLATION.md](ISOLATION.md#-nono-sandbox)
 - Config files to manage agent and container invocation, for example, profiles select combinations of agent + container + custom arguments (`--profile docker`, `--profile codex-high`)
 - Dynamic prompt assembly: ad-hoc pre/post instructions on top of named prompts, with macro support inside prompts
 - Can use the default subscription, OAuth, or API keys, with secrets stored in the OS keychain, prioritizing the cheapest mode if multiple keys are available
@@ -227,7 +228,18 @@ ateam inspect 12 --auto-debug
 ateam resume 12 --launch
 ```
 
-more at [COMMANDS.md](COMMANDS.md) and [CONFIG.md](CONFIG.md)
+```bash
+# an attended agent, a command or a shell under a sandbox profile (macOS, needs nono)
+ateam chat --profile sandbox/nono,dev/go
+ateam run --profile sandbox/nono,dev/go -- make test
+ateam shell --profile sandbox/nono,dev/go
+
+# save how this project runs, then reuse it
+ateam profile save myproject --profile sandbox/nono,dev/go --write ~/some/other/dir
+ateam chat --profile myproject
+```
+
+more at [COMMANDS.md](COMMANDS.md), [CONFIG.md](CONFIG.md) and [ISOLATION.md](ISOLATION.md)
 
 ## Examples
 
@@ -302,9 +314,10 @@ Isolation is configuration-driven, so any of the above can be tuned per project.
 | **Docker one-shot** | Fresh Linux container built and run per command | Strong isolation; need build/test tooling |
 | **Docker exec** | Exec into an existing user-managed container (docker-compose, devcontainer, …) | You already run a long-lived dev container |
 | **ATeam inside a container** | Run ateam itself from inside a container (Docker or an OS-native sandbox like [fence](https://github.com/fencesandbox/fence)); agents inherit the container's isolation and run without per-command restrictions | Docker-native projects, or sandboxing ateam itself if you don't trust it |
+| **nono sandbox** | The whole agent process, or any command or shell, under an OS sandbox set from outside it ([nono](https://nono.sh)); file and network rules come from composable profiles | A boundary the agent cannot edit; the same rules for attended and unattended work. macOS for now |
 | **None** | No isolation (agent runs directly on host) | Debugging only |
 
-By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for one-shot container isolation or `--profile docker-exec` to exec into an existing container. See `ateam cat --defaults` (the built-in `ateam.hcl`) for all profiles.
+By default ATeam uses the agent's built-in sandbox. Use `--profile docker` for one-shot container isolation, `--profile docker-exec` to exec into an existing container, or `--profile sandbox/nono` for the nono sandbox. See `ateam cat --defaults` (the built-in `ateam.hcl`) for all profiles.
 
 ## Commands
 

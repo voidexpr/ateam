@@ -22,12 +22,15 @@ type NonoInfo struct {
 
 // NonoProfile is a nono profile file (`nono profile guide`, nono 0.82).
 type NonoProfile struct {
-	Extends                string         `json:"extends"`
-	Meta                   nonoMeta       `json:"meta"`
-	Workdir                nonoWorkdir    `json:"workdir"`
-	Filesystem             nonoFilesystem `json:"filesystem"`
-	Network                nonoNetwork    `json:"network"`
-	AllowParentOfProtected bool           `json:"allow_parent_of_protected,omitempty"`
+	Extends    string         `json:"extends"`
+	Meta       nonoMeta       `json:"meta"`
+	Workdir    nonoWorkdir    `json:"workdir"`
+	Filesystem nonoFilesystem `json:"filesystem"`
+	Network    nonoNetwork    `json:"network"`
+	// UnsafeSeatbelt holds raw macOS Seatbelt rules: nono has no read-only
+	// rule inside a writable folder, Seatbelt does.
+	UnsafeSeatbelt         []string `json:"unsafe_macos_seatbelt_rules,omitempty"`
+	AllowParentOfProtected bool     `json:"allow_parent_of_protected,omitempty"`
 }
 
 type nonoMeta struct {
@@ -114,6 +117,7 @@ func RenderNono(p *Policy, info NonoInfo, goos string) (*NonoProfile, error) {
 		// with this flag (macOS only).
 		AllowParentOfProtected: true,
 	}
+	prof.UnsafeSeatbelt = readOnlyRules(p)
 	if len(p.Domains) == 0 {
 		// nono leaves the network open without a domain list.
 		prof.Network = nonoNetwork{Block: true}
@@ -121,6 +125,27 @@ func RenderNono(p *Policy, info NonoInfo, goos string) (*NonoProfile, error) {
 		prof.Network = nonoNetwork{AllowDomain: sortedStrings(p.Domains), OpenPort: []int{0}}
 	}
 	return prof, nil
+}
+
+// readOnlyRules renders the policy's read-only paths as Seatbelt rules:
+// no write below the path, and no rename or removal of the folders above
+// it up to the writable folder holding it, which would move the path out
+// from under its rule.
+func readOnlyRules(p *Policy) []string {
+	var rules []string
+	for _, r := range p.ReadOnly {
+		rules = append(rules, fmt.Sprintf("(deny file-write* (subpath %s))", seatbeltString(r.Path)))
+		root := p.WritableRoot(r.Path)
+		for dir := filepath.Dir(r.Path); root != "" && dir != root && Within(dir, root); dir = filepath.Dir(dir) {
+			rules = append(rules, fmt.Sprintf("(deny file-write* (literal %s))", seatbeltString(dir)))
+		}
+	}
+	return sortedStrings(rules)
+}
+
+// seatbeltString quotes s as a Seatbelt (Scheme) string.
+func seatbeltString(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }
 
 func sortedPaths(rules []Rule) []string {
@@ -151,18 +176,23 @@ func NonoCommand(nono, profileFile, workDir string, argv []string) []string {
 	return append(NonoPrefix(nono, profileFile, workDir, false), argv...)
 }
 
-// NonoPrefix is the nono command line up to and including "--". silent
+// NonoPrefix is the nono command line up to the command to run. silent
 // keeps nono's banner and summary off the terminal: for unattended runs.
 func NonoPrefix(nono, profileFile, workDir string, silent bool) []string {
 	args := []string{nono, "run"}
 	if silent {
 		args = append(args, "--silent")
 	}
-	return append(args, "--profile", profileFile, "--workdir", workDir, "--allow-cwd", "--")
+	// ATEAM_IN_SANDBOX tells an ateam started inside that a sandbox is
+	// already in place: it must not start another, which cannot nest.
+	return append(args, "--profile", profileFile, "--workdir", workDir, "--allow-cwd", "--", "/usr/bin/env", InSandboxEnv+"=1")
 }
 
+// InSandboxEnv is set for every command ateam runs under a sandbox backend.
+const InSandboxEnv = "ATEAM_IN_SANDBOX"
+
 // QueryNono asks the installed nono for the paths its required groups
-// deny on this platform.
+// deny on this platform, keeping those that exist.
 func QueryNono(ctx context.Context, nono string) (NonoInfo, error) {
 	type group struct {
 		Name     string `json:"name"`
@@ -188,7 +218,11 @@ func QueryNono(ctx context.Context, nono string) (NonoInfo, error) {
 			return NonoInfo{}, err
 		}
 		for _, a := range detail.Deny.Access {
-			info.Blocked = append(info.Blocked, filepath.Clean(a.Expanded))
+			// nono lists every path it knows; lifting one that is not
+			// there only draws a warning per launch.
+			if _, err := os.Lstat(a.Expanded); err == nil {
+				info.Blocked = append(info.Blocked, filepath.Clean(a.Expanded))
+			}
 		}
 	}
 	return info, nil

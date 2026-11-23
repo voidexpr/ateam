@@ -12,7 +12,11 @@ import (
 
 func testInput(t *testing.T) Input {
 	t.Helper()
-	home := t.TempDir()
+	// Resolved, as a real home is: the temp folder is reached through a link.
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	work := filepath.Join(home, "proj")
 	if err := os.MkdirAll(filepath.Join(work, ".ateam", "runtime"), 0o755); err != nil {
 		t.Fatal(err)
@@ -69,7 +73,7 @@ func TestBuildRefusesWhatItCannotResolve(t *testing.T) {
 	in := testInput(t)
 	in.Read = []string{"go-read"}
 	if _, err := Build(in); err == nil || !strings.Contains(err.Error(), "go-read") {
-		t.Errorf("a filter name must be refused for now, got %v", err)
+		t.Errorf("an unknown filter name must be refused, got %v", err)
 	}
 	in = testInput(t)
 	in.WorkDir = in.Home
@@ -243,5 +247,118 @@ func TestGitGuard(t *testing.T) {
 	}
 	if data, err := os.ReadFile(filepath.Join(backup, ".git", "config")); err != nil || string(data) != "[core]\n" {
 		t.Errorf("backup of .git/config = %q, %v", data, err)
+	}
+}
+
+// A grant written through a link reopens a rule on the real path: the
+// working folder is often reached through one (~/projects -> elsewhere).
+func TestGrantThroughLinkReopensExclude(t *testing.T) {
+	in := testInput(t)
+	link := filepath.Join(in.Home, "link")
+	if err := os.Symlink(in.WorkDir, link); err != nil {
+		t.Fatal(err)
+	}
+	in.Read = []string{filepath.Join(link, ".ateam", "ateam.hcl")}
+	p, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	real, _ := filepath.EvalSymlinks(filepath.Join(in.WorkDir, ".ateam", "ateam.hcl"))
+	for _, ex := range paths(p.Exclude) {
+		if resolved, _ := filepath.EvalSymlinks(ex); resolved == real {
+			t.Errorf("%s is still excluded after a read through a link", ex)
+		}
+	}
+	if !slices.Contains(paths(p.Read), real) {
+		t.Errorf("read = %v, want the real path %s", paths(p.Read), real)
+	}
+}
+
+// A read that reopens an excluded path inside a writable folder stays
+// read-only, and so do the repository's hooks and config: Seatbelt rules,
+// with the folders above pinned so the path cannot be moved away.
+func TestNonoKeepsReadOnlyInsideWritableFolder(t *testing.T) {
+	in := testInput(t)
+	if err := os.MkdirAll(filepath.Join(in.WorkDir, ".git", "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hcl := filepath.Join(in.ProjectDir, "ateam.hcl")
+	in.Read = []string{hcl, in.AteamHome}
+	p, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prof, err := RenderNono(p, NonoInfo{}, "darwin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`(deny file-write* (subpath "` + hcl + `"))`,
+		`(deny file-write* (literal "` + in.ProjectDir + `"))`, // .ateam cannot be renamed away
+		`(deny file-write* (subpath "` + filepath.Join(in.WorkDir, ".git", "hooks") + `"))`,
+		`(deny file-write* (subpath "` + filepath.Join(in.WorkDir, ".git", "config") + `"))`,
+		`(deny file-write* (literal "` + filepath.Join(in.WorkDir, ".git") + `"))`,
+	} {
+		if !slices.Contains(prof.UnsafeSeatbelt, want) {
+			t.Errorf("missing rule %s in %v", want, prof.UnsafeSeatbelt)
+		}
+	}
+	for _, rule := range prof.UnsafeSeatbelt {
+		if strings.Contains(rule, `"`+in.AteamHome+`"`) || strings.Contains(rule, `(literal "`+in.WorkDir+`")`) {
+			t.Errorf("no rule on a path outside a writable folder, or on the folder itself: %s", rule)
+		}
+	}
+
+	in.Read, in.Write = nil, []string{hcl} // opened fully, on purpose
+	p, _ = Build(in)
+	prof, _ = RenderNono(p, NonoInfo{}, "darwin")
+	for _, rule := range prof.UnsafeSeatbelt {
+		if strings.Contains(rule, "ateam.hcl") {
+			t.Errorf("an explicit write is not read-only: %s", rule)
+		}
+	}
+	if got := seatbeltString(`a"b\c`); got != `"a\"b\\c"` {
+		t.Errorf("seatbeltString = %s", got)
+	}
+}
+
+func TestAteamFilesOpen(t *testing.T) {
+	in := testInput(t)
+	in.OpenAteam = true
+	p, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ex := range paths(p.Exclude) {
+		if Within(ex, in.AteamHome) || Within(ex, in.ProjectDir) {
+			t.Errorf("ateam's files must be open: %s is excluded", ex)
+		}
+	}
+	if w := paths(p.Write); !slices.Contains(w, in.AteamHome) || !slices.Contains(w, in.ProjectDir) {
+		t.Errorf("ateam's directories must be writable: %v", w)
+	}
+}
+
+// A grant that names the project's .ateam opens ateam's own rules below
+// it; a grant of the whole project does not.
+func TestGrantOfAteamDirOpensItsEntries(t *testing.T) {
+	in := testInput(t)
+	in.Write = []string{in.ProjectDir}
+	p, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := paths(p.Exclude)
+	if slices.Contains(ex, filepath.Join(in.ProjectDir, "ateam.hcl")) {
+		t.Errorf("write of .ateam opens ateam.hcl: %v", ex)
+	}
+	if !slices.Contains(ex, in.AteamHome) {
+		t.Error("the user's ateam directory stays closed")
+	}
+
+	in.Write = []string{in.WorkDir + "/sub", in.Home + "/elsewhere"}
+	p, _ = Build(in)
+	if !slices.Contains(paths(p.Exclude), filepath.Join(in.ProjectDir, "ateam.hcl")) {
+		t.Error("a grant outside .ateam opens nothing of ateam's")
 	}
 }

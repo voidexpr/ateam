@@ -452,7 +452,7 @@ docker run \
 
 ### `ateam chat`, `ateam run`, `ateam shell`
 
-Run an attended agent, a command or your shell with the access of a composed profile. See [CONFIG.md → Composable profiles](CONFIG.md#composable-profiles) for the profile fields and [ISOLATION.md → nono](ISOLATION.md#nono-sandbox) for the sandbox.
+Run an attended agent, a command or your shell with the access of a composed profile. See [CONFIG.md → Composable profiles](CONFIG.md#composable-profiles) for the profile fields and [ISOLATION.md → nono](ISOLATION.md#-nono-sandbox) for the sandbox.
 
 ```bash
 ateam chat  [flags] [-- AGENT_ARG...]        # the profile's agent, in this terminal

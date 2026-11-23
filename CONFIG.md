@@ -606,7 +606,7 @@ Pricing can go stale. The top-level `pricing_as_of` date says when the tables we
 
 ### Containers
 
-Four container types are supported: `none`, `docker` (one-shot), `docker-exec` (exec into a user-managed container), and `nono` (an OS-level sandbox on the host; see [Composable profiles](#composable-profiles) and [ISOLATION.md → nono](ISOLATION.md#nono-sandbox)).
+Four container types are supported: `none`, `docker` (one-shot), `docker-exec` (exec into a user-managed container), and `nono` (an OS-level sandbox on the host; see [Composable profiles](#composable-profiles) and [ISOLATION.md → nono](ISOLATION.md#-nono-sandbox)).
 
 ```hcl
 container "docker" {
@@ -690,11 +690,12 @@ profile "myproject" {
 | Attribute | Meaning |
 |-----------|---------|
 | `use` | Profiles merged into this one, in order. |
-| `read` | Paths readable. An entry equal to an inherited `exclude` reopens it. |
+| `read` | Paths readable. An entry equal to an inherited `exclude` reopens it; inside a writable folder it stays read-only. |
 | `write` | Paths writable, beside the working folder. |
 | `exclude` | Paths neither readable nor writable. |
 | `domains` | Hosts reachable. With none, a sandbox backend closes the network. |
 | `command` | Saved command for `ateam run`. |
+| `ateam_files` | `"open"`: the command may read and write ateam's own files (its user directory and the project's `.ateam/`). For a command that runs ateam itself. Default: closed. |
 
 - Lists add up across `use`, in order, then the profile's own entries. For `agent`, `container`, `model`, `effort`, `max_budget_usd` and `command`, the profile's own value wins, then the later `use` entry.
 - A profile without an agent or a container runs with the `default` profile's.
@@ -703,9 +704,39 @@ profile "myproject" {
 - The rules need a sandbox backend. Any run, attended or not, on a container that cannot enforce them is refused. `nono` enforces all of them.
 - Each layer also loads `profiles/*.hcl` after its `ateam.hcl`: where `ateam profile save` writes.
 
-Built-in composable profiles (`ateam profile list`): `sandbox/nono` (the nono container plus `agent/secrets`), `agent/secrets` (keys, credentials, app data and personal folders unreadable), `agent/claude` and `agent/codex` (the agent's own files and API hosts), `dev/go`, `dev/rust`, `dev/python`, `dev/node`, `dev/deno`, `dev/github`, `dev/all`.
+##### Filters
 
-Every sandboxed launch also closes ateam's own files: the user's ateam directory, and in the project's `.ateam/` everything but `runtime/`, `shared/`, `prompts/`, `cache/` and `.gitignore`. An explicit `read` or `write` of one of them reopens it.
+A `filter` block names a set of paths in the shared filter syntax (the one of autoversion and targy). Profiles name filters in `read`, `write` and `exclude`, beside literal paths: an entry starting with `~` or `/` is a path, anything else a filter name.
+
+```hcl
+filter "my/secrets" {
+  file = "filters/secrets.filter"     # relative to this file
+}
+
+filter "my/go-write" {
+  rules = <<-EOT
+    version 1
+    /go/pkg
+    /{Library/Caches,.cache}/go-build
+  EOT
+}
+
+profile "myproject" {
+  use   = ["sandbox/nono"]
+  read  = ["my/secrets"]
+  write = ["my/go-write", "~/SyncDatabox/dotfiles"]
+}
+```
+
+- Rules apply under the filter's `root` line, or the home without one.
+- In `read`: the filter's excludes become unreadable, its includes reopen a path. In `write`: its includes are writable, its excludes unreadable. In `exclude`: every path it names is excluded.
+- A filter may `use` another filter by name. A used filter carries no `root`.
+- A sandbox takes paths, not patterns: a rule with a wildcard, a type prefix or a marker is a load error. So are an unknown name, a cycle and a file that cannot be read.
+- A later layer replaces a filter of the same name whole.
+
+Built-in composable profiles (`ateam profile list`): `sandbox/nono` (the nono container plus `agent/secrets`), `agent/secrets` (keys, credentials, app data and personal folders unreadable), `agent/claude` and `agent/codex` (the agent's own files and API hosts), `agent/ateam` (ateam's own files open, to run ateam inside the sandbox), `dev/go`, `dev/rust`, `dev/python`, `dev/node`, `dev/deno`, `dev/github`, `dev/all`.
+
+Every sandboxed launch also closes ateam's own files: the user's ateam directory, and in the project's `.ateam/` everything but `runtime/`, `shared/`, `prompts/`, `cache/` and `.gitignore`. An explicit `read` or `write` of one of them, or of the `.ateam/` directory itself, reopens it; `ateam_files = "open"` opens all of them.
 
 #### Running the supervisor inside Docker
 

@@ -13,6 +13,7 @@ import (
 	"github.com/ateam/internal/config"
 	"github.com/ateam/internal/container"
 	"github.com/ateam/internal/display"
+	"github.com/ateam/internal/sandboxpolicy"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclparse"
@@ -26,7 +27,10 @@ type Config struct {
 	Agents     map[string]AgentConfig
 	Containers map[string]ContainerConfig
 	Profiles   map[string]ProfileConfig
-	Settings   config.Config
+	// Filters holds the filter blocks, name -> text in the shared filter
+	// syntax. Profiles name them in read, write and exclude.
+	Filters  map[string]string
+	Settings config.Config
 
 	// SandboxDetection toggles auto-detection of an outer sandbox
 	// (fence, firejail, macOS Seatbelt, Linux bwrap-style). nil = use
@@ -203,7 +207,11 @@ type ProfileConfig struct {
 	Write   []string // paths writable, beside the working folder
 	Exclude []string // paths unreadable
 	Domains []string // hosts reachable; none closes the network under a sandbox backend
-	Command []string // saved command for `ateam run`
+	// AteamFiles is "open" to let the command reach ateam's own files (its
+	// user directory and the project's .ateam), which a sandbox closes by
+	// default: for a command that runs ateam itself. "" or "closed" otherwise.
+	AteamFiles string
+	Command    []string // saved command for `ateam run`
 
 	// From records which profile each composed value came from: the
 	// attribute name for scalars ("agent"), originKey for list entries.
@@ -213,7 +221,7 @@ type ProfileConfig struct {
 // HasPolicy reports whether the profile restricts or grants file or
 // network access, which only a sandbox backend can enforce.
 func (p *ProfileConfig) HasPolicy() bool {
-	return len(p.Read)+len(p.Write)+len(p.Exclude)+len(p.Domains) > 0
+	return len(p.Read)+len(p.Write)+len(p.Exclude)+len(p.Domains) > 0 || p.AteamFiles != ""
 }
 
 // hclFile is the HCL schema for ateam.hcl.
@@ -225,6 +233,7 @@ type hclFile struct {
 	Agents           []hclAgent          `hcl:"agent,block"`
 	Containers       []hclContainer      `hcl:"container,block"`
 	Profiles         []hclProfile        `hcl:"profile,block"`
+	Filters          []hclFilter         `hcl:"filter,block"`
 	Projects         []hclProject        `hcl:"project,block"`
 	Roles            []hclRole           `hcl:"role,block"`
 	Supervisors      []hclSupervisor     `hcl:"supervisor,block"`
@@ -307,6 +316,15 @@ type hclContainer struct {
 	MountClaudeConfig bool      `hcl:"mount_claude_config,optional"`
 }
 
+// hclFilter is a named filter: its rules inline, or the file holding them
+// (relative to the HCL file).
+type hclFilter struct {
+	DefRange hcl.Range `hcl:",def_range"`
+	Name     string    `hcl:"name,label"`
+	File     string    `hcl:"file,optional"`
+	Rules    string    `hcl:"rules,optional"`
+}
+
 type hclProfile struct {
 	DefRange           hcl.Range `hcl:",def_range"`
 	Name               string    `hcl:"name,label"`
@@ -323,6 +341,7 @@ type hclProfile struct {
 	Write              []string  `hcl:"write,optional"`
 	Exclude            []string  `hcl:"exclude,optional"`
 	Domains            []string  `hcl:"domains,optional"`
+	AteamFiles         string    `hcl:"ateam_files,optional"`
 	Command            []string  `hcl:"command,optional"`
 
 	AgentExtraArgsPrepend     []string `hcl:"agent_extra_args_prepend,optional"`
@@ -417,6 +436,9 @@ func LoadWithFiles(layerDirs, files []string) (*Config, error) {
 	if err := cfg.composeProfiles(); err != nil {
 		return nil, err
 	}
+	if err := sandboxpolicy.FilterSet(cfg.Filters).Check(); err != nil {
+		return nil, err
+	}
 	cfg.Settings.ContainerExtra.ExtraArgs = cfg.withAdditions("container_extra.extra_args", cfg.Settings.ContainerExtra.ExtraArgs)
 
 	// Apply detection settings to the container package — but only if
@@ -436,6 +458,7 @@ func newConfig() *Config {
 		Agents:     make(map[string]AgentConfig),
 		Containers: make(map[string]ContainerConfig),
 		Profiles:   make(map[string]ProfileConfig),
+		Filters:    make(map[string]string),
 		Sources:    make(map[string][]Contribution),
 	}
 }
@@ -802,6 +825,11 @@ func mergeHCL(cfg *Config, data []byte, filename, label string) error {
 	for _, c := range hf.Containers {
 		cfg.mergeContainer(c, label)
 	}
+	for _, f := range hf.Filters {
+		if err := cfg.mergeFilter(f, filename, label); err != nil {
+			return err
+		}
+	}
 	for _, p := range hf.Profiles {
 		cfg.mergeProfile(p, label)
 	}
@@ -953,6 +981,30 @@ func (c *Config) mergeContainer(h hclContainer, label string) {
 	c.Containers[h.Name] = cc
 }
 
+// mergeFilter records a filter block: a later layer replaces a filter of
+// the same name whole. `file` is read from beside the HCL file.
+func (c *Config) mergeFilter(h hclFilter, filename, label string) error {
+	where := fmt.Sprintf("filter %q (%s:%d)", h.Name, label, h.DefRange.Start.Line)
+	if (h.File == "") == (h.Rules == "") {
+		return fmt.Errorf("%s: set one of file or rules", where)
+	}
+	text := h.Rules
+	if h.File != "" {
+		path := display.ExpandHome(h.File)
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(filepath.Dir(filename), path)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("%s: %w", where, err)
+		}
+		text = string(data)
+	}
+	c.Filters[h.Name] = text
+	c.record("filter."+h.Name+".name", label, h.Name, h.DefRange.Start.Line)
+	return nil
+}
+
 func (c *Config) mergeProfile(h hclProfile, label string) {
 	p := c.Profiles[h.Name]
 	p.Name = h.Name
@@ -1000,6 +1052,9 @@ func (c *Config) mergeProfile(h hclProfile, label string) {
 		case "domains":
 			p.Domains = h.Domains
 			value = renderList(h.Domains)
+		case "ateam_files":
+			p.AteamFiles = h.AteamFiles
+			value = h.AteamFiles
 		case "command":
 			p.Command = h.Command
 			value = renderList(h.Command)
