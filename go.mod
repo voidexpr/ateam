@@ -10,6 +10,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20
 	github.com/spf13/cobra v1.10.2
 	github.com/vbauerster/mpb/v8 v8.12.0
+	github.com/voidexpr/autoversion v0.0.0-20261123041524-9174f09450ed
 	github.com/yuin/goldmark v1.8.2
 	github.com/zalando/go-keyring v0.2.8
 	github.com/zclconf/go-cty v1.16.3
@@ -32,7 +33,6 @@ require (
 	github.com/mattn/go-runewidth v0.0.20 // indirect
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
-	github.com/nicad/autoversion v0.0.0-20261121232952-d87bce674c94
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	golang.org/x/mod v0.37.0 // indirect

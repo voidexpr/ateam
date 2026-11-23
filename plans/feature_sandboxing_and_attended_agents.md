@@ -1,6 +1,8 @@
 # Sandboxing and attended agents in ateam
 
-Status, 2026-11-21: design decided in outline (see "Decisions"). Nothing built.
+Status, 2026-11-23: phase 1 is built and in use on macOS, except Linux and the cleanup in targy. What is built, how it was checked and what is next: `feature_sandboxing_and_attended_agents_impl_steps.md`. User documentation: `ISOLATION.md` (mode ⑤), `CONFIG.md` (composable profiles, filters), `COMMANDS.md`.
+
+This file is the design and its decisions. Where the code differs from a section below, the decisions table and the steps file say so.
 
 ## Summary
 
@@ -68,9 +70,16 @@ Related research: `research/ResearchSandboxing.md`, sections F.1.2 (review-time 
 | 8 | Network | A `network` entity, tool-agnostic, mapped to the backend or an error. Default: deny, with LLM provider hosts and localhost allowed. |
 | 9 | Filters | A `filter` entity in the unified syntax (autoversion). Defined by file or inline. Profile lists accept filter names and literal paths together. |
 | 10 | Agent settings generation | Stays in targy for now. |
-| 11 | Git hooks (2026-11-22) | `.git/config` and `.git/hooks` cannot be read-only under nono: compared after the run, a change is reported. |
+| 11 | Git hooks (2026-11-22, revised 2026-11-23) | `.git/config` and `.git/hooks` of the working folder are read-only in every sandboxed launch (raw Seatbelt rules in the nono profile). Attended launches also compare them after the run. |
 | 12 | Backend default blocks (2026-11-22) | The profile's excludes decide alone. What nono blocks on its own and the profile does not exclude is lifted, as targy did. |
 | 13 | Unattended runs (2026-11-22) | Same container and same rules as attended ones. Recording attended sessions in the metrics database: a task for later, after the sandbox work. |
+
+| 14 | Read-only inside a writable folder (2026-11-23) | A `read` that reopens an excluded path inside a writable folder stays read-only; `write` opens it fully. The folders above a read-only path are pinned against rename. |
+| 15 | ateam inside the sandbox (2026-11-23) | `ateam_files = "open"` (profile `agent/ateam`) opens ateam's own files. Every sandboxed command gets `ATEAM_IN_SANDBOX=1`; an ateam that sees it starts no second sandbox, and its runs share the outer one with the outer rules. |
+| 16 | Supervised coding (2026-11-22/23) | Two supported setups: supervisor without nono and sub-runs with a nono profile; or supervisor under nono with `agent/ateam`, all in one sandbox. |
+| 17 | Names (2026-11-21) | Built-in composable profiles carry a folder prefix (`sandbox/nono`, `agent/claude`, `dev/go`): a profile named `claude` would shadow the agent shorthand of unattended runs. No `--go` shorthand: `--profile a,b`. |
+| 18 | `domains` (2026-11-21) | A plain profile list for now, so a sandboxed build can reach its registries. The `network` entity (decision 8) replaces it. |
+| 19 | Default container (2026-11-21) | A profile without agent or container takes the `default` profile's. No new top-level setting. No wrapper phase. |
 
 ## Design
 
@@ -138,7 +147,7 @@ Resolution at launch:
 - No agent: fine for `run` and `shell`. `chat` falls back to the default agent.
 - No container: fall back to a configured default sandbox backend (for example a top-level `default_container = "nono"`).
 - If the resolved container cannot enforce every rule of the profile, the launch is refused. A policy is never dropped silently.
-- `--profile` can be given several times; they compose in order. `--NAME` (`--go`) is shorthand for adding the profile `NAME`. `--read`, `--write`, `--exclude` add entries for one launch.
+- `--profile` can be given several times or as a comma-separated list; they compose in order. `--read`, `--write`, `--exclude`, `--domain` add entries for one launch. (The `--go` shorthand was dropped: decision 17.)
 
 Second phase, `_remove` and `_replace`:
 
@@ -169,14 +178,14 @@ filter "go-write" {
 }
 ```
 
-- The unified filter syntax, parsed with `github.com/nicad/autoversion/filterrules`.
+- The unified filter syntax, parsed with `github.com/voidexpr/autoversion/filterrules`.
 - A `use NAME` line inside a filter resolves against the other `filter` blocks, through `filterrules`' caller-supplied resolver (implemented in autoversion, 2026-11-21):
   - `Resolver` interface (`Lookup`, `Names`); `ParseFileWith`, `File.UseWith`, `NewWith`.
   - Caller names shadow built-in groups; nested `use`; a cycle is `use-cycle` naming the chain; prefixed names (`dev/go`) work.
   - A used filter with `root`, `types` or `max-file-size` is refused, never dropped.
   - Resolution is lazy: ateam calls `NewWith` when it loads its config, so errors surface at load, named by filter.
   - `Rules.List()` returns the flattened rules with kind, text and the filter each came from: what the nono renderer and `profile show` need.
-  - No tags in autoversion: ateam pins a commit hash. `filterrules` imports `golang.org/x/sys`, which ateam already has as an indirect dependency.
+  - autoversion is public at `github.com/voidexpr/autoversion` (moved 2026-11-23, so CI, Docker builds and other users can fetch it). No tags: ateam pins a commit hash. `filterrules` imports `golang.org/x/sys`, which ateam already has as an indirect dependency.
 - While this is being developed, the shared filters live in ateam: filter files embedded in `defaults/`, under folder prefixes (`dev/go`, `dev/node`, `agent/secrets`, `system/read-macos`; labels are examples). A filter change is then an ateam change only, with no autoversion release.
 - Machine-specific rules (`/SyncDatabox/nicmac/.ssh`) stay in the user's own config, as `filter` blocks or files under `~/.ateam/`.
 - Resolution order for a name: the profile's HCL `filter` blocks, then the user layer, then ateam's embedded defaults, then autoversion's built-ins.
@@ -273,7 +282,7 @@ Requirements:
 ```bash
 # attended agent
 ateam chat --profile myproject
-ateam chat --profile myproject --go --write ~/tmp/scratch -- --continue
+ateam chat --profile myproject,dev/go --write ~/tmp/scratch -- --continue
 
 # a command under a profile
 ateam run --profile myproject -- make test      # no saved command: command after --
@@ -285,9 +294,10 @@ ateam run --profile build --command "make lint"  # replace the saved command for
 ateam shell --profile myproject
 
 # profiles
-ateam profile save myproject --go --write ~/SyncDatabox/dotfiles
+ateam profile save myproject --profile sandbox/nono,dev/go --write ~/SyncDatabox/dotfiles
 ateam profile show myproject
 ateam profile list
+ateam profile export myproject --out DIR
 ```
 
 - `chat`: launches the agent, from the profile or else the default agent. Ignores `command`. Arguments after `--` go to the agent. Adds the agent-specific wiring: its settings, its inner sandbox off, usage and cost recorded in the metrics database.
@@ -319,15 +329,15 @@ ateam profile list
 
 ## Phases
 
-| Phase | Content |
-|---|---|
-| 0 | Optional: a wrapper container type, ateam prefixes the agent command with `nono-sandbox ... --`. No port. Unattended runs get nono now. |
-| 1 | Profiles: optional agent and container, `use`, `read`/`write`/`exclude`, `command`. `filter` entity and the `filterrules` resolver. nono backend port with targy's test fixtures. `chat`, `run`, `shell`, `profile save/show/list`. Protection of ateam's files. Attended sessions in the metrics database. Retire `nono-sandbox`. |
-| 2 | `network` entity mapped to nono's proxy; per-group domains. `_remove` and `_replace`. Trust on first use for project-supplied profiles. |
-| 3 | Secrets: `ateam secret` values as placeholders, injected outside the sandbox (research G.4, F.1.1 Tier A first). |
-| 4 | `exposes` and `resources`: ports, Playwright, build containers, remote computers. Other backends: fence or an embedded Go sandbox; Enclave or OpenShell for container modes. |
+| Phase | Content | State (2026-11-23) |
+|---|---|---|
+| 0 | A wrapper container type around `nono-sandbox` | Dropped |
+| 1 | Composable profiles; `filter` entity; nono backend; `chat`, `run`, `shell`, `profile save/show/list/export`; protection of ateam's files; unattended runs under nono; ateam inside the sandbox | Built on macOS. Left: Linux, built-in profiles as filter files, retiring `nono-sandbox` |
+| 2 | `network` entity mapped to nono's proxy, with ports. `_remove` and `_replace`. Trust on first use for project-supplied profiles | Not started. `domains` stands in for the network entity |
+| 3 | Secrets: `ateam secret` values as placeholders, injected outside the sandbox (research G.4, F.1.1 Tier A first) | Not started |
+| 4 | `exposes` and `resources`: ports, Playwright, build containers, remote computers. Other backends: fence or an embedded Go sandbox; Enclave, OpenShell or Strands Box for comparison | Not started |
 
-Phase 1 should wait for the Linux run of the current targy implementation (K4 on meerdog), so the port copies settled behavior.
+Later, outside the phases: attended sessions in the metrics database; `chat`, `run`, `shell` on Docker containers.
 
 ## What stays in targy and dotfiles
 
@@ -358,12 +368,12 @@ Staying with targy + `nono-sandbox`:
 
 ## Open questions
 
-1. Claude under `--dangerously-skip-permissions`: do command deny rules still apply (see "Claude settings under a sandbox backend").
-2. Folder labels for the shared filters (`dev/`, `agent/`, `system/`), and when to move them to autoversion.
-3. Phase 0: worth doing, or go straight to phase 1.
-4. Names for `exposes` and `resources`, and the shape of port and Playwright blocks.
-5. A dynamic port: how a profile learns the port that was chosen.
-6. `default_container`: a new top-level setting, or the `default` profile's container.
+1. Claude under `--dangerously-skip-permissions`: do command deny rules still apply (see "Claude settings under a sandbox backend"). The owner has the command to run; not run yet.
+2. When to move the shared filters to autoversion, once the built-in profiles are filter files.
+3. Linux: the home listing around excluded paths (ported from targy), and a mechanism for read-only paths inside a writable folder, which on macOS relies on Seatbelt.
+4. `unsafe_macos_seatbelt_rules` is not in nono's profile guide. Ask nono's authors whether it is stable, or whether a read-only rule is planned.
+5. A profile per run for unattended commands (a worktree per role): today every run of a command shares one working folder and one nono profile.
+6. Names for `exposes` and `resources`, and the shape of port and Playwright blocks. A dynamic port: how a profile learns the port that was chosen.
 7. Whether `run` and `chat` should also accept a `--save NAME` shortcut. Current answer: no, `profile save` then launch.
-8. Go version: ateam is on 1.26.5, autoversion on 1.25.0. Fine for importing; confirm `make run-ci` (vuln, deadcode) with the new dependency.
-9. Renaming `exec` and `prompt` to fit the wider scope.
+8. Renaming `exec` and `prompt` to fit the wider scope.
+9. `DEV.md` describes `roles/` and `supervisor/` as promotion targets while `CONFIG.md` and the prompts use `shared/`: which is current.

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/nicad/autoversion/filterrules"
+	"github.com/voidexpr/autoversion/filterrules"
 )
 
 // FilterSet holds named filters in the shared filter syntax (the one of

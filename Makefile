@@ -54,9 +54,9 @@ build-all-race: build-binary-race companion-race
 tidy:
 	$(GO) mod tidy
 
-# autoversion is a private repo with no tags: this pins the latest commit of main.
+# autoversion has no tags: this pins the latest commit of main.
 update-autoversion:
-	$(GO) get github.com/nicad/autoversion@main
+	$(GO) get github.com/voidexpr/autoversion@main
 	$(GO) mod tidy
 
 check-tidy:
