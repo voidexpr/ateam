@@ -79,6 +79,7 @@ Related research: `research/ResearchSandboxing.md`, sections F.1.2 (review-time 
 | 16 | Supervised coding (2026-11-22/23) | Two supported setups: supervisor without nono and sub-runs with a nono profile; or supervisor under nono with `agent/ateam`, all in one sandbox. |
 | 17 | Names (2026-11-21) | Built-in composable profiles carry a folder prefix (`sandbox/nono`, `agent/claude`, `dev/go`): a profile named `claude` would shadow the agent shorthand of unattended runs. No `--go` shorthand: `--profile a,b`. |
 | 18 | `domains` (2026-11-21) | A plain profile list for now, so a sandboxed build can reach its registries. The `network` entity (decision 8) replaces it. |
+| 20 | Embedded sandbox (2026-11-23) | fence is added as a second backend, used as a Go library so ateam carries its own sandbox. It also tests that the policy model is not shaped by nono. |
 | 19 | Default container (2026-11-21) | A profile without agent or container takes the `default` profile's. No new top-level setting. No wrapper phase. |
 
 ## Design
@@ -335,7 +336,8 @@ ateam profile export myproject --out DIR
 | 1 | Composable profiles; `filter` entity; nono backend; `chat`, `run`, `shell`, `profile save/show/list/export`; protection of ateam's files; unattended runs under nono; ateam inside the sandbox | Built on macOS. Left: Linux, built-in profiles as filter files, retiring `nono-sandbox` |
 | 2 | `network` entity mapped to nono's proxy, with ports. `_remove` and `_replace`. Trust on first use for project-supplied profiles | Not started. `domains` stands in for the network entity |
 | 3 | Secrets: `ateam secret` values as placeholders, injected outside the sandbox (research G.4, F.1.1 Tier A first) | Not started |
-| 4 | `exposes` and `resources`: ports, Playwright, build containers, remote computers. Other backends: fence or an embedded Go sandbox; Enclave, OpenShell or Strands Box for comparison | Not started |
+| 4 | `exposes` and `resources`: ports, Playwright, build containers, remote computers. Other backends for comparison: Enclave, OpenShell, Strands Box | Not started |
+| — | fence as an embedded backend (Go library, no external binary): a second consumer of the policy model, and a path to Linux | Next (decided 2026-11-23); see the steps file |
 
 Later, outside the phases: attended sessions in the metrics database; `chat`, `run`, `shell` on Docker containers.
 
