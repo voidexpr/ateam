@@ -160,14 +160,48 @@ func TestBuiltinSandboxProfilesCompose(t *testing.T) {
 	if cc.Type != ContainerTypeNono {
 		t.Errorf("container type = %q", cc.Type)
 	}
-	for attr, want := range map[string]string{"exclude": "~/.ssh", "write": "~/go/pkg", "domains": "api.anthropic.com"} {
-		list := map[string][]string{"exclude": prof.Exclude, "write": prof.Write, "domains": prof.Domains}[attr]
+	// The path lists are filters: the profiles name them.
+	for attr, want := range map[string]string{"read": "agent/secrets", "write": "dev/go-write", "domains": "api.anthropic.com"} {
+		list := map[string][]string{"read": prof.Read, "write": prof.Write, "domains": prof.Domains}[attr]
 		if !slices.Contains(list, want) {
 			t.Errorf("%s lacks %s", attr, want)
 		}
 	}
-	if got := prof.EntryOrigin("exclude", "~/.ssh"); got != "agent/secrets" {
-		t.Errorf("origin of ~/.ssh = %q", got)
+	if got := prof.EntryOrigin("read", "agent/secrets"); got != "agent/secrets" {
+		t.Errorf("origin of the agent/secrets filter = %q", got)
+	}
+	for _, name := range []string{"agent/secrets", "system/removable", "agent/claude-write", "dev/go-write", "dev/node-write"} {
+		if cfg.Filters[name] == "" {
+			t.Errorf("embedded filter %q is missing", name)
+		}
+	}
+}
+
+// A filter file in a layer replaces an embedded one of the same name, and
+// a filter block in the layer's ateam.hcl replaces the file.
+func TestLayerFilterFilesOverride(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "filters", "dev"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{
+		"dev/go-write.filter": "version 1\n/mygo\n",
+		"dev/mine.filter":     "version 1\n/mine\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, "filters", name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeLayer(t, dir, "filter \"dev/mine\" {\n  rules = \"version 1\\n/block\\n\"\n}\n")
+	cfg, err := Load([]string{dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cfg.Filters["dev/go-write"], "/mygo") {
+		t.Errorf("the layer's file must replace the embedded filter: %q", cfg.Filters["dev/go-write"])
+	}
+	if !strings.Contains(cfg.Filters["dev/mine"], "/block") {
+		t.Errorf("the filter block must replace the layer's file: %q", cfg.Filters["dev/mine"])
 	}
 }
 

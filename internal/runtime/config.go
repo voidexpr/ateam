@@ -3,6 +3,7 @@ package runtime
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -387,6 +388,9 @@ func LoadWithFiles(layerDirs, files []string) (*Config, error) {
 		return nil, fmt.Errorf("cannot read embedded defaults: %w", err)
 	}
 	cfg.Layers = append(cfg.Layers, Layer{Label: BuiltinLayer, Found: true})
+	if err := cfg.loadFilterFiles(defaults.FS, FiltersSubdir, BuiltinLayer); err != nil {
+		return nil, fmt.Errorf("embedded filters: %w", err)
+	}
 	if err := mergeHCL(cfg, defaultData, "defaults/"+ConfigFile, BuiltinLayer); err != nil {
 		return nil, fmt.Errorf("cannot parse embedded defaults: %w", err)
 	}
@@ -394,6 +398,14 @@ func LoadWithFiles(layerDirs, files []string) (*Config, error) {
 	for _, dir := range layerDirs {
 		if dir == "" {
 			continue
+		}
+		// A layer's filter files come before its ateam.hcl, whose filter
+		// blocks win over a file of the same name.
+		filterDir := filepath.Join(dir, FiltersSubdir)
+		if info, err := os.Stat(filterDir); err == nil && info.IsDir() {
+			if err := cfg.loadFilterFiles(os.DirFS(filterDir), ".", filterDir); err != nil {
+				return nil, err
+			}
 		}
 		if err := mergeHCLFile(cfg, filepath.Join(dir, ConfigFile)); err != nil {
 			return nil, err
@@ -979,6 +991,34 @@ func (c *Config) mergeContainer(h hclContainer, label string) {
 		c.record(key+attr, label, value, line)
 	}
 	c.Containers[h.Name] = cc
+}
+
+// FiltersSubdir holds filter files in the embedded defaults and in a layer
+// directory: filters/dev/go-write.filter is the filter "dev/go-write".
+const FiltersSubdir = "filters"
+
+const filterExt = ".filter"
+
+// loadFilterFiles records every *.filter file below root in fsys, named by
+// its path without the extension. label names the source for provenance.
+func (c *Config) loadFilterFiles(fsys fs.FS, root, label string) error {
+	return fs.WalkDir(fsys, root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, filterExt) {
+			return err
+		}
+		data, err := fs.ReadFile(fsys, path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		name := filepath.ToSlash(strings.TrimSuffix(rel, filterExt))
+		c.Filters[name] = string(data)
+		c.record("filter."+name+".name", label, filepath.Join(label, rel), 0)
+		return nil
+	})
 }
 
 // mergeFilter records a filter block: a later layer replaces a filter of

@@ -1,0 +1,4 @@
+# system/removable: external and network volumes, unreadable.
+version 1
+root /
+exclude /{Volumes,media,mnt}

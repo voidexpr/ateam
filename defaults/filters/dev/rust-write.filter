@@ -1,0 +1,3 @@
+# dev/rust-write: cargo's registry and git checkouts.
+version 1
+/.cargo/{registry,git}

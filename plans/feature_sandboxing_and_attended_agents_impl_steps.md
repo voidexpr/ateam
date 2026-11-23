@@ -16,7 +16,8 @@ Status, 2026-11-23: phase 1 is built on macOS and committed (`d7ecad6`, `10f6d34
 | Profile commands | `ateam profile list`, `show`, `save`, `export`; each layer loads `profiles/*.hcl`; `--profile FILE` | `cmd/profile.go` |
 | Unattended runs | The runner uses a nono container like a Docker one, with the same policy code | `internal/container/nono.go`, `cmd/runner_setup.go` |
 | ateam inside the sandbox | `agent/ateam`, `ATEAM_IN_SANDBOX=1`, no second sandbox from inside | `cmd/sandbox_launch.go` (`sandboxType`) |
-| Built-in profiles | `sandbox/nono`, `agent/secrets`, `agent/claude`, `agent/codex`, `agent/ateam`, `dev/*`: literal paths ported from `agents.targy` | `defaults/ateam.hcl` |
+| Built-in profiles | `sandbox/nono`, `agent/secrets`, `agent/claude`, `agent/codex`, `agent/ateam`, `dev/*`, naming filters | `defaults/ateam.hcl` |
+| Built-in filters | The path lists ported from `agents.targy`, as embedded filter files; a layer's `filters/*.filter` and `filter` blocks override them; `ateam filter list`, `show` | `defaults/filters/`, `cmd/filter.go` |
 
 ## How it was checked
 
@@ -53,7 +54,7 @@ Not checked:
 In order:
 
 1. **Owner: use it.** `ateam chat` and `ateam shell` for real work; `ateam code` with a nono code profile; `make test-docker` after `55d7abf`. Each refusal that is not obvious is a missing path or host in a built-in profile.
-2. **Built-in profiles as filter files.** Move the path lists of `defaults/ateam.hcl` into embedded filter files (`agent/secrets`, `dev/go-write`, ...), keep the profiles as thin references. Add `ateam filter show NAME`. Needs embedded filters in the resolver order: HCL blocks, user layer, embedded defaults, autoversion built-ins.
+2. ~~Built-in profiles as filter files.~~ Done 2026-11-23: `defaults/filters/`, `ateam filter list` and `show`. Every filter resolves to the same paths as the literal list it replaced (compared one by one).
 3. **Linux.** Port the home listing walk from targy (`filters/listing.py`): the home listed around the excluded paths, since nono refuses a deny inside a grant there. Decide how read-only paths work without Seatbelt (open question 3). Then the run on meerdog.
 4. **Retire `nono-sandbox`.** Remove it from `~/dotfiles/bin`; in targy remove the `nono_profile` step and the `launch` target, keep `claude_permissions`, `json_merge`, `claude-settings`. After a period of daily use of the ateam commands.
 5. **Phase 2: the `network` entity**, replacing `domains`: default deny, named sets, `host:port`, mapped to nono's proxy or an error. Then `_remove` / `_replace` and trust on first use for project-supplied profiles.

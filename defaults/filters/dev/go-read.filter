@@ -1,0 +1,3 @@
+# dev/go-read: GOENV lives under a folder agent/secrets closes on macOS.
+version 1
+/Library/Application Support/go

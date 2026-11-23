@@ -873,8 +873,9 @@ role "test.recent" { status = "on" }
 //   domains = hosts reachable; none closes the network
 //   command = saved command for `ateam run`
 //   ateam_files = "open" lets the command reach ateam's own files
-// Paths start with ~ or /. Reading is open below the home, except what is
-// excluded; a path that does not exist is harmless.
+// An entry of read, write or exclude is a path (~ or / first) or the name
+// of a filter. Reading is open below the home, except what is excluded; a
+// path that does not exist is harmless.
 // ---------------------------------------------------------------------
 
 // nono (https://nono.sh): an OS-level sandbox on the host, no container,
@@ -890,39 +891,20 @@ profile "sandbox/nono" {
   use       = ["agent/secrets"]
 }
 
-// Keys, credentials, app data and personal folders: unreadable.
+// The path lists live in filter files, embedded in the binary: see
+// `ateam filter list` and `ateam filter show NAME`. A file of the same
+// name under filters/ in ~/.ateam or a project's .ateam replaces one.
+
+// Keys, credentials, app data, personal folders and external volumes:
+// unreadable.
 profile "agent/secrets" {
-  exclude = [
-    "~/.ssh", "~/.gnupg", "~/.aws", "~/.azure", "~/.kube", "~/.netrc",
-    "~/.git-credentials", "~/.pypirc", "~/.gem/credentials",
-    "~/.cargo/credentials.toml", "~/.appstoreconnect", "~/.minisign",
-    "~/.config/gh", "~/.config/gcloud", "~/.config/op", "~/.config/agebox",
-    "~/.config/anthropic", "~/.config/borg", "~/.config/plakar",
-    "~/.config/configstore", "~/.config/rclone/rclone.conf",
-    "~/.claude/.credentials.json", "~/.codex/auth.json", "~/.gemini",
-    "~/.copilot", "~/.local/share/keyrings",
-    "~/Library/Application Support", "~/Library/Containers",
-    "~/Library/Group Containers", "~/Library/Preferences",
-    "~/Library/Keychains", "~/Library/Cookies", "~/Library/Safari",
-    "~/Library/Messages", "~/Library/Mail", "~/Library/Calendars",
-    "~/Library/Accounts", "~/Library/CloudStorage",
-    "~/Library/Mobile Documents", "~/Library/Thunderbird",
-    "~/.mozilla", "~/.thunderbird", "~/.config/google-chrome",
-    "~/.config/chromium", "~/.config/BraveSoftware", "~/.config/1Password",
-    "~/Dropbox", "~/.dropbox", "~/Downloads", "~/Documents", "~/Desktop",
-    "~/.bash_history", "~/.zsh_history", "~/.psql_history",
-    "/Volumes", "/media", "/mnt",
-  ]
+  read = ["agent/secrets", "system/removable"]
 }
 
 // Claude Code: its own files (it edits them) and the login keychain, which
-// it needs to sign in. `ateam chat` adds agent/<type> for the agent it runs.
+// it needs to sign in. A launch adds agent/<type> for the agent it runs.
 profile "agent/claude" {
-  write = [
-    "~/.claude", "~/.claude.json", "~/.claude.json.lock", "~/.cache/claude",
-    "~/.local/state/claude", "~/Library/Caches/claude-cli-nodejs",
-    "~/Library/Keychains",
-  ]
+  write = ["agent/claude-write"]
   // mcp-proxy: the claude.ai connectors. Telemetry hosts are left closed.
   domains = ["api.anthropic.com", "claude.ai", "mcp-proxy.anthropic.com"]
 }
@@ -936,7 +918,7 @@ profile "agent/ateam" {
 }
 
 profile "agent/codex" {
-  write   = ["~/.codex"]
+  write   = ["agent/codex-write"]
   domains = ["api.openai.com", "chatgpt.com", "auth.openai.com"]
 }
 
@@ -946,30 +928,30 @@ profile "dev/github" {
 
 profile "dev/go" {
   use     = ["dev/github"]
-  write   = ["~/go/pkg", "~/Library/Caches/go-build", "~/.cache/go-build"]
-  read    = ["~/Library/Application Support/go"]
+  write   = ["dev/go-write"]
+  read    = ["dev/go-read"]
   domains = ["proxy.golang.org", "sum.golang.org", "vuln.go.dev", "golang.org", "storage.googleapis.com"]
 }
 
 profile "dev/rust" {
   use     = ["dev/github"]
-  write   = ["~/.cargo/registry", "~/.cargo/git"]
+  write   = ["dev/rust-write"]
   domains = ["crates.io", "index.crates.io", "static.crates.io"]
 }
 
 profile "dev/python" {
-  write   = ["~/Library/Caches/pip", "~/.cache/pip", "~/.cache/uv"]
+  write   = ["dev/python-write"]
   domains = ["pypi.org", "files.pythonhosted.org"]
 }
 
 profile "dev/node" {
   use     = ["dev/github"]
-  write   = ["~/.npm", "~/Library/pnpm/store", "~/.local/share/pnpm/store", "~/.pnpm-store", "~/.bun/install/cache"]
+  write   = ["dev/node-write"]
   domains = ["registry.npmjs.org"]
 }
 
 profile "dev/deno" {
-  write   = ["~/Library/Caches/deno", "~/.cache/deno"]
+  write   = ["dev/deno-write"]
   domains = ["deno.land", "jsr.io"]
 }
 

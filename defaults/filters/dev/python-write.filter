@@ -1,0 +1,4 @@
+# dev/python-write: pip and uv caches.
+version 1
+/{Library/Caches,.cache}/pip
+/.cache/uv

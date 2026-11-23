@@ -503,6 +503,16 @@ ateam profile export myproject --out ~/sandboxes/myproject
 ~/sandboxes/myproject/run.sh make test
 ```
 
+### `ateam filter`
+
+```bash
+ateam filter list                 # every filter and where it is defined
+ateam filter show NAME            # the filter as written
+ateam filter show NAME --paths    # the absolute paths it includes and excludes here
+```
+
+Filters are named sets of paths that profiles use in `read`, `write` and `exclude`. See [CONFIG.md → Filters](CONFIG.md#filters).
+
 ### `ateam exec`
 
 Run an agent with a prompt. Can run standalone (just needs `~/.ateam/`) or within a project.

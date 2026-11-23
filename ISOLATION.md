@@ -101,6 +101,8 @@ ateam run --profile sandbox/nono,dev/go --write ~/tmp/scratch --domain example.c
 | `dev/go`, `dev/rust`, `dev/python`, `dev/node`, `dev/deno`, `dev/all` | Each toolchain's caches (writable) and registries (reachable) |
 | `dev/github` | github.com hosts |
 
+The path lists behind these profiles are filters, embedded in the binary. `ateam filter list` names them and `ateam filter show agent/secrets --paths` prints what one closes on this machine. A file of the same name in `~/.ateam/filters/` replaces a built-in one.
+
 Save how a project runs, then reuse it:
 
 ```bash

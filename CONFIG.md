@@ -733,6 +733,10 @@ profile "myproject" {
 - A filter may `use` another filter by name. A used filter carries no `root`.
 - A sandbox takes paths, not patterns: a rule with a wildcard, a type prefix or a marker is a load error. So are an unknown name, a cycle and a file that cannot be read.
 - A later layer replaces a filter of the same name whole.
+- Filters also come from files: `filters/NAME.filter` in a layer directory (`~/.ateam/filters/dev/go-write.filter` is the filter `dev/go-write`). The built-in filters are such files, embedded in the binary; a file or block of the same name replaces one. Order: built-in, then each layer's files, then that layer's `filter` blocks.
+- `ateam filter list` shows every filter and its source; `ateam filter show NAME` prints it, `--paths` the paths it resolves to.
+
+The path lists of the built-in profiles are filters (`agent/secrets`, `dev/go-write`, ...): to change what a built-in profile grants, put a filter file of the same name in `~/.ateam/filters/`.
 
 Built-in composable profiles (`ateam profile list`): `sandbox/nono` (the nono container plus `agent/secrets`), `agent/secrets` (keys, credentials, app data and personal folders unreadable), `agent/claude` and `agent/codex` (the agent's own files and API hosts), `agent/ateam` (ateam's own files open, to run ateam inside the sandbox), `dev/go`, `dev/rust`, `dev/python`, `dev/node`, `dev/deno`, `dev/github`, `dev/all`.
 

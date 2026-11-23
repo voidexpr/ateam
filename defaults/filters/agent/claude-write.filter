@@ -1,0 +1,6 @@
+# agent/claude-write: Claude Code's own files (it edits them) and the login
+# keychain, which it needs to sign in.
+version 1
+/{.claude,.claude.json,.claude.json.lock,.cache/claude,.local/state/claude}
+/Library/Caches/claude-cli-nodejs
+/Library/Keychains

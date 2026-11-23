@@ -9,4 +9,5 @@ import "embed"
 //
 //go:embed prompts/*.md prompts/report/*.md
 //go:embed ateam.hcl Dockerfile
+//go:embed filters
 var FS embed.FS

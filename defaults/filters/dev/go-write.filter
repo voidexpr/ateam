@@ -1,0 +1,4 @@
+# dev/go-write: what a Go build writes outside the project.
+version 1
+/go/pkg
+/{Library/Caches,.cache}/go-build
