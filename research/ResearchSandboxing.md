@@ -789,6 +789,8 @@ Positioned as defense-in-depth, not a hostile-code boundary. The package-manager
 
 **Assessment:** Best for layering dev-specific command/package policies on top of a filesystem sandbox. ATeam should borrow Fence's package-manager and command-policy patterns regardless of which filesystem sandbox is used.
 
+**Update 2026-11-23:** the project moved to [`fencesandbox/fence`](https://github.com/fencesandbox/fence). Current mechanisms, the Go library API, SSH rules and a comparison with the Codex sandbox are in E.19.
+
 #### E.13.3 clampdown
 
 **Platform:** Linux only (macOS only via Linux VM: Colima/Podman machine; Docker Desktop explicitly unsupported)
@@ -1822,7 +1824,7 @@ A dimension that's easy to overlook: **the agent CLIs themselves now ship sandbo
 
 | Agent CLI | Built-in mechanism | Default state | macOS | Linux | Windows |
 |---|---|---|---|---|---|
-| **OpenAI Codex CLI** | Seatbelt + Landlock + seccomp + restricted-token | **On by default**; tiered modes: `read-only`, `workspace-write`, `danger-full-access` | Seatbelt | Landlock + seccomp | Restricted tokens |
+| **OpenAI Codex CLI** | Seatbelt + Landlock + seccomp + restricted-token (May 2026; see E.19 for the November 2026 state: bubblewrap + seccomp on Linux, MXC on Windows, permission profiles) | **On by default**; tiered modes: `read-only`, `workspace-write`, `danger-full-access` | Seatbelt | Landlock + seccomp | Restricted tokens |
 | **Anthropic Claude Code** | `@anthropic-ai/sandbox-runtime` (E.2) — Seatbelt or bubblewrap, plus a network proxy | Off by default in CLI; cloud sessions run in full microVMs | Seatbelt | bubblewrap | n/a |
 | **Google Gemini CLI** | Seatbelt profile *or* Docker/Podman container per `.gemini/sandbox.Dockerfile` | Opt-in | Seatbelt | Docker/Podman | Docker/Podman |
 | **GitHub Copilot Coding Agent** | Ephemeral cloud sandbox VM, per-task | On (cloud-only) | n/a | n/a | n/a |
@@ -1858,6 +1860,170 @@ Worth a deep dive on the next refresh:
 - **Cleanroom** (Buildkite) — microVM with deny-by-default egress; the network model is the relevant comparable to Matchlock's.
 - **container-use** (Dagger) — already noted briefly in E.8; if Dagger continues investing it may become the standard "branch + container per agent" reference and warrant a full entry.
 - **shai** (colony-2/shai) and **treebeard** (divmain/treebeard) — Linux-side ergonomic sandboxes worth checking if ATeam ever ships on Linux laptops.
+
+### E.19 Codex sandbox (November 2026), compared with Fence
+
+**Sources:** OpenAI, ["Inside the Codex sandbox"](https://openai.com/index/inside-the-codex-sandbox/) (Michael Bolin, 2026-11-18); the linked [Codex permissions doc](https://learn.chatgpt.com/docs/permissions); Fence's README, `ARCHITECTURE.md`, `docs/security-model.md`, `docs/configuration.md`, `docs/library.md`, `docs/hooks.md`.
+**Reviewed:** 2026-11-23, from those documents. Not run locally. "Not stated" means the sources are silent.
+
+This supersedes the Codex row of E.17 and extends the Fence entry in E.13.2. Fence has moved from `Use-Tusk/fence` to [`fencesandbox/fence`](https://github.com/fencesandbox/fence).
+
+#### Codex sandbox
+
+**Mechanism per platform:**
+
+| Platform | Mechanism | Notes |
+|---|---|---|
+| macOS | Seatbelt through `/usr/bin/sandbox-exec`. Profiles start from `(deny default)` and are assembled per command with `-D` parameters. | The article acknowledges Apple deprecated `sandbox-exec` and `sandbox_init()`, and says Codex plans to keep using Seatbelt. |
+| Linux | bubblewrap for the filesystem view and the network namespace, plus seccomp-bpf applied by an internal `codex-linux-sandbox` helper. `no_new_privs` set. | Codex vendors its own `bwrap` but prefers a system one on `PATH`. The legacy Landlock option is rejected for filesystem-restricted policies. **E.17's "Landlock + seccomp" is out of date.** |
+| Windows | Being replaced by a sandbox built on Microsoft's MXC library. Legacy `elevated` and weaker `unelevated` fallbacks remain. | Earlier limits cited: admin setup, slow ACL operations, persistent host state. |
+
+**Execution model:**
+
+- **Per command.** The harness's shell tool spawns each command under the sandbox. The harness itself runs outside it. Descendants inherit the restrictions, including ones that outlive the parent.
+- Stdio MCP servers are **not** sandboxed by default. The article recommends wrapping them with `codex sandbox --permission-profile`.
+- Standalone use for arbitrary commands: `codex sandbox --permission-profile <name> -- <cmd>`.
+
+**Permission profiles** (the configuration model; `sandbox_mode` is now a legacy setting that still takes precedence when present):
+
+- Built-in: `:read-only`, `:workspace`, `:danger-full-access`.
+- `:workspace`: writes inside the workspace, broad filesystem reads, network disabled. `.git`, `.agents`, `.codex` and `.aws` stay read-only unless overridden.
+- Custom profiles: `[permissions.<name>]` with `extends`, and a `filesystem` map of paths to `"read"`, `"write"` or `"deny"`. Named roots: `:workspace_roots`, `:root`, `:tmpdir`, `:slash_tmp`.
+- `default_permissions` selects the profile. Administrators can restrict choices with `allowed_permission_profiles` in `/etc/codex/requirements.toml`.
+- Stated limit: **deny globs are expanded at launch** and do not cover paths created later.
+- Stated limit: sensitive files elsewhere on the machine (for example a config holding API keys) can stay readable under `:workspace`, because reads are broad.
+
+**Network:**
+
+- Three modes: off, full direct access, or a domain-filtering proxy.
+- Off is the default for `:workspace`. On Linux, seccomp blocks `connect` and `bind`.
+- Proxy: a shared `codex-network-proxy` crate runs HTTP and SOCKS5 proxies (defaults `127.0.0.1:3128` and `127.0.0.1:8081`). The child gets `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and tool-specific variables such as `PIP_PROXY`. The OS sandbox blocks direct connections.
+- The article states that not all programs honor these variables.
+- Rules: exact and wildcard names, deny beats allow. Unmatched requests can be suspended for approval. DNS is resolved only after the allow decision.
+- Stated limit: wildcard rules or DNS access can still allow DNS exfiltration.
+- macOS: local ports allowed by Seatbelt rules. Linux: a host-side relay bridges a loopback listener inside the network namespace; seccomp blocks standalone unix sockets when the proxy is on.
+- `allow_local_binding` defaults to false.
+
+**Escalation:**
+
+- The `exec_command` tool takes `sandbox_permissions`: `use_default`, `with_additional_permissions` or `require_escalated`, with a `justification`.
+- The harness decides. Requests go to a user prompt or to auto-review.
+- Command allow/deny rules and approval policy values: not stated in these sources.
+
+**Not stated:** environment variable filtering, credential injection, known escapes, red-team results, performance numbers, license.
+
+**Stated motivation:** defense in depth alongside training and alignment. The example given is a malicious change to `node_modules/prettier` that runs when an editor saves.
+
+#### Fence, current state
+
+Additions to E.13.2:
+
+- Go, Apache-2.0, about 1.0k⭐.
+- macOS: `sandbox-exec` with generated profiles. Linux: bubblewrap, plus optional Landlock, seccomp and eBPF monitoring, chosen by feature detection. Needs `bubblewrap` and `socat` on Linux.
+- Filesystem: writes denied by default. Reads allowed by default except `denyRead`; `defaultDenyRead` makes reads opt-in; `strictDenyRead` also drops the always-readable system paths. Mandatory protection of shell startup files, nested `.git/hooks` and some editor config directories.
+- Network: all outbound blocked by default. Built-in HTTP CONNECT and SOCKS5 proxies enforce `allowedDomains` / `deniedDomains`. Linux uses `--unshare-net` with `socat` bridges. Without network namespaces (common in containers and CI) it degrades to best effort.
+- `upstreamProxy` can forward traffic to another HTTP proxy, such as an intercepting one.
+- Command rules: preflight parsing of `&&`, `||`, `;`, pipes and `sh -c` payloads. At runtime, `path` mode masks executables by resolved path (single-token rules only, both platforms). `argv` mode inspects `execve` arguments through seccomp user notification, **Linux only**. So a rule like "deny `git push`" does not reach an agent's child processes on macOS.
+- **SSH rules:** `ssh.allowedHosts`, `deniedHosts`, `allowedCommands`, `deniedCommands`, `allowAllCommands`, `inheritDeny`. They are a preflight check on the command string, not an SSH proxy. Details and limits below.
+- Config: `fence.jsonc` found by walking up from the working directory, with `extends` (templates, user base, files), append-and-dedupe merge. `fence import --claude`.
+- Agent hooks for Claude Code, Codex, Cursor, OpenCode, Windsurf. The Codex hook is intent-only by default: Codex's own sandbox blocks Fence's nested proxy bind.
+- **Go library:** `github.com/fencesandbox/fence/pkg/fence`. `NewManager(cfg, debug, monitor)`, `Initialize()`, `WrapCommand(cmd)`, `HTTPPort()`, `SOCKSPort()`, `Cleanup()`. Policy checks without sandboxing: `CheckReadPath`, `CheckWritePath`, `CheckCommand`, `CheckURL`.
+- Library caveats: `Manager` is not thread-safe. Linux needs a helper binary (`SetLinuxHelperPath`). Callers strip `LD_*` / `DYLD_*` themselves. Monitor mode is not exposed.
+- Stated position: defense in depth for semi-trusted code, not a strong isolation boundary. Not covered: kernel-bug escapes, resource limits, exfiltration to allowed domains.
+- No credential injection.
+
+**Fence SSH rules** (added 2026-11-23, from `docs/configuration.md` and `internal/sandbox/command.go`):
+
+| Key | Meaning |
+|---|---|
+| `allowedHosts` | Host patterns allowed. `*` wildcards anywhere (`*.example.com`, `prod-*`). A `user@` prefix is stripped. Port syntax not stated. |
+| `deniedHosts` | Host patterns denied; checked first. |
+| `allowedCommands` | Remote commands allowed (allowlist mode). Token-prefix matching, the same as `command.deny`. |
+| `deniedCommands` | Remote commands denied; checked before the allowlist. |
+| `allowAllCommands` | `true` switches to denylist mode. |
+| `inheritDeny` | `true` also applies `command.deny` and the default deny list to remote commands. |
+
+```json
+{"ssh": {"allowedHosts": ["*.example.com"], "allowedCommands": ["ls", "cat", "grep", "tail"]}}
+```
+
+How it is enforced:
+
+- `CheckSSHCommand` runs inside `CheckCommand`, the preflight on the command string given to Fence. The string is tokenized and the first token's basename must be `ssh`.
+- There is no shim on `PATH`, no generated `ssh_config`, no exec hook for SSH, and no proxy that sees the session.
+- So the rules apply to an `ssh ...` command passed to Fence directly, for example through the agent hook that rewrites a Bash tool call to `fence -c`. An `ssh` started by a child process (git over SSH, `rsync -e ssh`, a script) is not evaluated by this check. The runtime exec code was not read.
+- The remote command is everything after the host, split on `|`, `&&`, `||`, `;`, with `sh -c` payloads expanded. Each part is matched against the rules.
+- With no remote command (an interactive session), only the host is checked and the session is allowed.
+
+Gaps seen in the code (v0.1.67 docs and source; our reading, not stated by the project):
+
+- `-J` jump hosts, `-o ProxyCommand=...`, and `-L`/`-R`/`-D` forwarding values are skipped, not checked. A jump host is not matched against `allowedHosts`.
+- `-F otherconfig` is not read; the host is the literal argument, so a config alias can map an allowed name to another host.
+- Command substitution (`$(...)`, backticks) is not extracted.
+- `env ssh ...` or `nohup ssh ...` is not recognized as ssh.
+- A `command.allow` rule that matches the whole string returns early and skips the SSH checks.
+- If neither `allowedHosts` nor `deniedHosts` is set, every ssh command is allowed and `allowedCommands` is ignored. The docs say SSH defaults to allowlist mode.
+- Keys: not stated whether `~/.ssh` or `SSH_AUTH_SOCK` is reachable by default. Network: not stated whether port 22 to an allowed host is opened.
+
+Verdict: these rules are a guardrail on what an agent types, in the same class as the regex-based MCP servers in `ResearchNetworkSandboxing.md` §5.5. They are not a boundary. Prefix matching on a command string is the unsafe policy form listed in §5.8 there.
+
+**Fence `Manager` and concurrency** (from `docs/library.md`, `internal/sandbox/manager.go`, and the v0.1.67 module source):
+
+- The docs say `Manager` instances are "not thread-safe" and recommend one per goroutine or synchronized access.
+- The reason is plain: the struct has no mutex, and `Initialize`, `SetService`, `ExposeHostPath`, `SetLinuxHelperPath` and `WrapCommand` (which calls `Initialize` lazily) all write its fields.
+- State per manager: the config, the HTTP and SOCKS proxies and their ports, the Linux bridges, exposed paths, shell options, the helper path, an `initialized` flag.
+- The proxies inside one manager do handle concurrent connections.
+- Several managers can coexist in one process: ports are random unless the config pins `httpProxyPort` / `socksProxyPort`.
+- `WrapCommand` returns a shell command string. It embeds the proxy ports, so the manager must stay alive until the child exits. `Cleanup` stops bridges and proxies.
+- Package-level state: Linux feature detection behind a `sync.Once`; a per-process `sessionSuffix` on macOS; a default logger with its own mutex. Read-only after init.
+- Process-global mutation (`os.Setenv`, `os.Unsetenv`, `signal.Notify`) exists, in the Linux bootstrap helper and the signal forwarder. Those run in the helper process or the CLI, not in `Manager` methods.
+- Linux needs a helper binary: `WrapCommand` returns `ErrLinuxHelperRequired` without one. The host binary can be its own helper: call `DispatchInternalHelper(os.Args)` first in `main`, then `SetLinuxHelperPath(os.Executable())`.
+- On Linux the package has an `init()` that exits the process when `FENCE_INTERNAL_SECCOMP_PROBE` is set. It runs in every binary that imports the package.
+
+For ATeam: one manager per process, created and used by one goroutine, avoids the question entirely. That is the shape of a `fence-exec` subprocess per run.
+
+#### Comparison
+
+| | Codex sandbox | Fence |
+|---|---|---|
+| Kind | Built into one agent's harness | Standalone wrapper and Go library, agent-agnostic |
+| Language | Rust (`codex-rs/`) | Go |
+| What is sandboxed | Each command the agent runs. The harness is outside. | The whole agent (`fence -- claude`), or one command (`fence -c`) |
+| macOS | Seatbelt, `(deny default)` | Seatbelt |
+| Linux | bubblewrap + seccomp | bubblewrap + optional Landlock, seccomp, eBPF |
+| Windows | MXC, with legacy fallbacks | Not supported |
+| Read default | Broad reads; deny entries per profile | Broad reads; `defaultDenyRead` available |
+| Write default | Workspace only, with protected names inside it | Denied; `allowWrite` |
+| Protected names in writable roots | `.git`, `.agents`, `.codex`, `.aws` | Shell startup files, `.git/hooks`, editor config |
+| Network default | Off | Off |
+| Domain filtering | HTTP + SOCKS5 proxy, direct egress blocked by the OS sandbox | Same design |
+| Unmatched domain | Can suspend for approval | Blocked |
+| Command rules | Not stated here; escalation is requested per call | Deny/allow lists; argument-level only on Linux |
+| SSH rules | Not stated | Host and command lists |
+| Escalation out of the sandbox | Yes: `require_escalated` with approval or auto-review | None; the policy is fixed for the run |
+| MCP servers | Unsandboxed unless wrapped | Inside the sandbox when the whole agent is wrapped |
+| Config | TOML profiles with `extends`; admin `requirements.toml` | JSONC with `extends` and templates |
+| Monitor mode | Not stated | `-m`: proxy blocks, macOS log stream, Linux eBPF |
+| Embeddable in a Go binary | No. Usable as a command: `codex sandbox -- cmd` | Yes |
+| Credential handling | Not stated | Not provided |
+
+Reading the comparison:
+
+- **The mechanisms are nearly the same.** Both use Seatbelt on macOS and bubblewrap plus seccomp on Linux, with a local HTTP/SOCKS proxy and kernel-blocked direct egress. The difference is not strength of the primitive.
+- **The difference is the boundary.** Codex sandboxes commands and trusts its own harness, which holds credentials and can grant escalation. Fence wraps everything, including the harness and its MCP servers, and has no escalation path.
+- For unattended runs this matters: a per-command sandbox with escalation needs someone, or an auto-review model, to answer. A whole-process wrapper never asks.
+- Both state the same limits: programs that ignore proxy variables fail rather than leak, and an allowed domain is an exfiltration channel.
+- Codex's deny globs are evaluated once at launch. Fence's `denyRead` semantics for paths created later were not checked.
+- Neither injects credentials.
+
+#### For ATeam
+
+1. **Codex under an outer sandbox.** Nesting is a known problem: Codex's sandbox blocks Fence's proxy bind, and Seatbelt cannot be nested. When ATeam runs Codex under nono or another outer sandbox, Codex's own sandbox should be off (`:danger-full-access`), as ATeam already does for Claude under a sandbox backend.
+2. **MCP servers.** With Codex's built-in sandbox alone, stdio MCP servers run unsandboxed. An outer whole-process sandbox covers them. This is an argument for the outer boundary in the sandboxing plan.
+3. **`codex sandbox` as a backend.** It can wrap arbitrary commands with a named profile, so it could be a container type next to nono. It would add a dependency on the Codex binary for non-Codex runs. Lower priority than nono or Fence.
+4. **Fence as the embedded Go candidate.** The `pkg/fence` API confirms it can be imported. Open points before choosing it: the Linux helper binary, the non-thread-safe `Manager` (one per sandbox process), and the unreviewed SSH enforcement.
+5. **Ideas to borrow from Codex:** named roots (`:workspace_roots`, `:tmpdir`) in the rule syntax; an admin-level file that limits which profiles may be selected; suspending an unmatched domain for approval in attended mode (`chat`) while refusing in unattended mode.
+6. **Protected names.** Codex adds `.agents`, `.codex` and `.aws` to the list borrowed from Porta in G.8 item 5.
 
 ---
 

@@ -622,6 +622,16 @@ Shared weaknesses:
 - The agent must use a tool instead of `ssh`, so `git`, `rsync` and scripts that call ssh do not work.
 - These servers hold or read the real keys themselves.
 
+**A fifth form: preflight on the command line (Fence).** Added 2026-11-23; details in `ResearchSandboxing.md` §E.19.
+
+- Fence has `ssh.allowedHosts`, `deniedHosts`, `allowedCommands`, `deniedCommands`, `allowAllCommands`, `inheritDeny`.
+- It parses the `ssh ...` command string before running it: host pattern check, then token-prefix matching of the remote command, split on `|`, `&&`, `||`, `;`.
+- It is not a proxy and sees no session. An `ssh` started by a child process (git, rsync, a script) is not checked.
+- Not checked: `-J` jump hosts, `-o ProxyCommand`, port forwarding, `-F` alternate config, command substitution, `env ssh`.
+- Key isolation is not addressed: the real keys or agent are whatever the sandbox can reach.
+- With no host list configured, every ssh command is allowed, although the docs describe an allowlist default.
+- Verdict: a guardrail on what the agent types. It does not meet R4. It is the cheapest thing that exists, and its config keys are a reasonable vocabulary for a real broker's policy.
+
 ShellGuard's parse, allowlist and re-quote pipeline is reusable Go prior art for a "diagnostics" rule type.
 
 ### 5.6 Models against real workloads
@@ -642,6 +652,7 @@ ShellGuard's parse, allowlist and re-quote pipeline is reusable Go prior art for
 | Product | Verified fact |
 |---|---|
 | nono | "`git` can call `ssh` under its own policy, while the agent cannot call `ssh` directly." No SSH key brokering or command rules described. ([README](https://raw.githubusercontent.com/nolabs-ai/nono/main/README.md)) |
+| Fence | Host and remote-command rules, checked on the command string before it runs. No session visibility, no key isolation, child processes not covered (§5.5). ([configuration](https://raw.githubusercontent.com/fencesandbox/fence/main/docs/configuration.md)) |
 | Docker Sandboxes | Host ssh-agent forwarding on by default: a signing oracle. Injection is HTTP only. ([docs](https://docs.docker.com/ai/sandboxes/security/credentials/)) |
 | Claude Code cloud sessions | No SSH. A git proxy swaps a scoped credential for the real token and rejects branch deletions. ([docs](https://code.claude.com/docs/en/claude-code-on-the-web)) |
 | Codex cloud | Secrets available during setup only. SSH handling UNVERIFIED. |
