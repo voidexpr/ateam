@@ -190,7 +190,7 @@ How it was checked:
 
 - Unit tests: the rendered configuration; the Seatbelt profile the fork generates has the allow of the file after the deny of its folder; `dev/go` passes fence's own check before a launch.
 - Linux, Debian container, as root: `carve` 8 of 8. By hand: `--read ~/.ssh/config` with `~/.ssh` excluded reads the file, does not see `id_rsa`, lists the folder as `config` alone, and cannot write the file.
-- Not checked: a real run on macOS (`make test-sandbox`, the owner).
+- macOS, the owner, 2026-11-24, `6e5f8a8`: nono `base`, `carve` and `carve-write` pass; fence `carve` 8 of 8, `carve-write` refused at launch as expected. fence `base` failed once on reaching example.com and passed on the rerun (a firewall prompt answered late, probably); the probe now prints a failed command's own error line.
 
 One difference seen: on Linux a listing of the excluded folder shows the opened entries; on macOS the listing is refused.
 

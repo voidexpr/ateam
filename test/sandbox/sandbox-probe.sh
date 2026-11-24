@@ -27,13 +27,15 @@ pass=0
 fail=0
 
 # allowed DESCRIPTION SHELL-COMMAND: the command must succeed.
+# On a failure the last line the command printed is shown: its own reason.
 allowed() {
-    if sh -c "$2" >/dev/null 2>&1; then
+    if out=$(sh -c "$2" 2>&1); then
         pass=$((pass + 1))
         echo "PASS allowed: $1"
     else
         fail=$((fail + 1))
         echo "FAIL must be allowed: $1    [$2]"
+        [ -n "$out" ] && echo "     $(printf '%s\n' "$out" | tail -1)"
     fi
 }
 

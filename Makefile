@@ -59,6 +59,12 @@ update-autoversion:
 	$(GO) get github.com/voidexpr/autoversion@main
 	$(GO) mod tidy
 
+update-fence:
+	$(GO) mod edit -replace github.com/fencesandbox/fence=github.com/voidexpr/fence@fork
+	$(GO) mod tidy
+
+update-all: update-autoversion update-fence
+
 check-tidy:
 	$(GO) mod tidy -diff
 

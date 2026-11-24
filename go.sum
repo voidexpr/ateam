@@ -68,8 +68,8 @@ github.com/vbauerster/mpb/v8 v8.12.0 h1:+gneY3ifzc88tKDzOtfG8k8gfngCx615S2ZmFM4l
 github.com/vbauerster/mpb/v8 v8.12.0/go.mod h1:V02YIuMVo301Y1VE9VtZlD8s84OMsk+EKN6mwvf/588=
 github.com/voidexpr/autoversion v0.0.0-20261123041524-9174f09450ed h1:ma8kBg0IC2ws3yD2S3KDCPw0RI0yqds8qDRosHyejlY=
 github.com/voidexpr/autoversion v0.0.0-20261123041524-9174f09450ed/go.mod h1:hRdzJ3bwgEhLUhMONyhyTite225eCaoeuPtv8cIFREQ=
-github.com/voidexpr/fence v0.0.0-20261124171113-f0664aa86748 h1:LU2Qgtd7ccVpnxBEhADtHQa0PkEdER0XDuNGMgHqhXw=
-github.com/voidexpr/fence v0.0.0-20261124171113-f0664aa86748/go.mod h1:OOJYEswHfU0VLnHRgVIjoGdnf9VwikUfqDhUbM3GjB4=
+github.com/voidexpr/fence v0.0.0-20261124185126-fb9d96180cd1 h1:fWEtn18c8ZOr49VLfCqzUVYCDM86Ma8HS4+ZZ5hIpno=
+github.com/voidexpr/fence v0.0.0-20261124185126-fb9d96180cd1/go.mod h1:OOJYEswHfU0VLnHRgVIjoGdnf9VwikUfqDhUbM3GjB4=
 github.com/yuin/goldmark v1.8.2 h1:kEGpgqJXdgbkhcOgBxkC0X0PmoPG1ZyoZ117rDVp4zE=
 github.com/yuin/goldmark v1.8.2/go.mod h1:ip/1k0VRfGynBgxOz0yCqHrbZXhcjxyuS66Brc7iBKg=
 github.com/zalando/go-keyring v0.2.8 h1:6sD/Ucpl7jNq10rM2pgqTs0sZ9V3qMrqfIIy5YPccHs=
