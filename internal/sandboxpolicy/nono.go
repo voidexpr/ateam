@@ -118,6 +118,9 @@ func RenderNono(p *Policy, info NonoInfo, goos string) (*NonoProfile, error) {
 		AllowParentOfProtected: true,
 	}
 	prof.UnsafeSeatbelt = readOnlyRules(p)
+	if err := p.checkListenWithoutPrivateNetwork("nono on macOS"); err != nil {
+		return nil, err
+	}
 	switch {
 	case len(p.DeniedDomains) > 0:
 		return nil, fmt.Errorf("the nono backend has no checked rule to deny a host inside the allowed ones (%s): use the fence backend, or drop the deny", strings.Join(p.DeniedDomains, ", "))

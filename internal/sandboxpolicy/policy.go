@@ -24,6 +24,22 @@ type Rule struct {
 	Reopens bool
 }
 
+// ListenPort is a port the sandboxed command serves on. Public is false
+// for this machine only (127.0.0.1) and true for every interface
+// (0.0.0.0): other machines can then reach it.
+type ListenPort struct {
+	Port   int
+	Public bool
+}
+
+// Addr is the address the port is reachable at from outside the sandbox.
+func (l ListenPort) Addr() string {
+	if l.Public {
+		return fmt.Sprintf("0.0.0.0:%d", l.Port)
+	}
+	return fmt.Sprintf("127.0.0.1:%d", l.Port)
+}
+
 // Policy is what a sandboxed command may touch. Reading is open below
 // Home, except Exclude; writing is the working folder plus Write.
 type Policy struct {
@@ -49,6 +65,9 @@ type Policy struct {
 	// opens single ports of it.
 	HostLocalhost bool
 	HostPorts     []int
+	// Listen lists the ports the command serves on, for this machine or
+	// for other machines to reach.
+	Listen []ListenPort
 	// Gaps lists what the policy means to protect and no backend rule
 	// below does; a renderer adds its own. Shown at launch and in exports.
 	Gaps []string
@@ -67,6 +86,9 @@ type Input struct {
 	// "localhost:PORT".
 	Domains []string
 	Deny    []string
+	// Listen entries: "PORT", "localhost:PORT", "127.0.0.1:PORT" (this
+	// machine only) or "0.0.0.0:PORT" (every interface).
+	Listen []string
 	// Origin names the profile an entry of a list attribute came from.
 	Origin func(attr, entry string) string
 	// Filters resolves the entries that are filter names.
@@ -107,6 +129,9 @@ func Build(in Input) (*Policy, error) {
 	}
 	p := &Policy{Name: in.Name, Home: home, WorkDir: workDir}
 	if err := p.addNetwork(in.Domains, in.Deny); err != nil {
+		return nil, err
+	}
+	if err := p.addListen(in.Listen); err != nil {
 		return nil, err
 	}
 	origin := in.Origin
@@ -310,6 +335,50 @@ func (p *Policy) addNetwork(allow, deny []string) error {
 	return nil
 }
 
+// addListen parses the ports the command serves on.
+func (p *Policy) addListen(entries []string) error {
+	for _, entry := range entries {
+		host, port := "localhost", entry
+		if h, pt, err := net.SplitHostPort(entry); err == nil {
+			host, port = h, pt
+		}
+		l := ListenPort{}
+		ip := net.ParseIP(strings.Trim(host, "[]"))
+		switch {
+		case host == "localhost" || ip != nil && ip.IsLoopback():
+		case ip != nil && ip.IsUnspecified():
+			l.Public = true
+		default:
+			return fmt.Errorf("listen entry %q: want PORT, 127.0.0.1:PORT (this machine only) or 0.0.0.0:PORT (every interface)", entry)
+		}
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("listen entry %q: the port must be a number from 1 to 65535", entry)
+		}
+		l.Port = n
+		if !slices.Contains(p.Listen, l) {
+			p.Listen = append(p.Listen, l)
+		}
+	}
+	return nil
+}
+
+// checkListenWithoutPrivateNetwork is the rule of every backend that
+// shares this machine's localhost with the sandbox (macOS): a served port
+// is reachable when all of localhost is open, which such a backend cannot
+// narrow to one port, and never from other machines.
+func (p *Policy) checkListenWithoutPrivateNetwork(backend string) error {
+	for _, l := range p.Listen {
+		if l.Public {
+			return fmt.Errorf("%s cannot let other machines reach a port (listen %s): only 127.0.0.1", backend, l.Addr())
+		}
+	}
+	if len(p.Listen) > 0 && !p.LocalhostOpen() {
+		return fmt.Errorf("%s opens all of localhost or none of it, not one served port (listen %d): add localhost to domains", backend, p.Listen[0].Port)
+	}
+	return nil
+}
+
 // LocalhostOpen reports whether a backend without a private network
 // (macOS) must open all of localhost: asked for, or needed by a command
 // that reaches hosts and talks to what it starts.
@@ -319,7 +388,7 @@ func (p *Policy) LocalhostOpen() bool {
 
 // NetworkClosed reports whether the policy allows no network at all.
 func (p *Policy) NetworkClosed() bool {
-	return len(p.Domains) == 0 && !p.HostLocalhost && len(p.HostPorts) == 0
+	return len(p.Domains) == 0 && !p.HostLocalhost && len(p.HostPorts) == 0 && len(p.Listen) == 0
 }
 
 // WritableRoot returns the writable folder holding path (the working

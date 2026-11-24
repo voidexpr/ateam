@@ -289,7 +289,7 @@ func TestCheckFenceConfigRefusesWhatFenceNeverWrites(t *testing.T) {
 
 func TestFenceExecRefusesToNest(t *testing.T) {
 	t.Setenv("ATEAM_IN_SANDBOX", "1")
-	if _, err := runFenceExec("fence.json", t.TempDir(), []string{"true"}); err == nil || !strings.Contains(err.Error(), "inside a sandbox") {
+	if _, err := runFenceExec("fence.json", t.TempDir(), nil, []string{"true"}); err == nil || !strings.Contains(err.Error(), "inside a sandbox") {
 		t.Errorf("a sandbox inside a sandbox must be refused, got %v", err)
 	}
 	if got := fenceEnv([]string{"PATH=/bin", "DYLD_INSERT_LIBRARIES=x", "LD_PRELOAD=y", "LDFLAGS=-s"}); !slices.Equal(got, []string{"PATH=/bin", "LDFLAGS=-s"}) {

@@ -131,7 +131,8 @@ func RenderFence(p *Policy, goos string) (*FenceConfig, error) {
 		return nil, fmt.Errorf("fence on Linux opens the host's localhost one port at a time: write localhost:PORT for each port instead of localhost")
 	case goos == "linux":
 		// The sandbox has a localhost of its own. Each listed port of the
-		// host's is bridged into it.
+		// host's is bridged into it; each served port is bridged out
+		// (FenceExposures, given to fence when the command starts).
 		cfg.Network.AllowLocalOutbound = len(p.HostPorts) > 0
 		cfg.Network.AllowLocalOutboundPorts = slices.Clone(p.HostPorts)
 	case p.LocalhostOpen():
@@ -142,7 +143,26 @@ func RenderFence(p *Policy, goos string) (*FenceConfig, error) {
 	case len(p.HostPorts) > 0:
 		return nil, fmt.Errorf("fence on macOS opens all of localhost or none of it, not single ports (localhost:%d): write localhost", p.HostPorts[0])
 	}
+	if goos == "darwin" {
+		if err := p.checkListenWithoutPrivateNetwork("fence on macOS"); err != nil {
+			return nil, err
+		}
+	}
 	return cfg, nil
+}
+
+// FenceExposures returns the served ports fence must bridge out of the
+// sandbox on goos, as ADDR:PORT: on Linux each one. On macOS the sandbox
+// shares this machine's localhost and nothing is bridged.
+func FenceExposures(p *Policy, goos string) []string {
+	if goos != "linux" {
+		return nil
+	}
+	var out []string
+	for _, l := range p.Listen {
+		out = append(out, l.Addr())
+	}
+	return out
 }
 
 func ruleOrigin(r Rule) string {
@@ -164,13 +184,21 @@ const FenceExecCommand = "fence-exec"
 
 // FencePrefix is the command line up to the command to run: ateam itself,
 // which holds the sandbox, so no other binary is needed.
-func FencePrefix(ateam, configFile, workDir string) []string {
-	return []string{ateam, FenceExecCommand, "--settings", configFile, "--workdir", workDir, "--"}
+func FencePrefix(ateam, configFile, workDir string, exposures []string) []string {
+	args := []string{ateam, FenceExecCommand, "--settings", configFile, "--workdir", workDir}
+	for _, addr := range exposures {
+		args = append(args, "--expose", addr)
+	}
+	return append(args, "--")
 }
 
 // FenceCLIPrefix is the same for the fence command itself, without ateam:
 // what an exported profile runs. fence takes the current folder as the
 // working folder.
-func FenceCLIPrefix(configFile string) []string {
-	return []string{"env", InSandboxEnv + "=1", "fence", "--settings", configFile, "--"}
+func FenceCLIPrefix(configFile string, exposures []string) []string {
+	args := []string{"env", InSandboxEnv + "=1", "fence", "--settings", configFile}
+	for _, addr := range exposures {
+		args = append(args, "-p", addr)
+	}
+	return append(args, "--")
 }

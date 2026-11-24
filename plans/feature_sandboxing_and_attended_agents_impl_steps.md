@@ -219,12 +219,15 @@ What is built:
 - fence, macOS: `deniedDomains`; `localhost` opens all of localhost; `localhost:PORT` is refused unless all of localhost is open already.
 - fence, Linux: `localhost:PORT` becomes `allowLocalOutboundPorts`; `localhost` is refused.
 - Before a fence launch, fence is also asked about every plain host (`CheckURL`): allowed ones must pass, denied ones must not.
+- Loopback addresses (2026-11-24): `127.0.0.1` and `::1` mean `localhost`; any other IP address is refused. Before, `127.0.0.1` reached the proxy as a host name.
+- Served ports (2026-11-24): profile list `listen` and `--listen`, entries `PORT`, `127.0.0.1:PORT`, `0.0.0.0:PORT`. `Policy.Listen`. fence on Linux: `ateam fence-exec --expose ADDR:PORT`, which fence bridges from the host into the sandbox (`Manager.SetService`; the fence configuration file has no field for it). macOS, nono and fence: reachable when all of localhost is open, refused otherwise and for `0.0.0.0`. Why it exists: on Linux the sandbox has a localhost of its own, so a dev server started inside is invisible outside; the owner asked whether a toggle could share the machine's localhost instead, and it cannot without giving up the domain rules, which the private network enforces there.
 
 How it was checked:
 
 - Unit tests: each form per backend (`TestNetworkRulesPerBackend`), composition through `use`, the launch and the summary line (`TestPlanLaunchNetworkRules`).
 - Linux, in the Debian container, as root, with two servers on the host's localhost: with `--domain localhost:18081` that port answers and 18082 does not; without a rule, and with a host only, neither answers; a server the command starts itself is reachable over the sandbox's own localhost; `--domain localhost` is refused at launch with the reason.
-- Not checked: a denied host in a real run (fence's proxy); anything of this on macOS in a real run (the existing probes still cover hosts); nono with these rules beyond the refusals.
+- Linux, same container: a server started in the sandbox on port 19090 answers from the host with `--listen 19090` and does not without it.
+- Not checked: `0.0.0.0:PORT` in a real run; a denied host in a real run (fence's proxy); anything of this on macOS in a real run (the existing probes still cover hosts); nono with these rules beyond the refusals.
 
 ## Next steps
 
@@ -234,7 +237,7 @@ In order:
 2. **Owner: use it.** `ateam chat` and `ateam shell` for real work; `ateam code` with a nono code profile. Each refusal that is not obvious is a missing path or host in a built-in filter or profile.
 3. **Linux.** With fence: built, experimental, see "fence on Linux". Left: the run on meerdog as a plain user (`make test-sandbox-fence`), the decision on paths that do not exist yet, localhost by port (step 5). nono on Linux: not planned for now; it would need the home listed entry by entry and has no read-only path inside a writable folder.
 4. **Retire `nono-sandbox`.** Remove it from `~/dotfiles/bin`; in targy remove the `nono_profile` step and the `launch` target, keep `claude_permissions`, `json_merge`, `claude-settings`. After a period of daily use of the ateam commands.
-5. **Phase 2: the rest.** The network rules are built (see "Network rules"). Left: a port the sandboxed command listens on; a port on a host; then `_remove` / `_replace` and trust on first use for project-supplied profiles. A dynamically chosen port stays open question 6 of the design file.
+5. **Phase 2: the rest.** The network rules are built (see "Network rules"). Left: a port on a host; then `_remove` / `_replace` and trust on first use for project-supplied profiles. A dynamically chosen port stays open question 6 of the design file.
 6. **Phase 3: secrets.** Placeholders injected outside the sandbox, the LLM key first (research F.1.1 Tier A; see also `research/ResearchNetworkSandboxing.md`).
 
 Done since the first version of this list: built-in profiles as filter files, `ateam filter list` and `show` (2026-11-23, `1d5bc94`): every filter resolves to the same paths as the literal list it replaced.

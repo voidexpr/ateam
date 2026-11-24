@@ -465,6 +465,7 @@ ateam shell [flags]                          # $SHELL
 | `--profile NAME\|FILE` | Profile to compose, in order. Repeatable, comma-separated. A value ending in `.hcl` is a profile file. |
 | `--read PATH`, `--write PATH`, `--exclude PATH` | A path for this launch. Repeatable. |
 | `--domain HOST` | A reachable host, `localhost` or `localhost:PORT` for this launch. Repeatable. |
+| `--listen PORT` | A port the command serves on, to reach from outside the sandbox. `0.0.0.0:PORT` for other machines too. Repeatable. |
 | `--deny-domain HOST` | A host refused for this launch, even when a `--domain` covers it. Repeatable. See [network rules](CONFIG.md#network-rules). |
 | `--command "CMD"` | `run` only: replaces the profile's saved command (split on spaces). |
 | `--dry-run` | Print the rules and the full command line, run nothing. |

@@ -126,6 +126,7 @@ ateam profile export myproject --out ~/sandboxes/myproject
 When something is refused inside the sandbox, nono names the path or host at the end of the run. Add it to a profile:
 
 - A build tool's cache: `--write PATH`, or the matching `dev/` profile.
+- A server the command starts, to reach from your browser: `--listen PORT` (needed under fence on Linux).
 - A host: `--domain HOST`. A server on this machine: `--domain localhost:PORT` (fence on Linux), `--domain localhost` (macOS).
 - Your shell's own startup writes (a history log, `~/.pyenv/shims`): a personal profile, `ateam profile save shell --write ~/.pyenv/shims`.
 
@@ -218,7 +219,7 @@ The Linux rows come from each tool's documentation, not from runs by ateam. Insi
 
 - fence on Linux is experimental (checked by the probes on a desktop as a plain user and in a Debian container, 2026-11-23; an interactive shell only through a pseudo-terminal in the container; not yet with an agent run):
   - Needs `bwrap` and `socat`. When `bwrap` cannot create a network namespace (a Docker container without `NET_ADMIN`, a CI runner, AppArmor on Ubuntu 24.04), the launch is refused: fence would otherwise go on with the proxy variables as the only network rule.
-  - The sandbox has a localhost of its own. This machine's localhost is reached one listed port at a time (`localhost:PORT`); plain `localhost` is refused there.
+  - The sandbox has a localhost of its own, as in a Docker container (Claude's built-in sandbox does the same on Linux). This machine's localhost is reached one listed port at a time (`--domain localhost:PORT`); plain `localhost` is refused there. A server started inside is reached from outside only when its port is listed (`--listen PORT`).
   - **A protected path that does not exist yet can be created.** fence closes a path with a mount, which needs the path to exist. Inside a writable folder, a command can create `.ateam/profiles/`, `.ateam/secrets.env` or a missing `.git/hooks`. ateam lists these paths on stderr at every launch (`NOT ENFORCED`) and in `--dry-run`. With `strict = true` on the container, the launch is refused instead.
   - An excluded folder is seen as an empty one. Inside a writable folder a write into it succeeds and is thrown away at the end; the real folder is untouched.
 - macOS only. On Linux nono refuses a deny inside a grant; the launch is refused until ateam lists the home around the excluded paths.

@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	goruntime "runtime"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/ateam/internal/container"
@@ -19,6 +21,7 @@ import (
 var (
 	fenceExecSettings string
 	fenceExecWorkDir  string
+	fenceExecExpose   []string
 )
 
 // fenceExecCmd is what a fence container runs: ateam itself, holding the
@@ -30,7 +33,7 @@ var fenceExecCmd = &cobra.Command{
 	Hidden: true,
 	Args:   cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		code, err := runFenceExec(fenceExecSettings, fenceExecWorkDir, args)
+		code, err := runFenceExec(fenceExecSettings, fenceExecWorkDir, fenceExecExpose, args)
 		if err != nil {
 			return err
 		}
@@ -44,12 +47,13 @@ var fenceExecCmd = &cobra.Command{
 func init() {
 	fenceExecCmd.Flags().StringVar(&fenceExecSettings, "settings", "", "fence configuration file")
 	fenceExecCmd.Flags().StringVar(&fenceExecWorkDir, "workdir", "", "the command's working folder")
+	fenceExecCmd.Flags().StringArrayVar(&fenceExecExpose, "expose", nil, "ADDR:PORT the command serves on, to make reachable from outside the sandbox (repeatable)")
 	rootCmd.AddCommand(fenceExecCmd)
 }
 
 // runFenceExec runs argv under the fence configuration in settings and
 // returns its exit code.
-func runFenceExec(settings, workDir string, argv []string) (int, error) {
+func runFenceExec(settings, workDir string, expose, argv []string) (int, error) {
 	if settings == "" || workDir == "" {
 		return 0, fmt.Errorf("--settings and --workdir are required")
 	}
@@ -63,8 +67,15 @@ func runFenceExec(settings, workDir string, argv []string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	exposures, err := fenceExposures(expose)
+	if err != nil {
+		return 0, err
+	}
 	manager := fence.NewManager(cfg, false, false)
 	defer manager.Cleanup()
+	if len(exposures) > 0 {
+		manager.SetService(fence.ServiceOptions{Exposures: exposures})
+	}
 	if goruntime.GOOS == "linux" {
 		// On Linux fence starts parts of itself inside the sandbox: ateam
 		// is that helper too (fence.DispatchInternalHelper in main).
@@ -87,6 +98,20 @@ func runFenceExec(settings, workDir string, argv []string) (int, error) {
 	cmd.Dir = workDir
 	cmd.Env = append(fenceEnv(os.Environ()), sandboxpolicy.InSandboxEnv+"=1")
 	return runAttached(cmd), nil
+}
+
+// fenceExposures parses the --expose entries, ADDR:PORT.
+func fenceExposures(entries []string) ([]fence.ExposedPort, error) {
+	var out []fence.ExposedPort
+	for _, entry := range entries {
+		host, port, err := net.SplitHostPort(entry)
+		n, perr := strconv.Atoi(port)
+		if err != nil || perr != nil || net.ParseIP(host) == nil {
+			return nil, fmt.Errorf("--expose %q: want ADDR:PORT, as in 127.0.0.1:3000", entry)
+		}
+		out = append(out, fence.ExposedPort{BindAddress: host, Port: n})
+	}
+	return out, nil
 }
 
 // fenceEnv drops the variables that load a library into every process:

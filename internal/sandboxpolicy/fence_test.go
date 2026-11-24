@@ -247,8 +247,73 @@ func TestWriteFenceConfig(t *testing.T) {
 			}
 		}
 	}
-	if got := FencePrefix("/bin/ateam", dest, in.WorkDir); !slices.Equal(got, []string{"/bin/ateam", "fence-exec", "--settings", dest, "--workdir", in.WorkDir, "--"}) {
+	if got := FencePrefix("/bin/ateam", dest, in.WorkDir, nil); !slices.Equal(got, []string{"/bin/ateam", "fence-exec", "--settings", dest, "--workdir", in.WorkDir, "--"}) {
 		t.Errorf("prefix = %v", got)
+	}
+}
+
+// A served port: on Linux fence bridges it out of the sandbox's own
+// localhost; on macOS it is reachable when all of localhost is open, and
+// never from other machines.
+func TestListenPorts(t *testing.T) {
+	build := func(domains, listen []string) *Policy {
+		t.Helper()
+		in := testInput(t)
+		in.Domains, in.Listen = domains, listen
+		p, err := Build(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	p := build(nil, []string{"3000", "127.0.0.1:8080", "localhost:3000", "0.0.0.0:9000"})
+	want := []ListenPort{{Port: 3000}, {Port: 8080}, {Port: 9000, Public: true}}
+	if !slices.Equal(p.Listen, want) || p.NetworkClosed() {
+		t.Fatalf("listen = %+v", p.Listen)
+	}
+	if _, err := RenderFence(p, "linux"); err != nil {
+		t.Errorf("Linux needs no host for a served port: %v", err)
+	}
+	if got := FenceExposures(p, "linux"); !slices.Equal(got, []string{"127.0.0.1:3000", "127.0.0.1:8080", "0.0.0.0:9000"}) {
+		t.Errorf("exposures = %v", got)
+	}
+	if got := FencePrefix("ateam", "f.json", "/w", FenceExposures(p, "linux")); !slices.Equal(got[len(got)-7:], []string{"--expose", "127.0.0.1:3000", "--expose", "127.0.0.1:8080", "--expose", "0.0.0.0:9000", "--"}) {
+		t.Errorf("prefix = %v", got)
+	}
+	if got := FenceCLIPrefix("f.json", []string{"127.0.0.1:3000"}); !slices.Equal(got[len(got)-3:], []string{"-p", "127.0.0.1:3000", "--"}) {
+		t.Errorf("fence command prefix = %v", got)
+	}
+	if len(FenceExposures(p, "darwin")) != 0 {
+		t.Error("macOS shares this machine's localhost: nothing to bridge")
+	}
+
+	// macOS: other machines never; this machine only with localhost open.
+	if _, err := RenderFence(p, "darwin"); err == nil || !strings.Contains(err.Error(), "0.0.0.0:9000") {
+		t.Errorf("a port for other machines must be refused on macOS: %v", err)
+	}
+	p = build(nil, []string{"3000"})
+	for backend, err := range map[string]error{
+		"fence": func() error { _, err := RenderFence(p, "darwin"); return err }(),
+		"nono":  func() error { _, err := RenderNono(p, NonoInfo{}, "darwin"); return err }(),
+	} {
+		if err == nil || !strings.Contains(err.Error(), "listen 3000") {
+			t.Errorf("%s: a served port without localhost open must be refused: %v", backend, err)
+		}
+	}
+	p = build([]string{"example.com"}, []string{"3000"})
+	if _, err := RenderFence(p, "darwin"); err != nil {
+		t.Errorf("with a host, localhost is open: %v", err)
+	}
+	if _, err := RenderNono(p, NonoInfo{}, "darwin"); err != nil {
+		t.Errorf("with a host, localhost is open: %v", err)
+	}
+
+	for _, entry := range []string{"0", "70000", "x", "10.0.0.5:80", "example.com:80", ""} {
+		in := testInput(t)
+		in.Listen = []string{entry}
+		if _, err := Build(in); err == nil {
+			t.Errorf("listen entry %q must be refused", entry)
+		}
 	}
 }
 

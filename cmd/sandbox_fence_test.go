@@ -161,3 +161,15 @@ func TestReportFenceGaps(t *testing.T) {
 		t.Error("strict = true must be read from the container block")
 	}
 }
+
+func TestFenceExposures(t *testing.T) {
+	got, err := fenceExposures([]string{"127.0.0.1:3000", "0.0.0.0:9000"})
+	if err != nil || len(got) != 2 || got[0] != (fence.ExposedPort{BindAddress: "127.0.0.1", Port: 3000}) || got[1].BindAddress != "0.0.0.0" {
+		t.Errorf("exposures = %+v, %v", got, err)
+	}
+	for _, bad := range []string{"3000", "localhost:3000", "127.0.0.1:x"} {
+		if _, err := fenceExposures([]string{bad}); err == nil {
+			t.Errorf("--expose %q must be refused", bad)
+		}
+	}
+}

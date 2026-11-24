@@ -224,6 +224,9 @@ type ProfileConfig struct {
 	// DenyDomains lists hosts refused even when a Domains entry covers them.
 	Domains     []string
 	DenyDomains []string
+	// Listen lists the ports the command serves on for others to reach:
+	// "PORT" or "127.0.0.1:PORT" (this machine only), "0.0.0.0:PORT".
+	Listen []string
 	// AteamFiles is "open" to let the command reach ateam's own files (its
 	// user directory and the project's .ateam), which a sandbox closes by
 	// default: for a command that runs ateam itself. "" or "closed" otherwise.
@@ -238,7 +241,7 @@ type ProfileConfig struct {
 // HasPolicy reports whether the profile restricts or grants file or
 // network access, which only a sandbox backend can enforce.
 func (p *ProfileConfig) HasPolicy() bool {
-	return len(p.Read)+len(p.Write)+len(p.Exclude)+len(p.Domains)+len(p.DenyDomains) > 0 || p.AteamFiles != ""
+	return len(p.Read)+len(p.Write)+len(p.Exclude)+len(p.Domains)+len(p.DenyDomains)+len(p.Listen) > 0 || p.AteamFiles != ""
 }
 
 // hclFile is the HCL schema for ateam.hcl.
@@ -360,6 +363,7 @@ type hclProfile struct {
 	Exclude            []string  `hcl:"exclude,optional"`
 	Domains            []string  `hcl:"domains,optional"`
 	DenyDomains        []string  `hcl:"deny_domains,optional"`
+	Listen             []string  `hcl:"listen,optional"`
 	AteamFiles         string    `hcl:"ateam_files,optional"`
 	Command            []string  `hcl:"command,optional"`
 
@@ -1116,6 +1120,9 @@ func (c *Config) mergeProfile(h hclProfile, label string) {
 		case "deny_domains":
 			p.DenyDomains = h.DenyDomains
 			value = renderList(h.DenyDomains)
+		case "listen":
+			p.Listen = h.Listen
+			value = renderList(h.Listen)
 		case "ateam_files":
 			p.AteamFiles = h.AteamFiles
 			value = h.AteamFiles

@@ -695,6 +695,7 @@ profile "myproject" {
 | `exclude` | Paths neither readable nor writable. |
 | `domains` | What is reachable: hosts, `localhost` or `localhost:PORT`. With none, a sandbox backend closes the network. See [Network rules](#network-rules). |
 | `deny_domains` | Hosts refused even when a `domains` entry covers them. |
+| `listen` | Ports the command serves on, for others to reach: `"3000"` or `"127.0.0.1:3000"` (this machine only), `"0.0.0.0:3000"` (other machines too). |
 | `command` | Saved command for `ateam run`. |
 | `ateam_files` | `"open"`: the command may read and write ateam's own files (its user directory and the project's `.ateam/`). For a command that runs ateam itself. Default: closed. |
 
@@ -707,12 +708,13 @@ profile "myproject" {
 
 ##### Network rules
 
-`domains` and `deny_domains` are plain profile lists. To reuse a set of rules, put it in a profile and `use` it:
+`domains`, `deny_domains` and `listen` are plain profile lists. To reuse a set of rules, put it in a profile and `use` it:
 
 ```hcl
 profile "net/webapp" {
   domains      = ["registry.npmjs.org", "*.example.com", "localhost:5432"]
   deny_domains = ["telemetry.example.com"]   # refused even when a domain covers it
+  listen       = ["3000"]                    # the dev server the command starts
 }
 
 profile "web" {
@@ -724,7 +726,7 @@ profile "web" {
 - Everything not listed is refused. A profile without `domains` has no network at all, localhost included.
 - The rules are tool-agnostic: each sandbox backend maps them to its own, and a rule it cannot express is an error that names it.
 - `127.0.0.1` and `::1` mean `localhost`. Any other IP address, and a port on a host (`example.com:8443`), are not supported yet and are refused.
-- A port the sandboxed command listens on for others to reach (`0.0.0.0:3000`) is not supported yet. On macOS a server the command starts on localhost is reachable from this machine whenever localhost is open; on Linux under fence it is not, the sandbox has a localhost of its own.
+- `domains` is about connecting out; `listen` is about a server the command starts (`make start-dev-server`) that you reach from outside the sandbox.
 
 Localhost differs per system, so a rule may be refused on one of them:
 
@@ -734,6 +736,8 @@ Localhost differs per system, so a rule may be refused on one of them:
 | `localhost` | This machine's localhost, every port. Under nono only together with at least one host | Refused: write each port |
 | `localhost:PORT` | fence: refused unless all of localhost is open already (a host, or `localhost`). nono: needs at least one host, and then all of localhost is open | That port of this machine's localhost |
 | `deny_domains` | fence only; nono refuses the launch | fence |
+| `listen = ["3000"]` | Reachable whenever localhost is open (a host, or `localhost`); refused otherwise, since one port cannot be opened alone | That port is bridged from this machine's localhost into the sandbox. Needed: without it a server in the sandbox is invisible from outside |
+| `listen = ["0.0.0.0:3000"]` | Refused | Reachable from other machines too |
 
 ##### Filters
 

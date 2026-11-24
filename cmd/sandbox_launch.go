@@ -30,6 +30,7 @@ type launchFlags struct {
 	exclude  []string
 	domains  []string
 	denied   []string
+	listen   []string
 	command  string
 	dryRun   bool
 	// backend replaces the profile's container with a sandbox backend, by
@@ -43,6 +44,7 @@ func addLaunchFlags(cmd *cobra.Command, f *launchFlags) {
 	cmd.Flags().StringArrayVar(&f.write, "write", nil, "path writable for this launch (repeatable)")
 	cmd.Flags().StringArrayVar(&f.exclude, "exclude", nil, "path unreadable for this launch (repeatable)")
 	cmd.Flags().StringArrayVar(&f.domains, "domain", nil, "host, localhost or localhost:PORT reachable for this launch (repeatable)")
+	cmd.Flags().StringArrayVar(&f.listen, "listen", nil, "port the command serves on for this launch: PORT, or 0.0.0.0:PORT for other machines too (repeatable)")
 	cmd.Flags().StringArrayVar(&f.denied, "deny-domain", nil, "host refused for this launch, even when a --domain covers it (repeatable)")
 }
 
@@ -137,7 +139,7 @@ func composeLaunch(f *launchFlags, layers []string) (*runtime.Config, runtime.Pr
 		}
 		names = append(names, defined...)
 	}
-	extra := runtime.ProfileConfig{Read: f.read, Write: f.write, Exclude: f.exclude, Domains: f.domains, DenyDomains: f.denied}
+	extra := runtime.ProfileConfig{Read: f.read, Write: f.write, Exclude: f.exclude, Domains: f.domains, DenyDomains: f.denied, Listen: f.listen}
 	if f.command != "" {
 		extra.Command = strings.Fields(f.command)
 	}
@@ -242,7 +244,7 @@ func buildSandboxPolicy(cfg *runtime.Config, prof *runtime.ProfileConfig, grantD
 	return sandboxpolicy.Build(sandboxpolicy.Input{
 		Name: prof.Name, Home: home, WorkDir: grantDir,
 		Read: prof.Read, Write: prof.Write, Exclude: prof.Exclude,
-		Domains: prof.Domains, Deny: prof.DenyDomains,
+		Domains: prof.Domains, Deny: prof.DenyDomains, Listen: prof.Listen,
 		Origin: prof.EntryOrigin, Filters: cfg.Filters, OpenAteam: prof.AteamFiles == "open",
 		AteamHome: ateamHome, ProjectDir: projectDir, ProfileFiles: files,
 	})
@@ -319,7 +321,7 @@ func sandboxPrefix(ctx context.Context, policy *sandboxpolicy.Policy, cc *runtim
 		if err != nil {
 			return nil, err
 		}
-		return sandboxpolicy.FencePrefix(ateam, profileFile, policy.WorkDir), nil
+		return sandboxpolicy.FencePrefix(ateam, profileFile, policy.WorkDir, sandboxpolicy.FenceExposures(policy, goruntime.GOOS)), nil
 	}
 	nono, err := writeNonoProfile(ctx, policy, cc.Name, profileFile)
 	if err != nil {
@@ -342,6 +344,9 @@ func (p *launchPlan) describe(w io.Writer) {
 	printRules(w, "excluded  ", p.policy.Exclude)
 	fence := p.container.Type == runtime.ContainerTypeFence
 	fmt.Fprintf(w, "network    %s\n", networkSummary(p.policy, fence && goruntime.GOOS == "linux"))
+	for _, l := range p.policy.Listen {
+		fmt.Fprintf(w, "serves     %s\n", l.Addr())
+	}
 	printRules(w, "read-only ", p.policy.ReadOnly)
 	if fence {
 		for _, note := range sandboxpolicy.FenceNotes(goruntime.GOOS) {
@@ -355,7 +360,7 @@ func (p *launchPlan) describe(w io.Writer) {
 // that gives the sandbox a localhost of its own (fence on Linux): there
 // the host's localhost is only what the policy lists.
 func networkSummary(p *sandboxpolicy.Policy, privateLocalhost bool) string {
-	if p.NetworkClosed() {
+	if p.NetworkClosed() || len(p.Domains) == 0 && !p.HostLocalhost && len(p.HostPorts) == 0 {
 		return "closed"
 	}
 	parts := slices.Clone(p.Domains)

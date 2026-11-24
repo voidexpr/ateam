@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -61,7 +62,7 @@ var profileListCmd = &cobra.Command{
 				parts = append(parts, "use="+strings.Join(p.Use, ","))
 			}
 			if p.HasPolicy() {
-				parts = append(parts, fmt.Sprintf("rules=%d", len(p.Read)+len(p.Write)+len(p.Exclude)+len(p.Domains)+len(p.DenyDomains)))
+				parts = append(parts, fmt.Sprintf("rules=%d", len(p.Read)+len(p.Write)+len(p.Exclude)+len(p.Domains)+len(p.DenyDomains)+len(p.Listen)))
 			}
 			fmt.Printf("%-24s %s\n", name, strings.Join(parts, " "))
 		}
@@ -135,6 +136,7 @@ func printComposedProfile(w io.Writer, p *runtime.ProfileConfig) {
 	list("exclude", p.Exclude)
 	list("domains", p.Domains)
 	list("deny_domains", p.DenyDomains)
+	list("listen", p.Listen)
 }
 
 var profileSaveCmd = &cobra.Command{
@@ -180,6 +182,7 @@ func profileHCL(name string, f *launchFlags) string {
 	attr("exclude", f.exclude)
 	attr("domains", f.domains)
 	attr("deny_domains", f.denied)
+	attr("listen", f.listen)
 	attr("command", strings.Fields(f.command))
 	b.WriteString("}\n")
 	return b.String()
@@ -284,7 +287,7 @@ func exportProfile(f *launchFlags, out string) error {
 	if fence {
 		// Without ateam the file is run by the fence command; the prefix
 		// printed below runs it with the fence built into ateam.
-		run = "cd " + shellJoin([]string{plan.policy.WorkDir}) + " && exec " + shellJoin(sandboxpolicy.FenceCLIPrefix(profileFile))
+		run = "cd " + shellJoin([]string{plan.policy.WorkDir}) + " && exec " + shellJoin(sandboxpolicy.FenceCLIPrefix(profileFile, sandboxpolicy.FenceExposures(plan.policy, goruntime.GOOS)))
 	}
 	script := "#!/bin/sh\n# Runs a command under " + profileFile + ", without ateam.\n# Usage: run.sh COMMAND [ARG]...\n" + run + " \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(out, "run.sh"), []byte(script), 0o700); err != nil {
