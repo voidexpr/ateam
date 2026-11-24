@@ -165,7 +165,7 @@ For supervised coding (`ateam code`), either run the supervisor without nono and
 
 ### fence, the built-in backend
 
-[fence](https://github.com/fencesandbox/fence) is a second sandbox backend, compiled into ateam as a library (v0.1.67): `sandbox/fence` needs no other program. It takes the same profiles and applies the same rules as `sandbox/nono`.
+[fence](https://github.com/fencesandbox/fence) is a second sandbox backend, compiled into ateam as a library: `sandbox/fence` needs no other program. ateam builds with [its own fork](https://github.com/voidexpr/fence), which adds one thing to fence: a read opened inside an excluded folder. It takes the same profiles and applies the same rules as `sandbox/nono`.
 
 ```bash
 ateam run   --profile sandbox/fence,dev/rust -- cargo test
@@ -185,18 +185,19 @@ How it runs:
 
 Differences from nono (the full table per operating system, with the network rules: [SANDBOX_DIFFERENCES.md](SANDBOX_DIFFERENCES.md)):
 
-| | nono | fence |
-|---|---|---|
-| Install | `nono` in `PATH` | Nothing |
-| A `read` or `write` inside a folder that stays excluded (`--read ~/.ssh/config`) | Opened | Refused: in fence a denied folder stays denied as a whole |
-| `dev/go` | Works | Refused: it reads `~/Library/Application Support/go`, inside a folder `agent/secrets` excludes |
-| The backend's own blocked reads | Lifted where the profile does not exclude | None: fence blocks no read on its own |
-| Writes the backend refuses on its own | None left | In the working folder, at any depth: `.gitmodules`, `.mcp.json`, `.ripgreprc`, `.vscode/`, `.idea/`, shell startup files. In the home: shell startup files and `.gitconfig`. No setting lifts this; a `write` of one of them is an error |
-| Writable besides the profile | nono's defaults | `/tmp/fence`, the per-user temporary folder, `~/.npm/_logs` |
-| Readable besides the home | nono's defaults | The system folders, `/tmp`, `/opt` |
-| Read-only paths | Raw Seatbelt rules added by ateam | fence's own write-deny rule, which also refuses the rename of the folders above |
-| An excluded path that is a link (`~/.ssh` kept in a synced folder) | The link and its target are closed | The target is closed; the link itself can be seen (its name and where it points) |
-| `profile export` | `profile.json`, run by `nono` | `fence.json`, run by the `fence` command (`run.sh`) or by `ateam fence-exec` |
+| | nono | fence, as built into ateam (the fork) | fence, upstream |
+|---|---|---|---|
+| Install | `nono` in `PATH` | Nothing | The `fence` command, for an exported profile |
+| A `read` inside a folder that stays excluded (`--read ~/.ssh/config`) | Opened | Opened, read-only. On Linux a listing of the folder shows the opened entries only | Stays closed: a denied folder is denied as a whole |
+| A `write` inside a folder that stays excluded | Opened | Refused by ateam, with both rules named | Stays closed |
+| `dev/go` (reads `~/Library/Application Support/go`, inside a folder `agent/secrets` excludes) | Works | Works | Go runs without your `go env -w` settings |
+| The backend's own blocked reads | Lifted where the profile does not exclude | None: fence blocks no read on its own | Same as the fork |
+| Writes the backend refuses on its own | None left | In the working folder, at any depth: `.gitmodules`, `.mcp.json`, `.ripgreprc`, `.vscode/`, `.idea/`, shell startup files. In the home: shell startup files and `.gitconfig`. No setting lifts this; a `write` of one of them is an error | Same as the fork |
+| Writable besides the profile | nono's defaults | `/tmp/fence`, the per-user temporary folder, `~/.npm/_logs` | Same as the fork |
+| Readable besides the home | nono's defaults | The system folders, `/tmp`, `/opt` | Same as the fork |
+| Read-only paths | Raw Seatbelt rules added by ateam | fence's own write-deny rule, which also refuses the rename of the folders above | Same as the fork |
+| An excluded path that is a link (`~/.ssh` kept in a synced folder) | The link and its target are closed | The target is closed; the link itself can be seen (its name and where it points) | Same as the fork |
+| `profile export` | `profile.json`, run by `nono` | `fence.json`, run by `ateam fence-exec` | The same `fence.json`, run by the `fence` command (`run.sh`): a read inside an excluded folder then stays closed |
 
 `ateam profile export NAME --backend fence` (or `nono`) writes a profile for the other backend than its own.
 

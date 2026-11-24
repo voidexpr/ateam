@@ -4,8 +4,9 @@
 # made; the only path of yours it touches is `ls ~/.ssh`, which reads.
 #
 # Usage (from run-probes.sh): sandbox-probe.sh SUITE
-#   base   the rules every profile gets
-#   carve  a path opened inside an excluded folder
+#   base         the rules every profile gets
+#   carve        a path opened for reading inside an excluded folder
+#   carve-write  a path opened for writing inside an excluded folder
 # Environment: PROBE_ROOT (scratch folder), PROBE_NET (1: check hosts),
 # PROBE_SSH (1: ~/.ssh exists).
 #
@@ -105,11 +106,12 @@ base() {
 }
 
 carve() {
-    # a read and a write opened inside an excluded folder
+    # a read opened inside an excluded folder
     allowed "read a file opened by --read inside an excluded folder" 'cat "$R/secret/open.txt"'
     refused "write that file: it is outside every writable folder" 'echo x >> "$R/secret/open.txt"'
     refused "read the rest of the excluded folder" 'cat "$R/secret/token"'
-    allowed "write under a --write path inside an excluded folder" 'echo x > "$R/secret/rw/new.txt"'
+    # Linux lists the folder with the opened entry alone; macOS refuses the listing.
+    refused "see the other entries of the excluded folder" 'ls "$R/secret" | grep -q token'
 
     # the same inside the working folder: reopened for reading stays read-only
     allowed "read a file opened by --read inside an excluded folder of the working folder" 'cat private/readme.txt'
@@ -118,9 +120,17 @@ carve() {
     refused "rename the folder above the read-only file" 'mv private private2' 'mv private2 private'
 }
 
+carve_write() {
+    # a write opened inside an excluded folder
+    allowed "write under a --write path inside an excluded folder" 'echo x > "$R/secret/rw/new.txt"'
+    allowed "remove a file there" 'rm "$R/secret/rw/new.txt"'
+    refused "read the rest of the excluded folder" 'cat "$R/secret/token"'
+}
+
 case "$suite" in
 base) base ;;
 carve) carve ;;
+carve-write) carve_write ;;
 *)
     echo "unknown suite: $suite" >&2
     exit 2

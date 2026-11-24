@@ -380,5 +380,5 @@ Staying with targy + `nono-sandbox`:
 6. Names for `exposes` and `resources`, and the shape of port and Playwright blocks. A dynamic port: how a profile learns the port that was chosen.
 7. Whether `run` and `chat` should also accept a `--save NAME` shortcut. Current answer: no, `profile save` then launch.
 8. Renaming `exec` and `prompt` to fit the wider scope.
-10. fence: a grant inside an excluded folder cannot be expressed (`dev/go`, unattended runs without a project). Keep it refused, split the exclude around the grant at launch, or ask for it upstream. See the steps file.
+10. fence: a read inside an excluded folder works since ateam builds with its fork of fence (2026-11-24). A write there does not; the same change for writes would also close the Linux creation gap. See the steps file, "The fence fork".
 9. `DEV.md` describes `roles/` and `supervisor/` as promotion targets while `CONFIG.md` and the prompts use `shared/`: which is current.

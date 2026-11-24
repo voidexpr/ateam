@@ -135,35 +135,47 @@ func TestFenceGaps(t *testing.T) {
 	}
 }
 
-// fence cannot open a path inside a folder that stays denied: the rule is
-// refused and named, never dropped.
-func TestRenderFenceRefusesGrantInsideExclude(t *testing.T) {
-	for _, attr := range []string{"read", "write"} {
-		in := testInput(t)
-		in.Exclude = []string{"~/.ssh"}
-		in.Origin = func(a, entry string) string { return "profile mine" }
-		if attr == "read" {
-			in.Read = []string{"~/.ssh/config"}
-		} else {
-			in.Write = []string{"~/.ssh/known_hosts"}
+// A read inside a folder that stays excluded is opened by the fork's
+// carve-out: allowed and denied at once, the deeper path winning in fence.
+// A write there cannot be expressed: refused and named, never dropped.
+func TestRenderFenceGrantInsideExclude(t *testing.T) {
+	in := testInput(t)
+	in.Exclude = []string{"~/.ssh"}
+	in.Read = []string{"~/.ssh/config"}
+	in.Origin = func(a, entry string) string { return "profile mine" }
+	p, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := RenderFence(p, "darwin")
+	if err != nil {
+		t.Fatalf("a read inside an excluded folder is a carve-out: %v", err)
+	}
+	ssh := filepath.Join(in.Home, ".ssh")
+	fs := cfg.Filesystem
+	if !slices.Contains(fs.AllowRead, filepath.Join(ssh, "config")) || !slices.Contains(fs.DenyRead, ssh) {
+		t.Errorf("the folder is denied and the file allowed inside it: %+v", fs)
+	}
+	if !slices.Contains(fs.DenyWrite, ssh) || slices.Contains(fs.AllowWrite, filepath.Join(ssh, "config")) {
+		t.Errorf("the reopened file stays read-only: %+v", fs)
+	}
+
+	in.Read, in.Write = nil, []string{"~/.ssh/known_hosts"}
+	if p, err = Build(in); err != nil {
+		t.Fatal(err)
+	}
+	_, err = RenderFence(p, "darwin")
+	if err == nil {
+		t.Fatal("a write inside an excluded folder must be refused")
+	}
+	for _, want := range []string{ssh, "profile mine", "writable"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error must name %q: %v", want, err)
 		}
-		p, err := Build(in)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, err = RenderFence(p, "darwin")
-		if err == nil {
-			t.Fatalf("%s inside an excluded folder must be refused", attr)
-		}
-		for _, want := range []string{filepath.Join(in.Home, ".ssh"), "profile mine"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("the error must name %q: %v", want, err)
-			}
-		}
-		// The same policy is one nono expresses.
-		if _, err := RenderNono(p, NonoInfo{}, "darwin"); err != nil {
-			t.Errorf("nono renders it: %v", err)
-		}
+	}
+	// The same policy is one nono expresses.
+	if _, err := RenderNono(p, NonoInfo{}, "darwin"); err != nil {
+		t.Errorf("nono renders it: %v", err)
 	}
 }
 

@@ -6,7 +6,7 @@ import (
 	"slices"
 )
 
-// FenceConfig is a fence settings file (fence.json, fence 0.1.67): what
+// FenceConfig is a fence settings file (fence.json): what
 // ateam's embedded sandbox loads, and what `fence --settings` reads.
 type FenceConfig struct {
 	Network    fenceNetwork    `json:"network"`
@@ -72,15 +72,20 @@ func FenceGaps(p *Policy, goos string) []Rule {
 
 // RenderFence renders a policy as a fence configuration for goos.
 //
+// ateam builds with its fork of fence (github.com/voidexpr/fence, see
+// go.mod), in which a read allowed inside a denied folder stays readable:
+// the deepest path wins. Upstream fence denies the folder as a whole.
+//
 // Reading is closed by default and opened for the home and the policy's
-// grants; fence adds the system folders. In fence a deny always wins over
-// an allow, for reads and for writes:
-//   - an excluded path is denied for both: a write grant around it would
-//     otherwise leave it writable;
-//   - a read-only path is a write deny, and fence refuses the rename of
-//     the folders above a denied path;
-//   - a grant inside a folder that stays excluded cannot be expressed, and
-//     is refused.
+// grants; fence adds the system folders.
+//   - An excluded path is denied for reads and for writes: a write grant
+//     around it would otherwise leave it writable.
+//   - A read inside a folder that stays excluded is opened by the fork's
+//     rule above. It stays read-only: the folder's write deny covers it.
+//   - A read-only path is a write deny, and fence refuses the rename of
+//     the folders above a denied path.
+//   - For writes a deny still always wins: a write inside a folder that
+//     stays excluded cannot be expressed, and is refused.
 //
 // Localhost: macOS has all of it or none; Linux gives the sandbox one of
 // its own and reaches the host's one listed port at a time. A form the
@@ -90,10 +95,10 @@ func RenderFence(p *Policy, goos string) (*FenceConfig, error) {
 	if goos != "darwin" && goos != "linux" {
 		return nil, fmt.Errorf("the fence backend supports macOS and Linux (this is %s)", goos)
 	}
-	for _, grant := range slices.Concat(p.Read, p.Write) {
+	for _, grant := range p.Write {
 		for _, ex := range p.Exclude {
 			if Within(grant.Path, ex.Path) {
-				return nil, fmt.Errorf("fence cannot open %s (%s) inside the excluded %s (%s): in fence a denied folder stays denied as a whole. Exclude the entries of %s one by one, or use the nono backend",
+				return nil, fmt.Errorf("fence cannot make %s writable (%s) inside the excluded %s (%s): a read can be opened inside an excluded folder, a write cannot. Exclude the entries of %s one by one, or use the nono backend",
 					grant.Path, ruleOrigin(grant), ex.Path, ruleOrigin(ex), ex.Path)
 			}
 		}

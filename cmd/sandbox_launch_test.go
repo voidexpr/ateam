@@ -252,16 +252,26 @@ func TestPlanLaunchFence(t *testing.T) {
 		}
 	}
 
-	// A grant inside a folder that stays excluded: refused, the file not
-	// left behind. dev/go is one: it reads the Go settings inside the
-	// excluded ~/Library/Application Support.
+	// dev/go reads the Go settings inside the excluded
+	// ~/Library/Application Support: a read carve-out, which the fork of
+	// fence ateam builds with expresses and confirms.
 	plan, err = planLaunch(&launchFlags{profiles: []string{"sandbox/fence", "dev/go"}}, modeRun, []string{"true"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := plan.wrapped(t.Context(), modeRun, filepath.Join(t.TempDir(), "go.json")); err != nil {
+		t.Errorf("dev/go must launch under fence: %v", err)
+	}
+
+	// A write inside a folder that stays excluded: refused, the file not
+	// left behind.
+	plan, err = planLaunch(&launchFlags{profiles: []string{"sandbox/fence"}, write: []string{"~/.ssh/known_hosts"}}, modeRun, []string{"true"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	refused := filepath.Join(t.TempDir(), "refused.json")
-	if _, err := plan.wrapped(t.Context(), modeRun, refused); err == nil || !strings.Contains(err.Error(), "Application Support/go") || !strings.Contains(err.Error(), "dev/go-read") {
-		t.Errorf("a read inside an excluded folder must be refused, naming the path and its filter, got %v", err)
+	if _, err := plan.wrapped(t.Context(), modeRun, refused); err == nil || !strings.Contains(err.Error(), ".ssh/known_hosts") || !strings.Contains(err.Error(), "command line") {
+		t.Errorf("a write inside an excluded folder must be refused, naming the path and where it was asked, got %v", err)
 	}
 	if fileExists(refused) {
 		t.Error("a refused launch leaves no configuration")

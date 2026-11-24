@@ -134,12 +134,8 @@ Not checked:
 
 ### Open points for the owner
 
-0. A user's `--read` or `--write` inside an excluded folder (`~/.ssh/config`): accepted as refused under fence (owner, 2026-11-23). Agents are not given `~/.ssh` that way in practice; see the dotfiles profile under "Tasks for later".
-1. `dev/go` under fence: decided 2026-11-23, kept as it is. `dev/go` works under nono and stays refused under fence; to revisit. What is known for then:
-   - The read is `~/Library/Application Support/go`: the file `env` (settings saved with `go env -w`) and Go's telemetry counters.
-   - Without it Go works: with the folder unreadable (file permissions in a scratch home, not a sandbox refusal), `go env`, `go build` and `go vet` pass and the settings of `env` are ignored. So dropping the read from `dev/go` would make it work under both backends, at the cost of `go env -w` settings inside the sandbox.
-   - Opening the parent folder instead is ruled out: it holds every app's data, and excluding known secrets is the point of the sandbox.
-   - The other ways: an allow that wins inside a deny in fence (a fork or upstream).
+0. A user's `--read` inside an excluded folder (`~/.ssh/config`): works under fence since the fork (2026-11-24). A `--write` there is still refused under fence; accepted (owner, 2026-11-23). Agents are not given `~/.ssh` that way in practice; see the dotfiles profile under "Tasks for later".
+1. `dev/go` under fence: closed 2026-11-24 by the fence fork (a read carve-out). Known from before: Go also works without that read, losing only `go env -w` settings.
 2. Unattended runs under fence: done 2026-11-23. They were refused with and without a project: the agent's config folder (`~/.ateam/state/agents/...`) and, without a project, the run's output lie inside `~/.ateam`, excluded as a whole. `sandboxpolicy.Build` now closes an exclude of ateam's own entry by entry around a grant inside it (`splitAround`), with the known names closed before they exist. Both backends get the same rules; without such a grant (chat, run, shell) nothing changes. Checked by tests and by `ateam exec --dry-run` with both backends; not by a real unattended run.
 3. Linux: decided 2026-11-23. `bwrap` and `socat` are acceptable requirements, documented in ISOLATION.md ("Where a sandbox backend can start"), with an early failure when one is missing. Not coded yet: the renderer still refuses Linux one step earlier. See "Next steps", 3.
 4. Carve-outs (points 1 and 2) by changing fence itself, in a fork. Read of the source, v0.1.67:
@@ -153,7 +149,8 @@ Not checked:
 
 - `make test-sandbox`, `make test-sandbox-nono`, `make test-sandbox-fence`. From a plain terminal: a sandbox cannot start inside another one. Not part of `make test-all`.
 - Suite `base`: the working folder and a `--write` path writable; the rest of the home readable and not writable; an excluded folder closed for reads and writes, outside and inside the working folder, and not renamable; ateam's own files closed, `.ateam/shared` open; `~/.ssh` closed; git status, add and commit working with `.git/config` and `.git/hooks` read-only and `.git` not renamable; a `--domain` host reachable and another refused.
-- Suite `carve`: a `--read` and a `--write` inside an excluded folder; read-only inside the working folder. Under fence the launch is refused, which the script reports as known.
+- Suite `carve`: a `--read` inside an excluded folder, outside and inside the working folder (there it stays read-only). Passes under nono and under fence since the fork.
+- Suite `carve-write`: a `--write` inside an excluded folder. Under fence the launch is refused, which the script reports as known.
 - Checked from the agent's sandbox: `SANDBOX_PROBE_DRY_RUN=1 make test-sandbox` plans every launch; the probe run with no sandbox reports each missing refusal as FAIL. Not checked: a real run. On Linux both backends are refused before the launch for now, so the targets report "NOT STARTED" there.
 - The dry run found one bug, fixed: the check before a fence launch compared an excluded link (`~/.claude` kept in a synced folder) by its own spelling and refused the launch.
 - Real run on macOS, owner, 2026-11-23 (nono 0.82.0, `2e01bc7`): nono `base` 27 of 27 and `carve` 8 of 8; fence `base` 26 of 27, `carve` refused at launch as expected. The one fence failure was the probe: `~/.ssh` is a link there, and `ls` of a link whose target is closed prints the link's name and succeeds. The check now lists the content (`ls ~/.ssh/`); rerun the same day: fence `base` 27 of 27.
@@ -167,6 +164,42 @@ Not checked:
   - Conclusion: nono on Linux can only take grants that contain nothing denied. That means the home listed entry by entry around every exclude and around nono's own state (the targy port), and no read-only path inside a writable folder (`.git/hooks` in the working folder), since Landlock has no deny. fence on Linux hides a denied folder with a mount and makes a path read-only with a mount, so it can express both: fence is the better first backend for Linux.
   - `open_port` 0 (all of localhost) is macOS only in nono; Linux takes explicit ports. So localhost by port (step 5) is needed for nono on Linux too, not only for fence.
 - Not covered by the script: an interactive shell, an agent turn, `ateam exec` inside the sandbox, a `dev/` toolchain build.
+
+## The fence fork
+
+2026-11-24: ateam builds with the owner's fork, `github.com/voidexpr/fence` branch `fork`, through a `replace` line in `go.mod` (`v0.0.0-20261124171113-f0664aa86748`). The fork is public and served by proxy.golang.org. It is upstream's main branch (`737751a`, after v0.1.67) plus one commit, `5d3a1b3`.
+
+What the fork changes (read of the commit):
+
+- A literal `allowRead` path strictly inside a `denyRead` entry stays readable. The deepest literal path wins; a deny wins a tie; a deeper deny closes part of a carve-out again. Glob allows reopen nothing.
+- One precedence (`readPolicy`) shared by the macOS profile generator, the Linux mount planner and `CheckReadPath`.
+- macOS: the reopening allow rules are written after the deny rules, by depth, with a metadata allow on the closed folders above so tools can reach the path.
+- Linux: a "reveal" mount, a read-only bind of the path after the mask of its folder.
+- `CheckReadPath` also checks the symlink-resolved spelling.
+- Writes are untouched: `denyWrite` always wins, and the unlink block on a denied subtree stays.
+
+What changed in ateam:
+
+- `RenderFence` no longer refuses a read inside a folder that stays excluded: the folder stays in `denyRead` and `denyWrite`, the path is in `allowRead`. It is read-only by construction. A write there is still refused, by name.
+- `dev/go` launches under fence (open point 1 is closed).
+- Probes: `carve` is now reads only and must pass under fence; the write case moved to a new suite, `carve-write`, which fence refuses at launch (reported as known).
+- Docs: the comparisons show upstream fence and the fork side by side (`SANDBOX_DIFFERENCES.md`, `ISOLATION.md`).
+- Kept: `splitAround` for ateam's own directory. An unattended run writes inside `~/.ateam`, and writes have no carve-out.
+
+How it was checked:
+
+- Unit tests: the rendered configuration; the Seatbelt profile the fork generates has the allow of the file after the deny of its folder; `dev/go` passes fence's own check before a launch.
+- Linux, Debian container, as root: `carve` 8 of 8. By hand: `--read ~/.ssh/config` with `~/.ssh` excluded reads the file, does not see `id_rsa`, lists the folder as `config` alone, and cannot write the file.
+- Not checked: a real run on macOS (`make test-sandbox`, the owner).
+
+One difference seen: on Linux a listing of the excluded folder shows the opened entries; on macOS the listing is refused.
+
+Wanted next in the fork, by value for ateam:
+
+1. **Write carve-outs**: an `allowWrite` path inside a `denyWrite` entry stays writable (macOS: allow after deny, and the unlink block reopened for it; Linux: a writable bind after the read-only one). It closes the Linux gap below: the project's `.ateam` would be read-only as a whole with its open entries writable, so nothing can be created in it. It also lets `--write` work inside an excluded folder and would retire `splitAround`.
+2. **Deny the link itself**: for a denied path that is a link, also deny the link's own spelling, not only its target (today the link's name and target stay visible on macOS).
+3. **No silent fallback on Linux**: an option that makes fence fail instead of continuing without a network namespace. ateam makes fence's probe itself today (`fencePreflight`); an option would remove the duplicate.
+4. Minor: served ports in the configuration file (today only through `Manager.SetService`, hence `fence-exec --expose`).
 
 ## fence on Linux
 

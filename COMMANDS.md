@@ -475,7 +475,7 @@ ateam shell [flags]                          # $SHELL
 - `shell`: ignores the profile's `command` and agent.
 - The working folder is writable: the project root inside a project, else the current folder. Running in the home or `/` is refused.
 - Under a sandbox backend, ateam waits for the command and compares `.git/config` and `.git/hooks` afterwards: a change is listed and the launch exits with code 3.
-- A profile whose rules its container cannot enforce is refused. `none` enforces nothing, `nono` enforces all of them, `fence` refuses a `read` or `write` inside a folder that stays excluded; `docker` and `docker-exec` are not supported by these commands yet.
+- A profile whose rules its container cannot enforce is refused. `none` enforces nothing, `nono` enforces all of them, `fence` refuses a `write` inside a folder that stays excluded; `docker` and `docker-exec` are not supported by these commands yet.
 - Flags come before the command: everything after the first argument belongs to it.
 
 ```bash

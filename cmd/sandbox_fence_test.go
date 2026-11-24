@@ -24,7 +24,7 @@ func TestFenceSeatbeltRulesOfRenderedConfig(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(work, ".git", "hooks"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	f := &launchFlags{profiles: []string{"sandbox/fence"}, write: []string{"~/extra"}, domains: []string{"example.com"}}
+	f := &launchFlags{profiles: []string{"sandbox/fence"}, write: []string{"~/extra"}, read: []string{"~/.ssh/config"}, domains: []string{"example.com"}}
 	plan, err := planLaunch(f, modeRun, []string{"true"})
 	if err != nil {
 		t.Fatal(err)
@@ -65,6 +65,13 @@ func TestFenceSeatbeltRulesOfRenderedConfig(t *testing.T) {
 		if !strings.Contains(wrapped, want) {
 			t.Errorf("the Seatbelt profile lacks:\n%s", want)
 		}
+	}
+	// The carve-out: the file inside the excluded folder is allowed after
+	// the folder's deny, and Seatbelt applies the last matching rule.
+	deny := strings.Index(wrapped, rule("deny file-read-data", ssh))
+	allow := strings.LastIndex(wrapped, "(allow file-read-data\n  (subpath \""+filepath.Join(ssh, "config")+"\")")
+	if deny < 0 || allow < deny {
+		t.Errorf("the read inside the excluded folder must be allowed after the folder's deny: deny at %d, allow at %d", deny, allow)
 	}
 	for _, never := range []string{"(allow file-read*)", "(allow network*)\n"} {
 		if strings.Contains(wrapped, never) {

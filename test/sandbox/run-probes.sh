@@ -146,6 +146,9 @@ verify() {
         '[ "$(cat "$R/secret/token")" = token ] && [ ! -e "$R/secret/new.txt" ]'
     host "the excluded folder inside the working folder is as it was" \
         '[ "$(cat private/token)" = token ] && [ ! -e private/new.txt ] && [ ! -e private2 ]'
+    if [ "$1" = carve-write ]; then
+        return "$host_failed"
+    fi
     if [ "$1" = base ]; then
         host "nothing was written outside the working folder" \
             '[ "$(cat "$R/outside/readable.txt")" = readable ] && [ ! -e "$R/outside/new.txt" ]'
@@ -189,19 +192,27 @@ for backend in "$@"; do
     esac
 
     launch "$backend" carve \
-        --exclude "$ROOT/secret" --read "$ROOT/secret/open.txt" --write "$ROOT/secret/rw" \
+        --exclude "$ROOT/secret" --read "$ROOT/secret/open.txt" \
         --exclude "$ROOT/proj/private" --read "$ROOT/proj/private/readme.txt"
-    status=$?
-    if [ "$backend" = fence ] && [ "$status" -ne 0 ] && grep -q "fence cannot open" "$ROOT/carve.out"; then
-        # Known: fence has no rule that opens a path inside a denied folder
-        # (plans/feature_sandboxing_and_attended_agents_impl_steps.md).
-        summary+=("$backend carve: refused at launch (known: fence cannot open a path inside an excluded folder)")
-        continue
-    fi
-    case $status in
+    case $? in
     0) summary+=("$backend carve: ok") ;;
     2) failed=1 && summary+=("$backend carve: NOT STARTED") ;;
     *) failed=1 && summary+=("$backend carve: FAILED") ;;
+    esac
+
+    launch "$backend" carve-write \
+        --exclude "$ROOT/secret" --write "$ROOT/secret/rw"
+    status=$?
+    if [ "$backend" = fence ] && [ "$status" -ne 0 ] && grep -q "fence cannot make" "$ROOT/carve-write.out"; then
+        # Known: in fence a write deny always wins; only reads can be
+        # opened inside an excluded folder (ateam's fork of fence).
+        summary+=("$backend carve-write: refused at launch (known: fence cannot open a write inside an excluded folder)")
+        continue
+    fi
+    case $status in
+    0) summary+=("$backend carve-write: ok") ;;
+    2) failed=1 && summary+=("$backend carve-write: NOT STARTED") ;;
+    *) failed=1 && summary+=("$backend carve-write: FAILED") ;;
     esac
 done
 
