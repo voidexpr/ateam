@@ -204,15 +204,17 @@ The gap, to decide:
 - Why it matters: `.ateam/profiles/*.hcl` is loaded by every later ateam launch in the project, outside the sandbox. A supervisor that starts sub-runs would load a planted profile.
 - Options: (a) fence with a writable mount allowed inside a read-only one, so the project's `.ateam` is read-only and its open entries writable: a change in fence's Linux mount planner; (b) ateam creates the harmless missing entries before the launch (`profiles/`, `logs/` as empty folders), which leaves the files (`secrets.env`, `Dockerfile`); (c) a check after the run, as for git: what appeared at a protected path is reported and moved away. Only (a) prevents; (c) leaves the time of the run open.
 
-## Network blocks
+## Network rules
 
 Built 2026-11-23, the first part of phase 2. Owner's choices: a profile without a network rule stays closed, localhost included; a localhost rule a backend cannot express is refused, not widened.
 
+Simplified 2026-11-24 (owner): no separate `network` entity. A first version had `network "NAME" { use, allow, deny }` blocks and `--network` (`5fea5b6`); they said nothing profiles do not already say, since profiles compose with `use`. Rules are plain profile lists, and a set of rules is reused as a profile (`profile "net/db"`). This replaces decision 8's entity until rules need more than lists (method and path, ports on hosts).
+
 What is built:
 
-- `network "NAME" { use, allow, deny, default }` blocks; `network = [...]` on a profile; `--network NAME` on `chat`, `run`, `shell` and the `profile` commands. Checked at load: unknown names, cycles, a `default` other than `"deny"`. `internal/runtime/network.go`.
-- Entries: a host, `localhost` (the machine's, every port), `localhost:PORT`. `domains` and `--domain` take the same entries and stay as the short form. A port on a host is refused when the policy is built.
-- `Policy` gained `DeniedDomains`, `HostLocalhost`, `HostPorts`. Unchanged: with at least one host, macOS backends also open all of localhost, so a command can talk to what it starts.
+- Profile lists `domains` and `deny_domains`; flags `--domain` and `--deny-domain`.
+- `domains` entries: a host, `localhost` (the machine's, every port), `localhost:PORT`. A port on a host is refused when the policy is built.
+- `Policy` has `DeniedDomains`, `HostLocalhost`, `HostPorts`. Unchanged: with at least one host, macOS backends also open all of localhost, so a command can talk to what it starts.
 - nono: hosts as before. A denied host, and localhost without any host, are refused: what nono does with them was not checked.
 - fence, macOS: `deniedDomains`; `localhost` opens all of localhost; `localhost:PORT` is refused unless all of localhost is open already.
 - fence, Linux: `localhost:PORT` becomes `allowLocalOutboundPorts`; `localhost` is refused.
@@ -220,7 +222,7 @@ What is built:
 
 How it was checked:
 
-- Unit tests: the blocks and their errors (`internal/runtime/network_test.go`), each form per backend (`TestNetworkRulesPerBackend`), the launch and the summary line (`TestPlanLaunchNetwork`).
+- Unit tests: each form per backend (`TestNetworkRulesPerBackend`), composition through `use`, the launch and the summary line (`TestPlanLaunchNetworkRules`).
 - Linux, in the Debian container, as root, with two servers on the host's localhost: with `--domain localhost:18081` that port answers and 18082 does not; without a rule, and with a host only, neither answers; a server the command starts itself is reachable over the sandbox's own localhost; `--domain localhost` is refused at launch with the reason.
 - Not checked: a denied host in a real run (fence's proxy); anything of this on macOS in a real run (the existing probes still cover hosts); nono with these rules beyond the refusals.
 
@@ -232,7 +234,7 @@ In order:
 2. **Owner: use it.** `ateam chat` and `ateam shell` for real work; `ateam code` with a nono code profile. Each refusal that is not obvious is a missing path or host in a built-in filter or profile.
 3. **Linux.** With fence: built, experimental, see "fence on Linux". Left: the run on meerdog as a plain user (`make test-sandbox-fence`), the decision on paths that do not exist yet, localhost by port (step 5). nono on Linux: not planned for now; it would need the home listed entry by entry and has no read-only path inside a writable folder.
 4. **Retire `nono-sandbox`.** Remove it from `~/dotfiles/bin`; in targy remove the `nono_profile` step and the `launch` target, keep `claude_permissions`, `json_merge`, `claude-settings`. After a period of daily use of the ateam commands.
-5. **Phase 2: the rest.** The `network` blocks are built (see "Network blocks"). Left, in order: a port the sandboxed command listens on; built-in profiles moved from `domains` to network blocks; `default = "allow"` with denies; a port on a host; then `_remove` / `_replace` and trust on first use for project-supplied profiles. A dynamically chosen port stays open question 6 of the design file.
+5. **Phase 2: the rest.** The network rules are built (see "Network rules"). Left: a port the sandboxed command listens on; a port on a host; then `_remove` / `_replace` and trust on first use for project-supplied profiles. A dynamically chosen port stays open question 6 of the design file.
 6. **Phase 3: secrets.** Placeholders injected outside the sandbox, the LLM key first (research F.1.1 Tier A; see also `research/ResearchNetworkSandboxing.md`).
 
 Done since the first version of this list: built-in profiles as filter files, `ateam filter list` and `show` (2026-11-23, `1d5bc94`): every filter resolves to the same paths as the literal list it replaced.

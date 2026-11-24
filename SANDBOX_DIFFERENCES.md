@@ -74,7 +74,7 @@ All three filter hosts with a proxy outside the sandbox and refuse direct connec
 
 Notes:
 
-- ateam writes: hosts, denied hosts (fence), `localhost` and `localhost:PORT` (`domains` and `network` blocks, see CONFIG.md). On macOS "all of localhost" is also opened whenever there is at least one host, so a command can talk to what it starts. Without any rule the network is closed, localhost included.
+- ateam writes: hosts, denied hosts (fence), `localhost` and `localhost:PORT` (the profile lists `domains` and `deny_domains`, see CONFIG.md). On macOS "all of localhost" is also opened whenever there is at least one host, so a command can talk to what it starts. Without any rule the network is closed, localhost included.
 - "All of localhost" exists on macOS only, in every tool. "One port" exists on Linux in nono and fence, and on macOS in nono only. No tool has both forms on both systems.
 - Claude sandbox: listing `localhost` in `allowedDomains` only affects connections that go through the proxy; `localhost` is in `NO_PROXY`, so a plain `curl localhost` is a direct connection and is not covered by it.
 - nono's method and path rules and its key injection are not used by ateam yet (phase 3).
@@ -94,9 +94,9 @@ nono's tracker, all open on 2026-11-23. Only the issue texts were read, not the 
 
 fence: its tracker was not searched. The carve-out limit is documented behaviour there ("denyRead always wins").
 
-## What the `network` blocks do with this (built 2026-11-23)
+## What ateam's network rules do with this (built 2026-11-23)
 
 - `localhost` (all ports) and `localhost:PORT` (a server on the host) are separate forms. Each backend maps the forms it has and refuses the others by name: `localhost` under fence on Linux; `localhost:PORT` under fence on macOS unless all of localhost is open already.
 - nono: localhost without any host, and a denied host, are refused: what nono does with them was not checked.
-- Not built: a port the sandboxed command listens on and the host must reach; a port on a host; method and path rules; an open network with denies (`default = "allow"`).
+- Not built: a port the sandboxed command listens on and the host must reach; a port on a host; method and path rules; an open network with denies.
 - fence on Linux without a private network is refused, not accepted.

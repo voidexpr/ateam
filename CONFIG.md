@@ -693,8 +693,8 @@ profile "myproject" {
 | `read` | Paths readable. An entry equal to an inherited `exclude` reopens it; inside a writable folder it stays read-only. |
 | `write` | Paths writable, beside the working folder. |
 | `exclude` | Paths neither readable nor writable. |
-| `domains` | What is reachable: hosts, `localhost` or `localhost:PORT`. With none, and no `network`, a sandbox backend closes the network. |
-| `network` | [Network blocks](#network-blocks) by name. Their rules add to `domains`. |
+| `domains` | What is reachable: hosts, `localhost` or `localhost:PORT`. With none, a sandbox backend closes the network. See [Network rules](#network-rules). |
+| `deny_domains` | Hosts refused even when a `domains` entry covers them. |
 | `command` | Saved command for `ateam run`. |
 | `ateam_files` | `"open"`: the command may read and write ateam's own files (its user directory and the project's `.ateam/`). For a command that runs ateam itself. Default: closed. |
 
@@ -705,37 +705,24 @@ profile "myproject" {
 - The rules need a sandbox backend. Any run, attended or not, on a container that cannot enforce them is refused. `nono` enforces all of them. `fence` enforces them too, except a `read` or `write` inside a folder that stays excluded, which it refuses.
 - Each layer also loads `profiles/*.hcl` after its `ateam.hcl`: where `ateam profile save` writes.
 
-##### Network blocks
+##### Network rules
 
-A `network` block names a set of network rules. Profiles list blocks in `network`, and `--network NAME` adds one for a launch. The rules are tool-agnostic: each sandbox backend maps them to its own, and a rule it cannot express is an error that names it.
+`domains` and `deny_domains` are plain profile lists. To reuse a set of rules, put it in a profile and `use` it:
 
 ```hcl
-network "db" {
-  allow = ["localhost:5432"]             # a server on this machine
-}
-
-network "webapp" {
-  use   = ["db"]
-  allow = ["registry.npmjs.org", "*.example.com"]
-  deny  = ["telemetry.example.com"]      # refused even when an allow covers it
+profile "net/webapp" {
+  domains      = ["registry.npmjs.org", "*.example.com", "localhost:5432"]
+  deny_domains = ["telemetry.example.com"]   # refused even when a domain covers it
 }
 
 profile "web" {
-  use     = ["sandbox/fence", "dev/node"]
-  network = ["webapp"]
+  use = ["sandbox/fence", "dev/node", "net/webapp"]
 }
 ```
 
-| Attribute | Meaning |
-|-----------|---------|
-| `use` | Network blocks merged into this one, in order. |
-| `allow` | A host (`github.com`, `*.github.com`), `localhost` (this machine's localhost, every port) or `localhost:PORT`. |
-| `deny` | Hosts refused even when an `allow` entry covers them. |
-| `default` | What happens to the rest. Only `"deny"`, which is also the default. |
-
-- Everything not allowed is refused. A profile without `domains` and `network` has no network at all, localhost included.
-- An unknown name, a cycle in `use` or another `default` is a load error. A later layer's block of the same name replaces the earlier one as a whole.
-- `domains` takes the same entries as `allow`; it stays as the short form.
+- A `domains` entry is a host (`github.com`, `*.github.com`), `localhost` (this machine's localhost, every port) or `localhost:PORT`.
+- Everything not listed is refused. A profile without `domains` has no network at all, localhost included.
+- The rules are tool-agnostic: each sandbox backend maps them to its own, and a rule it cannot express is an error that names it.
 - A port on a host (`example.com:8443`) is not supported yet.
 
 Localhost differs per system, so a rule may be refused on one of them:
@@ -745,7 +732,7 @@ Localhost differs per system, so a rule may be refused on one of them:
 | At least one host | The command can also use localhost: this machine's, every port. A sandbox there cannot tell its own from the machine's | The sandbox has a localhost of its own. The machine's is closed |
 | `localhost` | This machine's localhost, every port. Under nono only together with at least one host | Refused: write each port |
 | `localhost:PORT` | fence: refused unless all of localhost is open already (a host, or `localhost`). nono: needs at least one host, and then all of localhost is open | That port of this machine's localhost |
-| `deny` | fence only; nono refuses the launch | fence |
+| `deny_domains` | fence only; nono refuses the launch | fence |
 
 ##### Filters
 

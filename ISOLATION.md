@@ -71,7 +71,7 @@ Requires `nono` in `PATH` (tested with 0.82). macOS only for now. A second backe
 |---|---|
 | Writing | The working folder (the project root inside a project, else the current folder) and the profile's `write` paths. Nothing else. Running in the home or `/` is refused. |
 | Reading | The home, except the profile's `exclude` paths. `agent/secrets`, part of `sandbox/nono`, excludes keys, credentials, app data and personal folders. |
-| Network | The profile's `domains` and `network` blocks: hosts, `localhost`, `localhost:PORT`. Without any, the network is closed, localhost included. With at least one host the command can use localhost (macOS: this machine's; Linux under fence: one of its own). See [CONFIG.md → Network blocks](CONFIG.md#network-blocks). |
+| Network | The profile's `domains`: hosts, `localhost`, `localhost:PORT`; `deny_domains` refuses a host inside them. Without any, the network is closed, localhost included. With at least one host the command can use localhost (macOS: this machine's; Linux under fence: one of its own). See [CONFIG.md → Network rules](CONFIG.md#network-rules). |
 | ateam's own files | Closed: the user's ateam directory, and in the project's `.ateam/` everything but `runtime/`, `shared/`, `prompts/`, `cache/` and `.gitignore`. |
 | Git | `.git/config` and `.git/hooks` of the working folder are read-only. A hook planted there would run outside the sandbox later. |
 

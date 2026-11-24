@@ -61,7 +61,7 @@ var profileListCmd = &cobra.Command{
 				parts = append(parts, "use="+strings.Join(p.Use, ","))
 			}
 			if p.HasPolicy() {
-				parts = append(parts, fmt.Sprintf("rules=%d", len(p.Read)+len(p.Write)+len(p.Exclude)+len(p.Domains)+len(p.Network)))
+				parts = append(parts, fmt.Sprintf("rules=%d", len(p.Read)+len(p.Write)+len(p.Exclude)+len(p.Domains)+len(p.DenyDomains)))
 			}
 			fmt.Printf("%-24s %s\n", name, strings.Join(parts, " "))
 		}
@@ -134,7 +134,7 @@ func printComposedProfile(w io.Writer, p *runtime.ProfileConfig) {
 	list("read", p.Read)
 	list("exclude", p.Exclude)
 	list("domains", p.Domains)
-	list("network", p.Network)
+	list("deny_domains", p.DenyDomains)
 }
 
 var profileSaveCmd = &cobra.Command{
@@ -179,7 +179,7 @@ func profileHCL(name string, f *launchFlags) string {
 	attr("read", f.read)
 	attr("exclude", f.exclude)
 	attr("domains", f.domains)
-	attr("network", f.networks)
+	attr("deny_domains", f.denied)
 	attr("command", strings.Fields(f.command))
 	b.WriteString("}\n")
 	return b.String()

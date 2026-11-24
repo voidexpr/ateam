@@ -415,44 +415,44 @@ func TestBuildNonoContainerForUnattendedRun(t *testing.T) {
 	}
 }
 
-// A network block reaches the policy through a profile or --network, next
-// to the plain domains; the summary line says what is reachable.
-func TestPlanLaunchNetwork(t *testing.T) {
+// Network rules are plain profile lists, reused through `use`: hosts,
+// localhost forms and denied hosts reach the policy, and the summary line
+// says what is reachable.
+func TestPlanLaunchNetworkRules(t *testing.T) {
 	launchFixture(t)
 	file := filepath.Join(t.TempDir(), "net.hcl")
 	hcl := `
-network "db" {
-  allow = ["localhost:5432", "db.example.com"]
-  deny  = ["telemetry.example.com"]
+profile "net/db" {
+  domains      = ["localhost:5432", "db.example.com"]
+  deny_domains = ["telemetry.example.com"]
 }
 profile "withdb" {
-  use     = ["sandbox/fence"]
-  network = ["db"]
+  use = ["sandbox/fence", "net/db"]
 }
 `
 	if err := os.WriteFile(file, []byte(hcl), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := planLaunch(&launchFlags{profiles: []string{file}, domains: []string{"example.com"}}, modeRun, []string{"true"})
+	cfg, err := runtime.LoadWithFiles(nil, []string{file})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prof := cfg.Profiles["withdb"]; prof.EntryOrigin("deny_domains", "telemetry.example.com") != "net/db" || !prof.HasPolicy() {
+		t.Errorf("deny_domains composes through use, with its origin: %+v", prof)
+	}
+	f := &launchFlags{profiles: []string{"sandbox/fence", "net/db", file}, domains: []string{"example.com"}, denied: []string{"ads.example.com"}}
+	plan, err := planLaunch(f, modeRun, []string{"true"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	p := plan.policy
-	if !slices.Equal(p.Domains, []string{"example.com", "db.example.com"}) || !slices.Equal(p.HostPorts, []int{5432}) || !slices.Equal(p.DeniedDomains, []string{"telemetry.example.com"}) {
+	if !slices.Equal(p.Domains, []string{"db.example.com", "example.com"}) || !slices.Equal(p.HostPorts, []int{5432}) || !slices.Equal(p.DeniedDomains, []string{"telemetry.example.com", "ads.example.com"}) {
 		t.Errorf("policy network = %v %v %v", p.Domains, p.HostPorts, p.DeniedDomains)
 	}
-	if got, want := networkSummary(p, true), "example.com, db.example.com, localhost:5432; refused: telemetry.example.com"; got != want {
+	if got, want := networkSummary(p, true), "db.example.com, example.com, localhost:5432; refused: telemetry.example.com, ads.example.com"; got != want {
 		t.Errorf("with a private localhost: %q, want %q", got, want)
 	}
-	if got, want := networkSummary(p, false), "example.com, db.example.com, localhost; refused: telemetry.example.com"; got != want {
+	if got, want := networkSummary(p, false), "db.example.com, example.com, localhost; refused: telemetry.example.com, ads.example.com"; got != want {
 		t.Errorf("without one: %q, want %q", got, want)
-	}
-
-	plan, err = planLaunch(&launchFlags{profiles: []string{"sandbox/fence", file}, networks: []string{"db"}}, modeRun, []string{"true"})
-	if err != nil || !slices.Equal(plan.policy.HostPorts, []int{5432}) {
-		t.Errorf("--network adds the block: %+v, %v", plan, err)
-	}
-	if _, err := planLaunch(&launchFlags{profiles: []string{"sandbox/fence"}, networks: []string{"nope"}}, modeRun, []string{"true"}); err == nil {
-		t.Error("an unknown --network must be refused")
 	}
 }

@@ -30,9 +30,7 @@ type Config struct {
 	Profiles   map[string]ProfileConfig
 	// Filters holds the filter blocks, name -> text in the shared filter
 	// syntax. Profiles name them in read, write and exclude.
-	Filters map[string]string
-	// Networks holds the network blocks. Profiles name them in network.
-	Networks map[string]NetworkConfig
+	Filters  map[string]string
 	Settings config.Config
 
 	// SandboxDetection toggles auto-detection of an outer sandbox
@@ -221,8 +219,11 @@ type ProfileConfig struct {
 	Read    []string // paths readable, reopening what an inherited exclude closes
 	Write   []string // paths writable, beside the working folder
 	Exclude []string // paths unreadable
-	Domains []string // hosts reachable; none closes the network under a sandbox backend
-	Network []string // network blocks by name: their rules add to domains
+	// Domains lists what is reachable: hosts, "localhost" or
+	// "localhost:PORT"; none closes the network under a sandbox backend.
+	// DenyDomains lists hosts refused even when a Domains entry covers them.
+	Domains     []string
+	DenyDomains []string
 	// AteamFiles is "open" to let the command reach ateam's own files (its
 	// user directory and the project's .ateam), which a sandbox closes by
 	// default: for a command that runs ateam itself. "" or "closed" otherwise.
@@ -237,7 +238,7 @@ type ProfileConfig struct {
 // HasPolicy reports whether the profile restricts or grants file or
 // network access, which only a sandbox backend can enforce.
 func (p *ProfileConfig) HasPolicy() bool {
-	return len(p.Read)+len(p.Write)+len(p.Exclude)+len(p.Domains)+len(p.Network) > 0 || p.AteamFiles != ""
+	return len(p.Read)+len(p.Write)+len(p.Exclude)+len(p.Domains)+len(p.DenyDomains) > 0 || p.AteamFiles != ""
 }
 
 // hclFile is the HCL schema for ateam.hcl.
@@ -250,7 +251,6 @@ type hclFile struct {
 	Containers       []hclContainer      `hcl:"container,block"`
 	Profiles         []hclProfile        `hcl:"profile,block"`
 	Filters          []hclFilter         `hcl:"filter,block"`
-	Networks         []hclNetwork        `hcl:"network,block"`
 	Projects         []hclProject        `hcl:"project,block"`
 	Roles            []hclRole           `hcl:"role,block"`
 	Supervisors      []hclSupervisor     `hcl:"supervisor,block"`
@@ -343,17 +343,6 @@ type hclFilter struct {
 	Rules    string    `hcl:"rules,optional"`
 }
 
-// hclNetwork is a named set of network rules. A later layer's block of the
-// same name replaces the earlier one as a whole.
-type hclNetwork struct {
-	DefRange hcl.Range `hcl:",def_range"`
-	Name     string    `hcl:"name,label"`
-	Use      []string  `hcl:"use,optional"`
-	Allow    []string  `hcl:"allow,optional"`
-	Deny     []string  `hcl:"deny,optional"`
-	Default  string    `hcl:"default,optional"`
-}
-
 type hclProfile struct {
 	DefRange           hcl.Range `hcl:",def_range"`
 	Name               string    `hcl:"name,label"`
@@ -370,7 +359,7 @@ type hclProfile struct {
 	Write              []string  `hcl:"write,optional"`
 	Exclude            []string  `hcl:"exclude,optional"`
 	Domains            []string  `hcl:"domains,optional"`
-	Network            []string  `hcl:"network,optional"`
+	DenyDomains        []string  `hcl:"deny_domains,optional"`
 	AteamFiles         string    `hcl:"ateam_files,optional"`
 	Command            []string  `hcl:"command,optional"`
 
@@ -480,9 +469,6 @@ func LoadWithFiles(layerDirs, files []string) (*Config, error) {
 	if err := sandboxpolicy.FilterSet(cfg.Filters).Check(); err != nil {
 		return nil, err
 	}
-	if err := cfg.checkNetworks(); err != nil {
-		return nil, err
-	}
 	cfg.Settings.ContainerExtra.ExtraArgs = cfg.withAdditions("container_extra.extra_args", cfg.Settings.ContainerExtra.ExtraArgs)
 
 	// Apply detection settings to the container package — but only if
@@ -503,7 +489,6 @@ func newConfig() *Config {
 		Containers: make(map[string]ContainerConfig),
 		Profiles:   make(map[string]ProfileConfig),
 		Filters:    make(map[string]string),
-		Networks:   make(map[string]NetworkConfig),
 		Sources:    make(map[string][]Contribution),
 	}
 }
@@ -875,10 +860,6 @@ func mergeHCL(cfg *Config, data []byte, filename, label string) error {
 			return err
 		}
 	}
-	for _, n := range hf.Networks {
-		cfg.Networks[n.Name] = NetworkConfig{Name: n.Name, Use: n.Use, Allow: n.Allow, Deny: n.Deny, Default: n.Default}
-		cfg.record("network."+n.Name+".name", label, n.Name, n.DefRange.Start.Line)
-	}
 	for _, p := range hf.Profiles {
 		cfg.mergeProfile(p, label)
 	}
@@ -1132,9 +1113,9 @@ func (c *Config) mergeProfile(h hclProfile, label string) {
 		case "domains":
 			p.Domains = h.Domains
 			value = renderList(h.Domains)
-		case "network":
-			p.Network = h.Network
-			value = renderList(h.Network)
+		case "deny_domains":
+			p.DenyDomains = h.DenyDomains
+			value = renderList(h.DenyDomains)
 		case "ateam_files":
 			p.AteamFiles = h.AteamFiles
 			value = h.AteamFiles

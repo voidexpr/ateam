@@ -29,7 +29,7 @@ type launchFlags struct {
 	write    []string
 	exclude  []string
 	domains  []string
-	networks []string
+	denied   []string
 	command  string
 	dryRun   bool
 	// backend replaces the profile's container with a sandbox backend, by
@@ -43,7 +43,7 @@ func addLaunchFlags(cmd *cobra.Command, f *launchFlags) {
 	cmd.Flags().StringArrayVar(&f.write, "write", nil, "path writable for this launch (repeatable)")
 	cmd.Flags().StringArrayVar(&f.exclude, "exclude", nil, "path unreadable for this launch (repeatable)")
 	cmd.Flags().StringArrayVar(&f.domains, "domain", nil, "host, localhost or localhost:PORT reachable for this launch (repeatable)")
-	cmd.Flags().StringArrayVar(&f.networks, "network", nil, "network block to add for this launch, by name (repeatable)")
+	cmd.Flags().StringArrayVar(&f.denied, "deny-domain", nil, "host refused for this launch, even when a --domain covers it (repeatable)")
 }
 
 // launchMode is what a launch runs.
@@ -137,7 +137,7 @@ func composeLaunch(f *launchFlags, layers []string) (*runtime.Config, runtime.Pr
 		}
 		names = append(names, defined...)
 	}
-	extra := runtime.ProfileConfig{Read: f.read, Write: f.write, Exclude: f.exclude, Domains: f.domains, Network: f.networks}
+	extra := runtime.ProfileConfig{Read: f.read, Write: f.write, Exclude: f.exclude, Domains: f.domains, DenyDomains: f.denied}
 	if f.command != "" {
 		extra.Command = strings.Fields(f.command)
 	}
@@ -239,14 +239,10 @@ func buildSandboxPolicy(cfg *runtime.Config, prof *runtime.ProfileConfig, grantD
 	if err != nil {
 		return nil, err
 	}
-	allow, deny, err := cfg.NetworkRules(prof.Network)
-	if err != nil {
-		return nil, err
-	}
 	return sandboxpolicy.Build(sandboxpolicy.Input{
 		Name: prof.Name, Home: home, WorkDir: grantDir,
 		Read: prof.Read, Write: prof.Write, Exclude: prof.Exclude,
-		Domains: slices.Concat(prof.Domains, allow), Deny: deny,
+		Domains: prof.Domains, Deny: prof.DenyDomains,
 		Origin: prof.EntryOrigin, Filters: cfg.Filters, OpenAteam: prof.AteamFiles == "open",
 		AteamHome: ateamHome, ProjectDir: projectDir, ProfileFiles: files,
 	})
