@@ -256,6 +256,20 @@ func (p *Policy) Writable() []Rule {
 	return append([]Rule{{Path: p.WorkDir, Source: "the working folder"}}, p.Write...)
 }
 
+// PinnedDirs returns the folders above each read-only path, up to and not
+// including the writable folder that holds it. Renaming or removing one
+// would move the path out from under its rule: a backend must pin them.
+func (p *Policy) PinnedDirs() []string {
+	var dirs []string
+	for _, r := range p.ReadOnly {
+		root := p.WritableRoot(r.Path)
+		for dir := filepath.Dir(r.Path); root != "" && dir != root && Within(dir, root); dir = filepath.Dir(dir) {
+			dirs = append(dirs, dir)
+		}
+	}
+	return sortedStrings(dirs)
+}
+
 func pathsOf(rules []Rule) []string {
 	out := make([]string, 0, len(rules))
 	for _, r := range rules {

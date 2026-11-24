@@ -135,10 +135,9 @@ func readOnlyRules(p *Policy) []string {
 	var rules []string
 	for _, r := range p.ReadOnly {
 		rules = append(rules, fmt.Sprintf("(deny file-write* (subpath %s))", seatbeltString(r.Path)))
-		root := p.WritableRoot(r.Path)
-		for dir := filepath.Dir(r.Path); root != "" && dir != root && Within(dir, root); dir = filepath.Dir(dir) {
-			rules = append(rules, fmt.Sprintf("(deny file-write* (literal %s))", seatbeltString(dir)))
-		}
+	}
+	for _, dir := range p.PinnedDirs() {
+		rules = append(rules, fmt.Sprintf("(deny file-write* (literal %s))", seatbeltString(dir)))
 	}
 	return sortedStrings(rules)
 }

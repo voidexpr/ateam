@@ -606,7 +606,7 @@ Pricing can go stale. The top-level `pricing_as_of` date says when the tables we
 
 ### Containers
 
-Five container types are supported: `none`, `docker` (one-shot), `docker-exec` (exec into a user-managed container), `nono` (an OS-level sandbox on the host; see [Composable profiles](#composable-profiles) and [ISOLATION.md → nono](ISOLATION.md#-nono-sandbox)) and `fence` (the same kind of sandbox, built into ateam; see [ISOLATION.md → fence](ISOLATION.md#fence-the-built-in-backend)).
+Five container types are supported: `none`, `docker` (one-shot), `docker-exec` (exec into a user-managed container), `nono` (an OS-level sandbox on the host; see [Composable profiles](#composable-profiles) and [ISOLATION.md → nono](ISOLATION.md#-nono-sandbox)) and `fence` (the same kind of sandbox, built into ateam; see [ISOLATION.md → fence](ISOLATION.md#fence-the-built-in-backend)). A `fence` container takes `strict = true`: a rule fence does not enforce on this system (on Linux, a protected path that does not exist yet) is then an error instead of a warning.
 
 ```hcl
 container "docker" {

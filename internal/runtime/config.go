@@ -200,6 +200,7 @@ type ContainerConfig struct {
 	Precheck          []string // docker/docker-exec: precheck command, e.g. ["sh", "precheck.sh"] or ["make", "restart"]
 	CopyAteam         bool     // docker-exec: copy ateam binary into container via docker cp
 	MountClaudeConfig bool     // docker: mount host ~/.claude/ read-only into container (needed for OAuth tokens)
+	Strict            bool     // fence: a rule the backend does not enforce here is an error, not a warning
 }
 
 type ProfileConfig struct {
@@ -326,6 +327,7 @@ type hclContainer struct {
 	Precheck          []string  `hcl:"precheck,optional"`
 	CopyAteam         bool      `hcl:"copy_ateam,optional"`
 	MountClaudeConfig bool      `hcl:"mount_claude_config,optional"`
+	Strict            bool      `hcl:"strict,optional"`
 }
 
 // hclFilter is a named filter: its rules inline, or the file holding them
@@ -998,6 +1000,9 @@ func (c *Config) mergeContainer(h hclContainer, label string) {
 		case "mount_claude_config":
 			cc.MountClaudeConfig = h.MountClaudeConfig
 			value = strconv.FormatBool(h.MountClaudeConfig)
+		case "strict":
+			cc.Strict = h.Strict
+			value = strconv.FormatBool(h.Strict)
 		}
 		c.record(key+attr, label, value, line)
 	}

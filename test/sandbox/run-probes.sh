@@ -116,12 +116,49 @@ launch() {
         echo "-- the sandbox did not start, or the checks did not finish (exit $status)"
         return 2
     fi
+    if ! verify "$suite"; then
+        status=1
+    fi
     if [ "$status" -ne 0 ]; then
         # 1: a check failed. 3: ateam found .git/config or .git/hooks changed.
         echo "-- exit $status"
         return 1
     fi
     return 0
+}
+
+# host DESCRIPTION SHELL-COMMAND: a check from outside the sandbox, after the
+# run, of what it left in the real files.
+host() {
+    if (cd "$ROOT/proj" && R="$ROOT" sh -c "$2") >/dev/null 2>&1; then
+        echo "PASS after the run: $1"
+    else
+        echo "FAIL after the run: $1    [$2]"
+        host_failed=1
+    fi
+}
+
+# verify SUITE: the real files after a suite. Returns 1 when one is wrong.
+# shellcheck disable=SC2016  # the commands are run by `sh -c`
+verify() {
+    host_failed=0
+    host "the excluded folder outside the working folder is as it was" \
+        '[ "$(cat "$R/secret/token")" = token ] && [ ! -e "$R/secret/new.txt" ]'
+    host "the excluded folder inside the working folder is as it was" \
+        '[ "$(cat private/token)" = token ] && [ ! -e private/new.txt ] && [ ! -e private2 ]'
+    if [ "$1" = base ]; then
+        host "nothing was written outside the working folder" \
+            '[ "$(cat "$R/outside/readable.txt")" = readable ] && [ ! -e "$R/outside/new.txt" ]'
+        host "the user's ateam directory is as it was" '[ "$(cat "$R/ahome/secrets.env")" = PROBE=secret ]'
+        host "the project's ateam.hcl is as it was" '! grep -q probe .ateam/ateam.hcl'
+        host "no profile was created in the project's .ateam" '[ ! -e .ateam/profiles ]'
+        host ".git/config is as it was" '! grep -q probe .git/config'
+        host "no git hook was created" '[ ! -e .git/hooks/probe ] && [ ! -e .git2 ]'
+    else
+        host "the files opened for reading are as they were" \
+            '[ "$(cat "$R/secret/open.txt")" = open ] && [ "$(cat private/readme.txt)" = readme ]'
+    fi
+    return "$host_failed"
 }
 
 failed=0

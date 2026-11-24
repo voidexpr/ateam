@@ -10,6 +10,10 @@
 # PROBE_SSH (1: ~/.ssh exists).
 #
 # Prints one PASS or FAIL line per check and exits 1 on any FAIL.
+#
+# What a write did to the real files is checked afterwards by run-probes.sh,
+# from outside: on Linux an excluded folder is replaced by an empty one, and
+# inside a writable folder a write to it succeeds and is thrown away.
 
 # The commands are run by `sh -c`, which expands their variables.
 # shellcheck disable=SC2016
@@ -57,13 +61,14 @@ base() {
 
     # an excluded folder outside the working folder
     refused "read a file of an excluded folder" 'cat "$R/secret/token"'
-    refused "list an excluded folder" 'ls "$R/secret"'
+    refused "see the entries of an excluded folder" 'ls "$R/secret" | grep -q .'
     refused "create a file in an excluded folder" 'echo x > "$R/secret/new.txt"'
 
     # an excluded folder inside the working folder: closed for writes too
+    # the writes are tried here and judged from outside (see the top)
     refused "read an excluded file inside the working folder" 'cat private/token'
-    refused "overwrite an excluded file inside the working folder" 'echo x > private/token'
-    refused "create a file in an excluded folder inside the working folder" 'echo x > private/new.txt'
+    echo x >private/token 2>/dev/null
+    echo x >private/new.txt 2>/dev/null
     refused "rename an excluded folder inside the working folder" 'mv private private2' 'mv private2 private'
 
     # ateam's own files
@@ -76,9 +81,9 @@ base() {
     # The trailing slash asks for the content: when ~/.ssh is a link whose
     # target is closed, plain `ls ~/.ssh` prints the link's name and succeeds.
     if [ "${PROBE_SSH:-0}" = 1 ]; then
-        refused "list the content of ~/.ssh" 'ls "$HOME/.ssh/"'
+        refused "see the entries of ~/.ssh" 'ls "$HOME/.ssh/" | grep -q .'
     else
-        echo "SKIP list the content of ~/.ssh: it does not exist"
+        echo "SKIP see the entries of ~/.ssh: it does not exist"
     fi
 
     # git: usable, with its config and hooks read-only

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -59,8 +60,78 @@ func TestRenderFence(t *testing.T) {
 	if net := cfg.Network; len(net.AllowedDomains) != 0 || net.AllowLocalBinding || net.AllowLocalOutbound {
 		t.Errorf("no domain must close the network, localhost included: %+v", net)
 	}
-	if _, err := RenderFence(p, "linux"); err == nil {
-		t.Error("Linux must be refused: localhost cannot be opened as a whole there")
+	if _, err := RenderFence(p, "windows"); err == nil {
+		t.Error("an unsupported system must be refused")
+	}
+}
+
+// On Linux fence opens localhost one listed port at a time: it stays
+// closed, which is said in the notes. The denies are the same; the folder
+// above a read-only path is bound onto itself so it cannot be renamed.
+func TestRenderFenceLinux(t *testing.T) {
+	in := testInput(t)
+	if err := os.MkdirAll(filepath.Join(in.WorkDir, ".git", "hooks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	in.Exclude = []string{"~/.ssh"}
+	in.Domains = []string{"example.com"}
+	p, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac, err := RenderFence(p, "darwin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	linux, err := RenderFence(p, "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if net := linux.Network; net.AllowLocalBinding || net.AllowLocalOutbound || !slices.Equal(net.AllowedDomains, []string{"example.com"}) {
+		t.Errorf("network = %+v", net)
+	}
+	if !reflect.DeepEqual(mac.Filesystem.DenyRead, linux.Filesystem.DenyRead) || !reflect.DeepEqual(mac.Filesystem.DenyWrite, linux.Filesystem.DenyWrite) {
+		t.Errorf("the denies must not depend on the system:\n%+v\n%+v", mac.Filesystem, linux.Filesystem)
+	}
+	git := filepath.Join(in.WorkDir, ".git")
+	if !slices.Contains(linux.Filesystem.AllowWrite, git) || slices.Contains(mac.Filesystem.AllowWrite, git) {
+		t.Errorf(".git is pinned by a mount on Linux only: linux %v, mac %v", linux.Filesystem.AllowWrite, mac.Filesystem.AllowWrite)
+	}
+	if !slices.ContainsFunc(FenceNotes("linux"), func(n string) bool { return strings.Contains(n, "localhost is closed") }) {
+		t.Errorf("the notes must say localhost is closed: %v", FenceNotes("linux"))
+	}
+}
+
+// On Linux fence closes a path with a mount, so a protected path that does
+// not exist yet inside a writable folder can be created: it is listed as
+// not enforced, never left unsaid.
+func TestFenceGaps(t *testing.T) {
+	in := testInput(t)
+	if err := os.MkdirAll(filepath.Join(in.WorkDir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	in.Exclude = []string{"~/.ssh"} // does not exist, but nothing can be created in the home
+	p, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gaps := FenceGaps(p, "darwin"); len(gaps) != 0 {
+		t.Errorf("Seatbelt closes a path that does not exist: %v", paths(gaps))
+	}
+	gaps := paths(FenceGaps(p, "linux"))
+	for _, want := range []string{
+		filepath.Join(in.ProjectDir, "secrets.env"),
+		filepath.Join(in.ProjectDir, "profiles"),
+		filepath.Join(in.WorkDir, ".git", "hooks"),
+	} {
+		if !slices.Contains(gaps, want) {
+			t.Errorf("%s does not exist and can be created: %v", want, gaps)
+		}
+	}
+	for _, never := range []string{filepath.Join(in.ProjectDir, "ateam.hcl"), filepath.Join(in.Home, ".ssh"), in.AteamHome} {
+		if slices.Contains(gaps, never) {
+			t.Errorf("%s exists, or lies outside every writable folder: %v", never, gaps)
+		}
 	}
 }
 

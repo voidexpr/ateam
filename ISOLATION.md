@@ -81,7 +81,7 @@ Details:
 - **Read-only inside a writable folder.** A `read` that reopens an excluded path there stays read-only (`--read .ateam/ateam.hcl`); `write` opens it fully. The folders above a read-only path cannot be renamed or removed. nono has no such rule: ateam adds raw Seatbelt rules to the profile.
 - **Git keeps working** (status, add, commit). `git config --local`, `git remote add` and setting an upstream fail inside the sandbox: they write `.git/config`.
 - **Links.** A path is compared by where it really is: `~/projects/x` and the folder that link leads to are one path. An excluded link is excluded at its target too.
-- **A rule that cannot be enforced is an error.** A profile with rules on a container that enforces none (`none`) is refused, attended or not.
+- **A rule that cannot be enforced is an error.** A profile with rules on a container that enforces none (`none`) is refused, attended or not. One exception, said at every launch: fence on Linux cannot keep a protected path that does not exist yet from being created (see Limits).
 
 ### Profiles
 
@@ -207,7 +207,7 @@ Both backends use the operating system's own sandbox. Where that is not availabl
 |---|---|---|
 | macOS, plain terminal | Works (Seatbelt). Needs `nono` installed | Works (Seatbelt). Nothing to install |
 | macOS, inside another Seatbelt sandbox (an agent's own sandbox, another nono or fence) | Cannot start: Seatbelt does not nest | Cannot start: same reason (`sandbox_apply: Operation not permitted`) |
-| Linux | Not enabled in ateam yet. nono uses Landlock, which needs a kernel that has it (5.13 or later) | Not enabled in ateam yet. Needs `bwrap` (package `bubblewrap`) and `socat` installed, and unprivileged user namespaces |
+| Linux | Not enabled in ateam: nono (Landlock) cannot deny a path inside a grant, nor take the home as one grant | Experimental. Needs `bwrap` (package `bubblewrap`) and `socat` installed, and a network namespace `bwrap` can create. ateam checks all three before a launch and refuses with the reason |
 | Linux, Ubuntu 24.04 or later | Not checked | fence's documentation: AppArmor restricts user namespaces by default; `bwrap` needs a profile that allows them |
 | Inside a Docker container (Docker on macOS included: it is a Linux machine) | Not checked. Landlock depends on the host's kernel and on the container's seccomp profile | fence's documentation: `bwrap` needs `--cap-add=NET_ADMIN` or `--privileged` to isolate the network; user namespaces must be allowed |
 | CI runners (GitHub Actions) | Not checked | fence's documentation: no network isolation without elevated permissions |
@@ -216,7 +216,11 @@ The Linux rows come from each tool's documentation, not from runs by ateam. Insi
 
 ### Limits
 
-- fence: macOS only for now. Linux is planned, with `bwrap` and `socat` as requirements checked before a launch. It waits for network rules with ports: on Linux fence reaches the host's localhost one listed port at a time, which a profile cannot say yet.
+- fence on Linux is experimental (checked in a Debian container as root, 2026-11-23; not yet on a desktop as a plain user):
+  - Needs `bwrap` and `socat`. When `bwrap` cannot create a network namespace (a Docker container without `NET_ADMIN`, a CI runner, AppArmor on Ubuntu 24.04), the launch is refused: fence would otherwise go on with the proxy variables as the only network rule.
+  - Localhost is closed, also with domains: fence reaches the host's localhost one listed port at a time there, which a profile cannot say yet.
+  - **A protected path that does not exist yet can be created.** fence closes a path with a mount, which needs the path to exist. Inside a writable folder, a command can create `.ateam/profiles/`, `.ateam/secrets.env` or a missing `.git/hooks`. ateam lists these paths on stderr at every launch (`NOT ENFORCED`) and in `--dry-run`. With `strict = true` on the container, the launch is refused instead.
+  - An excluded folder is seen as an empty one. Inside a writable folder a write into it succeeds and is thrown away at the end; the real folder is untouched.
 - macOS only. On Linux nono refuses a deny inside a grant; the launch is refused until ateam lists the home around the excluded paths.
 - The read-only rules use a nono profile key (`unsafe_macos_seatbelt_rules`) that nono's profile guide does not document.
 - Same kernel as the host: a process sandbox, not a container or a VM.

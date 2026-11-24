@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	goruntime "runtime"
@@ -55,12 +56,26 @@ func runFenceExec(settings, workDir string, argv []string) (int, error) {
 	if container.IsInContainer() {
 		return 0, fmt.Errorf("already inside a sandbox (%s): a sandbox cannot start inside another", container.IsolationSource())
 	}
+	if err := fencePreflight(); err != nil {
+		return 0, err
+	}
 	cfg, err := loadFenceConfig(settings)
 	if err != nil {
 		return 0, err
 	}
 	manager := fence.NewManager(cfg, false, false)
 	defer manager.Cleanup()
+	if goruntime.GOOS == "linux" {
+		// On Linux fence starts parts of itself inside the sandbox: ateam
+		// is that helper too (fence.DispatchInternalHelper in main).
+		self, err := os.Executable()
+		if err != nil {
+			return 0, err
+		}
+		if err := manager.SetLinuxHelperPath(self); err != nil {
+			return 0, fmt.Errorf("fence: %w", err)
+		}
+	}
 	if err := manager.Initialize(); err != nil {
 		return 0, fmt.Errorf("fence: %w", err)
 	}
@@ -82,6 +97,53 @@ func fenceEnv(env []string) []string {
 	})
 }
 
+// fencePreflight fails, before anything is written or started, when this
+// host lacks what the embedded fence needs.
+func fencePreflight() error {
+	if err := fenceRequirements(goruntime.GOOS, exec.LookPath); err != nil {
+		return err
+	}
+	if goruntime.GOOS != "linux" {
+		return nil
+	}
+	// The probe fence itself makes. When it fails fence goes on without a
+	// private network, with the domain rules carried by proxy variables
+	// alone: a weakened rule, which ateam refuses.
+	truePath, err := exec.LookPath("true")
+	if err != nil {
+		return err
+	}
+	if out, err := exec.Command("bwrap", "--unshare-net", "--ro-bind", "/", "/", "--", truePath).CombinedOutput(); err != nil {
+		return fmt.Errorf("fence cannot isolate the network here: bwrap cannot create a network namespace (%s). Usual causes: a Docker container without --cap-add=NET_ADMIN, a CI runner, or AppArmor restricting user namespaces (Ubuntu 24.04 and later)", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// fenceRequirements names the programs fence runs on goos that are not
+// installed.
+func fenceRequirements(goos string, lookPath func(string) (string, error)) error {
+	var need []string
+	hint := ""
+	switch goos {
+	case "darwin":
+		need = []string{"sandbox-exec"}
+	case "linux":
+		need, hint = []string{"bwrap", "socat"}, " (install the packages bubblewrap and socat)"
+	default:
+		return fmt.Errorf("the embedded fence sandbox does not run on %s", goos)
+	}
+	var missing []string
+	for _, name := range need {
+		if _, err := lookPath(name); err != nil {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("the fence sandbox needs %s on %s: not found in PATH: %s%s", strings.Join(need, " and "), goos, strings.Join(missing, ", "), hint)
+	}
+	return nil
+}
+
 func loadFenceConfig(file string) (*fence.Config, error) {
 	cfg, err := fence.LoadConfig(file)
 	if err != nil {
@@ -95,10 +157,15 @@ func loadFenceConfig(file string) (*fence.Config, error) {
 
 // writeFenceConfig renders a policy for the embedded fence, writes it to
 // configFile and has fence itself confirm every rule of the policy on the
-// file it will load. It returns the ateam binary that runs it.
-func writeFenceConfig(policy *sandboxpolicy.Policy, configFile string) (string, error) {
+// file it will load. It returns the ateam binary that runs it. What fence
+// does not enforce on this system is said on stderr at every launch, or
+// refused when the container is strict.
+func writeFenceConfig(policy *sandboxpolicy.Policy, configFile string, strict bool) (string, error) {
 	rendered, err := sandboxpolicy.RenderFence(policy, goruntime.GOOS)
 	if err != nil {
+		return "", err
+	}
+	if err := fencePreflight(); err != nil {
 		return "", err
 	}
 	err = sandboxpolicy.WriteFenceConfig(rendered, configFile, func(tmp string) error {
@@ -111,7 +178,29 @@ func writeFenceConfig(policy *sandboxpolicy.Policy, configFile string) (string, 
 	if err != nil {
 		return "", err
 	}
+	if err := reportFenceGaps(os.Stderr, sandboxpolicy.FenceGaps(policy, goruntime.GOOS), strict); err != nil {
+		_ = os.Remove(configFile)
+		return "", err
+	}
 	return os.Executable()
+}
+
+// reportFenceGaps says which rules fence does not enforce: a warning on w,
+// or an error when strict.
+func reportFenceGaps(w io.Writer, gaps []sandboxpolicy.Rule, strict bool) error {
+	if len(gaps) == 0 {
+		return nil
+	}
+	paths := make([]string, len(gaps))
+	for i, r := range gaps {
+		paths[i] = r.Path
+	}
+	msg := fmt.Sprintf("NOT ENFORCED by fence on Linux: these %d paths do not exist yet and the command can create them:\n  %s", len(paths), strings.Join(paths, "\n  "))
+	if strict {
+		return fmt.Errorf("%s\nthe container is strict: create the paths first, or remove `strict`", msg)
+	}
+	fmt.Fprintf(w, "ateam: %s\n", msg)
+	return nil
 }
 
 // checkFenceConfig asks fence, rule by rule, whether cfg does what the

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ateam/internal/runtime"
+	"github.com/ateam/internal/sandboxpolicy"
 	"github.com/fencesandbox/fence/pkg/fence"
 )
 
@@ -104,5 +106,58 @@ func TestFenceCheckFollowsLinks(t *testing.T) {
 	}
 	if !strings.Contains(string(data), filepath.Join(real, ".credentials.json")) {
 		t.Errorf("the link's target must be denied:\n%s", data)
+	}
+}
+
+func TestFenceRequirements(t *testing.T) {
+	none := func(string) (string, error) { return "", os.ErrNotExist }
+	onlyBwrap := func(name string) (string, error) {
+		if name == "bwrap" {
+			return "/usr/bin/bwrap", nil
+		}
+		return "", os.ErrNotExist
+	}
+	all := func(name string) (string, error) { return "/usr/bin/" + name, nil }
+	if err := fenceRequirements("linux", all); err != nil {
+		t.Errorf("everything installed: %v", err)
+	}
+	err := fenceRequirements("linux", onlyBwrap)
+	if err == nil || !strings.Contains(err.Error(), "not found in PATH: socat") || !strings.Contains(err.Error(), "bubblewrap") {
+		t.Errorf("the error must name what is missing and the packages: %v", err)
+	}
+	if err := fenceRequirements("darwin", none); err == nil || !strings.Contains(err.Error(), "sandbox-exec") {
+		t.Errorf("macOS needs sandbox-exec: %v", err)
+	}
+	if err := fenceRequirements("windows", all); err == nil {
+		t.Error("an unsupported system must be refused")
+	}
+}
+
+// What fence does not enforce is a warning, or an error for a strict
+// container; `strict` is read from the container block.
+func TestReportFenceGaps(t *testing.T) {
+	gaps := []sandboxpolicy.Rule{{Path: "/work/.ateam/profiles"}}
+	var out strings.Builder
+	if err := reportFenceGaps(&out, nil, true); err != nil || out.Len() != 0 {
+		t.Errorf("no gap, nothing to say: %v %q", err, out.String())
+	}
+	if err := reportFenceGaps(&out, gaps, false); err != nil || !strings.Contains(out.String(), "NOT ENFORCED") || !strings.Contains(out.String(), "/work/.ateam/profiles") {
+		t.Errorf("a warning naming the path: %v %q", err, out.String())
+	}
+	if err := reportFenceGaps(&out, gaps, true); err == nil || !strings.Contains(err.Error(), "/work/.ateam/profiles") {
+		t.Errorf("strict must refuse, naming the path: %v", err)
+	}
+
+	file := filepath.Join(t.TempDir(), "strict.hcl")
+	if err := os.WriteFile(file, []byte("container \"fence\" {\n  type   = \"fence\"\n  strict = true\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	launchFixture(t)
+	cfg, err := runtime.LoadWithFiles(nil, []string{file})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Containers["fence"].Strict {
+		t.Error("strict = true must be read from the container block")
 	}
 }

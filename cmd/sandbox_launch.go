@@ -312,7 +312,7 @@ func (p *launchPlan) wrapped(ctx context.Context, mode launchMode, profileFile s
 // none.
 func sandboxPrefix(ctx context.Context, policy *sandboxpolicy.Policy, cc *runtime.ContainerConfig, profileFile string, silent bool) ([]string, error) {
 	if cc.Type == runtime.ContainerTypeFence {
-		ateam, err := writeFenceConfig(policy, profileFile)
+		ateam, err := writeFenceConfig(policy, profileFile, cc.Strict)
 		if err != nil {
 			return nil, err
 		}
@@ -337,16 +337,21 @@ func (p *launchPlan) describe(w io.Writer) {
 	printRules(w, "writable  ", p.policy.Write)
 	printRules(w, "readable  ", p.policy.Read)
 	printRules(w, "excluded  ", p.policy.Exclude)
-	if len(p.policy.Domains) == 0 {
+	fence := p.container.Type == runtime.ContainerTypeFence
+	switch {
+	case len(p.policy.Domains) == 0:
 		fmt.Fprintln(w, "network    closed")
-	} else {
+	case fence && goruntime.GOOS == "linux":
+		fmt.Fprintf(w, "network    %s\n", strings.Join(p.policy.Domains, ", "))
+	default:
 		fmt.Fprintf(w, "network    %s, localhost\n", strings.Join(p.policy.Domains, ", "))
 	}
 	printRules(w, "read-only ", p.policy.ReadOnly)
-	if p.container.Type == runtime.ContainerTypeFence {
-		for _, note := range sandboxpolicy.FenceNotes {
+	if fence {
+		for _, note := range sandboxpolicy.FenceNotes(goruntime.GOOS) {
 			fmt.Fprintf(w, "note       %s\n", note)
 		}
+		printRules(w, "NOT ENFORCED (does not exist yet, can be created)", sandboxpolicy.FenceGaps(p.policy, goruntime.GOOS))
 	}
 }
 

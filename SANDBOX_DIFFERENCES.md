@@ -8,7 +8,7 @@ How sure each cell is:
 
 | Mark | Meaning |
 |---|---|
-| **run** | Seen in a real run (`make test-sandbox` on macOS, or a hand test on Linux) |
+| **run** | Seen in a real run (`make test-sandbox` on macOS; on Linux a hand test for nono, and for fence the same probes in a Debian container, as root) |
 | src | Read in the tool's source |
 | doc | From the tool's documentation, not run |
 | ? | Not checked |
@@ -35,11 +35,13 @@ The examples use the home as the readable area, as ateam profiles do.
 
 | Rule | Example | nono macOS | fence macOS | nono Linux | fence Linux |
 |---|---|---|---|---|---|
-| Deny inside a grant | the home, except `~/.ssh` | Yes, **run** | Yes, **run** | No, **run**: refuses to start | Yes, src |
+| Deny inside a grant | the home, except `~/.ssh` | Yes, **run** | Yes, **run** | No, **run**: refuses to start | Yes, **run**: the folder is seen empty |
 | Allow inside a deny (carve-out) | `~/.ssh/config` with `~/.ssh` closed | Yes, **run** | No, **run**: denies are written last and win | Only by granting entry by entry, doc | No, src: its mount planner forbids it |
-| The home as one grant | `read ~` | Yes, **run** (with `allow_parent_of_protected`) | Yes, **run** | No, **run**: it holds nono's own state | Yes, src |
-| Read-only inside a writable folder | `.git/hooks` in the working folder | Yes, **run**: raw Seatbelt rules added by ateam | Yes, **run**: `denyWrite` | No: Landlock has no deny | Yes, src: read-only mount |
-| Rename of a folder above a protected path refused | `mv .git .git2` | Yes, **run**: ateam pins each folder | Yes, **run**: fence does it itself | ? | ? |
+| The home as one grant | `read ~` | Yes, **run** (with `allow_parent_of_protected`) | Yes, **run** | No, **run**: it holds nono's own state | Yes, **run** |
+| Read-only inside a writable folder | `.git/hooks` in the working folder | Yes, **run**: raw Seatbelt rules added by ateam | Yes, **run**: `denyWrite` | No: Landlock has no deny | Yes, **run**: read-only mount |
+| Rename of a folder above a protected path refused | `mv .git .git2` | Yes, **run**: ateam pins each folder | Yes, **run**: fence does it itself | ? | Yes, **run**: only because ateam binds each such folder onto itself; not without |
+| A protected path that does not exist yet cannot be created | `.ateam/profiles/` missing, in the working folder | Yes, **run** | Yes, **run** | ? | **No, run**: a mount needs the path to exist |
+| A write into an excluded folder inside a writable one | `echo x > private/token` | Refused, **run** | Refused, **run** | not applicable | Succeeds and is thrown away; the real file is untouched, **run** |
 | An excluded path that is a link | `~/.ssh` kept in a synced folder | Link and target closed, **run** | Target closed; the link's name and target stay visible, **run** | ? | ? |
 | Reads the tool blocks on its own | credentials, keychains, shell configs | Yes; ateam lifts each one the profile does not exclude | None | Yes, 5 required groups, **run** | None, src |
 | Writes the tool refuses on its own | `.vscode/`, `.mcp.json`, shell startup files | None left | Yes, a fixed list no setting lifts | None left | Yes, src |
@@ -49,7 +51,7 @@ Consequences for ateam:
 
 - macOS: both backends enforce every rule of a profile. fence refuses a carve-out; a change in fence's rule order would lift that.
 - Linux, nono: needs the home listed entry by entry around every exclude and around nono's state. The list is taken at launch: an entry created later is not readable. No read-only path inside the working folder.
-- Linux, fence: expresses excludes and read-only paths. Not enabled in ateam yet, and nothing was run there.
+- Linux, fence: expresses excludes and read-only paths. Enabled as experimental. One rule is not enforced and is said at every launch: a protected path that does not exist yet can be created. Closing it needs a writable mount inside a read-only one (the project's `.ateam` read-only, its open entries writable), which fence's mount planner does not allow.
 
 ## Network rules
 
@@ -57,17 +59,17 @@ All three filter hosts with a proxy outside the sandbox and refuse direct connec
 
 | Rule | Example | nono macOS | nono Linux | fence macOS | fence Linux | Claude macOS | Claude Linux |
 |---|---|---|---|---|---|---|---|
-| Close everything | no host listed | Yes, **run** (`network.block`; open when left out) | Yes, doc | Yes, **run** | Yes, src | Yes, doc | Yes, doc |
-| Allow a host | `github.com` | Yes, **run** | Yes, doc | Yes, **run** | Yes, src | Yes, doc | Yes, doc |
+| Close everything | no host listed | Yes, **run** (`network.block`; open when left out) | Yes, doc | Yes, **run** | Yes, **run** (another host is refused) | Yes, doc | Yes, doc |
+| Allow a host | `github.com` | Yes, **run** | Yes, doc | Yes, **run** | Yes, **run** | Yes, doc | Yes, doc |
 | Wildcard host | `*.github.com` | Yes, doc | Yes, doc | Yes, src | Yes, src | Yes, doc | Yes, doc |
 | Deny one host inside a wildcard | `*.example.com` but not `internal.example.com` | ? | ? | Yes, src (`deniedDomains`) | Yes, src | ? | ? |
 | Host with a port | `example.com:8443` | ? | ? | ? | ? | Yes, doc | Yes, doc |
 | Method and path on a host | `GET api.github.com/repos/*` | Yes, doc (`--allow-endpoint`) | Yes, doc | No | No | No | No |
-| All of the host's localhost | `localhost` | Yes, doc (`open_port` 0) | No, doc | Yes, src (`allowLocalOutbound`) | No, src | Yes, doc (`allowLocalBinding`) | No, doc |
+| All of the host's localhost | `localhost` | Yes, doc (`open_port` 0) | No, doc | Yes, src (`allowLocalOutbound`) | No, src: ateam keeps localhost closed there | Yes, doc (`allowLocalBinding`) | No, doc |
 | One port of the host's localhost | `localhost:5432` | Yes, doc (`open_port`) | Yes, doc | No: all or nothing | Yes, src (`allowLocalOutboundPorts`) | No: all or nothing, doc | No, doc: the sandbox's localhost is not the host's |
 | A port the sandbox listens on, reached from the host | a dev server on `:3000` | Yes, doc | Yes, doc | Yes, src | Yes, src (a bridge per port) | Yes, doc (`allowLocalBinding`) | Not documented |
 | Unix socket by path | `/var/run/docker.sock` | Yes, doc | Yes, doc (`af_unix_mediation`) | Yes, src | Yes, src | Yes, doc (`allowUnixSockets`) | No, doc: all or none |
-| Network rules hold when a private network cannot be created | Docker without `NET_ADMIN`, CI | not applicable | ? | not applicable | No, doc: fence continues with the proxy variables only | not applicable | ? |
+| Network rules hold when a private network cannot be created | Docker without `NET_ADMIN`, CI | not applicable | ? | not applicable | No, doc: fence continues with the proxy variables only. ateam makes fence's own probe first and refuses, **run** | not applicable | ? |
 
 Notes:
 

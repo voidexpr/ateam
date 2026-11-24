@@ -168,19 +168,39 @@ Not checked:
   - `open_port` 0 (all of localhost) is macOS only in nono; Linux takes explicit ports. So localhost by port (step 5) is needed for nono on Linux too, not only for fence.
 - Not covered by the script: an interactive shell, an agent turn, `ateam exec` inside the sandbox, a `dev/` toolchain build.
 
+## fence on Linux
+
+Built 2026-11-23, experimental. Decided by the owner the same day: `bwrap` and `socat` are acceptable requirements, and localhost stays closed until the `network` entity has ports.
+
+What is built:
+
+- `RenderFence` accepts Linux: the same denies; localhost closed (said in the notes); each folder above a read-only path listed as writable, which fence binds onto itself so it cannot be renamed (`Policy.PinnedDirs`, shared with the nono renderer).
+- `fencePreflight`, before anything is written or started and again in `fence-exec`: `bwrap` and `socat` in `PATH`, then fence's own probe `bwrap --unshare-net --ro-bind / / -- true`. A failure is an error with the usual causes. Without it fence would run with the proxy variables as the only network rule.
+- `fence.DispatchInternalHelper(os.Args)` first in `main`, and `SetLinuxHelperPath(os.Executable())` in `fence-exec`: ateam is fence's helper inside the sandbox.
+- `FenceGaps`: what is not enforced, printed on stderr at every launch and in `--dry-run`. `strict = true` on the container makes it an error (owner, 2026-11-23: a warning by default, strict as an option).
+- The probes now also check the real files after the run (`verify` in `run-probes.sh`): on Linux a write into an excluded folder inside the working folder succeeds in a throwaway folder, so the result inside the sandbox says nothing.
+
+How it was checked: the agent's sandbox reaches Docker. The Linux binary and the probe scripts were copied into a `debian:bookworm-slim` container (bubblewrap 0.8.0, socat 1.7.4.4) started with `NET_ADMIN`, `SYS_ADMIN` and seccomp and AppArmor unconfined, the Docker marker removed so that ateam starts its own sandbox.
+
+- As a plain user: the preflight refuses ("bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted"). The early failure works.
+- As root: `base` 24 of 25 inside, 7 of 8 after the run. Files, ateam's files, git with a commit, both hosts, and the rename of `.git` (refused only since the pin; allowed before it).
+- The one failure, inside and after: `.ateam/profiles/probe.hcl` was created. This is the gap below.
+
+Not checked: Linux as a plain user on a desktop (meerdog), where the network namespace should be available; an interactive shell (the fence command relays a terminal on Linux, the library does not); an agent turn.
+
+The gap, to decide:
+
+- fence closes a path with a mount, and a mount needs the path to exist. A protected path that does not exist yet inside a writable folder can be created: ateam's names in the project's `.ateam` (`profiles/`, `secrets.env`, `Dockerfile`, ...), a missing `.git/hooks`, a user's exclude of a path that is not there.
+- Why it matters: `.ateam/profiles/*.hcl` is loaded by every later ateam launch in the project, outside the sandbox. A supervisor that starts sub-runs would load a planted profile.
+- Options: (a) fence with a writable mount allowed inside a read-only one, so the project's `.ateam` is read-only and its open entries writable: a change in fence's Linux mount planner; (b) ateam creates the harmless missing entries before the launch (`profiles/`, `logs/` as empty folders), which leaves the files (`secrets.env`, `Dockerfile`); (c) a check after the run, as for git: what appeared at a protected path is reported and moved away. Only (a) prevents; (c) leaves the time of the run open.
+
 ## Next steps
 
 In order:
 
 1. **fence: the owner's real runs** (the probes under "fence, embedded"), then the open points there.
 2. **Owner: use it.** `ateam chat` and `ateam shell` for real work; `ateam code` with a nono code profile. Each refusal that is not obvious is a missing path or host in a built-in filter or profile.
-3. **Linux.** With fence first; `bwrap` and `socat` as requirements are accepted (owner, 2026-11-23). Before the renderer accepts Linux:
-   - Fail early, before anything is written or started: `bwrap` and `socat` in `PATH`, and a probe that `bwrap` can create its namespaces (user and network). The error names what is missing and how to install it (`bubblewrap`, `socat`).
-   - fence falls back to running **without a network namespace** when it cannot create one (Docker without `NET_ADMIN`, CI runners, Ubuntu 24.04 AppArmor): only the proxy variables then carry the domain rules. ateam must refuse that case, not accept it: a weakened rule.
-   - Localhost by port, from the `network` entity (step 5).
-   - `fence.DispatchInternalHelper(os.Args)` first in `main`, and `SetLinuxHelperPath(os.Executable())` in `fence-exec`.
-   - Check on meerdog: the rename of a folder above a read-only path; the probes of the macOS list.
-   - For nono on Linux, later: port the home listing walk from targy (`filters/listing.py`), and decide how read-only paths work without Seatbelt (open question 3).
+3. **Linux.** With fence: built, experimental, see "fence on Linux". Left: the run on meerdog as a plain user (`make test-sandbox-fence`), the decision on paths that do not exist yet, localhost by port (step 5). nono on Linux: not planned for now; it would need the home listed entry by entry and has no read-only path inside a writable folder.
 4. **Retire `nono-sandbox`.** Remove it from `~/dotfiles/bin`; in targy remove the `nono_profile` step and the `launch` target, keep `claude_permissions`, `json_merge`, `claude-settings`. After a period of daily use of the ateam commands.
 5. **Phase 2: the `network` entity**, replacing `domains`: default deny, named sets, `host:port`, mapped to each backend or an error. Then `_remove` / `_replace` and trust on first use for project-supplied profiles.
    - Localhost with ports (needed for fence on Linux). Today a profile with a domain means "localhost open, any port". The entity must be able to say: `localhost` (all ports), `localhost:PORT` (connect to a server on the host), and a port the sandboxed command listens on that the host must reach.

@@ -892,10 +892,13 @@ profile "sandbox/nono" {
 }
 
 // fence (https://github.com/fencesandbox/fence): the same kind of sandbox,
-// built into ateam as a library: no other program to install. macOS only
-// for now. The same profiles apply. A read or write inside a folder that
-// stays excluded cannot be expressed and is refused; fence keeps a few
-// write refusals of its own (see ISOLATION.md).
+// built into ateam as a library. macOS: no other program to install.
+// Linux (experimental): needs bwrap and socat, localhost stays closed, and
+// a protected path that does not exist yet can be created. The same
+// profiles apply. A read or write inside a folder that stays excluded
+// cannot be expressed and is refused; fence keeps a few write refusals of
+// its own (see ISOLATION.md).
+// strict = true: what fence does not enforce is an error, not a warning.
 container "fence" {
   type = "fence"
 }
