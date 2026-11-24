@@ -336,6 +336,21 @@ func TestNetworkRulesPerBackend(t *testing.T) {
 			t.Errorf("network entry %q must be refused", entry)
 		}
 	}
+	// 127.0.0.1 and ::1 are localhost; other addresses are refused.
+	p = build([]string{"127.0.0.1:5432", "[::1]:3000", "example.com"})
+	if !slices.Equal(p.HostPorts, []int{3000, 5432}) || !slices.Equal(p.Domains, []string{"example.com"}) {
+		t.Errorf("loopback addresses are localhost: %+v", p)
+	}
+	if p = build([]string{"127.0.0.1"}); !p.HostLocalhost || len(p.Domains) != 0 {
+		t.Errorf("127.0.0.1 is all of localhost, not a host name: %+v", p)
+	}
+	for _, entry := range []string{"0.0.0.0:3000", "0.0.0.0", "10.0.0.5", "10.0.0.5:443", "::"} {
+		in := testInput(t)
+		in.Domains = []string{entry}
+		if _, err := Build(in); err == nil {
+			t.Errorf("network entry %q must be refused", entry)
+		}
+	}
 	in := testInput(t)
 	in.Deny = []string{"localhost"}
 	if _, err := Build(in); err == nil {

@@ -723,7 +723,8 @@ profile "web" {
 - A `domains` entry is a host (`github.com`, `*.github.com`), `localhost` (this machine's localhost, every port) or `localhost:PORT`.
 - Everything not listed is refused. A profile without `domains` has no network at all, localhost included.
 - The rules are tool-agnostic: each sandbox backend maps them to its own, and a rule it cannot express is an error that names it.
-- A port on a host (`example.com:8443`) is not supported yet.
+- `127.0.0.1` and `::1` mean `localhost`. Any other IP address, and a port on a host (`example.com:8443`), are not supported yet and are refused.
+- A port the sandboxed command listens on for others to reach (`0.0.0.0:3000`) is not supported yet. On macOS a server the command starts on localhost is reachable from this machine whenever localhost is open; on Linux under fence it is not, the sandbox has a localhost of its own.
 
 Localhost differs per system, so a rule may be refused on one of them:
 

@@ -7,6 +7,7 @@ package sandboxpolicy
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -259,7 +260,23 @@ func Build(in Input) (*Policy, error) {
 // its ports. A form no backend takes is refused here, by name.
 func (p *Policy) addNetwork(allow, deny []string) error {
 	for _, entry := range allow {
-		host, port, hasPort := strings.Cut(entry, ":")
+		host, port, hasPort := entry, "", false
+		if h, p, err := net.SplitHostPort(entry); err == nil {
+			host, port, hasPort = h, p, true
+		}
+		// 127.0.0.1 and ::1 are localhost. Any other address is refused:
+		// a backend's proxy filters names, and what it does with an
+		// address was not checked.
+		if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+			switch {
+			case ip.IsLoopback():
+				host = "localhost"
+			case ip.IsUnspecified():
+				return fmt.Errorf("network entry %q: this is an address a server listens on, not one to reach; a port the command listens on is not supported yet", entry)
+			default:
+				return fmt.Errorf("network entry %q: an IP address is not supported yet; write a host name, or localhost", entry)
+			}
+		}
 		switch {
 		case entry == "" || strings.ContainsAny(entry, "/ "):
 			return fmt.Errorf("network entry %q: want a host, localhost or localhost:PORT", entry)
@@ -275,8 +292,10 @@ func (p *Policy) addNetwork(allow, deny []string) error {
 			}
 		case hasPort:
 			return fmt.Errorf("network entry %q: a port on a host is not supported yet; only localhost:PORT", entry)
-		case !slices.Contains(p.Domains, entry):
-			p.Domains = append(p.Domains, entry)
+		case strings.Contains(host, ":"):
+			return fmt.Errorf("network entry %q: want a host, localhost or localhost:PORT", entry)
+		case !slices.Contains(p.Domains, host):
+			p.Domains = append(p.Domains, host)
 		}
 	}
 	for _, entry := range deny {
