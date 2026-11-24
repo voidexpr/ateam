@@ -54,7 +54,7 @@ Not checked:
 
 Decided by the owner, 2026-11-23: a second sandbox backend, [fence](https://github.com/fencesandbox/fence), used **as a Go library** so that ateam carries its own sandbox and needs no external binary. Two purposes: an embedded sandbox, and a stress test of the policy model, which only nono consumed.
 
-State, 2026-11-22: built on macOS, not committed, **not yet run for real** (the agent's own sandbox refuses `sandbox_apply`). The owner runs the probes below.
+State, 2026-11-23: built on macOS, committed (`2e01bc7`). The file, git and host probes pass in a real run by the owner (see "Sandbox probes"). Not yet run: an interactive shell, an agent turn, a toolchain build.
 
 ### What was found
 
@@ -151,6 +151,16 @@ Not checked:
 - Suite `carve`: a `--read` and a `--write` inside an excluded folder; read-only inside the working folder. Under fence the launch is refused, which the script reports as known.
 - Checked from the agent's sandbox: `SANDBOX_PROBE_DRY_RUN=1 make test-sandbox` plans every launch; the probe run with no sandbox reports each missing refusal as FAIL. Not checked: a real run. On Linux both backends are refused before the launch for now, so the targets report "NOT STARTED" there.
 - The dry run found one bug, fixed: the check before a fence launch compared an excluded link (`~/.claude` kept in a synced folder) by its own spelling and refused the launch.
+- Real run on macOS, owner, 2026-11-23 (nono 0.82.0, `2e01bc7`): nono `base` 27 of 27 and `carve` 8 of 8; fence `base` 26 of 27, `carve` refused at launch as expected. The one fence failure was the probe: `~/.ssh` is a link there, and `ls` of a link whose target is closed prints the link's name and succeeds. The check now lists the content (`ls ~/.ssh/`); rerun the same day: fence `base` 27 of 27.
+- What that failure does show: fence resolves a denied link to its target and leaves the link itself visible (its name and where it points); nono closes both. A fork can deny both spellings.
+- Linux, owner on meerdog, 2026-11-23 (nono 0.82.0, kernel 7.1):
+  - nono still refuses to start with a deny inside a grant ("Landlock deny-overlap is not enforceable on Linux"). `nono profile validate` accepts the same profile: validation does not catch it.
+  - nono's guide points to "supervised mode" (`"security": {"capability_elevation": true}`), which checks file opens against the deny list through seccomp-notify. To test before porting the home listing from targy: whether it starts with a deny inside a grant, and whether it asks a question at run time, which an unattended run cannot answer.
+  - `allow_parent_of_protected` is ignored on Linux: a grant of a folder that holds nono's own state (`~/.nono`, `~/.local/state/nono`) is always rejected. So the home cannot be one grant there, whatever the deny rules: either supervised mode lifts this too, or the home is listed entry by entry.
+  - Required deny groups on Linux: `deny_browser_data_linux`, `deny_credentials`, `deny_keychains_linux`, `deny_shell_configs`, `deny_shell_history`.
+  - Tested the same day with `capability_elevation` on: both refusals stay. A deny inside a grant: "Landlock deny-overlap is not enforceable on Linux". The home as one grant: "overlaps protected nono state root ~/.local/state/nono". The guide's advice does not hold for 0.82.0 as run here (`nono run --silent --profile`); no other flag was tried.
+  - Conclusion: nono on Linux can only take grants that contain nothing denied. That means the home listed entry by entry around every exclude and around nono's own state (the targy port), and no read-only path inside a writable folder (`.git/hooks` in the working folder), since Landlock has no deny. fence on Linux hides a denied folder with a mount and makes a path read-only with a mount, so it can express both: fence is the better first backend for Linux.
+  - `open_port` 0 (all of localhost) is macOS only in nono; Linux takes explicit ports. So localhost by port (step 5) is needed for nono on Linux too, not only for fence.
 - Not covered by the script: an interactive shell, an agent turn, `ateam exec` inside the sandbox, a `dev/` toolchain build.
 
 ## Next steps

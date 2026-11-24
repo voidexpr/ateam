@@ -73,10 +73,12 @@ base() {
     refused "create a profile in the project's .ateam" 'mkdir -p .ateam/profiles && echo x > .ateam/profiles/probe.hcl'
     allowed "write in the project's .ateam/shared" 'mkdir -p .ateam/shared && echo x > .ateam/shared/probe.txt'
 
+    # The trailing slash asks for the content: when ~/.ssh is a link whose
+    # target is closed, plain `ls ~/.ssh` prints the link's name and succeeds.
     if [ "${PROBE_SSH:-0}" = 1 ]; then
-        refused "list ~/.ssh" 'ls "$HOME/.ssh"'
+        refused "list the content of ~/.ssh" 'ls "$HOME/.ssh/"'
     else
-        echo "SKIP list ~/.ssh: it does not exist"
+        echo "SKIP list the content of ~/.ssh: it does not exist"
     fi
 
     # git: usable, with its config and hooks read-only

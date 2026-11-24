@@ -172,7 +172,7 @@ ateam shell --profile sandbox/fence
 ateam exec "review the diff" --profile sandbox/fence     # inside a project
 ```
 
-Experimental: the rules are checked by tests on the configuration and on the Seatbelt profile fence generates from it, not yet by real launches.
+Experimental. Checked on macOS by real launches of the file, git and host probes (`make test-sandbox-fence`), not yet by daily use, an interactive session or an agent run.
 
 How it runs:
 
@@ -194,6 +194,7 @@ Differences from nono:
 | Writable besides the profile | nono's defaults | `/tmp/fence`, the per-user temporary folder, `~/.npm/_logs` |
 | Readable besides the home | nono's defaults | The system folders, `/tmp`, `/opt` |
 | Read-only paths | Raw Seatbelt rules added by ateam | fence's own write-deny rule, which also refuses the rename of the folders above |
+| An excluded path that is a link (`~/.ssh` kept in a synced folder) | The link and its target are closed | The target is closed; the link itself can be seen (its name and where it points) |
 | `profile export` | `profile.json`, run by `nono` | `fence.json`, run by the `fence` command (`run.sh`) or by `ateam fence-exec` |
 
 `ateam profile export NAME --backend fence` (or `nono`) writes a profile for the other backend than its own.
