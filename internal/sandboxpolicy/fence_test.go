@@ -97,8 +97,8 @@ func TestRenderFenceLinux(t *testing.T) {
 	if !slices.Contains(linux.Filesystem.AllowWrite, git) || slices.Contains(mac.Filesystem.AllowWrite, git) {
 		t.Errorf(".git is pinned by a mount on Linux only: linux %v, mac %v", linux.Filesystem.AllowWrite, mac.Filesystem.AllowWrite)
 	}
-	if !slices.ContainsFunc(FenceNotes("linux"), func(n string) bool { return strings.Contains(n, "localhost is closed") }) {
-		t.Errorf("the notes must say localhost is closed: %v", FenceNotes("linux"))
+	if !slices.ContainsFunc(FenceNotes("linux"), func(n string) bool { return strings.Contains(n, "localhost of its own") }) {
+		t.Errorf("the notes must say the host's localhost is closed: %v", FenceNotes("linux"))
 	}
 }
 
@@ -249,5 +249,96 @@ func TestWriteFenceConfig(t *testing.T) {
 	}
 	if got := FencePrefix("/bin/ateam", dest, in.WorkDir); !slices.Equal(got, []string{"/bin/ateam", "fence-exec", "--settings", dest, "--workdir", in.WorkDir, "--"}) {
 		t.Errorf("prefix = %v", got)
+	}
+}
+
+// Localhost has three forms and no backend takes all of them on both
+// systems: each renders what it has and refuses the rest by name.
+func TestNetworkRulesPerBackend(t *testing.T) {
+	build := func(domains []string, deny ...string) *Policy {
+		t.Helper()
+		in := testInput(t)
+		in.Domains, in.Deny = domains, deny
+		p, err := Build(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	refused := func(what string, err error, want string) {
+		t.Helper()
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s must be refused, naming %q: %v", what, want, err)
+		}
+	}
+
+	// localhost:PORT, with a host
+	p := build([]string{"example.com", "localhost:5432", "localhost:3000"})
+	if !slices.Equal(p.HostPorts, []int{3000, 5432}) || p.HostLocalhost || !slices.Equal(p.Domains, []string{"example.com"}) {
+		t.Fatalf("policy = %+v", p)
+	}
+	linux, err := RenderFence(p, "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if net := linux.Network; !net.AllowLocalOutbound || !slices.Equal(net.AllowLocalOutboundPorts, []int{3000, 5432}) || net.AllowLocalBinding {
+		t.Errorf("Linux bridges each listed port: %+v", net)
+	}
+	mac, err := RenderFence(p, "darwin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if net := mac.Network; !net.AllowLocalOutbound || len(net.AllowLocalOutboundPorts) != 0 {
+		t.Errorf("macOS with a host has all of localhost already: %+v", net)
+	}
+	nono, err := RenderNono(p, NonoInfo{}, "darwin")
+	if err != nil || !slices.Equal(nono.Network.OpenPort, []int{0}) {
+		t.Errorf("nono with a host opens all of localhost: %+v, %v", nono, err)
+	}
+
+	// localhost:PORT alone
+	p = build([]string{"localhost:5432"})
+	if p.NetworkClosed() {
+		t.Error("a port of localhost is not a closed network")
+	}
+	if linux, err = RenderFence(p, "linux"); err != nil || !slices.Equal(linux.Network.AllowLocalOutboundPorts, []int{5432}) {
+		t.Errorf("Linux: %+v, %v", linux, err)
+	}
+	_, err = RenderFence(p, "darwin")
+	refused("a single port under fence on macOS", err, "localhost:5432")
+	_, err = RenderNono(p, NonoInfo{}, "darwin")
+	refused("localhost alone under nono", err, "localhost alone")
+
+	// all of the host's localhost
+	p = build([]string{"localhost"})
+	if !p.HostLocalhost {
+		t.Fatalf("policy = %+v", p)
+	}
+	if mac, err = RenderFence(p, "darwin"); err != nil || !mac.Network.AllowLocalOutbound || !mac.Network.AllowLocalBinding {
+		t.Errorf("macOS opens all of localhost: %+v, %v", mac, err)
+	}
+	_, err = RenderFence(p, "linux")
+	refused("all of localhost under fence on Linux", err, "localhost:PORT")
+
+	// a denied host
+	p = build([]string{"*.example.com"}, "internal.example.com")
+	if mac, err = RenderFence(p, "darwin"); err != nil || !slices.Equal(mac.Network.DeniedDomains, []string{"internal.example.com"}) {
+		t.Errorf("fence denies the host: %+v, %v", mac, err)
+	}
+	_, err = RenderNono(p, NonoInfo{}, "darwin")
+	refused("a denied host under nono", err, "internal.example.com")
+
+	// forms no backend takes
+	for _, entry := range []string{"example.com:8443", "localhost:0", "localhost:x", "http://example.com", ""} {
+		in := testInput(t)
+		in.Domains = []string{entry}
+		if _, err := Build(in); err == nil {
+			t.Errorf("network entry %q must be refused", entry)
+		}
+	}
+	in := testInput(t)
+	in.Deny = []string{"localhost"}
+	if _, err := Build(in); err == nil {
+		t.Error("a deny of localhost must be refused")
 	}
 }

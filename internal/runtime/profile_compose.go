@@ -107,6 +107,7 @@ func mergeComposed(dst, src *ProfileConfig, origin func(key string) string) {
 	set("write", &dst.Write, src.Write)
 	set("exclude", &dst.Exclude, src.Exclude)
 	set("domains", &dst.Domains, src.Domains)
+	set("network", &dst.Network, src.Network)
 	// Arguments may repeat on purpose, so they are not deduplicated.
 	dst.AgentExtraArgs = append(dst.AgentExtraArgs, src.AgentExtraArgs...)
 	dst.ContainerExtraArgs = append(dst.ContainerExtraArgs, src.ContainerExtraArgs...)

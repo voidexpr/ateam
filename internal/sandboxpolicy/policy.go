@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -36,7 +37,17 @@ type Policy struct {
 	// excluded path there, and the files of the working folder's
 	// repository that git runs or reads outside the sandbox later.
 	ReadOnly []Rule
-	Domains  []string
+	// Domains lists the hosts reachable; none closes the network. With at
+	// least one host the command can also use localhost for itself: on
+	// macOS that is the host's localhost, every port (a sandbox there
+	// cannot tell its own from the host's); on Linux a private one.
+	Domains []string
+	// DeniedDomains are refused even when a Domains entry covers them.
+	DeniedDomains []string
+	// HostLocalhost opens the host's localhost, every port; HostPorts
+	// opens single ports of it.
+	HostLocalhost bool
+	HostPorts     []int
 	// Gaps lists what the policy means to protect and no backend rule
 	// below does; a renderer adds its own. Shown at launch and in exports.
 	Gaps []string
@@ -50,7 +61,11 @@ type Input struct {
 	Read    []string
 	Write   []string
 	Exclude []string
+	// Domains and Deny are network entries: a host ("github.com",
+	// "*.github.com"), and for Domains also "localhost" or
+	// "localhost:PORT".
 	Domains []string
+	Deny    []string
 	// Origin names the profile an entry of a list attribute came from.
 	Origin func(attr, entry string) string
 	// Filters resolves the entries that are filter names.
@@ -89,7 +104,10 @@ func Build(in Input) (*Policy, error) {
 	if workDir == home || workDir == "/" {
 		return nil, fmt.Errorf("refusing to run in %s: everything below it would be writable", workDir)
 	}
-	p := &Policy{Name: in.Name, Home: home, WorkDir: workDir, Domains: slices.Clone(in.Domains)}
+	p := &Policy{Name: in.Name, Home: home, WorkDir: workDir}
+	if err := p.addNetwork(in.Domains, in.Deny); err != nil {
+		return nil, err
+	}
 	origin := in.Origin
 	if origin == nil {
 		origin = func(string, string) string { return "" }
@@ -235,6 +253,54 @@ func Build(in Input) (*Policy, error) {
 		}
 	}
 	return p, nil
+}
+
+// addNetwork sorts network entries into hosts, the host's localhost and
+// its ports. A form no backend takes is refused here, by name.
+func (p *Policy) addNetwork(allow, deny []string) error {
+	for _, entry := range allow {
+		host, port, hasPort := strings.Cut(entry, ":")
+		switch {
+		case entry == "" || strings.ContainsAny(entry, "/ "):
+			return fmt.Errorf("network entry %q: want a host, localhost or localhost:PORT", entry)
+		case host == "localhost" && !hasPort:
+			p.HostLocalhost = true
+		case host == "localhost":
+			n, err := strconv.Atoi(port)
+			if err != nil || n < 1 || n > 65535 {
+				return fmt.Errorf("network entry %q: the port must be a number from 1 to 65535", entry)
+			}
+			if !slices.Contains(p.HostPorts, n) {
+				p.HostPorts = append(p.HostPorts, n)
+			}
+		case hasPort:
+			return fmt.Errorf("network entry %q: a port on a host is not supported yet; only localhost:PORT", entry)
+		case !slices.Contains(p.Domains, entry):
+			p.Domains = append(p.Domains, entry)
+		}
+	}
+	for _, entry := range deny {
+		if entry == "" || strings.ContainsAny(entry, ":/ ") || entry == "localhost" {
+			return fmt.Errorf("network deny entry %q: want a host", entry)
+		}
+		if !slices.Contains(p.DeniedDomains, entry) {
+			p.DeniedDomains = append(p.DeniedDomains, entry)
+		}
+	}
+	slices.Sort(p.HostPorts)
+	return nil
+}
+
+// LocalhostOpen reports whether a backend without a private network
+// (macOS) must open all of localhost: asked for, or needed by a command
+// that reaches hosts and talks to what it starts.
+func (p *Policy) LocalhostOpen() bool {
+	return p.HostLocalhost || len(p.Domains) > 0
+}
+
+// NetworkClosed reports whether the policy allows no network at all.
+func (p *Policy) NetworkClosed() bool {
+	return len(p.Domains) == 0 && !p.HostLocalhost && len(p.HostPorts) == 0
 }
 
 // WritableRoot returns the writable folder holding path (the working

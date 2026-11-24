@@ -215,6 +215,7 @@ network "webapp-dev" {
 ```
 
 - Tool-agnostic. Each backend maps the rules to its own semantics, or returns an error. No confusion between fail open and fail closed.
+- As built (2026-11-23): `use`, `allow`, `deny`; `default` only `"deny"`. A profile that names no network and no domain has no network at all, localhost included (owner's choice, instead of the next line).
 - Default when a profile names no network: deny, with LLM provider hosts and localhost allowed.
 - The LLM hosts are their own named set. A profile that routes through a proxy leaves it out, so direct connections are closed.
 - Ports: `host:port`. A dynamically allocated port is edited into the profile by hand in the first version. A proper mechanism (`exposes`) comes later.
@@ -335,7 +336,7 @@ ateam profile export myproject --out DIR
 |---|---|---|
 | 0 | A wrapper container type around `nono-sandbox` | Dropped |
 | 1 | Composable profiles; `filter` entity; nono backend; `chat`, `run`, `shell`, `profile save/show/list/export`; protection of ateam's files; unattended runs under nono; ateam inside the sandbox | Built on macOS. Left: Linux, built-in profiles as filter files, retiring `nono-sandbox` |
-| 2 | `network` entity mapped to nono's proxy, with ports. `_remove` and `_replace`. Trust on first use for project-supplied profiles | Not started. `domains` stands in for the network entity |
+| 2 | `network` entity mapped to nono's proxy, with ports. `_remove` and `_replace`. Trust on first use for project-supplied profiles | `network` blocks built 2026-11-23 for hosts, denied hosts, `localhost` and `localhost:PORT`, mapped to nono and fence or refused; `domains` stays as the short form. The rest not started: see the steps file |
 | 3 | Secrets: `ateam secret` values as placeholders, injected outside the sandbox (research G.4, F.1.1 Tier A first) | Not started |
 | 4 | `exposes` and `resources`: ports, Playwright, build containers, remote computers. Other backends for comparison: Enclave, OpenShell, Strands Box | Not started |
 | — | fence as an embedded backend (Go library, no external binary on macOS): a second consumer of the policy model | Built on macOS, not yet run for real. Not a path to Linux as it stands: there fence needs `bwrap` and `socat`, and opens localhost one port at a time. See the steps file |

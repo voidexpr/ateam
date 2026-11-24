@@ -118,10 +118,18 @@ func RenderNono(p *Policy, info NonoInfo, goos string) (*NonoProfile, error) {
 		AllowParentOfProtected: true,
 	}
 	prof.UnsafeSeatbelt = readOnlyRules(p)
-	if len(p.Domains) == 0 {
+	switch {
+	case len(p.DeniedDomains) > 0:
+		return nil, fmt.Errorf("the nono backend has no checked rule to deny a host inside the allowed ones (%s): use the fence backend, or drop the deny", strings.Join(p.DeniedDomains, ", "))
+	case p.NetworkClosed():
 		// nono leaves the network open without a domain list.
 		prof.Network = nonoNetwork{Block: true}
-	} else {
+	case len(p.Domains) == 0:
+		// Without a domain list nono leaves the network open, and whether
+		// a block plus an open port closes the rest was not checked.
+		return nil, fmt.Errorf("the nono backend cannot open localhost alone yet: add at least one host, or use the fence backend")
+	default:
+		// Port 0 is all of localhost: it covers the listed ports.
 		prof.Network = nonoNetwork{AllowDomain: sortedStrings(p.Domains), OpenPort: []int{0}}
 	}
 	return prof, nil

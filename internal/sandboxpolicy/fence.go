@@ -16,9 +16,11 @@ type FenceConfig struct {
 }
 
 type fenceNetwork struct {
-	AllowedDomains     []string `json:"allowedDomains"`
-	AllowLocalBinding  bool     `json:"allowLocalBinding"`
-	AllowLocalOutbound bool     `json:"allowLocalOutbound"`
+	AllowedDomains          []string `json:"allowedDomains"`
+	DeniedDomains           []string `json:"deniedDomains"`
+	AllowLocalBinding       bool     `json:"allowLocalBinding"`
+	AllowLocalOutbound      bool     `json:"allowLocalOutbound"`
+	AllowLocalOutboundPorts []int    `json:"allowLocalOutboundPorts,omitempty"`
 }
 
 type fenceFilesystem struct {
@@ -43,7 +45,7 @@ func FenceNotes(goos string) []string {
 	if goos == "linux" {
 		return append(notes,
 			"fence also lets ~/.npm/_logs be written and the system folders be read; /tmp is a private, empty folder",
-			"localhost is closed: on Linux fence opens it one listed port at a time, which a profile cannot say yet")
+			"the sandbox has a localhost of its own; the host's is closed, but for the ports a profile lists as localhost:PORT")
 	}
 	return append(notes, "fence also lets its own temporary folder (/tmp/fence), the per-user temporary folder and ~/.npm/_logs be written, and the system folders, /tmp and /opt be read")
 }
@@ -80,10 +82,10 @@ func FenceGaps(p *Policy, goos string) []Rule {
 //   - a grant inside a folder that stays excluded cannot be expressed, and
 //     is refused.
 //
-// On Linux localhost stays closed: there fence reaches the host's
-// localhost one listed port at a time, and the policy means localhost as
-// a whole. Closed is stricter than asked, never looser. See FenceGaps for
-// what Linux does not enforce.
+// Localhost: macOS has all of it or none; Linux gives the sandbox one of
+// its own and reaches the host's one listed port at a time. A form the
+// system does not have is refused. See FenceGaps for what Linux does not
+// enforce.
 func RenderFence(p *Policy, goos string) (*FenceConfig, error) {
 	if goos != "darwin" && goos != "linux" {
 		return nil, fmt.Errorf("the fence backend supports macOS and Linux (this is %s)", goos)
@@ -123,10 +125,22 @@ func RenderFence(p *Policy, goos string) (*FenceConfig, error) {
 		AllowPty: true,
 	}
 	cfg.Network.AllowedDomains = sortedStrings(p.Domains)
-	if len(p.Domains) > 0 && goos == "darwin" {
-		// As under nono: no domain closes the network, localhost included.
+	cfg.Network.DeniedDomains = sortedStrings(p.DeniedDomains)
+	switch {
+	case goos == "linux" && p.HostLocalhost:
+		return nil, fmt.Errorf("fence on Linux opens the host's localhost one port at a time: write localhost:PORT for each port instead of localhost")
+	case goos == "linux":
+		// The sandbox has a localhost of its own. Each listed port of the
+		// host's is bridged into it.
+		cfg.Network.AllowLocalOutbound = len(p.HostPorts) > 0
+		cfg.Network.AllowLocalOutboundPorts = slices.Clone(p.HostPorts)
+	case p.LocalhostOpen():
+		// macOS has all of localhost or none of it: with at least one
+		// host, as under nono, or when asked for.
 		cfg.Network.AllowLocalBinding = true
 		cfg.Network.AllowLocalOutbound = true
+	case len(p.HostPorts) > 0:
+		return nil, fmt.Errorf("fence on macOS opens all of localhost or none of it, not single ports (localhost:%d): write localhost", p.HostPorts[0])
 	}
 	return cfg, nil
 }

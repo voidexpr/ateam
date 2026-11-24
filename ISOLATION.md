@@ -71,7 +71,7 @@ Requires `nono` in `PATH` (tested with 0.82). macOS only for now. A second backe
 |---|---|
 | Writing | The working folder (the project root inside a project, else the current folder) and the profile's `write` paths. Nothing else. Running in the home or `/` is refused. |
 | Reading | The home, except the profile's `exclude` paths. `agent/secrets`, part of `sandbox/nono`, excludes keys, credentials, app data and personal folders. |
-| Network | The profile's `domains` and localhost. Without a domain, the network is closed. |
+| Network | The profile's `domains` and `network` blocks: hosts, `localhost`, `localhost:PORT`. Without any, the network is closed, localhost included. With at least one host the command can use localhost (macOS: this machine's; Linux under fence: one of its own). See [CONFIG.md → Network blocks](CONFIG.md#network-blocks). |
 | ateam's own files | Closed: the user's ateam directory, and in the project's `.ateam/` everything but `runtime/`, `shared/`, `prompts/`, `cache/` and `.gitignore`. |
 | Git | `.git/config` and `.git/hooks` of the working folder are read-only. A hook planted there would run outside the sandbox later. |
 
@@ -126,7 +126,7 @@ ateam profile export myproject --out ~/sandboxes/myproject
 When something is refused inside the sandbox, nono names the path or host at the end of the run. Add it to a profile:
 
 - A build tool's cache: `--write PATH`, or the matching `dev/` profile.
-- A host: `--domain HOST`.
+- A host: `--domain HOST`. A server on this machine: `--domain localhost:PORT` (fence on Linux), `--domain localhost` (macOS).
 - Your shell's own startup writes (a history log, `~/.pyenv/shims`): a personal profile, `ateam profile save shell --write ~/.pyenv/shims`.
 
 ### Attended launches: `chat`, `run`, `shell`
@@ -218,7 +218,7 @@ The Linux rows come from each tool's documentation, not from runs by ateam. Insi
 
 - fence on Linux is experimental (checked by the probes on a desktop as a plain user and in a Debian container, 2026-11-23; an interactive shell only through a pseudo-terminal in the container; not yet with an agent run):
   - Needs `bwrap` and `socat`. When `bwrap` cannot create a network namespace (a Docker container without `NET_ADMIN`, a CI runner, AppArmor on Ubuntu 24.04), the launch is refused: fence would otherwise go on with the proxy variables as the only network rule.
-  - Localhost is closed, also with domains: fence reaches the host's localhost one listed port at a time there, which a profile cannot say yet.
+  - The sandbox has a localhost of its own. This machine's localhost is reached one listed port at a time (`localhost:PORT`); plain `localhost` is refused there.
   - **A protected path that does not exist yet can be created.** fence closes a path with a mount, which needs the path to exist. Inside a writable folder, a command can create `.ateam/profiles/`, `.ateam/secrets.env` or a missing `.git/hooks`. ateam lists these paths on stderr at every launch (`NOT ENFORCED`) and in `--dry-run`. With `strict = true` on the container, the launch is refused instead.
   - An excluded folder is seen as an empty one. Inside a writable folder a write into it succeeds and is thrown away at the end; the real folder is untouched.
 - macOS only. On Linux nono refuses a deny inside a grant; the launch is refused until ateam lists the home around the excluded paths.

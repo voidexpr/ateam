@@ -65,15 +65,16 @@ All three filter hosts with a proxy outside the sandbox and refuse direct connec
 | Deny one host inside a wildcard | `*.example.com` but not `internal.example.com` | ? | ? | Yes, src (`deniedDomains`) | Yes, src | ? | ? |
 | Host with a port | `example.com:8443` | ? | ? | ? | ? | Yes, doc | Yes, doc |
 | Method and path on a host | `GET api.github.com/repos/*` | Yes, doc (`--allow-endpoint`) | Yes, doc | No | No | No | No |
-| All of the host's localhost | `localhost` | Yes, doc (`open_port` 0) | No, doc | Yes, src (`allowLocalOutbound`) | No, src: ateam keeps localhost closed there | Yes, doc (`allowLocalBinding`) | No, doc |
-| One port of the host's localhost | `localhost:5432` | Yes, doc (`open_port`) | Yes, doc | No: all or nothing | Yes, src (`allowLocalOutboundPorts`) | No: all or nothing, doc | No, doc: the sandbox's localhost is not the host's |
+| All of the host's localhost | `localhost` | Yes, doc (`open_port` 0) | No, doc | Yes, src (`allowLocalOutbound`) | No, **run**: ateam refuses the rule there | Yes, doc (`allowLocalBinding`) | No, doc |
+| One port of the host's localhost | `localhost:5432` | Yes, doc (`open_port`) | Yes, doc | No: all or nothing | Yes, **run** (`allowLocalOutboundPorts`): the listed port answers, another does not |
+| The sandbox talks to what it starts, over localhost | a test that opens its own server | Only by opening all of localhost | ? | Only by opening all of localhost | Yes, **run**: a localhost of its own | No: all or nothing, doc | No, doc: the sandbox's localhost is not the host's |
 | A port the sandbox listens on, reached from the host | a dev server on `:3000` | Yes, doc | Yes, doc | Yes, src | Yes, src (a bridge per port) | Yes, doc (`allowLocalBinding`) | Not documented |
 | Unix socket by path | `/var/run/docker.sock` | Yes, doc | Yes, doc (`af_unix_mediation`) | Yes, src | Yes, src | Yes, doc (`allowUnixSockets`) | No, doc: all or none |
 | Network rules hold when a private network cannot be created | Docker without `NET_ADMIN`, CI | not applicable | ? | not applicable | No, doc: fence continues with the proxy variables only. ateam makes fence's own probe first and refuses, **run** | not applicable | ? |
 
 Notes:
 
-- ateam writes two things today: the list of hosts (`domains`), and "all of localhost" whenever there is at least one host. Without a host the network is closed, localhost included.
+- ateam writes: hosts, denied hosts (fence), `localhost` and `localhost:PORT` (`domains` and `network` blocks, see CONFIG.md). On macOS "all of localhost" is also opened whenever there is at least one host, so a command can talk to what it starts. Without any rule the network is closed, localhost included.
 - "All of localhost" exists on macOS only, in every tool. "One port" exists on Linux in nono and fence, and on macOS in nono only. No tool has both forms on both systems.
 - Claude sandbox: listing `localhost` in `allowedDomains` only affects connections that go through the proxy; `localhost` is in `NO_PROXY`, so a plain `curl localhost` is a direct connection and is not covered by it.
 - nono's method and path rules and its key injection are not used by ateam yet (phase 3).
@@ -93,8 +94,9 @@ nono's tracker, all open on 2026-11-23. Only the issue texts were read, not the 
 
 fence: its tracker was not searched. The carve-out limit is documented behaviour there ("denyRead always wins").
 
-## What this means for the `network` entity (phase 2)
+## What the `network` blocks do with this (built 2026-11-23)
 
-- `localhost` (all ports), `localhost:PORT` (a server on the host) and a port the sandboxed command listens on are three separate forms.
-- Each backend maps the forms it has and refuses the others by name: `localhost` on Linux; `localhost:PORT` under fence on macOS, where only "all of localhost" exists (wider than asked).
-- fence on Linux without a private network must be refused, not accepted.
+- `localhost` (all ports) and `localhost:PORT` (a server on the host) are separate forms. Each backend maps the forms it has and refuses the others by name: `localhost` under fence on Linux; `localhost:PORT` under fence on macOS unless all of localhost is open already.
+- nono: localhost without any host, and a denied host, are refused: what nono does with them was not checked.
+- Not built: a port the sandboxed command listens on and the host must reach; a port on a host; method and path rules; an open network with denies (`default = "allow"`).
+- fence on Linux without a private network is refused, not accepted.

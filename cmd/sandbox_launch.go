@@ -29,6 +29,7 @@ type launchFlags struct {
 	write    []string
 	exclude  []string
 	domains  []string
+	networks []string
 	command  string
 	dryRun   bool
 	// backend replaces the profile's container with a sandbox backend, by
@@ -41,7 +42,8 @@ func addLaunchFlags(cmd *cobra.Command, f *launchFlags) {
 	cmd.Flags().StringArrayVar(&f.read, "read", nil, "path readable for this launch (repeatable)")
 	cmd.Flags().StringArrayVar(&f.write, "write", nil, "path writable for this launch (repeatable)")
 	cmd.Flags().StringArrayVar(&f.exclude, "exclude", nil, "path unreadable for this launch (repeatable)")
-	cmd.Flags().StringArrayVar(&f.domains, "domain", nil, "host reachable for this launch (repeatable)")
+	cmd.Flags().StringArrayVar(&f.domains, "domain", nil, "host, localhost or localhost:PORT reachable for this launch (repeatable)")
+	cmd.Flags().StringArrayVar(&f.networks, "network", nil, "network block to add for this launch, by name (repeatable)")
 }
 
 // launchMode is what a launch runs.
@@ -135,7 +137,7 @@ func composeLaunch(f *launchFlags, layers []string) (*runtime.Config, runtime.Pr
 		}
 		names = append(names, defined...)
 	}
-	extra := runtime.ProfileConfig{Read: f.read, Write: f.write, Exclude: f.exclude, Domains: f.domains}
+	extra := runtime.ProfileConfig{Read: f.read, Write: f.write, Exclude: f.exclude, Domains: f.domains, Network: f.networks}
 	if f.command != "" {
 		extra.Command = strings.Fields(f.command)
 	}
@@ -237,9 +239,14 @@ func buildSandboxPolicy(cfg *runtime.Config, prof *runtime.ProfileConfig, grantD
 	if err != nil {
 		return nil, err
 	}
+	allow, deny, err := cfg.NetworkRules(prof.Network)
+	if err != nil {
+		return nil, err
+	}
 	return sandboxpolicy.Build(sandboxpolicy.Input{
 		Name: prof.Name, Home: home, WorkDir: grantDir,
-		Read: prof.Read, Write: prof.Write, Exclude: prof.Exclude, Domains: prof.Domains,
+		Read: prof.Read, Write: prof.Write, Exclude: prof.Exclude,
+		Domains: slices.Concat(prof.Domains, allow), Deny: deny,
 		Origin: prof.EntryOrigin, Filters: cfg.Filters, OpenAteam: prof.AteamFiles == "open",
 		AteamHome: ateamHome, ProjectDir: projectDir, ProfileFiles: files,
 	})
@@ -338,14 +345,7 @@ func (p *launchPlan) describe(w io.Writer) {
 	printRules(w, "readable  ", p.policy.Read)
 	printRules(w, "excluded  ", p.policy.Exclude)
 	fence := p.container.Type == runtime.ContainerTypeFence
-	switch {
-	case len(p.policy.Domains) == 0:
-		fmt.Fprintln(w, "network    closed")
-	case fence && goruntime.GOOS == "linux":
-		fmt.Fprintf(w, "network    %s\n", strings.Join(p.policy.Domains, ", "))
-	default:
-		fmt.Fprintf(w, "network    %s, localhost\n", strings.Join(p.policy.Domains, ", "))
-	}
+	fmt.Fprintf(w, "network    %s\n", networkSummary(p.policy, fence && goruntime.GOOS == "linux"))
 	printRules(w, "read-only ", p.policy.ReadOnly)
 	if fence {
 		for _, note := range sandboxpolicy.FenceNotes(goruntime.GOOS) {
@@ -353,6 +353,35 @@ func (p *launchPlan) describe(w io.Writer) {
 		}
 		printRules(w, "NOT ENFORCED (does not exist yet, can be created)", sandboxpolicy.FenceGaps(p.policy, goruntime.GOOS))
 	}
+}
+
+// networkSummary says what a policy reaches. privateLocalhost is a backend
+// that gives the sandbox a localhost of its own (fence on Linux): there
+// the host's localhost is only what the policy lists.
+func networkSummary(p *sandboxpolicy.Policy, privateLocalhost bool) string {
+	if p.NetworkClosed() {
+		return "closed"
+	}
+	parts := slices.Clone(p.Domains)
+	switch {
+	case privateLocalhost && p.HostLocalhost:
+		parts = append(parts, "localhost")
+	case privateLocalhost:
+		for _, port := range p.HostPorts {
+			parts = append(parts, fmt.Sprintf("localhost:%d", port))
+		}
+	case p.LocalhostOpen():
+		parts = append(parts, "localhost")
+	default:
+		for _, port := range p.HostPorts {
+			parts = append(parts, fmt.Sprintf("localhost:%d", port))
+		}
+	}
+	out := strings.Join(parts, ", ")
+	if len(p.DeniedDomains) > 0 {
+		out += "; refused: " + strings.Join(p.DeniedDomains, ", ")
+	}
+	return out
 }
 
 func printRules(w io.Writer, label string, rules []sandboxpolicy.Rule) {

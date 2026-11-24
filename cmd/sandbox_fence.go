@@ -226,6 +226,19 @@ func checkFenceConfig(cfg *fence.Config, policy *sandboxpolicy.Policy) error {
 		}
 		return nil
 	}
+	for _, host := range policy.DeniedDomains {
+		if !strings.Contains(host, "*") && fence.CheckURL(cfg, "https://"+host+"/") == nil {
+			return fmt.Errorf("fence would let %s be reached, which the profile forbids", host)
+		}
+	}
+	for _, host := range policy.Domains {
+		if strings.Contains(host, "*") || slices.Contains(policy.DeniedDomains, host) {
+			continue
+		}
+		if err := fence.CheckURL(cfg, "https://"+host+"/"); err != nil {
+			return fmt.Errorf("fence cannot let %s be reached: %w", host, err)
+		}
+	}
 	writable := policy.Writable()
 	return errors.Join(
 		expect(writable, "written", fence.CheckWritePath, true),

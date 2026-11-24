@@ -464,7 +464,8 @@ ateam shell [flags]                          # $SHELL
 |------|-------------|
 | `--profile NAME\|FILE` | Profile to compose, in order. Repeatable, comma-separated. A value ending in `.hcl` is a profile file. |
 | `--read PATH`, `--write PATH`, `--exclude PATH` | A path for this launch. Repeatable. |
-| `--domain HOST` | A reachable host for this launch. Repeatable. |
+| `--domain HOST` | A reachable host, `localhost` or `localhost:PORT` for this launch. Repeatable. |
+| `--network NAME` | A [network block](CONFIG.md#network-blocks) to add for this launch. Repeatable. |
 | `--command "CMD"` | `run` only: replaces the profile's saved command (split on spaces). |
 | `--dry-run` | Print the rules and the full command line, run nothing. |
 
