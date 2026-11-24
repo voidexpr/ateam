@@ -8,7 +8,7 @@ How sure each cell is:
 
 | Mark | Meaning |
 |---|---|
-| **run** | Seen in a real run (`make test-sandbox` on macOS; on Linux a hand test for nono, and for fence the same probes in a Debian container, as root) |
+| **run** | Seen in a real run (`make test-sandbox` on macOS; on Linux a hand test for nono, and for fence the same probes on a desktop as a plain user and in a Debian container) |
 | src | Read in the tool's source |
 | doc | From the tool's documentation, not run |
 | ? | Not checked |

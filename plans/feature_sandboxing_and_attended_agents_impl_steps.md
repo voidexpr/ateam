@@ -186,7 +186,12 @@ How it was checked: the agent's sandbox reaches Docker. The Linux binary and the
 - As root: `base` 24 of 25 inside, 7 of 8 after the run. Files, ateam's files, git with a commit, both hosts, and the rename of `.git` (refused only since the pin; allowed before it).
 - The one failure, inside and after: `.ateam/profiles/probe.hcl` was created. This is the gap below.
 
-Not checked: Linux as a plain user on a desktop (meerdog), where the network namespace should be available; an interactive shell (the fence command relays a terminal on Linux, the library does not); an agent turn.
+Real runs by the owner, 2026-11-23, `0621639`:
+
+- meerdog, as a plain user: the network namespace is available. `base` 24 of 25 inside and 7 of 8 after the run; the one failure is the creation of `.ateam/profiles`, the stated gap. `carve` refused at launch as expected.
+- macOS, with the changed probe script: nono `base` 25 of 25, `carve` 8 of 8; fence `base` 25 of 25; every check after the run passes for both.
+
+Not checked: an interactive shell (the fence command relays a terminal on Linux, the library does not); an agent turn.
 
 The gap, to decide:
 

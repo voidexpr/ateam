@@ -67,8 +67,8 @@ base() {
     # an excluded folder inside the working folder: closed for writes too
     # the writes are tried here and judged from outside (see the top)
     refused "read an excluded file inside the working folder" 'cat private/token'
-    echo x >private/token 2>/dev/null
-    echo x >private/new.txt 2>/dev/null
+    (echo x >private/token) 2>/dev/null
+    (echo x >private/new.txt) 2>/dev/null
     refused "rename an excluded folder inside the working folder" 'mv private private2' 'mv private2 private'
 
     # ateam's own files
