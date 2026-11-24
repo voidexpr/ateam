@@ -318,10 +318,10 @@ func TestBuildFenceContainerForUnattendedRun(t *testing.T) {
 	}
 	ac.ConfigDir = "agents/claude"
 	// Without a project the run's output lies in ateam's own folder, which
-	// stays excluded as a whole: fence cannot open a path inside it.
+	// is then closed entry by entry around it.
 	env := &root.ResolvedEnv{HomeDir: os.Getenv(runtime.HomeEnv), WorkDir: work}
-	if _, err := buildSandboxContainer(env, cfg, prof, ac, cc); err == nil || !strings.Contains(err.Error(), filepath.Join(env.HomeDir, "state", "runtime")) {
-		t.Errorf("a run without a project must be refused, naming its output folder: %v", err)
+	if _, err := buildSandboxContainer(env, cfg, prof, ac, cc); err != nil {
+		t.Errorf("a run without a project: %v", err)
 	}
 	env.ProjectDir = filepath.Join(work, ".ateam")
 	if err := os.MkdirAll(env.ProjectDir, 0o755); err != nil {

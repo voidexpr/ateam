@@ -740,7 +740,7 @@ The path lists of the built-in profiles are filters (`agent/secrets`, `dev/go-wr
 
 Built-in composable profiles (`ateam profile list`): `sandbox/nono` (the nono container plus `agent/secrets`), `sandbox/fence` (the same with the built-in fence container), `agent/secrets` (keys, credentials, app data and personal folders unreadable), `agent/claude` and `agent/codex` (the agent's own files and API hosts), `agent/ateam` (ateam's own files open, to run ateam inside the sandbox), `dev/go`, `dev/rust`, `dev/python`, `dev/node`, `dev/deno`, `dev/github`, `dev/all`.
 
-Every sandboxed launch also closes ateam's own files: the user's ateam directory, and in the project's `.ateam/` everything but `runtime/`, `shared/`, `prompts/`, `cache/` and `.gitignore`. An explicit `read` or `write` of one of them, or of the `.ateam/` directory itself, reopens it; `ateam_files = "open"` opens all of them.
+Every sandboxed launch also closes ateam's own files: the user's ateam directory, and in the project's `.ateam/` everything but `runtime/`, `shared/`, `prompts/`, `cache/` and `.gitignore`. An explicit `read` or `write` of one of them, or of the `.ateam/` directory itself, reopens it; `ateam_files = "open"` opens all of them. A `read` or `write` below the user's ateam directory closes that directory entry by entry around the path instead of as a whole.
 
 #### Running the supervisor inside Docker
 

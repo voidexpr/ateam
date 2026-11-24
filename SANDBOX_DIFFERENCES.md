@@ -76,6 +76,21 @@ Notes:
 - Claude sandbox: listing `localhost` in `allowedDomains` only affects connections that go through the proxy; `localhost` is in `NO_PROXY`, so a plain `curl localhost` is a direct connection and is not covered by it.
 - nono's method and path rules and its key injection are not used by ateam yet (phase 3).
 
+## Upstream issues
+
+nono's tracker, all open on 2026-11-23. Only the issue texts were read, not the discussions.
+
+| Issue | Subject | Row above |
+|---|---|---|
+| [nono #2296](https://github.com/nolabs-ai/nono/issues/2296) | Blocking a project's `.env` on Linux: the guide's supervised-mode advice does not work | Deny inside a grant, nono Linux |
+| [nono #2086](https://github.com/nolabs-ai/nono/issues/2086) | A grant above nono's own state folder is refused | The home as one grant, nono Linux |
+| [nono #2046](https://github.com/nolabs-ai/nono/issues/2046) | Read-only access to the root folder refused because of the protected state (title only, not read) | The home as one grant, nono Linux |
+| [nono #2310](https://github.com/nolabs-ai/nono/issues/2310) | A write-deny for a subpath, with a nested re-allow | Read-only inside a writable folder; carve-out |
+| [nono #2157](https://github.com/nolabs-ai/nono/issues/2157) | Protect `.git`, `.git/hooks` first, by default | Read-only inside a writable folder |
+| [nono #1652](https://github.com/nolabs-ai/nono/issues/1652) | Localhost: port 0 works on macOS only; port ranges | All of the host's localhost |
+
+fence: its tracker was not searched. The carve-out limit is documented behaviour there ("denyRead always wins").
+
 ## What this means for the `network` entity (phase 2)
 
 - `localhost` (all ports), `localhost:PORT` (a server on the host) and a port the sandboxed command listens on are three separate forms.

@@ -362,3 +362,51 @@ func TestGrantOfAteamDirOpensItsEntries(t *testing.T) {
 		t.Error("a grant outside .ateam opens nothing of ateam's")
 	}
 }
+
+// A grant inside the user's ateam directory (an unattended run's output)
+// closes the directory entry by entry around it: no path is opened inside
+// a folder that stays excluded, which fence could not express.
+func TestAteamHomeIsSplitAroundAGrant(t *testing.T) {
+	in := testInput(t)
+	state := filepath.Join(in.AteamHome, "state")
+	for _, dir := range []string{"runtime", "agents/claude", "agents/codex", "logs"} {
+		if err := os.MkdirAll(filepath.Join(state, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(paths(p.Exclude), in.AteamHome) {
+		t.Fatalf("without a grant inside, the directory is closed as a whole: %v", paths(p.Exclude))
+	}
+
+	in.Write = []string{filepath.Join(state, "runtime"), filepath.Join(state, "agents", "claude")}
+	p, err = Build(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := paths(p.Exclude)
+	for _, want := range []string{
+		filepath.Join(in.AteamHome, "ateam.hcl"),   // closed before it exists
+		filepath.Join(in.AteamHome, "secrets.env"), // closed before it exists
+		filepath.Join(state, "state.sqlite"),
+		filepath.Join(state, "logs"),
+		filepath.Join(state, "agents", "codex"), // another agent's config
+	} {
+		if !slices.Contains(ex, want) {
+			t.Errorf("%s must stay excluded: %v", want, ex)
+		}
+	}
+	for _, grant := range paths(p.Write) {
+		for _, path := range ex {
+			if Within(grant, path) {
+				t.Errorf("the grant %s lies inside the excluded %s", grant, path)
+			}
+		}
+	}
+	if _, err := RenderFence(p, "darwin"); err != nil {
+		t.Errorf("fence renders it: %v", err)
+	}
+}

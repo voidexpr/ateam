@@ -74,6 +74,10 @@ var ateamOpen = []string{"runtime", "shared", "prompts", "cache", ".gitignore"}
 // command cannot create the config its next launch would read.
 var ateamClosed = []string{"ateam.hcl", "profiles", "secrets.env", "state.sqlite", "state.sqlite-wal", "state.sqlite-shm", "logs", "Dockerfile"}
 
+// ateamHomeNames is closed in the user's ateam directory and in its state
+// folder even before it exists, when one of them is split around a grant.
+var ateamHomeNames = append(slices.Clone(ateamClosed), "state", "agents", "cache", "filters", "prompts", "projects.hcl", "sandbox")
+
 // Build resolves the entries of a profile into absolute rules and adds
 // ateam's own. An entry is a path (~ or / first) or the name of a filter;
 // an unknown name is an error: it must not grant nothing silently.
@@ -170,7 +174,20 @@ func Build(in Input) (*Policy, error) {
 		opensAteam = func(grant, path string) bool {
 			return inAteam(grant) && Within(RealPath(path), grant)
 		}
-		excluded = append(excluded, implicitExcludes(in)...)
+		// An unattended run writes inside the user's ateam directory (its
+		// output, the agent's config folder). The directory is then closed
+		// entry by entry around those grants, as the project's .ateam is:
+		// no backend has to open a path inside a closed folder.
+		grants := pathsOf(slices.Concat(p.Read, p.Write))
+		named := func(dir string) []string {
+			if home := filepath.Clean(in.AteamHome); in.AteamHome != "" && (dir == home || dir == filepath.Join(home, "state")) {
+				return slices.Clone(ateamHomeNames)
+			}
+			return nil
+		}
+		for _, ex := range implicitExcludes(in) {
+			excluded = append(excluded, splitAround(ex, grants, named)...)
+		}
 	}
 
 	// A read or write of exactly an excluded path reopens it: the nearer
@@ -243,6 +260,34 @@ func pathsOf(rules []Rule) []string {
 	out := make([]string, 0, len(rules))
 	for _, r := range rules {
 		out = append(out, r.Path)
+	}
+	return out
+}
+
+// splitAround returns ex, or, when a grant lies inside it, its entries
+// level by level down to each grant: every entry that leads to no grant
+// stays excluded. named gives the entries of a folder to close even when
+// they do not exist yet. An entry created later under another name is not
+// excluded: only for folders whose layout ateam owns.
+func splitAround(ex Rule, grants []string, named func(dir string) []string) []Rule {
+	real := RealPath(ex.Path)
+	if !slices.ContainsFunc(grants, func(g string) bool { return g != real && Within(g, real) }) {
+		return []Rule{ex}
+	}
+	names := named(ex.Path)
+	if entries, err := os.ReadDir(ex.Path); err == nil {
+		for _, e := range entries {
+			if !slices.Contains(names, e.Name()) {
+				names = append(names, e.Name())
+			}
+		}
+	}
+	slices.Sort(names)
+	var out []Rule
+	for _, name := range names {
+		child := ex
+		child.Path = filepath.Join(ex.Path, name)
+		out = append(out, splitAround(child, grants, named)...)
 	}
 	return out
 }

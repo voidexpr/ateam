@@ -142,6 +142,7 @@ Any profile whose container is `nono` works with the unattended commands, throug
 
 - The agent runs as in any container: its `inside_container` block applies (no agent sandbox, permission prompts skipped).
 - The `agent/<type>` profile is added, plus what the run writes: the agent's `config_dir`, `runtime/`, the agent's `rw_paths` / `ro_paths` and the project's `sandbox_extra`.
+- When one of those lies inside the user's ateam directory (the agent's config folder, the output of a run without a project), that directory is closed entry by entry around it instead of as a whole: its configuration, secrets, state database, logs and the other agents' folders stay closed.
 - The agent uses its host login (`ateam login`). Unlike Docker, no secret has to be configured up front.
 - `container_extra` does not apply, and every run of a command shares the working folder of the launch.
 
@@ -169,7 +170,7 @@ For supervised coding (`ateam code`), either run the supervisor without nono and
 ateam run   --profile sandbox/fence,dev/rust -- cargo test
 ateam chat  --profile sandbox/fence
 ateam shell --profile sandbox/fence
-ateam exec "review the diff" --profile sandbox/fence     # inside a project
+ateam exec "review the diff" --profile sandbox/fence     # an unattended agent
 ```
 
 Experimental. Checked on macOS by real launches of the file, git and host probes (`make test-sandbox-fence`), not yet by daily use, an interactive session or an agent run.
@@ -188,7 +189,6 @@ Differences from nono (the full table per operating system, with the network rul
 | Install | `nono` in `PATH` | Nothing |
 | A `read` or `write` inside a folder that stays excluded (`--read ~/.ssh/config`) | Opened | Refused: in fence a denied folder stays denied as a whole |
 | `dev/go` | Works | Refused: it reads `~/Library/Application Support/go`, inside a folder `agent/secrets` excludes |
-| Unattended run without a project | Works | Refused: the run's output is in the user's ateam directory, which is excluded as a whole |
 | The backend's own blocked reads | Lifted where the profile does not exclude | None: fence blocks no read on its own |
 | Writes the backend refuses on its own | None left | In the working folder, at any depth: `.gitmodules`, `.mcp.json`, `.ripgreprc`, `.vscode/`, `.idea/`, shell startup files. In the home: shell startup files and `.gitconfig`. No setting lifts this; a `write` of one of them is an error |
 | Writable besides the profile | nono's defaults | `/tmp/fence`, the per-user temporary folder, `~/.npm/_logs` |

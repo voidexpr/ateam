@@ -84,7 +84,7 @@ What the stress test showed about the policy model:
 - A write grant does not make a path readable in fence's Seatbelt profile: writable paths are also listed in `allowRead`.
 - "A grant inside an exclude" is a nono shape (deny plus bypass). Three places use it, and all three are refused under fence:
   - `dev/go`: `dev/go-read` opens `~/Library/Application Support/go` inside the excluded `~/Library/Application Support`.
-  - An unattended run without a project: its output is `~/.ateam/state/runtime`, inside the excluded `~/.ateam`.
+  - An unattended run: the agent's config folder and, without a project, its output lie inside the excluded `~/.ateam`. Fixed in the policy, see open point 2.
   - Any `--read` or `--write` below an excluded folder.
 - The `Policy` type did not change. `Policy.Gaps` is still unused.
 
@@ -134,8 +134,13 @@ Not checked:
 
 ### Open points for the owner
 
-1. `dev/go` under fence. Options: keep it refused; ask fence's authors for an allow that wins inside a deny; or split an exclude around a grant at launch (deny each entry of the folder but the one opened), which leaves entries created later readable.
-2. Unattended runs without a project under fence: the same split for `~/.ateam`, or keep them refused.
+0. A user's `--read` or `--write` inside an excluded folder (`~/.ssh/config`): accepted as refused under fence (owner, 2026-11-23). Agents are not given `~/.ssh` that way in practice; see the dotfiles profile under "Tasks for later".
+1. `dev/go` under fence: decided 2026-11-23, kept as it is. `dev/go` works under nono and stays refused under fence; to revisit. What is known for then:
+   - The read is `~/Library/Application Support/go`: the file `env` (settings saved with `go env -w`) and Go's telemetry counters.
+   - Without it Go works: with the folder unreadable (file permissions in a scratch home, not a sandbox refusal), `go env`, `go build` and `go vet` pass and the settings of `env` are ignored. So dropping the read from `dev/go` would make it work under both backends, at the cost of `go env -w` settings inside the sandbox.
+   - Opening the parent folder instead is ruled out: it holds every app's data, and excluding known secrets is the point of the sandbox.
+   - The other ways: an allow that wins inside a deny in fence (a fork or upstream).
+2. Unattended runs under fence: done 2026-11-23. They were refused with and without a project: the agent's config folder (`~/.ateam/state/agents/...`) and, without a project, the run's output lie inside `~/.ateam`, excluded as a whole. `sandboxpolicy.Build` now closes an exclude of ateam's own entry by entry around a grant inside it (`splitAround`), with the known names closed before they exist. Both backends get the same rules; without such a grant (chat, run, shell) nothing changes. Checked by tests and by `ateam exec --dry-run` with both backends; not by a real unattended run.
 3. Linux: decided 2026-11-23. `bwrap` and `socat` are acceptable requirements, documented in ISOLATION.md ("Where a sandbox backend can start"), with an early failure when one is missing. Not coded yet: the renderer still refuses Linux one step earlier. See "Next steps", 3.
 4. Carve-outs (points 1 and 2) by changing fence itself, in a fork. Read of the source, v0.1.67:
    - macOS: small. The Seatbelt profile lists allows, then denies, and the last matching rule wins. A carve-out is an allow written after the denies for each allowed path inside a denied one (`generateReadRules`, `generateWriteRules` in `internal/sandbox/macos.go`), plus the rename guard (`deny file-write-unlink` on the denied subtree must be reopened for a writable carve-out), plus the same precedence in `CheckReadPath` / `CheckWritePath`. nono does the same on Seatbelt, and `dev/go` works under it.
@@ -186,6 +191,8 @@ In order:
 Done since the first version of this list: built-in profiles as filter files, `ateam filter list` and `show` (2026-11-23, `1d5bc94`): every filter resolves to the same paths as the literal list it replaced.
 
 Tasks for later, not ordered:
+
+- A profile for sessions that work on dotfiles and `~/.ssh/config` (owner, 2026-11-23). Such a session changes its rules through a dedicated profile instead of opening one file inside an excluded folder. The result must be the same under nono and fence, so it cannot rely on a path opened inside a folder that stays excluded.
 
 - Attended sessions in the metrics database (usage and cost). `chat` already waits for the agent under a sandbox, so the row can be written there.
 - A profile per run for unattended commands (a worktree per role).
