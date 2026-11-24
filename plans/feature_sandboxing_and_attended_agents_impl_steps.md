@@ -1,6 +1,6 @@
 # Sandboxing and attended agents: state and next steps
 
-Design and decisions: `feature_sandboxing_and_attended_agents.md`. User documentation: `ISOLATION.md` (mode ⑤), `CONFIG.md`, `COMMANDS.md`.
+Design and decisions: `feature_sandboxing_and_attended_agents.md`. What each backend can express, per operating system: `SANDBOX_DIFFERENCES.md`. User documentation: `ISOLATION.md` (mode ⑤), `CONFIG.md`, `COMMANDS.md`.
 
 Status, 2026-11-23: phase 1 is built on macOS and committed (`d7ecad6`, `10f6d34`, `55d7abf`, `a842f8a`, `1d5bc94`). fence as an embedded sandbox backend is built, not committed and not yet run for real (see "fence, embedded").
 

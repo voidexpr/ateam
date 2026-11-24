@@ -181,7 +181,7 @@ How it runs:
 - `TMPDIR` is `/tmp/fence` inside the sandbox.
 - Before a launch, ateam asks fence about every rule of the profile on the file it wrote. A rule fence would not apply as written is an error that names it.
 
-Differences from nono:
+Differences from nono (the full table per operating system, with the network rules: [SANDBOX_DIFFERENCES.md](SANDBOX_DIFFERENCES.md)):
 
 | | nono | fence |
 |---|---|---|
