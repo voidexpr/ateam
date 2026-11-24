@@ -85,6 +85,11 @@ base() {
     # target is closed, plain `ls ~/.ssh` prints the link's name and succeeds.
     if [ "${PROBE_SSH:-0}" = 1 ]; then
         refused "see the entries of ~/.ssh" 'ls "$HOME/.ssh/" | grep -q .'
+        # Not judged: backends differ on whether an excluded link shows
+        # where it points.
+        if [ -L "$HOME/.ssh" ] && readlink "$HOME/.ssh" >/dev/null 2>&1; then
+            echo "INFO ~/.ssh is a link and where it points is visible"
+        fi
     else
         echo "SKIP see the entries of ~/.ssh: it does not exist"
     fi

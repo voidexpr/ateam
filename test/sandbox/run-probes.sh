@@ -203,10 +203,10 @@ for backend in "$@"; do
     launch "$backend" carve-write \
         --exclude "$ROOT/secret" --write "$ROOT/secret/rw"
     status=$?
-    if [ "$backend" = fence ] && [ "$status" -ne 0 ] && grep -q "fence cannot make" "$ROOT/carve-write.out"; then
-        # Known: in fence a write deny always wins; only reads can be
-        # opened inside an excluded folder (ateam's fork of fence).
-        summary+=("$backend carve-write: refused at launch (known: fence cannot open a write inside an excluded folder)")
+    if [ "$backend" = fence ] && [ "$status" -ne 0 ] && grep -q "fence on Linux cannot make" "$ROOT/carve-write.out"; then
+        # Known: on Linux ateam's fork of fence shows a path opened for
+        # writing inside an excluded folder, and leaves it read-only.
+        summary+=("$backend carve-write: refused at launch (known: fence on Linux cannot open a write inside an excluded folder)")
         continue
     fi
     case $status in

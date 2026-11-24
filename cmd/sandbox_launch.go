@@ -352,6 +352,9 @@ func (p *launchPlan) describe(w io.Writer) {
 		for _, note := range sandboxpolicy.FenceNotes(goruntime.GOOS) {
 			fmt.Fprintf(w, "note       %s\n", note)
 		}
+		if goruntime.GOOS == "linux" {
+			printRules(w, "sealed    ", p.policy.Sealed)
+		}
 		printRules(w, "NOT ENFORCED (does not exist yet, can be created)", sandboxpolicy.FenceGaps(p.policy, goruntime.GOOS))
 	}
 }

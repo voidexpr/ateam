@@ -703,7 +703,7 @@ profile "myproject" {
 - A profile without an agent or a container runs with the `default` profile's.
 - An unknown name or a cycle in `use` is a load error.
 - Paths start with `~` or `/`. Reading is open below the home, except what is excluded.
-- The rules need a sandbox backend. Any run, attended or not, on a container that cannot enforce them is refused. `nono` enforces all of them. `fence` enforces them too, except a `write` inside a folder that stays excluded, which it refuses.
+- The rules need a sandbox backend. Any run, attended or not, on a container that cannot enforce them is refused. `nono` enforces all of them. `fence` enforces them too, except, on Linux, a `write` inside a folder that stays excluded, which it refuses.
 - Each layer also loads `profiles/*.hcl` after its `ateam.hcl`: where `ateam profile save` writes.
 
 ##### Network rules

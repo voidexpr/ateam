@@ -165,7 +165,7 @@ For supervised coding (`ateam code`), either run the supervisor without nono and
 
 ### fence, the built-in backend
 
-[fence](https://github.com/fencesandbox/fence) is a second sandbox backend, compiled into ateam as a library: `sandbox/fence` needs no other program. ateam builds with [its own fork](https://github.com/voidexpr/fence), which adds one thing to fence: a read opened inside an excluded folder. It takes the same profiles and applies the same rules as `sandbox/nono`.
+[fence](https://github.com/fencesandbox/fence) is a second sandbox backend, compiled into ateam as a library: `sandbox/fence` needs no other program. ateam builds with [its own fork](https://github.com/voidexpr/fence), which adds carve-outs to fence: a read or a write opened inside an excluded folder. It takes the same profiles and applies the same rules as `sandbox/nono`.
 
 ```bash
 ateam run   --profile sandbox/fence,dev/rust -- cargo test
@@ -189,14 +189,14 @@ Differences from nono (the full table per operating system, with the network rul
 |---|---|---|---|
 | Install | `nono` in `PATH` | Nothing | The `fence` command, for an exported profile |
 | A `read` inside a folder that stays excluded (`--read ~/.ssh/config`) | Opened | Opened, read-only. On Linux a listing of the folder shows the opened entries only | Stays closed: a denied folder is denied as a whole |
-| A `write` inside a folder that stays excluded | Opened | Refused by ateam, with both rules named | Stays closed |
+| A `write` inside a folder that stays excluded | Opened | macOS: opened. Linux: refused by ateam, with both rules named (the fork would show the path read-only there) | Stays closed |
 | `dev/go` (reads `~/Library/Application Support/go`, inside a folder `agent/secrets` excludes) | Works | Works | Go runs without your `go env -w` settings |
 | The backend's own blocked reads | Lifted where the profile does not exclude | None: fence blocks no read on its own | Same as the fork |
 | Writes the backend refuses on its own | None left | In the working folder, at any depth: `.gitmodules`, `.mcp.json`, `.ripgreprc`, `.vscode/`, `.idea/`, shell startup files. In the home: shell startup files and `.gitconfig`. No setting lifts this; a `write` of one of them is an error | Same as the fork |
 | Writable besides the profile | nono's defaults | `/tmp/fence`, the per-user temporary folder, `~/.npm/_logs` | Same as the fork |
 | Readable besides the home | nono's defaults | The system folders, `/tmp`, `/opt` | Same as the fork |
 | Read-only paths | Raw Seatbelt rules added by ateam | fence's own write-deny rule, which also refuses the rename of the folders above | Same as the fork |
-| An excluded path that is a link (`~/.ssh` kept in a synced folder) | The link and its target are closed | The target is closed; the link itself can be seen (its name and where it points) | Same as the fork |
+| An excluded path that is a link (`~/.ssh` kept in a synced folder) | The link and its target are closed | macOS: both closed (since the fork; not yet seen in a run) | The target is closed; the link itself can be seen (its name and where it points) |
 | `profile export` | `profile.json`, run by `nono` | `fence.json`, run by `ateam fence-exec` | The same `fence.json`, run by the `fence` command (`run.sh`): a read inside an excluded folder then stays closed |
 
 `ateam profile export NAME --backend fence` (or `nono`) writes a profile for the other backend than its own.
@@ -221,7 +221,8 @@ The Linux rows come from each tool's documentation, not from runs by ateam. Insi
 - fence on Linux is experimental (checked by the probes on a desktop as a plain user and in a Debian container, 2026-11-23; an interactive shell only through a pseudo-terminal in the container; not yet with an agent run):
   - Needs `bwrap` and `socat`. When `bwrap` cannot create a network namespace (a Docker container without `NET_ADMIN`, a CI runner, AppArmor on Ubuntu 24.04), the launch is refused: fence would otherwise go on with the proxy variables as the only network rule.
   - The sandbox has a localhost of its own, as in a Docker container (Claude's built-in sandbox does the same on Linux). This machine's localhost is reached one listed port at a time (`--domain localhost:PORT`); plain `localhost` is refused there. A server started inside is reached from outside only when its port is listed (`--listen PORT`).
-  - **A protected path that does not exist yet can be created.** fence closes a path with a mount, which needs the path to exist. Inside a writable folder, a command can create `.ateam/profiles/`, `.ateam/secrets.env` or a missing `.git/hooks`. ateam lists these paths on stderr at every launch (`NOT ENFORCED`) and in `--dry-run`. With `strict = true` on the container, the launch is refused instead.
+  - The project's `.ateam` is sealed: mounted read-only as a whole, with only its open entries writable (`runtime/`, `shared/`, `cache/`, created before the launch when missing). Nothing new can be created in it, so a command cannot plant `.ateam/profiles/x.hcl` or `.ateam/secrets.env`.
+  - **Elsewhere, a protected path that does not exist yet can be created.** fence closes a path with a mount, which needs the path to exist. This concerns a repository without a `.git/hooks` folder, and an `exclude` of a path in the working folder that is not there yet. ateam lists these paths on stderr at every launch (`NOT ENFORCED`) and in `--dry-run`. With `strict = true` on the container, the launch is refused instead.
   - An excluded folder is seen as an empty one. Inside a writable folder a write into it succeeds and is thrown away at the end; the real folder is untouched.
 - macOS only. On Linux nono refuses a deny inside a grant; the launch is refused until ateam lists the home around the excluded paths.
 - The read-only rules use a nono profile key (`unsafe_macos_seatbelt_rules`) that nono's profile guide does not document.

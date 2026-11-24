@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	goruntime "runtime"
 	"slices"
 	"strconv"
@@ -186,6 +187,17 @@ func loadFenceConfig(file string) (*fence.Config, error) {
 // does not enforce on this system is said on stderr at every launch, or
 // refused when the container is strict.
 func writeFenceConfig(policy *sandboxpolicy.Policy, configFile string, strict bool) (string, error) {
+	if goruntime.GOOS == "linux" {
+		// A sealed folder is mounted read-only with its existing entries
+		// writable: the folders a command writes into must be there.
+		for _, dir := range policy.Sealed {
+			for _, name := range sandboxpolicy.AteamOpenFolders {
+				if err := os.MkdirAll(filepath.Join(dir.Path, name), 0o755); err != nil {
+					return "", err
+				}
+			}
+		}
+	}
 	rendered, err := sandboxpolicy.RenderFence(policy, goruntime.GOOS)
 	if err != nil {
 		return "", err

@@ -263,18 +263,14 @@ func TestPlanLaunchFence(t *testing.T) {
 		t.Errorf("dev/go must launch under fence: %v", err)
 	}
 
-	// A write inside a folder that stays excluded: refused, the file not
-	// left behind.
+	// A write inside a folder that stays excluded: a write carve-out,
+	// which fence confirms too (macOS).
 	plan, err = planLaunch(&launchFlags{profiles: []string{"sandbox/fence"}, write: []string{"~/.ssh/known_hosts"}}, modeRun, []string{"true"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	refused := filepath.Join(t.TempDir(), "refused.json")
-	if _, err := plan.wrapped(t.Context(), modeRun, refused); err == nil || !strings.Contains(err.Error(), ".ssh/known_hosts") || !strings.Contains(err.Error(), "command line") {
-		t.Errorf("a write inside an excluded folder must be refused, naming the path and where it was asked, got %v", err)
-	}
-	if fileExists(refused) {
-		t.Error("a refused launch leaves no configuration")
+	if _, err := plan.wrapped(t.Context(), modeRun, filepath.Join(t.TempDir(), "write.json")); err != nil {
+		t.Errorf("a write inside an excluded folder must launch under fence on macOS: %v", err)
 	}
 }
 
@@ -291,9 +287,13 @@ func TestCheckFenceConfigRefusesWhatFenceNeverWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = plan.wrapped(t.Context(), modeRun, filepath.Join(t.TempDir(), "fence.json"))
+	refused := filepath.Join(t.TempDir(), "fence.json")
+	_, err = plan.wrapped(t.Context(), modeRun, refused)
 	if err == nil || !strings.Contains(err.Error(), filepath.Join(home, ".gitconfig")) || !strings.Contains(err.Error(), "command line") {
 		t.Errorf("a write of ~/.gitconfig must be refused, naming the path and where it was asked: %v", err)
+	}
+	if fileExists(refused) {
+		t.Error("a refused launch leaves no configuration")
 	}
 }
 

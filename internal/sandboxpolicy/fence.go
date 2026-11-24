@@ -3,6 +3,7 @@ package sandboxpolicy
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 )
 
@@ -56,18 +57,38 @@ func FenceNotes(goos string) []string {
 // exist. An excluded or read-only path that does not exist yet inside a
 // writable folder can be created by the command: closed "before it
 // exists" does not hold there. Outside a writable folder nothing can be
-// created anyway.
+// created anyway, and nothing can be created in a sealed folder, which
+// RenderFence mounts read-only.
 func FenceGaps(p *Policy, goos string) []Rule {
 	if goos != "linux" {
 		return nil
 	}
 	var gaps []Rule
 	for _, r := range slices.Concat(p.Exclude, p.ReadOnly) {
-		if _, err := os.Lstat(r.Path); err != nil && p.WritableRoot(r.Path) != "" {
-			gaps = append(gaps, r)
+		if _, err := os.Lstat(r.Path); err == nil || p.WritableRoot(r.Path) == "" || containsPath(p.Sealed, filepath.Dir(r.Path)) {
+			continue
 		}
+		gaps = append(gaps, r)
 	}
 	return gaps
+}
+
+// sealedEntries returns, for a sealed folder, the entries in it that stay
+// writable: the ones no exclude or read-only rule covers.
+func sealedEntries(p *Policy, dir string) []Rule {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	closed := slices.Concat(p.Exclude, p.ReadOnly)
+	var open []Rule
+	for _, e := range entries {
+		path := filepath.Join(dir, e.Name())
+		if !slices.ContainsFunc(closed, func(r Rule) bool { return Within(path, r.Path) || Within(RealPath(path), r.Path) }) {
+			open = append(open, Rule{Path: path})
+		}
+	}
+	return open
 }
 
 // RenderFence renders a policy as a fence configuration for goos.
@@ -84,8 +105,13 @@ func FenceGaps(p *Policy, goos string) []Rule {
 //     rule above. It stays read-only: the folder's write deny covers it.
 //   - A read-only path is a write deny, and fence refuses the rename of
 //     the folders above a denied path.
-//   - For writes a deny still always wins: a write inside a folder that
-//     stays excluded cannot be expressed, and is refused.
+//   - A write inside a folder that stays excluded is the same for writes
+//     (macOS). On Linux the fork shows such a path and leaves it
+//     read-only: refused there, by name.
+//   - Linux: a sealed folder is a write deny on the folder, with each
+//     entry that stays writable allowed inside it. Nothing new can then be
+//     created in it, which a mount per name cannot do for a name that does
+//     not exist yet.
 //
 // Localhost: macOS has all of it or none; Linux gives the sandbox one of
 // its own and reaches the host's one listed port at a time. A form the
@@ -95,16 +121,21 @@ func RenderFence(p *Policy, goos string) (*FenceConfig, error) {
 	if goos != "darwin" && goos != "linux" {
 		return nil, fmt.Errorf("the fence backend supports macOS and Linux (this is %s)", goos)
 	}
-	for _, grant := range p.Write {
-		for _, ex := range p.Exclude {
-			if Within(grant.Path, ex.Path) {
-				return nil, fmt.Errorf("fence cannot make %s writable (%s) inside the excluded %s (%s): a read can be opened inside an excluded folder, a write cannot. Exclude the entries of %s one by one, or use the nono backend",
-					grant.Path, ruleOrigin(grant), ex.Path, ruleOrigin(ex), ex.Path)
+	writable := p.Writable()
+	var sealed []Rule
+	if goos == "linux" {
+		for _, grant := range p.Write {
+			for _, ex := range p.Exclude {
+				if Within(grant.Path, ex.Path) {
+					return nil, fmt.Errorf("fence on Linux cannot make %s writable (%s) inside the excluded %s (%s): the path would be shown read-only. Exclude the entries of %s one by one",
+						grant.Path, ruleOrigin(grant), ex.Path, ruleOrigin(ex), ex.Path)
+				}
 			}
 		}
-	}
-	writable := p.Writable()
-	if goos == "linux" {
+		for _, dir := range p.Sealed {
+			sealed = append(sealed, dir)
+			writable = append(writable, sealedEntries(p, dir.Path)...)
+		}
 		// On Linux a read-only path is a mount, and the folder above a
 		// mount can be renamed away. A folder that is a mount of its own
 		// cannot: each folder above a read-only path is listed as
@@ -122,7 +153,7 @@ func RenderFence(p *Policy, goos string) (*FenceConfig, error) {
 			AllowRead:  sortedPaths(slices.Concat([]Rule{{Path: p.Home}}, p.Read, writable)),
 			DenyRead:   sortedPaths(p.Exclude),
 			AllowWrite: sortedPaths(writable),
-			DenyWrite:  sortedPaths(slices.Concat(p.Exclude, p.ReadOnly)),
+			DenyWrite:  sortedPaths(slices.Concat(p.Exclude, p.ReadOnly, sealed)),
 		},
 		// The policy holds no command rule: fence's own list of refused
 		// commands is left out, so both backends run the same commands.

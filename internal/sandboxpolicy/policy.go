@@ -54,6 +54,13 @@ type Policy struct {
 	// excluded path there, and the files of the working folder's
 	// repository that git runs or reads outside the sandbox later.
 	ReadOnly []Rule
+	// Sealed lists folders inside a writable folder in which nothing new
+	// may be created; what is already there keeps its own rules. The
+	// project's .ateam is one: every name ateam may read there later is
+	// closed, also the ones that do not exist yet. A backend that closes
+	// paths by name needs nothing more; one that needs a path to exist
+	// (mounts) seals the folder instead.
+	Sealed []Rule
 	// Domains lists the hosts reachable; none closes the network. With at
 	// least one host the command can also use localhost for itself: on
 	// macOS that is the host's localhost, every port (a sandbox there
@@ -107,6 +114,11 @@ type Input struct {
 // generates, and the .gitignore git reads. Everything else there is
 // ateam's own.
 var ateamOpen = []string{"runtime", "shared", "prompts", "cache", ".gitignore"}
+
+// AteamOpenFolders are the folders of a project's .ateam a sandboxed
+// command writes into. In a sealed .ateam they must exist before the
+// launch: the command cannot create them.
+var AteamOpenFolders = []string{"runtime", "shared", "cache"}
 
 // ateamClosed is closed in a project's .ateam even before it exists, so a
 // command cannot create the config its next launch would read.
@@ -266,6 +278,9 @@ func Build(in Input) (*Policy, error) {
 				p.Exclude = append(p.Exclude, Rule{Path: path, Source: ex.Source, Reason: ex.Reason})
 			}
 		}
+	}
+	if dir := filepath.Clean(in.ProjectDir); in.ProjectDir != "" && !in.OpenAteam && p.WritableRoot(dir) != "" && !containsPath(p.Write, RealPath(dir)) {
+		p.Sealed = append(p.Sealed, Rule{Path: dir, Source: "ateam", Reason: "ateam reads this folder outside the sandbox later"})
 	}
 	for _, r := range p.Read {
 		if r.Reopens && !containsPath(p.Write, r.Path) && p.WritableRoot(r.Path) != "" {

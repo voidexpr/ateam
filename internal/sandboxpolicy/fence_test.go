@@ -90,8 +90,26 @@ func TestRenderFenceLinux(t *testing.T) {
 	if net := linux.Network; net.AllowLocalBinding || net.AllowLocalOutbound || !slices.Equal(net.AllowedDomains, []string{"example.com"}) {
 		t.Errorf("network = %+v", net)
 	}
-	if !reflect.DeepEqual(mac.Filesystem.DenyRead, linux.Filesystem.DenyRead) || !reflect.DeepEqual(mac.Filesystem.DenyWrite, linux.Filesystem.DenyWrite) {
-		t.Errorf("the denies must not depend on the system:\n%+v\n%+v", mac.Filesystem, linux.Filesystem)
+	if !reflect.DeepEqual(mac.Filesystem.DenyRead, linux.Filesystem.DenyRead) {
+		t.Errorf("the read denies must not depend on the system:\n%+v\n%+v", mac.Filesystem, linux.Filesystem)
+	}
+	// Linux seals the project's .ateam: the folder is a write deny and the
+	// entries that stay open are allowed inside it, so nothing new can be
+	// created there. macOS closes each name by its path instead.
+	if !slices.Equal(p.Sealed, []Rule{{Path: in.ProjectDir, Source: "ateam", Reason: p.Sealed[0].Reason}}) {
+		t.Fatalf("sealed = %+v", p.Sealed)
+	}
+	if want := sortedStrings(append(slices.Clone(mac.Filesystem.DenyWrite), in.ProjectDir)); !slices.Equal(linux.Filesystem.DenyWrite, want) {
+		t.Errorf("Linux adds the sealed folder to the write denies: %v", linux.Filesystem.DenyWrite)
+	}
+	runtime := filepath.Join(in.ProjectDir, "runtime")
+	if !slices.Contains(linux.Filesystem.AllowWrite, runtime) || slices.Contains(mac.Filesystem.AllowWrite, runtime) {
+		t.Errorf("an open entry of the sealed folder is allowed inside it on Linux only: %v", linux.Filesystem.AllowWrite)
+	}
+	for _, closed := range []string{"ateam.hcl", "notes.md"} {
+		if slices.Contains(linux.Filesystem.AllowWrite, filepath.Join(in.ProjectDir, closed)) {
+			t.Errorf("%s is ateam's own: not writable in the sealed folder", closed)
+		}
 	}
 	git := filepath.Join(in.WorkDir, ".git")
 	if !slices.Contains(linux.Filesystem.AllowWrite, git) || slices.Contains(mac.Filesystem.AllowWrite, git) {
@@ -119,19 +137,24 @@ func TestFenceGaps(t *testing.T) {
 		t.Errorf("Seatbelt closes a path that does not exist: %v", paths(gaps))
 	}
 	gaps := paths(FenceGaps(p, "linux"))
-	for _, want := range []string{
-		filepath.Join(in.ProjectDir, "secrets.env"),
+	if want := filepath.Join(in.WorkDir, ".git", "hooks"); !slices.Contains(gaps, want) {
+		t.Errorf("%s does not exist and can be created: %v", want, gaps)
+	}
+	for _, never := range []string{
+		filepath.Join(in.ProjectDir, "ateam.hcl"),   // exists
+		filepath.Join(in.ProjectDir, "secrets.env"), // in the sealed .ateam: cannot be created
 		filepath.Join(in.ProjectDir, "profiles"),
-		filepath.Join(in.WorkDir, ".git", "hooks"),
+		filepath.Join(in.Home, ".ssh"), in.AteamHome, // outside every writable folder
 	} {
-		if !slices.Contains(gaps, want) {
-			t.Errorf("%s does not exist and can be created: %v", want, gaps)
+		if slices.Contains(gaps, never) {
+			t.Errorf("%s is not a gap: %v", never, gaps)
 		}
 	}
-	for _, never := range []string{filepath.Join(in.ProjectDir, "ateam.hcl"), filepath.Join(in.Home, ".ssh"), in.AteamHome} {
-		if slices.Contains(gaps, never) {
-			t.Errorf("%s exists, or lies outside every writable folder: %v", never, gaps)
-		}
+
+	// A write grant of the project's .ateam itself opens it: not sealed.
+	in.Write = []string{in.ProjectDir}
+	if p, err = Build(in); err != nil || len(p.Sealed) != 0 {
+		t.Errorf("an opened .ateam is not sealed: %+v, %v", p.Sealed, err)
 	}
 }
 
@@ -164,9 +187,18 @@ func TestRenderFenceGrantInsideExclude(t *testing.T) {
 	if p, err = Build(in); err != nil {
 		t.Fatal(err)
 	}
-	_, err = RenderFence(p, "darwin")
+	// A write there: the same carve-out for writes on macOS. On Linux the
+	// fork shows the path read-only, so it is refused and named.
+	if cfg, err = RenderFence(p, "darwin"); err != nil {
+		t.Fatalf("a write inside an excluded folder is a carve-out on macOS: %v", err)
+	}
+	known := filepath.Join(ssh, "known_hosts")
+	if fs := cfg.Filesystem; !slices.Contains(fs.AllowWrite, known) || !slices.Contains(fs.AllowRead, known) || !slices.Contains(fs.DenyWrite, ssh) {
+		t.Errorf("the folder is denied and the path allowed inside it: %+v", fs)
+	}
+	_, err = RenderFence(p, "linux")
 	if err == nil {
-		t.Fatal("a write inside an excluded folder must be refused")
+		t.Fatal("a write inside an excluded folder must be refused on Linux")
 	}
 	for _, want := range []string{ssh, "profile mine", "writable"} {
 		if !strings.Contains(err.Error(), want) {

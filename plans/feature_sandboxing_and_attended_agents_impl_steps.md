@@ -194,12 +194,31 @@ How it was checked:
 
 One difference seen: on Linux a listing of the excluded folder shows the opened entries; on macOS the listing is refused.
 
+### Write carve-outs, 2026-11-24
+
+The fork moved to `fb9d961` (`bf8cb3d`): a literal `allowWrite` path strictly inside a `denyWrite` entry stays writable, with the same precedence as for reads; on macOS the unlink block is reopened for it and the mandatory dangerous-path denies are repeated after; on Linux a writable bind after the read-only one. Also: on macOS a `denyRead` entry given by a link denies the link itself. `CheckWritePath` follows.
+
+What changed in ateam:
+
+- `Policy.Sealed`: folders inside a writable folder in which nothing new may be created. `Build` seals the project's `.ateam` (unless `ateam_files` is open or a write grant names it).
+- `RenderFence`, Linux: a sealed folder is a write deny on the folder, with each entry that no exclude or read-only rule covers allowed inside it. `ateam` creates `runtime/`, `shared/` and `cache/` there before the launch, since the command no longer can. `FenceGaps` no longer lists what lies in a sealed folder.
+- `RenderFence`, macOS: a write inside a folder that stays excluded is accepted. Linux: still refused, see below.
+- nono and fence on macOS do not use `Sealed`: they close each name by its path.
+- Kept: `splitAround` for `~/.ateam`, because of the Linux case below.
+
+How it was checked:
+
+- Linux, Debian container, as root: `base` 25 of 25 and every check after the run: `.ateam/profiles` can no longer be created, `.ateam/shared` is writable. `carve` 8 of 8. By hand, the same with a hand-written configuration.
+- macOS: unit tests; fence's own check accepts a write inside an excluded folder. Not run for real: `make test-sandbox`, where `fence carve-write` is now expected to pass.
+
+**Found in the fork, Linux:** a write opened inside a folder that is denied for reads and for writes (what ateam's `exclude` is) does not work. With `/root/secret` excluded and `--write /root/secret/rw`: the folder lists `rw`, and writing into it fails with "Read-only file system". The writable mount is dropped because its closest ancestor mount is the mask of the folder; the reveal of the path itself is a read-only bind. Expected: the path revealed read-write. ateam refuses this case on Linux until it is fixed; `carve-write` reports it as known.
+
 Wanted next in the fork, by value for ateam:
 
-1. **Write carve-outs**: an `allowWrite` path inside a `denyWrite` entry stays writable (macOS: allow after deny, and the unlink block reopened for it; Linux: a writable bind after the read-only one). It closes the Linux gap below: the project's `.ateam` would be read-only as a whole with its open entries writable, so nothing can be created in it. It also lets `--write` work inside an excluded folder and would retire `splitAround`.
-2. **Deny the link itself**: for a denied path that is a link, also deny the link's own spelling, not only its target (today the link's name and target stay visible on macOS).
-3. **No silent fallback on Linux**: an option that makes fence fail instead of continuing without a network namespace. ateam makes fence's probe itself today (`fencePreflight`); an option would remove the duplicate.
-4. Minor: served ports in the configuration file (today only through `Manager.SetService`, hence `fence-exec --expose`).
+1. **Linux: a writable carve-out inside a masked folder** (above). It would let `--write` work inside an excluded folder on Linux and retire `splitAround`.
+2. **No silent fallback on Linux**: an option that makes fence fail instead of continuing without a network namespace. ateam makes fence's probe itself today (`fencePreflight`); an option would remove the duplicate.
+3. Minor: served ports in the configuration file (today only through `Manager.SetService`, hence `fence-exec --expose`).
+4. Not asked for yet: closing a path that does not exist (a missing `.git/hooks`); sealing covers `.ateam` only.
 
 ## fence on Linux
 
