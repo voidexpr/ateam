@@ -216,7 +216,7 @@ The Linux rows come from each tool's documentation, not from runs by ateam. Insi
 
 ### Limits
 
-- fence on Linux is experimental (checked by the probes on a desktop as a plain user and in a Debian container, 2026-11-23; not yet with an interactive session or an agent run):
+- fence on Linux is experimental (checked by the probes on a desktop as a plain user and in a Debian container, 2026-11-23; an interactive shell only through a pseudo-terminal in the container; not yet with an agent run):
   - Needs `bwrap` and `socat`. When `bwrap` cannot create a network namespace (a Docker container without `NET_ADMIN`, a CI runner, AppArmor on Ubuntu 24.04), the launch is refused: fence would otherwise go on with the proxy variables as the only network rule.
   - Localhost is closed, also with domains: fence reaches the host's localhost one listed port at a time there, which a profile cannot say yet.
   - **A protected path that does not exist yet can be created.** fence closes a path with a mount, which needs the path to exist. Inside a writable folder, a command can create `.ateam/profiles/`, `.ateam/secrets.env` or a missing `.git/hooks`. ateam lists these paths on stderr at every launch (`NOT ENFORCED`) and in `--dry-run`. With `strict = true` on the container, the launch is refused instead.

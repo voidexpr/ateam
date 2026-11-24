@@ -191,7 +191,12 @@ Real runs by the owner, 2026-11-23, `0621639`:
 - meerdog, as a plain user: the network namespace is available. `base` 24 of 25 inside and 7 of 8 after the run; the one failure is the creation of `.ateam/profiles`, the stated gap. `carve` refused at launch as expected.
 - macOS, with the changed probe script: nono `base` 25 of 25, `carve` 8 of 8; fence `base` 25 of 25; every check after the run passes for both.
 
-Not checked: an interactive shell (the fence command relays a terminal on Linux, the library does not); an agent turn.
+Checked in the container afterwards, 2026-11-23:
+
+- An interactive `ateam shell --profile sandbox/fence`, driven through a pseudo-terminal (`script`): prompt, a background job, `jobs`, `kill %1`, no job-control warning, `ATEAM_IN_SANDBOX=1`.
+- A writable entry inside a read-only folder, by hand (`allowWrite` of `.ateam/shared` and `.ateam/runtime`, `denyWrite` of `.ateam`): refused, the deny wins. So the gap below cannot be closed from ateam's side by making the project's `.ateam` read-only around its open entries; option (a) is the only way to prevent.
+
+Not checked: an interactive shell on a real terminal (meerdog); an agent turn on Linux.
 
 The gap, to decide:
 
