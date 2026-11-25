@@ -121,6 +121,18 @@ ateam run --profile myproject --dry-run -- make test    # the rules and the nono
 ateam profile export myproject --out ~/sandboxes/myproject
 ```
 
+`ateam probe` checks instead of describing: what the environment can read, write, reach and do, as a table of `ok`, `RISK` and `UNMET` rows ([COMMANDS.md](COMMANDS.md#ateam-probe)).
+
+```bash
+ateam probe                                            # this environment, nothing started
+ateam probe --profile myproject                        # compared with what the profile asks for
+ateam probe --start-sandbox --profile myproject        # inside the sandbox the profile starts
+```
+
+- Run it inside any sandbox or container, ateam's or not: it needs no configuration.
+- `RISK` is more open than it should be (an excluded path that is readable); `UNMET` is more closed than the profile asks (a `write` folder that is refused, an allowed host that does not answer).
+- One limit under fence on Linux: a write into an excluded folder inside a writable one succeeds in a throwaway copy, and from inside that looks like `write`.
+
 `profile export` writes the nono profile (`profile.json`), a script with the command line (`run.sh`) and the list of rules with their origin (`RULES.md`). The files do not reference ateam. Use them to troubleshoot, to reach a nono feature ateam does not expose, or, if you do not trust ateam itself, to run it under rules you edited.
 
 When something is refused inside the sandbox, nono names the path or host at the end of the run. Add it to a profile:

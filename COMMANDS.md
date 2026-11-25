@@ -484,6 +484,66 @@ ateam chat --profile sandbox/nono,dev/go --write ~/SyncDatabox/dotfiles
 ateam shell --profile myproject
 ```
 
+### `ateam probe`
+
+Report what the environment ateam runs in can read, write, replace, reach and do: a plain terminal, a sandbox (ateam's or another), a container, a remote host. Background: [ISOLATION.md → Seeing what a profile does](ISOLATION.md#seeing-what-a-profile-does).
+
+```bash
+ateam probe [flags] [PATH]...
+```
+
+Nothing is started unless asked for, and the first line of the output says what was.
+
+| Flag | Description |
+|------|-------------|
+| `PATH`... | Extra paths to check. |
+| `--profile`, `--read`, `--write`, `--exclude`, `--domain`, `--deny-domain`, `--listen` | The launch flags of `run`. Alone they start nothing: the current environment is compared with what the profile asks for. |
+| `--start-sandbox` | Start the sandbox the profile describes and run the checks inside it. From a plain terminal: a sandbox does not start inside another. |
+| `--with ID` | Also run an active check, which starts something: `playwright-launch`, `docker-build`, `docker-build-expand-bind`. Repeatable, comma-separated. |
+| `--only LIST`, `--skip LIST` | Groups or check ids to run, or to leave out. Repeatable, comma-separated. |
+| `--list` | Print every group and check, whether it is on, and what an active one starts. Check nothing. |
+| `--program NAME`, `--connect HOST[:PORT]`, `--url URL`, `--listen-check [ADDR:]PORT` | Extra targets. Repeatable. |
+| `--all` | Also list the ok rows with nothing there, and each row of a folded line. |
+| `--quiet` | Only the rows that are not ok. |
+| `--json` | One JSON document. Ids of the built-in checks are the same on every machine: compare two documents with a diff tool. |
+| `--dry-run` | Print the checks that would run, what each is compared with, and with `--start-sandbox` the sandbox command line. Check nothing. |
+
+Each row is a verdict, what was found, a type and a name:
+
+```
+nothing started: checking this environment
+linux, user: root, proxy: none, isolation: marker:/.dockerenv
+
+secrets
+  RISK   read     file        ~/.npmrc                 may hold credentials
+  RISK   set      env         GH_TOKEN                 a variable that looks like a credential: ...
+  ok     blocked  file        ~/.ssh
+docker
+  RISK   present  capability  docker daemon            rootful, ...; cannot tell if limited: --with docker-build
+```
+
+- Types and what can be found: `file` (`absent`, `create`, `blocked`, `read`, `write`, `connect` for a socket), `network` (`blocked`, `connect`, `listen`), `capability` (`absent`, `present`, and for an active check `works`, `fails`), `env` (`set`).
+- Verdicts: `ok`; `RISK`, more open than it should be; `UNMET`, more closed than the profile asks (only with a profile).
+- Groups: `profile`, `paths`, `where`, `secrets`, `shell`, `agent`, `ateam`, `git`, `programs`, `sockets`, `docker`, `playwright`, `identity`, `mounts`, `network`.
+- Beside the fixed lists, files, variables and sibling projects are discovered **by name** (`id_*`, `*.pem`, `.env*`, `*TOKEN*`, ...), to a bounded depth. A secret in a file called `notes.txt` is not found. No file content and no variable value is read or printed.
+- The checks change nothing that exists: a file is opened and never written; a folder gets one empty `.ateam-probe-*` file that is removed at once. A path with nothing there is tested by creating an empty file at that path and removing it at once (a sandbox refuses by name); if the removal fails, the path is printed.
+- The `network` group leaves the machine (`example.com`, `1.1.1.1`, a DNS lookup): `--skip network`.
+- Without a sandbox, most rows are a `RISK`: that is the answer. The header says `isolation: none detected`.
+- On macOS, reading `~/Documents`, `~/Desktop` or `~/Downloads` from a plain terminal can make the system ask for permission; a refusal shows as `blocked`.
+- Exit code: 0 when every row is ok, 1 with a `RISK` or an `UNMET`, 2 for a usage or launch error.
+
+```bash
+ateam probe                                    # where am I, what is open?
+ateam probe ~/.ssh ./secrets.env --only paths
+ateam probe --skip network,programs --quiet
+ateam probe --profile dev/go                   # does this environment give what dev/go needs?
+ateam probe --start-sandbox --profile sandbox/nono,dev/go
+ateam probe --with docker-build,docker-build-expand-bind --only docker
+ateam probe --json > mac-nono.json
+```
+
+On a remote host or in a container, copy the Linux binary (`build/ateam-linux-<arch>`, from `make companion`) and run it there: it needs no configuration.
+
 ### `ateam profile`
 
 ```bash

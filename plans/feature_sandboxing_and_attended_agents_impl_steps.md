@@ -145,6 +145,8 @@ Not checked:
 
 ## Sandbox probes
 
+2026-11-24: `ateam probe` is built (`plans/feature_sandbox_audit.md`, branch `worktree-ateam-probe`): the same kind of checks as a command, in place or inside a sandbox it starts, with `make test-probe` for the real runs. The shell probes below stay the reference for renames, thrown-away writes and ports reached from the host, until the command's phase 2.
+
 `test/sandbox/run-probes.sh` starts `test/sandbox/sandbox-probe.sh` under `ateam run --profile sandbox/BACKEND` in a scratch project (`~/.cache/ateam-sandbox-probe`, with its own `ATEAM_HOME`) and prints PASS or FAIL per expectation. Same script on macOS and Linux, for both backends.
 
 - `make test-sandbox`, `make test-sandbox-nono`, `make test-sandbox-fence`. From a plain terminal: a sandbox cannot start inside another one. Not part of `make test-all`. On Linux nono is skipped: ateam supports it on macOS only.

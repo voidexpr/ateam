@@ -21,6 +21,8 @@ Cells for the Claude sandbox come from a summarised read of its documentation: c
 - **ateam's fork**: `github.com/voidexpr/fence`, branch `fork`, pinned in `go.mod` by a `replace` line (`7c71685`: upstream's main branch plus the carve-out changes). The changes: a literal `allowRead` path strictly inside a `denyRead` entry stays readable, and a literal `allowWrite` path strictly inside a `denyWrite` entry stays writable; the deepest path wins and a deny wins a tie. On macOS a denied path that is a link is denied as a link too.
 - Network rules, the mechanism and where a sandbox can start are the same in both: the tables below have one fence column for them.
 
+Reproducing a cell: `ateam probe --start-sandbox --profile sandbox/BACKEND ...` runs the same checks inside each backend and prints one row per path and host; `--json` gives a document per system to compare ([COMMANDS.md](COMMANDS.md#ateam-probe)). `make test-probe` keeps the outputs in `test_data/probe-runs/`. The rows on renames, on a write that is thrown away and on a port reached from the host are not covered by it yet: `make test-sandbox` still is the reference for those.
+
 ## Mechanism
 
 | | macOS | Linux |

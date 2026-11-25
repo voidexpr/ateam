@@ -66,7 +66,10 @@ type launchPlan struct {
 	grantDir  string   // the folder the sandbox makes writable
 	ateamHome string
 	policy    *sandboxpolicy.Policy // nil without a sandbox backend
-	files     []string              // profile files named by path
+	// silent keeps the backend's own messages off the terminal: for a
+	// launch whose output is a report of its own.
+	silent bool
+	files  []string // profile files named by path
 }
 
 // launchPlaces returns the folder a launch may write (the project root
@@ -304,7 +307,7 @@ func (p *launchPlan) wrapped(ctx context.Context, mode launchMode, profileFile s
 	if mode == modeChat && p.agentCfg.TypeName() == agent.NameClaude && !slices.Contains(argv, "--settings") {
 		argv = append([]string{argv[0], "--settings", claudeSandboxOff}, argv[1:]...)
 	}
-	prefix, err := sandboxPrefix(ctx, p.policy, p.container, profileFile, false)
+	prefix, err := sandboxPrefix(ctx, p.policy, p.container, profileFile, p.silent)
 	if err != nil {
 		return nil, err
 	}
@@ -414,6 +417,14 @@ func shellJoin(argv []string) string {
 	return strings.Join(quoted, " ")
 }
 
+// launchFiles returns where this process keeps the backend profile of its
+// launch and the copy of the git files it guards. Old profiles are pruned.
+func launchFiles(ateamHome string) (profileFile, gitBackup string) {
+	dir := sandboxStateDir(ateamHome)
+	pruneSandboxProfiles(dir)
+	return filepath.Join(dir, fmt.Sprintf("profile.%d.json", os.Getpid())), filepath.Join(dir, fmt.Sprintf("git.%d", os.Getpid()))
+}
+
 // runLaunch plans a launch and runs it, or with --dry-run prints what it
 // would run. Without a sandbox the command replaces this process; under
 // one, ateam waits for it to compare the repository's hooks afterwards.
@@ -422,9 +433,7 @@ func runLaunch(f *launchFlags, mode launchMode, args []string) error {
 	if err != nil {
 		return err
 	}
-	dir := sandboxStateDir(plan.ateamHome)
-	pruneSandboxProfiles(dir)
-	profileFile := filepath.Join(dir, fmt.Sprintf("profile.%d.json", os.Getpid()))
+	profileFile, gitBackup := launchFiles(plan.ateamHome)
 	argv, err := plan.wrapped(context.Background(), mode, profileFile)
 	if err != nil {
 		return err
@@ -438,7 +447,7 @@ func runLaunch(f *launchFlags, mode launchMode, args []string) error {
 	if plan.policy == nil {
 		return syscall.Exec(argv[0], argv, os.Environ())
 	}
-	code := runGuarded(argv, plan.policy.WorkDir, filepath.Join(dir, fmt.Sprintf("git.%d", os.Getpid())))
+	code := runGuarded(argv, plan.policy.WorkDir, gitBackup)
 	if code != 0 {
 		os.Exit(code)
 	}

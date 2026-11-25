@@ -235,6 +235,10 @@ ateam chat --profile sandbox/nono,dev/go
 ateam run --profile sandbox/nono,dev/go -- make test
 ateam shell --profile sandbox/nono,dev/go
 
+# what can this environment (a terminal, a sandbox, a container) read, write and reach?
+ateam probe
+ateam probe --start-sandbox --profile sandbox/nono,dev/go
+
 # save how this project runs, then reuse it
 ateam profile save myproject --profile sandbox/nono,dev/go --write ~/some/other/dir
 ateam chat --profile myproject

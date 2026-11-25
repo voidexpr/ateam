@@ -5,7 +5,7 @@ GO_CMD ?= go
 GO := GOCACHE=$(GO_CACHE_DIR) $(GO_CMD)
 GO_INSTALL := GOBIN=$(GO_TOOL_BIN) $(GO)
 
-.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy update-autoversion check-tidy check-docs check test test-all test-cli test-sandbox test-sandbox-nono test-sandbox-fence test-sandbox-docker test-docker test-docker-live claude-in-docker vuln deadcode docs lint fmt fmt-check run-ci
+.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy update-autoversion check-tidy check-docs check test test-all test-cli test-sandbox test-sandbox-nono test-sandbox-fence test-sandbox-docker test-probe test-docker test-docker-live claude-in-docker vuln deadcode docs lint fmt fmt-check run-ci
 
 BUILD_TIME := $(shell python3 -c 'import time; print(f"{time.time():.6f}")' 2>/dev/null || date +%s)
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
@@ -109,6 +109,15 @@ test-sandbox-fence: build-binary
 # script). Runs from macOS and from an agent's sandbox.
 test-sandbox-docker: companion
 	./test/sandbox/run-probes-in-docker.sh build/ateam-linux-$(HOST_ARCH)
+
+# Real runs of `ateam probe`: in place, compared with a profile, inside
+# each sandbox backend, with the active probe scripts, and the Linux binary
+# in a Debian container. Each output is kept in test_data/probe-runs/.
+# Run from a plain terminal: the sandbox launches and the browser do not
+# work inside an agent's sandbox. PROBE_RUNS picks runs, e.g.
+# `make test-probe PROBE_RUNS="plain linux"`. Not part of test-all.
+test-probe: build-all
+	./test/sandbox/run-probe-command.sh $(PROBE_RUNS)
 
 test-all: test test-cli test-docker test-docker-live
 

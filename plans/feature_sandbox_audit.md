@@ -1,6 +1,26 @@
 # Environment audit command: `ateam probe`
 
-Status, 2026-11-24: spec, not built. Second version, after a review with the owner the same day. Written for the agent that builds it.
+Status, 2026-11-24: built on the branch `worktree-ateam-probe`, all seven steps. Unit tests pass. Real runs done by the agent: in place inside Claude's sandbox on macOS, the three probe scripts there, and the Linux binary as root in a Debian container. Not run yet, by the owner from a plain terminal (`make test-probe`): `--start-sandbox` under nono and fence, a plain terminal, `playwright-launch` where a browser can start, Linux outside a container.
+
+## Where the build differs from the spec below
+
+- **`create` is tested at the path itself** (decided by the owner, 2026-11-24, after the first real runs). An empty file is created at the missing path with `O_CREATE|O_EXCL` and removed at once. A marker in the folder above does not see a sandbox that refuses by name: it reported `.ateam/profiles` as creatable under nono and fence on macOS, where it is not. This replaces "the only thing the command ever creates is its marker file" below. Exceptions: a path whose folder is missing too is tested through the nearest folder that exists; a file a running program would trust (`-wal`, `-shm`, `-journal`, `.lock`, `.pid`) is not tried and shows as `absent`, with a detail that says so.
+- **Network**: a blocked connection says why. An answer whose certificate is not trusted is asked again without checking it, and counts as a connection: a proxy that intercepts TLS accepts the tunnel of a host it refuses.
+- **Two more groups**: `profile` (the checks made from a profile's rules) and `paths` (the paths given on the command line).
+- **The readable home is not a profile rule.** Only rules a profile states replace a built-in judgment. Otherwise `--profile dev/go`, which does not exclude `~/.ssh`, made a readable `~/.ssh` expected.
+- **Folded rows.** The ok rows of quiet checks (programs present, their files, the folders of `PATH`) are one line per group. More than three `RISK create` rows in a group (paths with nothing there, under a writable folder) are one line. `--all` lists each. An ok row with `create` is left out like one with `absent`.
+- **A variable that is not set** gives an `absent` row, left out by default, instead of no row: the list is built outside a sandbox and checked inside.
+- **Variable names**: `AWS_*` is not a pattern. `AWS_SECRET_ACCESS_KEY` and the like match `SECRET`, `KEY`, `TOKEN`; `AWS_REGION` is no secret. Added: `PASSWD`, `CREDENTIAL`, `DATABASE_URL`, `KUBECONFIG`, `NETRC`.
+- **Secret file names** in a working folder skip source and text files (`token.go`, `.env.example`) and public keys.
+- **`docker-build`** builds `FROM scratch` with one empty file: nothing is pulled, so the answer does not depend on a registry. It keeps the builder's state in its scratch folder, since `~/.docker` may be closed.
+- **`docker-build-expand-bind`** proves the mount with a regular file known on the host. A daemon in a VM that does not share the folder mounts an empty folder of its own, which a count of entries took for the host's.
+- **Scripts** get `ATEAM_PROBE_WORKDIR` and `ATEAM_PROBE_HOME`; their own working folder is a scratch folder.
+- **Mounts** are listed only in place: inside a sandbox ateam starts they are the sandbox's own.
+- **Listening, the own loopback and DNS are not judged under a profile**: backends differ on them without a rule saying so.
+- **`--start-sandbox` inside a sandbox**: refused when ateam's detection sees one (`ATEAM_IN_SANDBOX`, a container marker). Detection of other sandboxes is off by default in ateam, so there the launch is tried, after a warning.
+- **The header's isolation** uses the sandbox detection even when it is off for launches. On macOS that runs `sandbox-exec ... /usr/bin/true` once.
+- **The encoded check list** is gzip and base64: one argument is limited to 128 KiB on Linux.
+- **Not built**: the `discarded` outcome and the checks from outside (phase 2, as planned).
 
 Context to read first: `ISOLATION.md` (mode ⑤), `SANDBOX_DIFFERENCES.md`, `plans/feature_sandboxing_and_attended_agents_impl_steps.md` (sections "Sandbox probes", "fence on Linux", "Network rules"), `test/sandbox/run-probes.sh` and `sandbox-probe.sh` (the shell probes this command grows out of).
 

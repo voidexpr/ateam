@@ -359,6 +359,46 @@ profile "docker-data" {
 
 Relative host paths in `extra_volumes` are resolved from the project source directory, making the config portable across machines. `container_extra_args` passes raw flags to `docker run` for resource limits, network modes, or capabilities that don't have dedicated config fields.
 
+## Adding a probe
+
+`ateam probe` has two kinds of checks.
+
+**Passive checks** are Go, in `internal/sandboxprobe/`. A file, a network destination or a variable needs no new code: add an entry to the list of its group in `defaults.go` (`secretChecks`, `agentChecks`, `networkChecks`, ...), with the permissions that are safe. A check is one `Check` value; `Method` says how it is carried out (`CheckFile`, `CheckNet`), `Safe` what is no risk (`nil`: reported, not judged). Add a group name to `Groups` when it is new.
+
+**Active checks** start something (a container, a browser), so they are off unless `--with ID` names them. Each is one shell script in `defaults/probes/<id>.sh`, embedded in the binary: adding one needs no Go change.
+
+```sh
+#!/bin/sh
+# id: docker-build
+# group: docker
+# target: docker build
+# why: a command that can build an image can put anything in it and run it
+# starts: builds one image from scratch with one empty file (nothing is pulled), then removes it
+# risk: works
+# needs: docker
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | The file's name without `.sh`. What `--with` and `--only` take. |
+| `group` | A name of `sandboxprobe.Groups`. |
+| `target` | The name column of the report. |
+| `why` | Shown when the result is a `RISK`. |
+| `starts` | One line: what the script starts and removes. Printed by `--list` and as the first line of a run. |
+| `risk` | The result that is a `RISK`: `works`, `fails`, or `none` (reported only). |
+| `needs` | Optional. Programs, space-separated: when one is not in `PATH` the result is `absent` and the script does not run. |
+
+Contract:
+
+- Run as `sh -s` with the script on stdin, in an empty scratch folder that is removed afterwards. `ATEAM_PROBE_WORKDIR` and `ATEAM_PROBE_HOME` name the working folder and the home.
+- Exit 0: `works`. Exit 1: `fails`. Any other code, or no end within 60 seconds: `fails`, marked `unknown` and never a `RISK`. Use another code for "this script could not tell".
+- The first line printed on stdout is the detail column. Nothing else is kept; stderr is dropped.
+- Clean up with a `trap`, and name what you create `ateam-probe-$$` so a leftover can be found.
+- Exercise the capability and nothing else: never read, list or print the owner's files, never send anything beyond what the capability needs. A script may write only in its scratch folder.
+- Prove the answer. `docker-build-expand-bind` checks that a file known on the host is seen in the container: counting entries would take an empty folder created by a VM-based daemon for the host's.
+
+Testing one: `go test ./internal/sandboxprobe` checks every embedded script's header; then `make build && ./ateam probe --only ID --with ID`, and `./ateam probe --list` for its `starts` line. Add its id to the `active` run of `test/sandbox/run-probe-command.sh`.
+
 ## Embedded defaults and the pricing refresh contract
 
 `defaults/ateam.hcl` is embedded in the binary (`defaults/embed.go`) as the `built-in` layer, and it is also read over the network by binaries already released: `ateam setup --refresh-models` (`cmd/setup_model.go::refreshPricing`) fetches the copy on `main` from `DefaultsURL` (`https://raw.githubusercontent.com/voidexpr/ateam/main/defaults/ateam.hcl`), parses the whole file with that binary's decoder (`runtime.ParseDefaults`), refuses it when `pricing_as_of` is missing, and writes `pricing_as_of` plus every agent `pricing` block into the managed section of `~/.ateam/ateam.hcl` (`RenderPricingSection` / `ReplacePricingSection`, between the `// >>> ateam pricing` markers).

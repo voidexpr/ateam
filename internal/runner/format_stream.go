@@ -357,52 +357,31 @@ func toolDetail(name string, input json.RawMessage) string {
 // ANSI color helpers
 
 func (f *StreamFormatter) dim(s string) string {
-	if !f.Color {
-		return s
-	}
-	return "\033[2m" + s + "\033[0m"
+	return display.Paint(f.Color, s, display.StyleDim)
 }
 
 func (f *StreamFormatter) boldMagenta(s string) string {
-	if !f.Color {
-		return s
-	}
-	return "\033[1m\033[35m" + s + "\033[0m"
+	return display.Paint(f.Color, s, display.StyleBold, display.StyleMagenta)
 }
 
 func (f *StreamFormatter) cyan(s string) string {
-	if !f.Color {
-		return s
-	}
-	return "\033[36m" + s + "\033[0m"
+	return display.Paint(f.Color, s, display.StyleCyan)
 }
 
 func (f *StreamFormatter) boldCyan(s string) string {
-	if !f.Color {
-		return s
-	}
-	return "\033[1m\033[36m" + s + "\033[0m"
+	return display.Paint(f.Color, s, display.StyleBold, display.StyleCyan)
 }
 
 func (f *StreamFormatter) yellow(s string) string {
-	if !f.Color {
-		return s
-	}
-	return "\033[33m" + s + "\033[0m"
+	return display.Paint(f.Color, s, display.StyleYellow)
 }
 
 func (f *StreamFormatter) boldGreen(s string) string {
-	if !f.Color {
-		return s
-	}
-	return "\033[1m\033[32m" + s + "\033[0m"
+	return display.Paint(f.Color, s, display.StyleBold, display.StyleGreen)
 }
 
 func (f *StreamFormatter) red(s string) string {
-	if !f.Color {
-		return s
-	}
-	return "\033[31m" + s + "\033[0m"
+	return display.Paint(f.Color, s, display.StyleRed)
 }
 
 // SingleLineText collapses a multi-line string into a single trimmed line.
