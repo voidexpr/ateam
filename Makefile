@@ -5,7 +5,7 @@ GO_CMD ?= go
 GO := GOCACHE=$(GO_CACHE_DIR) $(GO_CMD)
 GO_INSTALL := GOBIN=$(GO_TOOL_BIN) $(GO)
 
-.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy update-autoversion check-tidy check-docs check test test-all test-cli test-sandbox test-sandbox-nono test-sandbox-fence test-docker test-docker-live claude-in-docker vuln deadcode docs lint fmt fmt-check run-ci
+.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy update-autoversion check-tidy check-docs check test test-all test-cli test-sandbox test-sandbox-nono test-sandbox-fence test-sandbox-docker test-docker test-docker-live claude-in-docker vuln deadcode docs lint fmt fmt-check run-ci
 
 BUILD_TIME := $(shell python3 -c 'import time; print(f"{time.time():.6f}")' 2>/dev/null || date +%s)
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
@@ -104,6 +104,11 @@ test-sandbox-nono: build-binary
 
 test-sandbox-fence: build-binary
 	./test/sandbox/run-probes.sh fence
+
+# The fence probes on Linux, in a Debian container (as root: see the
+# script). Runs from macOS and from an agent's sandbox.
+test-sandbox-docker: companion
+	./test/sandbox/run-probes-in-docker.sh build/ateam-linux-$(HOST_ARCH)
 
 test-all: test test-cli test-docker test-docker-live
 

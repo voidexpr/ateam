@@ -147,7 +147,8 @@ Not checked:
 
 `test/sandbox/run-probes.sh` starts `test/sandbox/sandbox-probe.sh` under `ateam run --profile sandbox/BACKEND` in a scratch project (`~/.cache/ateam-sandbox-probe`, with its own `ATEAM_HOME`) and prints PASS or FAIL per expectation. Same script on macOS and Linux, for both backends.
 
-- `make test-sandbox`, `make test-sandbox-nono`, `make test-sandbox-fence`. From a plain terminal: a sandbox cannot start inside another one. Not part of `make test-all`.
+- `make test-sandbox`, `make test-sandbox-nono`, `make test-sandbox-fence`. From a plain terminal: a sandbox cannot start inside another one. Not part of `make test-all`. On Linux nono is skipped: ateam supports it on macOS only.
+- `make test-sandbox-docker`: the fence probes on Linux in a Debian container (`run-probes-in-docker.sh`), as root, with the capabilities bwrap needs. It also shows the refusal a plain user gets there. This one runs from macOS and from an agent's sandbox.
 - Suite `base`: the working folder and a `--write` path writable; the rest of the home readable and not writable; an excluded folder closed for reads and writes, outside and inside the working folder, and not renamable; ateam's own files closed, `.ateam/shared` open; `~/.ssh` closed; git status, add and commit working with `.git/config` and `.git/hooks` read-only and `.git` not renamable; a `--domain` host reachable and another refused.
 - Suite `carve`: a `--read` inside an excluded folder, outside and inside the working folder (there it stays read-only). Passes under nono and under fence since the fork.
 - Suite `carve-write`: a `--write` inside an excluded folder. Under fence the launch is refused, which the script reports as known.
@@ -219,6 +220,8 @@ After the fix, in ateam:
 - `carve-write` is expected to pass under fence everywhere; the "known refusal" branch of `run-probes.sh` is gone.
 
 Checked on Linux, Debian container, as root, with `7c71685`: `base` 25 of 25, `carve` 8 of 8, `carve-write` 3 of 3. By hand, with `~/.ateam` excluded and two write grants inside it two levels down: both writable and the output is on the host; `secrets.env`, `state.sqlite` and another agent's folder are hidden; nothing can be created in `~/.ateam`; a listing shows only the folders that lead to the grants. Not run for real on macOS.
+
+Real runs by the owner, 2026-11-24, `39c4249`: macOS, `make test-sandbox`: all six suites pass (nono and fence; `fence carve-write` for the first time). meerdog, as a plain user: fence `base` 25 of 25, `carve` 8 of 8, `carve-write` 3 of 3, with every check after the run.
 
 Note for `make update-fence`: `@fork` is resolved by the Go proxy, which caches a branch for a while. Right after a push it still gives the previous commit; pin the commit hash instead (`go mod edit -replace ...=github.com/voidexpr/fence@<hash>`).
 
@@ -317,11 +320,30 @@ Tasks for later, not ordered:
 
 ## Notes for whoever continues
 
+State on 2026-11-24, `39c4249` plus the probe fixes after it: nono (macOS) and fence (macOS, Linux) enforce every rule of a profile and pass every probe in real runs. What each can express: `SANDBOX_DIFFERENCES.md`.
+
+Checking your work:
+
+- A sandbox cannot start inside an agent's own sandbox (`sandbox_apply: Operation not permitted`). So `make test-sandbox` is the owner's to run, from a plain terminal, on macOS and on meerdog (Linux).
+- What an agent can run itself: unit tests; `SANDBOX_PROBE_DRY_RUN=1 make test-sandbox` (plans every launch, runs fence's own pre-launch check); `make test-sandbox-docker` (the real fence probes on Linux, in a container). Docker is reachable from the agent's sandbox, but host folders are not shared with it: copy files in with `docker cp`, as `run-probes-in-docker.sh` does.
+- The fence library can also be asked for the Seatbelt profile it generates without running it: see `cmd/sandbox_fence_test.go`.
+- `make test` has one failure from an agent's sandbox, `TestValidateLocalPath/dot-claude_rejected`, also on an unmodified tree. Not ours.
+- `make test-docker` cannot run from an agent's sandbox: ask the owner after changes to `internal/container/`, `internal/runner/`, `internal/agent/`, `cmd/runner_setup.go`.
+- Do not write probes that modify the owner's real files. Probes work in `~/.cache/ateam-sandbox-probe` with their own `ATEAM_HOME`.
+
+Dependencies:
+
+- A dependency must be fetchable by CI and by other users. autoversion (`github.com/voidexpr/autoversion`) and the fence fork (`github.com/voidexpr/fence`, branch `fork`) are public and pinned by commit.
+- The `go` command cannot check TLS certificates from an agent's sandbox, so `go get` and `go mod tidy` fail on anything not in the module cache. `curl` works. To add or bump a module: copy its `.info`, `.mod` and `.zip` from `https://proxy.golang.org/<module>/@v/<version>.*` into a folder laid out the same way, run `go` with `GOPROXY=file://<folder> GOSUMDB=off`, then compare every new `go.sum` line with `https://sum.golang.org/lookup/<module>@<version>`. `make check-tidy` needs the same two variables.
+- To pin the fence fork after a push, use the commit, not the branch: `https://proxy.golang.org/github.com/voidexpr/fence/@v/<full hash>.info` gives the version to put in the `replace` line. `@fork` is cached by the proxy and returns the previous commit for a while.
+
+Code:
+
 - Read `CONCURRENCY.md` before touching `internal/container/` or `internal/runner/`: `SandboxContainer` (nono and fence) is immutable after construction on purpose. A fence run starts its own `ateam fence-exec` process, which holds that run's proxies: nothing is shared between runs.
-- The `go` command cannot check TLS from an agent's sandbox, so it cannot fetch a module. To add or update one: let the owner run `go get`, or fetch the module files with `curl` into a `file://` proxy and compare the new `go.sum` lines with sum.golang.org.
-- A nono launch cannot be started from inside another Seatbelt sandbox (an agent's shell). Test by printing the command with `--dry-run` and running `nono` outside, or run ateam from a plain terminal.
-- nono's inspection commands take three seconds each on a fresh home unless `NONO_NO_UPDATE_CHECK=1` is set; ateam sets it.
-- `unsafe_macos_seatbelt_rules` is a top-level profile key, accepted by `nono profile validate`, absent from `nono profile guide`.
-- Commit only when the owner asks; before a commit run `make run-ci`. `make test-docker` cannot run from an agent's sandbox: ask the owner after changes to `internal/container/`, `internal/runner/`, `internal/agent/`, `cmd/runner_setup.go`.
-- A dependency must be fetchable by CI and by other users: check that before adding one (fence included).
-- autoversion is public at `github.com/voidexpr/autoversion` and has no tags: `make update-autoversion` pins the latest commit of `main`; `go.mod` records it. It was private at first, which broke the Docker test build: a dependency must be fetchable by CI and by other users.
+- Attended and unattended runs share one policy path (`buildSandboxPolicy`). A rule a backend cannot express is an error that names the rule; the one stated exception is `FenceGaps` (a warning, or an error with `strict`).
+- nono's inspection commands take three seconds each on a fresh home unless `NONO_NO_UPDATE_CHECK=1` is set; ateam sets it. `unsafe_macos_seatbelt_rules` is a top-level nono profile key, accepted by `nono profile validate`, absent from `nono profile guide`.
+
+Commits:
+
+- Only when the owner asks. No git hook exists any more: run `make run-ci` (or its parts) yourself first.
+- Add files by name, not `git add -A`: the owner and other agents work in this tree too, and another agent has a worktree under `.claude/worktrees/`.

@@ -41,6 +41,7 @@ A Go CLI to manage unattended agent + software engineering quality oriented prom
 
 ### Sandbox backends (nono, fence)
 * `make test-sandbox` (or `test-sandbox-nono`, `test-sandbox-fence`): real launches of a probe under each sandbox backend, in a scratch project. Cannot run from an agent's sandbox (a sandbox does not nest): ask the owner after changes to `internal/sandboxpolicy/`, `cmd/sandbox_launch.go` or `cmd/sandbox_fence.go`. `SANDBOX_PROBE_DRY_RUN=1` only plans the launches and does run from an agent's sandbox
+* `make test-sandbox-docker`: the fence probes on Linux, in a Debian container, as root. Runs from macOS and from an agent's sandbox (Docker is reachable there): use it after any change to the fence backend
 
 ### Dock Related
 * `make test-docker`: any time you change agent, container, runner related code or dependencies, they run slower — when modifying `internal/runner/`, `internal/container/`, `cmd/runner_setup.go`, or `cmd/docker.go`, read `CONCURRENCY.md` first; violations cause SIGSEGVs under parallel workloads

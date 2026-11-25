@@ -8,7 +8,7 @@ How sure each cell is:
 
 | Mark | Meaning |
 |---|---|
-| **run** | Seen in a real run (`make test-sandbox` on macOS; on Linux a hand test for nono, and for fence the same probes on a desktop as a plain user and in a Debian container) |
+| **run** | Seen in a real run (`make test-sandbox` on macOS; on Linux a hand test for nono, and for fence the same probes on a desktop as a plain user and in a Debian container, `make test-sandbox-docker`) |
 | src | Read in the tool's source |
 | doc | From the tool's documentation, not run |
 | ? | Not checked |
@@ -46,7 +46,7 @@ Two fences are compared: **upstream** (v0.1.67, what the `fence` command of the 
 | Deny inside a grant | the home, except `~/.ssh` | Yes, **run** | Yes, **run** | same | No, **run**: refuses to start | Yes, **run**: the folder is seen empty | same |
 | Read allowed inside a deny (read carve-out) | `~/.ssh/config` with `~/.ssh` closed | Yes, **run** | No, **run**: denies are written last and win | Yes, **run**: the allow is written after the deny | Only by granting entry by entry, doc | No, src: its mount planner forbids it | Yes, **run**: the file is mounted back over the hidden folder |
 | What a listing of that folder shows | `ls ~/.ssh` | Refused | Refused | Refused, **run** | not applicable | An empty folder, **run** | The opened entries only (`config`), **run** |
-| Write allowed inside a folder closed for reads and writes (write carve-out in an excluded folder) | `--write ~/.ssh/known_hosts` with `~/.ssh` closed | Yes, **run** | No | Yes, src: the allow and the unlink allow are written after the denies, and fence's own check agrees; real run pending | not applicable | No | Yes, **run**: the path is mounted back read-write over the hidden folder |
+| Write allowed inside a folder closed for reads and writes (write carve-out in an excluded folder) | `--write ~/.ssh/known_hosts` with `~/.ssh` closed | Yes, **run** | No | Yes, **run**: the allow and the unlink allow are written after the denies | not applicable | No | Yes, **run**: the path is mounted back read-write over the hidden folder |
 | Write allowed inside a folder closed for writes only | `.ateam` read-only, `.ateam/shared` writable | Yes (raw Seatbelt rules), not used | No, **run** | Yes, src | not applicable | No, **run** | Yes, **run**: a writable mount after the read-only one |
 | The home as one grant | `read ~` | Yes, **run** (with `allow_parent_of_protected`) | Yes, **run** | same | No, **run**: it holds nono's own state | Yes, **run** | same |
 | Read-only inside a writable folder | `.git/hooks` in the working folder | Yes, **run**: raw Seatbelt rules added by ateam | Yes, **run**: `denyWrite` | same | No: Landlock has no deny | Yes, **run**: read-only mount | same |

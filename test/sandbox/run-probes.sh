@@ -6,6 +6,7 @@
 # Run: make test-sandbox            (nono and fence)
 #      make test-sandbox-nono
 #      make test-sandbox-fence
+#      make test-sandbox-docker     (fence on Linux, in a container)
 # or:  test/sandbox/run-probes.sh BACKEND...
 #
 # Run it from a plain terminal: a sandbox cannot start inside another one
@@ -175,6 +176,14 @@ for backend in "$@"; do
         exit 2
         ;;
     esac
+    if [ "$backend" = nono ] && [ "$(uname -s)" != Darwin ]; then
+        # ateam refuses nono outside macOS: on Linux nono cannot deny a path
+        # inside a grant. Nothing to probe, and not a failure of this run.
+        echo
+        echo "== nono: not supported by ateam on $(uname -s), skipped"
+        summary+=("nono: skipped (ateam supports nono on macOS only)")
+        continue
+    fi
     setup "$backend" || {
         failed=1
         summary+=("$backend: setup failed")
