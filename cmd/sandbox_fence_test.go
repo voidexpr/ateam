@@ -60,7 +60,9 @@ func TestFenceSeatbeltRulesOfRenderedConfig(t *testing.T) {
 		rule("deny file-write*", filepath.Join(work, ".git", "config")),
 		// the folder above a read-only path cannot be renamed away
 		"(deny file-write-unlink\n  (literal \"" + filepath.Join(work, ".git") + "\")",
-		`(allow network-outbound (local ip "localhost:*"))`,
+		// localhost is open by its remote end: a rule on the local end
+		// would also match a direct connection to any host.
+		`(allow network-outbound (remote ip "localhost:*"))`,
 	} {
 		if !strings.Contains(wrapped, want) {
 			t.Errorf("the Seatbelt profile lacks:\n%s", want)
@@ -73,7 +75,7 @@ func TestFenceSeatbeltRulesOfRenderedConfig(t *testing.T) {
 	if deny < 0 || allow < deny {
 		t.Errorf("the read inside the excluded folder must be allowed after the folder's deny: deny at %d, allow at %d", deny, allow)
 	}
-	for _, never := range []string{"(allow file-read*)", "(allow network*)\n"} {
+	for _, never := range []string{"(allow file-read*)", "(allow network*)\n", `(allow network-outbound (local ip "localhost:*"))`} {
 		if strings.Contains(wrapped, never) {
 			t.Errorf("the Seatbelt profile must not hold %q", never)
 		}

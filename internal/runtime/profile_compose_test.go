@@ -170,7 +170,7 @@ func TestBuiltinSandboxProfilesCompose(t *testing.T) {
 	if got := prof.EntryOrigin("read", "agent/secrets"); got != "agent/secrets" {
 		t.Errorf("origin of the agent/secrets filter = %q", got)
 	}
-	for _, name := range []string{"agent/secrets", "system/removable", "agent/claude-write", "dev/go-write", "dev/node-write"} {
+	for _, name := range []string{"agent/secrets", "system/removable", "system/sockets", "agent/claude-write", "dev/go-write", "dev/node-write"} {
 		if cfg.Filters[name] == "" {
 			t.Errorf("embedded filter %q is missing", name)
 		}

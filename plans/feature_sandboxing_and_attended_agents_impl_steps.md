@@ -235,6 +235,24 @@ Wanted next in the fork, by value for ateam:
 2. Minor: served ports in the configuration file (today only through `Manager.SetService`, hence `fence-exec --expose`).
 3. Not asked for yet: closing a path that does not exist (a missing `.git/hooks`); sealing covers `.ateam` only.
 
+## Direct connections on macOS under fence
+
+2026-11-24, from the fork's commit `098e514` (pinned by the owner as `302a52b`): upstream fence wrote the "localhost is open" rule on the local end of a connection (`local ip "localhost:*"`), which an unbound outgoing socket also matches. With localhost open, which ateam asks for whenever a profile has a host, a program that ignored the proxy variables could connect to any host directly. The probes missed it: they only used `curl` through the proxy. The fork writes the rule on the remote end.
+
+- `TestFenceSeatbeltRulesOfRenderedConfig` now expects the remote-end rule and refuses the old one.
+- New probe check: `curl --noproxy '*'` to an allowed host must fail. It passes on Linux in the container, and in the owner's runs of 2026-11-24: `make test-sandbox` on macOS (nono and fence) and `make test-sandbox-fence` on meerdog, which also covers the `/run/user` check below.
+
+## Unix sockets on Linux
+
+Found 2026-11-24 while checking whether a per-project broker socket could live in an excluded folder (it can: with the folder excluded and the socket opened by `--read`, a command reaches its own socket and not another project's).
+
+- fence on Linux has no rule for Unix sockets: a command can connect to any socket whose file is visible. Seen in the container: a socket in the home and one under `/run` both answered. `/run` is readable by default, and it holds the Docker socket and the per-user runtime folder (session bus, agents). The session bus can start programs outside the sandbox; the Docker socket gives root. Those two were not tried for real, only stand-ins.
+- Fix: a built-in filter, `system/sockets`, used by `agent/secrets`: it excludes `/run/user` and, under `/run` and `/var/run`, `docker.sock`, `containerd`, `podman`, `dbus`, `snapd.socket`, `snapd-snap.socket`, `libvirt`.
+- Checked in the container, with stand-in sockets: `/run/user/0/bus` and `/run/docker.sock` (also through `/var/run`) are refused; the probes have two new checks for them, which pass. An unlisted socket under `/run` still answers: this is a list of known sockets, not a rule.
+- Not checked: a desktop (`make test-sandbox-fence` on meerdog now checks `/run/user/UID`, and the Docker socket when there is one); what stops working with the runtime folder hidden (`XDG_RUNTIME_DIR` still points to it).
+- macOS: both backends refuse every socket connection unless a rule opens one. ateam has no such rule yet; the broker socket would need one (`allowUnixSockets` in fence, a Unix socket grant in nono).
+- Wanted in the fork: a way to refuse Unix socket connections on Linux except listed paths.
+
 ## fence on Linux
 
 Built 2026-11-23, experimental. Decided by the owner the same day: `bwrap` and `socat` are acceptable requirements, and localhost stays closed until the `network` entity has ports.

@@ -95,7 +95,7 @@ ateam run --profile sandbox/nono,dev/go --write ~/tmp/scratch --domain example.c
 | Built-in profile | Gives |
 |---|---|
 | `sandbox/nono` | The nono container, plus `agent/secrets` |
-| `agent/secrets` | Keys, credentials, app data, personal folders: unreadable |
+| `agent/secrets` | Keys, credentials, app data, personal folders: unreadable. Also external volumes, and on Linux the sockets that control the machine (`/run/user`, Docker, containerd, podman, D-Bus) |
 | `agent/claude`, `agent/codex` | The agent's own files and API hosts. Added automatically for the agent a launch runs |
 | `agent/ateam` | ateam's own files, open: to run ateam inside the sandbox (below) |
 | `dev/go`, `dev/rust`, `dev/python`, `dev/node`, `dev/deno`, `dev/all` | Each toolchain's caches (writable) and registries (reachable) |
@@ -233,6 +233,7 @@ The Linux rows come from each tool's documentation, not from runs by ateam. Insi
 - fence on Linux is experimental (checked by the probes on a desktop as a plain user and in a Debian container, 2026-11-23; an interactive shell only through a pseudo-terminal in the container; not yet with an agent run):
   - Needs `bwrap` and `socat`. When `bwrap` cannot create a network namespace (a Docker container without `NET_ADMIN`, a CI runner, AppArmor on Ubuntu 24.04), the launch is refused: fence would otherwise go on with the proxy variables as the only network rule.
   - The sandbox has a localhost of its own, as in a Docker container (Claude's built-in sandbox does the same on Linux). This machine's localhost is reached one listed port at a time (`--domain localhost:PORT`); plain `localhost` is refused there. A server started inside is reached from outside only when its port is listed (`--listen PORT`).
+  - **Unix sockets are not filtered.** A command can connect to any socket whose file it can see. `agent/secrets` hides the ones that control the machine: the per-user runtime folder `/run/user` (session bus, agents' sockets) and the sockets of Docker, containerd, podman, libvirt, snapd and the system D-Bus. Another socket in a readable place stays reachable: exclude its path. On macOS both backends refuse every socket connection.
   - The project's `.ateam` is sealed: mounted read-only as a whole, with only its open entries writable (`runtime/`, `shared/`, `cache/`, created before the launch when missing). Nothing new can be created in it, so a command cannot plant `.ateam/profiles/x.hcl` or `.ateam/secrets.env`.
   - **Elsewhere, a protected path that does not exist yet can be created.** fence closes a path with a mount, which needs the path to exist. This concerns a repository without a `.git/hooks` folder, and an `exclude` of a path in the working folder that is not there yet. ateam lists these paths on stderr at every launch (`NOT ENFORCED`) and in `--dry-run`. With `strict = true` on the container, the launch is refused instead.
   - An excluded folder is seen as an empty one. Inside a writable folder a write into it succeeds and is thrown away at the end; the real folder is untouched.

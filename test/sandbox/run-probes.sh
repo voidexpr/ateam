@@ -68,6 +68,15 @@ ssh=0
 if [ -e "$HOME/.ssh" ]; then
     ssh=1
 fi
+# What Linux keeps under /run: seen from outside, to know what to expect.
+runtime_dir=
+if [ -d "/run/user/$(id -u)" ] && [ -n "$(ls -A "/run/user/$(id -u)" 2>/dev/null)" ]; then
+    runtime_dir="/run/user/$(id -u)"
+fi
+docker_sock=0
+if [ "$(uname -s)" = Linux ] && { [ -S /run/docker.sock ] || [ -S /var/run/docker.sock ]; }; then
+    docker_sock=1
+fi
 
 # setup BACKEND: a fresh scratch project, initialised as users do.
 setup() {
@@ -107,6 +116,7 @@ launch() {
         cd "$ROOT/proj" &&
             "$ATEAM" run --profile "sandbox/$backend" "$@" ${dry[@]+"${dry[@]}"} -- \
                 /usr/bin/env PROBE_ROOT="$ROOT" PROBE_NET="${SANDBOX_PROBE_NET:-1}" PROBE_SSH="$ssh" \
+                PROBE_RUNTIME_DIR="$runtime_dir" PROBE_DOCKER_SOCK="$docker_sock" \
                 /bin/sh ./sandbox-probe.sh "$suite"
     ) 2>&1 | tee "$out"
     status=${PIPESTATUS[0]}

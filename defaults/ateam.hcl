@@ -914,7 +914,7 @@ profile "sandbox/fence" {
 // Keys, credentials, app data, personal folders and external volumes:
 // unreadable.
 profile "agent/secrets" {
-  read = ["agent/secrets", "system/removable"]
+  read = ["agent/secrets", "system/removable", "system/sockets"]
 }
 
 // Claude Code: its own files (it edits them) and the login keychain, which

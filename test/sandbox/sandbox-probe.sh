@@ -8,7 +8,8 @@
 #   carve        a path opened for reading inside an excluded folder
 #   carve-write  a path opened for writing inside an excluded folder
 # Environment: PROBE_ROOT (scratch folder), PROBE_NET (1: check hosts),
-# PROBE_SSH (1: ~/.ssh exists).
+# PROBE_SSH (1: ~/.ssh exists), PROBE_RUNTIME_DIR (the per-user runtime
+# folder, when it holds something), PROBE_DOCKER_SOCK (1: there is one).
 #
 # Prints one PASS or FAIL line per check and exits 1 on any FAIL.
 #
@@ -94,6 +95,15 @@ base() {
         echo "SKIP see the entries of ~/.ssh: it does not exist"
     fi
 
+    # Linux: a sandbox can connect to any Unix socket it sees, so the ones
+    # that control the machine are hidden.
+    if [ -n "${PROBE_RUNTIME_DIR:-}" ]; then
+        refused "see the per-user runtime folder ($PROBE_RUNTIME_DIR: session bus, agents)" 'ls "$PROBE_RUNTIME_DIR" | grep -q .'
+    fi
+    if [ "${PROBE_DOCKER_SOCK:-0}" = 1 ]; then
+        refused "see the Docker socket" '[ -S /run/docker.sock ] || [ -S /var/run/docker.sock ]'
+    fi
+
     # git: usable, with its config and hooks read-only
     allowed "git status" 'git status'
     refused "append to .git/config" 'echo "# probe" >> .git/config'
@@ -109,6 +119,9 @@ base() {
     else
         allowed "reach a host of --domain (example.com)" 'curl -sS -m 20 -o /dev/null https://example.com'
         refused "reach another host (example.org)" 'curl -sS -m 20 -o /dev/null https://example.org'
+        # A program that ignores the proxy must reach nothing, an allowed
+        # host included: the host list lives in the proxy.
+        refused "reach a host directly, without the proxy" 'curl --noproxy "*" -sS -m 10 -o /dev/null https://example.com'
     fi
 }
 

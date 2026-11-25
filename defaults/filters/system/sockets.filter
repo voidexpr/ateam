@@ -1,0 +1,9 @@
+# system/sockets: sockets that control this machine or other workloads,
+# unreadable. On Linux a sandbox can connect to any Unix socket it can
+# see: the per-user runtime folder holds the session bus (which can start
+# programs outside the sandbox) and the agents' sockets, and the container
+# engines' sockets give root on the machine.
+version 1
+root /
+exclude /run/user
+exclude /{run,var/run}/{docker.sock,containerd,podman,dbus,snapd.socket,snapd-snap.socket,libvirt}

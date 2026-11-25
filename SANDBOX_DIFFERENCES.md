@@ -18,8 +18,8 @@ Cells for the Claude sandbox come from a summarised read of its documentation: c
 ## The two fences
 
 - **Upstream**: `github.com/fencesandbox/fence`. Cells marked **run** for it were seen with v0.1.67, which ateam built with until 2026-11-24.
-- **ateam's fork**: `github.com/voidexpr/fence`, branch `fork`, pinned in `go.mod` by a `replace` line (`7c71685`: upstream's main branch plus the carve-out changes). The changes: a literal `allowRead` path strictly inside a `denyRead` entry stays readable, and a literal `allowWrite` path strictly inside a `denyWrite` entry stays writable; the deepest path wins and a deny wins a tie. On macOS a denied path that is a link is denied as a link too.
-- Network rules, the mechanism and where a sandbox can start are the same in both: the tables below have one fence column for them.
+- **ateam's fork**: `github.com/voidexpr/fence`, branch `fork`, pinned in `go.mod` by a `replace` line (`302a52b` on 2026-11-24: upstream's main branch plus the carve-out changes and a fix to the macOS localhost rule). The changes: a literal `allowRead` path strictly inside a `denyRead` entry stays readable, and a literal `allowWrite` path strictly inside a `denyWrite` entry stays writable; the deepest path wins and a deny wins a tie. On macOS a denied path that is a link is denied as a link too.
+- The mechanism and where a sandbox can start are the same in both. So are the network rules, with one exception on macOS, in the row "A program that ignores the proxy": the tables below have one fence column and say where the two differ.
 
 Reproducing a cell: `ateam probe --start-sandbox --profile sandbox/BACKEND ...` runs the same checks inside each backend and prints one row per path and host; `--json` gives a document per system to compare ([COMMANDS.md](COMMANDS.md#ateam-probe)). `make test-probe` keeps the outputs in `test_data/probe-runs/`. The rows on renames, on a write that is thrown away and on a port reached from the host are not covered by it yet: `make test-sandbox` still is the reference for those.
 
@@ -75,6 +75,7 @@ All three filter hosts with a proxy outside the sandbox and refuse direct connec
 
 | Rule | Example | nono macOS | nono Linux | fence macOS | fence Linux | Claude macOS | Claude Linux |
 |---|---|---|---|---|---|---|---|
+| A program that ignores the proxy reaches nothing | `curl --noproxy '*' https://example.com` | Yes, **run** | ? | Upstream: **no** when localhost is open, src: its localhost rule also matched a direct connection to any host. ateam's fork: fixed (`098e514`), **run** | Yes, **run**: a private network | ? | ? |
 | Close everything | no host listed | Yes, **run** (`network.block`; open when left out) | Yes, doc | Yes, **run** | Yes, **run** (another host is refused) | Yes, doc | Yes, doc |
 | Allow a host | `github.com` | Yes, **run** | Yes, doc | Yes, **run** | Yes, **run** | Yes, doc | Yes, doc |
 | Wildcard host | `*.github.com` | Yes, doc | Yes, doc | Yes, src | Yes, src | Yes, doc | Yes, doc |
@@ -86,7 +87,7 @@ All three filter hosts with a proxy outside the sandbox and refuse direct connec
 | The sandbox talks to what it starts, over localhost | a test that opens its own server | Only by opening all of localhost | ? | Only by opening all of localhost | Yes, **run**: a localhost of its own | No: all or nothing, doc | No, doc: the sandbox's localhost is not the host's |
 | A port the sandbox listens on, reached from the host | a dev server on `:3000` | Yes, doc: with all of localhost | Yes, doc | Yes, src: with all of localhost | Yes, **run** (a bridge per port, `listen`) | Yes, doc (`allowLocalBinding`) | Not documented |
 | The same, reached from other machines | `0.0.0.0:3000` | ateam refuses it | ? | No, src: only localhost can be bound | Yes, src (not run) | ? | ? |
-| Unix socket by path | `/var/run/docker.sock` | Yes, doc | Yes, doc (`af_unix_mediation`) | Yes, src | Yes, src | Yes, doc (`allowUnixSockets`) | No, doc: all or none |
+| Unix socket by path | `/var/run/docker.sock` | Yes, doc | Yes, doc (`af_unix_mediation`) | Yes, src (`allowUnixSockets`); refused without it | **No rule, run**: any socket whose file is visible can be connected to. ateam hides the control sockets (`system/sockets`) | Yes, doc (`allowUnixSockets`) | No, doc: all or none |
 | Network rules hold when a private network cannot be created | Docker without `NET_ADMIN`, CI | not applicable | ? | not applicable | No, doc: fence continues with the proxy variables only. ateam makes fence's own probe first and refuses, **run** | not applicable | ? |
 
 Notes:

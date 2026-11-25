@@ -50,4 +50,4 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace github.com/fencesandbox/fence => github.com/voidexpr/fence v0.0.0-20261124191457-7c71685f801a
+replace github.com/fencesandbox/fence => github.com/voidexpr/fence v0.0.0-20261125015527-302a52b40c5b

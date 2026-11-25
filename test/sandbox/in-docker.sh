@@ -21,6 +21,10 @@ su probe -c 'mkdir -p ~/w && cd ~/w && /opt/ateam/ateam run --profile sandbox/fe
 echo
 echo "== as root"
 mkdir -p ~/.ssh
+# Stand-ins for what a desktop keeps under /run, so the probes check them.
+mkdir -p /run/user/0 && socat UNIX-LISTEN:/run/user/0/bus,fork SYSTEM:"echo bus" &
+socat UNIX-LISTEN:/run/docker.sock,fork SYSTEM:"echo docker" &
+sleep 1
 cd /opt/ateam
 # shellcheck disable=SC2086  # a list of backends
 exec ./test/sandbox/run-probes.sh ${PROBE_BACKENDS:-fence}

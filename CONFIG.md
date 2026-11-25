@@ -773,7 +773,7 @@ profile "myproject" {
 
 The path lists of the built-in profiles are filters (`agent/secrets`, `dev/go-write`, ...): to change what a built-in profile grants, put a filter file of the same name in `~/.ateam/filters/`.
 
-Built-in composable profiles (`ateam profile list`): `sandbox/nono` (the nono container plus `agent/secrets`), `sandbox/fence` (the same with the built-in fence container), `agent/secrets` (keys, credentials, app data and personal folders unreadable), `agent/claude` and `agent/codex` (the agent's own files and API hosts), `agent/ateam` (ateam's own files open, to run ateam inside the sandbox), `dev/go`, `dev/rust`, `dev/python`, `dev/node`, `dev/deno`, `dev/github`, `dev/all`.
+Built-in composable profiles (`ateam profile list`): `sandbox/nono` (the nono container plus `agent/secrets`), `sandbox/fence` (the same with the built-in fence container), `agent/secrets` (keys, credentials, app data and personal folders unreadable; also the filters `system/removable` and `system/sockets`: external volumes, and on Linux the sockets that control the machine), `agent/claude` and `agent/codex` (the agent's own files and API hosts), `agent/ateam` (ateam's own files open, to run ateam inside the sandbox), `dev/go`, `dev/rust`, `dev/python`, `dev/node`, `dev/deno`, `dev/github`, `dev/all`.
 
 Every sandboxed launch also closes ateam's own files: the user's ateam directory, and in the project's `.ateam/` everything but `runtime/`, `shared/`, `prompts/`, `cache/` and `.gitignore`. An explicit `read` or `write` of one of them, or of the `.ateam/` directory itself, reopens it; `ateam_files = "open"` opens all of them. A `read` or `write` below the user's ateam directory opens that path only.
 
