@@ -895,9 +895,8 @@ profile "sandbox/nono" {
 // built into ateam as a library. macOS: no other program to install.
 // Linux (experimental): needs bwrap and socat, and the sandbox has a
 // localhost of its own. The same profiles apply. ateam builds with its
-// fork of fence, which opens a read or a write inside an excluded folder
-// (a write there is refused on Linux for now); fence keeps a few write
-// refusals of its own (see ISOLATION.md).
+// fork of fence, which opens a read or a write inside an excluded folder;
+// fence keeps a few write refusals of its own (see ISOLATION.md).
 // strict = true: what fence does not enforce is an error, not a warning.
 container "fence" {
   type = "fence"

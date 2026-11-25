@@ -18,7 +18,7 @@ Cells for the Claude sandbox come from a summarised read of its documentation: c
 ## The two fences
 
 - **Upstream**: `github.com/fencesandbox/fence`. Cells marked **run** for it were seen with v0.1.67, which ateam built with until 2026-11-24.
-- **ateam's fork**: `github.com/voidexpr/fence`, branch `fork`, pinned in `go.mod` by a `replace` line (`fb9d961`: upstream's main branch plus two changes). The changes: a literal `allowRead` path strictly inside a `denyRead` entry stays readable, and a literal `allowWrite` path strictly inside a `denyWrite` entry stays writable; the deepest path wins and a deny wins a tie. On macOS a denied path that is a link is denied as a link too.
+- **ateam's fork**: `github.com/voidexpr/fence`, branch `fork`, pinned in `go.mod` by a `replace` line (`7c71685`: upstream's main branch plus the carve-out changes). The changes: a literal `allowRead` path strictly inside a `denyRead` entry stays readable, and a literal `allowWrite` path strictly inside a `denyWrite` entry stays writable; the deepest path wins and a deny wins a tie. On macOS a denied path that is a link is denied as a link too.
 - Network rules, the mechanism and where a sandbox can start are the same in both: the tables below have one fence column for them.
 
 ## Mechanism
@@ -46,7 +46,7 @@ Two fences are compared: **upstream** (v0.1.67, what the `fence` command of the 
 | Deny inside a grant | the home, except `~/.ssh` | Yes, **run** | Yes, **run** | same | No, **run**: refuses to start | Yes, **run**: the folder is seen empty | same |
 | Read allowed inside a deny (read carve-out) | `~/.ssh/config` with `~/.ssh` closed | Yes, **run** | No, **run**: denies are written last and win | Yes, **run**: the allow is written after the deny | Only by granting entry by entry, doc | No, src: its mount planner forbids it | Yes, **run**: the file is mounted back over the hidden folder |
 | What a listing of that folder shows | `ls ~/.ssh` | Refused | Refused | Refused, **run** | not applicable | An empty folder, **run** | The opened entries only (`config`), **run** |
-| Write allowed inside a folder closed for reads and writes (write carve-out in an excluded folder) | `--write ~/.ssh/known_hosts` with `~/.ssh` closed | Yes, **run** | No | Yes, src: the allow and the unlink allow are written after the denies, and fence's own check agrees; real run pending | not applicable | No | **No, run**: the path is shown and stays read-only. ateam refuses the launch |
+| Write allowed inside a folder closed for reads and writes (write carve-out in an excluded folder) | `--write ~/.ssh/known_hosts` with `~/.ssh` closed | Yes, **run** | No | Yes, src: the allow and the unlink allow are written after the denies, and fence's own check agrees; real run pending | not applicable | No | Yes, **run**: the path is mounted back read-write over the hidden folder |
 | Write allowed inside a folder closed for writes only | `.ateam` read-only, `.ateam/shared` writable | Yes (raw Seatbelt rules), not used | No, **run** | Yes, src | not applicable | No, **run** | Yes, **run**: a writable mount after the read-only one |
 | The home as one grant | `read ~` | Yes, **run** (with `allow_parent_of_protected`) | Yes, **run** | same | No, **run**: it holds nono's own state | Yes, **run** | same |
 | Read-only inside a writable folder | `.git/hooks` in the working folder | Yes, **run**: raw Seatbelt rules added by ateam | Yes, **run**: `denyWrite` | same | No: Landlock has no deny | Yes, **run**: read-only mount | same |
@@ -62,8 +62,7 @@ Two fences are compared: **upstream** (v0.1.67, what the `fence` command of the 
 Consequences for ateam:
 
 - macOS, nono: every rule of a profile.
-- macOS, fence fork: every rule of a profile. `dev/go` works (it reads one folder inside an excluded one).
-- Linux, fence fork: every rule but a write inside a folder that stays excluded, which ateam refuses by name.
+- macOS and Linux, fence fork: every rule of a profile. `dev/go` works (it reads one folder inside an excluded one); an unattended run's own folders are opened inside the excluded `~/.ateam`.
 - With upstream fence, a read inside an excluded folder stays closed: a `fence.json` exported by ateam and run with the upstream `fence` command is stricter than the same file under ateam, never looser.
 - Linux, nono: needs the home listed entry by entry around every exclude and around nono's state. The list is taken at launch: an entry created later is not readable. No read-only path inside the working folder.
 - Linux, fence fork: the project's `.ateam` is sealed (read-only, its open entries writable), so nothing can be planted in it. A protected path that does not exist yet elsewhere in a writable folder can still be created, and is said at every launch. With upstream fence the `.ateam` case is open too.

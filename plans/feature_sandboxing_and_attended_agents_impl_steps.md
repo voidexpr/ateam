@@ -136,7 +136,7 @@ Not checked:
 
 0. A user's `--read` inside an excluded folder (`~/.ssh/config`): works under fence since the fork (2026-11-24). A `--write` there is still refused under fence; accepted (owner, 2026-11-23). Agents are not given `~/.ssh` that way in practice; see the dotfiles profile under "Tasks for later".
 1. `dev/go` under fence: closed 2026-11-24 by the fence fork (a read carve-out). Known from before: Go also works without that read, losing only `go env -w` settings.
-2. Unattended runs under fence: done 2026-11-23. They were refused with and without a project: the agent's config folder (`~/.ateam/state/agents/...`) and, without a project, the run's output lie inside `~/.ateam`, excluded as a whole. `sandboxpolicy.Build` now closes an exclude of ateam's own entry by entry around a grant inside it (`splitAround`), with the known names closed before they exist. Both backends get the same rules; without such a grant (chat, run, shell) nothing changes. Checked by tests and by `ateam exec --dry-run` with both backends; not by a real unattended run.
+2. Unattended runs under fence: done 2026-11-23, and simplified 2026-11-24: with write carve-outs in the fork, `splitAround` (described next) is removed and `~/.ateam` stays excluded as a whole. First version: They were refused with and without a project: the agent's config folder (`~/.ateam/state/agents/...`) and, without a project, the run's output lie inside `~/.ateam`, excluded as a whole. `sandboxpolicy.Build` now closes an exclude of ateam's own entry by entry around a grant inside it (`splitAround`), with the known names closed before they exist. Both backends get the same rules; without such a grant (chat, run, shell) nothing changes. Checked by tests and by `ateam exec --dry-run` with both backends; not by a real unattended run.
 3. Linux: decided 2026-11-23. `bwrap` and `socat` are acceptable requirements, documented in ISOLATION.md ("Where a sandbox backend can start"), with an early failure when one is missing. Not coded yet: the renderer still refuses Linux one step earlier. See "Next steps", 3.
 4. Carve-outs (points 1 and 2) by changing fence itself, in a fork. Read of the source, v0.1.67:
    - macOS: small. The Seatbelt profile lists allows, then denies, and the last matching rule wins. A carve-out is an allow written after the denies for each allowed path inside a denied one (`generateReadRules`, `generateWriteRules` in `internal/sandbox/macos.go`), plus the rename guard (`deny file-write-unlink` on the denied subtree must be reopened for a writable carve-out), plus the same precedence in `CheckReadPath` / `CheckWritePath`. nono does the same on Seatbelt, and `dev/go` works under it.
@@ -204,21 +204,31 @@ What changed in ateam:
 - `RenderFence`, Linux: a sealed folder is a write deny on the folder, with each entry that no exclude or read-only rule covers allowed inside it. `ateam` creates `runtime/`, `shared/` and `cache/` there before the launch, since the command no longer can. `FenceGaps` no longer lists what lies in a sealed folder.
 - `RenderFence`, macOS: a write inside a folder that stays excluded is accepted. Linux: still refused, see below.
 - nono and fence on macOS do not use `Sealed`: they close each name by its path.
-- Kept: `splitAround` for `~/.ateam`, because of the Linux case below.
 
 How it was checked:
 
 - Linux, Debian container, as root: `base` 25 of 25 and every check after the run: `.ateam/profiles` can no longer be created, `.ateam/shared` is writable. `carve` 8 of 8. By hand, the same with a hand-written configuration.
 - macOS: unit tests; fence's own check accepts a write inside an excluded folder. Not run for real: `make test-sandbox`, where `fence carve-write` is now expected to pass.
 
-**Found in the fork, Linux:** a write opened inside a folder that is denied for reads and for writes (what ateam's `exclude` is) does not work. With `/root/secret` excluded and `--write /root/secret/rw`: the folder lists `rw`, and writing into it fails with "Read-only file system". The writable mount is dropped because its closest ancestor mount is the mask of the folder; the reveal of the path itself is a read-only bind. Expected: the path revealed read-write. ateam refuses this case on Linux until it is fixed; `carve-write` reports it as known.
+**Found in the fork, Linux, and fixed there the same day** (`0d6aff5`, pinned as `7c71685`): a write opened inside a folder denied for reads and for writes (what ateam's `exclude` is) was shown and stayed read-only. The planner now binds such a path read-write.
+
+After the fix, in ateam:
+
+- The Linux refusal of a write inside an excluded folder is gone: fence takes it on both systems.
+- `splitAround` is removed. `~/.ateam` is excluded as a whole again, and an unattended run's grants (its output, the agent's config folder) are paths opened inside it, for nono and for fence alike. No entry list taken at launch any more.
+- `carve-write` is expected to pass under fence everywhere; the "known refusal" branch of `run-probes.sh` is gone.
+
+Checked on Linux, Debian container, as root, with `7c71685`: `base` 25 of 25, `carve` 8 of 8, `carve-write` 3 of 3. By hand, with `~/.ateam` excluded and two write grants inside it two levels down: both writable and the output is on the host; `secrets.env`, `state.sqlite` and another agent's folder are hidden; nothing can be created in `~/.ateam`; a listing shows only the folders that lead to the grants. Not run for real on macOS.
+
+Note for `make update-fence`: `@fork` is resolved by the Go proxy, which caches a branch for a while. Right after a push it still gives the previous commit; pin the commit hash instead (`go mod edit -replace ...=github.com/voidexpr/fence@<hash>`).
+
+Limit to know, Linux: a write grant whose path does not exist is not created by fence; it warns and the path is not writable.
 
 Wanted next in the fork, by value for ateam:
 
-1. **Linux: a writable carve-out inside a masked folder** (above). It would let `--write` work inside an excluded folder on Linux and retire `splitAround`.
-2. **No silent fallback on Linux**: an option that makes fence fail instead of continuing without a network namespace. ateam makes fence's probe itself today (`fencePreflight`); an option would remove the duplicate.
-3. Minor: served ports in the configuration file (today only through `Manager.SetService`, hence `fence-exec --expose`).
-4. Not asked for yet: closing a path that does not exist (a missing `.git/hooks`); sealing covers `.ateam` only.
+1. **No silent fallback on Linux**: an option that makes fence fail instead of continuing without a network namespace. ateam makes fence's probe itself today (`fencePreflight`); an option would remove the duplicate.
+2. Minor: served ports in the configuration file (today only through `Manager.SetService`, hence `fence-exec --expose`).
+3. Not asked for yet: closing a path that does not exist (a missing `.git/hooks`); sealing covers `.ateam` only.
 
 ## fence on Linux
 

@@ -364,49 +364,34 @@ func TestGrantOfAteamDirOpensItsEntries(t *testing.T) {
 }
 
 // A grant inside the user's ateam directory (an unattended run's output)
-// closes the directory entry by entry around it: no path is opened inside
-// a folder that stays excluded, which fence could not express.
-func TestAteamHomeIsSplitAroundAGrant(t *testing.T) {
+// leaves the directory excluded as a whole: the grant is a path opened
+// inside an excluded folder, which nono and fence both express.
+func TestGrantInsideAteamHome(t *testing.T) {
 	in := testInput(t)
-	state := filepath.Join(in.AteamHome, "state")
-	for _, dir := range []string{"runtime", "agents/claude", "agents/codex", "logs"} {
-		if err := os.MkdirAll(filepath.Join(state, dir), 0o755); err != nil {
-			t.Fatal(err)
-		}
+	runtime := filepath.Join(in.AteamHome, "state", "runtime")
+	if err := os.MkdirAll(runtime, 0o755); err != nil {
+		t.Fatal(err)
 	}
+	in.Write = []string{runtime}
 	p, err := Build(in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(paths(p.Exclude), in.AteamHome) {
-		t.Fatalf("without a grant inside, the directory is closed as a whole: %v", paths(p.Exclude))
+	if ex := paths(p.Exclude); !slices.Contains(ex, in.AteamHome) {
+		t.Fatalf("the directory stays excluded as a whole: %v", ex)
 	}
-
-	in.Write = []string{filepath.Join(state, "runtime"), filepath.Join(state, "agents", "claude")}
-	p, err = Build(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ex := paths(p.Exclude)
-	for _, want := range []string{
-		filepath.Join(in.AteamHome, "ateam.hcl"),   // closed before it exists
-		filepath.Join(in.AteamHome, "secrets.env"), // closed before it exists
-		filepath.Join(state, "state.sqlite"),
-		filepath.Join(state, "logs"),
-		filepath.Join(state, "agents", "codex"), // another agent's config
-	} {
-		if !slices.Contains(ex, want) {
-			t.Errorf("%s must stay excluded: %v", want, ex)
+	for _, goos := range []string{"darwin", "linux"} {
+		cfg, err := RenderFence(p, goos)
+		if err != nil {
+			t.Fatalf("fence on %s: %v", goos, err)
+		}
+		fs := cfg.Filesystem
+		if !slices.Contains(fs.DenyRead, in.AteamHome) || !slices.Contains(fs.DenyWrite, in.AteamHome) || !slices.Contains(fs.AllowWrite, runtime) || !slices.Contains(fs.AllowRead, runtime) {
+			t.Errorf("fence on %s: the folder denied, the grant allowed inside it: %+v", goos, fs)
 		}
 	}
-	for _, grant := range paths(p.Write) {
-		for _, path := range ex {
-			if Within(grant, path) {
-				t.Errorf("the grant %s lies inside the excluded %s", grant, path)
-			}
-		}
-	}
-	if _, err := RenderFence(p, "darwin"); err != nil {
-		t.Errorf("fence renders it: %v", err)
+	prof, err := RenderNono(p, NonoInfo{}, "darwin")
+	if err != nil || !slices.Contains(prof.Filesystem.BypassProtection, runtime) {
+		t.Errorf("nono lifts the grant inside the denied folder: %+v, %v", prof, err)
 	}
 }

@@ -187,22 +187,14 @@ func TestRenderFenceGrantInsideExclude(t *testing.T) {
 	if p, err = Build(in); err != nil {
 		t.Fatal(err)
 	}
-	// A write there: the same carve-out for writes on macOS. On Linux the
-	// fork shows the path read-only, so it is refused and named.
-	if cfg, err = RenderFence(p, "darwin"); err != nil {
-		t.Fatalf("a write inside an excluded folder is a carve-out on macOS: %v", err)
-	}
+	// A write there: the same carve-out, for writes, on both systems.
 	known := filepath.Join(ssh, "known_hosts")
-	if fs := cfg.Filesystem; !slices.Contains(fs.AllowWrite, known) || !slices.Contains(fs.AllowRead, known) || !slices.Contains(fs.DenyWrite, ssh) {
-		t.Errorf("the folder is denied and the path allowed inside it: %+v", fs)
-	}
-	_, err = RenderFence(p, "linux")
-	if err == nil {
-		t.Fatal("a write inside an excluded folder must be refused on Linux")
-	}
-	for _, want := range []string{ssh, "profile mine", "writable"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("the error must name %q: %v", want, err)
+	for _, goos := range []string{"darwin", "linux"} {
+		if cfg, err = RenderFence(p, goos); err != nil {
+			t.Fatalf("a write inside an excluded folder is a carve-out on %s: %v", goos, err)
+		}
+		if fs := cfg.Filesystem; !slices.Contains(fs.AllowWrite, known) || !slices.Contains(fs.AllowRead, known) || !slices.Contains(fs.DenyWrite, ssh) {
+			t.Errorf("%s: the folder is denied and the path allowed inside it: %+v", goos, fs)
 		}
 	}
 	// The same policy is one nono expresses.

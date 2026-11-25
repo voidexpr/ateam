@@ -105,9 +105,8 @@ func sealedEntries(p *Policy, dir string) []Rule {
 //     rule above. It stays read-only: the folder's write deny covers it.
 //   - A read-only path is a write deny, and fence refuses the rename of
 //     the folders above a denied path.
-//   - A write inside a folder that stays excluded is the same for writes
-//     (macOS). On Linux the fork shows such a path and leaves it
-//     read-only: refused there, by name.
+//   - A write inside a folder that stays excluded is the same carve-out,
+//     for writes.
 //   - Linux: a sealed folder is a write deny on the folder, with each
 //     entry that stays writable allowed inside it. Nothing new can then be
 //     created in it, which a mount per name cannot do for a name that does
@@ -124,14 +123,6 @@ func RenderFence(p *Policy, goos string) (*FenceConfig, error) {
 	writable := p.Writable()
 	var sealed []Rule
 	if goos == "linux" {
-		for _, grant := range p.Write {
-			for _, ex := range p.Exclude {
-				if Within(grant.Path, ex.Path) {
-					return nil, fmt.Errorf("fence on Linux cannot make %s writable (%s) inside the excluded %s (%s): the path would be shown read-only. Exclude the entries of %s one by one",
-						grant.Path, ruleOrigin(grant), ex.Path, ruleOrigin(ex), ex.Path)
-				}
-			}
-		}
 		for _, dir := range p.Sealed {
 			sealed = append(sealed, dir)
 			writable = append(writable, sealedEntries(p, dir.Path)...)
@@ -199,13 +190,6 @@ func FenceExposures(p *Policy, goos string) []string {
 		out = append(out, l.Addr())
 	}
 	return out
-}
-
-func ruleOrigin(r Rule) string {
-	if r.Source == "" {
-		return "no origin"
-	}
-	return r.Source
 }
 
 // WriteFenceConfig writes the configuration beside dest, has validate

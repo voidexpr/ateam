@@ -143,7 +143,7 @@ Any profile whose container is `nono` works with the unattended commands, throug
 
 - The agent runs as in any container: its `inside_container` block applies (no agent sandbox, permission prompts skipped).
 - The `agent/<type>` profile is added, plus what the run writes: the agent's `config_dir`, `runtime/`, the agent's `rw_paths` / `ro_paths` and the project's `sandbox_extra`.
-- When one of those lies inside the user's ateam directory (the agent's config folder, the output of a run without a project), that directory is closed entry by entry around it instead of as a whole: its configuration, secrets, state database, logs and the other agents' folders stay closed.
+- When one of those lies inside the user's ateam directory (the agent's config folder, the output of a run without a project), it is opened inside that directory, which stays closed as a whole: its configuration, secrets, state database, logs and the other agents' folders.
 - The agent uses its host login (`ateam login`). Unlike Docker, no secret has to be configured up front.
 - `container_extra` does not apply, and every run of a command shares the working folder of the launch.
 
@@ -189,7 +189,7 @@ Differences from nono (the full table per operating system, with the network rul
 |---|---|---|---|
 | Install | `nono` in `PATH` | Nothing | The `fence` command, for an exported profile |
 | A `read` inside a folder that stays excluded (`--read ~/.ssh/config`) | Opened | Opened, read-only. On Linux a listing of the folder shows the opened entries only | Stays closed: a denied folder is denied as a whole |
-| A `write` inside a folder that stays excluded | Opened | macOS: opened. Linux: refused by ateam, with both rules named (the fork would show the path read-only there) | Stays closed |
+| A `write` inside a folder that stays excluded | Opened | Opened | Stays closed |
 | `dev/go` (reads `~/Library/Application Support/go`, inside a folder `agent/secrets` excludes) | Works | Works | Go runs without your `go env -w` settings |
 | The backend's own blocked reads | Lifted where the profile does not exclude | None: fence blocks no read on its own | Same as the fork |
 | Writes the backend refuses on its own | None left | In the working folder, at any depth: `.gitmodules`, `.mcp.json`, `.ripgreprc`, `.vscode/`, `.idea/`, shell startup files. In the home: shell startup files and `.gitconfig`. No setting lifts this; a `write` of one of them is an error | Same as the fork |
