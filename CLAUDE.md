@@ -54,4 +54,4 @@ A Go CLI to manage unattended agent + software engineering quality oriented prom
 * `make run-ci`: full CI pipeline — `check` plus `vuln` and `deadcode`; run before commit (also referenced in the git section above)
 * `make fmt`: auto-format with gofmt
 * `make tidy`: `go mod tidy`
-* `make install-hooks`: install pre-commit hook (runs fmt-check, check-tidy, check-docs, lint)
+* no git hooks: nothing runs on its own at commit time. Run `make run-ci` yourself before a commit

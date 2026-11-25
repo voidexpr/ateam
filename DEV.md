@@ -47,15 +47,15 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 The Makefile checks for auth before starting and fails with setup instructions if neither is set. The tests themselves also fail (not skip) when auth is missing — this catches configuration issues in CI.
 
-## CI and pre-commit gates
+## CI and checks before a commit
 
 GitHub Actions (`.github/workflows/ci.yml`) is `workflow_dispatch`-only — triggered manually from the Actions tab, not on push or pull request. Its single step runs `make run-ci`, which expands to `check + vuln + deadcode` where `check = test + fmt-check + check-tidy + check-docs + lint`.
 
-Because nothing auto-gates push or PR, contributors and agents must run `make run-ci` locally before committing. The pre-commit hook described below covers a subset; `make run-ci` is the full gate.
+Because nothing auto-gates push or PR, contributors and agents must run `make run-ci` locally before committing. `make check` is the quicker subset, without `vuln` and `deadcode`.
 
 A separate workflow (`.github/workflows/docker-tests.yml`) runs `make test-docker`. It is also `workflow_dispatch`-only.
 
-The pre-commit hook installed by `make install-hooks` blocks commits that fail `fmt-check`, `check-tidy`, `check-docs`, or `lint`. It does not run `test`, `vuln`, or `deadcode` — run `make run-ci` for that.
+There is no git hook, on purpose: hooks run code silently at commit time, which is also how malware persists in a repository, so the checks are explicit `make` commands instead. `ateam` treats `.git/hooks` the same way inside its sandboxes: read-only. If an older checkout still has `.git/hooks/pre-commit` from the removed `make install-hooks`, delete it.
 
 ## Docker binary resolution
 
@@ -75,7 +75,7 @@ For developers building from source, cross-compilation happens automatically (st
 1. Create `defaults/prompts/report/<name>.prompt.md` (the role's main report body)
 2. Optionally add `defaults/prompts/code/<name>.prompt.md` for code-action support
 3. Run `make build` — the prompt tree is embedded via `defaults.FS`, so the role is discoverable from the embedded anchor
-4. Run `make docs` to regenerate `ROLES.md` from the embedded role set — required for `make check` / `make run-ci` and the pre-commit hook (`make install-hooks`) to pass, since `check-docs` diffs against this file
+4. Run `make docs` to regenerate `ROLES.md` from the embedded role set — required for `make check` / `make run-ci` to pass, since `check-docs` diffs against this file
 5. Enable it in a project: `ateam init --role <name>` or add `role "<name>" { status = "on" }` to `.ateam/ateam.hcl`
 
 The user-facing assembly model (anchor chain, filename patterns, `FirstMatch` vs `AllMatches`, template variables) is documented in **[CONFIG.md → Prompt Composition](CONFIG.md#prompt-composition)** and **[CONFIG.md → Template Variables](CONFIG.md#template-variables)**. The sections below cover the dev-only deltas.

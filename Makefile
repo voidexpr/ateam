@@ -5,7 +5,7 @@ GO_CMD ?= go
 GO := GOCACHE=$(GO_CACHE_DIR) $(GO_CMD)
 GO_INSTALL := GOBIN=$(GO_TOOL_BIN) $(GO)
 
-.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy update-autoversion check-tidy check-docs check test test-all test-cli test-sandbox test-sandbox-nono test-sandbox-fence test-docker test-docker-live claude-in-docker vuln deadcode docs lint fmt fmt-check install-hooks run-ci
+.PHONY: build build-binary build-binary-race companion companion-race build-all build-all-race clean tidy update-autoversion check-tidy check-docs check test test-all test-cli test-sandbox test-sandbox-nono test-sandbox-fence test-docker test-docker-live claude-in-docker vuln deadcode docs lint fmt fmt-check run-ci
 
 BUILD_TIME := $(shell python3 -c 'import time; print(f"{time.time():.6f}")' 2>/dev/null || date +%s)
 VERSION := $(shell cat VERSION 2>/dev/null || echo dev)
@@ -232,11 +232,15 @@ lint:
 	fi; \
 	GOCACHE="$(GO_CACHE_DIR)" GOLANGCI_LINT_CACHE="$(CURDIR)/.cache/golangci-lint" "$$BIN" run ./...
 
+# Only the files git tracks: another checkout below this folder (an agent's
+# worktree under .claude/) is not this tree's to format or to fail on.
+GO_FILES = $$(git ls-files '*.go')
+
 fmt:
-	gofmt -w .
+	gofmt -w $(GO_FILES)
 
 fmt-check:
-	@unformatted=$$(gofmt -l .); \
+	@unformatted=$$(gofmt -l $(GO_FILES)); \
 	if [ -n "$$unformatted" ]; then \
 		echo "The following files have formatting issues:"; \
 		echo "$$unformatted"; \
@@ -245,10 +249,6 @@ fmt-check:
 		exit 1; \
 	fi
 
-install-hooks:
-	@printf '#!/bin/sh\nmake fmt-check && make check-tidy && make check-docs && make lint\n' > .git/hooks/pre-commit
-	@chmod +x .git/hooks/pre-commit
-	@echo "Installed pre-commit hook."
 
 clean:
 	rm -f $(BINARY) $(BINARY)-race ateam-linux-*
